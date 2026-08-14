@@ -2,9 +2,8 @@
  * Bounded, in-memory-only warm path for the browser vault.
  *
  * Holds at most one decrypted ready snapshot and one in-flight session load in
- * module memory so an authenticated landing page can warm the replica before
- * the dashboard mounts, and so every dashboard route shares one decrypted
- * replica. Nothing here is persisted: no localStorage, sessionStorage,
+ * module memory so every dashboard route shares one decrypted replica. Nothing
+ * here is persisted: no localStorage, sessionStorage,
  * IndexedDB, Cache Storage, cookies, or service worker. Auth loss clears the
  * snapshot and bumps a generation counter so an older request that resolves
  * after the clear cannot repopulate it.
@@ -42,11 +41,13 @@ export type BrowserVaultWarmLoadOutcome =
 
 export interface StartBrowserVaultWarmLoadOptions {
   expectedMemberId?: string | null;
+  requestRefresh?: boolean;
 }
 
 let readySnapshot: BrowserVaultReadySnapshot | null = null;
 let inFlight: Promise<BrowserVaultWarmLoadOutcome> | null = null;
 let inFlightController: AbortController | null = null;
+let inFlightRequestsRefresh = false;
 let generation = 0;
 let stopSessionInvalidationListener: (() => void) | null = null;
 
@@ -59,7 +60,8 @@ export function peekBrowserVaultInFlightLoad(): Promise<BrowserVaultWarmLoadOutc
 }
 
 /**
- * Start (or reuse) the single warm load. The store owns reusable replica work;
+ * Start (or reuse) the single dashboard load. The store owns reusable
+ * replica work;
  * callers that cross an authority boundary must separately decide when its
  * cached result may be published.
  */
@@ -74,12 +76,24 @@ export function startBrowserVaultWarmLoad(
   ensureBrowserVaultSessionInvalidationListener();
 
   if (inFlight) {
+    if (options.requestRefresh && !inFlightRequestsRefresh) {
+      // A stronger request may wait for ordinary shared work, but it belongs
+      // to the same authority generation. Abort, clear, or unmount must not
+      // let that deferred continuation restart network work afterward.
+      const queuedGeneration = generation;
+      return inFlight.then(() =>
+        queuedGeneration === generation
+          ? startBrowserVaultWarmLoad(options)
+          : { status: "superseded" }
+      );
+    }
     return inFlight;
   }
 
   const loadGeneration = generation;
   const controller = new AbortController();
   inFlightController = controller;
+  inFlightRequestsRefresh = options.requestRefresh === true;
 
   const loadPromise = (async (): Promise<BrowserVaultWarmLoadOutcome> => {
     try {
@@ -89,6 +103,7 @@ export function startBrowserVaultWarmLoad(
           ? options.expectedMemberId
           : readySnapshot?.memberId,
         knownReplicaRef: readySnapshot?.ref ?? null,
+        requestRefresh: options.requestRefresh,
         signal: controller.signal,
       });
 
@@ -155,6 +170,7 @@ export function startBrowserVaultWarmLoad(
       if (loadGeneration === generation) {
         inFlight = null;
         inFlightController = null;
+        inFlightRequestsRefresh = false;
       }
     }
   })();
@@ -173,6 +189,7 @@ export function abortBrowserVaultInFlightLoad(): void {
   inFlightController?.abort();
   inFlightController = null;
   inFlight = null;
+  inFlightRequestsRefresh = false;
 }
 
 /**
@@ -185,6 +202,7 @@ export function clearBrowserVaultWarmState(): void {
   inFlightController?.abort();
   inFlightController = null;
   inFlight = null;
+  inFlightRequestsRefresh = false;
   readySnapshot = null;
   stopSessionInvalidationListener?.();
   stopSessionInvalidationListener = null;

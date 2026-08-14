@@ -1,15 +1,10 @@
 import {
-  resolveAgentmailApiKey,
-} from '@murphai/operator-config/agentmail-runtime'
-import {
   parseHostedEmailThreadTarget,
 } from '@murphai/runtime-state'
 import {
   isLinqChatNotFoundSendMessageError,
   type LinqFetch,
   probeLinqApi,
-  resolveLinqApiToken,
-  resolveLinqWebhookSecret,
 } from '@murphai/operator-config/linq-runtime'
 import {
   type AssistantBindingDelivery,
@@ -17,10 +12,10 @@ import {
   type AssistantProviderMessageEffect,
   type AssistantResponseMedia,
 } from '@murphai/operator-config/assistant-cli-contracts'
+import { setTelegramMessageReaction } from '@murphai/operator-config/telegram-runtime'
 import {
-  resolveTelegramBotToken,
-  setTelegramMessageReaction,
-} from '@murphai/operator-config/telegram-runtime'
+  buildTelegramRichMessage,
+} from '@murphai/operator-config/assistant-response-cards'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
   createAssistantChannelAdapter,
@@ -39,11 +34,11 @@ import {
 } from './helpers.js'
 import { createAssistantDeliveryConfirmationPendingError } from '../outbox/retry-policy.js'
 import {
-  sendEmailMessage,
   sendLinqMessage,
   setLinqMessageReaction,
   sendLinqVoiceMemoMessage,
   sendTelegramImageMessage,
+  sendTelegramRichMessage,
   prepareTelegramVoiceMemoMessage,
   sendPreparedTelegramVoiceMemoMessage,
   sendTelegramMessage,
@@ -69,9 +64,6 @@ const TELEGRAM_CHANNEL_ADAPTER = createAssistantChannelAdapter({
       ? null
       : 'Telegram auto-reply only runs for direct chats or validated hosted group routes'
   },
-  isReadyForSetup(env) {
-    return resolveTelegramBotToken(env) !== null
-  },
   supportsIdempotencyKey: false,
   resolveDeliveryTransportIdempotent() {
     return false
@@ -86,7 +78,7 @@ const TELEGRAM_CHANNEL_ADAPTER = createAssistantChannelAdapter({
       target: candidate.target,
     })) ?? null
   },
-  async sendMessage({ candidate, dependencies, idempotencyKey, media, message, replyToMessageId }) {
+  async sendMessage({ candidate, card, dependencies, idempotencyKey, media, message, replyToMessageId }) {
     if (hasVoiceMemoMedia(media)) {
       return await sendTelegramVoiceMemoDelivery({
         candidate,
@@ -106,6 +98,29 @@ const TELEGRAM_CHANNEL_ADAPTER = createAssistantChannelAdapter({
         message,
         replyToMessageId,
       })
+    }
+    if (card !== null) {
+      const request = {
+        fallbackMessage: message,
+        idempotencyKey: idempotencyKey ?? null,
+        replyToMessageId: replyToMessageId ?? null,
+        richMessage: buildTelegramRichMessage(card),
+        ...(dependencies.signal ? { signal: dependencies.signal } : {}),
+        target: candidate.target,
+      }
+      const delivered = dependencies.sendTelegramRich
+        ? await dependencies.sendTelegramRich(request)
+        : await sendTelegramRichMessage(
+            request,
+            dependencies.signal ? { signal: dependencies.signal } : {},
+          )
+      return {
+        cleanupMessages: readDeliveredCleanupMessages(delivered),
+        cleanupTargetAliases: readDeliveredCleanupTargetAliases(delivered),
+        target: readDeliveredTarget(delivered) ?? candidate.target,
+        providerMessageId: readDeliveredProviderMessageId(delivered),
+        providerMessageIds: readDeliveredProviderMessageIds(delivered),
+      }
     }
 
     const delivered = dependencies.sendTelegram
@@ -483,9 +498,6 @@ const LINQ_CHANNEL_ADAPTER = createAssistantChannelAdapter({
       eligibility.externalThreadRouteAuthorityPresent === true
       ? null
       : 'iMessage auto-reply only runs for direct chats'
-  },
-  isReadyForSetup(env) {
-    return resolveLinqApiToken(env) !== null && resolveLinqWebhookSecret(env) !== null
   },
   supportsIdempotencyKey: true,
   resolveDeliveryTransportIdempotent({ media }) {
@@ -1209,19 +1221,16 @@ const EMAIL_CHANNEL_ADAPTER = createAssistantChannelAdapter({
       ? null
       : 'Email auto-reply only runs for direct threads or validated hosted group routes'
   },
-  isReadyForSetup(env) {
-    return resolveAgentmailApiKey(env) !== null
-  },
   supportsIdempotencyKey: false,
   supportedResponseMediaKinds: [],
   targetRequiredMessage:
     'Email delivery requires an explicit recipient or a stored delivery binding.',
   async sendMessage({ candidate, dependencies, idempotencyKey, identityId, message, replyToMessageId, subject }) {
-    const send = dependencies.sendEmail ?? sendEmailMessage
-    if (!identityId && !dependencies.sendEmail) {
+    const send = dependencies.sendEmail
+    if (!send) {
       throw new VaultCliError(
-        'ASSISTANT_EMAIL_IDENTITY_REQUIRED',
-        'Email delivery requires a configured email sender identity. Pass --identity or resume a session already bound to email.',
+        'ASSISTANT_EMAIL_DELIVERY_UNAVAILABLE',
+        'Email delivery requires a configured runtime email transport.',
       )
     }
     const targetKind =
@@ -1230,7 +1239,7 @@ const EMAIL_CHANNEL_ADAPTER = createAssistantChannelAdapter({
         : candidate.kind
     const delivered = await send({
       idempotencyKey: idempotencyKey ?? null,
-      identityId: identityId!,
+      identityId,
       target: candidate.target,
       targetKind,
       replyToMessageId: replyToMessageId ?? null,

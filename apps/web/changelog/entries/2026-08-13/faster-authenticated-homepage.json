@@ -1,0 +1,18 @@
+{
+  "publishedOn": "2026-08-13",
+  "order": 75,
+  "item": {
+    "id": "faster-authenticated-homepage",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "A faster homepage after sign-in",
+    "summary": "The homepage no longer downloads dashboard data just because you are signed in, so returning to Murph starts with less browser work.",
+    "details": "Murph may prepare a fresh dashboard copy in the background after the homepage responds, using your existing access and health-data consent. Your browser downloads that data only when you open the dashboard.",
+    "relevanceTags": ["homepage", "performance", "dashboard", "privacy"],
+    "sourcePullRequests": [1793],
+    "tryIt": {
+      "href": "/",
+      "label": "Visit the homepage"
+    }
+  }
+}

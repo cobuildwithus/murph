@@ -69,6 +69,7 @@ import { SettingsAuthRequiredStudy } from "./settings-auth-required-study";
 import { SettingsCustomInferenceStudy } from "./settings-custom-inference-study";
 import { SignupReferralFlowStudy } from "./signup-referral-study";
 import { StructuredReviewResultsStudy } from "./structured-review-results-study";
+import { TrainingDashboardStudy } from "./training-dashboard-study";
 import {
   GroupUsageFundingStudy,
   PersonalUsageCreditOwnerStudy,
@@ -111,7 +112,7 @@ export function SectionsContent() {
         <div
           id="homepage-solo-first-hero"
           data-design-section="homepage-solo-first-hero"
-          data-design-state="soft-topic-labels"
+          data-design-state="light-topic-labels-mobile-narrow-phone"
           className="-mx-5 sm:-mx-8 lg:-mx-12"
           inert
         >
@@ -142,7 +143,7 @@ export function SectionsContent() {
 
       <Separator />
 
-      <StudySection title="Homepage authentication readiness and phone handoff">
+      <StudySection title="Homepage background readiness and phone handoff">
         <HomepageAuthWarmRuntimeStudy />
       </StudySection>
 
@@ -248,7 +249,7 @@ export function SectionsContent() {
 
       <Separator />
 
-      <StudySection title="Settings retained data export">
+      <StudySection title="Settings retained export while newer data is processing">
         <DataExportFlowStudy />
       </StudySection>
 
@@ -262,6 +263,18 @@ export function SectionsContent() {
 
       <StudySection title="Private Environment print report loading and ready states">
         <EnvironmentPrintStudy />
+      </StudySection>
+
+      <Separator />
+
+      <StudySection title="Private training dashboard">
+        <div
+          id="private-training-dashboard"
+          data-design-section="private-training-dashboard"
+          inert
+        >
+          <TrainingDashboardStudy />
+        </div>
       </StudySection>
 
       <Separator />
@@ -559,7 +572,7 @@ export function SectionsContent() {
 
       <Separator />
 
-      <StudySection title="Connect source actions and disconnect lifecycle">
+      <StudySection title="Connect source availability, actions, and disconnect lifecycle">
         <ConnectSourceCardStudy
           androidAppAvailable={isMurphAndroidAppEnabled(process.env)}
         />
@@ -603,7 +616,7 @@ export function SectionsContent() {
 
       <Separator />
 
-      <StudySection title="Subscription recovery, Family billing confirmation, Max plan comparison, sponsored billing, and exact usage status">
+      <StudySection title="Subscription recovery, Family billing confirmation, Max plan comparison, sponsored billing, and exact usage status, plus Family draft recovery">
         <GroupMemberPlanStudy />
       </StudySection>
 
@@ -627,7 +640,7 @@ export function SectionsContent() {
 
       <Separator />
 
-      <StudySection title="Group join invites, current and legacy sharing, and setup recovery">
+      <StudySection title="Group join invites, source-aware sharing, and setup recovery">
         <GroupJoinStudy
           comprehensivePermissions={projectHostedVaultShareProjectionDisplays(
             resolveHostedGroupAccessOfferProjectionScopes(undefined),

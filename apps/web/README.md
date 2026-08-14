@@ -273,6 +273,14 @@ card without fallback text remains contentless there rather than receiving the
 active-member placeholder. This rule is app-card-specific; legacy media-only
 first contacts retain their existing behavior.
 
+The public homepage also owns the browser fallback for shared response-card
+URLs. After hydration, a non-empty `#murph-card=` fragment opens the iPhone App
+Store handoff; the client compares only the prefix and presence of a value and
+never decodes, displays, stores, logs, or transmits that value. Other homepage
+fragments render normally. The compact dialog complements the canonical App
+Store identity in Linq's card payload; neither path changes Messages-extension
+routing or application authorization.
+
 ## Legal and health-permission publication surfaces
 
 Hosted deployments should expose HTML legal pages in addition to downloadable
@@ -876,7 +884,7 @@ Hosted AI usage metering:
 - Usage-credit payment accepts the existing personal self-target, an authenticated active Family owner selecting one exact active unsuspended Family membership, or the existing hosted-group funding target. Family admission re-binds the opaque path selector to the authenticated owner, their active unsuspended group, the exact active member, and that group's canonical `HostedAccountGroupBillingRef` customer. Every flow accepts only a server-owned offer code and single-use request key, re-fetches the configured active one-time Price to verify its exact single-currency amount and shape, and keeps the browser from choosing an arbitrary amount, Price, Customer, payer, beneficiary, grant, or Checkout URL.
 - Hosted-group funding offers monthly sponsorship first and one-time contribution second at every current capacity. One-time amount choices use plain `usage` copy and open in the shared bottom drawer on phones, with the contribution action pinned above the safe area, while retaining the centered desktop dialog. Monthly activation freezes one exact $5 purchase plus a payer/group authorization with a $5, $10, or $20 maximum. The durable settlement seam may admit one deterministic exact-$5 refill under the group beneficiary lock when capacity is low; the existing Stripe minute sweep charges it after commit. Pending and fulfilled purchases derive period commitment, unused ledger credit carries forward, and the authorization never stores a balance. Periods roll lazily from the successful activation anchor, including month-end. Payment failure blocks further automatic charges until the authenticated payer follows the private recovery path. Automatic refills create no sponsorship moment or refill-specific room notification. Assistant-visible group usage exposes only whether a funding ask is timely and the first-party funding URL: low capacity stays quiet while an automatic refill is available or pending, otherwise it uses the ordinary group funding heads-up, and every exhausted room receives the ordinary pause copy plus the link. The funding page separately preserves the single-automatic-sponsor invariant and private payer management.
 - Personal, Family, and group funding use Stripe `mode=payment` Checkout with Adaptive Pricing disabled. Current-policy personal and Family purchases resolve the exact Murph billing Subscription whose Customer matches the frozen purchase, then use its attached explicit default card or inherited attached Customer default. Missing, stale, terminal, customer-mismatched, unattached, or legacy Source-only exact-subscription state stays in Checkout, and unrelated Subscriptions never participate. Group funding has no required billing Subscription and may use the attached Customer default or sole attached card only when no legacy Customer default Source exists. Stripe's redisplay setting controls Checkout presentation rather than whether the existing subscription card can fund the payer's explicit top-up. The service creates an unconfirmed PaymentIntent, then rechecks active payer, still-created purchase state, and the current exact personal or Family billing Customer, Subscription, canonical status, suspension state, and last accepted Stripe-event time while durably binding that intent under the payer lock before off-session confirmation. A billing-reference change, deletion, or terminal-state race cancels the unbound intent and never confirms it; after bind, recovery remains tied to that exact intent rather than retargeting. Ambiguous responses remain bound to that exact intent and frozen offer, the browser preserves the original amount/request key for recovery, and authentication or card failure may open Checkout only after verified cancellation. The payer-owned cancel path also resolves a sessionless direct attempt from Settings or a target-conflict surface. Current-policy Checkout asks the payer whether to save the selected method so Stripe may present it in later Checkout flows. Murph stores no raw card data and never charges from amount selection alone.
-- Family conversion reuses an exact active direct paid or Trial Subscription in place under the owner lock; a Trial ends immediately and Trial-only metadata is cleared. Web and the private Family tool both disclose the current server-owned immediate-conversion terms and require fresh explicit confirmation before ending an active Trial. Automatic phone/email invite capacity carries its normalized target into the capacity owner, which repeats the active-member check under the same lock immediately before Stripe; acceptance repeats admission checks transactionally, while Telegram remains open-seat-only. Suspended direct members retain exact-customer Portal management, inactive Family billing projects a Portal recovery action, and sponsorship payers retain cancellation-only management after beneficiary authority disappears. The first event that recognizes a competing Family-sponsored direct subscription performs exact cancel/refund inspection before local terminalization; complex refund shapes remain support-required.
+- Family conversion reuses an exact active direct paid or Trial Subscription in place under the owner lock; a Trial ends immediately and Trial-only metadata is cleared. Web and the private Family tool both disclose the current server-owned immediate-conversion terms and require fresh explicit confirmation before ending an active Trial. Automatic phone/email invite capacity carries its normalized target into the capacity owner, which repeats the active-member check under the same lock immediately before Stripe; acceptance repeats admission checks transactionally, while Telegram remains open-seat-only. An accepting member's exact never-paid, owner-only draft is removed only after the invite is claimed and the destination membership is written in the same transaction. A draft with a live Checkout remains a conflict until the authenticated owner uses Settings to retrieve and expire that exact Session outside the transaction; locked revalidation preserves any concurrent completion, replacement, invite, membership, capacity, or billing authority. Suspended direct members retain exact-customer Portal management, inactive Family billing projects a Portal recovery action, and sponsorship payers retain cancellation-only management after beneficiary authority disappears. The first event that recognizes a competing Family-sponsored direct subscription performs exact cancel/refund inspection before local terminalization; complex refund shapes remain support-required.
 - A browser return or synchronous PaymentIntent response never grants credit. The existing verified Stripe event receipt owner re-fetches Checkout and line-item facts when present plus the exact PaymentIntent and Charge, then commits at most one purchase grant. After a new grant commits, the same durable Stripe-event retry lane requests the normal runtime recheck so preserved blocked input can resume.
 - The purchase schema freezes payer and beneficiary separately. Personal, Family-member, and hosted-group purchases converge on the same append-only beneficiary ledger, Stripe verification, refund/dispute adjustments, status/expire routes, and webhook-only grant path. Family top-ups reuse the active group billing customer; they do not create a personal customer, Family wallet, second ledger, or second credit projection. One payer-wide nonterminal purchase is the ambiguity fence: a conflicting Family target receives no payable URL or retry action, and former-member recovery remains payable only when Settings can show an owner-recognizable frozen beneficiary.
 - Conversational usage referrals reserve their fixed server-catalog reward
@@ -1064,9 +1072,22 @@ Callback auth contract:
 - `HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK` stays in the Cloudflare worker
   boundary; the isolated execution child talks back through the worker-owned
   `web-control.worker` proxy instead of receiving the signing key directly
+- after signature, key-id, timestamp/freshness, method/path/search/member, and
+  payload binding succeed, `apps/web` consumes the SHA-256 nonce with one
+  primary-Postgres insert; the `nonce_hash` primary-key conflict rejects a
+  replay, and callback admission never sweeps expired rows
+- the existing hourly hosted-retention cron removes only strictly expired nonce
+  rows in bounded `expires_at`, `nonce_hash` order with `FOR UPDATE SKIP LOCKED`;
+  account deletion still independently deletes the member's nonce rows
 - Hosted member private fields, device-sync credentials, mailbox payloads, and
   runtime execution state use signed hosted domain-root secure-box envelopes;
   lookup fingerprints/indexes use separate HMAC-only keys.
+- The generic hosted-mailbox append validates a durable dedupe replay before
+  crypto preparation, then warms the exact active ingress root before opening
+  its transaction. Its prepared transaction surface locks and re-reads root
+  authority and seals only from that scoped cache entry, with one full retry on
+  typed root drift. Legacy transaction append surfaces remain for separately
+  migrated callers and are not the transaction-safe generic entrypoint.
 - `POST /api/internal/hosted-runtime/owner-released` is the payload-free
   completion handoff. Web accepts a zero-byte body and either no query or the
   exact signature-bound `immediateRecheckRequested=1` positive edge, binds the
@@ -1201,6 +1222,15 @@ The signed assertion must include hosted user claims plus:
 
 Each assertion nonce is consumed once so replayed assertions fail even if the
 user tuple is unchanged.
+The assertion uses integer-second `exp` claims and the shared 60-second skew
+policy, so it remains admissible through the millisecond before
+`(exp + 61) * 1000` and is first invalid exactly at that instant. New nonce
+rows persist that first-invalid horizon, while request admission performs one
+primary-key insert and treats only the exact nonce conflict as replay. The
+bounded hourly hosted-retention owner deletes only rows whose stored
+`expiresAt <= now - 61 seconds`; this retains legacy raw-`exp` rows through the
+full acceptance window and deliberately retains new-format rows for an
+additional 61 seconds.
 There is no unauthenticated development-user fallback; local development must
 exercise the same signed assertion contract.
 
@@ -1886,9 +1916,11 @@ Current hosted billing assumptions:
 - The legacy provider-object drain is complete: an authenticated production
   apply retired 69 exact candidates, then its automatic verification reported
   zero remaining candidates and convergence. The one-time Ops control, batch
-  route and service, and CLI were removed. Keep the accepted
-  legacy Pulse Price and per-member cleanup/event guards through the maximum
-  delayed-event and manual-replay horizon; then remove that bounded
+  route and service, CLI, and checkout-time per-member cleanup owner were
+  removed. Ordinary paid Checkout no longer retrieves or cancels a legacy
+  subscription. Keep the accepted legacy Pulse Price plus delayed-event,
+  Family-conversion, and account-deletion guards through the maximum
+  delayed-event and manual-replay horizon; then remove that remaining bounded
   compatibility together in a separate contracting change.
 - `/ops/email` is the operator-only member email composer. It accepts up to 100
   explicit hosted member IDs plus one plain-text subject and body. Preview

@@ -38,9 +38,10 @@ import {
 import {
   planHostedLinqMessageEditedWebhook,
   planHostedOnboardingLinqWebhook,
+  resolveHostedLinqDirectPreparationMemberId,
+  resolveHostedLinqThreadContainerCryptoPreparationTarget,
   resolveHostedLinqMailboxPayloadRootPrewarmMemberId,
   resolveHostedLinqTypingPrewarmMemberId,
-  shouldPrepareHostedLinqThreadContainerCrypto,
   type HostedOnboardingLinqWebhookResponse,
 } from "./webhook-provider-linq";
 import {
@@ -69,8 +70,17 @@ import {
 } from "./logging";
 import {
   runWithHostedDomainRootUnwrapCache,
+  runWithHostedDomainRootProviderCallsDisabled,
 } from "../hosted-crypto/domain-root-unwrap-cache";
-import { unwrapHostedDomainRootForWeb } from "../hosted-crypto/domain-root-store";
+import {
+  HostedDomainRootPreparationMismatchError,
+  prepareHostedDomainRootForWeb,
+  prepareHostedCryptoDomainRootCandidates,
+  unwrapHostedDomainRootForWeb,
+  unwrapHostedDomainRootsForWebByRootKeyIds,
+  type PreparedHostedCryptoDomainRootCandidates,
+  type PreparedHostedDomainRootForWeb,
+} from "../hosted-crypto/domain-root-store";
 import { getHostedCryptoDomainForLane } from "@murphai/runtime-state";
 import {
   runWithPrismaOperationTimings,
@@ -124,18 +134,45 @@ import {
   type PreparedHostedThreadContainerDeliveryRoute,
 } from "../hosted-routing/thread-container-service";
 import {
+  HOSTED_PENDING_GROUP_SETUP_MAX_PARTICIPANT_MEMBERS,
+  prepareHostedPendingGroupSetupClaimForParticipants,
+  readHostedPendingGroupSetupPreparationFailure,
+  type PreparedHostedPendingGroupSetupClaim,
+} from "../hosted-groups/pending-group-setup";
+import {
   HOSTED_TELEGRAM_THREAD_ACCOUNT_LOOKUP_KEY,
 } from "../hosted-routing/thread-delivery-route";
 import {
   createHostedPhoneLookupKey,
 } from "./contact-privacy";
 import {
+  projectHostedMemberRoutingState,
+  readHostedMemberRoutingRecord,
+  readHostedMemberRoutingControlRootKeyIds,
   resolveHostedMemberCoreByTelegramUserId,
+  type HostedMemberRoutingRecord,
+  type HostedMemberRoutingStateSnapshot,
 } from "./hosted-member-routing-store";
 import {
   isHostedMemberSuspended,
 } from "./entitlement";
-import { readHostedRuntimeAiAccessDecision } from "./member-access";
+import {
+  readActiveHostedMemberAccess,
+  readHostedRuntimeAiAccessDecision,
+} from "./member-access";
+import {
+  prepareHostedFamilyOwnerNotification,
+  resolveHostedFamilyPhoneInvitePreparation,
+  type HostedFamilyPhoneInvitePreparation,
+  type PreparedHostedFamilyOwnerNotification,
+} from "./family-plan";
+import {
+  projectHostedMemberIdentityState,
+  readHostedMemberIdentityControlRootKeyIds,
+  readHostedMemberIdentityRecord,
+  type HostedMemberIdentityRecord,
+  type HostedMemberIdentityState,
+} from "./hosted-member-identity-store";
 import {
   resolveHostedOnboardingLinqMessageContext,
 } from "./webhook-provider-linq-shared";
@@ -151,9 +188,6 @@ import {
 import {
   lookupHostedGroupParticipantMemberIdsByHandles,
 } from "../hosted-groups/participant-member";
-import {
-  HOSTED_PENDING_GROUP_SETUP_MAX_PARTICIPANT_MEMBERS,
-} from "../hosted-groups/pending-group-setup";
 import {
   reconcileHostedUsageReferralRewardAfterCommit,
 } from "../hosted-growth/usage-referral";
@@ -539,50 +573,118 @@ export async function handleHostedOnboardingLinqWebhook(input: {
               prisma,
             })
           : null;
-      const runPlan = (instantStartAllowed = true) =>
-        runHostedThreadRoutingPreparedTransaction({
-          plan: ({ preparation, transaction }) =>
-            planHostedOnboardingLinqWebhook({
-              affirmativeReaction,
-              event: planningEvent,
-              firstContactAdmissionDecision,
-              instantStartAllowed,
-              pendingGroupParticipantMemberIds:
-                planningResolution.pendingGroupParticipantMemberIds ?? null,
-              pendingGroupRosterUnavailable:
-                planningResolution.pendingGroupRosterUnavailable ?? false,
-              ...(preparation.preparedThreadContainerCreation
-                ? {
-                    preparedThreadContainerCreation:
-                      preparation.preparedThreadContainerCreation,
-                  }
-                : {}),
-              ...(preparation.preparedThreadDeliveryRoute
-                ? {
-                    preparedThreadDeliveryRoute:
-                      preparation.preparedThreadDeliveryRoute,
-                  }
-                : {}),
-              requireFirstContactAdmission,
-              prisma: transaction,
-            }),
-          prepare: ({ attempt }) =>
-            prepareHostedLinqThreadRoutingCrypto({
+      const runPlan = (instantStartAllowed = true) => {
+        let reusableDirectCryptoDomainRoots: {
+          memberId: string;
+          preparedCryptoDomainRoots: PreparedHostedCryptoDomainRootCandidates;
+        } | null = null;
+        return runHostedThreadRoutingPreparedTransaction({
+          plan: async ({ preparation, transaction }) => {
+            const planPreparedWebhook = () =>
+              planHostedOnboardingLinqWebhook({
+                affirmativeReaction,
+                event: planningEvent,
+                firstContactAdmissionDecision,
+                instantStartAllowed,
+                pendingGroupParticipantMemberIds:
+                  planningResolution.pendingGroupParticipantMemberIds ?? null,
+                pendingGroupRosterUnavailable:
+                  planningResolution.pendingGroupRosterUnavailable ?? false,
+                ...(preparation.failedPendingGroupSetupPreparationClaim
+                  ? {
+                      failedPendingGroupSetupPreparationClaim:
+                        preparation.failedPendingGroupSetupPreparationClaim,
+                    }
+                  : {}),
+                ...("directMailboxPreparationFailure" in preparation
+                  ? {
+                      directMailboxPreparationFailure:
+                        preparation.directMailboxPreparationFailure,
+                    }
+                  : {}),
+                ...("preparedDirectMailboxPayloadRoot" in preparation
+                  ? {
+                      preparedDirectMailboxPayloadRoot:
+                        preparation.preparedDirectMailboxPayloadRoot ?? null,
+                    }
+                  : {}),
+                ...(preparation.preparedPendingGroupSetupClaim
+                  ? {
+                      preparedPendingGroupSetupClaim:
+                        preparation.preparedPendingGroupSetupClaim,
+                    }
+                  : {}),
+                ...(preparation.preparedThreadContainerCreation
+                  ? {
+                      preparedThreadContainerCreation:
+                        preparation.preparedThreadContainerCreation,
+                    }
+                  : {}),
+                ...(preparation.preparedThreadDeliveryRoute
+                  ? {
+                      preparedThreadDeliveryRoute:
+                        preparation.preparedThreadDeliveryRoute,
+                    }
+                  : {}),
+                requireFirstContactAdmission,
+                prisma: transaction,
+              });
+            if (!preparation.preparedDirectMailboxPayloadRoot) {
+              return planPreparedWebhook();
+            }
+            try {
+              return await runWithHostedDomainRootProviderCallsDisabled(
+                planPreparedWebhook,
+              );
+            } catch (error) {
+              if (!(error instanceof HostedDomainRootPreparationMismatchError)) {
+                throw error;
+              }
+              throw hostedOnboardingError({
+                cause: error,
+                code: "HOSTED_THREAD_ROUTE_PREPARATION_REQUIRED",
+                details: {
+                  preparationTarget: "direct_linq_mailbox",
+                  reason: "routing",
+                },
+                httpStatus: 503,
+                message: "Hosted Linq direct mailbox preparation is stale.",
+                retryable: true,
+              });
+            }
+          },
+          prepare: async ({ attempt }) => {
+            const preparation = await prepareHostedLinqThreadRoutingCrypto({
               event: planningEvent,
               participantMemberIds:
                 planningResolution.pendingGroupParticipantMemberIds ?? [],
               pendingGroupRosterUnavailable:
                 planningResolution.pendingGroupRosterUnavailable ?? false,
               prisma,
+              ...(reusableDirectCryptoDomainRoots
+                ? { reusableDirectCryptoDomainRoots }
+                : {}),
               // The resolver already performed the first authority read. A
               // route-conflict retry must read again so it can prepare for the
               // winning container instead of reusing a stale snapshot.
               threadRoute: attempt === 0
                 ? planningResolution.threadRoute
                 : undefined,
-            }),
+            });
+            if (preparation.preparedDirectMailboxPayloadRoot) {
+              reusableDirectCryptoDomainRoots = {
+                memberId:
+                  preparation.preparedDirectMailboxPayloadRoot.memberId,
+                preparedCryptoDomainRoots:
+                  preparation.preparedDirectMailboxPayloadRoot
+                    .preparedCryptoDomainRoots,
+              };
+            }
+            return preparation;
+          },
           prisma,
         });
+      };
       const planAfterBlockedAdmission = (reason?: string) =>
         requireFirstContactAdmission
           ? Promise.resolve(buildBlockedHostedLinqFirstContactAdmissionPlan(reason))
@@ -1908,6 +2010,23 @@ async function reconcileHostedUsageReferralRewardsAfterCommitBestEffort(input: {
 }
 
 interface HostedThreadRoutingCryptoPreparation {
+  directMailboxPreparationFailure?: unknown;
+  failedPendingGroupSetupPreparationClaim?: PreparedHostedPendingGroupSetupClaim;
+  pendingGroupSetupPreparationFailure?: unknown;
+  preparedDirectMailboxPayloadRoot?: {
+    memberId: string;
+    preparedControlRoot: PreparedHostedDomainRootForWeb;
+    preparedCryptoDomainRoots: PreparedHostedCryptoDomainRootCandidates;
+    preparedFamilyInvite: HostedFamilyPhoneInvitePreparation | null;
+    preparedFamilyOwnerNotification: PreparedHostedFamilyOwnerNotification | null;
+    preparedIngressRoot: PreparedHostedDomainRootForWeb | null;
+    identityRecord: HostedMemberIdentityRecord | null;
+    identityState: HostedMemberIdentityState | null;
+    routingRecord: HostedMemberRoutingRecord | null;
+    routingState: HostedMemberRoutingStateSnapshot | null;
+  } | null;
+  threadContainerPreparationFailure?: unknown;
+  preparedPendingGroupSetupClaim?: PreparedHostedPendingGroupSetupClaim;
   preparedSenderMemberId?: string;
   preparedThreadContainerCreation?: PreparedHostedThreadContainerCreation;
   preparedThreadDeliveryRoute?: PreparedHostedThreadContainerDeliveryRoute;
@@ -1915,7 +2034,7 @@ interface HostedThreadRoutingCryptoPreparation {
 
 async function prepareHostedThreadDeliveryRouteAndWarmMailbox(input: {
   prepareDeliveryRoute: () => Promise<PreparedHostedThreadContainerDeliveryRoute>;
-  warmMailboxRoot: () => Promise<void>;
+  warmMailboxRoot: () => Promise<unknown>;
 }): Promise<PreparedHostedThreadContainerDeliveryRoute> {
   let firstError: unknown;
   let hasError = false;
@@ -1951,6 +2070,10 @@ async function prepareHostedLinqThreadRoutingCrypto(input: {
   participantMemberIds: readonly string[];
   pendingGroupRosterUnavailable: boolean;
   prisma: PrismaClient;
+  reusableDirectCryptoDomainRoots?: {
+    memberId: string;
+    preparedCryptoDomainRoots: PreparedHostedCryptoDomainRootCandidates;
+  };
   threadRoute?: HostedThreadRouteSnapshot | null;
 }): Promise<HostedThreadRoutingCryptoPreparation> {
   if (input.event.event_type !== "message.received") {
@@ -1996,39 +2119,90 @@ async function prepareHostedLinqThreadRoutingCrypto(input: {
   }
 
   if (context.messageEvent.data.chat?.is_group === true) {
-    if (!await shouldPrepareHostedLinqThreadContainerCrypto({
-      event: input.event,
-      participantMemberIds: input.participantMemberIds,
-      pendingGroupRosterUnavailable: input.pendingGroupRosterUnavailable,
-      prisma: input.prisma,
-    })) {
+    const preparationTarget =
+      await resolveHostedLinqThreadContainerCryptoPreparationTarget({
+        event: input.event,
+        participantMemberIds: input.participantMemberIds,
+        pendingGroupRosterUnavailable: input.pendingGroupRosterUnavailable,
+        prisma: input.prisma,
+      });
+    if (!preparationTarget) {
       return {};
     }
     if (!accountLookupKey) {
       return {};
     }
+    const [pendingSetupResult, containerResult] = await Promise.allSettled([
+      prepareHostedPendingGroupSetupClaimForParticipants({
+        occurredAt: preparationTarget.occurredAt,
+        participantMemberIds: preparationTarget.participantMemberIds,
+        prisma: input.prisma,
+        recipientPhoneLookupKeys:
+          preparationTarget.recipientPhoneLookupKeys,
+        requiredCandidateId:
+          preparationTarget.requiredPendingSetupCandidateId,
+        senderMemberId: preparationTarget.senderMemberId,
+      }),
+      prepareHostedThreadContainerCreation({
+        accountLookupKey,
+        channel: "linq",
+        prisma: input.prisma,
+        threadId: context.summary.chatId,
+      }),
+    ]);
+    const pendingGroupSetupPreparationFailure =
+      pendingSetupResult.status === "rejected"
+        ? readHostedPendingGroupSetupPreparationFailure(
+            pendingSetupResult.reason,
+          )
+        : null;
     return {
-      preparedThreadContainerCreation:
-        await prepareHostedThreadContainerCreation({
-          accountLookupKey,
-          channel: "linq",
-          prisma: input.prisma,
-          threadId: context.summary.chatId,
-        }),
+      ...(pendingGroupSetupPreparationFailure
+        ? {
+            failedPendingGroupSetupPreparationClaim:
+              pendingGroupSetupPreparationFailure.preparedClaim,
+          }
+        : {}),
+      ...(pendingSetupResult.status === "fulfilled"
+        && pendingSetupResult.value
+        ? { preparedPendingGroupSetupClaim: pendingSetupResult.value }
+        : {}),
+      ...(pendingSetupResult.status === "rejected"
+        ? {
+            pendingGroupSetupPreparationFailure:
+              pendingGroupSetupPreparationFailure?.error
+              ?? pendingSetupResult.reason,
+          }
+        : {}),
+      ...(containerResult.status === "fulfilled"
+        ? { preparedThreadContainerCreation: containerResult.value }
+        : { threadContainerPreparationFailure: containerResult.reason }),
     };
   }
 
-  if (!accountLookupKey) {
-    throw new TypeError(
-      "Hosted Linq thread crypto preparation requires a recipient account lookup key.",
-    );
+  // Direct preparation resolves the member from participant and saved-home
+  // authority. Sparse saved-home events legitimately omit the recipient
+  // handle, so the thread/container account key is not a direct prerequisite.
+  try {
+    return {
+      preparedDirectMailboxPayloadRoot:
+        await prepareHostedLinqDirectMailboxPayloadRoot({
+          event: input.event,
+          prisma: input.prisma,
+          ...(input.reusableDirectCryptoDomainRoots
+            ? {
+                reusableDirectCryptoDomainRoots:
+                  input.reusableDirectCryptoDomainRoots,
+              }
+            : {}),
+        }),
+    };
+  } catch (error) {
+    // Carry the original error into the transaction for exact duplicate
+    // recovery and stable no-append policy outcomes. A branch that still needs
+    // private routing or mailbox append rethrows it unchanged.
+    return { directMailboxPreparationFailure: error };
   }
-  await warmHostedLinqMailboxPayloadRoot({
-    event: input.event,
-    prisma: input.prisma,
-    threadRoute: null,
-  });
-  return {};
 }
 
 async function prepareHostedTelegramThreadRoutingCrypto(input: {
@@ -2133,6 +2307,7 @@ async function runHostedThreadRoutingPreparedTransaction<TResult>(input: {
   for (let attempt = 0; attempt < 2; attempt += 1) {
     let preparation: HostedThreadRoutingCryptoPreparation = {};
     const preparationFailures: unknown[] = [];
+    let pendingGroupSetupPreparationFailure: unknown;
     try {
       return await runHostedOnboardingWebhookTransaction(
         input.prisma,
@@ -2140,6 +2315,15 @@ async function runHostedThreadRoutingPreparedTransaction<TResult>(input: {
         async () => {
           try {
             preparation = await input.prepare({ attempt });
+            if (preparation.pendingGroupSetupPreparationFailure !== undefined) {
+              pendingGroupSetupPreparationFailure =
+                preparation.pendingGroupSetupPreparationFailure;
+            }
+            if (preparation.threadContainerPreparationFailure !== undefined) {
+              preparationFailures.push(
+                preparation.threadContainerPreparationFailure,
+              );
+            }
           } catch (error) {
             preparationFailures.push(error);
             throw error;
@@ -2148,9 +2332,28 @@ async function runHostedThreadRoutingPreparedTransaction<TResult>(input: {
       );
     } catch (error) {
       if (
+        pendingGroupSetupPreparationFailure !== undefined
+        && isHostedOnboardingError(error)
+        && error.code === "HOSTED_THREAD_CONTAINER_PREPARATION_REQUIRED"
+        && error.details?.preparationTarget === "pending_group_setup_payload"
+        && error.details?.preparationFailureMatched === true
+      ) {
+        throw hostedOnboardingError({
+          cause: pendingGroupSetupPreparationFailure,
+          code: "HOSTED_PENDING_GROUP_SETUP_PREPARATION_FAILED",
+          details: {
+            preparationTarget: "pending_group_setup_payload",
+          },
+          httpStatus: 503,
+          message: "Hosted pending group setup payload preparation failed.",
+          retryable: true,
+        });
+      }
+      if (
         preparationFailures.length > 0
         && isHostedOnboardingError(error)
         && HOSTED_THREAD_ROUTING_PREPARATION_REQUIRED_CODES.has(error.code)
+        && error.details?.preparationTarget !== "pending_group_setup_payload"
       ) {
         // The transaction helper deliberately suppresses an irrelevant warm
         // failure so ignored branches can still complete. If the planner then
@@ -2189,32 +2392,255 @@ async function runHostedThreadRoutingPreparedTransaction<TResult>(input: {
  * without decrypting private identity or routing fields. Both remain hints:
  * the planner repeats every authority check inside the transaction.
  * `laneSeq` is authenticated metadata allocated inside the transaction, so
- * only the root is warmed; the payload is still encrypted in place.
+ * only required roots are warmed; the payload is still encrypted in place.
  */
 export async function warmHostedLinqMailboxPayloadRoot(input: {
   event: Parameters<typeof requireHostedLinqMessageReceivedEvent>[0];
   prisma: PrismaClient | Prisma.TransactionClient;
   threadRoute: Pick<HostedThreadRouteSnapshot, "containerMemberId"> | null;
-}): Promise<void> {
+}): Promise<{
+  memberId: string;
+  rootKeyId: string;
+} | null> {
   const memberId = await resolveHostedLinqMailboxPayloadRootPrewarmMemberId({
     event: input.event,
     prisma: input.prisma,
     threadRoute: input.threadRoute,
   });
   if (!memberId) {
-    return;
+    return null;
   }
 
+  return {
+    memberId,
+    rootKeyId: await warmHostedDomainRootForWeb({
+      domain: getHostedCryptoDomainForLane("mailbox-payload"),
+      memberId,
+      prisma: input.prisma,
+    }),
+  };
+}
+
+async function prepareHostedLinqDirectMailboxPayloadRoot(input: {
+  event: Parameters<typeof requireHostedLinqMessageReceivedEvent>[0];
+  prisma: PrismaClient;
+  reusableDirectCryptoDomainRoots?: {
+    memberId: string;
+    preparedCryptoDomainRoots: PreparedHostedCryptoDomainRootCandidates;
+  };
+}): Promise<{
+  memberId: string;
+  preparedControlRoot: PreparedHostedDomainRootForWeb;
+  preparedCryptoDomainRoots: PreparedHostedCryptoDomainRootCandidates;
+  preparedFamilyInvite: HostedFamilyPhoneInvitePreparation | null;
+  preparedFamilyOwnerNotification: PreparedHostedFamilyOwnerNotification | null;
+  preparedIngressRoot: PreparedHostedDomainRootForWeb | null;
+  identityRecord: HostedMemberIdentityRecord | null;
+  identityState: HostedMemberIdentityState | null;
+  routingRecord: HostedMemberRoutingRecord | null;
+  routingState: HostedMemberRoutingStateSnapshot | null;
+} | null> {
+  const memberId = await resolveHostedLinqDirectPreparationMemberId({
+    event: input.event,
+    prisma: input.prisma,
+  });
+  if (!memberId) {
+    return null;
+  }
+
+  const context = resolveHostedOnboardingLinqMessageContext(input.event);
+  const [identityRecord, routingRecord, accessAllowed, preparedFamilyInvite] =
+    await Promise.all([
+      readHostedMemberIdentityRecord({
+        memberId,
+        prisma: input.prisma,
+      }),
+      readHostedMemberRoutingRecord({
+        memberId,
+        prisma: input.prisma,
+      }),
+      readActiveHostedMemberAccess({
+        memberId,
+        prisma: input.prisma,
+      }),
+      context.participantContact?.kind === "phone"
+        ? resolveHostedFamilyPhoneInvitePreparation({
+            acceptedMemberId: memberId,
+            now: new Date(context.occurredAt),
+            phoneNumber: context.participantContact.value,
+            prisma: input.prisma,
+            text: context.summary.text,
+          })
+        : null,
+    ]);
+  const shouldPrepareFamilyAcceptance =
+    preparedFamilyInvite?.kind === "pending_acceptance";
+  const preparedCryptoDomainRoots =
+    await prepareHostedCryptoDomainRootCandidates({
+      ...(shouldPrepareFamilyAcceptance
+        ? {}
+        : {
+            domains: preparedFamilyInvite?.kind === "accepted_replay"
+              ? (["control"] as const)
+              : accessAllowed
+              ? (["control", "ingress"] as const)
+              : (["control"] as const),
+          }),
+      maxConcurrency: 2,
+      prisma: input.prisma,
+      ...(input.reusableDirectCryptoDomainRoots?.memberId === memberId
+        ? {
+            reusableCandidates:
+              input.reusableDirectCryptoDomainRoots.preparedCryptoDomainRoots,
+          }
+        : {}),
+      userId: memberId,
+    });
+  const shouldPrepareIngress =
+    shouldPrepareFamilyAcceptance
+    || (accessAllowed && preparedFamilyInvite?.kind !== "accepted_replay");
+
+  // Candidate signing finishes before unwrap preparation begins. Each phase is
+  // bounded at two concurrent provider operations: ingress runs beside one
+  // control lane, and that control lane warms historical roots sequentially
+  // before projecting the exact raw routing row from the request cache.
+  let firstPreparationError: unknown;
+  let hasPreparationError = false;
+  const preserveFirstPreparationError = async <T>(
+    operation: () => Promise<T>,
+  ): Promise<T> => {
+    try {
+      return await operation();
+    } catch (error) {
+      if (!hasPreparationError) {
+        firstPreparationError = error;
+        hasPreparationError = true;
+      }
+      throw error;
+    }
+  };
+  const prepareDomainRoot = (domain: "control" | "ingress") =>
+    prepareHostedDomainRootForWeb({
+      domain,
+      prisma: input.prisma,
+      reason: domain === "control"
+        ? "hosted-linq.direct-routing"
+        : "hosted-linq.direct-mailbox",
+      reusableCandidates: preparedCryptoDomainRoots,
+      userId: memberId,
+    });
+  const [ingressRootResult, controlRoutingResult] = await Promise.allSettled([
+    shouldPrepareIngress
+      ? preserveFirstPreparationError(() => prepareDomainRoot("ingress"))
+      : Promise.resolve(null),
+    preserveFirstPreparationError(async () => {
+      const preparedControlRoot = await prepareDomainRoot("control");
+      for (const rootKeyId of readHostedMemberIdentityControlRootKeyIds(
+        identityRecord,
+      )) {
+        const roots = await unwrapHostedDomainRootsForWebByRootKeyIds({
+          prisma: input.prisma,
+          references: [{
+            domain: getHostedCryptoDomainForLane("hosted-member-private-field"),
+            rootKeyId,
+            userId: memberId,
+          }],
+          retainFailureInScopedCache: true,
+          signal: undefined,
+        });
+        for (const root of roots) {
+          root.rootKey.fill(0);
+        }
+      }
+      await warmHostedLinqRoutingControlRoots({
+        memberId,
+        prisma: input.prisma,
+        routingRecord,
+      });
+      return {
+        preparedControlRoot,
+        routingState: routingRecord
+          ? await projectHostedMemberRoutingState(
+              routingRecord,
+              input.prisma,
+              true,
+            )
+          : null,
+      };
+    }),
+  ]);
+  if (hasPreparationError) {
+    throw firstPreparationError;
+  }
+  if (ingressRootResult.status === "rejected") {
+    throw ingressRootResult.reason;
+  }
+  if (controlRoutingResult.status === "rejected") {
+    throw controlRoutingResult.reason;
+  }
+  const identityState = identityRecord
+    ? await projectHostedMemberIdentityState(identityRecord, input.prisma)
+    : null;
+  const preparedFamilyOwnerNotification = shouldPrepareFamilyAcceptance
+    ? await prepareHostedFamilyOwnerNotification({
+        inviteCode: preparedFamilyInvite.inviteCode,
+        prisma: input.prisma,
+      })
+    : null;
+  return {
+    identityRecord,
+    identityState,
+    memberId,
+    preparedControlRoot: controlRoutingResult.value.preparedControlRoot,
+    preparedCryptoDomainRoots,
+    preparedFamilyInvite,
+    preparedFamilyOwnerNotification,
+    preparedIngressRoot: ingressRootResult.value,
+    routingRecord,
+    routingState: controlRoutingResult.value.routingState,
+  };
+}
+
+async function warmHostedLinqRoutingControlRoots(input: {
+  memberId: string;
+  prisma: PrismaClient;
+  routingRecord: HostedMemberRoutingRecord | null;
+}): Promise<void> {
+  const domain = getHostedCryptoDomainForLane("hosted-member-private-field");
+  for (const rootKeyId of readHostedMemberRoutingControlRootKeyIds(
+    input.routingRecord,
+  )) {
+    const roots = await unwrapHostedDomainRootsForWebByRootKeyIds({
+      prisma: input.prisma,
+      references: [{ domain, rootKeyId, userId: input.memberId }],
+      retainFailureInScopedCache: true,
+      signal: undefined,
+    });
+    for (const root of roots) {
+      root.rootKey.fill(0);
+    }
+  }
+}
+
+async function warmHostedDomainRootForWeb(input: {
+  domain: ReturnType<typeof getHostedCryptoDomainForLane>;
+  memberId: string;
+  prisma: PrismaClient | Prisma.TransactionClient;
+}): Promise<string> {
   const root = await unwrapHostedDomainRootForWeb({
-    domain: getHostedCryptoDomainForLane("mailbox-payload"),
+    domain: input.domain,
     prisma: input.prisma,
     retainFailureInScopedCache: true,
-    userId: memberId,
+    userId: input.memberId,
   });
   // The scoped cache hands every caller its own copy and expects that copy to
   // be wiped; the cached master is zeroized separately when the scope closes.
   // Warming needs the unwrap, not the plaintext, so wipe it immediately.
-  root.rootKey.fill(0);
+  try {
+    return root.envelope.rootKeyId;
+  } finally {
+    root.rootKey.fill(0);
+  }
 }
 
 export async function runHostedOnboardingWebhookTransaction<TResult>(
@@ -2224,7 +2650,7 @@ export async function runHostedOnboardingWebhookTransaction<TResult>(
    * Runs inside the unwrap cache but before the transaction opens, so a root
    * this planner is certain to need is unwrapped without a connection held.
    */
-  warmUnwrapCache?: () => Promise<void>,
+  warmUnwrapCache?: () => Promise<unknown>,
 ): Promise<TResult> {
   const operations: PrismaOperationTiming[] = [];
   let transactionMs = 0;

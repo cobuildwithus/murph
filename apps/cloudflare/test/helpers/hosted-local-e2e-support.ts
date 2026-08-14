@@ -234,10 +234,10 @@ export function expectAdvertisedMurphDynamicTools(
   options: {
     connectedAppsAvailable?: boolean;
     computerToolsAvailable?: boolean;
+    exerciseRoutineResponseCardAvailable?: boolean;
     groupRoomModelAvailable?: boolean;
     imessageContactAvailable?: boolean;
     messageTargetingAvailable?: boolean;
-    newsletterAvailable?: boolean;
     pendingVaultFilesAvailable?: boolean;
     physicalNotesAvailable?: boolean;
     phoneCallsAvailable?: boolean;
@@ -291,13 +291,6 @@ export function expectAdvertisedMurphDynamicTools(
       }
 
       if (
-        options.newsletterAvailable !== true
-        && name === "murph.newsletter"
-      ) {
-        return false;
-      }
-
-      if (
         options.physicalNotesAvailable !== true
         && name === "murph.send_physical_note"
       ) {
@@ -314,6 +307,13 @@ export function expectAdvertisedMurphDynamicTools(
       if (
         options.responseCardAvailable !== true
         && name === "murph.attach_response_card"
+      ) {
+        return false;
+      }
+
+      if (
+        options.exerciseRoutineResponseCardAvailable !== true
+        && name === "murph.attach_exercise_routine_card"
       ) {
         return false;
       }

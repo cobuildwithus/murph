@@ -8,6 +8,7 @@ import {
   HOSTED_MAILBOX_PAYLOAD_SCHEMA,
   isHostedMailboxKind,
   isHostedMailboxLane,
+  isHostedRetiredMailboxKind,
   type HostedMailboxFetchCursorMode,
   type HostedMailboxItem,
   type HostedMailboxKind,
@@ -31,9 +32,23 @@ import type {
 import type {
   HostedRuntimeSubscriptionAction,
 } from "@murphai/hosted-execution/subscription";
-import { parseHostedEmailThreadTarget } from "@murphai/runtime-state";
+import {
+  getHostedCryptoDomainForLane,
+  parseHostedEmailThreadTarget,
+} from "@murphai/runtime-state";
 import { Prisma, type PrismaClient } from "@prisma/client";
 
+import {
+  prepareHostedDomainRootForWeb,
+  revalidatePreparedHostedDomainRootForWebTx,
+  HostedDomainRootPreparationMismatchError,
+  type PreparedHostedDomainRootForWeb,
+} from "../hosted-crypto/domain-root-store";
+import {
+  runWithFreshHostedDomainRootUnwrapCache,
+  runWithHostedDomainRootUnwrapCache,
+  type CachedUnwrappedHostedDomainRoot,
+} from "../hosted-crypto/domain-root-unwrap-cache";
 import {
   formatHostedExecutionSafeLogErrorDetails,
 } from "../hosted-execution/logging";
@@ -52,6 +67,7 @@ import {
 import {
   decryptHostedMailboxPayloadString,
   encryptHostedMailboxPayloadString,
+  encryptHostedMailboxPayloadStringFromPreparedRoot,
   type HostedMailboxPayloadStorage,
 } from "./encryption";
 import { hashHostedMailboxStoredPayload } from "./fingerprint";
@@ -228,48 +244,178 @@ interface AppendHostedMailboxItemInternalInput extends AppendHostedMailboxItemBa
   sourceMessageLookupKey?: string | null;
 }
 
+interface NormalizedHostedMailboxAppendInput {
+  dedupeKey: string;
+  expiresAt: Date | null;
+  kind: HostedMailboxKind;
+  lane: HostedMailboxLane;
+  occurredAt: Date;
+  payloadBytes: number;
+  payloadHash: string;
+  payloadSchema: string;
+  serialized: string;
+  userId: string;
+}
+
+type HostedMailboxAppendEncryptionOwner =
+  | { mode: "legacy-transaction" }
+  | {
+      mode: "prepared-root";
+      prepared: PreparedHostedMailboxItemAppendCrypto;
+    };
+
+type HostedMailboxPayloadEncryptionOwner =
+  | {
+      mode: "legacy-provider-capable";
+      prisma: HostedMailboxStoreClient;
+    }
+  | {
+      mode: "prepared-root-local-only";
+      root: Promise<CachedUnwrappedHostedDomainRoot>;
+      rootKeyId: string;
+    };
+
+const HOSTED_MAILBOX_APPEND_CRYPTO_DOMAIN =
+  getHostedCryptoDomainForLane("mailbox-payload");
+const HOSTED_MAILBOX_APPEND_CRYPTO_PREPARATION_ATTEMPTS = 2;
+export type PreparedHostedMailboxItemAppendCrypto =
+  PreparedHostedDomainRootForWeb;
+
+/**
+ * Provider-capable mailbox crypto preparation. The returned token contains
+ * crypto identity only, grants no member/workspace/route authority, and is
+ * usable solely while the exact unwrapped ingress root remains in the
+ * surrounding request-scoped cache.
+ */
+export async function prepareHostedMailboxItemAppendCrypto(input: {
+  prisma: PrismaClient;
+  userId: string;
+}): Promise<PreparedHostedMailboxItemAppendCrypto> {
+  const userId = requireNonEmptyString(input.userId, "Hosted mailbox userId");
+  return prepareHostedDomainRootForWeb({
+    domain: HOSTED_MAILBOX_APPEND_CRYPTO_DOMAIN,
+    prepareMissing: false,
+    prisma: input.prisma,
+    reason: "hosted-mailbox.append-payload",
+    userId,
+  });
+}
+
+async function revalidatePreparedHostedMailboxAppendCryptoTx(input: {
+  prepared: PreparedHostedMailboxItemAppendCrypto;
+  tx: HostedMailboxMutationTx;
+  userId: string;
+}): Promise<{
+  root: Promise<CachedUnwrappedHostedDomainRoot>;
+  rootKeyId: string;
+}> {
+  const prepared = input.prepared;
+  if (
+    !prepared
+    || typeof prepared !== "object"
+    || prepared.domain !== HOSTED_MAILBOX_APPEND_CRYPTO_DOMAIN
+    || prepared.userId !== input.userId
+    || typeof prepared.rootKeyId !== "string"
+    || prepared.rootKeyId.trim().length === 0
+  ) {
+    throw new TypeError(
+      "Hosted mailbox append prepared crypto identity does not match the append.",
+    );
+  }
+  return revalidatePreparedHostedDomainRootForWebTx({
+    prepared,
+    tx: input.tx,
+  });
+}
+
 export async function appendHostedMailboxItem(
   input: AppendHostedMailboxItemBaseInput & {
     prisma?: PrismaClient;
   },
 ): Promise<AppendHostedMailboxItemResult> {
   const prisma = input.prisma ?? getPrisma();
+  const normalized = normalizeHostedMailboxAppendInput(input);
+  const existingBeforePreparation = await findHostedMailboxItemByDedupeKeyTx({
+    dedupeKey: normalized.dedupeKey,
+    tx: prisma,
+    userId: normalized.userId,
+  });
+  if (existingBeforePreparation) {
+    const duplicate = await buildHostedMailboxDuplicateResult({
+      existing: existingBeforePreparation,
+      normalized,
+    });
+    recordHostedMailboxDedupeConflictLog({
+      dedupeConflict: duplicate.dedupeConflict,
+      existing: existingBeforePreparation,
+      kind: normalized.kind,
+      lane: normalized.lane,
+      payloadBytes: normalized.payloadBytes,
+      payloadHash: normalized.payloadHash,
+      payloadSchema: normalized.payloadSchema,
+    });
+    return duplicate;
+  }
 
   try {
-    return await prisma.$transaction((tx) => appendHostedMailboxItemTx({
-      ...input,
-      tx,
-    }));
+    for (
+      let attempt = 0;
+      attempt < HOSTED_MAILBOX_APPEND_CRYPTO_PREPARATION_ATTEMPTS;
+      attempt += 1
+    ) {
+      try {
+        const runAttempt = async () => {
+          const prepared = await prepareHostedMailboxItemAppendCrypto({
+            prisma,
+            userId: normalized.userId,
+          });
+          return prisma.$transaction((tx) =>
+            appendHostedMailboxItemWithPreparedCryptoTx({
+              dedupeKey: normalized.dedupeKey,
+              expiresAt: normalized.expiresAt,
+              kind: normalized.kind,
+              lane: normalized.lane,
+              occurredAt: normalized.occurredAt,
+              payloadSchema: normalized.payloadSchema,
+              payloadSerializedJson: normalized.serialized,
+              prepared,
+              tx,
+              userId: normalized.userId,
+            })
+          );
+        };
+        return await (attempt === 0
+          ? runWithHostedDomainRootUnwrapCache(runAttempt)
+          : runWithFreshHostedDomainRootUnwrapCache(runAttempt));
+      } catch (error) {
+        if (!(error instanceof HostedDomainRootPreparationMismatchError)) {
+          throw error;
+        }
+        if (
+          attempt + 1
+          >= HOSTED_MAILBOX_APPEND_CRYPTO_PREPARATION_ATTEMPTS
+        ) {
+          throw error;
+        }
+      }
+    }
+
+    throw new Error(
+      "Hosted mailbox append crypto preparation retry exhausted unexpectedly.",
+    );
   } catch (error) {
     if (isPrismaUniqueConstraintError(error)) {
       const existing = await findHostedMailboxItemByDedupeKeyTx({
-        dedupeKey: input.dedupeKey,
+        dedupeKey: normalized.dedupeKey,
         tx: prisma,
-        userId: input.userId,
+        userId: normalized.userId,
       });
 
       if (existing) {
-        const payloadMetadata = deriveHostedMailboxStoredPayloadMetadata({
-          payloadSerializedJson: input.payloadSerializedJson,
-          userId: input.userId,
+        return buildHostedMailboxDuplicateResult({
+          existing,
+          normalized,
         });
-
-        return {
-          duplicate: true,
-          dedupeConflict: hasHostedMailboxDedupeConflict({
-            existing,
-            kind: input.kind,
-            lane: input.lane,
-            payloadBytes: payloadMetadata.payloadBytes,
-            payloadHash: payloadMetadata.payloadHash,
-            payloadSchema: normalizeNullableString(input.payloadSchema)
-              ?? HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA,
-          }),
-          inserted: false,
-          item: await hydrateHostedMailboxItemTx({
-            record: existing,
-          }),
-        };
       }
     }
 
@@ -277,6 +423,10 @@ export async function appendHostedMailboxItem(
   }
 }
 
+/**
+ * Legacy provider-capable transaction surface retained for separately migrated
+ * callers. New generic owners must use the prepared transaction surface below.
+ */
 export async function appendHostedMailboxItemTx(
   input: AppendHostedMailboxItemBaseInput & {
     tx: HostedMailboxMutationTx;
@@ -288,27 +438,60 @@ export async function appendHostedMailboxItemTx(
   });
 }
 
+/**
+ * Transaction-safe generic append surface. Crypto must be prepared before the
+ * transaction begins; this owner revalidates root authority and seals only
+ * from the exact request-scoped cache entry represented by `prepared`. The
+ * token does not replace any caller-owned admission or target checks.
+ */
+export async function appendHostedMailboxItemWithPreparedCryptoTx(
+  input: AppendHostedMailboxItemBaseInput & {
+    prepared: PreparedHostedMailboxItemAppendCrypto;
+    tx: HostedMailboxMutationTx;
+  },
+): Promise<AppendHostedMailboxItemResult> {
+  return appendHostedMailboxItemWithEncryptionTx({
+    ...input,
+    assistantInputLookupKey: null,
+    encryption: {
+      mode: "prepared-root",
+      prepared: input.prepared,
+    },
+  });
+}
+
 async function appendHostedMailboxItemWithAssistantInputLookupKeyTx(
   input: AppendHostedMailboxItemInternalInput & {
     assistantInputLookupKey: string | null;
     tx: HostedMailboxMutationTx;
   },
 ): Promise<AppendHostedMailboxItemResult> {
-  const userId = requireNonEmptyString(input.userId, "Hosted mailbox userId");
-  const lane = requireHostedMailboxLane(input.lane);
-  const dedupeKey = requireNonEmptyString(input.dedupeKey, "Hosted mailbox dedupeKey");
-  const kind = requireHostedMailboxKind(input.kind);
-  const occurredAt = requireDate(input.occurredAt, "Hosted mailbox occurredAt");
-  const expiresAt = input.expiresAt === undefined || input.expiresAt === null
-    ? null
-    : requireDate(input.expiresAt, "Hosted mailbox expiresAt");
-  const payloadSchema = normalizeNullableString(input.payloadSchema)
-    ?? HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA;
-  const payloadMetadata = deriveHostedMailboxStoredPayloadMetadata({
-    payloadSerializedJson: input.payloadSerializedJson,
-    userId,
+  return appendHostedMailboxItemWithEncryptionTx({
+    ...input,
+    encryption: { mode: "legacy-transaction" },
   });
-  const { payloadBytes, payloadHash, serialized } = payloadMetadata;
+}
+
+async function appendHostedMailboxItemWithEncryptionTx(
+  input: AppendHostedMailboxItemInternalInput & {
+    assistantInputLookupKey: string | null;
+    encryption: HostedMailboxAppendEncryptionOwner;
+    tx: HostedMailboxMutationTx;
+  },
+): Promise<AppendHostedMailboxItemResult> {
+  const normalized = normalizeHostedMailboxAppendInput(input);
+  const {
+    dedupeKey,
+    expiresAt,
+    kind,
+    lane,
+    occurredAt,
+    payloadBytes,
+    payloadHash,
+    payloadSchema,
+    serialized,
+    userId,
+  } = normalized;
   const sourceMessageLookupKey = input.sourceMessageLookupKey === undefined
     || input.sourceMessageLookupKey === null
     ? null
@@ -316,6 +499,19 @@ async function appendHostedMailboxItemWithAssistantInputLookupKeyTx(
         input.sourceMessageLookupKey,
         "Hosted mailbox sourceMessageLookupKey",
       );
+  const payloadEncryption = input.encryption.mode === "prepared-root"
+    ? {
+        mode: "prepared-root-local-only" as const,
+        ...await revalidatePreparedHostedMailboxAppendCryptoTx({
+          prepared: input.encryption.prepared,
+          tx: input.tx,
+          userId,
+        }),
+      }
+    : {
+        mode: "legacy-provider-capable" as const,
+        prisma: input.tx,
+      };
   await acquireHostedMailboxDedupeAppendLockTx({
     dedupeKey,
     tx: input.tx,
@@ -374,6 +570,7 @@ async function appendHostedMailboxItemWithAssistantInputLookupKeyTx(
   });
   const payloadStorage = await encryptHostedMailboxPayloadStorage({
     dedupeKey,
+    encryption: payloadEncryption,
     itemId,
     kind,
     lane,
@@ -381,7 +578,6 @@ async function appendHostedMailboxItemWithAssistantInputLookupKeyTx(
     occurredAt,
     payloadBytes,
     payloadSchema,
-    prisma: input.tx,
     serialized,
     userId,
   });
@@ -514,7 +710,31 @@ export async function appendHostedMailboxEnvelopeTx(input: {
   envelope: HostedMailboxProducerEnvelope;
   tx: HostedMailboxMutationTx;
 }): Promise<AppendHostedMailboxItemResult> {
-  return appendHostedMailboxEnvelopeInternalTx(input);
+  return appendHostedMailboxEnvelopeInternalTx({
+    ...input,
+    encryption: { mode: "legacy-transaction" },
+  });
+}
+
+/**
+ * Transaction-safe envelope append surface for callers that prepared mailbox
+ * crypto before opening their owner transaction. Envelope target and workspace
+ * authority remain transaction-owned; the prepared token supplies only the
+ * exact local ingress-root capability used by the final append.
+ */
+export async function appendHostedMailboxEnvelopeWithPreparedCryptoTx(input: {
+  envelope: HostedMailboxProducerEnvelope;
+  prepared: PreparedHostedMailboxItemAppendCrypto;
+  sourceMessageLookupKey?: string;
+  tx: HostedMailboxMutationTx;
+}): Promise<AppendHostedMailboxItemResult> {
+  return appendHostedMailboxEnvelopeInternalTx({
+    ...input,
+    encryption: {
+      mode: "prepared-root",
+      prepared: input.prepared,
+    },
+  });
 }
 
 export async function appendHostedMailboxEnvelopeWithSourceMessageTx(input: {
@@ -522,7 +742,10 @@ export async function appendHostedMailboxEnvelopeWithSourceMessageTx(input: {
   sourceMessageLookupKey: string;
   tx: HostedMailboxMutationTx;
 }): Promise<AppendHostedMailboxItemResult> {
-  return appendHostedMailboxEnvelopeInternalTx(input);
+  return appendHostedMailboxEnvelopeInternalTx({
+    ...input,
+    encryption: { mode: "legacy-transaction" },
+  });
 }
 
 export async function appendHostedMailboxEnvelopeWithIdentityTx(input: {
@@ -535,10 +758,15 @@ export async function appendHostedMailboxEnvelopeWithIdentityTx(input: {
   if (itemId !== input.envelope.eventId) {
     throw new TypeError("Hosted mailbox item identity must equal the envelope event id.");
   }
-  return appendHostedMailboxEnvelopeInternalTx({ ...input, itemId });
+  return appendHostedMailboxEnvelopeInternalTx({
+    ...input,
+    encryption: { mode: "legacy-transaction" },
+    itemId,
+  });
 }
 
 async function appendHostedMailboxEnvelopeInternalTx(input: {
+  encryption: HostedMailboxAppendEncryptionOwner;
   envelope: HostedMailboxProducerEnvelope;
   expiresAt?: Date | string | null;
   itemId?: string;
@@ -574,7 +802,7 @@ async function appendHostedMailboxEnvelopeInternalTx(input: {
       )
     : null;
 
-  return appendHostedMailboxItemWithAssistantInputLookupKeyTx({
+  return appendHostedMailboxItemWithEncryptionTx({
     assistantInputLookupKey,
     dedupeKey: envelope.eventId,
     ...(input.expiresAt === undefined ? {} : { expiresAt: input.expiresAt }),
@@ -586,6 +814,7 @@ async function appendHostedMailboxEnvelopeInternalTx(input: {
     ...(input.sourceMessageLookupKey === undefined
       ? {}
       : { sourceMessageLookupKey: input.sourceMessageLookupKey }),
+    encryption: input.encryption,
     tx: input.tx,
     userId: envelope.userId,
   });
@@ -2387,8 +2616,48 @@ function deriveHostedMailboxStoredPayloadMetadata(input: {
   };
 }
 
+function normalizeHostedMailboxAppendInput(
+  input: AppendHostedMailboxItemBaseInput,
+): NormalizedHostedMailboxAppendInput {
+  const userId = requireNonEmptyString(input.userId, "Hosted mailbox userId");
+  const lane = requireHostedMailboxLane(input.lane);
+  const dedupeKey = requireNonEmptyString(
+    input.dedupeKey,
+    "Hosted mailbox dedupeKey",
+  );
+  const kind = requireHostedMailboxWritableKind(input.kind);
+  const occurredAt = new Date(
+    requireDate(input.occurredAt, "Hosted mailbox occurredAt").getTime(),
+  );
+  const expiresAt = input.expiresAt === undefined || input.expiresAt === null
+    ? null
+    : new Date(
+        requireDate(input.expiresAt, "Hosted mailbox expiresAt").getTime(),
+      );
+  const payloadSchema = normalizeNullableString(input.payloadSchema)
+    ?? HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA;
+  const payloadMetadata = deriveHostedMailboxStoredPayloadMetadata({
+    payloadSerializedJson: input.payloadSerializedJson,
+    userId,
+  });
+
+  return {
+    dedupeKey,
+    expiresAt,
+    kind,
+    lane,
+    occurredAt,
+    payloadBytes: payloadMetadata.payloadBytes,
+    payloadHash: payloadMetadata.payloadHash,
+    payloadSchema,
+    serialized: payloadMetadata.serialized,
+    userId,
+  };
+}
+
 async function encryptHostedMailboxPayloadStorage(input: {
   dedupeKey: string;
+  encryption: HostedMailboxPayloadEncryptionOwner;
   itemId: string;
   kind: HostedMailboxKind;
   lane: HostedMailboxLane;
@@ -2396,7 +2665,6 @@ async function encryptHostedMailboxPayloadStorage(input: {
   occurredAt: Date;
   payloadBytes: number;
   payloadSchema: string;
-  prisma?: HostedMailboxStoreClient;
   serialized: string;
   userId: string;
 }): Promise<HostedMailboxEncryptedPayloadStorage> {
@@ -2406,7 +2674,7 @@ async function encryptHostedMailboxPayloadStorage(input: {
   const aadPayloadSchema = payloadStorage === "inline"
     ? input.payloadSchema
     : HOSTED_MAILBOX_PAYLOAD_SCHEMA;
-  const ciphertext = await encryptHostedMailboxPayloadString({
+  const encryptionInput = {
     dedupeKey: input.dedupeKey,
     itemId: input.itemId,
     kind: input.kind,
@@ -2415,10 +2683,19 @@ async function encryptHostedMailboxPayloadStorage(input: {
     occurredAt: input.occurredAt.toISOString(),
     payloadSchema: aadPayloadSchema,
     payloadStorage,
-    prisma: input.prisma,
     userId: input.userId,
     value: input.serialized,
-  });
+  };
+  const ciphertext = input.encryption.mode === "prepared-root-local-only"
+    ? await encryptHostedMailboxPayloadStringFromPreparedRoot({
+        ...encryptionInput,
+        preparedRoot: input.encryption.root,
+        preparedRootKeyId: input.encryption.rootKeyId,
+      })
+    : await encryptHostedMailboxPayloadString({
+        ...encryptionInput,
+        prisma: input.encryption.prisma,
+      });
 
   if (!ciphertext) {
     throw new TypeError("Hosted mailbox payload encryption returned an empty ciphertext.");
@@ -2437,6 +2714,27 @@ async function encryptHostedMailboxPayloadStorage(input: {
       payloadRef: `${HOSTED_MAILBOX_PAYLOAD_REF_PREFIX}${input.itemId}`,
       storage: "ref",
     };
+}
+
+async function buildHostedMailboxDuplicateResult(input: {
+  existing: HostedMailboxItemRow;
+  normalized: NormalizedHostedMailboxAppendInput;
+}): Promise<AppendHostedMailboxItemResult> {
+  return {
+    duplicate: true,
+    dedupeConflict: hasHostedMailboxDedupeConflict({
+      existing: input.existing,
+      kind: input.normalized.kind,
+      lane: input.normalized.lane,
+      payloadBytes: input.normalized.payloadBytes,
+      payloadHash: input.normalized.payloadHash,
+      payloadSchema: input.normalized.payloadSchema,
+    }),
+    inserted: false,
+    item: await hydrateHostedMailboxItemTx({
+      record: input.existing,
+    }),
+  };
 }
 
 function requireHostedMailboxSerializedPayload(value: string): string {
@@ -2617,6 +2915,16 @@ function requireHostedMailboxKind(value: string): HostedMailboxKind {
   throw new TypeError(
     `Hosted mailbox kind must be one of ${HOSTED_MAILBOX_KINDS.join(", ")}.`,
   );
+}
+
+function requireHostedMailboxWritableKind(value: string): HostedMailboxKind {
+  const kind = requireHostedMailboxKind(value);
+
+  if (isHostedRetiredMailboxKind(kind)) {
+    throw new TypeError("Hosted mailbox retired kinds are read-only.");
+  }
+
+  return kind;
 }
 
 function requireNonEmptyString(value: string, label: string): string {

@@ -21,9 +21,9 @@ import {
   HOSTED_RUNTIME_GROUP_DISCLOSURE_PERMISSION_TEXT_MAX_CODE_POINTS,
   HOSTED_RUNTIME_GROUP_DISPLAY_NAME_MAX_LENGTH,
   HOSTED_RUNTIME_GROUP_JOIN_OFFER_LEGACY_MESSAGE_TEMPLATE,
-  HOSTED_RUNTIME_NEWSLETTER_HTML_MAX_LENGTH,
-  HOSTED_RUNTIME_NEWSLETTER_SUBJECT_MAX_LENGTH,
-  HOSTED_RUNTIME_NEWSLETTER_TEXT_MAX_LENGTH,
+  HOSTED_RUNTIME_GROUP_EMAIL_HTML_MAX_LENGTH,
+  HOSTED_RUNTIME_GROUP_EMAIL_SUBJECT_MAX_LENGTH,
+  HOSTED_RUNTIME_GROUP_EMAIL_TEXT_MAX_LENGTH,
   HOSTED_USAGE_REFERRAL_POLICY_CODES,
   isHostedRuntimeAssistantAskDiagnosticCode,
   isHostedRuntimeAssistantAskRequestId,
@@ -33,9 +33,8 @@ import {
   type HostedRuntimeGroupSummary,
   type HostedRuntimeGroupToolRequest,
   type HostedRuntimeGroupToolResponse,
-  type HostedRuntimeNewsletterParticipantSummary,
-  type HostedRuntimeNewsletterToolRequest,
-  type HostedRuntimeNewsletterToolResponse,
+  type HostedRuntimeGroupEmailParticipantSummary,
+  type HostedRuntimeGroupEmailEffectResponse,
   type HostedRuntimeProductFeedbackRecord,
 } from '@murphai/hosted-execution/runtime-control'
 import {
@@ -82,16 +81,14 @@ import {
   type AssistantResponseMedia,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import {
+  exerciseRoutineResponseCardV1Schema,
   assistantResponseCardAuthoringSchema,
   type AssistantResponseCard,
 } from '@murphai/operator-config/assistant-response-cards'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import { normalizeNullableString } from '@murphai/operator-config/text/shared'
 import {
-  buildSharedGroupWeeklyMembers,
-  type SharedGroupWeeklyMember,
-} from '@murphai/query'
-import {
+  type AssistantHostedGroupSharedMember,
   type AssistantHostedGroupSharedProjection,
   type AssistantHostedGroupSharedReadResponse,
   type AssistantHostedGroupSharedReader,
@@ -100,6 +97,9 @@ import {
 import type {
   AssistantConversationScope,
 } from '../assistant/conversation-policy.js'
+import type {
+  AssistantAcceptedTurnInputReferenceWindow,
+} from '../assistant/active-turn-input-journal.js'
 import {
   ASSISTANT_HOSTED_GROUP_SHARED_READ_MAX_PROJECTION_SCOPES,
   ASSISTANT_HOSTED_GROUP_SHARED_READ_MAX_RESULT_CODE_UNITS,
@@ -116,7 +116,6 @@ import {
 import {
   scoreGroupChallengeJson,
 } from '../assistant/group-challenge-scorecard-schema.js'
-import { GROUP_NEWSLETTER_HEALTH_SCOPE_VALUES } from '../assistant/group-newsletter-automation.js'
 import type { AssistantRuntimeIssueInput } from '../assistant/issue-reporting.js'
 import {
   createAssistantHostedScheduledRequestKey,
@@ -128,6 +127,7 @@ import type {
   AssistantProviderUsageDraft,
 } from '../assistant/providers/types.js'
 import {
+  ASSISTANT_AUTHORED_RESPONSE_MEDIA_MAX_ITEMS,
   matchesExactAssistantVaultImageResponseMedia,
   normalizeAssistantResponseMediaList,
 } from '../assistant/response-media.js'
@@ -230,6 +230,7 @@ import {
   type PhoneCallDynamicToolRequest,
 } from './dynamic-tools/phone-calls.js'
 import {
+  buildPhysicalNoteFailureInstruction,
   createPhysicalNoteRequestKey,
   readPhysicalNoteDynamicToolRequest,
   resolvePhysicalNoteExplicitOriginInputId,
@@ -259,6 +260,7 @@ import {
   GROUP_ACCESS_FRESH_NATIVE_RESPONSE_HANDLING,
   HOSTED_COMPUTER_UNKNOWN_OUTCOME_TEXT,
   MURPH_ASSISTANT_CONFIGURATION_TOOL,
+  MURPH_ATTACH_EXERCISE_ROUTINE_CARD_TOOL,
   MURPH_ATTACH_RESPONSE_CARD_TOOL,
   MURPH_ATTACH_RESPONSE_MEDIA_TOOL,
   MURPH_COMPUTER_ACT_TOOL,
@@ -271,7 +273,6 @@ import {
   MURPH_GENERATE_IMAGE_TOOL,
   MURPH_GROUP_TOOL,
   MURPH_IMESSAGE_CONTACT_TOOL,
-  MURPH_NEWSLETTER_TOOL,
   MURPH_PERSONALIZATION_TOOL,
   MURPH_PLAN_USAGE_TOOL,
   MURPH_REACT_TO_MESSAGE_TOOL,
@@ -305,9 +306,15 @@ const attachResponseCardArgumentsSchema = z
 const attachGroupChallengeResponseCardArgumentsSchema =
   groupChallengeResponseCardToolInputSchema
 
+const attachExerciseRoutineCardArgumentsSchema = z
+  .object({
+    card: exerciseRoutineResponseCardV1Schema,
+  })
+  .strict()
+
 const attachResponseMediaArgumentsSchema = z
   .object({
-    media: z.array(z.unknown()).max(40),
+    media: z.array(z.unknown()).max(ASSISTANT_AUTHORED_RESPONSE_MEDIA_MAX_ITEMS),
   })
   .strict()
 
@@ -527,10 +534,11 @@ const groupArgumentsSchema = z.discriminatedUnion('action', [
   z
     .object({
       action: z.literal('read_shared'),
+      audience: z.literal('group_email').optional(),
       projectionScopes: z
         .array(groupVaultShareProjectionScopeSchema)
         .min(1)
-        .max(ASSISTANT_HOSTED_GROUP_SHARED_READ_MAX_PROJECTION_SCOPES)
+        .max(HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES.length)
         .refine(
           (projectionScopes) =>
             new Set(
@@ -538,6 +546,29 @@ const groupArgumentsSchema = z.discriminatedUnion('action', [
             ).size === projectionScopes.length,
           { message: 'projectionScopes must contain unique exact scopes' },
         ),
+    })
+    .strict()
+    .refine(
+      (request) =>
+        request.audience === 'group_email'
+        || request.projectionScopes.length
+          <= ASSISTANT_HOSTED_GROUP_SHARED_READ_MAX_PROJECTION_SCOPES,
+      {
+        message: `ordinary shared reads allow at most ${ASSISTANT_HOSTED_GROUP_SHARED_READ_MAX_PROJECTION_SCOPES} scopes`,
+        path: ['projectionScopes'],
+      },
+    ),
+  z
+    .object({
+      action: z.literal('send_email'),
+      html: z.string().trim().min(1).max(HOSTED_RUNTIME_GROUP_EMAIL_HTML_MAX_LENGTH),
+      subject: z.string().trim().min(1).max(HOSTED_RUNTIME_GROUP_EMAIL_SUBJECT_MAX_LENGTH),
+      text: z
+        .string()
+        .trim()
+        .max(HOSTED_RUNTIME_GROUP_EMAIL_TEXT_MAX_LENGTH)
+        .nullable()
+        .optional(),
     })
     .strict(),
   z
@@ -617,27 +648,6 @@ const groupArgumentsSchema = z.discriminatedUnion('action', [
       message_ref: z
         .string()
         .regex(new RegExp(ASSISTANT_ACCEPTED_MESSAGE_REF_PATTERN, 'u')),
-    })
-    .strict(),
-])
-
-const newsletterArgumentsSchema = z.discriminatedUnion('action', [
-  z
-    .object({
-      action: z.literal('prepare'),
-    })
-    .strict(),
-  z
-    .object({
-      action: z.literal('send'),
-      html: z.string().trim().min(1).max(HOSTED_RUNTIME_NEWSLETTER_HTML_MAX_LENGTH),
-      subject: z.string().trim().min(1).max(HOSTED_RUNTIME_NEWSLETTER_SUBJECT_MAX_LENGTH),
-      text: z
-        .string()
-        .trim()
-        .max(HOSTED_RUNTIME_NEWSLETTER_TEXT_MAX_LENGTH)
-        .nullable()
-        .optional(),
     })
     .strict(),
 ])
@@ -916,7 +926,7 @@ export type MurphDynamicToolResponseMediaPatch = {
 export type MurphDynamicToolFinalActionPatch =
   | {
       kind: 'none'
-      owner?: 'vault-file'
+      owner?: 'group-email' | 'vault-file'
     }
   | {
       kind: 'reply-required'
@@ -990,13 +1000,21 @@ type MurphGroupToolRequest =
           | 'create_signup_referral_link'
           | 'post_disclosure_request'
           | 'post_join_offer'
+          | 'prepare_email'
           | 'read_usage_referral'
           | 'revoke_own_email_share'
       }
     >
   | {
       action: 'read_shared'
+      audience?: 'group_email'
       projectionScopes: readonly HostedVaultShareSelectableProjectionScope[]
+    }
+  | {
+      action: 'send_email'
+      html: string
+      subject: string
+      text?: string | null
     }
   | {
       action: 'ask'
@@ -1207,10 +1225,6 @@ export type MurphDynamicToolRequest =
       validationDigest: SafeToolCallValidationDigest
     }
   | {
-      kind: 'invalid-newsletter-arguments'
-      validationDigest: SafeToolCallValidationDigest
-    }
-  | {
       kind: 'family-plan'
       request: HostedRuntimeFamilyPlanToolRequest
     }
@@ -1238,10 +1252,6 @@ export type MurphDynamicToolRequest =
       kind: 'group'
       request: MurphGroupToolRequest
       toolCallId?: string
-    }
-  | {
-      kind: 'newsletter'
-      request: HostedRuntimeNewsletterToolRequest
     }
   | {
       kind: 'submit-product-feedback'
@@ -1275,6 +1285,9 @@ function isMurphDynamicToolNamespace(namespace: string | null): boolean {
 
 export function readMurphDynamicToolRequest(
   message: CodexRpcMessage,
+  input?: {
+    automationRelativeDateReferenceWindow?: AssistantAcceptedTurnInputReferenceWindow | null
+  },
 ): MurphDynamicToolRequest | null {
   const request = parseDynamicToolCallRequest(message)
   if (!request) {
@@ -1291,6 +1304,8 @@ export function readMurphDynamicToolRequest(
 
   const automationRequest = readAutomationDynamicToolRequest({
     arguments: request.arguments,
+    relativeDateReferenceWindow:
+      input?.automationRelativeDateReferenceWindow ?? null,
     tool: request.tool,
   })
   if (automationRequest) {
@@ -1405,6 +1420,20 @@ export function readMurphDynamicToolRequest(
               card: parsed.card,
               kind: 'attach-response-card' as const,
             }),
+      }
+    }
+    case MURPH_ATTACH_EXERCISE_ROUTINE_CARD_TOOL.name: {
+      const parsed = parseAttachExerciseRoutineCardArguments(request.arguments)
+      if (!parsed.ok) {
+        return {
+          kind: 'invalid-response-card-arguments',
+          validationDigest: parsed.validationDigest,
+        }
+      }
+
+      return {
+        kind: 'attach-response-card',
+        card: parsed.card,
       }
     }
     case MURPH_ATTACH_RESPONSE_MEDIA_TOOL.name: {
@@ -1599,19 +1628,6 @@ export function readMurphDynamicToolRequest(
         kind: 'group',
         request: parsed.request,
         ...(request.toolCallId ? { toolCallId: request.toolCallId } : {}),
-      }
-    }
-    case MURPH_NEWSLETTER_TOOL.name: {
-      const parsed = parseNewsletterArguments(request.arguments)
-      if (!parsed.ok) {
-        return {
-          kind: 'invalid-newsletter-arguments',
-          validationDigest: parsed.validationDigest,
-        }
-      }
-      return {
-        kind: 'newsletter',
-        request: parsed.request,
       }
     }
     case MURPH_FINISH_WITHOUT_REPLY_TOOL.name: {
@@ -1855,8 +1871,41 @@ export async function executeMurphDynamicToolRequest(input: {
   }
 
   switch (input.request.kind) {
-    case 'invalid-automation-arguments':
-      return toolTextResult(false, 'invalid automation arguments')
+    case 'invalid-automation-arguments': {
+      switch (input.request.safeFailureCode) {
+        case 'local_at_gap':
+          return toolTextResult(
+            false,
+            input.request.resolvedLocalDate && input.request.localAtTargetKey
+              ? `that local reminder time does not exist because of a daylight-saving change; the trusted host resolved the requested calendar date as ${input.request.resolvedLocalDate}; tell the user that exact date and ask for another local time; retry with schedule.localAt.date=${input.request.resolvedLocalDate} instead of relativeDay and localAtRecoveryKey=${input.request.localAtTargetKey}, or if the participant withdraws or replaces this request call action=dismiss_local_at_recovery with localAtRecoveryKey=${input.request.localAtTargetKey} and resolvedLocalDate=${input.request.resolvedLocalDate}`
+              : 'that local reminder time does not exist because of a daylight-saving change; ask for another local time',
+          )
+        case 'local_at_fold':
+          return toolTextResult(
+            false,
+            input.request.resolvedLocalDate && input.request.localAtTargetKey
+              ? `that local reminder time occurs twice because of a daylight-saving change; the trusted host resolved the requested calendar date as ${input.request.resolvedLocalDate}; tell the user that exact date and ask whether the earlier or later occurrence is intended; retry with schedule.localAt.date=${input.request.resolvedLocalDate}, schedule.localAt.fold, and localAtRecoveryKey=${input.request.localAtTargetKey} instead of relativeDay, or if the participant withdraws or replaces this request call action=dismiss_local_at_recovery with localAtRecoveryKey=${input.request.localAtTargetKey} and resolvedLocalDate=${input.request.resolvedLocalDate}`
+              : 'that local reminder time occurs twice because of a daylight-saving change; ask whether the earlier or later occurrence is intended, then retry with schedule.localAt.fold',
+          )
+        case 'local_at_invalid_timezone':
+          return toolTextResult(
+            false,
+            'the reminder timezone is invalid; ask for or infer a valid IANA timezone before retrying',
+          )
+        case 'local_at_reference_unavailable':
+          return toolTextResult(
+            false,
+            'the relative reminder date could not be safely anchored to the accepted message; ask the user for an explicit calendar date before retrying',
+          )
+        case 'local_at_reference_spans_dates':
+          return toolTextResult(
+            false,
+            'the accepted messages span different calendar dates in that timezone; ask the user for an explicit calendar date before retrying',
+          )
+        default:
+          return toolTextResult(false, 'invalid automation arguments')
+      }
+    }
     case 'invalid-device-arguments':
       return toolTextResult(false, 'invalid device arguments')
     case 'invalid-labs-arguments':
@@ -1901,8 +1950,6 @@ export async function executeMurphDynamicToolRequest(input: {
       return toolTextResult(false, 'invalid assistant configuration arguments')
     case 'invalid-group-arguments':
       return toolTextResult(false, 'invalid group arguments')
-    case 'invalid-newsletter-arguments':
-      return toolTextResult(false, 'invalid newsletter arguments')
     case 'invalid-finish-without-reply-arguments':
       return toolTextResult(false, 'invalid no-reply arguments')
     case 'invalid-response-card-arguments':
@@ -2020,6 +2067,11 @@ export async function executeMurphDynamicToolRequest(input: {
         progressDelivery: input.progressDelivery,
         text: input.request.text,
       })
+    case 'automation-local-at-recovery-dismissal':
+      return toolTextResult(
+        false,
+        'local-time recovery dismissal is unavailable outside the active root turn',
+      )
     case 'automation': {
       const automationTool = input.hostedToolContext?.automationTool ?? null
       if (!automationTool) {
@@ -2349,6 +2401,18 @@ export async function executeMurphDynamicToolRequest(input: {
         })
         switch (result.status) {
           case 'accepted':
+            if (result.failureReason === 'prior_note_accepted') {
+              return toolTextResult(
+                true,
+                JSON.stringify({
+                  failureReason: result.failureReason,
+                  note:
+                    'Provider records show that this earlier physical-note submission was accepted for printing. This replay did not send another note. Historical billing evidence is unavailable, so do not describe it as paid or complimentary and do not state a cost. Say accepted for printing, not delivered.',
+                  physicalNoteId: result.physicalNoteId,
+                  status: result.status,
+                }),
+              )
+            }
             return toolTextResult(
               true,
               JSON.stringify({
@@ -2401,7 +2465,14 @@ export async function executeMurphDynamicToolRequest(input: {
           case 'failed':
             return toolTextResult(
               false,
-              'The physical note was not accepted for printing.',
+              JSON.stringify({
+                failureReason: result.failureReason ?? 'unknown',
+                note: buildPhysicalNoteFailureInstruction(
+                  result.failureReason,
+                ),
+                physicalNoteId: result.physicalNoteId,
+                status: result.status,
+              }),
             )
         }
       } catch {
@@ -2633,12 +2704,6 @@ export async function executeMurphDynamicToolRequest(input: {
         toolCallId: input.request.toolCallId ?? null,
         vaultRoot: input.vaultRoot ?? null,
       })
-    case 'newsletter':
-      return await executeNewsletterTool({
-        hostedToolContext: input.hostedToolContext ?? null,
-        request: input.request.request,
-        vaultRoot: input.vaultRoot ?? null,
-      })
     case 'finish-without-reply':
       return {
         ...toolTextResult(true, 'finished without reply'),
@@ -2732,13 +2797,24 @@ export async function executeMurphDynamicToolRequest(input: {
         acceptedInvocationSessionId ??
         userActionScope?.originSessionId ??
         null
+      const usesDetachedImageGeneration = Boolean(
+        imageGenerationLauncher && originAssistantInputId,
+      )
+      if (
+        !usesDetachedImageGeneration
+        && (input.currentResponseMedia?.length ?? 0)
+          >= ASSISTANT_AUTHORED_RESPONSE_MEDIA_MAX_ITEMS
+      ) {
+        return toolTextResult(false, 'response media limit reached')
+      }
       const providerRequestOrdinal = input.nextUsageOrdinal()
       const operationId =
         captureIdempotencyKey
         ?? `murph.dynamic-tool.generate-image:${originAssistantInputId}:${providerRequestOrdinal}`
       const generateImageArgs = input.request.args
       if (
-        imageGenerationLauncher
+        usesDetachedImageGeneration
+        && imageGenerationLauncher
         && originAssistantInputId
       ) {
         const launch = imageGenerationLauncher.launch({
@@ -2971,10 +3047,18 @@ function isHostedImageCompletionToolRequestAllowed(input: {
     return true
   }
   if (input.request.kind === 'attach-response-media') {
-    return matchesExactHostedImageCompletionMedia({
-      actual: input.request.media,
-      expected: input.scope.exactMedia,
-    })
+    const requested = input.request.media.length === 1
+      ? input.request.media[0]
+      : null
+    const expected = input.scope.exactMedia?.[0] ?? null
+    // The model relays a vault descriptor, but the vault remains authoritative
+    // for mutable capture metadata such as hash, size, filename and content
+    // type. Admit only the exact trusted ref here. The attachment path then
+    // rehydrates that ref from the vault and performs the full exact-media
+    // comparison before exposing a response patch.
+    return requested?.kind === 'vault_image' &&
+      expected !== null &&
+      requested.ref === expected.ref
   }
   // Physical-note generation already owns an exact-origin continuation: the
   // model must have launched generation with an authorized message_ref, and
@@ -3462,24 +3546,22 @@ function groupSharedUnavailableToolResult(
 /**
  * One read returns every member crossed with every requested scope. At the model
  * boundary, every projection is keyed by its exact scope and its grant/data pair
- * is collapsed to one three-state status. Non-workout record arrays remain
+ * is collapsed to one four-state status. Non-workout record arrays remain
  * byte-identical. `workouts.v0` additionally compacts repeated day identity,
  * time semantics, completion watermark, and activity kinds because its
  * per-workout lists are the one record payload dense enough to need that extra
  * reduction. Encrypted stored records and the complete Web response retain
  * their validated shapes.
- */
-/**
- * `grantStatus` and `dataStatus` only ever encode three states between them, so
- * the model reads one field instead of decoding a pair.
+ * The model reads the four collapsed states from one field instead of decoding
+ * the grant/data pair.
  */
 function groupSharedProjectionStatus(
   projection: AssistantHostedGroupSharedProjection,
-): 'available' | 'missing' | 'not_granted' {
+): 'available' | 'missing' | 'not_granted' | 'pending' {
   if (projection.grantStatus === 'not_granted') {
     return 'not_granted'
   }
-  return projection.dataStatus === 'missing' ? 'missing' : 'available'
+  return projection.dataStatus
 }
 
 function groupSharedWorkoutsModelProjection(
@@ -3623,9 +3705,22 @@ function groupSharedModelResult(
  */
 function groupSharedModelResultText(
   modelResult: ReturnType<typeof groupSharedModelResult>,
+  options: {
+    audience?: 'group_email'
+    result?: Record<string, unknown>
+  } = {},
 ): { capacityPartial: boolean; text: string } {
   const serialize = (value: unknown): string =>
-    JSON.stringify({ action: 'read_shared', result: value })
+    JSON.stringify({
+      action: 'read_shared',
+      ...(options.audience === undefined
+        ? {}
+        : { audience: options.audience }),
+      result: {
+        ...options.result,
+        ...(typeof value === 'object' && value !== null ? value : {}),
+      },
+    })
   let text = serialize(modelResult)
   if (
     text.length <= ASSISTANT_HOSTED_GROUP_SHARED_READ_MAX_RESULT_CODE_UNITS
@@ -4143,10 +4238,25 @@ async function executeGroupTool(input: {
   vaultRoot: string | null
 }): Promise<MurphDynamicToolExecutionResult> {
   if (input.request.action === 'read_shared') {
+    if (
+      'audience' in input.request
+      && input.request.audience === 'group_email'
+    ) {
+      return executeGroupEmailEffect({
+        hostedToolContext: input.hostedToolContext,
+        request: input.request,
+      })
+    }
     return executeGroupSharedRead({
       hostedToolContext: input.hostedToolContext,
       request: input.request,
       turnState: input.groupSharedReadTurnState,
+    })
+  }
+  if (input.request.action === 'send_email') {
+    return executeGroupEmailEffect({
+      hostedToolContext: input.hostedToolContext,
+      request: input.request,
     })
   }
   const groupTool = input.hostedToolContext?.groupTool ?? null
@@ -5085,103 +5195,150 @@ function isAbortError(error: unknown): boolean {
   return error instanceof Error && error.name === 'AbortError'
 }
 
-async function executeNewsletterTool(input: {
+async function executeGroupEmailEffect(input: {
   hostedToolContext: AssistantHostedToolContext | null
-  request: HostedRuntimeNewsletterToolRequest
-  vaultRoot: string | null
+  request:
+    | Extract<MurphGroupToolRequest, { action: 'read_shared' }>
+    | Extract<MurphGroupToolRequest, { action: 'send_email' }>
 }): Promise<MurphDynamicToolExecutionResult> {
-  const newsletterTool = input.hostedToolContext?.newsletterTool ?? null
-  if (!newsletterTool) {
-    recordNewsletterUnavailable(input.hostedToolContext, 'newsletter_tool_unavailable')
-    return toolTextResult(false, 'newsletter tools are unavailable for this turn')
+  const groupEmailEffect = input.hostedToolContext?.groupEmailEffect ?? null
+  if (!groupEmailEffect) {
+    recordGroupEmailUnavailable(
+      input.hostedToolContext,
+      'group_email_effect_unavailable',
+    )
+    return toolTextResult(false, 'group email is unavailable for this turn')
   }
+
   try {
-    const scheduledAutomationAuthority =
-      input.hostedToolContext?.currentScheduledAutomationAuthority?.() ??
-      null
-    const request: HostedRuntimeNewsletterToolRequest = {
-      ...input.request,
-      scheduledAutomationAuthority,
+    if (input.request.action === 'send_email') {
+      const result = await groupEmailEffect.request({
+        action: 'send_email',
+        html: input.request.html,
+        subject: input.request.subject,
+        ...(input.request.text === undefined
+          ? {}
+          : { text: input.request.text }),
+      })
+      if (result.action !== 'send_email') {
+        recordGroupEmailUnavailable(
+          input.hostedToolContext,
+          'group_email_effect_response_mismatch',
+        )
+        return toolTextResult(false, 'group email send could not be accepted')
+      }
+      input.hostedToolContext?.recordGroupEmailSendResult?.(result)
+      const skippedNoEmailMemberIds =
+        'skippedNoEmailMemberIds' in result.result
+          ? result.result.skippedNoEmailMemberIds
+          : []
+      return {
+        ...toolTextResult(
+          !isGroupEmailAllRecipientSendFailure(result),
+          safeToolPayloadText({
+            action: 'send_email',
+            result: {
+              ...result.result,
+              missingVerifiedEmailCount: skippedNoEmailMemberIds.length,
+            },
+          }),
+        ),
+        // A durable external effect is terminal for this scheduled turn. The
+        // normal bound group outbox must not emit a second copy of the edition.
+        finalActionPatch: { kind: 'none', owner: 'group-email' },
+      }
     }
-    const result = await newsletterTool.request(request)
-    if (result.action === 'send') {
-      input.hostedToolContext?.recordNewsletterSendResult?.(result)
-    } else if (result.action === 'prepare' && result.result.status === 'unavailable') {
-      recordNewsletterUnavailable(
-        input.hostedToolContext,
-        result.result.unavailableReason,
-      )
+
+    const result = await groupEmailEffect.request({
+      action: 'prepare_email',
+      projectionScopes: input.request.projectionScopes,
+    })
+    if (
+      result.action !== 'prepare_email'
+      || result.result.status === 'unavailable'
+    ) {
+      const unavailableReason =
+        result.result.status === 'unavailable'
+          ? result.result.unavailableReason
+          : 'group_email_effect_response_mismatch'
+      recordGroupEmailUnavailable(input.hostedToolContext, unavailableReason)
+      return groupEmailPreparationUnavailableResult(unavailableReason)
     }
-    const toolSucceeded = !isNewsletterAllRecipientSendFailure(result)
-    if (result.action !== 'prepare' || result.result.status !== 'ok') {
-      return toolTextResult(toolSucceeded, safeToolPayloadText(result))
-    }
-    const skippedNoEmailMemberIds = result.result.participants
-      .filter((participant) => !participant.hasEmail)
-      .map((participant) => participant.memberId)
-    if (skippedNoEmailMemberIds.length === result.result.participants.length) {
-      input.hostedToolContext?.closeNewsletterCapability?.()
-      input.hostedToolContext?.recordNewsletterSendResult?.({
-        action: 'send',
+
+    const eligibleParticipants = result.result.participants.filter(
+      (participant) => participant.hasEmail,
+    )
+    const missingVerifiedEmailCount =
+      result.result.participants.length - eligibleParticipants.length
+    if (eligibleParticipants.length === 0) {
+      input.hostedToolContext?.closeGroupEmailCapability?.()
+      input.hostedToolContext?.recordGroupEmailSendResult?.({
+        action: 'send_email',
         result: {
           participantCount: 0,
-          skippedNoEmailMemberIds,
+          skippedNoEmailMemberIds: result.result.participants.map(
+            (participant) => participant.memberId,
+          ),
           status: 'no_recipients',
         },
       })
     }
-    const referenceAt = scheduledAutomationAuthority?.occurrenceAt ?? null
-    const members = await readNewsletterWeeklyMembers({
+
+    const shared = await readGroupEmailSharedData({
       groupSharedReader: input.hostedToolContext?.groupSharedReader ?? null,
       participants: result.result.participants,
-      referenceAt,
-      vaultRoot: input.vaultRoot,
+      projectionScopes: input.request.projectionScopes,
     })
-    if (members === null) {
-      recordNewsletterUnavailable(
+    if (shared === null) {
+      recordGroupEmailUnavailable(
         input.hostedToolContext,
-        'newsletter_preparation_unavailable',
+        'group_email_shared_read_unavailable',
       )
-      return groupSharedProjectionUnavailableResult(input.request.action)
+      return groupEmailPreparationUnavailableResult(
+        'shared_projection_unavailable',
+      )
     }
 
-    return toolTextResult(true, safeToolPayloadText({
-      action: 'prepare',
-      result: {
-        missingEmailParticipants: stripNewsletterAuthorizationSnapshot(
-          result.result.missingEmailParticipants,
-        ),
-        members,
-        participants: stripNewsletterAuthorizationSnapshot(
-          result.result.participants,
-        ),
-        referenceAt,
-        status: 'ok',
-      },
-    }))
+    return toolTextResult(
+      true,
+      groupSharedModelResultText(groupSharedModelResult(shared), {
+        audience: 'group_email',
+        result: {
+          missingVerifiedEmailCount,
+          recipientCount: eligibleParticipants.length,
+          referenceAt:
+            input.hostedToolContext
+              ?.currentScheduledAutomationAuthority?.()
+              ?.occurrenceAt ?? null,
+        },
+      }).text,
+    )
   } catch {
-    recordNewsletterUnavailable(input.hostedToolContext, 'newsletter_tool_failed')
-    return toolTextResult(false, 'newsletter tool request failed')
+    recordGroupEmailUnavailable(
+      input.hostedToolContext,
+      'group_email_effect_failed',
+    )
+    return toolTextResult(false, 'group email request failed')
   }
 }
 
-function recordNewsletterUnavailable(
+function recordGroupEmailUnavailable(
   hostedToolContext: AssistantHostedToolContext | null,
   unavailableReason: string,
 ): void {
-  hostedToolContext?.closeNewsletterCapability?.()
-  hostedToolContext?.recordNewsletterSendResult?.({
-    action: 'send',
+  hostedToolContext?.closeGroupEmailCapability?.()
+  hostedToolContext?.recordGroupEmailSendResult?.({
+    action: 'send_email',
     result: { status: 'unavailable', unavailableReason },
   })
 }
 
-function isNewsletterAllRecipientSendFailure(
-  result: HostedRuntimeNewsletterToolResponse,
+function isGroupEmailAllRecipientSendFailure(
+  result: HostedRuntimeGroupEmailEffectResponse,
 ): boolean {
   return (
-    result.action === 'send' &&
-    (
+    result.action === 'send_email'
+    && (
       result.result.status === 'unavailable'
       || (
         result.result.status === 'partial_failure'
@@ -5191,21 +5348,17 @@ function isNewsletterAllRecipientSendFailure(
   )
 }
 
-async function readNewsletterWeeklyMembers(input: {
+async function readGroupEmailSharedData(input: {
   groupSharedReader: AssistantHostedGroupSharedReader | null
-  participants: readonly HostedRuntimeNewsletterParticipantSummary[]
-  referenceAt: string | null
-  vaultRoot: string | null
-}): Promise<SharedGroupWeeklyMember[] | null> {
-  if (!input.referenceAt || !input.vaultRoot) {
-    return []
-  }
-
-  const projectionScopes = readNewsletterAuthorizedProjectionScopes(
-    input.participants,
-  )
-  if (projectionScopes.length === 0) {
-    return []
+  participants: readonly HostedRuntimeGroupEmailParticipantSummary[]
+  projectionScopes: readonly HostedVaultShareSelectableProjectionScope[]
+}): Promise<AssistantHostedGroupSharedReadResponse | null> {
+  if (input.projectionScopes.length === 0) {
+    return {
+      members: [],
+      requestedProjectionScopeKeys: [],
+      status: 'none',
+    }
   }
   const groupSharedReader = input.groupSharedReader
   if (!groupSharedReader) {
@@ -5213,21 +5366,15 @@ async function readNewsletterWeeklyMembers(input: {
   }
 
   try {
-    const [timeZone, responses] = await Promise.all([
-      readNewsletterTimeZone(input.vaultRoot),
-      Promise.all(
-        chunkNewsletterProjectionScopes(projectionScopes).map((batch) =>
-          groupSharedReader.request({ projectionScopes: batch })
-        ),
+    const responses = await Promise.all(
+      chunkGroupEmailProjectionScopes(input.projectionScopes).map(
+        (projectionScopes) =>
+          groupSharedReader.request({ projectionScopes }),
       ),
-    ])
-    if (
-      timeZone === null
-      || responses.some((response) => response.status === 'unavailable')
-    ) {
+    )
+    if (responses.some((response) => response.status === 'unavailable')) {
       return null
     }
-
     const availableResponses = responses.filter(
       (response): response is Extract<
         AssistantHostedGroupSharedReadResponse,
@@ -5235,11 +5382,15 @@ async function readNewsletterWeeklyMembers(input: {
       > => response.status === 'ok',
     )
     if (availableResponses.length === 0) {
-      return []
+      return {
+        members: [],
+        requestedProjectionScopeKeys: input.projectionScopes.map(
+          buildHostedVaultShareProjectionScopeKey,
+        ),
+        status: 'none',
+      }
     }
     if (availableResponses.length !== responses.length) {
-      // A group or membership changed between bounded reads. Do not combine
-      // different live snapshots.
       return null
     }
 
@@ -5259,101 +5410,72 @@ async function readNewsletterWeeklyMembers(input: {
       return null
     }
 
+    const requestedScopeKeys = new Set(
+      input.projectionScopes.map(buildHostedVaultShareProjectionScopeKey),
+    )
     const authorizedScopeKeysByMember = new Map(
       input.participants
         .filter((participant) => participant.hasEmail)
         .map((participant) => [
           participant.memberId,
           new Set(
-            participant.authorizedShares.map(
-              (share) => share.projectionScopeKey,
-            ),
+            participant.authorizedShares
+              .map((share) => share.projectionScopeKey)
+              .filter((scopeKey) => requestedScopeKeys.has(scopeKey)),
           ),
         ]),
     )
-    const members = new Map<string, {
-      displayName: string | null
-      memberId: string
-      shares: Array<{
-        projectionScopeKey: string
-        records: Array<{ data: object }>
-      }>
-    }>()
+    const members = new Map<string, AssistantHostedGroupSharedMember>()
 
     for (const response of availableResponses) {
       for (const member of response.members) {
-        const authorizedScopeKeys = authorizedScopeKeysByMember.get(member.memberId)
+        const authorizedScopeKeys =
+          authorizedScopeKeysByMember.get(member.memberId)
         if (!authorizedScopeKeys) {
           continue
         }
+        const projections = member.projections.filter((projection) =>
+          projection.grantStatus === 'granted'
+          && authorizedScopeKeys.has(projection.projectionScopeKey)
+        )
         const existing = members.get(member.memberId)
-        if (existing && existing.displayName !== member.displayName) {
+        if (!existing) {
+          members.set(member.memberId, {
+            ...member,
+            projections: [...projections],
+          })
+          continue
+        }
+        if (
+          existing.displayName !== member.displayName
+          || existing.participantId !== member.participantId
+          || !hasExactStringEntries(
+            existing.currentTurnHandles,
+            member.currentTurnHandles,
+          )
+        ) {
           return null
         }
-        const accumulator = existing ?? {
-          displayName: member.displayName,
-          memberId: member.memberId,
-          shares: [],
-        }
-        for (const projection of member.projections) {
-          if (
-            projection.grantStatus !== 'granted'
-            || !authorizedScopeKeys.has(projection.projectionScopeKey)
-            || projection.records.length === 0
-          ) {
-            continue
-          }
-          accumulator.shares.push({
-            projectionScopeKey: projection.projectionScopeKey,
-            records: projection.records.map((record) => ({
-              data: record.data,
-            })),
-          })
-        }
-        members.set(member.memberId, accumulator)
+        members.set(member.memberId, {
+          ...existing,
+          projections: [...existing.projections, ...projections],
+        })
       }
     }
 
-    return buildSharedGroupWeeklyMembers({
-      members: [...members.values()].filter((member) => member.shares.length > 0),
-      referenceAt: input.referenceAt,
-      timeZone,
-    })
+    return {
+      members: [...members.values()],
+      requestedProjectionScopeKeys: input.projectionScopes.map(
+        buildHostedVaultShareProjectionScopeKey,
+      ),
+      status: 'ok',
+    }
   } catch {
     return null
   }
 }
 
-// The newsletter reads the global selectable registry, so it must be intersected
-// with the newsletter's own configured allowlist. Otherwise any scope a member
-// grants for another surface (e.g. challenge-only nutrient totals) would flow into
-// scheduled email composition even though the newsletter was never configured for it.
-const NEWSLETTER_ALLOWED_PROJECTION_KINDS = new Set<string>(
-  GROUP_NEWSLETTER_HEALTH_SCOPE_VALUES,
-)
-
-function readNewsletterAuthorizedProjectionScopes(
-  participants: readonly HostedRuntimeNewsletterParticipantSummary[],
-): HostedVaultShareSelectableProjectionScope[] {
-  const authorizedScopeKeys = new Set(
-    participants
-      .filter((participant) => participant.hasEmail)
-      .flatMap((participant) =>
-        participant.authorizedShares.map(
-          (share) => share.projectionScopeKey,
-        )
-      ),
-  )
-  return HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES.filter(
-    (projectionScope) =>
-      NEWSLETTER_ALLOWED_PROJECTION_KINDS.has(projectionScope.projectionKind) &&
-      authorizedScopeKeys.has(
-        buildHostedVaultShareProjectionScopeKey(projectionScope),
-      ),
-  )
-}
-
-function chunkNewsletterProjectionScopes(
+function chunkGroupEmailProjectionScopes(
   projectionScopes: readonly HostedVaultShareSelectableProjectionScope[],
 ): HostedVaultShareSelectableProjectionScope[][] {
   const batches: HostedVaultShareSelectableProjectionScope[][] = []
@@ -5370,33 +5492,18 @@ function chunkNewsletterProjectionScopes(
   return batches
 }
 
-async function readNewsletterTimeZone(vaultRoot: string): Promise<string | null> {
-  try {
-    const { loadVault } = await import('@murphai/core')
-    return (await loadVault({ vaultRoot })).metadata.timezone
-  } catch {
-    return null
-  }
-}
-
-function stripNewsletterAuthorizationSnapshot(
-  participants: readonly HostedRuntimeNewsletterParticipantSummary[],
-): Array<Pick<HostedRuntimeNewsletterParticipantSummary, 'hasEmail' | 'memberId'>> {
-  return participants.map(({ hasEmail, memberId }) => ({ hasEmail, memberId }))
-}
-
-function groupSharedProjectionUnavailableResult(
-  action: HostedRuntimeNewsletterToolRequest['action'],
+function groupEmailPreparationUnavailableResult(
+  unavailableReason: string,
 ): MurphDynamicToolExecutionResult {
   return toolTextResult(true, safeToolPayloadText({
-    action,
+    action: 'read_shared',
+    audience: 'group_email',
     result: {
       status: 'unavailable',
-      unavailableReason: 'shared_projection_unavailable',
+      unavailableReason,
     },
   }))
 }
-
 async function executeProgressUpdateTool(input: {
   deliveryContextOrdinal: number | null
   progressDelivery: AssistantProgressDelivery | null
@@ -6282,9 +6389,15 @@ function parseGroupArguments(
       ok: true,
       request: {
         action: 'read_shared',
+        ...(parsed.data.audience === undefined
+          ? {}
+          : { audience: parsed.data.audience }),
         projectionScopes: parsed.data.projectionScopes,
       },
     }
+  }
+  if (parsed.data.action === 'send_email') {
+    return { ok: true, request: parsed.data }
   }
   if (parsed.data.action === 'offer_access') {
     return { ok: true, request: parsed.data }
@@ -6455,45 +6568,6 @@ function parseGroupArguments(
     }
   }
   return { ok: true, request: { action: 'read_current' } }
-}
-
-function parseNewsletterArguments(
-  value: unknown,
-):
-  | {
-      request: HostedRuntimeNewsletterToolRequest
-      ok: true
-    }
-  | { ok: false; validationDigest: SafeToolCallValidationDigest } {
-  const parsed = newsletterArgumentsSchema.safeParse(value)
-  if (!parsed.success) {
-    return {
-      ok: false,
-      validationDigest: buildDynamicToolValidationDigest({
-        error: parsed.error,
-        rawInput: value,
-        schemaName: 'murph.newsletter.input',
-        schemaRootKeys: ['action', 'html', 'subject', 'text'],
-        toolName: 'murph.newsletter',
-      }),
-    }
-  }
-  if (parsed.data.action === 'prepare') {
-    return {
-      ok: true,
-      request: { action: 'prepare' },
-    }
-  }
-
-  return {
-    ok: true,
-    request: {
-      action: 'send',
-      html: parsed.data.html,
-      subject: parsed.data.subject,
-      ...(parsed.data.text === undefined ? {} : { text: parsed.data.text }),
-    },
-  }
 }
 
 function parseFinishWithoutReplyArguments(
@@ -6729,6 +6803,35 @@ function parseAttachResponseCardArguments(
   return {
     groupChallenge: true,
     input: groupChallengeParsed.data,
+    ok: true,
+  }
+}
+
+function parseAttachExerciseRoutineCardArguments(
+  value: unknown,
+):
+  | { ok: true; card: AssistantResponseCard }
+  | { ok: false; validationDigest: SafeToolCallValidationDigest } {
+  const schemaName = 'murph.attach_exercise_routine_card.input'
+  const toolName = 'murph.attach_exercise_routine_card'
+  const parsed = attachExerciseRoutineCardArgumentsSchema.safeParse(value)
+  if (!parsed.success) {
+    return {
+      ok: false,
+      validationDigest: buildDynamicToolValidationDigest({
+        error: parsed.error,
+        rawInput: value,
+        schemaName,
+        schemaRootKeys: readZodObjectRootKeys(
+          attachExerciseRoutineCardArgumentsSchema,
+        ),
+        toolName,
+      }),
+    }
+  }
+
+  return {
+    card: parsed.data.card,
     ok: true,
   }
 }

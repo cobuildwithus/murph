@@ -43,6 +43,24 @@ export const HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_DIRTY_ACK_PATH =
 export const HOSTED_EXECUTION_DEVICE_SYNC_RECONCILE_PATH =
   "/api/internal/device-sync/reconcile";
 export const HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_UPDATE_LIMIT = 100;
+export const HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_SOURCE_LIMIT = 64;
+export const HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_BODY_LIMIT_BYTES =
+  256 * 1024;
+/** Maximum database rows one hosted runtime snapshot page may collect. */
+export const HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PAGE_LIMIT = 32;
+/**
+ * Maximum source-authority rows one connection snapshot may collect. This is
+ * separate from the connection-page bound because one aggregator connection
+ * can legitimately contain every configured source.
+ */
+export const HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_CONNECTION_SOURCE_LIMIT = 64;
+/**
+ * Maximum connections one complete credential hydration may return. This is
+ * intentionally aligned with the apply ceiling so one hydrated authority set
+ * can always be returned through the existing bounded write contract.
+ */
+export const HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_HYDRATION_LIMIT =
+  HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_UPDATE_LIMIT;
 export const HOSTED_EXECUTION_DEVICE_SYNC_STAGED_DIRTY_ACK_RECORD_LIMIT = 200;
 export const HOSTED_EXECUTION_DEVICE_SYNC_STAGED_DIRTY_ACK_PAYLOAD_ID_LIMIT = 5_000;
 
@@ -366,6 +384,11 @@ export interface HostedExecutionDeviceSyncRuntimeSnapshotCapabilities {
   connectionSourceApply?: boolean;
 }
 
+export interface HostedExecutionDeviceSyncRuntimeSnapshotCursor {
+  createdAt: string;
+  id: string;
+}
+
 export interface HostedExecutionDeviceSyncRuntimeConnectionSeed {
   connection: HostedExecutionDeviceSyncRuntimeConnectionStateSnapshot;
   credential: HostedExecutionDeviceSyncRuntimeWritableCredentialSnapshot;
@@ -374,6 +397,7 @@ export interface HostedExecutionDeviceSyncRuntimeConnectionSeed {
 
 export interface HostedExecutionDeviceSyncRuntimeSnapshotRequest {
   connectionId?: string | null;
+  cursor?: HostedExecutionDeviceSyncRuntimeSnapshotCursor | null;
   includeCredentialMaterial: boolean;
   limit?: number | null;
   provider?: string | null;
@@ -385,6 +409,8 @@ export interface HostedExecutionDeviceSyncRuntimeSnapshotResponse {
   capabilities?: HostedExecutionDeviceSyncRuntimeSnapshotCapabilities;
   connections: HostedExecutionDeviceSyncRuntimeConnectionSnapshot[];
   generatedAt: string;
+  /** Null only when the current bounded page exhausted matching authority. */
+  nextCursor?: HostedExecutionDeviceSyncRuntimeSnapshotCursor | null;
   /** Invocation-scoped client configuration for current app-bound connections. */
   providerConfigs?: SerializableConfiguredDeviceSyncProviderConfigs;
   userId: string;
@@ -523,6 +549,7 @@ export interface HostedExecutionDeviceSyncDirtyResource {
   resource: string | null;
   resourceCategory: string | null;
   sourceProviderSlug: string | null;
+  timingSourceProviderSlug?: string | null;
   windowEnd: string | null;
   windowStart: string | null;
 }
@@ -597,6 +624,7 @@ export function serializeHostedExecutionDeviceSyncDirtyPayloadIdentity(
 }
 
 export interface HostedExecutionDeviceSyncDirtyPendingRequest {
+  connectionId?: string | null;
   limit?: number | null;
   stagedDirtyAcks?: HostedExecutionDeviceSyncStagedDirtyAck[];
   userId: string;
@@ -703,6 +731,7 @@ const HOSTED_EXECUTION_DEVICE_SYNC_HINT_PAYLOAD_FIELD_KINDS: Readonly<
   emptyBackfillAttempts: "number",
   eventType: "string",
   historicalBackfill: "boolean",
+  historicalBackfillVersion: "number",
   historicalProviderRecordsSeen: "boolean",
   historicalRecordsSeen: "boolean",
   historicalUnresolvedProviderRecordIdentitiesJson: "string",
@@ -719,7 +748,10 @@ const HOSTED_EXECUTION_DEVICE_SYNC_HINT_PAYLOAD_FIELD_KINDS: Readonly<
   sourceEventType: "string",
   sourceProviderSlug: "string",
   timeseriesCursor: "isoTimestamp",
+  timeseriesResourceCursor: "string",
+  timeseriesWindowHours: "number",
   webhookDataJson: "string",
+  workoutStreamCursor: "string",
   windowEnd: "isoTimestamp",
   windowStart: "isoTimestamp",
 });
@@ -825,6 +857,16 @@ export function parseHostedExecutionDeviceSyncRuntimeSnapshotResponse(
       record.generatedAt,
       "Hosted device-sync runtime snapshot response generatedAt",
     ),
+    ...(record.nextCursor === undefined
+      ? {}
+      : {
+          nextCursor: record.nextCursor === null
+            ? null
+            : parseHostedExecutionDeviceSyncRuntimeSnapshotCursor(
+                record.nextCursor,
+                "Hosted device-sync runtime snapshot response nextCursor",
+              ),
+        }),
     ...(record.providerConfigs === undefined
       ? {}
       : {
@@ -864,6 +906,16 @@ export function parseHostedExecutionDeviceSyncRuntimeSnapshotRequest(
     ...(record.connectionId === undefined
       ? {}
       : { connectionId: readNullableStringValue(record.connectionId, "Hosted device-sync runtime snapshot request connectionId") }),
+    ...(record.cursor === undefined
+      ? {}
+      : {
+          cursor: record.cursor === null
+            ? null
+            : parseHostedExecutionDeviceSyncRuntimeSnapshotCursor(
+                record.cursor,
+                "Hosted device-sync runtime snapshot request cursor",
+              ),
+        }),
     includeCredentialMaterial:
       record.includeCredentialMaterial === undefined
         ? false
@@ -891,6 +943,17 @@ export function parseHostedExecutionDeviceSyncRuntimeSnapshotRequest(
           ),
         }),
     userId: resolveHostedDeviceSyncRuntimeRequestUserId(record.userId, trustedUserId),
+  };
+}
+
+function parseHostedExecutionDeviceSyncRuntimeSnapshotCursor(
+  value: unknown,
+  label: string,
+): HostedExecutionDeviceSyncRuntimeSnapshotCursor {
+  const record = requireObject(value, label);
+  return {
+    createdAt: requireIsoTimestamp(record.createdAt, `${label}.createdAt`),
+    id: requireString(record.id, `${label}.id`),
   };
 }
 
@@ -954,6 +1017,14 @@ export function parseHostedExecutionDeviceSyncDirtyPendingRequest(
     );
 
   return {
+    ...(record.connectionId === undefined
+      ? {}
+      : {
+          connectionId: readNullableStringValue(
+            record.connectionId,
+            "Hosted device-sync dirty pending request connectionId",
+          ),
+        }),
     ...(record.limit === undefined
       ? {}
       : {
@@ -1507,6 +1578,14 @@ function parseHostedExecutionDeviceSyncDirtyResource(
     resource: readNullableStringValue(record.resource, `${label}.resource`),
     resourceCategory: readNullableStringValue(record.resourceCategory, `${label}.resourceCategory`),
     sourceProviderSlug: readNullableStringValue(record.sourceProviderSlug, `${label}.sourceProviderSlug`),
+    ...(record.timingSourceProviderSlug === undefined
+      ? {}
+      : {
+          timingSourceProviderSlug: readNullableStringValue(
+            record.timingSourceProviderSlug,
+            `${label}.timingSourceProviderSlug`,
+          ),
+        }),
     windowEnd: readNullableIsoTimestamp(record.windowEnd, `${label}.windowEnd`),
     windowStart: readNullableIsoTimestamp(record.windowStart, `${label}.windowStart`),
   };
@@ -1777,9 +1856,10 @@ function parseHostedExecutionDeviceSyncRuntimeConnectionUpdate(
       );
   const sources = record.sources === undefined
     ? undefined
-    : requireArray(
+    : requireBoundedArray(
         record.sources,
         `Hosted device-sync runtime apply request updates[${index}].sources`,
+        HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_SOURCE_LIMIT,
       ).map((entry, sourceIndex) =>
         parseHostedExecutionDeviceSyncRuntimeConnectionSourceUpdate(
           entry,

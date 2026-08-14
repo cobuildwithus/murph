@@ -2,10 +2,10 @@ import { describe, expect, it } from "vitest";
 
 import * as hostedRuntime from "../src/hosted-runtime.ts";
 import {
-  addJunctionBloodPressureHistoryBackfillCoverage,
+  addJunctionExtendedTimeseriesHistoryBackfillCoverage,
   addJunctionHistoricalBackfillEvidence,
-  canCurrentRuntimeMutateJunctionBloodPressureHistoryBackfillCoverage,
-  hasJunctionBloodPressureHistoryBackfillCoverage,
+  canCurrentRuntimeMutateJunctionExtendedTimeseriesHistoryBackfillCoverage,
+  hasJunctionExtendedTimeseriesHistoryBackfillCoverage,
   readJunctionHistoricalBackfillEvidence,
 } from "../src/junction-historical-backfill-progress.ts";
 import { DEVICE_SYNC_METADATA_MAX_STRING_LENGTH } from "../src/metadata.ts";
@@ -22,6 +22,7 @@ import {
   parseHostedExecutionDeviceSyncRuntimeApplyRequest,
   parseHostedExecutionDeviceSyncRuntimeApplyResponse,
   parseHostedExecutionDeviceSyncDirtyPendingRequest,
+  parseHostedExecutionDeviceSyncDirtyStateResponse,
   parseHostedExecutionDeviceSyncReconcileRequest,
   parseHostedExecutionDeviceSyncReconcileResponse,
   parseHostedExecutionDeviceSyncRuntimeSnapshotRequest,
@@ -91,6 +92,51 @@ describe("wearable import delay buckets", () => {
       "5_to_30_minutes",
       "2_to_24_hours",
     )).toBe("2_to_24_hours");
+  });
+});
+
+describe("hosted device-sync dirty timing source parsing", () => {
+  it("preserves exact, mixed, and legacy timing-source states independently of execution source", () => {
+    const buildResource = (timingSourceProviderSlug: string | null | undefined) => ({
+      count: 1,
+      firstWebhookReceivedAt: "2026-04-08T00:04:00.000Z",
+      jobKind: "reconcile",
+      resource: null,
+      resourceCategory: null,
+      sourceProviderSlug: null,
+      ...(timingSourceProviderSlug === undefined ? {} : { timingSourceProviderSlug }),
+      windowEnd: null,
+      windowStart: null,
+    });
+
+    const parsed = parseHostedExecutionDeviceSyncDirtyStateResponse({
+      connectionId: "dsc_timing_sources",
+      dirtyRevision: "3",
+      dirtyResources: [
+        buildResource("garmin"),
+        buildResource(null),
+        buildResource(undefined),
+      ],
+      eventCount: "3",
+      latestDirtyAt: "2026-04-08T00:04:00.000Z",
+      processedRevision: "0",
+      provider: "junction",
+      resourceCategoryCounts: { reconcile: 3 },
+      sourceProviderCounts: { unknown: 3 },
+      userId: "member_timing_sources",
+      windowEnd: null,
+      windowStart: null,
+    });
+
+    expect(parsed?.dirtyResources[0]).toMatchObject({
+      sourceProviderSlug: null,
+      timingSourceProviderSlug: "garmin",
+    });
+    expect(parsed?.dirtyResources[1]).toMatchObject({
+      sourceProviderSlug: null,
+      timingSourceProviderSlug: null,
+    });
+    expect(parsed?.dirtyResources[2]).not.toHaveProperty("timingSourceProviderSlug");
   });
 });
 
@@ -254,40 +300,59 @@ describe("serializeHostedExecutionDeviceSyncDirtyPayloadIdentity", () => {
 
 describe("mergeHostedDeviceSyncConnectionMetadata", () => {
   it("keeps newer blood-pressure source-coverage semantics immutable to older runtimes", () => {
-    const coverage = addJunctionBloodPressureHistoryBackfillCoverage({
-      existingValue: "v2|withings",
+    const metadata = { junctionBloodPressureHistoryBackfillCoverage: "v2|withings" };
+    const coverage = addJunctionExtendedTimeseriesHistoryBackfillCoverage({
+      metadata,
       providerSlug: "omron",
+      resource: "blood_pressure",
       version: 1,
     });
 
-    expect(coverage).toBe("v2|withings");
-    expect(hasJunctionBloodPressureHistoryBackfillCoverage(coverage, "omron", 1)).toBe(false);
-    expect(hasJunctionBloodPressureHistoryBackfillCoverage("v1|omron", "omron", 2)).toBe(false);
-    expect(canCurrentRuntimeMutateJunctionBloodPressureHistoryBackfillCoverage(coverage, 1)).toBe(false);
-    expect(canCurrentRuntimeMutateJunctionBloodPressureHistoryBackfillCoverage("v1|omron", 2)).toBe(true);
-    expect(addJunctionBloodPressureHistoryBackfillCoverage({
-      existingValue: coverage,
+    expect(coverage).toBeNull();
+    expect(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
+      metadata,
+      "omron",
+      "blood_pressure",
+      1,
+    )).toBe(false);
+    expect(canCurrentRuntimeMutateJunctionExtendedTimeseriesHistoryBackfillCoverage(
+      metadata,
+      "blood_pressure",
+      1,
+    )).toBe(false);
+    expect(addJunctionExtendedTimeseriesHistoryBackfillCoverage({
+      metadata: {},
       providerSlug: "__proto__",
+      resource: "blood_pressure",
       version: 1,
     })).toBeNull();
   });
 
-  it("preserves unpublished local blood-pressure source coverage", () => {
+  it("preserves current local coverage without certifying legacy note semantics", () => {
     const result = mergeHostedDeviceSyncConnectionMetadata({
       hostedMetadata: { hostedOnly: true },
       localConnectionStateUnpublished: true,
       localMetadata: {
         junctionBloodPressureHistoryBackfillCoverage: "v1|omron",
+        junctionNoteHistoryBackfillCoverage: "v1|oura",
       },
     });
 
-    expect(result).toEqual({
-      metadata: {
-        hostedOnly: true,
-        junctionBloodPressureHistoryBackfillCoverage: "v1|omron",
-      },
-      preservedLocalProgress: true,
-    });
+    expect(result.metadata.hostedOnly).toBe(true);
+    expect(result.metadata.junctionNoteHistoryBackfillCoverage).toBeUndefined();
+    expect(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
+      result.metadata,
+      "omron",
+      "blood_pressure",
+      1,
+    )).toBe(true);
+    expect(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
+      result.metadata,
+      "oura",
+      "note",
+      2,
+    )).toBe(false);
+    expect(result.preservedLocalProgress).toBe(true);
   });
 
   it("accepts hosted migration metadata after local state is published", () => {
@@ -316,8 +381,150 @@ describe("mergeHostedDeviceSyncConnectionMetadata", () => {
       },
     });
 
-    expect(result.metadata.junctionBloodPressureHistoryBackfillCoverage).toBe("v1|omron,withings");
+    expect(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
+      result.metadata,
+      "omron",
+      "blood_pressure",
+      1,
+    )).toBe(true);
+    expect(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
+      result.metadata,
+      "withings",
+      "blood_pressure",
+      1,
+    )).toBe(true);
     expect(result.preservedLocalProgress).toBe(true);
+  });
+
+  it("retains unpublished matrix coverage when hosted metadata fills the envelope", () => {
+    const sharedMetadata = Object.fromEntries(
+      Array.from({ length: 15 }, (_, index) => [`sharedFact${index}`, `value-${index}`]),
+    );
+    const coverage = addJunctionExtendedTimeseriesHistoryBackfillCoverage({
+      metadata: sharedMetadata,
+      providerSlug: "omron",
+      resource: "caffeine",
+      version: 1,
+    });
+    expect(coverage).not.toBeNull();
+    if (!coverage) {
+      throw new TypeError("Expected representable Junction coverage.");
+    }
+
+    const result = mergeHostedDeviceSyncConnectionMetadata({
+      hostedMetadata: {
+        ...sharedMetadata,
+        concurrentHostedFact: "published",
+      },
+      localConnectionStateUnpublished: true,
+      localMetadata: {
+        ...sharedMetadata,
+        [coverage.metadataKey]: coverage.value,
+      },
+    });
+
+    expect(result.preservedLocalProgress).toBe(true);
+    expect(Object.keys(result.metadata)).toHaveLength(16);
+    expect(result.metadata.concurrentHostedFact).toBeUndefined();
+    expect(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
+      result.metadata,
+      "omron",
+      "caffeine",
+      1,
+    )).toBe(true);
+    for (const [key, value] of Object.entries(sharedMetadata)) {
+      expect(result.metadata[key]).toBe(value);
+    }
+  });
+
+  it("compacts split coverage slots before merging a full hosted envelope", () => {
+    const sharedMetadata = Object.fromEntries(
+      Array.from({ length: 15 }, (_, index) => [`sharedFact${index}`, `value-${index}`]),
+    );
+    const bloodPressureMatrix = addJunctionExtendedTimeseriesHistoryBackfillCoverage({
+      metadata: {},
+      providerSlug: "omron",
+      resource: "blood_pressure",
+      version: 1,
+    });
+    const noteMatrix = addJunctionExtendedTimeseriesHistoryBackfillCoverage({
+      metadata: {},
+      providerSlug: "oura",
+      resource: "note",
+      version: 2,
+    });
+    expect(bloodPressureMatrix).not.toBeNull();
+    expect(noteMatrix).not.toBeNull();
+    if (!bloodPressureMatrix || !noteMatrix) {
+      throw new TypeError("Expected representable Junction coverage.");
+    }
+
+    const cases = [
+      {
+        hostedCoverage: { junctionNoteHistoryBackfillCoverage: "v2|oura" },
+        localCoverage: { junctionBloodPressureHistoryBackfillCoverage: "v1|omron" },
+      },
+      {
+        hostedCoverage: { junctionBloodPressureHistoryBackfillCoverage: "v1|omron" },
+        localCoverage: { junctionNoteHistoryBackfillCoverage: "v2|oura" },
+      },
+      {
+        hostedCoverage: { junctionNoteHistoryBackfillCoverage: noteMatrix.value },
+        localCoverage: { junctionBloodPressureHistoryBackfillCoverage: "v1|omron" },
+      },
+      {
+        hostedCoverage: { junctionNoteHistoryBackfillCoverage: "v2|oura" },
+        localCoverage: {
+          junctionBloodPressureHistoryBackfillCoverage: bloodPressureMatrix.value,
+        },
+      },
+      {
+        hostedCoverage: { junctionNoteHistoryBackfillCoverage: noteMatrix.value },
+        localCoverage: {
+          junctionBloodPressureHistoryBackfillCoverage: bloodPressureMatrix.value,
+        },
+      },
+      {
+        hostedCoverage: {
+          junctionBloodPressureHistoryBackfillCoverage: bloodPressureMatrix.value,
+        },
+        localCoverage: { junctionNoteHistoryBackfillCoverage: noteMatrix.value },
+      },
+    ];
+
+    for (const { hostedCoverage, localCoverage } of cases) {
+      for (const hostedCoverageFirst of [true, false]) {
+        for (const localCoverageFirst of [true, false]) {
+          const result = mergeHostedDeviceSyncConnectionMetadata({
+            hostedMetadata: hostedCoverageFirst
+              ? { ...hostedCoverage, ...sharedMetadata }
+              : { ...sharedMetadata, ...hostedCoverage },
+            localConnectionStateUnpublished: true,
+            localMetadata: localCoverageFirst
+              ? { ...localCoverage, ...sharedMetadata }
+              : { ...sharedMetadata, ...localCoverage },
+          });
+
+          expect(result.preservedLocalProgress).toBe(true);
+          expect(Object.keys(result.metadata)).toHaveLength(16);
+          expect(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
+            result.metadata,
+            "omron",
+            "blood_pressure",
+            1,
+          )).toBe(true);
+          expect(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
+            result.metadata,
+            "oura",
+            "note",
+            2,
+          )).toBe(true);
+          for (const [key, value] of Object.entries(sharedMetadata)) {
+            expect(result.metadata[key]).toBe(value);
+          }
+        }
+      }
+    }
   });
 
   it("keeps published source coverage when a bounded union cannot fit", () => {
@@ -776,7 +983,7 @@ describe("mergeHostedDeviceSyncConnectionMetadata", () => {
 
 describe("mergeGuardedJunctionHistoricalBackfillMetadata", () => {
   it("preserves blood-pressure source coverage during guarded replacement", () => {
-    expect(mergeGuardedJunctionHistoricalBackfillMetadata({
+    const result = mergeGuardedJunctionHistoricalBackfillMetadata({
       existingMetadata: {
         junctionBloodPressureHistoryBackfillCoverage: "v1|omron",
         seedOnlyState: "discard",
@@ -784,10 +991,14 @@ describe("mergeGuardedJunctionHistoricalBackfillMetadata", () => {
       replacementMetadata: {
         callbackOutcome: "complete",
       },
-    })).toEqual({
-      callbackOutcome: "complete",
-      junctionBloodPressureHistoryBackfillCoverage: "v1|omron",
     });
+    expect(result.callbackOutcome).toBe("complete");
+    expect(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
+      result,
+      "omron",
+      "blood_pressure",
+      1,
+    )).toBe(true);
   });
 
   it("preserves opaque future historical state without retaining ordinary seed metadata", () => {
@@ -841,10 +1052,43 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
     ).toThrowError(/runtime apply response updates must include no more than 100 entries/u);
   });
 
+  it("caps each runtime apply update at 64 source projections", () => {
+    const source = (index: number) => ({
+      lastSeenAt: "2026-04-07T02:00:00.000Z",
+      observedLastSeenAt: null,
+      sourceInstanceKey: `source_${index}`,
+      sourceProviderSlug: `provider_${index}`,
+      status: "connected",
+    });
+    const boundedSources = Array.from(
+      {
+        length:
+          hostedRuntime.HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_SOURCE_LIMIT,
+      },
+      (_, index) => source(index),
+    );
+
+    expect(parseHostedExecutionDeviceSyncRuntimeApplyRequest({
+      updates: [{ connectionId: "conn_123", sources: boundedSources }],
+      userId: "user_123",
+    }).updates[0]?.sources).toHaveLength(64);
+
+    expect(() =>
+      parseHostedExecutionDeviceSyncRuntimeApplyRequest({
+        updates: [{
+          connectionId: "conn_123",
+          sources: [...boundedSources, source(boundedSources.length)],
+        }],
+        userId: "user_123",
+      })
+    ).toThrowError(/updates\[0\]\.sources must include no more than 64 entries/u);
+  });
+
   it("parses staged dirty ack overlays on dirty-pending requests", () => {
     expect(
       parseHostedExecutionDeviceSyncDirtyPendingRequest(
         {
+          connectionId: "dsc_123",
           limit: 10,
           stagedDirtyAcks: [
             {
@@ -857,6 +1101,7 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
         "trusted-user",
       ),
     ).toEqual({
+      connectionId: "dsc_123",
       limit: 10,
       stagedDirtyAcks: [
         {
@@ -968,6 +1213,10 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
       parseHostedExecutionDeviceSyncRuntimeSnapshotRequest(
         {
           connectionId: null,
+          cursor: {
+            createdAt: "2026-04-06T23:58:00+00:00",
+            id: "conn_cursor",
+          },
           limit: 4,
           provider: "oura",
         },
@@ -975,6 +1224,10 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
       ),
     ).toEqual({
       connectionId: null,
+      cursor: {
+        createdAt: "2026-04-06T23:58:00.000Z",
+        id: "conn_cursor",
+      },
       includeCredentialMaterial: false,
       limit: 4,
       provider: "oura",
@@ -1035,6 +1288,10 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
           },
         ],
         generatedAt: "2026-04-07T00:00:00.000Z",
+        nextCursor: {
+          createdAt: "2026-04-06T23:59:59+00:00",
+          id: "conn_123",
+        },
         userId: "user_123",
       }),
     ).toEqual({
@@ -1076,6 +1333,10 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
         },
       ],
       generatedAt: "2026-04-07T00:00:00.000Z",
+      nextCursor: {
+        createdAt: "2026-04-06T23:59:59.000Z",
+        id: "conn_123",
+      },
       userId: "user_123",
     });
   });
@@ -1097,6 +1358,25 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
     ).toThrowError(
       /Hosted device-sync runtime snapshot request includeCredentialMaterial must be a boolean/u,
     );
+    expect(() =>
+      parseHostedExecutionDeviceSyncRuntimeSnapshotRequest(
+        {
+          userId: "other-user",
+        },
+        "trusted-user",
+      ),
+    ).toThrowError(/userId must match the authenticated hosted execution user/u);
+    expect(() =>
+      parseHostedExecutionDeviceSyncRuntimeSnapshotRequest(
+        {
+          cursor: {
+            createdAt: "not-a-timestamp",
+            id: "conn_123",
+          },
+        },
+        "trusted-user",
+      ),
+    ).toThrowError(/snapshot request cursor.createdAt must be an ISO timestamp/u);
   });
 
   it("keeps only the supported internal projection paths", () => {
@@ -1105,6 +1385,11 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
     );
     expect(hostedRuntime.HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_PATH).toBe(
       "/api/internal/device-sync/runtime/apply",
+    );
+    expect(hostedRuntime.HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PAGE_LIMIT).toBe(32);
+    expect(hostedRuntime.HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_CONNECTION_SOURCE_LIMIT).toBe(64);
+    expect(hostedRuntime.HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_HYDRATION_LIMIT).toBe(
+      hostedRuntime.HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_UPDATE_LIMIT,
     );
     expect("buildHostedExecutionUserDeviceSyncRuntimePath" in hostedRuntime).toBe(false);
   });
@@ -2791,6 +3076,15 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
         `blood-pressure-${index.toString(16).padStart(16, "0")}`
       ),
     });
+    const workoutStreamCursor = JSON.stringify({
+      v: 1,
+      i: [JSON.stringify(["garmin", "watch", "watch-1", "workout-1"])],
+    });
+    const timeseriesResourceCursor = JSON.stringify({
+      v: 1,
+      a: "body_mass_index",
+      i: ["distance"],
+    });
     const hint = parseHostedExecutionDeviceSyncWakeHint({
       jobs: [
         {
@@ -2798,14 +3092,32 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
           payload: {
             emptyBackfillAttempts: 2,
             historicalBackfill: true,
+            historicalBackfillVersion: 2,
             historicalProviderRecordsSeen: true,
             historicalRecordsSeen: true,
             historicalUnresolvedProviderRecordIdentitiesJson: unresolvedIdentitiesJson,
             historicalUnresolvedProviderRecordCount: 65,
             historicalWindowStart: "2026-03-01T00:00:00Z",
             timeseriesCursor: "2026-04-02T00:00:00Z",
+            timeseriesResourceCursor,
+            workoutStreamCursor,
             windowEnd: "2026-04-03T00:00:00Z",
             windowStart: "2026-04-01T00:00:00Z",
+          },
+        },
+        {
+          kind: "reconcile",
+          payload: {
+            timeseriesResourceCursor: "heartrate",
+            windowEnd: "2026-04-04T00:00:00Z",
+            windowStart: "2026-04-03T00:00:00Z",
+          },
+        },
+        {
+          kind: "backfill",
+          payload: {
+            windowEnd: "2026-04-05T00:00:00Z",
+            windowStart: "2026-04-04T00:00:00Z",
           },
         },
       ],
@@ -2814,14 +3126,26 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
     expect(hint?.jobs?.[0]?.payload).toEqual({
       emptyBackfillAttempts: 2,
       historicalBackfill: true,
+      historicalBackfillVersion: 2,
       historicalProviderRecordsSeen: true,
       historicalRecordsSeen: true,
       historicalUnresolvedProviderRecordIdentitiesJson: unresolvedIdentitiesJson,
       historicalUnresolvedProviderRecordCount: 65,
       historicalWindowStart: "2026-03-01T00:00:00.000Z",
       timeseriesCursor: "2026-04-02T00:00:00.000Z",
+      timeseriesResourceCursor,
+      workoutStreamCursor,
       windowEnd: "2026-04-03T00:00:00.000Z",
       windowStart: "2026-04-01T00:00:00.000Z",
+    });
+    expect(hint?.jobs?.[1]?.payload).toEqual({
+      timeseriesResourceCursor: "heartrate",
+      windowEnd: "2026-04-04T00:00:00.000Z",
+      windowStart: "2026-04-03T00:00:00.000Z",
+    });
+    expect(hint?.jobs?.[2]?.payload).toEqual({
+      windowEnd: "2026-04-05T00:00:00.000Z",
+      windowStart: "2026-04-04T00:00:00.000Z",
     });
 
     expect(() =>

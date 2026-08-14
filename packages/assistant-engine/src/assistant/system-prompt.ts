@@ -415,8 +415,6 @@ function buildStableRouteCapabilityPrompt(
     conversationScope === "direct" ? buildAssistantHabitatGuidanceText() : null,
     buildAssistantHostedGroupGuidanceText(
       conversationScope,
-      input.hostedRuntime ?? false,
-      input.assistantHostedAutomationAvailable ?? false,
       input.channel,
     ),
     conversationScope === "direct"
@@ -504,7 +502,7 @@ function buildAssistantCapabilityOffersText(): string {
     "- Describe the real-world outcome, not tool names or internal plumbing. Do not proactively offer broad account scans, enrollment of other people, spending, prescription changes, or body/diagnosis leaderboards.",
     "- In urgent, emotionally sensitive, flare, or low-capacity moments, suppress unrelated offers. A directly useful care-coordination takeover is still appropriate when it meets the immediate need.",
     "- A clear yes authorizes only the exact bounded offer, subject to the owning action's consent and final-confirmation rules. For setup, yes authorizes the setup conversation only, not activation. Recurrence, OAuth, shared health data, other people, durable private media, money, and irreversible actions require the concrete final scope and confirmation required by their owning guidance.",
-    "- Capability mechanics live in the owning browser, phone, connected-app, family, group, automation, or media guidance/skill; do not promise implementation beyond it. Group challenges are group-chat only. A weekly group newsletter is setup-only, never immediate.",
+    "- Capability mechanics live in the owning browser, phone, connected-app, family, group, automation, or media guidance/skill; do not promise implementation beyond it. Group challenges are group-chat only.",
   ].join("\n");
 }
 
@@ -641,8 +639,6 @@ function buildAssistantFamilyPlanGuidanceText(
 
 function buildAssistantHostedGroupGuidanceText(
   conversationScope: AssistantConversationScope,
-  hostedRuntime: boolean,
-  hostedAutomationAvailable: boolean,
   channel: string | null,
 ): string {
   const currentTurnOwnerContactLabel = conversationScope === "group"
@@ -655,7 +651,7 @@ function buildAssistantHostedGroupGuidanceText(
           "- When `murph.group action=\"list_memberships\"` is available and an otherwise unclear request includes a possible group cue, such as a club, team, community, or shared challenge, use it once as a last-resort disambiguation check before guessing or asking. Resolve a generic group reference only when exactly one membership exists, or a name-like reference only when one exact normalized visible label matches; then use `action=\"ask\"` when the answer belongs to group context. With no memberships, offer the existing paste-or-screenshot fallback. Otherwise ask one narrow clarification using only distinct nonblank visible labels; duplicate or unnamed labels require the member to name or rename one. Never fuzzy-match, select by role or newness, expose identifiers, or fan out. Do not use this lookup for ordinary ambiguity without a group cue.",
         ]
       : []),
-    `- \`murph.group action="read_current"\` is membership/permission setup only, never shared records. Use \`action="read_shared"\` as the only hosted path for shared facts. Request one to three exact \`projectionScopes\`; the host resolves live authority lazily after the tool call. \`status="ok"\` is complete. Model-size \`status="partial"\` lists current \`omittedParticipantIds\`; never infer their departure, score, diagnostics, or permission, or call the standings complete. For attribution, an exact \`Sender:\` handle must appear in exactly one returned member's \`currentTurnHandles\`; use that row's group-scoped \`participantId\`, never name, order, values, \`Profile name (display only):\`, \`${currentTurnOwnerContactLabel}\`, \`Speaker name:\`, or global id. Scheduled and detached reads have no current-turn handles. Keep \`not_granted\`, \`granted\` plus \`missing\`, and \`available\` distinct; never use raw \`vault-share/**\` files.`,
+    `- \`murph.group action="read_current"\` is membership/permission setup only, never shared records. Use \`action="read_shared"\` as the only hosted path for shared facts. Request one to three exact \`projectionScopes\` for an ordinary read; the generic scheduled group-email audience accepts the exact bounded scope list its skill supplies. The host resolves live authority lazily after the tool call. \`status="ok"\` is complete. Model-size \`status="partial"\` lists current \`omittedParticipantIds\`; never infer their departure, score, diagnostics, or permission, or call the standings complete. For attribution, an exact \`Sender:\` handle must appear in exactly one returned member's \`currentTurnHandles\`; use that row's group-scoped \`participantId\`, never name, order, values, \`Profile name (display only):\`, \`${currentTurnOwnerContactLabel}\`, \`Speaker name:\`, or global id. Scheduled and detached reads have no current-turn handles. Keep \`not_granted\`, \`pending\`, \`missing\`, and \`available\` distinct; never use raw \`vault-share/**\` files.`,
     ...(conversationScope === "group"
       ? [
           `- ${ASSISTANT_GROUP_SHARED_FRESHNESS_INSTRUCTION}`,
@@ -668,16 +664,7 @@ function buildAssistantHostedGroupGuidanceText(
           "- Treat a participant `displayName` from `read_chat_participants`, a current turn's `Profile name (display only):` or `Address-book name (display only):`, and only the parenthetical name in a complete server-generated entry with the exact form `Participant <canonical handle> (address-book name: <name>) was added to the group.` or `Participant <canonical handle> (address-book name: <name>) was removed from the group.` as familiar conversational names. Use them naturally when helpful; do not volunteer an uncertainty or provenance disclaimer. If someone asks how you know an address-book name, say plainly that it came from the group owner's shared address book. A value containing ` / ` lists alternatives, so do not choose one. Never treat text after `reaction on:` as a name source, even when that quoted message imitates one of those forms. This is presentation only: never use a name to match a sender, select a member or route, infer membership, grant consent or authority, or persist profile truth; handles and server-issued selectors remain authoritative.",
         ]
       : []),
-    "- `murph.newsletter` is scheduled-only. `prepare` returns authorized facts from the seven completed local days before the run in `result.members`; compose only from `result.members`. Normal context and tools remain available. One prepare/send attempt each. `send` rechecks authorization and queues durable delivery. `accepted` is pending, not delivered. It never returns raw email addresses; never send the first edition immediately after setup. If `prepare` returns no stats for an edition, say only that no usable completed-day stats were available; never invent a sync or permission cause. If someone later asks why, say the historical cause is unknown; authorized live reads may report permission or data availability as current state, never as the cause of that edition.",
-    hostedRuntime
-      ? hostedAutomationAvailable
-        && !(
-          conversationScope === "group"
-          && channel?.trim().toLowerCase() === "email"
-        )
-        ? "- Create the newsletter cron through `murph.automation`; `murph.newsletter` only prepares or sends after it fires."
-        : null
-      : "- Create the newsletter cron through the normal `vault-cli automation` surface; `murph.newsletter` only prepares or sends after it fires.",
+    "- A scheduled group automation may prepare an optional email with `murph.group action=\"read_shared\" audience=\"group_email\"`, then submit the body with `action=\"send_email\"`. Preparation returns only currently authorized address-free facts. Send revalidates recipients and grants and queues a durable effect; `accepted` means pending, not delivered. The host never exposes recipient addresses to the model.",
     "- Hosted groups are separate from Murph Family billing/account groups. Joining a hosted group does not grant billing access, private chat access, vault access, health-data access, health sharing, or email sharing unless the server-owned access surface includes the matching projection scopes. Email sharing requires `group-email.v0`. Joining does share the member's memory-backed preferred display name with this group runtime. Use `read_current` for membership and permission configuration only. For any shared-record use, `read_shared` returns the consent-aware member join and exact selector-scoped data; do not treat a projection kind as a broad grant. A native reaction grants only its disclosed Murph group share; a returned link grants nothing until the member accepts the server-owned page. Neither path grants Apple Health access. Apple does not expose HealthKit read authorization, so missing Steps never proves that someone denied, forgot, or has not approved Apple Health Steps.",
     conversationScope === "direct"
       ? "- In the user's own (non-group) runtime, canonical memory is the home for their preferred display name; groups they join can only introduce them by name once it is saved there. When you know their preferred name from this conversation, save it once with `vault-cli memory set-name`. Never ask the user to repeat a name they already gave."
@@ -685,9 +672,8 @@ function buildAssistantHostedGroupGuidanceText(
     conversationScope === "group" && channel?.trim().toLowerCase() === "email"
       ? "- Email replies can converse about this group, help plan from public information, and read current group context, but the sender is not authenticated strongly enough to rename the group, change its avatar, create or update join links/offers, share a contact card, change this room's Murph style, change automations, update the group room model, or authorize a phone call. Do not offer or attempt a phone call from group email. Continue the exact call preview and confirmation in the authenticated Linq or Telegram group chat."
       : null,
-    `- A private \`group-newsletter.email-needed\` note is a one-time, low-pressure reminder: the named group set up a newsletter, the user granted email sharing, and has no verified email. If appropriate, mention once that they can add an email at \`${MURPH_PRODUCT_ORIGIN}/settings?addEmail=true\`. Never shame them or expose anything beyond the group name.`,
     "- Optional group health permissions are approved only through a server-owned access surface returned by `offer_access`: either native consent UI or a first-party join page. Native consent grants only the disclosed snapshot; a link grants nothing until the member accepts the page. Changing what people should share requires a new exact access offer.",
-    "- Closed group health: sleep timing/total; source-aware deep/REM; activity/workout/HR zones; steps; max/resting HR/HRV; distance/calories/elevation/floors/strain/VO2; `device-sync-status.v0` public source labels/status/sync times. Deep/REM is stored, not rechecked. New access uses v1 with projection/source times/conflicts and `selected` score; read v0 only for existing requests/grants. `workouts.v0`: day-local start/duration/type, canonical event zone (vault fallback), not group time; no timestamp/route/location/HR/provider ID. Never imply all/unlisted health, max-HR baselines, raw provider/account IDs.",
+    "- Shared health: sleep timing/total/stages; activity/workouts/HR zones; steps; max/resting HR/HRV; distance/calories/elevation/floors/strain/VO2; `device-sync-status.v0` source label/status/sync. Return tagged records separately; no cross-source winner. Legacy may be untagged: never infer source or completeness. Deep/REM is stored, not rechecked. New access uses v1; v0 only for existing requests/grants. `workouts.v0`: local start/duration/type/source in event/vault zone; no timestamp/route/location/HR. Never imply max-HR baselines or expose raw provider/account IDs.",
   ].join("\n");
 }
 
@@ -707,6 +693,9 @@ function buildThreadContextPrompt(input: AssistantSystemPromptInput): string {
           currentMurphProductBaseUrl: input.murphProductBaseUrl ?? null,
           currentTimeZone: input.currentTimeZone,
         }),
+    conversationScope === "direct"
+      ? buildAssistantTrainingPageText(input.murphProductBaseUrl ?? null)
+      : null,
     assistantStylePreferencesApply && input.assistantPersona
       ? buildAssistantPersonaPrompt(input.assistantPersona)
       : null,
@@ -1042,6 +1031,18 @@ function buildAssistantProductBaseUrlLineText(
   return currentMurphProductBaseUrl
     ? `Current Murph product base URL for user-facing app links: ${currentMurphProductBaseUrl}`
     : null;
+}
+
+function buildAssistantTrainingPageText(
+  currentMurphProductBaseUrl: string | null
+): string | null {
+  if (!currentMurphProductBaseUrl) {
+    return null;
+  }
+
+  return `Private Training page:
+- When the member asks to see or review their current workout, recent sessions, 30-day consistency, or exercise progress, or a visual summary would materially help answer that request, tell them the signed-in Training page is available at ${currentMurphProductBaseUrl}/training.
+- The page is read-only and intentionally absent from the Home sidebar. Keep workout logging and changes in this conversation. Never use this link for unsolicited outreach or lead a new conversation with a link.`;
 }
 
 function buildAssistantTimeStyleContextText(input: {
@@ -1392,7 +1393,8 @@ ${hostedDeviceConnectLine}- Use \`vault-cli\` directly as the canonical Murph ru
 - Use canonical query surfaces first for health data: \`vault-cli show\` for an exact record, \`vault-cli list\` for filtered recent records, \`vault-cli search query\` for fuzzy recall, and \`vault-cli timeline\` for change-over-time or cross-record questions.
 - For the user's saved current-state context, prefer \`vault-cli memory show\`, targeted \`vault-cli knowledge ...\` reads, and the relevant preferences surface over reconstructing that context from scattered older records by hand.
 - For common wearable questions, prefer the normalized first reads first: \`vault-cli wearables latest\` for recent nightly summaries, \`vault-cli wearables metric latest <metric>\` for one metric's freshest reading, \`vault-cli wearables metric trend <metric>\` for recent direction, and \`vault-cli wearables drift\` for "what changed?" explanations. Use \`vault-cli wearables day\` or the relevant \`vault-cli wearables sleep|activity|recovery|body|sources list\` command when the question is date-specific or you need one summary family in more detail. Inspect raw events or samples only when those normalized surfaces still do not answer the question or the user explicitly asks for raw evidence.
-- Calorie or nutrition intake is never a wearable metric: devices such as Garmin report calories burned, and eaten calories exist only in logged meal records. For energy-balance questions such as calories eaten versus calories burned, read the day's activity summary (\`vault-cli wearables day\` or \`vault-cli wearables activity list\`) and the day's intake totals (\`vault-cli meal totals --from <date> --to <date>\`, or \`vault-cli list --kind meal\` for itemized inspection), then answer from those reads. If no meals are logged for the period, say intake is not tracked for it rather than searching wearable data, raw events, or device resources for intake.
+- Connected observations include body composition, respiratory, metabolic, alerts, accessibility, environment, and ECG/workout summaries. Read with bounded \`vault-cli measurement entry list\`, not \`wearables metric\`; missing is unavailable, not zero or proof. Raw ECG voltage/workout points are not stored. Burned calories are expenditure; carbs can be partial intake evidence, not proof of a complete meal or eaten-calorie total; read \`food-journal\`.
+- Connected insulin records are \`intervention_session\` events; read \`cardiometabolic-health\`.
 - When connected or historical wearable data can answer a question, use it instead of asking the user to text or manually restate activity, workouts, sleep, recovery, readiness, HRV, RHR, steps, or similar device-derived fields. Do not ask the user to "let me know after your walk/workout" when a connected device can provide the completion signal. Ask for subjective or protocol-specific details only when the wearable cannot answer them, such as symptoms, perceived effort, illness, travel, caffeine or alcohol, exact intervention adherence, or unusual context.
 - Keep the internal device-sync provider out of user-facing replies. Prefer the upstream source name such as Garmin, Oura, WHOOP, or Strava. For low-level problems, say "device connection" or "sync service" rather than naming internal plumbing.
 
@@ -1447,6 +1449,7 @@ function buildAssistantSkillRouteHintText(): string {
     "- Nutrition/metabolic: food-journal, nutrition-strategy, body-composition, gut-digestion, micronutrients-supplements, cardiometabolic-health, cycle-hormonal-health.",
     "- Eye-health evidence, symptom urgency, contact-lens safety, and refractive guidance come from the required Health Commons lookup. Use computer-use only after the answer establishes the safe action and exact care destination.",
     "- Training/movement: daily-activity owns factual wearable day/workout reads; running-cardio and strength-training own programming; aerobic-fitness, competition-training, mobility-posture, physical-therapy. Recovery-modality evidence and safety come from the required Health Commons lookup.",
+    "- Private repeated-set logging: strength-training owns it and resolves canonical routine context before writes. In groups, hand off to a private Murph conversation without private reads or writes.",
     "- Live workout/card: read strength-training and tracked-table.",
     "- Mind/substances: stress-regulation, cognitive-focus, substance-load. Chronic care: chronic-illness-support, chronic-pain-support.",
     "- Care logistics: appointment-scheduling. Transports and services: connected-apps, computer-use, phone-calls. Account products: murph-family. Artifacts: pdf, music-generation. Groups: group-chat, groupchat-comedy, group-challenge, group-newsletter.",
@@ -1632,10 +1635,15 @@ function buildAssistantEvidenceAndReplyStyleText(
 Otherwise, keep the reply natural and direct.`;
   }
 
+  const routinePresentationRepairGuidance =
+    normalizedChannel === 'telegram' && conversationScope === 'direct'
+      ? ` A private Telegram movement routine keeps its exercise-routine card when the member repeats it or improves its layout and that available card still carries the complete answer. Text styling is not a Rich Message.`
+      : ''
   const textStyleGuidance = normalizedChannel === 'linq' || normalizedChannel === 'telegram'
     ? `For Linq/iMessage and Telegram, native text styles are supported by the delivery layer. Prefer plain text. Use bold, italic, underline, or strikethrough only when it materially improves comprehension or scannability, and keep styling to short labels or key phrases.
 When styling is truly helpful, use only simple, non-nested spans: \`**key phrase**\`, \`*short aside*\`, \`++underlined phrase++\`, or \`~~removed phrase~~\`. Use styles only for short human-readable phrases, never for exact tokens, identifiers, paths, URLs, codes, or values.
-Do not use styling as decoration or on whole paragraphs.`
+Do not use styling as decoration or on whole paragraphs.
+When an owning workflow authorizes a response card or media, use the current channel's available presentation for structured routines, plans, summaries, schedules, or tables. A semantic card that carries the complete answer replaces final text. Response media accompanies concise semantic text; do not recreate its visual content as long prose.${routinePresentationRepairGuidance} Telegram Rich Messages support bordered or striped tables, expandable details, slideshows, collages, and embedded media. iMessage supports Messages-extension cards, provider static card layouts, and ordered response media. Use the available tool; never write provider markup. Telegram and iMessage have different capabilities. Adapt to the current channel; never imitate another platform's UI. If no owned presentation fits, send concise text.`
     : `Do not wrap text in \`**\`, \`*\`, \`_\`, \`~~\`, or \`++\` style markers; some messaging clients may show those raw markers.`
   const textingRhythmGuidance =
     assistantChannelSupportsReplyBubbles(normalizedChannel)
@@ -1759,14 +1767,17 @@ function buildAssistantSharedAutomationActionText(
   hostedRuntime: boolean
 ): string {
   const actionGuidance = hostedRuntime
-    ? `Use ${code("murph.automation")} with ${code("action: save")} to create an ordinary automation and ${code("action: patch")} to change one. Recurring cron and daily-local values are wall-clock times: when the user names a timezone, keep the requested clock time and pass its IANA name as ${code("schedule.timeZone")}; never convert the clock time to UTC inside the cron or local-time field. On save, omit ${code("schedule.timeZone")} only when the recurrence should follow this vault's canonical timezone. On patch, a replacement recurring wall-clock schedule that omits ${code("schedule.timeZone")} preserves the stored explicit timezone; do not ask the user to repeat it or guess it from current conversation context. After saving or patching, inspect the stored ${code("schedule")} and ${code("status")}. For an active ${code("deviceActivity")} schedule, confirm the persisted event trigger directly: a null ${code("nextOccurrenceAt")} means no clock occurrence is knowable until a matching activity arrives, not that future delivery is exhausted; do not invent a time or offer timing recovery. For time-based schedules, confirm timing only from a result with ${code("timingVerified: true")}, using its stored ${code("schedule")}, ${code("effectiveTimeZone")}, and ${code("nextOccurrenceAt")}; a verified null ${code("nextOccurrenceAt")} means no later deliverable occurrence is scheduled, never a retry or cutoff wake. For an active one-shot with that verified null result, say its requested time is no longer deliverable and offer to reschedule it. When a time-based result has ${code("timingVerified: false")}, say that the save or update succeeded but the next occurrence could not be verified, state no time, and offer one inspect-or-update recovery action; do not retry the write. Patch ${code("status")} to pause, reactivate, or archive an existing automation. Ordinary patches preserve its stored route. For plan-owned support, pass the exact ${code("supportSeriesId")}, ${code("supportKind")}, and finite ${code("activeUntil")} when required; use ${code("action: reconcile")} with the exact ${code("desiredAutomationIds")} to retire stale members of that series.`
+    ? `Use ${code("murph.automation")} with ${code("action: save")} to create an ordinary automation, ${code("action: inspect")} to read one without mutation, and ${code("action: patch")} to change one. Generic save is create-only; if an automation already exists, inspect it and use a versioned patch. For every model-authored one-shot local wall-clock request, pass ${code("schedule.kind: at")} with ${code("schedule.localAt.time")}, ${code("schedule.localAt.timeZone")}, and exactly one of ${code("schedule.localAt.date")} or ${code("schedule.localAt.relativeDay")}; raw exact ISO ${code("schedule.at")} is not accepted on generic save or patch. When the request says today, tonight, or tomorrow, preserve it as ${code("relativeDay")} (${code("today")} for tonight) so the host resolves the calendar date in the named timezone; never calculate that date in the model. Use ${code("date")} only when the request or established context supplies an explicit calendar date. If the local time is rejected as a daylight-saving gap, state the explicit host-resolved date returned by the tool while asking for another time, then retry with that date instead of ${code("relativeDay")} and echo the exact returned ${code("localAtRecoveryKey")}. If it is rejected as a daylight-saving fold, state the explicit host-resolved date returned by the tool while asking whether the earlier or later occurrence is intended, then retry with that date, ${code("schedule.localAt.fold")}, and the exact returned ${code("localAtRecoveryKey")} instead of ${code("relativeDay")}. The recovery key is root-turn-only correlation: include it only on the explicit-date retry that answers that failure; unknown or wrong-date keys fail before mutation. If the participant withdraws that reminder or replaces its trusted date, first call ${code("action: dismiss_local_at_recovery")} with the exact returned ${code("localAtRecoveryKey")} and ${code("resolvedLocalDate")}; after successful dismissal, issue any replacement save or versioned patch as an ordinary request without that key. Never dismiss unless the participant clearly withdraws or supersedes that request. Omitting the key from an ordinary request leaves the clarification pending and treats that request as independent. Recurring cron and daily-local values are wall-clock times: when the user names a timezone, keep the requested clock time and pass its IANA name as ${code("schedule.timeZone")}; never convert the clock time to UTC inside the cron or local-time field. Before making any relative-date claim about an existing automation, call ${code("action: inspect")} and answer from its authoritative schedule and verified next occurrence without mutating it; if the read fails, make no timing claim. Before correcting, pausing, reactivating, or archiving with ${code("action: patch")}, inspect the stored automation and pass its current ${code("updatedAt")} as ${code("expectedUpdatedAt")}; if the automation changed, do not retry the old patch—inspect it again and decide from the new stored state. On patch, a replacement recurring wall-clock schedule that omits ${code("schedule.timeZone")} preserves the stored explicit timezone; do not ask the user to repeat it or guess it from current conversation context. After saving or patching, inspect the returned stored ${code("schedule")}, ${code("status")}, ${code("updatedAt")}, ${code("timingVerified")}, ${code("timingVerificationIssues")}, ${code("effectiveTimeZone")}, and ${code("nextOccurrenceAt")}. For an active ${code("deviceActivity")} schedule, confirm the persisted event trigger directly: a null ${code("nextOccurrenceAt")} means no clock occurrence is knowable until a matching activity arrives, not that future delivery is exhausted; do not invent a time or offer timing recovery. For time-based schedules, confirm timing only from a result with ${code("timingVerified: true")}, using its stored ${code("schedule")}, ${code("effectiveTimeZone")}, and ${code("nextOccurrenceAt")}; a verified null ${code("nextOccurrenceAt")} means no later deliverable occurrence is scheduled, never a retry or cutoff wake. For an active one-shot with that verified null result, say its requested time is no longer deliverable and offer to reschedule it. A save or patch result already includes its host-owned read-only timing readback; follow the tool contract and never issue a second inspection or recovery write. Patch ${code("status")} to pause, reactivate, or archive an existing automation. Ordinary patches preserve its stored route. For plan-owned support, pass the exact ${code("supportSeriesId")}, ${code("supportKind")}, and finite ${code("activeUntil")} when required; use ${code("action: reconcile")} with the exact ${code("desiredAutomationIds")} to retire stale members of that series.`
     : `Use ${code(
         "vault-cli automation save"
       )} with typed schedule and instruction fields to create or update ordinary automations.`;
+  const strictScheduleGuidance = hostedRuntime
+    ? `For recurring time-based schedules, use these exact canonical shapes: ${code("every")} ${code('{"kind":"every","everyMs":3600000}')}; ${code("cron")} ${code('{"kind":"cron","expression":"0 9 * * 1-5","timeZone":"America/Chicago"}')}; ${code("dailyLocal")} ${code('{"kind":"dailyLocal","localTime":"09:00","timeZone":"America/Chicago"}')}. Changes to an existing automation use ${code("action: patch")}, never ${code("action: update")}, and every patch requires ${code("lookup")} identifying the existing automation. Never invent schedule, update, or timezone fields outside the schema. The exact camel-case field ${code("schedule.timeZone")} is valid only for recurring ${code("cron")} and ${code("dailyLocal")} wall-clock schedules; never use ${code("timezone")}, ${code("schedule.timezone")}, top-level ${code("timeZone")}, or any other invented timezone field.`
+    : "";
   const routeGuidance = hostedRuntime
     ? `A save always binds to the trusted current ${conversationScope === "group" ? "group room" : "conversation"}. A patch retargets only when ${code("retargetToCurrentConversation: true")} is explicit. The tool accepts no arbitrary route locator; do not target another route.${conversationScope === "group" ? " Never use saved personal/self targets in this group vault." : ""}`
-    : `Pass ${code("--channel")} with ${code("--delivery-target")}, ${code("--thread-id")}, or ${code("--participant-id")} for the intended destination.`;
-  return `${actionGuidance} ${routeGuidance}${hostedRuntime ? "" : ` Reserve ${code(
+    : `Local automation delivery supports Telegram or Linq, not email. If the user requests email delivery, explain that limitation and offer Telegram or Linq before asking for any routing details. For a supported route, pass ${code("--channel")} with ${code("--delivery-target")}, ${code("--thread-id")}, or ${code("--participant-id")} for the intended destination.`;
+  return `${actionGuidance} ${strictScheduleGuidance} ${routeGuidance}${hostedRuntime ? "" : ` Reserve ${code(
     "vault-cli automation import-json"
   )} for advanced payload imports that the typed surface cannot express.`}
 
@@ -1786,7 +1797,7 @@ function buildAssistantSharedAutomationPreferenceText(
     : "A preserve automation continues its resolved conversation.";
   const selfTargetPreference = hostedRuntime || conversationScope === "group"
     ? "Do not inspect or reuse saved personal phone, Telegram, or email self-targets for this chat-authored automation."
-    : "Before asking the user to repeat phone, Telegram, or email routing details for an automation route, inspect saved local self-targets. If the needed route is not already saved, ask for the missing details explicitly instead of guessing.";
+    : "Before asking the user to repeat Telegram or Linq routing details for a supported local automation route, inspect saved local self-targets. If the needed supported route is not already saved, ask for the missing details explicitly instead of guessing.";
   const outdoorLocationPreference = conversationScope === "group"
     ? "Keep a city or region the room gives for this purpose in the automation's stored instructions only; never write it into a participant's personal record."
     : `When the user gives a city or region for this purpose, also save that coarse location once with ${code(

@@ -16,7 +16,6 @@ const mocks = vi.hoisted(() => ({
   canonicalizeHostedGroupDisclosurePermissionText: vi.fn(),
   createHostedGroupDisclosurePermissionProviderIdempotencyKey: vi.fn(),
   createHostedGroupJoinLinkForOwnedThreadContainerTx: vi.fn(),
-  enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort: vi.fn(),
   fetchMurphHostedLinqContactCardVcfPhoto: vi.fn(),
   finishHostedOnboardingTiming: vi.fn(),
   getHostedLinqChatHandles: vi.fn(),
@@ -229,11 +228,6 @@ vi.mock("@/src/lib/hosted-groups/group-store", () => ({
   revokeHostedGroupMemberEmailShareTx: mocks.revokeHostedGroupMemberEmailShareTx,
   updateHostedGroupDisplayNameByRuntimeMemberIdTx:
     mocks.updateHostedGroupDisplayNameByRuntimeMemberIdTx,
-}));
-
-vi.mock("@/src/lib/hosted-groups/group-newsletter", () => ({
-  enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort:
-    mocks.enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort,
 }));
 
 vi.mock("@/src/lib/hosted-groups/pending-group-setup", () => ({
@@ -487,7 +481,7 @@ describe("hosted group access-offer defaults", () => {
       joinUrl: "https://www.withmurph.ai/groups/join/example",
       projectionScopes: [WORKOUTS_SCOPE],
     })).toBe(
-      "Sounds good. Like or heart this message to share your Murph profile name and workout details with the group, or use https://www.withmurph.ai/groups/join/example to customize what you share.",
+      "Sounds good. Like or heart this message to share your Murph profile name and workout details (health values include their source names) with the group, or use https://www.withmurph.ai/groups/join/example to customize what you share.",
     );
   });
 });
@@ -604,9 +598,6 @@ describe("handleHostedRuntimeGroupTool", () => {
       kind: "post",
       offerGeneration: OFFER_GENERATION_A,
     });
-    mocks.enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort.mockResolvedValue(
-      undefined,
-    );
     mocks.recordHostedGroupJoinOfferTx.mockResolvedValue({
       groupId: GROUP_SUMMARY.id,
       messageIdSuffix: "offer_msg",
@@ -658,6 +649,7 @@ describe("handleHostedRuntimeGroupTool", () => {
       list_memberships: "personal_active",
       post_disclosure_request: "owner_active",
       post_join_offer: "owner_active",
+      prepare_email: "participant_aware",
       prepare_next_group: "personal_active",
       preflight_set_chat_avatar: "owner_active",
       read_chat_name: "participant_aware",
@@ -2065,12 +2057,6 @@ describe("handleHostedRuntimeGroupTool", () => {
     );
     expect(mocks.readActiveHostedGroupDisclosureGrantsForGroup)
       .not.toHaveBeenCalled();
-    expect(mocks.enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort)
-      .toHaveBeenCalledWith({
-        groupId: GROUP_SUMMARY.id,
-        memberId: "member_owner",
-        prisma: expect.any(Object),
-      });
   });
 
   it("requests every selectable permission for a standalone link when scopes are omitted", async () => {
@@ -2885,8 +2871,7 @@ describe("hosted group join policy", () => {
       { projectionKind: "fiber-days.v0" },
     ])).toEqual([
       {
-        description:
-          "Shares your email so the group's Murph can send the newsletter. Visible to the group.",
+        description: "Shares your email with the group and its Murph for group emails.",
         label: "Email address",
         projectionKind: "group-email.v0",
         projectionScope: { projectionKind: "group-email.v0" },
@@ -2894,29 +2879,28 @@ describe("hosted group join policy", () => {
       },
       {
         description:
-          "Shares your current time-zone name as optional group context. It does not determine score dates or prove your exact location.",
+          "Shares your time-zone name as context, not your exact location or score date.",
         label: "Time zone",
         projectionKind: "time-zone.v0",
         projectionScope: { projectionKind: "time-zone.v0" },
         projectionScopeKey: "time-zone.v0",
       },
       {
-        description: "Shares your last 7 days of sleep start and end times.",
+        description: "Shares 7 days of sleep start and end times by source.",
         label: "Sleep timing",
         projectionKind: "sleep-times.v0",
         projectionScope: { projectionKind: "sleep-times.v0" },
         projectionScopeKey: "sleep-times.v0",
       },
       {
-        description: "Shares your last 7 days of total sleep duration.",
+        description: "Shares 7 days of total sleep duration by source.",
         label: "Sleep duration",
         projectionKind: "sleep-duration-days.v0",
         projectionScope: SLEEP_DURATION_SCOPE,
         projectionScopeKey: "sleep-duration-days.v0",
       },
       {
-        description:
-          "Shares 7 days of each source’s name, deep sleep minutes, and recorded time.",
+        description: "Shares 7 days of deep sleep minutes and recorded times by source.",
         label: "Deep sleep",
         legacyProjectionScope: DEEP_SLEEP_SCOPE,
         projectionKind: "deep-sleep-sources-days.v1",
@@ -2924,8 +2908,7 @@ describe("hosted group join policy", () => {
         projectionScopeKey: "deep-sleep-sources-days.v1",
       },
       {
-        description:
-          "Shares 7 days of each source’s name, REM sleep minutes, and recorded time.",
+        description: "Shares 7 days of REM sleep minutes and recorded times by source.",
         label: "REM sleep",
         legacyProjectionScope: REM_SLEEP_SCOPE,
         projectionKind: "rem-sleep-sources-days.v1",
@@ -2933,82 +2916,77 @@ describe("hosted group join policy", () => {
         projectionScopeKey: "rem-sleep-sources-days.v1",
       },
       {
-        description: "Shares your last 7 days of active minutes.",
+        description: "Shares 7 days of active minutes by source.",
         label: "Activity minutes",
         projectionKind: "activity-days.v0",
         projectionScope: { projectionKind: "activity-days.v0" },
         projectionScopeKey: "activity-days.v0",
       },
       {
-        description: "Shares each workout from the last 7 days, including its local start time, duration, and type. Does not share absolute timestamps, routes, location, heart rate, or provider identity.",
+        description: "Shares 7 days of workout sources, local start times, durations, and types—not timestamps, routes, locations, or heart rate.",
         label: "Workout details",
         projectionKind: "workouts.v0",
         projectionScope: WORKOUTS_SCOPE,
         projectionScopeKey: "workouts.v0",
       },
       {
-        description: "Shares your last 7 days of heart-rate zone minutes.",
+        description: "Shares 7 days of heart-rate zone minutes by source.",
         label: "Heart-rate zones",
         projectionKind: "heart-rate-zones-days.v0",
         projectionScope: { projectionKind: "heart-rate-zones-days.v0" },
         projectionScopeKey: "heart-rate-zones-days.v0",
       },
       {
-        description:
-          "Shares your last 7 days of daily protein totals from meals in Murph, including meals imported from connected apps.",
+        description: "Shares 7 days of meal protein totals, including imports, with Murph as the source.",
         label: "Daily protein",
         projectionKind: "protein-days.v0",
         projectionScope: PROTEIN_SCOPE,
         projectionScopeKey: "protein-days.v0",
       },
       {
-        description:
-          "Shares your last 7 days of daily calorie totals from meals in Murph, including meals imported from connected apps.",
+        description: "Shares 7 days of meal calorie totals, including imports, with Murph as the source.",
         label: "Daily calories",
         projectionKind: "calories-days.v0",
         projectionScope: { projectionKind: "calories-days.v0" },
         projectionScopeKey: "calories-days.v0",
       },
       {
-        description:
-          "Shares your last 7 days of daily carbohydrate totals from meals in Murph, including meals imported from connected apps.",
+        description: "Shares 7 days of meal carbohydrate totals, including imports, with Murph as the source.",
         label: "Daily carbs",
         projectionKind: "carbs-days.v0",
         projectionScope: { projectionKind: "carbs-days.v0" },
         projectionScopeKey: "carbs-days.v0",
       },
       {
-        description:
-          "Shares your last 7 days of daily fat totals from meals in Murph, including meals imported from connected apps.",
+        description: "Shares 7 days of meal fat totals, including imports, with Murph as the source.",
         label: "Daily fat",
         projectionKind: "fat-days.v0",
         projectionScope: { projectionKind: "fat-days.v0" },
         projectionScopeKey: "fat-days.v0",
       },
       {
-        description:
-          "Shares your last 7 days of daily fiber totals from meals in Murph, including meals imported from connected apps.",
+        description: "Shares 7 days of meal fiber totals, including imports, with Murph as the source.",
         label: "Daily fiber",
         projectionKind: "fiber-days.v0",
         projectionScope: { projectionKind: "fiber-days.v0" },
         projectionScopeKey: "fiber-days.v0",
       },
       {
-        description: "Shares your last 7 days of running minutes.",
+        description: "Shares 7 days of running minutes by source.",
         label: "Running minutes",
         projectionKind: "activity-minutes-days.v1",
         projectionScope: RUNNING_SCOPE,
         projectionScopeKey: buildHostedVaultShareProjectionScopeKey(RUNNING_SCOPE),
       },
       {
-        description: "Shares daily running distance and session count.",
+        description: "Shares 7 days of running distance and session counts by source.",
         label: "Recent running distance and session count",
         projectionKind: "activity-distance-days.v1",
         projectionScope: RUNNING_DISTANCE_SCOPE,
         projectionScopeKey: buildHostedVaultShareProjectionScopeKey(RUNNING_DISTANCE_SCOPE),
       },
       {
-        description: "Shares daily running session count.",
+        description: "Shares 7 days of running session counts by source.",
         label: "Recent running session count",
         projectionKind: "activity-session-count-days.v1",
         projectionScope: RUNNING_SESSION_COUNT_SCOPE,
@@ -3031,8 +3009,7 @@ describe("hosted group join policy", () => {
       { projectionKind: "device-sync-status.v0" },
     ])).toEqual([
       {
-        description:
-          "Shares which health sources are connected. No health values.",
+        description: "Shares which health sources are connected, not their health values.",
         label: "Health source connection status",
         projectionKind: "device-sync-status.v0",
         projectionScope: { projectionKind: "device-sync-status.v0" },
@@ -3073,8 +3050,6 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
       messageLookupKey: "hbidx:linq-message:v1:offer",
       projectionKinds: ["sleep-times.v0"],
     });
-    mocks.enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort
-      .mockResolvedValue(undefined);
     mocks.readActiveHostedGroupDisclosureGrantsForGroup.mockResolvedValue([]);
     mocks.lookupHostedMemberIdentityByPhoneNumber.mockReset();
     mocks.readHostedOwnerAddressBookAdvisoryNames.mockReset();
@@ -3629,7 +3604,7 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
         chatId: "chat_group_1",
         idempotencyKey: expect.stringMatching(/^group-join-offer:v3:[a-f0-9]{40}$/u),
         message:
-          "Sounds good. Like or heart this message to share your Murph profile name, email address, sleep duration, activity minutes, workout summaries, resting heart rate, and HRV with the group, or use https://www.withmurph.ai/groups/join/abc123 to customize what you share.",
+          "Sounds good. Like or heart this message to share your Murph profile name, email address, sleep duration, activity minutes, workout summaries, resting heart rate, and HRV (health values include their source names; sleep duration covers the last 7 days) with the group, or use https://www.withmurph.ai/groups/join/abc123 to customize what you share.",
       }),
     );
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
@@ -3650,12 +3625,6 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
       projectionScopes: NEWSLETTER_DEFAULT_SCOPES,
       tx: fakeTx,
     });
-    expect(mocks.enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort)
-      .toHaveBeenCalledWith({
-        groupId: GROUP_SUMMARY.id,
-        memberId: "member_owner",
-        prisma: expect.any(Object),
-      });
     expect(mocks.sendHostedLinqAttachmentMessage).not.toHaveBeenCalled();
   });
 
@@ -3786,16 +3755,18 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         message:
-          "Sounds good. Like or heart this message to share your Murph profile name and daily protein (nutrition totals come from your meals in Murph, including meals imported from connected apps) with the group, or use https://www.withmurph.ai/groups/join/abc123 to customize what you share.",
+          "Sounds good. Like or heart this message to share your Murph profile name and daily protein (health values include their source names; nutrition totals come from your meals in Murph, including meals imported from connected apps) with the group, or use https://www.withmurph.ai/groups/join/abc123 to customize what you share.",
       }),
     );
   });
 
   it.each([
     ["deep sleep", "deep-sleep-days.v0", "deep sleep"],
+    ["deep sleep sources", "deep-sleep-sources-days.v1", "deep sleep"],
     ["REM sleep", "rem-sleep-days.v0", "REM sleep"],
+    ["REM sleep sources", "rem-sleep-sources-days.v1", "REM sleep"],
   ] as const)(
-    "keeps an explicit aggregate %s request exact in the native offer",
+    "keeps an explicit %s request exact in the native offer",
     async (_label, requestedProjectionKind, displayLabel) => {
       await expect(handleHostedRuntimeGroupTool({
         memberId: "member_container",
@@ -3814,7 +3785,7 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
       expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
         expect.objectContaining({
           message:
-            `Sounds good. Like or heart this message to share your Murph profile name and ${displayLabel} with the group, or use https://www.withmurph.ai/groups/join/abc123 to customize what you share.`,
+            `Sounds good. Like or heart this message to share your Murph profile name and ${displayLabel} (health values include source names, and sleep stages include each source's recorded time) with the group, or use https://www.withmurph.ai/groups/join/abc123 to customize what you share.`,
         }),
       );
       const offeredScopes = [{ projectionKind: requestedProjectionKind }];
@@ -4258,7 +4229,7 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         message:
-          "Sounds good. Like or heart this message to share your Murph profile name, steps, and health source connection status with the group, or use https://www.withmurph.ai/groups/join/abc123 to customize what you share.",
+          "Sounds good. Like or heart this message to share your Murph profile name, steps, and health source connection status (health values include their source names) with the group, or use https://www.withmurph.ai/groups/join/abc123 to customize what you share.",
       }),
     );
     expect(mocks.recordHostedGroupJoinOfferTx).toHaveBeenCalledWith({
@@ -4296,7 +4267,7 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         message:
-          "Sounds good. Like or heart this message to share your Murph profile name, running minutes, and health source connection status with the group, or use https://www.withmurph.ai/groups/join/abc123 to customize what you share.",
+          "Sounds good. Like or heart this message to share your Murph profile name, running minutes, and health source connection status (health values include their source names) with the group, or use https://www.withmurph.ai/groups/join/abc123 to customize what you share.",
       }),
     );
     expect(mocks.recordHostedGroupJoinOfferTx).toHaveBeenCalledWith({
@@ -4369,6 +4340,7 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
           messageTemplate: "Scope: {{share_scope}}. Customize: {{join_url}}.",
           projectionKinds: [
             "sleep-times.v0",
+            "sleep-duration-days.v0",
             "activity-days.v0",
             "workout-days.v0",
             "resting-heart-rate-days.v0",
@@ -4385,7 +4357,7 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         message:
-          "Sounds good. Like or heart this message to share your Murph profile name, sleep timing, activity minutes, workout summaries, resting heart rate, and HRV with the group, or use https://www.withmurph.ai/groups/join/abc123 to customize what you share.",
+          "Sounds good. Like or heart this message to share your Murph profile name, sleep timing, sleep duration, activity minutes, workout summaries, resting heart rate, and HRV (health values include their source names; sleep timing and sleep duration cover the last 7 days) with the group, or use https://www.withmurph.ai/groups/join/abc123 to customize what you share.",
       }),
     );
   });
@@ -4417,7 +4389,7 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         message:
-          "Sounds good. Like or heart this message to share your Murph profile name, email address, sleep timing, activity minutes, workout summaries, resting heart rate, and HRV with the group, or use https://www.withmurph.ai/groups/join/abc123 to customize what you share.",
+          "Sounds good. Like or heart this message to share your Murph profile name, email address, sleep timing, activity minutes, workout summaries, resting heart rate, and HRV (health values include their source names; sleep timing covers the last 7 days) with the group, or use https://www.withmurph.ai/groups/join/abc123 to customize what you share.",
       }),
     );
   });
@@ -4453,7 +4425,32 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         message:
-          "Sounds good. Like or heart this message to share your Murph profile name and recent running distance and session count with the group, or use https://www.withmurph.ai/groups/join/abc123 to customize what you share.",
+          "Sounds good. Like or heart this message to share your Murph profile name and recent running distance and session count (health values include their source names; running distance and session count covers the last 7 days) with the group, or use https://www.withmurph.ai/groups/join/abc123 to customize what you share.",
+      }),
+    );
+  });
+
+  it("discloses the seven-day window in session-count join offer copy", async () => {
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_container",
+      request: {
+        action: "post_join_offer",
+        joinOffer: {
+          messageTemplate:
+            "Like this to join. It shares {{share_scope}} with the group. Join page: {{join_url}}.",
+          projectionScopes: [RUNNING_SESSION_COUNT_SCOPE],
+        },
+        linqThread: LINQ_THREAD,
+      },
+    })).resolves.toMatchObject({
+      action: "post_join_offer",
+      result: { status: "sent" },
+    });
+
+    expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message:
+          "Sounds good. Like or heart this message to share your Murph profile name and recent running session count (health values include their source names; running session count covers the last 7 days) with the group, or use https://www.withmurph.ai/groups/join/abc123 to customize what you share.",
       }),
     );
   });
@@ -5166,8 +5163,14 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
       `https://murph-hosted.cobuildwithus.workers.dev/private-media/v1/v1.${"a".repeat(16)}.${"b".repeat(32)}/group-avatar.jpg?exp=2000000000`;
     mocks.hostedThreadContainerFindUnique.mockResolvedValue(null);
     mocks.assertHostedLinqRecentInboundEngagementForRuntime.mockResolvedValue({
-      targetOverride: null,
-      threadIsDirect: true,
+      resolvedRoute: {
+        conversationThreadId: "conversation-direct",
+        directRecipientPhoneNumber: "+15550001",
+        fromPhoneNumber: "+15550002",
+        target: "chat_direct_1",
+        targetKind: "thread",
+        threadIsDirect: true,
+      },
     });
 
     await expect(handleHostedRuntimeGroupTool({
@@ -5217,7 +5220,16 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
       label: "the resolved route is not direct",
       setup: () => {
         mocks.assertHostedLinqRecentInboundEngagementForRuntime
-          .mockResolvedValue({ targetOverride: null, threadIsDirect: false });
+          .mockResolvedValue({
+            resolvedRoute: {
+              conversationThreadId: null,
+              directRecipientPhoneNumber: null,
+              fromPhoneNumber: "+15550002",
+              target: "chat_group_1",
+              targetKind: "thread",
+              threadIsDirect: false,
+            },
+          });
       },
     },
   ])("refuses a generated contact card when $label", async ({ setup }) => {
@@ -5273,8 +5285,14 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
 
   it("rejects an untrusted generated contact-card image URL before fetching it", async () => {
     mocks.assertHostedLinqRecentInboundEngagementForRuntime.mockResolvedValue({
-      targetOverride: null,
-      threadIsDirect: true,
+      resolvedRoute: {
+        conversationThreadId: "conversation-direct",
+        directRecipientPhoneNumber: "+15550001",
+        fromPhoneNumber: "+15550002",
+        target: "chat_direct_1",
+        targetKind: "thread",
+        threadIsDirect: true,
+      },
     });
 
     await expect(handleHostedRuntimeGroupTool({
@@ -5340,7 +5358,16 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     mocks.assertHostedLinqRecentInboundEngagementForRuntime.mockImplementation(
       async () => {
         await new Promise((resolve) => setTimeout(resolve, 6_050));
-        return { targetOverride: null, threadIsDirect: true };
+        return {
+          resolvedRoute: {
+            conversationThreadId: "conversation-direct",
+            directRecipientPhoneNumber: "+15550001",
+            fromPhoneNumber: "+15550002",
+            target: "chat_direct_1",
+            targetKind: "thread",
+            threadIsDirect: true,
+          },
+        };
       },
     );
 
@@ -5370,8 +5397,14 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
       `https://murph-hosted.cobuildwithus.workers.dev/private-media/v1/v1.${"a".repeat(16)}.${"b".repeat(32)}/group-avatar.jpg?exp=2000000000`;
     mocks.hostedThreadContainerFindUnique.mockResolvedValue(null);
     mocks.assertHostedLinqRecentInboundEngagementForRuntime.mockResolvedValue({
-      targetOverride: null,
-      threadIsDirect: true,
+      resolvedRoute: {
+        conversationThreadId: "conversation-direct",
+        directRecipientPhoneNumber: "+15550001",
+        fromPhoneNumber: "+15550002",
+        target: "chat_direct_1",
+        targetKind: "thread",
+        threadIsDirect: true,
+      },
     });
     mocks.shareMurphHostedLinqContactCardVcfToChat.mockResolvedValue({
       status: "unconfirmed",
@@ -5496,8 +5529,14 @@ describe("hosted group tool route boundary", () => {
     mocks.requireHostedCloudflareCallbackJsonRequest.mockClear();
     mocks.hostedThreadContainerFindUnique.mockResolvedValue(null);
     mocks.assertHostedLinqRecentInboundEngagementForRuntime.mockResolvedValue({
-      targetOverride: null,
-      threadIsDirect: true,
+      resolvedRoute: {
+        conversationThreadId: "conversation-direct",
+        directRecipientPhoneNumber: "+15550001",
+        fromPhoneNumber: "+15550002",
+        target: "chat_direct_1",
+        targetKind: "thread",
+        threadIsDirect: true,
+      },
     });
     mocks.shareMurphHostedLinqContactCardVcfToChat.mockResolvedValue({ status: "sent" });
   });

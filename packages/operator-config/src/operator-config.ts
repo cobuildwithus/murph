@@ -1,7 +1,6 @@
 import path from 'node:path'
 import * as z from '@murphai/contracts/zod-runtime'
 import {
-  type AssistantChatProvider,
   type AssistantSelfDeliveryTarget,
 } from './assistant-cli-contracts.js'
 import {
@@ -14,7 +13,6 @@ import {
 } from './assistant-backend.js'
 import { readEnvValue } from './env-values.js'
 import {
-  type AssistantProviderConfig,
   type AssistantProviderDefaultsConfig,
   type AssistantProviderConfigInput,
   serializeAssistantProviderOperatorDefaults,
@@ -122,8 +120,6 @@ export interface OperatorConfig extends Omit<RawOperatorConfig, 'assistant' | 'h
 export type AssistantOperatorDefaults = z.infer<
   typeof assistantOperatorDefaultsSchema
 >
-export type AssistantProviderDefaultsEntry = AssistantProviderDefaultsConfig
-type AssistantChatProviderValue = AssistantChatProvider
 
 const assistantSelfDeliveryTargetDependencies = {
   normalizeString: normalizeOperatorConfigString,
@@ -405,10 +401,9 @@ export async function resolveHostedAssistantConfig(
 
 export function resolveAssistantProviderDefaults(
   defaults: AssistantOperatorDefaults | null | undefined,
-  provider: AssistantChatProviderValue,
-): AssistantProviderDefaultsEntry | null {
+): AssistantProviderDefaultsConfig | null {
   const backend = resolveAssistantBackendTarget(defaults)
-  if (!backend || backend.adapter !== provider) {
+  if (!backend) {
     return null
   }
 
@@ -425,16 +420,11 @@ export function resolveAssistantBackendTarget(
 
 export function buildAssistantProviderDefaultsPatch(input: {
   defaults: AssistantOperatorDefaults | null | undefined
-  provider: AssistantChatProviderValue
   providerConfig: AssistantProviderConfigInput
 }): Partial<AssistantOperatorDefaults> {
-  const savedProviderDefaults = resolveAssistantProviderDefaults(
-    input.defaults,
-    input.provider,
-  )
+  const savedProviderDefaults = resolveAssistantProviderDefaults(input.defaults)
   const nextBackend = normalizeAssistantBackendTargetForPersistence(
     createAssistantBackendTarget({
-      provider: input.provider,
       ...(savedProviderDefaults ? savedProviderDefaults : {}),
       ...input.providerConfig,
     }),

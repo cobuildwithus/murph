@@ -2,15 +2,23 @@ import "server-only";
 
 import {
   HOSTED_RUNTIME_PENDING_GROUP_SETUP_SCHEMA_VERSION,
+  hostedRuntimePendingGroupSetupInputSchema,
   parseHostedRuntimePendingGroupSetupInput,
   type HostedRuntimePendingGroupSetupInput,
 } from "@murphai/hosted-execution/pending-group-setup";
 import { Prisma, type PrismaClient } from "@prisma/client";
 
 import {
+  isHostedSecureBoxStringTestCodecConfiguredForTests,
   openHostedUserSecureBoxString,
+  openHostedUserSecureBoxStringFromPreparedRoot,
+  readHostedUserSecureBoxStringRootReference,
   sealHostedUserSecureBoxString,
 } from "../hosted-crypto/secure-box";
+import { getHostedDomainRootUnwrapCache } from "../hosted-crypto/domain-root-unwrap-cache";
+import {
+  unwrapHostedDomainRootsForWebByRootKeyIds,
+} from "../hosted-crypto/domain-root-store";
 import { isHostedMemberSuspended } from "../hosted-onboarding/entitlement";
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
 import { hasActiveHostedLinqManagedLine } from "../hosted-onboarding/linq-line-store";
@@ -58,6 +66,42 @@ export interface HostedPendingGroupSetupCandidateMetadata
   extends HostedPendingGroupSetupCandidate {
   armedAt: Date;
   recipientPhoneLookupKey: string;
+}
+
+export interface PreparedHostedPendingGroupSetupClaim {
+  id: string;
+  ownerMemberId: string;
+  payloadEncrypted: string;
+  payloadRootKeyId: string | null;
+  recipientPhoneLookupKey: string;
+}
+
+export interface HostedPendingGroupSetupPreparationFailure {
+  error: unknown;
+  preparedClaim: PreparedHostedPendingGroupSetupClaim;
+}
+
+const hostedPendingGroupSetupPreparationFailures = new WeakMap<
+  HostedPendingGroupSetupPreparationError,
+  HostedPendingGroupSetupPreparationFailure
+>();
+
+class HostedPendingGroupSetupPreparationError extends Error {
+  constructor(failure: HostedPendingGroupSetupPreparationFailure) {
+    super("Hosted pending group setup payload preparation failed.", {
+      cause: failure.error,
+    });
+    this.name = "HostedPendingGroupSetupPreparationError";
+    hostedPendingGroupSetupPreparationFailures.set(this, failure);
+  }
+}
+
+export function readHostedPendingGroupSetupPreparationFailure(
+  error: unknown,
+): HostedPendingGroupSetupPreparationFailure | null {
+  return error instanceof HostedPendingGroupSetupPreparationError
+    ? hostedPendingGroupSetupPreparationFailures.get(error) ?? null
+    : null;
 }
 
 export type HostedPendingGroupSetupCandidateSelection =
@@ -366,6 +410,127 @@ export function selectHostedPendingGroupSetupCandidate(input: {
 }
 
 /**
+ * Selects the exact pending setup that could win the next route transaction
+ * and prewarms only the root referenced by that row. This is a speculative
+ * read: the transaction repeats every authority and eligibility check before
+ * trusting the prepared identity.
+ */
+export async function prepareHostedPendingGroupSetupClaimForParticipants(input: {
+  now?: Date;
+  occurredAt: Date;
+  participantMemberIds: readonly string[];
+  prisma: PrismaClient;
+  recipientPhoneLookupKeys: readonly string[];
+  requiredCandidateId?: string | null;
+  senderMemberId?: string | null;
+}): Promise<PreparedHostedPendingGroupSetupClaim | null> {
+  const participantMemberIds = normalizeLookupKeys(input.participantMemberIds);
+  const recipientPhoneLookupKeys = normalizeLookupKeys(
+    input.recipientPhoneLookupKeys,
+  );
+  if (
+    participantMemberIds.length === 0
+    || participantMemberIds.length
+      > HOSTED_PENDING_GROUP_SETUP_MAX_PARTICIPANT_MEMBERS
+    || recipientPhoneLookupKeys.length === 0
+  ) {
+    return null;
+  }
+  const now = requireValidDate(
+    input.now ?? new Date(),
+    "pending group setup preparation time",
+  );
+  const occurredAt = requireValidDate(
+    input.occurredAt,
+    "pending group setup event time",
+  );
+  const requiredCandidateId = normalizeNullableString(input.requiredCandidateId);
+  if (!(await hasActiveHostedLinqManagedLine({
+    phoneNumberLookupKeys: recipientPhoneLookupKeys,
+    prisma: input.prisma,
+  }))) {
+    return null;
+  }
+
+  const candidateRows = await readCandidateRows({
+    now,
+    occurredAt,
+    ownerMemberIds: participantMemberIds,
+    prisma: input.prisma,
+    recipientPhoneLookupKeys,
+    requiredCandidateId,
+  });
+  const candidates = await filterCurrentlyEligibleCandidateRows({
+    candidates: candidateRows,
+    now,
+    prisma: input.prisma,
+  });
+  const selection = selectHostedPendingGroupSetupCandidate({
+    candidates,
+    senderMemberId: input.senderMemberId,
+  });
+  if (selection.kind === "none") {
+    return null;
+  }
+  const selected = candidateRows.find(
+    (row) =>
+      row.id === selection.candidate.id
+      && row.ownerMemberId === selection.candidate.ownerMemberId,
+  );
+  if (!selected) {
+    return null;
+  }
+
+  let payloadRootKeyId: string | null = null;
+  try {
+    const rootReference = readHostedUserSecureBoxStringRootReference({
+      lane: "hosted-member-private-field",
+      value: selected.payloadEncrypted,
+    });
+    payloadRootKeyId = rootReference?.rootKeyId ?? null;
+    if (rootReference) {
+      const roots = await unwrapHostedDomainRootsForWebByRootKeyIds({
+        prisma: input.prisma,
+        references: [{
+          domain: rootReference.domain,
+          rootKeyId: rootReference.rootKeyId,
+          userId: selected.ownerMemberId,
+        }],
+        retainFailureInScopedCache: true,
+      });
+      try {
+        const root = roots[0];
+        if (
+          !root
+          || root.domain !== rootReference.domain
+          || root.rootKeyId !== rootReference.rootKeyId
+          || root.userId !== selected.ownerMemberId
+        ) {
+          throw new Error("Pending group setup root prewarm returned the wrong root.");
+        }
+      } finally {
+        for (const root of roots) {
+          root.rootKey.fill(0);
+        }
+      }
+    }
+  } catch (error) {
+    throw new HostedPendingGroupSetupPreparationError({
+      error,
+      preparedClaim: buildPreparedHostedPendingGroupSetupClaim({
+        payloadRootKeyId,
+        row: selected,
+      }),
+    });
+  }
+
+  return buildPreparedHostedPendingGroupSetupClaim({
+    payloadRootKeyId,
+    row: selected,
+  });
+}
+
+/**
  * The selected setup row stays locked for the surrounding route transaction.
  * Its caller consumes it only after that transaction creates the intended
  * route; rollback and route convergence therefore need no compensation path.
@@ -373,7 +538,9 @@ export function selectHostedPendingGroupSetupCandidate(input: {
 export async function claimHostedPendingGroupSetupForParticipantsTx(input: {
   now?: Date;
   occurredAt: Date;
+  failedPreparedClaim?: PreparedHostedPendingGroupSetupClaim;
   participantMemberIds: readonly string[];
+  preparedClaim?: PreparedHostedPendingGroupSetupClaim;
   recipientPhoneLookupKeys: readonly string[];
   requiredCandidateId?: string | null;
   senderMemberId?: string | null;
@@ -405,18 +572,18 @@ export async function claimHostedPendingGroupSetupForParticipantsTx(input: {
   }
 
   for (let attempt = 0; attempt < 2; attempt += 1) {
-    const candidateRows = await readCandidateRowsTx({
+    const candidateRows = await readCandidateRows({
       now,
       occurredAt,
       ownerMemberIds: participantMemberIds,
+      prisma: input.tx,
       recipientPhoneLookupKeys,
       requiredCandidateId,
-      tx: input.tx,
     });
     const candidates = await filterCurrentlyEligibleCandidateRows({
       candidates: candidateRows,
       now,
-      tx: input.tx,
+      prisma: input.tx,
     });
     const selection = selectHostedPendingGroupSetupCandidate({
       candidates,
@@ -461,20 +628,71 @@ export async function claimHostedPendingGroupSetupForParticipantsTx(input: {
     `);
     const claimed = claimedRows[0];
     if (claimed) {
-      let setup: HostedRuntimePendingGroupSetupInput;
-      try {
-        setup = await openHostedPendingGroupSetupPayload({
-          prisma: input.tx,
+      const preparedClaim = input.preparedClaim;
+      if (
+        !preparedClaim
+        && !isHostedSecureBoxStringTestCodecConfiguredForTests()
+      ) {
+        throw hostedPendingGroupSetupPreparationRequired({
+          preparationFailureMatched:
+            input.failedPreparedClaim !== undefined
+            && doesPreparedHostedPendingGroupSetupClaimMatchRow({
+              preparedClaim: input.failedPreparedClaim,
+              row: claimed,
+            }),
+        });
+      }
+      if (
+        preparedClaim
+        && !doesPreparedHostedPendingGroupSetupClaimMatchRow({
+          preparedClaim,
+          row: claimed,
+        })
+      ) {
+        throw hostedPendingGroupSetupPreparationRequired();
+      }
+      const rootReference = readHostedUserSecureBoxStringRootReference({
+        lane: "hosted-member-private-field",
+        value: claimed.payloadEncrypted,
+      });
+      if (
+        rootReference
+        && (
+          !preparedClaim
+          || preparedClaim.payloadRootKeyId !== rootReference.rootKeyId
+          || !getHostedDomainRootUnwrapCache()?.has(
+            `${claimed.ownerMemberId}|${rootReference.domain}|${rootReference.rootKeyId}`,
+          )
+        )
+      ) {
+        throw hostedPendingGroupSetupPreparationRequired();
+      }
+      if (
+        !rootReference
+        && preparedClaim
+        && preparedClaim.payloadRootKeyId !== null
+      ) {
+        throw hostedPendingGroupSetupPreparationRequired();
+      }
+      const serialized =
+        await openHostedPendingGroupSetupPayloadAuthenticatedFromPreparedRoot({
+          preparedRootKeyId:
+            rootReference?.rootKeyId
+            ?? preparedClaim?.payloadRootKeyId
+            ?? null,
           row: claimed,
         });
-      } catch {
-        // Arm validates payloads. Corrupt or future bytes are consumed rather
-        // than repeatedly blocking unrelated new-group admission.
-        await deleteHostedPendingGroupSetupTx({
-          id: claimed.id,
-          ownerMemberId: claimed.ownerMemberId,
+      const setup = tryParseHostedPendingGroupSetupPayload(serialized);
+      if (!setup) {
+        // Authentication already succeeded. Only malformed plaintext or an
+        // unsupported payload schema is consumed so it cannot repeatedly block
+        // unrelated new-group admission.
+        if (!(await deleteInvalidHostedPendingGroupSetupClaimTx({
+          row: claimed,
           tx: input.tx,
-        });
+        }))) {
+          throw new Error("Locked invalid pending group setup could not be deleted.");
+        }
         return { kind: "none", reason: "invalid_payload" };
       }
       return {
@@ -496,18 +714,18 @@ export async function consumeHostedPendingGroupSetupClaimTx(input: {
   return await deleteHostedPendingGroupSetupTx(input);
 }
 
-async function readCandidateRowsTx(input: {
+async function readCandidateRows(input: {
   now: Date;
   occurredAt: Date;
   ownerMemberIds: readonly string[];
+  prisma: PrismaClient | Prisma.TransactionClient;
   recipientPhoneLookupKeys: readonly string[];
   requiredCandidateId: string | null;
-  tx: Prisma.TransactionClient;
 }): Promise<HostedPendingGroupSetupRow[]> {
   const requiredCandidateSql = input.requiredCandidateId
     ? Prisma.sql`AND setup."id" = ${input.requiredCandidateId}`
     : Prisma.sql``;
-  return await input.tx.$queryRaw<HostedPendingGroupSetupRow[]>(Prisma.sql`
+  return await input.prisma.$queryRaw<HostedPendingGroupSetupRow[]>(Prisma.sql`
     SELECT
       setup."id",
       setup."owner_member_id" AS "ownerMemberId",
@@ -548,17 +766,31 @@ async function deleteHostedPendingGroupSetupTx(input: {
   `)) > 0;
 }
 
+async function deleteInvalidHostedPendingGroupSetupClaimTx(input: {
+  row: HostedPendingGroupSetupRow;
+  tx: Prisma.TransactionClient;
+}): Promise<boolean> {
+  return (await input.tx.$executeRaw(Prisma.sql`
+    DELETE FROM "hosted_pending_group_setup"
+    WHERE "id" = ${input.row.id}
+      AND "owner_member_id" = ${input.row.ownerMemberId}
+      AND "channel" = ${HOSTED_PENDING_GROUP_SETUP_CHANNEL}
+      AND "recipient_phone_lookup_key" = ${input.row.recipientPhoneLookupKey}
+      AND "payload_encrypted" = ${input.row.payloadEncrypted}
+  `)) > 0;
+}
+
 async function filterCurrentlyEligibleCandidateRows(input: {
   candidates: readonly HostedPendingGroupSetupRow[];
   now: Date;
-  tx: Prisma.TransactionClient;
+  prisma: PrismaClient | Prisma.TransactionClient;
 }): Promise<HostedPendingGroupSetupRow[]> {
   const eligible: HostedPendingGroupSetupRow[] = [];
   for (const candidate of input.candidates) {
     const decision = await readHostedRuntimeAiAccessDecision({
       memberId: candidate.ownerMemberId,
       now: input.now,
-      prisma: input.tx,
+      prisma: input.prisma,
     });
     if (decision.allowed) {
       eligible.push(candidate);
@@ -586,25 +818,81 @@ async function openHostedPendingGroupSetupPayload(input: {
   prisma: PrismaClient | Prisma.TransactionClient;
   row: HostedPendingGroupSetupRow;
 }): Promise<HostedRuntimePendingGroupSetupInput> {
-  const serialized = await openHostedUserSecureBoxString({
-    aad: buildHostedPendingGroupSetupPayloadAad(input.row.id),
-    lane: "hosted-member-private-field",
-    prisma: input.prisma,
+  const serialized = await openHostedPendingGroupSetupPayloadAuthenticated(input);
+  return parseHostedPendingGroupSetupPayload(serialized);
+}
+
+async function openHostedPendingGroupSetupPayloadAuthenticated(input: {
+  prisma: PrismaClient | Prisma.TransactionClient;
+  row: HostedPendingGroupSetupRow;
+}): Promise<string> {
+  return requireHostedPendingGroupSetupPayloadPlaintext(
+    await openHostedUserSecureBoxString({
+      ...buildHostedPendingGroupSetupPayloadOpenInput(input.row),
+      prisma: input.prisma,
+    }),
+  );
+}
+
+async function openHostedPendingGroupSetupPayloadAuthenticatedFromPreparedRoot(
+  input: {
+    preparedRootKeyId: string | null;
+    row: HostedPendingGroupSetupRow;
+  },
+): Promise<string> {
+  return requireHostedPendingGroupSetupPayloadPlaintext(
+    await openHostedUserSecureBoxStringFromPreparedRoot({
+      ...buildHostedPendingGroupSetupPayloadOpenInput(input.row),
+      preparedRootKeyId: input.preparedRootKeyId,
+    }),
+  );
+}
+
+function buildHostedPendingGroupSetupPayloadOpenInput(
+  row: HostedPendingGroupSetupRow,
+) {
+  return {
+    aad: buildHostedPendingGroupSetupPayloadAad(row.id),
+    lane: "hosted-member-private-field" as const,
     scope: HOSTED_PENDING_GROUP_SETUP_PAYLOAD_SCOPE,
-    userId: input.row.ownerMemberId,
-    value: input.row.payloadEncrypted,
-  });
+    userId: row.ownerMemberId,
+    value: row.payloadEncrypted,
+  };
+}
+
+function requireHostedPendingGroupSetupPayloadPlaintext(
+  serialized: string | null,
+): string {
   if (!serialized) {
     throw new TypeError("Pending group setup payload is missing.");
   }
-  return parseHostedPendingGroupSetupPayloadEnvelope(JSON.parse(serialized));
+  return serialized;
 }
 
-function parseHostedPendingGroupSetupPayloadEnvelope(
-  value: unknown,
+function parseHostedPendingGroupSetupPayload(
+  serialized: string,
 ): HostedRuntimePendingGroupSetupInput {
+  const setup = tryParseHostedPendingGroupSetupPayload(serialized);
+  if (!setup) {
+    throw new TypeError("Pending group setup payload is invalid or unsupported.");
+  }
+  return setup;
+}
+
+function tryParseHostedPendingGroupSetupPayload(
+  serialized: string,
+): HostedRuntimePendingGroupSetupInput | null {
+  let value: unknown;
+  try {
+    value = JSON.parse(serialized);
+  } catch (error) {
+    if (error instanceof SyntaxError) {
+      return null;
+    }
+    throw error;
+  }
   if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new TypeError("Pending group setup payload must be an object.");
+    return null;
   }
   const record = value as Record<string, unknown>;
   if (
@@ -614,9 +902,10 @@ function parseHostedPendingGroupSetupPayloadEnvelope(
     || record.schemaVersion
       !== HOSTED_RUNTIME_PENDING_GROUP_SETUP_SCHEMA_VERSION
   ) {
-    throw new TypeError("Pending group setup payload version is unsupported.");
+    return null;
   }
-  return parseHostedRuntimePendingGroupSetupInput(record.setup);
+  const parsed = hostedRuntimePendingGroupSetupInputSchema.safeParse(record.setup);
+  return parsed.success ? parsed.data : null;
 }
 
 function buildHostedPendingGroupSetupPayloadAad(id: string) {
@@ -626,6 +915,47 @@ function buildHostedPendingGroupSetupPayloadAad(id: string) {
     rowId: id,
     table: "hosted_pending_group_setup",
   } as const;
+}
+
+function buildPreparedHostedPendingGroupSetupClaim(input: {
+  payloadRootKeyId: string | null;
+  row: HostedPendingGroupSetupRow;
+}): PreparedHostedPendingGroupSetupClaim {
+  return {
+    id: input.row.id,
+    ownerMemberId: input.row.ownerMemberId,
+    payloadEncrypted: input.row.payloadEncrypted,
+    payloadRootKeyId: input.payloadRootKeyId,
+    recipientPhoneLookupKey: input.row.recipientPhoneLookupKey,
+  };
+}
+
+function doesPreparedHostedPendingGroupSetupClaimMatchRow(input: {
+  preparedClaim: PreparedHostedPendingGroupSetupClaim;
+  row: HostedPendingGroupSetupRow;
+}): boolean {
+  return input.preparedClaim.id === input.row.id
+    && input.preparedClaim.ownerMemberId === input.row.ownerMemberId
+    && input.preparedClaim.recipientPhoneLookupKey
+      === input.row.recipientPhoneLookupKey
+    && input.preparedClaim.payloadEncrypted === input.row.payloadEncrypted;
+}
+
+function hostedPendingGroupSetupPreparationRequired(input: {
+  preparationFailureMatched?: boolean;
+} = {}) {
+  return hostedOnboardingError({
+    code: "HOSTED_THREAD_CONTAINER_PREPARATION_REQUIRED",
+    httpStatus: 503,
+    details: {
+      preparationTarget: "pending_group_setup_payload",
+      ...(input.preparationFailureMatched
+        ? { preparationFailureMatched: true }
+        : {}),
+    },
+    message: "Hosted pending group setup payload preparation is required.",
+    retryable: true,
+  });
 }
 
 function normalizeLookupKeys(values: readonly string[]): string[] {

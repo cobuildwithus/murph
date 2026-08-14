@@ -9,6 +9,9 @@ import type { HostedMember, PrismaClient } from "@prisma/client";
 import { getPrisma } from "../prisma";
 import { sha256Hex } from "../primitives";
 import { isHostedOnboardingError } from "./errors";
+import {
+  buildHostedFamilyDraftCheckoutConflictReplyText,
+} from "./family-plan";
 import { lookupHostedMemberIdentityByPhoneNumber } from "./hosted-member-identity-store";
 import { readHostedMemberRoutingState } from "./hosted-member-routing-store";
 import { lookupHostedMemberByVerifiedEmailAddress } from "./hosted-member-store";
@@ -125,6 +128,7 @@ const HOSTED_LINQ_PRIVATE_GROUP_RECOVERY_REASONS = new Set([
 
 const HOSTED_TELEGRAM_VISIBLE_SECONDARY_REASONS = new Set([
   "ambiguous-telegram-binding",
+  "family-invite-draft-recovery-required",
   "family-invite-not-accepted",
   "group-chat-provision-unavailable",
   "telegram-binding-changed",
@@ -270,9 +274,10 @@ export function withHostedVisibleSecondaryTelegramOutcomes(
 ): HostedOnboardingTelegramWebhookHandler {
   return async (input) => {
     const response = await handler(input);
-    const reason = response.reason ?? "";
+    const { familyInviteCode, ...publicResponse } = response;
+    const reason = publicResponse.reason ?? "";
     if (!response.ignored || !HOSTED_TELEGRAM_VISIBLE_SECONDARY_REASONS.has(reason)) {
-      return response;
+      return publicResponse;
     }
 
     // The wrapped handler verified the secret before returning. This second
@@ -281,19 +286,20 @@ export function withHostedVisibleSecondaryTelegramOutcomes(
     const message = extractTelegramMessage(update);
     const summary = await dependencies.summarizeHostedTelegramWebhook(update);
     if (!message || !summary) {
-      return response;
+      return publicResponse;
     }
 
     const signupUrl = reason === "unlinked-telegram"
       ? buildHostedSignupUrl(dependencies.requireHostedOnboardingPublicBaseUrl())
       : null;
     const reply = resolveHostedTelegramVisibleSecondaryReply({
+      familyInviteCode,
       isDirect: summary.isDirect,
       reason,
       signupUrl,
     });
     if (!reply) {
-      return response;
+      return publicResponse;
     }
 
     await dependencies.sendHostedTelegramTextMessage({
@@ -303,7 +309,7 @@ export function withHostedVisibleSecondaryTelegramOutcomes(
       ...(input.signal ? { signal: input.signal } : {}),
     });
 
-    return buildVisibleSecondaryResponse(response, reason);
+    return buildVisibleSecondaryResponse(publicResponse, reason);
   };
 }
 
@@ -334,11 +340,18 @@ export function resolveHostedLinqVisibleSecondaryReply(input: {
 }
 
 export function resolveHostedTelegramVisibleSecondaryReply(input: {
+  familyInviteCode?: string | null;
   isDirect: boolean;
   reason: string;
   signupUrl: string | null;
 }): string | null {
   switch (input.reason) {
+    case "family-invite-draft-recovery-required":
+      return input.isDirect && input.familyInviteCode
+        ? buildHostedFamilyDraftCheckoutConflictReplyText({
+            inviteCode: input.familyInviteCode,
+          })
+        : null;
     case "family-invite-not-accepted":
       return input.isDirect ? HOSTED_FAMILY_INVITE_UNAVAILABLE_REPLY : null;
     case "unlinked-telegram":

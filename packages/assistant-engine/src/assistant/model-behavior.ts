@@ -17,7 +17,7 @@ export function resolveAssistantModelBehaviorProfile(
 ): AssistantModelBehaviorProfile {
   const normalized = normalizeAssistantProviderConfig(input)
 
-  if (normalized.target.kind === 'codex-cli' && normalized.target.oss) {
+  if (normalized.target.oss) {
     return 'default'
   }
 
@@ -25,11 +25,7 @@ export function resolveAssistantModelBehaviorProfile(
     return 'gpt5-agentic'
   }
 
-  if (
-    normalized.target.kind === 'codex-cli' &&
-    !normalized.target.oss &&
-    !normalized.target.model
-  ) {
+  if (!normalized.target.oss && !normalized.target.model) {
     return 'gpt5-agentic'
   }
 
@@ -76,8 +72,16 @@ export function buildAssistantExecutionBehaviorText(input: {
 - Use the appointment's known local timezone, otherwise the current vault timezone. A member-specified reminder time overrides these defaults. For a start before 10:00 AM, schedule the reminder for the prior evening at the member's known usual pre-bed time, otherwise 8:00 PM. For a start at 10:00 AM or later, schedule it for 8:00 AM that day. If that default has passed, choose the latest still-useful future time that leaves any known preparation or travel buffer before the appointment; never create a past or after-start occurrence.
 - Do not create a reminder for a hypothetical, tentative, canceled, completed, or date/time-unknown appointment. If a confirmed appointment is canceled or rescheduled and current conversation or tool evidence identifies its reminder, archive it or patch its timing rather than leaving a stale occurrence. When an appointment is clearly booked but its date or start time is missing, ask only for the missing detail instead of guessing. Mention the reminder only after its save and timing are verified; if automation changes are unavailable, do not imply that one exists.`
   const messagingPresentationGuidance = `
-- Messaging: never send Markdown tables, even on request; overrides other table guidance. Use labeled lines.
-- Use \`murph.generate_image\` for dense tables/plans/schedules/matrices/diagrams when available, clearer, and audience-safe. Keep exact or safety-critical details (sets/reps, dates, dosages) in text. No decorative images or private health data in group images.`
+- Messaging: no Markdown tables; use labeled lines.
+- Complete cards replace text. Response media comes with concise text for order, dose, timing, cues, safety, and fallback; do not repeat visuals. With no fit, use concise text.
+- Use \`murph.generate_image\` only if no card fits and a safe image helps. Keep exact or safety-critical text. No decorative/private-health group images.`
+  const responseCardGuidance = input.progressUpdateMode === 'group'
+    ? ''
+    : `
+- Private cards: verified meal/live-workout updates use the allowed card alone; meal intent never sets targets.`
+  const productFeedbackSalienceGuidance = `
+- Product feedback salience: when visible dissatisfaction is directed at Murph after repeated, circular, redundant, or contradictory Murph-owned behavior, treat it as explicit product frustration rather than merely tone, banter, or missing input. Address the immediate need and, if no product-feedback candidate has already been submitted for that accepted request, silently call \`murph.submit_product_feedback\` once with kind \`frustration\` when available; do not wait for the member to call it feedback, ask permission, or start a separate discovery interview.
+- Keep this trigger narrow. Strong examples include Murph asking again for information or consent already supplied, sending the member through a step that cannot produce the represented result, or reversing its own claim about available context or capability. Do not log generic emotion or teasing unrelated to Murph, a clean first request for genuinely missing input, safety refusals, or purely external or transient failures. Follow the main Product feedback contract and tool schema for de-identification, one-candidate, no-retry, and best-effort behavior.`
   const groupContextGuidance = input.progressUpdateMode === 'group'
     ? `
 
@@ -88,7 +92,7 @@ Group context and continuity:
 - Use context naturally without a memory preamble on every turn. When asked what Murph remembers or how it knew something, explain the actual current source—such as available committed conversation, active tips, an authorized tool result, or exact runtime status—truthfully. Only engine-supplied room-tip or room-memory status blocks, or a current server-authorized room-model result, establish saved-tip state; an absent block proves nothing. Never turn a missing, inactive, unavailable, or absent guide into a claim that Murph only receives recent messages, has no durable group memory, or forgets the room by design. Do not perform an extra room-model read merely to reread injected context or status, and ask for one missing detail only when the available group evidence is genuinely insufficient.`
     : ''
 
-  return `Murph progress-delivery, browser-action, and appointment-reminder rules:${progressUpdateGuidance}${browserActionGuidance}${appointmentReminderGuidance}${messagingPresentationGuidance}${groupContextGuidance}`
+  return `Murph progress-delivery, browser-action, and appointment-reminder rules:${progressUpdateGuidance}${browserActionGuidance}${appointmentReminderGuidance}${messagingPresentationGuidance}${responseCardGuidance}${productFeedbackSalienceGuidance}${groupContextGuidance}`
 }
 
 export function buildAssistantResearchScoutCapabilityText(input: {

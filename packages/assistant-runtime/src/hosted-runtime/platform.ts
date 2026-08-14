@@ -37,8 +37,6 @@ import type {
   HostedRuntimeAssistantAskControlResponse,
   HostedRuntimeGroupToolRequest,
   HostedRuntimeGroupToolResponse,
-  HostedRuntimeNewsletterToolRequest,
-  HostedRuntimeNewsletterToolResponse,
   HostedRuntimeProductFeedbackRecord,
   HostedRuntimeProductFeedbackRecordResponse,
   HostedCodexAuthUpdate,
@@ -68,6 +66,7 @@ import type {
 import type {
   HostedBrowserVaultReplicaRef,
   HostedExecutionExternalThreadRouteAuthority,
+  HostedExecutionResolvedLinqDeliveryRoute,
 } from "@murphai/hosted-execution/contracts";
 import type {
   HostedExecutionPrivateAssistantAskCompletionDeliveryAuthority,
@@ -75,7 +74,8 @@ import type {
 import type {
   HostedVaultShareDeliverRequest,
   HostedVaultShareDeliverResponse,
-  HostedVaultShareProjectionScope,
+  HostedVaultShareActiveProjectionKindsResponse,
+  HostedVaultShareProjectionMode,
 } from "@murphai/hosted-execution/vault-share";
 import type {
   HostedWorkspaceSnapshotV2Aad,
@@ -114,6 +114,7 @@ import type {
   HostedExecutionDeviceSyncRuntimeApplyRequest,
   HostedExecutionDeviceSyncRuntimeApplyResponse,
   HostedExecutionDeviceSyncReconcileResponse,
+  HostedExecutionDeviceSyncRuntimeSnapshotCursor,
   HostedExecutionDeviceSyncRuntimeSnapshotResponse,
 } from "@murphai/device-syncd/hosted-runtime";
 import type {
@@ -312,15 +313,10 @@ export interface HostedRuntimeLinqRecentInboundEngagementRequest {
   homeRouteFallbackAllowed?: boolean | null;
   idempotencyKey?: string | null;
   intentId?: string | null;
+  expectedResolvedRoute?: HostedExecutionResolvedLinqDeliveryRoute | null;
   replyToMessageId?: string | null;
   target: string | null;
   targetKind?: HostedRuntimeProviderTargetKind | null;
-}
-
-export interface HostedRuntimeLinqTargetOverride {
-  conversationThreadId?: string | null;
-  target: string;
-  targetKind: "thread";
 }
 
 export interface HostedRuntimeLinqRecentInboundEngagementResult {
@@ -328,8 +324,7 @@ export interface HostedRuntimeLinqRecentInboundEngagementResult {
   deliveryBlockCode?: HostedRuntimeLinqDeliveryBlockCode | null;
   deliveryPosture?: HostedRuntimeLinqDeliveryPosture | null;
   providerDispatchClaimed?: boolean | null;
-  targetOverride?: HostedRuntimeLinqTargetOverride | null;
-  threadIsDirect?: boolean | null;
+  resolvedRoute?: HostedExecutionResolvedLinqDeliveryRoute | null;
 }
 
 export interface HostedRuntimeAssistantAskCompletionAuthority {
@@ -448,6 +443,7 @@ export interface HostedRuntimeDeviceSyncPort {
   }): Promise<HostedExecutionDeviceSyncReconcileResponse>;
   fetchSnapshot(input?: {
     connectionId?: string | null;
+    cursor?: HostedExecutionDeviceSyncRuntimeSnapshotCursor | null;
     includeCredentialMaterial?: boolean | null;
     limit?: number | null;
     provider?: string | null;
@@ -457,9 +453,11 @@ export interface HostedRuntimeDeviceSyncPort {
   fetchDirtyStates(input?: Omit<HostedExecutionDeviceSyncDirtyPendingRequest, "userId"> & {
     signal?: AbortSignal | null;
   }): Promise<HostedExecutionDeviceSyncDirtyPendingResponse>;
-  ackDirtyStateProcessed(input: Omit<HostedExecutionDeviceSyncDirtyAckRequest, "userId">): Promise<
-    HostedExecutionDeviceSyncDirtyAckResponse
-  >;
+  ackDirtyStateProcessed(
+    input: Omit<HostedExecutionDeviceSyncDirtyAckRequest, "userId"> & {
+      signal?: AbortSignal | null;
+    },
+  ): Promise<HostedExecutionDeviceSyncDirtyAckResponse>;
 }
 
 export interface HostedRuntimeClinicalRecordsPort {
@@ -550,12 +548,6 @@ export interface HostedRuntimeGroupToolPort {
     | { status: "unavailable"; unavailableReason: string };
 }
 
-export interface HostedRuntimeNewsletterToolPort {
-  request(
-    request: HostedRuntimeNewsletterToolRequest,
-  ): Promise<HostedRuntimeNewsletterToolResponse>;
-}
-
 export interface HostedRuntimeCodexAuthPort {
   update(update: HostedCodexAuthUpdate): Promise<HostedCodexAuthUpdateResponse>;
 }
@@ -579,7 +571,10 @@ export interface HostedRuntimePhysicalNotePort {
 }
 
 export interface HostedRuntimeMailboxPort {
-  fetch(request: HostedMailboxFetchRequest): Promise<HostedMailboxFetchResponse>;
+  fetch(
+    request: HostedMailboxFetchRequest,
+    context?: { signal?: AbortSignal | null },
+  ): Promise<HostedMailboxFetchResponse>;
   fetchPayload(
     request: HostedMailboxPayloadFetchRequest,
   ): Promise<HostedMailboxPayloadFetchResponse>;
@@ -694,11 +689,21 @@ export interface HostedRuntimeActionApprovalPort {
 }
 
 export interface HostedRuntimeVaultSharePort {
-  listActiveProjectionScopes(): Promise<HostedVaultShareProjectionScope[]>;
+  listActiveProjectionScopes(input?: {
+    projectionMode?: HostedVaultShareProjectionMode;
+    signal?: AbortSignal | null;
+  }): Promise<HostedVaultShareActiveProjectionKindsResponse>;
   deliver(
     request: HostedVaultShareDeliverRequest,
-  ): Promise<HostedVaultShareDeliverResponse>;
+  ): Promise<HostedRuntimeVaultShareDeliverResult>;
 }
+
+export type HostedRuntimeVaultShareDeliverResult =
+  | HostedVaultShareDeliverResponse
+  | {
+    /** Web reached a terminal response, but this scope still needs retry. */
+    status: "scope-failed";
+  };
 
 export interface HostedRuntimePlatform {
   actionApprovalPort?: HostedRuntimeActionApprovalPort | null;
@@ -722,7 +727,6 @@ export interface HostedRuntimePlatform {
   labsToolPort?: HostedRuntimeLabsToolPort | null;
   logPort?: HostedRuntimeLogPort | null;
   mailboxPort?: HostedRuntimeMailboxPort | null;
-  newsletterToolPort?: HostedRuntimeNewsletterToolPort | null;
   planUsageToolPort?: HostedRuntimePlanUsageToolPort | null;
   physicalNotes?: HostedRuntimePhysicalNotePort | null;
   privateImageUrlPublisher?: AssistantHostedPrivateImageUrlPublisher | null;

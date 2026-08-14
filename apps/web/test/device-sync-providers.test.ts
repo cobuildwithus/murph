@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import { createConfiguredDeviceSyncRegistry } from "@murphai/device-syncd/config";
+import {
+  createConfiguredDeviceSyncRegistry,
+  JUNCTION_PRODUCTION_TIMESERIES_RESOURCES,
+} from "@murphai/device-syncd/config";
 
 import {
   createHostedDeviceSyncRegistry,
@@ -80,5 +83,23 @@ describe("mergeHostedDeviceSyncProviderConfigs", () => {
     });
 
     expect(merged.whoop).toBe(whoop);
+  });
+
+  it("preserves Junction's code-owned production resources through member overlays", () => {
+    const merged = mergeHostedDeviceSyncProviderConfigs({
+      base: {
+        junction: {
+          apiKey: "platform-key",
+          clientUserIdSecret: "platform-client-user-secret",
+          environment: "sandbox",
+          region: "us",
+          timeseriesResources: [...JUNCTION_PRODUCTION_TIMESERIES_RESOURCES],
+        },
+      },
+      overlay: { junction: { environment: "sandbox", region: "us" } },
+    });
+
+    expect(merged.junction?.timeseriesResources)
+      .toEqual([...JUNCTION_PRODUCTION_TIMESERIES_RESOURCES]);
   });
 });

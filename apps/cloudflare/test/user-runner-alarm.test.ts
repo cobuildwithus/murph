@@ -2601,20 +2601,24 @@ describe("HostedUserRunner execution coordination", () => {
     });
   });
 
-  it("preempts a denied normalized invocation when foreground usage resumes", async () => {
+  it("wakes a denied normalized invocation when foreground usage resumes", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
     const firstInvocationResult = createDeferred<HostedWorkspaceInvocationResult>();
     const abortWorkspaceInvocation = vi.fn<
       NonNullable<HostedExecutionContainerStubLike["abortWorkspaceInvocation"]>
     >(async () => "accepted");
+    const ensureProcessing = vi.fn<
+      NonNullable<HostedExecutionContainerStubLike["ensureProcessing"]>
+    >(async () => ({
+      action: "woken" as const,
+      kind: "accepted" as const,
+    }));
     let platformAiUsageAllowed = false;
     const { flushWaitUntil, invoke, runner, sql } = createRunnerHarness({
       abortWorkspaceInvocation,
-      invocationResults: [
-        firstInvocationResult.promise,
-        { nextWakeAt: null, status: "idle" },
-      ],
+      ensureProcessing,
+      invocationResults: [firstInvocationResult.promise],
       platformAiUsageAllowed: () => platformAiUsageAllowed,
       workspace: createWorkspaceState({ version: "5" }),
     });
@@ -2642,7 +2646,7 @@ describe("HostedUserRunner execution coordination", () => {
       orchestrationAttemptId: "test-restored-foreground-attempt",
       userId: TEST_USER_ID,
     })).resolves.toMatchObject({
-      action: "replaced",
+      action: "woken",
       kind: "runtime_processing_accepted",
     });
 
@@ -2650,15 +2654,17 @@ describe("HostedUserRunner execution coordination", () => {
     if (!firstRequest) {
       throw new Error("Expected the denied background invocation request.");
     }
-    expect(abortWorkspaceInvocation).toHaveBeenCalledWith({
-      attemptId: firstRequest.attemptId,
-      leaseGeneration: firstRequest.leaseGeneration,
+    expect(ensureProcessing).toHaveBeenCalledWith({
+      activeRuntime: expect.objectContaining({
+        attemptId: firstRequest.attemptId,
+        leaseGeneration: firstRequest.leaseGeneration,
+        processingMode: "system_mailbox",
+        userId: TEST_USER_ID,
+      }),
       userId: TEST_USER_ID,
     });
-    await vi.waitFor(() => {
-      expect(invoke).toHaveBeenCalledTimes(2);
-      expect(invoke.mock.calls[1]?.[0].job.request.processingMode).toBeUndefined();
-    });
+    expect(abortWorkspaceInvocation).not.toHaveBeenCalled();
+    expect(invoke).toHaveBeenCalledOnce();
 
     firstInvocationResult.resolve({ nextWakeAt: null, status: "idle" });
     await flushWaitUntil();
@@ -3085,6 +3091,57 @@ describe("HostedUserRunner execution coordination", () => {
     });
   });
 
+  it("accepts active system-mailbox rechecks without waking the running device pass", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const ensureProcessing = vi.fn<NonNullable<HostedExecutionContainerStubLike["ensureProcessing"]>>(
+      async () => ({
+        action: "woken" as const,
+        kind: "accepted" as const,
+      }),
+    );
+    const readActiveRuntimeUserFence = vi.fn<
+      NonNullable<HostedExecutionContainerStubLike["readActiveRuntimeUserFence"]>
+    >(async () => ({
+      active: true,
+      attemptId: "attempt_runtime_active",
+      leaseGeneration: "2",
+      userId: TEST_USER_ID,
+    }));
+    const { invoke, runner, sql } = createRunnerHarness({
+      ensureProcessing,
+      readActiveRuntimeUserFence,
+      workspace: createWorkspaceState({ version: "7" }),
+    });
+    await runner.bindUser(TEST_USER_ID);
+    const token = writeRuntimeFenceForTest(sql, {
+      processingMode: "system_mailbox",
+      runnerContainerName: null,
+      workspaceVersion: "7",
+    });
+
+    await expect(runner.ensureRuntimeProcessingForUser({
+      orchestrationAttemptId: "test-orchestration-attempt-system-mailbox-recheck",
+      processingMode: "system_mailbox",
+      userId: TEST_USER_ID,
+    })).resolves.toMatchObject({
+      action: "already_running",
+      kind: "runtime_processing_accepted",
+      recommendedRecheckAt: ACTIVE_RUNTIME_RECHECK_AT,
+      runtimeAttemptId: token.attemptId,
+    });
+
+    expect(readActiveRuntimeUserFence).toHaveBeenCalledOnce();
+    expect(ensureProcessing).not.toHaveBeenCalled();
+    expect(invoke).not.toHaveBeenCalled();
+    expect(readRunnerMeta(sql)).toMatchObject({
+      active_attempt_id: token.attemptId,
+      active_expires_at: null,
+      backoff_until: null,
+      wake_at: null,
+    });
+  });
+
   it("returns retry_later for retention rechecks when active child liveness is indeterminate", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
@@ -3133,7 +3190,6 @@ describe("HostedUserRunner execution coordination", () => {
   it.each([
     ["retention-only", "default", "inbox_media_retention", undefined],
     ["retention-only", "system-mailbox", "inbox_media_retention", "system_mailbox"],
-    ["system-mailbox", "foreground", "system_mailbox", undefined],
   ] as const)(
     "preempts active %s work before starting %s processing",
     async (_activeLabel, _requestedLabel, activeProcessingMode, processingMode) => {
@@ -3258,6 +3314,57 @@ describe("HostedUserRunner execution coordination", () => {
     );
     },
   );
+
+  it("wakes active system-mailbox work before retrying foreground processing", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const abortWorkspaceInvocation = vi.fn<
+      NonNullable<HostedExecutionContainerStubLike["abortWorkspaceInvocation"]>
+    >(async () => "accepted");
+    const ensureProcessing = vi.fn<
+      NonNullable<HostedExecutionContainerStubLike["ensureProcessing"]>
+    >(async () => ({
+      action: "woken" as const,
+      kind: "accepted" as const,
+    }));
+    const { invoke, runner, sql } = createRunnerHarness({
+      abortWorkspaceInvocation,
+      ensureProcessing,
+      workspace: createWorkspaceState({ version: "7" }),
+    });
+    await runner.bindUser(TEST_USER_ID);
+    const token = writeRuntimeFenceForTest(sql, {
+      processingMode: "system_mailbox",
+      runnerContainerName: TEST_USER_ID,
+      workspaceVersion: "7",
+    });
+
+    await expect(runner.ensureRuntimeProcessingForUser({
+      orchestrationAttemptId: "test-foreground-behind-system-mailbox",
+      userId: TEST_USER_ID,
+    })).resolves.toMatchObject({
+      action: "woken",
+      kind: "runtime_processing_accepted",
+      runtimeAttemptId: token.attemptId,
+    });
+
+    expect(ensureProcessing).toHaveBeenCalledWith({
+      activeRuntime: expect.objectContaining({
+        attemptId: token.attemptId,
+        leaseGeneration: String(token.generation),
+        processingMode: "system_mailbox",
+        userId: TEST_USER_ID,
+      }),
+      userId: TEST_USER_ID,
+    });
+    expect(abortWorkspaceInvocation).not.toHaveBeenCalled();
+    expect(invoke).not.toHaveBeenCalled();
+    expect(readRunnerMeta(sql)).toMatchObject({
+      active_attempt_id: token.attemptId,
+      active_expires_at: null,
+      wake_at: null,
+    });
+  });
 
   it.each([
     ["stale", "2026-04-27T00:00:05.000Z"],

@@ -28,6 +28,49 @@ Runner bundle assembly esbuild-bundles two boot-critical surfaces with byte budg
 The device-sync package boundary suite also walks the static source graph from the runner's runtime-config entrypoint and rejects provider runtime modules, importer modules, and the Junction SDK. This focused gate catches boot-closure ownership regressions before the packed-bundle guard validates the final esbuild metafile.
 Hosted assistant delivery recovery now relies on committed side-effect state inside the encrypted workspace and the web-owned hosted workspace checkpoint.
 
+## Vault-Share Delivery Contract Rollout
+
+Deploy the Cloudflare Worker and runner bundle first with
+`container_rollout=immediate`, and require managed-container smoke to report the
+exact new bundle fingerprint before deploying Web's required
+`sourceWorkspaceVersion` parser, absolute effect-deadline parser, and conditional
+replacement writer. The runner also marks only actual Web responses so a
+proxy-local response cannot release publication ownership early. Old Web
+ignores the additive runner request fields, so the first phase keeps projection
+working; the source-version fence and shared deadline become authoritative only
+after Web deploys. Do not deploy Web first: an older runner omits required
+delivery fields and its projection fails closed, retaining the existing
+device-sync continuation until a compatible runner handles it.
+
+After both deploys, checkpoint one device-sync update with an active share,
+confirm the replacement is readable through the ordinary group shared-data
+path, and confirm the managed runner fingerprint still matches the deployed
+bundle. Once Web requires the field, the compatible runner is the rollback
+floor. Roll back Web before the runner only if necessary; otherwise forward-fix
+the pair. Do not add a second retry owner or compatibility watermark.
+
+## Generic Group-Email Cutover
+
+The newsletter deletion is a hard public-runtime and private-skill cutover.
+Old runners interpret an untagged `group-health-newsletter` record as email, so
+they must never claim an automation created or edited by the new ordinary
+recipe skill.
+
+Suspend hosted automation wake dispatch before either producer changes and let
+in-flight newsletter turns finish. Keep dispatch suspended while deploying the
+matching Web receiver, then the Cloudflare Worker and runner with
+`container_rollout=immediate`. Prove the exact runner-bundle fingerprint and
+record that public artifact as the hard rollback floor before publishing the
+private skill bundle or resuming wakes. The private skill must not deploy
+earlier. After it is published, rollback below that public floor or to the old
+skill is unsupported; use a forward fix.
+
+New outbox and HTTP writes use only generic group-email keys and proof fields.
+The current runner retains bounded readers for old persisted parents and
+instructions, but no old runner, Worker, or Web parser is part of the supported
+window. Remove the readers after legacy recipes are rewritten, legacy parents
+and children drain, and the retired mailbox inventory is empty.
+
 ## Provider Media-Effect Rollout
 
 The first runner that writes the true-only physical media-owner fact inside a
@@ -238,6 +281,48 @@ The prior bundle remains a safe rollback only before the first card-bearing
 value exists. After that point, the new bundle is the hard rollback floor for
 workspaces, checkpoints, retained outbox intents, and side effects. Forward-fix
 on that bundle or newer rather than restoring an older reader.
+
+## Exercise Routine Response-Card Rollout
+
+The `exercise_routine` discriminator extends the strict assistant outbox card
+union. Deploy the Cloudflare Worker operation allowlist before the new runner can
+emit `sendRichMessage`, then use `container_rollout=immediate`. An older Worker
+returns a non-Telegram policy response. The new runner treats that result as
+terminal ambiguity and does not send text fallback. Before routine traffic,
+require managed-container smoke to report the exact new runner-bundle fingerprint.
+
+The prior runner remains safe only before the first routine-card outbox intent
+is written. After that write, the new runner bundle is a hard rollback floor for
+that workspace because an older strict reader can quarantine the retained
+intent. Forward-fix on this bundle or newer. Monitor Workers Observability for
+`outbox.intent.quarantined`, strict outbox parse failures, and stale runner
+fingerprints after rollout.
+
+Telegram daily-nutrition Rich Messages reuse the existing queryless response-
+card image route. Keep that Web route available while sent Telegram or Linq
+cards can still fetch their immutable image.
+
+## Private Completion Continuity Rollout
+
+Deploy Web first, then deploy the Cloudflare Worker and runner bundle together
+with `container_rollout=immediate`. Only authenticated private-completion
+intents write the new strict outbox continuity fields; generic notifications
+remain compatible. An old runner cannot parse a retained new-format private
+intent, so the first such write is the rollback floor for that workspace.
+Forward-fix on this bundle or newer after the floor is crossed.
+
+Recent production evidence showed six total Assistant Ask completion mailbox
+items—an upper bound on private completions—and no matching private-completion
+or outbox-quarantine runtime-log events over 14 days. Recent successful
+protected deploy workflows completed in 8–13 minutes;
+immediate rollout makes that one workflow the expected compatibility window.
+Require managed-container smoke to report the new runner fingerprint, monitor
+`outbox.intent.quarantined` and strict outbox parse failures, then verify one
+same-channel private completion is delivered exactly once, never to the group,
+and is visible before the next ordinary direct turn, whether that consumer is
+an attended member turn, an exact-session scheduled occurrence, or an
+exact-session Assistant Ask continuation, and before a direct exact notification
+can append newer ordinary-session history.
 
 ## Audience-Key Rollout
 
@@ -450,6 +535,29 @@ container owns model execution and provider delivery.
 New runners may send an optional `lineLookupKey` solely for post-send
 line-health attribution; old Web ignores it, and new Web retains its existing
 fallback when an older supported runner omits it.
+
+### Canonical Linq Send-Route Rollout
+
+Deploy Web first with the complete ephemeral `resolvedRoute` response while it
+continues returning the deprecated `threadIsDirect` and conditional
+`targetOverride` fields. The existing runtime ignores the additive route and
+continues using the legacy fields, so this short reader-first window preserves
+ordinary delivery. Then deploy Cloudflare and the runner bundle immediately
+with `container_rollout=immediate`; the new runtime requires `resolvedRoute`,
+uses it as the sole provider target/recipient/sender/directness source, and
+reasserts the exact value before capability lookup and provider dispatch.
+
+Do not deploy the new runtime before Web. It intentionally fails closed when
+the canonical route is absent. If rollback is required during the compatibility
+window, roll Cloudflare back first and Web second. Keep the legacy Web fields
+until a later independently reviewed cleanup after the old runtime is outside
+the rollback window; no database migration or persisted runtime-state floor is
+introduced by this protocol.
+
+After rollout, prove one authorized private scheduled native card, one ordinary
+direct reply, one group reply, and one private Assistant Ask continuation.
+Confirm no canonical-route protocol-unavailable or route-mismatch error appears
+for those controlled sends.
 
 ## Group Usage Projection Privacy and Monthly Sponsorship Rollout
 
@@ -832,15 +940,6 @@ Core execution tuning:
 - `CF_COMPATIBILITY_DATE` defaults to `2026-03-27`
 - `CF_CONTAINER_INSTANCE_TYPE` defaults to `{"vcpu":2,"memory_mib":6144,"disk_mb":6000}`
 - `CF_CONTAINER_MAX_INSTANCES` defaults to `1000`
-- `CF_CONTAINER_SSH_PUBLIC_KEY` optionally adds one `ssh-ed25519` public key to
-  both runner Container `authorized_keys` entries for Wrangler SSH debugging.
-  The deploy renderer keeps only the key type and key body, so local key
-  comments are not copied into the generated Wrangler config. When this is set,
-  deploy automation also adds the `containers_pid_namespace` compatibility flag
-  so SSH debug sessions do not see unrelated VM processes.
-- `CF_CONTAINER_SSH_KEY_NAME` optionally sets the displayed key name for
-  `CF_CONTAINER_SSH_PUBLIC_KEY`; use a neutral lowercase slug. Defaults to
-  `local-debug`.
 - `CF_MAX_EVENT_ATTEMPTS` defaults to `3`
 - `CF_RETRY_DELAY_MS` defaults to `30000`
 - `CF_WEB_CONTROL_TIMEOUT_MS` defaults to `30000`
@@ -1256,6 +1355,13 @@ pnpm --dir apps/cloudflare deploy:preflight
 pnpm --dir apps/cloudflare deploy:artifacts
 ```
 
+To inspect the runner bundle and generated Wrangler config independently:
+
+```bash
+pnpm --dir apps/cloudflare runner:bundle
+pnpm --dir apps/cloudflare deploy:config:render
+```
+
 Local deploys and Docker smoke checks also prepare the stable native base image:
 
 ```bash
@@ -1363,6 +1469,20 @@ That command:
 The gradual container rollout keeps the production `RunnerContainer` `rollout_active_grace_period` at 300 seconds and rolls runner instances through `10`, `25`, `50`, then `100` percent. The isolated `DeploySmokeRunnerContainer` uses zero active grace and a single 100 percent step: it carries no user work, and smoke probes must not defer the image replacement they are trying to verify. The manual workflow exposes a `container_rollout` input; its production default is currently `immediate` because selector-scoped vault-share deliveries are unsafe under gradual runner rollout. Selecting `immediate` passes Wrangler's `--containers-rollout=immediate` flag and can interrupt active runner containers.
 Worker replacement is checkpoint-safe at the runtime fence rather than through rollout timing alone. The snapshot-session handshake has one six-second total deadline; the runtime starts its first exact durable upload-session heartbeat immediately after that response, then keeps serialized attempts on a two-second start-to-start cadence throughout publication. `UserRunner` retains the fence and retries after one second only for that exact attempt and lease generation while its heartbeat is less than 10 seconds old and completion is absent. Successful foreground preemption bypasses this preservation and stops heartbeat liveness before detached cleanup. After Web accepts the checkpoint, the runtime stops heartbeating and best-effort marks completion; marker failure falls back to stale-heartbeat expiry. Other starts remain immediate; live snapshots have no artificial publication deadline, while a dead runtime can defer replacement for the 10-second liveness window plus at most one additional retry interval (one second) after its final heartbeat.
 During gradual rollout, Worker code and runner container state may disagree for the rollout window. A newly deployed Worker version can handle provider egress or internal-host traffic from an already-running warm runner process whose bundle, process env, or provider-credential shape was created before the deploy. Treat this as expected rollout behavior, not proof that traffic is reaching an old Worker version. Any PR that changes a Worker/container contract, runner env shape, hosted provider credential, internal host route, parser/toolchain path, or bundle-owned runtime assumption must document the compatibility window in its PR description and final `DEPLOYMENT CONCERNS:` handoff: whether old containers can safely talk to new Worker code, whether new containers can safely talk to old web/control-plane code, whether `container_rollout=immediate` is required, and which deploy-smoke or Workers Observability checks prove the fleet has converged.
+
+The Junction scalar-timeseries continuation cutover is runner-only and requires
+`container_rollout=immediate`. The preceding production bundle could persist a
+canonical v1 `{v,a,i}` resource envelope in a hosted wake hint or local
+`device_job`; the compatible runner validates that exact envelope, projects
+only `a` into the existing scalar resource coordinate, and writes scalar
+successors. It does not restore phase or completed-resource state. Require
+managed-container smoke to report the compatible runner-bundle fingerprint
+before considering the fleet converged. Once any scalar successor has been
+written, that bundle is the rollback floor because the preceding runner cannot
+read the scalar shape. Keep the narrow v1 reader until separate aggregate proof
+shows no retained hosted wake hint or local device job can contain the envelope;
+without that proof, retain the reader rather than adding a migration or another
+state owner. Vercel/Web has no deployment ordering dependency for this cutover.
 
 The non-expiring Starter plan-usage schema was a bidirectional hard cut between
 Web and the runner bundle. Its production rollout is complete: compatible Web
@@ -1499,39 +1619,19 @@ Optional smoke env:
 
 If neither managed-container smoke nor `HOSTED_EXECUTION_SMOKE_USER_ID` is configured, smoke stops after the public banner and health checks.
 
-## Wrangler SSH Debugging
+## Container Operator Access
 
-Wrangler SSH for Cloudflare Containers is an operator debug path only. It does
-not expose a public port, but it does let Cloudflare account writers connect to
-running Container instances when their local private key matches a public key in
-the rendered Container `authorized_keys`.
+Wrangler SSH is intentionally disabled for both runner Container classes. The
+checked-in scaffold and generated deploy config must set `ssh.enabled` to
+`false`, contain no `authorized_keys`, and expose no environment input that can
+re-enable the capability. This explicit setting is required because Cloudflare
+enables Wrangler SSH by default.
 
-Use a local `ssh-ed25519` key. If you create a dedicated key, use a neutral
-comment and keep the private key outside source control:
+Keep `containers_pid_namespace` enabled independently of SSH. Murph's current
+compatibility date predates Cloudflare's default for isolated Container PID
+namespaces, and removing the flag would change process topology and widen
+`/proc` visibility rather than merely remove operator access.
 
-```bash
-ssh-keygen -t ed25519 -C murph-cloudflare-containers -f <SSH_PRIVATE_KEY>
-ssh-add <SSH_PRIVATE_KEY>
-```
-
-Before rendering or deploying, export the public key without the local comment:
-
-```bash
-export CF_CONTAINER_SSH_PUBLIC_KEY="$(awk '{print $1 \" \" $2}' < <SSH_PUBLIC_KEY>)"
-export CF_CONTAINER_SSH_KEY_NAME=local-debug
-pnpm --dir apps/cloudflare runner:bundle
-pnpm --dir apps/cloudflare deploy:config:render
-```
-
-`pnpm --dir apps/cloudflare deploy:worker` also renders the config, so keep
-those env vars present for the deploy that should carry the debug key. After
-deploying, find a running instance and connect:
-
-```bash
-pnpm --dir apps/cloudflare exec wrangler containers instances <APPLICATION>
-pnpm --dir apps/cloudflare exec wrangler containers ssh <INSTANCE_ID>
-```
-
-SSH does not wake stopped Containers and does not keep an otherwise idle
-Container alive. Unset `CF_CONTAINER_SSH_PUBLIC_KEY` and redeploy when the debug
-window is over.
+Use bounded structured runtime logs, Durable Object status, Container
+application and instance inventory, and the managed deploy smoke for production
+diagnosis. Do not add an operator shell or per-deploy SSH key escape hatch.

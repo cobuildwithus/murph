@@ -7,7 +7,6 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   buildHostedWorkerSecretsPayload,
   buildHostedWranglerDeployConfig,
-  HOSTED_WORKER_OPTIONAL_VAR_NAMES,
   HOSTED_WORKER_REQUIRED_SECRET_NAMES,
   HOSTED_WORKER_REQUIRED_VAR_NAMES,
   parseHostedContainerImageListOutput,
@@ -15,7 +14,6 @@ import {
   resolveCloudflareDeployPaths,
   selectHostedContainerImageTagsForCleanup,
 } from "../scripts/deploy-automation.js";
-import { HOSTED_WORKER_OPTIONAL_SECRET_NAMES } from "../scripts/deploy-automation/worker-secret-names.ts";
 import { renderWorkerSecretsFile } from "../scripts/render-worker-secrets.ts";
 import { buildHostedRunnerContainerPlatformEnv } from "../src/runner-env.ts";
 import { parseJsoncObject } from "./helpers/jsonc.js";
@@ -114,8 +112,6 @@ const REQUIRED_R2_PRESIGN_WORKER_SECRETS = {
 const REQUIRED_PRIVATE_IMAGE_WORKER_SECRET = {
   HOSTED_PRIVATE_MEDIA_CAPABILITY_SECRET: "images-signing-fixture",
 } as const;
-const VALID_TEST_SSH_ED25519_PUBLIC_KEY =
-  "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEB";
 
 function expectedRequiredHostedCryptoWorkerVars(): Record<string, string> {
   return Object.fromEntries(
@@ -242,6 +238,7 @@ describe("hosted deploy automation helpers", () => {
         max_instances: number;
         rollout_active_grace_period: number;
         rollout_step_percentage: number[];
+        ssh: { enabled: boolean };
       }>;
       durable_objects: {
         bindings: Array<{
@@ -308,6 +305,7 @@ describe("hosted deploy automation helpers", () => {
         max_instances: 250,
         rollout_active_grace_period: 300,
         rollout_step_percentage: [10, 25, 50, 100],
+        ssh: { enabled: false },
       },
       {
         class_name: "DeploySmokeRunnerContainer",
@@ -317,6 +315,7 @@ describe("hosted deploy automation helpers", () => {
         max_instances: 1,
         rollout_active_grace_period: 0,
         rollout_step_percentage: [100],
+        ssh: { enabled: false },
       },
     ]);
     expect(config.durable_objects.bindings).toEqual([
@@ -366,7 +365,10 @@ describe("hosted deploy automation helpers", () => {
         crons: ["*/5 * * * *"],
       },
     });
-    expect(config.compatibility_flags).toEqual(["nodejs_compat"]);
+    expect(config.compatibility_flags).toEqual([
+      "nodejs_compat",
+      "containers_pid_namespace",
+    ]);
     expect(config.placement).toEqual({ mode: "smart" });
     expect(config.r2_buckets).toEqual([
       {
@@ -423,7 +425,6 @@ describe("hosted deploy automation helpers", () => {
     ]);
     expect(config.ai).toEqual({ binding: "AI" });
     expect(config.vars.HOSTED_WEB_BASE_URL).toBe("https://web.example.test");
-    expect(config.vars.AGENTMAIL_BASE_URL).toBeUndefined();
     expect(config.vars.TELEGRAM_BOT_USERNAME).toBe("hosted_bot");
     expect(config.vars.HOSTED_EXECUTION_RUNNER_BASE_URL).toBeUndefined();
     expect(config.secrets?.required).toEqual([...HOSTED_WORKER_REQUIRED_SECRET_NAMES]);
@@ -500,6 +501,7 @@ describe("hosted deploy automation helpers", () => {
         max_instances: number;
         rollout_active_grace_period?: number;
         rollout_step_percentage?: number[];
+        ssh: { enabled: boolean };
       }>;
       durable_objects: {
         bindings: Array<{
@@ -543,6 +545,7 @@ describe("hosted deploy automation helpers", () => {
         max_instances: number;
         rollout_active_grace_period?: number;
         rollout_step_percentage?: number[];
+        ssh: { enabled: boolean };
       }>;
       durable_objects: {
         bindings: Array<{
@@ -585,12 +588,14 @@ describe("hosted deploy automation helpers", () => {
     ]);
     expect(checkedInConfig.containers).toHaveLength(generatedConfig.containers.length);
     for (const [index, generatedContainer] of generatedConfig.containers.entries()) {
+      expect(generatedContainer.ssh).toEqual({ enabled: false });
       expect(checkedInConfig.containers[index]).toMatchObject({
         class_name: generatedContainer.class_name,
         instance_type: generatedContainer.instance_type,
         max_instances: generatedContainer.max_instances,
         rollout_active_grace_period: generatedContainer.rollout_active_grace_period,
         rollout_step_percentage: generatedContainer.rollout_step_percentage,
+        ssh: generatedContainer.ssh,
       });
     }
     expect(checkedInConfig.durable_objects.bindings).toEqual(generatedConfig.durable_objects.bindings);
@@ -729,12 +734,12 @@ describe("hosted deploy automation helpers", () => {
     });
   });
 
-  it("renders an optional local container SSH public key without preserving comments", () => {
+  it("keeps container SSH disabled when retired SSH inputs are still present", () => {
     const environment = readHostedDeployAutomationEnvironment({
       CF_BUNDLES_BUCKET: "hosted-bundles",
       CF_BUNDLES_PREVIEW_BUCKET: "hosted-bundles-preview",
       CF_CONTAINER_SSH_KEY_NAME: "debug-key",
-      CF_CONTAINER_SSH_PUBLIC_KEY: `${VALID_TEST_SSH_ED25519_PUBLIC_KEY} local-comment`,
+      CF_CONTAINER_SSH_PUBLIC_KEY: "ssh-ed25519 retired-key-material",
       CF_WORKER_NAME: "hosted-worker",
       ...REQUIRED_HOSTED_CRYPTO_WORKER_VARS,
     });
@@ -742,58 +747,20 @@ describe("hosted deploy automation helpers", () => {
       compatibility_flags: string[];
       containers: Array<{
         authorized_keys?: Array<{ name: string; public_key: string }>;
-        ssh?: { enabled: boolean };
+        ssh: { enabled: boolean };
       }>;
     };
 
-    expect(config.compatibility_flags).toEqual(["nodejs_compat", "containers_pid_namespace"]);
+    expect(environment).not.toHaveProperty("containerSshKey");
+    expect(config.compatibility_flags).toEqual([
+      "nodejs_compat",
+      "containers_pid_namespace",
+    ]);
     expect(config.containers).toHaveLength(2);
     for (const container of config.containers) {
-      expect(container.ssh).toEqual({ enabled: true });
-      expect(container.authorized_keys).toEqual([{
-        name: "debug-key",
-        public_key: VALID_TEST_SSH_ED25519_PUBLIC_KEY,
-      }]);
+      expect(container.ssh).toEqual({ enabled: false });
+      expect(container).not.toHaveProperty("authorized_keys");
     }
-  });
-
-  it("rejects non-Ed25519 container SSH public keys", () => {
-    expect(() =>
-      readHostedDeployAutomationEnvironment({
-        CF_BUNDLES_BUCKET: "hosted-bundles",
-        CF_BUNDLES_PREVIEW_BUCKET: "hosted-bundles-preview",
-        CF_CONTAINER_SSH_PUBLIC_KEY:
-          "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQCinvalid",
-        CF_WORKER_NAME: "hosted-worker",
-        ...REQUIRED_HOSTED_CRYPTO_WORKER_VARS,
-      }),
-    ).toThrowError(/CF_CONTAINER_SSH_PUBLIC_KEY must be an ssh-ed25519 public key\./u);
-  });
-
-  it("rejects malformed Ed25519 container SSH public key bodies", () => {
-    expect(() =>
-      readHostedDeployAutomationEnvironment({
-        CF_BUNDLES_BUCKET: "hosted-bundles",
-        CF_BUNDLES_PREVIEW_BUCKET: "hosted-bundles-preview",
-        CF_CONTAINER_SSH_PUBLIC_KEY:
-          "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIMurphContainerDebugKey000000000000000",
-        CF_WORKER_NAME: "hosted-worker",
-        ...REQUIRED_HOSTED_CRYPTO_WORKER_VARS,
-      }),
-    ).toThrowError(/CF_CONTAINER_SSH_PUBLIC_KEY must be an ssh-ed25519 public key\./u);
-  });
-
-  it("rejects container SSH key names that are not neutral slugs", () => {
-    expect(() =>
-      readHostedDeployAutomationEnvironment({
-        CF_BUNDLES_BUCKET: "hosted-bundles",
-        CF_BUNDLES_PREVIEW_BUCKET: "hosted-bundles-preview",
-        CF_CONTAINER_SSH_KEY_NAME: "Debug Key",
-        CF_CONTAINER_SSH_PUBLIC_KEY: VALID_TEST_SSH_ED25519_PUBLIC_KEY,
-        CF_WORKER_NAME: "hosted-worker",
-        ...REQUIRED_HOSTED_CRYPTO_WORKER_VARS,
-      }),
-    ).toThrowError(/CF_CONTAINER_SSH_KEY_NAME must be a neutral lowercase slug/u);
   });
 
   it("rejects invalid custom container instance JSON", () => {
@@ -832,7 +799,6 @@ describe("hosted deploy automation helpers", () => {
 
     expect(buildHostedWorkerSecretsPayload({
       ...REQUIRED_PRIVATE_IMAGE_WORKER_SECRET,
-      AGENTMAIL_API_KEY: "agentmail-secret",
       GARMIN_API_BASE_URL: "https://apis.garmin.com/wellness-api/rest",
       GARMIN_CLIENT_ID: "garmin-client-id",
       GARMIN_CLIENT_SECRET: "garmin-client-secret",

@@ -31,7 +31,8 @@ import {
   assistantCodexModelProviderWireApiValues,
   assistantExecutionDriverValues,
   assistantResumeKindValues,
-  resolveAssistantRuntimeTarget,
+  buildCodexAssistantContinuityFingerprint,
+  normalizeAssistantCodexModelProvider,
 } from './assistant/target-runtime.js'
 import {
   codexResumeStateSchema,
@@ -689,24 +690,24 @@ function buildAssistantRuntimeSession(
   value: AssistantPersistedSessionRecord,
 ): AssistantSession {
   const provider = value.codexTarget.adapter
-  const resolvedRuntimeTarget = resolveAssistantRuntimeTarget({
-    provider,
-    approvalPolicy: value.codexTarget.approvalPolicy,
-    codexHome: value.codexTarget.codexHome,
-    model: value.codexTarget.model,
-    modelProvider: value.codexTarget.modelProvider,
-    oss: value.codexTarget.oss,
-    profile: value.codexTarget.profile,
-    reasoningEffort: value.codexTarget.reasoningEffort,
-    sandbox: value.codexTarget.sandbox,
-  })
+  const modelProvider = normalizeAssistantCodexModelProvider(
+    value.codexTarget.modelProvider,
+  )
   const providerOptions = assistantProviderSessionOptionsSchema.parse({
-    continuityFingerprint: resolvedRuntimeTarget.continuityFingerprint,
-    executionDriver: resolvedRuntimeTarget.executionDriver,
+    continuityFingerprint: buildCodexAssistantContinuityFingerprint({
+      approvalPolicy: value.codexTarget.approvalPolicy,
+      codexHome: value.codexTarget.codexHome,
+      model: value.codexTarget.model,
+      modelProvider,
+      oss: value.codexTarget.oss,
+      profile: value.codexTarget.profile,
+      sandbox: value.codexTarget.sandbox,
+    }),
+    executionDriver: 'codex-app-server',
     provider,
     model: value.codexTarget.model,
     reasoningEffort: value.codexTarget.reasoningEffort,
-    resumeKind: resolvedRuntimeTarget.resumeKind,
+    resumeKind: 'codex-thread',
     sandbox: value.codexTarget.sandbox,
     approvalPolicy: value.codexTarget.approvalPolicy,
     profile: value.codexTarget.profile,
@@ -714,9 +715,7 @@ function buildAssistantRuntimeSession(
     ...(value.codexTarget.codexHome
       ? { codexHome: value.codexTarget.codexHome }
       : {}),
-    ...(resolvedRuntimeTarget.modelProvider
-      ? { modelProvider: resolvedRuntimeTarget.modelProvider }
-      : {}),
+    ...(modelProvider ? { modelProvider } : {}),
   })
   return {
     ...value,
@@ -763,6 +762,9 @@ export const assistantTranscriptEntrySchema = z.object({
   kind: z.enum(assistantTranscriptEntryKindValues),
   text: z.string(),
   createdAt: isoTimestampSchema,
+  // Stable provenance for replay-safe imports that originate from a durable
+  // outbox delivery rather than a provider turn.
+  sourceOutboxIntentId: assistantOutboxIntentIdSchema.optional(),
   // The message receipt that owns the content-retention deadline. This may
   // precede createdAt when accepted work waits before entering a transcript.
   // New user entries always stamp it; legacy and non-message entries may omit
@@ -925,6 +927,30 @@ export const assistantTurnReceiptSummarySchema = z
   .strict()
 
 export const assistantOutboxIntentStatusValues = assistantOutboxStatusValues
+const assistantPrivateCompletionContinuitySchema = z.discriminatedUnion(
+  'status',
+  [
+    z
+      .object({
+        baseTurnCount: z.number().int().nonnegative(),
+        preparedAt: isoTimestampSchema,
+        sessionId: assistantSessionIdSchema,
+        status: z.literal('prepared'),
+        transcriptCreatedAt: isoTimestampSchema,
+      })
+      .strict(),
+    z
+      .object({
+        appliedAt: isoTimestampSchema,
+        baseTurnCount: z.number().int().nonnegative(),
+        preparedAt: isoTimestampSchema,
+        sessionId: assistantSessionIdSchema,
+        status: z.literal('applied'),
+        transcriptCreatedAt: isoTimestampSchema,
+      })
+      .strict(),
+  ],
+)
 export const assistantOutboxIntentSchema = z
   .object({
     schema: z.literal('murph.assistant-outbox-intent.v1'),
@@ -940,6 +966,10 @@ export const assistantOutboxIntentSchema = z
     status: z.enum(assistantOutboxIntentStatusValues),
     message: z.string(),
     reviewedAssistantAskCompletionExpiresAt: isoTimestampSchema.optional(),
+    privateCompletionContinuitySessionId:
+      assistantSessionIdSchema.nullable().optional(),
+    privateCompletionContinuity:
+      assistantPrivateCompletionContinuitySchema.nullable().optional(),
     emailHtml: z.string().max(500_000).nullable().optional(),
     media: z.array(assistantResponseMediaSchema).max(40).default([]),
     card: assistantResponseCardSchema.nullable().default(null),
@@ -968,6 +998,13 @@ export const assistantOutboxIntentSchema = z
     deliveryConfirmationPending: z.boolean().default(false),
     deliveryIdempotencyKey: z.string().min(1).nullable().default(null),
     deliveryTransportIdempotent: z.boolean().default(false),
+    groupEmailAuthorizationProof: z
+      .string()
+      .regex(/^[0-9a-f]{64}$/u)
+      .nullable()
+      .optional(),
+    // Read-only migration support for durable intents accepted before the
+    // generic group-email field shipped. New writes use the field above.
     newsletterAuthorizationProof: z
       .string()
       .regex(/^[0-9a-f]{64}$/u)

@@ -97,6 +97,15 @@ describe('assistant execution prompt contract', () => {
     expect(prompt).not.toContain('GPT-5 execution bias:')
     expect(prompt).toContain('Lead the final reply with the result')
     expect(prompt).toContain(
+      'Complete cards replace text.',
+    )
+    expect(prompt).toContain(
+      'Response media comes with concise text for order, dose, timing, cues, safety, and fallback',
+    )
+    expect(prompt).toContain(
+      'Use `murph.generate_image` only if no card fits',
+    )
+    expect(prompt).toContain(
       'trim introductions, repetition, reassurance, and optional background first',
     )
     expect(prompt).not.toContain('Final replies should briefly state')
@@ -1784,6 +1793,9 @@ describe('assistant consumption lookup guidance', () => {
       'Training/movement: daily-activity owns factual wearable day/workout reads; running-cardio and strength-training own programming; aerobic-fitness, competition-training, mobility-posture, physical-therapy. Recovery-modality evidence and safety come from the required Health Commons lookup.',
     )
     expect(prompt).toContain(
+      'Private repeated-set logging: strength-training owns it and resolves canonical routine context before writes. In groups, hand off to a private Murph conversation without private reads or writes.',
+    )
+    expect(prompt).toContain(
       'Live workout/card: read strength-training and tracked-table.',
     )
     expect(prompt).toContain(
@@ -1990,8 +2002,9 @@ describe('assistant system prompt cache stability', () => {
     // not a budget: raise it only for cross-route guidance that cannot live in
     // an owning skill. Capability-specific browser, connected-app, phone-call,
     // and Family mechanics are intentionally excluded from this resident layer.
-    // The established Apple Health/WHOOP relay contract sets this ceiling.
-    expect(layers.stableRouteCapabilityPrompt.length).toBeLessThanOrEqual(57_469)
+    // The local automation delivery limitation plus the established Apple
+    // Health/WHOOP relay and cross-route repeated-set boundary set this ceiling.
+    expect(layers.stableRouteCapabilityPrompt.length).toBeLessThanOrEqual(57_744)
   })
 
   it('passes the injected CLI contract through byte-for-byte at the stable-route tail', () => {
@@ -2052,6 +2065,13 @@ describe('assistant system prompt cache stability', () => {
     )
     expect(layers.threadContextPrompt).toContain(
       'Current Murph product base URL for user-facing app links: http://localhost:3000',
+    )
+    expect(layers.threadContextPrompt).toContain('Private Training page:')
+    expect(layers.threadContextPrompt).toContain(
+      'the signed-in Training page is available at http://localhost:3000/training',
+    )
+    expect(layers.threadContextPrompt).toContain(
+      'read-only and intentionally absent from the Home sidebar',
     )
     expect(layers.threadContextPrompt).not.toContain(
       'Layer partition assistant context snapshot.',
@@ -2897,6 +2917,8 @@ describe('assistant conversation scope', () => {
     expect(prompt).toContain('Assistant tone preference:')
     expect(prompt).not.toContain('Murph onboarding:')
     expect(prompt).not.toContain('/settings?voice=true')
+    expect(prompt).not.toContain('Private Training page:')
+    expect(prompt).not.toContain('/training')
     expect(prompt).not.toContain('vault-cli assistant style set')
     expect(prompt).not.toContain('vault-cli device connect <provider>')
     expect(prompt).not.toContain('Never invent invite/share/auth/wearable URLs')
@@ -2983,9 +3005,9 @@ describe('assistant conversation scope', () => {
       'Never describe the group funding link as a personal billing or account-management page.',
     )
 
-    // This is a private, explicitly per-person enrollment reminder owned by
-    // the group newsletter workflow, not a room-settings destination.
-    expect(prompt).toContain(
+    // Missing-email recovery belongs to the private newsletter skill's
+    // aggregate no-recipient branch, not every hosted group system prompt.
+    expect(prompt).not.toContain(
       `${MURPH_PRODUCT_ORIGIN}/settings?addEmail=true`,
     )
     expect(prompt).not.toContain('`/settings?addEmail=true`')
@@ -3095,8 +3117,17 @@ describe('assistant conversation scope', () => {
     expect(prompt).not.toContain('agentApproved: true')
     expect(prompt).not.toContain('event_duration_minutes')
     expect(prompt).not.toContain('do not retry the create call')
-    expect(prompt).toContain('Pass `--channel` with `--delivery-target`')
+    expect(prompt).toContain(
+      'Local automation delivery supports Telegram or Linq, not email.',
+    )
+    expect(prompt).toContain(
+      'offer Telegram or Linq before asking for any routing details',
+    )
+    expect(prompt).toContain('pass `--channel` with `--delivery-target`')
     expect(prompt).toContain('inspect saved local self-targets')
+    expect(prompt).not.toContain(
+      'repeat phone, Telegram, or email routing details',
+    )
     expect(prompt).not.toContain('current-conversation-only')
   })
 
@@ -3171,7 +3202,50 @@ describe('assistant conversation scope', () => {
       'Scheduled automation changes for this conversation are available through `murph.automation`.',
     )
     expect(prompt).toContain(
-      'Use `murph.automation` with `action: save` to create an ordinary automation and `action: patch` to change one.',
+      'Use `murph.automation` with `action: save` to create an ordinary automation, `action: inspect` to read one without mutation, and `action: patch` to change one.',
+    )
+    expect(prompt).toContain(
+      'For every model-authored one-shot local wall-clock request, pass `schedule.kind: at` with `schedule.localAt.time`, `schedule.localAt.timeZone`, and exactly one of `schedule.localAt.date` or `schedule.localAt.relativeDay`',
+    )
+    expect(prompt).toContain(
+      'Generic save is create-only; if an automation already exists, inspect it and use a versioned patch.',
+    )
+    expect(prompt).toContain(
+      'When the request says today, tonight, or tomorrow, preserve it as `relativeDay` (`today` for tonight) so the host resolves the calendar date in the named timezone; never calculate that date in the model.',
+    )
+    expect(prompt).toContain(
+      'state the explicit host-resolved date returned by the tool while asking for another time',
+    )
+    expect(prompt).toContain(
+      'state the explicit host-resolved date returned by the tool while asking whether the earlier or later occurrence is intended',
+    )
+    expect(prompt).toContain(
+      'Before making any relative-date claim about an existing automation, call `action: inspect` and answer from its authoritative schedule and verified next occurrence without mutating it',
+    )
+    expect(prompt).toContain(
+      'Before correcting, pausing, reactivating, or archiving with `action: patch`, inspect the stored automation and pass its current `updatedAt` as `expectedUpdatedAt`',
+    )
+    expect(prompt).toContain(
+      'After saving or patching, inspect the returned stored `schedule`, `status`, `updatedAt`, `timingVerified`, `timingVerificationIssues`, `effectiveTimeZone`, and `nextOccurrenceAt`.',
+    )
+    for (const scheduleExample of [
+      '`{"kind":"every","everyMs":3600000}`',
+      '`{"kind":"cron","expression":"0 9 * * 1-5","timeZone":"America/Chicago"}`',
+      '`{"kind":"dailyLocal","localTime":"09:00","timeZone":"America/Chicago"}`',
+    ]) {
+      expect(prompt).toContain(scheduleExample)
+    }
+    expect(prompt).toContain(
+      'Changes to an existing automation use `action: patch`, never `action: update`, and every patch requires `lookup` identifying the existing automation.',
+    )
+    expect(prompt).toContain(
+      'Never invent schedule, update, or timezone fields outside the schema.',
+    )
+    expect(prompt).toContain(
+      'The exact camel-case field `schedule.timeZone` is valid only for recurring `cron` and `dailyLocal` wall-clock schedules',
+    )
+    expect(prompt).toContain(
+      'never use `timezone`, `schedule.timezone`, top-level `timeZone`, or any other invented timezone field',
     )
     expect(prompt).toContain(
       'when the user names a timezone, keep the requested clock time and pass its IANA name as `schedule.timeZone`',
@@ -3201,8 +3275,14 @@ describe('assistant conversation scope', () => {
       'For an active one-shot with that verified null result, say its requested time is no longer deliverable and offer to reschedule it',
     )
     expect(prompt).toContain(
-      'When a time-based result has `timingVerified: false`, say that the save or update succeeded but the next occurrence could not be verified, state no time, and offer one inspect-or-update recovery action; do not retry the write.',
+      'A save or patch result already includes its host-owned read-only timing readback',
     )
+    expect(prompt).toContain(
+      'follow the tool contract and never issue a second inspection or recovery write.',
+    )
+    expect(prompt).not.toContain('Interpret `runtime_state_pending`')
+    expect(prompt).not.toContain('save or update succeeded')
+    expect(prompt).not.toContain('inspect-or-update recovery action')
     expect(prompt).toContain(
       'Patch `status` to pause, reactivate, or archive an existing automation.',
     )
@@ -3213,8 +3293,51 @@ describe('assistant conversation scope', () => {
     )
     expect(prompt).toContain('The tool accepts no arbitrary route locator')
     expect(prompt).toContain('do not target another route')
+    expect(prompt).toContain(
+      'Do not inspect or reuse saved personal phone, Telegram, or email self-targets',
+    )
+    expect(prompt).not.toContain(
+      'Local automation delivery supports Telegram or Linq, not email.',
+    )
     expect(prompt).not.toContain('vault-cli automation')
     expect(prompt).not.toContain('inspect saved local self-targets')
+  })
+
+  it('keeps trusted local one-shot timing available in authenticated group chat', () => {
+    const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput({
+      assistantHostedAutomationAvailable: true,
+      channel: 'linq',
+      conversationScope: 'group',
+      hostedRuntime: true,
+    }))
+
+    expect(prompt).toContain(
+      'Scheduled automation changes for this group room are available through `murph.automation`.',
+    )
+    expect(prompt).toContain(
+      'For every model-authored one-shot local wall-clock request, pass `schedule.kind: at` with `schedule.localAt.time`, `schedule.localAt.timeZone`, and exactly one of `schedule.localAt.date` or `schedule.localAt.relativeDay`',
+    )
+    expect(prompt).toContain(
+      'Generic save is create-only; if an automation already exists, inspect it and use a versioned patch.',
+    )
+    expect(prompt).toContain(
+      'When the request says today, tonight, or tomorrow, preserve it as `relativeDay` (`today` for tonight) so the host resolves the calendar date in the named timezone; never calculate that date in the model.',
+    )
+    expect(prompt).toContain(
+      'state the explicit host-resolved date returned by the tool while asking for another time',
+    )
+    expect(prompt).toContain(
+      'Before making any relative-date claim about an existing automation, call `action: inspect` and answer from its authoritative schedule and verified next occurrence without mutating it',
+    )
+    expect(prompt).toContain(
+      'Before correcting, pausing, reactivating, or archiving with `action: patch`, inspect the stored automation and pass its current `updatedAt` as `expectedUpdatedAt`',
+    )
+    expect(prompt).toContain(
+      'A save always binds to the trusted current group room.',
+    )
+    expect(prompt).toContain(
+      'Never use saved personal/self targets in this group vault.',
+    )
   })
 
   it('does not advertise hosted automation when the turn lacks its typed tool', () => {

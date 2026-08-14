@@ -8,6 +8,7 @@ import {
   HOSTED_RUNTIME_GROUP_SENDER_HANDLE_MAX_CODE_POINTS,
   HOSTED_RUNTIME_GROUP_TOOL_REQUEST_MAX_BYTES,
 } from "../src/runtime-control.ts";
+import { HOSTED_VAULT_SHARE_DELIVER_MAX_RECORDS } from "../src/vault-share.ts";
 
 import {
   parseHostedExecutionDirectRoute,
@@ -19,8 +20,8 @@ import {
   parseHostedRuntimeFamilyPlanToolResponse,
   parseHostedRuntimeGroupToolRequest,
   parseHostedRuntimeGroupToolResponse,
-  parseHostedRuntimeNewsletterToolRequest,
-  parseHostedRuntimeNewsletterToolResponse,
+  parseHostedRuntimeGroupEmailEffectRequest,
+  parseHostedRuntimeGroupEmailEffectResponse,
 } from "../src/parsers.ts";
 
 describe("parseHostedExecutionDirectRoute", () => {
@@ -742,40 +743,6 @@ describe("parseHostedExecutionEvent", () => {
       provider: "oura",
       reason: "webhook_hint",
       userId: "user-1",
-    });
-  });
-
-  it("parses group newsletter email-needed events and wakes", () => {
-    expect(parseHostedExecutionEvent({
-      directRoute: { channel: "linq", threadId: "linq_home_thread_123" },
-      groupDisplayName: "Tempo Crew",
-      groupId: "hgrp_123",
-      kind: "group-newsletter.email-needed",
-      userId: "member_123",
-    })).toEqual({
-      directRoute: { channel: "linq", threadId: "linq_home_thread_123" },
-      groupDisplayName: "Tempo Crew",
-      groupId: "hgrp_123",
-      kind: "group-newsletter.email-needed",
-      userId: "member_123",
-    });
-
-    expect(parseHostedExecutionWake({
-      directRoute: { channel: "telegram", threadId: "telegram_thread_123" },
-      eventId: "group-newsletter.email-needed:member_123:hgrp_123",
-      groupDisplayName: "Tempo Crew",
-      groupId: "hgrp_123",
-      kind: "group-newsletter.email-needed",
-      occurredAt: "2026-04-26T00:00:00.000Z",
-      userId: "member_123",
-    })).toEqual({
-      directRoute: { channel: "telegram", threadId: "telegram_thread_123" },
-      eventId: "group-newsletter.email-needed:member_123:hgrp_123",
-      groupDisplayName: "Tempo Crew",
-      groupId: "hgrp_123",
-      kind: "group-newsletter.email-needed",
-      occurredAt: "2026-04-26T00:00:00.000Z",
-      userId: "member_123",
     });
   });
 
@@ -2291,6 +2258,31 @@ describe("parseHostedRuntimeGroupTool", () => {
     })).toThrow(/not allowed/u);
   });
 
+  it("accepts the former eight-scope newsletter recipe only for email preparation", () => {
+    const projectionScopes = [
+      { projectionKind: "steps-days.v0" },
+      { projectionKind: "activity-days.v0" },
+      { projectionKind: "workout-days.v0" },
+      { projectionKind: "workouts.v0" },
+      { projectionKind: "sleep-duration-days.v0" },
+      { projectionKind: "sleep-times.v0" },
+      { projectionKind: "resting-heart-rate-days.v0" },
+      { projectionKind: "hrv-days.v0" },
+    ];
+
+    expect(parseHostedRuntimeGroupToolRequest({
+      action: "prepare_email",
+      projectionScopes,
+    })).toEqual({
+      action: "prepare_email",
+      projectionScopes,
+    });
+    expect(() => parseHostedRuntimeGroupToolRequest({
+      action: "read_shared",
+      projectionScopes: projectionScopes.slice(0, 4),
+    })).toThrow(/between 1 and 3 entries/u);
+  });
+
   it("parses referral requests with channel-qualified trusted sender evidence", () => {
     expect(parseHostedRuntimeGroupToolRequest({
       action: "read_usage_referral",
@@ -2570,6 +2562,31 @@ describe("parseHostedRuntimeGroupTool", () => {
         unavailableReason: "shared_data_unavailable",
       },
     });
+    expect(parseHostedRuntimeGroupToolResponse({
+      action: "read_shared",
+      result: {
+        members: [{
+          currentTurnHandles: [],
+          displayName: null,
+          memberId: "member_pending",
+          participantId: "participant_pending",
+          projections: [{
+            dataStatus: "pending",
+            grantedAt: "2026-07-31T12:32:00.000Z",
+            grantStatus: "granted",
+            projectionScope: { projectionKind: "steps-days.v0" },
+            projectionScopeKey: "steps-days.v0",
+            records: [],
+          }],
+        }],
+        requestedProjectionScopeKeys: ["steps-days.v0"],
+        status: "ok",
+      },
+    })).toMatchObject({
+      result: {
+        members: [{ projections: [{ dataStatus: "pending" }] }],
+      },
+    });
   });
 
   it("rejects read_shared identity leaks, inconsistent statuses, and corrupt records", () => {
@@ -2685,6 +2702,31 @@ describe("parseHostedRuntimeGroupTool", () => {
         ...result,
         members: [{
           ...result.members[0],
+          projections: [{ ...projection, dataStatus: "pending" }],
+        }],
+      },
+    })).toThrow(/must not contain records/u);
+    expect(() => parseHostedRuntimeGroupToolResponse({
+      action: "read_shared",
+      result: {
+        ...result,
+        members: [{
+          ...result.members[0],
+          projections: [{
+            ...projection,
+            dataStatus: "pending",
+            grantStatus: "not_granted",
+            records: [],
+          }],
+        }],
+      },
+    })).toThrow(/not_granted/u);
+    expect(() => parseHostedRuntimeGroupToolResponse({
+      action: "read_shared",
+      result: {
+        ...result,
+        members: [{
+          ...result.members[0],
           projections: [{ ...projection, records: [] }],
         }],
       },
@@ -2697,14 +2739,24 @@ describe("parseHostedRuntimeGroupTool", () => {
           ...result.members[0],
           projections: [{
             ...projection,
-            records: Array.from({ length: 9 }, (_, index) => ({
-              ...projection.records[0],
-              recordKey: `2026-07-0${index + 1}`,
-            })),
+            records: Array.from(
+              { length: HOSTED_VAULT_SHARE_DELIVER_MAX_RECORDS + 1 },
+              (_, index) => {
+                const date = new Date(Date.UTC(2026, 0, index + 1))
+                  .toISOString()
+                  .slice(0, 10);
+                return {
+                  ...projection.records[0],
+                  data: { ...projection.records[0].data, date },
+                  occurredAt: `${date}T00:00:00.000Z`,
+                  recordKey: date,
+                };
+              },
+            ),
           }],
         }],
       },
-    })).toThrow(/at most 8/u);
+    })).toThrow(new RegExp(`at most ${HOSTED_VAULT_SHARE_DELIVER_MAX_RECORDS}`, "u"));
     expect(() => parseHostedRuntimeGroupToolResponse({
       action: "read_shared",
       result: {
@@ -3558,7 +3610,7 @@ describe("parseHostedRuntimeGroupTool", () => {
   });
 });
 
-describe("parseHostedRuntimeNewsletterTool", () => {
+describe("parseHostedRuntimeGroupEmailEffect", () => {
   const AUTHORIZATION_PROOF = "a".repeat(64);
   const PARTICIPANT = {
     authorizedShares: [],
@@ -3567,46 +3619,55 @@ describe("parseHostedRuntimeNewsletterTool", () => {
   };
 
   it("parses prepare and send requests", () => {
-    expect(parseHostedRuntimeNewsletterToolRequest({
-      action: "prepare",
-      groupId: "group_123",
+    expect(parseHostedRuntimeGroupEmailEffectRequest({
+      action: "prepare_email",
+      projectionScopes: [
+        { projectionKind: "steps-days.v0" },
+        { projectionKind: "activity-days.v0" },
+        { projectionKind: "workout-days.v0" },
+        { projectionKind: "sleep-duration-days.v0" },
+      ],
     })).toEqual({
-      action: "prepare",
+      action: "prepare_email",
+      projectionScopes: [
+        { projectionKind: "steps-days.v0" },
+        { projectionKind: "activity-days.v0" },
+        { projectionKind: "workout-days.v0" },
+        { projectionKind: "sleep-duration-days.v0" },
+      ],
     });
-    expect(() => parseHostedRuntimeNewsletterToolRequest({
-      action: "prepare",
+    expect(() => parseHostedRuntimeGroupEmailEffectRequest({
+      action: "prepare_email",
       groupId: "group_123",
-      retiredVersionMarker: true,
+      projectionScopes: [{ projectionKind: "steps-days.v0" }],
     })).toThrow(/not allowed/u);
 
-    expect(parseHostedRuntimeNewsletterToolRequest({
-      action: "send",
-      groupId: "group_123",
+    expect(parseHostedRuntimeGroupEmailEffectRequest({
+      action: "send_email",
       html: "<p>Weekly health note</p>",
       subject: "Weekly health note",
       text: "Weekly health note",
     })).toEqual({
-      action: "send",
+      action: "send_email",
       html: "<p>Weekly health note</p>",
       subject: "Weekly health note",
       text: "Weekly health note",
     });
 
-    expect(parseHostedRuntimeNewsletterToolRequest({
-      action: "send",
-      groupId: "group_123",
+    expect(parseHostedRuntimeGroupEmailEffectRequest({
+      action: "send_email",
       html: "<p>Weekly health note</p>",
       subject: "Weekly health note",
     })).toEqual({
-      action: "send",
+      action: "send_email",
       html: "<p>Weekly health note</p>",
       subject: "Weekly health note",
       text: null,
     });
 
     expect(() =>
-      parseHostedRuntimeNewsletterToolRequest({
-        action: "send",
+      parseHostedRuntimeGroupEmailEffectRequest({
+        action: "send_email",
         groupId: "group_123",
         html: "<p>Weekly health note</p>",
         scheduledAutomationAuthority: {
@@ -3617,30 +3678,28 @@ describe("parseHostedRuntimeNewsletterTool", () => {
       })
     ).toThrow(/not allowed/u);
     expect(() =>
-      parseHostedRuntimeNewsletterToolRequest({
-        action: "send",
-        groupId: "group_123",
+      parseHostedRuntimeGroupEmailEffectRequest({
+        action: "send_email",
         html: " ",
         subject: "Weekly health note",
       })
     ).toThrow(/html must not be blank/u);
     expect(() =>
-      parseHostedRuntimeNewsletterToolRequest({
-        action: "send",
-        groupId: "group_123",
+      parseHostedRuntimeGroupEmailEffectRequest({
+        action: "send_email",
         html: "<p>Weekly health note</p>",
         subject: " ",
       })
     ).toThrow(/subject must not be blank/u);
-    expect(() => parseHostedRuntimeNewsletterToolRequest({
+    expect(() => parseHostedRuntimeGroupEmailEffectRequest({
       action: "retired_action",
       groupId: "group_123",
     })).toThrow(/action is not supported/u);
   });
 
   it("requires authorization snapshots in successful prepare responses", () => {
-    expect(() => parseHostedRuntimeNewsletterToolResponse({
-      action: "prepare",
+    expect(() => parseHostedRuntimeGroupEmailEffectResponse({
+      action: "prepare_email",
       result: {
         groupId: "group_123",
         missingEmailParticipants: [],
@@ -3649,8 +3708,8 @@ describe("parseHostedRuntimeNewsletterTool", () => {
       },
     })).toThrow(/authorizationProof/u);
 
-    expect(() => parseHostedRuntimeNewsletterToolResponse({
-      action: "prepare",
+    expect(() => parseHostedRuntimeGroupEmailEffectResponse({
+      action: "prepare_email",
       result: {
         authorizationProof: AUTHORIZATION_PROOF,
         groupId: "group_123",
@@ -3666,8 +3725,8 @@ describe("parseHostedRuntimeNewsletterTool", () => {
         { projectionScopeKey: "steps-days.v0", shareId: "share_steps" },
       ],
     };
-    expect(parseHostedRuntimeNewsletterToolResponse({
-      action: "prepare",
+    expect(parseHostedRuntimeGroupEmailEffectResponse({
+      action: "prepare_email",
       result: {
         authorizationProof: AUTHORIZATION_PROOF,
         groupId: "group_123",
@@ -3676,7 +3735,7 @@ describe("parseHostedRuntimeNewsletterTool", () => {
         status: "ok",
       },
     })).toEqual({
-      action: "prepare",
+      action: "prepare_email",
       result: {
         authorizationProof: AUTHORIZATION_PROOF,
         groupId: "group_123",
@@ -3686,14 +3745,14 @@ describe("parseHostedRuntimeNewsletterTool", () => {
       },
     });
 
-    expect(parseHostedRuntimeNewsletterToolResponse({
-      action: "prepare",
+    expect(parseHostedRuntimeGroupEmailEffectResponse({
+      action: "prepare_email",
       result: {
         status: "unavailable",
         unavailableReason: "not_group_runtime",
       },
     })).toEqual({
-      action: "prepare",
+      action: "prepare_email",
       result: {
         status: "unavailable",
         unavailableReason: "not_group_runtime",
@@ -3701,8 +3760,8 @@ describe("parseHostedRuntimeNewsletterTool", () => {
     });
 
     expect(() =>
-      parseHostedRuntimeNewsletterToolResponse({
-        action: "prepare",
+      parseHostedRuntimeGroupEmailEffectResponse({
+        action: "prepare_email",
         result: {
           authorizationProof: AUTHORIZATION_PROOF,
           groupId: "group_123",
@@ -3714,7 +3773,7 @@ describe("parseHostedRuntimeNewsletterTool", () => {
     ).toThrow(/not allowed/u);
   });
 
-  it("bounds newsletter participants and per-participant authorization snapshots", () => {
+  it("bounds group email participants and per-participant authorization snapshots", () => {
     const participant = {
       ...PARTICIPANT,
       authorizedShares: Array.from({ length: 101 }, (_, index) => ({
@@ -3722,8 +3781,8 @@ describe("parseHostedRuntimeNewsletterTool", () => {
         shareId: `share_${index}`,
       })),
     };
-    expect(() => parseHostedRuntimeNewsletterToolResponse({
-      action: "prepare",
+    expect(() => parseHostedRuntimeGroupEmailEffectResponse({
+      action: "prepare_email",
       result: {
         authorizationProof: AUTHORIZATION_PROOF,
         groupId: "group_123",
@@ -3733,8 +3792,8 @@ describe("parseHostedRuntimeNewsletterTool", () => {
       },
     })).toThrow(/authorizedShares must contain at most 100 entries/u);
 
-    expect(() => parseHostedRuntimeNewsletterToolResponse({
-      action: "prepare",
+    expect(() => parseHostedRuntimeGroupEmailEffectResponse({
+      action: "prepare_email",
       result: {
         authorizationProof: AUTHORIZATION_PROOF,
         groupId: "group_123",
@@ -3746,7 +3805,7 @@ describe("parseHostedRuntimeNewsletterTool", () => {
   });
 
   it("rejects unsupported response actions", () => {
-    expect(() => parseHostedRuntimeNewsletterToolResponse({
+    expect(() => parseHostedRuntimeGroupEmailEffectResponse({
       action: "retired_action",
       result: {
         status: "unavailable",
@@ -3755,16 +3814,16 @@ describe("parseHostedRuntimeNewsletterTool", () => {
     })).toThrow(/not supported/u);
   });
 
-  it("parses newsletter send outcomes and validates partial counts", () => {
-    expect(parseHostedRuntimeNewsletterToolResponse({
-      action: "send",
+  it("parses group email send outcomes and validates partial counts", () => {
+    expect(parseHostedRuntimeGroupEmailEffectResponse({
+      action: "send_email",
       result: {
         participantCount: 2,
         skippedNoEmailMemberIds: ["member_without_email"],
         status: "accepted",
       },
     })).toEqual({
-      action: "send",
+      action: "send_email",
       result: {
         participantCount: 2,
         skippedNoEmailMemberIds: ["member_without_email"],
@@ -3772,15 +3831,15 @@ describe("parseHostedRuntimeNewsletterTool", () => {
       },
     });
 
-    expect(parseHostedRuntimeNewsletterToolResponse({
-      action: "send",
+    expect(parseHostedRuntimeGroupEmailEffectResponse({
+      action: "send_email",
       result: {
         participantCount: 2,
         skippedNoEmailMemberIds: ["member_without_email"],
         status: "sent",
       },
     })).toEqual({
-      action: "send",
+      action: "send_email",
       result: {
         participantCount: 2,
         skippedNoEmailMemberIds: ["member_without_email"],
@@ -3788,8 +3847,8 @@ describe("parseHostedRuntimeNewsletterTool", () => {
       },
     });
 
-    expect(parseHostedRuntimeNewsletterToolResponse({
-      action: "send",
+    expect(parseHostedRuntimeGroupEmailEffectResponse({
+      action: "send_email",
       result: {
         failedRecipientCount: 1,
         participantCount: 3,
@@ -3798,7 +3857,7 @@ describe("parseHostedRuntimeNewsletterTool", () => {
         status: "partial_failure",
       },
     })).toEqual({
-      action: "send",
+      action: "send_email",
       result: {
         failedRecipientCount: 1,
         participantCount: 3,
@@ -3808,15 +3867,15 @@ describe("parseHostedRuntimeNewsletterTool", () => {
       },
     });
 
-    expect(parseHostedRuntimeNewsletterToolResponse({
-      action: "send",
+    expect(parseHostedRuntimeGroupEmailEffectResponse({
+      action: "send_email",
       result: {
         participantCount: 0,
         skippedNoEmailMemberIds: ["member_without_email"],
         status: "no_recipients",
       },
     })).toEqual({
-      action: "send",
+      action: "send_email",
       result: {
         participantCount: 0,
         skippedNoEmailMemberIds: ["member_without_email"],
@@ -3824,14 +3883,14 @@ describe("parseHostedRuntimeNewsletterTool", () => {
       },
     });
 
-    expect(parseHostedRuntimeNewsletterToolResponse({
-      action: "send",
+    expect(parseHostedRuntimeGroupEmailEffectResponse({
+      action: "send_email",
       result: {
         status: "unavailable",
         unavailableReason: "scheduled_authority_required",
       },
     })).toEqual({
-      action: "send",
+      action: "send_email",
       result: {
         status: "unavailable",
         unavailableReason: "scheduled_authority_required",
@@ -3839,8 +3898,8 @@ describe("parseHostedRuntimeNewsletterTool", () => {
     });
 
     expect(() =>
-      parseHostedRuntimeNewsletterToolResponse({
-        action: "send",
+      parseHostedRuntimeGroupEmailEffectResponse({
+        action: "send_email",
         result: {
           participantCount: 1,
           skippedNoEmailMemberIds: [],
@@ -3849,8 +3908,8 @@ describe("parseHostedRuntimeNewsletterTool", () => {
       })
     ).toThrow(/participantCount must be 0/u);
     expect(() =>
-      parseHostedRuntimeNewsletterToolResponse({
-        action: "send",
+      parseHostedRuntimeGroupEmailEffectResponse({
+        action: "send_email",
         result: {
           failedRecipientCount: -1,
           participantCount: 1,

@@ -12,7 +12,7 @@ The existing signed callback remains the only ingestion boundary:
 ```text
 Cloudflare runtime
   -> POST /api/internal/hosted-runtime/log
-  -> ECDSA verification + primary anti-replay nonce
+  -> ECDSA verification + one primary anti-replay nonce insert
   -> accepted-attempt recovery claim, when present
   -> isolated runtime-log Postgres append
 ```
@@ -20,8 +20,10 @@ Cloudflare runtime
 The callback stays in `apps/web`; Cloudflare receives no database credential and
 there is no new service or queue. The anti-replay nonce remains in the primary
 control database because `runner.accepted_attempt_failed` recovery shares this
-callback. A runtime-log database outage must not prevent a valid recovery claim
-from being authenticated and signaled.
+callback. Admission performs one insert keyed by the nonce hash; primary-key
+uniqueness rejects a replay, and the callback performs no expiry sweep. A
+runtime-log database outage must not prevent a valid recovery claim from being
+authenticated and signaled.
 
 The isolated database is the only runtime-log owner. Production fails closed
 when its URL is missing. Local development may leave it unconfigured; runtime
@@ -121,21 +123,32 @@ the operational stages instead of treating all missing-data time as one delay:
   receipt, when the provider exposes the signed time
 - `webhookToImportMs`: Murph receipt to successful canonical import
 - `runtimeQueueMs` and `importExecutionMs`: local queue and execution durations
-- `provider` and `jobKind`: bounded operational routing context
+- `provider`: bounded connector/executor context (`junction`, `oura`, `whoop`,
+  or `strava`)
+- `sourceProvider`: bounded wearable-source context. Junction-backed imports
+  retain their normalized source slug, including Garmin, Fitbit, and any other
+  supported Junction source; direct integrations fall back to `provider`
+- `jobKind`: bounded operational job context
 
 Clock skew does not become a negative latency; only the affected measurement is
 omitted. The log deliberately excludes raw stage timestamps, event or resource
-types, source-device/provider semantics, counts, health values, webhook bodies,
-and exact event-to-import intervals. The new timing fields on the dirty-resource
-carrier hold only the coarse upstream bucket, exact signed-send-to-receipt
-duration, and earliest Murph receipt needed for the remaining duration.
+types, source-device identifiers, counts, health values, webhook bodies, and
+exact event-to-import intervals. Source-provider attribution is a product-wide
+provider slug, never a member, account, connection, or physical-device id. The
+timing metadata on the dirty-resource carrier holds only the coarse upstream
+bucket, exact signed-send-to-receipt duration, earliest Murph receipt needed
+for the remaining duration, and a timing-only source slug. The timing source is
+separate from the pre-existing `sourceProviderSlug`, which remains part of
+resource execution identity and provider input.
 Pre-existing ingestion fields still use provider occurrence for dirty-window
 and clean-transition wake ownership; those fields are not copied into this
 runtime event. Compact timing and job fields
 can remain in the existing dirty row; oversized job payloads use the existing
 encrypted dirty-payload row. Coalesced hints keep the slowest upstream bucket,
 longest signed delivery, and earliest receipt, so timestamps from different
-events are never paired into a synthetic duration.
+events are never paired into a synthetic duration. Source attribution survives
+coalescing only when every hint agrees; a mixed-source job omits
+`sourceProvider` instead of choosing one.
 
 The timing association is pass-local and deliberately best-effort. A compact
 job that remains queued or retrying beyond its admitting runtime pass can later
@@ -150,6 +163,7 @@ Example bounded diagnostic read:
 SELECT
   at,
   redacted_json->>'provider' AS provider,
+  redacted_json->>'sourceProvider' AS source_provider,
   redacted_json->>'eventToProviderSendBucket' AS upstream_delay_bucket,
   (redacted_json->>'providerSendToWebhookMs')::bigint AS upstream_delivery_ms,
   (redacted_json->>'webhookToImportMs')::bigint AS murph_import_ms
@@ -173,8 +187,12 @@ The dedicated store keeps the existing policy:
 - warn/error: 14 days
 - ordered batches of 5,000, at most four batches per hourly cleanup
 
-The normal retention cron runs isolated cleanup serially through the diagnostic
-pool after the primary control-database cleanup completes.
+The normal retention cron first removes strictly expired callback nonces from
+the primary control database under the shared 5,000-row and four-batch ceilings.
+Each statement orders candidates by expiry and nonce hash, locks only that
+bounded set with `FOR UPDATE SKIP LOCKED`, and deletes those exact rows. It then
+runs isolated runtime-log cleanup serially through the diagnostic pool after the
+primary control-database cleanup completes.
 
 ## Configuration
 

@@ -111,6 +111,7 @@ export async function hasHostedMemberActivationProof(input: {
 }
 
 export async function activateHostedMemberForPositiveSourceTx(input: {
+  allowSignupWelcomeWithoutAssignableLinqLine?: boolean;
   dispatchContext: HostedStripeDispatchContext;
   emailLinked?: boolean;
   memberId: string;
@@ -181,6 +182,7 @@ export async function activateHostedMemberForFamilySponsorshipTx(input: {
 
 async function activateHostedMemberForPositiveSourceTxInner(input: {
   allowLegacyCryptoPreparation: boolean;
+  allowSignupWelcomeWithoutAssignableLinqLine?: boolean;
   dispatchContext: HostedStripeDispatchContext;
   emailLinked?: boolean;
   memberId: string;
@@ -225,6 +227,9 @@ async function activateHostedMemberForPositiveSourceTxInner(input: {
       return {
         activated: false,
         hostedExecutionEventId: existingWake.dedupeKey,
+        ...(!existingWake.consumedAt
+          ? { hostedExecutionMailboxItemId: existingWake.id }
+          : {}),
         memberId: currentMember.core.id,
       };
     }
@@ -252,6 +257,9 @@ async function activateHostedMemberForPositiveSourceTxInner(input: {
       return {
         activated: false,
         hostedExecutionEventId: existingWake?.dedupeKey ?? null,
+        ...(existingWake && !existingWake.consumedAt
+          ? { hostedExecutionMailboxItemId: existingWake.id }
+          : {}),
         memberId: currentMember.core.id,
       };
     }
@@ -303,6 +311,9 @@ async function activateHostedMemberForPositiveSourceTxInner(input: {
   const signupWelcomeRoute = input.suppressSignupWelcome
     ? null
     : (await resolveHostedMemberActivationWelcomeLinqRoute({
+        ...(input.allowSignupWelcomeWithoutAssignableLinqLine
+          ? { allowNoAssignableLine: true }
+          : {}),
         member: currentMember,
         prisma: input.prisma,
       })).welcomeRoute;
@@ -394,6 +405,7 @@ export function buildHostedMemberActivationWelcomeRoute(input: {
 }
 
 async function resolveHostedMemberActivationWelcomeLinqRoute(input: {
+  allowNoAssignableLine?: boolean;
   member: HostedMemberActivationSnapshot;
   prisma: Prisma.TransactionClient;
 }): Promise<{ welcomeRoute: HostedExecutionAssistantNotificationRoute | null }> {
@@ -431,7 +443,13 @@ async function resolveHostedMemberActivationWelcomeLinqRoute(input: {
     };
   }
 
-  return resolveHostedMemberActivationLinqRoute(input);
+  return resolveHostedMemberActivationLinqRoute({
+    ...(input.allowNoAssignableLine
+      ? { allowNoAssignableLine: true }
+      : {}),
+    member: input.member,
+    prisma: input.prisma,
+  });
 }
 
 async function readActivationReadyHostedMemberTx(input: {

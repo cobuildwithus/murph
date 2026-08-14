@@ -1236,6 +1236,104 @@ describe("PrismaHostedDirtyConnectionStore dirty pending state", () => {
     }
   });
 
+  it("coalesces timing-only sources without changing compact import identity", async () => {
+    const admitCompactResources = async (
+      connectionId: string,
+      timingSources: readonly [string, string],
+    ) => {
+      let createData: Record<string, unknown> | null = null;
+      let persistedDirtyResources: object = {};
+      let findCount = 0;
+      const dirtyAt = new Date("2026-05-26T12:00:00.000Z");
+      const prisma = {
+        $transaction: vi.fn(async (callback: (tx: unknown) => Promise<unknown>) => callback(prisma)),
+        deviceSyncDirtyConnection: {
+          createMany: vi.fn(async (input: { data: Record<string, unknown> }) => {
+            createData = input.data;
+            const dirtyResourcesJson = input.data.dirtyResourcesJson;
+            persistedDirtyResources = dirtyResourcesJson
+                && typeof dirtyResourcesJson === "object"
+              ? dirtyResourcesJson
+              : {};
+            return { count: 1 };
+          }),
+          findUnique: vi.fn(async () => {
+            findCount += 1;
+            if (findCount === 1 || !createData) {
+              return null;
+            }
+            return {
+              ...createData,
+              createdAt: dirtyAt,
+              updatedAt: dirtyAt,
+            };
+          }),
+        },
+        deviceSyncDirtyPayload: {
+          createMany: vi.fn(async () => ({ count: 0 })),
+        },
+      };
+      const store = new PrismaHostedDirtyConnectionStore(prisma as never);
+
+      const result = await store.upsertDirtyConnection({
+        connectionId,
+        dirtyAt: dirtyAt.toISOString(),
+        eventType: "connection.updated",
+        provider: "junction",
+        resourceCategory: null,
+        resources: timingSources.map((timingSourceProviderSlug) => ({
+          count: 1,
+          eventToProviderSendBucket: "under_5_minutes" as const,
+          firstWebhookReceivedAt: dirtyAt.toISOString(),
+          providerSendToWebhookMs: 30_000,
+          jobKind: "reconcile",
+          resource: null,
+          resourceCategory: null,
+          sourceProviderSlug: null,
+          timingSourceProviderSlug,
+          windowEnd: null,
+          windowStart: null,
+        })),
+        userId: "member_timing_sources",
+      });
+
+      return {
+        dirty: result.dirty,
+        persistedDirtyResources,
+      };
+    };
+
+    const agreeing = await admitCompactResources(
+      "dsc_timing_source_agreeing",
+      ["garmin", "garmin"],
+    );
+    const mixed = await admitCompactResources(
+      "dsc_timing_source_mixed",
+      ["garmin", "fitbit"],
+    );
+    const [agreeingResource] = Object.values(agreeing.dirty.dirtyResources);
+    const [mixedResource] = Object.values(mixed.dirty.dirtyResources);
+
+    expect(Object.keys(agreeing.dirty.dirtyResources)).toHaveLength(1);
+    expect(agreeingResource).toMatchObject({
+      count: 2,
+      jobKind: "reconcile",
+      sourceProviderSlug: null,
+      timingSourceProviderSlug: "garmin",
+    });
+    expect(Object.keys(mixed.dirty.dirtyResources)).toHaveLength(1);
+    expect(mixedResource).toMatchObject({
+      count: 2,
+      jobKind: "reconcile",
+      sourceProviderSlug: null,
+      timingSourceProviderSlug: null,
+    });
+    expect(agreeing.dirty.sourceProviderCounts).toEqual({ unknown: 2 });
+    expect(mixed.dirty.sourceProviderCounts).toEqual({ unknown: 2 });
+    expect(Object.keys(agreeing.persistedDirtyResources)).toHaveLength(1);
+    expect(Object.keys(mixed.persistedDirtyResources)).toHaveLength(1);
+  });
+
   it("moves Junction webhook payload JSON out of the compact dirty row while preserving the runtime resource", async () => {
     installHostedSecureBoxStringTestCodec();
     let createData: Record<string, unknown> | null = null;
@@ -1310,6 +1408,7 @@ describe("PrismaHostedDirtyConnectionStore dirty pending state", () => {
           resource: "steps",
           resourceCategory: "timeseries",
           sourceProviderSlug: "garmin",
+          timingSourceProviderSlug: "garmin",
           windowEnd: "2026-05-27T00:00:00.000Z",
           windowStart: "2026-05-26T00:00:00.000Z",
         },
@@ -1347,6 +1446,7 @@ describe("PrismaHostedDirtyConnectionStore dirty pending state", () => {
       eventToProviderSendBucket: "under_5_minutes",
       firstWebhookReceivedAt: "2026-05-26T12:00:00.000Z",
       providerSendToWebhookMs: 60_000,
+      timingSourceProviderSlug: "garmin",
     });
     expect(prisma.deviceSyncDirtyConnection.createMany).toHaveBeenCalledTimes(1);
     expect(prisma.deviceSyncDirtyPayload.createMany).toHaveBeenCalledTimes(1);
@@ -1654,6 +1754,7 @@ describe("PrismaHostedDirtyConnectionStore dirty pending state", () => {
     const store = new PrismaHostedDirtyConnectionStore(prisma as never);
 
     const result = await store.listPendingDirtyConnectionsForUser({
+      connectionId: "dsc_junction_revision_ack",
       limit: 10,
       userId: "member_123",
     });
@@ -1671,6 +1772,10 @@ describe("PrismaHostedDirtyConnectionStore dirty pending state", () => {
     };
     expect(query.text).toMatch(
       /and\s*\(\s*"dirty_revision"\s*>\s*"processed_revision"\s*or\s+exists\s*\(/su,
+    );
+    expect(query.text).toContain('and "connection_id" =');
+    expect((queryCalls[0] as { values: unknown[] }).values).toContain(
+      "dsc_junction_revision_ack",
     );
     expect(query.text).toContain(
       '"payload"."connection_id" = "device_sync_dirty_connection"."connection_id"',

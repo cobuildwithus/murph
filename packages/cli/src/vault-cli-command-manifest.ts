@@ -1155,12 +1155,12 @@ export const vaultCliCommandDescriptors = [
       },
       {
         path: ['workout', 'import', 'inspect'],
-        description: 'Inspect one workout CSV file without writing anything.',
+        description: 'Inspect one workout CSV file without writing anything, including timezone and unit requirements.',
       },
       {
         path: ['workout', 'import', 'csv'],
         description:
-          'Copy one workout CSV export into raw/workouts/** and optionally map it into activity_session events.',
+          'Validate one complete workout CSV and bulk-commit replay-safe activity_session events with bounded output.',
       },
       {
         path: ['workout', 'format', 'save'],
@@ -1521,7 +1521,7 @@ export const vaultCliCommandDescriptors = [
       },
       {
         path: ['wearables', 'body', 'list'],
-        description: 'List semantic daily body-state summaries with deduped weight, body-fat, BMI, temperature, and source-confidence details.',
+        description: 'List semantic daily body-state and body-composition summaries with source-confidence details.',
         output: wearablesBodyStateListResultSchema,
       },
       {

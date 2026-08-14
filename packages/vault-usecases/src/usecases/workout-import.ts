@@ -1,20 +1,49 @@
+import type {
+  PlannedWorkoutCsvSession,
+  WorkoutCsvDistanceUnit,
+  WorkoutCsvImportPlan,
+  WorkoutCsvSource,
+  WorkoutCsvWeightUnit,
+} from '@murphai/importers'
+
 import { createHash } from 'node:crypto'
-import { basename, extname } from 'node:path'
-import path from 'node:path'
-import { readFile } from 'node:fs/promises'
+import { readFile, stat } from 'node:fs/promises'
+import path, { basename, extname } from 'node:path'
+
 import {
   ID_PREFIXES,
+  type EventRecord,
   type JsonObject,
+  type RawImportManifest,
   type WorkoutSession,
   type WorkoutSet,
-  type WorkoutSetType,
 } from '@murphai/contracts'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
+
 import { loadRuntimeModule } from '../runtime-import.js'
-import { compactObject, normalizeOptionalText, toEventUpsertVaultCliError } from './vault-usecase-helpers.js'
-import { inferDurationMinutes } from './text-duration.js'
+import { compactObject, toVaultCliError } from './vault-usecase-helpers.js'
 import { buildStructuredWorkoutActivitySessionDraft } from './workout.js'
-import { loadWorkoutCoreRuntime } from './workout-core.js'
+
+const DEFAULT_SOURCE = 'strong'
+const DEFAULT_DELIMITER = ','
+const RESULT_LIST_LIMIT = 10
+const EXACT_RAW_CANDIDATE_LIMIT = 100
+const PRIOR_RAW_BATCH_LIMIT = 100
+const PRIOR_RAW_TOTAL_BYTES_LIMIT = 50 * 1024 * 1024
+// This version orders importer mapping semantics, not the revisionless CSV.
+// Bump it only when a corrected mapping must supersede prior canonical output.
+const WORKOUT_CSV_MAPPING_REVISION = '2026-08-12T19:00:00.000Z'
+
+interface WorkoutImportBatchResult {
+  applied: boolean
+  receivedCount: number
+  createdCount: number
+  skippedExistingCount: number
+  supersededCount: number
+  eventIds: string[]
+  eventShardPaths: string[]
+  auditPath: string | null
+}
 
 interface WorkoutImportCoreRuntime {
   applyCanonicalWriteBatch(input: {
@@ -36,6 +65,20 @@ interface WorkoutImportCoreRuntime {
     }>
   }): Promise<unknown>
   buildRawImportManifest(input: Record<string, unknown>): Record<string, unknown>
+  importEventBatch(input: {
+    vaultRoot: string
+    decisions: JsonObject[]
+    apply?: boolean
+  }): Promise<WorkoutImportBatchResult>
+  findEventsByRawRefs(input: {
+    vaultRoot: string
+    rawRefs: string[]
+    system?: string
+    resourceType?: string
+  }): Promise<WorkoutRawRefMatch[][]>
+  loadVault(input: { vaultRoot: string }): Promise<{
+    metadata: { timezone: string }
+  }>
   resolveRawAssetDirectory(input: {
     owner: {
       kind: string
@@ -44,14 +87,72 @@ interface WorkoutImportCoreRuntime {
     }
     occurredAt: string
   }): string
+  resolveVaultPath(vaultRoot: string, relativePath: string): {
+    absolutePath: string
+  }
+  parseRawImportManifest(value: unknown): RawImportManifest
+  walkVaultFiles(
+    vaultRoot: string,
+    relativeDirectory: string,
+    options?: { extension?: string },
+  ): Promise<string[]>
 }
 
 interface WorkoutImportersRuntime {
-  parseDelimitedRows(text: string, delimiter: string): string[][]
+  planWorkoutCsvImport(input: {
+    text: string
+    timeZone: string
+    source?: WorkoutCsvSource
+    delimiter?: string
+    weightUnit?: WorkoutCsvWeightUnit
+    distanceUnit?: WorkoutCsvDistanceUnit
+  }): WorkoutCsvImportPlan
 }
 
 interface WorkoutImportStateRuntime {
   generateUlid(): string
+}
+
+interface PreparedRawWorkoutBatch {
+  importId: string
+  manifest: Record<string, unknown>
+  manifestFile: string
+  rawFile: string
+}
+
+interface ExactRawWorkoutFile {
+  rawFile: string
+  source?: WorkoutCsvSource
+  delimiter?: string
+  weightUnit?: WorkoutCsvWeightUnit | null
+  distanceUnit?: WorkoutCsvDistanceUnit | null
+  timeZone?: string
+}
+
+interface PriorRawWorkoutFile extends ExactRawWorkoutFile {
+  text: string
+}
+
+interface PriorWorkoutSnapshotEvidence {
+  files: PriorRawWorkoutFile[]
+  matchesByFile: WorkoutRawRefMatch[][]
+}
+
+interface WorkoutExternalIdentity {
+  system: string
+  resourceType: string
+  resourceId: string
+  facet?: string
+}
+
+interface WorkoutExpectedLatest extends JsonObject {
+  eventId: string
+  lifecycleRevision: number
+}
+
+interface WorkoutRawRefMatch {
+  attachment: EventRecord
+  latest: EventRecord
 }
 
 async function loadWorkoutImportCoreRuntime(): Promise<WorkoutImportCoreRuntime> {
@@ -66,56 +167,12 @@ async function loadWorkoutImportStateRuntime(): Promise<WorkoutImportStateRuntim
   return loadRuntimeModule<WorkoutImportStateRuntime>('@murphai/runtime-state')
 }
 
-const DEFAULT_SOURCE = 'strong'
-const DEFAULT_DELIMITER = ','
-
-interface CsvInspection {
-  sourceFile: string
-  source: string
-  detectedSource: string | null
-  delimiter: string
-  headers: string[]
-  rowCount: number
-  estimatedWorkouts: number
-  importable: boolean
-  warnings: string[]
-  rows: string[][]
-}
-
-interface WorkoutCsvSessionExercise {
-  name: string
-  order: number
-  groupId?: string
-  mode?: WorkoutSession['exercises'][number]['mode']
-  unitOverride?: 'lb' | 'kg'
-  note?: string
-  sets: WorkoutSet[]
-}
-
-interface WorkoutCsvSession {
-  key: string
-  title: string
-  occurredAt?: string
-  startedAt?: string
-  endedAt?: string
-  durationMinutes?: number
-  distanceKm?: number
-  note?: string
-  rawRows: number[]
-  exercises: WorkoutCsvSessionExercise[]
-}
-
-function normalizeHeaderName(value: string): string {
-  return value.trim().toLowerCase().replace(/[^a-z0-9]+/gu, '')
-}
-
 function sanitizePathSegment(value: string, fallback: string): string {
   const normalized = value
     .trim()
     .toLowerCase()
     .replace(/[^a-z0-9]+/gu, '-')
     .replace(/^-+|-+$/gu, '')
-
   return normalized.length > 0 ? normalized : fallback
 }
 
@@ -124,679 +181,1749 @@ function sanitizeFileName(fileName: string): string {
   const stem = basename(fileName, ext)
     .replace(/[^A-Za-z0-9._-]+/gu, '-')
     .replace(/^-+|-+$/gu, '')
-  const safeStem = stem.length > 0 ? stem : 'workout-import'
-  return `${safeStem}${ext || '.csv'}`
+  return `${stem.length > 0 ? stem : 'workout-import'}${ext || '.csv'}`
 }
 
-function valueAt(row: readonly string[], index: number | undefined): string | undefined {
-  if (index === undefined) {
-    return undefined
-  }
-
-  const value = row[index]
-  return typeof value === 'string' ? value.trim() : undefined
-}
-
-function findHeaderIndex(headers: readonly string[], aliases: readonly string[]): number | undefined {
-  const normalizedHeaders = headers.map(normalizeHeaderName)
-
-  for (const alias of aliases) {
-    const aliasKey = normalizeHeaderName(alias)
-    const index = normalizedHeaders.indexOf(aliasKey)
-    if (index >= 0) {
-      return index
-    }
-  }
-
-  return undefined
-}
-
-function parseOptionalNumber(value: string | undefined): number | undefined {
-  const normalized = normalizeOptionalText(value)
-  if (!normalized) {
-    return undefined
-  }
-
-  const match = normalized.replace(/,/gu, '').match(/-?\d+(?:\.\d+)?/u)
-  if (!match) {
-    return undefined
-  }
-
-  const parsed = Number.parseFloat(match[0])
-  return Number.isFinite(parsed) ? parsed : undefined
-}
-
-function parseBooleanLike(value: string | undefined): boolean {
-  const normalized = normalizeOptionalText(value)?.toLowerCase()
-  return normalized === 'true' || normalized === 'yes' || normalized === 'y' || normalized === '1'
-}
-
-function parseOptionalInteger(value: string | undefined): number | undefined {
-  const parsed = parseOptionalNumber(value)
-  if (parsed === undefined) {
-    return undefined
-  }
-
-  return Math.round(parsed)
-}
-
-function normalizeLoadUnit(value: string | undefined): 'lb' | 'kg' | undefined {
-  const normalized = normalizeOptionalText(value)?.toLowerCase()
-  if (!normalized) {
-    return undefined
-  }
-
-  if (normalized.startsWith('lb') || normalized.startsWith('pound')) {
-    return 'lb'
-  }
-
-  if (normalized.startsWith('kg') || normalized.startsWith('kilo')) {
-    return 'kg'
-  }
-
-  return undefined
-}
-
-function parseWeight(value: string | undefined): { weight?: number; unit?: 'lb' | 'kg' } {
-  const normalized = normalizeOptionalText(value)
-  if (!normalized) {
-    return {}
-  }
-
-  return {
-    weight: parseOptionalNumber(normalized),
-    unit: normalizeLoadUnit(normalized),
-  }
-}
-
-function parseDistanceMeters(value: string | undefined): number | undefined {
-  const normalized = normalizeOptionalText(value)?.toLowerCase()
-  if (!normalized) {
-    return undefined
-  }
-
-  const amount = parseOptionalNumber(normalized)
-  if (amount === undefined) {
-    return undefined
-  }
-
-  if (normalized.includes('km')) {
-    return amount * 1000
-  }
-
-  if (normalized.includes('mi')) {
-    return amount * 1609.344
-  }
-
-  if (normalized.includes('m')) {
-    return amount
-  }
-
-  return amount
-}
-
-function parseDistanceKm(value: string | undefined): number | undefined {
-  const meters = parseDistanceMeters(value)
-  return meters !== undefined ? meters / 1000 : undefined
-}
-
-function parseDurationSeconds(value: string | undefined): number | undefined {
-  const normalized = normalizeOptionalText(value)?.toLowerCase()
-  if (!normalized) {
-    return undefined
-  }
-
-  const colonParts = normalized.split(':').map((part) => part.trim())
-  if (colonParts.length === 2 || colonParts.length === 3) {
-    const numbers = colonParts.map((part) => Number.parseInt(part, 10))
-    if (numbers.every((entry) => Number.isFinite(entry))) {
-      if (numbers.length === 2) {
-        const [minutes, seconds] = numbers
-        return minutes! * 60 + seconds!
-      }
-
-      const [hours, minutes, seconds] = numbers
-      return hours! * 3600 + minutes! * 60 + seconds!
-    }
-  }
-
-  const inferredMinutes = inferDurationMinutes(normalized)
-  if (typeof inferredMinutes === 'number') {
-    return inferredMinutes * 60
-  }
-
-  const amount = parseOptionalNumber(normalized)
-  if (amount === undefined) {
-    return undefined
-  }
-
-  if (normalized.includes('hour')) {
-    return Math.round(amount * 3600)
-  }
-
-  if (normalized.includes('min')) {
-    return Math.round(amount * 60)
-  }
-
-  return Math.round(amount)
-}
-
-function parseDurationMinutes(value: string | undefined): number | undefined {
-  const normalized = normalizeOptionalText(value)?.toLowerCase()
-  if (!normalized) {
-    return undefined
-  }
-
-  if (normalized.includes(':')) {
-    const seconds = parseDurationSeconds(normalized)
-    return seconds !== undefined ? Math.max(1, Math.round(seconds / 60)) : undefined
-  }
-
-  const inferredMinutes = inferDurationMinutes(normalized)
-  if (typeof inferredMinutes === 'number') {
-    return inferredMinutes
-  }
-
-  const amount = parseOptionalNumber(normalized)
-  if (amount === undefined) {
-    return undefined
-  }
-
-  if (normalized.includes('hour')) {
-    return Math.max(1, Math.round(amount * 60))
-  }
-
-  if (normalized.includes('sec')) {
-    return Math.max(1, Math.round(amount / 60))
-  }
-
-  return Math.max(1, Math.round(amount))
-}
-
-function normalizeSetType(value: string | undefined): WorkoutSetType | undefined {
-  const normalized = normalizeOptionalText(value)?.toLowerCase()
-  if (!normalized) {
-    return undefined
-  }
-
-  if (normalized.includes('warm')) {
-    return 'warmup'
-  }
-
-  if (normalized.includes('drop')) {
-    return 'dropset'
-  }
-
-  if (normalized.includes('fail')) {
-    return 'failure'
-  }
-
-  return 'normal'
-}
-
-function normalizeTimestamp(dateValue: string | undefined, timeValue?: string | undefined): string | undefined {
-  const dateText = normalizeOptionalText(dateValue)
-  const timeText = normalizeOptionalText(timeValue)
-
-  if (dateText && timeText) {
-    const composite = `${dateText} ${timeText}`
-    const parsed = new Date(composite)
-    if (Number.isFinite(parsed.getTime())) {
-      return parsed.toISOString()
-    }
-  }
-
-  if (dateText) {
-    if (/^\d{4}-\d{2}-\d{2}$/u.test(dateText)) {
-      return `${dateText}T12:00:00.000Z`
-    }
-
-    const parsed = new Date(dateText)
-    if (Number.isFinite(parsed.getTime())) {
-      return parsed.toISOString()
-    }
-  }
-
-  return undefined
-}
-
-function detectSource(headers: readonly string[]): string | null {
-  const normalizedHeaders = new Set(headers.map(normalizeHeaderName))
-
-  if (
-    normalizedHeaders.has('exerciseimage')
-    || normalizedHeaders.has('primarymuscles')
-    || normalizedHeaders.has('secondarymuscles')
-  ) {
-    return 'hevy'
-  }
-
-  if (
-    normalizedHeaders.has('workoutname')
-    || normalizedHeaders.has('exercisename')
-    || normalizedHeaders.has('setorder')
-  ) {
-    return 'strong'
-  }
-
-  return null
-}
-
-async function inspectWorkoutCsv(input: {
-  file: string
-  source?: string
-  delimiter?: string
-  text: string
-}): Promise<CsvInspection> {
-  const delimiter = input.delimiter ?? DEFAULT_DELIMITER
-  const { parseDelimitedRows } = await loadWorkoutImportersRuntime()
-  const rows = parseDelimitedRows(input.text, delimiter)
-
-  if (rows.length === 0) {
-    throw new VaultCliError('invalid_payload', 'Workout CSV is empty.')
-  }
-
-  const headerRow = rows[0] ?? []
-  const headers = headerRow.map((cell) => cell.trim())
-  const dataRows = rows.slice(1).filter((row) => row.some((cell) => cell.trim().length > 0))
-  const detectedSource = detectSource(headers)
-  const workoutNameIndex = findHeaderIndex(headers, ['workout name', 'workout', 'routine name', 'routine', 'name'])
-  const dateIndex = findHeaderIndex(headers, ['date', 'workout date', 'session date', 'day'])
-  const startTimeIndex = findHeaderIndex(headers, ['start time', 'start', 'started at', 'started'])
-
-  const estimatedKeys = new Set<string>()
-  for (const row of dataRows) {
-    const workoutName = valueAt(row, workoutNameIndex) ?? 'workout'
-    const occurredAt = normalizeTimestamp(valueAt(row, dateIndex), valueAt(row, startTimeIndex)) ?? `row-${estimatedKeys.size + 1}`
-    estimatedKeys.add(`${occurredAt}::${workoutName}`)
-  }
-
-  const warnings: string[] = []
-  if (headers.length === 0) {
-    warnings.push('The CSV header row did not contain any recognizable columns.')
-  }
-
-  if (findHeaderIndex(headers, ['exercise name', 'exercise', 'movement']) === undefined) {
-    warnings.push('No exercise column was detected; structured set import will be limited.')
-  }
-
-  return {
-    sourceFile: input.file,
-    source: input.source ?? detectedSource ?? DEFAULT_SOURCE,
-    detectedSource,
-    delimiter,
-    headers,
-    rowCount: dataRows.length,
-    estimatedWorkouts: estimatedKeys.size,
-    importable: dataRows.length > 0 && headers.length > 0,
-    warnings,
-    rows,
-  }
-}
-
-function resolveExerciseMode(exercise: WorkoutCsvSessionExercise): WorkoutCsvSessionExercise['mode'] {
-  const sets = exercise.sets
-  if (sets.some((set) => typeof set.assistanceKg === 'number')) {
-    return 'assisted_bodyweight'
-  }
-
-  if (sets.some((set) => typeof set.addedWeightKg === 'number')) {
-    return 'weighted_bodyweight'
-  }
-
-  if (sets.some((set) => typeof set.bodyweightKg === 'number')) {
-    return 'bodyweight'
-  }
-
-  if (sets.some((set) => typeof set.distanceMeters === 'number') && sets.some((set) => typeof set.durationSeconds === 'number')) {
-    return 'cardio'
-  }
-
-  if (sets.every((set) => typeof set.durationSeconds === 'number' && set.reps === undefined && set.weight === undefined)) {
-    return 'duration'
-  }
-
-  return 'weight_reps'
-}
-
-function buildWorkoutSessionsFromCsv(headers: readonly string[], rows: readonly string[][]): WorkoutCsvSession[] {
-  const workoutNameIndex = findHeaderIndex(headers, ['workout name', 'workout', 'routine name', 'routine', 'name'])
-  const dateIndex = findHeaderIndex(headers, ['date', 'workout date', 'session date', 'day'])
-  const startTimeIndex = findHeaderIndex(headers, ['start time', 'start', 'started at', 'started'])
-  const endTimeIndex = findHeaderIndex(headers, ['end time', 'end', 'ended at', 'ended'])
-  const durationIndex = findHeaderIndex(headers, ['duration minutes', 'duration min', 'duration'])
-  const distanceIndex = findHeaderIndex(headers, ['distance', 'distance km'])
-  const workoutNoteIndex = findHeaderIndex(headers, ['note', 'notes', 'workout note', 'session note'])
-  const exerciseNameIndex = findHeaderIndex(headers, ['exercise name', 'exercise', 'movement'])
-  const exerciseNoteIndex = findHeaderIndex(headers, ['exercise note', 'movement note'])
-  const setOrderIndex = findHeaderIndex(headers, ['set order', 'set number', 'set'])
-  const repsIndex = findHeaderIndex(headers, ['reps', 'rep'])
-  const weightIndex = findHeaderIndex(headers, ['weight', 'load'])
-  const weightUnitIndex = findHeaderIndex(headers, ['weight unit', 'load unit', 'unit'])
-  const setTypeIndex = findHeaderIndex(headers, ['set type', 'type'])
-  const groupIndex = findHeaderIndex(headers, ['group', 'group id', 'superset', 'circuit'])
-  const rpeIndex = findHeaderIndex(headers, ['rpe'])
-  const durationSecondsIndex = findHeaderIndex(headers, ['duration seconds', 'seconds', 'time'])
-  const setDistanceIndex = findHeaderIndex(headers, ['set distance', 'distance meters', 'distance'])
-  const bodyweightIndex = findHeaderIndex(headers, ['bodyweight', 'body weight'])
-  const assistanceIndex = findHeaderIndex(headers, ['assistance', 'assisted weight'])
-  const addedWeightIndex = findHeaderIndex(headers, ['added weight', 'extra weight'])
-  const warmupIndex = findHeaderIndex(headers, ['warmup', 'warm up'])
-  const dropsetIndex = findHeaderIndex(headers, ['dropset', 'drop set'])
-  const failureIndex = findHeaderIndex(headers, ['failure'])
-
-  const sessions = new Map<string, WorkoutCsvSession>()
-
-  for (let rowIndex = 1; rowIndex < rows.length; rowIndex += 1) {
-    const row = rows[rowIndex]
-    if (!row || row.every((cell) => cell.trim().length === 0)) {
-      continue
-    }
-
-    const workoutName = valueAt(row, workoutNameIndex) ?? 'Workout'
-    const occurredAt = normalizeTimestamp(valueAt(row, dateIndex), valueAt(row, startTimeIndex))
-    const key = `${occurredAt ?? `row-${rowIndex + 1}`}::${workoutName}`
-    let session = sessions.get(key)
-
-    if (!session) {
-      session = {
-        key,
-        title: workoutName,
-        occurredAt,
-        startedAt: occurredAt,
-        endedAt: normalizeTimestamp(valueAt(row, dateIndex), valueAt(row, endTimeIndex)),
-        durationMinutes: parseDurationMinutes(valueAt(row, durationIndex)),
-        distanceKm: parseDistanceKm(valueAt(row, distanceIndex)),
-        note: valueAt(row, workoutNoteIndex),
-        rawRows: [],
-        exercises: [],
-      }
-      sessions.set(key, session)
-    }
-
-    session.rawRows.push(rowIndex + 1)
-    session.note = session.note ?? valueAt(row, workoutNoteIndex)
-    session.durationMinutes = session.durationMinutes ?? parseDurationMinutes(valueAt(row, durationIndex))
-    session.distanceKm = session.distanceKm ?? parseDistanceKm(valueAt(row, distanceIndex))
-    session.endedAt = session.endedAt ?? normalizeTimestamp(valueAt(row, dateIndex), valueAt(row, endTimeIndex))
-
-    const exerciseName = valueAt(row, exerciseNameIndex)
-    if (!exerciseName) {
-      continue
-    }
-
-    let exercise = session.exercises.find((entry) => entry.name === exerciseName)
-    if (!exercise) {
-      exercise = {
-        name: exerciseName,
-        order: session.exercises.length + 1,
-        groupId: valueAt(row, groupIndex),
-        note: valueAt(row, exerciseNoteIndex),
-        sets: [],
-      }
-      session.exercises.push(exercise)
-    }
-
-    const parsedWeight = parseWeight(valueAt(row, weightIndex))
-    const explicitWeightUnit = normalizeLoadUnit(valueAt(row, weightUnitIndex))
-    const type = normalizeSetType(valueAt(row, setTypeIndex))
-      ?? (parseBooleanLike(valueAt(row, warmupIndex))
-        ? 'warmup'
-        : parseBooleanLike(valueAt(row, dropsetIndex))
-          ? 'dropset'
-          : parseBooleanLike(valueAt(row, failureIndex))
-            ? 'failure'
-            : 'normal')
-    const set: WorkoutSet = compactObject({
-      order: parseOptionalInteger(valueAt(row, setOrderIndex)) ?? exercise.sets.length + 1,
-      type,
-      reps: parseOptionalInteger(valueAt(row, repsIndex)),
-      weight: parsedWeight.weight,
-      weightUnit: explicitWeightUnit ?? parsedWeight.unit,
-      durationSeconds: parseDurationSeconds(valueAt(row, durationSecondsIndex)),
-      distanceMeters: parseDistanceMeters(valueAt(row, setDistanceIndex)),
-      rpe: parseOptionalNumber(valueAt(row, rpeIndex)),
-      bodyweightKg: parseOptionalNumber(valueAt(row, bodyweightIndex)),
-      assistanceKg: parseOptionalNumber(valueAt(row, assistanceIndex)),
-      addedWeightKg: parseOptionalNumber(valueAt(row, addedWeightIndex)),
-    }) as WorkoutSet
-
-    if (
-      set.reps === undefined
-      && set.weight === undefined
-      && set.durationSeconds === undefined
-      && set.distanceMeters === undefined
-      && set.rpe === undefined
-      && set.bodyweightKg === undefined
-      && set.assistanceKg === undefined
-      && set.addedWeightKg === undefined
-    ) {
-      continue
-    }
-
-    exercise.sets.push(set)
-    exercise.groupId = exercise.groupId ?? valueAt(row, groupIndex)
-    exercise.note = exercise.note ?? valueAt(row, exerciseNoteIndex)
-  }
-
-  return [...sessions.values()].map((session) => ({
-    ...session,
-    durationMinutes:
-      session.durationMinutes
-      ?? (session.startedAt && session.endedAt
-        ? Math.max(1, Math.round((new Date(session.endedAt).getTime() - new Date(session.startedAt).getTime()) / 60000))
-        : undefined),
-    exercises: session.exercises
-      .map((exercise) => ({
-        ...exercise,
-        mode: resolveExerciseMode(exercise),
-        unitOverride:
-          exercise.sets.find((set) => set.weightUnit)?.weightUnit,
-        sets: exercise.sets.slice().sort((left, right) => left.order - right.order),
-      }))
-      .filter((exercise) => exercise.sets.length > 0),
-  }))
-}
-
-export async function inspectWorkoutCsvImport(input: {
-  vault: string
-  file: string
-  source?: string
-  delimiter?: string
-}) {
-  const text = await readFile(input.file, 'utf8')
-  const inspection = await inspectWorkoutCsv({
-    file: input.file,
-    source: input.source,
-    delimiter: input.delimiter,
-    text,
-  })
-
-  return {
-    vault: input.vault,
-    sourceFile: input.file,
-    source: inspection.source,
-    detectedSource: inspection.detectedSource,
-    delimiter: inspection.delimiter,
-    headers: inspection.headers,
-    rowCount: inspection.rowCount,
-    estimatedWorkouts: inspection.estimatedWorkouts,
-    importable: inspection.importable,
-    warnings: inspection.warnings,
-  }
-}
-
-export async function importWorkoutCsv(input: {
-  vault: string
-  file: string
-  source?: string
-  delimiter?: string
-  storeRawOnly?: boolean
-}) {
-  const text = await readFile(input.file, 'utf8')
-  const inspection = await inspectWorkoutCsv({
-    file: input.file,
-    source: input.source,
-    delimiter: input.delimiter,
-    text,
-  })
-  const [{ generateUlid }, coreRuntime] = await Promise.all([
-    loadWorkoutImportStateRuntime(),
-    loadWorkoutImportCoreRuntime(),
-  ])
+function eventRecordToImportPayload(record: EventRecord): JsonObject {
   const {
-    applyCanonicalWriteBatch,
-    buildRawImportManifest,
-    resolveRawAssetDirectory,
-  } = coreRuntime
-  const importId = `${ID_PREFIXES.transform}_${generateUlid()}`
-  const importedAt = new Date().toISOString()
-  const safeSource = sanitizePathSegment(inspection.source, DEFAULT_SOURCE)
-  const rawDirectory = resolveRawAssetDirectory({
-    owner: {
-      kind: 'workout_batch',
-      id: importId,
-      partition: safeSource,
-    },
-    occurredAt: importedAt,
+    schemaVersion: _schemaVersion,
+    id: _id,
+    dayKey: _dayKey,
+    lifecycle: _lifecycle,
+    ...payload
+  } = record
+  return structuredClone(payload)
+}
+
+function buildWorkoutEventDecisions(
+  plan: WorkoutCsvImportPlan,
+  rawFile: string,
+  existingExternalRefs?: readonly WorkoutExternalIdentity[],
+  mappingRevision = WORKOUT_CSV_MAPPING_REVISION,
+  existingPayloads?: readonly (JsonObject | null | undefined)[],
+  expectedLatest?: readonly (WorkoutExpectedLatest | undefined)[],
+): { decisions: JsonObject[], suppressedDeletedCount: number } {
+  let suppressedDeletedCount = 0
+  const decisions = plan.sessions.flatMap((session, index): JsonObject[] => {
+    const existingPayload = existingPayloads?.[index]
+    if (existingPayload === null) {
+      suppressedDeletedCount += 1
+      return []
+    }
+    if (existingPayload) {
+      return [{
+        action: 'upsert',
+        payload: existingPayload,
+        ...(expectedLatest?.[index] ? { expectedLatest: expectedLatest[index] } : {}),
+      }]
+    }
+    const existingExternalRef = existingExternalRefs?.[index]
+    const draft = buildStructuredWorkoutActivitySessionDraft({
+      payload: compactObject({
+        title: session.title,
+        occurredAt: session.occurredAt,
+        timeZone: plan.timeZone,
+        source: 'import',
+        activityType: 'strength-training',
+        durationMinutes: session.durationMinutes,
+        distanceKm: session.distanceKm,
+        note: session.note,
+        rawRefs: [rawFile],
+        externalRef: {
+          system: existingExternalRef?.system ?? sanitizePathSegment(plan.source, DEFAULT_SOURCE),
+          resourceType: existingExternalRef?.resourceType ?? 'workout-session',
+          resourceId: existingExternalRef?.resourceId ?? session.sourceWorkoutId,
+          version: mappingRevision,
+          ...(existingExternalRef?.facet ? { facet: existingExternalRef.facet } : {}),
+        },
+        workout: session.workout,
+      }) as JsonObject,
+      source: 'import',
+      allowUnknownDuration: true,
+    })
+
+    const payload = {
+      kind: 'activity_session',
+      ...draft,
+    } as JsonObject
+
+    return [{
+      action: 'upsert',
+      payload,
+    }]
   })
-  const safeFileName = sanitizeFileName(path.basename(input.file))
-  const rawFile = path.posix.join(rawDirectory, safeFileName)
-  const manifestFile = path.posix.join(rawDirectory, 'manifest.json')
+  return { decisions, suppressedDeletedCount }
+}
 
-  const sessions = buildWorkoutSessionsFromCsv(inspection.headers, inspection.rows)
-  const warnings = [...inspection.warnings]
-
-  if (sessions.length === 0 && !input.storeRawOnly) {
-    warnings.push('No structured workouts were detected; only the raw CSV was stored.')
+function prepareRawWorkoutBatch(input: {
+  core: WorkoutImportCoreRuntime
+  file: string
+  text: string
+  plan: WorkoutCsvImportPlan
+  importId: string
+  importedAt: string
+}): PreparedRawWorkoutBatch {
+  const safeSource = sanitizePathSegment(input.plan.source, DEFAULT_SOURCE)
+  const owner = {
+    kind: 'workout_batch',
+    id: input.importId,
+    partition: safeSource,
   }
-
-  const manifest = buildRawImportManifest({
-    importId,
+  const rawDirectory = input.core.resolveRawAssetDirectory({
+    owner,
+    occurredAt: input.importedAt,
+  })
+  const rawFile = path.posix.join(rawDirectory, sanitizeFileName(path.basename(input.file)))
+  const manifestFile = path.posix.join(rawDirectory, 'manifest.json')
+  const warnings = input.plan.warnings
+  const manifest = input.core.buildRawImportManifest({
+    importId: input.importId,
     importKind: 'workout_batch',
-    importedAt,
-    owner: {
-      kind: 'workout_batch',
-      id: importId,
-      partition: safeSource,
-    },
-    source: inspection.source,
+    importedAt: input.importedAt,
+    owner,
+    source: input.plan.source,
     rawDirectory,
     artifacts: [{
       role: 'source',
       relativePath: rawFile,
       originalFileName: path.basename(input.file),
       mediaType: 'text/csv',
-      byteSize: new TextEncoder().encode(text).byteLength,
-      sha256: createHash('sha256').update(text).digest('hex'),
+      byteSize: new TextEncoder().encode(input.text).byteLength,
+      sha256: createHash('sha256').update(input.text).digest('hex'),
     }],
     provenance: {
       sourceFileName: path.basename(input.file),
-      delimiter: inspection.delimiter,
-      headers: inspection.headers,
-      rowCount: inspection.rowCount,
-      estimatedWorkouts: inspection.estimatedWorkouts,
+      delimiter: input.plan.delimiter,
+      rowCount: input.plan.rowCount,
+      estimatedWorkouts: input.plan.estimatedWorkouts,
+      repairedRowCount: input.plan.repairedRowCount,
+      ignoredRowCount: input.plan.ignoredRowCount,
+      skippedRowCount: input.plan.skippedRowCount,
+      skipReasons: input.plan.skipReasons,
+      timeZone: input.plan.timeZone,
+      weightUnit: input.plan.weightUnit,
+      distanceUnit: input.plan.distanceUnit,
       warnings,
     },
   })
 
-  await applyCanonicalWriteBatch({
+  return {
+    importId: input.importId,
+    manifest,
+    manifestFile,
+    rawFile,
+  }
+}
+
+async function storeRawWorkoutBatch(input: {
+  core: WorkoutImportCoreRuntime
+  vault: string
+  sourceFile: string
+  text: string
+  batch: PreparedRawWorkoutBatch
+}): Promise<void> {
+  await input.core.applyCanonicalWriteBatch({
     vaultRoot: input.vault,
-    operationType: 'workout_import_csv',
-    summary: `Import workout CSV ${path.basename(input.file)}`,
+    operationType: 'workout_import_csv_raw',
+    summary: `Store workout CSV ${path.basename(input.sourceFile)}`,
     audit: {
-      action: 'workout_import_csv',
+      action: 'workout_import_csv_raw',
       commandName: 'vaultUsecases.importWorkoutCsv',
-      summary: `Imported workout CSV ${path.basename(input.file)}.`,
-      targetIds: [importId],
+      summary: `Stored workout CSV ${path.basename(input.sourceFile)} as immutable raw evidence.`,
+      targetIds: [input.batch.importId],
     },
     rawContents: [{
-      targetRelativePath: rawFile,
-      content: text,
-      originalFileName: path.basename(input.file),
+      targetRelativePath: input.batch.rawFile,
+      content: input.text,
+      originalFileName: path.basename(input.sourceFile),
       mediaType: 'text/csv',
       allowExistingMatch: true,
     }, {
-      targetRelativePath: manifestFile,
-      content: `${JSON.stringify(manifest, null, 2)}\n`,
+      targetRelativePath: input.batch.manifestFile,
+      content: `${JSON.stringify(input.batch.manifest, null, 2)}\n`,
       originalFileName: 'manifest.json',
       mediaType: 'application/json',
       allowExistingMatch: true,
     }],
   })
+}
 
-  const lookupIds: string[] = []
-  const ledgerFiles = new Set<string>()
+async function loadWorkoutCsvPlan(input: {
+  vault: string
+  file: string
+  source?: WorkoutCsvSource
+  delimiter?: string
+  weightUnit?: WorkoutCsvWeightUnit
+  distanceUnit?: WorkoutCsvDistanceUnit
+}): Promise<{
+  text: string
+  plan: WorkoutCsvImportPlan
+  core: WorkoutImportCoreRuntime
+  importers: WorkoutImportersRuntime
+}> {
+  const [text, core, importers] = await Promise.all([
+    readFile(input.file, 'utf8'),
+    loadWorkoutImportCoreRuntime(),
+    loadWorkoutImportersRuntime(),
+  ])
+  const vault = await core.loadVault({ vaultRoot: input.vault })
+  const plan = importers.planWorkoutCsvImport({
+    text,
+    timeZone: vault.metadata.timezone,
+    source: input.source,
+    delimiter: input.delimiter,
+    weightUnit: input.weightUnit,
+    distanceUnit: input.distanceUnit,
+  })
+  return { text, plan, core, importers }
+}
 
-  if (!input.storeRawOnly) {
-    const core = await loadWorkoutCoreRuntime()
+function assertStructuredPlanImportable(plan: WorkoutCsvImportPlan): void {
+  if (plan.requiresWeightUnit) {
+    throw new VaultCliError(
+      'invalid_option',
+      'This workout CSV contains positive weights without unit metadata. Pass --weight-unit lb or --weight-unit kg; nothing was imported.',
+    )
+  }
+  if (plan.requiresDistanceUnit) {
+    throw new VaultCliError(
+      'invalid_option',
+      'This workout CSV contains positive distances without unit metadata. Pass --distance-unit m, --distance-unit km, or --distance-unit mi; nothing was imported.',
+    )
+  }
+  if (plan.skippedRowCount > 0) {
+    throw new VaultCliError(
+      'invalid_payload',
+      `${plan.skippedRowCount} workout CSV row(s) could not be mapped safely; nothing was imported. Run workout import inspect for aggregate reasons.`,
+    )
+  }
+  if (plan.detectedSource === null || plan.sessions.length === 0) {
+    throw new VaultCliError(
+      'invalid_payload',
+      'Workout CSV does not contain a supported structured workout export; nothing was imported.',
+    )
+  }
+}
 
-    for (const session of sessions) {
-      if (session.exercises.length === 0) {
+function assertSupportedWorkoutSource(plan: WorkoutCsvImportPlan): void {
+  if (plan.detectedSource === null) {
+    throw new VaultCliError(
+      'invalid_payload',
+      'Workout CSV does not contain a supported structured workout export; nothing was stored.',
+    )
+  }
+}
+
+function capList(values: readonly string[]): { values: string[], truncated: boolean } {
+  return {
+    values: values.slice(0, RESULT_LIST_LIMIT),
+    truncated: values.length > RESULT_LIST_LIMIT,
+  }
+}
+
+async function findExactRawWorkoutFiles(input: {
+  core: WorkoutImportCoreRuntime
+  vault: string
+  text: string
+}): Promise<ExactRawWorkoutFile[]> {
+  const expectedBytes = new TextEncoder().encode(input.text).byteLength
+  const expectedHash = createHash('sha256').update(input.text).digest('hex')
+  const manifestFiles = (await input.core.walkVaultFiles(
+    input.vault,
+    'raw/workouts',
+    { extension: '.json' },
+  )).filter((relativePath) => path.posix.basename(relativePath) === 'manifest.json')
+  const candidates = new Map<string, ExactRawWorkoutFile>()
+
+  for (const manifestFile of manifestFiles) {
+    const manifestPath = input.core.resolveVaultPath(input.vault, manifestFile).absolutePath
+    const manifest = input.core.parseRawImportManifest(
+      JSON.parse(await readFile(manifestPath, 'utf8')),
+    )
+    if (manifest.importKind !== 'workout_batch') {
+      continue
+    }
+    const artifacts = manifest.artifacts.filter((artifact) =>
+      artifact.role === 'source'
+      && artifact.byteSize === expectedBytes
+      && artifact.sha256 === expectedHash
+      && artifact.relativePath.startsWith(`${manifest.rawDirectory}/`)
+      && artifact.relativePath.startsWith('raw/workouts/'))
+    for (const artifact of artifacts) {
+      if (candidates.has(artifact.relativePath)) {
         continue
       }
-
-      const workout: WorkoutSession = {
-        sourceApp: inspection.source,
-        sourceWorkoutId: session.key.slice(0, 200),
-        startedAt: session.startedAt,
-        endedAt: session.endedAt,
-        routineName: session.title,
-        sessionNote: session.note,
-        exercises: session.exercises.map((exercise) => ({
-          name: exercise.name,
-          order: exercise.order,
-          groupId: exercise.groupId,
-          mode: exercise.mode,
-          unitOverride: exercise.unitOverride,
-          note: exercise.note,
-          sets: exercise.sets,
-        })),
+      if (candidates.size >= EXACT_RAW_CANDIDATE_LIMIT) {
+        throw new VaultCliError(
+          'conflict',
+          `Workout CSV matches more than ${EXACT_RAW_CANDIDATE_LIMIT} prior raw batches; nothing was imported.`,
+        )
       }
-
-      const draft = buildStructuredWorkoutActivitySessionDraft({
-        payload: compactObject({
-          title: session.title,
-          occurredAt: session.occurredAt,
-          source: 'import',
-          activityType: 'strength-training',
-          durationMinutes: session.durationMinutes,
-          distanceKm: session.distanceKm,
-          note: session.note,
-          rawRefs: [rawFile],
-          externalRef: {
-            system: safeSource,
-            resourceType: 'workout-session',
-            resourceId: session.key.slice(0, 200),
-          },
-          workout,
-        }) as JsonObject,
-        source: 'import',
-      })
-
+      const absolutePath = input.core.resolveVaultPath(
+        input.vault,
+        artifact.relativePath,
+      ).absolutePath
+      let matches = false
       try {
-        const result = await core.addActivitySession({
-          vaultRoot: input.vault,
-          draft,
+        if ((await stat(absolutePath)).size === expectedBytes) {
+          const existingHash = createHash('sha256').update(await readFile(absolutePath)).digest('hex')
+          matches = existingHash === expectedHash
+        }
+      } catch {
+        matches = false
+      }
+      if (matches) {
+        const source = manifest.source === 'strong' || manifest.source === 'hevy'
+          ? manifest.source
+          : undefined
+        const delimiter = manifest.provenance.delimiter
+        const weightUnit = manifest.provenance.weightUnit
+        const distanceUnit = manifest.provenance.distanceUnit
+        const timeZone = manifest.provenance.timeZone
+        candidates.set(artifact.relativePath, {
+          rawFile: artifact.relativePath,
+          ...(source ? { source } : {}),
+          ...(typeof delimiter === 'string' && delimiter.length === 1 ? { delimiter } : {}),
+          ...(weightUnit === null || weightUnit === 'lb' || weightUnit === 'kg'
+            ? { weightUnit }
+            : {}),
+          ...(distanceUnit === null || distanceUnit === 'm' || distanceUnit === 'km' || distanceUnit === 'mi'
+            ? { distanceUnit }
+            : {}),
+          ...(typeof timeZone === 'string' ? { timeZone } : {}),
         })
-        lookupIds.push(result.eventId)
-        ledgerFiles.add(result.ledgerFile)
-      } catch (error) {
-        throw toEventUpsertVaultCliError(error)
+      }
+    }
+  }
+  return [...candidates.values()].sort((left, right) => left.rawFile.localeCompare(right.rawFile))
+}
+
+async function findPriorRawWorkoutFiles(input: {
+  core: WorkoutImportCoreRuntime
+  vault: string
+}): Promise<PriorRawWorkoutFile[]> {
+  const manifestFiles = (await input.core.walkVaultFiles(
+    input.vault,
+    'raw/workouts',
+    { extension: '.json' },
+  )).filter((relativePath) => path.posix.basename(relativePath) === 'manifest.json')
+  const candidates: PriorRawWorkoutFile[] = []
+  let workoutBatchCount = 0
+  let admittedBytes = 0
+
+  for (const manifestFile of manifestFiles) {
+    const manifestPath = input.core.resolveVaultPath(input.vault, manifestFile).absolutePath
+    const manifest = input.core.parseRawImportManifest(
+      JSON.parse(await readFile(manifestPath, 'utf8')),
+    )
+    if (manifest.importKind !== 'workout_batch') continue
+    workoutBatchCount += 1
+    if (workoutBatchCount > PRIOR_RAW_BATCH_LIMIT) {
+      throw new VaultCliError(
+        'conflict',
+        `Workout history has more than ${PRIOR_RAW_BATCH_LIMIT} prior raw batches; nothing was imported.`,
+      )
+    }
+
+    const source = manifest.source === 'strong' || manifest.source === 'hevy'
+      ? manifest.source
+      : undefined
+    const delimiter = manifest.provenance.delimiter
+    const weightUnit = manifest.provenance.weightUnit
+    const distanceUnit = manifest.provenance.distanceUnit
+    const timeZone = manifest.provenance.timeZone
+    for (const artifact of manifest.artifacts) {
+      if (
+        artifact.role !== 'source'
+        || !artifact.relativePath.startsWith(`${manifest.rawDirectory}/`)
+        || !artifact.relativePath.startsWith('raw/workouts/')
+      ) continue
+      if (candidates.length >= PRIOR_RAW_BATCH_LIMIT) {
+        throw new VaultCliError(
+          'conflict',
+          `Workout history has more than ${PRIOR_RAW_BATCH_LIMIT} prior source files; nothing was imported.`,
+        )
+      }
+      admittedBytes += artifact.byteSize
+      if (admittedBytes > PRIOR_RAW_TOTAL_BYTES_LIMIT) {
+        throw new VaultCliError(
+          'conflict',
+          `Prior workout source files exceed the ${PRIOR_RAW_TOTAL_BYTES_LIMIT}-byte reconciliation limit; nothing was imported.`,
+        )
+      }
+      const absolutePath = input.core.resolveVaultPath(input.vault, artifact.relativePath).absolutePath
+      const text = await readFile(absolutePath, 'utf8')
+      const byteSize = new TextEncoder().encode(text).byteLength
+      const hash = createHash('sha256').update(text).digest('hex')
+      if (byteSize !== artifact.byteSize || hash !== artifact.sha256) {
+        throw new VaultCliError(
+          'conflict',
+          'Prior workout raw evidence does not match its manifest; nothing was imported.',
+        )
+      }
+      candidates.push({
+        rawFile: artifact.relativePath,
+        text,
+        ...(source ? { source } : {}),
+        ...(typeof delimiter === 'string' && delimiter.length === 1 ? { delimiter } : {}),
+        ...(weightUnit === null || weightUnit === 'lb' || weightUnit === 'kg'
+          ? { weightUnit }
+          : {}),
+        ...(distanceUnit === null || distanceUnit === 'm' || distanceUnit === 'km' || distanceUnit === 'mi'
+          ? { distanceUnit }
+          : {}),
+        ...(typeof timeZone === 'string' ? { timeZone } : {}),
+      })
+    }
+  }
+
+  return candidates.sort((left, right) => left.rawFile.localeCompare(right.rawFile))
+}
+
+function mappingFromAttachedEvents(
+  plan: WorkoutCsvImportPlan,
+  matches: readonly WorkoutRawRefMatch[],
+): {
+  externalRefs: WorkoutExternalIdentity[]
+  matches: WorkoutRawRefMatch[]
+  records: EventRecord[]
+  canonicalSourceMatches: boolean
+  currentMappingReplay: boolean
+  latestSourceRevision?: string
+  legacyUnitProvenance?: boolean
+} | undefined {
+  if (matches.length !== plan.sessions.length) {
+    return undefined
+  }
+  const validMatches = matches.every(({ attachment, latest }) => {
+    const externalRef = attachment.externalRef
+    return attachment.id === latest.id
+      && attachment.kind === 'activity_session'
+      && latest.kind === 'activity_session'
+      && externalRef?.resourceType === 'workout-session'
+  })
+  if (!validMatches) return undefined
+
+  const alignedMatches = new Array<WorkoutRawRefMatch>(plan.sessions.length)
+  const unassignedMatches = new Set(matches)
+  const unassignedSessionIndexes = new Set(plan.sessions.map((_session, index) => index))
+  const indexesBySourceId = new Map<string, number[]>()
+  plan.sessions.forEach((session, index) => {
+    for (const sourceId of [session.sourceWorkoutId, session.workout.sourceWorkoutId]) {
+      if (!sourceId) continue
+      const indexes = indexesBySourceId.get(sourceId) ?? []
+      indexes.push(index)
+      indexesBySourceId.set(sourceId, indexes)
+    }
+  })
+  for (const match of matches) {
+    const sourceIds = [
+      match.attachment.kind === 'activity_session'
+        ? match.attachment.workout.sourceWorkoutId
+        : undefined,
+      match.attachment.externalRef?.resourceId,
+    ].filter((sourceId): sourceId is string => typeof sourceId === 'string')
+    const matchingIndexes = new Set(sourceIds.flatMap((sourceId) =>
+      indexesBySourceId.get(sourceId) ?? []))
+    if (matchingIndexes.size > 1) return undefined
+    const matchingIndex = matchingIndexes.size === 1 ? [...matchingIndexes][0] : undefined
+    if (matchingIndex === undefined) continue
+    if (!unassignedSessionIndexes.has(matchingIndex)) return undefined
+    alignedMatches[matchingIndex] = match
+    unassignedMatches.delete(match)
+    unassignedSessionIndexes.delete(matchingIndex)
+  }
+
+  const matchesByTitle = new Map<string, WorkoutRawRefMatch[]>()
+  for (const match of unassignedMatches) {
+    const titleMatches = matchesByTitle.get(match.attachment.title) ?? []
+    titleMatches.push(match)
+    matchesByTitle.set(match.attachment.title, titleMatches)
+  }
+  const sessionIndexesByTitle = new Map<string, number[]>()
+  for (const index of unassignedSessionIndexes) {
+    const title = plan.sessions[index]!.title
+    const indexes = sessionIndexesByTitle.get(title) ?? []
+    indexes.push(index)
+    sessionIndexesByTitle.set(title, indexes)
+  }
+  for (const [title, sessionIndexes] of sessionIndexesByTitle) {
+    const titleMatches = matchesByTitle.get(title)
+    if (!titleMatches || titleMatches.length !== sessionIndexes.length) {
+      return undefined
+    }
+    sessionIndexes.sort((left, right) =>
+      plan.sessions[left]!.occurredAt.localeCompare(plan.sessions[right]!.occurredAt))
+    titleMatches.sort((left, right) =>
+      left.attachment.occurredAt.localeCompare(right.attachment.occurredAt)
+        || left.attachment.id.localeCompare(right.attachment.id))
+    sessionIndexes.forEach((sessionIndex, titleIndex) => {
+      alignedMatches[sessionIndex] = titleMatches[titleIndex]!
+    })
+  }
+  if (
+    alignedMatches.some((match) => match === undefined)
+    || new Set(alignedMatches.map((match) => match.latest.id)).size !== alignedMatches.length
+  ) {
+    return undefined
+  }
+  const alignedRecords = alignedMatches.map((match) => match.latest)
+  const externalRefs = alignedMatches.map(({ attachment, latest }): WorkoutExternalIdentity => {
+    const externalRef = latest.externalRef ?? attachment.externalRef!
+    if (
+      externalRef.resourceType !== 'workout-session'
+    ) {
+      throw new VaultCliError(
+        'conflict',
+        'Prior workout evidence lost its canonical workout identity; nothing was imported.',
+      )
+    }
+    return {
+      system: externalRef.system,
+      resourceType: externalRef.resourceType,
+      resourceId: externalRef.resourceId,
+      ...(externalRef.facet ? { facet: externalRef.facet } : {}),
+    }
+  })
+  const revisions = alignedMatches
+    .map(({ attachment, latest }) => latest.externalRef?.version ?? attachment.externalRef?.version)
+    .filter((revision): revision is string => typeof revision === 'string')
+    .sort()
+  return {
+    externalRefs,
+    matches: alignedMatches,
+    records: alignedRecords,
+    canonicalSourceMatches: alignedRecords.every(
+      (record) => record.lifecycle?.state === 'deleted'
+        || (record.kind === 'activity_session'
+          && record.workout?.sourceApp === plan.source)
+    ),
+    currentMappingReplay: alignedRecords.every(
+      (record) => record.externalRef?.version === WORKOUT_CSV_MAPPING_REVISION,
+    ),
+    ...(revisions.at(-1) ? { latestSourceRevision: revisions.at(-1) } : {}),
+  }
+}
+
+function comparableSourceSession(session: PlannedWorkoutCsvSession) {
+  const {
+    sourceApp: _sourceApp,
+    sourceWorkoutId: _sourceWorkoutId,
+    startedAt: _startedAt,
+    endedAt: _endedAt,
+    ...workout
+  } = session.workout
+  return {
+    title: session.title,
+    sourceEndTimeKey: session.sourceEndTimeKey,
+    durationMinutes: session.durationMinutes,
+    distanceKm: session.distanceKm,
+    note: session.note,
+    workout,
+  }
+}
+
+async function loadPriorWorkoutSnapshotEvidence(input: {
+  core: WorkoutImportCoreRuntime
+  vault: string
+}): Promise<PriorWorkoutSnapshotEvidence> {
+  const files = await findPriorRawWorkoutFiles(input)
+  if (files.length === 0) return { files, matchesByFile: [] }
+  const matchesByFile = await input.core.findEventsByRawRefs({
+    vaultRoot: input.vault,
+    rawRefs: files.map((candidate) => candidate.rawFile),
+    resourceType: 'workout-session',
+  })
+  return { files, matchesByFile }
+}
+
+function resolvePriorSnapshotMatches(input: {
+  importers: WorkoutImportersRuntime
+  plan: WorkoutCsvImportPlan
+  text: string
+  evidence: PriorWorkoutSnapshotEvidence
+  allowedRecordSources?: readonly WorkoutCsvSource[]
+}): Array<WorkoutRawRefMatch | undefined> {
+  const allowedRecordSources = new Set<string>(
+    input.allowedRecordSources ?? [input.plan.source],
+  )
+  const currentIndexesByKey = new Map(
+    input.plan.sessions.map((session, index) => [session.sourceSessionKey, index]),
+  )
+  const alignedMatches = new Array<WorkoutRawRefMatch | undefined>(input.plan.sessions.length)
+  let exactPartialEvidence = false
+  const admittedCandidates: Array<{
+    candidate: PriorRawWorkoutFile
+    priorPlan: WorkoutCsvImportPlan
+    matches: WorkoutRawRefMatch[]
+  }> = []
+
+  for (const [candidateIndex, candidate] of input.evidence.files.entries()) {
+    const matches = input.evidence.matchesByFile[candidateIndex] ?? []
+    if (matches.length === 0) continue
+    if (candidate.text === input.text) exactPartialEvidence = true
+    const recordTimeZones = new Set(matches
+      .map((match) => match.attachment.timeZone)
+      .filter((timeZone): timeZone is string => typeof timeZone === 'string'))
+    const timeZone = recordTimeZones.size === 1
+      ? [...recordTimeZones][0]!
+      : candidate.timeZone
+    if (!timeZone) {
+      throw new VaultCliError(
+        'conflict',
+        'Prior workout evidence does not prove one parsing timezone; nothing was imported.',
+      )
+    }
+    let priorPlan: WorkoutCsvImportPlan
+    try {
+      priorPlan = input.importers.planWorkoutCsvImport({
+        text: candidate.text,
+        timeZone,
+        source: candidate.source,
+        delimiter: candidate.delimiter,
+        weightUnit: candidate.weightUnit ?? undefined,
+        distanceUnit: candidate.distanceUnit ?? undefined,
+      })
+    } catch {
+      throw new VaultCliError(
+        'conflict',
+        'Prior workout raw evidence cannot be parsed safely for identity reconciliation; nothing was imported.',
+      )
+    }
+    const attachedSources = new Set(matches.flatMap(({ latest }) =>
+      latest.kind === 'activity_session' && latest.workout.sourceApp
+        ? [latest.workout.sourceApp]
+        : []))
+    const hasCurrentOverlap = priorPlan.sessions.some((session) =>
+      currentIndexesByKey.has(session.sourceSessionKey))
+    const isCurrentProviderHistory = candidate.source === input.plan.source
+      || (attachedSources.size === 1
+        && attachedSources.has(input.plan.source))
+    if (!hasCurrentOverlap && !isCurrentProviderHistory) continue
+    if (priorPlan.sessions.some((session) =>
+      !currentIndexesByKey.has(session.sourceSessionKey))) {
+      throw new VaultCliError(
+        'conflict',
+        'A prior workout source session is missing or changed in the refreshed export; nothing was imported.',
+      )
+    }
+    const directMapping = mappingFromAttachedEvents(priorPlan, matches)
+    const partialMatchesByIndex = new Map<number, WorkoutRawRefMatch>()
+    if (directMapping) {
+      directMapping.matches.forEach((match, index) => partialMatchesByIndex.set(index, match))
+    } else {
+      const indexesBySourceId = new Map(
+        priorPlan.sessions.map((session, index) => [session.sourceWorkoutId, index]),
+      )
+      const indexesByTitleAndTime = new Map(
+        priorPlan.sessions.map((session, index) => [`${session.title}\0${session.occurredAt}`, index]),
+      )
+      for (const match of matches) {
+        const record = match.attachment
+        const matchingIndexes = new Set<number>()
+        const nestedSourceId = record.kind === 'activity_session'
+          ? record.workout.sourceWorkoutId
+          : undefined
+        const nestedIndex = nestedSourceId
+          ? indexesBySourceId.get(nestedSourceId)
+          : undefined
+        const externalIndex = record.externalRef
+          ? indexesBySourceId.get(record.externalRef.resourceId)
+          : undefined
+        const titleTimeIndex = indexesByTitleAndTime.get(`${record.title}\0${record.occurredAt}`)
+        if (nestedIndex !== undefined) matchingIndexes.add(nestedIndex)
+        if (externalIndex !== undefined) matchingIndexes.add(externalIndex)
+        if (titleTimeIndex !== undefined) matchingIndexes.add(titleTimeIndex)
+        const matchingIndex = matchingIndexes.size === 1 ? [...matchingIndexes][0] : undefined
+        if (matchingIndex === undefined || partialMatchesByIndex.has(matchingIndex)) {
+          throw new VaultCliError(
+            'conflict',
+            'Prior workout evidence has partial or ambiguous session attachments; nothing was imported.',
+          )
+        }
+        partialMatchesByIndex.set(matchingIndex, match)
+      }
+    }
+    priorPlan.sessions.forEach((session, priorIndex) => {
+      const currentIndex = currentIndexesByKey.get(session.sourceSessionKey)
+      if (currentIndex === undefined) return
+      const match = partialMatchesByIndex.get(priorIndex)
+      if (!match) return
+      const record = match.latest
+      if (
+        record.lifecycle?.state !== 'deleted'
+        && (
+          record.kind !== 'activity_session'
+          || !record.workout.sourceApp
+          || !allowedRecordSources.has(record.workout.sourceApp)
+        )
+      ) {
+        throw new VaultCliError(
+          'conflict',
+          'Prior workout sessions use a different provider dialect; correct the exact prior file first. Nothing was imported.',
+        )
+      }
+      const selected = alignedMatches[currentIndex]
+      if (selected && selected.latest.id !== record.id) {
+        throw new VaultCliError(
+          'conflict',
+          'Prior workout snapshots map one source session to conflicting event identities; nothing was imported.',
+        )
+      }
+      alignedMatches[currentIndex] = selected ?? match
+    })
+    admittedCandidates.push({ candidate, priorPlan, matches })
+  }
+
+  for (const { candidate, priorPlan, matches } of admittedCandidates) {
+    const assembledMatches = priorPlan.sessions.map((session) => {
+      const currentIndex = currentIndexesByKey.get(session.sourceSessionKey)
+      return currentIndex === undefined ? undefined : alignedMatches[currentIndex]
+    })
+    const fullMapping = assembledMatches.every(
+      (match): match is WorkoutRawRefMatch => match !== undefined,
+    )
+      ? mappingFromAttachedEvents(priorPlan, assembledMatches)
+      : mappingFromAttachedEvents(priorPlan, matches)
+    const hasPostMappingCorrection = fullMapping?.records.every((record) => {
+      if (record.lifecycle?.state === 'deleted') return true
+      const revision = Date.parse(record.externalRef?.version ?? '')
+      return Number.isFinite(revision) && revision > Date.parse(WORKOUT_CSV_MAPPING_REVISION)
+    }) === true
+    const correctedWeightInterpretation = hasPostMappingCorrection
+      && fullMapping!.records.every((record, priorIndex) => {
+        if (record.lifecycle?.state === 'deleted') return true
+        const currentIndex = currentIndexesByKey.get(priorPlan.sessions[priorIndex]!.sourceSessionKey)
+        return currentIndex !== undefined
+          && record.kind === 'activity_session'
+          && JSON.stringify(weightOwnedProjection(record.workout))
+            === JSON.stringify(weightOwnedProjection(input.plan.sessions[currentIndex]!.workout))
+      })
+    const correctedDistanceInterpretation = hasPostMappingCorrection
+      && fullMapping!.records.every((record, priorIndex) => {
+        if (record.lifecycle?.state === 'deleted') return true
+        const currentIndex = currentIndexesByKey.get(priorPlan.sessions[priorIndex]!.sourceSessionKey)
+        return currentIndex !== undefined
+          && record.kind === 'activity_session'
+          && JSON.stringify(distanceOwnedProjection(record.workout, record.distanceKm))
+            === JSON.stringify(distanceOwnedProjection(
+              input.plan.sessions[currentIndex]!.workout,
+              input.plan.sessions[currentIndex]!.distanceKm,
+            ))
+      })
+    const legacyCanonicalWeightInterpretation = candidate.weightUnit === undefined
+      && fullMapping?.records.every((record, priorIndex) => {
+        if (record.lifecycle?.state === 'deleted') return true
+        const currentIndex = currentIndexesByKey.get(
+          priorPlan.sessions[priorIndex]!.sourceSessionKey,
+        )
+        return currentIndex !== undefined
+          && record.kind === 'activity_session'
+          && JSON.stringify(weightOwnedProjection(record.workout))
+            === JSON.stringify(weightOwnedProjection(input.plan.sessions[currentIndex]!.workout))
+      }) === true
+    const legacyCanonicalDistanceInterpretation = candidate.distanceUnit === undefined
+      && fullMapping?.records.every((record, priorIndex) => {
+        if (record.lifecycle?.state === 'deleted') return true
+        const currentIndex = currentIndexesByKey.get(
+          priorPlan.sessions[priorIndex]!.sourceSessionKey,
+        )
+        return currentIndex !== undefined
+          && record.kind === 'activity_session'
+          && JSON.stringify(distanceOwnedProjection(record.workout, record.distanceKm))
+            === JSON.stringify(distanceOwnedProjection(
+              input.plan.sessions[currentIndex]!.workout,
+              input.plan.sessions[currentIndex]!.distanceKm,
+            ))
+      }) === true
+    if (
+      (candidate.weightUnit === undefined
+        && input.plan.weightUnit !== null
+        && !legacyCanonicalWeightInterpretation)
+      || (candidate.distanceUnit === undefined
+        && input.plan.distanceUnit !== null
+        && !legacyCanonicalDistanceInterpretation)
+    ) {
+      throw new VaultCliError(
+        'conflict',
+        'Prior workout evidence does not prove the selected units. Rerun the exact original CSV with --correct-units, then retry this expanded snapshot; nothing was imported.',
+      )
+    }
+    let comparisonPlan: WorkoutCsvImportPlan
+    try {
+      comparisonPlan = input.importers.planWorkoutCsvImport({
+        text: candidate.text,
+        timeZone: input.plan.timeZone,
+        source: input.plan.source,
+        delimiter: candidate.delimiter,
+        weightUnit: correctedWeightInterpretation || legacyCanonicalWeightInterpretation
+          ? input.plan.weightUnit ?? undefined
+          : candidate.weightUnit === undefined
+          ? undefined
+          : candidate.weightUnit ?? undefined,
+        distanceUnit: correctedDistanceInterpretation || legacyCanonicalDistanceInterpretation
+          ? input.plan.distanceUnit ?? undefined
+          : candidate.distanceUnit === undefined
+          ? undefined
+          : candidate.distanceUnit ?? undefined,
+      })
+    } catch {
+      throw new VaultCliError(
+        'conflict',
+        'Prior workout source sessions cannot be compared safely with the current export; nothing was imported.',
+      )
+    }
+    const comparisonByKey = new Map(
+      comparisonPlan.sessions.map((session) => [session.sourceSessionKey, session]),
+    )
+    for (const priorSession of priorPlan.sessions) {
+      const currentIndex = currentIndexesByKey.get(priorSession.sourceSessionKey)
+      if (currentIndex === undefined) continue
+      const currentSession = input.plan.sessions[currentIndex]!
+      const comparablePrior = comparisonByKey.get(priorSession.sourceSessionKey)
+      if (
+        !comparablePrior
+        || JSON.stringify(comparableSourceSession(comparablePrior))
+          !== JSON.stringify(comparableSourceSession(currentSession))
+      ) {
+        throw new VaultCliError(
+          'conflict',
+          'A prior workout source session changed without an ordered source revision; nothing was imported.',
+        )
       }
     }
   }
 
+  if (exactPartialEvidence && alignedMatches.some((match) => match === undefined)) {
+    throw new VaultCliError(
+      'conflict',
+      'Exact prior workout snapshot cannot resolve every source session identity; nothing was imported.',
+    )
+  }
+
+  return alignedMatches
+}
+
+async function resolveExistingWorkoutEvidence(input: {
+  core: WorkoutImportCoreRuntime
+  importers: WorkoutImportersRuntime
+  vault: string
+  text: string
+  plan: WorkoutCsvImportPlan
+}): Promise<{
+  rawFile?: string
+  externalRefs?: WorkoutExternalIdentity[]
+  matches?: WorkoutRawRefMatch[]
+  records?: EventRecord[]
+  canonicalSourceMatches?: boolean
+  currentMappingReplay?: boolean
+  currentUnitsMatch?: boolean
+  currentCorrectedUnitsMatch?: boolean
+  currentWeightValuesMatch?: boolean
+  currentDistanceValuesMatch?: boolean
+  latestSourceRevision?: string
+  originalTimeZone?: string
+  originalSource?: WorkoutCsvSource
+  originalDelimiter?: string
+  originalWeightUnit?: WorkoutCsvWeightUnit | null
+  originalDistanceUnit?: WorkoutCsvDistanceUnit | null
+}> {
+  const exactRawFiles = await findExactRawWorkoutFiles({
+    core: input.core,
+    vault: input.vault,
+    text: input.text,
+  })
+  if (exactRawFiles.length === 0) {
+    return {}
+  }
+
+  const eventsByRawFile = await input.core.findEventsByRawRefs({
+    vaultRoot: input.vault,
+    rawRefs: exactRawFiles.map((candidate) => candidate.rawFile),
+    resourceType: 'workout-session',
+  })
+  let rawOnlyFile: string | undefined
+  let foundAmbiguousCanonicalEvidence = false
+  let priorSnapshotEvidence: PriorWorkoutSnapshotEvidence | undefined
+  let selectedEvidence: {
+    rawFile: string
+    externalRefs: WorkoutExternalIdentity[]
+    matches: WorkoutRawRefMatch[]
+    records: EventRecord[]
+    canonicalSourceMatches: boolean
+    currentMappingReplay: boolean
+    currentUnitsMatch: boolean
+    currentCorrectedUnitsMatch: boolean
+    currentWeightValuesMatch: boolean
+    currentDistanceValuesMatch: boolean
+    latestSourceRevision?: string
+    originalTimeZone?: string
+    originalSource?: WorkoutCsvSource
+    originalDelimiter?: string
+    originalWeightUnit?: WorkoutCsvWeightUnit | null
+    originalDistanceUnit?: WorkoutCsvDistanceUnit | null
+  } | undefined
+  for (const [index, candidate] of exactRawFiles.entries()) {
+    const rawFile = candidate.rawFile
+    const matches = eventsByRawFile[index] ?? []
+    if (matches.length === 0) {
+      const provenanceMatches = candidate.source === input.plan.source
+        && candidate.delimiter === input.plan.delimiter
+        && candidate.timeZone === input.plan.timeZone
+        && candidate.weightUnit === input.plan.weightUnit
+        && candidate.distanceUnit === input.plan.distanceUnit
+      if (provenanceMatches) rawOnlyFile = rawOnlyFile ?? rawFile
+      continue
+    }
+    let mapping = mappingFromAttachedEvents(input.plan, matches)
+    if (!mapping && matches.length < input.plan.sessions.length) {
+      const recordTimeZones = new Set(matches
+        .map((match) => match.attachment.timeZone)
+        .filter((timeZone): timeZone is string => typeof timeZone === 'string'))
+      const originalTimeZone = recordTimeZones.size === 1
+        ? [...recordTimeZones][0]
+        : candidate.timeZone
+      if (!originalTimeZone) {
+        throw new VaultCliError(
+          'conflict',
+          'Exact prior workout evidence does not prove its original timezone; nothing was imported.',
+        )
+      }
+      let exactPlan: WorkoutCsvImportPlan
+      try {
+        exactPlan = input.importers.planWorkoutCsvImport({
+          text: input.text,
+          timeZone: originalTimeZone,
+          source: candidate.source,
+          delimiter: candidate.delimiter,
+          weightUnit: candidate.weightUnit ?? undefined,
+          distanceUnit: candidate.distanceUnit ?? undefined,
+        })
+      } catch {
+        throw new VaultCliError(
+          'conflict',
+          'Exact prior workout raw evidence cannot be parsed safely for identity reconciliation; nothing was imported.',
+        )
+      }
+      priorSnapshotEvidence ??= await loadPriorWorkoutSnapshotEvidence({
+        core: input.core,
+        vault: input.vault,
+      })
+      const reconciledMatches = resolvePriorSnapshotMatches({
+        importers: input.importers,
+        plan: exactPlan,
+        text: input.text,
+        evidence: priorSnapshotEvidence,
+        allowedRecordSources: [exactPlan.source, input.plan.source],
+      })
+      if (reconciledMatches.every(
+        (match): match is WorkoutRawRefMatch => match !== undefined,
+      )) {
+        mapping = mappingFromAttachedEvents(input.plan, reconciledMatches)
+      }
+    }
+    if (mapping) {
+      const recordTimeZones = new Set(mapping.matches
+        .map((match) => match.attachment.timeZone)
+        .filter((timeZone): timeZone is string => typeof timeZone === 'string'))
+      const recordTimeZone = recordTimeZones.size === 1 ? [...recordTimeZones][0] : undefined
+      const originalTimeZone = recordTimeZone ?? candidate.timeZone
+      const currentWeightValuesMatch = mapping.records.every((record, sessionIndex) =>
+        record.lifecycle?.state === 'deleted'
+        || (record.kind === 'activity_session'
+          && JSON.stringify(weightOwnedProjection(record.workout))
+            === JSON.stringify(weightOwnedProjection(input.plan.sessions[sessionIndex]?.workout))))
+      const currentDistanceValuesMatch = mapping.records.every((record, sessionIndex) =>
+        record.lifecycle?.state === 'deleted'
+        || (record.kind === 'activity_session'
+          && JSON.stringify(distanceOwnedProjection(record.workout, record.distanceKm))
+            === JSON.stringify(distanceOwnedProjection(
+              input.plan.sessions[sessionIndex]?.workout,
+              input.plan.sessions[sessionIndex]?.distanceKm,
+            ))))
+      const evidence = {
+        rawFile,
+        ...mapping,
+        currentWeightValuesMatch,
+        currentDistanceValuesMatch,
+        currentCorrectedUnitsMatch:
+          currentWeightValuesMatch
+          && currentDistanceValuesMatch
+          && mapping.records.every((record) => {
+            if (record.lifecycle?.state === 'deleted') return true
+            const revision = Date.parse(record.externalRef?.version ?? '')
+            return Number.isFinite(revision)
+              && revision > Date.parse(WORKOUT_CSV_MAPPING_REVISION)
+          }),
+        currentUnitsMatch:
+          (candidate.weightUnit !== undefined
+            ? candidate.weightUnit === input.plan.weightUnit
+            : currentWeightValuesMatch)
+          && (candidate.distanceUnit !== undefined
+            ? candidate.distanceUnit === input.plan.distanceUnit
+            : currentDistanceValuesMatch),
+        ...(originalTimeZone ? { originalTimeZone } : {}),
+        ...(candidate.source ? { originalSource: candidate.source } : {}),
+        ...(candidate.delimiter ? { originalDelimiter: candidate.delimiter } : {}),
+        ...(candidate.weightUnit !== undefined ? { originalWeightUnit: candidate.weightUnit } : {}),
+        ...(candidate.distanceUnit !== undefined ? { originalDistanceUnit: candidate.distanceUnit } : {}),
+      }
+      if (
+        selectedEvidence
+        && selectedEvidence.records.map((record) => record.id).join('\0')
+          !== evidence.records.map((record) => record.id).join('\0')
+      ) {
+        foundAmbiguousCanonicalEvidence = true
+      } else {
+        selectedEvidence = selectedEvidence ?? evidence
+      }
+      continue
+    }
+  }
+
+  if (foundAmbiguousCanonicalEvidence) {
+    throw new VaultCliError(
+      'conflict',
+      'Exact prior workout evidence has an ambiguous canonical event mapping; nothing was imported.',
+    )
+  }
+  if (selectedEvidence) {
+    return selectedEvidence
+  }
+  return {
+    ...(rawOnlyFile ? { rawFile: rawOnlyFile } : {}),
+  }
+}
+
+function correctionStructure(workout: WorkoutSession | undefined) {
+  return workout?.exercises.map((exercise) => ({
+    name: exercise.name,
+    sourceExerciseId: exercise.sourceExerciseId,
+    order: exercise.order,
+    sets: exercise.sets.map((set) => ({
+      order: set.order,
+    })),
+  }))
+}
+
+function unitOwnedProjection(
+  workout: WorkoutSession | undefined,
+  distanceKm: number | undefined,
+) {
+  return {
+    weight: weightOwnedProjection(workout),
+    distance: distanceOwnedProjection(workout, distanceKm),
+  }
+}
+
+function weightOwnedProjection(workout: WorkoutSession | undefined) {
+  return workout?.exercises.map((exercise) => ({
+      unitOverride: exercise.unitOverride,
+      sets: exercise.sets.map((set) => ({
+        weight: set.weight,
+        weightUnit: set.weightUnit,
+        bodyweightKg: set.bodyweightKg,
+        assistanceKg: set.assistanceKg,
+        addedWeightKg: set.addedWeightKg,
+      })),
+    }))
+}
+
+function distanceOwnedProjection(
+  workout: WorkoutSession | undefined,
+  distanceKm: number | undefined,
+) {
+  return {
+    distanceKm,
+    exercises: workout?.exercises.map((exercise) => ({
+      sets: exercise.sets.map((set) => ({
+        distanceMeters: set.distanceMeters,
+      })),
+    })),
+  }
+}
+
+function expectedLatestForRecord(record: EventRecord): WorkoutExpectedLatest {
+  return {
+    eventId: record.id,
+    lifecycleRevision: record.lifecycle?.revision ?? 1,
+  }
+}
+
+function assertCorrectionStructure(
+  session: PlannedWorkoutCsvSession,
+  record: EventRecord,
+): asserts record is EventRecord & { kind: 'activity_session', workout: WorkoutSession } {
+  if (
+    record.kind !== 'activity_session'
+    || JSON.stringify(correctionStructure(record.workout))
+      !== JSON.stringify(correctionStructure(session.workout))
+  ) {
+    throw new VaultCliError(
+      'conflict',
+      'Exact prior workout evidence overlaps edited exercise or set fields; nothing was imported.',
+    )
+  }
+}
+
+function replaceOptionalSetField<K extends keyof WorkoutSet>(
+  set: WorkoutSet,
+  key: K,
+  value: WorkoutSet[K] | undefined,
+): void {
+  if (value === undefined) {
+    delete set[key]
+  } else {
+    set[key] = value
+  }
+}
+
+function correctedExternalRef(record: EventRecord, mappingRevision: string) {
+  const externalRef = record.externalRef
+  if (!externalRef) {
+    throw new VaultCliError(
+      'conflict',
+      'Exact prior workout event has no authoritative external identity; nothing was imported.',
+    )
+  }
+  return { ...externalRef, version: mappingRevision }
+}
+
+function eventRecordPayloadWithRevision(
+  record: EventRecord,
+  mappingRevision: string,
+): JsonObject {
+  const payload = eventRecordToImportPayload(record)
+  payload.externalRef = correctedExternalRef(record, mappingRevision)
+  return payload
+}
+
+function buildUnitCorrectionPayload(input: {
+  record: EventRecord
+  session: PlannedWorkoutCsvSession
+  ownershipSessions: readonly PlannedWorkoutCsvSession[]
+  mappingRevision: string
+  correctWeight: boolean
+  correctDistance: boolean
+}): JsonObject {
+  const { record } = input
+  assertCorrectionStructure(input.session, record)
+  const weightOwnershipMatches = !input.correctWeight || input.ownershipSessions.some((session) =>
+    JSON.stringify(weightOwnedProjection(session.workout))
+      === JSON.stringify(weightOwnedProjection(record.workout)))
+  const distanceOwnershipMatches = !input.correctDistance || input.ownershipSessions.some((session) =>
+    JSON.stringify(distanceOwnedProjection(session.workout, session.distanceKm))
+      === JSON.stringify(distanceOwnedProjection(record.workout, record.distanceKm)))
+  if (!weightOwnershipMatches || !distanceOwnershipMatches) {
+    throw new VaultCliError(
+      'conflict',
+      'Exact prior workout evidence overlaps edited load or distance fields; nothing was imported.',
+    )
+  }
+  const payload = eventRecordToImportPayload(record)
+  const workout = structuredClone(record.workout)
+  workout.exercises.forEach((exercise, exerciseIndex) => {
+    const plannedExercise = input.session.workout.exercises[exerciseIndex]!
+    if (input.correctWeight) {
+      exercise.unitOverride = plannedExercise.unitOverride
+    }
+    exercise.sets.forEach((set, setIndex) => {
+      const plannedSet = plannedExercise.sets[setIndex]!
+      if (input.correctWeight) {
+        replaceOptionalSetField(set, 'weight', plannedSet.weight)
+        replaceOptionalSetField(set, 'weightUnit', plannedSet.weightUnit)
+        replaceOptionalSetField(set, 'bodyweightKg', plannedSet.bodyweightKg)
+        replaceOptionalSetField(set, 'assistanceKg', plannedSet.assistanceKg)
+        replaceOptionalSetField(set, 'addedWeightKg', plannedSet.addedWeightKg)
+      }
+      if (input.correctDistance) {
+        replaceOptionalSetField(set, 'distanceMeters', plannedSet.distanceMeters)
+      }
+    })
+  })
+  payload.workout = workout
+  if (input.correctDistance) {
+    if (input.session.distanceKm === undefined) delete payload.distanceKm
+    else payload.distanceKm = input.session.distanceKm
+  }
+  payload.externalRef = correctedExternalRef(record, input.mappingRevision)
+  return payload
+}
+
+function buildUnitOwnershipPlans(input: {
+  importers: WorkoutImportersRuntime
+  text: string
+  timeZone: string
+  source: WorkoutCsvSource
+  delimiter?: string
+}): WorkoutCsvImportPlan[] {
+  const plans: WorkoutCsvImportPlan[] = []
+  const seen = new Set<string>()
+  for (const weightUnit of [undefined, 'lb', 'kg'] as const) {
+    for (const distanceUnit of [undefined, 'm', 'km', 'mi'] as const) {
+      try {
+        const plan = input.importers.planWorkoutCsvImport({
+          text: input.text,
+          timeZone: input.timeZone,
+          source: input.source,
+          delimiter: input.delimiter,
+          weightUnit,
+          distanceUnit,
+        })
+        if (!plan.importable) continue
+        const key = JSON.stringify(plan.sessions.map((session) =>
+          unitOwnedProjection(session.workout, session.distanceKm)))
+        if (!seen.has(key)) {
+          seen.add(key)
+          plans.push(plan)
+        }
+      } catch {
+        // Conflicting explicit/header unit combinations are not valid ownership candidates.
+      }
+    }
+  }
+  return plans
+}
+
+function canonicalCsvNote(session: PlannedWorkoutCsvSession): string {
+  return session.note
+    ?? session.workout.sessionNote
+    ?? session.workout.routineName
+    ?? session.title
+}
+
+function dialectOwnedStructure(workout: WorkoutSession | undefined) {
+  return workout?.exercises.map((exercise) => ({
+    name: exercise.name,
+    order: exercise.order,
+    note: exercise.note,
+    sets: exercise.sets.map((set) => ({ order: set.order, type: set.type })),
+  }))
+}
+
+function buildDialectCorrectionPayload(input: {
+  record: EventRecord
+  originalSession: PlannedWorkoutCsvSession
+  correctedSession: PlannedWorkoutCsvSession
+  mappingRevision: string
+}): JsonObject {
+  if (
+    input.record.kind !== 'activity_session'
+    || JSON.stringify(dialectOwnedStructure(input.record.workout))
+      !== JSON.stringify(dialectOwnedStructure(input.originalSession.workout))
+  ) {
+    throw new VaultCliError(
+      'conflict',
+      'Exact prior workout evidence overlaps edited provider-owned fields; nothing was imported.',
+    )
+  }
+  const payload = eventRecordToImportPayload(input.record)
+  const workout = structuredClone(input.record.workout)
+  workout.sourceApp = input.correctedSession.workout.sourceApp
+  workout.sourceWorkoutId = input.correctedSession.workout.sourceWorkoutId
+  workout.exercises.forEach((exercise, exerciseIndex) => {
+    const correctedExercise = input.correctedSession.workout.exercises[exerciseIndex]!
+    exercise.note = correctedExercise.note
+    exercise.sets.forEach((set, setIndex) => {
+      const correctedSet = correctedExercise.sets[setIndex]!
+      set.order = correctedSet.order
+      set.type = correctedSet.type
+    })
+  })
+  const originalSessionNote = input.originalSession.workout.sessionNote
+    ?? canonicalCsvNote(input.originalSession)
+  const correctedSessionNote = input.correctedSession.workout.sessionNote
+    ?? canonicalCsvNote(input.correctedSession)
+  if (originalSessionNote !== correctedSessionNote) {
+    if (workout.sessionNote !== originalSessionNote) {
+      throw new VaultCliError(
+        'conflict',
+        'Exact prior workout evidence overlaps an edited session note; nothing was imported.',
+      )
+    }
+    workout.sessionNote = correctedSessionNote
+  }
+  const originalNote = canonicalCsvNote(input.originalSession)
+  const correctedNote = canonicalCsvNote(input.correctedSession)
+  if (originalNote !== correctedNote) {
+    if (input.record.note !== originalNote) {
+      throw new VaultCliError(
+        'conflict',
+        'Exact prior workout evidence overlaps an edited workout note; nothing was imported.',
+      )
+    }
+    payload.note = correctedNote
+  }
+  payload.workout = workout
+  payload.externalRef = correctedExternalRef(input.record, input.mappingRevision)
+  return payload
+}
+
+function mapBatchError(error: unknown): unknown {
+  return toVaultCliError(error, {
+    EVENT_BATCH_INVALID: { code: 'contract_invalid' },
+    EVENT_EXPECTED_LATEST_MISMATCH: { code: 'conflict' },
+    EVENT_SOURCE_REVISION_CONFLICT: { code: 'conflict' },
+    EVENT_SOURCE_REVISION_UNORDERED: { code: 'conflict' },
+    EVENT_KIND_MISMATCH: { code: 'conflict' },
+  })
+}
+
+export async function inspectWorkoutCsvImport(input: {
+  vault: string
+  file: string
+  source?: WorkoutCsvSource
+  delimiter?: string
+  weightUnit?: WorkoutCsvWeightUnit
+  distanceUnit?: WorkoutCsvDistanceUnit
+}) {
+  const { plan } = await loadWorkoutCsvPlan(input)
+  return {
+    vault: input.vault,
+    sourceFile: input.file,
+    source: plan.source,
+    detectedSource: plan.detectedSource,
+    delimiter: plan.delimiter,
+    timeZone: plan.timeZone,
+    weightUnit: plan.weightUnit,
+    distanceUnit: plan.distanceUnit,
+    rowCount: plan.rowCount,
+    repairedRowCount: plan.repairedRowCount,
+    ignoredRowCount: plan.ignoredRowCount,
+    skippedRowCount: plan.skippedRowCount,
+    skipReasons: plan.skipReasons,
+    estimatedWorkouts: plan.estimatedWorkouts,
+    requiresWeightUnit: plan.requiresWeightUnit,
+    requiresDistanceUnit: plan.requiresDistanceUnit,
+    importable: plan.importable,
+    warnings: plan.warnings,
+  }
+}
+
+export async function importWorkoutCsv(input: {
+  vault: string
+  file: string
+  source?: WorkoutCsvSource
+  delimiter?: string
+  weightUnit?: WorkoutCsvWeightUnit
+  distanceUnit?: WorkoutCsvDistanceUnit
+  storeRawOnly?: boolean
+  correctUnits?: boolean
+}) {
+  const loaded = await loadWorkoutCsvPlan(input)
+  const { text, core, importers } = loaded
+  let { plan } = loaded
+  if (input.correctUnits && input.storeRawOnly) {
+    throw new VaultCliError(
+      'invalid_option',
+      '--correct-units cannot be combined with --store-raw-only.',
+    )
+  }
+  if (input.correctUnits && !input.weightUnit && !input.distanceUnit) {
+    throw new VaultCliError(
+      'invalid_option',
+      '--correct-units requires --weight-unit and/or --distance-unit.',
+    )
+  }
+
+  if (input.storeRawOnly) {
+    assertSupportedWorkoutSource(plan)
+    const { generateUlid } = await loadWorkoutImportStateRuntime()
+    const batch = prepareRawWorkoutBatch({
+      core,
+      file: input.file,
+      text,
+      plan,
+      importId: `${ID_PREFIXES.transform}_${generateUlid()}`,
+      importedAt: new Date().toISOString(),
+    })
+    await storeRawWorkoutBatch({
+      core,
+      vault: input.vault,
+      sourceFile: input.file,
+      text,
+      batch,
+    })
+    return {
+      vault: input.vault,
+      sourceFile: input.file,
+      rawFile: batch.rawFile,
+      manifestFile: batch.manifestFile,
+      rawStored: true,
+      source: plan.source,
+      timeZone: plan.timeZone,
+      weightUnit: plan.weightUnit,
+      distanceUnit: plan.distanceUnit,
+      parsedWorkoutCount: plan.sessions.length,
+      receivedCount: 0,
+      importedCount: 0,
+      createdCount: 0,
+      skippedExistingCount: 0,
+      supersededCount: 0,
+      repairedRowCount: plan.repairedRowCount,
+      ignoredRowCount: plan.ignoredRowCount,
+      skippedRowCount: plan.skippedRowCount,
+      rawOnly: true,
+      lookupIds: [],
+      lookupIdsTruncated: false,
+      ledgerFiles: [],
+      ledgerFilesTruncated: false,
+      warnings: plan.warnings,
+    }
+  }
+
+  const existingEvidence = await resolveExistingWorkoutEvidence({
+    core,
+    importers,
+    vault: input.vault,
+    text,
+    plan,
+  })
+  const sourceDialectCorrection = plan.detectedSource !== null
+    && existingEvidence.records !== undefined
+    && existingEvidence.canonicalSourceMatches === false
+  if (!sourceDialectCorrection) {
+    assertStructuredPlanImportable(plan)
+  }
+  if (
+    existingEvidence.records
+    && !existingEvidence.currentUnitsMatch
+    && !existingEvidence.currentCorrectedUnitsMatch
+    && !input.correctUnits
+    && !sourceDialectCorrection
+  ) {
+    throw new VaultCliError(
+      'conflict',
+      'This exact workout CSV does not match the selected units. Confirm the prior provider and rerun with --correct-units before any provider correction.',
+    )
+  }
+  if (
+    (
+      (input.correctUnits
+        && (input.weightUnit === undefined || existingEvidence.currentWeightValuesMatch)
+        && (input.distanceUnit === undefined || existingEvidence.currentDistanceValuesMatch))
+      || ((existingEvidence.currentMappingReplay || existingEvidence.currentCorrectedUnitsMatch)
+        && !input.correctUnits)
+    )
+    && !sourceDialectCorrection
+  ) {
+    return {
+      vault: input.vault,
+      sourceFile: input.file,
+      rawFile: null,
+      manifestFile: null,
+      rawStored: false,
+      source: plan.source,
+      timeZone: plan.timeZone,
+      weightUnit: plan.weightUnit,
+      distanceUnit: plan.distanceUnit,
+      parsedWorkoutCount: plan.sessions.length,
+      receivedCount: plan.sessions.length,
+      importedCount: 0,
+      createdCount: 0,
+      skippedExistingCount: plan.sessions.length,
+      supersededCount: 0,
+      repairedRowCount: plan.repairedRowCount,
+      ignoredRowCount: plan.ignoredRowCount,
+      skippedRowCount: plan.skippedRowCount,
+      rawOnly: false,
+      lookupIds: [],
+      lookupIdsTruncated: false,
+      ledgerFiles: [],
+      ledgerFilesTruncated: false,
+      warnings: plan.warnings,
+    }
+  }
+  const requiresEvidenceCorrection = input.correctUnits || sourceDialectCorrection
+  if (requiresEvidenceCorrection && !existingEvidence.rawFile) {
+    throw new VaultCliError(
+      'invalid_option',
+      'Workout correction requires an exact previously imported workout CSV; nothing was imported.',
+    )
+  }
+  let existingExternalRefs = existingEvidence.externalRefs
+  let originalCorrectionPlan: WorkoutCsvImportPlan | undefined
+  let correctedRecords: EventRecord[] | undefined
+  let unitOwnershipPlans: WorkoutCsvImportPlan[] = []
+  if (requiresEvidenceCorrection) {
+    if (!existingEvidence.originalTimeZone || !existingEvidence.records || !existingEvidence.matches) {
+      throw new VaultCliError(
+        'conflict',
+        'Exact prior workout evidence does not prove its original timezone; nothing was imported.',
+      )
+    }
+    if (input.correctUnits && sourceDialectCorrection) {
+      throw new VaultCliError(
+        'invalid_option',
+        'Correct the workout provider first by rerunning this exact CSV with the confirmed --source and without --correct-units; prior manifest units will be reused. Then run a separate --correct-units command. Nothing was imported.',
+      )
+    }
+    const originalSource = existingEvidence.originalSource
+      ?? (sourceDialectCorrection ? undefined : plan.source)
+    if (!originalSource) {
+      throw new VaultCliError(
+        'conflict',
+        'Exact prior workout evidence does not prove its original provider; nothing was imported.',
+      )
+    }
+    originalCorrectionPlan = importers.planWorkoutCsvImport({
+      text,
+      timeZone: existingEvidence.originalTimeZone,
+      source: originalSource,
+      delimiter: existingEvidence.originalDelimiter ?? input.delimiter,
+      weightUnit: existingEvidence.originalWeightUnit ?? undefined,
+      distanceUnit: existingEvidence.originalDistanceUnit ?? undefined,
+    })
+    if (input.correctUnits) {
+      unitOwnershipPlans = buildUnitOwnershipPlans({
+        importers,
+        text,
+        timeZone: existingEvidence.originalTimeZone,
+        source: originalSource,
+        delimiter: existingEvidence.originalDelimiter ?? input.delimiter,
+      })
+    }
+    const correctionPlan = importers.planWorkoutCsvImport({
+      text,
+      timeZone: existingEvidence.originalTimeZone,
+      source: plan.source,
+      delimiter: existingEvidence.originalDelimiter ?? input.delimiter,
+      weightUnit: sourceDialectCorrection
+        ? existingEvidence.originalWeightUnit ?? undefined
+        : input.weightUnit,
+      distanceUnit: sourceDialectCorrection
+        ? existingEvidence.originalDistanceUnit ?? undefined
+        : input.distanceUnit,
+    })
+    assertStructuredPlanImportable(correctionPlan)
+    const correctedMapping = mappingFromAttachedEvents(
+      correctionPlan,
+      existingEvidence.matches,
+    )
+    if (!correctedMapping) {
+      throw new VaultCliError(
+        'conflict',
+        'Exact prior workout evidence has an ambiguous correction mapping; nothing was imported.',
+      )
+    }
+    plan = correctionPlan
+    existingExternalRefs = correctedMapping.externalRefs
+    correctedRecords = correctedMapping.records
+  }
+  const priorRevisionTimestamp = existingEvidence.latestSourceRevision
+    ? Date.parse(existingEvidence.latestSourceRevision)
+    : Number.NaN
+  const mappingRevision = requiresEvidenceCorrection
+    ? new Date(Math.max(
+        Date.now(),
+        Date.parse(WORKOUT_CSV_MAPPING_REVISION) + 1,
+        Number.isFinite(priorRevisionTimestamp) ? priorRevisionTimestamp + 1 : 0,
+      )).toISOString()
+    : WORKOUT_CSV_MAPPING_REVISION
+  const { generateUlid } = await loadWorkoutImportStateRuntime()
+  const batch = prepareRawWorkoutBatch({
+    core,
+    file: input.file,
+    text,
+    plan,
+    importId: `${ID_PREFIXES.transform}_${generateUlid()}`,
+    importedAt: new Date().toISOString(),
+  })
+  const rawFile = existingEvidence.rawFile ?? batch.rawFile
+  let existingPayloads: Array<JsonObject | null | undefined> | undefined
+  let expectedLatest: Array<WorkoutExpectedLatest | undefined> | undefined
+  if (requiresEvidenceCorrection) {
+    const records = correctedRecords!
+    const originalPlan = originalCorrectionPlan!
+    const originalMapping = mappingFromAttachedEvents(originalPlan, existingEvidence.matches!)
+    if (!originalMapping) {
+      throw new VaultCliError(
+        'conflict',
+        'Exact prior workout evidence cannot prove its original session mapping; nothing was imported.',
+      )
+    }
+    existingPayloads = records.map((record, index) => {
+      if (record.lifecycle?.state === 'deleted') return null
+      if (originalMapping.records[index]?.id !== record.id) {
+        throw new VaultCliError(
+          'conflict',
+          'Exact prior workout evidence changes session ordering across correction dialects; nothing was imported.',
+        )
+      }
+      if (sourceDialectCorrection) {
+        return buildDialectCorrectionPayload({
+          record,
+          originalSession: originalPlan.sessions[index]!,
+          correctedSession: plan.sessions[index]!,
+          mappingRevision,
+        })
+      }
+      return buildUnitCorrectionPayload({
+        record,
+        session: plan.sessions[index]!,
+        ownershipSessions: [
+          originalPlan.sessions[index]!,
+          ...unitOwnershipPlans.map((ownershipPlan) => ownershipPlan.sessions[index]!),
+        ],
+        mappingRevision,
+        correctWeight: input.weightUnit !== undefined,
+        correctDistance: input.distanceUnit !== undefined,
+      })
+    })
+    expectedLatest = records.map(expectedLatestForRecord)
+  } else if (existingEvidence.records) {
+    existingPayloads = existingEvidence.records.map((record) =>
+      record.lifecycle?.state === 'deleted'
+        ? null
+        : eventRecordPayloadWithRevision(record, mappingRevision))
+    expectedLatest = existingEvidence.records.map(expectedLatestForRecord)
+  } else {
+    const priorEvidence = await loadPriorWorkoutSnapshotEvidence({
+      core,
+      vault: input.vault,
+    })
+    const priorMatches = resolvePriorSnapshotMatches({
+      importers,
+      plan,
+      text,
+      evidence: priorEvidence,
+    })
+    const priorRecords = priorMatches.map((match) =>
+      match?.latest.lifecycle?.state === 'deleted' ? null : match?.latest)
+    if (priorRecords.some((record) => record !== undefined)) {
+      existingPayloads = priorRecords.map((record) =>
+        record === null ? null : record ? eventRecordToImportPayload(record) : undefined)
+      expectedLatest = priorRecords.map((record) =>
+        record ? expectedLatestForRecord(record) : undefined)
+    }
+  }
+  const { decisions, suppressedDeletedCount } = buildWorkoutEventDecisions(
+    plan,
+    rawFile,
+    existingExternalRefs,
+    mappingRevision,
+    existingPayloads,
+    expectedLatest,
+  )
+  if (decisions.length === 0) {
+    return {
+      vault: input.vault,
+      sourceFile: input.file,
+      rawFile: null,
+      manifestFile: null,
+      rawStored: false,
+      source: plan.source,
+      timeZone: plan.timeZone,
+      weightUnit: plan.weightUnit,
+      distanceUnit: plan.distanceUnit,
+      parsedWorkoutCount: plan.sessions.length,
+      receivedCount: suppressedDeletedCount,
+      importedCount: 0,
+      createdCount: 0,
+      skippedExistingCount: suppressedDeletedCount,
+      supersededCount: 0,
+      repairedRowCount: plan.repairedRowCount,
+      ignoredRowCount: plan.ignoredRowCount,
+      skippedRowCount: plan.skippedRowCount,
+      rawOnly: false,
+      lookupIds: [],
+      lookupIdsTruncated: false,
+      ledgerFiles: [],
+      ledgerFilesTruncated: false,
+      warnings: plan.warnings,
+    }
+  }
+  let preview: WorkoutImportBatchResult
+  try {
+    preview = await core.importEventBatch({
+      vaultRoot: input.vault,
+      decisions,
+      apply: false,
+    })
+  } catch (error) {
+    throw mapBatchError(error)
+  }
+
+  const previewChangedCount = preview.createdCount + preview.supersededCount
+  if (previewChangedCount === 0) {
+    const ledgers = capList(preview.eventShardPaths)
+    return {
+      vault: input.vault,
+      sourceFile: input.file,
+      rawFile: null,
+      manifestFile: null,
+      rawStored: false,
+      source: plan.source,
+      timeZone: plan.timeZone,
+      weightUnit: plan.weightUnit,
+      distanceUnit: plan.distanceUnit,
+      parsedWorkoutCount: plan.sessions.length,
+      receivedCount: preview.receivedCount + suppressedDeletedCount,
+      importedCount: 0,
+      createdCount: 0,
+      skippedExistingCount: preview.skippedExistingCount + suppressedDeletedCount,
+      supersededCount: 0,
+      repairedRowCount: plan.repairedRowCount,
+      ignoredRowCount: plan.ignoredRowCount,
+      skippedRowCount: plan.skippedRowCount,
+      rawOnly: false,
+      lookupIds: [],
+      lookupIdsTruncated: false,
+      ledgerFiles: ledgers.values,
+      ledgerFilesTruncated: ledgers.truncated,
+      warnings: plan.warnings,
+    }
+  }
+
+  const rawStored = existingEvidence.rawFile === undefined
+  const manifestFile: string | null = rawStored ? batch.manifestFile : null
+
+  if (rawStored) {
+    await storeRawWorkoutBatch({
+      core,
+      vault: input.vault,
+      sourceFile: input.file,
+      text,
+      batch,
+    })
+  }
+  let applied: WorkoutImportBatchResult
+  try {
+    applied = await core.importEventBatch({
+      vaultRoot: input.vault,
+      decisions,
+      apply: true,
+    })
+  } catch (error) {
+    throw mapBatchError(error)
+  }
+
+  const lookupIds = capList(applied.eventIds)
+  const ledgerFiles = capList(applied.eventShardPaths)
   return {
     vault: input.vault,
     sourceFile: input.file,
     rawFile,
     manifestFile,
-    source: inspection.source,
-    importedCount: lookupIds.length,
-    rawOnly: input.storeRawOnly === true || lookupIds.length === 0,
-    lookupIds,
-    ledgerFiles: [...ledgerFiles],
-    warnings,
+    rawStored,
+    source: plan.source,
+    timeZone: plan.timeZone,
+    weightUnit: plan.weightUnit,
+    distanceUnit: plan.distanceUnit,
+    parsedWorkoutCount: plan.sessions.length,
+    receivedCount: applied.receivedCount + suppressedDeletedCount,
+    importedCount: applied.createdCount + applied.supersededCount,
+    createdCount: applied.createdCount,
+    skippedExistingCount: applied.skippedExistingCount + suppressedDeletedCount,
+    supersededCount: applied.supersededCount,
+    repairedRowCount: plan.repairedRowCount,
+    ignoredRowCount: plan.ignoredRowCount,
+    skippedRowCount: plan.skippedRowCount,
+    rawOnly: false,
+    lookupIds: lookupIds.values,
+    lookupIdsTruncated: lookupIds.truncated,
+    ledgerFiles: ledgerFiles.values,
+    ledgerFilesTruncated: ledgerFiles.truncated,
+    warnings: plan.warnings,
   }
 }

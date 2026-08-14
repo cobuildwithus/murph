@@ -6,9 +6,6 @@ import {
 } from "@murphai/hosted-execution/vault-share";
 
 import {
-  enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort,
-} from "@/src/lib/hosted-groups/group-newsletter";
-import {
   materializePendingHostedGroupJoinConfirmationsBestEffort,
   signalHostedGroupJoinConfirmationRuntimeBestEffort,
 } from "@/src/lib/hosted-groups/group-join-confirmation";
@@ -22,7 +19,7 @@ import {
   requireHostedInviteForAuthentication,
 } from "@/src/lib/hosted-onboarding/invite-service";
 import { HOSTED_ONBOARDING_TRANSACTION_OPTIONS } from "@/src/lib/hosted-onboarding/shared";
-import { signalHostedRuntimeMaintenanceRuntime } from "@/src/lib/hosted-orchestration/signal-runtime";
+import { signalHostedMailboxAppendRuntime } from "@/src/lib/hosted-orchestration/signal-runtime";
 import { resolveHostedPublicBaseUrl } from "@/src/lib/hosted-web/public-url";
 import { resolveDecodedRouteParam } from "@/src/lib/http";
 import { getPrisma } from "@/src/lib/prisma";
@@ -87,9 +84,28 @@ export const POST = withJsonError(async (
       tx,
     });
   }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
-  const { joinConfirmationSignal, ...responseResult } = result;
+  const {
+    joinConfirmationSignal,
+    projectionMaintenanceSignal,
+    ...responseResult
+  } = result;
 
   const postCommitDeadlineMs = createHostedPostCommitDeadline(undefined);
+  const projectionWake = projectionMaintenanceSignal
+    ? runHostedGroupJoinPostCommitBestEffort({
+        deadlineMs: postCommitDeadlineMs,
+        operation: (abortSignal) => signalHostedMailboxAppendRuntime({
+          abortSignal,
+          expectedUserId: projectionMaintenanceSignal.memberId,
+          knownCheckpoint: {
+            lane: projectionMaintenanceSignal.lane,
+            laneSeq: projectionMaintenanceSignal.laneSeq,
+            userId: projectionMaintenanceSignal.memberId,
+          },
+          mailboxItemId: projectionMaintenanceSignal.mailboxItemId,
+        }),
+      })
+    : null;
   if (joinConfirmationSignal) {
     await signalHostedGroupJoinConfirmationRuntimeBestEffort({
       ...joinConfirmationSignal,
@@ -105,26 +121,8 @@ export const POST = withJsonError(async (
     signal: request.signal,
     timeoutMs: readHostedPostCommitRemainingMs(postCommitDeadlineMs),
   });
+  await projectionWake;
 
-  if (result.grantedVaultShareProjectionKinds.length > 0) {
-    await runHostedGroupJoinPostCommitBestEffort({
-      deadlineMs: postCommitDeadlineMs,
-      operation: () => signalHostedRuntimeMaintenanceRuntime({ userId: auth.member.id }),
-      signal: request.signal,
-    });
-  }
-
-  if (result.grantedVaultShareProjectionKinds.includes("group-email.v0")) {
-    await runHostedGroupJoinPostCommitBestEffort({
-      deadlineMs: postCommitDeadlineMs,
-      operation: () => enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort({
-        groupId: result.groupId,
-        memberId: auth.member.id,
-        prisma,
-      }),
-      signal: request.signal,
-    });
-  }
   return jsonOk({ ok: true, ...responseResult });
 });
 
@@ -144,14 +142,12 @@ function parseOptionalInviteCode(value: unknown): string | null {
 
 async function runHostedGroupJoinPostCommitBestEffort(input: {
   deadlineMs: number;
-  operation: () => Promise<unknown>;
-  signal?: AbortSignal;
+  operation: (signal: AbortSignal) => Promise<unknown>;
 }): Promise<void> {
   try {
     await waitForHostedPostCommitOperation({
       deadlineMs: input.deadlineMs,
       operation: input.operation,
-      signal: input.signal,
     });
   } catch {
     // The durable join, grants, and mailbox items remain available for a later wake.

@@ -565,12 +565,12 @@ describe("expectAdvertisedMurphDynamicTools", () => {
       && name !== "murph.react_to_message"
       && name !== "murph.select_reply_target"
       && name !== "murph.create_phone_call"
-      && name !== "murph.newsletter"
       && name !== "murph.pending_vault_files"
       && name !== "murph.send_physical_note"
       && name !== "murph.send_vault_file"
       && name !== "murph.ask_grok"
       && name !== "murph.attach_response_card"
+      && name !== "murph.attach_exercise_routine_card"
     );
     const baseToolNamesWithoutProgress = baseToolNames.filter((name) =>
       name !== "murph.send_progress_update"
@@ -586,6 +586,7 @@ describe("expectAdvertisedMurphDynamicTools", () => {
     expect(allToolNames).toContain("murph.send_progress_update");
     expect(allToolNames).toContain("murph.ask_grok");
     expect(allToolNames).toContain("murph.attach_response_card");
+    expect(allToolNames).toContain("murph.attach_exercise_routine_card");
 
     expectAdvertisedMurphDynamicTools([
       buildResponsesRequest(baseToolNames),
@@ -627,10 +628,10 @@ describe("expectAdvertisedMurphDynamicTools", () => {
       {
         connectedAppsAvailable: true,
         computerToolsAvailable: true,
+        exerciseRoutineResponseCardAvailable: true,
         groupRoomModelAvailable: true,
         imessageContactAvailable: true,
         messageTargetingAvailable: true,
-        newsletterAvailable: true,
         pendingVaultFilesAvailable: true,
         physicalNotesAvailable: true,
         phoneCallsAvailable: true,

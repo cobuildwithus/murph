@@ -872,6 +872,31 @@ describe("hosted onboarding member activation", () => {
     expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledTimes(1);
   });
 
+  it("forwards optional Linq-line admission only for an explicitly tolerant signup", async () => {
+    const member = makeMemberSnapshot();
+    mocks.resolveHostedMemberActivationLinqRoute.mockResolvedValueOnce({
+      welcomeRoute: null,
+    });
+
+    await activateHostedMemberForPositiveSourceTx({
+      allowSignupWelcomeWithoutAssignableLinqLine: true,
+      dispatchContext: {
+        eventCreatedAt: new Date("2026-04-12T00:00:00.000Z"),
+        occurredAt: "2026-04-12T00:00:00.000Z",
+        sourceEventId: "evt_optional_line",
+        sourceType: "hosted.starter_usage.enrolled",
+      },
+      memberId: member.core.id,
+      prisma: makeTransactionHarness() as never,
+    });
+
+    expect(mocks.resolveHostedMemberActivationLinqRoute).toHaveBeenCalledWith({
+      allowNoAssignableLine: true,
+      member,
+      prisma: expect.anything(),
+    });
+  });
+
   it("passes pending signup timezone into the activation wake and clears the hosted row", async () => {
     const member = makeMemberSnapshot({
       core: {
@@ -1250,7 +1275,9 @@ describe("hosted onboarding member activation", () => {
     });
     setActivationMemberSnapshot(member);
     mocks.readHostedMailboxItemByDedupeKey.mockResolvedValue({
+      consumedAt: null,
       dedupeKey: "member.activated:stripe.customer.subscription.updated:member_123:evt_123",
+      id: "mailbox_existing_activation",
     });
 
     await expect(
@@ -1268,6 +1295,7 @@ describe("hosted onboarding member activation", () => {
     ).resolves.toEqual({
       activated: false,
       hostedExecutionEventId: "member.activated:stripe.customer.subscription.updated:member_123:evt_123",
+      hostedExecutionMailboxItemId: "mailbox_existing_activation",
       memberId: "member_123",
     });
 

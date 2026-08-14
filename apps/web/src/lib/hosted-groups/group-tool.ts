@@ -29,6 +29,9 @@ import type {
 import {
   buildHostedVaultShareProjectionScopeKey,
   getHostedVaultShareDailyMetricProjectionSpec,
+  HOSTED_VAULT_SHARE_ACTIVITY_DISTANCE_PROJECTION_KIND,
+  HOSTED_VAULT_SHARE_ACTIVITY_SESSION_COUNT_PROJECTION_KIND,
+  isHostedVaultShareRecentDateProjectionKind,
 } from "@murphai/hosted-execution/vault-share";
 
 import {
@@ -112,9 +115,7 @@ import {
   buildHostedGroupUsageFundingUrl,
   readHostedGroupFundingRecoveryStatus,
 } from "./group-usage-funding";
-import {
-  enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort,
-} from "./group-newsletter";
+import { prepareHostedGroupEmail } from "./group-email";
 import {
   createHostedGroupJoinLinkForOwnedThreadContainerTx,
   leaveHostedGroupMemberTx,
@@ -198,6 +199,7 @@ export const HOSTED_RUNTIME_GROUP_TOOL_ACCESS_CLASSIFICATION = {
   list_memberships: "personal_active",
   post_disclosure_request: "owner_active",
   post_join_offer: "owner_active",
+  prepare_email: "participant_aware",
   prepare_next_group: "personal_active",
   preflight_set_chat_avatar: "owner_active",
   read_chat_name: "participant_aware",
@@ -441,6 +443,15 @@ export async function handleHostedRuntimeGroupTool(input: {
         },
       };
     }
+  }
+
+  if (input.request.action === "prepare_email") {
+    return {
+      action: "prepare_email",
+      result: await prepareHostedGroupEmail({
+        runtimeMemberId: input.memberId,
+      }),
+    };
   }
 
   if (input.request.action === "read_usage") {
@@ -1111,12 +1122,6 @@ async function handleHostedRuntimeGroupCreateJoinLink(input: {
     // Durable grant already committed; the owner's runtime offers the
     // projection on a later wake if this best-effort signal fails.
   }
-  await enqueueGroupOwnerNewsletterEmailNeededNudgeIfGrantedBestEffort({
-    group: created.group,
-    ownerMemberId: created.ownerMemberId,
-    prisma,
-  });
-
   return {
     action: "create_join_link",
     result: {
@@ -1402,12 +1407,6 @@ async function handleHostedRuntimeGroupPostJoinOffer(input: {
     // The group and offer binding are durable; owner runtime maintenance can
     // catch up on its next organic wake.
   }
-  await enqueueGroupOwnerNewsletterEmailNeededNudgeIfGrantedBestEffort({
-    group: created.group,
-    ownerMemberId: created.ownerMemberId,
-    prisma,
-  });
-
   return {
     action: "post_join_offer",
     result: {
@@ -1576,31 +1575,6 @@ export function buildHostedGroupJoinOfferMessage(input: {
 const HOSTED_GROUP_JOIN_OFFER_SHARE_SCOPE_PLACEHOLDER = "{{share_scope}}";
 const HOSTED_GROUP_JOIN_OFFER_JOIN_URL_PLACEHOLDER = "{{join_url}}";
 
-async function enqueueGroupOwnerNewsletterEmailNeededNudgeIfGrantedBestEffort(input: {
-  group: {
-    id: string;
-    members: readonly {
-      grantedVaultShareProjectionKinds: readonly HostedVaultShareProjectionKind[];
-      memberId: string;
-    }[];
-  };
-  ownerMemberId: string;
-  prisma: PrismaClient;
-}): Promise<void> {
-  if (!input.group.members.some((member) =>
-    member.memberId === input.ownerMemberId
-    && member.grantedVaultShareProjectionKinds.includes("group-email.v0")
-  )) {
-    return;
-  }
-
-  await enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort({
-    groupId: input.group.id,
-    memberId: input.ownerMemberId,
-    prisma: input.prisma,
-  });
-}
-
 function normalizeHostedGroupChatIconUrl(value: string): string | null {
   const normalized = value.trim();
   if (
@@ -1747,6 +1721,15 @@ function renderHostedGroupJoinOfferScopeSentence(
     .map((display) => formatHostedGroupJoinOfferShareScopeLabel(display.label));
   const sentence = `your ${formatHumanList(["Murph profile name", ...labels])}`;
   const disclosures: string[] = [];
+  if (projectionScopes.some((scope) =>
+    isHostedVaultShareRecentDateProjectionKind(scope.projectionKind)
+  )) {
+    disclosures.push(
+      projectionScopes.some(isHostedGroupSleepStageProjectionScope)
+        ? "health values include source names, and sleep stages include each source's recorded time"
+        : "health values include their source names",
+    );
+  }
   // Nutrition labels (e.g. "daily protein") read as a bare number; disclose that
   // the totals come from the member's meals, connected-app imports included, so a
   // like-to-consent reaction is not materially narrower than what is exported.
@@ -1755,9 +1738,35 @@ function renderHostedGroupJoinOfferScopeSentence(
       "nutrition totals come from your meals in Murph, including meals imported from connected apps",
     );
   }
-  if (projectionScopes.some(isHostedGroupSleepSourceProjectionScope)) {
+  const recentSleepLabels = [
+    ...(projectionScopes.some((scope) => scope.projectionKind === "sleep-times.v0")
+      ? ["sleep timing"]
+      : []),
+    ...(projectionScopes.some(
+      (scope) => scope.projectionKind === "sleep-duration-days.v0",
+    )
+      ? ["sleep duration"]
+      : []),
+  ];
+  if (recentSleepLabels.length > 0) {
     disclosures.push(
-      "by-source sleep includes every available source's value and name, plus when Murph recorded that source value",
+      `${formatHumanList(recentSleepLabels)} ${recentSleepLabels.length === 1 ? "covers" : "cover"} the last 7 days`,
+    );
+  }
+  const recentActivityLabels = projectionScopes.flatMap((scope) => {
+    if (scope.projectionKind === HOSTED_VAULT_SHARE_ACTIVITY_DISTANCE_PROJECTION_KIND) {
+      const activity = scope.selector.activityKind.replace(/-/gu, " ");
+      return [`${activity} distance and session count`];
+    }
+    if (scope.projectionKind === HOSTED_VAULT_SHARE_ACTIVITY_SESSION_COUNT_PROJECTION_KIND) {
+      const activity = scope.selector.activityKind.replace(/-/gu, " ");
+      return [`${activity} session count`];
+    }
+    return [];
+  });
+  if (recentActivityLabels.length > 0) {
+    disclosures.push(
+      `${formatHumanList(recentActivityLabels)} ${recentActivityLabels.length === 1 ? "covers" : "cover"} the last 7 days`,
     );
   }
   return disclosures.length > 0
@@ -1774,10 +1783,12 @@ function isHostedGroupMealNutritionProjectionScope(
   );
 }
 
-function isHostedGroupSleepSourceProjectionScope(
+function isHostedGroupSleepStageProjectionScope(
   scope: HostedVaultShareProjectionScope,
 ): boolean {
-  return scope.projectionKind === "deep-sleep-sources-days.v1"
+  return scope.projectionKind === "deep-sleep-days.v0"
+    || scope.projectionKind === "deep-sleep-sources-days.v1"
+    || scope.projectionKind === "rem-sleep-days.v0"
     || scope.projectionKind === "rem-sleep-sources-days.v1";
 }
 
@@ -1818,7 +1829,7 @@ async function authorizeHostedRuntimeDirectLinqChat(input: {
       prisma: getPrisma(),
       target: input.chatId,
     });
-    if (assertion.threadIsDirect !== true) {
+    if (assertion.resolvedRoute.threadIsDirect !== true) {
       return { unavailableReason: "linq_thread_unauthorized" };
     }
   } catch {

@@ -1,13 +1,17 @@
 import { withJsonError } from "@/src/lib/hosted-onboarding/http";
 import { readRawBodyBuffer } from "@/src/lib/http";
-import { retellWebhookPayloadSchema } from "@/src/lib/phone-calls/retell-payloads";
 import {
-  handleRetellCallAnalyzed,
+  retellWebhookPayloadSchema,
+} from "@/src/lib/phone-calls/retell-payloads";
+import {
+  prepareRetellCallResult,
+} from "@/src/lib/phone-calls/retell-result-lifecycle";
+import {
+  finalizePreparedRetellCallResult,
   handleRetellCallEnded,
 } from "@/src/lib/phone-calls/result";
 import { accountRetellPhoneCallUsage } from "@/src/lib/phone-calls/usage";
 import { verifyRetellSignature } from "@/src/lib/phone-calls/retell-signature";
-import { signalHostedMailboxAppendRuntime } from "@/src/lib/hosted-orchestration/signal-runtime";
 
 const RETELL_WEBHOOK_MAX_BODY_BYTES = 4 * 1024 * 1024;
 
@@ -30,23 +34,29 @@ export const POST = withJsonError(async (request: Request) => {
       ]);
       break;
     case "call_analyzed": {
+      const resultCall = prepareRetellCallResult({
+        call: payload.call,
+        event: "call_analyzed",
+      });
       await settleRetellWebhookBranches([
         () => accountRetellPhoneCallUsage({ call: payload.call }),
-        async () => {
-          const result = await handleRetellCallAnalyzed({ call: payload.call });
-          if (result.notificationMailboxItemId) {
-            await signalHostedMailboxAppendRuntime({
-              expectedUserId: result.notificationUserId,
-              mailboxItemId: result.notificationMailboxItemId,
-            });
-          }
-        },
+        ...(resultCall
+          ? [() => finalizePreparedRetellCallResult(resultCall)]
+          : []),
       ]);
       break;
     }
-    case "transfer_ended":
-      await accountRetellPhoneCallUsage({ call: payload.call });
+    case "transfer_ended": {
+      const resultCall = prepareRetellCallResult({
+        call: payload.call,
+        event: "transfer_ended",
+      });
+      await settleRetellWebhookBranches([
+        () => accountRetellPhoneCallUsage({ call: payload.call }),
+        () => finalizePreparedRetellCallResult(resultCall),
+      ]);
       break;
+    }
   }
 
   return new Response(null, { status: 204 });

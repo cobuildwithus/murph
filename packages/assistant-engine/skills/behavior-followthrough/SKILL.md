@@ -372,6 +372,12 @@ Memory is for durable user preferences or broad context, not the source of truth
 
 When the user asks about a current plan, today's target, a ramp, routine, or habit, read the relevant active goal/regimen/automation records before reconstructing details. A compact snapshot or truncated regimen list is navigation only: read the full current regimen note and any linked records before advising, repairing, or closing the plan. If the baseline, ladder, or target date was not saved, say what is missing and update the plan once confirmed instead of inventing it.
 
+In a private conversation, when the user tersely reports unnamed repeated sets for an alternating or phased strength routine, read the full canonical regimen and linked experiment records before logging completion. Resolve the current exercise from the saved start or anchor date, rotation rule, and current member-local date; never substitute the most recently discussed or logged target. Require only one exercise, one canonical owner, and one current per-occurrence standard. Reminder automations can govern support consent and delivery but are not schedule evidence and cannot redirect or block a target uniquely resolved by the regimen and experiment. If those canonical facts are missing or ambiguous, say what is missing and ask one narrow clarification without writing a completion.
+
+A clarification that only names the current target authorizes only the current completion write, and only when the existing canonical records already resolve one owner and one per-occurrence standard. It does not authorize editing a regimen, experiment, automation, or plan. Repair saved plan state only when the user explicitly asks for that repair or affirmatively accepts a concrete proposed repair. After an authorized repair, re-read the changed canonical plan before logging any completion. If no existing owner or standard can be recovered, explain that the completion cannot yet be logged canonically, ask whether the user wants to repair the plan, and write no completion.
+
+In a group conversation, do not perform the private routine lookup or write a private completion. Acknowledge briefly and ask the speaker to continue in their private Murph conversation.
+
 When creating automations, make instructions context-aware. A future notification turn may not read this skill, so include the compact support loop directly in the automation instructions.
 
 Automation instructions may duplicate the compact support loop so scheduled turns have local context, but the habit regimen remains the source of truth.
@@ -379,6 +385,28 @@ Automation instructions may duplicate the compact support loop so scheduled turn
 Every automation owned by a non-experiment habit plan must set `supportSeriesId: "habit:<regimenId>"` and persist the exact accepted purpose as `supportKind: "reminder"`, `"check_in"`, or `"review"` when the automation is saved or patched, where `<regimenId>` is the canonical habit-regimen id. The active canonical automation is the exact persisted support-consent record for that purpose; pausing or archiving it withdraws scheduled delivery. Never pass a raw `system:support-series:*` tag; `tags` are only for ordinary descriptive values. Keep the support-series id stable, and do not key lifecycle cleanup only by a mutable slug, title, or reminder text.
 
 Support kind also bounds the user-facing message shape. `reminder` authorizes a cue or skip, never a proactive repair/accountability question. `check_in` authorizes one narrow current-state or repair question. `review` authorizes the bounded review and next-decision question. Put that exact authorized shape in the automation instructions; do not let a scheduled turn widen consent because the generic notification policy can generate questions.
+
+These attended follow-up rules apply only in a private member conversation or
+to support that is explicitly room-owned under current room authority.
+Never use a group participant's message to read or mutate that participant's
+private automation, memory, preference, plan, goal, or health context. Move
+personal support changes to a private conversation; in a group, act only on
+room-owned support within the room's current authority.
+
+When Murph proposes one exact finite support package in an attended
+conversation, that proposal remains the authorization boundary for a later
+reply. A clear yes authorizes only the named plan and support writes; apply
+them in that attended turn without a second confirmation. If the user edits
+the package, use only the edited scope. An ambiguous reply does not authorize
+writes.
+
+Natural requests to stop asking about a topic, ask less, pause check-ins, or
+stop reminders are action requests. Read current matching support first, then
+pause or archive the narrowest matching automation while
+preserving unrelated support. When no matching active automation exists, or
+the request covers future offers, save the exact topic-specific no-proactive-support boundary
+through the canonical memory or preference surface. Confirm the exact change
+and clear only that boundary after the user explicitly reopens the topic.
 
 Keep the habit support series finite. Prefer bounded one-shot automations. If the user explicitly accepts a recurring automation, set `activeUntil: "<ISO timestamp>"` no later than the accepted review or support-window end; do not create an evergreen recurrence.
 

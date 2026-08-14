@@ -1,6 +1,6 @@
 # Device Sync Hosted Control Plane
 
-Last verified against repo layout: 2026-07-27
+Last verified against repo layout: 2026-08-12
 
 ## Current split
 
@@ -176,11 +176,28 @@ remaining terminal setup failures normalize to
 `COMPANION_ADMISSION_SUPPORT_REQUIRED`. The client may retry only the former
 and must stop automatic admission attempts on the latter, while internal
 hosted lifecycle codes remain private. The route's static dependency graph is
-kept outside device-sync public ingress, and this account-only caller uses the
-existing signup-welcome suppression policy. Admission therefore preserves
-trial activation and the internal `member.activated` fact without assigning a
-Linq home line, queueing or emailing a welcome, or creating, resuming,
-reactivating, or otherwise mutating a Junction connection.
+kept outside device-sync public ingress. A consented fresh companion activation
+with a verified phone may enter the canonical signup-welcome path under the
+existing exact-member binding, signup idempotency, home-line health, and
+proactive-capacity owners. A healthy line sends the normal conversational
+welcome and keeps its existing bounded three-day unfinished-setup continuation;
+the companion does not also send the separate Web signup email. If no line is
+assignable or proactive capacity cannot be reserved, companion activation
+completes without a route and
+inbound-first messaging remains available on a contacted managed line whose
+existing reply-egress policy permits the exact active member's provider-attested
+direct message. That path binds the home route and appends the encrypted input
+atomically even when at-risk or delivery-warning posture excluded proactive
+outreach; unmanaged, disabled, ambiguous, and unsafe lines cannot establish that
+exact-line authority, and ordinary fallback selection fails closed when empty.
+Web activation keeps its existing fail-closed requirement. The activation mailbox item is the durable retry
+authority: a failed companion runtime wake returns the public retryable outcome,
+and later admission or sign-in-token requests signal that exact unconsumed item
+instead of creating a second activation or welcome. Sign-in-token is both a
+direct companion entry point and a retry after committed activation, so it
+returns the underlying retryable runtime-wake code and does not create a
+Junction session until the wake passes. Admission creates, resumes, reactivates,
+or otherwise mutates no Junction connection.
 
 ### Cloudflare execution state
 
@@ -267,7 +284,18 @@ These are read/manage wearable routes for the hosted settings page. Ordinary rea
 
 - `POST /api/device-sync/agents/pair`
 
-These are browser-initiated but lower-level than the settings surface. They must use short-lived signed assertions with replay protection.
+These are browser-initiated but lower-level than the settings surface. They
+must use short-lived signed assertions with the existing HMAC, member,
+audience, method, path, and origin bindings plus single-use nonce replay
+protection. The shared browser-assertion policy makes an integer-second `exp`
+first invalid exactly at `(exp + 61) * 1000`; every earlier millisecond remains
+admissible. New nonce rows persist that first-invalid instant, while request
+admission performs one primary-key insert and treats only the exact nonce
+conflict as replay. For mixed-version rollout, the bounded hourly
+hosted-retention owner deletes only rows whose stored
+`expiresAt <= now - 61 seconds`, retaining legacy raw-`exp` rows through the
+full accepted window and intentionally retaining new-format rows for one extra
+61-second interval.
 
 ### Hosted companion routes
 
@@ -277,8 +305,8 @@ These are browser-initiated but lower-level than the settings surface. They must
 
 All are Privy-bearer-authenticated and consent-gated. Admission validates its
 complete bounded optional-time-zone body before canonical member mutation and
-suppresses signup-welcome routing and delivery without suppressing canonical
-trial activation; it does not enter device sync. Sign-in honors the
+uses the canonical signup-welcome route without suppressing trial activation;
+it does not enter device sync. Sign-in honors the
 resume, omitted-intent inference, and future explicit-connect authority split
 above. The derived route accepts only the closed overnight summary contract,
 reuses one active member-owned Junction connection, and never establishes or
@@ -312,6 +340,68 @@ its existing per-connection mutation lock and transaction. This bound prevents
 one signed runtime callback from amplifying into unbounded concurrent database
 transactions without introducing a queue, bulk mutation owner, or second retry
 path.
+
+### Runtime snapshot collection and credential hydration
+
+The shared `@murphai/device-syncd/hosted-runtime` contract owns the snapshot
+work ceilings. A snapshot page contains at most 32 connections, ordered by
+`createdAt DESC, id DESC`. Web uses an immutable `(createdAt, id)` keyset
+predicate and reads at most 33 rows, returning the last emitted row as
+`nextCursor` only when the extra row proves another page exists. Caller limits
+are advisory below the ceiling; larger values cannot increase SQL,
+source-projection, or decrypt work.
+A `connectionId` lookup remains an exact member-owned lookup rather than a
+collection scan.
+
+Credential-free pages use a distinct Prisma projection that does not select
+`external_account_id_encrypted`, `access_token_encrypted`, or
+`refresh_token_encrypted`, and they never enter the device-secret opener. They
+retain the existing `opaque:<connectionId>` identity and redacted credential
+shape. Credential-bearing runtime hydration follows pages sequentially and
+fails closed if authority exceeds 100 connections, the existing runtime apply
+ceiling. The reader omits the limit on its first request so the legacy Web
+producer can return its complete snapshot; an omitted cursor is accepted only
+on that first response and only within the 100-connection ceiling. Cursor-aware
+responses use 32-row pages, and every continuing page must preserve explicit
+cursor presence. Authority is never silently truncated.
+
+Each page resolves connection sources through one set projection. The query
+keeps provider/source alias matching, applies a hard 64-row per-connection
+window plus one saturation detector, and rejects a saturated connection rather
+than returning partial source authority. Eligible external-account and OAuth
+token material is opened through the existing secure-box and domain-root
+owners as page-scoped sets. A single scoped root-metadata read is reused across
+the two device lanes, KMS unwraps remain chunked at four, AAD continues to bind
+member, connection, provider, field/purpose, and token version, and every root
+and plaintext buffer is zeroized. Missing or mismatched material fails closed;
+database, KMS, and secure-box outages propagate as operational failures rather
+than being rewritten as reauthorization. Application revision, refresh lease,
+terminal/disconnect state, connection epoch, and provider/source authority stay
+Web-owned and are preserved in the emitted snapshot.
+
+Cloudflare only forwards the bounded request and cursor through the signed Web
+callback. It does not persist a cursor, cache a page, hydrate secrets, or copy
+this policy into the execution plane.
+
+### Native companion status projection
+
+Native companion status remains Privy-bearer-authenticated, consent-gated, and
+member-isolated. After those checks, Web performs one narrow member-owned
+Junction connection read selecting only `id` and `status` with a 32+1
+saturation check, one bounded set source read for those ids with a 64+1
+unscoped authority check or a narrower 32+1 source-filtered check, and one set
+receipt-signal read. The path never selects or decrypts an external account id
+or OAuth token. It preserves the
+established active/not-disconnected predicates, source-scoped first-webhook
+behavior, disconnected-source `lastSeenAt` receipt cutoff, resource alias
+normalization, and timestamp-only response contract. Web remains the sole
+device-sync control-plane truth owner.
+
+Deploy the cursor-aware Cloudflare/assistant reader before the Web producer.
+The reader-first version accepts the legacy complete response under the total
+hydration ceiling; after Web deploys, the same reader follows the new bounded
+cursor pages. Deploying the Web producer before the cursor-aware reader would
+let a legacy transport discard continuation metadata and is therefore unsafe.
 
 ## Runtime access strategy
 
