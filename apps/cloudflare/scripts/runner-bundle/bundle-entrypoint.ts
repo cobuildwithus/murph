@@ -275,7 +275,13 @@ export const RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME = "dist-bundled";
 // total after the merged AgentMail removal on 2026-08-14. Ratchet those
 // measurements while retaining the existing cross-platform tolerances and
 // forbidden-startup-input guards.
-const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 10_325_065 + 32_768;
+//
+// Exact reminder-occurrence authority and due-reminder wake priority extend
+// existing lazy assistant/runtime output without adding a forbidden boot
+// input. Linux CI measured 10,362,146B total and exact macOS assembly measured
+// 10,413,418B total on 2026-08-14; ratchet the total baseline to the higher
+// cross-platform measurement and retain the established 32KB allowance.
+const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 10_413_418 + 32_768;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 1_689_721;
 const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 8_065_357;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_TOLERANCE_BYTES = 48_000;
