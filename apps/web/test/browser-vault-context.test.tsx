@@ -720,6 +720,132 @@ test("required bucket integrity failure surfaces through the provider without dr
   await rendered.cleanup();
 });
 
+test("a route transition aborts provider-owned bucket work and admits the new route before it settles", async () => {
+  mocks.usePathname.mockReturnValue("/biomarkers");
+  const metricBucketId = await getBrowserVaultMetricBucketId("resting-heart-rate");
+  const replica = createReplica();
+  const ref = await createShardedReplicaRef(replica);
+  const shardSet = await splitBrowserVaultReplica(replica);
+  const encoded = {
+    core: gzipSync(new TextEncoder().encode(JSON.stringify(shardSet.core))),
+    labs: gzipSync(new TextEncoder().encode(JSON.stringify(shardSet.labs))),
+    metricsIndex: gzipSync(new TextEncoder().encode(JSON.stringify(shardSet.metrics))),
+  };
+  const routeABucketResponse = createDeferred<Response>();
+  const routeABucketSignals: AbortSignal[] = [];
+  let requestIndex = 0;
+  const fetchMock = vi.fn((_url: RequestInfo | URL, init?: RequestInit) => {
+    const currentRequestIndex = requestIndex;
+    requestIndex += 1;
+    if (currentRequestIndex === 0) {
+      return Promise.resolve(jsonResponse({
+        replicaKeyEnvelope: createReplicaKeyEnvelope(),
+        replicaRef: ref,
+        shards: {
+          core: createEncryptedShardResponse(ref, "core"),
+          labs: createEncryptedShardResponse(ref, "labs"),
+          metricsIndex: createEncryptedShardResponse(ref, "metricsIndex"),
+        },
+        state: "ready",
+      }));
+    }
+    if (currentRequestIndex === 1) {
+      if (init?.signal) {
+        routeABucketSignals.push(init.signal);
+      }
+      // Deliberately ignore abort so the late response exercises the warm
+      // store generation fence as well as the provider authority fence.
+      return routeABucketResponse.promise;
+    }
+    if (currentRequestIndex === 2) {
+      return Promise.resolve(jsonResponse({
+        encryptedReplica: null,
+        memberId: "member_123",
+        replicaAad: null,
+        replicaKeyEnvelope: null,
+        replicaRef: ref,
+        state: "not_modified",
+      }));
+    }
+    throw new Error("Unexpected browser-vault route transition request.");
+  });
+  installBrowserVaultCryptoMocks();
+  mocks.decryptHostedStoragePayload.mockImplementation(({ aad }: {
+    aad: { shard?: string };
+  }) => {
+    if (aad.shard === "core") return Promise.resolve(encoded.core);
+    if (aad.shard === "labs") return Promise.resolve(encoded.labs);
+    if (aad.shard === "metricsIndex") return Promise.resolve(encoded.metricsIndex);
+    throw new Error("Unexpected encrypted browser-vault route transition child.");
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
+  function RouteTransitionHarness() {
+    const [onRouteB, setOnRouteB] = useState(false);
+    return createAuthenticatedBrowserVaultElement(
+      onRouteB
+        ? createElement(BrowserVaultStatusProbe)
+        : createElement(BrowserVaultRouteMetricDemandProbe, {
+            onNavigate: () => {
+              mocks.usePathname.mockReturnValue("/history");
+              setOnRouteB(true);
+            },
+          }),
+    );
+  }
+
+  const rendered = await renderClientComponent(
+    createElement(RouteTransitionHarness),
+    { requireButton: false },
+  );
+
+  await waitForCondition(
+    () => fetchMock.mock.calls.length === 2,
+    "route A bucket request",
+  );
+  assert.equal(routeABucketSignals[0]?.aborted, false);
+  const routeARequest = JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body));
+  assert.deepEqual(routeARequest.requestedMetricBuckets, [metricBucketId]);
+
+  await act(async () => {
+    rendered.button?.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
+  });
+  await waitForCondition(
+    () => fetchMock.mock.calls.length === 3,
+    "route B authority request",
+  );
+  assert.equal(routeABucketSignals[0]?.aborted, true);
+  await waitForText(rendered.container, `ready:${ref.dataVersion}`);
+  const routeBRequest = JSON.parse(String(fetchMock.mock.calls[2]?.[1]?.body));
+  assert.deepEqual(routeBRequest.requestedShards, ["core"]);
+  assert.deepEqual(routeBRequest.knownShards, ["core", "labs", "metricsIndex"]);
+  const routeBSnapshot = getBrowserVaultReadySnapshot();
+  assert.ok(routeBSnapshot);
+  assert.deepEqual(routeBSnapshot.loadedShards, ["core"]);
+  assert.deepEqual(routeBSnapshot.loadedMetricBuckets, []);
+
+  routeABucketResponse.resolve(jsonResponse({
+    metricBuckets: {
+      [metricBucketId]: createEncryptedMetricBucketResponse(ref, metricBucketId),
+    },
+    replicaKeyEnvelope: createReplicaKeyEnvelope(),
+    replicaRef: ref,
+    state: "ready",
+  }));
+  await act(async () => {
+    await routeABucketResponse.promise;
+    for (let flush = 0; flush < 6; flush += 1) {
+      await Promise.resolve();
+    }
+  });
+
+  assert.equal(getBrowserVaultReadySnapshot(), routeBSnapshot);
+  assert.deepEqual(getBrowserVaultReadySnapshot()?.loadedMetricBuckets, []);
+  assert.equal(rendered.container.textContent, `ready:${ref.dataVersion}`);
+
+  await rendered.cleanup();
+});
+
 test("experiment deep links load core and metrics index before exact run-card bucket follow-up", async () => {
   mocks.usePathname.mockReturnValue("/experiments/custom-protocol");
   const replica = createReplica({
@@ -3974,6 +4100,21 @@ function BrowserVaultRequiredMetricDemandProbe() {
     "button",
     { onClick: () => void vault.refresh({ background: true }) },
     `${vault.status}:${loaded ? "loaded" : "pending"}:${vault.client?.capability ?? "none"}:${vault.error ?? "none"}`,
+  );
+}
+
+function BrowserVaultRouteMetricDemandProbe({
+  onNavigate,
+}: {
+  onNavigate: () => void;
+}) {
+  const vault = useBrowserVault();
+  const loaded = useBrowserVaultMetricKeyDemand(["resting-heart-rate"]);
+
+  return createElement(
+    "button",
+    { onClick: onNavigate },
+    `${vault.status}:${loaded ? "loaded" : "pending"}:${vault.client?.capability ?? "none"}`,
   );
 }
 

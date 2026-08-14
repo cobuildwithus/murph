@@ -207,7 +207,7 @@ function ActiveBrowserVaultProvider({ children, initialMemberId }: {
   const clientRef = useRef<BrowserVaultAnyQueryClient | null>(null);
   const authorityGenerationRef = useRef(0);
   const mountedRef = useRef(false);
-  const providerStartedLoadRef = useRef(false);
+  const providerStartedLoadRef = useRef<string | null>(null);
   const runtimeRefreshCompletionRef =
     useRef<BrowserVaultRuntimeRefreshCompletion | null>(null);
   const runtimeRefreshAdmissionRef =
@@ -273,7 +273,7 @@ function ActiveBrowserVaultProvider({ children, initialMemberId }: {
       runtimeRefreshTimeoutRef.current = null;
       runtimeRefreshSignalSentRef.current = false;
       abortBrowserVaultInFlightLoad();
-      providerStartedLoadRef.current = false;
+      providerStartedLoadRef.current = null;
       if (mountedRef.current) {
         setRuntimeRefreshPolling(false);
       }
@@ -319,7 +319,7 @@ function ActiveBrowserVaultProvider({ children, initialMemberId }: {
         runtimeRefreshSignalSentRef.current = false;
         runtimeRefreshTimeoutRef.current = null;
         abortBrowserVaultInFlightLoad();
-        providerStartedLoadRef.current = false;
+        providerStartedLoadRef.current = null;
         if (mountedRef.current) {
           setSessionRefreshPending(false);
           setRuntimeRefreshPending(false);
@@ -379,7 +379,7 @@ function ActiveBrowserVaultProvider({ children, initialMemberId }: {
   const clearDecryptedClient = useCallback(() => {
     authorityGenerationRef.current += 1;
     clearBrowserVaultWarmState();
-    providerStartedLoadRef.current = false;
+    providerStartedLoadRef.current = null;
     clearRuntimeRefreshWait();
     commitEmpty(EMPTY_BROWSER_VAULT_SESSION_METADATA);
     setAdmittedPathname(null);
@@ -473,6 +473,7 @@ function ActiveBrowserVaultProvider({ children, initialMemberId }: {
         options.requestRuntimeRefreshUntilAfterRequest !== undefined;
       const requestRuntimeRefresh = runtimeRefreshCompletion !== undefined
         || options.retryPostRequestRefresh === true;
+      const targetPathname = authorityPathname ?? pathname;
       const authorityGeneration = authorityPathname === undefined
         ? authorityGenerationRef.current
         : authorityGenerationRef.current + 1;
@@ -483,7 +484,7 @@ function ActiveBrowserVaultProvider({ children, initialMemberId }: {
         if (runtimeRefreshCompletionRef.current) {
           clearRuntimeRefreshWait();
           abortBrowserVaultInFlightLoad();
-          providerStartedLoadRef.current = false;
+          providerStartedLoadRef.current = null;
         }
         authorityGenerationRef.current = authorityGeneration;
         setAdmittedPathname(null);
@@ -491,7 +492,20 @@ function ActiveBrowserVaultProvider({ children, initialMemberId }: {
         setError(null);
       }
 
-      const existing = peekBrowserVaultInFlightLoad();
+      let existing = peekBrowserVaultInFlightLoad();
+      if (
+        authorityPathname !== undefined
+        && existing
+        && providerStartedLoadRef.current !== null
+        && providerStartedLoadRef.current !== targetPathname
+      ) {
+        // A route-owned load cannot hold the persistent provider on its old
+        // pathname. External warm work has no provider owner and same-route
+        // callers still share the existing request.
+        abortBrowserVaultInFlightLoad();
+        providerStartedLoadRef.current = null;
+        existing = null;
+      }
       if (authorityPathname !== undefined && existing) {
         // Preserve the shared dashboard request. Its result stays private
         // module state until a second, post-boundary request proves authority
@@ -509,7 +523,7 @@ function ActiveBrowserVaultProvider({ children, initialMemberId }: {
       const startedLoad = !sharedLoad;
       if (startedLoad) {
         // This provider originated the load, so it owns aborting it on unmount.
-        providerStartedLoadRef.current = true;
+        providerStartedLoadRef.current = targetPathname;
         if (!background && authorityPathname === undefined) {
           setStatus("loading");
           setError(null);
@@ -523,7 +537,6 @@ function ActiveBrowserVaultProvider({ children, initialMemberId }: {
         );
       }
 
-      const targetPathname = authorityPathname ?? pathname;
       const routeShards = planBrowserVaultRouteShards(targetPathname);
       const requestedMetricBuckets = targetPathname === pathname
         ? activeMetricBucketDemandRef.current
@@ -538,8 +551,12 @@ function ActiveBrowserVaultProvider({ children, initialMemberId }: {
         requestedShards,
         requestRefresh: requestRuntimeRefresh,
       });
-      if (startedLoad && !peekBrowserVaultInFlightLoad()) {
-        providerStartedLoadRef.current = false;
+      if (
+        startedLoad
+        && providerStartedLoadRef.current === targetPathname
+        && !peekBrowserVaultInFlightLoad()
+      ) {
+        providerStartedLoadRef.current = null;
       }
       if (
         !mountedRef.current
@@ -721,7 +738,7 @@ function ActiveBrowserVaultProvider({ children, initialMemberId }: {
       }
       if (ownsRuntimeRefresh || providerStartedLoadRef.current) {
         abortBrowserVaultInFlightLoad();
-        providerStartedLoadRef.current = false;
+        providerStartedLoadRef.current = null;
       }
     };
   }, []);
