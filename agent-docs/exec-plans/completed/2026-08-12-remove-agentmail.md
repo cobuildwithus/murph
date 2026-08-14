@@ -1,8 +1,8 @@
 # Remove AgentMail from Murph
 
-Status: active
+Status: completed
 Created: 2026-08-12
-Updated: 2026-08-13
+Updated: 2026-08-14
 
 ## User evidence and decision
 
@@ -107,6 +107,13 @@ Updated: 2026-08-13
 - Cron pausing, auto-reply deletion, secret tombstones, setup cleanup summaries,
   self-delivery fallback exceptions, negative-only CLI cleanup, and proof-only
   fixtures for hypothetical historical AgentMail state are removed.
+- ReviewGPT round 8 returned `PASS` with no findings on the exact pushed
+  zero-compatibility head. The user then explicitly opted out of further
+  ReviewGPT runs and authorized conflict resolution and merge.
+- Current `main` was integrated with a normal two-parent merge. The four
+  bounded conflicts preserve the reviewed AgentMail-free ownership statement,
+  retain current-main device-sync and assistant prompt guidance, and regenerate
+  the CLI schema/hash from the combined source.
 
 ## Audit ledger
 
@@ -153,8 +160,16 @@ Updated: 2026-08-13
   production-built CLI setup/assistant/cron/hash (116), and web changelog (45)
   tests; CLI schema/hash generation; changelog generation; docs drift; and
   source-sidecar hygiene.
-- Required remote proof: a subsequent ReviewGPT `PASS` and exact-head CI.
-- The base branch advanced after the single permitted refresh and the draft PR
-  currently has a moving-base conflict. Per repository policy, do not perform a
-  second refresh merely to chase the base; record the exact-head result and the
-  remaining base-race blocker at handoff.
+- ReviewGPT round 8 returned `PASS` with no findings on correction head
+  `658c0baee5525bb41889ffc0667e5d6d72566fe1`.
+- After the user-authorized current-main merge, all eight affected package
+  typechecks pass; operator-config (318), inbox-services (67), setup-cli (108),
+  assistant-cli (128), focused assistant-engine (583, including the corrected
+  prompt-budget rerun), assistant-runtime environment (40), Cloudflare secret
+  policy (7), production-built CLI setup/assistant/cron/hash (116), and web
+  changelog (45) tests pass. Runtime preparation, CLI schema/hash generation,
+  docs drift, source-sidecar hygiene, diff hygiene, privacy checks, conflict
+  marker checks, and active-residue classification pass.
+- Required remote proof on the final closed-plan head is GitHub Actions. Per
+  the user's explicit instruction, no further ReviewGPT round is required.
+Completed: 2026-08-14
