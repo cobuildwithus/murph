@@ -1247,6 +1247,15 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   the app-local Vercel OIDC adapter remains for browser/session/status/deletion
   calls into Cloudflare.
 
+  The Web-owned operator usage dashboard is a bounded projection over those
+  canonical owners, not a second usage read model. Hosted-member traversal uses
+  primary-key keyset pagination with a 25-row page and cap-plus-one evidence;
+  row-level mailbox and immutable-usage aggregates admit only those page IDs.
+  Whole-population cards are scalar SQL aggregates. Each displayed row reuses
+  the canonical allowance gate plus exact persisted-period timestamp in its own
+  short sequential repeatable-read transaction, so no dashboard transaction
+  spans members and no off-page member receives gate work.
+
   Hosted device-sync scheduling keeps one canonical connection timestamp:
   Web's `nextReconcileAt` is the provider cadence and the only timestamp the
   global due-reconcile sweep may consume. The encrypted system-mailbox item

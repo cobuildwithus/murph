@@ -408,18 +408,27 @@ supported provider credential.
   Repeated exact-head Standard previews remain the external acceptance proof.
   The next exact-head Standard preview still OOM-killed Turbopack, so the
   catalog correction is retained as a boundary fix but was not sufficient
-  capacity proof on Next 16.2.6. Production and Linux CI now use Next 16.3's
-  default Turbopack path through the same shared production-build selector. The
-  Workflow integration runs through its native Next integration: exact-head CI
-  proves the complete compile, type-validation, static-generation, and
-  directive-discovery path, while focused Stripe and phone-call suites prove
-  the existing `workflow/api.start` wrappers and step contracts. Two
-  forced-cold exact-head Standard previews completed without OOM: compilation
-  took 91 and 87 seconds, TypeScript validation took 54 and 55 seconds, all 233
-  pages took 10.0 and 10.8 seconds, and each Vercel build stage completed in
-  four minutes. These repeated previews remain the external memory acceptance
-  proof. The accepted candidate preserves the heap split and all route/type
-  validation. The advisory budget is
+  capacity proof on Next 16.2.6. A later Next 16.3 Turbopack trial completed two
+  forced-cold exact-head Standard previews in about four minutes, but production
+  subsequently reproduced the intermittent failure: on 2026-08-14 two builds
+  remained in Turbopack compilation until Vercel's build-duration ceiling and a
+  third exited 137 with Vercel's explicit container-OOM report. Production and
+  Linux CI therefore use the supported Webpack fallback through the same shared
+  production-build selector. The Next config explicitly enables the isolated
+  Webpack build worker and memory optimizations because Workflow contributes
+  Webpack configuration. Three consecutive forced-cold Webpack previews, a
+  later integration preview, and the final corrected head previously completed
+  on the Standard builder without OOM. A versioned `.next/cache` epoch clears an
+  incompatible restored cache
+  until one Webpack build succeeds and then preserves ordinary warm caching.
+  The epoch is owned by the shared production runner and changes only after a
+  proven compiler/cache transition; missing or mismatched stamps fail toward a
+  cold build instead of trusting cross-compiler state.
+  Exact-head CI proves the complete compile, type-validation, static-generation,
+  and directive-discovery path,
+  while focused Stripe and phone-call suites prove the existing
+  `workflow/api.start` wrappers and step contracts. The accepted correction
+  preserves the heap split and all route/type validation. The advisory budget is
   a cgroup-unit model of Vercel Standard's 8 GB build machine: 7.2 GB available
   to the build cgroup and a 0.8 GB reserve for OS/container overhead outside it
   at the ceiling. The legacy-named guard budget override must stay strictly
@@ -647,6 +656,15 @@ supported provider credential.
   migration, Durable Object binding, required vars/secrets, checked-in scaffold,
   and generated Wrangler config aligned.
 - After hosted scenarios initialize the schema, the Linq route-authority matrix leg runs the focused real-PostgreSQL proofs for deterministic hosted usage replay, both participant-addition route-row orderings, the canonical chat-ownership-before-route-row order shared by usage-limit dispatch and route-key convergence, and device-sync exact-payload plus companion-receipt lock order against concurrent account deletion.
+- `hosted-linq-live-invite-source-ref-{migration,postgres}.test.ts` owns the
+  signup-link failure-liveness proof. The static lane pins the one concurrent
+  live-template `text_pattern_ops` index. The opt-in local PostgreSQL lane seeds
+  dominant unrelated live invite history, requires both scalar probes to use
+  that index before their existence bound, excludes attempt six from the
+  five-attempt identity contract, and proves two digest-specific terminal
+  failures serialize through the member owner so daily suppression releases
+  only after the last live identity. A later delivered receipt restores the
+  marker, while an older failed receipt remains stale.
 - That matrix starts from the hosted-local harness's intentional `prisma db
   push` schema. The usage-credit PostgreSQL suite therefore applies the exact
   checked-in detached direct-payment migration before creating fixtures, so

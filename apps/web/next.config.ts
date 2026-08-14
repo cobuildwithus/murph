@@ -312,6 +312,11 @@ export function buildHostedWebNextConfig(
       turbopackFileSystemCacheForDev: isHostedWebDevFileSystemCacheEnabled(environment),
       // Source-map emission is the largest proven build-memory cost.
       turbopackSourceMaps: false,
+      // Workflow contributes Webpack configuration, so select Next's isolated
+      // build worker explicitly and enable its memory-optimized compiler path.
+      // This is the repeatedly proven production path on Vercel's 8-GB builder.
+      webpackBuildWorker: true,
+      webpackMemoryOptimizations: true,
     },
     outputFileTracingIncludes: {
       "/experiments": [

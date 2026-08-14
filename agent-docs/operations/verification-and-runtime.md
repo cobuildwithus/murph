@@ -824,17 +824,22 @@ and completed all 229 static pages with the same heap policy. Repeated
 exact-head Standard previews remain the external acceptance proof. The
 next exact-head Standard preview still OOM-killed Turbopack, so the catalog
 correction remains a boundary fix but was not sufficient capacity proof on
-Next 16.2.6. Production and Linux CI now use Next 16.3's default Turbopack path
-through the same shared production-build selector. The Workflow integration
-runs through its native Next integration: exact-head CI proves the complete
-compile, type-validation, static-generation, and directive-discovery path,
-while focused Stripe and phone-call suites prove the existing
-`workflow/api.start` wrappers and step contracts. Two forced-cold exact-head
-Standard previews completed without OOM: compilation took 91 and 87 seconds,
-TypeScript validation took 54 and 55 seconds, all 233 pages took 10.0 and 10.8
-seconds, and each Vercel build stage completed in four minutes. These repeated
-previews remain the external memory acceptance proof. The accepted Next 16.3
-candidate preserves the heap policy and all route/type validation. The
+Next 16.2.6. Production and Linux CI now use Next 16.3's supported Webpack
+fallback through the same shared production-build selector, with the isolated
+Webpack build worker and memory optimizations enabled. Interactive development
+and the dev-smoke lane remain on Turbopack. A cache-local compiler epoch removes
+only `.next/cache` when a restored cache predates the Webpack cutover and writes
+the epoch only after a successful Next build, so a failed cold build retries
+cold while later successful builds retain normal warm caching. The Workflow
+integration runs through its native Next integration: exact-head CI proves the
+complete compile, type-validation, static-generation, and directive-discovery
+path, while focused Stripe and phone-call suites prove the existing
+`workflow/api.start` wrappers and step contracts. The exact-head Standard
+hosted proof on 2026-08-14 restored the prior cache, reset the incompatible
+epoch, compiled with Webpack in 2.7 minutes, and completed the full build and
+post-build runtime checks in eight minutes without OOM. This hosted proof is the
+current external memory acceptance evidence. The accepted Next 16.3 candidate
+preserves the heap policy and all route/type validation. The
 advisory budget is a cgroup-unit machine model
 for Vercel Standard's 8 GB build machine: 7.2 GB available to the build cgroup,
 with a 0.8 GB reserve for OS/container overhead outside it at the ceiling. The

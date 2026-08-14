@@ -1310,6 +1310,7 @@ model HostedAccountGroupInvite {
   acceptedBy                      HostedMember?       @relation("HostedAccountGroupInviteAcceptor", fields: [acceptedByMemberId], references: [id], onDelete: SetNull)
 
   @@index([groupId, status, createdAt])
+  @@index([groupId, status, expiresAt, id], map: "hagi_group_status_expires_id_idx")
   @@index([targetPhoneLookupKey])
   @@index([targetTelegramUsernameLookupKey], map: "hagi_target_telegram_username_lookup_key_idx")
   @@index([targetEmailLookupKey], map: "hagi_target_email_lookup_key_idx")
@@ -1429,6 +1430,7 @@ model HostedStripeEvent {
   nextAttemptAt    DateTime                @default(now()) @map("next_attempt_at")
   claimExpiresAt   DateTime?               @map("claim_expires_at")
   processedAt      DateTime?               @map("processed_at")
+  activationResultJson Json?                @map("activation_result_json")
   subscriptionCancellationEmailSentAt DateTime?               @map("subscription_cancellation_email_sent_at")
   lastErrorCode    String?                 @map("last_error_code")
   lastErrorMessage String?                 @map("last_error_message")
@@ -1792,6 +1794,7 @@ model HostedGroupMember {
   @@unique([groupId, memberId])
   @@index([memberId])
   @@index([groupId])
+  @@index([groupId, createdAt, id], map: "hosted_group_member_group_created_id_idx")
   @@map("hosted_group_member")
 }
 

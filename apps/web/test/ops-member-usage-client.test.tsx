@@ -2,9 +2,10 @@ import { act, createElement, type ComponentProps } from "react";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 const routerRefresh = vi.fn();
+const routerPush = vi.fn();
 
 vi.mock("next/navigation", () => ({
-  useRouter: () => ({ refresh: routerRefresh }),
+  useRouter: () => ({ push: routerPush, refresh: routerRefresh }),
 }));
 
 vi.mock("lucide-react", () => ({
@@ -75,6 +76,7 @@ let cleanupRender: (() => Promise<void>) | null = null;
 
 beforeEach(() => {
   fetchMock.mockReset();
+  routerPush.mockReset();
   routerRefresh.mockReset();
   vi.stubGlobal("fetch", fetchMock);
 });
@@ -101,7 +103,41 @@ describe("MemberUsageClient", () => {
     expect(rendered.container.textContent).toContain("2 participants");
     expect(rendered.container.textContent).toContain("$7.25");
     expect(rendered.container.textContent).toContain("Notice claimed");
+    expect(rendered.container.textContent).toContain("25 rows per page");
     expect(rendered.container.querySelectorAll("table")).toHaveLength(1);
+  });
+
+  test("navigates through deterministic previous and next cursors", async () => {
+    const dashboard = makeDashboard();
+    dashboard.pagination = {
+      nextCursor: "hbm_050",
+      pageSize: 25,
+      previousCursor: "hbm_026",
+    };
+    const rendered = await renderClientComponent(
+      createElement(MemberUsageClient, { dashboard }),
+    );
+    cleanupRender = rendered.cleanup;
+
+    await clickButton(
+      rendered.window,
+      getButton(rendered.container, "Previous"),
+    );
+    await clickButton(rendered.window, getButton(rendered.container, "Next"));
+
+    expect(routerPush).toHaveBeenNthCalledWith(
+      1,
+      "/ops/usage?before=hbm_026",
+    );
+    expect(routerPush).toHaveBeenNthCalledWith(
+      2,
+      "/ops/usage?after=hbm_050",
+    );
+    expect(
+      rendered.container.querySelector(
+        'nav[aria-label="Member usage pages"]',
+      ),
+    ).not.toBeNull();
   });
 
   test("labels a row without a current period without calling it available", async () => {
@@ -194,7 +230,7 @@ describe("MemberUsageClient", () => {
     cleanupRender = rendered.cleanup;
 
     expect(rendered.container.textContent).toContain(
-      "No hosted members or group containers were found.",
+      "No hosted members or group containers were found on this page.",
     );
   });
 
@@ -323,6 +359,11 @@ function makeDashboard(): HostedOpsMemberUsageDashboard {
   return {
     capturedAt: "2026-07-22T18:00:00.000Z",
     messageRetentionDays: 30,
+    pagination: {
+      nextCursor: null,
+      pageSize: 25,
+      previousCursor: null,
+    },
     rows: [{
       allowanceStatus: "available",
       allTimeUsageUsdMicros: "7250000",

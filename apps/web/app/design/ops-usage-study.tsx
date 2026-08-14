@@ -4,6 +4,11 @@ import type { HostedOpsMemberUsageDashboard } from "@/src/lib/hosted-ops/member-
 const DESIGN_OPS_USAGE_DASHBOARD: HostedOpsMemberUsageDashboard = {
   capturedAt: "2026-07-22T18:00:00.000Z",
   messageRetentionDays: 30,
+  pagination: {
+    nextCursor: "design_member_next",
+    pageSize: 25,
+    previousCursor: null,
+  },
   rows: [{
     allowanceStatus: "available",
     allTimeUsageUsdMicros: "7250000",
