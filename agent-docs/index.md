@@ -65,7 +65,8 @@ and resolved-pointer replay closure. Current-sender clarification and
 continuation reuse the stateful dynamic-tool chain in provider request order,
 so one cannot overtake the other while independent new exact-ref requests stay
 concurrent. A marked current caller may start a group-bound read only after the
-required notice; unmarked old group calls fail closed during Web-first rollout,
+required notice; unmarked old group calls fail closed before tool or mailbox
+work during Web-first rollout,
 while unmarked private calls and already-persisted legacy work retain their
 bounded drain. One `current_sender_personal` target owns the read while a
 separate result destination owns group or same-channel direct delivery; replay

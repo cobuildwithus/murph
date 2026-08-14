@@ -99,7 +99,7 @@ Local replacement-candidate evidence on 2026-08-13:
   typecheck passes. Round 15 returned findings but reported unknown model
   confirmation, so it is remediation evidence rather than the required trusted
   final PASS.
-- The replacement untrusted attempted round 15 found that Web accepted an
+- The replacement substantive round 15 found that Web accepted an
   unmarked old `ask_current_sender` group request even though that old runtime
   could not send the now-required advance room notice. A focused route test
   reproduced the bypass as HTTP 200 instead of the required fail-closed 400.
@@ -109,7 +109,10 @@ Local replacement-candidate evidence on 2026-08-13:
   The focused Web suite passes 45 tests, the current-sender Assistant Engine
   suite passes 7 tests, the Cloudflare marker/replay suite passes 19 tests,
   prepared Web typecheck and focused Web lint pass, and docs drift passes. The
-  replacement response again reported unknown model confirmation, so it also
-  remains remediation evidence rather than a trusted final result.
-- A fresh full-snapshot ReviewGPT PASS and required GitHub checks remain pending
-  on the remediated exact head.
+  exact-head full snapshot ran well beyond the 7.5-minute trust floor, completed
+  with substantive path analysis and the required marker, and its independent
+  capture metadata verifies `gpt-5-6-pro`; the response's inability to
+  self-report its model does not override that external evidence. It therefore
+  counts as substantive round 15.
+- A fresh full-snapshot ReviewGPT round 16 PASS and required GitHub checks
+  remain pending on the remediated exact head.
