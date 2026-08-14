@@ -17,6 +17,8 @@ Updated: 2026-08-13
   conversations without new persisted state or a reminder-specific history.
 - A focused occurrence-sequence regression proves send, one cadence question,
   then skip after continued silence.
+- Retired human transcript text remains visible only as a privacy-safe chronology
+  marker, so a long-cadence reminder cannot mistake an expired reply for silence.
 - Medication, clinician-directed, clinical, and safety-critical reminders remain
   outside the quiet-after-silence policy and continue until explicitly changed
   or paused or an existing authoritative skip condition applies.
@@ -60,6 +62,11 @@ Updated: 2026-08-13
    Mitigation: retain an explicit resident and setup-time safety exclusion and
    exercise three unanswered prescribed-treatment occurrences in the cron
    runtime harness.
+5. Risk: transcript-content retention could erase the only visible evidence
+   that a member answered a long-cadence reminder.
+   Mitigation: project the existing retired-entry metadata as a fixed
+   privacy-safe human-message marker and treat it as incomplete, not negative,
+   reply evidence.
 
 ## Tasks
 
@@ -80,6 +87,26 @@ Updated: 2026-08-13
 - Keep `supportKind`, automation lifecycle status, delivery/outbox state, and
   optional generic `activeUntil` because they own distinct authorization and
   reliability concerns.
+- Preserve retired human chronology through the transcript owner's existing
+  `textRetiredAt` metadata and a fixed provider-history marker; do not retain or
+  reconstruct expired message text.
+- Exclude every recognized Murph-managed automation owner scope from the
+  ordinary reminder overlay while retaining `supportKind: null` compatibility
+  for legacy or user-authored reminders.
+
+## Review outcomes
+
+- ReviewGPT round 1's safety-critical-reminder finding was accepted and fixed
+  with an explicit resident/setup/skill exclusion plus a three-occurrence
+  prescribed-treatment regression.
+- ReviewGPT round 2's long-cadence retention finding was accepted and fixed in
+  the existing transcript-history projection, with answered and unanswered
+  retention-boundary proof.
+- The preliminary specialist's public recovery wording, residual skill policy,
+  known managed-job scope, and model-decision coverage findings were accepted.
+  The new gated real-app-server table covers the reminder decision owner; the
+  existing inspect-and-patch tests remain the owner for later automation
+  mutations rather than duplicating that subsystem here.
 
 ## Verification
 
@@ -87,5 +114,12 @@ Updated: 2026-08-13
   TypeScript check selected by repository scripts, privacy/diff inspection,
   exact-head GitHub Actions, and required ReviewGPT commands.
 - Expected outcomes: focused behavior and prompt regressions pass, typecheck is
-  clean, the patch is net-deleting outside focused proof/docs, ReviewGPT has no
-  accepted unresolved findings, and required CI is green on the final head.
+  clean, the dense lifecycle remains deleted while review-driven safety and
+  retention corrections stay focused, ReviewGPT has no accepted unresolved
+  findings, and required CI is green on the final head.
+- Current local evidence: 8 changed-surface assistant files passed with 433
+  tests and 70 intentional provider-gated skips; assistant and Web typechecks
+  passed; 53 focused changelog tests passed; desktop and 390px archive/design
+  renders were inspected without overflow or clipping. The live real-model
+  command is authored but cannot execute in this worktree because the isolated
+  harness requires an `OPENAI_API_KEY` and none is configured.

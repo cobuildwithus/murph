@@ -137,6 +137,7 @@ import {
   buildAssistantGeneratedImageDeliveryTranscriptMarkerText,
 } from '../src/assistant/response-media.js'
 import {
+  ASSISTANT_RETIRED_HUMAN_TRANSCRIPT_HISTORY_TEXT,
   pruneAssistantTranscriptRetention,
   replaceTranscriptEntries,
 } from '../src/assistant/store/persistence.js'
@@ -5175,6 +5176,98 @@ describe('assistant Codex turn planning', () => {
 
       expect(staleResumePlan.resume).toBeNull()
       expect(staleResumePlan.conversationHistoryMessages).toEqual(expectedHistory)
+    } finally {
+      await rm(vault, { force: true, recursive: true })
+    }
+  })
+
+  it('preserves a privacy-safe human chronology marker after transcript text retention', async () => {
+    planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
+    planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
+    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
+      supportsNativeResume: false,
+    })
+    const vault = await mkdtemp(path.join(
+      os.tmpdir(),
+      'assistant-route-plan-retired-human-history-',
+    ))
+    const answeredSession = {
+      ...createSession({ turnCount: 1 }),
+      conversationId: 'session-retired-human-answer',
+      sessionId: 'session-retired-human-answer',
+    }
+    const unansweredSession = {
+      ...createSession({ turnCount: 1 }),
+      conversationId: 'session-no-human-answer',
+      sessionId: 'session-no-human-answer',
+    }
+    const cadenceQuestion =
+      'Monthly room reset. Should I keep these, change them, or pause?'
+    const executionProfile: AssistantCodexTurnResolvedExecutionProfile = {
+      promptProfile: 'conversation',
+      threadScope: 'session-thread',
+      toolProfile: 'provider-turn',
+    }
+
+    try {
+      await appendAssistantTranscriptEntries(vault, answeredSession.sessionId, [
+        {
+          createdAt: '2026-01-01T10:00:00.000Z',
+          kind: 'assistant',
+          text: cadenceQuestion,
+        },
+        {
+          contentReceivedAt: '2026-01-01T10:01:00.000Z',
+          createdAt: '2026-01-01T10:01:00.000Z',
+          kind: 'user',
+          text: 'Keep it.',
+        },
+      ])
+      await appendAssistantTranscriptEntries(vault, unansweredSession.sessionId, [
+        {
+          createdAt: '2026-01-01T10:00:00.000Z',
+          kind: 'assistant',
+          text: cadenceQuestion,
+        },
+      ])
+      await expect(pruneAssistantTranscriptRetention(
+        resolveAssistantStatePaths(vault),
+        { now: new Date('2026-02-01T10:00:00.000Z') },
+      )).resolves.toMatchObject({
+        entriesRedacted: 1,
+      })
+
+      const buildPlan = async (session: AssistantSession) =>
+        resolveAssistantRouteTurnPlan({
+          executionContext: null,
+          input: {
+            ...createMessageInput(),
+            vault,
+          },
+          profile: executionProfile,
+          promptTimeContext: {
+            currentLocalDate: '2026-02-01',
+            currentTimeZone: 'UTC',
+          },
+          route: createRoute(),
+          session,
+          sharedPlan: createPrivateSharedPlan(),
+        })
+
+      await expect(buildPlan(answeredSession)).resolves.toMatchObject({
+        conversationHistoryMessages: [
+          { content: cadenceQuestion, role: 'assistant' },
+          {
+            content: ASSISTANT_RETIRED_HUMAN_TRANSCRIPT_HISTORY_TEXT,
+            role: 'user',
+          },
+        ],
+      })
+      await expect(buildPlan(unansweredSession)).resolves.toMatchObject({
+        conversationHistoryMessages: [
+          { content: cadenceQuestion, role: 'assistant' },
+        ],
+      })
     } finally {
       await rm(vault, { force: true, recursive: true })
     }

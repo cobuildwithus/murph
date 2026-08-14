@@ -80,6 +80,7 @@ import {
 } from '../src/assistant/managed-automations.ts'
 import {
   ASSISTANT_CRON_INDEPENDENT_AUTOMATION_AUTHORITY_INSTRUCTIONS,
+  ASSISTANT_CRON_RECURRING_REMINDER_CONVERSATION_INSTRUCTIONS,
 } from '../src/assistant/cron/execution.ts'
 import {
   prepareAssistantAutoReplyInput,
@@ -3135,6 +3136,130 @@ describeRealCodex('real Codex independent scheduled reminder authority e2e', () 
         result.finalMessage,
       )
       expect(decision.kind).toBe(expectedKind)
+    } finally {
+      await removeRealCodexTemporaryPaths([
+        workingDirectory,
+        ...config.temporaryPaths,
+      ])
+    }
+  }, 360_000)
+})
+
+describeRealCodex('real Codex recurring reminder conversation e2e', () => {
+  it.each([
+    {
+      context: 'No reminder from this automation has been dispatched yet.',
+      expectedKind: 'send_message',
+      expectedText: /room reset/iu,
+      savedInstructions: 'Remind the room to do its short reset.',
+      scenario: 'sends the first ordinary cue',
+      scope: 'group' as const,
+    },
+    {
+      context: [
+        'The immediately prior cue, "Quick room reset.", was provider-accepted and sent.',
+        'No human message followed it.',
+      ].join('\n'),
+      expectedKind: 'send_message',
+      expectedText: /keep|change|pause/iu,
+      savedInstructions: 'Remind the room to do its short reset.',
+      scenario: 'asks one cadence question after an unanswered cue',
+      scope: 'group' as const,
+    },
+    {
+      context: [
+        'The immediately prior reminder, "Quick room reset. Should I keep these, change them, or pause?", was provider-accepted and sent.',
+        'No human message followed it.',
+      ].join('\n'),
+      expectedKind: 'skip',
+      expectedText: null,
+      savedInstructions: 'Remind the room to do its short reset.',
+      scenario: 'skips after the unanswered cadence question',
+      scope: 'group' as const,
+    },
+    {
+      context: [
+        'The prior cadence question was provider-accepted and sent.',
+        'A human then replied about this reminder: "Keep it, but make the next cue say quick stretch instead."',
+      ].join('\n'),
+      expectedKind: 'send_message',
+      expectedText: /quick stretch/iu,
+      savedInstructions: 'Remind the room to do its short reset.',
+      scenario: 'uses a relevant reply when resuming the cue',
+      scope: 'group' as const,
+    },
+    {
+      context: [
+        'The prior cadence question was provider-accepted and sent.',
+        'The only later human message was unrelated room chatter about tonight\'s dinner.',
+        'No one replied about the reminder or asked Murph to resume or change it.',
+      ].join('\n'),
+      expectedKind: 'skip',
+      expectedText: null,
+      savedInstructions: 'Remind the room to do its short reset.',
+      scenario: 'does not treat unrelated group chatter as re-engagement',
+      scope: 'group' as const,
+    },
+    {
+      context: [
+        'The immediately prior prescribed-medication cue was provider-accepted and sent.',
+        'No human message followed it.',
+      ].join('\n'),
+      expectedKind: 'send_message',
+      expectedText: /prescribed medication/iu,
+      savedInstructions:
+        'Remind the member to take their prescribed medication.',
+      scenario: 'keeps a prescribed-treatment reminder sending after silence',
+      scope: 'direct' as const,
+    },
+  ])('$scenario', async ({
+    context,
+    expectedKind,
+    expectedText,
+    savedInstructions,
+    scope,
+  }) => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(
+      path.join(tmpdir(), 'murph-recurring-reminder-conversation-e2e-'),
+    )
+
+    try {
+      const result = await executeRealCodexAppServerTurn({
+        approvalPolicy: 'never',
+        baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand:
+          normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+          ?? undefined,
+        codexHome: config.codexHome,
+        developerInstructions:
+          buildIndependentReminderDeveloperInstructions(scope),
+        dynamicTools: [],
+        env: config.env,
+        excludeResumeTurns: true,
+        groupConversation: scope === 'group',
+        model: config.model,
+        modelProvider: config.modelProvider,
+        prompt: [
+          savedInstructions,
+          ASSISTANT_CRON_RECURRING_REMINDER_CONVERSATION_INSTRUCTIONS,
+          'Current trusted delivery and conversation evidence:',
+          context,
+        ].join('\n\n'),
+        reasoningEffort: 'medium',
+        sandbox: 'read-only',
+        workingDirectory,
+      })
+
+      const decision = parseAssistantNotificationDecision(result.finalMessage)
+      expect(decision.kind).toBe(expectedKind)
+      if (expectedText) {
+        expect(decision.kind).toBe('send_message')
+        if (decision.kind === 'send_message') {
+          expect(decision.text).toMatch(expectedText)
+          expect(decision.text).not.toMatch(/did you|complete|failed|ignored/iu)
+        }
+      }
     } finally {
       await removeRealCodexTemporaryPaths([
         workingDirectory,
@@ -7676,7 +7801,9 @@ function buildExperimentOnboardingDeveloperInstructions(): string {
   })
 }
 
-function buildIndependentReminderDeveloperInstructions(): string {
+function buildIndependentReminderDeveloperInstructions(
+  conversationScope: 'direct' | 'group' = 'direct',
+): string {
   return buildAssistantSystemPrompt({
     assistantCliContract: null,
     assistantContextSnapshotPrompt: null,
@@ -7688,7 +7815,7 @@ function buildIndependentReminderDeveloperInstructions(): string {
       rawCommand: 'vault-cli',
       setupCommand: 'murph',
     },
-    conversationScope: 'direct',
+    conversationScope,
     currentLocalDate: '2026-08-05',
     currentTimeZone: 'America/New_York',
     hostedRuntime: true,

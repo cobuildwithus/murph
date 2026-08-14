@@ -7,7 +7,7 @@
     "priority": 3,
     "title": "Recurring reminders know when to pause",
     "summary": "When an ordinary recurring reminder receives no reply, Murph now asks once whether to keep, change, or pause it instead of repeating indefinitely.",
-    "details": "If that question also goes unanswered, later ordinary reminders stay quiet until the conversation changes. In groups, Murph asks the room and never blames a participant. Medication, clinician-directed, and safety-critical reminders keep sending unless explicitly changed or paused.",
+    "details": "If that question also goes unanswered, later ordinary reminders stay quiet until someone replies about the reminder or asks Murph to resume or change it. When older reply text expires for privacy, Murph still remembers that someone replied without retaining their words. In groups, Murph asks the room and never blames a participant. Medication, clinician-directed, and safety-critical reminders keep sending unless explicitly changed or paused.",
     "relevanceTags": ["assistant", "reminders", "groups"],
     "sourcePullRequests": [1775]
   }

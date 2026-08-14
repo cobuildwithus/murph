@@ -94,6 +94,9 @@ import {
   resolveAssistantStatePaths,
   type AssistantStatePaths,
 } from '../store/paths.js'
+import {
+  ASSISTANT_RETIRED_HUMAN_TRANSCRIPT_HISTORY_TEXT,
+} from '../store/persistence.js'
 import { withAssistantCronWriteLock } from './locking.js'
 import {
   buildAssistantCronHostedDeliveryIdempotency,
@@ -1807,6 +1810,20 @@ function buildAssistantCronSupportScopeInstructions(
   ].join('\n')
 }
 
+export const ASSISTANT_CRON_RECURRING_REMINDER_CONVERSATION_INSTRUCTIONS = [
+  'Recurring reminder conversation (engine-supplied; apply only when the saved request is an ordinary reminder):',
+  '- This silence policy does not apply to medication, prescribed treatment, clinician-directed care, clinical monitoring, or safety-critical reminders. For those reminders, send the saved cue normally unless the member explicitly changes or pauses it or an existing authoritative owner supplies a valid skip condition.',
+  '- Use recent conversation plus engine delivery evidence. A failed or unconfirmed immediately prior attempt does not count: send the current reminder normally instead of treating that attempt as unanswered.',
+  '- Otherwise find the most recent reminder from this automation whose dispatch was confirmed by provider acceptance or runtime `sent` state.',
+  '- If there is no such reminder for this revision, send the current reminder normally.',
+  '- If a relevant human reply followed that reminder, use it when composing the current reminder.',
+  `- A history item with the exact text \`${ASSISTANT_RETIRED_HUMAN_TRANSCRIPT_HISTORY_TEXT}\` proves only that a human message occurred where its content later expired. If it follows the reminder, treat reply evidence as incomplete rather than unanswered: continue the current cue unless retained conversation or another authoritative owner proves an explicit pause, change, or valid skip condition.`,
+  '- If no relevant human reply followed and that reminder already asked whether to keep, change, or pause these interruptions, return `skip`.',
+  '- Otherwise send the current concise cue and ask one natural question about whether to keep, change, or pause these interruptions.',
+  '- This question administers reminder cadence only. Do not ask whether the action was completed, infer failure or refusal from silence, increase frequency, or manufacture novelty when the same concise cue still fits.',
+  '- In a group, address the room collectively. Never assign silence, non-completion, or failure to an individual participant.',
+].join('\n')
+
 function buildAssistantCronRecurringReminderConversationInstructions(
   job: ResolvedAssistantCronJob,
 ): string | null {
@@ -1815,24 +1832,13 @@ function buildAssistantCronRecurringReminderConversationInstructions(
     job.source.kind !== 'automation' ||
     job.source.status !== 'active' ||
     (job.source.supportKind !== null && job.source.supportKind !== 'reminder') ||
-    resolveMurphManagedMaintenancePolicy(job.source.automationId) !== null ||
+    resolveMurphManagedAutomationOwnerScope(job.source.automationId) !== null ||
     job.source.schedule.kind === 'at'
   ) {
     return null
   }
 
-  return [
-    'Recurring reminder conversation (engine-supplied; apply only when the saved request is an ordinary reminder):',
-    '- This silence policy does not apply to medication, prescribed treatment, clinician-directed care, clinical monitoring, or safety-critical reminders. For those reminders, send the saved cue normally unless the member explicitly changes or pauses it or an existing authoritative owner supplies a valid skip condition.',
-    '- Use recent conversation plus engine delivery evidence. A failed or unconfirmed immediately prior attempt does not count: send the current reminder normally instead of treating that attempt as unanswered.',
-    '- Otherwise find the most recent reminder from this automation whose dispatch was confirmed by provider acceptance or runtime `sent` state.',
-    '- If there is no such reminder for this revision, send the current reminder normally.',
-    '- If a relevant human reply followed that reminder, use it when composing the current reminder.',
-    '- If no relevant human reply followed and that reminder already asked whether to keep, change, or pause these interruptions, return `skip`.',
-    '- Otherwise send the current concise cue and ask one natural question about whether to keep, change, or pause these interruptions.',
-    '- This question administers reminder cadence only. Do not ask whether the action was completed, infer failure or refusal from silence, increase frequency, or manufacture novelty when the same concise cue still fits.',
-    '- In a group, address the room collectively. Never assign silence, non-completion, or failure to an individual participant.',
-  ].join('\n')
+  return ASSISTANT_CRON_RECURRING_REMINDER_CONVERSATION_INSTRUCTIONS
 }
 
 function assistantCronTimestampIsLater(

@@ -1284,6 +1284,13 @@ describe('assistant skill assets', () => {
       'Reuse a good concise cue when the context has not changed.',
     )
     expect(compact).toContain('do not manufacture novelty')
+    expect(compact).toContain(
+      'Never copy these generic repair or review requirements into an ordinary recurring reminder.',
+    )
+    expect(compact).toContain(
+      'The generic repair, skip, and miss rules below apply only to Murph-designed habit support or an explicitly consented `check_in` or `review`',
+    )
+    expect(compact).not.toContain('Do not repeat stale reminder copy.')
     expect(raw).not.toContain('### Reminder density and reply loop')
     expect(raw).toContain('Count an ignored support attempt only when')
     expect(raw).toContain('When support is working, fade it instead of adding more.')

@@ -68,6 +68,8 @@ export const ASSISTANT_TRANSCRIPT_AUDIT_RETENTION_LIMIT = 100
  * This matches the capture-ledger window so one deadline covers both paths.
  */
 export const ASSISTANT_TRANSCRIPT_CONTENT_RETENTION_MS = 14 * 24 * 60 * 60 * 1000
+export const ASSISTANT_RETIRED_HUMAN_TRANSCRIPT_HISTORY_TEXT =
+  '[Earlier human message content expired under the transcript retention policy.]'
 const ASSISTANT_RECENT_SESSIONS_INDEX_LIMIT = 50
 
 const assistantAutomationStateCache = createAssistantBoundedRuntimeCache<string, AssistantAutomationState>({

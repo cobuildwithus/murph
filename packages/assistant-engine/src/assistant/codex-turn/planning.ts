@@ -63,6 +63,9 @@ import {
   listAssistantTranscriptEntries,
 } from '../store.js'
 import {
+  ASSISTANT_RETIRED_HUMAN_TRANSCRIPT_HISTORY_TEXT,
+} from '../store/persistence.js'
+import {
   readAssistantGeneratedImageDeliveryTranscriptMarker,
   renderAssistantGeneratedImageDeliveryHistoryText,
 } from '../response-media.js'
@@ -1186,6 +1189,15 @@ async function resolveAssistantCommittedTranscriptHistoryMessages(input: {
     }
     if (entry.kind !== 'assistant' && entry.kind !== 'user') {
       return []
+    }
+    if (entry.kind === 'user' && entry.textRetiredAt !== undefined) {
+      return [{
+        message: {
+          content: ASSISTANT_RETIRED_HUMAN_TRANSCRIPT_HISTORY_TEXT,
+          role: 'user',
+        },
+        userPromptKey: null,
+      }]
     }
     const rawContent = normalizeNullableString(entry.text)
     const content = limitAssistantConversationHistoryTextBytes(

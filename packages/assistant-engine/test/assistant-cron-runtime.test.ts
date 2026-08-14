@@ -217,6 +217,9 @@ import {
   reopenAssistantOnboarding,
   resolveAssistantOnboardingStatePath,
 } from '../src/assistant/onboarding-state.ts'
+import {
+  ASSISTANT_RETIRED_HUMAN_TRANSCRIPT_HISTORY_TEXT,
+} from '../src/assistant/store/persistence.ts'
 import type { AssistantExecutionContext } from '../src/assistant/execution-context.ts'
 import type { AssistantNotificationInput } from '../src/assistant/notification-turn.ts'
 import type { AssistantChannelDependencies } from '../src/assistant/channels/types.ts'
@@ -226,12 +229,14 @@ import {
   MURPH_ONBOARDING_GOAL_CHECKIN_AUTOMATION_ID,
 } from '../src/assistant/onboarding-goal-checkin-automation.ts'
 import {
+  MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION_ID,
   MURPH_GROUP_ROOM_MODEL_CONSOLIDATION_AUTOMATION_ID,
   MURPH_GROUP_ROOM_MODEL_CONSOLIDATION_PRIVATE_SUMMARY,
   MURPH_MONTHLY_IMPROVEMENT_COACH_AUTOMATION_ID,
   MURPH_ONBOARDING_FOLLOWUP_AUTOMATION,
   MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID,
   MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_PRIVATE_SUMMARY,
+  MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID,
   MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID,
   MURPH_WEEKLY_HEALTH_RESEARCH_SCOUT_AUTOMATION_ID,
   MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID,
@@ -4113,6 +4118,72 @@ describe('assistant cron runtime orchestration', () => {
     },
   )
 
+  it.each([
+    {
+      automationId: MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION_ID,
+      title: 'Automatic meal closeout',
+    },
+    {
+      automationId: MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID,
+      title: 'Weekly health digest',
+    },
+  ])('does not apply reminder conversation policy to $title', async ({
+    automationId,
+    title,
+  }) => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-08T10:01:00.000Z'))
+    const { vaultRoot } = await createRuntimeContext(
+      `assistant-cron-runtime-managed-non-reminder-${automationId}-`,
+    )
+    await completeAssistantOnboarding({
+      completedAt: '2026-04-08T09:00:00.000Z',
+      reason: 'user_answered',
+      vault: vaultRoot,
+    })
+    getVaultAutomationStore(vaultRoot).push({
+      automationId,
+      continuityPolicy: 'fresh',
+      createdAt: '2026-04-08T08:00:00.000Z',
+      instructions: `Run the managed ${title.toLowerCase()} task.`,
+      route: {
+        channel: 'telegram',
+        deliverySource: null,
+        deliveryTarget: 'room-1',
+        identityId: null,
+        participantId: null,
+        threadId: null,
+        threadIsDirect: true,
+      },
+      schedule: {
+        kind: 'dailyLocal',
+        localTime: '10:00',
+      },
+      status: 'active',
+      supportKind: null,
+      tags: ['murph-managed:test'],
+      title,
+      updatedAt: '2026-04-08T08:00:00.000Z',
+    })
+
+    await expect(processDueAssistantCronJobsLocal({
+      limit: 1,
+      vault: vaultRoot,
+    })).resolves.toEqual({
+      failed: 0,
+      processed: 1,
+      succeeded: 1,
+    })
+
+    expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledWith(
+      expect.objectContaining({
+        instructions: expect.not.stringContaining(
+          'Recurring reminder conversation (engine-supplied',
+        ),
+      }),
+    )
+  })
+
   it('sends one recurring reminder cadence question and then skips after continued room silence', async () => {
     vi.useFakeTimers()
     const { vaultRoot } = await createRuntimeContext(
@@ -4174,6 +4245,12 @@ describe('assistant cron runtime orchestration', () => {
       )
       expect(notificationInput.instructions).toContain(
         'This silence policy does not apply to medication, prescribed treatment, clinician-directed care, clinical monitoring, or safety-critical reminders.',
+      )
+      expect(notificationInput.instructions).toContain(
+        ASSISTANT_RETIRED_HUMAN_TRANSCRIPT_HISTORY_TEXT,
+      )
+      expect(notificationInput.instructions).toContain(
+        'treat reply evidence as incomplete rather than unanswered',
       )
       expect(notificationInput.instructions).not.toContain('carry-forward grace')
       if (occurrenceIndex === 0) {

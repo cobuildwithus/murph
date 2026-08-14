@@ -1401,7 +1401,7 @@ describe('assistant execution prompt contract', () => {
       'Prefer bounded, context-aware automations.',
     )
     expect(prompt).toContain(
-      'Repeated support needs skip/repair rules and an off-ramp.',
+      'Murph-designed habit support needs request-specific skip/repair rules and an off-ramp.',
     )
     expect(prompt).toContain(
       'That silence policy never applies to medication, prescribed treatment, clinician-directed care, clinical monitoring, or safety-critical reminders',

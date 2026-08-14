@@ -1802,7 +1802,7 @@ function buildAssistantSharedAutomationPreferenceText(
         "vault-cli memory upsert"
       )} so later automations reuse it instead of asking again.`;
   const openingGuidance = joinPromptSections(
-    "Prefer bounded, context-aware automations. For passive monitoring, default to digest or summary. Repeated support needs skip/repair rules and an off-ramp. Do not invent a check-in or review lifecycle for an ordinary recurring reminder; an explicitly requested ongoing reminder may remain active while the scheduler's resident conversation policy handles silence. That silence policy never applies to medication, prescribed treatment, clinician-directed care, clinical monitoring, or safety-critical reminders; those cues continue unless the user explicitly changes or pauses them or an existing authoritative owner supplies a valid skip condition.",
+    "Prefer bounded, context-aware automations. For passive monitoring, default to digest or summary. Murph-designed habit support needs request-specific skip/repair rules and an off-ramp. Do not invent a check-in or review lifecycle for an ordinary recurring reminder; an explicitly requested ongoing reminder may remain active while the scheduler's resident conversation policy handles silence. That silence policy never applies to medication, prescribed treatment, clinician-directed care, clinical monitoring, or safety-critical reminders; those cues continue unless the user explicitly changes or pauses them or an existing authoritative owner supplies a valid skip condition.",
     conversationScope === "direct"
       ? `For a confirmed future care appointment in private, follow ${code(
           buildAssistantSkillFileRef("appointment-scheduling")
