@@ -7,6 +7,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  readlinkSync,
   realpathSync,
   rmSync,
   statSync,
@@ -713,6 +714,75 @@ git add .metadata_never_index
         '.metadata_never_index',
       ]),
     ).toBe('')
+    expect(runGit(target, ['status', '--porcelain'])).toBe('')
+  })
+
+  it('restores a tracked executable Spotlight marker through hook index changes', () => {
+    const harness = createHarness()
+    const marker = path.join(harness.primary, '.metadata_never_index')
+    writeFileSync(marker, 'executable marker\n')
+    chmodSync(marker, 0o755)
+    runGit(harness.primary, ['config', 'core.filemode', 'true'])
+    runGit(harness.primary, ['add', '.metadata_never_index'])
+    runGit(harness.primary, ['commit', '-m', 'track executable marker'])
+    executable(
+      path.join(harness.primary, '.githooks', 'post-checkout'),
+      `#!/bin/sh
+printf 'hook marker\n' >.metadata_never_index
+chmod 0644 .metadata_never_index
+git add .metadata_never_index
+`,
+    )
+    const target = path.join(harness.root, 'tracked-executable-marker')
+
+    const creation = runScript(harness, 'create-worktree', [
+      '-b',
+      'tracked-executable-marker',
+      target,
+    ])
+
+    expect(creation.status, creation.stderr).toBe(0)
+    expect(
+      runGit(target, ['ls-files', '--stage', '--', '.metadata_never_index']),
+    ).toMatch(/^100755 /)
+    expect(readFileSync(path.join(target, '.metadata_never_index'), 'utf8')).toBe(
+      'executable marker\n',
+    )
+    expect(lstatSync(path.join(target, '.metadata_never_index')).mode & 0o777).toBe(
+      0o755,
+    )
+    expect(runGit(target, ['status', '--porcelain'])).toBe('')
+  })
+
+  it('restores a tracked symlink Spotlight marker without touching its target', () => {
+    const harness = createHarness()
+    symlinkSync(
+      'missing-spotlight-target',
+      path.join(harness.primary, '.metadata_never_index'),
+    )
+    runGit(harness.primary, ['add', '.metadata_never_index'])
+    runGit(harness.primary, ['commit', '-m', 'track symlink marker'])
+    executable(
+      path.join(harness.primary, '.githooks', 'post-checkout'),
+      `#!/bin/sh
+rm .metadata_never_index
+printf 'hook marker\n' >.metadata_never_index
+git add .metadata_never_index
+`,
+    )
+    const target = path.join(harness.root, 'tracked-symlink-marker')
+
+    const creation = runScript(harness, 'create-worktree', [
+      '-b',
+      'tracked-symlink-marker',
+      target,
+    ])
+
+    expect(creation.status, creation.stderr).toBe(0)
+    const targetMarker = path.join(target, '.metadata_never_index')
+    expect(lstatSync(targetMarker).isSymbolicLink()).toBe(true)
+    expect(readlinkSync(targetMarker)).toBe('missing-spotlight-target')
+    expect(existsSync(path.join(target, 'missing-spotlight-target'))).toBe(false)
     expect(runGit(target, ['status', '--porcelain'])).toBe('')
   })
 

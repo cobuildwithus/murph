@@ -89,13 +89,14 @@ variables, sets Git's exec path and empty prefix, prepends the exec path to
 real creation lock instead of inheriting authority to bypass it. It also gives
 the hook native end-of-file standard input while preserving standard output and
 error. Manual materialization may invoke `post-index-change`; after that boundary
-and again after `post-checkout`, the helper restores only the marker's captured
-checkout-tree index and worktree entry with hooks suppressed. It preserves every
-unrelated hook-created index or worktree effect. The helper then preserves the
-shared exclude file's identity and metadata while appending one exact rule when
-needed for final effective precedence, restores the marker, and verifies no
-marker delta before final storage-guard authorization. Keep the marker in place
-for the worktree's lifetime.
+and again after `post-checkout`, the helper uses Git's path-scoped reset and
+checkout primitives to restore only the marker from the captured checkout tree
+with hooks suppressed. It preserves every unrelated hook-created index or
+worktree effect. The helper then preserves the shared exclude file's identity
+and metadata while appending one exact rule when needed for final effective
+precedence, restores an absent marker, and verifies no marker delta before final
+storage-guard authorization. Keep the marker in place for the worktree's
+lifetime.
 
 Marker creation, materialization, hook completion, marker restoration, and
 final authorization publication form one post-registration boundary. If any
