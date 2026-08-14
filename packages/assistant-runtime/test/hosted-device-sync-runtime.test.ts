@@ -1409,8 +1409,10 @@ describe("hosted device-sync runtime", () => {
     );
     await mkdir(vaultRoot, { recursive: true });
     let jobSources: Array<{
+      lastErrorCode: string | null;
       sourceInstanceKey?: string;
       sourceProviderSlug: string;
+      status: "connected" | "disconnected" | "error" | "unavailable";
     }> = [];
     const baseProvider = createFakeProvider();
     const junctionProvider: DeviceSyncProvider = {
@@ -1426,10 +1428,12 @@ describe("hosted device-sync runtime", () => {
           jobSources = (await context.listConnectionSources?.({
             sourceProviderSlug: "apple_health_kit",
           }) ?? []).map((source) => ({
+            lastErrorCode: source.lastErrorCode,
             ...(source.sourceInstanceKey
               ? { sourceInstanceKey: source.sourceInstanceKey }
               : {}),
             sourceProviderSlug: source.sourceProviderSlug,
+            status: source.status,
           }));
           return {};
         },
@@ -1581,9 +1585,186 @@ describe("hosted device-sync runtime", () => {
         JSON.stringify(service.listJobFailureDiagnostics()),
       );
       assert.deepEqual(jobSources, [{
+        lastErrorCode: null,
         sourceInstanceKey: establishedSourceInstanceKey,
         sourceProviderSlug: "apple_health",
+        status: "connected",
       }]);
+
+      hostedSnapshot = buildRuntimeSnapshot({
+        connectionId: hostedConnectionId,
+        credential: {
+          credentialMetadata: {},
+          kind: "provider_config",
+          providerConfigKey: "junction",
+        },
+        externalAccountId,
+        provider: "junction",
+        // Deliberately oldest-first: job-time state selection must not depend
+        // on the Web snapshot's normal newest-first ordering.
+        sources: [
+          {
+            displayName: "Apple Health established",
+            firstSeenAt: "2026-04-01T09:00:00.000Z",
+            lastDataAt: null,
+            lastErrorCode: null,
+            lastErrorMessage: null,
+            lastSeenAt: "2026-04-06T09:26:00.000Z",
+            resourceCount: 1,
+            resourceAvailabilitySummary: { water: true },
+            sourceInstanceKey: establishedSourceInstanceKey,
+            sourceProviderSlug: "apple_health",
+            status: "connected",
+          },
+          {
+            displayName: "Apple Health disconnected alias",
+            firstSeenAt: "2026-04-03T09:00:00.000Z",
+            lastDataAt: "2026-04-06T09:29:00.000Z",
+            lastErrorCode: "SOURCE_USER_DISCONNECTED",
+            lastErrorMessage: "Disconnected",
+            lastSeenAt: "2026-04-06T09:30:00.000Z",
+            resourceCount: 1,
+            resourceAvailabilitySummary: { water: true },
+            sourceInstanceKey: "jxn_src_later_duplicate_apple_health",
+            sourceProviderSlug: "apple_health_kit",
+            status: "disconnected",
+          },
+        ],
+      });
+      jobSources = [];
+      const disconnectedJob = getStore(service).enqueueJob({
+        accountId: localAccountId,
+        availableAt: "2026-04-06T09:30:00.000Z",
+        kind: "reconcile",
+        payload: {},
+        provider: "junction",
+      });
+      await service.runWorkerOnce();
+      assert.equal(getStore(service).getJobById(disconnectedJob.id)?.status, "succeeded");
+      assert.deepEqual(jobSources, [{
+        lastErrorCode: "SOURCE_USER_DISCONNECTED",
+        sourceInstanceKey: establishedSourceInstanceKey,
+        sourceProviderSlug: "apple_health",
+        status: "disconnected",
+      }]);
+
+      hostedSnapshot = buildRuntimeSnapshot({
+        connectionId: hostedConnectionId,
+        credential: {
+          credentialMetadata: {},
+          kind: "provider_config",
+          providerConfigKey: "junction",
+        },
+        externalAccountId,
+        provider: "junction",
+        // Deliberately newest-state-first, with a later lastDataAt but an
+        // earlier lastSeenAt than the stale fence. Hydration treats the data
+        // arrival as an authority advance and job-time listing must agree.
+        sources: [
+          {
+            displayName: "Apple Health reconnected alias",
+            firstSeenAt: "2026-04-03T09:00:00.000Z",
+            lastDataAt: "2026-04-06T09:35:00.000Z",
+            lastErrorCode: null,
+            lastErrorMessage: null,
+            lastSeenAt: "2026-04-06T09:34:00.000Z",
+            resourceCount: 1,
+            resourceAvailabilitySummary: { water: true },
+            sourceInstanceKey: "jxn_src_later_duplicate_apple_health",
+            sourceProviderSlug: "apple-healthkit",
+            status: "connected",
+          },
+          {
+            displayName: "Apple Health stale fence",
+            firstSeenAt: "2026-04-01T09:00:00.000Z",
+            lastDataAt: "2026-04-06T09:30:00.000Z",
+            lastErrorCode: "SOURCE_USER_DISCONNECTED",
+            lastErrorMessage: "Disconnected",
+            lastSeenAt: "2026-04-06T09:36:00.000Z",
+            resourceCount: 1,
+            resourceAvailabilitySummary: { water: true },
+            sourceInstanceKey: establishedSourceInstanceKey,
+            sourceProviderSlug: "apple_health",
+            status: "disconnected",
+          },
+        ],
+      });
+      jobSources = [];
+      const reconnectedJob = getStore(service).enqueueJob({
+        accountId: localAccountId,
+        availableAt: "2026-04-06T09:36:00.000Z",
+        kind: "reconcile",
+        payload: {},
+        provider: "junction",
+      });
+      await service.runWorkerOnce();
+      assert.equal(getStore(service).getJobById(reconnectedJob.id)?.status, "succeeded");
+      assert.deepEqual(jobSources, [{
+        lastErrorCode: null,
+        sourceInstanceKey: establishedSourceInstanceKey,
+        sourceProviderSlug: "apple_health",
+        status: "connected",
+      }]);
+
+      hostedSnapshot = buildRuntimeSnapshot({
+        connectionId: hostedConnectionId,
+        credential: {
+          credentialMetadata: {},
+          kind: "provider_config",
+          providerConfigKey: "junction",
+        },
+        externalAccountId,
+        provider: "junction",
+        sources: [
+          {
+            displayName: "Apple Health established",
+            firstSeenAt: "2026-04-01T09:00:00.000Z",
+            lastDataAt: "2026-04-06T09:39:00.000Z",
+            lastErrorCode: null,
+            lastErrorMessage: null,
+            lastSeenAt: "2026-04-06T09:40:00.000Z",
+            resourceCount: 1,
+            resourceAvailabilitySummary: { water: true },
+            sourceInstanceKey: establishedSourceInstanceKey,
+            sourceProviderSlug: "apple_health",
+            status: "connected",
+          },
+          {
+            displayName: "Apple Health conflicting alias",
+            firstSeenAt: "2026-04-03T09:00:00.000Z",
+            lastDataAt: "2026-04-06T09:39:00.000Z",
+            lastErrorCode: "SOURCE_USER_DISCONNECTED",
+            lastErrorMessage: "Disconnected",
+            lastSeenAt: "2026-04-06T09:40:00.000Z",
+            resourceCount: 1,
+            resourceAvailabilitySummary: { water: true },
+            sourceInstanceKey: "jxn_src_later_duplicate_apple_health",
+            sourceProviderSlug: "apple_healthkit",
+            status: "disconnected",
+          },
+        ],
+      });
+      jobSources = [];
+      const ambiguousJob = getStore(service).enqueueJob({
+        accountId: localAccountId,
+        availableAt: "2026-04-06T09:40:00.000Z",
+        kind: "reconcile",
+        payload: {},
+        provider: "junction",
+      });
+      await service.runWorkerOnce();
+      assert.deepEqual(jobSources, []);
+      assert.equal(getStore(service).getJobById(ambiguousJob.id)?.status, "queued");
+      assert.deepEqual(
+        service.listJobFailureDiagnostics().map((diagnostic) => ({
+          code: diagnostic.code,
+          retryable: diagnostic.retryable,
+        })),
+        [{
+          code: "HOSTED_DEVICE_SYNC_SOURCE_STATE_UNAVAILABLE",
+          retryable: true,
+        }],
+      );
     } finally {
       closeHostedRuntimeDeviceSyncService(service);
       await cleanup();

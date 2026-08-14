@@ -128,12 +128,11 @@ async function listHostedJobConnectionSources(input: {
   });
   const projectedSources = connection.sources
     .filter((source) =>
-      (!input.sourceProviderSlug || areHostedJunctionSourcesEquivalent(
+      !input.sourceProviderSlug || areHostedJunctionSourcesEquivalent(
         input.provider,
         source.sourceProviderSlug,
         input.sourceProviderSlug,
-      ))
-      && (!input.status || source.status === input.status)
+      )
     )
     .map((source) => {
       const exactLocalSource = localSources.find(
@@ -160,11 +159,18 @@ async function listHostedJobConnectionSources(input: {
 
       return {
         ...source,
+        firstSeenAt: localSource?.firstSeenAt ?? source.firstSeenAt,
         ...(sourceInstanceKey ? { sourceInstanceKey } : {}),
         sourceProviderSlug: localSource?.sourceProviderSlug ?? source.sourceProviderSlug,
       };
     });
-  return dedupeHostedJobConnectionSources(input.provider, projectedSources);
+  const dedupedSources = dedupeHostedJobConnectionSources(
+    input.provider,
+    projectedSources,
+  );
+  return input.status
+    ? dedupedSources.filter((source) => source.status === input.status)
+    : dedupedSources;
 }
 
 function areHostedJunctionSourcesEquivalent(
@@ -189,10 +195,10 @@ function selectHostedJunctionSource(
       source.sourceProviderSlug,
       sourceProviderSlug,
     ))
-    .sort(compareHostedJobSources)[0];
+    .sort(compareHostedJobSourceIdentity)[0];
 }
 
-function compareHostedJobSources(
+function compareHostedJobSourceIdentity(
   left: ProviderJobConnectionSource,
   right: ProviderJobConnectionSource,
 ): number {
@@ -210,14 +216,77 @@ function compareHostedJobSources(
       || left.sourceProviderSlug.localeCompare(right.sourceProviderSlug);
 }
 
+interface HostedJobConnectionSource extends ProviderJobConnectionSource {
+  lastDataAt: string | null;
+  lastSeenAt: string;
+  resourceCount: number;
+}
+
+function compareHostedJobSourceLifecycle(
+  left: HostedJobConnectionSource,
+  right: HostedJobConnectionSource,
+): number {
+  const leftLastDataAt = parseHostedJobSourceTimestamp(left.lastDataAt);
+  const rightLastDataAt = parseHostedJobSourceTimestamp(right.lastDataAt);
+  if (leftLastDataAt !== rightLastDataAt) {
+    return rightLastDataAt - leftLastDataAt;
+  }
+
+  const leftLastSeenAt = parseHostedJobSourceTimestamp(left.lastSeenAt);
+  const rightLastSeenAt = parseHostedJobSourceTimestamp(right.lastSeenAt);
+  return rightLastSeenAt - leftLastSeenAt;
+}
+
+function parseHostedJobSourceTimestamp(value: string | null): number {
+  if (value === null) {
+    return Number.NEGATIVE_INFINITY;
+  }
+  const timestamp = Date.parse(value);
+  if (!Number.isFinite(timestamp)) {
+    throw hostedSourceStateUnavailable();
+  }
+  return timestamp;
+}
+
+function haveEqualHostedJobSourceLifecycleState(
+  left: HostedJobConnectionSource,
+  right: HostedJobConnectionSource,
+): boolean {
+  return left.status === right.status
+    && left.lastErrorCode === right.lastErrorCode
+    && left.lastErrorMessage === right.lastErrorMessage
+    && left.resourceCount === right.resourceCount
+    && haveEqualHostedJobSourceAvailability(
+      left.resourceAvailabilitySummary,
+      right.resourceAvailabilitySummary,
+    );
+}
+
+function haveEqualHostedJobSourceAvailability(
+  left: ProviderJobConnectionSource["resourceAvailabilitySummary"],
+  right: ProviderJobConnectionSource["resourceAvailabilitySummary"],
+): boolean {
+  const leftEntries = Object.entries(left ?? {}).sort(([leftKey], [rightKey]) =>
+    leftKey.localeCompare(rightKey)
+  );
+  const rightEntries = Object.entries(right ?? {}).sort(([leftKey], [rightKey]) =>
+    leftKey.localeCompare(rightKey)
+  );
+  return leftEntries.length === rightEntries.length
+    && leftEntries.every(([key, value], index) => {
+      const rightEntry = rightEntries[index];
+      return rightEntry?.[0] === key && Object.is(rightEntry[1], value);
+    });
+}
+
 function dedupeHostedJobConnectionSources(
   provider: string,
-  sources: readonly ProviderJobConnectionSource[],
-): ProviderJobConnectionSource[] {
+  sources: readonly HostedJobConnectionSource[],
+): HostedJobConnectionSource[] {
   if (provider !== "junction") {
     return [...sources];
   }
-  const deduped: ProviderJobConnectionSource[] = [];
+  const deduped: HostedJobConnectionSource[] = [];
   for (const source of sources) {
     const existingIndex = deduped.findIndex((candidate) =>
       areHostedJunctionSourcesEquivalent(
@@ -231,9 +300,32 @@ function dedupeHostedJobConnectionSources(
       continue;
     }
     const existing = deduped[existingIndex];
-    if (existing && compareHostedJobSources(source, existing) < 0) {
-      deduped[existingIndex] = source;
+    if (!existing) {
+      continue;
     }
+    const identitySource = compareHostedJobSourceIdentity(source, existing) < 0
+      ? source
+      : existing;
+    const lifecycleComparison = compareHostedJobSourceLifecycle(source, existing);
+    if (
+      lifecycleComparison === 0
+      && !haveEqualHostedJobSourceLifecycleState(source, existing)
+    ) {
+      throw hostedSourceStateUnavailable();
+    }
+    const lifecycleSource = lifecycleComparison < 0
+      ? source
+      : lifecycleComparison > 0
+        ? existing
+        : identitySource;
+    deduped[existingIndex] = {
+      ...lifecycleSource,
+      firstSeenAt: identitySource.firstSeenAt,
+      ...(identitySource.sourceInstanceKey
+        ? { sourceInstanceKey: identitySource.sourceInstanceKey }
+        : {}),
+      sourceProviderSlug: identitySource.sourceProviderSlug,
+    };
   }
   return deduped;
 }

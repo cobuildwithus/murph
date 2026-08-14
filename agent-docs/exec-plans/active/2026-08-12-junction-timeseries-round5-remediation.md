@@ -221,6 +221,14 @@ Updated: 2026-08-13
   one projected source. This is one precedence correction and one bounded
   in-memory dedupe in the existing listing owner; it adds no persisted state,
   migration, alias registry, queue, service, or lifecycle machinery.
+- Round twenty-one's review-induced finding is accepted. The round-twenty
+  dedupe selected the oldest alias row as a whole, coupling stable source
+  identity to potentially stale lifecycle state. Job-time listing now keeps
+  the established source key, spelling, and first-seen time while selecting
+  lifecycle authority by the same last-data-then-last-seen progression used by
+  hosted hydration. Equally authoritative aliases with conflicting state fail
+  retryably. The correction stays inside the existing bounded listing owner and
+  adds no store, registry, migration, queue, service, or reconciliation loop.
 
 ## Verification
 
@@ -387,5 +395,12 @@ Updated: 2026-08-13
   provider's routine, precise D1-to-D2 correction, and retained repair paths
   stay on that identity even when both persisted rows remain present. The
   existing real-core stale-replay proof remains on the same canonical spine.
+- Round twenty-one remediation passes the assistant-runtime typecheck, all 92
+  hosted runtime device-sync tests, and all 234 Junction provider tests. The
+  extended hosted regression proves that disconnect and reconnect state win by
+  lifecycle authority in opposite alias orders while the established identity
+  remains stable, and that equal-authority state conflicts stay retryable.
+  Docs drift, the 204-scenario integrity check, scoped privacy scanning, and
+  `git diff --check` also pass.
 - Pending: commit/push, exact-head CI, ReviewGPT PASS,
   merge, and worktree retirement.
