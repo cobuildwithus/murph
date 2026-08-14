@@ -134,6 +134,7 @@ describe.skipIf(!runPostgresProof)(
             firstSeenAt: connectedAt,
             id: sourceId,
             lastSeenAt: connectedAt,
+            lifecycleEpoch: 2,
             resourceAvailabilitySummaryJson: {},
             sourceInstanceKey: `garmin-${suffix}`,
             sourceProviderSlug: "garmin",
@@ -293,6 +294,7 @@ describe.skipIf(!runPostgresProof)(
           expect(snapshot.connections[0]?.connection.id).toBe(connectionId);
           expect(snapshot.connections[0]?.sources).toEqual([
             expect.objectContaining({
+              lifecycleEpoch: 2,
               sourceProviderSlug: "garmin",
             }),
           ]);

@@ -5,10 +5,12 @@ import { junctionProviderAdapter } from "@murphai/importers/device-providers/jun
 import { test } from "vitest";
 
 import { deviceSyncError, isDeviceSyncError } from "../src/errors.ts";
+import { JUNCTION_CONNECT_SOURCE_TARGETS } from "../src/config/junction-connect-sources.ts";
 import {
   addJunctionExtendedTimeseriesHistoryBackfillCoverage,
   hasJunctionExtendedTimeseriesHistoryBackfillCoverage,
 } from "../src/junction-historical-backfill-progress.ts";
+import { clearJunctionScheduleTimeExtendedHistoryCoverageForProvider } from "../src/junction-source-reconnect.ts";
 import { createJunctionDeviceSyncProvider } from "../src/providers/junction.ts";
 import {
   DEVICE_SYNC_SOURCE_DISCONNECT_IN_PROGRESS_ERROR_CODE,
@@ -1170,6 +1172,42 @@ test("terminal matrix coverage suppresses every extended-history pair", () => {
   );
 });
 
+test("one reconnect clears exactly 12 schedule-time coordinates at maximum source cardinality", () => {
+  const scheduleTimeResources = ["note", ...SPARSE_DAILY_HISTORY_RESOURCES, "weight"] as const;
+  const allResources = ["blood_pressure", ...scheduleTimeResources] as const;
+  const coveredMetadata = JUNCTION_CONNECT_SOURCE_TARGETS.reduce(
+    (metadata, target) => allResources.reduce(
+      (current, resource) => addHistoryCoverage(current, target.providerSlug, resource),
+      metadata,
+    ),
+    {} as Record<string, unknown>,
+  );
+  const reconnectingTarget = requireValue(
+    JUNCTION_CONNECT_SOURCE_TARGETS.find((target) => target.providerSlug === "garmin"),
+  );
+  const clearedMetadata = clearJunctionScheduleTimeExtendedHistoryCoverageForProvider({
+    metadata: coveredMetadata,
+    providerSlug: reconnectingTarget.providerSlug,
+  });
+
+  for (const target of JUNCTION_CONNECT_SOURCE_TARGETS) {
+    for (const resource of scheduleTimeResources) {
+      assertHistoryCoverage(
+        clearedMetadata,
+        target.providerSlug,
+        resource,
+        target.providerSlug !== reconnectingTarget.providerSlug,
+      );
+    }
+    assertHistoryCoverage(
+      clearedMetadata,
+      target.providerSlug,
+      "blood_pressure",
+      true,
+    );
+  }
+});
+
 test("an unrepresentable source is omitted from extended-history scheduling", () => {
   const requests: TimeseriesRequest[] = [];
   const provider = createProvider({
@@ -1342,7 +1380,7 @@ test("a stale job leaves newer extended-history coverage untouched without egres
 test("schedule-time history binds source lifecycle epochs without binding sibling or source-first-seen work", () => {
   const provider = createProvider({
     additionalProviders: [{
-      resourceAvailability: { caffeine: true },
+      resourceAvailability: { blood_pressure: true, caffeine: true },
       slug: "withings",
     }],
     providerState: {
@@ -1366,23 +1404,28 @@ test("schedule-time history binds source lifecycle epochs without binding siblin
           "withings",
           "2026-01-02T12:00:00.000Z",
           "connected",
-          { caffeine: true },
+          { blood_pressure: true, caffeine: true },
           7,
         ),
       ],
     }),
     NOW,
   );
-  const offered = requireValue(scheduled.jobs.find((job) =>
+  const offered = scheduled.jobs.filter((job) =>
     job.kind === "resource" && ["blood_pressure", "caffeine"].includes(String(job.payload?.resource))
-  ));
-  const sourceSlug = String(offered.payload?.sourceProviderSlug);
-
+  );
+  assert.deepEqual(
+    offered
+      .filter((job) => job.payload?.resource === "blood_pressure")
+      .map((job) => [job.payload?.sourceProviderSlug, job.payload?.sourceLifecycleEpoch]),
+    [["omron", undefined], ["withings", undefined]],
+  );
+  const caffeineJob = requireValue(
+    offered.find((job) => job.payload?.resource === "caffeine"),
+  );
   assert.equal(
-    offered.payload?.sourceLifecycleEpoch,
-    offered.payload?.resource === "caffeine"
-      ? sourceSlug === "omron" ? 3 : 7
-      : undefined,
+    caffeineJob.payload?.sourceLifecycleEpoch,
+    caffeineJob.payload?.sourceProviderSlug === "omron" ? 3 : 7,
   );
   assert.equal(
     scheduled.jobs.find((job) => job.kind === "reconcile")?.payload?.sourceLifecycleEpoch,
@@ -1390,7 +1433,48 @@ test("schedule-time history binds source lifecycle epochs without binding siblin
   );
 });
 
-test("extended-history scheduling admits one root per pass and rotates deterministic slots", () => {
+test("active dedupe evidence drains reopened source coordinates before ordinary rotation", () => {
+  const resources = ["caffeine", "water"] as const;
+  const availability = { caffeine: true, water: true };
+  const provider = createProvider({
+    additionalProviders: [{ resourceAvailability: availability, slug: "withings" }],
+    providerState: { resourceAvailability: availability, status: "connected" },
+    requests: [],
+    timeseriesResources: resources,
+  });
+  const createScheduledJobs = requireValue(
+    requireValue(provider.jobExecutor).createScheduledJobs,
+  );
+  const account = createStoredAccount({
+    sources: [
+      createSourceSummary("omron", "2026-01-01T00:00:00.000Z", "connected", availability, 1),
+      createSourceSummary("withings", "2026-01-02T00:00:00.000Z", "connected", availability, 2),
+    ],
+  });
+  const activeDedupeKeys = new Set<string>();
+  const context = {
+    findActiveDedupeKeys: (dedupeKeys: readonly string[]) =>
+      new Set(dedupeKeys.filter((dedupeKey) => activeDedupeKeys.has(dedupeKey))),
+  };
+
+  for (let pass = 0; pass < 2; pass += 1) {
+    const root = requireValue(createScheduledJobs(
+      account,
+      new Date(Date.parse(NOW) + pass * 60 * 60_000).toISOString(),
+      context,
+    ).jobs.find((job) => job.kind === "resource"));
+    assert.equal(root.payload?.sourceProviderSlug, "withings");
+    activeDedupeKeys.add(requireValue(root.dedupeKey));
+  }
+  const ordinary = requireValue(createScheduledJobs(
+    account,
+    new Date(Date.parse(NOW) + 2 * 60 * 60_000).toISOString(),
+    context,
+  ).jobs.find((job) => job.kind === "resource"));
+  assert.equal(ordinary.payload?.sourceProviderSlug, "omron");
+});
+
+test("schedule-time extended history admits one account root and rotates deterministic slots", () => {
   const resources = ["caffeine", "water"] as const;
   const availability = { caffeine: true, water: true };
   const provider = createProvider({
@@ -1430,18 +1514,20 @@ test("extended-history scheduling admits one root per pass and rotates determini
   assert.equal(extendedRoots(first.jobs).length, 1);
   assert.equal(extendedRoots(second.jobs).length, 1);
   assert.notDeepEqual(
-    extendedRoots(first.jobs)[0]?.payload,
-    extendedRoots(second.jobs)[0]?.payload,
+    extendedRoots(first.jobs).map((job) => job.payload),
+    extendedRoots(second.jobs).map((job) => job.payload),
   );
 
   const slotStart = Date.parse(NOW);
   const seenCoordinates = new Set<string>();
   for (let slot = 0; slot < 4; slot += 1) {
-    const offered = requireValue(extendedRoots(createScheduledJobs(
+    const offered = extendedRoots(createScheduledJobs(
       account,
       new Date(slotStart + slot * 60 * 60_000).toISOString(),
-    ).jobs)[0]);
-    seenCoordinates.add(`${offered.payload?.resource}:${offered.payload?.sourceProviderSlug}`);
+    ).jobs);
+    for (const job of offered) {
+      seenCoordinates.add(`${job.payload?.resource}:${job.payload?.sourceProviderSlug}`);
+    }
   }
   assert.deepEqual([...seenCoordinates].sort(), [
     "caffeine:omron",
@@ -1454,8 +1540,8 @@ test("extended-history scheduling admits one root per pass and rotates determini
     sources: [...requireValue(account.sources)].reverse(),
   });
   assert.deepEqual(
-    extendedRoots(createScheduledJobs(reorderedAccount, NOW).jobs)[0]?.payload,
-    extendedRoots(first.jobs)[0]?.payload,
+    extendedRoots(createScheduledJobs(reorderedAccount, NOW).jobs).map((job) => job.payload),
+    extendedRoots(first.jobs).map((job) => job.payload),
   );
 
   const reducedAccount = createStoredAccount({
@@ -1470,6 +1556,86 @@ test("extended-history scheduling admits one root per pass and rotates determini
     reducedSeen.add(`${offered.payload?.resource}:${offered.payload?.sourceProviderSlug}`);
   }
   assert.deepEqual([...reducedSeen].sort(), ["caffeine:omron", "water:omron"]);
+});
+
+test("maximum-cardinality schedule-time history queries 396 keys once and offers one inactive root", () => {
+  const resources = ["note", ...SPARSE_DAILY_HISTORY_RESOURCES, "weight"] as const;
+  const availability = Object.fromEntries(resources.map((resource) => [resource, true]));
+  const requests: TimeseriesRequest[] = [];
+  const provider = createProvider({
+    includeNote: true,
+    providerState: { resourceAvailability: availability, status: "connected" },
+    requests,
+    timeseriesResources: resources,
+  });
+  const createScheduledJobs = requireValue(
+    requireValue(provider.jobExecutor).createScheduledJobs,
+  );
+  const sources = JUNCTION_CONNECT_SOURCE_TARGETS.map((target, index) =>
+    createSourceSummary(
+      target.providerSlug,
+      new Date(Date.parse("2026-01-01T00:00:00.000Z") + index * 1_000).toISOString(),
+      "connected",
+      availability,
+      index % 2 === 0 ? 1 : 2,
+    )
+  );
+  const account = createStoredAccount({ sources });
+  const slotStart = Date.parse(NOW);
+  const seenCoordinates = new Set<string>();
+  const activeDedupeKeys = new Set<string>();
+  let membershipQueries = 0;
+  const context = {
+    findActiveDedupeKeys(dedupeKeys: readonly string[]) {
+      membershipQueries += 1;
+      assert.equal(dedupeKeys.length, 33 * 12);
+      return new Set(dedupeKeys.filter((dedupeKey) => activeDedupeKeys.has(dedupeKey)));
+    },
+  };
+
+  for (let slot = 0; slot < 33 * 12; slot += 1) {
+    const roots = createScheduledJobs(
+      account,
+      new Date(slotStart).toISOString(),
+      context,
+    ).jobs.filter((job) => job.kind === "resource" && job.payload?.historicalBackfill === true);
+    assert.equal(roots.length, 1);
+    const root = requireValue(roots[0]);
+    seenCoordinates.add(`${root.payload?.sourceProviderSlug}:${root.payload?.resource}`);
+    activeDedupeKeys.add(requireValue(root.dedupeKey));
+  }
+
+  assert.equal(JUNCTION_CONNECT_SOURCE_TARGETS.length, 33);
+  assert.equal(seenCoordinates.size, 33 * 12);
+  assert.equal(membershipQueries, 33 * 12);
+  assert.deepEqual(
+    createScheduledJobs(
+      createStoredAccount({ sources: [...sources].reverse() }),
+      NOW,
+      { findActiveDedupeKeys: () => new Set() },
+    ).jobs.filter((job) => job.kind === "resource").map((job) => job.payload),
+    createScheduledJobs(account, NOW, { findActiveDedupeKeys: () => new Set() }).jobs
+      .filter((job) => job.kind === "resource")
+      .map((job) => job.payload),
+  );
+
+  const coveredMetadata = JUNCTION_CONNECT_SOURCE_TARGETS.reduce(
+    (metadata, target) => resources.reduce(
+      (current, resource) => addHistoryCoverage(current, target.providerSlug, resource),
+      metadata,
+    ),
+    {} as Record<string, unknown>,
+  );
+  assert.equal(
+    createScheduledJobs(
+      createStoredAccount({ metadata: coveredMetadata, sources }),
+      NOW,
+      { findActiveDedupeKeys: () => new Set() },
+    ).jobs
+      .some((job) => job.kind === "resource"),
+    false,
+  );
+  assert.equal(requests.length, 0);
 });
 
 test.each([
@@ -1547,6 +1713,84 @@ test.each([
   assert.equal(providerListRequests.count, expectedProviderListRequests);
   assert.equal(requests.length, expectedTimeseriesRequests);
   assert.equal(importCalls, expectedImportCalls);
+});
+
+test("maximum source projection uses one shared snapshot while retaining exact-source fences", async () => {
+  const availability = { caffeine: true };
+  const providerListRequests = { count: 0 };
+  const requests: TimeseriesRequest[] = [];
+  const provider = createProvider({
+    additionalProviders: JUNCTION_CONNECT_SOURCE_TARGETS
+      .filter((target) => target.providerSlug !== "omron")
+      .map((target) => ({ resourceAvailability: availability, slug: target.providerSlug })),
+    historicalPullState: { providerSlug: "omron", resource: "caffeine", status: "success" },
+    providerListRequests,
+    providerState: { resourceAvailability: availability, status: "connected" },
+    requests,
+    timeseriesRecords: {
+      caffeine: [{
+        end: "2026-05-13T08:05:00.000Z",
+        start: "2026-05-13T08:00:00.000Z",
+        unit: "g",
+        value: 0.08,
+      }],
+    },
+    timeseriesResources: ["caffeine"],
+  });
+  const sources = JUNCTION_CONNECT_SOURCE_TARGETS.map((target) =>
+    createSourceSummary(
+      target.providerSlug,
+      "2026-01-01T00:00:00.000Z",
+      "connected",
+      availability,
+      1,
+    )
+  );
+  const createScheduledJobs = requireValue(
+    requireValue(provider.jobExecutor).createScheduledJobs,
+  );
+  const job = requireValue(Array.from({ length: 33 }, (_, offset) =>
+    createScheduledJobs(
+      createStoredAccount({ sources }),
+      new Date(Date.parse(NOW) + offset * 60 * 60_000).toISOString(),
+    ).jobs.find((candidate) =>
+      candidate.kind === "resource"
+      && candidate.payload?.resource === "caffeine"
+      && candidate.payload?.sourceProviderSlug === "omron"
+    )
+  ).find((candidate) => candidate !== undefined));
+  const targetSlug = String(job.payload?.sourceProviderSlug);
+  const sourceReads: string[] = [];
+  let importCalls = 0;
+
+  await requireValue(provider.jobExecutor).executeJob(
+    createJobContext({
+      account: createAccount({ sources }),
+      importSnapshot: async (snapshot) => {
+        importCalls += 1;
+        return importWithRealJunctionNormalizer(snapshot);
+      },
+      listConnectionSources: async (input) => {
+        sourceReads.push(input?.sourceProviderSlug ?? "*");
+        return input?.sourceProviderSlug
+          ? sources.filter((source) => source.sourceProviderSlug === input.sourceProviderSlug)
+          : sources;
+      },
+    }),
+    toJobRecord(job, 260),
+  );
+
+  assert.deepEqual(sourceReads, [
+    targetSlug,
+    "*",
+    targetSlug,
+    "*",
+    targetSlug,
+    targetSlug,
+  ]);
+  assert.equal(providerListRequests.count, 1);
+  assert.equal(requests.length, 1);
+  assert.equal(importCalls, 1);
 });
 
 test("an epoch change after canonical import blocks terminal coverage and continuation", async () => {
@@ -2890,15 +3134,14 @@ test("existing source obligations keep independent windows and queue identities"
       String(right.payload?.sourceProviderSlug),
     ));
 
-  assert.equal(bloodPressureJobs.length, 1);
-  assert.ok([
+  assert.deepEqual(bloodPressureJobs.map((job) => [
+    job.payload?.sourceProviderSlug,
+    job.payload?.historicalWindowStart,
+    job.payload?.windowEnd,
+  ]), [
     ["omron", "2026-04-01T00:00:00.000Z", "2026-05-01T00:00:00.000Z"],
     ["withings", "2026-05-02T00:00:00.000Z", "2026-06-01T00:00:00.000Z"],
-  ].some((expected) =>
-    expected[0] === bloodPressureJobs[0]?.payload?.sourceProviderSlug
-    && expected[1] === bloodPressureJobs[0]?.payload?.historicalWindowStart
-    && expected[2] === bloodPressureJobs[0]?.payload?.windowEnd
-  ));
+  ]);
 });
 
 test("an older runtime does not reinterpret newer source-coverage semantics", () => {

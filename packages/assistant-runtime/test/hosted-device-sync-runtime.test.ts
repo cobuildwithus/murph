@@ -17,6 +17,10 @@ import {
 import { createConfiguredDeviceSyncProvidersFromConfigs } from "@murphai/device-syncd/config";
 import { buildJunctionProviderSourceInstanceKey } from "@murphai/device-syncd/connect-config";
 import { JUNCTION_COMPANION_HRV_OBSERVATION_INVALID_CODE } from "@murphai/device-syncd/junction-resources";
+import {
+  addJunctionExtendedTimeseriesHistoryBackfillCoverage,
+  hasJunctionExtendedTimeseriesHistoryBackfillCoverage,
+} from "@murphai/device-syncd/junction-historical-backfill-progress";
 import { buildDeviceSyncTokenCipherOptions, createSecretCodec } from "@murphai/device-syncd/local-secret-codec";
 import { deviceSyncError } from "@murphai/device-syncd/errors";
 import {
@@ -1341,7 +1345,7 @@ describe("hosted device-sync runtime", () => {
         region: "us",
         summaryBackfillDays: 2,
         summaryResources: ["activity", "sleep"],
-        timeseriesResources: [],
+        timeseriesResources: ["blood_pressure", "caffeine"],
       },
     });
     assert.ok(provider);
@@ -1369,10 +1373,22 @@ describe("hosted device-sync runtime", () => {
       metadata: retryingMetadata,
       provider: "junction",
     });
+    const applyRequests: Parameters<HostedRuntimeDeviceSyncPort["applyUpdates"]>[0][] = [];
     const deviceSyncPort: HostedRuntimeDeviceSyncPort = {
       ...createNoDirtyStateDeviceSyncPortMethods(),
-      async applyUpdates() {
-        throw new Error("applyUpdates should not be called during source hydration.");
+      async applyUpdates(input) {
+        applyRequests.push(input);
+        return {
+          appliedAt: "2026-04-06T09:40:00.000Z",
+          updates: input.updates.map((update) => ({
+            connection: null,
+            connectionId: update.connectionId,
+            status: "updated" as const,
+            tokenUpdate: "unchanged" as const,
+            writeUpdate: "applied" as const,
+          })),
+          userId: "member_123",
+        };
       },
       async createConnectLink() {
         throw new Error("createConnectLink should not be called during source hydration.");
@@ -1383,7 +1399,7 @@ describe("hosted device-sync runtime", () => {
     };
 
     try {
-      const state = await syncHostedDeviceSyncControlPlaneState({
+      let state = await syncHostedDeviceSyncControlPlaneState({
         deviceSyncPort,
         wake: buildCronWake("2026-04-06T09:00:00.000Z"),
         secret: DEVICE_SYNC_SECRET,
@@ -1410,11 +1426,41 @@ describe("hosted device-sync runtime", () => {
         lastErrorCode: null,
         lastErrorMessage: null,
         lastSeenAt: "2026-04-06T09:20:00.000Z",
-        resourceAvailabilitySummary: { activity: true },
+        resourceAvailabilitySummary: { activity: true, blood_pressure: true, caffeine: true },
         sourceInstanceKey: localSourceInstanceKey,
         sourceProviderSlug: "garmin",
         status: "connected",
       });
+      const withingsSourceInstanceKey = buildJunctionProviderSourceInstanceKey({
+        connectionId: localAccountId,
+        sourceProviderSlug: "withings",
+      });
+      assert.ok(withingsSourceInstanceKey);
+      getStore(service).upsertConnectionSource({
+        connectionId: localAccountId,
+        firstSeenAt: "2026-04-02T09:00:00.000Z",
+        lastSeenAt: "2026-04-06T09:20:00.000Z",
+        resourceAvailabilitySummary: { caffeine: true },
+        sourceInstanceKey: withingsSourceInstanceKey,
+        sourceProviderSlug: "withings",
+        status: "connected",
+      });
+      let unpublishedMetadata = retryingMetadata as Record<string, unknown>;
+      for (const [providerSlug, resource] of [
+        ["garmin", "blood_pressure"],
+        ["garmin", "caffeine"],
+        ["withings", "caffeine"],
+      ] as const) {
+        const update = addJunctionExtendedTimeseriesHistoryBackfillCoverage({
+          metadata: unpublishedMetadata,
+          providerSlug,
+          resource,
+          version: 1,
+        });
+        assert.ok(update);
+        unpublishedMetadata = { ...unpublishedMetadata, [update.metadataKey]: update.value };
+      }
+      getStore(service).patchAccount(localAccountId, { metadata: unpublishedMetadata });
       hostedSnapshot = buildRuntimeSnapshot({
         connectionId: hostedConnectionId,
         credential: {
@@ -1434,7 +1480,12 @@ describe("hosted device-sync runtime", () => {
             lastSeenAt: "2026-04-06T09:25:00.000Z",
             lastDataAt: null,
             resourceCount: 2,
-            resourceAvailabilitySummary: { activity: true, sleep: true },
+            resourceAvailabilitySummary: {
+              activity: true,
+              blood_pressure: true,
+              caffeine: true,
+              sleep: true,
+            },
             sourceInstanceKey: hostedSourceInstanceKey,
             sourceProviderSlug: "garmin",
             status: "error",
@@ -1442,7 +1493,7 @@ describe("hosted device-sync runtime", () => {
         ],
       });
 
-      await syncHostedDeviceSyncControlPlaneState({
+      state = await syncHostedDeviceSyncControlPlaneState({
         deviceSyncPort,
         wake: buildCronWake("2026-04-06T09:25:00.000Z"),
         secret: DEVICE_SYNC_SECRET,
@@ -1452,17 +1503,19 @@ describe("hosted device-sync runtime", () => {
       const sources = getStore(service).listConnectionSources({
         connectionId: localAccountId,
       });
-      assert.equal(sources.length, 1);
-      assert.equal(sources[0]?.sourceInstanceKey, localSourceInstanceKey);
-      assert.equal(sources[0]?.sourceProviderSlug, "garmin");
-      assert.equal(sources[0]?.status, "error");
+      assert.equal(sources.length, 2);
+      const garminSource = sources.find((source) => source.sourceProviderSlug === "garmin");
+      assert.equal(garminSource?.sourceInstanceKey, localSourceInstanceKey);
+      assert.equal(garminSource?.status, "error");
       assert.equal(
-        sources[0]?.lastErrorCode,
+        garminSource?.lastErrorCode,
         "HISTORICAL_DATA_RECONNECT_REQUIRED",
       );
-      assert.equal(sources[0]?.lastSeenAt, "2026-04-06T09:25:00.000Z");
-      assert.deepEqual(sources[0]?.resourceAvailabilitySummary, {
+      assert.equal(garminSource?.lastSeenAt, "2026-04-06T09:25:00.000Z");
+      assert.deepEqual(garminSource?.resourceAvailabilitySummary, {
         activity: true,
+        blood_pressure: true,
+        caffeine: true,
         sleep: true,
       });
 
@@ -1486,7 +1539,12 @@ describe("hosted device-sync runtime", () => {
             lastSeenAt: "2026-04-06T09:30:00.000Z",
             lastDataAt: null,
             resourceCount: 1,
-            resourceAvailabilitySummary: { activity: true },
+            resourceAvailabilitySummary: {
+              activity: true,
+              blood_pressure: true,
+              caffeine: true,
+            },
+            lifecycleEpoch: 2,
             sourceInstanceKey: hostedSourceInstanceKey,
             sourceProviderSlug: "garmin",
             status: "connected",
@@ -1494,7 +1552,7 @@ describe("hosted device-sync runtime", () => {
         ],
       });
 
-      await syncHostedDeviceSyncControlPlaneState({
+      state = await syncHostedDeviceSyncControlPlaneState({
         deviceSyncPort,
         wake: buildCronWake("2026-04-06T09:35:00.000Z"),
         secret: DEVICE_SYNC_SECRET,
@@ -1504,15 +1562,73 @@ describe("hosted device-sync runtime", () => {
       const reconnectedSources = getStore(service).listConnectionSources({
         connectionId: localAccountId,
       });
-      assert.equal(reconnectedSources.length, 1);
-      assert.equal(reconnectedSources[0]?.sourceInstanceKey, localSourceInstanceKey);
-      assert.equal(reconnectedSources[0]?.status, "connected");
-      assert.equal(reconnectedSources[0]?.lastErrorCode, null);
-      assert.equal(reconnectedSources[0]?.lastSeenAt, "2026-04-06T09:30:00.000Z");
+      assert.equal(reconnectedSources.length, 2);
+      const reconnectedGarmin = reconnectedSources.find(
+        (source) => source.sourceProviderSlug === "garmin",
+      );
+      assert.equal(reconnectedGarmin?.sourceInstanceKey, localSourceInstanceKey);
+      assert.equal(reconnectedGarmin?.lifecycleEpoch, 2);
+      assert.equal(reconnectedGarmin?.status, "connected");
+      assert.equal(reconnectedGarmin?.lastErrorCode, null);
+      assert.equal(reconnectedGarmin?.lastSeenAt, "2026-04-06T09:30:00.000Z");
       assert.equal(
         getStore(service).getAccountById(localAccountId)?.metadata
           .junctionHistoricalBackfillStatus,
         "coverage_v3_retrying",
+      );
+      const reconnectedMetadata = getStore(service).getAccountById(localAccountId)?.metadata ?? {};
+      assert.equal(
+        hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
+          reconnectedMetadata,
+          "garmin",
+          "caffeine",
+          1,
+        ),
+        false,
+      );
+      assert.equal(
+        hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
+          reconnectedMetadata,
+          "withings",
+          "caffeine",
+          1,
+        ),
+        true,
+      );
+      assert.equal(
+        hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
+          reconnectedMetadata,
+          "garmin",
+          "blood_pressure",
+          1,
+        ),
+        true,
+      );
+
+      getStore(service).patchAccount(localAccountId, {
+        nextReconcileAt: "2026-04-06T09:30:00.000Z",
+      });
+      const scheduled = await service.runSchedulerOnce(localAccountId);
+      const caffeineJob = scheduled.find((job) => job.payload.resource === "caffeine");
+      assert.equal(caffeineJob?.payload.sourceProviderSlug, "garmin");
+      assert.equal(caffeineJob?.payload.sourceLifecycleEpoch, 2);
+
+      await reconcileHostedDeviceSyncControlPlaneState({
+        deviceSyncPort,
+        secret: DEVICE_SYNC_SECRET,
+        service,
+        state,
+        wake: buildCronWake("2026-04-06T09:40:00.000Z"),
+      });
+      const appliedMetadata = applyRequests.at(-1)?.updates[0]?.connection?.metadata ?? {};
+      assert.equal(
+        hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
+          appliedMetadata,
+          "garmin",
+          "caffeine",
+          1,
+        ),
+        false,
       );
     } finally {
       closeHostedRuntimeDeviceSyncService(service);

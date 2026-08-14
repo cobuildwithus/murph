@@ -49,6 +49,7 @@ interface StoredJobRow {
 
 const EXPIRED_JOB_LEASE_ERROR_CODE = "LEASE_EXPIRED";
 const EXPIRED_JOB_LEASE_ERROR_MESSAGE = "Device sync job lease expired before completion.";
+export const DEVICE_SYNC_ACTIVE_DEDUPE_KEY_LOOKUP_LIMIT = 396;
 
 function requireJobRowString(
   row: Record<string, unknown>,
@@ -199,6 +200,51 @@ export function listPendingDeviceSyncJobsForAccount(input: {
     const job = mapJobRow(row);
     return job ? [job] : [];
   });
+}
+
+export function findActiveDeviceSyncJobDedupeKeys(input: {
+  accountId: string;
+  database: DatabaseSync;
+  dedupeKeys: readonly string[];
+  provider: string;
+}): ReadonlySet<string> {
+  const dedupeKeys = [...new Set(input.dedupeKeys)];
+  if (dedupeKeys.length > DEVICE_SYNC_ACTIVE_DEDUPE_KEY_LOOKUP_LIMIT) {
+    throw new TypeError(
+      `Active device-sync dedupe lookup exceeds ${DEVICE_SYNC_ACTIVE_DEDUPE_KEY_LOOKUP_LIMIT} keys.`,
+    );
+  }
+  if (dedupeKeys.length === 0) {
+    return new Set();
+  }
+  const now = toIsoTimestamp(new Date());
+  const placeholders = dedupeKeys.map(() => "?").join(", ");
+  const rows = input.database.prepare(`
+    select distinct dedupe_key
+    from device_job
+    where account_id = ?
+      and provider = ?
+      and dedupe_key in (${placeholders})
+      and status in ('queued', 'running')
+      and not (
+        status = 'running'
+        and lease_expires_at is not null
+        and lease_expires_at <= ?
+        and attempts >= max_attempts
+        and not (
+          provider = 'junction'
+          and kind = 'resource'
+          and coalesce(json_extract(payload_json, '$.resource'), '') = ?
+        )
+      )
+  `).all(
+    input.accountId,
+    input.provider,
+    ...dedupeKeys,
+    now,
+    COMPANION_HRV_RMSSD_RESOURCE,
+  ) as { dedupe_key: string }[];
+  return new Set(rows.map((row) => row.dedupe_key));
 }
 
 export function readNextDeviceSyncJobWakeAt(database: DatabaseSync): string | null {

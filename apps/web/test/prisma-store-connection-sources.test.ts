@@ -587,6 +587,7 @@ describe("PrismaDeviceSyncControlPlaneStore connection source projection", () =>
       (_, index) => ({
         ...createSourceRecord({
           id: `dcs_${String(index).padStart(2, "0")}`,
+          lifecycleEpoch: 2,
           sourceInstanceKey: `src_${String(index).padStart(2, "0")}`,
           sourceProviderSlug: index % 2 === 0 ? "whoop" : "whoop_v2",
         }),
@@ -603,14 +604,14 @@ describe("PrismaDeviceSyncControlPlaneStore connection source projection", () =>
       } as never,
     });
 
-    await expect(store.listBoundedConnectionSourcesForConnections({
+    const projected = await store.listBoundedConnectionSourcesForConnections({
       connectionIds: ["dsc_parent", "dsc_parent"],
       excludeDisconnected: true,
       limitPerConnection: 1_000,
       sourceProviderSlugs: ["whoop", "whoop_v2"],
-    })).resolves.toHaveLength(
-      HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_CONNECTION_SOURCE_LIMIT,
-    );
+    });
+    expect(projected).toHaveLength(HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_CONNECTION_SOURCE_LIMIT);
+    expect(projected[0]?.lifecycleEpoch).toBe(2);
 
     expect(queryRaw).toHaveBeenCalledOnce();
     const query = queryRaw.mock.calls[0]?.[0] as {
@@ -618,6 +619,7 @@ describe("PrismaDeviceSyncControlPlaneStore connection source projection", () =>
       values?: readonly unknown[];
     };
     expect(query.strings?.join(" ")).toContain("ROW_NUMBER() OVER");
+    expect(query.strings?.join(" ")).toContain('lifecycle_epoch AS "lifecycleEpoch"');
     expect(query.strings?.join(" ")).toContain("status <> 'disconnected'");
     expect(query.values).toContain(
       HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_CONNECTION_SOURCE_LIMIT + 1,

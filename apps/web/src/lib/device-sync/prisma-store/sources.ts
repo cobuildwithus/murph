@@ -357,6 +357,7 @@ export class PrismaHostedConnectionSourceStore {
           first_seen_at AS "firstSeenAt",
           last_seen_at AS "lastSeenAt",
           last_data_at AS "lastDataAt",
+          lifecycle_epoch AS "lifecycleEpoch",
           created_at AS "createdAt",
           updated_at AS "updatedAt",
           "projectionRowNumber"

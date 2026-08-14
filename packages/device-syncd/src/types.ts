@@ -740,6 +740,10 @@ export interface ProviderScheduleResult {
   nextReconcileAt?: string | null;
 }
 
+export interface ProviderScheduleContext {
+  findActiveDedupeKeys(dedupeKeys: readonly string[]): ReadonlySet<string>;
+}
+
 export interface ProviderSnapshotImportReceipt {
   canonicalEventCount: number;
   canonicalEventExternalRefResourceIds?: readonly string[];
@@ -882,7 +886,11 @@ export interface DeviceWebhookHandler {
 }
 
 export interface DeviceJobExecutor {
-  createScheduledJobs?(account: StoredDeviceSyncAccount, now: string): ProviderScheduleResult;
+  createScheduledJobs?(
+    account: StoredDeviceSyncAccount,
+    now: string,
+    context?: ProviderScheduleContext,
+  ): ProviderScheduleResult;
   executeJob(context: ProviderJobContext, job: DeviceSyncJobRecord): Promise<ProviderJobResult>;
   batch?: DeviceJobBatchExecutor;
 }

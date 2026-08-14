@@ -136,6 +136,7 @@ import type {
   ProviderConnectionResult,
   ProviderJobContext,
   ProviderJobResult,
+  ProviderScheduleContext,
   ProviderScheduleResult,
   ProviderWebhookContext,
   ProviderWebhookResult,
@@ -779,10 +780,11 @@ export function createJunctionDeviceSyncProvider(
   function createScheduledJobs(
     account: StoredDeviceSyncAccount,
     now: string,
+    context?: ProviderScheduleContext,
   ): ProviderScheduleResult {
     const scheduledHistoricalBackfillJobs = buildScheduledHistoricalBackfillJobs(account, now);
     const scheduledExtendedTimeseriesBackfillJobs =
-      buildScheduledExtendedTimeseriesBackfillJobs(account, now);
+      buildScheduledExtendedTimeseriesBackfillJobs(account, now, context);
     const nextReconcileAt = resolveJunctionNextReconcileAt(
       account,
       now,
@@ -808,6 +810,7 @@ export function createJunctionDeviceSyncProvider(
   function buildScheduledExtendedTimeseriesBackfillJobs(
     account: StoredDeviceSyncAccount,
     now: string,
+    context?: ProviderScheduleContext,
   ): DeviceSyncJobInput[] {
     const candidates = extendedBackfillTimeseriesResources.flatMap((resource) => {
       const policy = resolveJunctionExtendedTimeseriesBackfillPolicy(resource);
@@ -893,9 +896,33 @@ export function createJunctionDeviceSyncProvider(
       left.resource.localeCompare(right.resource)
       || left.sourceProviderSlug.localeCompare(right.sourceProviderSlug)
     );
+    const sourceFirstCandidates = candidates.filter(
+      (candidate) => candidate.sourceLifecycleEpoch === undefined,
+    );
+    const scheduleTimeCandidates = candidates.filter(
+      (candidate) => candidate.sourceLifecycleEpoch !== undefined,
+    );
     const scheduleSlot = Math.floor(Date.parse(now) / reconcileIntervalMs);
-    const candidate = candidates[scheduleSlot % candidates.length]!;
-    return [buildExtendedTimeseriesBackfillJob(candidate)];
+    const scheduleTimeJobs = scheduleTimeCandidates.map(
+      (candidate) => [candidate, buildExtendedTimeseriesBackfillJob(candidate)] as const,
+    );
+    const activeDedupeKeys = context?.findActiveDedupeKeys(
+      scheduleTimeJobs.map(([, job]) => job.dedupeKey!),
+    ) ?? new Set<string>();
+    let inactiveJobs = scheduleTimeJobs.filter(
+      ([, job]) => !activeDedupeKeys.has(job.dedupeKey!),
+    );
+    const reopenedInactiveJobs = context
+      ? inactiveJobs.filter(([candidate]) => candidate.sourceLifecycleEpoch! > 1)
+      : [];
+    if (reopenedInactiveJobs.length > 0) {
+      inactiveJobs = reopenedInactiveJobs;
+    }
+    const scheduledJob = inactiveJobs[scheduleSlot % inactiveJobs.length]?.[1];
+    return [
+      ...sourceFirstCandidates.map((candidate) => buildExtendedTimeseriesBackfillJob(candidate)),
+      ...(scheduledJob ? [scheduledJob] : []),
+    ];
   }
 
   /**
@@ -8951,17 +8978,23 @@ async function projectJunctionSources(
     options.preserveHistoricalReconnectProviderSlugs === undefined
       ? null
       : new Set(options.preserveHistoricalReconnectProviderSlugs);
+  const existingSources = context.listConnectionSources
+    ? await context.listConnectionSources()
+    : [];
+  const admissionSources: readonly JunctionImportAdmissionSource[] =
+    context.listConnectionSources
+      ? existingSources
+      : context.account.sources ?? [];
+  const existingByInstanceKey = new Map(
+    existingSources.map((existingSource) => [
+      existingSource.sourceInstanceKey,
+      existingSource,
+    ] as const),
+  );
   for (const source of projectJunctionSourcesByProviderSlug(
     context.account.id,
     providers,
   )) {
-    const existingSources = context.listConnectionSources
-      ? await context.listConnectionSources()
-      : [];
-    const admissionSources: readonly JunctionImportAdmissionSource[] =
-      context.listConnectionSources
-        ? existingSources
-        : context.account.sources ?? [];
     const listedOnly = context.connectionSourceAdmissionMode === "listed_only";
     if (
       (
@@ -8978,12 +9011,6 @@ async function projectJunctionSources(
     ) {
       continue;
     }
-    const existingByInstanceKey = new Map(
-      existingSources.map((existingSource) => [
-        existingSource.sourceInstanceKey,
-        existingSource,
-      ] as const),
-    );
     const existing = existingByInstanceKey.get(source.sourceInstanceKey) ?? existingSources.find(
       (candidate) =>
         normalizeProviderSlug(candidate.sourceProviderSlug) === source.sourceProviderSlug,

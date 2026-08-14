@@ -97,7 +97,7 @@ Updated: 2026-08-13
 5. [completed] Run focused and comprehensive verification, bundle/type boundaries,
    privacy scans, scope/shape review, and update durable docs only where current
    owner contracts materially change.
-6. [pending] Commit and push a candidate, open a replacement PR with exact intent/load/
+6. [completed] Commit and push a candidate, open a replacement PR with exact intent/load/
    deployment/shape/proof metadata, then run preliminary specialist and final
    ReviewGPT concurrently with CI.
 7. [pending] Resolve accepted findings, perform parent final review, close this plan with
@@ -124,16 +124,66 @@ Updated: 2026-08-13
 - Maximum schedule-time candidate cardinality remains 396 source/resource
   reconnect obligations: 33 source slots multiplied by 12 schedule-time
   resource/version coordinates. Blood pressure remains the thirteenth matrix
-  slot, but its source-first history is not cleared by reconnect and therefore
-  is not one of those 396 obligations. The account scheduler offers one
-  deterministic uncovered root per pass and fully covered accounts offer none.
-  Rolling verification remains out of scope because it would reintroduce
-  unbounded composed provider work.
+  slot, but its independent source-first roots are not cleared by reconnect.
+  Each due pass performs one bounded SQLite membership query over at most 396
+  dedupe keys, prioritizes an inactive reopened-lifecycle coordinate, and
+  offers at most one current-day root for the account; fully covered or already
+  active candidate sets offer none. Dead keys become eligible again. Rolling
+  verification remains out of scope because it would reintroduce unbounded
+  composed provider work.
+- A maximum-cardinality current-day execution performs six source-authority
+  reads in the tested order `[target, all, target, all, target, target]`: four
+  exact-source lifecycle fences, one shared projection snapshot, and one shared
+  import-preparation snapshot. Neither shared read scales with provider count.
+- The specialist request for a member-visible “restoring history” state is
+  rejected as scope expansion. Settings freshness is the current sync/action
+  projection, history completion is intentionally redacted, reconnect and
+  backfill are separate automatic stages, and there is no member recovery
+  action to present. Exposing coverage would require a new product projection.
+- Cross-package Web-to-runner-to-apply behavior remains proven at package-owned
+  seams instead of a coupled mega-test: Web persists lifecycle epoch two in its
+  bounded snapshot, assistant hydration clears only superseded local
+  schedule-time bits before merge, the scheduler emits an epoch-two root, and
+  reconciliation proves the cleared bit is not emitted back to Web.
 - Deploy the additive Prisma migration first, then the Cloudflare runner and
   confirm new runner builds are active before deploying Web. The Web write
   guard rejects missing lifecycle observations for epochs above one and protects
   against old-runner stragglers; Web-first is unsafe because it can clear
   schedule-time coverage before the cap-one runner behavior is active.
+
+## ReviewGPT evidence and finding ledger
+
+- The valid preliminary `completion-specialists` retry reviewed exact head
+  `e46164ab9afafd14755b10c5612a89686081a30a` with `gpt-5-6-pro` for about
+  38 minutes 26 seconds (04:06:32 attachment through 04:44:58 capture) in
+  [its review thread](https://chatgpt.com/c/6a7e9449-f58c-83ea-8763-a060e29a011b).
+  It returned `SPECIALIST_OUTCOME: FINDINGS` and was valid.
+- Valid final ReviewGPT round 1 reviewed exact head
+  `37ab85e625df815e3b62c246bb8e3fcf76d21233` with `gpt-5-6-pro` for 65
+  minutes 17 seconds in
+  [its review thread](https://chatgpt.com/c/6a7e7812-469c-83ea-b23b-70481500c1f3).
+  It returned `ROUND_OUTCOME: FINDINGS` and `REVIEW_COMPLETE`.
+- Accepted and fixed: project `lifecycleEpoch` from the bounded Web raw SQL and
+  prove it against real Postgres; clear exact per-provider local coverage before
+  assistant hydration merges a newer hosted epoch; preserve the pending Link
+  source timestamp while a queued local job projects disconnected state; make
+  the stale source-start callback a terminal fresh-start response; keep
+  blood-pressure roots independent of the cap-one schedule-time lane; use active
+  queue ownership to prioritize reopened inactive work; prove the 396-coordinate
+  ceiling and maximum scheduler behavior; share the `projectJunctionSources`
+  source snapshot so projection is O(N) with the exact six authority reads;
+  prove exact 33-by-13 coverage clearing; and instrument the maximum locked path.
+- Rejected the specialist suggestion to expose a member-visible “restoring
+  history” state. The cited headline/detail/guidance is not rendered by the
+  current cards; fresh sync is not history completeness; the unchanged UI only
+  promises connected/learning; catch-up is automatic; and completion metadata
+  is intentionally redacted. A truthful state would require a separate product
+  projection, UI/catalog work, and changelog rather than leaking this internal
+  safety mechanism into the current patch.
+- Rejected one cross-owner Web-to-runner mega-test because it would couple
+  package internals without proving more authority. The remediation instead
+  strengthens the Web, assistant-runtime, device-sync, SQLite, and Postgres
+  owner seams individually.
 
 ## Verification
 
@@ -168,7 +218,7 @@ Updated: 2026-08-13
     all six parity probes. The vault bundle measured 9,086,709/9,100,000 total
     bytes and 791/20,000 entry bytes. The runner measured 1,701,391 entry bytes,
     8,088,219/8,088,470 static-closure bytes, and
-    10,219,811/10,251,013 total bytes, with no budget ratchet.
+    10,223,826/10,251,013 total bytes, with no budget ratchet.
   - Final diff check plus privacy, secret, local-path, and stale-symbol scans
     passed immediately before the scoped candidate checkpoint.
   - PR #1800's first clean release-app lane exposed one missing explicit Web
@@ -177,3 +227,20 @@ Updated: 2026-08-13
     resolve it without the Web-owned alias. Adding the exact source mapping
     makes clean and prebuilt resolution agree; Web `typecheck:prepared` and the
     repo workspace-source-resolution suite (7 tests) pass after remediation.
+  - Required GitHub Actions passed on pushed head
+    `e46164ab9afafd14755b10c5612a89686081a30a` while the ReviewGPT gates ran.
+  - Final uncommitted remediation proof: the three focused device-sync files
+    passed 255 tests; assistant hosted-device-sync runtime passed 100 tests;
+    scoped Web Prisma-source and hosted-wake files passed 139 tests; and the
+    isolated migrated Postgres resilience file passed all 6 tests.
+  - Device-sync, assistant-runtime, and prepared Web typechecks all pass on the
+    remediation candidate. Workspace package-cycle verification passes.
+    Workspace-boundary verification still reports only the origin/main-identical
+    sibling Web-test import outside this diff.
+  - The exact production runner assembly after remediation passed all six parity
+    probes without a budget ratchet: vault total 9,086,709/9,100,000 bytes;
+    runner entry 1,701,391 bytes; static closure 8,088,219/8,088,470 bytes; and
+    total 10,223,826/10,251,013 bytes.
+  - The hosted stale-residue guard, final diff check, and added-line secret,
+    privacy, local-home-path, and email-identifier scans pass on the remediation
+    candidate.

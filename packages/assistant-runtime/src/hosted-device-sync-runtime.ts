@@ -12,6 +12,7 @@ import {
   isJunctionCompanionHrvRmssdJob,
   JUNCTION_COMPANION_HRV_OBSERVATION_INVALID_CODE,
 } from "@murphai/device-syncd/junction-resources";
+import { clearJunctionScheduleTimeExtendedHistoryCoverageForProvider } from "@murphai/device-syncd/junction-source-reconnect";
 import { buildDeviceSyncTokenCipherOptions, createSecretCodec } from "@murphai/device-syncd/local-secret-codec";
 import type { DeviceSyncService } from "@murphai/device-syncd/service";
 import type {
@@ -211,6 +212,14 @@ export async function syncHostedDeviceSyncControlPlaneState(input: {
         isJunctionCredentialIndependentInlineImportJob: classifyJunctionProviderJob,
       } = await import("@murphai/device-syncd/junction-inline-authority"));
     }
+    const localSourcesBeforeHydration = existing
+      ? store.listConnectionSources({ connectionId: existing.id })
+      : [];
+    const hydrationExisting = clearNewerHostedJunctionSourceCoverageFromLocalMerge(
+      entry,
+      existing,
+      localSourcesBeforeHydration,
+    );
     const stored = store.hydrateHostedAccount(
       buildHostedAccountHydrationInput({
         classifyProviderJob: entry.connection.provider === "junction"
@@ -218,7 +227,7 @@ export async function syncHostedDeviceSyncControlPlaneState(input: {
           : undefined,
         codec,
         entry,
-        existing,
+        existing: hydrationExisting,
       }),
     );
 
@@ -389,6 +398,48 @@ function resolveHostedHydrationSourceInstanceKey(input: {
   return matchingSource?.sourceInstanceKey
     ?? canonicalSourceInstanceKey
     ?? input.sourceInstanceKey;
+}
+
+function clearNewerHostedJunctionSourceCoverageFromLocalMerge(
+  entry: HostedDeviceSyncRuntimeConnectionSnapshot,
+  existing: StoredDeviceSyncAccount | null,
+  localSources: readonly StoredDeviceConnectionSource[],
+): StoredDeviceSyncAccount | null {
+  if (
+    entry.connection.provider.trim().toLowerCase() !== "junction"
+    || !existing
+    || existing.connectedAt !== entry.connection.connectedAt
+    || isStaleHostedObservedUpdatedAt(
+      existing.hostedObservedUpdatedAt,
+      entry.connection.updatedAt ?? null,
+    )
+  ) {
+    return existing;
+  }
+
+  const localSourcesByKey = new Map(
+    localSources.map((source) => [source.sourceInstanceKey, source] as const),
+  );
+  let metadata = existing.metadata;
+  for (const source of entry.sources ?? []) {
+    if (!source.sourceInstanceKey) {
+      continue;
+    }
+    const sourceInstanceKey = resolveHostedHydrationSourceInstanceKey({
+      entry,
+      localSources,
+      source,
+      sourceInstanceKey: source.sourceInstanceKey,
+    });
+    const localSource = localSourcesByKey.get(sourceInstanceKey);
+    if (localSource && (source.lifecycleEpoch ?? 1) > localSource.lifecycleEpoch) {
+      metadata = clearJunctionScheduleTimeExtendedHistoryCoverageForProvider({
+        metadata,
+        providerSlug: source.sourceProviderSlug,
+      });
+    }
+  }
+  return metadata === existing.metadata ? existing : { ...existing, metadata };
 }
 
 function shouldPreserveLocalHydrationSource(input: {

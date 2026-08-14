@@ -513,7 +513,7 @@ export function upsertConnectionSource(
         normalized.connectionId,
         normalized.sourceInstanceKey,
       );
-      if (existing?.status === "disconnected" && normalized.status !== "disconnected") {
+      if (existing?.status === "disconnected") {
         return existing;
       }
     }

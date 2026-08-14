@@ -1106,13 +1106,16 @@ describe("hosted device-sync wakes", () => {
       lastSeenAt: "2026-03-26T12:01:00.000Z",
       status: "disconnected",
     });
+    const siblingSources = Array.from({ length: 32 }, (_, index) =>
+      buildHostedConnectionSource(establishedConnection.id, `sibling_${index}`)
+    );
     let sourceAccessActive = true;
     const isSourceAccessActive = vi.fn(async () => sourceAccessActive);
     const revokeSourceAccess = vi.fn(async () => undefined);
     mocks.getConnectionOwnerId.mockResolvedValue("user-123");
     mocks.getConnectionForUser.mockImplementation(async () => currentConnection);
     mocks.getStoredConnectionAccountForUser.mockResolvedValue(storedConnection);
-    mocks.listConnectionSources.mockImplementation(async () => [source]);
+    mocks.listConnectionSources.mockImplementation(async () => [source, ...siblingSources]);
     mocks.registryGet.mockReturnValue({
       connectionHandler: { isSourceAccessActive, revokeSourceAccess },
     });
@@ -1137,6 +1140,18 @@ describe("hosted device-sync wakes", () => {
       store,
     })).resolves.toBe("admitted");
     expect(source).toMatchObject({ lastErrorCode: null, status: "connected" });
+    expect(mocks.withConnectionMutationLock).toHaveBeenCalledTimes(2);
+    expect(mocks.getConnectionForUser).toHaveBeenCalledTimes(2);
+    expect(mocks.listConnectionSources).toHaveBeenCalledTimes(2);
+    expect(mocks.getStoredConnectionAccountForUser).toHaveBeenCalledTimes(2);
+    expect(isSourceAccessActive).toHaveBeenCalledTimes(1);
+    expect(mocks.listConnectionSources.mock.results).toHaveLength(2);
+    await expect(mocks.listConnectionSources.mock.results[0]?.value).resolves.toHaveLength(33);
+    const [firstConnectionRead, secondConnectionRead] =
+      mocks.getConnectionForUser.mock.invocationCallOrder;
+    const [externalAccessCheck] = isSourceAccessActive.mock.invocationCallOrder;
+    expect(firstConnectionRead).toBeLessThan(externalAccessCheck!);
+    expect(externalAccessCheck).toBeLessThan(secondConnectionRead!);
 
     source = {
       ...source,

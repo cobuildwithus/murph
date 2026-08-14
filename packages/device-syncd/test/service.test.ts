@@ -676,6 +676,7 @@ test("local shared-Junction target starts preserve established siblings through 
   vi.setSystemTime(new Date("2026-07-28T10:00:00.000Z"));
   const vaultRoot = await makeTempDirectory("murph-device-syncd-local-junction-siblings");
   const executedJobKinds: string[] = [];
+  let projectDisconnectedSourceSlug: string | null = null;
   let webhookSequence = 0;
   const provider: DeviceSyncProvider = {
     provider: "junction",
@@ -761,8 +762,29 @@ test("local shared-Junction target starts preserve established siblings through 
           nextReconcileAt: new Date(Date.parse(now) + 60 * 60_000).toISOString(),
         };
       },
-      async executeJob(_context, job) {
+      async executeJob(context, job) {
         executedJobKinds.push(job.kind);
+        if (
+          projectDisconnectedSourceSlug
+          && context.listConnectionSources
+          && context.upsertConnectionSource
+        ) {
+          const sourceProviderSlug = projectDisconnectedSourceSlug;
+          const existing = (await context.listConnectionSources({
+            sourceProviderSlug,
+          }))[0];
+          assert.ok(existing);
+          assert.ok(existing.sourceInstanceKey);
+          await context.upsertConnectionSource({
+            firstSeenAt: existing.firstSeenAt,
+            lastSeenAt: context.now,
+            lifecycleEpoch: existing.lifecycleEpoch,
+            resourceAvailabilitySummary: existing.resourceAvailabilitySummary,
+            sourceInstanceKey: existing.sourceInstanceKey,
+            sourceProviderSlug,
+            status: "disconnected",
+          });
+        }
         return {};
       },
     },
@@ -940,6 +962,17 @@ test("local shared-Junction target starts preserve established siblings through 
       provider: "junction",
       sourceProviderSlug: "fitbit",
     });
+    vi.setSystemTime(new Date("2026-07-28T10:07:30.000Z"));
+    projectDisconnectedSourceSlug = "fitbit";
+    service.queueManualReconcile(baseline.id);
+    await service.drainWorker(20);
+    projectDisconnectedSourceSlug = null;
+    const afterDisconnectedProjection = store.listConnectionSources({
+      connectionId: baseline.id,
+      sourceProviderSlug: "fitbit",
+    })[0];
+    assert.equal(afterDisconnectedProjection?.status, "disconnected");
+    assert.equal(afterDisconnectedProjection?.lastSeenAt, "2026-07-28T10:07:00.000Z");
     const jobsBeforeCallbacks = countJobsForAccountForTesting(store, baseline.id);
     const revisionBeforeCallbacks = store.getAccountById(baseline.id)?.localConnectionRevision;
 
@@ -955,7 +988,8 @@ test("local shared-Junction target starts preserve established siblings through 
       }),
       (error: unknown) =>
         error instanceof DeviceSyncError
-        && error.code === "CONNECTION_SOURCE_START_STALE",
+        && error.code === "CONNECTION_SOURCE_START_STALE"
+        && error.retryable === false,
     );
     const afterStaleCallback = store.listConnectionSources({
       connectionId: baseline.id,

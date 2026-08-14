@@ -44,6 +44,7 @@ import {
   enqueueDeviceSyncJobInTransaction,
   failDeviceSyncJob,
   failDeviceSyncJobIfOwned,
+  findActiveDeviceSyncJobDedupeKeys,
   getDeviceSyncJobById,
   listDueDeviceSyncJobBatchCandidates,
   listPendingDeviceSyncJobsForAccount,
@@ -539,6 +540,17 @@ export class SqliteDeviceSyncStore {
       accountId,
       database: this.database,
       limit,
+    });
+  }
+
+  findActiveJobDedupeKeys(input: {
+    accountId: string;
+    dedupeKeys: readonly string[];
+    provider: string;
+  }): ReadonlySet<string> {
+    return findActiveDeviceSyncJobDedupeKeys({
+      ...input,
+      database: this.database,
     });
   }
 

@@ -507,6 +507,24 @@ test("device sync store migrates existing v9 sources to lifecycle epoch one", as
       sourceProviderSlug: "garmin",
       status: "connected",
     }).lifecycleEpoch, 2);
+
+    const disconnected = store.upsertConnectionSource({
+      connectionId: connection.id,
+      lastSeenAt: "2026-07-04T00:00:00.000Z",
+      lifecycleEpoch: 2,
+      sourceInstanceKey: "src_garmin_lifecycle",
+      sourceProviderSlug: "garmin",
+      status: "disconnected",
+    });
+    const preserved = store.upsertConnectionSource({
+      connectionId: connection.id,
+      lastSeenAt: "2026-07-05T00:00:00.000Z",
+      lifecycleEpoch: 2,
+      sourceInstanceKey: "src_garmin_lifecycle",
+      sourceProviderSlug: "garmin",
+      status: "disconnected",
+    }, { preserveDisconnected: true });
+    assert.deepEqual(preserved, disconnected);
     store.close();
   } finally {
     await rm(tempDir, {
@@ -2985,6 +3003,107 @@ test("device sync store disconnects only the expected connection generation", as
       force: true,
       recursive: true,
     });
+  }
+});
+
+test("active dedupe membership matches enqueue ownership for queued and exhausted running jobs", async () => {
+  const tempDir = await makeTempDirectory("murph-device-syncd-store-active-dedupe-membership");
+  const store = new SqliteDeviceSyncStore(path.join(tempDir, "state.sqlite"));
+
+  try {
+    const account = store.upsertAccount({
+      connectedAt: "2026-04-07T00:00:00.000Z",
+      credential: {
+        credentialMetadata: {},
+        kind: "provider_config",
+        providerConfigKey: "junction",
+      },
+      displayName: "Junction",
+      externalAccountId: "junction-active-dedupe-membership",
+      provider: "junction",
+      scopes: [],
+    });
+    const ordinaryKey = "junction-history-ordinary";
+    const companionKey = "junction-history-companion";
+    const ordinaryJob = store.enqueueJob({
+      accountId: account.id,
+      availableAt: "2026-04-07T00:00:00.000Z",
+      dedupeKey: ordinaryKey,
+      kind: "resource",
+      maxAttempts: 1,
+      payload: { resource: "caffeine" },
+      priority: 10,
+      provider: "junction",
+    });
+    store.enqueueJob({
+      accountId: account.id,
+      availableAt: "2026-04-07T00:00:00.000Z",
+      dedupeKey: companionKey,
+      kind: "resource",
+      maxAttempts: 1,
+      payload: { resource: COMPANION_HRV_RMSSD_RESOURCE },
+      priority: 5,
+      provider: "junction",
+    });
+    assert.deepEqual(
+      [...store.findActiveJobDedupeKeys({
+        accountId: account.id,
+        dedupeKeys: [ordinaryKey, companionKey, "missing"],
+        provider: "junction",
+      })].sort(),
+      [companionKey, ordinaryKey].sort(),
+    );
+    assert.throws(
+      () => store.findActiveJobDedupeKeys({
+        accountId: account.id,
+        dedupeKeys: Array.from({ length: 397 }, (_, index) => `candidate-${index}`),
+        provider: "junction",
+      }),
+      /exceeds 396 keys/u,
+    );
+
+    assert.equal(
+      store.claimDueJob("worker-ordinary", "2026-04-07T00:00:00.000Z", 60_000)?.dedupeKey,
+      ordinaryKey,
+    );
+    assert.deepEqual(
+      [...store.findActiveJobDedupeKeys({
+        accountId: account.id,
+        dedupeKeys: [ordinaryKey, companionKey],
+        provider: "junction",
+      })],
+      [companionKey],
+    );
+    store.failJob(
+      ordinaryJob.id,
+      "2026-04-07T00:01:02.000Z",
+      "TERMINAL_TEST_FAILURE",
+      "Terminal test failure.",
+      null,
+      false,
+    );
+    assert.equal(store.getJobById(ordinaryJob.id)?.status, "dead");
+    assert.equal(store.findActiveJobDedupeKeys({
+      accountId: account.id,
+      dedupeKeys: [ordinaryKey],
+      provider: "junction",
+    }).size, 0);
+
+    assert.equal(
+      store.claimDueJob("worker-companion", "2026-04-07T00:01:01.000Z", 60_000)?.dedupeKey,
+      companionKey,
+    );
+    assert.deepEqual(
+      [...store.findActiveJobDedupeKeys({
+        accountId: account.id,
+        dedupeKeys: [ordinaryKey, companionKey],
+        provider: "junction",
+      })],
+      [companionKey],
+    );
+  } finally {
+    store.close();
+    await rm(tempDir, { force: true, recursive: true });
   }
 });
 
