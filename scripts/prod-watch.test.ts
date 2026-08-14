@@ -2354,13 +2354,15 @@ describe("production-watch locking and dry-run behavior", () => {
     expect(snapshot.anomalyCandidates).toEqual([]);
   });
 
-  it("collects provider evidence through a bounded fake Codex child", () => {
+  it("executes the operator-advertised state-owning provider pass through all adapters", () => {
     const runtimeRoot = makeTempRoot();
     const databaseEnv = installDatabaseFixtureHelper(runtimeRoot, "healthy");
     const codexEnv = installFakeCodex(runtimeRoot);
     const result = runProdWatch([
-      "collect",
+      "run",
       "--provider-child",
+      "--lookback-minutes",
+      "15",
       "--settling-delay-seconds",
       "0",
     ], runtimeRoot, {
@@ -2370,7 +2372,11 @@ describe("production-watch locking and dry-run behavior", () => {
     });
 
     expect(result.status, result.stderr).toBe(0);
-    const snapshot = JSON.parse(result.stdout) as ProductionWatchSnapshot;
+    expect(JSON.parse(result.stdout)).toMatchObject({ status: "partial", evidenceComplete: false });
+    const snapshot = JSON.parse(readFileSync(
+      path.join(runtimeRoot, "projections", "prod-watch", "latest.snapshot.v1.json"),
+      "utf8",
+    )) as ProductionWatchSnapshot;
     expect(snapshot.monitor).toMatchObject({ status: "partial", evidenceComplete: false });
     expect(snapshot.sourceHealth
       .filter((source) => source.source !== "database")
@@ -2378,6 +2384,8 @@ describe("production-watch locking and dry-run behavior", () => {
       .toBe(true);
     expect(snapshot.sourceHealth.find((source) => source.source === "cloudflare")?.coverage)
       .toBe("on_demand");
+    expect(existsSync(path.join(runtimeRoot, "operations", "prod-watch", "state.v1.json")))
+      .toBe(true);
   });
 
   it("settles a started provider sibling before propagating the first branch rejection", () => {
@@ -3753,7 +3761,17 @@ describe("production-watch static safety contracts", () => {
       "utf8",
     );
     expect(skill).toContain("The installed scheduler is monitor-only.");
-    expect(skill).toContain("do not run `pnpm --silent prod-watch` recursively");
+    const operations = readFileSync(
+      path.join(repoRoot, "agent-docs", "operations", "prod-watch.md"),
+      "utf8",
+    );
+    expect(skill).toContain("This skill is operator-only.");
+    expect(skill).toContain("pnpm --silent prod-watch run --provider-child --lookback-minutes 15");
+    expect(skill).not.toContain("If invoked by the provider-child prompt");
+    expect(skill).not.toContain("--provider-evidence");
+    expect(operations).toContain("The Cloudflare child is an internal adapter, not an operator command.");
+    expect(operations).not.toContain("--provider-evidence");
+    expect(operations).not.toContain("tells Codex to use the production-watch skill");
     expect(skill).toContain(
       "A `resolved` transition is record-only and is allowed only after fresh, complete evidence from the incident's authoritative deterministic source independently observes an externally applied fix.",
     );

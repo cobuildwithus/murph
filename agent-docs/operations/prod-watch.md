@@ -4,7 +4,7 @@ Last verified: 2026-08-09
 
 ## Decision
 
-Use **macOS `launchd` as the authoritative five-minute scheduler**, deterministic local collectors as the evidence boundary, and a **new shell-disabled `codex exec --ephemeral` process only for bounded advisory Cloudflare collection**. That process ignores user config, pins `gpt-5.6-luna` with low reasoning effort, disables nonessential built-in capabilities, and receives one reviewed Cloudflare MCP definition backed by the lockfile-pinned `mcp-remote` package. The installed watcher is monitor-only; automatic diagnosis dispatch and remediation are disabled. Do not use a Codex desktop scheduled task as the production scheduler.
+Use **macOS `launchd` as the authoritative five-minute scheduler**, deterministic local collectors as the evidence boundary, and a **new shell-disabled `codex exec --ephemeral` process only for bounded advisory Cloudflare collection**. That process ignores user config, pins `gpt-5.6-luna` with low reasoning effort, disables nonessential built-in capabilities, and receives one reviewed Cloudflare MCP definition backed by the lockfile-pinned `mcp-remote` package. The installed watcher is monitor-only and contains no automatic diagnosis or remediation implementation. Do not use a Codex desktop scheduled task as the production scheduler.
 
 The target lifecycle is hybrid:
 
@@ -57,19 +57,19 @@ pnpm --silent prod-watch <command>
 ### Collection and dry run
 
 ```sh
-# Aggregate-only snapshot to stdout. Does not persist state.
+# Database-only aggregate snapshot to stdout. Does not persist state.
 pnpm --silent prod-watch collect --lookback-minutes 15 --output -
 
 # Exercise synthetic parsing and scoring without state/projection writes.
 pnpm --silent prod-watch collect --fixture healthy --output -
 pnpm --silent prod-watch collect --fixture suspicious --output -
 
-# Exercise live-helper scoring and locking without state/projection writes.
-pnpm --silent prod-watch run --dry-run
+# Run the state-owning all-source monitor flow with deterministic database,
+# Vercel, and Stripe adapters plus the isolated Cloudflare child.
+pnpm --silent prod-watch run --provider-child --lookback-minutes 15
 
-# Merge a schema-validated provider envelope produced by a fresh Codex MCP pass.
-# The file must be current-user-owned, mode 0600, and inside a private temporary directory.
-pnpm --silent prod-watch run --dry-run --provider-evidence "$PROVIDER_EVIDENCE_FILE"
+# Exercise that same all-source flow without state/projection writes.
+pnpm --silent prod-watch run --dry-run --provider-child --lookback-minutes 15
 ```
 
 ### Scheduler
@@ -98,15 +98,7 @@ pnpm --silent prod-watch incident transition "$INCIDENT" \
 
 The incident projections show each incident's source. Database incidents support the full list → claim → drill-down → transition journey. Phase 1 provider incidents support list → claim → transition to `escalated`; provider drill-down is not advertised because the temporary provider envelope has already been removed. The CLI rejects a provider incident before heartbeating or persisting its lease, and it rejects an undisclosed provider-envelope input on the drill-down command. Synthetic fixtures are accepted only by read-only `collect`; `run` and `drill-down` reject `--fixture` before lock acquisition, lease extension, or any state/projection write.
 
-The target MCP command shape is intentionally external to Phase 1:
-
-```sh
-codex exec --ephemeral --sandbox read-only --json \
-  --output-schema scripts/prod-watch/schemas/provider-evidence.codex-output.v1.schema.json \
-  --output-last-message "$PROVIDER_EVIDENCE_FILE" -
-```
-
-The prompt is supplied on stdin and tells Codex to use the production-watch skill, query only aggregate MCP surfaces, and emit no prose. The wrapper streams the `--json` event output through a bounded parser that retains only the session/thread ID and terminal status; it never persists tool events. It must create the final envelope below a `0700` temporary directory as a current-user-owned `0600` file, cap the child runtime, validate the result locally, and remove the file after the merge succeeds or fails. The collector rejects symlinks, non-private permissions, unexpected ownership, oversized files, and invalid envelopes outside explicit fixture mode.
+The Cloudflare child is an internal adapter, not an operator command. It does not load the production-watch skill: `buildProviderEvidencePrompt` supplies its complete aggregate-only instructions on stdin while production code owns the exact `codex exec` arguments. The wrapper streams the `--json` event output through a bounded parser that retains only the session/thread ID and terminal status; it never persists tool events. It creates the final envelope below a `0700` temporary directory as a current-user-owned `0600` file, caps the child runtime, validates the result locally, and removes the file after merge or failure. The collector rejects symlinks, non-private permissions, unexpected ownership, oversized files, and invalid envelopes outside explicit fixture mode.
 
 ### Automation boundary
 
@@ -282,7 +274,7 @@ Alert suppression rules:
 | --- | --- |
 | Database secret exposure | Only hard-coded `murph-prod-psql-ro`; SQL on stdin; no URL/env discovery; bounded child output; no stderr persistence. |
 | Private production data leakage | Aggregate-only fixed SQL; strict allowlists; hashed fingerprints; unknown-field rejection; no raw text fields; latest snapshot only. |
-| Prompt injection in logs/provider output | Raw text is never ingested; tokens are allowlisted/normalized; evidence is data under a strict JSON schema; fresh read-only sessions; skill explicitly rejects embedded instructions. |
+| Prompt injection in logs/provider output | Raw text is never ingested; tokens are allowlisted/normalized; evidence is data under a strict JSON schema; fresh read-only sessions; the child prompt explicitly rejects embedded instructions. |
 | Compromised/malformed provider evidence | Positive effective MCP allowlist before child launch; strict schema, source uniqueness, bounded arrays, token/timestamp checks, local anomaly code; failure becomes monitor-degraded, not zero evidence. |
 | Runaway automation | 240-second collection deadline, bounded child output, shell-disabled advisory Cloudflare child, and no automatic worker/edit/review/GitHub/merge/deploy path. |
 | Overlapping collectors/split ownership | Non-waiting run lock, serialized state lock, per-incident operator triage leases, heartbeat/expiry, and handling-session checks. |
