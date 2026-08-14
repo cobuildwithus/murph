@@ -2,9 +2,19 @@ import assert from "node:assert/strict";
 
 import { test } from "vitest";
 import type { OverviewExperiment } from "@murphai/query/browser-overview";
+import {
+  BROWSER_VAULT_EXPERIMENT_RUN_CARD_SCHEMA,
+  BROWSER_VAULT_REPLICA_POLICY_ID,
+  BROWSER_VAULT_REPLICA_SCHEMA,
+  createBrowserVaultQueryClient,
+  type BrowserVaultReplica,
+} from "@murphai/query/browser-replica-client";
 
 import { CURRENT_EXPERIMENT_PROTOCOL_CONTRACT_VERSION } from "@/src/lib/experiments/experiment-detail";
-import { buildExperimentLibraryCards } from "@/src/lib/experiments/library-cards";
+import {
+  buildExperimentLibraryCards,
+  buildHomeExperimentLibraryCards,
+} from "@/src/lib/experiments/library-cards";
 import type { ExperimentProtocol } from "@/src/types/experiments";
 
 test("buildExperimentLibraryCards maps tracked run statuses to runStatus and badge variant", () => {
@@ -52,6 +62,70 @@ test("buildExperimentLibraryCards keeps protocol-only cards public and sorts pri
   assert.equal(protocolCard?.href, "/experiments/sauna-protocol");
   assert.equal(cards[0]?.href, "/experiments/runs/exp%3Atracked");
 });
+
+test("buildHomeExperimentLibraryCards decorates one matching public card without a private-only duplicate", () => {
+  const tracked = trackedExperiment({
+    id: "exp:sauna-run",
+    status: "active",
+    title: "My sauna run",
+  });
+  const cards = buildHomeExperimentLibraryCards({
+    client: createProjectedClient(),
+    protocols: [createProtocol()],
+    trackedExperiments: [tracked],
+  });
+
+  assert.equal(cards.length, 1);
+  assert.equal(cards[0]?.id, "sauna-protocol");
+  assert.equal(cards[0]?.trackedExperimentId, "exp:sauna-run");
+  assert.equal(cards[0]?.privateBadgeLabel, "Private data");
+  assert.equal(cards[0]?.href, "/experiments/sauna-protocol");
+});
+
+function createProjectedClient() {
+  return createBrowserVaultQueryClient({
+    assistantSummary: { highlights: [], latestDate: null },
+    entities: [],
+    experimentRunCards: [{
+      id: "exp:sauna-run",
+      lookupKeys: {
+        experimentIds: ["exp:sauna-run"],
+        protocolKeys: [],
+        slugs: ["sauna-protocol"],
+      },
+      runSummary: { metrics: [] },
+      requiredMetricBuckets: [],
+      schema: BROWSER_VAULT_EXPERIMENT_RUN_CARD_SCHEMA,
+      slug: "sauna-protocol",
+      startedOn: "2026-06-01",
+      status: "active",
+      statusLabel: "Active",
+      summary: "Protocol in progress",
+      summaryDetail: null,
+      tags: ["sauna"],
+      title: "My sauna run",
+    }],
+    generatedAt: "2026-06-03T12:00:00.000Z",
+    hasLabBiomarkers: false,
+    labResultRows: [],
+    metricGoalProgressRows: [],
+    metricRows: [],
+    metricSelectionRows: [],
+    policy: {
+      bodyPreviewChars: 280,
+      excludedFamilies: [],
+      id: BROWSER_VAULT_REPLICA_POLICY_ID,
+      includedFamilies: [],
+      metricLookbackDays: 365,
+    },
+    schema: BROWSER_VAULT_REPLICA_SCHEMA,
+    searchRows: [],
+    source: { dataVersion: "test", sourceBundleHash: "test" },
+    sourceHealthRows: [],
+    timelineRows: [],
+    weeklySampleSummaries: [],
+  } satisfies BrowserVaultReplica);
+}
 
 function trackedExperiment(input: {
   id: string;

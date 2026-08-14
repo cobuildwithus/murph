@@ -50,6 +50,14 @@ device or connected-app completion result takes foreground priority; closing it
 refreshes plain Home so pending onboarding appears next instead of mounting a
 second dialog.
 
+Generic dashboard contact resolution reads only complete opaque member-channel
+markers and Murph-owned destinations. It never unwraps a member encryption root
+or reads the Stripe checkout email: the assigned text destination resolves from
+the locally encrypted `HostedLinqLine` row, and the email option uses the signed
+reply alias without exposing the member's verified address. Provider-specific
+webmail shortcuts remain a Settings concern, where that verified address is
+already loaded for the account-email surface.
+
 `apps/cloudflare` remains the execution-only runtime boundary. It accepts
 authenticated execution intents, restores encrypted runtime state, runs a
 workspace-runtime pass, and checkpoints through the web-owned workspace CAS. It may hold
@@ -1592,12 +1600,18 @@ later validation worker or changing the compiled application. Repeated
 forced-cold Standard previews remain the direct acceptance evidence, and a Next
 upgrade must revalidate this worker boundary.
 
-Production builds use Next 16.3's default Turbopack path. The production script
-does not pass `--webpack`, and the Next config does not retain Webpack-only
-worker or memory flags. The hosted local-development wrapper also selects
-Turbopack unconditionally and rejects an explicit Webpack flag. Workflow
-directive discovery runs through its native Next integration without a custom
-repository Webpack configuration.
+Production builds use Next 16.3's supported Webpack fallback. The production
+script passes `--webpack`, and the Next config explicitly enables
+`webpackBuildWorker` plus `webpackMemoryOptimizations` because the Workflow
+integration contributes Webpack configuration that otherwise prevents Next
+from selecting the isolated build worker automatically. The hosted local-
+development wrapper remains on Turbopack and rejects an explicit Webpack flag.
+The production runner also owns a versioned cache epoch inside `.next/cache`.
+When that stamp is absent or differs, it removes the incompatible cache before
+compilation and writes the epoch only after Next succeeds. This gives the
+Turbopack-to-Webpack rollout one cold build without permanently disabling warm
+Webpack caching; bump the epoch only when a proven compiler/cache transition
+requires another invalidation.
 
 Next 16.3 no longer exposes `experimental.turbopackMemoryLimit`. Its replacement,
 `experimental.turbopackMemoryEviction`, is documented for development sessions
@@ -1629,15 +1643,25 @@ preview nevertheless OOM-killed Turbopack, so the catalog correction is kept
 for its proven boundary and graph improvement but is not claimed as sufficient
 capacity relief.
 
-The historical memory-optimized Webpack fallback compiled the complete
-application within the local heap policy and exposed stricter route-contract
-issues: a browser-vault parser re-export through a server-heavy cursor, an
-extra helper export from a page module, optional page props, and one synchronous
-route-param compatibility union. Those corrections remain in place, but the
-fallback itself is no longer active. A forced-cold Next 16.3 Standard preview
-subsequently completed with Turbopack on 4 vCPUs and 8 GB RAM: compilation took
-91 seconds, the complete Vercel build stage took four minutes, and all 233
-static pages were generated without an out-of-memory failure.
+The memory-optimized Webpack path compiled the complete application within the
+local heap policy and exposed stricter route-contract issues: a browser-vault
+parser re-export through a server-heavy cursor, an extra helper export from a
+page module, optional page props, and one synchronous route-param compatibility
+union. Those corrections remain in place. Three consecutive forced-cold
+Webpack previews, a later integration preview, and the final corrected head all
+completed on the Standard builder without an OOM.
+
+Next 16.3 Turbopack was later restored after forced-cold previews completed in
+about four minutes, but that bounded proof did not disprove the already observed
+intermittent memory failure. On 2026-08-14, two production builds remained in
+Turbopack compilation until Vercel's build-duration ceiling and another exited
+137 during compilation with Vercel's explicit container-OOM report. Production
+therefore uses the repeatedly proven Webpack path again. The first restored
+preview inherited the old Vercel build cache and remained in Webpack compilation
+for more than 15 minutes, despite the same Next 16.3 Webpack lane previously
+compiling in 2.6 to 3.2 minutes. That evidence owns the cache epoch above. A
+future Turbopack production cutover must prove repeated cold builds over a
+representative change window, not only isolated preview successes.
 
 The default advisory budget is 7,200,000,000 cgroup-accounted bytes: the 8 GB
 machine model minus a 0.8 GB reserve for OS/container overhead outside the build

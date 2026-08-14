@@ -2,32 +2,47 @@
  * Bounded, in-memory-only warm path for the browser vault.
  *
  * Holds at most one decrypted ready snapshot and one in-flight session load in
- * module memory so every dashboard route shares one decrypted replica. Nothing
- * here is persisted: no localStorage, sessionStorage,
+ * module memory so dashboard routes can share already-authorized shard work.
+ * The public landing page deliberately does not start this private load.
+ * Nothing here is persisted: no localStorage, sessionStorage,
  * IndexedDB, Cache Storage, cookies, or service worker. Auth loss clears the
  * snapshot and bumps a generation counter so an older request that resolves
  * after the clear cannot repopulate it.
  */
-import { type BrowserVaultQueryClient } from "@murphai/query/browser-replica-client";
+import {
+  type BrowserVaultMetricBucketId,
+  type BrowserVaultReplicaShardSelection,
+} from "@murphai/query/browser-replica-client";
 import { type HostedBrowserVaultReplicaRef } from "@murphai/hosted-execution/browser-vault";
 
 import {
+  createBrowserVaultRouteQueryClient,
   isBrowserVaultAbortError,
   isBrowserVaultUnauthorizedError,
   loadBrowserVaultReplica,
   normalizeBrowserVaultError,
+  selectBrowserVaultReplicaDemand,
+  type BrowserVaultAnyQueryClient,
   type BrowserVaultSessionMetadata,
 } from "./loader";
+import {
+  BROWSER_VAULT_REPLICA_SHARDS,
+  normalizeBrowserVaultMetricBucketDemand,
+  type BrowserVaultReplicaShard,
+} from "./route-shards";
 import {
   isBrowserVaultSessionEnding,
   subscribeBrowserVaultSessionInvalidation,
 } from "./session-invalidation";
 
 export interface BrowserVaultReadySnapshot {
-  client: BrowserVaultQueryClient;
+  client: BrowserVaultAnyQueryClient;
+  loadedMetricBuckets: readonly BrowserVaultMetricBucketId[];
+  loadedShards: readonly BrowserVaultReplicaShard[];
   memberId: string;
   metadata: BrowserVaultSessionMetadata;
   ref: HostedBrowserVaultReplicaRef;
+  shards: BrowserVaultReplicaShardSelection;
 }
 
 export type BrowserVaultWarmLoadOutcome =
@@ -41,6 +56,8 @@ export type BrowserVaultWarmLoadOutcome =
 
 export interface StartBrowserVaultWarmLoadOptions {
   expectedMemberId?: string | null;
+  requestedMetricBuckets?: readonly BrowserVaultMetricBucketId[];
+  requestedShards?: readonly BrowserVaultReplicaShard[];
   requestRefresh?: boolean;
 }
 
@@ -48,6 +65,8 @@ let readySnapshot: BrowserVaultReadySnapshot | null = null;
 let inFlight: Promise<BrowserVaultWarmLoadOutcome> | null = null;
 let inFlightController: AbortController | null = null;
 let inFlightRequestsRefresh = false;
+let inFlightRequestedShards: readonly BrowserVaultReplicaShard[] = [];
+let inFlightRequestedMetricBuckets: readonly BrowserVaultMetricBucketId[] = [];
 let generation = 0;
 let stopSessionInvalidationListener: (() => void) | null = null;
 
@@ -74,9 +93,22 @@ export function startBrowserVaultWarmLoad(
   }
 
   ensureBrowserVaultSessionInvalidationListener();
+  const requestedShards = options.requestedShards
+    ?? BROWSER_VAULT_REPLICA_SHARDS;
+  const requestedMetricBuckets = normalizeBrowserVaultMetricBucketDemand(
+    options.requestedMetricBuckets ?? [],
+  );
 
   if (inFlight) {
-    if (options.requestRefresh && !inFlightRequestsRefresh) {
+    if (
+      (options.requestRefresh && !inFlightRequestsRefresh)
+      || !browserVaultDemandsMatch(
+        inFlightRequestedShards,
+        inFlightRequestedMetricBuckets,
+        requestedShards,
+        requestedMetricBuckets,
+      )
+    ) {
       // A stronger request may wait for ordinary shared work, but it belongs
       // to the same authority generation. Abort, clear, or unmount must not
       // let that deferred continuation restart network work afterward.
@@ -94,6 +126,8 @@ export function startBrowserVaultWarmLoad(
   const controller = new AbortController();
   inFlightController = controller;
   inFlightRequestsRefresh = options.requestRefresh === true;
+  inFlightRequestedShards = requestedShards;
+  inFlightRequestedMetricBuckets = requestedMetricBuckets;
 
   const loadPromise = (async (): Promise<BrowserVaultWarmLoadOutcome> => {
     try {
@@ -102,7 +136,12 @@ export function startBrowserVaultWarmLoad(
         expectedMemberId: options.expectedMemberId !== undefined
           ? options.expectedMemberId
           : readySnapshot?.memberId,
+        knownShards: readySnapshot?.loadedShards ?? [],
+        knownMetricBuckets: readySnapshot?.loadedMetricBuckets ?? [],
+        knownReplicaShards: readySnapshot?.shards ?? null,
         knownReplicaRef: readySnapshot?.ref ?? null,
+        requestedShards,
+        requestedMetricBuckets,
         requestRefresh: options.requestRefresh,
         signal: controller.signal,
       });
@@ -129,26 +168,61 @@ export function startBrowserVaultWarmLoad(
       }
 
       if (result.state === "not_modified") {
-        // The known ref matched the server's replica, so keep the decrypted
-        // client we already hold. If the snapshot was cleared mid-flight there
-        // is nothing to keep and the outcome is treated as superseded.
+        // The known ref matched, so reuse the decrypted shards. Preserve the
+        // existing client when it already covers the route; otherwise project
+        // the newly requested capability without another decrypt.
         if (!readySnapshot) {
           return { status: "superseded" };
         }
+        if (!requestedShards.every((shard) =>
+          readySnapshot!.loadedShards.includes(shard)
+        ) || !requestedMetricBuckets.every((bucketId) =>
+          readySnapshot!.loadedMetricBuckets.includes(bucketId)
+        )) {
+          throw new Error(
+            "Browser vault unchanged session did not cover the requested shards.",
+          );
+        }
+        const exactDemand = browserVaultDemandsMatch(
+          readySnapshot.loadedShards,
+          readySnapshot.loadedMetricBuckets,
+          requestedShards,
+          requestedMetricBuckets,
+        );
+        const shards = exactDemand
+          ? readySnapshot.shards
+          : selectBrowserVaultReplicaDemand(
+              readySnapshot.shards,
+              requestedShards,
+              requestedMetricBuckets,
+            );
+        const client = exactDemand
+          ? readySnapshot.client
+          : createBrowserVaultRouteQueryClient(
+              shards,
+              requestedShards,
+              requestedMetricBuckets,
+            );
         readySnapshot = {
-          client: readySnapshot.client,
+          client,
+          loadedMetricBuckets: requestedMetricBuckets,
+          loadedShards: requestedShards,
           memberId: readySnapshot.memberId,
           metadata,
           ref: result.replicaRef,
+          shards,
         };
         return { status: "ready", snapshot: readySnapshot };
       }
 
       readySnapshot = {
         client: result.client,
+        loadedMetricBuckets: result.loadedMetricBuckets,
+        loadedShards: result.loadedShards,
         memberId: result.memberId,
         metadata,
         ref: result.replicaRef,
+        shards: result.shards,
       };
       return { status: "ready", snapshot: readySnapshot };
     } catch (loadError) {
@@ -171,12 +245,26 @@ export function startBrowserVaultWarmLoad(
         inFlight = null;
         inFlightController = null;
         inFlightRequestsRefresh = false;
+        inFlightRequestedShards = [];
+        inFlightRequestedMetricBuckets = [];
       }
     }
   })();
 
   inFlight = loadPromise;
   return loadPromise;
+}
+
+function browserVaultDemandsMatch(
+  leftShards: readonly BrowserVaultReplicaShard[],
+  leftBuckets: readonly BrowserVaultMetricBucketId[],
+  rightShards: readonly BrowserVaultReplicaShard[],
+  rightBuckets: readonly BrowserVaultMetricBucketId[],
+): boolean {
+  return leftShards.length === rightShards.length
+    && leftShards.every((shard) => rightShards.includes(shard))
+    && leftBuckets.length === rightBuckets.length
+    && leftBuckets.every((bucketId) => rightBuckets.includes(bucketId));
 }
 
 /**
@@ -190,6 +278,8 @@ export function abortBrowserVaultInFlightLoad(): void {
   inFlightController = null;
   inFlight = null;
   inFlightRequestsRefresh = false;
+  inFlightRequestedShards = [];
+  inFlightRequestedMetricBuckets = [];
 }
 
 /**
@@ -203,6 +293,8 @@ export function clearBrowserVaultWarmState(): void {
   inFlightController = null;
   inFlight = null;
   inFlightRequestsRefresh = false;
+  inFlightRequestedShards = [];
+  inFlightRequestedMetricBuckets = [];
   readySnapshot = null;
   stopSessionInvalidationListener?.();
   stopSessionInvalidationListener = null;

@@ -59,6 +59,10 @@ import {
 const databaseUrl = process.env.DATABASE_URL?.trim() ?? "";
 const runPostgresConcurrencyProof =
   process.env.MURPH_TEST_POSTGRES_CONCURRENCY === "1";
+const TEST_AUTHORITY_KEY_VERSION_NAME =
+  "projects/example/locations/global/keyRings/hosted/cryptoKeys/authority/cryptoKeyVersions/1";
+const TEST_ADDRESS_BOOK_KEY_VERSION_NAME =
+  "projects/example/locations/global/keyRings/address-book/cryptoKeys/phone-token/cryptoKeyVersions/1";
 
 type Deferred<T> = {
   promise: Promise<T>;
@@ -104,7 +108,7 @@ async function buildPreparedThreadContainerCreation(input: {
       {
         authoritySignature: {
           alg: "GCP-KMS-EC-P256-SHA256",
-          keyVersionName: "test-authority-key-version",
+          keyVersionName: TEST_AUTHORITY_KEY_VERSION_NAME,
           signature: "test-authority-signature",
           signedAt: preparedAt,
         },
@@ -288,10 +292,6 @@ function configureHostedAddressBookLocalCryptoForTest(): () => void {
     privateKeyEncoding: { format: "jwk" },
     publicKeyEncoding: { format: "jwk" },
   });
-  const authorityKeyVersion =
-    "projects/test-project/locations/global/keyRings/test/cryptoKeys/authority/cryptoKeyVersions/1";
-  const addressBookKeyVersion =
-    "projects/test-project/locations/global/keyRings/test/cryptoKeys/address-book/cryptoKeyVersions/1";
   Object.assign(process.env, {
     HOSTED_ADDRESS_BOOK_ADVISORY_NAMES_ENABLED: "1",
     HOSTED_ADDRESS_BOOK_REPLACEMENT_ENABLED: "1",
@@ -301,14 +301,15 @@ function configureHostedAddressBookLocalCryptoForTest(): () => void {
     HOSTED_CRYPTO_ENV: "test",
     HOSTED_CRYPTO_GCP_ADDRESS_BOOK_MAC_KEYRING_JSON: JSON.stringify({
       currentVersion: 1,
-      keyVersionNames: { 1: addressBookKeyVersion },
+      keyVersionNames: { 1: TEST_ADDRESS_BOOK_KEY_VERSION_NAME },
       readVersions: [1],
     }),
-    HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_KEY_VERSION: authorityKeyVersion,
+    HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_KEY_VERSION:
+      TEST_AUTHORITY_KEY_VERSION_NAME,
     HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_PUBLIC_KEY_PEM: authorityKey.publicKey,
     HOSTED_CRYPTO_GCP_KMS_API_ROOT: "local://murph-hosted-kms",
     HOSTED_CRYPTO_GCP_WEB_WRAP_KEY_NAME:
-      "projects/test-project/locations/global/keyRings/test/cryptoKeys/web-wrap",
+      "projects/test/locations/global/keyRings/test/cryptoKeys/web-wrap",
     HOSTED_CRYPTO_LOCAL_AUTHORITY_SIGN_PRIVATE_JWK:
       JSON.stringify(authorityKey.privateKey),
     HOSTED_CRYPTO_LOCAL_KMS_WRAP_KEY: Buffer.alloc(32, 7).toString("base64"),
@@ -485,12 +486,16 @@ function pauseAddressBookClearBeforeCommit(input: {
   });
 }
 
-function configureHostedContactPrivacyKeyringForTest(currentVersion: string): void {
-  const v1 = `v1:${Buffer.alloc(32, 3).toString("base64url")}`;
-  const v2 = `v2:${Buffer.alloc(32, 4).toString("base64url")}`;
-  process.env.HOSTED_CONTACT_PRIVACY_KEYS = currentVersion === "v1"
-    ? v1
-    : [v1, v2].join(",");
+function configureHostedContactPrivacyKeyringForTest(
+  currentVersion: "v1" | "v2",
+): void {
+  const keys = [
+    `v1:${Buffer.alloc(32, 3).toString("base64url")}`,
+  ];
+  if (currentVersion === "v2") {
+    keys.push(`v2:${Buffer.alloc(32, 4).toString("base64url")}`);
+  }
+  process.env.HOSTED_CONTACT_PRIVACY_KEYS = keys.join(",");
   process.env.HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION = currentVersion;
   clearHostedOnboardingEnvCache();
 }

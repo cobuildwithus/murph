@@ -5,6 +5,9 @@ import { HOSTED_MAILBOX_RETENTION_MS } from "../hosted-retention/cleanup";
 import {
   formatHostedExecutionSafeLogErrorDetails,
 } from "../hosted-execution/logging";
+import {
+  hostedThreadContainerParticipantAccessCutoff,
+} from "../hosted-groups/thread-container-participant-access";
 import { hasHostedRuntimeActiveAccess } from "../hosted-mailbox/runtime-access";
 import {
   createHostedPostCommitDeadline,
@@ -151,6 +154,8 @@ function createHostedPreferenceHandoffCandidateStore(
   return {
     async listCandidates(input) {
       const retainedAt = new Date(input.now.getTime() - HOSTED_MAILBOX_RETENTION_MS);
+      const participantAccessCutoff =
+        hostedThreadContainerParticipantAccessCutoff(input.now);
       // Preference writes can target a person member or a synthetic thread
       // container, while Clinical Records wakes only target person members.
       // One exact mailbox signal wakes the runtime to reconcile all durable
@@ -220,6 +225,7 @@ function createHostedPreferenceHandoffCandidateStore(
             AND "run"."completed_at" IS NULL
             AND "item"."lane_seq" > COALESCE("lane_counter"."consumed_seq", 0)
             AND ("item"."expires_at" IS NULL OR "item"."expires_at" > ${input.now})
+            AND "item"."created_at" > ${retainedAt}
         ),
         "pending_handoff_candidates" AS (
           SELECT "mailboxItemId", "userId", "createdAt", "laneSeq"
@@ -287,6 +293,7 @@ function createHostedPreferenceHandoffCandidateStore(
                     ON "active_participant"."id" = "participant"."participant_member_id"
                   WHERE "participant"."container_member_id" = "member"."id"
                     AND "participant"."removed_at" IS NULL
+                    AND "participant"."last_seen_at" >= ${participantAccessCutoff}
                 )
               )
             )

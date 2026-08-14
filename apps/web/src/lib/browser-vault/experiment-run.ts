@@ -7,7 +7,7 @@ import {
   type BrowserVaultExperimentResultsLookup,
   type BrowserVaultExperimentResultsView,
   type BrowserVaultExperimentScheduleResult,
-  type BrowserVaultQueryClient,
+  type BrowserVaultMetricSeriesCapableQueryClient,
 } from "@murphai/query/browser-experiments";
 
 import type {
@@ -25,12 +25,12 @@ import { normalizeExperimentRunStatus } from "@/src/lib/browser-vault/experiment
 import { resolveBiomarkerDesiredDirection } from "@/src/lib/health-commons/biomarker-desired-direction";
 
 export interface ResolveBrowserVaultExperimentRunInput {
-  client: BrowserVaultQueryClient | null;
+  client: BrowserVaultMetricSeriesCapableQueryClient | null;
   protocol: BrowserVaultExperimentProtocol;
 }
 
 export interface ResolveBrowserVaultExperimentRunByIdInput {
-  client: BrowserVaultQueryClient | null;
+  client: BrowserVaultMetricSeriesCapableQueryClient | null;
   experimentId: string;
 }
 
@@ -79,10 +79,10 @@ export function resolveBrowserVaultExperimentRunById({
 }
 
 function selectExperimentResultsForProtocol(
-  client: BrowserVaultQueryClient,
+  client: BrowserVaultMetricSeriesCapableQueryClient,
   protocol: BrowserVaultExperimentProtocol,
 ): BrowserVaultExperimentResultsView | null {
-  for (const lookup of buildExperimentResultLookups(protocol)) {
+  for (const lookup of buildBrowserVaultExperimentResultLookups(protocol)) {
     const result = selectBrowserVaultExperimentResults(client, lookup, {
       asOf: client.replica.generatedAt,
     });
@@ -96,7 +96,7 @@ function selectExperimentResultsForProtocol(
 }
 
 function mapExperimentResultsProjection(
-  client: BrowserVaultQueryClient,
+  client: BrowserVaultMetricSeriesCapableQueryClient,
   protocol: BrowserVaultExperimentProtocol,
   results: BrowserVaultExperimentResultsView,
 ): ExperimentRunProjection {
@@ -266,7 +266,7 @@ function resolvePrivateRunDurationDays(
   return null;
 }
 
-function buildExperimentResultLookups(
+export function buildBrowserVaultExperimentResultLookups(
   protocol: BrowserVaultExperimentProtocol,
 ): BrowserVaultExperimentResultsLookup[] {
   const protocolKeys = buildProtocolLookupKeys(protocol);
@@ -387,7 +387,7 @@ function buildSignals(results: BrowserVaultExperimentResultsView): ExperimentRun
 const HISTORY_LOOKBACK_DAYS = 30;
 
 function buildTrends(
-  client: BrowserVaultQueryClient,
+  client: BrowserVaultMetricSeriesCapableQueryClient,
   results: BrowserVaultExperimentResultsView,
 ): TrendData[] {
   const runStart = results.experiment.windows.baselineStart ?? results.experiment.startedOn;
@@ -467,7 +467,7 @@ function resolveOutcomeDisplayUnit(
 }
 
 function buildHistoryPoints(
-  client: BrowserVaultQueryClient,
+  client: BrowserVaultMetricSeriesCapableQueryClient,
   biomarker: BrowserVaultExperimentBiomarkerResult,
   runStart: string,
 ): { day: number; value: number }[] {
@@ -1173,7 +1173,7 @@ function buildPrivateRunTimeline(input: {
 }
 
 function lookupExperimentTags(
-  client: BrowserVaultQueryClient,
+  client: BrowserVaultMetricSeriesCapableQueryClient,
   id: string,
   slug: string | null,
 ): string[] {
@@ -1445,7 +1445,7 @@ function todayIsoDate(): string {
 
 function resolveResultsReferenceDate(
   results: BrowserVaultExperimentResultsView,
-  client: BrowserVaultQueryClient,
+  client: BrowserVaultMetricSeriesCapableQueryClient,
 ): string {
   const timeZone = results.schedule?.timeZone ?? results.experiment.runPlan.schedule?.timeZone ?? null;
 

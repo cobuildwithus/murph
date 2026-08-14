@@ -6,6 +6,10 @@ import {
   HOSTED_RUNTIME_GROUP_TOOL_PATH,
 } from "@murphai/hosted-execution/routes";
 import {
+  HOSTED_RUNTIME_GROUP_CURRENT_SENDER_PROTOCOL_MARKER,
+  HOSTED_RUNTIME_GROUP_CURRENT_SENDER_PROTOCOL_MARKER_VALUE,
+} from "@murphai/hosted-execution/runtime-control";
+import {
   buildHostedVaultShareProjectionScopeKey,
   HOSTED_VAULT_SHARE_KNOWN_PROJECTION_SCOPES,
 } from "@murphai/hosted-execution/vault-share";
@@ -56,7 +60,7 @@ export function createHostedRuntimeGroupToolPort(input: {
           : timeoutSignal;
       }
       const payload = await fetchHostedWebControlPlaneJson({
-        body: request,
+        body: encodeHostedRuntimeGroupToolRequest(request),
         boundUserId: input.boundUserId,
         description: "Hosted group tool",
         fetchImpl: input.fetchImpl,
@@ -84,6 +88,20 @@ export function createHostedRuntimeGroupToolPort(input: {
   };
 }
 
+function encodeHostedRuntimeGroupToolRequest(
+  request: Parameters<
+    NonNullable<HostedRuntimePlatform["groupToolPort"]>["request"]
+  >[0],
+): unknown {
+  return request.action === "ask_current_sender"
+    ? {
+        ...request,
+        [HOSTED_RUNTIME_GROUP_CURRENT_SENDER_PROTOCOL_MARKER]:
+          HOSTED_RUNTIME_GROUP_CURRENT_SENDER_PROTOCOL_MARKER_VALUE,
+      }
+    : request;
+}
+
 function isHostedReplaySafeGroupToolRequest(
   request: Parameters<
     NonNullable<HostedRuntimePlatform["groupToolPort"]>["request"]
@@ -91,7 +109,6 @@ function isHostedReplaySafeGroupToolRequest(
 ): boolean {
   return request.action === "ask"
     || request.action === "ask_current_sender"
-    || request.action === "message_current_sender"
     || request.action === "ask_member"
     || request.action === "record_current_sender_daily_metric";
 }

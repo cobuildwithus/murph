@@ -1326,13 +1326,15 @@ export function ComponentsContent() {
 
         <Separator />
 
-        <Section title="Setup Loader">
+        <Section id="setup-loader" title="Setup Loader">
           <p className="text-sm text-muted-foreground">
             Full-page loader shown on <code className="font-mono text-xs">/join/[inviteCode]</code> while
-            Starter usage is activated. The Murph mark fires a sonar ripple from its two
-            largest core dots outward — each dot&apos;s delay is proportional to its distance
-            from center, so the wave radiates through the constellation rather than pulsing
-            uniformly. Honors <code className="font-mono text-xs">prefers-reduced-motion</code>.
+            Starter usage is activated. Successful activation replaces the document so Home
+            re-evaluates the new access grant instead of retaining this loading tree. The Murph
+            mark fires a sonar ripple from its two largest core dots outward — each dot&apos;s delay
+            is proportional to its distance from center, so the wave radiates through the
+            constellation rather than pulsing uniformly. Honors{" "}
+            <code className="font-mono text-xs">prefers-reduced-motion</code>.
           </p>
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="flex flex-col items-center justify-center gap-6 rounded-2xl bg-[#FAF8F4] px-8 py-16 ring-1 ring-[#1A1F16]/[0.06]">

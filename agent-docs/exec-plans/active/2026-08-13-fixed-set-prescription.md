@@ -1,8 +1,8 @@
-# Reuse exact active-workout set prescriptions
+# Reuse exact active-workout repetition prescriptions
 
 Status: active
 Created: 2026-08-13
-Updated: 2026-08-13
+Updated: 2026-08-14
 
 ## Goal
 
@@ -13,10 +13,13 @@ Updated: 2026-08-13
 ## Success criteria
 
 - Prompt guidance distinguishes an exact member-stated active-workout
-  prescription from an inferred target or a previous-workout value.
-- Later `set N done` messages apply the exact active prescription, while
+  repetition prescription from an inferred target or a previous-workout value.
+- Later `set N done` messages apply the exact active repetition count, while
   explicit deviations, ranges, AMRAP, and conflicting prescriptions remain
   safe and unambiguous.
+- The exception carries forward only repetitions; planned load and every other
+  actual field remain unset unless stated with the completion or already
+  present on that exact canonical set.
 - Focused regression tests and a direct sequential conversation prove the
   fixed value is recorded on the canonical completed set.
 - Required prompt/product/coverage review and exact-head CI pass before merge.
@@ -31,17 +34,19 @@ Updated: 2026-08-13
 ## Constraints
 
 - Technical constraints: keep actual completed-set fields distinct from saved
-  plans; reuse only an exact prescription explicitly established in the active
-  workout conversation.
+  plans; reuse only an exact repetition count explicitly established in the
+  active workout conversation.
 - Product/process constraints: do not copy private feedback text into source or
   PR artifacts; use synthetic regression language and the prompt-primary PR
   workflow.
 
 ## Risks and mitigations
 
-1. Risk: Murph could silently apply an ambiguous or stale target.
-   Mitigation: allow reuse only for one exact active-workout prescription and
-   require clarification for ranges, AMRAP, conflicts, or explicit deviations.
+1. Risk: Murph could silently apply an ambiguous, stale, or non-repetition
+   target.
+   Mitigation: allow reuse only for one exact active-workout repetition count,
+   require clarification for ranges, AMRAP, conflicts, or explicit deviations,
+   and require every other actual field at completion time.
 2. Risk: a prompt-only assertion could pass string tests without changing real
    behavior.
    Mitigation: run the production-model sequential conversation and inspect the
@@ -51,8 +56,8 @@ Updated: 2026-08-13
 
 1. Inspect the current tracked-table guidance, prompt assembly, and focused
    tests on current main.
-2. Add the smallest non-conflicting active-prescription rule and regression
-   coverage.
+2. Add the smallest repetitions-only active-prescription rule and regression
+   coverage, including proof that a planned load remains unset.
 3. Run focused tests, typecheck, and direct sequential behavior proof.
 4. Commit and push a candidate, open the PR, and run required ReviewGPT and CI.
 5. Resolve findings, close this plan through `scripts/finish-task`, merge, and
@@ -61,8 +66,10 @@ Updated: 2026-08-13
 ## Decisions
 
 - Keep the fix prompt-primary. The active conversation already retains the
-  exact prescription; no new persisted state or schema is needed for the
+  exact repetition count; no new persisted state or schema is needed for the
   reported same-conversation behavior.
+- Carry forward only `--reps`; every other actual field retains the ordinary
+  plan-versus-actual boundary.
 
 ## Verification
 

@@ -159,6 +159,7 @@ describe("hosted Stripe webhook service", () => {
     });
     expect(prisma.hostedStripeEvent.findUnique).toHaveBeenCalledWith({
       select: {
+        activationResultJson: true,
         claimExpiresAt: true,
         nextAttemptAt: true,
         status: true,

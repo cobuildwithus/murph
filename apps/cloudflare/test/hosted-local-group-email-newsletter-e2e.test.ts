@@ -131,11 +131,19 @@ describe("hosted local group email newsletter e2e", () => {
         memberId: missingEmailMemberId,
       }),
     ]);
-    for (const memberId of [ownerMemberId, missingEmailMemberId]) {
-      await requireScenario().runWake(buildActivationWake(memberId), memberId);
-      const activated = await requireScenario().waitForHostedCompletion(memberId);
-      expect(activated.lastErrorCode ?? null).toBeNull();
-    }
+    await Promise.all([
+      requireScenario().runWake(buildActivationWake(ownerMemberId), ownerMemberId),
+      requireScenario().runWake(
+        buildActivationWake(missingEmailMemberId),
+        missingEmailMemberId,
+      ),
+    ]);
+    const [ownerActivated, missingEmailActivated] = await Promise.all([
+      requireScenario().waitForHostedCompletion(ownerMemberId),
+      requireScenario().waitForHostedCompletion(missingEmailMemberId),
+    ]);
+    expect(ownerActivated.lastErrorCode ?? null).toBeNull();
+    expect(missingEmailActivated.lastErrorCode ?? null).toBeNull();
 
     requireScenario().queueAssistantResponses(
       [bootstrapReplyText],

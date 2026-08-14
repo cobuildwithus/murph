@@ -555,6 +555,23 @@ export class HostedUserRunner {
     return await this.workspaceSnapshotSessions.rememberPresignedPut(input);
   }
 
+  async admitHostedBrowserVaultReplicaDirectPut(input: {
+    admittedAt: string;
+    attemptId: string;
+    leaseGeneration: string;
+    userId: string;
+    writeId: string;
+  }): Promise<boolean> {
+    return await this.workspaceSnapshotSessions.admitBrowserVaultReplicaDirectPut(input);
+  }
+
+  async releaseHostedBrowserVaultReplicaDirectPut(input: {
+    userId: string;
+    writeId: string;
+  }): Promise<void> {
+    await this.workspaceSnapshotSessions.releaseBrowserVaultReplicaDirectPut(input);
+  }
+
   async recordHostedWorkspaceSnapshotOrphanCandidate(
     input: HostedWorkspaceSnapshotOrphanCandidate,
   ): Promise<HostedWorkspaceSnapshotOrphanCandidate> {

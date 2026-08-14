@@ -1,6 +1,6 @@
 # Local Storage Lifecycle
 
-Last verified: 2026-08-10
+Last verified: 2026-08-13
 
 ## Purpose
 
@@ -77,10 +77,36 @@ Use `scripts/create-worktree`; use `--data-research <reason>` only for genuinely
 large data or research work. Registered worktrees remain visible to the normal
 open-PR, plan, cleanliness, process-CWD, and retirement gates.
 
-The creation helper writes `.metadata_never_index` at each worktree root so
-macOS Spotlight does not crawl rebuildable checkout contents. It also adds the
-root marker to the repository's common local exclude file so the marker never
-appears as worktree dirt. Keep the marker in place for the worktree's lifetime.
+The creation helper prepares the shared local exclude rule before registration,
+registers each worktree with checkout materialization suppressed, and writes
+`.metadata_never_index` at the worktree root before tracked files exist. It then
+materializes the checkout under Git's linked-worktree directory and work-tree
+environment with submodule recursion disabled, then invokes the configured
+`post-checkout` hook once from the canonical target root with Git's worktree-add
+arguments and launch environment. The launcher clears repository-local
+variables, sets Git's exec path and empty prefix, prepends the exec path to
+`PATH`, and removes Murph's lock-held flags so hook descendants must acquire the
+real creation lock instead of inheriting authority to bypass it. It also gives
+the hook native end-of-file standard input while preserving standard output and
+error. Manual materialization may invoke `post-index-change`; after that boundary
+and again after `post-checkout`, the helper uses Git's path-scoped reset and
+checkout primitives to restore only the marker from the captured checkout tree
+with hooks suppressed. It preserves every unrelated hook-created index or
+worktree effect. The helper then preserves the shared exclude file's identity
+and metadata while appending one exact rule when needed for final effective
+precedence, restores an absent marker, and verifies no marker delta before final
+storage-guard authorization. Keep the marker in place for the worktree's
+lifetime.
+
+Marker creation, materialization, hook completion, marker restoration, and
+final authorization publication form one post-registration boundary. If any
+step fails or the helper receives a catchable interruption, it removes only the
+exact worktree it just registered while the creation lock is still held,
+repairs shared Spotlight precedence before removal, preserves the created branch
+for retry, and returns the original failure or signal status. A failed shared
+repair is reported alongside that status. A failed rollback is reported
+explicitly and leaves the target registered but unauthorized for manual
+diagnosis instead of hiding the partial state.
 
 `scripts/worktree-storage-guard` scans only conventional direct-child
 `murph-*` Git checkouts in the system `/tmp` roots by default and matches the

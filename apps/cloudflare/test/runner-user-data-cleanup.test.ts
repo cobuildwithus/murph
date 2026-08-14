@@ -1,5 +1,13 @@
 import type { HostedWorkspaceState } from "@murphai/hosted-execution/runtime-control";
 import {
+  HOSTED_BROWSER_VAULT_REPLICA_METRIC_BUCKET_COUNT,
+  HOSTED_BROWSER_VAULT_REPLICA_METRIC_BUCKET_IDS,
+  HOSTED_BROWSER_VAULT_REPLICA_METRIC_BUCKET_SET_REF_SCHEMA,
+  HOSTED_BROWSER_VAULT_REPLICA_SHARD_SET_REF_SCHEMA,
+  type HostedBrowserVaultReplicaMetricBucketSetRef,
+  type HostedBrowserVaultReplicaRef,
+} from "@murphai/hosted-execution/contracts";
+import {
   buildHostedWorkspaceSnapshotV2Aad,
   HOSTED_WORKSPACE_SNAPSHOT_V2_ENCRYPTION_SCHEME,
 } from "@murphai/hosted-execution/workspace-snapshot-v2";
@@ -12,6 +20,7 @@ import {
 } from "../src/runner-container.js";
 import {
   hostedBundleUserPrefix,
+  hostedBrowserVaultReplicaUserPrefix,
   hostedMealPhotoUserPrefix,
   hostedPrivateMediaUserPrefix,
 } from "../src/storage-paths.js";
@@ -21,6 +30,10 @@ import {
   type HostedWorkspaceSnapshotUploadSession,
 } from "../src/workspace-snapshot-store.js";
 import {
+  HOSTED_BROWSER_VAULT_REPLICA_ORPHAN_CANDIDATE_SCHEMA,
+  listHostedBrowserVaultReplicaSiblingObjectKeys,
+} from "../src/browser-vault-store.ts";
+import {
   deleteHostedRunnerUserData,
 } from "../src/user-runner/user-data-deletion.js";
 import {
@@ -28,6 +41,7 @@ import {
 } from "../src/user-runner/r2-delete.js";
 import {
   createWorkspaceSnapshotSessionService,
+  browserVaultReplicaOrphanCandidateStorageKey,
   workspaceSnapshotOrphanCandidateStorageKey,
 } from "../src/user-runner/workspace-snapshot-sessions.js";
 import type {
@@ -432,6 +446,133 @@ describe("hosted runner user data cleanup", () => {
     expect(bucket.deleteBatches).toEqual([]);
   });
 
+  it("waits out an admitted browser-vault PUT and deletes its late object on retry", async () => {
+    const startedAt = Date.parse("2026-07-28T12:00:00.000Z");
+    vi.spyOn(Date, "now").mockReturnValue(startedAt);
+    const durable = createDurableObjectHarness();
+    const bucket = new ListableMemoryEncryptedR2Bucket();
+    const service = createWorkspaceSnapshotSessionService({
+      bucket,
+      runnerStoreCache: createUnusedRunnerStoreCache(),
+      state: durable.state,
+      stateStore: createOwningSnapshotStateStore(),
+      readHostedWorkspaceFromWeb: async (userId) => ({
+        fetchedAt: NOW,
+        workspace: createWorkspaceState(userId),
+      }),
+      assertWorkspaceBelongsToRunnerUser() {},
+    });
+    const writeId = "browser-vault-put-test";
+    await expect(service.admitBrowserVaultReplicaDirectPut({
+      admittedAt: "2026-07-28T12:00:00.000Z",
+      attemptId: "attempt_1",
+      leaseGeneration: "3",
+      userId: USER_ID,
+      writeId,
+    })).resolves.toBe(true);
+    const objectKey = `${await hostedBrowserVaultReplicaUserPrefix({
+      userId: USER_ID,
+    })}${"d".repeat(48)}.json`;
+    let releasePut = (): void => {};
+    const putGate = new Promise<void>((resolve) => {
+      releasePut = resolve;
+    });
+    const delayedPut = (async () => {
+      await putGate;
+      await bucket.put(objectKey, "late-encrypted-browser-vault-replica");
+    })();
+    const deletionStateStore = createDeletionStateStore();
+
+    await expect(deleteHostedRunnerUserData({
+      bucket,
+      runnerContainerNamespace: null,
+      runnerRuntimeEnvSource: {},
+      state: durable.state,
+      stateStore: deletionStateStore,
+      userId: USER_ID,
+    })).resolves.toEqual({
+      ok: false,
+      reason: "r2_upload_drain_pending",
+      retryAfterSeconds: 60,
+      userId: USER_ID,
+    });
+    expect(bucket.listCalls).toEqual([]);
+
+    releasePut();
+    await delayedPut;
+    await service.releaseBrowserVaultReplicaDirectPut({ userId: USER_ID, writeId });
+    expect(bucket.objects.has(objectKey)).toBe(true);
+
+    await expect(deleteHostedRunnerUserData({
+      bucket,
+      runnerContainerNamespace: null,
+      runnerRuntimeEnvSource: {},
+      state: durable.state,
+      stateStore: deletionStateStore,
+      userId: USER_ID,
+    })).resolves.toMatchObject({ ok: true });
+    expect(bucket.objects.has(objectKey)).toBe(false);
+    expect(deletionStateStore.deleteStateCallCount).toBe(1);
+  });
+
+  it("clears a crashed browser-vault writer after the post-stop drain window", async () => {
+    const admittedAt = Date.parse("2026-07-28T12:00:00.000Z");
+    const deletionStartedAt = admittedAt + 2 * 60 * 60_000;
+    const dateNow = vi.spyOn(Date, "now").mockReturnValue(deletionStartedAt);
+    const durable = createDurableObjectHarness();
+    const bucket = new ListableMemoryEncryptedR2Bucket();
+    const service = createWorkspaceSnapshotSessionService({
+      bucket,
+      runnerStoreCache: createUnusedRunnerStoreCache(),
+      state: durable.state,
+      stateStore: createOwningSnapshotStateStore(),
+      readHostedWorkspaceFromWeb: async (userId) => ({
+        fetchedAt: NOW,
+        workspace: createWorkspaceState(userId),
+      }),
+      assertWorkspaceBelongsToRunnerUser() {},
+    });
+    await expect(service.admitBrowserVaultReplicaDirectPut({
+      admittedAt: "2026-07-28T12:00:00.000Z",
+      attemptId: "attempt_1",
+      leaseGeneration: "3",
+      userId: USER_ID,
+      writeId: "stale-browser-vault-put",
+    })).resolves.toBe(true);
+    const deletionStateStore = createDeletionStateStore();
+
+    await expect(deleteHostedRunnerUserData({
+      bucket,
+      runnerContainerNamespace: null,
+      runnerRuntimeEnvSource: {},
+      state: durable.state,
+      stateStore: deletionStateStore,
+      userId: USER_ID,
+    })).resolves.toMatchObject({
+      ok: false,
+      reason: "r2_upload_drain_pending",
+      retryAfterSeconds: 60,
+    });
+    expect(bucket.listCalls).toEqual([]);
+
+    const objectKey = `${await hostedBrowserVaultReplicaUserPrefix({
+      userId: USER_ID,
+    })}${"e".repeat(48)}.json`;
+    await bucket.put(objectKey, "late-encrypted-browser-vault-replica");
+    dateNow.mockReturnValue(deletionStartedAt + 60_001);
+
+    await expect(deleteHostedRunnerUserData({
+      bucket,
+      runnerContainerNamespace: null,
+      runnerRuntimeEnvSource: {},
+      state: durable.state,
+      stateStore: deletionStateStore,
+      userId: USER_ID,
+    })).resolves.toMatchObject({ ok: true });
+    expect(bucket.objects.has(objectKey)).toBe(false);
+    expect(deletionStateStore.deleteStateCallCount).toBe(1);
+  });
+
   it("withholds completion when a late object appears between empty observations", async () => {
     const durable = createDurableObjectHarness();
     const stateStore = createDeletionStateStore();
@@ -526,6 +667,101 @@ describe("hosted runner user data cleanup", () => {
     expect(durable.storageValues.has(malformedCandidateKey)).toBe(false);
     expect(durable.storageValues.has(validCandidateKey)).toBe(false);
     expect(stateStore.boundUsers).toEqual([USER_ID]);
+  });
+
+  it("protects every live browser-vault shard while deleting replaced replica objects", async () => {
+    const durable = createDurableObjectHarness();
+    const stateStore = createBindOnlyStateStore();
+    const bucket = new ListableMemoryEncryptedR2Bucket();
+    const prefix = await hostedBrowserVaultReplicaUserPrefix({ userId: USER_ID });
+    const objectKey = `${prefix}${"a".repeat(48)}.json`;
+    const currentObjectKeys = [
+      objectKey,
+      ...listHostedBrowserVaultReplicaSiblingObjectKeys(objectKey),
+    ];
+    const replacedObjectKey = `${prefix}${"b".repeat(48)}.json`;
+    const metricBucketRefs = Object.fromEntries(
+      HOSTED_BROWSER_VAULT_REPLICA_METRIC_BUCKET_IDS.map((bucketId) => [
+        bucketId,
+        createHostedBrowserVaultShardRef(
+          objectKey.replace(/\.json$/u, `.metric-bucket-${bucketId}.json`),
+        ),
+      ]),
+    ) as HostedBrowserVaultReplicaMetricBucketSetRef["buckets"];
+    const replicaRef: HostedBrowserVaultReplicaRef = {
+      byteLength: 10_000,
+      dataVersion: "cleanup-test",
+      generatedAt: "2026-04-26T00:00:00.000Z",
+      keyId: "browser-vault-replica:cleanup-test",
+      objectKey,
+      replicaSchema: "murph.browser-vault-replica" as const,
+      runtimeRootKeyId: "runtime-root-cleanup-test",
+      schema: "murph.hosted-browser-vault-replica-ref.v1" as const,
+      metricBuckets: {
+        bucketCount: HOSTED_BROWSER_VAULT_REPLICA_METRIC_BUCKET_COUNT,
+        buckets: metricBucketRefs,
+        schema: HOSTED_BROWSER_VAULT_REPLICA_METRIC_BUCKET_SET_REF_SCHEMA,
+      },
+      shards: {
+        core: createHostedBrowserVaultShardRef(
+          objectKey.replace(/\.json$/u, ".core.json"),
+        ),
+        labs: createHostedBrowserVaultShardRef(
+          objectKey.replace(/\.json$/u, ".labs.json"),
+        ),
+        metricsIndex: createHostedBrowserVaultShardRef(
+          objectKey.replace(/\.json$/u, ".metrics-index.json"),
+        ),
+        schema: HOSTED_BROWSER_VAULT_REPLICA_SHARD_SET_REF_SCHEMA,
+      },
+      sourceBundleHash: "c".repeat(64),
+    };
+    const candidateObjectKeys = [objectKey, replacedObjectKey];
+    for (const candidateObjectKey of candidateObjectKeys) {
+      durable.storageValues.set(
+        browserVaultReplicaOrphanCandidateStorageKey(candidateObjectKey),
+        {
+          createdAt: "2026-04-26T00:00:00.000Z",
+          objectKey: candidateObjectKey,
+          schema: HOSTED_BROWSER_VAULT_REPLICA_ORPHAN_CANDIDATE_SCHEMA,
+          userId: USER_ID,
+        },
+      );
+    }
+    const replacedObjectKeys = [
+      replacedObjectKey,
+      ...listHostedBrowserVaultReplicaSiblingObjectKeys(replacedObjectKey),
+    ];
+    for (const storedObjectKey of [...currentObjectKeys, ...replacedObjectKeys]) {
+      await bucket.put(storedObjectKey, "encrypted-replica-object");
+    }
+    const service = createWorkspaceSnapshotSessionService({
+      bucket,
+      runnerStoreCache: createUnusedRunnerStoreCache(),
+      state: durable.state,
+      stateStore,
+      readHostedWorkspaceFromWeb: async (userId) => ({
+        fetchedAt: NOW,
+        workspace: {
+          ...createWorkspaceState(userId),
+          browserVaultReplicaRef: replicaRef,
+        },
+      }),
+      assertWorkspaceBelongsToRunnerUser(workspace, userId) {
+        if (workspace?.userId !== userId) {
+          throw new Error("Workspace user mismatch.");
+        }
+      },
+    });
+
+    await service.cleanupOrphanCandidates(USER_ID);
+
+    expect(bucket.deleted).toEqual(replacedObjectKeys);
+    expect(currentObjectKeys.every((key) => bucket.objects.has(key))).toBe(true);
+    expect(replacedObjectKeys.every((key) => !bucket.objects.has(key))).toBe(true);
+    expect(candidateObjectKeys.every((key) =>
+      !durable.storageValues.has(browserVaultReplicaOrphanCandidateStorageKey(key))))
+      .toBe(true);
   });
 
   it("does not log malformed orphan candidate keys when invalid-record discard fails", async () => {
@@ -719,6 +955,15 @@ function createWorkspaceState(userId: string): HostedWorkspaceState {
     updatedAt: NOW,
     userId,
     version: "1",
+  };
+}
+
+function createHostedBrowserVaultShardRef(objectKey: string) {
+  return {
+    byteLength: 1_000,
+    contentEncoding: "gzip" as const,
+    encodedByteLength: 100,
+    objectKey,
   };
 }
 

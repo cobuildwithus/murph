@@ -129,6 +129,13 @@ Last verified: 2026-08-14
   input, cache-read, cache-write, and output rates and records the provider
   model and pricing source in the snapshot; unknown non-Venice standard
   provider evidence retains the existing OpenAI-compatible behavior.
+- The operator `/ops/usage` collection is bounded independently of lifetime
+  member count. It reads at most 26 hosted-member primary keys to admit a
+  25-row page, uses one scalar whole-population aggregate, filters mailbox and
+  immutable-usage groupings to those 25 IDs, and runs the canonical allowance
+  gate sequentially in one short repeatable-read transaction per displayed
+  member. No transaction spans members, no off-page member reaches the gate,
+  and peak added transactional connection ownership is one.
 - An authenticated Settings provider change commits Postgres first and then
   sends the payload-free `runtime_wake_requested` Temporal signal. The per-user
   workflow coalesces duplicate wakes as one boolean and calls the existing
@@ -430,6 +437,18 @@ Last verified: 2026-08-14
   activation failure falls back to the existing signup-link path, while the
   single-owner wait remains provider-retryable, without creating a second
   entitlement, queue, or runtime.
+- Linq signup-link terminal failures recompute suppression under the existing
+  member-row lock without reading delivery history into application memory.
+  One scalar statement checks only the exact five source references for the
+  failed generic or source-event-digest identity and whether any syntactically
+  valid five-attempt identity remains live for that member/day. Both probes use
+  the concurrent partial `source_ref text_pattern_ops` index restricted to live
+  `invite_signup` and `invite_signup_fallback` rows. Receipt ordering remains
+  the terminal authority: a same-identity live attempt suppresses reopen, a
+  different group-aware identity may reopen only its group context while
+  retaining daily suppression, and the daily marker is released only after no
+  live identity remains. No cache, queue, or duplicate projection owns this
+  state.
 - Web and companion onboarding use the same semantic-keyed starter grant with
   their own bounded source references. A repeated enrollment cannot replace the
   accepted grant or add balance. Historical trial metadata remains only for
@@ -525,6 +544,19 @@ Last verified: 2026-08-14
   route also requires proof: a new browser on an old instance receives 404, and
   an old browser on a new instance receives 400, so mixed-version traffic fails
   safely during convergence.
+- The Family owner snapshot admits at most the six supported active and pending
+  seats before reading private invite history. Active membership admission uses
+  the existing group/status index without a pre-limit sort; live pending invite
+  admission seeks by group/status/expiry/id. Both restore created order only
+  after the cap checks pass. The ordinary root-client read evaluates roster,
+  paid capacities, and accepted-invite history in one short repeatable-read
+  database snapshot, then closes that transaction before private invite
+  projection and decryption; a caller already inside a canonical transaction
+  reuses it instead of nesting another transaction. For each current non-owner
+  member, one indexed lateral lookup selects only the earliest accepted invite;
+  departed members and later historical accepts never reach decryption. A
+  roster that exceeds the product invariant fails closed instead of turning a
+  settings read into an unbounded history scan.
 - Stripe receipts poison after the normal attempt cap when a failure remains
   permanent, regardless of whether the owning billing transaction already
   committed. Concrete Stripe/Prisma/network failures remain retryable, and a
@@ -532,6 +564,13 @@ Last verified: 2026-08-14
   retryable obligation. Replay-safe cleanup or notification work does not gain
   blanket retry authority merely because it runs post-commit. No second queue
   owns redrive.
+- A completed Stripe receipt persists the exact mailbox item identifiers for
+  every `member.activated` result it committed. Runtime-wake replay reads only
+  those identifiers and revalidates the mailbox kind; a malformed non-null
+  projection fails closed. Receipts written before this additive field was
+  deployed retain the legacy lookup solely as a mixed-deploy transition, while
+  account deletion may legitimately cascade a pointed-to mailbox item without
+  changing the completed billing outcome.
 - Immediate paid-plan upgrades use a one-item Customer Portal
   `subscription_update_confirm` session rather than a Murph-owned Subscription
   mutation or pending-invoice retry loop. Web takes the member lock only to
@@ -750,21 +789,26 @@ Last verified: 2026-08-14
   prevent a future retry for one connection from blocking or advancing due work
   for another.
   The focused WHOOP regression fixes one canonical schedule-event identity and
-  one durable mailbox-item identity. Its first pass restores the committed input,
-  fetches that mailbox item, runs four distinct read-only method/path classes,
-  writes four artifacts, commits checkpoint 1, and injects the only failure at
-  checkpoint 2 record/completion persistence. Cold restore from checkpoint 1
-  at 00:05 observes exactly one replay of those four classes (eight requests
-  total) and makes three successful checkpoints, advancing the workspace from
-  version 1 through version 4. Its retained completion fence is due at 00:05:30
-  and carries the 06:05 provider cadence. The completion pass performs no third
-  provider pull, makes two successful checkpoints through version 6, and
+  one durable mailbox-item identity. The fixture first commits the clean input
+  workspace through the production v2 checkpoint bridge. The initial incident
+  pass then fetches that mailbox item, runs four distinct read-only method/path
+  classes, writes four artifacts, and creates the machine-local SQLite execution
+  record. Its production v2 post-pull archive plan observes the live SQLite store,
+  omits it from the archive, and retains the durable system-mailbox state. The only
+  injected failure rejects that v2 snapshot checkpoint, leaving the exact clean
+  input ref as the last committed snapshot. At 00:05, production v2 restore of
+  that committed ref starts without the SQLite execution record, reconstructs the
+  pending obligation from durable mailbox authority, observes exactly one replay
+  of the four provider classes (eight requests total), and makes three successful
+  recovery checkpoints. Its retained completion fence is
+  due at 00:05:30 and carries the 06:05 provider cadence. The completion pass
+  performs no third provider pull, makes two successful checkpoints, and
   publishes 06:05 only after the durable recovery/completion checkpoint. The
   first later bucket at 00:10 returns idle with no wake and performs one bounded
-  post-publication convergence checkpoint through version 7; the following
-  00:15 bucket is fully quiescent. The proof therefore records eight checkpoint
-  attempts, seven commits, one injected failure, and no provider work after the
-  single four-class replay.
+  post-publication convergence checkpoint; the following 00:15 bucket is fully
+  quiescent. Within the measured incident window, the proof records eight
+  checkpoint attempts, seven commits, one injected failure, and no provider work
+  after the single four-class replay.
   Future provider cadence remains projected as the workspace follow-up wake and
   is recorded with a system-mailbox checkpoint handoff; once that cadence is
   due, only a connection mailbox wake may admit it, so a generic runtime timer
@@ -1401,11 +1445,18 @@ Last verified: 2026-08-14
   row, or delivery ledger.
 - Cloudflare may exact-replay one Assistant Ask control request within the
   original request deadline after a replay-safe transport ambiguity or HTTP
-  `5xx`. This applies only to group `ask`, `ask_member`, `ask_current_sender`,
-  `message_current_sender`, and the dedicated `prepare` / `complete` control
-  requests, whose stable identities make identical replay idempotent. Caller
-  cancellation, exhausted deadlines, authority failures, and other `4xx`
-  responses do not replay.
+  `5xx`. This applies only to group `ask`, `ask_member`, the canonical
+  `ask_current_sender`, and the dedicated `prepare` / `complete` control
+  requests, whose stable identities make identical replay idempotent. New
+  current-sender callers use one strict JSON-body protocol marker; the URL has
+  no duplicate marker. Old Web rejects that unknown field, while new Web strips
+  it before canonical parsing. New Web rejects deployed unmarked old
+  `ask_current_sender` calls because those runtimes cannot prove the mandatory
+  pre-read room notice; the optional group consultation fails closed until the
+  runtime is recycled. Unmarked old `message_current_sender` calls may still
+  drain through exact-source private admission. The undeployed dual URL marker
+  and destination dialect are rejected. Caller cancellation, exhausted
+  deadlines, authority failures, and other `4xx` responses do not replay.
 - Assistant Ask request and completion appends first signal the existing Temporal
   workflow, then may issue the shared payloadless, no-retry direct
   `ensure-processing` latency hint. Temporal acceptance failure starts no direct
@@ -1425,29 +1476,99 @@ Last verified: 2026-08-14
   and request id to the existing `checkpoint.snapshot_failed` error cause; the
   raw body, resource path, object key, and presigned request material remain
   excluded.
-- One-time current-sender Assistant Ask has two target-bound completion adapters
-  over the same mailbox lifecycle, deterministic request identity, ten-minute
-  expiry, isolated reviewed personal read, and completion identity.
-  `ask_current_sender` retains exact-origin group delivery.
-  `message_current_sender` creates one deterministic
-  `assistant.notification.requested` for the same personal member: queue-only,
-  exact-text, idempotent, same source channel, current `direct-member` route
-  only, and no external group-route authority. The personal runtime's existing
-  notification consumer creates the delivery intent while retaining the
-  original completion expiry and proof anchor. Each provider-entry attempt asks
-  Web to revalidate that expiry, the exact reviewed-text digest, the same
-  personal member, and the current same-channel `direct-member` route. Expired,
-  revoked, text-mismatched, or route-drifted proof is terminal with no group or
-  alternate-route fallback. Exact replay reopens and revalidates the stored
-  group input; changed identity, question, permission, target, route, or expiry
-  becomes unavailable, and route drift cannot redirect existing work. Neither
-  path adds a scheduler, callback wait, status or grant row, retry owner,
-  delivery ledger, or second generation.
+- One-time current-sender Assistant Ask has one origin-level request, one Web
+  admission owner, one mailbox lifecycle, one deterministic origin identity,
+  ten-minute expiry, isolated personal read, existing fresh allow/deny reviewer,
+  one canonical group completion/fallback identity, and one separate private
+  delivery identity. The model action accepts only an opaque accepted-message
+  ref from the current group turn, allowing independent requests in one batch
+  while granting no sender or route authority. The conversational model infers
+  group, private, or genuine audience ambiguity for that exact ref. Web reloads
+  the exact wake, preserves native-reply evidence, resolves its author, binds
+  the corresponding result destination, and requires the same source's trusted
+  group notice or current same-channel private route before admission.
+- Ambiguity persists one ten-minute group/sender pointer to the original exact
+  input/session and causal sequence, without copied question text. Creation is
+  serialized and causally monotonic: older work cannot replace newer work, and
+  exact replay cannot reopen a resolved pointer. Continuation accepts only a
+  later exact input from the same sender. Claim and ordinary admission share one
+  database-only transaction, so unavailable admission rolls the claim back.
+  Within one assistant invocation, the existing stateful dynamic-tool chain
+  runs current-sender clarification and continuation transitions in provider
+  request order; a later continuation cannot start before an earlier
+  clarification settles, while independent new exact-ref requests remain
+  concurrent.
+- At accepted App Server request intake, strict parsing precedes one turn-local
+  decision claim per exact accepted ref in App Server request arrival order.
+  The claim happens before dynamic-tool lane selection or the pre-tool hook, so
+  a later immediate `new` request cannot overtake an earlier serialized
+  clarification or continuation. Contradictory clarification, group, private,
+  new, or continuation choices for that ref fail before notice, Web admission,
+  or clarification persistence. Exact repeated group decisions share one
+  in-flight notice promise. The claim remains after notice failure or
+  uncertainty, so a same-turn retry cannot switch to private delivery;
+  different exact refs stay concurrent. This is bounded invocation memory, not
+  another durable owner. Web's canonical exact-source request identity remains
+  the replay fence across invocations and restarts.
+- Admission persists one `current_sender_personal` read target and a separate
+  result destination. `origin_context` selects the existing group completion;
+  `requester_direct` also pins the admitted Linq or Telegram channel. The
+  matching permission digest remains fixed disclosure policy. Private admission
+  first resolves a current same-channel direct route. Prepare and completion
+  re-read the source, target, and result destination under the existing request
+  locks. The personal runtime and reviewer cannot change the destination; the
+  reviewer returns only allow or deny. Exact request replay returns the same
+  mailbox item, a replay that switches destination conflicts, and exactly one
+  alias may exist for an origin.
+- Group completion persists as `assistant.ask.completed` for the originating
+  group. If a valid answered `origin_context` completion is already persisted
+  when the current sender loses personal runtime access, provider-entry
+  authority returns the existing fixed-fallback signal so the outbox sends the
+  non-disclosing terminal instead of becoming permanently stranded. Malformed
+  envelopes and destination mismatches remain terminal authority failures.
+  Private completion persists as one deterministic queue-only
+  `assistant.notification.requested` for the source sender: exact text,
+  same-channel current `direct-member` route, no external group-route authority,
+  and the original request expiry. Its separate identity cannot block the
+  canonical group fallback. If the direct route is lost before completion or
+  at provider entry, or the request expires before prepare, Web discards the
+  private answer and atomically persists a fresh fixed `cannot_answer` group
+  completion instead. Completion replay recognizes that fallback as the one
+  authorized terminal experience before considering a subsequently recovered
+  direct route. A lost fallback-authority response therefore replays the same
+  fallback and cannot later release the private effect. If a private completion
+  committed before a lost detached-control response, expired control replay
+  re-hands that deterministic private item instead of independently appending a
+  group terminal; provider-entry authority remains the sole owner that may
+  convert it to the fallback. The detached runtime
+  removes work only after a valid persisted completion or an explicit
+  `already_completed` response; a terminal/unavailable response with no valid
+  completion requeues until expiry rather than consuming accepted work.
+- Legacy wire and mailbox compatibility is bounded. Web accepts deployed older
+  unmarked action shapes only at the transport edge and reapplies exact-source
+  admission. The undeployed dual URL marker, destination dialect, and
+  intermediate request-id alias are rejected. Existing former request ids and `group_sender` /
+  `group_sender_private` targets drain only when their stored shape is valid and
+  the reloaded source independently agrees on sender and legacy destination.
+  Completion
+  locks every alias and accepts at most one completion alias. After
+  all old runners are recycled, wait the ten-minute request TTL plus the
+  one-minute detached-queue retry margin (eleven minutes total), then remove the
+  old action parsing, former request-id readers, and neutral-permission drain
+  branch together.
+- Deploy in authority order: shared contracts and Web first, then the personal
+  runtime/assistant-engine bundle, then Cloudflare and the exact-ref model
+  catalog. The new body marker fails closed against old Web. Roll back the model
+  catalog and Cloudflare first; retain new Web and runtime compatibility through
+  the eleven-minute drain window. Post-deploy proof must cover canonical marked
+  admission, an old unmarked request, fixed group and private completion, route
+  loss fallback, replay, and concurrent origin/completion locking.
 - The same dirty-runtime prefix admits only three server-identified,
   replay-safe external-completion notification families:
   `assistant.notification.requested:phone-call-result:*` and
   `assistant.notification.requested:usage-referral-reward:*`, plus exact private
-  Assistant Ask completions under `aask_done_*`. Their stable mailbox identity
+  Assistant Ask completions under legacy `aask_done_*` or current
+  `aask_private_*`. Their stable mailbox identity
   lets them interrupt the idle floor; the foreground-causal selector rechecks
   those exact dedupe-key families and carries only the just-created causal
   outbox intent into the existing write-ahead provider drain. Private Assistant
@@ -1593,6 +1714,15 @@ Last verified: 2026-08-14
   A successful attribution pass remains authoritative and may replace unknown
   values or write null when it proves retained sender evidence incomplete.
 - Observability writes (logs, latency traces, diagnostics, metrics) must never block user-facing latency: queue or fire-and-forget them off the reply hot path and flush at invocation end, per the `Foreground Reply Critical Path` invariants in `docs/contracts/00-invariants.md`. Only warn/error crash-tail writes may block, bounded by the process exit backstop.
+- The best-effort ingress-latency checkpoint-publication milestone updates at
+  most 250 of the newest currently staged, unconsumed traces for the
+  authenticated member and source in one set-based statement. A 251st locked
+  candidate reports truncation without widening the write. PostgreSQL owns row
+  serialization while the write preserves attempt and monotonic
+  lease-generation authority, max-merges the publication deadline, sanitizes
+  stored diagnostic JSON, and changes `updated_at` only when state changes. It
+  must not select trace ids into the application, lock an unbounded collection,
+  or open one transaction per trace.
 - Chat-affirmation group joins (Linq reaction, Telegram inline button) are
   at-least-once, not exactly-once. The provider-event ledger records that an
   event was *received*, not that it was *applied*, so a redelivered event
