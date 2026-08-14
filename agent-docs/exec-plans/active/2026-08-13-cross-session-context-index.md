@@ -88,7 +88,11 @@ Updated: 2026-08-13
 - ReviewGPT selected one route-owned `settledThrough` watermark plus at most one
   pending `{delivery, consumerTurnId}` claim. The claim is installed at the
   existing pre-provider boundary after receipt creation; the referenced
-  receipt's completed/deferred evidence commits it. No required route mutation
+  receipt's matching completed/deferred timeline evidence commits it. A
+  same-turn upgrade retains one receipt-proven prior order so an abandoned
+  newer steer cannot consume the wrong message or replay an earlier accepted
+  one. A terminal receipt without any matching evidence clears an abandoned
+  claim without consuming it. No required route mutation
   follows terminal receipt persistence.
 - Outbox remains the owner of delivery content and attestation. General turn
   receipts remain the owner of turn outcome. The route record owns only the
@@ -99,9 +103,16 @@ Updated: 2026-08-13
   correctness, disappear on rollover, or retain O(n) work/lifecycle machinery.
 - First-use foreground migration was rejected because it would preserve the
   exact O(n) latency spike this task removes. Exact provider-message anchors
-  remain available before migration because their running receipt is already a
-  durable import witness; optional unanchored context fails closed until the
-  residue-owned marker is complete.
+  remain available before migration and write the same bounded pending claim
+  before live provider steering; optional unanchored context fails closed until
+  the residue-owned marker is complete.
+- Preliminary ReviewGPT found that ambiguous legacy running consumers could
+  throw before residue cleanup and that a route claim could protect an
+  abandoned running receipt forever. Migration now stays incomplete without
+  throwing while those consumers remain live. At the existing old-running
+  cutoff, the residue owner clears only claims whose trusted outbox, receipt,
+  journal, and pending-input evidence proves abandoned, then prunes that
+  receipt and journal without manufacturing consumption.
 
 ## Verification
 

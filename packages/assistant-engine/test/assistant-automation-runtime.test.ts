@@ -3491,7 +3491,9 @@ describe('assistant auto-reply runtime', () => {
     expect(readAutoReplyCursor(state, 'linq')).toEqual(successor.event.cursor)
     expect(replyMocks.sendAssistantMessage).toHaveBeenCalledTimes(1)
     expect(replyMocks.sendAssistantMessage).toHaveBeenLastCalledWith(
-      expect.objectContaining({ beforeProviderAcceptedInputs }),
+      expect.objectContaining({
+        beforeProviderAcceptedInputs: expect.any(Function),
+      }),
     )
 
     await expect(scan(1)).resolves.toMatchObject({
@@ -3504,7 +3506,9 @@ describe('assistant auto-reply runtime', () => {
     expect(readAutoReplyCursor(state, 'linq')).toEqual(unrelated.event.cursor)
     expect(replyMocks.sendAssistantMessage).toHaveBeenCalledTimes(2)
     expect(replyMocks.sendAssistantMessage).toHaveBeenLastCalledWith(
-      expect.objectContaining({ beforeProviderAcceptedInputs }),
+      expect.objectContaining({
+        beforeProviderAcceptedInputs: expect.any(Function),
+      }),
     )
 
     await expect(scan(1)).resolves.toMatchObject({

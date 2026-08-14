@@ -28,6 +28,7 @@ import {
 } from '../src/assistant/automation/auto-reply-retry.ts'
 import { withAssistantRuntimeWriteLock } from '../src/assistant/runtime-write-lock.ts'
 import {
+  appendAssistantTurnReceiptEvent,
   createAssistantTurnReceipt,
   finalizeAssistantTurnReceipt,
   resolveAssistantTurnReceiptPath,
@@ -260,6 +261,80 @@ describe('assistant auto-reply exact route state', () => {
     })
   })
 
+  it('persists an exact pre-migration claim before its receipt records late-input acceptance', async () => {
+    const vault = await createTempVault('migration-incomplete-late-anchor')
+    const route = emailRoute()
+    const outboxIntent = createOutboxIntent({ intentId: 'intent-late-anchor' })
+    const receipt = await createRunningReceipt({
+      turnId: 'turn-late-anchor',
+      vault,
+    })
+
+    await claimAssistantAutoReplyRouteContext({
+      anchored: true,
+      order: order(outboxIntent.intentId, BASE_TIME),
+      routeDigest: route.digest,
+      turnId: receipt.turnId,
+      vault,
+    })
+    await completeMigration(vault, [outboxIntent], [receipt])
+
+    await expect(readAssistantAutoReplyRouteState({
+      routeDigest: route.digest,
+      vault,
+    })).resolves.toEqual({
+      kind: 'blocked',
+      reason: 'running-receipt',
+    })
+  })
+
+  it('leaves ambiguous legacy running consumers for residue instead of failing migration', async () => {
+    const vault = await createTempVault('migration-ambiguous-running')
+    const paths = resolveAssistantStatePaths(vault)
+    const route = emailRoute()
+    const firstIntent = createOutboxIntent({ intentId: 'intent-running-first' })
+    const secondIntent = createOutboxIntent({
+      intentId: 'intent-running-second',
+      sentAt: LATER_TIME,
+    })
+    const firstReceipt = createReceipt({
+      intentId: firstIntent.intentId,
+      status: 'running',
+      turnId: 'turn-running-first',
+    })
+    const secondReceipt = createReceipt({
+      intentId: secondIntent.intentId,
+      status: 'running',
+      turnId: 'turn-running-second',
+    })
+
+    await expect(maintainAssistantAutoReplyRouteStateAtPaths({
+      outboxIntents: [firstIntent, secondIntent],
+      outboxTrusted: true,
+      paths,
+      receipts: [firstReceipt, secondReceipt],
+      receiptsTrusted: true,
+    })).resolves.toEqual({
+      protectedReceiptTurnIds: new Set([
+        firstReceipt.turnId,
+        secondReceipt.turnId,
+      ]),
+      releasedAbandonedReceiptTurnIds: new Set(),
+      trusted: true,
+    })
+    await expect(readFile(
+      resolveAssistantAutoReplyRouteMigrationPath(paths),
+      'utf8',
+    )).rejects.toMatchObject({ code: 'ENOENT' })
+    await expect(readAssistantAutoReplyRouteState({
+      routeDigest: route.digest,
+      vault,
+    })).resolves.toEqual({
+      kind: 'blocked',
+      reason: 'migration-incomplete',
+    })
+  })
+
   it('imports one legacy running receipt as a pending claim and uses that exact receipt as its witness', async () => {
     const vault = await createTempVault('legacy-running')
     const route = emailRoute()
@@ -296,24 +371,29 @@ describe('assistant auto-reply exact route state', () => {
   })
 
   it.each([
-    { consumes: true, status: 'completed' },
-    { consumes: true, status: 'deferred' },
-    { consumes: false, status: 'failed' },
-    { consumes: false, status: 'blocked' },
+    { consumes: true, recordsClaim: true, status: 'completed' },
+    { consumes: true, recordsClaim: true, status: 'deferred' },
+    { consumes: false, recordsClaim: true, status: 'failed' },
+    { consumes: false, recordsClaim: true, status: 'blocked' },
+    { consumes: false, recordsClaim: false, status: 'completed' },
   ] satisfies readonly {
     consumes: boolean
+    recordsClaim: boolean
     status: 'blocked' | 'completed' | 'deferred' | 'failed'
-  }[])('$status receipt reconciliation consumes=$consumes', async ({
+  }[])('$status receipt reconciliation recordsClaim=$recordsClaim consumes=$consumes', async ({
     consumes,
+    recordsClaim,
     status,
   }: {
     consumes: boolean
+    recordsClaim: boolean
     status: 'blocked' | 'completed' | 'deferred' | 'failed'
   }) => {
     const vault = await createTempVault(`terminal-${status}`)
     const route = emailRoute()
     const deliveryOrder = order(`intent-${status}`, BASE_TIME)
     const receipt = await createRunningReceipt({
+      ...(recordsClaim ? { intentId: deliveryOrder.intentId } : {}),
       turnId: `turn-${status}`,
       vault,
     })
@@ -719,6 +799,7 @@ describe('assistant auto-reply exact route state', () => {
     const older = order('intent-older', '2026-08-13T19:59:00.000Z')
     const later = order('intent-later', LATER_TIME)
     const receipt = await createRunningReceipt({
+      intentId: first.intentId,
       turnId: 'turn-same-consumer',
       vault,
     })
@@ -745,6 +826,16 @@ describe('assistant auto-reply exact route state', () => {
       turnId: receipt.turnId,
       vault,
     })
+    await appendAssistantTurnReceiptEvent({
+      detail: null,
+      kind: 'turn.input.accepted',
+      metadata: {
+        [AUTO_REPLY_RECEIPT_CROSS_SESSION_CONTEXT_INTENT_ID_KEY]:
+          later.intentId,
+      },
+      turnId: receipt.turnId,
+      vault,
+    })
     await finalizeAssistantTurnReceipt({
       completedAt: '2026-08-13T20:02:00.000Z',
       status: 'completed',
@@ -758,6 +849,48 @@ describe('assistant auto-reply exact route state', () => {
     })).resolves.toEqual({
       kind: 'ready',
       settledThrough: later,
+    })
+  })
+
+  it('settles an accepted same-turn claim instead of a newer abandoned steer', async () => {
+    const vault = await createTempVault('same-turn-abandoned-steer')
+    const route = emailRoute()
+    const accepted = order('intent-accepted', BASE_TIME)
+    const abandoned = order('intent-abandoned', LATER_TIME)
+    const receipt = await createRunningReceipt({
+      intentId: accepted.intentId,
+      turnId: 'turn-abandoned-steer',
+      vault,
+    })
+    await completeMigration(vault)
+
+    await claimAssistantAutoReplyRouteContext({
+      anchored: false,
+      order: accepted,
+      routeDigest: route.digest,
+      turnId: receipt.turnId,
+      vault,
+    })
+    await claimAssistantAutoReplyRouteContext({
+      anchored: true,
+      order: abandoned,
+      routeDigest: route.digest,
+      turnId: receipt.turnId,
+      vault,
+    })
+    await finalizeAssistantTurnReceipt({
+      completedAt: '2026-08-13T20:02:00.000Z',
+      status: 'completed',
+      turnId: receipt.turnId,
+      vault,
+    })
+
+    await expect(readAssistantAutoReplyRouteState({
+      routeDigest: route.digest,
+      vault,
+    })).resolves.toEqual({
+      kind: 'ready',
+      settledThrough: accepted,
     })
   })
 
@@ -804,6 +937,7 @@ describe('assistant auto-reply exact route state', () => {
     })
     await completeMigration(vault)
     const running = await createRunningReceipt({
+      intentId: deliveryOrder.intentId,
       turnId: 'turn-residue',
       vault,
     })
@@ -1032,11 +1166,20 @@ function createReceipt(input: {
 }
 
 async function createRunningReceipt(input: {
+  intentId?: string
   turnId: string
   vault: string
 }): Promise<AssistantTurnReceipt> {
   return await createAssistantTurnReceipt({
     deliveryRequested: false,
+    ...(input.intentId
+      ? {
+          metadata: {
+            [AUTO_REPLY_RECEIPT_CROSS_SESSION_CONTEXT_INTENT_ID_KEY]:
+              input.intentId,
+          },
+        }
+      : {}),
     prompt: 'test prompt',
     provider: 'codex-cli',
     providerModel: null,
@@ -1092,6 +1235,7 @@ async function claimAndFinalize(input: {
   vault: string
 }): Promise<void> {
   await createRunningReceipt({
+    intentId: input.deliveryOrder.intentId,
     turnId: input.turnId,
     vault: input.vault,
   })
