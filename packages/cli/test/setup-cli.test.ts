@@ -106,7 +106,7 @@ test('setup wizard completion waits for Ink exit before resolving the selected f
   const completion = createSetupWizardCompletionController()
   const selected = {
     assistantPreset: 'codex' as const,
-    channels: ['email'] as const,
+    channels: ['telegram'] as const,
     scheduledUpdates: ['weekly-health-snapshot'] as const,
     wearables: [] as const,
   }
@@ -130,7 +130,7 @@ test('setup wizard completion waits for Ink exit before resolving the selected f
 
   assert.deepEqual(await pendingResult, {
     assistantPreset: 'codex',
-    channels: ['email'],
+    channels: ['telegram'],
     scheduledUpdates: ['weekly-health-snapshot'],
     wearables: [],
   })
@@ -726,27 +726,31 @@ function makeBootstrapResult(vault: string, options?: {
       ok: true,
       checks: options?.doctorChecks ?? [],
       connectors: [],
-      parserToolchain: options?.parserToolchainPath
-        ? {
-            configPath: '.runtime/operations/parsers/toolchain.json',
-            discoveredAt: '2026-03-13T12:05:00.000Z',
-            tools: {
-              ffmpeg: {
-                available: true,
-                command: '/usr/local/bin/ffmpeg',
-                reason: 'ffmpeg CLI available.',
-                source: 'config' as const,
-              },
-              whisper: {
-                available: true,
-                command: options.whisperCommand ?? options.parserToolchainPath,
-                modelPath: options.whisperModelPath ?? options.parserToolchainPath,
-                reason: 'whisper.cpp CLI and model path configured.',
-                source: 'config' as const,
-              },
-            },
-          }
-        : null,
+      parserToolchain: {
+        configPath: '.runtime/operations/parsers/toolchain.json',
+        discoveredAt: '2026-03-13T12:05:00.000Z',
+        tools: {
+          ffmpeg: {
+            available: true,
+            command: '/usr/local/bin/ffmpeg',
+            reason: 'ffmpeg CLI available.',
+            source: 'config' as const,
+          },
+          whisper: {
+            available: true,
+            command:
+              options?.whisperCommand ??
+              options?.parserToolchainPath ??
+              '/usr/local/bin/whisper-cli',
+            modelPath:
+              options?.whisperModelPath ??
+              options?.parserToolchainPath ??
+              '/tmp/model.bin',
+            reason: 'whisper.cpp CLI and model path configured.',
+            source: 'config' as const,
+          },
+        },
+      },
     },
   }
 }
@@ -1462,12 +1466,6 @@ test('runtime env helpers honor channel aliases and require explicit wearable cl
     [],
   )
   assert.deepEqual(
-    resolveSetupChannelMissingEnv('email', {
-      AGENTMAIL_API_KEY: 'agentmail-key',
-    }),
-    [],
-  )
-  assert.deepEqual(
     resolveSetupChannelMissingEnv('telegram', {}),
     ['TELEGRAM_BOT_TOKEN'],
   )
@@ -1525,14 +1523,13 @@ test('interactive onboarding prompts for missing channel and wearable credential
     wearables: string[]
   }> = []
   const receivedInputs: Array<{
-    allowChannelPrompts: boolean | undefined
     channels: string[] | null
     envOverrides: NodeJS.ProcessEnv | undefined
     scheduledUpdatePresetIds: string[] | null
     wearables: string[] | null
   }> = []
   const previousEnv = {
-    AGENTMAIL_API_KEY: process.env.AGENTMAIL_API_KEY,
+    TELEGRAM_BOT_TOKEN: process.env.TELEGRAM_BOT_TOKEN,
     OURA_CLIENT_ID: process.env.OURA_CLIENT_ID,
     OURA_CLIENT_SECRET: process.env.OURA_CLIENT_SECRET,
   }
@@ -1550,7 +1547,7 @@ test('interactive onboarding prompts for missing channel and wearable credential
           wearables: [...input.wearables],
         })
         return {
-          AGENTMAIL_API_KEY: 'agentmail-key',
+          TELEGRAM_BOT_TOKEN: 'bot-token',
           OURA_CLIENT_ID: 'oura-client',
           OURA_CLIENT_SECRET: 'oura-secret',
         }
@@ -1563,7 +1560,6 @@ test('interactive onboarding prompts for missing channel and wearable credential
     services: {
       async setupMacos(input: any) {
         receivedInputs.push({
-          allowChannelPrompts: input.allowChannelPrompts,
           channels: input.channels == null ? null : [...input.channels],
           envOverrides: input.envOverrides,
           scheduledUpdatePresetIds:
@@ -1579,7 +1575,7 @@ test('interactive onboarding prompts for missing channel and wearable credential
       async run() {
         return {
           assistantPreset: 'skip',
-          channels: ['email'],
+          channels: ['telegram'],
           scheduledUpdates: ['weekly-health-snapshot'],
           wearables: ['oura'],
         }
@@ -1596,7 +1592,7 @@ test('interactive onboarding prompts for missing channel and wearable credential
 
     assert.deepEqual(promptedInputs, [
       {
-        channels: ['email'],
+        channels: ['telegram'],
         env: {},
         helpText: [
           'Device OAuth callbacks can stay on localhost. Only optional webhooks need a public HTTPS URL.',
@@ -1628,10 +1624,9 @@ test('interactive onboarding prompts for missing channel and wearable credential
     ])
     assert.deepEqual(receivedInputs, [
       {
-        allowChannelPrompts: true,
-        channels: ['email'],
+        channels: ['telegram'],
         envOverrides: {
-          AGENTMAIL_API_KEY: 'agentmail-key',
+          TELEGRAM_BOT_TOKEN: 'bot-token',
           OURA_CLIENT_ID: 'oura-client',
           OURA_CLIENT_SECRET: 'oura-secret',
         },
@@ -1639,16 +1634,16 @@ test('interactive onboarding prompts for missing channel and wearable credential
         wearables: ['oura'],
       },
     ])
-    assert.equal(process.env.AGENTMAIL_API_KEY, 'agentmail-key')
+    assert.equal(process.env.TELEGRAM_BOT_TOKEN, 'bot-token')
     assert.equal(process.env.OURA_CLIENT_ID, 'oura-client')
     assert.equal(process.env.OURA_CLIENT_SECRET, 'oura-secret')
   } finally {
     await rm(vaultRoot, { recursive: true, force: true })
 
-    if (previousEnv.AGENTMAIL_API_KEY === undefined) {
-      delete process.env.AGENTMAIL_API_KEY
+    if (previousEnv.TELEGRAM_BOT_TOKEN === undefined) {
+      delete process.env.TELEGRAM_BOT_TOKEN
     } else {
-      process.env.AGENTMAIL_API_KEY = previousEnv.AGENTMAIL_API_KEY
+      process.env.TELEGRAM_BOT_TOKEN = previousEnv.TELEGRAM_BOT_TOKEN
     }
 
     if (previousEnv.OURA_CLIENT_ID === undefined) {
@@ -3741,7 +3736,7 @@ test.sequential('setup service dry-run on Linux reports supported channels clean
   const homeRoot = await mkdtemp(path.join(tmpdir(), 'murph-setup-linux-home-'))
   const services = createSetupServices({
     arch: () => 'x64',
-    env: () => ({ AGENTMAIL_API_KEY: 'agentmail-key', PATH: '' }),
+    env: () => ({ PATH: '', TELEGRAM_BOT_TOKEN: 'bot-token' }),
     getHomeDirectory: () => homeRoot,
     log() {},
     platform: () => 'linux',
@@ -3751,17 +3746,17 @@ test.sequential('setup service dry-run on Linux reports supported channels clean
   try {
     const result = await services.setupHost({
       vault: './vault',
-      channels: ['email'],
+      channels: ['telegram'],
       dryRun: true,
     })
 
     assert.equal(result.platform, 'linux')
     assert.equal(result.dryRun, true)
-    assert.equal(result.channels[0]?.channel, 'email')
+    assert.equal(result.channels[0]?.channel, 'telegram')
     assert.equal(result.channels[0]?.configured, false)
-    assert.match(result.channels[0]?.detail ?? '', /enable assistant auto-reply for direct email threads/u)
+    assert.match(result.channels[0]?.detail ?? '', /enable assistant auto-reply for Telegram direct chats/u)
     assert.equal(result.channels[0]?.autoReply, true)
-    assert.ok(result.steps.some((step) => step.id === 'channel-email' && step.status === 'planned'))
+    assert.ok(result.steps.some((step) => step.id === 'channel-telegram' && step.status === 'planned'))
   } finally {
     await rm(homeRoot, { recursive: true, force: true })
   }
@@ -3913,8 +3908,8 @@ test.sequential('Linux setup reuses one apt update across declarative tool insta
   }
 })
 
-test.sequential('Linux setup reuses existing email state while adding Telegram on the same vault', async () => {
-  const tempRoot = await mkdtemp(path.join(tmpdir(), 'murph-setup-linux-preserve-email-'))
+test.sequential('Linux setup preserves existing Linq state while adding Telegram on the same vault', async () => {
+  const tempRoot = await mkdtemp(path.join(tmpdir(), 'murph-setup-linux-preserve-linq-'))
   const homeRoot = path.join(tempRoot, 'home')
   const vaultRoot = path.join(tempRoot, 'vault')
   const binRoot = path.join(tempRoot, 'bin')
@@ -3925,11 +3920,13 @@ test.sequential('Linux setup reuses existing email state while adding Telegram o
     {
       accountId: 'default',
       enabled: true,
-      id: 'email:agentmail',
+      id: 'linq:default',
       options: {
-        emailAddress: 'team@example.com',
+        linqWebhookHost: '127.0.0.1',
+        linqWebhookPath: '/hooks/linq',
+        linqWebhookPort: 9911,
       },
-      source: 'email' as const,
+      source: 'linq' as const,
     },
   ]
   const sourceAddCalls: Array<{
@@ -3954,7 +3951,7 @@ test.sequential('Linux setup reuses existing email state while adding Telegram o
     version: 1,
     autoReply: [
       {
-        channel: 'email',
+        channel: 'linq',
         enabledAt: '2026-03-24T23:00:00.000Z',
         eligibleAfter: null,
       },
@@ -3969,7 +3966,6 @@ test.sequential('Linux setup reuses existing email state while adding Telegram o
       await writeFile(destinationPath, 'model', 'utf8')
     },
     env: () => ({
-      AGENTMAIL_API_KEY: 'agentmail-key',
       PATH: binRoot,
       TELEGRAM_BOT_TOKEN: 'token-123',
     }),
@@ -3981,25 +3977,6 @@ test.sequential('Linux setup reuses existing email state while adding Telegram o
         })
       },
       async doctor(input: InboxDoctorInput) {
-        if (input.sourceId === 'email:agentmail') {
-          return {
-            vault: input.vault,
-            configPath: '.runtime/inboxd/config.json',
-            databasePath: '.runtime/inboxd.sqlite',
-            target: input.sourceId ?? null,
-            ok: true,
-            checks: [
-              {
-                name: 'probe',
-                status: 'warn' as const,
-                message: 'Email inbox reachable',
-              },
-            ],
-            connectors: [],
-            parserToolchain: null,
-          }
-        }
-
         return {
           vault: input.vault,
           configPath: '.runtime/inboxd/config.json',
@@ -4096,19 +4073,16 @@ test.sequential('Linux setup reuses existing email state while adding Telegram o
 
   try {
     const result = await services.setupHost({
-      channels: ['telegram', 'email'],
+      channels: ['telegram'],
       vault: vaultRoot,
       whisperModel: 'base.en',
     })
 
     assert.equal(result.platform, 'linux')
-    assert.equal(result.channels.length, 2)
+    assert.equal(result.channels.length, 1)
     assert.equal(result.channels[0]?.channel, 'telegram')
     assert.equal(result.channels[0]?.configured, true)
     assert.equal(result.channels[0]?.autoReply, true)
-    assert.equal(result.channels[1]?.channel, 'email')
-    assert.equal(result.channels[1]?.configured, true)
-    assert.equal(result.channels[1]?.autoReply, true)
     assert.deepEqual(sourceAddCalls, [
       {
         account: 'bot',
@@ -4119,10 +4093,10 @@ test.sequential('Linux setup reuses existing email state while adding Telegram o
       },
     ])
     assert.deepEqual(sourceSetEnabledCalls, [])
-    assert.equal(connectors.find((connector) => connector.id === 'email:agentmail')?.enabled, true)
+    assert.equal(connectors.find((connector) => connector.id === 'linq:default')?.enabled, true)
 
     const automationState = await readAssistantAutomationState(vaultRoot)
-    assert.deepEqual(listAutoReplyChannels(automationState), ['email', 'telegram'])
+    assert.deepEqual(listAutoReplyChannels(automationState), ['linq', 'telegram'])
   } finally {
     await rm(tempRoot, { recursive: true, force: true })
   }

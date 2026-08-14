@@ -481,6 +481,7 @@ export async function applyAssistantSelfDeliveryTargetDefaults(
   input: AssistantSelfDeliveryTargetLookupInput,
   options?: {
     allowSingleSavedTargetFallback?: boolean
+    includeEmailInSingleSavedTargetFallback?: boolean
   },
   homeDirectory = resolveOperatorHomeDirectory(),
 ): Promise<AssistantSelfDeliveryTargetLookupInput> {

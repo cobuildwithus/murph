@@ -2,8 +2,9 @@ import assert from 'node:assert/strict'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
-import { test } from 'vitest'
+import { test, vi } from 'vitest'
 import type { AssistantInputCursor } from '@murphai/operator-config/assistant-cli-contracts'
+import type { InboxServices } from '@murphai/inbox-services'
 import {
   hasAssistantAutoReplyChannel,
   normalizeAssistantAutoReplyChannels,
@@ -14,6 +15,7 @@ import {
   enableAssistantAutoReplyChannelLocal,
   managedAssistantAutoReplyChannelsNeedCursorSeed as managedChannelsNeedCursorSeed,
   readLatestAssistantInputSourceCursor,
+  removeRetiredLocalEmailAutoReplyChannel,
   reconcileManagedAssistantAutoReplyChannels as reconcileManagedChannels,
   reconcileManagedAssistantAutoReplyChannelsLocal,
 } from '../src/assistant/auto-reply-channels.js'
@@ -22,6 +24,8 @@ import {
   upsertAssistantInputEvent,
 } from '../src/assistant/input-store.js'
 import type { AssistantInputSource } from '../src/assistant/input-source.js'
+import { createStoreBackedAssistantInputSource } from '../src/assistant/input-source.js'
+import { runAssistantAutomationPass } from '../src/assistant/automation/run-loop.js'
 import {
   readAssistantAutomationState,
   saveAssistantAutomationState,
@@ -438,6 +442,87 @@ test('reconcileManagedAssistantAutoReplyChannelsLocal uses an explicit latest cu
         eligibleAfter: explicitCursor,
       },
     ])
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true })
+  }
+})
+
+test('removeRetiredLocalEmailAutoReplyChannel deletes only legacy email state and is idempotent', async () => {
+  const vaultRoot = await mkdtemp(
+    path.join(tmpdir(), 'murph-assistant-auto-reply-retired-email-'),
+  )
+
+  try {
+    await saveAssistantAutomationState(vaultRoot, {
+      version: 1,
+      autoReply: [
+        autoReplyState('email', null),
+        autoReplyState('telegram', null),
+        autoReplyState('linq', null),
+        autoReplyState('custom', null),
+      ],
+      updatedAt: '2026-04-10T00:00:00.000Z',
+    })
+
+    const first = await removeRetiredLocalEmailAutoReplyChannel({
+      vault: vaultRoot,
+    })
+    const second = await removeRetiredLocalEmailAutoReplyChannel({
+      vault: vaultRoot,
+    })
+
+    assert.equal(first.changed, true)
+    assert.deepEqual(first.state.autoReply.map((entry) => entry.channel), [
+      'custom',
+      'linq',
+      'telegram',
+    ])
+    assert.equal(second.changed, false)
+    assert.deepEqual(
+      (await readAssistantAutomationState(vaultRoot)).autoReply,
+      first.state.autoReply,
+    )
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true })
+  }
+})
+
+test('a direct local automation pass removes legacy email auto-reply before scanning pending input', async () => {
+  const vaultRoot = await mkdtemp(
+    path.join(tmpdir(), 'murph-assistant-auto-reply-retired-email-pass-'),
+  )
+
+  try {
+    await saveAssistantAutomationState(vaultRoot, {
+      version: 1,
+      autoReply: [autoReplyState('email', null)],
+      updatedAt: '2026-04-10T00:00:00.000Z',
+    })
+    await stageHostedAssistantInput({
+      createdAt: '2026-04-10T05:00:01.000Z',
+      eventId: 'event_retired_email_pending',
+      laneSeq: '5',
+      occurredAt: '2026-04-10T05:00:00.000Z',
+      source: 'email',
+      vault: vaultRoot,
+    })
+    const onProviderRequestStarted = vi.fn()
+
+    const result = await runAssistantAutomationPass({
+      drainOutbox: false,
+      inboxServices: {} as InboxServices,
+      inputSource: createStoreBackedAssistantInputSource({ vault: vaultRoot }),
+      onProviderRequestStarted,
+      shouldYieldBackgroundMaintenance: () => true,
+      vault: vaultRoot,
+    })
+
+    assert.equal(result.replies.considered, 0)
+    assert.equal(onProviderRequestStarted.mock.calls.length, 0)
+    assert.deepEqual(
+      (await readAssistantAutomationState(vaultRoot)).autoReply,
+      [],
+    )
   } finally {
     await rm(vaultRoot, { recursive: true, force: true })
   }

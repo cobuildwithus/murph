@@ -471,6 +471,12 @@ describe('assistant cron runtime threshold coverage', () => {
       threadId: 'thread-1',
     })
     expect(job.target.deliveryTarget).toBeNull()
+    expect(cronMocks.applyAssistantSelfDeliveryTargetDefaults).toHaveBeenCalledWith(
+      expect.any(Object),
+      {
+        allowSingleSavedTargetFallback: true,
+      },
+    )
   })
 
   it('preserves the existing next run when a disabled recurring job succeeds manually', async () => {

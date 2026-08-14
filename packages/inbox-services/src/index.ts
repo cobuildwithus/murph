@@ -2,9 +2,9 @@
  * Neutral inbox service surface shared by the CLI shell and headless assistant consumers.
  */
 export { createIntegratedInboxServices } from './inbox-app/service.js'
+export { assertBootstrapStrictReady } from './inbox-services/parser.js'
 
 export type {
-  AgentmailApiClient,
   CanonicalAttachmentPromotionResult,
   CanonicalPromotionLookupSpec,
   CanonicalPromotionLookupTarget,
@@ -12,7 +12,6 @@ export type {
   CanonicalPromotionMatch,
   ConfiguredParserRegistryRuntime,
   CoreRuntimeModule,
-  EmailDriver,
   InboxConnectorConfig,
   InboxServices,
   InboxSourceSetEnabledResult,

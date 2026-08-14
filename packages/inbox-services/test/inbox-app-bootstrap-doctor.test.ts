@@ -3,7 +3,6 @@ import assert from 'node:assert/strict'
 import { beforeEach, test, vi } from 'vitest'
 
 const {
-  assertBootstrapStrictReadyMock,
   ensureConfigFileMock,
   ensureDirectoryMock,
   fileExistsMock,
@@ -14,7 +13,6 @@ const {
   toCliParserToolchainMock,
   toParserToolChecksMock,
 } = vi.hoisted(() => ({
-  assertBootstrapStrictReadyMock: vi.fn(),
   ensureConfigFileMock: vi.fn(),
   ensureDirectoryMock: vi.fn(),
   fileExistsMock: vi.fn(),
@@ -34,12 +32,16 @@ vi.mock('../src/inbox-services/state.ts', () => ({
   ensureConfigFile: ensureConfigFileMock,
   ensureDirectory: ensureDirectoryMock,
   findConnector: findConnectorMock,
-  readConfig: readConfigMock,
+  async readConfigWithReconciliation(...args: unknown[]) {
+    return {
+      config: await readConfigMock(...args),
+      removedLegacyEmailConnectorCount: 0,
+    }
+  },
   rebuildRuntime: rebuildRuntimeMock,
 }))
 
 vi.mock('../src/inbox-services/parser.ts', () => ({
-  assertBootstrapStrictReady: assertBootstrapStrictReadyMock,
   toCliParserToolchain: toCliParserToolchainMock,
   toParserToolChecks: toParserToolChecksMock,
 }))
@@ -58,7 +60,7 @@ import {
   warnCheck,
 } from '../src/inbox-services/shared.ts'
 import { createInboxBootstrapDoctorOps } from '../src/inbox-app/bootstrap-doctor.ts'
-import { DOCTOR_STRATEGIES } from '../src/inbox-app/bootstrap-doctor-strategies.ts'
+import { runTelegramDoctorChecks } from '../src/inbox-app/bootstrap-doctor-strategies.ts'
 import type {
   DoctorContext,
   InboxAppEnvironment,
@@ -229,13 +231,7 @@ function createInboxRuntimeModule(
     createTelegramPollConnector() {
       throw new Error('not used in bootstrap tests')
     },
-    createEmailPollConnector() {
-      throw new Error('not used in bootstrap tests')
-    },
     createTelegramBotApiPollDriver() {
-      throw new Error('not used in bootstrap tests')
-    },
-    createAgentmailApiPollDriver() {
       throw new Error('not used in bootstrap tests')
     },
     async rebuildRuntimeFromVault() {},
@@ -306,9 +302,6 @@ function createEnvironment(
 ): InboxAppEnvironment {
   return {
     clock: () => new Date('2026-04-08T00:00:00.000Z'),
-    createConfiguredAgentmailClient() {
-      throw new Error('not used in bootstrap tests')
-    },
     enableAssistantAutoReplyChannel: unusedAsync,
     getEnvironment: () => ({}),
     getHomeDirectory: () => '/tmp',
@@ -316,18 +309,14 @@ function createEnvironment(
     getPlatform: () => 'linux',
     journalPromotionEnabled: false,
     killProcess() {},
-    loadConfiguredEmailDriver: unusedAsync,
     loadConfiguredTelegramDriver: unusedAsync,
     loadCore: unusedAsync,
     loadImporters: unusedAsync,
     loadInbox: async () => createInboxRuntimeModule(),
     loadParsers: async () => createParsersModule(),
     loadQuery: unusedAsync,
-    provisionOrRecoverAgentmailInbox: unusedAsync,
     requireParsers: async () => createParsersModule(),
     sleep: async () => undefined,
-    tryResolveAgentmailInboxAddress: unusedAsync,
-    usesInjectedEmailDriver: false,
     usesInjectedTelegramDriver: false,
     ...overrides,
   }
@@ -391,6 +380,10 @@ beforeEach(() => {
   ensureConfigFileMock.mockImplementation(
     async (_paths: ReturnType<typeof createPaths>, createdPaths: string[]) => {
       createdPaths.push('.runtime/operations/inbox/config.json')
+      return {
+        config: { connectors: [] },
+        removedLegacyEmailConnectorCount: 0,
+      }
     },
   )
   readConfigMock.mockResolvedValue({ connectors: [] })
@@ -408,7 +401,6 @@ beforeEach(() => {
         ? false
         : false,
   )
-  assertBootstrapStrictReadyMock.mockImplementation(() => undefined)
   toCliParserToolchainMock.mockImplementation(() => createParserToolchain())
   toParserToolChecksMock.mockImplementation(() => [
     passCheck('parser-ffmpeg', 'ffmpeg configured'),
@@ -416,7 +408,7 @@ beforeEach(() => {
   ])
 })
 
-test('bootstrap initializes runtime, writes parser config, and optionally enforces strict readiness', async () => {
+test('bootstrap initializes runtime, writes parser config, and returns doctor readiness', async () => {
   readConfigMock.mockResolvedValue({
     connectors: [createConnector('telegram', 'telegram:bot')],
   })
@@ -484,7 +476,6 @@ test('bootstrap initializes runtime, writes parser config, and optionally enforc
     vault: '/vault',
     whisperModelPath: '/models/base.bin',
   })
-  assert.equal(assertBootstrapStrictReadyMock.mock.calls.length, 0)
   assert.deepEqual(nonStrict.init.createdPaths, [
     '.runtime',
     '.runtime/operations/inbox',
@@ -521,30 +512,18 @@ test('bootstrap initializes runtime, writes parser config, and optionally enforc
   assert.equal(nonStrict.doctor.ok, true)
   assert.equal(nonStrict.doctor.target, null)
 
-  const strict = await ops.bootstrap({
+  const repeated = await ops.bootstrap({
     requestId: null,
-    strict: true,
     vault: '/vault',
   })
-  assert.equal(assertBootstrapStrictReadyMock.mock.calls.length, 1)
-  assert.equal(assertBootstrapStrictReadyMock.mock.calls[0]?.[0]?.ok, strict.doctor.ok)
-  assert.deepEqual(
-    assertBootstrapStrictReadyMock.mock.calls[0]?.[0]?.checks,
-    strict.doctor.checks,
-  )
+  assert.equal(repeated.doctor.ok, true)
   assert.equal(openInboxRuntime.mock.calls.length > 0, true)
   assert.equal(discoverParserToolchain.mock.calls.length > 0, true)
 })
 
-test('bootstrap reports unhealthy configured connectors in doctor output and strict mode rejects them', async () => {
+test('bootstrap reports unhealthy configured connectors in doctor output', async () => {
   readConfigMock.mockResolvedValue({
     connectors: [createConnector('telegram', 'telegram:bot')],
-  })
-
-  assertBootstrapStrictReadyMock.mockImplementation((result: { ok: boolean }) => {
-    if (!result.ok) {
-      throw new Error('strict bootstrap failed')
-    }
   })
 
   const ops = createInboxBootstrapDoctorOps(createEnvironment())
@@ -560,18 +539,6 @@ test('bootstrap reports unhealthy configured connectors in doctor output and str
     ),
     true,
   )
-
-  await assert.rejects(
-    () =>
-      ops.bootstrap({
-        requestId: null,
-        strict: true,
-        vault: '/vault',
-      }),
-    /strict bootstrap failed/u,
-  )
-  assert.equal(assertBootstrapStrictReadyMock.mock.calls.length, 1)
-  assert.equal(assertBootstrapStrictReadyMock.mock.calls[0]?.[0]?.ok, false)
 })
 
 test('doctor stops after a vault failure and keeps missing config and database paths null', async () => {
@@ -666,7 +633,7 @@ test('doctor warns when no connectors are configured and fails when a requested 
   )
 
   readConfigMock.mockResolvedValue({
-    connectors: [createConnector('email', 'email:primary')],
+    connectors: [createConnector('telegram', 'telegram:primary')],
   })
 
   const missingConnector = await ops.doctor({
@@ -749,13 +716,10 @@ test('doctor rebuilds runtime and runs the telegram strategy for a configured co
   )
 })
 
-test('doctor runs rebuild once and executes supported connector strategies in all-connectors mode', async () => {
+test('doctor runs the supported strategy and reports removed local sources in all-connectors mode', async () => {
   readConfigMock.mockResolvedValue({
     connectors: [
       createConnector('telegram', 'telegram:bot'),
-      createConnector('email', 'email:primary', {
-        accountId: 'mailbox-1',
-      }),
       createConnector('linq', 'linq:primary'),
     ],
   })
@@ -782,24 +746,12 @@ test('doctor runs rebuild once and executes supported connector strategies in al
       return undefined
     },
   }))
-  const loadConfiguredEmailDriver = vi.fn(async () => ({
-    inboxId: 'mailbox-1',
-    async downloadAttachment() {
-      return null
-    },
-    async listUnreadMessages() {
-      return [{ id: 'message-1' }]
-    },
-    async markProcessed() {},
-  }))
 
   const ops = createInboxBootstrapDoctorOps(
     createEnvironment({
       getEnvironment: () => ({
-        AGENTMAIL_API_KEY: 'agentmail-key',
         TELEGRAM_BOT_TOKEN: 'telegram-token',
       }),
-      loadConfiguredEmailDriver,
       loadConfiguredTelegramDriver,
     }),
   )
@@ -813,29 +765,23 @@ test('doctor runs rebuild once and executes supported connector strategies in al
   assert.equal(result.ok, false)
   assert.equal(rebuildRuntimeMock.mock.calls.length, 1)
   assert.equal(loadConfiguredTelegramDriver.mock.calls.length, 1)
-  assert.equal(loadConfiguredEmailDriver.mock.calls.length, 1)
   assert.equal(findCheck(result, 'connectors')?.status, 'pass')
   assert.equal(findCheck(result, 'unsupported-connectors')?.status, 'fail')
   assert.equal(
     result.checks.filter((check) => check.name === 'connector').length,
-    2,
+    1,
   )
   assert.equal(
     result.checks.filter(
       (check) => check.name === 'probe' && check.status === 'pass',
     ).length,
-    2,
+    1,
   )
 })
 
-test('doctor continues all-connectors strategy checks when rebuild fails', async () => {
+test('doctor continues the Telegram strategy when rebuild fails', async () => {
   readConfigMock.mockResolvedValue({
-    connectors: [
-      createConnector('telegram', 'telegram:bot'),
-      createConnector('email', 'email:primary', {
-        accountId: 'mailbox-1',
-      }),
-    ],
+    connectors: [createConnector('telegram', 'telegram:bot')],
   })
   rebuildRuntimeMock.mockRejectedValue(new Error('rebuild failed'))
 
@@ -860,24 +806,12 @@ test('doctor continues all-connectors strategy checks when rebuild fails', async
       return undefined
     },
   }))
-  const loadConfiguredEmailDriver = vi.fn(async () => ({
-    inboxId: 'mailbox-1',
-    async downloadAttachment() {
-      return null
-    },
-    async listUnreadMessages() {
-      return [{ id: 'message-1' }]
-    },
-    async markProcessed() {},
-  }))
 
   const ops = createInboxBootstrapDoctorOps(
     createEnvironment({
       getEnvironment: () => ({
-        AGENTMAIL_API_KEY: 'agentmail-key',
         TELEGRAM_BOT_TOKEN: 'telegram-token',
       }),
-      loadConfiguredEmailDriver,
       loadConfiguredTelegramDriver,
     }),
   )
@@ -890,12 +824,11 @@ test('doctor continues all-connectors strategy checks when rebuild fails', async
   assert.equal(result.ok, false)
   assert.equal(findCheck(result, 'rebuild')?.status, 'fail')
   assert.equal(loadConfiguredTelegramDriver.mock.calls.length, 1)
-  assert.equal(loadConfiguredEmailDriver.mock.calls.length, 1)
   assert.equal(
     result.checks.filter(
       (check) => check.name === 'probe' && check.status === 'pass',
     ).length,
-    2,
+    1,
   )
 })
 
@@ -905,7 +838,7 @@ test('telegram strategy covers missing token, delegated drivers, webhook passes,
   const missingTokenContext = createDoctorContext({
     sourceId: telegramConnector.id,
   })
-  await DOCTOR_STRATEGIES.telegram(missingTokenContext, telegramConnector, {
+  await runTelegramDoctorChecks(missingTokenContext, telegramConnector, {
     env: createEnvironment(),
     runDoctorCheck,
   })
@@ -916,7 +849,7 @@ test('telegram strategy covers missing token, delegated drivers, webhook passes,
   const delegatedContext = createDoctorContext({
     sourceId: telegramConnector.id,
   })
-  await DOCTOR_STRATEGIES.telegram(delegatedContext, telegramConnector, {
+  await runTelegramDoctorChecks(delegatedContext, telegramConnector, {
     env: createEnvironment({
       loadConfiguredTelegramDriver: async () => ({
         async deleteWebhook() {},
@@ -947,7 +880,7 @@ test('telegram strategy covers missing token, delegated drivers, webhook passes,
   const webhookPassContext = createDoctorContext({
     sourceId: telegramConnector.id,
   })
-  await DOCTOR_STRATEGIES.telegram(webhookPassContext, telegramConnector, {
+  await runTelegramDoctorChecks(webhookPassContext, telegramConnector, {
     env: createEnvironment({
       getEnvironment: () => ({
         TELEGRAM_BOT_TOKEN: 'telegram-token',
@@ -981,7 +914,7 @@ test('telegram strategy covers missing token, delegated drivers, webhook passes,
   const webhookWarnContext = createDoctorContext({
     sourceId: telegramConnector.id,
   })
-  await DOCTOR_STRATEGIES.telegram(webhookWarnContext, telegramConnector, {
+  await runTelegramDoctorChecks(webhookWarnContext, telegramConnector, {
     env: createEnvironment({
       getEnvironment: () => ({
         TELEGRAM_BOT_TOKEN: 'telegram-token',
@@ -1015,7 +948,7 @@ test('telegram strategy covers missing token, delegated drivers, webhook passes,
   const probeFailureContext = createDoctorContext({
     sourceId: telegramConnector.id,
   })
-  await DOCTOR_STRATEGIES.telegram(probeFailureContext, telegramConnector, {
+  await runTelegramDoctorChecks(probeFailureContext, telegramConnector, {
     env: createEnvironment({
       getEnvironment: () => ({
         TELEGRAM_BOT_TOKEN: 'telegram-token',
@@ -1045,84 +978,6 @@ test('telegram strategy covers missing token, delegated drivers, webhook passes,
     runDoctorCheck,
   })
   assert.equal(findCheck(probeFailureContext, 'probe')?.status, 'fail')
-})
-
-test('email strategy covers missing configuration, delegated drivers, and unread probe results', async () => {
-  const missingEmailContext = createDoctorContext({
-    sourceId: 'email:missing',
-  })
-  await DOCTOR_STRATEGIES.email(
-    missingEmailContext,
-    createConnector('email', 'email:missing'),
-    {
-      env: createEnvironment(),
-      runDoctorCheck,
-    },
-  )
-  assert.equal(findCheck(missingEmailContext, 'account')?.status, 'fail')
-  assert.equal(findCheck(missingEmailContext, 'token')?.status, 'fail')
-  assert.equal(findCheck(missingEmailContext, 'driver-import'), null)
-
-  const delegatedEmailContext = createDoctorContext({
-    sourceId: 'email:delegated',
-  })
-  await DOCTOR_STRATEGIES.email(
-    delegatedEmailContext,
-    createConnector('email', 'email:delegated', {
-      accountId: 'mailbox-1',
-      options: {
-        emailAddress: 'reader@example.com',
-      },
-    }),
-    {
-      env: createEnvironment({
-        loadConfiguredEmailDriver: async () => ({
-          inboxId: 'mailbox-1',
-          async downloadAttachment() {
-            return null
-          },
-          async listUnreadMessages() {
-            return []
-          },
-          async markProcessed() {},
-        }),
-        usesInjectedEmailDriver: true,
-      }),
-      runDoctorCheck,
-    },
-  )
-  assert.equal(findCheck(delegatedEmailContext, 'account')?.status, 'pass')
-  assert.equal(findCheck(delegatedEmailContext, 'token')?.status, 'pass')
-  assert.equal(findCheck(delegatedEmailContext, 'probe')?.status, 'warn')
-
-  const successEmailContext = createDoctorContext({
-    sourceId: 'email:primary',
-  })
-  await DOCTOR_STRATEGIES.email(
-    successEmailContext,
-    createConnector('email', 'email:primary', {
-      accountId: 'mailbox-2',
-    }),
-    {
-      env: createEnvironment({
-        getEnvironment: () => ({
-          AGENTMAIL_API_KEY: 'agentmail-key',
-        }),
-        loadConfiguredEmailDriver: async () => ({
-          inboxId: 'mailbox-2',
-          async downloadAttachment() {
-            return null
-          },
-          async listUnreadMessages() {
-            return [{ id: 'message-1' }]
-          },
-          async markProcessed() {},
-        }),
-      }),
-      runDoctorCheck,
-    },
-  )
-  assert.equal(findCheck(successEmailContext, 'probe')?.status, 'pass')
 })
 
 test('doctor reports unsupported local sources without invoking a strategy', async () => {

@@ -635,7 +635,34 @@ test.sequential(
     assert.equal(shown.target?.channel, 'telegram')
     assert.equal(shown.target?.participantId, 'saved-chat')
 
+    await saveAssistantSelfDeliveryTarget(
+      {
+        channel: 'email',
+        deliverySource: null,
+        deliveryTarget: 'retired@example.test',
+        identityId: null,
+        participantId: null,
+        threadId: null,
+      },
+      homeRoot,
+    )
+    const retiredEmailShow = await runCli(
+      ['assistant', 'self-target', 'show', 'email'],
+      { env },
+    )
+    assert.equal(retiredEmailShow.ok, false)
+
+    const clearedRetiredEmail = requireData(
+      await runCli<{
+        clearedChannels: string[]
+      }>(['assistant', 'self-target', 'clear', 'email'], {
+        env,
+      }),
+    )
+    assert.deepEqual(clearedRetiredEmail.clearedChannels, ['email'])
+
     const config = await readOperatorConfig(homeRoot)
+    assert.equal(config?.assistant?.selfDeliveryTargets?.email, undefined)
     assert.equal(config?.assistant?.selfDeliveryTargets?.telegram?.threadId, 'saved-chat')
     assert.equal(resolveOperatorConfigPath(homeRoot).endsWith(path.join('.murph', 'config.json')), true)
 
@@ -663,11 +690,13 @@ test.sequential(
 )
 
 test.sequential(
-  'assistant self-target commands reject unsupported channels and invalid email recipients',
+  'assistant delivery commands reject removed local email channels',
   async () => {
     const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-self-target-guard-'))
     const homeRoot = path.join(parent, 'home')
+    const vaultRoot = path.join(parent, 'vault')
     await mkdir(homeRoot, { recursive: true })
+    await initializeVault({ vaultRoot })
     cleanupPaths.push(parent)
 
     const env = {
@@ -687,7 +716,7 @@ test.sequential(
     assert.equal(unsupportedChannel.ok, false)
     if (!unsupportedChannel.ok) {
       assert.match(unsupportedChannel.error.message ?? '', /telegram/u)
-      assert.match(unsupportedChannel.error.message ?? '', /email/u)
+      assert.doesNotMatch(unsupportedChannel.error.message ?? '', /email/u)
     }
 
     const invalidEmail = await runCli([
@@ -704,7 +733,11 @@ test.sequential(
     })
     assert.equal(invalidEmail.ok, false)
     if (!invalidEmail.ok) {
-      assert.match(invalidEmail.error.message ?? '', /single recipient email address/u)
+      assert.match(invalidEmail.error.message ?? '', /telegram/u)
+      assert.doesNotMatch(
+        invalidEmail.error.message ?? '',
+        /single recipient email address/u,
+      )
     }
 
     const invalidDirectEmail = await runCli([
@@ -724,9 +757,39 @@ test.sequential(
     })
     assert.equal(invalidDirectEmail.ok, false)
     if (!invalidDirectEmail.ok) {
-      assert.match(
+      assert.match(invalidDirectEmail.error.message ?? '', /telegram/u)
+      assert.doesNotMatch(
         invalidDirectEmail.error.message ?? '',
         /single recipient email address/u,
+      )
+    }
+
+    await saveAssistantSelfDeliveryTarget(
+      {
+        channel: 'email',
+        deliverySource: null,
+        deliveryTarget: 'retired@example.test',
+        identityId: null,
+        participantId: null,
+        threadId: null,
+      },
+      homeRoot,
+    )
+    const implicitLegacyEmail = await runCli([
+      'assistant',
+      'deliver',
+      'hello',
+      '--vault',
+      vaultRoot,
+    ], {
+      env,
+    })
+    assert.equal(implicitLegacyEmail.ok, false)
+    if (!implicitLegacyEmail.ok) {
+      assert.doesNotMatch(implicitLegacyEmail.error.message ?? '', /email/u)
+      assert.doesNotMatch(
+        implicitLegacyEmail.error.message ?? '',
+        /retired@example\.test/u,
       )
     }
   },

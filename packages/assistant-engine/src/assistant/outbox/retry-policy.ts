@@ -334,8 +334,7 @@ function assistantOutboxErrorCodeIsInternal(code: string): boolean {
   return code.startsWith('ASSISTANT_') ||
     code.startsWith('HOSTED_') ||
     code.startsWith('LINQ_') ||
-    code.startsWith('TELEGRAM_') ||
-    code.startsWith('AGENTMAIL_')
+    code.startsWith('TELEGRAM_')
 }
 
 function assistantOutboxErrorMessageLooksRetryable(message: string): boolean {

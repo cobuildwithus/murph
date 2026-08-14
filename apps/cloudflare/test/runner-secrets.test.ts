@@ -47,13 +47,19 @@ describe("hosted runner secrets payload decoding", () => {
 
   it("rejects removed or disallowed keys even if they are present in stored payloads", () => {
     expect(() => decodeHostedRunnerSecretsPayload(encodeRunnerSecretsPayload({
+      AGENTMAIL_API_KEY: "retired-provider-secret",
+    }), {
+      HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS: "AGENTMAIL_API_KEY",
+    })).toThrow(/not allowed/u);
+
+    expect(() => decodeHostedRunnerSecretsPayload(encodeRunnerSecretsPayload({
       OPENAI_API_KEY: "openai-user-secret",
     }), {
       HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS: "OPENAI_API_KEY",
     })).toThrow(/not allowed/u);
 
     expect(() => decodeHostedRunnerSecretsPayload(encodeRunnerSecretsPayload({
-      AGENTMAIL_API_KEY: "agentmail-secret",
+      UNLISTED_PROVIDER_API_KEY: "provider-secret",
     }))).toThrow(/not allowed/u);
 
     expect(() => decodeHostedRunnerSecretsPayload(encodeRunnerSecretsPayload({

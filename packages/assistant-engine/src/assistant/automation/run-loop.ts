@@ -76,6 +76,7 @@ import {
   stampAssistantProviderStartCriticalPath,
   type AssistantProviderStartCriticalPathContext,
 } from '../provider-start-critical-path.js'
+import { removeRetiredLocalEmailAutoReplyChannel } from '../auto-reply-channels.js'
 
 type AssistantAutomationLoopStateSnapshot = Pick<
   AssistantAutomationState,
@@ -928,6 +929,19 @@ export async function runAssistantAutomationPass(
     }
   }
   let state = await readAssistantAutomationState(input.vault)
+  if (
+    executionContext.hosted === null &&
+    state.autoReply.some((entry) => entry.channel === 'email')
+  ) {
+    state = applyCanonicalWrites
+      ? (
+          await removeRetiredLocalEmailAutoReplyChannel({ vault: input.vault })
+        ).state
+      : {
+          ...state,
+          autoReply: state.autoReply.filter((entry) => entry.channel !== 'email'),
+        }
+  }
   const providerStartCriticalPath = stampAssistantProviderStartCriticalPath(
     input.providerStartCriticalPath,
     'automationPassSetupDoneAtMonotonicMs',
