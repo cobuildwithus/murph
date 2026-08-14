@@ -189,8 +189,8 @@ function classifyHostedRuntimeFetchCause(
   error: unknown,
   signalState: HostedRuntimeControlPlaneFetchSignalState,
 ): HostedRuntimeControlPlaneFetchCauseKind {
-  const causeChain = readHostedRuntimeFetchCauseChain(error);
   const message = readHostedRuntimeFetchCauseMessage(error).toLowerCase();
+  const causeName = error instanceof Error ? error.name : "";
 
   if (message === "the rpc call destroy() was called") {
     return "cloudflare_rpc_destroy";
@@ -198,34 +198,25 @@ function classifyHostedRuntimeFetchCause(
 
   if (
     signalState.timeoutSignalAborted
-    || causeChain.some((cause) => {
-      const causeMessage = readHostedRuntimeFetchCauseMessage(cause).toLowerCase();
-      return (cause instanceof Error && cause.name === "TimeoutError")
-        || causeMessage.includes("timed out")
-        || causeMessage.includes("timeout");
-    })
+    || causeName === "TimeoutError"
+    || message.includes("timed out")
+    || message.includes("timeout")
   ) {
     return "timeout";
   }
 
   if (
     signalState.callerSignalAborted
-    || causeChain.some((cause) => {
-      const causeMessage = readHostedRuntimeFetchCauseMessage(cause).toLowerCase();
-      return (cause instanceof Error && cause.name === "AbortError")
-        || causeMessage.includes("abort");
-    })
+    || causeName === "AbortError"
+    || message.includes("abort")
   ) {
     return "abort";
   }
 
   if (
-    causeChain.some((cause) => {
-      const causeMessage = readHostedRuntimeFetchCauseMessage(cause).toLowerCase();
-      return causeMessage.includes("network")
-        || causeMessage.includes("socket")
-        || causeMessage.includes("connection reset");
-    })
+    message.includes("network")
+    || message.includes("socket")
+    || message.includes("connection reset")
   ) {
     return "network";
   }
@@ -235,27 +226,6 @@ function classifyHostedRuntimeFetchCause(
   }
 
   return "unknown";
-}
-
-function readHostedRuntimeFetchCauseChain(error: unknown): unknown[] {
-  const causes: unknown[] = [];
-  const seen = new Set<unknown>();
-  let current: unknown = error;
-
-  while (
-    current
-    && typeof current === "object"
-    && !seen.has(current)
-    && causes.length < 8
-  ) {
-    causes.push(current);
-    seen.add(current);
-    current = "cause" in current
-      ? (current as Record<string, unknown>).cause
-      : null;
-  }
-
-  return causes;
 }
 
 export function shouldPreserveHostedRuntimeFetchError(error: unknown): boolean {
