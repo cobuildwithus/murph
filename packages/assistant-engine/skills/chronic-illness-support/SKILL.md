@@ -1,6 +1,6 @@
 ---
 name: chronic-illness-support
-description: Proactively help people with chronic illness reduce symptom burden, manage flares, test habits, improve daily function, and advocate for better care through evidence-informed reasoning, low-burden tracking, and calibrated safety.
+description: Proactively help people with chronic illness or persistent and recurring symptoms reduce symptom burden, manage flares, choose one symptom-targeted low-burden trial, improve daily function, and advocate for better care through evidence-informed reasoning, minimal tracking, and calibrated safety.
 ---
 
 # Chronic illness support
@@ -11,12 +11,12 @@ Act as an active self-management partner for people living with chronic illness,
 
 This skill is not merely a journal, validation layer, or referral gate. Murph should use its reasoning capacity to synthesize the record, identify likely leverage points, recommend a next step, and learn from the result.
 
-Use this skill when chronic illness, a symptom flare, low energy or cognition, medical invalidation, care fragmentation, habit change, appointment preparation, caregiver coordination, or longitudinal symptom management is central.
+Use this skill when chronic illness, a persistent or recurring symptom pattern even without a settled diagnosis, a symptom flare, low energy or cognition, medical invalidation, care fragmentation, habit change, appointment preparation, caregiver coordination, or longitudinal symptom management is central.
 
 Also use:
 
 - `chronic-pain-support` when persistent pain is a major problem;
-- `self-management-experiments` when the user wants to test a habit, routine, pacing strategy, environmental change, or other reversible intervention;
+- `self-management-experiments` when the user asks what to change or try day to day, wants to test a habit, routine, pacing strategy, environmental change, or other reversible intervention;
 - `physical-therapy` when the main task is movement rehabilitation or exercise programming.
 
 ## Operating stance
@@ -172,6 +172,8 @@ Murph should recommend the best first lever and explain why it outranks the othe
 ## Step 6: run bounded self-management experiments
 
 Use `self-management-experiments` whenever the user wants to change a habit or test what helps.
+
+The user does not need to say “experiment.” When a stable persistent or recurring symptom pattern leads them to ask what daily-life change may help, treat that as experiment intent if one low-risk reversible lever can answer the question. Choose one symptom-targeted first lever rather than a bundle of generic wellness factors. Give the exact technique or dose, a bounded observation window, one meaningful outcome, one burden or adverse-effect check, stop rules, and a review and decision rule. Ask one high-value question first when missing context would change the lever. Do not use a trial when urgent evaluation or a condition-specific owner should come first.
 
 A good experiment has:
 
@@ -337,6 +339,7 @@ A response fails if it:
 - reflexively says “see a clinician” when a safe, useful action or analysis is available now;
 - leads with a disclaimer instead of helping;
 - gives a list of options without recommending one;
+- answers a persistent-symptom change request with generic wellness factors instead of one ranked, symptom-targeted trial;
 - asks for a full history already present in memory or records;
 - treats pain or symptom relief as an illegitimate goal;
 - psychologizes an unresolved physical problem;
