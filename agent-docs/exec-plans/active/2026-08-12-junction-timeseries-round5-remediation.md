@@ -511,3 +511,8 @@ Updated: 2026-08-14
   fidelity graph at 10,465,027 bytes. Only the total measured baseline is
   ratcheted to that value with the existing 32 KiB allowance; entry, static,
   and forbidden-input guards are unchanged, and the 42-test budget proof passes.
+- The non-required platform coverage shard exposed equal-priority test ordering:
+  two retained calendar rows were due at the same instant, but the regression
+  asserted which random job ID claimed first. The intended first row now has
+  explicit priority. The focused regression and all 50 store tests pass; no
+  production behavior changed.

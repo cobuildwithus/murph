@@ -3178,6 +3178,7 @@ test("device sync store preserves retained calendar work across account cleanup 
         resource: "water",
         sourceProviderSlug: "garmin",
       },
+      priority: 1,
       provider: "junction",
     });
     const ordinary = store.enqueueJob({
