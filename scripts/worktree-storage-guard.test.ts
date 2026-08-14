@@ -466,6 +466,38 @@ touch hook-installed
     expect(growth.stderr).toContain('new unmanaged temporary checkout')
   })
 
+  it('warns without admitting a new unmanaged clone during a scoped commit', () => {
+    const harness = createHarness()
+    runGit(harness.primary, [
+      'remote',
+      'add',
+      'origin',
+      'https://example.test/example/murph.git',
+    ])
+    const baseline = runScript(harness, 'worktree-storage-guard')
+    expect(baseline.status, baseline.stderr).toBe(0)
+
+    runGit(harness.root, [
+      'clone',
+      harness.primary,
+      path.join(harness.tempRoot, 'murph-unrelated-task'),
+    ])
+    writeFileSync(path.join(harness.primary, 'tracked.txt'), 'scoped commit\n')
+    runGit(harness.primary, ['add', 'tracked.txt'])
+
+    const commit = runScript(harness, 'committer', ['-m', 'scoped commit'], {
+      MURPH_TEST_COMMITTER_BIN: path.join(harness.fakeBin, 'cobuild-committer'),
+    })
+
+    expect(commit.status, commit.stderr).toBe(0)
+    expect(commit.stderr).toContain('warning: 1 new unmanaged temporary checkout')
+    expect(readFileSync(path.join(harness.state, 'unmanaged-temp-checkouts'), 'utf8')).toBe('')
+
+    const globalAudit = runScript(harness, 'worktree-storage-guard')
+    expect(globalAudit.status).toBe(1)
+    expect(globalAudit.stderr).toContain('new unmanaged temporary checkout')
+  })
+
   it('fails closed when unmanaged-checkout fingerprinting fails', () => {
     const harness = createHarness()
     runGit(harness.primary, [
