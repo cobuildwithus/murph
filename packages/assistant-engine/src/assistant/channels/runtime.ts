@@ -4,11 +4,6 @@ import {
   type TelegramThreadTarget,
 } from '@murphai/messaging-ingress/telegram-webhook'
 import {
-  createAgentmailApiClient,
-  resolveAgentmailApiKey,
-  resolveAgentmailBaseUrl,
-} from '@murphai/operator-config/agentmail-runtime'
-import {
   assertLinqMessageTextPartWithinLimit,
   checkLinqIMessageCapability,
   createLinqChat,
@@ -53,7 +48,6 @@ import type {
   AssistantChannelActivityHandle,
   AssistantChannelActivityStopOptions,
   AssistantDeliveryCandidate,
-  EmailRuntimeDependencies,
   LinqRuntimeDependencies,
   TelegramRuntimeDependencies,
 } from './types.js'
@@ -1398,93 +1392,6 @@ function waitForAssistantChannelActivityRefresh(
 }
 
 
-export async function sendEmailMessage(
-  input: {
-    idempotencyKey?: string | null
-    identityId: string
-    message: string
-    replyToMessageId?: string | null
-    target: string
-    targetKind: AssistantDeliveryCandidate['kind']
-    subject?: string | null
-  },
-  dependencies: EmailRuntimeDependencies = {},
-): Promise<{ providerMessageId: string | null; providerThreadId: string | null }> {
-  const identityId = input.identityId.trim()
-  if (identityId.length === 0) {
-    throw new VaultCliError(
-      'ASSISTANT_EMAIL_IDENTITY_REQUIRED',
-      'Default email delivery requires an AgentMail inbox identity.',
-    )
-  }
-
-  const target = input.target.trim()
-  if (target.length === 0) {
-    throw new VaultCliError(
-      'ASSISTANT_CHANNEL_TARGET_REQUIRED',
-      'Email delivery requires a non-empty recipient or thread target.',
-    )
-  }
-
-  const subject = normalizeOptionalText(input.subject)
-  const env = dependencies.env ?? process.env
-  const apiKey = resolveAgentmailApiKey(env)
-  if (!apiKey) {
-    throw new VaultCliError(
-      'ASSISTANT_EMAIL_API_KEY_REQUIRED',
-      'Outbound email delivery requires AGENTMAIL_API_KEY.',
-    )
-  }
-
-  const client = createAgentmailApiClient(apiKey, {
-    baseUrl: resolveAgentmailBaseUrl(env) ?? undefined,
-    fetchImplementation: dependencies.fetchImplementation,
-  })
-
-  if (input.targetKind === 'thread') {
-    if (subject) {
-      throw new VaultCliError(
-        'ASSISTANT_EMAIL_THREAD_SUBJECT_UNSUPPORTED',
-        'Email thread replies preserve the existing subject. Do not provide a subject override when replying to a thread.',
-        { threadId: target },
-      )
-    }
-
-    const thread = await client.getThread(target)
-    const messageId = resolveAgentmailThreadReplyMessageId(thread)
-    if (!messageId) {
-      throw new VaultCliError(
-        'ASSISTANT_EMAIL_THREAD_REPLY_UNAVAILABLE',
-        'Email thread delivery requires a resolvable parent AgentMail message.',
-        { threadId: target },
-      )
-    }
-
-    const delivered = await client.replyToMessage({
-      inboxId: identityId,
-      messageId: normalizeOptionalText(input.replyToMessageId) ?? messageId,
-      text: input.message,
-      replyAll: true,
-    })
-    return {
-      providerMessageId: normalizeOptionalText(delivered.message_id),
-      providerThreadId: normalizeOptionalText(delivered.thread_id),
-    }
-  }
-
-  const delivered = await client.sendMessage({
-    inboxId: identityId,
-    to: target,
-    subject: subject ?? 'Murph update',
-    text: input.message,
-  })
-
-  return {
-    providerMessageId: normalizeOptionalText(delivered.message_id),
-    providerThreadId: normalizeOptionalText(delivered.thread_id),
-  }
-}
-
 async function sendTelegramMessageDetailed(
   input: {
     idempotencyKey?: string | null
@@ -1715,28 +1622,6 @@ function groupTelegramCleanupMessagesByTarget(
   }
 
   return grouped
-}
-
-function resolveAgentmailThreadReplyMessageId(input: {
-  last_message_id?: string | null
-  messages?: Array<{ message_id?: string | null }> | null
-}): string | null {
-  const direct = input.last_message_id?.trim() ? input.last_message_id.trim() : null
-  if (direct) {
-    return direct
-  }
-
-  const messages = Array.isArray(input.messages) ? input.messages : []
-  for (let index = messages.length - 1; index >= 0; index -= 1) {
-    const candidate = messages[index]?.message_id?.trim()
-      ? messages[index]!.message_id!.trim()
-      : null
-    if (candidate) {
-      return candidate
-    }
-  }
-
-  return null
 }
 
 async function sendTelegramTextChunk(input: {
