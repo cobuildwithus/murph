@@ -30,6 +30,7 @@ import {
   HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
   generateHostedMemberId,
   lockHostedMemberRow,
+  normalizePhoneNumber,
 } from "./shared";
 import {
   createHostedMember,
@@ -100,6 +101,53 @@ export async function ensureHostedMemberForPhoneTx(input: {
 }): Promise<HostedMemberCoreState> {
   const resolution = await ensureHostedMemberForPhoneResolutionTx(input);
   return resolution.member;
+}
+
+/**
+ * Binds a provider-verified phone to an already resolved member. The caller
+ * must own the participant-phone lock and the member row before invoking this
+ * prepared path; it never creates or selects a different member.
+ */
+export async function bindHostedMemberPhoneToPreparedMemberTx(input: {
+  currentIdentity: Awaited<ReturnType<typeof readHostedMemberIdentity>>;
+  member: HostedMemberCoreState;
+  phoneNumber: string;
+  phoneNumberVerifiedAt: Date;
+  preparedControlRoot: PreparedHostedDomainRootForWeb;
+  prisma: Prisma.TransactionClient;
+}): Promise<HostedMemberCoreState> {
+  const phoneOwnerMemberId = await lookupHostedMemberIdByPhoneNumber({
+    phoneNumber: input.phoneNumber,
+    prisma: input.prisma,
+  });
+  if (phoneOwnerMemberId && phoneOwnerMemberId !== input.member.id) {
+    throw new HostedDomainRootPreparationMismatchError();
+  }
+  if (
+    input.currentIdentity?.phoneLookupKey
+    && !hostedPhoneLookupKeyMatchesValue(
+      input.phoneNumber,
+      input.currentIdentity.phoneLookupKey,
+    )
+  ) {
+    throw new HostedDomainRootPreparationMismatchError();
+  }
+  if (input.currentIdentity?.phoneNumber) {
+    const currentPhoneNumber = normalizePhoneNumber(input.currentIdentity.phoneNumber);
+    const incomingPhoneNumber = normalizePhoneNumber(input.phoneNumber);
+    if (!currentPhoneNumber || currentPhoneNumber !== incomingPhoneNumber) {
+      throw new HostedDomainRootPreparationMismatchError();
+    }
+  }
+
+  return refreshHostedMemberForPhoneTx({
+    currentIdentity: input.currentIdentity,
+    member: input.member,
+    phoneNumber: input.phoneNumber,
+    phoneNumberVerifiedAt: input.phoneNumberVerifiedAt,
+    preparedControlRoot: input.preparedControlRoot,
+    prisma: input.prisma,
+  });
 }
 
 export async function ensureHostedMemberForPhoneResolutionTx(input: {
@@ -298,16 +346,22 @@ export async function ensureHostedMemberForPendingLinqParticipantContactTx(input
 }
 
 async function refreshHostedMemberForPhoneTx(input: {
-  currentIdentity: HostedMemberIdentityLookup["identity"] | null;
+  currentIdentity:
+    | HostedMemberIdentityLookup["identity"]
+    | Awaited<ReturnType<typeof readHostedMemberIdentity>>;
   member: HostedMemberCoreState;
   phoneNumber: string;
   phoneNumberVerifiedAt?: Date | null;
+  preparedControlRoot?: PreparedHostedDomainRootForWeb;
   prisma: Prisma.TransactionClient;
 }): Promise<HostedMemberCoreState> {
   assertHostedMemberNotSuspended(input.member);
   await upsertHostedMemberIdentity({
     ...buildHostedMemberPhoneIdentityFields(input.phoneNumber),
     memberId: input.member.id,
+    ...(input.preparedControlRoot
+      ? { preparedControlRoot: input.preparedControlRoot }
+      : {}),
     phoneNumberVerifiedAt:
       input.phoneNumberVerifiedAt ?? input.currentIdentity?.phoneNumberVerifiedAt ?? null,
     prisma: input.prisma,

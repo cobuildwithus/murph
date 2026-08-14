@@ -61,10 +61,67 @@ test("dashboard route consumers no longer wrap their own BrowserVaultProvider", 
   }
 });
 
-test("the landing page does not start private browser-vault work", () => {
-  const landingSource = readSource("app/page.tsx");
-  assert.doesNotMatch(landingSource, /LandingBrowserVaultWarm/u);
-  assert.doesNotMatch(landingSource, /startBrowserVaultWarmLoad/u);
+test("the homepage schedules only server-side browser-vault preparation", () => {
+  const homepageSource = readSource("app/page.tsx");
+  const preparationSource = readSource(
+    "src/lib/browser-vault/homepage-preparation.ts",
+  );
+  const preparationWorkerSource = readSource(
+    "src/lib/browser-vault/homepage-preparation-worker.ts",
+  );
+  const retiredClientWarmUrl = new URL(
+    "../src/components/homepage/landing-browser-vault-warm.tsx",
+    import.meta.url,
+  );
+
+  assert.match(homepageSource, /scheduleHomepageBrowserVaultPreparation/u);
+  assert.match(
+    homepageSource,
+    /if \(authenticatedMember\) \{[\s\S]*memberId: authenticatedMember\.id/u,
+  );
+  assert.equal(existsSync(retiredClientWarmUrl), false);
+  assert.doesNotMatch(homepageSource, /LandingBrowserVaultWarm/u);
+  assert.doesNotMatch(homepageSource, /browser-vault\/warm-store/u);
+  assert.doesNotMatch(homepageSource, /\/api\/browser-vault\/session/u);
+  assert.doesNotMatch(homepageSource, /browserPublicKeyJwk/u);
+  assert.doesNotMatch(homepageSource, /decryptHostedStoragePayload/u);
+  assert.doesNotMatch(homepageSource, /unwrapHostedBrowserSessionKey/u);
+  assert.match(preparationSource, /import \{ after \} from "next\/server"/u);
+  assert.match(
+    preparationSource,
+    /await import\(\s*"\.\/homepage-preparation-worker"\s*\)/u,
+  );
+  assert.doesNotMatch(preparationSource, /assertBrowserVaultMemberAuthority/u);
+  assert.doesNotMatch(preparationSource, /assessBrowserVaultReplicaFreshness/u);
+  assert.doesNotMatch(preparationSource, /signalHostedBrowserVaultRefreshRuntime/u);
+  assert.match(preparationWorkerSource, /assertBrowserVaultMemberAuthority/u);
+  assert.match(preparationWorkerSource, /assessBrowserVaultReplicaFreshness/u);
+  assert.match(
+    preparationWorkerSource,
+    /signalHostedBrowserVaultRefreshRuntime/u,
+  );
+  assert.doesNotMatch(preparationSource, /"use client"/u);
+  assert.doesNotMatch(preparationSource, /browser-vault\/warm-store/u);
+  assert.doesNotMatch(preparationSource, /\/api\/browser-vault\/session/u);
+  assert.doesNotMatch(preparationSource, /fetch\(/u);
+  assert.doesNotMatch(preparationSource, /createBrowserVaultSession/u);
+  assert.doesNotMatch(preparationSource, /generateHostedUserRecipientKeyPair/u);
+  assert.doesNotMatch(preparationSource, /decryptHostedStoragePayload/u);
+  assert.doesNotMatch(preparationSource, /unwrapHostedBrowserSessionKey/u);
+  assert.doesNotMatch(preparationSource, /encryptedReplica/u);
+  assert.doesNotMatch(preparationSource, /replicaKeyEnvelope/u);
+  assert.doesNotMatch(preparationWorkerSource, /browser-vault\/warm-store/u);
+  assert.doesNotMatch(preparationWorkerSource, /\/api\/browser-vault\/session/u);
+  assert.doesNotMatch(preparationWorkerSource, /fetch\(/u);
+  assert.doesNotMatch(preparationWorkerSource, /createBrowserVaultSession/u);
+  assert.doesNotMatch(
+    preparationWorkerSource,
+    /generateHostedUserRecipientKeyPair/u,
+  );
+  assert.doesNotMatch(preparationWorkerSource, /decryptHostedStoragePayload/u);
+  assert.doesNotMatch(preparationWorkerSource, /unwrapHostedBrowserSessionKey/u);
+  assert.doesNotMatch(preparationWorkerSource, /encryptedReplica/u);
+  assert.doesNotMatch(preparationWorkerSource, /replicaKeyEnvelope/u);
 });
 
 test("authenticated landing links fetch current dashboard authority on click", () => {

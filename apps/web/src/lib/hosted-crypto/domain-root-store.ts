@@ -138,6 +138,7 @@ export async function prepareHostedDomainRootForWeb(input: {
   prepareMissing?: boolean;
   prisma?: HostedCryptoClient;
   reason: string;
+  reusableCandidates?: PreparedHostedCryptoDomainRootCandidates;
   signal?: AbortSignal;
   userId: string;
 }): Promise<PreparedHostedDomainRootForWeb> {
@@ -157,6 +158,9 @@ export async function prepareHostedDomainRootForWeb(input: {
     : await prepareHostedCryptoDomainRootCandidates({
         domains: [input.domain],
         prisma: input.prisma,
+        ...(input.reusableCandidates
+          ? { reusableCandidates: input.reusableCandidates }
+          : {}),
         userId: input.userId,
       });
   const candidate = preparedCandidates.get(input.domain);
@@ -363,11 +367,15 @@ async function unwrapWithScopedCache(
  * GCP KMS round trips, so the candidates are built here, before any transaction
  * or advisory lock is taken. Candidates are ephemeral: one that loses the
  * insert race is discarded, and a root key that was never persisted decrypts
- * nothing and is referenced by nothing.
+ * nothing and is referenced by nothing. A caller retrying after its transaction
+ * rolled back may reuse its prior candidates so the scoped unwrap cache stays
+ * bound to the same ephemeral roots.
  */
 export async function prepareHostedCryptoDomainRootCandidates(input: {
   domains?: readonly HostedCryptoDomain[];
+  maxConcurrency?: number;
   prisma?: HostedCryptoClient;
+  reusableCandidates?: PreparedHostedCryptoDomainRootCandidates;
   userId: string;
 }): Promise<PreparedHostedCryptoDomainRootCandidates> {
   const prisma = input.prisma ?? getPrisma();
@@ -381,31 +389,66 @@ export async function prepareHostedCryptoDomainRootCandidates(input: {
   if (missing.length === 0) {
     return new Map();
   }
+  const preparedEntries: Array<readonly [
+    HostedCryptoDomain,
+    HostedDomainRootKeyEnvelopeV1,
+  ]> = [];
+  const pending = missing.flatMap((domain, index) => {
+    const reusable = input.reusableCandidates?.get(domain);
+    if (!reusable) {
+      return [{ domain, index }];
+    }
+    if (reusable.domain !== domain || reusable.userId !== input.userId) {
+      throw new TypeError(
+        "Reusable hosted domain root candidate does not match the requested user/domain.",
+      );
+    }
+    preparedEntries[index] = [domain, reusable];
+    return [];
+  });
+  if (pending.length === 0) {
+    return new Map(preparedEntries);
+  }
+  const maxConcurrency = input.maxConcurrency ?? missing.length;
+  if (!Number.isSafeInteger(maxConcurrency) || maxConcurrency <= 0) {
+    throw new TypeError("Hosted domain-root preparation concurrency must be a positive integer.");
+  }
   let firstError: unknown;
   let hasError = false;
-  const settled = await Promise.allSettled(missing.map(async (domain) => {
-    try {
-      return [
-        domain,
-        await createSignedHostedDomainRootEnvelope({ domain, userId: input.userId }),
-      ] as const;
-    } catch (error) {
-      if (!hasError) {
-        firstError = error;
-        hasError = true;
+  let nextIndex = 0;
+  const workers = Array.from(
+    { length: Math.min(maxConcurrency, pending.length) },
+    async () => {
+      while (!hasError) {
+        const pendingEntry = pending[nextIndex];
+        nextIndex += 1;
+        if (!pendingEntry) {
+          return;
+        }
+        const { domain, index } = pendingEntry;
+        try {
+          preparedEntries[index] = [
+            domain,
+            await createSignedHostedDomainRootEnvelope({
+              domain,
+              userId: input.userId,
+            }),
+          ];
+        } catch (error) {
+          if (!hasError) {
+            firstError = error;
+            hasError = true;
+          }
+          return;
+        }
       }
-      throw error;
-    }
-  }));
+    },
+  );
+  await Promise.all(workers);
   if (hasError) {
     throw firstError;
   }
-  return new Map(settled.map((result) => {
-    if (result.status === "rejected") {
-      throw result.reason;
-    }
-    return result.value;
-  }));
+  return new Map(preparedEntries);
 }
 
 export async function provisionHostedCryptoDomainRootsForUser(input: {

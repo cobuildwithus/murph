@@ -79,7 +79,8 @@ export function peekBrowserVaultInFlightLoad(): Promise<BrowserVaultWarmLoadOutc
 }
 
 /**
- * Start (or reuse) the single warm load. The store owns reusable replica work;
+ * Start (or reuse) the single dashboard load. The store owns reusable
+ * replica work;
  * callers that cross an authority boundary must separately decide when its
  * cached result may be published.
  */
