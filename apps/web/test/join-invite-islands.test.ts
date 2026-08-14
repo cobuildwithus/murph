@@ -1,7 +1,10 @@
 import { act, createElement } from "react";
 import { beforeEach, expect, test, vi } from "vitest";
 
-import { renderClientComponent } from "./render-client-component";
+import {
+  createMemoryStorage,
+  renderClientComponent,
+} from "./render-client-component";
 
 import {
   JoinInviteCheckoutPlanButtonIsland,
@@ -23,6 +26,7 @@ import {
 import type { HostedInviteStatusPayload } from "@/src/lib/hosted-onboarding/types";
 import type { HostedConsentStatus } from "@/src/lib/legal/consent";
 import { buildJoinInviteStatusRefreshSnapshot } from "@/src/components/hosted-onboarding/join-invite-state";
+import { armHostedGroupStartHandoff } from "@/src/lib/hosted-groups/group-start-handoff";
 
 const mocks = vi.hoisted(() => ({
   privyLogout: vi.fn(),
@@ -350,6 +354,30 @@ test("JoinInviteStarterUsageIsland preserves the document reload after unmount",
 
   expect(replaceLocation).toHaveBeenCalledWith("/home");
   expect(mocks.replace).not.toHaveBeenCalled();
+});
+
+test("JoinInviteStarterUsageIsland reloads the armed group-start handoff", async () => {
+  mocks.requestHostedStarterUsageEnrollment.mockResolvedValue({
+    redirectPath: "/home",
+    status: "enrolled",
+  });
+  const sessionStorage = createMemoryStorage();
+  armHostedGroupStartHandoff({ storage: sessionStorage });
+
+  const { cleanup, replaceLocation } = await renderClientComponent(
+    createElement(JoinInviteStarterUsageIsland, {
+      inviteCode: "invite-code",
+    }),
+    { requireButton: false, sessionStorage },
+  );
+
+  await act(async () => {
+    await Promise.resolve();
+  });
+
+  expect(replaceLocation).toHaveBeenCalledWith("/groups/start");
+  expect(mocks.replace).not.toHaveBeenCalled();
+  await cleanup();
 });
 
 test("JoinInviteStarterUsageIsland renders a distinct retry state after enrollment fails", async () => {
