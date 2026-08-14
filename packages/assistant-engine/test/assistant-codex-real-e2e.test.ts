@@ -90,6 +90,9 @@ import {
   parseAssistantNotificationDecision,
 } from '../src/assistant/notification-turn.ts'
 import {
+  ASSISTANT_BOUNDED_CONVERSATION_HISTORY_INCOMPLETE_TEXT,
+} from '../src/assistant/shared.ts'
+import {
   resolveAssistantPromptTimeContext,
 } from '../src/assistant/prompt-time.ts'
 import {
@@ -3260,6 +3263,97 @@ describeRealCodex('real Codex recurring reminder conversation e2e', () => {
           expect(decision.text).not.toMatch(/did you|complete|failed|ignored/iu)
         }
       }
+    } finally {
+      await removeRealCodexTemporaryPaths([
+        workingDirectory,
+        ...config.temporaryPaths,
+      ])
+    }
+  }, 360_000)
+
+  it('expires a cold-history marker before later native-resume decisions', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(
+      path.join(tmpdir(), 'murph-recurring-reminder-resume-e2e-'),
+    )
+    const commonInput = {
+      approvalPolicy: 'never' as const,
+      baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+      codexCommand:
+        normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+        ?? undefined,
+      codexHome: config.codexHome,
+      developerInstructions:
+        buildIndependentReminderDeveloperInstructions('group'),
+      dynamicTools: [],
+      env: config.env,
+      excludeResumeTurns: true,
+      groupConversation: true,
+      model: config.model,
+      modelProvider: config.modelProvider,
+      reasoningEffort: 'medium' as const,
+      sandbox: 'read-only' as const,
+      workingDirectory,
+    }
+    const savedInstructions = 'Remind the room to do its short reset.'
+
+    try {
+      const cold = await executeRealCodexAppServerTurn({
+        ...commonInput,
+        prompt: [
+          'Recent conversation history for context only; do not answer these prior messages:',
+          `Assistant:\n${ASSISTANT_BOUNDED_CONVERSATION_HISTORY_INCOMPLETE_TEXT}`,
+          'User message:',
+          savedInstructions,
+          ASSISTANT_CRON_RECURRING_REMINDER_CONVERSATION_INSTRUCTIONS,
+          'Current trusted delivery and conversation evidence:',
+          'The immediately prior reminder, "Quick room reset. Should I keep these, change them, or pause?", was provider-accepted and sent.',
+          'The bounded current conversation excerpt cannot establish whether a relevant human reply followed it.',
+        ].join('\n\n'),
+      })
+      const coldDecision = parseAssistantNotificationDecision(
+        cold.finalMessage,
+      )
+      expect(coldDecision.kind).toBe('send_message')
+      if (coldDecision.kind === 'send_message') {
+        expect(coldDecision.text).toMatch(/room reset/iu)
+        expect(coldDecision.text).not.toMatch(/keep|change|pause/iu)
+      }
+
+      const warmQuestion = await executeRealCodexAppServerTurn({
+        ...commonInput,
+        prompt: [
+          savedInstructions,
+          ASSISTANT_CRON_RECURRING_REMINDER_CONVERSATION_INSTRUCTIONS,
+          'Current trusted delivery and conversation evidence:',
+          `The immediately prior reminder, ${JSON.stringify(coldDecision.kind === 'send_message' ? coldDecision.text : 'Quick room reset.')}, was provider-accepted and sent.`,
+          'No human message followed it.',
+        ].join('\n\n'),
+        resumeSessionId: cold.sessionId,
+      })
+      const questionDecision = parseAssistantNotificationDecision(
+        warmQuestion.finalMessage,
+      )
+      expect(questionDecision.kind).toBe('send_message')
+      if (questionDecision.kind !== 'send_message') {
+        throw new Error('Expected the resumed occurrence to ask about cadence.')
+      }
+      expect(questionDecision.text).toMatch(/keep|change|pause/iu)
+
+      const warmSkip = await executeRealCodexAppServerTurn({
+        ...commonInput,
+        prompt: [
+          savedInstructions,
+          ASSISTANT_CRON_RECURRING_REMINDER_CONVERSATION_INSTRUCTIONS,
+          'Current trusted delivery and conversation evidence:',
+          `The immediately prior reminder, ${JSON.stringify(questionDecision.text)}, was provider-accepted and sent.`,
+          'No human message followed it.',
+        ].join('\n\n'),
+        resumeSessionId: warmQuestion.sessionId,
+      })
+      expect(
+        parseAssistantNotificationDecision(warmSkip.finalMessage).kind,
+      ).toBe('skip')
     } finally {
       await removeRealCodexTemporaryPaths([
         workingDirectory,

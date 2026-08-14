@@ -118,6 +118,13 @@ Updated: 2026-08-14
   native resume remains authoritative, while bounded reconstruction cannot
   prove silence. No reminder state, history store, lifecycle, or second policy
   owner is authorized.
+- Final round 4 found that a current-cold-history marker would remain visible
+  inside the replacement native thread and could become a permanent veto on
+  later cadence decisions. The finding is accepted: marker authority is scoped
+  to the provider request whose engine-supplied cold-history section contains
+  it, and expires before later native-resume decisions. A gated three-turn App
+  Server regression covers cold continuation, resumed cadence question, and
+  resumed skip without adding state.
 
 ## Verification
 

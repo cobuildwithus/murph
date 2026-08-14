@@ -4250,7 +4250,10 @@ describe('assistant cron runtime orchestration', () => {
         ASSISTANT_BOUNDED_CONVERSATION_HISTORY_INCOMPLETE_TEXT,
       )
       expect(notificationInput.instructions).toContain(
-        'Do not apply a silence-based cadence question or skip when it is present',
+        'inside this provider request\'s engine-supplied recent-conversation-history section',
+      )
+      expect(notificationInput.instructions).toContain(
+        'That marker expires after the provider request that supplied it',
       )
       expect(notificationInput.instructions).not.toContain('carry-forward grace')
       if (occurrenceIndex === 0) {
