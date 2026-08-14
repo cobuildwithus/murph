@@ -84,7 +84,9 @@ import {
   restoreRecoveredHandoffBeforeWorktreeRecovery,
   isEmptyRepairHandoffCommit,
   normalizeUnpushedDescendantToPullRequestHead,
+  persistRepairHandoff,
   TerminalPrePullRequestFailure,
+  terminalHandoffPreviousRemoteHead,
   terminalWorkerFailureClass,
   trustedReviewControlPaths,
   trustedReviewControlsMatch,
@@ -126,6 +128,13 @@ const repositoryRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
   "..",
 );
+const targetReviewControlRoot = existsSync(path.join(
+  repositoryRoot,
+  "scripts",
+  "package-audit-context-full.sh",
+))
+  ? repositoryRoot
+  : path.join(repositoryRoot, "test-fixtures", "murph");
 const authenticatedOperator = "automation-operator";
 const authoritativeBodySha256 = "d".repeat(64);
 const taskIdentity = {
@@ -1161,7 +1170,8 @@ describe("Frog autofix guards", () => {
       source.indexOf("function persistRepairHandoff"),
       source.indexOf("function persistClosedPullRequestHandoff"),
     );
-    expect(terminalHandoff).toContain("firstHead: head");
+    expect(terminalHandoff).toContain("firstHead: previousHandoffHead");
+    expect(terminalHandoff).not.toContain("firstHead: head");
     expect(terminalHandoff).toContain("handoffTree !== mainTree");
     expect(terminalHandoff.indexOf("writePrivateFileAtomically(bodyPath"))
       .toBeLessThan(terminalHandoff.indexOf("authenticatedOperator(options.primary)"));
@@ -1170,10 +1180,13 @@ describe("Frog autofix guards", () => {
     );
     expect(terminalHandoff).toContain("authorizedTerminalHandoffLease({");
     expect(terminalHandoff).toContain(
-      "const previousHandoffHead = head",
+      "let previousHandoffHead = head",
     );
-    expect(terminalHandoff.indexOf("const previousHandoffHead = head"))
+    expect(terminalHandoff.indexOf("let previousHandoffHead = head"))
       .toBeLessThan(terminalHandoff.indexOf("createEmptyRepairHandoffCommit("));
+    expect(terminalHandoff).toContain(
+      "previousHandoffHead = terminalHandoffPreviousRemoteHead(",
+    );
     expect(terminalHandoff).toContain(
       "normalizeUnpushedDescendantToPullRequestHead(",
     );
@@ -1198,6 +1211,73 @@ describe("Frog autofix guards", () => {
       .toBeLessThan(publication.indexOf("verifyCandidateWorkerAuthority("));
     expect(publication).not.toContain("publicationAttempt");
     expect(runOnce).not.toContain("publicationAttempt");
+  });
+
+  it("emits content-free foreground progress before blocking repair phases", () => {
+    const source = readFileSync(
+      path.join(repositoryRoot, "scripts", "frog-autofix.ts"),
+      "utf8",
+    );
+    const runOnce = source.slice(source.indexOf("async function runOnce()"));
+    const review = source.slice(
+      source.indexOf("async function reviewPublishAndFinalize("),
+      source.indexOf("function retireMergedWorktree("),
+    );
+    const indexBefore = (scope: string, message: string, operation: string) => {
+      const progress = scope.indexOf(`console.log(${JSON.stringify(message)})`);
+      const blocked = scope.indexOf(operation);
+      expect(progress, message).toBeGreaterThanOrEqual(0);
+      expect(blocked, operation).toBeGreaterThan(progress);
+    };
+
+    indexBefore(
+      runOnce,
+      "Frog autofix admitted one trusted repair task.",
+      "prepareIssueWorktree(",
+    );
+    indexBefore(
+      runOnce,
+      "Frog autofix is preparing the implementation candidate.",
+      "runParentReview({",
+    );
+    indexBefore(
+      runOnce,
+      "Frog autofix is running the edit-only worker.",
+      "await runEditOnlyCycle({",
+    );
+    indexBefore(
+      runOnce,
+      "Frog autofix is publishing and reviewing the repair.",
+      "await reviewPublishAndFinalize({",
+    );
+    indexBefore(
+      review,
+      "Frog autofix is waiting for required checks.",
+      'runCommand(\n    "gh",\n    [\n      "pr",\n      "checks",',
+    );
+    indexBefore(
+      review,
+      "Frog autofix is finalizing the protected merge.",
+      "finalizeReviewedRepair(",
+    );
+
+    const success = "Frog autofix merged the repair and closed its bound issue.";
+    const terminal = runOnce.indexOf(`console.log(${JSON.stringify(success)})`);
+    expect(terminal).toBeGreaterThan(
+      runOnce.indexOf('recordEvent("repair_closed_issue", issue.number)'),
+    );
+    expect(terminal).toBeLessThan(runOnce.indexOf("retireMergedWorktree("));
+    for (const message of [
+      "Frog autofix admitted one trusted repair task.",
+      "Frog autofix is preparing the implementation candidate.",
+      "Frog autofix is running the edit-only worker.",
+      "Frog autofix is publishing and reviewing the repair.",
+      "Frog autofix is waiting for required checks.",
+      "Frog autofix is finalizing the protected merge.",
+      success,
+    ]) {
+      expect(message).not.toMatch(/[0-9/@\\]/u);
+    }
   });
 
   it("restamps foreign-edited exact and ancestor handoffs before worktree recovery", () => {
@@ -2091,7 +2171,7 @@ describe("Frog autofix guards", () => {
         "review-gpt-context-policy.sh",
       ]) {
         copyFileSync(
-          path.join(repositoryRoot, "scripts", script),
+          path.join(targetReviewControlRoot, "scripts", script),
           path.join(root, "scripts", script),
         );
       }
@@ -2828,6 +2908,337 @@ esac
     runRecovery("exact");
     runRecovery("foreign");
   });
+
+  it("re-enters the real handoff owner after neutral normalization", () => {
+    const runRecovery = (
+      interruption: "before-body-rewrite" | "after-body-rewrite",
+      remoteMove: "exact" | "foreign",
+    ) => {
+      const root = mkdtempSync(path.join(tmpdir(), "frog-handoff-restart-"));
+      const origin = path.join(root, "origin.git");
+      const primary = path.join(root, "primary");
+      const worktree = path.join(root, "worktree");
+      const bin = path.join(root, "bin");
+      const statePath = path.join(root, "github-state.json");
+      const harnessPath = path.join(root, "recover-handoff.ts");
+      const branch = "agent/frog-autofix-42";
+      const runGit = (cwd: string, ...args: string[]) => {
+        const result = spawnSync("git", args, { cwd, encoding: "utf8" });
+        return {
+          status: result.status ?? 1,
+          stderr: result.stderr,
+          stdout: result.stdout.trim(),
+        };
+      };
+      const git = (cwd: string, ...args: string[]) => {
+        const result = runGit(cwd, ...args);
+        expect(result.status, result.stderr).toBe(0);
+        return result.stdout;
+      };
+      const bodyPath = path.join(worktree, FROG_AUTOFIX_PR_BODY_PATH);
+      const readState = () => JSON.parse(readFileSync(statePath, "utf8")) as {
+        failAuthOnce: boolean;
+        pullRequest: { body: string; branch: string; head: string } | null;
+      };
+      const writeState = (state: ReturnType<typeof readState>) => {
+        writeFileSync(statePath, JSON.stringify(state));
+      };
+      const invokePersist = () => {
+        const result = spawnSync(
+          path.join(repositoryRoot, "node_modules", ".bin", "tsx"),
+          [harnessPath, primary, worktree, branch],
+          {
+            cwd: repositoryRoot,
+            encoding: "utf8",
+            env: {
+              ...process.env,
+              PATH: `${bin}:${process.env.PATH ?? ""}`,
+            },
+          },
+        );
+        expect(result.status, result.stderr).toBe(0);
+        return JSON.parse(result.stdout) as {
+          message?: string;
+          ok: boolean;
+          pullRequest?: number;
+        };
+      };
+
+      try {
+        mkdirSync(bin);
+        git(root, "init", "--bare", "--quiet", origin);
+        for (const checkout of [primary, worktree]) {
+          mkdirSync(checkout);
+          mkdirSync(path.join(checkout, ".disabled-hooks"));
+          git(checkout, "init", "--quiet");
+          git(checkout, "config", "core.hooksPath", ".disabled-hooks");
+          git(checkout, "config", "user.name", "Automation");
+          git(checkout, "config", "user.email", "automation@example.invalid");
+          git(checkout, "remote", "add", "origin", origin);
+        }
+        writeFileSync(path.join(primary, ".gitignore"), "audit-packages/\n");
+        writeFileSync(path.join(primary, "AGENTS.md"), "trusted instructions v1\n");
+        writeFileSync(path.join(primary, "base.txt"), "base\n");
+        git(primary, "add", ".gitignore", "AGENTS.md", "base.txt");
+        git(primary, "commit", "--quiet", "-m", "base");
+        git(primary, "branch", "-M", "main");
+        git(primary, "push", "--set-upstream", "origin", "main");
+
+        git(worktree, "fetch", "--quiet", "origin", "main");
+        git(worktree, "checkout", "--quiet", "-b", branch, "origin/main");
+        writeFileSync(path.join(worktree, "candidate.txt"), "candidate\n");
+        git(worktree, "add", "candidate.txt");
+        git(worktree, "commit", "--quiet", "-m", "candidate");
+        const candidate = git(worktree, "rev-parse", "HEAD");
+        git(
+          worktree,
+          "push",
+          "--set-upstream",
+          "origin",
+          `${candidate}:refs/heads/${branch}`,
+        );
+
+        writeFileSync(path.join(primary, "AGENTS.md"), "trusted instructions v2\n");
+        git(primary, "add", "AGENTS.md");
+        git(primary, "commit", "--quiet", "-m", "advance authority");
+        git(primary, "push", "origin", "main");
+        git(worktree, "fetch", "--quiet", "origin", "main");
+        mkdirSync(path.dirname(bodyPath), { recursive: true });
+        writeFileSync(
+          bodyPath,
+          renderTerminalRepairHandoffBody({
+            firstHead: candidate,
+            head: candidate,
+            issueNumber: 42,
+            task: taskIdentity,
+          }),
+        );
+
+        writeState({ failAuthOnce: false, pullRequest: null });
+        writeFileSync(path.join(bin, "gh"), `#!/usr/bin/env node
+import { execFileSync } from "node:child_process";
+import { readFileSync, writeFileSync } from "node:fs";
+
+const statePath = ${JSON.stringify(statePath)};
+const operator = ${JSON.stringify(authenticatedOperator)};
+const bot = ${JSON.stringify(FROG_AUTOFIX_BOT)};
+const args = process.argv.slice(2);
+const state = JSON.parse(readFileSync(statePath, "utf8"));
+const save = () => writeFileSync(statePath, JSON.stringify(state));
+if (args[0] === "api" && args[1] === "user") {
+  if (state.failAuthOnce) {
+    state.failAuthOnce = false;
+    save();
+    process.exit(1);
+  }
+  process.stdout.write(operator + "\\n");
+  process.exit(0);
+}
+if (args[0] === "issue" && args[1] === "view") {
+  process.stdout.write(JSON.stringify({
+    author: { login: bot },
+    labels: [{ name: "enhancement" }],
+    number: 42,
+    state: "OPEN",
+  }));
+  process.exit(0);
+}
+if (args[0] === "api" && args[1] === "graphql") {
+  const nodes = state.pullRequest ? [{
+    author: { login: operator },
+    baseRefName: "main",
+    body: state.pullRequest.body,
+    editor: { login: operator },
+    headRefName: state.pullRequest.branch,
+    headRefOid: state.pullRequest.head,
+    headRepositoryOwner: { login: "cobuildwithus" },
+    isCrossRepository: false,
+    isDraft: true,
+    lastEditedAt: "2030-01-01T00:00:00Z",
+    mergedAt: null,
+    number: 99,
+    state: "OPEN",
+  }] : [];
+  process.stdout.write(JSON.stringify([{ data: { repository: {
+    pullRequests: {
+      nodes,
+      pageInfo: { endCursor: null, hasNextPage: false },
+      totalCount: nodes.length,
+    },
+  } } }]));
+  process.exit(0);
+}
+if (args[0] === "pr" && (args[1] === "create" || args[1] === "edit")) {
+  const bodyPath = args[args.indexOf("--body-file") + 1];
+  const branch = args.includes("--head")
+    ? args[args.indexOf("--head") + 1]
+    : state.pullRequest?.branch;
+  const remoteHead = execFileSync(
+    "git",
+    ["ls-remote", "--refs", "origin", "refs/heads/" + branch],
+    { encoding: "utf8" },
+  ).trim().split(/\\s+/u)[0];
+  state.pullRequest = {
+    body: readFileSync(bodyPath, "utf8"),
+    branch,
+    head: remoteHead,
+  };
+  save();
+  process.stdout.write("https://example.invalid/pull/99\\n");
+  process.exit(0);
+}
+process.stderr.write("unsupported gh test command\\n");
+process.exit(2);
+`);
+        chmodSync(path.join(bin, "gh"), 0o755);
+        writeFileSync(harnessPath, `
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import {
+  FROG_AUTOFIX_PR_BODY_PATH,
+} from ${JSON.stringify(path.join(repositoryRoot, "scripts", "frog-autofix-parent.ts"))};
+import { persistRepairHandoff } from ${JSON.stringify(path.join(repositoryRoot, "scripts", "frog-autofix.ts"))};
+
+const [primary, worktree, branch] = process.argv.slice(2);
+try {
+  const pullRequest = persistRepairHandoff({
+    branch,
+    expectedPullRequest: null,
+    issueNumber: 42,
+    primary,
+    recoveredExistingBody: readFileSync(
+      path.join(worktree, FROG_AUTOFIX_PR_BODY_PATH),
+      "utf8",
+    ),
+    task: ${JSON.stringify(taskIdentity)},
+    worktree,
+  });
+  process.stdout.write(JSON.stringify({ ok: true, pullRequest }));
+} catch (error) {
+  process.stdout.write(JSON.stringify({
+    ok: false,
+    message: error instanceof Error ? error.message : "unknown",
+  }));
+}
+`);
+
+        let handoff: string;
+        if (interruption === "before-body-rewrite") {
+          handoff = createEmptyRepairHandoffCommit(worktree, 42);
+          writeFileSync(
+            path.join(worktree, "base.txt"),
+            "interrupted reset residue\n",
+          );
+        } else {
+          writeState({ failAuthOnce: true, pullRequest: null });
+          const previousPath = process.env.PATH;
+          process.env.PATH = `${bin}:${previousPath ?? ""}`;
+          try {
+            expect(() => persistRepairHandoff({
+              branch,
+              expectedPullRequest: null,
+              issueNumber: 42,
+              primary,
+              recoveredExistingBody: readFileSync(bodyPath, "utf8"),
+              task: taskIdentity,
+              worktree,
+            })).toThrow("gh failed with status 1");
+          } finally {
+            process.env.PATH = previousPath;
+          }
+          handoff = git(worktree, "rev-parse", "HEAD");
+        }
+        const interruptedBody = readFileSync(bodyPath, "utf8");
+        expect(terminalHandoffPreviousRemoteHead(
+          interruptedBody,
+          handoff,
+        )).toBe(candidate);
+
+        let retainedRemoteHandoff: string | null = null;
+        if (
+          interruption === "after-body-rewrite"
+          && remoteMove === "exact"
+        ) {
+          git(
+            worktree,
+            "push",
+            "--force",
+            "origin",
+            `${handoff}:refs/heads/${branch}`,
+          );
+          retainedRemoteHandoff = handoff;
+          writeFileSync(
+            path.join(primary, "AGENTS.md"),
+            "trusted instructions v3\n",
+          );
+          git(primary, "add", "AGENTS.md");
+          git(primary, "commit", "--quiet", "-m", "advance authority again");
+          git(primary, "push", "origin", "main");
+          git(worktree, "fetch", "--quiet", "origin", "main");
+          handoff = createEmptyRepairHandoffCommit(worktree, 42);
+          expect(terminalHandoffPreviousRemoteHead(
+            readFileSync(bodyPath, "utf8"),
+            handoff,
+            retainedRemoteHandoff,
+          )).toBe(candidate);
+        }
+
+        let foreign: string | null = null;
+        if (remoteMove === "foreign") {
+          foreign = git(
+            worktree,
+            "commit-tree",
+            `${candidate}^{tree}`,
+            "-p",
+            candidate,
+            "-m",
+            "foreign move",
+          );
+          git(
+            worktree,
+            "push",
+            "--force",
+            "origin",
+            `${foreign}:refs/heads/${branch}`,
+          );
+        }
+
+        const recovered = invokePersist();
+        if (foreign) {
+          expect(recovered.ok).toBe(false);
+          expect(recovered.message).toContain("unproven remote issue branch");
+          expect(git(origin, "rev-parse", `refs/heads/${branch}`)).toBe(foreign);
+          expect(readState().pullRequest).toBeNull();
+          return;
+        }
+
+        expect(recovered).toEqual({ ok: true, pullRequest: 99 });
+        const recoveredHead = git(worktree, "rev-parse", "HEAD");
+        expect(git(worktree, "rev-parse", `${recoveredHead}^{tree}`))
+          .toBe(git(worktree, "rev-parse", "origin/main^{tree}"));
+        expect(recoveredHead).toBe(handoff);
+        if (retainedRemoteHandoff) {
+          expect(recoveredHead).not.toBe(retainedRemoteHandoff);
+        }
+        expect(git(origin, "rev-parse", `refs/heads/${branch}`))
+          .toBe(recoveredHead);
+        const recoveredBody = readFileSync(bodyPath, "utf8");
+        expect(extractFirstReviewedHead(recoveredBody)).toBe(candidate);
+        expect(bodyHandoff(recoveredBody, recoveredHead)).toBe("review-findings");
+        expect(readState().pullRequest).toEqual({
+          body: recoveredBody,
+          branch,
+          head: recoveredHead,
+        });
+      } finally {
+        rmSync(root, { force: true, recursive: true });
+      }
+    };
+
+    runRecovery("before-body-rewrite", "exact");
+    runRecovery("after-body-rewrite", "exact");
+    runRecovery("after-body-rewrite", "foreign");
+  }, 600_000);
 
   it("paginates foreign PR history before enforcing parent-owned cardinality", () => {
     const branch = "agent/frog-autofix-42";
@@ -4066,8 +4477,20 @@ esac
       })).toBe(head);
       expect(() => authorizedTerminalHandoffLease({
         currentHandoffHead: nextHead,
+        observedRemoteHead: nextHead,
+        previousHandoffHead: head,
+      })).toThrow("unproven remote issue branch");
+      expect(authorizedTerminalHandoffLease({
+        currentHandoffHead: nextHead,
+        observedRemoteHead: nextHead,
+        previousHandoffHead: head,
+        retainedHandoffHeads: [nextHead],
+      })).toBe(nextHead);
+      expect(() => authorizedTerminalHandoffLease({
+        currentHandoffHead: nextHead,
         observedRemoteHead: "c".repeat(40),
         previousHandoffHead: head,
+        retainedHandoffHeads: [nextHead],
       })).toThrow("unproven remote issue branch");
 
       writeFileSync(path.join(root, "tracked.txt"), "descendant candidate\n");
@@ -4109,7 +4532,7 @@ esac
     } finally {
       rmSync(root, { force: true, recursive: true });
     }
-  });
+  }, 180_000);
 
   it("recovers only dead or PID-reused locks and preserves live ownership", () => {
     const root = mkdtempSync(path.join(tmpdir(), "frog-autofix-lock-"));
@@ -4256,20 +4679,20 @@ esac
     const leader = [
       "const{spawn}=require('node:child_process');",
       `const child=spawn(process.execPath,['-e',${JSON.stringify(descendant)}],{stdio:'ignore'});`,
-      "process.stdout.write(String(child.pid));",
+      "child.once('spawn',()=>process.stdout.write(String(process.pid)+':'+String(child.pid)));",
       "process.on('SIGTERM',()=>process.exit(0));",
       "setInterval(()=>{},1000);",
     ].join("");
     const result = spawnSync(process.execPath, [
       path.join(repositoryRoot, "node_modules", "tsx", "dist", "cli.mjs"),
       path.join(repositoryRoot, "scripts", "frog-autofix-command.ts"),
-      "150",
+      "1000",
       repositoryRoot,
       "--",
       process.execPath,
       "-e",
       leader,
-    ], { encoding: "utf8", timeout: 5_000 });
+    ], { encoding: "utf8", timeout: 15_000 });
     expect(result.error).toBeUndefined();
     const envelope = JSON.parse(result.stdout) as {
       status: number;
@@ -4277,13 +4700,18 @@ esac
       timedOut: boolean;
     };
     expect(envelope.timedOut).toBe(true);
-    const descendantPid = Number(envelope.stdout);
+    const [leaderPidRaw, descendantPidRaw] = envelope.stdout.split(":");
+    const leaderPid = Number(leaderPidRaw);
+    const descendantPid = Number(descendantPidRaw);
+    expect(Number.isSafeInteger(leaderPid)).toBe(true);
     expect(Number.isSafeInteger(descendantPid)).toBe(true);
-    const reapDeadline = Date.now() + 2_000;
+    expect(descendantPid).not.toBe(leaderPid);
+    const processGroupId = -leaderPid;
+    const reapDeadline = Date.now() + 5_000;
     let disappeared = false;
     while (Date.now() < reapDeadline) {
       try {
-        process.kill(descendantPid, 0);
+        process.kill(processGroupId, 0);
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code === "ESRCH") {
           disappeared = true;

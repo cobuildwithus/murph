@@ -105,10 +105,15 @@ exactly `origin/main`, and publishes the fixed draft body with an exact-head
 `review-findings` handoff. The private body records that disposition before any
 remote operation, so recovery recognizes it before branch synchronization or
 another implementation turn. A newly appeared remote ref is preserved; only
-the exact retained neutral handoff head from an interrupted parent push can
-authorize a lease-based refresh, while a branch-creation push uses an explicit
-nonexistence lease. It never requests a second implementation; browser,
-ReviewGPT, command, and GitHub infrastructure unavailability remains retryable.
+the exact pre-normalization candidate retained as the immutable first-reviewed
+head, or the exact current neutral handoff after its own interrupted push, can
+authorize a lease-based refresh. Neutral normalization and every body restamp
+preserve that candidate proof across process restarts; a branch-creation push
+uses an explicit nonexistence lease. When fresh `main` requires another neutral
+commit, the prior body binding remains in place until the exact leased push
+succeeds, then the parent atomically restamps the new neutral head. It never
+requests a second implementation; browser, ReviewGPT, command, and GitHub
+infrastructure unavailability remains retryable.
 The post-worker task refresh runs only after the parent has committed the local
 candidate and outside deterministic worker-output classification, so an
 infrastructure failure preserves that exact resumable commit while an actual
@@ -201,6 +206,10 @@ it cannot starve the queue. Only a newly verified parent merge may precede
 issue closure. The invocation has one eight-hour deadline; each model
 worker is bounded to two hours and every spawned command or worker has exact
 process-group ownership.
+An admitted foreground run emits fixed, content-free progress lines before its
+implementation/worker, review, required-check, and merge waits, plus an explicit
+success or existing durable-handoff terminal line. Those messages contain no
+issue content, model/provider detail, or local path and add no durable state.
 
 The native mutating shell entry reconciles the clean primary dependency tree
 with `pnpm install --frozen-lockfile --ignore-scripts` before loading the

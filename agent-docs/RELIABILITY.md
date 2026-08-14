@@ -99,6 +99,11 @@ Last verified: 2026-08-14
   checks and a
   current-base conflict instead publish the existing review-findings handoff so
   the oldest issue cannot pin later work.
+  A foreground run prints fixed, content-free progress at task admission and
+  before implementation/worker, review, required-check, and merge waits. A
+  successful merge/closure and every durable human handoff print an explicit
+  terminal line; these messages add no state and reveal no issue content,
+  provider/model detail, or local path.
   The post-worker task refresh is outside deterministic worker-output
   classification and follows the parent commit. A fetch or GitHub failure
   therefore leaves that exact commit resumable, while a proven task-identity
@@ -173,11 +178,15 @@ Last verified: 2026-08-14
   overlapping the next invocation. The last scope evaluation cannot fetch past
   that fence: it uses the caller-fetched ref, then
   the parent performs the final task comparison. A local terminal marker is
-  recovered before remote synchronization. Remote replacement is authorized
-  only by an exact locally retained neutral handoff head from a proven parent
-  push; a newly appeared or different deterministic branch is preserved and
-  fails closed, including through an explicit nonexistence lease on branch
-  creation. Before merge it
+  recovered before remote synchronization. Its immutable first-reviewed head
+  retains the exact pre-normalization candidate when the local branch becomes
+  a neutral current-main handoff. Across a restart, only that candidate or the
+  exact body-bound or local neutral heads can satisfy the force-with-lease.
+  Re-normalization keeps the prior body binding until its leased push succeeds,
+  then atomically restamps the new neutral head. A newly appeared or different
+  deterministic branch is preserved and fails
+  closed, including through an explicit nonexistence lease on branch creation.
+  Before merge it
   revalidates live issue authority, PR head, exact parent body digest/editor/
   issue binding, required checks, current-base mergeability, and both old and
   new paths of any rename or copy. Only the enumerated Frog autofix script files,

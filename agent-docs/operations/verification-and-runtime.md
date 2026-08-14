@@ -648,8 +648,9 @@ reads, trusted remote-no-PR task provenance, terminal missing or
 rejected patch/response and edit-only worker outcomes that publish a fixed-body
 empty-tree handoff without candidate bytes or a second implementation, local
 terminal recovery before remote synchronization, foreign deterministic-branch
-preservation, exact retained-handoff and branch-nonexistence lease
-authorization, plus
+preservation, cross-process pre/post-neutral-body recovery using the immutable
+first-reviewed candidate, exact current-neutral/candidate and branch-
+nonexistence lease authorization, plus
 retryable post-worker authority infrastructure after the parent commit,
 unchanged-PR ancestor normalization that preserves the pre-remote PR-head
 marker while discarding unpushed candidate bytes without a push, non-ancestor
@@ -687,7 +688,9 @@ and canonical preliminary/final ZIPs with exact task/skill bytes and manifests
 plus fail-closed omission proof and filename-independent exactly-one bounded
 regular-archive selection with stale parent-owned archive replacement on retry,
 an explicit Frog script allowlist that excludes the GitHub Actions-owned
-`scripts/frog-pr-context.ts` on direct/rename/copy paths. A macOS
+`scripts/frog-pr-context.ts` on direct/rename/copy paths, and fixed content-free
+foreground admission/implementation/review/check/merge progress with an
+explicit success terminal line. A macOS
 permission smoke must also apply the exact native worker profile and prove an
 in-worktree read/write succeeds while an outside-root read and a network
 request fail:

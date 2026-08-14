@@ -2,21 +2,24 @@
 
 Status: completed
 Created: 2026-08-13
-Updated: 2026-08-13
+Updated: 2026-08-14
 
 ## Goal
 
-- Install and activate the already reviewed local Frog autofix source in the
-  Murph repository, then prove one genuine eligible Frog issue reaches its
-  intended GitHub terminal state under the existing authority gates.
+- Publish the reviewed local Frog autofix in the canonical `cobuild-agents`
+  package, vendor that exact release into Murph, then prove one genuine
+  eligible Frog issue reaches its intended GitHub terminal state under the
+  existing authority gates.
 
 ## Success criteria
 
-- Current Murph `main` contains the byte-identical reviewed Frog runtime and
-  the target-local package, review-packaging, architecture, security,
-  reliability, and verification contracts it requires.
+- `cobuild-agents` owns the checked standalone package, and current Murph
+  `main` contains its byte-identical runtime plus the target-local package,
+  review-packaging, architecture, security, reliability, and verification
+  contracts it requires.
 - Focused Frog, review-packaging, shell, typecheck, documentation, privacy, and
-  permission checks pass; required exact-head CI and ReviewGPT gates pass.
+  permission checks pass; required exact-head CI passes and all accepted
+  findings from completed ReviewGPT rounds 1–4 are resolved.
 - The clean primary checkout installs a two-hour LaunchAgent and reports
   `loaded=yes`.
 - A foreground invocation admits one real App-authored, committed Frog issue
@@ -25,11 +28,11 @@ Updated: 2026-08-13
 
 ## Scope
 
-- In scope: target-embedded Frog runtime, package entrypoint, canonical
-  target-local contracts and proof, installation, one observed real run.
-- Out of scope: changes to the private source repository, product/runtime
-  behavior, new issue fabrication, bypassing branch protection, broad cleanup
-  of the existing Frog backlog.
+- In scope: canonical `cobuild-agents` source synchronization and package
+  proof, target-embedded Frog runtime, package entrypoint, target-local
+  contracts and proof, installation, and one observed real run.
+- Out of scope: product/runtime behavior, new issue fabrication, bypassing
+  branch protection, and broad cleanup of the existing Frog backlog.
 
 ## Constraints
 
@@ -57,20 +60,22 @@ Updated: 2026-08-13
 
 1. Merge the existing App-owned reconciliation PR after its required checks so
    committed issue bindings exist on `main`.
-2. Integrate the reviewed runtime and target-local controls on a sanctioned
-   activation branch.
+2. Synchronize the standalone canonical package, then integrate its exact
+   runtime and target-local controls on a sanctioned activation branch.
 3. Run focused verification, inspect the complete diff, and publish a draft PR.
-4. Complete preliminary and final ReviewGPT gates concurrently with CI,
-   remediate any accepted findings, and merge without bypass.
+4. Complete the preliminary pass and final ReviewGPT rounds 1–4 concurrently
+   with CI, remediate every accepted finding, then honor the operator's explicit
+   direction to stop further ReviewGPT rounds and merge without bypass.
 5. Install from the exact clean primary checkout, verify permissions/status,
    run once in the foreground, and babysit the resulting issue/PR lifecycle.
 
 ## Decisions
 
 - Reuse the existing real Frog backlog; do not create a synthetic issue.
-- Treat private-repository publication as source ownership only. Activation is
-  a separate Murph target deployment because the runtime's trust fences are
-  deliberately target-local.
+- Treat `cobuild-agents` as the editable source owner. Activation remains a
+  separate Murph target deployment because the runtime's trust fences are
+  deliberately target-local; target-only corrections are incomplete until
+  synchronized back to the canonical package.
 - Preserve the persistent `frog/sync` branch when merging reconciliation PRs.
 - Reuse the reviewed source byte-for-byte from the private source repository;
   integrate only its isolated target-local contract sections into current
@@ -155,6 +160,27 @@ replace that proven remote head with the existing neutral handoff under an
 exact force-with-lease. No new durable state, service, or authority owner is
 introduced; an unproven remote move still fails closed.
 
+ReviewGPT round 3 proved that the post-push candidate lease could not depend on
+invocation-local callback state. The correction removed that callback and its
+publication-attempt plumbing, captured the synchronized deterministic branch
+head before neutral normalization, and kept the observed-remote comparison on
+an exact force-with-lease. A two-process regression now starts from the exact
+pushed candidate and rejects a foreign remote move.
+
+ReviewGPT round 4 found the remaining crash windows inside terminal handoff
+normalization: a restart before or after the body restamp could otherwise
+forget the pre-normalization candidate or an exact already-pushed neutral head.
+The final correction keeps the candidate in the parent-owned immutable
+first-reviewed-head field, recognizes exact body-bound prior neutral commits,
+materializes a new neutral commit before moving the branch, and defers the body
+restamp until its exact leased push succeeds. Every other remote SHA still
+fails closed. The same round also found that an admitted multi-hour foreground
+run was silent. Fixed, content-free admission, implementation/worker, review,
+required-check, merge, and success-terminal lines now expose phase progress
+without adding state or revealing issue content, provider/model detail, or
+local paths. The operator explicitly ended the ReviewGPT loop after these
+accepted corrections; no fifth round was run.
+
 ## Verification
 
 - `pnpm exec vitest run scripts/frog-autofix.test.ts --config scripts/vitest.config.ts --no-coverage`
@@ -162,13 +188,24 @@ introduced; an unproven remote move still fails closed.
 - `bash -n scripts/frog-autofix scripts/package-audit-context-full.sh`
 - `scripts/frog-autofix verify-permissions` and `scripts/frog-autofix scan`
 - Murph typecheck, docs/reference checks, privacy scan, exact-head required CI,
-  preliminary specialist ReviewGPT, final ReviewGPT, and current-base
-  `git merge-tree --write-tree` must all pass.
+  canonical-source `pnpm check`, and current-base `git merge-tree --write-tree`
+  must all pass. ReviewGPT evidence ends with rounds 1–4 by explicit operator
+  direction; every finding from those completed rounds is accepted and fixed.
 
 Current candidate proof:
 
-- Frog suite: 54 passed, including fresh protected-main instruction drift and
-  post-push task-drift lease recovery.
+- Canonical source: `cobuildwithus/cobuild-agents#4` merged as
+  `27af99711d2995bef16535be80245e9ca2c936f4`; all ten release files and
+  three target-control fixtures matched Murph byte-for-byte before merge, and
+  the two native entrypoints retained executable mode.
+- Canonical package: TypeScript and shell/bootstrap checks passed, and all 56
+  Frog tests passed. The repository-level check then reached only unchanged
+  production-watch failures; four exact failures reproduced on clean
+  `cobuild-agents` main. GitHub-hosted checks could not start because the
+  repository account's Actions budget was exhausted.
+- Frog suite: 56 tests, including fresh protected-main instruction drift,
+  two-process pre/post-neutral-restamp lease recovery, foreign remote rejection,
+  and fixed content-free foreground phase output.
 - Full repository-tools suite: 595 passed.
 - ReviewGPT packager regression suite: 43 passed, 1 existing
   environment-dependent skip.

@@ -1,6 +1,6 @@
 # Security
 
-Last verified: 2026-08-13
+Last verified: 2026-08-14
 
 ## Local Frog autofix authority
 
@@ -194,12 +194,15 @@ Last verified: 2026-08-13
   exact-head review-findings handoff. The private body receives the terminal
   marker before authenticated-operator lookup, PR traversal, fetch, issue
   verification, remote lookup, push, or PR creation, and recovery consumes it
-  before branch synchronization or model work. A newly appeared remote branch
-  grants no replacement authority. Force-with-lease is allowed only when its
-  expected SHA is the exact neutral handoff head already retained in local
-  provenance after an interrupted parent push; a new branch uses an empty
-  expected-SHA lease so a concurrent creator wins and Frog fails closed. Model
-  prose never enters that PR.
+  before branch synchronization or model work. Its immutable first-reviewed
+  head preserves the exact pre-normalization candidate through the neutral
+  commit and every parent body restamp. After restart, force-with-lease accepts
+  only that exact candidate or the exact current neutral handoff already pushed
+  by the parent; every different remote move fails closed. A new branch uses an
+  empty expected-SHA lease so a concurrent creator wins. If fresh `main`
+  requires another neutral commit, the body keeps its prior neutral binding
+  until the exact leased push succeeds and only then atomically restamps the
+  new head. Model prose never enters that PR.
   ReviewGPT/browser/command/GitHub infrastructure unavailability remains
   retryable and does not manufacture a terminal classification. In particular,
   the post-worker task refresh happens after the parent commit and outside the

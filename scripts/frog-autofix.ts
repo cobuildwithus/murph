@@ -2593,7 +2593,37 @@ export function createEmptyRepairHandoffCommit(
   worktree: string,
   issueNumber: number,
 ): string {
-  requireCommand("git", ["reset", "--hard", "origin/main"], worktree);
+  const neutralIdentity: NodeJS.ProcessEnv = {
+    GIT_AUTHOR_EMAIL: "frog-autofix@users.noreply.github.com",
+    GIT_AUTHOR_NAME: "Frog Autofix",
+    GIT_COMMITTER_EMAIL: "frog-autofix@users.noreply.github.com",
+    GIT_COMMITTER_NAME: "Frog Autofix",
+  };
+  const main = requireCommand("git", ["rev-parse", "origin/main"], worktree);
+  const mainTree = requireCommand(
+    "git",
+    ["rev-parse", "origin/main^{tree}"],
+    worktree,
+  );
+  // Materialize the neutral object before moving the branch. A restart then
+  // sees either the original candidate or one structurally exact handoff,
+  // never a temporary current-main head with no durable lease provenance.
+  const head = requireCommand(
+    "git",
+    [
+      "-c",
+      "commit.gpgSign=false",
+      "commit-tree",
+      mainTree,
+      "-p",
+      main,
+      "-m",
+      `Hand off Frog issue #${issueNumber}`,
+    ],
+    worktree,
+    neutralIdentity,
+  );
+  requireCommand("git", ["reset", "--hard", head], worktree);
   requireCommand(
     "git",
     ["clean", "-ffdx", "-e", FROG_AUTOFIX_PR_BODY_PATH],
@@ -2602,37 +2632,14 @@ export function createEmptyRepairHandoffCommit(
   if (requireCommand("git", ["status", "--porcelain"], worktree)) {
     throw new Error("terminal repair handoff did not recover a clean worktree");
   }
-  const neutralIdentity: NodeJS.ProcessEnv = {
-    GIT_AUTHOR_EMAIL: "frog-autofix@users.noreply.github.com",
-    GIT_AUTHOR_NAME: "Frog Autofix",
-    GIT_COMMITTER_EMAIL: "frog-autofix@users.noreply.github.com",
-    GIT_COMMITTER_NAME: "Frog Autofix",
-  };
-  requireCommand(
-    "git",
-    [
-      "-c",
-      "commit.gpgSign=false",
-      "-c",
-      "core.hooksPath=/dev/null",
-      "commit",
-      "--allow-empty",
-      "--no-verify",
-      "-m",
-      `Hand off Frog issue #${issueNumber}`,
-    ],
-    worktree,
-    neutralIdentity,
-  );
-  const head = requireCommand("git", ["rev-parse", "HEAD"], worktree);
   const handoffTree = requireCommand("git", ["rev-parse", "HEAD^{tree}"], worktree);
-  const mainTree = requireCommand(
+  const currentMainTree = requireCommand(
     "git",
     ["rev-parse", "origin/main^{tree}"],
     worktree,
   );
   if (
-    handoffTree !== mainTree
+    handoffTree !== currentMainTree
     || requireCommand("git", ["status", "--porcelain"], worktree)
   ) {
     throw new Error("terminal repair handoff commit contains candidate bytes");
@@ -2640,7 +2647,7 @@ export function createEmptyRepairHandoffCommit(
   return head;
 }
 
-export function isEmptyRepairHandoffCommit(
+function isRepairHandoffCommitObject(
   worktree: string,
   head: string,
   issueNumber: number,
@@ -2666,8 +2673,53 @@ export function isEmptyRepairHandoffCommit(
     && parentTree.stdout.trim() === headTree.stdout.trim()
     && metadata.status === 0
     && metadata.stdout.trim()
-      === `Frog Autofix\nfrog-autofix@users.noreply.github.com\nHand off Frog issue #${issueNumber}`
+      === `Frog Autofix\nfrog-autofix@users.noreply.github.com\nHand off Frog issue #${issueNumber}`;
+}
+
+export function isEmptyRepairHandoffCommit(
+  worktree: string,
+  head: string,
+  issueNumber: number,
+): boolean {
+  return isRepairHandoffCommitObject(worktree, head, issueNumber)
     && !requireCommand("git", ["status", "--porcelain"], worktree);
+}
+
+function restoreEmptyRepairHandoffCommit(
+  worktree: string,
+  head: string,
+  issueNumber: number,
+): boolean {
+  if (!isRepairHandoffCommitObject(worktree, head, issueNumber)) return false;
+  requireCommand("git", ["reset", "--hard", head], worktree);
+  requireCommand(
+    "git",
+    ["clean", "-ffdx", "-e", FROG_AUTOFIX_PR_BODY_PATH],
+    worktree,
+  );
+  if (requireCommand("git", ["status", "--porcelain"], worktree)) {
+    throw new Error("terminal repair handoff did not recover a clean worktree");
+  }
+  return true;
+}
+
+export function terminalHandoffPreviousRemoteHead(
+  body: string,
+  currentHead: string,
+  retainedRemoteHead?: string,
+): string {
+  const handoff = bodyHandoffRecord(body);
+  const firstHead = extractFirstReviewedHead(body);
+  if (
+    handoff?.kind === "review-findings"
+    && firstHead
+    && (handoff.head === currentHead
+      || handoff.head === firstHead
+      || handoff.head === retainedRemoteHead)
+  ) {
+    return firstHead;
+  }
+  return currentHead;
 }
 
 function remoteIssueBranchHead(worktree: string, branch: string): string | null {
@@ -2690,8 +2742,13 @@ export function authorizedTerminalHandoffLease(options: {
   currentHandoffHead: string;
   observedRemoteHead: string | null;
   previousHandoffHead: string;
+  retainedHandoffHeads?: readonly string[];
 }): string {
-  for (const head of [options.currentHandoffHead, options.previousHandoffHead]) {
+  for (const head of [
+    options.currentHandoffHead,
+    options.previousHandoffHead,
+    ...(options.retainedHandoffHeads ?? []),
+  ]) {
     if (!/^[0-9a-f]{40}$/u.test(head)) {
       throw new Error("terminal handoff head is invalid");
     }
@@ -2699,6 +2756,7 @@ export function authorizedTerminalHandoffLease(options: {
   if (
     options.observedRemoteHead
     && options.observedRemoteHead !== options.previousHandoffHead
+    && !options.retainedHandoffHeads?.includes(options.observedRemoteHead)
   ) {
     throw new Error("unproven remote issue branch cannot be replaced");
   }
@@ -2752,7 +2810,7 @@ export function normalizeUnpushedDescendantToPullRequestHead(
   return pullRequestHead;
 }
 
-function persistRepairHandoff(options: {
+export function persistRepairHandoff(options: {
   branch: string;
   expectedPullRequest: BranchPullRequestRecord | null;
   failure?: TerminalPrePullRequestFailureClass;
@@ -2763,7 +2821,9 @@ function persistRepairHandoff(options: {
   worktree: string;
 }): number {
   let head = requireCommand("git", ["rev-parse", "HEAD"], options.worktree);
-  const previousHandoffHead = head;
+  let previousHandoffHead = head;
+  const retainedHandoffHeads: string[] = [];
+  let deferBodyWriteUntilPush = false;
   let firstHead: string | undefined;
   if (options.recoveredExistingBody) {
     try {
@@ -2797,7 +2857,7 @@ function persistRepairHandoff(options: {
           options.issueNumber,
         );
         if (
-          bodyHandoff(candidate, head) === "review-findings"
+          bodyHandoffRecord(candidate)?.kind === "review-findings"
           && (options.task === undefined
             || (extractFrogTaskIdentity(candidate)?.path === options.task.path
               && extractFrogTaskIdentity(candidate)?.sha256 === options.task.sha256))
@@ -2812,13 +2872,59 @@ function persistRepairHandoff(options: {
     }
     if (
       retainedBody
-      && isEmptyRepairHandoffCommit(options.worktree, head, options.issueNumber)
+      && restoreEmptyRepairHandoffCommit(
+        options.worktree,
+        head,
+        options.issueNumber,
+      )
     ) {
-      body = retainedBody;
+      const retainedHandoff = bodyHandoffRecord(retainedBody);
+      const retainedFirstHead = extractFirstReviewedHead(retainedBody);
+      let retainedRemoteHead: string | undefined;
+      retainedHandoffHeads.push(head);
+      deferBodyWriteUntilPush = true;
+      if (retainedHandoff?.head === head) {
+        retainedRemoteHead = head;
+      } else if (
+        retainedHandoff?.kind === "review-findings"
+        && retainedFirstHead
+        && retainedHandoff.head !== retainedFirstHead
+        && isRepairHandoffCommitObject(
+          options.worktree,
+          retainedHandoff.head,
+          options.issueNumber,
+        )
+      ) {
+        retainedRemoteHead = retainedHandoff.head;
+        retainedHandoffHeads.push(retainedRemoteHead);
+      }
+      previousHandoffHead = terminalHandoffPreviousRemoteHead(
+        retainedBody,
+        head,
+        retainedRemoteHead,
+      );
+      if (
+        retainedHandoff?.kind !== "review-findings"
+        || (retainedHandoff.head !== head
+          && retainedHandoff.head !== previousHandoffHead
+          && retainedHandoff.head !== retainedRemoteHead)
+      ) {
+        throw new Error("terminal repair handoff lost its prior remote proof");
+      }
+      body = renderTerminalRepairHandoffBody({
+        failure: options.failure,
+        firstHead: previousHandoffHead,
+        head,
+        issueNumber: options.issueNumber,
+        task: options.task,
+      });
+      if (!deferBodyWriteUntilPush) {
+        writePrivateFileAtomically(bodyPath, body, 0o600);
+      }
     } else {
       body = renderTerminalRepairHandoffBody({
         failure: options.failure,
-        firstHead: head,
+        firstHead: previousHandoffHead,
         head,
         issueNumber: options.issueNumber,
         task: options.task,
@@ -2830,7 +2936,7 @@ function persistRepairHandoff(options: {
       );
       body = renderTerminalRepairHandoffBody({
         failure: options.failure,
-        firstHead: head,
+        firstHead: previousHandoffHead,
         head,
         issueNumber: options.issueNumber,
         task: options.task,
@@ -2947,17 +3053,20 @@ function persistRepairHandoff(options: {
     head = createEmptyRepairHandoffCommit(options.worktree, options.issueNumber);
     body = renderTerminalRepairHandoffBody({
       failure: options.failure,
-      firstHead: head,
+      firstHead: previousHandoffHead,
       head,
       issueNumber: options.issueNumber,
       task: options.task,
     });
-    writePrivateFileAtomically(bodyPath, body, 0o600);
+    if (!deferBodyWriteUntilPush) {
+      writePrivateFileAtomically(bodyPath, body, 0o600);
+    }
   }
   authorizedLeaseHead = authorizedTerminalHandoffLease({
     currentHandoffHead: head,
     observedRemoteHead,
     previousHandoffHead,
+    retainedHandoffHeads,
   });
   const pullRequest = publishDraftRepair(head, {
     createPullRequest: () => requireCommand(
@@ -2996,21 +3105,26 @@ function persistRepairHandoff(options: {
       number,
       body,
     ),
-    pushExactHead: () => requireCommand(
-      "git",
-      [
-        "-c",
-        "core.hooksPath=/dev/null",
-        "push",
-        "--set-upstream",
-        `--force-with-lease=refs/heads/${options.branch}:${authorizedLeaseHead}`,
-        "origin",
-        `${head}:refs/heads/${options.branch}`,
-      ],
-      options.worktree,
-      {},
-      30 * 60 * 1_000,
-    ),
+    pushExactHead: () => {
+      requireCommand(
+        "git",
+        [
+          "-c",
+          "core.hooksPath=/dev/null",
+          "push",
+          "--set-upstream",
+          `--force-with-lease=refs/heads/${options.branch}:${authorizedLeaseHead}`,
+          "origin",
+          `${head}:refs/heads/${options.branch}`,
+        ],
+        options.worktree,
+        {},
+        30 * 60 * 1_000,
+      );
+      if (deferBodyWriteUntilPush) {
+        writePrivateFileAtomically(bodyPath, body, 0o600);
+      }
+    },
     refreshAndVerifyIssue: () => {
       fetchMain(options.primary);
       verifyIssueAuthority(options.primary, options.issueNumber);
@@ -4111,6 +4225,7 @@ async function reviewPublishAndFinalize(options: {
   } else if (draft !== "false") {
     throw new Error("GitHub returned an invalid pull request draft state");
   }
+  console.log("Frog autofix is waiting for required checks.");
   const checkWatch = runCommand(
     "gh",
     [
@@ -4139,6 +4254,7 @@ async function reviewPublishAndFinalize(options: {
       return "awaiting-human";
     }
   }
+  console.log("Frog autofix is finalizing the protected merge.");
   const result = finalizeReviewedRepair(
     options.primary,
     options.worktree,
@@ -4223,6 +4339,7 @@ async function runOnce() {
     }
     verifyExactIssue(primary, issue.number);
     const admittedTask = committedFrictionTask(primary, issue.number);
+    console.log("Frog autofix admitted one trusted repair task.");
     const branch = `${FROG_AUTOFIX_BRANCH_PREFIX}${issue.number}`;
     const repairPullRequests = branchPullRequests(
       primary,
@@ -4394,6 +4511,7 @@ async function runOnce() {
       );
 
       if (workerMode === "implement") {
+        console.log("Frog autofix is preparing the implementation candidate.");
         ensureWorkerTooling(worktree, true);
         const implementation = runParentReview({
           issueNumber: issue.number,
@@ -4435,6 +4553,7 @@ async function runOnce() {
           validatedWorkerPrBody(worktree, issue.number);
         } else {
           ensureWorkerTooling(worktree, workerMode === "implement");
+          console.log("Frog autofix is running the edit-only worker.");
           await runEditOnlyCycle({
             codexHome: readConfiguredCodexHome(),
             issueNumber: issue.number,
@@ -4448,6 +4567,7 @@ async function runOnce() {
           });
         }
       }
+      console.log("Frog autofix is publishing and reviewing the repair.");
       const result = await reviewPublishAndFinalize({
         branch,
         issueNumber: issue.number,
@@ -4466,6 +4586,7 @@ async function runOnce() {
         return;
       }
       recordEvent("repair_closed_issue", issue.number);
+      console.log("Frog autofix merged the repair and closed its bound issue.");
       retireMergedWorktree(primary, worktree, branch, issue.number);
       return;
     } catch (error) {
