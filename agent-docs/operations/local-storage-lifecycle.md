@@ -77,21 +77,23 @@ Use `scripts/create-worktree`; use `--data-research <reason>` only for genuinely
 large data or research work. Registered worktrees remain visible to the normal
 open-PR, plan, cleanliness, process-CWD, and retirement gates.
 
-The creation helper registers each worktree with checkout materialization
-suppressed, writes `.metadata_never_index` at the worktree root, and only then
-materializes tracked files so macOS Spotlight cannot observe the initial
-checkout contents before the exclusion exists. It also adds the root marker to
-the repository's common local exclude file so the marker never appears as
-worktree dirt. Keep the marker in place for the worktree's lifetime.
+The creation helper prepares the shared local exclude rule before registration,
+registers each worktree with checkout materialization suppressed, and writes
+`.metadata_never_index` at the worktree root before tracked files exist. It then
+materializes the checkout and invokes the configured `post-checkout` hook once
+from the canonical target root with Git's worktree-add arguments and launch
+environment. The launcher clears repository-local variables, sets Git's exec
+path and empty prefix, prepends the exec path to `PATH`, and removes Murph's
+lock-held flags so hook descendants must acquire the real creation lock instead
+of inheriting authority to bypass it. Keep the marker in place for the
+worktree's lifetime.
 
-After materialization, the helper invokes the configured `post-checkout` hook
-once from the canonical worktree root with Git's repository-local environment
-variables cleared, matching native `git worktree add` behavior. If
-materialization fails, the helper removes only the exact worktree it just
-registered while the creation lock is still held, preserves the created branch
-for retry, skips `post-checkout`, and returns the materialization failure. A
-failed rollback is reported explicitly and leaves the target registered for
-manual diagnosis instead of hiding the partial state.
+Authorization, marker creation, materialization, and hook completion form one
+post-registration boundary. If any step fails, the helper removes only the
+exact worktree it just registered while the creation lock is still held,
+preserves the created branch for retry, and returns the failure. A failed
+rollback is reported explicitly and leaves the target registered for manual
+diagnosis instead of hiding the partial state.
 
 `scripts/worktree-storage-guard` scans only conventional direct-child
 `murph-*` Git checkouts in the system `/tmp` roots by default and matches the

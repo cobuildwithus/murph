@@ -50,7 +50,7 @@ state_dir="${MURPH_WORKTREE_GUARD_STATE_DIR:-$common_dir/murph-worktree-storage-
 lock_file="$state_dir/lock"
 mkdir -p "$state_dir"
 
-mark_worktree_non_indexable() {
+prepare_worktree_spotlight_exclusion() {
   local exclude_file="$common_dir/info/exclude"
   local exclude_rule='/.metadata_never_index'
 
@@ -62,7 +62,71 @@ mark_worktree_non_indexable() {
       printf '%s\n' "$exclude_rule" >>"$exclude_file"
     fi
   fi
+}
+
+mark_worktree_non_indexable() {
   touch "$target_path/.metadata_never_index"
+}
+
+rollback_registered_worktree() {
+  local failure_status="$1"
+  local rollback_status
+
+  set +e
+  git -C "$repo_root" worktree remove --force --force "$target_path"
+  rollback_status=$?
+  set -e
+
+  if (( rollback_status != 0 )); then
+    printf 'create-worktree: setup failed (status %d); rollback failed (status %d), leaving the target registered\n' \
+      "$failure_status" "$rollback_status" >&2
+    exit "$rollback_status"
+  fi
+  exit "$failure_status"
+}
+
+run_post_checkout_hook() {
+  local head_oid null_oid hook_path git_exec_path local_env_vars
+  local first_line interpreter local_env_var
+  local -a hook_env
+
+  head_oid="$(git -C "$target_path" rev-parse HEAD)" || return
+  null_oid="$(printf '%0*d' "${#head_oid}" 0)"
+  hook_path="$(git -C "$target_path" rev-parse --path-format=absolute --git-path hooks/post-checkout)" || return
+
+  if [[ ! -x "$hook_path" ]]; then
+    git -C "$target_path" hook run --ignore-missing post-checkout -- \
+      "$null_oid" "$head_oid" 1
+    return
+  fi
+
+  if IFS= read -r first_line <"$hook_path" && [[ "$first_line" == '#!'* ]]; then
+    interpreter="${first_line#\#!}"
+    interpreter="${interpreter%%[[:space:]]*}"
+    if [[ "$interpreter" != /* || ! -f "$interpreter" || ! -x "$interpreter" ]]; then
+      printf 'create-worktree: post-checkout hook interpreter is unavailable\n' >&2
+      return 1
+    fi
+  fi
+
+  git_exec_path="$(git -C "$target_path" --exec-path)" || return
+  local_env_vars="$(git -C "$target_path" rev-parse --local-env-vars)" || return
+  hook_env=(env)
+  while IFS= read -r local_env_var; do
+    [[ -n "$local_env_var" ]] && hook_env+=(-u "$local_env_var")
+  done <<<"$local_env_vars"
+  hook_env+=(
+    -u MURPH_CREATE_WORKTREE_LOCK_HELD
+    -u MURPH_WORKTREE_GUARD_LOCK_HELD
+    "GIT_EXEC_PATH=$git_exec_path"
+    'GIT_PREFIX='
+    "PATH=$git_exec_path:${PATH:-}"
+  )
+
+  (
+    cd -P "$target_path"
+    "${hook_env[@]}" "$hook_path" "$null_oid" "$head_oid" 1
+  )
 }
 
 if [[ "${MURPH_CREATE_WORKTREE_LOCK_HELD:-0}" != 1 ]]; then
@@ -111,74 +175,44 @@ if (( registered_before == 1 )); then
   exit 1
 fi
 
+prepare_worktree_spotlight_exclusion
+
 set +e
 git -C "$repo_root" worktree add --no-checkout "${args[@]}"
 add_status=$?
 set -e
 
+if (( add_status != 0 )); then
+  exit "$add_status"
+fi
+
+setup_status=0
 if [[ -d "$target_path" ]] \
   && admin_dir="$(git -C "$target_path" rev-parse --path-format=absolute --git-dir 2>/dev/null)" \
   && [[ -d "$admin_dir" ]]; then
   admin_dir="$(cd "$admin_dir" && pwd -P)"
   case "$admin_dir" in
     "$common_dir"/worktrees/*)
-      : >"$admin_dir/murph-storage-guard-authorized"
-      mark_worktree_non_indexable
+      set +e
+      : >"$admin_dir/murph-storage-guard-authorized" \
+        && mark_worktree_non_indexable \
+        && git -C "$target_path" reset --hard \
+        && run_post_checkout_hook
+      setup_status=$?
+      set -e
       ;;
     *)
       printf 'create-worktree: new checkout has an unexpected administrative directory\n' >&2
-      exit 1
+      setup_status=1
       ;;
   esac
-elif (( add_status == 0 )); then
-  printf 'create-worktree: new checkout has an unexpected administrative directory\n' >&2
-  exit 1
-fi
-
-if (( add_status != 0 )); then
-  exit "$add_status"
-fi
-
-set +e
-git -C "$target_path" reset --hard
-checkout_status=$?
-set -e
-
-if (( checkout_status != 0 )); then
-  set +e
-  git -C "$repo_root" worktree remove --force --force "$target_path"
-  cleanup_status=$?
-  set -e
-
-  if (( cleanup_status != 0 )); then
-    printf 'create-worktree: checkout materialization failed (status %d); rollback failed (status %d), leaving the target registered\n' \
-      "$checkout_status" "$cleanup_status" >&2
-    exit "$cleanup_status"
-  fi
-  exit "$checkout_status"
-fi
-
-head_oid="$(git -C "$target_path" rev-parse HEAD)"
-null_oid="$(printf '%0*d' "${#head_oid}" 0)"
-hook_path="$(git -C "$target_path" rev-parse --path-format=absolute --git-path hooks/post-checkout)"
-
-if [[ -x "$hook_path" ]]; then
-  local_env_vars="$(git -C "$target_path" rev-parse --local-env-vars)"
-  hook_env=(env)
-  while IFS= read -r local_env_var; do
-    [[ -n "$local_env_var" ]] && hook_env+=(-u "$local_env_var")
-  done <<<"$local_env_vars"
-  set +e
-  (
-    cd -P "$target_path"
-    "${hook_env[@]}" "$hook_path" "$null_oid" "$head_oid" 1
-  )
 else
-  set +e
-  git -C "$target_path" hook run --ignore-missing post-checkout -- \
-    "$null_oid" "$head_oid" 1
+  printf 'create-worktree: new checkout has an unexpected administrative directory\n' >&2
+  setup_status=1
 fi
-hook_status=$?
-set -e
 
-exit "$hook_status"
+if (( setup_status != 0 )); then
+  rollback_registered_worktree "$setup_status"
+fi
+
+exit 0

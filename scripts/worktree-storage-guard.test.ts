@@ -544,6 +544,69 @@ touch ${JSON.stringify(hookInvoked)}
     expect(runGit(target, ['status', '--porcelain'])).toBe('')
   })
 
+  it('does not register a worktree when shared Spotlight exclusion setup fails', () => {
+    const harness = createHarness()
+    const target = path.join(harness.root, 'exclude-setup-failure')
+    const excludeFile = runGit(harness.primary, [
+      'rev-parse',
+      '--path-format=absolute',
+      '--git-path',
+      'info/exclude',
+    ])
+    rmSync(excludeFile)
+    mkdirSync(excludeFile)
+
+    const creation = runScript(harness, 'create-worktree', [
+      '-b',
+      'exclude-setup-failure',
+      target,
+    ])
+
+    expect(creation.status).not.toBe(0)
+    expect(existsSync(target)).toBe(false)
+    expect(runGit(harness.primary, ['worktree', 'list', '--porcelain'])).not.toContain(
+      target,
+    )
+    expect(runGit(harness.primary, ['branch', '--format=%(refname:short)'])).not.toContain(
+      'exclude-setup-failure',
+    )
+  })
+
+  it('rolls back the complete post-registration setup boundary', () => {
+    const harness = createHarness()
+    const target = path.join(harness.root, 'marker-setup-failure')
+    executable(
+      path.join(harness.fakeBin, 'touch'),
+      `#!/bin/sh
+if [ "\${1-}" = ${JSON.stringify(path.join(target, '.metadata_never_index'))} ]; then
+  exit 29
+fi
+PATH=/usr/bin:/bin exec touch "$@"
+`,
+    )
+
+    const creation = runScript(harness, 'create-worktree', [
+      '-b',
+      'marker-setup-failure',
+      target,
+    ])
+
+    expect(creation.status).toBe(29)
+    expect(runGit(harness.primary, ['worktree', 'list', '--porcelain'])).not.toContain(
+      target,
+    )
+    expect(existsSync(target)).toBe(false)
+    expect(
+      runGit(harness.primary, [
+        'rev-parse',
+        '--verify',
+        'refs/heads/marker-setup-failure',
+      ]),
+    ).toMatch(/^[0-9a-f]{40,64}$/)
+    const guard = runScript(harness, 'worktree-storage-guard')
+    expect(guard.status, guard.stderr).toBe(0)
+  })
+
   it('ratchets unmanaged temporary clones to zero and rejects new paths', () => {
     const harness = createHarness()
     const origin = 'https://example.test/example/murph.git'
@@ -1420,7 +1483,7 @@ done
     expect(result.stderr).toContain('bypassed scripts/create-worktree')
   })
 
-  it('does not wedge when a checkout hook fails after worktree registration', () => {
+  it('rolls back when the native checkout hook fails', () => {
     const harness = createHarness()
     const postCheckout = path.join(harness.primary, '.githooks', 'post-checkout')
     const hookInvocations = path.join(harness.root, 'post-checkout-invocations')
@@ -1440,11 +1503,20 @@ exit 23
       target,
     ])
     expect(creation.status).toBe(23)
-    expect(runGit(harness.primary, ['worktree', 'list', '--porcelain'])).toContain(target)
-    expect(existsSync(path.join(target, '.metadata_never_index'))).toBe(true)
+    expect(runGit(harness.primary, ['worktree', 'list', '--porcelain'])).not.toContain(
+      target,
+    )
+    expect(existsSync(target)).toBe(false)
     expect(readFileSync(hookInvocations, 'utf8').trim().split('\n')).toEqual([
-      `${realpathSync(target)}|${'0'.repeat(expectedHead.length)}|${expectedHead}|1`,
+      `${realpathSync(harness.root)}/partial|${'0'.repeat(expectedHead.length)}|${expectedHead}|1`,
     ])
+    expect(
+      runGit(harness.primary, [
+        'rev-parse',
+        '--verify',
+        'refs/heads/partial-hook-failure',
+      ]),
+    ).toBe(expectedHead)
     rmSync(postCheckout)
 
     const guard = runScript(harness, 'worktree-storage-guard')
@@ -1469,10 +1541,18 @@ exit 23
     writeFileSync(secondaryFile, 'changed\n')
 
     const hookEnvironments = path.join(harness.root, 'post-checkout-environments')
+    const expectedHead = runGit(harness.primary, ['rev-parse', 'HEAD'])
+    const expectedExecPath = runGit(harness.primary, ['--exec-path'])
     executable(
       path.join(harness.primary, '.githooks', 'post-checkout'),
       `#!/bin/sh
-printf '%s|%s\n' "$PWD" "\${GIT_DIR-unset}" >>${JSON.stringify(hookEnvironments)}
+printf '%s|%s|%s:%s|%s|%s|%s|%s|%s|%s|%s\n' \
+  "$PWD" "\${GIT_DIR-unset}" "\${GIT_PREFIX+set}" "\${GIT_PREFIX-}" \
+  "\${GIT_EXEC_PATH-unset}" "\${PATH%%:*}" \
+  "\${MURPH_CREATE_WORKTREE_LOCK_HELD-unset}" \
+  "\${MURPH_WORKTREE_GUARD_LOCK_HELD-unset}" \
+  "$1" "$2" "$3" >>${JSON.stringify(hookEnvironments)}
+( . "$GIT_EXEC_PATH/git-sh-setup" )
 git -C ${JSON.stringify(secondary)} add secondary-only.txt
 `,
     )
@@ -1501,13 +1581,75 @@ git -C ${JSON.stringify(secondary)} add secondary-only.txt
 
     expect(creation.status, creation.stderr).toBe(0)
     expect(readFileSync(hookEnvironments, 'utf8').trim().split('\n')).toEqual([
-      `${realpathSync(nativeTarget)}|unset`,
-      `${realpathSync(target)}|unset`,
+      `${realpathSync(nativeTarget)}|unset|set:|${expectedExecPath}|${expectedExecPath}|unset|unset|${'0'.repeat(expectedHead.length)}|${expectedHead}|1`,
+      `${realpathSync(target)}|unset|set:|${expectedExecPath}|${expectedExecPath}|unset|unset|${'0'.repeat(expectedHead.length)}|${expectedHead}|1`,
     ])
     expect(runGit(target, ['status', '--porcelain'])).toBe('')
     expect(runGit(secondary, ['status', '--porcelain'])).toBe(
       'M  secondary-only.txt',
     )
+  })
+
+  it('matches native unavailable post-checkout interpreter status', () => {
+    const nativeHarness = createHarness()
+    const nativeHook = path.join(
+      nativeHarness.primary,
+      '.githooks',
+      'post-checkout',
+    )
+    executable(nativeHook, '#!/definitely/missing/murph-interpreter\n')
+    expect(runScript(nativeHarness, 'install-git-hooks').status).toBe(0)
+    const nativeTarget = path.join(nativeHarness.root, 'native-missing-interpreter')
+    const nativeCreation = spawnSync(
+      'git',
+      [
+        'worktree',
+        'add',
+        '-b',
+        'native-missing-interpreter',
+        nativeTarget,
+      ],
+      { cwd: nativeHarness.primary, encoding: 'utf8' },
+    )
+
+    const helperHarness = createHarness()
+    executable(
+      path.join(helperHarness.primary, '.githooks', 'post-checkout'),
+      '#!/definitely/missing/murph-interpreter\n',
+    )
+    const helperTarget = path.join(helperHarness.root, 'helper-missing-interpreter')
+    const helperCreation = runScript(helperHarness, 'create-worktree', [
+      '-b',
+      'helper-missing-interpreter',
+      helperTarget,
+    ])
+
+    expect(nativeCreation.status).toBe(1)
+    expect(helperCreation.status).toBe(nativeCreation.status)
+    expect(helperCreation.stderr).toContain('hook interpreter is unavailable')
+    expect(
+      runGit(helperHarness.primary, ['worktree', 'list', '--porcelain']),
+    ).not.toContain(helperTarget)
+    expect(existsSync(helperTarget)).toBe(false)
+  })
+
+  it('preserves ignored non-executable post-checkout hook behavior', () => {
+    const harness = createHarness()
+    writeFileSync(
+      path.join(harness.primary, '.githooks', 'post-checkout'),
+      '#!/bin/sh\nexit 23\n',
+    )
+    const target = path.join(harness.root, 'non-executable-hook')
+
+    const creation = runScript(harness, 'create-worktree', [
+      '-b',
+      'non-executable-hook',
+      target,
+    ])
+
+    expect(creation.status, creation.stderr).toBe(0)
+    expect(runGit(target, ['status', '--porcelain'])).toBe('')
+    expect(existsSync(path.join(target, '.metadata_never_index'))).toBe(true)
   })
 
   it('ignores a stale advisory-lock file after its owner exits', () => {
