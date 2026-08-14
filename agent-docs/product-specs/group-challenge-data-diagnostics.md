@@ -1,6 +1,6 @@
 # Group Challenge Data Diagnostics
 
-Last verified: 2026-08-11
+Last verified: 2026-08-13
 
 Status: Implemented
 
@@ -164,6 +164,18 @@ Duplicate normalization may resolve multiple facts within one public source,
 but it never compares sources to pick a group-share winner. Single-owner
 profile, timezone, and group-email authority records stay unsourced, and
 `device-sync-status.v0` retains its existing per-source item list.
+
+When the exact current sender contradicts a visible snapshot, Murph treats that
+snapshot as contradicted and unverified rather than repeating it as a current
+device value. If the sender supplies an exact metric, value, unit, and civil
+date, `record_current_sender_daily_metric` reuses the accepted-message ref to
+resolve that participant server-side and durably admits a report to the
+participant's personal runtime. The canonical write is a separate `manual`
+daily observation; it never edits or deletes a wearable observation. Accepted
+means the personal mailbox owns the report. The existing post-checkpoint share
+projection then refreshes already-granted scopes, so a later `read_shared` can
+return the manual record beside any device record. Missing values or dates are
+never inferred, and the action creates no group-owned health-value store.
 
 Persisted unsourced records and the earlier nested source-aware sleep snapshots
 remain parseable during convergence. A new join view or access offer still

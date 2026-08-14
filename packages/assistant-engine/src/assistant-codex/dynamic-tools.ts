@@ -1,4 +1,5 @@
 import * as z from '@murphai/contracts/zod-runtime'
+import { isStrictIsoDate } from '@murphai/contracts'
 import {
   hostedRuntimeAssistantPersonalizationModelToolRequestSchema,
   type HostedRuntimeAssistantPersonalizationModelToolRequest,
@@ -7,7 +8,11 @@ import {
 import {
   HOSTED_EXECUTION_ASSISTANT_ASK_QUESTION_MAX_CODE_POINTS,
   HOSTED_EXECUTION_ASSISTANT_ASK_TARGET_LABEL_MAX_CODE_POINTS,
+  HOSTED_EXECUTION_DAILY_METRIC_MAX_UNIT_LENGTH,
 } from '@murphai/hosted-execution/contracts'
+import {
+  HOSTED_EXECUTION_MEMBER_REPORTED_DAILY_METRIC_KEYS,
+} from '@murphai/hosted-execution'
 import {
   hostedRuntimePendingGroupSetupInputSchema,
 } from '@murphai/hosted-execution/pending-group-setup'
@@ -433,6 +438,26 @@ const groupArgumentsSchema = z.discriminatedUnion('action', [
       message_ref: z.string().regex(
         new RegExp(ASSISTANT_ACCEPTED_MESSAGE_REF_PATTERN, 'u'),
       ),
+    })
+    .strict(),
+  z
+    .object({
+      action: z.literal('record_current_sender_daily_metric'),
+      date: z.string().refine(isStrictIsoDate, {
+        message: 'date must be a valid YYYY-MM-DD calendar date',
+      }),
+      message_ref: z.string().regex(
+        new RegExp(ASSISTANT_ACCEPTED_MESSAGE_REF_PATTERN, 'u'),
+      ),
+      metric: z.enum(
+        HOSTED_EXECUTION_MEMBER_REPORTED_DAILY_METRIC_KEYS as [string, ...string[]],
+      ),
+      unit: z
+        .string()
+        .min(1)
+        .max(HOSTED_EXECUTION_DAILY_METRIC_MAX_UNIT_LENGTH)
+        .regex(/^[A-Za-z0-9._/%-]+$/u),
+      value: z.number(),
     })
     .strict(),
   z
@@ -995,6 +1020,7 @@ type MurphGroupToolRequest =
           | 'ask'
           | 'ask_current_sender'
           | 'message_current_sender'
+          | 'record_current_sender_daily_metric'
           | 'ask_member'
           | 'create_join_link'
           | 'create_signup_referral_link'
@@ -1027,6 +1053,16 @@ type MurphGroupToolRequest =
     }
   | {
       action: 'message_current_sender'
+      messageRef: string
+    }
+  | {
+      action: 'record_current_sender_daily_metric'
+      dailyMetric: {
+        date: string
+        metric: string
+        unit: string
+        value: number
+      }
       messageRef: string
     }
   | {
@@ -4451,6 +4487,7 @@ async function executeGroupTool(input: {
   } else if (
     input.request.action === 'ask_current_sender'
     || input.request.action === 'message_current_sender'
+    || input.request.action === 'record_current_sender_daily_metric'
   ) {
     const userActionScope =
       input.hostedToolContext?.currentUserActionScope?.() ?? null
@@ -4463,14 +4500,21 @@ async function executeGroupTool(input: {
         'current-sender actions require the selected accepted message in this group turn',
       )
     }
-    request = {
-      action: input.request.action,
-      origin: {
-        assistantInputId: input.request.messageRef,
-        kind: 'accepted_input',
-        sessionId: userActionScope.originSessionId,
-      },
+    const origin = {
+      assistantInputId: input.request.messageRef,
+      kind: 'accepted_input' as const,
+      sessionId: userActionScope.originSessionId,
     }
+    request = input.request.action === 'record_current_sender_daily_metric'
+      ? {
+          action: input.request.action,
+          dailyMetric: input.request.dailyMetric,
+          origin,
+        }
+      : {
+          action: input.request.action,
+          origin,
+        }
   } else if (input.request.action === 'ask_member') {
     if (!invocationScope) {
       return toolTextResult(
@@ -6380,6 +6424,21 @@ function parseGroupArguments(
       ok: true,
       request: {
         action: parsed.data.action,
+        messageRef: parsed.data.message_ref,
+      },
+    }
+  }
+  if (parsed.data.action === 'record_current_sender_daily_metric') {
+    return {
+      ok: true,
+      request: {
+        action: parsed.data.action,
+        dailyMetric: {
+          date: parsed.data.date,
+          metric: parsed.data.metric,
+          unit: parsed.data.unit,
+          value: parsed.data.value,
+        },
         messageRef: parsed.data.message_ref,
       },
     }

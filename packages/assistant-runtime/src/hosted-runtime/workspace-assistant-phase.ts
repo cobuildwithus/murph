@@ -662,6 +662,7 @@ function buildHostedGroupEmailRestrictedActionUnavailable(
     case "ask":
     case "ask_current_sender":
     case "message_current_sender":
+    case "record_current_sender_daily_metric":
     case "ask_member":
       return {
         action: request.action,

@@ -28,6 +28,7 @@ import type {
   HostedExecutionAcceptedGroupMessageParticipant,
   HostedExecutionAssistantAskOrigin,
   HostedExecutionAssistantAskResult,
+  HostedExecutionDailyMetricReportedPayload,
   HostedBrowserVaultReplicaCursorRef,
   HostedBrowserVaultReplicaRef,
   HostedExecutionLinqExternalThreadRouteAuthority,
@@ -164,6 +165,7 @@ export const HOSTED_MAILBOX_KINDS = [
   "clinical-records.sync-requested",
   "device-sync.wake",
   "environment-voice.captured",
+  "health.daily-metric.reported",
   "meal-photo.captured",
   "vault-share.delivery",
   "vault-share.revoke",
@@ -1468,6 +1470,14 @@ export type HostedRuntimeGroupToolRequest =
       >;
     }
   | {
+      action: "record_current_sender_daily_metric";
+      dailyMetric: HostedExecutionDailyMetricReportedPayload;
+      origin: Extract<
+        HostedExecutionAssistantAskOrigin,
+        { kind: "accepted_input" }
+      >;
+    }
+  | {
       action: "ask_member";
       grantId: string;
       origin: HostedExecutionAssistantAskOrigin;
@@ -1597,6 +1607,10 @@ export type HostedRuntimeGroupCurrentSenderMessageResult =
   | { status: "accepted" }
   | { status: "unavailable"; unavailableReason: string };
 
+export type HostedRuntimeGroupDailyMetricReportResult =
+  | { status: "accepted" }
+  | { status: "unavailable"; unavailableReason: string };
+
 export type HostedRuntimeGroupToolResponse =
   | {
       action: "ask";
@@ -1606,6 +1620,10 @@ export type HostedRuntimeGroupToolResponse =
   | {
       action: "message_current_sender";
       result: HostedRuntimeGroupCurrentSenderMessageResult;
+    }
+  | {
+      action: "record_current_sender_daily_metric";
+      result: HostedRuntimeGroupDailyMetricReportResult;
     }
   | { action: "ask_member"; result: HostedRuntimeGroupMemberAskResult }
   | {

@@ -292,6 +292,12 @@ describe('assistant capability-offers prompt contract', () => {
     expect(prompt).toContain('never score or count it as zero, missing, disconnected, or non-consenting')
     expect(prompt).toContain('never offer consent again for that scope')
     expect(prompt).toContain('granted plus `missing` means there are no currently visible shared records')
+    expect(prompt).toContain('A visible shared record is a projection snapshot, not proof of a live device count')
+    expect(prompt).toContain('treat that snapshot as contradicted and unverified')
+    expect(prompt).toContain('use `record_current_sender_daily_metric`')
+    expect(prompt).toContain('durably noted as separate Manual evidence')
+    expect(prompt).toContain('it never means a device source changed')
+    expect(prompt).toContain('Do not infer a missing value or date')
     expect(prompt).toContain('unrelated "now"/"yet" questions')
     expect(prompt).toContain(
       'no timestamp/route/location/HR',

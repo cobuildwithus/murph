@@ -942,6 +942,7 @@ function readHostedSystemMailboxRouteAction(
     || item.route.action === "run-clinical-records-sync"
     || item.route.action === "run-device-sync-wake"
     || item.route.action === "run-environment-voice"
+    || item.route.action === "import-reported-daily-metric"
     || item.route.action === "apply-runtime-control-request"
   ) {
     return item.route.action;

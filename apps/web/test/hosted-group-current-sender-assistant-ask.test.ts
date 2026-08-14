@@ -11,6 +11,7 @@ import {
 } from "@murphai/hosted-execution";
 
 const mocks = vi.hoisted(() => ({
+  appendHostedMailboxEnvelopeTx: vi.fn(),
   appendHostedMailboxEnvelopeWithIdentityTx: vi.fn(),
   assertHostedLinqRouteEgressAuthority: vi.fn(),
   assertHostedThreadRouteEgressAuthority: vi.fn(),
@@ -18,6 +19,7 @@ const mocks = vi.hoisted(() => ({
   lookupHostedGroupParticipantMemberByHandle: vi.fn(),
   readHostedGroupDisclosureGrantAuthorityTx: vi.fn(),
   readHostedMailboxConversationWakeByAssistantInputId: vi.fn(),
+  readHostedMailboxItemByDedupeKey: vi.fn(),
   readHostedMailboxItemById: vi.fn(),
   readHostedMailboxWakeByDedupeKey: vi.fn(),
   readHostedMailboxWakeByItemId: vi.fn(),
@@ -35,10 +37,12 @@ const fakeTx = {
 };
 
 vi.mock("@/src/lib/hosted-mailbox/store", () => ({
+  appendHostedMailboxEnvelopeTx: mocks.appendHostedMailboxEnvelopeTx,
   appendHostedMailboxEnvelopeWithIdentityTx:
     mocks.appendHostedMailboxEnvelopeWithIdentityTx,
   readHostedMailboxConversationWakeByAssistantInputId:
     mocks.readHostedMailboxConversationWakeByAssistantInputId,
+  readHostedMailboxItemByDedupeKey: mocks.readHostedMailboxItemByDedupeKey,
   readHostedMailboxItemById: mocks.readHostedMailboxItemById,
   readHostedMailboxWakeByDedupeKey: mocks.readHostedMailboxWakeByDedupeKey,
   readHostedMailboxWakeByItemId: mocks.readHostedMailboxWakeByItemId,
@@ -112,6 +116,10 @@ import {
   requestHostedGroupCurrentSenderAssistantAsk,
   requestHostedGroupCurrentSenderPrivateAssistantAsk,
 } from "@/src/lib/hosted-groups/group-current-sender-assistant-ask";
+import {
+  createHostedGroupCurrentSenderDailyMetricReportId,
+  recordHostedGroupCurrentSenderDailyMetric,
+} from "@/src/lib/hosted-groups/group-current-sender-daily-metric";
 
 const GROUP_RUNTIME_MEMBER_ID = "member_group_runtime";
 const SENDER_MEMBER_ID = "member_sender";
@@ -271,6 +279,7 @@ describe("hosted current-sender Assistant Ask authority", () => {
       status: "found",
     });
     mocks.readHostedMailboxItemById.mockResolvedValue(null);
+    mocks.readHostedMailboxItemByDedupeKey.mockResolvedValue(null);
     mocks.readHostedMailboxWakeByDedupeKey.mockResolvedValue(null);
     mocks.readHostedMailboxWakeByItemId.mockResolvedValue(null);
     mocks.requireHostedRuntimeActiveAccess.mockResolvedValue(undefined);
@@ -289,6 +298,73 @@ describe("hosted current-sender Assistant Ask authority", () => {
         item: { id: input.itemId },
       }),
     );
+    mocks.appendHostedMailboxEnvelopeTx.mockImplementation(
+      async (input: { envelope: { eventId: string } }) => ({
+        dedupeConflict: false,
+        item: { id: `item_${input.envelope.eventId}` },
+      }),
+    );
+  });
+
+  it("durably admits an exact sender's daily metric report and rejects changed replay", async () => {
+    const dailyMetric = {
+      date: "2026-07-27",
+      metric: "steps",
+      unit: "count",
+      value: 8_000,
+    };
+    const reportId = createHostedGroupCurrentSenderDailyMetricReportId({
+      date: dailyMetric.date,
+      groupRuntimeMemberId: GROUP_RUNTIME_MEMBER_ID,
+      metric: dailyMetric.metric,
+      originAssistantInputId: ORIGIN_ASSISTANT_INPUT_ID,
+    });
+
+    const admission = await recordHostedGroupCurrentSenderDailyMetric({
+      dailyMetric,
+      groupRuntimeMemberId: GROUP_RUNTIME_MEMBER_ID,
+      now: NOW,
+      origin: CURRENT_SENDER_ORIGIN,
+    });
+
+    expect(admission).toEqual({
+      mailboxWake: {
+        expectedUserId: SENDER_MEMBER_ID,
+        mailboxItemId: `item_${reportId}`,
+      },
+      result: { status: "accepted" },
+    });
+    const appendedWake = mocks.appendHostedMailboxEnvelopeTx.mock.calls[0]?.[0]
+      .envelope;
+    expect(appendedWake).toEqual({
+      dailyMetric,
+      eventId: reportId,
+      kind: "health.daily-metric.reported",
+      occurredAt: NOW.toISOString(),
+      userId: SENDER_MEMBER_ID,
+    });
+
+    mocks.readHostedMailboxItemByDedupeKey.mockResolvedValue({
+      id: `item_${reportId}`,
+    });
+    mocks.readHostedMailboxWakeByDedupeKey.mockResolvedValue(appendedWake);
+    await expect(recordHostedGroupCurrentSenderDailyMetric({
+      dailyMetric,
+      groupRuntimeMemberId: GROUP_RUNTIME_MEMBER_ID,
+      now: NOW,
+      origin: CURRENT_SENDER_ORIGIN,
+    })).resolves.toEqual(admission);
+    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledTimes(1);
+
+    await expect(recordHostedGroupCurrentSenderDailyMetric({
+      dailyMetric: { ...dailyMetric, value: 9_000 },
+      groupRuntimeMemberId: GROUP_RUNTIME_MEMBER_ID,
+      now: NOW,
+      origin: CURRENT_SENDER_ORIGIN,
+    })).resolves.toEqual({
+      mailboxWake: null,
+      result: { status: "unavailable", unavailableReason: "report_conflict" },
+    });
   });
 
   it("derives sender, exact question, route, and reviewed authority from one stored input", async () => {

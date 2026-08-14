@@ -755,6 +755,18 @@ Last verified: 2026-08-12
   vault state.
   This ordering adds no projection retry queue, group wake fanout, persisted
   projection watermark, or second freshness owner.
+- A group sender's daily-metric report is admitted under one deterministic
+  mailbox identity derived from the exact accepted input, date, and metric.
+  Web serializes admission with the existing current-sender authority read;
+  an exact payload replay returns accepted while a changed value or unit fails
+  closed. Mailbox import deterministically upserts one canonical `manual`
+  summary observation at noon on that civil date in the personal vault's
+  timezone. A replay must match the full canonical record or blocks as a
+  conflict. The same system-mailbox item retains a
+  `vault-share.projection` post-checkpoint obligation, so already-granted group
+  snapshots refresh only after the canonical write checkpoints and projection
+  failures reuse the existing recording retry. There is no new scheduler,
+  correction queue, projection watermark, or Web health-value owner.
 - The composed maximum for one projection opportunity is one active-scope read,
   at most 98 sequential projectable-scope deliveries from the closed registry,
   and at most 25 sequential share-replacement transactions per delivery under

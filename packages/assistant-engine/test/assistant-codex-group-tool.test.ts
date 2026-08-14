@@ -195,6 +195,7 @@ describe("murph.group dynamic tool", () => {
       "ask",
       "ask_current_sender",
       "message_current_sender",
+      "record_current_sender_daily_metric",
       "ask_member",
       "post_disclosure_request",
       "revoke_disclosure_grant",
@@ -224,6 +225,15 @@ describe("murph.group dynamic tool", () => {
     expect(MURPH_GROUP_TOOL.inputSchema.allOf[1].oneOf[0]).toMatchObject({
       properties: {
         action: {
+          enum: ["record_current_sender_daily_metric"],
+        },
+        message_ref: {},
+      },
+      required: ["action", "date", "message_ref", "metric", "unit", "value"],
+    });
+    expect(MURPH_GROUP_TOOL.inputSchema.allOf[1].oneOf[1]).toMatchObject({
+      properties: {
+        action: {
           enum: [
             "ask_current_sender",
             "message_current_sender",
@@ -235,7 +245,7 @@ describe("murph.group dynamic tool", () => {
       required: ["action", "message_ref"],
     });
     expect(
-      MURPH_GROUP_TOOL.inputSchema.allOf[1].oneOf[1].properties.action.enum,
+      MURPH_GROUP_TOOL.inputSchema.allOf[1].oneOf[2].properties.action.enum,
     ).not.toContain("message_current_sender");
     expect(GROUP_TOOL_INPUT_PROPERTIES.question.maxLength)
       .toBe(HOSTED_EXECUTION_ASSISTANT_ASK_QUESTION_MAX_CODE_POINTS);
@@ -336,6 +346,8 @@ describe("murph.group dynamic tool", () => {
       .toContain("message_current_sender: exact sender's explicit private-continuation request only");
     expect(MURPH_GROUP_TOOL.description)
       .toContain("accepted means private processing started, not delivered");
+    expect(MURPH_GROUP_TOOL.description)
+      .toContain("record_current_sender_daily_metric durably accepts");
     expect(MURPH_GROUP_TOOL.description)
       .toContain("update_display_name/set_chat_avatar ok means provider acceptance");
     expect(MURPH_GROUP_TOOL.description)

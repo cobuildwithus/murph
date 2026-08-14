@@ -62,6 +62,14 @@ This contract is jointly specified by `ARCHITECTURE.md`,
 `agent-docs/RELIABILITY.md`, and
 `agent-docs/references/hosted-runtime-protocol.md`.
 
+Exact-sender member-reported daily metrics reuse accepted-message authority,
+the encrypted personal mailbox, canonical `manual` observations, and that same
+checkpoint-gated share projection. Device observations remain independent, and
+contradicted snapshots are never represented as live values. This contract is
+jointly specified by `ARCHITECTURE.md`, `agent-docs/SECURITY.md`,
+`agent-docs/RELIABILITY.md`, and
+`agent-docs/product-specs/group-challenge-data-diagnostics.md`.
+
 Hosted cold-start ownership keeps established-member startup on the ordinary
 post-Temporal direct ensure so container boot can overlap fenced invocation
 preparation. The separate first-contact shell hint is serialized by the
