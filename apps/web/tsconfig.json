@@ -27,6 +27,9 @@
       "@/*": [
         "./*"
       ],
+      "@murphai/assistant-runtime/hosted-device-sync-testkit": [
+        "../../packages/assistant-runtime/src/hosted-device-sync-testkit.ts"
+      ],
       "@murphai/assistant-runtime/hosted-device-sync-status": [
         "../../packages/assistant-runtime/src/hosted-device-sync-status.ts"
       ],
@@ -291,6 +294,9 @@
       "@murphai/device-syncd/junction-resources": [
         "../../packages/device-syncd/src/junction-resources.ts"
       ],
+      "@murphai/device-syncd/local-secret-codec": [
+        "../../packages/device-syncd/src/local-secret-codec.ts"
+      ],
       "@murphai/device-syncd/provider-label": [
         "../../packages/device-syncd/src/provider-label.ts"
       ],
@@ -323,6 +329,9 @@
       ],
       "@murphai/device-syncd/public-provider-descriptors": [
         "../../packages/device-syncd/src/public-provider-descriptors.ts"
+      ],
+      "@murphai/device-syncd/service": [
+        "../../packages/device-syncd/src/service.ts"
       ],
       "@murphai/device-syncd/types": [
         "../../packages/device-syncd/src/types.ts"

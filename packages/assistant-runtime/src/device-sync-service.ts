@@ -20,8 +20,10 @@ import type {
 } from "@murphai/device-syncd/types";
 import {
   HostedRuntimeArtifactWriteError,
-  type HostedRuntimeDeviceSyncPort,
-} from "./hosted-runtime/platform.ts";
+} from "./hosted-runtime/artifact-write-error.ts";
+import type {
+  HostedRuntimeDeviceSyncPort,
+} from "./hosted-runtime/device-sync-port.ts";
 
 const storeByService = new WeakMap<DeviceSyncService, SqliteDeviceSyncStore>();
 

@@ -450,6 +450,13 @@ export function verifyWorkspaceImportPolicy({
 
   if (
     !isTestFile
+    && specifier === "@murphai/assistant-runtime/hosted-device-sync-testkit"
+  ) {
+    return `${path.relative(repoRoot, filePath)} imports ${JSON.stringify(specifier)}; the hosted device-sync testkit is for focused tests only and must not become a production surface.`;
+  }
+
+  if (
+    !isTestFile
     && specifier === "@murphai/assistant-runtime/hosted-invocation-testkit"
   ) {
     return `${path.relative(repoRoot, filePath)} imports ${JSON.stringify(specifier)}; the hosted invocation testkit is for focused tests only and must not become a production bridge-construction surface.`;

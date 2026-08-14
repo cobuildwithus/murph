@@ -1,11 +1,14 @@
 import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
 
-import { test } from "vitest";
+import { expectTypeOf, test } from "vitest";
 
 import {
   parseHostedRuntimeLatencyTraceResponse as parseHostedRuntimeLatencyTraceResponseRootPublic,
   runHostedWorkspaceRuntimeJobInProcess as runHostedWorkspaceRuntimeJobInProcessPublic,
+} from "@murphai/assistant-runtime";
+import type {
+  HostedRuntimeDeviceSyncPort as HostedRuntimeDeviceSyncPortPublic,
 } from "@murphai/assistant-runtime";
 import {
   parseHostedEmailSendRequest as parseHostedEmailSendRequestPublic,
@@ -17,6 +20,13 @@ import {
   buildHostedDeviceSyncStatusPrompt as buildHostedDeviceSyncStatusPromptPublic,
   fetchCompleteHostedDeviceSyncRuntimeSnapshot as fetchCompleteHostedDeviceSyncRuntimeSnapshotPublic,
 } from "@murphai/assistant-runtime/hosted-device-sync-status";
+import {
+  createHostedRuntimeDeviceSyncService as createHostedRuntimeDeviceSyncServiceTestkitPublic,
+  resolveHostedDeviceSyncWakeRecovery as resolveHostedDeviceSyncWakeRecoveryTestkitPublic,
+} from "@murphai/assistant-runtime/hosted-device-sync-testkit";
+import type {
+  HostedRuntimeDeviceSyncPort as HostedRuntimeDeviceSyncPortTestkitPublic,
+} from "@murphai/assistant-runtime/hosted-device-sync-testkit";
 import {
   createHostedWorkspaceInvocationLease as createHostedWorkspaceInvocationLeasePublic,
   runHostedWorkspaceInvocation as runHostedWorkspaceInvocationPublic,
@@ -55,6 +65,16 @@ import {
   buildHostedDeviceSyncStatusPrompt as buildHostedDeviceSyncStatusPromptDirect,
   fetchCompleteHostedDeviceSyncRuntimeSnapshot as fetchCompleteHostedDeviceSyncRuntimeSnapshotDirect,
 } from "../src/hosted-device-sync-status.ts";
+import {
+  createHostedRuntimeDeviceSyncService as createHostedRuntimeDeviceSyncServiceTestkitDirect,
+  resolveHostedDeviceSyncWakeRecovery as resolveHostedDeviceSyncWakeRecoveryTestkitDirect,
+} from "../src/hosted-device-sync-testkit.ts";
+import type {
+  HostedRuntimeDeviceSyncPort as HostedRuntimeDeviceSyncPortLeaf,
+} from "../src/hosted-runtime/device-sync-port.ts";
+import type {
+  HostedRuntimeDeviceSyncPort as HostedRuntimeDeviceSyncPortPlatform,
+} from "../src/hosted-runtime/platform.ts";
 import {
   checkpointHostedRuntimeBridgeWebWorkspace as checkpointHostedRuntimeBridgeWebWorkspaceSource,
 } from "../src/hosted-runtime/checkpoint-bridge.ts";
@@ -96,6 +116,7 @@ const expectedAssistantRuntimePublicExportKeys = [
   "./hosted-assistant-bootstrap",
   "./hosted-checkpoint-bridge",
   "./hosted-device-sync-status",
+  "./hosted-device-sync-testkit",
   "./hosted-email",
   "./hosted-invocation",
   "./hosted-invocation-testkit",
@@ -256,6 +277,38 @@ test("hosted-device-sync-status subpath stays wired to the existing status owner
     fetchCompleteHostedDeviceSyncRuntimeSnapshotPublic,
     fetchCompleteHostedDeviceSyncRuntimeSnapshotDirect,
   );
+});
+
+test("hosted-device-sync-testkit subpath stays wired to the existing device-sync owners", () => {
+  assert.equal(
+    createHostedRuntimeDeviceSyncServiceTestkitPublic,
+    createHostedRuntimeDeviceSyncServiceTestkitDirect,
+  );
+  assert.equal(
+    resolveHostedDeviceSyncWakeRecoveryTestkitPublic,
+    resolveHostedDeviceSyncWakeRecoveryTestkitDirect,
+  );
+});
+
+test("hosted device-sync port type stays identical across production and testkit entrypoints", () => {
+  expectTypeOf<HostedRuntimeDeviceSyncPortTestkitPublic>()
+    .toEqualTypeOf<HostedRuntimeDeviceSyncPortPublic>();
+  expectTypeOf<HostedRuntimeDeviceSyncPortPublic>()
+    .toEqualTypeOf<HostedRuntimeDeviceSyncPortPlatform>();
+  expectTypeOf<HostedRuntimeDeviceSyncPortPlatform>()
+    .toEqualTypeOf<HostedRuntimeDeviceSyncPortLeaf>();
+});
+
+test("assistant-runtime testkits stay partitioned by owner", async () => {
+  const deviceSyncTestkit = await import(
+    "@murphai/assistant-runtime/hosted-device-sync-testkit"
+  );
+  const invocationTestkit = await import(
+    "@murphai/assistant-runtime/hosted-invocation-testkit"
+  );
+
+  assert.equal("createHostedWorkspaceRuntimeBridgeJobOptions" in deviceSyncTestkit, false);
+  assert.equal("createHostedRuntimeDeviceSyncService" in invocationTestkit, false);
 });
 
 test("hosted-invocation-testkit subpath export stays wired to bridge option construction", () => {

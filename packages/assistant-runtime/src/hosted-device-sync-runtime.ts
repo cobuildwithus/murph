@@ -59,7 +59,7 @@ import {
 } from "@murphai/hosted-execution";
 import type {
   HostedRuntimeDeviceSyncPort,
-} from "./hosted-runtime/platform.ts";
+} from "./hosted-runtime/device-sync-port.ts";
 import { requireHostedRuntimeDeviceSyncStore } from "./device-sync-service.ts";
 import {
   HOSTED_DEVICE_SYNC_DIRTY_PENDING_FETCH_LIMIT,

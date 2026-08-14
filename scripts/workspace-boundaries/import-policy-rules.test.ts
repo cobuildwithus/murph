@@ -218,6 +218,33 @@ import /* keep */ {
     expect(failure).toBeNull();
   });
 
+  it("rejects non-test imports from the hosted device-sync testkit", () => {
+    const filePath = path.join(repoRoot, "apps/web/src/lib/device-sync/runtime.ts");
+    const failure = verifyWorkspaceImportPolicy({
+      filePath,
+      source: 'import { createHostedRuntimeDeviceSyncService } from "@murphai/assistant-runtime/hosted-device-sync-testkit";',
+      sourceMember: "apps/web",
+      specifier: "@murphai/assistant-runtime/hosted-device-sync-testkit",
+    });
+
+    expect(failure).toContain("testkit is for focused tests only");
+  });
+
+  it("allows test imports from the hosted device-sync testkit", () => {
+    const filePath = path.join(
+      repoRoot,
+      "apps/web/test/hosted-device-sync-closed-loop-quiescence.test.ts",
+    );
+    const failure = verifyWorkspaceImportPolicy({
+      filePath,
+      source: 'import { createHostedRuntimeDeviceSyncService } from "@murphai/assistant-runtime/hosted-device-sync-testkit";',
+      sourceMember: "apps/web",
+      specifier: "@murphai/assistant-runtime/hosted-device-sync-testkit",
+    });
+
+    expect(failure).toBeNull();
+  });
+
   it("rejects Cloudflare source re-exports of hosted invocation internals from assistant-runtime root", () => {
     const filePath = path.join(repoRoot, "apps/cloudflare/src/hosted-workspace-invocation.ts");
     const failure = verifyWorkspaceImportPolicy({

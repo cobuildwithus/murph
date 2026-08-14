@@ -35,6 +35,20 @@ describe("workspace source resolution", () => {
     expect(resolveAliasReplacement(aliases, "@murphai/clinical-records/retrieval-limits")).toBe(
       path.join(repoRoot, "packages/clinical-records/src/retrieval-limits.ts"),
     );
+    expect(resolveAliasReplacement(aliases, "@murphai/device-syncd/local-secret-codec")).toBe(
+      path.join(repoRoot, "packages/device-syncd/src/local-secret-codec.ts"),
+    );
+    expect(resolveAliasReplacement(aliases, "@murphai/device-syncd/service")).toBe(
+      path.join(repoRoot, "packages/device-syncd/src/service.ts"),
+    );
+    expect(
+      resolveAliasReplacement(
+        aliases,
+        "@murphai/assistant-runtime/hosted-device-sync-testkit",
+      ),
+    ).toBe(
+      path.join(repoRoot, "packages/assistant-runtime/src/hosted-device-sync-testkit.ts"),
+    );
     expect(resolveAliasReplacement(aliases, "@murphai/hosted-execution/hosted-email")).toBe(
       path.join(repoRoot, "packages/hosted-execution/src/hosted-email.ts"),
     );
@@ -116,6 +130,21 @@ describe("workspace source resolution", () => {
       );
 
     expect(broadSourceAliases).toEqual([]);
+    expect(
+      tsconfig.compilerOptions?.paths?.[
+        "@murphai/assistant-runtime/hosted-device-sync-testkit"
+      ],
+    ).toEqual([
+      "../../packages/assistant-runtime/src/hosted-device-sync-testkit.ts",
+    ]);
+    expect(
+      tsconfig.compilerOptions?.paths?.["@murphai/device-syncd/local-secret-codec"],
+    ).toEqual([
+      "../../packages/device-syncd/src/local-secret-codec.ts",
+    ]);
+    expect(tsconfig.compilerOptions?.paths?.["@murphai/device-syncd/service"]).toEqual([
+      "../../packages/device-syncd/src/service.ts",
+    ]);
   });
 
   it("derives non-web Vitest workspace aliases from the root tsconfig paths", () => {
