@@ -999,11 +999,22 @@ function parseHostedLinqAttachmentUploadHeaders(value: unknown): Record<string, 
   if (!value || typeof value !== "object") {
     return {};
   }
+  const allowedHeaderNames = new Set([
+    "content-length",
+    "content-type",
+    "if-none-match",
+    "x-upload-token",
+  ]);
   const headers: Record<string, string> = {};
   for (const [key, headerValue] of Object.entries(value as Record<string, unknown>)) {
-    if (typeof headerValue === "string" && key.trim()) {
-      headers[key] = headerValue;
+    const normalizedKey = key.trim().toLowerCase();
+    if (!allowedHeaderNames.has(normalizedKey)) {
+      throw new TypeError("attachment upload header is not supported by Linq.");
     }
+    if (typeof headerValue !== "string" || !headerValue.trim()) {
+      throw new TypeError("attachment upload header value must be a non-empty string.");
+    }
+    headers[normalizedKey] = headerValue.trim();
   }
   return headers;
 }

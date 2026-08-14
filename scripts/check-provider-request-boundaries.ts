@@ -296,55 +296,53 @@ export const providerHttpExceptionRegistry = Object.freeze([
 
 const approvedPresignedTransferHeaderFactories = Object.freeze([
   {
+    implementationSha256: "039cd93198c2d0d02895ab465d9a46fba4be4ed96c9d7addd450f6b85944c572",
     name: "parseHostedLinqAttachmentUploadHeaders",
     relativePath: "apps/web/src/lib/hosted-onboarding/linq-client.ts",
   },
   {
+    implementationSha256: "9270f5a2ade489be7f0d818c28eda988a82a1babafff228cc9554d4f58d7c7ad",
     name: "normalizeLinqRequiredHeaders",
     relativePath: "packages/operator-config/src/linq-runtime.ts",
   },
 ] as const);
 const approvedPresignedTransferUrlFactories = Object.freeze([
   {
+    implementationSha256: "622f955de784fa29b35a8c2b028b0205b8e7274dac4c1f827fb185cde3266d29",
     name: "normalizeLinqAttachmentUploadUrl",
     relativePath: "packages/operator-config/src/linq-runtime.ts",
   },
 ] as const);
 const approvedPresignedTransferUrlOwners = Object.freeze([
   {
+    implementationSha256: "df89ecf4a04b585a6d17cafbac5445b5654d57a05c344591d27074a06a13145f",
     names: ["presignedPutUrl", "url"],
     ownerName: "putHostedContainerDirectR2SmokePayload",
     relativePath: "apps/cloudflare/src/container-entrypoint.ts",
   },
   {
+    implementationSha256: "c9f0c881712a8b5e6ec7b4d79943357bcbd23df8e4608baa4ffc681084d4f58c",
     names: ["imageUrl"],
     ownerName: "fetchMurphHostedLinqContactCardVcfPhoto",
     relativePath: "apps/web/src/lib/hosted-onboarding/linq-contact-card.ts",
   },
   {
+    implementationSha256: "8bbe9ad24d1650ec713d9d85251d6a282e174eda708a7cb98aac485d3e40f368",
     names: ["uploadUrl"],
     ownerName: "sendHostedLinqAttachmentMessage",
     relativePath: "apps/web/src/lib/hosted-onboarding/linq-client.ts",
   },
   {
+    implementationSha256: "516432d2137d65ceb2130c7ff898b9336c7697688226b24171371857945c35b1",
     names: ["uploadUrl"],
     ownerName: "uploadLinqAttachmentBytes",
     relativePath: "packages/operator-config/src/linq-runtime.ts",
   },
   {
+    implementationSha256: "441cacf90f7446d1006cc6b17e9c0e5a1d59bda6cffe230f63af70b2c60bd1d0",
     names: ["url"],
     ownerName: "downloadHostedLinqAttachmentBytes",
     relativePath: "packages/assistant-runtime/src/hosted-runtime/events/linq.ts",
-  },
-  {
-    names: ["url"],
-    ownerName: "downloadUrl",
-    relativePath: "packages/inboxd/src/connectors/email/connector.ts",
-  },
-  {
-    names: ["downloadUrl", "url"],
-    ownerName: "downloadUrl",
-    relativePath: "packages/operator-config/src/agentmail-runtime.ts",
   },
 ] as const);
 
@@ -352,6 +350,7 @@ const safeLiteralTransferHeaderNames = new Set([
   "content-length",
   "content-type",
   "if-none-match",
+  "x-upload-token",
 ]);
 const binaryTransferConstructorNames = new Set([
   "ArrayBuffer",
@@ -405,6 +404,7 @@ interface ParameterBinding {
 }
 
 interface ProviderHttpSourceAnalysis {
+  readonly contents: string;
   readonly exactFetchTypeNames: ReadonlySet<string>;
   readonly fileFallbackProviderIds: ReadonlySet<string>;
   readonly fetchTypeNames: ReadonlySet<string>;
@@ -819,6 +819,7 @@ function analyzeProviderHttpSource(
   contents: string,
 ): ProviderHttpSourceAnalysis {
   return {
+    contents,
     exactFetchTypeNames: collectFetchTypeNames(sourceFile, contents, true),
     fileFallbackProviderIds: collectFileProviderFallbackIds(
       sourceFile,
@@ -978,9 +979,9 @@ function collectHttpTransportBindings(
         return;
       }
       const init = unwrapExpression(node.init);
-      const requiredModule = readRequiredModuleName(init);
-      const directTransport = requiredModule
-        ? classifyHttpTransportModule(requiredModule)
+      const staticModuleName = readStaticTransportModuleName(init);
+      const directTransport = staticModuleName
+        ? classifyHttpTransportModule(staticModuleName)
         : null;
 
       if (isIdentifier(node.id)) {
@@ -1226,6 +1227,34 @@ function readRequiredModuleName(node: Node): string | null {
   }
   const moduleName = node.arguments[0];
   return moduleName && isStringLiteral(moduleName) ? moduleName.value : null;
+}
+
+function readStaticTransportModuleName(node: Node): string | null {
+  const expression = unwrapExpression(node);
+  if (expression.type === "AwaitExpression") {
+    return readStaticTransportModuleName(expression.argument);
+  }
+  if (expression.type === "ImportExpression") {
+    return isStringLiteral(expression.source) && expression.options === null
+      ? expression.source.value
+      : null;
+  }
+  if (
+    (isCallExpression(expression) || isOptionalCallExpression(expression)) &&
+    expression.callee.type === "Import"
+  ) {
+    if (expression.arguments.length !== 1) {
+      return null;
+    }
+    const [moduleName] = expression.arguments;
+    return moduleName &&
+      moduleName.type !== "ArgumentPlaceholder" &&
+      moduleName.type !== "SpreadElement" &&
+      isStringLiteral(moduleName)
+      ? moduleName.value
+      : null;
+  }
+  return readRequiredModuleName(expression);
 }
 
 function readImportEqualsModuleName(node: Node): string | null {
@@ -2264,30 +2293,63 @@ function matchesRegisteredProviderHttpException(
 
 const officialSdkFetchHookApprovals = Object.freeze([
   {
+    adapterReferenceMode: "exclusive-sdk-wiring",
+    authorityFileSha256: null,
+    authorityFunctions: [
+      {
+        functionName: "mapOperatorLinqSdkUrl",
+        implementationSha256:
+          "8e0c0f007664e393fde2e077fdb707ee38bbb110ed1380027ee6c06a5161cd72",
+      },
+      {
+        functionName: "encodeOperatorLinqSdkPath",
+        implementationSha256:
+          "cf853616b399448d143130044cb51b9b975f8042a7821dbd90c08b640bda2efe",
+      },
+      {
+        functionName: "normalizeOperatorLinqApiRoot",
+        implementationSha256:
+          "a44fd4146acc1fbc513035a6bef13bfa82bcb3c4a8da9a52bc101fcf3608c869",
+      },
+    ],
     functionName: "createOperatorLinqFetch",
     implementationSha256:
       "db8252a4862fc54c7992ef719a4dedddcfc250e34a8ad6a9b77e1081cab8ce18",
     moduleName: "@linqapp/sdk",
     providerId: "linq",
     relativePath: "apps/cloudflare/src/operator-alert/linq.ts",
+    sdkBindingName: "LinqAPIV3",
     transportPath: "fetchImplementation",
     wiringFunctionName: "createOperatorLinqClient",
     wiringImplementationSha256:
       "48f6cde07d60d37abe5a9c18f34d9f91bc39e028688c33b535181bc63fd8a48f",
   },
   {
+    adapterReferenceMode: "exclusive-sdk-wiring",
+    authorityFileSha256: null,
+    authorityFunctions: [
+      {
+        functionName: "preserveRepeatedComposioListQueryParams",
+        implementationSha256:
+          "83f9d9242cfd7cce27b9e6058dd0e85b04c20b2e293888e4b88e0ac5336f1c2d",
+      },
+    ],
     functionName: "createBoundedComposioFetch",
     implementationSha256:
       "34d29361fbc5bf27dc4d91b00da6bdae98b4d32f18fd43da3eed21abccf56c28",
     moduleName: "@composio/client",
     providerId: "composio",
     relativePath: "apps/web/src/lib/connected-apps/composio.ts",
+    sdkBindingName: "Composio",
     transportPath: "fetchImpl",
     wiringFunctionName: "createComposioConnectedAppsClient",
     wiringImplementationSha256:
       "48e86be84700a2922eb1c06d954178c7138405d1e9185bff9c9a7036f3962276",
   },
   {
+    adapterReferenceMode: "exclusive-sdk-wiring",
+    authorityFileSha256: null,
+    authorityFunctions: [],
     functionName: "createHostedFirstContactAdmissionOpenAiFetch",
     implementationSha256:
       "3961d54845bd37ca2638f9294bd1a063a15376c3a1e07117a650c2b380c27d27",
@@ -2295,60 +2357,127 @@ const officialSdkFetchHookApprovals = Object.freeze([
     providerId: "openai",
     relativePath:
       "apps/web/src/lib/hosted-onboarding/linq-first-contact-admission.ts",
+    sdkBindingName: "OpenAI",
     transportPath: "fetchImpl.call",
     wiringFunctionName: "classifyHostedLinqFirstContactAdmission",
     wiringImplementationSha256:
       "c03d60638053bf2cb07fc2afb8b5b9c6753fad2c32078acad5c1b3c55fac4096",
   },
   {
+    adapterReferenceMode: "same-owner",
+    authorityFileSha256: "69eb35e89271588cbfa8d1866aecd4371ab53297ccbe29cbbdbde524ff74efc9",
+    authorityFunctions: [],
     functionName: "requestJunctionResource",
     implementationSha256:
       "6a19d0dd8cf5de40b16c918065d523a2389cbcf1c1f8e2e7b1b9ebba5be2755d",
     moduleName: "@junction-api/sdk",
     providerId: "junction",
     relativePath: "apps/web/src/lib/labs/junction.ts",
+    sdkBindingName: "JunctionSdkClient",
     transportPath: "runtime.fetchImpl",
     wiringFunctionName: "requestJunctionResource",
     wiringImplementationSha256:
       "6a19d0dd8cf5de40b16c918065d523a2389cbcf1c1f8e2e7b1b9ebba5be2755d",
   },
   {
+    adapterReferenceMode: "exclusive-sdk-wiring",
+    authorityFileSha256: null,
+    authorityFunctions: [
+      {
+        functionName: "normalizeLinqApiRoot",
+        implementationSha256:
+          "a46bfdb41fcd63b5521b0ab8d74dfc6acc74b0dec9709d7bce890618d6e2138b",
+      },
+      {
+        functionName: "mapLinqSdkRequestUrl",
+        implementationSha256:
+          "ac0ee287824aef5e1ff1418192d15f57c726c0eac8a96ce01d7d76bdddfd31e8",
+      },
+      {
+        functionName: "encodeLinqSdkPath",
+        implementationSha256:
+          "0ef44b1e5f588c490c6212999330cfa85acad4b35e1c854ac8b779994ecec0c3",
+      },
+      {
+        functionName: "normalizeLinqSdkRequestHeaders",
+        implementationSha256:
+          "f67e562891bc67f7a5996b5542d0dcf11c64031c017a9f4afd45feca2c6e5ecb",
+      },
+    ],
     functionName: "createBoundedLinqApiFetch",
     implementationSha256:
       "2ba9401aa75e438bd9ac8ff084ddecd5072c9eb2e801f2334537f6f071c43818",
     moduleName: "@linqapp/sdk",
     providerId: "linq",
     relativePath: "apps/web/src/lib/linq/api.ts",
+    sdkBindingName: "LinqAPIV3",
     transportPath: "fetchImplementation.call",
     wiringFunctionName: "createLinqApiClientWithState",
     wiringImplementationSha256:
       "a6621c48e90cce711fdb7f3c20b57c9822e411f7982e1bfd5006e855127c26f0",
   },
   {
+    adapterReferenceMode: "exclusive-sdk-wiring",
+    authorityFileSha256: null,
+    authorityFunctions: [
+      {
+        functionName: "readLobRequestUrl",
+        implementationSha256:
+          "aa96a348761c2a8289634856768a83b9b17a1e6f612ff79b8c8d2849a8bc3784",
+      },
+      {
+        functionName: "appendLobRequestParams",
+        implementationSha256:
+          "5e27e58bdd901c33fa612e6238dd1fea7bfc2bfcfb72187667ba1dfb14176ae2",
+      },
+      {
+        functionName: "readLobRequestHeaders",
+        implementationSha256:
+          "079bb55a8a666ccafb2d01863654c176602577c90b2d208e8f53c23af05069e7",
+      },
+      {
+        functionName: "readLobRequestBody",
+        implementationSha256:
+          "6b0238b1207b54b62725a8e51599d6aea2f64e54bd37b8776021b594856568e9",
+      },
+      {
+        functionName: "requireValue",
+        implementationSha256:
+          "7e40229d02805d134ec334284dc265fb0501799d5b1faa9d60a13ae275766f54",
+      },
+    ],
     functionName: "createLobFetchAdapter",
     implementationSha256:
       "df849b52e90d331b52e2e913b030dd85ece18652e1a8302971698f29bbfb48fe",
     moduleName: "@lob/lob-typescript-sdk",
     providerId: "lob",
     relativePath: "apps/web/src/lib/physical-notes/lob-runtime.ts",
+    sdkBindingName: "Configuration",
     transportPath: "fetchImpl",
     wiringFunctionName: "createLobLettersApi",
     wiringImplementationSha256:
       "1b015ed2300bc58c6f45255a1de5db6a976d148cc6cc6604698c0cbb9a9a9260",
   },
   {
+    adapterReferenceMode: "exclusive-sdk-wiring",
+    authorityFileSha256: null,
+    authorityFunctions: [],
     functionName: "createTelegramElevenLabsSdkFetchAdapter",
     implementationSha256:
       "00c46bb135d79635b9a71c5282042f8fa92f92226beab6f8d249fc0de63d950e",
     moduleName: "@murphai/operator-config/elevenlabs-runtime",
     providerId: "elevenlabs",
     relativePath: "packages/assistant-engine/src/assistant/channels/runtime.ts",
+    sdkBindingName: "generateElevenLabsVoiceMemoAudio",
     transportPath: "fetchImplementation",
     wiringFunctionName: "prepareTelegramVoiceMemoMessage",
     wiringImplementationSha256:
       "0e77b3d385280e9c07b3d1a3d9990031f3503dce9d13c32c85946e00a2d67342",
   },
   {
+    adapterReferenceMode: "exclusive-sdk-wiring",
+    authorityFileSha256: null,
+    authorityFunctions: [],
     functionName: "createOpenAiImageSdkFetch",
     implementationSha256:
       "b0d6c3b84cf1868b281e9f264ec2269345fab23c22972329ecbcdd3cf8d0d3a0",
@@ -2356,42 +2485,102 @@ const officialSdkFetchHookApprovals = Object.freeze([
     providerId: "openai",
     relativePath:
       "packages/assistant-engine/src/assistant-codex/openai-image-generation.ts",
+    sdkBindingName: "OpenAI",
     transportPath: "fetchImpl.call",
     wiringFunctionName: "requestOpenAiImage",
     wiringImplementationSha256:
       "af0552a002f890cd69cd0d32bebc04f176d651acf504f45b03398518006fc48f",
   },
   {
+    adapterReferenceMode: "same-owner",
+    authorityFileSha256: "53e3c60d56811285fb3f7f17647160301252583e8440cec8c511d03362a29db5",
+    authorityFunctions: [],
     functionName: "requestSdkResource",
     implementationSha256:
       "6f53c31185895fd9706dd0cc60e8234ae6435ed89caf34be71aa8b10e1d646e8",
     moduleName: "@junction-api/sdk/activity",
     providerId: "junction",
     relativePath: "packages/device-syncd/src/providers/junction-client.ts",
+    sdkBindingName: "ActivityClient",
     transportPath: "this.fetchImpl",
     wiringFunctionName: "requestSdkResource",
     wiringImplementationSha256:
       "6f53c31185895fd9706dd0cc60e8234ae6435ed89caf34be71aa8b10e1d646e8",
   },
   {
+    adapterReferenceMode: "exclusive-sdk-wiring",
+    authorityFileSha256: null,
+    authorityFunctions: [
+      {
+        functionName: "readRequestInput",
+        implementationSha256:
+          "69a164a38ce63d1ea9a2a52e7184ab36d0e19439ef9af68c8210b5e7111f6c8c",
+      },
+      {
+        functionName: "mergeFetchHeaders",
+        implementationSha256:
+          "4b68fcdb12bffeb4facb17dc8030f2f0423150a7c8555f740cfc86583947c0e2",
+      },
+      {
+        functionName: "readSdkRequestBody",
+        implementationSha256:
+          "6ac5ad48125ed41df6d7e8d13d353b38ee8375c5dbd4447cf7f5cdf750b8e6ee",
+      },
+    ],
     functionName: "createElevenLabsSdkFetch",
     implementationSha256:
       "7cb128bcd93285b69daac64e5e85660d7fce775c940095c22f3efaf5d9930f7b",
     moduleName: "@elevenlabs/elevenlabs-js",
     providerId: "elevenlabs",
     relativePath: "packages/operator-config/src/elevenlabs-runtime.ts",
+    sdkBindingName: "ElevenLabsClient",
     transportPath: "fetchImplementation",
     wiringFunctionName: "requestElevenLabsAudio",
     wiringImplementationSha256:
       "19d13521b2450550504a1bff4c5c13f3524280481ecc0bdf3fdecdb63f630c82",
   },
   {
+    adapterReferenceMode: "exclusive-sdk-wiring",
+    authorityFileSha256: null,
+    authorityFunctions: [
+      {
+        functionName: "mapLinqSdkRequestUrl",
+        implementationSha256:
+          "88586ecbb4297525633f73bd1a9e287cc6f812fbe71ed475b4f3bb4f7ed02be3",
+      },
+      {
+        functionName: "encodeLinqSdkPath",
+        implementationSha256:
+          "4195abfebfa4b4021361da9bd74cd32aa8485f6276ab0ccf1641a65d0fb9dd91",
+      },
+      {
+        functionName: "normalizeLinqSdkRequestBody",
+        implementationSha256:
+          "4335dd261a3b8ed15a42d561a32ab61a6c9c615247dda1077c6358f80f5d2a9c",
+      },
+      {
+        functionName: "normalizeLinqSdkRequestHeaders",
+        implementationSha256:
+          "06a9c99b8ab65647756bcd936a035793d83aa49a17ae8ae67dab22d7cdad972e",
+      },
+      {
+        functionName: "normalizeLinqBaseUrl",
+        implementationSha256:
+          "3411305d54133d6338da4a9b9fa4c64cb41f6717396fbac1b1736550a4716b94",
+      },
+      {
+        functionName: "buildLinqRequestUrl",
+        implementationSha256:
+          "44d1e5bbf008220258181aca60d0b4b934dc0317cf0992cfa9b687779f456a2f",
+      },
+    ],
     functionName: "createLinqSdkFetch",
     implementationSha256:
-      "09ec695997d73c393974076a5b6721b768f5d618c9751956422f45edaa9ad82b",
+      "b34861eaad1627d9b3de85dcc276a8488eab49bb73b6f45c54907497d0b38a84",
     moduleName: "@linqapp/sdk",
     providerId: "linq",
     relativePath: "packages/operator-config/src/linq-runtime.ts",
+    sdkBindingName: "LinqAPIV3",
     transportPath: "input.fetchImplementation.call",
     wiringFunctionName: "createLinqSdkClient",
     wiringImplementationSha256:
@@ -2409,7 +2598,11 @@ function isOfficialSdkFetchHook(
   );
   if (
     !approval ||
-    !hasExactProviderModuleImport(input.analysis.sourceFile, approval.moduleName) ||
+    !hasExactRuntimeProviderImport(
+      input.analysis.sourceFile,
+      approval.moduleName,
+      approval.sdkBindingName,
+    ) ||
     readMemberPath(input.call.callee)?.join(".") !== approval.transportPath
   ) {
     return false;
@@ -2431,8 +2624,107 @@ function isOfficialSdkFetchHook(
       input.contents,
       wiringOwner,
       approval.wiringImplementationSha256,
+    ) &&
+    (
+      approval.authorityFileSha256 === null
+        ? hasExactApprovedAuthorityFunctions({
+            approvals: approval.authorityFunctions,
+            contents: input.contents,
+            sourceFile: input.analysis.sourceFile,
+          })
+        : hasExactContentsHash(
+            input.contents,
+            approval.authorityFileSha256,
+          )
+    ) &&
+    (
+      approval.authorityFileSha256 !== null ||
+      hasIdentifierInsideRange(
+        input.analysis.sourceFile,
+        approval.sdkBindingName,
+        wiringOwner,
+      )
+    ) &&
+    (
+      approval.adapterReferenceMode === "same-owner"
+        ? owner.start === wiringOwner.start && owner.end === wiringOwner.end
+        : hasExclusiveAdapterWiringReference({
+            functionName: approval.functionName,
+            owner,
+            sourceFile: input.analysis.sourceFile,
+            wiringOwner,
+          })
     ),
   );
+}
+
+function hasExactApprovedAuthorityFunctions(input: {
+  readonly approvals: readonly {
+    readonly functionName: string;
+    readonly implementationSha256: string;
+  }[];
+  readonly contents: string;
+  readonly sourceFile: Node;
+}): boolean {
+  return input.approvals.every((approval) => {
+    const range = findExactApprovedFunctionRange({
+      functionName: approval.functionName,
+      sourceFile: input.sourceFile,
+    });
+    return Boolean(
+      range &&
+      hasExactSourceHash(
+        input.contents,
+        range,
+        approval.implementationSha256,
+      ),
+    );
+  });
+}
+
+function hasExclusiveAdapterWiringReference(input: {
+  readonly functionName: string;
+  readonly owner: LocalFunctionRange;
+  readonly sourceFile: Node;
+  readonly wiringOwner: LocalFunctionRange;
+}): boolean {
+  const outsideOwnerReferences: Node[] = [];
+  traverseFast(input.sourceFile, (node) => {
+    if (
+      isIdentifier(node, { name: input.functionName }) &&
+      (
+        (node.start ?? 0) < input.owner.start ||
+        (node.end ?? Number.MAX_SAFE_INTEGER) > input.owner.end
+      )
+    ) {
+      outsideOwnerReferences.push(node);
+    }
+  });
+  const [reference] = outsideOwnerReferences;
+  return outsideOwnerReferences.length === 1 &&
+    Boolean(
+      reference &&
+      input.wiringOwner.start <= (reference.start ?? 0) &&
+      (reference.end ?? Number.MAX_SAFE_INTEGER) <= input.wiringOwner.end,
+    );
+}
+
+function hasIdentifierInsideRange(
+  sourceFile: Node,
+  name: string,
+  range: LocalFunctionRange,
+): boolean {
+  let matches = 0;
+  traverseFast(sourceFile, (node) => {
+    if (
+      isIdentifier(node, { name }) &&
+      range.start <= (node.start ?? 0) &&
+      (node.end ?? Number.MAX_SAFE_INTEGER) <= range.end
+    ) {
+      matches += 1;
+    }
+  });
+  return matches >= 1;
 }
 
 function findExactApprovedFunctionRange(input: {
@@ -2458,6 +2750,14 @@ function hasExactSourceHash(
   return createHash("sha256")
     .update(contents.slice(range.start, range.end))
     .digest("hex") === expectedSha256;
+}
+
+function hasExactContentsHash(
+  contents: string,
+  expectedSha256: string,
+): boolean {
+  return createHash("sha256").update(contents).digest("hex") ===
+    expectedSha256;
 }
 
 function isResendSdkFetchRequestOverride(
@@ -2680,21 +2980,29 @@ function isInsideExactSdkSubclassMethod(input: {
   return matches === 1;
 }
 
-function hasExactProviderModuleImport(
+function hasExactRuntimeProviderImport(
   sourceFile: Node,
   moduleName: string,
+  localName: string,
 ): boolean {
   let matches = 0;
   traverseFast(sourceFile, (node) => {
     if (
       isImportDeclaration(node) &&
-      (node.source.value === moduleName ||
-        node.source.value.startsWith(`${moduleName}/`))
+      node.importKind !== "type" &&
+      node.source.value === moduleName
     ) {
-      matches += 1;
+      for (const specifier of node.specifiers) {
+        if (
+          specifier.local.name === localName &&
+          (!isImportSpecifier(specifier) || specifier.importKind !== "type")
+        ) {
+          matches += 1;
+        }
+      }
     }
   });
-  return matches >= 1;
+  return matches === 1;
 }
 
 function hasExactNamedProviderImport(
@@ -3361,14 +3669,29 @@ function isApprovedPresignedTransferHeaderFactoryCall(
   if (!functionBinding || functionBinding.scopeStart !== 0) {
     return false;
   }
-  return approvedPresignedTransferHeaderFactories.some(
-    (factory) =>
-      factory.relativePath === normalizeRepoPath(relativePath) &&
-      factory.name === callee.name &&
+  return approvedPresignedTransferHeaderFactories.some((factory) => {
+    if (
+      factory.relativePath !== normalizeRepoPath(relativePath) ||
+      factory.name !== callee.name ||
       analysis.functionBindings.get(callee.name)?.filter(
         (binding) => binding.scopeStart === 0,
-      ).length === 1,
-  );
+      ).length !== 1
+    ) {
+      return false;
+    }
+    const range = findExactApprovedFunctionRange({
+      functionName: factory.name,
+      sourceFile: analysis.sourceFile,
+    });
+    return Boolean(
+      range &&
+      hasExactSourceHash(
+        analysis.contents,
+        range,
+        factory.implementationSha256,
+      ),
+    );
+  });
 }
 
 function isApprovedPresignedTransferUrlExpression(input: {
@@ -3414,17 +3737,32 @@ function isApprovedPresignedTransferUrlExpression(input: {
     callee.name,
     input.before,
   );
-  return Boolean(
-    functionBinding?.scopeStart === 0 &&
-    approvedPresignedTransferUrlFactories.some(
-      (factory) =>
-        factory.relativePath === normalizeRepoPath(input.relativePath) &&
-        factory.name === callee.name &&
-        input.analysis.functionBindings.get(callee.name)?.filter(
-          (binding) => binding.scopeStart === 0,
-        ).length === 1,
-    ),
-  );
+  if (functionBinding?.scopeStart !== 0) {
+    return false;
+  }
+  return approvedPresignedTransferUrlFactories.some((factory) => {
+    if (
+      factory.relativePath !== normalizeRepoPath(input.relativePath) ||
+      factory.name !== callee.name ||
+      input.analysis.functionBindings.get(callee.name)?.filter(
+        (binding) => binding.scopeStart === 0,
+      ).length !== 1
+    ) {
+      return false;
+    }
+    const range = findExactApprovedFunctionRange({
+      functionName: factory.name,
+      sourceFile: input.analysis.sourceFile,
+    });
+    return Boolean(
+      range &&
+      hasExactSourceHash(
+        input.analysis.contents,
+        range,
+        factory.implementationSha256,
+      ),
+    );
+  });
 }
 
 function isOpaqueTransferUrlShape(input: {
@@ -3524,7 +3862,12 @@ function isApprovedPresignedTransferUrlOwner(
       (approved) =>
         approved.relativePath === normalizeRepoPath(relativePath) &&
         approved.ownerName === owner.name &&
-        approved.names.some((candidate) => candidate === name),
+        approved.names.some((candidate) => candidate === name) &&
+        hasExactSourceHash(
+          input.analysis.contents,
+          owner,
+          approved.implementationSha256,
+        ),
     ),
   );
 }

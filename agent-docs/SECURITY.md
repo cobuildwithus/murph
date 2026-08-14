@@ -1,6 +1,6 @@
 # Security
 
-Last verified: 2026-08-12
+Last verified: 2026-08-14
 
 ## Non-Negotiable Rules
 
@@ -299,8 +299,9 @@ Last verified: 2026-08-12
   generated output, fixtures, and tests. For the explicit provider registry it
   preserves the SDK request-object checks, reports the global fetch primitive,
   imported Node HTTP/HTTPS and Undici transports, explicit aliases, injected
-  fetch-call signatures, CommonJS `require`, TypeScript import-equals, direct
-  invocation, and destructured transport forms, and strict fetch-shaped
+  fetch-call signatures, CommonJS `require`, literal dynamic `import()`,
+  TypeScript import-equals, direct invocation, and destructured transport
+  forms, and strict fetch-shaped
   wrappers at their nearest lexical binding when they resolve to provider
   literals or provider-configured URL data. Untyped fetch parameters retain
   their exact default expressions, and identifier reads resolve the nearest
@@ -338,10 +339,11 @@ Last verified: 2026-08-12
   no credentials or only static
   `credentials: "omit"` and either an allowlisted literal header set or a
   direct call to a path-scoped audited transfer-header factory resolved to its
-  unique top-level
-  declaration; the URL expression must also belong to one unique registered
-  transfer owner, and a provider-named URL must resolve through its registered
-  owner-path URL normalizer; statically known internal or
+  unique top-level declaration with an exact implementation digest; the URL
+  expression must also belong to one unique registered transfer owner whose
+  complete callable is digest-pinned, and a provider-named URL must resolve
+  through its registered owner-path URL normalizer with its implementation
+  digest pinned; statically known internal or
   unambiguous single-slash application traffic, plus `new URL` composition only
   against the exact static `location.origin` owner;
   registered providers without a verified provider-owned TypeScript SDK, and
@@ -354,11 +356,17 @@ Last verified: 2026-08-12
   source comments do not suppress a finding. The xAI, transfer URL,
   transfer-header, and streamed-R2 proofs are restricted to their audited owner
   paths. An unavoidable SDK transport bridge is admitted only when its exact
-  path, provider, SDK or SDK-owner import, raw transport target, unique adapter
-  function, and unique SDK-construction function match the registry. The full
-  source spans of both functions are SHA-256 pinned, so a URL, init, response,
-  duplicate-effect, or constructor-wiring change fails until that exact bridge
-  is re-audited and the pins are deliberately updated. The Resend and Exa SDK
+  path, provider, exact runtime SDK or SDK-owner import binding, raw transport
+  target, unique adapter function, and SDK-construction function match the
+  registry. A factory
+  adapter has exactly one reference outside its own body and that reference must
+  be inside the pinned SDK-construction function. The full source spans of both
+  functions and every authority-bearing URL, header, body, or origin helper are
+  SHA-256 pinned; a same-owner callback whose authority cannot be closed over a
+  small helper set pins the complete source file. A URL, init, response, helper,
+  duplicate-effect, import-binding, extra-consumer, or constructor-wiring change
+  therefore fails until that exact bridge is re-audited and the pins are
+  deliberately updated. The Resend and Exa SDK
   overrides are separate path-scoped exceptions whose URL and direct closed
   request init are structurally proved; aliases, helper mutation,
   `Object.assign`, spreads, computed properties, and duplicate properties do

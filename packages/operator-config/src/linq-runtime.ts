@@ -1751,6 +1751,9 @@ function createLinqSdkFetch(input: {
 ) => Promise<Response> {
   return async (request, init) => {
     const url = mapLinqSdkRequestUrl(request, input.apiRoot)
+    const requestMethod = typeof init?.method === 'string'
+      ? init.method.trim()
+      : ''
     input.state.requestOrigin = readRequestOrigin(url)
     let response: LinqFetchResult
     try {
@@ -1759,7 +1762,7 @@ function createLinqSdkFetch(input: {
           ? {}
           : { body: normalizeLinqSdkRequestBody(init.body) }),
         headers: normalizeLinqSdkRequestHeaders(init?.headers),
-        method: normalizeNullableString(init?.method) ?? 'GET',
+        method: requestMethod || 'GET',
         ...(init?.signal ? { signal: init.signal } : {}),
       })
     } catch (error) {
@@ -2615,9 +2618,16 @@ function createLinqAttachmentReservationResponseError(input: {
 }
 
 function normalizeLinqAttachmentUploadUrl(value: string): string {
+  const normalized = value.trim()
+  if (!normalized) {
+    throw new VaultCliError(
+      'LINQ_INVALID_INPUT',
+      'Linq attachment upload URL must be a valid HTTPS URL.',
+    )
+  }
   let parsed: URL
   try {
-    parsed = new URL(normalizeRequiredString(value, 'attachment upload url'))
+    parsed = new URL(normalized)
   } catch {
     throw new VaultCliError(
       'LINQ_INVALID_INPUT',
@@ -2637,7 +2647,17 @@ function normalizeLinqAttachmentUploadUrl(value: string): string {
       'Linq attachment upload URL must not include credentials or fragments.',
     )
   }
-  if (!isPublicLinqAttachmentUploadHost(parsed.hostname)) {
+  const normalizedHostname = parsed.hostname.toLowerCase().replace(/\.$/u, '')
+  const ipLiteral = normalizedHostname.startsWith('[') && normalizedHostname.endsWith(']')
+    ? normalizedHostname.slice(1, -1)
+    : normalizedHostname
+  if (
+    !normalizedHostname ||
+    normalizedHostname === 'localhost' ||
+    normalizedHostname.endsWith('.localhost') ||
+    normalizedHostname.endsWith('.local') ||
+    isIP(ipLiteral) !== 0
+  ) {
     throw new VaultCliError(
       'LINQ_INVALID_INPUT',
       'Linq attachment upload URL must use a public host.',
@@ -2645,23 +2665,6 @@ function normalizeLinqAttachmentUploadUrl(value: string): string {
   }
 
   return parsed.toString()
-}
-
-function isPublicLinqAttachmentUploadHost(hostname: string): boolean {
-  const normalized = hostname.toLowerCase().replace(/\.$/u, '')
-  if (
-    !normalized ||
-    normalized === 'localhost' ||
-    normalized.endsWith('.localhost') ||
-    normalized.endsWith('.local')
-  ) {
-    return false
-  }
-
-  const ipLiteral = normalized.startsWith('[') && normalized.endsWith(']')
-    ? normalized.slice(1, -1)
-    : normalized
-  return isIP(ipLiteral) === 0
 }
 
 function parseLinqVoiceMemoResponse(input: {
@@ -2716,12 +2719,27 @@ function copyUint8ArrayToArrayBuffer(value: Uint8Array): ArrayBuffer {
 function normalizeLinqRequiredHeaders(
   headers: Record<string, string>,
 ): Record<string, string> {
+  const allowedHeaderNames = new Set([
+    'content-length',
+    'content-type',
+    'if-none-match',
+    'x-upload-token',
+  ])
   const normalized: Record<string, string> = {}
   for (const [key, value] of Object.entries(headers)) {
-    const normalizedKey = normalizeNullableString(key)
-    const normalizedValue = normalizeNullableString(value)
-    if (!normalizedKey || normalizedValue === null) {
-      continue
+    const normalizedKey = key.trim().toLowerCase()
+    if (!allowedHeaderNames.has(normalizedKey)) {
+      throw new VaultCliError(
+        'LINQ_INVALID_INPUT',
+        'Linq attachment upload header is not supported.',
+      )
+    }
+    const normalizedValue = value.trim()
+    if (!normalizedValue) {
+      throw new VaultCliError(
+        'LINQ_INVALID_INPUT',
+        'Linq attachment upload header value must be a non-empty string.',
+      )
     }
     normalized[normalizedKey] = normalizedValue
   }
@@ -2851,13 +2869,27 @@ function summarizeLinqJsonObjectShape(value: Record<string, unknown>): string {
 }
 
 function normalizeLinqBaseUrl(value: string): string {
-  return normalizeRequiredString(value, 'base url').replace(/\/+$/u, '')
+  const normalized = value.trim()
+  if (!normalized) {
+    throw new VaultCliError(
+      'LINQ_INVALID_INPUT',
+      'Linq base url must be a non-empty string.',
+    )
+  }
+  return normalized.replace(/\/+$/u, '')
 }
 
 function buildLinqRequestUrl(baseUrl: string, path: string): string {
   const url = new URL(normalizeLinqBaseUrl(baseUrl))
   const basePathname = url.pathname.replace(/\/+$/u, '')
-  const requestPathname = normalizeRequiredString(path, 'path').replace(/^\/+/u, '')
+  const normalizedPath = path.trim()
+  if (!normalizedPath) {
+    throw new VaultCliError(
+      'LINQ_INVALID_INPUT',
+      'Linq path must be a non-empty string.',
+    )
+  }
+  const requestPathname = normalizedPath.replace(/^\/+/u, '')
 
   url.pathname = `${basePathname}/${requestPathname}`
   url.search = ''

@@ -2392,6 +2392,19 @@ test.each([
       upload_url: 'https://uploads.example.test/upload/report',
     },
   },
+  {
+    label: 'credential-bearing required headers',
+    payload: {
+      attachment_id: 'attachment_credential_header',
+      expires_at: '2026-04-08T00:05:00.000Z',
+      http_method: 'PUT',
+      required_headers: {
+        authorization: 'Bearer reservation-secret-value',
+        'content-type': 'application/pdf',
+      },
+      upload_url: 'https://uploads.example.test/upload/report',
+    },
+  },
 ])('linq runtime marks a successful reservation with $label as post-reservation ambiguity', async ({ payload }) => {
   const env = {
     LINQ_API_BASE_URL: 'https://linq.example.test/custom/',

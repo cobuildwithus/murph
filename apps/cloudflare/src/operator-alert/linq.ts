@@ -284,7 +284,7 @@ function mapOperatorLinqSdkUrl(
   );
   const target = new URL(
     relativePath,
-    ensureTrailingSlash(apiRoot),
+    apiRoot.endsWith("/") ? apiRoot : `${apiRoot}/`,
   );
   target.search = source.search;
   return target;
@@ -468,10 +468,6 @@ class OperatorAlertLinqResponseTooLargeError extends Error {
     super("Linq operator-alert response exceeded the configured byte limit.");
     this.name = "OperatorAlertLinqResponseTooLargeError";
   }
-}
-
-function ensureTrailingSlash(value: string): string {
-  return value.endsWith("/") ? value : `${value}/`;
 }
 
 function isObjectRecord(value: unknown): value is Record<string, unknown> {

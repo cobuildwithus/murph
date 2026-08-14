@@ -1,6 +1,6 @@
 # Murph Agent Docs Index
 
-Last verified: 2026-08-13
+Last verified: 2026-08-14
 
 ## Purpose
 
@@ -27,7 +27,9 @@ fences cadence publication. The contract is jointly specified by
 The external-provider request guard, including its registered providers,
 structural presigned/internal/xAI exceptions, raw HTTP transport discovery,
 conditional-aware effective assignment and fetch invocation provenance, SDK
-fetch-adapter and handwritten wire-contract detection, and exact current failure inventory, is
+fetch-adapter and handwritten wire-contract detection, literal dynamic-import
+transports, digest-pinned transfer/adapter authority closure, and exact current
+failure inventory, is
 specified by `agent-docs/SECURITY.md`,
 `agent-docs/references/testing-ci-map.md`, and
 `agent-docs/exec-plans/active/2026-08-12-provider-request-guard.md`.

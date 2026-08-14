@@ -1,8 +1,18 @@
 # Testing And CI Map
 
-Last verified: 2026-08-13
+Last verified: 2026-08-14
 
 ## Current Repo Checks
+
+Provider-request guard closure is fail-closed beyond the summary row below:
+literal dynamic imports of Node HTTP/HTTPS and Undici are transports in every
+scanned module extension; presigned transfer owners, header factories, and URL
+normalizers are implementation-digest pinned; and an approved SDK bridge must
+use the exact runtime SDK or SDK-owner import binding with one exclusive adapter
+consumer in the pinned constructor. Every authority-bearing helper is also
+digest-pinned, or the complete file is pinned for a same-owner callback. Type-only,
+side-effect, or local SDK-binding replacement, helper drift, and an extra
+consumer all invalidate approval.
 
 | Command | Purpose | Current coverage |
 | --- | --- | --- |

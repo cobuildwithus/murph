@@ -976,6 +976,61 @@ describe("check-provider-request-boundaries", () => {
     expect(matches.map((match) => match.line)).toEqual([5, 6, 7]);
   });
 
+  it("reports literal dynamic-import transports in every scanned module extension", () => {
+    const cases = [
+      {
+        expectedLines: [2],
+        path: "scripts/dynamic-provider-transport.mjs",
+        source: [
+          "const { request: send } = await import('node:https');",
+          "send('https://api.openai.com/v1/responses');",
+        ].join("\n"),
+      },
+      {
+        expectedLines: [2, 4],
+        path: "scripts/dynamic-provider-transport.mts",
+        source: [
+          "const https = await import('node:https');",
+          "https.request('https://api.openai.com/v1/responses');",
+          "const { fetch: send } = await import('undici');",
+          "send('https://api.linqapp.com/api/partner/v3/chats');",
+        ].join("\n"),
+      },
+      {
+        expectedLines: [2],
+        path: "scripts/dynamic-provider-transport.cts",
+        source: [
+          "const undici = await import('undici');",
+          "undici.fetch('https://api.openai.com/v1/responses');",
+        ].join("\n"),
+      },
+    ] as const;
+
+    for (const testCase of cases) {
+      expect(
+        violationsOfKind("raw-provider-http", testCase.source, testCase.path)
+          .map((match) => match.line),
+        testCase.path,
+      ).toEqual(testCase.expectedLines);
+    }
+  });
+
+  it("does not infer HTTP transports from computed or unrelated dynamic imports", () => {
+    const matches = violationsOfKind(
+      "raw-provider-http",
+      [
+        "const moduleName = 'node:https';",
+        "const computed = await import(moduleName);",
+        "computed.request('https://api.openai.com/v1/responses');",
+        "const unrelated = await import('unrelated');",
+        "unrelated.request('https://api.openai.com/v1/responses');",
+      ].join("\n"),
+      "scripts/unrelated-dynamic-provider-transport.mjs",
+    );
+
+    expect(matches).toEqual([]);
+  });
+
   it("recognizes provider SDK request objects through import-equals", () => {
     const matches = findProviderRequestBoundaryViolations(
       "scripts/import-equals-openai-client.cts",
@@ -1181,7 +1236,7 @@ describe("check-provider-request-boundaries", () => {
     expect(matches.map((match) => match.line)).toEqual([2, 3, 6, 7, 8, 9, 12, 13]);
   });
 
-  it("admits only registered presigned transfer-header factories", () => {
+  it("rejects name-only presigned transfer factories and shadowed factories", () => {
     expect(
       violationsOfKind(
         "raw-provider-http",
@@ -1194,8 +1249,8 @@ describe("check-provider-request-boundaries", () => {
           "}",
         ].join("\n"),
         "packages/operator-config/src/linq-runtime.ts",
-      ),
-    ).toEqual([]);
+      ).map((match) => match.line),
+    ).toEqual([5]);
     expect(
       violationsOfKind(
         "raw-provider-http",
@@ -1322,8 +1377,8 @@ describe("check-provider-request-boundaries", () => {
         path: "packages/operator-config/src/elevenlabs-runtime.ts",
       },
       {
-        after: "method: normalizeNullableString(init?.method) ?? 'POST',",
-        before: "method: normalizeNullableString(init?.method) ?? 'GET',",
+        after: "method: 'POST',",
+        before: "method: requestMethod || 'GET',",
         path: "packages/operator-config/src/linq-runtime.ts",
       },
       {
@@ -1396,6 +1451,71 @@ describe("check-provider-request-boundaries", () => {
       "const composioWiringDecoy = { fetch: createBoundedComposioFetch(fetchImpl) };",
     ].join("\n");
     expect(rawHttpViolations(decoyWiring, relativePath)).toHaveLength(1);
+  });
+
+  it("rejects authority-helper, SDK-binding, and exclusive-consumer mutations", () => {
+    const relativePath = "apps/web/src/lib/connected-apps/composio.ts";
+    const source = readFileSync(relativePath, "utf8");
+    const helperRedirect = replaceRequired(
+      source,
+      "const url = new URL(requestUrl);",
+      "const url = new URL('https://api.openai.com/v1/responses');",
+    );
+    expect(rawHttpViolations(helperRedirect, relativePath)).toHaveLength(1);
+
+    const localSdkReplacement = replaceRequired(
+      source,
+      "import Composio, { APIConnectionError, APIError } from \"@composio/client\";",
+      [
+        "import type ComposioSdk from \"@composio/client\";",
+        "import { APIConnectionError, APIError } from \"@composio/client\";",
+        "class Composio { constructor(_input: unknown) { void (null as unknown as ComposioSdk); } }",
+      ].join("\n"),
+    );
+    expect(rawHttpViolations(localSdkReplacement, relativePath)).toHaveLength(1);
+
+    const sideEffectSdkImport = replaceRequired(
+      source,
+      "import Composio, { APIConnectionError, APIError } from \"@composio/client\";",
+      [
+        "import \"@composio/client\";",
+        "import { APIConnectionError, APIError } from \"@composio/client\";",
+        "class Composio { constructor(_input: unknown) {} }",
+      ].join("\n"),
+    );
+    expect(rawHttpViolations(sideEffectSdkImport, relativePath)).toHaveLength(1);
+
+    const secondConsumer = [
+      source,
+      "const leakedComposioFetch = createBoundedComposioFetch(fetch);",
+    ].join("\n");
+    expect(rawHttpViolations(secondConsumer, relativePath)).toHaveLength(1);
+  });
+
+  it("rejects presigned transfer authority mutations and additional owners", () => {
+    const relativePath = "packages/operator-config/src/linq-runtime.ts";
+    const source = readFileSync(relativePath, "utf8");
+    const credentialInjection = replaceRequired(
+      source,
+      "const normalized: Record<string, string> = {}",
+      "const normalized: Record<string, string> = { authorization: 'Bearer injected' }",
+    );
+    expect(rawHttpViolations(credentialInjection, relativePath)).toHaveLength(1);
+
+    const urlMutation = replaceRequired(
+      source,
+      "return parsed.toString()",
+      "return input.uploadUrl",
+    );
+    expect(rawHttpViolations(urlMutation, relativePath)).toHaveLength(1);
+
+    const secondOwner = [
+      source,
+      "async function uploadLinqAttachmentBytesAgain(uploadUrl: string, bytes: Uint8Array) {",
+      "  await fetch(uploadUrl, { body: bytes, method: 'PUT' });",
+      "}",
+    ].join("\n");
+    expect(rawHttpViolations(secondOwner, relativePath)).toHaveLength(1);
   });
 
   it("requires the Resend override to pass one direct closed request init", () => {

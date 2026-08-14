@@ -55,9 +55,11 @@ Updated: 2026-08-14
    require narrow exception metadata.
 2. Risk: an unavoidable SDK transport adapter drifts beyond the exact reviewed
    request and constructor shape.
-   Mitigation: pin the unique raw adapter and SDK-construction function source
-   spans, and require mutation fixtures for effects, wiring, duplicate owners,
-   and decoys before deliberately updating either digest.
+   Mitigation: pin the exact runtime SDK or SDK-owner binding, unique raw
+   adapter, SDK-construction function, every authority-bearing helper, and the
+   exclusive adapter consumer; same-owner callbacks pin the complete file. Require
+   mutation fixtures for effects, helpers, imports, wiring, extra consumers,
+   duplicate owners, and decoys before deliberately updating a digest.
 3. Risk: the guard lands before sibling SDK migrations and makes CI red.
    Mitigation: keep the PR active, rebase only when the sibling migrations are
    available, and require a clean current-base guard run before merge.
@@ -237,6 +239,14 @@ Updated: 2026-08-14
   prove that URL, init, cache/redirect, duplicate effects or owners, decoy or
   changed wiring, and mutable request shapes fail closed. This does not create
   an SDK-import exemption or authorize another handwritten provider operation.
+- Accepted the later ReviewGPT authority-closure and dynamic-import findings.
+  SDK bridge approval now requires the exact runtime SDK or SDK-owner import
+  binding, one exclusive adapter consumer inside the pinned SDK-construction
+  owner, and digests for every authority-bearing helper; complex same-owner
+  Junction callbacks pin the complete file. Presigned transfer owner, header, and URL
+  helper implementations are pinned as well. Literal dynamic imports of Node
+  HTTP/HTTPS and Undici are recognized in `.mjs`, `.mts`, and `.cts`, with
+  computed and unrelated imports remaining provider-neutral.
 
 ## Verification
 
@@ -249,9 +259,9 @@ Updated: 2026-08-14
 
 Current evidence:
 
-- Focused guard suite: 99 tests passed after the official-SDK hook and mutation
+- Focused guard suite: 103 tests passed after the official-SDK hook and mutation
   coverage follow-up.
-- Repository-tool suite: 35 files and 609 tests passed in the latest local run.
+- Repository-tool suite: 35 files and 613 tests passed in the latest local run.
 - Tools and operator-config TypeScript no-emit checks: passed.
 - `pnpm provider-requests:guard`: passes in the integration workspace containing
   the current-base sibling SDK migrations and the exact registered SDK hooks.
