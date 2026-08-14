@@ -665,6 +665,15 @@ supported provider credential.
   migration, Durable Object binding, required vars/secrets, checked-in scaffold,
   and generated Wrangler config aligned.
 - After hosted scenarios initialize the schema, the Linq route-authority matrix leg runs the focused real-PostgreSQL proofs for deterministic hosted usage replay, both participant-addition route-row orderings, the canonical chat-ownership-before-route-row order shared by usage-limit dispatch and route-key convergence, and device-sync exact-payload plus companion-receipt lock order against concurrent account deletion.
+- `hosted-linq-live-invite-source-ref-{migration,postgres}.test.ts` owns the
+  signup-link failure-liveness proof. The static lane pins the one concurrent
+  live-template `text_pattern_ops` index. The opt-in local PostgreSQL lane seeds
+  dominant unrelated live invite history, requires both scalar probes to use
+  that index before their existence bound, excludes attempt six from the
+  five-attempt identity contract, and proves two digest-specific terminal
+  failures serialize through the member owner so daily suppression releases
+  only after the last live identity. A later delivered receipt restores the
+  marker, while an older failed receipt remains stale.
 - That matrix starts from the hosted-local harness's intentional `prisma db
   push` schema. The usage-credit PostgreSQL suite therefore applies the exact
   checked-in detached direct-payment migration before creating fixtures, so

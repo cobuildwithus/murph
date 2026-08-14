@@ -1,4 +1,4 @@
-import type { Prisma, PrismaClient } from "@prisma/client";
+import { Prisma, type PrismaClient } from "@prisma/client";
 
 import {
   createHostedLinqChatLookupKey,
@@ -3081,22 +3081,20 @@ async function resolveHostedLinqFailedDeliveryReopenTx(input: {
   }
 
   // The daily marker is one projection of all generic and group-aware signup
-  // deliveries for the member/day. Recompute from that complete set after any
-  // failed identity. The caller holds the member row lock, so the result is
-  // independent of terminal receipt order, including concurrent failures.
-  const liveAttempts = await readHostedLinqInviteSignupLiveAttemptsTx({
+  // deliveries for the member/day. Recompute only the two bounded facts the
+  // caller needs after any failed identity. The caller holds the member row
+  // lock, so the result is independent of terminal receipt order, including
+  // concurrent failures.
+  const liveAttemptFacts = await readHostedLinqInviteSignupLiveAttemptsTx({
     dayUtc: failedAttempt.dayUtc,
     memberId: failedAttempt.memberId,
     prisma: input.prisma,
+    sourceEventDigest: failedAttempt.sourceEventDigest,
   });
-  const sameIdentityStillLive = liveAttempts.some(
-    (attempt) =>
-      attempt.sourceEventDigest === failedAttempt.sourceEventDigest,
-  );
-  if (sameIdentityStillLive) {
+  if (liveAttemptFacts.sameIdentityStillLive) {
     return null;
   }
-  if (liveAttempts.length > 0) {
+  if (liveAttemptFacts.anyIdentityLive) {
     return link.groupJoinReplyContext ? link : null;
   }
   return link.groupJoinReplyContext
@@ -3104,37 +3102,85 @@ async function resolveHostedLinqFailedDeliveryReopenTx(input: {
     : link;
 }
 
-async function readHostedLinqInviteSignupLiveAttemptsTx(input: {
+export async function readHostedLinqInviteSignupLiveAttemptsTx(input: {
   dayUtc: string;
   memberId: string;
   prisma: HostedLinqDeliveryClient;
-}): Promise<Array<NonNullable<
-  ReturnType<typeof parseHostedLinqInviteSignupEffectId>
->>> {
+  sourceEventDigest?: string | null;
+}): Promise<{
+  anyIdentityLive: boolean;
+  sameIdentityStillLive: boolean;
+}> {
   const sourceRefPrefix = buildHostedLinqInviteSignupEffectId({
     memberId: input.memberId,
     occurredAt: input.dayUtc,
   });
-  const liveDeliveries = await input.prisma.hostedLinqDelivery.findMany({
-    where: {
-      sourceRef: { startsWith: sourceRefPrefix },
-      status: {
-        in: ["attempted", "provider_dispatch_started", "accepted", "delivered"],
-      },
-      template: {
-        in: ["invite_signup", "invite_signup_fallback"],
-      },
-    },
-    select: { sourceRef: true },
-  });
-  return liveDeliveries.flatMap((delivery) => {
-    const attempt = parseHostedLinqInviteSignupEffectId(delivery.sourceRef);
-    return attempt
-      && attempt.memberId === input.memberId
-      && attempt.dayUtc === input.dayUtc
-      ? [attempt]
-      : [];
-  });
+  const sourceRefLikePattern = `${escapeHostedLinqSourceRefLikePrefix(
+    sourceRefPrefix,
+  )}%`;
+  const exactIdentitySourceRefs = input.sourceEventDigest === undefined
+    ? null
+    : Array.from(
+      { length: HOSTED_LINQ_INVITE_SIGNUP_MAX_ATTEMPTS_PER_IDENTITY },
+      (_, index) => buildHostedLinqInviteSignupEffectId({
+        attempt: index + 1,
+        memberId: input.memberId,
+        occurredAt: input.dayUtc,
+        sourceEventDigest: input.sourceEventDigest,
+      }),
+    );
+  const liveInviteSignupDeliveryPredicateSql = Prisma.sql`
+    "delivery"."source_ref" IS NOT NULL
+      AND "delivery"."template" IN (
+        'invite_signup',
+        'invite_signup_fallback'
+      )
+      AND "delivery"."status" IN (
+        'attempted',
+        'provider_dispatch_started',
+        'accepted',
+        'delivered'
+      )
+  `;
+  const sameIdentityStillLiveSql = exactIdentitySourceRefs
+    ? Prisma.sql`
+        EXISTS (
+          SELECT 1
+          FROM "hosted_linq_delivery" AS "delivery"
+          WHERE ${liveInviteSignupDeliveryPredicateSql}
+            AND "delivery"."source_ref" IN (
+              ${Prisma.join(exactIdentitySourceRefs)}
+            )
+          LIMIT 1
+        )
+      `
+    : Prisma.sql`FALSE`;
+  const rows = await input.prisma.$queryRaw<Array<{
+    anyIdentityLive: boolean;
+    sameIdentityStillLive: boolean;
+  }>>(Prisma.sql`
+    SELECT
+      ${sameIdentityStillLiveSql} AS "sameIdentityStillLive",
+      EXISTS (
+        SELECT 1
+        FROM "hosted_linq_delivery" AS "delivery"
+        WHERE ${liveInviteSignupDeliveryPredicateSql}
+          AND "delivery"."source_ref" LIKE ${sourceRefLikePattern}::text ESCAPE '!'
+          AND substring(
+            "delivery"."source_ref"
+            FROM char_length(${sourceRefPrefix}::text) + 1
+          ) ~ '^(?::a[2-5]|:e[0-9a-f]{32}(?::a[2-5])?)?$'
+        LIMIT 1
+      ) AS "anyIdentityLive"
+  `);
+  return {
+    anyIdentityLive: rows[0]?.anyIdentityLive === true,
+    sameIdentityStillLive: rows[0]?.sameIdentityStillLive === true,
+  };
+}
+
+function escapeHostedLinqSourceRefLikePrefix(value: string): string {
+  return value.replace(/[!%_]/gu, (character) => `!${character}`);
 }
 
 export async function hasHostedLinqInviteSignupLiveDeliveryTx(input: {
@@ -3142,8 +3188,8 @@ export async function hasHostedLinqInviteSignupLiveDeliveryTx(input: {
   memberId: string;
   prisma: HostedLinqDeliveryClient;
 }): Promise<boolean> {
-  const liveAttempts = await readHostedLinqInviteSignupLiveAttemptsTx(input);
-  return liveAttempts.length > 0;
+  const liveAttemptFacts = await readHostedLinqInviteSignupLiveAttemptsTx(input);
+  return liveAttemptFacts.anyIdentityLive;
 }
 
 function readHostedLinqAcceptedMilestoneStatus(
