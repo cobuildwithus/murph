@@ -1,4 +1,6 @@
+import { parseAutomationSupportSeriesTag } from '@murphai/contracts'
 import type { InboxServices } from '@murphai/inbox-services'
+import { readAutomation } from '@murphai/query'
 import {
   readAssistantDeliveryFailureClass,
 } from '@murphai/operator-config/assistant/delivery-failure'
@@ -1524,6 +1526,13 @@ async function evaluateAssistantAutoReplyGroup(input: {
     )
   }
   const latestCrossSessionDelivery = outboxContext.delivery
+  const experimentSupportDelivery =
+    outboxContext.replyTargetDelivery ?? latestCrossSessionDelivery
+  const experimentSupportContext =
+    await buildAssistantAutoReplyExperimentSupportContext({
+      delivery: experimentSupportDelivery,
+      vault: input.vault,
+    })
   if (
     input.executionContext?.hosted &&
     primaryReplyInput.source === 'telegram' &&
@@ -1577,13 +1586,17 @@ async function evaluateAssistantAutoReplyGroup(input: {
     providerStartCriticalPath,
     turnContext: buildAssistantAutoReplyTurnContext({
       baseContext: affirmativeReaction
-      ? buildAssistantAutoReplyReactionTurnContext(
-          outboxContext.replyTargetDelivery?.message ?? null,
-        )
+      ? combineAssistantAutoReplyContextSections([
+          buildAssistantAutoReplyReactionTurnContext(
+            outboxContext.replyTargetDelivery?.message ?? null,
+          ),
+          experimentSupportContext,
+        ])
       : explicitReplyContext?.hasExplicitReply === true
-      ? null
+      ? experimentSupportContext
       : buildAssistantAutoReplyCrossSessionTurnContext(
           latestCrossSessionDelivery?.message ?? null,
+          experimentSupportContext,
         ),
       trustedHostedImageCompletionContext:
         buildTrustedHostedImageCompletionTurnContext(promptInputs),
@@ -4859,6 +4872,9 @@ function resolveAssistantAutoReplyOutboxCausalUpperBoundMs(input: {
 }
 
 interface AssistantAutoReplyMatchingOutboxDelivery {
+  automationId: string | null
+  automationExpectedUpdatedAt: string | null
+  scheduledOccurrenceAt: string | null
   intentId: string
   media: readonly AssistantResponseMedia[]
   message: string | null
@@ -4937,6 +4953,14 @@ async function listAssistantAutoReplyMatchingOutboxDeliveries(input: {
       return []
     }
     return [{
+      automationId:
+        normalizeNullableString(intent.automationAuthority?.automationId) ?? null,
+      automationExpectedUpdatedAt:
+        normalizeNullableString(
+          intent.automationAuthority?.expectedUpdatedAt,
+        ) ?? null,
+      scheduledOccurrenceAt:
+        normalizeNullableString(intent.scheduledOccurrenceAt) ?? null,
       intentId: intent.intentId,
       media: intent.media ?? [],
       message: message ?? null,
@@ -5123,21 +5147,79 @@ function assistantAutoReplyRouteValueMatches(input: {
   return normalizeNullableString(input.actual) === expected
 }
 
+async function buildAssistantAutoReplyExperimentSupportContext(input: {
+  delivery: AssistantAutoReplyMatchingOutboxDelivery | null
+  vault: string
+}): Promise<string | null> {
+  const automationId = normalizeNullableString(input.delivery?.automationId)
+  if (!automationId) {
+    return null
+  }
+
+  const automation = await readAutomation(input.vault, automationId)
+  const expectedUpdatedAt = normalizeNullableString(
+    input.delivery?.automationExpectedUpdatedAt,
+  )
+  if (
+    !automation ||
+    expectedUpdatedAt === null ||
+    automation.updatedAt !== expectedUpdatedAt ||
+    automation.supportKind === null
+  ) {
+    return null
+  }
+  const experimentOwners = automation.tags
+    .map((tag) => parseAutomationSupportSeriesTag(tag)?.seriesId ?? null)
+    .filter((seriesId): seriesId is string =>
+      seriesId?.startsWith('experiment:') === true &&
+      seriesId.length > 'experiment:'.length
+    )
+  if (experimentOwners.length !== 1) {
+    return null
+  }
+
+  const experimentId = experimentOwners[0]!.slice('experiment:'.length)
+  const scheduledOccurrenceAt = normalizeNullableString(
+    input.delivery!.scheduledOccurrenceAt,
+  )
+  const providerAcceptedAt = new Date(input.delivery!.sentAtMs).toISOString()
+  return [
+    'Canonical experiment reminder context:',
+    `- Automation ${automation.automationId} belongs to experiment ${experimentId} with support kind ${automation.supportKind}.`,
+    ...(scheduledOccurrenceAt
+      ? [`- This reminder's exact scheduled occurrence is ${scheduledOccurrenceAt}.`]
+      : ['- The exact scheduled occurrence is unavailable; do not infer it from send or delivery timing.']),
+    `- The prior message reached provider acceptance at ${providerAcceptedAt}. This is not a delivered-receipt timestamp.`,
+    '- Treat a generic affirmative or completion reply as evidence for exactly one occurrence of this experiment-owned reminder, never the whole day or several sets.',
+    '- Before writing, read the exact experiment and its canonical progress to resolve the declared adherence event lane and the intended occurrence.',
+    '- Use that declared lane. Do not create or switch to a generic activity_session when the experiment requires intervention_session evidence.',
+    '- After the canonical write, re-read progress. Say the occurrence was recorded only when that readback proves the new event; otherwise state the failure without a success acknowledgment.',
+  ].join('\n')
+}
+
 function buildAssistantAutoReplyCrossSessionTurnContext(
   message: string | null,
+  experimentSupportContext: string | null = null,
 ): string | null {
   const normalized = normalizeNullableString(message)
-  if (!normalized) {
+  if (!normalized && !experimentSupportContext) {
     return null
   }
 
   return [
-    'Conversation context:',
-    'The assistant previously sent this message in the same conversation from another assistant run:',
-    '',
-    normalized.slice(0, ASSISTANT_AUTO_REPLY_PRIOR_MESSAGE_MAX_LENGTH),
-    '',
-    'Use it only to interpret the current user message.',
+    ...(normalized
+      ? [
+          'Conversation context:',
+          'The assistant previously sent this message in the same conversation from another assistant run:',
+          '',
+          normalized.slice(0, ASSISTANT_AUTO_REPLY_PRIOR_MESSAGE_MAX_LENGTH),
+          '',
+          'Use it only to interpret the current user message.',
+        ]
+      : []),
+    ...(experimentSupportContext
+      ? [normalized ? '' : 'Conversation context:', experimentSupportContext]
+      : []),
   ].join('\n')
 }
 
@@ -5204,6 +5286,13 @@ function buildAssistantAutoReplyExplicitUnquotedReplyContext(
         'The exact reply target has no attested text or media.',
         'Do not infer adjacent content.',
       ].join('\n')
+}
+
+function combineAssistantAutoReplyContextSections(
+  sections: readonly (string | null)[],
+): string | null {
+  const present = sections.filter((section): section is string => section !== null)
+  return present.length > 0 ? present.join('\n\n') : null
 }
 
 function buildAssistantAutoReplyTurnContext(input: {

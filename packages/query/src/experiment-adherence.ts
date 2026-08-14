@@ -198,28 +198,32 @@ export function resolveExperimentAdherenceTargets(input: {
   explicitTargets?: readonly ExperimentAdherenceTarget[] | null;
   protocolActivitySessionEvidence?: ProtocolActivitySessionEvidence | null;
   protocolKey?: string | null;
+  protocolSessionsPerDay?: number | null;
   runPlan: LegacyExperimentRunPlan | null | undefined;
 }): ExperimentAdherenceTarget[] {
   const protocolEvidence = resolveProtocolActivitySessionEvidence(input);
-  if (input.explicitTargets !== undefined && input.explicitTargets !== null) {
-    const explicitTargets = input.explicitTargets.slice();
-    if (
-      !protocolEvidence ||
-      !explicitTargetsMatchLegacyGeneratedTarget(
-        explicitTargets,
-        input.runPlan,
-      )
-    ) {
-      return explicitTargets;
-    }
-    return explicitTargets.map((target) =>
-      applyProtocolActivitySessionEvidence(target, protocolEvidence)
-    );
-  }
-
   const synthesized = synthesizeLegacySessionAdherenceTargets({
+    protocolSessionsPerDay: input.protocolSessionsPerDay,
     runPlan: input.runPlan,
   });
+  if (input.explicitTargets !== undefined && input.explicitTargets !== null) {
+    const explicitTargets = input.explicitTargets.slice();
+    const generatedTargets = resolveLegacyGeneratedTargets({
+      explicitTargets,
+      protocolSessionsPerDay: input.protocolSessionsPerDay,
+      runPlan: input.runPlan,
+      synthesized,
+    });
+    if (!generatedTargets) {
+      return explicitTargets;
+    }
+    return protocolEvidence
+      ? generatedTargets.map((target) =>
+          applyProtocolActivitySessionEvidence(target, protocolEvidence)
+        )
+      : generatedTargets;
+  }
+
   return protocolEvidence
     ? synthesized.map((target) =>
         applyProtocolActivitySessionEvidence(target, protocolEvidence)
@@ -248,25 +252,50 @@ function resolveProtocolActivitySessionEvidence(input: {
     : null;
 }
 
-function explicitTargetsMatchLegacyGeneratedTarget(
-  targets: readonly ExperimentAdherenceTarget[],
-  runPlan: LegacyExperimentRunPlan | null | undefined,
-): boolean {
-  if (targets.length !== 1) {
-    return false;
+function resolveLegacyGeneratedTargets(input: {
+  explicitTargets: readonly ExperimentAdherenceTarget[];
+  protocolSessionsPerDay?: number | null;
+  runPlan: LegacyExperimentRunPlan | null | undefined;
+  synthesized: ExperimentAdherenceTarget[];
+}): ExperimentAdherenceTarget[] | null {
+  if (input.explicitTargets.length !== 1 || input.synthesized.length !== 1) {
+    return null;
   }
-  const target = targets[0];
-  const synthesized = synthesizeLegacySessionAdherenceTargets({ runPlan })[0];
-  if (!target || !synthesized) {
+
+  if (adherenceTargetsEqual(input.explicitTargets, input.synthesized)) {
+    return input.explicitTargets.slice();
+  }
+
+  const sessionsPerDay = normalizePositiveInteger(input.protocolSessionsPerDay);
+  if (sessionsPerDay === null || sessionsPerDay <= 1) {
+    return null;
+  }
+  const legacySingleOccurrenceTargets = synthesizeLegacySessionAdherenceTargets({
+    runPlan: input.runPlan,
+  });
+  return adherenceTargetsEqual(
+    input.explicitTargets,
+    legacySingleOccurrenceTargets,
+  )
+    ? input.synthesized
+    : null;
+}
+
+function adherenceTargetsEqual(
+  left: readonly ExperimentAdherenceTarget[],
+  right: readonly ExperimentAdherenceTarget[],
+): boolean {
+  if (left.length !== right.length) {
     return false;
   }
 
-  // Zod emits both strict targets in the same schema-owned key order. Comparing
-  // those parsed values makes the compatibility repair exact across the full
-  // historical generated shape: label, phase, calendar, evidence, grace, and
-  // rollup. Any custom material difference remains authoritative.
-  return JSON.stringify(experimentAdherenceTargetSchema.parse(target)) ===
-    JSON.stringify(experimentAdherenceTargetSchema.parse(synthesized));
+  // Zod emits strict targets in schema-owned key order. Comparing parsed values
+  // makes this compatibility repair exact across the historical generated
+  // shape while preserving every custom material difference.
+  return left.every((target, index) =>
+    JSON.stringify(experimentAdherenceTargetSchema.parse(target)) ===
+      JSON.stringify(experimentAdherenceTargetSchema.parse(right[index]))
+  );
 }
 
 function applyProtocolActivitySessionEvidence(
@@ -501,6 +530,7 @@ function countExperimentAdherenceExpectations(
 }
 
 export function synthesizeLegacySessionAdherenceTargets(input: {
+  protocolSessionsPerDay?: number | null;
   runPlan: LegacyExperimentRunPlan | null | undefined;
 }): ExperimentAdherenceTarget[] {
   const runPlan = input.runPlan;
@@ -536,7 +566,12 @@ export function synthesizeLegacySessionAdherenceTargets(input: {
   };
 
   if (runPlan.schedule) {
-    const calendar = calendarFromLegacySchedule(runPlan.schedule);
+    const targetCountPerDay =
+      normalizePositiveInteger(input.protocolSessionsPerDay) ?? 1;
+    const calendar = calendarFromLegacySchedule(
+      runPlan.schedule,
+      targetCountPerDay,
+    );
     if (calendar) {
       return [{
         ...base,
@@ -545,9 +580,11 @@ export function synthesizeLegacySessionAdherenceTargets(input: {
           kind: "linkedEventCount" as const,
           eventKind: evidence.eventKind,
           ...(evidence.activityKind ? { activityKind: evidence.activityKind } : {}),
-          missing: evidence.eventKind === "intervention_session"
-            ? "assumed_after_grace" as const
-            : "missed_after_grace" as const,
+          missing:
+            evidence.eventKind === "intervention_session"
+              && targetCountPerDay === 1
+              ? "assumed_after_grace" as const
+              : "missed_after_grace" as const,
         },
       }];
     }
@@ -725,11 +762,10 @@ export function countCalendarAdherenceSessions(input: {
       continue;
     }
 
-    const missingPolicy =
-      target.evidence.missing === "assumed_after_grace" &&
-        target.evidence.eventKind !== "intervention_session"
-        ? "missed_after_grace"
-        : target.evidence.missing;
+    const missingPolicy = resolveEffectiveLinkedEventMissingPolicy({
+      evidence: target.evidence,
+      expectedCount,
+    });
     if (missingPolicy === "assumed_after_grace") {
       counts.completedSessions += remaining;
       counts.assumedSessions += remaining;
@@ -739,6 +775,25 @@ export function countCalendarAdherenceSessions(input: {
   }
 
   return counts;
+}
+
+
+function resolveEffectiveLinkedEventMissingPolicy(input: {
+  evidence: Extract<ExperimentAdherenceEvidenceRule, { kind: "linkedEventCount" }>;
+  expectedCount: number;
+}): Extract<
+  ExperimentAdherenceEvidenceRule,
+  { kind: "linkedEventCount" }
+>["missing"] {
+  if (
+    input.evidence.missing === "assumed_after_grace" &&
+    (input.evidence.eventKind !== "intervention_session" || input.expectedCount > 1)
+  ) {
+    // Persisted targets predating the schema guard must not infer repeated or
+    // non-manual evidence from silence.
+    return "missed_after_grace";
+  }
+  return input.evidence.missing;
 }
 
 function normalizeExpectedOccurrenceCount(
@@ -973,15 +1028,12 @@ function missingCell(input: {
     return cell(expectation, "scheduled", null, 0, input.observations, "The planned target is not due yet.");
   }
 
-  let missingPolicy = expectation.target.evidence.missing;
-  if (
-    missingPolicy === "assumed_after_grace" &&
-    expectation.target.evidence.kind === "linkedEventCount" &&
-    expectation.target.evidence.eventKind !== "intervention_session"
-  ) {
-    // Persisted targets predating the schema guard must not assume evidence outside manual intervention sessions.
-    missingPolicy = "missed_after_grace";
-  }
+  const missingPolicy = expectation.target.evidence.kind === "linkedEventCount"
+    ? resolveEffectiveLinkedEventMissingPolicy({
+        evidence: expectation.target.evidence,
+        expectedCount: expectation.expectedCount,
+      })
+    : expectation.target.evidence.missing;
   if (missingPolicy === "assumed_after_grace") {
     return cell(expectation, "assumed", 1, 0, input.observations, "No log needed. Assumed done on schedule.");
   }
@@ -1425,13 +1477,14 @@ function resolveTargetDateRange(
 
 function calendarFromLegacySchedule(
   schedule: ExperimentRunScheduleIntent,
+  targetCountPerDay: number,
 ): ExperimentAdherenceTarget["calendar"] | null {
   if (schedule.kind === "dailyLocal") {
     return {
       kind: "daily",
       timeZone: schedule.timeZone,
       localTime: schedule.localTime,
-      targetCountPerDay: 1,
+      targetCountPerDay,
     };
   }
 
@@ -1445,7 +1498,7 @@ function calendarFromLegacySchedule(
     timeZone: schedule.timeZone,
     localTime: parsed.localTime,
     weekdays: parsed.weekdays,
-    targetCountPerDay: 1,
+    targetCountPerDay,
   };
 }
 

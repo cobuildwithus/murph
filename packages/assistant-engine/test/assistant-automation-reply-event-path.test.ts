@@ -3,6 +3,8 @@ import os from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { buildAutomationSupportSeriesTag } from '@murphai/contracts'
+import { initializeVault, upsertAutomation } from '@murphai/core'
 import type { InboxServices } from '@murphai/inbox-services'
 import { serializeHostedEmailThreadTarget } from '@murphai/runtime-state'
 import type { AssistantInputCandidate } from '../src/assistant/input-source.ts'
@@ -3041,6 +3043,131 @@ describe('assistant auto-reply event-first path', () => {
     expect(sendInput.prompt).toContain('What do I do for this reset?')
   })
 
+  it('carries canonical experiment ownership only from the exact automation revision', async () => {
+    const vault = await createTempVault()
+    const automationId = 'automation_01JQ8PWXP5A68SQM1W0GYM41WB'
+    const experimentId = 'exp_01JQ8PWXP5A68SQM1W0GYM41WC'
+    await initializeVault({
+      createdAt: '2026-04-08T00:00:00.000Z',
+      vaultRoot: vault,
+    })
+    const automation = await upsertAutomation({
+      automationId,
+      continuityPolicy: 'fresh',
+      instructions: 'Ask for one synthetic set completion.',
+      now: new Date('2026-04-08T00:04:00.000Z'),
+      route: {
+        channel: 'email',
+        deliveryTarget: 'thread-1',
+        identityId: 'identity-1',
+        participantId: 'actor-1',
+        threadId: 'thread-1',
+        threadIsDirect: true,
+      },
+      schedule: {
+        at: '2026-04-08T00:03:00.000Z',
+        kind: 'at',
+      },
+      status: 'active',
+      supportKind: 'reminder',
+      tags: [buildAutomationSupportSeriesTag(`experiment:${experimentId}`)],
+      title: 'Synthetic experiment set reminder',
+      vaultRoot: vault,
+    })
+    replyEventPathMocks.resolveAssistantSession.mockResolvedValue({
+      created: false,
+      session: {
+        lastTurnAt: '2026-04-08T00:02:00.000Z',
+        sessionId: 'session-chat',
+      },
+    })
+    replyEventPathMocks.listAssistantOutboxIntents.mockResolvedValue([
+      createOutboxMessage({
+        automationAuthority: {
+          automationId,
+          expectedUpdatedAt: automation.record.updatedAt,
+        },
+        intentId: 'intent-experiment-reminder',
+        message: 'Set two: reply when complete.',
+        scheduledOccurrenceAt: '2026-04-08T00:03:00.000Z',
+        sentAt: '2026-04-08T00:05:00.000Z',
+        sessionId: 'session-automation',
+      }),
+    ])
+
+    await processAssistantAutoReplyGroup({
+      allowSelfAuthored: false,
+      context: createReplyContext(createAssistantInputCandidate({
+        occurredAt: '2026-04-08T00:10:00.000Z',
+        optionalInboxCaptureId: null,
+        source: 'email',
+        text: 'Done',
+        threadIsDirect: true,
+      })),
+      enabledChannels: ['email'],
+      inboxServices: createInboxServices(),
+      requestId: null,
+      sessionMaxAgeMs: null,
+      vault,
+    })
+
+    const turnContext = replyEventPathMocks.sendAssistantMessage.mock.calls[0]?.[0]
+      .turnContext ?? ''
+    expect(turnContext).toContain('Canonical experiment reminder context:')
+    expect(turnContext).toContain(`belongs to experiment ${experimentId}`)
+    expect(turnContext).toContain('exactly one occurrence')
+    expect(turnContext).toContain('resolve the declared adherence event lane')
+    expect(turnContext).toContain(
+      'Say the occurrence was recorded only when that readback proves the new event',
+    )
+    expect(turnContext).toContain(
+      "This reminder's exact scheduled occurrence is 2026-04-08T00:03:00.000Z.",
+    )
+    expect(turnContext).toContain(
+      'The prior message reached provider acceptance at 2026-04-08T00:05:00.000Z. This is not a delivered-receipt timestamp.',
+    )
+
+    replyEventPathMocks.sendAssistantMessage.mockClear()
+    replyEventPathMocks.listAssistantOutboxIntents.mockResolvedValue([
+      createOutboxMessage({
+        automationAuthority: {
+          automationId,
+          expectedUpdatedAt: '2026-04-08T00:03:59.000Z',
+        },
+        intentId: 'intent-stale-experiment-reminder',
+        message: 'Stale reminder revision.',
+        scheduledOccurrenceAt: '2026-04-08T00:03:00.000Z',
+        sentAt: '2026-04-08T00:05:00.000Z',
+        sessionId: 'session-automation',
+      }),
+    ])
+
+    await processAssistantAutoReplyGroup({
+      allowSelfAuthored: false,
+      context: createReplyContext(createAssistantInputCandidate({
+        inputId: 'ain_44444444444444444444444444444444',
+        occurredAt: '2026-04-08T00:11:00.000Z',
+        optionalInboxCaptureId: null,
+        source: 'email',
+        text: 'Done again',
+        threadIsDirect: true,
+      })),
+      enabledChannels: ['email'],
+      inboxServices: createInboxServices(),
+      requestId: null,
+      sessionMaxAgeMs: null,
+      vault,
+    })
+
+    const staleTurnContext =
+      replyEventPathMocks.sendAssistantMessage.mock.calls[0]?.[0]
+        .turnContext ?? ''
+    expect(staleTurnContext).toContain('Stale reminder revision.')
+    expect(staleTurnContext).not.toContain(
+      'Canonical experiment reminder context:',
+    )
+  })
+
   it('records the selected cross-session intent in receipt metadata so subsequent turns can suppress it', async () => {
     const vault = await createTempVault()
     replyEventPathMocks.resolveAssistantSession.mockResolvedValue({
@@ -3889,6 +4016,35 @@ describe('assistant auto-reply event-first path', () => {
 
   it('binds an attested same-session affirmative Linq reaction to the exact older target', async () => {
     const vault = await createTempVault()
+    const automationId = 'automation_01JQ8PWXP5A68SQM1W0GYM42AA'
+    const experimentId = 'exp_01JQ8PWXP5A68SQM1W0GYM42AB'
+    await initializeVault({
+      createdAt: '2026-04-08T00:00:00.000Z',
+      vaultRoot: vault,
+    })
+    const automation = await upsertAutomation({
+      automationId,
+      continuityPolicy: 'fresh',
+      instructions: 'Ask for one synthetic completion.',
+      now: new Date('2026-04-08T00:04:00.000Z'),
+      route: {
+        channel: 'linq',
+        deliveryTarget: 'thread-1',
+        identityId: 'identity-1',
+        participantId: 'actor-1',
+        threadId: 'thread-1',
+        threadIsDirect: true,
+      },
+      schedule: {
+        at: '2026-04-08T00:03:00.000Z',
+        kind: 'at',
+      },
+      status: 'active',
+      supportKind: 'reminder',
+      tags: [buildAutomationSupportSeriesTag(`experiment:${experimentId}`)],
+      title: 'Synthetic reaction reminder',
+      vaultRoot: vault,
+    })
     replyEventPathMocks.resolveAssistantSession.mockResolvedValue({
       created: false,
       session: {
@@ -3898,10 +4054,15 @@ describe('assistant auto-reply event-first path', () => {
     })
     replyEventPathMocks.listAssistantOutboxIntents.mockResolvedValue([
       createOutboxMessage({
+        automationAuthority: {
+          automationId,
+          expectedUpdatedAt: automation.record.updatedAt,
+        },
         channel: 'linq',
         intentId: 'intent-same-session-reaction-target',
         message: 'Would you like me to continue?',
         providerMessageId: 'linq-msg-same-session-target',
+        scheduledOccurrenceAt: '2026-04-08T00:03:00.000Z',
         sentAt: '2026-04-08T00:05:00.000Z',
         sessionId: 'session-chat',
       }),
@@ -3954,7 +4115,7 @@ describe('assistant auto-reply event-first path', () => {
     expect(replyEventPathMocks.sendAssistantMessage).toHaveBeenCalledTimes(1)
     const sendInput = replyEventPathMocks.sendAssistantMessage.mock.calls[0]?.[0]
     const turnContext = sendInput?.turnContext
-    expect(turnContext).toBe([
+    expect(turnContext).toContain([
       'Reaction target:',
       'The user reacted with a tapback (heart, like, or similar) to this exact assistant message:',
       '',
@@ -3962,6 +4123,11 @@ describe('assistant auto-reply event-first path', () => {
       '',
       'Interpret the reaction in the context of this message. A tapback usually signals acknowledgment or appreciation. Treat it as a "yes" only when this message asked a single closed yes/no question or proposed one specific action whose affirmative answer is unambiguous; never infer facts about the user or treat a reaction alone as consent or authorization. Respond only in relation to this message; a brief acknowledgment-weight reply is fine.',
     ].join('\n'))
+    expect(turnContext).toContain('Canonical experiment reminder context:')
+    expect(turnContext).toContain(`belongs to experiment ${experimentId}`)
+    expect(turnContext).toContain(
+      "This reminder's exact scheduled occurrence is 2026-04-08T00:03:00.000Z.",
+    )
     expect(turnContext).not.toContain('Should I send the newer message?')
     expect(turnContext).not.toContain('another assistant run')
     expect(sendInput?.receiptMetadata).not.toHaveProperty(
@@ -4790,6 +4956,10 @@ function createAssistantInputCandidate(input: {
 
 function createOutboxMessage(input: {
   actorId?: string | null
+  automationAuthority?: {
+    automationId: string
+    expectedUpdatedAt: string
+  } | null
   channel?: string
   identityId?: string | null
   intentId: string
@@ -4803,6 +4973,7 @@ function createOutboxMessage(input: {
   providerMessageId?: string | null
   providerMessageIds?: string[]
   providerThreadId?: string | null
+  scheduledOccurrenceAt?: string | null
   sentAt: string
   sessionId: string
   status?: 'pending' | 'sent'
@@ -4818,6 +4989,12 @@ function createOutboxMessage(input: {
   const channel = input.channel ?? 'email'
   return {
     actorId: input.actorId === undefined ? 'actor-1' : input.actorId,
+    ...(input.automationAuthority === undefined
+      ? {}
+      : { automationAuthority: input.automationAuthority }),
+    ...(input.scheduledOccurrenceAt === undefined
+      ? {}
+      : { scheduledOccurrenceAt: input.scheduledOccurrenceAt }),
     channel,
     delivery:
       status === 'sent'

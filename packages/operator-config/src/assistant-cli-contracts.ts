@@ -989,6 +989,7 @@ export const assistantOutboxIntentSchema = z
     automationAuthority: assistantOutboxAutomationAuthoritySchema
       .nullable()
       .optional(),
+    scheduledOccurrenceAt: isoTimestampSchema.nullable().optional(),
     externalThreadRouteAuthority: assistantExternalThreadRouteAuthoritySchema
       .nullable()
       .optional(),

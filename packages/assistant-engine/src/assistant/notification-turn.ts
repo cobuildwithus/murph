@@ -1519,6 +1519,7 @@ async function deliverAssistantNotificationMessage(input: {
     reviewedAssistantAskCompletionExpiresAt:
       input.input.reviewedAssistantAskCompletionExpiresAt ?? null,
     automationAuthority: input.input.outboxAutomationAuthority ?? null,
+    scheduledOccurrenceAt: input.input.scheduledOccurrenceAt ?? null,
     externalThreadRouteAuthority:
       input.input.outboxExternalThreadRouteAuthority ?? null,
     turnId: input.turnId,

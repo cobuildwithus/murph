@@ -963,6 +963,8 @@ function hydrateRunPlanAdherenceTargets(
     protocolActivitySessionEvidence:
       effectiveProtocolSnapshot?.activitySessionEvidence,
     protocolKey,
+    protocolSessionsPerDay:
+      effectiveProtocolSnapshot?.frequency?.sessionsPerDay,
     runPlan,
   })
   if (!adherenceTarget?.calendar) {

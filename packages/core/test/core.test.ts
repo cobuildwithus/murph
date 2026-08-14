@@ -1750,6 +1750,39 @@ test("createExperiment rejects invalid status values on the canonical path", asy
   );
 });
 
+test("createExperiment rejects newly authored repeated targets that infer completion from silence", async () => {
+  const vaultRoot = await makeTempDirectory("murph-vault");
+  await initializeVault({ vaultRoot });
+
+  await assert.rejects(
+    () =>
+      createExperiment({
+        vaultRoot,
+        slug: "repeated-assumed-target",
+        title: "Repeated assumed target",
+        runPlan: {
+          adherenceTargets: [{
+            targetId: "micro-set",
+            label: "Micro set",
+            phase: "intervention",
+            calendar: {
+              kind: "daily",
+              timeZone: "UTC",
+              targetCountPerDay: 8,
+            },
+            evidence: {
+              kind: "linkedEventCount",
+              eventKind: "intervention_session",
+              missing: "assumed_after_grace",
+            },
+          }],
+        },
+      }),
+    (error: unknown) =>
+      error instanceof VaultError && error.code === "FRONTMATTER_INVALID",
+  );
+});
+
 test("assessment imports append contract-shaped records and emit intake audits", async () => {
   const vaultRoot = await makeTempDirectory("murph-vault");
   const sourceRoot = await makeTempDirectory("murph-source");

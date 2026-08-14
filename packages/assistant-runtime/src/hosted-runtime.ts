@@ -2137,24 +2137,29 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           });
       const stagedAssistantInput =
         hostedMailboxImportStagedConversationInput(initialMailboxImport);
-      const checkpointNextWake = selectEarliestHostedRuntimeWake([
-        {
-          at: nextWake.nextWakeAt,
-          reason: nextWake.nextWakeReason,
-        },
-        {
-          at: systemMailboxWake.at,
-          reason: systemMailboxWake.reason,
-        },
-        {
-          at: assistantCronWake?.at ?? null,
-          reason: assistantCronWake?.reason ?? null,
-        },
-        {
-          at: stagedAssistantInput ? new Date().toISOString() : null,
-          reason: stagedAssistantInput ? "assistant" : null,
-        },
-      ]);
+      const checkpointNextWake = assistantCronWake?.dueNow
+        ? {
+            nextWakeAt: assistantCronWake.at,
+            nextWakeReason: assistantCronWake.reason,
+          }
+        : selectEarliestHostedRuntimeWake([
+            {
+              at: nextWake.nextWakeAt,
+              reason: nextWake.nextWakeReason,
+            },
+            {
+              at: systemMailboxWake.at,
+              reason: systemMailboxWake.reason,
+            },
+            {
+              at: assistantCronWake?.at ?? null,
+              reason: assistantCronWake?.reason ?? null,
+            },
+            {
+              at: stagedAssistantInput ? new Date().toISOString() : null,
+              reason: stagedAssistantInput ? "assistant" : null,
+            },
+          ]);
       const returnedNextWake = selectEarliestHostedRuntimeWake([
         {
           at: checkpointNextWake.nextWakeAt,
@@ -2171,10 +2176,17 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         && initialMailboxImport.stateChanged;
       const hostedVaultStartupPreparationRequiresCheckpoint =
         hostedVaultStartupPreparation.mutated;
+      const activeWorkspaceAlreadyOwnsDueAssistantWake =
+        activeWorkspace?.nextWakeReason === HOSTED_ASSISTANT_WAKE_REASON
+        && hostedRuntimeWakeIsDue(activeWorkspace.nextWakeAt ?? null);
+      const dueAssistantHandoffRequiresCheckpoint =
+        assistantCronWake?.dueNow === true
+        && !activeWorkspaceAlreadyOwnsDueAssistantWake;
 
       if (
         initialMailboxImportRequiresCheckpoint
         || hostedVaultStartupPreparationRequiresCheckpoint
+        || dueAssistantHandoffRequiresCheckpoint
       ) {
         emitPhaseLog({
           details: {
@@ -2277,6 +2289,9 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       }
 
       const invocationResult = {
+        ...(assistantCronWake?.dueNow
+          ? { immediateRecheckRequested: true as const }
+          : {}),
         nextWakeAt: returnedNextWake.nextWakeAt,
         ...(returnedNextWake.nextWakeReason
           ? { nextWakeReason: returnedNextWake.nextWakeReason }
@@ -7582,15 +7597,17 @@ async function resolveHostedAssistantCronWakeAfterInitialImport(input: {
   operatorHomeRoot: string;
   runtimeEnv: Readonly<Record<string, string>>;
   vaultRoot: string;
-}): Promise<{ at: string | null; reason: string | null }> {
+}): Promise<{ at: string | null; dueNow: boolean; reason: string | null }> {
   const status = await getAssistantCronStatus(input.vaultRoot, {
     turnEnvironment: createHostedAssistantTurnEnvironment(input),
   });
-  const at = status.dueJobs > 0
+  const dueNow = status.dueJobs > 0;
+  const at = dueNow
     ? new Date().toISOString()
     : status.nextRunAt;
   return {
     at,
+    dueNow,
     reason: at ? HOSTED_ASSISTANT_WAKE_REASON : null,
   };
 }

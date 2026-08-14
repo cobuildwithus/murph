@@ -3676,6 +3676,7 @@ test('sendAssistantNotificationLocal defers queue-only notification commit until
         automationId: 'automation_sleep_reminder',
         expectedUpdatedAt: '2026-07-16T12:00:00.000Z',
       },
+      scheduledOccurrenceAt: '2026-07-16T13:00:00.000Z',
       vault: '/vaults/deferred-queue',
     }),
   ).rejects.toBe(commitError)
@@ -3686,6 +3687,7 @@ test('sendAssistantNotificationLocal defers queue-only notification commit until
       automationId: 'automation_sleep_reminder',
       expectedUpdatedAt: '2026-07-16T12:00:00.000Z',
     },
+    scheduledOccurrenceAt: '2026-07-16T13:00:00.000Z',
   }))
   expect(mocks.persistAssistantTurnAndSession).not.toHaveBeenCalled()
   const runtimeState = mocks.createAssistantRuntimeStateService.mock.results[0]?.value

@@ -16,6 +16,7 @@ import type {
 } from "@murphai/contracts";
 import {
   EXPERIMENT_STATUSES,
+  experimentAdherenceTargetsAuthoringSchema,
   experimentDocumentRelativePath,
   experimentFrontmatterSchema,
   experimentOutcomeSchema,
@@ -389,6 +390,12 @@ export async function createExperiment(input: CreateExperimentInput): Promise<Cr
     }),
     "FRONTMATTER_INVALID",
     "Experiment frontmatter failed contract validation before write.",
+  );
+  validateContract(
+    experimentAdherenceTargetsAuthoringSchema,
+    attributes.runPlan?.adherenceTargets ?? [],
+    "FRONTMATTER_INVALID",
+    "Experiment adherence targets failed authoring validation before write.",
   );
   const body = input.body ?? `# ${normalizedTitle}\n\n## Plan\n\n## Notes\n\n`;
 

@@ -13419,6 +13419,107 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
+  test("system mailbox hands a newly due assistant cron past an older device-sync wake", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const now = "2026-04-27T14:00:00.000Z";
+    const staleDeviceSyncWakeAt = "2026-04-27T13:59:00.000Z";
+    const automationId = "automation_01JQ8PWXP5A68SQM1W0GYM41WA";
+    const deviceSyncPort = createSnapshotDeviceSyncPort({
+      connectionId: "device_sync_connection_due_assistant_handoff",
+      nextReconcileAt: "2026-04-27T14:05:00.000Z",
+    });
+
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(new Date(now));
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      await upsertAutomation({
+        automationId,
+        continuityPolicy: "fresh",
+        instructions: "Send one synthetic experiment reminder.",
+        now: new Date("2026-04-27T13:58:00.000Z"),
+        route: {
+          channel: "linq",
+          deliveryTarget: "synthetic_direct_chat",
+          identityId: null,
+          participantId: null,
+          threadId: "synthetic_direct_chat",
+          threadIsDirect: true,
+        },
+        schedule: {
+          at: "2026-04-27T13:59:30.000Z",
+          kind: "at",
+        },
+        status: "active",
+        title: "Synthetic due reminder",
+        vaultRoot,
+      });
+      mocks.getAssistantCronStatus.mockResolvedValueOnce({
+        dueJobs: 1,
+        enabledJobs: 1,
+        nextRunAt: "2026-04-27T13:59:30.000Z",
+        runningJobs: 0,
+        totalJobs: 1,
+      });
+
+      const result = await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_due_assistant_system_handoff",
+            processingMode: "system_mailbox",
+            workspaceVersion: "0",
+          },
+          resolvedConfig: createDeviceSyncResolvedConfig(),
+        }),
+        {
+          async createCheckpointSnapshot() {
+            return {
+              snapshotRef: createBundleRef({
+                hash: "a".repeat(64),
+                key: "users/bundles/member-synthetic/due-assistant-system-handoff.bundle.json",
+                size: 512,
+              }),
+            };
+          },
+          async importItem() {
+            throw new Error("No mailbox items should be imported for this handoff.");
+          },
+          platform: createPlatform({
+            deviceSyncPort,
+            mailboxPort: createMailboxPort({ events, items: [] }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              events,
+              workspace: createWorkspaceState({
+                nextWakeAt: staleDeviceSyncWakeAt,
+                nextWakeReason: "device-sync.reconcile",
+                version: "0",
+              }),
+            }),
+          }),
+          async runAssistantPhase() {
+            throw new Error("System mailbox handoff must return before assistant execution.");
+          },
+          vaultRoot,
+        },
+      );
+
+      assert.equal(deviceSyncPort.fetchSnapshotCalls, 0);
+      assert.equal(result.immediateRecheckRequested, true);
+      assert.equal(result.nextWakeAt, now);
+      assert.equal(result.nextWakeReason, "assistant");
+      assert.equal(result.status, "scheduled");
+      assert.equal(checkpointRequests.length, 1);
+      assert.equal(checkpointRequests[0]?.nextWakeAt, now);
+      assert.equal(checkpointRequests[0]?.nextWakeReason, "assistant");
+    } finally {
+      vi.useRealTimers();
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
   test("does not import initial conversation messages while cold bootstrap is deferred", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const events: string[] = [];

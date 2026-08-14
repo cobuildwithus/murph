@@ -215,7 +215,7 @@ test("progress counts explicit repeated occurrences instead of one partial day",
   );
 });
 
-test("progress preserves assumed pacing while labeling every assumed occurrence", () => {
+test("progress never infers repeated occurrences from silence", () => {
   const vault = createVaultReadModel({
     vaultRoot: "/vault",
     entities: [makeExperiment({ missing: "assumed_after_grace" })],
@@ -227,18 +227,18 @@ test("progress preserves assumed pacing while labeling every assumed occurrence"
 
   assert.deepEqual(
     {
-      assumedSessions: progress.adherence.assumedSessions,
+      assumedSessions: progress.adherence.assumedSessions ?? 0,
       completedSessions: progress.adherence.completedSessions,
       expectedSessionsByNow: progress.adherence.expectedSessionsByNow,
       loggedSessions: progress.adherence.loggedSessions,
       status: progress.adherence.status,
     },
     {
-      assumedSessions: 8,
-      completedSessions: 8,
+      assumedSessions: 0,
+      completedSessions: 0,
       expectedSessionsByNow: 8,
-      loggedSessions: 8,
-      status: "met_target",
+      loggedSessions: 0,
+      status: "not_started",
     },
   );
 });
@@ -316,7 +316,7 @@ test("missing repeated occurrences become missed only after grace", () => {
   assert.equal(counts.missedSessions, 5);
 });
 
-test("legacy assumed repeated targets assume only the unobserved remainder", () => {
+test("legacy assumed repeated targets never infer the unobserved remainder", () => {
   const counts = countRepeatedDay({
     asOf: "2026-08-02T01:00:00.000Z",
     graceHours: 4,
@@ -329,10 +329,11 @@ test("legacy assumed repeated targets assume only the unobserved remainder", () 
     ],
   });
 
-  assert.equal(counts.completedSessions, 8);
+  assert.equal(counts.completedSessions, 3);
   assert.equal(counts.confirmedSessions, 3);
-  assert.equal(counts.assumedSessions, 5);
+  assert.equal(counts.assumedSessions, 0);
   assert.equal(counts.expectedSessionsByNow, 8);
+  assert.equal(counts.missedSessions, 5);
 });
 
 test("explicit skipped occurrences preserve adherence v1 missed semantics", () => {
