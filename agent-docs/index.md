@@ -23,10 +23,15 @@ fresh-ref revalidation after the final scope evaluation for implementation and
 canonical review without the mutable
 GitHub-content connector, mandatory
 foul-play assessment in both implementation prompts without hostile-comment
-queue veto, no historical
+queue veto, parent rejection of candidate task/skill/worker-template and every
+root-or-nested-agent authority change before and after the child, with
+Git-parsed protected patch targets and protected-main path/digest identities in the edit-only
+prompt, exact task/skill evidence in implementation and canonical review ZIPs,
+strict kind-specific review response grammar, no historical
 close-only path, a native workspace-only Codex
-permission profile, canonical parent-owned ReviewGPT gates whose complete prompt-preset surface is
-trusted-main-bound and whose archive uses the exact digest-bound parent-local
+permission profile, canonical parent-owned ReviewGPT gates whose complete
+prompt-preset surface, including its four exact delegated specialist lens
+prompts, is trusted-main-bound and whose archive uses the exact digest-bound parent-local
 body with pre/post-wait and pre-persistence drift checks that preserve a new
 operator handoff, plus fresh trusted-control fences after every long canonical
 review and immediately before merge, and matching fences from the invocation's

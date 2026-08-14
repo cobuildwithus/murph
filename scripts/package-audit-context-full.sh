@@ -4,9 +4,29 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 review_gpt_repo_root_absolute="$(realpath -q "$ROOT_DIR")"
 pnpm no-js
+review_gpt_caller_always_paths="${COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS:-}"
 source scripts/repo-tools.config.sh
+COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS+=$'\n'"$review_gpt_caller_always_paths"
 # shellcheck source=review-gpt-context-policy.sh
 source scripts/review-gpt-context-policy.sh
+
+review_gpt_frog_evidence_paths=(
+  "frog-review-evidence/frog-autofix-task.md"
+  "frog-review-evidence/frog-autofix-task.json"
+  "frog-review-evidence/frog-autofix-skill.md"
+  "frog-review-evidence/frog-autofix-skill.json"
+)
+if [[ "$review_gpt_caller_always_paths" == *"frog-review-evidence/frog-autofix-"* ]]; then
+  for review_gpt_frog_evidence_path in "${review_gpt_frog_evidence_paths[@]}"; do
+    if [[ ! -f "$review_gpt_frog_evidence_path" ]] \
+      || [[ -L "$review_gpt_frog_evidence_path" ]] \
+      || ! grep -Fxq "$review_gpt_frog_evidence_path" \
+        <<< "$review_gpt_caller_always_paths"; then
+      echo "Error: immutable Frog review evidence is incomplete." >&2
+      exit 1
+    fi
+  done
+fi
 
 review_gpt_pr_ref="${REVIEW_GPT_PR_URL:-${REVIEW_GPT_PR_REF:-}}"
 review_gpt_pr_context_dir="review-gpt-pr-context"

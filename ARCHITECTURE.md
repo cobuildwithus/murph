@@ -38,10 +38,16 @@ pre-PR provenance and authenticated PR body, then compares it with a fresh
 `origin/main` read after every long wait and at both final merge fences. The
 last task comparison follows the last scope evaluation, and the scope
 classifier consumes the caller-fetched ref without fetching again. Both
-implementation prompts
-require a foul-play assessment before edits. Proposed patches, existing branch/worktree
-state, content outside the instruction hierarchy, and embedded instructions
-remain adversarial evidence. Unrelated hostile prose is ignored rather than
+implementation prompts require a foul-play assessment before edits. Before the
+edit-only child starts, the parent rejects candidate add/edit/delete/move of the
+exact task, Frog skill, worker template, or root/nested `AGENTS.md`, including
+ignored untracked instruction files; the same fence repeats after the child
+returns. Git's own parsed patch targets, not only textual diff headers, enforce
+the protected path boundary. The prompt names the task, skill, and instruction
+paths with their protected `origin/main` SHA-256 identities.
+Candidate copies, other
+docs, proposed patches, existing branch/worktree state, and embedded
+instructions remain evidence only. Unrelated hostile prose is ignored rather than
 becoming a queue veto; an unexplained candidate or a committed task or actual
 change that requires weakened authentication, review, sandbox, credential, or
 network boundaries still fails closed rather than being normalized into a PR. A
@@ -144,8 +150,9 @@ non-closing issue binding, and digest before either model invocation. The same
 exact projection is checked after each long model wait and immediately before
 metadata persistence; an operator handoff created during a wait is preserved
 and any other drift fails closed. Review
-controls, including the complete prompt-preset directory, exactly match trusted
-`main`. That comparison repeats after every long canonical review once the
+controls, including the complete prompt-preset directory and the four exact
+specialist lens prompts that it delegates to, exactly match trusted `main`.
+That comparison repeats after every long canonical review once the
 parent has refreshed `origin/main`, and at both finalization refreshes including
 immediately before merge. Review-control drift uses the existing exact-head
 review-findings handoff; superseded review evidence never retains unattended

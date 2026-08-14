@@ -221,6 +221,7 @@ export function renderWorkerPrompt(
   template: string,
   issueNumber: number,
   mode: FrogAutofixWorkerMode,
+  verifiedAuthority: string,
 ): string {
   if (!Number.isSafeInteger(issueNumber) || issueNumber <= 0) {
     throw new Error("invalid issue number");
@@ -228,12 +229,15 @@ export function renderWorkerPrompt(
   if (
     !template.includes("{{ISSUE_NUMBER}}")
     || !template.includes("{{MODE_WORKFLOW}}")
+    || !template.includes("{{VERIFIED_AUTHORITY}}")
   ) {
     throw new Error("worker template is missing a required placeholder");
   }
+  if (!verifiedAuthority.trim()) throw new Error("worker authority manifest is empty");
   return template
     .replaceAll("{{ISSUE_NUMBER}}", String(issueNumber))
-    .replace("{{MODE_WORKFLOW}}", workerModeInstructions(mode));
+    .replace("{{MODE_WORKFLOW}}", workerModeInstructions(mode))
+    .replace("{{VERIFIED_AUTHORITY}}", verifiedAuthority);
 }
 
 function parseModelVerification(raw: string): ReviewModelVerification | null {
@@ -273,15 +277,29 @@ export function reviewOutcome(response: string, kind: "final" | "specialist"):
   ReviewOutcome {
   const prefix = kind === "final" ? "ROUND_OUTCOME" : "SPECIALIST_OUTCOME";
   const marker = kind === "final" ? "REVIEW_COMPLETE" : "SPECIALIST_REVIEW_COMPLETE";
-  if (exactLineCount(response, marker) !== 1) return "invalid";
+  const nonemptyLines = response
+    .split(/\r?\n/u)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  if (
+    exactLineCount(response, marker) !== 1
+    || nonemptyLines.at(-1) !== marker
+  ) return "invalid";
   const allowedOutcomes = kind === "final"
     ? (["PASS", "FINDINGS", "INVALID", "RETROSPECTIVE_REQUIRED"] as const)
     : (["PASS", "FINDINGS", "INVALID"] as const);
-  const outcomes = allowedOutcomes.filter(
-    (outcome) => exactLineCount(response, `${prefix}: ${outcome}`) === 1,
+  const outcomeLines = nonemptyLines.filter((line) => line.startsWith(`${prefix}:`));
+  const expectedOutcome = nonemptyLines.at(-2);
+  if (
+    outcomeLines.length !== 1
+    || !expectedOutcome
+    || outcomeLines[0] !== expectedOutcome
+  ) return "invalid";
+  const outcome = allowedOutcomes.find(
+    (candidate) => expectedOutcome === `${prefix}: ${candidate}`,
   );
-  if (outcomes.length !== 1) return "invalid";
-  switch (outcomes[0]) {
+  if (!outcome) return "invalid";
+  switch (outcome) {
     case "PASS":
       return "pass";
     case "FINDINGS":
@@ -291,6 +309,57 @@ export function reviewOutcome(response: string, kind: "final" | "specialist"):
     case "INVALID":
       return "invalid";
   }
+}
+
+export function reviewResponseStructureIsValid(options: {
+  head: string;
+  kind: "final" | "specialist";
+  pullRequest: number;
+  response: string;
+}): boolean {
+  if (
+    !Number.isSafeInteger(options.pullRequest)
+    || options.pullRequest <= 0
+    || !/^[0-9a-f]{40}$/u.test(options.head)
+  ) return false;
+  const lines = options.response
+    .split(/\r?\n/u)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const opening = options.kind === "specialist"
+    ? `Checked preliminary specialists: PR #${options.pullRequest} @ ${options.head.slice(0, 7)}`
+    : `Checked: PR #${options.pullRequest} @ ${options.head.slice(0, 7)}`;
+  if (lines[0] !== opening || reviewOutcome(options.response, options.kind) === "invalid") {
+    return false;
+  }
+  if (options.kind === "final") return true;
+
+  const exact = (prefix: string, pattern: RegExp) => {
+    const matches = lines.filter((line) => line.startsWith(prefix));
+    return matches.length === 1 ? pattern.exec(matches[0] ?? "") : null;
+  };
+  const product = exact(
+    "Product experience lens:",
+    /^Product experience lens: (applicable|not applicable) — \S.*$/u,
+  );
+  if (!product) return false;
+  for (const lens of ["Prompt", "Frontend", "Coverage"] as const) {
+    if (!exact(
+      `${lens} lens:`,
+      new RegExp(`^${lens} lens: (?:applicable|not applicable) — \\S.*$`, "u"),
+    )) return false;
+  }
+  const purposeLines = lines.filter((line) => line.startsWith("Product purpose verdict:"));
+  if (
+    (product[1] === "applicable"
+      && (purposeLines.length !== 1
+        || !/^Product purpose verdict: \S.*$/u.test(purposeLines[0] ?? "")))
+    || (product[1] === "not applicable" && purposeLines.length !== 0)
+  ) return false;
+  return Boolean(exact(
+    "Patch artifact:",
+    /^Patch artifact: (?:none|reviewgpt-coverage\.patch)$/u,
+  ));
 }
 
 export function reviewRequiresHumanHandoff(
@@ -305,13 +374,14 @@ export function reviewEvidenceIsValid(options: {
   issueNumber: number;
   kind: "final" | "specialist";
   modelVerification: string;
+  pullRequest: number;
   response: string;
 }): boolean {
   const verification = parseModelVerification(options.modelVerification);
   if (!verification || verification.responseSha256 !== options.expectedHash) return false;
   if (!options.response.includes(`#${options.issueNumber}`)) return false;
   if (!options.response.includes(options.head.slice(0, 12))) return false;
-  return reviewOutcome(options.response, options.kind) !== "invalid";
+  return reviewResponseStructureIsValid(options);
 }
 
 export interface WorkerSupervisorDependencies {

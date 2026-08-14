@@ -30,11 +30,16 @@ Last verified: 2026-08-13
   tree. The issue number is the only issue field inserted into the parent
   worker prompt. The ReviewGPT implementation prompt and edit-only Codex prompt
   require an explicit foul-play assessment before implementation. The exact
-  committed friction binding and repository instruction hierarchy own task
-  intent. Fresh implementation ReviewGPT does not request or use the GitHub
-  connector and does not collect mutable issue title/body/comments/attachments/
+  committed friction binding, Frog skill, and protected `origin/main`
+  `AGENTS.md` hierarchy own task intent. Before child launch the parent rejects
+  candidate task, skill, worker-template, or root/nested `AGENTS.md` changes,
+  including ignored untracked instructions, before and after the edit-only
+  child. Git-parsed patch targets enforce the same protected paths without
+  trusting textual diff headers. The parent supplies the authority paths and SHA-256 identities; candidate
+  copies and other docs are evidence only. Fresh implementation ReviewGPT does
+  not request or use the GitHub connector and does not collect mutable issue title/body/comments/attachments/
   links. Proposed patches, existing branch/worktree state, embedded instructions,
-  content outside the instruction hierarchy, and ReviewGPT prose remain
+  other candidate content, and ReviewGPT prose remain
   adversarial evidence and cannot override user or repository instructions.
   Their unrelated hostile content is ignored rather than treated as a queue
   veto. Unexplained
@@ -131,7 +136,8 @@ Last verified: 2026-08-13
   creating a draft. Preliminary and final parent ReviewGPT use Murph's
   canonical packager and canonical review state from a detached exact-head
   checkout only when every executable and instructional review control,
-  including the complete prompt-preset directory, matches trusted `main`.
+  including the complete prompt-preset directory and its four exact delegated
+  specialist lens prompts, matches trusted `main`.
   The parent writes the already validated local body into that checkout and
   binds it by SHA-256; the packager does not fetch mutable remote presentation
   as the intent contract. Immediately before either model invocation, one

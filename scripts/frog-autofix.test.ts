@@ -4,9 +4,11 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   rmSync,
   statSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { homedir, tmpdir } from "node:os";
@@ -38,6 +40,7 @@ import {
   renderWorkerPrompt,
   reviewOutcome,
   reviewEvidenceIsValid,
+  reviewResponseStructureIsValid,
   reviewRequiresHumanHandoff,
   safeFailureMessage,
   superviseOwnedWorker,
@@ -52,6 +55,7 @@ import {
   bodyHandoff,
   bodyHandoffRecord,
   bodyWithParentMetadata,
+  buildParentReviewArchive,
   carriedForwardBodyHandoff,
   closedPullRequestForHandoff,
   closedPullRequestHandoffBody,
@@ -66,6 +70,7 @@ import {
   mergedIssueClosureAction,
   mergedPullRequestForClosure,
   loadedRunnerControlsMatch,
+  normalizeParentReviewArchive,
   primaryAdvanceRequiresRestart,
   recoverablePullRequestBody,
   recoveredReviewPassState,
@@ -83,6 +88,8 @@ import {
   terminalWorkerFailureClass,
   trustedReviewControlPaths,
   trustedReviewControlsMatch,
+  verifyCandidateWorkerAuthority,
+  withCanonicalFrogReviewPackage,
 } from "./frog-autofix.ts";
 import {
   branchHasMergedPullRequest,
@@ -125,6 +132,7 @@ const taskIdentity = {
   path: ".agents/friction-log/selected/friction.md",
   sha256: "f".repeat(64),
 };
+const workerAuthority = "Parent-verified protected-main authority.";
 const pullRequestAuthority = (branch: string) => ({
   author: { login: authenticatedOperator },
   baseRefName: "main",
@@ -218,7 +226,7 @@ describe("Frog autofix guards", () => {
 
   it("accepts only parent-bound ReviewGPT outcomes and model evidence", () => {
     const head = "a".repeat(40);
-    const response = `Issue #42\nReviewed ${head.slice(0, 12)}\nROUND_OUTCOME: PASS\nREVIEW_COMPLETE\n`;
+    const response = `Checked: PR #99 @ ${head.slice(0, 7)}\nIssue #42\nReviewed ${head.slice(0, 12)}\nROUND_OUTCOME: PASS\nREVIEW_COMPLETE\n`;
     const hash = createHash("sha256").update(response).digest("hex");
     const modelVerification = JSON.stringify({
       requestedModel: "gpt-5.6-sol",
@@ -232,6 +240,7 @@ describe("Frog autofix guards", () => {
       issueNumber: 42,
       kind: "final",
       modelVerification,
+      pullRequest: 99,
       response,
     })).toBe(true);
     expect(reviewEvidenceIsValid({
@@ -240,6 +249,7 @@ describe("Frog autofix guards", () => {
       issueNumber: 42,
       kind: "final",
       modelVerification,
+      pullRequest: 99,
       response,
     })).toBe(false);
     expect(reviewOutcome(response, "final")).toBe("pass");
@@ -247,7 +257,7 @@ describe("Frog autofix guards", () => {
       "SPECIALIST_OUTCOME: FINDINGS\nSPECIALIST_REVIEW_COMPLETE\n",
       "specialist",
     )).toBe("findings");
-    const retrospective = `Issue #42\nReviewed ${head.slice(0, 12)}\nROUND_OUTCOME: RETROSPECTIVE_REQUIRED\nREVIEW_COMPLETE\n`;
+    const retrospective = `Checked: PR #99 @ ${head.slice(0, 7)}\nIssue #42\nReviewed ${head.slice(0, 12)}\nROUND_OUTCOME: RETROSPECTIVE_REQUIRED\nREVIEW_COMPLETE\n`;
     const retrospectiveHash = createHash("sha256").update(retrospective).digest("hex");
     const retrospectiveVerification = JSON.stringify({
       requestedModel: "gpt-5.6-sol",
@@ -267,6 +277,7 @@ describe("Frog autofix guards", () => {
       issueNumber: 42,
       kind: "final",
       modelVerification: retrospectiveVerification,
+      pullRequest: 99,
       response: retrospective,
     })).toBe(true);
     expect(reviewOutcome(
@@ -276,12 +287,93 @@ describe("Frog autofix guards", () => {
     expect(reviewOutcome("ROUND_OUTCOME: PASS\n", "final")).toBe("invalid");
   });
 
-  it("keeps every ReviewGPT preset in the trusted parent control inventory", () => {
+  it("requires the exact kind-specific ReviewGPT response structure", () => {
+    const head = "a".repeat(40);
+    const specialist = [
+      `Checked preliminary specialists: PR #99 @ ${head.slice(0, 7)}`,
+      `Issue #42 at ${head.slice(0, 12)}`,
+      "Product experience lens: not applicable — no product-owned behavior changes.",
+      "Prompt lens: applicable — worker instructions change.",
+      "Frontend lens: not applicable — no web surface changes.",
+      "Coverage lens: applicable — executable orchestration changes.",
+      "Patch artifact: none",
+      "SPECIALIST_OUTCOME: PASS",
+      "SPECIALIST_REVIEW_COMPLETE",
+      "",
+    ].join("\n");
+    expect(reviewResponseStructureIsValid({
+      head,
+      kind: "specialist",
+      pullRequest: 99,
+      response: specialist,
+    })).toBe(true);
+    const productApplicable = specialist
+      .replace("not applicable — no product-owned behavior changes.", "applicable — flow changes.")
+      .replace(
+        "Prompt lens:",
+        "Product purpose verdict: the complete flow remains bounded.\nPrompt lens:",
+      );
+    expect(reviewResponseStructureIsValid({
+      head,
+      kind: "specialist",
+      pullRequest: 99,
+      response: productApplicable,
+    })).toBe(true);
+    for (const malformed of [
+      specialist.replace("Coverage lens:", "Coverage omitted:"),
+      specialist.replace("SPECIALIST_OUTCOME: PASS\n", ""),
+      specialist.replace(
+        "SPECIALIST_OUTCOME: PASS\nSPECIALIST_REVIEW_COMPLETE",
+        "SPECIALIST_REVIEW_COMPLETE\nSPECIALIST_OUTCOME: PASS",
+      ),
+      `${specialist}trailing prose\n`,
+      productApplicable.replace("Product purpose verdict:", "Purpose:"),
+      specialist.replace("Prompt lens:", "Prompt lens: applicable — duplicate.\nPrompt lens:"),
+    ]) {
+      expect(reviewResponseStructureIsValid({
+        head,
+        kind: "specialist",
+        pullRequest: 99,
+        response: malformed,
+      })).toBe(false);
+    }
+    const final = `Checked: PR #99 @ ${head.slice(0, 7)}\nIssue #42 at ${head.slice(0, 12)}\nROUND_OUTCOME: PASS\nREVIEW_COMPLETE\n`;
+    expect(reviewResponseStructureIsValid({
+      head,
+      kind: "final",
+      pullRequest: 99,
+      response: final,
+    })).toBe(true);
+    for (const malformed of [
+      final.replace("Checked: PR #99", "Checked: PR #98"),
+      final.replace("ROUND_OUTCOME: PASS\nREVIEW_COMPLETE", "REVIEW_COMPLETE\nROUND_OUTCOME: PASS"),
+      `${final}trailing prose\n`,
+    ]) {
+      expect(reviewResponseStructureIsValid({
+        head,
+        kind: "final",
+        pullRequest: 99,
+        response: malformed,
+      })).toBe(false);
+    }
+  });
+
+  it("keeps every ReviewGPT prompt authority in the trusted parent control inventory", () => {
+    const specialistPromptPaths = [
+      "agent-docs/prompts/coverage-write.md",
+      "agent-docs/prompts/frontend-review.md",
+      "agent-docs/prompts/product-experience-review.md",
+      "agent-docs/prompts/prompt-review.md",
+    ];
     expect(trustedReviewControlPaths).toContain("scripts/chatgpt-review-presets");
     expect(trustedReviewControlPaths).toContain(".agents/skills/frog/SKILL.md");
+    for (const promptPath of specialistPromptPaths) {
+      expect(trustedReviewControlPaths).toContain(promptPath);
+    }
     const root = mkdtempSync(path.join(tmpdir(), "frog-review-controls-"));
     const presetDirectory = path.join(root, "scripts", "chatgpt-review-presets");
     const skillDirectory = path.join(root, ".agents", "skills", "frog");
+    const promptDirectory = path.join(root, "agent-docs", "prompts");
     const git = (...args: string[]) => {
       const result = spawnSync("git", args, { cwd: root, encoding: "utf8" });
       if (result.status !== 0) {
@@ -292,9 +384,13 @@ describe("Frog autofix guards", () => {
     try {
       mkdirSync(presetDirectory, { recursive: true });
       mkdirSync(skillDirectory, { recursive: true });
+      mkdirSync(promptDirectory, { recursive: true });
       mkdirSync(path.join(root, "scripts"), { recursive: true });
       writeFileSync(path.join(presetDirectory, "pr-deep-review.md"), "trusted\n");
       writeFileSync(path.join(skillDirectory, "SKILL.md"), "trusted\n");
+      for (const promptPath of specialistPromptPaths) {
+        writeFileSync(path.join(root, promptPath), "trusted\n");
+      }
       writeFileSync(path.join(root, "package.json"), "{}\n");
       writeFileSync(path.join(root, "pnpm-lock.yaml"), "lockfileVersion: '9.0'\n");
       writeFileSync(
@@ -320,6 +416,7 @@ describe("Frog autofix guards", () => {
         "scripts/review-gpt-pr-head-preflight.sh",
         "scripts/chatgpt-review-presets/pr-deep-review.md",
         ".agents/skills/frog/SKILL.md",
+        ...specialistPromptPaths,
       ]) {
         writeFileSync(path.join(root, changedPath), `candidate ${changedPath}\n`);
         git("add", changedPath);
@@ -932,7 +1029,7 @@ describe("Frog autofix guards", () => {
       source.indexOf("function downloadImplementationPatch"),
     );
     expect(canonical.indexOf("assertExpectedPullRequestBody({"))
-      .toBeLessThan(canonical.indexOf("prepareTrustedReviewCheckout("));
+      .toBeLessThan(canonical.indexOf("withCanonicalFrogReviewPackage({"));
     expect(canonical.indexOf("assertExpectedPullRequestBody({"))
       .toBeLessThan(canonical.indexOf('requireCommand(\n      "pnpm"'));
     expect(canonical.lastIndexOf("expectedPullRequestBodyDisposition({"))
@@ -1711,26 +1808,34 @@ describe("Frog autofix guards", () => {
 
   it("constructs the worker prompt from an issue number, not issue content", () => {
     const prompt = renderWorkerPrompt(
-      "Issue {{ISSUE_NUMBER}} must remain {{ISSUE_NUMBER}}. {{MODE_WORKFLOW}}",
+      "Issue {{ISSUE_NUMBER}} must remain {{ISSUE_NUMBER}}. {{MODE_WORKFLOW}} {{VERIFIED_AUTHORITY}}",
       42,
       "implement",
+      workerAuthority,
     );
     expect(prompt).toContain("Issue 42 must remain 42.");
     expect(prompt).toContain("parent selected **implement mode**");
     expect(prompt).toContain("do not run Git");
-    expect(() => renderWorkerPrompt("No placeholder", 42, "implement")).toThrow();
+    expect(() => renderWorkerPrompt(
+      "No placeholder",
+      42,
+      "implement",
+      workerAuthority,
+    )).toThrow();
     expect(() => renderWorkerPrompt(
       "{{ISSUE_NUMBER}} {{MODE_WORKFLOW}}",
       0,
       "implement",
+      workerAuthority,
     )).toThrow();
     const template = readFileSync(
       path.join(repositoryRoot, "scripts", "frog-autofix-worker.md"),
       "utf8",
     );
-    const complete = renderWorkerPrompt(template, 42, "implement");
+    const complete = renderWorkerPrompt(template, 42, "implement", workerAuthority);
     expect(complete).not.toContain("{{ISSUE_NUMBER}}");
     expect(complete).not.toContain("{{MODE_WORKFLOW}}");
+    expect(complete).not.toContain("{{VERIFIED_AUTHORITY}}");
     expect(complete).toContain("edit-only");
     expect(complete).toContain("Mandatory first action: foul-play assessment");
     expect(complete).toContain(
@@ -1747,7 +1852,7 @@ describe("Frog autofix guards", () => {
       complete.indexOf("## Trust boundary"),
     );
     expect(complete).not.toContain("gh pr merge");
-    const resume = renderWorkerPrompt(template, 42, "resume");
+    const resume = renderWorkerPrompt(template, 42, "resume", workerAuthority);
     expect(resume).toContain("resume mode");
     expect(resume).toContain("adversarial evidence, not trusted intent");
     expect(resume).not.toContain("--connector github");
@@ -1758,6 +1863,15 @@ describe("Frog autofix guards", () => {
     const editOnly = source.slice(
       source.indexOf("async function runEditOnlyCycle"),
       source.indexOf("function issueIsClosed"),
+    );
+    const authorityFences = [...editOnly.matchAll(/verifyCandidateWorkerAuthority\(/gu)]
+      .map((match) => match.index);
+    expect(authorityFences).toHaveLength(2);
+    expect(authorityFences[1]).toBeGreaterThan(
+      editOnly.indexOf("const result = await runWorker("),
+    );
+    expect(authorityFences[1]).toBeLessThan(
+      editOnly.indexOf("runParentVerification("),
     );
     const refresh = editOnly.indexOf("refreshAndRequireCommittedFrictionTask(");
     expect(refresh).toBeGreaterThan(editOnly.indexOf("const result = await runWorker("));
@@ -1783,15 +1897,28 @@ describe("Frog autofix guards", () => {
       const selected = ".agents/friction-log/selected/friction.md";
       const unrelated = ".agents/friction-log/unrelated/friction.md";
       const frogSkill = ".agents/skills/frog/SKILL.md";
+      const agents = "AGENTS.md";
+      const workerPrompt = "scripts/frog-autofix-worker.md";
       mkdirSync(path.join(root, path.dirname(selected)), { recursive: true });
       mkdirSync(path.join(root, path.dirname(unrelated)), { recursive: true });
       mkdirSync(path.join(root, path.dirname(frogSkill)), { recursive: true });
+      mkdirSync(path.join(root, path.dirname(workerPrompt)), { recursive: true });
       const content = "---\nissue: 'cobuildwithus/murph#42'\n---\n\nTrusted task.\n";
       const skillContent = "---\nname: frog\n---\n\nTrusted Frog instructions.\n";
       writeFileSync(path.join(root, selected), content);
       writeFileSync(path.join(root, unrelated), "---\ntitle: unrelated\n---\n");
       writeFileSync(path.join(root, frogSkill), skillContent);
-      git("add", ".agents");
+      writeFileSync(path.join(root, agents), "Protected instructions.\n");
+      writeFileSync(path.join(root, workerPrompt), "Protected worker prompt.\n");
+      writeFileSync(
+        path.join(root, ".gitignore"),
+        "node_modules/\n.next/\naudit-packages/\nignored/\n",
+      );
+      for (const ignoredDirectory of ["node_modules", ".next", "audit-packages"]) {
+        mkdirSync(path.join(root, ignoredDirectory));
+        writeFileSync(path.join(root, ignoredDirectory, "sentinel"), "ignored\n");
+      }
+      git("add", ".agents", agents, workerPrompt, ".gitignore");
       git("commit", "--quiet", "-m", "tasks");
       git("update-ref", "refs/remotes/origin/main", git("rev-parse", "HEAD"));
       writeFileSync(path.join(root, selected), "candidate-modified\n");
@@ -1803,6 +1930,38 @@ describe("Frog autofix guards", () => {
       });
       const expectedTask = committedFrictionTask(root, 42);
       expect(committedFrictionTaskMatches(root, 42, expectedTask)).toBe(true);
+      writeFileSync(path.join(root, selected), content);
+      const authority = verifyCandidateWorkerAuthority(root, root, 42, expectedTask);
+      expect(authority).toContain(`\`${agents}\` sha256`);
+      expect(authority).toContain(`\`${frogSkill}\` sha256`);
+      expect(authority).toContain(`\`${selected}\` sha256`);
+      writeFileSync(path.join(root, selected), "candidate-modified\n");
+      writeFileSync(path.join(root, agents), "candidate-modified\n");
+      rmSync(path.join(root, frogSkill));
+      writeFileSync(path.join(root, workerPrompt), "candidate-modified\n");
+      mkdirSync(path.join(root, "nested"));
+      writeFileSync(path.join(root, "nested", "AGENTS.md"), "candidate-added\n");
+      git("add", "--all");
+      git("commit", "--quiet", "-m", "candidate authority changes");
+      expect(() => verifyCandidateWorkerAuthority(root, root, 42, expectedTask))
+        .toThrow("candidate changes worker instruction authority");
+      writeFileSync(path.join(root, selected), content);
+      writeFileSync(path.join(root, agents), "Protected instructions.\n");
+      writeFileSync(path.join(root, frogSkill), skillContent);
+      writeFileSync(path.join(root, workerPrompt), "Protected worker prompt.\n");
+      git("rm", "nested/AGENTS.md");
+      git("add", selected, agents, frogSkill, workerPrompt);
+      git("commit", "--quiet", "-m", "restore candidate authority");
+      mkdirSync(path.join(root, "nested"), { recursive: true });
+      writeFileSync(path.join(root, "nested", "AGENTS.md"), "candidate-added\n");
+      expect(() => verifyCandidateWorkerAuthority(root, root, 42, expectedTask))
+        .toThrow("candidate changes worker instruction authority");
+      rmSync(path.join(root, "nested"), { force: true, recursive: true });
+      mkdirSync(path.join(root, "ignored"), { recursive: true });
+      writeFileSync(path.join(root, "ignored", "AGENTS.md"), "candidate-ignored\n");
+      expect(() => verifyCandidateWorkerAuthority(root, root, 42, expectedTask))
+        .toThrow("candidate changes worker instruction authority");
+      rmSync(path.join(root, "ignored"), { force: true, recursive: true });
       const alwaysPaths = materializeCommittedFrogReviewEvidence(
         root,
         checkout,
@@ -1810,41 +1969,28 @@ describe("Frog autofix guards", () => {
         expectedTask,
       );
       expect(alwaysPaths).toEqual([
-        "audit-packages/frog-autofix-task.md",
-        "audit-packages/frog-autofix-task.json",
-        "audit-packages/frog-autofix-skill.md",
-        "audit-packages/frog-autofix-skill.json",
+        "frog-review-evidence/frog-autofix-task.md",
+        "frog-review-evidence/frog-autofix-task.json",
+        "frog-review-evidence/frog-autofix-skill.md",
+        "frog-review-evidence/frog-autofix-skill.json",
       ]);
       expect(readFileSync(
-        path.join(checkout, "audit-packages/frog-autofix-task.md"),
+        path.join(checkout, "frog-review-evidence/frog-autofix-task.md"),
         "utf8",
       )).toBe(content);
       expect(readFileSync(
-        path.join(checkout, "audit-packages/frog-autofix-task.json"),
+        path.join(checkout, "frog-review-evidence/frog-autofix-task.json"),
         "utf8",
       )).toContain(createHash("sha256").update(content).digest("hex"));
       expect(readFileSync(
-        path.join(checkout, "audit-packages/frog-autofix-skill.md"),
+        path.join(checkout, "frog-review-evidence/frog-autofix-skill.md"),
         "utf8",
       )).toBe(skillContent);
       expect(readFileSync(
-        path.join(checkout, "audit-packages/frog-autofix-skill.json"),
+        path.join(checkout, "frog-review-evidence/frog-autofix-skill.json"),
         "utf8",
       )).toContain(createHash("sha256").update(skillContent).digest("hex"));
       expect(existsSync(path.join(checkout, unrelated))).toBe(false);
-
-      const source = readFileSync(
-        path.join(repositoryRoot, "scripts", "frog-autofix.ts"),
-        "utf8",
-      );
-      expect(source.slice(
-        source.indexOf("export function buildParentReviewArchive"),
-        source.indexOf("function runParentReview"),
-      )).toContain("materializeCommittedFrogReviewEvidence(");
-      expect(source.slice(
-        source.indexOf("function runCanonicalPullRequestReview"),
-        source.indexOf("function downloadImplementationPatch"),
-      )).toContain("materializeCommittedFrogReviewEvidence(");
 
       const updated = content.replace("Trusted task.", "Updated task.");
       writeFileSync(path.join(root, selected), updated);
@@ -1884,6 +2030,220 @@ describe("Frog autofix guards", () => {
       git("commit", "--quiet", "-m", "replace task");
       git("update-ref", "refs/remotes/origin/main", git("rev-parse", "HEAD"));
       expect(committedFrictionTaskMatches(root, 42, expectedTask)).toBe(false);
+    } finally {
+      rmSync(root, { force: true, recursive: true });
+    }
+  }, 120_000);
+
+  it("composes all three production review ZIPs with exact immutable Frog evidence", () => {
+    const runRoot = mkdtempSync(path.join(tmpdir(), "frog-review-zips-"));
+    const root = path.join(runRoot, "repository");
+    const transient = path.join(runRoot, "transient");
+    const fakeBin = path.join(runRoot, "bin");
+    mkdirSync(path.join(root, "scripts"), { recursive: true });
+    mkdirSync(path.join(root, ".agents", "friction-log", "selected"), {
+      recursive: true,
+    });
+    mkdirSync(path.join(root, ".agents", "skills", "frog"), { recursive: true });
+    mkdirSync(transient, { recursive: true });
+    mkdirSync(fakeBin, { recursive: true });
+    const taskPath = ".agents/friction-log/selected/friction.md";
+    const skillPath = ".agents/skills/frog/SKILL.md";
+    const taskContent = "---\nissue: 'cobuildwithus/murph#42'\n---\n\nTrusted task.\n";
+    const skillContent = "---\nname: frog\n---\n\nTrusted skill.\n";
+    const git = (...args: string[]) => {
+      const result = spawnSync("git", args, { cwd: root, encoding: "utf8" });
+      expect(result.status, result.stderr).toBe(0);
+      return result.stdout.trim();
+    };
+    try {
+      for (const script of [
+        "package-audit-context-full.sh",
+        "repo-tools.config.sh",
+        "review-gpt-context-policy.sh",
+      ]) {
+        copyFileSync(
+          path.join(repositoryRoot, "scripts", script),
+          path.join(root, "scripts", script),
+        );
+      }
+      writeFileSync(path.join(root, "AGENTS.md"), "Protected instructions.\n");
+      writeFileSync(path.join(root, "ARCHITECTURE.md"), "# Architecture\n");
+      writeFileSync(path.join(root, "README.md"), "# Fixture\n");
+      writeFileSync(path.join(root, ".crabbox.yaml"), "version: 1\n");
+      writeFileSync(path.join(root, taskPath), taskContent);
+      writeFileSync(path.join(root, skillPath), skillContent);
+      writeFileSync(
+        path.join(root, "package.json"),
+        `${JSON.stringify({ private: true, scripts: { "no-js": "true" } }, null, 2)}\n`,
+      );
+      git("init", "--quiet");
+      git("config", "user.name", "Automation");
+      git("config", "user.email", "automation@example.invalid");
+      git("add", ".");
+      git("commit", "--quiet", "-m", "fixture");
+      const head = git("rev-parse", "HEAD");
+      git("update-ref", "refs/remotes/origin/main", head);
+      symlinkSync(path.join(repositoryRoot, "node_modules"), path.join(root, "node_modules"), "dir");
+      const gh = path.join(fakeBin, "gh");
+      writeFileSync(gh, `#!/bin/bash
+set -euo pipefail
+json=""
+while [[ "$#" -gt 0 ]]; do
+  if [[ "$1" == "--json" ]]; then json="$2"; shift 2; else shift; fi
+done
+case "$json" in
+  baseRefName) printf 'main\\n' ;;
+  baseRefOid|headRefOid) printf '${head}\\n' ;;
+  headRefOid,additions,deletions,changedFiles) printf '${head}\\t1\\t0\\t1\\n' ;;
+  *) exit 64 ;;
+esac
+`);
+      chmodSync(gh, 0o700);
+      const task = committedFrictionTask(root, 42);
+      const body = bodyWithParentMetadata(renderRecoveredPullRequestBody(42), {
+        firstHead: head,
+      });
+      const expectedArtifacts = [
+        "frog-review-evidence/frog-autofix-task.md",
+        "frog-review-evidence/frog-autofix-task.json",
+        "frog-review-evidence/frog-autofix-skill.md",
+        "frog-review-evidence/frog-autofix-skill.json",
+      ];
+      const archiveContents = (zipPath: string) => {
+        const listed = spawnSync("unzip", ["-Z1", zipPath], { encoding: "utf8" });
+        expect(listed.status, listed.stderr).toBe(0);
+        const entries = listed.stdout.split("\n").filter(Boolean);
+        const evidenceEntries = entries
+          .map((entry) => entry.split("frog-review-evidence/")[1])
+          .filter((entry): entry is string => Boolean(entry));
+        expect(evidenceEntries.sort()).toEqual([...expectedArtifacts]
+          .map((artifact) => artifact.replace("frog-review-evidence/", ""))
+          .sort());
+        const resolved = new Map(expectedArtifacts.map((artifact) => {
+          const matches = entries.filter((entry) => (
+            entry === artifact || entry.endsWith(`/${artifact}`)
+          ));
+          expect(matches, artifact).toHaveLength(1);
+          return [artifact, matches[0] as string];
+        }));
+        const read = (artifact: string) => {
+          const result = spawnSync(
+            "unzip",
+            ["-p", zipPath, resolved.get(artifact) as string],
+            { encoding: "utf8" },
+          );
+          expect(result.status, result.stderr).toBe(0);
+          return result.stdout;
+        };
+        expect(read(expectedArtifacts[0] as string)).toBe(taskContent);
+        expect(JSON.parse(read(expectedArtifacts[1] as string))).toEqual({
+          issue: "cobuildwithus/murph#42",
+          path: taskPath,
+          sha256: createHash("sha256").update(taskContent).digest("hex"),
+        });
+        expect(read(expectedArtifacts[2] as string)).toBe(skillContent);
+        expect(JSON.parse(read(expectedArtifacts[3] as string))).toEqual({
+          path: skillPath,
+          sha256: createHash("sha256").update(skillContent).digest("hex"),
+        });
+      };
+
+      const interruptedReviewRoot = path.join(transient, "implementation");
+      mkdirSync(interruptedReviewRoot, { recursive: true });
+      writeFileSync(
+        path.join(interruptedReviewRoot, "codebase-stale-invocation.zip"),
+        "stale-parent-owned-archive",
+      );
+      const implementation = buildParentReviewArchive(
+        root,
+        root,
+        transient,
+        "implementation",
+        42,
+        task,
+      );
+      archiveContents(path.join(implementation.reviewRoot, "codebase.zip"));
+
+      const packageCanonical = (
+        kind: "final" | "specialist",
+        omit?: string,
+      ): string => {
+        const output = path.join(runRoot, `${kind}-${omit ? "omitted" : "complete"}`);
+        let zipPath = "";
+        withCanonicalFrogReviewPackage({
+          expectedBody: body,
+          head,
+          issueNumber: 42,
+          kind,
+          primary: root,
+          pullRequest: 99,
+          task,
+          transient,
+          worktree: root,
+        }, ({ checkout, environment }) => {
+          if (omit) rmSync(path.join(checkout, omit));
+          mkdirSync(output, { recursive: true });
+          const packaged = spawnSync(
+            "bash",
+            [
+              "scripts/package-audit-context-full.sh",
+              "--zip",
+              "--out-dir",
+              output,
+              "--name",
+              "codebase",
+            ],
+            {
+              cwd: checkout,
+              encoding: "utf8",
+              env: {
+                ...process.env,
+                ...environment,
+                PATH: `${fakeBin}:${process.env.PATH ?? ""}`,
+              },
+            },
+          );
+          if (omit) expect(packaged.status).not.toBe(0);
+          else {
+            expect(packaged.status, packaged.stderr).toBe(0);
+            const archives = readdirSync(output).filter((entry) => entry.endsWith(".zip"));
+            expect(archives).toHaveLength(1);
+            zipPath = path.join(output, archives[0] as string);
+          }
+        });
+        return zipPath;
+      };
+      archiveContents(packageCanonical("specialist"));
+      archiveContents(packageCanonical("final"));
+      packageCanonical("specialist", "frog-review-evidence/frog-autofix-skill.json");
+    } finally {
+      rmSync(runRoot, { force: true, recursive: true });
+    }
+  }, 180_000);
+
+  it("normalizes one bounded parent review ZIP without depending on its suffix", () => {
+    const root = mkdtempSync(path.join(tmpdir(), "frog-parent-archive-"));
+    try {
+      const suffixed = path.join(
+        root,
+        "codebase-20260813-120000Z-invocation-abc123.zip",
+      );
+      writeFileSync(suffixed, "zip-bytes");
+      const normalized = normalizeParentReviewArchive(root);
+      expect(normalized).toBe(path.join(root, "codebase.zip"));
+      expect(readFileSync(normalized, "utf8")).toBe("zip-bytes");
+
+      rmSync(normalized);
+      writeFileSync(path.join(root, "one.zip"), "one");
+      writeFileSync(path.join(root, "two.zip"), "two");
+      expect(() => normalizeParentReviewArchive(root)).toThrow("ambiguous");
+
+      rmSync(path.join(root, "one.zip"));
+      rmSync(path.join(root, "two.zip"));
+      writeFileSync(path.join(root, "payload"), "payload");
+      symlinkSync(path.join(root, "payload"), path.join(root, "linked.zip"));
+      expect(() => normalizeParentReviewArchive(root)).toThrow("invalid");
     } finally {
       rmSync(root, { force: true, recursive: true });
     }
@@ -3195,14 +3555,45 @@ describe("Frog autofix guards", () => {
       "+new",
       "",
     ].join("\n");
-    expect(validatePatchText(patch)).toEqual(["scripts/frog-tool.ts"]);
+    expect(validatePatchText(patch, taskIdentity.path))
+      .toEqual(["scripts/frog-tool.ts"]);
     expect(() => validatePatchText(
       patch.replaceAll("scripts/frog-tool.ts", "../outside"),
+      taskIdentity.path,
     )).toThrow("unsafe path");
     expect(() => validatePatchText(
       patch.replaceAll("scripts/frog-tool.ts", ".codex/config.toml"),
+      taskIdentity.path,
     )).toThrow("unsafe path");
-    expect(() => validatePatchText(`${patch}GIT binary patch\n`)).toThrow(
+    for (const protectedPath of [
+      taskIdentity.path,
+      ".agents/skills/frog/SKILL.md",
+      "scripts/frog-autofix-worker.md",
+      "AGENTS.md",
+      "nested/AGENTS.md",
+      "frog-review-evidence/forged.json",
+    ]) {
+      expect(() => validatePatchText(
+        patch.replaceAll("scripts/frog-tool.ts", protectedPath),
+        taskIdentity.path,
+      )).toThrow("unsafe path");
+    }
+    const quotedProtectedPatch = [
+      patch,
+      'diff --git "a/AGENTS.md" "b/AGENTS.md"',
+      '--- "a/AGENTS.md"',
+      '+++ "b/AGENTS.md"',
+      "@@ -1 +1 @@",
+      "-trusted",
+      "+untrusted",
+      "",
+    ].join("\n");
+    expect(() => validatePatchText(quotedProtectedPatch, taskIdentity.path))
+      .toThrow("unsupported path encoding");
+    expect(() => validatePatchText(
+      `${patch}GIT binary patch\n`,
+      taskIdentity.path,
+    )).toThrow(
       "unsupported payload",
     );
     expect(() => requireImplementationCompletion("No attachment marker.\n"))
@@ -3210,6 +3601,14 @@ describe("Frog autofix guards", () => {
     expect(() => requireImplementationCompletion(
       "Done.\nIMPLEMENTATION_PATCH_COMPLETE\n",
     )).not.toThrow();
+    for (const malformed of [
+      "IMPLEMENTATION_PATCH_COMPLETE\nMore prose.\n",
+      "IMPLEMENTATION_PATCH_COMPLETE\nIMPLEMENTATION_PATCH_COMPLETE\n",
+      "No attachment marker.\n",
+    ]) {
+      expect(() => requireImplementationCompletion(malformed))
+        .toThrow(TerminalPrePullRequestFailure);
+    }
     expect(terminalWorkerFailureClass({ status: 0, timedOut: false })).toBeNull();
     expect(terminalWorkerFailureClass({ status: 7, timedOut: false }))
       .toBe("worker-failed");
@@ -3227,6 +3626,9 @@ describe("Frog autofix guards", () => {
     expect(implementationPrompt).toContain(
       "exact committed friction report",
     );
+    expect(implementationPrompt).toContain("frog-autofix-skill.json");
+    expect(implementationPrompt).toContain("SHA-256 digests");
+    expect(implementationPrompt).toContain("final nonempty line");
     expect(implementationPrompt).toContain(
       "Do not access or use mutable issue titles",
     );
@@ -3346,10 +3748,27 @@ describe("Frog autofix guards", () => {
       git("config", "user.name", "Automation");
       git("config", "user.email", "automation@example.invalid");
       writeFileSync(path.join(root, ".gitignore"), "audit-packages/\n");
+      writeFileSync(path.join(root, "AGENTS.md"), "trusted instructions\n");
       writeFileSync(path.join(root, "tracked.txt"), "main\n");
-      git("add", ".gitignore", "tracked.txt");
+      git("add", ".gitignore", "AGENTS.md", "tracked.txt");
       git("commit", "--quiet", "-m", "main");
       git("update-ref", "refs/remotes/origin/main", git("rev-parse", "HEAD"));
+      writeFileSync(path.join(root, "AGENTS.md"), "untrusted instructions\n");
+      const forgedTargetPatch = `${git("diff", "--", "AGENTS.md")}`
+        .replace(
+          "diff --git a/AGENTS.md b/AGENTS.md",
+          "diff --git a/tracked.txt b/tracked.txt",
+        );
+      writeFileSync(path.join(root, "AGENTS.md"), "trusted instructions\n");
+      const forgedTargetPatchPath = path.join(root, "forged-target.patch");
+      writeFileSync(forgedTargetPatchPath, `${forgedTargetPatch}\n`);
+      expect(() => applyImplementationPatch(
+        root,
+        forgedTargetPatchPath,
+        taskIdentity.path,
+      )).toThrow(TerminalPrePullRequestFailure);
+      expect(readFileSync(path.join(root, "AGENTS.md"), "utf8"))
+        .toBe("trusted instructions\n");
       writeFileSync(path.join(root, "tracked.txt"), "candidate\n");
       writeFileSync(path.join(root, "candidate.txt"), "must not persist\n");
       const pendingBodyPath = path.join(root, FROG_AUTOFIX_PR_BODY_PATH);
@@ -3366,7 +3785,7 @@ describe("Frog autofix guards", () => {
       writeFileSync(ignoredCandidate, "must not persist\n");
       const rejectedPatch = path.join(root, "rejected.patch");
       writeFileSync(rejectedPatch, "not a patch\n");
-      expect(() => applyImplementationPatch(root, rejectedPatch))
+      expect(() => applyImplementationPatch(root, rejectedPatch, taskIdentity.path))
         .toThrow(TerminalPrePullRequestFailure);
 
       const head = createEmptyRepairHandoffCommit(root, 42);

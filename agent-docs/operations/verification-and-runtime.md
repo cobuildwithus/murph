@@ -623,7 +623,8 @@ implementation proof includes the real leader-first descendant timeout,
 parent-owned ReviewGPT/patch boundaries, network-denied worker arguments,
 tracked/untracked/ignored interruption recovery, revoked-authority/head/check/
 conflict rejection, both sides of real Git renames/copies, product-runtime
-merge pausing, complete trusted prompt-preset coverage, final-retrospective
+merge pausing, complete trusted prompt-preset and delegated specialist-lens
+coverage, final-retrospective
 handoff and queue advancement, same-named fork/different-operator rejection,
 closed-unmerged and descendant-head handoff continuity, terminal versus
 transient required-check classification, conflict disposition, real native
@@ -636,6 +637,11 @@ remote-only PASS recovery, fixed-body handoff when no trusted baseline remains,
 implementation prompts whose archives contain only the exact immutable
 `origin/main` friction task blob and path/digest manifest, and do not request or
 use a mutable GitHub-content connector,
+parent-verified worker authority that rejects candidate task/Frog-skill/
+worker-template or root/nested `AGENTS.md` changes, including ignored untracked
+instructions, before and after child execution; validates protected paths from
+Git's parsed patch targets; and binds the task, skill, and instruction
+paths/digests into the child prompt,
 task edit/move/delete/replacement/binding-drift rejection after long waits and
 at both merge fences including final-scope ref movement, fresh post-wait task
 reads, trusted remote-no-PR task provenance, terminal missing or
@@ -675,6 +681,11 @@ same native-gate inode,
 operator-handoff preservation during a blocked model review, non-closing exact
 issue binding across short and full-URL forms plus parent-only post-merge
 closure and never-closed retry that refuses deliberate reopen,
+strict kind-specific specialist/final response structure, one final
+implementation completion marker, and production composition of implementation
+and canonical preliminary/final ZIPs with exact task/skill bytes and manifests
+plus fail-closed omission proof and filename-independent exactly-one bounded
+regular-archive selection with stale parent-owned archive replacement on retry,
 an explicit Frog script allowlist that excludes the GitHub Actions-owned
 `scripts/frog-pr-context.ts` on direct/rename/copy paths. A macOS
 permission smoke must also apply the exact native worker profile and prove an

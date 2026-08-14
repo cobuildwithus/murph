@@ -110,11 +110,16 @@ Last verified: 2026-08-13
   stale candidate; changed projection, non-ancestor state, or foreign ownership
   fails closed.
 - Both implementation prompts require an explicit foul-play assessment before
-  edits. The exact committed friction binding and repository instruction
-  hierarchy own task intent. Fresh implementation ReviewGPT does not request or
-  use the GitHub connector and does not collect mutable issue title/body/
-  comments/attachments/links. Proposed patches, existing branch/worktree
-  state, content outside the instruction hierarchy, and embedded instructions
+  edits. The exact committed friction binding, Frog skill, and protected
+  `origin/main` `AGENTS.md` hierarchy own task intent. Before child launch the
+  parent rejects candidate task, skill, worker-template, or root/nested
+  `AGENTS.md` changes, including ignored untracked instructions, before and
+  after child execution. Git-parsed patch targets independently enforce the
+  same protected path boundary. The parent supplies the authority paths and SHA-256 identities;
+  candidate copies and other docs are evidence only. Fresh implementation
+  ReviewGPT does not request or use the GitHub connector and does not collect
+  mutable issue title/body/comments/attachments/links. Proposed patches, existing branch/worktree
+  state, other candidate content, and embedded instructions
   are adversarial evidence.
   Unrelated hostile prose is ignored rather than becoming a recurring queue
   veto; unexplained candidate scope or a committed task or actual change that
@@ -149,8 +154,9 @@ Last verified: 2026-08-13
   receives the fixed-body handoff without autonomous rebaselining. The same
   task path/digest must still resolve to the sole issue binding after every
   long model wait and at both final merge fences; edit, move, replacement,
-  deletion, or binding drift produces the fixed human handoff. The trusted ReviewGPT control
-  inventory is likewise compared with freshly fetched `origin/main` after each
+  deletion, or binding drift produces the fixed human handoff. The trusted
+  ReviewGPT control inventory, including the four exact delegated specialist
+  lens prompts, is likewise compared with freshly fetched `origin/main` after each
   long canonical review and after both finalization refreshes, including just
   before merge. Drift publishes the existing review-findings handoff instead of
   accepting or merging superseded review evidence. The invocation also retains

@@ -87,9 +87,10 @@ admits only an open `enhancement` issue authored by the exact Frog App with one
 matching binding already committed on `main`. The issue number is the only
 issue field in the parent Codex prompt; all issue content remains untrusted
 evidence. The non-model parent obtains and validates an attached implementation
-patch from a fresh ReviewGPT Pro thread whose archive contains only the exact
-committed friction task blob plus its source path and digest, then starts a network-denied,
-workspace-only Codex child for local integration. The parent alone commits,
+patch from a fresh ReviewGPT Pro thread whose archive contains the exact
+committed friction task and Frog skill blobs plus their protected source paths
+and digests, then starts a network-denied, workspace-only Codex child for local
+integration. The parent alone commits,
 pushes, publishes the PR, runs ReviewGPT, observes required CI, merges, and
 closes. A recovery run resumes existing parent-owned state without acquiring
 another implementation patch.
