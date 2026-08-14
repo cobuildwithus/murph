@@ -43,6 +43,7 @@ import {
 } from "@murphai/hosted-execution/runtime-control";
 import {
   buildHostedExecutionWorkingSnapshotRef,
+  parseHostedWorkspaceSnapshotV2Ref,
 } from "@murphai/hosted-execution/parsers";
 import {
   createAssistantUsageReportingUserId,
@@ -4297,7 +4298,230 @@ describe("handleRunnerOutboundRequest", () => {
       secondBody.snapshotId,
       "second workspace snapshot id",
     ))).toBe(true);
+    expect(hostedExecutionMocks.emitHostedExecutionStructuredLog.mock.calls.some(
+      ([entry]) => entry.message
+        === "Hosted runner workspace snapshot start diagnostic.",
+    )).toBe(false);
   });
+
+  it("emits bounded fixed-key workspace snapshot start route diagnostics", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-27T00:00:00.000Z"));
+    const fixture = await createHostedRuntimeCryptoContextFixture();
+    const runner = createWorkspaceVersionAwareUserRunner();
+    const runnerStub = runner.getByName();
+    const originalCreate = runnerStub.createHostedWorkspaceSnapshotUploadSession;
+    if (!originalCreate) {
+      throw new TypeError("Workspace snapshot session create stub is unavailable.");
+    }
+    const timedStub: WorkerUserRunnerStubLike = {
+      ...runnerStub,
+      async createHostedWorkspaceSnapshotUploadSession(
+        session: HostedWorkspaceSnapshotUploadSession,
+      ) {
+        const created = await originalCreate.call(runnerStub, session);
+        vi.setSystemTime(new Date(Date.now() + 90_001));
+        return created;
+      },
+    };
+    const env = createRunnerOutboundEnv({
+      ...fixture.env,
+      USER_RUNNER: { getByName: () => timedStub },
+    });
+    vi.stubGlobal("fetch", fixture.fetchMock);
+
+    const response = await handleRunnerOutboundRequest(
+      createWorkspaceSnapshotStartRequest({
+        expectedWorkspaceVersion: "4",
+        workspaceVersion: "4",
+      }),
+      env,
+      "member_123",
+    );
+
+    expect(response.status).toBe(200);
+    const responseBody = requireTestObject(
+      await response.json(),
+      "bounded workspace snapshot start response",
+    );
+    const responseEncryption = requireTestObject(
+      responseBody.encryption,
+      "bounded workspace snapshot start encryption",
+    );
+    const diagnosticLog = hostedExecutionMocks.emitHostedExecutionStructuredLog.mock.calls
+      .map(([entry]) => entry)
+      .find(
+        (entry: { details?: unknown; level?: string; message?: string }) =>
+          entry.message === "Hosted runner workspace snapshot start diagnostic.",
+      );
+    expect(diagnosticLog).toBeDefined();
+    expect(diagnosticLog?.level).toBe("info");
+    expect(diagnosticLog).toMatchObject({ userId: null });
+    const details = requireTestObject(
+      diagnosticLog?.details,
+      "workspace snapshot start route diagnostic details",
+    );
+    expect(details).toMatchObject({
+      operation: "workspace_snapshot_start",
+      responseStatus: 200,
+      snapshotStartAlarmCandidateCount: 0,
+      snapshotStartAlarmCandidateWorkDurationMs: 0,
+      snapshotStartCandidateCountsObserved: false,
+      snapshotStartDiagnosticScopeKind: "route",
+      snapshotStartDurationsCapped: true,
+      snapshotStartNewWorkspaceCandidateCount: 0,
+      snapshotStartOutcomeKind: "created",
+      snapshotStartSessionCreateStorageDurationMs: 60_000,
+      snapshotStartSubstageKind: "completed",
+      snapshotStartTotalDurationMs: 60_000,
+      userIdPresent: true,
+    });
+    const durationKeys = [
+      "snapshotStartAlarmCandidateWorkDurationMs",
+      "snapshotStartCryptoDataKeyDurationMs",
+      "snapshotStartSessionCreateStorageDurationMs",
+      "snapshotStartTotalDurationMs",
+      "snapshotStartWriteFenceOwnerValidationDurationMs",
+    ] as const;
+    for (const key of durationKeys) {
+      const value = details[key];
+      if (typeof value !== "number") {
+        throw new TypeError(`${key} must be numeric.`);
+      }
+      expect(Number.isInteger(value)).toBe(true);
+      expect(value).toBeGreaterThanOrEqual(0);
+      expect(value).toBeLessThanOrEqual(60_000);
+    }
+    expect(Object.keys(details).sort()).toEqual([
+      "operation",
+      "responseStatus",
+      "snapshotStartAlarmCandidateCount",
+      "snapshotStartAlarmCandidateWorkDurationMs",
+      "snapshotStartCandidateCountsCapped",
+      "snapshotStartCandidateCountsObserved",
+      "snapshotStartCryptoDataKeyDurationMs",
+      "snapshotStartCurrentSessionCandidateCount",
+      "snapshotStartDiagnosticScopeKind",
+      "snapshotStartDurationsCapped",
+      "snapshotStartNewWorkspaceCandidateCount",
+      "snapshotStartOutcomeKind",
+      "snapshotStartRecordedCandidateCount",
+      "snapshotStartSessionCreateStorageDurationMs",
+      "snapshotStartSubstageKind",
+      "snapshotStartTotalDurationMs",
+      "snapshotStartWriteFenceOwnerValidationDurationMs",
+      "userIdPresent",
+    ]);
+    const serializedDetails = JSON.stringify(details);
+    expect(serializedDetails).not.toContain(requireTestString(
+      responseBody.snapshotId,
+      "bounded workspace snapshot id",
+    ));
+    expect(serializedDetails).not.toContain(requireTestString(
+      responseBody.objectKey,
+      "bounded workspace snapshot object key",
+    ));
+    expect(serializedDetails).not.toContain(requireTestString(
+      responseEncryption.dataKeyBase64,
+      "bounded workspace snapshot data key",
+    ));
+    expect(serializedDetails).not.toContain(requireTestString(
+      responseEncryption.wrappedDataKey,
+      "bounded workspace snapshot wrapped data key",
+    ));
+  });
+
+  it.each([
+    {
+      durationKey: "snapshotStartWriteFenceOwnerValidationDurationMs",
+      stage: "write_fence_owner_validation",
+    },
+    {
+      durationKey: "snapshotStartCryptoDataKeyDurationMs",
+      stage: "crypto_data_key",
+    },
+  ] as const)(
+    "attributes isolated $stage latency to the matching route diagnostic",
+    async ({ durationKey, stage }) => {
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(new Date("2026-04-27T00:00:00.000Z"));
+      const fixture = await createHostedRuntimeCryptoContextFixture();
+      const runner = createWorkspaceVersionAwareUserRunner();
+      const runnerStub = runner.getByName();
+      const originalValidateRuntimeWriteFence =
+        runnerStub.validateRuntimeWriteFence;
+      if (!originalValidateRuntimeWriteFence) {
+        throw new TypeError("Workspace snapshot write-fence stub is unavailable.");
+      }
+      const timedStub: WorkerUserRunnerStubLike =
+        stage === "write_fence_owner_validation"
+          ? {
+              ...runnerStub,
+              async validateRuntimeWriteFence(request) {
+                const result = await originalValidateRuntimeWriteFence.call(
+                  runnerStub,
+                  request,
+                );
+                vi.setSystemTime(new Date(Date.now() + 1_500));
+                return result;
+              },
+            }
+          : runnerStub;
+      const timedFetch = stage === "crypto_data_key"
+        ? vi.fn<typeof fetch>(async (...args) => {
+            const response = await fixture.fetchMock(...args);
+            vi.setSystemTime(new Date(Date.now() + 1_500));
+            return response;
+          })
+        : fixture.fetchMock;
+      const env = createRunnerOutboundEnv({
+        ...fixture.env,
+        USER_RUNNER: { getByName: () => timedStub },
+      });
+      vi.stubGlobal("fetch", timedFetch);
+
+      const response = await handleRunnerOutboundRequest(
+        createWorkspaceSnapshotStartRequest({
+          expectedWorkspaceVersion: "4",
+          workspaceVersion: "4",
+        }),
+        env,
+        "member_123",
+      );
+
+      expect(response.status).toBe(200);
+      const diagnosticLog =
+        hostedExecutionMocks.emitHostedExecutionStructuredLog.mock.calls
+          .map(([entry]) => entry)
+          .find(
+            (entry: { details?: unknown; message?: string }) =>
+              entry.message
+                === "Hosted runner workspace snapshot start diagnostic.",
+          );
+      const details = requireTestObject(
+        diagnosticLog?.details,
+        `${stage} workspace snapshot start route diagnostic details`,
+      );
+      expect(details).toMatchObject({
+        snapshotStartDiagnosticScopeKind: "route",
+        snapshotStartDurationsCapped: false,
+        snapshotStartOutcomeKind: "created",
+        snapshotStartSubstageKind: "completed",
+        snapshotStartTotalDurationMs: 1_500,
+      });
+      expect(details[durationKey]).toBe(1_500);
+      for (const otherDurationKey of [
+        "snapshotStartWriteFenceOwnerValidationDurationMs",
+        "snapshotStartCryptoDataKeyDurationMs",
+        "snapshotStartSessionCreateStorageDurationMs",
+      ] as const) {
+        if (otherDurationKey === durationKey) {
+          continue;
+        }
+        expect(details[otherDurationKey]).toBe(0);
+      }
+    },
+  );
 
   it("refreshes only the write-fence-owned workspace snapshot handoff", async () => {
     vi.useFakeTimers();
@@ -6423,6 +6647,140 @@ describe("handleRunnerOutboundRequest", () => {
       replacedSnapshotRef,
       snapshotId,
     });
+  });
+
+  it("replays completion against the exact snapshot ref committed before response loss", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-05-02T00:00:00.000Z"));
+    const runner = createWorkspaceVersionAwareUserRunner();
+    const bytes = new Uint8Array([1, 2, 3, 4]);
+    const snapshotId = "snapshot_complete_committed_response_lost";
+    const objectKey = await hostedWorkspaceSnapshotObjectKey({
+      snapshotId,
+      userId: "member_123",
+    });
+    const requestedSnapshotRef = createWorkspaceSnapshotV2Ref({
+      encryptedByteSize: bytes.byteLength,
+      encryptedObjectSha256: sha256Hex(bytes),
+      objectKey,
+      snapshotId,
+      userId: "member_123",
+    });
+    const session = createWorkspaceSnapshotUploadSession(requestedSnapshotRef);
+    runner.workspaceSnapshotUploadSessions.set(snapshotId, session);
+    const deleteObject = vi.fn(async () => {});
+    const env = createRunnerOutboundEnv({
+      BUNDLES: createWorkspaceSnapshotBucket(
+        async (key) => ({ key, size: bytes.byteLength }),
+        async (key) => ({
+          checksums: createWorkspaceSnapshotHeadChecksums(requestedSnapshotRef),
+          customMetadata: createWorkspaceSnapshotHeadMetadata(requestedSnapshotRef),
+          key,
+          size: bytes.byteLength,
+        }),
+        deleteObject,
+      ),
+      USER_RUNNER: {
+        getByName: runner.getByName,
+      },
+    });
+    let committedSnapshotRef: HostedWorkspaceSnapshotV2Ref | null = null;
+    let checkpointCalls = 0;
+    const fetchMock = vi.fn<typeof fetch>(async (
+      ...args: Parameters<typeof fetch>
+    ): Promise<Response> => {
+      if (isHostedWorkspaceReadFetch(args)) {
+        return createHostedWorkspaceReadFetchResponse(
+          committedSnapshotRef,
+          committedSnapshotRef ? "5" : "4",
+        );
+      }
+      checkpointCalls += 1;
+      const checkpointRequest = readTestFetchBodyObject(
+        args,
+        "workspace snapshot committed-response-loss checkpoint request",
+      );
+      const attemptedSnapshotRef = parseHostedWorkspaceSnapshotV2Ref(
+        checkpointRequest.snapshotRef,
+        "workspace snapshot committed-response-loss checkpoint ref",
+      );
+      if (!committedSnapshotRef) {
+        committedSnapshotRef = attemptedSnapshotRef;
+        return new Response(
+          JSON.stringify(createHostedWorkspaceCheckpointResponseWithSnapshotRef(
+            "5",
+            committedSnapshotRef,
+          )),
+          {
+            headers: {
+              "content-type": "application/json; charset=utf-8",
+            },
+            status: 200,
+          },
+        );
+      }
+      return new Response(
+        JSON.stringify({
+          ...createHostedWorkspaceCheckpointResponseWithSnapshotRef(
+            "5",
+            committedSnapshotRef,
+          ),
+          checkpointConflictReason: "workspace_version",
+          checkpointed: false,
+        }),
+        {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        },
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const completionRequest = () => createWorkspaceSnapshotCompleteRequest({
+      snapshotId,
+      snapshotRef: requestedSnapshotRef,
+      workspaceVersion: "4",
+    });
+
+    const lostResponse = await handleRunnerOutboundRequest(
+      completionRequest(),
+      env,
+      "member_123",
+    );
+    expect(lostResponse.status).toBe(200);
+    expect(committedSnapshotRef).toEqual(expect.objectContaining({
+      createdAt: session.createdAt,
+      objectKey,
+      snapshotId,
+    }));
+
+    vi.setSystemTime(new Date("2026-05-02T00:00:05.000Z"));
+    const replayResponse = await handleRunnerOutboundRequest(
+      completionRequest(),
+      env,
+      "member_123",
+    );
+    const replayBody = requireTestObject(
+      await replayResponse.json(),
+      "workspace snapshot committed-response-loss replay response",
+    );
+
+    expect(replayResponse.status).toBe(200);
+    expect(replayBody).toEqual(expect.objectContaining({
+      checkpoint: expect.objectContaining({
+        checkpointed: true,
+        workspace: expect.objectContaining({
+          snapshotRef: committedSnapshotRef,
+          version: "5",
+        }),
+      }),
+      snapshotRef: committedSnapshotRef,
+    }));
+    expect(checkpointCalls).toBe(2);
+    expect(deleteObject).not.toHaveBeenCalled();
+    expect(runner.recordHostedWorkspaceSnapshotOrphanCandidate).not.toHaveBeenCalled();
+    expect(runner.deleteHostedWorkspaceSnapshotUploadSession).not.toHaveBeenCalled();
   });
 
   it("ignores replaced successful workspace snapshots outside the bound user namespace", async () => {

@@ -34,6 +34,7 @@ import {
 } from "@murphai/runtime-state/node";
 import { createIntegratedVaultServices } from "@murphai/vault-usecases/vault-services";
 
+import { hostedBrowserVaultReplicaObjectKey } from "../src/storage-paths.js";
 import {
   buildAssistantProviderMurphToolCall,
   buildAssistantProviderShellCommandCall,
@@ -453,7 +454,7 @@ async function seedPreferenceReceiptRecoveryIncident(): Promise<
     receiptLogArtifact.bytes,
   );
   const checkpoint = await seedHostedWorkspaceCheckpointForTest({
-    browserVaultReplicaRef: createPreferenceRecoveryBrowserVaultReplicaRef(
+    browserVaultReplicaRef: await createPreferenceRecoveryBrowserVaultReplicaRef(
       snapshotHash,
     ),
     environment: requireScenario().runtimeEnv,
@@ -629,16 +630,21 @@ function createSnapshotBundleRef(input: {
   };
 }
 
-function createPreferenceRecoveryBrowserVaultReplicaRef(
+async function createPreferenceRecoveryBrowserVaultReplicaRef(
   sourceBundleHash: string,
-): HostedBrowserVaultReplicaRef {
+): Promise<HostedBrowserVaultReplicaRef> {
+  const dataVersion = `preference-receipt-${sourceBundleHash.slice(0, 16)}`;
+  const generatedAt = new Date().toISOString();
   return {
     byteLength: 256,
-    dataVersion: `preference-receipt-${sourceBundleHash.slice(0, 16)}`,
-    generatedAt: new Date().toISOString(),
+    dataVersion,
+    generatedAt,
     keyId: "browser-vault-replica:preference-receipt-recovery",
-    objectKey:
-      `browser-vault/${preferenceRecoveryUserId}/preference-receipt-recovery.json`,
+    objectKey: await hostedBrowserVaultReplicaObjectKey({
+      dataVersion,
+      generatedAt,
+      userId: preferenceRecoveryUserId,
+    }),
     replicaSchema: "murph.browser-vault-replica",
     runtimeRootKeyId: "udrk:runtime:preference-receipt-recovery",
     schema: "murph.hosted-browser-vault-replica-ref.v1",

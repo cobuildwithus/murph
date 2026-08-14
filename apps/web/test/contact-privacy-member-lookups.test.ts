@@ -34,7 +34,7 @@ describe("hosted member lookup keys", () => {
   beforeEach(() => {
     restoreKeyring = configureHostedContactPrivacyKeyringForTest({
       currentVersion: "v1",
-      entries: { ...TEST_KEYRING_ENTRIES },
+      entries: { v1: TEST_KEYRING_ENTRIES.v1 },
     });
   });
 
@@ -150,7 +150,7 @@ describe("hosted member lookup keys", () => {
     try {
       const candidates = createHostedTelegramUsernameLookupKeyReadCandidates("@Riderway");
 
-      expect(candidates).toHaveLength(2);
+      expect(candidates).toHaveLength(1);
       expect(candidates[0]).toMatch(/^hbidx:telegram-username:v1:/u);
     } finally {
       restoreEnvValue(
@@ -161,19 +161,19 @@ describe("hosted member lookup keys", () => {
   });
 
   it("matches a stored legacy phone lookup key against the same raw phone value", () => {
-    const restore = configureHostedContactPrivacyKeyringForTest({
+    const restoreV1 = configureHostedContactPrivacyKeyringForTest({
+      currentVersion: "v1",
+      entries: { v1: TEST_KEYRING_ENTRIES.v1 },
+    });
+    const legacyLookupKey = createHostedPhoneLookupKey("+15551234567");
+    restoreV1();
+
+    const restoreV2 = configureHostedContactPrivacyKeyringForTest({
       currentVersion: "v2",
       entries: { ...TEST_KEYRING_ENTRIES },
     });
 
     try {
-      process.env.HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION = "v1";
-      clearHostedOnboardingEnvCache();
-      const legacyLookupKey = createHostedPhoneLookupKey("+15551234567");
-
-      process.env.HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION = "v2";
-      clearHostedOnboardingEnvCache();
-
       expect(
         hostedPhoneLookupKeyMatchesValue("+15551234567", legacyLookupKey),
       ).toBe(true);
@@ -181,7 +181,7 @@ describe("hosted member lookup keys", () => {
         hostedPhoneLookupKeyMatchesValue("+15557654321", legacyLookupKey),
       ).toBe(false);
     } finally {
-      restore();
+      restoreV2();
     }
   });
 });

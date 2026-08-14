@@ -54,7 +54,6 @@ import {
   detectSetupProgramName,
   isSetupInvocation,
 } from './setup-services.js'
-import { createSetupAgentmailSelectionResolver } from './setup-agentmail.js'
 import {
   createSetupAssistantAccountResolver,
   detectCodexAccountFromAuthJson,
@@ -82,7 +81,6 @@ export {
   configureSetupChannels,
   configureSetupScheduledUpdates,
   createSetupWizardCompletionController,
-  createSetupAgentmailSelectionResolver,
   createSetupAssistantAccountResolver,
   createSetupServices,
   detectCodexAccountFromAuthJson,
@@ -291,7 +289,6 @@ export function createSetupCli(options: SetupCliOptions = {}): Cli.Cli {
 
     const result = await setupHost({
       assistant: selectedAssistant,
-      allowChannelPrompts: interactiveWizard,
       channels: selectedChannels,
       dryRun: context.options.dryRun,
       envOverrides: provisioningEnvOverrides,
@@ -501,7 +498,7 @@ function buildSetupCtaCommands(result: SetupResult): Array<{
     commands.push({
       command: 'assistant run',
       description:
-        'Start the assistant automation loop so configured Telegram or email channels can receive automatic replies.',
+        'Start the assistant automation loop so configured Telegram channels can receive automatic replies.',
     })
   }
 

@@ -607,6 +607,7 @@ describe("hosted crypto Google KMS aborts and redacted errors", () => {
       /projects\/|keyRings|secret-provider|privatePayload|KMS denied/u,
     );
     expect(isObjectWithProperty(thrown, "cause")).toBe(false);
+    expect(isObjectWithProperty(thrown, "permanent")).toBe(false);
   });
 });
 

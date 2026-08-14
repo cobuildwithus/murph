@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-13",
+  "order": 150,
+  "item": {
+    "id": "active-workout-fixed-set-prescriptions",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Fixed set targets carry through your workout",
+    "summary": "When you set one exact repetition count for every set in an active workout, Murph now applies it to later completed sets without asking you to repeat it.",
+    "details": "An explicit result still takes priority. Murph asks for clarification instead of guessing when a target is a range, AMRAP, conflicting, or ambiguous.",
+    "relevanceTags": ["assistant", "workouts", "strength-training"],
+    "sourcePullRequests": [1795]
+  }
+}
