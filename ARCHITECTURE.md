@@ -2050,10 +2050,20 @@ current member bindings at the participant-lease authority boundary, composing
 to at most four identity reads and one lease statement. On the signed live route,
 complete-roster lease reconciliation is one parameterized PostgreSQL statement
 only after route revalidation and a completed current-provider roster read.
-Inside the existing
-route transaction, a lone roster-matched intent wins; if several match, only
+Pending-setup admission then uses one candidate projection plus canonical set
+reads for runtime access, active managed lines, narrow home-line routing, and
+all bounded recovery attempts. Only candidates that already pass access,
+managed-line, and exact routing eligibility have private home-line ciphertext
+opened, and only the selected payload root is prepared. Inside the existing
+route transaction, Web repeats the complete candidate set and sender precedence,
+locks the exact winner, and revalidates current access, incoming and original
+managed lines, routing and setup ciphertext/root identity, and replacement-line
+recovery authority. A lone roster-matched intent wins; if several match, only
 the current sender's own intent breaks the tie. Otherwise the canonical
 first-active-sender fallback continues when the provider roster read completed.
+A changed selection or prepared identity fails closed through the single fresh
+preparation retry. Replacement-line recovery pins its candidate id across that
+retry so a refreshed roster cannot silently transfer ownership.
 An unavailable roster leaves recovery-backed ownership indeterminate and
 returns a typed retry before route creation; a completed empty or oversized
 roster cannot match another member's setup but may retain the active-sender
@@ -2078,7 +2088,10 @@ re-reads the canonical route and appends its distinct message there. Only
 successfully authenticated plaintext that is malformed JSON or fails the strict
 supported schema is consumed as unavailable optional setup; secure-box parse,
 envelope/root lookup, KMS/provider, authentication, and missing-preparation
-failures roll back and preserve the row. Expiry is query-time authority, and
+failures roll back and preserve the row. Once that exact terminal invalid
+payload is deleted, the same event may use an already-proven fallback owner or
+continue the ordinary setup handoff; races, changed authority, and transient
+preparation failures remain route-free. Expiry is query-time authority, and
 member deletion removes the intent by foreign-key cascade. Provider add-actor
 fields are not ownership authority. For a hard-blocked-line recovery, the
 existing delivery attempt is the retry owner: transport must durably record its
