@@ -104,6 +104,11 @@ Updated: 2026-08-14
   its hosted OpenAI usage identity once in the existing operator-config owner,
   then reuse that derivation before pricing and record construction in every
   usage producer, including idle compaction.
+- The protected deploy authentication regression supplies the validated local
+  OpenAI override and therefore receives the reserved local route identity in
+  generated Codex configuration. Keep its authentication, native-memory, and
+  legacy-provider checks unchanged while updating only that stale identity
+  expectation and asserting the matching effective provider environment value.
 
 ## Verification
 
@@ -131,4 +136,12 @@ Updated: 2026-08-14
   assistant-engine usage, and assistant-runtime idle maintenance, including
   negative proof that command arguments cannot satisfy tool-output evidence and
   local OpenAI Flex compaction records the hosted OpenAI identity. All four
-  changed owners typecheck. A new exact-head combined private matrix is pending.
+  changed owners typecheck. The full protected deploy auth test has 46 passing
+  tests and 2 intentional skips, including the exact local OpenAI authentication
+  journey. Exact-head private run 31845724644 assembled the Linux runner bundle
+  within every byte budget, then stopped at GitHub's account-level artifact
+  storage quota before the scenario matrix could start. The same bundle exceeds
+  the shared static-closure threshold only on macOS, so the local canonical
+  scenario also stops before execution; Frog entry
+  `20260814173830-runner-bundle-byte` records that platform-specific verifier
+  mismatch. A later ReviewGPT PASS and current-base merge remain pending.

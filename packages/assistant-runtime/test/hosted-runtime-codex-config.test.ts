@@ -28,6 +28,9 @@ import {
   HostedAssistantConfigurationError,
 } from "@murphai/operator-config/hosted-assistant-config";
 import {
+  HOSTED_LOCAL_TEST_CODEX_MODEL_PROVIDER_ID,
+} from "@murphai/operator-config/assistant/target-runtime";
+import {
   HOSTED_RUNTIME_CODEX_APP_SERVER_COMMAND_ENV,
   HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV,
   HOSTED_RUNTIME_PROCESS_ENV,
@@ -981,8 +984,12 @@ testHostedCodexAuthE2e(
       });
       const config = await readFile(result.codexConfigPath, "utf8");
 
-      assert.match(config, /^model_provider = "hosted-openai"$/mu);
-      assert.match(config, /\[model_providers\."hosted-openai"\]/u);
+      assert.equal(
+        result.runtimeEnv[HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV],
+        HOSTED_LOCAL_TEST_CODEX_MODEL_PROVIDER_ID,
+      );
+      assert.match(config, /^model_provider = "openai-local-test"$/mu);
+      assert.match(config, /\[model_providers\."openai-local-test"\]/u);
       assert.match(config, /^env_key = "OPENAI_API_KEY"$/mu);
       assert.match(config, /^requires_openai_auth = false$/mu);
       assert.doesNotMatch(config, /^model_provider = "openai"$/mu);
