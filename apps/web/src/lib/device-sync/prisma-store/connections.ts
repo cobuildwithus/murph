@@ -773,15 +773,26 @@ export class PrismaHostedConnectionStore {
     account: Pick<PublicDeviceSyncAccount, "externalAccountId" | "id">,
     localState: HostedLocalHeartbeatStateUpdate,
     tx?: HostedPrismaTransactionClient,
-  ): Promise<PublicDeviceSyncAccount> {
+  ): Promise<PublicDeviceSyncAccount | null> {
     const prisma = tx ?? this.prisma;
-    const record = await prisma.deviceConnection.update({
+    const update = await prisma.deviceConnection.updateMany({
       where: {
         id: account.id,
+        status: { not: "reauthorization_required" },
       },
       data: buildHostedLocalHeartbeatUpdateData(localState),
+    });
+    if (update.count === 0) {
+      return null;
+    }
+
+    const record = await prisma.deviceConnection.findFirst({
+      where: { id: account.id },
       ...hostedConnectionRecordArgs,
     });
+    if (!record) {
+      return null;
+    }
 
     return await this.buildDurableConnectionRecord(
       record,

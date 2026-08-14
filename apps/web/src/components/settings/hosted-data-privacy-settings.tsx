@@ -2,6 +2,7 @@
 
 import { forwardRef, useEffect, useRef, useState } from "react";
 import { Download, Trash2 } from "lucide-react";
+import Link from "next/link";
 
 import {
   HostedOnboardingApiError,
@@ -96,6 +97,7 @@ function HostedDataPrivacySettingsAuthorized(props: {
   const [exitNote, setExitNote] = useState("");
   const [confirmationPhrase, setConfirmationPhrase] = useState("");
   const [dialogError, setDialogError] = useState<string | null>(null);
+  const [deviceReconnectRequired, setDeviceReconnectRequired] = useState(false);
   const [providerAccessRemovalRequired, setProviderAccessRemovalRequired] = useState(false);
   const [providerAccessRemovalConfirmed, setProviderAccessRemovalConfirmed] = useState(false);
   const [providerAccessRemovalConfirmationToken, setProviderAccessRemovalConfirmationToken] = useState<string | null>(null);
@@ -188,6 +190,7 @@ function HostedDataPrivacySettingsAuthorized(props: {
 
     setDeletePending(true);
     setDialogError(null);
+    setDeviceReconnectRequired(false);
     let sessionEndingDispatched = false;
     let receivedReplacementHeaders = false;
 
@@ -221,9 +224,13 @@ function HostedDataPrivacySettingsAuthorized(props: {
         requestError instanceof HostedOnboardingApiError
         && requestError.code
           === "ACCOUNT_DELETION_DEVICE_AUTHORIZATION_RECOVERY_REQUIRED";
+      const deviceTokenRefreshRecoveryRequired =
+        requestError instanceof HostedOnboardingApiError
+        && requestError.code
+          === "ACCOUNT_DELETION_DEVICE_TOKEN_REFRESH_RECOVERY_REQUIRED";
       if (sessionEndingDispatched && !receivedReplacementHeaders) {
         publishBrowserVaultSessionInvalidation();
-        if (!providerRecoveryRequired) {
+        if (!providerRecoveryRequired && !deviceTokenRefreshRecoveryRequired) {
           reloadCurrentHostedAuthDocument();
         }
       }
@@ -235,6 +242,9 @@ function HostedDataPrivacySettingsAuthorized(props: {
         setProviderAccessRemovalRequired(true);
         setProviderAccessRemovalConfirmed(false);
         setProviderAccessRemovalConfirmationToken(nextConfirmationToken);
+      }
+      if (deviceTokenRefreshRecoveryRequired) {
+        setDeviceReconnectRequired(true);
       }
       setDialogError(requestError instanceof HostedOnboardingApiError
         ? requestError.message
@@ -264,6 +274,7 @@ function HostedDataPrivacySettingsAuthorized(props: {
   function openDialog() {
     setConfirmationPhrase("");
     setDialogError(null);
+    setDeviceReconnectRequired(false);
     setDialogStep("reason");
     setExitReason(null);
     setExitNote("");
@@ -281,6 +292,7 @@ function HostedDataPrivacySettingsAuthorized(props: {
     setDialogOpen(false);
     setConfirmationPhrase("");
     setDialogError(null);
+    setDeviceReconnectRequired(false);
     setDialogStep("reason");
     setExitReason(null);
     setExitNote("");
@@ -379,9 +391,17 @@ function HostedDataPrivacySettingsAuthorized(props: {
             </DialogDescription>
           </DialogHeader>
           {dialogError ? (
-            <p role="alert" className="rounded-lg border border-destructive/20 bg-destructive/5 p-3 text-sm text-destructive">
-              {dialogError}
-            </p>
+            <div role="alert" className="flex flex-col gap-2 rounded-lg border border-destructive/20 bg-destructive/5 p-3 text-sm text-destructive">
+              <p>{dialogError}</p>
+              {deviceReconnectRequired ? (
+                <Link
+                  className="self-start font-medium underline underline-offset-4"
+                  href="/connect"
+                >
+                  Manage wearables
+                </Link>
+              ) : null}
+            </div>
           ) : null}
           {dialogStep === "reason" ? (
             <AccountExitReasonStep

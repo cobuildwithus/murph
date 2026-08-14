@@ -751,6 +751,79 @@ describe("HostedDataPrivacySettings", () => {
     expect(mocks.reloadCurrentHostedAuthDocument).toHaveBeenCalledTimes(1);
   });
 
+  test("keeps reconnect-required deletion guidance in the open dialog without reloading", async () => {
+    mockHostedDataPrivacyDeleteFlowState();
+    const { HostedOnboardingApiError } = await import(
+      "@/src/components/hosted-onboarding/client-api"
+    );
+    mocks.requestHostedOnboardingJson.mockRejectedValueOnce(
+      new HostedOnboardingApiError({
+        code: "ACCOUNT_DELETION_DEVICE_TOKEN_REFRESH_RECOVERY_REQUIRED",
+        details: {
+          connectionId: "dsc_123",
+          providerLabel: "Oura",
+        },
+        message: "The Oura credential refresh did not finish safely. Reconnect that source, then retry account deletion.",
+      }),
+    );
+
+    const { document, window } = loadLinkedom().parseHTML(
+      "<html><body><div id='root'></div></body></html>",
+    );
+    installGlobals(window, document);
+    const container = document.getElementById("root");
+    assert.ok(container);
+
+    const root: Root = createRoot(container);
+    cleanupRender = async () => {
+      await act(async () => {
+        root.unmount();
+      });
+    };
+
+    await act(async () => {
+      root.render(createElement(HostedDataPrivacySettings, { authenticated: true }));
+    });
+
+    await clickButton(container, "Delete account", window);
+
+    expect(mocks.publishBrowserVaultSessionEnding).toHaveBeenCalledTimes(1);
+    expect(mocks.publishBrowserVaultSessionInvalidation).toHaveBeenCalledTimes(1);
+    expect(mocks.reloadCurrentHostedAuthDocument).not.toHaveBeenCalled();
+  });
+
+  test("links reconnect-required deletion guidance to the wearables recovery surface", async () => {
+    const recoveryMessage = "The Oura credential refresh did not finish safely. Reconnect that source, then retry account deletion.";
+    mockHostedDataPrivacyDeleteFlowState({
+      deviceReconnectRequired: true,
+      dialogError: recoveryMessage,
+    });
+
+    const { document, window } = loadLinkedom().parseHTML(
+      "<html><body><div id='root'></div></body></html>",
+    );
+    installGlobals(window, document);
+    const container = document.getElementById("root");
+    assert.ok(container);
+
+    const root: Root = createRoot(container);
+    cleanupRender = async () => {
+      await act(async () => {
+        root.unmount();
+      });
+    };
+
+    await act(async () => {
+      root.render(createElement(HostedDataPrivacySettings, { authenticated: true }));
+    });
+
+    expect(container.textContent).toContain(recoveryMessage);
+    const recoveryLink = [...container.querySelectorAll("a")]
+      .find((link) => link.textContent?.trim() === "Manage wearables");
+    assert.ok(recoveryLink);
+    expect(recoveryLink.getAttribute("href")).toBe("/connect");
+  });
+
   test("declines deletion at initiation, before approval or vault teardown", async () => {
     mockHostedDataPrivacyDeleteFlowState();
     const { HostedOnboardingApiError } = await import(
@@ -948,7 +1021,7 @@ describe("HostedDataPrivacySettings", () => {
 // Values follow the component's useState declaration order:
 // exportPending, exportDialogOpen, acknowledgedSensitiveDownload, exportDialogError,
 // exportSuccess, deletePending, dialogOpen, dialogStep, exitReason, exitNote,
-// confirmationPhrase, dialogError, providerAccessRemovalRequired,
+// confirmationPhrase, dialogError, deviceReconnectRequired, providerAccessRemovalRequired,
 // providerAccessRemovalConfirmed, providerAccessRemovalConfirmationToken,
 // deleted, cleanupPending, privyLogoutDone.
 function mockHostedVaultExportFlowState(input: {
@@ -969,6 +1042,7 @@ function mockHostedVaultExportFlowState(input: {
     null,
     false,
     false,
+    false,
     null,
     false,
     false,
@@ -978,6 +1052,7 @@ function mockHostedVaultExportFlowState(input: {
 
 function mockHostedDataPrivacyDeleteFlowState(input: {
   confirmationPhrase?: string;
+  deviceReconnectRequired?: boolean;
   dialogError?: string | null;
   exitNote?: string;
   exitReason?: string | null;
@@ -1000,6 +1075,7 @@ function mockHostedDataPrivacyDeleteFlowState(input: {
     input.exitNote ?? "",
     input.confirmationPhrase ?? "DELETE MY ACCOUNT",
     input.dialogError ?? null,
+    input.deviceReconnectRequired ?? false,
     input.providerAccessRemovalRequired ?? false,
     input.providerAccessRemovalConfirmed ?? false,
     input.providerAccessRemovalConfirmationToken ?? null,
@@ -1025,6 +1101,7 @@ function mockHostedDataPrivacyDeletedState(input: {
     "",
     "",
     null,
+    false,
     false,
     false,
     null,

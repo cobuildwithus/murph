@@ -1943,9 +1943,21 @@ async function resolveHostedAccountDeletionRefreshLeases(input: {
     select: {
       id: true,
       lastErrorCode: true,
+      metadataJson: true,
+      provider: true,
       refreshLeaseExpiresAt: true,
       refreshLeaseOwner: true,
       refreshLeaseTokenVersion: true,
+      sources: {
+        orderBy: [
+          { status: "asc" },
+          { sourceProviderSlug: "asc" },
+        ],
+        select: {
+          sourceProviderSlug: true,
+          status: true,
+        },
+      },
       status: true,
       tokenVersion: true,
     },
@@ -1963,11 +1975,12 @@ async function resolveHostedAccountDeletionRefreshLeases(input: {
       ],
     },
   });
-  if (candidateConnections.some((record) =>
+  const reconnectRequiredConnection = candidateConnections.find((record) =>
     record.status === "reauthorization_required"
     && record.lastErrorCode === "TOKEN_REFRESH_STATE_UNKNOWN"
-  )) {
-    throw accountDeletionDeviceTokenRefreshRecoveryRequiredError();
+  );
+  if (reconnectRequiredConnection) {
+    throw accountDeletionDeviceTokenRefreshRecoveryRequiredError(reconnectRequiredConnection);
   }
   const now = input.now.toISOString();
   const leasedConnections = candidateConnections.filter((record) =>
@@ -2042,16 +2055,29 @@ async function resolveHostedAccountDeletionRefreshLeases(input: {
     });
   }
   if (resolution.status === "stale_failed_closed") {
-    throw accountDeletionDeviceTokenRefreshRecoveryRequiredError();
+    throw accountDeletionDeviceTokenRefreshRecoveryRequiredError(connection);
   }
 }
 
-function accountDeletionDeviceTokenRefreshRecoveryRequiredError() {
+function accountDeletionDeviceTokenRefreshRecoveryRequiredError(connection: {
+  id: string;
+  metadataJson?: Prisma.JsonValue | null;
+  provider: string;
+  sources?: readonly {
+    sourceProviderSlug: string;
+    status: string;
+  }[];
+}) {
+  const providerLabel = resolveDeviceConnectionProviderLabel(connection);
   return hostedOnboardingError({
     code: "ACCOUNT_DELETION_DEVICE_TOKEN_REFRESH_RECOVERY_REQUIRED",
     httpStatus: 409,
-    message: "A connected-health credential refresh did not finish safely. Reconnect that source, then retry account deletion.",
+    message: `The ${providerLabel} credential refresh did not finish safely. Reconnect that source, then retry account deletion.`,
     retryable: false,
+    details: {
+      connectionId: connection.id,
+      providerLabel,
+    },
   });
 }
 

@@ -3790,6 +3790,11 @@ describe("deleteHostedAccountData", () => {
     };
     await expect(deleteHostedAccountData(deletionInput)).rejects.toMatchObject({
       code: "ACCOUNT_DELETION_DEVICE_TOKEN_REFRESH_RECOVERY_REQUIRED",
+      details: {
+        connectionId: connection.id,
+        providerLabel: "Oura",
+      },
+      message: "The Oura credential refresh did not finish safely. Reconnect that source, then retry account deletion.",
       retryable: false,
     });
     await expect(deleteHostedAccountData(deletionInput)).rejects.toMatchObject({
