@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { InboxShowResult } from '@murphai/operator-config/inbox-cli-contracts'
 import {
   assistantResponseCardSchema,
+  buildTelegramRichMessage,
   renderAssistantResponseCardText,
   type AssistantResponseCard,
 } from '@murphai/operator-config/assistant-response-cards'
@@ -71,6 +72,16 @@ const ROUTINE_CARD: AssistantResponseCard = {
 }
 
 const ROUTINE_CARD_TEXT = renderAssistantResponseCardText(ROUTINE_CARD)
+
+const TELEGRAM_RICH_CONTENT_CARD: AssistantResponseCard = {
+  kind: 'telegram_rich_content',
+  version: 1,
+  html: '<h2>Travel prep</h2><ol><li>Pack the charger.</li></ol><blockquote>Keep the passport with you.</blockquote>',
+}
+
+const TELEGRAM_RICH_CONTENT_CARD_TEXT = renderAssistantResponseCardText(
+  TELEGRAM_RICH_CONTENT_CARD,
+)
 
 const LONG_ROUTINE_CARD = assistantResponseCardSchema.parse({
   ...ROUTINE_CARD,
@@ -1006,6 +1017,37 @@ describe('assistant channels runtime seam', () => {
     })
   })
 
+  it('forwards disabled automatic entities for generic Telegram rich content', async () => {
+    const fetchImplementation = createQueuedFetch([
+      createTelegramResponse(200, {
+        ok: true,
+        result: { message_id: 2502 },
+      }),
+    ])
+
+    await sendTelegramRichMessage({
+      fallbackMessage: TELEGRAM_RICH_CONTENT_CARD_TEXT,
+      idempotencyKey: 'generic-rich-content',
+      replyToMessageId: null,
+      richMessage: buildTelegramRichMessage(TELEGRAM_RICH_CONTENT_CARD),
+      target: '123',
+    }, {
+      env: {
+        TELEGRAM_API_BASE_URL: 'https://telegram.test/',
+        TELEGRAM_BOT_TOKEN: 'bot-token',
+      },
+      fetchImplementation,
+    })
+
+    expect(readJsonBody(fetchImplementation.mock.calls[0]?.[1]?.body)).toEqual({
+      chat_id: '123',
+      rich_message: {
+        html: TELEGRAM_RICH_CONTENT_CARD.html,
+        skip_entity_detection: true,
+      },
+    })
+  })
+
   it('falls back to text only after a definitive rich-message rejection', async () => {
     const fetchImplementation = createQueuedFetch([
       createTelegramResponse(400, {
@@ -1048,6 +1090,67 @@ describe('assistant channels runtime seam', () => {
     expect(LONG_ROUTINE_CARD_TEXT.length).toBeLessThanOrEqual(4_096)
   })
 
+  it('keeps automatic entities disabled in the generic rich-content fallback', async () => {
+    const fallbackMessage = [
+      'https://example.test example.test help@example.test',
+      '@helper #topic /start +48 123 456 789',
+      '[support](https://support.example.test)',
+      'call(**kwargs, **options)',
+    ].join('\n')
+    const fetchImplementation = createQueuedFetch([
+      createTelegramResponse(400, {
+        description: 'Bad Request: rich messages are not supported',
+        error_code: 400,
+        ok: false,
+      }),
+      createTelegramResponse(200, {
+        ok: true,
+        result: { message_id: 2503 },
+      }),
+    ])
+
+    await expect(sendTelegramRichMessage(
+      {
+        fallbackMessage,
+        replyToMessageId: '42',
+        richMessage: {
+          html: '<h2>Contact options</h2>',
+          skip_entity_detection: true,
+        },
+        target: '123:topic:9',
+      },
+      {
+        env: {
+          TELEGRAM_API_BASE_URL: 'https://telegram.test/',
+          TELEGRAM_BOT_TOKEN: 'bot-token',
+        },
+        fetchImplementation,
+      },
+    )).resolves.toMatchObject({
+      providerMessageId: '2503',
+      target: '123:topic:9',
+    })
+
+    expect(fetchImplementation).toHaveBeenCalledTimes(2)
+    const fallbackPayload = readJsonBody(
+      fetchImplementation.mock.calls[1]?.[1]?.body,
+    )
+    if (typeof fallbackPayload.text !== 'string') {
+      throw new Error('Expected the Telegram fallback payload to contain text.')
+    }
+    expect(fallbackPayload).toEqual({
+      chat_id: '123',
+      entities: [{
+        length: fallbackPayload.text.length,
+        offset: 0,
+        type: 'pre',
+      }],
+      message_thread_id: 9,
+      reply_to_message_id: 42,
+      text: fallbackMessage,
+    })
+  })
+
   it('keeps an ambiguous definitive-rejection fallback terminal and single-attempt', async () => {
     const fetchImplementation = createQueuedFetch([
       createTelegramResponse(400, {
@@ -1062,8 +1165,11 @@ describe('assistant channels runtime seam', () => {
 
     await expect(sendTelegramRichMessage(
       {
-        fallbackMessage: LONG_ROUTINE_CARD_TEXT,
-        richMessage: { html: '<h2>Routine</h2>' },
+        fallbackMessage: 'Contact https://example.test or @helper',
+        richMessage: {
+          html: '<h2>Contact options</h2>',
+          skip_entity_detection: true,
+        },
         target: '123',
       },
       {
@@ -1080,6 +1186,12 @@ describe('assistant channels runtime seam', () => {
     })
 
     expect(fetchImplementation).toHaveBeenCalledTimes(2)
+    expect(readJsonBody(fetchImplementation.mock.calls[1]?.[1]?.body)).toMatchObject({
+      entities: [{
+        offset: 0,
+        type: 'pre',
+      }],
+    })
   })
 
   it('rejects a multi-message rich fallback before provider entry', async () => {
@@ -1343,12 +1455,12 @@ describe('assistant channels runtime seam', () => {
     await expect(ASSISTANT_CHANNEL_ADAPTERS.telegram.send({
       actorId: null,
       bindingDelivery: createAssistantBindingDelivery('thread', '123'),
-      card: NUTRITION_CARD,
+      card: TELEGRAM_RICH_CONTENT_CARD,
       explicitTarget: null,
       idempotencyKey: 'rich-card-idempotency',
       identityId: null,
       media: [],
-      message: NUTRITION_CARD_TEXT,
+      message: TELEGRAM_RICH_CONTENT_CARD_TEXT,
       replyToMessageId: '42',
       threadIsDirect: true,
     }, {
@@ -1361,11 +1473,12 @@ describe('assistant channels runtime seam', () => {
     })
 
     expect(sendTelegramRich).toHaveBeenCalledWith(expect.objectContaining({
-      fallbackMessage: NUTRITION_CARD_TEXT,
+      fallbackMessage: TELEGRAM_RICH_CONTENT_CARD_TEXT,
       idempotencyKey: 'rich-card-idempotency',
       replyToMessageId: '42',
       richMessage: expect.objectContaining({
-        html: expect.stringContaining('<table bordered striped>'),
+        html: TELEGRAM_RICH_CONTENT_CARD.html,
+        skip_entity_detection: true,
       }),
       target: '123',
     }))
@@ -2247,6 +2360,35 @@ describe('assistant channels runtime seam', () => {
     }, {
       env: { LINQ_API_TOKEN: 'linq-token' },
       fetchImplementation: undefined,
+    })
+  })
+
+  it('uses deterministic text if Telegram-only rich content reaches Linq', async () => {
+    const persistAppCardTextFallback = vi.fn().mockResolvedValue(undefined)
+    runtimeMocks.sendLinqChatMessage.mockResolvedValue({
+      message: { id: 'telegram-rich-text-message-1' },
+    })
+
+    await expect(sendLinqMessage({
+      card: TELEGRAM_RICH_CONTENT_CARD,
+      directRecipientPhoneNumber: '+15550001',
+      idempotencyKey: 'telegram-rich-card-delivery-1',
+      message: TELEGRAM_RICH_CONTENT_CARD_TEXT,
+      target: 'private-thread-telegram-rich',
+      targetKind: 'thread',
+      threadIsDirect: true,
+    }, {
+      env: { LINQ_API_TOKEN: 'linq-token' },
+      persistAppCardTextFallback,
+    })).resolves.toMatchObject({
+      providerMessageId: 'telegram-rich-text-message-1',
+      target: 'private-thread-telegram-rich',
+    })
+
+    expect(runtimeMocks.checkLinqIMessageCapability).not.toHaveBeenCalled()
+    expect(runtimeMocks.sendLinqIMessageAppCard).not.toHaveBeenCalled()
+    expect(persistAppCardTextFallback).toHaveBeenCalledWith({
+      idempotencyKey: 'telegram-rich-card-delivery-1',
     })
   })
 

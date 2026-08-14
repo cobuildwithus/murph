@@ -279,3 +279,151 @@ describe("murph.group message_current_sender", () => {
     }
   });
 });
+
+describe("murph.group record_current_sender_daily_metric", () => {
+  function parseDailyMetricRequest(messageRef = SELECTED_INPUT_ID) {
+    const request = readMurphDynamicToolRequest(groupToolCall({
+      action: "record_current_sender_daily_metric",
+      date: "2026-08-13",
+      message_ref: messageRef,
+      metric: "steps",
+      unit: "count",
+      value: 8_000,
+    }));
+    if (!request || request.kind !== "group") {
+      throw new Error("Expected a parsed murph.group request.");
+    }
+    return request;
+  }
+
+  it("accepts an exact dated metric without a model-selected member", () => {
+    expect(parseDailyMetricRequest().request).toEqual({
+      action: "record_current_sender_daily_metric",
+      dailyMetric: {
+        date: "2026-08-13",
+        metric: "steps",
+        unit: "count",
+        value: 8_000,
+      },
+      messageRef: SELECTED_INPUT_ID,
+    });
+    expect(readMurphDynamicToolRequest(groupToolCall({
+      action: "record_current_sender_daily_metric",
+      date: "2026-02-30",
+      message_ref: SELECTED_INPUT_ID,
+      metric: "steps",
+      unit: "count",
+      value: 8_000,
+    }))).toMatchObject({ kind: "invalid-group-arguments" });
+    expect(readMurphDynamicToolRequest(groupToolCall({
+      action: "record_current_sender_daily_metric",
+      date: "2026-08-13",
+      memberId: "model_selected_member",
+      message_ref: SELECTED_INPUT_ID,
+      metric: "steps",
+      unit: "count",
+      value: 8_000,
+    }))).toMatchObject({ kind: "invalid-group-arguments" });
+  });
+
+  it("binds the report to the selected accepted group input", async () => {
+    const groupRequest = vi.fn(async () => ({
+      action: "record_current_sender_daily_metric" as const,
+      result: { status: "accepted" as const },
+    }));
+    const result = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext: createHostedToolContext({ request: groupRequest }),
+      nextUsageOrdinal: () => 1,
+      progressDelivery: null,
+      request: parseDailyMetricRequest(),
+    });
+
+    expect(groupRequest).toHaveBeenCalledWith({
+      action: "record_current_sender_daily_metric",
+      dailyMetric: {
+        date: "2026-08-13",
+        metric: "steps",
+        unit: "count",
+        value: 8_000,
+      },
+      origin: {
+        assistantInputId: SELECTED_INPUT_ID,
+        kind: "accepted_input",
+        sessionId: "session_group",
+      },
+    });
+    expect(result.rpcResult.success).toBe(true);
+    expect(result.rpcResult.contentItems[0]?.text).toContain(
+      '"action":"record_current_sender_daily_metric"',
+    );
+    expect(result.rpcResult.contentItems[0]?.text).toContain(
+      '"status":"accepted"',
+    );
+  });
+
+  it("returns unavailable without presenting the report as accepted", async () => {
+    const result = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext: createHostedToolContext({
+        request: vi.fn(async () => ({
+          action: "record_current_sender_daily_metric" as const,
+          result: {
+            status: "unavailable" as const,
+            unavailableReason: "daily_metric_report_unavailable",
+          },
+        })),
+      }),
+      nextUsageOrdinal: () => 1,
+      progressDelivery: null,
+      request: parseDailyMetricRequest(),
+    });
+
+    expect(result.rpcResult.success).toBe(true);
+    expect(result.rpcResult.contentItems[0]?.text).toContain(
+      '"status":"unavailable"',
+    );
+    expect(result.rpcResult.contentItems[0]?.text).not.toContain(
+      '"status":"accepted"',
+    );
+  });
+
+  it("reports an uncertain transport failure without inventing a result", async () => {
+    const result = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext: createHostedToolContext({
+        request: vi.fn(async () => {
+          throw new Error("synthetic transport failure");
+        }),
+      }),
+      nextUsageOrdinal: () => 1,
+      progressDelivery: null,
+      request: parseDailyMetricRequest(),
+    });
+
+    expect(result.rpcResult.success).toBe(false);
+    expect(result.rpcResult.contentItems[0]?.text).toBe(
+      "group tool request failed",
+    );
+    expect(result.rpcResult.contentItems[0]?.text).not.toContain("accepted");
+  });
+
+  it("fails closed for a foreign Message ref", async () => {
+    const hostedToolContext = createHostedToolContext({
+      acceptedInputIds: [OTHER_INPUT_ID],
+    });
+    const result = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext,
+      nextUsageOrdinal: () => 1,
+      progressDelivery: null,
+      request: parseDailyMetricRequest(),
+    });
+    expect(result.rpcResult.success).toBe(false);
+    expect(hostedToolContext.groupTool?.request).not.toHaveBeenCalled();
+  });
+});

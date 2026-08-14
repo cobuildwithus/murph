@@ -11,13 +11,16 @@ import {
 } from "@murphai/hosted-execution";
 
 const mocks = vi.hoisted(() => ({
+  appendHostedMailboxEnvelopeTx: vi.fn(),
   appendHostedMailboxEnvelopeWithIdentityTx: vi.fn(),
   assertHostedLinqRouteEgressAuthority: vi.fn(),
   assertHostedThreadRouteEgressAuthority: vi.fn(),
   hostedThreadContainerFindUnique: vi.fn(),
   lookupHostedGroupParticipantMemberByHandle: vi.fn(),
+  readHostedHealthDataConsentState: vi.fn(),
   readHostedGroupDisclosureGrantAuthorityTx: vi.fn(),
   readHostedMailboxConversationWakeByAssistantInputId: vi.fn(),
+  readHostedMailboxItemByDedupeKey: vi.fn(),
   readHostedMailboxItemById: vi.fn(),
   readHostedMailboxWakeByDedupeKey: vi.fn(),
   readHostedMailboxWakeByItemId: vi.fn(),
@@ -35,10 +38,12 @@ const fakeTx = {
 };
 
 vi.mock("@/src/lib/hosted-mailbox/store", () => ({
+  appendHostedMailboxEnvelopeTx: mocks.appendHostedMailboxEnvelopeTx,
   appendHostedMailboxEnvelopeWithIdentityTx:
     mocks.appendHostedMailboxEnvelopeWithIdentityTx,
   readHostedMailboxConversationWakeByAssistantInputId:
     mocks.readHostedMailboxConversationWakeByAssistantInputId,
+  readHostedMailboxItemByDedupeKey: mocks.readHostedMailboxItemByDedupeKey,
   readHostedMailboxItemById: mocks.readHostedMailboxItemById,
   readHostedMailboxWakeByDedupeKey: mocks.readHostedMailboxWakeByDedupeKey,
   readHostedMailboxWakeByItemId: mocks.readHostedMailboxWakeByItemId,
@@ -92,6 +97,10 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-routing-store", () => ({
     mocks.resolveHostedMemberRoutingByTelegramUserId,
 }));
 
+vi.mock("@/src/lib/legal/consent", () => ({
+  readHostedHealthDataConsentState: mocks.readHostedHealthDataConsentState,
+}));
+
 vi.mock("@/src/lib/prisma", () => ({
   getPrisma: () => ({
     $transaction: (run: (tx: typeof fakeTx) => Promise<unknown>) => run(fakeTx),
@@ -112,6 +121,10 @@ import {
   requestHostedGroupCurrentSenderAssistantAsk,
   requestHostedGroupCurrentSenderPrivateAssistantAsk,
 } from "@/src/lib/hosted-groups/group-current-sender-assistant-ask";
+import {
+  createHostedGroupCurrentSenderDailyMetricReportId,
+  recordHostedGroupCurrentSenderDailyMetric,
+} from "@/src/lib/hosted-groups/group-current-sender-daily-metric";
 
 const GROUP_RUNTIME_MEMBER_ID = "member_group_runtime";
 const SENDER_MEMBER_ID = "member_sender";
@@ -201,6 +214,31 @@ function createTelegramSourceWake() {
   });
 }
 
+function createEvidenceSourceWake(
+  kind: "linq-media" | "telegram-media" | "linq-long-caption",
+): CurrentSenderSourceWake {
+  if (kind === "telegram-media") {
+    const wake = createTelegramSourceWake();
+    wake.message.telegramMessage.text = null;
+    wake.message.telegramMessage.attachments = [{
+      fileId: "telegram_photo",
+      kind: "photo",
+    }];
+    return wake;
+  }
+  const wake = createSourceWake({
+    text: kind === "linq-long-caption" ? "x".repeat(1_201) : "placeholder",
+  });
+  if (kind === "linq-media") {
+    wake.message.linqMessage.parts = [{
+      attachmentId: "linq_photo",
+      mimeType: "image/png",
+      type: "media",
+    }];
+  }
+  return wake;
+}
+
 function activeContainerLookup(input: { where?: { memberId?: string } }) {
   return input.where?.memberId === GROUP_RUNTIME_MEMBER_ID
     ? { memberId: GROUP_RUNTIME_MEMBER_ID }
@@ -271,6 +309,7 @@ describe("hosted current-sender Assistant Ask authority", () => {
       status: "found",
     });
     mocks.readHostedMailboxItemById.mockResolvedValue(null);
+    mocks.readHostedMailboxItemByDedupeKey.mockResolvedValue(null);
     mocks.readHostedMailboxWakeByDedupeKey.mockResolvedValue(null);
     mocks.readHostedMailboxWakeByItemId.mockResolvedValue(null);
     mocks.requireHostedRuntimeActiveAccess.mockResolvedValue(undefined);
@@ -283,12 +322,186 @@ describe("hosted current-sender Assistant Ask authority", () => {
     mocks.assertHostedLinqRouteEgressAuthority.mockResolvedValue(undefined);
     mocks.assertHostedThreadRouteEgressAuthority.mockResolvedValue(undefined);
     mocks.readHostedGroupDisclosureGrantAuthorityTx.mockResolvedValue(null);
+    mocks.readHostedHealthDataConsentState.mockResolvedValue("missing");
     mocks.appendHostedMailboxEnvelopeWithIdentityTx.mockImplementation(
       async (input: { envelope: { eventId: string }; itemId: string }) => ({
         dedupeConflict: false,
         item: { id: input.itemId },
       }),
     );
+    mocks.appendHostedMailboxEnvelopeTx.mockImplementation(
+      async (input: { envelope: { eventId: string } }) => ({
+        dedupeConflict: false,
+        item: { id: `item_${input.envelope.eventId}` },
+      }),
+    );
+  });
+
+  it("resolves an exact committed metric across authority changes and rejects changed replay", async () => {
+    const dailyMetric = {
+      date: "2026-07-27",
+      metric: "steps",
+      unit: "count",
+      value: 8_000,
+    };
+    const reportId = createHostedGroupCurrentSenderDailyMetricReportId({
+      date: dailyMetric.date,
+      groupRuntimeMemberId: GROUP_RUNTIME_MEMBER_ID,
+      metric: dailyMetric.metric,
+      originAssistantInputId: ORIGIN_ASSISTANT_INPUT_ID,
+    });
+
+    let admittedWake: Record<string, unknown> | null = null;
+    mocks.readHostedMailboxItemById.mockImplementation(
+      async ({ mailboxItemId }: { mailboxItemId: string }) =>
+        admittedWake && mailboxItemId === reportId
+          ? {
+              dedupeKey: reportId,
+              id: reportId,
+              kind: "health.daily-metric.reported",
+              occurredAt: admittedWake.occurredAt,
+              userId: admittedWake.userId,
+            }
+          : null,
+    );
+    mocks.appendHostedMailboxEnvelopeWithIdentityTx.mockImplementation(
+      async (input: {
+        envelope: Record<string, unknown>;
+        itemId: string;
+      }) => {
+        const dedupeConflict = admittedWake !== null
+          && JSON.stringify(admittedWake) !== JSON.stringify(input.envelope);
+        admittedWake ??= input.envelope;
+        return {
+          dedupeConflict,
+          item: { id: input.itemId },
+        };
+      },
+    );
+
+    const admission = await recordHostedGroupCurrentSenderDailyMetric({
+      dailyMetric,
+      groupRuntimeMemberId: GROUP_RUNTIME_MEMBER_ID,
+      now: NOW,
+      origin: CURRENT_SENDER_ORIGIN,
+    });
+
+    expect(admission).toEqual({
+      mailboxWake: {
+        expectedUserId: SENDER_MEMBER_ID,
+        mailboxItemId: reportId,
+      },
+      result: { status: "accepted" },
+    });
+    const appendedWake =
+      mocks.appendHostedMailboxEnvelopeWithIdentityTx.mock.calls[0]?.[0]
+        .envelope;
+    expect(appendedWake).toEqual({
+      dailyMetric,
+      eventId: reportId,
+      kind: "health.daily-metric.reported",
+      occurredAt: "2026-07-27T19:59:59.000Z",
+      userId: SENDER_MEMBER_ID,
+    });
+
+    mocks.readHostedHealthDataConsentState.mockResolvedValue("revoked");
+    mocks.hostedThreadContainerFindUnique.mockResolvedValue(null);
+    await expect(recordHostedGroupCurrentSenderDailyMetric({
+      dailyMetric,
+      groupRuntimeMemberId: GROUP_RUNTIME_MEMBER_ID,
+      now: NOW,
+      origin: CURRENT_SENDER_ORIGIN,
+    })).resolves.toEqual(admission);
+    expect(mocks.readHostedHealthDataConsentState).toHaveBeenCalledTimes(1);
+    expect(mocks.appendHostedMailboxEnvelopeWithIdentityTx).toHaveBeenCalledTimes(2);
+
+    await expect(recordHostedGroupCurrentSenderDailyMetric({
+      dailyMetric: { ...dailyMetric, value: 9_000 },
+      groupRuntimeMemberId: GROUP_RUNTIME_MEMBER_ID,
+      now: NOW,
+      origin: CURRENT_SENDER_ORIGIN,
+    })).resolves.toEqual({
+      mailboxWake: null,
+      result: { status: "unavailable", unavailableReason: "report_conflict" },
+    });
+  });
+
+  it.each([
+    "linq-media",
+    "telegram-media",
+    "linq-long-caption",
+  ] as const)("admits a daily metric from %s while ask-only text policy stays closed", async (kind) => {
+    mocks.readHostedMailboxConversationWakeByAssistantInputId.mockResolvedValue(
+      createEvidenceSourceWake(kind),
+    );
+    const dailyMetric = {
+      date: "2026-07-27",
+      metric: "steps",
+      unit: "count",
+      value: 9_000,
+    };
+
+    await expect(recordHostedGroupCurrentSenderDailyMetric({
+      dailyMetric,
+      groupRuntimeMemberId: GROUP_RUNTIME_MEMBER_ID,
+      now: NOW,
+      origin: CURRENT_SENDER_ORIGIN,
+    })).resolves.toMatchObject({
+      mailboxWake: { expectedUserId: SENDER_MEMBER_ID },
+      result: { status: "accepted" },
+    });
+    await expect(requestHostedGroupCurrentSenderAssistantAsk({
+      groupRuntimeMemberId: GROUP_RUNTIME_MEMBER_ID,
+      now: NOW,
+      origin: CURRENT_SENDER_ORIGIN,
+    })).resolves.toMatchObject({
+      mailboxWake: null,
+      result: { status: "unavailable" },
+    });
+    await expect(requestHostedGroupCurrentSenderPrivateAssistantAsk({
+      groupRuntimeMemberId: GROUP_RUNTIME_MEMBER_ID,
+      now: NOW,
+      origin: CURRENT_SENDER_ORIGIN,
+    })).resolves.toMatchObject({
+      mailboxWake: null,
+      result: { status: "unavailable" },
+    });
+    expect(mocks.appendHostedMailboxEnvelopeWithIdentityTx).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects a daily metric report after health-data consent is revoked", async () => {
+    mocks.readHostedHealthDataConsentState.mockResolvedValueOnce("revoked");
+
+    await expect(recordHostedGroupCurrentSenderDailyMetric({
+      dailyMetric: {
+        date: "2026-07-27",
+        metric: "steps",
+        unit: "count",
+        value: 8_000,
+      },
+      groupRuntimeMemberId: GROUP_RUNTIME_MEMBER_ID,
+      now: NOW,
+      origin: CURRENT_SENDER_ORIGIN,
+    })).resolves.toEqual({
+      mailboxWake: null,
+      result: {
+        status: "unavailable",
+        unavailableReason: "health_data_consent_revoked",
+      },
+    });
+
+    expect(mocks.requireHostedRuntimeActiveAccessForUpdateTx).toHaveBeenCalledWith(
+      SENDER_MEMBER_ID,
+      expect.objectContaining({ prisma: fakeTx }),
+    );
+    expect(mocks.readHostedHealthDataConsentState).toHaveBeenCalledWith({
+      memberId: SENDER_MEMBER_ID,
+      prisma: fakeTx,
+    });
+    expect(
+      mocks.requireHostedRuntimeActiveAccessForUpdateTx.mock.invocationCallOrder[1],
+    ).toBeLessThan(mocks.readHostedHealthDataConsentState.mock.invocationCallOrder[0]);
+    expect(mocks.appendHostedMailboxEnvelopeWithIdentityTx).not.toHaveBeenCalled();
   });
 
   it("derives sender, exact question, route, and reviewed authority from one stored input", async () => {

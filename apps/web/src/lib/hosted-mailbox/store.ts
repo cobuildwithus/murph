@@ -794,7 +794,7 @@ export async function appendHostedMailboxEnvelopeWithSourceMessageTx(input: {
 
 export async function appendHostedMailboxEnvelopeWithIdentityTx(input: {
   envelope: HostedMailboxProducerEnvelope;
-  expiresAt: Date | string;
+  expiresAt: Date | string | null;
   itemId: string;
   tx: HostedMailboxMutationTx;
 }): Promise<AppendHostedMailboxItemResult> {

@@ -7,6 +7,12 @@ Last verified: 2026-08-14
 This index is the table of contents for the current canonical docs in this repository.
 It intentionally lists live architecture, product, verification, and package-boundary docs only.
 
+Private Telegram model-authored rich-content admission, exclusive semantic-card
+ownership, closed HTML, disabled automatic Telegram entities, trusted text
+fallback derivation, and runner rollback ownership are jointly specified by
+`ARCHITECTURE.md`, `agent-docs/PRODUCT_SENSE.md`, `agent-docs/SECURITY.md`, and
+`agent-docs/RELIABILITY.md`.
+
 Local setup and assistant delivery no longer own an operational email provider:
 setup manages Telegram, the local inbox runtime retains Telegram and Linq, and
 generic email remains confined to hosted ingress and injected hosted delivery.
@@ -104,6 +110,19 @@ The producer-first hard-cut rollout is specified by `apps/cloudflare/DEPLOY.md`.
 This contract is jointly specified by `ARCHITECTURE.md`,
 `agent-docs/RELIABILITY.md`, and
 `agent-docs/references/hosted-runtime-protocol.md`.
+
+Exact-sender member-reported daily metrics reuse accepted-message authority,
+the encrypted personal mailbox, canonical `manual` observations, and that same
+checkpoint-gated share projection. New admission rechecks explicit health-data
+consent under the sender lock. A deterministic mailbox identity lets the
+existing Cloudflare exact-request replay resolve a committed response loss
+without re-admitting health data, while the generic mailbox append remains the
+only payload/conflict owner. The durable receipt consumes the projection
+owner's exact result. Device observations remain independent, and contradicted
+snapshots are never represented as live values. This contract is
+jointly specified by `ARCHITECTURE.md`, `agent-docs/SECURITY.md`,
+`agent-docs/RELIABILITY.md`, and
+`agent-docs/product-specs/group-challenge-data-diagnostics.md`.
 
 Hosted cold-start ownership keeps established-member startup on the ordinary
 post-Temporal direct ensure so container boot can overlap fenced invocation
@@ -307,7 +326,7 @@ webhook admission fence for app-bound connections, is jointly specified by
 | `docs/health-data-incident-runbook.md` | Engineering runbook for suspected health-data incidents, consent bypasses, vendor incidents, and tracking disclosures. | Health-data incident response | High | 2026-08-05 |
 | `docs/templates/README.md` | Entry points for reusable device-provider templates. | Template inventory | Low | 2026-04-03 |
 | `agent-docs/strategy.md` | Internal product north star for making member-valued health progress radically easier through progressively complete context, connected evidence, useful action, authorized proactive support, and delight. | Current product strategy | High | 2026-07-15 |
-| `agent-docs/PRODUCT_SENSE.md` | Current product posture for a broad personal health assistant, including immediate value, compounding context, consequential discovery, proactive support, composable primitives, first-visit personalization, conversation-first control, channel-native Telegram and iMessage presentation, uncertainty-aware profile/contact speaker labels, public product-link sharing, pre-save capacity disclosure, and product guardrails. | Current product behavior | High | 2026-08-11 |
+| `agent-docs/PRODUCT_SENSE.md` | Current product posture for a broad personal health assistant, including immediate value, compounding context, consequential discovery, proactive support, composable primitives, first-visit personalization, conversation-first control, channel-native Telegram and iMessage presentation with bounded model-authored Telegram rich content and exclusive semantic-card ownership, uncertainty-aware profile/contact speaker labels, public product-link sharing, pre-save capacity disclosure, and product guardrails. | Current product behavior | High | 2026-08-13 |
 | `agent-docs/PRODUCT_CONSTITUTION.md` | Internal product constitution and tradeoff rules, including selective proactivity and progressively deeper member-controlled context. | Product principles | High | 2026-07-15 |
 | `agent-docs/FRONTEND.md` | Frontend implementation guidance for `apps/web`, including design-system sources (`PRODUCT.md`, `DESIGN.md`), model-neutral implementation routing, required component/section catalog updates, desktop/mobile PR screenshots, browser proof, preliminary ReviewGPT frontend review, and completion-workflow routing. | Current frontend implementation guidance | Medium | 2026-07-22 |
 | `agent-docs/product-marketing-context.md` | Product marketing context for Murph as a broad personal health assistant, with honest fact/strategy/hypothesis/target-state labels, longitudinal-context and proactivity differentiation, delight, private-first onboarding, optional social support, and experiments as one primitive. | Product/marketing decisions | High | 2026-07-15 |
@@ -359,7 +378,7 @@ webhook admission fence for app-bound connections, is jointly specified by
 | `agent-docs/product-specs/group-managed-automations.md` | Implemented member/group managed-owner isolation, execution checks, and retirement behavior; no member-facing group social automation currently ships. | Managed group automation behavior | High | 2026-07-26 |
 | `agent-docs/product-specs/group-health-newsletter.md` | Newsletter as a private skill recipe over an ordinary wall-clock-aware group automation, consent-aware shared reads, normal current-chat delivery, and an optional generic group-email effect with Web-owned recipient revalidation and existing-outbox durability. | Group newsletter behavior | Medium | 2026-08-10 |
 | `agent-docs/product-specs/group-challenge-formats-and-scorecards.md` | Individual, team, and collective challenge formats plus one-to-five model-interpreted additive components with deterministic point arithmetic and aggregation. | Group challenge scorecards | High | 2026-07-29 |
-| `agent-docs/product-specs/group-challenge-data-diagnostics.md` | Truthful complete or partial group-challenge standings, evidence-ordered missing-data guidance with explicit first-projection `pending` versus completed-empty `missing` states, group-authorized fresh exact-scope reads, source-tagged multi-source health shares without cross-source selection, rollback-readable legacy sleep compatibility, and connection/source-epoch-coherent privacy-bounded `device-sync-status.v0` observations. | Group challenge diagnostics | High | 2026-08-13 |
+| `agent-docs/product-specs/group-challenge-data-diagnostics.md` | Truthful complete or partial group-challenge standings, evidence-ordered missing-data guidance with explicit first-projection `pending` versus completed-empty `missing` states, group-authorized fresh exact-scope reads, consent-fenced member-reported Manual corrections, source-tagged multi-source health shares without cross-source selection, rollback-readable legacy sleep compatibility, and connection/source-epoch-coherent privacy-bounded `device-sync-status.v0` observations. | Group challenge diagnostics | High | 2026-08-13 |
 | `agent-docs/product-specs/challenge-standings-card.md` | Native Messages presentation contract for individual, team, and collective challenge standings with truthful partial and unscored states, authenticated Linq group-only delivery, complete semantic captions, and an identity-free static-image projection with the canonical Murph badge. | Group challenge standings response card | High | 2026-08-11 |
 | `agent-docs/product-specs/personal-group-awareness.md` | Personal Murph read access to the member's hosted-group memberships, requested permissions, active self grants, and owner-authorized permission links. | Hosted group self-awareness | High | 2026-07-10 |
 | `agent-docs/product-specs/private-group-consultation.md` | Implemented Assistant Ask request/reply primitive, first composed as an automatically resolved, read-only private-to-group Murph ask, with exact requester identity, deterministic exact unavailable delivery, bounded foreground-causal draining, bounded opaque failure correlation, and post-Temporal direct latency hints. | Hosted group consultation | High | 2026-07-26 |

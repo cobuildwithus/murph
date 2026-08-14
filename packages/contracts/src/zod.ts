@@ -1229,6 +1229,7 @@ const noteEventFieldsShape = {
 const observationEventFieldsShape = {
   metric: patternedString(SLUG_PATTERN),
   queryVisibility: z.enum(["default"]).optional(),
+  qualifiers: measurementQualifiersSchema.optional(),
   value: numberSchema(),
   visibility: z.enum(["display"]).optional(),
   canonicalFact: z.literal(true).optional(),
