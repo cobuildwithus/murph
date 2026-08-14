@@ -513,12 +513,17 @@ deploying the Web producer. After Web deploys, a synthetic granted steps report
 must be accepted once, advance the personal system-lane checkpoint, and appear
 beside—not instead of—the device record as `Manual` on a later `read_shared`.
 Absence of `unsupported_kind` evidence and of an unconsumed report behind the
-system-lane counter is the convergence smoke. The new consumer is the rollback
-floor while any report is retained or unconsumed; Web may roll back first to
-stop production. Signal-loss recovery stays with the existing bounded mailbox
-handoff sweep. Repair means keep the compatible runner, invoke that sweep, and
-verify counter progress—never mutate mailbox rows, create an unrelated message,
-or add a second queue.
+system-lane counter is convergence smoke only; it never changes rollback
+eligibility. `apps/cloudflare/DEPLOY.md` is the authoritative rollout and
+rollback contract. Web producer enablement or the first imported report creates
+a permanent contracts/query/runner rollback floor because the strict
+observation qualifier and causal ordering outlive transient mailbox work. Web
+may roll back first to stop production, but the runner must remain at that floor
+or newer and be forward-fixed, independent of retained, pending, unconsumed, or
+drained mailbox work. Signal-loss recovery stays with the existing bounded
+mailbox handoff sweep. Repair means keep the compatible runner, invoke that
+sweep, and verify counter progress—never mutate mailbox rows, create an
+unrelated message, or add a second queue.
 
 ## Acceptance cases
 

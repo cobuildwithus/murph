@@ -138,3 +138,13 @@ Updated: 2026-08-14
   meal-photo flow through the same strict event-ledger scan. A deployment-doc
   contract test prohibits the former drain-based rollback, and the affected
   assistant-runtime and Cloudflare tests and typechecks pass under Node 24.
+- ReviewGPT round 7 required a retrospective because the jointly specified
+  group-challenge product contract still conditioned the runner floor on
+  retained mailbox work. The recorded ownership decision makes the Cloudflare
+  deployment guide authoritative, makes the product spec explicitly delegate
+  to it, and mechanically requires both surfaces to preserve the permanent
+  post-producer contracts/query/runner floor independently of mailbox drain.
+- Round 7 is the automatic substantive-round cap. This accepted documentation
+  inconsistency is resolved and will receive focused proof, exact-head CI, and
+  parent review, but a round 8 requires an explicit continuation decision and
+  the PR remains draft and non-merge-ready until a later exact-head `PASS`.

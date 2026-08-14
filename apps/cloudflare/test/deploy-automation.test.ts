@@ -1107,18 +1107,34 @@ describe("hosted deploy automation helpers", () => {
 
   it("keeps the daily-report rollback floor after transient mailbox state drains", async () => {
     const deployGuide = await readFile(new URL("../DEPLOY.md", import.meta.url), "utf8");
+    const groupChallengeContract = await readFile(
+      new URL("../../../agent-docs/product-specs/group-challenge-data-diagnostics.md", import.meta.url),
+      "utf8",
+    );
     const sectionStart = deployGuide.indexOf("Member-reported daily metrics add the");
     const sectionEnd = deployGuide.indexOf("The scheduled Linq authority release", sectionStart);
+    const contractStart = groupChallengeContract.indexOf("Member-reported daily metrics use");
+    const contractEnd = groupChallengeContract.indexOf("## Acceptance cases", contractStart);
     expect(sectionStart).toBeGreaterThan(-1);
     expect(sectionEnd).toBeGreaterThan(sectionStart);
+    expect(contractStart).toBeGreaterThan(-1);
+    expect(contractEnd).toBeGreaterThan(contractStart);
 
     const dailyReportRollout = deployGuide.slice(sectionStart, sectionEnd);
+    const dailyReportContract = groupChallengeContract.slice(contractStart, contractEnd);
     expect(dailyReportRollout).toContain("hard rollback floor");
     expect(dailyReportRollout).toContain("after the transient mailbox item drains");
     expect(dailyReportRollout).toMatch(/never roll the runner below this\s+floor afterward/u);
     expect(dailyReportRollout).toContain("existing meal-photo import");
     expect(dailyReportRollout).toContain("projection rebuild");
     expect(dailyReportRollout).toContain("no event rewrite");
-    expect(dailyReportRollout).not.toContain("until the retained population has drained");
+    expect(dailyReportContract).toContain("`apps/cloudflare/DEPLOY.md` is the authoritative rollout and");
+    expect(dailyReportContract).toContain("permanent contracts/query/runner rollback floor");
+    expect(dailyReportContract).toMatch(/independent of retained, pending, unconsumed, or\s+drained mailbox work/u);
+
+    for (const owner of [dailyReportRollout, dailyReportContract]) {
+      expect(owner).not.toContain("rollback floor while any report is retained or unconsumed");
+      expect(owner).not.toContain("until the retained population has drained");
+    }
   });
 });
