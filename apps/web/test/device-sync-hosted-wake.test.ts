@@ -3201,9 +3201,10 @@ describe("hosted device-sync wakes", () => {
     mocks.getConnectionForUser.mockResolvedValue(activeConnection);
     mocks.getConnectionRecordForUser.mockResolvedValue({
       credentialKind: "oauth_tokens",
-      refreshLeaseExpiresAt: new Date("2026-03-26T12:05:00.000Z"),
+      refreshLeaseExpiresAt: new Date("2099-03-26T12:05:00.000Z"),
       refreshLeaseOwner: "agent-refresh:lease-proof",
       refreshLeaseTokenVersion: 2,
+      tokenVersion: 2,
     });
 
     await expect(controlPlane.disconnectConnection(
@@ -3218,6 +3219,68 @@ describe("hosted device-sync wakes", () => {
     expect(mocks.syncDurableConnectionState).not.toHaveBeenCalled();
     expect(mocks.persistStoredConnectionTokenBundle).not.toHaveBeenCalled();
     expect(mocks.createSignal).not.toHaveBeenCalled();
+    expect(mocks.appendHostedMailboxEnvelope).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["expired", {
+      refreshLeaseExpiresAt: new Date("2020-03-26T12:05:00.000Z"),
+      refreshLeaseOwner: "agent-refresh:expired",
+      refreshLeaseTokenVersion: 2,
+    }],
+    ["malformed", {
+      refreshLeaseExpiresAt: null,
+      refreshLeaseOwner: "",
+      refreshLeaseTokenVersion: 2,
+    }],
+    ["for an obsolete token version", {
+      refreshLeaseExpiresAt: new Date("2099-03-26T12:05:00.000Z"),
+      refreshLeaseOwner: "agent-refresh:obsolete",
+      refreshLeaseTokenVersion: 1,
+    }],
+  ])("fails closed before provider work when an OAuth refresh lease is %s", async (_label, lease) => {
+    const controlPlane = createHostedDeviceSyncPublicIngressService(
+      new Request("https://control.example.test/api/settings/device-sync/connections/dsc_123/disconnect"),
+    );
+    const activeConnection = buildHostedConnection();
+    mocks.listConnectionsForUser.mockResolvedValue([activeConnection]);
+    mocks.getConnectionForUser.mockResolvedValue(activeConnection);
+    mocks.getConnectionRecordForUser.mockResolvedValue({
+      credentialKind: "oauth_tokens",
+      ...lease,
+      tokenVersion: 2,
+    });
+
+    await expect(controlPlane.disconnectConnection(
+      "user-123",
+      buildPublicConnectionId("dsc_123"),
+    )).rejects.toMatchObject({
+      accountStatus: "reauthorization_required",
+      code: "TOKEN_REFRESH_STATE_UNKNOWN",
+      retryable: false,
+    });
+
+    expect(mocks.registryGet).not.toHaveBeenCalled();
+    expect(mocks.syncDurableConnectionState).toHaveBeenCalledWith(
+      expect.objectContaining({
+        lastErrorCode: "TOKEN_REFRESH_STATE_UNKNOWN",
+        nextReconcileAt: null,
+        status: "reauthorization_required",
+      }),
+      mocks.prismaTx,
+    );
+    expect(mocks.persistStoredConnectionTokenBundle).toHaveBeenCalledWith({
+      clearRefreshLease: true,
+      connectionId: "dsc_123",
+      externalAccountId: activeConnection.externalAccountId,
+      provider: "oura",
+      tokenBundle: null,
+      tx: mocks.prismaTx,
+    });
+    expect(mocks.createSignal).toHaveBeenCalledWith(expect.objectContaining({
+      kind: "reauthorization_required",
+      reason: "token_refresh_state_unknown",
+    }));
     expect(mocks.appendHostedMailboxEnvelope).not.toHaveBeenCalled();
   });
 

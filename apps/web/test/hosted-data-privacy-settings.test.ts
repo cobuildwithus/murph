@@ -560,6 +560,7 @@ describe("HostedDataPrivacySettings", () => {
   test("submits explicit provider-access confirmation on the recovery retry", async () => {
     mockHostedDataPrivacyDeleteFlowState({
       providerAccessRemovalConfirmed: true,
+      providerAccessRemovalConfirmationToken: "a".repeat(64),
       providerAccessRemovalRequired: true,
     });
 
@@ -584,7 +585,7 @@ describe("HostedDataPrivacySettings", () => {
     await clickButton(container, "Delete account", window);
 
     expect(mocks.requestHostedOnboardingJson.mock.calls[0]?.[0]?.payload)
-      .toMatchObject({ providerAccessRemovalConfirmed: true });
+      .toMatchObject({ providerAccessRemovalConfirmationToken: "a".repeat(64) });
   });
 
   test("allows account deletion to succeed after the vault receiver lease window", async () => {
@@ -948,7 +949,8 @@ describe("HostedDataPrivacySettings", () => {
 // exportPending, exportDialogOpen, acknowledgedSensitiveDownload, exportDialogError,
 // exportSuccess, deletePending, dialogOpen, dialogStep, exitReason, exitNote,
 // confirmationPhrase, dialogError, providerAccessRemovalRequired,
-// providerAccessRemovalConfirmed, deleted, cleanupPending, privyLogoutDone.
+// providerAccessRemovalConfirmed, providerAccessRemovalConfirmationToken,
+// deleted, cleanupPending, privyLogoutDone.
 function mockHostedVaultExportFlowState(input: {
   acknowledgedSensitiveDownload?: boolean;
 } = {}) {
@@ -967,6 +969,7 @@ function mockHostedVaultExportFlowState(input: {
     null,
     false,
     false,
+    null,
     false,
     false,
     false,
@@ -979,6 +982,7 @@ function mockHostedDataPrivacyDeleteFlowState(input: {
   exitNote?: string;
   exitReason?: string | null;
   providerAccessRemovalConfirmed?: boolean;
+  providerAccessRemovalConfirmationToken?: string | null;
   providerAccessRemovalRequired?: boolean;
 } = {}) {
   mocks.useStateValues = [
@@ -998,6 +1002,7 @@ function mockHostedDataPrivacyDeleteFlowState(input: {
     input.dialogError ?? null,
     input.providerAccessRemovalRequired ?? false,
     input.providerAccessRemovalConfirmed ?? false,
+    input.providerAccessRemovalConfirmationToken ?? null,
     false,
     false,
     false,
@@ -1022,6 +1027,7 @@ function mockHostedDataPrivacyDeletedState(input: {
     null,
     false,
     false,
+    null,
     true,
     input.cleanupPending ?? false,
     false,

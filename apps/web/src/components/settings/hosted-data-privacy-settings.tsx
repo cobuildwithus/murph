@@ -98,6 +98,7 @@ function HostedDataPrivacySettingsAuthorized(props: {
   const [dialogError, setDialogError] = useState<string | null>(null);
   const [providerAccessRemovalRequired, setProviderAccessRemovalRequired] = useState(false);
   const [providerAccessRemovalConfirmed, setProviderAccessRemovalConfirmed] = useState(false);
+  const [providerAccessRemovalConfirmationToken, setProviderAccessRemovalConfirmationToken] = useState<string | null>(null);
   const [deleted, setDeleted] = useState(false);
   const [cleanupPending, setCleanupPending] = useState(false);
   const [privyLogoutDone, setPrivyLogoutDone] = useState(false);
@@ -106,7 +107,13 @@ function HostedDataPrivacySettingsAuthorized(props: {
   const exportReady = acknowledgedSensitiveDownload && !exportPending;
   const phraseMatches = confirmationPhrase === HOSTED_ACCOUNT_DELETION_CONFIRMATION_PHRASE;
   const deleteReady = phraseMatches
-    && (!providerAccessRemovalRequired || providerAccessRemovalConfirmed)
+    && (
+      !providerAccessRemovalRequired
+      || (
+        providerAccessRemovalConfirmed
+        && providerAccessRemovalConfirmationToken !== null
+      )
+    )
     && !deletePending;
 
   useEffect(() => {
@@ -199,8 +206,8 @@ function HostedDataPrivacySettingsAuthorized(props: {
           authorization,
           confirmationPhrase,
           ...(exitReason ? { exitNote, exitReason } : {}),
-          ...(providerAccessRemovalConfirmed
-            ? { providerAccessRemovalConfirmed: true }
+          ...(providerAccessRemovalConfirmed && providerAccessRemovalConfirmationToken
+            ? { providerAccessRemovalConfirmationToken }
             : {}),
         },
         url: "/api/settings/privacy/delete",
@@ -221,8 +228,13 @@ function HostedDataPrivacySettingsAuthorized(props: {
         }
       }
       if (providerRecoveryRequired) {
+        const nextConfirmationToken =
+          typeof requestError.details?.providerAccessRemovalConfirmationToken === "string"
+            ? requestError.details.providerAccessRemovalConfirmationToken
+            : null;
         setProviderAccessRemovalRequired(true);
         setProviderAccessRemovalConfirmed(false);
+        setProviderAccessRemovalConfirmationToken(nextConfirmationToken);
       }
       setDialogError(requestError instanceof HostedOnboardingApiError
         ? requestError.message
@@ -257,6 +269,7 @@ function HostedDataPrivacySettingsAuthorized(props: {
     setExitNote("");
     setProviderAccessRemovalRequired(false);
     setProviderAccessRemovalConfirmed(false);
+    setProviderAccessRemovalConfirmationToken(null);
     setDialogOpen(true);
   }
 
@@ -273,6 +286,7 @@ function HostedDataPrivacySettingsAuthorized(props: {
     setExitNote("");
     setProviderAccessRemovalRequired(false);
     setProviderAccessRemovalConfirmed(false);
+    setProviderAccessRemovalConfirmationToken(null);
   }
 
   function skipExitReason() {

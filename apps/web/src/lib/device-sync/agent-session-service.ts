@@ -33,7 +33,10 @@ import {
   shouldRefreshHostedToken,
 } from "./agent-session-token-bundle";
 import {
+  classifyHostedTokenRefreshLease,
+  failClosedStaleHostedTokenRefreshLease,
   type HostedProviderTokenRefreshResult,
+  type HostedTokenRefreshLeaseStatus,
   persistProviderTokenRefreshErrorStatus,
   refreshProviderTokens,
 } from "./agent-session-token-refresh";
@@ -130,11 +133,6 @@ type HostedTokenRefreshPersistResult =
 type HostedTokenRefreshStaleLeaseResult =
   | HostedTokenRefreshSuccess
   | { status: "stale_failed_closed"; error: unknown };
-
-type HostedTokenRefreshLeaseStatus =
-  | { status: "none" }
-  | { status: "in_progress"; leaseExpiresAt: string }
-  | { status: "stale" };
 
 type HostedTokenExportResponseResult = HostedTokenBundleExportResponse & {
   status?: undefined;
@@ -666,31 +664,17 @@ export class HostedDeviceSyncAgentSessionService {
 
     if (
       !lease
-      || (
-        !lease.refreshLeaseOwner
-        && !lease.refreshLeaseExpiresAt
-        && lease.refreshLeaseTokenVersion === null
-      )
     ) {
       return { status: "none" };
     }
 
-    if (
-      !lease.refreshLeaseOwner
-      || !lease.refreshLeaseExpiresAt
-      || lease.refreshLeaseTokenVersion !== input.tokenVersion
-    ) {
-      return { status: "stale" };
-    }
-
-    if (lease.refreshLeaseExpiresAt.getTime() > Date.parse(input.now)) {
-      return {
-        status: "in_progress",
-        leaseExpiresAt: lease.refreshLeaseExpiresAt.toISOString(),
-      };
-    }
-
-    return { status: "stale" };
+    return classifyHostedTokenRefreshLease({
+      now: input.now,
+      record: {
+        ...lease,
+        tokenVersion: input.tokenVersion,
+      },
+    });
   }
 
   private async assertTokenBundleRefreshLeaseExportable(input: {
@@ -798,13 +782,30 @@ export class HostedDeviceSyncAgentSessionService {
         });
 
         if (currentTokenBundle.tokenVersion !== input.baseTokenBundle.tokenVersion) {
-          await this.assertTokenBundleRefreshLeaseExportable({
+          const currentLeaseStatus = await this.readRefreshLeaseStatus({
             connectionId: input.connectionId,
             now: input.now,
             tokenVersion: currentTokenBundle.tokenVersion,
             tx,
             userId: input.session.userId,
           });
+          if (currentLeaseStatus.status === "in_progress") {
+            throw buildHostedTokenRefreshInProgressError(
+              currentLeaseStatus.leaseExpiresAt,
+            );
+          }
+          if (currentLeaseStatus.status === "stale") {
+            return {
+              status: "stale_failed_closed",
+              error: await failClosedStaleHostedTokenRefreshLease({
+                account: currentAccount,
+                now: input.now,
+                store: this.store,
+                tx,
+                userId: input.session.userId,
+              }),
+            };
+          }
           const tokenBundle = await this.buildAuthorizedTokenExport({
             connectionId: input.connectionId,
             now: input.now,
@@ -850,65 +851,35 @@ export class HostedDeviceSyncAgentSessionService {
           },
         });
 
-        if (!lease?.refreshLeaseOwner || !lease.refreshLeaseExpiresAt) {
+        if (!lease) {
           throw buildHostedTokenRefreshRetryRequiredError();
         }
 
-        if (lease.refreshLeaseExpiresAt.getTime() > Date.parse(input.now)) {
-          throw buildHostedTokenRefreshInProgressError(lease.refreshLeaseExpiresAt.toISOString());
-        }
-
-        if (lease.refreshLeaseTokenVersion !== currentTokenBundle.tokenVersion) {
-          throw buildHostedTokenRefreshRetryRequiredError();
-        }
-
-        const currentConnection = toPublicHostedDeviceSyncAccount(currentAccount);
-        const nextConnection: PublicDeviceSyncAccount = {
-          ...currentConnection,
-          lastErrorCode: "TOKEN_REFRESH_STATE_UNKNOWN",
-          lastErrorMessage: "Token refresh state is unknown. Reconnect this source.",
-          lastSyncErrorAt: input.now,
-          nextReconcileAt: null,
-          status: "reauthorization_required",
-          updatedAt: input.now,
-        };
-
-        await this.store.createSignal({
-          userId: input.session.userId,
-          connectionId: input.connectionId,
-          provider: currentAccount.provider,
-          kind: "reauthorization_required",
-          occurredAt: input.now,
-          reason: "token_refresh_state_unknown",
-          revokeWarning: {
-            code: "TOKEN_REFRESH_STATE_UNKNOWN",
-            message: "Token refresh state is unknown. Reconnect this source.",
+        const currentLeaseStatus = classifyHostedTokenRefreshLease({
+          now: input.now,
+          record: {
+            ...lease,
+            tokenVersion: currentTokenBundle.tokenVersion,
           },
-          createdAt: input.now,
-          tx,
         });
-        await this.store.syncDurableConnectionState(nextConnection, tx);
-        await this.store.persistStoredConnectionTokenBundle({
-          connectionId: input.connectionId,
-          externalAccountId: currentAccount.externalAccountId,
-          provider: currentAccount.provider,
-          refreshLeaseOwner: lease.refreshLeaseOwner,
-          tokenBundle: null,
-          tx,
-        });
-
-        const cleared = await this.store.clearConnectionRefreshLease({
-          connectionId: input.connectionId,
-          leaseOwner: lease.refreshLeaseOwner,
-          tx,
-        });
-        if (!cleared) {
+        if (currentLeaseStatus.status === "none") {
           throw buildHostedTokenRefreshRetryRequiredError();
+        }
+        if (currentLeaseStatus.status === "in_progress") {
+          throw buildHostedTokenRefreshInProgressError(
+            currentLeaseStatus.leaseExpiresAt,
+          );
         }
 
         return {
           status: "stale_failed_closed",
-          error: buildHostedTokenRefreshStateUnknownError(),
+          error: await failClosedStaleHostedTokenRefreshLease({
+            account: currentAccount,
+            now: input.now,
+            store: this.store,
+            tx,
+            userId: input.session.userId,
+          }),
         };
       },
     );
@@ -1396,15 +1367,5 @@ function buildHostedTokenRefreshRetryRequiredError() {
     message: "Hosted device-sync token refresh state changed before it could be confirmed.",
     retryable: true,
     httpStatus: 409,
-  });
-}
-
-function buildHostedTokenRefreshStateUnknownError() {
-  return deviceSyncError({
-    code: "TOKEN_REFRESH_STATE_UNKNOWN",
-    message: "Hosted device-sync token refresh state is unknown. Reconnect this source before syncing again.",
-    retryable: false,
-    httpStatus: 409,
-    accountStatus: "reauthorization_required",
   });
 }

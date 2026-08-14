@@ -98,6 +98,10 @@ import {
 import type { HostedDeviceConnectionSource } from "./prisma-store";
 import type { HostedDeviceSyncDirtyResource } from "./prisma-store";
 import {
+  classifyHostedTokenRefreshLease,
+  failClosedStaleHostedTokenRefreshLease,
+} from "./agent-session-token-refresh";
+import {
   normalizeNullableString,
   sha256Hex,
   toIsoTimestamp,
@@ -1070,17 +1074,29 @@ export async function disconnectHostedDeviceSyncConnection(input: {
       connectionChangedDuringDisconnectError();
     }
 
-    if (
-      connectionRecord.refreshLeaseOwner != null
-      || connectionRecord.refreshLeaseExpiresAt != null
-      || connectionRecord.refreshLeaseTokenVersion != null
-    ) {
+    const refreshLeaseStatus = classifyHostedTokenRefreshLease({
+      now: disconnectStartedAt,
+      record: connectionRecord,
+    });
+    if (refreshLeaseStatus.status === "in_progress") {
       throw deviceSyncError({
         code: "TOKEN_REFRESH_IN_PROGRESS",
         message: "A hosted device-sync token refresh is already in progress for this connection.",
         retryable: true,
         httpStatus: 409,
       });
+    }
+    if (refreshLeaseStatus.status === "stale") {
+      return {
+        refreshLeaseRecoveryError:
+          await failClosedStaleHostedTokenRefreshLease({
+            account: connection,
+            now: disconnectStartedAt,
+            store: input.store,
+            tx,
+            userId: input.userId,
+          }),
+      };
     }
 
     // The raw durable credential kind is the cleanup authority. In particular,
@@ -1132,6 +1148,9 @@ export async function disconnectHostedDeviceSyncConnection(input: {
       storedAccount,
     };
   });
+  if ("refreshLeaseRecoveryError" in target) {
+    throw target.refreshLeaseRecoveryError;
+  }
   const existing = target.connection;
   const storedAccount = target.storedAccount;
 

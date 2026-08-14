@@ -65,7 +65,7 @@ describe("settings privacy delete route", () => {
     mocks.parseHostedAccountDeletionRequest.mockReturnValue({
       confirmationPhrase: "DELETE MY ACCOUNT",
       exitFeedback: null,
-      providerAccessRemovalConfirmed: false,
+      providerAccessRemovalConfirmationToken: null,
     });
     mocks.requireHostedAppSessionFromRequest.mockResolvedValue({
       member: {
@@ -146,7 +146,7 @@ describe("settings privacy delete route", () => {
       exitFeedback: null,
       memberId: "member_123",
       prisma: mocks.prismaClient,
-      providerAccessRemovalConfirmed: false,
+      providerAccessRemovalConfirmationToken: null,
       request: expect.any(Request),
     });
     expect(mocks.buildHostedAppSessionClearCookie).toHaveBeenCalledTimes(1);

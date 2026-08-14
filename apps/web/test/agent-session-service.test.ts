@@ -1553,6 +1553,7 @@ function createRetrySafeStoreHarness(bearerToken: string): {
           : null;
       },
       async persistStoredConnectionTokenBundle(input: {
+        clearRefreshLease?: boolean;
         connectionId: string;
         externalAccountId: string;
         provider: string;
@@ -1566,6 +1567,10 @@ function createRetrySafeStoreHarness(bearerToken: string): {
       }) {
         if (input.connectionId !== connection.id) {
           return;
+        }
+
+        if (input.clearRefreshLease === true) {
+          refreshLease = null;
         }
 
         if (!input.tokenBundle) {

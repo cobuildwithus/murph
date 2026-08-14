@@ -613,7 +613,7 @@ describe("parseHostedAccountDeletionRequest", () => {
     })).toEqual({
       confirmationPhrase: HOSTED_ACCOUNT_DELETION_CONFIRMATION_PHRASE,
       exitFeedback: null,
-      providerAccessRemovalConfirmed: false,
+      providerAccessRemovalConfirmationToken: null,
     });
   });
 
@@ -628,7 +628,18 @@ describe("parseHostedAccountDeletionRequest", () => {
         note: "Too many texts on weekends.",
         reason: "too_many_texts",
       },
-      providerAccessRemovalConfirmed: false,
+      providerAccessRemovalConfirmationToken: null,
+    });
+  });
+
+  it("carries the exact provider-removal confirmation token", () => {
+    const providerAccessRemovalConfirmationToken = "a".repeat(64);
+
+    expect(parseHostedAccountDeletionRequest({
+      confirmationPhrase: HOSTED_ACCOUNT_DELETION_CONFIRMATION_PHRASE,
+      providerAccessRemovalConfirmationToken,
+    })).toMatchObject({
+      providerAccessRemovalConfirmationToken,
     });
   });
 
@@ -668,7 +679,7 @@ describe("parseHostedAccountDeletionRequest", () => {
     })).toEqual({
       confirmationPhrase: HOSTED_ACCOUNT_DELETION_CONFIRMATION_PHRASE,
       exitFeedback: null,
-      providerAccessRemovalConfirmed: false,
+      providerAccessRemovalConfirmationToken: null,
     });
   });
 
@@ -3556,22 +3567,17 @@ describe("deleteHostedAccountData", () => {
     expect(rawDeletionQueries).toEqual([]);
   });
 
-  it("locks the exact device authority rows and blocks an in-flight token refresh", async () => {
+  it("blocks a live token refresh before account suspension or provider work", async () => {
     const deviceAuthorityLockQueries: string[] = [];
-    const operationOrder: string[] = [];
+    const hostedMemberUpdateCalls: unknown[] = [];
     const rawDeletionQueries: HostedAccountDeletionRawQuery[] = [];
-    serviceMocks.createHostedDeviceSyncControlPlane.mockReturnValueOnce({
-      store: {
-        getStoredConnectionAccountForUser: vi.fn(async () => null),
-      },
-    });
     const connection = {
       connectedAt: new Date("2026-04-27T00:07:00.000Z"),
       id: "dsc_refresh_in_flight",
       provider: "oura",
       providerAccountBlindIndex: "hbdi_refresh_in_flight",
       providerApplicationRevision: null,
-      refreshLeaseExpiresAt: new Date("2026-04-27T00:12:00.000Z"),
+      refreshLeaseExpiresAt: new Date("2099-04-27T00:12:00.000Z"),
       refreshLeaseOwner: "refresh_owner",
       refreshLeaseTokenVersion: 4,
       sources: [],
@@ -3580,8 +3586,8 @@ describe("deleteHostedAccountData", () => {
     const prisma = createHostedAccountDeletionPrismaForTest({
       deviceAuthorityLockQueries,
       deviceConnections: [connection],
+      hostedMemberUpdateCalls,
       onTransaction: () => undefined,
-      operationOrder,
       rawDeletionQueries,
       transactionDeviceConnections: [connection],
     });
@@ -3595,17 +3601,132 @@ describe("deleteHostedAccountData", () => {
       retryable: true,
     });
 
+    expect(deviceAuthorityLockQueries).toEqual([]);
+    expect(hostedMemberUpdateCalls).toEqual([]);
+    expect(serviceMocks.createHostedDeviceSyncControlPlane).not.toHaveBeenCalled();
+    expect(rawDeletionQueries).toEqual([]);
+  });
+
+  it("fails an expired token refresh closed before account suspension", async () => {
+    const hostedMemberUpdateCalls: unknown[] = [];
+    const persistStoredConnectionTokenBundle = vi.fn(async () => undefined);
+    const createSignal = vi.fn(async () => ({ id: 1 }));
+    const syncDurableConnectionState = vi.fn(async () => undefined);
+    const connection = {
+      connectedAt: new Date("2026-04-27T00:07:00.000Z"),
+      credentialKind: "oauth_tokens",
+      id: "dsc_refresh_expired",
+      provider: "oura",
+      providerAccountBlindIndex: "hbdi_refresh_expired",
+      providerApplicationRevision: null,
+      refreshLeaseExpiresAt: new Date("2020-04-27T00:12:00.000Z"),
+      refreshLeaseOwner: "refresh_owner",
+      refreshLeaseTokenVersion: 4,
+      sources: [],
+      tokenVersion: 4,
+    };
+    serviceMocks.createHostedDeviceSyncControlPlane.mockReturnValueOnce({
+      store: {
+        createSignal,
+        getConnectionForUser: vi.fn(async () => ({
+          connectedAt: "2026-04-27T00:07:00.000Z",
+          createdAt: "2026-04-27T00:07:00.000Z",
+          displayName: "Oura",
+          externalAccountId: "provider-account",
+          id: connection.id,
+          lastErrorCode: null,
+          lastErrorMessage: null,
+          lastSyncCompletedAt: null,
+          lastSyncErrorAt: null,
+          lastSyncStartedAt: null,
+          lastWebhookAt: null,
+          metadata: {},
+          nextReconcileAt: null,
+          provider: connection.provider,
+          scopes: [],
+          status: "active",
+          updatedAt: "2026-04-27T00:07:00.000Z",
+        })),
+        getConnectionRecordForUser: vi.fn(async () => connection),
+        persistStoredConnectionTokenBundle,
+        syncDurableConnectionState,
+        withConnectionMutationLock: vi.fn(async (
+          _connectionId: string,
+          callback: (tx: { __tx: true }) => Promise<unknown>,
+        ) => callback({ __tx: true })),
+      },
+    });
+    const prisma = createHostedAccountDeletionPrismaForTest({
+      deviceConnections: [connection],
+      hostedMemberUpdateCalls,
+      onTransaction: () => undefined,
+    });
+
+    await expect(deleteHostedAccountData({
+      memberId: "member_123",
+      prisma,
+      request: new Request("https://join.example.test/settings"),
+    })).rejects.toMatchObject({
+      code: "ACCOUNT_DELETION_DEVICE_TOKEN_REFRESH_RECOVERY_REQUIRED",
+      retryable: false,
+    });
+
+    expect(hostedMemberUpdateCalls).toEqual([]);
+    expect(syncDurableConnectionState).toHaveBeenCalledWith(
+      expect.objectContaining({
+        lastErrorCode: "TOKEN_REFRESH_STATE_UNKNOWN",
+        status: "reauthorization_required",
+      }),
+      { __tx: true },
+    );
+    expect(persistStoredConnectionTokenBundle).toHaveBeenCalledWith({
+      clearRefreshLease: true,
+      connectionId: connection.id,
+      externalAccountId: "provider-account",
+      provider: "oura",
+      tokenBundle: null,
+      tx: { __tx: true },
+    });
+    expect(createSignal).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the terminal fence for a token refresh that starts after suspension", async () => {
+    const deviceAuthorityLockQueries: string[] = [];
+    const rawDeletionQueries: HostedAccountDeletionRawQuery[] = [];
+    const connection = {
+      connectedAt: new Date("2026-04-27T00:07:00.000Z"),
+      id: "dsc_refresh_race",
+      provider: "oura",
+      providerAccountBlindIndex: "hbdi_refresh_race",
+      providerApplicationRevision: null,
+      sources: [],
+      tokenVersion: 4,
+    };
+    const prisma = createHostedAccountDeletionPrismaForTest({
+      deviceAuthorityLockQueries,
+      deviceConnections: [connection],
+      onTransaction: () => undefined,
+      rawDeletionQueries,
+      transactionDeviceConnections: [{
+        ...connection,
+        refreshLeaseExpiresAt: new Date("2099-04-27T00:12:00.000Z"),
+        refreshLeaseOwner: "refresh_owner",
+        refreshLeaseTokenVersion: 4,
+      }],
+    });
+
+    await expect(deleteHostedAccountData({
+      memberId: "member_123",
+      prisma,
+      request: new Request("https://join.example.test/settings"),
+    })).rejects.toMatchObject({
+      code: "ACCOUNT_DELETION_DEVICE_AUTHORIZATION_IN_FLIGHT",
+      retryable: true,
+    });
+
     expect(deviceAuthorityLockQueries).toHaveLength(2);
-    expect(deviceAuthorityLockQueries[0]).toContain(
-      "FOR UPDATE OF connection",
-    );
+    expect(deviceAuthorityLockQueries[0]).toContain("FOR UPDATE OF connection");
     expect(deviceAuthorityLockQueries[1]).toContain("FOR UPDATE OF source");
-    expect(operationOrder.indexOf("lock:deviceConnectionAuthority")).toBeLessThan(
-      operationOrder.indexOf("find:deviceConnection"),
-    );
-    expect(operationOrder.indexOf("lock:deviceSourceAuthority")).toBeLessThan(
-      operationOrder.indexOf("find:deviceConnection"),
-    );
     expect(rawDeletionQueries).toEqual([]);
   });
 
@@ -3648,7 +3769,10 @@ describe("deleteHostedAccountData", () => {
       request: new Request("https://join.example.test/settings"),
     })).rejects.toMatchObject({
       code: "ACCOUNT_DELETION_DEVICE_AUTHORIZATION_RECOVERY_REQUIRED",
-      details: { providerLabels: ["Oura"] },
+      details: {
+        providerAccessRemovalConfirmationToken: expect.any(String),
+        providerLabels: ["Oura"],
+      },
       retryable: false,
     });
     expect(deleteCalls).toEqual([]);
@@ -3668,10 +3792,25 @@ describe("deleteHostedAccountData", () => {
       onTransaction: () => undefined,
     });
 
+    let providerAccessRemovalConfirmationToken: string | null = null;
+    try {
+      await deleteHostedAccountData({
+        memberId: "member_123",
+        prisma,
+        request: new Request("https://join.example.test/settings"),
+      });
+    } catch (error) {
+      const token = (error as HostedOnboardingError).details
+        ?.providerAccessRemovalConfirmationToken;
+      providerAccessRemovalConfirmationToken =
+        typeof token === "string" ? token : null;
+    }
+    expect(providerAccessRemovalConfirmationToken).toEqual(expect.any(String));
+
     await expect(deleteHostedAccountData({
       memberId: "member_123",
       prisma,
-      providerAccessRemovalConfirmed: true,
+      providerAccessRemovalConfirmationToken,
       request: new Request("https://join.example.test/settings"),
     })).resolves.toMatchObject({ memberId: "member_123" });
     expect(deleteCalls).toContainEqual({
@@ -3698,15 +3837,84 @@ describe("deleteHostedAccountData", () => {
       onTransaction: () => undefined,
     });
 
+    let providerAccessRemovalConfirmationToken: string | null = null;
+    try {
+      await deleteHostedAccountData({
+        memberId: "member_123",
+        prisma,
+        request: new Request("https://join.example.test/settings"),
+      });
+    } catch (error) {
+      const token = (error as HostedOnboardingError).details
+        ?.providerAccessRemovalConfirmationToken;
+      providerAccessRemovalConfirmationToken =
+        typeof token === "string" ? token : null;
+    }
+
     await expect(deleteHostedAccountData({
       memberId: "member_123",
       prisma,
-      providerAccessRemovalConfirmed: true,
+      providerAccessRemovalConfirmationToken,
       request: new Request("https://join.example.test/settings"),
     })).rejects.toMatchObject({
       code: "ACCOUNT_DELETION_DEVICE_AUTHORIZATION_IN_FLIGHT",
       retryable: true,
     });
+    expect(hostedMemberUpdateCalls).toEqual([]);
+  });
+
+  it("does not delete a newly arrived ambiguous OAuth claim under an older confirmation", async () => {
+    const deleteCalls: HostedAccountDeletionPrismaDeleteCall[] = [];
+    const hostedMemberUpdateCalls: unknown[] = [];
+    const deviceOauthSessions = [{
+      consumedAt: new Date("2026-04-27T00:00:00.000Z"),
+      expiresAt: new Date("2026-04-27T00:15:00.000Z"),
+      provider: "oura",
+      state: "oauth-state-a",
+    }];
+    const prisma = createHostedAccountDeletionPrismaForTest({
+      deleteCalls,
+      deviceOauthSessions,
+      hostedMemberUpdateCalls,
+      onTransaction: () => undefined,
+    });
+
+    let olderConfirmationToken: string | null = null;
+    try {
+      await deleteHostedAccountData({
+        memberId: "member_123",
+        prisma,
+        request: new Request("https://join.example.test/settings"),
+      });
+    } catch (error) {
+      const token = (error as HostedOnboardingError).details
+        ?.providerAccessRemovalConfirmationToken;
+      olderConfirmationToken = typeof token === "string" ? token : null;
+    }
+    expect(olderConfirmationToken).toEqual(expect.any(String));
+
+    deviceOauthSessions.push({
+      consumedAt: new Date("2026-04-27T00:01:00.000Z"),
+      expiresAt: new Date("2026-04-27T00:16:00.000Z"),
+      provider: "whoop",
+      state: "oauth-state-b",
+    });
+
+    await expect(deleteHostedAccountData({
+      memberId: "member_123",
+      prisma,
+      providerAccessRemovalConfirmationToken: olderConfirmationToken,
+      request: new Request("https://join.example.test/settings"),
+    })).rejects.toMatchObject({
+      code: "ACCOUNT_DELETION_DEVICE_AUTHORIZATION_RECOVERY_REQUIRED",
+      details: {
+        providerAccessRemovalConfirmationToken: expect.not.stringMatching(
+          olderConfirmationToken!,
+        ),
+        providerLabels: ["Oura", "WHOOP"],
+      },
+    });
+    expect(deleteCalls).toEqual([]);
     expect(hostedMemberUpdateCalls).toEqual([]);
   });
 
@@ -5022,6 +5230,9 @@ function createHostedAccountDeletionPrismaForTest(input: {
     provider: string;
     providerApplicationRevision?: number | null;
     providerAccountBlindIndex: string;
+    refreshLeaseExpiresAt?: Date | null;
+    refreshLeaseOwner?: string | null;
+    refreshLeaseTokenVersion?: number | null;
     sources?: { sourceProviderSlug: string; status: string }[];
     status?: string;
     tokenVersion?: number;
@@ -5072,6 +5283,9 @@ function createHostedAccountDeletionPrismaForTest(input: {
     provider: string;
     providerApplicationRevision?: number | null;
     providerAccountBlindIndex: string;
+    refreshLeaseExpiresAt?: Date | null;
+    refreshLeaseOwner?: string | null;
+    refreshLeaseTokenVersion?: number | null;
     sources?: { sourceProviderSlug: string; status: string }[];
     status?: string;
     tokenVersion?: number;
@@ -5497,10 +5711,24 @@ function createHostedAccountDeletionPrismaForTest(input: {
 
 function normalizeHostedAccountDeletionDeviceConnectionsForTest<
   T extends { credentialKind?: string },
->(connections: readonly T[]): Array<T & { credentialKind: string }> {
+>(connections: readonly T[]): Array<T & {
+  credentialKind: string;
+  refreshLeaseExpiresAt: Date | null;
+  refreshLeaseOwner: string | null;
+  refreshLeaseTokenVersion: number | null;
+}> {
   return connections.map((connection) => ({
     ...connection,
     credentialKind: connection.credentialKind ?? "none",
+    refreshLeaseExpiresAt: "refreshLeaseExpiresAt" in connection
+      ? (connection.refreshLeaseExpiresAt as Date | null)
+      : null,
+    refreshLeaseOwner: "refreshLeaseOwner" in connection
+      ? (connection.refreshLeaseOwner as string | null)
+      : null,
+    refreshLeaseTokenVersion: "refreshLeaseTokenVersion" in connection
+      ? (connection.refreshLeaseTokenVersion as number | null)
+      : null,
   }));
 }
 
