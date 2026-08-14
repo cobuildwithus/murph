@@ -215,7 +215,7 @@ export const ASSISTANT_SKILLS = [
     slug: 'chronic-illness-support',
     name: 'chronic-illness-support',
     triggerHint:
-      'Use for chronic illness, fluctuating disability, symptom flares, treatment burden, medical invalidation, low-capacity self-management, longitudinal support, care preparation, and caregiver coordination. This skill should reason, recommend, and help the user act—not merely validate or refer.',
+      'Use for chronic illness, persistent or recurring symptoms even without a settled diagnosis, fluctuating disability, symptom flares, treatment burden, medical invalidation, low-capacity self-management, longitudinal support, care preparation, and caregiver coordination. When the member asks what to change or try day to day and personal response determines the answer, load self-management-experiments and recommend one ranked low-burden trial rather than a generic wellness bundle. This skill should reason, recommend, and help the user act—not merely validate or refer.',
   },
   {
     slug: 'chronic-pain-support',
@@ -227,7 +227,7 @@ export const ASSISTANT_SKILLS = [
     slug: 'self-management-experiments',
     name: 'self-management-experiments',
     triggerHint:
-      'Use to design, run, and interpret low-burden personalized experiments involving habits, routines, pacing, activity timing, environment, sleep, coping, communication, or other reversible self-management changes.',
+      'Use to design, run, and interpret low-burden personalized experiments involving habits, routines, pacing, activity timing, environment, sleep, coping, communication, or other reversible self-management changes. The member does not need to say “experiment”: a persistent or recurring symptom question framed as what to change or try day to day is experiment intent when one reversible lever can reduce uncertainty.',
   },
   {
     slug: 'physical-therapy',
