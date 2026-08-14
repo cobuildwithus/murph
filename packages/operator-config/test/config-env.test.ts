@@ -85,12 +85,13 @@ async function withTemporaryProcessEnv(
 
 test('setup env helpers trim values, report missing keys, and surface channel readiness', () => {
   const env: NodeJS.ProcessEnv = {
-    WHOOP_CLIENT_ID: '  whoop-id  ',
+    AGENTMAIL_API_KEY: '  agentmail-key  ',
     TELEGRAM_BOT_TOKEN: '   telegram-bot-token   ',
   }
 
-  assert.equal(readEnvValue(env, ['TELEGRAM_BOT_TOKEN', 'WHOOP_CLIENT_ID']), 'telegram-bot-token')
+  assert.equal(readEnvValue(env, ['TELEGRAM_BOT_TOKEN', 'AGENTMAIL_API_KEY']), 'telegram-bot-token')
   assert.deepEqual(resolveSetupChannelMissingEnv('telegram', env), [])
+  assert.deepEqual(resolveSetupChannelMissingEnv('email', env), [])
   assert.deepEqual(describeSetupChannelStatus('telegram', env, 'darwin'), {
     badge: 'ready',
     detail: 'Bot token is available in the current environment.',

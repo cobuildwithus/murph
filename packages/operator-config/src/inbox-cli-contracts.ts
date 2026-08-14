@@ -6,12 +6,13 @@ import {
 import { normalizeNullableString } from './text/shared.js'
 import { VaultCliError } from './vault-cli-errors.js'
 
-export const inboxSourceValues = ['telegram', 'linq'] as const
+export const inboxSourceValues = ['telegram', 'email', 'linq'] as const
 export const inboxPromotionTargetValues = ['meal', 'document', 'journal', 'experiment-note'] as const
 export const inboxCheckStatusValues = ['pass', 'warn', 'fail'] as const
 
 export const inboxConnectorOptionsSchema = z.object({
   backfillLimit: z.number().int().positive().max(5000).optional(),
+  emailAddress: z.string().min(1).nullable().optional(),
   linqWebhookHost: z.string().min(1).nullable().optional(),
   linqWebhookPath: z.string().min(1).nullable().optional(),
   linqWebhookPort: z.number().int().positive().max(65535).nullable().optional(),
@@ -139,11 +140,21 @@ export const inboxInitResultSchema = z.object({
   rebuiltCaptures: z.number().int().nonnegative(),
 })
 
+export const inboxProvisionedMailboxSchema = z.object({
+  inboxId: z.string().min(1),
+  emailAddress: z.string().min(1),
+  displayName: z.string().min(1).nullable(),
+  clientId: z.string().min(1).nullable(),
+  provider: z.literal('agentmail'),
+})
+
 export const inboxSourceAddResultSchema = z.object({
   vault: pathSchema,
   configPath: pathSchema,
   connector: inboxConnectorConfigSchema,
   connectorCount: z.number().int().nonnegative(),
+  provisionedMailbox: inboxProvisionedMailboxSchema.nullable().optional(),
+  reusedMailbox: inboxProvisionedMailboxSchema.nullable().optional(),
   autoReplyEnabled: z.boolean().optional(),
 })
 
@@ -427,6 +438,7 @@ export type InboxParserToolchainStatus = z.infer<typeof inboxParserToolchainStat
 export type InboxPromotionEntry = z.infer<typeof inboxPromotionEntrySchema>
 export type InboxPromotionStore = z.infer<typeof inboxPromotionStoreSchema>
 export type InboxInitResult = z.infer<typeof inboxInitResultSchema>
+export type InboxProvisionedMailbox = z.infer<typeof inboxProvisionedMailboxSchema>
 export type InboxSourceAddResult = z.infer<typeof inboxSourceAddResultSchema>
 export type InboxSourceRemoveResult = z.infer<typeof inboxSourceRemoveResultSchema>
 export type InboxSourceListResult = z.infer<typeof inboxSourceListResultSchema>
@@ -457,6 +469,8 @@ export function normalizeInboxConnectorAccountId(
   switch (source) {
     case 'telegram':
       return normalized ?? 'bot'
+    case 'email':
+      return normalized
     case 'linq':
       return normalized ?? 'default'
     default: {

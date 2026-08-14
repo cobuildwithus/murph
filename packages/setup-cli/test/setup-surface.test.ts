@@ -24,6 +24,9 @@ import {
 } from '../src/setup-cli.ts'
 import type { SetupCliOptions } from '../src/setup-cli.js'
 import {
+  createSetupAgentmailSelectionResolver,
+} from '../src/setup-agentmail.js'
+import {
   detectSetupProgramName,
   isSetupInvocation,
 } from '../src/setup-services.js'
@@ -68,15 +71,6 @@ async function runJsonCli(args: string[]): Promise<{
       )
     },
   })
-  cli.command('fail-after-cleanup', {
-    args: z.object({}),
-    async run() {
-      throw new VaultCliError(
-        'INBOX_BOOTSTRAP_STRICT_FAILED',
-        'Inbox bootstrap strict readiness checks failed.\n\nRemoved retired local email state and paused affected automations. Retarget them to Telegram or Linq before reactivating them.',
-      )
-    },
-  })
 
   const output: string[] = []
   let exitCode: number | null = null
@@ -118,6 +112,10 @@ async function runSetupCli(args: string[], options: SetupCliOptions): Promise<vo
 test('package surface re-exports the setup entrypoints', () => {
   assert.ok(createSetupCli())
   assert.equal(packageSurface.createSetupCli, createSetupCli)
+  assert.equal(
+    packageSurface.createSetupAgentmailSelectionResolver,
+    createSetupAgentmailSelectionResolver,
+  )
   assert.equal(
     packageSurface.detectSetupProgramName,
     detectSetupProgramName,
@@ -169,21 +167,6 @@ test('setup bridge omits invalid retryable and exitCode context types', async ()
   assert.equal(result.exitCode, 1)
 })
 
-test('structured setup errors retain completed cleanup guidance', async () => {
-  const result = await runJsonCli(['fail-after-cleanup'])
-
-  assert.equal(result.envelope.ok, false)
-  assert.equal(result.envelope.error?.code, 'INBOX_BOOTSTRAP_STRICT_FAILED')
-  assert.match(
-    result.envelope.error?.message ?? '',
-    /Removed retired local email state and paused affected automations/u,
-  )
-  assert.match(
-    result.envelope.error?.message ?? '',
-    /Retarget them to Telegram or Linq/u,
-  )
-})
-
 test('onboard CLI builds setup CTAs from configured channels, updates, wearables, and missing env', async () => {
   const preset = listAssistantCronPresets()[0]
   assert.ok(preset)
@@ -198,12 +181,21 @@ test('onboard CLI builds setup CTAs from configured channels, updates, wearables
             channels: [
               {
                 autoReply: true,
-                channel: 'telegram',
+                channel: 'email',
                 configured: true,
-                connectorId: 'telegram:bot',
-                detail: 'Configured Telegram.',
+                connectorId: 'email:agentmail',
+                detail: 'Configured email.',
                 enabled: true,
-                missingEnv: [],
+                missingEnv: ['AGENTMAIL_API_KEY'],
+              },
+              {
+                autoReply: false,
+                channel: 'telegram',
+                configured: false,
+                connectorId: null,
+                detail: 'Not configured.',
+                enabled: false,
+                missingEnv: ['TELEGRAM_BOT_TOKEN'],
               },
             ],
             scheduledUpdates: [
@@ -236,12 +228,21 @@ test('onboard CLI builds setup CTAs from configured channels, updates, wearables
             channels: [
               {
                 autoReply: true,
-                channel: 'telegram',
+                channel: 'email',
                 configured: true,
-                connectorId: 'telegram:bot',
-                detail: 'Configured Telegram.',
+                connectorId: 'email:agentmail',
+                detail: 'Configured email.',
                 enabled: true,
-                missingEnv: [],
+                missingEnv: ['AGENTMAIL_API_KEY'],
+              },
+              {
+                autoReply: false,
+                channel: 'telegram',
+                configured: false,
+                connectorId: null,
+                detail: 'Not configured.',
+                enabled: false,
+                missingEnv: ['TELEGRAM_BOT_TOKEN'],
               },
             ],
             scheduledUpdates: [
@@ -281,7 +282,9 @@ test('onboard CLI builds setup CTAs from configured channels, updates, wearables
       'murph automation list',
       'murph assistant chat',
       'murph device connect oura --open',
+      'murph export AGENTMAIL_API_KEY=...',
       'murph export OURA_CLIENT_ID=...',
+      'murph export TELEGRAM_BOT_TOKEN=...',
       'murph automation scaffold',
     ],
   )
@@ -325,6 +328,7 @@ test('interactive onboard uses wizard defaults, runtime env hints, and setupHost
         services: {
           async setupHost(input) {
             setupHostCalls.push({
+              allowChannelPrompts: input.allowChannelPrompts,
               assistant: input.assistant,
               channels: input.channels == null ? null : [...input.channels],
               envOverrides: input.envOverrides,
@@ -402,6 +406,7 @@ test('interactive onboard uses wizard defaults, runtime env hints, and setupHost
     ])
     assert.deepEqual(setupHostCalls, [
       {
+        allowChannelPrompts: true,
         assistant: {
           account: null,
           approvalPolicy: null,

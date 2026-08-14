@@ -261,7 +261,7 @@ async function runSetupInvocation(input: {
 
   if (launchAction === 'assistant-run') {
     process.stderr.write(
-      '\nStarting Murph assistant automation. Leave this terminal open while channel auto-reply is active for Telegram or Linq. Press Ctrl+C to stop.\n\n',
+      '\nStarting Murph assistant automation. Leave this terminal open while channel auto-reply is active for Telegram, Linq, and/or email. Press Ctrl+C to stop.\n\n',
     )
     await serveVaultCliWithExistingContext({
       argv: ['assistant', 'run'],

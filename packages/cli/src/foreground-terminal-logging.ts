@@ -275,6 +275,8 @@ function humanizeSource(source: string | null | undefined): string {
       return 'Telegram'
     case 'linq':
       return 'Linq'
+    case 'agentmail':
+      return 'AgentMail'
     default:
       return 'Inbox'
   }

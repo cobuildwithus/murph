@@ -106,10 +106,10 @@ test('setup scheduling helpers respect terminal gating and launch routing', () =
           channels: [
             {
               autoReply: true,
-              channel: 'telegram',
+              channel: 'email',
               configured: true,
-              connectorId: 'telegram:bot',
-              detail: 'Configured Telegram.',
+              connectorId: 'email:agentmail',
+              detail: 'Configured email.',
               enabled: true,
               missingEnv: [],
             },
@@ -322,7 +322,7 @@ test('setup wizard initial channels prefer persisted state and only default when
         version: 1,
         autoReply: [
           { channel: 'telegram', enabledAt: '2026-04-08T00:00:00.000Z', eligibleAfter: null },
-          { channel: 'linq', enabledAt: '2026-04-08T00:00:00.000Z', eligibleAfter: null },
+          { channel: 'email', enabledAt: '2026-04-08T00:00:00.000Z', eligibleAfter: null },
           { channel: 'unknown', enabledAt: '2026-04-08T00:00:00.000Z', eligibleAfter: null },
         ],
         updatedAt: '2026-04-08T00:00:00.000Z',
@@ -332,7 +332,7 @@ test('setup wizard initial channels prefer persisted state and only default when
 
     assert.deepEqual(
       await resolveInitialSetupWizardChannels(vaultRoot, 'darwin'),
-      ['telegram'],
+      ['telegram', 'email'],
     )
 
     await writeFile(

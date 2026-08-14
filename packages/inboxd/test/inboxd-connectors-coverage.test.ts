@@ -15,9 +15,12 @@ import type {
   InboundCapture,
   ParsedEmailMessage,
   PersistedCapture,
+  TelegramPollDriver,
 } from "../src/index.ts";
 import {
   compareInboundCaptures,
+  createAgentmailApiPollDriver,
+  createEmailPollConnector,
   createInboundCaptureFromChatMessage,
   createNormalizedChatPollConnector,
   createTelegramPollConnector,
@@ -363,7 +366,7 @@ test("normalizeParsedEmailMessage builds fallback thread targets, dedupes reply-
     headers: {
       "x-trace-id": "trace-1",
     },
-    html: "<p>Inline <strong>photo</strong> attached</p>",
+    html: null,
     inReplyTo: "<prior@example.test>",
     messageId: null,
     occurredAt: "2026-04-08T11:30:00.000Z",
@@ -378,7 +381,7 @@ test("normalizeParsedEmailMessage builds fallback thread targets, dedupes reply-
       "Reply Desk <reply@example.test>",
     ],
     subject: "  Inbox coverage  ",
-    text: null,
+    text: "Inline photo attached",
     to: [
       "Customer Example <customer@example.test>",
       "assistant+alias@example.test",
@@ -408,7 +411,6 @@ test("normalizeParsedEmailMessage builds fallback thread targets, dedupes reply-
   assert.equal(capture.actor.displayName, "Assistant Alias");
   assert.equal(capture.actor.isSelf, true);
   assert.equal(capture.receivedAt, "2026-04-08T11:31:00.000Z");
-  assert.equal(capture.text, "Inline photo attached");
   assert.equal(capture.attachments[0]?.kind, "image");
   assert.equal(capture.attachments[0]?.externalId, "cid-photo");
   assert.equal(capture.attachments[0]?.byteSize, 3);
@@ -426,9 +428,9 @@ test("normalizeParsedEmailMessage builds fallback thread targets, dedupes reply-
     attachment_count: 1,
     cc_count: 3,
     has_from: true,
-    has_html: true,
     has_in_reply_to: true,
     has_subject: true,
+    has_text: true,
     header_count: 1,
     raw_hash: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
     raw_size: 512,
@@ -479,6 +481,220 @@ test("parsed email thread metadata exposes stable input keys and private reply t
   ]);
   assert.equal(threadTarget?.lastMessageId, "<current@example.test>");
   assert.equal(threadTarget?.subject, "Threaded update");
+});
+
+test("createAgentmailApiPollDriver validates inputs, normalizes empty download URLs, and createEmailPollConnector rejects tiny poll intervals", async () => {
+  assert.throws(
+    () =>
+      createAgentmailApiPollDriver({
+        apiKey: " ",
+        inboxId: "inbox-1",
+        fetchImplementation: async () => {
+          throw new Error("not used");
+        },
+      }),
+    /non-empty API key/u,
+  );
+  assert.throws(
+    () =>
+      createAgentmailApiPollDriver({
+        apiKey: "key",
+        inboxId: " ",
+        fetchImplementation: async () => {
+          throw new Error("not used");
+        },
+      }),
+    /non-empty inbox id/u,
+  );
+  assert.throws(
+    () =>
+      createAgentmailApiPollDriver({
+        apiKey: "key",
+        inboxId: "inbox-1",
+        baseUrl: " ",
+        fetchImplementation: async () => {
+          throw new Error("not used");
+        },
+      }),
+    /non-empty base URL/u,
+  );
+  const requests: Array<{ method: string; url: string; body?: string }> = [];
+  const driver = createAgentmailApiPollDriver({
+    apiKey: "am-key",
+    inboxId: "inbox-1",
+    baseUrl: "https://mail.example.test/v0/",
+    fetchImplementation: async (url, init) => {
+      requests.push({
+        method: init.method,
+        url,
+        body: init.body,
+      });
+
+      if (url.includes("/messages?")) {
+        return {
+          ok: true,
+          status: 200,
+          async json() {
+            return {
+              count: 0,
+              messages: null,
+            };
+          },
+          async text() {
+            return "";
+          },
+          async arrayBuffer() {
+            return new ArrayBuffer(0);
+          },
+        };
+      }
+
+      if (url.endsWith("/attachments/att-empty")) {
+        return {
+          ok: true,
+          status: 200,
+          async json() {
+            return {
+              attachment_id: "att-empty",
+              download_url: "   ",
+            };
+          },
+          async text() {
+            return "";
+          },
+          async arrayBuffer() {
+            return new ArrayBuffer(0);
+          },
+        };
+      }
+
+      return {
+        ok: true,
+        status: 200,
+        async json() {
+          return {
+            thread_id: "thread-1",
+          };
+        },
+        async text() {
+          return "";
+        },
+        async arrayBuffer() {
+          return new ArrayBuffer(0);
+        },
+      };
+    },
+  });
+
+  assert.deepEqual(await driver.listUnreadMessages({ limit: 0 }), []);
+  assert.equal(
+    await driver.downloadAttachment({
+      attachmentId: "att-empty",
+      messageId: "msg-1",
+    }),
+    null,
+  );
+  assert.deepEqual(
+    await driver.getThread?.({
+      threadId: "thread-1",
+    }),
+    {
+      thread_id: "thread-1",
+    },
+  );
+  assert.equal(requests[0]?.url.includes("limit=1"), true);
+  assert.equal(requests.some((request) => request.url.endsWith("/threads/thread-1")), true);
+
+  assert.throws(
+    () =>
+      createEmailPollConnector({
+        driver: {
+          inboxId: "inbox-1",
+          async listUnreadMessages() {
+            return [];
+          },
+          async markProcessed() {},
+          async downloadAttachment() {
+            return null;
+          },
+        },
+        pollIntervalMs: 249,
+      }),
+    /at least 250ms/u,
+  );
+});
+
+test("createEmailPollConnector watch falls back to the driver inbox account, reuses unread summaries, and stops after aborting mid-batch", async () => {
+  const processedMessageIds: string[] = [];
+  const emitted: string[] = [];
+  const controller = new AbortController();
+  let unreadCalls = 0;
+
+  const connector = createEmailPollConnector({
+    accountId: null,
+    backfillLimit: 2,
+    driver: {
+      inboxId: "inbox-coverage",
+      async listUnreadMessages({ limit } = {}) {
+        unreadCalls += 1;
+        assert.equal(limit, 2);
+
+        return [
+          {
+            inbox_id: "inbox-coverage",
+            thread_id: "thread-1",
+            message_id: "msg-watch-1",
+            timestamp: "2026-04-08T12:00:00.000Z",
+            from: "Alice Example <alice@example.test>",
+            to: ["murph@example.test"],
+            extracted_text: "summary body",
+          },
+          {
+            inbox_id: "inbox-coverage",
+            thread_id: "thread-1",
+            message_id: "msg-watch-2",
+            timestamp: "2026-04-08T12:01:00.000Z",
+            from: "Alice Example <alice@example.test>",
+            to: ["murph@example.test"],
+            extracted_text: "should stay unread",
+          },
+        ];
+      },
+      async markProcessed({ messageId }) {
+        processedMessageIds.push(messageId);
+      },
+      async downloadAttachment() {
+        return null;
+      },
+    },
+    pollIntervalMs: 250,
+  });
+
+  assert.equal(connector.id, "email:inbox-coverage");
+  assert.equal(connector.accountId, "inbox-coverage");
+
+  await connector.watch(
+    null,
+    async (capture) => {
+      emitted.push(capture.externalId);
+      assert.equal(capture.accountId, "inbox-coverage");
+      assert.equal(capture.text, "summary body");
+      controller.abort();
+
+      return {
+        captureId: "cap-email-watch-1",
+        eventId: "evt-email-watch-1",
+        sourceDirectory: "raw/inbox/email/msg-watch-1",
+        createdAt: capture.occurredAt,
+        deduped: false,
+      };
+    },
+    controller.signal,
+  );
+
+  assert.equal(unreadCalls, 1);
+  assert.deepEqual(emitted, ["email:msg-watch-1"]);
+  assert.deepEqual(processedMessageIds, ["msg-watch-1"]);
 });
 
 test("createTelegramPollConnector fails closed when an active webhook exists but deleteWebhook is unavailable", async () => {

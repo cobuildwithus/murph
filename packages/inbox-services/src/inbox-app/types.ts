@@ -13,6 +13,7 @@ import type { ConnectorRestartPolicy } from '@murphai/inboxd/runtime'
 import type { EventSource, MealNutrition } from '@murphai/contracts'
 import type { RuntimePaths } from '@murphai/runtime-state/node'
 import type * as z from '@murphai/contracts/zod-runtime'
+import type { AgentmailApiClient } from '@murphai/operator-config/agentmail-runtime'
 import { inboxPromotionStoreSchema } from '@murphai/operator-config/inbox-cli-contracts'
 import type {
   QueryEntityFamily,
@@ -40,6 +41,7 @@ import type {
   InboxPromoteMealResult,
   InboxPreserveDocumentAttachmentsResult,
   InboxPromotionEntry,
+  InboxProvisionedMailbox,
   InboxRequeueResult,
   InboxRunResult,
   InboxRuntimeConfig,
@@ -51,6 +53,7 @@ import type {
   InboxSourceRemoveResult,
 } from '@murphai/operator-config/inbox-cli-contracts'
 
+export type { AgentmailApiClient } from '@murphai/operator-config/agentmail-runtime'
 export type {
   InboxConnectorConfig,
   InboxRuntimeConfig,
@@ -172,6 +175,31 @@ export interface TelegramDriver {
   getWebhookInfo?(signal?: AbortSignal): Promise<{ url?: string } | null>
 }
 
+export interface EmailDriver {
+  inboxId: string
+  listUnreadMessages(input?: {
+    limit?: number
+    signal?: AbortSignal
+  }): Promise<unknown[]>
+  getMessage?(input: {
+    messageId: string
+    signal?: AbortSignal
+  }): Promise<unknown>
+  markProcessed(input: {
+    messageId: string
+    signal?: AbortSignal
+  }): Promise<void>
+  downloadAttachment(input: {
+    attachmentId: string
+    messageId: string
+    signal: AbortSignal
+  }): Promise<Uint8Array | null>
+  getThread?(input: {
+    threadId: string
+    signal?: AbortSignal
+  }): Promise<unknown>
+}
+
 export interface InboxRuntimeModule {
   ensureInboxVault(vaultRoot: string): Promise<void>
   openInboxRuntime(input: { vaultRoot: string }): Promise<RuntimeStore>
@@ -187,6 +215,14 @@ export interface InboxRuntimeModule {
     downloadAttachments?: boolean
     transportMode?: 'take-over-webhook' | 'require-no-webhook'
   }): PollConnector
+  createEmailPollConnector(input: {
+    driver: EmailDriver
+    id?: string
+    accountId?: string | null
+    accountAddress?: string | null
+    backfillLimit?: number
+    pollIntervalMs?: number
+  }): PollConnector
   createTelegramBotApiPollDriver(input: {
     token: string
     allowedUpdates?: string[] | null
@@ -195,6 +231,11 @@ export interface InboxRuntimeModule {
     apiBaseUrl?: string
     fileBaseUrl?: string
   }): TelegramDriver
+  createAgentmailApiPollDriver(input: {
+    apiKey: string
+    inboxId: string
+    baseUrl?: string
+  }): EmailDriver
   rebuildRuntimeFromVault(input: {
     enqueueParserJobs: boolean
     vaultRoot: string
@@ -466,6 +507,12 @@ export interface InboxServicesDependencies {
   loadParsersModule?: () => Promise<ParsersRuntimeModule>
   loadQueryModule?: () => Promise<QueryRuntimeModule>
   loadTelegramDriver?: (config: InboxConnectorConfig) => Promise<TelegramDriver>
+  loadEmailDriver?: (config: InboxConnectorConfig) => Promise<EmailDriver>
+  createAgentmailClient?: (input: {
+    apiKey: string
+    baseUrl?: string
+    env: NodeJS.ProcessEnv
+  }) => AgentmailApiClient
   enableAssistantAutoReplyChannel?: (
     vault: string,
     channel: InboxConnectorConfig['source'],
@@ -477,8 +524,14 @@ export interface SourceAddInput extends CommandContext {
   source: InboxConnectorConfig['source']
   id: string
   account?: string | null
+  address?: string | null
   includeOwn?: boolean
   backfillLimit?: number
+  provision?: boolean
+  emailDisplayName?: string | null
+  emailUsername?: string | null
+  emailDomain?: string | null
+  emailClientId?: string | null
   linqWebhookHost?: string | null
   linqWebhookPath?: string | null
   linqWebhookPort?: number
@@ -541,6 +594,7 @@ export interface SetupInput extends CommandContext {
 
 export interface BootstrapInput extends SetupInput {
   rebuild?: boolean
+  strict?: boolean
 }
 
 export interface ParseInput extends CommandContext {
@@ -644,6 +698,19 @@ export interface InboxServices {
   ): Promise<InboxPromoteExperimentNoteResult>
 }
 
+export interface RecoveredProvisionedMailbox {
+  accountId: string
+  emailAddress: string | null
+  mailbox: InboxProvisionedMailbox | null
+}
+
+export interface ProvisionedMailboxResolution {
+  accountId: string
+  emailAddress: string | null
+  provisionedMailbox: InboxProvisionedMailbox | null
+  reusedMailbox: InboxProvisionedMailbox | null
+}
+
 export interface InboxAppEnvironment {
   clock: () => Date
   getPid: () => number
@@ -652,6 +719,7 @@ export interface InboxAppEnvironment {
   killProcess: (pid: number, signal?: NodeJS.Signals | number) => void
   sleep: (milliseconds: number) => Promise<void>
   getEnvironment: () => NodeJS.ProcessEnv
+  usesInjectedEmailDriver: boolean
   usesInjectedTelegramDriver: boolean
   loadCore: () => Promise<CoreRuntimeModule>
   loadImporters: () => Promise<ImportersFactoryRuntimeModule>
@@ -660,9 +728,23 @@ export interface InboxAppEnvironment {
   loadQuery: () => Promise<QueryRuntimeModule>
   requireParsers: (operation: string) => Promise<ParsersRuntimeModule>
   loadConfiguredTelegramDriver: (config: InboxConnectorConfig) => Promise<TelegramDriver>
+  loadConfiguredEmailDriver: (config: InboxConnectorConfig) => Promise<EmailDriver>
+  createConfiguredAgentmailClient: (apiKey?: string | null) => AgentmailApiClient
   enableAssistantAutoReplyChannel: (
     vault: string,
     channel: InboxConnectorConfig['source'],
   ) => Promise<boolean>
+  provisionOrRecoverAgentmailInbox: (input: {
+    displayName?: string | null
+    username?: string | null
+    domain?: string | null
+    clientId?: string | null
+    preferredAccountId?: string | null
+    preferredEmailAddress?: string | null
+  }) => Promise<ProvisionedMailboxResolution>
+  tryResolveAgentmailInboxAddress: (input: {
+    accountId: string
+    emailAddress: string | null
+  }) => Promise<string | null>
   journalPromotionEnabled: boolean
 }

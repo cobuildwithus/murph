@@ -1,3 +1,6 @@
+import type {
+  AgentmailFetch,
+} from '@murphai/operator-config/agentmail-runtime'
 import type { LinqFetch } from '@murphai/operator-config/linq-runtime'
 import type {
   AssistantResponseCard,
@@ -46,6 +49,11 @@ export interface TelegramRuntimeDependencies {
   ) => Promise<Uint8Array>
   maxDeliveryAttempts?: number
   signal?: AbortSignal
+}
+
+export interface EmailRuntimeDependencies {
+  env?: NodeJS.ProcessEnv
+  fetchImplementation?: AgentmailFetch
 }
 
 export interface AssistantEmailDeliverySummary {
@@ -267,6 +275,7 @@ export interface AssistantChannelAdapter {
     deliveryKind?: AssistantBindingDeliveryKind | null
     deliveryTarget?: string | null
   }) => AssistantBindingDelivery | null
+  isReadyForSetup: (env: NodeJS.ProcessEnv) => boolean
   startTypingIndicator?: (
     input: {
       bindingDelivery: AssistantBindingDelivery | null
@@ -319,6 +328,7 @@ export interface AssistantChannelAdapterSpec {
   canAutoReply: AssistantChannelAdapter['canAutoReply']
   channel: AssistantChannelName
   inferBindingDelivery?: AssistantChannelAdapter['inferBindingDelivery']
+  isReadyForSetup: AssistantChannelAdapter['isReadyForSetup']
   startTypingIndicator?: (input: {
     candidate: AssistantDeliveryCandidate
     dependencies: AssistantChannelDependencies

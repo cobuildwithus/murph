@@ -64,6 +64,35 @@ export {
   createNormalizedChatPollConnector,
 } from "./connectors/chat/poll.ts";
 export {
+  createAgentmailApiPollDriver,
+  createEmailPollConnector,
+} from "./connectors/email/connector.ts";
+export type {
+  AgentmailFetch,
+  AgentmailPollDriver,
+  CreateAgentmailApiPollDriverInput,
+  EmailConnectorOptions,
+} from "./connectors/email/connector.ts";
+export {
+  buildAgentmailMessageText,
+  buildEmailMessageText,
+  inferAttachmentKind,
+  inferDirectEmailThread,
+  inferDirectEmailThreadFromParticipants,
+  normalizeAgentmailMessage,
+  resolveAgentmailAddress,
+  resolveAgentmailDisplayName,
+  resolveEmailAddress,
+  resolveEmailDisplayName,
+  toAgentmailChatMessage,
+} from "./connectors/email/normalize.ts";
+export type {
+  AgentmailAttachmentDownloadDriver,
+  BuildEmailMessageTextInput,
+  InferDirectEmailThreadParticipantsInput,
+  NormalizeAgentmailMessageInput,
+} from "./connectors/email/normalize.ts";
+export {
   normalizeParsedEmailMessage,
   toParsedEmailChatMessage,
 } from "./connectors/email/normalize-parsed.ts";
@@ -80,6 +109,13 @@ export type {
   ParsedEmailMessage,
   RawEmailHeaderValue,
 } from "./connectors/email/parsed.ts";
+export type {
+  AgentmailAttachmentDownload,
+  AgentmailListMessagesResponse,
+  AgentmailMessageAttachment,
+  AgentmailMessageLike,
+  AgentmailThreadLike,
+} from "./connectors/email/types.ts";
 export {
   normalizeHostedLinqConversationMessage,
   normalizeLinqWebhookEvent,

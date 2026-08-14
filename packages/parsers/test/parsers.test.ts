@@ -3814,9 +3814,9 @@ test("daemon with parsers can keep healthy connectors running after one connecto
     registry: createParserRegistry([]),
     connectors: [
         {
-          id: "healthy-linq",
-          source: "linq",
-        accountId: "primary",
+          id: "healthy-email",
+          source: "email",
+        accountId: "agentmail",
         kind: "poll" as const,
           capabilities: {
             attachments: true,

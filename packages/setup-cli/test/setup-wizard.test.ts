@@ -127,8 +127,13 @@ test('setup wizard scheduled updates keep the starter bundle unless explicitly o
 })
 
 test('setup wizard selection toggles keep channels and wearables in canonical order', () => {
-  assert.deepEqual(toggleSetupWizardChannel([], 'telegram'), ['telegram'])
-  assert.deepEqual(toggleSetupWizardChannel(['telegram'], 'telegram'), [])
+  assert.deepEqual(toggleSetupWizardChannel(['email'], 'telegram'), [
+    'telegram',
+    'email',
+  ])
+  assert.deepEqual(toggleSetupWizardChannel(['telegram', 'email'], 'telegram'), [
+    'email',
+  ])
   assert.deepEqual(toggleSetupWizardWearable(['whoop'], 'garmin'), [
     'garmin',
     'whoop',
@@ -302,6 +307,7 @@ test.sequential('setup wizard wrapper rejects when Ink exits with an error after
 
 test('setup wizard extracted option and public-url helpers keep labels and trimming stable', () => {
   assert.equal(formatSetupChannel('telegram'), 'Telegram')
+  assert.equal(formatSetupChannel('email'), 'Email')
   assert.equal(formatSetupWearable('garmin'), 'Garmin')
   assert.equal(formatSetupWearable('oura'), 'Oura')
   assert.equal(formatSetupScheduledUpdate('environment-health-watch'), 'Environment health watch')
@@ -1001,7 +1007,7 @@ test.sequential('setup wizard accepts wrapped selection navigation plus space-ba
     await writeInput('\u001B[B')
     await writeInput('\u001B[B')
     await writeInput('\u001B[B')
-    await waitForRenderedText(flush, readOutput, /› □ Telegram/u)
+    await waitForRenderedText(flush, readOutput, /› □ Email/u)
     await writeInput(' ')
     await writeInput('\r')
     await waitForRenderedText(flush, readOutput, /Health data/u)

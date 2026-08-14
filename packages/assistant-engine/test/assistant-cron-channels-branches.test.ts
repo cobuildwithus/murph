@@ -2,11 +2,18 @@ import { mkdir, readFile, rm, unlink, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
+import { resolveSystemTimeZone } from '@murphai/contracts'
+import type {
+  AgentmailApiClient,
+} from '@murphai/operator-config/agentmail-runtime'
 import type { InboxShowResult } from '@murphai/operator-config/inbox-cli-contracts'
 import {
+  assistantCronJobSchema,
+  type AssistantCronJob,
   type AssistantCronPresetVariable,
   type AssistantCronSchedule,
 } from '@murphai/operator-config/assistant-cli-contracts'
+import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 type MockAutomationRecord = {
@@ -36,6 +43,7 @@ type MockAutomationRecord = {
 }
 
 const runtimeMocks = vi.hoisted(() => ({
+  createAgentmailApiClient: vi.fn(),
   sendLinqChatMessage: vi.fn(),
   startLinqChatTypingIndicator: vi.fn(),
   stopLinqChatTypingIndicator: vi.fn(),
@@ -56,6 +64,15 @@ const cronMocks = vi.hoisted(() => ({
   showCanonicalAutomation: vi.fn(),
   upsertAutomation: vi.fn(),
 }))
+
+vi.mock('@murphai/operator-config/agentmail-runtime', async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import('@murphai/operator-config/agentmail-runtime')>()
+  return {
+    ...actual,
+    createAgentmailApiClient: runtimeMocks.createAgentmailApiClient,
+  }
+})
 
 vi.mock('@murphai/operator-config/linq-runtime', async (importOriginal) => {
   const actual =
@@ -117,6 +134,7 @@ vi.mock('@murphai/operator-config/operator-config', () => ({
 import { ASSISTANT_CHANNEL_ADAPTERS } from '../src/assistant/channels/descriptors.ts'
 import { createAssistantBindingDelivery } from '../src/assistant/channels/helpers.ts'
 import {
+  sendEmailMessage,
   sendLinqMessage,
   sendTelegramMessage,
   startLinqTypingIndicator,
@@ -124,6 +142,7 @@ import {
 } from '../src/assistant/channels/runtime.ts'
 import { withAssistantCronWriteLock } from '../src/assistant/cron/locking.ts'
 import {
+  getAssistantCronPresetDefinition,
   renderAssistantCronPreset,
 } from '../src/assistant/cron/presets.ts'
 import {
@@ -137,9 +156,12 @@ import {
 } from '../src/assistant/cron/runtime-state.ts'
 import {
   appendAssistantCronRun,
+  readAssistantCronStore,
+  writeAssistantCronStore,
 } from '../src/assistant/cron/store.ts'
 import {
   addAssistantCronJob,
+  getAssistantCronJob,
   getAssistantCronJobTarget,
   getAssistantCronPreset,
   installAssistantCronPreset,
@@ -159,6 +181,7 @@ beforeEach(() => {
   vi.restoreAllMocks()
   vi.unstubAllGlobals()
 
+  runtimeMocks.createAgentmailApiClient.mockReset()
   runtimeMocks.sendLinqChatMessage.mockReset()
   runtimeMocks.startLinqChatTypingIndicator.mockReset()
   runtimeMocks.stopLinqChatTypingIndicator.mockReset()
@@ -485,7 +508,7 @@ describe('assistant channel descriptors and runtime edges', () => {
     })
   })
 
-  it('covers runtime fallbacks and error shaping for telegram and linq', async () => {
+  it('covers runtime fallbacks and error shaping for telegram, linq, and email', async () => {
     await expect(
       sendLinqMessage(
         {
@@ -513,6 +536,61 @@ describe('assistant channel descriptors and runtime edges', () => {
       ),
     ).rejects.toMatchObject({
       code: 'ASSISTANT_CHANNEL_TARGET_REQUIRED',
+    })
+
+    await expect(
+      sendEmailMessage(
+        {
+          identityId: 'identity-1',
+          message: 'hello',
+          target: '   ',
+          targetKind: 'explicit',
+        },
+        {
+          env: {
+            AGENTMAIL_API_KEY: 'agentmail-key',
+          },
+        },
+      ),
+    ).rejects.toMatchObject({
+      code: 'ASSISTANT_CHANNEL_TARGET_REQUIRED',
+    })
+
+    const threadClient = createAgentmailClient({
+      getThread: vi.fn().mockResolvedValue({
+        inbox_id: 'identity-1',
+        last_message_id: ' parent-1 ',
+        thread_id: 'thread-1',
+      }),
+      replyToMessage: vi.fn().mockResolvedValue({
+        message_id: ' reply-1 ',
+        thread_id: ' thread-1 ',
+      }),
+    })
+    runtimeMocks.createAgentmailApiClient.mockReturnValueOnce(threadClient)
+    await expect(
+      sendEmailMessage(
+        {
+          identityId: 'identity-1',
+          message: 'reply',
+          target: 'thread-1',
+          targetKind: 'thread',
+        },
+        {
+          env: {
+            AGENTMAIL_API_KEY: 'agentmail-key',
+          },
+        },
+      ),
+    ).resolves.toEqual({
+      providerMessageId: 'reply-1',
+      providerThreadId: 'thread-1',
+    })
+    expect(threadClient.replyToMessage).toHaveBeenCalledWith({
+      inboxId: 'identity-1',
+      messageId: 'parent-1',
+      replyAll: true,
+      text: 'reply',
     })
 
     const malformedTargetFetch = createQueuedFetch([])
@@ -929,8 +1007,8 @@ describe('assistant cron helpers and wrappers', () => {
       addAssistantCronJob({
         channel: 'email',
         deliveryTarget: 'team@example.com',
-        name: 'unsupported-local-email',
-        prompt: 'email route is unavailable locally',
+        name: 'email-without-identity',
+        prompt: 'email route uses the hosted sender',
         schedule: {
           expression: '0 9 * * *',
           kind: 'cron',
@@ -938,8 +1016,7 @@ describe('assistant cron helpers and wrappers', () => {
         vault: vaultRoot,
       }),
     ).rejects.toMatchObject({
-      code: 'ASSISTANT_CRON_DELIVERY_REQUIRED',
-      message: expect.stringMatching(/local email automation delivery is not supported/i),
+      code: 'ASSISTANT_EMAIL_IDENTITY_REQUIRED',
     })
 
     const canonicalRecords = getVaultAutomationStore(vaultRoot)
@@ -1104,6 +1181,79 @@ async function createRuntimeContext(prefix: string) {
   const context = await createTempVaultContext(prefix)
   tempRoots.push(context.parentRoot)
   return context
+}
+
+function createAgentmailClient(
+  overrides: Partial<
+    Pick<AgentmailApiClient, 'getThread' | 'replyToMessage' | 'sendMessage'>
+  > = {},
+): AgentmailApiClient {
+  const listInboxes: AgentmailApiClient['listInboxes'] = async () => ({
+    count: 0,
+    inboxes: [],
+  })
+  const getInbox: AgentmailApiClient['getInbox'] = async () => ({
+    email: 'sender@example.com',
+    inbox_id: 'identity-1',
+  })
+  const createInbox: AgentmailApiClient['createInbox'] = async () => ({
+    email: 'sender@example.com',
+    inbox_id: 'identity-1',
+  })
+  const sendMessage =
+    overrides.sendMessage ??
+    (async () => ({
+      message_id: 'message-id',
+      thread_id: 'thread-id',
+    }))
+  const replyToMessage =
+    overrides.replyToMessage ??
+    (async () => ({
+      message_id: 'reply-id',
+      thread_id: 'thread-id',
+    }))
+  const getThread =
+    overrides.getThread ??
+    (async () => ({
+      inbox_id: 'identity-1',
+      thread_id: 'thread-id',
+    }))
+  const listMessages: AgentmailApiClient['listMessages'] = async () => ({
+    count: 0,
+    messages: [],
+  })
+  const getMessage: AgentmailApiClient['getMessage'] = async () => ({
+    inbox_id: 'identity-1',
+    message_id: 'message-id',
+    thread_id: 'thread-id',
+  })
+  const updateMessage: AgentmailApiClient['updateMessage'] = async () => ({
+    inbox_id: 'identity-1',
+    message_id: 'message-id',
+    thread_id: 'thread-id',
+  })
+  const getAttachment: AgentmailApiClient['getAttachment'] = async () => ({
+    attachment_id: 'attachment-1',
+    download_url: 'https://agentmail.test/file',
+  })
+  const downloadUrl: AgentmailApiClient['downloadUrl'] = async () =>
+    new Uint8Array()
+
+  return {
+    apiKey: 'agentmail-key',
+    baseUrl: 'https://agentmail.test',
+    createInbox,
+    downloadUrl,
+    getAttachment,
+    getInbox,
+    getMessage,
+    getThread,
+    listInboxes,
+    listMessages,
+    replyToMessage,
+    sendMessage,
+    updateMessage,
+  }
 }
 
 function createTelegramResponse(

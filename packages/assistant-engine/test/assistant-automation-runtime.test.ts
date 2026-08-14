@@ -86,7 +86,6 @@ const runLoopMocks = vi.hoisted(() => ({
   resolveAssistantStatePaths: vi.fn(),
   saveAssistantAutomationState: vi.fn(),
   scanAssistantAutomationOnce: vi.fn(),
-  updateAssistantAutomationState: vi.fn(),
   warnAssistantBestEffortFailure: vi.fn(),
 }))
 
@@ -236,7 +235,6 @@ vi.mock('../src/assistant/store.ts', () => ({
   resolveAssistantSession: replyMocks.resolveAssistantSession,
   resolveAssistantStatePaths: runLoopMocks.resolveAssistantStatePaths,
   saveAssistantAutomationState: runLoopMocks.saveAssistantAutomationState,
-  updateAssistantAutomationState: runLoopMocks.updateAssistantAutomationState,
 }))
 
 vi.mock('../src/assistant/automation/runtime-lock.ts', () => ({
@@ -1139,14 +1137,6 @@ beforeEach(() => {
   runLoopMocks.saveAssistantAutomationState
     .mockReset()
     .mockImplementation(async (_vault: string, next: AssistantAutomationState) => next)
-  runLoopMocks.updateAssistantAutomationState
-    .mockReset()
-    .mockImplementation(async (
-      _vault: string,
-      update: (
-        state: AssistantAutomationState,
-      ) => AssistantAutomationState | Promise<AssistantAutomationState>,
-    ) => update(await runLoopMocks.readAssistantAutomationState()))
   runLoopMocks.scanAssistantAutomationOnce.mockReset().mockResolvedValue({
     currentTurnDeliveryIntentIds: [],
     routing: {
@@ -6899,96 +6889,6 @@ describe('assistant auto-reply runtime', () => {
         }),
       }),
     )
-  })
-
-  it('removes retired email auto-reply state before a direct local scan', async () => {
-    const runLoop = await vi.importActual<
-      typeof import('../src/assistant/automation/run-loop.ts')
-    >('../src/assistant/automation/run-loop.ts')
-    const onProviderRequestStarted = vi.fn()
-    runLoopMocks.readAssistantAutomationState.mockResolvedValue(
-      createAutomationState({
-        autoReply: createAutoReplyEntries(['email', 'telegram', 'custom']),
-      }),
-    )
-    runLoopMocks.scanAssistantAutomationOnce.mockResolvedValueOnce({
-      currentTurnDeliveryIntentIds: [],
-      routing: {
-        considered: 0,
-        failed: 0,
-        nextWakeAt: null,
-        noAction: 0,
-        routed: 0,
-        skipped: 0,
-      },
-      replies: {
-        considered: 0,
-        failed: 0,
-        nextWakeAt: null,
-        replied: 0,
-        skipped: 0,
-      },
-    })
-
-    await runLoop.runAssistantAutomationPass({
-      onProviderRequestStarted,
-      requestId: 'request-local-retired-email',
-      vault: '/tmp/assistant-automation-vault',
-    })
-
-    expect(runLoopMocks.updateAssistantAutomationState).toHaveBeenCalledOnce()
-    expect(runLoopMocks.scanAssistantAutomationOnce).toHaveBeenCalledWith(
-      expect.objectContaining({
-        state: expect.objectContaining({
-          autoReply: expect.arrayContaining([
-            expect.objectContaining({ channel: 'custom' }),
-            expect.objectContaining({ channel: 'telegram' }),
-          ]),
-        }),
-      }),
-    )
-    const scanState = runLoopMocks.scanAssistantAutomationOnce.mock.calls[0]?.[0]
-      ?.state as AssistantAutomationState
-    expect(scanState.autoReply.map((entry) => entry.channel).sort()).toEqual([
-      'custom',
-      'telegram',
-    ])
-    expect(
-      runLoopMocks.updateAssistantAutomationState.mock.invocationCallOrder[0],
-    ).toBeLessThan(
-      runLoopMocks.scanAssistantAutomationOnce.mock.invocationCallOrder[0]!,
-    )
-    expect(onProviderRequestStarted).not.toHaveBeenCalled()
-  })
-
-  it('preserves hosted email auto-reply state', async () => {
-    const runLoop = await vi.importActual<
-      typeof import('../src/assistant/automation/run-loop.ts')
-    >('../src/assistant/automation/run-loop.ts')
-    runLoopMocks.readAssistantAutomationState.mockResolvedValue(
-      createAutomationState({
-        autoReply: createAutoReplyEntries(['email', 'telegram']),
-      }),
-    )
-
-    await runLoop.runAssistantAutomationPass({
-      executionContext: {
-        hosted: {
-          memberId: 'member-1',
-          userEnvKeys: [],
-        },
-      },
-      requestId: 'request-hosted-email-preserved',
-      vault: '/tmp/assistant-automation-vault',
-    })
-
-    expect(runLoopMocks.updateAssistantAutomationState).not.toHaveBeenCalled()
-    const scanState = runLoopMocks.scanAssistantAutomationOnce.mock.calls[0]?.[0]
-      ?.state as AssistantAutomationState
-    expect(scanState.autoReply.map((entry) => entry.channel).sort()).toEqual([
-      'email',
-      'telegram',
-    ])
   })
 
   it('refreshes assistant input before the normal scanner', async () => {

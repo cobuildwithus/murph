@@ -703,39 +703,6 @@ describe('applyMurphManagedAutomations', () => {
     )
   })
 
-  it('retains generic email fallback for hosted managed automation routes', async () => {
-    managedAutomationMocks.applyAssistantSelfDeliveryTargetDefaults.mockResolvedValue({
-      channel: 'email',
-      deliveryTarget: 'hosted@example.test',
-      identityId: null,
-      participantId: null,
-      threadId: null,
-    })
-
-    const result = await applyMurphManagedAutomations({
-      now: new Date('2026-06-09T12:00:00.000Z'),
-      operatorHomeRoot: '/tmp/hosted-operator-home',
-      routeValidationProfile: 'hosted',
-      vaultRoot,
-    })
-
-    expect(result).toEqual({
-      created: 5,
-      skipped: 0,
-      updated: 0,
-    })
-    expect(
-      managedAutomationMocks.applyAssistantSelfDeliveryTargetDefaults,
-    ).toHaveBeenCalledWith(
-      expect.any(Object),
-      {
-        allowSingleSavedTargetFallback: true,
-        includeEmailInSingleSavedTargetFallback: true,
-      },
-      '/tmp/hosted-operator-home',
-    )
-  })
-
   it('reactivates a future progress milestone after an experiment pauses then resumes', async () => {
     const supportSeriesTag =
       'system:support-series:experiment-lifecycle:exp_RESUMED'
@@ -2821,15 +2788,6 @@ describe('applyMurphManagedAutomations', () => {
           threadId: null,
         },
       }),
-    )
-    expect(
-      managedAutomationMocks.applyAssistantSelfDeliveryTargetDefaults,
-    ).toHaveBeenCalledWith(
-      expect.any(Object),
-      {
-        allowSingleSavedTargetFallback: true,
-      },
-      undefined,
     )
   })
 

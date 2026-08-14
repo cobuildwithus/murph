@@ -12,6 +12,7 @@ export {
   listAssistantChannelNames,
   normalizeAssistantDeliverySubject,
   resolveDeliveryCandidates,
+  sendEmailMessage,
   sendLinqMessage,
   sendTelegramMessage,
   sendTelegramVoiceMemoMessage,

@@ -182,7 +182,7 @@ describe('assistant cron mutation helpers', () => {
       }),
     ).rejects.toMatchObject({
       code: 'ASSISTANT_CRON_DELIVERY_REQUIRED',
-      message: expect.stringContaining('Local email automation delivery is not supported'),
+      message: expect.stringContaining('Email assistant cron jobs require an explicit delivery target'),
     })
     await expect(
       setResolvedLocalAssistantCronJobEnabled({
@@ -308,7 +308,7 @@ describe('assistant cron mutation helpers', () => {
       }),
     ).rejects.toMatchObject({
       code: 'ASSISTANT_CRON_DELIVERY_REQUIRED',
-      message: expect.stringContaining('Local email automation delivery is not supported'),
+      message: expect.stringContaining('Email assistant cron jobs require an explicit delivery target'),
     })
     expect(cronMutationMocks.upsertAutomation).not.toHaveBeenCalled()
 

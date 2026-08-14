@@ -1,5 +1,6 @@
 import { SETUP_RUNTIME_ENV_NOTICE } from '@murphai/operator-config/setup-runtime-env'
 import { resolveTelegramBotToken } from '@murphai/operator-config/telegram-runtime'
+import { resolveAgentmailApiKey } from '@murphai/operator-config/agentmail-runtime'
 import type {
   InboxConnectorConfig,
   InboxDoctorCheck,
@@ -16,6 +17,8 @@ import {
 } from '../inbox-services/shared.js'
 
 type DoctorCheckResult = InboxDoctorCheck | InboxDoctorCheck[]
+type DoctorSource = InboxConnectorConfig['source']
+type SupportedDoctorSource = 'telegram' | 'email'
 
 export interface DoctorCheckRunner {
   <TResult>(
@@ -28,15 +31,22 @@ export interface DoctorCheckRunner {
   ): Promise<TResult | null>
 }
 
-export async function runTelegramDoctorChecks(
+export interface DoctorStrategyDeps {
+  env: InboxAppEnvironment
+  runDoctorCheck: DoctorCheckRunner
+}
+
+export type DoctorStrategy = (
   context: DoctorContext,
   connector: InboxConnectorConfig,
-  input: {
-    env: InboxAppEnvironment
-    runDoctorCheck: DoctorCheckRunner
-  },
-): Promise<void> {
-  const { env, runDoctorCheck } = input
+  deps: DoctorStrategyDeps,
+) => Promise<void>
+
+const runTelegramDoctorChecks: DoctorStrategy = async (
+  context,
+  connector,
+  { env, runDoctorCheck },
+) => {
   context.checks.push(
     passCheck('platform', 'Telegram long polling is platform-agnostic.'),
   )
@@ -133,4 +143,105 @@ export async function runTelegramDoctorChecks(
         { error: errorMessage(error) },
       ),
   })
+}
+
+const runEmailDoctorChecks: DoctorStrategy = async (
+  context,
+  connector,
+  { env, runDoctorCheck },
+) => {
+  context.checks.push(
+    passCheck('platform', 'Email polling is platform-agnostic.'),
+  )
+
+  const envVars = env.getEnvironment()
+  const apiKey = resolveAgentmailApiKey(envVars)
+  const usesInjectedEmailDriver = env.usesInjectedEmailDriver
+
+  if (!connector.accountId) {
+    context.checks.push(
+      failCheck(
+        'account',
+        'Email connectors require an AgentMail inbox id as the connector account.',
+      ),
+    )
+  } else {
+    context.checks.push(
+      passCheck('account', 'AgentMail inbox id is configured for the connector.', {
+        inboxId: connector.accountId,
+        emailAddress: connector.options.emailAddress ?? null,
+      }),
+    )
+  }
+
+  if (!apiKey && !usesInjectedEmailDriver) {
+    context.checks.push(
+      failCheck(
+        'token',
+        `AgentMail API key is missing from AGENTMAIL_API_KEY. ${SETUP_RUNTIME_ENV_NOTICE}`,
+      ),
+    )
+  } else if (usesInjectedEmailDriver) {
+    context.checks.push(
+      passCheck(
+        'token',
+        'Email driver configuration is delegated to the integrating workspace.',
+      ),
+    )
+  } else {
+    context.checks.push(
+      passCheck('token', 'AgentMail API key was found in the local environment.'),
+    )
+  }
+
+  const driver =
+    connector.accountId && (apiKey || usesInjectedEmailDriver)
+      ? await runDoctorCheck(context, {
+          run: () => env.loadConfiguredEmailDriver(connector),
+          onSuccess: () =>
+            passCheck(
+              'driver-import',
+              'The AgentMail poll driver initialized successfully.',
+            ),
+          onError: (error) =>
+            failCheck(
+              'driver-import',
+              'The AgentMail poll driver could not be initialized.',
+              { error: errorMessage(error) },
+            ),
+        })
+      : null
+
+  if (!driver) {
+    return
+  }
+
+  await runDoctorCheck(context, {
+    run: () =>
+      driver.listUnreadMessages({
+        limit: 1,
+      }),
+    onSuccess: (messages) =>
+      messages.length > 0
+        ? passCheck(
+            'probe',
+            'The AgentMail inbox responded and returned unread messages.',
+            { messages: messages.length },
+          )
+        : warnCheck(
+            'probe',
+            'The AgentMail inbox responded but returned no unread messages.',
+          ),
+    onError: (error) =>
+      failCheck(
+        'probe',
+        'The AgentMail inbox could not be queried for unread messages.',
+        { error: errorMessage(error) },
+      ),
+  })
+}
+
+export const DOCTOR_STRATEGIES: Record<SupportedDoctorSource, DoctorStrategy> = {
+  telegram: runTelegramDoctorChecks,
+  email: runEmailDoctorChecks,
 }

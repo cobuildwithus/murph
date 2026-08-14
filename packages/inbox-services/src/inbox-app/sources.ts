@@ -10,6 +10,7 @@ import type {
 import {
   normalizeBackfillLimit,
   normalizeConnectorAccountId,
+  normalizeNullableString,
   relativeToVault,
 } from '../inbox-services/shared.js'
 import {
@@ -23,7 +24,10 @@ import {
 export function createInboxSourceOps(
   env: Pick<
     InboxAppEnvironment,
-    'enableAssistantAutoReplyChannel' | 'loadInbox'
+    | 'enableAssistantAutoReplyChannel'
+    | 'loadInbox'
+    | 'provisionOrRecoverAgentmailInbox'
+    | 'tryResolveAgentmailInboxAddress'
   >,
 ): Pick<
   InboxServices,
@@ -48,13 +52,48 @@ export function createInboxSourceOps(
         )
       }
 
+      let provisionedMailbox = null
+      let reusedMailbox = null
+      let accountId = normalizeConnectorAccountId(input.source, input.account)
+      let emailAddress = normalizeNullableString(input.address)
+
+      if (input.source === 'email') {
+        if (input.provision) {
+          const mailbox = await env.provisionOrRecoverAgentmailInbox({
+            displayName: input.emailDisplayName,
+            username: input.emailUsername,
+            domain: input.emailDomain,
+            clientId: input.emailClientId,
+            preferredAccountId: accountId,
+            preferredEmailAddress: emailAddress,
+          })
+          accountId = mailbox.accountId
+          emailAddress = mailbox.emailAddress
+          provisionedMailbox = mailbox.provisionedMailbox
+          reusedMailbox = mailbox.reusedMailbox
+        }
+
+        if (!accountId) {
+          throw new VaultCliError(
+            'INBOX_EMAIL_ACCOUNT_REQUIRED',
+            'Email connectors require --account with an existing AgentMail inbox id, or --provision to create one.',
+          )
+        }
+
+        emailAddress = await env.tryResolveAgentmailInboxAddress({
+          accountId,
+          emailAddress,
+        })
+      }
+
       const connector: InboxConnectorConfig = normalizeInboxConnectorConfig({
         id: input.id,
         source: input.source,
         enabled: true,
-        accountId: normalizeConnectorAccountId(input.source, input.account),
+        accountId,
         options: {
           backfillLimit: normalizeBackfillLimit(input.backfillLimit),
+          emailAddress: input.source === 'email' ? emailAddress : undefined,
         },
       })
       ensureConnectorNamespaceAvailable(config, connector)
@@ -78,6 +117,8 @@ export function createInboxSourceOps(
         configPath: relativeToVault(paths.absoluteVaultRoot, paths.inboxConfigPath),
         connector,
         connectorCount: nextConfig.connectors.length,
+        provisionedMailbox,
+        reusedMailbox,
         autoReplyEnabled,
       }
     },

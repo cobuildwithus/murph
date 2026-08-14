@@ -15,6 +15,7 @@ export {
   selectedAssistantEmailDeliveryIsThreadReply,
 } from './channels/registry.js'
 export {
+  sendEmailMessage,
   sendLinqMessage,
   sendLinqVoiceMemoMessage,
   sendTelegramImageMessage,

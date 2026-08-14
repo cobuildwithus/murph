@@ -70,7 +70,7 @@ describe("prepareAssistantDirectCliEnv", () => {
   it("projects hosted Codex child env to the needed CLI surface without unrelated credentials", () => {
     const env = prepareAssistantDirectCliEnv({
       [HOSTED_RUNTIME_PROCESS_ENV_MARKER]: "1",
-      AGENTMAIL_API_KEY: "retired-provider-secret",
+      AGENTMAIL_API_KEY: "agentmail-secret",
       AMBIENT_SECRET: "ambient-secret",
       ASSISTANT_MEMORY_BOUND_SESSION_ID: "stale-session",
       ASSISTANT_MEMORY_BOUND_SOURCE_PROMPT: "stale prompt",
@@ -162,8 +162,8 @@ describe("prepareAssistantDirectCliEnv", () => {
     expect(
       pathEntries.some((entry) => entry.endsWith(`${path.sep}node_modules${path.sep}.bin`)),
     ).toBe(true);
-    expect(env.AMBIENT_SECRET).toBeUndefined();
     expect(env.AGENTMAIL_API_KEY).toBeUndefined();
+    expect(env.AMBIENT_SECRET).toBeUndefined();
     expect(env.DEVICE_SYNC_BASE_URL).toBeUndefined();
     expect(env.DEVICE_SYNC_CONTROL_TOKEN).toBeUndefined();
     expect(env.ELEVENLABS_API_KEY).toBeUndefined();

@@ -169,7 +169,7 @@ function instrumentConnectorForRunEvents(
 }
 
 function isSupportedRuntimeSource(source: string): boolean {
-  return source === 'telegram'
+  return source === 'telegram' || source === 'email'
 }
 
 function emitParserDrainEvent(
@@ -341,6 +341,7 @@ export function createInboxRuntimeOps(
           inputLimit: input.limit,
           loadInbox: env.loadInbox,
           loadTelegramDriver: env.loadConfiguredTelegramDriver,
+          loadEmailDriver: env.loadConfiguredEmailDriver,
         })
         let importedCount = 0
         let dedupedCount = 0
@@ -425,6 +426,7 @@ export function createInboxRuntimeOps(
           connector,
           loadInbox: env.loadInbox,
           loadTelegramDriver: env.loadConfiguredTelegramDriver,
+          loadEmailDriver: env.loadConfiguredEmailDriver,
         })
         instrumentedConnectors.push(
           instrumentConnectorForRunEvents(instantiated, options?.onEvent),
@@ -434,7 +436,7 @@ export function createInboxRuntimeOps(
       if (instrumentedConnectors.length === 0) {
         throw new VaultCliError(
           'INBOX_NO_SUPPORTED_SOURCES',
-          'No supported inbox sources are enabled. Enable a Telegram connector first.',
+          'No supported inbox sources are enabled. Enable a Telegram or email connector first.',
           {
             connectorIds: enabledConnectors.map((connector) => connector.id),
             unsupportedConnectorIds: enabledConnectors

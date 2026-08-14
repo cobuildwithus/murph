@@ -1300,7 +1300,7 @@ function buildMemberWorkspaceAutomationSaveArgs(input: {
     "--channel",
     "telegram",
     "--delivery-target",
-    "telegram:hosted-member-workspace-smoke",
+    "agentmail:hosted-member-workspace-smoke",
     "--identity-id",
     "identity_hosted_member_workspace_smoke",
     "--participant-id",
@@ -1324,7 +1324,7 @@ function createMemberWorkspaceAutomationImportPayload(input: {
     instructions: "Run the hosted member-workspace import permission proof.",
     route: {
       channel: "telegram",
-      deliveryTarget: "telegram:hosted-member-workspace-import-smoke",
+      deliveryTarget: "agentmail:hosted-member-workspace-import-smoke",
       identityId: "identity_hosted_member_workspace_import_smoke",
       participantId: "participant_hosted_member_workspace_import_smoke",
       threadId: "thread_hosted_member_workspace_import_smoke",

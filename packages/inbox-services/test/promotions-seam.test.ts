@@ -224,8 +224,14 @@ function createInboxRuntimeModule(runtime: RuntimeStore): InboxRuntimeModule {
     createTelegramPollConnector() {
       throw new Error('createTelegramPollConnector not used in promotions tests')
     },
+    createEmailPollConnector() {
+      throw new Error('createEmailPollConnector not used in promotions tests')
+    },
     createTelegramBotApiPollDriver() {
       throw new Error('createTelegramBotApiPollDriver not used in promotions tests')
+    },
+    createAgentmailApiPollDriver() {
+      throw new Error('createAgentmailApiPollDriver not used in promotions tests')
     },
     async rebuildRuntimeFromVault() {
       throw new Error('rebuildRuntimeFromVault not used in promotions tests')
@@ -370,6 +376,7 @@ function createInboxAppEnvironment(input: {
     killProcess() {},
     sleep: async () => undefined,
     getEnvironment: () => ({}),
+    usesInjectedEmailDriver: false,
     usesInjectedTelegramDriver: false,
     loadCore: async () => input.core ?? createCoreRuntimeModule(),
     loadImporters: async () =>
@@ -392,8 +399,20 @@ function createInboxAppEnvironment(input: {
     async loadConfiguredTelegramDriver() {
       throw new Error('loadConfiguredTelegramDriver not used in promotions tests')
     },
+    async loadConfiguredEmailDriver() {
+      throw new Error('loadConfiguredEmailDriver not used in promotions tests')
+    },
+    createConfiguredAgentmailClient() {
+      throw new Error('createConfiguredAgentmailClient not used in promotions tests')
+    },
     async enableAssistantAutoReplyChannel() {
       return false
+    },
+    async provisionOrRecoverAgentmailInbox() {
+      throw new Error('provisionOrRecoverAgentmailInbox not used in promotions tests')
+    },
+    async tryResolveAgentmailInboxAddress() {
+      return null
     },
     journalPromotionEnabled: true,
   }

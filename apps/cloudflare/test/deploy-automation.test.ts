@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   buildHostedWorkerSecretsPayload,
   buildHostedWranglerDeployConfig,
+  HOSTED_WORKER_OPTIONAL_VAR_NAMES,
   HOSTED_WORKER_REQUIRED_SECRET_NAMES,
   HOSTED_WORKER_REQUIRED_VAR_NAMES,
   parseHostedContainerImageListOutput,
@@ -14,6 +15,7 @@ import {
   resolveCloudflareDeployPaths,
   selectHostedContainerImageTagsForCleanup,
 } from "../scripts/deploy-automation.js";
+import { HOSTED_WORKER_OPTIONAL_SECRET_NAMES } from "../scripts/deploy-automation/worker-secret-names.ts";
 import { renderWorkerSecretsFile } from "../scripts/render-worker-secrets.ts";
 import { buildHostedRunnerContainerPlatformEnv } from "../src/runner-env.ts";
 import { parseJsoncObject } from "./helpers/jsonc.js";
@@ -425,6 +427,7 @@ describe("hosted deploy automation helpers", () => {
     ]);
     expect(config.ai).toEqual({ binding: "AI" });
     expect(config.vars.HOSTED_WEB_BASE_URL).toBe("https://web.example.test");
+    expect(config.vars.AGENTMAIL_BASE_URL).toBeUndefined();
     expect(config.vars.TELEGRAM_BOT_USERNAME).toBe("hosted_bot");
     expect(config.vars.HOSTED_EXECUTION_RUNNER_BASE_URL).toBeUndefined();
     expect(config.secrets?.required).toEqual([...HOSTED_WORKER_REQUIRED_SECRET_NAMES]);
@@ -799,6 +802,7 @@ describe("hosted deploy automation helpers", () => {
 
     expect(buildHostedWorkerSecretsPayload({
       ...REQUIRED_PRIVATE_IMAGE_WORKER_SECRET,
+      AGENTMAIL_API_KEY: "agentmail-secret",
       GARMIN_API_BASE_URL: "https://apis.garmin.com/wellness-api/rest",
       GARMIN_CLIENT_ID: "garmin-client-id",
       GARMIN_CLIENT_SECRET: "garmin-client-secret",

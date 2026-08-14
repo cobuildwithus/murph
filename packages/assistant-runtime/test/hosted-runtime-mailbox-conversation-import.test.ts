@@ -32,6 +32,7 @@ import {
   listAssistantInputEvents,
   resolveAssistantConversationLookupKey,
   updateAssistantInputAttachmentEvidence,
+  updateAssistantInputProjection,
 } from "@murphai/assistant-engine";
 import {
   reconcileManagedAssistantAutoReplyChannelsLocal,
@@ -3270,7 +3271,7 @@ describe("hosted mailbox conversation import adapter", () => {
       eventId: "evt_synthetic_email_001",
       message: {
         channel: "email",
-        identityId: "hosted_email_identity_synthetic",
+        identityId: "agentmail_inbox_synthetic",
         messageId: "email_message_synthetic_001",
         rawMessageKey: "raw_email_thread_authority",
         selfAddress: "assistant@example.test",
@@ -3321,7 +3322,7 @@ describe("hosted mailbox conversation import adapter", () => {
     assert.equal(replyTarget.messageId, "email_message_synthetic_001");
     assert.ok(replyTarget.threadId?.startsWith("hostedmail:"));
     assert.equal(JSON.stringify(event).includes("raw_email_thread_authority"), false);
-    assert.equal(JSON.stringify(event).includes("hosted_email_identity_synthetic"), false);
+    assert.equal(JSON.stringify(event).includes("agentmail_inbox_synthetic"), false);
     assert.equal(JSON.stringify(event).includes("assistant@example.test"), false);
   });
 

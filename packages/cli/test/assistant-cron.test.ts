@@ -296,17 +296,6 @@ test('assistant cron jobs require explicit outbound delivery routing', async () 
   process.env.HOME = homeRoot
 
   try {
-    await saveAssistantSelfDeliveryTarget(
-      {
-        channel: 'email',
-        deliverySource: null,
-        deliveryTarget: 'retired@example.test',
-        identityId: null,
-        participantId: null,
-        threadId: null,
-      },
-      homeRoot,
-    )
     await assert.rejects(
       () =>
         addAssistantCronJob({
@@ -317,17 +306,7 @@ test('assistant cron jobs require explicit outbound delivery routing', async () 
             every: '2h',
           }),
         }),
-      (error: unknown) => {
-        assert.match(
-          error instanceof Error ? error.message : String(error),
-          /must declare an outbound channel and delivery route/u,
-        )
-        assert.doesNotMatch(
-          error instanceof Error ? error.message : String(error),
-          /email/u,
-        )
-        return true
-      },
+      /must declare an outbound channel and delivery route/u,
     )
 
     await assert.rejects(
@@ -342,7 +321,7 @@ test('assistant cron jobs require explicit outbound delivery routing', async () 
           channel: 'email',
           deliveryTarget: 'me@example.com',
         }),
-      /Local email automation delivery is not supported/u,
+      /sender identity/u,
     )
 
   } finally {
@@ -439,31 +418,35 @@ test('assistant cron targets can be inspected and updated in place', async () =>
   const updated = await setAssistantCronJobTarget({
     vault: vaultRoot,
     job: 'weekly-health-snapshot',
-    channel: 'telegram',
-    threadId: 'chat-456',
+    channel: 'email',
+    identityId: 'sender@example.com',
+    deliveryTarget: 'me@example.com',
   })
 
   assert.equal(updated.changed, true)
   assert.equal(updated.continuityReset, false)
   assert.equal(updated.dryRun, false)
   assert.equal(updated.beforeTarget.target.channel, 'telegram')
-  assert.equal(updated.afterTarget.target.channel, 'telegram')
-  assert.equal(updated.afterTarget.target.threadId, 'chat-456')
-  assert.equal(updated.job.target.sessionId, null)
+  assert.equal(updated.afterTarget.target.channel, 'email')
+  assert.equal(updated.afterTarget.target.identityId, 'sender@example.com')
+  assert.equal(updated.afterTarget.target.deliveryTarget, 'me@example.com')
+  assert.equal(updated.job.target.sessionId, 'session-target-test')
   assert.equal(updated.job.target.alias, 'routine:weekly-health-snapshot')
 
   const reloaded = await getAssistantCronJob(vaultRoot, 'weekly-health-snapshot')
   assert.equal(reloaded.jobId, job.jobId)
-  assert.equal(reloaded.target.channel, 'telegram')
-  assert.equal(reloaded.target.threadId, 'chat-456')
-  assert.equal(reloaded.target.sessionId, null)
+  assert.equal(reloaded.target.channel, 'email')
+  assert.equal(reloaded.target.identityId, 'sender@example.com')
+  assert.equal(reloaded.target.deliveryTarget, 'me@example.com')
+  assert.equal(reloaded.target.sessionId, 'session-target-test')
   assert.equal(reloaded.target.alias, 'routine:weekly-health-snapshot')
 
   const reset = await setAssistantCronJobTarget({
     vault: vaultRoot,
     job: 'weekly-health-snapshot',
-    channel: 'telegram',
-    threadId: 'chat-456',
+    channel: 'email',
+    identityId: 'sender@example.com',
+    deliveryTarget: 'me@example.com',
     resetContinuity: true,
   })
 

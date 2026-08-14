@@ -11,6 +11,8 @@ import {
 test('normalizeInboxConnectorAccountId applies source-specific defaults', () => {
   assert.equal(normalizeInboxConnectorAccountId('telegram', null), 'bot')
   assert.equal(normalizeInboxConnectorAccountId('telegram', 'team-bot'), 'team-bot')
+  assert.equal(normalizeInboxConnectorAccountId('email', null), null)
+  assert.equal(normalizeInboxConnectorAccountId('email', 'ops@example.com'), 'ops@example.com')
   assert.equal(normalizeInboxConnectorAccountId('linq', null), 'default')
   assert.equal(normalizeInboxConnectorAccountId('linq', 'partner-account'), 'partner-account')
 })
@@ -50,6 +52,13 @@ test('normalizeInboxConnectorConfig and runtime config normalize connector accou
           options: {},
           source: 'linq',
         },
+        {
+          accountId: 'alerts@example.com',
+          enabled: false,
+          id: 'email-alerts',
+          options: {},
+          source: 'email',
+        },
       ],
     }),
     {
@@ -68,6 +77,13 @@ test('normalizeInboxConnectorConfig and runtime config normalize connector accou
           options: {},
           source: 'linq',
         },
+        {
+          accountId: 'alerts@example.com',
+          enabled: false,
+          id: 'email-alerts',
+          options: {},
+          source: 'email',
+        },
       ],
     },
   )
@@ -77,20 +93,5 @@ test('normalizeInboxConnectorAccountId rejects unsupported sources at runtime', 
   assert.throws(
     () => Reflect.apply(normalizeInboxConnectorAccountId, undefined, ['sms', null]),
     /Inbox source "sms" is not supported\./u,
-  )
-})
-
-test('normalizeInboxRuntimeConfig rejects the removed local email source', () => {
-  assert.throws(
-    () => Reflect.apply(normalizeInboxRuntimeConfig, undefined, [{
-      connectors: [{
-        accountId: 'alerts@example.test',
-        enabled: false,
-        id: 'email-alerts',
-        options: {},
-        source: 'email',
-      }],
-    }]),
-    /Inbox source "email" is not supported\./u,
   )
 })

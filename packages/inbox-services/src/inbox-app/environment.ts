@@ -1,4 +1,11 @@
 import os from 'node:os'
+import {
+  createAgentmailApiClient,
+  listAllAgentmailInboxes,
+  matchesAgentmailHttpError,
+  resolveAgentmailApiKey,
+  resolveAgentmailBaseUrl,
+} from '@murphai/operator-config/agentmail-runtime'
 import { SETUP_RUNTIME_ENV_NOTICE } from '@murphai/operator-config/setup-runtime-env'
 import {
   resolveTelegramApiBaseUrl,
@@ -9,15 +16,21 @@ import type { InboxConnectorConfig } from '@murphai/operator-config/inbox-cli-co
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import type {
   CoreRuntimeModule,
+  EmailDriver,
   InboxAppEnvironment,
   ImportersFactoryRuntimeModule,
   InboxServicesDependencies,
   InboxRuntimeModule,
   ParsersRuntimeModule,
+  ProvisionedMailboxResolution,
+  QueryRuntimeModule,
+  RecoveredProvisionedMailbox,
   TelegramDriver,
 } from './types.js'
 import { loadQueryRuntime } from '@murphai/vault-usecases/runtime'
 import { loadRuntimeModule } from '../runtime-import.js'
+
+import { normalizeNullableString } from '../inbox-services/shared.js'
 
 function createParserRuntimeUnavailableError(
   operation: string,
@@ -110,9 +123,229 @@ export function createInboxAppEnvironment(
     })
   }
 
+  const createConfiguredAgentmailClient = (
+    apiKey?: string | null,
+  ) => {
+    const env = getEnvironment()
+    const resolvedApiKey =
+      normalizeNullableString(apiKey) ?? resolveAgentmailApiKey(env)
+
+    if (!resolvedApiKey) {
+      throw new VaultCliError(
+        'INBOX_EMAIL_API_KEY_MISSING',
+        `Email requires AGENTMAIL_API_KEY. ${SETUP_RUNTIME_ENV_NOTICE}`,
+      )
+    }
+
+    const baseUrl = resolveAgentmailBaseUrl(env) ?? undefined
+
+    return dependencies.createAgentmailClient
+      ? dependencies.createAgentmailClient({
+          apiKey: resolvedApiKey,
+          baseUrl,
+          env,
+        })
+      : createAgentmailApiClient(resolvedApiKey, {
+          baseUrl,
+        })
+  }
+
+  const loadConfiguredEmailDriver = async (
+    config: InboxConnectorConfig,
+  ): Promise<EmailDriver> => {
+    if (dependencies.loadEmailDriver) {
+      return dependencies.loadEmailDriver(config)
+    }
+
+    const inboxId = normalizeNullableString(config.accountId)
+    if (!inboxId) {
+      throw new VaultCliError(
+        'INBOX_EMAIL_ACCOUNT_REQUIRED',
+        'Email connectors require an AgentMail inbox id as the connector account.',
+      )
+    }
+
+    const client = createConfiguredAgentmailClient()
+    const inboxd = await loadInbox()
+    return inboxd.createAgentmailApiPollDriver({
+      apiKey: client.apiKey,
+      inboxId,
+      baseUrl: client.baseUrl,
+    })
+  }
+
   const enableAssistantAutoReplyChannel =
     dependencies.enableAssistantAutoReplyChannel ??
     (async () => false)
+
+  const toProvisionedMailbox = (input: {
+    inbox_id: string
+    email: string
+    display_name?: string | null
+    client_id?: string | null
+  }) => ({
+    inboxId: input.inbox_id,
+    emailAddress: input.email,
+    displayName: normalizeNullableString(input.display_name),
+    clientId: normalizeNullableString(input.client_id),
+    provider: 'agentmail' as const,
+  })
+
+  const tryResolveAgentmailInboxAddress = async (input: {
+    accountId: string
+    emailAddress: string | null
+  }): Promise<string | null> => {
+    if (input.emailAddress) {
+      return input.emailAddress
+    }
+
+    try {
+      const inbox = await createConfiguredAgentmailClient().getInbox(input.accountId)
+      return normalizeNullableString(inbox.email)
+    } catch {
+      return input.emailAddress
+    }
+  }
+
+  const toRecoveredMailbox = (input: {
+    accountId: string
+    emailAddress: string | null
+  }) => {
+    const emailAddress = normalizeNullableString(input.emailAddress)
+    if (!emailAddress) {
+      return null
+    }
+
+    return {
+      inboxId: input.accountId,
+      emailAddress,
+      displayName: null,
+      clientId: null,
+      provider: 'agentmail' as const,
+    }
+  }
+
+  const recoverForbiddenAgentmailProvision = async (input: {
+    preferredAccountId?: string | null
+    preferredEmailAddress?: string | null
+  } = {}): Promise<RecoveredProvisionedMailbox> => {
+    const preferredAccountId = normalizeNullableString(input.preferredAccountId)
+    const preferredEmailAddress = normalizeNullableString(input.preferredEmailAddress)
+
+    if (preferredAccountId) {
+      try {
+        const inbox = await createConfiguredAgentmailClient().getInbox(preferredAccountId)
+        return {
+          accountId: inbox.inbox_id,
+          emailAddress: normalizeNullableString(inbox.email),
+          mailbox: toProvisionedMailbox(inbox),
+        }
+      } catch {
+        return {
+          accountId: preferredAccountId,
+          emailAddress: preferredEmailAddress,
+          mailbox: toRecoveredMailbox({
+            accountId: preferredAccountId,
+            emailAddress: preferredEmailAddress,
+          }),
+        }
+      }
+    }
+
+    try {
+      const inboxes = await listAllAgentmailInboxes(createConfiguredAgentmailClient())
+
+      if (inboxes.length === 1) {
+        const inbox = inboxes[0]!
+        return {
+          accountId: inbox.inbox_id,
+          emailAddress: normalizeNullableString(inbox.email),
+          mailbox: toProvisionedMailbox(inbox),
+        }
+      }
+
+      if (inboxes.length > 1) {
+        throw new VaultCliError(
+          'INBOX_EMAIL_ACCOUNT_SELECTION_REQUIRED',
+          'AgentMail rejected inbox creation for this API key, but multiple existing inboxes are available. Rerun with --account <inbox_id> to choose one, or use `murph onboard` to select an inbox interactively.',
+          { inboxCount: inboxes.length },
+        )
+      }
+
+      throw new VaultCliError(
+        'INBOX_EMAIL_ACCOUNT_REQUIRED',
+        'AgentMail rejected inbox creation for this API key and no existing inboxes were returned. Rerun with --account <inbox_id> for an existing inbox, or check whether this key can create inboxes.',
+      )
+    } catch (error) {
+      if (
+        matchesAgentmailHttpError(error, {
+          status: 403,
+          method: 'GET',
+          path: '/inboxes',
+        })
+      ) {
+        throw new VaultCliError(
+          'INBOX_EMAIL_SCOPED_KEY_ACCOUNT_REQUIRED',
+          'AgentMail rejected both inbox creation and inbox discovery for this API key. This key may be scoped to an existing inbox. Rerun with --account <inbox_id> (often the inbox email address), or use `murph onboard`.',
+        )
+      }
+
+      if (error instanceof VaultCliError) {
+        throw error
+      }
+
+      throw error
+    }
+  }
+
+  const provisionOrRecoverAgentmailInbox = async (input: {
+    displayName?: string | null
+    username?: string | null
+    domain?: string | null
+    clientId?: string | null
+    preferredAccountId?: string | null
+    preferredEmailAddress?: string | null
+  }): Promise<ProvisionedMailboxResolution> => {
+    const client = createConfiguredAgentmailClient()
+
+    try {
+      const inbox = await client.createInbox({
+        displayName: normalizeNullableString(input.displayName),
+        username: normalizeNullableString(input.username),
+        domain: normalizeNullableString(input.domain),
+        clientId: normalizeNullableString(input.clientId),
+      })
+
+      return {
+        accountId: inbox.inbox_id,
+        emailAddress: normalizeNullableString(inbox.email),
+        provisionedMailbox: toProvisionedMailbox(inbox),
+        reusedMailbox: null,
+      }
+    } catch (error) {
+      if (
+        !matchesAgentmailHttpError(error, {
+          status: 403,
+          method: 'POST',
+          path: '/inboxes',
+        })
+      ) {
+        throw error
+      }
+
+      const recovered = await recoverForbiddenAgentmailProvision({
+        preferredAccountId: input.preferredAccountId,
+        preferredEmailAddress: input.preferredEmailAddress,
+      })
+
+      return {
+        accountId: recovered.accountId,
+        emailAddress: recovered.emailAddress,
+        provisionedMailbox: null,
+        reusedMailbox: recovered.mailbox,
+      }
+    }
+  }
 
   return {
     clock,
@@ -122,6 +355,7 @@ export function createInboxAppEnvironment(
     killProcess,
     sleep,
     getEnvironment,
+    usesInjectedEmailDriver: Boolean(dependencies.loadEmailDriver),
     usesInjectedTelegramDriver: Boolean(dependencies.loadTelegramDriver),
     loadCore,
     loadImporters,
@@ -130,7 +364,11 @@ export function createInboxAppEnvironment(
     loadQuery,
     requireParsers,
     loadConfiguredTelegramDriver,
+    loadConfiguredEmailDriver,
+    createConfiguredAgentmailClient,
     enableAssistantAutoReplyChannel,
+    provisionOrRecoverAgentmailInbox,
+    tryResolveAgentmailInboxAddress,
     journalPromotionEnabled:
       dependencies.enableJournalPromotion ?? dependencies.loadCoreModule === undefined,
   }

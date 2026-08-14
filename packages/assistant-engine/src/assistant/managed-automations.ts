@@ -1704,9 +1704,6 @@ async function resolveMurphManagedAutomationCreateRoute(
     },
     {
       allowSingleSavedTargetFallback: true,
-      ...(routeValidationProfile === 'hosted'
-        ? { includeEmailInSingleSavedTargetFallback: true }
-        : {}),
     },
     input.operatorHomeRoot ?? undefined,
   )

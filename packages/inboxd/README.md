@@ -4,11 +4,11 @@ Workspace-private source-agnostic inbox ingestion for Murph.
 
 This package keeps canonical inbox evidence in the vault and uses local runtime state for source cursors, a durable local capture mutation cursor, transient dedupe caches, capture-local search tables, and attachment job state.
 
-Stateless provider ingress semantics that need to be shared with hosted callers now live in `@murphai/messaging-ingress`. `@murphai/inboxd` consumes that package for provider webhook parsing/minimization and keeps ownership of the Telegram polling driver, runtime state, capture persistence, and generic parsed-email normalization used by hosted ingress.
+Stateless provider ingress semantics that need to be shared with hosted callers now live in `@murphai/messaging-ingress`. `@murphai/inboxd` consumes that package for provider webhook parsing/minimization and keeps ownership of polling drivers, runtime state, and capture persistence.
 
 Consumers that only need shared Linq or Telegram webhook parsing, verification, targets, summaries, or sparse minimization should depend on `@murphai/messaging-ingress` directly instead of `@murphai/inboxd` convenience subpaths.
 
-Consumers that need inbox-owned normalization without the full inboxd barrel should use the focused connector exports such as `@murphai/inboxd/connectors/email/normalize-parsed`, `@murphai/inboxd/connectors/linq/normalize`, `@murphai/inboxd/connectors/telegram/normalize`, or `@murphai/inboxd/connectors/hosted-conversation` for hosted mailbox conversation wakes.
+Consumers that need inbox-owned normalization without the full inboxd barrel should use the focused connector exports such as `@murphai/inboxd/connectors/linq/normalize`, `@murphai/inboxd/connectors/telegram/normalize`, or `@murphai/inboxd/connectors/hosted-conversation` for hosted mailbox conversation wakes.
 
 ## Runtime expectations
 
@@ -34,7 +34,7 @@ Consumers that need inbox-owned normalization without the full inboxd barrel sho
 
 - connector contracts for polling and webhook sources
 - a generic normalized chat-poll connector factory for source-specific transports
-- Telegram polling connector ownership, generic parsed-email normalization for hosted ingress, and shared Telegram/Linq normalization primitives
+- Telegram and email/Linq inbox connector ownership plus shared connector primitives for supported inbox sources
 - source-specific checkpoints for connectors whose cursors are not derivable from `occurredAt`/`externalId`
 - capture pipeline with atomic raw persistence, inbox-capture ledger append, dedupe, FTS, and a durable local capture mutation cursor for downstream inbox/query projections
 - rebuilds and replay dedupe treat raw envelopes as source evidence, not a legacy persistence lane, except for the narrow current-format crash-recovery path gated by unresolved `inbox_capture_persist` metadata

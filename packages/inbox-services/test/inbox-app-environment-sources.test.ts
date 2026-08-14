@@ -12,8 +12,10 @@ import { createInboxAppEnvironment } from '../src/inbox-app/environment.js'
 import { createIntegratedInboxServices } from '../src/inbox-app/service.js'
 import { createInboxSourceOps } from '../src/inbox-app/sources.js'
 import type {
-  InboxConnectorConfig,
+  AgentmailApiClient,
+  EmailDriver,
   InboxRuntimeModule,
+  InboxConnectorConfig,
   ParsersRuntimeModule,
   PollConnector,
   RuntimeStore,
@@ -54,10 +56,10 @@ function createRuntimeStore(): RuntimeStore {
         },
       }
     },
-    getAttachment() {
+    getCapture() {
       return null
     },
-    getCapture() {
+    getAttachment() {
       return null
     },
     getCursor() {
@@ -82,6 +84,7 @@ function createRuntimeStore(): RuntimeStore {
 function createPollConnector(
   source: InboxConnectorConfig['source'],
   id: string,
+  webhooks: boolean,
 ): PollConnector {
   return {
     async backfill() {
@@ -91,7 +94,7 @@ function createPollConnector(
       attachments: true,
       backfill: true,
       watch: true,
-      webhooks: false,
+      webhooks,
     },
     id,
     kind: 'poll',
@@ -100,7 +103,9 @@ function createPollConnector(
   }
 }
 
-function createTelegramDriver(): TelegramDriver {
+function createTelegramDriver(
+  overrides: Partial<TelegramDriver> = {},
+): TelegramDriver {
   return {
     async downloadFile() {
       return new Uint8Array()
@@ -115,30 +120,105 @@ function createTelegramDriver(): TelegramDriver {
       return []
     },
     async startWatching() {},
+    ...overrides,
+  }
+}
+
+function createEmailDriver(
+  overrides: Partial<EmailDriver> = {},
+): EmailDriver {
+  return {
+    async downloadAttachment() {
+      return null
+    },
+    inboxId: 'mailbox-1',
+    async listUnreadMessages() {
+      return []
+    },
+    async markProcessed() {},
+    ...overrides,
+  }
+}
+
+function createAgentmailClient(
+  overrides: Partial<AgentmailApiClient> = {},
+): AgentmailApiClient {
+  return {
+    apiKey: 'agentmail-key',
+    baseUrl: 'https://agentmail.test',
+    async createInbox() {
+      throw new Error('not used in this test')
+    },
+    async downloadUrl() {
+      return new Uint8Array()
+    },
+    async getAttachment() {
+      throw new Error('not used in this test')
+    },
+    async getInbox(inboxId: string) {
+      return {
+        email: 'agentmail@example.com',
+        inbox_id: inboxId,
+      }
+    },
+    async getMessage() {
+      throw new Error('not used in this test')
+    },
+    async getThread() {
+      throw new Error('not used in this test')
+    },
+    async listInboxes() {
+      return {
+        count: 0,
+        inboxes: [],
+      }
+    },
+    async listMessages() {
+      return {
+        count: 0,
+        messages: [],
+      }
+    },
+    async replyToMessage() {
+      throw new Error('not used in this test')
+    },
+    async sendMessage() {
+      throw new Error('not used in this test')
+    },
+    async updateMessage() {
+      throw new Error('not used in this test')
+    },
+    ...overrides,
   }
 }
 
 function createInboxRuntimeModule(): InboxRuntimeModule {
   return {
+    createAgentmailApiPollDriver(input) {
+      return createEmailDriver({
+        inboxId: input.inboxId,
+      })
+    },
     async createInboxPipeline() {
       throw new Error('not used in this test')
     },
-    async createParsedInboxPipeline() {
-      throw new Error('not used in this test')
+    createEmailPollConnector() {
+      return createPollConnector('email', 'email:primary', false)
     },
     createTelegramBotApiPollDriver() {
       return createTelegramDriver()
     },
     createTelegramPollConnector() {
-      return createPollConnector('telegram', 'telegram:bot')
+      return createPollConnector('telegram', 'telegram:bot', false)
     },
     async ensureInboxVault() {},
     async openInboxRuntime() {
       return createRuntimeStore()
     },
+    async createParsedInboxPipeline() {
+      throw new Error('not used in this test')
+    },
     async rebuildRuntimeFromVault() {},
-    async runInboxDaemon() {},
-    async runInboxDaemonWithParsers() {},
     async runInboxEnvelopeMigration() {
       return {
         activeOperationCount: 0,
@@ -156,9 +236,11 @@ function createInboxRuntimeModule(): InboxRuntimeModule {
         scannedEnvelopeCount: 0,
       }
     },
+    async runInboxDaemon() {},
     async runPollConnectorBackfill() {
       throw new Error('not used in this test')
     },
+    async runInboxDaemonWithParsers() {},
   }
 }
 
@@ -211,12 +293,7 @@ function createParserModule(): ParsersRuntimeModule {
         config: {
           updatedAt: '2026-04-08T00:00:00.000Z',
         },
-        configPath: path.join(
-          input.vaultRoot,
-          'derived',
-          'inbox',
-          'parser-toolchain.json',
-        ),
+        configPath: path.join(input.vaultRoot, 'derived', 'inbox', 'parser-toolchain.json'),
       }
     },
   }
@@ -230,6 +307,85 @@ async function withTempVault<T>(fn: (vault: string) => Promise<T>): Promise<T> {
     await rm(vault, { force: true, recursive: true })
   }
 }
+
+test('createInboxAppEnvironment builds an AgentMail client from injected settings', () => {
+  const seen: Array<{ apiKey: string; baseUrl?: string; env: NodeJS.ProcessEnv }> = []
+  const client = { apiKey: 'client-key', baseUrl: 'https://agentmail.test' } satisfies Partial<AgentmailApiClient>
+
+  const env = createInboxAppEnvironment({
+    createAgentmailClient(input) {
+      seen.push(input)
+      return createAgentmailClient(client)
+    },
+    getEnvironment: () => ({
+      AGENTMAIL_API_KEY: 'env-key',
+      AGENTMAIL_BASE_URL: 'https://env-agentmail.test',
+    }),
+  })
+
+  const configuredClient = env.createConfiguredAgentmailClient('explicit-key')
+  assert.equal(configuredClient.apiKey, 'client-key')
+  assert.equal(configuredClient.baseUrl, 'https://agentmail.test')
+  assert.deepEqual(seen, [
+    {
+      apiKey: 'explicit-key',
+      baseUrl: 'https://env-agentmail.test',
+      env: {
+        AGENTMAIL_API_KEY: 'env-key',
+        AGENTMAIL_BASE_URL: 'https://env-agentmail.test',
+      },
+    },
+  ])
+})
+
+test('createInboxAppEnvironment recovers an existing AgentMail inbox after create is forbidden', async () => {
+  const env = createInboxAppEnvironment({
+    createAgentmailClient() {
+      return createAgentmailClient({
+        async createInbox() {
+          throw new VaultCliError(
+            'AGENTMAIL_REQUEST_FAILED',
+            'forbidden',
+            {
+              status: 403,
+              method: 'POST',
+              path: '/inboxes',
+            },
+          )
+        },
+        async getInbox(inboxId: string) {
+          return {
+            client_id: 'client-1',
+            display_name: 'Inbox',
+            email: 'agentmail@example.com',
+            inbox_id: inboxId,
+          }
+        },
+      })
+    },
+    getEnvironment: () => ({
+      AGENTMAIL_API_KEY: 'agentmail-key',
+    }),
+  })
+
+  const result = await env.provisionOrRecoverAgentmailInbox({
+    preferredAccountId: 'existing-inbox',
+    preferredEmailAddress: 'existing@example.com',
+  })
+
+  assert.deepEqual(result, {
+    accountId: 'existing-inbox',
+    emailAddress: 'agentmail@example.com',
+    provisionedMailbox: null,
+    reusedMailbox: {
+      clientId: 'client-1',
+      displayName: 'Inbox',
+      emailAddress: 'agentmail@example.com',
+      inboxId: 'existing-inbox',
+      provider: 'agentmail',
+    },
+  })
+})
 
 test('createInboxAppEnvironment throws when Telegram bot token is missing', async () => {
   const env = createInboxAppEnvironment({
@@ -256,10 +412,17 @@ test('createInboxAppEnvironment throws when Telegram bot token is missing', asyn
 
 test('integrated services reject local Linq connector adds in a temp vault', async () => {
   await withTempVault(async (vault) => {
+    const inboxd = createInboxRuntimeModule()
     const services = createIntegratedInboxServices({
-      getEnvironment: () => ({ TELEGRAM_BOT_TOKEN: 'bot-token' }),
+      createAgentmailClient() {
+        throw new Error('not used in this test')
+      },
       getPlatform: () => 'linux',
-      loadInboxModule: async () => createInboxRuntimeModule(),
+      getEnvironment: () => ({
+        AGENTMAIL_API_KEY: 'agentmail-key',
+        TELEGRAM_BOT_TOKEN: 'bot-token',
+      }),
+      loadInboxModule: async () => inboxd,
       loadParsersModule: async () => createParserModule(),
     })
 
@@ -301,7 +464,7 @@ test('integrated services reject local Linq connector adds in a temp vault', asy
   })
 })
 
-test('source operations reject identifiers outside the current source contract', async () => {
+test('source operations reject unsupported source identifiers outside the current runtime contract', async () => {
   await withTempVault(async (vault) => {
     const env = createInboxAppEnvironment({
       loadInboxModule: async () => createInboxRuntimeModule(),

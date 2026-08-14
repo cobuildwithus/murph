@@ -25,8 +25,12 @@ vi.mock('../src/inbox-services/state.ts', () => ({
 }))
 
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
+
 import { createInboxSourceOps } from '../src/inbox-app/sources.ts'
-import type { InboxConnectorConfig } from '../src/inbox-app/types.ts'
+import type {
+  InboxAppEnvironment,
+  InboxConnectorConfig,
+} from '../src/inbox-app/types.ts'
 
 function createPaths() {
   return {
@@ -36,17 +40,73 @@ function createPaths() {
 }
 
 function createConfig(connectors: InboxConnectorConfig[] = []) {
-  return { connectors: [...connectors] }
+  return {
+    connectors: [...connectors],
+  }
 }
 
 function createEnv(
-  enableAssistantAutoReplyChannel = vi.fn(async () => false),
-): Parameters<typeof createInboxSourceOps>[0] {
+  overrides: Partial<InboxAppEnvironment> = {},
+): InboxAppEnvironment {
   return {
-    enableAssistantAutoReplyChannel,
+    clock: () => new Date('2026-04-08T00:00:00.000Z'),
+    createConfiguredAgentmailClient() {
+      throw new Error('not used in source tests')
+    },
+    enableAssistantAutoReplyChannel: vi.fn(
+      async (_vault: string, _channel: InboxConnectorConfig['source']) => false,
+    ),
+    getEnvironment: () => ({}),
+    getHomeDirectory: () => '/tmp',
+    getPid: () => 123,
+    getPlatform: () => 'darwin',
+    journalPromotionEnabled: true,
+    killProcess() {},
+    loadCore: async () => {
+      throw new Error('not used in source tests')
+    },
+    loadConfiguredEmailDriver: async () => {
+      throw new Error('not used in source tests')
+    },
+    loadConfiguredTelegramDriver: async () => {
+      throw new Error('not used in source tests')
+    },
+    loadImporters: async () => {
+      throw new Error('not used in source tests')
+    },
     loadInbox: async () => {
       throw new Error('not used in source tests')
     },
+    loadParsers: async () => {
+      throw new Error('not used in source tests')
+    },
+    loadQuery: async () => {
+      throw new Error('not used in source tests')
+    },
+    provisionOrRecoverAgentmailInbox: async () => ({
+      accountId: 'mailbox-1',
+      emailAddress: 'user@example.com',
+      provisionedMailbox: {
+        inboxId: 'mailbox-1',
+        emailAddress: 'user@example.com',
+        displayName: null,
+        clientId: null,
+        provider: 'agentmail',
+      },
+      reusedMailbox: null,
+    }),
+    requireParsers: async () => {
+      throw new Error('not used in source tests')
+    },
+    sleep: async () => undefined,
+    tryResolveAgentmailInboxAddress: async ({
+      emailAddress,
+    }: {
+      emailAddress: string | null
+    }) => emailAddress ?? 'resolved@example.com',
+    usesInjectedEmailDriver: false,
+    usesInjectedTelegramDriver: false,
+    ...overrides,
   }
 }
 
@@ -72,10 +132,10 @@ test('sourceAdd rejects duplicate connector ids', async () => {
   readConfigMock.mockResolvedValue(
     createConfig([
       {
-        id: 'telegram:bot',
-        source: 'telegram',
+        id: 'email:primary',
+        source: 'email',
         enabled: true,
-        accountId: 'bot',
+        accountId: 'mailbox-1',
         options: {},
       },
     ]),
@@ -87,9 +147,17 @@ test('sourceAdd rejects duplicate connector ids', async () => {
     () =>
       ops.sourceAdd({
         ...commandContext(),
-        id: 'telegram:bot',
-        source: 'telegram',
-        account: 'bot',
+        id: 'email:primary',
+        source: 'email',
+        account: 'mailbox-2',
+        address: null,
+        backfillLimit: undefined,
+        provision: false,
+        enableAutoReply: false,
+        includeOwn: false,
+        linqWebhookHost: null,
+        linqWebhookPath: null,
+        linqWebhookPort: undefined,
       }),
     (error: unknown) => {
       assert.ok(error instanceof VaultCliError)
@@ -99,7 +167,7 @@ test('sourceAdd rejects duplicate connector ids', async () => {
   )
 })
 
-test('sourceAdd rejects unsupported sources outside the current contract', async () => {
+test('sourceAdd rejects unsupported sources outside the current runtime contract', async () => {
   const ops = createInboxSourceOps(createEnv())
 
   await assert.rejects(
@@ -109,10 +177,45 @@ test('sourceAdd rejects unsupported sources outside the current contract', async
         id: 'unsupported:source',
         source: 'unsupported' as never,
         account: 'custom',
+        address: null,
+        backfillLimit: undefined,
+        provision: false,
+        enableAutoReply: false,
+        includeOwn: false,
+        linqWebhookHost: null,
+        linqWebhookPath: null,
+        linqWebhookPort: undefined,
       }),
     (error: unknown) => {
       assert.ok(error instanceof VaultCliError)
       assert.equal(error.code, 'INBOX_SOURCE_UNSUPPORTED')
+      return true
+    },
+  )
+})
+
+test('sourceAdd requires an email account when provisioning is disabled', async () => {
+  const ops = createInboxSourceOps(createEnv())
+
+  await assert.rejects(
+    () =>
+      ops.sourceAdd({
+        ...commandContext(),
+        id: 'email:primary',
+        source: 'email',
+        account: '   ',
+        address: null,
+        backfillLimit: undefined,
+        provision: false,
+        enableAutoReply: false,
+        includeOwn: false,
+        linqWebhookHost: null,
+        linqWebhookPath: null,
+        linqWebhookPort: undefined,
+      }),
+    (error: unknown) => {
+      assert.ok(error instanceof VaultCliError)
+      assert.equal(error.code, 'INBOX_EMAIL_ACCOUNT_REQUIRED')
       return true
     },
   )
@@ -128,6 +231,14 @@ test('sourceAdd rejects local Linq connector creation', async () => {
         id: 'linq:primary',
         source: 'linq',
         account: null,
+        address: null,
+        backfillLimit: undefined,
+        provision: false,
+        enableAutoReply: false,
+        includeOwn: false,
+        linqWebhookHost: '0.0.0.0',
+        linqWebhookPath: 'linq-webhook',
+        linqWebhookPort: 8789,
       }),
     (error: unknown) => {
       assert.ok(error instanceof VaultCliError)
@@ -137,49 +248,113 @@ test('sourceAdd rejects local Linq connector creation', async () => {
   )
 })
 
-test('sourceAdd persists normalized Telegram composition and optional auto reply', async () => {
-  const enableAssistantAutoReplyChannel = vi.fn(async () => true)
+test('sourceAdd normalizes Telegram account ids before persistence', async () => {
+  const enableAssistantAutoReplyChannel = vi.fn(async () => false)
   const config = createConfig()
   readConfigMock.mockResolvedValue(config)
 
-  const ops = createInboxSourceOps(createEnv(enableAssistantAutoReplyChannel))
+  const ops = createInboxSourceOps(
+    createEnv({
+      enableAssistantAutoReplyChannel,
+    }),
+  )
+
   const result = await ops.sourceAdd({
     ...commandContext(),
     id: 'telegram:bot',
     source: 'telegram',
     account: null,
+    address: null,
     backfillLimit: 25,
+    provision: false,
+    enableAutoReply: false,
+    includeOwn: false,
+    linqWebhookHost: null,
+    linqWebhookPath: null,
+    linqWebhookPort: undefined,
+  })
+
+  assert.equal(result.connector.accountId, 'bot')
+  const writtenConfig = writeConfigMock.mock.calls[0]?.[1]
+  assert.equal(writtenConfig?.connectors[0]?.accountId, 'bot')
+  assert.equal(enableAssistantAutoReplyChannel.mock.calls.length, 0)
+})
+
+test('sourceAdd provisions email connectors and enables auto reply when requested', async () => {
+  const enableAssistantAutoReplyChannel = vi.fn(
+    async (_vault: string, _channel: InboxConnectorConfig['source']) => true,
+  )
+  const provisionOrRecoverAgentmailInbox = vi.fn(async () => ({
+    accountId: 'mailbox-9',
+    emailAddress: 'provisioned@example.com',
+    provisionedMailbox: {
+      inboxId: 'mailbox-9',
+      emailAddress: 'provisioned@example.com',
+      displayName: 'Provisioned Inbox',
+      clientId: 'client-9',
+      provider: 'agentmail' as const,
+    },
+    reusedMailbox: null,
+  }))
+  const tryResolveAgentmailInboxAddress = vi.fn(async () => 'resolved@example.com')
+  const config = createConfig()
+  readConfigMock.mockResolvedValue(config)
+
+  const ops = createInboxSourceOps(
+    createEnv({
+      provisionOrRecoverAgentmailInbox,
+      tryResolveAgentmailInboxAddress,
+      enableAssistantAutoReplyChannel,
+    }),
+  )
+
+  const result = await ops.sourceAdd({
+    ...commandContext(),
+    id: 'email:primary',
+    source: 'email',
+    account: null,
+    address: null,
+    backfillLimit: 25,
+    provision: true,
     enableAutoReply: true,
+    includeOwn: false,
+    emailClientId: 'client-9',
+    emailDisplayName: 'Provisioned Inbox',
+    emailDomain: 'example.com',
+    emailUsername: 'user',
+    linqWebhookHost: null,
+    linqWebhookPath: null,
+    linqWebhookPort: undefined,
   })
 
   assert.equal(config.connectors.length, 0)
   const writtenConfig = writeConfigMock.mock.calls[0]?.[1]
-  assert.deepEqual(writtenConfig?.connectors, [
-    {
-      id: 'telegram:bot',
-      source: 'telegram',
-      enabled: true,
-      accountId: 'bot',
-      options: { backfillLimit: 25 },
-    },
-  ])
+  assert.equal(writtenConfig?.connectors.length, 1)
+  assert.equal(writtenConfig?.connectors[0]?.id, 'email:primary')
+  assert.equal(writtenConfig?.connectors[0]?.accountId, 'mailbox-9')
+  assert.equal(
+    writtenConfig?.connectors[0]?.options.emailAddress,
+    'resolved@example.com',
+  )
   assert.equal(result.autoReplyEnabled, true)
-  assert.deepEqual(enableAssistantAutoReplyChannel.mock.calls[0], [
-    '/vault',
-    'telegram',
-  ])
+  assert.equal(enableAssistantAutoReplyChannel.mock.calls[0]?.[1], 'email')
   assert.equal(sortConnectorsMock.mock.calls.length, 1)
+  assert.equal(writeConfigMock.mock.calls.length, 1)
 })
 
-test('sourceAdd does not persist when auto reply enablement throws', async () => {
+test('sourceAdd does not persist the connector when auto reply enablement throws', async () => {
+  const enableAssistantAutoReplyChannel = vi.fn(
+    async () => {
+      throw new Error('auto reply failed')
+    },
+  )
   const config = createConfig()
   readConfigMock.mockResolvedValue(config)
+
   const ops = createInboxSourceOps(
-    createEnv(
-      vi.fn(async () => {
-        throw new Error('auto reply failed')
-      }),
-    ),
+    createEnv({
+      enableAssistantAutoReplyChannel,
+    }),
   )
 
   await assert.rejects(
@@ -188,13 +363,22 @@ test('sourceAdd does not persist when auto reply enablement throws', async () =>
         ...commandContext(),
         id: 'telegram:bot',
         source: 'telegram',
+        account: null,
+        address: null,
+        backfillLimit: 25,
+        provision: false,
         enableAutoReply: true,
+        includeOwn: false,
+        linqWebhookHost: null,
+        linqWebhookPath: null,
+        linqWebhookPort: undefined,
       }),
     /auto reply failed/,
   )
 
   assert.equal(config.connectors.length, 0)
   assert.equal(writeConfigMock.mock.calls.length, 0)
+  assert.equal(sortConnectorsMock.mock.calls.length, 0)
 })
 
 test('sourceList returns the current config connectors', async () => {
@@ -210,23 +394,14 @@ test('sourceList returns the current config connectors', async () => {
     ]),
   )
 
-  const result = await createInboxSourceOps(createEnv()).sourceList(commandContext())
+  const ops = createInboxSourceOps(createEnv())
+  const result = await ops.sourceList(commandContext())
 
   assert.equal(result.connectors.length, 1)
   assert.equal(result.configPath, '.inbox/config.json')
 })
 
-test('sourceRemove deletes the matching connector and rejects unknown ids', async () => {
-  const config = createConfig([
-    {
-      id: 'telegram:bot',
-      source: 'telegram',
-      enabled: true,
-      accountId: 'bot',
-      options: {},
-    },
-  ])
-  readConfigMock.mockResolvedValue(config)
+test('sourceRemove rejects unknown connector ids', async () => {
   const ops = createInboxSourceOps(createEnv())
 
   await assert.rejects(
@@ -237,27 +412,32 @@ test('sourceRemove deletes the matching connector and rejects unknown ids', asyn
       return true
     },
   )
-
-  const result = await ops.sourceRemove({
-    ...commandContext(),
-    connectorId: 'telegram:bot',
-  })
-  assert.equal(result.removed, true)
-  assert.equal(config.connectors.length, 0)
-  assert.equal(writeConfigMock.mock.calls.length, 1)
 })
 
-test('sourceSetEnabled updates connector state and rejects unknown ids', async () => {
+test('sourceRemove deletes the matching connector and writes config', async () => {
   const config = createConfig([
     {
       id: 'telegram:bot',
       source: 'telegram',
-      enabled: false,
+      enabled: true,
       accountId: 'bot',
       options: {},
     },
   ])
   readConfigMock.mockResolvedValue(config)
+
+  const ops = createInboxSourceOps(createEnv())
+  const result = await ops.sourceRemove({
+    ...commandContext(),
+    connectorId: 'telegram:bot',
+  })
+
+  assert.equal(config.connectors.length, 0)
+  assert.equal(result.removed, true)
+  assert.equal(writeConfigMock.mock.calls.length, 1)
+})
+
+test('sourceSetEnabled rejects unknown connector ids', async () => {
   const ops = createInboxSourceOps(createEnv())
 
   await assert.rejects(
@@ -273,12 +453,28 @@ test('sourceSetEnabled updates connector state and rejects unknown ids', async (
       return true
     },
   )
+})
 
+test('sourceSetEnabled updates connector state and persists config', async () => {
+  const config = createConfig([
+    {
+      id: 'telegram:bot',
+      source: 'telegram',
+      enabled: false,
+      accountId: 'bot',
+      options: {},
+    },
+  ])
+  readConfigMock.mockResolvedValue(config)
+
+  const ops = createInboxSourceOps(createEnv())
   const result = await ops.sourceSetEnabled({
     ...commandContext(),
     connectorId: 'telegram:bot',
     enabled: true,
   })
+
+  assert.equal(config.connectors[0]?.enabled, true)
   assert.equal(result.connector.enabled, true)
   assert.equal(writeConfigMock.mock.calls.length, 1)
 })

@@ -10,6 +10,7 @@ import {
   getAssistantChannelAdapter,
   normalizeAssistantDeliverySubject,
   resolveDeliveryCandidates,
+  sendEmailMessage,
   sendLinqMessage,
   sendLinqVoiceMemoMessage,
   sendTelegramMessage,
@@ -45,6 +46,7 @@ import type {
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 
 export {
+  sendEmailMessage,
   sendLinqMessage,
   sendLinqVoiceMemoMessage,
   sendTelegramMessage,

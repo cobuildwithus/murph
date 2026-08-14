@@ -15,13 +15,6 @@ specified by `agent-docs/SECURITY.md`,
 `agent-docs/references/testing-ci-map.md`, and
 `agent-docs/exec-plans/active/2026-08-12-provider-request-guard.md`.
 
-Local setup and assistant delivery no longer own an operational email provider:
-setup manages Telegram, the local inbox runtime retains Telegram and Linq, and
-generic email remains confined to hosted ingress and injected hosted delivery.
-This ownership split is jointly specified by `ARCHITECTURE.md`,
-`agent-docs/SECURITY.md`, `agent-docs/operations/verification-and-runtime.md`,
-and `agent-docs/references/testing-ci-map.md`.
-
 Hosted device-sync wake ownership keeps provider cadence in Web's canonical
 `nextReconcileAt`, while the encrypted system-mailbox item retains exact
 connection-specific retry work and Web dirty rows retain dirty resource/deletion

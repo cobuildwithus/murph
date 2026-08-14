@@ -22,7 +22,7 @@ export interface AssistantAutomationRouteDeliverabilityIssue {
     | 'email_delivery_target_required'
     | 'email_hosted_thread_target_invalid'
     | 'email_hosted_thread_target_recipient_required'
-    | 'email_local_unsupported'
+    | 'email_identity_required'
     | 'email_private_delivery_target'
     | 'linq_delivery_target_required'
     | 'linq_private_participant'
@@ -218,6 +218,7 @@ export function getAssistantAutomationRouteDeliverabilityIssue(
 ): AssistantAutomationRouteDeliverabilityIssue | null {
   const channel = normalizeAssistantRouteString(input.channel)
   const deliveryTarget = normalizeAssistantRouteString(input.deliveryTarget)
+  const identityId = normalizeAssistantRouteString(input.identityId)
   const participantId = normalizeAssistantRouteString(input.participantId)
   const threadId = normalizeAssistantRouteString(input.threadId)
   const deliverySourceKind =
@@ -273,14 +274,10 @@ export function getAssistantAutomationRouteDeliverabilityIssue(
   }
 
   if (channel === 'email') {
-    if (profile !== 'hosted') {
-      return {
-        code: 'email_local_unsupported',
-        message:
-          'Local email automation delivery is not supported. Use Telegram or Linq for local automations.',
-      }
-    }
-
+    const isHostedProfile = profile === 'hosted'
+    const hasUsableEmailIdentity =
+      Boolean(identityId) &&
+      !looksLikePrivateAssistantRoutePlaceholder(identityId)
     const hostedEmailThreadTarget = deliveryTarget?.startsWith(
       HOSTED_EMAIL_THREAD_TARGET_PREFIX,
     )
@@ -317,7 +314,32 @@ export function getAssistantAutomationRouteDeliverabilityIssue(
       }
     }
 
-    if (!deliveryTarget) {
+    if (
+      deliveryTarget &&
+      !hasUsableEmailIdentity &&
+      !isHostedProfile
+    ) {
+      return {
+        code: 'email_identity_required',
+        message:
+          'Email automation routes require a sender identity for explicit email delivery targets.',
+      }
+    }
+
+    const hasLocalBindingDeliveryRoute =
+      !isHostedProfile &&
+      hasUsableEmailIdentity &&
+      (
+        (
+          Boolean(threadId) &&
+          !looksLikePrivateAssistantRoutePlaceholder(threadId)
+        ) ||
+        (
+          Boolean(participantId) &&
+          !looksLikePrivateAssistantRoutePlaceholder(participantId)
+        )
+      )
+    if (!deliveryTarget && !hasLocalBindingDeliveryRoute) {
       return {
         code: 'email_delivery_target_required',
         message:

@@ -10,6 +10,11 @@ import { normalizeTextValue, sanitizeRawMetadata, toIsoTimestamp } from "../../s
 import type { ChatMessage } from "../chat/message.ts";
 import { createInboundCaptureFromChatMessage } from "../chat/message.ts";
 import {
+  buildEmailMessageText,
+  inferAttachmentKind,
+  resolveEmailDisplayName,
+} from "./normalize.ts";
+import {
   inferDirectEmailThreadFromParticipants,
   resolveEmailAddress,
 } from "./directness.ts";
@@ -81,7 +86,10 @@ export async function toParsedEmailChatMessage(input: {
     occurredAt: toIsoTimestamp(input.message.occurredAt ?? new Date()),
     raw: sanitizeParsedEmailMessage(input.message),
     receivedAt: input.message.receivedAt ?? input.message.occurredAt ?? null,
-    text: buildParsedEmailMessageText(input.message),
+    text: buildEmailMessageText({
+      html: input.message.html,
+      text: input.message.text,
+    }),
     thread: {
       id: serializeHostedEmailThreadTarget(resolvedThreadTarget),
       ...(input.threadIsDirect === null
@@ -287,77 +295,4 @@ function compactRecord(
   return Object.fromEntries(
     Object.entries(value).filter(([, entryValue]) => entryValue !== undefined),
   );
-}
-
-function buildParsedEmailMessageText(message: ParsedEmailMessage): string | null {
-  return (
-    normalizeTextValue(message.text) ??
-    normalizeTextValue(stripHtml(message.html)) ??
-    null
-  );
-}
-
-function resolveEmailDisplayName(
-  value: string | null | undefined,
-): string | null {
-  const normalized = normalizeTextValue(value ?? null);
-  if (!normalized) {
-    return null;
-  }
-
-  const angleIndex = normalized.indexOf("<");
-  if (angleIndex <= 0) {
-    return null;
-  }
-
-  const candidate = normalized.slice(0, angleIndex).trim().replace(/^"|"$/gu, "");
-  return candidate.length > 0 ? candidate : null;
-}
-
-function inferAttachmentKind(attachment: {
-  content_type?: string | null;
-  filename?: string | null;
-}): InboundAttachment["kind"] {
-  const mime = String(attachment.content_type ?? "").toLowerCase();
-  const fileName = String(attachment.filename ?? "").toLowerCase();
-
-  if (mime.startsWith("image/") || /\.(gif|heic|heif|jpe?g|png|webp)$/u.test(fileName)) {
-    return "image";
-  }
-  if (mime.startsWith("audio/") || /\.(aac|m4a|mp3|wav)$/u.test(fileName)) {
-    return "audio";
-  }
-  if (mime.startsWith("video/") || /\.(m4v|mov|mp4|webm)$/u.test(fileName)) {
-    return "video";
-  }
-  if (
-    mime === "application/pdf" ||
-    /\.(csv|docx?|pdf|rtf|txt|xls|xlsx)$/u.test(fileName)
-  ) {
-    return "document";
-  }
-
-  return "other";
-}
-
-function stripHtml(value: string | null | undefined): string | null {
-  const normalized = normalizeTextValue(value ?? null);
-  if (!normalized) {
-    return null;
-  }
-
-  return normalized
-    .replace(/<style\b[^>]*>[\s\S]*?<\/style>/giu, " ")
-    .replace(/<script\b[^>]*>[\s\S]*?<\/script>/giu, " ")
-    .replace(/<br\s*\/?>/giu, "\n")
-    .replace(/<\/p>/giu, "\n\n")
-    .replace(/<[^>]+>/gu, " ")
-    .replace(/&nbsp;/giu, " ")
-    .replace(/&amp;/giu, "&")
-    .replace(/&lt;/giu, "<")
-    .replace(/&gt;/giu, ">")
-    .replace(/\s+\n/gu, "\n")
-    .replace(/\n{3,}/gu, "\n\n")
-    .replace(/[ \t]{2,}/gu, " ")
-    .trim();
 }

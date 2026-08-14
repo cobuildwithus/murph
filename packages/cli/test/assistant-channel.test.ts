@@ -8,6 +8,7 @@ import {
   serializeHostedEmailThreadTarget,
 } from '@murphai/runtime-state/node'
 import {
+  sendEmailMessage,
   sendLinqMessage,
   sendTelegramMessage,
   startLinqTypingIndicator,
@@ -611,7 +612,7 @@ test('deliverAssistantMessage uses stored email thread bindings so one assistant
     {
       vault: vaultRoot,
       channel: 'email',
-      identityId: 'hosted-email-identity',
+      identityId: 'inbox_123',
       participantId: 'user@example.com',
       threadId: 'thread_123',
       threadIsDirect: true,
@@ -626,7 +627,7 @@ test('deliverAssistantMessage uses stored email thread bindings so one assistant
 
   assert.equal(sent.length, 1)
   assertAssistantOutboxDispatch(sent[0], {
-    identityId: 'hosted-email-identity',
+    identityId: 'inbox_123',
     target: 'thread_123',
     targetKind: 'thread',
     message: 'Email thread reply.',
@@ -637,7 +638,7 @@ test('deliverAssistantMessage uses stored email thread bindings so one assistant
   assert.equal(result.delivery.target, 'thread_123')
   assert.equal(result.delivery.targetKind, 'thread')
   assert.equal(result.session.binding.channel, 'email')
-  assert.equal(result.session.binding.identityId, 'hosted-email-identity')
+  assert.equal(result.session.binding.identityId, 'inbox_123')
   assert.equal(result.session.binding.threadId, 'thread_123')
   assert.equal(result.session.binding.delivery?.kind, 'thread')
   assert.equal(result.session.binding.delivery?.target, 'thread_123')
@@ -699,6 +700,292 @@ test('deliverAssistantMessage persists canonical email thread targets returned b
   assert.equal(result.delivery.targetKind, 'thread')
   assert.equal(result.session.binding.threadId, canonicalTarget)
   assert.equal(result.session.binding.delivery?.target, canonicalTarget)
+})
+
+test('sendEmailMessage sends new outbound email through the configured AgentMail inbox', async () => {
+  const requests: Array<{
+    body: Record<string, unknown>
+    headers: Record<string, string> | undefined
+    method: string
+    url: string
+  }> = []
+
+  await sendEmailMessage(
+    {
+      identityId: 'inbox_123',
+      message: 'Daily summary',
+      target: 'user@example.com',
+      targetKind: 'participant',
+    },
+    {
+      env: {
+        AGENTMAIL_API_KEY: 'agentmail-key',
+        AGENTMAIL_BASE_URL: 'https://mail.example.test/v0',
+      },
+      fetchImplementation: async (url, init) => {
+        requests.push({
+          body: parseJsonRequestBody(init.body),
+          headers: init.headers,
+          method: init.method,
+          url,
+        })
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ message_id: 'msg_1', thread_id: 'thr_1' }),
+          text: async () => '',
+          arrayBuffer: async () => new ArrayBuffer(0),
+        }
+      },
+    },
+  )
+
+  assert.equal(requests.length, 1)
+  assert.equal(
+    requests[0]?.url,
+    'https://mail.example.test/v0/inboxes/inbox_123/messages/send',
+  )
+  assert.equal(requests[0]?.method, 'POST')
+  assert.equal(requests[0]?.headers?.authorization, 'Bearer agentmail-key')
+  assert.equal(requests[0]?.headers?.['content-type'], 'application/json')
+  assert.deepEqual(requests[0]?.body, {
+    to: 'user@example.com',
+    subject: 'Murph update',
+    text: 'Daily summary',
+  })
+})
+
+test('sendEmailMessage retries AgentMail send requests after a 429 response', async () => {
+  const requests: Array<{
+    method: string
+    url: string
+  }> = []
+  let attempt = 0
+
+  vi.useFakeTimers()
+
+  try {
+    const sendPromise = sendEmailMessage(
+      {
+        identityId: 'inbox_123',
+        message: 'Daily summary',
+        target: 'user@example.com',
+        targetKind: 'participant',
+      },
+      {
+        env: {
+          AGENTMAIL_API_KEY: 'agentmail-key',
+          AGENTMAIL_BASE_URL: 'https://mail.example.test/v0',
+        },
+        fetchImplementation: async (url, init) => {
+          attempt += 1
+          requests.push({
+            method: init.method,
+            url,
+          })
+
+          if (attempt === 1) {
+            return {
+              ok: false,
+              status: 429,
+              json: async () => ({ message: 'Rate limited' }),
+              text: async () => '',
+              arrayBuffer: async () => new ArrayBuffer(0),
+            }
+          }
+
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({ message_id: 'msg_1', thread_id: 'thr_1' }),
+            text: async () => '',
+            arrayBuffer: async () => new ArrayBuffer(0),
+          }
+        },
+      },
+    )
+
+    await vi.advanceTimersByTimeAsync(1_000)
+    await sendPromise
+  } finally {
+    vi.useRealTimers()
+  }
+
+  assert.equal(requests.length, 2)
+  assert.equal(requests[0]?.method, 'POST')
+  assert.equal(requests[1]?.method, 'POST')
+  assert.equal(
+    requests[0]?.url,
+    'https://mail.example.test/v0/inboxes/inbox_123/messages/send',
+  )
+  assert.equal(requests[0]?.url, requests[1]?.url)
+})
+
+test('sendEmailMessage honors AgentMail Retry-After headers on 429 responses', async () => {
+  let attempt = 0
+  const attemptTimes: number[] = []
+
+  vi.useFakeTimers()
+
+  try {
+    const sendPromise = sendEmailMessage(
+      {
+        identityId: 'inbox_123',
+        message: 'Daily summary',
+        target: 'user@example.com',
+        targetKind: 'participant',
+      },
+      {
+        env: {
+          AGENTMAIL_API_KEY: 'agentmail-key',
+          AGENTMAIL_BASE_URL: 'https://mail.example.test/v0',
+        },
+        fetchImplementation: async (_url, _init) => {
+          attempt += 1
+          attemptTimes.push(Date.now())
+
+          if (attempt === 1) {
+            return {
+              ok: false,
+              status: 429,
+              headers: {
+                'Retry-After': '0.05',
+              },
+              json: async () => ({ message: 'Rate limited' }),
+              text: async () => '',
+              arrayBuffer: async () => new ArrayBuffer(0),
+            }
+          }
+
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({ message_id: 'msg_1', thread_id: 'thr_1' }),
+            text: async () => '',
+            arrayBuffer: async () => new ArrayBuffer(0),
+          }
+        },
+      },
+    )
+
+    await vi.advanceTimersByTimeAsync(100)
+    await sendPromise
+
+    assert.equal(attempt, 2)
+    assert.ok((attemptTimes[1] ?? 0) - (attemptTimes[0] ?? 0) >= 50)
+    assert.ok((attemptTimes[1] ?? 0) - (attemptTimes[0] ?? 0) < 1_000)
+  } finally {
+    vi.useRealTimers()
+  }
+})
+
+test('sendEmailMessage falls back to raw AgentMail error text when the error body is not JSON', async () => {
+  await assert.rejects(
+    () =>
+      sendEmailMessage(
+        {
+          identityId: 'inbox_123',
+          message: 'Daily summary',
+          target: 'user@example.com',
+          targetKind: 'participant',
+        },
+        {
+          env: {
+            AGENTMAIL_API_KEY: 'agentmail-key',
+            AGENTMAIL_BASE_URL: 'https://mail.example.test/v0',
+          },
+          fetchImplementation: async () => ({
+            ok: false,
+            status: 500,
+            json: async () => {
+              throw new Error('invalid json')
+            },
+            text: async () => 'Plain AgentMail failure',
+            arrayBuffer: async () => new ArrayBuffer(0),
+          }),
+        },
+      ),
+    (error: unknown) => {
+      assert.equal(error instanceof VaultCliError, true)
+      assert.equal((error as VaultCliError).code, 'AGENTMAIL_REQUEST_FAILED')
+      assert.equal((error as VaultCliError).message, 'Plain AgentMail failure')
+      assert.deepEqual((error as VaultCliError).context, {
+        method: 'POST',
+        path: '/inboxes/inbox_123/messages/send',
+        retryable: false,
+        status: 500,
+      })
+      return true
+    },
+  )
+})
+
+test('sendEmailMessage resolves a thread and replies to the latest AgentMail message', async () => {
+  const requests: Array<{
+    body: Record<string, unknown> | null
+    method: string
+    url: string
+  }> = []
+
+  await sendEmailMessage(
+    {
+      identityId: 'inbox_123',
+      message: 'Following up in-thread.',
+      target: 'thread_123',
+      targetKind: 'thread',
+    },
+    {
+      env: {
+        AGENTMAIL_API_KEY: 'agentmail-key',
+        AGENTMAIL_BASE_URL: 'https://mail.example.test/v0',
+      },
+      fetchImplementation: async (url, init) => {
+        requests.push({
+          body: init.body ? (JSON.parse(init.body) as Record<string, unknown>) : null,
+          method: init.method,
+          url,
+        })
+
+        if (url.endsWith('/threads/thread_123')) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              thread_id: 'thread_123',
+              last_message_id: 'msg_9',
+              messages: [
+                { message_id: 'msg_1' },
+                { message_id: 'msg_9' },
+              ],
+            }),
+            text: async () => '',
+            arrayBuffer: async () => new ArrayBuffer(0),
+          }
+        }
+
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ message_id: 'msg_10', thread_id: 'thread_123' }),
+          text: async () => '',
+          arrayBuffer: async () => new ArrayBuffer(0),
+        }
+      },
+    },
+  )
+
+  assert.equal(requests.length, 2)
+  assert.equal(requests[0]?.method, 'GET')
+  assert.equal(requests[0]?.url, 'https://mail.example.test/v0/threads/thread_123')
+  assert.equal(requests[1]?.method, 'POST')
+  assert.equal(
+    requests[1]?.url,
+    'https://mail.example.test/v0/inboxes/inbox_123/messages/msg_9/reply',
+  )
+  assert.deepEqual(requests[1]?.body, {
+    reply_all: true,
+    text: 'Following up in-thread.',
+  })
 })
 
 test('sendLinqMessage posts Linq chat message payloads to the configured API base url', async () => {
