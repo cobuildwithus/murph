@@ -4,8 +4,12 @@ import {
 import {
   HOSTED_RUNTIME_ASSISTANT_ASK_DIAGNOSTIC_CODE_HEADER,
   HOSTED_RUNTIME_ASSISTANT_ASK_REQUEST_ID_HEADER,
+  HOSTED_RUNTIME_GROUP_CURRENT_SENDER_PROTOCOL_MARKER,
+  HOSTED_RUNTIME_GROUP_CURRENT_SENDER_PROTOCOL_MARKER_VALUE,
   HOSTED_RUNTIME_GROUP_TOOL_REQUEST_MAX_BYTES,
   isHostedRuntimeAssistantAskDiagnosticCode,
+  type HostedRuntimeGroupCurrentSenderDirectResult,
+  type HostedRuntimeGroupToolResponse,
 } from "@murphai/hosted-execution/runtime-control";
 import {
   handleHostedRuntimeGroupTool,
@@ -43,7 +47,8 @@ export const POST = withJsonError(async (request: Request) => {
   const { payload, userId: memberId } = await requireHostedCloudflareCallbackJsonRequest(request, {
     maxBodyBytes: HOSTED_RUNTIME_GROUP_TOOL_REQUEST_MAX_BYTES,
   });
-  const body = parseHostedRuntimeGroupToolRequest(payload, {
+  const currentSenderWire = readHostedCurrentSenderWire(payload);
+  const body = parseHostedRuntimeGroupToolRequest(currentSenderWire.payload, {
     privateMediaDeliveryOrigin: readHostedExecutionControlOrigin(),
   });
   const supportedProjectionScopeKeys =
@@ -64,7 +69,10 @@ export const POST = withJsonError(async (request: Request) => {
   );
 
   if (body.action !== "ask") {
-    return jsonOk(await executeTool());
+    return jsonOk(encodeHostedCurrentSenderLegacyWireResponse(
+      await executeTool(),
+      currentSenderWire.compatibility,
+    ));
   }
 
   const responseHeaders = {
@@ -99,4 +107,114 @@ function readHostedAssistantAskDiagnosticCode(error: unknown): string | undefine
   } catch {
     return undefined;
   }
+}
+
+type HostedCurrentSenderWireCompatibility = {
+  action: "message_current_sender";
+};
+
+type HostedCurrentSenderWire = {
+  compatibility: HostedCurrentSenderWireCompatibility | null;
+  payload: unknown;
+};
+
+type HostedCurrentSenderLegacyWireResponse = {
+  action: "message_current_sender";
+  result: HostedRuntimeGroupCurrentSenderDirectResult;
+};
+
+function readHostedCurrentSenderWire(
+  payload: unknown,
+): HostedCurrentSenderWire {
+  const hasProtocolMarker = hasHostedWireProperty(
+    payload,
+    HOSTED_RUNTIME_GROUP_CURRENT_SENDER_PROTOCOL_MARKER,
+  );
+
+  if (hasProtocolMarker) {
+    if (
+      readHostedWireProperty(
+        payload,
+        HOSTED_RUNTIME_GROUP_CURRENT_SENDER_PROTOCOL_MARKER,
+      ) !== HOSTED_RUNTIME_GROUP_CURRENT_SENDER_PROTOCOL_MARKER_VALUE
+      || readHostedCurrentSenderWireAction(payload) !== "ask_current_sender"
+    ) {
+      throw new TypeError("Hosted current-sender protocol is invalid.");
+    }
+    return {
+      compatibility: null,
+      payload: removeHostedWireProperty(
+        payload,
+        HOSTED_RUNTIME_GROUP_CURRENT_SENDER_PROTOCOL_MARKER,
+      ),
+    };
+  }
+
+  const action = readHostedCurrentSenderWireAction(payload);
+  if (action === "ask_current_sender") {
+    throw new TypeError("Hosted current-sender group protocol marker is required.");
+  }
+  if (action === "message_current_sender") {
+    assertHostedCurrentSenderLegacyWireShape(payload);
+    return {
+      compatibility: { action },
+      payload,
+    };
+  }
+  return { compatibility: null, payload };
+}
+
+function assertHostedCurrentSenderLegacyWireShape(payload: unknown): void {
+  if (
+    typeof payload !== "object"
+    || payload === null
+    || Object.keys(payload).some((key) => key !== "action" && key !== "origin")
+  ) {
+    throw new TypeError("Hosted current-sender legacy protocol is invalid.");
+  }
+}
+
+function hasHostedWireProperty(
+  payload: unknown,
+  key: string,
+): payload is object {
+  return (typeof payload === "object" || typeof payload === "function")
+    && payload !== null
+    && Object.hasOwn(payload, key);
+}
+
+function readHostedWireProperty(payload: unknown, key: string): unknown {
+  if (!hasHostedWireProperty(payload, key)) {
+    return undefined;
+  }
+  try {
+    return Reflect.get(payload, key);
+  } catch {
+    return undefined;
+  }
+}
+
+function removeHostedWireProperty(payload: unknown, key: string): unknown {
+  const canonicalPayload = { ...(payload as Record<string, unknown>) };
+  delete canonicalPayload[key];
+  return canonicalPayload;
+}
+
+function readHostedCurrentSenderWireAction(
+  payload: unknown,
+): "ask_current_sender" | "message_current_sender" | null {
+  const action = readHostedWireProperty(payload, "action");
+  return action === "ask_current_sender" || action === "message_current_sender"
+    ? action
+    : null;
+}
+
+function encodeHostedCurrentSenderLegacyWireResponse(
+  response: HostedRuntimeGroupToolResponse,
+  compatibility: HostedCurrentSenderWireCompatibility | null,
+): HostedRuntimeGroupToolResponse | HostedCurrentSenderLegacyWireResponse {
+  if (response.action !== "ask_current_sender" || compatibility === null) {
+    return response;
+  }
+  return { action: compatibility.action, result: response.result };
 }

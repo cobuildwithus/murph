@@ -157,6 +157,48 @@ describe('assistant manual provider export guidance', () => {
     expect(reference).toContain(
       'vault-cli workout import csv <file> --vault "$VAULT" --source strong --format json',
     )
+    expect(normalizedReference).toContain(
+      'Never infer units from locale, exercise names, or value size',
+    )
+    expect(normalizedReference).toContain(
+      '`--distance-unit m|km|mi`',
+    )
+    expect(normalizedReference).toContain(
+      '`lookupIds` and `ledgerFiles` are intentionally capped',
+    )
+    expect(normalizedReference).toContain(
+      'the weight answer applies to every unitless load field',
+    )
+    expect(normalizedReference).toContain(
+      'For both Strong and Hevy workout exports, inspect the original CSV before any write',
+    )
+    expect(normalizedReference).toContain(
+      'the corrected unit option and `--correct-units`',
+    )
+    expect(normalizedReference).toContain(
+      'If inspection returns `detectedSource: null` for headers shared by Strong and Hevy',
+    )
+    expect(normalizedReference).toContain(
+      'Never guess Strong from shared workout headers',
+    )
+    expect(normalizedReference).toContain(
+      'preserves the original workout timezone and other non-unit fields',
+    )
+    expect(normalizedReference).toContain(
+      'correct the provider first by rerunning the exact CSV with only the confirmed `--source`',
+    )
+    expect(normalizedReference).toContain(
+      'do not restate a known-wrong unit',
+    )
+    expect(normalizedReference).toContain(
+      'stop instead of overwriting member changes',
+    )
+    expect(normalizedReference).toContain(
+      'it never returns source headers or row content',
+    )
+    expect(normalizedReference).toContain(
+      'Treat each refreshed export as a complete snapshot',
+    )
 
     expect(reference).toContain('`Export Workouts`')
     expect(reference).toContain('`Export Measurements`')
@@ -165,6 +207,9 @@ describe('assistant manual provider export guidance', () => {
     )
     expect(normalizedReference).toContain(
       'A Hevy measurements export is not a workout CSV',
+    )
+    expect(normalizedReference).toContain(
+      'Follow the shared workout CSV import contract above',
     )
 
     expect(reference).toContain('Lab Results of Record')

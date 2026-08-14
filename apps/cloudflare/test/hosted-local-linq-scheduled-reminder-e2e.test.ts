@@ -82,6 +82,9 @@ const scheduledReminderInstructions =
   "Send the user the hosted-local sleep reminder: go to sleep.";
 const scheduledImageReminderInstructions =
   "Send the user the hosted-local sleep reminder with a simple sleep illustration.";
+const scheduledImageReminderTitle = "Sleep image reminder";
+const overlapReminderTitle = "Overlapping sleep reminder";
+const scheduledNutritionCardTitle = "Daily nutrition card reminder";
 const scheduledReminderMinimumRunwayMs = 5_000;
 const scheduledReminderSendWaitMs = 60_000;
 const scheduledReminderCompletionWaitMs = 60_000;
@@ -155,6 +158,7 @@ describe("hosted local Linq scheduled reminder e2e", () => {
         dueAtIso: scheduledReminderTimes.dueAtIso,
         instructions: scheduledImageReminderInstructions,
         text: setupReplyText,
+        title: scheduledImageReminderTitle,
       }),
       { matchInputContains: scheduledImageSetupRequestText },
     );
@@ -340,6 +344,7 @@ describe("hosted local Linq scheduled reminder e2e", () => {
         dueAtIso: overlapSetupTimes.dueAtIso,
         instructions: scheduledReminderInstructions,
         text: setupReplyText,
+        title: overlapReminderTitle,
       }),
       { matchInputContains: setupRequestText },
     );
@@ -484,6 +489,7 @@ describe("hosted local Linq scheduled reminder e2e", () => {
         dueAtIso: scheduledCardSetupTimes.dueAtIso,
         instructions: scheduledNutritionCardInstructions,
         text: setupReplyText,
+        title: scheduledNutritionCardTitle,
       }),
       { matchInputContains: scheduledNutritionCardSetupRequestText },
     );
@@ -629,6 +635,47 @@ describe("hosted local Linq scheduled reminder timing helpers", () => {
     expect(() => resolveScheduledReminderLocalAt("2026-06-18T12:02:30.000Z"))
       .toThrow("Expected a minute-aligned scheduled reminder timestamp");
     expect(scheduledReminderLeadMs).toBeGreaterThan(scheduledReminderMinimumRunwayMs);
+  });
+
+  it("uses distinct create-only automation identities across scenario phases", () => {
+    const dueAtIso = "2026-06-18T12:02:00.000Z";
+    const scriptedSaves = [
+      {
+        instructions: scheduledImageReminderInstructions,
+        title: scheduledImageReminderTitle,
+      },
+      {
+        instructions: scheduledReminderInstructions,
+        title: overlapReminderTitle,
+      },
+      {
+        instructions: scheduledNutritionCardInstructions,
+        title: scheduledNutritionCardTitle,
+      },
+    ].map(({ instructions, title }) => buildHostedAssistantAutomationSaveResponses({
+      dueAtIso,
+      instructions,
+      text: setupReplyText,
+      title,
+    })[0]);
+
+    expect(scriptedSaves).toEqual([
+      expect.objectContaining({
+        customToolCall: expect.objectContaining({
+          input: expect.stringContaining(`"title":"${scheduledImageReminderTitle}"`),
+        }),
+      }),
+      expect.objectContaining({
+        customToolCall: expect.objectContaining({
+          input: expect.stringContaining(`"title":"${overlapReminderTitle}"`),
+        }),
+      }),
+      expect.objectContaining({
+        customToolCall: expect.objectContaining({
+          input: expect.stringContaining(`"title":"${scheduledNutritionCardTitle}"`),
+        }),
+      }),
+    ]);
   });
 });
 
@@ -851,6 +898,7 @@ function buildHostedAssistantAutomationSaveResponses(input: {
   dueAtIso: string;
   instructions: string;
   text: string;
+  title: string;
 }): readonly HostedLocalAssistantProviderScriptedResponse[] {
   return [
     buildAssistantProviderMurphToolCall("automation", {
@@ -863,7 +911,7 @@ function buildHostedAssistantAutomationSaveResponses(input: {
       },
       summary: "One-shot sleep reminder.",
       tags: ["assistant", "scheduled"],
-      title: "Sleep reminder",
+      title: input.title,
     }),
     input.text,
   ];

@@ -113,19 +113,25 @@ export async function prepareHostedAccountDeletionCleanup(input: {
   const privyUserId = optionalIdentifier(input.privyUserId, "Privy user");
   const privyUserLookupKey = createHostedPrivyUserLookupKey(privyUserId);
   const cryptoConfig = getHostedWebCryptoConfig();
-  const encrypted = await cryptoConfig.gcpKms.encrypt({
-    additionalAuthenticatedData: cleanupAad({
-      environment: cryptoConfig.env,
-      id,
-    }),
-    keyName: cryptoConfig.webWrapKmsKeyName,
-    plaintext: new TextEncoder().encode(JSON.stringify({
-      privyUserId,
-      runtimeMemberIds,
-      schema: CLEANUP_SCHEMA,
-      stripeCustomerIds,
-    } satisfies CleanupPayload)),
-  });
+  const payloadPlaintext = new TextEncoder().encode(JSON.stringify({
+    privyUserId,
+    runtimeMemberIds,
+    schema: CLEANUP_SCHEMA,
+    stripeCustomerIds,
+  } satisfies CleanupPayload));
+  let encrypted: Awaited<ReturnType<typeof cryptoConfig.gcpKms.encrypt>>;
+  try {
+    encrypted = await cryptoConfig.gcpKms.encrypt({
+      additionalAuthenticatedData: cleanupAad({
+        environment: cryptoConfig.env,
+        id,
+      }),
+      keyName: cryptoConfig.webWrapKmsKeyName,
+      plaintext: payloadPlaintext,
+    });
+  } finally {
+    payloadPlaintext.fill(0);
+  }
 
   return {
     cloudflareCompletedAt: null,
@@ -422,9 +428,13 @@ async function decryptCleanupPayload(
     keyName: normalizeGcpKmsCryptoKeyName(cleanup.kmsKeyName),
     signal,
   });
-  return parseCleanupPayload(
-    JSON.parse(new TextDecoder().decode(decrypted.plaintext)),
-  );
+  try {
+    return parseCleanupPayload(
+      JSON.parse(new TextDecoder().decode(decrypted.plaintext)),
+    );
+  } finally {
+    decrypted.plaintext.fill(0);
+  }
 }
 
 function parseCleanupPayload(value: unknown): CleanupPayload {

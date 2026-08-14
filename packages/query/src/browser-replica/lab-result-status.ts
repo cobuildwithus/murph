@@ -15,7 +15,7 @@ import {
   type BrowserVaultNormalizedLabReferenceRange,
   type BrowserVaultPresentedLabResultRow,
 } from "./lab-results.ts";
-import type { BrowserVaultQueryClient } from "./shared.ts";
+import type { BrowserVaultLabsCapableQueryClient } from "./shared.ts";
 
 type RangePosition = "above" | "below" | "within";
 type ResultComparator = NonNullable<BrowserVaultPresentedLabResultRow["comparator"]>;
@@ -74,7 +74,7 @@ export function deriveBrowserVaultLabResultStatus(
 }
 
 export function selectBrowserVaultMeasuredBiomarkers(
-  client: BrowserVaultQueryClient,
+  client: BrowserVaultLabsCapableQueryClient,
 ): BrowserVaultMeasuredBiomarker[] {
   return selectBrowserVaultMeasuredBiomarkersBase(client).map((biomarker) => ({
     ...biomarker,
@@ -83,7 +83,7 @@ export function selectBrowserVaultMeasuredBiomarkers(
 }
 
 export function selectBrowserVaultLabBiomarkerDetail(
-  client: BrowserVaultQueryClient,
+  client: BrowserVaultLabsCapableQueryClient,
   metricKey: string,
 ): BrowserVaultLabBiomarkerDetail | null {
   const detail = selectBrowserVaultLabBiomarkerDetailBase(client, metricKey);

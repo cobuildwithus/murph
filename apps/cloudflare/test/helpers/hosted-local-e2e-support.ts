@@ -243,6 +243,7 @@ export function expectAdvertisedMurphDynamicTools(
     phoneCallsAvailable?: boolean;
     progressUpdatesAvailable?: boolean;
     responseCardAvailable?: boolean;
+    telegramRichContentResponseCardAvailable?: boolean;
     vaultFileSendAvailable?: boolean;
     askGrokAvailable?: boolean;
   } = {},
@@ -314,6 +315,13 @@ export function expectAdvertisedMurphDynamicTools(
       if (
         options.exerciseRoutineResponseCardAvailable !== true
         && name === "murph.attach_exercise_routine_card"
+      ) {
+        return false;
+      }
+
+      if (
+        options.telegramRichContentResponseCardAvailable !== true
+        && name === "murph.attach_telegram_rich_content"
       ) {
         return false;
       }

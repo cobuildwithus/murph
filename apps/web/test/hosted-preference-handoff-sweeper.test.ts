@@ -291,6 +291,9 @@ describe("hosted preference handoff sweeper", () => {
       "'runtime.maintenance-requested'",
     );
     expect(sql).toContain(
+      "'health.daily-metric.reported'",
+    );
+    expect(sql).toContain(
       '"item"."lane_seq" > COALESCE("lane_counter"."consumed_seq", 0)',
     );
     expect(requestHandoff).toHaveBeenCalledWith({

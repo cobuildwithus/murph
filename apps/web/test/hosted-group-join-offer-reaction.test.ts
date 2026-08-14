@@ -964,7 +964,7 @@ describe("handleHostedGroupJoinOfferReaction", () => {
   it("uses read candidates for rotated offer lookup", async () => {
     restoreKeyring = configureHostedContactPrivacyKeyringForTest({
       currentVersion: "v1",
-      entries: { ...TEST_KEYRING_ENTRIES },
+      entries: { v1: TEST_KEYRING_ENTRIES.v1 },
     });
     const storedMessageLookupKey = createHostedLinqMessageLookupKey("msg_offer_123");
     const storedThreadIdentityLookupKey = createHostedExternalThreadIdentityLookupKey({
@@ -974,8 +974,11 @@ describe("handleHostedGroupJoinOfferReaction", () => {
     if (!storedMessageLookupKey || !storedThreadIdentityLookupKey) {
       throw new Error("Expected prior-version lookup keys.");
     }
-    process.env.HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION = "v2";
-    clearHostedOnboardingEnvCache();
+    restoreKeyring();
+    restoreKeyring = configureHostedContactPrivacyKeyringForTest({
+      currentVersion: "v2",
+      entries: { ...TEST_KEYRING_ENTRIES },
+    });
     mocks.acceptHostedGroupJoinOfferTx.mockResolvedValueOnce({
       alreadyMember: false,
       grantedVaultShareProjectionKinds: ["profile-name.v0", "sleep-times.v0"],

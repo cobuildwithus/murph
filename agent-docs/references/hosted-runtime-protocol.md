@@ -1,6 +1,6 @@
 # Hosted Mailbox Runtime Protocol
 
-Last verified: 2026-08-12
+Last verified: 2026-08-14
 
 ## Decision
 
@@ -40,7 +40,8 @@ The live ownership split is:
   The runtime, not the host, keeps dirty state warm through the configured idle
   floor. The exact assistant wake projected directly by the current foreground
   assistant phase may run once before that floor without checkpointing. The
-  exact phone-call-result, usage-referral-reward, and `aask_done_*` private
+  exact phone-call-result, usage-referral-reward, legacy `aask_done_*`, and
+  current `aask_private_*` private
   Assistant Ask notification families may also run queue-only through their
   causal outbox intent after fresh conversation work has priority; generic
   notifications remain excluded. Non-idempotent provider work still waits for
@@ -118,7 +119,8 @@ for Linq input with link parts, attachment-bearing non-email input, and direct r
 run local runtime work until idle or budget
 while dirty and before the idle floor, service fresh foreground input, the
   exact safe Assistant Ask shapes, and only replay-safe phone-call-result,
-  usage-referral-reward, or `aask_done_*` private Assistant Ask notifications
+  usage-referral-reward, legacy `aask_done_*`, or current `aask_private_*`
+  private Assistant Ask notifications
   without publishing a snapshot; other wakes do not shorten the floor
 at the idle floor, or on shutdown, checkpoint final dirty runtime state with
   checkpoint reason idle_shutdown; commit
@@ -206,10 +208,13 @@ serialized heartbeat attempts on a two-second start-to-start cadence for the
 full publication. This leaves the two-second heartbeat request inside the
 10-second stale boundary. A successful foreground preemption bypasses handoff
 preservation and stops heartbeat liveness before detached session cleanup.
-After Web accepts the checkpoint, the runtime stops heartbeating and
-best-effort records completion; a failed marker falls back to stale-heartbeat
-expiry. Absent, mismatched, completed, or stale sessions do not delay
-replacement. This
+If `/complete` loses its response at the transport boundary, the runtime replays
+that exact completion request at most once under the original heartbeat,
+stored write-fence headers, and remaining commit timeout; non-OK HTTP responses
+and parse/validation failures are terminal. After Web accepts the checkpoint,
+the runtime stops heartbeating and best-effort records completion; a failed
+marker falls back to stale-heartbeat expiry. Absent, mismatched, completed, or
+stale sessions do not delay replacement. This
 bridges the shutdown publication race without imposing a fixed snapshot
 deadline or turning the much longer orphan-cleanup lifetime into startup
 liveness. A dead runtime can defer replacement for the 10-second liveness
@@ -405,13 +410,18 @@ infrastructure fields.
 The Web response is complete. For the model boundary, the assistant-engine
 adapter keys every retained projection by its exact scope and collapses the
 grant/data pair to `not_granted`, `pending`, `missing`, or `available`.
-Non-workout record arrays remain intact; `workouts.v0` additionally hoists
-repeated day, kind, time-semantics, and completion-watermark fields. If whole
-member rows still
-exceed the model result limit, the adapter returns `status="partial"` with every
-omitted current membership named in `omittedParticipantIds`. It never truncates
-a member row, treats an omitted member as departed, or alters stored or
-Web-returned truth.
+All source-tagged record arrays remain intact; `workouts.v0` additionally
+hoists repeated day, kind, time-semantics, and completion-watermark fields while
+retaining each workout item's source tag. Group email reads use this same model
+adapter, so they cannot silently collapse a source that the ordinary group tool
+would preserve. The model-result ceiling composes the shared 320 KiB maximum
+serialized projection with the maximum three-scope request and the bounded
+member-identity envelope, including worst-case JSON escaping. One complete
+legal member therefore always fits before roster compaction begins. If whole
+member rows still exceed that composed limit, the adapter returns
+`status="partial"` with every omitted current membership named in
+`omittedParticipantIds`. It never truncates a member row, treats an omitted
+member as departed, or alters stored or Web-returned truth.
 
 `device-sync-status.v0` is explicit consent only. When that exact grant is in
 the captured authority set, Web derives the result live from its bounded device
@@ -627,15 +637,43 @@ rollback floor; rolling Web back would recreate false missing states for newly
 admitted or refreshed generations even before the legacy backfill begins.
 
 Recent daily and sleep projection owners derive the member's current civil date
-from the validated vault timezone, admit only that date and the prior six civil
-dates, and emit at most seven records. Sparse data therefore cannot reach an
-eighth member-local date, including around UTC midnight or daylight-saving
-changes. A missing or invalid vault timezone fails these civil-date scopes
-closed. `workouts.v0` retains its separate global calendar-close semantics.
+from the validated vault timezone and admit only that date and the prior six
+civil dates. Each available public source receives its own tagged record and
+`date.source` key; up to eight sources therefore produce at most 56 complete
+records without cross-source ranking or truncation. `workouts.v0` instead keeps
+seven day records, tags each workout item, and retains its separate global
+calendar-close semantics. It retains up to thirteen workouts per public source
+per day across the same eight-source admission bound, while legacy unsourced
+days retain the original thirteen-workout limit. Any per-source or source-count
+overflow fails the complete projection closed, and the legal 104-item daily
+maximum remains within the shared 320 KiB delivery and encrypted-snapshot
+authority. The shared canonical activity-session read admits the complete 832
+rows for the workout producer's eight-date source horizon and uses one extra
+query row only to detect overflow; larger reads still fail closed. A missing or
+invalid vault timezone fails the other civil-date
+scopes closed. Public source identity is part of every existing
+health scope, including active v0 grants; scope keys and grant/revoke controls
+do not change, and each member-facing permission describes the source-aware
+share in one short sentence.
+Each source-tagged Deep or REM record separately carries that provider's
+validated `recordedAt` timestamp or `null`; the record's synthetic UTC-midnight
+`occurredAt` remains its civil-date identity and is never substituted for the
+provider time.
 Deploy the Cloudflare runtime bundle with that producer bound and the additive
 `pending` parser/model status before Web emits `pending`, exact seven-day consent
 copy, or fresh projection work. Deploy Web before any backfill clears a legacy
 snapshot.
+
+The source-tagged snapshot shape is a consumer-first rolling change. Deploy Web
+first so its delivery parser, encrypted snapshot bound, direct reader, v1-to-v0
+compatibility path, ordinary group tool, and group-email path accept and retain
+the additive source fields, sleep-stage provider times, and larger complete
+record sets. Then deploy the
+Cloudflare Worker/runner producer with immediate convergence. During the bounded
+window, new Web accepts old unsourced snapshots. Old Web must not receive a new
+source-tagged snapshot because its closed parser would reject the additive
+field. Roll back the producer before Web; after tagged snapshots are published,
+the source-aware Web consumer is the rollback floor.
 
 This protocol is a consumer-first hard cut:
 
@@ -804,6 +842,20 @@ publishing partial or corrupt state.
 
 ### Assistant Ask Read Side Lane
 
+For a current group speaker asking Murph to consult their own personal Murph,
+the resident model infers from ordinary conversation whether the answer belongs
+in the room or in the speaker's direct thread. It still supplies only the exact
+accepted-message reference. If that audience is genuinely ambiguous, Web keeps
+one ten-minute pointer for that group runtime and exact sender; Murph asks a
+normal clarification with no prescribed reply form, and the speaker's later
+natural answer resolves the pending original through its own exact message
+reference. The pointer copies no question text and is removed by bounded hourly
+expiry cleanup or account deletion. A group-bound request sends a deterministic
+advance notice before Web admits any personal read; notice failure blocks the
+request. A private request sends no group notice. Web remains the identity and
+route authority, reloads the exact source, and prevents a replay from changing
+the already-fixed result destination.
+
 `murph.group(action="ask")` is admitted only from a fresh authenticated private
 input. The runtime calls `assistantAskPort.request`; the signed
 `POST /api/internal/hosted-execution/assistant-asks/runtime` Web control owner
@@ -856,7 +908,8 @@ cancellation, or mailbox-budget exhaustion stops the drain.
 The same bounded pass admits only
 `assistant.notification.requested:phone-call-result:*` and
 `assistant.notification.requested:usage-referral-reward:*`, plus exact private
-Assistant Ask completions under `aask_done_*`. Import eligibility does not grant
+Assistant Ask completions under legacy `aask_done_*` or current
+`aask_private_*`. Import eligibility does not grant
 dispatch authority: the foreground-causal system-mailbox selector must match the
 exact dedupe-key family again, then collect only the outbox intent returned by
 that mailbox execution. Its persisted `sending` transition precedes provider
@@ -989,22 +1042,97 @@ the request identity. Exact retries reuse that mailbox item, a changed question
 for the same grant conflicts, and another current grant in the same invocation
 is independent.
 
-The one-time `group_sender` adapter instead derives the target and fixed
-self-only permission from one exact authenticated current-sender group input.
-Every request requires fresh exact-message authority and grants no standing
-access.
+The one-time current-sender adapter exposes internal group actions with one
+opaque `message_ref` and no member, question, or route argument. Trusted
+group-turn state requires that ref to name an accepted input in the current
+turn, so independent simultaneous requests can each be submitted. The resident
+group model infers whether the answer belongs in the room or in the speaker's
+direct thread from ordinary conversation. If that is genuinely ambiguous, it
+registers the exact request and asks a concise natural clarification; the same
+speaker's later natural answer resumes it by that answer's exact ref. Members
+never need a command or exact reply form.
 
-Prepare revalidates the same authority immediately before private context is
-read and returns the exact immutable permission to the runtime. The personal
-read-only child proposes one candidate under that permission. There is no
-incoming model reviewer. One separate fresh one-shot outgoing reviewer has no
-personal workspace, history, application tools, network, or delivery route and
-receives only the permission, question, and candidate. It returns only `allow`
-or `deny`; it cannot rewrite or redact. Invalid output, refusal, timeout, provider
-failure, or ambiguity fails closed, and denied candidate bytes do not enter a
-Murph mailbox, vault, assistant state, operational log, or error.
+Web reloads each exact source and is the sole identity, route, and admission
+owner. It derives the sender, locks every canonical and bounded legacy request
+alias, prevents replay from changing the already-fixed result destination, and appends at
+most one request. A private request must already have a current same-channel
+direct route. A group-bound request must first deliver the deterministic room
+notice; notice failure prevents the Web call. Missing private routing returns
+immediate concise recovery guidance without enqueuing personal work. The
+mailbox item persists one `current_sender_personal` read target, a separate
+`origin_context` or same-channel `requester_direct` result destination, and the
+self-only permission text before the personal runtime starts. The request id is
+derived from the exact source, not the destination, so replay cannot change the
+stored choice. The clarification pointer copies no question text, expires after
+ten minutes through the bounded hourly retention owner, and is also removed by
+account deletion. Current-sender clarification and continuation transitions use
+the existing stateful dynamic-tool chain in provider request order, so an
+earlier clarification settles before a later continuation may begin its notice
+or Web effect; independent new exact-ref requests remain concurrent.
 
-On an allow, the completion control path revalidates the group, personal
+At accepted App Server request intake, strict parsing precedes one turn-local
+decision claim per exact accepted ref in App Server request arrival order. The
+claim happens before dynamic-tool lane selection or the pre-tool hook, so a
+later immediate `new` request cannot overtake an earlier serialized
+clarification or continuation. A different same-ref clarification, group,
+private, new, or continuation decision fails before a notice, Web admission,
+or clarification write. Exact repeated group decisions share one in-flight
+notice; notice failure retains the group claim for the invocation rather than
+allowing a private switch. Different exact refs remain independently concurrent.
+The claim is invocation-local only. Web's canonical exact-source request
+identity remains the durable replay and destination fence across invocations
+and restarts.
+
+Prepare reloads the same source and revalidates membership, group routing,
+permission, fixed result destination, and any required private route immediately before
+private context is read. The personal read-only child proposes one candidate
+under that immutable permission. There is no incoming model reviewer. One fresh
+one-shot outgoing reviewer has no personal workspace, history, application
+tools, network, audience choice, or delivery route. It receives only the fixed
+permission, question, and candidate and returns only `allow` or `deny`; it
+cannot rewrite or redact. Invalid output, refusal, timeout, provider failure, or
+ambiguity fails closed, and denied candidate bytes do not enter a Murph mailbox,
+vault, assistant state, operational log, or error.
+
+Completion cannot change result destination. `origin_context` uses the existing
+authorized group completion. If a valid answered group completion was already
+persisted when the current sender loses personal runtime access, provider-entry
+authority returns the existing fixed-fallback signal and the outbox substitutes
+the non-disclosing terminal before provider dispatch. Malformed envelopes and
+destination mismatches remain authority failures. `requester_direct` uses the
+existing same-channel private notification with exact reviewed text and a
+separate deterministic delivery identity. It cannot occupy the canonical group
+completion/fallback identity. If that direct route disappears after admission or at provider entry,
+or if the request expires before prepare, Web persists a fresh non-disclosing
+`cannot_answer` completion to the already-authorized originating group; the
+private answer never falls back. Replay, restart, and concurrent prepare or
+completion observe the persisted terminal result. Provider-entry replay checks
+that fallback before live-route authorization, so route recovery cannot revive
+the superseded private effect after a lost authority response. When the private
+effect committed first but its detached-control response was lost, expired
+control replay re-hands that effect and leaves any fallback conversion to its
+provider-entry owner rather than creating a competing terminal. A detached
+runner must requeue rather than consume a terminal or unavailable response that
+has no persisted completion.
+
+New callers identify the strict protocol with the single
+`currentSenderProtocol: "v3"` body field. During Web-first rollout, Web rejects
+deployed unmarked old `ask_current_sender` bodies because those runtimes cannot
+prove that the required exact-room notice preceded the personal read. That
+optional group consultation fails closed until the runtime is recycled. Web
+continues to accept unmarked old `message_current_sender` bodies for private
+delivery, whose authority has no room-notice prerequisite, and drains
+already-accepted `group_sender` or `group_sender_private` mailbox work. It
+reloads the exact source and preserves the old private call's meaning. New work
+writes only the unified current-sender target and separate result destination.
+The undeployed dual URL marker, model-authored destination dialect, and
+intermediate request-id alias are rejected rather than preserved. Remove the
+old action parsing and legacy request-id lookup eleven minutes after all old runners are
+recycled: the existing ten-minute request TTL plus a one-minute queue margin.
+
+
+For `consented_member` requests, on an allow the completion control path
+revalidates the group, personal
 runtime, membership generation, grant generation, permission digest, origin,
 expiry, and active fences again. It appends one deterministic
 `assistant.ask.completed` item to the bound group runtime. The trusted `origin`
@@ -1053,8 +1181,12 @@ that secure-box operation.
 Web may satisfy it without another provider send only when a covering active
 offer already exists. Grants held by current hosted members never suppress the
 offer: a provider-room participant who has not joined the hosted group may be
-the intended recipient. A fresh request returns `sent` only after the provider
-send succeeds and its message binding is durably recorded.
+the intended recipient. Its canonical reaction sentence discloses that offered
+health values include source names and that sleep-stage values also include each
+source's recorded time. The same source-aware meaning applies to existing health
+scope keys and active grants; there is no separate source-details permission.
+A fresh request returns `sent` only after the provider send succeeds and its
+message binding is durably recorded.
 
 An unfinished child leaves the request pending. Before invocation return,
 checkpoint, shutdown, fence loss, or workspace replacement, the runtime
@@ -2011,15 +2143,78 @@ The scheduled-wake sweep is the bounded backstop for active connections whose
 canonical `nextReconcileAt` is due. Temporal owns that cadence through a global
 scheduled reconciler workflow, but web owns the signed legacy-named command that
 selects due-reconcile facts, records due-reconcile signals, appends bounded
-`device-sync.wake` handoffs, and keeps retries idempotent. Dirty rows are not
+`device-sync.wake` handoffs, and keeps retries idempotent. An unchanged due tuple
+is suppressed only inside the current five-minute recovery bucket; a later
+bucket may re-signal the same durable mailbox item while canonical cadence is
+still stale. That signal is recovery admission for the existing mailbox/event
+identity and must not mint another schedule-event or mailbox-item identity.
+It does not promise exactly-once provider execution. Dirty rows are not
 independently swept; due-reconcile candidates may include dirty or stuck rows
 when canonical `nextReconcileAt` is due. Dirty state remains the work source,
 not a scheduler queue. The runtime must support dirty-pending and dirty-ack
 callbacks; dirty ack means the dirty revision was handed off into the
-checkpointed local device-sync job store, not that upstream provider sync
-succeeded. Connection-established and disconnect lifecycle commands may still
-use coarse device-sync mailbox wakes because they are explicit lifecycle events,
-not high-cardinality freshness hints.
+local execution cache. Web keeps the dirty row and payload authority until the
+runtime reports terminal job completion, so a lost cache cannot acknowledge
+unfinished provider work. Connection-established and disconnect lifecycle
+commands may still use coarse device-sync mailbox wakes because they are
+explicit lifecycle events, not high-cardinality freshness hints.
+The machine-local job store projects its earliest queued-job continuation
+through the runtime-owned workspace `nextWakeAt` while the runner is warm. The
+hosted provider scheduler runs only for the account mapped by a connection
+mailbox wake; a retained job wake and a generic runtime timer cannot admit
+provider cadence. Only that connection mailbox wake may fetch its exact
+Web-owned dirty row or claim its account's local jobs; a generic runtime timer
+does neither. The connection-specific encrypted system-mailbox item remains
+pending while that account has queued or running work. Before checkpoint
+publication, the runtime queries those actual job rows and replaces the item's
+job hints with every unfinished kind, manifest-shaped payload/window, dedupe
+identity, priority, retry time, and remaining attempt limit, including
+worker-created children. It also carries the provider's advanced cadence, but
+withholds that cadence from Web until an empty-job completion-fence checkpoint
+has made the terminal transition durable. A cold replacement, whose snapshot
+intentionally excludes the device-sync SQLite store, reconstructs the same
+unfinished operation and cadence from that item. The canonical mailbox
+item/event already exists in the committed input workspace. The read-only
+provider classes and their artifact writes run before checkpoint 1, which then
+durably captures the replayable post-pull/intermediate state. If checkpoint 2
+fails to persist record/completion, cold restore from checkpoint 1 lacks the
+machine-local SQLite execution record and may run the same provider classes
+again. Replay compares the read-only HTTP method/path class rather than the full
+query string because the reconstructed pull window may advance. This
+bounded at-least-once behavior is the intentional consequence of keeping
+machine-local execution state out of snapshots; preventing it would require a
+new durable provider-effect journal or snapshot protocol. Terminal success or
+failure then advances the mailbox item. Web dirty rows use their existing
+terminal acknowledgement boundary instead. Device-sync mailbox ordering and scheduler
+admission are per connection, so a retained retry cannot block or advance a due
+wake for a different connection. The global due-reconcile sweep consumes only
+the Web-owned provider `nextReconcileAt`; local retry timing never enters that
+sweep. Future provider cadence may remain the workspace's projected follow-up
+wake and is included in the system-mailbox checkpoint handoff, but a cadence
+that is already due is suppressed from generic runtime-timer projection and can
+be admitted only by its connection mailbox wake.
+
+The executable WHOOP regression fixes one canonical schedule-event identity and
+one durable mailbox-item identity. The fixture commits the clean input workspace
+through the production v2 checkpoint bridge. Its initial incident pass then
+fetches the mailbox item, issues sleep, recovery, cycle, and workout reads, writes
+four artifacts, and creates the machine-local SQLite execution record. The
+production v2 post-pull archive plan observes the live SQLite store, omits it from
+the archive, and retains the durable system-mailbox state. The only injected
+failure rejects that snapshot checkpoint, so the clean input ref remains the last
+committed snapshot. In the next five-minute bucket, the production v2 restore
+dispatch restores that exact ref without the SQLite execution record,
+reconstructs the pending obligation from durable mailbox authority, and replays
+those same four method/path classes exactly once,
+for eight requests total. That 00:05 recovery pass makes three successful
+checkpoints. Its retained completion-fence wake is due at 00:05:30 and carries
+the 06:05 provider cadence. The completion pass makes no third provider pull,
+makes two successful checkpoints, and publishes 06:05 only after the durable
+recovery/completion checkpoint. The 00:10 pass returns idle with no wake and
+makes one bounded post-publication convergence checkpoint; the 00:15 pass is
+fully quiescent. Within the measured incident window, the proof observes eight
+checkpoint attempts, seven commits, one injected failure, and no provider work
+after the single replay.
 
 Hosted clinical-record retrieval uses the existing per-user workflow and
 system-mailbox path, not a separate Temporal workflow. Web transactionally

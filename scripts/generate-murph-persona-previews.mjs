@@ -5,10 +5,10 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
+import { generateElevenLabsSpeechMp3 } from "./elevenlabs-speech-generation.mjs";
+
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const OUTPUT_DIR = path.join(REPO_ROOT, "apps/web/public/audio/murph-personas");
-const ELEVENLABS_API_BASE_URL = "https://api.elevenlabs.io";
-const ELEVENLABS_OUTPUT_FORMAT = "mp3_44100_64";
 const DEFAULT_ELEVENLABS_MODEL_ID = "eleven_v3";
 
 await loadLocalEnvFile(".env.local");
@@ -37,7 +37,7 @@ for (const persona of contracts.assistantBasePersonaOptions) {
     if (!voiceId) {
       throw new Error("MURPH_ELEVENLABS_VOICE_ID is required for the classic voice.");
     }
-    const bytes = await generatePreview({
+    const bytes = await generateElevenLabsSpeechMp3({
       apiKey,
       modelId,
       text: persona.previewText,
@@ -62,30 +62,6 @@ async function readContracts() {
     throw new Error("packages/contracts did not export the persona and voice catalogs.");
   }
   return contracts;
-}
-
-async function generatePreview(input) {
-  const url = new URL(
-    `/v1/text-to-speech/${encodeURIComponent(input.voiceId)}`,
-    ELEVENLABS_API_BASE_URL,
-  );
-  url.searchParams.set("output_format", ELEVENLABS_OUTPUT_FORMAT);
-  const response = await fetch(url, {
-    body: JSON.stringify({ model_id: input.modelId, text: input.text }),
-    headers: {
-      accept: "audio/mpeg",
-      "content-type": "application/json",
-      "xi-api-key": input.apiKey,
-    },
-    method: "POST",
-  });
-  if (!response.ok) {
-    const text = await response.text().catch(() => "");
-    throw new Error(
-      `ElevenLabs persona preview generation failed: ${response.status} ${text.slice(0, 160)}`,
-    );
-  }
-  return new Uint8Array(await response.arrayBuffer());
 }
 
 async function loadLocalEnvFile(relativePath) {

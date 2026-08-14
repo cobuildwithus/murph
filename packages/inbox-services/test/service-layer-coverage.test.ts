@@ -74,7 +74,6 @@ import {
   resolveAssistantVaultPath,
 } from '@murphai/vault-usecases/assistant-vault-paths'
 import type {
-  EmailDriver,
   InboxPaths,
   InboxRuntimeModule,
   PollConnector,
@@ -334,7 +333,6 @@ test('service-layer helpers cover connector, query, state, daemon, and vault pat
   )
   assert.equal(normalizeConnectorAccountId('telegram', undefined), 'bot')
   assert.equal(normalizeConnectorAccountId('linq', undefined), 'default')
-  assert.equal(normalizeConnectorAccountId('email', undefined), null)
   assert.equal(normalizeBackfillLimit(undefined), undefined)
   assert.equal(normalizeBackfillLimit(50), 50)
   assert.throws(() => normalizeBackfillLimit(0), /Backfill limit must be an integer/)
@@ -367,13 +365,7 @@ test('service-layer helpers cover connector, query, state, daemon, and vault pat
     connector,
     inputLimit: 25,
     loadInbox: async () => ({
-      createAgentmailApiPollDriver() {
-        throw new Error('unused')
-      },
       async createInboxPipeline() {
-        throw new Error('unused')
-      },
-      createEmailPollConnector() {
         throw new Error('unused')
       },
       createTelegramBotApiPollDriver() {
@@ -417,48 +409,6 @@ test('service-layer helpers cover connector, query, state, daemon, and vault pat
     /Unsupported inbox connector source: linq/,
   )
 
-  const emailConnector = await instantiateConnector({
-    connector: createConnector({
-      id: 'email:primary',
-      source: 'email',
-      options: { emailAddress: 'ada@example.com' },
-    }),
-    loadEmailDriver: async () => ({}) as EmailDriver,
-    loadInbox: async () => ({
-      createAgentmailApiPollDriver() {
-        throw new Error('unused')
-      },
-      async createInboxPipeline() {
-        throw new Error('unused')
-      },
-      createEmailPollConnector(input) {
-        assert.equal(input.accountAddress, 'ada@example.com')
-        return createPollConnector('email', 'email:primary')
-      },
-      createTelegramBotApiPollDriver() {
-        throw new Error('unused')
-      },
-      createTelegramPollConnector() {
-        throw new Error('unused')
-      },
-      async ensureInboxVault() {},
-      async openInboxRuntime() {
-        return createRuntimeStore([])
-      },
-      async createParsedInboxPipeline() {
-        throw new Error('unused')
-      },
-      async rebuildRuntimeFromVault() {},
-      runInboxEnvelopeMigration,
-      async runInboxDaemon() {},
-      async runPollConnectorBackfill() {
-        throw new Error('unused')
-      },
-      async runInboxDaemonWithParsers() {},
-    } satisfies InboxRuntimeModule),
-    loadTelegramDriver: async () => ({}) as TelegramDriver,
-  })
-  assert.equal(emailConnector.id, 'email:primary')
 
   const attachment: RuntimeAttachmentRecord = {
     attachmentId: 'attachment-1',
@@ -560,7 +510,7 @@ test('service-layer helpers cover connector, query, state, daemon, and vault pat
   )
   ensureConnectorNamespaceAvailable(
     persistedConfig,
-    createConnector({ id: 'email:primary', source: 'email', accountId: 'ada@example.com' }),
+    createConnector({ id: 'linq:primary', source: 'linq', accountId: 'line-1' }),
   )
 
   const rebuildRuntimeFromVaultMock = vi.fn(
@@ -641,13 +591,7 @@ test('service-layer helpers cover connector, query, state, daemon, and vault pat
       createTelegramPollConnector() {
         throw new Error('unused')
       },
-      createEmailPollConnector() {
-        throw new Error('unused')
-      },
       createTelegramBotApiPollDriver() {
-        throw new Error('unused')
-      },
-      createAgentmailApiPollDriver() {
         throw new Error('unused')
       },
       async rebuildRuntimeFromVault(input) {

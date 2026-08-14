@@ -227,6 +227,7 @@ export function normalizeUnit(value: string | null): string | null {
     in: "in",
     inch: "in",
     inches: "in",
+    kg_m2: "kg/m^2",
     "kg/m2": "kg/m^2",
     "kg/m^2": "kg/m^2",
     lb: "lb",

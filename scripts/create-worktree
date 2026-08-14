@@ -49,20 +49,147 @@ common_dir="$(git -C "$repo_root" rev-parse --path-format=absolute --git-common-
 state_dir="${MURPH_WORKTREE_GUARD_STATE_DIR:-$common_dir/murph-worktree-storage-guard}"
 lock_file="$state_dir/lock"
 mkdir -p "$state_dir"
+spotlight_marker_path='.metadata_never_index'
+spotlight_tree_head=''
 
-mark_worktree_non_indexable() {
+prepare_worktree_spotlight_exclusion() {
   local exclude_file="$common_dir/info/exclude"
   local exclude_rule='/.metadata_never_index'
+  local final_line
 
-  mkdir -p "$common_dir/info"
-  if ! grep -Fqx "$exclude_rule" "$exclude_file" 2>/dev/null; then
-    if [[ -s "$exclude_file" ]]; then
-      printf '\n%s\n' "$exclude_rule" >>"$exclude_file"
-    else
-      printf '%s\n' "$exclude_rule" >>"$exclude_file"
+  mkdir -p "$common_dir/info" || return
+  if [[ -e "$exclude_file" || -L "$exclude_file" ]]; then
+    [[ -f "$exclude_file" ]] || return 1
+  else
+    : >"$exclude_file" || return
+  fi
+  if [[ -s "$exclude_file" ]]; then
+    final_line="$(tail -n 1 "$exclude_file")" || return
+    if [[ "$final_line" == "$exclude_rule" ]]; then
+      return 0
+    fi
+    printf '\n%s\n' "$exclude_rule" >>"$exclude_file" || return
+  else
+    printf '%s\n' "$exclude_rule" >>"$exclude_file" || return
+  fi
+}
+
+mark_worktree_non_indexable() {
+  touch "$target_path/$spotlight_marker_path"
+}
+
+capture_worktree_spotlight_tree() {
+  spotlight_tree_head="$(git -C "$target_path" rev-parse HEAD)" || return
+}
+
+restore_worktree_spotlight_state() {
+  local marker_tracked=0
+
+  GIT_DIR="$target_path/.git" GIT_WORK_TREE=. \
+    git -C "$target_path" -c core.hooksPath=/dev/null reset --quiet \
+      "$spotlight_tree_head" -- "$spotlight_marker_path" \
+    || return
+  if GIT_DIR="$target_path/.git" GIT_WORK_TREE=. \
+    git -C "$target_path" -c core.hooksPath=/dev/null ls-files \
+      --error-unmatch -- "$spotlight_marker_path" >/dev/null 2>&1; then
+    marker_tracked=1
+    GIT_DIR="$target_path/.git" GIT_WORK_TREE=. \
+      git -C "$target_path" -c core.hooksPath=/dev/null checkout-index --force -- \
+        "$spotlight_marker_path" \
+      || return
+  fi
+  GIT_DIR="$target_path/.git" GIT_WORK_TREE=. \
+    git -C "$target_path" -c core.hooksPath=/dev/null diff --cached --quiet \
+      "$spotlight_tree_head" -- "$spotlight_marker_path" \
+    || return
+  prepare_worktree_spotlight_exclusion || return
+  if (( marker_tracked == 0 )); then
+    mark_worktree_non_indexable || return
+  fi
+  GIT_DIR="$target_path/.git" GIT_WORK_TREE=. \
+    git -C "$target_path" -c core.hooksPath=/dev/null diff --quiet -- \
+      "$spotlight_marker_path"
+}
+
+rollback_registered_worktree() {
+  local failure_status="$1"
+  local repair_status
+  local rollback_status
+
+  trap - EXIT INT TERM HUP
+  set +e
+  prepare_worktree_spotlight_exclusion
+  repair_status=$?
+  git -C "$repo_root" worktree remove --force --force "$target_path"
+  rollback_status=$?
+  set -e
+
+  if (( repair_status != 0 )); then
+    printf 'create-worktree: setup failed (status %d); Spotlight exclude repair failed (status %d)\n' \
+      "$failure_status" "$repair_status" >&2
+  fi
+  if (( rollback_status != 0 )); then
+    printf 'create-worktree: setup failed (status %d); rollback failed (status %d), leaving the target registered\n' \
+      "$failure_status" "$rollback_status" >&2
+    exit "$rollback_status"
+  fi
+  exit "$failure_status"
+}
+
+rollback_registered_worktree_on_exit() {
+  local failure_status="$?"
+
+  if (( failure_status == 0 )); then
+    failure_status=1
+  fi
+  rollback_registered_worktree "$failure_status"
+}
+
+run_post_checkout_hook() {
+  local head_oid null_oid hook_path git_exec_path local_env_vars
+  local first_line interpreter local_env_var
+  local -a hook_env
+
+  head_oid="$(git -C "$target_path" rev-parse HEAD)" || return
+  null_oid="$(printf '%0*d' "${#head_oid}" 0)"
+  hook_path="$(git -C "$target_path" rev-parse --path-format=absolute --git-path hooks/post-checkout)" || return
+
+  if [[ ! -x "$hook_path" ]]; then
+    git -C "$target_path" hook run --ignore-missing post-checkout -- \
+      "$null_oid" "$head_oid" 1
+    return
+  fi
+
+  if IFS= read -r first_line <"$hook_path" && [[ "$first_line" == '#!'* ]]; then
+    interpreter="${first_line#\#!}"
+    while [[ "$interpreter" == ' '* || "$interpreter" == $'\t'* ]]; do
+      interpreter="${interpreter:1}"
+    done
+    interpreter="${interpreter%%[[:space:]]*}"
+    if [[ "$interpreter" != /* || ! -f "$interpreter" || ! -x "$interpreter" ]]; then
+      printf 'create-worktree: post-checkout hook interpreter is unavailable\n' >&2
+      return 1
     fi
   fi
-  touch "$target_path/.metadata_never_index"
+
+  git_exec_path="$(git -C "$target_path" --exec-path)" || return
+  local_env_vars="$(git -C "$target_path" rev-parse --local-env-vars)" || return
+  hook_env=(env)
+  while IFS= read -r local_env_var; do
+    [[ -n "$local_env_var" ]] && hook_env+=(-u "$local_env_var")
+  done <<<"$local_env_vars"
+  hook_env+=(
+    -u MURPH_CREATE_WORKTREE_LOCK_HELD
+    -u MURPH_WORKTREE_GUARD_LOCK_HELD
+    "GIT_EXEC_PATH=$git_exec_path"
+    'GIT_PREFIX='
+    "PATH=$git_exec_path:${PATH:-}"
+  )
+
+  (
+    cd -P "$target_path"
+    "${hook_env[@]}" "$hook_path" "$null_oid" "$head_oid" 1 </dev/null
+  )
 }
 
 if [[ "${MURPH_CREATE_WORKTREE_LOCK_HELD:-0}" != 1 ]]; then
@@ -111,28 +238,54 @@ if (( registered_before == 1 )); then
   exit 1
 fi
 
+prepare_worktree_spotlight_exclusion
+
 set +e
-git -C "$repo_root" worktree add "${args[@]}"
+git -C "$repo_root" worktree add --no-checkout "${args[@]}"
 add_status=$?
 set -e
 
+if (( add_status != 0 )); then
+  exit "$add_status"
+fi
+
+trap rollback_registered_worktree_on_exit EXIT
+trap 'rollback_registered_worktree 130' INT
+trap 'rollback_registered_worktree 143' TERM
+trap 'rollback_registered_worktree 129' HUP
+
+setup_status=0
 if [[ -d "$target_path" ]] \
   && admin_dir="$(git -C "$target_path" rev-parse --path-format=absolute --git-dir 2>/dev/null)" \
   && [[ -d "$admin_dir" ]]; then
   admin_dir="$(cd "$admin_dir" && pwd -P)"
   case "$admin_dir" in
     "$common_dir"/worktrees/*)
-      : >"$admin_dir/murph-storage-guard-authorized"
-      mark_worktree_non_indexable
+      set +e
+      capture_worktree_spotlight_tree \
+        && mark_worktree_non_indexable \
+        && GIT_DIR="$target_path/.git" GIT_WORK_TREE=. \
+          git -C "$target_path" reset --hard --no-recurse-submodules \
+        && restore_worktree_spotlight_state \
+        && run_post_checkout_hook \
+        && restore_worktree_spotlight_state \
+        && : >"$admin_dir/murph-storage-guard-authorized"
+      setup_status=$?
+      set -e
       ;;
     *)
       printf 'create-worktree: new checkout has an unexpected administrative directory\n' >&2
-      exit 1
+      setup_status=1
       ;;
   esac
-elif (( add_status == 0 )); then
+else
   printf 'create-worktree: new checkout has an unexpected administrative directory\n' >&2
-  exit 1
+  setup_status=1
 fi
 
-exit "$add_status"
+if (( setup_status != 0 )); then
+  rollback_registered_worktree "$setup_status"
+fi
+
+trap - EXIT INT TERM HUP
+exit 0

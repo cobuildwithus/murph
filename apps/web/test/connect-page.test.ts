@@ -3476,7 +3476,7 @@ test("ConnectSourcesGrid redeems an initial device connect intent through the ap
   await rendered.cleanup();
 });
 
-test("ConnectSourcesGrid explains Vital before redeeming an initial device connect intent", async () => {
+test("ConnectSourcesGrid explains Vital before redeeming a WHOOP device connect intent", async () => {
   const claim = "dc_12345678901234567890123456789012";
   let resolveAuthorizationResponse:
     | ((response: Response) => void)
@@ -3499,23 +3499,23 @@ test("ConnectSourcesGrid explains Vital before redeeming an initial device conne
     createElement(ConnectSourcesGrid, {
       sources: [
         {
-          connectTarget: "fitbit",
-          description: "Sleep, activity, heart rate, and daily readiness.",
-          id: "fitbit",
+          connectTarget: "whoop_v2",
+          description: "Recovery, strain, sleep, and heart rate.",
+          id: "whoop",
           logo: {
             className: "size-11 object-contain",
             height: 44,
-            src: "/brand-logos/connect/fitbit.svg",
+            src: "/brand-logos/connect/whoop.svg",
             width: 44,
           },
-          name: "Fitbit",
+          name: "Whoop",
         },
       ],
     }),
     {
       location: {
-        hash: `#deviceConnectIntent=${claim}&connectSource=fitbit&connectProvider=junction`,
-        href: `https://join.example.test/connect#deviceConnectIntent=${claim}&connectSource=fitbit&connectProvider=junction`,
+        hash: `#deviceConnectIntent=${claim}&connectSource=whoop&connectProvider=junction`,
+        href: `https://join.example.test/connect#deviceConnectIntent=${claim}&connectSource=whoop&connectProvider=junction`,
       },
     },
   );
@@ -3523,7 +3523,7 @@ test("ConnectSourcesGrid explains Vital before redeeming an initial device conne
   await vi.waitFor(() => {
     assert.match(
       rendered.container.textContent ?? "",
-      /Connect Fitbit to Murph/u,
+      /Connect Whoop to Murph/u,
     );
   });
   assert.equal(fetch.mock.calls.length, 0);
@@ -3531,7 +3531,7 @@ test("ConnectSourcesGrid explains Vital before redeeming an initial device conne
 
   const continueButton = [
     ...rendered.container.querySelectorAll("button"),
-  ].find((button) => button.textContent === "Continue to Fitbit");
+  ].find((button) => button.textContent === "Continue to Whoop");
   assert.ok(continueButton instanceof rendered.window.HTMLButtonElement);
   await act(async () => {
     continueButton.dispatchEvent(
@@ -3541,7 +3541,7 @@ test("ConnectSourcesGrid explains Vital before redeeming an initial device conne
 
   await vi.waitFor(() => {
     assert.equal(fetch.mock.calls.length, 1);
-    assert.match(rendered.container.textContent ?? "", /Connecting Fitbit/u);
+    assert.match(rendered.container.textContent ?? "", /Connecting Whoop/u);
   });
   assert.equal(rendered.assign.mock.calls.length, 0);
   assert.equal(fetch.mock.calls[0]?.[0], `/device/connect/${claim}`);
@@ -3560,14 +3560,14 @@ test("ConnectSourcesGrid explains Vital before redeeming an initial device conne
   await act(async () => {
     resolveAuthorizationResponse?.(
       Response.json({
-        authorizationUrl: "https://junction.example.test/link/fitbit",
+        authorizationUrl: "https://junction.example.test/link/whoop",
       }),
     );
   });
   await vi.waitFor(() => {
     assert.equal(
       rendered.assign.mock.calls[0]?.[0],
-      "https://junction.example.test/link/fitbit",
+      "https://junction.example.test/link/whoop",
     );
   });
   assert.equal(fetch.mock.calls.length, 1);

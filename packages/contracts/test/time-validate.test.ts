@@ -13,6 +13,7 @@ import {
   normalizeIanaTimeZone,
   normalizeStrictIsoTimestamp,
   parseDailyTime,
+  resolveLocalDateAtNoon,
   toLocalDayKey,
 } from "../src/time.ts";
 import { assertContract, formatContractIssues, safeParseContract } from "../src/validate.ts";
@@ -113,6 +114,24 @@ describe("time helpers", () => {
   it("adds days across month boundaries", () => {
     expect(addDaysToIsoDate("2024-02-28", 2)).toBe("2024-03-01");
     expect(() => addDaysToIsoDate("not-a-date", 1)).toThrow("Invalid ISO date: not-a-date");
+  });
+
+  it("resolves civil dates to noon in the requested timezone", () => {
+    expect(resolveLocalDateAtNoon("2026-08-13", "UTC")).toBe(
+      "2026-08-13T12:00:00.000Z",
+    );
+    expect(resolveLocalDateAtNoon("2026-03-08", "America/New_York")).toBe(
+      "2026-03-08T16:00:00.000Z",
+    );
+    expect(resolveLocalDateAtNoon("2026-08-13", "Pacific/Kiritimati")).toBe(
+      "2026-08-12T22:00:00.000Z",
+    );
+    expect(() => resolveLocalDateAtNoon("2026-02-30", "UTC")).toThrow(
+      "Invalid ISO date",
+    );
+    expect(() => resolveLocalDateAtNoon("2026-08-13", "Mars/Olympus")).toThrow(
+      "Invalid IANA time zone",
+    );
   });
 });
 

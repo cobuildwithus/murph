@@ -1,6 +1,7 @@
 ---
 title: 'Design-proof uploader treats the documented separator as a screenshot path'
 severity: 'minor'
+issue: 'cobuildwithus/murph#1665'
 ---
 
 ## Expected Behavior
