@@ -2,7 +2,7 @@
 
 Status: active
 Created: 2026-08-13
-Updated: 2026-08-13
+Updated: 2026-08-14
 
 ## Goal
 
@@ -86,6 +86,9 @@ provider-specific automation layer.
 13. [x] Bind each reserved candidate run before Kernel provisioning, attach it
     before navigation, and prove both Cancel/admission winner orders against real
     PostgreSQL without leaving active computer work.
+14. [x] Keep a bound browserless run and its setup nonterminal while remote
+    creation may be in flight, then prove late-response and lost-response cleanup
+    through the existing exact creator and stale-provisioning owners.
 
 ## Decisions
 
@@ -122,6 +125,12 @@ provider-specific automation layer.
   a losing candidate is retired, while a winning binding lets the existing
   `canceling` path finish the exact run. Browser attach precedes navigation so a
   canceled or otherwise ineligible setup cannot receive provider effects.
+- A bound browserless run is not quiescent merely because an early deterministic
+  delete reports absence while remote creation is in flight. Cancel reuses
+  `cleanup_pending`, remains visible as `canceling`, and retains the exact browser
+  name until the returning creator deletes its session or the existing
+  stale-provisioning boundary repeats cleanup. The setup read owner alone then
+  finalizes `canceled`; no queue, scheduler, state, or cleanup owner was added.
 
 ## Verification
 
@@ -140,6 +149,12 @@ provider-specific automation layer.
   the setup CAS with computer reservation before Kernel provisioning and requires
   exact eligible attachment before navigation. Direct service/computer proof:
   211 passed. Real PostgreSQL proof covers both winners; all 5 cases passed.
+- ReviewGPT round 11 found the post-binding in-flight-create interval. The
+  correction retains `cleanup_pending` through an early delete-by-name absence,
+  classifies exact setup ineligibility as safe exact-browser compensation, and
+  lets visible setup polling finalize only after cleanup. Direct setup/computer/
+  Connect proof passes 321 tests; real PostgreSQL covers late and lost create
+  responses in addition to the prior races, with all 7 cases passing.
 - Coupled-state audit: every reported setup/browser finding was confirmed and
   corrected; no additional unresolved state inconsistency remains in the
   affected owner.

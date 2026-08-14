@@ -88,6 +88,7 @@ const MEMBER_OWNED_SETUP_REVALIDATE_MS = 2_000;
 const MEMBER_OWNED_SETUP_ACTIVE_STATUSES = new Set([
   "authorized",
   "browser_setup",
+  "canceling",
   "capturing",
 ]);
 

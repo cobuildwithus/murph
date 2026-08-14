@@ -894,7 +894,14 @@ Last verified: 2026-08-13
   submit. A candidate run is CAS-bound to an acquisition-eligible setup before
   Kernel provisioning, then its browser attaches under that exact binding before
   navigation. If Cancel wins first, the unadmitted candidate is synchronously
-  retired; if binding wins first, Cancel sees and finishes that exact run.
+  retired; if binding wins first, Cancel sees and owns that exact run. A
+  browserless bound run whose remote create may be in flight moves to the
+  existing `cleanup_pending` state and leaves the setup truthfully `canceling`.
+  Delete-by-name before materialization retains that claim; a late create result
+  deletes the returned exact browser, while a lost response converges through
+  the existing two-minute stale-provisioning cleanup. Setup polling finalizes
+  `canceled` only after one of those paths proves cleanup, and navigation remains
+  impossible because attach revalidates the now-ineligible setup.
   Re-entering an awaiting setup rotates or
   reuses its latest valid handoff without repeating provider submission. Completing
   the exact setup-owned handoff resumes that run without a conversation reply;

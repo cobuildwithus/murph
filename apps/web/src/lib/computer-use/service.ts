@@ -127,6 +127,7 @@ export interface ComputerExpiredRunCleanupResult {
 
 type ComputerRunCleanupOutcome = "cleaned" | "expired" | "failed";
 type BrowserlessProvisioningRecovery = "busy" | "changed" | "recovered";
+type ComputerOwnedFinishStatus = HostedComputerFinishOutcome | "cleanup_pending";
 
 export interface ComputerAccountExternalCleanupResult {
   browserSessionsDeleted: number;
@@ -653,15 +654,24 @@ export class ComputerUseService {
             });
           }
         } else {
-          await store.finishRun({
+          const finishedRunning = await store.finishRun({
             expectedKernelSessionId: attachedSessionId,
             expectedRunStatus: "running",
             now,
             outcome: "failed",
             runId: reservedRun.id,
-          }).catch(() => {
-            // Preserve the provisioning failure; the reservation cleanup is compensating.
-          });
+          }).then(() => true).catch(() => false);
+          if (!finishedRunning) {
+            await store.finishRun({
+              expectedKernelSessionId: null,
+              expectedRunStatus: "cleanup_pending",
+              now,
+              outcome: "failed",
+              runId: reservedRun.id,
+            }).catch(() => {
+              // Preserve the provisioning failure; the reservation cleanup is compensating.
+            });
+          }
         }
       }
       if (browserCleanupFailed) {
@@ -1286,7 +1296,12 @@ export class ComputerUseService {
     outcome: HostedComputerFinishOutcome;
     runId: string;
   }): Promise<{ ok: true; runId: string; status: HostedComputerFinishOutcome }> {
-    return await this.finishRunWithStore(input, this.store);
+    const result = await this.finishRunWithStore(input, this.store);
+    const status = result.status;
+    if (status === "cleanup_pending") {
+      throw browserProvisioningInProgressError();
+    }
+    return { ...result, status };
   }
 
   async finishOwnedRun(input: {
@@ -1295,7 +1310,7 @@ export class ComputerUseService {
     ownerKey: string;
     ownerPurpose: MemberOwnedProviderSetupComputerRunPurpose;
     runId: string;
-  }): Promise<{ ok: true; runId: string; status: HostedComputerFinishOutcome }> {
+  }): Promise<{ ok: true; runId: string; status: ComputerOwnedFinishStatus }> {
     return await this.finishRunWithStore(input, this.store, {
       ownerKey: input.ownerKey,
       ownerPurpose: input.ownerPurpose,
@@ -1310,7 +1325,7 @@ export class ComputerUseService {
     },
     store: ComputerUseStore,
     owner: ComputerRunOwner | null = null,
-  ): Promise<{ ok: true; runId: string; status: HostedComputerFinishOutcome }> {
+  ): Promise<{ ok: true; runId: string; status: ComputerOwnedFinishStatus }> {
     if (owner) {
       await store.requireMemberOwnedProviderSetupRun({
         memberId: input.memberId,
@@ -1338,6 +1353,41 @@ export class ComputerUseService {
         runId: run.id,
         status: run.status,
       };
+    }
+    if (
+      owner
+      && input.outcome === "canceled"
+      && run.kernelSessionId === null
+      && (run.status === "running" || run.status === "cleanup_pending")
+    ) {
+      if (run.status === "cleanup_pending") {
+        if (!isStaleCleanupPendingRun(run, now)) {
+          return { ok: true, runId: run.id, status: "cleanup_pending" };
+        }
+        const cleanup = await this.expireRunAndDeleteBrowserBestEffort(run, now, store);
+        if (cleanup === "failed") {
+          throw browserCleanupFailedError();
+        }
+        return { ok: true, runId: run.id, status: input.outcome };
+      }
+
+      try {
+        run = await store.markRunCleanupPending({
+          expectedKernelSessionId: null,
+          expectedRunStatus: run.status,
+          expectedRunUpdatedAt: run.updatedAt,
+          memberId: run.memberId,
+          now,
+          runId: run.id,
+        });
+      } catch (error) {
+        if (isStaleRunStateConflict(error)) {
+          return await this.finishRunWithStore(input, store, owner);
+        }
+        throw error;
+      }
+      await this.deleteBrowserBestEffort(buildKernelBrowserName({ runId: run.id }));
+      return { ok: true, runId: run.id, status: "cleanup_pending" };
     }
     if (run.status === "cleanup_pending") {
       throw browserCleanupFailedError();
@@ -3827,7 +3877,13 @@ export class ComputerUseService {
     try {
       return await input.store.attachRunBrowser(input.attachInput);
     } catch (error) {
-      if (isStaleRunStateConflict(error) || isComputerUseNotFoundError(error)) {
+      if (
+        isStaleRunStateConflict(error)
+        || isComputerUseNotFoundError(error)
+        || isComputerRunOwnershipConflictError(error)
+      ) {
+        // An ineligible exact setup cannot accept this candidate. Deleting the
+        // returned exact browser is safe even if the first attach committed.
         return null;
       }
       return "unknown";
@@ -5540,6 +5596,13 @@ function isComputerUseNotFoundError(error: unknown): boolean {
     error !== null &&
     "code" in error &&
     error.code === "HOSTED_COMPUTER_NOT_FOUND";
+}
+
+function isComputerRunOwnershipConflictError(error: unknown): boolean {
+  return typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    error.code === "HOSTED_COMPUTER_RUN_OWNERSHIP_CONFLICT";
 }
 
 function isMemberSuspendedComputerUseError(error: unknown): boolean {

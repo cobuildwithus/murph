@@ -6480,6 +6480,69 @@ test("ConnectSourcesGrid discovers OAuth readiness on the same open page", async
   await rendered.cleanup();
 });
 
+test("ConnectSourcesGrid keeps polling a safely canceling provider setup", async () => {
+  vi.useFakeTimers();
+  const canceling = createStravaSetupProjection({
+    action: "none",
+    status: "canceling",
+  }).strava;
+  const canceled = createStravaSetupProjection({
+    action: "authorize",
+    status: "canceled",
+  }).strava;
+  const fetch = vi.fn(async (
+    _input: RequestInfo | URL,
+    _init?: RequestInit,
+  ) => {
+    void _input;
+    void _init;
+    return Response.json({
+      presentation: canceled.presentation,
+      provider: "strava",
+      setup: canceled.setup,
+    });
+  });
+  vi.stubGlobal("fetch", fetch);
+
+  const { ConnectSourcesGrid } = await import(
+    "../app/(dashboard)/connect/connect-page-client"
+  );
+  const rendered = await renderClientComponent(
+    createElement(ConnectSourcesGrid, {
+      sources: [{
+        connectTarget: "strava",
+        description: "Rides, runs, workouts, route context, power, and training load.",
+        id: "strava",
+        logo: {
+          className: "h-auto max-h-9 w-auto max-w-[8rem] object-contain",
+          height: 20,
+          src: "/brand-logos/connect/strava.svg",
+          width: 96,
+        },
+        memberOwnedSetup: canceling.setup,
+        memberOwnedSetupPresentation: canceling.presentation,
+        memberOwnedSetupProvider: "strava" as const,
+        name: "Strava",
+      }],
+    }),
+    { requireButton: false },
+  );
+
+  assert.match(rendered.container.textContent ?? "", /Canceling safely/u);
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(2_000);
+  });
+
+  assert.equal(fetch.mock.calls.length, 1);
+  assert.equal(
+    fetch.mock.calls[0]?.[0],
+    "/api/settings/device-sync/provider-setups/strava",
+  );
+  assert.match(rendered.container.textContent ?? "", /Canceled/u);
+
+  await rendered.cleanup();
+});
+
 test("ConnectSourcesGrid cancels a proved-unsent Strava prerequisite through the authenticated setup route", async () => {
   const prerequisite = createStravaSetupProjection({
     action: "none",

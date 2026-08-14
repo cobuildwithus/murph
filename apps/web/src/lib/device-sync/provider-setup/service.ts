@@ -604,7 +604,7 @@ export class MemberOwnedProviderSetupService {
       return this.toView(setup);
     }
     if (setup.status === "canceling") {
-      return this.finishCancellation(setup);
+      return this.toView(await this.settleCancellation(setup));
     }
     if (readMemberOwnedProviderSetupBinding(setup)) {
       throw deviceSyncError({
@@ -627,7 +627,7 @@ export class MemberOwnedProviderSetupService {
       throw setupBusyError(setup.status);
     }
     setup = await this.transition(setup, { status: "canceling" });
-    return this.finishCancellation(setup);
+    return this.toView(await this.settleCancellation(setup));
   }
 
   async startOAuth(input: {
@@ -758,24 +758,26 @@ export class MemberOwnedProviderSetupService {
     return this.toView(await this.releaseTerminalBrowserRun(deleted));
   }
 
-  private async finishCancellation(
+  private async settleCancellation(
     setup: MemberOwnedProviderSetupRecord,
-  ): Promise<MemberOwnedProviderSetupView> {
+  ): Promise<MemberOwnedProviderSetupRecord> {
     if (setup.browserRunId) {
-      await this.computer.finishOwnedRun({
+      const finished = await this.computer.finishOwnedRun({
         memberId: setup.memberId,
         outcome: "canceled",
         ownerKey: setup.id,
         ownerPurpose: MEMBER_OWNED_PROVIDER_SETUP_COMPUTER_RUN_PURPOSE,
         runId: setup.browserRunId,
       });
+      if (finished.status === "cleanup_pending") {
+        return setup;
+      }
     }
-    const canceled = await this.transition(setup, {
+    return this.transition(setup, {
       browserRunId: null,
       completedAt: this.now(),
       status: "canceled",
     });
-    return this.toView(canceled);
   }
 
   private async releaseTerminalBrowserRun(
@@ -896,6 +898,9 @@ export class MemberOwnedProviderSetupService {
       )
     ) {
       setup = await this.releaseTerminalBrowserRun(setup);
+    }
+    if (persist && setup.status === "canceling") {
+      setup = await this.settleCancellation(setup);
     }
     if (
       setup.status === "canceling"

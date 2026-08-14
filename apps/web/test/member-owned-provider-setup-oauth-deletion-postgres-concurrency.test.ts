@@ -135,6 +135,76 @@ function createProviderSetupKernel(input: {
   };
 }
 
+function createInFlightProviderSetupKernel(input: {
+  browserMaterialized: Deferred<void>;
+  createBrowserReached: Deferred<void>;
+  materializeBrowser: Deferred<void>;
+  releaseCreateBrowser: Deferred<void>;
+}): ComputerKernelClient & {
+  browserLive: boolean;
+  deleteCalls: string[];
+  navigationCalls: number;
+} {
+  return {
+    browserLive: false,
+    deleteCalls: [],
+    navigationCalls: 0,
+    async createBrowser() {
+      input.createBrowserReached.resolve();
+      await input.materializeBrowser.promise;
+      this.browserLive = true;
+      input.browserMaterialized.resolve();
+      await input.releaseCreateBrowser.promise;
+      return {
+        liveViewUrl: "https://proxy.test-browser.onkernel.com/live/provider-setup-in-flight",
+        sessionId: "kernel-provider-setup-in-flight",
+      };
+    },
+    async deleteBrowserByIdOrName(idOrName) {
+      this.deleteCalls.push(idOrName);
+      this.browserLive = false;
+    },
+    async deleteManagedAuthConnection() {},
+    async deleteProfile() {},
+    async ensureManagedAuthConnection(managedInput) {
+      return {
+        browserSessionId: null,
+        domain: managedInput.domain,
+        flowExpiresAt: null,
+        flowStatus: null,
+        hostedUrl: null,
+        id: "managed-auth-provider-setup",
+        profileName: managedInput.profileName,
+        status: "NEEDS_AUTH" as const,
+      };
+    },
+    async ensureProfile() {},
+    async executePlaywright() {
+      this.navigationCalls += 1;
+      return {
+        result: {
+          title: "Provider applications",
+          url: "https://www.strava.com/settings/api",
+          visibleText: "Provider applications",
+        },
+      };
+    },
+    async findManagedAuthConnection() {
+      return null;
+    },
+    async listManagedAuthConnections() {
+      return [];
+    },
+    async osControl() {},
+    async startManagedAuthLogin() {
+      return {
+        flowExpiresAt: new Date("2026-08-13T12:30:00.000Z"),
+        hostedUrl: "https://auth.onkernel.com/login/provider-setup",
+      };
+    },
+  };
+}
+
 async function bounded<T>(
   promise: Promise<T>,
   label: string,
@@ -321,12 +391,17 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           }
 
           await expect(service.cancel(memberId, setupId)).resolves.toMatchObject({
-            status: "canceled",
+            status: winner === "cancel_first" ? "canceled" : "canceling",
           });
           releaseAdmission.resolve();
           releaseEnsureProfile.resolve();
           const [beginResult] = await bounded(begin, "provider setup cancellation race");
           expect(beginResult.status).toBe("rejected");
+          if (winner === "binding_first") {
+            await expect(service.read(memberId)).resolves.toMatchObject({
+              status: "canceled",
+            });
+          }
 
           const setup = await prisma.deviceProviderSetup.findUniqueOrThrow({
             where: { id: setupId },
@@ -344,9 +419,7 @@ describe.skipIf(!runPostgresConcurrencyProof)(
             status: "canceled",
           });
           expect(runs).toHaveLength(1);
-          expect(runs[0]?.status).toBe(
-            winner === "cancel_first" ? "failed" : "canceled",
-          );
+          expect(runs[0]?.status).toBe("failed");
           expect(activeRun).toBeNull();
           expect(kernel.createdBrowsers).toBe(0);
           expect(kernel.navigationCalls).toBe(0);
@@ -366,6 +439,187 @@ describe.skipIf(!runPostgresConcurrencyProof)(
       },
       30_000,
     );
+
+    it("keeps cancellation fenced until an in-flight browser create is quiescent", async () => {
+      const suffix = randomUUID().replaceAll("-", "");
+      const memberId = `member_provider_create_cancel_${suffix}`;
+      const setupId = `dps_provider_create_cancel_${suffix}`;
+      const prisma = createPrismaClient({ databaseUrl, poolMax: 4 });
+      const browserMaterialized = createDeferred();
+      const createBrowserReached = createDeferred();
+      const materializeBrowser = createDeferred();
+      const releaseCreateBrowser = createDeferred();
+      const kernel = createInFlightProviderSetupKernel({
+        browserMaterialized,
+        createBrowserReached,
+        materializeBrowser,
+        releaseCreateBrowser,
+      });
+      const computer = new ComputerUseService({
+        env: { HOSTED_COMPUTER_PROFILE_NAMESPACE: "test" },
+        kernel,
+        now: () => new Date("2026-08-13T12:00:00.000Z"),
+        store: new PrismaComputerUseStore(prisma),
+      });
+      const service = new MemberOwnedProviderSetupService("strava", {
+        computer,
+        store: new PrismaDeviceProviderSetupStore(prisma),
+      });
+      let begin: Promise<PromiseSettledResult<unknown>[]> | null = null;
+      vi.stubEnv("HOSTED_WEB_BASE_URL", "https://web.example.test");
+
+      try {
+        await prisma.hostedMember.create({ data: { id: memberId } });
+        await prisma.deviceProviderSetup.create({
+          data: {
+            active: true,
+            connectSourceId: "strava",
+            connectTarget: "strava",
+            id: setupId,
+            memberId,
+            provider: "strava",
+            status: "authorized",
+            version: 1,
+          },
+        });
+
+        begin = Promise.allSettled([service.beginBrowserSetup(memberId)]);
+        await bounded(createBrowserReached.promise, "in-flight browser create");
+
+        await expect(service.cancel(memberId, setupId)).resolves.toMatchObject({
+          status: "canceling",
+        });
+        await expect(prisma.hostedComputerRun.findFirstOrThrow({
+          where: { memberId },
+        })).resolves.toMatchObject({
+          kernelSessionId: null,
+          status: "cleanup_pending",
+        });
+        expect(kernel.browserLive).toBe(false);
+        expect(kernel.navigationCalls).toBe(0);
+
+        materializeBrowser.resolve();
+        await bounded(browserMaterialized.promise, "late browser materialization");
+        releaseCreateBrowser.resolve();
+        const [beginResult] = await bounded(begin, "late browser create response");
+        expect(beginResult.status).toBe("rejected");
+        expect(kernel.browserLive).toBe(false);
+        expect(kernel.navigationCalls).toBe(0);
+
+        await expect(service.read(memberId)).resolves.toMatchObject({
+          status: "canceled",
+        });
+        await expect(prisma.hostedComputerRun.findFirstOrThrow({
+          where: { memberId },
+        })).resolves.toMatchObject({
+          kernelSessionId: null,
+          status: expect.stringMatching(/^(canceled|failed)$/u),
+        });
+      } finally {
+        materializeBrowser.resolve();
+        releaseCreateBrowser.resolve();
+        if (begin) {
+          await begin;
+        }
+        vi.unstubAllEnvs();
+        await prisma.hostedComputerHandoff.deleteMany({ where: { memberId } });
+        await prisma.deviceProviderSetup.deleteMany({ where: { memberId } });
+        await prisma.hostedComputerRun.deleteMany({ where: { memberId } });
+        await prisma.hostedMember.deleteMany({ where: { id: memberId } });
+        await prisma.$disconnect();
+      }
+    }, 30_000);
+
+    it("settles a canceled setup after an in-flight create response is lost", async () => {
+      const suffix = randomUUID().replaceAll("-", "");
+      const memberId = `member_provider_create_loss_${suffix}`;
+      const setupId = `dps_provider_create_loss_${suffix}`;
+      const prisma = createPrismaClient({ databaseUrl, poolMax: 4 });
+      const browserMaterialized = createDeferred();
+      const createBrowserReached = createDeferred();
+      const materializeBrowser = createDeferred();
+      const releaseCreateBrowser = createDeferred();
+      const kernel = createInFlightProviderSetupKernel({
+        browserMaterialized,
+        createBrowserReached,
+        materializeBrowser,
+        releaseCreateBrowser,
+      });
+      let now = new Date("2026-08-13T12:00:00.000Z");
+      const computer = new ComputerUseService({
+        env: { HOSTED_COMPUTER_PROFILE_NAMESPACE: "test" },
+        kernel,
+        now: () => now,
+        store: new PrismaComputerUseStore(prisma),
+      });
+      const service = new MemberOwnedProviderSetupService("strava", {
+        computer,
+        now: () => now,
+        store: new PrismaDeviceProviderSetupStore(prisma),
+      });
+      let begin: Promise<PromiseSettledResult<unknown>[]> | null = null;
+      vi.stubEnv("HOSTED_WEB_BASE_URL", "https://web.example.test");
+
+      try {
+        await prisma.hostedMember.create({ data: { id: memberId } });
+        await prisma.deviceProviderSetup.create({
+          data: {
+            active: true,
+            connectSourceId: "strava",
+            connectTarget: "strava",
+            id: setupId,
+            memberId,
+            provider: "strava",
+            status: "authorized",
+            version: 1,
+          },
+        });
+
+        begin = Promise.allSettled([service.beginBrowserSetup(memberId)]);
+        await bounded(createBrowserReached.promise, "lost browser create response");
+        await expect(service.cancel(memberId, setupId)).resolves.toMatchObject({
+          status: "canceling",
+        });
+
+        materializeBrowser.resolve();
+        await bounded(browserMaterialized.promise, "unobserved browser materialization");
+        expect(kernel.browserLive).toBe(true);
+
+        const cleanupClaim = await prisma.hostedComputerRun.findFirstOrThrow({
+          where: { memberId },
+        });
+        now = new Date(cleanupClaim.updatedAt.getTime() + 120_001);
+        await expect(service.read(memberId)).resolves.toMatchObject({
+          status: "canceled",
+        });
+        expect(kernel.browserLive).toBe(false);
+        expect(kernel.navigationCalls).toBe(0);
+        await expect(prisma.hostedComputerRun.findFirstOrThrow({
+          where: { memberId },
+        })).resolves.toMatchObject({
+          kernelSessionId: null,
+          status: "expired",
+        });
+
+        releaseCreateBrowser.resolve();
+        const [beginResult] = await bounded(begin, "released lost create response");
+        expect(beginResult.status).toBe("rejected");
+        expect(kernel.browserLive).toBe(false);
+        expect(kernel.navigationCalls).toBe(0);
+      } finally {
+        materializeBrowser.resolve();
+        releaseCreateBrowser.resolve();
+        if (begin) {
+          await begin;
+        }
+        vi.unstubAllEnvs();
+        await prisma.hostedComputerHandoff.deleteMany({ where: { memberId } });
+        await prisma.deviceProviderSetup.deleteMany({ where: { memberId } });
+        await prisma.hostedComputerRun.deleteMany({ where: { memberId } });
+        await prisma.hostedMember.deleteMany({ where: { id: memberId } });
+        await prisma.$disconnect();
+      }
+    }, 30_000);
 
     it("deactivates a deleted tombstone before creating a successor setup", async () => {
       const suffix = randomUUID().replaceAll("-", "");

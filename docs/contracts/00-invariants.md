@@ -300,7 +300,12 @@ it has been explicitly elevated to a cross-cutting invariant.
   reservation is not navigation authority: a new or successor candidate
   must CAS-bind to an acquisition-eligible exact setup before Kernel provisioning
   and attach under that binding before navigation. A losing admission retires the
-  candidate synchronously; a winning admission makes cancellation finish it.
+  candidate synchronously; a winning admission makes cancellation own it. If
+  remote browser creation may already be in flight, cancellation persists the
+  existing cleanup claim and remains `canceling`: an early delete-by-name
+  `NotFound` is not quiescence. The returning creator deletes its exact browser,
+  or the existing stale-provisioning boundary repeats deterministic cleanup;
+  only that proof may clear the claim and report `canceled`.
   Successful application deletion deactivates the terminal setup only after its exact
   browser run is released, so a fresh setup never overlaps owned browser work.
   Continue and setup-owned handoff completion append exact typed continuation

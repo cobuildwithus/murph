@@ -1030,7 +1030,12 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   provisioning, and the browser must attach under that still-eligible binding
   before provider navigation. Losing admission terminalizes the candidate;
   winning admission makes the run visible to the persisted `canceling` fence,
-  which finishes it. Once an exact application binding is
+  which owns its cleanup. If browser creation may already be in flight, the run
+  retains its deterministic `cleanup_pending` claim and the setup remains
+  `canceling`; a late creator deletes the exact returned browser, and a lost
+  response reuses the existing stale-provisioning delete-by-name boundary.
+  `/connect` keeps polling that existing setup owner and reports `canceled` only
+  after cleanup is proven. Once an exact application binding is
   durable, setup finishes that exact browser run and compare-and-set clears its
   run binding before OAuth can continue; an interrupted finish or clear remains
   explicit and retryable. After application deletion, the same terminal-release
