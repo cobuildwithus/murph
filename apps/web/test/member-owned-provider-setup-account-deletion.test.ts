@@ -163,6 +163,7 @@ function buildSetup(
 ): MemberOwnedProviderSetupRecord {
   return {
     active: true,
+    applicationName: "Cobalt Trail 4827",
     browserRunId: null,
     completedAt: null,
     connectSourceId: "strava",

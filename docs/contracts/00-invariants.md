@@ -295,7 +295,7 @@ it has been explicitly elevated to a cross-cutting invariant.
   fence and exact-run recovery cannot submit again. If that run expires, only a
   successor already proven by the computer owner to belong to the same setup may
   replace its run binding, without changing `capturing`. A fully loaded exact safe
-  landing with no ownership marker may clear that fence without submitting;
+  landing with no exact persisted application name may clear that fence without submitting;
   only a later independent invocation may attempt creation again. Run
   reservation is not navigation authority: a new or successor candidate
   must CAS-bind to an acquisition-eligible exact setup before Kernel provisioning

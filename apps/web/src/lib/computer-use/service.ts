@@ -4907,7 +4907,6 @@ function buildMemberOwnedProviderSetupComputerActCode(
   return `
 const __murphSteps = ${JSON.stringify(input.steps)};
 const __murphCredentialHint = /(?:client\\s*(?:id|secret)|consumer\\s*(?:key|secret)|api\\s*(?:key|secret|token)|oauth\\s*(?:key|secret|token)|access\\s*token|refresh\\s*token|private\\s*key|password|credential|bearer\\s*token)/iu;
-const __murphOwnershipMarker = /^Murph Private Sync [a-f0-9]{12}$/u;
 const __murphCommitHint = /(?:^|\\b)(?:create|register|save|submit)(?:\\b|$)/iu;
 const __murphDestructiveHint = /(?:^|\\b)(?:delete|remove|revoke|reset|rotate|destroy|disconnect)(?:\\b|$)/iu;
 const __murphBlockedRequest = async (route) => {
@@ -5003,9 +5002,6 @@ try {
         const metadata = await __murphTargetMetadata(target);
         if (metadata.type === "password" || __murphCredentialHint.test(metadata.hints)) {
           throw new Error("MURPH_PROVIDER_SETUP_CREDENTIAL_FIELD_FORBIDDEN");
-        }
-        if (__murphOwnershipMarker.test(step.value.trim())) {
-          throw new Error("MURPH_PROVIDER_SETUP_OWNERSHIP_MARKER_FORBIDDEN");
         }
         await target.fill(step.value);
         break;

@@ -1,7 +1,5 @@
 import "server-only";
 
-import { createHash } from "node:crypto";
-
 import {
   listMemberOwnedDeviceSyncConnectTargets,
   normalizeDeviceConnectSourceId,
@@ -54,6 +52,7 @@ export interface MemberOwnedProviderSetupBrowserContract<
   application: {
     callbackUrl: string;
     category: string | null;
+    name: string | null;
     readOnlyScopes: readonly string[];
     website: string;
   };
@@ -77,9 +76,9 @@ const STRAVA_REGISTRATION = Object.freeze({
     applicationWebsite: "https://withmurph.ai",
     developerPortalUrl: "https://www.strava.com/settings/api",
     guidance: Object.freeze([
-      "Use the provider developer page to prepare one private application with the supplied website, category, callback URL, and read-only scopes. Leave the application name for the trusted capture boundary.",
+      "Use the provider developer page to prepare one private application with the supplied website, category, callback URL, and read-only scopes. Invent a short, distinctive, friendly application name unrelated to the member unless the contract already supplies one; pass it only to provider_setup capture.",
       "Navigate and identify controls from the live page. Never rely on checked-in provider selectors or a provider-specific browser program.",
-      "Fill the reversible metadata fields with computer tools, but do not fill the application name or submit with computer_act. Call provider_setup capture so the trusted browser boundary names and submits the application before credential sealing.",
+      "Fill the reversible metadata fields with computer tools, but do not fill the application name or submit with computer_act. Call provider_setup capture so the trusted browser boundary freezes, writes, and submits the chosen name before credential sealing.",
       "For sign-in, MFA, CAPTCHA, or developer-access prerequisites, pause the same run for the member. Ask them to complete only that interruption, not to create the application or copy credentials.",
     ]),
     safeLandingUrl: "https://www.strava.com/settings/api",
@@ -147,6 +146,7 @@ export function requireMemberOwnedProviderSetupRegistration(
 }
 
 export function buildMemberOwnedProviderSetupBrowserContract(input: {
+  applicationName?: string | null;
   env?: Readonly<Record<string, string | undefined>>;
   memberId: string;
   provider: MemberOwnedDeviceProviderApplicationProvider;
@@ -174,6 +174,7 @@ export function buildMemberOwnedProviderSetupBrowserContract(input: {
         `${publicBaseUrl.replace(/\/+$/u, "")}/`,
       ).toString(),
       category: registration.browser.applicationCategory,
+      name: input.applicationName ?? null,
       readOnlyScopes: descriptor.defaultScopes,
       website: registration.browser.applicationWebsite,
     },
@@ -183,17 +184,6 @@ export function buildMemberOwnedProviderSetupBrowserContract(input: {
     providerName: registration.presentation.providerName,
     safeLandingUrl: registration.browser.safeLandingUrl,
   };
-}
-
-export function buildMemberOwnedProviderApplicationMarker(input: {
-  memberId: string;
-  provider: MemberOwnedDeviceProviderApplicationProvider;
-}): string {
-  const suffix = createHash("sha256")
-    .update(`murph.member-owned-provider:${input.provider}:${input.memberId}`, "utf8")
-    .digest("hex")
-    .slice(0, 12);
-  return `Murph Private Sync ${suffix}`;
 }
 
 function assertRegistrationsMatchConnectCatalog(): void {

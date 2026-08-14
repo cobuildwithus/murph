@@ -1625,11 +1625,12 @@ describe('assistant local PDF evidence guidance', () => {
       ))
 
     expect(directGuidance).toContain(
-      'For Strava (`strava`) and Trailbox (`trailbox`), /connect Continue authorizes; it starts no work',
+      'For Strava (`strava`) and Trailbox (`trailbox`), /connect Continue authorizes',
     )
     expect(directGuidance).toContain(
-      'Leave the application name and submit to capture',
+      'invent a random friendly name, no member details; pass only to capture',
     )
+    expect(directGuidance).toContain('reuse it')
     expect(directGuidance).toContain(
       'Pause for sign-in, MFA/CAPTCHA/prerequisites, then begin after return',
     )

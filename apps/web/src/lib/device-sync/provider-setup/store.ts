@@ -23,6 +23,7 @@ import {
 
 export const DEVICE_PROVIDER_SETUP_SELECT = {
   active: true,
+  applicationName: true,
   browserRunId: true,
   completedAt: true,
   connectSourceId: true,
@@ -71,6 +72,7 @@ export class DeviceProviderSetupError extends DeviceSyncError {
 
 export interface DeviceProviderSetupTransitionInput {
   active?: boolean;
+  applicationName?: string | null;
   browserRunId?: string | null;
   completedAt?: Date | null;
   expectedVersion: number;
@@ -171,6 +173,9 @@ export class PrismaDeviceProviderSetupStore {
     const update = await this.prisma.deviceProviderSetup.updateMany({
       data: {
         ...(input.active === undefined ? {} : { active: input.active }),
+        ...(input.applicationName === undefined
+          ? {}
+          : { applicationName: input.applicationName }),
         ...(input.browserRunId === undefined
           ? {}
           : { browserRunId: input.browserRunId }),
@@ -414,10 +419,17 @@ function mapSetup(row: DeviceProviderSetupRow): MemberOwnedProviderSetupRecord {
   if (!Number.isSafeInteger(row.version) || row.version <= 0) {
     throw new TypeError("Stored private provider setup version is invalid.");
   }
+  if (
+    row.applicationName !== null
+    && normalizeProviderApplicationName(row.applicationName) !== row.applicationName
+  ) {
+    throw new TypeError("Stored private provider application name is invalid.");
+  }
   const hasApplicationId = row.providerApplicationId !== null;
   const hasApplicationRevision = row.providerApplicationRevision !== null;
   if (
     hasApplicationId !== hasApplicationRevision
+    || (hasApplicationId && row.applicationName === null)
     || (hasApplicationRevision
       && (!Number.isSafeInteger(row.providerApplicationRevision)
         || (row.providerApplicationRevision ?? 0) <= 0))
@@ -452,6 +464,13 @@ function assertSetupCoordinates(
 }
 
 function assertApplicationPair(input: DeviceProviderSetupTransitionInput): void {
+  if (
+    input.applicationName !== undefined
+    && input.applicationName !== null
+    && normalizeProviderApplicationName(input.applicationName) !== input.applicationName
+  ) {
+    throw new TypeError("Private provider application name is invalid.");
+  }
   const updatesId = input.providerApplicationId !== undefined;
   const updatesRevision = input.providerApplicationRevision !== undefined;
   if (updatesId !== updatesRevision) {
@@ -474,6 +493,11 @@ function assertApplicationPair(input: DeviceProviderSetupTransitionInput): void 
   ) {
     throw new TypeError("Private provider setup application binding is invalid.");
   }
+}
+
+function normalizeProviderApplicationName(value: string): string | null {
+  const normalized = value.trim().replace(/\s+/gu, " ");
+  return normalized.length >= 3 && normalized.length <= 80 ? normalized : null;
 }
 
 async function requirePersonalMember(input: {

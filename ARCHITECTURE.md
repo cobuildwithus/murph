@@ -1008,16 +1008,19 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   returns to `/connect`.
 
   Final submission and credential capture remain trusted Web operations. The
-  model supplies only restricted control selectors identified from the live page;
-  trusted code fills the server-derived ownership marker and submits within the
-  one provider-declared creation form, then reloads the trusted provider page and
-  derives the one marked application container before it proves credential,
-  delete, and confirmation controls belong to that object. The marker is not
-  exposed in the browser contract, and generic model-driven fills reject its
-  format. Trusted capture reads the client id and secret inside the browser boundary,
+  model proposes one short friendly application name and supplies only restricted
+  control selectors identified from the live page. Web freezes that exact name on
+  the setup before trusted code writes or submits it within the one
+  provider-declared creation form. Trusted code then reloads the provider page and
+  derives the one exact-name application container before it proves credential,
+  delete, and confirmation controls belong to that object. Before submission,
+  trusted code also rejects a name already present on the page; the safe
+  pre-submit rollback releases that choice so the model can propose another.
+  Generic model-driven actions cannot fill the name or submit the form. Trusted
+  capture reads the client id and secret inside the browser boundary,
   seals them directly into `DeviceProviderApplication`, navigates away, scrubs
   transient values, and returns no credential-bearing result. Owned deletion
-  uses the same marker-derived boundary; ambiguous absence retains the local
+  uses the same persisted-name boundary; ambiguous absence retains the local
   binding. `capturing` is the irreversible submission fence, so it cannot be
   canceled after an ambiguous failure and recovery of the exact run never
   submits again. If that run expires, the computer owner's existing exact-owner
@@ -1090,7 +1093,7 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   durable work, acquire a browser, or start OAuth until the member has seen the
   prerequisite disclosure and explicitly chooses Continue.
   Strava is the first registry entry: its declarative guidance uses the
-  deterministic Murph marker, models the provider's
+  setup's frozen friendly application name, models the provider's
   subscription prerequisite as a disclosed recoverable pause with explicit
   Continue and Cancel actions, uses the checked-in callback and `activity:read`
   scope, never falls back to global credentials, and does not enable

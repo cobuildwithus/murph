@@ -31,7 +31,7 @@ provider-specific automation layer.
   connection binding checks, focused tests, concurrency proof, and verification
   map updates.
 - Out of scope: new provider adapters, provider-specific browser scripting,
-  device-sync runtime redesign, database schema changes, or deployment config.
+  device-sync runtime redesign, new database owners or tables, or deployment config.
 
 ## Constraints
 
@@ -103,6 +103,9 @@ provider-specific automation layer.
 19. [x] Return the first durably retained no-handle browser-create ambiguity as
     the existing typed provisioning outcome so the accepted mailbox item owns
     its two-minute retry.
+20. [x] Replace the visible member-derived ownership marker with one friendly
+    model-proposed application name frozen on the existing setup before trusted
+    submission, then prove exact-name recovery and deletion remain fail closed.
 
 ## Decisions
 
@@ -165,6 +168,13 @@ provider-specific automation layer.
   `cleanup_pending`, the caller receives the existing typed provisioning
   outcome even if immediate best-effort delete-by-name fails. That outcome is
   retry ownership, not proof of cleanup or permission for another browser.
+- The model may propose a short friendly application name, but it does not own
+  the mutation. `DeviceProviderSetup` freezes that exact name before the trusted
+  boundary writes or submits it. The boundary rejects an exact pre-existing name
+  before submit and releases that safe pre-submit choice so the model can choose
+  another. Capture, recovery, and deletion derive authority only after a fresh
+  provider-page load produces one exact-name container; the model cannot change
+  the name after provider mutation may have started.
 
 ## Verification
 
@@ -239,3 +249,14 @@ provider-specific automation layer.
   successor case, and the exact engine/mailbox ownership seams pass. Hosted Web
   and Cloudflare typechecks, focused Web ESLint, docs drift, diff integrity, and
   the changed-line privacy scan pass.
+- Friendly-name proof: 269 focused Web browser-boundary, service, route,
+  migration, and changelog tests; 109 assistant prompt/tool tests; and 9 hosted
+  execution contract tests pass. Web, assistant-engine, and hosted-execution
+  typechecks, focused Web ESLint, Prisma validation, docs drift, diff integrity,
+  and the changed-line privacy scan pass. The opt-in PostgreSQL case now proves
+  the name and `capturing` fence commit together; local execution was unavailable
+  because the checkout database is intentionally unbaselined and lacks this PR's
+  setup table, so exact runtime proof remains owned by post-migration CI.
+- Friendly-name collision hardening: 41 direct service and trusted-browser tests
+  pass, including exact pre-existing-name rejection before submit and release of
+  that safe choice for a later retry. Hosted Web typecheck and docs drift pass.

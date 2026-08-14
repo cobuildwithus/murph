@@ -11,6 +11,13 @@ const migration = readFileSync(
   ),
   "utf8",
 );
+const friendlyNameMigration = readFileSync(
+  join(
+    webRoot,
+    "prisma/migrations/20260814180000_provider_setup_friendly_application_name/migration.sql",
+  ),
+  "utf8",
+);
 const schema = readFileSync(join(webRoot, "prisma/schema.prisma"), "utf8");
 
 describe("member-owned provider setup migration", () => {
@@ -18,6 +25,9 @@ describe("member-owned provider setup migration", () => {
     expect(migration).toContain('ADD COLUMN "owner_purpose" TEXT');
     expect(migration).toContain('ADD COLUMN "owner_key" TEXT');
     expect(migration).toContain('CREATE TABLE "device_provider_setup"');
+    expect(friendlyNameMigration).toContain(
+      'ADD COLUMN "application_name" TEXT',
+    );
     expect(migration).toContain('WHERE "active" = TRUE');
     expect(migration).toContain('REFERENCES "device_provider_application"("id")');
     expect(migration).toContain('REFERENCES "hosted_computer_run"("id")');
@@ -32,8 +42,8 @@ describe("member-owned provider setup migration", () => {
     expect(migration).toContain(
       'FOREIGN KEY ("provider_setup_id") REFERENCES "device_provider_setup"("id")',
     );
-    expect(schema).toContain("providerSetup        DeviceProviderSetup?");
-    expect(schema).toContain("connectIntents              DeviceConnectIntent[]");
-    expect(schema).toContain("deviceProviderSetups       DeviceProviderSetup[]");
+    expect(schema).toMatch(/providerSetup\s+DeviceProviderSetup\?/u);
+    expect(schema).toMatch(/connectIntents\s+DeviceConnectIntent\[\]/u);
+    expect(schema).toMatch(/deviceProviderSetups\s+DeviceProviderSetup\[\]/u);
   });
 });

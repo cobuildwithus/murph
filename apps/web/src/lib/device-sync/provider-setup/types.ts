@@ -25,6 +25,7 @@ export interface MemberOwnedProviderSetupRecord<
   TProvider extends string = MemberOwnedDeviceProviderApplicationProvider,
 > {
   active: boolean;
+  applicationName: string | null;
   browserRunId: string | null;
   completedAt: Date | null;
   connectSourceId: string;

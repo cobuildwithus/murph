@@ -6,7 +6,6 @@ import { parseHostedRuntimeProviderSetupToolRequest } from "@murphai/hosted-exec
 
 import {
   STRAVA_MEMBER_OWNED_PROVIDER_SETUP_PRESENTATION,
-  buildMemberOwnedProviderApplicationMarker,
   buildMemberOwnedProviderSetupBrowserContract,
   listMemberOwnedProviderSetupRegistrations,
 } from "@/src/lib/device-sync/provider-setup/registry";
@@ -23,6 +22,7 @@ const MEMBER_ID = "member_synthetic";
 
 const SETUP: MemberOwnedProviderSetupRecord = {
   active: true,
+  applicationName: null,
   browserRunId: null,
   completedAt: null,
   connectSourceId: "strava",
@@ -72,30 +72,28 @@ describe("member-owned provider setup contract", () => {
       provider: "strava",
     });
     expect(contract.application).not.toHaveProperty("marker");
-    expect(contract.application).not.toHaveProperty("name");
+    expect(contract.application.name).toBeNull();
     expect(contract.guidance.join(" ")).toMatch(/live page/iu);
     expect(contract.guidance.join(" ")).toMatch(/trusted browser boundary/iu);
     expect(contract.guidance.join(" ")).not.toMatch(/input\[|button\.|data-testid|xpath/iu);
   });
 
-  it("uses a stable opaque ownership marker without exposing the member id", () => {
-    const first = buildMemberOwnedProviderApplicationMarker({
-      memberId: MEMBER_ID,
-      provider: "strava",
-    });
-    const second = buildMemberOwnedProviderApplicationMarker({
+  it("returns the friendly application name frozen on the setup", () => {
+    const named = buildMemberOwnedProviderSetupBrowserContract({
+      applicationName: "Cobalt Trail 4827",
+      env: { HOSTED_WEB_BASE_URL: "https://web.example.test" },
       memberId: MEMBER_ID,
       provider: "strava",
     });
 
-    expect(first).toBe(second);
-    expect(first).toMatch(/^Murph Private Sync [a-f0-9]{12}$/u);
-    expect(first).not.toContain(MEMBER_ID);
+    expect(named.application.name).toBe("Cobalt Trail 4827");
+    expect(named.application.name).not.toContain(MEMBER_ID);
   });
 
   it("accepts only the runtime selector handoff and rejects credential-shaped tool input", () => {
     const parsed = parseHostedRuntimeProviderSetupToolRequest({
       action: "capture",
+      applicationName: "Cobalt Trail 4827",
       applicationNameSelector: "[data-application-name]",
       clientIdSelector: "[data-client-id]",
       clientSecretSelector: "[data-client-secret]",
@@ -124,7 +122,7 @@ describe("member-owned provider setup contract", () => {
       clientIdSelector: "#runtime-client-id",
       clientSecretSelector: "#runtime-client-secret",
       creationFormSelector: "form[data-owned-application]",
-      marker: "Murph Private Sync fixture",
+      applicationName: "Cobalt Trail 4827",
       revealSecretSelector: "#runtime-reveal",
       safeLandingUrl: "https://provider.example.test/apps",
       submitSelector: "#runtime-submit",
@@ -133,7 +131,7 @@ describe("member-owned provider setup contract", () => {
       applicationContainerSelector: "section[data-owned-application]",
       confirmSelector: "#runtime-confirm",
       deleteSelector: "#runtime-delete",
-      marker: "Murph Private Sync fixture",
+      applicationName: "Cobalt Trail 4827",
       safeLandingUrl: "https://provider.example.test/apps",
     });
 
@@ -165,7 +163,7 @@ describe("member-owned provider setup contract", () => {
     });
     page.setNavigationContent(`
       <section data-owned-application>
-        <h3>Murph Private Sync fixture</h3>
+        <h3>Cobalt Trail 4827</h3>
         <output class="client-id">right-id</output>
         <output class="client-secret">right-secret</output>
       </section>
@@ -176,7 +174,7 @@ describe("member-owned provider setup contract", () => {
       clientIdSelector: ".client-id",
       clientSecretSelector: ".client-secret",
       creationFormSelector: "form[data-owned-creation]",
-      marker: "Murph Private Sync fixture",
+      applicationName: "Cobalt Trail 4827",
       revealSecretSelector: null,
       safeLandingUrl: "about:blank",
       submitSelector: ".create",
@@ -189,7 +187,7 @@ describe("member-owned provider setup contract", () => {
       clientId: "right-id",
       clientSecret: "right-secret",
     });
-    expect(submittedNames).toEqual(["Murph Private Sync fixture"]);
+    expect(submittedNames).toEqual(["Cobalt Trail 4827"]);
   });
 
   it("reports proven pre-submit failure but fences an unknown submit outcome", async () => {
@@ -204,7 +202,7 @@ describe("member-owned provider setup contract", () => {
       clientIdSelector: ".client-id",
       clientSecretSelector: ".client-secret",
       creationFormSelector: "form[data-owned-creation]",
-      marker: "Murph Private Sync fixture",
+      applicationName: "Cobalt Trail 4827",
       revealSecretSelector: null,
       safeLandingUrl: "about:blank",
       submitSelector: ".create",
@@ -227,6 +225,35 @@ describe("member-owned provider setup contract", () => {
     expect(page.clickSelectors).toEqual([".create"]);
   });
 
+  it("rejects an exact friendly-name collision before trusted submission", async () => {
+    const page = createFixturePage(`
+      <section data-owned-application>
+        <h3>Cobalt Trail 4827</h3>
+      </section>
+      <form data-owned-creation>
+        <input class="application-name" value="" />
+        <button class="create" type="button">Create</button>
+      </form>
+    `);
+    const code = buildBlindProviderCredentialCaptureCode({
+      applicationNameSelector: ".application-name",
+      applicationContainerSelector: "section[data-owned-application]",
+      clientIdSelector: ".client-id",
+      clientSecretSelector: ".client-secret",
+      creationFormSelector: "form[data-owned-creation]",
+      applicationName: "Cobalt Trail 4827",
+      revealSecretSelector: null,
+      safeLandingUrl: "about:blank",
+      submitSelector: ".create",
+    });
+    const run = new Function("page", `return (async () => {${code}})();`) as (
+      page: FixturePage,
+    ) => Promise<unknown>;
+
+    await expect(run(page)).resolves.toEqual({ kind: "pre_submit_failed" });
+    expect(page.clickSelectors).toEqual([]);
+  });
+
   it("reports authoritative marker absence only from a recovery inspection", async () => {
     const page = createFixturePage("<main>No owned applications</main>");
     const code = buildBlindProviderCredentialCaptureCode({
@@ -235,7 +262,7 @@ describe("member-owned provider setup contract", () => {
       clientIdSelector: ".client-id",
       clientSecretSelector: ".client-secret",
       creationFormSelector: "form[data-owned-creation]",
-      marker: "Murph Private Sync fixture",
+      applicationName: "Cobalt Trail 4827",
       revealSecretSelector: null,
       safeLandingUrl: "about:blank",
       submitSelector: null,
@@ -257,7 +284,7 @@ describe("member-owned provider setup contract", () => {
       clientIdSelector: ".client-id",
       clientSecretSelector: ".client-secret",
       creationFormSelector: "form[data-owned-creation]",
-      marker: "Murph Private Sync fixture",
+      applicationName: "Cobalt Trail 4827",
       revealSecretSelector: null,
       safeLandingUrl: "about:blank",
       submitSelector: null,
@@ -279,7 +306,7 @@ describe("member-owned provider setup contract", () => {
           <output class="cross-secret">wrong-secret</output>
         </form>
         <form data-owned-application>
-          <input name="name" value="Murph Private Sync fixture" />
+          <input name="name" value="Cobalt Trail 4827" />
           <button class="owned-submit" type="button">Create</button>
           <output class="owned-id">right-id</output>
           <output class="owned-secret">right-secret</output>
@@ -292,7 +319,7 @@ describe("member-owned provider setup contract", () => {
         clientIdSelector: ".owned-id",
         clientSecretSelector: ".owned-secret",
         creationFormSelector: "form[data-owned-application]",
-        marker: "Murph Private Sync fixture",
+        applicationName: "Cobalt Trail 4827",
         revealSecretSelector: null,
         safeLandingUrl: "about:blank",
         submitSelector: null,
@@ -308,7 +335,7 @@ describe("member-owned provider setup contract", () => {
 
       await page.setContent(`
         <form data-owned-application>
-          <input name="name" value="Murph Private Sync fixture" />
+          <input name="name" value="Cobalt Trail 4827" />
           <button class="owned-submit" type="button">Create</button>
         </form>
         <output class="cross-id">wrong-id</output>
@@ -320,7 +347,7 @@ describe("member-owned provider setup contract", () => {
         clientIdSelector: ".cross-id",
         clientSecretSelector: ".cross-secret",
         creationFormSelector: "form[data-owned-application]",
-        marker: "Murph Private Sync fixture",
+        applicationName: "Cobalt Trail 4827",
         revealSecretSelector: null,
         safeLandingUrl: "about:blank",
         submitSelector: null,
@@ -337,13 +364,13 @@ describe("member-owned provider setup contract", () => {
   it("rejects duplicate persisted markers before any irreversible control", async () => {
     const page = createFixturePage(`
         <form data-owned-application>
-          <input name="name" value="Murph Private Sync fixture" />
+          <input name="name" value="Cobalt Trail 4827" />
           <button class="owned-submit" type="button">Create</button>
           <output class="owned-id">right-id</output>
           <output class="owned-secret">right-secret</output>
         </form>
         <section data-owned-application>
-          <h3>Murph Private Sync fixture</h3>
+          <h3>Cobalt Trail 4827</h3>
         </section>
       `);
       const code = buildBlindProviderCredentialCaptureCode({
@@ -352,7 +379,7 @@ describe("member-owned provider setup contract", () => {
         clientIdSelector: ".owned-id",
         clientSecretSelector: ".owned-secret",
         creationFormSelector: "form[data-owned-application]",
-        marker: "Murph Private Sync fixture",
+        applicationName: "Cobalt Trail 4827",
         revealSecretSelector: null,
         safeLandingUrl: "about:blank",
         submitSelector: null,
@@ -367,7 +394,7 @@ describe("member-owned provider setup contract", () => {
   it("ignores a transient forged marker and trusts the reloaded landing absence", async () => {
     const forged = `
       <section data-owned-application>
-        <input class="forged-name" value="Murph Private Sync fixture" />
+        <input class="forged-name" value="Cobalt Trail 4827" />
         <output class="owned-id">wrong-id</output>
         <output class="owned-secret">wrong-secret</output>
         <button class="owned-delete" type="button">Delete</button>
@@ -389,7 +416,7 @@ describe("member-owned provider setup contract", () => {
       clientIdSelector: ".owned-id",
       clientSecretSelector: ".owned-secret",
       creationFormSelector: "form[data-owned-application]",
-      marker: "Murph Private Sync fixture",
+      applicationName: "Cobalt Trail 4827",
       revealSecretSelector: null,
       safeLandingUrl: "about:blank",
       submitSelector: null,
@@ -405,7 +432,7 @@ describe("member-owned provider setup contract", () => {
       applicationContainerSelector: "section[data-owned-application]",
       confirmSelector: null,
       deleteSelector: ".owned-delete",
-      marker: "Murph Private Sync fixture",
+      applicationName: "Cobalt Trail 4827",
       safeLandingUrl: "about:blank",
     });
     const runDelete = new Function(
@@ -418,8 +445,8 @@ describe("member-owned provider setup contract", () => {
   it("derives one application authority when its marker is rendered in multiple fields", async () => {
     const page = createFixturePage(`
         <section data-owned-application>
-          <h3>Murph Private Sync fixture</h3>
-          <input name="name" value="Murph Private Sync fixture" />
+          <h3>Cobalt Trail 4827</h3>
+          <input name="name" value="Cobalt Trail 4827" />
           <output class="owned-id">right-id</output>
           <output class="owned-secret">right-secret</output>
         </section>
@@ -430,7 +457,7 @@ describe("member-owned provider setup contract", () => {
         clientIdSelector: ".owned-id",
         clientSecretSelector: ".owned-secret",
         creationFormSelector: "form[data-owned-application]",
-        marker: "Murph Private Sync fixture",
+        applicationName: "Cobalt Trail 4827",
         revealSecretSelector: null,
         safeLandingUrl: "about:blank",
         submitSelector: null,
@@ -463,7 +490,7 @@ describe("member-owned provider setup contract", () => {
       applicationContainerSelector: "section[data-owned-application]",
       confirmSelector: null,
       deleteSelector: ".owned-delete",
-      marker: "Murph Private Sync fixture",
+      applicationName: "Cobalt Trail 4827",
       safeLandingUrl: "about:blank",
     });
     const run = new Function("page", `return (async () => {${code}})();`) as (
@@ -477,7 +504,7 @@ describe("member-owned provider setup contract", () => {
   it("keeps deletion fenced when the authoritative landing is unavailable", async () => {
     const page = createFixturePage(`
       <section data-owned-application>
-        <h3>Murph Private Sync fixture</h3>
+        <h3>Cobalt Trail 4827</h3>
         <button class="owned-delete" type="button">Delete</button>
       </section>
     `);
@@ -486,7 +513,7 @@ describe("member-owned provider setup contract", () => {
       applicationContainerSelector: "section[data-owned-application]",
       confirmSelector: null,
       deleteSelector: ".owned-delete",
-      marker: "Murph Private Sync fixture",
+      applicationName: "Cobalt Trail 4827",
       safeLandingUrl: "about:blank",
     });
     const run = new Function("page", `return (async () => {${code}})();`) as (
@@ -499,14 +526,14 @@ describe("member-owned provider setup contract", () => {
 
   it("keeps deletion fenced when multiple exact ownership markers exist", async () => {
     const page = createFixturePage(`
-      <section data-owned-application><h3>Murph Private Sync fixture</h3></section>
-      <section data-owned-application><h3>Murph Private Sync fixture</h3></section>
+      <section data-owned-application><h3>Cobalt Trail 4827</h3></section>
+      <section data-owned-application><h3>Cobalt Trail 4827</h3></section>
     `);
     const code = buildBlindOwnedApplicationDeleteCode({
       applicationContainerSelector: "section[data-owned-application]",
       confirmSelector: null,
       deleteSelector: ".owned-delete",
-      marker: "Murph Private Sync fixture",
+      applicationName: "Cobalt Trail 4827",
       safeLandingUrl: "about:blank",
     });
     const run = new Function("page", `return (async () => {${code}})();`) as (
@@ -523,7 +550,7 @@ describe("member-owned provider setup contract", () => {
           <button class="other-delete" type="button">Delete</button>
         </section>
         <section data-owned-application id="owned-app">
-          <h3>Murph Private Sync fixture</h3>
+          <h3>Cobalt Trail 4827</h3>
           <button class="owned-delete" type="button">Delete</button>
         </section>
         <button class="confirm" id="global-confirm" type="button">Global confirm</button>
@@ -550,7 +577,7 @@ describe("member-owned provider setup contract", () => {
         applicationContainerSelector: "section[data-owned-application]",
         confirmSelector: ".confirm",
         deleteSelector: ".owned-delete",
-        marker: "Murph Private Sync fixture",
+        applicationName: "Cobalt Trail 4827",
         safeLandingUrl: "about:blank",
       });
       const run = new Function("page", `return (async () => {${code}})();`) as (
@@ -562,7 +589,7 @@ describe("member-owned provider setup contract", () => {
 
       await page.setContent(`
         <section data-owned-application>
-          <h3>Murph Private Sync fixture</h3>
+          <h3>Cobalt Trail 4827</h3>
         </section>
         <button class="other-delete" type="button">Delete another app</button>
       `);
@@ -570,7 +597,7 @@ describe("member-owned provider setup contract", () => {
         applicationContainerSelector: "section[data-owned-application]",
         confirmSelector: null,
         deleteSelector: ".other-delete",
-        marker: "Murph Private Sync fixture",
+        applicationName: "Cobalt Trail 4827",
         safeLandingUrl: "about:blank",
       });
       const runCrossObject = new Function(

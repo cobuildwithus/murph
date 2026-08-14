@@ -7,7 +7,7 @@
     "priority": 4,
     "title": "A private Strava setup journey",
     "summary": "Starting or repairing Strava now uses one durable Connect journey instead of asking you to copy developer credentials into Murph.",
-    "details": "Murph creates or recovers only its marked private application, seals credentials without displaying them, and continues with read-only OAuth. Strava may first require a developer subscription or provider prerequisite; when it does, Connect offers Continue in Strava or a safe pre-submission cancellation. Progress remains saved across sign-in, consent, retry, disconnect, and deletion. This release records checked-in workflow and deterministic fake-provider validation; it does not claim external production launch proof.",
+    "details": "Murph gives the private application a distinct friendly name, creates or recovers only that exact application, seals credentials without displaying them, and continues with read-only OAuth. Strava may first require a developer subscription or provider prerequisite; when it does, Connect offers Continue in Strava or a safe pre-submission cancellation. Progress remains saved across sign-in, consent, retry, disconnect, and deletion. This release records checked-in workflow and deterministic fake-provider validation; it does not claim external production launch proof.",
     "relevanceTags": [
       "strava",
       "connections",

@@ -1255,7 +1255,7 @@ export const MURPH_PROVIDER_SETUP_TOOL = {
   namespace: 'murph',
   name: 'provider_setup',
   description:
-    'Drive an authorized private provider-app setup through the trusted browser boundary. Begin or resume the exact setup, then use computer_open/computer_act on its runId. Final submit/capture and owned deletion must use this tool so client credentials never enter model context. Selectors are identified from the live page at call time; never embed provider UI programs or credentials.',
+    'Drive an authorized private provider-app setup through the trusted browser boundary. Begin or resume the exact setup, then use computer_open/computer_act on its runId. When begin returns no name, invent one short random friendly name with no member details; pass it to capture but never fill or submit it yourself. Final submit/capture and owned deletion must use this tool so client credentials never enter model context. Selectors are identified from the live page at call time; never embed provider UI programs or credentials.',
   inputSchema: z.toJSONSchema(hostedRuntimeProviderSetupToolRequestSchema, {
     io: 'input',
   }) as Record<string, unknown>,

@@ -25,7 +25,6 @@ import {
 } from "../provider-applications";
 import {
   buildMemberOwnedProviderSetupBrowserContract,
-  buildMemberOwnedProviderApplicationMarker,
   requireMemberOwnedProviderSetupRegistration,
   type MemberOwnedProviderSetupBrowserContract,
   type MemberOwnedProviderSetupRegistration,
@@ -445,7 +444,7 @@ export class MemberOwnedProviderSetupService {
       });
     }
     if (setup.status === "capturing") {
-      const contract = this.browserContract(setup.memberId);
+      const contract = this.browserContract(setup);
       const acquired = await this.acquireBrowserRun(
         setup,
         "capturing",
@@ -462,7 +461,7 @@ export class MemberOwnedProviderSetupService {
       throw setupBusyError(setup.status);
     }
 
-    const contract = this.browserContract(setup.memberId);
+    const contract = this.browserContract(setup);
     const acquired = await this.acquireBrowserRun(
       setup,
       "browser_setup",
@@ -496,12 +495,39 @@ export class MemberOwnedProviderSetupService {
       }
     }
     const recovery = setup.status === "capturing";
+    const requestedApplicationName = request.applicationName === null
+      ? null
+      : normalizeProviderApplicationName(request.applicationName);
+    if (
+      setup.applicationName !== null
+      && requestedApplicationName !== null
+      && requestedApplicationName !== setup.applicationName
+    ) {
+      throw deviceSyncError({
+        code: "DEVICE_PROVIDER_SETUP_APPLICATION_NAME_CONFLICT",
+        httpStatus: 409,
+        message: "Continue with the application name already assigned to this setup.",
+        retryable: false,
+      });
+    }
+    const applicationName = setup.applicationName ?? requestedApplicationName;
+    if (applicationName === null) {
+      throw deviceSyncError({
+        code: "DEVICE_PROVIDER_SETUP_APPLICATION_NAME_REQUIRED",
+        httpStatus: 400,
+        message: "Choose a short, distinctive application name before capture.",
+        retryable: false,
+      });
+    }
     if (!recovery) {
-      setup = await this.transition(setup, { status: "capturing" });
+      setup = await this.transition(setup, {
+        applicationName,
+        status: "capturing",
+      });
     }
     const captureVersion = setup.version;
     const binding = readMemberOwnedProviderSetupBinding(setup);
-    const contract = this.browserContract(memberId);
+    const contract = this.browserContract(setup);
 
     try {
       await this.computer.captureAndSealProviderCredentialsInOwnedRun({
@@ -515,10 +541,7 @@ export class MemberOwnedProviderSetupService {
           clientSecretSelector: request.clientSecretSelector,
           creationFormSelector:
             this.registration.browser.trustedAuthority.creationFormSelector,
-          marker: buildMemberOwnedProviderApplicationMarker({
-            memberId,
-            provider: setup.provider,
-          }),
+          applicationName,
           revealSecretSelector: request.revealSecretSelector,
           safeLandingUrl: contract.safeLandingUrl,
           submitSelector: recovery ? null : request.submitSelector,
@@ -561,7 +584,12 @@ export class MemberOwnedProviderSetupService {
           && latest.version === captureVersion
           && latest.browserRunId === request.runId
         ) {
-          const restored = await this.transition(latest, { status: "browser_setup" });
+          const restored = await this.transition(latest, {
+            applicationName: missingApplicationProven
+              ? latest.applicationName
+              : null,
+            status: "browser_setup",
+          });
           if (missingApplicationProven) {
             return this.toView(restored);
           }
@@ -595,7 +623,7 @@ export class MemberOwnedProviderSetupService {
     if (deletion.kind === "connection_conflict") {
       throw disconnectFirstError(this.registration.presentation.providerName);
     }
-    const contract = this.browserContract(memberId);
+    const contract = this.browserContract(setup);
     const acquired = await this.acquireBrowserRun(
       setup,
       "deletion_pending",
@@ -623,17 +651,14 @@ export class MemberOwnedProviderSetupService {
       await this.transition(setup, { status: "disconnect_first" });
       throw disconnectFirstError(this.registration.presentation.providerName);
     }
-    const contract = this.browserContract(memberId);
+    const contract = this.browserContract(setup);
     const result = await this.computer.actOwnedRun({
       code: buildBlindOwnedApplicationDeleteCode({
         applicationContainerSelector:
           this.registration.browser.trustedAuthority.applicationContainerSelector,
         confirmSelector: request.confirmSelector,
         deleteSelector: request.deleteSelector,
-        marker: buildMemberOwnedProviderApplicationMarker({
-          memberId,
-          provider: setup.provider,
-        }),
+        applicationName: requireProviderApplicationName(setup),
         safeLandingUrl: contract.safeLandingUrl,
       }),
       memberId,
@@ -1055,6 +1080,7 @@ export class MemberOwnedProviderSetupService {
     setup: MemberOwnedProviderSetupRecord,
     input: {
       active?: boolean;
+      applicationName?: string | null;
       browserRunId?: string | null;
       completedAt?: Date | null;
       providerApplicationId?: string | null;
@@ -1096,9 +1122,12 @@ export class MemberOwnedProviderSetupService {
     return { run, setup };
   }
 
-  private browserContract(memberId: string): MemberOwnedProviderSetupBrowserContract {
+  private browserContract(
+    setup: MemberOwnedProviderSetupRecord,
+  ): MemberOwnedProviderSetupBrowserContract {
     return buildMemberOwnedProviderSetupBrowserContract({
-      memberId,
+      applicationName: setup.applicationName,
+      memberId: setup.memberId,
       provider: this.registration.coordinates.provider,
       registration: this.registration,
     });
@@ -1131,13 +1160,27 @@ export function createMemberOwnedProviderSetupService(
   return new MemberOwnedProviderSetupService(provider);
 }
 
+function normalizeProviderApplicationName(value: string): string | null {
+  const normalized = value.trim().replace(/\s+/gu, " ");
+  return normalized.length >= 3 && normalized.length <= 80 ? normalized : null;
+}
+
+function requireProviderApplicationName(
+  setup: MemberOwnedProviderSetupRecord,
+): string {
+  if (setup.applicationName === null) {
+    throw new TypeError("Private provider setup application name is missing.");
+  }
+  return setup.applicationName;
+}
+
 export function buildBlindProviderCredentialCaptureCode(input: {
   applicationNameSelector: string | null;
   applicationContainerSelector: string;
   clientIdSelector: string;
   clientSecretSelector: string;
   creationFormSelector: string;
-  marker: string;
+  applicationName: string;
   revealSecretSelector: string | null;
   safeLandingUrl: string;
   submitSelector: string | null;
@@ -1180,7 +1223,7 @@ const deriveAuthority = async () => {
   }, {
     authorityAttribute,
     containerSelector: ${JSON.stringify(input.applicationContainerSelector)},
-    expectedMarker: ${JSON.stringify(input.marker)},
+    expectedMarker: ${JSON.stringify(input.applicationName)},
   });
   if (result.kind === "absent") {
     ${recovery
@@ -1218,8 +1261,19 @@ if (await creationForm.locator(${JSON.stringify(input.clientIdSelector)}).count(
   throw new Error("provider creation form already exposes credentials");
 }
 const applicationName = await exactVisibleIn(creationForm, ${JSON.stringify(input.applicationNameSelector)}, "application name selector");
-await applicationName.fill(${JSON.stringify(input.marker)});
-if (await readField(applicationName) !== ${JSON.stringify(input.marker)}) {
+const existingApplicationNameCount = await page.evaluate((expectedApplicationName) => {
+  const readExact = (element) => element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement
+    ? element.value.trim()
+    : (element.textContent || "").trim();
+  return Array.from(document.querySelectorAll(
+    'input, textarea, [data-application-name], [data-app-name], h1, h2, h3, h4, dt, dd, p, span, a'
+  )).filter((element) => readExact(element) === expectedApplicationName).length;
+}, ${JSON.stringify(input.applicationName)});
+if (existingApplicationNameCount !== 0) {
+  throw new Error("provider application name is already present");
+}
+await applicationName.fill(${JSON.stringify(input.applicationName)});
+if (await readField(applicationName) !== ${JSON.stringify(input.applicationName)}) {
   throw new Error("provider application ownership marker was not placed");
 }
 const trustedSubmit = await exactVisibleIn(creationForm, ${JSON.stringify(input.submitSelector)}, "submit selector");
@@ -1259,7 +1313,7 @@ export function buildBlindOwnedApplicationDeleteCode(input: {
   applicationContainerSelector: string;
   confirmSelector: string | null;
   deleteSelector: string;
-  marker: string;
+  applicationName: string;
   safeLandingUrl: string;
 }): string {
   return `
@@ -1293,7 +1347,7 @@ const authority = await page.evaluate(({ authorityAttribute, containerSelector, 
 }, {
   authorityAttribute,
   containerSelector: ${JSON.stringify(input.applicationContainerSelector)},
-  expectedMarker: ${JSON.stringify(input.marker)},
+  expectedMarker: ${JSON.stringify(input.applicationName)},
 });
 if (authority.kind === "absent") {
   return { kind: "already_deleted" };
@@ -1340,7 +1394,7 @@ await page.waitForFunction(({ expectedMarker, expectedUrl }) => {
     'input, textarea, [data-application-name], [data-app-name], h1, h2, h3, h4, dt, dd, p, span, a'
   ));
   return !candidates.some((element) => readExact(element) === expectedMarker);
-}, { expectedMarker: ${JSON.stringify(input.marker)}, expectedUrl: ${JSON.stringify(input.safeLandingUrl)} }, { timeout: 15000 });
+}, { expectedMarker: ${JSON.stringify(input.applicationName)}, expectedUrl: ${JSON.stringify(input.safeLandingUrl)} }, { timeout: 15000 });
 await page.goto(${JSON.stringify(input.safeLandingUrl)}, { waitUntil: "domcontentloaded" });
 return { kind: "deleted" };
 `;

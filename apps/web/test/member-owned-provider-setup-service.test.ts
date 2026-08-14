@@ -164,6 +164,9 @@ class MemorySetupStore {
     this.setup = {
       ...this.setup,
       ...(input.active === undefined ? {} : { active: input.active }),
+      ...(input.applicationName === undefined
+        ? {}
+        : { applicationName: input.applicationName }),
       ...(input.browserRunId === undefined ? {} : { browserRunId: input.browserRunId }),
       ...(input.completedAt === undefined ? {} : { completedAt: input.completedAt }),
       ...(input.providerApplicationId === undefined
@@ -382,6 +385,7 @@ describe("member-owned provider setup service", () => {
     expect(first.contract).toMatchObject({
       application: {
         category: "Fixture category",
+        name: "Cobalt Trail 4827",
         website: "https://fixture.example.test",
       },
       developerPortalUrl: CUSTOM_REGISTRATION.browser.developerPortalUrl,
@@ -667,7 +671,11 @@ describe("member-owned provider setup service", () => {
 
   it("hands credentials directly to the sealed application owner without returning them", async () => {
     const store = new MemorySetupStore();
-    store.setup = buildSetup({ browserRunId: RUN_ID, status: "browser_setup" });
+    store.setup = buildSetup({
+      applicationName: null,
+      browserRunId: RUN_ID,
+      status: "browser_setup",
+    });
     const computer = new FakeProviderComputer();
     const saveApplication = vi.fn(async (input: SaveApplicationInput) => {
       expect(input).toMatchObject({
@@ -695,6 +703,7 @@ describe("member-owned provider setup service", () => {
     expect(JSON.stringify(result)).not.toContain(CAPTURED_CREDENTIALS.clientId);
     expect(JSON.stringify(result)).not.toContain(CAPTURED_CREDENTIALS.clientSecret);
     expect(store.setup).toMatchObject({
+      applicationName: "Cobalt Trail 4827",
       browserRunId: null,
       providerApplicationId: APPLICATION_ID,
       providerApplicationRevision: 3,
@@ -704,6 +713,43 @@ describe("member-owned provider setup service", () => {
       outcome: "completed",
       runId: RUN_ID,
     }));
+  });
+
+  it("requires one friendly name and freezes it before trusted submission", async () => {
+    const store = new MemorySetupStore();
+    store.setup = buildSetup({
+      applicationName: null,
+      browserRunId: RUN_ID,
+      status: "browser_setup",
+    });
+    const computer = new FakeProviderComputer();
+    const capture = vi.spyOn(
+      computer,
+      "captureAndSealProviderCredentialsInOwnedRun",
+    );
+    const service = createService({ computer, store });
+
+    await expect(service.captureAndSeal(MEMBER_ID, {
+      ...captureRequest(),
+      applicationName: null,
+    })).rejects.toMatchObject({
+      code: "DEVICE_PROVIDER_SETUP_APPLICATION_NAME_REQUIRED",
+    });
+    expect(capture).not.toHaveBeenCalled();
+
+    store.setup = buildSetup({
+      applicationName: "Cobalt Trail 4827",
+      browserRunId: RUN_ID,
+      status: "browser_setup",
+    });
+    await expect(service.captureAndSeal(MEMBER_ID, {
+      ...captureRequest(),
+      applicationName: "Amber Summit 9135",
+    })).rejects.toMatchObject({
+      code: "DEVICE_PROVIDER_SETUP_APPLICATION_NAME_CONFLICT",
+    });
+    expect(store.setup.applicationName).toBe("Cobalt Trail 4827");
+    expect(capture).not.toHaveBeenCalled();
   });
 
   it("keeps the irreversible capture fence after submission and rejects Cancel", async () => {
@@ -815,7 +861,7 @@ describe("member-owned provider setup service", () => {
     });
   });
 
-  it("requires an independent zero-marker recovery before another submit", async () => {
+  it("requires an independent exact-name absence proof before another submit", async () => {
     const store = new MemorySetupStore();
     store.setup = buildSetup({ browserRunId: RUN_ID, status: "browser_setup", version: 3 });
     const computer = new FakeProviderComputer();
@@ -856,6 +902,7 @@ describe("member-owned provider setup service", () => {
       "trusted pre-submit selector failure",
     );
     expect(store.setup).toMatchObject({
+      applicationName: null,
       browserRunId: RUN_ID,
       status: "browser_setup",
       version: 5,
@@ -865,7 +912,7 @@ describe("member-owned provider setup service", () => {
     });
   });
 
-  it("verifies the ownership marker in the trusted browser operation before exact deletion", async () => {
+  it("uses the frozen friendly name as trusted browser authority before exact deletion", async () => {
     const store = new MemorySetupStore();
     store.setup = buildSetup({
       providerApplicationId: APPLICATION_ID,
@@ -889,7 +936,7 @@ describe("member-owned provider setup service", () => {
     });
 
     const trustedCode = computer.actOwnedRun.mock.calls[0]?.[0].code ?? "";
-    expect(trustedCode).toMatch(/Murph Private Sync [a-f0-9]{12}/u);
+    expect(trustedCode).toContain("Cobalt Trail 4827");
     expect(trustedCode).toContain("provider application ownership marker mismatch");
     expect(trustedCode).toContain("button.delete-application");
     expect(deleteApplication).toHaveBeenCalledWith(expect.objectContaining({
@@ -1137,6 +1184,7 @@ function createService(input: {
 function captureRequest() {
   return {
     action: "capture" as const,
+    applicationName: "Cobalt Trail 4827",
     applicationNameSelector: "[data-application-name]",
     clientIdSelector: "[data-client-id]",
     clientSecretSelector: "[data-client-secret]",
@@ -1153,6 +1201,7 @@ function buildSetup(
 ): MemberOwnedProviderSetupRecord {
   return {
     active: true,
+    applicationName: "Cobalt Trail 4827",
     browserRunId: null,
     completedAt: null,
     connectSourceId: "strava",

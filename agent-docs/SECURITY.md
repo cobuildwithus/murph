@@ -81,9 +81,12 @@ Last verified: 2026-08-14
   foreign, and stale setup runs remain rejected. Prerequisite cancellation terminates
   only that exact run and is rejected unless durable state proves there is no
   provider submission, application binding, or connection. The provider-neutral
-  trusted boundary may inspect, create, repair, or delete only the exact
-  deterministic Murph marker within the registered container coordinates and
-  must fail closed around unrelated applications. A setup may
+  trusted boundary may inspect, create, repair, or delete only the exact friendly
+  application name frozen on the setup before trusted submission. Authority is
+  derived only after a fresh trusted provider-page load within the registered
+  container coordinates; trusted submission rejects a pre-existing exact name,
+  and zero or multiple post-submit matches fail closed around unrelated
+  applications. A setup may
   navigate only a browser run durably bound to that exact setup owner key; a
   generic active member run is never reusable for provider setup, and generic
   computer actions reject setup-owned runs. Account deletion checks external

@@ -10,7 +10,6 @@ export {
 export {
   STRAVA_MEMBER_OWNED_PROVIDER_SETUP_COORDINATES,
   STRAVA_MEMBER_OWNED_PROVIDER_SETUP_PRESENTATION,
-  buildMemberOwnedProviderApplicationMarker,
   buildMemberOwnedProviderSetupBrowserContract,
   listMemberOwnedProviderSetupRegistrations,
   readMemberOwnedProviderSetupRegistration,

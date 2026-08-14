@@ -12,6 +12,7 @@ const setupIdSchema = z.string().trim().min(1).max(200);
 const runIdSchema = z.string().trim().min(1).max(200);
 const selectorSchema = hostedComputerSafeSelectorSchema;
 const setupVersionSchema = z.number().int().positive();
+const applicationNameSchema = z.string().trim().min(3).max(80);
 
 export const hostedRuntimeProviderSetupContinuationValidateRequestSchema = z.object({
   provider: providerSchema,
@@ -40,6 +41,7 @@ const beginRequestSchema = z.object({
 
 const captureRequestSchema = z.object({
   action: z.literal("capture"),
+  applicationName: applicationNameSchema.nullable().default(null),
   applicationNameSelector: selectorSchema,
   clientIdSelector: selectorSchema,
   clientSecretSelector: selectorSchema,

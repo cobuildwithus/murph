@@ -956,7 +956,7 @@ Last verified: 2026-08-14
   outcomes survive page refresh and process restart. Ambiguous creation records
   the submission boundary before the provider call; the next missing inspection
   fully loads and verifies the exact safe landing, clears ambiguity without
-  creating only when no ownership marker exists, and only another independent
+  creating only when the persisted exact application name is absent, and only another independent
   invocation may create. Permanent malformed or undecryptable application state
   enters repair;
   transient crypto, KMS, root-key, and database failures remain retryable
