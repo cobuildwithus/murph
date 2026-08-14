@@ -22,6 +22,7 @@ const ASSISTANT_CRON_OUTPUT_HISTORY_OUTCOMES = new Set<
 ])
 
 interface AssistantCronOutputHistorySelection {
+  sessionId?: string | null
   startedAtOrAfter?: string | null
 }
 
@@ -32,6 +33,7 @@ interface AssistantCronOutputHistoryScope {
 
 export async function prepareAssistantCronNotificationInput(
   input: AssistantNotificationInput,
+  selection: Pick<AssistantCronOutputHistorySelection, 'sessionId'> = {},
 ): Promise<AssistantNotificationInput> {
   const scope = resolveAssistantCronOutputHistoryScope(input)
   if (!scope) {
@@ -45,6 +47,7 @@ export async function prepareAssistantCronNotificationInput(
         scope.automationId,
       ),
       {
+        sessionId: selection.sessionId,
         startedAtOrAfter: scope.updatedAt,
       },
     ),
@@ -81,6 +84,7 @@ export function selectAssistantCronRecentOutputs(
     }
     if (
       Date.parse(run.startedAt) < cutoffMs ||
+      (selection.sessionId != null && run.sessionId !== selection.sessionId) ||
       !ASSISTANT_CRON_OUTPUT_HISTORY_OUTCOMES.has(run.outcome)
     ) {
       continue

@@ -125,6 +125,17 @@ Updated: 2026-08-14
   it, and expires before later native-resume decisions. A gated three-turn App
   Server regression covers cold continuation, resumed cadence question, and
   resumed skip without adding state.
+- Final round 5 found an earlier chronology boundary: a supported provider,
+  inference-revision, expiry, or other continuity transition can replace the
+  conversation session before transcript projection, while automation outputs
+  from the prior session remain available. The second requirement-level
+  retrospective chooses the existing cross-owner join instead of another
+  marker: cadence evidence may use only automation runs whose existing
+  `sessionId` matches the currently resolved conversation session. On session
+  replacement, older output is neither answered nor unanswered evidence, so
+  the current cue sends normally and establishes a fresh same-session sequence.
+  Output enrichment moves behind session resolution; no schema, state, counter,
+  session type, lifecycle, or reminder-specific history is added.
 
 ## Verification
 
@@ -135,9 +146,12 @@ Updated: 2026-08-14
   clean, the dense lifecycle remains deleted while review-driven safety and
   retention corrections stay focused, ReviewGPT has no accepted unresolved
   findings, and required CI is green on the final head.
-- Current local evidence: 8 changed-surface assistant files passed with 434
-  tests and 70 intentional provider-gated skips; assistant and Web typechecks
-  passed; 53 focused changelog tests passed; desktop and 390px archive/design
-  renders were inspected without overflow or clipping. The live real-model
-  command is authored but cannot execute in this worktree because the isolated
-  harness requires an `OPENAI_API_KEY` and none is configured.
+- Current local evidence: 9 changed-surface assistant files passed with 490
+  tests and 71 intentional provider-gated skips; focused cron output and
+  notification-turn coverage passed with 277 tests; assistant and Web
+  typechecks passed; 57 focused changelog tests passed; desktop and 390px
+  archive/design renders were inspected without overflow or clipping. The
+  session replacement correction has direct selection, persisted-vault, and
+  resolved-notification-path proof. The live real-model command is authored but
+  cannot execute in this worktree because the isolated harness requires an
+  `OPENAI_API_KEY` and none is configured.
