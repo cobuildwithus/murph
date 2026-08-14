@@ -115,6 +115,43 @@ test("accepts GitHub-rendered attributes and a hosted image", () => {
   assert.deepEqual(result.errors, []);
 });
 
+test("rejects text that says evidence or viewport checks are absent", () => {
+  const result = validateFrontendDesignProof({
+    changedPaths: UI_PATHS,
+    prBodyHtml: `
+<h2>Design proof</h2>
+<ul>
+<li>Design page: <code>/design?tab=components#settings</code></li>
+<li>Evidence: No evidence was captured.</li>
+<li>Coverage: Phone and desktop were not checked.</li>
+</ul>
+`,
+  });
+
+  assert.deepEqual(result.errors, [
+    "The Design proof section must include evidence matched to the changed visual, state, interaction, or responsive risk.",
+    "The Design proof section must explain which states and viewports were checked and why that evidence is sufficient.",
+  ]);
+});
+
+test("rejects pending text-only evidence", () => {
+  const result = validateFrontendDesignProof({
+    changedPaths: UI_PATHS,
+    prBodyHtml: `
+<h2>Design proof</h2>
+<ul>
+<li>Design page: <code>/design?tab=components#settings</code></li>
+<li>Evidence: Evidence is pending.</li>
+<li>Coverage: Settings states at the only affected fixed width.</li>
+</ul>
+`,
+  });
+
+  assert.deepEqual(result.errors, [
+    "The Design proof section must include evidence matched to the changed visual, state, interaction, or responsive risk.",
+  ]);
+});
+
 test("reports missing catalog, heading, evidence, and coverage", () => {
   assert.deepEqual(
     validateFrontendDesignProof({
@@ -255,6 +292,14 @@ not proof
 `.trim();
   const renderedByMarkdown = new Map([
     ["visible", COMPLETE_HTML],
+    [
+      "explicit-absence",
+      `<h2>Design proof</h2><ul>
+<li>Design page: <code>/design?tab=components#settings</code></li>
+<li>Evidence: No evidence was captured.</li>
+<li>Coverage: Phone and desktop were not checked.</li>
+</ul>`,
+    ],
     [hiddenHeading, "<p>##Design proof</p>"],
     [commentSuffixedFence, "<pre><code>## Design proof</code></pre>"],
     [commentInsideRawHtml, "<div>## Design proof</div>"],
@@ -291,6 +336,15 @@ not proof
     const visible = await runCli(fixture, endpoint, "visible");
     assert.match(visible.stdout, /Frontend design proof passed/u);
 
+    const explicitAbsence = await runCli(
+      fixture,
+      endpoint,
+      "explicit-absence",
+    );
+    assert.equal(explicitAbsence.code, 1);
+    assert.match(explicitAbsence.stderr, /must include evidence matched/u);
+    assert.match(explicitAbsence.stderr, /must explain which states/u);
+
     const composedBodies = [
       hiddenHeading,
       commentSuffixedFence,
@@ -311,7 +365,7 @@ not proof
 
     assert.deepEqual(
       requests.map(({ payload }) => payload.text),
-      ["visible", ...composedBodies, "renderer-error"],
+      ["visible", "explicit-absence", ...composedBodies, "renderer-error"],
     );
     for (const request of requests) {
       assert.equal(request.authorization, "Bearer test-token");

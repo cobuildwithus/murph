@@ -1664,7 +1664,13 @@ describe('monorepo release flow coverage audit', () => {
     expect(completionWorkflow).toContain('not a quality target or an automatic merge')
     expect(completionWorkflow).toContain('evidenced current member/event volume')
     expect(completionWorkflow).toContain('`ROUND_OUTCOME: PASS`')
-    expect(completionWorkflow).toContain('User experience (when applicable)')
+    expect(completionWorkflow).not.toContain(
+      'User experience (when applicable)',
+    )
+    expect(completionWorkflow).toContain('expected timing and longest')
+    expect(completionWorkflow).toContain(
+      'without an unrelated new inbound action',
+    )
     expect(completionWorkflow).toContain('Non-obvious affected surfaces')
     expect(completionWorkflow).toContain('If none exist,')
     expect(completionWorkflow).toContain('## Preliminary Specialist Applicability')
@@ -2107,6 +2113,10 @@ printf '%s|%s|%s|%s\n' \
       path.join(repoRoot, 'agent-docs', 'prompts', 'product-experience-review.md'),
       'utf8',
     )
+    const productUx = readFileSync(
+      path.join(repoRoot, 'agent-docs', 'operations', 'product-ux.md'),
+      'utf8',
+    )
     const frontendReview = readFileSync(
       path.join(repoRoot, 'agent-docs', 'prompts', 'frontend-review.md'),
       'utf8',
@@ -2148,6 +2158,16 @@ printf '%s|%s|%s|%s\n' \
     )
     expect(completionSpecialists).not.toMatch(/product\s+alignment/u)
     expect(productExperienceReview).toContain('irreducible user purpose')
+    expect(productUx).toContain('Restore the existing promise: `Patch`.')
+    expect(productUx).toContain(
+      'Change the existing promise: `Product change`.',
+    )
+    expect(productUx).toMatch(
+      /Create a promise, audience, authority relationship, or product meaning:\s+`Feature`\./u,
+    )
+    expect(productUx).toContain(
+      'The number of affected people changes walkthrough coverage, not the effort',
+    )
     expect(productExperienceReview).toContain(
       '`agent-docs/operations/product-ux.md`',
     )

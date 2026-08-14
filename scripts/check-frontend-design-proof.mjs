@@ -168,8 +168,13 @@ function hasMeaningfulListItem(section, label) {
     return false;
   }
   const value = renderedText(item).slice(`${label}:`.length).trim();
-  return value.length >= 8
-    && !/^(?:n\/?a|none|not applicable)$/iu.test(value);
+  return value.length >= 8 && !isExplicitProofAbsence(value);
+}
+
+function isExplicitProofAbsence(value) {
+  return /(?:^(?:n\/?a|none|not applicable|pending|tbd|todo)\b|^(?:no|without)\s+(?:direct\s+)?(?:evidence|proof)\b|\b(?:evidence|proof)\s+(?:is\s+|was\s+|remains\s+)?(?:missing|pending|unavailable|uncaptured|not\s+(?:captured|collected|provided))\b|\b(?:not|never)\s+(?:checked|tested|inspected|verified)\b|\b(?:will be|to be)\s+(?:added|captured|collected|provided)\b)/iu.test(
+    value,
+  );
 }
 
 function hasEvidenceItem(section) {

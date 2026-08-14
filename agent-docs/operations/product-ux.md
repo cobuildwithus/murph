@@ -31,10 +31,21 @@ a large product promise. A large internal diff can have no Product UX effect.
 
 ## Choose The Smallest Useful Effort
 
+Choose the level from the product promise:
+
+1. Restore the existing promise: `Patch`.
+2. Change the existing promise: `Product change`.
+3. Create a promise, audience, authority relationship, or product meaning:
+   `Feature`.
+
+The number of affected people changes walkthrough coverage, not the effort
+level. A new cross-person promise or authority relationship is a Feature.
+
 ### Patch
 
-Use this level when the change restores or tunes an existing promise. It must
-not add an audience, surface, data source, state, or product decision.
+Use this level when the change restores or tunes an existing promise without
+changing its meaning or scope. It must not add an audience, surface, data
+source, state, or product decision.
 
 Record three short lines in the working plan or PR:
 
@@ -44,16 +55,15 @@ Record three short lines in the working plan or PR:
 
 ### Product change
 
-Use this level when the change alters a journey, result, surface, visible state,
-or message meaning. Add the short Product UX Plan below to the existing work
-plan before code. Challenge the selected people once. Resolve a material gap
-before implementation.
+Use this level when the change alters the meaning or scope of an existing
+journey, result, surface, visible state, or message. Add the short Product UX
+Plan below to the existing work plan before code. Challenge the selected people
+once. Resolve a material gap before implementation.
 
 ### Feature
 
-Use this level when the work creates a new promise, surface, data meaning, or
-journey. Also use it when several materially different people can receive
-different results.
+Use this level when the work creates a new promise, audience, authority
+relationship, surface, data meaning, or journey.
 
 Before code:
 

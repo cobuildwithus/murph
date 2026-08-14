@@ -7,12 +7,13 @@ Hosted integration control plane for Vercel deployments.
 The live design catalog is available at `/design`. Every pull request that
 changes user-facing frontend UI must render the real production component on
 `/design?tab=components`, or the complete composed section or flow on
-`/design?tab=sections`. Include hosted desktop and mobile screenshots captured
-from that catalog surface in the PR so reviewers can judge the UI without
-reconstructing the state locally. Capture lossless PNGs at 2x device scale or
-higher, crop to the changed component or section, and verify both local and
-hosted images at native resolution. The `Frontend design proof` workflow
-enforces the catalog update and PR evidence contract.
+`/design?tab=sections`. Include evidence matched to the changed visual, state,
+interaction, and responsive risk. A change can need no screenshots, one
+screenshot, or many. Inspect phone and desktop when responsive behavior can
+change. When a screenshot adds proof, capture a lossless PNG at 2x device scale
+or higher, crop it to the changed component or section, and inspect it at
+native resolution. The `Frontend design proof` workflow enforces the catalog
+update and PR evidence contract.
 
 `apps/web` is the canonical hosted control plane. Hosted product meaning lives
 in Postgres here, not in Cloudflare worker control storage. In particular,

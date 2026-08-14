@@ -253,18 +253,6 @@ Required:
 
 - **Why this PR exists.** The user need or product need being solved, in one or two sentences.
 - **User goal / user-visible behavior.** What the user can do or experience once this PR ships, stated as the outcome the diff is meant to reach. State this even when the diff temporarily disables, gates, fail-closes, scrubs, or stubs that behavior while wiring is in progress — the goal is the requirement, the disabled state is in-progress wiring.
-- **User experience (when applicable).** Outline the end-to-end UX created or
-  changed by the PR. State the irreducible user purpose and why the proposed
-  path uses the fewest necessary words, actions, choices, and screens. Trace
-  the entry point, immediate feedback, expected timing class and longest normal
-  wait, every asynchronous continuation owner, final destination and audience,
-  failure or recovery behavior, and what the user experiences next without an
-  unrelated new inbound action. For frontend work, record the local rendered
-  evidence for the changed states and its result. ReviewGPT may assess rendered
-  craft only from reviewer-readable visual artifacts contained in its guarded
-  snapshot; otherwise it must report the exact evidence gap without guessing.
-  If the PR has no user-facing effect, say so instead of inventing a UX
-  narrative.
 - **Invariants the PR must preserve.** The smallest set of correctness/security/exposure/operational invariants reviewers should hold the diff against.
 - **Non-obvious affected surfaces.** List every production behavior, shared
   subsystem, workflow, state owner, or deploy/runtime surface changed even
@@ -341,8 +329,16 @@ Required:
 - **Product UX.** For every user-facing change, name the Product UX effort:
   Patch, Product change, or Feature. Include the matching plan, affected people,
   material exclusions, completed walkthroughs, evidence, and `Ready` or `Hold`
-  result from `agent-docs/operations/product-ux.md`. Write `Not applicable`
-  with a concrete reason only when no user-facing outcome can change.
+  result from `agent-docs/operations/product-ux.md`. State the irreducible user
+  purpose and why the path uses the fewest necessary words, actions, choices,
+  and screens. Trace the entry, immediate feedback, expected timing and longest
+  normal wait, continuation owners, final destination and audience, failure or
+  recovery, and what happens next without an unrelated new inbound action. For
+  frontend work, name the local rendered evidence and its result. ReviewGPT can
+  judge rendered craft only from reviewer-readable visual evidence in its
+  guarded snapshot. Otherwise, it must state the exact evidence gap. Write
+  `Not applicable` with a concrete reason only when no user-facing outcome can
+  change.
 - **Preliminary specialist lenses.** Mark product experience, prompt, frontend,
   and coverage as `applicable` or `not applicable` with one short reason each.
   For product experience, state the intended outcome and name the direct
