@@ -8,6 +8,7 @@ import {
   buildHostedExecutionMemberActivatedWake,
   buildHostedExecutionMemberChannelsUpdatedWake,
   buildHostedExecutionPendingEffectsReconcileRequestedWake,
+  buildHostedExecutionProviderSetupContinuationRequestedWake,
   buildHostedExecutionRuntimeControlWake,
 } from "@murphai/hosted-execution";
 import {
@@ -3334,6 +3335,83 @@ describe("executeHostedMailboxEvent", () => {
       postCheckpointRecord: null,
       redactedLogEntries: [],
     });
+  });
+
+  it("revalidates an exact provider setup continuation before assistant work", async () => {
+    const providerFetch = vi.fn(async () => new Response(
+      JSON.stringify({ accepted: true }),
+      {
+        headers: { "content-type": "application/json" },
+        status: 200,
+      },
+    ));
+    const wake = buildHostedExecutionProviderSetupContinuationRequestedWake({
+      eventId: "runtime-control:provider-setup-continuation:fixture",
+      occurredAt: "2026-04-08T00:03:00.000Z",
+      providerSetup: {
+        handoffId: null,
+        provider: "strava",
+        runId: null,
+        setupId: "dps_fixture",
+        setupVersion: 3,
+      },
+      userId: "member_123",
+    });
+
+    const result = await executeHostedMailboxEvent({
+      wake,
+      executionContext: {
+        hosted: {
+          memberId: "member_123",
+          providerFetch,
+          userEnvKeys: [],
+        },
+      },
+      runtime: createRuntime(),
+      runtimeEnv: {},
+      vaultRoot: "/tmp/assistant-runtime-events",
+    });
+
+    expect(providerFetch).toHaveBeenCalledExactlyOnceWith(
+      "http://web-control.worker/api/internal/hosted-execution/provider-setup/continuation/validate",
+      expect.objectContaining({
+        body: JSON.stringify({
+          provider: "strava",
+          setupId: "dps_fixture",
+          setupVersion: 3,
+        }),
+        method: "POST",
+      }),
+    );
+    expect(result).toEqual(expect.objectContaining({
+      mailboxLane: "runtime-control",
+      providerSetupContinuationAccepted: true,
+    }));
+  });
+
+  it("fails closed when provider setup continuation validation is unavailable", async () => {
+    const wake = buildHostedExecutionProviderSetupContinuationRequestedWake({
+      eventId: "runtime-control:provider-setup-continuation:fixture",
+      occurredAt: "2026-04-08T00:03:00.000Z",
+      providerSetup: {
+        handoffId: null,
+        provider: "strava",
+        runId: null,
+        setupId: "dps_fixture",
+        setupVersion: 3,
+      },
+      userId: "member_123",
+    });
+
+    await expect(executeHostedMailboxEvent({
+      wake,
+      executionContext,
+      runtime: createRuntime(),
+      runtimeEnv: {},
+      vaultRoot: "/tmp/assistant-runtime-events",
+    })).rejects.toThrow(
+      "Hosted provider setup continuation validation is unavailable.",
+    );
   });
 
   it("keeps maintenance requests pending through a post-checkpoint vault-share projection", async () => {

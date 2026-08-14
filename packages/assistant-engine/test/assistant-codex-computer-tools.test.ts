@@ -1095,6 +1095,37 @@ describe("murph computer dynamic tools", () => {
       },
     });
   });
+
+  it("returns provisioning ownership to the active provider continuation", async () => {
+    const retryProviderSetupContinuation = vi.fn(async () => undefined);
+    const fetchImpl = vi.fn(async () => jsonResponse({
+      error: {
+        code: "HOSTED_COMPUTER_BROWSER_PROVISIONING",
+        message: "Computer browser is still starting.",
+      },
+    }, 409));
+    const request = readTestMurphDynamicToolRequest(dynamicToolCall({
+      argumentsValue: { action: "begin", provider: "strava" },
+      tool: "provider_setup",
+    }));
+    if (!request || request.kind !== "provider-setup") {
+      throw new Error("Expected provider_setup request.");
+    }
+
+    const result = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl,
+      hostedToolContext: createHostedToolContext({
+        retryProviderSetupContinuation,
+      }),
+      nextUsageOrdinal: () => 1,
+      progressDelivery: createProgressDelivery(),
+      request,
+    });
+
+    expect(result.rpcResult.success).toBe(false);
+    expect(retryProviderSetupContinuation).toHaveBeenCalledOnce();
+  });
 });
 
 function dynamicToolCall(input: {
@@ -1119,6 +1150,7 @@ function createHostedToolContext(input: {
     returnContactKind?: "text" | "telegram" | "email" | null;
   };
   hostedMailboxItemIds?: string[];
+  retryProviderSetupContinuation?: () => Promise<void>;
 } = {}): AssistantHostedToolContext {
   return {
     currentHostedDeliveryContext: () => input.deliveryContext
@@ -1129,6 +1161,9 @@ function createHostedToolContext(input: {
       : null,
     currentHostedMailboxItemIds: () => input.hostedMailboxItemIds ?? [],
     computerToolsAvailable: input.computerToolsAvailable ?? true,
+    ...(input.retryProviderSetupContinuation
+      ? { retryProviderSetupContinuation: input.retryProviderSetupContinuation }
+      : {}),
     sendVaultFile: vi.fn(async () => {
       throw new Error("Vault-file sending is unavailable for this turn.");
     }),

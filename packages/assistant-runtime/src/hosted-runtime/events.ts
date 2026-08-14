@@ -1,4 +1,5 @@
 import type {
+  HostedExecutionProviderSetupContinuationRequestedWake,
   HostedExecutionSystemWake,
   HostedExecutionWake,
 } from "@murphai/hosted-execution";
@@ -10,6 +11,10 @@ import {
   emitHostedExecutionStructuredLog,
   isHostedConversationMessageWake,
 } from "@murphai/hosted-execution";
+import {
+  HOSTED_RUNTIME_PROVIDER_SETUP_CONTINUATION_VALIDATE_PATH,
+  hostedRuntimeProviderSetupContinuationValidateResponseSchema,
+} from "@murphai/hosted-execution/provider-setup";
 import {
   applyHostedMemberPreferences,
   hydrateHostedExecutionDefaultTarget,
@@ -42,6 +47,39 @@ export { emitHostedAssistantProviderTraceLog } from "./events/provider-trace-log
 
 const DIRECT_CONVERSATION_WAKE_ERROR_MESSAGE =
   "Hosted conversation wakes must be imported through mailbox AssistantInputEvent staging.";
+
+async function validateHostedProviderSetupContinuation(input: {
+  executionContext: AssistantExecutionContext;
+  signal: AbortSignal | null;
+  wake: HostedExecutionProviderSetupContinuationRequestedWake;
+}): Promise<boolean> {
+  const providerFetch = input.executionContext.hosted?.providerFetch ?? null;
+  if (!providerFetch) {
+    throw new Error("Hosted provider setup continuation validation is unavailable.");
+  }
+  const continuation = input.wake.providerSetup;
+  const response = await providerFetch(
+    new URL(
+      HOSTED_RUNTIME_PROVIDER_SETUP_CONTINUATION_VALIDATE_PATH,
+      "http://web-control.worker",
+    ).toString(),
+    {
+      body: JSON.stringify({
+        provider: continuation.provider,
+        setupId: continuation.setupId,
+        setupVersion: continuation.setupVersion,
+      }),
+      headers: { "content-type": "application/json" },
+      method: "POST",
+      signal: input.signal ?? undefined,
+    },
+  );
+  if (!response.ok) {
+    throw new Error("Hosted provider setup continuation validation failed.");
+  }
+  return hostedRuntimeProviderSetupContinuationValidateResponseSchema
+    .parse(await response.json()).accepted;
+}
 export async function executeHostedMailboxEvent(input: {
   wake: HostedExecutionWake;
   executionContext: AssistantExecutionContext;
@@ -126,6 +164,12 @@ export async function executeHostedMailboxEvent(input: {
       ? { nextWakeReason: mailboxEffect.nextWakeReason ?? null }
       : {}),
     postCheckpointRecord: mailboxEffect.postCheckpointRecord,
+    ...(mailboxEffect.providerSetupContinuationAccepted === undefined
+      ? {}
+      : {
+          providerSetupContinuationAccepted:
+            mailboxEffect.providerSetupContinuationAccepted,
+        }),
     redactedLogEntries: mailboxEffect.redactedLogEntries ?? [],
   };
 }
@@ -360,7 +404,6 @@ async function executeHostedSystemWake(input: {
       });
     }
     case "runtime.manual-requested":
-    case "runtime.provider-setup-continuation-requested":
     case "runtime.pending-effects-reconcile-requested":
     case "runtime.browser-vault-refresh-requested":
     case "runtime.device-sync-recovery-requested":
@@ -368,6 +411,17 @@ async function executeHostedSystemWake(input: {
       return createNoopMailboxEffect({
         conversationMetrics: null,
         mailboxLane: "runtime-control",
+      });
+    case "runtime.provider-setup-continuation-requested":
+      return createNoopMailboxEffect({
+        conversationMetrics: null,
+        mailboxLane: "runtime-control",
+        providerSetupContinuationAccepted:
+          await validateHostedProviderSetupContinuation({
+            executionContext: input.executionContext,
+            signal: input.signal,
+            wake: input.wake,
+          }),
       });
     case "runtime.maintenance-requested":
       return createNoopMailboxEffect({

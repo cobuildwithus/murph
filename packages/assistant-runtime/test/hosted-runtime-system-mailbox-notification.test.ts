@@ -11,6 +11,7 @@ import {
   buildHostedExecutionMemberChannelsUpdatedWake,
   buildHostedExecutionMemberPreferencesUpdatedWake,
   buildHostedExecutionPendingEffectsReconcileRequestedWake,
+  buildHostedExecutionProviderSetupContinuationRequestedWake,
   buildHostedExecutionRuntimeControlWake,
 } from "@murphai/hosted-execution";
 import {
@@ -67,6 +68,7 @@ import {
   readHostedSystemMailboxCheckpointRollbackState,
   recordHostedDeviceSyncDirtyPostCheckpointRecord,
   recordHostedSystemMailboxItemAfterCheckpoint,
+  retryHostedProviderSetupContinuationItem,
   retainHostedSystemMailboxItemAfterForegroundPreemption,
   resolveHostedSystemMailboxNextWakeAt,
   restoreHostedSystemMailboxCheckpointRollbackState,
@@ -2107,6 +2109,80 @@ describe("hosted system mailbox notification execution context", () => {
           }),
         }),
       );
+    } finally {
+      await workspace.cleanup();
+    }
+  });
+
+  it("retains an accepted provider continuation until its assistant turn settles", async () => {
+    const workspace = await createHostedRuntimeWorkspace("murph-hosted-system-mailbox-");
+    const wake = buildHostedExecutionProviderSetupContinuationRequestedWake({
+      eventId: "runtime-control:provider-setup-continuation:fixture",
+      occurredAt: FIXED_NOW,
+      providerSetup: {
+        handoffId: null,
+        provider: "strava",
+        runId: null,
+        setupId: "dps_fixture",
+        setupVersion: 2,
+      },
+      userId: "member_123",
+    });
+    mocks.executeHostedMailboxEvent.mockResolvedValueOnce({
+      bootstrapResult: null,
+      conversationMetrics: null,
+      mailboxLane: "runtime-control",
+      nextWakeAt: null,
+      postCheckpointRecord: null,
+      providerSetupContinuationAccepted: true,
+      redactedLogEntries: [],
+    });
+
+    try {
+      await enqueueHostedSystemMailboxItem({
+        item: createResolvedRuntimeControlItem({
+          dedupeKey: wake.eventId,
+          id: "mailbox_item_provider_setup_continuation",
+          kind: wake.kind,
+        }),
+        vaultRoot: workspace.vaultRoot,
+        wake,
+      });
+      const prepared = await prepareHostedSystemMailboxItemForCheckpoint({
+        executionContext: null,
+        now: () => FIXED_NOW,
+        runtime: createRuntime({}),
+        runtimeEnv: {},
+        vaultRoot: workspace.vaultRoot,
+      });
+
+      assert.equal(prepared?.status, "processed");
+      expect(await readHostedSystemMailboxState(workspace.vaultRoot)).toMatchObject({
+        pending: [{
+          itemId: "mailbox_item_provider_setup_continuation",
+          status: "recording",
+        }],
+      });
+
+      const nextAttemptAt = "2026-04-27T00:01:00.000Z";
+      await retryHostedProviderSetupContinuationItem({
+        item: prepared.item,
+        nextAttemptAt,
+        vaultRoot: workspace.vaultRoot,
+      });
+      await recordHostedSystemMailboxItemAfterCheckpoint({
+        item: prepared.item,
+        runtime: createRuntime({}),
+        vaultRoot: workspace.vaultRoot,
+      });
+
+      expect(await readHostedSystemMailboxState(workspace.vaultRoot)).toMatchObject({
+        pending: [{
+          itemId: "mailbox_item_provider_setup_continuation",
+          nextAttemptAt,
+          status: "pending",
+        }],
+      });
     } finally {
       await workspace.cleanup();
     }

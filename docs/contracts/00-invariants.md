@@ -308,12 +308,17 @@ it has been explicitly elevated to a cross-cutting invariant.
   provider-client rejection without an exact browser handle remains ambiguous,
   and no fresh acquisition may clear its claim before that boundary;
   only that proof may clear the claim and report `canceled`. Without Cancel,
-  `/connect` setup reconciliation preserves a fresh exact cleanup claim. At the
-  same stale boundary it may delete only that setup-owned deterministic browser,
-  terminalize the old run, CAS-clear its binding without changing
-  `browser_setup` or `capturing`, and append the existing continuation for the
-  new setup version. Repeated reads reuse that continuation identity, and
-  `capturing` recovery remains submit-free.
+  the originally accepted typed mailbox item remains the retry owner. Before
+  each assistant attempt it revalidates the exact setup id, accepted version,
+  and eligible `authorized`, `browser_setup`, or `capturing` phase. A typed
+  browser-provisioning outcome returns that same item to mailbox backoff without
+  rerunning mutable admission; after the existing stale boundary the computer
+  owner alone cleans the exact deterministic browser and may admit one
+  same-setup successor. `/connect` reads do not own recovery, and `capturing`
+  recovery remains submit-free. Consent withdrawal routes established
+  connections through disconnection, cancels pre-submit browser work through
+  its exact owner, preserves `canceling` while cleanup remains ambiguous, and
+  never erases the durable `capturing` fence.
   Successful application deletion deactivates the terminal setup only after its exact
   browser run is released, so a fresh setup never overlaps owned browser work.
   Continue and setup-owned handoff completion append exact typed continuation

@@ -69,6 +69,7 @@ const mocks = vi.hoisted(() => ({
   recordHostedProviderCleanupAfterDelivery: vi.fn(),
   recordHostedProviderCleanupBeforeCommit: vi.fn(),
   recordHostedSystemMailboxItemAfterCheckpoint: vi.fn(),
+  retryHostedProviderSetupContinuationItem: vi.fn(),
   readHostedProviderCleanupCheckpoint: vi.fn(),
   resolveHostedProviderCleanupCheckpointWakeAt: vi.fn(),
   resolveHostedProviderCleanupFirstDeferredWakeAt: vi.fn(),
@@ -209,6 +210,8 @@ vi.mock("../src/hosted-runtime/system-mailbox.ts", () => ({
     mocks.recordHostedDeviceSyncDirtyPostCheckpointRecord,
   recordHostedSystemMailboxItemAfterCheckpoint:
     mocks.recordHostedSystemMailboxItemAfterCheckpoint,
+  retryHostedProviderSetupContinuationItem:
+    mocks.retryHostedProviderSetupContinuationItem,
   resolveHostedSystemMailboxNextWakeCandidate:
     mocks.resolveHostedSystemMailboxNextWakeCandidate,
   resolveHostedSystemMailboxNextWakeAt: mocks.resolveHostedSystemMailboxNextWakeAt,
@@ -14533,6 +14536,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         bootstrapResult: null,
         conversationMetrics: null,
         mailboxLane: "runtime-control",
+        providerSetupContinuationAccepted: true,
         redactedLogEntries: [],
       },
       status: "processed",
@@ -14557,6 +14561,14 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(prompt).toContain("murph.provider_setup");
     expect(prompt).not.toMatch(/clientId|clientSecret|credential value/iu);
     expect(prompt).not.toContain("dps_fixture");
+    const executionContext = mocks.runHostedAssistantAutomationLane.mock.calls[0]?.[0]
+      .executionContext;
+    await executionContext.hosted?.retryProviderSetupContinuation?.();
+    expect(mocks.retryHostedProviderSetupContinuationItem).toHaveBeenCalledWith({
+      item: providerSetupItem,
+      nextAttemptAt: "2026-04-27T00:02:00.000Z",
+      vaultRoot: "/tmp/murph-vault",
+    });
   });
 
   it("does not continue non-manual runtime-control receipts into assistant automation", async () => {

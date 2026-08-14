@@ -188,6 +188,7 @@ export interface AssistantHostedToolContext {
   currentUserActionScope?(): AssistantHostedUserActionScope | null
   currentProductFeedbackAcceptedInputIds?(): readonly string[]
   readonly computerToolsAvailable: boolean
+  retryProviderSetupContinuation?(): Promise<void>
   readonly pendingVaultFilesAvailable?: boolean
   readonly vaultFileSendAvailable: boolean
   sendVaultFile(
@@ -458,6 +459,12 @@ export function createAssistantHostedToolContext(input: {
       ? { beforeToolExecution: input.beforeToolExecution }
       : {}),
     computerToolsAvailable: input.computerToolsAvailable === true,
+    ...(executionContext?.retryProviderSetupContinuation
+      ? {
+          retryProviderSetupContinuation:
+            executionContext.retryProviderSetupContinuation,
+        }
+      : {}),
     currentAssistantInputId: () =>
       readCurrentHostedImageCompletionEffectScope() === null
         ? readRawCurrentAssistantInputId()

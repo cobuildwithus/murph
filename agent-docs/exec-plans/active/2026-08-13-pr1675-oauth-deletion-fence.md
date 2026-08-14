@@ -70,8 +70,9 @@ provider-specific automation layer.
 5. [x] Add unit and real-PostgreSQL proof for stale OAuth and both lock winners.
 6. [x] Run focused tests, hosted Web typecheck, lint, docs, diff, and privacy
    checks.
-7. [ ] Archive this plan in the scoped commit, push the exact head, and run
-   ReviewGPT concurrently with required CI.
+7. [ ] Commit the remediation while retaining this active plan, push the exact
+   head, and run ReviewGPT concurrently with required CI. Archive only after the
+   review gate passes.
 8. [ ] Merge only after ReviewGPT passes and required exact-head checks are
    green; verify the safe deployment boundary and retire the worktree.
 9. [x] Triage ReviewGPT round 8 and reproduce both terminal setup-slot and
@@ -92,6 +93,11 @@ provider-specific automation layer.
 15. [x] Treat a provider-client create rejection without an exact browser handle
     as ambiguous, block fresh acquisition, and prove Cancel and no-Cancel timeout
     convergence through the same stale-provisioning owner.
+16. [x] Move no-Cancel timeout recovery from presentation reads back to the
+    originally accepted mailbox item, with exact pre-model validation and typed
+    two-minute retry through the existing computer owner.
+17. [x] Route consent withdrawal through existing setup status owners so
+    `capturing` and cleanup-pending `canceling` retain their durable fences.
 
 ## Decisions
 
@@ -134,10 +140,18 @@ provider-specific automation layer.
   name until the returning creator deletes its session or the existing
   stale-provisioning boundary repeats cleanup. A provider-client timeout without
   an exact returned handle is the same ambiguity and cannot admit a successor
-  before that boundary. The setup read owner alone then finalizes `canceled` or,
-  without Cancel, clears the settled exact run while preserving phase and
-  appends the existing versioned continuation. No queue, scheduler, state, or
-  cleanup owner was added.
+  before that boundary.
+- The accepted typed mailbox item, not a `/connect` read, owns no-Cancel
+  continuation. It is revalidated against exact setup authority before every
+  assistant attempt, remains `recording` until that turn checkpoints, and moves
+  back to `pending` for the existing two-minute boundary on the typed browser
+  provisioning result. The next attempt reuses the existing computer owner for
+  exact stale cleanup and successor admission; mutable usage admission is not
+  repeated.
+- Consent withdrawal does not add a setup state. It delegates connected/bound
+  work to disconnection, pre-submit browser work to cancellation, retains
+  cleanup-pending `canceling`, and leaves `capturing` intact so ambiguous submit
+  recovery cannot create twice.
 
 ## Verification
 
@@ -191,3 +205,14 @@ provider-specific automation layer.
 - Hosted Web ESLint: 0 errors; unrelated existing warnings remain.
 - `pnpm docs:drift`, `git diff --check`, and the changed-line identifier scan:
   passed.
+- ReviewGPT round 14 found that the round-13 retry owner depended on visible
+  `/connect` reads and that blanket consent-withdrawal projection erased
+  `capturing` and `canceling` authority. The correction retains the accepted
+  mailbox item, performs exact Web-owned validation before model work, returns
+  typed provisioning outcomes to the existing two-minute mailbox retry, removes
+  read-side continuation publication, and delegates consent withdrawal by
+  status. Focused service/consent, engine, mailbox, event, workspace-phase, and
+  hosted-contract tests pass; assistant-runtime and hosted-execution typechecks
+  pass. Exact authority validation passes, and the isolated PostgreSQL proof
+  confirms that an exact stale owner is expired and replaced without a second
+  live browser.

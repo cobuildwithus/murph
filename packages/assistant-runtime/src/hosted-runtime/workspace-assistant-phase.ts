@@ -168,6 +168,7 @@ import {
   prepareHostedSystemMailboxItemForCheckpoint,
   recordHostedDeviceSyncDirtyPostCheckpointRecord,
   recordHostedSystemMailboxItemAfterCheckpoint,
+  retryHostedProviderSetupContinuationItem,
   resolveHostedSystemMailboxNextWakeAt,
   resolveHostedSystemMailboxNextWakeCandidate,
   type HostedSystemMailboxCheckpointPreparation,
@@ -213,6 +214,7 @@ import {
 } from "./wake-candidates.ts";
 
 const HOSTED_DEVICE_SYNC_DIRTY_ACK_FAILURE_RETRY_DELAY_MS = 60_000;
+const HOSTED_PROVIDER_SETUP_CONTINUATION_RETRY_DELAY_MS = 2 * 60 * 1_000;
 const HOSTED_OUTBOX_DELIVERY_ERROR_LOG_LIMIT = 16;
 const OUTBOX_DELIVERY_FAILED_INPUT_PREFIX = "outbox-delivery-failed";
 const OUTBOX_DELIVERY_FAILED_PAYLOAD_SCHEMA =
@@ -2222,6 +2224,20 @@ export async function runHostedWorkspaceAssistantPhase(
       input,
       wake,
     });
+    const providerSetupContinuationItem =
+      systemMailboxMaintenance.providerSetupContinuationItem ?? null;
+    if (executionContext.hosted && providerSetupContinuationItem) {
+      executionContext.hosted.retryProviderSetupContinuation = async () => {
+        await retryHostedProviderSetupContinuationItem({
+          item: providerSetupContinuationItem,
+          nextAttemptAt: new Date(
+            resolveHostedAssistantPhaseNowMs(input)
+              + HOSTED_PROVIDER_SETUP_CONTINUATION_RETRY_DELAY_MS,
+          ).toISOString(),
+          vaultRoot: input.restored.vaultRoot,
+        });
+      };
+    }
     const systemMailboxMaintenanceMs = elapsedSince(systemMailboxMaintenanceStartedAt);
     const hasAssistantInputAtPassStart =
       hasFreshConversationInput
@@ -4123,24 +4139,32 @@ function shouldContinueAssistantLaneAfterSystemMailboxPreparation(
     && systemMailboxPreparation.item.routeAction === "apply-runtime-control-request"
     && (
       systemMailboxPreparation.item.wake.kind === "runtime.manual-requested"
-      || systemMailboxPreparation.item.wake.kind
-        === "runtime.provider-setup-continuation-requested"
+      || readAcceptedProviderSetupContinuationItem(systemMailboxPreparation) !== null
     );
+}
+
+function readAcceptedProviderSetupContinuationItem(
+  systemMailboxPreparation: HostedSystemMailboxPreparation,
+): HostedSystemMailboxPendingItem | null {
+  return "item" in systemMailboxPreparation
+    && "metrics" in systemMailboxPreparation
+    && systemMailboxPreparation.status === "processed"
+    && systemMailboxPreparation.metrics.providerSetupContinuationAccepted === true
+    && systemMailboxPreparation.item.routeAction === "apply-runtime-control-request"
+    && systemMailboxPreparation.item.wake.kind
+      === "runtime.provider-setup-continuation-requested"
+    ? systemMailboxPreparation.item
+    : null;
 }
 
 function buildProviderSetupContinuationPrompt(
   systemMailboxPreparation: HostedSystemMailboxPreparation,
 ): string | null {
-  if (
-    !("item" in systemMailboxPreparation)
-    || systemMailboxPreparation.status !== "processed"
-    || systemMailboxPreparation.item.routeAction !== "apply-runtime-control-request"
-    || systemMailboxPreparation.item.wake.kind
-      !== "runtime.provider-setup-continuation-requested"
-  ) {
+  const item = readAcceptedProviderSetupContinuationItem(systemMailboxPreparation);
+  if (!item || item.wake.kind !== "runtime.provider-setup-continuation-requested") {
     return null;
   }
-  const continuation = systemMailboxPreparation.item.wake.providerSetup;
+  const continuation = item.wake.providerSetup;
   return [
     "Private provider setup continuation accepted:",
     `- Continue the exact ${continuation.provider} setup with \`murph.provider_setup\` using provider \`${continuation.provider}\`.`,
@@ -5163,6 +5187,7 @@ async function runSystemMailboxMaintenancePhase(input: {
   deviceSyncMaintenanceRan: boolean;
   initialProviderCleanupCheckpoint: HostedProviderCleanupCheckpoint | null;
   pendingAssistantInputWakeAt: string | null;
+  providerSetupContinuationItem?: HostedSystemMailboxPendingItem | null;
   providerSetupContinuationPrompt?: string | null;
   result: HostedWorkspaceRunnerAssistantPhaseResult | null;
 }> {
@@ -5724,6 +5749,8 @@ async function runSystemMailboxMaintenancePhase(input: {
         ),
     initialProviderCleanupCheckpoint,
     pendingAssistantInputWakeAt,
+    providerSetupContinuationItem:
+      readAcceptedProviderSetupContinuationItem(systemMailboxPreparation),
     providerSetupContinuationPrompt:
       buildProviderSetupContinuationPrompt(systemMailboxPreparation),
     result: mergeMemberPreferencesPrePlanningResult({

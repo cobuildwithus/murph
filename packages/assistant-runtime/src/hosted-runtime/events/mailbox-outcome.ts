@@ -17,6 +17,7 @@ export function createNoopMailboxEffect(input: {
   nextWakeAt?: HostedMailboxOutcome["nextWakeAt"];
   nextWakeReason?: HostedMailboxOutcome["nextWakeReason"];
   postCheckpointRecord?: HostedMailboxOutcome["postCheckpointRecord"];
+  providerSetupContinuationAccepted?: boolean | null;
   redactedLogEntries?: HostedExecutionRedactedLogEntry[];
 }): HostedMailboxOutcome {
   return {
@@ -30,6 +31,12 @@ export function createNoopMailboxEffect(input: {
       : { nextWakeReason: input.nextWakeReason ?? null }),
     mailboxLane: input.mailboxLane,
     postCheckpointRecord: input.postCheckpointRecord ?? null,
+    ...(input.providerSetupContinuationAccepted === undefined
+      ? {}
+      : {
+          providerSetupContinuationAccepted:
+            input.providerSetupContinuationAccepted,
+        }),
     redactedLogEntries: input.redactedLogEntries ?? [],
   };
 }

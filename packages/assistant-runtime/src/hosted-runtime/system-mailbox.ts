@@ -41,6 +41,7 @@ import {
   mergeHostedSystemMailboxRollbackItems,
   readHostedSystemMailboxState,
   removeHostedSystemMailboxPendingItemIfCurrent,
+  replaceHostedSystemMailboxPendingItemIfCurrent,
   resolveHostedSystemMailboxNextWakeAt,
   resolveHostedSystemMailboxNextWakeCandidate,
   updateHostedSystemMailboxPendingItem,
@@ -331,6 +332,10 @@ export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
         selected: pending,
       });
 
+      const retryProviderSetupRecording =
+        collapsed.selected.status === "recording"
+        && collapsed.selected.wake.kind
+          === "runtime.provider-setup-continuation-requested";
       const nextItem: HostedSystemMailboxPendingItem = {
         ...collapsed.selected,
         attemptCount: collapsed.selected.attemptCount + 1,
@@ -338,7 +343,7 @@ export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
         lastErrorCode: null,
         lastErrorMessage: null,
         nextAttemptAt: null,
-        status: collapsed.selected.status === "recording"
+        status: collapsed.selected.status === "recording" && !retryProviderSetupRecording
           ? "recording"
           : "sending",
       };
@@ -382,7 +387,11 @@ export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
       vaultRoot: input.vaultRoot,
     });
     const postCheckpointRecord = metrics.postCheckpointRecord ?? null;
-    if (postCheckpointRecord || input.retainProcessedItemUntilRecorded === true) {
+    if (
+      postCheckpointRecord
+      || input.retainProcessedItemUntilRecorded === true
+      || metrics.providerSetupContinuationAccepted === true
+    ) {
       const processedItem: HostedSystemMailboxPendingItem = {
         ...prepared,
         postCheckpointRecord,
@@ -461,6 +470,30 @@ export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
       wakeKind: prepared.wake.kind,
     };
   }
+}
+
+export async function retryHostedProviderSetupContinuationItem(input: {
+  item: HostedSystemMailboxPendingItem;
+  nextAttemptAt: string;
+  vaultRoot: string;
+}): Promise<boolean> {
+  if (
+    input.item.wake.kind
+      !== "runtime.provider-setup-continuation-requested"
+  ) {
+    return false;
+  }
+  return await replaceHostedSystemMailboxPendingItemIfCurrent({
+    expected: input.item,
+    item: {
+      ...input.item,
+      lastErrorCode: "HOSTED_COMPUTER_BROWSER_PROVISIONING",
+      lastErrorMessage: "Computer browser is still starting.",
+      nextAttemptAt: input.nextAttemptAt,
+      status: "pending",
+    },
+    vaultRoot: input.vaultRoot,
+  });
 }
 
 function resolveHostedSystemMailboxPreparedItemRetryWakeReason(

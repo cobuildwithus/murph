@@ -4,8 +4,8 @@ vi.mock("server-only", () => ({}));
 
 const mocks = vi.hoisted(() => ({
   disconnectAllHostedDeviceSyncConnectionsForUser: vi.fn(),
+  reconcileMemberOwnedProviderSetupConsentWithdrawal: vi.fn(),
   listMemberOwnedProviderSetups: vi.fn(),
-  markMemberOwnedProviderSetupDisconnected: vi.fn(),
   readHostedConsentStatus: vi.fn(),
   readHostedHealthDataConsentState: vi.fn(),
   revokeAllMealPhotoCaptureEnrollmentsForMember: vi.fn(),
@@ -21,12 +21,20 @@ vi.mock("@/src/lib/device-sync/provider-setup/store", () => ({
     async listMemberSetups(memberId: string) {
       return await mocks.listMemberOwnedProviderSetups(memberId);
     }
-
-    async markDisconnected(input: { memberId: string; provider: "strava" }) {
-      return await mocks.markMemberOwnedProviderSetupDisconnected(input);
-    }
   },
 }));
+vi.mock("@/src/lib/device-sync/provider-setup", async () => {
+  const actual = await vi.importActual<typeof import("@/src/lib/device-sync/provider-setup")>(
+    "@/src/lib/device-sync/provider-setup",
+  );
+  return {
+    ...actual,
+    createMemberOwnedProviderSetupService: vi.fn(() => ({
+      reconcileConsentWithdrawal:
+        mocks.reconcileMemberOwnedProviderSetupConsentWithdrawal,
+    })),
+  };
+});
 vi.mock("@/src/lib/device-sync/meal-photo-capture", () => ({
   revokeAllMealPhotoCaptureEnrollmentsForMember:
     mocks.revokeAllMealPhotoCaptureEnrollmentsForMember,
@@ -93,7 +101,7 @@ describe("withdrawHostedHealthDataConsent", () => {
       updatedAt: new Date("2026-08-11T12:02:00.000Z"),
       version: 3,
     }]);
-    mocks.markMemberOwnedProviderSetupDisconnected.mockResolvedValue(null);
+    mocks.reconcileMemberOwnedProviderSetupConsentWithdrawal.mockResolvedValue(null);
     mocks.revokeAllMealPhotoCaptureEnrollmentsForMember.mockResolvedValue({
       revokedCount: 1,
     });
@@ -130,10 +138,8 @@ describe("withdrawHostedHealthDataConsent", () => {
       userId: "member_123",
     });
     expect(mocks.listMemberOwnedProviderSetups).toHaveBeenCalledWith("member_123");
-    expect(mocks.markMemberOwnedProviderSetupDisconnected).toHaveBeenCalledWith({
-      memberId: "member_123",
-      provider: "strava",
-    });
+    expect(mocks.reconcileMemberOwnedProviderSetupConsentWithdrawal)
+      .toHaveBeenCalledWith("member_123");
     expect(mocks.revokeAllMealPhotoCaptureEnrollmentsForMember).toHaveBeenCalledWith({
       memberId: "member_123",
       prisma,

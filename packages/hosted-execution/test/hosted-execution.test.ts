@@ -47,6 +47,7 @@ import {
   readHostedComputerRunOperationRoute,
 } from "../src/computer-use.ts";
 import {
+  parseHostedRuntimeProviderSetupContinuationValidateRequest,
   parseHostedRuntimeProviderSetupToolRequest,
 } from "../src/provider-setup.ts";
 import {
@@ -928,6 +929,20 @@ describe("hosted execution coverage gaps", () => {
       runId: "hcr_setup",
       setupId: "dps_setup",
       submitSelector: 'button[type="submit"]',
+    })).toThrow();
+    expect(parseHostedRuntimeProviderSetupContinuationValidateRequest({
+      provider: "strava",
+      setupId: "dps_setup",
+      setupVersion: 2,
+    })).toEqual({
+      provider: "strava",
+      setupId: "dps_setup",
+      setupVersion: 2,
+    });
+    expect(() => parseHostedRuntimeProviderSetupContinuationValidateRequest({
+      provider: "strava",
+      setupId: "dps_setup",
+      setupVersion: 0,
     })).toThrow();
     expect(parseHostedComputerOpenRunRequest({
       startUrl: "about:blank",

@@ -214,6 +214,29 @@ export async function removeHostedSystemMailboxPendingItemIfCurrent(input: {
   });
 }
 
+export async function replaceHostedSystemMailboxPendingItemIfCurrent(input: {
+  expected: HostedSystemMailboxPendingItem;
+  item: HostedSystemMailboxPendingItem;
+  vaultRoot: string;
+}): Promise<boolean> {
+  return await updateHostedSystemMailboxState(input.vaultRoot, (state) => {
+    const current = state.pending.find(
+      (item) => item.itemId === input.expected.itemId,
+    ) ?? null;
+    if (!current || !hostedSystemMailboxPendingItemsMatch(current, input.expected)) {
+      return { result: false, state };
+    }
+    return {
+      result: true,
+      state: {
+        pending: state.pending.map((item) =>
+          item.itemId === input.expected.itemId ? input.item : item
+        ),
+      },
+    };
+  });
+}
+
 export async function removeHostedSystemMailboxPendingItems(input: {
   itemIds: readonly string[];
   vaultRoot: string;

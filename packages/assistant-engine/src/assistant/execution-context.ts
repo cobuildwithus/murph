@@ -526,6 +526,7 @@ export interface AssistantHostedExecutionContext {
   progressDeliveryDependencies?: AssistantHostedProgressDeliveryDependencies
   productFeedbackCandidateSink?: AssistantHostedProductFeedbackCandidateSink | null
   providerFetch?: typeof fetch | null
+  retryProviderSetupContinuation?: (() => Promise<void>) | null
   phoneCalls?: AssistantPhoneCallPort | null
   publicInternetFetch?: typeof fetch | null
   resolveScheduledLinqRoute?(input: {
@@ -714,6 +715,12 @@ export function normalizeAssistantExecutionContext(
       ...(phoneCalls ? { phoneCalls } : {}),
       ...(typeof hosted?.providerFetch === 'function'
         ? { providerFetch: hosted.providerFetch }
+        : {}),
+      ...(typeof hosted?.retryProviderSetupContinuation === 'function'
+        ? {
+            retryProviderSetupContinuation:
+              hosted.retryProviderSetupContinuation,
+          }
         : {}),
       ...(typeof hosted?.publicInternetFetch === 'function'
         ? { publicInternetFetch: hosted.publicInternetFetch }

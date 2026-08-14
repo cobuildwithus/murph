@@ -141,6 +141,7 @@ export interface HostedMailboxEffect {
   nextWakeAt?: string | null;
   nextWakeReason?: string | null;
   postCheckpointRecord?: HostedSystemMailboxPostCheckpointRecord | null;
+  providerSetupContinuationAccepted?: boolean | null;
   redactedLogEntries?: HostedExecutionRedactedLogEntry[] | null;
 }
 

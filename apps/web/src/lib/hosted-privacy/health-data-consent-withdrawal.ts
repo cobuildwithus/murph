@@ -6,6 +6,7 @@ import type { CloudflareHostedControlClient } from "@murphai/cloudflare-hosted-c
 import { revokeAllMealPhotoCaptureEnrollmentsForMember } from "../device-sync/meal-photo-capture";
 import { disconnectAllHostedDeviceSyncConnectionsForUser } from "../device-sync/public-ingress-service";
 import {
+  createMemberOwnedProviderSetupService,
   readMemberOwnedProviderSetupRegistration,
 } from "../device-sync/provider-setup";
 import { PrismaDeviceProviderSetupStore } from "../device-sync/provider-setup/store";
@@ -73,10 +74,9 @@ export async function cleanupWithdrawnHostedHealthDataConsent(input: {
       if (!registration) {
         continue;
       }
-      await setupStore.markDisconnected({
-        memberId: input.memberId,
-        provider: registration.coordinates.provider,
-      });
+      await createMemberOwnedProviderSetupService(
+        registration.coordinates.provider,
+      ).reconcileConsentWithdrawal(input.memberId);
     }
   });
   await runWithdrawalCleanup("meal photo capture", async () => {

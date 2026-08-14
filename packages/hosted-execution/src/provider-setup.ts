@@ -4,11 +4,34 @@ import { hostedComputerSafeSelectorSchema } from "./computer-use.ts";
 
 export const HOSTED_RUNTIME_PROVIDER_SETUP_TOOL_PATH =
   "/api/internal/hosted-execution/provider-setup/tool";
+export const HOSTED_RUNTIME_PROVIDER_SETUP_CONTINUATION_VALIDATE_PATH =
+  "/api/internal/hosted-execution/provider-setup/continuation/validate";
 
 const providerSchema = z.string().trim().min(1).max(80);
 const setupIdSchema = z.string().trim().min(1).max(200);
 const runIdSchema = z.string().trim().min(1).max(200);
 const selectorSchema = hostedComputerSafeSelectorSchema;
+const setupVersionSchema = z.number().int().positive();
+
+export const hostedRuntimeProviderSetupContinuationValidateRequestSchema = z.object({
+  provider: providerSchema,
+  setupId: setupIdSchema,
+  setupVersion: setupVersionSchema,
+}).strict();
+
+export const hostedRuntimeProviderSetupContinuationValidateResponseSchema = z.object({
+  accepted: z.boolean(),
+}).strict();
+
+export type HostedRuntimeProviderSetupContinuationValidateRequest = z.infer<
+  typeof hostedRuntimeProviderSetupContinuationValidateRequestSchema
+>;
+
+export function parseHostedRuntimeProviderSetupContinuationValidateRequest(
+  value: unknown,
+): HostedRuntimeProviderSetupContinuationValidateRequest {
+  return hostedRuntimeProviderSetupContinuationValidateRequestSchema.parse(value);
+}
 
 const beginRequestSchema = z.object({
   action: z.literal("begin"),

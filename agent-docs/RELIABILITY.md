@@ -976,18 +976,25 @@ Last verified: 2026-08-13
   deletes the returned exact browser, while a lost response or client timeout
   without an exact handle converges through the existing two-minute
   stale-provisioning cleanup. A fresh retry remains blocked until that cleanup
-  runs. Setup polling finalizes `canceled` only after one of those paths proves
-  cleanup, and navigation remains impossible because attach revalidates the
-  now-ineligible setup. For `browser_setup` or `capturing` without Cancel, the
-  same `/connect` read owner leaves a fresh claim and setup version unchanged.
-  At the stale boundary it deletes only the exact setup-owned deterministic
-  browser, terminalizes that run even while its ordinary expiry is still in the
-  future, CAS-clears its binding without changing phase, and appends the
-  existing typed continuation for the new version. A crash before clear is
-  retried from the terminal run; a crash before append is retried from the
-  unbound setup; duplicate appends converge on the same event identity.
-  `capturing` recovery remains submit-free, while `canceling` never creates a
-  continuation.
+  runs. Setup reconciliation finalizes `canceled` only after one of those paths
+  proves cleanup, and navigation remains impossible because attach revalidates
+  the now-ineligible setup. For `browser_setup` or `capturing` without Cancel,
+  the originally accepted typed mailbox item remains `recording` through the
+  assistant turn. Each attempt calls Web to validate the exact setup id,
+  accepted version, and eligible phase before starting model work; stale,
+  canceled, deleted, or superseded authority consumes the item without provider
+  work, while validation failure returns it to ordinary mailbox retry. The exact
+  typed browser-provisioning result CASes that same item back to `pending` for
+  the two-minute stale boundary without another usage or consent admission.
+  The next invocation reuses `acquireRunWithStore`, whose existing owner cleanup
+  terminalizes only the exact deterministic browser and admits at most one
+  same-setup successor. A crash while the item is `recording` revalidates and
+  retries it. `/connect` reads do not publish continuations; `capturing`
+  recovery remains submit-free, while `canceling` never starts replacement
+  work. Consent withdrawal uses the same status owners: connected or bound work
+  projects disconnection, authorized/browser setup cancels, cleanup-pending
+  cancellation stays `canceling`, and `capturing` remains the durable ambiguous
+  submit fence.
   Re-entering an awaiting setup rotates or
   reuses its latest valid handoff without repeating provider submission. Completing
   the exact setup-owned handoff resumes that run without a conversation reply;

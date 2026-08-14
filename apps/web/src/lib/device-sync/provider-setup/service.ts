@@ -254,10 +254,54 @@ export class MemberOwnedProviderSetupService {
     if (!setup) {
       return null;
     }
-    const reconciled = await this.resumeTimedOutBrowserProvisioning(
-      await this.reconcile(setup, true),
-    );
+    const reconciled = await this.reconcile(setup, true);
     return this.toView(reconciled, await this.hasHandoff(reconciled));
+  }
+
+  async validateContinuation(input: {
+    expectedSetupId: string;
+    expectedSetupVersion: number;
+    memberId: string;
+  }): Promise<boolean> {
+    const setup = await this.store.readActive({
+      memberId: input.memberId,
+      provider: this.registration.coordinates.provider,
+    });
+    if (!setup || setup.id !== input.expectedSetupId) {
+      return false;
+    }
+    if (setup.status === "authorized") {
+      return setup.version === input.expectedSetupVersion;
+    }
+    return setup.version >= input.expectedSetupVersion
+      && (setup.status === "browser_setup" || setup.status === "capturing");
+  }
+
+  async reconcileConsentWithdrawal(
+    memberId: string,
+  ): Promise<MemberOwnedProviderSetupView | null> {
+    const setup = await this.store.readActive({
+      memberId,
+      provider: this.registration.coordinates.provider,
+    });
+    if (!setup) {
+      return null;
+    }
+    if (
+      setup.status === "authorized"
+      || setup.status === "browser_setup"
+      || setup.status === "canceling"
+    ) {
+      return await this.cancel(memberId, setup.id);
+    }
+    if (
+      setup.status === "connected"
+      || setup.status === "disconnect_first"
+      || setup.status === "oauth_in_progress"
+    ) {
+      return await this.markDisconnected(memberId);
+    }
+    return this.toView(setup);
   }
 
   async issueHandoff(
@@ -786,79 +830,6 @@ export class MemberOwnedProviderSetupService {
       completedAt: this.now(),
       status: "canceled",
     });
-  }
-
-  private async resumeTimedOutBrowserProvisioning(
-    input: MemberOwnedProviderSetupRecord,
-  ): Promise<MemberOwnedProviderSetupRecord> {
-    if (input.status !== "browser_setup" && input.status !== "capturing") {
-      return input;
-    }
-
-    let setup = input;
-    const runId = setup.browserRunId;
-    if (runId) {
-      let run: Awaited<ReturnType<
-        ProviderSetupComputer["reconcileOwnedBrowserProvisioningRun"]
-      >>;
-      try {
-        run = await this.computer.reconcileOwnedBrowserProvisioningRun({
-          memberId: setup.memberId,
-          ownerKey: setup.id,
-          ownerPurpose: MEMBER_OWNED_PROVIDER_SETUP_COMPUTER_RUN_PURPOSE,
-          runId,
-        });
-      } catch (error) {
-        if (!isComputerRunOwnershipConflict(error)) {
-          throw error;
-        }
-        const latest = await this.store.readOwned({
-          memberId: input.memberId,
-          provider: input.provider,
-          setupId: input.id,
-        });
-        if (latest.browserRunId === runId) {
-          throw error;
-        }
-        setup = latest;
-        run = "settled";
-      }
-      if (run !== "settled") {
-        return setup;
-      }
-      if (setup.browserRunId === runId) {
-        try {
-          setup = await this.transition(setup, {
-            browserRunId: null,
-            status: setup.status,
-          });
-        } catch (error) {
-          if (!isDeviceSyncError(error) || error.code !== "DEVICE_PROVIDER_SETUP_CONFLICT") {
-            throw error;
-          }
-          setup = await this.store.readOwned({
-            memberId: input.memberId,
-            provider: input.provider,
-            setupId: input.id,
-          });
-        }
-      }
-    }
-
-    if (
-      setup.browserRunId === null
-      && (setup.status === "browser_setup" || setup.status === "capturing")
-    ) {
-      await this.requestContinuation({
-        handoffId: null,
-        memberId: setup.memberId,
-        provider: setup.provider,
-        runId: null,
-        setupId: setup.id,
-        setupVersion: setup.version,
-      });
-    }
-    return setup;
   }
 
   private async releaseTerminalBrowserRun(
@@ -1412,14 +1383,6 @@ function isTrustedMissingApplicationCapture(error: unknown): boolean {
     && typeof error === "object"
     && Reflect.get(error, "code")
       === "HOSTED_COMPUTER_PROVIDER_CREDENTIAL_CAPTURE_NO_APPLICATION"
-  );
-}
-
-function isComputerRunOwnershipConflict(error: unknown): boolean {
-  return Boolean(
-    error
-    && typeof error === "object"
-    && Reflect.get(error, "code") === "HOSTED_COMPUTER_RUN_OWNERSHIP_CONFLICT"
   );
 }
 
