@@ -421,6 +421,28 @@ touch hook-installed
     )
     writeFileSync(excludeFile, '/custom-local-only')
     writeFileSync(path.join(harness.primary, 'custom-local-only'), 'ignored\n')
+    runGit(harness.primary, [
+      'config',
+      'filter.spotlight-marker.smudge',
+      'test -f .metadata_never_index && cat',
+    ])
+    runGit(harness.primary, [
+      'config',
+      'filter.spotlight-marker.clean',
+      'cat',
+    ])
+    runGit(harness.primary, [
+      'config',
+      'filter.spotlight-marker.required',
+      'true',
+    ])
+    writeFileSync(
+      path.join(harness.primary, '.gitattributes'),
+      'spotlight-probe.txt filter=spotlight-marker\n',
+    )
+    writeFileSync(path.join(harness.primary, 'spotlight-probe.txt'), 'probe\n')
+    runGit(harness.primary, ['add', '.gitattributes', 'spotlight-probe.txt'])
+    runGit(harness.primary, ['commit', '-m', 'add Spotlight ordering probe'])
 
     const creation = runScript(harness, 'create-worktree', [
       '-b',
@@ -435,6 +457,9 @@ touch hook-installed
     )
     expect(runGit(harness.primary, ['check-ignore', 'custom-local-only'])).toBe(
       'custom-local-only',
+    )
+    expect(readFileSync(path.join(target, 'spotlight-probe.txt'), 'utf8')).toBe(
+      'probe\n',
     )
     expect(
       readFileSync(excludeFile, 'utf8')
@@ -1323,8 +1348,16 @@ done
   it('does not wedge when a checkout hook fails after worktree registration', () => {
     const harness = createHarness()
     const postCheckout = path.join(harness.primary, '.githooks', 'post-checkout')
-    executable(postCheckout, '#!/bin/sh\nexit 23\n')
+    const hookInvocations = path.join(harness.root, 'post-checkout-invocations')
+    executable(
+      postCheckout,
+      `#!/bin/sh
+printf '%s|%s|%s|%s\\n' "$PWD" "$1" "$2" "$3" >>${JSON.stringify(hookInvocations)}
+exit 23
+`,
+    )
     const target = path.join(harness.root, 'partial')
+    const expectedHead = runGit(harness.primary, ['rev-parse', 'HEAD'])
 
     const creation = runScript(harness, 'create-worktree', [
       '-b',
@@ -1334,6 +1367,9 @@ done
     expect(creation.status).toBe(23)
     expect(runGit(harness.primary, ['worktree', 'list', '--porcelain'])).toContain(target)
     expect(existsSync(path.join(target, '.metadata_never_index'))).toBe(true)
+    expect(readFileSync(hookInvocations, 'utf8').trim().split('\n')).toEqual([
+      `${realpathSync(target)}|${'0'.repeat(expectedHead.length)}|${expectedHead}|1`,
+    ])
     rmSync(postCheckout)
 
     const guard = runScript(harness, 'worktree-storage-guard')

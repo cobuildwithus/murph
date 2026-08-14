@@ -112,7 +112,7 @@ if (( registered_before == 1 )); then
 fi
 
 set +e
-git -C "$repo_root" worktree add "${args[@]}"
+git -C "$repo_root" worktree add --no-checkout "${args[@]}"
 add_status=$?
 set -e
 
@@ -135,4 +135,26 @@ elif (( add_status == 0 )); then
   exit 1
 fi
 
-exit "$add_status"
+if (( add_status != 0 )); then
+  exit "$add_status"
+fi
+
+set +e
+git -C "$target_path" reset --hard
+checkout_status=$?
+set -e
+
+if (( checkout_status != 0 )); then
+  exit "$checkout_status"
+fi
+
+head_oid="$(git -C "$target_path" rev-parse HEAD)"
+null_oid="$(printf '%0*d' "${#head_oid}" 0)"
+
+set +e
+git -C "$target_path" hook run --ignore-missing post-checkout -- \
+  "$null_oid" "$head_oid" 1
+hook_status=$?
+set -e
+
+exit "$hook_status"
