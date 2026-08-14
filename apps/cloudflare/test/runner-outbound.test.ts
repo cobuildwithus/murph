@@ -43,6 +43,7 @@ import {
 } from "@murphai/hosted-execution/runtime-control";
 import {
   buildHostedExecutionWorkingSnapshotRef,
+  parseHostedWorkspaceSnapshotV2Ref,
 } from "@murphai/hosted-execution/parsers";
 import {
   createAssistantUsageReportingUserId,
@@ -6423,6 +6424,140 @@ describe("handleRunnerOutboundRequest", () => {
       replacedSnapshotRef,
       snapshotId,
     });
+  });
+
+  it("replays completion against the exact snapshot ref committed before response loss", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-05-02T00:00:00.000Z"));
+    const runner = createWorkspaceVersionAwareUserRunner();
+    const bytes = new Uint8Array([1, 2, 3, 4]);
+    const snapshotId = "snapshot_complete_committed_response_lost";
+    const objectKey = await hostedWorkspaceSnapshotObjectKey({
+      snapshotId,
+      userId: "member_123",
+    });
+    const requestedSnapshotRef = createWorkspaceSnapshotV2Ref({
+      encryptedByteSize: bytes.byteLength,
+      encryptedObjectSha256: sha256Hex(bytes),
+      objectKey,
+      snapshotId,
+      userId: "member_123",
+    });
+    const session = createWorkspaceSnapshotUploadSession(requestedSnapshotRef);
+    runner.workspaceSnapshotUploadSessions.set(snapshotId, session);
+    const deleteObject = vi.fn(async () => {});
+    const env = createRunnerOutboundEnv({
+      BUNDLES: createWorkspaceSnapshotBucket(
+        async (key) => ({ key, size: bytes.byteLength }),
+        async (key) => ({
+          checksums: createWorkspaceSnapshotHeadChecksums(requestedSnapshotRef),
+          customMetadata: createWorkspaceSnapshotHeadMetadata(requestedSnapshotRef),
+          key,
+          size: bytes.byteLength,
+        }),
+        deleteObject,
+      ),
+      USER_RUNNER: {
+        getByName: runner.getByName,
+      },
+    });
+    let committedSnapshotRef: HostedWorkspaceSnapshotV2Ref | null = null;
+    let checkpointCalls = 0;
+    const fetchMock = vi.fn<typeof fetch>(async (
+      ...args: Parameters<typeof fetch>
+    ): Promise<Response> => {
+      if (isHostedWorkspaceReadFetch(args)) {
+        return createHostedWorkspaceReadFetchResponse(
+          committedSnapshotRef,
+          committedSnapshotRef ? "5" : "4",
+        );
+      }
+      checkpointCalls += 1;
+      const checkpointRequest = readTestFetchBodyObject(
+        args,
+        "workspace snapshot committed-response-loss checkpoint request",
+      );
+      const attemptedSnapshotRef = parseHostedWorkspaceSnapshotV2Ref(
+        checkpointRequest.snapshotRef,
+        "workspace snapshot committed-response-loss checkpoint ref",
+      );
+      if (!committedSnapshotRef) {
+        committedSnapshotRef = attemptedSnapshotRef;
+        return new Response(
+          JSON.stringify(createHostedWorkspaceCheckpointResponseWithSnapshotRef(
+            "5",
+            committedSnapshotRef,
+          )),
+          {
+            headers: {
+              "content-type": "application/json; charset=utf-8",
+            },
+            status: 200,
+          },
+        );
+      }
+      return new Response(
+        JSON.stringify({
+          ...createHostedWorkspaceCheckpointResponseWithSnapshotRef(
+            "5",
+            committedSnapshotRef,
+          ),
+          checkpointConflictReason: "workspace_version",
+          checkpointed: false,
+        }),
+        {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        },
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const completionRequest = () => createWorkspaceSnapshotCompleteRequest({
+      snapshotId,
+      snapshotRef: requestedSnapshotRef,
+      workspaceVersion: "4",
+    });
+
+    const lostResponse = await handleRunnerOutboundRequest(
+      completionRequest(),
+      env,
+      "member_123",
+    );
+    expect(lostResponse.status).toBe(200);
+    expect(committedSnapshotRef).toEqual(expect.objectContaining({
+      createdAt: session.createdAt,
+      objectKey,
+      snapshotId,
+    }));
+
+    vi.setSystemTime(new Date("2026-05-02T00:00:05.000Z"));
+    const replayResponse = await handleRunnerOutboundRequest(
+      completionRequest(),
+      env,
+      "member_123",
+    );
+    const replayBody = requireTestObject(
+      await replayResponse.json(),
+      "workspace snapshot committed-response-loss replay response",
+    );
+
+    expect(replayResponse.status).toBe(200);
+    expect(replayBody).toEqual(expect.objectContaining({
+      checkpoint: expect.objectContaining({
+        checkpointed: true,
+        workspace: expect.objectContaining({
+          snapshotRef: committedSnapshotRef,
+          version: "5",
+        }),
+      }),
+      snapshotRef: committedSnapshotRef,
+    }));
+    expect(checkpointCalls).toBe(2);
+    expect(deleteObject).not.toHaveBeenCalled();
+    expect(runner.recordHostedWorkspaceSnapshotOrphanCandidate).not.toHaveBeenCalled();
+    expect(runner.deleteHostedWorkspaceSnapshotUploadSession).not.toHaveBeenCalled();
   });
 
   it("ignores replaced successful workspace snapshots outside the bound user namespace", async () => {

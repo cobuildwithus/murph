@@ -76,13 +76,16 @@ export function createCloudflareWorkspaceSnapshotPort(input: {
   timeoutMs: number;
   workspaceCheckpointBridge: HostedWorkspaceCheckpointBridgeAuthority;
 }): NonNullable<HostedRuntimePlatform["workspaceSnapshotPort"]> {
-  const sessionWriteFenceHeaders = new Map<string, Headers>();
+  const sessionRuntimeState = new Map<string, {
+    headers: Headers;
+    signal: AbortSignal | null;
+  }>();
   const sessionHeartbeatStops = new Map<string, () => void>();
   const readSessionWriteFenceHeaders = async (
     snapshotId: string,
     description: string,
   ): Promise<Headers> => {
-    const stored = sessionWriteFenceHeaders.get(snapshotId);
+    const stored = sessionRuntimeState.get(snapshotId)?.headers;
     if (stored) {
       return new Headers(stored);
     }
@@ -195,39 +198,77 @@ export function createCloudflareWorkspaceSnapshotPort(input: {
           ),
         });
       } finally {
-        sessionWriteFenceHeaders.delete(request.snapshotId);
+        sessionRuntimeState.delete(request.snapshotId);
       }
     },
 
     async completeSnapshotSession(request) {
+      const snapshotId = request.ref.snapshotId;
       const headers = await readSessionWriteFenceHeaders(
-        request.ref.snapshotId,
+        snapshotId,
         "Hosted workspace snapshot complete",
       );
+      headers.set("content-type", "application/json; charset=utf-8");
+      // Canonical publication stays non-interruptible once `/complete` starts.
+      // The session signal only prevents replay after foreground cancellation.
+      const sessionCancellationSignal =
+        sessionRuntimeState.get(snapshotId)?.signal ?? null;
+      const body = JSON.stringify({
+        archive: request.ref.archive,
+        checkpointRequest: request.checkpointRequest,
+        objectKey: request.ref.objectKey,
+        snapshotId,
+      });
+      const url = new URL(
+        `/workspace-snapshots/${encodeURIComponent(snapshotId)}/complete`,
+        `${CLOUDFLARE_HOSTED_RUNTIME_BASE_URLS.workspaceSnapshotStore}/`,
+      );
+      const deadlineMs = Date.now() + input.timeoutMs;
+      const complete = async (timeoutMs: number): Promise<unknown> => {
+        const response = await fetchHostedResponse({
+          description: "Hosted workspace snapshot complete",
+          fetchImpl: input.fetchImpl,
+          init: {
+            body,
+            headers,
+            method: "POST",
+          },
+          redactedLogPath: "/workspace-snapshots/REDACTED/complete",
+          timeoutMs,
+          url,
+        });
+        if (!response.ok) {
+          await cancelHostedWorkspaceSnapshotResponseBody(response.body);
+        }
+        assertHostedOk(response, "Hosted workspace snapshot complete");
+        return await readHostedWorkspaceSnapshotCompleteResponsePayload({
+          deadlineMs,
+          response,
+        });
+      };
       let payload: unknown;
       try {
-        payload = await fetchHostedJson({
-          body: {
-            archive: request.ref.archive,
-            checkpointRequest: request.checkpointRequest,
-            objectKey: request.ref.objectKey,
-            snapshotId: request.ref.snapshotId,
-          },
-          description: "Hosted workspace snapshot complete",
-          exposeResponseBodyInError: false,
-          fetchImpl: input.fetchImpl,
-          headers,
-          redactedLogPath: "/workspace-snapshots/REDACTED/complete",
-          method: "POST",
-          timeoutMs: input.timeoutMs,
-          url: new URL(
-            `/workspace-snapshots/${encodeURIComponent(request.ref.snapshotId)}/complete`,
-            `${CLOUDFLARE_HOSTED_RUNTIME_BASE_URLS.workspaceSnapshotStore}/`,
-          ),
-        });
+        try {
+          payload = await complete(Math.max(0, deadlineMs - Date.now()));
+        } catch (error) {
+          assertHostedWorkspaceSnapshotOperationLive(sessionCancellationSignal);
+          const replayTimeoutMs = deadlineMs - Date.now();
+          if (
+            replayTimeoutMs <= 0
+            || !isRetryableHostedRuntimeReplaySafeReadTransportError(error)
+          ) {
+            throw error;
+          }
+          try {
+            payload = await complete(replayTimeoutMs);
+          } catch (replayError) {
+            assertHostedWorkspaceSnapshotOperationLive(sessionCancellationSignal);
+            throw replayError;
+          }
+        }
       } finally {
-        stopSessionHeartbeat(request.ref.snapshotId);
-        sessionWriteFenceHeaders.delete(request.ref.snapshotId);
+        stopSessionHeartbeat(snapshotId);
+        sessionRuntimeState.delete(snapshotId);
       }
       const completed = parseHostedWorkspaceSnapshotCompletePayload(payload);
       const { checkpoint } = completed;
@@ -537,7 +578,10 @@ export function createCloudflareWorkspaceSnapshotPort(input: {
       }
       assertHostedWorkspaceSnapshotOperationLive(signal);
       const started = parseHostedWorkspaceSnapshotStartPayload(payload, input.boundUserId);
-      sessionWriteFenceHeaders.set(started.snapshotId, new Headers(headers));
+      sessionRuntimeState.set(started.snapshotId, {
+        headers: new Headers(headers),
+        signal: signal ?? null,
+      });
       startSessionHeartbeat(started.snapshotId, headers, signal);
       return started;
     },
@@ -973,6 +1017,37 @@ async function cancelHostedWorkspaceSnapshotResponseBody(
     await body?.cancel();
   } catch {
     // Best-effort cleanup only; preserve the original restore failure.
+  }
+}
+
+async function readHostedWorkspaceSnapshotCompleteResponsePayload(input: {
+  deadlineMs: number;
+  response: Response;
+}): Promise<unknown> {
+  if (!input.response.body) {
+    return null;
+  }
+
+  const decoder = new TextDecoder();
+  let text = "";
+  for await (const chunk of readHostedRuntimeResponseBodyChunks({
+    body: input.response.body,
+    description: "Hosted workspace snapshot complete",
+    timeoutMs: Math.max(0, input.deadlineMs - Date.now()),
+  })) {
+    text += decoder.decode(chunk, { stream: true });
+  }
+  text += decoder.decode();
+  if (!text.trim()) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(text);
+  } catch (error) {
+    throw new Error("Hosted workspace snapshot complete returned invalid JSON.", {
+      cause: error,
+    });
   }
 }
 
