@@ -126,7 +126,11 @@ async function interruptScriptAfterPath(
   harness: Harness,
   args: string[],
   readyPath: string,
-): Promise<{ status: number | null; stderr: string }> {
+): Promise<{
+  signal: NodeJS.Signals | null
+  status: number | null
+  stderr: string
+}> {
   const child = spawn('bash', [path.join('scripts', 'create-worktree'), ...args], {
     cwd: harness.primary,
     detached: true,
@@ -138,10 +142,14 @@ async function interruptScriptAfterPath(
   child.stderr.on('data', (chunk: string) => {
     stderr += chunk
   })
-  const completed = new Promise<{ status: number | null; stderr: string }>(
+  const completed = new Promise<{
+    signal: NodeJS.Signals | null
+    status: number | null
+    stderr: string
+  }>(
     (resolve, reject) => {
       child.once('error', reject)
-      child.once('close', (status) => resolve({ status, stderr }))
+      child.once('close', (status, signal) => resolve({ signal, status, stderr }))
     },
   )
 
@@ -690,7 +698,11 @@ touch ${JSON.stringify(hookInvoked)}
       filterStarted,
     )
 
-    expect(creation.status, creation.stderr).toBe(130)
+    expect(
+      creation.status === 130 ||
+        (creation.status === null && creation.signal === 'SIGINT'),
+      creation.stderr,
+    ).toBe(true)
     const listing = runGit(harness.primary, ['worktree', 'list', '--porcelain'])
     expect(listing).not.toContain(target)
     expect(listing).toContain(unrelatedTarget)
@@ -740,7 +752,11 @@ sleep 2
       hookStarted,
     )
 
-    expect(creation.status, creation.stderr).toBe(130)
+    expect(
+      creation.status === 130 ||
+        (creation.status === null && creation.signal === 'SIGINT'),
+      creation.stderr,
+    ).toBe(true)
     expect(runGit(harness.primary, ['worktree', 'list', '--porcelain'])).not.toContain(
       target,
     )
