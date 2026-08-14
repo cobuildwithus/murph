@@ -29,6 +29,11 @@ Updated: 2026-08-14
   relocated-function probe showed that Webpack checks the inlined build-time
   source path before the deployed `apps/web` asset layout. The resolver must
   prefer the runtime layout so image routes never reach outside their function.
+- Preview deployments are suppressed twice: the checked-in branch allowlist
+  permits only `main`, and the Vercel project Ignored Build Step cancels every
+  non-production deployment. The cold proof therefore needs both one exact
+  task-branch allowance and Vercel's explicit force-deploy commit override;
+  the branch allowance must be removed after the proof.
 
 ## Protected invariants
 
