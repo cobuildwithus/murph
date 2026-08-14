@@ -74,8 +74,6 @@ export type AssistantAutoReplyRouteReadResult =
     }
 
 export interface AssistantAutoReplyRouteMaintenanceResult {
-  protectedReceiptTurnIds: ReadonlySet<string>
-  releasedAbandonedReceiptTurnIds: ReadonlySet<string>
   trusted: boolean
 }
 
@@ -494,8 +492,8 @@ function mergeAssistantAutoReplyRouteClaims(
   return [...claimsByRoute.values()]
 }
 
+/** Reconcile only while the caller holds the runtime lock at a quiescent automation boundary. */
 export async function maintainAssistantAutoReplyRouteStateAtPaths(input: {
-  abandonedReceiptTurnIds?: ReadonlySet<string>
   outboxIntents: readonly AssistantOutboxIntent[]
   outboxTrusted: boolean
   paths: AssistantStatePaths
@@ -504,8 +502,6 @@ export async function maintainAssistantAutoReplyRouteStateAtPaths(input: {
 }): Promise<AssistantAutoReplyRouteMaintenanceResult> {
   if (!input.outboxTrusted || !input.receiptsTrusted) {
     return {
-      protectedReceiptTurnIds: new Set<string>(),
-      releasedAbandonedReceiptTurnIds: new Set<string>(),
       trusted: false,
     }
   }
@@ -514,41 +510,15 @@ export async function maintainAssistantAutoReplyRouteStateAtPaths(input: {
     await readAssistantAutoReplyRouteMigrationStatusAtPaths(input.paths)
   if (migrationStatus === 'corrupt') {
     return {
-      protectedReceiptTurnIds: new Set<string>(),
-      releasedAbandonedReceiptTurnIds: new Set<string>(),
       trusted: false,
     }
   }
-  const releasedAbandonedReceiptTurnIds = new Set(
-    input.receipts
-      .filter((receipt) =>
-        input.abandonedReceiptTurnIds?.has(receipt.turnId) &&
-        receiptRecordsAnyCrossSessionContextIntent(receipt)
-      )
-      .map((receipt) => receipt.turnId),
-  )
   if (migrationStatus === 'missing') {
-    const migrationCompleted = await migrateAssistantAutoReplyRouteStateAtPaths({
+    await migrateAssistantAutoReplyRouteStateAtPaths({
       outboxIntents: input.outboxIntents,
       paths: input.paths,
-      receipts: input.receipts.filter((receipt) =>
-        !input.abandonedReceiptTurnIds?.has(receipt.turnId)
-      ),
+      receipts: input.receipts,
     })
-    if (!migrationCompleted) {
-      return {
-        protectedReceiptTurnIds: new Set(
-          input.receipts
-            .filter((receipt) =>
-              receipt.status === 'running' &&
-              !input.abandonedReceiptTurnIds?.has(receipt.turnId)
-            )
-            .map((receipt) => receipt.turnId),
-        ),
-        releasedAbandonedReceiptTurnIds,
-        trusted: false,
-      }
-    }
   }
 
   const routesDirectory = resolveAssistantAutoReplyRoutesDirectory(input.paths)
@@ -558,8 +528,6 @@ export async function maintainAssistantAutoReplyRouteStateAtPaths(input: {
   } catch (error) {
     if (isMissingFileError(error)) {
       return {
-        protectedReceiptTurnIds: new Set<string>(),
-        releasedAbandonedReceiptTurnIds,
         trusted: true,
       }
     }
@@ -579,7 +547,6 @@ export async function maintainAssistantAutoReplyRouteStateAtPaths(input: {
       return route ? [route.digest] : []
     }),
   )
-  const protectedReceiptTurnIds = new Set<string>()
   let trusted = true
   for (const entry of entries) {
     if (
@@ -608,40 +575,33 @@ export async function maintainAssistantAutoReplyRouteStateAtPaths(input: {
       continue
     }
     const pending = routeStateRead.state.pending
+    if (!liveRouteDigests.has(routeDigest)) {
+      await removeAssistantAutoReplyRouteStateFile(
+        resolveAssistantAutoReplyRouteStatePath(input.paths, routeDigest),
+      )
+      continue
+    }
     if (!pending) {
-      if (!liveRouteDigests.has(routeDigest)) {
-        await removeAssistantAutoReplyRouteStateFile(
-          resolveAssistantAutoReplyRouteStatePath(input.paths, routeDigest),
-        )
-      }
       continue
     }
-    if (input.abandonedReceiptTurnIds?.has(pending.turnId)) {
-      releasedAbandonedReceiptTurnIds.add(pending.turnId)
-      const clearedState = {
-        pending: null,
-        settledThrough: routeStateRead.state.settledThrough,
-      }
-      if (!liveRouteDigests.has(routeDigest)) {
-        await removeAssistantAutoReplyRouteStateFile(
-          resolveAssistantAutoReplyRouteStatePath(input.paths, routeDigest),
-        )
-      } else {
-        await writeAssistantAutoReplyRouteStateAtPaths(
-          input.paths,
-          routeDigest,
-          clearedState,
-        )
-      }
-      continue
-    }
-    const receipt = receiptsByTurnId.get(pending.turnId) ?? null
+    const receipt = receiptsByTurnId.get(pending.turnId) ??
+      await readAssistantTurnReceiptAtPaths(input.paths, pending.turnId)
     const reconciled = reconcileAssistantAutoReplyPendingClaim({
       receipt,
       state: routeStateRead.state,
     })
     if (reconciled.kind === 'blocked') {
-      protectedReceiptTurnIds.add(pending.turnId)
+      await writeAssistantAutoReplyRouteStateAtPaths(
+        input.paths,
+        routeDigest,
+        {
+          pending: null,
+          settledThrough: maxAssistantAutoReplyDeliveryOrder(
+            routeStateRead.state.settledThrough,
+            pending.order,
+          ),
+        },
+      )
       continue
     }
     if (reconciled.changed) {
@@ -663,8 +623,6 @@ export async function maintainAssistantAutoReplyRouteStateAtPaths(input: {
   }
 
   return {
-    protectedReceiptTurnIds,
-    releasedAbandonedReceiptTurnIds,
     trusted,
   }
 }
@@ -829,7 +787,7 @@ async function migrateAssistantAutoReplyRouteStateAtPaths(input: {
   outboxIntents: readonly AssistantOutboxIntent[]
   paths: AssistantStatePaths
   receipts: readonly AssistantTurnReceipt[]
-}): Promise<boolean> {
+}): Promise<void> {
   const deliveriesByIntentId = new Map<string, {
     order: AssistantAutoReplyDeliveryOrder
     routeDigest: string
@@ -852,10 +810,6 @@ async function migrateAssistantAutoReplyRouteStateAtPaths(input: {
     string,
     AssistantAutoReplyDeliveryOrder
   >()
-  const runningClaimsByRoute = new Map<
-    string,
-    NonNullable<AssistantAutoReplyRouteStateValue['pending']>
-  >()
   for (const receipt of input.receipts) {
     if (
       receipt.status !== 'completed' &&
@@ -877,21 +831,6 @@ async function migrateAssistantAutoReplyRouteStateAtPaths(input: {
       if (!delivery) {
         continue
       }
-      if (receipt.status === 'running') {
-        const merged = mergeAssistantAutoReplyLegacyRunningClaim({
-          claim: {
-            acceptedThrough: null,
-            order: delivery.order,
-            turnId: receipt.turnId,
-          },
-          claimsByRoute: runningClaimsByRoute,
-          routeDigest: delivery.routeDigest,
-        })
-        if (!merged) {
-          return false
-        }
-        continue
-      }
       settledThroughByRoute.set(
         delivery.routeDigest,
         maxAssistantAutoReplyDeliveryOrder(
@@ -902,14 +841,7 @@ async function migrateAssistantAutoReplyRouteStateAtPaths(input: {
     }
   }
 
-  const routeDigests = new Set([
-    ...settledThroughByRoute.keys(),
-    ...runningClaimsByRoute.keys(),
-  ])
-  const routeWrites: Array<{
-    routeDigest: string
-    state: AssistantAutoReplyRouteStateValue
-  }> = []
+  const routeDigests = new Set(settledThroughByRoute.keys())
   for (const routeDigest of routeDigests) {
     const currentRead = await readAssistantAutoReplyRouteStateAtPaths(
       input.paths,
@@ -924,36 +856,27 @@ async function migrateAssistantAutoReplyRouteStateAtPaths(input: {
       ? createEmptyAssistantAutoReplyRouteState()
       : currentRead.state
     const migratedSettledThrough = settledThroughByRoute.get(routeDigest)
-    const settledThrough = migratedSettledThrough === undefined
-      ? current.settledThrough
-      : maxAssistantAutoReplyDeliveryOrder(
-          current.settledThrough,
-          migratedSettledThrough,
-        )
-    const migratedPending = runningClaimsByRoute.get(routeDigest) ?? null
-    const pendingMerge = mergeAssistantAutoReplyLegacyPendingClaims({
-      current: current.pending,
-      migrated: migratedPending,
-      routeDigest,
-      settledThrough,
-    })
-    if (pendingMerge.kind === 'conflict') {
-      return false
+    if (migratedSettledThrough === undefined) {
+      continue
     }
-    routeWrites.push({
-      routeDigest,
-      state: {
-        pending: pendingMerge.pending,
+    const settledThrough = maxAssistantAutoReplyDeliveryOrder(
+      current.settledThrough,
+      migratedSettledThrough,
+    )
+    const pending = current.pending === null ||
+      compareAssistantAutoReplyDeliveryOrders(
+        current.pending.order,
         settledThrough,
-      },
-    })
-  }
-
-  for (const write of routeWrites) {
+      ) <= 0
+      ? null
+      : current.pending
     await writeAssistantAutoReplyRouteStateAtPaths(
       input.paths,
-      write.routeDigest,
-      write.state,
+      routeDigest,
+      {
+        pending,
+        settledThrough,
+      },
     )
   }
 
@@ -965,92 +888,9 @@ async function migrateAssistantAutoReplyRouteStateAtPaths(input: {
       completedAt: new Date().toISOString(),
     } satisfies AssistantAutoReplyRouteMigrationValue,
   })
-  return true
 }
 
-function mergeAssistantAutoReplyLegacyRunningClaim(input: {
-  claim: NonNullable<AssistantAutoReplyRouteStateValue['pending']>
-  claimsByRoute: Map<
-    string,
-    NonNullable<AssistantAutoReplyRouteStateValue['pending']>
-  >
-  routeDigest: string
-}): boolean {
-  const current = input.claimsByRoute.get(input.routeDigest)
-  if (!current) {
-    input.claimsByRoute.set(input.routeDigest, input.claim)
-    return true
-  }
-  if (current.turnId !== input.claim.turnId) {
-    return false
-  }
-  if (
-    compareAssistantAutoReplyDeliveryOrders(
-      current.order,
-      input.claim.order,
-    ) < 0
-  ) {
-    input.claimsByRoute.set(input.routeDigest, input.claim)
-  }
-  return true
-}
-
-function mergeAssistantAutoReplyLegacyPendingClaims(input: {
-  current: AssistantAutoReplyRouteStateValue['pending']
-  migrated: AssistantAutoReplyRouteStateValue['pending']
-  routeDigest: string
-  settledThrough: AssistantAutoReplyDeliveryOrder | null
-}):
-  | { kind: 'conflict' }
-  | {
-      kind: 'ready'
-      pending: AssistantAutoReplyRouteStateValue['pending']
-    } {
-  const candidates = [input.current, input.migrated].filter(
-    (candidate): candidate is NonNullable<
-      AssistantAutoReplyRouteStateValue['pending']
-    > => candidate !== null,
-  )
-  const unsettled = candidates.filter((candidate) =>
-    input.settledThrough === null ||
-    compareAssistantAutoReplyDeliveryOrders(
-      candidate.order,
-      input.settledThrough,
-    ) > 0,
-  )
-  if (unsettled.length === 0) {
-    return { kind: 'ready', pending: null }
-  }
-  const turnIds = new Set(unsettled.map((candidate) => candidate.turnId))
-  if (turnIds.size !== 1) {
-    return { kind: 'conflict' }
-  }
-  const selected = unsettled.reduce((selected, candidate) =>
-    compareAssistantAutoReplyDeliveryOrders(
-      selected.order,
-      candidate.order,
-    ) < 0
-      ? candidate
-      : selected,
-  )
-  return {
-    kind: 'ready',
-    pending: {
-      ...selected,
-      acceptedThrough: unsettled.reduce<AssistantAutoReplyDeliveryOrder | null>(
-        (acceptedThrough, candidate) => candidate.acceptedThrough === null
-          ? acceptedThrough
-          : maxAssistantAutoReplyDeliveryOrder(
-              acceptedThrough,
-              candidate.acceptedThrough,
-            ),
-        null,
-      ),
-    },
-  }
-}
-
-async function readAssistantAutoReplyRouteMigrationStatusAtPaths(
+export async function readAssistantAutoReplyRouteMigrationStatusAtPaths(
   paths: AssistantStatePaths,
 ): Promise<'complete' | 'corrupt' | 'missing'> {
   try {
@@ -1170,16 +1010,6 @@ function receiptRecordsCrossSessionContextIntent(
     normalizeNullableString(
       event.metadata[AUTO_REPLY_RECEIPT_CROSS_SESSION_CONTEXT_INTENT_ID_KEY],
     ) === intentId
-  )
-}
-
-function receiptRecordsAnyCrossSessionContextIntent(
-  receipt: AssistantTurnReceipt,
-): boolean {
-  return receipt.timeline.some((event) =>
-    normalizeNullableString(
-      event.metadata[AUTO_REPLY_RECEIPT_CROSS_SESSION_CONTEXT_INTENT_ID_KEY],
-    ) !== null
   )
 }
 

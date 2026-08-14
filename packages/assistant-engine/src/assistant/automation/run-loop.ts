@@ -24,6 +24,9 @@ import type { AssistantProviderProgressEvent } from '../provider-progress.js'
 import type { AssistantTurnEnvironment } from '../service-contracts.js'
 import { buildAssistantOutboxSummary } from '../outbox/summary.js'
 import { maybeRunAssistantRuntimeMaintenance } from '../runtime-budgets.js'
+import {
+  maintainAssistantAutoReplyRouteStateAfterAutomationPass,
+} from '../runtime-residue.js'
 import { refreshAssistantStatusSnapshot } from '../status.js'
 import {
   readAssistantAutomationState,
@@ -971,6 +974,21 @@ export async function runAssistantAutomationPass(
     },
   })
   passTiming.scanElapsedMs = Date.now() - scanStartedAt
+  if (
+    applyCanonicalWrites
+    && input.signal?.aborted !== true
+    && input.shouldYieldBackgroundMaintenance?.() !== true
+  ) {
+    await maintainAssistantAutoReplyRouteStateAfterAutomationPass({
+      signal: input.signal ?? null,
+      vault: input.vault,
+    }).catch((error) => {
+      warnAssistantBestEffortFailure({
+        error,
+        operation: 'auto-reply route maintenance',
+      })
+    })
+  }
   if (
     scanResult.replies.considered === 0
     && input.signal?.aborted !== true

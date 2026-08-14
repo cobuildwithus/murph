@@ -256,8 +256,8 @@ describe('assistant auto-reply exact route state', () => {
       routeDigest: route.digest,
       vault,
     })).resolves.toEqual({
-      kind: 'blocked',
-      reason: 'running-receipt',
+      kind: 'ready',
+      settledThrough: order(outboxIntent.intentId, BASE_TIME),
     })
   })
 
@@ -283,12 +283,12 @@ describe('assistant auto-reply exact route state', () => {
       routeDigest: route.digest,
       vault,
     })).resolves.toEqual({
-      kind: 'blocked',
-      reason: 'running-receipt',
+      kind: 'ready',
+      settledThrough: order(outboxIntent.intentId, BASE_TIME),
     })
   })
 
-  it('leaves ambiguous legacy running consumers for residue instead of failing migration', async () => {
+  it('folds concurrent legacy running consumers into one suppression watermark', async () => {
     const vault = await createTempVault('migration-ambiguous-running')
     const paths = resolveAssistantStatePaths(vault)
     const route = emailRoute()
@@ -314,28 +314,21 @@ describe('assistant auto-reply exact route state', () => {
       paths,
       receipts: [firstReceipt, secondReceipt],
       receiptsTrusted: true,
-    })).resolves.toEqual({
-      protectedReceiptTurnIds: new Set([
-        firstReceipt.turnId,
-        secondReceipt.turnId,
-      ]),
-      releasedAbandonedReceiptTurnIds: new Set(),
-      trusted: false,
-    })
+    })).resolves.toEqual({ trusted: true })
     await expect(readFile(
       resolveAssistantAutoReplyRouteMigrationPath(paths),
       'utf8',
-    )).rejects.toMatchObject({ code: 'ENOENT' })
+    )).resolves.toContain('murph.assistant-auto-reply-route-migration')
     await expect(readAssistantAutoReplyRouteState({
       routeDigest: route.digest,
       vault,
     })).resolves.toEqual({
-      kind: 'blocked',
-      reason: 'migration-incomplete',
+      kind: 'ready',
+      settledThrough: order(secondIntent.intentId, LATER_TIME),
     })
   })
 
-  it('imports one legacy running receipt as a pending claim and uses that exact receipt as its witness', async () => {
+  it('retires a legacy running receipt into a suppression watermark', async () => {
     const vault = await createTempVault('legacy-running')
     const route = emailRoute()
     const outboxIntent = createOutboxIntent({ intentId: 'intent-running' })
@@ -347,20 +340,6 @@ describe('assistant auto-reply exact route state', () => {
     await saveAssistantTurnReceipt(vault, runningReceipt)
 
     await completeMigration(vault, [outboxIntent], [runningReceipt])
-    await expect(readAssistantAutoReplyRouteState({
-      routeDigest: route.digest,
-      vault,
-    })).resolves.toEqual({
-      kind: 'blocked',
-      reason: 'running-receipt',
-    })
-
-    await finalizeAssistantTurnReceipt({
-      completedAt: LATER_TIME,
-      status: 'completed',
-      turnId: runningReceipt.turnId,
-      vault,
-    })
     await expect(readAssistantAutoReplyRouteState({
       routeDigest: route.digest,
       vault,
@@ -927,7 +906,7 @@ describe('assistant auto-reply exact route state', () => {
     })
   })
 
-  it('protects running claim witnesses during residue maintenance and compacts terminal claims before receipt pruning', async () => {
+  it('retires running claims at quiescence and removes routes with no live outbox authority', async () => {
     const vault = await createTempVault('residue')
     const route = emailRoute()
     const deliveryOrder = order('intent-residue', BASE_TIME)
@@ -955,8 +934,13 @@ describe('assistant auto-reply exact route state', () => {
       vault,
     })
     expect(runningMaintenance.trusted).toBe(true)
-    expect([...runningMaintenance.protectedReceiptTurnIds])
-      .toEqual([running.turnId])
+    await expect(readAssistantAutoReplyRouteState({
+      routeDigest: route.digest,
+      vault,
+    })).resolves.toEqual({
+      kind: 'ready',
+      settledThrough: deliveryOrder,
+    })
 
     const completed = await finalizeAssistantTurnReceipt({
       completedAt: LATER_TIME,
@@ -973,7 +957,6 @@ describe('assistant auto-reply exact route state', () => {
       vault,
     })
     expect(terminalMaintenance.trusted).toBe(true)
-    expect([...terminalMaintenance.protectedReceiptTurnIds]).toEqual([])
 
     const exactReceiptRead = vi.fn(async () => completed)
     await expect(readAssistantAutoReplyRouteState(

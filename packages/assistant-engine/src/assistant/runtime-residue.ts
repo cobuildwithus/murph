@@ -21,6 +21,7 @@ import {
 } from './automation/auto-reply-retry.js'
 import {
   maintainAssistantAutoReplyRouteStateAtPaths,
+  readAssistantAutoReplyRouteMigrationStatusAtPaths,
   type AssistantAutoReplyRouteMaintenanceResult,
 } from './automation/cross-session-route-state.js'
 import {
@@ -159,6 +160,47 @@ export async function pruneAssistantRuntimeResidue(input: {
   return result
 }
 
+export async function maintainAssistantAutoReplyRouteStateAfterAutomationPass(
+  input: {
+    signal?: AbortSignal | null
+    vault: string
+  },
+): Promise<AssistantAutoReplyRouteMaintenanceResult> {
+  input.signal?.throwIfAborted()
+  return await withAssistantRuntimeWriteLock(
+    input.vault,
+    async (paths) => {
+      await ensureAssistantState(paths)
+      input.signal?.throwIfAborted()
+      const [outbox, migrationStatus] = await Promise.all([
+        readOutboxInventory(
+          paths.outboxDirectory,
+          input.vault,
+          input.signal,
+        ),
+        readAssistantAutoReplyRouteMigrationStatusAtPaths(paths),
+      ])
+      input.signal?.throwIfAborted()
+      const receipts = migrationStatus === 'missing'
+        ? await readJsonInventory(
+            paths.turnsDirectory,
+            (value) => assistantTurnReceiptSchema.parse(value),
+            input.signal,
+          )
+        : { records: [], trusted: true }
+      input.signal?.throwIfAborted()
+      return await maintainAssistantAutoReplyRouteStateAtPaths({
+        outboxIntents: outbox.records.map(({ record }) => record),
+        outboxTrusted: outbox.trusted,
+        paths,
+        receipts: receipts.records.map(({ record }) => record),
+        receiptsTrusted: receipts.trusted,
+      })
+    },
+    input.signal,
+  )
+}
+
 async function pruneAssistantRuntimeResidueAtPaths(input: {
   generatedDeliveryFilesQuiescent: boolean
   now: Date
@@ -177,13 +219,7 @@ async function pruneAssistantRuntimeResidueAtPaths(input: {
     vault: input.vault,
   })
   input.signal?.throwIfAborted()
-  const abandonedRunningTurnIds = resolveAbandonedRunningTurnIds({
-    inventory,
-    now: input.now,
-    pendingInputIds: input.pendingInputIds,
-  })
   const autoReplyRouteState = await maintainAssistantAutoReplyRouteStateAtPaths({
-    abandonedReceiptTurnIds: abandonedRunningTurnIds,
     outboxIntents: inventory.outbox.records.map(({ record }) => record),
     outboxTrusted: inventory.outbox.trusted,
     paths: input.paths,
@@ -656,12 +692,7 @@ function planAssistantRuntimeResiduePrune(input: {
       input.inventory.journals.trusted &&
       input.inventory.outbox.trusted &&
       receipt !== null &&
-      (
-        receipt.status !== 'running' ||
-        input.autoReplyRouteState.releasedAbandonedReceiptTurnIds.has(
-          journal.record.turnId,
-        )
-      ) &&
+      receipt.status !== 'running' &&
       !activeTurnIds.has(journal.record.turnId) &&
       journal.record.inputIds.every((inputId) => !pendingInputIds.has(inputId))
 
@@ -780,11 +811,10 @@ function planAssistantRuntimeResiduePrune(input: {
     input.inventory.outbox.trusted &&
     input.inventory.receipts.trusted
   ) {
-    const unprotectedReceipts = input.inventory.receipts.records
+    const eligibleReceipts = input.inventory.receipts.records
       .filter(({ record }) =>
         !activeTurnIds.has(record.turnId) &&
         !retainedJournalTurnIds.has(record.turnId) &&
-        !input.autoReplyRouteState.protectedReceiptTurnIds.has(record.turnId) &&
         receiptHasNoPendingAutoReplyInputs({
           pendingInputIds,
           receipt: record,
@@ -792,7 +822,7 @@ function planAssistantRuntimeResiduePrune(input: {
         Number.isFinite(resolveReceiptTimestampMs(record)),
       )
 
-    const terminalReceipts = unprotectedReceipts
+    const terminalReceipts = eligibleReceipts
       .filter(({ record }) => isPrunableTerminalAssistantTurnReceipt(record))
       .sort((left, right) =>
         resolveReceiptTimestampMs(right.record) -
@@ -808,7 +838,7 @@ function planAssistantRuntimeResiduePrune(input: {
       }
     }
 
-    for (const receipt of unprotectedReceipts) {
+    for (const receipt of eligibleReceipts) {
       if (
         receipt.record.status === 'running' &&
         resolveReceiptTimestampMs(receipt.record) < cutoffMs
@@ -833,58 +863,6 @@ function planAssistantRuntimeResiduePrune(input: {
     provenancePaths,
     receiptPaths,
   }
-}
-
-function resolveAbandonedRunningTurnIds(input: {
-  inventory: AssistantRuntimeResidueInventory
-  now: Date
-  pendingInputIds: readonly string[]
-}): ReadonlySet<string> {
-  if (
-    !input.inventory.journals.trusted ||
-    !input.inventory.outbox.trusted ||
-    !input.inventory.receipts.trusted
-  ) {
-    return new Set<string>()
-  }
-
-  const cutoffMs = input.now.getTime() - ASSISTANT_RUNTIME_RESIDUE_RETENTION_MS
-  const pendingInputIds = new Set(
-    input.pendingInputIds.map((inputId) => inputId.trim()).filter(Boolean),
-  )
-  const activeTurnIds = new Set(
-    input.inventory.outbox.records
-      .map(({ record }) => record)
-      .filter(isActiveAssistantOutboxIntent)
-      .map((intent) => intent.turnId),
-  )
-  const journalsByTurnId = new Map<string, AssistantAcceptedTurnInputJournal[]>()
-  for (const { record } of input.inventory.journals.records) {
-    const journals = journalsByTurnId.get(record.turnId) ?? []
-    journals.push(record)
-    journalsByTurnId.set(record.turnId, journals)
-  }
-
-  return new Set(
-    input.inventory.receipts.records.flatMap(({ record }) => {
-      if (
-        record.status !== 'running' ||
-        activeTurnIds.has(record.turnId) ||
-        !Number.isFinite(resolveReceiptTimestampMs(record)) ||
-        resolveReceiptTimestampMs(record) >= cutoffMs ||
-        !receiptHasNoPendingAutoReplyInputs({
-          pendingInputIds,
-          receipt: record,
-        }) ||
-        (journalsByTurnId.get(record.turnId) ?? []).some((journal) =>
-          journal.inputIds.some((inputId) => pendingInputIds.has(inputId))
-        )
-      ) {
-        return []
-      }
-      return [record.turnId]
-    }),
-  )
 }
 
 function receiptHasNoPendingAutoReplyInputs(input: {

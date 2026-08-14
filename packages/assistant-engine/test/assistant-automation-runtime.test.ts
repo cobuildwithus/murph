@@ -76,6 +76,7 @@ const runLoopMocks = vi.hoisted(() => ({
   errorMessage: vi.fn(),
   formatStructuredErrorMessage: vi.fn(),
   getAssistantCronStatus: vi.fn(),
+  maintainAssistantAutoReplyRouteStateAfterAutomationPass: vi.fn(),
   maybeRunAssistantRuntimeMaintenance: vi.fn(),
   maybeThrowInjectedAssistantFault: vi.fn(),
   processDueAssistantCronJobs: vi.fn(),
@@ -209,6 +210,11 @@ vi.mock('../src/assistant/outbox/summary.ts', () => ({
 
 vi.mock('../src/assistant/runtime-budgets.ts', () => ({
   maybeRunAssistantRuntimeMaintenance: runLoopMocks.maybeRunAssistantRuntimeMaintenance,
+}))
+
+vi.mock('../src/assistant/runtime-residue.ts', () => ({
+  maintainAssistantAutoReplyRouteStateAfterAutomationPass:
+    runLoopMocks.maintainAssistantAutoReplyRouteStateAfterAutomationPass,
 }))
 
 vi.mock('../src/assistant/status.ts', () => ({
@@ -1118,6 +1124,9 @@ beforeEach(() => {
   runLoopMocks.buildAssistantOutboxSummary.mockReset().mockResolvedValue({
     nextAttemptAt: null,
   })
+  runLoopMocks.maintainAssistantAutoReplyRouteStateAfterAutomationPass
+    .mockReset()
+    .mockResolvedValue({ trusted: true })
   runLoopMocks.maybeRunAssistantRuntimeMaintenance.mockReset().mockResolvedValue(undefined)
   runLoopMocks.maybeThrowInjectedAssistantFault.mockReset().mockImplementation(() => {})
   runLoopMocks.processDueAssistantCronJobs.mockReset().mockResolvedValue({
@@ -13465,6 +13474,12 @@ describe('assistant automation run loop', () => {
       signal: expect.any(AbortSignal),
     })
     expect(runLoopMocks.processDueAssistantCronJobs).toHaveBeenCalledOnce()
+    expect(
+      runLoopMocks.maintainAssistantAutoReplyRouteStateAfterAutomationPass,
+    ).toHaveBeenCalledWith({
+      signal: expect.any(AbortSignal),
+      vault: '/tmp/assistant-automation-vault',
+    })
     expect(runLoopMocks.recordAssistantDiagnosticEvent).not.toHaveBeenCalled()
     expect(runLoopMocks.maybeRunAssistantRuntimeMaintenance).not.toHaveBeenCalled()
     expect(release).toHaveBeenCalledOnce()
@@ -13506,6 +13521,9 @@ describe('assistant automation run loop', () => {
     })
 
     expect(runLoopMocks.scanAssistantAutomationOnce).toHaveBeenCalledOnce()
+    expect(
+      runLoopMocks.maintainAssistantAutoReplyRouteStateAfterAutomationPass,
+    ).toHaveBeenCalledOnce()
     expect(runLoopMocks.maybeRunAssistantRuntimeMaintenance).toHaveBeenCalledOnce()
     expect(runLoopMocks.processDueAssistantCronJobs).toHaveBeenCalledOnce()
     expect(
@@ -13556,6 +13574,9 @@ describe('assistant automation run loop', () => {
     })
 
     expect(runLoopMocks.maybeRunAssistantRuntimeMaintenance).not.toHaveBeenCalled()
+    expect(
+      runLoopMocks.maintainAssistantAutoReplyRouteStateAfterAutomationPass,
+    ).not.toHaveBeenCalled()
   })
 
   it('threads the foreground yield check into an in-flight maintenance pass', async () => {

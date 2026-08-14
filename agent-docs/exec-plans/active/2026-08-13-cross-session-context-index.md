@@ -108,11 +108,17 @@ Updated: 2026-08-13
   the residue-owned marker is complete.
 - Preliminary ReviewGPT found that ambiguous legacy running consumers could
   throw before residue cleanup and that a route claim could protect an
-  abandoned running receipt forever. Migration now stays incomplete without
-  throwing while those consumers remain live. At the existing old-running
-  cutoff, the residue owner clears only claims whose trusted outbox, receipt,
-  journal, and pending-input evidence proves abandoned, then prunes that
-  receipt and journal without manufacturing consumption.
+  abandoned running receipt forever. Final ReviewGPT round 1 also found that
+  local, assistantd, and one-shot runs had no guaranteed migration owner. The
+  correction reuses the automation post-pass boundary for every runtime mode:
+  the first trusted pass folds legacy running consumers into one per-route
+  suppression watermark and publishes the migration marker, while later
+  passes exact-read only pending witnesses. At quiescence an unresolved claim
+  becomes a suppression watermark and clears immediately; it does not assert
+  successful provider consumption, and exact anchors still bypass it. Routes
+  without live outbox authority are deleted before reconciliation. This
+  removes the timeout, abandoned-turn classifier, and route-specific receipt
+  protection instead of adding another lifecycle.
 
 ## Verification
 
