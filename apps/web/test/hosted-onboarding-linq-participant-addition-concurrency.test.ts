@@ -289,9 +289,9 @@ function configureHostedAddressBookLocalCryptoForTest(): () => void {
     publicKeyEncoding: { format: "jwk" },
   });
   const authorityKeyVersion =
-    "projects/test/locations/global/keyRings/test/cryptoKeys/authority/cryptoKeyVersions/1";
+    "projects/test-project/locations/global/keyRings/test/cryptoKeys/authority/cryptoKeyVersions/1";
   const addressBookKeyVersion =
-    "projects/test/locations/global/keyRings/test/cryptoKeys/address-book/cryptoKeyVersions/1";
+    "projects/test-project/locations/global/keyRings/test/cryptoKeys/address-book/cryptoKeyVersions/1";
   Object.assign(process.env, {
     HOSTED_ADDRESS_BOOK_ADVISORY_NAMES_ENABLED: "1",
     HOSTED_ADDRESS_BOOK_REPLACEMENT_ENABLED: "1",
@@ -308,7 +308,7 @@ function configureHostedAddressBookLocalCryptoForTest(): () => void {
     HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_PUBLIC_KEY_PEM: authorityKey.publicKey,
     HOSTED_CRYPTO_GCP_KMS_API_ROOT: "local://murph-hosted-kms",
     HOSTED_CRYPTO_GCP_WEB_WRAP_KEY_NAME:
-      "projects/test/locations/global/keyRings/test/cryptoKeys/web-wrap",
+      "projects/test-project/locations/global/keyRings/test/cryptoKeys/web-wrap",
     HOSTED_CRYPTO_LOCAL_AUTHORITY_SIGN_PRIVATE_JWK:
       JSON.stringify(authorityKey.privateKey),
     HOSTED_CRYPTO_LOCAL_KMS_WRAP_KEY: Buffer.alloc(32, 7).toString("base64"),
@@ -486,10 +486,11 @@ function pauseAddressBookClearBeforeCommit(input: {
 }
 
 function configureHostedContactPrivacyKeyringForTest(currentVersion: string): void {
-  process.env.HOSTED_CONTACT_PRIVACY_KEYS = [
-    `v1:${Buffer.alloc(32, 3).toString("base64url")}`,
-    `v2:${Buffer.alloc(32, 4).toString("base64url")}`,
-  ].join(",");
+  const v1 = `v1:${Buffer.alloc(32, 3).toString("base64url")}`;
+  const v2 = `v2:${Buffer.alloc(32, 4).toString("base64url")}`;
+  process.env.HOSTED_CONTACT_PRIVACY_KEYS = currentVersion === "v1"
+    ? v1
+    : [v1, v2].join(",");
   process.env.HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION = currentVersion;
   clearHostedOnboardingEnvCache();
 }

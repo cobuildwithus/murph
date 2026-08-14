@@ -261,28 +261,61 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", async () => {
   };
 });
 
-vi.mock("@/src/lib/hosted-crypto/env", () => ({
-  getHostedWebCryptoConfig: () => ({
-    env: "test",
-    gcpKms: {
-      decrypt: async ({ ciphertext }: { ciphertext: string }) => ({
-        plaintext: new Uint8Array(Buffer.from(ciphertext, "base64")),
+vi.mock("@/src/lib/hosted-crypto/env", async () => {
+  const { generateKeyPairSync, sign } = await import("node:crypto");
+  const { createHostedAuthorityVerifyKeyring } = await import(
+    "@murphai/runtime-state"
+  );
+  const authoritySignKeyVersionName =
+    "projects/test-project/locations/global/keyRings/test/cryptoKeys/authority/cryptoKeyVersions/1";
+  const authorityKey = generateKeyPairSync("ec", { namedCurve: "prime256v1" });
+  const authoritySignPublicKeyPem = authorityKey.publicKey.export({
+    format: "pem",
+    type: "spki",
+  }).toString();
+
+  return {
+    getHostedWebCryptoConfig: () => ({
+      authoritySignKeyVersionName,
+      authoritySignPublicKeyPem,
+      authorityVerifyKeyring: createHostedAuthorityVerifyKeyring({
+        activeKeyVersionName: authoritySignKeyVersionName,
+        activePublicKeyPem: authoritySignPublicKeyPem,
       }),
-      encrypt: async ({
-        keyName,
-        plaintext,
-      }: {
-        keyName: string;
-        plaintext: Uint8Array;
-      }) => ({
-        ciphertext: Buffer.from(plaintext).toString("base64"),
-        keyName,
-      }),
-    },
-    webWrapKmsKeyName:
-      "projects/test/locations/global/keyRings/test/cryptoKeys/delete-race",
-  }),
-}));
+      env: "test",
+      gcpKms: {
+        asymmetricSign: async ({
+          keyVersionName,
+          message,
+        }: {
+          keyVersionName: string;
+          message: Uint8Array;
+        }) => ({
+          keyVersionName,
+          signature: sign("sha256", message, {
+            dsaEncoding: "ieee-p1363",
+            key: authorityKey.privateKey,
+          }).toString("base64"),
+        }),
+        decrypt: async ({ ciphertext }: { ciphertext: string }) => ({
+          plaintext: new Uint8Array(Buffer.from(ciphertext, "base64")),
+        }),
+        encrypt: async ({
+          keyName,
+          plaintext,
+        }: {
+          keyName: string;
+          plaintext: Uint8Array;
+        }) => ({
+          ciphertext: Buffer.from(plaintext).toString("base64"),
+          keyName,
+        }),
+      },
+      webWrapKmsKeyName:
+        "projects/test-project/locations/global/keyRings/test/cryptoKeys/delete-race",
+    }),
+  };
+});
 
 const databaseUrl = process.env.DATABASE_URL?.trim() ?? "";
 const runPostgresConcurrencyProof =
@@ -1233,7 +1266,7 @@ describe.skipIf(!runPostgresConcurrencyProof)(
             environment: "test",
             id: cleanupId,
             kmsKeyName:
-              "projects/test/locations/global/keyRings/test/cryptoKeys/delete-race",
+              "projects/test-project/locations/global/keyRings/test/cryptoKeys/delete-race",
             nextAttemptAt: cleanupStartedAt,
             payloadCiphertext: encodeCleanupPayload({
               privyUserId,
