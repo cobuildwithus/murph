@@ -302,6 +302,20 @@ intent. Forward-fix on this bundle or newer. Monitor Workers Observability for
 `outbox.intent.quarantined`, strict outbox parse failures, and stale runner
 fingerprints after rollout.
 
+## Model-Authored Telegram Rich-Content Rollout
+
+The `telegram_rich_content` discriminator extends the same strict assistant
+outbox card union. The Worker already allows `sendRichMessage`, so this release
+needs no new provider operation or Worker egress rule. Deploy the new runner
+bundle with `container_rollout=immediate`, and require managed-container smoke
+to report its exact fingerprint before the model can attach this card.
+
+The prior runner remains safe only before the first rich-content card intent is
+written. After that write, the new runner bundle is a hard rollback floor for
+that workspace because an older strict reader can quarantine the retained
+intent. Forward-fix on this bundle or newer. Monitor `outbox.intent.quarantined`,
+strict outbox parse failures, and stale runner fingerprints after rollout.
+
 Telegram daily-nutrition Rich Messages reuse the existing queryless response-
 card image route. Keep that Web route available while sent Telegram or Linq
 cards can still fetch their immutable image.

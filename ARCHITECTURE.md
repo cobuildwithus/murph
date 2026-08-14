@@ -1789,6 +1789,22 @@ the deterministic routine text remains only compatibility behavior for retained
 card state. The card still cannot coexist with response media, and no new queue,
 persisted state owner, callback action, or mutable message state exists.
 
+Private Telegram can also attach one model-authored rich-content card when a
+complete structured answer does not fit the nutrition, compact-table, workout,
+or catalog exercise contracts. Those semantic cards keep exclusive ownership
+and remain unchanged. If an owning semantic card cannot attach, the reply stays
+ordinary text. The new card stores only bounded Rich HTML from a closed
+presentation-only subset. Contract parsing rejects explicit links and remote media,
+provider fetches, unknown tags or attributes, malformed nesting, oversized
+tables, and content whose derived text exceeds one Telegram fallback message.
+and its Telegram projection sets `skip_entity_detection` so plain domains,
+email addresses, mentions, hashtags, commands, and phone numbers stay text.
+Trusted code derives that fallback from the accepted HTML, so the model cannot
+provide a different fallback copy. The card then uses the existing response-card
+effect, Telegram projection, provider entry, and outbox lifecycle. The tool is
+private-Telegram-only. A defensive Linq path renders its deterministic text and
+never attempts a Messages card. No new delivery or persistence owner exists.
+
 Assistant image media has an explicit public/private type boundary. `image`
 contains an intentionally public fetchable URL, while `vault_image` contains a
 normalized vault ref plus hash, size, filename, and allowlisted image MIME
