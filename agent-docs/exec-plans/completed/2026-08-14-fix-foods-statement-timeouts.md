@@ -1,6 +1,6 @@
 # Bound food-label search work
 
-Status: active
+Status: completed
 Created: 2026-08-14
 Updated: 2026-08-14
 
@@ -60,7 +60,7 @@ Updated: 2026-08-14
    coverage.
 4. [x] Run focused tests, hosted-web typecheck, direct PostgreSQL proof, and a
    parent diff review.
-5. [ ] Commit and push the candidate, open a PR, and complete exact-head CI and
+5. [x] Commit and push the candidate, open a PR, and complete exact-head CI and
    required ReviewGPT review gates.
 
 ## Decisions
@@ -110,3 +110,9 @@ Completed during implementation:
   opt-in local PostgreSQL search regression passed 132 tests, including
   greater-than-5,000 private-food admission, SQL wildcard input, and a literal
   percent-bearing product name.
+- Final ReviewGPT round 2 returned `ROUND_OUTCOME: PASS` with no qualifying
+  findings after rechecking all three round-1 remediations, bounded database
+  fanout, the index-first rollout, and the complete current change shape.
+- Exact-head CI passed all 15 reported checks on remediation commit
+  `88bdebfb7fb7b1bf6bcdfa9c0039e4f6e3ad64b7`.
+Completed: 2026-08-14

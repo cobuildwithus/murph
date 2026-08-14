@@ -1497,8 +1497,8 @@ across the full food catalog. Exact-id and UPC lookups retain their direct
 indexed paths;
 supplement generic search and the public projection retain their pre-existing
 ranking and candidate contracts. Existing labels databases must receive the
-foods name-rank and canonical-rank indexes before this private-food query shape
-is deployed. The public
+foods name-rank, exact-name-rank, and canonical-rank indexes before this
+private-food query shape is deployed. The public
 projection of that database is Murph Safe at `/search` and the
 read-only Murph Product Data API under `/api/public/v1`. Wire contracts belong
 to `@murphai/contracts`; one web-owned service maps bounded database records to
