@@ -154,6 +154,13 @@ Updated: 2026-08-14
   abort authority. Each serial item resets the local fact before import, sets it
   at its existing durable callback, and clears it on completion, so prior work
   cannot cancel a following unstaged message.
+- Final ReviewGPT round 5 found that route migration and cleanup used sent-only
+  outbox authority even though the existing exact Linq reply path accepts one
+  unambiguous provider-accepted media message while its sibling rich-link
+  delivery is still retryable. The correction reuses that existing evidence
+  mode at only the two route-authority boundaries, preserving its consumption
+  watermark through retry and later sent transition without widening the
+  unanchored foreground selector.
 
 ## Verification
 
@@ -174,3 +181,8 @@ Updated: 2026-08-14
   item's projection stall remains abortable after its stage, and a no-op import
   releases cooperative yield. The two hosted-runtime suites still pass 402
   tests, and assistant-runtime typecheck and build pass under Node 24.14.1.
+- ReviewGPT round 5 remediation: two focused route-state tests cover accepted
+  non-sent Linq media migration, cleanup retention, later sent transition,
+  unanchored rejection, and final authority removal. The five route-state,
+  runtime-residue, automation, wake, and reply-event suites pass 326 tests;
+  assistant-engine typecheck and build pass under Node 24.14.1.

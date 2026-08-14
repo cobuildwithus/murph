@@ -184,6 +184,41 @@ describe('assistant auto-reply exact route state', () => {
     })
   })
 
+  it('migrates consumed accepted Linq media while its sibling delivery is retryable', async () => {
+    const vault = await createTempVault('migration-accepted-linq-media')
+    const paths = resolveAssistantStatePaths(vault)
+    const outboxIntent = createAcceptedNonSentLinqMediaIntent({
+      intentId: 'intent-migration-accepted-linq-media',
+    })
+    const route = requireRoute(resolveAssistantAutoReplyOutboxExactRoute(
+      outboxIntent,
+    ))
+    const receipt = createReceipt({
+      intentId: outboxIntent.intentId,
+      status: 'completed',
+      turnId: 'turn-migration-accepted-linq-media',
+    })
+
+    await expect(maintainAssistantAutoReplyRouteStateAtPaths({
+      outboxIntents: [outboxIntent],
+      outboxTrusted: true,
+      paths,
+      receipts: [receipt],
+      receiptsTrusted: true,
+    })).resolves.toMatchObject({ changed: true, trusted: true })
+    await expect(readFile(
+      resolveAssistantAutoReplyRouteMigrationPath(paths),
+      'utf8',
+    )).resolves.toContain('murph.assistant-auto-reply-route-migration')
+    await expect(readAssistantAutoReplyRouteState({
+      routeDigest: route.digest,
+      vault,
+    })).resolves.toEqual({
+      kind: 'ready',
+      settledThrough: order(outboxIntent.intentId, BASE_TIME),
+    })
+  })
+
   it('leaves migration incomplete when legacy receipt or outbox inventory is untrusted', async () => {
     const vault = await createTempVault('migration-untrusted')
     const paths = resolveAssistantStatePaths(vault)
@@ -1060,6 +1095,104 @@ describe('assistant auto-reply exact route state', () => {
     })
   })
 
+  it('keeps an exact-reply watermark while accepted Linq media remains outbox authority', async () => {
+    const vault = await createTempVault('accepted-linq-media-authority')
+    const outboxIntent = createAcceptedNonSentLinqMediaIntent({
+      intentId: 'intent-accepted-linq-media-authority',
+    })
+    const route = requireRoute(resolveAssistantAutoReplyOutboxExactRoute(
+      outboxIntent,
+    ))
+    const deliveryOrder = order(outboxIntent.intentId, BASE_TIME)
+    await completeMigration(vault)
+    const running = await createRunningReceipt({
+      intentId: outboxIntent.intentId,
+      turnId: 'turn-accepted-linq-media-authority',
+      vault,
+    })
+    await claimAssistantAutoReplyRouteContext({
+      anchored: true,
+      order: deliveryOrder,
+      routeDigest: route.digest,
+      turnId: running.turnId,
+      vault,
+    })
+    const completed = await finalizeAssistantTurnReceipt({
+      completedAt: LATER_TIME,
+      status: 'completed',
+      turnId: running.turnId,
+      vault,
+    })
+    if (!completed) {
+      throw new Error('expected completed accepted-media receipt')
+    }
+    await expect(readAssistantAutoReplyRouteState({
+      routeDigest: route.digest,
+      vault,
+    })).resolves.toEqual({
+      kind: 'ready',
+      settledThrough: deliveryOrder,
+    })
+
+    await maintainAtVault({
+      outboxIntents: [outboxIntent],
+      receipts: [completed],
+      vault,
+    })
+    await expect(readAssistantAutoReplyRouteState({
+      routeDigest: route.digest,
+      vault,
+    })).resolves.toEqual({
+      kind: 'ready',
+      settledThrough: deliveryOrder,
+    })
+
+    const sentIntent = assistantOutboxIntentSchema.parse({
+      ...outboxIntent,
+      lastError: null,
+      nextAttemptAt: null,
+      sentAt: LATER_TIME,
+      status: 'sent',
+      updatedAt: LATER_TIME,
+    })
+    await maintainAtVault({
+      outboxIntents: [sentIntent],
+      receipts: [completed],
+      vault,
+    })
+    await expect(readAssistantAutoReplyRouteState({
+      routeDigest: route.digest,
+      vault,
+    })).resolves.toEqual({
+      kind: 'ready',
+      settledThrough: deliveryOrder,
+    })
+    await createRunningReceipt({
+      turnId: 'turn-unanchored-after-accepted-media-send',
+      vault,
+    })
+    await expect(claimAssistantAutoReplyRouteContext({
+      anchored: false,
+      order: deliveryOrder,
+      routeDigest: route.digest,
+      turnId: 'turn-unanchored-after-accepted-media-send',
+      vault,
+    })).rejects.toThrow('already settled')
+
+    await maintainAtVault({
+      outboxIntents: [],
+      receipts: [completed],
+      vault,
+    })
+    await expect(readAssistantAutoReplyRouteState({
+      routeDigest: route.digest,
+      vault,
+    })).resolves.toEqual({
+      kind: 'ready',
+      settledThrough: null,
+    })
+  })
+
   it('restores the opaque route watermark with the portable assistant auto-reply subtree', async () => {
     const sourceVault = await createTempVault('restore-source')
     const restoredVault = await createTempVault('restore-target')
@@ -1181,6 +1314,43 @@ function createOutboxIntent(input: {
       targetKind: input.targetKind ?? 'thread',
     },
     lastError: null,
+  })
+}
+
+function createAcceptedNonSentLinqMediaIntent(input: {
+  intentId: string
+}): AssistantOutboxIntent {
+  const providerMessageId = `provider-${input.intentId}`
+  const intent = createOutboxIntent({
+    channel: 'linq',
+    intentId: input.intentId,
+    providerThreadId: 'linq-thread-accepted-media',
+    target: 'linq-thread-accepted-media',
+  })
+  if (!intent.delivery || intent.delivery.kind === 'message-reaction') {
+    throw new Error('expected message delivery')
+  }
+  return assistantOutboxIntentSchema.parse({
+    ...intent,
+    delivery: {
+      ...intent.delivery,
+      providerMessageEffects: [{
+        carriesIntentMedia: true,
+        message: 'Generated image',
+        providerMessageId,
+      }],
+      providerMessageId,
+      providerMessageIds: [providerMessageId],
+    },
+    deliveryConfirmationPending: false,
+    lastError: {
+      code: 'ASSISTANT_DELIVERY_RETRYABLE',
+      message: 'rich-link delivery is retryable',
+    },
+    nextAttemptAt: LATER_TIME,
+    sentAt: null,
+    status: 'retryable',
+    updatedAt: BASE_TIME,
   })
 }
 

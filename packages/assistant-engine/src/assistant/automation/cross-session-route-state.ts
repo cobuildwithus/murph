@@ -562,7 +562,7 @@ export async function maintainAssistantAutoReplyRouteStateAtPaths(input: {
     if (input.shouldYield?.() === true) {
       return { changed, trusted: false }
     }
-    if (!hasAssistantOutboxDeliveryEvidence(intent)) {
+    if (!hasAssistantOutboxDeliveryEvidence(intent, true)) {
       continue
     }
     const route = resolveAssistantAutoReplyOutboxExactRoute(intent)
@@ -830,7 +830,7 @@ async function migrateAssistantAutoReplyRouteStateAtPaths(input: {
     if (input.shouldYield?.() === true) {
       return { changed, completed: false }
     }
-    if (!hasAssistantOutboxDeliveryEvidence(intent)) {
+    if (!hasAssistantOutboxDeliveryEvidence(intent, true)) {
       continue
     }
     const route = resolveAssistantAutoReplyOutboxExactRoute(intent)
