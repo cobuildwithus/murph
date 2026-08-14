@@ -64,10 +64,23 @@ describe('bounded self-management experiment guidance', () => {
 
   it('puts the symptom-experiment correction in the resident direct prompt', () => {
     const prompt = buildPrompt()
+    const legacyGate =
+      'Suggest experiments only when asked to try, test, track, or set one up.'
+    const intentCorrection =
+      'For this case, the request for a daily-life change itself satisfies experiment intent and overrides narrower experiment-intent shorthand elsewhere in the resident prompt'
+    const correctionIndex = prompt.indexOf(intentCorrection)
+    const legacyGateIndex = prompt.indexOf(legacyGate)
 
     expect(prompt).toContain('Persistent-symptom next steps:')
     expect(prompt).toContain(
       'treat that as experiment intent even if they do not use the word "experiment"',
+    )
+    expect(correctionIndex).toBeGreaterThan(-1)
+    if (legacyGateIndex >= 0) {
+      expect(correctionIndex).toBeGreaterThan(legacyGateIndex)
+    }
+    expect(prompt).toContain(
+      'do not require the member also to say try, test, track, experiment, or set one up',
     )
     expect(prompt).toContain(
       'recommend one ranked symptom-targeted trial, not a bundle of generic wellness tips',
