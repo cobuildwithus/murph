@@ -607,6 +607,42 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
       .toBe(false);
   });
 
+  it("logs a completion failure but returns the runtime wake that follows it", async () => {
+    const vaultRoot = await createVaultRoot();
+    const { calls, platform } = createRuntimePlatform();
+    const controller = new AbortController();
+    const interruption = new HostedRuntimeCheckpointInterruptedByWakeError();
+    const completionFailure = new Error("snapshot completion transport failed");
+    calls.completeSnapshotSession.mockImplementationOnce(async () => {
+      controller.abort(interruption);
+      throw completionFailure;
+    });
+    const options = createBridgeOptions({
+      platform,
+      vaultRoot,
+    });
+
+    await expect(options.createCheckpointSnapshot(
+      createCheckpointInput("idle_shutdown"),
+      { signal: controller.signal },
+    )).rejects.toBe(interruption);
+
+    const entries = calls.logWrite.mock.calls.flatMap(([request]) => request.entries);
+    expect(entries).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        eventCode: "checkpoint.snapshot_failed",
+        level: "error",
+        redactedJson: expect.objectContaining({
+          errorCode: "runtime_error",
+        }),
+      }),
+    ]));
+    expect(entries.some((entry) => entry.eventCode === "checkpoint.snapshot_preempted"))
+      .toBe(false);
+    expect(calls.completeSnapshotSession).toHaveBeenCalledOnce();
+    expect(calls.abortSnapshotSession).not.toHaveBeenCalled();
+  });
+
   it("propagates checkpoint interruption into runtime-owned symlink cleanup", async () => {
     const vaultRoot = await createVaultRoot();
     const workspaceRoot = path.dirname(path.dirname(vaultRoot));

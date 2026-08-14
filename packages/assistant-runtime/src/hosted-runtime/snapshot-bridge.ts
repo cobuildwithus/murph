@@ -673,21 +673,26 @@ async function createHostedWorkspaceV2Snapshot(
       });
     }
   } catch (error) {
-    const interruptedBeforeCommit = input.signal?.aborted === true && !checkpointAttempted;
-    const interruptionError = interruptedBeforeCommit
-      ? input.signal?.reason instanceof Error
+    const activeInterruptionError = input.signal?.aborted === true
+      ? input.signal.reason instanceof Error
         ? input.signal.reason
         : new Error("Hosted workspace snapshot construction was interrupted.")
       : null;
+    const interruptedBeforeCommit = activeInterruptionError !== null && !checkpointAttempted;
+    const controlInterruptionError = interruptedBeforeCommit
+      ? activeInterruptionError
+      : activeInterruptionError instanceof HostedRuntimeCheckpointInterruptedByWakeError
+        ? activeInterruptionError
+        : null;
     const interruptionCausedFailure = interruptedBeforeCommit
       && error === input.signal?.reason;
     const reportedError = interruptionCausedFailure
-      ? interruptionError
+      ? activeInterruptionError
       : classifyHostedWorkspaceSnapshotFailure(error);
     // Preserve the abort reason for control flow, but classify only the exact
     // caught runtime-wake abort as expected preemption. A real failure that
     // merely races with a wake remains actionable.
-    const classifiedError = interruptionError ?? reportedError;
+    const classifiedError = controlInterruptionError ?? reportedError;
     const expectedRuntimeWakePreemption = interruptionCausedFailure
       && classifiedError instanceof HostedRuntimeCheckpointInterruptedByWakeError;
     const abortedSnapshotSession = snapshotSession;
