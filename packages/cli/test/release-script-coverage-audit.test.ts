@@ -944,13 +944,13 @@ describe('monorepo release flow coverage audit', () => {
     expect(existsSync(path.join(repoRoot, 'scripts', 'chatgpt-managed-browser.test.mjs'))).toBe(false)
     expect(existsSync(path.join(repoRoot, 'scripts', 'review-gpt.sh'))).toBe(false)
     expect(existsSync(path.join(repoRoot, 'scripts', 'review-gpt-cli.sh'))).toBe(false)
-    expect(rootPackageJson.devDependencies?.['@cobuild/review-gpt']).toBe('^0.5.125')
+    expect(rootPackageJson.devDependencies?.['@cobuild/review-gpt']).toBe('^0.5.126')
     expect(
       pnpmWorkspace
         .match(/^minimumReleaseAgeExclude:\n((?:  - .+\n)+)/mu)?.[1]
         ?.split('\n')
         .filter((line) => line.includes('@cobuild/review-gpt')),
-    ).toEqual(["  - '@cobuild/review-gpt@0.5.125'"])
+    ).toEqual(["  - '@cobuild/review-gpt@0.5.126'"])
     expect(
       pnpmWorkspace
         .match(/^patchedDependencies:\n((?:  .+\n)+)/mu)?.[1]
@@ -1116,11 +1116,20 @@ describe('monorepo release flow coverage audit', () => {
     expect(reviewGptDriver).toContain("createHash('sha256')")
     expect(reviewGptDriver).toContain('mode: 0o600')
     expect(reviewGptDriver).toContain("`${responseFilePath}.model-verification.json`")
+    const attachmentStage = reviewGptDriver.indexOf("currentStage = 'attachments'")
+    const promptStage = reviewGptDriver.indexOf("currentStage = 'prompt-prefill'")
+    expect(attachmentStage).toBeGreaterThan(-1)
+    expect(promptStage).toBeGreaterThan(attachmentStage)
+    expect(reviewGptDriver).toContain('function installOwnedTargetSignalCleanup()')
+    expect(reviewGptDriver).toContain("for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP'])")
     expect(reviewGptDriver).toContain(
       [
         'if (require.main === module) {',
         '  prepareRuntimeConfig();',
-        '  mainWithRetry().catch((error) => {',
+        '  const removeSignalCleanup = installOwnedTargetSignalCleanup();',
+        '  mainWithRetry()',
+        '    .then(() => removeSignalCleanup())',
+        '    .catch((error) => {',
       ].join('\n'),
     )
     const completedArtifactWriteStart = reviewGptDriver.indexOf(
@@ -1166,6 +1175,7 @@ describe('monorepo release flow coverage audit', () => {
         '  });',
         "  const pageTargetId = String(target?.id || '');",
         '  let ownedTargetId = pageTargetId;',
+        '  ownedTargetIdForSignalCleanup = ownedTargetId;',
         '  let operationError = null;',
         '  let completedResponseCapture = null;',
         '  let waitedAttachmentCleanupPending = false;',
@@ -1200,6 +1210,7 @@ describe('monorepo release flow coverage audit', () => {
         "      console.log('Retained generated local attachment artifact(s) for the unsent draft.');",
         '    }',
         "    ownedTargetId = '';",
+        "    ownedTargetIdForSignalCleanup = '';",
       ].join('\n'),
     )
     expect(unsentDraft).not.toContain('cleanupConfirmedDraftAttachments')
@@ -1208,6 +1219,7 @@ describe('monorepo release flow coverage audit', () => {
       [
         '      if (!shouldWaitForResponse) {',
         "        ownedTargetId = '';",
+        "        ownedTargetIdForSignalCleanup = '';",
         '      }',
         '    } else {',
         '      throw new Error(`Auto-send failed: ${JSON.stringify(sendResult?.lastAttempt || sendResult || { status: \'unknown\' })}`);',
@@ -1221,6 +1233,10 @@ describe('monorepo release flow coverage audit', () => {
         '      await closeBackgroundTarget(ownedTargetId);',
         '    } catch (error) {',
         '      cleanupError = addTargetCleanupContext(error, operationError);',
+        '    } finally {',
+        '      if (ownedTargetIdForSignalCleanup === ownedTargetId) {',
+        "        ownedTargetIdForSignalCleanup = '';",
+        '      }',
         '    }',
         '  }',
         '  try {',

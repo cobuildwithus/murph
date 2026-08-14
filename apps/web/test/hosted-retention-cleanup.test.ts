@@ -117,6 +117,7 @@ describe("hosted retention cleanup", () => {
       ['DELETE FROM "hosted_web_internal_request_nonce"', 6],
       ['DELETE FROM "hosted_ingress_latency_trace"', 1],
       ['DELETE FROM "hosted_assistant_runtime_issue"', 2],
+      ['DELETE FROM "hosted_group_current_sender_clarification"', 3],
       ['DELETE FROM "device_webhook_trace"', 4],
       ['UPDATE "hosted_linq_provider_event"', 5],
     ]);
@@ -163,6 +164,7 @@ describe("hosted retention cleanup", () => {
       expiredComputerRunsCleanedUp: 0,
       expiredConversationPolicyNonRepliesRecorded: 0,
       expiredDeviceWebhookTracesDeleted: 4,
+      expiredGroupCurrentSenderClarificationsDeleted: 3,
       expiredIngressLatencyTracesDeleted: 1,
       expiredMailboxContentRetired: 7,
       expiredMailboxTombstonesDeleted: 3,
@@ -207,7 +209,7 @@ describe("hosted retention cleanup", () => {
     ]);
 
     // One statement per category: every short batch stops that category's loop.
-    expect(executeRaw).toHaveBeenCalledTimes(7);
+    expect(executeRaw).toHaveBeenCalledTimes(8);
 
     const callbackNonceCall = findRetentionCall(
       executeRaw,
@@ -537,6 +539,7 @@ describe("hosted retention cleanup", () => {
         expiredComputerRunsCleanedUp: 0,
         expiredConversationPolicyNonRepliesRecorded: 0,
         expiredDeviceWebhookTracesDeleted: 1,
+        expiredGroupCurrentSenderClarificationsDeleted: 1,
         expiredIngressLatencyTracesDeleted: 1,
         expiredMailboxContentRetired: 1,
         expiredMailboxTombstonesDeleted: 0,
