@@ -1620,7 +1620,7 @@ describe("acceptHostedGroupJoinCodeTx", () => {
   it("accepts a join-offer reaction matched by prior-version message and thread identity lookup candidates", async () => {
     restoreKeyring = configureHostedContactPrivacyKeyringForTest({
       currentVersion: "v1",
-      entries: { ...TEST_KEYRING_ENTRIES },
+      entries: { v1: TEST_KEYRING_ENTRIES.v1 },
     });
     const storedMessageLookupKey = createHostedLinqMessageLookupKey("msg_offer_123");
     const storedThreadIdentityLookupKey = createHostedExternalThreadIdentityLookupKey({
@@ -1631,8 +1631,11 @@ describe("acceptHostedGroupJoinCodeTx", () => {
       throw new Error("Expected prior-version lookup keys.");
     }
 
-    process.env.HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION = "v2";
-    clearHostedOnboardingEnvCache();
+    restoreKeyring();
+    restoreKeyring = configureHostedContactPrivacyKeyringForTest({
+      currentVersion: "v2",
+      entries: { ...TEST_KEYRING_ENTRIES },
+    });
     const tx = buildTx({
       activeGroupGrantCount: 0,
       offerMessageLookupKey: storedMessageLookupKey,
