@@ -4172,6 +4172,9 @@ describe('assistant cron runtime orchestration', () => {
       expect(notificationInput.instructions).toContain(
         'In a group, address the room collectively.',
       )
+      expect(notificationInput.instructions).toContain(
+        'This silence policy does not apply to medication, prescribed treatment, clinician-directed care, clinical monitoring, or safety-critical reminders.',
+      )
       expect(notificationInput.instructions).not.toContain('carry-forward grace')
       if (occurrenceIndex === 0) {
         expect(notificationInput.instructions).not.toContain(
@@ -4240,6 +4243,107 @@ describe('assistant cron runtime orchestration', () => {
         { outcome: 'no_op', response: 'The room cadence question remains unanswered.' },
         { outcome: 'delivered', response: providerDecisions[1].text },
         { outcome: 'delivered', response: providerDecisions[0].text },
+      ],
+    })
+  })
+
+  it('keeps a safety-critical recurring reminder sending after unanswered occurrences', async () => {
+    vi.useFakeTimers()
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-safety-reminder-conversation-',
+    )
+    const canonicalJob = await createCanonicalJob(
+      vaultRoot,
+      'prescribed medication reminder',
+    )
+    const automation = findCanonicalAutomation(vaultRoot, canonicalJob.jobId)
+    if (!automation) {
+      throw new Error('Expected the medication reminder automation to exist.')
+    }
+    automation.instructions = 'Remind the member to take their prescribed medication.'
+    automation.supportKind = 'reminder'
+
+    const reminderText = 'Time for your prescribed medication.'
+    const decision = {
+      kind: 'send_message' as const,
+      privateSummary: 'Sent the prescribed medication reminder.',
+      text: reminderText,
+    }
+    let occurrenceIndex = 0
+    cronMocks.sendAssistantMessageLocal.mockImplementation(async (input: {
+      beforeCommit?: (context: {
+        decision: typeof decision
+        deliveryOutcome: ReturnType<typeof buildSentReminderDeliveryOutcome>
+        response: string
+      }) => Promise<void> | void
+      beforeDelivery?: (context: {
+        decision: typeof decision
+        deliveryOutcome: ReturnType<typeof buildSentReminderDeliveryOutcome>
+        response: string
+      }) => Promise<void> | void
+      instructions: string
+      onProviderRequestStarted?: () => Promise<void> | void
+    }) => {
+      const notificationInput = await prepareAssistantCronNotificationInput(
+        input as AssistantNotificationInput,
+      )
+      expect(notificationInput.instructions).toContain(
+        'This silence policy does not apply to medication, prescribed treatment, clinician-directed care, clinical monitoring, or safety-critical reminders.',
+      )
+      expect(notificationInput.instructions).toContain(
+        'For those reminders, send the saved cue normally unless the member explicitly changes or pauses it or an existing authoritative owner supplies a valid skip condition.',
+      )
+      if (occurrenceIndex > 0) {
+        expect(notificationInput.instructions).toContain(
+          'Recent outputs from this automation',
+        )
+        expect(notificationInput.instructions).toContain(reminderText)
+      }
+      await input.onProviderRequestStarted?.()
+
+      occurrenceIndex += 1
+      const deliveryOutcome = buildSentReminderDeliveryOutcome(
+        `outbox_medication_reminder_${occurrenceIndex}`,
+        reminderText,
+      )
+      const context = {
+        decision,
+        deliveryOutcome,
+        response: reminderText,
+      }
+      await input.beforeDelivery?.(context)
+      await input.beforeCommit?.(context)
+      return {
+        ...context,
+        session: { sessionId: 'session-medication-reminder' },
+      }
+    })
+
+    for (const occurrenceTime of [
+      '2026-04-08T10:01:00.000Z',
+      '2026-04-09T10:01:00.000Z',
+      '2026-04-10T10:01:00.000Z',
+    ]) {
+      vi.setSystemTime(new Date(occurrenceTime))
+      await expect(processDueAssistantCronJobsLocal({
+        limit: 1,
+        vault: vaultRoot,
+      })).resolves.toEqual({
+        failed: 0,
+        processed: 1,
+        succeeded: 1,
+      })
+    }
+
+    expect(occurrenceIndex).toBe(3)
+    await expect(listAssistantCronRuns({
+      job: canonicalJob.jobId,
+      vault: vaultRoot,
+    })).resolves.toMatchObject({
+      runs: [
+        { outcome: 'delivered', response: reminderText },
+        { outcome: 'delivered', response: reminderText },
+        { outcome: 'delivered', response: reminderText },
       ],
     })
   })
@@ -12928,12 +13032,15 @@ async function createCanonicalJob(
   })
 }
 
-function buildSentReminderDeliveryOutcome(intentId: string) {
+function buildSentReminderDeliveryOutcome(
+  intentId: string,
+  response = 'Quick room reset.',
+) {
   return {
     delivery: {
       channel: 'telegram' as const,
       idempotencyKey: null,
-      messageLength: 'Quick room reset.'.length,
+      messageLength: response.length,
       providerMessageId: intentId,
       providerThreadId: 'room-1',
       sentAt: new Date().toISOString(),

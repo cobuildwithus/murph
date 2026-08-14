@@ -1236,6 +1236,9 @@ describe('assistant skill assets', () => {
       'The runtime-owned keep/change/pause cadence question does not ask about the outcome and does not turn a reminder into a check-in.',
     )
     expect(compact).toContain(
+      'Medication, prescribed treatment, clinician-directed care, clinical monitoring, and safety-critical reminders continue the saved cue after silence',
+    )
+    expect(compact).toContain(
       'A direct request to check back later authorizes that exact check-in.',
     )
     expect(compact).toContain(

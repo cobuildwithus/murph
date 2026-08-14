@@ -1404,6 +1404,9 @@ describe('assistant execution prompt contract', () => {
       'Repeated support needs skip/repair rules and an off-ramp.',
     )
     expect(prompt).toContain(
+      'That silence policy never applies to medication, prescribed treatment, clinician-directed care, clinical monitoring, or safety-critical reminders',
+    )
+    expect(prompt).toContain(
       "Ordinary reminders, check-ins, and lightweight support use the automation contract's default continuity; do not explicitly restate that default.",
     )
     expect(prompt).toContain(

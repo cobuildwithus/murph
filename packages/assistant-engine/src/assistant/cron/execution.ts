@@ -1823,6 +1823,7 @@ function buildAssistantCronRecurringReminderConversationInstructions(
 
   return [
     'Recurring reminder conversation (engine-supplied; apply only when the saved request is an ordinary reminder):',
+    '- This silence policy does not apply to medication, prescribed treatment, clinician-directed care, clinical monitoring, or safety-critical reminders. For those reminders, send the saved cue normally unless the member explicitly changes or pauses it or an existing authoritative owner supplies a valid skip condition.',
     '- Use recent conversation plus engine delivery evidence. A failed or unconfirmed immediately prior attempt does not count: send the current reminder normally instead of treating that attempt as unanswered.',
     '- Otherwise find the most recent reminder from this automation whose dispatch was confirmed by provider acceptance or runtime `sent` state.',
     '- If there is no such reminder for this revision, send the current reminder normally.',

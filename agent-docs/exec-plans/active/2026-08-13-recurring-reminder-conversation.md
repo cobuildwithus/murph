@@ -17,6 +17,9 @@ Updated: 2026-08-13
   conversations without new persisted state or a reminder-specific history.
 - A focused occurrence-sequence regression proves send, one cadence question,
   then skip after continued silence.
+- Medication, clinician-directed, clinical, and safety-critical reminders remain
+  outside the quiet-after-silence policy and continue until explicitly changed
+  or paused or an existing authoritative skip condition applies.
 - Dense-cadence setup policy and Linq-only unanswered-reminder policy are
   deleted, while reminder/check-in/review authorization boundaries remain.
 - Relevant package tests and TypeScript checks pass; the exact pushed PR head
@@ -52,6 +55,11 @@ Updated: 2026-08-13
 3. Risk: channel posture could continue to fork product semantics.
    Mitigation: remove reminder behavior from Linq recovery posture and keep
    route-health guidance only.
+4. Risk: the generic policy could silence a safety-critical cue without explicit
+   user intent.
+   Mitigation: retain an explicit resident and setup-time safety exclusion and
+   exercise three unanswered prescribed-treatment occurrences in the cron
+   runtime harness.
 
 ## Tasks
 

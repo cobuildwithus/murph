@@ -385,6 +385,11 @@ cue or skip. Its only question exception is runtime-owned cadence
 administration: after one delivered recurring cue receives no relevant reply,
 Murph may ask once whether to keep, change, or pause the interruption. It does
 not authorize a completion, repair, accountability, or reflection question.
+This cadence exception is limited to ordinary non-clinical reminders.
+Medication, prescribed treatment, clinician-directed care, clinical monitoring,
+and safety-critical reminders continue the saved cue after silence; only the
+user's explicit change or pause or an existing authoritative skip condition may
+stop them.
 `check_in` authorizes one narrow current-state or repair question. `review`
 authorizes the bounded review and next-decision question. Put only the
 request-specific authorized shape in the automation instructions; generic
@@ -414,9 +419,11 @@ and clear only that boundary after the user explicitly reopens the topic.
 
 Keep Murph-designed habit support finite and prefer bounded one-shot
 automations. When the user explicitly requests an ongoing recurring cue, it
-may omit `activeUntil`; the runtime's quiet-after-silence behavior and the
-user's pause, change, and stop controls remain its off-ramp. Do not add a
-finite check-in or review lifecycle merely because the reminder recurs.
+may omit `activeUntil`; for an ordinary non-clinical reminder, the runtime's
+quiet-after-silence behavior and the user's pause, change, and stop controls
+remain its off-ramp. Do not add a finite check-in or review lifecycle merely
+because the reminder recurs. Never use silence to stop clinical or
+safety-critical support.
 
 When support is replaced or repaired, keep only the intended active automation ids through the current shared automation action surface: in a hosted turn use `murph.automation` action `reconcile` with `supportSeriesId: "habit:<regimenId>"` and exact `desiredAutomationIds`; use `vault-cli automation reconcile-support-series` only in a privileged local route. Use the read-only `vault-cli automation list --support-series-id habit:<regimenId>` when the plan does not already store the ids needed to reconcile safely. Never infer membership from text or a title.
 
