@@ -1,6 +1,6 @@
 # Murph Architecture
 
-Last verified: 2026-08-12
+Last verified: 2026-08-13
 
 ## Accepted-Message Targeting
 
@@ -1272,13 +1272,19 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   family stays null and its canonical allowlisted name is retained, while
   available families continue to drive their own conditions. Missing data is
   never treated as zero. Unusable collections receive one bounded confirmation
-  attempt. Usable partial collections stay single-pass whenever available
-  evidence is unsafe; a safe observation missing only the direct-error counter
-  uses the same confirmation budget. The confirmation's available signals are
-  evaluated, a recovered counter joins the original complete gauge evidence,
-  and failure or continued absence retains the original incomplete observation.
-  A telemetry-only notification opens after two
-  consecutive incomplete or failed collections. The first two-check threshold
+  attempt. The connection-error family retains the expected ports 5432
+  and 6432 as independent region-plus-port monotonic series. Missing either
+  port leaves that family unknown, while an observed port can still contribute
+  unsafe evidence. Usable partial collections stay single-pass whenever
+  available evidence is unsafe; a safe observation missing only part or all of
+  the connection-error family uses the same confirmation budget. The
+  confirmation's available signals are evaluated, complementary observed ports
+  may join the original complete gauge evidence, and failure or continued
+  absence retains the original incomplete observation. Each observed port
+  advances only its usable baseline; an omitted port retains its prior baseline,
+  and new or reset region series are independently suppressed so an old delta is
+  never replayed. A telemetry-only notification opens after two consecutive
+  incomplete or failed collections. The first two-check threshold
   window counts incomplete versus unavailable observations, unions only
   canonical missing families observed on partial checks, and uses the threshold
   time as the window end; one bounded evidence value on each existing sample
@@ -1286,48 +1292,53 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   existing incident row survives a busy pending slot, restart, and recovery
   until a telemetry-bearing page is acknowledged. Recovery and another metric
   gap before that acknowledgment coalesce into the same unresolved operator
-  notification instead of creating a backlog; the first threshold window remains
-  authoritative. An owed telemetry page
-  alone does not occupy a closed provider fence. Before an incident admits its
-  first page, concrete evidence—including a direct-error delta—that appears on
-  the threshold or a later sample persists in one combined immutable body, so
-  the exact pressure and truthful
-  telemetry facts share the next eligible attempt and one acknowledgment cycle.
+  notification instead of creating a backlog; the first threshold window
+  remains authoritative. An owed telemetry page alone does not occupy a closed
+  provider fence. Before an incident admits its
+  first page, concrete evidence—including either connection-error category—that
+  appears on the threshold or a later sample persists in one combined immutable
+  body, so the exact pressure and truthful telemetry facts share the next
+  eligible attempt and one acknowledgment cycle.
   An acknowledged-incident recurrence waits for the eligible sample, which
-  includes any still-current unsafe evidence and labels
-  historical telemetry by its own observation time. A later complete collection rearms
-  telemetry only after the obligation is acknowledged. Its additive alert-state
-  and sample-evidence columns
-  preserve the existing schema
-  version; current code also recognizes a telemetry pending body cleared by the
+  includes any still-current unsafe evidence and labels historical telemetry by
+  its own observation time. A later complete collection rearms telemetry only
+  after the obligation is acknowledged. Its additive alert-state and
+  sample-evidence columns preserve the existing schema version; current code
+  also recognizes a telemetry pending body cleared by the
   prior Worker, preventing a duplicate after rollback and re-upgrade. Concrete
   unsafe conditions retain paced recurrence, but acknowledged monitoring
   evidence cannot enter their later pages without a currently owed obligation.
-  First-incident
-  and non-replayable direct-error alert
-  admission shares one synchronous SQLite transaction with sample/baseline
-  persistence; an inside-fence direct-error body excludes co-occurring
+  Port 5432 retains the direct migration-admission interpretation. Port 6432 is
+  reported only as pooled application connection errors because the provider
+  metric has no reason label and cannot identify a specific rejection cause.
+  First-incident and non-replayable connection-error alert admission shares one
+  synchronous SQLite transaction with sample/baseline
+  persistence; an inside-fence connection-error body excludes co-occurring
   replayable evidence, and acknowledged replayable recurrence is admitted only
-  from the current sample once the attempt fence opens. Any direct-error delta
-  observed while the single immutable message slot is occupied accumulates as
-  count-plus-check-time evidence in the same alert row and transaction that
-  advances the persisted sample baseline. After the older message is
-  acknowledged, the next run atomically promotes that evidence into the one
-  pending message slot; provider pacing still applies, and retry never mutates
-  a provider-entered body. Before posting, the monitor resolves both direct
-  chats and requires two distinct sole external recipients. Primary recipient
+  from the current sample once the attempt fence opens. Any connection-error
+  delta observed while the single immutable message slot is occupied
+  accumulates as category-specific count-plus-check-time evidence in the same
+  alert row and transaction that advances the persisted sample baseline. After
+  the older message is acknowledged, the next run atomically promotes that
+  evidence into the one pending message slot; provider pacing still applies,
+  and retry never mutates a provider-entered body. Before posting, the monitor
+  resolves both direct chats and requires two distinct sole external recipients.
+  Primary recipient
   identity is a prerequisite for secondary provider entry, so an unresolved
   primary identity suppresses both operations while an unresolved secondary
   identity may still allow the primary. Delivery health is independent from
   identity: a known but unhealthy primary destination does not block a healthy,
   distinct secondary. If distinct chats resolve to the same recipient, only
   the primary operation may enter Linq and the page stays pending until
-  configuration is corrected. Otherwise the two
-  direct-chat deliveries settle independently: the primary retains the existing
+  configuration is corrected. Otherwise the two direct-chat deliveries settle
+  independently: the primary retains the existing
   idempotency key, the secondary uses a stable derived key, and a partial
   failure retains the pending page for a later globally paced replay. Only
-  acknowledged entry to both distinct recipients clears a pending page. SQLite
-  contains no connection URL,
+  acknowledged entry to both distinct recipients clears a pending page. The
+  legacy physical SQLite sample column names remain deliberately compatible;
+  current code stores the generalized two-port baseline and aggregate delta in
+  them, while additive pooled-defer columns keep schema version 1 rollback-safe.
+  SQLite contains no connection URL,
   credential, query, member identifier, phone number, or raw response. This is
   operational monitoring history, never health truth, routing authority, or a
   product control plane.
