@@ -1592,12 +1592,12 @@ later validation worker or changing the compiled application. Repeated
 forced-cold Standard previews remain the direct acceptance evidence, and a Next
 upgrade must revalidate this worker boundary.
 
-Production builds use Next 16.3's default Turbopack path. The production script
-does not pass `--webpack`, and the Next config does not retain Webpack-only
-worker or memory flags. The hosted local-development wrapper also selects
-Turbopack unconditionally and rejects an explicit Webpack flag. Workflow
-directive discovery runs through its native Next integration without a custom
-repository Webpack configuration.
+Production builds use Next 16.3's supported Webpack fallback. The production
+script passes `--webpack`, and the Next config explicitly enables
+`webpackBuildWorker` plus `webpackMemoryOptimizations` because the Workflow
+integration contributes Webpack configuration that otherwise prevents Next
+from selecting the isolated build worker automatically. The hosted local-
+development wrapper remains on Turbopack and rejects an explicit Webpack flag.
 
 Next 16.3 no longer exposes `experimental.turbopackMemoryLimit`. Its replacement,
 `experimental.turbopackMemoryEviction`, is documented for development sessions
@@ -1629,15 +1629,22 @@ preview nevertheless OOM-killed Turbopack, so the catalog correction is kept
 for its proven boundary and graph improvement but is not claimed as sufficient
 capacity relief.
 
-The historical memory-optimized Webpack fallback compiled the complete
-application within the local heap policy and exposed stricter route-contract
-issues: a browser-vault parser re-export through a server-heavy cursor, an
-extra helper export from a page module, optional page props, and one synchronous
-route-param compatibility union. Those corrections remain in place, but the
-fallback itself is no longer active. A forced-cold Next 16.3 Standard preview
-subsequently completed with Turbopack on 4 vCPUs and 8 GB RAM: compilation took
-91 seconds, the complete Vercel build stage took four minutes, and all 233
-static pages were generated without an out-of-memory failure.
+The memory-optimized Webpack path compiled the complete application within the
+local heap policy and exposed stricter route-contract issues: a browser-vault
+parser re-export through a server-heavy cursor, an extra helper export from a
+page module, optional page props, and one synchronous route-param compatibility
+union. Those corrections remain in place. Three consecutive forced-cold
+Webpack previews, a later integration preview, and the final corrected head all
+completed on the Standard builder without an OOM.
+
+Next 16.3 Turbopack was later restored after forced-cold previews completed in
+about four minutes, but that bounded proof did not disprove the already observed
+intermittent memory failure. On 2026-08-14, two production builds remained in
+Turbopack compilation until Vercel's build-duration ceiling and another exited
+137 during compilation with Vercel's explicit container-OOM report. Production
+therefore uses the repeatedly proven Webpack path again. A future Turbopack
+production cutover must prove repeated cold builds over a representative change
+window, not only isolated preview successes.
 
 The default advisory budget is 7,200,000,000 cgroup-accounted bytes: the 8 GB
 machine model minus a 0.8 GB reserve for OS/container overhead outside the build
