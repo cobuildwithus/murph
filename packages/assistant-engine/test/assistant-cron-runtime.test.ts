@@ -221,6 +221,7 @@ import {
   ASSISTANT_BOUNDED_CONVERSATION_HISTORY_INCOMPLETE_TEXT,
 } from '../src/assistant/shared.ts'
 import type { AssistantExecutionContext } from '../src/assistant/execution-context.ts'
+import type { AssistantNotificationInput } from '../src/assistant/notification-turn.ts'
 import type { AssistantChannelDependencies } from '../src/assistant/channels/types.ts'
 import { sendLinqMessage } from '../src/assistant/channels/runtime.ts'
 import {
