@@ -69,6 +69,11 @@ import {
   buildCloudflareHostedControlUserStatusPath,
 } from "./routes.ts";
 import { requireCloudflareHostedControlUserId } from "./user-id.ts";
+import {
+  CLOUDFLARE_HOSTED_CONTROL_DEVICE_WEBHOOK_ENQUEUE_PATH,
+  parseDeviceWebhookQueueEnvelope,
+  type DeviceWebhookQueueEnvelopeV1,
+} from "./device-webhook-queue.ts";
 
 export type CloudflareHostedControlBrowserVaultShardKind =
   HostedBrowserVaultReplicaShardKind;
@@ -227,6 +232,9 @@ export type CloudflareHostedControlTelegramUsageLimitNoticeResponse =
   };
 
 export interface CloudflareHostedControlClient {
+  enqueueDeviceWebhook(
+    envelope: DeviceWebhookQueueEnvelopeV1,
+  ): Promise<{ accepted: true; transportId: string }>;
   createBrowserVaultSession(input: {
     browserPublicKeyJwk: HostedUserRecipientPublicKeyJwk;
     replicaRef: HostedBrowserVaultReplicaRef;
@@ -364,7 +372,6 @@ export function createCloudflareHostedControlClient(
       input.replicaRef,
       "Cloudflare browser vault session request replicaRef",
     );
-
     if (!replicaRef) {
       throw new TypeError("Cloudflare browser vault session request replicaRef must not be null.");
     }
@@ -456,6 +463,26 @@ export function createCloudflareHostedControlClient(
   };
 
   return {
+    enqueueDeviceWebhook(envelope) {
+      const request = parseDeviceWebhookQueueEnvelope(envelope);
+      return requestHostedExecutionAuthorizedJson({
+        baseUrl,
+        fetchImpl,
+        getAuthorizationHeader,
+        label: "device webhook enqueue",
+        parse: parseDeviceWebhookEnqueueResponse,
+        path: CLOUDFLARE_HOSTED_CONTROL_DEVICE_WEBHOOK_ENQUEUE_PATH,
+        request: {
+          body: JSON.stringify(request),
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          method: "POST",
+        },
+        timeoutMs: options.timeoutMs,
+      });
+    },
+
     createBrowserVaultSession(input) {
       return requestBrowserVaultSession(input);
     },
@@ -764,6 +791,20 @@ export function createCloudflareHostedControlClient(
       });
     },
   };
+}
+
+function parseDeviceWebhookEnqueueResponse(
+  value: unknown,
+): { accepted: true; transportId: string } {
+  const record = requireRecord(value, "Device webhook enqueue response");
+  if (record.accepted !== true) {
+    throw new TypeError("Device webhook enqueue response accepted must be true.");
+  }
+  const transportId = requireString(
+    record.transportId,
+    "Device webhook enqueue response transportId",
+  );
+  return { accepted: true, transportId };
 }
 
 function parseCloudflareHostedControlEnvironmentVoiceStageResult(

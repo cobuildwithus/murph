@@ -40,6 +40,7 @@ describe("createCloudflareHostedControlClient", () => {
       "deleteEnvironmentVoice",
       "deleteMealPhoto",
       "deleteUserData",
+      "enqueueDeviceWebhook",
       "ensureRuntimeProcessing",
       "getRunnerStatus",
       "prewarmRuntimeShell",
@@ -49,6 +50,49 @@ describe("createCloudflareHostedControlClient", () => {
       "stageMealPhoto",
       "verifyInferenceConnection",
     ]);
+  });
+
+  it("enqueues an opaque device-webhook envelope without binding member authority", async () => {
+    const keys = await crypto.subtle.generateKey(
+      { name: "ECDH", namedCurve: "P-256" },
+      true,
+      ["deriveBits"],
+    );
+    const { sealDeviceWebhookQueueEnvelope } = await import(
+      "../src/device-webhook-queue.ts"
+    );
+    const envelope = await sealDeviceWebhookQueueEnvelope({
+      env: "test",
+      preparedWebhook: {
+        acceptanceMode: "level_dirty_hint",
+        eventType: "demo.updated",
+        externalAccountId: "opaque-account",
+        jobs: [],
+        provider: "oura",
+        receivedAt: "2026-02-02T00:00:00.000Z",
+        schema: "murph.device-sync-prepared-webhook.v1",
+        traceId: "1".repeat(64),
+      },
+      recipientKeyId: "automation:test",
+      recipientPublicJwk: await crypto.subtle.exportKey("jwk", keys.publicKey),
+    });
+    const fetchImpl = vi.fn(async () => createJsonResponse({
+      accepted: true,
+      transportId: envelope.transportId,
+    })) as typeof fetch;
+    const client = createCloudflareHostedControlClient({
+      baseUrl: "https://runner.example.test",
+      fetchImpl,
+      getBearerToken: async () => "token-123",
+    });
+
+    await expect(client.enqueueDeviceWebhook(envelope)).resolves.toEqual({
+      accepted: true,
+      transportId: envelope.transportId,
+    });
+    const [url, init] = vi.mocked(fetchImpl).mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("https://runner.example.test/internal/device-webhooks/enqueue");
+    expect(new Headers(init.headers).get(HOSTED_EXECUTION_USER_ID_HEADER)).toBeNull();
   });
 
   it("verifies a bounded inference candidate through the user-bound route", async () => {

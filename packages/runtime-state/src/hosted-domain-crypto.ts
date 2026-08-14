@@ -32,6 +32,7 @@ export const HOSTED_CRYPTO_LANES = [
   "device-sync-provider-application",
   "device-sync-external-account-id",
   "device-sync-payload",
+  "device-webhook-transport",
   "mailbox-payload",
   "email-raw",
   "meal-photo",
@@ -59,6 +60,7 @@ export const HOSTED_CRYPTO_LANE_DOMAINS: Record<
   "device-sync-payload": "device",
   "device-sync-provider-application": "device",
   "device-sync-token": "device",
+  "device-webhook-transport": "ingress",
   "email-raw": "ingress",
   "hosted-member-private-field": "control",
   "hosted-inference-connection": "control",
@@ -809,7 +811,7 @@ function parseHostedGcpKmsWrappedDomainRootKey(
   };
 }
 
-function parseHostedEcdhWrappedDomainRootKey(
+export function parseHostedEcdhWrappedDomainRootKey(
   value: unknown,
   label: string,
 ): HostedEcdhWrappedDomainRootKey {

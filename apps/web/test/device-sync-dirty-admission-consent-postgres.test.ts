@@ -191,26 +191,24 @@ function buildResource(lane: AdmissionLane): HostedDeviceSyncDirtyResource {
 function admitDirtyPayload(input: {
   fixture: Fixture;
   lane: AdmissionLane;
-  onEntered?: () => Promise<void> | void;
+  onPreflightEntered?: () => Promise<void> | void;
+  onPrepared?: () => Promise<void> | void;
 }): Promise<unknown> {
-  const callback = async (tx: HostedPrismaTransactionClient) => {
-    await input.onEntered?.();
-    return input.fixture.store.upsertDirtyConnection({
-      connectionId: input.fixture.connectionId,
-      dirtyAt: "2026-07-16T12:01:00.000Z",
-      eventType: input.lane === "companion"
-        ? "companion.hrv-rmssd.created"
-        : "daily.data.deleted",
-      provider: input.lane === "companion" ? "junction" : "oura",
-      resourceCategory: input.lane === "companion" ? "derived" : "sleep",
-      resources: [buildResource(input.lane)],
-      traceId: `trace_dirty_admission_${input.lane}`,
-      tx,
-      userId: input.fixture.userId,
-    });
-  };
-
-  return input.lane === "webhook"
+  const dirtyInput = {
+    connectionId: input.fixture.connectionId,
+    dirtyAt: "2026-07-16T12:01:00.000Z",
+    eventType: input.lane === "companion"
+      ? "companion.hrv-rmssd.created"
+      : "daily.data.deleted",
+    provider: input.lane === "companion" ? "junction" : "oura",
+    resourceCategory: input.lane === "companion" ? "derived" : "sleep",
+    resources: [buildResource(input.lane)],
+    traceId: `trace_dirty_admission_${input.lane}`,
+    userId: input.fixture.userId,
+  } as const;
+  const withAdmissionLock = <T>(
+    callback: (tx: HostedPrismaTransactionClient) => Promise<T>,
+  ) => input.lane === "webhook"
     ? input.fixture.store.withHealthDataAdmissionLock(
         input.fixture.userId,
         input.fixture.connectionId,
@@ -222,6 +220,22 @@ function admitDirtyPayload(input: {
         input.fixture.connectionId,
         callback,
       );
+
+  return (async () => {
+    await withAdmissionLock(async () => {
+      await input.onPreflightEntered?.();
+    });
+    const prepared = await input.fixture.store.prepareDirtyConnectionUpsert(
+      dirtyInput,
+    );
+    await input.onPrepared?.();
+    return withAdmissionLock((tx) =>
+      input.fixture.store.upsertDirtyConnectionWithPreparedPlanTx({
+        prepared,
+        tx,
+      })
+    );
+  })();
 }
 
 async function cleanupFixture(fixture: Fixture): Promise<void> {
@@ -280,7 +294,7 @@ describe.skipIf(!runPostgresProof)(
           admissionOutcome = admitDirtyPayload({
             fixture,
             lane,
-            onEntered: admissionCallback,
+            onPreflightEntered: admissionCallback,
           });
           await waitForBlockedBackend({
             observer: fixture.observer,
@@ -315,11 +329,11 @@ describe.skipIf(!runPostgresProof)(
     );
 
     it.each<AdmissionLane>(["webhook", "companion"])(
-      "finishes consent-ordered %s preparation before a waiting withdrawal",
+      "lets %s withdrawal commit after preparation and rejects the final write",
       async (lane) => {
         const fixture = await createFixture(lane);
-        const admissionLocked = createDeferred();
-        const allowPreparation = createDeferred();
+        const preparationFinished = createDeferred();
+        const allowFinalAdmission = createDeferred();
         const encrypt = vi.fn((input: { value: string }) => input.value);
         let admissionOutcome: Promise<unknown> | null = null;
         let withdrawalOutcome: Promise<unknown> | null = null;
@@ -332,14 +346,13 @@ describe.skipIf(!runPostgresProof)(
           admissionOutcome = admitDirtyPayload({
             fixture,
             lane,
-            onEntered: async () => {
-              admissionLocked.resolve();
-              await allowPreparation.promise;
+            onPrepared: async () => {
+              preparationFinished.resolve();
+              await allowFinalAdmission.promise;
             },
           });
-          await admissionLocked.promise;
+          await preparationFinished.promise;
 
-          const withdrawalPid = await readBackendPid(fixture.withdrawal);
           withdrawalOutcome = revokeHostedConsentScope({
             memberId: fixture.userId,
             now: new Date("2026-07-16T12:02:00.000Z"),
@@ -347,21 +360,18 @@ describe.skipIf(!runPostgresProof)(
             scope: "launch.health-data",
             source: "device-sync-admission-consent-test",
           });
-          await waitForBlockedBackend({
-            observer: fixture.observer,
-            pid: withdrawalPid,
-          });
-
-          allowPreparation.resolve();
-          await expect(admissionOutcome).resolves.toMatchObject({
-            dirty: expect.objectContaining({ connectionId: fixture.connectionId }),
-          });
           await expect(withdrawalOutcome).resolves.toMatchObject({ ok: true });
+          allowFinalAdmission.resolve();
+          await expect(admissionOutcome).rejects.toMatchObject({
+            code: "HEALTH_DATA_CONSENT_REQUIRED",
+          });
           expect(encrypt).toHaveBeenCalledTimes(1);
-          await expect(fixture.observer.deviceSyncDirtyPayload.findFirstOrThrow({
-            select: { credentialIndependent: true },
+          await expect(fixture.observer.deviceSyncDirtyPayload.count({
             where: { connectionId: fixture.connectionId },
-          })).resolves.toEqual({ credentialIndependent: true });
+          })).resolves.toBe(0);
+          await expect(fixture.observer.deviceSyncDirtyConnection.count({
+            where: { connectionId: fixture.connectionId },
+          })).resolves.toBe(0);
           await expect(fixture.observer.hostedConsentGrant.findUniqueOrThrow({
             select: { status: true },
             where: {
@@ -373,9 +383,9 @@ describe.skipIf(!runPostgresProof)(
           })).resolves.toEqual({ status: "revoked" });
           await expect(fixture.observer.deviceSyncCompanionCaptureReceipt.count({
             where: { connectionId: fixture.connectionId },
-          })).resolves.toBe(lane === "companion" ? 1 : 0);
+          })).resolves.toBe(0);
         } finally {
-          allowPreparation.resolve();
+          allowFinalAdmission.resolve();
           await Promise.allSettled([
             ...(admissionOutcome ? [admissionOutcome] : []),
             ...(withdrawalOutcome ? [withdrawalOutcome] : []),
