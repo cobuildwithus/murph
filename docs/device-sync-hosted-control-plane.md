@@ -1,6 +1,6 @@
 # Device Sync Hosted Control Plane
 
-Last verified against repo layout: 2026-08-12
+Last verified against repo layout: 2026-08-13
 
 ## Current split
 
@@ -8,6 +8,7 @@ Murph's hosted device-sync stack is now split this way:
 
 - `apps/web` is the canonical hosted control plane. It owns durable hosted device-sync facts in Postgres, including connection ownership, OAuth/session state, short-lived hosted connect intents, token-audit history, sparse sync signals, per-connection dirty state for webhook freshness, local-agent sessions, and the web-owned internal runtime snapshot/apply/connect-link/reconcile/dirty-state/pending/ack routes.
 - `apps/cloudflare` is the hosted execution plane only. During a hosted job it may call narrow signed web callbacks to fetch the current device-sync runtime snapshot, apply runtime updates, or start a provider connect link, but it is not a second durable device-sync control plane.
+- `apps/cloudflare` also owns encrypted, non-canonical Queue transport for provider webhook bursts. Queue and its encrypted DLQ are delivery buffers only; they own no connection, trace, dirty, consent, lifecycle, or health fact.
 - local `device-syncd` remains the data plane that talks to provider APIs, normalizes provider payloads through `@murphai/importers`, and writes canonical health records into the local vault.
 
 This is the live repo shape, not a future rollout plan.
@@ -59,6 +60,7 @@ It does not own canonical health-data import, token authority, or canonical host
 - signed Temporal `ensure-processing` handling, per-user Durable Object coordination, and bounded hosted workspace invocation drive
 - invoking signed internal `apps/web` callbacks when a hosted job needs current device-sync runtime authority
 - consuming current runtime snapshots during a hosted job and sending narrow runtime updates back to web
+- durably accepting ciphertext-only device-webhook envelopes and returning decrypted deliveries to Web in signed, sequential, size-bounded batches
 
 `apps/cloudflare` must not:
 
@@ -129,9 +131,53 @@ Recommended durable tables remain:
 
 Postgres should keep only opaque ids, blind indexes, typed summaries, sparse signals, audit history, dirty resource/window summaries, and the canonical hosted runtime authority consumed by the internal snapshot/apply/dirty-state/pending/ack routes. It should not store canonical health facts.
 
+### Bursty webhook transport
+
+For providers explicitly listed in `HOSTED_DEVICE_WEBHOOK_QUEUE_PROVIDERS`, the
+public Web route first decides Queue eligibility from the provider gate and
+bounded raw-body size. Oversized bodies use the existing synchronous path. An
+eligible request verifies the provider signature and parses the exact body once,
+then freezes that authenticated meaning as the explicit versioned
+`murph.device-sync-prepared-webhook.v1` contract without reading Postgres. The
+raw signature headers and body are not queued. Web seals only that prepared
+event under a one-message ingress root wrapped to the existing Cloudflare
+automation P-256 recipient, then calls the OIDC-authenticated Cloudflare enqueue
+route. Provider success is returned only after `Queue.send` confirms durable
+acceptance. A failed or ambiguous enqueue never falls through to synchronous
+admission; provider redelivery converges through the existing provider-scoped
+trace identity. Neither path invokes the provider verifier twice.
+
+The Queue consumer is configured for 100 messages, five-second collection,
+one consumer, ten retries, and an encrypted DLQ. It decrypts outside Postgres
+and partitions each delivery into signed Web callbacks of at most 25 messages.
+Web validates the whole callback, then uses an explicit serial loop around the
+existing shared ingress's prepared-event admission. It does not re-run the
+provider signature verifier or parser. The frozen receipt instant and parsed
+meaning therefore survive provider secret or parser rotation while queued; the
+trace processing lease begins at Web admission time so a delayed delivery never
+starts with an expired lease. Every emitted prepared schema decoder must remain
+readable through the maximum Queue, DLQ, and redrive horizon, just as an old
+transport recipient key remains decrypt-only during its retention window.
+Existing trace claims, health-data consent,
+provider-application revision, setup, source, reconnect, disconnect, dirty
+state, exact encrypted payload, mailbox wake, and post-commit Temporal behavior
+remain unchanged. Thus a 100-message burst creates peak-one webhook admission
+pressure, although it still performs the existing sequential canonical writes.
+No raw-SQL batch owner, Queue database, Durable Object state, Vercel Workflow,
+or Temporal webhook workflow is introduced.
+
+Queue-visible state contains random transport identifiers, ciphertext, and key
+wrap metadata only. Provider, account, event, trace, and prepared job meaning
+remain inside the secure box; provider signature headers and raw request bodies
+are discarded after initial verification. Tamper, unknown key, unsupported
+prepared schema, malformed envelope, callback ambiguity, and every failed Web
+admission retain the individual encrypted message for retry and eventual DLQ.
+Only accepted and duplicate dispositions acknowledge a message; failures cannot
+be dropped without a separate durable quarantine owner.
+
 `device_connect_intent` stores short-lived first-party Murph connect claims for hosted assistant-initiated wearable linking. The signed internal connect-link route returns only the first-party `/device/connect/:claim` URL to the runner. Opening that URL requires the authenticated Murph app session for the same member before provider OAuth starts. The hosted browser start also requires its configured provider callback base to use that request's hostname; a mismatch fails before OAuth state creation or provider authorization. Start sets a short-lived provider-, state-, member-, and session-bound host-only proof. The provider callback GET validates that proof, passes `expectedOwnerId` into shared ingress, and redirects back into the app without an interstitial. A missing proof burns the OAuth state and returns to Connect so the callback URL cannot be relayed. Intent rows must not store raw provider or Junction authorization URLs.
 
-`device_sync_dirty_connection` is the coalescing point for high-cardinality device webhook backfills. It is keyed by hosted connection ID and tracks `dirty_revision`, `processed_revision`, first/latest dirty timestamps, widened safe windows, compact resource/source counters, and a compact `dirty_resources_json` map. It must not store raw provider request bodies, provider tokens, raw samples, or user-visible health facts. Provider-owned durable webhook work, such as Junction direct data or exact resource/delete/deauthorization jobs needed for later import, is event-triggered work and is stored in `device_sync_dirty_payload` as bounded encrypted/compressed payload rows until the runtime consumes and explicitly acknowledges those row ids. Each new row also stores one server-derived `credential_independent` boolean beside the ciphertext. Store-owned dirty writes classify, compress, and seal before their transaction. Consent-gated webhook and companion admissions do that work inside the existing member-row transaction after locking and re-reading health-data consent, but before the dirty-marker lock or mutation, so completed withdrawal prevents later payload processing without adding another authority owner. During mixed-version rollout the bit is nullable. The steady-state reconnect path reads no payload and resets the compact marker plus deletes credential-scoped rows with set-based writes. Nullable legacy rows are the other bounded consent-ordered path: reconnect classifies at most 800 inside the existing member transaction after locking and re-reading health-data consent and then locking the dirty marker. Acknowledgement takes that same marker-before-payload order, preventing a reconnect/acknowledgement deadlock. A larger null backlog fails retryably until runtime acknowledgement reduces it.
+`device_sync_dirty_connection` is the coalescing point for high-cardinality device webhook backfills. It is keyed by hosted connection ID and tracks `dirty_revision`, `processed_revision`, first/latest dirty timestamps, widened safe windows, compact resource/source counters, and a compact `dirty_resources_json` map. It must not store raw provider request bodies, provider tokens, raw samples, or user-visible health facts. Provider-owned durable webhook work, such as Junction direct data or exact resource/delete/deauthorization jobs needed for later import, is event-triggered work and is stored in `device_sync_dirty_payload` as bounded encrypted/compressed payload rows until the runtime consumes and explicitly acknowledges those row ids. Each new row also stores one server-derived `credential_independent` boolean beside the ciphertext. Store-owned dirty writes classify, compress, and seal before their transaction. Consent-gated webhook and companion admissions first check consent plus exact connection/source authority in a short transaction, prepare through a request-local non-serializable dirty-store capability outside all locks, then reacquire the admission locks and require unchanged consent, authority, dirty-marker snapshot, and, for payload work, device-domain root before persistence. Clean-to-dirty mailbox crypto follows the same outside-lock preparation and exact ingress-root revalidation. One fresh-cache full replan is allowed on drift; repeated drift fails retryably. A withdrawal that commits while preparation is in flight leaves no durable payload, receipt, signal, trace-completion, or wake. During mixed-version rollout the bit is nullable. The steady-state reconnect path reads no payload and resets the compact marker plus deletes credential-scoped rows with set-based writes. Nullable legacy rows are the other bounded consent-ordered path: reconnect classifies at most 800 inside the existing member transaction after locking and re-reading health-data consent and then locking the dirty marker. Acknowledgement takes that same marker-before-payload order, preventing a reconnect/acknowledgement deadlock. A larger null backlog fails retryably until runtime acknowledgement reduces it.
 
 The companion overnight PRV lane reuses that encrypted payload owner. Its only
 public health payload contains `schema`, `methodVersion`, `nightDate`,

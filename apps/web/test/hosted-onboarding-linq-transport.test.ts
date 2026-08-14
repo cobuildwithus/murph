@@ -1593,7 +1593,7 @@ describe("hosted Linq webhook transport", () => {
   it("keeps the redirect effect id stable when the contact-privacy keyring rotates", () => {
     const restoreV1 = configureHostedContactPrivacyKeyringForTest({
       currentVersion: "v1",
-      entries: HOME_REDIRECT_TEST_KEYRING_ENTRIES,
+      entries: { v1: HOME_REDIRECT_TEST_KEYRING_ENTRIES.v1 },
     });
     let firstRedirect;
     try {
@@ -1647,7 +1647,7 @@ describe("hosted Linq webhook transport", () => {
 
     const restoreV1 = configureHostedContactPrivacyKeyringForTest({
       currentVersion: "v1",
-      entries: HOME_REDIRECT_TEST_KEYRING_ENTRIES,
+      entries: { v1: HOME_REDIRECT_TEST_KEYRING_ENTRIES.v1 },
     });
     let firstRecovery;
     let firstLookupKey;

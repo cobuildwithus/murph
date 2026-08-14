@@ -69,6 +69,9 @@
       "@murphai/cloudflare-hosted-control/client": [
         "../../packages/cloudflare-hosted-control/src/client.ts"
       ],
+      "@murphai/cloudflare-hosted-control/device-webhook-queue": [
+        "../../packages/cloudflare-hosted-control/src/device-webhook-queue.ts"
+      ],
       "@murphai/cloudflare-hosted-control/routes": [
         "../../packages/cloudflare-hosted-control/src/routes.ts"
       ],
@@ -323,6 +326,9 @@
       ],
       "@murphai/device-syncd/public-ingress": [
         "../../packages/device-syncd/src/public-ingress.ts"
+      ],
+      "@murphai/device-syncd/prepared-webhook": [
+        "../../packages/device-syncd/src/prepared-webhook.ts"
       ],
       "@murphai/device-syncd/public-provider-descriptors": [
         "../../packages/device-syncd/src/public-provider-descriptors.ts"

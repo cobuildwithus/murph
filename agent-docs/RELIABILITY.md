@@ -260,14 +260,20 @@ Last verified: 2026-08-13
   second, outside any storage transaction. Only an exhausted two-attempt
   collection increments the consecutive-failure state. A usable partial
   observation remains single-pass when any available signal is unsafe, so
-  concrete evidence is evaluated without delay. When the only absent family is
-  the direct-error counter and every available signal is safe, the monitor uses
-  that same bounded retry as a confirmation scrape. Every available confirmation
-  signal is evaluated; a recovered direct counter is merged with the original
-  complete gauge evidence, while a failed or still-incomplete confirmation
-  retains the original partial observation. This makes transient counter-family
-  omission less noisy without converting unknown to zero or weakening the
-  two-check telemetry fallback.
+  concrete evidence is evaluated without delay. The connection-error family
+  expects direct port 5432 and pooled application port 6432, keyed by port and
+  region so their counters cannot collide. Missing either expected port leaves
+  the family unknown. An observed port can still produce a positive
+  non-replayable condition; when every available signal is safe and only this
+  family is incomplete, the monitor uses that same bounded retry as a
+  confirmation scrape. Every available confirmation signal is evaluated;
+  complementary observed ports can be composed with the original complete
+  gauge evidence, while a failed or still-incomplete confirmation retains the
+  original partial observation. Each observed port replaces and advances only
+  its own usable series baseline, an omitted port retains its prior baseline,
+  and new or reset region series are independently suppressed. This makes
+  transient counter-family omission less noisy without converting unknown to
+  zero, replaying an old delta, or weakening the two-check telemetry fallback.
   Discovery, scrape, parse, or incomplete required metrics must recur on two
   consecutive runs before paging the monitoring condition. Crossing that
   threshold persists one bounded telemetry-page obligation in the existing
@@ -276,47 +282,53 @@ Last verified: 2026-08-13
   partial checks, and uses the threshold time as its window end. One bounded
   evidence value on each existing sample preserves that aggregate provenance
   across restart. The obligation survives an occupied pending-message slot,
-  restart, recovery, and direct-error-only prioritization; only acknowledgment
-  of a pending body that includes the monitoring condition clears it. Recovery
-  and another threshold before acknowledgment deliberately coalesce into that
-  unresolved notification, retaining the first threshold window; this monitor
-  does not maintain an outage backlog. The additive columns retain the existing
-  schema version so a rollback Worker can ignore them. Current code recognizes
-  the prior Worker's cleared pending key/body with the telemetry marker still set
-  as an acknowledgment and removes the stale obligation before re-admission.
-  A newly opened incident or one-shot direct migration admission failure admits
-  its exact body and idempotency key in the same synchronous SQLite transaction
-  that persists the sample and advances any direct-error counter baseline.
-  If another immutable page already owns the single pending-message slot, the
-  same transaction advances the sample baseline and accumulates the later
-  direct-error count plus latest check time in the existing alert row instead
-  of dropping it. An acknowledged older page cannot close the incident while
-  that evidence remains. The next run with a free slot atomically promotes the
-  accumulated count into one non-replayable page, retaining any owed telemetry
-  condition in the same body, which then follows the ordinary attempt fence,
-  health preflight, exact-body retry, and restart contract.
-  When a direct error forces admission inside an acknowledged incident's
-  closed attempt fence, that pending body contains the non-replayable direct
-  error plus any durable telemetry obligation already available at admission;
-  co-occurring replayable gauges remain in the persisted sample but cannot
-  become stale pending claims. Pure deferred evidence keeps its stored check
-  time; when a current direct-error delta joins the promoted count, the page uses
-  the latest included check. Historical telemetry carries its separate
-  observation time. That exact combined page owns the next eligible attempt and
+  restart, recovery, and connection-error-only prioritization; only
+  acknowledgment of a pending body that includes the monitoring condition
+  clears it. Recovery and another threshold before acknowledgment deliberately
+  coalesce into that unresolved notification, retaining the first threshold
+  window; this monitor does not maintain an outage backlog. The additive
+  columns retain the existing schema version so a rollback Worker can ignore
+  them. Current code recognizes the prior Worker's cleared pending key/body with
+  the telemetry marker still set as an acknowledgment and removes the stale
+  obligation before re-admission.
+  A newly opened incident or one-shot connection-error condition admits its
+  exact body and idempotency key in the same synchronous SQLite transaction
+  that persists the sample and advances the generalized connection-error
+  counter baseline. Port 5432 retains direct migration-admission wording. Port
+  6432 is a distinct pooled application connection-error condition; the metric
+  has no reason label, so the page cannot claim a specific provider rejection
+  reason. If another immutable page already owns the single pending-message
+  slot, the same transaction advances the sample baseline and accumulates each
+  later category's count plus latest check time in the existing alert row
+  instead of dropping it. An acknowledged older page cannot close the incident
+  while that evidence remains. The next run with a free slot atomically
+  promotes the accumulated categories into one non-replayable page, retaining
+  any owed telemetry condition in the same body, which then follows the
+  ordinary attempt fence, health preflight, exact-body retry, and restart
+  contract.
+  When a connection error forces admission inside an acknowledged incident's
+  closed attempt fence, that pending body contains only the non-replayable
+  connection-error categories plus any durable telemetry obligation already
+  available at admission; co-occurring replayable gauges remain in the
+  persisted sample but cannot become stale pending claims. Pure deferred
+  evidence keeps the latest stored check time among its included categories;
+  when a current connection-error delta joins the promoted counts, the page
+  uses the current check. Historical telemetry carries its separate observation
+  time. That exact combined page owns the next eligible attempt and
   acknowledgment clears the represented telemetry obligation, avoiding a
   second notification lifecycle.
   A replayable condition still unsafe at that boundary remains eligible for the
   following paced recurrence. The same one-slot ordering applies in reverse: a
-  later direct-error obligation waits behind an older page but cannot be consumed
-  by the counter baseline. This explicit prioritization keeps admitted bodies
-  immutable without another message queue or delivery lifecycle.
+  later connection-error obligation waits behind an older page but cannot be
+  consumed by the counter baseline. This explicit prioritization keeps admitted
+  bodies immutable without another message queue or delivery lifecycle.
   An acknowledged incident's replayable gauge does not admit stale evidence
   while the attempt fence is closed; once the fence opens, a still-unsafe
   current gauge admits the recurrence. An unadmitted monitoring obligation does
   not occupy a closed provider fence. Until an incident admits its first page,
-  concrete evidence, including a direct-error delta, that appears on the
-  threshold or a later sample persists in one combined immutable body with
-  exact identity, concrete check time, and
+  concrete evidence, including either connection-error category, that appears
+  on the threshold or a later sample persists in one combined immutable body
+  with exact identity, concrete check time, and
   condition-local telemetry time; both facts share the first eligible attempt
   and one acknowledgment cycle. For an acknowledged-incident
   recurrence, the first eligible sample supplies any still-current concrete
@@ -369,6 +381,11 @@ Last verified: 2026-08-13
   filtering: at the hourly cap, one incident traverses one hundred reviewed
   leads before repeating one. Literal reviewed data avoids a prose generator,
   provider dependency, or second runtime copy owner.
+  The physical SQLite sample columns deliberately retain their schema-v1
+  `direct_connection_error_*` names for rollback compatibility. Current code
+  stores the generalized two-port baseline and aggregate delta in those columns;
+  pooled deferred evidence uses additive category-specific columns without a
+  schema-version increment.
   Telemetry-only copy instead states that monitoring is incomplete or
   unavailable and cannot claim that the database itself is under pressure.
   Message variation must remain contextual and deterministic, never random
@@ -780,11 +797,19 @@ Last verified: 2026-08-13
 - Store-owned device-sync dirty writes use a private prepare-then-commit
   boundary: the dirty store derives the credential-independence authority bit,
   compresses, and secure-box seals each payload before opening its transaction;
-  no caller can supply a prepared ciphertext or classification bundle.
-  Consent-gated webhook and companion admissions instead perform that
-  preparation inside the existing member-row transaction, after the consent
-  re-read and before the dirty-marker lock or mutation. This keeps completed
-  withdrawal authoritative without adding another fence or state owner. The
+  no caller can supply a prepared ciphertext or classification bundle. A
+  consent-gated webhook or companion admission first performs a short
+  member/connection/source authority check, then prepares through the same
+  request-local, non-serializable dirty-store capability outside every database
+  lock. The final transaction reacquires the canonical member/connection locks,
+  re-reads consent and exact connection/source authority, and requires both the
+  exact dirty-marker snapshot and, when payloads exist, device-domain root
+  before inserting them.
+  A clean-to-dirty wake similarly uses an ingress-root capability prepared
+  outside the locks. Drift permits one full replan with a fresh root cache;
+  repeated drift fails retryably. Withdrawal may commit while ephemeral
+  preparation is in flight, but the final consent re-read then rejects without
+  durable dirty, receipt, signal, trace-completion, or mailbox state. The
   steady-state connection-replacement path reads no payload and uses set-based writes only.
   Nullable rows from mixed-version writers are the bounded transitional
   exception: replacement classifies at most 800 rows after taking the existing
@@ -794,6 +819,53 @@ Last verified: 2026-08-13
   lock the dirty marker before touching payload rows.
   A larger nullable backlog fails retryably until runtime acknowledgement
   reduces it; classification may never run before the consent fence.
+- Queue-enabled provider webhooks verify once, freeze a versioned prepared
+  event, and encrypt before any Postgres read. Raw provider signature headers
+  and payload bytes do not enter Queue state. The prepared event enters one
+  Cloudflare Queue consumer configured for batches of 100, five-second
+  collection, concurrency one, ten retries, and an encrypted DLQ. The consumer
+  decrypts outside Postgres and sends sequential Web subbatches of at most 25;
+  Web admits each prepared entry through the existing canonical ingress in an
+  explicit serial loop and never reruns a provider verifier whose secret,
+  parser, or replay window may have rotated. The original receipt instant
+  remains the signature and audit instant, while the trace-processing lease
+  starts when Web admits the queued delivery. Only `accepted` and `duplicate`
+  results ack one Queue
+  message; all failed, missing, malformed, tampered, ambiguous, or unavailable
+  results retain only that encrypted message for retry and DLQ recovery.
+  Current provider registration, connection epoch/status, consent, source
+  lifecycle, and provider-application authority are revalidated at admission.
+  Apple Health source-registration observation first captures an ephemeral
+  exact authority proof under the existing member-plus-connection admission
+  lock, releases the transaction before provider I/O, then re-enters the same
+  owner to exact-match connection, public application, stored-account, and
+  source epochs before committing source activation, receipt state, dirty
+  work, mailbox/signal effects, and trace completion together. Determinate
+  authority loss consumes only the trace; missing or ambiguous reads, a
+  credential change during provider I/O, and provider registration that is not
+  yet active remain retryable without mutation.
+  No provider call runs inside a database transaction and no additional
+  authority owner or durable fence is introduced.
+  Every emitted prepared-event schema decoder remains readable through the
+  maximum Queue/DLQ retention and redrive horizon, just as old transport keys
+  remain decrypt-only until those encrypted envelopes are proven drained.
+  Queue is transport,
+  not device truth, and cannot weaken consent, source, setup, reconnect,
+  disconnect, trace, dirty-payload, mailbox, or Temporal authority.
+  A separate five-minute SQLite Durable Object monitor reads only native Queue
+  metrics from the main transport and encrypted DLQ. It pages immediately for
+  any DLQ backlog or a main message at least 15 minutes old, and after two
+  consecutive metric-collection failures. A two-minute persisted run lease
+  coalesces overlapping cron deliveries. Incident sequence, exact pending body
+  and idempotency key, latest typed observation, and the last successful page
+  time survive restart. A failed page retries with the same bytes and key on
+  the next five-minute scheduled check, and every newly opened incident admits
+  its first page independently of an earlier incident. Only successfully
+  delivered repeat pages in one continuously open incident are paced to one
+  hour. Only acknowledged delivery to both configured operator chats clears
+  pending state; an incident closes only after the pending page is cleared and
+  both Queue observations are healthy. The monitor persists no
+  webhook ciphertext, provider identity, member identity, or Queue message id.
 - Junction Link setup remains retryable but inert before proof-verified callback
   completion. Webhooks for an active `pending_link` or `link_returned` account
   release their trace claim and return a retryable not-ready response; they do
@@ -848,12 +920,15 @@ Last verified: 2026-08-13
 - Junction full reconcile and backfill jobs finish inventory, summary, profile,
   and historical scheduling once, then advance timeseries-only work through the
   existing job payload. Each attempt owns one canonical resource and one
-  complete UTC day. A collection may use at most two sequential pages with one
+  complete UTC day. A collection may use at most three sequential pages with one
   bounded request attempt per page. Page-heavy active-calorie and heart-rate
   days deterministically retry as complete UTC hours; no partial aggregate or
   vendor cursor is persisted. `timeseriesCursor` and
   `timeseriesResourceCursor` identify the next complete unit without changing
-  job dedupe identity. Every partial continuation preserves
+  job dedupe identity. The deployed v1 resource envelope is read only at this
+  provider boundary, validated exactly, and projected immediately to its active
+  scalar resource; new successors never write the envelope or consult its
+  completed-resource names. Every partial continuation preserves
   `lastSyncCompletedAt`; only terminal current full work may advance it.
 - A member-owned device provider application's revision is its credential
   epoch. OAuth state and established connections retain the exact application
