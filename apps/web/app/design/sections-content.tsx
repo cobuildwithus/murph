@@ -143,7 +143,7 @@ export function SectionsContent() {
 
       <Separator />
 
-      <StudySection title="Homepage authentication readiness and phone handoff">
+      <StudySection title="Homepage background readiness and phone handoff">
         <HomepageAuthWarmRuntimeStudy />
       </StudySection>
 

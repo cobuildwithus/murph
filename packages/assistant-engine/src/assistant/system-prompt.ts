@@ -1449,6 +1449,7 @@ function buildAssistantSkillRouteHintText(): string {
     "- Nutrition/metabolic: food-journal, nutrition-strategy, body-composition, gut-digestion, micronutrients-supplements, cardiometabolic-health, cycle-hormonal-health.",
     "- Eye-health evidence, symptom urgency, contact-lens safety, and refractive guidance come from the required Health Commons lookup. Use computer-use only after the answer establishes the safe action and exact care destination.",
     "- Training/movement: daily-activity owns factual wearable day/workout reads; running-cardio and strength-training own programming; aerobic-fitness, competition-training, mobility-posture, physical-therapy. Recovery-modality evidence and safety come from the required Health Commons lookup.",
+    "- Private repeated-set logging: strength-training owns it and resolves canonical routine context before writes. In groups, hand off to a private Murph conversation without private reads or writes.",
     "- Live workout/card: read strength-training and tracked-table.",
     "- Mind/substances: stress-regulation, cognitive-focus, substance-load. Chronic care: chronic-illness-support, chronic-pain-support.",
     "- Care logistics: appointment-scheduling. Transports and services: connected-apps, computer-use, phone-calls. Account products: murph-family. Artifacts: pdf, music-generation. Groups: group-chat, groupchat-comedy, group-challenge, group-newsletter.",
