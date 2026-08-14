@@ -50,6 +50,14 @@ device or connected-app completion result takes foreground priority; closing it
 refreshes plain Home so pending onboarding appears next instead of mounting a
 second dialog.
 
+Generic dashboard contact resolution reads only complete opaque member-channel
+markers and Murph-owned destinations. It never unwraps a member encryption root
+or reads the Stripe checkout email: the assigned text destination resolves from
+the locally encrypted `HostedLinqLine` row, and the email option uses the signed
+reply alias without exposing the member's verified address. Provider-specific
+webmail shortcuts remain a Settings concern, where that verified address is
+already loaded for the account-email surface.
+
 `apps/cloudflare` remains the execution-only runtime boundary. It accepts
 authenticated execution intents, restores encrypted runtime state, runs a
 workspace-runtime pass, and checkpoints through the web-owned workspace CAS. It may hold

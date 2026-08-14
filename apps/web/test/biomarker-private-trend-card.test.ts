@@ -9,17 +9,21 @@ import {
   type BrowserVaultMetricSelectionRow,
   type BrowserVaultReplica,
 } from "@murphai/query/browser";
-import { createElement, type ReactNode } from "react";
+import { act, createElement, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, test, vi } from "vitest";
+import { renderClientComponent } from "./render-client-component";
 
 const mocks = vi.hoisted(() => ({
   useBrowserVault: vi.fn(),
+  useBrowserVaultMetricKeyDemand: vi.fn(() => true),
 }));
 
 vi.mock("@/src/lib/browser-vault/context", () => ({
   BrowserVaultProvider: ({ children }: { children: ReactNode }) => createElement("section", { "data-browser-vault-provider": true }, children),
+  isBrowserVaultMetricsCapable: (client: unknown) => client !== null,
   useBrowserVault: mocks.useBrowserVault,
+  useBrowserVaultMetricKeyDemand: mocks.useBrowserVaultMetricKeyDemand,
 }));
 
 import { BiomarkerOverview } from "@/src/components/biomarkers/biomarker-detail/biomarker-overview";
@@ -28,6 +32,44 @@ import { resolveHealthCommonsBiomarkerOverview } from "@/src/lib/health-commons/
 
 beforeEach(() => {
   mocks.useBrowserVault.mockReset();
+  mocks.useBrowserVaultMetricKeyDemand.mockReset();
+  mocks.useBrowserVaultMetricKeyDemand.mockReturnValue(true);
+});
+
+test("renders and retries a required bucket error instead of leaving the trend loading", async () => {
+  const biomarker = resolveHealthCommonsBiomarkerOverview("resting-heart-rate");
+  assert.ok(biomarker);
+  const refresh = vi.fn(async () => {});
+  mocks.useBrowserVaultMetricKeyDemand.mockReturnValue(false);
+  mocks.useBrowserVault.mockReturnValue({
+    client: null,
+    dataVersion: null,
+    deviceSyncImportPending: false,
+    error: "Browser vault failed",
+    ref: null,
+    refresh,
+    status: "error",
+  });
+
+  const rendered = await renderClientComponent(
+    createElement(BiomarkerPrivateTrendCard, { biomarker }),
+    { requireButton: false },
+  );
+
+  try {
+    assert.match(rendered.container.textContent ?? "", /Browser vault failed/u);
+    assert.doesNotMatch(rendered.container.innerHTML, /animate-pulse/u);
+    const retry = [...rendered.container.querySelectorAll("button")].find(
+      (button) => button.textContent === "Retry private trend",
+    );
+    assert.ok(retry);
+    await act(async () => {
+      retry.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
+    });
+    assert.equal(refresh.mock.calls.length, 1);
+  } finally {
+    await rendered.cleanup();
+  }
 });
 
 test("does not render mocked private biomarker values when browser-vault is unavailable", () => {

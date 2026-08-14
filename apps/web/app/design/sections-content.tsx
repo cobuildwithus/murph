@@ -78,6 +78,7 @@ import { ExperimentResultsShareStudy } from "./experiment-results-share-study";
 import { EnvironmentProgressStudy } from "./environment-progress-study";
 import { EnvironmentPrintStudy } from "./environment-print-study";
 import { PersonalPatternsStudy } from "./personal-patterns-study";
+import { BrowserVaultLoadingTransitionsStudy } from "./browser-vault-loading-transitions-study";
 
 function StudySection({
   children,
@@ -630,6 +631,12 @@ export function SectionsContent() {
 
       <StudySection title="Home partial-load and vault-unavailable recovery">
         <HomeLoadStateStudy />
+      </StudySection>
+
+      <Separator />
+
+      <StudySection title="Browser Vault progressive loading transitions">
+        <BrowserVaultLoadingTransitionsStudy />
       </StudySection>
 
       <Separator />

@@ -1,6 +1,9 @@
 import { resolveMetricDefinition } from "@murphai/health-metrics";
 
-import { type BrowserVaultMetricRow, type BrowserVaultQueryClient } from "./shared.ts";
+import {
+  type BrowserVaultMetricRow,
+  type BrowserVaultMetricSeriesCapableQueryClient as BrowserVaultMetricsCapableQueryClient,
+} from "./shared.ts";
 
 /**
  * Provenance kinds produced by wearable/device pipelines. Manual entries
@@ -40,7 +43,7 @@ export interface BrowserVaultDeviceMetricSummary {
  * and staleness. Returns null when no device-derived reading exists.
  */
 export function selectBrowserVaultDeviceMetricSummary(
-  client: BrowserVaultQueryClient,
+  client: BrowserVaultMetricsCapableQueryClient,
   metricKey: string,
 ): BrowserVaultDeviceMetricSummary | null {
   const rows = client.metrics.series({ metricKey })

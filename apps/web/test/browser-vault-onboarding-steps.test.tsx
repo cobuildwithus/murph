@@ -20,6 +20,7 @@ import type {
 import {
   BROWSER_VAULT_REPLICA_POLICY_ID,
   BROWSER_VAULT_REPLICA_SCHEMA,
+  BROWSER_VAULT_EXPERIMENT_RUN_CARD_SCHEMA,
   createBrowserVaultQueryClient,
 } from "@murphai/query/browser-replica-client";
 
@@ -498,7 +499,41 @@ function createClient(
         latestDate: null,
       },
       entities,
+      experimentRunCards: entities
+        .filter((entity) => entity.family === "experiment")
+        .map((entity) => {
+          const status = entity.status === "paused"
+            ? "paused" as const
+            : entity.status === "active" || entity.status === "planned"
+              ? "active" as const
+              : entity.status === "closed" || entity.status === "stopped"
+                ? "stopped" as const
+                : "finished" as const;
+          return {
+            id: entity.id,
+            lookupKeys: {
+              experimentIds: [entity.id, ...entity.lookupIds],
+              protocolKeys: [],
+              slugs: [entity.experimentSlug, ...entity.lookupIds]
+                .filter((value): value is string => value !== null),
+            },
+            runSummary: { metrics: [] },
+            requiredMetricBuckets: [],
+            schema: BROWSER_VAULT_EXPERIMENT_RUN_CARD_SCHEMA,
+            slug: entity.experimentSlug,
+            startedOn: entity.date,
+            status,
+            statusLabel: status === "finished" ? "Completed" : status === "paused" ? "Paused" : "Active",
+            summary: null,
+            summaryDetail: null,
+            tags: entity.tags,
+            title: entity.title ?? entity.id,
+          };
+        }),
       generatedAt: "2026-06-06T12:00:00.000Z",
+      hasLabBiomarkers: metricRows.some((row) =>
+        row.sourceKind === "test-result" && row.biomarkerKey !== null && row.value !== null
+      ),
       labResultRows: [],
       metricGoalProgressRows: [],
       metricRows,
