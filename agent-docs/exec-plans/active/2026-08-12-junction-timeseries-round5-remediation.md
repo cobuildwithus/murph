@@ -507,3 +507,7 @@ Updated: 2026-08-14
   baselines. The 42 runner-budget tests, Cloudflare and device-sync typechecks,
   all 80 extended-history tests, docs drift, provider request boundaries, the
   206-scenario integrity check, and the post-merge merge-tree proof pass.
+- Exact-head Linux runner assembly then measured the combined current-main plus
+  fidelity graph at 10,465,027 bytes. Only the total measured baseline is
+  ratcheted to that value with the existing 32 KiB allowance; entry, static,
+  and forbidden-input guards are unchanged, and the 42-test budget proof passes.
