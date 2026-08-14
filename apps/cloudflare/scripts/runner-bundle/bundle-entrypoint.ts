@@ -275,7 +275,12 @@ export const RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME = "dist-bundled";
 // total after the merged AgentMail removal on 2026-08-14. Ratchet those
 // measurements while retaining the existing cross-platform tolerances and
 // forbidden-startup-input guards.
-const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 10_325_065 + 32_768;
+//
+// Current-main workout-card capacity and Telegram rich-card composition then
+// measured 10,360,160B on Linux and 10,408,474B on macOS on 2026-08-14. Ratchet
+// the total to the larger cross-platform measurement; the boot-path baselines,
+// forbidden-input guards, and established 32KB total allowance are unchanged.
+const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 10_408_474 + 32_768;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 1_689_721;
 const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 8_065_357;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_TOLERANCE_BYTES = 48_000;
