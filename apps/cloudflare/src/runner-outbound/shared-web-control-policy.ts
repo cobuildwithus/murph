@@ -14,6 +14,10 @@ import {
   HOSTED_PHYSICAL_NOTES_PATH,
 } from "@murphai/hosted-execution/physical-notes";
 import {
+  HOSTED_RUNTIME_PROVIDER_SETUP_CONTINUATION_VALIDATE_PATH,
+  HOSTED_RUNTIME_PROVIDER_SETUP_TOOL_PATH,
+} from "@murphai/hosted-execution/provider-setup";
+import {
   HOSTED_RUNTIME_ASSISTANT_PERSONALIZATION_TOOL_PATH,
 } from "@murphai/hosted-execution/assistant-personalization";
 import {
@@ -108,6 +112,7 @@ export type HostedRunnerWebControlOperation =
   | "thread_route_authority"
   | "phone_call_start"
   | "physical_note_send"
+  | "provider_setup"
   | "runtime_latency_trace"
   | "runtime_log_write"
   | "product_feedback_recording"
@@ -162,6 +167,8 @@ const HOSTED_RUNNER_WEB_CONTROL_POST_POLICY = new Map<string, HostedRunnerWebCon
   [HOSTED_RUNTIME_USAGE_RECORD_PATH, "usage_recording"],
   [HOSTED_PHONE_CALLS_PATH, "phone_call_start"],
   [HOSTED_PHYSICAL_NOTES_PATH, "physical_note_send"],
+  [HOSTED_RUNTIME_PROVIDER_SETUP_CONTINUATION_VALIDATE_PATH, "provider_setup"],
+  [HOSTED_RUNTIME_PROVIDER_SETUP_TOOL_PATH, "provider_setup"],
   [HOSTED_RUNTIME_VAULT_SHARE_DELIVER_PATH, "vault_share_deliver"],
 ]);
 

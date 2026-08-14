@@ -1,6 +1,6 @@
 # Security
 
-Last verified: 2026-08-13
+Last verified: 2026-08-14
 
 ## Non-Negotiable Rules
 
@@ -64,10 +64,14 @@ Last verified: 2026-08-13
   credential-bearing runtime snapshots may decrypt and project the
   invocation-scoped configuration.
   Member-owned dashboard setup adds no model-visible credential path. A narrow
-  hosted-computer execution boundary reads client id and secret inside Kernel,
-  validates the exact bounded result, immediately calls the encrypted application
-  store, recursively scrubs the raw execution result even on malformed output,
-  and returns only non-secret application metadata. General browser actions, DOM
+  Cloudflare `web-control.worker` policy admits only the shared exact validation
+  and tool POST paths, requires the active runtime write fence, strips
+  child-supplied authority headers, and signs the forwarded callback for the
+  bound runtime member. Neighboring paths and other methods fail closed.
+  The narrow hosted-computer execution boundary reads client id and secret
+  inside Kernel, validates the exact bounded result, immediately calls the
+  encrypted application store, recursively scrubs the raw execution result even
+  on malformed output, and returns only non-secret application metadata. General browser actions, DOM
   summaries, screenshots, tool results, logs, exceptions, analytics, workspaces,
   fixtures, and UI must never receive the secret. Human sign-in, MFA, CAPTCHA,
   provider prerequisites, and consent use only the same-origin

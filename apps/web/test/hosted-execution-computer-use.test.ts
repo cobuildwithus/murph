@@ -3948,63 +3948,67 @@ describe("ComputerUseService", () => {
     expect(kernel.deletedSessionIds).toEqual(["kernel-session-2"]);
   });
 
-  it("keeps a reserved run retryable when ambiguous browser provisioning cleanup fails", async () => {
-    let now = new Date("2026-06-17T12:00:00.000Z");
-    const store = new FakeComputerUseStore({
-      run: createRunRecord({
-        completedAt: new Date("2026-06-17T11:00:00.000Z"),
-        kernelLiveViewUrlEncrypted: null,
+  it.each(["fail", "ok"] as const)(
+    "keeps a reserved run retryable when immediate ambiguous provisioning cleanup is %s",
+    async (deleteBrowserResult) => {
+      let now = new Date("2026-06-17T12:00:00.000Z");
+      const store = new FakeComputerUseStore({
+        run: createRunRecord({
+          completedAt: new Date("2026-06-17T11:00:00.000Z"),
+          kernelLiveViewUrlEncrypted: null,
+          kernelSessionId: null,
+          status: "completed",
+        }),
+      });
+      const kernel = createFakeKernel({
+        createBrowserResults: ["fail"],
+        deleteBrowserResults: [deleteBrowserResult],
+      });
+      const service = new ComputerUseService({
+        kernel,
+        now: () => now,
+        store,
+      });
+
+      await expect(service.startRun({
+        memberId: "member_123",
+        startUrl: "https://dentist.example.test",
+      })).rejects.toMatchObject({
+        code: "HOSTED_COMPUTER_BROWSER_PROVISIONING",
+        retryable: true,
+      });
+      expect(kernel.createdBrowserInputs).toEqual([
+        expect.objectContaining({
+          browserName: expect.stringMatching(/^murph-browser-hcr_/u),
+        }),
+      ]);
+      expect(kernel.createdBrowserInputs[0]).not.toHaveProperty("startUrl");
+      expect(kernel.createdSessionIds).toEqual([]);
+      expect(kernel.deletedSessionIds).toEqual([
+        expect.stringMatching(/^murph-browser-hcr_/u),
+      ]);
+      expect(store.run).toMatchObject({
         kernelSessionId: null,
-        status: "completed",
-      }),
-    });
-    const kernel = createFakeKernel({
-      createBrowserResults: ["fail"],
-      deleteBrowserResults: ["fail"],
-    });
-    const service = new ComputerUseService({
-      kernel,
-      now: () => now,
-      store,
-    });
+        status: "cleanup_pending",
+      });
 
-    await expect(service.startRun({
-      memberId: "member_123",
-      startUrl: "https://dentist.example.test",
-    })).rejects.toMatchObject({
-      code: "HOSTED_COMPUTER_BROWSER_DELETE_FAILED",
-    });
-    expect(kernel.createdBrowserInputs).toEqual([
-      expect.objectContaining({
-        browserName: expect.stringMatching(/^murph-browser-hcr_/u),
-      }),
-    ]);
-    expect(kernel.createdBrowserInputs[0]).not.toHaveProperty("startUrl");
-    expect(kernel.createdSessionIds).toEqual([]);
-    expect(kernel.deletedSessionIds).toEqual([
-      expect.stringMatching(/^murph-browser-hcr_/u),
-    ]);
-    expect(store.run).toMatchObject({
-      kernelSessionId: null,
-      status: "cleanup_pending",
-    });
-
-    now = new Date("2026-06-17T12:02:00.001Z");
-    await expect(service.startRun({
-      memberId: "member_123",
-      startUrl: "https://dentist.example.test",
-    })).resolves.toMatchObject({
-      status: "running",
-    });
-    expect(kernel.deletedSessionIds).toEqual([
-      expect.stringMatching(/^murph-browser-hcr_/u),
-      expect.stringMatching(/^murph-browser-hcr_/u),
-    ]);
-    expect(store.run).toMatchObject({
-      kernelSessionId: "kernel-session-2",
-      status: "running",
-    });
-  });
+      now = new Date("2026-06-17T12:02:00.001Z");
+      await expect(service.startRun({
+        memberId: "member_123",
+        startUrl: "https://dentist.example.test",
+      })).resolves.toMatchObject({
+        status: "running",
+      });
+      expect(kernel.deletedSessionIds).toEqual([
+        expect.stringMatching(/^murph-browser-hcr_/u),
+        expect.stringMatching(/^murph-browser-hcr_/u),
+      ]);
+      expect(store.run).toMatchObject({
+        kernelSessionId: "kernel-session-2",
+        status: "running",
+      });
+    },
+  );
 
   it("fails closed when a suspended member race happens after browser creation", async () => {
     const now = new Date("2026-06-17T12:00:00.000Z");

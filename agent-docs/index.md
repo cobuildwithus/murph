@@ -24,6 +24,13 @@ fences cadence publication. The contract is jointly specified by
 `agent-docs/RELIABILITY.md` and
 `agent-docs/references/hosted-runtime-protocol.md`.
 
+Member-owned provider setup keeps accepted no-handle recovery in the existing
+mailbox and computer owners, returns the typed retry disposition on the first
+durably retained ambiguity, and admits only its two exact signed POST callbacks
+through Cloudflare's bounded Web-control policy. This contract is jointly
+specified by `ARCHITECTURE.md`, `agent-docs/SECURITY.md`,
+`agent-docs/RELIABILITY.md`, and `agent-docs/references/testing-ci-map.md`.
+
 Personal-to-group projection convergence, including attempt-local foreground
 preemption, abort/shutdown admission before every scope, its single forwarded deadline, and
 authoritative Web-response ownership, typed destination-failure isolation,

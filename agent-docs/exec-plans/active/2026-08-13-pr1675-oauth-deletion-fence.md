@@ -98,6 +98,11 @@ provider-specific automation layer.
     two-minute retry through the existing computer owner.
 17. [x] Route consent withdrawal through existing setup status owners so
     `capturing` and cleanup-pending `canceling` retain their durable fences.
+18. [x] Admit both exact provider-setup POST routes through the existing signed
+    Cloudflare Web-control policy and prove the production outbound boundary.
+19. [x] Return the first durably retained no-handle browser-create ambiguity as
+    the existing typed provisioning outcome so the accepted mailbox item owns
+    its two-minute retry.
 
 ## Decisions
 
@@ -152,6 +157,14 @@ provider-specific automation layer.
   work to disconnection, pre-submit browser work to cancellation, retains
   cleanup-pending `canceling`, and leaves `capturing` intact so ambiguous submit
   recovery cannot create twice.
+- Provider setup uses the existing `web-control.worker` service-binding request
+  path. Cloudflare admits only the two shared exact POST constants and preserves
+  the existing bound-member, runtime-write-fence, callback-signing, and body
+  limit owners.
+- Once the computer owner durably retains an exact no-handle browser create as
+  `cleanup_pending`, the caller receives the existing typed provisioning
+  outcome even if immediate best-effort delete-by-name fails. That outcome is
+  retry ownership, not proof of cleanup or permission for another browser.
 
 ## Verification
 
@@ -216,3 +229,13 @@ provider-specific automation layer.
   pass. Exact authority validation passes, and the isolated PostgreSQL proof
   confirms that an exact stale owner is expired and replaced without a second
   live browser.
+- ReviewGPT round 15 found that Cloudflare's exact outbound allowlist omitted
+  both provider-setup routes and that the first no-handle timeout surfaced the
+  raw Kernel/delete error after durably retaining `cleanup_pending`. Both are
+  accepted for correction through the existing Web-control policy and typed
+  mailbox retry disposition; no new transport or retry owner is permitted.
+- Round-15 remediation proof: 33 production Cloudflare outbound cases, both
+  immediate-delete outcomes, the isolated PostgreSQL first-attempt and exact
+  successor case, and the exact engine/mailbox ownership seams pass. Hosted Web
+  and Cloudflare typechecks, focused Web ESLint, docs drift, diff integrity, and
+  the changed-line privacy scan pass.

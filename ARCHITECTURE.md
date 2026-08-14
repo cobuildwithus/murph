@@ -1035,14 +1035,19 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   `canceling`; a late creator deletes the exact returned browser, and a lost
   response or client timeout without an exact handle reuses the existing
   stale-provisioning delete-by-name boundary. Fresh acquisition cannot clear
-  that claim or admit a successor before the boundary. `/connect` keeps polling
-  that existing setup owner. With Cancel it reports `canceled` only after
-  cleanup is proven. Without Cancel, the same read path preserves the fresh
-  claim; at the stale boundary it deletes only the exact deterministic browser,
-  terminalizes the old run, CAS-clears the run binding while preserving
-  `browser_setup` or `capturing`, and appends the existing setup-versioned
-  continuation. Duplicate reads converge on the same mailbox identity, and a
-  `capturing` successor remains submit-free. Once an exact application binding is
+  that claim or admit a successor before the boundary. With Cancel, setup
+  reconciliation reports `canceled` only after cleanup is proven. Without
+  Cancel, the originally accepted mailbox item remains `recording` through the
+  assistant turn. Once the exact no-handle claim is durably retained, the first
+  tool attempt returns the existing typed provisioning outcome even if its
+  immediate best-effort delete-by-name fails; that outcome CASes the same item
+  back to `pending` for the two-minute boundary. Before each model attempt, the
+  runtime calls the exact signed Web validation route through Cloudflare's
+  bounded `web-control.worker` POST allowlist. At the boundary, the existing
+  computer owner deletes only the exact deterministic browser, terminalizes the
+  old run, and may admit one same-setup successor while preserving
+  `browser_setup` or `capturing`. `/connect` reads presentation truth only, and
+  a `capturing` successor remains submit-free. Once an exact application binding is
   durable, setup finishes that exact browser run and compare-and-set clears its
   run binding before OAuth can continue; an interrupted finish or clear remains
   explicit and retryable. After application deletion, the same terminal-release
@@ -1058,6 +1063,8 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   `runtime.provider-setup-continuation-requested` item to the existing hosted
   system mailbox, keyed by the exact setup/version or run/handoff, before the
   existing droppable runtime wake. Mailbox handoff recovery covers a lost wake.
+  Cloudflare admits the exact validation and tool POST paths through the existing
+  bound-member, runtime-write-fence, callback-signing, and body-limit transport.
   The runtime supplies only provider-level continuation guidance to the next
   background assistant turn; setup, run, and credentials remain behind their
   existing trusted tools and never enter model context.

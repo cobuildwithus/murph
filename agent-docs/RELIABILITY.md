@@ -1,6 +1,6 @@
 # Reliability
 
-Last verified: 2026-08-13
+Last verified: 2026-08-14
 
 ## Current Guardrails
 
@@ -986,6 +986,10 @@ Last verified: 2026-08-13
   work, while validation failure returns it to ordinary mailbox retry. The exact
   typed browser-provisioning result CASes that same item back to `pending` for
   the two-minute stale boundary without another usage or consent admission.
+  The first no-handle create attempt returns that typed result as soon as its
+  exact `cleanup_pending` claim is durable, including when the immediate
+  best-effort delete-by-name fails; the claim, not that early delete, owns
+  quiescence and retry.
   The next invocation reuses `acquireRunWithStore`, whose existing owner cleanup
   terminalizes only the exact deterministic browser and admits at most one
   same-setup successor. A crash while the item is `recording` revalidates and
@@ -995,6 +999,10 @@ Last verified: 2026-08-13
   projects disconnection, authorized/browser setup cancels, cleanup-pending
   cancellation stays `canceling`, and `capturing` remains the durable ambiguous
   submit fence.
+  Both provider-setup runtime POSTs traverse the existing Cloudflare
+  `web-control.worker` policy under the current runtime write fence, bound member,
+  callback signature, and Web-control body limit. Neighboring paths and other
+  methods remain blocked.
   Re-entering an awaiting setup rotates or
   reuses its latest valid handoff without repeating provider submission. Completing
   the exact setup-owned handoff resumes that run without a conversation reply;

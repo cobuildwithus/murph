@@ -833,7 +833,13 @@ describe.skipIf(!runPostgresConcurrencyProof)(
         await bounded(createBrowserReached.promise, "timed-out browser create without cancel");
         rejectCreateBrowser.resolve();
         const [beginResult] = await bounded(begin, "no-cancel create timeout rejection");
-        expect(beginResult.status).toBe("rejected");
+        expect(beginResult).toMatchObject({
+          reason: {
+            code: "HOSTED_COMPUTER_BROWSER_PROVISIONING",
+            retryable: true,
+          },
+          status: "rejected",
+        });
         const cleanupClaim = await prisma.hostedComputerRun.findFirstOrThrow({
           where: { memberId },
         });

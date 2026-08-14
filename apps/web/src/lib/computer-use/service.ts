@@ -651,6 +651,7 @@ export class ComputerUseService {
         }
       }
       let browserCleanupFailed = false;
+      let ambiguousBrowserCreateRetained = false;
       const cleanupBrowserId = browser?.sessionId ?? attachedSessionId ?? browserDeleteName;
       if (cleanupBrowserId && !await this.deleteBrowserBestEffort(cleanupBrowserId)) {
         browserCleanupFailed = true;
@@ -662,6 +663,7 @@ export class ComputerUseService {
             run: reservedRun,
             store,
           });
+          ambiguousBrowserCreateRetained = true;
         } else if (browserCleanupFailed) {
           if (!attachedSessionId) {
             await store.markRunCleanupPending({
@@ -695,6 +697,9 @@ export class ComputerUseService {
             });
           }
         }
+      }
+      if (ambiguousBrowserCreateRetained) {
+        throw browserProvisioningInProgressError();
       }
       if (browserCleanupFailed) {
         throw browserCleanupFailedError();

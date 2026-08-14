@@ -51,6 +51,10 @@ import {
   HOSTED_RUNTIME_ASSISTANT_PERSONALIZATION_TOOL_PATH,
 } from "@murphai/hosted-execution/assistant-personalization";
 import {
+  HOSTED_RUNTIME_PROVIDER_SETUP_CONTINUATION_VALIDATE_PATH,
+  HOSTED_RUNTIME_PROVIDER_SETUP_TOOL_PATH,
+} from "@murphai/hosted-execution/provider-setup";
+import {
   buildHostedComputerRunOperationPath,
   HOSTED_COMPUTER_RUNS_PATH,
   isHostedComputerWebControlRequest,
@@ -208,6 +212,23 @@ const PRIVATE_MEDIA_PUBLISH_EXPIRES_AT = "2033-05-18T03:33:20.000Z";
 const PRIVATE_MEDIA_PUBLISH_URL =
   `https://murph-hosted.cobuildwithus.workers.dev/private-media/v1/v1.${"a".repeat(16)}.${"b".repeat(32)}?exp=2000000000`;
 const ALLOWLISTED_WEB_CONTROL_CASES = [
+  {
+    body: {
+      provider: "strava",
+      setupId: "dps_setup",
+      setupVersion: 2,
+    },
+    name: "provider setup continuation validation",
+    path: HOSTED_RUNTIME_PROVIDER_SETUP_CONTINUATION_VALIDATE_PATH,
+  },
+  {
+    body: {
+      action: "begin",
+      provider: "strava",
+    },
+    name: "provider setup tool",
+    path: HOSTED_RUNTIME_PROVIDER_SETUP_TOOL_PATH,
+  },
   {
     body: {
       action: "upgrade_edge",
@@ -719,6 +740,24 @@ describe("handleRunnerOutboundRequest", () => {
       method: "POST",
       path: HOSTED_RUNTIME_ACTION_APPROVAL_CONSUME_PATH,
     })).toBe(true);
+  });
+
+  it.each([
+    HOSTED_RUNTIME_PROVIDER_SETUP_CONTINUATION_VALIDATE_PATH,
+    HOSTED_RUNTIME_PROVIDER_SETUP_TOOL_PATH,
+  ])("allows only the exact provider-setup POST route: %s", (path) => {
+    expect(isAllowedHostedRunnerWebControlRequest({
+      method: "POST",
+      path,
+    })).toBe(true);
+    expect(isAllowedHostedRunnerWebControlRequest({
+      method: "GET",
+      path,
+    })).toBe(false);
+    expect(isAllowedHostedRunnerWebControlRequest({
+      method: "POST",
+      path: `${path}/arbitrary`,
+    })).toBe(false);
   });
 
   it.each(ALLOWLISTED_WEB_CONTROL_CASES)(
