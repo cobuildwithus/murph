@@ -12,9 +12,11 @@ if (runtimeRoot === undefined) {
   (globalThis as Record<string, unknown>)[TEST_OVERRIDES_KEY] = Object.freeze({
     runtimeRoot,
     providerFixture: process.env.TEST_PROVIDER_FIXTURE,
-    diagnosisFixture: process.env.TEST_DIAGNOSIS_FIXTURE,
     nodeModulesSource: process.env.TEST_NODE_MODULES_SOURCE,
     codexBin: process.env.MURPH_PROD_WATCH_CODEX_BIN,
+    mcpRemoteBin: process.env.TEST_MCP_REMOTE_BIN,
+    codexArgsCapture: process.env.TEST_CODEX_ARGS_CAPTURE,
+    codexPromptCapture: process.env.TEST_CODEX_PROMPT_CAPTURE,
     extraMcp: process.env.TEST_CODEX_EXTRA_MCP === "1",
   });
   try {

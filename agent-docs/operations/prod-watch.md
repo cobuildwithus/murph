@@ -1,10 +1,10 @@
 # Production Watch
 
-Last verified: 2026-08-10
+Last verified: 2026-08-09
 
 ## Decision
 
-Use **macOS `launchd` as the authoritative five-minute scheduler**, deterministic local collectors as the evidence boundary, and a **new shell-disabled `codex exec --ephemeral` process only for bounded advisory Cloudflare collection**. The installed watcher is monitor-only; automatic diagnosis dispatch and remediation are disabled. Do not use a Codex desktop scheduled task as the production scheduler.
+Use **macOS `launchd` as the authoritative five-minute scheduler**, deterministic local collectors as the evidence boundary, and a **new shell-disabled `codex exec --ephemeral` process only for bounded advisory Cloudflare collection**. That process ignores user config, pins `gpt-5.6-luna` with low reasoning effort, disables nonessential built-in capabilities, and receives one reviewed Cloudflare MCP definition backed by the lockfile-pinned `mcp-remote` package. The installed watcher is monitor-only; automatic diagnosis dispatch and remediation are disabled. Do not use a Codex desktop scheduled task as the production scheduler.
 
 The target lifecycle is hybrid:
 
@@ -15,7 +15,7 @@ The target lifecycle is hybrid:
 5. A promoted incident is recorded in the private ledger. An operator may later claim it and use database-only scoped drill-down; the scheduler does not launch an agent worker.
 6. The launchable CLI rejects worker/remediation commands, and the scheduler never dispatches them. No automatic edit, ReviewGPT, GitHub, merge, deployment, or production mutation path is active.
 
-The launchable phase implements all-source collection and the private incident ledger. Experimental remediation code remains dormant for follow-up work and is not part of the production authority path. Missing coverage is never labeled healthy: unavailable sources remain explicit failures, and incomplete runs stay `partial` or `degraded`.
+The launchable phase implements all-source collection and the private incident ledger. It contains no diagnosis, remediation, ReviewGPT, or GitHub automation implementation. Missing coverage is never labeled healthy: unavailable sources remain explicit failures, and incomplete runs stay `partial` or `degraded`.
 
 The scheduler creates up to 288 fresh Cloudflare collection sessions per day. Vercel and Stripe stay deterministic to reduce latency, session cost, and MCP failure surface; add another MCP only when no safe deterministic aggregate adapter is available.
 
@@ -32,14 +32,14 @@ The scheduler creates up to 288 fresh Cloudflare collection sessions per day. Ve
 
 The scheduled interval is 300 seconds. One run has a 240-second deadline, leaving 60 seconds for process teardown and the next tick.
 
-1. `launchd` invokes `/bin/zsh -f -c` so user shell startup files are disabled, then starts the verified Node executable directly with an exact-head-pinned owner-only runtime's `tsx` entrypoint and `prod-watch.ts run --scheduled --provider-child`. It exports the dedicated Codex home/profile, the installer-approved absolute Codex executable and SHA-256, the shared private state root, the approved head derived from the clean installer checkout, and one fixed bounded PATH containing `$HOME/.local/bin` plus standard Homebrew/system directories. The command clears named test controls, verifies the pinned head and clean tracked tree before collection, and never enables worker dispatch.
+1. `launchd` invokes `/bin/zsh -f -c` so user shell startup files are disabled, then starts the verified Node executable directly with an exact-head-pinned owner-only runtime's `tsx` entrypoint and `prod-watch.ts run --scheduled --provider-child`. It exports the dedicated Codex home for authentication only, the installer-approved absolute Codex executable and SHA-256, the shared private state root, the approved head derived from the clean installer checkout, and one fixed bounded PATH containing `$HOME/.local/bin` plus standard Homebrew/system directories. The command clears named test controls, verifies the pinned head and clean tracked tree before collection, and never enables worker dispatch.
 2. The command creates one contender claim in `.runtime/tmp/prod-watch/run.lock`; the oldest live claim wins. A dead PID is recoverable, and claims older than 10 minutes are stale even if the PID was reused. `launchd` itself skips an interval that fires while the job is still running; the lock additionally protects manual runs, duplicate installations, and other launchers. Any losing invocation records one bounded overlap marker and exits successfully without starting another collector.
 3. The collection window ends 60 seconds before collection time to tolerate ingestion lag. It compares adjacent 15-minute windows, so every event is seen in multiple scheduled runs without becoming duplicate incident state.
 4. The database adapter sends fixed SQL to `murph-prod-psql-ro` on stdin. The helper remains the only PostgreSQL entry point. The child has a 30-second deadline and bounded stdout/stderr capture. Only stdout is parsed; stderr contents are discarded and reduced to a redacted error code. A stdin failure enters the same terminate-then-force-terminate lifecycle as timeout or abort, and the parent does not settle until the child exits.
-5. Deterministic adapters read Vercel request-log aggregates through the existing CLI authorization and Stripe live event aggregates through the Stripe CLI. A new `codex exec --ephemeral` process receives only bounded aggregate context and a JSON output schema, uses read-only sandboxing with only Cloudflare Observability enabled, writes one temporary provider envelope, and exits. The file is validated locally and deleted after merge. `--provider-shadow` exercises the same path but does not merge evidence or advance provider health.
+5. Deterministic adapters read Vercel request-log aggregates through the existing CLI authorization and Stripe live event aggregates through the Stripe CLI. A new `codex exec --ephemeral --ignore-user-config --strict-config` process receives only bounded aggregate context and a JSON output schema, uses read-only sandboxing, pins the reviewed model and effort, disables web/apps/hooks/multi-agent/shell and other nonessential built-ins, defines only the lockfile-pinned Cloudflare Observability MCP transport, writes one temporary provider envelope, and exits. The dedicated Codex home supplies authentication material only; arbitrary instructions and tool configuration are not inherited. The file is validated locally and deleted after merge. `--provider-shadow` exercises the same path but does not merge evidence or advance provider health.
 6. Local code evaluates fixed rules, advances consecutive-source-observation streaks, deduplicates by stable fingerprint, and writes state/projections under a separate state lock. Only fresh, complete, authenticated, successful evidence from deterministic adapters contributes production counters, latency, fingerprints, provider release context, or terminal-transition authority. Cloudflare's model-mediated collection remains advisory and non-scorable until a deterministic adapter replaces it. Degraded, partial, stale, failed, unauthenticated, or advisory evidence contributes monitor-health status only. One observation rule governs every source-owned state slice: evidence in any status uses its source `collectedAt`; a fresh deterministic collection/admission failure without evidence uses its attempt time; and absence is no observation. Replays and unrelated-source ticks preserve state. A newer non-scorable observation may advance monitor recurrence while preserving production streaks and trusted cumulative baselines; a newer scorable clean observation resets source streaks and updates any supplied cumulative totals.
 7. Files are written to a same-directory temporary file, synced, chmod `0600`, and renamed. Directories use `0700`.
-8. Production parsing ignores `--dispatch-workers`, and direct worker/remediation commands fail closed with `automatic_remediation_not_enabled`. Promoted incidents remain in the private Markdown/JSON ledger for operator handling without blocking later five-minute collection passes.
+8. Dispatch flags are rejected as unknown, and direct worker/remediation commands fail closed with `automatic_remediation_not_enabled`. Promoted incidents remain in the private Markdown/JSON ledger for operator handling without blocking later five-minute collection passes.
 9. Healthy scheduled runs produce no terminal output. New incidents, degraded monitor health, manual runs, and dry runs return a small summary.
 10. A normal exit removes its contender claim. If the process crashes or is force-killed, a later tick removes the claim when its recorded PID is no longer alive or when it is older than the 10-minute PID-reuse fence. `launchd` does not use `KeepAlive`, so it does not create a crash loop; the next 300-second tick retries.
 11. Missed ticks are not replayed in a burst after sleep. Scheduler lag and the last successful collection are explicit monitor-health fields.
@@ -70,25 +70,18 @@ pnpm --silent prod-watch run --dry-run
 # Merge a schema-validated provider envelope produced by a fresh Codex MCP pass.
 # The file must be current-user-owned, mode 0600, and inside a private temporary directory.
 pnpm --silent prod-watch run --dry-run --provider-evidence "$PROVIDER_EVIDENCE_FILE"
-
-# Run the fresh read-only Codex provider child directly.
-pnpm --silent prod-watch collect --provider-child --output -
-
-# Validate provider-child behavior without merging it into the snapshot.
-pnpm --silent prod-watch collect --provider-shadow --output -
 ```
 
 ### Scheduler
 
 ```sh
 pnpm --silent prod-watch scheduler render --output -
-pnpm --silent prod-watch scheduler preflight
 pnpm --silent prod-watch scheduler install
 pnpm --silent prod-watch scheduler status
 pnpm --silent prod-watch scheduler uninstall
 ```
 
-`preflight` verifies the current Node executable, repository-local `tsx`, tools tsconfig, production-watch entrypoint, executable `murph-prod-psql-ro`, the exact owner-controlled Codex standalone release path and version, configured Codex profile, an effective MCP set containing only Cloudflare Observability, and live aggregate provider coverage. `install` derives its sole approved revision from the clean Git head of the code executing the installer; a caller-supplied head is only an optional equality assertion and can never select another commit. It records the resolved approved Codex executable and its SHA-256 into the rendered job, creates a dedicated owner-only self-contained Git runtime at that immutable revision with hooks, reflogs, and automatic Git maintenance disabled, installs locked dependencies offline with scripts disabled, and renders the job against that pinned runtime. The runtime keeps its Git directory and objects inside its owner-only scheduler directory so launchd does not depend on metadata in the source checkout. Every provider pass rechecks the pinned Codex path, owner/mode, and digest before launch. Run install only from the exact ReviewGPT-approved clean checkout. Verification happens before an existing managed job is stopped. The command writes the plist under the current user's LaunchAgents directory and uses `launchctl bootstrap`. It refuses unsafe paths, alternate Codex binaries, a changed Codex digest, a conflicting head assertion, test-only production controls, or an unavailable executable/helper/provider chain. Neither the checked-in template nor rendered plist contains a concrete home directory, account name, or secret. Install, replacement, and uninstall verify the label with `launchctl print`; an unknown service state is an error, and uninstall preserves the managed plist until absence is proven. Status reports `launchdState` as `loaded`, `absent`, or `unknown` and uses `loaded: null` for the unknown case. Routine stdout/stderr goes to `/dev/null`; monitor state plus `launchctl` status are the diagnostic surface.
+`preflight` verifies the current Node executable, repository-local `tsx` and lockfile-pinned `mcp-remote`, tools tsconfig, production-watch entrypoint, executable `murph-prod-psql-ro`, the exact owner-controlled Codex standalone release path and version, the immutable provider model/effort/feature overrides, an effective MCP set containing only Cloudflare Observability, and live aggregate provider coverage. `install` derives its sole approved revision from the clean Git head of the code executing the installer; a caller-supplied head is only an optional equality assertion and can never select another commit. It records the resolved approved Codex executable and its SHA-256 into the rendered job, creates a dedicated owner-only self-contained Git runtime at that immutable revision with hooks, reflogs, and automatic Git maintenance disabled, installs locked dependencies offline with scripts disabled, and renders the job against that pinned runtime. The runtime keeps its Git directory and objects inside its owner-only scheduler directory so launchd does not depend on metadata in the source checkout. Every provider pass rechecks the pinned Codex path, owner/mode, and digest plus the repository-local MCP transport before launch. Run install only from the exact ReviewGPT-approved clean checkout. Verification happens before an existing managed job is stopped. The command writes the plist under the current user's LaunchAgents directory and uses `launchctl bootstrap`. It refuses unsafe paths, alternate Codex binaries, a changed Codex digest, a conflicting head assertion, test-only production controls, or an unavailable executable/helper/provider chain. Neither the checked-in template nor rendered plist contains a concrete home directory, account name, or secret. Install, replacement, and uninstall verify the label with `launchctl print`; an unknown service state is an error, and uninstall preserves the managed plist until absence is proven. Status reports `launchdState` as `loaded`, `absent`, or `unknown` and uses `loaded: null` for the unknown case. Routine stdout/stderr goes to `/dev/null`; monitor state plus `launchctl` status are the diagnostic surface.
 
 ### Incident coordination and drill-down
 
@@ -103,9 +96,9 @@ pnpm --silent prod-watch incident transition "$INCIDENT" \
   --state escalated
 ```
 
-The incident projections show each incident's source. Database incidents support the full list → claim → drill-down → transition journey. Provider incidents support list → claim → transition to `escalated`; provider drill-down is not advertised because the temporary provider envelope has already been removed. The CLI rejects a provider incident before heartbeating or persisting its lease, and it rejects an undisclosed provider-envelope input on the drill-down command. Synthetic fixtures are accepted only by read-only `collect`; `run` and `drill-down` reject `--fixture` before lock acquisition, lease extension, or any state/projection write.
+The incident projections show each incident's source. Database incidents support the full list → claim → drill-down → transition journey. Phase 1 provider incidents support list → claim → transition to `escalated`; provider drill-down is not advertised because the temporary provider envelope has already been removed. The CLI rejects a provider incident before heartbeating or persisting its lease, and it rejects an undisclosed provider-envelope input on the drill-down command. Synthetic fixtures are accepted only by read-only `collect`; `run` and `drill-down` reject `--fixture` before lock acquisition, lease extension, or any state/projection write.
 
-The provider-child command shape is:
+The target MCP command shape is intentionally external to Phase 1:
 
 ```sh
 codex exec --ephemeral --sandbox read-only --json \
@@ -115,14 +108,9 @@ codex exec --ephemeral --sandbox read-only --json \
 
 The prompt is supplied on stdin and tells Codex to use the production-watch skill, query only aggregate MCP surfaces, and emit no prose. The wrapper streams the `--json` event output through a bounded parser that retains only the session/thread ID and terminal status; it never persists tool events. It must create the final envelope below a `0700` temporary directory as a current-user-owned `0600` file, cap the child runtime, validate the result locally, and remove the file after the merge succeeds or fails. The collector rejects symlinks, non-private permissions, unexpected ownership, oversized files, and invalid envelopes outside explicit fixture mode.
 
-### Remediation
+### Automation boundary
 
-```sh
-# Automatic worker/remediation commands are intentionally unavailable.
-pnpm --silent prod-watch remediate "$INCIDENT" --session-id "$SESSION"
-```
-
-The installed scheduler runs from a dedicated owner-only, self-contained Git runtime pinned to the clean installer checkout's exact reviewed commit and installed offline with dependency scripts disabled. Every tick verifies that pinned Git head, tracked tree, internal Git common directory, and lack of object alternates before collection. It never passes `--dispatch-workers`. Direct worker and remediation commands fail closed. The production entrypoint refuses `NODE_ENV=test`, `NODE_OPTIONS`, the test runtime-root variable, and every `TEST_*` variable; test dependency injection lives in a separate test-only entrypoint that the scheduler never invokes. Before the only Codex child in the launch path starts, the pinned executable and digest are rechecked and the same executable, profile, overrides, environment, and working directory must report exactly one enabled MCP: Cloudflare Observability. The child also has shell tooling disabled, an isolated HOME and minimal environment, and receives no database, Vercel, or Stripe evidence. Production-watch never invokes GitHub, ReviewGPT, merge, auto-merge, deploy, or production/provider mutations in this phase.
+The installed scheduler runs from a dedicated owner-only, self-contained Git runtime pinned to the clean installer checkout's exact reviewed commit and installed offline with dependency scripts disabled. Every tick verifies that pinned Git head, tracked tree, internal Git common directory, and lack of object alternates before collection. It never passes a dispatch flag. Direct worker and remediation commands fail closed before state or external effects. The production entrypoint refuses `NODE_ENV=test`, `NODE_OPTIONS`, the test runtime-root variable, and every `TEST_*` variable; test dependency injection lives in a separate test-only entrypoint that the scheduler never invokes. Before the only Codex child in the launch path starts, the pinned executable and digest are rechecked, user config is ignored, and the reviewed model, effort, disabled-feature set, environment, working directory, transport path, and one enabled MCP are re-established. The child has shell tooling disabled, an isolated HOME and minimal environment, and receives no database, Vercel, or Stripe evidence. Production-watch contains no GitHub, ReviewGPT, merge, auto-merge, deploy, or production/provider mutation implementation.
 
 ## Snapshot schema
 
@@ -147,7 +135,7 @@ The serialized fingerprint bound is 37: 13 ranked database fingerprints plus eig
 
 ## Adapter ownership
 
-| Source | Phase 2 owner | Target | Notes |
+| Source | Phase 1 | Target | Notes |
 | --- | --- | --- | --- |
 | PostgreSQL | Deterministic local SQL | Same | Fixed query on stdin through `murph-prod-psql-ro`; read-only transaction; no connection string. |
 | Repository SHA | Deterministic local Git read | Same | Context only; never production truth by itself. |
@@ -176,11 +164,11 @@ The first database query deliberately omits full workspace/checkpoint scans: the
     state.lock/
 ```
 
-`state.v1.json` is durable machine-local coordination state. It stores monitor health, the latest observation identity/classification per source, anomaly streaks, cumulative-counter baselines, the incident lifecycle, and triage lease metadata. Its schema retains dormant remediation fields for compatibility, but the launchable CLI never populates them. It contains no raw snapshots, production bodies, provider payloads, diffs, or ReviewGPT transcripts. Active projections expose the source, short incident ID, and canonical redacted Signal accepted by claim, heartbeat, and transition commands; database incidents also accept the ID for drill-down. Metric signals have the form `metric|key=value|key=value` with sorted exact dimensions, so simultaneous provider/database surfaces remain distinguishable. A rate incident's drill-down retains only its matching numerator and denominator at those exact dimensions; latency and fingerprint drill-downs are equally exact. The fingerprint prefix is diagnostic only.
+`state.v1.json` is durable machine-local coordination state. It stores monitor health, the latest observation identity/classification per source, anomaly streaks, cumulative-counter baselines, the incident lifecycle, and triage lease metadata. It contains no remediation lifecycle, raw snapshots, production bodies, provider payloads, diffs, or review transcripts. Active projections expose the source, short incident ID, and canonical redacted Signal accepted by claim, heartbeat, and transition commands; database incidents also accept the ID for drill-down. Metric signals have the form `metric|key=value|key=value` with sorted exact dimensions, so simultaneous provider/database surfaces remain distinguishable. A rate incident's drill-down retains only its matching numerator and denominator at those exact dimensions; latency and fingerprint drill-downs are equally exact. The fingerprint prefix is diagnostic only.
 
 The Markdown files are rebuildable atomic projections. They are ignored by Git and must never be edited as inputs. `ACTIVE_INCIDENTS.md` shows nonterminal incidents and current lease ownership. `INCIDENT_HISTORY.md` shows terminal and active history without private production data. `MONITOR_STATUS.md` shows scheduler/coverage health.
 
-JSON is sufficient for Phase 2 because state is small, single-host, and serialized by one state lock. Move baseline history to SQLite only when rolling baselines require many samples or multi-process queries; do not introduce SQLite merely for incident rows.
+JSON is sufficient for Phase 1 because state is small, single-host, and serialized by one state lock. Move baseline history to SQLite only when rolling baselines require many samples or multi-process queries; do not introduce SQLite merely for incident rows.
 
 ### Deduplication and retention
 
@@ -190,7 +178,7 @@ JSON is sufficient for Phase 2 because state is small, single-host, and serializ
 - Cumulative totals retain their last trusted value across absent, failed, degraded, stale, unavailable, or unauthenticated ticks. A newer scorable value replaces that baseline, so a recovery observation detects a positive delta across the collection gap instead of silently losing it.
 - Repeated occurrences update `lastSeenAt`, count, evidence, and release context on the same incident.
 - Incidents retain at most 32 transitions. Terminal incidents retain 180 days, with a hard cap of 2,000 records.
-- Triage leases are per incident, with acquired/heartbeat/expiry times. A different session cannot claim before expiry. Stale triage leases are recovered on state read. Dormant remediation lease fields are not production authority.
+- Triage leases are per incident, with acquired/heartbeat/expiry times. A different session cannot claim before expiry. Stale triage leases are recovered on state read.
 
 ## Incident state machine
 
@@ -261,9 +249,9 @@ All must hold:
 6. Repository search identifies a narrow reachable path; no raw production data is needed.
 7. The incident is not sensitive or otherwise alert-only.
 
-### Deferred edit, ReviewGPT, and PR gate
+### Deferred automation gate
 
-The launchable CLI rejects worker/remediation commands before any worktree, model, review, Git, GitHub, or network effect. The scheduler never supplies the dispatch flag. Experimental code is retained only as non-authoritative follow-up material. A future activation must add deterministic deployment identity, an editor-only tool boundary with no production evidence, queue-owned attempt fencing, current-evidence revalidation, and crash-idempotent review/publication reconciliation, then pass a new exact-head launch gate.
+The launchable CLI rejects worker/remediation commands before state or external effects, and dispatch flags are not accepted. No automatic diagnosis, edit, review, GitHub, or publication implementation is retained. Any future automation must introduce and document a complete authority model, then pass a new exact-head launch gate.
 
 ## Self-monitoring
 
@@ -276,7 +264,7 @@ The monitor projection exposes:
 - configured and collected source coverage;
 - source failure streaks and stale/auth state;
 - overlap skip count;
-- active incident count, triage lease owner, active remediation count, and global remediation lease owner;
+- active incident count and lease owner;
 - latest snapshot schema/collector version.
 
 Alert suppression rules:
@@ -302,7 +290,7 @@ Alert suppression rules:
 | State corruption or final-path symlink | Private directories, exact schema parsing, final-directory checks, atomic same-directory rename, fail-closed reads, ignored machine-local paths. |
 | Laptop sleep/offline | Scheduler lag and stale success metadata; no catch-up storm. External metadata-only dead-man is required for true 24/7 assurance. |
 | Malicious code change to monitor | Review the production-watch diff like any operational code; fixtures assert private fields never enter SQL/schema; monitor has no production write credentials. |
-| Local executable or test-mode substitution | Install accepts only the exact standalone Codex release path, records its digest, and rechecks path/owner/mode/digest before child launch. The production entrypoint rejects test-only environment controls; test injection uses a separate entrypoint. |
+| Local executable, mutable Codex config, or test-mode substitution | Install accepts only the exact standalone Codex release path, records its digest, and rechecks path/owner/mode/digest before child launch. The child ignores user config and receives reviewed model/effort/feature/MCP overrides with a lockfile-pinned transport. The production entrypoint rejects test-only environment controls; test injection uses a separate entrypoint. |
 
 ## Verification matrix
 
@@ -311,17 +299,17 @@ Alert suppression rules:
 | Schema bounds/redaction | Healthy fixture serializes without fixture raw fingerprint or forbidden identifier/text keys; strict provider evidence rejects extra prompt/log fields. |
 | Anomaly rules | Suspicious fixture proves sensitive escalation, deployment correlation, and two-window promotion for noisy rates. |
 | Deduplication | Same source/rule dimensions stay one incident across windows and release SHA changes. |
-| Lease safety | A second triage owner cannot claim; stale dead-PID/PID-reuse claims are recoverable; live lock is not stolen; malformed incident/remediation state fails closed; the global remediation lease has one owner. |
+| Lease safety | A second triage owner cannot claim; stale dead-PID/PID-reuse claims are recoverable; live lock is not stolen; malformed incident state fails closed. |
 | Timeout/failure isolation | Fake database helpers hang, close stdin early, and ignore the first termination request; the collector preserves bounded termination ownership, waits for exact child exit, emits only a redacted helper failure/timeout, and recovers for the next collection. |
 | Fixture/read-only boundary | Fixtures exercise `collect` only. `run`, `run --dry-run`, and `drill-down` reject fixtures before state locks or leases and leave state, projections, and the latest snapshot byte-for-byte unchanged. |
-| Provider evidence | A source-wide `{source}` request/error/timeout triple is the sole source-completeness proof; consistent surface-only subsets remain partial. Exact-dimension rate denominators remain mandatory supplementary proof. A fake Codex child proves schema-output ingestion without persisting event streams. |
+| Provider evidence | A source-wide `{source}` request/error/timeout triple is the sole source-completeness proof; consistent surface-only subsets remain partial. Exact-dimension rate denominators remain mandatory supplementary proof. A hostile source Codex config cannot override the reviewed model/effort or enable web, apps, hooks, multi-agent, remote plugins, or shell; the fake child captures the real stdin and proves each aggregate-only prompt clause plus the dynamic worker/source/window request. |
 | Source-aware recurrence | Replaying one provider envelope cannot advance a streak; database-only ticks preserve it; a newer provider observation advances or cleanly resets it; retention expiry resets it. |
 | Monitor/cumulative observation ownership | Replaying one unchanged failed provider envelope leaves monitor and failure streaks unchanged; a newer failed observation advances the chosen monitor policy; newer clean evidence resets it. A failed database tick preserves the trusted cumulative baseline and a higher recovery total detects the intervening delta. |
 | Dry run | Live-helper dry run produces a snapshot without state or Markdown projection files. |
-| Database boundary | Static proof requires a read-only transaction, bounded timeouts, and no private columns. The opt-in `scripts/prod-watch.database.integration.test.ts` lane runs the exact CLI query through `murph-prod-psql-ro`, retains the aggregate snapshot only in memory, and validates the strict snapshot contract without printing the payload. |
+| Database boundary | Static proof requires a read-only transaction, bounded timeouts, and no private columns. A deterministic maximum-cardinality process test proves one helper/session, one read-only transaction, zero provider calls, peak database concurrency one, exact SQL delivery, sensitive-first bounded ordering, and at most 15 counters, 2 latency rows, and 13 fingerprints. The opt-in `scripts/prod-watch.database.integration.test.ts` lane runs the exact CLI query through `murph-prod-psql-ro`, retains the aggregate snapshot only in memory, and validates the strict snapshot contract without printing the payload. |
 | Database fingerprint identity | Static writer/importer/SQL proof and behavioral parsing prove allowlisted operation/surface propagation, sensitive classification, and exact source-fingerprint drill-down matching. |
 | Scheduler | Template proof requires a 300-second interval, `KeepAlive=false`, `/bin/zsh -f -c`, exact-head/runtime placeholders, a fixed helper PATH, the dedicated Codex home/profile, installer-pinned Codex path/digest, production test-control clearing, provider collection, no worker dispatch, and no concrete machine path. Rendered output retains literal `$HOME` paths and rejects unsafe repository/runtime paths. A macOS-only command smoke places a detectable `.zshenv` in the scheduler HOME, starts from a minimal launchd environment, proves the startup file is not executed, makes `murph-prod-psql-ro` and fake Codex available only through the test-only dependency-injection entrypoint, runs the rendered Node/tsx chain, and proves collection. Separate regressions prove that the production entrypoint rejects test controls and an alternate Codex executable. A disposable-home/fake-`launchctl` lifecycle test proves unmanaged-file refusal, preflight before managed replacement, pinned runtime setup, failed-enable cleanup, and uninstall behavior; an operator smoke remains required before activation. |
-| Remediation gate | Production CLI tests prove worker and remediation commands fail before state or external effects; the launchd template contains no dispatch flag. Dormant core state tests remain compatibility-only. |
+| Automation boundary | Production CLI tests prove worker and remediation commands fail before state or external effects; dispatch flags are rejected; the launchd template contains no dispatch flag; the state schema has no remediation owner or session fields. |
 | JSON contracts | All checked-in schemas parse; fixture evidence passes the runtime's strict parsers and produces the documented `snapshot.v1` shape. |
 | Repo gates | `pnpm test:repo-tools -- scripts/prod-watch.test.ts`, tools typecheck, `git diff --check`, and relevant docs checks. |
 
@@ -329,7 +317,7 @@ Alert suppression rules:
 
 The local activation enables monitor-only all-source collection from a pinned reviewed runtime. The collection supervisor has a 240-second deadline and never starts detached diagnosis/remediation workers. Every incident remains ledger-only until an operator explicitly investigates it outside the scheduler. Automatic editing and publication require a future separately reviewed activation.
 
-Review duration, overlap count, source failure streaks, incident precision, and retained worktrees daily during the first week. Disable the scheduler if collection repeatedly exceeds its deadline, auth fails persistently, or incident quality is poor.
+Review duration, overlap count, source failure streaks, incident precision, and retained runtimes daily during the first week. Disable the scheduler if collection repeatedly exceeds its deadline, auth fails persistently, or incident quality is poor.
 
 Rollback is immediate and application-independent:
 

@@ -24,7 +24,7 @@
       "const": "prod-watch.snapshot.v1"
     },
     "collectorVersion": {
-      "const": "phase-2"
+      "const": "phase-1"
     },
     "generatedAt": {
       "$ref": "#/$defs/timestamp"
@@ -621,8 +621,7 @@
         "observedAt",
         "evidence",
         "deploymentCorrelated",
-        "minimumConsecutiveRuns",
-        "automationClass"
+        "minimumConsecutiveRuns"
       ],
       "properties": {
         "fingerprint": {
@@ -685,13 +684,6 @@
           "type": "integer",
           "minimum": 1,
           "maximum": 3
-        },
-        "automationClass": {
-          "enum": [
-            "alert_only",
-            "diagnosis_only",
-            "remediation_candidate"
-          ]
         }
       }
     },

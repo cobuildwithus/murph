@@ -104,6 +104,9 @@ importers:
       frog:
         specifier: 1.1.0
         version: 1.1.0
+      mcp-remote:
+        specifier: 0.1.38
+        version: 0.1.38
       tsx:
         specifier: ^4.20.6
         version: 4.21.0
@@ -7629,6 +7632,10 @@ packages:
     resolution: {integrity: sha512-/IXtbwEk5HTPyEwyKX6hGkYXxM9nbj64B+ilVJnC/R6B0pH5G4V3b0pVbL7DBj4tkhBAppbQUlf6F6Xl9LHu1g==}
     engines: {node: '>= 0.4'}
 
+  mcp-remote@0.1.38:
+    resolution: {integrity: sha512-w+JU4U3CfG29TawXR4JLNQ9d1Un5nT8AGI65f/juCaqUdF/V6fS7wE4o7xNPbB8X58o46hRXEJgYglQMAKQs4w==}
+    hasBin: true
+
   md5@2.3.0:
     resolution: {integrity: sha512-T1GITYmFaKuO91vxyoQMFETst+O71VUPEU3ze5GNzDm0OWdP8v1ziTaAEPUr/3kLsY3Sftgz242A1SetQiDL7g==}
 
@@ -9113,6 +9120,9 @@ packages:
   strict-uri-encode@2.0.0:
     resolution: {integrity: sha512-QwiXZgpRcKkhTj2Scnn++4PKtWsH0kpzZ62L2R6c/LUVYv7hVnZqcg2+sMuT6R7Jusu1vviK/MFsu6kNJfWlEQ==}
     engines: {node: '>=4'}
+
+  strict-url-sanitise@0.0.1:
+    resolution: {integrity: sha512-nuFtF539K8jZg3FjaWH/L8eocCR6gegz5RDOsaWxfdbF5Jqr2VXWxZayjTwUzsWJDC91k2EbnJXp6FuWW+Z4hg==}
 
   string-width@4.2.3:
     resolution: {integrity: sha512-wKyQRQpjJ0sIp62ErSZdGsjMJWsap5oRNihHhu6G7JVO/9jIB6UyevL+tXuOqrng8j/cxKTWyWUwvSTriiZz/g==}
@@ -18807,6 +18817,15 @@ snapshots:
 
   math-intrinsics@1.1.0: {}
 
+  mcp-remote@0.1.38:
+    dependencies:
+      express: 4.22.1
+      open: 10.2.0
+      strict-url-sanitise: 0.0.1
+      undici: 7.28.0
+    transitivePeerDependencies:
+      - supports-color
+
   md5@2.3.0:
     dependencies:
       charenc: 0.0.2
@@ -20591,6 +20610,8 @@ snapshots:
   strict-event-emitter@0.5.1: {}
 
   strict-uri-encode@2.0.0: {}
+
+  strict-url-sanitise@0.0.1: {}
 
   string-width@4.2.3:
     dependencies:

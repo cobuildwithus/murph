@@ -16,9 +16,8 @@ export const SNAPSHOT_SCHEMA_VERSION = "prod-watch.snapshot.v1" as const;
 export const ADAPTER_SCHEMA_VERSION = "prod-watch.adapter-evidence.v1" as const;
 export const PROVIDER_SCHEMA_VERSION = "prod-watch.provider-evidence.v1" as const;
 export const STATE_SCHEMA_VERSION = "prod-watch.state.v1" as const;
-export const REMEDIATION_SCHEMA_VERSION = "prod-watch.remediation.v1" as const;
 export const REDACTION_POLICY_VERSION = "prod-watch.redaction.v1" as const;
-export const COLLECTOR_VERSION = "phase-2" as const;
+export const COLLECTOR_VERSION = "phase-1" as const;
 
 export const WATCH_SOURCES = ["database", "vercel", "cloudflare", "stripe"] as const;
 export type WatchSource = (typeof WATCH_SOURCES)[number];
@@ -26,7 +25,6 @@ export type ReleaseSource = WatchSource | "repository";
 export type SourceStatus = "ok" | "degraded" | "unavailable" | "not_collected";
 export type AuthStatus = "ok" | "failed" | "not_required" | "unknown";
 export type Severity = "low" | "medium" | "high" | "critical";
-export type AutomationClass = "alert_only" | "diagnosis_only" | "remediation_candidate";
 export type RunMode = "collect" | "scheduled" | "drill_down";
 export type FailureClass = "auth" | "timeout" | "rate_limit" | "schema" | "unavailable" | "internal";
 export type CounterUnit = "count" | "ratio" | "bytes" | "milliseconds";
@@ -43,12 +41,6 @@ export type IncidentState =
 const TERMINAL_INCIDENT_STATES = new Set<IncidentState>([
   "false_positive",
   "resolved",
-]);
-const ACTIVE_REMEDIATION_STATES = new Set<RemediationSessionState>([
-  "queued",
-  "dispatched",
-  "review_pending",
-  "review_approved",
 ]);
 const INCIDENT_TRANSITIONS: Readonly<Record<IncidentState, ReadonlySet<IncidentState>>> = {
   candidate: new Set(["claimed_triage"]),
@@ -79,14 +71,9 @@ const MAX_ANOMALIES = MAX_FAILURES
   + MAX_FINGERPRINTS;
 const MAX_INCIDENTS = 2_000;
 const MAX_TRANSITIONS = 32;
-const MAX_REMEDIATION_SESSIONS = 256;
-const MAX_REMEDIATION_COOLDOWNS = 512;
 const INCIDENT_RETENTION_MS = 180 * 24 * 60 * 60 * 1_000;
 const FALSE_POSITIVE_REOPEN_COOLDOWN_MS = 6 * 60 * 60 * 1_000;
 const STREAK_RETENTION_MS = 2 * 60 * 60 * 1_000;
-const REMEDIATION_SESSION_RETENTION_MS = 30 * 24 * 60 * 60 * 1_000;
-const REMEDIATION_DISPATCH_COOLDOWN_MS = 30 * 60 * 1_000;
-const REMEDIATION_REVIEW_COOLDOWN_MS = 6 * 60 * 60 * 1_000;
 const MAX_LOCK_CLAIM_AGE_MS = 10 * 60 * 1_000;
 const LOCK_ELECTION_SETTLE_MS = 100;
 const SAFE_TOKEN_PATTERN = /^[A-Za-z0-9._:/-]+$/u;
@@ -281,7 +268,6 @@ export interface AnomalyCandidate {
   evidence: AnomalyEvidence[];
   deploymentCorrelated: boolean;
   minimumConsecutiveRuns: number;
-  automationClass: AutomationClass;
 }
 
 export interface ProductionWatchSnapshot {
@@ -364,47 +350,12 @@ export interface IncidentTransition {
   sessionId?: string;
 }
 
-export type RemediationSessionState =
-  | "queued"
-  | "dispatched"
-  | "alert_escalated"
-  | "blocked"
-  | "review_pending"
-  | "review_approved"
-  | "draft_pr_opened";
-
-export type RemediationReviewOutcome = "approved" | "rejected" | "invalid";
-
-export interface RemediationSessionRecord {
-  sessionId: string;
-  incidentId: string;
-  incidentFingerprint: string;
-  state: RemediationSessionState;
-  startedAt: string;
-  updatedAt: string;
-  heartbeatAt?: string;
-  expiresAt?: string;
-  patchHead?: string;
-  reviewFingerprint?: string;
-  reviewOutcome?: RemediationReviewOutcome;
-  prRef?: string;
-  lastErrorCode?: string;
-}
-
-export interface RemediationCoordinationState {
-  schemaVersion: typeof REMEDIATION_SCHEMA_VERSION;
-  globalLease?: IncidentLease;
-  sessions: RemediationSessionRecord[];
-  reviewCooldowns: Record<string, string>;
-}
-
 export interface IncidentRecord {
   id: string;
   fingerprint: string;
   state: IncidentState;
   severity: Severity;
   category: AnomalyCandidate["category"];
-  automationClass: AutomationClass;
   source: WatchSource;
   ruleId: string;
   signalCode: string;
@@ -465,7 +416,6 @@ export interface ProductionWatchState {
   }>;
   cumulativeCounters: Record<string, number>;
   incidents: IncidentRecord[];
-  remediation: RemediationCoordinationState;
 }
 
 export interface BuildSnapshotInput {
@@ -817,8 +767,9 @@ function sourceAccess(source: WatchSource): SourceHealth["access"] {
 
 function isMandatoryAnomaly(candidate: AnomalyCandidate): boolean {
   return candidate.category === "sensitive"
+    || candidate.category === "monitor"
     || candidate.severity === "critical"
-    || candidate.automationClass === "alert_only";
+    || candidate.source === "stripe";
 }
 
 function selectBoundedAnomalies(candidates: AnomalyCandidate[]): AnomalyCandidate[] {
@@ -882,7 +833,6 @@ export function evaluateAnomalies(input: {
       observedAt,
       evidence: [{ metric: "collector_failure", current: 1, threshold: 1, unit: "count" }],
       minimumConsecutiveRuns: authFailure ? 1 : 2,
-      automationClass: "alert_only",
       deploymentCorrelated: false,
     }));
   }
@@ -900,7 +850,6 @@ export function evaluateAnomalies(input: {
         observedAt,
         evidence: [{ metric: "collector_failure", current: 1, threshold: 1, unit: "count" }],
         minimumConsecutiveRuns: authFailure ? 1 : 2,
-        automationClass: "alert_only",
         deploymentCorrelated: false,
       }));
     }
@@ -914,7 +863,6 @@ export function evaluateAnomalies(input: {
         observedAt,
         evidence: [{ metric: "source_degraded", current: 1, threshold: 1, unit: "count" }],
         minimumConsecutiveRuns: 2,
-        automationClass: "alert_only",
         deploymentCorrelated: false,
       }));
     }
@@ -937,7 +885,6 @@ export function evaluateAnomalies(input: {
           unit: "count",
         }],
         minimumConsecutiveRuns: 2,
-        automationClass: "alert_only",
         deploymentCorrelated: false,
       }));
     }
@@ -1005,7 +952,6 @@ export function evaluateAnomalies(input: {
         observedAt,
         evidence: [{ metric: counter.metric, current: counter.current, threshold: 0.9, unit: "ratio" }],
         minimumConsecutiveRuns: 2,
-        automationClass: "diagnosis_only",
         deploymentCorrelated: false,
       }));
     }
@@ -1021,7 +967,6 @@ export function evaluateAnomalies(input: {
         observedAt,
         evidence: [{ metric: counter.metric, current: counter.current, threshold: 1, unit: "count" }],
         minimumConsecutiveRuns: 2,
-        automationClass: "diagnosis_only",
         deploymentCorrelated: false,
       }));
     }
@@ -1037,7 +982,6 @@ export function evaluateAnomalies(input: {
         observedAt,
         evidence: [{ metric: counter.metric, current: counter.current, threshold: 5, unit: "count" }],
         minimumConsecutiveRuns: 2,
-        automationClass: "diagnosis_only",
         deploymentCorrelated: false,
       }));
     }
@@ -1063,7 +1007,6 @@ export function evaluateAnomalies(input: {
           unit: "count",
         }],
         minimumConsecutiveRuns: 1,
-        automationClass: "diagnosis_only",
         deploymentCorrelated: false,
       }));
     }
@@ -1118,11 +1061,6 @@ export function evaluateAnomalies(input: {
         },
       ],
       minimumConsecutiveRuns: 2,
-      automationClass: sensitive
-        ? "alert_only"
-        : release === undefined
-          ? "diagnosis_only"
-          : "remediation_candidate",
       deploymentCorrelated: release !== undefined,
     }));
   }
@@ -1171,11 +1109,6 @@ export function evaluateAnomalies(input: {
         unit: "count",
       }],
       minimumConsecutiveRuns: sensitive || critical ? 1 : 2,
-      automationClass: sensitive || critical
-        ? "alert_only"
-        : release === undefined
-          ? "diagnosis_only"
-          : "remediation_candidate",
       deploymentCorrelated: release !== undefined,
     }));
   }
@@ -1200,15 +1133,6 @@ export function createInitialState(now: Date, configuredSources: WatchSource[]):
     anomalyStreaks: {},
     cumulativeCounters: {},
     incidents: [],
-    remediation: createInitialRemediationState(),
-  };
-}
-
-function createInitialRemediationState(): RemediationCoordinationState {
-  return {
-    schemaVersion: REMEDIATION_SCHEMA_VERSION,
-    sessions: [],
-    reviewCooldowns: {},
   };
 }
 
@@ -1219,22 +1143,9 @@ export function parseState(value: unknown): ProductionWatchState {
     "cumulativeCounters",
     "incidents",
     "monitor",
-    "remediation",
     "schemaVersion",
     "updatedAt",
-  ], "state", true);
-  for (const requiredKey of [
-    "anomalyStreaks",
-    "cumulativeCounters",
-    "incidents",
-    "monitor",
-    "schemaVersion",
-    "updatedAt",
-  ]) {
-    if (!(requiredKey in object)) {
-      throw new Error(`state_missing_key_${requiredKey}`);
-    }
-  }
+  ], "state");
   if (object.schemaVersion !== STATE_SCHEMA_VERSION) {
     throw new Error("state_schema_version_invalid");
   }
@@ -1316,9 +1227,6 @@ export function parseState(value: unknown): ProductionWatchState {
   initial.incidents = readArray(object.incidents, "state incidents", MAX_INCIDENTS).map(parseIncidentRecord);
   assertUniqueBy(initial.incidents, (incident) => incident.id, "state_incident_id_duplicate");
   assertUniqueBy(initial.incidents, (incident) => incident.fingerprint, "state_incident_fingerprint_duplicate");
-  initial.remediation = object.remediation === undefined
-    ? createInitialRemediationState()
-    : parseRemediationState(object.remediation, initial.incidents);
   return initial;
 }
 
@@ -1364,7 +1272,6 @@ export function updateStateFromSnapshot(
   const now = new Date(snapshot.generatedAt);
   const next = structuredClone(state) as ProductionWatchState;
   recoverExpiredLeases(next, now);
-  pruneRemediationState(next, now);
   next.updatedAt = snapshot.generatedAt;
   next.monitor.lastRunAt = snapshot.generatedAt;
   next.monitor.lastDurationMs = snapshot.run.durationMs;
@@ -1499,7 +1406,6 @@ export function updateStateFromSnapshot(
     )),
   };
   next.incidents = pruneIncidents(next.incidents, now);
-  pruneRemediationState(next, now);
   return { state: next, promotedIncidentIds };
 }
 
@@ -1599,405 +1505,6 @@ export function transitionIncident(
   appendTransition(incident, { at: now.toISOString(), from, to: target, sessionId });
   next.updatedAt = now.toISOString();
   return next;
-}
-
-export interface RemediationDispatch {
-  incidentId: string;
-  incidentFingerprint: string;
-  sessionId: string;
-}
-
-export function remediationDispatchTargets(state: ProductionWatchState): string[] {
-  return state.incidents
-    .filter((incident) => !TERMINAL_INCIDENT_STATES.has(incident.state))
-    .map((incident) => incident.id);
-}
-
-export function updateStateAndQueueRemediation(
-  state: ProductionWatchState,
-  snapshot: ProductionWatchSnapshot,
-  options: { maxConcurrency: number },
-): {
-  state: ProductionWatchState;
-  promotedIncidentIds: string[];
-  dispatches: RemediationDispatch[];
-} {
-  const updated = updateStateFromSnapshot(state, snapshot);
-  const queued = queueRemediationDispatches(
-    updated.state,
-    remediationDispatchTargets(updated.state),
-    new Date(snapshot.generatedAt),
-    options,
-  );
-  return {
-    state: queued.state,
-    promotedIncidentIds: updated.promotedIncidentIds,
-    dispatches: queued.dispatches,
-  };
-}
-
-export function queueRemediationDispatches(
-  state: ProductionWatchState,
-  incidentTargets: string[],
-  now: Date,
-  options: { maxConcurrency: number },
-): { state: ProductionWatchState; dispatches: RemediationDispatch[] } {
-  if (
-    !Number.isInteger(options.maxConcurrency)
-    || options.maxConcurrency < 1
-    || options.maxConcurrency > 8
-  ) {
-    throw new Error("remediation_concurrency_out_of_range");
-  }
-  const next = structuredClone(state) as ProductionWatchState;
-  recoverExpiredLeases(next, now);
-  pruneRemediationState(next, now);
-  const activeNonQueuedCount = next.remediation.sessions.filter((session) => (
-    ACTIVE_REMEDIATION_STATES.has(session.state) && session.state !== "queued"
-  )).length;
-  const dispatches: RemediationDispatch[] = next.remediation.sessions
-    .filter((session) => session.state === "queued")
-    .sort((left, right) => Date.parse(left.startedAt) - Date.parse(right.startedAt))
-    .slice(0, Math.max(0, options.maxConcurrency - activeNonQueuedCount))
-    .map((session) => ({
-      incidentId: session.incidentId,
-      incidentFingerprint: session.incidentFingerprint,
-      sessionId: session.sessionId,
-    }));
-  const activeCount = () => next.remediation.sessions.filter((session) =>
-    ACTIVE_REMEDIATION_STATES.has(session.state)
-  ).length;
-  for (const target of incidentTargets) {
-    if (activeCount() >= options.maxConcurrency) {
-      break;
-    }
-    const incident = requireIncident(next, target);
-    if (TERMINAL_INCIDENT_STATES.has(incident.state)) {
-      continue;
-    }
-    if (next.remediation.sessions.some((session) => (
-      session.incidentFingerprint === incident.fingerprint
-      && ACTIVE_REMEDIATION_STATES.has(session.state)
-    ))) {
-      continue;
-    }
-    const lastSession = [...next.remediation.sessions]
-      .filter((session) => session.incidentFingerprint === incident.fingerprint)
-      .sort((left, right) => Date.parse(right.updatedAt) - Date.parse(left.updatedAt))[0];
-    if (
-      lastSession !== undefined
-      && lastSession.lastErrorCode !== "remediation_session_superseded"
-      && now.getTime() - Date.parse(lastSession.updatedAt) < REMEDIATION_DISPATCH_COOLDOWN_MS
-    ) {
-      continue;
-    }
-    const sessionId = makeWorkerSessionId(incident);
-    next.remediation.sessions.push({
-      sessionId,
-      incidentId: incident.id,
-      incidentFingerprint: incident.fingerprint,
-      state: "queued",
-      startedAt: now.toISOString(),
-      updatedAt: now.toISOString(),
-    });
-    dispatches.push({
-      incidentId: incident.id,
-      incidentFingerprint: incident.fingerprint,
-      sessionId,
-    });
-  }
-  next.updatedAt = now.toISOString();
-  pruneRemediationState(next, now);
-  return { state: next, dispatches };
-}
-
-export function queueRemediationSession(
-  state: ProductionWatchState,
-  incidentTarget: string,
-  sessionId: string,
-  now: Date,
-): ProductionWatchState {
-  assertSessionId(sessionId);
-  const next = structuredClone(state) as ProductionWatchState;
-  recoverExpiredLeases(next, now);
-  pruneRemediationState(next, now);
-  if (next.remediation.sessions.some((session) => session.sessionId === sessionId)) {
-    return next;
-  }
-  const incident = requireIncident(next, incidentTarget);
-  if (TERMINAL_INCIDENT_STATES.has(incident.state)) {
-    throw new Error("incident_terminal");
-  }
-  if (next.remediation.sessions.some((session) => (
-    session.incidentFingerprint === incident.fingerprint
-    && ACTIVE_REMEDIATION_STATES.has(session.state)
-  ))) {
-    throw new Error("remediation_session_already_active");
-  }
-  next.remediation.sessions.push({
-    sessionId,
-    incidentId: incident.id,
-    incidentFingerprint: incident.fingerprint,
-    state: "queued",
-    startedAt: now.toISOString(),
-    updatedAt: now.toISOString(),
-  });
-  next.updatedAt = now.toISOString();
-  return next;
-}
-
-export function markRemediationDispatched(
-  state: ProductionWatchState,
-  sessionId: string,
-  now: Date,
-  leaseMinutes: number,
-): ProductionWatchState {
-  assertSessionId(sessionId);
-  if (!Number.isInteger(leaseMinutes) || leaseMinutes < 5 || leaseMinutes > 60) {
-    throw new Error("lease_minutes_out_of_range");
-  }
-  const next = structuredClone(state) as ProductionWatchState;
-  recoverExpiredLeases(next, now);
-  const session = requireRemediationSession(next, sessionId);
-  if (session.state !== "queued") {
-    throw new Error("remediation_session_not_queued");
-  }
-  session.state = "dispatched";
-  session.updatedAt = now.toISOString();
-  session.heartbeatAt = now.toISOString();
-  session.expiresAt = new Date(now.getTime() + leaseMinutes * 60 * 1_000).toISOString();
-  next.updatedAt = now.toISOString();
-  return next;
-}
-
-export function heartbeatRemediationSession(
-  state: ProductionWatchState,
-  sessionId: string,
-  now: Date,
-  leaseMinutes: number,
-): ProductionWatchState {
-  assertSessionId(sessionId);
-  if (!Number.isInteger(leaseMinutes) || leaseMinutes < 5 || leaseMinutes > 60) {
-    throw new Error("lease_minutes_out_of_range");
-  }
-  const next = structuredClone(state) as ProductionWatchState;
-  recoverExpiredLeases(next, now);
-  const session = requireRemediationSession(next, sessionId);
-  if (session.state !== "dispatched") {
-    throw new Error("remediation_session_not_dispatched");
-  }
-  session.heartbeatAt = now.toISOString();
-  session.expiresAt = new Date(now.getTime() + leaseMinutes * 60 * 1_000).toISOString();
-  session.updatedAt = now.toISOString();
-  next.updatedAt = now.toISOString();
-  return next;
-}
-
-export function markRemediationBlocked(
-  state: ProductionWatchState,
-  sessionId: string,
-  now: Date,
-  errorCode: string,
-): ProductionWatchState {
-  assertSessionId(sessionId);
-  const next = structuredClone(state) as ProductionWatchState;
-  recoverExpiredLeases(next, now);
-  const session = requireRemediationSession(next, sessionId);
-  session.state = "blocked";
-  session.updatedAt = now.toISOString();
-  session.lastErrorCode = readEvidenceToken(errorCode, "remediation block code", 64);
-  delete session.heartbeatAt;
-  delete session.expiresAt;
-  if (next.remediation.globalLease?.sessionId === sessionId) {
-    delete next.remediation.globalLease;
-  }
-  next.updatedAt = now.toISOString();
-  return next;
-}
-
-export function markRemediationAlertEscalated(
-  state: ProductionWatchState,
-  sessionId: string,
-  now: Date,
-  errorCode: string,
-): ProductionWatchState {
-  assertSessionId(sessionId);
-  const next = structuredClone(state) as ProductionWatchState;
-  recoverExpiredLeases(next, now);
-  const session = requireRemediationSession(next, sessionId);
-  session.state = "alert_escalated";
-  session.updatedAt = now.toISOString();
-  session.lastErrorCode = readEvidenceToken(errorCode, "remediation escalation code", 64);
-  delete session.heartbeatAt;
-  delete session.expiresAt;
-  if (next.remediation.globalLease?.sessionId === sessionId) {
-    delete next.remediation.globalLease;
-  }
-  next.updatedAt = now.toISOString();
-  return next;
-}
-
-export function claimGlobalRemediationLease(
-  state: ProductionWatchState,
-  sessionId: string,
-  now: Date,
-  leaseMinutes: number,
-): ProductionWatchState {
-  assertSessionId(sessionId);
-  if (!Number.isInteger(leaseMinutes) || leaseMinutes < 5 || leaseMinutes > 60) {
-    throw new Error("lease_minutes_out_of_range");
-  }
-  const next = structuredClone(state) as ProductionWatchState;
-  recoverExpiredLeases(next, now);
-  const session = requireRemediationSession(next, sessionId);
-  if (!["dispatched", "review_pending", "review_approved"].includes(session.state)) {
-    throw new Error("remediation_session_state_invalid_for_global_lease");
-  }
-  if (
-    next.remediation.globalLease !== undefined
-    && next.remediation.globalLease.sessionId !== sessionId
-  ) {
-    throw new Error("remediation_global_lease_busy");
-  }
-  const expiresAt = new Date(now.getTime() + leaseMinutes * 60 * 1_000).toISOString();
-  next.remediation.globalLease = {
-    leaseId: randomUUID(),
-    sessionId,
-    claimedAt: next.remediation.globalLease?.claimedAt ?? now.toISOString(),
-    heartbeatAt: now.toISOString(),
-    expiresAt,
-  };
-  session.heartbeatAt = now.toISOString();
-  session.expiresAt = expiresAt;
-  session.updatedAt = now.toISOString();
-  next.updatedAt = now.toISOString();
-  return next;
-}
-
-export function heartbeatRemediationLease(
-  state: ProductionWatchState,
-  sessionId: string,
-  now: Date,
-  leaseMinutes: number,
-): ProductionWatchState {
-  assertSessionId(sessionId);
-  if (!Number.isInteger(leaseMinutes) || leaseMinutes < 5 || leaseMinutes > 60) {
-    throw new Error("lease_minutes_out_of_range");
-  }
-  const next = structuredClone(state) as ProductionWatchState;
-  recoverExpiredLeases(next, now);
-  const session = requireRemediationSession(next, sessionId);
-  if (next.remediation.globalLease?.sessionId !== sessionId) {
-    throw new Error("remediation_global_lease_not_owned");
-  }
-  const expiresAt = new Date(now.getTime() + leaseMinutes * 60 * 1_000).toISOString();
-  next.remediation.globalLease.heartbeatAt = now.toISOString();
-  next.remediation.globalLease.expiresAt = expiresAt;
-  session.heartbeatAt = now.toISOString();
-  session.expiresAt = expiresAt;
-  session.updatedAt = now.toISOString();
-  next.updatedAt = now.toISOString();
-  return next;
-}
-
-export function releaseRemediationLease(
-  state: ProductionWatchState,
-  sessionId: string,
-  now: Date,
-): ProductionWatchState {
-  assertSessionId(sessionId);
-  const next = structuredClone(state) as ProductionWatchState;
-  recoverExpiredLeases(next, now);
-  const session = requireRemediationSession(next, sessionId);
-  if (next.remediation.globalLease?.sessionId !== sessionId) {
-    throw new Error("remediation_global_lease_not_owned");
-  }
-  delete next.remediation.globalLease;
-  delete session.heartbeatAt;
-  delete session.expiresAt;
-  session.updatedAt = now.toISOString();
-  next.updatedAt = now.toISOString();
-  return next;
-}
-
-export function recordRemediationReview(
-  state: ProductionWatchState,
-  sessionId: string,
-  now: Date,
-  input: {
-    patchHead: string;
-    outcome: RemediationReviewOutcome;
-  },
-): ProductionWatchState {
-  assertSessionId(sessionId);
-  const patchHead = readReleaseSha(input.patchHead, "remediation patchHead");
-  const outcome = readEnum(input.outcome, ["approved", "rejected", "invalid"] as const, "remediation review outcome");
-  const next = structuredClone(state) as ProductionWatchState;
-  recoverExpiredLeases(next, now);
-  const session = requireRemediationSession(next, sessionId);
-  if (next.remediation.globalLease?.sessionId !== sessionId) {
-    throw new Error("remediation_global_lease_not_owned");
-  }
-  const cooldownKey = remediationReviewCooldownKey(session.incidentFingerprint, patchHead);
-  const cooldownUntil = next.remediation.reviewCooldowns[cooldownKey];
-  if (cooldownUntil !== undefined && Date.parse(cooldownUntil) > now.getTime()) {
-    throw new Error("remediation_review_cooldown_active");
-  }
-  session.patchHead = patchHead;
-  session.reviewFingerprint = stableHash(["review", session.incidentFingerprint, patchHead]);
-  session.reviewOutcome = outcome;
-  session.state = outcome === "approved" ? "review_approved" : "blocked";
-  session.updatedAt = now.toISOString();
-  if (outcome !== "approved") {
-    session.lastErrorCode = `review_${outcome}`;
-    delete session.heartbeatAt;
-    delete session.expiresAt;
-    delete next.remediation.globalLease;
-  }
-  next.remediation.reviewCooldowns[cooldownKey] = new Date(
-    now.getTime() + REMEDIATION_REVIEW_COOLDOWN_MS,
-  ).toISOString();
-  next.updatedAt = now.toISOString();
-  pruneRemediationState(next, now);
-  return next;
-}
-
-export function recordDraftPrOpened(
-  state: ProductionWatchState,
-  sessionId: string,
-  now: Date,
-  input: { patchHead: string; prRef: string },
-): ProductionWatchState {
-  assertSessionId(sessionId);
-  const patchHead = readReleaseSha(input.patchHead, "remediation patchHead");
-  const next = structuredClone(state) as ProductionWatchState;
-  recoverExpiredLeases(next, now);
-  const session = requireRemediationSession(next, sessionId);
-  if (
-    session.state !== "review_approved"
-    || session.reviewOutcome !== "approved"
-    || session.patchHead !== patchHead
-  ) {
-    throw new Error("remediation_pr_requires_approved_review");
-  }
-  if (next.remediation.globalLease?.sessionId !== sessionId) {
-    throw new Error("remediation_global_lease_not_owned");
-  }
-  session.state = "draft_pr_opened";
-  session.prRef = readEvidenceToken(input.prRef, "remediation prRef", 64);
-  session.updatedAt = now.toISOString();
-  delete session.heartbeatAt;
-  delete session.expiresAt;
-  delete next.remediation.globalLease;
-  next.updatedAt = now.toISOString();
-  return next;
-}
-
-export function isIncidentAutomaticRemediationEligible(incident: IncidentRecord): boolean {
-  return incident.source === "database"
-    && incident.category !== "sensitive"
-    && incident.automationClass === "remediation_candidate"
-    && incident.severity !== "critical";
 }
 
 function assertTerminalTransitionAuthority(
@@ -2146,9 +1653,6 @@ export function renderIncidentHistory(state: ProductionWatchState): string {
 
 export function renderMonitorStatus(state: ProductionWatchState): string {
   const activeCount = state.incidents.filter((incident) => !TERMINAL_INCIDENT_STATES.has(incident.state)).length;
-  const activeRemediation = state.remediation.sessions.filter((session) =>
-    ACTIVE_REMEDIATION_STATES.has(session.state)
-  ).length;
   const lines = [
     "# Production-watch monitor status",
     "",
@@ -2163,8 +1667,6 @@ export function renderMonitorStatus(state: ProductionWatchState): string {
     `Consecutive collection failures: ${state.monitor.consecutiveCollectionFailures}`,
     `Skipped overlapping ticks: ${state.monitor.skippedOverlapCount}`,
     `Active incidents: ${activeCount}`,
-    `Active remediation sessions: ${activeRemediation}`,
-    `Global remediation lease: ${state.remediation.globalLease?.sessionId ?? "none"}`,
     `Configured sources: ${state.monitor.configuredSources.join(", ")}`,
     "",
   ];
@@ -2501,7 +2003,6 @@ function evaluateCountCounter(
       unit: "count",
     }],
     minimumConsecutiveRuns: 2,
-    automationClass: release === undefined ? "diagnosis_only" : "remediation_candidate",
     deploymentCorrelated: release !== undefined,
   });
 }
@@ -2562,11 +2063,6 @@ function evaluateRateCounter(
       unit: "ratio",
     }],
     minimumConsecutiveRuns: 2,
-    automationClass: sensitive
-      ? "alert_only"
-      : release === undefined
-        ? "diagnosis_only"
-        : "remediation_candidate",
     deploymentCorrelated: release !== undefined,
   });
 }
@@ -2843,7 +2339,6 @@ function incidentFromCandidate(candidate: AnomalyCandidate, at: string): Inciden
     state: "candidate",
     severity: candidate.severity,
     category: candidate.category,
-    automationClass: candidate.automationClass,
     source: candidate.source,
     ruleId: candidate.ruleId,
     signalCode: candidate.signalCode,
@@ -2864,19 +2359,11 @@ function incidentFromCandidate(candidate: AnomalyCandidate, at: string): Inciden
 }
 
 function tightenIncidentPolicy(incident: IncidentRecord, candidate: AnomalyCandidate): void {
-  const automationRank: Readonly<Record<AutomationClass, number>> = {
-    remediation_candidate: 0,
-    diagnosis_only: 1,
-    alert_only: 2,
-  };
   const sensitive = incident.category === "sensitive"
     || candidate.category === "sensitive"
     || incident.source === "stripe";
   if (sensitive) {
     incident.category = "sensitive";
-    incident.automationClass = "alert_only";
-  } else if (automationRank[candidate.automationClass] > automationRank[incident.automationClass]) {
-    incident.automationClass = candidate.automationClass;
   }
 
 }
@@ -2895,40 +2382,6 @@ function recoverExpiredLeases(state: ProductionWatchState, now: Date): void {
     incident.staleLeaseRecoveries += 1;
     appendTransition(incident, { at: now.toISOString(), from, to: incident.state, sessionId });
   }
-  if (
-    state.remediation.globalLease !== undefined
-    && Date.parse(state.remediation.globalLease.expiresAt) <= now.getTime()
-  ) {
-    const sessionId = state.remediation.globalLease.sessionId;
-    delete state.remediation.globalLease;
-    const session = state.remediation.sessions.find((candidate) => candidate.sessionId === sessionId);
-    if (session !== undefined && ACTIVE_REMEDIATION_STATES.has(session.state)) {
-      const superseded = session.state === "dispatched";
-      session.state = "blocked";
-      session.updatedAt = now.toISOString();
-      session.lastErrorCode = superseded
-        ? "remediation_session_superseded"
-        : "remediation_lease_expired";
-      delete session.heartbeatAt;
-      delete session.expiresAt;
-    }
-  }
-  for (const session of state.remediation.sessions) {
-    if (
-      session.expiresAt !== undefined
-      && Date.parse(session.expiresAt) <= now.getTime()
-      && ACTIVE_REMEDIATION_STATES.has(session.state)
-    ) {
-      const superseded = session.state === "dispatched";
-      session.state = "blocked";
-      session.updatedAt = now.toISOString();
-      session.lastErrorCode = superseded
-        ? "remediation_session_superseded"
-        : "remediation_lease_expired";
-      delete session.heartbeatAt;
-      delete session.expiresAt;
-    }
-  }
 }
 
 function pruneIncidents(incidents: IncidentRecord[], now: Date): IncidentRecord[] {
@@ -2939,32 +2392,6 @@ function pruneIncidents(incidents: IncidentRecord[], now: Date): IncidentRecord[
       || now.getTime() - Date.parse(incident.resolvedAt) <= INCIDENT_RETENTION_MS)
     .sort((left, right) => Date.parse(right.resolvedAt ?? right.lastDetectedAt) - Date.parse(left.resolvedAt ?? left.lastDetectedAt));
   return [...active, ...terminal].slice(0, MAX_INCIDENTS);
-}
-
-function pruneRemediationState(state: ProductionWatchState, now: Date): void {
-  const activeSessionIds = new Set<string>();
-  state.remediation.sessions = state.remediation.sessions
-    .filter((session) => {
-      const active = ACTIVE_REMEDIATION_STATES.has(session.state);
-      if (active) {
-        activeSessionIds.add(session.sessionId);
-        return true;
-      }
-      return now.getTime() - Date.parse(session.updatedAt) <= REMEDIATION_SESSION_RETENTION_MS;
-    })
-    .sort((left, right) => Date.parse(right.updatedAt) - Date.parse(left.updatedAt))
-    .slice(0, MAX_REMEDIATION_SESSIONS);
-  if (
-    state.remediation.globalLease !== undefined
-    && !activeSessionIds.has(state.remediation.globalLease.sessionId)
-  ) {
-    delete state.remediation.globalLease;
-  }
-  const cooldownEntries = Object.entries(state.remediation.reviewCooldowns)
-    .filter(([, until]) => Date.parse(until) > now.getTime())
-    .sort((left, right) => Date.parse(left[1]) - Date.parse(right[1]))
-    .slice(0, MAX_REMEDIATION_COOLDOWNS);
-  state.remediation.reviewCooldowns = Object.fromEntries(cooldownEntries);
 }
 
 function appendTransition(incident: IncidentRecord, transition: IncidentTransition): void {
@@ -2980,25 +2407,6 @@ function requireIncident(state: ProductionWatchState, fingerprint: string): Inci
     throw new Error("incident_not_found");
   }
   return incident;
-}
-
-function requireRemediationSession(
-  state: ProductionWatchState,
-  sessionId: string,
-): RemediationSessionRecord {
-  const session = state.remediation.sessions.find((candidate) => candidate.sessionId === sessionId);
-  if (session === undefined) {
-    throw new Error("remediation_session_not_found");
-  }
-  return session;
-}
-
-function makeWorkerSessionId(incident: IncidentRecord): string {
-  return normalizeToken(`pw-worker-${incident.id}-${randomUUID()}`, 96);
-}
-
-function remediationReviewCooldownKey(incidentFingerprint: string, patchHead: string): string {
-  return stableHash(["review-cooldown", incidentFingerprint, patchHead]);
 }
 
 function parseReleaseContext(value: unknown, defaultSource?: WatchSource): ReleaseContext {
@@ -3195,7 +2603,6 @@ function parseSourceHealth(value: unknown): SourceHealth {
 function parseIncidentRecord(value: unknown): IncidentRecord {
   const object = readObject(value, "incident");
   assertExactKeys(object, [
-    "automationClass",
     "category",
     "component",
     "errorCode",
@@ -3247,11 +2654,6 @@ function parseIncidentRecord(value: unknown): IncidentRecord {
     ["availability", "latency", "monitor", "pressure", "sensitive"] as const,
     "incident category",
   );
-  const automationClass = readEnum(
-    object.automationClass,
-    ["alert_only", "diagnosis_only", "remediation_candidate"] as const,
-    "incident automationClass",
-  );
   const signalCode = readSignalCode(object.signalCode, "incident signalCode");
   const metricSignal = parseMetricSignalCode(signalCode);
   if (metricSignal !== undefined && metricSignal.dimensions.source !== source) {
@@ -3263,7 +2665,6 @@ function parseIncidentRecord(value: unknown): IncidentRecord {
     state,
     severity: readEnum(object.severity, ["low", "medium", "high", "critical"] as const, "incident severity"),
     category,
-    automationClass,
     source,
     ruleId: readToken(object.ruleId, "incident ruleId", 64),
     signalCode,
@@ -3306,145 +2707,10 @@ function parseIncidentRecord(value: unknown): IncidentRecord {
   if (terminal && owner !== undefined) {
     throw new Error("terminal_incident_owner_forbidden");
   }
-  if ((category === "sensitive" || source === "stripe") && automationClass !== "alert_only") {
-    throw new Error("sensitive_incident_must_be_alert_only");
-  }
   if (owner !== undefined && !handlingSessions.includes(owner.sessionId)) {
     throw new Error("incident_owner_session_unrecorded");
   }
   return record;
-}
-
-function parseRemediationState(
-  value: unknown,
-  incidents: IncidentRecord[],
-): RemediationCoordinationState {
-  const object = readObject(value, "remediation state");
-  assertExactKeys(object, ["globalLease", "reviewCooldowns", "schemaVersion", "sessions"], "remediation state", true);
-  if (object.schemaVersion !== REMEDIATION_SCHEMA_VERSION) {
-    throw new Error("remediation_schema_version_invalid");
-  }
-  const sessions = readArray(object.sessions, "remediation sessions", MAX_REMEDIATION_SESSIONS)
-    .map(parseRemediationSession);
-  assertUniqueBy(sessions, (session) => session.sessionId, "remediation_session_duplicate");
-  const knownIncidentFingerprints = new Set(incidents.map((incident) => incident.fingerprint));
-  if (sessions.some((session) => !knownIncidentFingerprints.has(session.incidentFingerprint))) {
-    throw new Error("remediation_session_incident_unknown");
-  }
-  const reviewCooldowns = parseReviewCooldowns(object.reviewCooldowns);
-  const globalLease = object.globalLease === undefined
-    ? undefined
-    : parseIncidentLease(object.globalLease);
-  if (
-    globalLease !== undefined
-    && !sessions.some((session) => (
-      session.sessionId === globalLease.sessionId
-      && ["dispatched", "review_pending", "review_approved"].includes(session.state)
-    ))
-  ) {
-    throw new Error("remediation_global_lease_session_unknown");
-  }
-  return {
-    schemaVersion: REMEDIATION_SCHEMA_VERSION,
-    ...(globalLease === undefined ? {} : { globalLease }),
-    sessions,
-    reviewCooldowns,
-  };
-}
-
-function parseRemediationSession(value: unknown): RemediationSessionRecord {
-  const object = readObject(value, "remediation session");
-  assertExactKeys(object, [
-    "expiresAt",
-    "heartbeatAt",
-    "incidentFingerprint",
-    "incidentId",
-    "lastErrorCode",
-    "patchHead",
-    "prRef",
-    "reviewFingerprint",
-    "reviewOutcome",
-    "sessionId",
-    "startedAt",
-    "state",
-    "updatedAt",
-  ], "remediation session", true);
-  const state = readEnum(object.state, [
-    "queued",
-    "dispatched",
-    "alert_escalated",
-    "blocked",
-    "review_pending",
-    "review_approved",
-    "draft_pr_opened",
-  ] as const, "remediation session state");
-  const sessionId = readSessionId(object.sessionId);
-  const startedAt = readIsoTimestamp(object.startedAt, "remediation session startedAt");
-  const updatedAt = readIsoTimestamp(object.updatedAt, "remediation session updatedAt");
-  if (Date.parse(startedAt) > Date.parse(updatedAt)) {
-    throw new Error("remediation_session_time_order_invalid");
-  }
-  const heartbeatAt = object.heartbeatAt === undefined
-    ? undefined
-    : readIsoTimestamp(object.heartbeatAt, "remediation session heartbeatAt");
-  const expiresAt = object.expiresAt === undefined
-    ? undefined
-    : readIsoTimestamp(object.expiresAt, "remediation session expiresAt");
-  if ((heartbeatAt === undefined) !== (expiresAt === undefined)) {
-    throw new Error("remediation_session_lease_shape_invalid");
-  }
-  if (
-    heartbeatAt !== undefined
-    && expiresAt !== undefined
-    && (Date.parse(startedAt) > Date.parse(heartbeatAt) || Date.parse(heartbeatAt) >= Date.parse(expiresAt))
-  ) {
-    throw new Error("remediation_session_lease_time_order_invalid");
-  }
-  const patchHead = object.patchHead === undefined
-    ? undefined
-    : readReleaseSha(object.patchHead, "remediation session patchHead");
-  const reviewFingerprint = object.reviewFingerprint === undefined
-    ? undefined
-    : readHash(object.reviewFingerprint, "remediation session reviewFingerprint");
-  const reviewOutcome = object.reviewOutcome === undefined
-    ? undefined
-    : readEnum(object.reviewOutcome, ["approved", "rejected", "invalid"] as const, "remediation session reviewOutcome");
-  if ((reviewFingerprint === undefined) !== (reviewOutcome === undefined)) {
-    throw new Error("remediation_session_review_shape_invalid");
-  }
-  if (state === "review_approved" && reviewOutcome !== "approved") {
-    throw new Error("remediation_session_review_approval_missing");
-  }
-  if (state === "draft_pr_opened" && (reviewOutcome !== "approved" || patchHead === undefined || object.prRef === undefined)) {
-    throw new Error("remediation_session_pr_gate_invalid");
-  }
-  return {
-    sessionId,
-    incidentId: readToken(object.incidentId, "remediation session incidentId", 32),
-    incidentFingerprint: readHash(object.incidentFingerprint, "remediation session incidentFingerprint"),
-    state,
-    startedAt,
-    updatedAt,
-    ...(heartbeatAt === undefined ? {} : { heartbeatAt }),
-    ...(expiresAt === undefined ? {} : { expiresAt }),
-    ...(patchHead === undefined ? {} : { patchHead }),
-    ...(reviewFingerprint === undefined ? {} : { reviewFingerprint }),
-    ...(reviewOutcome === undefined ? {} : { reviewOutcome }),
-    ...(object.prRef === undefined ? {} : { prRef: readEvidenceToken(object.prRef, "remediation session prRef", 64) }),
-    ...(object.lastErrorCode === undefined ? {} : { lastErrorCode: readEvidenceToken(object.lastErrorCode, "remediation session lastErrorCode", 64) }),
-  };
-}
-
-function parseReviewCooldowns(value: unknown): Record<string, string> {
-  const object = readObject(value, "review cooldowns");
-  const entries = Object.entries(object);
-  if (entries.length > MAX_REMEDIATION_COOLDOWNS) {
-    throw new Error("review_cooldowns_too_many");
-  }
-  return Object.fromEntries(entries.map(([key, until]) => [
-    readHash(key, "review cooldown key"),
-    readIsoTimestamp(until, "review cooldown until"),
-  ]));
 }
 
 function parseIncidentLease(value: unknown): IncidentLease {
