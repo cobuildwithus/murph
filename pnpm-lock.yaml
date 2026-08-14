@@ -83,6 +83,9 @@ importers:
       '@elevenlabs/elevenlabs-js':
         specifier: 2.62.0
         version: 2.62.0(bufferutil@4.1.0)(utf-8-validate@6.0.6)
+      '@linqapp/sdk':
+        specifier: 0.34.0
+        version: 0.34.0
       '@murphai/health-metrics':
         specifier: workspace:*
         version: link:packages/health-metrics

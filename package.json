@@ -96,6 +96,7 @@
     "@cobuild/repo-tools": "^0.1.15",
     "@cobuild/review-gpt": "^0.5.124",
     "@elevenlabs/elevenlabs-js": "2.62.0",
+    "@linqapp/sdk": "0.34.0",
     "@murphai/health-metrics": "workspace:*",
     "@murphai/hosted-local-harness": "workspace:*",
     "@types/node": "^25.6.2",
