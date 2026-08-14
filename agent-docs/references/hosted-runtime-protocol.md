@@ -405,13 +405,18 @@ infrastructure fields.
 The Web response is complete. For the model boundary, the assistant-engine
 adapter keys every retained projection by its exact scope and collapses the
 grant/data pair to `not_granted`, `pending`, `missing`, or `available`.
-Non-workout record arrays remain intact; `workouts.v0` additionally hoists
-repeated day, kind, time-semantics, and completion-watermark fields. If whole
-member rows still
-exceed the model result limit, the adapter returns `status="partial"` with every
-omitted current membership named in `omittedParticipantIds`. It never truncates
-a member row, treats an omitted member as departed, or alters stored or
-Web-returned truth.
+All source-tagged record arrays remain intact; `workouts.v0` additionally
+hoists repeated day, kind, time-semantics, and completion-watermark fields while
+retaining each workout item's source tag. Group email reads use this same model
+adapter, so they cannot silently collapse a source that the ordinary group tool
+would preserve. The model-result ceiling composes the shared 320 KiB maximum
+serialized projection with the maximum three-scope request and the bounded
+member-identity envelope, including worst-case JSON escaping. One complete
+legal member therefore always fits before roster compaction begins. If whole
+member rows still exceed that composed limit, the adapter returns
+`status="partial"` with every omitted current membership named in
+`omittedParticipantIds`. It never truncates a member row, treats an omitted
+member as departed, or alters stored or Web-returned truth.
 
 `device-sync-status.v0` is explicit consent only. When that exact grant is in
 the captured authority set, Web derives the result live from its bounded device
@@ -627,15 +632,43 @@ rollback floor; rolling Web back would recreate false missing states for newly
 admitted or refreshed generations even before the legacy backfill begins.
 
 Recent daily and sleep projection owners derive the member's current civil date
-from the validated vault timezone, admit only that date and the prior six civil
-dates, and emit at most seven records. Sparse data therefore cannot reach an
-eighth member-local date, including around UTC midnight or daylight-saving
-changes. A missing or invalid vault timezone fails these civil-date scopes
-closed. `workouts.v0` retains its separate global calendar-close semantics.
+from the validated vault timezone and admit only that date and the prior six
+civil dates. Each available public source receives its own tagged record and
+`date.source` key; up to eight sources therefore produce at most 56 complete
+records without cross-source ranking or truncation. `workouts.v0` instead keeps
+seven day records, tags each workout item, and retains its separate global
+calendar-close semantics. It retains up to thirteen workouts per public source
+per day across the same eight-source admission bound, while legacy unsourced
+days retain the original thirteen-workout limit. Any per-source or source-count
+overflow fails the complete projection closed, and the legal 104-item daily
+maximum remains within the shared 320 KiB delivery and encrypted-snapshot
+authority. The shared canonical activity-session read admits the complete 832
+rows for the workout producer's eight-date source horizon and uses one extra
+query row only to detect overflow; larger reads still fail closed. A missing or
+invalid vault timezone fails the other civil-date
+scopes closed. Public source identity is part of every existing
+health scope, including active v0 grants; scope keys and grant/revoke controls
+do not change, and each member-facing permission describes the source-aware
+share in one short sentence.
+Each source-tagged Deep or REM record separately carries that provider's
+validated `recordedAt` timestamp or `null`; the record's synthetic UTC-midnight
+`occurredAt` remains its civil-date identity and is never substituted for the
+provider time.
 Deploy the Cloudflare runtime bundle with that producer bound and the additive
 `pending` parser/model status before Web emits `pending`, exact seven-day consent
 copy, or fresh projection work. Deploy Web before any backfill clears a legacy
 snapshot.
+
+The source-tagged snapshot shape is a consumer-first rolling change. Deploy Web
+first so its delivery parser, encrypted snapshot bound, direct reader, v1-to-v0
+compatibility path, ordinary group tool, and group-email path accept and retain
+the additive source fields, sleep-stage provider times, and larger complete
+record sets. Then deploy the
+Cloudflare Worker/runner producer with immediate convergence. During the bounded
+window, new Web accepts old unsourced snapshots. Old Web must not receive a new
+source-tagged snapshot because its closed parser would reject the additive
+field. Roll back the producer before Web; after tagged snapshots are published,
+the source-aware Web consumer is the rollback floor.
 
 This protocol is a consumer-first hard cut:
 
@@ -1053,8 +1086,12 @@ that secure-box operation.
 Web may satisfy it without another provider send only when a covering active
 offer already exists. Grants held by current hosted members never suppress the
 offer: a provider-room participant who has not joined the hosted group may be
-the intended recipient. A fresh request returns `sent` only after the provider
-send succeeds and its message binding is durably recorded.
+the intended recipient. Its canonical reaction sentence discloses that offered
+health values include source names and that sleep-stage values also include each
+source's recorded time. The same source-aware meaning applies to existing health
+scope keys and active grants; there is no separate source-details permission.
+A fresh request returns `sent` only after the provider send succeeds and its
+message binding is durably recorded.
 
 An unfinished child leaves the request pending. Before invocation return,
 checkpoint, shutdown, fence loss, or workspace replacement, the runtime

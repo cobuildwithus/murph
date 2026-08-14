@@ -5,6 +5,12 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import {
+  eventRecordSchema,
+  experimentFrontmatterSchema,
+  experimentProgressSnapshotSchema,
+  regimenFrontmatterSchema,
+} from '@murphai/contracts'
+import {
   initializeVault,
   readHabitatAspect,
   upsertHabitatAspect,
@@ -14,6 +20,10 @@ import {
   parseAssistantSessionRecord,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import { normalizeAssistantProviderConfig } from '@murphai/operator-config/assistant/provider-config'
+import {
+  listEntitySchema,
+  showResultSchema,
+} from '@murphai/operator-config/vault-cli-contracts'
 import { describe, expect, it } from 'vitest'
 
 import {
@@ -113,6 +123,17 @@ const RUN_REAL_CODEX_E2E = process.env.MURPH_RUN_REAL_CODEX_E2E === '1'
 const describeRealCodex = RUN_REAL_CODEX_E2E ? describe : describe.skip
 const RETIRED_USAGE_TERM = ['cost', 'weighted'].join('-')
 const DEFAULT_REAL_CODEX_MODEL = 'gpt-5.6-terra'
+const REPEATED_SET_REGIMEN_ID = 'reg_01JNV447V6K3SW1Q9NJ7XVQZ7P'
+const REPEATED_SET_ALPHA_EXPERIMENT_ID = 'exp_01JNV447V6K3SW1Q9NJ7XVQZ7Q'
+const REPEATED_SET_BETA_EXPERIMENT_ID = 'exp_01JNV447V6K3SW1Q9NJ7XVQZ7R'
+const REPEATED_SET_ALPHA_EVENT_IDS = Array.from(
+  { length: 5 },
+  (_, index) => `evt_01JNV447V6K3SW1Q9NJ7XVQZ7${index + 1}`,
+)
+const REPEATED_SET_BETA_EVENT_IDS = Array.from(
+  { length: 4 },
+  (_, index) => `evt_01JNV447V6K3SW1Q9NJ7XVQZ8${index + 1}`,
+)
 const COUNTRY_ELEVENLABS_VOICE_ID = 'Bj9UqZbhQsanLzgalpEG'
 const ONBOARDING_POLICY_PATHS = [
   ['SKILL.md', 'murph-onboarding/SKILL.md'],
@@ -3066,6 +3087,226 @@ describeRealCodex('real Codex wearable arrival and timezone recovery e2e', () =>
   )
 })
 
+describeRealCodex('real Codex connected health record awareness e2e', () => {
+  it(
+    'chooses one canonical read for expanded connected health records',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+
+      try {
+        for (const probe of [
+          {
+            commandPattern: /measurement entry list --metric calories_basal --from 2026-07-12 --to 2026-07-12 --limit 50 --format json/u,
+            finalExcludes: /wearables day|food intake|ate|consumed/iu,
+            finalIncludes: [/1[,.]?640.*(?:basal|calor)|(?:basal|calor).*1[,.]?640/iu],
+            id: 'basal',
+            prompt: 'How many basal calories did my connected device record on July 12?',
+            result: {
+              count: 1,
+              items: [{
+                eventId: 'evt_basal_calories_summary',
+                metric: 'basal-calories',
+                occurredAt: '2026-07-12T23:59:00.000Z',
+                recordKind: 'observation',
+                source: 'device',
+                unit: 'kcal',
+                value: 1640,
+              }],
+            },
+            skillSlug: 'daily-activity',
+          },
+          {
+            commandPattern: /event list --kind intervention_session --from 2026-07-12 --to 2026-07-12 --limit 200 --format json/u,
+            finalExcludes: /(?:you should|I recommend|I suggest).{0,40}(?:start|stop|change|adjust|retime)|no insulin was recorded|none recorded|total dose/iu,
+            finalIncludes: [/4(?:\s|-)?unit.*insulin|insulin.*4(?:\s|-)?unit/iu],
+            id: 'insulin',
+            prompt: 'What insulin dose records did my connected device return for July 12?',
+            result: {
+              count: 1,
+              items: [{
+                data: {
+                  fields: {
+                    'dose-amount': 4,
+                    'dose-unit': 'unit',
+                  },
+                  interventionType: 'insulin-injection',
+                  sessionStatus: 'completed',
+                  source: 'device',
+                },
+                id: 'evt_insulin_dose',
+                kind: 'intervention_session',
+                links: [],
+                occurredAt: '2026-07-12T19:15:00.000Z',
+                path: 'events/2026/07/evt_insulin_dose.md',
+                title: 'Connected insulin injection',
+              }],
+            },
+            skillSlug: 'cardiometabolic-health',
+          },
+          {
+            commandPattern: /measurement entry list --metric carbohydrates --from 2026-07-12 --to 2026-07-12 --limit 50 --format json/u,
+            finalExcludes: /unavailable|no carbohydrate|(?:ate|consumed).*48/iu,
+            finalIncludes: [/48\s*(?:g|grams?).*carb|carb.*48\s*(?:g|grams?)/iu],
+            id: 'carbohydrates',
+            prompt: 'How many carbohydrates did my connected device record on July 12?',
+            result: {
+              count: 1,
+              items: [{
+                eventId: 'evt_carbohydrates_summary',
+                metric: 'carbohydrates',
+                occurredAt: '2026-07-12T19:15:00.000Z',
+                recordKind: 'observation',
+                source: 'device',
+                unit: 'g',
+                value: 48,
+              }],
+            },
+            skillSlug: 'food-journal',
+          },
+          {
+            commandPattern: /measurement entry list --metric carbohydrates --from 2026-07-12 --to 2026-07-12 --limit 50 --format json/u,
+            finalExcludes: /you (?:ate|consumed) 48|(?:ate|consumed|total).{0,30}192/iu,
+            finalIncludes: [
+              /(?:complete|full).*(?:unavailable|cannot|not)|(?:meal|food) records?.*(?:needed|required)|does not (?:show|prove|establish)/iu,
+            ],
+            id: 'carbohydrates-not-complete-intake',
+            prompt: 'Use my connected-device carbohydrate data to tell me what I ate and how many calories I consumed on July 12.',
+            result: {
+              count: 1,
+              items: [{
+                eventId: 'evt_carbohydrates_summary',
+                metric: 'carbohydrates',
+                occurredAt: '2026-07-12T19:15:00.000Z',
+                recordKind: 'observation',
+                source: 'device',
+                unit: 'g',
+                value: 48,
+              }],
+            },
+            skillSlug: 'food-journal',
+          },
+          {
+            commandPattern: /event list --kind intervention_session --from 2026-07-12 --to 2026-07-12 --limit 200 --format json/u,
+            finalExcludes: /(?:you should|I recommend|I suggest).{0,40}(?:start|stop|change|adjust|retime)|total dose|all insulin|complete history/iu,
+            finalIncludes: [
+              /4(?:\s|-)?unit.*insulin|insulin.*4(?:\s|-)?unit/iu,
+              /2(?:\s|-)?unit.*insulin|insulin.*2(?:\s|-)?unit/iu,
+            ],
+            id: 'multiple-insulin',
+            prompt: 'Which insulin dose records did my connected device return for July 12?',
+            result: {
+              count: 2,
+              items: [
+                {
+                  data: {
+                    fields: {
+                      'dose-amount': 4,
+                      'dose-unit': 'unit',
+                    },
+                    interventionType: 'insulin-injection',
+                    sessionStatus: 'completed',
+                    source: 'device',
+                  },
+                  id: 'evt_insulin_dose_1',
+                  kind: 'intervention_session',
+                  links: [],
+                  occurredAt: '2026-07-12T08:15:00.000Z',
+                  path: 'events/2026/07/evt_insulin_dose_1.md',
+                  title: 'Connected insulin injection',
+                },
+                {
+                  data: {
+                    fields: {
+                      'dose-amount': 2,
+                      'dose-unit': 'unit',
+                    },
+                    interventionType: 'insulin-injection',
+                    sessionStatus: 'completed',
+                    source: 'device',
+                  },
+                  id: 'evt_insulin_dose_2',
+                  kind: 'intervention_session',
+                  links: [],
+                  occurredAt: '2026-07-12T19:15:00.000Z',
+                  path: 'events/2026/07/evt_insulin_dose_2.md',
+                  title: 'Connected insulin injection',
+                },
+              ],
+            },
+            skillSlug: 'cardiometabolic-health',
+          },
+          {
+            commandPattern: /event list --kind intervention_session --from 2026-07-12 --to 2026-07-12 --limit 200 --format json/u,
+            finalExcludes: /no insulin was recorded|none recorded|you did not take insulin|you took no insulin|(?:you should|I recommend|I suggest).{0,40}(?:start|stop|change|adjust|retime)/iu,
+            finalIncludes: [
+              /(?:bounded|this) (?:read|result).*(?:no|none)|no matching.*(?:returned|found)|did not return any/iu,
+            ],
+            id: 'empty-insulin',
+            prompt: 'Did my connected device return any insulin dose records for July 12?',
+            result: {
+              count: 0,
+              items: [],
+            },
+            skillSlug: 'cardiometabolic-health',
+          },
+        ] as const) {
+          const workingDirectory = await mkdtemp(
+            path.join(tmpdir(), `murph-connected-health-${probe.id}-e2e-`),
+          )
+
+          try {
+            const binDirectory = path.join(workingDirectory, 'bin')
+            const skillsRoot = path.join(workingDirectory, 'skills')
+            await Promise.all([
+              materializeAssistantSkill({ skillsRoot, slug: probe.skillSlug }),
+              materializeConnectedHealthVaultCli({
+                binDirectory,
+                result: probe.result,
+              }),
+            ])
+            const result = await executeRealCodexAppServerTurn({
+              approvalPolicy: 'never',
+              baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+              codexCommand:
+                normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+                ?? undefined,
+              codexHome: config.codexHome,
+              developerInstructions: buildDirectConversationDeveloperInstructions(),
+              env: {
+                ...config.env,
+                [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
+                PATH: `${binDirectory}:${config.env.PATH ?? ''}`,
+              },
+              excludeResumeTurns: true,
+              model: config.model,
+              modelProvider: config.modelProvider,
+              prompt: probe.prompt,
+              reasoningEffort: 'low',
+              sandbox: 'workspace-write',
+              workingDirectory,
+            })
+            const commands = readCapabilityRoutingActions(result.jsonEvents)
+              .flatMap((action) => action.kind === 'command' ? [action.command] : [])
+              .filter((command) => command.includes('vault-cli'))
+
+            expect(commands, probe.id).toHaveLength(1)
+            expect(commands[0], probe.id).toMatch(probe.commandPattern)
+            for (const expected of probe.finalIncludes) {
+              expect(result.finalMessage, probe.id).toMatch(expected)
+            }
+            expect(result.finalMessage, probe.id).not.toMatch(probe.finalExcludes)
+          } finally {
+            await removeRealCodexTemporaryPath(workingDirectory)
+          }
+        }
+      } finally {
+        await removeRealCodexTemporaryPaths(config.temporaryPaths)
+      }
+    },
+    720_000,
+  )
+})
+
 describeRealCodex('real Codex independent scheduled reminder authority e2e', () => {
   it.each([
     {
@@ -3401,6 +3642,91 @@ describeRealCodex('real Codex experiment onboarding e2e', () => {
         )
       }
       expect(result.finalMessage).toMatch(/changed|revision|updated/iu)
+    },
+    360_000,
+  )
+})
+
+describeRealCodex('real Codex repeated-set resolution e2e', () => {
+  it(
+    'logs every repeated set against the member-local alternating target despite a stale reminder and rereads canonical totals',
+    async () => {
+      const result = await runRepeatedSetResolutionProbe('success')
+      const alphaWrites = result.commandLog.filter((command) =>
+        command.includes(`experiment session log ${REPEATED_SET_ALPHA_EXPERIMENT_ID}`)
+      )
+
+      expect(result.commandLog).toEqual(expect.arrayContaining([
+        expect.stringContaining(`experiment progress ${REPEATED_SET_ALPHA_EXPERIMENT_ID}`),
+      ]))
+      expect(result.prompt).toMatch(/reminded me about Movement Beta/iu)
+      expect(alphaWrites).toHaveLength(3)
+      expect(alphaWrites.every((command) =>
+        command.replaceAll(/['"]/gu, '').includes('--field repetitions=8')
+      )).toBe(true)
+      expect(result.commandLog.some((command) =>
+        command.includes(`experiment session log ${REPEATED_SET_BETA_EXPERIMENT_ID}`)
+      )).toBe(false)
+
+      const reversedCommands = [...result.commandLog].reverse()
+      const reverseFinalWriteIndex = reversedCommands.findIndex((command) =>
+        command.includes(`experiment session log ${REPEATED_SET_ALPHA_EXPERIMENT_ID}`)
+      )
+      const reverseProgressIndex = reversedCommands.findIndex((command) =>
+        command.includes(`experiment progress ${REPEATED_SET_ALPHA_EXPERIMENT_ID}`)
+      )
+      const reverseLinkedSessionReadIndex = reversedCommands.findIndex((command) =>
+        REPEATED_SET_ALPHA_EVENT_IDS.some((eventId) =>
+          command.includes(`intervention show ${eventId}`)
+          || command.includes(`event show ${eventId}`)
+        )
+      )
+      expect(reverseFinalWriteIndex).toBeGreaterThanOrEqual(0)
+      expect(reverseProgressIndex).toBeGreaterThanOrEqual(0)
+      expect(reverseLinkedSessionReadIndex).toBeGreaterThanOrEqual(0)
+      const finalWriteIndex = result.commandLog.length - 1 - reverseFinalWriteIndex
+      const progressIndex = result.commandLog.length - 1 - reverseProgressIndex
+      const linkedSessionReadIndex = result.commandLog.length - 1 - reverseLinkedSessionReadIndex
+      expect(progressIndex).toBeGreaterThan(finalWriteIndex)
+      expect(linkedSessionReadIndex).toBeGreaterThan(finalWriteIndex)
+      for (const eventId of REPEATED_SET_ALPHA_EVENT_IDS) {
+        expect(result.commandLog.some((command) =>
+          command.includes(`intervention show ${eventId}`)
+          || command.includes(`event show ${eventId}`)
+        )).toBe(true)
+      }
+      expect(result.finalMessage).toMatch(/Movement Alpha/iu)
+      expect(result.finalMessage).toMatch(/(?:40[^\n]{0,40}\b(?:reps?|repetitions?)\b|\b(?:reps?|repetitions?)\b[^\n]{0,40}40)/iu)
+    },
+    360_000,
+  )
+
+  it(
+    'asks one narrow question and writes nothing when the canonical owner is ambiguous',
+    async () => {
+      const result = await runRepeatedSetResolutionProbe('ambiguous')
+      const mutations = result.commandLog.filter((command) =>
+        /(?:experiment session log|experiment edit|regimen (?:add|edit)|automation (?:add|create|edit|reconcile))/u.test(command)
+      )
+
+      expect(mutations).toEqual([])
+      expect(result.finalMessage).toMatch(/Movement Alpha|Movement Beta|exercise|target/iu)
+      expect(result.finalMessage.match(/\?/gu) ?? []).toHaveLength(1)
+    },
+    360_000,
+  )
+
+  it(
+    'keeps a group repeated-set report out of private vault state and hands off privately',
+    async () => {
+      const result = await runRepeatedSetResolutionProbe('group')
+
+      expect(result.commandLog).toEqual([])
+      expect(result.actions.some((action) =>
+        action.kind === 'command' && action.command.includes('vault-cli')
+      )).toBe(false)
+      expect(result.finalMessage).toMatch(/private|one[- ]on[- ]one|direct/iu)
+      expect(result.finalMessage.length).toBeLessThan(280)
     },
     360_000,
   )
@@ -7204,6 +7530,479 @@ async function materializeAssistantSkill(input: {
   )
 }
 
+type RepeatedSetResolutionMode = 'ambiguous' | 'group' | 'success'
+
+async function runRepeatedSetResolutionProbe(
+  mode: RepeatedSetResolutionMode,
+) {
+  const config = await resolveRealCodexE2eConfig()
+  const workingDirectory = await mkdtemp(
+    path.join(tmpdir(), `murph-repeated-set-${mode}-e2e-`),
+  )
+
+  try {
+    const binDirectory = path.join(workingDirectory, 'bin')
+    const commandLogPath = path.join(workingDirectory, 'vault-commands.log')
+    const skillsRoot = path.join(workingDirectory, 'skills')
+    await Promise.all([
+      materializeAssistantSkill({
+        skillsRoot,
+        slug: 'behavior-followthrough',
+      }),
+      materializeAssistantSkill({
+        skillsRoot,
+        slug: 'experiment-onboarding',
+      }),
+      materializeAssistantSkill({
+        skillsRoot,
+        slug: 'strength-training',
+      }),
+      materializeRepeatedSetVaultCli({
+        binDirectory,
+        mode,
+      }),
+      writeFile(commandLogPath, '', 'utf8'),
+    ])
+
+    const prompt = mode === 'group'
+      ? [
+          'Trusted group transcript:',
+          'A participant says: “Sets 1 through 3 are done. Log them to my saved alternating routine and tell me the total.”',
+          'Respond to that participant without exposing or changing private member state.',
+        ].join('\n')
+      : [
+          'I completed sets 1 through 3.',
+          'Earlier in this conversation, Murph reminded me about Movement Beta.',
+          'Use my saved alternating routine and today\'s member-local date.',
+          mode === 'success'
+            ? 'Log the completions and tell me the all-time recorded repetition total for that exercise across every linked canonical session.'
+            : 'If the saved records do not uniquely identify today\'s exercise, ask only the one clarification needed and do not change any saved plan.',
+        ].join(' ')
+    const result = await executeRealCodexAppServerTurn({
+      approvalPolicy: 'never',
+      baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+      codexCommand:
+        normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+        ?? undefined,
+      codexHome: config.codexHome,
+      developerInstructions: buildRepeatedSetDeveloperInstructions(
+        mode === 'group' ? 'group' : 'direct',
+      ),
+      env: {
+        ...config.env,
+        [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
+        MURPH_REPEATED_SET_E2E_COMMAND_LOG: commandLogPath,
+        PATH: `${binDirectory}:${config.env.PATH ?? ''}`,
+      },
+      excludeResumeTurns: true,
+      model: config.model,
+      modelProvider: config.modelProvider,
+      prompt,
+      reasoningEffort: 'medium',
+      sandbox: 'workspace-write',
+      workingDirectory,
+    })
+    const commandLog = (await readFile(commandLogPath, 'utf8'))
+      .split('\n')
+      .map((command) => command.trim())
+      .filter((command) => command.length > 0)
+
+    return {
+      ...result,
+      actions: readCapabilityRoutingActions(result.jsonEvents),
+      commandLog,
+      prompt,
+    }
+  } finally {
+    await removeRealCodexTemporaryPaths([
+      workingDirectory,
+      ...config.temporaryPaths,
+    ])
+  }
+}
+
+function buildRepeatedSetDeveloperInstructions(
+  conversationScope: 'direct' | 'group',
+): string {
+  return buildAssistantSystemPrompt({
+    assistantCliContract: null,
+    assistantContextSnapshotPrompt: null,
+    assistantHostedDeviceConnectAvailable: false,
+    assistantHostedDeviceConnectProviders: [],
+    assistantKnowledgeToolsAvailable: false,
+    channel: 'linq',
+    cliAccess: {
+      rawCommand: 'vault-cli',
+      setupCommand: 'murph',
+    },
+    conversationScope,
+    currentLocalDate: '2030-01-15',
+    currentTimeZone: 'America/New_York',
+    hostedRuntime: true,
+    modelBehaviorProfile: 'gpt5-agentic',
+    onboardingGuidance: false,
+    turnTrigger: null,
+  })
+}
+
+async function materializeRepeatedSetVaultCli(input: {
+  binDirectory: string
+  mode: RepeatedSetResolutionMode
+}): Promise<void> {
+  await mkdir(input.binDirectory, { recursive: true })
+  const executablePath = path.join(input.binDirectory, 'vault-cli')
+  const vault = '/private-vault'
+  const regimenId = REPEATED_SET_REGIMEN_ID
+  const alphaExperimentId = REPEATED_SET_ALPHA_EXPERIMENT_ID
+  const betaExperimentId = REPEATED_SET_BETA_EXPERIMENT_ID
+  const alphaSlug = 'movement-alpha'
+  const betaSlug = 'movement-beta'
+  const regimenData = regimenFrontmatterSchema.parse({
+    schemaVersion: 'murph.frontmatter.regimen.v1',
+    docType: 'regimen',
+    regimenId,
+    slug: 'alternating-strength-routine',
+    title: 'Alternating strength routine',
+    kind: 'habit',
+    status: 'active',
+    startedOn: '2030-01-14',
+    schedule: input.mode === 'ambiguous'
+      ? 'Alternate Movement Beta and Movement Alpha daily; the anchor movement was not saved.'
+      : 'Daily alternation anchored 2030-01-14 with Movement Beta, then Movement Alpha.',
+    note: `Movement Alpha uses experiment ${alphaExperimentId} at 8 repetitions per set. Movement Beta uses experiment ${betaExperimentId} at 5 repetitions per set.`,
+  })
+  const alphaExperimentData = experimentFrontmatterSchema.parse({
+    schemaVersion: 'murph.frontmatter.experiment.v1',
+    docType: 'experiment',
+    experimentId: alphaExperimentId,
+    slug: alphaSlug,
+    status: 'active',
+    title: 'Movement Alpha sets',
+    startedOn: '2030-01-13',
+    hypothesis: 'Consistent Movement Alpha sets improve strength.',
+    runPlan: {
+      interventionStart: '2030-01-13',
+      interventionEnd: '2030-02-12',
+      dose: '8 repetitions per completed set of Movement Alpha',
+      logging: { sessionFields: ['repetitions'] },
+    },
+  })
+  const betaExperimentData = experimentFrontmatterSchema.parse({
+    schemaVersion: 'murph.frontmatter.experiment.v1',
+    docType: 'experiment',
+    experimentId: betaExperimentId,
+    slug: betaSlug,
+    status: 'active',
+    title: 'Movement Beta sets',
+    startedOn: '2030-01-13',
+    hypothesis: 'Consistent Movement Beta sets improve strength.',
+    runPlan: {
+      interventionStart: '2030-01-13',
+      interventionEnd: '2030-02-12',
+      dose: '5 repetitions per completed set of Movement Beta',
+      logging: { sessionFields: ['repetitions'] },
+    },
+  })
+  const makeShowEntity = (input: {
+    data: Record<string, unknown>
+    id: string
+    kind: string
+    markdown: string
+    path: string
+    title: string
+  }) => ({
+    id: input.id,
+    kind: input.kind,
+    title: input.title,
+    occurredAt: null,
+    path: input.path,
+    markdown: input.markdown,
+    data: input.data,
+    links: [],
+  })
+  const regimenEntity = makeShowEntity({
+    data: regimenData,
+    id: regimenId,
+    kind: 'regimen',
+    markdown: '# Alternating strength routine',
+    path: 'bank/regimens/alternating-strength-routine.md',
+    title: 'Alternating strength routine',
+  })
+  const alphaExperimentEntity = makeShowEntity({
+    data: alphaExperimentData,
+    id: alphaExperimentId,
+    kind: 'experiment',
+    markdown: '# Movement Alpha sets',
+    path: 'bank/experiments/movement-alpha.md',
+    title: 'Movement Alpha sets',
+  })
+  const betaExperimentEntity = makeShowEntity({
+    data: betaExperimentData,
+    id: betaExperimentId,
+    kind: 'experiment',
+    markdown: '# Movement Beta sets',
+    path: 'bank/experiments/movement-beta.md',
+    title: 'Movement Beta sets',
+  })
+  const toListEntity = (entity: ReturnType<typeof makeShowEntity>) => {
+    const { markdown: _markdown, ...listEntity } = entity
+    void _markdown
+    return listEntitySchema.parse(listEntity)
+  }
+  const regimenShow = showResultSchema.parse({ vault, entity: regimenEntity })
+  const regimenList = {
+    vault,
+    filters: { limit: 10 },
+    items: [toListEntity(regimenEntity)],
+    count: 1,
+    nextCursor: null,
+  }
+  const alphaExperimentShow = showResultSchema.parse({
+    vault,
+    entity: alphaExperimentEntity,
+  })
+  const betaExperimentShow = showResultSchema.parse({
+    vault,
+    entity: betaExperimentEntity,
+  })
+  const experimentList = {
+    vault,
+    filters: { status: null, limit: 10 },
+    items: [
+      toListEntity(betaExperimentEntity),
+      toListEntity(alphaExperimentEntity),
+    ],
+    count: 2,
+    nextCursor: null,
+  }
+  const successEnvelope = (command: string, data: unknown) => ({
+    ok: true,
+    data,
+    meta: { command, duration: '0ms' },
+  })
+  const progressEnvelope = (input: {
+    completedSessions: number
+    eventIds: string[]
+    experimentId: string
+    slug: string
+    title: string
+  }) => successEnvelope('experiment progress', {
+    vault,
+    experimentId: input.experimentId,
+    lookupId: input.experimentId,
+    slug: input.slug,
+    asOf: '2030-01-15',
+    progress: experimentProgressSnapshotSchema.parse({
+      schemaVersion: 'murph.experiment-progress.v2',
+      schema: 'murph.experiment-progress.v2',
+      asOf: '2030-01-15',
+      adherence: {
+        completedSessions: input.completedSessions,
+        confirmedSessions: input.completedSessions,
+        evidence: { eventKind: 'intervention_session' },
+        expectedSessionsByNow: null,
+        loggedSessions: input.completedSessions,
+        minimumUsefulSessions: null,
+        sessionEventIds: input.eventIds,
+        status: 'on_track',
+        targetSessions: null,
+      },
+      confounders: [],
+      dataCoverage: {
+        activityProviders: [],
+        baselineDaysAvailable: 0,
+        interventionDaysAvailable: 0,
+        primaryBiomarkerKey: null,
+        primaryMetricDaysAvailable: 0,
+        status: 'no_wearable_data',
+        wearableProviders: [],
+      },
+      dayInRun: 3,
+      setupReadiness: { status: 'ready', blockingReasons: [] },
+      analysisReadiness: {
+        status: 'incomplete',
+        blockingReasons: ['missing_analysis_plan'],
+      },
+      experiment: {
+        id: input.experimentId,
+        slug: input.slug,
+        status: 'active',
+        title: input.title,
+      },
+      phase: 'intervention',
+      commonsProtocolRef: null,
+      protocolRef: null,
+      recommendation: {
+        action: 'summary',
+        reason: 'The member requested the current canonical total.',
+        shouldNotifyUser: false,
+      },
+      signals: [],
+      windows: {
+        baselineEnd: null,
+        baselineStart: null,
+        interventionEnd: '2030-02-12',
+        interventionStart: '2030-01-13',
+      },
+    }),
+  })
+  const alphaEventIds = REPEATED_SET_ALPHA_EVENT_IDS
+  const betaEventIds = REPEATED_SET_BETA_EVENT_IDS
+  const makeEventShowEnvelope = (input: {
+    eventId: string
+    experimentId: string
+    repetitions: number
+    slug: string
+    title: string
+  }) => {
+    const eventData = eventRecordSchema.parse({
+      schemaVersion: 'murph.event.v1',
+      id: input.eventId,
+      occurredAt: '2030-01-13T21:00:00.000Z',
+      recordedAt: '2030-01-13T21:00:01.000Z',
+      dayKey: '2030-01-13',
+      source: 'manual',
+      title: `${input.title} completed set`,
+      kind: 'intervention_session',
+      interventionType: input.slug,
+      experimentId: input.experimentId,
+      experimentSlug: input.slug,
+      sessionStatus: 'completed',
+      sessionLocalDate: '2030-01-13',
+      fields: { repetitions: input.repetitions },
+    })
+    return successEnvelope('event show', showResultSchema.parse({
+      vault,
+      entity: {
+        id: input.eventId,
+        kind: 'intervention_session',
+        title: `${input.title} completed set`,
+        occurredAt: eventData.occurredAt,
+        path: 'bank/events/2030-01.jsonl',
+        markdown: null,
+        data: eventData,
+        links: [
+          { id: input.experimentId, kind: 'experiment', queryable: true },
+        ],
+      },
+    }))
+  }
+  const alphaProgressEnvelopes = Array.from({ length: 4 }, (_, writeCount) =>
+    progressEnvelope({
+      completedSessions: writeCount + 2,
+      eventIds: alphaEventIds.slice(0, writeCount + 2),
+      experimentId: alphaExperimentId,
+      slug: alphaSlug,
+      title: 'Movement Alpha sets',
+    }))
+  const betaProgressEnvelope = progressEnvelope({
+    completedSessions: 4,
+    eventIds: betaEventIds,
+    experimentId: betaExperimentId,
+    slug: betaSlug,
+    title: 'Movement Beta sets',
+  })
+  const alphaEventEnvelopes = alphaEventIds.map((eventId) =>
+    makeEventShowEnvelope({
+      eventId,
+      experimentId: alphaExperimentId,
+      repetitions: 8,
+      slug: alphaSlug,
+      title: 'Movement Alpha',
+    }))
+  const betaEventEnvelopes = betaEventIds.map((eventId) =>
+    makeEventShowEnvelope({
+      eventId,
+      experimentId: betaExperimentId,
+      repetitions: 5,
+      slug: betaSlug,
+      title: 'Movement Beta',
+    }))
+  const shellJson = (value: unknown) =>
+    JSON.stringify(value).replaceAll("'", "'\\''")
+  const alphaProgressCaseLines = alphaProgressEnvelopes.map((envelope, writeCount) =>
+    `      ${writeCount}) printf '%s\\n' '${shellJson(envelope)}' ;;`)
+  const alphaEventCaseLines = alphaEventEnvelopes.flatMap((envelope, index) => [
+    `  *"intervention show ${alphaEventIds[index]}"*|*"event show ${alphaEventIds[index]}"*)`,
+    `    printf '%s\\n' '${shellJson(envelope)}'`,
+    '    ;;',
+    `  *"show ${alphaEventIds[index]}"*)`,
+    `    printf '%s\\n' '${shellJson(successEnvelope('show', envelope.data))}'`,
+    '    ;;',
+  ])
+  const betaEventCaseLines = betaEventEnvelopes.flatMap((envelope, index) => [
+    `  *"intervention show ${betaEventIds[index]}"*|*"event show ${betaEventIds[index]}"*)`,
+    `    printf '%s\\n' '${shellJson(envelope)}'`,
+    '    ;;',
+    `  *"show ${betaEventIds[index]}"*)`,
+    `    printf '%s\\n' '${shellJson(successEnvelope('show', envelope.data))}'`,
+    '    ;;',
+  ])
+
+  await writeFile(
+    executablePath,
+    [
+      '#!/bin/sh',
+      'set -eu',
+      'printf \'%s\\n\' "$*" >> "$MURPH_REPEATED_SET_E2E_COMMAND_LOG"',
+      'command_line="$*"',
+      'case "$command_line" in',
+      '  *"experiment list"*)',
+      `    printf '%s\\n' '${shellJson(successEnvelope('experiment list', experimentList))}'`,
+      '    ;;',
+      '  *"regimen list"*)',
+      `    printf '%s\\n' '${shellJson(successEnvelope('regimen list', regimenList))}'`,
+      '    ;;',
+      `  *"regimen show ${regimenId}"*)`,
+      `    printf '%s\\n' '${shellJson(successEnvelope('regimen show', regimenShow))}'`,
+      '    ;;',
+      `  *"show ${regimenId}"*)`,
+      `    printf '%s\\n' '${shellJson(successEnvelope('show', regimenShow))}'`,
+      '    ;;',
+      `  *"experiment show ${alphaExperimentId}"*)`,
+      `    printf '%s\\n' '${shellJson(successEnvelope('experiment show', alphaExperimentShow))}'`,
+      '    ;;',
+      `  *"show ${alphaExperimentId}"*)`,
+      `    printf '%s\\n' '${shellJson(successEnvelope('show', alphaExperimentShow))}'`,
+      '    ;;',
+      `  *"experiment show ${betaExperimentId}"*)`,
+      `    printf '%s\\n' '${shellJson(successEnvelope('experiment show', betaExperimentShow))}'`,
+      '    ;;',
+      `  *"show ${betaExperimentId}"*)`,
+      `    printf '%s\\n' '${shellJson(successEnvelope('show', betaExperimentShow))}'`,
+      '    ;;',
+      `  *"experiment session log ${alphaExperimentId}"*)`,
+      `    count=$(grep -c "experiment session log ${alphaExperimentId}" "$MURPH_REPEATED_SET_E2E_COMMAND_LOG")`,
+      '    event_id="evt_01JNV447V6K3SW1Q9NJ7XVQZ7$((count + 2))"',
+      `    printf '{"ok":true,"data":{"vault":"${vault}","experimentId":"${alphaExperimentId}","lookupId":"${alphaExperimentId}","slug":"${alphaSlug}","eventId":"%s","ledgerFile":"bank/events/2030-01.jsonl","created":true,"kind":"intervention_session"},"meta":{"command":"experiment session log","duration":"0ms"}}\\n' "$event_id"`,
+      '    ;;',
+      `  *"experiment session log ${betaExperimentId}"*)`,
+      '    printf \'%s\\n\' \'{"ok":false,"error":{"code":"wrong_owner","message":"Movement Beta is not the current target.","retryable":false},"meta":{"command":"experiment session log","duration":"0ms"}}\' >&2',
+      '    exit 2',
+      '    ;;',
+      `  *"experiment progress ${alphaExperimentId}"*)`,
+      `    count=$(grep -c "experiment session log ${alphaExperimentId}" "$MURPH_REPEATED_SET_E2E_COMMAND_LOG" || true)`,
+      '    case "$count" in',
+      ...alphaProgressCaseLines,
+      `      *) printf '%s\\n' '${shellJson(alphaProgressEnvelopes[3])}' ;;`,
+      '    esac',
+      '    ;;',
+      `  *"experiment progress ${betaExperimentId}"*)`,
+      `    printf '%s\\n' '${shellJson(betaProgressEnvelope)}'`,
+      '    ;;',
+      ...alphaEventCaseLines,
+      ...betaEventCaseLines,
+      '  *)',
+      '    printf \'%s\\n\' \'{"ok":true,"data":{"items":[]},"meta":{"command":"unknown","duration":"0ms"}}\'',
+      '    ;;',
+      'esac',
+      '',
+    ].join('\n'),
+    { encoding: 'utf8', mode: 0o700 },
+  )
+  await chmod(executablePath, 0o700)
+}
+
 function buildHabitatVoiceE2ePrompt(transcript: string): string {
   return [
     'Goal: update the member\'s Habitat from one environment voice walkthrough.',
@@ -7668,6 +8467,25 @@ async function materializeWearableArrivalVaultCli(input: {
       '    printf \'%s\\n\' \'{"data":[],"ok":true}\'',
       '    ;;',
       'esac',
+      '',
+    ].join('\n'),
+    { encoding: 'utf8', mode: 0o700 },
+  )
+  await chmod(executablePath, 0o700)
+}
+
+async function materializeConnectedHealthVaultCli(input: {
+  binDirectory: string
+  result: Record<string, unknown>
+}): Promise<void> {
+  await mkdir(input.binDirectory, { recursive: true })
+  const executablePath = path.join(input.binDirectory, 'vault-cli')
+  const encodedResult = JSON.stringify(input.result).replaceAll("'", "'\\''")
+  await writeFile(
+    executablePath,
+    [
+      '#!/bin/sh',
+      `printf '%s\\n' '${encodedResult}'`,
       '',
     ].join('\n'),
     { encoding: 'utf8', mode: 0o700 },

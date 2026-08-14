@@ -85,7 +85,7 @@ function assertFullTimeseriesContinuation(result: {
   assert.equal(continuation?.payload?.timeseriesCursor, "2026-04-01T00:00:00.000Z");
   assert.equal(
     continuation?.payload?.timeseriesResourceCursor,
-    JSON.stringify({ v: 1, a: "blood_oxygen", i: [] }),
+    "blood_oxygen",
   );
 }
 

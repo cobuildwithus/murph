@@ -168,14 +168,17 @@ provider-no-replay recovery, are jointly specified by
 `agent-docs/references/hosted-runtime-protocol.md`.
 
 Independent partial PlanetScale metric normalization, explicit unknown-family
-evidence, continued evaluation of available database signals, bounded safe
-direct-counter-only confirmation with cross-scrape evidence composition and
-without suppressing unsafe observations, and one-shot telemetry-only operator
-paging with unresolved-window coalescing, current-pressure
-priority including direct errors in one combined pre-first-page incident,
-post-ack recurrence suppression, durable owed-page preservation inside
-non-replayable direct-error admission, truthful direct-error and mixed telemetry
-window provenance, and rollback-compatible additive state are
+evidence when either expected connection-error port is missing, continued
+evaluation of available database signals, per-port baseline advancement with
+new/reset suppression, bounded safe connection-error confirmation with
+cross-scrape port composition and without suppressing unsafe observations, and
+one-shot telemetry-only operator paging with unresolved-window coalescing,
+current-pressure priority including direct and pooled connection errors in one
+combined pre-first-page incident, post-ack recurrence suppression, durable
+owed-page preservation inside non-replayable category-specific admission,
+truthful connection-error and mixed telemetry window provenance, and
+rollback-compatible additive state with deliberately compatible physical sample
+columns are
 jointly specified by `ARCHITECTURE.md`,
 `agent-docs/RELIABILITY.md`, `agent-docs/references/testing-ci-map.md`, and
 `apps/cloudflare/README.md`.
@@ -370,7 +373,7 @@ webhook admission fence for app-bound connections, is jointly specified by
 | `agent-docs/product-specs/group-managed-automations.md` | Implemented member/group managed-owner isolation, execution checks, and retirement behavior; no member-facing group social automation currently ships. | Managed group automation behavior | High | 2026-07-26 |
 | `agent-docs/product-specs/group-health-newsletter.md` | Newsletter as a private skill recipe over an ordinary wall-clock-aware group automation, consent-aware shared reads, normal current-chat delivery, and an optional generic group-email effect with Web-owned recipient revalidation and existing-outbox durability. | Group newsletter behavior | Medium | 2026-08-10 |
 | `agent-docs/product-specs/group-challenge-formats-and-scorecards.md` | Individual, team, and collective challenge formats plus one-to-five model-interpreted additive components with deterministic point arithmetic and aggregation. | Group challenge scorecards | High | 2026-07-29 |
-| `agent-docs/product-specs/group-challenge-data-diagnostics.md` | Truthful complete or partial group-challenge standings, evidence-ordered missing-data guidance with explicit first-projection `pending` versus completed-empty `missing` states, group-authorized fresh exact-scope reads for ordinary and privately requested visibility checks, immediately scoreable reported Deep/REM values with member-local future-date rejection, source-aware sleep permissions with rollback-readable compatibility, and connection/source-epoch-coherent privacy-bounded `device-sync-status.v0` observations. | Group challenge diagnostics | High | 2026-08-11 |
+| `agent-docs/product-specs/group-challenge-data-diagnostics.md` | Truthful complete or partial group-challenge standings, evidence-ordered missing-data guidance with explicit first-projection `pending` versus completed-empty `missing` states, group-authorized fresh exact-scope reads, source-tagged multi-source health shares without cross-source selection, rollback-readable legacy sleep compatibility, and connection/source-epoch-coherent privacy-bounded `device-sync-status.v0` observations. | Group challenge diagnostics | High | 2026-08-13 |
 | `agent-docs/product-specs/challenge-standings-card.md` | Native Messages presentation contract for individual, team, and collective challenge standings with truthful partial and unscored states, authenticated Linq group-only delivery, complete semantic captions, and an identity-free static-image projection with the canonical Murph badge. | Group challenge standings response card | High | 2026-08-11 |
 | `agent-docs/product-specs/personal-group-awareness.md` | Personal Murph read access to the member's hosted-group memberships, requested permissions, active self grants, and owner-authorized permission links. | Hosted group self-awareness | High | 2026-07-10 |
 | `agent-docs/product-specs/private-group-consultation.md` | Implemented Assistant Ask request/reply primitive, first composed as an automatically resolved, read-only private-to-group Murph ask, with exact requester identity, deterministic exact unavailable delivery, bounded foreground-causal draining, bounded opaque failure correlation, and post-Temporal direct latency hints. | Hosted group consultation | High | 2026-07-26 |
@@ -391,6 +394,7 @@ webhook admission fence for app-bound connections, is jointly specified by
 | `agent-docs/references/hosted-temporal-orchestration.md` | Durable hard-cut Temporal orchestration ADR defining final ownership split, private Murph Cloud production worker, deployment, prior-private-version rollback ownership, and repository-relocation replay continuity, pointer-only Temporal state including the payload-free runtime wake used by provider changes and the same-transaction durable maintenance-mailbox handoff used by new group-share grants, signal-aware retry/wait behavior including failed-runtime completion backoff, web signal-client and worker Temporal Cloud auth/TLS parity, callback-signed execution-adapter and device-sync scheduled wake sweep contract, web-owned reconciliation facts without Activity-local signed usage decisions, post-start exact-code AI-usage denial as an unchanged mailbox prefix with durable lag preserved, mailbox-lag priority, global device-sync scheduled-wake Schedule ownership with bounded mailbox handoff, production Workflow bundle, cache-memory, fixed execution-slot and autoscaling-poller limits, two-instance Render capacity, Cloudflare scheduler deletion targets, Vercel Workflow nudge deletion targets, architecture guard coverage, and acceptance criteria; `agent-docs/exec-plans/completed/TEMPORAL.md` is the completed execution snapshot. | Hosted Temporal orchestration target | High | 2026-08-11 |
 | `agent-docs/references/data-model-seams.md` | Current shared-owner notes for high-leverage data-model seams. | Data-model seam guidance | Medium | 2026-04-07 |
 | `agent-docs/references/giant-file-composability-seams.md` | Paused giant-file cleanup planning guidance and current worth-planning/keep-together notes for oversized multi-responsibility files. | Giant-file composability seam guidance | Medium | 2026-06-03 |
+| `agent-docs/research/2026-08-13-alternating-routine-set-resolution.md` | Privacy-safe production correlation and root-cause analysis for repeated strength-set completions attributed to the wrong exercise in an alternating routine. | Investigation artifact | Medium | 2026-08-13 |
 | `agent-docs/research/2026-08-05-ios-android-companion-parity-audit.md` | Point-in-time exhaustive crosswalk of landed Murph iOS companion pull requests against Android main, with confirmed product, correctness, health, contact, release, and verification gaps plus platform-specific exclusions. | Mobile companion parity audit | Medium | 2026-08-05 |
 | `agent-docs/research/2026-07-16-codex-session-architecture-audit.md` | Point-in-time aggregate evidence from the frozen 30-day Codex session audit, including corpus coverage, change-mapping dispositions, steering themes, and confidence limits. | Architecture audit research artifact | Medium | 2026-07-18 |
 | `agent-docs/research/2026-07-10-junction-labs-commerce-and-fulfillment.md` | Point-in-time Junction lab-ordering research and phased product, commerce, fulfillment, result-import, and launch-gate proposal. | Research and future planning artifact | Medium | 2026-07-10 |

@@ -167,11 +167,12 @@ describe('assistant capability-offers prompt contract', () => {
     expect(section).toContain('`not_granted`, `pending`, `missing`, and `available`')
     expect(prompt).toContain('Deep/REM is stored, not rechecked')
     expect(prompt).toContain('New access uses v1')
-    expect(prompt).toContain(
-      'read v0 only for existing requests/grants',
-    )
-    expect(prompt).toContain('projection/source times/conflicts')
-    expect(prompt).toContain('`selected` score')
+    expect(prompt).toContain('v0 only for existing requests/grants')
+    expect(prompt).toContain('Return tagged records separately')
+    expect(prompt).toContain('Legacy may be untagged')
+    expect(prompt).toContain('no cross-source winner')
+    expect(prompt).toContain('Never imply max-HR baselines')
+    expect(prompt).not.toContain('`selected` score')
     expect(section).toContain('Use `read_current` for membership and permission configuration only')
     expect(section).toContain('Neither path grants Apple Health access')
     expect(section).toContain('Apple does not expose HealthKit read authorization')
@@ -277,11 +278,14 @@ describe('assistant capability-offers prompt contract', () => {
 
     expect(prompt).toContain(HOSTED_GROUPS_HEADER)
     expect(prompt).toContain('`device-sync-status.v0`')
-    expect(prompt).toContain('public source labels/status/sync times')
+    expect(prompt).toContain('source label/status/sync')
     expect(prompt).toContain('raw provider/account IDs')
-    expect(prompt).toContain('sleep timing/total; source-aware deep/REM')
-    expect(prompt).toContain('`workouts.v0`: day-local start/duration/type')
-    expect(prompt).toContain('canonical event zone (vault fallback)')
+    expect(prompt).toContain('sleep timing/total/stages')
+    expect(prompt).toContain('Return tagged records separately')
+    expect(prompt).toContain('never infer source or completeness')
+    expect(prompt).toContain('no cross-source winner')
+    expect(prompt).toContain('`workouts.v0`: local start/duration/type/source')
+    expect(prompt).toContain('event/vault zone')
     expect(prompt).toContain('explicit current visibility of a consented shared metric')
     expect(prompt).toContain('call exact-scope `read_shared` once first')
     expect(prompt).toContain('`pending` means permission is active')
@@ -290,7 +294,7 @@ describe('assistant capability-offers prompt contract', () => {
     expect(prompt).toContain('granted plus `missing` means there are no currently visible shared records')
     expect(prompt).toContain('unrelated "now"/"yet" questions')
     expect(prompt).toContain(
-      'no timestamp/route/location/HR/provider ID',
+      'no timestamp/route/location/HR',
     )
   })
 

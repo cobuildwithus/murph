@@ -25,8 +25,7 @@ const DESIGN_ACTIVITY_SCOPE: HostedVaultShareProjectionScope = {
 
 const DESIGN_SLEEP_SOURCE_PERMISSIONS: GroupJoinPermissionDisplay[] = [
   {
-    description:
-      "Shares 7 days of each source’s name, deep sleep minutes, and recorded time.",
+    description: "Shares 7 days of deep sleep minutes and recorded times by source.",
     label: "Deep sleep",
     legacyProjectionScope: { projectionKind: "deep-sleep-days.v0" },
     projectionScope: { projectionKind: "deep-sleep-sources-days.v1" },
@@ -35,8 +34,7 @@ const DESIGN_SLEEP_SOURCE_PERMISSIONS: GroupJoinPermissionDisplay[] = [
     }),
   },
   {
-    description:
-      "Shares 7 days of each source’s name, REM sleep minutes, and recorded time.",
+    description: "Shares 7 days of REM sleep minutes and recorded times by source.",
     label: "REM sleep",
     legacyProjectionScope: { projectionKind: "rem-sleep-days.v0" },
     projectionScope: { projectionKind: "rem-sleep-sources-days.v1" },
@@ -48,7 +46,7 @@ const DESIGN_SLEEP_SOURCE_PERMISSIONS: GroupJoinPermissionDisplay[] = [
 
 const DESIGN_PERMISSIONS: GroupJoinPermissionDisplay[] = [
   {
-    description: "Shares your last 7 days of active minutes.",
+    description: "Shares 7 days of active minutes by source.",
     label: "Activity minutes",
     projectionScope: DESIGN_ACTIVITY_SCOPE,
     projectionScopeKey: buildHostedVaultShareProjectionScopeKey(DESIGN_ACTIVITY_SCOPE),
@@ -57,8 +55,7 @@ const DESIGN_PERMISSIONS: GroupJoinPermissionDisplay[] = [
   // The four gram-macro scopes render as a single "Daily macros" card; dietary
   // calories stay a separate "Daily calories" card.
   {
-    description:
-      "Shares your last 7 days of daily protein totals from meals in Murph, including meals imported from connected apps.",
+    description: "Shares 7 days of meal protein totals, including imports, with Murph as the source.",
     label: "Daily protein",
     projectionScope: { projectionKind: "protein-days.v0" },
     projectionScopeKey: buildHostedVaultShareProjectionScopeKey({
@@ -66,8 +63,7 @@ const DESIGN_PERMISSIONS: GroupJoinPermissionDisplay[] = [
     }),
   },
   {
-    description:
-      "Shares your last 7 days of daily carbohydrate totals from meals in Murph, including meals imported from connected apps.",
+    description: "Shares 7 days of meal carbohydrate totals, including imports, with Murph as the source.",
     label: "Daily carbs",
     projectionScope: { projectionKind: "carbs-days.v0" },
     projectionScopeKey: buildHostedVaultShareProjectionScopeKey({
@@ -75,8 +71,7 @@ const DESIGN_PERMISSIONS: GroupJoinPermissionDisplay[] = [
     }),
   },
   {
-    description:
-      "Shares your last 7 days of daily fat totals from meals in Murph, including meals imported from connected apps.",
+    description: "Shares 7 days of meal fat totals, including imports, with Murph as the source.",
     label: "Daily fat",
     projectionScope: { projectionKind: "fat-days.v0" },
     projectionScopeKey: buildHostedVaultShareProjectionScopeKey({
@@ -84,8 +79,7 @@ const DESIGN_PERMISSIONS: GroupJoinPermissionDisplay[] = [
     }),
   },
   {
-    description:
-      "Shares your last 7 days of daily fiber totals from meals in Murph, including meals imported from connected apps.",
+    description: "Shares 7 days of meal fiber totals, including imports, with Murph as the source.",
     label: "Daily fiber",
     projectionScope: { projectionKind: "fiber-days.v0" },
     projectionScopeKey: buildHostedVaultShareProjectionScopeKey({
@@ -93,8 +87,7 @@ const DESIGN_PERMISSIONS: GroupJoinPermissionDisplay[] = [
     }),
   },
   {
-    description:
-      "Shares your last 7 days of daily calorie totals from meals in Murph, including meals imported from connected apps.",
+    description: "Shares 7 days of meal calorie totals, including imports, with Murph as the source.",
     label: "Daily calories",
     projectionScope: { projectionKind: "calories-days.v0" },
     projectionScopeKey: buildHostedVaultShareProjectionScopeKey({
@@ -131,7 +124,7 @@ export function GroupJoinStudy({
       inert
     >
       <GroupJoinVariant
-        caption="Deep sleep is one exact consent choice that includes source names, each source's recorded time, and every available value. Existing provider-neutral grants keep their original narrower meaning without becoming a second choice."
+        caption="Deep sleep is one exact consent choice that includes source names, each source's recorded time, and every available value across both stored scope versions."
         title="Sleep sources · exact consent"
       >
         <GroupJoinPageMock alreadyActiveMember={false}>
@@ -149,8 +142,8 @@ export function GroupJoinStudy({
       </GroupJoinVariant>
 
       <GroupJoinVariant
-        caption="An existing narrow grant remains visible as the same single sleep permission. Saving keeps it narrow, Include source details explicitly upgrades it, and unchecking stops all versions of that sleep share."
-        title="Sleep sources · legacy sharing active"
+        caption="An existing v0 grant remains visible under the same source-labelled sleep permission. Saving preserves its scope key, and unchecking still stops every stored version of that share."
+        title="Sleep sources · existing sharing active"
       >
         <GroupJoinPageMock alreadyActiveMember>
           <GroupJoinAcceptForm

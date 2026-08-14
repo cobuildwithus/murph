@@ -7,6 +7,7 @@ import { afterEach, expect, test, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   getMurphGithubStarCount: vi.fn(),
   getHostedPageAuthSnapshot: vi.fn(),
+  scheduleHomepageBrowserVaultPreparation: vi.fn(),
   headers: vi.fn(
     async () =>
       new Headers({
@@ -66,6 +67,11 @@ vi.mock("@/src/lib/hosted-onboarding/page-auth", () => ({
   getHostedDashboardPageAuthSnapshot: mocks.getHostedPageAuthSnapshot,
 }));
 
+vi.mock("@/src/lib/browser-vault/homepage-preparation", () => ({
+  scheduleHomepageBrowserVaultPreparation:
+    mocks.scheduleHomepageBrowserVaultPreparation,
+}));
+
 vi.mock("@/src/lib/github-stars", async () => {
   const actual =
     await vi.importActual<typeof import("@/src/lib/github-stars")>(
@@ -122,6 +128,7 @@ test("HomePage renders the canonical landing page at the root route", async () =
   const markup = renderToStaticMarkup(await HomePage());
 
   expect(mocks.getHostedPageAuthSnapshot).toHaveBeenCalledTimes(1);
+  expect(mocks.scheduleHomepageBrowserVaultPreparation).not.toHaveBeenCalled();
   expect(mocks.getMurphGithubStarCount).toHaveBeenCalledTimes(1);
   expect(mocks.headers).toHaveBeenCalledTimes(1);
   expect(mocks.LandingAuthActions).toHaveBeenCalledTimes(5);
@@ -439,6 +446,7 @@ test("HomePage keeps the final CTA consistent for authenticated sessions", async
   vi.clearAllMocks();
   mocks.getHostedPageAuthSnapshot.mockResolvedValue({
     authenticated: true,
+    authenticatedMember: { id: "member_homepage" },
   });
   mocks.getMurphGithubStarCount.mockResolvedValue(null);
   mocks.headers.mockResolvedValue(new Headers({
@@ -449,6 +457,9 @@ test("HomePage keeps the final CTA consistent for authenticated sessions", async
 
   const markup = renderToStaticMarkup(await HomePage());
 
+  expect(mocks.scheduleHomepageBrowserVaultPreparation).toHaveBeenCalledWith({
+    memberId: "member_homepage",
+  });
   expect(mocks.headers).toHaveBeenCalledTimes(1);
   expect(mocks.LandingAuthActions).toHaveBeenCalledTimes(5);
   expect(mocks.LandingAuthActions).toHaveBeenNthCalledWith(

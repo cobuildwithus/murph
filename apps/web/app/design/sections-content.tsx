@@ -143,7 +143,7 @@ export function SectionsContent() {
 
       <Separator />
 
-      <StudySection title="Homepage authentication readiness and phone handoff">
+      <StudySection title="Homepage background readiness and phone handoff">
         <HomepageAuthWarmRuntimeStudy />
       </StudySection>
 
@@ -640,7 +640,7 @@ export function SectionsContent() {
 
       <Separator />
 
-      <StudySection title="Group join invites, current and legacy sharing, and setup recovery">
+      <StudySection title="Group join invites, source-aware sharing, and setup recovery">
         <GroupJoinStudy
           comprehensivePermissions={projectHostedVaultShareProjectionDisplays(
             resolveHostedGroupAccessOfferProjectionScopes(undefined),

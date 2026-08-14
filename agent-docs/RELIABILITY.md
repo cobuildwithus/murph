@@ -1,7 +1,6 @@
 # Reliability
 
 Last verified: 2026-08-13
-
 ## Local Frog autofix scheduling
 
 - One macOS user-session LaunchAgent owns the optional local schedule with
@@ -202,7 +201,6 @@ Last verified: 2026-08-13
   output, credential, direct identifier, or absolute path. Malformed or
   ownership-ambiguous locks fail closed; a dead PID or a live PID with a
   different start token is safely recoverable without sending a signal.
-
 
 ## Current Guardrails
 
@@ -462,14 +460,20 @@ Last verified: 2026-08-13
   second, outside any storage transaction. Only an exhausted two-attempt
   collection increments the consecutive-failure state. A usable partial
   observation remains single-pass when any available signal is unsafe, so
-  concrete evidence is evaluated without delay. When the only absent family is
-  the direct-error counter and every available signal is safe, the monitor uses
-  that same bounded retry as a confirmation scrape. Every available confirmation
-  signal is evaluated; a recovered direct counter is merged with the original
-  complete gauge evidence, while a failed or still-incomplete confirmation
-  retains the original partial observation. This makes transient counter-family
-  omission less noisy without converting unknown to zero or weakening the
-  two-check telemetry fallback.
+  concrete evidence is evaluated without delay. The connection-error family
+  expects direct port 5432 and pooled application port 6432, keyed by port and
+  region so their counters cannot collide. Missing either expected port leaves
+  the family unknown. An observed port can still produce a positive
+  non-replayable condition; when every available signal is safe and only this
+  family is incomplete, the monitor uses that same bounded retry as a
+  confirmation scrape. Every available confirmation signal is evaluated;
+  complementary observed ports can be composed with the original complete
+  gauge evidence, while a failed or still-incomplete confirmation retains the
+  original partial observation. Each observed port replaces and advances only
+  its own usable series baseline, an omitted port retains its prior baseline,
+  and new or reset region series are independently suppressed. This makes
+  transient counter-family omission less noisy without converting unknown to
+  zero, replaying an old delta, or weakening the two-check telemetry fallback.
   Discovery, scrape, parse, or incomplete required metrics must recur on two
   consecutive runs before paging the monitoring condition. Crossing that
   threshold persists one bounded telemetry-page obligation in the existing
@@ -478,47 +482,53 @@ Last verified: 2026-08-13
   partial checks, and uses the threshold time as its window end. One bounded
   evidence value on each existing sample preserves that aggregate provenance
   across restart. The obligation survives an occupied pending-message slot,
-  restart, recovery, and direct-error-only prioritization; only acknowledgment
-  of a pending body that includes the monitoring condition clears it. Recovery
-  and another threshold before acknowledgment deliberately coalesce into that
-  unresolved notification, retaining the first threshold window; this monitor
-  does not maintain an outage backlog. The additive columns retain the existing
-  schema version so a rollback Worker can ignore them. Current code recognizes
-  the prior Worker's cleared pending key/body with the telemetry marker still set
-  as an acknowledgment and removes the stale obligation before re-admission.
-  A newly opened incident or one-shot direct migration admission failure admits
-  its exact body and idempotency key in the same synchronous SQLite transaction
-  that persists the sample and advances any direct-error counter baseline.
-  If another immutable page already owns the single pending-message slot, the
-  same transaction advances the sample baseline and accumulates the later
-  direct-error count plus latest check time in the existing alert row instead
-  of dropping it. An acknowledged older page cannot close the incident while
-  that evidence remains. The next run with a free slot atomically promotes the
-  accumulated count into one non-replayable page, retaining any owed telemetry
-  condition in the same body, which then follows the ordinary attempt fence,
-  health preflight, exact-body retry, and restart contract.
-  When a direct error forces admission inside an acknowledged incident's
-  closed attempt fence, that pending body contains the non-replayable direct
-  error plus any durable telemetry obligation already available at admission;
-  co-occurring replayable gauges remain in the persisted sample but cannot
-  become stale pending claims. Pure deferred evidence keeps its stored check
-  time; when a current direct-error delta joins the promoted count, the page uses
-  the latest included check. Historical telemetry carries its separate
-  observation time. That exact combined page owns the next eligible attempt and
+  restart, recovery, and connection-error-only prioritization; only
+  acknowledgment of a pending body that includes the monitoring condition
+  clears it. Recovery and another threshold before acknowledgment deliberately
+  coalesce into that unresolved notification, retaining the first threshold
+  window; this monitor does not maintain an outage backlog. The additive
+  columns retain the existing schema version so a rollback Worker can ignore
+  them. Current code recognizes the prior Worker's cleared pending key/body with
+  the telemetry marker still set as an acknowledgment and removes the stale
+  obligation before re-admission.
+  A newly opened incident or one-shot connection-error condition admits its
+  exact body and idempotency key in the same synchronous SQLite transaction
+  that persists the sample and advances the generalized connection-error
+  counter baseline. Port 5432 retains direct migration-admission wording. Port
+  6432 is a distinct pooled application connection-error condition; the metric
+  has no reason label, so the page cannot claim a specific provider rejection
+  reason. If another immutable page already owns the single pending-message
+  slot, the same transaction advances the sample baseline and accumulates each
+  later category's count plus latest check time in the existing alert row
+  instead of dropping it. An acknowledged older page cannot close the incident
+  while that evidence remains. The next run with a free slot atomically
+  promotes the accumulated categories into one non-replayable page, retaining
+  any owed telemetry condition in the same body, which then follows the
+  ordinary attempt fence, health preflight, exact-body retry, and restart
+  contract.
+  When a connection error forces admission inside an acknowledged incident's
+  closed attempt fence, that pending body contains only the non-replayable
+  connection-error categories plus any durable telemetry obligation already
+  available at admission; co-occurring replayable gauges remain in the
+  persisted sample but cannot become stale pending claims. Pure deferred
+  evidence keeps the latest stored check time among its included categories;
+  when a current connection-error delta joins the promoted counts, the page
+  uses the current check. Historical telemetry carries its separate observation
+  time. That exact combined page owns the next eligible attempt and
   acknowledgment clears the represented telemetry obligation, avoiding a
   second notification lifecycle.
   A replayable condition still unsafe at that boundary remains eligible for the
   following paced recurrence. The same one-slot ordering applies in reverse: a
-  later direct-error obligation waits behind an older page but cannot be consumed
-  by the counter baseline. This explicit prioritization keeps admitted bodies
-  immutable without another message queue or delivery lifecycle.
+  later connection-error obligation waits behind an older page but cannot be
+  consumed by the counter baseline. This explicit prioritization keeps admitted
+  bodies immutable without another message queue or delivery lifecycle.
   An acknowledged incident's replayable gauge does not admit stale evidence
   while the attempt fence is closed; once the fence opens, a still-unsafe
   current gauge admits the recurrence. An unadmitted monitoring obligation does
   not occupy a closed provider fence. Until an incident admits its first page,
-  concrete evidence, including a direct-error delta, that appears on the
-  threshold or a later sample persists in one combined immutable body with
-  exact identity, concrete check time, and
+  concrete evidence, including either connection-error category, that appears
+  on the threshold or a later sample persists in one combined immutable body
+  with exact identity, concrete check time, and
   condition-local telemetry time; both facts share the first eligible attempt
   and one acknowledgment cycle. For an acknowledged-incident
   recurrence, the first eligible sample supplies any still-current concrete
@@ -571,6 +581,11 @@ Last verified: 2026-08-13
   filtering: at the hourly cap, one incident traverses one hundred reviewed
   leads before repeating one. Literal reviewed data avoids a prose generator,
   provider dependency, or second runtime copy owner.
+  The physical SQLite sample columns deliberately retain their schema-v1
+  `direct_connection_error_*` names for rollback compatibility. Current code
+  stores the generalized two-port baseline and aggregate delta in those columns;
+  pooled deferred evidence uses additive category-specific columns without a
+  schema-version increment.
   Telemetry-only copy instead states that monitoring is incomplete or
   unavailable and cannot claim that the database itself is under pressure.
   Message variation must remain contextual and deterministic, never random
@@ -1050,12 +1065,15 @@ Last verified: 2026-08-13
 - Junction full reconcile and backfill jobs finish inventory, summary, profile,
   and historical scheduling once, then advance timeseries-only work through the
   existing job payload. Each attempt owns one canonical resource and one
-  complete UTC day. A collection may use at most two sequential pages with one
+  complete UTC day. A collection may use at most three sequential pages with one
   bounded request attempt per page. Page-heavy active-calorie and heart-rate
   days deterministically retry as complete UTC hours; no partial aggregate or
   vendor cursor is persisted. `timeseriesCursor` and
   `timeseriesResourceCursor` identify the next complete unit without changing
-  job dedupe identity. Every partial continuation preserves
+  job dedupe identity. The deployed v1 resource envelope is read only at this
+  provider boundary, validated exactly, and projected immediately to its active
+  scalar resource; new successors never write the envelope or consult its
+  completed-resource names. Every partial continuation preserves
   `lastSyncCompletedAt`; only terminal current full work may advance it.
 - A member-owned device provider application's revision is its credential
   epoch. OAuth state and established connections retain the exact application

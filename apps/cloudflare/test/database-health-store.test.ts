@@ -50,6 +50,8 @@ describe("database health store", () => {
 
     expect(store.readAlertState()).toMatchObject({
       alertSequence: 1,
+      deferredPooledErrorCheckedAtMs: null,
+      deferredPooledErrorCount: 0,
       incidentOpen: true,
       incidentSequence: 7,
       monitoringAlertObligation: null,
@@ -57,11 +59,68 @@ describe("database health store", () => {
       pendingAlertIncludesMonitoring: false,
       pendingAlertMessage: "existing alert",
     });
+    expect(sql.exec<{ name: string }>(
+      "PRAGMA table_info(database_health_meta)",
+    ).toArray().map((column) => column.name)).toEqual(
+      expect.arrayContaining([
+        "deferred_pooled_error_count",
+        "deferred_pooled_error_checked_at_ms",
+      ]),
+    );
     expect(sql.exec<{ value: number }>(
       `SELECT value
        FROM database_health_schema_meta
        WHERE key = 'schema_version'`,
     ).one().value).toBe(1);
+  });
+
+  it("stores a generalized counter baseline in the compatible sample column", () => {
+    const sql = createTestSqlStorage();
+    const store = new DatabaseHealthStore(sql);
+    const connectionErrorCounterBaseline = {
+      '["5432","us-east"]': 7,
+      '["6432","us-east"]': 8,
+    };
+
+    store.recordFailedSample({
+      connectionErrorCounterBaseline,
+      connectionErrorDelta: 2,
+      conditions: [
+        { count: 2, kind: "direct_migration_admission_failures" },
+      ],
+      failureCode: "required_metrics_missing",
+      monitoringEvidence: {
+        availability: "incomplete",
+        missingMetrics: [
+          "planetscale_edge_postgres_connection_errors_total",
+        ],
+      },
+      observedAtMs: 300_000,
+      snapshot: {
+        clientWaitSeconds: 0,
+        clientWaitingConnections: 0,
+        connectionErrorCounters: {
+          '["5432","us-east"]': 7,
+        },
+        postgresConnections: 10,
+        postgresConnectionStates: { active: 5, idle: 5 },
+        postgresMaxConnections: 50,
+        serverConnections: 10,
+        serverPoolCapacity: 50,
+        serverPoolSaturationRatio: 0.2,
+        serverPoolStates: { active: 5, idle: 5 },
+      },
+    });
+
+    expect(store.readLatestConnectionErrorCounterBaseline()).toEqual(
+      connectionErrorCounterBaseline,
+    );
+    expect(store.readRecentSamples()).toEqual([
+      expect.objectContaining({
+        connectionErrorDelta: 2,
+        failureCode: "required_metrics_missing",
+      }),
+    ]);
   });
 
   it("adds bounded monitoring evidence to version-one sample history", () => {
