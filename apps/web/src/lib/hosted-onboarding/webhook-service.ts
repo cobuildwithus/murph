@@ -186,7 +186,7 @@ import {
   reconcileHostedThreadContainerParticipants,
 } from "../hosted-groups/group-tool";
 import {
-  lookupHostedGroupParticipantMemberIdByHandle,
+  lookupHostedGroupParticipantMemberIdsByHandles,
 } from "../hosted-groups/participant-member";
 import {
   reconcileHostedUsageReferralRewardAfterCommit,
@@ -1370,15 +1370,14 @@ async function resolveHostedLinqPendingGroupParticipantMemberIds(input: {
         unavailable: false,
       };
     }
-    const resolved = await Promise.all(participantHandles.map(async (handle) =>
-      await lookupHostedGroupParticipantMemberIdByHandle({
-        handle,
-        prisma: input.prisma,
-      })
-    ));
-    const memberIds = [...new Set(resolved.flatMap((memberId) =>
-      memberId ? [memberId] : []
-    ))];
+    const memberIdsByHandle = await lookupHostedGroupParticipantMemberIdsByHandles({
+      handles: participantHandles,
+      prisma: input.prisma,
+    });
+    const memberIds = [...new Set(participantHandles.flatMap((handle) => {
+      const memberId = memberIdsByHandle.get(handle) ?? null;
+      return memberId ? [memberId] : [];
+    }))];
     logHostedLinqPendingGroupRoster("resolved");
     return {
       handles,

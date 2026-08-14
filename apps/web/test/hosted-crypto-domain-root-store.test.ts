@@ -297,6 +297,35 @@ test("detects whether all active hosted crypto domain roots exist for a user", a
   })).resolves.toBe(true);
 });
 
+test("reads a maximum activation root set with one narrow query and no KMS", async () => {
+  const { readUserIdsWithActiveHostedCryptoDomainRootsTx } = await import(
+    "../src/lib/hosted-crypto/domain-root-store"
+  );
+  const memberIds = Array.from({ length: 32 }, (_, index) => `member-batch-${index}`);
+  const queryRaw = vi.fn(async (query: Prisma.Sql) => {
+    expect(query).toBeDefined();
+    return [
+      { userId: memberIds[0] },
+      { userId: memberIds[31] },
+    ];
+  });
+
+  await expect(readUserIdsWithActiveHostedCryptoDomainRootsTx({
+    tx: { $queryRaw: queryRaw } as never,
+    userIds: memberIds,
+  })).resolves.toEqual(new Set([memberIds[0], memberIds[31]]));
+
+  expect(queryRaw).toHaveBeenCalledTimes(1);
+  const query = queryRaw.mock.calls[0]?.[0] as Prisma.Sql | undefined;
+  expect(query?.sql).toContain('SELECT user_id AS "userId"');
+  expect(query?.sql).toContain("GROUP BY user_id");
+  expect(query?.sql).toContain("HAVING COUNT(DISTINCT domain)");
+  expect(query?.sql).not.toContain("signed_envelope_json");
+  expect(query?.sql).not.toContain("root_key_id");
+  expect(query?.values).toEqual(expect.arrayContaining(memberIds));
+  expect(gcpKmsMock.client).toBeNull();
+});
+
 test("signs hosted domain root envelopes before the provisioning transaction opens", async () => {
   const signer = await generateP256SigningKeyPair();
   const cloudflareRecipient = await generateP256EcdhKeyPair();
@@ -1923,6 +1952,7 @@ test("Stripe activation preflight keeps activation proof false and reuses KMS ro
     },
     hostedMailboxItem: {
       findFirst: async () => null,
+      groupBy: async () => [],
     },
     hostedMemberRouting: {
       findUnique: async () => null,
@@ -2001,6 +2031,7 @@ test("Stripe activation preflight failure cannot create complete-root activation
     ) => run(tx.prisma),
     hostedMailboxItem: {
       findFirst: async () => null,
+      groupBy: async () => [],
     },
   });
   resetLocalKmsDecryptMetrics(decryptMetrics, { failAtCall: 1 });
@@ -2856,11 +2887,13 @@ function createCapturingTransaction(): HostedCryptoTestTransaction {
     $queryRaw: async <T = unknown>(
       ...args: Parameters<Prisma.TransactionClient["$queryRaw"]>
     ): Promise<T> => {
-      const strings = args[0] as TemplateStringsArray;
-      const sql = strings.join("?");
-      const values = args.slice(1);
-      const userId = values.find((value): value is string =>
+      const query = args[0] as TemplateStringsArray | Prisma.Sql;
+      const isPrismaSql = !Array.isArray(query) && "sql" in query;
+      const sql = isPrismaSql ? query.sql : query.join("?");
+      const values = isPrismaSql ? query.values : args.slice(1);
+      const userIds = values.filter((value): value is string =>
         typeof value === "string" && (value.startsWith("member-") || value.startsWith("hbm_")));
+      const userId = userIds[0];
       if (sql.includes("SELECT DISTINCT domain")) {
         const domains = new Set(
           persistedEnvelopes
@@ -2871,14 +2904,18 @@ function createCapturingTransaction(): HostedCryptoTestTransaction {
         return [...domains].map((domain) => ({ domain })) as T;
       }
 
-      if (sql.includes("COUNT(DISTINCT domain)")) {
-        const domains = new Set(
-          persistedEnvelopes
-            .filter((candidate) => candidate.userId === userId)
-            .filter((candidate) => !inactiveEnvelopeKeys.has(createEnvelopeStatusKey(candidate)))
-            .map((candidate) => candidate.domain),
-        );
-        return [{ domainCount: domains.size }] as T;
+      if (sql.includes("HAVING COUNT(DISTINCT domain)")) {
+        return userIds.flatMap((candidateUserId) => {
+          const domains = new Set(
+            persistedEnvelopes
+              .filter((candidate) => candidate.userId === candidateUserId)
+              .filter((candidate) =>
+                !inactiveEnvelopeKeys.has(createEnvelopeStatusKey(candidate))
+              )
+              .map((candidate) => candidate.domain),
+          );
+          return domains.size >= 4 ? [{ userId: candidateUserId }] : [];
+        }) as T;
       }
 
       const rootKeyId = values.find((value): value is string =>

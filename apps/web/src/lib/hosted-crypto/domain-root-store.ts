@@ -522,14 +522,19 @@ export async function provisionHostedCryptoDomainRootsForUserTx(input: {
   });
 }
 
-export async function hasActiveHostedCryptoDomainRootsForUserTx(input: {
+export async function readUserIdsWithActiveHostedCryptoDomainRootsTx(input: {
   tx: HostedCryptoClient;
-  userId: string;
-}): Promise<boolean> {
-  const rows = await input.tx.$queryRaw<Array<{ domainCount: number }>>`
-    SELECT COUNT(DISTINCT domain)::int AS "domainCount"
+  userIds: readonly string[];
+}): Promise<ReadonlySet<string>> {
+  const userIds = [...new Set(input.userIds)];
+  if (userIds.length === 0) {
+    return new Set();
+  }
+
+  const rows = await input.tx.$queryRaw<Array<{ userId: string }>>(Prisma.sql`
+    SELECT user_id AS "userId"
     FROM hosted_user_crypto_envelope
-    WHERE user_id = ${input.userId}
+    WHERE user_id IN (${Prisma.join(userIds)})
       AND status = 'active'::hosted_crypto_envelope_status
       AND domain IN (
         'control'::hosted_crypto_domain,
@@ -537,9 +542,22 @@ export async function hasActiveHostedCryptoDomainRootsForUserTx(input: {
         'ingress'::hosted_crypto_domain,
         'runtime'::hosted_crypto_domain
       )
-  `;
+    GROUP BY user_id
+    HAVING COUNT(DISTINCT domain) = ${ALL_DOMAINS.length}
+  `);
 
-  return (rows[0]?.domainCount ?? 0) >= ALL_DOMAINS.length;
+  return new Set(rows.map((row) => row.userId));
+}
+
+export async function hasActiveHostedCryptoDomainRootsForUserTx(input: {
+  tx: HostedCryptoClient;
+  userId: string;
+}): Promise<boolean> {
+  const userIds = await readUserIdsWithActiveHostedCryptoDomainRootsTx({
+    tx: input.tx,
+    userIds: [input.userId],
+  });
+  return userIds.has(input.userId);
 }
 
 /**

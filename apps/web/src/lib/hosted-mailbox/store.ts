@@ -1791,6 +1791,35 @@ export async function hasPendingHostedEnvironmentVoiceMailboxItem(input: {
   return item !== null;
 }
 
+export async function readHostedMailboxUserIdsByKind(input: {
+  kind: HostedMailboxKind | string;
+  prisma?: HostedMailboxStoreClient;
+  userIds: readonly string[];
+}): Promise<ReadonlySet<string>> {
+  const prisma = input.prisma ?? getPrisma();
+  const kind = requireHostedMailboxKind(input.kind);
+  const userIds = [
+    ...new Set(
+      input.userIds.map((userId) =>
+        requireNonEmptyString(userId, "Hosted mailbox userId")
+      ),
+    ),
+  ];
+  if (userIds.length === 0) {
+    return new Set();
+  }
+
+  const records = await prisma.hostedMailboxItem.groupBy({
+    by: ["userId"],
+    where: {
+      kind,
+      userId: { in: userIds },
+    },
+  });
+
+  return new Set(records.map((record) => record.userId));
+}
+
 export async function hasHostedMailboxItemByKind(input: {
   kind: HostedMailboxKind | string;
   prisma?: HostedMailboxStoreClient;
