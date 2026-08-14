@@ -7,14 +7,6 @@ Last verified: 2026-08-13
 This index is the table of contents for the current canonical docs in this repository.
 It intentionally lists live architecture, product, verification, and package-boundary docs only.
 
-The external-provider request guard, including its registered providers,
-structural presigned/internal/xAI exceptions, raw HTTP transport discovery,
-conditional-aware effective assignment and fetch invocation provenance, SDK
-fetch-adapter and handwritten wire-contract detection, and exact current failure inventory, is
-specified by `agent-docs/SECURITY.md`,
-`agent-docs/references/testing-ci-map.md`, and
-`agent-docs/exec-plans/active/2026-08-12-provider-request-guard.md`.
-
 Hosted device-sync wake ownership keeps provider cadence in Web's canonical
 `nextReconcileAt`, while the encrypted system-mailbox item retains exact
 connection-specific retry work and Web dirty rows retain dirty resource/deletion
@@ -24,6 +16,14 @@ come from actual manifest-shaped queued/running rows, and a terminal checkpoint
 fences cadence publication. The contract is jointly specified by
 `agent-docs/RELIABILITY.md` and
 `agent-docs/references/hosted-runtime-protocol.md`.
+
+The external-provider request guard, including its registered providers,
+structural presigned/internal/xAI exceptions, raw HTTP transport discovery,
+conditional-aware effective assignment and fetch invocation provenance, SDK
+fetch-adapter and handwritten wire-contract detection, and exact current failure inventory, is
+specified by `agent-docs/SECURITY.md`,
+`agent-docs/references/testing-ci-map.md`, and
+`agent-docs/exec-plans/active/2026-08-12-provider-request-guard.md`.
 
 Personal-to-group projection convergence, including attempt-local foreground
 preemption, abort/shutdown admission before every scope, its single forwarded deadline, and
