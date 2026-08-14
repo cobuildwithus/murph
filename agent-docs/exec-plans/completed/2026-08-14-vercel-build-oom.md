@@ -1,6 +1,6 @@
 # Restore reliable Vercel production builds
 
-Status: active
+Status: completed
 Created: 2026-08-14
 Updated: 2026-08-14
 
@@ -42,6 +42,15 @@ Updated: 2026-08-14
   slower than rebuilding. The compiler transition therefore needs a one-time,
   fail-closed cache epoch: clear `.next/cache` until a successful Webpack build
   writes the new epoch, then retain normal warm caching on later deploys.
+- The executable runner regression drives the real production shell path
+  through missing, matching, failed-build, and retry-success epoch states.
+- The exact hosted proof restored the prior Vercel cache, reset the incompatible
+  epoch, compiled with Webpack in 2.7 minutes, completed the full build and
+  post-build runtime checks in eight minutes, and reached Ready without OOM.
+- The preliminary ReviewGPT specialist finding about source-pattern-only epoch
+  coverage was accepted and resolved by that executable runner regression. The
+  independent final full-patch audit returned `PASS` with no qualifying
+  findings on the repaired head.
 
 ## Protected invariants
 
@@ -55,18 +64,18 @@ Updated: 2026-08-14
 
 ## Tasks
 
-1. Restore the previously proven explicit Webpack production invocation and its
+1. [x] Restore the previously proven explicit Webpack production invocation and its
    supported build-worker/memory-optimization settings.
-2. Correct the two invalid route-module exports exposed by the restored builder.
-3. Make OG/card assets prefer the deployed runtime layout under Webpack.
-4. Invalidate the incompatible pre-cutover build cache once, preserving warm
+2. [x] Correct the two invalid route-module exports exposed by the restored builder.
+3. [x] Make OG/card assets prefer the deployed runtime layout under Webpack.
+4. [x] Invalidate the incompatible pre-cutover build cache once, preserving warm
    Webpack caching after a successful epoch build.
-5. Update focused build-policy coverage and the hosted Web build contract.
-6. Run focused tests, hosted Web typechecking, and a complete local production
+5. [x] Update focused build-policy coverage and the hosted Web build contract.
+6. [x] Run focused tests, hosted Web typechecking, and a complete local production
    build.
-7. Commit and push the exact candidate, open a PR, and complete the preliminary
+7. [x] Commit and push the exact candidate, open a PR, and complete the preliminary
    specialist plus final ReviewGPT gates with exact-head CI.
-8. Run a forced-cold Standard preview on the exact candidate and verify that the
+8. [x] Run a forced-cold Standard preview on the exact candidate and verify that the
    build uses Webpack and reaches Ready without an OOM.
 
 ## Deployment concerns
@@ -75,3 +84,4 @@ Updated: 2026-08-14
   window.
 - The first production deployment after merge should be inspected for the
   explicit Webpack banner and successful completion on the Standard builder.
+Completed: 2026-08-14
