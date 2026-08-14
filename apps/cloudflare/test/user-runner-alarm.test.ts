@@ -6661,6 +6661,8 @@ describe("HostedUserRunner execution coordination", () => {
   });
 
   it("does not await retained orphan scans when creating a snapshot session", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date(FIXED_NOW));
     const listStarted = createDeferred<void>();
     const releaseFirstList = createDeferred<void>();
     let blockFirstList = true;
@@ -6674,6 +6676,11 @@ describe("HostedUserRunner execution coordination", () => {
     });
     const { flushWaitUntil, runner, sql, storageValues } = createRunnerHarness({
       onStorageList: storageList,
+      onStoragePut: ({ key }) => {
+        if (key === workspaceSnapshotUploadSessionCurrentStorageKey()) {
+          vi.setSystemTime(new Date(Date.now() + 1_500));
+        }
+      },
     });
     await activateWorkspaceSnapshotSessionOwner({ runner, sql });
     const workspacePrefix = await hostedWorkspaceSnapshotUserPrefix({
@@ -6692,6 +6699,7 @@ describe("HostedUserRunner execution coordination", () => {
         },
       );
     }
+    mocks.emitHostedExecutionStructuredLog.mockClear();
     const createPromise = runner.createHostedWorkspaceSnapshotUploadSession({
       ...createWorkspaceSnapshotUploadSessionForTest({
         objectKey: `${workspacePrefix}snapshot_create_no_scan_current.snapshot.enc`,
@@ -6717,6 +6725,64 @@ describe("HostedUserRunner execution coordination", () => {
     });
     expect(blockedListCallCount).toBe(1);
     expect(storageList).toHaveBeenCalledTimes(4);
+    const diagnosticLog = mocks.emitHostedExecutionStructuredLog.mock.calls
+      .map(([entry]) => entry)
+      .find(
+        (entry) => entry.message
+          === "Hosted runner workspace snapshot session start diagnostic.",
+      );
+    expect(diagnosticLog).toBeDefined();
+    expect(diagnosticLog?.level).toBe("info");
+    const details = diagnosticLog?.details;
+    if (!details || typeof details !== "object" || Array.isArray(details)) {
+      throw new TypeError("Workspace snapshot session diagnostic details are invalid.");
+    }
+    expect(details).toMatchObject({
+      operation: "workspace_snapshot_start",
+      snapshotStartAlarmCandidateCount: 1,
+      snapshotStartCandidateCountsCapped: false,
+      snapshotStartCandidateCountsObserved: true,
+      snapshotStartCryptoDataKeyDurationMs: 0,
+      snapshotStartCurrentSessionCandidateCount: 1,
+      snapshotStartDiagnosticScopeKind: "session_owner",
+      snapshotStartNewWorkspaceCandidateCount: 0,
+      snapshotStartOutcomeKind: "created",
+      snapshotStartRecordedCandidateCount: 0,
+      snapshotStartSubstageKind: "completed",
+    });
+    for (const key of [
+      "snapshotStartAlarmCandidateWorkDurationMs",
+      "snapshotStartCryptoDataKeyDurationMs",
+      "snapshotStartSessionCreateStorageDurationMs",
+      "snapshotStartWriteFenceOwnerValidationDurationMs",
+    ] as const) {
+      const value = details[key];
+      if (typeof value !== "number") {
+        throw new TypeError(`${key} must be numeric.`);
+      }
+      expect(Number.isInteger(value)).toBe(true);
+      expect(value).toBeGreaterThanOrEqual(0);
+      expect(value).toBeLessThanOrEqual(60_000);
+    }
+    expect(Object.keys(details).sort()).toEqual([
+      "operation",
+      "snapshotStartAlarmCandidateCount",
+      "snapshotStartAlarmCandidateWorkDurationMs",
+      "snapshotStartCandidateCountsCapped",
+      "snapshotStartCandidateCountsObserved",
+      "snapshotStartCryptoDataKeyDurationMs",
+      "snapshotStartCurrentSessionCandidateCount",
+      "snapshotStartDiagnosticScopeKind",
+      "snapshotStartDurationsCapped",
+      "snapshotStartNewWorkspaceCandidateCount",
+      "snapshotStartOutcomeKind",
+      "snapshotStartRecordedCandidateCount",
+      "snapshotStartSessionCreateStorageDurationMs",
+      "snapshotStartSubstageKind",
+      "snapshotStartWriteFenceOwnerValidationDurationMs",
+    ]);
+    expect(JSON.stringify(details)).not.toContain("snapshot_create_no_scan_current");
+    expect(JSON.stringify(details)).not.toContain(workspacePrefix);
   });
 
   it("schedules both persisted previous-session candidates when replacement ownership is lost", async () => {
@@ -6775,6 +6841,7 @@ describe("HostedUserRunner execution coordination", () => {
       workspaceSnapshotUploadSessionCurrentStorageKey(),
       previousSession,
     );
+    mocks.emitHostedExecutionStructuredLog.mockClear();
 
     await expect(harness.runner.createHostedWorkspaceSnapshotUploadSession({
       ...createWorkspaceSnapshotUploadSessionForTest({
@@ -6810,6 +6877,25 @@ describe("HostedUserRunner execution coordination", () => {
     });
     expect(harness.alarms).toEqual(["2026-04-27T02:35:00.000Z"]);
     expect(storageList).not.toHaveBeenCalled();
+    const diagnosticLog = mocks.emitHostedExecutionStructuredLog.mock.calls
+      .map(([entry]) => entry)
+      .find(
+        (entry) => entry.message
+          === "Hosted runner workspace snapshot session start diagnostic.",
+      );
+    expect(diagnosticLog?.details).toMatchObject({
+      operation: "workspace_snapshot_start",
+      snapshotStartAlarmCandidateCount: 2,
+      snapshotStartCandidateCountsObserved: true,
+      snapshotStartCurrentSessionCandidateCount: 0,
+      snapshotStartDiagnosticScopeKind: "session_owner",
+      snapshotStartNewWorkspaceCandidateCount: 2,
+      snapshotStartOutcomeKind: "stale_owner",
+      snapshotStartRecordedCandidateCount: 2,
+      snapshotStartSubstageKind: "alarm_candidate_work",
+    });
+    expect(JSON.stringify(diagnosticLog?.details)).not.toContain(previousObjectKey);
+    expect(JSON.stringify(diagnosticLog?.details)).not.toContain(replacedObjectKey);
   });
 
   it("retains both previous-current orphan records while scheduling their earliest eligibility", async () => {

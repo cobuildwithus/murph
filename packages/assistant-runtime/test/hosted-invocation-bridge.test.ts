@@ -59,6 +59,7 @@ import {
 } from "@murphai/runtime-state/node";
 
 import {
+  HostedRuntimeCheckpointInterruptedByWakeError,
   type HostedRuntimePlatform,
   type HostedWorkspaceRuntimeJobOptions,
 } from "../src/hosted-runtime.ts";
@@ -424,7 +425,9 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
       return await new Promise<never>(() => {});
     });
     const controller = new AbortController();
-    const interruption = new Error("Synthetic checkpoint interruption.");
+    const interruption = new HostedRuntimeCheckpointInterruptedByWakeError({
+      message: "private checkpoint wake detail",
+    });
     let resolveArchiveStarted: (() => void) | undefined;
     const archiveStarted = new Promise<void>((resolve) => {
       resolveArchiveStarted = resolve;
@@ -489,6 +492,74 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     expect(calls.abortSnapshotSession).toHaveBeenCalledOnce();
     expect(calls.putSnapshotObjectDirect).not.toHaveBeenCalled();
     expect(calls.completeSnapshotSession).not.toHaveBeenCalled();
+    await vi.waitFor(() => {
+      const entries = calls.logWrite.mock.calls.flatMap(([request]) => request.entries);
+      expect(entries.some((entry) => entry.eventCode === "checkpoint.snapshot_preempted"))
+        .toBe(true);
+    });
+    const entries = calls.logWrite.mock.calls.flatMap(([request]) => request.entries);
+    const preemptionEntry = entries.find(
+      (entry) => entry.eventCode === "checkpoint.snapshot_preempted",
+    );
+    expect(preemptionEntry).toMatchObject({
+      errorCode: "runtime_wake_during_checkpoint",
+      eventCode: "checkpoint.snapshot_preempted",
+      level: "info",
+      redactedJson: expect.objectContaining({
+        errorCode: "runtime_wake_during_checkpoint",
+        snapshotInterruptedBeforeCommit: true,
+        snapshotOutcomeKind: "expected_preemption",
+        snapshotPreemptionKind: "runtime_wake",
+      }),
+    });
+    expect(entries.some((entry) => entry.eventCode === "checkpoint.snapshot_failed"))
+      .toBe(false);
+    expect(JSON.stringify(preemptionEntry)).not.toContain(
+      "private checkpoint wake detail",
+    );
+  });
+
+  it("keeps a real archive failure actionable when a runtime wake races it", async () => {
+    const vaultRoot = await createVaultRoot();
+    const { calls, platform } = createRuntimePlatform();
+    const controller = new AbortController();
+    const interruption = new HostedRuntimeCheckpointInterruptedByWakeError();
+    const snapshotFailure = new Error("snapshot construction failed independently");
+    const snapshotArchiveBuilder: HostedWorkspaceSnapshotArchiveBuilder = {
+      buildEncryptedSnapshot: vi.fn(async () => {
+        controller.abort(interruption);
+        throw snapshotFailure;
+      }),
+    };
+    const options = createBridgeOptions({
+      platform,
+      snapshotArchiveBuilder,
+      vaultRoot,
+    });
+
+    await expect(options.createCheckpointSnapshot(
+      createCheckpointInput("idle_shutdown"),
+      { signal: controller.signal },
+    )).rejects.toBe(interruption);
+
+    await vi.waitFor(() => {
+      const entries = calls.logWrite.mock.calls.flatMap(([request]) => request.entries);
+      expect(entries.some((entry) => entry.eventCode === "checkpoint.snapshot_failed"))
+        .toBe(true);
+    });
+    const entries = calls.logWrite.mock.calls.flatMap(([request]) => request.entries);
+    expect(entries).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        eventCode: "checkpoint.snapshot_failed",
+        level: "warn",
+        redactedJson: expect.objectContaining({
+          errorCode: "runtime_error",
+          snapshotInterruptedBeforeCommit: true,
+        }),
+      }),
+    ]));
+    expect(entries.some((entry) => entry.eventCode === "checkpoint.snapshot_preempted"))
+      .toBe(false);
   });
 
   it("propagates checkpoint interruption into runtime-owned symlink cleanup", async () => {

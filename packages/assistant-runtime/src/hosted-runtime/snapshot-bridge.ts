@@ -1,8 +1,9 @@
 import { rm } from "node:fs/promises";
 import path from "node:path";
 
-import type {
-  HostedWorkspaceRuntimeJobOptions,
+import {
+  HostedRuntimeCheckpointInterruptedByWakeError,
+  type HostedWorkspaceRuntimeJobOptions,
 } from "../hosted-runtime.ts";
 import {
   pruneTerminalWriteOperationRecords,
@@ -678,8 +679,17 @@ async function createHostedWorkspaceV2Snapshot(
         ? input.signal.reason
         : new Error("Hosted workspace snapshot construction was interrupted.")
       : null;
-    const classifiedError = interruptionError
-      ?? classifyHostedWorkspaceSnapshotFailure(error);
+    const interruptionCausedFailure = interruptedBeforeCommit
+      && error === input.signal?.reason;
+    const reportedError = interruptionCausedFailure
+      ? interruptionError
+      : classifyHostedWorkspaceSnapshotFailure(error);
+    // Preserve the abort reason for control flow, but classify only the exact
+    // caught runtime-wake abort as expected preemption. A real failure that
+    // merely races with a wake remains actionable.
+    const classifiedError = interruptionError ?? reportedError;
+    const expectedRuntimeWakePreemption = interruptionCausedFailure
+      && classifiedError instanceof HostedRuntimeCheckpointInterruptedByWakeError;
     const abortedSnapshotSession = snapshotSession;
     if (abortedSnapshotSession && !checkpointAttempted) {
       const abortSnapshotSession = async () => {
@@ -739,12 +749,25 @@ async function createHostedWorkspaceV2Snapshot(
         ...(interruptedBeforeCommit
           ? { snapshotInterruptedBeforeCommit: true }
           : {}),
+        ...(expectedRuntimeWakePreemption
+          ? {
+              errorCode: "runtime_wake_during_checkpoint",
+              snapshotOutcomeKind: "expected_preemption",
+              snapshotPreemptionKind: "runtime_wake",
+            }
+          : {}),
         snapshotElapsedMs: Date.now() - startedAt,
         snapshotMode: HOSTED_WORKSPACE_V2_SNAPSHOT_MODE,
       },
-      error: classifiedError,
-      eventCode: "checkpoint.snapshot_failed",
-      level: interruptedBeforeCommit ? "warn" : "error",
+      ...(!expectedRuntimeWakePreemption ? { error: reportedError } : {}),
+      eventCode: expectedRuntimeWakePreemption
+        ? "checkpoint.snapshot_preempted"
+        : "checkpoint.snapshot_failed",
+      level: expectedRuntimeWakePreemption
+        ? "info"
+        : interruptedBeforeCommit
+          ? "warn"
+          : "error",
       platform: input.platform,
       request: input.request,
       signal: null,
