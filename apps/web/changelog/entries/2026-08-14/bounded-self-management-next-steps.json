@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-14",
+  "order": 200,
+  "item": {
+    "id": "bounded-self-management-next-steps",
+    "kind": "improvement",
+    "priority": 4,
+    "title": "Clearer next steps for persistent symptoms",
+    "summary": "When a safe daily-life change could help clarify a recurring symptom pattern, Murph now recommends one bounded first trial instead of a generic list of wellness tips.",
+    "details": "Each trial names the exact action, duration, what to notice, stop conditions, and review point. Murph still asks a safety-changing question or routes to appropriate care when self-management is not the right first step.",
+    "relevanceTags": ["assistant", "health-support", "experiments", "personalization"],
+    "sourcePullRequests": [1829]
+  }
+}
