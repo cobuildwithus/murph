@@ -36,12 +36,16 @@ import {
   summarizeHostedTelegramWebhook,
 } from "./telegram";
 import {
+  HOSTED_LINQ_MESSAGE_EDIT_MAX_SOURCE_ROWS,
   planHostedLinqMessageEditedWebhook,
   planHostedOnboardingLinqWebhook,
   prepareHostedLinqThreadContainerAdmission,
+  prewarmHostedLinqMessageEditPreparation,
+  readHostedLinqMessageEditPreparation,
   resolveHostedLinqDirectPreparationMemberId,
   resolveHostedLinqMailboxPayloadRootPrewarmMemberId,
   resolveHostedLinqTypingPrewarmMemberId,
+  type HostedLinqMessageEditPreparation,
   type HostedOnboardingLinqWebhookResponse,
 } from "./webhook-provider-linq";
 import {
@@ -73,6 +77,7 @@ import {
   runWithHostedDomainRootProviderCallsDisabled,
 } from "../hosted-crypto/domain-root-unwrap-cache";
 import {
+  isHostedDomainRootPreparationRequiredError,
   HostedDomainRootPreparationMismatchError,
   prepareHostedDomainRootForWeb,
   prepareHostedCryptoDomainRootCandidates,
@@ -82,6 +87,9 @@ import {
   type PreparedHostedDomainRootForWeb,
 } from "../hosted-crypto/domain-root-store";
 import { getHostedCryptoDomainForLane } from "@murphai/runtime-state";
+import {
+  isHostedMailboxSourceConversationPreparationMismatchError,
+} from "../hosted-mailbox/store";
 import {
   runWithPrismaOperationTimings,
   type PrismaOperationTiming,
@@ -180,7 +188,7 @@ import {
   reconcileHostedThreadContainerParticipants,
 } from "../hosted-groups/group-tool";
 import {
-  lookupHostedGroupParticipantMemberIdByHandle,
+  lookupHostedGroupParticipantMemberIdsByHandles,
 } from "../hosted-groups/participant-member";
 import {
   HOSTED_PENDING_GROUP_SETUP_MAX_PARTICIPANT_MEMBERS,
@@ -478,14 +486,10 @@ export async function handleHostedOnboardingLinqWebhook(input: {
       );
       let editPlan: Awaited<ReturnType<typeof planHostedLinqMessageEditedWebhook>>;
       try {
-        editPlan = await runHostedOnboardingWebhookTransaction(
+        editPlan = await runHostedLinqMessageEditPreparedTransaction({
+          event: editedEvent,
           prisma,
-          (transaction) =>
-            planHostedLinqMessageEditedWebhook({
-              event: editedEvent,
-              prisma: transaction,
-            }),
-        );
+        });
       } catch (error) {
         finishHostedOnboardingTiming(planTiming, "failed", {
           errorName: deriveHostedOnboardingTimingErrorName(error),
@@ -1382,15 +1386,14 @@ async function resolveHostedLinqPendingGroupParticipantMemberIds(input: {
         unavailable: false,
       };
     }
-    const resolved = await Promise.all(participantHandles.map(async (handle) =>
-      await lookupHostedGroupParticipantMemberIdByHandle({
-        handle,
-        prisma: input.prisma,
-      })
-    ));
-    const memberIds = [...new Set(resolved.flatMap((memberId) =>
-      memberId ? [memberId] : []
-    ))];
+    const memberIdsByHandle = await lookupHostedGroupParticipantMemberIdsByHandles({
+      handles: participantHandles,
+      prisma: input.prisma,
+    });
+    const memberIds = [...new Set(participantHandles.flatMap((handle) => {
+      const memberId = memberIdsByHandle.get(handle) ?? null;
+      return memberId ? [memberId] : [];
+    }))];
     logHostedLinqPendingGroupRoster("resolved");
     return {
       handles,
@@ -2288,6 +2291,69 @@ const HOSTED_THREAD_ROUTING_PREPARATION_RETRY_CODES = new Set([
   ...HOSTED_THREAD_ROUTING_PREPARATION_REQUIRED_CODES,
   "HOSTED_THREAD_ROUTE_WRITE_CONFLICT",
 ]);
+
+export async function runHostedLinqMessageEditPreparedTransaction(input: {
+  event: Parameters<typeof readHostedLinqMessageEditPreparation>[0]["event"];
+  prisma: PrismaClient;
+}): Promise<Awaited<ReturnType<typeof planHostedLinqMessageEditedWebhook>>> {
+  // Every mismatch means another accepted correction changed the bounded
+  // lineage. Reuse that lineage cap as the single finite retry budget.
+  for (
+    let attempt = 0;
+    attempt < HOSTED_LINQ_MESSAGE_EDIT_MAX_SOURCE_ROWS;
+    attempt += 1
+  ) {
+    const preparation: HostedLinqMessageEditPreparation =
+      await readHostedLinqMessageEditPreparation({
+        event: input.event,
+        prisma: input.prisma,
+      });
+    const preparationFailures: unknown[] = [];
+    try {
+      return await runHostedOnboardingWebhookTransaction(
+        input.prisma,
+        (transaction) =>
+          planHostedLinqMessageEditedWebhook({
+            event: input.event,
+            preparation,
+            prisma: transaction,
+          }),
+        async () => {
+          try {
+            await prewarmHostedLinqMessageEditPreparation({
+              preparation,
+              prisma: input.prisma,
+            });
+          } catch (error) {
+            preparationFailures.push(error);
+            throw error;
+          }
+        },
+      );
+    } catch (error) {
+      if (
+        preparationFailures.length > 0
+        && isHostedDomainRootPreparationRequiredError(error)
+      ) {
+        throw preparationFailures[0];
+      }
+      if (
+        attempt + 1 < HOSTED_LINQ_MESSAGE_EDIT_MAX_SOURCE_ROWS
+        && isHostedMailboxSourceConversationPreparationMismatchError(error)
+      ) {
+        logHostedOnboardingDiagnostic(
+          "hosted-onboarding.webhook.linq-message-edit-preparation-retry",
+          {},
+        );
+        continue;
+      }
+      throw error;
+    }
+  }
+  throw new Error(
+    "Hosted Linq message edit preparation retry exhausted unexpectedly.",
+  );
+}
 
 async function runHostedThreadRoutingPreparedTransaction<TResult>(input: {
   plan: (input: {

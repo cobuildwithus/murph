@@ -31,6 +31,7 @@ export {
   acquireHostedMemberHomeLinqRouteLockTx,
   countHostedMemberHomeLinqBindingsByRecipientPhone,
   demoteHostedMemberLinqGroupChatBindingsTx,
+  readHostedMemberHomeLinqRouteAuthorityTx,
   upsertHostedMemberHomeLinqBindingTx,
   upsertHostedMemberHomeLinqRecipientPhoneTx,
   upsertHostedMemberPendingLinqBindingTx,

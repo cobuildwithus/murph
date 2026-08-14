@@ -1237,7 +1237,12 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   `device-sync.wake` mailbox handoffs for the Temporal global reconciler.
   Webhook freshness is not scheduler input: Web persists dirty state, appends
   one bounded wake on a clean-to-dirty transition, and the runner drains and
-  acknowledges dirty-pending rows through signed callbacks. Hosted provider
+  acknowledges dirty-pending rows through signed callbacks. Web classifies,
+  compresses, and seals dirty payloads and prepares clean-to-dirty mailbox
+  crypto outside consent/member/connection locks through request-local
+  capabilities; the final transaction revalidates consent, exact connection and
+  source authority, the dirty snapshot, and every applicable prepared root
+  identity before mutation, with one fresh-cache full replan on drift. Hosted provider
   registration reuses the shared `device-syncd` provider-manifest assembly path
   rather than maintaining an app-local provider list.
 - Group sponsorship remains an extension of the existing Web-owned
@@ -2016,17 +2021,29 @@ existing assistant-style fields and bounded explicit room-context Markdown. It
 stores no plaintext setup, chat id, roster, provider actor, message, contact
 label, or participant handle. Before the transaction for the first inbound on
 an unbound Linq group, Web performs one bounded current-chat read and resolves
-at most 32 active non-Murph roster handles to member ids. Pending-setup
-admission then uses one candidate projection plus canonical set reads for
-runtime access, active managed lines, narrow home-line routing, and all bounded
-recovery attempts. Only candidates that already pass access, managed-line, and
-exact routing eligibility have private home-line ciphertext opened, and only
-the selected payload root is prepared. Inside the existing route transaction,
-Web repeats the complete candidate set and sender precedence, locks the exact
-winner, and revalidates current access, incoming and original managed lines,
-routing and setup ciphertext/root identity, and replacement-line recovery
-authority. A lone roster-matched intent wins; if several match, only the
-current sender's own intent breaks the tie. Otherwise the canonical
+at most 32 active non-Murph roster handles to member ids. Across provisional
+ownership planning, live `read_chat_participants`, and participant-lease
+reconciliation, each cap-32 roster resolution performs at most one ID-only
+phone blind-index read and one ID-only verified-email blind-index read. The
+live activation projection adds at most two ID-only metadata reads (the
+activation mailbox fact and complete active crypto-domain envelopes) and zero
+private-field decrypt or KMS work. Live roster work therefore composes to at
+most two identity reads, two activation reads, and one lease statement;
+first-message roster planning reuses its provider handles but revalidates their
+current member bindings at the participant-lease authority boundary, composing
+to at most four identity reads and one lease statement. On the signed live route,
+complete-roster lease reconciliation is one parameterized PostgreSQL statement
+only after route revalidation and a completed current-provider roster read.
+Pending-setup admission then uses one candidate projection plus canonical set
+reads for runtime access, active managed lines, narrow home-line routing, and
+all bounded recovery attempts. Only candidates that already pass access,
+managed-line, and exact routing eligibility have private home-line ciphertext
+opened, and only the selected payload root is prepared. Inside the existing
+route transaction, Web repeats the complete candidate set and sender precedence,
+locks the exact winner, and revalidates current access, incoming and original
+managed lines, routing and setup ciphertext/root identity, and replacement-line
+recovery authority. A lone roster-matched intent wins; if several match, only
+the current sender's own intent breaks the tie. Otherwise the canonical
 first-active-sender fallback continues when the provider roster read completed.
 A changed selection or prepared identity fails closed through the single fresh
 preparation retry. Replacement-line recovery pins its candidate id across that
@@ -2340,6 +2357,37 @@ report completion. Deploy preflight requires both canonical buckets to report
 ENAM Standard. The runtime has no source-region fallback, dual write, migration
 phase, storage-specific admission gate, or binding to the retired OC region.
 
+Provider webhooks may use Cloudflare Queue as encrypted, non-canonical burst
+transport. Web verifies provider proof once and freezes the versioned parsed
+event before any Postgres access; raw provider signature headers and payload
+bytes do not enter Queue state. One Queue consumer returns size-bounded
+subbatches of those prepared events to the existing Web ingress, which admits
+entries serially without rerunning the provider verifier. Postgres remains the
+sole trace, consent, connection-lifecycle, dirty-state, mailbox, and device-sync
+control owner. This Queue transport is separate from hosted runtime wake
+execution and is never a second device-sync authority. Dequeue revalidates
+current provider registration, connection epoch/status, consent, source
+lifecycle, and provider-application authority before delayed provider access.
+Apple Health registration observation uses two passes through that existing
+admission owner: the first returns an ephemeral exact connection, source, and
+stored-account proof; provider access runs with no database transaction open;
+the second revalidates that proof and atomically commits source activation,
+receipt state, dirty work, mailbox/signal effects, and trace completion.
+Revoked consent, removed provider registration, a private-application rebind,
+or a superseded connection/source epoch terminally completes only the trace.
+An unresolved canonical read, credential change across provider access, or
+provider registration not yet active stays retryable. Every emitted prepared-event
+schema decoder remains readable until all main-Queue and DLQ retention plus
+redrive exposure to that schema is proven drained, matching the decrypt-only
+transport-key retirement floor.
+An independent Cloudflare Durable Object samples only main-Queue and DLQ
+metrics every five minutes. Its SQLite state owns the monitor run lease,
+incident and alert sequence, immutable pending page, attempt pacing, and latest
+typed observation. It never reads or persists webhook messages. DLQ backlog,
+15-minute main-Queue age, and repeated metrics unavailability therefore reach
+the existing dual-phone operator alert boundary without consulting Postgres or
+opening a database connection.
+
 12. The hosted `apps/cloudflare` execution plane accepts ensure-processing requests over its narrow internal HTTP surface — callback-signed from the Temporal orchestrator, or Vercel OIDC-authenticated from web ingress as best-effort direct latency hints for Linq and Assistant Ask request/completion mailbox appends whose trigger is recorded in orchestration latency diagnostics as `triggeredByWebDirect` derived from the authorizing credential — plus Vercel OIDC-authenticated browser-vault session, deletion, and user-status requests, with one additional signed deploy-smoke route for managed-container release verification. The ensure-processing adapter starts, wakes, or accepts pending processing for the exact active write-fenced runtime and returns after that intent is accepted rather than after runtime idle; Cloudflare alarms remain write-fence alarm cleanup rather than semantic schedulers. Browser-vault refresh is hosted runtime work represented by web-owned system-mailbox rows and orchestrated by Temporal, not a separate worker path. Pristine sequence-contiguous legacy Browser Vault refresh controls may collapse inside the runtime mailbox to their final row as one idempotent intent; Postgres rows remain authoritative, and a gap, interleaved system kind, prior attempt, retry, or preemption fences the collapse while handled-through remains immediately before the representative until completion. There is no Cloudflare Queue wake executor or fallback; duplicate delivery safety belongs to mailbox event-id dedupe, Temporal signal coalescing, exact Assistant Ask request/completion identity, idempotent continuation delivery, and Linq delivery-time `consumedAt` stamps. The direct Durable Object methods restore ephemeral local execution context from encrypted hosted workspace snapshots, inject a method-based hosted runtime platform into `packages/assistant-runtime`, and keep deployment topology app-local. Hosted is a thin containerized runner over the same local runtime input spine: it restores the workspace, stages mailbox conversation rows as assistant input, runs the local scanner/active-turn machinery, imports a bounded same-wake mailbox batch during initial selection or the required pre-scan refresh, freezes that batch before provider start while leaving later rows pending, imports late active-turn mailbox rows through an invocation-local foreground loop, steers same-conversation input into the live Codex turn when one exists, journals accepted input, may hot-service only the exact assistant wake projected by the current foreground assistant phase once before the idle floor while dirty without publishing a snapshot, and keeps the invocation dirty until the runtime-owned idle-floor—or last-chance shutdown—`idle_shutdown` checkpoint publishes the updated workspace. Mailbox payload decrypt is a narrow Worker-owned runtime write-fence capability: the container calls a mailbox decode hook through the normal `web-control.worker` virtual host, Cloudflare Container outbound interception dispatches it inside the Worker, the Worker verifies the runtime write fence and returns only a parsed hosted wake or blocked result, and the container does not receive ingress root keys, private JWKs, callback-signing private material, or root-fetch authority for mailbox import. The canonical runtime-to-worker authority model is normal internal virtual-host fetches plus runtime write-fence headers, with no public runner callback endpoint; generic side-effect authority is `attemptId`, write-fence generation, and bound user, while workspace version remains only checkpoint/restore compare-and-swap freshness. Provider egress for intercepted OpenAI, ElevenLabs, Exa, Mapbox, Linq, Telegram, hosted data API, and Workers AI transcription calls stays Worker-mediated through Cloudflare Container per-host outbound handlers for default provider/internal hosts, while the catch-all outbound handler remains an explicit open-internet passthrough for arbitrary hosted-agent HTTP/HTTPS egress and runtime-configured provider override hosts. Native child-process integrations for OpenAI, Exa, Mapbox, `murph_data_api`, and `workers_ai_transcribe` receive a signed Murph provider credential in the provider's native credential slot; Worker egress validates that credential's provider/user/runner identity against UserRunner's current active runtime state before injecting the real Worker-owned credential. Generated image turns use that OpenAI egress path for GPT Image 2, persist validated image bytes as canonical capture media under `raw/captures/**`, and emit a hash-bound `vault_image` response-media descriptor. Durable delivery reloads and verifies that vault artifact before provider dispatch, uploads the bytes through Linq's existing attachment API or sends Telegram multipart `sendPhoto`, and never represents the private image as a fetchable URL. The legacy `results.worker/generated-images` route is a `410 Gone` rolling-deploy tombstone so old warm runners fall back to text instead of creating public objects. Generated voice memo turns store bounded transcript/config metadata only; Linq turns upload generated MP3 bytes into a Linq attachment during tool execution, while Telegram turns generate bounded MP3 bytes at final delivery and send them through Telegram `sendVoice` without persisting the bytes. ElevenLabs, Linq, and Telegram credentials stay Worker-owned sentinels in hosted runtime env. Hosted audio transcription is the same Worker-owned shape: the parser pipeline POSTs ffmpeg-prepared audio bytes to the fixed `murph-transcribe.worker/v1/transcribe` host, the Worker authorizes the signed `workers_ai_transcribe` provider credential, exact write-fence proof, or a provider-egress token, calls the Workers AI binding (`@cf/openai/whisper-large-v3-turbo`), and returns only bounded transcript JSON; Workers AI account context never enters the runtime env and the runner image ships no local speech model. Direct invocation mints runner-scoped provider credentials into the explicit supervisor-env projection, the runtime platform attaches exact write-fence headers or provider-egress tokens where the client path can carry them, and Worker secret injection strips runtime authority headers before upstream egress. The open-internet passthrough also strips runtime authority headers and never injects Worker-owned provider credentials. Intercepted providers validate exact write-fence headers, provider-egress token proof, or a runner-scoped signed provider credential; there is no tokenless active-user-fence provider authorization path. Delivery providers (Linq and Telegram) and ElevenLabs continue to require exact write-fence headers or a provider-egress token, so they can only be reached through the runtime's wrapped fetch that routes through the outbound-intent journal owning recipient binding and idempotency. ElevenLabs is constrained to `POST /v1/text-to-speech/:voice_id` with the MP3 output format, Exa is constrained to `POST /search`, and Mapbox remains constrained to allowed read-only GET allowlisted path families. The container supervisor pins Codex, native TLS, Node, Python requests, and curl CA bundle env to Cloudflare's runtime HTTPS-interception CA path, rewires the installed `codex` command to the native binary so the long-lived process is the native app-server, and direct invocation preserves those CA pointers plus Cloudflare-managed proxy env without accepting user overrides for transport settings. The outer native container shell may stay warm per user for the configured idle lifecycle; when Cloudflare reports `sleepAfter` activity expiry, RunnerContainer yields to any active foreground invocation or tears down an idle warm shell, and it never records pending checkpoint intent or posts a host-owned checkpoint job. The private container bridge is reached only through the container Durable Object's internal `containerFetch`, keeps a plain `/health` check plus validated `POST /internal/workspace-invocation`, rejects concurrent workspace invocations, exposes only an internal `POST /internal/runtime-wake` callback into the active invocation, and no longer carries a second per-shell bearer-token layer. The direct hosted invocation uses per-user warm workspace roots with invocation-local writable cache and temp roots. The per-user runner keeps only write-fence state, direct-R2 snapshot upload sessions, and other short-lived coordination state in Durable Object storage while writing v2 checkpoints as a single encrypted object through a presigned R2 PUT URL; the Worker never streams the snapshot body and there is no Worker request-body fallback. Gateway state here is projection or cache only, not a second durable authority. Broad worker control seams are intentionally gone: no generic user-env CRUD route surface, no dispatch-payload CRUD or staged dispatch control plane, no deleted sharing CRUD, no local-vault import payload CRUD, no broad pending-usage store routes, and no mutable gateway control routes. Narrow signed callbacks back into `apps/web` remain only where execution still needs them, such as device connect-link initiation, hosted device-sync runtime snapshot/apply callbacks against the web-owned authority, assistant-configuration reads and mutations against web-owned member preferences, product-feedback recording into web-owned rows, and direct hosted usage recording into the web-owned ledger. Missing crypto fails closed outside the explicit activation-time provisioning path, and platform-envelope key material must still fail startup immediately when malformed.
 
 Within that foreground loop, live steering is limited to exact-successor
@@ -2521,11 +2569,25 @@ message id. A verified `message.edited` webhook locks that source lineage,
 finds the already-accepted original, and revalidates its exact sender, chat,
 direction, direct home route or same group route, and container access before
 appending a structured correction through the ordinary mailbox and wake
-handoff. The lock is edit-only: ordinary accepted messages write the blind
-source index without an additional source-lock query. An edit that races an
-uncommitted original receives the existing bounded retryable missing-source
-outcome and resolves after provider retry; simultaneous edits serialize from
-lineage read through correction append. Optional group `senderMemberId`
+handoff. Before opening the planning transaction, Web reads the complete
+source lineage and any sidecar payloads in one bounded seven-row set query over
+only the current and one configured prior contact-privacy version. It prepares
+the exact ciphertext roots through the request-scoped deduplicated batch KMS
+owner, plus the active mailbox root only when another correction could be
+appended. Inside the transaction, Web reacquires the sorted source locks,
+repeats and exactly revalidates that snapshot, opens payloads only from the
+prepared request scope, repeats all direct or group authority checks, and
+appends atomically. A changed snapshot is prepared again sequentially, using
+the existing six-row accepted-correction cap as the sole finite attempt bound;
+each attempt completes its set read and bounded root preparation before opening
+one short transaction, with no queue, backoff loop, or second retry owner.
+direct authority reads only the existing blind home-route columns rather than
+decrypting unrelated routing state. The lock is edit-only: ordinary accepted
+messages write the blind source index without an additional source-lock query.
+An edit that races an uncommitted original receives the existing bounded
+retryable missing-source outcome and resolves after provider retry;
+simultaneous edits serialize from lineage read through correction append.
+Optional group `senderMemberId`
 attribution and personal entitlement
 never grant or remove owner-backed room authority: an absent participant
 projection remains eligible, while an existing projection that positively

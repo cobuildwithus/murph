@@ -54,6 +54,7 @@ import {
   acquireHostedMemberHomeLinqRouteLockTx,
   demoteHostedMemberLinqGroupChatBindingsTx,
   lookupHostedMemberCoreByPendingLinqParticipantContact,
+  readHostedMemberHomeLinqRouteAuthorityTx,
   lookupHostedMemberRoutingByHomeLinqChatId,
   hostedMemberRoutingRecordsEqual,
   readHostedMemberRoutingRecord,
@@ -91,8 +92,11 @@ import {
 import {
   appendHostedMailboxEnvelopeWithPreparedCryptoTx,
   appendHostedMailboxEnvelopeWithSourceMessageTx,
+  prewarmHostedMailboxSourceConversationPreparation,
   readHostedMailboxItemByDedupeKey,
+  readHostedMailboxSourceConversationPreparation,
   readHostedMailboxSourceConversationEntriesTx,
+  type HostedMailboxSourceConversationPreparation,
 } from "../hosted-mailbox/store";
 import {
   renewHostedThreadContainerParticipantAccessTx,
@@ -136,6 +140,7 @@ import {
 import {
   createHostedEmailLookupKey,
   createHostedExternalThreadIdentityLookupKeyReadCandidates,
+  createHostedLinqChatLookupKeyReadCandidates,
   createHostedLinqMessageLookupKey,
   createHostedLinqMessageLookupKeyReadCandidates,
   createHostedPhoneLookupKey,
@@ -884,11 +889,44 @@ async function isHostedLinqMailboxRootPrewarmEligible(input: {
 }
 
 const HOSTED_LINQ_MESSAGE_EDIT_RETRY_WINDOW_MS = 25 * 60_000;
-const HOSTED_LINQ_MESSAGE_EDIT_MAX_SOURCE_ROWS = 6;
+export const HOSTED_LINQ_MESSAGE_EDIT_MAX_SOURCE_ROWS = 6;
+
+export type HostedLinqMessageEditPreparation =
+  HostedMailboxSourceConversationPreparation | null;
+
+export async function readHostedLinqMessageEditPreparation(input: {
+  event: HostedLinqMessageEditedEvent;
+  preparedAt?: Date;
+  prisma: HostedOnboardingReadClient;
+}): Promise<HostedLinqMessageEditPreparation> {
+  if (input.event.data.direction === "outbound") {
+    return null;
+  }
+  return readHostedMailboxSourceConversationPreparation({
+    prisma: input.prisma,
+    sourceMessageLookupKeys:
+      createHostedLinqMessageLookupKeyReadCandidates(input.event.data.id),
+    ...(input.preparedAt === undefined ? {} : { preparedAt: input.preparedAt }),
+  });
+}
+
+export async function prewarmHostedLinqMessageEditPreparation(input: {
+  preparation: HostedLinqMessageEditPreparation;
+  prisma: HostedOnboardingReadClient;
+}): Promise<void> {
+  if (!input.preparation) {
+    return;
+  }
+  await prewarmHostedMailboxSourceConversationPreparation({
+    preparation: input.preparation,
+    prisma: input.prisma,
+  });
+}
 
 export async function planHostedLinqMessageEditedWebhook(input: {
   event: HostedLinqMessageEditedEvent;
   now?: Date;
+  preparation: HostedLinqMessageEditPreparation;
   prisma: Prisma.TransactionClient;
 }): Promise<HostedOnboardingLinqDirectPlan> {
   const event = input.event;
@@ -901,7 +939,11 @@ export async function planHostedLinqMessageEditedWebhook(input: {
   );
   const sourceMessageLookupKeyReadCandidates =
     createHostedLinqMessageLookupKeyReadCandidates(event.data.id);
+  if (!input.preparation) {
+    throw new TypeError("Inbound Linq message edit preparation is required.");
+  }
   const sourceEntries = await readHostedMailboxSourceConversationEntriesTx({
+    preparation: input.preparation,
     sourceMessageLookupKeys: sourceMessageLookupKeyReadCandidates,
     tx: input.prisma,
   });
@@ -1016,10 +1058,12 @@ export async function planHostedLinqMessageEditedWebhook(input: {
     originalWake.message.linqMessage.threadIsDirect !== false;
   if (originalIsDirect) {
     await lockHostedMemberRow(input.prisma, sourceUserId);
-    const [routing, accessDecision] = await Promise.all([
-      readHostedMemberRoutingState({
+    const linqChatLookupKeyCandidates =
+      createHostedLinqChatLookupKeyReadCandidates(event.data.chat.id);
+    const [routingAuthority, accessDecision] = await Promise.all([
+      readHostedMemberHomeLinqRouteAuthorityTx({
         memberId: sourceUserId,
-        prisma: input.prisma,
+        tx: input.prisma,
       }),
       readHostedRuntimeAiAccessDecision({
         memberId: sourceUserId,
@@ -1029,10 +1073,14 @@ export async function planHostedLinqMessageEditedWebhook(input: {
     ]);
     if (
       !accessDecision.allowed
-      || routing?.linqChatId !== event.data.chat.id
-      || routing.linqParticipantContact?.kind !== participantContact.kind
+      || !routingAuthority
+      || !routingAuthority.linqChatLookupKey
+      || !linqChatLookupKeyCandidates.includes(
+        routingAuthority.linqChatLookupKey,
+      )
+      || routingAuthority.participantContact?.kind !== participantContact.kind
       || !participantLookupKeyCandidates.includes(
-        routing.linqParticipantContact.lookupKey,
+        routingAuthority.participantContact.lookupKey,
       )
     ) {
       return buildIgnoredHostedLinqMessageEditPlan(
