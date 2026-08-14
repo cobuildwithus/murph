@@ -571,6 +571,151 @@ touch hook-installed
     expect(runGit(target, ['status', '--porcelain'])).toBe('')
   })
 
+  it('removes a Spotlight marker staged by post-index-change without discarding other hook effects', () => {
+    const harness = createHarness()
+    const target = path.join(harness.root, 'post-index-change-marker')
+    const hookInvocations = path.join(
+      harness.root,
+      'post-index-change-invocations',
+    )
+    executable(
+      path.join(harness.primary, '.githooks', 'post-index-change'),
+      `#!/bin/sh
+if [ -e ${JSON.stringify(hookInvocations)} ]; then
+  exit 0
+fi
+printf 'invoked\n' >>${JSON.stringify(hookInvocations)}
+exclude=$(git rev-parse --path-format=absolute --git-path info/exclude)
+printf '!/.metadata_never_index\n' >"$exclude"
+printf 'generated\n' >hook-generated.txt
+git add -A
+`,
+    )
+
+    const creation = runScript(harness, 'create-worktree', [
+      '-b',
+      'post-index-change-marker',
+      target,
+    ])
+
+    expect(creation.status, creation.stderr).toBe(0)
+    expect(readFileSync(hookInvocations, 'utf8')).toBe('invoked\n')
+    expect(
+      runGit(target, ['ls-files', '--stage', '--', '.metadata_never_index']),
+    ).toBe('')
+    expect(runGit(target, ['status', '--porcelain'])).toBe(
+      'A  hook-generated.txt',
+    )
+    const excludeFile = runGit(target, [
+      'rev-parse',
+      '--path-format=absolute',
+      '--git-path',
+      'info/exclude',
+    ])
+    expect(readFileSync(excludeFile, 'utf8')).toMatch(
+      /(?:^|\n)\/\.metadata_never_index\n$/,
+    )
+    expect(runGit(target, ['check-ignore', '.metadata_never_index'])).toBe(
+      '.metadata_never_index',
+    )
+    const admin = runGit(target, [
+      'rev-parse',
+      '--path-format=absolute',
+      '--git-dir',
+    ])
+    expect(existsSync(path.join(admin, 'murph-storage-guard-authorized'))).toBe(
+      true,
+    )
+  })
+
+  it('removes a Spotlight marker staged by post-checkout without discarding other hook effects', () => {
+    const harness = createHarness()
+    const target = path.join(harness.root, 'post-checkout-marker')
+    const hookInvocations = path.join(harness.root, 'marker-hook-invocations')
+    executable(
+      path.join(harness.primary, '.githooks', 'post-checkout'),
+      `#!/bin/sh
+printf 'invoked\n' >>${JSON.stringify(hookInvocations)}
+exclude=$(git rev-parse --path-format=absolute --git-path info/exclude)
+printf '!/.metadata_never_index\n' >"$exclude"
+printf 'generated\n' >hook-generated.txt
+git add -A
+`,
+    )
+
+    const creation = runScript(harness, 'create-worktree', [
+      '-b',
+      'post-checkout-marker',
+      target,
+    ])
+
+    expect(creation.status, creation.stderr).toBe(0)
+    expect(readFileSync(hookInvocations, 'utf8')).toBe('invoked\n')
+    expect(
+      runGit(target, ['ls-files', '--stage', '--', '.metadata_never_index']),
+    ).toBe('')
+    expect(runGit(target, ['status', '--porcelain'])).toBe(
+      'A  hook-generated.txt',
+    )
+    expect(runGit(target, ['check-ignore', '.metadata_never_index'])).toBe(
+      '.metadata_never_index',
+    )
+    const admin = runGit(target, [
+      'rev-parse',
+      '--path-format=absolute',
+      '--git-dir',
+    ])
+    expect(existsSync(path.join(admin, 'murph-storage-guard-authorized'))).toBe(
+      true,
+    )
+  })
+
+  it('restores the checked-out tree entry when the Spotlight marker is tracked', () => {
+    const harness = createHarness()
+    writeFileSync(
+      path.join(harness.primary, '.metadata_never_index'),
+      'tracked marker\n',
+    )
+    runGit(harness.primary, ['add', '.metadata_never_index'])
+    runGit(harness.primary, ['commit', '-m', 'track Spotlight marker'])
+    executable(
+      path.join(harness.primary, '.githooks', 'post-checkout'),
+      `#!/bin/sh
+exclude=$(git rev-parse --path-format=absolute --git-path info/exclude)
+printf '!/.metadata_never_index\n' >"$exclude"
+printf 'hook marker\n' >.metadata_never_index
+git add .metadata_never_index
+`,
+    )
+    const target = path.join(harness.root, 'tracked-spotlight-marker')
+
+    const creation = runScript(harness, 'create-worktree', [
+      '-b',
+      'tracked-spotlight-marker',
+      target,
+    ])
+
+    expect(creation.status, creation.stderr).toBe(0)
+    const expectedOid = runGit(harness.primary, [
+      'rev-parse',
+      'HEAD:.metadata_never_index',
+    ])
+    expect(
+      runGit(target, ['ls-files', '--stage', '--', '.metadata_never_index']),
+    ).toContain(expectedOid)
+    expect(
+      runGit(target, [
+        'diff',
+        '--cached',
+        '--name-only',
+        'HEAD',
+        '--',
+        '.metadata_never_index',
+      ]),
+    ).toBe('')
+    expect(runGit(target, ['status', '--porcelain'])).toBe('')
+  })
+
   it('matches native checkout-filter worktree context', () => {
     const configureFilter = (harness: Harness, output: string): void => {
       const attributes = runGit(harness.primary, [

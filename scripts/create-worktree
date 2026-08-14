@@ -49,6 +49,11 @@ common_dir="$(git -C "$repo_root" rev-parse --path-format=absolute --git-common-
 state_dir="${MURPH_WORKTREE_GUARD_STATE_DIR:-$common_dir/murph-worktree-storage-guard}"
 lock_file="$state_dir/lock"
 mkdir -p "$state_dir"
+spotlight_marker_path='.metadata_never_index'
+spotlight_tree_head=''
+spotlight_tree_mode=''
+spotlight_tree_oid=''
+spotlight_tree_present=0
 
 prepare_worktree_spotlight_exclusion() {
   local exclude_file="$common_dir/info/exclude"
@@ -73,7 +78,56 @@ prepare_worktree_spotlight_exclusion() {
 }
 
 mark_worktree_non_indexable() {
-  touch "$target_path/.metadata_never_index"
+  touch "$target_path/$spotlight_marker_path"
+}
+
+capture_worktree_spotlight_index_state() {
+  local tree_entry tree_type tree_path
+
+  spotlight_tree_head="$(git -C "$target_path" rev-parse HEAD)" || return
+  tree_entry="$(git -C "$target_path" ls-tree "$spotlight_tree_head" -- "$spotlight_marker_path")" \
+    || return
+  if [[ -z "$tree_entry" ]]; then
+    spotlight_tree_present=0
+    return 0
+  fi
+  IFS=$' \t' read -r spotlight_tree_mode tree_type spotlight_tree_oid tree_path \
+    <<<"$tree_entry"
+  if [[ ( "$spotlight_tree_mode" != 100644 && "$spotlight_tree_mode" != 100755 ) \
+    || ! "$spotlight_tree_oid" =~ ^[0-9a-f]{40,64}$ \
+    || "$tree_type" != blob \
+    || "$tree_path" != "$spotlight_marker_path" ]]; then
+    return 1
+  fi
+  spotlight_tree_present=1
+}
+
+restore_worktree_spotlight_state() {
+  local -a index_args
+
+  if (( spotlight_tree_present == 1 )); then
+    index_args=(--add --cacheinfo "$spotlight_tree_mode,$spotlight_tree_oid,$spotlight_marker_path")
+  else
+    index_args=(--force-remove -- "$spotlight_marker_path")
+  fi
+  GIT_DIR="$target_path/.git" GIT_WORK_TREE=. \
+    git -C "$target_path" -c core.hooksPath=/dev/null update-index "${index_args[@]}" \
+    || return
+  if (( spotlight_tree_present == 1 )); then
+    GIT_DIR="$target_path/.git" GIT_WORK_TREE=. \
+      git -C "$target_path" -c core.hooksPath=/dev/null checkout-index --force -- \
+        "$spotlight_marker_path" \
+      || return
+  fi
+  GIT_DIR="$target_path/.git" GIT_WORK_TREE=. \
+    git -C "$target_path" -c core.hooksPath=/dev/null diff --cached --quiet \
+      "$spotlight_tree_head" -- "$spotlight_marker_path" \
+    || return
+  prepare_worktree_spotlight_exclusion \
+    && mark_worktree_non_indexable \
+    && GIT_DIR="$target_path/.git" GIT_WORK_TREE=. \
+      git -C "$target_path" -c core.hooksPath=/dev/null diff --quiet -- \
+        "$spotlight_marker_path"
 }
 
 rollback_registered_worktree() {
@@ -227,12 +281,13 @@ if [[ -d "$target_path" ]] \
   case "$admin_dir" in
     "$common_dir"/worktrees/*)
       set +e
-      mark_worktree_non_indexable \
+      capture_worktree_spotlight_index_state \
+        && mark_worktree_non_indexable \
         && GIT_DIR="$target_path/.git" GIT_WORK_TREE=. \
           git -C "$target_path" reset --hard --no-recurse-submodules \
+        && restore_worktree_spotlight_state \
         && run_post_checkout_hook \
-        && prepare_worktree_spotlight_exclusion \
-        && mark_worktree_non_indexable \
+        && restore_worktree_spotlight_state \
         && : >"$admin_dir/murph-storage-guard-authorized"
       setup_status=$?
       set -e
