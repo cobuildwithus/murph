@@ -1,6 +1,6 @@
 # Device Sync Ingestion Invariants
 
-Last verified: 2026-08-10
+Last verified: 2026-08-12
 
 ## Purpose
 
@@ -302,9 +302,29 @@ drain/batch service seam in `packages/device-syncd/src/service.ts`.
    boolean beside the ciphertext. The dirty store privately completes
    compression, secure-box sealing, and any lazy Junction classifier load
    before a store-owned transaction; callers cannot supply prepared bundles.
-   Consent-gated webhook and companion admissions do that work
-   only after the member lock and consent re-read, but before the dirty-marker
-   lock or mutation. On a replacement epoch, the ordinary non-null path uses only a marker
+   Consent-gated webhook and companion admissions first use a short member and
+   connection/source authority transaction, then do payload-bearing work outside
+   every database lock through a request-local non-serializable store capability.
+   Their final transaction reacquires the same admission locks, re-reads consent
+   and exact connection/source authority, and consumes the capability only if
+   the dirty-marker snapshot and, for payload work, device-domain root are
+   unchanged. Compact-only webhook hints do not mint a dirty crypto capability:
+   the preflight reads only whether the marker is expected to cross clean-to-dirty,
+   the canonical dirty store owns the final in-transaction update and actual
+   revision, and only an unexpected clean transition triggers a full replan.
+   Exact source admission reads use the connection id, provider slug, connected
+   status, and disconnect-fence predicate in SQL and return at most one minimally
+   projected candidate per check instead of hydrating connection-wide history.
+   Clean-to-dirty mailbox crypto is prepared outside the locks and revalidates
+   its exact ingress root in the final transaction. One fresh-cache full replan is allowed on
+   preparation drift, including the shared domain-root mismatch emitted by the
+   mailbox owner; repeated drift fails retryably. Built-in webhook providers
+   admit at most two dirty resources in one delivery (the Junction connection
+   event is the maximum), while companion admissions carry exactly one. Web
+   rejects a larger provider batch before admission so the composed preparation
+   and transaction bound cannot grow silently. A withdrawal that commits
+   during preparation therefore prevents every durable payload, receipt, signal,
+   trace-completion, and wake mutation. On a replacement epoch, the ordinary non-null path uses only a marker
    compare-and-set plus set-based deletion of rows classified as
    credential-scoped. Nullable rows left by mixed-version writers are the one
    transitional exception: Web classifies at most 800 of them inside the

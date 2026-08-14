@@ -720,11 +720,11 @@ test('assistant deliver resolves saved routes unless a session is provided', asy
   const deliver = readCommand(assistant.commands, 'deliver')
 
   commandMocks.applyAssistantSelfDeliveryTargetDefaults.mockResolvedValueOnce({
-    channel: 'email',
-    identityId: 'inbox_saved',
-    participantId: 'recipient_saved@example.com',
-    threadId: 'thread_saved',
-    deliveryTarget: 'recipient_saved@example.com',
+    channel: 'telegram',
+    identityId: 'bot-primary',
+    participantId: '123456789',
+    threadId: '123456789',
+    deliveryTarget: '123456789',
   })
   commandMocks.deliverAssistantMessage.mockResolvedValueOnce({
     delivered: true,
@@ -761,13 +761,13 @@ test('assistant deliver resolves saved routes unless a session is provided', asy
   )
   assert.deepEqual(commandMocks.deliverAssistantMessage.mock.calls[0]?.[0], {
     alias: undefined,
-    channel: 'email',
-    identityId: 'inbox_saved',
+    channel: 'telegram',
+    identityId: 'bot-primary',
     message: 'Delivery test message',
-    participantId: 'recipient_saved@example.com',
+    participantId: '123456789',
     sessionId: undefined,
-    threadId: 'thread_saved',
-    target: 'recipient_saved@example.com',
+    threadId: '123456789',
+    target: '123456789',
     vault: '/tmp/vault',
   })
   assert.deepEqual(commandMocks.deliverAssistantMessage.mock.calls[1]?.[0], {
@@ -811,7 +811,7 @@ test('assistant deliver rejects serialized object delivery targets before sendin
   assert.equal(commandMocks.deliverAssistantMessage.mock.calls.length, 0)
 })
 
-test('assistant deliver validates overrides against the session channel before sending', async () => {
+test('assistant deliver rejects removed local email session routes before sending', async () => {
   const commands = createAssistantCli()
   const assistant = readCommandGroup(commands, 'assistant')
   const deliver = readCommand(assistant.commands, 'deliver')
@@ -821,11 +821,11 @@ test('assistant deliver validates overrides against the session channel before s
     binding: {
       ...TEST_SESSION.binding,
       channel: 'email',
-      identityId: 'inbox_123',
-      threadId: 'thread_123',
+      identityId: 'hosted-email-identity',
+      threadId: 'hosted-email-thread',
       delivery: {
         kind: 'thread',
-        target: 'thread_123',
+        target: 'hosted-email-thread',
       },
     },
   } satisfies AssistantSession)
@@ -834,18 +834,17 @@ test('assistant deliver validates overrides against the session channel before s
     () =>
       deliver.run({
         args: {
-          message: 'Reuse the existing email session',
+          message: 'Reuse the existing session',
         },
         options: {
-          deliveryTarget: 'not-an-email-target',
-          session: 'session-email',
+          session: 'session-hosted-email',
           vault: '/tmp/vault',
         },
       }),
     (error: unknown) => {
       assert.ok(error instanceof VaultCliError)
       assert.equal(error.code, 'invalid_option')
-      assert.match(error.message, /Email delivery targets/u)
+      assert.match(error.message, /supports only Telegram/u)
       return true
     },
   )
@@ -1090,7 +1089,7 @@ test('assistant status and session commands reject uninitialized vault roots bef
   assert.equal(commandMocks.listAssistantSessions.mock.calls.length, 0)
 })
 
-test('self-target commands normalize channels, enforce email identity, and surface config paths', async () => {
+test('self-target commands preserve retained channel inspection and save Telegram targets', async () => {
   const commands = createAssistantCli()
   const assistant = readCommandGroup(commands, 'assistant')
   const selfTarget = readCommandGroup(assistant.commands, 'self-target')
@@ -1110,11 +1109,11 @@ test('self-target commands normalize channels, enforce email identity, and surfa
     threadId: 'chat-123',
   })
   commandMocks.saveAssistantSelfDeliveryTarget.mockResolvedValueOnce({
-    channel: 'email',
-    deliveryTarget: 'recipient@example.com',
-    identityId: 'inbox_123',
+    channel: 'telegram',
+    deliveryTarget: '123456789',
+    identityId: 'bot-primary',
     participantId: null,
-    threadId: null,
+    threadId: '123456789',
   })
   commandMocks.clearAssistantSelfDeliveryTargets.mockResolvedValueOnce(['linq'])
 
@@ -1156,12 +1155,13 @@ test('self-target commands normalize channels, enforce email identity, and surfa
           channel: 'email',
         },
         options: {
-          deliveryTarget: 'recipient@example.com',
+          deliveryTarget: 'verified@example.test',
         },
       }),
     (error: unknown) => {
       assert.ok(error instanceof VaultCliError)
-      assert.equal(error.message.includes('require --identity'), true)
+      assert.equal(error.code, 'invalid_option')
+      assert.match(error.message, /supports only Telegram/u)
       return true
     },
   )
@@ -1185,11 +1185,12 @@ test('self-target commands normalize channels, enforce email identity, and surfa
 
   const setResult = await readCommand(selfTarget.commands, 'set').run({
     args: {
-      channel: '  Email  ',
+      channel: '  Telegram  ',
     },
     options: {
-      deliveryTarget: 'recipient@example.com',
-      identity: 'inbox_123',
+      deliveryTarget: '123456789',
+      identity: 'bot-primary',
+      thread: '123456789',
     },
   })
   const clearResult = await readCommand(selfTarget.commands, 'clear').run({
@@ -1216,11 +1217,11 @@ test('self-target commands normalize channels, enforce email identity, and surfa
   assert.deepEqual(setResult, {
     configPath: 'redacted:/tmp/operator-config.json',
     target: {
-      channel: 'email',
-      deliveryTarget: 'recipient@example.com',
-      identityId: 'inbox_123',
+      channel: 'telegram',
+      deliveryTarget: '123456789',
+      identityId: 'bot-primary',
       participantId: null,
-      threadId: null,
+      threadId: '123456789',
     },
   })
   assert.deepEqual(clearResult, {
@@ -1236,12 +1237,12 @@ test('self-target commands normalize channels, enforce email identity, and surfa
     'linq',
   )
   assert.deepEqual(commandMocks.saveAssistantSelfDeliveryTarget.mock.calls[0]?.[0], {
-    channel: 'email',
+    channel: 'telegram',
     deliverySource: null,
-    deliveryTarget: 'recipient@example.com',
-    identityId: 'inbox_123',
+    deliveryTarget: '123456789',
+    identityId: 'bot-primary',
     participantId: null,
-    threadId: null,
+    threadId: '123456789',
   })
 })
 
@@ -1258,7 +1259,7 @@ test('assistant command help describes routing shapes and flat header JSON input
 
   assert.equal(
     readOptionDescription(ask, 'participant')?.includes(
-      'transport-native participant value',
+      'thread-addressed transports may rely on --thread',
     ),
     true,
   )
@@ -1270,7 +1271,7 @@ test('assistant command help describes routing shapes and flat header JSON input
   )
   assert.equal(
     readOptionDescription(deliver, 'deliveryTarget')?.includes(
-      'transport-native send format',
+      'one-send Telegram destination',
     ),
     true,
   )
@@ -1287,7 +1288,7 @@ test('assistant command help describes routing shapes and flat header JSON input
     false,
   )
   assert.equal(
-    run.description?.includes('Telegram or email'),
+    run.description?.includes('Telegram'),
     true,
   )
   assert.equal(
@@ -1298,13 +1299,13 @@ test('assistant command help describes routing shapes and flat header JSON input
   )
   assert.equal(
     selfTargetSet.hint?.includes(
-      'Saved email targets also require --identity with the configured AgentMail inbox id.',
+      'Provide at least one of --participant, --thread, or --deliveryTarget.',
     ),
     true,
   )
   assert.equal(
     readOptionDescription(selfTargetSet, 'identity')?.includes(
-      'Email targets require the configured AgentMail inbox id here.',
+      'Optional local assistant identity id',
     ),
     true,
   )
