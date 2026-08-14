@@ -527,6 +527,8 @@ export interface AssistantHostedExecutionContext {
   providerFetch?: typeof fetch | null
   phoneCalls?: AssistantPhoneCallPort | null
   publicInternetFetch?: typeof fetch | null
+  /** Test-only local providers run inside an already-isolated outer container. */
+  providerWorkspaceSandbox?: boolean
   resolveScheduledLinqRoute?(input: {
     fromPhoneNumber?: string | null
     homeRouteFallbackAllowed: boolean
@@ -716,6 +718,9 @@ export function normalizeAssistantExecutionContext(
         : {}),
       ...(typeof hosted?.publicInternetFetch === 'function'
         ? { publicInternetFetch: hosted.publicInternetFetch }
+        : {}),
+      ...(hosted?.providerWorkspaceSandbox === true
+        ? { providerWorkspaceSandbox: true }
         : {}),
       ...(typeof hosted?.resolveScheduledLinqRoute === 'function'
         ? { resolveScheduledLinqRoute: hosted.resolveScheduledLinqRoute }

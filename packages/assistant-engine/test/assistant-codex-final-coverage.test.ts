@@ -925,7 +925,7 @@ describe('Codex model catalog', () => {
     providerMocks.executeCodexAssistantTurnAttemptFromInput.mockResolvedValue(
       createProviderAttemptResult(),
     )
-    providerTurnRunnerMocks.buildCodexTurnExecutionPlan.mockResolvedValue({
+    const executionPlan: AssistantCodexTurnExecutionPlan = {
       activeTurnSteering,
       executionContext: {
         hosted: {
@@ -951,7 +951,10 @@ describe('Codex model catalog', () => {
       route,
       sharedPlan: createSharedPlan(),
       turnId: 'turn-completion-native-authority',
-    } satisfies AssistantCodexTurnExecutionPlan)
+    }
+    providerTurnRunnerMocks.buildCodexTurnExecutionPlan.mockResolvedValue(
+      executionPlan,
+    )
     providerTurnRunnerMocks.buildCodexTurnAttemptPlan.mockResolvedValue({
       attemptCount: 1,
       route,
@@ -1063,6 +1066,30 @@ describe('Codex model catalog', () => {
       runtimeWorkspaceRoots: ['/work'],
     })
     expect(foregroundProviderInput).not.toHaveProperty('processLifetime')
+
+    if (!executionPlan.executionContext?.hosted) {
+      throw new Error('Expected hosted execution context.')
+    }
+    executionPlan.executionContext.hosted.providerWorkspaceSandbox = true
+    providerMocks.executeCodexAssistantTurnAttemptFromInput.mockClear()
+
+    const localProviderOutcome = await executeCodexTurnWithRecovery({
+      input,
+      plan: createSharedPlan(),
+      resolvedSession: session,
+      route,
+      turnCreatedAt: '2026-08-10T00:02:00.000Z',
+      turnId: 'turn-local-provider-workspace-sandbox',
+    })
+
+    expect(localProviderOutcome.kind).toBe('succeeded')
+    const localProviderInput =
+      providerMocks.executeCodexAssistantTurnAttemptFromInput.mock.calls[0]?.[0]
+    expect(localProviderInput?.providerConfig).toMatchObject({
+      sandbox: 'danger-full-access',
+    })
+    expect(localProviderInput?.permissions).toBeNull()
+    expect(localProviderInput?.runtimeWorkspaceRoots).toEqual(['/work'])
   })
 
   it('keeps only song generation while denying native creative-notification capabilities', async () => {

@@ -698,7 +698,9 @@ async function executeAssistantCodexAttempt(input: {
               : readOnlyAutomationTurn && executionPlan.executionContext?.hosted
               ? MURPH_MEMBER_READ_PERMISSION_PROFILE
               : ordinaryHostedWorkspaceTurn
-                ? MURPH_MEMBER_WORKSPACE_PERMISSION_PROFILE
+                ? executionPlan.executionContext?.hosted?.providerWorkspaceSandbox === true
+                  ? null
+                  : MURPH_MEMBER_WORKSPACE_PERMISSION_PROFILE
                 : null,
         ...(restrictedOneShotTurn
           ? { processLifetime: 'one-shot' as const }

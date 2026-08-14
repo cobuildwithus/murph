@@ -836,6 +836,39 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     );
   });
 
+  it("uses the provider workspace sandbox only for the local test provider", async () => {
+    await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      runtimeEnv: {
+        HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL: "http://127.0.0.1:4111/v1",
+        NODE_ENV: "test",
+      },
+    }));
+
+    expect(mocks.runHostedAssistantAutomationLane).toHaveBeenCalledWith(
+      expect.objectContaining({
+        executionContext: expect.objectContaining({
+          hosted: expect.objectContaining({
+            providerWorkspaceSandbox: true,
+          }),
+        }),
+      }),
+    );
+
+    mocks.runHostedAssistantAutomationLane.mockClear();
+    await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      runtimeEnv: {
+        HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL: "http://127.0.0.1:4111/v1",
+        NODE_ENV: "production",
+      },
+    }));
+
+    const productionExecutionContext =
+      mocks.runHostedAssistantAutomationLane.mock.calls[0]?.[0]?.executionContext;
+    expect(productionExecutionContext?.hosted).not.toHaveProperty(
+      "providerWorkspaceSandbox",
+    );
+  });
+
   it("starts the assistant lane before a scheduled group operation lazily reads the Web-owned shared snapshot", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "hosted-share-authority-"));
     const sequence: string[] = [];
