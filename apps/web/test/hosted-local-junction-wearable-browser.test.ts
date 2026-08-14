@@ -30,6 +30,22 @@ function emptyLocator() {
   };
 }
 
+function actionLocator(click: () => void) {
+  const action = {
+    click: vi.fn(async () => {
+      click();
+    }),
+    getAttribute: vi.fn(async () => null),
+    innerText: vi.fn(async () => "Continue"),
+    isEnabled: vi.fn(async () => true),
+    isVisible: vi.fn(async () => true),
+  };
+  return {
+    count: vi.fn(async () => 1),
+    nth: vi.fn(() => action),
+  };
+}
+
 describe("hosted-local Junction wearable browser authorization", () => {
   it("fails a continuous external challenge after the bounded grace period", async () => {
     let now = 0;
@@ -52,16 +68,53 @@ describe("hosted-local Junction wearable browser authorization", () => {
     expect(now).toBe(15_000);
   });
 
-  it("resets the challenge timer after an ordinary provider surface", async () => {
+  it("keeps one blocked window across alternating challenge and no-action polls", async () => {
     let now = 0;
-    let waitCount = 0;
-    let atMurph = false;
-    let challengeVisible = true;
     const page = {
-      frames: () => challengeVisible
+      frames: () => now % 2_000 === 0
         ? [{ url: () => "https://challenges.cloudflare.com/frame" }]
         : [{ url: () => "https://id.whoop.com/sign-in" }],
       getByRole: vi.fn(() => emptyLocator()),
+      locator: vi.fn(() => emptyLocator()),
+      title: vi.fn(async () => "Sign in"),
+      url: () => "https://id.whoop.com/sign-in",
+      waitForTimeout: vi.fn(async (duration: number) => {
+        now += duration;
+      }),
+    };
+
+    await expect(completeExternalJunctionAuthorizationForTest(
+      page as never,
+      createConfig(),
+      () => now,
+    )).rejects.toThrow(
+      "WHOOP authorization was blocked by an external provider challenge.",
+    );
+    expect(now).toBe(15_000);
+  });
+
+  it("resets the blocked window only after an automated action is clicked", async () => {
+    let actionClicked = false;
+    let atMurph = false;
+    let challengeWaitsAfterClick = 0;
+    let now = 0;
+    const page = {
+      frames: () => !actionClicked && now === 14_000
+        ? [{ url: () => "https://id.whoop.com/sign-in" }]
+        : [{ url: () => "https://challenges.cloudflare.com/frame" }],
+      getByRole: vi.fn((role: string, options?: { name?: RegExp }) => {
+        if (
+          role === "button"
+          && !actionClicked
+          && now === 14_000
+          && options?.name?.test("Continue")
+        ) {
+          return actionLocator(() => {
+            actionClicked = true;
+          });
+        }
+        return emptyLocator();
+      }),
       locator: vi.fn(() => emptyLocator()),
       title: vi.fn(async () => "Sign in"),
       url: () => atMurph
@@ -69,13 +122,11 @@ describe("hosted-local Junction wearable browser authorization", () => {
         : "https://id.whoop.com/sign-in",
       waitForTimeout: vi.fn(async (duration: number) => {
         now += duration;
-        waitCount += 1;
-        if (waitCount === 1) {
-          challengeVisible = false;
-        } else if (waitCount === 2) {
-          challengeVisible = true;
-        } else if (waitCount === 16) {
-          atMurph = true;
+        if (actionClicked && duration === 1_000) {
+          challengeWaitsAfterClick += 1;
+          if (challengeWaitsAfterClick === 14) {
+            atMurph = true;
+          }
         }
       }),
     };
@@ -85,7 +136,8 @@ describe("hosted-local Junction wearable browser authorization", () => {
       createConfig(),
       () => now,
     )).resolves.toBeUndefined();
-    expect(now).toBe(16_000);
+    expect(actionClicked).toBe(true);
+    expect(now).toBe(28_750);
   });
 
   it.each(["true", " TRUE ", "1"])(

@@ -61,8 +61,7 @@ const PROVIDER_AUTHORIZATION_DOMAINS = {
 } as const;
 const REQUIRED_CONSENT_PATTERN = /\b(?:authorization|required|privacy|terms)\b/iu;
 const OPTIONAL_MARKETING_PATTERN = /\b(?:marketing|newsletter|offers?|promotions?)\b/iu;
-const PROVIDER_CHALLENGE_GRACE_MS = 15_000;
-const PROVIDER_NO_ACTION_GRACE_MS = 15_000;
+const PROVIDER_AUTOMATION_BLOCKED_GRACE_MS = 15_000;
 const SENSITIVE_BROWSER_ENVIRONMENT_KEYS = [
   "JUNCTION_API_KEY",
   "JUNCTION_CLIENT_USER_ID_SECRET",
@@ -176,8 +175,8 @@ async function completeExternalAuthorization(
   now: () => number = Date.now,
 ): Promise<void> {
   const deadline = now() + config.timeoutMs;
-  let noActionObservedAt: number | null = null;
-  let providerChallengeObservedAt: number | null = null;
+  let automationBlockedObservedAt: number | null = null;
+  let blockedWindowObservedChallenge = false;
 
   while (now() < deadline) {
     if (readOrigin(page.url()) === config.webOrigin) {
@@ -190,77 +189,78 @@ async function completeExternalAuthorization(
       title: await page.title().catch(() => ""),
     });
     if (providerChallenge) {
-      noActionObservedAt = null;
       if (config.manualAuthorizationAllowed) {
-        providerChallengeObservedAt = null;
         await page.waitForTimeout(1_000);
         continue;
       }
-      providerChallengeObservedAt ??= now();
-      if (now() - providerChallengeObservedAt >= PROVIDER_CHALLENGE_GRACE_MS) {
+    } else {
+      await fillVisible(page, [
+        'input[type="email"]',
+        'input[autocomplete="email"]',
+        'input[autocomplete="username"]',
+        'input[name*="email" i]',
+        'input[name="username"]',
+      ], config.email);
+      if (config.password) {
+        await fillVisible(page, [
+          'input[type="password"]',
+          'input[autocomplete="current-password"]',
+        ], config.password);
+      }
+
+      const otpInput = await findVisibleEditable(page, [
+        'input[autocomplete="one-time-code"]',
+        'input[name*="otp" i]',
+        'input[name*="verification" i]',
+      ]);
+      if (otpInput) {
+        const currentOtp = await otpInput.inputValue().catch(() => "");
+        if (config.otp) {
+          if (currentOtp !== config.otp) {
+            await otpInput.fill(config.otp);
+          }
+        } else if (!config.manualAuthorizationAllowed) {
+          throw new Error(
+            `${config.label} requested a one-time code. Set MURPH_E2E_PROVIDER_OTP; manual entry is available only in a headed non-CI run.`,
+          );
+        } else if (!currentOtp.trim()) {
+          await page.waitForTimeout(1_000);
+          continue;
+        }
+      }
+
+      await checkRequiredConsentCheckboxes(page);
+      const clicked = await clickFirstVisibleAction(page, AUTH_ACTIONS);
+      if (clicked) {
+        automationBlockedObservedAt = null;
+        blockedWindowObservedChallenge = false;
+        await page.waitForTimeout(750);
+        continue;
+      }
+      if (config.manualAuthorizationAllowed) {
+        // Headful runs permit manual CAPTCHA or one-time-code completion while
+        // the test continues watching for the proof-bound Murph callback.
+        await page.waitForTimeout(1_000);
+        continue;
+      }
+    }
+
+    automationBlockedObservedAt ??= now();
+    blockedWindowObservedChallenge ||= providerChallenge;
+    if (
+      now() - automationBlockedObservedAt
+        >= PROVIDER_AUTOMATION_BLOCKED_GRACE_MS
+    ) {
+      if (blockedWindowObservedChallenge) {
         throw new Error(
           `${config.label} authorization was blocked by an external provider challenge.`,
         );
       }
-      await page.waitForTimeout(1_000);
-      continue;
+      throw new Error(
+        `${config.label} did not expose an automated authorization action. Manual completion is available only in a headed non-CI run.`,
+      );
     }
-    providerChallengeObservedAt = null;
-
-    await fillVisible(page, [
-      'input[type="email"]',
-      'input[autocomplete="email"]',
-      'input[autocomplete="username"]',
-      'input[name*="email" i]',
-      'input[name="username"]',
-    ], config.email);
-    if (config.password) {
-      await fillVisible(page, [
-        'input[type="password"]',
-        'input[autocomplete="current-password"]',
-      ], config.password);
-    }
-
-    const otpInput = await findVisibleEditable(page, [
-      'input[autocomplete="one-time-code"]',
-      'input[name*="otp" i]',
-      'input[name*="verification" i]',
-    ]);
-    if (otpInput) {
-      const currentOtp = await otpInput.inputValue().catch(() => "");
-      if (config.otp) {
-        if (currentOtp !== config.otp) {
-          await otpInput.fill(config.otp);
-        }
-      } else if (!config.manualAuthorizationAllowed) {
-        throw new Error(
-          `${config.label} requested a one-time code. Set MURPH_E2E_PROVIDER_OTP; manual entry is available only in a headed non-CI run.`,
-        );
-      } else if (!currentOtp.trim()) {
-        await page.waitForTimeout(1_000);
-        continue;
-      }
-    }
-
-    await checkRequiredConsentCheckboxes(page);
-    const clicked = await clickFirstVisibleAction(page, AUTH_ACTIONS);
-    if (!clicked && config.manualAuthorizationAllowed) {
-      // Headful runs permit manual CAPTCHA or one-time-code completion while
-      // the test continues watching for the proof-bound Murph callback.
-      await page.waitForTimeout(1_000);
-      continue;
-    }
-    if (!clicked) {
-      noActionObservedAt ??= now();
-      if (now() - noActionObservedAt >= PROVIDER_NO_ACTION_GRACE_MS) {
-        throw new Error(
-          `${config.label} did not expose an automated authorization action. Manual completion is available only in a headed non-CI run.`,
-        );
-      }
-    } else {
-      noActionObservedAt = null;
-    }
-    await page.waitForTimeout(clicked ? 750 : 1_000);
+    await page.waitForTimeout(1_000);
   }
 
   throw new Error("Timed out before Junction returned the browser to Murph.");
