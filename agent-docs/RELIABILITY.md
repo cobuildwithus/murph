@@ -437,6 +437,18 @@ Last verified: 2026-08-14
   activation failure falls back to the existing signup-link path, while the
   single-owner wait remains provider-retryable, without creating a second
   entitlement, queue, or runtime.
+- Linq signup-link terminal failures recompute suppression under the existing
+  member-row lock without reading delivery history into application memory.
+  One scalar statement checks only the exact five source references for the
+  failed generic or source-event-digest identity and whether any syntactically
+  valid five-attempt identity remains live for that member/day. Both probes use
+  the concurrent partial `source_ref text_pattern_ops` index restricted to live
+  `invite_signup` and `invite_signup_fallback` rows. Receipt ordering remains
+  the terminal authority: a same-identity live attempt suppresses reopen, a
+  different group-aware identity may reopen only its group context while
+  retaining daily suppression, and the daily marker is released only after no
+  live identity remains. No cache, queue, or duplicate projection owns this
+  state.
 - Web and companion onboarding use the same semantic-keyed starter grant with
   their own bounded source references. A repeated enrollment cannot replace the
   accepted grant or add balance. Historical trial metadata remains only for
