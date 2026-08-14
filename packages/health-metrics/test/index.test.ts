@@ -1577,11 +1577,10 @@ test("selects metric points by policy and exposes provenance warnings", () => {
   assert.equal(blankMetricKey.point, null);
 });
 
-test("uses shared causal order before opaque ids and preserves the legacy fallback", () => {
+test("uses shared causal order before synthetic times and preserves the legacy fallback", () => {
   const common = {
     effectiveDate: "2026-08-13",
     metricKey: "steps",
-    observedAt: "2026-08-13T12:00:00.000Z",
     recordedAt: "2026-08-13T18:00:00.000Z",
     sourceKind: "observation" as const,
     unit: "count",
@@ -1590,6 +1589,7 @@ test("uses shared causal order before opaque ids and preserves the legacy fallba
     ...common,
     context: { causalSeq: "41" },
     id: "metric-point:opaque-a",
+    observedAt: "2026-08-13T19:00:00.000Z",
     recordId: "evt_older_report",
     value: 8_000,
   });
@@ -1597,6 +1597,7 @@ test("uses shared causal order before opaque ids and preserves the legacy fallba
     ...common,
     context: { causalSeq: "42" },
     id: "metric-point:opaque-z",
+    observedAt: "2026-08-13T16:00:00.000Z",
     recordId: "evt_newer_report",
     value: 9_000,
   });
@@ -1606,6 +1607,13 @@ test("uses shared causal order before opaque ids and preserves the legacy fallba
     metricKey: "steps",
     points: [
       { ...older, context: {} },
+      { ...newer, context: {} },
+    ],
+  }).value, 8_000);
+  assert.equal(selectMetricValue({
+    metricKey: "steps",
+    points: [
+      { ...older, context: {}, observedAt: newer.observedAt },
       { ...newer, context: {} },
     ],
   }).value, 8_000);

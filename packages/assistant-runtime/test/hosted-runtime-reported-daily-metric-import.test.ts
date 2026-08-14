@@ -115,9 +115,35 @@ describe("hosted member-reported daily metric import", () => {
     ]);
   });
 
-  it("uses mailbox causal order for equal-time corrections while preserving device evidence", async () => {
+  it.each([
+    {
+      firstObservedAt: "2026-08-13T19:00:00.000Z",
+      firstReportedAt: REPORTED_AT,
+      firstTimeZone: "America/Los_Angeles",
+      label: "equal report times from west to east",
+      secondObservedAt: "2026-08-13T16:00:00.000Z",
+      secondReportedAt: REPORTED_AT,
+      secondTimeZone: "America/New_York",
+    },
+    {
+      firstObservedAt: "2026-08-13T16:00:00.000Z",
+      firstReportedAt: REPORTED_AT,
+      firstTimeZone: "America/New_York",
+      label: "unequal report times from east to west",
+      secondObservedAt: "2026-08-13T19:00:00.000Z",
+      secondReportedAt: "2026-08-13T18:00:01.000Z",
+      secondTimeZone: "America/Los_Angeles",
+    },
+  ])("uses mailbox causal order across $label while preserving device evidence", async ({
+    firstObservedAt,
+    firstReportedAt,
+    firstTimeZone,
+    secondObservedAt,
+    secondReportedAt,
+    secondTimeZone,
+  }) => {
     vi.spyOn(Date, "now").mockReturnValue(Date.parse("2026-08-13T20:00:00.000Z"));
-    const vaultRoot = await createTestVault("UTC");
+    const vaultRoot = await createTestVault(firstTimeZone);
     await upsertEvent({
       payload: {
         dayKey: "2026-08-13",
@@ -143,21 +169,29 @@ describe("hosted member-reported daily metric import", () => {
       vaultRoot,
     });
 
-    // These stable report IDs make the older point's opaque ID sort first, so
-    // the assertion proves causal order wins instead of the legacy ID fallback.
     const olderReportId = "daily-metric:report:steps:older-0";
     const newerReportId = "daily-metric:report:steps:newer-8";
-    const olderItem = createMailboxItem({ causalSeq: "41", reportId: olderReportId });
-    const newerItem = createMailboxItem({ causalSeq: "42", reportId: newerReportId });
+    const olderItem = createMailboxItem({
+      causalSeq: "41",
+      occurredAt: firstReportedAt,
+      reportId: olderReportId,
+    });
     await expect(importHostedReportedDailyMetricMailboxItem({
       item: olderItem,
       vaultRoot,
-      wake: createWake(8_000, olderReportId),
+      wake: createWake(8_000, olderReportId, firstReportedAt),
     })).resolves.toMatchObject({ status: "imported" });
+
+    await updateVaultSummary({ vaultRoot, timezone: secondTimeZone });
+    const newerItem = createMailboxItem({
+      causalSeq: "42",
+      occurredAt: secondReportedAt,
+      reportId: newerReportId,
+    });
     await expect(importHostedReportedDailyMetricMailboxItem({
       item: newerItem,
       vaultRoot,
-      wake: createWake(9_000, newerReportId),
+      wake: createWake(9_000, newerReportId, secondReportedAt),
     })).resolves.toMatchObject({ status: "imported" });
 
     await expect(findEventByExternalRef({
@@ -166,7 +200,9 @@ describe("hosted member-reported daily metric import", () => {
       system: "manual",
       vaultRoot,
     })).resolves.toMatchObject({
+      occurredAt: firstObservedAt,
       qualifiers: { [HOSTED_MAILBOX_CAUSAL_SEQ_QUALIFIER]: "41" },
+      recordedAt: firstReportedAt,
       value: 8_000,
     });
     await expect(findEventByExternalRef({
@@ -175,7 +211,9 @@ describe("hosted member-reported daily metric import", () => {
       system: "manual",
       vaultRoot,
     })).resolves.toMatchObject({
+      occurredAt: secondObservedAt,
       qualifiers: { [HOSTED_MAILBOX_CAUSAL_SEQ_QUALIFIER]: "42" },
+      recordedAt: secondReportedAt,
       value: 9_000,
     });
 
@@ -188,9 +226,12 @@ describe("hosted member-reported daily metric import", () => {
     const newerPoint = points.find((point) => point.context.causalSeq === "42");
     expect(olderPoint).toBeDefined();
     expect(newerPoint).toBeDefined();
-    expect(olderPoint?.id.localeCompare(newerPoint?.id ?? "")).toBeLessThan(0);
     expect(olderPoint?.context.causalSeq).toBe("41");
+    expect(olderPoint?.observedAt).toBe(firstObservedAt);
+    expect(olderPoint?.recordedAt).toBe(firstReportedAt);
     expect(newerPoint?.context.causalSeq).toBe("42");
+    expect(newerPoint?.observedAt).toBe(secondObservedAt);
+    expect(newerPoint?.recordedAt).toBe(secondReportedAt);
     expect(selectAuthoritativeMetricPoint(
       points.filter((point) => point.context.causalSeq),
     )?.value).toBe(9_000);
@@ -220,7 +261,7 @@ describe("hosted member-reported daily metric import", () => {
     await expect(importHostedReportedDailyMetricMailboxItem({
       item: olderItem,
       vaultRoot,
-      wake: createWake(8_000, olderReportId),
+      wake: createWake(8_000, olderReportId, firstReportedAt),
     })).resolves.toMatchObject({ status: "imported" });
     const replayedPoints = await listMetricPointsBatch(vaultRoot, [{
       from: "2026-08-13",
@@ -313,13 +354,17 @@ async function createTestVault(timezone: string): Promise<string> {
   return vaultRoot;
 }
 
-function createWake(value: number, eventId = REPORT_ID) {
+function createWake(
+  value: number,
+  eventId = REPORT_ID,
+  occurredAt = REPORTED_AT,
+) {
   return buildHostedExecutionDailyMetricReportedWake({
     date: "2026-08-13",
     eventId,
     memberId: "member_synthetic_001",
     metric: "steps",
-    occurredAt: REPORTED_AT,
+    occurredAt,
     unit: "count",
     value,
   });
@@ -327,25 +372,28 @@ function createWake(value: number, eventId = REPORT_ID) {
 
 function createMailboxItem(input: {
   causalSeq?: string;
+  occurredAt?: string;
   reportId?: string;
 } = {}): HostedMailboxResolvedImportItem {
+  const causalSeq = input.causalSeq ?? "1";
+  const occurredAt = input.occurredAt ?? REPORTED_AT;
   const reportId = input.reportId ?? REPORT_ID;
   return {
     item: {
-      causalSeq: input.causalSeq ?? "1",
-      createdAt: REPORTED_AT,
+      causalSeq,
+      createdAt: occurredAt,
       dedupeKey: reportId,
       expiresAt: null,
       id: reportId,
       kind: "health.daily-metric.reported",
       lane: "system",
-      laneSeq: "1",
-      occurredAt: REPORTED_AT,
+      laneSeq: causalSeq,
+      occurredAt,
       payloadBytes: 256,
       payloadInlineCiphertext: "ciphertext_synthetic_inline",
       payloadRef: null,
       payloadSchema: "murph.hosted-mailbox-item.v1",
-      updatedAt: REPORTED_AT,
+      updatedAt: occurredAt,
       userId: "member_synthetic_001",
     },
     payload: {
@@ -362,7 +410,7 @@ function createMailboxItem(input: {
         id: reportId,
         kind: "health.daily-metric.reported",
         lane: "system",
-        laneSeq: "1",
+        laneSeq: causalSeq,
       },
       state: "route",
     },

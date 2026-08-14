@@ -97,9 +97,19 @@ Updated: 2026-08-14
   apparent latest correction. The importer now carries the mailbox owner's
   existing causal sequence into a bounded canonical qualifier, the metric query
   exposes it only for manual daily reports, and same-source selection compares
-  two valid causal sequences before the legacy recorded-time/id fallback.
+  two valid causal sequences before the legacy synthetic-time, recorded-time,
+  and id fallback.
 - Manual external references no longer enter the wearable summary resolver, so
   a provider summary cannot suppress separately sourced member evidence. The
   focused mixed-source proof writes 8,000 then 9,000 at one timestamp, chooses
   ids that would otherwise prefer the older report, preserves 7,500 device
   evidence, selects and projects 9,000, reloads the vault, and replays safely.
+- ReviewGPT round 4 showed the sequence was still subordinate to the canonical
+  event's timezone-derived local-noon instant, so a timezone change between two
+  reports could keep the older value visible. The required anomaly retrospective
+  continued with the same mailbox ordering owner and moved its comparison ahead
+  of synthetic observed time; legacy points without two valid sequences retain
+  the complete prior fallback. Parameterized end-to-end proof covers both
+  timezone directions and equal/unequal report timestamps. The retrospective is
+  recorded at
+  `https://github.com/cobuildwithus/murph/pull/1794#issuecomment-5292431858`.
