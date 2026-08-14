@@ -1475,6 +1475,103 @@ test("active dedupe evidence drains reopened source coordinates before ordinary 
   assert.equal(ordinary.payload?.sourceProviderSlug, "omron");
 });
 
+test("a dead reopened schedule-time coordinate cannot starve ordinary history", async () => {
+  const tempDir = await makeTempDirectory("murph-junction-reopened-history-fairness");
+  const store = new SqliteDeviceSyncStore(path.join(tempDir, "state.sqlite"));
+  const provider = createProvider({
+    additionalProviders: [{
+      resourceAvailability: { caffeine: true, water: false },
+      slug: "withings",
+    }],
+    providerState: {
+      resourceAvailability: { caffeine: false, water: true },
+      status: "connected",
+    },
+    requests: [],
+    timeseriesResources: ["caffeine", "water"],
+  });
+  const createScheduledJobs = requireValue(
+    requireValue(provider.jobExecutor).createScheduledJobs,
+  );
+
+  try {
+    const storedAccount = store.upsertAccount({
+      connectedAt: NOW,
+      credential: {
+        credentialMetadata: {},
+        kind: "provider_config",
+        providerConfigKey: "junction",
+      },
+      displayName: "Junction",
+      externalAccountId: "junction-reopened-history-fairness",
+      provider: "junction",
+      scopes: [],
+      status: "active",
+    });
+    const account = {
+      ...createStoredAccount({
+        sources: [
+          createSourceSummary(
+            "omron",
+            "2026-01-01T00:00:00.000Z",
+            "connected",
+            { caffeine: false, water: true },
+            1,
+          ),
+          createSourceSummary(
+            "withings",
+            "2026-01-02T00:00:00.000Z",
+            "connected",
+            { caffeine: true, water: false },
+            2,
+          ),
+        ],
+      }),
+      id: storedAccount.id,
+    };
+    const selectedSources: string[] = [];
+
+    for (let pass = 0; pass < 4; pass += 1) {
+      const now = new Date(Date.parse(NOW) + pass * 60 * 60_000).toISOString();
+      const resourceJobs = createScheduledJobs(account, now, {
+        findActiveDedupeKeys: (dedupeKeys) => store.findActiveJobDedupeKeys({
+          accountId: storedAccount.id,
+          dedupeKeys,
+          provider: "junction",
+        }),
+      }).jobs.filter((job) => job.kind === "resource");
+      const root = requireValue(resourceJobs[0]);
+      selectedSources.push(String(root.payload?.sourceProviderSlug));
+
+      if (root.payload?.sourceProviderSlug === "withings") {
+        const queued = store.enqueueJob({
+          ...root,
+          accountId: storedAccount.id,
+          provider: "junction",
+        });
+        assert.equal(
+          store.claimDueJob(`worker-${pass}`, now, 60_000)?.id,
+          queued.id,
+        );
+        store.failJob(
+          queued.id,
+          now,
+          "NONRETRYABLE_PROVIDER_RESPONSE",
+          "The provider rejected this coordinate.",
+          null,
+          false,
+        );
+        assert.equal(store.getJobById(queued.id)?.status, "dead");
+      }
+    }
+
+    assert.deepEqual(selectedSources, ["withings", "withings", "withings", "omron"]);
+  } finally {
+    store.close();
+    await rm(tempDir, { force: true, recursive: true });
+  }
+});
+
 test("schedule-time extended history admits one account root and rotates deterministic slots", () => {
   const resources = ["caffeine", "water"] as const;
   const availability = { caffeine: true, water: true };

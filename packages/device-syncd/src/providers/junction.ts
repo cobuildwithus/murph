@@ -505,6 +505,7 @@ const JUNCTION_BLOOD_PRESSURE_PROVIDER_RECORD_IDENTITY_PATTERN =
 const JUNCTION_SCHEDULED_RECONCILE_PRIORITY = 40;
 const JUNCTION_HISTORICAL_BACKFILL_PRIORITY = 30;
 const JUNCTION_HISTORICAL_BACKFILL_RETRY_PRIORITY = 50;
+const JUNCTION_REOPENED_HISTORY_PRIORITY_CYCLE_SLOTS = 4;
 
 export function createJunctionDeviceSyncProvider(
   config: JunctionDeviceSyncProviderConfig,
@@ -917,16 +918,23 @@ export function createJunctionDeviceSyncProvider(
     const activeDedupeKeys = context?.findActiveDedupeKeys(
       scheduleTimeJobs.map(([, job]) => job.dedupeKey!),
     ) ?? new Set<string>();
-    let inactiveJobs = scheduleTimeJobs.filter(
+    const inactiveJobs = scheduleTimeJobs.filter(
       ([, job]) => !activeDedupeKeys.has(job.dedupeKey!),
     );
     const reopenedInactiveJobs = context
       ? inactiveJobs.filter(([candidate]) => candidate.sourceLifecycleEpoch > 1)
       : [];
-    if (reopenedInactiveJobs.length > 0) {
-      inactiveJobs = reopenedInactiveJobs;
-    }
-    const scheduledJob = inactiveJobs[scheduleSlot % inactiveJobs.length]?.[1];
+    const ordinaryInactiveJobs = context
+      ? inactiveJobs.filter(([candidate]) => candidate.sourceLifecycleEpoch === 1)
+      : inactiveJobs;
+    const ordinaryPrioritySlot = reopenedInactiveJobs.length > 0
+      && ordinaryInactiveJobs.length > 0
+      && scheduleSlot % JUNCTION_REOPENED_HISTORY_PRIORITY_CYCLE_SLOTS
+        === JUNCTION_REOPENED_HISTORY_PRIORITY_CYCLE_SLOTS - 1;
+    const selectionPool = reopenedInactiveJobs.length === 0 || ordinaryPrioritySlot
+      ? ordinaryInactiveJobs
+      : reopenedInactiveJobs;
+    const scheduledJob = selectionPool[scheduleSlot % selectionPool.length]?.[1];
     return [
       ...sourceFirstCandidates.map((candidate) => buildExtendedTimeseriesBackfillJob(candidate)),
       ...(scheduledJob ? [scheduledJob] : []),

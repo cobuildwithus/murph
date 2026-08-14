@@ -191,6 +191,13 @@ Updated: 2026-08-14
   but canonicalization must not manufacture a field that a strict pre-epoch Web
   apply parser rejects. If any canonical candidate supplied an epoch, retain the
   maximum observed value so current Web stale-apply fencing remains intact.
+- Reopened schedule-time history keeps stateless priority without absolute
+  ownership of the account-wide lane. When reopened and ordinary inactive
+  coordinates coexist, three hourly slots select reopened work and the fourth
+  selects ordinary work; a single nonempty pool retains every slot. This bounds
+  unrelated ordinary progress to four passes while preserving the one-root
+  limit, active-key suppression, the 396-key query, and independent source-first
+  blood-pressure roots without adding retry history or another state owner.
 
 ## ReviewGPT evidence and finding ledger
 
@@ -242,6 +249,18 @@ Updated: 2026-08-14
   serializing an epoch only when at least one hosted candidate supplied it.
   Production-path proof covers old-Web Apple aliases through JSON wire shape and
   a frozen pre-epoch allowlist, plus the complementary epoch-bearing reply.
+- Valid final ReviewGPT round 4 reviewed exact head
+  `7b1b380cf60ca5c4c3203d63e70744369880b4d8` with `gpt-5-6-pro` for 84
+  minutes 13 seconds and returned `ROUND_OUTCOME: FINDINGS` plus
+  `REVIEW_COMPLETE`. The waited wrapper lost its final CDP capture after the
+  response completed; a read-only export of the existing accepted thread
+  recovered the single marked result without resending the prompt.
+- Accepted: absolute reopened-only schedule-time selection can repeatedly
+  re-enqueue one dead nonretryable coordinate and starve an ordinary epoch-one
+  coordinate indefinitely. The correction derives reopened and ordinary pools
+  from the existing inactive set and reserves every fourth deterministic
+  schedule slot for ordinary work when both exist. It adds no persisted state,
+  queue, retry policy, manager, or second owner.
 
 ## Verification
 
@@ -330,3 +349,14 @@ Updated: 2026-08-14
   - The hosted stale-residue guard, final diff check, and added-line credential,
     privacy, local-home-path, and email-identifier scans pass on the remediated
     candidate before its scoped commit.
+  - Round-3 wire-presence remediation proof passes: the full assistant hosted
+    runtime file passes 104 tests; the frozen pre-epoch Web parser lane passes
+    10 tests with the new exact callback; device-sync and assistant-runtime
+    typechecks pass; and every required GitHub Action passes on exact head
+    `7b1b380cf60ca5c4c3203d63e70744369880b4d8`.
+  - Round-4 fairness proof first reproduced the defect against the uncorrected
+    scheduler: four hourly passes all selected the same dead reopened source.
+    After the stateless selection correction, the regression passes with three
+    reopened attempts followed by ordinary progress on the fourth slot; the
+    complete Junction history file passes 98 tests and the device-sync
+    typecheck passes.
