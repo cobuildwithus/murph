@@ -45,6 +45,13 @@ const HOSTED_DEVICE_SYNC_DENSE_RAW_RETENTION_MAILBOX_ITEM_ID_PREFIX =
   "system_mailbox_item_device_sync_dense_raw_retention";
 const HOSTED_DEVICE_SYNC_DENSE_RAW_RETENTION_MAILBOX_DEDUPE_KEY =
   "device-sync.wake:dense-raw-retention";
+const HOSTED_VAULT_SHARE_PROJECTION_MAILBOX_DEDUPE_KEY_PREFIX =
+  "runtime-control:group-share-projection:";
+
+type HostedSystemMailboxSerializationKey =
+  | HostedSystemMailboxRouteAction
+  | "apply-vault-share-projection"
+  | `run-device-sync-wake:${string}`;
 
 export type HostedSystemMailboxRouteAction =
   | "apply-member-activation"
@@ -57,6 +64,7 @@ export type HostedSystemMailboxRouteAction =
   | "run-clinical-records-sync"
   | "run-device-sync-wake"
   | "run-environment-voice"
+  | "import-reported-daily-metric"
   | "apply-runtime-control-request";
 
 export interface HostedSystemMailboxPendingItem {
@@ -337,25 +345,19 @@ export function findNextHostedSystemMailboxQueueItem(input: {
   now: string;
   state: HostedSystemMailboxState;
 }): HostedSystemMailboxPendingItem | null {
-  if (input.allowedRouteActions) {
-    const item = input.state.pending.find((pending) =>
-      systemMailboxItemRouteActionAllowed(pending, input.allowedRouteActions)
-    ) ?? null;
-    return item
-      && systemMailboxItemIsDue(item, input.now)
-      ? item
-      : null;
-  }
-
-  const blockedRouteActions = new Set<HostedSystemMailboxRouteAction>();
+  const blockedSerializationKeys = new Set<HostedSystemMailboxSerializationKey>();
   for (const item of input.state.pending) {
-    if (blockedRouteActions.has(item.routeAction)) {
+    if (!systemMailboxItemRouteActionAllowed(item, input.allowedRouteActions)) {
+      continue;
+    }
+    const serializationKey = resolveHostedSystemMailboxSerializationKey(item);
+    if (blockedSerializationKeys.has(serializationKey)) {
       continue;
     }
     if (systemMailboxItemIsDue(item, input.now)) {
       return item;
     }
-    blockedRouteActions.add(item.routeAction);
+    blockedSerializationKeys.add(serializationKey);
   }
 
   return null;
@@ -500,6 +502,7 @@ function parseHostedSystemMailboxRouteAction(value: unknown): HostedSystemMailbo
     || value === "run-clinical-records-sync"
     || value === "run-device-sync-wake"
     || value === "run-environment-voice"
+    || value === "import-reported-daily-metric"
     || value === "apply-runtime-control-request"
   ) {
     return value;
@@ -522,6 +525,15 @@ function parseHostedSystemMailboxRecordRequest(
     throw new TypeError("hosted system mailbox postCheckpointRecord must be an object.");
   }
   const record = value as Record<string, unknown>;
+
+  if (record.kind === "vault-share.projection") {
+    assertHostedSystemMailboxRecordKeys(
+      record,
+      ["kind"],
+      "hosted system mailbox vault-share projection postCheckpointRecord",
+    );
+    return { kind: "vault-share.projection" };
+  }
 
   if (record.kind === "clinical-records.outcome-recorded") {
     assertHostedSystemMailboxRecordKeys(
@@ -557,9 +569,13 @@ function parseHostedSystemMailboxRecordRequest(
         "hosted system mailbox postCheckpointRecord records must be an array.",
       );
     }
-    if (record.records.length === 0 && record.nextWakeAt == null) {
+    if (
+      record.records.length === 0
+      && record.nextWakeAt == null
+      && record.retainMailboxItemUntil == null
+    ) {
       throw new TypeError(
-        "hosted system mailbox postCheckpointRecord empty records must include nextWakeAt.",
+        "hosted system mailbox postCheckpointRecord empty records must include a wake.",
       );
     }
     if (record.records.length > HOSTED_DEVICE_SYNC_DIRTY_ACK_BATCH_MAX_RECORDS) {
@@ -576,6 +592,19 @@ function parseHostedSystemMailboxRecordRequest(
               record.nextWakeAt,
               "hosted system mailbox postCheckpointRecord nextWakeAt",
             ),
+          }),
+      ...(record.retainMailboxItemUntil === undefined
+        ? {}
+        : {
+            retainMailboxItemUntil: readNullableIsoTimestamp(
+              record.retainMailboxItemUntil,
+              "hosted system mailbox postCheckpointRecord retainMailboxItemUntil",
+            ),
+          }),
+      ...(record.retainedWake === undefined
+        ? {}
+        : {
+            retainedWake: parseHostedDeviceSyncRetainedWake(record.retainedWake),
           }),
       records: record.records.map((entry, index) =>
         parseHostedDeviceSyncDirtyProcessedPostCheckpointRecord(
@@ -631,6 +660,18 @@ function parseHostedSystemMailboxRecordRequest(
   throw new TypeError("hosted system mailbox postCheckpointRecord kind is invalid.");
 }
 
+function parseHostedDeviceSyncRetainedWake(
+  value: unknown,
+): Extract<HostedExecutionSystemWake, { kind: "device-sync.wake" }> {
+  const wake = parseHostedExecutionWake(value);
+  if (wake.kind !== "device-sync.wake") {
+    throw new TypeError(
+      "hosted system mailbox postCheckpointRecord retainedWake must be a device-sync wake.",
+    );
+  }
+  return wake;
+}
+
 function assertHostedSystemMailboxRecordKeys(
   record: Record<string, unknown>,
   allowedKeys: readonly string[],
@@ -678,22 +719,17 @@ function findNextHostedSystemMailboxQueueItemsForWake(input: {
   allowedRouteActions: readonly HostedSystemMailboxRouteAction[] | null;
   state: HostedSystemMailboxState;
 }): HostedSystemMailboxPendingItem[] {
-  if (input.allowedRouteActions) {
-    const item = input.state.pending.find((pending) =>
-      systemMailboxItemRouteActionAllowed(pending, input.allowedRouteActions)
-    ) ?? null;
-    return item
-      ? [item]
-      : [];
-  }
-
-  const seenRouteActions = new Set<HostedSystemMailboxRouteAction>();
+  const seenSerializationKeys = new Set<HostedSystemMailboxSerializationKey>();
   const items: HostedSystemMailboxPendingItem[] = [];
   for (const item of input.state.pending) {
-    if (seenRouteActions.has(item.routeAction)) {
+    if (!systemMailboxItemRouteActionAllowed(item, input.allowedRouteActions)) {
       continue;
     }
-    seenRouteActions.add(item.routeAction);
+    const serializationKey = resolveHostedSystemMailboxSerializationKey(item);
+    if (seenSerializationKeys.has(serializationKey)) {
+      continue;
+    }
+    seenSerializationKeys.add(serializationKey);
     items.push(item);
   }
   return items;
@@ -704,6 +740,27 @@ function systemMailboxItemRouteActionAllowed(
   allowedRouteActions: readonly HostedSystemMailboxRouteAction[] | null,
 ): boolean {
   return !allowedRouteActions || allowedRouteActions.includes(item.routeAction);
+}
+
+function resolveHostedSystemMailboxSerializationKey(
+  item: HostedSystemMailboxPendingItem,
+): HostedSystemMailboxSerializationKey {
+  if (
+    item.postCheckpointRecord?.kind === "vault-share.projection"
+    || item.mailboxDedupeKey.startsWith(
+      HOSTED_VAULT_SHARE_PROJECTION_MAILBOX_DEDUPE_KEY_PREFIX,
+    )
+  ) {
+    return "apply-vault-share-projection";
+  }
+  if (
+    item.routeAction === "run-device-sync-wake"
+    && item.wake.kind === "device-sync.wake"
+    && item.wake.connectionId
+  ) {
+    return `${item.routeAction}:${item.wake.connectionId}`;
+  }
+  return item.routeAction;
 }
 
 function systemMailboxItemIsDue(

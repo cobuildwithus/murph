@@ -20,6 +20,7 @@ review_gpt_rendered_evidence_paths="${REVIEW_GPT_RENDERED_EVIDENCE_PATHS:-}"
 review_gpt_supplemental_evidence_paths="${REVIEW_GPT_SUPPLEMENTAL_EVIDENCE_PATHS:-}"
 review_gpt_full_review_reason="${REVIEW_GPT_FULL_REVIEW_REASON:-}"
 review_gpt_context_mode="full_snapshot"
+review_gpt_pr_touches_health_commons=0
 
 if [[ -n "$review_gpt_full_review_reason" ]] \
   && [[ -z "${review_gpt_full_review_reason//[[:space:]]/}" ]]; then
@@ -352,10 +353,24 @@ if [[ -n "$review_gpt_pr_ref" ]]; then
       > "$review_gpt_pr_context_dir/pr.diff"
     git diff --name-only "$review_gpt_base_oid...$review_gpt_head_oid" \
       > "$review_gpt_pr_context_dir/changed-files.txt"
+    if git diff --quiet --no-renames \
+      "$review_gpt_base_oid...$review_gpt_head_oid" -- packages/health-commons/; then
+      :
+    else
+      review_gpt_health_commons_diff_status="$?"
+      if [[ "$review_gpt_health_commons_diff_status" != "1" ]]; then
+        echo "Error: could not determine whether the PR touches Health Commons." >&2
+        exit "$review_gpt_health_commons_diff_status"
+      fi
+      review_gpt_pr_touches_health_commons=1
+    fi
   else
     echo "Warning: local PR base/head commits are incomplete; falling back to gh pr diff." >&2
     gh pr diff "$review_gpt_pr_ref" --patch > "$review_gpt_pr_context_dir/pr.diff"
     gh pr diff "$review_gpt_pr_ref" --name-only > "$review_gpt_pr_context_dir/changed-files.txt"
+    # Without both commits, rename detection cannot reliably expose both paths.
+    # Retain the corpus rather than omit relevant context on an uncertain fallback.
+    review_gpt_pr_touches_health_commons=1
   fi
 
   COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS="${COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS:-}"$'\n'"$review_gpt_pr_context_dir/pr-body.md"$'\n'"$review_gpt_pr_context_dir/pr.diff"$'\n'"$review_gpt_pr_context_dir/changed-files.txt"
@@ -508,6 +523,11 @@ else
   export COBUILD_AUDIT_CONTEXT_INCLUDE_CI_DEFAULT='1'
 fi
 export COBUILD_AUDIT_CONTEXT_EXCLUDE_GLOBS="${COBUILD_AUDIT_CONTEXT_BINARY_EXCLUDE_GLOBS:-}"
+if [[ "$review_gpt_context_mode" != "same_thread_delta" ]] \
+  && [[ "$review_gpt_pr_touches_health_commons" != "1" ]]; then
+  COBUILD_AUDIT_CONTEXT_EXCLUDE_GLOBS+=$'\n'"packages/health-commons/content/sources/**"
+  export COBUILD_AUDIT_CONTEXT_EXCLUDE_GLOBS
+fi
 if [[ "$review_gpt_context_mode" != "same_thread_delta" ]]; then
   repo_tools_join_lines COBUILD_AUDIT_CONTEXT_SCAN_SPECS \
     "agent-docs/product-specs" \

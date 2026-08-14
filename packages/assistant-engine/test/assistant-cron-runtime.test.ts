@@ -192,6 +192,9 @@ import {
   executeClaimedAssistantCronJob,
 } from '../src/assistant/cron/execution.ts'
 import {
+  prepareAssistantCronNotificationInput,
+} from '../src/assistant/cron/output-history.ts'
+import {
   readAssistantCronCanonicalRuntimeStore,
   writeAssistantCronCanonicalRuntimeStore,
 } from '../src/assistant/cron/runtime-state.ts'
@@ -214,6 +217,9 @@ import {
   reopenAssistantOnboarding,
   resolveAssistantOnboardingStatePath,
 } from '../src/assistant/onboarding-state.ts'
+import {
+  ASSISTANT_BOUNDED_CONVERSATION_HISTORY_INCOMPLETE_TEXT,
+} from '../src/assistant/shared.ts'
 import type { AssistantExecutionContext } from '../src/assistant/execution-context.ts'
 import type { AssistantNotificationInput } from '../src/assistant/notification-turn.ts'
 import type { AssistantChannelDependencies } from '../src/assistant/channels/types.ts'
@@ -223,12 +229,14 @@ import {
   MURPH_ONBOARDING_GOAL_CHECKIN_AUTOMATION_ID,
 } from '../src/assistant/onboarding-goal-checkin-automation.ts'
 import {
+  MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION_ID,
   MURPH_GROUP_ROOM_MODEL_CONSOLIDATION_AUTOMATION_ID,
   MURPH_GROUP_ROOM_MODEL_CONSOLIDATION_PRIVATE_SUMMARY,
   MURPH_MONTHLY_IMPROVEMENT_COACH_AUTOMATION_ID,
   MURPH_ONBOARDING_FOLLOWUP_AUTOMATION,
   MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID,
   MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_PRIVATE_SUMMARY,
+  MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID,
   MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID,
   MURPH_WEEKLY_HEALTH_RESEARCH_SCOUT_AUTOMATION_ID,
   MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID,
@@ -1057,6 +1065,7 @@ describe('assistant cron runtime orchestration', () => {
     expect(completed.job.state.nextRunAt).toBe('2026-08-10T17:00:00.000Z')
     expect(completed).toMatchObject({
       nextOccurrenceAt: null,
+      occurrenceUnverifiedReason: null,
       occurrenceVerified: true,
     })
 
@@ -1077,6 +1086,7 @@ describe('assistant cron runtime orchestration', () => {
     expect(retrying.job.state.nextRunAt).toBe('2026-08-10T16:30:00.000Z')
     expect(retrying).toMatchObject({
       nextOccurrenceAt: null,
+      occurrenceUnverifiedReason: 'runtime_state_pending',
       occurrenceVerified: false,
     })
   })
@@ -1233,6 +1243,7 @@ describe('assistant cron runtime orchestration', () => {
       'America/New_York',
     )).resolves.toMatchObject({
       nextOccurrenceAt: null,
+      occurrenceUnverifiedReason: 'stale_recurring_occurrence',
       occurrenceVerified: false,
     })
   })
@@ -4035,7 +4046,7 @@ describe('assistant cron runtime orchestration', () => {
     [
       'reminder',
       'Deliver only the agreed reminder purpose, including a consented first-session walkthrough when the automation says so',
-      'Do not ask a proactive repair, accountability, reflection, or follow-up question.',
+      'Do not ask whether the action was completed or add a proactive repair, accountability, or reflection question.',
     ],
     [
       'check_in',
@@ -4106,6 +4117,319 @@ describe('assistant cron runtime orchestration', () => {
       )
     },
   )
+
+  it.each([
+    {
+      automationId: MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION_ID,
+      title: 'Automatic meal closeout',
+    },
+    {
+      automationId: MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID,
+      title: 'Weekly health digest',
+    },
+  ])('does not apply reminder conversation policy to $title', async ({
+    automationId,
+    title,
+  }) => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-08T10:01:00.000Z'))
+    const { vaultRoot } = await createRuntimeContext(
+      `assistant-cron-runtime-managed-non-reminder-${automationId}-`,
+    )
+    await completeAssistantOnboarding({
+      completedAt: '2026-04-08T09:00:00.000Z',
+      reason: 'user_answered',
+      vault: vaultRoot,
+    })
+    getVaultAutomationStore(vaultRoot).push({
+      automationId,
+      continuityPolicy: 'fresh',
+      createdAt: '2026-04-08T08:00:00.000Z',
+      instructions: `Run the managed ${title.toLowerCase()} task.`,
+      route: {
+        channel: 'telegram',
+        deliverySource: null,
+        deliveryTarget: 'room-1',
+        identityId: null,
+        participantId: null,
+        threadId: null,
+        threadIsDirect: true,
+      },
+      schedule: {
+        kind: 'dailyLocal',
+        localTime: '10:00',
+      },
+      status: 'active',
+      supportKind: null,
+      tags: ['murph-managed:test'],
+      title,
+      updatedAt: '2026-04-08T08:00:00.000Z',
+    })
+
+    await expect(processDueAssistantCronJobsLocal({
+      limit: 1,
+      vault: vaultRoot,
+    })).resolves.toEqual({
+      failed: 0,
+      processed: 1,
+      succeeded: 1,
+    })
+
+    expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledWith(
+      expect.objectContaining({
+        instructions: expect.not.stringContaining(
+          'Recurring reminder conversation (engine-supplied',
+        ),
+      }),
+    )
+  })
+
+  it('sends one recurring reminder cadence question and then skips after continued room silence', async () => {
+    vi.useFakeTimers()
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-recurring-reminder-conversation-',
+    )
+    const canonicalJob = await createCanonicalJob(
+      vaultRoot,
+      'room reset reminder',
+    )
+    const automation = findCanonicalAutomation(vaultRoot, canonicalJob.jobId)
+    if (!automation) {
+      throw new Error('Expected the recurring reminder automation to exist.')
+    }
+    automation.instructions = 'Remind the room to do its short reset.'
+    automation.route.threadIsDirect = false
+
+    const providerDecisions = [
+      {
+        kind: 'send_message' as const,
+        privateSummary: 'Sent the current room reminder.',
+        text: 'Quick room reset.',
+      },
+      {
+        kind: 'send_message' as const,
+        privateSummary: 'Sent the cue with one room cadence question.',
+        text: 'Quick room reset. Should I keep these, change them, or pause?',
+      },
+      {
+        kind: 'skip' as const,
+        privateSummary: 'The room cadence question remains unanswered.',
+      },
+    ]
+    let occurrenceIndex = 0
+    cronMocks.sendAssistantMessageLocal.mockImplementation(async (input: {
+      beforeCommit?: (context: {
+        decision: (typeof providerDecisions)[number]
+        deliveryOutcome: ReturnType<typeof buildSentReminderDeliveryOutcome> | null
+        response: string | null
+      }) => Promise<void> | void
+      beforeDelivery?: (context: {
+        decision: (typeof providerDecisions)[number]
+        deliveryOutcome: ReturnType<typeof buildSentReminderDeliveryOutcome> | null
+        response: string | null
+      }) => Promise<void> | void
+      instructions: string
+      onProviderRequestStarted?: () => Promise<void> | void
+    }) => {
+      const notificationInput = await prepareAssistantCronNotificationInput(
+        input as AssistantNotificationInput,
+      )
+      expect(notificationInput.instructions).toContain(
+        'Recurring reminder conversation (engine-supplied',
+      )
+      expect(notificationInput.instructions).toContain(
+        'If no relevant human reply followed and that output already asked whether to keep, change, or pause these interruptions, return `skip`.',
+      )
+      expect(notificationInput.instructions).toContain(
+        'If that output is unavailable under the existing evidence-retention horizon, send the current cue normally.',
+      )
+      expect(notificationInput.instructions).toContain(
+        'In a group, address the room collectively.',
+      )
+      expect(notificationInput.instructions).toContain(
+        'This silence policy does not apply to medication, prescribed treatment, clinician-directed care, clinical monitoring, or safety-critical reminders.',
+      )
+      expect(notificationInput.instructions).toContain(
+        ASSISTANT_BOUNDED_CONVERSATION_HISTORY_INCOMPLETE_TEXT,
+      )
+      expect(notificationInput.instructions).toContain(
+        'inside this provider request\'s engine-supplied recent-conversation-history section',
+      )
+      expect(notificationInput.instructions).toContain(
+        'That marker expires after the provider request that supplied it',
+      )
+      expect(notificationInput.instructions).not.toContain('carry-forward grace')
+      if (occurrenceIndex === 0) {
+        expect(notificationInput.instructions).not.toContain(
+          'Recent outputs from this automation',
+        )
+      } else {
+        expect(notificationInput.instructions).toContain(
+          'Recent outputs from this automation',
+        )
+        expect(notificationInput.instructions).toContain('1. "Quick room reset.')
+      }
+      await input.onProviderRequestStarted?.()
+
+      const decision = providerDecisions[occurrenceIndex]
+      if (!decision) {
+        throw new Error('Unexpected extra reminder occurrence.')
+      }
+      occurrenceIndex += 1
+      if (decision.kind === 'skip') {
+        return {
+          decision,
+          response: null,
+          session: { sessionId: 'session-room-reminder' },
+        }
+      }
+
+      const deliveryOutcome = buildSentReminderDeliveryOutcome(
+        `outbox_room_reminder_${occurrenceIndex}`,
+      )
+      const context = {
+        decision,
+        deliveryOutcome,
+        response: decision.text,
+      }
+      await input.beforeDelivery?.(context)
+      await input.beforeCommit?.(context)
+      return {
+        ...context,
+        session: { sessionId: 'session-room-reminder' },
+      }
+    })
+
+    const occurrenceTimes = [
+      '2026-04-08T10:01:00.000Z',
+      '2026-04-09T10:01:00.000Z',
+      '2026-04-10T10:01:00.000Z',
+    ]
+    for (const occurrenceTime of occurrenceTimes) {
+      vi.setSystemTime(new Date(occurrenceTime))
+      await expect(processDueAssistantCronJobsLocal({
+        limit: 1,
+        vault: vaultRoot,
+      })).resolves.toEqual({
+        failed: 0,
+        processed: 1,
+        succeeded: 1,
+      })
+    }
+
+    expect(occurrenceIndex).toBe(3)
+    await expect(listAssistantCronRuns({
+      job: canonicalJob.jobId,
+      vault: vaultRoot,
+    })).resolves.toMatchObject({
+      runs: [
+        { outcome: 'no_op', response: 'The room cadence question remains unanswered.' },
+        { outcome: 'delivered', response: providerDecisions[1].text },
+        { outcome: 'delivered', response: providerDecisions[0].text },
+      ],
+    })
+  })
+
+  it('keeps a safety-critical recurring reminder sending after unanswered occurrences', async () => {
+    vi.useFakeTimers()
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-safety-reminder-conversation-',
+    )
+    const canonicalJob = await createCanonicalJob(
+      vaultRoot,
+      'prescribed medication reminder',
+    )
+    const automation = findCanonicalAutomation(vaultRoot, canonicalJob.jobId)
+    if (!automation) {
+      throw new Error('Expected the medication reminder automation to exist.')
+    }
+    automation.instructions = 'Remind the member to take their prescribed medication.'
+    automation.supportKind = 'reminder'
+
+    const reminderText = 'Time for your prescribed medication.'
+    const decision = {
+      kind: 'send_message' as const,
+      privateSummary: 'Sent the prescribed medication reminder.',
+      text: reminderText,
+    }
+    let occurrenceIndex = 0
+    cronMocks.sendAssistantMessageLocal.mockImplementation(async (input: {
+      beforeCommit?: (context: {
+        decision: typeof decision
+        deliveryOutcome: ReturnType<typeof buildSentReminderDeliveryOutcome>
+        response: string
+      }) => Promise<void> | void
+      beforeDelivery?: (context: {
+        decision: typeof decision
+        deliveryOutcome: ReturnType<typeof buildSentReminderDeliveryOutcome>
+        response: string
+      }) => Promise<void> | void
+      instructions: string
+      onProviderRequestStarted?: () => Promise<void> | void
+    }) => {
+      const notificationInput = await prepareAssistantCronNotificationInput(
+        input as AssistantNotificationInput,
+      )
+      expect(notificationInput.instructions).toContain(
+        'This silence policy does not apply to medication, prescribed treatment, clinician-directed care, clinical monitoring, or safety-critical reminders.',
+      )
+      expect(notificationInput.instructions).toContain(
+        'For those reminders, send the saved cue normally unless the member explicitly changes or pauses it or an existing authoritative owner supplies a valid skip condition.',
+      )
+      if (occurrenceIndex > 0) {
+        expect(notificationInput.instructions).toContain(
+          'Recent outputs from this automation',
+        )
+        expect(notificationInput.instructions).toContain(reminderText)
+      }
+      await input.onProviderRequestStarted?.()
+
+      occurrenceIndex += 1
+      const deliveryOutcome = buildSentReminderDeliveryOutcome(
+        `outbox_medication_reminder_${occurrenceIndex}`,
+        reminderText,
+      )
+      const context = {
+        decision,
+        deliveryOutcome,
+        response: reminderText,
+      }
+      await input.beforeDelivery?.(context)
+      await input.beforeCommit?.(context)
+      return {
+        ...context,
+        session: { sessionId: 'session-medication-reminder' },
+      }
+    })
+
+    for (const occurrenceTime of [
+      '2026-04-08T10:01:00.000Z',
+      '2026-04-09T10:01:00.000Z',
+      '2026-04-10T10:01:00.000Z',
+    ]) {
+      vi.setSystemTime(new Date(occurrenceTime))
+      await expect(processDueAssistantCronJobsLocal({
+        limit: 1,
+        vault: vaultRoot,
+      })).resolves.toEqual({
+        failed: 0,
+        processed: 1,
+        succeeded: 1,
+      })
+    }
+
+    expect(occurrenceIndex).toBe(3)
+    await expect(listAssistantCronRuns({
+      job: canonicalJob.jobId,
+      vault: vaultRoot,
+    })).resolves.toMatchObject({
+      runs: [
+        { outcome: 'delivered', response: reminderText },
+        { outcome: 'delivered', response: reminderText },
+        { outcome: 'delivered', response: reminderText },
+      ],
+    })
+  })
 
   it('runs retained Linq overnight maintenance without entering its audience', async () => {
     const { vaultRoot } = await createRuntimeContext(
@@ -10139,171 +10463,6 @@ describe('assistant cron runtime orchestration', () => {
     expect(cronMocks.sendAssistantMessageLocal).not.toHaveBeenCalled()
   })
 
-  it('executes existing email thread routes only when a sender identity is present', async () => {
-    vi.useFakeTimers()
-    vi.setSystemTime(new Date('2026-04-08T10:20:00.000Z'))
-    const { vaultRoot } = await createRuntimeContext(
-      'assistant-cron-runtime-email-thread-identity-',
-    )
-    getVaultAutomationStore(vaultRoot).push({
-      automationId: 'automation-email-thread-identity',
-      continuityPolicy: 'fresh',
-      createdAt: '2026-04-08T08:00:00.000Z',
-      instructions: 'Reply to the existing email thread.',
-      route: {
-        channel: 'email',
-        deliverySource: null,
-        deliveryTarget: null,
-        identityId: 'agentmail-inbox-1',
-        participantId: null,
-        threadId: 'email-thread-123',
-      },
-      schedule: {
-        at: '2026-04-08T10:00:00.000Z',
-        kind: 'at',
-      },
-      slug: 'email-thread-identity-reminder',
-      status: 'active',
-      summary: null,
-      tags: ['assistant', 'scheduled'],
-      title: 'Email thread identity reminder',
-      updatedAt: '2026-04-08T08:00:00.000Z',
-    })
-
-    const summary = await processDueAssistantCronJobsLocal({
-      limit: 1,
-      vault: vaultRoot,
-    })
-
-    expect(summary).toEqual({
-      failed: 0,
-      processed: 1,
-      succeeded: 1,
-    })
-    expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledWith(
-      expect.objectContaining({
-        bindingDeliveryTarget: 'email-thread-123',
-        channel: 'email',
-        deliveryKind: 'thread',
-        deliveryTarget: null,
-        identityId: 'agentmail-inbox-1',
-        participantId: null,
-        threadId: 'email-thread-123',
-      }),
-    )
-  })
-
-  it('executes existing local email participant routes when a sender identity is present', async () => {
-    vi.useFakeTimers()
-    vi.setSystemTime(new Date('2026-04-08T10:20:00.000Z'))
-    const { vaultRoot } = await createRuntimeContext(
-      'assistant-cron-runtime-email-participant-identity-',
-    )
-    getVaultAutomationStore(vaultRoot).push({
-      automationId: 'automation-email-participant-identity',
-      continuityPolicy: 'fresh',
-      createdAt: '2026-04-08T08:00:00.000Z',
-      instructions: 'Send the email participant reminder.',
-      route: {
-        channel: 'email',
-        deliverySource: null,
-        deliveryTarget: null,
-        identityId: 'agentmail-inbox-1',
-        participantId: 'recipient@example.test',
-        threadId: null,
-      },
-      schedule: {
-        at: '2026-04-08T10:00:00.000Z',
-        kind: 'at',
-      },
-      slug: 'email-participant-identity-reminder',
-      status: 'active',
-      summary: null,
-      tags: ['assistant', 'scheduled'],
-      title: 'Email participant identity reminder',
-      updatedAt: '2026-04-08T08:00:00.000Z',
-    })
-
-    const summary = await processDueAssistantCronJobsLocal({
-      deliveryDispatchMode: 'queue-only',
-      limit: 1,
-      vault: vaultRoot,
-    })
-
-    expect(summary).toEqual({
-      failed: 0,
-      processed: 1,
-      succeeded: 1,
-    })
-    expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledWith(
-      expect.objectContaining({
-        bindingDeliveryTarget: 'recipient@example.test',
-        channel: 'email',
-        deliveryDispatchMode: 'queue-only',
-        deliveryKind: 'participant',
-        deliveryTarget: null,
-        identityId: 'agentmail-inbox-1',
-        participantId: 'recipient@example.test',
-        threadId: null,
-      }),
-    )
-  })
-
-  it('executes existing local queue-only email thread routes when a sender identity is present', async () => {
-    vi.useFakeTimers()
-    vi.setSystemTime(new Date('2026-04-08T10:20:00.000Z'))
-    const { vaultRoot } = await createRuntimeContext(
-      'assistant-cron-runtime-email-thread-identity-queue-only-',
-    )
-    getVaultAutomationStore(vaultRoot).push({
-      automationId: 'automation-email-thread-identity-queue-only',
-      continuityPolicy: 'fresh',
-      createdAt: '2026-04-08T08:00:00.000Z',
-      instructions: 'Reply to the existing email thread.',
-      route: {
-        channel: 'email',
-        deliverySource: null,
-        deliveryTarget: null,
-        identityId: 'agentmail-inbox-1',
-        participantId: null,
-        threadId: 'email-thread-123',
-      },
-      schedule: {
-        at: '2026-04-08T10:00:00.000Z',
-        kind: 'at',
-      },
-      slug: 'email-thread-identity-queue-only-reminder',
-      status: 'active',
-      summary: null,
-      tags: ['assistant', 'scheduled'],
-      title: 'Email thread identity queue-only reminder',
-      updatedAt: '2026-04-08T08:00:00.000Z',
-    })
-
-    const summary = await processDueAssistantCronJobsLocal({
-      deliveryDispatchMode: 'queue-only',
-      limit: 1,
-      vault: vaultRoot,
-    })
-
-    expect(summary).toEqual({
-      failed: 0,
-      processed: 1,
-      succeeded: 1,
-    })
-    expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledWith(
-      expect.objectContaining({
-        bindingDeliveryTarget: 'email-thread-123',
-        channel: 'email',
-        deliveryDispatchMode: 'queue-only',
-        deliveryKind: 'thread',
-        deliveryTarget: null,
-        identityId: 'agentmail-inbox-1',
-        threadId: 'email-thread-123',
-      }),
-    )
-  })
-
   it('rejects email participant routes before hosted queue-only execution', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-04-08T10:20:00.000Z'))
@@ -10319,7 +10478,7 @@ describe('assistant cron runtime orchestration', () => {
         channel: 'email',
         deliverySource: null,
         deliveryTarget: null,
-        identityId: 'agentmail-inbox-1',
+        identityId: 'hosted-email-identity-1',
         participantId: 'recipient@example.test',
         threadId: null,
       },
@@ -10384,7 +10543,7 @@ describe('assistant cron runtime orchestration', () => {
         channel: 'email',
         deliverySource: null,
         deliveryTarget: null,
-        identityId: 'agentmail-inbox-1',
+        identityId: 'hosted-email-identity-1',
         participantId: null,
         threadId: 'email-thread-123',
       },
@@ -10432,98 +10591,6 @@ describe('assistant cron runtime orchestration', () => {
         }),
       ],
     })
-  })
-
-  it('rejects existing explicit email targets without a usable sender identity outside hosted execution', async () => {
-    vi.useFakeTimers()
-    vi.setSystemTime(new Date('2026-04-08T10:20:00.000Z'))
-
-    for (const scenario of [
-      {
-        automationId: 'automation-explicit-email-target-local',
-        identityId: null,
-        processInput: {},
-        vaultPrefix: 'assistant-cron-runtime-explicit-email-target-local-',
-      },
-      {
-        automationId: 'automation-explicit-email-target-queue-only-local',
-        identityId: null,
-        processInput: { deliveryDispatchMode: 'queue-only' as const },
-        vaultPrefix: 'assistant-cron-runtime-explicit-email-target-queue-only-local-',
-      },
-      {
-        automationId: 'automation-explicit-email-target-private-identity-local',
-        identityId: 'hid_email_identity',
-        processInput: {},
-        vaultPrefix: 'assistant-cron-runtime-explicit-email-target-private-identity-local-',
-      },
-    ]) {
-      const { vaultRoot } = await createRuntimeContext(scenario.vaultPrefix)
-      getVaultAutomationStore(vaultRoot).push({
-        automationId: scenario.automationId,
-        continuityPolicy: 'fresh',
-        createdAt: '2026-04-08T08:00:00.000Z',
-        instructions: 'Send the explicit email reminder.',
-        route: {
-          channel: 'email',
-          deliverySource: null,
-          deliveryTarget: 'team@example.com',
-          identityId: scenario.identityId,
-          participantId: null,
-          threadId: null,
-        },
-        schedule: {
-          at: '2026-04-08T10:00:00.000Z',
-          kind: 'at',
-        },
-        slug: 'explicit-email-target-local-reminder',
-        status: 'active',
-        summary: null,
-        tags: ['assistant', 'scheduled'],
-        title: 'Explicit email target local reminder',
-        updatedAt: '2026-04-08T08:00:00.000Z',
-      })
-
-      const events: unknown[] = []
-      const summary = await processDueAssistantCronJobsLocal({
-        ...scenario.processInput,
-        limit: 1,
-        onEvent: (event) => {
-          events.push(event)
-        },
-        vault: vaultRoot,
-      })
-
-      expect(summary).toEqual({
-        failed: 1,
-        processed: 1,
-        succeeded: 0,
-      })
-      expect(cronMocks.sendAssistantMessageLocal).not.toHaveBeenCalled()
-      expect(
-        (
-          await listAssistantCronRuns({
-            job: scenario.automationId,
-            vault: vaultRoot,
-          })
-        ).runs[0],
-      ).toMatchObject({
-        error: expect.stringContaining('sender identity'),
-        status: 'failed',
-      })
-      expect(events).toEqual(
-        expect.arrayContaining([
-          expect.objectContaining({
-            failureContext: expect.objectContaining({
-              errorCode: 'ASSISTANT_EMAIL_IDENTITY_REQUIRED',
-              errorPresent: true,
-              runOutcome: 'failed',
-            }),
-            type: 'cron.job.completed',
-          }),
-        ]),
-      )
-    }
   })
 
   it('executes existing explicit hosted email targets without a sender identity', async () => {
@@ -10915,7 +10982,7 @@ describe('assistant cron runtime orchestration', () => {
     )?.status).toBe('archived')
   })
 
-  it('fails an existing email thread-locator-only automation before running the assistant turn', async () => {
+  it('fails an existing local email automation before running the assistant turn', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-06-19T15:00:05.000Z'))
     cronMocks.loadVault.mockResolvedValue({
@@ -10924,9 +10991,9 @@ describe('assistant cron runtime orchestration', () => {
       },
     })
     const { vaultRoot } = await createRuntimeContext(
-      'assistant-cron-runtime-email-thread-only-',
+      'assistant-cron-runtime-local-email-unsupported-',
     )
-    const automationId = 'automation_email_thread_only_reminder'
+    const automationId = 'automation_local_email_unsupported'
     getVaultAutomationStore(vaultRoot).push({
       automationId,
       continuityPolicy: 'fresh',
@@ -10935,72 +11002,8 @@ describe('assistant cron runtime orchestration', () => {
       route: {
         channel: 'email',
         deliverySource: null,
-        deliveryTarget: null,
+        deliveryTarget: 'recipient@example.test',
         identityId: null,
-        participantId: null,
-        threadId: 'h1_333333333333333333333333',
-      },
-      schedule: {
-        expression: '0 11 * * 5',
-        kind: 'cron',
-      },
-      slug: 'email-thread-only-reminder',
-      status: 'active',
-      summary: null,
-      tags: ['assistant', 'scheduled'],
-      title: 'Email thread-only reminder',
-      updatedAt: '2026-06-19T14:56:00.000Z',
-    })
-
-    const summary = await processDueAssistantCronJobsLocal({
-      limit: 1,
-      vault: vaultRoot,
-    })
-
-    expect(summary).toEqual({
-      failed: 1,
-      processed: 1,
-      succeeded: 0,
-    })
-    expect(cronMocks.sendAssistantMessageLocal).not.toHaveBeenCalled()
-    await expect(
-      listAssistantCronRuns({
-        job: automationId,
-        vault: vaultRoot,
-      }),
-    ).resolves.toMatchObject({
-      jobId: automationId,
-      runs: [
-        expect.objectContaining({
-          error: expect.stringContaining('Email assistant cron jobs require an explicit delivery target'),
-          status: 'failed',
-        }),
-      ],
-    })
-  })
-
-  it('fails an existing email placeholder-target automation before running the assistant turn', async () => {
-    vi.useFakeTimers()
-    vi.setSystemTime(new Date('2026-06-19T15:00:05.000Z'))
-    cronMocks.loadVault.mockResolvedValue({
-      metadata: {
-        timezone: 'America/New_York',
-      },
-    })
-    const { vaultRoot } = await createRuntimeContext(
-      'assistant-cron-runtime-email-placeholder-target-',
-    )
-    const automationId = 'automation_email_placeholder_target_reminder'
-    getVaultAutomationStore(vaultRoot).push({
-      automationId,
-      continuityPolicy: 'fresh',
-      createdAt: '2026-06-19T14:56:00.000Z',
-      instructions: 'Send the 11am reminder.',
-      route: {
-        channel: 'email',
-        deliverySource: null,
-        deliveryTarget: 'h1_333333333333333333333333',
-        identityId: 'identity_email_sender_1',
         participantId: null,
         threadId: null,
       },
@@ -11008,11 +11011,11 @@ describe('assistant cron runtime orchestration', () => {
         expression: '0 11 * * 5',
         kind: 'cron',
       },
-      slug: 'email-placeholder-target-reminder',
+      slug: 'local-email-unsupported',
       status: 'active',
       summary: null,
       tags: ['assistant', 'scheduled'],
-      title: 'Email placeholder-target reminder',
+      title: 'Unsupported local email reminder',
       updatedAt: '2026-06-19T14:56:00.000Z',
     })
 
@@ -11037,7 +11040,7 @@ describe('assistant cron runtime orchestration', () => {
       runs: [
         expect.objectContaining({
           error: expect.stringContaining(
-            'Email assistant cron jobs cannot use redacted conversation placeholders as delivery targets',
+            'Local email automation delivery is not supported',
           ),
           status: 'failed',
         }),
@@ -11255,6 +11258,29 @@ describe('assistant cron runtime orchestration', () => {
     )
     expect(failed.state.nextRunAt).toBe('2026-05-05T16:00:00.000Z')
     expect(failed.state.consecutiveFailures).toBe(0)
+    await expect(
+      listAssistantCronRuns({
+        job: 'automation-kl-midnight',
+        vault: vaultRoot,
+      }),
+    ).resolves.toMatchObject({
+      runs: [
+        expect.objectContaining({
+          error:
+            'Linq request POST /chats/[chat]/messages failed with HTTP 400.',
+          finishedAt: '2026-05-04T16:00:20.000Z',
+          outcome: 'failed',
+          reason: 'delivery_failed',
+        }),
+      ],
+    })
+    const failedNotificationInput = cronMocks.sendAssistantMessageLocal.mock
+      .calls[0]?.[0] as AssistantNotificationInput
+    await expect(
+      prepareAssistantCronNotificationInput(failedNotificationInput, {
+        sessionId: 'session-default',
+      }),
+    ).resolves.toBe(failedNotificationInput)
   })
 
   it('passes an explicit participant delivery target for a source-backed mixed Linq route', async () => {
@@ -11486,6 +11512,29 @@ describe('assistant cron runtime orchestration', () => {
     expect(sent.state.lastError).toBeNull()
     expect(sent.state.consecutiveFailures).toBe(0)
     expect(sent.state.nextRunAt).toBe('2026-05-05T16:00:00.000Z')
+    await expect(
+      listAssistantCronRuns({
+        job: 'automation-kl-pending-sent',
+        vault: vaultRoot,
+      }),
+    ).resolves.toMatchObject({
+      runs: [
+        expect.objectContaining({
+          error: null,
+          finishedAt: '2026-05-04T16:00:20.000Z',
+          outcome: 'delivered',
+          reason: 'delivery_sent',
+        }),
+      ],
+    })
+    const sentNotificationInput = cronMocks.sendAssistantMessageLocal.mock
+      .calls[0]?.[0] as AssistantNotificationInput
+    const sentProjection = await prepareAssistantCronNotificationInput(
+      sentNotificationInput,
+      { sessionId: 'session-default' },
+    )
+    expect(sentProjection).not.toBe(sentNotificationInput)
+    expect(sentProjection.instructions).toContain('Remember to sleep.')
   })
 
   it('retries required one-shot delivery past the generic stale window and archives only after sent', async () => {
@@ -12789,6 +12838,28 @@ async function createCanonicalJob(
     threadIsDirect: true,
     vault: vaultRoot,
   })
+}
+
+function buildSentReminderDeliveryOutcome(
+  intentId: string,
+  response = 'Quick room reset.',
+) {
+  return {
+    delivery: {
+      channel: 'telegram' as const,
+      idempotencyKey: null,
+      messageLength: response.length,
+      providerMessageId: intentId,
+      providerThreadId: 'room-1',
+      sentAt: new Date().toISOString(),
+      target: 'room-1',
+      targetKind: 'thread' as const,
+    },
+    intentId,
+    kind: 'sent' as const,
+    media: [],
+    session: { sessionId: 'session-room-reminder' },
+  }
 }
 
 async function claimFirstCanonicalCronJob(vaultRoot: string): Promise<{

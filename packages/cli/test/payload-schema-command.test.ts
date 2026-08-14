@@ -351,6 +351,41 @@ test('payload-schema commands emit import body schemas without requiring vault s
     ...validSymptomRow,
     dayKey: '2026-03-12',
   }, false)
+
+  const activitySession = requireData(
+    (await runInProcessJsonCli<PayloadSchemaResult>(cli, [
+      'event',
+      'payload-schema',
+      '--for',
+      'import-jsonl',
+      '--kind',
+      'activity_session',
+    ])).envelope,
+  )
+  const activitySessionRow = {
+    kind: 'activity_session',
+    occurredAt: '2026-03-12T11:15:00.000Z',
+    title: 'Strength training',
+    activityType: 'strength-training',
+    workout: {
+      exercises: [
+        {
+          name: 'Squat',
+          order: 1,
+          sets: [{ order: 1, reps: 5 }],
+        },
+      ],
+    },
+  }
+  assert.equal(
+    (activitySession.schema.required as unknown[] | undefined)?.includes('durationMinutes'),
+    true,
+  )
+  assertJsonSchemaValidation(activitySession.schema, activitySessionRow, false)
+  assertJsonSchemaValidation(activitySession.schema, {
+    ...activitySessionRow,
+    durationMinutes: 45,
+  }, true)
 })
 
 test('payload-schema discovery copy is limited to supported import nouns', async () => {

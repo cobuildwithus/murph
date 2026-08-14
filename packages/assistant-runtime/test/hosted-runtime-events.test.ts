@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   buildHostedExecutionAssistantNotificationRequestedWake,
+  buildHostedExecutionDailyMetricReportedWake,
   buildHostedExecutionLinqConversationMessageWake,
   buildHostedExecutionMemberActivatedWake,
   buildHostedExecutionMemberChannelsUpdatedWake,
@@ -3334,6 +3335,75 @@ describe("executeHostedMailboxEvent", () => {
       postCheckpointRecord: null,
       redactedLogEntries: [],
     });
+  });
+
+  it("keeps maintenance requests pending through a post-checkpoint vault-share projection", async () => {
+    const wake = buildHostedExecutionRuntimeControlWake({
+      eventId: "runtime-control:group-share-projection:synthetic",
+      kind: "runtime.maintenance-requested",
+      occurredAt: "2026-04-08T00:03:00.000Z",
+      userId: "member_123",
+    });
+
+    const result = await executeHostedMailboxEvent({
+      wake,
+      executionContext,
+      runtime: createRuntime(),
+      runtimeEnv: {},
+      vaultRoot: "/tmp/assistant-runtime-events",
+    });
+
+    expect(mocks.sendAssistantNotification).not.toHaveBeenCalled();
+    expect(result).toEqual(expect.objectContaining({
+      conversationMetrics: null,
+      mailboxLane: "runtime-control",
+      nextWakeAt: null,
+      postCheckpointRecord: { kind: "vault-share.projection" },
+      redactedLogEntries: [],
+    }));
+  });
+
+  it("refreshes granted shares after a reported daily metric checkpoints", async () => {
+    const result = await executeHostedMailboxEvent({
+      wake: buildHostedExecutionDailyMetricReportedWake({
+        date: "2026-08-13",
+        eventId: "daily_metric_report_synthetic",
+        memberId: "member_123",
+        metric: "steps",
+        occurredAt: "2026-08-13T20:00:00.000Z",
+        unit: "count",
+        value: 8_000,
+      }),
+      executionContext,
+      runtime: createRuntime(),
+      runtimeEnv: {},
+      vaultRoot: "/tmp/assistant-runtime-events",
+    });
+
+    expect(result).toEqual(expect.objectContaining({
+      conversationMetrics: null,
+      mailboxLane: "runtime-control",
+      nextWakeAt: null,
+      postCheckpointRecord: { kind: "vault-share.projection" },
+      redactedLogEntries: [],
+    }));
+  });
+
+  it("keeps unrelated maintenance requests as ordinary no-op control work", async () => {
+    const result = await executeHostedMailboxEvent({
+      wake: buildHostedExecutionRuntimeControlWake({
+        eventId: "runtime-control:maintenance:unrelated",
+        kind: "runtime.maintenance-requested",
+        occurredAt: "2026-04-08T00:03:00.000Z",
+        userId: "member_123",
+      }),
+      executionContext,
+      runtime: createRuntime(),
+      runtimeEnv: {},
+      vaultRoot: "/tmp/assistant-runtime-events",
+    });
+
+    expect(result.postCheckpointRecord).toBeNull();
   });
 
 });

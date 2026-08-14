@@ -23,6 +23,9 @@ import type {
 import type { AssistantUsageAttribution } from '../usage-attribution.js'
 import type { AssistantActiveTurnLiveProviderSteering } from '../turn-input.js'
 import type {
+  AssistantAcceptedTurnInputReferenceWindow,
+} from '../active-turn-input-journal.js'
+import type {
   AssistantProgressDelivery,
   AssistantTurnProductFeedbackRecorder,
 } from '../turn-progress.js'
@@ -135,6 +138,7 @@ export interface AssistantProviderTurn {
   activeTurnId?: string | null
   activeTurnSessionId?: string | null
   allowFinishWithoutReply?: boolean | null
+  automationRelativeDateReferenceWindow?: AssistantAcceptedTurnInputReferenceWindow | null
   authorizeAcceptedMessageTarget?: AssistantAcceptedMessageTargetAuthorizer | null
   abortSignal?: AbortSignal
   codexConfigOverrides?: readonly string[] | null

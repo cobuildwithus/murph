@@ -21,7 +21,13 @@ import {
   type HostedOnboardingReadClient,
   normalizeNullableString,
 } from "./shared";
-import { provisionActiveHostedDomainRootEnvelopeForUserOnly } from "../hosted-crypto/domain-root-store";
+import {
+  provisionActiveHostedDomainRootEnvelopeForUserOnly,
+  revalidatePreparedHostedDomainRootForWebTx,
+  type PreparedHostedDomainRootForWeb,
+} from "../hosted-crypto/domain-root-store";
+import { readHostedUserSecureBoxStringRootReference } from "../hosted-crypto/secure-box";
+import type { PreparedHostedWebEncryptionRoot } from "../hosted-web/encryption";
 
 export interface HostedMemberIdentityState {
   maskedPhoneNumberHint: string | null;
@@ -53,9 +59,37 @@ export interface HostedMemberIdentityLookup {
   matchedBy: HostedMemberIdentityLookupMatch;
 }
 
+const hostedMemberIdentityCoreLookupSelect =
+  Prisma.validator<Prisma.HostedMemberIdentitySelect>()({
+    memberId: true,
+    member: {
+      select: {
+        billingStatus: true,
+        createdAt: true,
+        id: true,
+        suspendedAt: true,
+        updatedAt: true,
+      },
+    },
+  });
+
+export interface HostedMemberIdentityCoreLookup {
+  core: Prisma.HostedMemberIdentityGetPayload<{
+    select: typeof hostedMemberIdentityCoreLookupSelect;
+  }>["member"];
+  matchedBy: "phoneNumber";
+}
+
+type HostedMemberIdentityCoreLookupRecord =
+  Prisma.HostedMemberIdentityGetPayload<{
+    select: typeof hostedMemberIdentityCoreLookupSelect;
+  }>;
+
 type HostedMemberIdentityRecordWithMember = HostedMemberIdentity & {
   member: HostedMember;
 };
+
+export type HostedMemberIdentityRecord = HostedMemberIdentity;
 
 // Lookup helpers return the matched identity slice with the core row so auth
 // and onboarding flows do not need to round-trip through readHostedMemberIdentity.
@@ -65,6 +99,7 @@ export interface HostedMemberIdentityWriteInput {
   memberId: string;
   phoneLookupKey: string | null;
   phoneNumberVerifiedAt: Date | null;
+  preparedControlRoot?: PreparedHostedDomainRootForWeb;
   prisma: Prisma.TransactionClient;
   phoneNumber: string | null;
   privyUserId: string | null;
@@ -125,14 +160,36 @@ export async function lookupHostedMemberIdentityByPhoneLookupKey(input: {
     : null;
 }
 
-export async function lookupHostedMemberIdentityByPhoneNumber(input: {
+type HostedMemberIdentityByPhoneNumberInput = {
   phoneNumber: string;
   prisma: HostedOnboardingReadClient;
-}): Promise<HostedMemberIdentityLookup | null> {
+};
+
+export async function lookupHostedMemberIdentityByPhoneNumber(
+  input: HostedMemberIdentityByPhoneNumberInput & { projection: "core" },
+): Promise<HostedMemberIdentityCoreLookup | null>;
+export async function lookupHostedMemberIdentityByPhoneNumber(
+  input: HostedMemberIdentityByPhoneNumberInput,
+): Promise<HostedMemberIdentityLookup | null>;
+export async function lookupHostedMemberIdentityByPhoneNumber(
+  input: HostedMemberIdentityByPhoneNumberInput & { projection?: "core" },
+): Promise<HostedMemberIdentityCoreLookup | HostedMemberIdentityLookup | null> {
   const phoneLookupKeys = createHostedPhoneLookupKeyReadCandidates(input.phoneNumber);
 
   if (phoneLookupKeys.length === 0) {
     return null;
+  }
+
+  if (input.projection === "core") {
+    const records = await input.prisma.hostedMemberIdentity.findMany({
+      where: {
+        phoneLookupKey: {
+          in: phoneLookupKeys,
+        },
+      },
+      select: hostedMemberIdentityCoreLookupSelect,
+    });
+    return resolveHostedMemberIdentityCoreLookup(records, "phoneNumber");
   }
 
   const identityRecords = await input.prisma.hostedMemberIdentity.findMany({
@@ -149,6 +206,50 @@ export async function lookupHostedMemberIdentityByPhoneNumber(input: {
   return resolveHostedMemberIdentityLookup(identityRecords, "phoneNumber", input.prisma);
 }
 
+/**
+ * Reads only blind-index ownership for conflict suppression. Callers that need
+ * no private identity fields must not decrypt a second member under their
+ * transaction-local prepared-root scope.
+ */
+export async function lookupHostedMemberIdByPhoneNumber(input: {
+  phoneNumber: string;
+  prisma: HostedOnboardingReadClient;
+}): Promise<string | null> {
+  const phoneLookupKeys = createHostedPhoneLookupKeyReadCandidates(input.phoneNumber);
+
+  if (phoneLookupKeys.length === 0) {
+    return null;
+  }
+
+  const identityRecords = await input.prisma.hostedMemberIdentity.findMany({
+    where: {
+      phoneLookupKey: {
+        in: phoneLookupKeys,
+      },
+    },
+    select: {
+      memberId: true,
+    },
+  });
+  const memberIds = new Set(identityRecords.map((identity) => identity.memberId));
+
+  if (memberIds.size > 1) {
+    throw hostedOnboardingError({
+      code: "HOSTED_MEMBER_IDENTITY_LOOKUP_AMBIGUOUS",
+      details: {
+        matchCount: memberIds.size,
+        matchedBy: "phoneNumber",
+      },
+      httpStatus: 500,
+      message:
+        "Hosted member identity lookup matched multiple accounts during blind-index rotation. Repair the duplicate binding before retrying.",
+      retryable: true,
+    });
+  }
+
+  return memberIds.values().next().value ?? null;
+}
+
 export async function readHostedMemberIdentity(input: {
   memberId: string;
   prisma: HostedOnboardingReadClient;
@@ -162,11 +263,98 @@ export async function readHostedMemberIdentity(input: {
   return identityRecord ? await projectHostedMemberIdentityState(identityRecord, input.prisma) : null;
 }
 
+/**
+ * Reads the exact encrypted identity row without projecting private fields.
+ * Prepared webhook paths use this to bind an outside-transaction projection
+ * to the row re-read while the member lock is held.
+ */
+export async function readHostedMemberIdentityRecord(input: {
+  memberId: string;
+  prisma: HostedOnboardingReadClient;
+}): Promise<HostedMemberIdentityRecord | null> {
+  return input.prisma.hostedMemberIdentity.findUnique({
+    where: {
+      memberId: input.memberId,
+    },
+  });
+}
+
+export async function lockHostedMemberIdentityStateTx(input: {
+  memberId: string;
+  prisma: Prisma.TransactionClient;
+}): Promise<void> {
+  await input.prisma.$queryRaw`
+    SELECT 1
+    FROM "hosted_member_identity"
+    WHERE "member_id" = ${input.memberId}
+    FOR UPDATE
+  `;
+}
+
+const HOSTED_MEMBER_IDENTITY_RECORD_KEYS = [
+  "createdAt",
+  "maskedPhoneNumberHint",
+  "memberId",
+  "phoneLookupKey",
+  "phoneNumberEncrypted",
+  "phoneNumberVerifiedAt",
+  "privyUserIdEncrypted",
+  "privyUserLookupKey",
+  "signupPhoneCodeSendAttemptId",
+  "signupPhoneCodeSendAttemptStartedAt",
+  "signupPhoneCodeSentAt",
+  "signupPhoneNumberEncrypted",
+  "updatedAt",
+  "walletAddressEncrypted",
+  "walletAddressLookupKey",
+  "walletChainType",
+  "walletCreatedAt",
+  "walletProvider",
+] as const satisfies readonly (keyof HostedMemberIdentityRecord)[];
+
+export function hostedMemberIdentityRecordsEqual(
+  current: HostedMemberIdentityRecord | null,
+  prepared: HostedMemberIdentityRecord | null,
+): boolean {
+  if (!current || !prepared) {
+    return current === prepared;
+  }
+  return HOSTED_MEMBER_IDENTITY_RECORD_KEYS.every((key) => {
+    const currentValue = current[key];
+    const preparedValue = prepared[key];
+    return currentValue instanceof Date && preparedValue instanceof Date
+      ? currentValue.getTime() === preparedValue.getTime()
+      : currentValue === preparedValue;
+  });
+}
+
+export function readHostedMemberIdentityControlRootKeyIds(
+  identity: HostedMemberIdentityRecord | null,
+): string[] {
+  if (!identity) {
+    return [];
+  }
+  const encryptedValues = [
+    identity.phoneNumberEncrypted,
+    identity.privyUserIdEncrypted,
+    identity.signupPhoneNumberEncrypted,
+    identity.walletAddressEncrypted,
+  ];
+  return [...new Set(encryptedValues.flatMap((value) => {
+    const reference = readHostedUserSecureBoxStringRootReference({
+      lane: "hosted-member-private-field",
+      value,
+    });
+    return reference ? [reference.rootKeyId] : [];
+  }))];
+}
+
 export async function upsertHostedMemberIdentity(
   input: HostedMemberIdentityWriteInput,
 ): Promise<HostedMemberIdentityState> {
-  await ensureHostedMemberIdentityControlRootTx({
+  const preparedRoot = await resolveHostedMemberIdentityControlRootTx({
     memberId: input.memberId,
+    preparedControlRoot: input.preparedControlRoot,
     prisma: input.prisma,
   });
 
@@ -174,8 +362,8 @@ export async function upsertHostedMemberIdentity(
     where: {
       memberId: input.memberId,
     },
-    create: await buildHostedMemberIdentityCreateData(input),
-    update: await buildHostedMemberIdentityUpdateData(input),
+    create: await buildHostedMemberIdentityCreateData(input, preparedRoot),
+    update: await buildHostedMemberIdentityUpdateData(input, preparedRoot),
   });
 
   return projectHostedMemberIdentityState(identity, input.prisma);
@@ -184,13 +372,14 @@ export async function upsertHostedMemberIdentity(
 export async function tryCreateHostedMemberIdentity(
   input: HostedMemberIdentityWriteInput,
 ): Promise<boolean> {
-  await ensureHostedMemberIdentityControlRootTx({
+  const preparedRoot = await resolveHostedMemberIdentityControlRootTx({
     memberId: input.memberId,
+    preparedControlRoot: input.preparedControlRoot,
     prisma: input.prisma,
   });
 
   const result = await input.prisma.hostedMemberIdentity.createMany({
-    data: await buildHostedMemberIdentityCreateData(input),
+    data: await buildHostedMemberIdentityCreateData(input, preparedRoot),
     skipDuplicates: true,
   });
 
@@ -212,7 +401,7 @@ export async function writeHostedMemberSignupPhoneState(
     data.signupPhoneCodeSentAt = input.signupPhoneCodeSentAt;
   }
   if (input.signupPhoneNumber !== undefined) {
-    await ensureHostedMemberIdentityControlRootTx({
+    await resolveHostedMemberIdentityControlRootTx({
       memberId: input.memberId,
       prisma: input.prisma,
     });
@@ -332,25 +521,61 @@ async function resolveHostedMemberIdentityLookup(
   return projectHostedMemberIdentityLookup(identityRecord, matchedBy, prisma);
 }
 
+function resolveHostedMemberIdentityCoreLookup(
+  records: readonly HostedMemberIdentityCoreLookupRecord[],
+  matchedBy: "phoneNumber",
+): HostedMemberIdentityCoreLookup | null {
+  const coreByMemberId = new Map<string, HostedMemberIdentityCoreLookup["core"]>();
+  for (const record of records) {
+    coreByMemberId.set(record.memberId, record.member);
+  }
+  if (coreByMemberId.size === 0) {
+    return null;
+  }
+  if (coreByMemberId.size !== 1) {
+    throw hostedOnboardingError({
+      code: "HOSTED_MEMBER_IDENTITY_LOOKUP_AMBIGUOUS",
+      details: {
+        matchCount: coreByMemberId.size,
+        matchedBy,
+      },
+      httpStatus: 500,
+      message:
+        "Hosted member identity lookup matched multiple accounts during blind-index rotation. Repair the duplicate binding before retrying.",
+      retryable: true,
+    });
+  }
+  return {
+    core: coreByMemberId.values().next().value!,
+    matchedBy,
+  };
+}
+
 async function buildHostedMemberIdentityCreateData(
   input: HostedMemberIdentityWriteInput,
+  preparedRoot?: PreparedHostedWebEncryptionRoot,
 ): Promise<Prisma.HostedMemberIdentityUncheckedCreateInput> {
   return {
     memberId: input.memberId,
-    ...(await buildHostedMemberIdentityMutationData(input)),
+    ...(await buildHostedMemberIdentityMutationData(input, preparedRoot)),
   };
 }
 
 async function buildHostedMemberIdentityUpdateData(
   input: HostedMemberIdentityWriteInput,
+  preparedRoot?: PreparedHostedWebEncryptionRoot,
 ): Promise<Prisma.HostedMemberIdentityUncheckedUpdateInput> {
-  return buildHostedMemberIdentityMutationData(input);
+  return buildHostedMemberIdentityMutationData(input, preparedRoot);
 }
 
-async function buildHostedMemberIdentityMutationData(input: HostedMemberIdentityWriteInput) {
+async function buildHostedMemberIdentityMutationData(
+  input: HostedMemberIdentityWriteInput,
+  preparedRoot?: PreparedHostedWebEncryptionRoot,
+) {
   const privateColumns = await buildHostedMemberIdentityPrivateColumns({
     memberId: input.memberId,
     phoneNumber: input.phoneNumber,
+    preparedRoot,
     prisma: input.prisma,
     privyUserId: input.privyUserId,
     signupPhoneCodeSendAttemptId: input.signupPhoneCodeSendAttemptId,
@@ -368,14 +593,34 @@ async function buildHostedMemberIdentityMutationData(input: HostedMemberIdentity
   };
 }
 
-async function ensureHostedMemberIdentityControlRootTx(input: {
+async function resolveHostedMemberIdentityControlRootTx(input: {
   memberId: string;
+  preparedControlRoot?: PreparedHostedDomainRootForWeb;
   prisma: Prisma.TransactionClient;
-}): Promise<void> {
+}): Promise<PreparedHostedWebEncryptionRoot | undefined> {
+  if (input.preparedControlRoot) {
+    if (
+      input.preparedControlRoot.domain !== "control"
+      || input.preparedControlRoot.userId !== input.memberId
+    ) {
+      throw new TypeError(
+        "Prepared hosted member identity root does not match the member.",
+      );
+    }
+    const prepared = await revalidatePreparedHostedDomainRootForWebTx({
+      prepared: input.preparedControlRoot,
+      tx: input.prisma,
+    });
+    return {
+      preparedRoot: prepared.root,
+      preparedRootKeyId: prepared.rootKeyId,
+    };
+  }
   await provisionActiveHostedDomainRootEnvelopeForUserOnly({
     domain: "control",
     prisma: input.prisma,
     reason: "hosted-member.identity-private-fields",
     userId: input.memberId,
   });
+  return undefined;
 }

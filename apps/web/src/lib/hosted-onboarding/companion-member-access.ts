@@ -6,7 +6,10 @@ import {
 import { getPrisma } from "../prisma";
 import { assertHostedHistoricalLaunchConsentGranted } from "../legal/consent";
 import { completeHostedPrivyVerification } from "./authentication-service";
-import { ensureHostedStarterUsageEnrollment } from "./starter-usage-enrollment-service";
+import {
+  ensureHostedStarterUsageEnrollment,
+  retryPendingHostedStarterUsageActivationRuntimeWake,
+} from "./starter-usage-enrollment-service";
 import { assertHostedMemberNotSuspended } from "./entitlement";
 import { hostedOnboardingError } from "./errors";
 import {
@@ -29,7 +32,6 @@ import { resolveHostedPrivySessionFromBearerToken } from "./hosted-session";
 export async function requireHostedCompanionMemberIdFromRequest(input: {
   prisma?: PrismaClient;
   request: Request;
-  suppressSignupWelcome?: boolean;
   timeZone?: string | null;
 }): Promise<string> {
   const prisma = input.prisma ?? getPrisma();
@@ -46,9 +48,6 @@ export async function requireHostedCompanionMemberIdFromRequest(input: {
   return ensureHostedCompanionMemberId({
     identity: session.identity,
     prisma,
-    ...(input.suppressSignupWelcome === undefined
-      ? {}
-      : { suppressSignupWelcome: input.suppressSignupWelcome }),
     ...(input.timeZone ? { timeZone: input.timeZone } : {}),
   });
 }
@@ -57,7 +56,6 @@ export async function ensureHostedCompanionMemberId(input: {
   identity: HostedPrivyIdentity;
   now?: Date;
   prisma?: PrismaClient;
-  suppressSignupWelcome?: boolean;
   timeZone?: string | null;
 }): Promise<string> {
   const prisma = input.prisma ?? getPrisma();
@@ -75,6 +73,10 @@ export async function ensureHostedCompanionMemberId(input: {
       prisma,
     })) {
       await assertHostedHistoricalLaunchConsentGranted({
+        memberId: existingMember.id,
+        prisma,
+      });
+      await requireHostedCompanionActivationRuntimeWake({
         memberId: existingMember.id,
         prisma,
       });
@@ -100,6 +102,10 @@ export async function ensureHostedCompanionMemberId(input: {
     memberId: completion.memberId,
     prisma,
   })) {
+    await requireHostedCompanionActivationRuntimeWake({
+      memberId: completion.memberId,
+      prisma,
+    });
     return completion.memberId;
   }
 
@@ -116,9 +122,6 @@ export async function ensureHostedCompanionMemberId(input: {
       now,
       prisma,
       source: "companion_onboarding",
-      ...(input.suppressSignupWelcome === undefined
-        ? {}
-        : { suppressSignupWelcome: input.suppressSignupWelcome }),
     });
   }
 
@@ -128,4 +131,20 @@ export async function ensureHostedCompanionMemberId(input: {
   });
 
   return completion.memberId;
+}
+
+async function requireHostedCompanionActivationRuntimeWake(input: {
+  memberId: string;
+  prisma: PrismaClient;
+}): Promise<void> {
+  const runtimeWake =
+    await retryPendingHostedStarterUsageActivationRuntimeWake(input);
+  if (runtimeWake && !runtimeWake.accepted) {
+    throw hostedOnboardingError({
+      code: "HOSTED_STARTER_USAGE_RUNTIME_WAKE_REQUIRED",
+      httpStatus: 503,
+      message: "Murph account setup is waiting for runtime recovery.",
+      retryable: true,
+    });
+  }
 }

@@ -64,6 +64,11 @@ can still deprioritize unrelated renderers and occluded windows. Balanced mode
 passes none of Chromium's background-timer, occluded-window, or renderer
 backgrounding opt-out flags; use the fully unthrottled fallback only for a
 browser version with a proven capture stall.
+The lanes also default to headful display mode. Headless is an explicit local
+override for removing visible UI, not a resource-saving default: it preserves
+ChatGPT's renderer and page JavaScript, and the settled one-page comparison used
+more CPU and memory than headful. A fresh profile must complete sign-in once in
+headful mode before it can run headless.
 Leaving completed waited targets open still accumulates active renderers across
 rounds even when ordinary browser history and site data have been cleared.
 

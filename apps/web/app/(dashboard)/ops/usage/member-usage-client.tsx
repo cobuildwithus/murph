@@ -74,6 +74,17 @@ export function MemberUsageClient({
   );
   const isResetting = resettingMemberId !== null;
 
+  function openPage(
+    direction: "after" | "before",
+    cursor: string | null,
+  ): void {
+    if (!cursor) {
+      return;
+    }
+    const params = new URLSearchParams({ [direction]: cursor });
+    router.push(`/ops/usage?${params.toString()}`);
+  }
+
   async function resetUsage(row: HostedOpsMemberUsageRow): Promise<void> {
     if (!row.currentPeriod || isResetting) {
       return;
@@ -159,10 +170,10 @@ export function MemberUsageClient({
             Usage
           </h1>
           <p className="mt-3 max-w-2xl text-sm leading-6 text-muted-foreground">
-            Inbound message volume and priced AI usage for every hosted member
-            and synthetic group container. Reset restores the current included
-            allowance without changing immutable usage history or purchased
-            credits.
+            Whole-population usage totals with a bounded, ID-ordered view of
+            hosted members and synthetic group containers. Reset restores the
+            current included allowance without changing immutable usage history
+            or purchased credits.
           </p>
         </div>
       </header>
@@ -209,7 +220,8 @@ export function MemberUsageClient({
             Retained inbound messages cover the canonical {dashboard.messageRetentionDays}-day
             mailbox window. Last 7 days and daily average use the trailing seven
             24-hour periods. AI usage is all-time counted priced cost from
-            immutable usage rows.
+            immutable usage rows. Rows are ordered by member ID and limited to{" "}
+            {dashboard.pagination.pageSize} per page.
           </p>
           <p className="font-mono text-[10px] uppercase tracking-[0.1em] text-muted-foreground">
             Captured {formatTimestamp(dashboard.capturedAt)}
@@ -243,7 +255,7 @@ export function MemberUsageClient({
                     className="py-10 text-center text-muted-foreground"
                     colSpan={10}
                   >
-                    No hosted members or group containers were found.
+                    No hosted members or group containers were found on this page.
                   </TableCell>
                 </TableRow>
               ) : (
@@ -263,6 +275,38 @@ export function MemberUsageClient({
             </TableBody>
           </Table>
         </div>
+        <nav
+          aria-label="Member usage pages"
+          className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"
+        >
+          <p className="text-xs text-muted-foreground">
+            {formatInteger(dashboard.rows.length)} rows shown · {formatInteger(
+              dashboard.pagination.pageSize,
+            )} rows per page
+          </p>
+          <div className="flex items-center gap-2">
+            <Button
+              disabled={dashboard.pagination.previousCursor === null}
+              onClick={() => {
+                openPage("before", dashboard.pagination.previousCursor);
+              }}
+              type="button"
+              variant="outline"
+            >
+              Previous
+            </Button>
+            <Button
+              disabled={dashboard.pagination.nextCursor === null}
+              onClick={() => {
+                openPage("after", dashboard.pagination.nextCursor);
+              }}
+              type="button"
+              variant="outline"
+            >
+              Next
+            </Button>
+          </div>
+        </nav>
       </section>
 
       <Dialog

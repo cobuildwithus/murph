@@ -32,6 +32,7 @@ export {
   junctionProviderAdapter,
   normalizeJunctionResourceName,
   normalizeJunctionSnapshot,
+  resolveJunctionWeightProviderRecordIdentity,
   type JunctionSnapshotInput,
   type JunctionBloodPressureProviderRecordIdentityEvidence,
   type JunctionSummaryNormalizationEvidence,

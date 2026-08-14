@@ -12,17 +12,17 @@ import {
 } from "@murphai/hosted-execution";
 
 import {
-  hasActiveHostedCryptoDomainRootsForUserTx,
   provisionHostedCryptoDomainRootsForUserTx,
   provisionPreparedHostedCryptoDomainRootsTx,
+  readUserIdsWithActiveHostedCryptoDomainRootsTx,
   type PreparedHostedCryptoDomainRootCandidates,
   unwrapHostedDomainRootForWeb,
 } from "../hosted-crypto/domain-root-store";
 import { runWithHostedDomainRootUnwrapCache } from "../hosted-crypto/domain-root-unwrap-cache";
 import {
   appendHostedMailboxEnvelopeTx,
-  hasHostedMailboxItemByKind,
   readHostedMailboxItemByDedupeKey,
+  readHostedMailboxUserIdsByKind,
 } from "../hosted-mailbox/store";
 import { renderUserFacingMessage } from "../hosted-messages/user-facing-messages";
 import {
@@ -71,21 +71,47 @@ type HostedMemberActivationSnapshot = HostedMemberSnapshot & {
   core: HostedMemberActivationCoreState;
 };
 
+export async function readHostedMemberActivationProofMemberIds(input: {
+  memberIds: readonly string[];
+  prisma: HostedOnboardingReadClient;
+}): Promise<ReadonlySet<string>> {
+  const memberIds = [...new Set(input.memberIds)];
+  if (memberIds.length === 0) {
+    return new Set();
+  }
+
+  const mailboxMemberIds = await readHostedMailboxUserIdsByKind({
+    kind: "member.activated",
+    prisma: input.prisma,
+    userIds: memberIds,
+  });
+  const unresolvedMemberIds = memberIds.filter(
+    (memberId) => !mailboxMemberIds.has(memberId),
+  );
+  if (unresolvedMemberIds.length === 0) {
+    return mailboxMemberIds;
+  }
+
+  const cryptoMemberIds = await readUserIdsWithActiveHostedCryptoDomainRootsTx({
+    tx: input.prisma,
+    userIds: unresolvedMemberIds,
+  });
+  return new Set([...mailboxMemberIds, ...cryptoMemberIds]);
+}
+
 export async function hasHostedMemberActivationProof(input: {
   memberId: string;
   prisma: HostedOnboardingReadClient;
 }): Promise<boolean> {
-  return await hasHostedMailboxItemByKind({
-    kind: "member.activated",
+  const activatedMemberIds = await readHostedMemberActivationProofMemberIds({
+    memberIds: [input.memberId],
     prisma: input.prisma,
-    userId: input.memberId,
-  }) || await hasActiveHostedCryptoDomainRootsForUserTx({
-    tx: input.prisma,
-    userId: input.memberId,
   });
+  return activatedMemberIds.has(input.memberId);
 }
 
 export async function activateHostedMemberForPositiveSourceTx(input: {
+  allowSignupWelcomeWithoutAssignableLinqLine?: boolean;
   dispatchContext: HostedStripeDispatchContext;
   emailLinked?: boolean;
   memberId: string;
@@ -156,6 +182,7 @@ export async function activateHostedMemberForFamilySponsorshipTx(input: {
 
 async function activateHostedMemberForPositiveSourceTxInner(input: {
   allowLegacyCryptoPreparation: boolean;
+  allowSignupWelcomeWithoutAssignableLinqLine?: boolean;
   dispatchContext: HostedStripeDispatchContext;
   emailLinked?: boolean;
   memberId: string;
@@ -200,6 +227,9 @@ async function activateHostedMemberForPositiveSourceTxInner(input: {
       return {
         activated: false,
         hostedExecutionEventId: existingWake.dedupeKey,
+        ...(!existingWake.consumedAt
+          ? { hostedExecutionMailboxItemId: existingWake.id }
+          : {}),
         memberId: currentMember.core.id,
       };
     }
@@ -227,6 +257,9 @@ async function activateHostedMemberForPositiveSourceTxInner(input: {
       return {
         activated: false,
         hostedExecutionEventId: existingWake?.dedupeKey ?? null,
+        ...(existingWake && !existingWake.consumedAt
+          ? { hostedExecutionMailboxItemId: existingWake.id }
+          : {}),
         memberId: currentMember.core.id,
       };
     }
@@ -278,6 +311,9 @@ async function activateHostedMemberForPositiveSourceTxInner(input: {
   const signupWelcomeRoute = input.suppressSignupWelcome
     ? null
     : (await resolveHostedMemberActivationWelcomeLinqRoute({
+        ...(input.allowSignupWelcomeWithoutAssignableLinqLine
+          ? { allowNoAssignableLine: true }
+          : {}),
         member: currentMember,
         prisma: input.prisma,
       })).welcomeRoute;
@@ -369,6 +405,7 @@ export function buildHostedMemberActivationWelcomeRoute(input: {
 }
 
 async function resolveHostedMemberActivationWelcomeLinqRoute(input: {
+  allowNoAssignableLine?: boolean;
   member: HostedMemberActivationSnapshot;
   prisma: Prisma.TransactionClient;
 }): Promise<{ welcomeRoute: HostedExecutionAssistantNotificationRoute | null }> {
@@ -406,7 +443,13 @@ async function resolveHostedMemberActivationWelcomeLinqRoute(input: {
     };
   }
 
-  return resolveHostedMemberActivationLinqRoute(input);
+  return resolveHostedMemberActivationLinqRoute({
+    ...(input.allowNoAssignableLine
+      ? { allowNoAssignableLine: true }
+      : {}),
+    member: input.member,
+    prisma: input.prisma,
+  });
 }
 
 async function readActivationReadyHostedMemberTx(input: {

@@ -43,6 +43,8 @@ import {
 } from "@murphai/hosted-execution/runtime-control";
 import {
   buildHostedExecutionWorkingSnapshotRef,
+  parseHostedBrowserVaultReplicaRef,
+  parseHostedWorkspaceSnapshotV2Ref,
 } from "@murphai/hosted-execution/parsers";
 import {
   createAssistantUsageReportingUserId,
@@ -94,11 +96,16 @@ import {
   HOSTED_RUNTIME_WORKSPACE_PATH,
 } from "@murphai/hosted-execution/routes";
 import {
+  HOSTED_VAULT_SHARE_DELIVERY_EFFECT_TIMEOUT_MS,
+  HOSTED_VAULT_SHARE_EFFECT_DEADLINE_HEADER,
+} from "@murphai/hosted-execution/vault-share";
+import {
   encryptHostedStorageEnvelope,
   type R2PutValueLike,
 } from "../src/crypto.ts";
 import {
   HOSTED_BROWSER_VAULT_REPLICA_ORPHAN_CANDIDATE_SCHEMA,
+  listHostedBrowserVaultReplicaObjectKeys,
   type HostedBrowserVaultReplicaOrphanCandidate,
 } from "../src/browser-vault-store.ts";
 import {
@@ -117,6 +124,7 @@ import {
 import {
   HOSTED_RUNTIME_ARTIFACT_FETCH_CORRELATION_ID_HEADER,
   HOSTED_RUNTIME_ARTIFACT_READ_PURPOSE_HEADER,
+  HOSTED_WEB_CONTROL_FORWARDED_RESPONSE_HEADER,
 } from "../src/runner-outbound/headers.ts";
 import {
   resolveRunnerOutboundUserCryptoContext,
@@ -1462,7 +1470,7 @@ describe("handleRunnerOutboundRequest", () => {
             },
           ],
         }),
-        headers: createRunnerProxyHeaders({
+        headers: createVaultShareRunnerProxyHeaders({
           "content-type": "application/json; charset=utf-8",
         }),
         method: "POST",
@@ -1517,7 +1525,7 @@ describe("handleRunnerOutboundRequest", () => {
             },
           ],
         }),
-        headers: createRunnerProxyHeaders({
+        headers: createVaultShareRunnerProxyHeaders({
           "content-type": "application/json; charset=utf-8",
           "x-hosted-runtime-attempt-id": "attempt_1",
           "x-hosted-runtime-lease-generation": "9",
@@ -1538,6 +1546,7 @@ describe("handleRunnerOutboundRequest", () => {
     );
 
     expect(response.status).toBe(200);
+    expect(response.headers.get(HOSTED_WEB_CONTROL_FORWARDED_RESPONSE_HEADER)).toBe("1");
     expect(validateRuntimeWriteFence).toHaveBeenCalledWith({
       attemptId: "attempt_1",
       generation: "9",
@@ -1548,6 +1557,7 @@ describe("handleRunnerOutboundRequest", () => {
     const headers = new Headers(requestInit?.headers);
     expect(headers.get("x-hosted-runtime-attempt-id")).toBe("attempt_1");
     expect(headers.get("x-hosted-runtime-lease-generation")).toBe("9");
+    expect(headers.get(HOSTED_VAULT_SHARE_EFFECT_DEADLINE_HEADER)).toMatch(/^\d{13}$/u);
     expect(headers.get("authorization")).toBeNull();
     expect(headers.get("x-api-key")).toBeNull();
   });
@@ -1573,7 +1583,7 @@ describe("handleRunnerOutboundRequest", () => {
             },
           ],
         }),
-        headers: createRunnerProxyHeaders({
+        headers: createVaultShareRunnerProxyHeaders({
           "content-type": "application/json; charset=utf-8",
           "x-hosted-runtime-attempt-id": "attempt_1",
           "x-hosted-runtime-lease-generation": "9",
@@ -4290,7 +4300,230 @@ describe("handleRunnerOutboundRequest", () => {
       secondBody.snapshotId,
       "second workspace snapshot id",
     ))).toBe(true);
+    expect(hostedExecutionMocks.emitHostedExecutionStructuredLog.mock.calls.some(
+      ([entry]) => entry.message
+        === "Hosted runner workspace snapshot start diagnostic.",
+    )).toBe(false);
   });
+
+  it("emits bounded fixed-key workspace snapshot start route diagnostics", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-27T00:00:00.000Z"));
+    const fixture = await createHostedRuntimeCryptoContextFixture();
+    const runner = createWorkspaceVersionAwareUserRunner();
+    const runnerStub = runner.getByName();
+    const originalCreate = runnerStub.createHostedWorkspaceSnapshotUploadSession;
+    if (!originalCreate) {
+      throw new TypeError("Workspace snapshot session create stub is unavailable.");
+    }
+    const timedStub: WorkerUserRunnerStubLike = {
+      ...runnerStub,
+      async createHostedWorkspaceSnapshotUploadSession(
+        session: HostedWorkspaceSnapshotUploadSession,
+      ) {
+        const created = await originalCreate.call(runnerStub, session);
+        vi.setSystemTime(new Date(Date.now() + 90_001));
+        return created;
+      },
+    };
+    const env = createRunnerOutboundEnv({
+      ...fixture.env,
+      USER_RUNNER: { getByName: () => timedStub },
+    });
+    vi.stubGlobal("fetch", fixture.fetchMock);
+
+    const response = await handleRunnerOutboundRequest(
+      createWorkspaceSnapshotStartRequest({
+        expectedWorkspaceVersion: "4",
+        workspaceVersion: "4",
+      }),
+      env,
+      "member_123",
+    );
+
+    expect(response.status).toBe(200);
+    const responseBody = requireTestObject(
+      await response.json(),
+      "bounded workspace snapshot start response",
+    );
+    const responseEncryption = requireTestObject(
+      responseBody.encryption,
+      "bounded workspace snapshot start encryption",
+    );
+    const diagnosticLog = hostedExecutionMocks.emitHostedExecutionStructuredLog.mock.calls
+      .map(([entry]) => entry)
+      .find(
+        (entry: { details?: unknown; level?: string; message?: string }) =>
+          entry.message === "Hosted runner workspace snapshot start diagnostic.",
+      );
+    expect(diagnosticLog).toBeDefined();
+    expect(diagnosticLog?.level).toBe("info");
+    expect(diagnosticLog).toMatchObject({ userId: null });
+    const details = requireTestObject(
+      diagnosticLog?.details,
+      "workspace snapshot start route diagnostic details",
+    );
+    expect(details).toMatchObject({
+      operation: "workspace_snapshot_start",
+      responseStatus: 200,
+      snapshotStartAlarmCandidateCount: 0,
+      snapshotStartAlarmCandidateWorkDurationMs: 0,
+      snapshotStartCandidateCountsObserved: false,
+      snapshotStartDiagnosticScopeKind: "route",
+      snapshotStartDurationsCapped: true,
+      snapshotStartNewWorkspaceCandidateCount: 0,
+      snapshotStartOutcomeKind: "created",
+      snapshotStartSessionCreateStorageDurationMs: 60_000,
+      snapshotStartSubstageKind: "completed",
+      snapshotStartTotalDurationMs: 60_000,
+      userIdPresent: true,
+    });
+    const durationKeys = [
+      "snapshotStartAlarmCandidateWorkDurationMs",
+      "snapshotStartCryptoDataKeyDurationMs",
+      "snapshotStartSessionCreateStorageDurationMs",
+      "snapshotStartTotalDurationMs",
+      "snapshotStartWriteFenceOwnerValidationDurationMs",
+    ] as const;
+    for (const key of durationKeys) {
+      const value = details[key];
+      if (typeof value !== "number") {
+        throw new TypeError(`${key} must be numeric.`);
+      }
+      expect(Number.isInteger(value)).toBe(true);
+      expect(value).toBeGreaterThanOrEqual(0);
+      expect(value).toBeLessThanOrEqual(60_000);
+    }
+    expect(Object.keys(details).sort()).toEqual([
+      "operation",
+      "responseStatus",
+      "snapshotStartAlarmCandidateCount",
+      "snapshotStartAlarmCandidateWorkDurationMs",
+      "snapshotStartCandidateCountsCapped",
+      "snapshotStartCandidateCountsObserved",
+      "snapshotStartCryptoDataKeyDurationMs",
+      "snapshotStartCurrentSessionCandidateCount",
+      "snapshotStartDiagnosticScopeKind",
+      "snapshotStartDurationsCapped",
+      "snapshotStartNewWorkspaceCandidateCount",
+      "snapshotStartOutcomeKind",
+      "snapshotStartRecordedCandidateCount",
+      "snapshotStartSessionCreateStorageDurationMs",
+      "snapshotStartSubstageKind",
+      "snapshotStartTotalDurationMs",
+      "snapshotStartWriteFenceOwnerValidationDurationMs",
+      "userIdPresent",
+    ]);
+    const serializedDetails = JSON.stringify(details);
+    expect(serializedDetails).not.toContain(requireTestString(
+      responseBody.snapshotId,
+      "bounded workspace snapshot id",
+    ));
+    expect(serializedDetails).not.toContain(requireTestString(
+      responseBody.objectKey,
+      "bounded workspace snapshot object key",
+    ));
+    expect(serializedDetails).not.toContain(requireTestString(
+      responseEncryption.dataKeyBase64,
+      "bounded workspace snapshot data key",
+    ));
+    expect(serializedDetails).not.toContain(requireTestString(
+      responseEncryption.wrappedDataKey,
+      "bounded workspace snapshot wrapped data key",
+    ));
+  });
+
+  it.each([
+    {
+      durationKey: "snapshotStartWriteFenceOwnerValidationDurationMs",
+      stage: "write_fence_owner_validation",
+    },
+    {
+      durationKey: "snapshotStartCryptoDataKeyDurationMs",
+      stage: "crypto_data_key",
+    },
+  ] as const)(
+    "attributes isolated $stage latency to the matching route diagnostic",
+    async ({ durationKey, stage }) => {
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(new Date("2026-04-27T00:00:00.000Z"));
+      const fixture = await createHostedRuntimeCryptoContextFixture();
+      const runner = createWorkspaceVersionAwareUserRunner();
+      const runnerStub = runner.getByName();
+      const originalValidateRuntimeWriteFence =
+        runnerStub.validateRuntimeWriteFence;
+      if (!originalValidateRuntimeWriteFence) {
+        throw new TypeError("Workspace snapshot write-fence stub is unavailable.");
+      }
+      const timedStub: WorkerUserRunnerStubLike =
+        stage === "write_fence_owner_validation"
+          ? {
+              ...runnerStub,
+              async validateRuntimeWriteFence(request) {
+                const result = await originalValidateRuntimeWriteFence.call(
+                  runnerStub,
+                  request,
+                );
+                vi.setSystemTime(new Date(Date.now() + 1_500));
+                return result;
+              },
+            }
+          : runnerStub;
+      const timedFetch = stage === "crypto_data_key"
+        ? vi.fn<typeof fetch>(async (...args) => {
+            const response = await fixture.fetchMock(...args);
+            vi.setSystemTime(new Date(Date.now() + 1_500));
+            return response;
+          })
+        : fixture.fetchMock;
+      const env = createRunnerOutboundEnv({
+        ...fixture.env,
+        USER_RUNNER: { getByName: () => timedStub },
+      });
+      vi.stubGlobal("fetch", timedFetch);
+
+      const response = await handleRunnerOutboundRequest(
+        createWorkspaceSnapshotStartRequest({
+          expectedWorkspaceVersion: "4",
+          workspaceVersion: "4",
+        }),
+        env,
+        "member_123",
+      );
+
+      expect(response.status).toBe(200);
+      const diagnosticLog =
+        hostedExecutionMocks.emitHostedExecutionStructuredLog.mock.calls
+          .map(([entry]) => entry)
+          .find(
+            (entry: { details?: unknown; message?: string }) =>
+              entry.message
+                === "Hosted runner workspace snapshot start diagnostic.",
+          );
+      const details = requireTestObject(
+        diagnosticLog?.details,
+        `${stage} workspace snapshot start route diagnostic details`,
+      );
+      expect(details).toMatchObject({
+        snapshotStartDiagnosticScopeKind: "route",
+        snapshotStartDurationsCapped: false,
+        snapshotStartOutcomeKind: "created",
+        snapshotStartSubstageKind: "completed",
+        snapshotStartTotalDurationMs: 1_500,
+      });
+      expect(details[durationKey]).toBe(1_500);
+      for (const otherDurationKey of [
+        "snapshotStartWriteFenceOwnerValidationDurationMs",
+        "snapshotStartCryptoDataKeyDurationMs",
+        "snapshotStartSessionCreateStorageDurationMs",
+      ] as const) {
+        if (otherDurationKey === durationKey) {
+          continue;
+        }
+        expect(details[otherDurationKey]).toBe(0);
+      }
+    },
+  );
 
   it("refreshes only the write-fence-owned workspace snapshot handoff", async () => {
     vi.useFakeTimers();
@@ -6416,6 +6649,140 @@ describe("handleRunnerOutboundRequest", () => {
       replacedSnapshotRef,
       snapshotId,
     });
+  });
+
+  it("replays completion against the exact snapshot ref committed before response loss", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-05-02T00:00:00.000Z"));
+    const runner = createWorkspaceVersionAwareUserRunner();
+    const bytes = new Uint8Array([1, 2, 3, 4]);
+    const snapshotId = "snapshot_complete_committed_response_lost";
+    const objectKey = await hostedWorkspaceSnapshotObjectKey({
+      snapshotId,
+      userId: "member_123",
+    });
+    const requestedSnapshotRef = createWorkspaceSnapshotV2Ref({
+      encryptedByteSize: bytes.byteLength,
+      encryptedObjectSha256: sha256Hex(bytes),
+      objectKey,
+      snapshotId,
+      userId: "member_123",
+    });
+    const session = createWorkspaceSnapshotUploadSession(requestedSnapshotRef);
+    runner.workspaceSnapshotUploadSessions.set(snapshotId, session);
+    const deleteObject = vi.fn(async () => {});
+    const env = createRunnerOutboundEnv({
+      BUNDLES: createWorkspaceSnapshotBucket(
+        async (key) => ({ key, size: bytes.byteLength }),
+        async (key) => ({
+          checksums: createWorkspaceSnapshotHeadChecksums(requestedSnapshotRef),
+          customMetadata: createWorkspaceSnapshotHeadMetadata(requestedSnapshotRef),
+          key,
+          size: bytes.byteLength,
+        }),
+        deleteObject,
+      ),
+      USER_RUNNER: {
+        getByName: runner.getByName,
+      },
+    });
+    let committedSnapshotRef: HostedWorkspaceSnapshotV2Ref | null = null;
+    let checkpointCalls = 0;
+    const fetchMock = vi.fn<typeof fetch>(async (
+      ...args: Parameters<typeof fetch>
+    ): Promise<Response> => {
+      if (isHostedWorkspaceReadFetch(args)) {
+        return createHostedWorkspaceReadFetchResponse(
+          committedSnapshotRef,
+          committedSnapshotRef ? "5" : "4",
+        );
+      }
+      checkpointCalls += 1;
+      const checkpointRequest = readTestFetchBodyObject(
+        args,
+        "workspace snapshot committed-response-loss checkpoint request",
+      );
+      const attemptedSnapshotRef = parseHostedWorkspaceSnapshotV2Ref(
+        checkpointRequest.snapshotRef,
+        "workspace snapshot committed-response-loss checkpoint ref",
+      );
+      if (!committedSnapshotRef) {
+        committedSnapshotRef = attemptedSnapshotRef;
+        return new Response(
+          JSON.stringify(createHostedWorkspaceCheckpointResponseWithSnapshotRef(
+            "5",
+            committedSnapshotRef,
+          )),
+          {
+            headers: {
+              "content-type": "application/json; charset=utf-8",
+            },
+            status: 200,
+          },
+        );
+      }
+      return new Response(
+        JSON.stringify({
+          ...createHostedWorkspaceCheckpointResponseWithSnapshotRef(
+            "5",
+            committedSnapshotRef,
+          ),
+          checkpointConflictReason: "workspace_version",
+          checkpointed: false,
+        }),
+        {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        },
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const completionRequest = () => createWorkspaceSnapshotCompleteRequest({
+      snapshotId,
+      snapshotRef: requestedSnapshotRef,
+      workspaceVersion: "4",
+    });
+
+    const lostResponse = await handleRunnerOutboundRequest(
+      completionRequest(),
+      env,
+      "member_123",
+    );
+    expect(lostResponse.status).toBe(200);
+    expect(committedSnapshotRef).toEqual(expect.objectContaining({
+      createdAt: session.createdAt,
+      objectKey,
+      snapshotId,
+    }));
+
+    vi.setSystemTime(new Date("2026-05-02T00:00:05.000Z"));
+    const replayResponse = await handleRunnerOutboundRequest(
+      completionRequest(),
+      env,
+      "member_123",
+    );
+    const replayBody = requireTestObject(
+      await replayResponse.json(),
+      "workspace snapshot committed-response-loss replay response",
+    );
+
+    expect(replayResponse.status).toBe(200);
+    expect(replayBody).toEqual(expect.objectContaining({
+      checkpoint: expect.objectContaining({
+        checkpointed: true,
+        workspace: expect.objectContaining({
+          snapshotRef: committedSnapshotRef,
+          version: "5",
+        }),
+      }),
+      snapshotRef: committedSnapshotRef,
+    }));
+    expect(checkpointCalls).toBe(2);
+    expect(deleteObject).not.toHaveBeenCalled();
+    expect(runner.recordHostedWorkspaceSnapshotOrphanCandidate).not.toHaveBeenCalled();
+    expect(runner.deleteHostedWorkspaceSnapshotUploadSession).not.toHaveBeenCalled();
   });
 
   it("ignores replaced successful workspace snapshots outside the bound user namespace", async () => {
@@ -9292,13 +9659,19 @@ it("returns foreground-pending checkpoint responses from snapshot completion wit
     );
 
     expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual({
+    const responseBody = requireTestObject(
+      await response.json(),
+      "Browser vault replica write response",
+    );
+    const publishedReplicaRef = parseHostedBrowserVaultReplicaRef(responseBody.replicaRef);
+    expect(responseBody).toEqual({
       replicaRef: expect.objectContaining({
         replicaSchema: "murph.browser-vault-replica",
         schema: "murph.hosted-browser-vault-replica-ref.v1",
         sourceBundleHash,
       }),
     });
+    expect(publishedReplicaRef?.shards).toBeDefined();
     expect(runner.ownsActiveInvocationLease).toHaveBeenCalledOnce();
     expect(fixture.fetchMock).toHaveBeenCalledOnce();
     expect(runner.recordHostedBrowserVaultReplicaOrphanCandidate).toHaveBeenCalledTimes(2);
@@ -9310,16 +9683,80 @@ it("returns foreground-pending checkpoint responses from snapshot completion wit
     });
     const plannedReplicaCandidate = runner.recordHostedBrowserVaultReplicaOrphanCandidate.mock
       .calls[1]?.[0];
-    expect(plannedReplicaCandidate).toMatchObject({
-      createdAt: expect.any(String),
-      schema: HOSTED_BROWSER_VAULT_REPLICA_ORPHAN_CANDIDATE_SCHEMA,
-      userId: "member_123",
-    });
-    expect(events).toEqual([
+    const plannedObjectKeys = publishedReplicaRef
+      ? listHostedBrowserVaultReplicaObjectKeys(publishedReplicaRef)
+      : [];
+    expect(plannedReplicaCandidate?.objectKey).toBe(plannedObjectKeys[0]);
+    expect(events.slice(0, 2)).toEqual([
       `record:${replacedReplicaRef.objectKey}`,
       `record:${plannedReplicaCandidate?.objectKey}`,
-      `put:${plannedReplicaCandidate?.objectKey}`,
     ]);
+    expect(new Set(events.slice(2))).toEqual(
+      new Set(plannedObjectKeys.map((objectKey) => `put:${objectKey}`)),
+    );
+  });
+
+  it("keeps the browser-vault write admitted until every planned PUT settles", async () => {
+    const fixture = await createHostedRuntimeCryptoContextFixture();
+    const runner = createWorkspaceVersionAwareUserRunner();
+    const defaultEnv = createRunnerOutboundEnv();
+    const putKeys: string[] = [];
+    let releaseDelayedPut = (): void => {};
+    const delayedPutGate = new Promise<void>((resolve) => {
+      releaseDelayedPut = resolve;
+    });
+    let markDelayedPutStarted = (): void => {};
+    const delayedPutStarted = new Promise<void>((resolve) => {
+      markDelayedPutStarted = resolve;
+    });
+    let delayedPutCompleted = false;
+    const bucket = {
+      ...defaultEnv.BUNDLES,
+      async put(key: string, value: R2PutValueLike) {
+        putKeys.push(key);
+        if (key.endsWith(".metric-bucket-00.json")) {
+          throw new Error("synthetic metric bucket write failure");
+        }
+        if (key.endsWith(".labs.json")) {
+          markDelayedPutStarted();
+          await delayedPutGate;
+          delayedPutCompleted = true;
+        }
+        await defaultEnv.BUNDLES.put(key, value);
+      },
+    };
+    const env = createRunnerOutboundEnv({
+      ...fixture.env,
+      BUNDLES: bucket,
+      USER_RUNNER: { getByName: runner.getByName },
+    });
+    vi.stubGlobal("fetch", fixture.fetchMock);
+
+    const writePromise = handleRunnerOutboundRequest(
+      createBrowserVaultReplicaWriteRequest({
+        replica: createBrowserVaultReplica("d".repeat(64)),
+        workspaceVersion: "5",
+      }),
+      env,
+      "member_123",
+    );
+
+    await delayedPutStarted;
+    expect(putKeys.some((key) => key.endsWith(".labs.json"))).toBe(true);
+    expect(runner.admitHostedBrowserVaultReplicaDirectPut).toHaveBeenCalledOnce();
+    expect(runner.releaseHostedBrowserVaultReplicaDirectPut).not.toHaveBeenCalled();
+
+    releaseDelayedPut();
+    await expect(writePromise).rejects.toThrow("synthetic metric bucket write failure");
+
+    const plannedReplicaCandidate = runner.recordHostedBrowserVaultReplicaOrphanCandidate.mock
+      .calls[0]?.[0];
+    expect(plannedReplicaCandidate?.objectKey).toMatch(/\.json$/u);
+    expect(putKeys).toHaveLength(36);
+    expect(putKeys).toContain(plannedReplicaCandidate?.objectKey);
+    expect(delayedPutCompleted).toBe(true);
+    expect(runner.releaseHostedBrowserVaultReplicaDirectPut).toHaveBeenCalledOnce();
+    expect(runner.browserVaultReplicaOrphanCandidates.size).toBe(1);
   });
 
   it("accepts browser-vault replica writes when the workspace version header is stale", async () => {
@@ -9974,6 +10411,17 @@ function createRunnerProxyHeaders(headers: Record<string, string> = {}) {
   };
 }
 
+function createVaultShareRunnerProxyHeaders(
+  headers: Record<string, string> = {},
+) {
+  return createRunnerProxyHeaders({
+    [HOSTED_VAULT_SHARE_EFFECT_DEADLINE_HEADER]: String(
+      Date.now() + HOSTED_VAULT_SHARE_DELIVERY_EFFECT_TIMEOUT_MS,
+    ),
+    ...headers,
+  });
+}
+
 function createAssistantPersonalizationRunnerRequest(
   headers: Record<string, string> = {},
   search = "",
@@ -10477,12 +10925,29 @@ function createBrowserVaultReplicaWriteRequest(input: {
 
 function createBrowserVaultReplica(sourceBundleHash: string) {
   return {
+    assistantSummary: { highlights: [], latestDate: null },
+    entities: [],
     generatedAt: "2026-04-26T00:00:00.000Z",
+    labResultRows: [],
+    metricGoalProgressRows: [],
+    metricRows: [],
+    metricSelectionRows: [],
+    policy: {
+      bodyPreviewChars: 280,
+      excludedFamilies: [],
+      id: "health-vault-browser",
+      includedFamilies: [],
+      metricLookbackDays: 365,
+    },
     schema: "murph.browser-vault-replica",
+    searchRows: [],
     source: {
       dataVersion: "runner-outbound-test",
       sourceBundleHash,
     },
+    sourceHealthRows: [],
+    timelineRows: [],
+    weeklySampleSummaries: [],
   };
 }
 
@@ -10675,6 +11140,27 @@ function createWorkspaceVersionAwareUserRunner(input: {
     workspaceSnapshotUploadSessions.set(current.snapshotId, updatedSession);
     return updatedSession;
   });
+  const admitHostedBrowserVaultReplicaDirectPut = vi.fn(async function (
+    this: WorkerUserRunnerStubLike,
+    request: {
+      admittedAt: string;
+      attemptId: string;
+      leaseGeneration: string;
+      userId: string;
+      writeId: string;
+    },
+  ) {
+    assertSnapshotRpcReceiver(this);
+    return request.attemptId === attemptId
+      && request.leaseGeneration === leaseGeneration
+      && request.userId === userId;
+  });
+  const releaseHostedBrowserVaultReplicaDirectPut = vi.fn(async function (
+    this: WorkerUserRunnerStubLike,
+    _request: { userId: string; writeId: string },
+  ) {
+    assertSnapshotRpcReceiver(this);
+  });
   const readHostedWorkspaceSnapshotUploadSession = vi.fn(async function (
     this: WorkerUserRunnerStubLike,
     request: {
@@ -10750,12 +11236,14 @@ function createWorkspaceVersionAwareUserRunner(input: {
     createHostedWorkspaceSnapshotUploadSession,
     deleteHostedWorkspaceSnapshotUploadSession,
     heartbeatHostedWorkspaceSnapshotUploadSession,
+    admitHostedBrowserVaultReplicaDirectPut,
     rememberHostedWorkspaceSnapshotPresignedPut,
     rememberHostedWorkspaceSnapshotReplacedRef,
     publishHostedPrivateMedia,
     readHostedWorkspaceSnapshotUploadSession,
     recordHostedBrowserVaultReplicaOrphanCandidate,
     recordHostedWorkspaceSnapshotOrphanCandidate,
+    releaseHostedBrowserVaultReplicaDirectPut,
     validateRuntimeWriteFence,
   };
 
@@ -10769,11 +11257,13 @@ function createWorkspaceVersionAwareUserRunner(input: {
       return userRunnerStub;
     },
     heartbeatHostedWorkspaceSnapshotUploadSession,
+    admitHostedBrowserVaultReplicaDirectPut,
     ownsActiveInvocationLease,
     publishHostedPrivateMedia,
     readHostedWorkspaceSnapshotUploadSession,
     recordHostedBrowserVaultReplicaOrphanCandidate,
     recordHostedWorkspaceSnapshotOrphanCandidate,
+    releaseHostedBrowserVaultReplicaDirectPut,
     rememberHostedWorkspaceSnapshotPresignedPut,
     rememberHostedWorkspaceSnapshotReplacedRef,
     setActiveWriteFence(input: {

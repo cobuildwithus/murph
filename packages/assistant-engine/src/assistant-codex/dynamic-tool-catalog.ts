@@ -1,5 +1,8 @@
 import * as z from '@murphai/contracts/zod-runtime'
 import {
+  HOSTED_EXECUTION_MEMBER_REPORTED_DAILY_METRIC_KEYS,
+} from '@murphai/hosted-execution'
+import {
   assistantBasePersonaIdValues,
   assistantBasePersonaOptions,
   assistantPersonaIdValues,
@@ -32,6 +35,7 @@ import {
   HOSTED_ASSISTANT_REASONING_EFFORTS,
 } from '@murphai/hosted-execution/assistant-model'
 import { HOSTED_PLAN_USAGE_DIRECT_BILLING_PLAN_CODES } from '@murphai/hosted-execution/plan-usage'
+import { ASSISTANT_AUTHORED_RESPONSE_MEDIA_MAX_ITEMS } from '../assistant/response-media.js'
 import {
   HOSTED_VAULT_SHARE_ACTIVITY_DISTANCE_PROJECTION_KIND,
   HOSTED_VAULT_SHARE_ACTIVITY_DISTANCE_SELECTOR_ACTIVITY_KINDS,
@@ -51,6 +55,7 @@ import { assistantVaultImageMaxBytes } from '@murphai/operator-config/assistant-
 import {
   assistantResponseCardJsonSchema,
   exerciseRoutineResponseCardJsonSchema,
+  telegramRichContentResponseCardJsonSchema,
 } from '@murphai/operator-config/assistant-response-cards'
 import {
   ASSISTANT_HOSTED_GROUP_SHARED_READ_MAX_PROJECTION_SCOPES,
@@ -162,16 +167,16 @@ export const MURPH_ATTACH_RESPONSE_MEDIA_TOOL = {
   namespace: 'murph',
   name: 'attach_response_media',
   description:
-    'Attach image media to the current final assistant response. Accept intentionally public catalog image URLs or an exact vault_image descriptor returned by a trusted Murph command. Never invent or modify a private descriptor. Replaces the current response media batch for this turn only. It does not send directly.',
+    `Attach up to ${ASSISTANT_AUTHORED_RESPONSE_MEDIA_MAX_ITEMS} images to the current final assistant response. Accept intentionally public catalog image URLs or an exact vault_image descriptor returned by a trusted Murph command. Never invent or modify a private descriptor. Replaces the current response media batch for this turn only. It does not send directly.`,
   inputSchema: {
     type: 'object',
     additionalProperties: false,
     properties: {
       media: {
         type: 'array',
-        maxItems: 40,
+        maxItems: ASSISTANT_AUTHORED_RESPONSE_MEDIA_MAX_ITEMS,
         description:
-          'The complete image batch for the final assistant reply. Passing an empty array clears the current reply media batch.',
+          `The complete image batch for the final assistant reply, limited to ${ASSISTANT_AUTHORED_RESPONSE_MEDIA_MAX_ITEMS} images. Passing an empty array clears the current reply media batch.`,
         items: {
           oneOf: [
             {
@@ -261,7 +266,7 @@ export const MURPH_ATTACH_RESPONSE_CARD_TOOL = {
     'The daily-nutrition safety gate includes a separate vault-cli measurement entry list --metric pregnancy-test --from <300-days-before-today> --to <today> --limit 200 --format json read before numeric proposals, Goal activation, or cards. Require exact metric pregnancy-test, unit result, value 1, and a normalized positive qualifiers.result; any such positive wins over negative evidence from either pregnancy-evidence owner in the window and suppresses numeric output without diagnosing pregnancy. Missing, negative, stale, indeterminate, malformed, or conflicting rows are unavailable evidence rather than proof of non-pregnancy. A failed, unreadable, or exactly 200-record pregnancy-test read fails closed with no Goal or measurement mutation and no card; scheduled occurrences ask no question. ' +
     'The same gate includes vault-cli event list --kind test --from <300-days-before-today> --to <today> --limit 200 --format json. A failed, unreadable, or exactly 200-record list fails closed before any numeric effect, with no test detail reads on saturation. Otherwise event show every returned test because list output compacts results and can truncate summaries; any failed or unreadable detail fails closed. Treat a pregnancy/hCG test or matching structured analyte with an explicit positive, detected, or pregnant textValue or unambiguous test-level summary as positive evidence unless resultStatus is pending. Canonical resultStatus unknown classifies the result rather than source lifecycle and may qualify only with that strict identity plus explicit text. Do not infer pregnancy from numeric hCG, reference ranges, abnormal or unknown status/flags alone, titles, notes, or ambiguous or negated text. An explicit positive wins over negative evidence from either canonical owner in the window and suppresses numeric output, Goal mutation or activation, and cards. Missing, negative, pending, numeric-only, stale, unrelated, and ambiguous test evidence is unavailable rather than a universal block. Scheduled occurrences ask no question, perform no mutation, and attach no card. ' +
     'Workout footers span native and static cards; never promise native-only taps. ' +
-    'Attach one private-direct response card only when the current accepted member message or the saved instructions for the exact scheduled automation occurrence explicitly request it, during managed meal closeout, for the verified initial card after starting or resuming one canonical live workout, or for an unambiguous update to its established workout card. Occurrence authority alone is not card intent. The card replaces the entire final response: attach it only when the card alone completely satisfies the current request; answer compound requests with complete ordinary text and no card. Before every goal-aware daily_nutrition card, first run vault-cli goal list --status active --limit 200 --format json. If it returns 200 records, fail closed with ordinary text, no Goal or measurement mutation, and no card. Otherwise run vault-cli goal show <goal-id> --format json for every returned active Goal whose list item reports a nonzero data.metricTargetsCount; never select detail reads by title, slug, domain, context-snapshot visibility, or the default list prefix. Resolve metric identity, unit, comparator, effective date, conflicts, and the 1,200-kcal boundary only after inspecting that complete detail set. Keep this active-target authority read separate from any all-status lookup used to reuse or honor Murph\'s managed paused or abandoned proposal; neither read substitutes for the other. For daily_nutrition, immediately beforehand run vault-cli meal totals --from <date> --to <same-date> and copy its exact canonical metric { total, mealCount } values; never calculate or reuse totals. New authoring uses V2 with fiber and five required goal snapshots; nullable V2 goals and nutrition V1 remain legacy replay and rendering compatibility only. Before deriving, saving, or surfacing numeric nutrition goals, before activating a paused nutrition proposal, and before every daily_nutrition attachment, even with five active goals or on a scheduled closeout, follow nutrition-strategy/references/daily-nutrition-card-safety.md. First run vault-cli memory show --format json and inspect the complete canonical Identity, Preferences, Instructions, and Context memory document for explicit, unambiguous safety facts; the context snapshot does not inject it. A failed or unreadable memory read fails closed with ordinary non-numeric text, no Goal or measurement mutation, and no card; leave an existing paused proposal unchanged. A clearly current saved age under 18 or clearly current intuitive-eating or number-sensitive preference uses the same suppression path. Missing, stale, ambiguous, or conflicting age alone is unavailable evidence, not a universal block; scheduled occurrences never ask. Run both vault-cli condition list --status active --limit 200 --format json and vault-cli regimen list --status active --limit 200 --format json. If either read fails or returns exactly 200 records, run no condition or regimen detail reads and fail closed with ordinary non-numeric text, no Goal or measurement mutation, and no card. Otherwise run vault-cli condition show <condition-id> --format json for every returned active condition and vault-cli regimen show <regimen-id> --format json for every returned active regimen before applying the safety gate; never select by title, substance, severity, context-snapshot visibility, or the default list prefix. If any required detail read fails or is unreadable, use the same fail-closed behavior; otherwise reuse the complete current-turn reads. Then run vault-cli event list --kind procedure --limit 200 --format json and apply its complete procedure-item and conditional-detail contract before continuing; a completed bariatric procedure suppresses numeric output, and a failed, unreadable, or saturated read fails closed. As part of that same pre-numeric and pre-activation gate, also run its bounded lossless vault-cli measurement entry list read over the canonical 45-day window. A usable adult BMI below 18.5, including height and weight rows sharing one eventId, suppresses numeric proposal derivation or presentation, every Goal write or activation, and the card. A failed read, or a saturated read that cannot resolve usable BMI evidence, fails closed with ordinary non-numeric text, no Goal or measurement mutation, and no card; leave an existing paused proposal unchanged. The gate also blocks known underweight, frailty, malnutrition risk, glucose-lowering medication, safety-relevant disease or clinician-managed nutrition context, and calorie targets below 1,200 kcal/day without flooring them upward. Scheduled authority never permits questions or activation; only the first eligible managed meal closeout may create and explain one paused proposal after the complete safety gate and an all-status Goal read prove the stable managed slug has never existed. For the exact card localDate, require the containing active Goal window and each target\'s optional startAt/targetAt interval to include that date, with inclusive boundaries; use the selected capture date for a scheduled closeout, which may differ from the occurrence date for a historical catch-up, or the explicitly requested date, never wall-clock today. Ignore out-of-window targets for current authority and conflicts, and never expose, compare, copy, derive from, or mutate a Goal because of them. Require exactly one unambiguous applicable exact point target in each fixed card unit: dietary-calories in kcal, and protein-grams, carbs-grams, fat-grams, and fiber-grams in g, resolved across active canonical Goals. Each target must use selected-value comparator between with identical numeric value and highValue. A one-sided threshold, non-identical range, or other shape remains authoritative but makes the bundle comparator-incompatible: never expose, compare, copy, or derive from its bound or create, replace, or remove a managed target around it; use ordinary text with no card or managed Goal mutation, and ask no question on a scheduled closeout. A target in another unit likewise remains authoritative but makes the bundle incompatible: never compare, convert, copy, or derive from its raw value. An explicit numeric-card request or the one first eligible managed closeout authorizes only the goal-aware workflow\'s paused canonical proposal, not activation or use. When any target is missing, follow nutrition-strategy/references/daily-nutrition-card-goals.md: hold applicable, compatible exact point targets fixed, derive missing macros from residual calories, and require every AMDR plus a 50 kcal energy tolerance before any Goal write; an infeasible bundle means ordinary text and no mutation. Save one paused canonical proposal, explain its values, reasoning, and effective date in ordinary text with no card, and activate it only after member acceptance. On first creation, set Goal window.startAt explicitly: use a member-requested effective date when present, otherwise the selected card localDate for a dated card request, otherwise the engine-supplied current vault-local date; never rely on the write-day default. Preserve that window on every later edit, activation, or card request and never silently rebase it to another card date. Any derived target addition or change atomically pauses the complete managed bundle until acceptance. A scheduled closeout never asks for inputs or activates provisional targets. On the first eligible managed closeout only, if the complete all-status Goal read proves the stable managed slug has never existed and already-known inputs pass the complete safety and derivation contracts, create and explain one paused proposal in ordinary text with no card; once that Goal exists in any status, scheduled turns never create, change, or automatically repeat it. Without a complete accepted bundle or that one first-run proposal path, use ordinary closeout text and no card. When an explicit card request caused the proposal, its next unambiguous acceptance may complete that pending request only after the complete safety recheck passes, then activation and readback, and a fresh same-date totals read; corrections, declines, ambiguous replies, target-setting-only requests, and compound requests remain text-only. Explicit active targets win metric by metric; conflicts, thresholds, ranges, unsafe numbers, or missing responsible calorie inputs mean ordinary text or one consolidated question, never a goal-less card. Freeze each exact point target and Murph\'s context-aware status without a universal threshold. Use compact_table only for an explicit table or structured-tracker request, that verified initial live-workout card, or an unambiguous update to the same active workout; with multiple plausible workouts, do not infer authority and ask one narrow question. Never invent or silently truncate values. For tracked workouts, first update or resolve the canonical workout, re-read it successfully, and copy only that verified snapshot with its exact evt_<ULID> reference and canonical UTC snapshot instant. Use only when numerical output is permitted. Runtime renders durable text and fallbacks, so do not repeat card values in final send_message. This tool does not send and cannot combine with response media.',
+    'Attach one private-direct response card when the current accepted member message or the saved instructions for the exact scheduled automation occurrence request a structured answer that the card alone can represent, during managed meal closeout, for the verified initial card after starting or resuming one canonical live workout, or for an unambiguous update to its established workout card. Occurrence authority alone is not card intent. The card replaces the entire final response: attach it only when the card alone completely satisfies the current request; answer compound requests with complete ordinary text and no card. Before every goal-aware daily_nutrition card, first run vault-cli goal list --status active --limit 200 --format json. If it returns 200 records, fail closed with ordinary text, no Goal or measurement mutation, and no card. Otherwise run vault-cli goal show <goal-id> --format json for every returned active Goal whose list item reports a nonzero data.metricTargetsCount; never select detail reads by title, slug, domain, context-snapshot visibility, or the default list prefix. Resolve metric identity, unit, comparator, effective date, conflicts, and the 1,200-kcal boundary only after inspecting that complete detail set. Keep this active-target authority read separate from any all-status lookup used to reuse or honor Murph\'s managed paused or abandoned proposal; neither read substitutes for the other. For daily_nutrition, immediately beforehand run vault-cli meal totals --from <date> --to <same-date> and copy its exact canonical metric { total, mealCount } values; never calculate or reuse totals. New authoring uses V2 with fiber and five required goal snapshots; nullable V2 goals and nutrition V1 remain legacy replay and rendering compatibility only. Before deriving, saving, or surfacing numeric nutrition goals, before activating a paused nutrition proposal, and before every daily_nutrition attachment, even with five active goals or on a scheduled closeout, follow nutrition-strategy/references/daily-nutrition-card-safety.md. First run vault-cli memory show --format json and inspect the complete canonical Identity, Preferences, Instructions, and Context memory document for explicit, unambiguous safety facts; the context snapshot does not inject it. A failed or unreadable memory read fails closed with ordinary non-numeric text, no Goal or measurement mutation, and no card; leave an existing paused proposal unchanged. A clearly current saved age under 18 or clearly current intuitive-eating or number-sensitive preference uses the same suppression path. Missing, stale, ambiguous, or conflicting age alone is unavailable evidence, not a universal block; scheduled occurrences never ask. Run both vault-cli condition list --status active --limit 200 --format json and vault-cli regimen list --status active --limit 200 --format json. If either read fails or returns exactly 200 records, run no condition or regimen detail reads and fail closed with ordinary non-numeric text, no Goal or measurement mutation, and no card. Otherwise run vault-cli condition show <condition-id> --format json for every returned active condition and vault-cli regimen show <regimen-id> --format json for every returned active regimen before applying the safety gate; never select by title, substance, severity, context-snapshot visibility, or the default list prefix. If any required detail read fails or is unreadable, use the same fail-closed behavior; otherwise reuse the complete current-turn reads. Then run vault-cli event list --kind procedure --limit 200 --format json and apply its complete procedure-item and conditional-detail contract before continuing; a completed bariatric procedure suppresses numeric output, and a failed, unreadable, or saturated read fails closed. As part of that same pre-numeric and pre-activation gate, also run its bounded lossless vault-cli measurement entry list read over the canonical 45-day window. A usable adult BMI below 18.5, including height and weight rows sharing one eventId, suppresses numeric proposal derivation or presentation, every Goal write or activation, and the card. A failed read, or a saturated read that cannot resolve usable BMI evidence, fails closed with ordinary non-numeric text, no Goal or measurement mutation, and no card; leave an existing paused proposal unchanged. The gate also blocks known underweight, frailty, malnutrition risk, glucose-lowering medication, safety-relevant disease or clinician-managed nutrition context, and calorie targets below 1,200 kcal/day without flooring them upward. Scheduled authority never permits questions or activation; only the first eligible managed meal closeout may create and explain one paused proposal after the complete safety gate and an all-status Goal read prove the stable managed slug has never existed. For the exact card localDate, require the containing active Goal window and each target\'s optional startAt/targetAt interval to include that date, with inclusive boundaries; use the selected capture date for a scheduled closeout, which may differ from the occurrence date for a historical catch-up, or the explicitly requested date, never wall-clock today. Ignore out-of-window targets for current authority and conflicts, and never expose, compare, copy, derive from, or mutate a Goal because of them. Require exactly one unambiguous applicable exact point target in each fixed card unit: dietary-calories in kcal, and protein-grams, carbs-grams, fat-grams, and fiber-grams in g, resolved across active canonical Goals. Each target must use selected-value comparator between with identical numeric value and highValue. A one-sided threshold, non-identical range, or other shape remains authoritative but makes the bundle comparator-incompatible: never expose, compare, copy, or derive from its bound or create, replace, or remove a managed target around it; use ordinary text with no card or managed Goal mutation, and ask no question on a scheduled closeout. A target in another unit likewise remains authoritative but makes the bundle incompatible: never compare, convert, copy, or derive from its raw value. An explicit numeric-card request or the one first eligible managed closeout authorizes only the goal-aware workflow\'s paused canonical proposal, not activation or use. When any target is missing, follow nutrition-strategy/references/daily-nutrition-card-goals.md: hold applicable, compatible exact point targets fixed, derive missing macros from residual calories, and require every AMDR plus a 50 kcal energy tolerance before any Goal write; an infeasible bundle means ordinary text and no mutation. Save one paused canonical proposal, explain its values, reasoning, and effective date in ordinary text with no card, and activate it only after member acceptance. On first creation, set Goal window.startAt explicitly: use a member-requested effective date when present, otherwise the selected card localDate for a dated card request, otherwise the engine-supplied current vault-local date; never rely on the write-day default. Preserve that window on every later edit, activation, or card request and never silently rebase it to another card date. Any derived target addition or change atomically pauses the complete managed bundle until acceptance. A scheduled closeout never asks for inputs or activates provisional targets. On the first eligible managed closeout only, if the complete all-status Goal read proves the stable managed slug has never existed and already-known inputs pass the complete safety and derivation contracts, create and explain one paused proposal in ordinary text with no card; once that Goal exists in any status, scheduled turns never create, change, or automatically repeat it. Without a complete accepted bundle or that one first-run proposal path, use ordinary closeout text and no card. When an explicit card request caused the proposal, its next unambiguous acceptance may complete that pending request only after the complete safety recheck passes, then activation and readback, and a fresh same-date totals read; corrections, declines, ambiguous replies, target-setting-only requests, and compound requests remain text-only. Explicit active targets win metric by metric; conflicts, thresholds, ranges, unsafe numbers, or missing responsible calorie inputs mean ordinary text or one consolidated question, never a goal-less card. Freeze each exact point target and Murph\'s context-aware status without a universal threshold. Use compact_table for an explicit table or structured-tracker request, a structured plan or schedule that the table alone can fully represent within its bounds, that verified initial live-workout card, or an unambiguous update to the same active workout; with multiple plausible workouts, do not infer authority and ask one narrow question. Never invent or silently truncate values. For tracked workouts, first update or resolve the canonical workout, re-read it successfully, and copy only that verified snapshot with its exact evt_<ULID> reference and canonical UTC snapshot instant. Use only when numerical output is permitted. Runtime renders durable text and fallbacks, so do not repeat card values in final send_message. This tool does not send and cannot combine with response media.',
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -276,12 +281,27 @@ export const MURPH_ATTACH_EXERCISE_ROUTINE_CARD_TOOL = {
   namespace: 'murph',
   name: 'attach_exercise_routine_card',
   description:
-    'Attach one private-direct exercise routine card when this tool is available for a movement-instruction turn or saved instructions for the exact scheduled occurrence that ask Murph to teach the routine now. The card must completely answer the request and replaces final text. First run vault-cli exercise show for each named movement. Copy each selected image URL, alt, and step exactly. Construct its source as exercise_catalog:<returned-item-id>:<1-based-position-in-returned-images>; never invent media or reorder images before assigning the position. Keep each instruction concrete and short. Use subtitle for one short orientation sentence in the user\'s language that tells them to open each exercise for instructions and images. Use footer only when it adds information that the title, exercise details, subtitle, or safety note do not already say. Estimate each exercise, transition, and total honestly. Before attaching, compare the stated total with the routine and do not claim a longer session than the content supports. The current channel renders the card with its supported native presentation. Do not repeat values in final send_message and do not combine this card with response media.',
+    'Attach one private-direct exercise routine card when this tool is available for a movement-instruction turn or saved instructions for the exact scheduled occurrence that ask Murph to teach the routine now. Also use it when the current message asks to repeat, resend, or improve the presentation of a movement routine already present in the committed conversation. A request for a richer or more visual layout means this card, not styled plain text. The card must completely answer the request and replaces final text. First run vault-cli exercise show for each named movement. By default, include at least one useful returned catalog image for every exercise that has one. Add more frames for unfamiliar or technique-sensitive movements, while keeping the card at eight images or fewer. Omit exercise images only when the user explicitly asks for a routine without them. Copy each selected image URL, alt, and step exactly. Construct its source as exercise_catalog:<returned-item-id>:<1-based-position-in-returned-images>; never invent media or reorder images before assigning the position. Keep each instruction concrete and short. Use subtitle for one short orientation sentence in the user\'s language that tells them to open each exercise for instructions and images when images are included. Never promise images for an exercise that has none. Use footer only when it adds information that the title, exercise details, subtitle, or safety note do not already say. Estimate each exercise, transition, and total honestly. Before attaching, compare the stated total with the routine and do not claim a longer session than the content supports. The current channel renders the card with its supported native presentation. Do not repeat values in final send_message and do not combine this card with response media.',
   inputSchema: {
     type: 'object',
     additionalProperties: false,
     properties: {
       card: exerciseRoutineResponseCardJsonSchema,
+    },
+    required: ['card'],
+  },
+} as const
+
+export const MURPH_ATTACH_TELEGRAM_RICH_CONTENT_TOOL = {
+  namespace: 'murph',
+  name: 'attach_telegram_rich_content',
+  description:
+    'Attach one complete private Telegram Rich Message when structure makes the answer easier to scan and no existing semantic card owns the content. Good uses include a multi-step guide, non-catalog routine, checklist, comparison with explanatory detail, or multi-section summary. Keep short answers, one-paragraph advice, confirmations, urgent single actions, and casual chat as ordinary text. Never use this tool to derive or present nutrition totals or targets, tracked-workout state, a compact table that attach_response_card can represent, or a catalog-backed movement routine. Use attach_response_card for its nutrition, compact-table, and tracked-workout content. Use attach_exercise_routine_card for catalog-backed movement routines. If the owning semantic card cannot be attached, use ordinary text instead of this tool. These three approved cards remain routing examples: compact summary or schedule means attach_response_card; catalog movement instructions mean attach_exercise_routine_card; nutrition totals or targets mean attach_response_card only after its full safety workflow. They are not HTML templates. The card replaces the entire final response, so send no duplicate final text and attach no response media. Keep it compact: usually one h2, two to six sections or steps, and under 1,500 visible characters. Add more only when the complete answer needs it. Do not repeat the same facts in a summary, table, and details. Use short labels instead of sentence-shaped table cells. Put optional detail in details, but keep safety limits and stop conditions visible. Use a table only when explanatory content makes the answer unsuitable for the compact-table card, with at most five columns. Supported tags: h2, h3, p, footer, hr, ul, ol, li, blockquote, cite, aside, details, summary, table, caption, tr, th, td, b, strong, i, em, u, ins, code, mark, and br. Tables allow bordered and striped. Cells allow align="left", "center", or "right". Details allow open. Escape text with &amp;, &lt;, &gt;, &quot;, or &apos;. Do not use links, visible URLs, images, media, maps, custom emoji, scripts, styles, unsupported attributes, or Markdown. Generic example: <h2>Short focus reset</h2><p>Low effort · about 5 min</p><ol><li>Clear one small work area.</li><li>Choose one next action.</li></ol><details><summary>Why this helps</summary><p>A smaller field reduces competing cues.</p></details><blockquote>Pause if this starts adding stress.</blockquote>.',
+  inputSchema: {
+    type: 'object',
+    additionalProperties: false,
+    properties: {
+      card: telegramRichContentResponseCardJsonSchema,
     },
     required: ['card'],
   },
@@ -299,7 +319,7 @@ export const MURPH_GENERATE_IMAGE_TOOL = {
   namespace: 'murph',
   name: 'generate_image',
   description:
-    `Generate one GPT Image 2 image when requested, a known preference supports visual help, or a skill/product flow explicitly marks images welcome and privacy-safe. Use ordered vault refs and explain their roles; include ${MURPH_CHARACTER_SHEET_REFERENCE_IMAGE_REF}, Murph's canonical character sheet, when Murph appears. Vault outputs persist under raw/captures/**. Hosted accepted-message turns start generation in the background and finish through trusted private media. Exact scheduled automation occurrences remain synchronous and attach private media to the same final response. Local runs stay synchronous and save under CODEX_HOME/generated_images.`,
+    `Generate one GPT Image 2 image when requested, a known preference supports visual help, or a skill/product flow explicitly marks images welcome and privacy-safe. Use ordered vault refs and explain their roles; include ${MURPH_CHARACTER_SHEET_REFERENCE_IMAGE_REF}, Murph's canonical character sheet, when Murph appears. Vault outputs persist under raw/captures/**. Hosted accepted-message turns start generation in the background and finish through trusted private media. Exact scheduled automation occurrences remain synchronous and attach private media to the same final response; that image consumes one of the same ${ASSISTANT_AUTHORED_RESPONSE_MEDIA_MAX_ITEMS} final-response media slots, so leave a slot before calling. Local runs stay synchronous with the same slot rule and save under CODEX_HOME/generated_images.`,
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -842,13 +862,19 @@ const ASSISTANT_ACCEPTED_MESSAGE_REF_SCHEMA = {
   type: 'string',
   pattern: ASSISTANT_ACCEPTED_MESSAGE_REF_PATTERN,
   description:
-    'Opaque Message ref shown beside an accepted inbound message in the current prompt. Required for ask_current_sender, message_current_sender, and revoke_own_email_share; optional only for create_signup_referral_link and read_usage_referral. Use the exact ref beside the request; this is not a provider message id.',
+    'Opaque Message ref shown beside an accepted inbound message in the current prompt. Required for current-sender actions, record_current_sender_daily_metric, and revoke_own_email_share; optional only for create_signup_referral_link and read_usage_referral. Use the exact ref beside the relevant request or clarification answer; this is not a provider message id.',
 } as const
 
-const MURPH_GROUP_TOOL_ACTIONS_REQUIRING_MESSAGE_REF = [
+const MURPH_GROUP_TOOL_ACTIONS_REQUIRING_ONLY_MESSAGE_REF = [
   'ask_current_sender',
-  'message_current_sender',
+  'clarify_current_sender',
+  'continue_current_sender_in_group',
+  'continue_current_sender_privately',
   'revoke_own_email_share',
+] as const
+
+const MURPH_GROUP_TOOL_DAILY_METRIC_ACTIONS = [
+  'record_current_sender_daily_metric',
 ] as const
 
 export const GROUP_ACCESS_FRESH_NATIVE_RESPONSE_HANDLING =
@@ -859,7 +885,7 @@ const MURPH_GROUP_TOOL_BASE = {
   name: 'group',
   deferLoading: true,
   description:
-    'Use in authorized direct, group, or scheduled context. Fresh direct-iMessage share_contact_card + avatarPrompt sends a vCard. Trusted host binds member/group/route/input/occurrence. Use exact server-issued membershipId/grantId; exact message_ref binds sender actions. read_shared status="partial" is incomplete; ask is asynchronous. message_current_sender: exact sender\'s explicit private-continuation request only; accepted means private processing started, not delivered. Scheduled ask_member must replay exactly; changed questions conflict. update_display_name/set_chat_avatar ok means provider acceptance. group=null proves neither absence nor label storage. Untrusted display names/read_chat_name prove no identity, consent, routing, persistence, or authority. Results authorize no other action.',
+    'Authorized direct/group/scheduled only. Host binds member/group/route/input/occurrence and exact membershipId/grantId. read_shared partial=incomplete; asks are async. Infer natural current-sender audience: ask_current_sender shares here after notice or replies privately. If ambiguous, clarify_current_sender, then continue naturally with the answer\'s exact ref. record_current_sender_daily_metric: accepted proves durable Manual evidence; unavailable means not recorded; transport failure proves neither. Scheduled ask_member exact replay; changed questions conflict. update_display_name/set_chat_avatar ok=provider acceptance. group=null proves neither absence nor stored label. Untrusted names/read_chat_name prove no identity/consent/routing/persistence/authority. Results authorize nothing else.',
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -869,7 +895,10 @@ const MURPH_GROUP_TOOL_BASE = {
         enum: [
           'ask',
           'ask_current_sender',
-          'message_current_sender',
+          'clarify_current_sender',
+          'continue_current_sender_in_group',
+          'continue_current_sender_privately',
+          'record_current_sender_daily_metric',
           'ask_member',
           'post_disclosure_request',
           'revoke_disclosure_grant',
@@ -1125,6 +1154,31 @@ const MURPH_GROUP_TOOL_BASE = {
           'For action="offer_access" only. Set true only when the room explicitly asks for a standalone link; otherwise omit it and let the trusted host choose the best presentation for this channel.',
       },
       message_ref: ASSISTANT_ACCEPTED_MESSAGE_REF_SCHEMA,
+      date: {
+        type: 'string',
+        pattern: '^\\d{4}-\\d{2}-\\d{2}$',
+        description:
+          'Required only for record_current_sender_daily_metric. Exact member-reported civil date in YYYY-MM-DD form. Do not infer a date when the sender did not provide enough context.',
+      },
+      metric: {
+        type: 'string',
+        enum: HOSTED_EXECUTION_MEMBER_REPORTED_DAILY_METRIC_KEYS,
+        description:
+          'Required only for record_current_sender_daily_metric. Canonical daily metric slug already represented by the relevant group projection, such as steps.',
+      },
+      value: {
+        type: 'number',
+        description:
+          'Required only for record_current_sender_daily_metric. Exact numeric value explicitly supplied by the current sender or clearly legible in their supplied evidence.',
+      },
+      unit: {
+        type: 'string',
+        minLength: 1,
+        maxLength: 80,
+        pattern: '^[A-Za-z0-9._/%-]+$',
+        description:
+          'Required only for record_current_sender_daily_metric. Canonical compact unit for the metric, such as count for steps.',
+      },
     },
     required: ['action'],
   },
@@ -1132,9 +1186,12 @@ const MURPH_GROUP_TOOL_BASE = {
 
 const MURPH_GROUP_TOOL_ACTIONS_WITHOUT_REQUIRED_MESSAGE_REF =
   MURPH_GROUP_TOOL_BASE.inputSchema.properties.action.enum.filter((action) =>
-    action !== 'ask_current_sender'
-    && action !== 'message_current_sender'
-    && action !== 'revoke_own_email_share')
+    !MURPH_GROUP_TOOL_ACTIONS_REQUIRING_ONLY_MESSAGE_REF.includes(
+      action as (typeof MURPH_GROUP_TOOL_ACTIONS_REQUIRING_ONLY_MESSAGE_REF)[number],
+    )
+    && !MURPH_GROUP_TOOL_DAILY_METRIC_ACTIONS.includes(
+      action as (typeof MURPH_GROUP_TOOL_DAILY_METRIC_ACTIONS)[number],
+    ))
 
 export const MURPH_GROUP_TOOL = {
   ...MURPH_GROUP_TOOL_BASE,
@@ -1145,10 +1202,34 @@ export const MURPH_GROUP_TOOL = {
         oneOf: [
           {
             type: 'object',
+            maxProperties: 6,
             properties: {
               action: {
                 type: 'string',
-                enum: MURPH_GROUP_TOOL_ACTIONS_REQUIRING_MESSAGE_REF,
+                enum: MURPH_GROUP_TOOL_DAILY_METRIC_ACTIONS,
+              },
+              date: MURPH_GROUP_TOOL_BASE.inputSchema.properties.date,
+              message_ref: ASSISTANT_ACCEPTED_MESSAGE_REF_SCHEMA,
+              metric: MURPH_GROUP_TOOL_BASE.inputSchema.properties.metric,
+              unit: MURPH_GROUP_TOOL_BASE.inputSchema.properties.unit,
+              value: MURPH_GROUP_TOOL_BASE.inputSchema.properties.value,
+            },
+            required: [
+              'action',
+              'date',
+              'message_ref',
+              'metric',
+              'unit',
+              'value',
+            ],
+          },
+          {
+            type: 'object',
+            maxProperties: 2,
+            properties: {
+              action: {
+                type: 'string',
+                enum: MURPH_GROUP_TOOL_ACTIONS_REQUIRING_ONLY_MESSAGE_REF,
               },
               message_ref: ASSISTANT_ACCEPTED_MESSAGE_REF_SCHEMA,
             },
@@ -1404,6 +1485,7 @@ const MURPH_BASE_DYNAMIC_TOOLS = [
   MURPH_ATTACH_RESPONSE_MEDIA_TOOL,
   MURPH_ATTACH_RESPONSE_CARD_TOOL,
   MURPH_ATTACH_EXERCISE_ROUTINE_CARD_TOOL,
+  MURPH_ATTACH_TELEGRAM_RICH_CONTENT_TOOL,
   MURPH_GENERATE_IMAGE_TOOL,
   MURPH_GENERATE_VOICE_MEMO_TOOL,
   MURPH_ASSISTANT_CONFIGURATION_TOOL,
@@ -1477,6 +1559,7 @@ export interface MurphDynamicToolAvailability {
   productFeedbackAvailable?: boolean | null
   responseCardsAvailable?: boolean | null
   exerciseRoutineResponseCardsAvailable?: boolean | null
+  telegramRichContentResponseCardsAvailable?: boolean | null
   groupChallengeResponseCardsAvailable?: boolean | null
   progressUpdateMode?: 'direct' | 'group'
   physicalNotesAvailable?: boolean | null
@@ -1512,6 +1595,8 @@ const TOOL_AVAILABILITY: ReadonlyMap<MurphDynamicTool, AvailabilityPredicate> =
     [MURPH_ATTACH_RESPONSE_CARD_TOOL, defaultOff((a) => a.responseCardsAvailable)],
     [MURPH_ATTACH_EXERCISE_ROUTINE_CARD_TOOL, defaultOff((a) =>
       a.exerciseRoutineResponseCardsAvailable)],
+    [MURPH_ATTACH_TELEGRAM_RICH_CONTENT_TOOL, defaultOff((a) =>
+      a.telegramRichContentResponseCardsAvailable)],
     [MURPH_FINISH_WITHOUT_REPLY_TOOL, defaultOn((a) => a.allowFinishWithoutReply)],
     [MURPH_SELECT_REPLY_TARGET_TOOL, defaultOff((a) => a.messageTargetingAvailable)],
     [MURPH_REACT_TO_MESSAGE_TOOL, defaultOff((a) => a.messageTargetingAvailable)],

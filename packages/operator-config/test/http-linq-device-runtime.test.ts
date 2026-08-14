@@ -2953,6 +2953,10 @@ test('linq runtime records safe request and response diagnostics for provider ht
         {
           chatId: 'sample-chat-route-value',
           idempotencyKey: 'reply-key-safe-diagnostics',
+          media: [
+            { url: 'https://cdn.example.test/private-diagnostic-image.png' },
+            { attachmentId: 'attachment-safe-diagnostics' },
+          ],
           message: 'hello reminder',
           replyToMessageId: 'reply-sample-message-id',
         },
@@ -2964,11 +2968,13 @@ test('linq runtime records safe request and response diagnostics for provider ht
             createJsonResponse(
               {
                 'sample-chat-route-value': 'dynamic key should stay private',
-                errors: [
-                  {
-                    message: 'chat sample-chat-route-value rejected message',
-                  },
-                ],
+                error: {
+                  code: 1004,
+                  doc_url: 'https://docs.linqapp.com/error/codes/1xxx/1004/',
+                  message: 'chat sample-chat-route-value rejected message',
+                  status: 400,
+                },
+                success: false,
                 trace_id: 'trace-sample-response-value',
               },
               {
@@ -2991,20 +2997,98 @@ test('linq runtime records safe request and response diagnostics for provider ht
         error.context?.requestBodyShape ===
           'object:message|message:idempotency_key,parts' &&
         error.context?.requestMessageLength === 'hello reminder'.length &&
-        error.context?.requestMessagePartCount === 1 &&
+        error.context?.requestMessagePartCount === 3 &&
+        error.context?.requestTextPartCount === 1 &&
+        error.context?.requestMediaPartCount === 2 &&
+        error.context?.requestPublicUrlMediaPartCount === 1 &&
+        error.context?.requestAttachmentMediaPartCount === 1 &&
+        error.context?.providerErrorCode === '1004' &&
+        error.context?.providerRequestId === 'trace-sample-response-value' &&
         error.context?.responseBodyKind === 'json_object' &&
-        error.context?.responseBodyKeyCount === 3 &&
+        error.context?.responseBodyKeyCount === 4 &&
+        error.context?.responseBodyKeySummary === 'error,trace_id' &&
         JSON.stringify(error.context?.responseBodyKeys) ===
-          JSON.stringify(['errors', 'trace_id']) &&
+          JSON.stringify(['error', 'trace_id']) &&
         error.context?.responseBodyStringFieldCount === 2 &&
+        error.context?.responseBodyStringFieldSummary === 'trace_id' &&
         JSON.stringify(error.context?.responseBodyStringFields) ===
           JSON.stringify(['trace_id']) &&
+        typeof error.context?.responseBodySha256 === 'string' &&
+        /^[a-f0-9]{64}$/u.test(error.context.responseBodySha256) &&
         !contextJson.includes('hello reminder') &&
         !contextJson.includes('sample-chat-route-value') &&
-        !contextJson.includes('trace-sample-response-value')
+        !contextJson.includes('private-diagnostic-image.png') &&
+        !contextJson.includes('chat sample-chat-route-value rejected message')
       )
     },
   )
+})
+
+test('linq runtime retains hashed text diagnostics from bounded response streams', async () => {
+  const providerText = 'Plain Linq failure'
+
+  await assert.rejects(
+    () => sendLinqChatMessage(
+      {
+        chatId: 'private-chat-route',
+        message: 'private message body',
+      },
+      {
+        env: { LINQ_API_TOKEN: '<REDACTED_TOKEN>' },
+        fetchImplementation: async () => new Response(providerText, {
+          headers: { 'content-type': 'text/plain' },
+          status: 400,
+        }),
+      },
+    ),
+    (error) => {
+      if (!(error instanceof VaultCliError)) {
+        return false
+      }
+      const serialized = JSON.stringify({
+        context: error.context,
+        message: error.message,
+      })
+      return error.code === 'LINQ_API_REQUEST_FAILED'
+        && error.context?.responseBodyKind === 'text'
+        && error.context?.responseBodySha256 ===
+          'da7d00e0c46925b2155166ece27e101541b4a22b97ac223cd4749b880e59a0da'
+        && error.context?.responseBodyTextLength === providerText.length
+        && !serialized.includes(providerText)
+        && !serialized.includes('private-chat-route')
+        && !serialized.includes('private message body')
+    },
+  )
+})
+
+test('linq runtime rejects oversized rendered text before provider entry', async () => {
+  const fetchImplementation = vi.fn(async () => createJsonResponse({}))
+
+  await assert.rejects(
+    () => sendLinqChatMessage(
+      {
+        chatId: 'chat-oversized-text',
+        media: [{ url: 'https://cdn.example.test/frame.png' }],
+        message: 'x'.repeat(10_001),
+      },
+      {
+        env: { LINQ_API_TOKEN: '<REDACTED_TOKEN>' },
+        fetchImplementation,
+      },
+    ),
+    (error) =>
+      error instanceof VaultCliError &&
+      error.code === 'LINQ_INVALID_INPUT' &&
+      error.context?.failureStage === 'configuration' &&
+      error.context?.operation === 'send_message' &&
+      error.context?.requestMessageLength === 10_001 &&
+      error.context?.requestMessagePartCount === 2 &&
+      error.context?.requestMediaPartCount === 1 &&
+      error.context?.retryable === false &&
+      'deliveryMayHaveSucceeded' in error &&
+      error.deliveryMayHaveSucceeded === false,
+  )
+  expect(fetchImplementation).not.toHaveBeenCalled()
 })
 
 test('linq runtime does not surface top-level provider error text or transport cause text', async () => {
@@ -3026,6 +3110,10 @@ test('linq runtime does not surface top-level provider error text or transport c
                   'chat sample-chat-route rejected sample reminder text',
               },
               {
+                headers: {
+                  'Content-Type': 'application/json',
+                  'X-Trace-ID': 'trace-header-only',
+                },
                 status: 400,
               },
             ),
@@ -3044,6 +3132,7 @@ test('linq runtime does not surface top-level provider error text or transport c
         error.code === 'LINQ_API_REQUEST_FAILED' &&
         error.message ===
           'Linq request POST /chats/[chat]/messages failed with HTTP 400.' &&
+        error.context?.providerRequestId === 'trace-header-only' &&
         error.context?.responseBodyKind === 'json_object' &&
         JSON.stringify(error.context?.responseBodyKeys) ===
           JSON.stringify(['message']) &&
@@ -3229,6 +3318,89 @@ test('stopLinqChatTypingIndicator does not inherit delete-message retries', asyn
   )
 
   assert.equal(transientAttempts, 1)
+})
+
+test('linq runtime leaves all control-plane retries to the Murph policy', async () => {
+  vi.useFakeTimers()
+  const requestUrls: string[] = []
+  const send = sendLinqChatMessage(
+    {
+      chatId: 'chat-sdk-retry-owner',
+      idempotencyKey: 'sdk-retry-owner-key',
+      message: 'hello',
+    },
+    {
+      env: {
+        LINQ_API_BASE_URL: 'https://linq.example.test/custom/partner/v3/',
+        LINQ_API_TOKEN: 'linq-token',
+      },
+      fetchImplementation: async (url) => {
+        requestUrls.push(url)
+        return createJsonResponse(
+          { error: { message: 'temporarily unavailable' } },
+          { status: 503 },
+        )
+      },
+    },
+  )
+  const rejection = assert.rejects(
+    send,
+    (error) =>
+      error instanceof VaultCliError &&
+      error.code === 'LINQ_API_REQUEST_FAILED' &&
+      error.context?.operation === 'send_message' &&
+      error.context?.retryable === true &&
+      error.context?.status === 503,
+  )
+
+  await vi.runAllTimersAsync()
+  await rejection
+
+  assert.equal(requestUrls.length, 3)
+  assert.deepEqual(requestUrls, Array(3).fill(
+    'https://linq.example.test/custom/partner/v3/chats/chat-sdk-retry-owner/messages',
+  ))
+})
+
+test.each([
+  {
+    buildResponse: () => new Response('{"phone_numbers":[]}', {
+      headers: { 'content-length': String(256 * 1024 + 1) },
+      status: 200,
+    }),
+    label: 'declared',
+  },
+  {
+    buildResponse: () => new Response(new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new Uint8Array(200 * 1024))
+        controller.enqueue(new Uint8Array(64 * 1024 + 1))
+      },
+    }), { status: 200 }),
+    label: 'chunked',
+  },
+])('linq runtime caps $label SDK responses before parsing', async ({
+  buildResponse,
+}) => {
+  let attempts = 0
+  await assert.rejects(
+    () => probeLinqApi({
+      env: { LINQ_API_TOKEN: 'linq-token' },
+      fetchImplementation: async () => {
+        attempts += 1
+        return buildResponse()
+      },
+    }),
+    (error) =>
+      error instanceof VaultCliError &&
+      error.code === 'LINQ_API_REQUEST_FAILED' &&
+      error.context?.failureStage === 'http' &&
+      error.context?.operation === 'list_phone_numbers' &&
+      error.context?.responseBodyKind === 'oversize' &&
+      error.context?.retryable === false &&
+      error.context?.status === 200,
+  )
+  assert.equal(attempts, 1)
 })
 
 test('linq runtime covers optional payload omissions, fallback http messages, and timeout transport errors', async () => {

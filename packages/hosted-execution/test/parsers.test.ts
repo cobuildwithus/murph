@@ -8,6 +8,7 @@ import {
   HOSTED_RUNTIME_GROUP_SENDER_HANDLE_MAX_CODE_POINTS,
   HOSTED_RUNTIME_GROUP_TOOL_REQUEST_MAX_BYTES,
 } from "../src/runtime-control.ts";
+import { HOSTED_VAULT_SHARE_DELIVER_MAX_RECORDS } from "../src/vault-share.ts";
 
 import {
   parseHostedExecutionDirectRoute,
@@ -2561,6 +2562,31 @@ describe("parseHostedRuntimeGroupTool", () => {
         unavailableReason: "shared_data_unavailable",
       },
     });
+    expect(parseHostedRuntimeGroupToolResponse({
+      action: "read_shared",
+      result: {
+        members: [{
+          currentTurnHandles: [],
+          displayName: null,
+          memberId: "member_pending",
+          participantId: "participant_pending",
+          projections: [{
+            dataStatus: "pending",
+            grantedAt: "2026-07-31T12:32:00.000Z",
+            grantStatus: "granted",
+            projectionScope: { projectionKind: "steps-days.v0" },
+            projectionScopeKey: "steps-days.v0",
+            records: [],
+          }],
+        }],
+        requestedProjectionScopeKeys: ["steps-days.v0"],
+        status: "ok",
+      },
+    })).toMatchObject({
+      result: {
+        members: [{ projections: [{ dataStatus: "pending" }] }],
+      },
+    });
   });
 
   it("rejects read_shared identity leaks, inconsistent statuses, and corrupt records", () => {
@@ -2676,6 +2702,31 @@ describe("parseHostedRuntimeGroupTool", () => {
         ...result,
         members: [{
           ...result.members[0],
+          projections: [{ ...projection, dataStatus: "pending" }],
+        }],
+      },
+    })).toThrow(/must not contain records/u);
+    expect(() => parseHostedRuntimeGroupToolResponse({
+      action: "read_shared",
+      result: {
+        ...result,
+        members: [{
+          ...result.members[0],
+          projections: [{
+            ...projection,
+            dataStatus: "pending",
+            grantStatus: "not_granted",
+            records: [],
+          }],
+        }],
+      },
+    })).toThrow(/not_granted/u);
+    expect(() => parseHostedRuntimeGroupToolResponse({
+      action: "read_shared",
+      result: {
+        ...result,
+        members: [{
+          ...result.members[0],
           projections: [{ ...projection, records: [] }],
         }],
       },
@@ -2688,14 +2739,24 @@ describe("parseHostedRuntimeGroupTool", () => {
           ...result.members[0],
           projections: [{
             ...projection,
-            records: Array.from({ length: 9 }, (_, index) => ({
-              ...projection.records[0],
-              recordKey: `2026-07-0${index + 1}`,
-            })),
+            records: Array.from(
+              { length: HOSTED_VAULT_SHARE_DELIVER_MAX_RECORDS + 1 },
+              (_, index) => {
+                const date = new Date(Date.UTC(2026, 0, index + 1))
+                  .toISOString()
+                  .slice(0, 10);
+                return {
+                  ...projection.records[0],
+                  data: { ...projection.records[0].data, date },
+                  occurredAt: `${date}T00:00:00.000Z`,
+                  recordKey: date,
+                };
+              },
+            ),
           }],
         }],
       },
-    })).toThrow(/at most 8/u);
+    })).toThrow(new RegExp(`at most ${HOSTED_VAULT_SHARE_DELIVER_MAX_RECORDS}`, "u"));
     expect(() => parseHostedRuntimeGroupToolResponse({
       action: "read_shared",
       result: {

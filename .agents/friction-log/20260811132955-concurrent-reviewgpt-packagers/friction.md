@@ -1,6 +1,7 @@
 ---
 title: 'Concurrent ReviewGPT packagers share a removable PR context directory'
 severity: 'minor'
+issue: 'cobuildwithus/murph#1685'
 ---
 
 ## Expected Behavior

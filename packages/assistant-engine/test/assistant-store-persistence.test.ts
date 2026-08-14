@@ -929,7 +929,7 @@ describe('assistant store persistence seams', () => {
           },
         },
         {
-          channel: 'agentmail',
+          channel: 'linq',
           enabledAt: '2026-04-08T00:06:00.000Z',
           eligibleAfter: null,
         },
@@ -951,7 +951,7 @@ describe('assistant store persistence seams', () => {
           },
         },
         {
-          channel: 'agentmail',
+          channel: 'linq',
           enabledAt: '2026-04-08T00:06:00.000Z',
           eligibleAfter: null,
         },

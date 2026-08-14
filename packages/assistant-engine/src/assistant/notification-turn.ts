@@ -6,6 +6,9 @@ import type {
 import {
   parseAssistantSessionRecord,
 } from '@murphai/operator-config/assistant-cli-contracts'
+import {
+  createHostedExecutionPrivateAssistantAskCompletionDeliveryKey,
+} from '@murphai/hosted-execution/assistant-identifiers'
 import type {
   HostedRuntimeGroupEmailEffectResponse,
 } from '@murphai/hosted-execution/runtime-control'
@@ -29,6 +32,7 @@ import { resolveAssistantSessionForMessage } from './session-resolution.js'
 import { resolveAssistantSessionTarget } from './session-resolution.js'
 import { resolveAssistantTurnSharedPlan } from './turn-plan.js'
 import { resolveAssistantConversationScope } from './conversation-policy.js'
+import { prepareAssistantCronNotificationInput } from './cron/output-history.js'
 import {
   executeCodexTurnWithRecovery,
   type AssistantCodexTurnThreadScopeProfile,
@@ -299,7 +303,7 @@ export async function sendAssistantNotificationLocal(
     abortSignal: input.abortSignal,
     vault: input.vault,
     run: async () => {
-      const messageInput = buildAssistantNotificationMessageInput(
+      const resolutionMessageInput = buildAssistantNotificationMessageInput(
         input,
         maintenanceEvidence,
       )
@@ -312,13 +316,22 @@ export async function sendAssistantNotificationLocal(
           ? createAssistantMaintenanceNotificationResolvedSession({
               boundaryDefaultTarget,
               defaults,
-              message: messageInput,
+              message: resolutionMessageInput,
             })
           : await resolveAssistantSessionForMessage({
               boundaryDefaultTarget,
               defaults,
-              message: messageInput,
+              message: resolutionMessageInput,
             })
+      const preparedInput = await prepareAssistantCronNotificationInput(input, {
+        sessionId: resolved.session.sessionId,
+      })
+      const messageInput = preparedInput === input
+        ? resolutionMessageInput
+        : buildAssistantNotificationMessageInput(
+            preparedInput,
+            maintenanceEvidence,
+          )
       await emitHostedAssistantContextSessionResolvedTrace({
         message: messageInput,
         resolved,
@@ -398,6 +411,8 @@ export async function sendAssistantNotificationLocal(
             firstContactDocIds,
             input,
             messageInput,
+            privateCompletionContinuitySessionId:
+              resolved.privateCompletionContinuitySessionId ?? null,
             responseText: responsePolicy.text,
             session: resolved.session,
             sharedPlan,
@@ -891,6 +906,7 @@ async function sendAssistantExactTextNotificationLocal(input: {
   firstContactDocIds: readonly string[]
   input: AssistantNotificationInput
   messageInput: AssistantMessageInput
+  privateCompletionContinuitySessionId: string | null
   responseText: string
   session: AssistantSession
   sharedPlan: Awaited<ReturnType<typeof resolveAssistantTurnSharedPlan>>
@@ -899,6 +915,8 @@ async function sendAssistantExactTextNotificationLocal(input: {
     input.responseText,
     'notification response',
   )
+  const deferPrivateCompletionContinuity =
+    isAssistantReviewedPrivateExactCompletion(input.input)
   const turnId = createAssistantTurnId()
   const turnCreatedAt = new Date().toISOString()
   const state = createAssistantRuntimeStateService(input.input.vault)
@@ -940,6 +958,10 @@ async function sendAssistantExactTextNotificationLocal(input: {
     input: input.messageInput,
     media: [],
     message: responseText,
+    privateCompletionContinuitySessionId:
+      deferPrivateCompletionContinuity
+        ? input.privateCompletionContinuitySessionId
+        : undefined,
     session: input.session,
     sharedPlan: input.sharedPlan,
     turnId,
@@ -974,12 +996,14 @@ async function sendAssistantExactTextNotificationLocal(input: {
         turnId,
         vault: input.input.vault,
       })
-      savedSession = await persistAssistantExactTextNotificationSession({
-        responseText,
-        session: deliveryOutcome.session,
-        turnCreatedAt,
-        vault: input.input.vault,
-      })
+      savedSession = deferPrivateCompletionContinuity
+        ? deliveryOutcome.session
+        : await persistAssistantExactTextNotificationSession({
+            responseText,
+            session: deliveryOutcome.session,
+            turnCreatedAt,
+            vault: input.input.vault,
+          })
     } catch (error) {
       await abandonQueuedNotificationDeliveryAfterCommitFailure({
         deliveryOutcome,
@@ -1009,12 +1033,14 @@ async function sendAssistantExactTextNotificationLocal(input: {
     if (deliveryOutcome.kind === 'failed') {
       throw deliveryOutcome.error
     }
-    savedSession = await persistAssistantExactTextNotificationSession({
-      responseText,
-      session: deliveryOutcome.session,
-      turnCreatedAt,
-      vault: input.input.vault,
-    })
+    savedSession = deferPrivateCompletionContinuity
+      ? deliveryOutcome.session
+      : await persistAssistantExactTextNotificationSession({
+          responseText,
+          session: deliveryOutcome.session,
+          turnCreatedAt,
+          vault: input.input.vault,
+        })
   }
 
   if (
@@ -1132,6 +1158,42 @@ async function persistAssistantExactTextNotificationSession(input: {
     lastTurnAt: updatedAt,
     turnCount: input.session.turnCount + 1,
   })
+}
+
+function isAssistantReviewedPrivateExactCompletion(
+  input: AssistantNotificationInput,
+): boolean {
+  const expiresAt = normalizeNullableString(
+    input.reviewedAssistantAskCompletionExpiresAt,
+  )
+  const answeredMailboxItemIds = input.answeredMailboxItemIds ?? []
+  const completionId = answeredMailboxItemIds.length === 1
+    ? normalizeNullableString(answeredMailboxItemIds[0])
+    : null
+  if (
+    expiresAt === null
+    || !Number.isFinite(Date.parse(expiresAt))
+    || completionId === null
+    || answeredMailboxItemIds[0] !== completionId
+    || [...completionId].length > 256
+  ) {
+    return false
+  }
+
+  const deliveryKey =
+    createHostedExecutionPrivateAssistantAskCompletionDeliveryKey(completionId)
+  return (
+    input.executionContext?.hosted != null
+    && input.responsePolicy?.kind === 'require_send_exact_text'
+    && input.deliveryDispatchMode === 'queue-only'
+    && input.firstContactPolicy == null
+    && input.notificationPromptProfile == null
+    && input.outboxExternalThreadRouteAuthority == null
+    && input.threadIsDirect === true
+    && (input.channel === 'linq' || input.channel === 'telegram')
+    && normalizeNullableString(input.deliveryDedupeToken) === deliveryKey
+    && normalizeNullableString(input.deliveryIdempotencyKey) === deliveryKey
+  )
 }
 
 type AssistantNotificationAnnotatedError = Error & {
@@ -1417,6 +1479,7 @@ async function deliverAssistantNotificationMessage(input: {
   input: AssistantMessageInput
   media?: readonly AssistantResponseMedia[] | null
   message: string
+  privateCompletionContinuitySessionId?: string | null
   session: AssistantSession
   sharedPlan: Awaited<ReturnType<typeof resolveAssistantTurnSharedPlan>>
   turnId: string
@@ -1467,6 +1530,12 @@ async function deliverAssistantNotificationMessage(input: {
     ...deliveryFields,
     card: input.card ?? null,
     media,
+    ...(input.privateCompletionContinuitySessionId === undefined
+      ? {}
+      : {
+          privateCompletionContinuitySessionId:
+            input.privateCompletionContinuitySessionId,
+        }),
     dispatchMode: input.input.deliveryDispatchMode,
   })
   switch (outcome.kind) {

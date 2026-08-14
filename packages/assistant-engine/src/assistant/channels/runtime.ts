@@ -4,11 +4,7 @@ import {
   type TelegramThreadTarget,
 } from '@murphai/messaging-ingress/telegram-webhook'
 import {
-  createAgentmailApiClient,
-  resolveAgentmailApiKey,
-  resolveAgentmailBaseUrl,
-} from '@murphai/operator-config/agentmail-runtime'
-import {
+  assertLinqMessageTextPartWithinLimit,
   checkLinqIMessageCapability,
   createLinqChat,
   isDefinitiveLinqIMessageAppCardRejection,
@@ -52,7 +48,6 @@ import type {
   AssistantChannelActivityHandle,
   AssistantChannelActivityStopOptions,
   AssistantDeliveryCandidate,
-  EmailRuntimeDependencies,
   LinqRuntimeDependencies,
   TelegramRuntimeDependencies,
 } from './types.js'
@@ -103,7 +98,7 @@ type PreparedTelegramPhoto =
 type TelegramMessageEntity = {
   length: number
   offset: number
-  type: MessageTextDecoration['style']
+  type: MessageTextDecoration['style'] | 'pre'
 }
 
 type DecoratedTelegramPhotoCaption = {
@@ -201,7 +196,10 @@ export async function sendTelegramRichMessage(
   providerMessageIds?: string[]
   target: string
 }> {
-  assertSingleTelegramRichFallbackMessage(input.fallbackMessage)
+  assertSingleTelegramRichFallbackMessage(
+    input.fallbackMessage,
+    input.richMessage.skip_entity_detection === true,
+  )
   const env = dependencies.env ?? process.env
   const token = resolveTelegramBotToken(env)
   if (!token) {
@@ -285,6 +283,8 @@ export async function sendTelegramRichMessage(
           {
             idempotencyKey: input.idempotencyKey ?? null,
             message: input.fallbackMessage,
+            protectAutomaticEntities:
+              input.richMessage.skip_entity_detection === true,
             replyToMessageId: input.replyToMessageId ?? null,
             target: targetLabel,
           },
@@ -716,6 +716,7 @@ export async function sendLinqMessage(
   const shouldAttemptDirectNativeCard =
     card !== null &&
     card.kind !== 'exercise_routine' &&
+    card.kind !== 'telegram_rich_content' &&
     input.targetKind === 'thread' &&
     input.threadIsDirect === true &&
     input.nativeReplyRequested !== true &&
@@ -806,6 +807,20 @@ export async function sendLinqMessage(
     }
   }
 
+  const message = responseMedia.some((item) => item.kind === 'vault_file')
+    ? ''
+    : appendImageAlternativeText(input.message, responseMedia)
+  assertLinqMessageTextPartWithinLimit({
+    message,
+    operation: participantFromPhoneNumber ? 'create_chat' : 'send_message',
+    requestAttachmentMediaPartCount: responseMedia.filter((item) =>
+      item.kind === 'vault_image' || item.kind === 'vault_file'
+    ).length,
+    requestMediaPartCount: responseMedia.length,
+    requestPublicUrlMediaPartCount:
+      responseMedia.filter((item) => item.kind === 'image').length,
+  })
+
   if (card !== null) {
     const textFallbackIdempotencyKey =
       appCardFallbackIdempotencyKey ?? idempotencyKey
@@ -831,9 +846,6 @@ export async function sendLinqMessage(
     responseMedia,
     dependencies,
   )
-  const message = responseMedia.some((item) => item.kind === 'vault_file')
-    ? ''
-    : appendImageAlternativeText(input.message, input.media ?? [])
 
   if (participantFromPhoneNumber) {
     const created = await createLinqChat(
@@ -1386,97 +1398,11 @@ function waitForAssistantChannelActivityRefresh(
 }
 
 
-export async function sendEmailMessage(
-  input: {
-    idempotencyKey?: string | null
-    identityId: string
-    message: string
-    replyToMessageId?: string | null
-    target: string
-    targetKind: AssistantDeliveryCandidate['kind']
-    subject?: string | null
-  },
-  dependencies: EmailRuntimeDependencies = {},
-): Promise<{ providerMessageId: string | null; providerThreadId: string | null }> {
-  const identityId = input.identityId.trim()
-  if (identityId.length === 0) {
-    throw new VaultCliError(
-      'ASSISTANT_EMAIL_IDENTITY_REQUIRED',
-      'Default email delivery requires an AgentMail inbox identity.',
-    )
-  }
-
-  const target = input.target.trim()
-  if (target.length === 0) {
-    throw new VaultCliError(
-      'ASSISTANT_CHANNEL_TARGET_REQUIRED',
-      'Email delivery requires a non-empty recipient or thread target.',
-    )
-  }
-
-  const subject = normalizeOptionalText(input.subject)
-  const env = dependencies.env ?? process.env
-  const apiKey = resolveAgentmailApiKey(env)
-  if (!apiKey) {
-    throw new VaultCliError(
-      'ASSISTANT_EMAIL_API_KEY_REQUIRED',
-      'Outbound email delivery requires AGENTMAIL_API_KEY.',
-    )
-  }
-
-  const client = createAgentmailApiClient(apiKey, {
-    baseUrl: resolveAgentmailBaseUrl(env) ?? undefined,
-    fetchImplementation: dependencies.fetchImplementation,
-  })
-
-  if (input.targetKind === 'thread') {
-    if (subject) {
-      throw new VaultCliError(
-        'ASSISTANT_EMAIL_THREAD_SUBJECT_UNSUPPORTED',
-        'Email thread replies preserve the existing subject. Do not provide a subject override when replying to a thread.',
-        { threadId: target },
-      )
-    }
-
-    const thread = await client.getThread(target)
-    const messageId = resolveAgentmailThreadReplyMessageId(thread)
-    if (!messageId) {
-      throw new VaultCliError(
-        'ASSISTANT_EMAIL_THREAD_REPLY_UNAVAILABLE',
-        'Email thread delivery requires a resolvable parent AgentMail message.',
-        { threadId: target },
-      )
-    }
-
-    const delivered = await client.replyToMessage({
-      inboxId: identityId,
-      messageId: normalizeOptionalText(input.replyToMessageId) ?? messageId,
-      text: input.message,
-      replyAll: true,
-    })
-    return {
-      providerMessageId: normalizeOptionalText(delivered.message_id),
-      providerThreadId: normalizeOptionalText(delivered.thread_id),
-    }
-  }
-
-  const delivered = await client.sendMessage({
-    inboxId: identityId,
-    to: target,
-    subject: subject ?? 'Murph update',
-    text: input.message,
-  })
-
-  return {
-    providerMessageId: normalizeOptionalText(delivered.message_id),
-    providerThreadId: normalizeOptionalText(delivered.thread_id),
-  }
-}
-
 async function sendTelegramMessageDetailed(
   input: {
     idempotencyKey?: string | null
     message: string
+    protectAutomaticEntities?: boolean
     replyToMessageId?: string | null
     target: string
   },
@@ -1518,7 +1444,9 @@ async function sendTelegramMessageDetailed(
   const providerMessageIds: string[] = []
   let replyToMessageId = normalizeTelegramReplyToMessageId(input.replyToMessageId)
 
-  const renderedMessage = renderMarkdownMessageText(input.message)
+  const renderedMessage = input.protectAutomaticEntities
+    ? { decorations: [], text: input.message }
+    : renderMarkdownMessageText(input.message)
   const chunks = splitDecoratedMessageText(renderedMessage, TELEGRAM_MAX_TEXT_LENGTH)
   const maxDeliveryAttempts = requireTelegramMaxDeliveryAttempts(
     dependencies.maxDeliveryAttempts,
@@ -1528,7 +1456,9 @@ async function sendTelegramMessageDetailed(
       const delivered = await sendTelegramTextChunk({
         authorityBoundTarget: dependencies.authorityBoundTarget,
         baseUrl,
-        entities: buildTelegramMessageEntities(chunk.decorations),
+        entities: input.protectAutomaticEntities
+          ? [{ length: chunk.text.length, offset: 0, type: 'pre' }]
+          : buildTelegramMessageEntities(chunk.decorations),
         fetchImplementation,
         maxDeliveryAttempts,
         replyToMessageId,
@@ -1703,28 +1633,6 @@ function groupTelegramCleanupMessagesByTarget(
   }
 
   return grouped
-}
-
-function resolveAgentmailThreadReplyMessageId(input: {
-  last_message_id?: string | null
-  messages?: Array<{ message_id?: string | null }> | null
-}): string | null {
-  const direct = input.last_message_id?.trim() ? input.last_message_id.trim() : null
-  if (direct) {
-    return direct
-  }
-
-  const messages = Array.isArray(input.messages) ? input.messages : []
-  for (let index = messages.length - 1; index >= 0; index -= 1) {
-    const candidate = messages[index]?.message_id?.trim()
-      ? messages[index]!.message_id!.trim()
-      : null
-    if (candidate) {
-      return candidate
-    }
-  }
-
-  return null
 }
 
 async function sendTelegramTextChunk(input: {
@@ -2408,8 +2316,13 @@ function markTelegramDeliveryAmbiguous(
   })
 }
 
-function assertSingleTelegramRichFallbackMessage(message: string): void {
-  const renderedMessage = renderMarkdownMessageText(message)
+function assertSingleTelegramRichFallbackMessage(
+  message: string,
+  protectAutomaticEntities: boolean,
+): void {
+  const renderedMessage = protectAutomaticEntities
+    ? { decorations: [], text: message }
+    : renderMarkdownMessageText(message)
   const chunks = splitDecoratedMessageText(
     renderedMessage,
     TELEGRAM_MAX_TEXT_LENGTH,

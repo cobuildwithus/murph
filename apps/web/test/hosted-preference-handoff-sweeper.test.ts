@@ -1,10 +1,13 @@
 import { describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
-  queryRaw: vi.fn((..._args: unknown[]): Promise<Array<{
+  queryRaw: vi.fn((...args: unknown[]): Promise<Array<{
     mailboxItemId: string;
     userId: string;
-  }>> => Promise.resolve([])),
+  }>> => {
+    void args;
+    return Promise.resolve([]);
+  }),
 }));
 
 vi.mock("@/src/lib/prisma", () => ({
@@ -185,6 +188,7 @@ describe("hosted preference handoff sweeper", () => {
   });
 
   it("selects active synthetic room runtimes before applying the handoff limit", async () => {
+    const now = new Date("2026-08-12T12:00:00.000Z");
     mocks.queryRaw.mockResolvedValueOnce([{
       mailboxItemId: "mailbox_group_preference",
       userId: "member_group_runtime",
@@ -198,11 +202,13 @@ describe("hosted preference handoff sweeper", () => {
     await runHostedPreferenceHandoffSweeper({
       hasActiveAccess,
       logger: buildLogger(),
+      now,
       requestHandoff,
     });
 
     const query = mocks.queryRaw.mock.calls[0]?.[0] as {
       strings?: readonly string[];
+      values?: readonly unknown[];
     } | undefined;
     const sql = query?.strings?.join("?") ?? "";
     expect(sql).toContain('"active_person_members"');
@@ -211,6 +217,10 @@ describe("hosted preference handoff sweeper", () => {
     expect(sql).toContain('"hosted_thread_container_participant"');
     expect(sql).toContain('JOIN "active_person_members" AS "active_participant"');
     expect(sql).toContain('"participant"."removed_at" IS NULL');
+    expect(sql).toContain('"participant"."last_seen_at" >= ?');
+    expect(query?.values).toContainEqual(
+      new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000),
+    );
     expect(hasActiveAccess).toHaveBeenCalledWith("member_group_runtime");
     expect(hasActiveAccess.mock.invocationCallOrder[0]).toBeLessThan(
       requestHandoff.mock.invocationCallOrder[0]!,
@@ -223,6 +233,7 @@ describe("hosted preference handoff sweeper", () => {
   });
 
   it("selects exact current Clinical Records wakes in the shared mailbox sweep", async () => {
+    const now = new Date("2026-08-12T12:00:00.000Z");
     mocks.queryRaw.mockResolvedValueOnce([{
       mailboxItemId: "mailbox_clinical_current",
       userId: "member_clinical_current",
@@ -235,11 +246,13 @@ describe("hosted preference handoff sweeper", () => {
     await runHostedPreferenceHandoffSweeper({
       hasActiveAccess: vi.fn(async () => true),
       logger: buildLogger(),
+      now,
       requestHandoff,
     });
 
     const query = mocks.queryRaw.mock.calls[0]?.[0] as {
       strings?: readonly string[];
+      values?: readonly unknown[];
     } | undefined;
     const sql = query?.strings?.join("?") ?? "";
     expect(sql).toContain('"pending_handoff_candidates"');
@@ -256,6 +269,10 @@ describe("hosted preference handoff sweeper", () => {
     );
     expect(sql).toContain('"item"."lane_seq" > COALESCE("lane_counter"."consumed_seq", 0)');
     expect(sql).toContain('"item"."expires_at" IS NULL OR "item"."expires_at" > ?');
+    expect(sql).toContain('"item"."created_at" > ?');
+    expect(query?.values).toContainEqual(
+      new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000),
+    );
     expect(requestHandoff).toHaveBeenCalledWith({
       abortSignal: expect.any(AbortSignal),
       expectedUserId: "member_clinical_current",
@@ -263,7 +280,7 @@ describe("hosted preference handoff sweeper", () => {
     });
   });
 
-  it("selects pending browser-vault refresh wakes in the shared mailbox sweep", async () => {
+  it("selects pending browser-vault and maintenance wakes in the shared mailbox sweep", async () => {
     mocks.queryRaw.mockResolvedValueOnce([{
       mailboxItemId: "mailbox_browser_refresh",
       userId: "member_browser_refresh",
@@ -283,9 +300,15 @@ describe("hosted preference handoff sweeper", () => {
       strings?: readonly string[];
     } | undefined;
     const sql = query?.strings?.join("?") ?? "";
-    expect(sql).toContain('"pending_browser_vault_refresh_users"');
+    expect(sql).toContain('"pending_runtime_control_users"');
     expect(sql).toContain(
-      '"item"."kind" = \'runtime.browser-vault-refresh-requested\'',
+      "'runtime.browser-vault-refresh-requested'",
+    );
+    expect(sql).toContain(
+      "'runtime.maintenance-requested'",
+    );
+    expect(sql).toContain(
+      "'health.daily-metric.reported'",
     );
     expect(sql).toContain(
       '"item"."lane_seq" > COALESCE("lane_counter"."consumed_seq", 0)',
