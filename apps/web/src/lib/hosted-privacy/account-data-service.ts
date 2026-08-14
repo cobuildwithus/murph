@@ -2000,35 +2000,36 @@ async function resolveHostedAccountDeletionRefreshLeases(input: {
     });
   }
 
-  let recoveredStaleLease = false;
-  for (const connection of leasedConnections) {
-    const resolution =
-      await resolveHostedRefreshLeaseBeforeDestructiveAction({
-        connectionId: connection.id,
-        now,
-        store: controlPlane.store,
-        userId: input.memberId,
-      });
-    if (resolution.status === "in_progress") {
-      throw hostedOnboardingError({
-        code: "ACCOUNT_DELETION_DEVICE_AUTHORIZATION_IN_FLIGHT",
-        httpStatus: 503,
-        message: "A connected-health credential refresh is still finishing. Retry account deletion.",
-        retryable: true,
-      });
-    }
-    if (resolution.status === "missing") {
-      throw hostedOnboardingError({
-        code: "ACCOUNT_DELETION_DEVICE_AUTHORIZATION_IN_FLIGHT",
-        httpStatus: 503,
-        message: "A connected-health connection changed while account deletion was starting. Retry account deletion.",
-        retryable: true,
-      });
-    }
-    recoveredStaleLease ||= resolution.status === "stale_failed_closed";
+  // Recover at most one stale lease per request. This keeps the destructive
+  // preflight to one connection-lock transaction even when an account has
+  // several stale connections; later retries handle the next connection.
+  const [connection] = leasedConnections;
+  if (!connection) {
+    return;
   }
-
-  if (recoveredStaleLease) {
+  const resolution = await resolveHostedRefreshLeaseBeforeDestructiveAction({
+    connectionId: connection.id,
+    now,
+    store: controlPlane.store,
+    userId: input.memberId,
+  });
+  if (resolution.status === "in_progress") {
+    throw hostedOnboardingError({
+      code: "ACCOUNT_DELETION_DEVICE_AUTHORIZATION_IN_FLIGHT",
+      httpStatus: 503,
+      message: "A connected-health credential refresh is still finishing. Retry account deletion.",
+      retryable: true,
+    });
+  }
+  if (resolution.status === "missing" || resolution.status === "none") {
+    throw hostedOnboardingError({
+      code: "ACCOUNT_DELETION_DEVICE_AUTHORIZATION_IN_FLIGHT",
+      httpStatus: 503,
+      message: "A connected-health connection changed while account deletion was starting. Retry account deletion.",
+      retryable: true,
+    });
+  }
+  if (resolution.status === "stale_failed_closed") {
     throw hostedOnboardingError({
       code: "ACCOUNT_DELETION_DEVICE_TOKEN_REFRESH_RECOVERY_REQUIRED",
       httpStatus: 409,

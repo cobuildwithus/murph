@@ -3607,11 +3607,15 @@ describe("deleteHostedAccountData", () => {
     expect(rawDeletionQueries).toEqual([]);
   });
 
-  it("fails an expired token refresh closed before account suspension", async () => {
+  it("fails one expired token refresh closed in one transaction before account suspension", async () => {
     const hostedMemberUpdateCalls: unknown[] = [];
     const persistStoredConnectionTokenBundle = vi.fn(async () => undefined);
     const createSignal = vi.fn(async () => ({ id: 1 }));
     const syncDurableConnectionState = vi.fn(async () => undefined);
+    const withConnectionMutationLock = vi.fn(async (
+      _connectionId: string,
+      callback: (tx: { __tx: true }) => Promise<unknown>,
+    ) => callback({ __tx: true }));
     const connection = {
       connectedAt: new Date("2026-04-27T00:07:00.000Z"),
       credentialKind: "oauth_tokens",
@@ -3650,14 +3654,19 @@ describe("deleteHostedAccountData", () => {
         getConnectionRecordForUser: vi.fn(async () => connection),
         persistStoredConnectionTokenBundle,
         syncDurableConnectionState,
-        withConnectionMutationLock: vi.fn(async (
-          _connectionId: string,
-          callback: (tx: { __tx: true }) => Promise<unknown>,
-        ) => callback({ __tx: true })),
+        withConnectionMutationLock,
       },
     });
     const prisma = createHostedAccountDeletionPrismaForTest({
-      deviceConnections: [connection],
+      deviceConnections: [
+        connection,
+        {
+          ...connection,
+          id: "dsc_refresh_expired_second",
+          provider: "garmin",
+          providerAccountBlindIndex: "hbdi_refresh_expired_second",
+        },
+      ],
       hostedMemberUpdateCalls,
       onTransaction: () => undefined,
     });
@@ -3672,6 +3681,11 @@ describe("deleteHostedAccountData", () => {
     });
 
     expect(hostedMemberUpdateCalls).toEqual([]);
+    expect(withConnectionMutationLock).toHaveBeenCalledTimes(1);
+    expect(withConnectionMutationLock).toHaveBeenCalledWith(
+      connection.id,
+      expect.any(Function),
+    );
     expect(syncDurableConnectionState).toHaveBeenCalledWith(
       expect.objectContaining({
         lastErrorCode: "TOKEN_REFRESH_STATE_UNKNOWN",
