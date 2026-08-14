@@ -413,6 +413,7 @@ export function createCloudflareWorkspaceSnapshotPort(input: {
         );
         if (
           attempt >= WORKSPACE_SNAPSHOT_R2_PUT_MAX_ATTEMPTS
+          || response.status === 412
           || !isRetryableHostedWorkspaceSnapshotR2Response({
             diagnostics: r2FailureDiagnostics,
             status: response.status,
@@ -649,9 +650,79 @@ function isRetryableHostedWorkspaceSnapshotR2TransportFailure(
     return false;
   }
 
-  return diagnostics.fetchCauseKind === "cloudflare_rpc_destroy"
-    || diagnostics.fetchCauseKind === "fetch_failed"
-    || diagnostics.fetchCauseKind === "network";
+  return areHostedWorkspaceSnapshotR2NestedCausesRetryable(error)
+    && (
+      diagnostics.fetchCauseKind === "cloudflare_rpc_destroy"
+      || diagnostics.fetchCauseKind === "fetch_failed"
+      || diagnostics.fetchCauseKind === "network"
+    );
+}
+
+const WORKSPACE_SNAPSHOT_R2_RETRYABLE_NESTED_TRANSPORT_CODES = new Set([
+  "ECONNABORTED",
+  "ECONNREFUSED",
+  "ECONNRESET",
+  "EHOSTDOWN",
+  "EHOSTUNREACH",
+  "ENETDOWN",
+  "ENETRESET",
+  "ENETUNREACH",
+  "EPIPE",
+  "UND_ERR_SOCKET",
+]);
+
+function areHostedWorkspaceSnapshotR2NestedCausesRetryable(
+  error: unknown,
+): boolean {
+  const fetchError = readHostedWorkspaceSnapshotErrorCause(error);
+  let current = readHostedWorkspaceSnapshotErrorCause(fetchError);
+  const seen = new Set<unknown>();
+  let depth = 0;
+
+  while (
+    current
+    && typeof current === "object"
+    && !seen.has(current)
+    && depth < 8
+  ) {
+    seen.add(current);
+    depth += 1;
+    const record = current as Record<string, unknown>;
+    const name = current instanceof Error ? current.name : "";
+    const message = current instanceof Error
+      ? current.message.trim().toLowerCase()
+      : "";
+    const code = typeof record.code === "string"
+      ? record.code.trim().toUpperCase()
+      : "";
+    const isRemoteTransportCause =
+      WORKSPACE_SNAPSHOT_R2_RETRYABLE_NESTED_TRANSPORT_CODES.has(code)
+      || message === "the rpc call destroy() was called"
+      || message.includes("network")
+      || message.includes("socket")
+      || message.includes("connection reset")
+      || message.includes("connection closed")
+      || message.includes("broken pipe");
+    if (
+      name === "AbortError"
+      || name === "TimeoutError"
+      || message.includes("abort")
+      || message.includes("timed out")
+      || message.includes("timeout")
+      || !isRemoteTransportCause
+    ) {
+      return false;
+    }
+    current = readHostedWorkspaceSnapshotErrorCause(current);
+  }
+
+  return true;
+}
+
+function readHostedWorkspaceSnapshotErrorCause(error: unknown): unknown {
+  return error && typeof error === "object" && "cause" in error
+    ? (error as Record<string, unknown>).cause
+    : null;
 }
 
 function isRetryableHostedWorkspaceSnapshotR2Response(input: {
