@@ -423,6 +423,44 @@ function createWorkspaceSnapshotSessionStartResponse(input: {
   });
 }
 
+function createWorkspaceSnapshotCheckpointRequest(
+  ref: HostedWorkspaceSnapshotV2Ref,
+): HostedWorkspaceCheckpointRequest {
+  return {
+    attemptId: "attempt_1",
+    expectedWorkspaceVersion: "4",
+    leaseGeneration: "9",
+    reason: "idle_shutdown",
+    snapshotRef: ref,
+  };
+}
+
+function createWorkspaceSnapshotCompleteResponse(
+  ref: HostedWorkspaceSnapshotV2Ref,
+): Response {
+  return new Response(JSON.stringify({
+    checkpoint: {
+      checkpointed: true,
+      workspace: {
+        checkpointedAt: "2026-04-26T00:00:05.000Z",
+        createdAt: "2026-04-26T00:00:00.000Z",
+        nextWakeAt: null,
+        nextWakeReason: null,
+        redactedStatus: null,
+        snapshotRef: ref,
+        updatedAt: "2026-04-26T00:00:05.000Z",
+        userId: "member_123",
+        version: "5",
+      },
+    },
+    ok: true,
+    snapshotRef: ref,
+  }), {
+    headers: { "content-type": "application/json; charset=utf-8" },
+    status: 200,
+  });
+}
+
 function createEncryptedWorkspaceSnapshotBytes(input: {
   aad: HostedWorkspaceSnapshotV2Aad;
   dataKey: Uint8Array;
@@ -2535,6 +2573,360 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(completeRequest.headers.get("x-hosted-runtime-workspace-version")).toBe("4");
     await vi.advanceTimersByTimeAsync(10_000);
     expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
+  it("replays one transport-ambiguous snapshot completion with the identical payload and headers", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const startedAtMs = Date.parse("2026-05-01T00:00:00.000Z");
+    vi.setSystemTime(startedAtMs);
+    const timeoutSpy = vi.spyOn(AbortSignal, "timeout");
+    const ref = createWorkspaceSnapshotV2Ref({ encryptedByteSize: 4 });
+    const checkpointRequest = createWorkspaceSnapshotCheckpointRequest(ref);
+    const dataKeyBase64 = encodeHostedWorkspaceSnapshotV2DataKey(
+      Uint8Array.from({ length: 32 }, (_, index) => index + 1),
+    );
+    const completionBodies: string[] = [];
+    const completionHeaders: Array<Array<[string, string]>> = [];
+    const fetchMock = vi.fn(async (...args: Parameters<typeof fetch>) => {
+      const request = requireFetchRequest(args, "workspace snapshot completion replay");
+      if (request.url.endsWith("/workspace-snapshots/start")) {
+        return createWorkspaceSnapshotSessionStartResponse({
+          dataKeyBase64,
+          objectKey: ref.objectKey,
+          snapshotId: ref.snapshotId,
+        });
+      }
+      if (request.url.endsWith(`/workspace-snapshots/${ref.snapshotId}/heartbeat`)) {
+        return new Response(JSON.stringify({ alive: true, ok: true }), {
+          headers: { "content-type": "application/json; charset=utf-8" },
+          status: 200,
+        });
+      }
+      if (request.url.endsWith(`/workspace-snapshots/${ref.snapshotId}/complete`)) {
+        completionBodies.push(await request.clone().text());
+        completionHeaders.push(Array.from(request.headers.entries()));
+        if (completionBodies.length === 1) {
+          return new Response(new ReadableStream<Uint8Array>({
+            start(controller) {
+              controller.enqueue(new TextEncoder().encode("{"));
+              vi.setSystemTime(startedAtMs + 250);
+              controller.error(new TypeError("fetch failed"));
+            },
+          }), {
+            headers: { "content-type": "application/json; charset=utf-8" },
+            status: 200,
+          });
+        }
+        return createWorkspaceSnapshotCompleteResponse(ref);
+      }
+      return new Response("unexpected", { status: 500 });
+    });
+    const platform = buildTestHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      commitTimeoutMs: 1_000,
+      fetchImpl: fetchMock as typeof fetch,
+      workspaceCheckpointBridge: {
+        readCurrentLease: () => ({
+          attemptId: "attempt_1",
+          leaseGeneration: "9",
+          userId: "member_123",
+          workspaceVersion: "4",
+        }),
+      },
+    });
+
+    await platform.workspaceSnapshotPort!.startSnapshotSession({
+      expectedWorkspaceVersion: "4",
+      reason: "idle_shutdown",
+    });
+    const completed = await platform.workspaceSnapshotPort!.completeSnapshotSession({
+      checkpointRequest,
+      ref,
+    });
+
+    expect(completed.snapshotRef).toEqual(ref);
+    expect(completionBodies).toHaveLength(2);
+    expect(completionBodies[1]).toBe(completionBodies[0]);
+    expect(JSON.parse(completionBodies[0] ?? "null")).toEqual({
+      archive: ref.archive,
+      checkpointRequest,
+      objectKey: ref.objectKey,
+      snapshotId: ref.snapshotId,
+    });
+    expect(completionHeaders).toHaveLength(2);
+    expect(completionHeaders[1]).toEqual(completionHeaders[0]);
+    expect(Object.fromEntries(completionHeaders[0] ?? [])).toEqual(expect.objectContaining({
+      "x-hosted-runtime-attempt-id": "attempt_1",
+      "x-hosted-runtime-lease-generation": "9",
+      "x-hosted-runtime-workspace-version": "4",
+    }));
+    expect(timeoutSpy.mock.calls.slice(-2)).toEqual([[750], [750]]);
+    vi.useRealTimers();
+  });
+
+  it("does not replay an application 5xx when its response body transport closes", async () => {
+    const ref = createWorkspaceSnapshotV2Ref({ encryptedByteSize: 4 });
+    const dataKeyBase64 = encodeHostedWorkspaceSnapshotV2DataKey(
+      Uint8Array.from({ length: 32 }, (_, index) => index + 1),
+    );
+    let completionCalls = 0;
+    let responseBodyCancelled = false;
+    let responseBodyRead = false;
+    const fetchMock = vi.fn(async (...args: Parameters<typeof fetch>) => {
+      const request = requireFetchRequest(args, "workspace snapshot completion 5xx");
+      if (request.url.endsWith("/workspace-snapshots/start")) {
+        return createWorkspaceSnapshotSessionStartResponse({
+          dataKeyBase64,
+          objectKey: ref.objectKey,
+          snapshotId: ref.snapshotId,
+        });
+      }
+      if (request.url.endsWith(`/workspace-snapshots/${ref.snapshotId}/heartbeat`)) {
+        return new Response(JSON.stringify({ alive: true, ok: true }), {
+          headers: { "content-type": "application/json; charset=utf-8" },
+          status: 200,
+        });
+      }
+      if (request.url.endsWith(`/workspace-snapshots/${ref.snapshotId}/complete`)) {
+        completionCalls += 1;
+        return new Response(new ReadableStream<Uint8Array>({
+          cancel() {
+            responseBodyCancelled = true;
+          },
+          pull(controller) {
+            responseBodyRead = true;
+            controller.error(new TypeError("fetch failed"));
+          },
+        }, {
+          highWaterMark: 0,
+        }), {
+          headers: { "content-type": "application/json; charset=utf-8" },
+          status: 503,
+        });
+      }
+      return new Response("unexpected", { status: 500 });
+    });
+    const platform = buildTestHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: fetchMock as typeof fetch,
+    });
+
+    await platform.workspaceSnapshotPort!.startSnapshotSession({
+      expectedWorkspaceVersion: "4",
+      reason: "idle_shutdown",
+    });
+    await expect(platform.workspaceSnapshotPort!.completeSnapshotSession({
+      checkpointRequest: createWorkspaceSnapshotCheckpointRequest(ref),
+      ref,
+    })).rejects.toThrow("Hosted workspace snapshot complete failed with HTTP 503.");
+
+    expect(completionCalls).toBe(1);
+    expect(responseBodyCancelled).toBe(true);
+    expect(responseBodyRead).toBe(false);
+  });
+
+  it("does not replay snapshot completion after cancellation", async () => {
+    const ref = createWorkspaceSnapshotV2Ref({ encryptedByteSize: 4 });
+    const dataKeyBase64 = encodeHostedWorkspaceSnapshotV2DataKey(
+      Uint8Array.from({ length: 32 }, (_, index) => index + 1),
+    );
+    const abortController = new AbortController();
+    const abortReason = new Error("foreground wake interrupted snapshot completion");
+    let completionCalls = 0;
+    const fetchMock = vi.fn(async (...args: Parameters<typeof fetch>) => {
+      const request = requireFetchRequest(args, "cancelled workspace snapshot completion");
+      if (request.url.endsWith("/workspace-snapshots/start")) {
+        return createWorkspaceSnapshotSessionStartResponse({
+          dataKeyBase64,
+          objectKey: ref.objectKey,
+          snapshotId: ref.snapshotId,
+        });
+      }
+      if (request.url.endsWith(`/workspace-snapshots/${ref.snapshotId}/heartbeat`)) {
+        return new Response(JSON.stringify({ alive: true, ok: true }), {
+          headers: { "content-type": "application/json; charset=utf-8" },
+          status: 200,
+        });
+      }
+      if (request.url.endsWith(`/workspace-snapshots/${ref.snapshotId}/complete`)) {
+        completionCalls += 1;
+        abortController.abort(abortReason);
+        throw new TypeError("fetch failed");
+      }
+      return new Response("unexpected", { status: 500 });
+    });
+    const platform = buildTestHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: fetchMock as typeof fetch,
+    });
+
+    await platform.workspaceSnapshotPort!.startSnapshotSession({
+      expectedWorkspaceVersion: "4",
+      reason: "idle_shutdown",
+      signal: abortController.signal,
+    });
+    await expect(platform.workspaceSnapshotPort!.completeSnapshotSession({
+      checkpointRequest: createWorkspaceSnapshotCheckpointRequest(ref),
+      ref,
+    })).rejects.toBe(abortReason);
+
+    expect(completionCalls).toBe(1);
+  });
+
+  it("terminates snapshot completion after a second transport closure", async () => {
+    const ref = createWorkspaceSnapshotV2Ref({ encryptedByteSize: 4 });
+    const dataKeyBase64 = encodeHostedWorkspaceSnapshotV2DataKey(
+      Uint8Array.from({ length: 32 }, (_, index) => index + 1),
+    );
+    let completionCalls = 0;
+    const fetchMock = vi.fn(async (...args: Parameters<typeof fetch>) => {
+      const request = requireFetchRequest(args, "workspace snapshot repeated transport closure");
+      if (request.url.endsWith("/workspace-snapshots/start")) {
+        return createWorkspaceSnapshotSessionStartResponse({
+          dataKeyBase64,
+          objectKey: ref.objectKey,
+          snapshotId: ref.snapshotId,
+        });
+      }
+      if (request.url.endsWith(`/workspace-snapshots/${ref.snapshotId}/heartbeat`)) {
+        return new Response(JSON.stringify({ alive: true, ok: true }), {
+          headers: { "content-type": "application/json; charset=utf-8" },
+          status: 200,
+        });
+      }
+      if (request.url.endsWith(`/workspace-snapshots/${ref.snapshotId}/complete`)) {
+        completionCalls += 1;
+        throw new TypeError("fetch failed");
+      }
+      return new Response("unexpected", { status: 500 });
+    });
+    const platform = buildTestHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: fetchMock as typeof fetch,
+    });
+
+    await platform.workspaceSnapshotPort!.startSnapshotSession({
+      expectedWorkspaceVersion: "4",
+      reason: "idle_shutdown",
+    });
+    await expect(platform.workspaceSnapshotPort!.completeSnapshotSession({
+      checkpointRequest: createWorkspaceSnapshotCheckpointRequest(ref),
+      ref,
+    })).rejects.toThrow("Hosted workspace snapshot complete request failed.");
+
+    expect(completionCalls).toBe(2);
+  });
+
+  it("keeps snapshot heartbeat and stored headers through replay, then clears both", async () => {
+    vi.useFakeTimers();
+    const ref = createWorkspaceSnapshotV2Ref({ encryptedByteSize: 4 });
+    const dataKeyBase64 = encodeHostedWorkspaceSnapshotV2DataKey(
+      Uint8Array.from({ length: 32 }, (_, index) => index + 1),
+    );
+    let currentLease = {
+      attemptId: "attempt_1",
+      leaseGeneration: "9",
+      userId: "member_123",
+      workspaceVersion: "4",
+    };
+    const replayResponse = createDeferred<Response>();
+    const completionHeaders: Array<Array<[string, string]>> = [];
+    const heartbeatHeaders: Array<Array<[string, string]>> = [];
+    const abortHeaders: Array<Array<[string, string]>> = [];
+    const fetchMock = vi.fn(async (...args: Parameters<typeof fetch>) => {
+      const request = requireFetchRequest(args, "workspace snapshot replay lifecycle");
+      if (request.url.endsWith("/workspace-snapshots/start")) {
+        return createWorkspaceSnapshotSessionStartResponse({
+          dataKeyBase64,
+          objectKey: ref.objectKey,
+          snapshotId: ref.snapshotId,
+        });
+      }
+      if (request.url.endsWith(`/workspace-snapshots/${ref.snapshotId}/heartbeat`)) {
+        heartbeatHeaders.push(Array.from(request.headers.entries()));
+        return new Response(JSON.stringify({ alive: true, ok: true }), {
+          headers: { "content-type": "application/json; charset=utf-8" },
+          status: 200,
+        });
+      }
+      if (request.url.endsWith(`/workspace-snapshots/${ref.snapshotId}/complete`)) {
+        completionHeaders.push(Array.from(request.headers.entries()));
+        if (completionHeaders.length === 1) {
+          throw new TypeError("fetch failed");
+        }
+        return await replayResponse.promise;
+      }
+      if (request.url.endsWith(`/workspace-snapshots/${ref.snapshotId}`)) {
+        abortHeaders.push(Array.from(request.headers.entries()));
+        return new Response(JSON.stringify({ aborted: false, ok: true }), {
+          headers: { "content-type": "application/json; charset=utf-8" },
+          status: 200,
+        });
+      }
+      return new Response("unexpected", { status: 500 });
+    });
+    const platform = buildTestHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      commitTimeoutMs: 30_000,
+      fetchImpl: fetchMock as typeof fetch,
+      workspaceCheckpointBridge: {
+        readCurrentLease: () => currentLease,
+      },
+    });
+
+    try {
+      await platform.workspaceSnapshotPort!.startSnapshotSession({
+        expectedWorkspaceVersion: "4",
+        reason: "idle_shutdown",
+      });
+      await vi.waitFor(() => expect(heartbeatHeaders).toHaveLength(1));
+      currentLease = {
+        attemptId: "attempt_2",
+        leaseGeneration: "10",
+        userId: "member_123",
+        workspaceVersion: "5",
+      };
+
+      const completion = platform.workspaceSnapshotPort!.completeSnapshotSession({
+        checkpointRequest: createWorkspaceSnapshotCheckpointRequest(ref),
+        ref,
+      });
+      await vi.waitFor(() => expect(completionHeaders).toHaveLength(2));
+      await vi.advanceTimersByTimeAsync(2_000);
+      await vi.waitFor(() => expect(heartbeatHeaders).toHaveLength(2));
+
+      expect(Object.fromEntries(completionHeaders[0] ?? [])).toEqual(expect.objectContaining({
+        "x-hosted-runtime-attempt-id": "attempt_1",
+        "x-hosted-runtime-lease-generation": "9",
+        "x-hosted-runtime-workspace-version": "4",
+      }));
+      expect(completionHeaders[1]).toEqual(completionHeaders[0]);
+      expect(Object.fromEntries(heartbeatHeaders[1] ?? [])).toEqual(expect.objectContaining({
+        "x-hosted-runtime-attempt-id": "attempt_1",
+        "x-hosted-runtime-lease-generation": "9",
+        "x-hosted-runtime-workspace-version": "4",
+      }));
+
+      replayResponse.resolve(createWorkspaceSnapshotCompleteResponse(ref));
+      await completion;
+      const heartbeatCountAfterCompletion = heartbeatHeaders.length;
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(heartbeatHeaders).toHaveLength(heartbeatCountAfterCompletion);
+
+      await platform.workspaceSnapshotPort!.abortSnapshotSession({
+        objectKey: ref.objectKey,
+        snapshotId: ref.snapshotId,
+      });
+      expect(abortHeaders).toHaveLength(1);
+      expect(Object.fromEntries(abortHeaders[0] ?? [])).toEqual(expect.objectContaining({
+        "x-hosted-runtime-attempt-id": "attempt_2",
+        "x-hosted-runtime-lease-generation": "10",
+        "x-hosted-runtime-workspace-version": "5",
+      }));
+    } finally {
+      replayResponse.resolve(createWorkspaceSnapshotCompleteResponse(ref));
+      vi.useRealTimers();
+    }
   });
 
   it("returns foreground-pending snapshot completion checkpoints to the runtime", async () => {
