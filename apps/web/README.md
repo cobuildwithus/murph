@@ -633,7 +633,11 @@ Attribution lives under `sql/product-tests/`.
 The current search path uses built-in Postgres full-text search only. No
 extensions such as `pg_trgm`, `pgvector`, or vector indexes are required for
 supplement label lookup. Food label lookup additionally applies `pg_trgm` in
-`sql/foods/schema.sql` for name search support.
+`sql/foods/schema.sql` for name search support. Generic label search admits at
+most 5,000 indexed matches from either its full-text arm or its trigram fallback
+before similarity scoring, canonical-key deduplication, and window sorting; the
+public projection then narrows that set to 250 candidates before its final
+projection.
 
 The supplement payload constraint is additive for existing databases:
 `sql/supplements/schema.sql` adds it `NOT VALID`, so it immediately rejects new

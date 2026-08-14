@@ -20,6 +20,7 @@ const PRODUCT_LABEL_GTIN_LENGTHS = new Set([8, 12, 13, 14]);
 const PRODUCT_CONTAMINANT_ALERT_LIMIT = 5;
 const PRODUCT_CONTAMINANT_OBSERVATION_LIMIT = 20;
 const PUBLIC_PRODUCT_LABEL_JSON_LIMIT_BYTES = 256 * 1_024;
+const PRODUCT_LABEL_SEARCH_MATCH_LIMIT = 5_000;
 const PUBLIC_PRODUCT_SEARCH_CANDIDATE_LIMIT = 250;
 const PRODUCT_CONTAMINANT_CONCERN_RANK: Record<
   ProductContaminantConcernLevel,
@@ -2061,6 +2062,35 @@ async function searchGenericProductLabels(
             websearch_to_tsquery('simple', $1) AS tsq${stemmed ? `,
             websearch_to_tsquery('english', $1) AS stemmed_tsq` : ""}
         ),
+        fts_matches AS MATERIALIZED (
+          SELECT
+            id,
+            canonical_key,
+            data_origin,
+            data_origin_id,
+            name,
+            brand,
+            upc,
+            off_market,
+            search_text,
+            data_origin_priority
+          FROM ${tableSql}, query
+          WHERE
+            -- With stemming on, match both dictionaries: 'simple' keeps
+            -- exact tokens that 'english' would drop or mangle
+            -- (stopword-shaped brands like "NOW"), while 'english' stems so
+            -- singular/plural queries reach rows indexed under the other
+            -- form. Both arms are GIN-indexed.
+            ${stemmed ? `(
+              to_tsvector('simple', search_text) @@ query.tsq
+              OR to_tsvector('english', search_text) @@ query.stemmed_tsq
+            )` : `to_tsvector('simple', search_text) @@ query.tsq`}
+            AND ($2::boolean OR off_market = false)
+            AND ${PRODUCT_LABEL_SOURCE_FILTER_SQL}
+            AND ($4::text[] IS NULL OR data_origin = ANY($4::text[]))
+            AND ${excludedDataOriginsSql}
+          LIMIT ${PRODUCT_LABEL_SEARCH_MATCH_LIMIT}
+        ),
         fts_candidates AS MATERIALIZED (
           SELECT
             id,
@@ -2089,22 +2119,29 @@ async function searchGenericProductLabels(
               ELSE 0
             END` : "0"} AS stemmed_name_match,
             data_origin_priority
+          FROM fts_matches, query
+          ${candidateBoundSql}
+        ),
+        trigram_matches AS MATERIALIZED (
+          SELECT
+            id,
+            canonical_key,
+            data_origin,
+            data_origin_id,
+            name,
+            brand,
+            upc,
+            off_market,
+            data_origin_priority
           FROM ${tableSql}, query
           WHERE
-            -- With stemming on, match both dictionaries: 'simple' keeps
-            -- exact tokens that 'english' would drop or mangle
-            -- (stopword-shaped brands like "NOW"), while 'english' stems so
-            -- singular/plural queries reach rows indexed under the other
-            -- form. Both arms are GIN-indexed.
-            ${stemmed ? `(
-              to_tsvector('simple', search_text) @@ query.tsq
-              OR to_tsvector('english', search_text) @@ query.stemmed_tsq
-            )` : `to_tsvector('simple', search_text) @@ query.tsq`}
+            NOT EXISTS (SELECT 1 FROM fts_matches)
+            AND name % query.raw_q
             AND ($2::boolean OR off_market = false)
             AND ${PRODUCT_LABEL_SOURCE_FILTER_SQL}
             AND ($4::text[] IS NULL OR data_origin = ANY($4::text[]))
             AND ${excludedDataOriginsSql}
-            ${candidateBoundSql}
+          LIMIT ${PRODUCT_LABEL_SEARCH_MATCH_LIMIT}
         ),
         trigram_candidates AS MATERIALIZED (
           SELECT
@@ -2131,15 +2168,8 @@ async function searchGenericProductLabels(
               ELSE 0
             END` : "0"} AS stemmed_name_match,
             data_origin_priority
-          FROM ${tableSql}, query
-          WHERE
-            NOT EXISTS (SELECT 1 FROM fts_candidates)
-            AND name % query.raw_q
-            AND ($2::boolean OR off_market = false)
-            AND ${PRODUCT_LABEL_SOURCE_FILTER_SQL}
-            AND ($4::text[] IS NULL OR data_origin = ANY($4::text[]))
-            AND ${excludedDataOriginsSql}
-            ${candidateBoundSql}
+          FROM trigram_matches, query
+          ${candidateBoundSql}
         ),
         candidates AS (
           SELECT * FROM fts_candidates

@@ -248,10 +248,18 @@ describe("supplements query helpers", () => {
     expect(searchCall?.text).toContain(
       "strict_word_similarity(query.raw_q, name)",
     );
+    expect(searchCall?.text).toContain("fts_matches AS MATERIALIZED");
     expect(searchCall?.text).toContain("fts_candidates AS MATERIALIZED");
+    expect(searchCall?.text).toContain("trigram_matches AS MATERIALIZED");
     expect(searchCall?.text).toContain("trigram_candidates AS MATERIALIZED");
     expect(searchCall?.text).toContain(
-      "NOT EXISTS (SELECT 1 FROM fts_candidates)",
+      "NOT EXISTS (SELECT 1 FROM fts_matches)",
+    );
+    expect(searchCall?.text).toMatch(
+      /fts_matches AS MATERIALIZED \([\s\S]*?FROM supplements, query[\s\S]*?LIMIT 5000[\s\S]*?\),\s*fts_candidates AS MATERIALIZED \([\s\S]*?FROM fts_matches, query/u,
+    );
+    expect(searchCall?.text).toMatch(
+      /trigram_matches AS MATERIALIZED \([\s\S]*?FROM supplements, query[\s\S]*?LIMIT 5000[\s\S]*?\),\s*trigram_candidates AS MATERIALIZED \([\s\S]*?FROM trigram_matches, query/u,
     );
     expect(searchCall?.text).toContain("name % query.raw_q");
     expect(searchCall?.text).not.toContain("OR name % query.raw_q");
@@ -265,10 +273,10 @@ describe("supplements query helpers", () => {
     );
     expect(searchCall?.text).not.toContain("FROM product_tests product_test_sources");
     expect(searchCall?.text).not.toMatch(
-      /fts_candidates AS MATERIALIZED[\s\S]*?\blabel\b[\s\S]*?FROM supplements, query/u,
+      /fts_matches AS MATERIALIZED[\s\S]*?\blabel\b[\s\S]*?FROM supplements, query/u,
     );
     expect(searchCall?.text).not.toMatch(
-      /trigram_candidates AS MATERIALIZED[\s\S]*?\blabel\b[\s\S]*?FROM supplements, query/u,
+      /trigram_matches AS MATERIALIZED[\s\S]*?\blabel\b[\s\S]*?FROM supplements, query/u,
     );
     expect(searchCall?.text).toContain("JOIN supplements labels");
     expect(searchCall?.text).toMatch(
