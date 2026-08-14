@@ -110,8 +110,9 @@ Messages extension as the first action family.
   fields keep the whole immutable card on V4 so attachment cannot replace a
   truthful actual with a reduced editable value.
 - Admission rejects destructive batches whose final typed visible set sequence
-  recreates their prestate. This is the smallest deterministic answer to an
-  otherwise indistinguishable first application versus retry and avoids stable
+  recreates their prestate because those batches have no observable structural
+  effect. The canonical workout write atomically stores the bounded action id;
+  that exact marker replaces visible-state replay inference and avoids stable
   client-visible set ids or a second receipt store.
 - The generic workout edit path retains its saved-set deletion guard. Only the
   live-workout member-action owner may use the narrow set-removal persistence

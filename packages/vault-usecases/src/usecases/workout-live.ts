@@ -7,6 +7,7 @@ import {
   type WorkoutSession,
   type WorkoutSessionDetailV1,
   type WorkoutSet,
+  memberActionIdV1Schema,
   workoutLiveApplyMemberActionV1Schema,
   workoutSessionSchema,
   workoutTemplateSchema,
@@ -79,7 +80,10 @@ const MAX_LIVE_WORKOUT_SETS_PER_EXERCISE = 150
 export async function applyLiveWorkoutMemberAction(
   input: ApplyLiveWorkoutMemberActionInput,
 ): Promise<ApplyLiveWorkoutMemberActionResult> {
-  if (!workoutLiveApplyMemberActionV1Schema.safeParse(input.action).success) {
+  if (
+    !workoutLiveApplyMemberActionV1Schema.safeParse(input.action).success
+    || !memberActionIdV1Schema.safeParse(input.actionId).success
+  ) {
     return { reason: 'workout_changed', status: 'rejected' }
   }
   return withLiveWorkoutMutationLock(input.vault, () =>
@@ -123,7 +127,7 @@ async function applyLiveWorkoutMemberActionWithLockHeld(
 
   const exercises = structuredClone(workout.exercises)
     .sort((left, right) => left.order - right.order)
-  if (memberActionAlreadyApplied(exercises, input.action)) {
+  if (workout.lastMemberActionId === input.actionId) {
     return { status: 'unchanged' }
   }
   if (
@@ -230,15 +234,14 @@ async function applyLiveWorkoutMemberActionWithLockHeld(
   if (!parsed.success) {
     return { reason: 'workout_changed', status: 'rejected' }
   }
-  if (JSON.stringify(parsed.data.exercises) === JSON.stringify(workout.exercises)) {
-    return { status: 'unchanged' }
-  }
+  const changed = JSON.stringify(parsed.data.exercises)
+    !== JSON.stringify(workout.exercises)
 
   const persistExercises = removeMutations.length > 0
     ? updateLiveWorkoutExercisesAfterValidatedSetRemoval
     : updateLiveWorkoutExercises
-  await persistExercises(shown, workout, parsed.data.exercises)
-  return { status: 'applied' }
+  await persistExercises(shown, workout, parsed.data.exercises, input.actionId)
+  return { status: changed ? 'applied' : 'unchanged' }
 }
 
 function applyMemberActionSetPuts(
@@ -300,129 +303,6 @@ function applyMemberActionSetAppends(
   return true
 }
 
-function memberActionAlreadyApplied(
-  exercises: WorkoutExercise[],
-  action: WorkoutLiveApplyMemberActionV1,
-): boolean {
-  const mutations = action.mutations
-  return mutations.every((mutation) => {
-    const exercise = exercises[mutation.exercisePosition - 1]
-    if (mutation.kind === 'exercise.append') {
-      return exercise !== undefined
-        && matchesAppendedExercise(exercise, mutation, mutations)
-    }
-    const removal = mutations.find((candidate) =>
-      candidate.kind === 'set.remove'
-        && candidate.exercisePosition === mutation.exercisePosition,
-    )
-    if (removal?.kind === 'set.remove') {
-      return memberActionRemovalsAlreadyApplied(exercises, action, removal)
-    }
-    if (
-      (mutation.kind !== 'set.put' && mutation.kind !== 'set.append')
-      || !exercise
-      || exercise.name !== mutation.exerciseName
-    ) {
-      return false
-    }
-    const set = exercise.sets
-      .slice()
-      .sort((left, right) => left.order - right.order)[mutation.setPosition - 1]
-    return set !== undefined
-      && memberActionWorkoutSetMatches({
-        expected: mutation.result,
-        ownedKind: mutation.result?.kind ?? null,
-        set,
-      })
-  })
-}
-
-function memberActionRemovalsAlreadyApplied(
-  exercises: WorkoutExercise[],
-  action: WorkoutLiveApplyMemberActionV1,
-  mutation: Extract<
-    WorkoutLiveApplyMemberActionV1['mutations'][number],
-    { kind: 'set.remove' }
-  >,
-): boolean {
-  const exercise = exercises[mutation.exercisePosition - 1]
-  const expected = action.expectedWorkout.exercises[mutation.exercisePosition - 1]
-  if (!exercise || !expected || exercise.name !== mutation.exerciseName) {
-    return false
-  }
-  const removal = action.mutations.find((candidate) =>
-    candidate.kind === 'set.remove'
-      && candidate.exercisePosition === mutation.exercisePosition,
-  )
-  if (removal?.kind !== 'set.remove') {
-    return false
-  }
-  if (exercise.sets.length !== removal.expectedSets.length - removedPositionsCount(
-    action,
-    mutation.exercisePosition,
-  ) + appendedSetsCount(action, mutation.exercisePosition)) {
-    return false
-  }
-  const expectedSetStates = removal.expectedSets.map((state) => state.result)
-  const existingSetMutations = action.mutations.filter(
-    (candidate): candidate is SetPutMutation =>
-      candidate.kind === 'set.put'
-      && candidate.exercisePosition === mutation.exercisePosition,
-  )
-  for (const put of existingSetMutations) {
-    expectedSetStates[put.setPosition - 1] = put.result
-  }
-  const removedPositions = action.mutations.flatMap((candidate) =>
-    candidate.kind === 'set.remove'
-      && candidate.exercisePosition === mutation.exercisePosition
-      ? [candidate.setPosition]
-      : [],
-  ).sort((left, right) => right - left)
-  for (const position of removedPositions) {
-    expectedSetStates.splice(position - 1, 1)
-  }
-  const appendedSetMutations = action.mutations.filter(
-    (candidate): candidate is SetAppendMutation =>
-      candidate.kind === 'set.append'
-      && candidate.exercisePosition === mutation.exercisePosition,
-  ).sort((left, right) => left.setPosition - right.setPosition)
-  for (const appended of appendedSetMutations) {
-    if (appended.setPosition !== expectedSetStates.length + 1) {
-      return false
-    }
-    expectedSetStates.push(appended.result)
-  }
-  const current = exercise.sets.slice().sort((left, right) => left.order - right.order)
-  return current.length === expectedSetStates.length
-    && current.every((set, index) =>
-      memberActionWorkoutSetMatches({
-        expected: expectedSetStates[index] ?? null,
-        ownedKind: expectedSetStates[index]?.kind ?? null,
-        set,
-      }),
-    )
-}
-
-function removedPositionsCount(
-  action: WorkoutLiveApplyMemberActionV1,
-  exercisePosition: number,
-): number {
-  return action.mutations.filter((candidate) =>
-    candidate.kind === 'set.remove'
-      && candidate.exercisePosition === exercisePosition,
-  ).length
-}
-
-function appendedSetsCount(
-  action: WorkoutLiveApplyMemberActionV1,
-  exercisePosition: number,
-): number {
-  return action.mutations.filter((candidate) =>
-    candidate.kind === 'set.append'
-      && candidate.exercisePosition === exercisePosition,
-  ).length
-}
-
 function memberActionExpectedSetsMatch(
   sets: WorkoutSet[],
   expected: WorkoutMemberActionExpectedSetStateV1[],
@@ -464,46 +344,6 @@ function memberActionExpectedWorkoutMatches(
       (expectedSet, setIndex) =>
         expectedSet.logged === hasLoggedWorkoutSet(sets[setIndex]!),
     )
-  })
-}
-
-function matchesAppendedExercise(
-  exercise: WorkoutExercise,
-  mutation: Extract<
-    WorkoutLiveApplyMemberActionV1['mutations'][number],
-    { kind: 'exercise.append' }
-  >,
-  mutations: WorkoutLiveApplyMemberActionV1['mutations'],
-): boolean {
-  if (
-    exercise.name !== mutation.name
-    || (exercise.mode ?? null) !== mutation.mode
-    || (exercise.unitOverride ?? null) !== mutation.unitOverride
-    || exercise.sets.length !== mutation.setCount
-  ) {
-    return false
-  }
-
-  const sets = exercise.sets.slice().sort((left, right) => left.order - right.order)
-  return sets.every((set, setIndex) => {
-    const setPosition = setIndex + 1
-    if (set.order !== setPosition) {
-      return false
-    }
-    const setMutation = mutations.find((candidate) =>
-      candidate.kind === 'set.put'
-      && candidate.exercisePosition === mutation.exercisePosition
-      && candidate.exerciseName === mutation.name
-      && candidate.setPosition === setPosition
-    )
-    if (setMutation?.kind !== 'set.put') {
-      return !hasLoggedWorkoutSet(set)
-    }
-    return memberActionWorkoutSetMatches({
-      expected: setMutation.result,
-      ownedKind: setMutation.result?.kind ?? null,
-      set,
-    })
   })
 }
 

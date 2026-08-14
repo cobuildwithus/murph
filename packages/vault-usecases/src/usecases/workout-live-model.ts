@@ -83,6 +83,7 @@ export interface FinishLiveWorkoutInput extends LiveWorkoutLookupInput {
 export interface ApplyLiveWorkoutMemberActionInput {
   acceptedAt: string
   action: WorkoutLiveApplyMemberActionV1
+  actionId: string
   vault: string
 }
 

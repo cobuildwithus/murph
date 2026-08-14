@@ -19,6 +19,7 @@ export async function executeHostedMemberActionWake(input: {
       const result = await applyLiveWorkoutMemberAction({
         acceptedAt: input.wake.occurredAt,
         action: input.wake.request.action,
+        actionId: input.wake.request.actionId,
         vault: input.vaultRoot,
       });
       return createNoopMailboxEffect({

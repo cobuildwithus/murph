@@ -131,6 +131,7 @@ export async function updateLiveWorkoutExercises(
   shown: WorkoutShowResult,
   workout: WorkoutSession,
   exercises: WorkoutExercise[],
+  lastMemberActionId?: string,
 ) {
   const update = validateLiveWorkoutExerciseUpdate(shown, workout, exercises)
   const set = [
@@ -138,6 +139,9 @@ export async function updateLiveWorkoutExercises(
   ]
   if (update.durationMinutes !== undefined) {
     set.push(`durationMinutes=${update.durationMinutes}`)
+  }
+  if (lastMemberActionId !== undefined) {
+    set.push(`workout.lastMemberActionId=${lastMemberActionId}`)
   }
 
   return editWorkoutRecord({
@@ -151,11 +155,13 @@ export async function updateLiveWorkoutExercisesAfterValidatedSetRemoval(
   shown: WorkoutShowResult,
   workout: WorkoutSession,
   exercises: WorkoutExercise[],
+  lastMemberActionId: string,
 ) {
   const update = validateLiveWorkoutExerciseUpdate(shown, workout, exercises)
   return editWorkoutRecordAfterValidatedSetRemoval({
     durationMinutes: update.durationMinutes,
     exercises: update.exercises,
+    lastMemberActionId,
     lookup: shown.entity.id,
     vault: shown.vault,
   })

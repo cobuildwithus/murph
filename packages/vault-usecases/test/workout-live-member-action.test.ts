@@ -27,7 +27,7 @@ vi.mock("../src/usecases/workout-live-state.js", async (importOriginal) => ({
 }));
 
 import {
-  applyLiveWorkoutMemberAction,
+  applyLiveWorkoutMemberAction as applyLiveWorkoutMemberActionWithId,
 } from "../src/usecases/workout-live.ts";
 
 const BASE_WORKOUT: WorkoutSession = {
@@ -43,6 +43,19 @@ const BASE_WORKOUT: WorkoutSession = {
 };
 const ACCEPTED_AT = "2026-08-12T15:00:00.000Z";
 const ACTION_BINDING = deriveWorkoutActionBinding("evt_test_workout");
+const ACTION_ID = "2f1c1fdc-c7b0-4d90-b902-8e6295959243";
+
+function applyLiveWorkoutMemberAction(
+  input: Omit<
+    Parameters<typeof applyLiveWorkoutMemberActionWithId>[0],
+    "actionId"
+  > & { actionId?: string },
+) {
+  return applyLiveWorkoutMemberActionWithId({
+    ...input,
+    actionId: input.actionId ?? ACTION_ID,
+  });
+}
 
 function shownWorkout(
   workout: WorkoutSession = BASE_WORKOUT,
@@ -228,9 +241,10 @@ describe("live workout member action", () => {
     expect(mocks.updateLiveWorkoutExercises).not.toHaveBeenCalled();
   });
 
-  it("treats an exact retry as unchanged before the stale-shape check", async () => {
+  it("uses the persisted action id for exact retry before stale-shape checks", async () => {
     mocks.findActiveLiveWorkouts.mockResolvedValueOnce([shownWorkout({
       ...BASE_WORKOUT,
+      lastMemberActionId: ACTION_ID,
       exercises: [{
         ...BASE_WORKOUT.exercises[0],
         sets: [{ order: 1, reps: 8 }],
@@ -284,6 +298,7 @@ describe("live workout member action", () => {
   it("treats an exact set-removal replay as unchanged", async () => {
     mocks.findActiveLiveWorkouts.mockResolvedValueOnce([shownWorkout({
       ...BASE_WORKOUT,
+      lastMemberActionId: ACTION_ID,
       exercises: [{
         ...BASE_WORKOUT.exercises[0],
         sets: [{ order: 1 }],
@@ -357,6 +372,74 @@ describe("live workout member action", () => {
     expect(mocks.updateLiveWorkoutExercises).not.toHaveBeenCalled();
   });
 
+  it("rejects a stale destructive action when current values mimic its final projection", async () => {
+    const originalWorkout: WorkoutSession = {
+      ...BASE_WORKOUT,
+      exercises: [{
+        ...BASE_WORKOUT.exercises[0],
+        sets: [
+          { order: 1, reps: 10, type: "warmup" },
+          { order: 2, reps: 20 },
+        ],
+      }],
+    };
+    const expectedSets = [
+      { logged: true, result: { kind: "reps" as const, reps: 10 } },
+      { logged: true, result: { kind: "reps" as const, reps: 20 } },
+    ];
+    mocks.findActiveLiveWorkouts.mockResolvedValueOnce([shownWorkout({
+      ...originalWorkout,
+      lastMemberActionId: "8676b264-9b91-4b50-8c73-184d7a63b901",
+      exercises: [{
+        ...originalWorkout.exercises[0],
+        sets: [
+          { order: 1, reps: 20, type: "warmup" },
+          { order: 2, reps: 30 },
+        ],
+      }],
+    })]);
+
+    await expect(applyLiveWorkoutMemberAction({
+      acceptedAt: ACCEPTED_AT,
+      action: {
+        expectedWorkout: {
+          actionBinding: ACTION_BINDING,
+          exercises: [{
+            name: "Leg press",
+            sets: expectedSets.map(({ logged }) => ({ logged })),
+          }],
+          setRemovalBinding: deriveWorkoutSetRemovalBinding(
+            "evt_test_workout",
+            originalWorkout.exercises,
+          ),
+        },
+        kind: "workout.live.apply",
+        mutations: [
+          {
+            exerciseName: "Leg press",
+            exercisePosition: 1,
+            expectedSets,
+            kind: "set.remove",
+            setPosition: 1,
+          },
+          {
+            exerciseName: "Leg press",
+            exercisePosition: 1,
+            kind: "set.append",
+            result: { kind: "reps", reps: 30 },
+            setPosition: 2,
+          },
+        ],
+        version: 1,
+      },
+      vault: "/vault",
+    })).resolves.toEqual({
+      reason: "workout_changed",
+      status: "rejected",
+    });
+    expect(mocks.updateLiveWorkoutExercises).not.toHaveBeenCalled();
+  });
+
   it("applies and exactly replays descending removals plus appended sets", async () => {
     const expectedSets = [
       { logged: false, result: null },
@@ -424,6 +507,7 @@ describe("live workout member action", () => {
     mocks.updateLiveWorkoutExercises.mockClear();
     mocks.findActiveLiveWorkouts.mockResolvedValueOnce([shownWorkout({
       ...BASE_WORKOUT,
+      lastMemberActionId: ACTION_ID,
       exercises: finalExercises,
     })]);
     await expect(applyLiveWorkoutMemberAction({
@@ -475,6 +559,7 @@ describe("live workout member action", () => {
     mocks.updateLiveWorkoutExercises.mockClear();
     mocks.findActiveLiveWorkouts.mockResolvedValueOnce([shownWorkout({
       ...BASE_WORKOUT,
+      lastMemberActionId: ACTION_ID,
       exercises: [{
         ...BASE_WORKOUT.exercises[0],
         sets: [{ order: 1, reps: 10 }, { order: 2 }],
@@ -734,6 +819,7 @@ describe("live workout member action", () => {
   it("recognizes an exact correction replay after an unrelated annotation changes", async () => {
     mocks.findActiveLiveWorkouts.mockResolvedValueOnce([shownWorkout({
       ...BASE_WORKOUT,
+      lastMemberActionId: ACTION_ID,
       exercises: [{
         ...BASE_WORKOUT.exercises[0],
         sets: [{
@@ -896,6 +982,7 @@ describe("live workout member action", () => {
   it("recognizes an exact add-weight replay from a partial prior state", async () => {
     mocks.findActiveLiveWorkouts.mockResolvedValueOnce([shownWorkout({
       ...BASE_WORKOUT,
+      lastMemberActionId: ACTION_ID,
       exercises: [{
         ...BASE_WORKOUT.exercises[0],
         sets: [{ order: 1, reps: 8, weight: 185, weightUnit: "lb" }],
@@ -980,6 +1067,7 @@ describe("live workout member action", () => {
   it("treats an exact appended exercise retry as unchanged", async () => {
     mocks.findActiveLiveWorkouts.mockResolvedValueOnce([shownWorkout({
       ...BASE_WORKOUT,
+      lastMemberActionId: ACTION_ID,
       exercises: [
         BASE_WORKOUT.exercises[0],
         {
@@ -1002,6 +1090,7 @@ describe("live workout member action", () => {
   it("recognizes an appended-set replay after an unrelated annotation changes", async () => {
     mocks.findActiveLiveWorkouts.mockResolvedValueOnce([shownWorkout({
       ...BASE_WORKOUT,
+      lastMemberActionId: ACTION_ID,
       exercises: [
         BASE_WORKOUT.exercises[0],
         {

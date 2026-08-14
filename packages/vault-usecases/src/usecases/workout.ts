@@ -745,6 +745,7 @@ export function editWorkoutRecordAfterValidatedSetRemoval(
   input: {
     durationMinutes?: number
     exercises: WorkoutExercise[]
+    lastMemberActionId: string
     lookup: string
     vault: string
   },
@@ -755,6 +756,7 @@ export function editWorkoutRecordAfterValidatedSetRemoval(
   if (input.durationMinutes !== undefined) {
     set.push(`durationMinutes=${input.durationMinutes}`)
   }
+  set.push(`workout.lastMemberActionId=${input.lastMemberActionId}`)
   return editWorkoutRecordWithStructurePolicy({
     lookup: input.lookup,
     set,

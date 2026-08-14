@@ -72,6 +72,7 @@ describe("hosted member action runtime", () => {
     expect(mocks.applyLiveWorkoutMemberAction).toHaveBeenCalledWith({
       acceptedAt: "2026-08-12T15:00:00.000Z",
       action,
+      actionId: "2f1c1fdc-c7b0-4d90-b902-8e6295959243",
       vault: "/vault",
     });
   });
@@ -179,6 +180,7 @@ describe("hosted member action runtime", () => {
       expect(mocks.applyLiveWorkoutMemberAction).toHaveBeenCalledWith({
         acceptedAt: "2026-08-12T15:00:00.000Z",
         action,
+        actionId: "2f1c1fdc-c7b0-4d90-b902-8e6295959243",
         vault: "/vault",
       });
     },

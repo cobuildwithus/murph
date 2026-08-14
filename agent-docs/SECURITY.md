@@ -669,9 +669,12 @@ Last verified: 2026-08-13
   grants identity or write authority. Neither binding reveals a canonical id or
   member. A destructive batch is invalid when its typed final visible set
   sequence equals its submitted prestate, because the projection cannot prove
-  whether that batch was first-applied or replayed; reject it before mailbox
-  append rather than adding stable client-visible set ids or another receipt
-  store. Canonical persistence keeps the generic no-deletion guard and exposes
+  whether that batch changes the visible structure; reject it before mailbox
+  append rather than accepting a meaningless destructive command. Canonical
+  persistence atomically records the bounded action id with the workout change,
+  and only that exact marker—not visible-state coincidence—proves replay before
+  destructive preconditions. This adds no client-visible set id or second
+  receipt store. Canonical persistence keeps the generic no-deletion guard and exposes
   set removal only to the live-workout member-action owner after the exact
   binding and snapshot checks succeed. An editable note is admitted only when its exact
   canonical value fits the visible 40-character result field; a longer hidden

@@ -15,7 +15,7 @@ import { expect, test } from "vitest";
 
 import {
   addLiveWorkoutExercise,
-  applyLiveWorkoutMemberAction,
+  applyLiveWorkoutMemberAction as applyLiveWorkoutMemberActionWithId,
   logLiveWorkoutSet,
   showActiveLiveWorkout,
   startLiveWorkout,
@@ -25,6 +25,19 @@ import { editWorkoutRecord } from "../src/usecases/workout.js";
 
 const STARTED_AT = "2026-08-13T14:00:00.000Z";
 const ACCEPTED_AT = "2026-08-13T15:00:00.000Z";
+const ACTION_ID = "2f1c1fdc-c7b0-4d90-b902-8e6295959243";
+
+function applyLiveWorkoutMemberAction(
+  input: Omit<
+    Parameters<typeof applyLiveWorkoutMemberActionWithId>[0],
+    "actionId"
+  > & { actionId?: string },
+) {
+  return applyLiveWorkoutMemberActionWithId({
+    ...input,
+    actionId: input.actionId ?? ACTION_ID,
+  });
+}
 
 async function createLoggedWorkout(reps: readonly number[]): Promise<{
   vault: string;
@@ -139,6 +152,8 @@ test("a member action can remove a saved set through the real vault boundary", a
     })).resolves.toEqual({ status: "applied" });
 
     await expectStoredReps(fixture.vault, [8, 10]);
+    const stored = await showActiveLiveWorkout({ vault: fixture.vault });
+    expect(parseShownWorkout(stored).lastMemberActionId).toBe(ACTION_ID);
     await expect(applyLiveWorkoutMemberAction({
       acceptedAt: ACCEPTED_AT,
       action,

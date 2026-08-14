@@ -1494,7 +1494,11 @@ missing outcome retains the local draft. The first workout editor additionally
 requires the V6 card's opaque exact-workout binding under the existing workout
 mutation lock, so delayed or forwarded cards cannot retarget a later workout.
 Admission also rejects any destructive set batch whose final visible projection
-equals its prestate; otherwise an early exact-replay check could mistake a first
-application for convergence when hidden canonical set fields differ. Validated
-set removal uses one narrow canonical replacement operation, while every generic
-workout replacement remains fail-closed against saved-set loss.
+equals its prestate because that request has no observable structural effect.
+The canonical workout write atomically records the action id with the mutation;
+only that exact persisted id proves replay. A merely matching visible result is
+never success for a stale destructive action. The serialized mailbox lane means
+one last-applied id is sufficient until its terminal outcome commits, without a
+second receipt store. Validated set removal uses one narrow canonical replacement
+operation, while every generic workout replacement remains fail-closed against
+saved-set loss.
