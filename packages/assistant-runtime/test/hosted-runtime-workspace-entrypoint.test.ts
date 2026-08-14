@@ -10660,7 +10660,10 @@ describe("hosted workspace runtime entrypoint", () => {
       ReadonlyMap<string, Uint8Array>
     >();
     const completedSnapshotIds = new Set<string>();
-    const restoredSnapshotIdByAttempt = new Map<string, string>();
+    const restoredSnapshotRefByAttempt = new Map<
+      string,
+      HostedWorkspaceSnapshotV2Ref
+    >();
     const deviceSyncStatePresentWhenSnapshotBuilt = new Map<string, boolean>();
     const deviceSyncStatePresentAtRestoreByAttempt = new Map<string, boolean>();
     const dueAt = TEST_NOW;
@@ -10888,8 +10891,8 @@ describe("hosted workspace runtime entrypoint", () => {
         assert.equal(completedSnapshotIds.has(input.ref.snapshotId), true);
         const snapshotFiles = capturedSnapshotFiles.get(input.ref.snapshotId);
         assert.ok(snapshotFiles);
-        assert.equal(restoredSnapshotIdByAttempt.has(activeAttemptId), false);
-        restoredSnapshotIdByAttempt.set(activeAttemptId, input.ref.snapshotId);
+        assert.equal(restoredSnapshotRefByAttempt.has(activeAttemptId), false);
+        restoredSnapshotRefByAttempt.set(activeAttemptId, input.ref);
         await rm(input.durableRoot, { force: true, recursive: true });
         await mkdir(input.durableRoot, { mode: 0o700, recursive: true });
         const resolvedDurableRoot = path.resolve(input.durableRoot);
@@ -11073,6 +11076,7 @@ describe("hosted workspace runtime entrypoint", () => {
       const committedInputSnapshotRef = committedInputSnapshot.snapshotRef;
       assert.ok(isHostedWorkspaceSnapshotV2Ref(committedInputSnapshotRef));
       assert.ok(currentWorkspace);
+      assert.equal(currentWorkspace.version, "1");
       assert.deepEqual(currentWorkspace.snapshotRef, committedInputSnapshotRef);
       assert.equal(
         deviceSyncStatePresentWhenSnapshotBuilt.get(
@@ -11087,10 +11091,6 @@ describe("hosted workspace runtime entrypoint", () => {
           ),
         true,
       );
-      currentWorkspace = createWorkspaceState({
-        snapshotRef: committedInputSnapshotRef,
-        version: "0",
-      });
       checkpointAttempt = 0;
       checkpointRequests.length = 0;
       events.length = 0;
@@ -11134,10 +11134,10 @@ describe("hosted workspace runtime entrypoint", () => {
       );
       assert.deepEqual(
         checkpointRequests.map((request) => request.expectedWorkspaceVersion),
-        ["0", "1"],
+        ["1", "2"],
       );
       assert.ok(currentWorkspace);
-      assert.equal(currentWorkspace.version, "1");
+      assert.equal(currentWorkspace.version, "2");
       const initialProviderRequestClasses = providerRequestClasses.slice();
       assert.deepEqual(initialProviderRequestClasses, expectedWhoopRequestClasses);
       assert.deepEqual(cadencePublications, []);
@@ -11164,7 +11164,7 @@ describe("hosted workspace runtime entrypoint", () => {
         4,
       );
       assert.equal(
-        events.indexOf("checkpoint.commit:attempt_device_sync_closed_loop_initial:2"),
+        events.indexOf("checkpoint.commit:attempt_device_sync_closed_loop_initial:3"),
         -1,
       );
       const durablePostPullCheckpoint = checkpointRequests[0];
@@ -11212,9 +11212,9 @@ describe("hosted workspace runtime entrypoint", () => {
         vaultRoot: coldVaultRoot,
       });
 
-      assert.equal(
-        restoredSnapshotIdByAttempt.get(recoveryAttemptId),
-        committedInputSnapshotRef.snapshotId,
+      assert.deepEqual(
+        restoredSnapshotRefByAttempt.get(recoveryAttemptId),
+        committedInputSnapshotRef,
       );
       assert.equal(
         deviceSyncStatePresentAtRestoreByAttempt.get(recoveryAttemptId),
@@ -11230,14 +11230,14 @@ describe("hosted workspace runtime entrypoint", () => {
       assert.equal(canonicalNextReconcileAt, dueAt);
       assert.equal(recovered.nextWakeReason, "device-sync.reconcile");
       assert.ok(currentWorkspace);
-      assert.equal(currentWorkspace.version, "4");
+      assert.equal(currentWorkspace.version, "5");
       assert.equal(checkpointAttempt, 5);
       assert.equal(checkpointRequests.length, 5);
       assert.deepEqual(
         checkpointRequests.slice(2, 5).map((request) =>
           request.expectedWorkspaceVersion
         ),
-        ["1", "2", "3"],
+        ["2", "3", "4"],
       );
       const recoveryCheckpointCommitIndexes = events.flatMap((event, index) =>
         event.startsWith(`checkpoint.commit:${recoveryAttemptId}:`) ? [index] : []
@@ -11296,10 +11296,10 @@ describe("hosted workspace runtime entrypoint", () => {
         checkpointRequests.slice(5, 7).map((request) =>
           request.expectedWorkspaceVersion
         ),
-        ["4", "5"],
+        ["5", "6"],
       );
       assert.ok(currentWorkspace);
-      assert.equal(currentWorkspace.version, "6");
+      assert.equal(currentWorkspace.version, "7");
 
       const checkpointAttemptsAfterSettlement = checkpointAttempt;
       assert.equal(checkpointAttemptsAfterSettlement, 7);
@@ -11325,9 +11325,9 @@ describe("hosted workspace runtime entrypoint", () => {
       assert.equal(converged.nextWakeReason, undefined);
       assert.equal(providerRequestClasses.length, providerRequestsBeforeConvergence);
       assert.equal(checkpointAttempt, checkpointAttemptsBeforeConvergence + 1);
-      assert.equal(checkpointRequests.at(-1)?.expectedWorkspaceVersion, "6");
+      assert.equal(checkpointRequests.at(-1)?.expectedWorkspaceVersion, "7");
       assert.ok(currentWorkspace);
-      assert.equal(currentWorkspace.version, "7");
+      assert.equal(currentWorkspace.version, "8");
 
       const quiescentBucketAt = "2026-04-27T00:15:00.000Z";
       const quiescentAttemptId =
@@ -11345,7 +11345,7 @@ describe("hosted workspace runtime entrypoint", () => {
       assert.equal(providerRequestClasses.length, providerRequestsBeforeQuiescence);
       assert.equal(checkpointAttempt, checkpointAttemptsBeforeQuiescence);
       assert.ok(currentWorkspace);
-      assert.equal(currentWorkspace.version, "7");
+      assert.equal(currentWorkspace.version, "8");
       assert.equal(
         providerRequestClasses.length,
         providerRequestClassesAfterSettlement,

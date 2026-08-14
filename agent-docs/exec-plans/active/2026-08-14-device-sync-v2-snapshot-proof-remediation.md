@@ -58,3 +58,11 @@ Updated: 2026-08-14
   restores the exact last committed v2 ref through the production restore owner.
 - Focused owner regression, Web admission regressions, assistant-runtime
   typecheck, docs drift, and `git diff --check` pass.
+- PR #1812 preliminary specialists: `SPECIALIST_OUTCOME: FINDINGS` at
+  `0b692be223aa77277805834e3701d514aacff48c`. The accepted coverage finding
+  preserves the authoritative version-1 seed workspace and compares the complete
+  restored v2 ref. The downloaded test-only patch passed cached-index apply-check;
+  the parent correction also shifted the failed checkpoint event version that
+  the unexecuted artifact omitted. Focused proof passes after correction.
+- PR #1812 final ReviewGPT round 1: `ROUND_OUTCOME: PASS` at the same head. The
+  next final round verifies the combined specialist remediation delta.
