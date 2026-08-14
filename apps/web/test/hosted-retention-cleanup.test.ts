@@ -114,8 +114,10 @@ describe("hosted retention cleanup", () => {
   it("prunes every high-volume diagnostic table before signaling runtimes", async () => {
     const now = new Date("2026-04-25T12:00:00.000Z");
     const countsByStatement = new Map<string, number>([
+      ['DELETE FROM "hosted_web_internal_request_nonce"', 6],
       ['DELETE FROM "hosted_ingress_latency_trace"', 1],
       ['DELETE FROM "hosted_assistant_runtime_issue"', 2],
+      ['DELETE FROM "hosted_group_current_sender_clarification"', 3],
       ['DELETE FROM "device_webhook_trace"', 4],
       ['UPDATE "hosted_linq_provider_event"', 5],
     ]);
@@ -158,9 +160,11 @@ describe("hosted retention cleanup", () => {
       },
       compactedLinqProviderEventDiagnostics: 5,
       expiredAssistantRuntimeIssuesDeleted: 2,
+      expiredCallbackRequestNoncesDeleted: 6,
       expiredComputerRunsCleanedUp: 0,
       expiredConversationPolicyNonRepliesRecorded: 0,
       expiredDeviceWebhookTracesDeleted: 4,
+      expiredGroupCurrentSenderClarificationsDeleted: 3,
       expiredIngressLatencyTracesDeleted: 1,
       expiredMailboxContentRetired: 7,
       expiredMailboxTombstonesDeleted: 3,
@@ -205,7 +209,40 @@ describe("hosted retention cleanup", () => {
     ]);
 
     // One statement per category: every short batch stops that category's loop.
-    expect(executeRaw).toHaveBeenCalledTimes(6);
+    expect(executeRaw).toHaveBeenCalledTimes(8);
+
+    const callbackNonceCall = findRetentionCall(
+      executeRaw,
+      'DELETE FROM "hosted_web_internal_request_nonce"',
+    );
+    expect(sqlOf(callbackNonceCall)).toContain(
+      "WITH database_clock AS MATERIALIZED",
+    );
+    expect(sqlOf(callbackNonceCall)).toContain("doomed AS MATERIALIZED");
+    expect(sqlOf(callbackNonceCall)).toContain("date_trunc(");
+    expect(sqlOf(callbackNonceCall)).toContain("'milliseconds'");
+    expect(sqlOf(callbackNonceCall)).toContain(
+      "clock_timestamp() AT TIME ZONE 'UTC'",
+    );
+    expect(sqlOf(callbackNonceCall)).toContain(
+      'WHERE request_nonce."expires_at" < database_clock."now"',
+    );
+    expect(sqlOf(callbackNonceCall)).toContain(
+      'request_nonce."expires_at" ASC',
+    );
+    expect(sqlOf(callbackNonceCall)).toContain(
+      'request_nonce."nonce_hash" ASC',
+    );
+    expect(sqlOf(callbackNonceCall)).toContain("LIMIT ?");
+    expect(sqlOf(callbackNonceCall)).toContain(
+      "FOR UPDATE OF request_nonce SKIP LOCKED",
+    );
+    expect(sqlOf(callbackNonceCall)).toContain(
+      'WHERE request_nonce."nonce_hash" = doomed."nonce_hash"',
+    );
+    expect(callbackNonceCall.slice(1)).toEqual([
+      HOSTED_RETENTION_BATCH_SIZE,
+    ]);
 
     const latencyTraceCall = findRetentionCall(
       executeRaw,
@@ -390,13 +427,19 @@ describe("hosted retention cleanup", () => {
   it("stops each category at its per-run batch ceiling", async () => {
     // A backlog that keeps returning full batches must not turn one hourly run
     // into an unbounded delete loop.
+    let nonceBatches = 0;
     let traceBatches = 0;
     const executeRaw = vi.fn(async (strings: TemplateStringsArray) => {
-      if (!strings.join("?").includes('DELETE FROM "hosted_ingress_latency_trace"')) {
-        return 0;
+      const sql = strings.join("?");
+      if (sql.includes('DELETE FROM "hosted_web_internal_request_nonce"')) {
+        nonceBatches += 1;
+        return HOSTED_RETENTION_BATCH_SIZE;
       }
-      traceBatches += 1;
-      return HOSTED_RETENTION_BATCH_SIZE;
+      if (sql.includes('DELETE FROM "hosted_ingress_latency_trace"')) {
+        traceBatches += 1;
+        return HOSTED_RETENTION_BATCH_SIZE;
+      }
+      return 0;
     });
     const prisma = createRetentionPrisma({ executeRaw });
 
@@ -404,9 +447,12 @@ describe("hosted retention cleanup", () => {
       now: "2026-04-25T12:00:00.000Z",
       prisma: prisma as never,
     })).resolves.toMatchObject({
+      expiredCallbackRequestNoncesDeleted:
+        HOSTED_RETENTION_BATCH_SIZE * HOSTED_RETENTION_MAX_BATCHES,
       expiredIngressLatencyTracesDeleted:
         HOSTED_RETENTION_BATCH_SIZE * HOSTED_RETENTION_MAX_BATCHES,
     });
+    expect(nonceBatches).toBe(HOSTED_RETENTION_MAX_BATCHES);
     expect(traceBatches).toBe(HOSTED_RETENTION_MAX_BATCHES);
   });
 
@@ -489,9 +535,11 @@ describe("hosted retention cleanup", () => {
         },
         compactedLinqProviderEventDiagnostics: 1,
         expiredAssistantRuntimeIssuesDeleted: 1,
+        expiredCallbackRequestNoncesDeleted: 1,
         expiredComputerRunsCleanedUp: 0,
         expiredConversationPolicyNonRepliesRecorded: 0,
         expiredDeviceWebhookTracesDeleted: 1,
+        expiredGroupCurrentSenderClarificationsDeleted: 1,
         expiredIngressLatencyTracesDeleted: 1,
         expiredMailboxContentRetired: 1,
         expiredMailboxTombstonesDeleted: 0,

@@ -1,6 +1,6 @@
 # Native Companion Apps (Health Sync)
 
-Last verified: 2026-08-06
+Last verified: 2026-08-12
 
 Current iOS distribution status: approved for the App Store. The canonical
 public listing is `https://apps.apple.com/us/app/murph-ai/id6786145859`.
@@ -154,9 +154,10 @@ before status, token exchange, or any health setup:
    alternate-sign-in recovery. On typed `HOSTED_CONSENT_REQUIRED`, use the
    existing bearer-only legal-consent `GET` and `POST` boundary to render and
    record the required launch grants, then retry admission. On typed
-   `HOSTED_ACCESS_REQUIRED`—including normalized unavailable, blocked, or
-   already-used automatic-trial outcomes—enter the existing billing/activation
-   access recovery instead of falling through to health setup. Typed
+   `HOSTED_ACCESS_REQUIRED`—including a member whose prior billing history
+   makes automatic starter enrollment unsafe—enter the existing
+   billing/activation access recovery instead of falling through to health
+   setup. Typed
    `HOSTED_MEMBER_SUSPENDED` enters suspended-account support recovery.
    `COMPANION_ADMISSION_RETRYABLE` keeps the account gate visible with an
    explicit retry, while `COMPANION_ADMISSION_SUPPORT_REQUIRED` enters support
@@ -170,11 +171,25 @@ before status, token exchange, or any health setup:
 Admission grants no Junction or device authority. A newly authenticated signup
 must not request a sign-in token, sign in to the Junction SDK, or create or
 resume a hosted connection before the member explicitly chooses **Connect
-Health Connect**. Account-only admission also suppresses the ordinary hosted
-signup welcome: it must not assign a Linq home line, queue a signup-welcome
-notification, or send a welcome email. Canonical Pulse trial activation,
-active-access proof, and the internal `member.activated` fact remain intact.
-Existing established-member session restoration retains its separate
+Health Connect**. A consented fresh companion activation with a verified phone
+may enter the ordinary hosted signup-welcome path. The existing exact-member
+binding, signup idempotency, home-line health, and proactive-capacity owners
+still govern that path. Exhausted proactive capacity does not block activation:
+Web assigns an eligible home line without a proactive welcome, and inbound-first
+messaging remains available. If no line is assignable, account activation still
+succeeds without assigning one. The exact active member's first provider-
+attested direct message can bind the contacted managed line when the existing
+reply-egress policy permits it, including at-risk and delivery-warning lines
+that cannot initiate outreach. Unmanaged, disabled, ambiguous, or unsafe lines
+cannot establish that exact-line authority; ordinary fallback selection still
+fails closed when no eligible line exists. A successfully delivered welcome uses the existing finite
+unfinished-onboarding continuation: at most one low-pressure opportunity on
+each of the next three local days, with the ordinary stop rules. Companion
+admission does not also send the signup welcome email. A committed activation
+whose runtime wake is not accepted stays on the retryable account gate; retry
+re-signals only the exact pending Starter activation mailbox item. Canonical starter-usage activation, active-access
+proof, and the internal `member.activated` fact remain intact. Existing
+established-member session restoration retains its separate
 documented `resume` path and cannot turn admission itself into health
 connection authority.
 

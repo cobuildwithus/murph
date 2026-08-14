@@ -22,6 +22,29 @@ import {
 } from "./hosted-member-store";
 import { logHostedStripeFailure } from "./stripe-error-log";
 
+const HOSTED_LEGACY_TRIAL_RETIRABLE_STATUSES = new Set<Stripe.Subscription.Status>([
+  "canceled",
+  "incomplete",
+  "incomplete_expired",
+  "paused",
+  "trialing",
+]);
+
+export function isHostedLegacyPulseTrialRetirableStatus(
+  status: Stripe.Subscription.Status,
+): boolean {
+  return HOSTED_LEGACY_TRIAL_RETIRABLE_STATUSES.has(status);
+}
+
+export function buildHostedLegacyTrialRetirementBlockedError() {
+  return hostedOnboardingError({
+    code: "HOSTED_BILLING_SUBSCRIPTION_ALREADY_EXISTS",
+    httpStatus: 409,
+    message:
+      "This hosted account already has a subscription. Manage it from Settings instead of starting a new one.",
+  });
+}
+
 export type HostedPulseTrialCandidateDisposition =
   | "current"
   | "eligible"
@@ -82,16 +105,16 @@ function classifyHostedPulseTrialCandidateDispositionForIdentity(input: {
   if (input.currentSubscriptionIdentity === "candidate") {
     return "current";
   }
+  // A second legacy trial may never replace an already-bound provider
+  // identity. Retire the delayed candidate and leave the current identity for
+  // its own exact delayed-event reconciliation.
+  if (input.currentSubscriptionIdentity === "different") {
+    return "loser";
+  }
   if (
-    input.pulseTrialRedeemedAt ||
-    input.currentBillingPhase === "paid" ||
-    (
-      input.billingStatus === HostedBillingStatus.active &&
-      (
-        input.currentBillingPhase !== "trial" ||
-        input.currentSubscriptionIdentity === "different"
-      )
-    )
+    input.pulseTrialRedeemedAt
+    || input.currentBillingPhase === "paid"
+    || input.billingStatus === HostedBillingStatus.active
   ) {
     return "loser";
   }

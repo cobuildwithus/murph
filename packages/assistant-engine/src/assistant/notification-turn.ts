@@ -6,8 +6,11 @@ import type {
 import {
   parseAssistantSessionRecord,
 } from '@murphai/operator-config/assistant-cli-contracts'
+import {
+  createHostedExecutionPrivateAssistantAskCompletionDeliveryKey,
+} from '@murphai/hosted-execution/assistant-identifiers'
 import type {
-  HostedRuntimeNewsletterToolResponse,
+  HostedRuntimeGroupEmailEffectResponse,
 } from '@murphai/hosted-execution/runtime-control'
 import type { AutomationScheduleKind } from '@murphai/contracts'
 import { createDefaultLocalAssistantModelTarget } from '@murphai/operator-config/assistant-backend'
@@ -29,6 +32,7 @@ import { resolveAssistantSessionForMessage } from './session-resolution.js'
 import { resolveAssistantSessionTarget } from './session-resolution.js'
 import { resolveAssistantTurnSharedPlan } from './turn-plan.js'
 import { resolveAssistantConversationScope } from './conversation-policy.js'
+import { prepareAssistantCronNotificationInput } from './cron/output-history.js'
 import {
   executeCodexTurnWithRecovery,
   type AssistantCodexTurnThreadScopeProfile,
@@ -207,15 +211,15 @@ export interface AssistantNotificationCommitContext {
 }
 
 export interface AssistantNotificationPostTurnDeliveryExpectations {
-  newsletterPendingDeliveryIntentId?: string | null
-  newsletterSendResult?: Extract<
-    HostedRuntimeNewsletterToolResponse,
-    { action: 'send' }
+  groupEmailPendingDeliveryIntentId?: string | null
+  groupEmailSendResult?: Extract<
+    HostedRuntimeGroupEmailEffectResponse,
+    { action: 'send_email' }
   >['result'] | null
 }
 
-type AssistantNotificationNewsletterSendResult = NonNullable<
-  AssistantNotificationPostTurnDeliveryExpectations['newsletterSendResult']
+type AssistantNotificationGroupEmailSendResult = NonNullable<
+  AssistantNotificationPostTurnDeliveryExpectations['groupEmailSendResult']
 >
 
 export interface AssistantNotificationInput
@@ -258,7 +262,7 @@ export interface AssistantNotificationInput
   deferCommitUntilDeliveryAccepted?: boolean | null
   firstContactPolicy?: AssistantNotificationFirstContactPolicy | null
   instructions: string
-  onNewsletterPendingDeliveryIntentId?: ((intentId: string) => void) | null
+  onGroupEmailPendingDeliveryIntentId?: ((intentId: string) => void) | null
   notificationPromptProfile?: AssistantNotificationPromptProfile | null
   turnPolicy?: AssistantNotificationTurnPolicy | null
   responsePolicy?: AssistantNotificationResponsePolicy | null
@@ -299,31 +303,35 @@ export async function sendAssistantNotificationLocal(
     abortSignal: input.abortSignal,
     vault: input.vault,
     run: async () => {
-      const messageInput = buildAssistantNotificationMessageInput(
+      const resolutionMessageInput = buildAssistantNotificationMessageInput(
         input,
         maintenanceEvidence,
       )
-      let newsletterSendResult:
-        | AssistantNotificationPostTurnDeliveryExpectations['newsletterSendResult']
-        | null = input.scheduledAutomationAuthority
-          ? {
-              status: 'unavailable',
-              unavailableReason: 'newsletter_send_not_observed',
-            }
-          : null
-      let newsletterPendingDeliveryIntentId: string | null = null
+      let groupEmailSendResult:
+        | AssistantNotificationPostTurnDeliveryExpectations['groupEmailSendResult']
+        | null = null
+      let groupEmailPendingDeliveryIntentId: string | null = null
       const resolved =
         isAssistantNotificationMaintenanceExactSkip(input)
           ? createAssistantMaintenanceNotificationResolvedSession({
               boundaryDefaultTarget,
               defaults,
-              message: messageInput,
+              message: resolutionMessageInput,
             })
           : await resolveAssistantSessionForMessage({
               boundaryDefaultTarget,
               defaults,
-              message: messageInput,
+              message: resolutionMessageInput,
             })
+      const preparedInput = await prepareAssistantCronNotificationInput(input, {
+        sessionId: resolved.session.sessionId,
+      })
+      const messageInput = preparedInput === input
+        ? resolutionMessageInput
+        : buildAssistantNotificationMessageInput(
+            preparedInput,
+            maintenanceEvidence,
+          )
       await emitHostedAssistantContextSessionResolvedTrace({
         message: messageInput,
         resolved,
@@ -332,15 +340,15 @@ export async function sendAssistantNotificationLocal(
       const withPostTurnDeliveryExpectations = (
         result: AssistantNotificationResult,
       ): AssistantNotificationResult =>
-        newsletterSendResult
+        groupEmailSendResult
           ? {
               ...result,
               postTurnDeliveryExpectations: {
                 ...(result.postTurnDeliveryExpectations ?? {}),
-                ...(newsletterPendingDeliveryIntentId
-                  ? { newsletterPendingDeliveryIntentId }
+                ...(groupEmailPendingDeliveryIntentId
+                  ? { groupEmailPendingDeliveryIntentId }
                   : {}),
-                newsletterSendResult,
+                groupEmailSendResult,
               },
             }
           : result
@@ -403,6 +411,8 @@ export async function sendAssistantNotificationLocal(
             firstContactDocIds,
             input,
             messageInput,
+            privateCompletionContinuitySessionId:
+              resolved.privateCompletionContinuitySessionId ?? null,
             responseText: responsePolicy.text,
             session: resolved.session,
             sharedPlan,
@@ -429,19 +439,19 @@ export async function sendAssistantNotificationLocal(
             executionContext: hostedExecutionContext,
             getConversationScope: () => conversationScope,
             messageInput,
-            newsletterOutbox: {
+            groupEmailOutbox: {
               turnId,
               vault: input.vault,
             },
-            recordNewsletterSendResult: (result) => {
-              newsletterSendResult = resolveAssistantNotificationNewsletterSendResult({
-                current: newsletterSendResult ?? null,
+            recordGroupEmailSendResult: (result) => {
+              groupEmailSendResult = resolveAssistantNotificationGroupEmailSendResult({
+                current: groupEmailSendResult ?? null,
                 next: result.result,
               })
             },
-            recordNewsletterPendingDeliveryIntentId: (intentId) => {
-              newsletterPendingDeliveryIntentId = intentId
-              input.onNewsletterPendingDeliveryIntentId?.(intentId)
+            recordGroupEmailPendingDeliveryIntentId: (intentId) => {
+              groupEmailPendingDeliveryIntentId = intentId
+              input.onGroupEmailPendingDeliveryIntentId?.(intentId)
             },
             route,
             session: resolved.session,
@@ -601,9 +611,14 @@ export async function sendAssistantNotificationLocal(
         }
         let decision: AssistantNotificationDecision
         try {
-          decision = parseAssistantNotificationDecision(
-            providerResult.providerAuthoredResponse ?? providerResult.response,
-          )
+          decision = providerResult.finalAction?.kind === 'none' && groupEmailSendResult
+            ? {
+                kind: 'skip',
+                privateSummary: 'Group email effect completed.',
+              }
+            : parseAssistantNotificationDecision(
+                providerResult.providerAuthoredResponse ?? providerResult.response,
+              )
           if (providerResult.responseCard && decision.kind !== 'send_message') {
             throw new VaultCliError(
               'ASSISTANT_NOTIFICATION_INVALID_RESPONSE',
@@ -891,6 +906,7 @@ async function sendAssistantExactTextNotificationLocal(input: {
   firstContactDocIds: readonly string[]
   input: AssistantNotificationInput
   messageInput: AssistantMessageInput
+  privateCompletionContinuitySessionId: string | null
   responseText: string
   session: AssistantSession
   sharedPlan: Awaited<ReturnType<typeof resolveAssistantTurnSharedPlan>>
@@ -899,6 +915,8 @@ async function sendAssistantExactTextNotificationLocal(input: {
     input.responseText,
     'notification response',
   )
+  const deferPrivateCompletionContinuity =
+    isAssistantReviewedPrivateExactCompletion(input.input)
   const turnId = createAssistantTurnId()
   const turnCreatedAt = new Date().toISOString()
   const state = createAssistantRuntimeStateService(input.input.vault)
@@ -940,6 +958,10 @@ async function sendAssistantExactTextNotificationLocal(input: {
     input: input.messageInput,
     media: [],
     message: responseText,
+    privateCompletionContinuitySessionId:
+      deferPrivateCompletionContinuity
+        ? input.privateCompletionContinuitySessionId
+        : undefined,
     session: input.session,
     sharedPlan: input.sharedPlan,
     turnId,
@@ -974,12 +996,14 @@ async function sendAssistantExactTextNotificationLocal(input: {
         turnId,
         vault: input.input.vault,
       })
-      savedSession = await persistAssistantExactTextNotificationSession({
-        responseText,
-        session: deliveryOutcome.session,
-        turnCreatedAt,
-        vault: input.input.vault,
-      })
+      savedSession = deferPrivateCompletionContinuity
+        ? deliveryOutcome.session
+        : await persistAssistantExactTextNotificationSession({
+            responseText,
+            session: deliveryOutcome.session,
+            turnCreatedAt,
+            vault: input.input.vault,
+          })
     } catch (error) {
       await abandonQueuedNotificationDeliveryAfterCommitFailure({
         deliveryOutcome,
@@ -1009,12 +1033,14 @@ async function sendAssistantExactTextNotificationLocal(input: {
     if (deliveryOutcome.kind === 'failed') {
       throw deliveryOutcome.error
     }
-    savedSession = await persistAssistantExactTextNotificationSession({
-      responseText,
-      session: deliveryOutcome.session,
-      turnCreatedAt,
-      vault: input.input.vault,
-    })
+    savedSession = deferPrivateCompletionContinuity
+      ? deliveryOutcome.session
+      : await persistAssistantExactTextNotificationSession({
+          responseText,
+          session: deliveryOutcome.session,
+          turnCreatedAt,
+          vault: input.input.vault,
+        })
   }
 
   if (
@@ -1051,10 +1077,10 @@ async function sendAssistantExactTextNotificationLocal(input: {
   }
 }
 
-function resolveAssistantNotificationNewsletterSendResult(input: {
-  current: AssistantNotificationNewsletterSendResult | null
-  next: AssistantNotificationNewsletterSendResult
-}): AssistantNotificationNewsletterSendResult {
+function resolveAssistantNotificationGroupEmailSendResult(input: {
+  current: AssistantNotificationGroupEmailSendResult | null
+  next: AssistantNotificationGroupEmailSendResult
+}): AssistantNotificationGroupEmailSendResult {
   if (input.current && input.current.status !== 'unavailable') {
     return input.current
   }
@@ -1132,6 +1158,42 @@ async function persistAssistantExactTextNotificationSession(input: {
     lastTurnAt: updatedAt,
     turnCount: input.session.turnCount + 1,
   })
+}
+
+function isAssistantReviewedPrivateExactCompletion(
+  input: AssistantNotificationInput,
+): boolean {
+  const expiresAt = normalizeNullableString(
+    input.reviewedAssistantAskCompletionExpiresAt,
+  )
+  const answeredMailboxItemIds = input.answeredMailboxItemIds ?? []
+  const completionId = answeredMailboxItemIds.length === 1
+    ? normalizeNullableString(answeredMailboxItemIds[0])
+    : null
+  if (
+    expiresAt === null
+    || !Number.isFinite(Date.parse(expiresAt))
+    || completionId === null
+    || answeredMailboxItemIds[0] !== completionId
+    || [...completionId].length > 256
+  ) {
+    return false
+  }
+
+  const deliveryKey =
+    createHostedExecutionPrivateAssistantAskCompletionDeliveryKey(completionId)
+  return (
+    input.executionContext?.hosted != null
+    && input.responsePolicy?.kind === 'require_send_exact_text'
+    && input.deliveryDispatchMode === 'queue-only'
+    && input.firstContactPolicy == null
+    && input.notificationPromptProfile == null
+    && input.outboxExternalThreadRouteAuthority == null
+    && input.threadIsDirect === true
+    && (input.channel === 'linq' || input.channel === 'telegram')
+    && normalizeNullableString(input.deliveryDedupeToken) === deliveryKey
+    && normalizeNullableString(input.deliveryIdempotencyKey) === deliveryKey
+  )
 }
 
 type AssistantNotificationAnnotatedError = Error & {
@@ -1417,6 +1479,7 @@ async function deliverAssistantNotificationMessage(input: {
   input: AssistantMessageInput
   media?: readonly AssistantResponseMedia[] | null
   message: string
+  privateCompletionContinuitySessionId?: string | null
   session: AssistantSession
   sharedPlan: Awaited<ReturnType<typeof resolveAssistantTurnSharedPlan>>
   turnId: string
@@ -1467,6 +1530,12 @@ async function deliverAssistantNotificationMessage(input: {
     ...deliveryFields,
     card: input.card ?? null,
     media,
+    ...(input.privateCompletionContinuitySessionId === undefined
+      ? {}
+      : {
+          privateCompletionContinuitySessionId:
+            input.privateCompletionContinuitySessionId,
+        }),
     dispatchMode: input.input.deliveryDispatchMode,
   })
   switch (outcome.kind) {
@@ -1648,7 +1717,7 @@ function assistantMaintenanceRawEventsIncludeMutation(
     }
     return (
       event.kind === 'status_item' &&
-      event.itemType === 'command.execution' &&
+      event.itemType === 'commandExecution' &&
       event.itemState === 'completed' &&
       event.exitCode === 0 &&
       isAssistantMaintenanceMutationCommand(event.commandLabel, profile)
@@ -1676,26 +1745,20 @@ function assistantGroupRoomModelDynamicMutationCompleted(
   event: ReturnType<typeof normalizeCodexEvent>,
 ): boolean {
   if (
-    event.kind !== 'status_item' ||
+    event.kind !== 'tool_call' ||
     event.itemState !== 'completed' ||
-    event.itemType !== 'dynamic.tool.call'
+    event.toolServer !== 'murph' ||
+    event.toolName !== 'group_room_model'
   ) {
     return false
   }
   const record = readAssistantNotificationRecord(event.rawEvent)
-  const item =
-    readAssistantNotificationRecord(record?.item) ??
-    readAssistantNotificationRecord(
-      readAssistantNotificationRecord(record?.params)?.item,
-    ) ??
-    readAssistantNotificationRecord(
-      readAssistantNotificationRecord(record?.data)?.item,
-    )
+  const item = readAssistantNotificationRecord(
+    readAssistantNotificationRecord(record?.params)?.item,
+  )
   const args = readAssistantNotificationRecord(item?.arguments)
   return (
     item?.success === true &&
-    item.namespace === 'murph' &&
-    (item.tool === 'group_room_model' || item.name === 'group_room_model') &&
     (args?.action === 'upsert' || args?.action === 'delete')
   )
 }

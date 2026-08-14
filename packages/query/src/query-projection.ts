@@ -75,6 +75,12 @@ import {
   normalizeMetricPointFilters,
 } from "./projection/metric-store.ts";
 import {
+  buildWearableMetricEvidenceFromBundle,
+} from "./metrics/projection.ts";
+import {
+  extractMetricPointsFromMetricRows,
+} from "./metrics/index.ts";
+import {
   rebuildQueryProjectionWithManifest,
 } from "./projection/rebuild.ts";
 import {
@@ -88,6 +94,11 @@ import {
   readWearableSummaryRows,
 } from "./projection/wearable-summary-store.ts";
 import { resolveWearableSleepPatternReadFilters } from "./wearables/sleep-pattern.ts";
+import { createVaultReadModel } from "./read-model.ts";
+import {
+  buildPersonalPatternReportFromWearableBundleAndMetricPoints,
+  type PersonalPatternReport,
+} from "./personal-patterns.ts";
 
 export type {
   QueryCanonicalEntityFilters,
@@ -182,6 +193,34 @@ export async function listMetricPointsBatchRuntime(
   );
 }
 
+export async function listMetricPointsByPublicSourceRuntime(
+  vaultRoot: string,
+  input: {
+    from?: string;
+    metricKeys: readonly string[];
+    providers: readonly string[];
+    to?: string;
+  },
+): Promise<Array<{ points: MetricPoint[]; provider: string }>> {
+  const location = await ensureFreshQueryProjection(vaultRoot);
+  const metricKeys = new Set(input.metricKeys);
+  return input.providers.map((provider) => {
+    const bundle = readStoredPublicWearableSummaryBundle(location, {
+      ...(input.from ? { from: input.from } : {}),
+      providers: [provider],
+      ...(input.to ? { to: input.to } : {}),
+    });
+    const points = extractMetricPointsFromMetricRows(
+      buildWearableMetricEvidenceFromBundle(bundle),
+    ).filter((point) =>
+      metricKeys.has(point.metricKey)
+      && (input.from === undefined || point.effectiveDate >= input.from)
+      && (input.to === undefined || point.effectiveDate <= input.to)
+    );
+    return { points, provider };
+  });
+}
+
 export async function summarizeWearableDayRuntime(
   vaultRoot: string,
   date: string,
@@ -273,6 +312,30 @@ export async function summarizeWearableSleepPatternRuntime(
         ? "vault_metadata"
         : undefined,
   });
+}
+
+export async function buildPersonalPatternReportRuntime(
+  vaultRoot: string,
+  options: { asOf?: Date | string; windowDays?: number } = {},
+): Promise<PersonalPatternReport> {
+  const location = await ensureFreshQueryProjection(vaultRoot);
+  const snapshot = readStoredVaultSource(location);
+  const vault = createVaultReadModel({
+    entities: snapshot.entities,
+    metadata: snapshot.metadata,
+    vaultRoot,
+  });
+  const wearableBundle = readStoredPublicWearableSummaryBundle(location, {});
+  const metricPoints = listStoredMetricPoints(
+    location,
+    normalizeMetricPointFilters({ limit: null }),
+  );
+  return buildPersonalPatternReportFromWearableBundleAndMetricPoints(
+    vault,
+    wearableBundle,
+    metricPoints,
+    options,
+  );
 }
 
 export async function summarizeWearableActivityRuntime(

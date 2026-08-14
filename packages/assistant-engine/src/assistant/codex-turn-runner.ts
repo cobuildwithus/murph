@@ -11,6 +11,7 @@ import {
   MURPH_GROUP_ROOM_MODEL_MAINTENANCE_PERMISSION_PROFILE,
   MURPH_MEMBER_MEMORY_MAINTENANCE_PERMISSION_PROFILE,
   MURPH_MEMBER_READ_PERMISSION_PROFILE,
+  MURPH_MEMBER_WORKSPACE_PERMISSION_PROFILE,
 } from '@murphai/hosted-execution/assistant-permissions'
 import {
   resolveHostedAiUsageTokenPricingBasis,
@@ -85,9 +86,10 @@ import {
 import type {
   AssistantHostedToolContext,
 } from './hosted-tool-context.js'
-import type {
-  AssistantAcceptedTurnInputItemInput,
-  AssistantCodexContinuation,
+import {
+  resolveAssistantAcceptedTurnInputReferenceWindow,
+  type AssistantAcceptedTurnInputItemInput,
+  type AssistantCodexContinuation,
 } from './active-turn-input-journal.js'
 import type { AssistantUserMessageContentPart } from './content-types.js'
 import type { AssistantProviderTraceEvent } from './provider-traces.js'
@@ -130,7 +132,20 @@ const ASSISTANT_NATIVE_CAPABILITIES_RESTRICTED_THREAD_CONFIG = {
   'memories.use_memories': false,
   web_search: 'disabled',
 } as const
-const ASSISTANT_READ_ONLY_AUTOMATION_CODEX_CONFIG_OVERRIDES = [
+const ASSISTANT_RESTRICTED_ONE_SHOT_INSTRUCTION_CONFIG = {
+  include_apps_instructions: false,
+  include_collaboration_mode_instructions: false,
+  include_environment_context: false,
+  include_permissions_instructions: false,
+  project_doc_max_bytes: 0,
+  'features.request_permissions_tool': false,
+  'skills.include_instructions': false,
+} as const
+const ASSISTANT_GROUP_ROOM_MODEL_MAINTENANCE_THREAD_CONFIG = {
+  ...ASSISTANT_NATIVE_CAPABILITIES_RESTRICTED_THREAD_CONFIG,
+  ...ASSISTANT_RESTRICTED_ONE_SHOT_INSTRUCTION_CONFIG,
+} as const
+const ASSISTANT_SHELL_PRESERVING_RESTRICTED_CODEX_CONFIG_OVERRIDES = [
   'memories.generate_memories=false',
   'web_search="disabled"',
   'features.web_search_request=false',
@@ -143,6 +158,11 @@ const ASSISTANT_READ_ONLY_AUTOMATION_CODEX_CONFIG_OVERRIDES = [
   'features.multi_agent_v2=false',
   'features.tool_suggest=false',
 ] as const
+const ASSISTANT_NATIVE_CAPABILITIES_RESTRICTED_CODEX_CONFIG_OVERRIDES = [
+  ...ASSISTANT_SHELL_PRESERVING_RESTRICTED_CODEX_CONFIG_OVERRIDES,
+  'memories.use_memories=false',
+  'features.shell_tool=false',
+] as const
 const ASSISTANT_FILESYSTEM_DISABLED_CODEX_CONFIG_OVERRIDES = [
   'features.shell_tool=false',
   'features.multi_agent=false',
@@ -152,11 +172,18 @@ const ASSISTANT_FILESYSTEM_DISABLED_CODEX_CONFIG_OVERRIDES = [
 
 function resolveAssistantCodexConfigOverrides(input: {
   filesystemDisabledTurn: boolean
-  readOnlyAutomationTurn: boolean
+  nativeCapabilitiesRestrictedTurn: boolean
+  shellPreservingCapabilitiesRestrictedTurn: boolean
   requested: readonly string[] | null
 }): readonly string[] | null {
-  if (input.readOnlyAutomationTurn) {
-    return ASSISTANT_READ_ONLY_AUTOMATION_CODEX_CONFIG_OVERRIDES
+  if (input.nativeCapabilitiesRestrictedTurn) {
+    return [
+      ...(input.requested ?? []),
+      ...ASSISTANT_NATIVE_CAPABILITIES_RESTRICTED_CODEX_CONFIG_OVERRIDES,
+    ]
+  }
+  if (input.shellPreservingCapabilitiesRestrictedTurn) {
+    return ASSISTANT_SHELL_PRESERVING_RESTRICTED_CODEX_CONFIG_OVERRIDES
   }
   if (!input.filesystemDisabledTurn) {
     return input.requested
@@ -494,9 +521,21 @@ async function executeAssistantCodexAttempt(input: {
     const readOnlyAutomationTurn =
       executionPlan.input.scheduledInvocationAuthority?.automationId ===
         MURPH_ONBOARDING_GOAL_CHECKIN_AUTOMATION_ID
-    const nativeCapabilitiesRestrictedTurn =
+    const hostedRuntimeCapabilitiesRestrictedTurn =
       outputOnlyTurn ||
       executionPlan.profile.promptProfile === 'creative-notification'
+    const readCurrentHostedImageCompletionEffectScope =
+      executionPlan.hostedToolContext
+        ?.currentHostedImageCompletionEffectScope
+    const hostedImageCompletionNativeCapabilitiesRestrictedTurn =
+      executionPlan.input.hostedImageCompletionEffectRestriction != null &&
+      (
+        readCurrentHostedImageCompletionEffectScope == null ||
+        readCurrentHostedImageCompletionEffectScope() !== null
+      )
+    const nativeCapabilitiesRestrictedTurn =
+      hostedRuntimeCapabilitiesRestrictedTurn ||
+      hostedImageCompletionNativeCapabilitiesRestrictedTurn
     const creativeNotificationSongTurn =
       executionPlan.profile.promptProfile === 'creative-notification' &&
       executionPlan.profile.toolProfile === 'provider-turn'
@@ -523,6 +562,11 @@ async function executeAssistantCodexAttempt(input: {
     const groupEmailTurn =
       audience.threadIsDirect === false &&
       normalizeNullableString(audience.channel)?.toLowerCase() === 'email'
+    const ordinaryHostedWorkspaceTurn =
+      Boolean(executionPlan.executionContext?.hosted) &&
+      !restrictedOneShotTurn &&
+      !nativeCapabilitiesRestrictedTurn &&
+      !groupEmailTurn
     const attemptResult = await executeCodexAssistantTurnAttemptFromInput({
       providerConfig: {
         approvalPolicy:
@@ -552,19 +596,34 @@ async function executeAssistantCodexAttempt(input: {
           ? composeAssistantProviderFlexDeadlineSignal(executionPlan.input.abortSignal)
           : executionPlan.input.abortSignal,
         activeTurnId: executionPlan.turnId,
-        activeTurnSteering: executionPlan.activeTurnSteering,
+        activeTurnSteering:
+          hostedImageCompletionNativeCapabilitiesRestrictedTurn
+          ? null
+          : executionPlan.activeTurnSteering,
         activeTurnSessionId: attemptPlan.session.sessionId,
         allowFinishWithoutReply: executionPlan.allowFinishWithoutReply,
+        automationRelativeDateReferenceWindow:
+          resolveAssistantAcceptedTurnInputReferenceWindow(
+            executionPlan.acceptedInputItems ?? [],
+          ),
         authorizeAcceptedMessageTarget:
           executionPlan.authorizeAcceptedMessageTarget ?? null,
         codexConfigOverrides: resolveAssistantCodexConfigOverrides({
           filesystemDisabledTurn: groupEmailTurn,
-          readOnlyAutomationTurn,
+          nativeCapabilitiesRestrictedTurn:
+            hostedImageCompletionNativeCapabilitiesRestrictedTurn,
+          shellPreservingCapabilitiesRestrictedTurn:
+            memberMemoryMaintenanceTurn || readOnlyAutomationTurn,
           requested: executionPlan.input.codexConfigOverrides ?? null,
         }),
-        codexThreadConfig: nativeCapabilitiesRestrictedTurn
-          ? ASSISTANT_NATIVE_CAPABILITIES_RESTRICTED_THREAD_CONFIG
-          : null,
+        codexThreadConfig:
+          nativeCapabilitiesRestrictedTurn
+            ? ASSISTANT_NATIVE_CAPABILITIES_RESTRICTED_THREAD_CONFIG
+            : groupRoomModelMaintenanceTurn
+              ? ASSISTANT_GROUP_ROOM_MODEL_MAINTENANCE_THREAD_CONFIG
+              : memberMemoryMaintenanceTurn || readOnlyAutomationTurn
+                ? ASSISTANT_RESTRICTED_ONE_SHOT_INSTRUCTION_CONFIG
+                : null,
         conversationHistoryMessages:
           attemptPlan.routePlan.conversationHistoryMessages,
         developerInstructions: attemptPlan.routePlan.developerInstructions,
@@ -585,11 +644,11 @@ async function executeAssistantCodexAttempt(input: {
         groupConversation,
         groupRoomModelMaintenanceAuthorized: groupRoomModelMaintenanceTurn,
         hostedToolContext:
-          nativeCapabilitiesRestrictedTurn || readOnlyAutomationTurn
+          hostedRuntimeCapabilitiesRestrictedTurn || readOnlyAutomationTurn
           ? null
           : executionPlan.hostedToolContext ?? null,
         materializeWorkspaceArtifacts:
-          nativeCapabilitiesRestrictedTurn || readOnlyAutomationTurn
+          hostedRuntimeCapabilitiesRestrictedTurn || readOnlyAutomationTurn
           ? null
           : executionPlan.executionContext?.hosted?.materializeWorkspaceArtifacts ?? null,
         onboardingFirstReadCompletionTransitionAvailable:
@@ -628,7 +687,7 @@ async function executeAssistantCodexAttempt(input: {
           ? true
           : executionPlan.input.providerThreadEphemeral ?? null,
         progressDelivery:
-          nativeCapabilitiesRestrictedTurn || readOnlyAutomationTurn
+          hostedRuntimeCapabilitiesRestrictedTurn || readOnlyAutomationTurn
           ? null
           : executionPlan.progressDelivery ?? null,
         permissions:
@@ -638,11 +697,16 @@ async function executeAssistantCodexAttempt(input: {
               ? MURPH_MEMBER_MEMORY_MAINTENANCE_PERMISSION_PROFILE
               : readOnlyAutomationTurn && executionPlan.executionContext?.hosted
               ? MURPH_MEMBER_READ_PERMISSION_PROFILE
-              : null,
+              : ordinaryHostedWorkspaceTurn
+                ? MURPH_MEMBER_WORKSPACE_PERMISSION_PROFILE
+                : null,
         ...(restrictedOneShotTurn
           ? { processLifetime: 'one-shot' as const }
           : {}),
-        providerFetch: outputOnlyTurn || readOnlyAutomationTurn
+        providerFetch:
+          outputOnlyTurn ||
+          readOnlyAutomationTurn ||
+          hostedImageCompletionNativeCapabilitiesRestrictedTurn
           ? null
           : executionPlan.executionContext?.hosted?.providerFetch ?? null,
         providerRequestOrdinal: input.providerRequestOrdinal ?? null,
@@ -650,14 +714,17 @@ async function executeAssistantCodexAttempt(input: {
           ? { providerStartCriticalPath: input.providerStartCriticalPath }
           : {}),
         publicInternetFetch:
-          outputOnlyTurn || readOnlyAutomationTurn
+          outputOnlyTurn ||
+          readOnlyAutomationTurn ||
+          hostedImageCompletionNativeCapabilitiesRestrictedTurn
           ? null
           : executionPlan.executionContext?.hosted?.publicInternetFetch ?? null,
         requireHostedPrivateImageDelivery:
-          !nativeCapabilitiesRestrictedTurn &&
+          !hostedRuntimeCapabilitiesRestrictedTurn &&
           !readOnlyAutomationTurn &&
           Boolean(executionPlan.executionContext?.hosted),
-        runtimeWorkspaceRoots: restrictedOneShotTurn
+        runtimeWorkspaceRoots:
+          restrictedOneShotTurn || ordinaryHostedWorkspaceTurn
           ? [attemptPlan.routePlan.workingDirectory]
           : null,
         resume: readOnlyAutomationTurn ? null : attemptPlan.routePlan.resume,

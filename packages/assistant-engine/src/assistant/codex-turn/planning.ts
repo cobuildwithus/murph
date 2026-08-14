@@ -1,16 +1,14 @@
 import type { AssistantSession } from '@murphai/operator-config/assistant-cli-contracts'
 import { resolveXaiApiKey } from '@murphai/operator-config/xai-runtime'
+import { isMurphAndroidAppEnabled } from '@murphai/hosted-execution/env'
 import {
   resolveAssistantEffectiveStyle,
   resolveAssistantVoiceOptionElevenLabsVoiceId,
   type AssistantPersonaId,
   type AssistantPersonalityPreferences,
   type AssistantTonePreference,
-  normalizeIanaTimeZone,
-  resolveSystemTimeZone,
-  toLocalDayKey,
 } from '@murphai/contracts'
-import { loadVault, readPreferencesDocument } from '@murphai/core'
+import { readPreferencesDocument } from '@murphai/core'
 import {
   resolveCodexAssistantTargetCapabilities,
 } from '../codex-runtime.js'
@@ -20,6 +18,7 @@ import {
 } from '../cli-surface-bootstrap.js'
 import {
   readAssistantContextSnapshotPrompt,
+  refreshAssistantContextSnapshotBestEffort,
 } from '../context-snapshot.js'
 import {
   assistantRouteSupportsGroupRoomModel,
@@ -64,6 +63,13 @@ import {
   listAssistantTranscriptEntries,
 } from '../store.js'
 import {
+  ASSISTANT_TRANSCRIPT_AUDIT_RETENTION_LIMIT,
+} from '../store/persistence.js'
+import {
+  readAssistantGeneratedImageDeliveryTranscriptMarker,
+  renderAssistantGeneratedImageDeliveryHistoryText,
+} from '../response-media.js'
+import {
   ASSISTANT_NO_REPLY_TRANSCRIPT_HISTORY_TEXT,
   ASSISTANT_NO_REPLY_TRANSCRIPT_MARKER_PREFIX,
 } from '../turn-finalizer.js'
@@ -102,6 +108,7 @@ import type {
 } from '../providers/types.js'
 import { getAssistantChannelAdapter } from '../channel-adapters.js'
 import {
+  ASSISTANT_BOUNDED_CONVERSATION_HISTORY_INCOMPLETE_TEXT,
   assistantConversationHistoryUtf8Bytes,
   limitAssistantConversationHistoryTextBytes,
   normalizeNullableString,
@@ -126,6 +133,12 @@ import {
   resolveAssistantVoiceMemoDeliveryChannel,
   type AssistantVoiceMemoDeliveryChannel,
 } from '../voice-memo-delivery.js'
+import {
+  resolveAssistantPromptTimeContext,
+  type AssistantPromptTimeContext,
+} from '../prompt-time.js'
+
+const ASSISTANT_CONTEXT_SNAPSHOT_FOREGROUND_REFRESH_MAX_STEPS = 64
 
 export interface AssistantRouteTurnPlan {
   assistantContractFingerprint: string
@@ -223,11 +236,6 @@ export interface AssistantPromptCapabilityAvailability {
   assistantHostedDeviceConnectAvailable: boolean
   assistantHostedDeviceConnectProviders: readonly AssistantHostedDeviceConnectProvider[]
   assistantKnowledgeToolsAvailable: boolean
-}
-
-export interface AssistantPromptTimeContext {
-  currentLocalDate: string
-  currentTimeZone: string
 }
 
 export type AssistantCodexTurnPromptProfile =
@@ -360,7 +368,8 @@ export async function buildCodexTurnExecutionPlan(input: {
   const profile = resolveAssistantCodexTurnExecutionProfile({
     profile: input.profile,
   })
-  const promptTimeContext = await resolveAssistantPromptTimeContext(input.input.vault)
+  const promptTimeContext = input.input.promptTimeContext
+    ?? await resolveAssistantPromptTimeContext(input.input.vault)
   const preferenceContext = await resolveAssistantTurnPreferenceContext(input.input.vault)
 
   return {
@@ -514,6 +523,21 @@ export async function resolveAssistantRouteTurnPlan(input: {
         input.input.scheduledInvocationAuthority == null) ||
       input.input.scheduledInvocationAuthority?.automationId ===
         MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION_ID)
+  const exerciseRoutineResponseCardsAvailable =
+    responseCardsAvailable &&
+    resolvedChannel?.trim().toLowerCase() === 'telegram'
+  const telegramRichContentResponseCardsAvailable =
+    responseCardsAvailable &&
+    resolvedChannel?.trim().toLowerCase() === 'telegram'
+  const groupChallengeResponseCardsAvailable =
+    authenticatedGroupChatRuntime &&
+    resolvedChannel?.trim().toLowerCase() === 'linq' &&
+    input.hostedToolContext?.groupSharedReader != null &&
+    input.profile.promptProfile === 'conversation' &&
+    input.profile.toolProfile === 'provider-turn' &&
+    (scheduledInvocationScope !== null ||
+      (ordinaryInboundTurn &&
+        input.input.scheduledInvocationAuthority == null))
   const shouldUseCommittedTranscriptHistory =
     input.profile.threadScope === 'session-thread' ||
     input.profile.promptProfile === 'assistant-ask-continuation' ||
@@ -547,7 +571,8 @@ export async function resolveAssistantRouteTurnPlan(input: {
     input.profile.toolProfile === 'provider-turn'
   const assistantVoicePreferenceApplies =
     privateInteractiveAudience || hostedGroupRuntime
-  const explicitAssistantPersona = privateInteractiveProviderTurn
+  const explicitAssistantPersona =
+    privateInteractiveProviderTurn || groupAssistantStylePreferencesApply
     ? preferenceContext.assistantPersona ?? null
     : null
   const effectiveAssistantStyle = explicitAssistantPersona
@@ -683,6 +708,22 @@ export async function resolveAssistantRouteTurnPlan(input: {
     hostedRuntime: input.executionContext?.hosted != null,
     researchAvailable: assistantResearchAvailable,
   })
+  if (privateInteractiveProviderTurn) {
+    // A small vault can repair its navigation snapshot before provider start.
+    // Larger vaults yield to the degraded prompt instead of delaying the turn.
+    let remainingRefreshSteps =
+      ASSISTANT_CONTEXT_SNAPSHOT_FOREGROUND_REFRESH_MAX_STEPS
+    await refreshAssistantContextSnapshotBestEffort({
+      shouldYield: () => {
+        if (remainingRefreshSteps <= 0) {
+          return true
+        }
+        remainingRefreshSteps -= 1
+        return false
+      },
+      vaultRoot: input.input.vault,
+    })
+  }
   let assistantContextSnapshotElapsedMs: number | null = null
   const assistantContextSnapshotPrompt =
     maintenanceTurn || systemNotificationTurn || !privateInteractiveAudience
@@ -713,6 +754,8 @@ export async function resolveAssistantRouteTurnPlan(input: {
         )
       }
       return buildAssistantMaintenanceSystemPromptWithCacheMetadata({
+        canonicalTimeZoneAvailable:
+          input.promptTimeContext.canonicalTimeZoneAvailable !== false,
         currentLocalDate: input.promptTimeContext.currentLocalDate,
         currentTimeZone: input.promptTimeContext.currentTimeZone,
         profile: maintenanceProfile,
@@ -746,6 +789,9 @@ export async function resolveAssistantRouteTurnPlan(input: {
     }
 
     return buildAssistantSystemPromptWithCacheMetadata({
+      assistantAndroidAppAvailable: isMurphAndroidAppEnabled(
+        input.sharedPlan.cliAccess.env,
+      ),
       assistantCliContract: options.assistantCliContract,
       assistantContextSnapshotPrompt,
       assistantDynamicContextPrompts: assistantDynamicContextPrompts,
@@ -771,6 +817,8 @@ export async function resolveAssistantRouteTurnPlan(input: {
       assistantTone,
       cliAccess: input.sharedPlan.cliAccess,
       channel: resolvedChannel,
+      canonicalTimeZoneAvailable:
+        input.promptTimeContext.canonicalTimeZoneAvailable !== false,
       currentLocalDate: input.promptTimeContext.currentLocalDate,
       currentTimeZone: input.promptTimeContext.currentTimeZone,
       conversationScope,
@@ -910,7 +958,6 @@ export async function resolveAssistantRouteTurnPlan(input: {
         groupSharedReadAvailable:
           hostedGroupRuntime &&
           input.hostedToolContext?.groupSharedReader != null,
-        newsletterAvailable: input.hostedToolContext?.newsletterTool != null,
         personalizationAvailable:
           assistantStyleSettingsAvailable &&
           input.hostedToolContext?.personalizationTool != null,
@@ -919,6 +966,9 @@ export async function resolveAssistantRouteTurnPlan(input: {
           typeof input.executionContext?.hosted?.productFeedbackCandidateSink
             ?.acceptProductFeedbackCandidate === 'function',
         responseCardsAvailable,
+        exerciseRoutineResponseCardsAvailable,
+        telegramRichContentResponseCardsAvailable,
+        groupChallengeResponseCardsAvailable,
         physicalNotesAvailable:
           (privateInteractiveAudience || authenticatedGroupChatRuntime) &&
           input.hostedToolContext?.physicalNotes != null &&
@@ -1110,16 +1160,20 @@ async function resolveAssistantCommittedTranscriptHistoryMessages(input: {
   }
 
   type TranscriptHistoryCandidate = {
+    contentIncomplete: boolean
     message: AssistantProviderConversationMessage
     userPromptKey: string | null
   }
 
+  let historyIncomplete =
+    entries.length >= ASSISTANT_TRANSCRIPT_AUDIT_RETENTION_LIMIT
   const messages = entries.flatMap((entry): TranscriptHistoryCandidate[] => {
     if (
       entry.kind === 'status' &&
       entry.text.startsWith(ASSISTANT_NO_REPLY_TRANSCRIPT_MARKER_PREFIX)
     ) {
       return [{
+        contentIncomplete: false,
         message: {
           content: ASSISTANT_NO_REPLY_TRANSCRIPT_HISTORY_TEXT,
           role: 'assistant',
@@ -1127,16 +1181,42 @@ async function resolveAssistantCommittedTranscriptHistoryMessages(input: {
         userPromptKey: null,
       }]
     }
+    if (entry.kind === 'status') {
+      const generatedImage =
+        readAssistantGeneratedImageDeliveryTranscriptMarker(entry.text)
+      return generatedImage
+        ? [{
+            contentIncomplete: false,
+            message: {
+              content: renderAssistantGeneratedImageDeliveryHistoryText(
+                generatedImage,
+              ),
+              role: 'assistant',
+            },
+            userPromptKey: null,
+          }]
+        : []
+    }
     if (entry.kind !== 'assistant' && entry.kind !== 'user') {
       return []
     }
+    if (entry.kind === 'user' && entry.textRetiredAt !== undefined) {
+      historyIncomplete = true
+      return []
+    }
     const rawContent = normalizeNullableString(entry.text)
+    const contentIncomplete = Boolean(
+      rawContent &&
+      assistantConversationHistoryUtf8Bytes(rawContent) >
+        ASSISTANT_ROUTE_COMMITTED_TRANSCRIPT_HISTORY_MESSAGE_BYTES
+    )
     const content = limitAssistantConversationHistoryTextBytes(
       rawContent,
       ASSISTANT_ROUTE_COMMITTED_TRANSCRIPT_HISTORY_MESSAGE_BYTES,
     )
     return content
       ? [{
+          contentIncomplete,
           message: {
             content,
             role: entry.kind,
@@ -1172,8 +1252,12 @@ async function resolveAssistantCommittedTranscriptHistoryMessages(input: {
     break
   }
 
+  historyIncomplete ||= messages.some(({ contentIncomplete }) =>
+    contentIncomplete)
+
   return limitAssistantConversationHistoryMessages(
     messages.map(({ message }) => message),
+    historyIncomplete,
   )
 }
 
@@ -1200,7 +1284,11 @@ function shouldDropTrailingCurrentUserPrompt(input: {
 
 function limitAssistantConversationHistoryMessages(
   messages: readonly AssistantProviderConversationMessage[],
+  historyIncomplete: boolean,
 ): AssistantProviderConversationMessage[] {
+  let incomplete =
+    historyIncomplete ||
+    messages.length > ASSISTANT_ROUTE_COMMITTED_TRANSCRIPT_HISTORY_LIMIT
   const countLimited = messages.slice(-ASSISTANT_ROUTE_COMMITTED_TRANSCRIPT_HISTORY_LIMIT)
   const retained: AssistantProviderConversationMessage[] = []
   let retainedBytes = 0
@@ -1217,13 +1305,38 @@ function limitAssistantConversationHistoryMessages(
       retainedBytes + messageBytes >
       ASSISTANT_ROUTE_COMMITTED_TRANSCRIPT_HISTORY_TOTAL_BYTES
     ) {
+      incomplete = true
       break
     }
     retained.push(message)
     retainedBytes += messageBytes
   }
 
-  return retained.reverse()
+  retained.reverse()
+  if (!incomplete) {
+    return retained
+  }
+
+  const marker: AssistantProviderConversationMessage = {
+    content: ASSISTANT_BOUNDED_CONVERSATION_HISTORY_INCOMPLETE_TEXT,
+    role: 'assistant',
+  }
+  const markerBytes = assistantConversationHistoryUtf8Bytes(
+    ASSISTANT_BOUNDED_CONVERSATION_HISTORY_INCOMPLETE_TEXT,
+  )
+  while (
+    retained.length >= ASSISTANT_ROUTE_COMMITTED_TRANSCRIPT_HISTORY_LIMIT ||
+    retainedBytes + markerBytes >
+      ASSISTANT_ROUTE_COMMITTED_TRANSCRIPT_HISTORY_TOTAL_BYTES
+  ) {
+    const removed = retained.shift()
+    if (!removed || typeof removed.content !== 'string') {
+      continue
+    }
+    retainedBytes -= assistantConversationHistoryUtf8Bytes(removed.content)
+  }
+
+  return [marker, ...retained]
 }
 
 async function measureRoutePlanningAsync<TResult>(
@@ -1298,28 +1411,6 @@ function resolveRoutePlanningSlowestSpan(
 
 function elapsedSince(startedAt: number): number {
   return Math.max(0, Date.now() - startedAt)
-}
-
-export async function resolveAssistantPromptTimeContext(
-  vaultRoot: string,
-): Promise<AssistantPromptTimeContext> {
-  const fallbackTimeZone = resolveSystemTimeZone()
-  let currentTimeZone = fallbackTimeZone
-
-  try {
-    const loadedVault = await loadVault({
-      vaultRoot,
-    })
-    currentTimeZone =
-      normalizeIanaTimeZone(loadedVault.metadata.timezone) ?? fallbackTimeZone
-  } catch {
-    // Prompt time context is best-effort and should not block the turn.
-  }
-
-  return {
-    currentLocalDate: toLocalDayKey(new Date(), currentTimeZone),
-    currentTimeZone,
-  }
 }
 
 // Assemble the personality that drives thread-context band rendering. Persona

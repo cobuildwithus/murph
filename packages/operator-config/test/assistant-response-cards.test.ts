@@ -3,15 +3,23 @@ import { Buffer } from 'node:buffer'
 import { describe, expect, it } from 'vitest'
 
 import {
-  LINQ_IMESSAGE_APP_CARD_FALLBACK_TEXT,
   LINQ_IMESSAGE_APP_CARD_ORIGIN,
+  assistantResponseCardAuthoringSchema,
   assistantResponseCardJsonSchema,
   assistantResponseCardSchema,
+  buildLinqIMessageAppFallbackText,
   buildLinqIMessageAppCardUrl,
+  buildLinqIMessageAppCardImageUrl,
   buildLinqIMessageAppLayout,
+  buildTelegramRichMessage,
+  exerciseRoutineResponseCardJsonSchema,
+  telegramRichContentResponseCardV1Schema,
   renderAssistantResponseCardText,
   type DailyNutritionResponseCard,
   type DailyNutritionResponseCardV2,
+  type ExerciseRoutineResponseCardV1,
+  type TelegramRichContentResponseCardV1,
+  type AssistantResponseCard,
 } from '../src/assistant-response-cards.ts'
 
 const COMPLETE_CARD: DailyNutritionResponseCard = {
@@ -41,14 +49,64 @@ const COMPLETE_CARD_V2: DailyNutritionResponseCardV2 = {
   goals: {
     calories: { target: 2_100, status: 'under_target' },
     proteinGrams: { target: 100, status: 'on_target' },
-    carbsGrams: null,
+    carbsGrams: { target: 220, status: 'on_target' },
     fatGrams: { target: 40, status: 'on_target' },
     fiberGrams: { target: 30, status: 'under_target' },
   },
 }
 
+const ROUTINE_CARD: ExerciseRoutineResponseCardV1 = {
+  exercises: [
+    {
+      dose: '8 repetitions',
+      estimatedSeconds: 45,
+      images: [
+        {
+          alt: 'Person standing tall with the forearm on a door frame.',
+          source: 'exercise_catalog:ST170:1',
+          step: 'Setup',
+          url: 'https://cdn.example.test/doorway-stretch.png?x=1&y=2',
+        },
+      ],
+      instructions: [
+        'Stand tall without forcing the lower back.',
+        'Move only through a comfortable range.',
+      ],
+      name: 'Doorway stretch <easy>',
+    },
+    {
+      dose: '5 per side',
+      estimatedSeconds: 60,
+      images: [],
+      instructions: ['Turn slowly and keep the hips quiet.'],
+      name: 'Torso rotation',
+    },
+  ],
+  footer: 'Breathe normally.',
+  intensity: 'Easy',
+  kind: 'exercise_routine',
+  labels: {
+    dose: 'Dose',
+    exercise: 'Exercise',
+    time: 'Time',
+    visualGuide: 'Visual guide',
+  },
+  safety: 'Stop if pain or dizziness increases.',
+  subtitle: 'Shoulders and chest',
+  title: 'Short reset',
+  totalSeconds: 120,
+  transitionSeconds: 15,
+  version: 1,
+}
+
 function decodeAppCardUrl(url: string): unknown {
   const encoded = new URL(url).hash.replace(/^#murph-card=/u, '')
+  return JSON.parse(Buffer.from(encoded, 'base64url').toString('utf8'))
+}
+
+function decodeAppCardImageUrl(url: string): unknown {
+  const filename = new URL(url).pathname.split('/').at(-1) ?? ''
+  const encoded = filename.replace(/\.png$/u, '')
   return JSON.parse(Buffer.from(encoded, 'base64url').toString('utf8'))
 }
 
@@ -62,47 +120,111 @@ describe('assistant response cards', () => {
           additionalProperties: false,
           properties: {
             goals: {
+              additionalProperties: false,
+              patternProperties: {
+                '^(?:proteinGrams|carbsGrams|fatGrams|fiberGrams)$': {
+                  additionalProperties: false,
+                  properties: {
+                    target: {
+                      exclusiveMinimum: 0,
+                      maximum: 2_000,
+                      type: 'number',
+                    },
+                  },
+                  required: ['target', 'status'],
+                  type: 'object',
+                },
+              },
               properties: {
                 calories: {
-                  anyOf: [
-                    {
-                      properties: {
-                        status: {
-                          enum: [
-                            'far_under_target',
-                            'under_target',
-                            'on_target',
-                            'over_target',
-                            'far_over_target',
-                            'unavailable',
-                          ],
-                        },
-                        target: { type: 'number' },
-                      },
+                  additionalProperties: false,
+                  properties: {
+                    status: {
+                      enum: [
+                        'far_under_target',
+                        'under_target',
+                        'on_target',
+                        'over_target',
+                        'far_over_target',
+                        'unavailable',
+                      ],
                     },
-                    { type: 'null' },
-                  ],
+                    target: {
+                      exclusiveMinimum: 0,
+                      maximum: 20_000,
+                      type: 'number',
+                    },
+                  },
+                  required: ['target', 'status'],
+                  type: 'object',
                 },
+                proteinGrams: {
+                  additionalProperties: false,
+                  type: 'object',
+                },
+                carbsGrams: {},
+                fatGrams: {},
+                fiberGrams: {},
               },
             },
             kind: { const: 'daily_nutrition' },
+            localDate: {
+              pattern: '^\\d{4}-\\d{2}-\\d{2}$',
+              type: 'string',
+            },
+            mealCount: {
+              maximum: 100,
+              minimum: 1,
+              type: 'integer',
+            },
             totals: {
-              properties: {
-                fiberGrams: {
-                  anyOf: [
-                    {
-                      properties: {
-                        total: { type: 'number' },
-                      },
+              additionalProperties: false,
+              patternProperties: {
+                '^(?:proteinGrams|carbsGrams|fatGrams|fiberGrams)$': {
+                  additionalProperties: false,
+                  properties: {
+                    mealCount: {
+                      maximum: 100,
+                      minimum: 0,
+                      type: 'integer',
                     },
-                    {
-                      properties: {
-                        mealCount: { const: 0 },
-                        total: { type: 'null' },
-                      },
+                    total: {
+                      maximum: 2_000,
+                      minimum: 0,
+                      type: ['number', 'null'],
                     },
-                  ],
+                  },
                 },
+              },
+              properties: {
+                calories: {
+                  additionalProperties: false,
+                  properties: {
+                    mealCount: {
+                      maximum: 100,
+                      minimum: 1,
+                      type: 'integer',
+                    },
+                    total: {
+                      maximum: 20_000,
+                      minimum: 0,
+                      type: 'number',
+                    },
+                  },
+                },
+                proteinGrams: {
+                  additionalProperties: false,
+                  properties: {
+                    total: {
+                      maximum: 2_000,
+                      minimum: 0,
+                      type: ['number', 'null'],
+                    },
+                  },
+                },
+                carbsGrams: {},
+                fatGrams: {},
+                fiberGrams: {},
               },
             },
             version: { const: 2 },
@@ -117,48 +239,301 @@ describe('assistant response cards', () => {
           ],
         },
         {
-          additionalProperties: false,
-          properties: {
-            columns: {
-              maxItems: 4,
-              minItems: 1,
-              type: 'array',
-            },
-            kind: { const: 'compact_table' },
-            rows: {
-              maxItems: 8,
-              minItems: 1,
-              type: 'array',
-            },
-            tracking: {
-              anyOf: [
-                {
+          allOf: [
+            {
+              additionalProperties: false,
+              properties: {
+                columns: {
+                  maxItems: 4,
+                  minItems: 1,
+                  type: 'array',
+                },
+                kind: { const: 'compact_table' },
+                title: {
+                  minLength: 1,
+                  pattern: '^\\S(?:.*\\S)?$',
+                  type: 'string',
+                },
+                rows: {
+                  maxItems: 8,
+                  minItems: 1,
+                  type: 'array',
+                },
+                tracking: {
                   additionalProperties: false,
                   properties: {
+                    entityId: {
+                      maxLength: 30,
+                      pattern: '^evt_[0-9A-HJKMNP-TV-Z]{26}$',
+                    },
                     kind: { const: 'workout' },
+                    snapshotAt: {
+                      maxLength: 24,
+                      minLength: 24,
+                      pattern: expect.stringContaining('\\.\\d{3}Z'),
+                    },
                   },
+                  type: ['object', 'null'],
                 },
-                { type: 'null' },
+                version: { const: 1 },
+              },
+              required: [
+                'kind',
+                'version',
+                'title',
+                'subtitle',
+                'footer',
+                'tracking',
               ],
             },
-            version: { const: 1 },
-          },
-          required: [
-            'kind',
-            'version',
-            'title',
-            'subtitle',
-            'rowHeader',
-            'columns',
-            'rows',
-            'footer',
-            'tracking',
+            {},
           ],
         },
       ],
     })
-    expect(assistantResponseCardJsonSchema).not.toHaveProperty('$defs')
     expect(assistantResponseCardSchema.parse(COMPLETE_CARD)).toEqual(COMPLETE_CARD)
+    expect(assistantResponseCardAuthoringSchema.parse(COMPLETE_CARD_V2)).toEqual(
+      COMPLETE_CARD_V2,
+    )
+    expect(assistantResponseCardAuthoringSchema.safeParse(COMPLETE_CARD).success)
+      .toBe(false)
+
+    for (const metric of [
+      'calories',
+      'proteinGrams',
+      'carbsGrams',
+      'fatGrams',
+      'fiberGrams',
+    ] as const) {
+      const legacyCompatibleCard = {
+        ...COMPLETE_CARD_V2,
+        goals: {
+          ...COMPLETE_CARD_V2.goals,
+          [metric]: null,
+        },
+      }
+      expect(
+        assistantResponseCardAuthoringSchema.safeParse(legacyCompatibleCard)
+          .success,
+      ).toBe(false)
+      expect(assistantResponseCardSchema.parse(legacyCompatibleCard)).toEqual(
+        legacyCompatibleCard,
+      )
+    }
+  })
+
+  it('keeps routine timing model-authored and renders one accessible rich message', () => {
+    expect(exerciseRoutineResponseCardJsonSchema).toMatchObject({
+      additionalProperties: false,
+      properties: {
+        exercises: { maxItems: 8, minItems: 1, type: 'array' },
+        kind: { const: 'exercise_routine' },
+        totalSeconds: { maximum: 3600, type: 'integer' },
+        version: { const: 1 },
+      },
+    })
+    expect(assistantResponseCardSchema.parse(ROUTINE_CARD)).toEqual(ROUTINE_CARD)
+    expect(assistantResponseCardSchema.parse({
+      ...ROUTINE_CARD,
+      totalSeconds: 480,
+    })).toMatchObject({ totalSeconds: 480 })
+
+    expect(renderAssistantResponseCardText(ROUTINE_CARD)).toContain(
+      'Doorway stretch <easy> — 8 repetitions (45s)',
+    )
+    const richMessage = buildTelegramRichMessage(ROUTINE_CARD)
+    expect(richMessage.html).toContain('<details>')
+    expect(richMessage.html).toContain(
+      '<details><summary>Doorway stretch &lt;easy&gt;</summary><p><b>Dose:</b> 8 repetitions · <b>Time:</b> 45s</p>',
+    )
+    expect(richMessage.html).toContain(
+      '</ol><tg-slideshow><img src="https://cdn.example.test/doorway-stretch.png?x=1&amp;y=2"/></tg-slideshow></details>',
+    )
+    expect(richMessage.html).not.toContain('<th>Exercise</th>')
+    expect(richMessage.html).toContain('Doorway stretch &lt;easy&gt;')
+    expect(richMessage.html).not.toContain('<figcaption>')
+    expect(richMessage.html).not.toContain('Person standing tall')
+  })
+
+  it('preserves nutrition goals in the Telegram rich projection', () => {
+    const richMessage = buildTelegramRichMessage(COMPLETE_CARD_V2)
+    expect(richMessage.html).toContain(
+      `<figure><img src="${buildLinqIMessageAppCardImageUrl(COMPLETE_CARD_V2)}"/></figure>`,
+    )
+    expect(richMessage.html).toContain(
+      '<details><summary>Daily goals</summary><table bordered>',
+    )
+    expect(richMessage.html).toContain(
+      '<tr><td>Calories</td><td align="right">2,100 cal</td><td>🟠 Below target</td></tr>',
+    )
+    expect(richMessage.html).toContain(
+      '<tr><td>Protein</td><td align="right">100g</td><td>🟢 On target</td></tr>',
+    )
+    expect(richMessage.html).not.toContain('<summary>Goals</summary><ul>')
+    expect(richMessage.html).toContain('<table bordered striped>')
+  })
+
+  it('renders generic tables, workouts, and standings as Telegram rich cards', () => {
+    const genericTable = {
+      columns: ['Result <now>'],
+      footer: null,
+      kind: 'compact_table',
+      rows: [{ label: 'Mobility', values: ['Complete & calm'] }],
+      rowHeader: 'Exercise',
+      subtitle: null,
+      title: 'Today',
+      tracking: null,
+      version: 1,
+    } satisfies AssistantResponseCard
+    const workout = {
+      footer: 'Reply to log a set.',
+      kind: 'compact_table',
+      subtitle: null,
+      title: 'Strength',
+      tracking: {
+        entityId: 'evt_01K1ABCDEFGHJKMNPQRSTVWXYZ',
+        kind: 'workout',
+        snapshotAt: '2026-08-11T10:00:00.000Z',
+      },
+      version: 1,
+      workout: {
+        exercises: [{
+          name: 'Goblet squat',
+          sets: [{ actual: '10', status: 'completed', target: '8–10' }],
+        }],
+        state: 'active',
+        version: 1,
+      },
+    } satisfies AssistantResponseCard
+    const standings = {
+      entries: [{
+        coverage: 'complete',
+        detail: null,
+        label: 'Team <A>',
+        points: 120,
+      }],
+      footer: null,
+      format: 'teams',
+      kind: 'challenge_standings',
+      objective: { kind: 'ranking' },
+      subtitle: null,
+      title: 'Weekly standings',
+      version: 1,
+    } satisfies AssistantResponseCard
+
+    expect(buildTelegramRichMessage(genericTable).html).toContain(
+      'Result &lt;now&gt;',
+    )
+    expect(buildTelegramRichMessage(genericTable).html).toContain(
+      'Complete &amp; calm',
+    )
+    expect(buildTelegramRichMessage(workout).html).toContain('Goblet squat')
+    expect(buildTelegramRichMessage(workout).html).toContain(
+      '1/1 sets complete',
+    )
+    expect(buildTelegramRichMessage(standings).html).toContain('Team &lt;A&gt;')
+    expect(renderAssistantResponseCardText(standings)).toContain(
+      'Team <A>: 120 points',
+    )
+  })
+
+  it('keeps exercise routine cards on the deterministic iMessage text fallback', () => {
+    expect(() => buildLinqIMessageAppLayout(ROUTINE_CARD)).toThrow(
+      'do not have a native iMessage layout',
+    )
+    expect(() => buildLinqIMessageAppCardUrl(ROUTINE_CARD)).toThrow(
+      'do not have a native iMessage app URL',
+    )
+  })
+
+  it('validates and renders model-authored Telegram rich content', () => {
+    const card: TelegramRichContentResponseCardV1 = {
+      kind: 'telegram_rich_content',
+      version: 1,
+      html: '<h2>Travel prep</h2><p>Two quick checks &amp; one optional note.</p><ol><li>Check the departure time.</li><li>Pack the charger.</li></ol><details><summary>Optional note</summary><p>Download the ticket.</p></details><blockquote>Keep the passport with you.</blockquote>',
+    }
+
+    expect(telegramRichContentResponseCardV1Schema.parse(card)).toEqual(card)
+    expect(buildTelegramRichMessage(card)).toEqual({
+      html: card.html,
+      skip_entity_detection: true,
+    })
+    expect(renderAssistantResponseCardText(card)).toBe(
+      'Travel prep\nTwo quick checks & one optional note.\n1. Check the departure time.\n2. Pack the charger.\nOptional note\nDownload the ticket.\n\n> Keep the passport with you.',
+    )
+    expect(() => buildLinqIMessageAppLayout(card)).toThrow(
+      'Telegram rich content cards do not have a native iMessage layout',
+    )
+  })
+
+  it('rejects unsafe or malformed model-authored Telegram rich content', () => {
+    const parseHtml = (html: string) => telegramRichContentResponseCardV1Schema.safeParse({
+      kind: 'telegram_rich_content',
+      version: 1,
+      html,
+    })
+
+    expect(parseHtml('<h2>Guide</h2><script>alert(1)</script>').success).toBe(false)
+    expect(parseHtml('<h2>Guide</h2><a href="https://example.test">Link</a>').success).toBe(false)
+    expect(parseHtml('<h2 style="color:red">Guide</h2>').success).toBe(false)
+    expect(parseHtml('<details><p>Hidden</p></details>').success).toBe(false)
+    expect(parseHtml('<table><tr><td>A</td></table>').success).toBe(false)
+    expect(parseHtml('<p>Unclosed').success).toBe(false)
+    expect(parseHtml('<p>A &copy; B</p>').success).toBe(false)
+  })
+
+  it('keeps a maximum-count routine within one rich message and one text fallback', () => {
+    const imageUrlPrefix = 'https://cdn.example.test/'
+    const maximumText = 'x'.repeat(160)
+    const maximumAltText = 'x'.repeat(500)
+    const longExerciseText = 'x'.repeat(80)
+    const maximumImageUrl = imageUrlPrefix.padEnd(500, 'a')
+    const maximumRoutine: ExerciseRoutineResponseCardV1 = {
+      ...ROUTINE_CARD,
+      exercises: Array.from({ length: 8 }, () => ({
+        dose: longExerciseText,
+        estimatedSeconds: 1,
+        images: [{
+          alt: maximumAltText,
+          source: 'exercise_catalog:EX001:1',
+          step: maximumText,
+          url: maximumImageUrl,
+        }],
+        instructions: [longExerciseText, longExerciseText],
+        name: longExerciseText,
+      })),
+      footer: maximumText,
+      intensity: maximumText,
+      labels: {
+        dose: maximumText,
+        exercise: maximumText,
+        time: maximumText,
+        visualGuide: maximumText,
+      },
+      safety: maximumText,
+      subtitle: maximumText,
+      title: maximumText,
+      totalSeconds: 8,
+      transitionSeconds: 0,
+    }
+
+    const parsed = assistantResponseCardSchema.parse(maximumRoutine)
+    expect(buildTelegramRichMessage(parsed).html.length).toBeLessThanOrEqual(
+      32_768,
+    )
+    expect(renderAssistantResponseCardText(parsed).length).toBeLessThanOrEqual(
+      4_096,
+    )
+
+    expect(() => assistantResponseCardSchema.parse({
+      ...maximumRoutine,
+      exercises: maximumRoutine.exercises.map((exercise) => ({
+        ...exercise,
+        dose: maximumText,
+        instructions: [maximumText, maximumText, maximumText],
+        name: maximumText,
+      })),
+    })).toThrow('text fallback must fit 4096 characters')
   })
 
   it('rejects malformed, unknown, and implausible daily nutrition values', () => {
@@ -337,7 +712,7 @@ describe('assistant response cards', () => {
     )
 
     expect(renderAssistantResponseCardText(COMPLETE_CARD_V2)).toBe(
-      'Jul 28: about 1,490.25 calories · 94.5g protein · 193.125g carbs · 34.75g fat · 26.5g fiber from 3 logged meals.',
+      'Jul 28: about 1,490.25 calories · 94.5g protein · 193.125g carbs · 34.75g fat · 26.5g fiber from 3 logged meals. Targets: 2,100 calories (under target) · 100g protein (on target) · 220g carbs (on target) · 40g fat (on target) · 30g fiber (under target).',
     )
     expect(renderAssistantResponseCardText({
       ...COMPLETE_CARD_V2,
@@ -350,8 +725,16 @@ describe('assistant response cards', () => {
         fiberGrams: { target: 30, status: 'unavailable' },
       },
     })).toBe(
-      'Jul 28: about 1,490.25 calories · 94.5g protein · 193.125g carbs · 34.75g fat from 3 logged meals. Some nutrition estimates were partial.',
+      'Jul 28: about 1,490.25 calories · 94.5g protein · 193.125g carbs · 34.75g fat from 3 logged meals. Targets: 2,100 calories (under target) · 100g protein (on target) · 220g carbs (on target) · 40g fat (on target) · 30g fiber (status unavailable). Some nutrition estimates were partial.',
     )
+
+    expect(renderAssistantResponseCardText({
+      ...COMPLETE_CARD_V2,
+      goals: {
+        ...COMPLETE_CARD_V2.goals,
+        carbsGrams: null,
+      },
+    })).toContain('carbs target unavailable')
   })
 
   it('uses the same bounded display precision as the native card', () => {
@@ -384,8 +767,8 @@ describe('assistant response cards', () => {
     }).endsWith('Some calorie and macro estimates were partial.')).toBe(true)
   })
 
-  it('omits unavailable layout metrics while retaining the partial marker', () => {
-    expect(buildLinqIMessageAppLayout({
+  it('keeps the static nutrition layout concise when metrics are unavailable', () => {
+    const card: DailyNutritionResponseCardV2 = {
       ...COMPLETE_CARD_V2,
       totals: {
         calories: { total: 1_490.25, mealCount: 3 },
@@ -401,9 +784,11 @@ describe('assistant response cards', () => {
         fatGrams: null,
         fiberGrams: null,
       },
-    })).toEqual({
-      caption: 'Jul 28 · 3 meals · PARTIAL TOTALS',
-      subcaption: '1,490.25 cal',
+    }
+    expect(buildLinqIMessageAppLayout(card)).toEqual({
+      caption: 'Jul 28 · 3 meals',
+      image_url: buildLinqIMessageAppCardImageUrl(card),
+      subcaption: 'Some nutrition estimates were partial.',
     })
   })
 
@@ -431,8 +816,28 @@ describe('assistant response cards', () => {
         fiberGrams: null,
       },
     })
-    expect(LINQ_IMESSAGE_APP_CARD_FALLBACK_TEXT).toBe(
-      'Ask Murph for this card in text',
+    const completeNoGoalsLayout = buildLinqIMessageAppLayout({
+      ...COMPLETE_CARD_V2,
+      goals: {
+        calories: null,
+        proteinGrams: null,
+        carbsGrams: null,
+        fatGrams: null,
+        fiberGrams: null,
+      },
+    })
+    const directionalGoalsLayout = buildLinqIMessageAppLayout({
+      ...COMPLETE_CARD_V2,
+      goals: {
+        calories: { target: 3_000, status: 'far_under_target' },
+        proteinGrams: { target: 90, status: 'over_target' },
+        carbsGrams: null,
+        fatGrams: null,
+        fiberGrams: null,
+      },
+    })
+    expect(buildLinqIMessageAppFallbackText(COMPLETE_CARD_V2)).toBe(
+      'Your daily nutrition. Ask Murph for this card in text',
     )
     const completeCardUrl = buildLinqIMessageAppCardUrl(COMPLETE_CARD)
     const goalCardUrl = buildLinqIMessageAppCardUrl(COMPLETE_CARD_V2)
@@ -453,26 +858,38 @@ describe('assistant response cards', () => {
     })
     expect(completeLayout).toEqual({
       caption: 'Jul 28 · 3 meals',
-      subcaption: '1,490.25 cal',
-      trailing_caption: '94.5g protein · 193.125g carbs',
-      trailing_subcaption: '34.75g fat',
+      image_url: buildLinqIMessageAppCardImageUrl(COMPLETE_CARD),
     })
     expect(goalLayout).toEqual({
       caption: 'Jul 28 · 3 meals',
-      subcaption: '1,490.25 cal · 2,100 cal goal · UNDER TARGET',
-      trailing_caption: '94.5g protein · 193.125g carbs',
-      trailing_subcaption: '34.75g fat · 26.5g fiber',
+      image_url: buildLinqIMessageAppCardImageUrl(COMPLETE_CARD_V2),
     })
-    expect(proteinGoalLayout.subcaption).toBe(
-      '1,490.25 cal · 100g protein goal · ON TARGET',
-    )
+    expect(proteinGoalLayout).not.toHaveProperty('subcaption')
+    expect(completeNoGoalsLayout).not.toHaveProperty('subcaption')
+    expect(directionalGoalsLayout).not.toHaveProperty('subcaption')
+    expect(decodeAppCardImageUrl(proteinGoalLayout.image_url ?? '')).toEqual({
+      schemaVersion: 2,
+      card: {
+        ...COMPLETE_CARD_V2,
+        goals: {
+          calories: null,
+          proteinGrams: { target: 100, status: 'on_target' },
+          carbsGrams: null,
+          fatGrams: null,
+          fiberGrams: null,
+        },
+      },
+    })
     expect(partialLayout).toEqual({
-      caption: 'Jul 28 · 4 meals · PARTIAL TOTALS',
-      subcaption: '1,490.25 cal',
-      trailing_caption: '94.5g protein · 193.125g carbs',
-      trailing_subcaption: '34.75g fat · 26.5g fiber',
+      caption: 'Jul 28 · 4 meals',
+      image_url: expect.stringMatching(
+        /^https:\/\/www\.withmurph\.ai\/imessage\/card\/v1\/[A-Za-z0-9_-]+\.png$/u,
+      ),
+      subcaption: 'Some calorie and nutrition estimates were partial.',
     })
-    expect(LINQ_IMESSAGE_APP_CARD_FALLBACK_TEXT).not.toMatch(
+    expect(buildLinqIMessageAppCardImageUrl(COMPLETE_CARD_V2).length)
+      .toBeLessThan(2_048)
+    expect(buildLinqIMessageAppFallbackText(COMPLETE_CARD_V2)).not.toMatch(
       /\d|today|day|time/iu,
     )
   })

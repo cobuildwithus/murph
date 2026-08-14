@@ -3,6 +3,9 @@ import type { ReactNode } from "react";
 
 import type { buttonVariants } from "@/src/components/ui/button";
 import type { MurphContactOption } from "@/src/lib/murph-contact-routing";
+import type {
+  HostedUsageCreditCapacityConflictCode,
+} from "@/src/lib/hosted-onboarding/usage-credit-capacity-conflict";
 
 const PURCHASE_STATUSES = [
   "checkout_open",
@@ -47,6 +50,7 @@ interface HostedUsageTopUpDialogProps {
   contactOptions?: readonly MurphContactOption[];
   deferTerminalRefreshUntilClose?: boolean;
   groupPaymentMode?: "monthly" | "one_time";
+  initialCheckoutErrorCode?: HostedUsageCreditCapacityConflictCode;
   initialOpen?: boolean;
   inert?: boolean;
   offers: readonly HostedUsageTopUpOffer[];

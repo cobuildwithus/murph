@@ -1,7 +1,6 @@
 export {
   HostedBillingBrowserDriver,
   type HostedBillingBrowserActor,
-  type HostedBillingBrowserApiResult,
   type HostedBillingBrowserDiagnostic,
   type HostedBillingCheckoutStart,
   type HostedFamilyInviteStart,
@@ -28,7 +27,6 @@ export {
   type HostedStripeCleanupSummary,
   type HostedStripeBillingSandboxInput,
   type HostedStripeCheckoutOwnership,
-  type HostedStripeResumeEventTrace,
   type HostedStripeScheduleTruth,
   type HostedStripeSubscriptionFixture,
   type HostedStripeSubscriptionTruth,
@@ -74,6 +72,10 @@ import {
 import type {
   HostedRuntimeLatencyPhaseBreakdown,
 } from "@murphai/hosted-execution/runtime-control";
+import type {
+  HostedVaultShareProjectionMode,
+  HostedVaultShareProjectionScope,
+} from "@murphai/hosted-execution/vault-share";
 import { Client } from "pg";
 
 import { hostedRuntimeLogSubjectKey } from "@/src/lib/hosted-runtime-log/subject-key";
@@ -115,6 +117,22 @@ const hostedUsageCreditModuleSpecifier = new URL(
   "../../src/lib/hosted-execution/usage-credits.ts",
   import.meta.url,
 ).href;
+const hostedGroupStoreModuleSpecifier = new URL(
+  "../../src/lib/hosted-groups/group-store.ts",
+  import.meta.url,
+).href;
+const hostedMemberStoreModuleSpecifier = new URL(
+  "../../src/lib/hosted-onboarding/hosted-member-store.ts",
+  import.meta.url,
+).href;
+const hostedVaultShareGrantStoreModuleSpecifier = new URL(
+  "../../src/lib/hosted-vault-share/share-grant-store.ts",
+  import.meta.url,
+).href;
+const hostedVaultShareProjectionStoreModuleSpecifier = new URL(
+  "../../src/lib/hosted-vault-share/projection-store.ts",
+  import.meta.url,
+).href;
 const hostedComputerUseServiceModuleSpecifier = new URL(
   "../../src/lib/computer-use/service.ts",
   import.meta.url,
@@ -145,7 +163,72 @@ type HostedTestPrismaClient =
   & HostedLinqWorkspaceIsolationForTestPrismaClient
   & HostedWorkspaceSeedForTestPrismaClient
   & HostedVaultShareForTestPrismaClient
+  & HostedGroupEmailSeedForTestPrismaClient
   & HostedUsageDiagnosticsForTestPrismaClient;
+
+interface HostedGroupEmailSeedForTestPrismaClient {
+  hostedGroupMember: {
+    upsert(args: unknown): Promise<unknown>;
+  };
+}
+
+interface HostedGroupStoreForTestModule {
+  ensureHostedGroupForThreadContainerTx(input: {
+    containerMemberId: string;
+    now: Date;
+    requestedVaultShareProjectionScopes: readonly HostedVaultShareProjectionScope[];
+    tx: unknown;
+  }): Promise<{ id: string }>;
+}
+
+interface HostedMemberStoreForTestModule {
+  syncHostedMemberVerifiedEmailAuthorization(input: {
+    address: string;
+    memberId: string;
+    prisma: HostedTestPrismaClient;
+    verifiedAt: Date;
+  }): Promise<unknown>;
+}
+
+interface HostedVaultShareGrantStoreForTestModule {
+  grantHostedVaultShareTx(input: {
+    destinationMemberId: string;
+    grantorMemberId: string;
+    now: Date;
+    projectionScope: HostedVaultShareProjectionScope;
+    tx: unknown;
+  }): Promise<void>;
+}
+
+interface HostedVaultShareProjectionStoreForTestModule {
+  findActiveHostedVaultShares(input: {
+    grantorMemberId: string;
+    prisma: HostedTestPrismaClient;
+    projectionMode?: HostedVaultShareProjectionMode;
+    projectionScope: HostedVaultShareProjectionScope;
+  }): Promise<Array<{
+    destinationMemberId: string;
+    grantorMemberId: string;
+    id: string;
+    projectionKind: string;
+    projectionScope: HostedVaultShareProjectionScope;
+    projectionScopeKey: string;
+  }>>;
+  replaceHostedVaultShareProjectionSnapshot(input: {
+    prisma: HostedTestPrismaClient;
+    projectionMode?: HostedVaultShareProjectionMode;
+    records: [];
+    share: {
+      destinationMemberId: string;
+      grantorMemberId: string;
+      id: string;
+      projectionKind: string;
+      projectionScope: HostedVaultShareProjectionScope;
+      projectionScopeKey: string;
+    };
+    sourceWorkspaceVersion: string;
+  }): Promise<"no-active-share" | "replaced">;
+}
 
 interface HostedVaultShareForTestPrismaClient {
   hostedVaultShare: {
@@ -166,7 +249,9 @@ interface HostedConsentForTestModule {
 
 interface HostedTestPrismaFactoryClient {
   $disconnect(): Promise<void>;
-  $transaction<T>(callback: (tx: unknown) => Promise<T>): Promise<T>;
+  $transaction<T>(
+    callback: (tx: HostedGroupEmailSeedForTestPrismaClient) => Promise<T>,
+  ): Promise<T>;
   hostedMailboxItem: {
     count(args: unknown): Promise<number>;
     findUniqueOrThrow(args: unknown): Promise<{
@@ -181,6 +266,7 @@ interface HostedTestPrismaFactoryClient {
       payloadSchema: string | null;
       userId: string;
     }>;
+    updateMany(args: unknown): Promise<{ count: number }>;
   };
   hostedMember: {
     create(args: unknown): Promise<{ id: string }>;
@@ -467,6 +553,11 @@ interface HostedTestPrismaModule {
 }
 
 interface HostedMailboxAppendForTestStoreModule {
+  advanceHostedMailboxConsumedSeqByLane(input: {
+    lanes: readonly { consumedSeq: string; lane: string }[];
+    prisma: unknown;
+    userId: string;
+  }): Promise<Array<{ consumedSeq: string; lane: string }>>;
   appendHostedMailboxEnvelopeTx(input: {
     envelope: HostedExecutionWake;
     tx: unknown;
@@ -826,6 +917,55 @@ export async function readHostedMailboxItemForTest(input: {
   });
 }
 
+export async function ageHostedMailboxItemForTest(input: {
+  ageMs: number;
+  environment?: NodeJS.ProcessEnv;
+  mailboxItemId: string;
+  userId: string;
+}): Promise<{ updated: boolean }> {
+  if (!Number.isSafeInteger(input.ageMs) || input.ageMs < 0) {
+    throw new RangeError(
+      "Hosted mailbox item test age requires a non-negative integer.",
+    );
+  }
+
+  return withHostedWebTestkitDeps(input.environment, async (deps) => {
+    const agedAt = new Date(Date.now() - input.ageMs);
+    const updated = await deps.prisma.hostedMailboxItem.updateMany({
+      data: {
+        createdAt: agedAt,
+        occurredAt: agedAt,
+      },
+      where: {
+        id: input.mailboxItemId,
+        userId: input.userId,
+      },
+    });
+    return { updated: updated.count === 1 };
+  });
+}
+
+export async function advanceHostedMailboxConsumedSeqForTest(input: {
+  environment?: NodeJS.ProcessEnv;
+  lane: "conversation" | "system";
+  seq: string;
+  userId: string;
+}): Promise<{ consumedSeq: string }> {
+  return withHostedWebTestkitDeps(input.environment, async (deps) => {
+    const advanced = await deps.hostedMailboxStore
+      .advanceHostedMailboxConsumedSeqByLane({
+        lanes: [{ consumedSeq: input.seq, lane: input.lane }],
+        prisma: deps.prisma,
+        userId: input.userId,
+      });
+    const lane = advanced.find((entry) => entry.lane === input.lane);
+    if (!lane) {
+      throw new Error("Hosted mailbox test progress did not return its lane.");
+    }
+    return { consumedSeq: lane.consumedSeq };
+  });
+}
+
 export async function setLatestHostedLinqReplyLatencyForTest(input: {
   environment?: NodeJS.ProcessEnv;
   latencyMs: number;
@@ -963,6 +1103,49 @@ export async function ageHostedRuntimeLatencyAlertForTest(input: {
 
   return withHostedWebTestkitDeps(input.environment, async (deps) => {
     const monitorId = "hosted-runtime-latency-monitor:v1";
+    const state = await deps.prisma.hostedLinqAlert.findUnique({
+      select: {
+        lastAttemptedAt: true,
+        sentAt: true,
+      },
+      where: {
+        id: monitorId,
+      },
+    });
+    if (!state) {
+      return { updated: false };
+    }
+
+    const agedAt = new Date(Date.now() - input.ageMs);
+    await deps.prisma.hostedLinqAlert.update({
+      data: {
+        lastAttemptedAt: state.lastAttemptedAt ? agedAt : null,
+        sentAt: state.sentAt ? agedAt : null,
+      },
+      select: {
+        lastAttemptedAt: true,
+        sentAt: true,
+      },
+      where: {
+        id: monitorId,
+      },
+    });
+    return { updated: true };
+  });
+}
+
+export async function ageHostedRuntimeProgressAlertForTest(input: {
+  ageMs: number;
+  environment?: NodeJS.ProcessEnv;
+}): Promise<{ updated: boolean }> {
+  if (!Number.isSafeInteger(input.ageMs) || input.ageMs < 0) {
+    throw new RangeError(
+      "Hosted runtime progress alert test age requires a non-negative integer.",
+    );
+  }
+
+  return withHostedWebTestkitDeps(input.environment, async (deps) => {
+    const monitorId = "hosted-runtime-progress-monitor:v1";
     const state = await deps.prisma.hostedLinqAlert.findUnique({
       select: {
         lastAttemptedAt: true,
@@ -1156,6 +1339,115 @@ export async function seedHostedLaunchConsentForTest(input: {
         source: "hosted-local-e2e",
       });
     }
+  });
+}
+
+export async function seedHostedGroupEmailAuthorizationForTest(input: {
+  environment?: NodeJS.ProcessEnv;
+  participants: readonly {
+    memberId: string;
+    verifiedEmail?: string | null;
+  }[];
+  projectionScopes: readonly HostedVaultShareProjectionScope[];
+  runtimeMemberId: string;
+}): Promise<{ groupId: string }> {
+  return withHostedWebTestkitDeps(input.environment, async (deps) => {
+    const [
+      groupStore,
+      memberStore,
+      shareGrantStore,
+      projectionStore,
+    ] = await Promise.all([
+      import(hostedGroupStoreModuleSpecifier) as Promise<HostedGroupStoreForTestModule>,
+      import(hostedMemberStoreModuleSpecifier) as Promise<HostedMemberStoreForTestModule>,
+      import(hostedVaultShareGrantStoreModuleSpecifier) as Promise<
+        HostedVaultShareGrantStoreForTestModule
+      >,
+      import(hostedVaultShareProjectionStoreModuleSpecifier) as Promise<
+        HostedVaultShareProjectionStoreForTestModule
+      >,
+    ]);
+    const now = new Date();
+    const groupId = await deps.prisma.$transaction(async (tx) => {
+      const group = await groupStore.ensureHostedGroupForThreadContainerTx({
+        containerMemberId: input.runtimeMemberId,
+        now,
+        requestedVaultShareProjectionScopes: input.projectionScopes,
+        tx,
+      });
+      for (const participant of input.participants) {
+        await tx.hostedGroupMember.upsert({
+          create: {
+            groupId: group.id,
+            id: `hgm_hosted_local_${participant.memberId}`,
+            joinedAt: now,
+            memberId: participant.memberId,
+            role: "member",
+          },
+          update: { joinedAt: now },
+          where: {
+            groupId_memberId: {
+              groupId: group.id,
+              memberId: participant.memberId,
+            },
+          },
+        });
+        for (const projectionScope of [
+          { projectionKind: "group-email.v0" } as const,
+          ...input.projectionScopes,
+        ]) {
+          await shareGrantStore.grantHostedVaultShareTx({
+            destinationMemberId: input.runtimeMemberId,
+            grantorMemberId: participant.memberId,
+            now,
+            projectionScope,
+            tx,
+          });
+        }
+      }
+      return group.id;
+    });
+
+    for (const participant of input.participants) {
+      const sourceWorkspace = await deps.prisma.hostedWorkspace.findUnique({
+        select: { version: true },
+        where: { userId: participant.memberId },
+      });
+      if (!sourceWorkspace) {
+        throw new Error("Hosted-local group email participant workspace was not created.");
+      }
+      if (participant.verifiedEmail) {
+        await memberStore.syncHostedMemberVerifiedEmailAuthorization({
+          address: participant.verifiedEmail,
+          memberId: participant.memberId,
+          prisma: deps.prisma,
+          verifiedAt: now,
+        });
+      }
+      for (const projectionScope of input.projectionScopes) {
+        const share = (await projectionStore.findActiveHostedVaultShares({
+          grantorMemberId: participant.memberId,
+          prisma: deps.prisma,
+          projectionScope,
+        })).find((candidate) =>
+          candidate.destinationMemberId === input.runtimeMemberId
+        );
+        if (!share) {
+          throw new Error("Hosted-local group email share was not created.");
+        }
+        const replaced = await projectionStore.replaceHostedVaultShareProjectionSnapshot({
+          prisma: deps.prisma,
+          records: [],
+          share,
+          sourceWorkspaceVersion: sourceWorkspace.version.toString(),
+        });
+        if (replaced !== "replaced") {
+          throw new Error("Hosted-local group email projection snapshot was not replaced.");
+        }
+      }
+    }
+
+    return { groupId };
   });
 }
 
@@ -1975,6 +2267,8 @@ async function loadHostedMailboxAppendForTestModules(): Promise<HostedMailboxApp
     hostedMailboxStoreModule as HostedMailboxAppendForTestStoreModule;
 
   return {
+    advanceHostedMailboxConsumedSeqByLane:
+      typedHostedMailboxStoreModule.advanceHostedMailboxConsumedSeqByLane,
     appendHostedMailboxEnvelopeTx: typedHostedMailboxStoreModule.appendHostedMailboxEnvelopeTx,
   };
 }

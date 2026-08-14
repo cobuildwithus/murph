@@ -140,7 +140,7 @@ export function scopeHostedLocalAssistantProviderResponse(
 
 /**
  * Scripts a sandboxed shell execution through the real Codex app-server.
- * Codex 0.145.0 (CODEX_CLI_VERSION in Dockerfile.cloudflare-hosted-runner-base)
+ * Codex 0.147.0 (CODEX_CLI_VERSION in Dockerfile.cloudflare-hosted-runner-base)
  * advertises the unified `exec_command` tool on Linux; bump the tool name here
  * if a Codex upgrade changes the advertised exec tool.
  */
@@ -197,7 +197,10 @@ function buildAssistantProviderMurphCodeModeInput(
   tool: string,
   toolArguments: Record<string, unknown>,
 ): string {
+  // Scripted provider responses cannot inspect a yielded cell and call `wait`.
+  // Keep the nested tool in the initial exec window on loaded CI runners.
   return [
+    '// @exec: {"yield_time_ms": 30000}',
     `const result = await tools.murph__${tool}(${JSON.stringify(toolArguments)});`,
     "text(result);",
   ].join("\n");
@@ -231,15 +234,16 @@ export function expectAdvertisedMurphDynamicTools(
   options: {
     connectedAppsAvailable?: boolean;
     computerToolsAvailable?: boolean;
+    exerciseRoutineResponseCardAvailable?: boolean;
     groupRoomModelAvailable?: boolean;
     imessageContactAvailable?: boolean;
     messageTargetingAvailable?: boolean;
-    newsletterAvailable?: boolean;
     pendingVaultFilesAvailable?: boolean;
     physicalNotesAvailable?: boolean;
     phoneCallsAvailable?: boolean;
     progressUpdatesAvailable?: boolean;
     responseCardAvailable?: boolean;
+    telegramRichContentResponseCardAvailable?: boolean;
     vaultFileSendAvailable?: boolean;
     askGrokAvailable?: boolean;
   } = {},
@@ -288,13 +292,6 @@ export function expectAdvertisedMurphDynamicTools(
       }
 
       if (
-        options.newsletterAvailable !== true
-        && name === "murph.newsletter"
-      ) {
-        return false;
-      }
-
-      if (
         options.physicalNotesAvailable !== true
         && name === "murph.send_physical_note"
       ) {
@@ -311,6 +308,20 @@ export function expectAdvertisedMurphDynamicTools(
       if (
         options.responseCardAvailable !== true
         && name === "murph.attach_response_card"
+      ) {
+        return false;
+      }
+
+      if (
+        options.exerciseRoutineResponseCardAvailable !== true
+        && name === "murph.attach_exercise_routine_card"
+      ) {
+        return false;
+      }
+
+      if (
+        options.telegramRichContentResponseCardAvailable !== true
+        && name === "murph.attach_telegram_rich_content"
       ) {
         return false;
       }
@@ -393,16 +404,32 @@ function readMurphDynamicToolAdvertisement(body: string): {
     }
   }
 
-  const murphNamespace = candidateToolLists
-    .flat()
-    .find((tool): tool is { tools?: unknown } =>
+  const directToolCandidates = candidateToolLists.flat();
+  const functionsNamespace = directToolCandidates.find(
+    (tool): tool is { tools?: unknown } =>
+      Boolean(
+        tool
+        && typeof tool === "object"
+        && (tool as { type?: unknown }).type === "namespace"
+        && (tool as { name?: unknown }).name === "functions",
+      ),
+  );
+  const toolCandidates = [
+    ...directToolCandidates,
+    ...(functionsNamespace && Array.isArray(functionsNamespace.tools)
+      ? functionsNamespace.tools
+      : []),
+  ];
+
+  const murphNamespace = toolCandidates.find(
+    (tool): tool is { tools?: unknown } =>
       Boolean(
         tool
         && typeof tool === "object"
         && (tool as { type?: unknown }).type === "namespace"
         && (tool as { name?: unknown }).name === "murph",
-      )
-    );
+      ),
+  );
   const names = new Set<string>();
   if (murphNamespace && Array.isArray(murphNamespace.tools)) {
     for (const tool of murphNamespace.tools) {
@@ -416,8 +443,7 @@ function readMurphDynamicToolAdvertisement(body: string): {
     }
   }
 
-  const execDescriptions = candidateToolLists
-    .flat()
+  const execDescriptions = toolCandidates
     .filter((tool): tool is { description?: unknown } =>
       Boolean(
         tool
@@ -564,6 +590,14 @@ function readHostedLocalAssistantProviderResponsePayload(
   return isScopedAssistantProviderScriptedResponse(scriptedResponse)
     ? scriptedResponse.response
     : scriptedResponse;
+}
+
+function isHostedLocalAssistantProviderHeldTextResponse(
+  scriptedResponse: HostedLocalAssistantProviderScriptedResponsePayload,
+): scriptedResponse is HostedLocalAssistantProviderHeldTextResponse {
+  return typeof scriptedResponse === "object"
+    && scriptedResponse !== null
+    && "text" in scriptedResponse;
 }
 
 function normalizeHostedLocalAssistantProviderResponsePayload(
@@ -718,13 +752,15 @@ async function prepareAssistantProviderScriptedResponse(
   return scriptedResponse.text;
 }
 
-function writeAssistantProviderResponsesApiStubStream(input: {
+async function writeAssistantProviderResponsesApiStubStream(input: {
+  beforeContent?: (() => Promise<void> | void) | null;
   modelId: string;
+  onStarted?: (() => void) | null;
   response: ServerResponse;
   responseId: string;
   responseText: string;
   usage: HostedLocalAssistantProviderUsage;
-}): void {
+}): Promise<void> {
   const messageId = `msg_${input.responseId}`;
   const content = {
     annotations: [],
@@ -760,6 +796,8 @@ function writeAssistantProviderResponsesApiStubStream(input: {
     },
     type: "response.created",
   });
+  input.onStarted?.();
+  await input.beforeContent?.();
   writeAssistantProviderSseEvent(input.response, "response.output_item.added", {
     item: {
       ...outputItem,
@@ -1075,6 +1113,28 @@ export async function startAssistantProviderStubServer(input: {
         return;
       }
 
+      if (
+        bodyJson.stream === true
+        && isHostedLocalAssistantProviderHeldTextResponse(scriptedResponse)
+      ) {
+        const responseText = scriptedResponse.text;
+        const usage = buildAssistantProviderStubUsage({
+          body,
+          responseText,
+          usageMode: input.usageMode ?? "fixed",
+        });
+        await writeAssistantProviderResponsesApiStubStream({
+          beforeContent: scriptedResponse.beforeResponse,
+          modelId,
+          onStarted: scriptedResponse.onResponseStarted,
+          response,
+          responseId,
+          responseText,
+          usage,
+        });
+        return;
+      }
+
       const preparedScriptedResponse =
         await prepareAssistantProviderScriptedResponse(scriptedResponse, {
           requestBody: body,
@@ -1125,7 +1185,7 @@ export async function startAssistantProviderStubServer(input: {
       });
 
       if (bodyJson.stream === true) {
-        writeAssistantProviderResponsesApiStubStream({
+        await writeAssistantProviderResponsesApiStubStream({
           modelId,
           response,
           responseId,

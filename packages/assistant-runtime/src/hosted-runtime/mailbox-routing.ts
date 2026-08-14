@@ -20,11 +20,12 @@ export const HOSTED_MAILBOX_IMPORT_ACTIONS = [
   "run-clinical-records-sync",
   "run-device-sync-wake",
   "run-environment-voice",
-  "import-group-newsletter-email-needed",
+  "import-reported-daily-metric",
   "import-meal-photo",
   "apply-runtime-control-request",
   "import-vault-share-delivery",
   "import-vault-share-revoke",
+  "skip-retired-mailbox-item",
 ] as const;
 
 export type HostedMailboxImportAction =
@@ -72,7 +73,8 @@ const ACTION_BY_KIND = {
   "conversation.message": "import-conversation-message",
   "device-sync.wake": "run-device-sync-wake",
   "environment-voice.captured": "run-environment-voice",
-  "group-newsletter.email-needed": "import-group-newsletter-email-needed",
+  "health.daily-metric.reported": "import-reported-daily-metric",
+  "group-newsletter.email-needed": "skip-retired-mailbox-item",
   "meal-photo.captured": "import-meal-photo",
   "member.activated": "apply-member-activation",
   "member.channels.updated": "apply-member-channels-update",

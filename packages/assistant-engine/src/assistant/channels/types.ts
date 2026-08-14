@@ -1,9 +1,7 @@
-import type {
-  AgentmailFetch,
-} from '@murphai/operator-config/agentmail-runtime'
 import type { LinqFetch } from '@murphai/operator-config/linq-runtime'
 import type {
   AssistantResponseCard,
+  TelegramRichMessage,
 } from '@murphai/operator-config/assistant-response-cards'
 import type { TelegramFetchImplementation } from '@murphai/operator-config/telegram-runtime'
 import {
@@ -48,11 +46,6 @@ export interface TelegramRuntimeDependencies {
   ) => Promise<Uint8Array>
   maxDeliveryAttempts?: number
   signal?: AbortSignal
-}
-
-export interface EmailRuntimeDependencies {
-  env?: NodeJS.ProcessEnv
-  fetchImplementation?: AgentmailFetch
 }
 
 export interface AssistantEmailDeliverySummary {
@@ -100,6 +93,25 @@ export interface AssistantChannelDependencies {
     idempotencyKey?: string | null
     message: string
     replyToMessageId?: string | null
+    signal?: AbortSignal
+    target: string
+  }) => Promise<
+    | {
+        cleanupMessages?: Array<{ messageId: string; target: string }> | null
+        cleanupTargetAliases?: string[] | null
+        providerMessageId?: string | null
+        providerMessageIds?: string[] | null
+        providerThreadId?: string | null
+        target?: string | null
+        targetKind?: AssistantChannelDeliveryTargetKind | null
+      }
+    | void
+  >
+  sendTelegramRich?: (input: {
+    fallbackMessage: string
+    idempotencyKey?: string | null
+    replyToMessageId?: string | null
+    richMessage: TelegramRichMessage
     signal?: AbortSignal
     target: string
   }) => Promise<
@@ -255,7 +267,6 @@ export interface AssistantChannelAdapter {
     deliveryKind?: AssistantBindingDeliveryKind | null
     deliveryTarget?: string | null
   }) => AssistantBindingDelivery | null
-  isReadyForSetup: (env: NodeJS.ProcessEnv) => boolean
   startTypingIndicator?: (
     input: {
       bindingDelivery: AssistantBindingDelivery | null
@@ -308,7 +319,6 @@ export interface AssistantChannelAdapterSpec {
   canAutoReply: AssistantChannelAdapter['canAutoReply']
   channel: AssistantChannelName
   inferBindingDelivery?: AssistantChannelAdapter['inferBindingDelivery']
-  isReadyForSetup: AssistantChannelAdapter['isReadyForSetup']
   startTypingIndicator?: (input: {
     candidate: AssistantDeliveryCandidate
     dependencies: AssistantChannelDependencies

@@ -10,6 +10,7 @@ import {
 } from '../src/assistant-backend.ts'
 import {
   DEFAULT_MURPH_CODEX_REASONING_EFFORT,
+  serializeAssistantProviderSessionOptions,
 } from '../src/assistant/provider-config.ts'
 import {
   assistantSessionIdSchema,
@@ -38,7 +39,6 @@ import {
   tryParseHostedAssistantConfig,
 } from '../src/hosted-assistant-config.ts'
 import { normalizeHostedAssistantConfig } from '../src/assistant/hosted-config.ts'
-import { resolveAssistantRuntimeTarget } from '../src/assistant/target-runtime.ts'
 import {
   applySetupRuntimeEnvOverridesToProcess,
   describeSelectedSetupWearables,
@@ -85,13 +85,12 @@ async function withTemporaryProcessEnv(
 
 test('setup env helpers trim values, report missing keys, and surface channel readiness', () => {
   const env: NodeJS.ProcessEnv = {
-    AGENTMAIL_API_KEY: '  agentmail-key  ',
+    WHOOP_CLIENT_ID: '  whoop-id  ',
     TELEGRAM_BOT_TOKEN: '   telegram-bot-token   ',
   }
 
-  assert.equal(readEnvValue(env, ['TELEGRAM_BOT_TOKEN', 'AGENTMAIL_API_KEY']), 'telegram-bot-token')
+  assert.equal(readEnvValue(env, ['TELEGRAM_BOT_TOKEN', 'WHOOP_CLIENT_ID']), 'telegram-bot-token')
   assert.deepEqual(resolveSetupChannelMissingEnv('telegram', env), [])
-  assert.deepEqual(resolveSetupChannelMissingEnv('email', env), [])
   assert.deepEqual(describeSetupChannelStatus('telegram', env, 'darwin'), {
     badge: 'ready',
     detail: 'Bot token is available in the current environment.',
@@ -347,7 +346,7 @@ test('representative contract schemas stay wired to the owned setup/operator sea
   assert.equal(assistantSessionIdSchema.safeParse('../session').success, false)
   assert.throws(
     () =>
-      resolveAssistantRuntimeTarget({
+      serializeAssistantProviderSessionOptions({
         provider: 'unsupported-provider',
         model: 'gpt-5.4',
       }),
@@ -395,7 +394,7 @@ test('representative contract schemas stay wired to the owned setup/operator sea
   })
   assert.deepEqual(parsedAssistantSession.providerOptions, {
     approvalPolicy: 'never',
-    continuityFingerprint: resolveAssistantRuntimeTarget({
+    continuityFingerprint: serializeAssistantProviderSessionOptions({
       provider: 'codex-cli',
       approvalPolicy: 'never',
       model: 'gpt-5.6-terra',

@@ -341,6 +341,13 @@ export function isRetryableHostedRuntimeReplaySafeReadTransportError(
     return false;
   }
 
+  // Once response headers establish an application status, a transport loss
+  // while reading its optional body must not turn that known rejection into a
+  // replay-safe request failure.
+  if (readHostedWebControlErrorStatus(error) !== null) {
+    return false;
+  }
+
   const diagnostics = readHostedRuntimeControlPlaneFetchFailureDiagnostics(error);
   if (diagnostics) {
     if (
@@ -357,10 +364,6 @@ export function isRetryableHostedRuntimeReplaySafeReadTransportError(
   }
 
   if (isHostedWebControlAbortError(error) || isHostedWebControlTimeoutError(error)) {
-    return false;
-  }
-
-  if (readHostedWebControlErrorStatus(error) !== null) {
     return false;
   }
 

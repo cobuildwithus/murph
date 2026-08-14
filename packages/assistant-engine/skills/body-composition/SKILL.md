@@ -55,6 +55,15 @@ Check, when relevant:
 - age and life stage; pregnancy, breastfeeding, growth, or older-adult context
 - current weight and same-condition trend, not only the latest value
 - waist trend or clothing fit if useful and acceptable
+- when connected measurements matter, use the lossless global observation read
+  `vault-cli measurement entry list --metric <metric> --from <date> --to <date> --limit 50 --format json`
+  with `body_mass_index`, `fat`, `lean_body_mass`, or `waist_circumference`.
+  Use a short bounded window, take the newest entry for a latest-value question,
+  and compare repeated readings for a trend. Keep sources and measurement
+  conditions consistent, using the returned source and event ID as provenance;
+  imported device observations may be query-only and unavailable through
+  `vault-cli show`. No returned entries means missing coverage rather than no
+  change
 - strength, repetitions, training quality, and resistance-training consistency
 - meal or food pattern, estimated protein, alcohol, liquid calories, appetite, and food access
 - steps, cardio, sedentary time, sleep, recovery, illness, pain, and recent training changes
@@ -63,6 +72,12 @@ Check, when relevant:
 - scale, unit, source, timestamp, and whether device values are direct measurements or estimates
 
 Do not request progress photos, exact calorie logging, body-fat percentage, or daily weighing by default. Offer only the minimum measurement burden that can change a decision.
+
+For a daily nutrition-card calorie target, read
+`$MURPH_ASSISTANT_SKILLS_ROOT/nutrition-strategy/references/daily-nutrition-card-goals.md`.
+This skill owns whether the direction is maintenance/recomp, muscle gain, or fat
+loss; the reference owns the researched estimate, conservative adjustment, and
+explanation-before-card sequence.
 
 ## If Context Is Thin
 

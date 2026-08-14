@@ -30,25 +30,23 @@ import {
 import {
   HOSTED_ASSISTANT_TURN_TIMING_SCHEMA,
   HOSTED_ASSISTANT_TURN_TIMING_TYPE,
-  GROUP_HEALTH_NEWSLETTER_AUTOMATION_SLUG,
-  GROUP_NEWSLETTER_CURRENT_CHAT_DELIVERY_TAG,
-  GROUP_NEWSLETTER_EMAIL_DELIVERY_TAG,
   MURPH_ONBOARDING_FIRST_PERSONAL_READ_AUTOMATION_ID,
   MURPH_ONBOARDING_FIRST_PERSONAL_READ_AUTOMATION_SLUG,
   applyMurphManagedAutomations,
+  getAssistantCronAutomationTimingProjection,
   getAssistantCronStatus,
-  hasGroupNewsletterDeliveryTag,
   isCanonicalOnboardingFirstPersonalReadAutomationSaveRequest,
-  isCanonicalGroupNewsletterAutomationInstructions,
   readAssistantOnboardingState,
   recordHostedMailboxAssistantInputItem,
   readAssistantInputEvent,
   readAssistantOutboxIntent,
-  refreshReminderAvailability,
   refreshAssistantContextSnapshotBestEffort,
+  refreshReminderAvailability,
+  resolveAssistantCronDefaultTimeZoneProjection,
   scheduleDeviceActivityTriggeredAutomations,
   upsertAssistantInputEvent,
   type AssistantCronStatusOptions,
+  type AssistantAutomationTimingVerificationIssue,
   type AssistantBeforeProviderAcceptedInputsHook,
   type AssistantAutomationOperationScope,
   type AssistantExecutionContext,
@@ -79,6 +77,7 @@ import {
   showAutomation,
   stripAutomationAvailabilityConflictBlock,
   upsertAutomation,
+  type AutomationRecord,
 } from "@murphai/core";
 import {
   findAssistantAutoReplyDeliveryIntentIds,
@@ -99,6 +98,9 @@ import {
   resolveAssistantDeliveryRouteWithCurrentRoute,
 } from "@murphai/operator-config/assistant/current-delivery-route";
 
+import {
+  fetchCompleteHostedDeviceSyncRuntimeSnapshot,
+} from "./device-sync-snapshot-pagination.ts";
 import {
   collectHostedAssistantDeliverySideEffects,
   createHostedAssistantProgressDeliveryDependencies,
@@ -195,6 +197,7 @@ import {
 } from "./runtime-logs.ts";
 import type {
   HostedWorkspaceDurableCheckpointEffect,
+  HostedWorkspaceDurableCheckpointEffectContext,
   HostedWorkspaceRunnerAssistantPhaseInput,
   HostedWorkspaceRunnerAssistantPhasePostCheckpoint,
   HostedWorkspaceRunnerAssistantPhaseResult,
@@ -301,6 +304,8 @@ const HOSTED_PRE_CHECKPOINT_EXTERNAL_COMPLETION_WAKE_KINDS = [
 const HOSTED_PRE_CHECKPOINT_EXTERNAL_COMPLETION_DEDUPE_KEY_PREFIXES = [
   "assistant.notification.requested:phone-call-result:",
   "assistant.notification.requested:usage-referral-reward:",
+  "aask_done_",
+  "aask_private_",
 ] as const;
 const HOSTED_PRE_CHECKPOINT_ASSISTANT_ASK_COMPLETION_ROUTE_ACTIONS = [
   "continue-assistant-ask",
@@ -541,20 +546,22 @@ function buildHostedGroupJoinLinkFallbackRequest(
   if (!joinOffer) {
     return { action: "create_join_link" };
   }
+  const projectionScopes = joinOffer.projectionScopes;
+  const projectionKinds = joinOffer.projectionKinds;
   const joinLink = {
     ...(joinOffer.displayName
       ? { displayName: joinOffer.displayName }
       : {}),
-    ...(joinOffer.projectionScopes?.length
+    ...(projectionScopes !== undefined && projectionScopes !== null
       ? {
         requestedVaultShareProjectionScopes: [
-          ...joinOffer.projectionScopes,
+          ...projectionScopes,
         ],
       }
-      : joinOffer.projectionKinds?.length
+      : projectionKinds !== undefined && projectionKinds !== null
         ? {
           requestedVaultShareProjectionKinds: [
-            ...joinOffer.projectionKinds,
+            ...projectionKinds,
           ],
         }
         : {}),
@@ -655,10 +662,15 @@ function buildHostedGroupEmailRestrictedActionUnavailable(
   const unavailableReason = "authenticated_sender_required";
   switch (request.action) {
     case "ask":
-    case "ask_current_sender":
+    case "record_current_sender_daily_metric":
     case "ask_member":
       return {
         action: request.action,
+        result: { status: "unavailable", unavailableReason },
+      };
+    case "ask_current_sender":
+      return {
+        action: "ask_current_sender",
         result: { status: "unavailable", unavailableReason },
       };
     case "list_memberships":
@@ -699,6 +711,7 @@ function buildHostedGroupEmailRestrictedActionUnavailable(
     case "read_next_group":
     case "cancel_next_group":
     case "revoke_own_email_share":
+    case "prepare_email":
       return {
         action: request.action,
         result: { status: "unavailable", unavailableReason },
@@ -931,6 +944,7 @@ function readHostedInitialAssistantInputIds(
 
 function createHostedAssistantAutomationOperationScope(
   input: HostedWorkspaceRuntimeAssistantPhaseInput,
+  redactedLogEntries: HostedExecutionRedactedLogEntry[],
 ): AssistantAutomationOperationScope {
   return {
     async runAutoReplyGroup<T>(scopeInput: {
@@ -968,6 +982,7 @@ function createHostedAssistantAutomationOperationScope(
       });
       const scopedExecutionContext = scopeHostedAutomationToolToAssistantOperation({
         executionContext: groupScopedExecutionContext,
+        redactedLogEntries,
         route,
         vaultRoot: input.restored.vaultRoot,
       });
@@ -1379,6 +1394,7 @@ type HostedAssistantAutomationTool = NonNullable<
 
 function scopeHostedAutomationToolToAssistantOperation(input: {
   executionContext: AssistantExecutionContext;
+  redactedLogEntries: HostedExecutionRedactedLogEntry[];
   route: AssistantCurrentDeliveryRoute | null;
   vaultRoot: string;
 }): AssistantExecutionContext {
@@ -1396,6 +1412,7 @@ function scopeHostedAutomationToolToAssistantOperation(input: {
       && input.route.threadIsDirect === false
     )
     ? createHostedAssistantAutomationTool({
+        redactedLogEntries: input.redactedLogEntries,
         route: input.route,
         vaultRoot: input.vaultRoot,
       })
@@ -1410,6 +1427,7 @@ function scopeHostedAutomationToolToAssistantOperation(input: {
 }
 
 function createHostedAssistantAutomationTool(input: {
+  redactedLogEntries: HostedExecutionRedactedLogEntry[];
   route: AssistantCurrentDeliveryRoute;
   vaultRoot: string;
 }): HostedAssistantAutomationTool {
@@ -1490,25 +1508,7 @@ function createHostedAssistantAutomationTool(input: {
             );
           }
         }
-        const isGroupNewsletter =
-          requestedSlug === GROUP_HEALTH_NEWSLETTER_AUTOMATION_SLUG
-          || existingTarget?.slug === GROUP_HEALTH_NEWSLETTER_AUTOMATION_SLUG;
-        const status =
-          isGroupNewsletter && request.status === undefined
-            ? (
-                existingTarget?.slug === GROUP_HEALTH_NEWSLETTER_AUTOMATION_SLUG
-                  ? existingTarget
-                  : await showAutomation({
-                      slug: GROUP_HEALTH_NEWSLETTER_AUTOMATION_SLUG,
-                      vaultRoot: input.vaultRoot,
-                    })
-              )?.status ?? "active"
-            : request.status ?? "active";
-        assertHostedAutomationSaveRequest({
-          isGroupNewsletter,
-          request,
-          route: currentRoute,
-        });
+        const status = request.status ?? "active";
         assertActiveHostedAutomationRoute({
           route: currentRoute,
           status,
@@ -1522,6 +1522,7 @@ function createHostedAssistantAutomationTool(input: {
             : { assistantTargetOverride: request.assistantTargetOverride }),
           ...(request.automationId ? { automationId: request.automationId } : {}),
           continuityPolicy: request.continuityPolicy ?? "preserve",
+          createOnly: true,
           instructions: stripHostedAssistantAvailabilityConflictBlock(
             request.instructions,
           ),
@@ -1546,10 +1547,12 @@ function createHostedAssistantAutomationTool(input: {
           title: request.title,
           vaultRoot: input.vaultRoot,
         });
-        return buildHostedAutomationToolResponse({
+        return await buildHostedAutomationToolResponse({
           action: "save",
+          redactedLogEntries: input.redactedLogEntries,
           result,
           routeBinding: "current_conversation",
+          vaultRoot: input.vaultRoot,
         });
       }
 
@@ -1564,8 +1567,15 @@ function createHostedAssistantAutomationTool(input: {
           "Automation was not found.",
         );
       }
-      assertHostedAutomationPatchRequest({ existing, request });
       context?.signal?.throwIfAborted();
+      if (request.action === "inspect") {
+        return await buildHostedAutomationToolResponse({
+          action: "inspect",
+          record: existing,
+          routeBinding: "preserved",
+          vaultRoot: input.vaultRoot,
+        });
+      }
       const route = request.retargetToCurrentConversation === true
         ? currentRoute
         : existing.route;
@@ -1583,6 +1593,7 @@ function createHostedAssistantAutomationTool(input: {
         ...(request.continuityPolicy === undefined
           ? {}
           : { continuityPolicy: request.continuityPolicy }),
+        expectedUpdatedAt: request.expectedUpdatedAt,
         ...(request.instructions === undefined
           ? {}
           : {
@@ -1615,12 +1626,14 @@ function createHostedAssistantAutomationTool(input: {
         ...(request.title === undefined ? {} : { title: request.title }),
         vaultRoot: input.vaultRoot,
       });
-      return buildHostedAutomationToolResponse({
+      return await buildHostedAutomationToolResponse({
         action: "patch",
+        redactedLogEntries: input.redactedLogEntries,
         result,
         routeBinding: request.retargetToCurrentConversation === true
           ? "current_conversation"
           : "preserved",
+        vaultRoot: input.vaultRoot,
       });
     },
   };
@@ -1639,103 +1652,31 @@ function stripHostedAssistantAvailabilityConflictBlock(
   }
 }
 
-function assertHostedAutomationSaveRequest(input: {
-  isGroupNewsletter: boolean;
-  request: Extract<
-    Parameters<HostedAssistantAutomationTool["request"]>[0],
-    { action: "save" }
-  >;
-  route: AutomationRoute;
-}): void {
-  const tags = input.request.tags ?? [];
-  const newsletterTagCount = tags.filter((tag) =>
-    tag === GROUP_NEWSLETTER_EMAIL_DELIVERY_TAG
-    || tag === GROUP_NEWSLETTER_CURRENT_CHAT_DELIVERY_TAG
-  ).length;
-  if (!input.isGroupNewsletter) {
-    if (newsletterTagCount > 0) {
-      throw new VaultCliError(
-        "invalid_option",
-        "Newsletter delivery tags are valid only on the group newsletter automation.",
-      );
-    }
-    return;
-  }
-
-  const channel = normalizeAssistantRouteString(input.route.channel)?.toLowerCase();
-  if (
-    input.route.threadIsDirect !== false
-    || (channel !== "linq" && channel !== "telegram")
-  ) {
-    throw new VaultCliError(
-      "invalid_option",
-      "Group newsletters can be saved only from the current iMessage or Telegram group conversation.",
-    );
-  }
-  if (
-    input.request.slug !== GROUP_HEALTH_NEWSLETTER_AUTOMATION_SLUG
-    || newsletterTagCount !== 1
-    || tags.length !== 3
-    || !tags.includes("assistant")
-    || !tags.includes("scheduled")
-    || input.request.schedule.kind !== "cron"
-    || input.request.continuityPolicy !== "fresh"
-    || !isCanonicalGroupNewsletterAutomationInstructions(input.request.instructions)
-  ) {
-    throw new VaultCliError(
-      "invalid_option",
-      "Use murph.automation action=save_newsletter to configure this group newsletter.",
-    );
-  }
-}
-
-function assertHostedAutomationPatchRequest(input: {
-  existing: NonNullable<Awaited<ReturnType<typeof showAutomation>>>;
-  request: Extract<
-    Parameters<HostedAssistantAutomationTool["request"]>[0],
-    { action: "patch" }
-  >;
-}): void {
-  if (
-    input.request.slug === GROUP_HEALTH_NEWSLETTER_AUTOMATION_SLUG
-    && input.existing.slug !== GROUP_HEALTH_NEWSLETTER_AUTOMATION_SLUG
-  ) {
-    throw new VaultCliError(
-      "invalid_option",
-      "Use murph.automation action=save_newsletter to configure this group newsletter.",
-    );
-  }
-  if (
-    input.request.tags?.some((tag) => hasGroupNewsletterDeliveryTag([tag]))
-    && input.existing.slug !== GROUP_HEALTH_NEWSLETTER_AUTOMATION_SLUG
-  ) {
-    throw new VaultCliError(
-      "invalid_option",
-      "Newsletter delivery tags are valid only on the group newsletter automation.",
-    );
-  }
-  if (input.existing.slug !== GROUP_HEALTH_NEWSLETTER_AUTOMATION_SLUG) {
-    return;
-  }
-  if (
-    input.request.activeUntil !== undefined
-    || input.request.assistantTargetOverride !== undefined
-    || input.request.continuityPolicy !== undefined
-    || input.request.instructions !== undefined
-    || input.request.retargetToCurrentConversation !== undefined
-    || input.request.schedule !== undefined
-    || input.request.slug !== undefined
-    || input.request.summary !== undefined
-    || input.request.supportKind !== undefined
-    || input.request.supportSeriesId !== undefined
-    || input.request.tags !== undefined
-    || input.request.title !== undefined
-  ) {
-    throw new VaultCliError(
-      "invalid_option",
-      "Use murph.automation action=save_newsletter for newsletter configuration or route changes; patch may only change status.",
-    );
-  }
+function buildHostedAutomationTimingVerificationLogEntry(input: {
+  action: "patch" | "save";
+  issues: readonly AssistantAutomationTimingVerificationIssue[];
+  recovered: boolean;
+  stage: "initial" | "readback";
+}): HostedExecutionRedactedLogEntry {
+  return {
+    component: "automation.tool",
+    level: "info",
+    message: input.recovered
+      ? "Hosted automation timing verification recovered after automatic readback."
+      : "Hosted automation timing verification was incomplete.",
+    phase: "timing-verification",
+    redacted: {
+      ...(input.recovered
+        ? {}
+        : { errorCode: "ASSISTANT_AUTOMATION_TIMING_UNVERIFIED" }),
+      automationTimingVerificationAction: input.action,
+      automationTimingVerificationIssues: [...input.issues],
+      automationTimingVerificationRecovered: input.recovered,
+      automationTimingVerificationStage: input.stage,
+      schema: "murph.hosted-automation-timing-verification.v1",
+      type: "automation.timing-verification",
+    },
+  };
 }
 
 function normalizeHostedAutomationSupportTags(input: {
@@ -1782,18 +1723,195 @@ function assertActiveHostedAutomationRoute(input: {
   }
 }
 
-function buildHostedAutomationToolResponse(input: {
-  action: "patch" | "save";
-  result: Awaited<ReturnType<typeof upsertAutomation>>;
-  routeBinding: "current_conversation" | "preserved";
-}): Awaited<ReturnType<HostedAssistantAutomationTool["request"]>> {
+type HostedAutomationToolResponseInput =
+  | {
+      action: "inspect";
+      record: AutomationRecord;
+      routeBinding: "preserved";
+      vaultRoot: string;
+    }
+  | {
+      action: "patch" | "save";
+      redactedLogEntries: HostedExecutionRedactedLogEntry[];
+      result: Awaited<ReturnType<typeof upsertAutomation>>;
+      routeBinding: "current_conversation" | "preserved";
+      vaultRoot: string;
+    };
+
+async function projectHostedAutomationResponseFields(input: {
+  record: AutomationRecord;
+  vaultRoot: string;
+}) {
+  const schedule = input.record.schedule;
+  let effectiveTimeZone =
+    schedule.kind === "cron" || schedule.kind === "dailyLocal"
+      ? schedule.timeZone ?? null
+      : null;
+  let nextOccurrenceAt: string | null = null;
+  const timingVerificationIssues = new Set<
+    AssistantAutomationTimingVerificationIssue
+  >();
+  let defaultTimeZone: string | undefined;
+  if (schedule.kind !== "deviceActivity") {
+    const timeZoneProjection = await resolveAssistantCronDefaultTimeZoneProjection(
+      input.vaultRoot,
+    );
+    defaultTimeZone = timeZoneProjection.timeZone;
+    if (
+      (schedule.kind === "cron" || schedule.kind === "dailyLocal")
+      && effectiveTimeZone === null
+    ) {
+      effectiveTimeZone = timeZoneProjection.timeZone;
+      if (!timeZoneProjection.vaultTimeZoneVerified) {
+        timingVerificationIssues.add("default_timezone_unverified");
+      }
+    }
+  }
+  if (
+    input.record.status !== "archived"
+    && schedule.kind !== "deviceActivity"
+  ) {
+    try {
+      if (defaultTimeZone === undefined) {
+        throw new Error("Automation timing projection requires a default timezone.");
+      }
+      const projection = await getAssistantCronAutomationTimingProjection(
+        input.vaultRoot,
+        input.record.relativePath,
+        defaultTimeZone,
+      );
+      const { job } = projection;
+      nextOccurrenceAt = projection.nextOccurrenceAt;
+      if (!projection.occurrenceVerified) {
+        timingVerificationIssues.add(
+          projection.occurrenceUnverifiedReason ?? "projection_unavailable",
+        );
+      }
+      if (
+        job.updatedAt !== input.record.updatedAt
+        || JSON.stringify(job.schedule) !== JSON.stringify(schedule)
+      ) {
+        timingVerificationIssues.add("record_readback_mismatch");
+      }
+    } catch {
+      timingVerificationIssues.add("projection_unavailable");
+    }
+  }
+  const timingVerificationIssueList = [...timingVerificationIssues];
   return {
+    automationId: input.record.automationId,
+    effectiveTimeZone,
+    lookupId: input.record.slug,
+    nextOccurrenceAt,
+    schedule,
+    status: input.record.status,
+    timingVerificationIssues: timingVerificationIssueList,
+    timingVerified: timingVerificationIssueList.length === 0,
+    updatedAt: input.record.updatedAt,
+  };
+}
+
+async function buildHostedAutomationToolResponse(
+  input: HostedAutomationToolResponseInput,
+): Promise<Awaited<ReturnType<HostedAssistantAutomationTool["request"]>>> {
+  const record = input.action === "inspect" ? input.record : input.result.record;
+  const responseFields = await projectHostedAutomationResponseFields({
+    record,
+    vaultRoot: input.vaultRoot,
+  });
+  if (input.action === "inspect") {
+    return {
+      action: "inspect" as const,
+      ...responseFields,
+      routeBinding: "preserved" as const,
+    };
+  }
+
+  const response: HostedAssistantAutomationWriteResponse = {
     action: input.action,
-    automationId: input.result.record.automationId,
+    ...responseFields,
     created: input.result.created,
-    lookupId: input.result.record.slug,
     routeBinding: input.routeBinding,
-    status: input.result.record.status,
+  };
+  if (response.timingVerified) {
+    return response;
+  }
+  input.redactedLogEntries.push(
+    buildHostedAutomationTimingVerificationLogEntry({
+      action: input.action,
+      issues: response.timingVerificationIssues ?? [],
+      recovered: false,
+      stage: "initial",
+    }),
+  );
+
+  let readbackResponse = response;
+  try {
+    const readbackRecord = await showAutomation({
+      automationId: record.automationId,
+      vaultRoot: input.vaultRoot,
+    });
+    if (!readbackRecord) {
+      readbackResponse = markHostedAutomationTimingUnverified(
+        response,
+        "record_readback_mismatch",
+      );
+    } else {
+      const readbackFields = await projectHostedAutomationResponseFields({
+        record: readbackRecord,
+        vaultRoot: input.vaultRoot,
+      });
+      const projectedReadback: HostedAssistantAutomationWriteResponse = {
+        action: input.action,
+        ...readbackFields,
+        created: input.result.created,
+        routeBinding: input.routeBinding,
+      };
+      const recordChanged =
+        readbackRecord.updatedAt !== record.updatedAt
+        || JSON.stringify(readbackRecord.schedule)
+          !== JSON.stringify(record.schedule);
+      readbackResponse = recordChanged
+        ? markHostedAutomationTimingUnverified(
+            projectedReadback,
+            "record_readback_mismatch",
+          )
+        : projectedReadback;
+    }
+  } catch {
+    readbackResponse = markHostedAutomationTimingUnverified(
+      response,
+      "projection_unavailable",
+    );
+  }
+  input.redactedLogEntries.push(
+    buildHostedAutomationTimingVerificationLogEntry({
+      action: input.action,
+      issues: readbackResponse.timingVerificationIssues ?? [],
+      recovered: readbackResponse.timingVerified,
+      stage: "readback",
+    }),
+  );
+  return readbackResponse;
+}
+
+type HostedAssistantAutomationWriteResponse = Extract<
+  Awaited<ReturnType<HostedAssistantAutomationTool["request"]>>,
+  { action: "patch" | "save" }
+>;
+
+function markHostedAutomationTimingUnverified(
+  response: HostedAssistantAutomationWriteResponse,
+  issue: AssistantAutomationTimingVerificationIssue,
+): HostedAssistantAutomationWriteResponse {
+  return {
+    ...response,
+    nextOccurrenceAt: null,
+    timingVerificationIssues: [...new Set([
+      ...(response.timingVerificationIssues ?? []),
+      issue,
+    ])],
+    timingVerified: false,
   };
 }
 
@@ -1816,10 +1934,30 @@ export async function runHostedWorkspaceAssistantPhase(
     triggerKind: "runtime_timer",
     userId: input.request.userId,
   });
+  const recordDeferredUsage = (
+    record: AssistantUsageRecord,
+    providerRequestAcceptedInputIds?: readonly string[],
+  ): Promise<void> => {
+    input.recordDeferredUsage?.(
+      record,
+      providerRequestAcceptedInputIds,
+    );
+    return Promise.resolve();
+  };
+  const usageRecorder =
+    input.runtime.platform.usageRecordPort && input.recordDeferredUsage
+      ? { recordUsage: recordDeferredUsage }
+      : null;
   if (input.foregroundCausalOnly === true) {
     try {
       const systemMailboxMaintenance = await runSystemMailboxMaintenancePhase({
-        executionContext: { hosted: null },
+        executionContext: {
+          hosted: {
+            memberId: input.request.userId,
+            ...(usageRecorder ? { usageRecorder } : {}),
+            userEnvKeys: Object.keys(input.runtime.userEnv),
+          },
+        },
         hasFreshConversationInput: false,
         input,
         pendingAssistantInputWakeAt: null,
@@ -1859,16 +1997,6 @@ export async function runHostedWorkspaceAssistantPhase(
     string,
     HostedRuntimeProductFeedbackRecord
   >();
-  const recordDeferredUsage = (
-    record: AssistantUsageRecord,
-    providerRequestAcceptedInputIds?: readonly string[],
-  ): Promise<void> => {
-    input.recordDeferredUsage?.(
-      record,
-      providerRequestAcceptedInputIds,
-    );
-    return Promise.resolve();
-  };
   if (shouldWriteHostedDeviceConnectContextLog({ deviceConnectProviders, input })) {
     void writeHostedDeviceConnectRuntimeLog({
       deviceConnectProviders,
@@ -1932,11 +2060,6 @@ export async function runHostedWorkspaceAssistantPhase(
           ? {
               personalizationTool:
                 input.runtime.platform.assistantPersonalizationToolPort,
-            }
-          : {}),
-        ...(input.runtime.platform.newsletterToolPort
-          ? {
-              newsletterTool: input.runtime.platform.newsletterToolPort,
             }
           : {}),
         ...(input.runtime.platform.planUsageToolPort
@@ -2052,7 +2175,12 @@ export async function runHostedWorkspaceAssistantPhase(
             target,
             targetKind,
           }, { signal });
-          if (typeof authority?.threadIsDirect !== "boolean") {
+          const resolvedRoute = authority?.resolvedRoute;
+          if (
+            !resolvedRoute
+            || resolvedRoute.targetKind !== "thread"
+            || typeof resolvedRoute.threadIsDirect !== "boolean"
+          ) {
             throw new VaultCliError(
               "ASSISTANT_LINQ_AUDIENCE_AUTHORITY_UNAVAILABLE",
               "Hosted Linq delivery requires direct or group authority before provider work.",
@@ -2060,7 +2188,7 @@ export async function runHostedWorkspaceAssistantPhase(
             );
           }
           const conversationThreadId =
-            authority.targetOverride?.conversationThreadId?.trim() ?? "";
+            resolvedRoute.conversationThreadId?.trim() ?? "";
           return {
             ...(conversationThreadId ? { conversationThreadId } : {}),
             ...(authority.deliveryBlockCode
@@ -2069,17 +2197,11 @@ export async function runHostedWorkspaceAssistantPhase(
             ...(authority.deliveryPosture
               ? { deliveryPosture: authority.deliveryPosture }
               : {}),
-            target: authority.targetOverride?.target ?? target,
-            threadIsDirect: authority.threadIsDirect,
+            target: resolvedRoute.target,
+            threadIsDirect: resolvedRoute.threadIsDirect,
           };
         },
-        ...(input.runtime.platform.usageRecordPort && input.recordDeferredUsage
-          ? {
-              usageRecorder: {
-                recordUsage: recordDeferredUsage,
-              },
-            }
-          : {}),
+        ...(usageRecorder ? { usageRecorder } : {}),
         userEnvKeys: Object.keys(input.runtime.userEnv),
       },
     },
@@ -2089,7 +2211,11 @@ export async function runHostedWorkspaceAssistantPhase(
     },
   );
   const executionTargetHydrateMs = elapsedSince(executionTargetHydrateStartedAt);
-  const automationOperationScope = createHostedAssistantAutomationOperationScope(input);
+  const assistantAutomationRedactedLogEntries: HostedExecutionRedactedLogEntry[] = [];
+  const automationOperationScope = createHostedAssistantAutomationOperationScope(
+    input,
+    assistantAutomationRedactedLogEntries,
+  );
   try {
     const hasFreshConversationInput = hasFreshHostedConversationInput(input);
     const systemMailboxMaintenanceStartedAt = Date.now();
@@ -2215,7 +2341,6 @@ export async function runHostedWorkspaceAssistantPhase(
     }
 
     const freshAssistantInputIds = readHostedInitialAssistantInputIds(input);
-    const assistantAutomationRedactedLogEntries: HostedExecutionRedactedLogEntry[] = [];
     const shouldReadDeviceSyncStatusPromptForBackgroundWork = async (options: {
       managedAutomationsResult: HostedWorkspaceRunnerAssistantPhaseResult | null;
       systemMailboxMaintenance: Awaited<ReturnType<typeof runSystemMailboxMaintenancePhase>>;
@@ -3844,14 +3969,15 @@ interface DeferredHostedSystemMailboxPostCheckpointRecord {
 function shouldDeferHostedSystemMailboxRecordAfterDurableCheckpoint(
   input: HostedSystemMailboxPendingItem,
 ): boolean {
-  return input.postCheckpointRecord?.kind === "codex-auth.updated";
+  return input.postCheckpointRecord?.kind === "codex-auth.updated"
+    || input.postCheckpointRecord?.kind === "vault-share.projection";
 }
 
 function deferHostedDeviceSyncDirtyPostCheckpointRecord(input: Parameters<
   typeof recordHostedDeviceSyncDirtyPostCheckpointRecord
 >[0]): DeferredHostedDeviceSyncDirtyPostCheckpointRecord {
-  return {
-    afterDurableCheckpoint: async () => {
+  const afterDurableCheckpoint: HostedWorkspaceDurableCheckpointEffect = Object.assign(
+    async () => {
       try {
         const result = await recordHostedDeviceSyncDirtyPostCheckpointRecord(input);
         return result.nextWakeAt
@@ -3886,6 +4012,16 @@ function deferHostedDeviceSyncDirtyPostCheckpointRecord(input: Parameters<
         };
       }
     },
+    {
+      vaultShareProjectionFailureWake: {
+        nextWakeAt: resolveHostedDeviceSyncDirtyAckFailureWakeAt(input.record),
+        nextWakeReason: HOSTED_DEVICE_SYNC_RECONCILE_WAKE_REASON,
+        requiresFollowUpCheckpoint: true,
+      },
+    },
+  );
+  return {
+    afterDurableCheckpoint,
     nextWakeAt: input.record.nextWakeAt ?? null,
     redactedStatus: {
       hostedDeviceSyncDirtyAckDeferred: true,
@@ -3901,9 +4037,16 @@ function deferHostedSystemMailboxPostCheckpointRecord(input: Parameters<
   followUpWakeAt: string;
 }): DeferredHostedSystemMailboxPostCheckpointRecord {
   const { followUpWakeAt, ...recordInput } = input;
-  return {
-    afterDurableCheckpoint: async () => {
-      const result = await recordHostedSystemMailboxItemAfterCheckpoint(recordInput);
+  const requiresVaultShareProjectionResult =
+    recordInput.item.postCheckpointRecord?.kind === "vault-share.projection";
+  const afterDurableCheckpoint: HostedWorkspaceDurableCheckpointEffect = Object.assign(
+    async (context?: HostedWorkspaceDurableCheckpointEffectContext) => {
+      const result = await recordHostedSystemMailboxItemAfterCheckpoint({
+        ...recordInput,
+        ...(requiresVaultShareProjectionResult && context?.vaultShareProjectionResult
+          ? { vaultShareProjectionResult: context.vaultShareProjectionResult }
+          : {}),
+      });
       if (result.failed > 0) {
         return {
           nextWakeAt: result.nextWakeAt,
@@ -3917,6 +4060,19 @@ function deferHostedSystemMailboxPostCheckpointRecord(input: Parameters<
         requiresFollowUpCheckpoint: true,
       };
     },
+    requiresVaultShareProjectionResult
+      ? {
+          requiresVaultShareProjectionResult: true,
+          vaultShareProjectionFailureWake: {
+            nextWakeAt: followUpWakeAt,
+            nextWakeReason: "assistant",
+            requiresFollowUpCheckpoint: true,
+          },
+        }
+      : {},
+  );
+  return {
+    afterDurableCheckpoint,
     redactedStatus: {
       hostedSystemMailboxRecordDeferred: true,
     },
@@ -4384,12 +4540,6 @@ async function runIdleDeviceSyncWakeLaneBestEffort(input: {
   phaseInput: HostedWorkspaceRuntimeAssistantPhaseInput;
   wake: ReturnType<typeof buildHostedExecutionRuntimeTimerWake>;
 }): Promise<HostedDeviceSyncWakeMetrics> {
-  const cancellation = createHostedBackgroundMaintenanceCancellation({
-    signal: input.phaseInput.signal ?? null,
-    shouldYield: input.phaseInput.shouldYieldBackgroundMaintenance ?? null,
-    timeoutMs: input.phaseInput.runtime.commitTimeoutMs,
-  });
-
   try {
     const {
       runHostedDeviceSyncWakeLane,
@@ -4402,7 +4552,7 @@ async function runIdleDeviceSyncWakeLaneBestEffort(input: {
       ...(input.phaseInput.shouldYieldBackgroundMaintenance
         ? { shouldYieldDeviceSync: input.phaseInput.shouldYieldBackgroundMaintenance }
         : {}),
-      signal: cancellation.signal,
+      signal: input.phaseInput.signal ?? null,
       skipDirtyPendingFetch: input.phaseInput.suppressDirtyPendingFetch ?? false,
       stagedDirtyAcks: input.phaseInput.stagedDirtyAcks ?? null,
       timeoutMs: input.phaseInput.runtime.commitTimeoutMs,
@@ -4427,8 +4577,6 @@ async function runIdleDeviceSyncWakeLaneBestEffort(input: {
       parserProcessed: 0,
       postCheckpointRecord: null,
     };
-  } finally {
-    cancellation.dispose();
   }
 }
 
@@ -5403,7 +5551,10 @@ async function runSystemMailboxMaintenancePhase(input: {
     });
   }
   const systemMailboxWake = systemMailboxPreparation.status === "retryable_failed"
-    ? createHostedRuntimeWakeCandidate(systemMailboxPreparation.nextWakeAt, "assistant")
+    ? createHostedRuntimeWakeCandidate(
+        systemMailboxPreparation.nextWakeAt,
+        systemMailboxPreparation.nextWakeReason ?? "assistant",
+      )
     : phaseInput.foregroundCausalOnly === true
       ? null
       : await resolveHostedSystemMailboxNextWakeCandidate({
@@ -5527,24 +5678,30 @@ async function runSystemMailboxMaintenancePhase(input: {
   }
   await writeHostedSystemMailboxRuntimeLog({
     assistantAskCompletionFirstAttemptDelayed,
+    attemptCount: systemMailboxPreparation.status === "retryable_failed"
+      ? systemMailboxPreparation.attemptCount
+      : systemMailboxPreparation.item.attemptCount,
+    errorCode: systemMailboxPreparation.status === "retryable_failed"
+      ? systemMailboxPreparation.errorCode
+      : null,
+    errorMessage: systemMailboxPreparation.status === "retryable_failed"
+      ? systemMailboxPreparation.errorMessage
+      : null,
     input: phaseInput,
+    legacyUsageReferralAuthorityClassification:
+      systemMailboxPreparation.status === "retryable_failed"
+        ? systemMailboxPreparation.legacyUsageReferralAuthorityClassification
+        : null,
     nextWakeAt,
     recorded: null,
     recordFailed: null,
+    routeAction: systemMailboxPreparation.status === "retryable_failed"
+      ? systemMailboxPreparation.routeAction
+      : systemMailboxPreparation.item.routeAction,
     status: systemMailboxPreparation.status,
-    ...("item" in systemMailboxPreparation
-      ? {
-          attemptCount: systemMailboxPreparation.item.attemptCount,
-          routeAction: systemMailboxPreparation.item.routeAction,
-          wakeKind: systemMailboxPreparation.item.wake.kind,
-        }
-      : {
-          attemptCount: null,
-          errorCode: systemMailboxPreparation.errorCode,
-          errorMessage: systemMailboxPreparation.errorMessage,
-          routeAction: null,
-          wakeKind: null,
-        }),
+    wakeKind: systemMailboxPreparation.status === "retryable_failed"
+      ? systemMailboxPreparation.wakeKind
+      : systemMailboxPreparation.item.wake.kind,
   });
 
   return {
@@ -5809,6 +5966,7 @@ async function runSystemMailboxPostCheckpointPhase(input: {
     await writeHostedSystemMailboxRuntimeLog({
       attemptCount: input.systemMailboxPreparation.item.attemptCount,
       input: input.input,
+      legacyUsageReferralAuthorityClassification: null,
       nextWakeAt: statusNextWakeAt,
       recorded: statusCallback.recorded,
       recordFailed: statusCallback.failed,
@@ -6497,6 +6655,7 @@ async function drainHostedPostCheckpointDelivery(input: {
   const postNextWakeAt = postNextWake.at;
   if (input.assistantDeliveryEffects.length > 0) {
     await writeHostedOutboxDeliveryRuntimeLog({
+      deliveryEffects: input.assistantDeliveryEffects,
       input: input.input,
       outcomes,
       postNextWakeAt,
@@ -6871,6 +7030,9 @@ function renderHostedTerminalOutboxFailureSystemNote(input: {
     "unknown",
   );
   const mediaDescription = renderHostedFailureNoteMedia(input.effect);
+  const hasImage = input.effect?.payload.media.some((item) =>
+    item.kind === "image" || item.kind === "vault_image"
+  ) === true;
   const hasVaultFile = input.effect?.payload.media.some((item) =>
     item.kind === "vault_file"
   ) === true;
@@ -6886,6 +7048,11 @@ function renderHostedTerminalOutboxFailureSystemNote(input: {
       "Any consumed vault-file approval must be re-requested before retrying.",
     );
   }
+  if (hasImage) {
+    lines.push(
+      "Image delivery remains outstanding. A text-only substitute is not equivalent; do not offer or send one as recovery. Any recovery attempt must attach images and stay within the current response-media limit.",
+    );
+  }
   lines.push("Do not claim the failed message or file was sent.");
   return lines.join(" ");
 }
@@ -6898,15 +7065,20 @@ function renderHostedFailureNoteMedia(
     return "none";
   }
 
-  return media.map((item) => {
-    if (item.kind === "vault_file") {
-      return `vault file "${normalizeHostedFailureNoteFilename(item.filename)}"`;
-    }
-    if (item.kind === "voice_memo") {
-      return "voice memo";
-    }
-    return "image";
-  }).join(", ");
+  const imageCount = media.filter((item) =>
+    item.kind === "image" || item.kind === "vault_image"
+  ).length;
+  const voiceMemoCount = media.filter((item) => item.kind === "voice_memo").length;
+  const descriptions = [
+    imageCount > 0 ? `${imageCount} ${imageCount === 1 ? "image" : "images"}` : null,
+    voiceMemoCount > 0
+      ? `${voiceMemoCount} ${voiceMemoCount === 1 ? "voice memo" : "voice memos"}`
+      : null,
+    ...media
+      .filter((item) => item.kind === "vault_file")
+      .map((item) => `vault file "${normalizeHostedFailureNoteFilename(item.filename)}"`),
+  ];
+  return descriptions.filter((value): value is string => value !== null).join(", ");
 }
 
 function normalizeHostedFailureNoteFilename(filename: string): string {
@@ -7474,6 +7646,7 @@ async function writeHostedSystemMailboxRuntimeLog(input: {
   errorCode?: string | null;
   errorMessage?: string | null;
   input: HostedWorkspaceRuntimeAssistantPhaseInput;
+  legacyUsageReferralAuthorityClassification: string | null;
   nextWakeAt: string | null;
   recorded: number | null;
   recordFailed: number | null;
@@ -7510,6 +7683,8 @@ async function writeHostedSystemMailboxRuntimeLog(input: {
         assistantAskCompletionFirstAttemptDelayed:
           input.assistantAskCompletionFirstAttemptDelayed ?? false,
         errorCode: input.errorCode ? errorCode : null,
+        legacyUsageReferralAuthorityClassification:
+          input.legacyUsageReferralAuthorityClassification,
         nextWakeAtPresent: input.nextWakeAt !== null,
         recordFailed: input.recordFailed,
         recorded: input.recorded,
@@ -7983,6 +8158,7 @@ function isHostedRuntimeRedactedLogStringValue(value: string): boolean {
 }
 
 async function writeHostedOutboxDeliveryRuntimeLog(input: {
+  deliveryEffects: HostedAssistantDeliveryEffects;
   input: HostedWorkspaceRuntimeAssistantPhaseInput;
   outcomes: HostedAssistantDeliveryOutcome[];
   postNextWakeAt: string | null;
@@ -8016,6 +8192,7 @@ async function writeHostedOutboxDeliveryRuntimeLog(input: {
         deliveryErrorCodeSummary: summarizeHostedOutboxDeliveryErrorCodes(
           input.outcomes.map((outcome) => outcome.deliveryErrorCode),
         ),
+        ...buildHostedOutboxDeliveryPayloadLogFields(input.deliveryEffects),
         ...buildHostedOutboxDeliveryErrorLogFields(input.outcomes),
         failed,
         journalStatusSummary: summarizeHostedOutboxDeliveryCodes(
@@ -8037,6 +8214,40 @@ async function writeHostedOutboxDeliveryRuntimeLog(input: {
     },
     platform: input.input.platform,
   });
+}
+
+function buildHostedOutboxDeliveryPayloadLogFields(
+  effects: HostedAssistantDeliveryEffects,
+): HostedRuntimeRedactedObject {
+  const media = effects.flatMap((effect) => effect.payload.media);
+  const imageMedia = media.filter((item) =>
+    item.kind === "image" || item.kind === "vault_image"
+  );
+  const mediaCounts = effects.map((effect) => effect.payload.media.length);
+  const messageLengths = effects.map((effect) => effect.payload.message.length);
+  return {
+    imageBearingIntentCount: effects.filter((effect) => effect.payload.media.some((item) =>
+      item.kind === "image" || item.kind === "vault_image"
+    )).length,
+    imageMediaItemCount: imageMedia.length,
+    maxMediaItemsPerIntent: Math.max(0, ...mediaCounts),
+    maxMessageLength: Math.max(0, ...messageLengths),
+    mediaItemCount: media.length,
+    mediaKindSummary: summarizeHostedOutboxDeliveryCodes(
+      media.map((item) => item.kind),
+    ),
+    privateImageMediaItemCount:
+      imageMedia.filter((item) => item.kind === "vault_image").length,
+    publicImageMediaItemCount:
+      imageMedia.filter((item) => item.kind === "image").length,
+    totalImageAltTextLength: imageMedia.reduce(
+      (total, item) => total + (item.alt?.length ?? 0),
+      0,
+    ),
+    totalMessageLength: messageLengths.reduce((total, length) => total + length, 0),
+    vaultFileMediaItemCount: media.filter((item) => item.kind === "vault_file").length,
+    voiceMemoMediaItemCount: media.filter((item) => item.kind === "voice_memo").length,
+  };
 }
 
 function summarizeHostedOutboxDeliveryCodes(values: readonly (string | null)[]): string {
@@ -8127,23 +8338,57 @@ function buildHostedOutboxDeliveryErrorDetailSummary(
     sanitizedDetails,
     ["errorCode", "errorCodeDetail", "providerErrorCode"],
   ));
-  appendHostedOutboxDeliveryErrorDetail(output, "Description", readFirstHostedOutboxDeliveryErrorDetail(
-    sanitizedDetails,
-    ["description", "errorDetail", "safeErrorMessage"],
-  ));
   appendHostedOutboxDeliveryErrorDetail(output, "Operation", readFirstHostedOutboxDeliveryErrorDetail(
     sanitizedDetails,
     ["operation", "action"],
   ));
   appendHostedOutboxDeliveryErrorDetail(output, "FailureStage", sanitizedDetails.failureStage);
   appendHostedOutboxDeliveryErrorDetail(output, "Method", sanitizedDetails.method);
-  appendHostedOutboxDeliveryErrorDetail(output, "Retryable", sanitizedDetails.retryable);
-  appendHostedOutboxDeliveryErrorDetail(output, "TimedOut", sanitizedDetails.timedOut);
+  appendHostedOutboxDeliveryErrorDetail(
+    output,
+    "RequestSummary",
+    buildHostedOutboxDeliveryDiagnosticSummary(sanitizedDetails, [
+      ["messageLength", "requestMessageLength"],
+      ["partCount", "requestMessagePartCount"],
+      ["textPartCount", "requestTextPartCount"],
+      ["mediaPartCount", "requestMediaPartCount"],
+      ["publicUrlMediaPartCount", "requestPublicUrlMediaPartCount"],
+      ["attachmentMediaPartCount", "requestAttachmentMediaPartCount"],
+      ["bodyShape", "requestBodyShape"],
+    ]),
+  );
+  appendHostedOutboxDeliveryErrorDetail(
+    output,
+    "ResponseSummary",
+    buildHostedOutboxDeliveryDiagnosticSummary(sanitizedDetails, [
+      ["kind", "responseBodyKind"],
+      ["textLength", "responseBodyTextLength"],
+      ["keyCount", "responseBodyKeyCount"],
+      ["keySummary", "responseBodyKeySummary"],
+      ["stringFieldCount", "responseBodyStringFieldCount"],
+      ["stringFieldSummary", "responseBodyStringFieldSummary"],
+    ]),
+  );
+  appendHostedOutboxDeliveryErrorDetail(
+    output,
+    "ProviderRequestId",
+    sanitizedDetails.providerRequestId,
+  );
+  appendHostedOutboxDeliveryErrorDetail(
+    output,
+    "ResponseSignature",
+    sanitizedDetails.responseBodySha256,
+  );
   appendHostedOutboxDeliveryErrorDetail(
     output,
     "TransportErrorName",
     sanitizedDetails.transportErrorName,
   );
+  appendHostedOutboxDeliveryErrorDetail(output, "TimedOut", sanitizedDetails.timedOut);
+  appendHostedOutboxDeliveryErrorDetail(output, "Description", readFirstHostedOutboxDeliveryErrorDetail(
+    sanitizedDetails,
+    ["description", "errorDetail", "safeErrorMessage"],
+  ));
   appendHostedOutboxDeliveryErrorDetail(output, "ErrorName", readFirstHostedOutboxDeliveryErrorDetail(
     sanitizedDetails,
     ["name", "errorName"],
@@ -8156,8 +8401,29 @@ function buildHostedOutboxDeliveryErrorDetailSummary(
     sanitizedDetails,
     ["errorCause", "cause"],
   ));
-  output.deliveryErrorDetailFieldCount = Object.keys(sanitizedDetails).length;
+  appendHostedOutboxDeliveryErrorDetail(output, "Retryable", sanitizedDetails.retryable);
+  if (Object.keys(output).length < 9) {
+    output.deliveryErrorDetailFieldCount = Object.keys(sanitizedDetails).length;
+  }
   return output;
+}
+
+function buildHostedOutboxDeliveryDiagnosticSummary(
+  details: Record<string, HostedRuntimeRedactedScalar>,
+  fields: readonly (readonly [label: string, key: string])[],
+): string | undefined {
+  const summary: Record<string, HostedRuntimeRedactedScalar> = {};
+  for (const [label, key] of fields) {
+    const value = details[key];
+    if (value === undefined) {
+      continue;
+    }
+    const normalized = normalizeHostedOutboxDeliveryErrorDetail(value);
+    if (normalized !== null) {
+      summary[label] = normalized;
+    }
+  }
+  return Object.keys(summary).length > 0 ? JSON.stringify(summary) : undefined;
 }
 
 function normalizeHostedOutboxDeliveryErrorDetails(
@@ -8194,7 +8460,9 @@ function appendHostedOutboxDeliveryErrorDetail(
   suffix: string,
   value: HostedRuntimeRedactedScalar | undefined,
 ): void {
-  if (value === undefined) {
+  // A delivery summary always has seven base fields. Keep details to nine so
+  // every summary satisfies the hosted runtime parser's 16-key object bound.
+  if (value === undefined || Object.keys(output).length >= 9) {
     return;
   }
 
@@ -8412,7 +8680,8 @@ function resolveHostedWorkspaceDeviceTool(input: {
       if (request.action === "list_accounts") {
         const provider = normalizeAssistantRouteString(request.provider);
         const sourceProvider = normalizeAssistantRouteString(request.sourceProvider);
-        const snapshot = await deviceSyncPort.fetchSnapshot({
+        const snapshot = await fetchCompleteHostedDeviceSyncRuntimeSnapshot({
+          deviceSyncPort,
           includeCredentialMaterial: false,
           ...(provider ? { provider } : {}),
           signal: context?.signal ?? null,

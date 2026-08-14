@@ -11,11 +11,18 @@ import type {
 } from "@murphai/hosted-execution/plan-usage";
 
 import {
+  GroupFundingSignInRequired,
+} from "@/src/components/hosted-groups/group-funding-sign-in-button";
+import { GroupFundingSupporters } from "@/src/components/hosted-groups/group-funding-supporters";
+import {
   GroupUsageFundingActions,
   GroupUsageFundingShell,
 } from "@/src/components/hosted-groups/group-usage-funding-shell";
 import { GroupSponsorshipDialog } from "@/src/components/hosted-groups/group-sponsorship-dialog";
-import { GroupSponsorshipManagementCard } from "@/src/components/hosted-groups/group-sponsorship-management-card";
+import {
+  GroupSponsorshipCanceledReceipt,
+  GroupSponsorshipManagementCard,
+} from "@/src/components/hosted-groups/group-sponsorship-management-card";
 import { HostedAiUsageActivity } from "@/src/components/settings/hosted-ai-usage-activity";
 import { HostedBillingSettings } from "@/src/components/settings/hosted-billing-settings";
 import { Button } from "@/src/components/ui/button";
@@ -57,6 +64,17 @@ const DESIGN_GROUP_MONTHLY_CAPS = [
   { amountLabel: "$20", monthlyCapMinor: 2_000 },
 ] as const;
 
+const DESIGN_GROUP_FUNDING_SUPPORTERS = {
+  monthlySponsor: {
+    id: "hucp_design_monthly_sponsor",
+    name: "The Group Historian",
+  },
+  oneTimeContributions: [
+    { id: "hucp_design_one_time_1", name: "Night Shift" },
+    { id: "hucp_design_one_time_2", name: "Anonymous" },
+  ],
+};
+
 const DESIGN_TOP_UP_CONTACT_OPTIONS: MurphContactOption[] = [
   {
     href: buildMurphSmsHref({
@@ -70,7 +88,7 @@ const DESIGN_TOP_UP_CONTACT_OPTIONS: MurphContactOption[] = [
 
 const DESIGN_USAGE_MISSION_CONTACT_OPTION: MurphContactOption = {
   href: buildMurphSmsHref({
-    body: "Hey Murph, what usage missions can I choose from?",
+    body: "Hey Murph, what referral options can I choose from?",
     murphPhoneNumber: "+15555550100",
   }),
   kind: "text",
@@ -103,7 +121,7 @@ const DESIGN_AI_USAGE_ACTIVITY: HostedAiUsageActivitySnapshot = {
       status: "in_progress",
       statusLabel: "In progress",
       timingLabel: "Ends Aug 3 at 12:00 PM UTC",
-      title: "Start an active group",
+      title: "Start a group conversation",
     },
     {
       destinationLabel: "the group",
@@ -115,7 +133,7 @@ const DESIGN_AI_USAGE_ACTIVITY: HostedAiUsageActivitySnapshot = {
       status: "checking_final_activity",
       statusLabel: "Checking final activity",
       timingLabel: "Closed Jul 27 at 12:00 PM UTC",
-      title: "Start an active group",
+      title: "Start a group conversation",
     },
     {
       destinationLabel: "the group",
@@ -127,13 +145,13 @@ const DESIGN_AI_USAGE_ACTIVITY: HostedAiUsageActivitySnapshot = {
       status: "reward_pending",
       statusLabel: "Reward pending",
       timingLabel: "Qualified Jul 25",
-      title: "Start an active group",
+      title: "Start a group conversation",
     },
     {
       destinationLabel: "your Murph",
       id: "design-mission-new-person",
       requirementsLabel:
-        "Bring one new person into a fresh Murph group. Murph handles onboarding, and the mission completes once they join the conversation with their own Murph.",
+        "Bring one new person into a fresh Murph group. Murph handles setup, and the reward is earned once they join the conversation with their own Murph.",
       rewardLabel: "About 10 more days of Murph usage",
       selectedLabel: "Jul 10, 2026",
       status: "completed",
@@ -158,7 +176,7 @@ const DESIGN_AI_USAGE_WAITING_ACTIVITY: HostedAiUsageActivitySnapshot = {
       status: "waiting_for_group",
       statusLabel: "Waiting for a new group",
       timingLabel: "Start by Aug 5 at 12:00 PM UTC",
-      title: "Start an active group",
+      title: "Start a group conversation",
     },
   ],
   missionsEnabled: true,
@@ -184,7 +202,7 @@ const DESIGN_AI_USAGE_DISABLED_HISTORY: HostedAiUsageActivitySnapshot = {
       destinationLabel: "your Murph",
       id: "design-mission-disabled-history",
       requirementsLabel:
-        "Bring one new person into a fresh Murph group. Murph handles onboarding, and the mission completes once they join the conversation with their own Murph.",
+        "Bring one new person into a fresh Murph group. Murph handles setup, and the reward is earned once they join the conversation with their own Murph.",
       rewardLabel: "About 10 more days of Murph usage",
       selectedLabel: "Jul 10, 2026",
       status: "completed",
@@ -217,15 +235,31 @@ const DESIGN_PERSONAL_USAGE_STATUS: HostedPlanUsageAvailableStatus = {
   usedPercent: 35,
 };
 
-const DESIGN_TRIAL_CONVERSION_USAGE_STATUS: HostedPlanUsageStatus = {
+const DESIGN_UNAVAILABLE_USAGE_STATUS: HostedPlanUsageStatus = {
   generatedAt: "2026-07-22T12:00:00.000Z",
-  reason: "trial_conversion_pending",
+  reason: "group_not_supported",
+  recommendedAction: null,
+  status: "unavailable",
+};
+
+const DESIGN_STARTER_USAGE_STATUS: HostedPlanUsageAvailableStatus = {
+  accessKind: "starter",
+  forecast: null,
+  generatedAt: "2026-08-07T20:00:00.000Z",
+  periodEnd: "2099-12-31T23:59:59.999Z",
+  periodKind: "lifetime",
+  periodStart: "2026-08-07T20:00:00.000Z",
+  planCode: "launch_monthly",
+  planName: "Starter",
   recommendedAction: {
-    kind: "start_pulse",
-    label: "Start Pulse",
+    kind: "change_plan",
+    label: "Choose Pulse",
+    targetPlanCode: "launch_monthly",
     url: "/settings#subscription",
   },
-  status: "unavailable",
+  remainingPercent: 0,
+  status: "exhausted",
+  usedPercent: 100,
 };
 
 const DESIGN_EXHAUSTED_USAGE_STATUS: HostedPlanUsageAvailableStatus = {
@@ -301,6 +335,7 @@ function GroupUsageFundingStudy() {
           />
         )}
       />
+      <GroupFundingSupporters supporters={DESIGN_GROUP_FUNDING_SUPPORTERS} />
     </div>
   );
   const oneTimeRecovery = () => (
@@ -467,6 +502,39 @@ function GroupUsageFundingStudy() {
         </DesignSponsorshipState>
 
         <DesignSponsorshipState
+          label="Cancellation-only recovery"
+          state="monthly-cancel-only"
+        >
+          <GroupSponsorshipManagementCard
+            cancelOnly
+            endpoint="/api/groups/fund/design/sponsorship"
+            management={{
+              authorizationId: "hgsa_design_cancel_only",
+              chargedThisPeriodMinor: 500,
+              monthlyCapMinor: 1_000,
+              pendingMonthlyCapMinor: null,
+              pendingThisPeriodMinor: 0,
+              periodEnd: "2026-08-30T16:00:00.000Z",
+              status: "active",
+            }}
+          />
+        </DesignSponsorshipState>
+
+        <DesignSponsorshipState
+          label="Signed-out sponsorship management handoff"
+          state="monthly-management-sign-in"
+        >
+          <GroupFundingSignInRequired initiallyOpen={false} />
+        </DesignSponsorshipState>
+
+        <DesignSponsorshipState
+          label="Cancellation completion receipt"
+          state="monthly-canceled"
+        >
+          <GroupSponsorshipCanceledReceipt />
+        </DesignSponsorshipState>
+
+        <DesignSponsorshipState
           label="Sponsored-chat one-time purchase recovery"
           state="sponsored-one-time-recovery"
         >
@@ -476,6 +544,18 @@ function GroupUsageFundingStudy() {
           />
         </DesignSponsorshipState>
       </div>
+    </div>
+  );
+}
+
+export function GroupFundingSupportersStudy() {
+  return (
+    <div
+      className="w-full max-w-lg rounded-3xl border border-border bg-background px-6 pb-8"
+      data-design-component="group-funding-supporters"
+      inert
+    >
+      <GroupFundingSupporters supporters={DESIGN_GROUP_FUNDING_SUPPORTERS} />
     </div>
   );
 }
@@ -604,11 +684,11 @@ function PersonalUsageCreditOwnerStudy() {
         </div>
       </div>
       <PersonalUsageCreditState
-        billingState="pulse-trial"
-        canStartPaidPulse
-        label="Pulse trial ended"
-        state="trial-conversion"
-        usageStatus={DESIGN_TRIAL_CONVERSION_USAGE_STATUS}
+        billingState="starter"
+        canStartDirectPlan
+        label="Starter usage exhausted"
+        state="starter-exhausted"
+        usageStatus={DESIGN_STARTER_USAGE_STATUS}
       />
       <div
         className="flex flex-col gap-3"
@@ -625,24 +705,25 @@ function PersonalUsageCreditOwnerStudy() {
           Preview fulfilled top-up
         </Button>
         {fulfilledPreviewKey > 0 ? (
-          <HostedBillingSettings
-            key={fulfilledPreviewKey}
-            authenticated
-            billingStatus="active"
-            currentBillingPhase="paid"
-            currentBillingPlanCode="launch_monthly"
-            payerMemberId={DESIGN_PAYER_MEMBER_ID}
-            usageStatus={DESIGN_FULFILLED_USAGE_STATUS}
-            usageTopUpActivePurchase={{
-              offerCode: "usage_5_usd",
-              purchaseId: "hucp_design_overall_usage_added",
-              retryAllowed: false,
-              status: "fulfilled",
-            }}
-            usageTopUpContactOptions={DESIGN_TOP_UP_CONTACT_OPTIONS}
-            usageTopUpInitialOpen
-            usageTopUpOffers={[]}
-          />
+          <div key={fulfilledPreviewKey}>
+            <HostedBillingSettings
+              authenticated
+              billingStatus="active"
+              currentBillingPhase="paid"
+              currentBillingPlanCode="launch_monthly"
+              payerMemberId={DESIGN_PAYER_MEMBER_ID}
+              usageStatus={DESIGN_FULFILLED_USAGE_STATUS}
+              usageTopUpActivePurchase={{
+                offerCode: "usage_5_usd",
+                purchaseId: "hucp_design_overall_usage_added",
+                retryAllowed: false,
+                status: "fulfilled",
+              }}
+              usageTopUpContactOptions={DESIGN_TOP_UP_CONTACT_OPTIONS}
+              usageTopUpInitialOpen
+              usageTopUpOffers={[]}
+            />
+          </div>
         ) : null}
       </div>
     </div>
@@ -650,8 +731,8 @@ function PersonalUsageCreditOwnerStudy() {
 }
 
 function PersonalUsageCreditState(props: {
-  billingState?: "paid" | "pulse-trial";
-  canStartPaidPulse?: boolean;
+  billingState?: "paid" | "starter";
+  canStartDirectPlan?: boolean;
   label: string;
   state: string;
   usageActivityDetail?: ReactNode;
@@ -671,15 +752,12 @@ function PersonalUsageCreditState(props: {
         <HostedBillingSettings
           authenticated
           billingStatus="active"
-          canStartPaidPulse={props.canStartPaidPulse}
+          canStartDirectPlan={props.canStartDirectPlan}
           currentBillingPhase={
-            props.billingState === "pulse-trial" ? "trial" : "paid"
+            props.billingState === "starter" ? null : "paid"
           }
-          currentBillingPlanCode="launch_monthly"
-          currentCheckoutOffer={
-            props.billingState === "pulse-trial"
-              ? "pulse_trial_7d"
-              : "standard"
+          currentBillingPlanCode={
+            props.billingState === "starter" ? null : "launch_monthly"
           }
           payerMemberId={DESIGN_PAYER_MEMBER_ID}
           usageActivityDetail={props.usageActivityDetail}

@@ -55,8 +55,8 @@ import {
   createCatalogModel,
 } from '../src/assistant/providers/catalog.ts'
 import {
-  buildAssistantCodexTurnProfileJson,
-  extractCodexAssistantProviderUsage,
+  buildAssistantCodexTurnProfileJson as buildExactAssistantCodexTurnProfileJson,
+  extractCodexAssistantProviderUsage as extractExactCodexAssistantProviderUsage,
   resolveCodexAssistantProviderTokenPricingBasis,
   resolveAssistantProviderPrompt as resolveAssistantProviderPromptUnchecked,
 } from '../src/assistant/providers/helpers.ts'
@@ -77,9 +77,6 @@ import {
   MURPH_DYNAMIC_TOOLS,
   resolveMurphDynamicTools,
 } from '../src/assistant-codex/dynamic-tools.ts'
-import {
-  executeGenerateSongTool,
-} from '../src/assistant-codex/generate-voice-memo-tool.ts'
 import type { CodexThreadIdentity } from '../src/assistant/codex-thread-route.ts'
 import type {
   AssistantProviderTurnExecutionInput,
@@ -94,6 +91,116 @@ function testCodexResume(codexThreadId: string) {
   return {
     codexThreadId,
   }
+}
+
+function extractCodexAssistantProviderUsage(
+  input: Parameters<typeof extractExactCodexAssistantProviderUsage>[0],
+) {
+  return extractExactCodexAssistantProviderUsage({
+    ...input,
+    rawEvents: completeTestCodexProtocolEvents(
+      input.rawEvents,
+      resolveTestTurnId(input.rawEvents),
+    ),
+  })
+}
+
+function buildAssistantCodexTurnProfileJson(
+  input: Parameters<typeof buildExactAssistantCodexTurnProfileJson>[0],
+) {
+  return buildExactAssistantCodexTurnProfileJson({
+    ...input,
+    rawEvents: completeTestCodexProtocolEvents(input.rawEvents, input.turnId),
+  })
+}
+
+function completeTestCodexProtocolEvents(
+  events: readonly unknown[],
+  turnId: string | null,
+): unknown[] {
+  return events.map((event) => {
+    const record = readTestRecord(event)
+    const params = readTestRecord(record?.params)
+    if (!record || !params || typeof record.method !== 'string') {
+      return event
+    }
+
+    const completedParams = {
+      threadId: 'thread-test',
+      ...(turnId ? { turnId } : {}),
+      ...params,
+    }
+    const tokenUsage = readTestRecord(params?.tokenUsage)
+    if (record.method !== 'thread/tokenUsage/updated' || !tokenUsage) {
+      return {
+        ...record,
+        params: completedParams,
+      }
+    }
+
+    const last = completeTestTokenUsageBreakdown(tokenUsage.last)
+    const total = completeTestTokenUsageBreakdown(
+      tokenUsage.total ?? tokenUsage.last,
+    )
+    if (!last || !total) {
+      return event
+    }
+
+    return {
+      ...record,
+      params: {
+        ...completedParams,
+        tokenUsage: {
+          modelContextWindow: null,
+          ...tokenUsage,
+          last,
+          total,
+        },
+      },
+    }
+  })
+}
+
+function resolveTestTurnId(events: readonly unknown[]): string | null {
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const params = readTestRecord(readTestRecord(events[index])?.params)
+    const turnId = typeof params?.turnId === 'string'
+      ? params.turnId
+      : readTestRecord(params?.turn)?.id
+    if (typeof turnId === 'string' && turnId.length > 0) {
+      return turnId
+    }
+  }
+  return null
+}
+
+function completeTestTokenUsageBreakdown(
+  value: unknown,
+): Record<string, unknown> | null {
+  const breakdown = readTestRecord(value)
+  const inputTokens = typeof breakdown?.inputTokens === 'number'
+    ? breakdown.inputTokens
+    : 0
+  const outputTokens = typeof breakdown?.outputTokens === 'number'
+    ? breakdown.outputTokens
+    : 0
+  return breakdown
+    ? {
+        cacheWriteInputTokens: 0,
+        cachedInputTokens: 0,
+        inputTokens,
+        outputTokens,
+        reasoningOutputTokens: 0,
+        totalTokens: inputTokens + outputTokens,
+        ...breakdown,
+      }
+    : null
+}
+
+function readTestRecord(value: unknown): Record<string, unknown> | null {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null
 }
 
 function resolveAssistantProviderPrompt(
@@ -325,6 +432,175 @@ describe('Codex assistant registry helpers', () => {
     })
   })
 
+  it.each([
+    {
+      requestedModel: 'gpt-5.6-luna',
+      servedModel: 'gpt-5.6-sol',
+    },
+    {
+      requestedModel: 'gpt-5.6-sol',
+      servedModel: 'gpt-5.6-luna',
+    },
+  ])(
+    'attributes canonical $requestedModel reroutes to served $servedModel',
+    ({ requestedModel, servedModel }) => {
+      const usage = extractExactCodexAssistantProviderUsage({
+        providerConfig: normalizeAssistantProviderConfig({
+          provider: 'codex-cli',
+          model: requestedModel,
+          modelProvider: 'openai',
+          oss: false,
+        }),
+        rawEvents: [
+          {
+            method: 'turn/started',
+            params: {
+              threadId: 'thread-rerouted-usage',
+              turn: { id: 'turn-rerouted-usage' },
+            },
+          },
+          {
+            method: 'model/rerouted',
+            params: { toModel: servedModel },
+          },
+          {
+            method: 'thread/tokenUsage/updated',
+            params: {
+              threadId: 'thread-rerouted-usage',
+              tokenUsage: {
+                last: {
+                  cacheWriteInputTokens: 0,
+                  cachedInputTokens: 12,
+                  inputTokens: 120,
+                  outputTokens: 45,
+                  reasoningOutputTokens: 8,
+                  totalTokens: 165,
+                },
+                modelContextWindow: 258_400,
+                total: {
+                  cacheWriteInputTokens: 0,
+                  cachedInputTokens: 12,
+                  inputTokens: 120,
+                  outputTokens: 45,
+                  reasoningOutputTokens: 8,
+                  totalTokens: 165,
+                },
+              },
+              turnId: 'turn-rerouted-usage',
+            },
+          },
+          {
+            method: 'turn/completed',
+            params: {
+              threadId: 'thread-rerouted-usage',
+              turn: {
+                id: 'turn-rerouted-usage',
+                status: 'completed',
+              },
+            },
+          },
+        ],
+      })
+
+      expect(usage).toMatchObject({
+        inputTokens: 120,
+        outputTokens: 45,
+        requestedModel,
+        servedModel,
+      })
+    },
+  )
+
+  it('ignores a canonical reroute that precedes the current turn boundary', () => {
+    const usage = extractExactCodexAssistantProviderUsage({
+      providerConfig: normalizeAssistantProviderConfig({
+        provider: 'codex-cli',
+        model: 'gpt-5.6-luna',
+        modelProvider: 'openai',
+        oss: false,
+      }),
+      rawEvents: [
+        {
+          method: 'model/rerouted',
+          params: { toModel: 'gpt-5.6-sol' },
+        },
+        {
+          method: 'turn/started',
+          params: {
+            threadId: 'thread-current-usage',
+            turn: { id: 'turn-current-usage' },
+          },
+        },
+        {
+          method: 'turn/completed',
+          params: {
+            threadId: 'thread-current-usage',
+            turn: {
+              id: 'turn-current-usage',
+              status: 'completed',
+            },
+          },
+        },
+      ],
+    })
+
+    expect(usage).toMatchObject({
+      requestedModel: 'gpt-5.6-luna',
+      servedModel: 'gpt-5.6-luna',
+    })
+  })
+
+  it.each([
+    {
+      expectedPricingBasis: 'openai-flex' as const,
+      requestedModel: 'gpt-5.4-mini',
+      servedModel: 'gpt-5.6-sol',
+    },
+    {
+      expectedPricingBasis: 'standard' as const,
+      requestedModel: 'gpt-5.6-sol',
+      servedModel: 'gpt-5.4-mini',
+    },
+  ])(
+    'derives $expectedPricingBasis pricing from rerouted $servedModel',
+    ({ expectedPricingBasis, requestedModel, servedModel }) => {
+      const usage = extractExactCodexAssistantProviderUsage({
+        providerConfig: normalizeAssistantProviderConfig({
+          provider: 'codex-cli',
+          model: requestedModel,
+          modelProvider: 'openai',
+          oss: false,
+        }),
+        rawEvents: [
+          {
+            method: 'turn/started',
+            params: { turn: { id: 'turn-rerouted-pricing' } },
+          },
+          {
+            method: 'model/rerouted',
+            params: { toModel: servedModel },
+          },
+          {
+            method: 'turn/completed',
+            params: {
+              turn: {
+                id: 'turn-rerouted-pricing',
+                status: 'completed',
+              },
+            },
+          },
+        ],
+        serviceTier: 'flex',
+      })
+
+      expect(usage).toMatchObject({
+        requestedModel,
+        servedModel,
+        tokenPricingBasis: expectedPricingBasis,
+      })
+    },
+  )
+
   it('uses OpenAI flex token pricing only for requested flex on supported OpenAI models', () => {
     const codexSettingsFlexEvent = {
       method: 'thread/settings/updated',
@@ -436,7 +712,7 @@ describe('Codex assistant registry helpers', () => {
                 usage: {},
               },
             },
-            type: 'turn.completed',
+            method: 'turn/completed',
           },
         ],
         serviceTier: 'flex',
@@ -444,7 +720,7 @@ describe('Codex assistant registry helpers', () => {
     ).toMatchObject({
       providerName: 'openai',
       requestedModel: 'gpt-5.6-terra',
-      servedModel: 'openai-production-alias',
+      servedModel: 'gpt-5.6-terra',
       tokenPricingBasis: 'openai-flex',
     })
     expect(
@@ -531,6 +807,15 @@ describe('Codex assistant registry helpers', () => {
         {
           method: 'turn/started',
           params: { turn: { id: 'turn_profile' } },
+        },
+        {
+          method: 'item/started',
+          params: {
+            item: {
+              id: 'item_1',
+              type: 'commandExecution',
+            },
+          },
         },
         {
           method: 'thread/tokenUsage/updated',
@@ -1335,6 +1620,7 @@ describe('Codex assistant registry helpers', () => {
         total_tokens: 26,
       },
       expectedSourcePath: 'params.usage',
+      legacy: true,
       name: 'OpenAI chat-completions usage aliases',
       rawEvents: [
         {
@@ -1356,7 +1642,7 @@ describe('Codex assistant registry helpers', () => {
               total_tokens: 26,
             },
           },
-          type: 'turn.completed',
+          method: 'turn/completed',
         },
       ],
     },
@@ -1380,6 +1666,7 @@ describe('Codex assistant registry helpers', () => {
         total_tokens: 41,
       },
       expectedSourcePath: 'params.usage',
+      legacy: true,
       name: 'OpenAI responses usage detail aliases',
       rawEvents: [
         {
@@ -1400,7 +1687,7 @@ describe('Codex assistant registry helpers', () => {
               total_tokens: 41,
             },
           },
-          type: 'turn.completed',
+          method: 'turn/completed',
         },
       ],
     },
@@ -1420,6 +1707,7 @@ describe('Codex assistant registry helpers', () => {
         total_tokens: 53,
       },
       expectedSourcePath: 'params.usage',
+      legacy: true,
       name: 'OpenAI chat usage prompt token detail aliases',
       rawEvents: [
         {
@@ -1437,7 +1725,7 @@ describe('Codex assistant registry helpers', () => {
               total_tokens: 53,
             },
           },
-          type: 'turn.completed',
+          method: 'turn/completed',
         },
       ],
     },
@@ -1459,6 +1747,7 @@ describe('Codex assistant registry helpers', () => {
         totalTokens: 34,
       },
       expectedSourcePath: 'params.turn.usage',
+      legacy: true,
       name: 'camel-case prompt and completion aliases',
       rawEvents: [
         {
@@ -1476,7 +1765,7 @@ describe('Codex assistant registry helpers', () => {
               },
             },
           },
-          type: 'turn.completed',
+          method: 'turn/completed',
         },
       ],
     },
@@ -1498,6 +1787,7 @@ describe('Codex assistant registry helpers', () => {
         total_tokens: 32,
       },
       expectedSourcePath: 'params.metrics.usage',
+      legacy: true,
       name: 'snake-case Murph usage aliases',
       rawEvents: [
         {
@@ -1517,7 +1807,7 @@ describe('Codex assistant registry helpers', () => {
               model: 'gpt-5.4',
             },
           },
-          type: 'turn.completed',
+          method: 'turn/completed',
         },
       ],
     },
@@ -1569,7 +1859,7 @@ describe('Codex assistant registry helpers', () => {
               model: 'gpt-5.4',
             },
           },
-          type: 'turn.completed',
+          method: 'turn/completed',
         },
       ],
     },
@@ -1589,6 +1879,7 @@ describe('Codex assistant registry helpers', () => {
         totalTokens: 31,
       },
       expectedSourcePath: 'thread.tokenUsage.total.delta',
+      legacy: true,
       name: 'Codex normalized dotted thread token usage notification',
       rawEvents: [
         {
@@ -1621,7 +1912,7 @@ describe('Codex assistant registry helpers', () => {
               model: 'gpt-5.4',
             },
           },
-          type: 'turn.completed',
+          method: 'turn/completed',
         },
       ],
     },
@@ -1696,7 +1987,7 @@ describe('Codex assistant registry helpers', () => {
               model: 'gpt-5.4',
             },
           },
-          type: 'turn.completed',
+          method: 'turn/completed',
         },
       ],
     },
@@ -1748,7 +2039,7 @@ describe('Codex assistant registry helpers', () => {
               model: 'gpt-5.4',
             },
           },
-          type: 'turn.completed',
+          method: 'turn/completed',
         },
       ],
     },
@@ -1823,7 +2114,7 @@ describe('Codex assistant registry helpers', () => {
               model: 'gpt-5.4',
             },
           },
-          type: 'turn.completed',
+          method: 'turn/completed',
         },
       ],
     },
@@ -1972,7 +2263,7 @@ describe('Codex assistant registry helpers', () => {
               model: 'gpt-5.4',
             },
           },
-          type: 'turn.completed',
+          method: 'turn/completed',
         },
       ],
     },
@@ -2026,13 +2317,11 @@ describe('Codex assistant registry helpers', () => {
           },
         },
         {
-          method: 'assistant.message.delta',
+          method: 'item/agentMessage/delta',
           params: {
             delta: 'OK',
-            item: {
-              id: 'assistant-resume-delta',
-              type: 'assistant_message',
-            },
+            itemId: 'assistant-resume-delta',
+            threadId: 'thread-resume-assistant-delta-token-usage',
             turnId: 'turn-resume-assistant-delta-token-usage',
           },
         },
@@ -2066,7 +2355,7 @@ describe('Codex assistant registry helpers', () => {
               model: 'gpt-5.4',
             },
           },
-          type: 'turn.completed',
+          method: 'turn/completed',
         },
       ],
     },
@@ -2085,7 +2374,7 @@ describe('Codex assistant registry helpers', () => {
         reasoningOutputTokens: 8,
         totalTokens: 118,
       },
-      expectedSourcePath: 'thread.tokenUsage.last',
+      expectedSourcePath: 'thread.tokenUsage.total.delta',
       name: 'Codex token usage notification with empty completion usage',
       rawEvents: [
         {
@@ -2112,7 +2401,7 @@ describe('Codex assistant registry helpers', () => {
               usage: {},
             },
           },
-          type: 'turn.completed',
+          method: 'turn/completed',
         },
       ],
     },
@@ -2120,23 +2409,36 @@ describe('Codex assistant registry helpers', () => {
     expected,
     expectedRawUsageJson,
     expectedSourcePath,
+    legacy = false,
     rawEvents,
   }) => {
-    expect(
-      extractCodexAssistantProviderUsage({
-        providerConfig: normalizeAssistantProviderConfig({
-          provider: 'codex-cli',
-          model: 'gpt-5.4',
-          modelProvider: 'openai',
-          oss: false,
-        }),
-        rawEvents,
+    const usage = extractCodexAssistantProviderUsage({
+      providerConfig: normalizeAssistantProviderConfig({
+        provider: 'codex-cli',
+        model: 'gpt-5.4',
+        modelProvider: 'openai',
+        oss: false,
       }),
-    ).toMatchObject({
-      cacheWriteTokens: null,
+      rawEvents,
+    })
+    if (legacy) {
+      expect(usage).toMatchObject({
+        inputTokens: null,
+        outputTokens: null,
+        rawUsageJson: null,
+        usageExtractionSourcePath: null,
+      })
+      return
+    }
+
+    expect(usage).toMatchObject({
+      cacheWriteTokens: 0,
       providerName: 'openai',
       providerRequestId: expect.stringMatching(/^turn-/u),
-      rawUsageJson: expectedRawUsageJson,
+      rawUsageJson: {
+        cacheWriteInputTokens: 0,
+        ...expectedRawUsageJson,
+      },
       rawUsageJsonHash: expect.stringMatching(/^sha256:[0-9a-f]{64}$/u),
       servedModel: 'gpt-5.4',
       usageExtractionSourcePath: expectedSourcePath,
@@ -2371,7 +2673,7 @@ describe('Codex assistant registry helpers', () => {
     )
   })
 
-  it('forwards voice memo delivery channels through input wrappers to Codex execution', async () => {
+  it('keeps local Telegram runtime while public Linq wrappers fail closed', async () => {
     codexAppServerMocks.executeCodexAppServerTurn.mockResolvedValue({
       finalMessage: 'ok',
       precedingAgentMessageSegments: [],
@@ -2393,6 +2695,11 @@ describe('Codex assistant registry helpers', () => {
           dynamicTools: resolveMurphDynamicTools({
             progressUpdatesAvailable: false,
           }),
+          env: {
+            ELEVENLABS_API_KEY: 'local-elevenlabs-key',
+            MURPH_ELEVENLABS_MODEL_ID: 'eleven_multilingual_v2',
+            MURPH_ELEVENLABS_VOICE_ID: 'voice_default',
+          },
           prompt: 'send a voice memo',
           voiceMemoDeliveryChannel: 'telegram',
           workingDirectory: '/tmp/provider-tests',
@@ -2403,10 +2710,14 @@ describe('Codex assistant registry helpers', () => {
     })
     const telegramTurnInput =
       codexAppServerMocks.executeCodexAppServerTurn.mock.calls[0]?.[0]
-    expect(telegramTurnInput).toMatchObject({
-      voiceMemoRuntime: {
-        kind: 'telegram',
+    expect(telegramTurnInput?.voiceMemoRuntime).toEqual({
+      elevenLabs: {
+        apiKeyAvailable: true,
+        defaultVoiceId: 'voice_default',
+        modelId: 'eleven_multilingual_v2',
+        voiceId: 'voice_default',
       },
+      kind: 'telegram',
     })
     expect(telegramTurnInput).not.toHaveProperty('voiceMemoDeliveryChannel')
 
@@ -2425,124 +2736,8 @@ describe('Codex assistant registry helpers', () => {
     expect(attempt.ok).toBe(true)
     const linqTurnInput =
       codexAppServerMocks.executeCodexAppServerTurn.mock.calls[1]?.[0]
-    expect(linqTurnInput).toMatchObject({
-      voiceMemoRuntime: {
-        kind: 'linq',
-      },
-    })
+    expect(linqTurnInput?.voiceMemoRuntime).toBeNull()
     expect(linqTurnInput).not.toHaveProperty('voiceMemoDeliveryChannel')
-  })
-
-  it('reuses the application public fetch inside the Linq media tool', async () => {
-    codexAppServerMocks.executeCodexAppServerTurn.mockResolvedValue({
-      finalMessage: 'ok',
-      precedingAgentMessageSegments: [],
-      responseDeliveryContextOrdinal: 0,
-      transcriptMessage: 'ok',
-      jsonEvents: [],
-      providerActionCount: 0,
-      sessionId: 'codex-thread-song-upload',
-      stderr: '',
-      stdout: '',
-      threadId: 'codex-thread-song-upload',
-      turnId: 'turn-song-upload',
-    })
-    const providerFetch = vi.fn<typeof fetch>(async (input) => {
-      const url = String(input)
-      if (url.startsWith('https://api.elevenlabs.io/v1/music')) {
-        return new Response(new Uint8Array([0xff, 0xfb, 0x90, 0x64]), {
-          headers: {
-            'content-type': 'audio/mpeg',
-          },
-        })
-      }
-      if (url === 'https://api.linqapp.com/api/partner/v3/attachments') {
-        return new Response(JSON.stringify({
-          attachment_id: 'attachment_sponsor_song',
-          download_url: 'https://cdn.example.test/sponsor-song.mp3',
-          expires_at: '2026-07-29T21:00:00.000Z',
-          http_method: 'PUT',
-          required_headers: {
-            'content-type': 'audio/mpeg',
-          },
-          upload_url: 'https://uploads.example.test/sponsor-song',
-        }), {
-          headers: {
-            'content-type': 'application/json',
-          },
-        })
-      }
-      throw new Error(`Unexpected provider request: ${url}`)
-    })
-    const applicationPublicFetch = vi.fn<typeof fetch>(async (input, init) => {
-      expect(String(input)).toBe(
-        'https://uploads.example.test/sponsor-song',
-      )
-      expect(init?.method).toBe('PUT')
-      expect(init?.body).toBeInstanceOf(Blob)
-      return new Response(null, { status: 204 })
-    })
-
-    const attempt = await executeCodexAssistantTurnAttemptFromInput({
-      providerConfig: { provider: 'codex-cli' },
-      turn: {
-        codexThreadConfig: {
-          'features.shell_tool': false,
-          web_search: 'disabled',
-        },
-        dynamicTools: resolveMurphDynamicTools({
-          progressUpdatesAvailable: false,
-        }),
-        env: {
-          ELEVENLABS_API_KEY: 'elevenlabs-key',
-          LINQ_API_TOKEN: 'linq-token',
-        },
-        prompt: 'generate one sponsor song',
-        providerFetch,
-        publicInternetFetch: applicationPublicFetch,
-        voiceMemoDeliveryChannel: 'linq',
-        workingDirectory: '/tmp/provider-tests',
-      },
-    })
-
-    expect(attempt.ok).toBe(true)
-    const appServerInput =
-      codexAppServerMocks.executeCodexAppServerTurn.mock.calls[0]?.[0]
-    expect(appServerInput).toMatchObject({
-      publicInternetFetch: applicationPublicFetch,
-      threadConfig: {
-        'features.shell_tool': false,
-        web_search: 'disabled',
-      },
-      voiceMemoRuntime: {
-        kind: 'linq',
-      },
-    })
-    if (appServerInput?.voiceMemoRuntime?.kind !== 'linq') {
-      throw new Error('Expected a Linq voice memo runtime')
-    }
-
-    await expect(executeGenerateSongTool({
-      args: {
-        durationSeconds: 5,
-        instrumental: false,
-        prompt: 'A five-second thank-you song.',
-      },
-      runtime: appServerInput.voiceMemoRuntime,
-    })).resolves.toMatchObject({
-      responseMedia: [
-        {
-          kind: 'voice_memo',
-          transport: {
-            attachmentId: 'attachment_sponsor_song',
-            kind: 'linq_attachment',
-          },
-        },
-      ],
-      rpcSuccess: true,
-    })
-    expect(providerFetch).toHaveBeenCalledTimes(2)
-    expect(applicationPublicFetch).toHaveBeenCalledOnce()
   })
 
   it('forwards message-target tools and their authorizer to Codex execution', async () => {
@@ -2746,6 +2941,17 @@ describe('Codex assistant registry helpers', () => {
       supportedUserMessageContentTypes: ['text', 'image'],
       supportsNativeResume: true,
       supportsReasoningEffort: true,
+      supportsRichUserMessageContent: true,
+    })
+    expect(
+      resolveCodexAssistantTargetCapabilities({
+        modelProvider: 'hosted-custom-inference',
+        provider: 'codex-cli',
+      }),
+    ).toEqual({
+      supportedUserMessageContentTypes: ['text', 'image'],
+      supportsNativeResume: true,
+      supportsReasoningEffort: false,
       supportsRichUserMessageContent: true,
     })
 
@@ -3016,6 +3222,10 @@ describe('Codex assistant registry helpers', () => {
         closeInputAdmission,
         registerLiveProviderTurn: vi.fn(() => () => {}),
       },
+      automationRelativeDateReferenceWindow: {
+        earliestAt: '2031-02-15T09:59:59.900Z',
+        latestAt: '2031-02-15T09:59:59.900Z',
+      },
       providerConfig: normalizeAssistantProviderConfig({
         provider: 'codex-cli',
       }),
@@ -3029,6 +3239,10 @@ describe('Codex assistant registry helpers', () => {
     expect(appServerInput?.onFirstAssistantResponseCompleted).toEqual(
       expect.any(Function),
     )
+    expect(appServerInput?.automationRelativeDateReferenceWindow).toEqual({
+      earliestAt: '2031-02-15T09:59:59.900Z',
+      latestAt: '2031-02-15T09:59:59.900Z',
+    })
     appServerInput?.onFirstAssistantResponseCompleted?.()
     expect(closeInputAdmission).toHaveBeenCalledTimes(1)
   })
@@ -3365,6 +3579,51 @@ describe('Codex assistant registry helpers', () => {
       runtimeWorkspaceRoots: ['/tmp/provider-tests'],
     })
     expect(appServerInput?.sandbox).toBeUndefined()
+  })
+
+  it('forwards resident member-workspace permissions through start and resume inputs', async () => {
+    codexAppServerMocks.executeCodexAppServerTurn.mockResolvedValueOnce({
+      finalMessage: 'Completed ordinary hosted work.',
+      precedingAgentMessageSegments: [],
+      responseDeliveryContextOrdinal: 0,
+      transcriptMessage: 'Completed ordinary hosted work.',
+      jsonEvents: [],
+      providerActionCount: 0,
+      sessionId: 'member-workspace-thread',
+      stderr: '',
+      stdout: '',
+      threadId: 'member-workspace-thread',
+      turnId: 'turn-member-workspace',
+    })
+
+    const attempt = await executeCodexAssistantTurnAttemptFromInput({
+      providerConfig: {
+        provider: 'codex-cli',
+        sandbox: 'danger-full-access',
+      },
+      turn: {
+        dynamicTools: [],
+        permissions: 'murph-member-workspace',
+        prompt: 'Update the ordinary member vault.',
+        resume: {
+          codexThreadId: 'member-workspace-thread',
+        },
+        runtimeWorkspaceRoots: ['/tmp/provider-tests'],
+        workingDirectory: '/tmp/provider-tests',
+      },
+    })
+
+    expect(attempt.ok).toBe(true)
+    const appServerInput =
+      codexAppServerMocks.executeCodexAppServerTurn.mock.calls[0]?.[0]
+    expect(appServerInput).toMatchObject({
+      permissions: 'murph-member-workspace',
+      resumeSessionId: 'member-workspace-thread',
+      runtimeWorkspaceRoots: ['/tmp/provider-tests'],
+    })
+    expect(appServerInput?.sandbox).toBeUndefined()
+    expect(appServerInput?.processLifetime).toBeUndefined()
+    expect(appServerInput?.ephemeral).toBeUndefined()
   })
 
   it('does not replay committed history after stale native resume fails', async () => {

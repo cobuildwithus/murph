@@ -493,9 +493,9 @@ describe("hosted email routing and transport", () => {
       emailBinding,
       request: {
         html: "<p>Weekly</p>",
-        idempotencyKey: "group-newsletter:test",
+        idempotencyKey: "group-email-effect:test",
         message: "Plain body",
-        newsletterAuthorizationProof: "a".repeat(64),
+        groupEmailAuthorizationProof: "a".repeat(64),
         subject: "Weekly health note",
         target: "group_123",
         targetKind: "group",
@@ -508,7 +508,7 @@ describe("hosted email routing and transport", () => {
     expect(webControlPlane.fetchHostedExecutionWebControlPlaneResponse.mock.calls[0]?.[0])
       .toMatchObject({
         body: JSON.stringify({
-          expectedNewsletterAuthorizationProof: "a".repeat(64),
+          expectedGroupEmailAuthorizationProof: "a".repeat(64),
           groupId: "group_123",
         }),
         boundUserId: "member_runtime",
@@ -543,7 +543,7 @@ describe("hosted email routing and transport", () => {
     expect(threadTarget?.to).toEqual([]);
   });
 
-  it("fails newsletter delivery before provider entry when its proof is missing", async () => {
+  it("fails group email delivery before provider entry when its proof is missing", async () => {
     const emailBinding = {
       send: vi.fn(async (_message: unknown) => undefined),
     };
@@ -552,7 +552,7 @@ describe("hosted email routing and transport", () => {
       config: TEST_CONFIG,
       emailBinding,
       request: {
-        idempotencyKey: "group-newsletter:automation_123:occurrence_123:group_123",
+        idempotencyKey: "group-email-effect:automation_123:occurrence_123:group_123",
         message: "Plain body",
         subject: "Weekly health note",
         target: "group_123",
@@ -566,6 +566,31 @@ describe("hosted email routing and transport", () => {
       retryable: true,
     });
     expect(webControlPlane.fetchHostedExecutionWebControlPlaneResponse).not.toHaveBeenCalled();
+    expect(emailBinding.send).not.toHaveBeenCalled();
+  });
+
+  it("keeps the former group-email effect key fail-closed while accepted effects drain", async () => {
+    const emailBinding = {
+      send: vi.fn(async (_message: unknown) => undefined),
+    };
+
+    await expect(sendHostedEmailMessage({
+      config: TEST_CONFIG,
+      emailBinding,
+      request: {
+        idempotencyKey: "group-newsletter:automation_legacy:occurrence_legacy:group_legacy",
+        message: "Legacy accepted body",
+        subject: "Legacy accepted group email",
+        target: "group_legacy",
+        targetKind: "group",
+      },
+      userId: "member_runtime",
+      webCallbackSigning: TEST_CALLBACK_SIGNING,
+      webControlBaseUrl: "https://web.example.test",
+    })).rejects.toMatchObject({
+      deliveryMayHaveSucceeded: false,
+      retryable: true,
+    });
     expect(emailBinding.send).not.toHaveBeenCalled();
   });
 
@@ -686,9 +711,9 @@ describe("hosted email routing and transport", () => {
 
     const request = {
       html: "<p>Weekly</p>",
-      idempotencyKey: "group-newsletter:automation_123:2026-07-12T13:00:00.000Z:group_123",
+      idempotencyKey: "group-email-effect:automation_123:2026-07-12T13:00:00.000Z:group_123",
       message: "Plain body",
-      newsletterAuthorizationProof: "a".repeat(64),
+      groupEmailAuthorizationProof: "a".repeat(64),
       subject: "Weekly health note",
       target: "group_123",
       targetKind: "group" as const,
@@ -757,7 +782,7 @@ describe("hosted email routing and transport", () => {
     expect(parseHostedEmailThreadTarget(second.target)?.lastMessageId).toBe(firstMessageId);
   });
 
-  it("uses the newsletter occurrence time as a stable MIME Date seed", async () => {
+  it("uses the group-email occurrence time as a stable MIME Date seed", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-07-14T15:00:00.000Z"));
     const emailBinding = {
@@ -782,9 +807,9 @@ describe("hosted email routing and transport", () => {
 
     const request = {
       html: "<p>Weekly</p>",
-      idempotencyKey: "group-newsletter:automation_123:2026-07-12T13:00:00.000Z:group_123",
+      idempotencyKey: "group-email-effect:automation_123:2026-07-12T13:00:00.000Z:group_123",
       message: "Plain body",
-      newsletterAuthorizationProof: "a".repeat(64),
+      groupEmailAuthorizationProof: "a".repeat(64),
       subject: "Weekly health note",
       target: "group_123",
       targetKind: "group" as const,
@@ -1281,7 +1306,7 @@ describe("hosted email routing and transport", () => {
     };
     webControlPlane.fetchHostedExecutionWebControlPlaneResponse.mockResolvedValueOnce(
       new Response(JSON.stringify({
-        error: { code: "HOSTED_GROUP_NEWSLETTER_RECIPIENTS_UNAVAILABLE" },
+        error: { code: "HOSTED_GROUP_EMAIL_RECIPIENTS_UNAVAILABLE" },
       }), {
         headers: { "content-type": "application/json; charset=utf-8" },
         status: 409,
@@ -1292,9 +1317,9 @@ describe("hosted email routing and transport", () => {
       config: TEST_CONFIG,
       emailBinding,
       request: {
-        idempotencyKey: "group-newsletter:automation_123:occurrence_123:group_123",
+        idempotencyKey: "group-email-effect:automation_123:occurrence_123:group_123",
         message: "Group reply",
-        newsletterAuthorizationProof: "a".repeat(64),
+        groupEmailAuthorizationProof: "a".repeat(64),
         planGroupFanout: true,
         subject: "Weekly health note",
         target: "group_123",

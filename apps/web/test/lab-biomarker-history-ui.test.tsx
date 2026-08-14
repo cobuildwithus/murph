@@ -43,6 +43,15 @@ vi.mock("@/src/lib/browser-vault/context", () => ({
   useBrowserVaultSelector<T>(selector: (client: BrowserVaultQueryClient) => T) {
     return browserVaultMock.value.client ? selector(browserVaultMock.value.client) : null;
   },
+  useBrowserVaultLabsSelector<T>(selector: (client: BrowserVaultQueryClient) => T) {
+    return browserVaultMock.value.client ? selector(browserVaultMock.value.client) : null;
+  },
+  useBrowserVaultMetricKeyDemand() {
+    return true;
+  },
+  useBrowserVaultMetricsSelector<T>(selector: (client: BrowserVaultQueryClient) => T) {
+    return browserVaultMock.value.client ? selector(browserVaultMock.value.client) : null;
+  },
 }));
 
 vi.mock("@/src/components/ui/auth-button", () => ({
@@ -1244,6 +1253,49 @@ test("a unit-matched published comparator appears only when the latest lab range
         '[aria-label="Chloride results over time; published adult comparator 98 to 107 mmol/L from Mayo Clinic Laboratories adult serum reference interval · not the reporting lab\'s range"]',
       ),
     ).not.toBeNull();
+  } finally {
+    await rendered.cleanup();
+  }
+});
+
+test("a censored result keeps its published-comparator status provenance without a chart point", async () => {
+  browserVaultMock.value.client = clientWithRows([
+    labRow({
+      analyte: "eGFR",
+      biomarkerKey: "biomarker:egfr",
+      comparator: ">=",
+      id: "egfr-censored",
+      metricKey: "egfr",
+      normalizedUnit: "mL/min/1.73m^2",
+      normalizedValue: 60,
+      specimenKind: "serum",
+      unit: "mL/min/1.73m^2",
+      value: 60,
+    }),
+  ]);
+  browserVaultMock.value.status = "ready";
+
+  const rendered = await renderClientComponent(
+    <LabBiomarkerDetailClient
+      authenticated
+      fallbackRanges={[{
+        applicability: "For published adult kidney comparison.",
+        eligibleSpecimenKinds: ["serum"],
+        label: "Published adult kidney comparator",
+        lowerBound: { inclusive: true, value: 60 },
+        unit: "mL/min/1.73m^2",
+      }]}
+      metricKey="egfr"
+    />,
+    { requireButton: false },
+  );
+
+  try {
+    const text = rendered.container.textContent ?? "";
+    expect(text).toContain("In range");
+    expect(text).toContain(">=60 mL/min/1.73m^2");
+    expect(text).toContain("Published comparator — not the reporting lab's range");
+    expect(text).not.toContain("No reference range");
   } finally {
     await rendered.cleanup();
   }

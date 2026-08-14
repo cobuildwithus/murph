@@ -17,6 +17,7 @@ const CONNECT_SOURCE_POPULARITY_ORDER = [
   "garmin",
   "fitbit",
   "google-fit",
+  "mobvoi-health",
   "strava",
   ...MAINSTREAM_APPLE_HEALTH_RELAY_SOURCE_IDS,
   "withings",

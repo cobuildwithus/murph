@@ -48,6 +48,11 @@ export {
   isCanonicalQuerySourcePath,
   listCanonicalSourceManifest,
 } from "./vault-source.ts";
+export {
+  listCanonicalObservationMetricEntries,
+  type CanonicalObservationMetricEntry,
+  type CanonicalObservationMetricEntryFilters,
+} from "./canonical-observation-metrics.ts";
 export type {
   CanonicalQuerySourceHash,
   QuerySourceManifestEntry,
@@ -72,6 +77,9 @@ export {
   deviceActivityCoverageKeyIsAfterCursor,
   resolveNextDeviceActivityCoverageCursor,
 } from "./device-activity-coverage.ts";
+export {
+  resolveWearablePublicSourceProvider,
+} from "./wearables/origin.ts";
 export type {
   DeviceActivityCoverageCursor,
   DeviceActivityCoverageKey,
@@ -110,6 +118,18 @@ export type {
   OverviewWeeklySampleSummary,
   OverviewWeeklyStat,
 } from "./overview.ts";
+export {
+  buildPersonalPatternReport,
+  buildPersonalPatternReportFromWearableBundle,
+  emptyPersonalPatternReport,
+} from "./personal-patterns.ts";
+export type {
+  PersonalPatternCell,
+  PersonalPatternFactor,
+  PersonalPatternOutcome,
+  PersonalPatternReport,
+  PersonalPatternStage,
+} from "./personal-patterns.ts";
 export {
   buildSharedGroupWeeklyMembers,
 } from "./group-weekly.ts";
@@ -214,12 +234,14 @@ export {
   normalizeMetricValue,
   resolveMetricDefinition,
   resolveMetricDefinitionForBiomarker,
+  resolveMetricInputKey,
   assessExperimentPrimaryMetricCapture,
   experimentSessionMetricIsDeclared,
   resolveExperimentSessionMetricSpec,
   resolveExperimentSessionMetricSpecForBiomarker,
   validateExperimentSessionMetricValue,
   selectMetricGoalProgress,
+  selectAuthoritativeMetricPoint,
   selectMetricSeries,
   selectMetricTrend,
   selectMetricValue,
@@ -356,6 +378,7 @@ export {
   DERIVED_KNOWLEDGE_LOG_PATH,
   DERIVED_KNOWLEDGE_PAGES_ROOT,
   DERIVED_KNOWLEDGE_ROOT,
+  parseDerivedKnowledgeNodeMarkdown,
   readDerivedKnowledgeGraph,
   readDerivedKnowledgeGraphWithIssues,
   renderDerivedKnowledgeIndex,
@@ -445,6 +468,22 @@ export async function listMetricPointsBatch(
 ): Promise<import("@murphai/health-metrics").MetricPoint[]> {
   const mod = await import("./query-projection.ts");
   return mod.listMetricPointsBatchRuntime(vaultRoot, filtersList);
+}
+
+export async function listMetricPointsByPublicSource(
+  vaultRoot: string,
+  input: {
+    from?: string;
+    metricKeys: readonly string[];
+    providers: readonly string[];
+    to?: string;
+  },
+): Promise<Array<{
+  points: import("@murphai/health-metrics").MetricPoint[];
+  provider: string;
+}>> {
+  const mod = await import("./query-projection.ts");
+  return mod.listMetricPointsByPublicSourceRuntime(vaultRoot, input);
 }
 
 export async function selectMetric(input: {
@@ -554,6 +593,14 @@ export async function summarizeWearableSleepPatternRuntime(
 ): Promise<WearableSleepPatternSummary> {
   const mod = await import("./query-projection.ts");
   return mod.summarizeWearableSleepPatternRuntime(vaultRoot, filters);
+}
+
+export async function buildPersonalPatternReportRuntime(
+  vaultRoot: string,
+  options: { asOf?: Date | string; windowDays?: number } = {},
+): Promise<import("./personal-patterns.ts").PersonalPatternReport> {
+  const mod = await import("./query-projection.ts");
+  return mod.buildPersonalPatternReportRuntime(vaultRoot, options);
 }
 
 export async function summarizeWearableActivityRuntime(

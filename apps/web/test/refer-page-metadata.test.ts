@@ -4,7 +4,7 @@ import { test, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
 
-import { buildReferralPageMetadata } from "../app/refer/page";
+import { buildReferralPageMetadata } from "../src/lib/hosted-growth/referral-page-metadata";
 import {
   HOSTED_PUBLIC_REFERRAL_REWARDS,
 } from "@/src/lib/hosted-growth/referral-program";
@@ -18,7 +18,7 @@ test("ReferPage metadata describes the public referral program", () => {
   );
   assert.equal(
     metadata.description,
-    "Explore Murph referral options. Qualifying link and group rewards add usage after eligibility, rolling-limit, and completion checks pass.",
+    "Share your referral link or start a new group with Murph. When a referral meets the rules, Murph adds extra usage automatically.",
   );
   assert.equal(metadata.alternates?.canonical, "/refer");
   assert.deepEqual(metadata.openGraph?.images, [
@@ -45,8 +45,9 @@ test("ReferPage metadata does not promise disabled reward paths", () => {
   const signupMetadata = buildReferralPageMetadata(
     HOSTED_PUBLIC_REFERRAL_REWARDS.filter(({ id }) => id === "signup-link"),
   );
-  assert.match(String(signupMetadata.description), /referral link/);
-  assert.match(String(signupMetadata.description), /rolling-limit checks pass/);
+  assert.match(String(signupMetadata.description), /personal link/);
+  assert.match(String(signupMetadata.description), /finish setup/);
+  assert.doesNotMatch(String(signupMetadata.description), /eligibility|rolling-limit/);
   assert.doesNotMatch(String(signupMetadata.description), /group/);
   assert.doesNotMatch(String(signupMetadata.description), /earn more AI usage when/);
   assert.doesNotMatch(
@@ -57,8 +58,14 @@ test("ReferPage metadata does not promise disabled reward paths", () => {
   const groupMetadata = buildReferralPageMetadata(
     HOSTED_PUBLIC_REFERRAL_REWARDS.filter(({ id }) => id !== "signup-link"),
   );
-  assert.match(String(groupMetadata.description), /fresh-group mission/);
-  assert.doesNotMatch(String(groupMetadata.description), /referral link/);
+  assert.match(String(groupMetadata.description), /Share your personal link/);
+  assert.match(String(groupMetadata.description), /To earn extra usage, choose a group referral option/);
+  assert.match(String(groupMetadata.description), /ask Murph before starting the group/);
+  assert.doesNotMatch(
+    String(groupMetadata.description),
+    /personal link.*Murph adds extra usage/i,
+  );
+  assert.doesNotMatch(String(groupMetadata.description), /\bmissions?\b/i);
   assert.doesNotMatch(String(groupMetadata.description), /earn more AI usage when/);
 
   const unavailableMetadata = buildReferralPageMetadata([]);

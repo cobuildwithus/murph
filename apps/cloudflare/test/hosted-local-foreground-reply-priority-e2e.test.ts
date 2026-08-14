@@ -7,7 +7,10 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
+  advanceHostedMailboxConsumedSeqForTest,
+  ageHostedMailboxItemForTest,
   ageHostedRuntimeLatencyAlertForTest,
+  ageHostedRuntimeProgressAlertForTest,
   appendHostedExecutionWakeForTest,
   normalizeHostedLinqLatencyTracesForTest,
   queryHostedRuntimeWorkflowForTest,
@@ -26,7 +29,6 @@ import {
   buildHostedExecutionCodexAuthRequestedWake,
   buildHostedExecutionDeviceSyncWake,
   buildHostedExecutionEnvironmentVoiceCapturedWake,
-  buildHostedExecutionGroupNewsletterEmailNeededWake,
   buildHostedExecutionMealPhotoCapturedWake,
   buildHostedExecutionMemberActivatedWake,
   buildHostedExecutionMemberChannelsUpdatedWake,
@@ -250,7 +252,7 @@ describe.sequential("hosted local foreground reply priority e2e", () => {
     try {
       latencyMs = await sendInboundAndRequirePromptReply({
         afterAccepted: async () => {
-          await waitForForegroundReplacementWhileBarrierHeld(
+          await requireSystemOwnerPreservedWhileBarrierHeld(
             systemMailboxProbe.userId,
             systemFence.attemptId,
           );
@@ -778,7 +780,141 @@ describe.sequential("hosted local foreground reply priority e2e", () => {
     const recurrence = observedResendLatencyAlertRequests().at(-1);
     expect(recurrence?.idempotencyKey).not.toBe(incidentIdempotencyKey);
     expect(observedLinqLatencyAlertRequests()).toHaveLength(0);
-  }, 120_000);
+
+    await normalizeHostedLinqLatencyTracesForTest({
+      environment: requireScenario().runtimeEnv,
+      userIds: allProbeIdentities.map((identity) => identity.userId),
+    });
+    const latencyRecovered = await requestLatencyAlertCron();
+    expect(latencyRecovered.status).toBe(200);
+    await expect(latencyRecovered.json()).resolves.toMatchObject({
+      runtimeLatencyAlert: { outcome: "healthy" },
+      runtimeProgressAlert: { outcome: "healthy" },
+    });
+
+    const progressWake = await appendHostedExecutionWakeForTest({
+      environment: requireScenario().runtimeEnv,
+      wake: buildHostedExecutionDeviceSyncWake({
+        eventId: `device-sync.wake:progress-alert:${runId}`,
+        occurredAt: new Date().toISOString(),
+        reason: "webhook_hint",
+        userId: retentionProbe.userId,
+      }),
+    });
+    await expect(ageHostedMailboxItemForTest({
+      ageMs: 20 * 60_000,
+      environment: requireScenario().runtimeEnv,
+      mailboxItemId: progressWake.wake.id,
+      userId: retentionProbe.userId,
+    })).resolves.toEqual({ updated: true });
+    requireResendStub().armNextPostAcceptLostAcknowledgment({
+      matchRequest: (request) =>
+        readObservedResendEmail(request).subject
+          === "Hosted runtime progress stalled",
+    });
+
+    const progressFailed = await requestLatencyAlertCron();
+    expect(progressFailed.status).toBe(502);
+    await expect(progressFailed.json()).resolves.toMatchObject({
+      error: {
+        code: "HOSTED_RUNTIME_PROGRESS_ALERT_SEND_FAILED",
+      },
+    });
+    const progressFailedAttempts = observedResendProgressAlertRequests();
+    expect(progressFailedAttempts).toHaveLength(1);
+    const progressEmail = readObservedResendEmail(progressFailedAttempts[0]);
+    const progressBody = progressFailedAttempts[0]?.body;
+    const progressIncidentIdempotencyKey =
+      progressFailedAttempts[0]?.idempotencyKey ?? null;
+    expect(progressEmail).toMatchObject({
+      subject: "Hosted runtime progress stalled",
+      to: [latencyAlertEmail],
+    });
+    expect(progressEmail.text).toContain("Murph runtime progress alert.");
+    expect(progressIncidentIdempotencyKey).toMatch(
+      /^murph\/runtime-progress\/[0-9a-f-]+\/alert$/u,
+    );
+    for (const privateFragment of privateAlertFragments) {
+      expect(progressEmail.text).not.toContain(privateFragment);
+    }
+    expect(observedLinqProgressAlertRequests()).toHaveLength(0);
+
+    const progressPaced = await requestLatencyAlertCron();
+    expect(progressPaced.status).toBe(200);
+    await expect(progressPaced.json()).resolves.toMatchObject({
+      runtimeLatencyAlert: { outcome: "healthy" },
+      runtimeProgressAlert: { outcome: "deferred_rate_limit" },
+    });
+    expect(observedResendProgressAlertRequests()).toHaveLength(1);
+
+    await expect(ageHostedRuntimeProgressAlertForTest({
+      ageMs: 21 * 60_000,
+      environment: requireScenario().runtimeEnv,
+    })).resolves.toEqual({ updated: true });
+    const progressRetried = await requestLatencyAlertCron();
+    expect(progressRetried.status).toBe(200);
+    await expect(progressRetried.json()).resolves.toMatchObject({
+      runtimeLatencyAlert: { outcome: "healthy" },
+      runtimeProgressAlert: { outcome: "alert_sent" },
+    });
+    const progressRetriedAttempts = observedResendProgressAlertRequests();
+    expect(progressRetriedAttempts).toHaveLength(2);
+    expect(progressRetriedAttempts[1]?.body).toBe(progressBody);
+    expect(progressRetriedAttempts[1]?.idempotencyKey)
+      .toBe(progressIncidentIdempotencyKey);
+    expect(acceptedResendProgressAlertRequests()).toHaveLength(1);
+
+    const progressCoalesced = await requestLatencyAlertCron();
+    expect(progressCoalesced.status).toBe(200);
+    await expect(progressCoalesced.json()).resolves.toMatchObject({
+      runtimeProgressAlert: { outcome: "incident_active" },
+    });
+    expect(observedResendProgressAlertRequests()).toHaveLength(2);
+
+    await expect(advanceHostedMailboxConsumedSeqForTest({
+      environment: requireScenario().runtimeEnv,
+      lane: "system",
+      seq: progressWake.wake.seq,
+      userId: retentionProbe.userId,
+    })).resolves.toEqual({ consumedSeq: progressWake.wake.seq });
+    const progressRecovered = await requestLatencyAlertCron();
+    expect(progressRecovered.status).toBe(200);
+    await expect(progressRecovered.json()).resolves.toMatchObject({
+      runtimeLatencyAlert: { outcome: "healthy" },
+      runtimeProgressAlert: { outcome: "healthy" },
+    });
+
+    const recurrenceWake = await appendHostedExecutionWakeForTest({
+      environment: requireScenario().runtimeEnv,
+      wake: buildHostedExecutionDeviceSyncWake({
+        eventId: `device-sync.wake:progress-alert-recurrence:${runId}`,
+        occurredAt: new Date().toISOString(),
+        reason: "webhook_hint",
+        userId: retentionProbe.userId,
+      }),
+    });
+    await expect(ageHostedMailboxItemForTest({
+      ageMs: 20 * 60_000,
+      environment: requireScenario().runtimeEnv,
+      mailboxItemId: recurrenceWake.wake.id,
+      userId: retentionProbe.userId,
+    })).resolves.toEqual({ updated: true });
+    await expect(ageHostedRuntimeProgressAlertForTest({
+      ageMs: 21 * 60_000,
+      environment: requireScenario().runtimeEnv,
+    })).resolves.toEqual({ updated: true });
+    const progressRecurred = await requestLatencyAlertCron();
+    expect(progressRecurred.status).toBe(200);
+    await expect(progressRecurred.json()).resolves.toMatchObject({
+      runtimeLatencyAlert: { outcome: "healthy" },
+      runtimeProgressAlert: { outcome: "alert_sent" },
+    });
+    expect(acceptedResendProgressAlertRequests()).toHaveLength(2);
+    const progressRecurrence = observedResendProgressAlertRequests().at(-1);
+    expect(progressRecurrence?.idempotencyKey)
+      .not.toBe(progressIncidentIdempotencyKey);
+    expect(observedLinqProgressAlertRequests()).toHaveLength(0);
+  }, 240_000);
 });
 
 // The idle checkpoint delay is process-wide. The scenario registry runs this
@@ -1844,37 +1980,33 @@ async function waitForSystemWakeStormCheckpointBarrier(
   ]));
 }
 
-async function waitForForegroundReplacementWhileBarrierHeld(
+async function requireSystemOwnerPreservedWhileBarrierHeld(
   userId: string,
   systemAttemptId: string,
 ): Promise<void> {
-  const deadlineAt = Date.now() + 15_000;
-  let lastFence = await readActiveRuntimeFenceForTest(userId);
-
-  while (Date.now() < deadlineAt) {
+  for (let observation = 0; observation < 3; observation += 1) {
     const barrier =
       await requireScenario().harness.readShutdownCheckpointPublicationBarrierForTest(
         userId,
       );
     if (barrier.state !== "entered") {
-      throw new Error("Canonical checkpoint publication escaped before foreground replacement.");
+      throw new Error(
+        "Canonical checkpoint publication escaped before the foreground-safe handoff.",
+      );
     }
-    lastFence = await readActiveRuntimeFenceForTest(userId);
+    const activeFence = await readActiveRuntimeFenceForTest(userId);
     if (
-      lastFence
-      && lastFence.attemptId !== systemAttemptId
-      && lastFence.processingMode === "default"
+      activeFence?.attemptId !== systemAttemptId
+      || activeFence?.processingMode !== "system_mailbox"
     ) {
-      return;
+      throw new Error(await requireScenario().buildFailureMessage(userId, [
+        "Foreground admission replaced the system owner before its held checkpoint became durable.",
+        `system attempt id: ${systemAttemptId}`,
+        `active fence: ${JSON.stringify(activeFence)}`,
+      ]));
     }
     await sleep(100);
   }
-
-  throw new Error(await requireScenario().buildFailureMessage(userId, [
-    "Foreground admission did not replace the held system-mailbox owner.",
-    `system attempt id: ${systemAttemptId}`,
-    `last active fence: ${JSON.stringify(lastFence)}`,
-  ]));
 }
 
 async function readActiveRuntimeFenceForTest(userId: string): Promise<{
@@ -2187,13 +2319,6 @@ function buildEverySystemWake(
       occurredAt: requestedAt,
       sha256: environmentVoice.sha256,
     }),
-    buildHostedExecutionGroupNewsletterEmailNeededWake({
-      eventId: `group-newsletter.email-needed:priority:${runId}`,
-      groupDisplayName: "Priority gate",
-      groupId: `group_priority_${runId}`,
-      memberId: identity.userId,
-      occurredAt: requestedAt,
-    }),
     buildHostedExecutionMealPhotoCapturedWake({
       byteLength: mealPhoto.byteLength,
       captureId: mealPhoto.captureId,
@@ -2396,6 +2521,13 @@ function observedLinqLatencyAlertRequests(): ObservedLinqRequest[] {
   );
 }
 
+function observedLinqProgressAlertRequests(): ObservedLinqRequest[] {
+  return requireLinqStub().observedRequests.filter((request) =>
+    requireLinqStub().readObservedMessageText(request)
+      ?.startsWith("Murph runtime progress alert.") === true
+  );
+}
+
 function observedResendLatencyAlertRequests(): ObservedResendRequest[] {
   return requireResendStub().observedRequests.filter((request) =>
     request.method === "POST"
@@ -2409,6 +2541,22 @@ function acceptedResendLatencyAlertRequests(): ObservedResendRequest[] {
   return requireResendStub().acceptedRequests.filter((request) =>
     readObservedResendEmail(request).subject
       === "Hosted runtime reply latency"
+  );
+}
+
+function observedResendProgressAlertRequests(): ObservedResendRequest[] {
+  return requireResendStub().observedRequests.filter((request) =>
+    request.method === "POST"
+    && request.url === "/emails"
+    && readObservedResendEmail(request).subject
+      === "Hosted runtime progress stalled"
+  );
+}
+
+function acceptedResendProgressAlertRequests(): ObservedResendRequest[] {
+  return requireResendStub().acceptedRequests.filter((request) =>
+    readObservedResendEmail(request).subject
+      === "Hosted runtime progress stalled"
   );
 }
 

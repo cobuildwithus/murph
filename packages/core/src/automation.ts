@@ -1,3 +1,5 @@
+import { isDeepStrictEqual } from "node:util";
+
 import {
   AUTOMATION_DOC_TYPE,
   AUTOMATION_SCHEMA_VERSION,
@@ -16,6 +18,7 @@ import {
   buildAutomationSupportSeriesTag,
   compareDeviceActivityCoverageKeys,
   isValidAutomationCronExpression,
+  normalizeIanaTimeZone,
   parseAutomationSupportSeriesTag,
   resolveNextDeviceActivityCoverageCursor,
   type AutomationAssistantTargetOverride,
@@ -74,13 +77,22 @@ class AutomationSupportSeriesReconciliationYieldError extends Error {
   }
 }
 
-function rejectRecurringScheduleTimeZone(object: Record<string, unknown>): void {
-  if (Object.hasOwn(object, "timeZone")) {
+function normalizeRecurringScheduleTimeZone(
+  object: Record<string, unknown>,
+): string | undefined {
+  if (!Object.hasOwn(object, "timeZone") || object.timeZone === undefined) {
+    return undefined;
+  }
+
+  const requested = requireString(object.timeZone, "schedule.timeZone", 128);
+  const normalized = normalizeIanaTimeZone(requested);
+  if (!normalized) {
     throw new VaultError(
       "VAULT_INVALID_INPUT",
-      "schedule.timeZone is not supported for canonical automation schedules.",
+      "schedule.timeZone must be a valid IANA timezone.",
     );
   }
+  return normalized;
 }
 
 export type {
@@ -108,6 +120,7 @@ export interface AutomationRecord {
   continuityPolicy: AutomationContinuityPolicy;
   tags: string[];
   createdAt: string;
+  scheduleAnchorAt?: string;
   updatedAt: string;
   instructions: string;
   relativePath: string;
@@ -130,6 +143,7 @@ export type AutomationScaffoldPayload = ContractAutomationScaffoldPayload;
 export interface UpsertAutomationInput extends AutomationScaffoldPayload {
   allowSlugRename?: boolean;
   automationId?: string;
+  createOnly?: boolean;
   now?: Date;
   vaultRoot: string;
 }
@@ -406,7 +420,7 @@ function normalizeAutomationSchedule(
         everyMs: object.everyMs,
       };
     case "cron": {
-      rejectRecurringScheduleTimeZone(object);
+      const timeZone = normalizeRecurringScheduleTimeZone(object);
       const expression = requireString(object.expression, "schedule.expression", 400);
       if (!isValidAutomationCronExpression(expression)) {
         throw new VaultError("VAULT_INVALID_INPUT", "schedule.expression must be a valid five-field cron expression.");
@@ -415,6 +429,7 @@ function normalizeAutomationSchedule(
       return {
         kind,
         expression,
+        ...(timeZone ? { timeZone } : {}),
       };
     }
     case "dailyLocal": {
@@ -423,11 +438,12 @@ function normalizeAutomationSchedule(
         throw new VaultError("VAULT_INVALID_INPUT", "schedule.localTime must use HH:MM format.");
       }
 
-      rejectRecurringScheduleTimeZone(object);
+      const timeZone = normalizeRecurringScheduleTimeZone(object);
 
       return {
         kind,
         localTime,
+        ...(timeZone ? { timeZone } : {}),
       };
     }
     case "deviceActivity": {
@@ -502,6 +518,26 @@ function normalizeAutomationRouteChannel(value: unknown): string {
     default:
       return channel;
   }
+}
+
+function resolveAutomationPatchSchedule(input: {
+  existing: AutomationSchedule;
+  replacement: AutomationSchedule;
+}): AutomationSchedule {
+  const replacement = normalizeAutomationSchedule(input.replacement);
+  if (
+    (replacement.kind !== "cron" && replacement.kind !== "dailyLocal")
+    || replacement.timeZone !== undefined
+    || (input.existing.kind !== "cron" && input.existing.kind !== "dailyLocal")
+    || input.existing.timeZone === undefined
+  ) {
+    return replacement;
+  }
+
+  return {
+    ...replacement,
+    timeZone: input.existing.timeZone,
+  };
 }
 
 function normalizeAutomationAssistantTargetOverride(
@@ -683,11 +719,13 @@ function buildAutomationScheduleFrontmatter(schedule: AutomationSchedule): Front
       return {
         kind: schedule.kind,
         expression: schedule.expression,
+        ...(schedule.timeZone ? { timeZone: schedule.timeZone } : {}),
       };
     case "dailyLocal":
       return {
         kind: schedule.kind,
         localTime: schedule.localTime,
+        ...(schedule.timeZone ? { timeZone: schedule.timeZone } : {}),
       };
     case "deviceActivity":
       return {
@@ -740,6 +778,7 @@ function buildAutomationFrontmatter(record: AutomationRecord): FrontmatterObject
     continuityPolicy: record.continuityPolicy,
     tags: record.tags,
     createdAt: record.createdAt,
+    scheduleAnchorAt: record.scheduleAnchorAt ?? record.createdAt,
     updatedAt: record.updatedAt,
   };
 }
@@ -765,6 +804,8 @@ function parseAutomationRecord(
   const activeUntil = normalizeAutomationActiveUntil(attributes.activeUntil);
   assertAutomationActiveUntilMatchesSchedule({ activeUntil, schedule });
 
+  const createdAt = requireString(attributes.createdAt, "createdAt", 64);
+
   return {
     schemaVersion: AUTOMATION_SCHEMA_VERSION,
     docType: AUTOMATION_DOC_TYPE,
@@ -782,7 +823,11 @@ function parseAutomationRecord(
     supportKind: normalizeAutomationSupportKind(attributes.supportKind),
     continuityPolicy: normalizeAutomationContinuityPolicy(attributes.continuityPolicy),
     tags: normalizeAutomationTags(attributes.tags),
-    createdAt: requireString(attributes.createdAt, "createdAt", 64),
+    createdAt,
+    scheduleAnchorAt: normalizeAutomationIsoTimestamp(
+      attributes.scheduleAnchorAt ?? createdAt,
+      "scheduleAnchorAt",
+    ),
     updatedAt: requireString(attributes.updatedAt, "updatedAt", 64),
     instructions: normalizeAutomationInstructions(parsedDocument.body),
     relativePath,
@@ -1046,7 +1091,12 @@ export async function patchAutomation(
         input.supportKind === undefined
           ? existingRecord.supportKind
           : normalizeAutomationSupportKind(input.supportKind),
-      schedule: input.schedule ?? existingRecord.schedule,
+      schedule: input.schedule === undefined
+        ? existingRecord.schedule
+        : resolveAutomationPatchSchedule({
+            existing: existingRecord.schedule,
+            replacement: input.schedule,
+          }),
       slug: input.slug ?? existingRecord.slug,
       status: input.status ?? existingRecord.status,
       summary: input.summary === undefined ? existingRecord.summary : input.summary,
@@ -1541,6 +1591,12 @@ async function upsertAutomationWithLatestRegistry(
     records ?? await loadAutomationRecords(input.vaultRoot),
     { automationId: normalizedId, slug: requestedSlug },
   );
+  if (input.createOnly === true && existingRecord !== null) {
+    throw new VaultError(
+      "VAULT_AUTOMATION_CONFLICT",
+      "Automation already exists; use a versioned patch to change it.",
+    );
+  }
   const now = (input.now ?? new Date()).toISOString();
   const recordId = existingRecord?.automationId ?? normalizedId ?? generateRecordId("automation");
   const createdAt = existingRecord?.createdAt ?? now;
@@ -1565,6 +1621,13 @@ async function upsertAutomationWithLatestRegistry(
     : normalizeAutomationActiveUntil(input.activeUntil);
   assertAutomationActiveUntilMatchesSchedule({ activeUntil, schedule });
   const status = normalizeAutomationStatus(input.status ?? existingRecord?.status);
+  const timingChanged =
+    existingRecord === null ||
+    !isDeepStrictEqual(existingRecord.schedule, schedule) ||
+    (existingRecord.status !== "active" && status === "active");
+  const scheduleAnchorAt = timingChanged
+    ? now
+    : existingRecord.scheduleAnchorAt ?? existingRecord.createdAt;
   const requestedTags = input.tags === undefined
     ? existingRecord?.tags ?? []
     : normalizeAutomationTags(input.tags);
@@ -1613,6 +1676,7 @@ async function upsertAutomationWithLatestRegistry(
       normalizeAutomationContinuityPolicy(input.continuityPolicy ?? existingRecord?.continuityPolicy),
     tags,
     createdAt,
+    scheduleAnchorAt,
     updatedAt,
     instructions: normalizeAutomationAvailabilityForSchedule({
       instructions: normalizeAutomationInstructions(input.instructions),
@@ -1661,6 +1725,7 @@ export function buildAutomationMarkdownPreview(
   input: AutomationScaffoldPayload,
 ): string {
   const slug = input.slug ?? normalizeSlug(undefined, "slug", input.title);
+  const now = new Date().toISOString();
   const schedule = normalizeAutomationSchedule(input.schedule);
   const activeUntil = normalizeAutomationActiveUntil(input.activeUntil);
   assertAutomationActiveUntilMatchesSchedule({ activeUntil, schedule });
@@ -1681,8 +1746,9 @@ export function buildAutomationMarkdownPreview(
     supportKind: normalizeAutomationSupportKind(input.supportKind),
     continuityPolicy: normalizeAutomationContinuityPolicy(input.continuityPolicy),
     tags: normalizeAutomationTags(input.tags),
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
+    createdAt: now,
+    scheduleAnchorAt: now,
+    updatedAt: now,
     instructions: normalizeAutomationAvailabilityForSchedule({
       instructions: normalizeAutomationInstructions(input.instructions),
       scheduleKind: schedule.kind,

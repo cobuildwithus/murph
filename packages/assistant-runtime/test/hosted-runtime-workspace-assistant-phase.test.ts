@@ -76,6 +76,7 @@ const mocks = vi.hoisted(() => ({
   resolveHostedOldestAssistantInputOccurredAt: vi.fn(),
   resolveHostedOldestPendingAssistantInputAt: vi.fn(),
   resolveHostedPendingAssistantInputWakeAt: vi.fn(),
+  resolveAssistantCronDefaultTimeZoneProjection: vi.fn(),
   resolveHostedAssistantOutboxNextWakeAt: vi.fn(),
   resolveHostedDeviceSyncNextWakeAt: vi.fn(),
   resolveHostedSystemMailboxNextWakeCandidate: vi.fn(),
@@ -120,6 +121,8 @@ vi.mock("@murphai/assistant-engine", async (importOriginal) => {
     DEFAULT_ASSISTANT_AUTOMATION_SCAN_LIMIT:
       automation.DEFAULT_ASSISTANT_AUTOMATION_SCAN_LIMIT,
     getAssistantCronStatus: mocks.getAssistantCronStatus,
+    resolveAssistantCronDefaultTimeZoneProjection:
+      mocks.resolveAssistantCronDefaultTimeZoneProjection,
     readAssistantInputEvent: mocks.readAssistantInputEvent,
     readAssistantOutboxIntent: mocks.readAssistantOutboxIntent,
     refreshReminderAvailability: mocks.refreshReminderAvailability,
@@ -213,15 +216,15 @@ vi.mock("../src/hosted-runtime/system-mailbox.ts", () => ({
 
 import {
   initializeVault,
+  patchAutomation,
   showAutomation,
   splitAutomationAvailabilityConflictBlock,
   upsertAutomation,
 } from "@murphai/core";
 import {
-  buildGroupNewsletterAutomationSaveRequest,
   buildOnboardingFirstPersonalReadAutomationSaveRequest,
   completeAssistantOnboarding,
-  GROUP_NEWSLETTER_CURRENT_CHAT_DELIVERY_TAG,
+  getAssistantCronJob,
   markAssistantContextSnapshotDirty,
   MURPH_ONBOARDING_FIRST_PERSONAL_READ_AUTOMATION_ID,
   MURPH_ONBOARDING_FIRST_PERSONAL_READ_AUTOMATION_SLUG,
@@ -230,6 +233,7 @@ import {
   saveAssistantSession,
   upsertAssistantInputEvent,
   type AssistantAutomationOperationScope,
+  type AssistantExecutionContext,
 } from "@murphai/assistant-engine";
 import {
   parseAssistantSessionRecord,
@@ -395,6 +399,14 @@ const PREPARED_HOSTED_ASSISTANT_RUNTIME_STATE = {
 
 beforeEach(() => {
   vi.resetAllMocks();
+  mocks.resolveAssistantCronDefaultTimeZoneProjection.mockImplementation(
+    async (vaultRoot: string) => {
+      const actual = await vi.importActual<
+        typeof import("@murphai/assistant-engine")
+      >("@murphai/assistant-engine");
+      return await actual.resolveAssistantCronDefaultTimeZoneProjection(vaultRoot);
+    },
+  );
   mocks.buildHostedLinqChannelEnv.mockImplementation((input) => {
     const env: Record<string, string> = {};
     const token = input.userEnv.LINQ_API_TOKEN ?? input.forwardedEnv.LINQ_API_TOKEN;
@@ -1132,24 +1144,33 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     const signal = new AbortController().signal;
     const assertLinqRecentInboundEngagement = vi.fn()
       .mockResolvedValueOnce({
-        targetOverride: {
+        resolvedRoute: {
+          conversationThreadId: null,
+          directRecipientPhoneNumber: null,
+          fromPhoneNumber: "+15550002",
           target: "chat_current_group",
           targetKind: "thread" as const,
+          threadIsDirect: false,
         },
-        threadIsDirect: false,
       })
       .mockResolvedValueOnce({
-        targetOverride: {
+        resolvedRoute: {
           conversationThreadId: "hid_current_direct",
+          directRecipientPhoneNumber: "+15550001",
+          fromPhoneNumber: "+15550002",
           target: "chat_current_direct",
           targetKind: "thread" as const,
+          threadIsDirect: true,
         },
-        threadIsDirect: true,
       })
       .mockResolvedValueOnce({
-        targetOverride: {
+        resolvedRoute: {
+          conversationThreadId: null,
+          directRecipientPhoneNumber: "+15550001",
+          fromPhoneNumber: "+15550002",
           target: "chat_current_direct",
           targetKind: "thread" as const,
+          threadIsDirect: null,
         },
       });
     const phaseInput = createPhaseInput({});
@@ -2320,6 +2341,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     try {
       await initializeVault({
         createdAt: "2026-04-27T00:00:00.000Z",
+        timezone: "America/New_York",
         vaultRoot,
       });
       await writeHostedPhaseExperimentSource(vaultRoot);
@@ -4422,12 +4444,17 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       action: "post_join_offer" as const,
       joinOffer: { projectionKinds: ["steps-days.v0" as const] },
     };
-    const runOffer = async (ids: readonly string[]) =>
+    const runOffer = async (
+      ids: readonly string[],
+      request: Extract<HostedRuntimeGroupToolRequest, {
+        action: "post_join_offer";
+      }> = offer,
+    ) =>
       await operationScope.runAutoReplyGroup({
         executionContext: laneInput.executionContext,
         inputIds: ids,
         operation: async (executionContext) =>
-          await executionContext.hosted?.groupTool?.request(offer),
+          await executionContext.hosted?.groupTool?.request(request),
         turnEnvironment: null,
       });
 
@@ -4449,6 +4476,18 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         status: "ok",
       },
     });
+    const emptyOffer = {
+      action: "post_join_offer" as const,
+      joinOffer: { projectionScopes: [] },
+    };
+    await expect(runOffer([inputIds.sms], emptyOffer)).resolves.toMatchObject({
+      action: "create_join_link",
+      result: { status: "ok" },
+    });
+    await expect(runOffer([inputIds.telegram], emptyOffer)).resolves.toMatchObject({
+      action: "create_join_link",
+      result: { status: "ok" },
+    });
     await expect(runOffer([inputIds.mixedSms, inputIds.mixedRcs]))
       .resolves.toMatchObject({
         action: "post_join_offer",
@@ -4467,6 +4506,14 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       {
         action: "create_join_link",
         joinLink: { requestedVaultShareProjectionKinds: ["steps-days.v0"] },
+      },
+      {
+        action: "create_join_link",
+        joinLink: { requestedVaultShareProjectionScopes: [] },
+      },
+      {
+        action: "create_join_link",
+        joinLink: { requestedVaultShareProjectionScopes: [] },
       },
       offer,
     ]);
@@ -4975,7 +5022,11 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
             action: "save",
             activeUntil: "2099-08-01T00:00:00.000Z",
             instructions: "Ask for one lightweight group check-in.",
-            schedule: { kind: "dailyLocal", localTime: "08:30" },
+            schedule: {
+              kind: "dailyLocal",
+              localTime: "21:00",
+              timeZone: "America/Chicago",
+            },
             slug: "group-check-in",
             supportKind: "check_in",
             supportSeriesId: "habit:group-check-in",
@@ -4984,20 +5035,19 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
           if (!saved || saved.action !== "save") {
             throw new Error("Expected saved automation.");
           }
-          const newsletter = await executionContext.hosted?.automationTool?.request(
-            buildGroupNewsletterAutomationSaveRequest({
-              configuration: {
-                delivery: "current_chat",
-                healthScopes: ["steps-days.v0", "sleep-duration-days.v0"],
-                newsletterName: "Family weekly health newsletter",
-                tone: "supportive",
-              },
-              schedule: {
-                expression: "0 13 * * 1",
-                kind: "cron",
-              },
-            }),
-          );
+          const newsletter = await executionContext.hosted?.automationTool?.request({
+            action: "save",
+            continuityPolicy: "fresh",
+            instructions: [
+              "Read and follow the group-newsletter skill before every execution.",
+              "Delivery: current_chat",
+              "Health scopes: steps-days.v0, sleep-duration-days.v0",
+              "Tone: supportive",
+            ].join("\n"),
+            schedule: { expression: "0 13 * * 1", kind: "cron" },
+            slug: "group-health-newsletter",
+            title: "Family weekly health newsletter",
+          });
           if (!newsletter || newsletter.action !== "save") {
             throw new Error("Expected saved group newsletter.");
           }
@@ -5007,18 +5057,30 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
             instructions: "Replace the group newsletter with free-form instructions.",
             schedule: { expression: "0 13 * * 1", kind: "cron" },
             title: "Family weekly health newsletter",
-          })).rejects.toThrow(
-            "Use murph.automation action=save_newsletter to configure this group newsletter.",
-          );
+          })).rejects.toMatchObject({ code: "VAULT_AUTOMATION_CONFLICT" });
           await expect(executionContext.hosted?.automationTool?.request({
+            action: "save",
+            instructions: "Replace the group newsletter by slug.",
+            schedule: { expression: "0 13 * * 1", kind: "cron" },
+            slug: "group-health-newsletter",
+            title: "Family weekly health newsletter",
+          })).rejects.toMatchObject({ code: "VAULT_AUTOMATION_CONFLICT" });
+          const rescheduledNewsletter = await executionContext.hosted?.automationTool?.request({
             action: "patch",
+            expectedUpdatedAt: newsletter.updatedAt,
             lookup: "group-health-newsletter",
             schedule: { expression: "0 14 * * 1", kind: "cron" },
-          })).rejects.toThrow(
-            "Use murph.automation action=save_newsletter for newsletter configuration or route changes; patch may only change status.",
-          );
+          });
+          expect(rescheduledNewsletter).toMatchObject({
+            action: "patch",
+            routeBinding: "preserved",
+          });
+          if (!rescheduledNewsletter || rescheduledNewsletter.action !== "patch") {
+            throw new Error("Expected rescheduled group newsletter.");
+          }
           await expect(executionContext.hosted?.automationTool?.request({
             action: "patch",
+            expectedUpdatedAt: rescheduledNewsletter.updatedAt,
             lookup: "group-health-newsletter",
             status: "paused",
           })).resolves.toEqual(expect.objectContaining({
@@ -5093,9 +5155,17 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       expect(linqResult).toEqual(expect.objectContaining({
         action: "save",
         created: true,
+        effectiveTimeZone: "America/Chicago",
         lookupId: "group-check-in",
+        nextOccurrenceAt: expect.any(String),
         routeBinding: "current_conversation",
+        schedule: {
+          kind: "dailyLocal",
+          localTime: "21:00",
+          timeZone: "America/Chicago",
+        },
         status: "active",
+        timingVerified: true,
       }));
       const telegramResult = await operationScope.runAutoReplyGroup({
         executionContext: laneInput.executionContext,
@@ -5107,20 +5177,20 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
             action: "read_shared",
             projectionScopes: [{ projectionKind: "steps-days.v0" }],
           });
-          return await executionContext.hosted?.automationTool?.request(
-            buildGroupNewsletterAutomationSaveRequest({
-              configuration: {
-                delivery: "current_chat",
-                healthScopes: ["steps-days.v0", "sleep-duration-days.v0"],
-                newsletterName: "Family weekly health newsletter",
-                tone: "supportive",
-              },
-              schedule: {
-                expression: "0 13 * * 1",
-                kind: "cron",
-              },
-            }),
-          );
+          const current = await showAutomation({
+            slug: "group-health-newsletter",
+            vaultRoot,
+          });
+          if (!current) {
+            throw new Error("Expected current group newsletter.");
+          }
+          return await executionContext.hosted?.automationTool?.request({
+            action: "patch",
+            expectedUpdatedAt: current.updatedAt,
+            lookup: "group-health-newsletter",
+            retargetToCurrentConversation: true,
+            title: "Telegram group health newsletter",
+          });
         },
         turnEnvironment: null,
       });
@@ -5130,7 +5200,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         projectionScopes: [{ projectionKind: "steps-days.v0" }],
       });
       expect(telegramResult).toEqual(expect.objectContaining({
-        action: "save",
+        action: "patch",
         created: false,
         lookupId: "group-health-newsletter",
         routeBinding: "current_conversation",
@@ -5164,6 +5234,11 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
           threadIsDirect: false,
         }),
         supportKind: "check_in",
+        schedule: {
+          kind: "dailyLocal",
+          localTime: "21:00",
+          timeZone: "America/Chicago",
+        },
         tags: expect.arrayContaining([
           "system:support-series:habit:group-check-in",
         ]),
@@ -5178,9 +5253,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
           deliveryTarget: "telegram_group_chat",
           threadIsDirect: false,
         }),
-        tags: expect.arrayContaining([
-          GROUP_NEWSLETTER_CURRENT_CHAT_DELIVERY_TAG,
-        ]),
+        instructions: expect.stringContaining("group-newsletter skill"),
         status: "paused",
       }));
       await expect(showAutomation({
@@ -5195,6 +5268,668 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         slug: "other-group-check-in",
         vaultRoot,
       })).resolves.toEqual(expect.objectContaining({ status: "active" }));
+    } finally {
+      await rm(parentRoot, { force: true, recursive: true });
+    }
+  });
+
+  it("returns the scheduler's exact future occurrence after reactivation and schedule revision", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-01T12:00:00.000Z"));
+    const parentRoot = await mkdtemp(path.join(tmpdir(), "hosted-automation-timing-"));
+    const vaultRoot = path.join(parentRoot, "vault");
+    const inputId = "ain_44444444444444444444444444444444";
+
+    try {
+      await initializeVault({
+        createdAt: "2026-08-01T12:00:00.000Z",
+        timezone: "America/New_York",
+        vaultRoot,
+      });
+      mocks.readAssistantInputEvent.mockResolvedValue({
+        conversation: {
+          accountId: "linq_identity_timing",
+          actorId: "linq_participant_timing",
+          actorIsSelf: false,
+          source: "linq",
+          threadId: "linq_thread_timing",
+          threadIsDirect: true,
+        },
+        replyTarget: {
+          channel: "linq",
+          messageId: "linq_message_timing",
+          threadId: "linq_chat_timing",
+        },
+      });
+
+      await runHostedWorkspaceAssistantPhase(createPhaseInput({
+        assistantInputIds: [inputId],
+        importedCount: 1,
+        vaultRoot,
+      }));
+      const laneInput = mocks.runHostedAssistantAutomationLane.mock.calls.at(-1)?.[0];
+      const operationScope = laneInput?.operationScope as
+        | AssistantAutomationOperationScope
+        | undefined;
+      if (!laneInput?.executionContext || !operationScope) {
+        throw new Error("Expected hosted automation operation scope.");
+      }
+
+      const requestAutomation = async (
+        request: Parameters<
+          NonNullable<
+            NonNullable<AssistantExecutionContext["hosted"]>["automationTool"]
+          >["request"]
+        >[0],
+      ) => await operationScope.runAutoReplyGroup({
+        executionContext: laneInput.executionContext,
+        inputIds: [inputId],
+        operation: async (executionContext) => {
+          const automationTool = executionContext.hosted?.automationTool;
+          if (!automationTool) {
+            throw new Error("Expected scoped hosted automation tool.");
+          }
+          return await automationTool.request(request);
+        },
+        turnEnvironment: null,
+      });
+
+      const nextWorkout = await requestAutomation({
+        action: "save",
+        instructions: "Ask how the next workout felt.",
+        schedule: {
+          activityKind: "workout",
+          after: "2026-08-01T12:00:00.000Z",
+          kind: "deviceActivity",
+          source: "whoop",
+        },
+        slug: "next-workout-check-in",
+        title: "Next workout check-in",
+      });
+      if (nextWorkout.action !== "save") {
+        throw new Error("Expected next-workout save result.");
+      }
+      expect(nextWorkout).toEqual(expect.objectContaining({
+        effectiveTimeZone: null,
+        nextOccurrenceAt: null,
+        schedule: {
+          activityKind: "workout",
+          after: "2026-08-01T12:00:00.000Z",
+          kind: "deviceActivity",
+          source: "whoop",
+        },
+        status: "active",
+        timingVerified: true,
+      }));
+      await expect(requestAutomation({
+        action: "patch",
+        expectedUpdatedAt: nextWorkout.updatedAt,
+        instructions: "Ask briefly how the next workout felt.",
+        lookup: "next-workout-check-in",
+      })).resolves.toEqual(expect.objectContaining({
+        nextOccurrenceAt: null,
+        schedule: expect.objectContaining({ kind: "deviceActivity" }),
+        status: "active",
+        timingVerified: true,
+      }));
+
+      const dailyEveningReminder = await requestAutomation({
+        action: "save",
+        instructions: "Send the daily evening reminder.",
+        schedule: {
+          kind: "dailyLocal",
+          localTime: "21:00",
+          timeZone: "America/Chicago",
+        },
+        slug: "daily-evening-reminder",
+        status: "paused",
+        title: "Daily evening reminder",
+      });
+      if (dailyEveningReminder.action !== "save") {
+        throw new Error("Expected daily reminder save result.");
+      }
+      expect(dailyEveningReminder).toEqual(expect.objectContaining({
+        nextOccurrenceAt: null,
+        status: "paused",
+        timingVerified: true,
+      }));
+
+      const oneTimeEveningReminder = await requestAutomation({
+        action: "save",
+        instructions: "Send the one-time evening reminder.",
+        schedule: {
+          at: "2026-08-01T13:00:00.000Z",
+          kind: "at",
+        },
+        slug: "one-time-evening-reminder",
+        status: "paused",
+        title: "One-time evening reminder",
+      });
+      if (oneTimeEveningReminder.action !== "save") {
+        throw new Error("Expected one-time reminder save result.");
+      }
+      expect(oneTimeEveningReminder).toEqual(expect.objectContaining({
+        nextOccurrenceAt: null,
+        status: "paused",
+        timingVerified: true,
+      }));
+
+      const finiteOneTimeReminder = await requestAutomation({
+        action: "save",
+        activeUntil: "2026-08-01T12:45:00.000Z",
+        instructions: "Send the finite one-time reminder.",
+        schedule: {
+          at: "2026-08-01T12:30:00.000Z",
+          kind: "at",
+        },
+        slug: "finite-one-time-reminder",
+        status: "paused",
+        title: "Finite one-time reminder",
+      });
+      if (finiteOneTimeReminder.action !== "save") {
+        throw new Error("Expected finite reminder save result.");
+      }
+      expect(finiteOneTimeReminder).toEqual(expect.objectContaining({
+        nextOccurrenceAt: null,
+        status: "paused",
+        timingVerified: true,
+      }));
+
+      const recurringIntervalReminder = await requestAutomation({
+        action: "save",
+        instructions: "Send the recurring interval reminder.",
+        schedule: {
+          everyMs: 86_400_000,
+          kind: "every",
+        },
+        slug: "recurring-interval-reminder",
+        title: "Recurring interval reminder",
+      });
+      if (recurringIntervalReminder.action !== "save") {
+        throw new Error("Expected recurring reminder save result.");
+      }
+      expect(recurringIntervalReminder).toEqual(expect.objectContaining({
+        nextOccurrenceAt: "2026-08-02T12:00:00.000Z",
+        status: "active",
+        timingVerified: true,
+      }));
+
+      vi.setSystemTime(new Date("2026-08-01T13:00:00.000Z"));
+      await expect(requestAutomation({
+        action: "patch",
+        expectedUpdatedAt: finiteOneTimeReminder.updatedAt,
+        lookup: "finite-one-time-reminder",
+        status: "active",
+      })).resolves.toEqual(expect.objectContaining({
+        nextOccurrenceAt: null,
+        status: "active",
+        timingVerified: true,
+      }));
+
+      vi.setSystemTime(new Date("2026-08-10T00:27:19.000Z"));
+      await expect(requestAutomation({
+        action: "patch",
+        expectedUpdatedAt: recurringIntervalReminder.updatedAt,
+        instructions: "Send the revised recurring interval reminder.",
+        lookup: "recurring-interval-reminder",
+      })).resolves.toEqual(expect.objectContaining({
+        nextOccurrenceAt: null,
+        schedule: {
+          everyMs: 86_400_000,
+          kind: "every",
+        },
+        status: "active",
+        timingVerified: false,
+        timingVerificationIssues: ["stale_recurring_occurrence"],
+      }));
+      await expect(requestAutomation({
+        action: "patch",
+        expectedUpdatedAt: oneTimeEveningReminder.updatedAt,
+        lookup: "one-time-evening-reminder",
+        status: "active",
+      })).resolves.toEqual(expect.objectContaining({
+        nextOccurrenceAt: null,
+        schedule: {
+          at: "2026-08-01T13:00:00.000Z",
+          kind: "at",
+        },
+        status: "active",
+        timingVerified: true,
+      }));
+      const dailyReactivated = await requestAutomation({
+        action: "patch",
+        expectedUpdatedAt: dailyEveningReminder.updatedAt,
+        lookup: "daily-evening-reminder",
+        status: "active",
+      });
+      if (dailyReactivated.action !== "patch") {
+        throw new Error("Expected daily reminder patch result.");
+      }
+      expect(dailyReactivated).toEqual(expect.objectContaining({
+        effectiveTimeZone: "America/Chicago",
+        nextOccurrenceAt: "2026-08-10T02:00:00.000Z",
+        timingVerified: true,
+      }));
+      await expect(getAssistantCronJob(
+        vaultRoot,
+        "daily-evening-reminder",
+      )).resolves.toMatchObject({
+        state: { nextRunAt: "2026-08-10T02:00:00.000Z" },
+      });
+
+      vi.setSystemTime(new Date("2026-08-10T00:28:19.000Z"));
+      const dailyRevised = await requestAutomation({
+        action: "patch",
+        expectedUpdatedAt: dailyReactivated.updatedAt,
+        lookup: "daily-evening-reminder",
+        schedule: {
+          kind: "dailyLocal",
+          localTime: "22:00",
+          timeZone: "America/Chicago",
+        },
+      });
+      if (dailyRevised.action !== "patch") {
+        throw new Error("Expected daily revised patch result.");
+      }
+      expect(dailyRevised).toEqual(expect.objectContaining({
+        nextOccurrenceAt: "2026-08-10T03:00:00.000Z",
+        schedule: {
+          kind: "dailyLocal",
+          localTime: "22:00",
+          timeZone: "America/Chicago",
+        },
+        timingVerified: true,
+      }));
+      await expect(getAssistantCronJob(
+        vaultRoot,
+        "daily-evening-reminder",
+      )).resolves.toMatchObject({
+        state: { nextRunAt: "2026-08-10T03:00:00.000Z" },
+      });
+
+      const beforeInspect = await showAutomation({
+        slug: "daily-evening-reminder",
+        vaultRoot,
+      });
+      if (!beforeInspect) {
+        throw new Error("Expected daily reminder before inspection.");
+      }
+      const recordPath = path.join(vaultRoot, beforeInspect.relativePath);
+      const recordBytesBeforeInspect = await readFile(recordPath, "utf8");
+      await expect(requestAutomation({
+        action: "inspect",
+        lookup: "daily-evening-reminder",
+      })).resolves.toEqual({
+        action: "inspect",
+        automationId: beforeInspect.automationId,
+        effectiveTimeZone: "America/Chicago",
+        lookupId: "daily-evening-reminder",
+        nextOccurrenceAt: "2026-08-10T03:00:00.000Z",
+        routeBinding: "preserved",
+        schedule: {
+          kind: "dailyLocal",
+          localTime: "22:00",
+          timeZone: "America/Chicago",
+        },
+        status: "active",
+        timingVerified: true,
+        timingVerificationIssues: [],
+        updatedAt: dailyRevised.updatedAt,
+      });
+      await expect(readFile(recordPath, "utf8")).resolves.toBe(
+        recordBytesBeforeInspect,
+      );
+      await expect(showAutomation({
+        slug: "daily-evening-reminder",
+        vaultRoot,
+      })).resolves.toEqual(beforeInspect);
+
+      mocks.resolveAssistantCronDefaultTimeZoneProjection.mockResolvedValueOnce({
+        timeZone: "America/New_York",
+        vaultTimeZoneVerified: false,
+      });
+      const dailyPreservedTimeZone = await requestAutomation({
+        action: "patch",
+        expectedUpdatedAt: dailyRevised.updatedAt,
+        lookup: "daily-evening-reminder",
+        schedule: {
+          kind: "dailyLocal",
+          localTime: "23:00",
+        },
+      });
+      if (dailyPreservedTimeZone.action !== "patch") {
+        throw new Error("Expected daily preserved-timezone patch result.");
+      }
+      expect(dailyPreservedTimeZone).toEqual(expect.objectContaining({
+        action: "patch",
+        effectiveTimeZone: "America/Chicago",
+        nextOccurrenceAt: "2026-08-10T04:00:00.000Z",
+        schedule: {
+          kind: "dailyLocal",
+          localTime: "23:00",
+          timeZone: "America/Chicago",
+        },
+        timingVerified: true,
+      }));
+
+      await expect(requestAutomation({
+        action: "patch",
+        activeUntil: "2026-08-10T02:30:00.000Z",
+        expectedUpdatedAt: dailyPreservedTimeZone.updatedAt,
+        lookup: "daily-evening-reminder",
+      })).resolves.toEqual(expect.objectContaining({
+        action: "patch",
+        nextOccurrenceAt: null,
+        timingVerified: true,
+      }));
+      await expect(getAssistantCronJob(
+        vaultRoot,
+        "daily-evening-reminder",
+      )).resolves.toMatchObject({
+        state: { nextRunAt: "2026-08-10T02:30:00.000Z" },
+      });
+    } finally {
+      await rm(parentRoot, { force: true, recursive: true });
+    }
+  });
+
+  it("logs content-free timing verification failure and recovery details", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-13T01:00:00.000Z"));
+    const parentRoot = await mkdtemp(path.join(
+      tmpdir(),
+      "hosted-automation-verification-telemetry-",
+    ));
+    const vaultRoot = path.join(parentRoot, "vault");
+    const inputId = "ain_45454545454545454545454545454545";
+    const logRequests: HostedRuntimeLogRequest[] = [];
+
+    try {
+      await initializeVault({
+        createdAt: "2026-08-13T01:00:00.000Z",
+        timezone: "America/New_York",
+        vaultRoot,
+      });
+      mocks.readAssistantInputEvent.mockResolvedValue({
+        conversation: {
+          accountId: "linq_identity_verification_telemetry",
+          actorId: "linq_participant_verification_telemetry",
+          actorIsSelf: false,
+          source: "linq",
+          threadId: "linq_thread_verification_telemetry",
+          threadIsDirect: true,
+        },
+        replyTarget: {
+          channel: "linq",
+          messageId: "linq_message_verification_telemetry",
+          threadId: "linq_chat_verification_telemetry",
+        },
+      });
+      mocks.resolveAssistantCronDefaultTimeZoneProjection
+        .mockResolvedValueOnce({
+          timeZone: "America/New_York",
+          vaultTimeZoneVerified: false,
+        })
+        .mockResolvedValue({
+          timeZone: "America/New_York",
+          vaultTimeZoneVerified: true,
+        });
+      mocks.runHostedAssistantAutomationLane.mockImplementationOnce(async (laneInput) => {
+        await laneInput.operationScope.runAutoReplyGroup({
+          executionContext: laneInput.executionContext,
+          inputIds: [inputId],
+          operation: async (executionContext: AssistantExecutionContext) => {
+            const automationTool = executionContext.hosted?.automationTool;
+            if (!automationTool) {
+              throw new Error("Expected scoped hosted automation tool.");
+            }
+            const recoveredProjectionCallsBefore =
+              mocks.resolveAssistantCronDefaultTimeZoneProjection.mock.calls.length;
+            const saved = await automationTool.request({
+              action: "save",
+              instructions: "Send the synthetic private reminder payload.",
+              schedule: {
+                kind: "dailyLocal",
+                localTime: "22:30",
+              },
+              slug: "synthetic-private-verification-reminder",
+              title: "Synthetic private verification reminder",
+            });
+            expect(saved).toEqual(expect.objectContaining({
+              timingVerified: true,
+              timingVerificationIssues: [],
+            }));
+            expect(
+              mocks.resolveAssistantCronDefaultTimeZoneProjection.mock.calls.length
+              - recoveredProjectionCallsBefore,
+            ).toBe(2);
+
+            mocks.resolveAssistantCronDefaultTimeZoneProjection.mockResolvedValue({
+              timeZone: "America/New_York",
+              vaultTimeZoneVerified: false,
+            });
+            const persistentProjectionCallsBefore =
+              mocks.resolveAssistantCronDefaultTimeZoneProjection.mock.calls.length;
+            await expect(automationTool.request({
+              action: "save",
+              instructions: "Send another synthetic private reminder payload.",
+              schedule: {
+                kind: "dailyLocal",
+                localTime: "23:30",
+              },
+              slug: "synthetic-private-persistent-verification-reminder",
+              title: "Synthetic private persistent verification reminder",
+            })).resolves.toEqual(expect.objectContaining({
+              timingVerified: false,
+              timingVerificationIssues: ["default_timezone_unverified"],
+            }));
+            expect(
+              mocks.resolveAssistantCronDefaultTimeZoneProjection.mock.calls.length
+              - persistentProjectionCallsBefore,
+            ).toBe(2);
+
+            mocks.resolveAssistantCronDefaultTimeZoneProjection
+              .mockImplementationOnce(async () => {
+                const current = await showAutomation({
+                  slug: "synthetic-readback-mismatch-reminder",
+                  vaultRoot,
+                });
+                if (!current) {
+                  throw new Error("Expected the readback mismatch fixture.");
+                }
+                await patchAutomation({
+                  expectedUpdatedAt: current.updatedAt,
+                  lookup: current.automationId,
+                  schedule: {
+                    kind: "dailyLocal",
+                    localTime: "08:45",
+                  },
+                  vaultRoot,
+                });
+                return {
+                  timeZone: "America/New_York",
+                  vaultTimeZoneVerified: false,
+                };
+              })
+              .mockResolvedValue({
+                timeZone: "America/New_York",
+                vaultTimeZoneVerified: true,
+              });
+            await expect(automationTool.request({
+              action: "save",
+              instructions: "Send the original synthetic mismatch reminder.",
+              schedule: {
+                kind: "dailyLocal",
+                localTime: "08:30",
+              },
+              slug: "synthetic-readback-mismatch-reminder",
+              title: "Synthetic readback mismatch reminder",
+            })).resolves.toEqual(expect.objectContaining({
+              nextOccurrenceAt: null,
+              timingVerified: false,
+              timingVerificationIssues: expect.arrayContaining([
+                "record_readback_mismatch",
+              ]),
+            }));
+
+            mocks.resolveAssistantCronDefaultTimeZoneProjection
+              .mockImplementationOnce(async () => {
+                const current = await showAutomation({
+                  slug: "synthetic-projection-failure-reminder",
+                  vaultRoot,
+                });
+                if (!current) {
+                  throw new Error("Expected the projection failure fixture.");
+                }
+                await rm(path.join(vaultRoot, current.relativePath));
+                return {
+                  timeZone: "America/New_York",
+                  vaultTimeZoneVerified: true,
+                };
+              });
+            await expect(automationTool.request({
+              action: "save",
+              instructions: "Send the synthetic projection failure reminder.",
+              schedule: {
+                kind: "dailyLocal",
+                localTime: "07:30",
+              },
+              slug: "synthetic-projection-failure-reminder",
+              title: "Synthetic projection failure reminder",
+            })).resolves.toEqual(expect.objectContaining({
+              nextOccurrenceAt: null,
+              timingVerified: false,
+              timingVerificationIssues: expect.arrayContaining([
+                "projection_unavailable",
+                "record_readback_mismatch",
+              ]),
+            }));
+          },
+          turnEnvironment: null,
+        });
+        return {
+          assistantAutomationCurrentTurnDeliveryIntentIds: [],
+          assistantAutomationProgressed: true,
+          nextWakeAt: null,
+          redactedLogEntries: [],
+        };
+      });
+
+      await runHostedWorkspaceAssistantPhase(createPhaseInput({
+        assistantInputIds: [inputId],
+        importedCount: 1,
+        logRequests,
+        vaultRoot,
+      }));
+
+      const verificationEntries = logRequests
+        .flatMap((request) => request.entries)
+        .filter((entry) =>
+          entry.eventCode === "assistant.automation_detail"
+          && entry.redactedJson?.schema
+            === "murph.hosted-automation-timing-verification.v1"
+        );
+      expect(verificationEntries).toHaveLength(8);
+      expect(verificationEntries[0]).toEqual(expect.objectContaining({
+        errorCode: "ASSISTANT_AUTOMATION_TIMING_UNVERIFIED",
+        level: "info",
+        redactedJson: expect.objectContaining({
+          automationTimingVerificationAction: "save",
+          automationTimingVerificationIssues: ["default_timezone_unverified"],
+          automationTimingVerificationRecovered: false,
+          automationTimingVerificationStage: "initial",
+          detailComponent: "automation.tool",
+        }),
+      }));
+      expect(verificationEntries[1]).toEqual(expect.objectContaining({
+        level: "info",
+        redactedJson: expect.objectContaining({
+          automationTimingVerificationAction: "save",
+          automationTimingVerificationRecovered: true,
+          automationTimingVerificationStage: "readback",
+          detailComponent: "automation.tool",
+        }),
+      }));
+      expect(verificationEntries[2]).toEqual(expect.objectContaining({
+        errorCode: "ASSISTANT_AUTOMATION_TIMING_UNVERIFIED",
+        level: "info",
+        redactedJson: expect.objectContaining({
+          automationTimingVerificationAction: "save",
+          automationTimingVerificationRecovered: false,
+          automationTimingVerificationStage: "initial",
+        }),
+      }));
+      expect(verificationEntries[3]).toEqual(expect.objectContaining({
+        errorCode: "ASSISTANT_AUTOMATION_TIMING_UNVERIFIED",
+        level: "info",
+        redactedJson: expect.objectContaining({
+          automationTimingVerificationAction: "save",
+          automationTimingVerificationRecovered: false,
+          automationTimingVerificationStage: "readback",
+        }),
+      }));
+      expect(verificationEntries[5]).toEqual(expect.objectContaining({
+        errorCode: "ASSISTANT_AUTOMATION_TIMING_UNVERIFIED",
+        level: "info",
+        redactedJson: expect.objectContaining({
+          automationTimingVerificationIssues: expect.arrayContaining([
+            "record_readback_mismatch",
+          ]),
+          automationTimingVerificationRecovered: false,
+          automationTimingVerificationStage: "readback",
+        }),
+      }));
+      expect(verificationEntries[7]).toEqual(expect.objectContaining({
+        errorCode: "ASSISTANT_AUTOMATION_TIMING_UNVERIFIED",
+        level: "info",
+        redactedJson: expect.objectContaining({
+          automationTimingVerificationIssues: expect.arrayContaining([
+            "projection_unavailable",
+            "record_readback_mismatch",
+          ]),
+          automationTimingVerificationRecovered: false,
+          automationTimingVerificationStage: "readback",
+        }),
+      }));
+      expect(JSON.stringify(logRequests)).not.toContain(
+        "synthetic-private-verification-reminder",
+      );
+      expect(JSON.stringify(logRequests)).not.toContain(
+        "synthetic private reminder payload",
+      );
+      expect(JSON.stringify(logRequests)).not.toContain(
+        "Synthetic private verification reminder",
+      );
+      expect(JSON.stringify(logRequests)).not.toContain(
+        "synthetic-private-persistent-verification-reminder",
+      );
+      expect(JSON.stringify(logRequests)).not.toContain(
+        "another synthetic private reminder payload",
+      );
+      expect(JSON.stringify(logRequests)).not.toContain(
+        "Synthetic private persistent verification reminder",
+      );
+      expect(JSON.stringify(logRequests)).not.toContain(
+        "synthetic-readback-mismatch-reminder",
+      );
+      expect(JSON.stringify(logRequests)).not.toContain(
+        "original synthetic mismatch reminder",
+      );
+      expect(JSON.stringify(logRequests)).not.toContain(
+        "Synthetic readback mismatch reminder",
+      );
+      expect(JSON.stringify(logRequests)).not.toContain("08:45");
+      expect(JSON.stringify(logRequests)).not.toContain(
+        "synthetic-projection-failure-reminder",
+      );
+      expect(JSON.stringify(logRequests)).not.toContain(
+        "synthetic projection failure reminder",
+      );
+      expect(JSON.stringify(logRequests)).not.toContain(
+        "Synthetic projection failure reminder",
+      );
+      expect(JSON.stringify(logRequests)).not.toContain("07:30");
+      expect(() => logRequests.forEach(parseHostedRuntimeLogRequest)).not.toThrow();
     } finally {
       await rm(parentRoot, { force: true, recursive: true });
     }
@@ -5384,33 +6119,6 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         title: "Existing reminder",
         vaultRoot,
       });
-      const newsletterSave = buildGroupNewsletterAutomationSaveRequest({
-        configuration: {
-          delivery: "current_chat",
-          healthScopes: ["steps-days.v0"],
-          newsletterName: "Existing group newsletter",
-          tone: "supportive",
-        },
-        schedule: { expression: "0 9 * * 0", kind: "cron" },
-      });
-      await upsertAutomation({
-        continuityPolicy: newsletterSave.continuityPolicy,
-        instructions: newsletterSave.instructions,
-        route: {
-          channel: "telegram",
-          deliveryTarget: "telegram_existing_group",
-          identityId: null,
-          participantId: null,
-          threadId: "telegram_existing_group",
-          threadIsDirect: false,
-        },
-        schedule: newsletterSave.schedule,
-        slug: newsletterSave.slug,
-        status: "active",
-        tags: newsletterSave.tags,
-        title: newsletterSave.title,
-        vaultRoot,
-      });
       mocks.readAssistantInputEvent.mockResolvedValue({
         conversation: {
           accountId: "linq_identity_current",
@@ -5450,28 +6158,16 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
             if (!automationTool) {
               throw new Error("Expected scoped hosted automation tool.");
             }
-            await expect(automationTool.request(
-              buildGroupNewsletterAutomationSaveRequest({
-                configuration: {
-                  delivery: "current_chat",
-                  healthScopes: ["steps-days.v0"],
-                  newsletterName: "Private thread newsletter",
-                  tone: "supportive",
-                },
-                schedule: { expression: "0 9 * * 0", kind: "cron" },
-              }),
-            )).rejects.toThrow(
-              "Group newsletters can be saved only from the current iMessage or Telegram group conversation.",
-            );
-            await expect(automationTool.request({
-              action: "patch",
-              lookup: "group-health-newsletter",
-              retargetToCurrentConversation: true,
-            })).rejects.toThrow(
-              "Use murph.automation action=save_newsletter for newsletter configuration or route changes; patch may only change status.",
-            );
+            const current = await showAutomation({
+              slug: "existing-reminder",
+              vaultRoot,
+            });
+            if (!current) {
+              throw new Error("Expected existing reminder.");
+            }
             return await automationTool.request({
               action: "patch",
+              expectedUpdatedAt: current.updatedAt,
               lookup: "existing-reminder",
               retargetToCurrentConversation,
               title: retargetToCurrentConversation
@@ -5525,8 +6221,16 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
           if (!automationTool) {
             throw new Error("Expected scoped hosted automation tool.");
           }
+          const current = await showAutomation({
+            slug: "existing-reminder",
+            vaultRoot,
+          });
+          if (!current) {
+            throw new Error("Expected existing reminder.");
+          }
           return await automationTool.request({
             action: "patch",
+            expectedUpdatedAt: current.updatedAt,
             lookup: "existing-reminder",
             schedule: { at: "2026-08-01T13:00:00.000Z", kind: "at" },
           });
@@ -5553,8 +6257,16 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
           if (!automationTool) {
             throw new Error("Expected scoped hosted automation tool.");
           }
+          const current = await showAutomation({
+            slug: "existing-reminder",
+            vaultRoot,
+          });
+          if (!current) {
+            throw new Error("Expected existing reminder.");
+          }
           return await automationTool.request({
             action: "patch",
+            expectedUpdatedAt: current.updatedAt,
             instructions: `${availabilityBase.replace(
               "Availability conflict policy: skip-when-busy",
               "Availability conflict policy: fixed",
@@ -5762,6 +6474,9 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         routeBinding: "current_conversation",
         status: "active",
       }));
+      if (saved.action !== "save") {
+        throw new Error("Expected first-read save result.");
+      }
       await expect(showAutomation({
         slug: MURPH_ONBOARDING_FIRST_PERSONAL_READ_AUTOMATION_SLUG,
         vaultRoot,
@@ -5783,6 +6498,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
           }
           return await automationTool.request({
             action: "patch",
+            expectedUpdatedAt: saved.updatedAt,
             lookup: MURPH_ONBOARDING_FIRST_PERSONAL_READ_AUTOMATION_SLUG,
             status: "archived",
           });
@@ -7322,6 +8038,40 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     const fetchSnapshotRequests: Array<Parameters<RuntimeDeviceSyncPort["fetchSnapshot"]>[0]> = [];
     const reconcileRequests: Array<Parameters<NonNullable<RuntimeDeviceSyncPort["reconcileAccount"]>>[0]> = [];
     const logRequests: HostedRuntimeLogRequest[] = [];
+    const accountSnapshots = Array.from({ length: 33 }, (_, index) => ({
+      connection: {
+        accessTokenExpiresAt: "2026-05-01T00:00:00.000Z",
+        connectedAt: "2026-04-28T00:00:00.000Z",
+        createdAt: new Date(Date.parse("2026-04-28T00:00:00.000Z") - index * 1_000)
+          .toISOString(),
+        displayName: index === 0 ? "Training wearable" : `Training wearable ${index + 1}`,
+        externalAccountId: `external-account-not-for-assistant-${index + 1}`,
+        id: index === 0
+          ? "conn_synthetic_whoop"
+          : `conn_synthetic_whoop_${String(index + 1).padStart(2, "0")}`,
+        metadata: { privateProviderDetail: "not-for-assistant" },
+        provider: "whoop",
+        scopes: ["read:recovery"],
+        status: "active" as const,
+      },
+      credential: {
+        credentialMetadata: { privateCredentialDetail: "not-for-assistant" },
+        kind: "none" as const,
+      },
+      localState: {
+        lastErrorCode: null,
+        lastErrorMessage: null,
+        lastSyncCompletedAt: "2026-04-29T00:00:00.000Z",
+        lastSyncErrorAt: null,
+        lastSyncStartedAt: "2026-04-28T23:59:00.000Z",
+        lastWebhookAt: "2026-04-28T23:58:00.000Z",
+        nextReconcileAt: null,
+      },
+    }));
+    const accountCursor = {
+      createdAt: accountSnapshots[31]!.connection.createdAt,
+      id: accountSnapshots[31]!.connection.id,
+    };
     const deviceSyncPort = {
       ...createNoDirtyRuntimeDeviceSyncPortMethods(),
       async applyUpdates() {
@@ -7342,36 +8092,14 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         };
       },
       async fetchSnapshot(request) {
+        const pageIndex = fetchSnapshotRequests.length;
         fetchSnapshotRequests.push(request);
         return {
-          connections: [{
-            connection: {
-              accessTokenExpiresAt: "2026-05-01T00:00:00.000Z",
-              connectedAt: "2026-04-28T00:00:00.000Z",
-              createdAt: "2026-04-28T00:00:00.000Z",
-              displayName: "Training wearable",
-              externalAccountId: "external-account-not-for-assistant",
-              id: "conn_synthetic_whoop",
-              metadata: { privateProviderDetail: "not-for-assistant" },
-              provider: "whoop",
-              scopes: ["read:recovery"],
-              status: "active" as const,
-            },
-            credential: {
-              credentialMetadata: { privateCredentialDetail: "not-for-assistant" },
-              kind: "none" as const,
-            },
-            localState: {
-              lastErrorCode: null,
-              lastErrorMessage: null,
-              lastSyncCompletedAt: "2026-04-29T00:00:00.000Z",
-              lastSyncErrorAt: null,
-              lastSyncStartedAt: "2026-04-28T23:59:00.000Z",
-              lastWebhookAt: "2026-04-28T23:58:00.000Z",
-              nextReconcileAt: null,
-            },
-          }],
+          connections: pageIndex === 0
+            ? accountSnapshots.slice(0, 32)
+            : accountSnapshots.slice(32),
           generatedAt: "2026-04-29T00:00:00.000Z",
+          nextCursor: pageIndex === 0 ? accountCursor : null,
           userId: "member_synthetic_phase",
         };
       },
@@ -7392,7 +8120,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         providerConfigs: {
           junction: {
             environment: "sandbox",
-            providerFilter: ["fitbit"],
+            providerFilter: ["fitbit", "dexcom_v3", "dexcom"],
             region: "us",
           },
           strava: {
@@ -7416,6 +8144,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         deviceConnectProviders: [
           { label: "WHOOP", provider: "whoop" },
           { label: "Fitbit", provider: "fitbit" },
+          { label: "Dexcom (G6 and older)", provider: "dexcom" },
         ],
         deviceTool: expect.objectContaining({ request: expect.any(Function) }),
         memberId: "member_synthetic_phase",
@@ -7431,24 +8160,34 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       provider: " whoop ",
       sourceProvider: " whoop_v2 ",
     }, { signal: abortController.signal })).resolves.toEqual({
-      accounts: [{
-        accountId: "conn_synthetic_whoop",
-        displayName: "Training wearable",
-        lastErrorCode: null,
-        lastSyncCompletedAt: "2026-04-29T00:00:00.000Z",
-        provider: "whoop",
-        status: "active",
-      }],
+      accounts: accountSnapshots.map(({ connection, localState }) => ({
+        accountId: connection.id,
+        displayName: connection.displayName,
+        lastErrorCode: localState.lastErrorCode,
+        lastSyncCompletedAt: localState.lastSyncCompletedAt,
+        provider: connection.provider,
+        status: connection.status,
+      })),
       action: "list_accounts",
       provider: "whoop",
       sourceProvider: "whoop_v2",
     });
-    expect(fetchSnapshotRequests).toEqual([{
-      includeCredentialMaterial: false,
-      provider: "whoop",
-      signal: abortController.signal,
-      sourceProviderSlug: "whoop_v2",
-    }]);
+    expect(fetchSnapshotRequests).toEqual([
+      {
+        includeCredentialMaterial: false,
+        provider: "whoop",
+        signal: abortController.signal,
+        sourceProviderSlug: "whoop_v2",
+      },
+      {
+        cursor: accountCursor,
+        includeCredentialMaterial: false,
+        limit: 32,
+        provider: "whoop",
+        signal: abortController.signal,
+        sourceProviderSlug: "whoop_v2",
+      },
+    ]);
     await expect(
       deviceTool.request({
         action: "connect",
@@ -7488,7 +8227,21 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       action: "connect",
       provider: "strava",
     })).rejects.toThrow("not available to connect");
-    expect(connectLinkRequests).toHaveLength(1);
+    await expect(deviceTool.request({
+      action: "connect",
+      provider: "dexcom_v3",
+    })).rejects.toThrow("not available to connect");
+    await expect(deviceTool.request({
+      action: "connect",
+      provider: "dexcom",
+    })).resolves.toEqual({
+      action: "connect",
+      link: expect.objectContaining({ provider: "dexcom" }),
+    });
+    expect(connectLinkRequests).toEqual([
+      { connectTarget: "whoop", messagingReturnTarget: "telegram" },
+      { connectTarget: "dexcom", messagingReturnTarget: "telegram" },
+    ]);
     await Promise.resolve();
     const deviceConnectLogs = logRequests
       .flatMap((request) => request.entries)
@@ -7497,8 +8250,8 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       expect.objectContaining({
         deviceConnectIssueLinkAvailable: true,
         deviceConnectPortPresent: true,
-        deviceConnectProviderCount: 2,
-        deviceConnectProviders: ["whoop", "fitbit"],
+        deviceConnectProviderCount: 3,
+        deviceConnectProviders: ["whoop", "fitbit", "dexcom"],
         deviceConnectStage: "context",
         deviceConnectStatus: "available",
       }),
@@ -7514,6 +8267,19 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         deviceConnectReturnTarget: "telegram",
         expiresAtPresent: true,
         provider: "whoop",
+      }),
+      expect.objectContaining({
+        deviceConnectStage: "request",
+        deviceConnectStatus: "requested",
+        deviceConnectReturnTarget: "telegram",
+        provider: "dexcom",
+      }),
+      expect.objectContaining({
+        deviceConnectStage: "request",
+        deviceConnectStatus: "issued",
+        deviceConnectReturnTarget: "telegram",
+        expiresAtPresent: true,
+        provider: "dexcom",
       }),
     ]);
     expect(JSON.stringify(deviceConnectLogs)).not.toContain("connect.example.test");
@@ -7574,14 +8340,6 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       },
       async fetchSnapshot(request) {
         fetchSnapshotRequests.push(request);
-        if (request?.sourceProviderSlug !== "whoop_v2") {
-          return {
-            connections: [],
-            generatedAt: "2026-04-29T00:00:00.000Z",
-            userId: "member_synthetic_phase",
-          };
-        }
-
         return {
           connections: [
             {
@@ -7676,23 +8434,15 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(assistantLaneCall?.executionContext.hosted?.deviceTool).toEqual(
       expect.objectContaining({ request: expect.any(Function) }),
     );
-    expect(fetchSnapshotRequests.map((request) => request?.sourceProviderSlug)).toEqual([
-      "fitbit",
-      "garmin",
-      "oura",
-      "withings",
-      "whoop_v2",
+    expect(fetchSnapshotRequests).toEqual([
+      {
+        includeCredentialMaterial: false,
+        signal: expect.any(AbortSignal),
+      },
     ]);
-    expect(fetchSnapshotRequests).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          includeCredentialMaterial: false,
-          limit: 4,
-          signal: expect.any(AbortSignal),
-          sourceProviderSlug: "whoop_v2",
-        }),
-      ]),
-    );
+    for (const request of fetchSnapshotRequests) {
+      expect(request).not.toHaveProperty("limit");
+    }
     expect(assistantLaneCall?.signal).toBeUndefined();
     expect(assistantLaneCall).not.toHaveProperty("suppressActiveTurnInputRefresh");
     expect(assistantLaneCall?.executionContext.hosted?.dynamicContextPrompts)
@@ -7869,7 +8619,8 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(prompt).toContain("generic device-connect command is ambiguous");
     expect(prompt).not.toContain("vault-cli device connect oura --format json");
     expect(prompt).toContain("Strava currently needs reconnect");
-    expect(prompt).toContain("No hosted reconnect target is configured for this wearable/source");
+    expect(prompt).toContain("Reconnect is not currently available for this wearable/source");
+    expect(prompt).toContain("Do not offer or issue a reconnect link");
     expect(prompt).not.toContain("vault-cli device connect strava --format json");
   });
 
@@ -8328,6 +9079,10 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         type: "input.reply-failed",
       }),
     }));
+    const serializedLogRequests = JSON.stringify(logRequests);
+    expect(serializedLogRequests).not.toContain('"itemId"');
+    expect(serializedLogRequests).not.toContain('"mailboxDedupeKey"');
+    expect(serializedLogRequests).not.toContain('"requestId"');
   });
 
   it("redacts unsafe diagnostic error text before persistence", async () => {
@@ -8418,8 +9173,32 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
 
   it("writes an outbox delivery summary after committed delivery effects drain", async () => {
     const logRequests: HostedRuntimeLogRequest[] = [];
+    const deliveryEffect = {
+      ...createDeliveryEffect(),
+      payload: {
+        ...createDeliveryEffect().payload,
+        media: [
+          {
+            alt: "Start",
+            kind: "image" as const,
+            source: "exercise_catalog:movement:1",
+            url: "https://cdn.example.test/exercises/start.png",
+          },
+          {
+            alt: "Finish",
+            contentType: "image/png" as const,
+            filename: "finish.png",
+            kind: "vault_image" as const,
+            ref: "generated/finish.png",
+            sha256: "a".repeat(64),
+            sizeBytes: 1234,
+            source: "murph.generate_image",
+          },
+        ],
+      },
+    };
     mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValueOnce([
-      createDeliveryEffect(),
+      deliveryEffect,
     ]);
     mocks.drainHostedPreparedAssistantDeliveries.mockResolvedValueOnce([
       {
@@ -8461,9 +9240,21 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       redactedJson: expect.objectContaining({
         attempted: 1,
         failed: 0,
+        imageBearingIntentCount: 1,
+        imageMediaItemCount: 2,
+        maxMediaItemsPerIntent: 2,
+        maxMessageLength: "Synthetic delivery".length,
+        mediaItemCount: 2,
+        mediaKindSummary: "image:1,vault_image:1",
+        privateImageMediaItemCount: 1,
+        publicImageMediaItemCount: 1,
         retryable: 0,
         sent: 1,
         statusSummary: "sent:1",
+        totalImageAltTextLength: "Start".length + "Finish".length,
+        totalMessageLength: "Synthetic delivery".length,
+        vaultFileMediaItemCount: 0,
+        voiceMemoMediaItemCount: 0,
       }),
     }));
     expect(mocks.drainHostedProviderCleanupAfterCommit).not.toHaveBeenCalled();
@@ -9097,6 +9888,11 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
             ref: "documents/lab-results.pdf",
             sha256: "a".repeat(64),
             sizeBytes: 1234,
+          }, {
+            alt: "Start position",
+            kind: "image" as const,
+            source: "exercise_catalog:movement:1",
+            url: "https://cdn.example.test/exercises/start.png",
           }],
         },
       };
@@ -9204,6 +10000,10 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         "outgoing message failed to send and was NOT delivered",
       );
       expect(event?.content.text).toContain('vault file "lab-results.pdf"');
+      expect(event?.content.text).toContain("1 image");
+      expect(event?.content.text).toContain(
+        "A text-only substitute is not equivalent; do not offer or send one as recovery",
+      );
     } finally {
       await rm(vaultRoot, { force: true, recursive: true });
     }
@@ -12027,6 +12827,102 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(() => parseHostedRuntimeLogRequest(deliveryLogRequest)).not.toThrow();
   });
 
+  it("projects Linq payload shape and response signatures without provider content", async () => {
+    const logRequests: HostedRuntimeLogRequest[] = [];
+    mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValueOnce([
+      createDeliveryEffect(),
+    ]);
+    mocks.drainHostedPreparedAssistantDeliveries.mockResolvedValueOnce([
+      createFailedDeliveryOutcome({
+        deliveryErrorCode: "LINQ_API_REQUEST_FAILED",
+        deliveryErrorDetails: {
+          failureStage: "http",
+          method: "POST",
+          name: "VaultCliError",
+          operation: "send_message",
+          providerErrorCode: "INVALID_MEDIA",
+          providerErrorMessage: "provider response prose",
+          providerRequestId: "trace_safe_123",
+          requestAttachmentMediaPartCount: 1,
+          requestBodyShape: "object:message|message:idempotency_key,parts",
+          requestMediaPartCount: 8,
+          requestMessageLength: 4321,
+          requestMessagePartCount: 9,
+          requestPublicUrlMediaPartCount: 7,
+          requestTextPartCount: 1,
+          responseBodyKeyCount: 4,
+          responseBodyKeySummary: "code,errors,trace_id",
+          responseBodyKind: "json_object",
+          responseBodySha256: "a".repeat(64),
+          responseBodyStringFieldCount: 3,
+          responseBodyStringFieldSummary: "code,trace_id",
+          responseBodyTextLength: 246,
+          retryable: false,
+          status: 400,
+        },
+        deliveryErrorMessage:
+          "Linq request POST /chats/[chat]/messages failed with HTTP 400.",
+        effectId: "effect_linq_payload_diagnostics",
+      }),
+    ]);
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      logRequests,
+      workspace: createDueAssistantWorkspace(),
+    }));
+    await result.afterCheckpoint?.();
+    const deliveryLogRequest = withoutAssistantTurnTimingLogs(logRequests)[1];
+
+    expect(deliveryLogRequest?.entries[0]?.redactedJson).toEqual(expect.objectContaining({
+      deliveryErrorSummaries: [
+        expect.objectContaining({
+          deliveryErrorDetailFailureStage: "http",
+          deliveryErrorDetailMethod: "POST",
+          deliveryErrorDetailOperation: "send_message",
+          deliveryErrorDetailProviderCode: "INVALID_MEDIA",
+          deliveryErrorDetailProviderRequestId: "trace_safe_123",
+          deliveryErrorDetailRequestSummary: JSON.stringify({
+            messageLength: 4321,
+            partCount: 9,
+            textPartCount: 1,
+            mediaPartCount: 8,
+            publicUrlMediaPartCount: 7,
+            attachmentMediaPartCount: 1,
+            bodyShape: "object:message|message:idempotency_key,parts",
+          }),
+          deliveryErrorDetailResponseSummary: JSON.stringify({
+            kind: "json_object",
+            textLength: 246,
+            keyCount: 4,
+            keySummary: "code,errors,trace_id",
+            stringFieldCount: 3,
+            stringFieldSummary: "code,trace_id",
+          }),
+          deliveryErrorDetailResponseSignature: "a".repeat(64),
+          deliveryErrorDetailStatus: 400,
+        }),
+      ],
+    }));
+    const deliveryErrorSummaries = deliveryLogRequest?.entries[0]?.redactedJson
+      ?.deliveryErrorSummaries;
+    expect(Array.isArray(deliveryErrorSummaries)).toBe(true);
+    if (!Array.isArray(deliveryErrorSummaries)) {
+      throw new Error("Expected delivery error summaries.");
+    }
+    const deliveryErrorSummary = deliveryErrorSummaries[0];
+    expect(deliveryErrorSummary).toBeDefined();
+    if (
+      deliveryErrorSummary === null
+      || typeof deliveryErrorSummary !== "object"
+      || Array.isArray(deliveryErrorSummary)
+    ) {
+      throw new Error("Expected a delivery error summary object.");
+    }
+    expect(Object.keys(deliveryErrorSummary)).toHaveLength(16);
+    expect(JSON.stringify(deliveryLogRequest)).not.toContain("provider response prose");
+    expect(() => parseHostedRuntimeLogRequest(deliveryLogRequest)).not.toThrow();
+  });
+
   it("preserves safe Telegram reaction delivery error codes", async () => {
     const logRequests: HostedRuntimeLogRequest[] = [];
     mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValueOnce([
@@ -12119,11 +13015,15 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
   it("writes a system mailbox processing summary", async () => {
     const logRequests: HostedRuntimeLogRequest[] = [];
     mocks.prepareHostedSystemMailboxItemForCheckpoint.mockResolvedValueOnce({
+      attemptCount: 2,
       errorCode: "system_mailbox.retryable",
       errorMessage: "redacted",
       itemId: "system_mailbox_item_123456789",
+      legacyUsageReferralAuthorityClassification: "identity_mismatch",
       nextWakeAt: "2026-04-27T00:10:00.000Z",
+      routeAction: "dispatch-assistant-notification",
       status: "retryable_failed",
+      wakeKind: "assistant.notification.requested",
     });
 
     const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({ logRequests }));
@@ -12139,9 +13039,13 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       level: "warn",
       phase: "checkpoint",
       redactedJson: expect.objectContaining({
+        attemptCount: 2,
         errorCode: "system_mailbox.retryable",
+        legacyUsageReferralAuthorityClassification: "identity_mismatch",
         nextWakeAtPresent: true,
+        routeAction: "dispatch-assistant-notification",
         status: "retryable_failed",
+        wakeKind: "assistant.notification.requested",
       }),
     }));
   });
@@ -12399,13 +13303,18 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }));
   });
 
-  it("preserves system mailbox retry wake without running idle device sync", async () => {
+  it("does not mark a retryable device-sync mailbox attempt as completed", async () => {
+    const deviceSyncWorkspaceWakeAt = "2026-04-27T00:00:00.000Z";
     mocks.prepareHostedSystemMailboxItemForCheckpoint.mockResolvedValueOnce({
+      attemptCount: 2,
       errorCode: "system_mailbox.retryable",
       errorMessage: "redacted",
       itemId: "system_mailbox_item_retryable",
+      legacyUsageReferralAuthorityClassification: null,
       nextWakeAt: "2026-04-27T00:10:00.000Z",
+      routeAction: "run-device-sync-wake",
       status: "retryable_failed",
+      wakeKind: "device-sync.wake",
     });
     const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
       now: () => "2026-04-27T00:00:00.000Z",
@@ -12419,13 +13328,56 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         publicBaseUrl: "https://device-sync.example.test",
         secret: "synthetic-device-sync-secret",
       },
+      workspace: createDueAssistantWorkspace({
+        nextWakeAt: deviceSyncWorkspaceWakeAt,
+        nextWakeReason: "device-sync.reconcile",
+      }),
     }));
     const postCheckpoint = await result.afterCheckpoint?.();
 
     expect(result.nextWakeAt).toBe("2026-04-27T00:10:00.000Z");
+    expect(result.nextWakeReason).toBeUndefined();
+    expect(result.deviceSyncMaintenanceRan).toBeUndefined();
     expect(postCheckpoint).toBeUndefined();
     expect(mocks.runHostedDeviceSyncWakeLane).not.toHaveBeenCalled();
     expect(mocks.recordHostedDeviceSyncDirtyPostCheckpointRecord).not.toHaveBeenCalled();
+  });
+
+  it("does not record a retryable mailbox item during an unrelated checkpoint", async () => {
+    const logRequests: HostedRuntimeLogRequest[] = [];
+    mocks.readHostedProviderCleanupCheckpoint.mockResolvedValueOnce({
+      nextWakeAt: null,
+    });
+    mocks.prepareHostedSystemMailboxItemForCheckpoint.mockResolvedValueOnce({
+      attemptCount: 2,
+      errorCode: "system_mailbox.retryable",
+      errorMessage: "redacted",
+      itemId: "system_mailbox_item_retryable",
+      legacyUsageReferralAuthorityClassification: null,
+      nextWakeAt: "2026-04-27T00:10:00.000Z",
+      routeAction: "dispatch-assistant-notification",
+      status: "retryable_failed",
+      wakeKind: "assistant.notification.requested",
+    });
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      logRequests,
+      now: () => "2026-04-27T00:00:00.000Z",
+    }));
+    await result.afterCheckpoint?.();
+
+    expect(mocks.recordHostedSystemMailboxItemAfterCheckpoint).not.toHaveBeenCalled();
+    expect(
+      logRequests.flatMap((request) => request.entries).filter((entry) =>
+        entry.eventCode === "mailbox.system_processed"
+      ),
+    ).toEqual([
+      expect.objectContaining({
+        redactedJson: expect.objectContaining({
+          status: "retryable_failed",
+        }),
+      }),
+    ]);
   });
 
   it("preserves a device-sync mailbox follow-up wake after recording the mailbox item", async () => {
@@ -13846,9 +14798,24 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         "assistant.notification.requested:usage-referral-reward:referral_123",
       label: "usage-referral reward",
     },
+    {
+      dedupeKey: "aask_done_private_completion",
+      label: "legacy private Assistant Ask completion",
+    },
+    {
+      dedupeKey: "aask_private_completion",
+      label: "current private Assistant Ask completion",
+    },
   ])("drains an exact $label through the causal-only fixed-route outbox once", async ({
     dedupeKey,
   }) => {
+    const deferredUsageRecords: AssistantUsageRecord[] = [];
+    const usageRecordPort: RuntimeUsageRecordPort = {
+      recordUsage: vi.fn(async (record) => ({
+        recorded: true,
+        usageId: record.usageId,
+      })),
+    };
     const completionItem = createExternalCompletionSystemMailboxItem({
       dedupeKey,
     });
@@ -13872,17 +14839,22 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     mocks.prepareHostedSystemMailboxItemForCheckpoint
       .mockResolvedValueOnce(null)
       .mockResolvedValueOnce(null)
-      .mockResolvedValueOnce({
-        item: completionItem,
-        itemId: completionItem.itemId,
-        metrics: {
-          bootstrapResult: null,
-          conversationMetrics: null,
-          deliveryIntentIds: [deliveryIntentId],
-          mailboxLane: "assistant-notification",
-          redactedLogEntries: [],
-        },
-        status: "processed",
+      .mockImplementationOnce(async ({ executionContext }) => {
+        await executionContext.hosted?.usageRecorder?.recordUsage(
+          createAssistantUsageRecord(),
+        );
+        return {
+          item: completionItem,
+          itemId: completionItem.itemId,
+          metrics: {
+            bootstrapResult: null,
+            conversationMetrics: null,
+            deliveryIntentIds: [deliveryIntentId],
+            mailboxLane: "assistant-notification",
+            redactedLogEntries: [],
+          },
+          status: "processed",
+        };
       });
     mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValueOnce([
       deliveryEffect,
@@ -13914,6 +14886,10 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       conversationImportedCount: 0,
       importedCount: 1,
       now: () => "2026-04-27T00:03:00.000Z",
+      recordDeferredUsage: (record) => {
+        deferredUsageRecords.push(record);
+      },
+      runtimeUsageRecordPort: usageRecordPort,
     });
     const result = await runHostedWorkspaceAssistantPhase(input);
 
@@ -13924,9 +14900,20 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
           allowedMailboxDedupeKeyPrefixes: [
             "assistant.notification.requested:phone-call-result:",
             "assistant.notification.requested:usage-referral-reward:",
+            "aask_done_",
+            "aask_private_",
           ],
           allowedRouteActions: ["dispatch-assistant-notification"],
           allowedWakeKinds: ["assistant.notification.requested"],
+          executionContext: {
+            hosted: expect.objectContaining({
+              memberId: "member_synthetic_phase",
+              usageRecorder: {
+                recordUsage: expect.any(Function),
+              },
+              userEnvKeys: [],
+            }),
+          },
         }),
       );
     expect(mocks.collectHostedAssistantDeliverySideEffects).toHaveBeenCalledWith({
@@ -13940,6 +14927,12 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       checkpointReason: "outbox_sending",
       progressed: true,
     }));
+    expect(deferredUsageRecords).toEqual([
+      expect.objectContaining({
+        usageId: "turn_direct_usage.attempt-1",
+      }),
+    ]);
+    expect(usageRecordPort.recordUsage).not.toHaveBeenCalled();
 
     await result.afterCheckpoint?.();
 
@@ -13960,6 +14953,8 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
 
     const replay = await runHostedWorkspaceAssistantPhase(input);
     expect(replay.progressed).toBe(false);
+    expect(deferredUsageRecords).toHaveLength(1);
+    expect(usageRecordPort.recordUsage).not.toHaveBeenCalled();
     expect(mocks.drainHostedPreparedAssistantDeliveries).toHaveBeenCalledTimes(1);
   });
 
@@ -14784,6 +15779,52 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     });
   });
 
+  it("defers vault-share projection work until after the durable checkpoint", async () => {
+    const vaultShareItem = createVaultShareProjectionSystemMailboxItem();
+    mocks.prepareHostedSystemMailboxItemForCheckpoint.mockResolvedValueOnce({
+      item: vaultShareItem,
+      itemId: vaultShareItem.itemId,
+      metrics: {
+        bootstrapResult: null,
+        conversationMetrics: null,
+        mailboxLane: "runtime-control",
+        redactedLogEntries: [],
+      },
+      status: "processed",
+    });
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      now: () => "2026-04-27T00:00:00.000Z",
+    }));
+    const postCheckpoint = await result.afterCheckpoint?.();
+
+    expect(mocks.recordHostedSystemMailboxItemAfterCheckpoint).not.toHaveBeenCalled();
+    expect(postCheckpoint).toEqual(expect.objectContaining({
+      afterDurableCheckpoint: expect.any(Array),
+      checkpointReason: "system_mailbox_receipt",
+      redactedStatus: expect.objectContaining({
+        hostedSystemMailboxRecordDeferred: true,
+      }),
+    }));
+
+    const effects = postCheckpoint?.afterDurableCheckpoint;
+    const effect = typeof effects === "function" ? effects : effects?.[0];
+    if (!effect) {
+      throw new Error("Expected deferred vault-share projection effect.");
+    }
+    expect(effect.requiresVaultShareProjectionResult).toBe(true);
+    await effect({
+      vaultShareProjectionResult: { outcome: "delivered" },
+    });
+    expect(mocks.recordHostedSystemMailboxItemAfterCheckpoint).toHaveBeenCalledWith({
+      item: vaultShareItem,
+      operatorHomeRoot: "/tmp/murph-operator-home",
+      runtime: expect.any(Object),
+      vaultShareProjectionResult: { outcome: "delivered" },
+      vaultRoot: "/tmp/murph-vault",
+    });
+  });
+
   it("does not discover terminal Linq cleanup for foreground assistant input ids", async () => {
     const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
       assistantInputIds: ["ain_00000000000000000000000000000007"],
@@ -15410,11 +16451,15 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
           "initialize-group-room-model",
         ]);
         return {
+          attemptCount: item.attemptCount,
           errorCode: "group_room_model_unavailable",
           errorMessage: "Group room model unavailable.",
           itemId: item.itemId,
+          legacyUsageReferralAuthorityClassification: null,
           nextWakeAt: "2026-07-29T18:02:00.000Z",
+          routeAction: item.routeAction,
           status: "retryable_failed",
+          wakeKind: item.wake.kind,
         };
       })
       .mockImplementationOnce(async (input) => {
@@ -15744,11 +16789,15 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     mocks.prepareHostedSystemMailboxItemForCheckpoint.mockImplementationOnce(async () => {
       callOrder.push("member-preferences");
       return {
+        attemptCount: 2,
         errorCode: "synthetic_preferences_retry",
         errorMessage: "Synthetic preferences retry.",
         itemId: "system_mailbox_item_member_preferences",
+        legacyUsageReferralAuthorityClassification: null,
         nextWakeAt: "2026-04-27T00:01:00.000Z",
+        routeAction: "apply-member-preferences",
         status: "retryable_failed",
+        wakeKind: "member.preferences.updated",
       };
     });
     mocks.runHostedAssistantAutomationLane.mockImplementationOnce(async () => {
@@ -16473,11 +17522,15 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     const deliveryEffect = createDeliveryEffect();
     const preparedDispatches = createPreparedDispatchesForDeliveryEffect(deliveryEffect);
     mocks.prepareHostedSystemMailboxItemForCheckpoint.mockResolvedValueOnce({
+      attemptCount: 2,
       errorCode: "HOSTED_MEMBER_CHANNELS_TRANSIENT",
       errorMessage: "Hosted member-channel update failed.",
       itemId: "system_mailbox_item_member_channels",
+      legacyUsageReferralAuthorityClassification: null,
       nextWakeAt: "2026-04-27T00:01:00.000Z",
+      routeAction: "apply-member-channels-update",
       status: "retryable_failed",
+      wakeKind: "member.channels.updated",
     });
     mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValueOnce([
       deliveryEffect,
@@ -16520,11 +17573,15 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       "2026-04-27T00:14:00.000Z",
     );
     mocks.prepareHostedSystemMailboxItemForCheckpoint.mockResolvedValueOnce({
+      attemptCount: 2,
       errorCode: "HOSTED_MEMBER_CHANNELS_TRANSIENT",
       errorMessage: "Hosted member-channel update failed.",
       itemId: "system_mailbox_item_member_channels",
+      legacyUsageReferralAuthorityClassification: null,
       nextWakeAt: "2026-04-27T00:30:00.000Z",
+      routeAction: "apply-member-channels-update",
       status: "retryable_failed",
+      wakeKind: "member.channels.updated",
     });
     mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValueOnce([
       deliveryEffect,
@@ -16586,11 +17643,15 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         status: "processed",
       })
       .mockResolvedValueOnce({
+        attemptCount: 2,
         errorCode: "HOSTED_MEMBER_CHANNELS_TRANSIENT",
         errorMessage: "Hosted member-channel update failed.",
         itemId: "system_mailbox_item_member_channels",
+        legacyUsageReferralAuthorityClassification: null,
         nextWakeAt: "2026-04-27T00:30:00.000Z",
+        routeAction: "apply-member-channels-update",
         status: "retryable_failed",
+        wakeKind: "member.channels.updated",
       });
     mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValueOnce([
       deliveryEffect,
@@ -18074,6 +19135,24 @@ function createCodexAuthSystemMailboxItem() {
       attemptId: "hca_abcdefghijklmnop",
       eventId: "runtime-control:codex-auth",
       kind: "runtime.codex-auth-requested" as const,
+      occurredAt: "2026-04-27T00:00:00.000Z",
+      userId: "member_synthetic_phase",
+    },
+  };
+}
+
+function createVaultShareProjectionSystemMailboxItem() {
+  return {
+    ...createSystemMailboxItem(),
+    itemId: "system_mailbox_item_vault_share_projection",
+    mailboxDedupeKey: "runtime-control:group-share-projection:synthetic",
+    postCheckpointRecord: {
+      kind: "vault-share.projection" as const,
+    },
+    routeAction: "apply-runtime-control-request" as const,
+    wake: {
+      eventId: "runtime-control:group-share-projection:synthetic",
+      kind: "runtime.maintenance-requested" as const,
       occurredAt: "2026-04-27T00:00:00.000Z",
       userId: "member_synthetic_phase",
     },

@@ -153,6 +153,8 @@ export function ConnectSourcesGrid({
           (source) =>
             source.connectionAvailable !== false ||
             Boolean(source.setupGuideId) ||
+            Boolean(source.unavailableActionUrl) ||
+            Boolean(source.unavailableMessage) ||
             source.connected === true ||
             source.requiresReconnect === true ||
             Boolean(source.recoveryKind) ||
@@ -170,6 +172,21 @@ export function ConnectSourcesGrid({
     () => filterConnectSourcesForSearch(displaySources, search),
     [displaySources, search],
   );
+  const disconnectUnavailableSourceNames = useMemo(() => {
+    if (
+      disconnectSource?.disconnectScope !== "junction_account"
+      || !disconnectSource.disconnectConnectionId
+    ) {
+      return [];
+    }
+
+    return displaySources
+      .filter((source) =>
+        source.disconnectConnectionId === disconnectSource.disconnectConnectionId
+        && source.connectionAvailable === false
+      )
+      .map((source) => source.name);
+  }, [disconnectSource, displaySources]);
   const hasInitialCallback = Boolean(initialCallback);
   const activeConnectIntent = initialConnectIntent ?? locationConnectIntent;
   const initialConnectIntentPresentation = useMemo(
@@ -608,6 +625,7 @@ export function ConnectSourcesGrid({
       />
 
       <ConnectDisconnectDialog
+        affectedUnavailableSourceNames={disconnectUnavailableSourceNames}
         errorMessage={
           disconnectSource && actionError?.sourceId === disconnectSource.id
             ? actionError.message

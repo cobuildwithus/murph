@@ -222,6 +222,47 @@ export function createCloudflareEffectsPort(input: {
     },
     ...(webControlTransport
       ? {
+          async assertAssistantAskPrivateCompletionAuthority(request, context) {
+            const description =
+              "Hosted Assistant Ask private completion authority assertion";
+            const payload = await fetchHostedWebControlPlaneJson({
+              body: {
+                authority: request.route,
+                privateAssistantAskCompletion: {
+                  answeredMailboxItemIds: request.answeredMailboxItemIds,
+                  expiresAt: request.assistantAskCompletionExpiresAt,
+                  idempotencyKey: request.idempotencyKey,
+                  responseTextDigest: request.responseTextDigest,
+                },
+              },
+              boundUserId: input.boundUserId,
+              description,
+              fetchImpl: input.fetchImpl,
+              headers: await requireHostedEffectsRuntimeWriteFenceHeaders({
+                description,
+                workspaceCheckpointBridge: input.workspaceCheckpointBridge ?? null,
+              }),
+              path: HOSTED_RUNTIME_THREAD_ROUTE_AUTHORITY_PATH,
+              signal: context?.signal ?? null,
+              timeoutMs: input.timeoutMs,
+              transport: webControlTransport,
+            });
+            const authorityResponse = payload as {
+              assistantAskFallbackRequired?: unknown;
+              authorized?: unknown;
+            } | null;
+            if (
+              authorityResponse?.authorized === false
+              && authorityResponse.assistantAskFallbackRequired === true
+            ) {
+              return { assistantAskFallbackRequired: true };
+            }
+            if (authorityResponse?.authorized !== true) {
+              throw new TypeError(
+                "Hosted Assistant Ask private completion authority response is invalid.",
+              );
+            }
+          },
           async assertExternalThreadRouteAuthority(authority, context) {
             const payload = await fetchHostedWebControlPlaneJson({
               body: context?.assistantAskCompletion
@@ -375,8 +416,7 @@ function parseHostedRuntimeLinqRecentInboundEngagementResult(
     deliveryBlockCode?: unknown;
     deliveryPosture?: unknown;
     providerDispatchClaimed?: unknown;
-    targetOverride?: unknown;
-    threadIsDirect?: unknown;
+    resolvedRoute?: unknown;
   };
   if (typeof response.assistantAskFallbackRequired === "boolean") {
     result.assistantAskFallbackRequired = response.assistantAskFallbackRequired;
@@ -400,33 +440,64 @@ function parseHostedRuntimeLinqRecentInboundEngagementResult(
   if (typeof response.providerDispatchClaimed === "boolean") {
     result.providerDispatchClaimed = response.providerDispatchClaimed;
   }
-  if (typeof response.threadIsDirect === "boolean") {
-    result.threadIsDirect = response.threadIsDirect;
-  }
 
-  const targetOverride = response.targetOverride;
+  const resolvedRoute = response.resolvedRoute;
   if (
-    !targetOverride ||
-    typeof targetOverride !== "object" ||
-    Array.isArray(targetOverride)
+    !resolvedRoute ||
+    typeof resolvedRoute !== "object" ||
+    Array.isArray(resolvedRoute)
   ) {
     return result;
   }
 
-  const target = readOptionalStringField(targetOverride, "target");
-  const targetKind = readOptionalStringField(targetOverride, "targetKind");
-  if (target && targetKind === "thread") {
-    const conversationThreadId = readOptionalStringField(
-      targetOverride,
-      "conversationThreadId",
-    );
-    result.targetOverride = {
-      ...(conversationThreadId ? { conversationThreadId } : {}),
+  const record = resolvedRoute as Record<string, unknown>;
+  const target = readOptionalStringField(record, "target");
+  const targetKind = readOptionalStringField(record, "targetKind");
+  const conversationThreadId = readHostedRuntimeNullableStringField(
+    record,
+    "conversationThreadId",
+  );
+  const directRecipientPhoneNumber = readHostedRuntimeNullableStringField(
+    record,
+    "directRecipientPhoneNumber",
+  );
+  const fromPhoneNumber = readHostedRuntimeNullableStringField(
+    record,
+    "fromPhoneNumber",
+  );
+  if (
+    target
+    && (targetKind === "participant" || targetKind === "thread")
+    && conversationThreadId !== undefined
+    && directRecipientPhoneNumber !== undefined
+    && fromPhoneNumber !== undefined
+    && typeof record.threadIsDirect === "boolean"
+  ) {
+    result.resolvedRoute = {
+      conversationThreadId,
+      directRecipientPhoneNumber,
+      fromPhoneNumber,
       target,
       targetKind,
+      threadIsDirect: record.threadIsDirect,
     };
   }
   return result;
+}
+
+function readHostedRuntimeNullableStringField(
+  record: Record<string, unknown>,
+  field: string,
+): string | null | undefined {
+  const value = record[field];
+  if (value === null) {
+    return null;
+  }
+  if (typeof value !== "string") {
+    return undefined;
+  }
+  const normalized = value.trim();
+  return normalized.length > 0 ? normalized : undefined;
 }
 
 function readOptionalHostedEmailDeliverySummary(

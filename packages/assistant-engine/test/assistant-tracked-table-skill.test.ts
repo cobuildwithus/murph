@@ -38,6 +38,46 @@ const FOUR_SET_CARD = {
   },
 } satisfies AssistantResponseCard
 
+const AD_HOC_EXERCISE_NAMES = [
+  'Bench press',
+  'Incline bench press',
+  'Push-up',
+  'Dip',
+] as const
+
+const AD_HOC_TARGETLESS_WORKOUT_CARD = {
+  kind: 'compact_table',
+  version: 1,
+  title: 'Upper body workout',
+  subtitle: null,
+  footer: 'Reply with the exercise, set, and result.',
+  tracking: {
+    kind: 'workout',
+    entityId: 'evt_01K1ABCDEFGHJKMNPQRSTVWXYZ',
+    snapshotAt: '2026-08-11T18:14:00.000Z',
+  },
+  workout: {
+    version: 1,
+    state: 'active',
+    exercises: AD_HOC_EXERCISE_NAMES.map((name) => ({
+      name,
+      sets: [{ status: 'pending' as const, target: null, actual: null }],
+    })),
+  },
+} satisfies AssistantResponseCard
+
+const AD_HOC_COMPLETED_TARGETLESS_WORKOUT_CARD = {
+  ...AD_HOC_TARGETLESS_WORKOUT_CARD,
+  workout: {
+    version: 1,
+    state: 'completed',
+    exercises: AD_HOC_EXERCISE_NAMES.map((name) => ({
+      name,
+      sets: [{ status: 'skipped' as const, target: null, actual: null }],
+    })),
+  },
+} satisfies AssistantResponseCard
+
 describe('assistant tracked workout table skill', () => {
   it('registers direct table and live-workout language with the skill router', () => {
     const matches = ASSISTANT_SKILLS.filter(
@@ -48,6 +88,7 @@ describe('assistant tracked workout table skill', () => {
     expect(matches[0]?.triggerHint).toContain('workout table')
     expect(matches[0]?.triggerHint).toContain('structured tracker')
     expect(matches[0]?.triggerHint).toContain('live workout log')
+    expect(matches[0]?.triggerHint).toContain('start or resume a live workout')
     expect(matches[0]?.triggerHint).toContain('updated/refreshed table')
   })
 
@@ -61,6 +102,7 @@ describe('assistant tracked workout table skill', () => {
       '$MURPH_ASSISTANT_SKILLS_ROOT/tracked-table/SKILL.md',
     )
     expect(strengthSkill).toContain('put a workout log in a table')
+    expect(strengthSkill).toContain('start or resume a canonical live workout')
     expect(strengthSkill).toContain('instead of Markdown table syntax')
   })
 
@@ -85,7 +127,45 @@ describe('assistant tracked workout table skill', () => {
     )
     expect(skill).toContain('one explicit exercise selector, and `--set-order`')
     expect(skill).toContain('correct the same set rather than append a duplicate')
+    expect(skill).toContain(
+      'The sole carry-forward exception is one exact repetition count the member explicitly applied to every set of one exercise',
+    )
+    expect(skill).toContain(
+      'while the same workout is active and its establishing message remains available in the current direct conversation',
+    )
+    expect(skill).toContain(
+      'pass only `--reps` with that count instead of asking again or writing a note-only completion',
+    )
+    expect(skill).toContain(
+      'Do not carry forward weight, duration, distance, RPE, bodyweight, assistance, added weight, or any other actual field',
+    )
+    expect(skill).toContain(
+      'A repetition count stated with the completion overrides the earlier count',
+    )
+    expect(skill).toContain(
+      'range, AMRAP or qualitative instruction, conflicts with another count',
+    )
+    expect(skill).toContain(
+      'Never treat a saved-plan target, prior workout, card target, or assistant-authored suggestion as this repetition prescription',
+    )
+    expect(skill).not.toContain('pass the prescribed actual field')
     expect(skill).toContain('Saved target values remain in the workout format')
+    expect(skill).toContain('preserve every distinct exercise the member named')
+    expect(skill).toContain('including closely related variations')
+    expect(skill).toContain(
+      'one unlogged targetless placeholder as the next log slot',
+    )
+    expect(skill).toContain('not as a claimed plan or completed set')
+    expect(skill).toContain(
+      'every canonical event set with no matching format set',
+    )
+    expect(skill).toContain(
+      '`pending` while the workout is live and the slot is empty',
+    )
+    expect(skill).toContain(
+      '`skipped` after the workout ends and the slot remains empty',
+    )
+    expect(skill).toContain('not evidence of a planned set')
     expect(skill).toContain('vault-cli workout format show')
     expect(skill).toContain(
       'Never copy planned targets into actual set fields',
@@ -96,7 +176,43 @@ describe('assistant tracked workout table skill', () => {
     expect(skill).toContain('Use `--clear-workout` only')
     expect(skill).toContain('remove the entire record')
     expect(skill).toContain('Finish only when the member explicitly says they are done')
+    expect(skill).toContain('already-completed return is convergence')
+    expect(skill).not.toContain('Complete workout exercise')
     expect(skill).toContain('Never infer weight, repetitions, effort, assistance')
+    expect(skill).toContain(
+      'After every verified private workout mutation that changes the snapshot',
+    )
+    expect(skill).toContain(
+      'ordinary set log, correction, clear, exercise addition, start, resume, or finish',
+    )
+    expect(skill).toContain(
+      'Do not send a text-only acknowledgement or companion prose.',
+    )
+    expect(skill).toContain(
+      'After every verified ordinary free-form set log, correction, clear, or exercise addition',
+    )
+    expect(skill).toContain(
+      'When a request does not materially change canonical workout state',
+    )
+    expect(skill).not.toContain(
+      'Do not send a fresh table card after every ordinary set update.',
+    )
+    expect(skill).not.toContain(
+      'For ordinary free-form logging, prefer concise text',
+    )
+    expect(skill).toContain(
+      'use one verified structured workout card as the complete response on a supported private card route',
+    )
+    expect(skill).toContain(
+      'Do not send a text-only start acknowledgement or wait for a separate card request.',
+    )
+    expect(skill).toContain('the canonical event cannot be verified')
+    expect(skill).toContain(
+      'any claimed planned targets cannot be verified from their matching format',
+    )
+    expect(skill).toContain(
+      'the bounded card contract cannot represent the workout',
+    )
   })
 
   it('keeps set annotations canonical and preserves a fourth set', async () => {
@@ -108,7 +224,7 @@ describe('assistant tracked workout table skill', () => {
     expect(skill).toMatch(/^---\nname: tracked-table\n/)
     expect(skill).toContain('one to four compact value columns')
     expect(skill).toContain('Never emit Markdown-table syntax')
-    expect(skill).toContain("that set's canonical `note`")
+    expect(skill).toContain("that exact set's canonical `note`")
     expect(skill).toContain('note=final rep spotted')
     expect(skill).toContain('Do not collapse or discard the fourth set')
     expect(skill).toContain('do not silently truncate it')
@@ -129,5 +245,16 @@ describe('assistant tracked workout table skill', () => {
     expect(assistantResponseCardSchema.parse(FOUR_SET_CARD)).toEqual(
       FOUR_SET_CARD,
     )
+  })
+
+  it('accepts distinct ad-hoc exercises with targetless active and finished slots', () => {
+    expect(
+      assistantResponseCardSchema.parse(AD_HOC_TARGETLESS_WORKOUT_CARD),
+    ).toEqual(AD_HOC_TARGETLESS_WORKOUT_CARD)
+    expect(
+      assistantResponseCardSchema.parse(
+        AD_HOC_COMPLETED_TARGETLESS_WORKOUT_CARD,
+      ),
+    ).toEqual(AD_HOC_COMPLETED_TARGETLESS_WORKOUT_CARD)
   })
 })

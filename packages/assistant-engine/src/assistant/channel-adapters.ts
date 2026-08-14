@@ -15,11 +15,11 @@ export {
   selectedAssistantEmailDeliveryIsThreadReply,
 } from './channels/registry.js'
 export {
-  sendEmailMessage,
   sendLinqMessage,
   sendLinqVoiceMemoMessage,
   sendTelegramImageMessage,
   sendTelegramMessage,
+  sendTelegramRichMessage,
   sendTelegramVoiceMemoMessage,
   startAssistantChannelActivitySession,
   startLinqTypingIndicator,

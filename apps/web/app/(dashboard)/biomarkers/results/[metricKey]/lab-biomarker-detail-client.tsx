@@ -6,12 +6,12 @@ import {
   useCallback,
   type ReactNode,
 } from "react";
-import type { HealthCommonsWebBiomarkerFallbackRange } from "@murphai/health-commons/runtime";
+import type { BiomarkerFallbackRangeForDisplay } from "@murphai/health-commons/biomarker-fallback-ranges";
 import {
   selectBrowserVaultLabBiomarkerDetail,
+  type BrowserVaultLabsCapableQueryClient,
   type BrowserVaultLabBiomarkerDetail,
   type BrowserVaultPresentedLabResultRow,
-  type BrowserVaultQueryClient,
 } from "@murphai/query/browser-biomarkers";
 
 import {
@@ -45,14 +45,14 @@ import {
 } from "@/src/lib/biomarkers/lab-result-display";
 import {
   useBrowserVault,
-  useBrowserVaultSelector,
+  useBrowserVaultLabsSelector,
 } from "@/src/lib/browser-vault/context";
 import { cn } from "@/src/lib/utils";
 
 interface LabBiomarkerDetailClientProps {
   authenticated: boolean;
   chatAction?: ReactNode;
-  fallbackRanges?: readonly HealthCommonsWebBiomarkerFallbackRange[];
+  fallbackRanges?: readonly BiomarkerFallbackRangeForDisplay[];
   metricKey: string;
   summary?: string | null;
   uploadLabsAction?: ReactNode;
@@ -79,11 +79,11 @@ export function LabBiomarkerDetailClient({
     status,
   } = useBrowserVault();
   const selectDetail = useCallback(
-    (client: BrowserVaultQueryClient) =>
+    (client: BrowserVaultLabsCapableQueryClient) =>
       selectBrowserVaultLabBiomarkerDetail(client, metricKey),
     [metricKey],
   );
-  const detail = useBrowserVaultSelector(selectDetail);
+  const detail = useBrowserVaultLabsSelector(selectDetail);
   const authRequired = !authenticated
     || (status === "error" && isAuthRequiredBrowserVaultError(error));
 
@@ -196,7 +196,7 @@ function BiomarkerDetailContent({
   stale,
 }: {
   detail: BrowserVaultLabBiomarkerDetail;
-  fallbackRanges: readonly HealthCommonsWebBiomarkerFallbackRange[];
+  fallbackRanges: readonly BiomarkerFallbackRangeForDisplay[];
   onRefresh: () => void;
   refreshPending: boolean;
   stale: boolean;
@@ -272,6 +272,11 @@ function BiomarkerDetailContent({
             >
               {formatLabDate(detail.latest.date)}
             </time>
+            {statusSourceLabel(detail.latest.statusSource, true) ? (
+              <p className="mt-2 text-xs text-muted-foreground">
+                {statusSourceLabel(detail.latest.statusSource, true)}
+              </p>
+            ) : null}
           </div>
 
           {chartPoints.length > 0 ? (
@@ -396,6 +401,8 @@ function LabResultYearSection({ group }: { group: LabResultYearGroup }) {
                         <span aria-hidden="true" className="xl:hidden">Range </span>
                         {referenceRange}
                       </>
+                    ) : row.statusSource === "published_comparator" ? (
+                      "Published comparator — not the reporting lab's range"
                     ) : (
                       "No reference range"
                     )}
@@ -413,6 +420,22 @@ function LabResultYearSection({ group }: { group: LabResultYearGroup }) {
       </div>
     </section>
   );
+}
+
+function statusSourceLabel(
+  source: BrowserVaultPresentedLabResultRow["statusSource"],
+  latest: boolean,
+): string | null {
+  switch (source) {
+    case "published_comparator":
+      return "Published comparator — not the reporting lab's range";
+    case "reporting_lab_flag":
+      return "Reporting-lab flag";
+    case "reporting_lab_range":
+      return latest ? "Latest lab range" : "Reporting-lab range";
+    case "reported":
+      return null;
+  }
 }
 
 function EmptyBiomarkerDetailCard({
@@ -579,7 +602,7 @@ function formatDetailSummary(detail: BrowserVaultLabBiomarkerDetail): string {
  */
 function resolveChartedReferenceContext(
   detail: BrowserVaultLabBiomarkerDetail,
-  fallbackRanges: readonly HealthCommonsWebBiomarkerFallbackRange[],
+  fallbackRanges: readonly BiomarkerFallbackRangeForDisplay[],
   latestReferenceRange: string | null,
 ): {
   label: string;
@@ -645,7 +668,7 @@ function resolveChartedReferenceContext(
 }
 
 function formatFallbackReferenceRange(
-  range: HealthCommonsWebBiomarkerFallbackRange,
+  range: BiomarkerFallbackRangeForDisplay,
 ): string | null {
   const lower = range.lowerBound;
   const upper = range.upperBound;

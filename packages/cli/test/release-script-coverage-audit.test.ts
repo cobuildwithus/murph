@@ -8,6 +8,7 @@ import {
   mkdtempSync,
   readdirSync,
   readFileSync,
+  realpathSync,
   rmSync,
   statSync,
   writeFileSync,
@@ -928,7 +929,7 @@ describe('monorepo release flow coverage audit', () => {
     ]
 
     expect(rootPackageJson.scripts?.['review:gpt']).toBe(
-      'cobuild-review-gpt --config scripts/review-gpt.config.sh',
+      'bash scripts/review-gpt-pr-head-preflight.sh --run',
     )
     for (const scriptName of removedScripts) {
       expect(rootPackageJson.scripts?.[scriptName]).toBeUndefined()
@@ -943,13 +944,13 @@ describe('monorepo release flow coverage audit', () => {
     expect(existsSync(path.join(repoRoot, 'scripts', 'chatgpt-managed-browser.test.mjs'))).toBe(false)
     expect(existsSync(path.join(repoRoot, 'scripts', 'review-gpt.sh'))).toBe(false)
     expect(existsSync(path.join(repoRoot, 'scripts', 'review-gpt-cli.sh'))).toBe(false)
-    expect(rootPackageJson.devDependencies?.['@cobuild/review-gpt']).toBe('^0.5.122')
+    expect(rootPackageJson.devDependencies?.['@cobuild/review-gpt']).toBe('^0.5.126')
     expect(
       pnpmWorkspace
         .match(/^minimumReleaseAgeExclude:\n((?:  - .+\n)+)/mu)?.[1]
         ?.split('\n')
         .filter((line) => line.includes('@cobuild/review-gpt')),
-    ).toEqual(["  - '@cobuild/review-gpt@0.5.122'"])
+    ).toEqual(["  - '@cobuild/review-gpt@0.5.126'"])
     expect(
       pnpmWorkspace
         .match(/^patchedDependencies:\n((?:  .+\n)+)/mu)?.[1]
@@ -1115,11 +1116,20 @@ describe('monorepo release flow coverage audit', () => {
     expect(reviewGptDriver).toContain("createHash('sha256')")
     expect(reviewGptDriver).toContain('mode: 0o600')
     expect(reviewGptDriver).toContain("`${responseFilePath}.model-verification.json`")
+    const attachmentStage = reviewGptDriver.indexOf("currentStage = 'attachments'")
+    const promptStage = reviewGptDriver.indexOf("currentStage = 'prompt-prefill'")
+    expect(attachmentStage).toBeGreaterThan(-1)
+    expect(promptStage).toBeGreaterThan(attachmentStage)
+    expect(reviewGptDriver).toContain('function installOwnedTargetSignalCleanup()')
+    expect(reviewGptDriver).toContain("for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP'])")
     expect(reviewGptDriver).toContain(
       [
         'if (require.main === module) {',
         '  prepareRuntimeConfig();',
-        '  mainWithRetry().catch((error) => {',
+        '  const removeSignalCleanup = installOwnedTargetSignalCleanup();',
+        '  mainWithRetry()',
+        '    .then(() => removeSignalCleanup())',
+        '    .catch((error) => {',
       ].join('\n'),
     )
     const completedArtifactWriteStart = reviewGptDriver.indexOf(
@@ -1165,6 +1175,7 @@ describe('monorepo release flow coverage audit', () => {
         '  });',
         "  const pageTargetId = String(target?.id || '');",
         '  let ownedTargetId = pageTargetId;',
+        '  ownedTargetIdForSignalCleanup = ownedTargetId;',
         '  let operationError = null;',
         '  let completedResponseCapture = null;',
         '  let waitedAttachmentCleanupPending = false;',
@@ -1199,6 +1210,7 @@ describe('monorepo release flow coverage audit', () => {
         "      console.log('Retained generated local attachment artifact(s) for the unsent draft.');",
         '    }',
         "    ownedTargetId = '';",
+        "    ownedTargetIdForSignalCleanup = '';",
       ].join('\n'),
     )
     expect(unsentDraft).not.toContain('cleanupConfirmedDraftAttachments')
@@ -1207,6 +1219,7 @@ describe('monorepo release flow coverage audit', () => {
       [
         '      if (!shouldWaitForResponse) {',
         "        ownedTargetId = '';",
+        "        ownedTargetIdForSignalCleanup = '';",
         '      }',
         '    } else {',
         '      throw new Error(`Auto-send failed: ${JSON.stringify(sendResult?.lastAttempt || sendResult || { status: \'unknown\' })}`);',
@@ -1220,6 +1233,10 @@ describe('monorepo release flow coverage audit', () => {
         '      await closeBackgroundTarget(ownedTargetId);',
         '    } catch (error) {',
         '      cleanupError = addTargetCleanupContext(error, operationError);',
+        '    } finally {',
+        '      if (ownedTargetIdForSignalCleanup === ownedTargetId) {',
+        "        ownedTargetIdForSignalCleanup = '';",
+        '      }',
         '    }',
         '  }',
         '  try {',
@@ -1255,6 +1272,7 @@ describe('monorepo release flow coverage audit', () => {
     expect(reviewGptConfig).toContain(
       'review_gpt_all_browser_lanes=(eragon phlebas hercules mountain)',
     )
+    expect(reviewGptConfig).toContain('MURPH_REVIEW_GPT_PROFILE_SLUG:-auto')
     expect(reviewGptConfig).toContain('REVIEW_GPT_BROWSER_LANE_COUNT')
     expect(reviewGptConfig).toContain('REVIEW_GPT_THREAD_URL')
     expect(reviewGptConfig).toContain('REVIEW_GPT_FULL_REVIEW_REASON')
@@ -1274,6 +1292,15 @@ describe('monorepo release flow coverage audit', () => {
     )
     expect(reviewGptConfig).toContain(
       'managed_browser_background_mode="${managed_browser_background_mode:-balanced}"',
+    )
+    expect(reviewGptConfig).toContain(
+      'managed_browser_display_mode="${managed_browser_display_mode:-headful}"',
+    )
+    expect(reviewGptConfig).toContain(
+      'review_gpt_installed_browser_binary="/Applications/Brave Browser.app/Contents/MacOS/Brave Browser"',
+    )
+    expect(reviewGptConfig).toContain(
+      'browser_binary_path="${browser_binary_path:-$review_gpt_installed_browser_binary}"',
     )
     expect(reviewGptConfig).toContain('codebase.zip')
     expect(reviewGptConfig).toContain('package_script="scripts/package-audit-context-full.sh"')
@@ -1358,6 +1385,26 @@ describe('monorepo release flow coverage audit', () => {
     expect(prFollowupReviewPrompt).toContain(
       'report only a `REVIEW_INDUCED` finding',
     )
+    expect(prDeepReviewPrompt).toContain(
+      '`Complexity disposition:` followed by what the correction deletes, combines,',
+    )
+    expect(prDeepReviewPrompt).toContain(
+      'Findings caused by one mechanism must share one root-cause',
+    )
+    expect(prDeepReviewPrompt).toContain(
+      'or changes outside production',
+    )
+    expect(prDeepReviewPrompt).toContain(
+      'rules out deletion, combination, reordering, derivation, and reuse',
+    )
+    expect(prFollowupReviewPrompt).toContain(
+      '`Complexity disposition:` for every finding',
+    )
+    expect(prFollowupReviewPrompt).toContain(
+      'one shared root-cause correction',
+    )
+    expect(prDeepReviewPrompt).not.toContain('collapse|reuse|additive')
+    expect(prFollowupReviewPrompt).not.toContain('collapse|reuse|additive')
     expect(prDeepReviewPrompt).toContain('`ORIGINAL_PR`')
     expect(prDeepReviewPrompt).toContain('`REVIEW_INDUCED`')
     expect(prDeepReviewPrompt).toContain('`PRE_EXISTING_OR_ADJACENT`')
@@ -1486,7 +1533,11 @@ describe('monorepo release flow coverage audit', () => {
       'Both stages use the managed Eragon, Phlebas, Hercules, and Mountain browser',
     )
     expect(prReviewGptLoop).toContain('default randomized usable managed')
-    expect(prReviewGptLoop).toContain('`Hercules.app` on `9444`')
+    expect(prReviewGptLoop).toContain('Hercules on `9444`')
+    expect(prReviewGptLoop).toContain('current installed Brave binary')
+    expect(prReviewGptLoop).toContain(
+      "passes none of Chromium's background-timer, occluded-window, or renderer",
+    )
     expect(prReviewGptLoop).toContain(
       '`REVIEW_GPT_BROWSER_LANE=eragon|phlebas|hercules|mountain`',
     )
@@ -1584,7 +1635,7 @@ describe('monorepo release flow coverage audit', () => {
       '## Verification Ownership By Delivery Path',
     )
     expect(verificationAndRuntime).toMatch(
-      /run\s+`pnpm verify:acceptance` before pushing/u,
+      /run\s+`pnpm verify:acceptance` once for that direct-push attempt/u,
     )
     expect(completionSpecialistsPrompt).toMatch(
       /Applicability does not depend on a local coverage\s+umbrella command/u,
@@ -1604,7 +1655,36 @@ describe('monorepo release flow coverage audit', () => {
       'MURPH_VERIFY_EXECUTOR=crabbox pnpm verify:acceptance',
     )
     expect(verificationAndRuntime).toMatch(/fully\s+staging any new non-ignored source/u)
-    expect(completionWorkflow).toContain('not complete until the PR branch has no merge conflicts')
+    expect(completionWorkflow).toContain(
+      'Green required CI on the PR-authored head plus a clean current-base merge-tree is sufficient preparation',
+    )
+    expect(completionWorkflow).toContain(
+      'strict up-to-date checks block the merge',
+    )
+    expect(completionWorkflow).toContain(
+      'Do not start repeated base-refresh/CI loops during preparation.',
+    )
+    expect(completionWorkflow).toContain(
+      'never perform a second base update or restart CI',
+    )
+    expect(prReviewGptLoop).toContain(
+      'The budget remains consumed until merge',
+    )
+    expect(prReviewGptLoop).toContain('report `moving-base race`')
+    expect(prReviewGptLoop).toContain('Do not poll for a quiet base.')
+    expect(agentsGuide).toContain('report `moving-base race` and stop')
+    expect(agentsGuide).toContain(
+      'run `pnpm verify:acceptance` once for that direct-push attempt',
+    )
+    expect(verificationAndRuntime).toContain(
+      'Do not restart full acceptance solely because',
+    )
+    expect(verificationAndRuntime).toMatch(
+      /The\s+one-rebase budget remains consumed until push or handoff/u,
+    )
+    expect(completionWorkflow).toContain(
+      'follow the one-rebase direct-push rule',
+    )
     expect(completionWorkflow).toContain('fetch the latest `main`')
     expect(completionWorkflow).toContain(
       'pass replaces the four former local `product-experience-review`,',
@@ -1683,49 +1763,298 @@ describe('monorepo release flow coverage audit', () => {
     expect(existsSync(path.join(repoRoot, 'scripts', 'research-init.mjs'))).toBe(false)
   })
 
+  it('applies ReviewGPT response timeout precedence from repo config to one run', () => {
+    const harnessRoot = mkdtempSync(path.join(os.tmpdir(), 'murph-review-gpt-timeout-'))
+    const localConfigRoot = path.join(harnessRoot, 'config')
+    const reviewGptBin = path.join(
+      repoRoot,
+      'node_modules',
+      '.bin',
+      'cobuild-review-gpt',
+    )
+    const runDry = (extraArgs: string[] = []) =>
+      spawnSync(
+        reviewGptBin,
+        [
+          '--config',
+          'scripts/review-gpt.config.sh',
+          '--wait',
+          '--dry-run',
+          '--no-zip',
+          '--browser-path',
+          process.execPath,
+          '--prompt',
+          'Validate response timeout precedence.',
+          ...extraArgs,
+        ],
+        {
+          cwd: repoRoot,
+          encoding: 'utf8',
+          env: {
+            ...withoutNodeV8Coverage(),
+            HOME: harnessRoot,
+            REVIEW_GPT_BROWSER_LANE_COUNT: '1',
+            XDG_CONFIG_HOME: localConfigRoot,
+          },
+        },
+      )
+
+    try {
+      const defaultResult = runDry()
+      expect(defaultResult.status, defaultResult.stderr).toBe(0)
+      expect(defaultResult.stdout).toContain(
+        'Response capture: enabled (10800000ms timeout)',
+      )
+
+      writeHarnessFile(
+        localConfigRoot,
+        'murph/review-gpt.conf',
+        'response_timeout_ms=7654321\n',
+      )
+      const localResult = runDry()
+      expect(localResult.status, localResult.stderr).toBe(0)
+      expect(localResult.stdout).toContain(
+        'Response capture: enabled (7654321ms timeout)',
+      )
+
+      const perRunResult = runDry(['--wait-timeout', '42m'])
+      expect(perRunResult.status, perRunResult.stderr).toBe(0)
+      expect(perRunResult.stdout).toContain(
+        'Response capture: enabled (2520000ms timeout)',
+      )
+    } finally {
+      rmSync(harnessRoot, { force: true, recursive: true })
+    }
+  })
+
+  it('prefers the installed ReviewGPT browser while preserving lane isolation and copied fallback', () => {
+    const harnessRoot = realpathSync(
+      mkdtempSync(path.join(os.tmpdir(), 'murph-review-gpt-browser-choice-')),
+    )
+    const controlledRepoRoot = path.join(harnessRoot, 'repo')
+    const controlledConfigPath = path.join(
+      controlledRepoRoot,
+      'scripts',
+      'review-gpt.config.sh',
+    )
+    const installedBrowserPath = path.join(
+      harnessRoot,
+      'installed',
+      'Brave Browser',
+    )
+    const copiedBrowserPath = path.join(
+      controlledRepoRoot,
+      'output-packages',
+      'review-gpt-profiles',
+      'eragon',
+      'Eragon.app',
+      'Contents',
+      'MacOS',
+      'Brave Browser',
+    )
+    const installedBrowserAssignment =
+      'review_gpt_installed_browser_binary="/Applications/Brave Browser.app/Contents/MacOS/Brave Browser"'
+    const controlledConfig = readFileSync(
+      path.join(repoRoot, 'scripts', 'review-gpt.config.sh'),
+      'utf8',
+    ).replace(
+      installedBrowserAssignment,
+      `review_gpt_installed_browser_binary="${installedBrowserPath}"`,
+    )
+    expect(controlledConfig).not.toContain(installedBrowserAssignment)
+    writeHarnessFile(
+      controlledRepoRoot,
+      'scripts/review-gpt.config.sh',
+      controlledConfig,
+    )
+    writeHarnessFile(
+      controlledRepoRoot,
+      'output-packages/review-gpt-profiles/eragon/Eragon.app/Contents/MacOS/Brave Browser',
+      '#!/usr/bin/env bash\nexit 0\n',
+      true,
+    )
+    const configHarness = `
+set -euo pipefail
+review_gpt_register_dir_preset() { :; }
+review_gpt_register_preset_group() { :; }
+source "$CONFIG_PATH"
+printf '%s|%s|%s|%s|%s|%s|%s\n' \
+  "$review_gpt_selected_browser_lane" \
+  "$browser_binary_path" \
+  "$managed_browser_user_data_dir" \
+  "$managed_browser_profile" \
+  "$managed_browser_port" \
+  "$managed_browser_background_mode" \
+  "$managed_browser_display_mode"
+`
+    const runConfig = () =>
+      spawnSync('bash', ['-c', configHarness], {
+        cwd: controlledRepoRoot,
+        encoding: 'utf8',
+        env: {
+          ...withoutNodeV8Coverage(),
+          CONFIG_PATH: controlledConfigPath,
+          HOME: harnessRoot,
+          REVIEW_GPT_BROWSER_LANE: 'eragon',
+          XDG_CONFIG_HOME: path.join(harnessRoot, 'config'),
+          browser_binary_path: '',
+          managed_browser_background_mode: '',
+          managed_browser_display_mode: '',
+        },
+      })
+    const laneUserDataDir = path.join(
+      harnessRoot,
+      'Library',
+      'Application Support',
+      'MurphReviewGPT',
+      'Eragon',
+    )
+
+    try {
+      const fallbackResult = runConfig()
+      expect(fallbackResult.status, fallbackResult.stderr).toBe(0)
+      expect(fallbackResult.stdout.trim()).toBe(
+        [
+          'eragon',
+          copiedBrowserPath,
+          laneUserDataDir,
+          'Default',
+          '9448',
+          'balanced',
+          'headful',
+        ].join('|'),
+      )
+
+      writeHarnessFile(
+        harnessRoot,
+        'installed/Brave Browser',
+        '#!/usr/bin/env bash\nexit 0\n',
+        true,
+      )
+      const installedResult = runConfig()
+      expect(installedResult.status, installedResult.stderr).toBe(0)
+      expect(installedResult.stdout.trim()).toBe(
+        [
+          'eragon',
+          installedBrowserPath,
+          laneUserDataDir,
+          'Default',
+          '9448',
+          'balanced',
+          'headful',
+        ].join('|'),
+      )
+    } finally {
+      rmSync(harnessRoot, { force: true, recursive: true })
+    }
+  })
+
   it('keeps ReviewGPT browser preferences local and reuses correction threads', () => {
     const harnessRoot = mkdtempSync(path.join(os.tmpdir(), 'murph-review-gpt-browser-'))
     const localConfigRoot = path.join(harnessRoot, 'config')
     const configHarness = `
 set -euo pipefail
+# Keep live local CDP ports out of the lock fixture.
+curl() { return 1; }
 review_gpt_register_dir_preset() { :; }
 review_gpt_register_preset_group() { :; }
 source "$REPO_ROOT/scripts/review-gpt.config.sh"
-printf '%s|%s\n' "$review_gpt_selected_browser_lane" "$review_gpt_browser_lane_count"
+printf '%s|%s|%s|%s|%s\n' \
+  "$review_gpt_selected_browser_lane" \
+  "$review_gpt_browser_lane_count" \
+  "$browser_binary_path" \
+  "$managed_browser_background_mode" \
+  "$managed_browser_display_mode"
 `
+    const cleanBrowserPreferenceEnv = () => {
+      const env = withoutNodeV8Coverage()
+      delete env.REVIEW_GPT_BROWSER_LANE
+      delete env.MURPH_REVIEW_GPT_BROWSER_LANE
+      delete env.MURPH_REVIEW_GPT_PROFILE_SLUG
+      delete env.REVIEW_GPT_BROWSER_LANE_COUNT
+      delete env.MURPH_REVIEW_GPT_BROWSER_LANE_COUNT
+      delete env.browser_binary_path
+      delete env.managed_browser_background_mode
+      delete env.managed_browser_display_mode
+      return env
+    }
 
     try {
       writeHarnessFile(
         localConfigRoot,
         'murph/review-gpt.conf',
-        'REVIEW_GPT_BROWSER_LANE_COUNT=1\n',
+        [
+          'REVIEW_GPT_BROWSER_LANE_COUNT=1',
+          'browser_binary_path="/tmp/custom-brave"',
+          'managed_browser_background_mode="unthrottled"',
+          'managed_browser_display_mode="headless"',
+          '',
+        ].join('\n'),
       )
       const localResult = spawnSync('bash', ['-c', configHarness], {
         cwd: repoRoot,
         encoding: 'utf8',
         env: {
-          ...withoutNodeV8Coverage(),
+          ...cleanBrowserPreferenceEnv(),
           HOME: harnessRoot,
           REPO_ROOT: repoRoot,
           XDG_CONFIG_HOME: localConfigRoot,
         },
       })
       expect(localResult.status, localResult.stderr).toBe(0)
-      expect(localResult.stdout.trim()).toBe('eragon|1')
+      expect(localResult.stdout.trim()).toBe(
+        'eragon|1|/tmp/custom-brave|unthrottled|headless',
+      )
 
       rmSync(path.join(localConfigRoot, 'murph', 'review-gpt.conf'))
+      for (const lane of ['Eragon', 'Phlebas', 'Hercules']) {
+        writeHarnessFile(
+          harnessRoot,
+          `Library/Application Support/MurphReviewGPT/${lane}/SingletonLock`,
+          'locked\n',
+        )
+      }
       const defaultResult = spawnSync('bash', ['-c', configHarness], {
         cwd: repoRoot,
         encoding: 'utf8',
         env: {
-          ...withoutNodeV8Coverage(),
+          ...cleanBrowserPreferenceEnv(),
           HOME: harnessRoot,
           REPO_ROOT: repoRoot,
           XDG_CONFIG_HOME: localConfigRoot,
         },
       })
       expect(defaultResult.status, defaultResult.stderr).toBe(0)
-      expect(defaultResult.stdout.trim().split('|')[1]).toBe('4')
+      const [
+        defaultLane,
+        defaultLaneCount,
+        defaultBrowser,
+        defaultBackgroundMode,
+        defaultDisplayMode,
+      ] = defaultResult.stdout.trim().split('|')
+      expect(defaultLane).toBe('mountain')
+      expect(defaultLaneCount).toBe('4')
+      expect(defaultBrowser).toBe(
+        '/Applications/Brave Browser.app/Contents/MacOS/Brave Browser',
+      )
+      expect(defaultBackgroundMode).toBe('balanced')
+      expect(defaultDisplayMode).toBe('headful')
+
+      const mainResult = spawnSync('bash', ['-c', configHarness], {
+        cwd: repoRoot,
+        encoding: 'utf8',
+        env: {
+          ...cleanBrowserPreferenceEnv(),
+          HOME: harnessRoot,
+          REPO_ROOT: repoRoot,
+          REVIEW_GPT_BROWSER_LANE: 'main',
+          XDG_CONFIG_HOME: localConfigRoot,
+        },
+      })
+      expect(mainResult.status, mainResult.stderr).toBe(0)
+      expect(mainResult.stdout.trim()).toBe(
+        'main|4|/Applications/Brave Browser.app/Contents/MacOS/Brave Browser|balanced|headful',
+      )
 
       const missingThreadResult = spawnSync('bash', ['-c', configHarness], {
         cwd: repoRoot,
@@ -2966,6 +3295,7 @@ Updated: 2026-04-24
     expect(repoToolsConfig).toContain("export COBUILD_AUDIT_CONTEXT_INCLUDE_CI_DEFAULT='0'")
     expect(repoToolsConfig).toContain('repo_tools_join_lines COBUILD_AUDIT_CONTEXT_BINARY_EXCLUDE_GLOBS')
     expect(repoToolsConfig).toContain('"apps/*/public/design-assets/**"')
+    expect(repoToolsConfig).toContain('"apps/*/public/audio/**"')
     expect(repoToolsConfig).toContain('"docs/assets/*.jpg"')
     expect(repoToolsConfig).toContain('repo_tools_join_lines COBUILD_AUDIT_CONTEXT_EXCLUDE_GLOBS')
     expect(repoToolsConfig).toContain('"PRODUCT.md"')
@@ -2997,6 +3327,9 @@ Updated: 2026-04-24
     expect(fullPackageScript).toContain('$review_gpt_pr_context_dir/pr-body.md')
     expect(fullPackageScript).toContain(
       'export COBUILD_AUDIT_CONTEXT_EXCLUDE_GLOBS="${COBUILD_AUDIT_CONTEXT_BINARY_EXCLUDE_GLOBS:-}"',
+    )
+    expect(fullPackageScript).toContain(
+      'packages/health-commons/content/sources/**',
     )
   })
 
@@ -3099,6 +3432,7 @@ while (( "$#" )); do
   esac
 done
 mkdir -p "$out_dir"
+printf '%s' "\${COBUILD_AUDIT_CONTEXT_EXCLUDE_GLOBS:-}" > "$out_dir/exclude-globs.txt"
 entries=()
 while IFS= read -r entry; do
   [[ -z "$entry" ]] || entries+=("$entry")
@@ -3122,6 +3456,16 @@ done <<< "\${COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS:-}"
       })
       writeHarnessFile(harnessRoot, 'apps/demo/source.ts', 'export const value = 0\n')
       writeHarnessFile(harnessRoot, 'apps/demo/unrelated.ts', 'export const unrelated = true\n')
+      writeHarnessFile(
+        harnessRoot,
+        'packages/health-commons/content/sources/demo/moved.md',
+        'health source to move\n',
+      )
+      writeHarnessFile(
+        harnessRoot,
+        'packages/health-commons/content/sources/demo/sibling.md',
+        'unchanged health source\n',
+      )
       writeHarnessFile(
         harnessRoot,
         'packages/demo/test/unrelated.test.ts',
@@ -3184,6 +3528,43 @@ done <<< "\${COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS:-}"
         cwd: harnessRoot,
         encoding: 'utf8',
       }).trim()
+
+      writeHarnessFile(
+        harnessRoot,
+        'packages/health-commons/content/sources/demo/source.md',
+        'health source\n',
+      )
+      execFileSync('git', ['add', '.'], { cwd: harnessRoot })
+      execFileSync('git', ['commit', '-q', '-m', 'health commons review'], {
+        cwd: harnessRoot,
+      })
+      const healthCommonsHead = execFileSync('git', ['rev-parse', 'HEAD'], {
+        cwd: harnessRoot,
+        encoding: 'utf8',
+      }).trim()
+      execFileSync('git', ['checkout', '-q', '--detach', currentHead], {
+        cwd: harnessRoot,
+      })
+
+      execFileSync(
+        'git',
+        [
+          'mv',
+          'packages/health-commons/content/sources/demo/moved.md',
+          'apps/demo/moved-health-source.md',
+        ],
+        { cwd: harnessRoot },
+      )
+      execFileSync('git', ['commit', '-q', '-m', 'move health source'], {
+        cwd: harnessRoot,
+      })
+      const healthCommonsRenameOutHead = execFileSync('git', ['rev-parse', 'HEAD'], {
+        cwd: harnessRoot,
+        encoding: 'utf8',
+      }).trim()
+      execFileSync('git', ['checkout', '-q', '--detach', currentHead], {
+        cwd: harnessRoot,
+      })
 
       execFileSync('git', ['checkout', '-q', '-b', 'non-ancestor', baseHead], {
         cwd: harnessRoot,
@@ -3248,6 +3629,9 @@ done <<< "\${COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS:-}"
           ? readdirSync(outDir).find((entry) => entry.endsWith('.zip'))
           : undefined
         return {
+          excludeGlobs: existsSync(path.join(outDir, 'exclude-globs.txt'))
+            ? readFileSync(path.join(outDir, 'exclude-globs.txt'), 'utf8')
+            : '',
           outDir,
           result,
           zipPath: existsSync(exactZipPath)
@@ -3268,6 +3652,9 @@ done <<< "\${COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS:-}"
         ].join('\n'),
       })
       expect(preliminary.result.status, preliminary.result.stderr).toBe(0)
+      expect(preliminary.excludeGlobs).toContain(
+        'packages/health-commons/content/sources/**',
+      )
       const preliminaryMetadata = JSON.parse(
         execFileSync(
           'unzip',
@@ -3350,6 +3737,76 @@ done <<< "\${COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS:-}"
       expect(preliminaryEntries).not.toContain(
         'review-gpt-pr-context/review-round.json',
       )
+      expect(existsSync(path.join(harnessRoot, 'review-gpt-pr-context'))).toBe(false)
+
+      execFileSync('git', ['checkout', '-q', '--detach', healthCommonsHead], {
+        cwd: harnessRoot,
+      })
+      const healthCommonsPreliminary = invokePackager(
+        'health-commons-preliminary',
+        healthCommonsHead,
+        {
+          REVIEW_GPT_REVIEW_PHASE: 'preliminary',
+          REVIEW_GPT_FIRST_REVIEWED_HEAD: '',
+          REVIEW_GPT_PREVIOUS_REVIEWED_HEAD: '',
+          REVIEW_GPT_ROUND_NUMBER: '',
+        },
+      )
+      expect(
+        healthCommonsPreliminary.result.status,
+        healthCommonsPreliminary.result.stderr,
+      ).toBe(0)
+      expect(healthCommonsPreliminary.excludeGlobs).not.toContain(
+        'packages/health-commons/content/sources/**',
+      )
+
+      execFileSync('git', ['checkout', '-q', '--detach', healthCommonsRenameOutHead], {
+        cwd: harnessRoot,
+      })
+      const healthCommonsRenameOutPreliminary = invokePackager(
+        'health-commons-rename-out-preliminary',
+        healthCommonsRenameOutHead,
+        {
+          REVIEW_GPT_REVIEW_PHASE: 'preliminary',
+          REVIEW_GPT_FIRST_REVIEWED_HEAD: '',
+          REVIEW_GPT_PREVIOUS_REVIEWED_HEAD: '',
+          REVIEW_GPT_ROUND_NUMBER: '',
+        },
+      )
+      expect(
+        healthCommonsRenameOutPreliminary.result.status,
+        healthCommonsRenameOutPreliminary.result.stderr,
+      ).toBe(0)
+      expect(healthCommonsRenameOutPreliminary.excludeGlobs).not.toContain(
+        'packages/health-commons/content/sources/**',
+      )
+      const healthCommonsRenameOutReal = invokePackager(
+        'health-commons-rename-out-real',
+        healthCommonsRenameOutHead,
+        {
+          COBUILD_AUDIT_CONTEXT_SCAN_SPECS: 'packages',
+          REVIEW_GPT_REVIEW_PHASE: 'preliminary',
+          REVIEW_GPT_FIRST_REVIEWED_HEAD: '',
+          REVIEW_GPT_PREVIOUS_REVIEWED_HEAD: '',
+          REVIEW_GPT_ROUND_NUMBER: '',
+          TEST_REAL_PACKAGER_BIN: path.join(
+            repoRoot,
+            'node_modules',
+            '.bin',
+            'cobuild-package-audit-context',
+          ),
+        },
+      )
+      expect(
+        healthCommonsRenameOutReal.result.status,
+        healthCommonsRenameOutReal.result.stderr,
+      ).toBe(0)
+      expect(listZipEntries(healthCommonsRenameOutReal.zipPath)).toContain(
+        'packages/health-commons/content/sources/demo/sibling.md',
+      )
+      execFileSync('git', ['checkout', '-q', '--detach', currentHead], {
+        cwd: harnessRoot,
+      })
       expect(existsSync(path.join(harnessRoot, 'review-gpt-pr-context'))).toBe(false)
 
       const finalWithSupplementalEvidence = invokePackager(
@@ -3923,9 +4380,9 @@ done <<< "\${COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS:-}"
     } finally {
       rmSync(harnessRoot, { force: true, recursive: true })
     }
-  }, 30_000)
+  }, 45_000)
 
-  it('keeps the lean audit bundle smaller than the full one while preserving durable agent docs', () => {
+  it('keeps audit bundles scoped while preserving durable agent docs', () => {
     const leanBundle = createAuditZip('package-audit-context.sh', 'murph-lean-audit')
     const fullBundle = createAuditZip('package-audit-context-full.sh', 'murph-full-audit')
 
@@ -3943,6 +4400,7 @@ done <<< "\${COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS:-}"
       expect(leanEntries).toContain('agent-docs/FRONTEND.md')
       expect(leanEntries).toContain('agent-docs/PRODUCT_CONSTITUTION.md')
       expect(leanEntries).toContain('agent-docs/PRODUCT_SENSE.md')
+      expect(leanEntries).toContain('Dockerfile.cloudflare-hosted-runner-base')
       expect(leanEntries).not.toContain('.crabbox.yaml')
       expect(leanEntries).not.toContain('agent-docs/product-specs/repo-v1.md')
       expect(leanEntries).toContain('docs/architecture.md')
@@ -3977,10 +4435,15 @@ done <<< "\${COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS:-}"
       expect(fullEntries).toContain('agent-docs/PRODUCT_CONSTITUTION.md')
       expect(fullEntries).toContain('agent-docs/PRODUCT_SENSE.md')
       expect(fullEntries).not.toContain('apps/web/public/design-assets/hero-02.png')
+      expect(fullEntries).not.toContain('apps/web/public/audio/challenge-roast.mp3')
       expect(fullEntries).not.toContain('apps/web/public/hero.jpg')
       expect(fullEntries).not.toContain('apps/web/public/legal/privacy.pdf')
       expect(fullEntries).not.toContain('docs/assets/readme-hero.jpg')
-      expect(leanEntries.length).toBeLessThan(fullEntries.length)
+      expect(fullEntries).not.toContain(
+        'packages/health-commons/content/sources/cognitive-offload-before-bed/pmid-29058942.md',
+      )
+      expect(fullEntries).toContain('packages/health-commons/src/runtime.ts')
+      expect(fullEntries).toContain('packages/health-commons/test/runtime.test.ts')
     } finally {
       rmSync(leanBundle.outDir, { force: true, recursive: true })
       rmSync(fullBundle.outDir, { force: true, recursive: true })

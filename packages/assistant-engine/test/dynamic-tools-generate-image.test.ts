@@ -1,3 +1,4 @@
+import { readTestMurphDynamicToolRequest } from './support/codex-app-server.ts'
 import { Buffer } from 'node:buffer'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -11,7 +12,7 @@ import {
   MURPH_GENERATE_IMAGE_TOOL,
   MURPH_GROUP_TOOL,
   executeMurphDynamicToolRequest,
-  readMurphDynamicToolRequest,
+  readMurphDynamicToolRequest as readExactMurphDynamicToolRequest,
 } from '../src/assistant-codex/dynamic-tools.js'
 import type {
   AssistantHostedToolContext,
@@ -47,6 +48,12 @@ describe('murph.generate_image dynamic tool schema', () => {
     )
     expect(MURPH_GENERATE_IMAGE_TOOL.description).toContain(
       'Exact scheduled automation occurrences remain synchronous and attach private media to the same final response',
+    )
+    expect(MURPH_GENERATE_IMAGE_TOOL.description).toContain(
+      'that image consumes one of the same 8 final-response media slots, so leave a slot before calling',
+    )
+    expect(MURPH_GENERATE_IMAGE_TOOL.description).toContain(
+      'Local runs stay synchronous with the same slot rule',
     )
     expect(MURPH_GENERATE_VOICE_MEMO_TOOL.description).toContain(
       'a known preference supports voice',
@@ -522,8 +529,8 @@ describe('murph.generate_image dynamic tool schema', () => {
     })
   })
 
-  it('keeps the minimal legacy prompt-only call valid', () => {
-    const request = readMurphDynamicToolRequest({
+  it('keeps the minimal canonical prompt-only arguments valid', () => {
+    const request = readTestMurphDynamicToolRequest({
       method: 'item/tool/call',
       params: {
         arguments: {
@@ -547,9 +554,21 @@ describe('murph.generate_image dynamic tool schema', () => {
     })
   })
 
+  it('rejects a tool request without the pinned protocol identity fields', () => {
+    expect(readExactMurphDynamicToolRequest({
+      id: 'request-missing-identity',
+      method: 'item/tool/call',
+      params: {
+        arguments: { prompt: 'Draw a simple image.' },
+        namespace: 'murph',
+        tool: 'generate_image',
+      },
+    })).toBeNull()
+  })
+
   it('parses an exact effect-authorizing message outside provider arguments', () => {
     const messageRef = `ain_${'c'.repeat(32)}`
-    expect(readMurphDynamicToolRequest({
+    expect(readTestMurphDynamicToolRequest({
       method: 'item/tool/call',
       params: {
         arguments: {
@@ -569,7 +588,7 @@ describe('murph.generate_image dynamic tool schema', () => {
   })
 
   it('accepts up to sixteen ordered reference image refs', () => {
-    const request = readMurphDynamicToolRequest({
+    const request = readTestMurphDynamicToolRequest({
       method: 'item/tool/call',
       params: {
         arguments: {
@@ -596,7 +615,7 @@ describe('murph.generate_image dynamic tool schema', () => {
   })
 
   it('accepts the canonical Murph character sheet skill asset ref', () => {
-    const request = readMurphDynamicToolRequest({
+    const request = readTestMurphDynamicToolRequest({
       method: 'item/tool/call',
       params: {
         arguments: {
@@ -617,7 +636,7 @@ describe('murph.generate_image dynamic tool schema', () => {
   })
 
   it('rejects more than sixteen reference image refs', () => {
-    const request = readMurphDynamicToolRequest({
+    const request = readTestMurphDynamicToolRequest({
       method: 'item/tool/call',
       params: {
         arguments: {
@@ -653,9 +672,9 @@ describe('murph.generate_image dynamic tool schema', () => {
     expect(generateImageReferenceDescription).toContain(
       'whenever Murph itself appears',
     )
-    expect(MURPH_GROUP_TOOL.inputSchema.properties.referenceImageRefs.description)
+    expect(MURPH_GROUP_TOOL.inputSchema.allOf[0].properties.referenceImageRefs.description)
       .toContain('skill-assets/murph-character-sheet-v1.png')
-    expect(MURPH_GROUP_TOOL.inputSchema.properties.action.enum).toContain(
+    expect(MURPH_GROUP_TOOL.inputSchema.allOf[0].properties.action.enum).toContain(
       'set_chat_avatar',
     )
   })
@@ -671,7 +690,7 @@ describe('murph.generate_image dynamic tool schema', () => {
       sizeBytes: 1234,
       source: 'murph.experiment-progress-card',
     }
-    expect(readMurphDynamicToolRequest({
+    expect(readTestMurphDynamicToolRequest({
       method: 'item/tool/call',
       params: {
         arguments: { media: [media] },
@@ -681,6 +700,27 @@ describe('murph.generate_image dynamic tool schema', () => {
     })).toEqual({
       kind: 'attach-response-media',
       media: [media],
+    })
+  })
+
+  it('publishes and enforces the eight-image authored response limit', () => {
+    expect(MURPH_ATTACH_RESPONSE_MEDIA_TOOL.inputSchema.properties.media.maxItems).toBe(8)
+    const media = Array.from({ length: 9 }, (_, index) => ({
+      alt: `Frame ${index + 1}`,
+      kind: 'image',
+      source: `exercise_catalog:movement:${index + 1}`,
+      url: `https://cdn.example.test/exercises/frame-${index + 1}.png`,
+    }))
+
+    expect(readTestMurphDynamicToolRequest({
+      method: 'item/tool/call',
+      params: {
+        arguments: { media },
+        namespace: 'murph',
+        tool: MURPH_ATTACH_RESPONSE_MEDIA_TOOL.name,
+      },
+    })).toMatchObject({
+      kind: 'invalid-response-media-arguments',
     })
   })
 })

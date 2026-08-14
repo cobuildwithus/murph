@@ -410,7 +410,7 @@ test("ConnectPage renders source search, source names, and logo marks", async ()
   );
   assert.equal(
     markup.match(/>Not available<\/button>/gu)?.length,
-    sources.length - 7,
+    sources.length - 8,
   );
   assert.match(markup, /disabled=""/);
   assert.match(markup, /aria-label="Download app for Apple Health"/);
@@ -420,10 +420,19 @@ test("ConnectPage renders source search, source names, and logo marks", async ()
   );
   assert.match(markup, /target="_blank"/);
   assert.match(markup, /rel="noopener noreferrer"/);
+  assert.doesNotMatch(markup, /Mobvoi \/ TicWatch/u);
+  assert.doesNotMatch(markup, /Get Murph for Android/u);
+  assert.doesNotMatch(markup, /play\.google\.com/u);
   assert.match(markup, /aria-label="Oura connection is not available yet"/);
+  assert.match(markup, /Dexcom connections are coming soon\./u);
+  assert.match(
+    markup,
+    /aria-label="Dexcom web setup is not available yet"[^>]+disabled/u,
+  );
+  assert.match(markup, />Coming soon<\/button>/u);
+  assert.doesNotMatch(markup, /aria-label="Connect Dexcom"/u);
   assert.match(markup, /Apple Health not connected/);
   assert.match(markup, /Oura not connected/);
-  assert.match(markup, />Download app<\/a>/u);
   for (const relayName of [
     "Zepp / Amazfit",
     "Xiaomi / Mi Fitness",
@@ -1217,7 +1226,7 @@ test("ConnectPage enables every Link source exposed by the shared Junction defau
   assert.equal(
     markup.match(/>Connect<\/button>/gu)?.length,
     JUNCTION_DEFAULT_PROVIDER_FILTER.filter(
-      (providerSlug) => providerSlug !== "strava",
+      (providerSlug) => providerSlug !== "strava" && providerSlug !== "dexcom_v3",
     ).length,
   );
   assert.equal(markup.match(/>Not available<\/button>/gu)?.length ?? 0, 0);
@@ -1231,7 +1240,7 @@ test("ConnectPage enables every Link source exposed by the shared Junction defau
   const visibleSourceIds = new Set(
     listVisibleConnectSources().map((source) => source.id),
   );
-  const configuredSourceIds = new Set(
+  const configuredSourceIds = new Set<string>(
     (
       await import("@murphai/device-syncd/config")
     ).DEVICE_CONNECT_SOURCES.filter((source) =>
@@ -1241,6 +1250,12 @@ test("ConnectPage enables every Link source exposed by the shared Junction defau
   assert.deepEqual(
     [...visibleSourceIds].sort(),
     [...configuredSourceIds].sort(),
+  );
+  assert.equal(visibleSourceIds.has("mobvoi-health"), false);
+  assert.equal(
+    listVisibleConnectSources({ MURPH_ANDROID_APP_ENABLED: "1" })
+      .some((source) => source.id === "mobvoi-health"),
+    true,
   );
 
   const logo = {
@@ -1261,6 +1276,8 @@ test("ConnectPage enables every Link source exposed by the shared Junction defau
       name: "Dexcom",
       description: "Current Dexcom.",
       logo,
+      unavailableActionLabel: "Coming soon",
+      unavailableMessage: "Dexcom connections are coming soon.",
     },
     {
       id: "mapmyfitness",
@@ -1285,10 +1302,15 @@ test("ConnectPage enables every Link source exposed by the shared Junction defau
     ),
     {
       accuchek: undefined,
-      dexcom: "dexcom_v3",
+      dexcom: undefined,
       "dexcom-g6-and-older": "dexcom",
       mapmyfitness: "map_my_fitness",
     },
+  );
+  assert.equal(
+    resolvedConnectSources.find((source) => source.id === "dexcom")
+      ?.connectionAvailable,
+    false,
   );
 });
 
@@ -1322,7 +1344,7 @@ test("ConnectSourcesGrid posts mapped Junction connect targets", async () => {
     "junction-client-user-id-secret",
   );
   vi.stubEnv("JUNCTION_ENV", "sandbox");
-  vi.stubEnv("JUNCTION_PROVIDER_FILTER", "dexcom_v3");
+  vi.stubEnv("JUNCTION_PROVIDER_FILTER", "map_my_fitness");
   vi.stubEnv("JUNCTION_REGION", "us");
 
   const fetch = vi.fn(
@@ -1330,7 +1352,7 @@ test("ConnectSourcesGrid posts mapped Junction connect targets", async () => {
       void _input;
       void _init;
       return Response.json({
-        authorizationUrl: "https://junction.example.test/link/dexcom-v3",
+        authorizationUrl: "https://junction.example.test/link/mapmyfitness",
       });
     },
   );
@@ -1350,14 +1372,14 @@ test("ConnectSourcesGrid posts mapped Junction connect targets", async () => {
   };
   const [source] = resolveConfiguredConnectSources([
     {
-      id: "dexcom",
-      name: "Dexcom",
-      description: "Current Dexcom.",
+      id: "mapmyfitness",
+      name: "MapMyFitness",
+      description: "Workouts.",
       logo,
     },
   ]);
   assert.ok(source);
-  assert.equal(source.connectTarget, "dexcom_v3");
+  assert.equal(source.connectTarget, "map_my_fitness");
   assert.equal(source.requiresVitalDisclosure, true);
 
   const rendered = await renderClientComponent(
@@ -1375,12 +1397,12 @@ test("ConnectSourcesGrid posts mapped Junction connect targets", async () => {
   assert.equal(fetch.mock.calls.length, 0);
   assert.match(
     rendered.container.textContent ?? "",
-    /Connect Dexcom to Murph/u,
+    /Connect MapMyFitness to Murph/u,
   );
 
   const continueButton = [
     ...rendered.container.querySelectorAll("button"),
-  ].find((button) => button.textContent === "Continue to Dexcom");
+  ].find((button) => button.textContent === "Continue to MapMyFitness");
   assert.ok(continueButton instanceof rendered.window.HTMLButtonElement);
   await act(async () => {
     continueButton.dispatchEvent(
@@ -1391,9 +1413,9 @@ test("ConnectSourcesGrid posts mapped Junction connect targets", async () => {
   await vi.waitFor(() => {
     assert.equal(fetch.mock.calls.length, 1);
   });
-  assert.equal(fetch.mock.calls[0]?.[0], "/api/connect-sources/dexcom/start");
+  assert.equal(fetch.mock.calls[0]?.[0], "/api/connect-sources/mapmyfitness/start");
   assert.deepEqual(fetch.mock.calls[0]?.[1], {
-    body: JSON.stringify({ connectTarget: "dexcom_v3" }),
+    body: JSON.stringify({ connectTarget: "map_my_fitness" }),
     cache: "no-store",
     credentials: "same-origin",
     headers: {
@@ -1404,7 +1426,7 @@ test("ConnectSourcesGrid posts mapped Junction connect targets", async () => {
   });
   assert.equal(
     rendered.assign.mock.calls[0]?.[0],
-    "https://junction.example.test/link/dexcom-v3",
+    "https://junction.example.test/link/mapmyfitness",
   );
 
   await rendered.cleanup();
@@ -1502,6 +1524,46 @@ test("ConnectPage marks iOS Apple Health Junction SDK source connected from host
     sourceHeadingIndex(markup, "Apple Health") <
       sourceHeadingIndex(markup, "Garmin"),
   );
+});
+
+test("ConnectPage keeps Mobvoi statusless when Health Connect is active", async () => {
+  vi.stubEnv("MURPH_ANDROID_APP_ENABLED", "1");
+  mocks.buildHostedDeviceSyncSettingsResponse.mockResolvedValueOnce({
+    generatedAt: "2026-05-01T00:00:00.000Z",
+    ok: true,
+    sources: [
+      {
+        connectionId: "dsc_junction_health_connect",
+        provider: "junction",
+        state: "active",
+        upstreamSources: [
+          {
+            providerLabel: "Health Connect",
+            resourceCount: 4,
+            sourceProviderSlug: "health_connect",
+            status: "connected",
+          },
+        ],
+      },
+    ],
+  });
+
+  const { default: ConnectPage } = await import(
+    "../app/(dashboard)/connect/connect-page-content"
+  );
+  const markup = renderToStaticMarkup(await ConnectPage());
+
+  assert.match(
+    markup,
+    /aria-label="Get Murph for Android for Mobvoi \/ TicWatch"/u,
+  );
+  assert.match(
+    markup,
+    /Sync through Mobvoi Health or Google Fit, then connect Health Connect in Murph\./u,
+  );
+  assert.match(markup, /src="\/brand-logos\/connect\/mobvoi-health\.png"/u);
+  assert.match(markup, /rounded-full/u);
+  assert.doesNotMatch(markup, /Mobvoi \/ TicWatch (?:connected|not connected)/u);
 });
 
 test("ConnectPage shows source-scoped disconnects for multi-source Junction accounts", async () => {
@@ -2581,6 +2643,86 @@ test("SourceCard stacks connection-reset content vertically at the base breakpoi
   assert.match(actionErrorMarkup, /aria-label="Connect Garmin"[^>]+self-end/u);
 });
 
+test("SourceCard shows modern Dexcom as coming soon without hiding existing-account controls", async () => {
+  const { SourceCard } = await import(
+    "../app/(dashboard)/connect/connect-source-card"
+  );
+  const logo = {
+    className: "size-11 object-contain",
+    height: 44,
+    src: "/brand-logos/connect/dexcom.png",
+    width: 44,
+  };
+  const cardProps = {
+    errorMessage: null,
+    onDisconnectTargetChange: () => {},
+    onStartConnection: async () => {},
+    pending: false,
+    pendingDisconnect: false,
+  };
+  const source = {
+    connectionAvailable: false,
+    description: "CGM glucose readings and trends.",
+    id: "dexcom",
+    logo,
+    name: "Dexcom",
+    unavailableActionLabel: "Coming soon",
+    unavailableMessage: "Dexcom connections are coming soon.",
+  };
+
+  const signedOutMarkup = renderToStaticMarkup(
+    createElement(SourceCard, {
+      ...cardProps,
+      authenticated: false,
+      source,
+    }),
+  );
+
+  assert.match(signedOutMarkup, /Dexcom connections are coming soon\./u);
+  assert.match(signedOutMarkup, />Coming soon<\/button>/u);
+  assert.doesNotMatch(signedOutMarkup, />Sign in<\/button>/u);
+  assert.doesNotMatch(signedOutMarkup, /aria-label="Connect Dexcom"/u);
+
+  const connectedMarkup = renderToStaticMarkup(
+    createElement(SourceCard, {
+      ...cardProps,
+      authenticated: true,
+      source: {
+        ...source,
+        connected: true,
+        disconnectConnectionId: "dsc_dexcom_existing",
+        disconnectScope: "junction_account" as const,
+      },
+    }),
+  );
+
+  assert.match(connectedMarkup, /aria-label="Disconnect account"/u);
+  assert.doesNotMatch(connectedMarkup, />Coming soon<\/button>/u);
+
+  const recoveryMarkup = renderToStaticMarkup(
+    createElement(SourceCard, {
+      ...cardProps,
+      authenticated: true,
+      source: {
+        ...source,
+        connected: true,
+        disconnectConnectionId: "dsc_dexcom_recovery",
+        disconnectScope: "junction_account" as const,
+        requiresReconnect: true,
+      },
+    }),
+  );
+
+  assert.match(
+    recoveryMarkup,
+    /Dexcom reconnects are not available yet\. Your existing history is still available\./u,
+  );
+  assert.match(recoveryMarkup, />Coming soon<\/button>/u);
+  assert.match(recoveryMarkup, /aria-label="Disconnect account"/u);
+  assert.doesNotMatch(recoveryMarkup, /connected app/u);
+  assert.doesNotMatch(recoveryMarkup, /aria-label="Reconnect Dexcom"/u);
+});
+
 test("SourceCard does not promise unavailable Strava recovery connections", async () => {
   const { SourceCard } = await import(
     "../app/(dashboard)/connect/connect-source-card"
@@ -2728,6 +2870,9 @@ test("connect source card design study renders the production action states", as
   assert.match(markup, /aria-label="Download app for Apple Health"/u);
   assert.match(markup, /aria-label="Connect Fitbit"/u);
   assert.match(markup, /aria-label="Sign in to connect Oura"/u);
+  assert.match(markup, /Dexcom connections are coming soon\./u);
+  assert.match(markup, /aria-label="Dexcom web setup is not available yet"/u);
+  assert.doesNotMatch(markup, /aria-label="Sign in to connect Dexcom"/u);
   assert.match(markup, /Whoop needs a fresh connection/u);
   assert.match(markup, /aria-label="Disconnect account"/u);
   assert.match(markup, /Peloton could not open\. Please try again\./u);
@@ -3331,7 +3476,7 @@ test("ConnectSourcesGrid redeems an initial device connect intent through the ap
   await rendered.cleanup();
 });
 
-test("ConnectSourcesGrid explains Vital before redeeming an initial device connect intent", async () => {
+test("ConnectSourcesGrid explains Vital before redeeming a WHOOP device connect intent", async () => {
   const claim = "dc_12345678901234567890123456789012";
   let resolveAuthorizationResponse:
     | ((response: Response) => void)
@@ -3354,23 +3499,23 @@ test("ConnectSourcesGrid explains Vital before redeeming an initial device conne
     createElement(ConnectSourcesGrid, {
       sources: [
         {
-          connectTarget: "fitbit",
-          description: "Sleep, activity, heart rate, and daily readiness.",
-          id: "fitbit",
+          connectTarget: "whoop_v2",
+          description: "Recovery, strain, sleep, and heart rate.",
+          id: "whoop",
           logo: {
             className: "size-11 object-contain",
             height: 44,
-            src: "/brand-logos/connect/fitbit.svg",
+            src: "/brand-logos/connect/whoop.svg",
             width: 44,
           },
-          name: "Fitbit",
+          name: "Whoop",
         },
       ],
     }),
     {
       location: {
-        hash: `#deviceConnectIntent=${claim}&connectSource=fitbit&connectProvider=junction`,
-        href: `https://join.example.test/connect#deviceConnectIntent=${claim}&connectSource=fitbit&connectProvider=junction`,
+        hash: `#deviceConnectIntent=${claim}&connectSource=whoop&connectProvider=junction`,
+        href: `https://join.example.test/connect#deviceConnectIntent=${claim}&connectSource=whoop&connectProvider=junction`,
       },
     },
   );
@@ -3378,7 +3523,7 @@ test("ConnectSourcesGrid explains Vital before redeeming an initial device conne
   await vi.waitFor(() => {
     assert.match(
       rendered.container.textContent ?? "",
-      /Connect Fitbit to Murph/u,
+      /Connect Whoop to Murph/u,
     );
   });
   assert.equal(fetch.mock.calls.length, 0);
@@ -3386,7 +3531,7 @@ test("ConnectSourcesGrid explains Vital before redeeming an initial device conne
 
   const continueButton = [
     ...rendered.container.querySelectorAll("button"),
-  ].find((button) => button.textContent === "Continue to Fitbit");
+  ].find((button) => button.textContent === "Continue to Whoop");
   assert.ok(continueButton instanceof rendered.window.HTMLButtonElement);
   await act(async () => {
     continueButton.dispatchEvent(
@@ -3396,7 +3541,7 @@ test("ConnectSourcesGrid explains Vital before redeeming an initial device conne
 
   await vi.waitFor(() => {
     assert.equal(fetch.mock.calls.length, 1);
-    assert.match(rendered.container.textContent ?? "", /Connecting Fitbit/u);
+    assert.match(rendered.container.textContent ?? "", /Connecting Whoop/u);
   });
   assert.equal(rendered.assign.mock.calls.length, 0);
   assert.equal(fetch.mock.calls[0]?.[0], `/device/connect/${claim}`);
@@ -3415,14 +3560,14 @@ test("ConnectSourcesGrid explains Vital before redeeming an initial device conne
   await act(async () => {
     resolveAuthorizationResponse?.(
       Response.json({
-        authorizationUrl: "https://junction.example.test/link/fitbit",
+        authorizationUrl: "https://junction.example.test/link/whoop",
       }),
     );
   });
   await vi.waitFor(() => {
     assert.equal(
       rendered.assign.mock.calls[0]?.[0],
-      "https://junction.example.test/link/fitbit",
+      "https://junction.example.test/link/whoop",
     );
   });
   assert.equal(fetch.mock.calls.length, 1);
@@ -4478,6 +4623,135 @@ test("ConnectSourcesGrid keeps Apple Health mobile guidance after local disconne
     "https://apps.apple.com/us/app/murph-ai/id6786145859",
   );
   assert.doesNotMatch(rendered.container.textContent ?? "", /Not available/u);
+
+  await rendered.cleanup();
+});
+
+test("ConnectSourcesGrid warns when a Garmin account reset also disconnects unavailable Dexcom", async () => {
+  const fetch = vi.fn(
+    async (_input: RequestInfo | URL, _init?: RequestInit) => {
+      void _input;
+      void _init;
+      return Response.json({});
+    },
+  );
+  vi.stubGlobal("fetch", fetch);
+
+  const { ConnectSourcesGrid } = await import(
+    "../app/(dashboard)/connect/connect-page-client"
+  );
+  const rendered = await renderClientComponent(
+    createElement(ConnectSourcesGrid, {
+      sources: [
+        {
+          connectionAvailable: true,
+          connectTarget: "garmin",
+          connected: true,
+          description: "Workouts, sleep, stress, heart rate, and body battery.",
+          disconnectConnectionId: "dsc_shared_garmin_dexcom",
+          disconnectScope: "junction_account",
+          id: "garmin",
+          logo: {
+            className: "size-11 object-contain",
+            height: 44,
+            src: "/brand-logos/connect/garmin.png",
+            width: 44,
+          },
+          name: "Garmin",
+          recoveryKind: "connection_reset",
+        },
+        {
+          connectionAvailable: false,
+          connected: true,
+          description: "CGM glucose readings and trends.",
+          disconnectConnectionId: "dsc_shared_garmin_dexcom",
+          disconnectScope: "junction_account",
+          id: "dexcom",
+          logo: {
+            className: "size-11 object-contain",
+            height: 44,
+            src: "/brand-logos/connect/dexcom.png",
+            width: 44,
+          },
+          name: "Dexcom",
+          unavailableActionLabel: "Coming soon",
+          unavailableMessage: "Dexcom connections are coming soon.",
+        },
+      ],
+    }),
+  );
+
+  const garminHeading = [...rendered.container.querySelectorAll("h2")]
+    .find((heading) => heading.textContent === "Garmin");
+  const garminCard = garminHeading?.closest("div.relative");
+  const disconnectButton = garminCard?.querySelector(
+    "button[aria-label='Disconnect account']",
+  ) ?? null;
+  assert.ok(disconnectButton instanceof rendered.window.HTMLButtonElement);
+
+  await act(async () => {
+    disconnectButton.dispatchEvent(
+      new rendered.window.Event("click", { bubbles: true }),
+    );
+  });
+
+  assert.match(
+    rendered.container.textContent ?? "",
+    /This also disconnects Dexcom, which cannot be reconnected yet\./u,
+  );
+  const cancelButton = [...rendered.container.querySelectorAll("button")]
+    .find((button) => button.textContent === "Cancel");
+  assert.ok(cancelButton instanceof rendered.window.HTMLButtonElement);
+
+  await act(async () => {
+    cancelButton.dispatchEvent(
+      new rendered.window.Event("click", { bubbles: true }),
+    );
+  });
+
+  assert.match(rendered.container.textContent ?? "", /Garmin needs a fresh connection/u);
+  assert.match(rendered.container.textContent ?? "", /Dexcom connected/u);
+  assert.equal(fetch.mock.calls.length, 0);
+
+  await act(async () => {
+    disconnectButton.dispatchEvent(
+      new rendered.window.Event("click", { bubbles: true }),
+    );
+  });
+  const confirmButton = [...rendered.container.querySelectorAll("button")]
+    .filter((button) => button.textContent === "Disconnect")
+    .at(-1);
+  assert.ok(confirmButton instanceof rendered.window.HTMLButtonElement);
+
+  await act(async () => {
+    confirmButton.dispatchEvent(
+      new rendered.window.Event("click", { bubbles: true }),
+    );
+  });
+
+  await vi.waitFor(() => {
+    assert.match(rendered.container.textContent ?? "", /Garmin not connected/u);
+    assert.match(rendered.container.textContent ?? "", /Dexcom not connected/u);
+    assert.match(rendered.container.textContent ?? "", /Dexcom connections are coming soon\./u);
+  });
+  assert.equal(
+    fetch.mock.calls[0]?.[0],
+    "/api/settings/device-sync/connections/dsc_shared_garmin_dexcom/disconnect",
+  );
+  assert.ok(
+    rendered.container.querySelector("button[aria-label='Connect Garmin']"),
+  );
+  assert.ok(
+    rendered.container.querySelector("button[aria-label='Dexcom web setup is not available yet']"),
+  );
+  assert.equal(
+    rendered.container.querySelector("button[aria-label='Connect Dexcom']"),
+    null,
+  );
+  assert.equal(
+    rendered.container.querySelector("button[aria-label='Reconnect Dexcom']"),
+    null,
+  );
 
   await rendered.cleanup();
 });

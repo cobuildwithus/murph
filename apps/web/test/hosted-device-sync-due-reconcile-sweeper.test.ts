@@ -11,7 +11,7 @@ vi.mock("@/src/lib/device-sync/wake-service", () => ({
   }) => [
     "device-sync",
     "scheduled-reconcile",
-    "v1",
+    "v3",
     input.connectionId,
     input.expectedConnectedAt,
     input.nextReconcileAt,
@@ -60,7 +60,7 @@ describe("hosted device-sync due reconcile sweeper", () => {
     expect(mocks.appendHostedDeviceSyncScheduledReconcileWake).toHaveBeenCalledWith({
       connectionId: "dsc_due_1",
       createdAt: "2026-05-05T00:01:00.000Z",
-      eventId: "device-sync:scheduled-reconcile:v1:dsc_due_1:2026-05-04T12:00:00.000Z:2026-05-05T00:00:00.000Z",
+      eventId: "device-sync:scheduled-reconcile:v3:dsc_due_1:2026-05-04T12:00:00.000Z:2026-05-05T00:00:00.000Z",
       expectedConnectedAt: "2026-05-04T12:00:00.000Z",
       nextReconcileAt: "2026-05-05T00:00:00.000Z",
       provider: "whoop",
@@ -144,7 +144,7 @@ describe("hosted device-sync due reconcile sweeper", () => {
       [{
         connectionId: "dsc_due_1",
         createdAt: "2026-05-05T00:01:00.000Z",
-        eventId: "device-sync:scheduled-reconcile:v1:dsc_due_1:2026-05-04T12:00:00.000Z:2026-05-05T00:00:00.000Z",
+        eventId: "device-sync:scheduled-reconcile:v3:dsc_due_1:2026-05-04T12:00:00.000Z:2026-05-05T00:00:00.000Z",
         expectedConnectedAt: "2026-05-04T12:00:00.000Z",
         nextReconcileAt: "2026-05-05T00:00:00.000Z",
         provider: "whoop",
@@ -154,7 +154,7 @@ describe("hosted device-sync due reconcile sweeper", () => {
       [{
         connectionId: "dsc_due_2",
         createdAt: "2026-05-05T00:01:00.000Z",
-        eventId: "device-sync:scheduled-reconcile:v1:dsc_due_2:2026-05-04T12:05:00.000Z:2026-05-05T00:00:00.000Z",
+        eventId: "device-sync:scheduled-reconcile:v3:dsc_due_2:2026-05-04T12:05:00.000Z:2026-05-05T00:00:00.000Z",
         expectedConnectedAt: "2026-05-04T12:05:00.000Z",
         nextReconcileAt: "2026-05-05T00:00:00.000Z",
         provider: "whoop",

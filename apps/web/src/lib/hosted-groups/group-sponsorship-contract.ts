@@ -13,9 +13,16 @@ export interface HostedGroupSponsorshipCreativeRequest {
   styleRequest: string | null;
 }
 
+export const HOSTED_GROUP_FUNDING_RECOGNITION_CONSENT =
+  "funding_participants_v1" as const;
+
+export type HostedGroupFundingRecognitionConsent =
+  typeof HOSTED_GROUP_FUNDING_RECOGNITION_CONSENT;
+
 export interface HostedGroupSponsorshipDraft {
   creativeRequest?: HostedGroupSponsorshipCreativeRequest;
   publicAlias: string | null;
+  publicAliasRecognition?: HostedGroupFundingRecognitionConsent;
   runningBitRequest: string | null;
   sponsorMessage: string | null;
 }
@@ -46,13 +53,17 @@ export function buildHostedGroupSponsorshipDraftInput(
   const runningBitRequest = input.runningBitAvailable
     ? normalizeOptionalDraftText(input.runningBitRequest)
     : null;
+  const publicAlias = normalizeOptionalDraftText(input.publicAlias);
 
   return {
     ...(creativeRequest ? { creativeRequest } : {}),
-    publicAlias:
-      creativeRequest || runningBitRequest
-        ? normalizeOptionalDraftText(input.publicAlias)
-        : null,
+    publicAlias,
+    ...(publicAlias
+      ? {
+          publicAliasRecognition:
+            HOSTED_GROUP_FUNDING_RECOGNITION_CONSENT,
+        }
+      : {}),
     runningBitRequest,
     sponsorMessage: null,
   };

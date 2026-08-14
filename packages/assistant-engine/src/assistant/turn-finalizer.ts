@@ -11,7 +11,6 @@ import {
   serializeAssistantProviderSessionOptions,
 } from '@murphai/operator-config/assistant/provider-config'
 import { buildCodexResumeState } from '@murphai/operator-config/assistant/codex-resume-state'
-import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
   doesAssistantResumeBindingMatchRoute,
 } from './codex-resume-binding.js'
@@ -23,6 +22,12 @@ import { createAssistantRuntimeStateService } from './runtime-state-service.js'
 import {
   buildAssistantProviderTranscriptAuditEntries,
 } from './transcript-audit.js'
+import {
+  buildAssistantGeneratedImageDeliveryTranscriptMarkerText,
+  matchesExactAssistantVaultImageResponseMedia,
+  readAssistantGeneratedImageDeliveryTranscriptMarker,
+  type AssistantGeneratedImageDeliveryTranscriptMarker,
+} from './response-media.js'
 import {
   readCodexThreadCompatibilityFingerprint,
   readCodexThreadRouteFingerprint,
@@ -320,10 +325,23 @@ export async function persistAssistantTurnAndSession(input: {
         }]
       : []),
   ]
-  if (assistantTranscriptEntries.length > 0) {
+  const generatedImageDeliveryEntries =
+    await resolveAssistantGeneratedImageDeliveryTranscriptEntries({
+      input: input.input,
+      providerResult: input.providerResult,
+      sessionId: input.session.sessionId,
+      state,
+      turnCreatedAt: input.turnCreatedAt,
+      turnId: input.turnId,
+    })
+  const turnTranscriptEntries = [
+    ...assistantTranscriptEntries,
+    ...generatedImageDeliveryEntries,
+  ]
+  if (turnTranscriptEntries.length > 0) {
     await state.transcripts.append(
       input.session.sessionId,
-      assistantTranscriptEntries,
+      turnTranscriptEntries,
     )
   }
   const acceptedNoReplyDeliveryContextOrdinals =
@@ -348,7 +366,7 @@ export async function persistAssistantTurnAndSession(input: {
   })
   const turnCommittedConversationHistory =
     persistUserPromptToTranscript ||
-    assistantTranscriptEntries.length > 0 ||
+    turnTranscriptEntries.length > 0 ||
     noReplyMarkerDeliveryContextOrdinals.length > 0
 
   const updatedAt = new Date().toISOString()
@@ -365,12 +383,6 @@ export async function persistAssistantTurnAndSession(input: {
         ...(compactAssistantProviderConfigInput(input.input) ?? {}),
       }) ?? input.session.target
     : input.session.target
-  if (nextTarget.adapter !== 'codex-cli') {
-    throw new VaultCliError(
-      'ASSISTANT_PROVIDER_UNSUPPORTED',
-      'Assistant turn finalization only supports Codex app-server targets.',
-    )
-  }
   const nextProviderOptions = shouldApplyProviderConfigToSession
     ? serializeAssistantProviderSessionOptions(
         assistantBackendTargetToProviderConfigInput(nextTarget),
@@ -408,6 +420,81 @@ export async function persistAssistantTurnAndSession(input: {
   })
 
   return savedSession
+}
+
+async function resolveAssistantGeneratedImageDeliveryTranscriptEntries(input: {
+  input: AssistantMessageInput
+  providerResult: ExecutedAssistantProviderTurnResult
+  sessionId: string
+  state: ReturnType<typeof createAssistantRuntimeStateService>
+  turnCreatedAt: string
+  turnId: string
+}): Promise<Array<{
+  createdAt: string
+  kind: 'status'
+  text: string
+}>> {
+  const exactMedia =
+    input.input.hostedImageCompletionEffectRestriction?.exactMedia?.[0] ?? null
+  if (exactMedia === null || !exactMedia.ref.startsWith('raw/captures/')) {
+    return []
+  }
+  const deliveryContextOrdinals = new Set<number>()
+  for (const segment of input.providerResult.precedingResponseSegments ?? []) {
+    if (matchesExactAssistantVaultImageResponseMedia({
+      actual: segment.media,
+      expected: exactMedia,
+    })) {
+      deliveryContextOrdinals.add(segment.deliveryContextOrdinal)
+    }
+  }
+  if (matchesExactAssistantVaultImageResponseMedia({
+    actual: input.providerResult.responseMedia,
+    expected: exactMedia,
+  })) {
+    deliveryContextOrdinals.add(
+      input.providerResult.responseDeliveryContextOrdinal,
+    )
+  }
+  if (deliveryContextOrdinals.size === 0) {
+    // This marker records trusted generated provenance, not delivery. A ready
+    // completion may retain provider continuity while finishing without an
+    // attachment; the outbox join independently proves later visibility.
+    deliveryContextOrdinals.add(
+      input.providerResult.responseDeliveryContextOrdinal,
+    )
+  }
+  const markers = [...deliveryContextOrdinals].sort((left, right) =>
+    left - right
+  ).map((deliveryContextOrdinal) => ({
+    contentType: exactMedia.contentType,
+    deliveryContextOrdinal,
+    ref: exactMedia.ref,
+    sha256: exactMedia.sha256,
+    sizeBytes: exactMedia.sizeBytes,
+    turnId: input.turnId,
+  } satisfies AssistantGeneratedImageDeliveryTranscriptMarker))
+  const existing = await input.state.transcripts.list(input.sessionId)
+  const existingKeys = new Set(existing.flatMap((entry) => {
+    if (entry.kind !== 'status') {
+      return []
+    }
+    const marker = readAssistantGeneratedImageDeliveryTranscriptMarker(
+      entry.text,
+    )
+    return marker
+      ? [`${marker.turnId}:${marker.deliveryContextOrdinal}:${marker.ref}:${marker.sha256}`]
+      : []
+  }))
+  return markers
+    .filter((marker) => !existingKeys.has(
+      `${marker.turnId}:${marker.deliveryContextOrdinal}:${marker.ref}:${marker.sha256}`,
+    ))
+    .map((marker) => ({
+      createdAt: input.turnCreatedAt,
+      kind: 'status' as const,
+      text: buildAssistantGeneratedImageDeliveryTranscriptMarkerText(marker),
+    }))
 }
 
 type AssistantNextResumeStateInput = {

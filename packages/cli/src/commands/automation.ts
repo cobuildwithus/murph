@@ -1,6 +1,5 @@
 import { Cli, z } from "incur";
 
-import { isHostedRuntimeProcessEnv } from "@murphai/hosted-execution/env";
 import {
   AUTOMATION_SUPPORT_SERIES_RECONCILED_ARCHIVE_TAG,
   AUTOMATION_SUPPORT_SERIES_TAG_PREFIX,
@@ -110,6 +109,7 @@ export const automationRecordSchema = z
     continuityPolicy: z.enum(automationContinuityPolicyValues),
     tags: z.array(z.string().min(1)),
     createdAt: z.string().min(1),
+    scheduleAnchorAt: z.string().min(1).optional(),
     updatedAt: z.string().min(1),
     instructions: z.string().min(1),
     relativePath: pathSchema,
@@ -298,17 +298,6 @@ function buildAutomationRouteFromOptions(
   });
   return automationRouteSchema.parse(
     resolveAssistantDeliveryRouteWithCurrentRoute(explicit, null),
-  );
-}
-
-function assertAutomationCliMutationAllowed(): void {
-  if (!isHostedRuntimeProcessEnv(process.env)) {
-    return;
-  }
-
-  throw new VaultCliError(
-    "invalid_option",
-    "Hosted automation mutations are available only through Murph's root hosted automation tool.",
   );
 }
 
@@ -685,7 +674,6 @@ export function registerAutomationCommands(cli: Cli.Cli) {
     options: withBaseOptions(automationSaveOptionSchemas),
     output: automationSaveResultSchema,
     async run(context) {
-      assertAutomationCliMutationAllowed();
       const now = new Date().toISOString();
       const route = buildAutomationRouteFromOptions({
         channel: context.options.channel,
@@ -772,7 +760,6 @@ export function registerAutomationCommands(cli: Cli.Cli) {
     options: withBaseOptions(automationEditOptionSchemas),
     output: automationSaveResultSchema,
     async run(context) {
-      assertAutomationCliMutationAllowed();
       const now = new Date().toISOString();
       const existing = await showAutomation(context.options.vault, context.args.lookup);
       if (!existing) {
@@ -886,7 +873,6 @@ export function registerAutomationCommands(cli: Cli.Cli) {
     }),
     output: automationSaveResultSchema,
     async run(context) {
-      assertAutomationCliMutationAllowed();
       const existing = await showAutomation(context.options.vault, context.args.lookup);
       if (!existing) {
         throw new VaultCliError(
@@ -991,7 +977,6 @@ export function registerAutomationCommands(cli: Cli.Cli) {
     }),
     output: automationSupportSeriesReconcileResultSchema,
     async run(context) {
-      assertAutomationCliMutationAllowed();
       const supportSeriesId = context.args.seriesId.trim();
       const supportSeriesTag = requireAutomationSupportSeriesTagFromId(
         supportSeriesId,
@@ -1030,7 +1015,6 @@ export function registerAutomationCommands(cli: Cli.Cli) {
     }),
     output: automationSaveResultSchema,
     async run(context) {
-      assertAutomationCliMutationAllowed();
       const input = automationScaffoldPayloadSchema.parse(
         await loadJsonInputObject(
           context.options.input,

@@ -15,6 +15,7 @@ type RenderClientComponentResult<TButton extends HTMLButtonElement | null> = {
   container: HTMLElement;
   open: ReturnType<typeof vi.fn>;
   reload: ReturnType<typeof vi.fn>;
+  replaceLocation: ReturnType<typeof vi.fn>;
   replaceState: ReturnType<typeof vi.fn>;
   rerender: (element: ReactElement) => Promise<void>;
   rerenderInTransition: (element: ReactElement) => Promise<void>;
@@ -55,11 +56,13 @@ export async function renderClientComponent(
   const assign = vi.fn();
   const open = vi.fn();
   const reload = vi.fn();
+  const replaceLocation = vi.fn();
   Object.defineProperty(window, "location", {
     configurable: true,
     value: {
       assign,
       reload,
+      replace: replaceLocation,
       ...(options.location ?? {}),
     },
   });
@@ -135,6 +138,7 @@ export async function renderClientComponent(
     container,
     open,
     reload,
+    replaceLocation,
     replaceState,
     rerender: async (nextElement: ReactElement) => {
       await act(async () => {

@@ -1,6 +1,6 @@
 # Verification And Runtime
 
-Last verified: 2026-08-06
+Last verified: 2026-08-11
 ## Verification Ownership By Delivery Path
 
 The delivery path decides who owns broad verification:
@@ -18,13 +18,36 @@ The delivery path decides who owns broad verification:
   broader reproduction is useful. Do not rerun an unrelated full local suite.
 - **Direct shared-default push:** after fetching and reconciling the exact
   candidate for `main` or another shared default branch, run
-  `pnpm verify:acceptance` before pushing. This rule overrides the PR-focused
-  and docs-only fast paths because there is no PR feedback loop before the
-  shared branch changes.
+  `pnpm verify:acceptance` once for that direct-push attempt. This rule overrides
+  the PR-focused and docs-only fast paths because there is no PR feedback loop
+  before the shared branch changes. If the remote advances while acceptance
+  runs, fetch it and allow the unchanged accepted patch one post-acceptance
+  normal rebase. Require a conflict-free rebase, prove the patch is unchanged,
+  inspect the intervening base diff for overlap or invalidated assumptions, and
+  rerun affected focused checks. Do not restart full acceptance solely because
+  the base moved. Push immediately after that proof. If the patch changes, the
+  rebase conflicts, the intervening diff invalidates acceptance, or the push is
+  rejected because the remote advances again, do not rebase or rerun acceptance
+  again: report `moving-base race` and stop or move the change to a PR. The
+  one-rebase budget remains consumed until push or handoff; a later agent turn
+  does not reset it.
 
 Focused local proof is still mandatory for changed behavior. The PR rule moves
 the broad suite to CI; it does not permit an untested push or make a green
 unrelated check sufficient.
+
+For readiness, the exact PR head is the commit that contains the PR-authored
+change; it does not need to be repeatedly merged with a moving base. Keep green
+required CI on that head and prove current-base mergeability with
+`git merge-tree --write-tree`. At the authorized merge boundary, wait only for
+routed review gates and required GitHub checks. If strict up-to-date checks
+apply, prefer the merge queue; otherwise allow at most one normal base update
+for the unchanged reviewed patch and let required CI gate that head. If the base
+advances again after it is green, never perform a second base update or restart
+CI. Re-run the current-base merge-tree and follow the terminal non-refresh merge
+or `moving-base race` stop rule in `pr-reviewgpt-loop.md`. A non-required check
+delays merge only when its failure is relevant to the changed surface or the
+user explicitly requested it.
 
 Verification evidence belongs to the exact file state it checked. After the
 last code, test, or config edit, rerun every focused command whose inputs or
@@ -59,6 +82,17 @@ run, finish the cheap deterministic proof first:
 This order keeps stochastic evidence useful without making incidental model
 behavior or an avoidable late contradiction trigger repeated expensive runs.
 
+Assistant Engine's opt-in live Codex journeys use
+`MURPH_RUN_REAL_CODEX_E2E=1` with a supported provider credential. The
+generated-image avatar journey must exercise the production tool contracts in
+three natural turns: launch with a truthful wait acknowledgement, trusted
+completion media attachment with no group mutation, and a later explicit
+exact-ref avatar update with no product-feedback submission. Routine package
+verification compiles this scenario but skips the paid provider call when the
+gate or credential is absent; deterministic suites remain authoritative for
+transcript persistence, native-resume rejection, exact reply linkage, byte
+publication, and effect-authority denial.
+
 For hosted Linq weighted line-planning changes, the focused owner proof is the
 hosted-web Vitest slice covering routing policy, on-demand line load, home
 routing, group outreach, canonical thread-route refresh/repair, the bounded
@@ -66,6 +100,20 @@ account-projection backfill, and the production migration guard. Keep the
 5,000 assignment target assertions separate from the existing 7,000 provider
 traffic guideline; this verification slice must not add a runtime traffic-cap
 expectation.
+
+For Hosted Assistant Ask target changes, focused proof must cover the shared
+contract and parser, exact target-adapter admission and replay, Web
+prepare/complete authority revalidation, mailbox routing, reviewed-child
+lifecycle, and Cloudflare control-port replay. A private-current-sender change
+additionally proves exact accepted group-message attribution to the canonical
+author's active personal runtime, rejection of thread-container and
+non-accepted-input contexts, conversion to one same-channel `direct-member`
+queue-only exact-text notification with no group-route authority, and rejection
+of route-changing replay. Provider-entry proof must revalidate the original
+private Assistant Ask expiry, exact reviewed-text digest, same personal member,
+and current same-channel `direct-member` route, with expiry, revocation, text
+mismatch, and route drift all terminal and unable to fall back to the group.
+Exact-head CI owns the broad app and package suites.
 
 ## Hosted Stripe Billing Verification
 
@@ -78,7 +126,8 @@ pnpm --dir packages/hosted-local-harness exec vitest run \
   test/stripe-billing-live-config.test.ts \
   test/dev-hosted-local/stack.test.ts
 pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage \
-  apps/web/test/hosted-onboarding-billing-start-paid-pulse-service.test.ts \
+  apps/web/test/hosted-onboarding-billing-checkout-route.test.ts \
+  apps/web/test/hosted-starter-usage-migration.test.ts \
   apps/web/test/hosted-billing-live-support.test.ts
 pnpm hosted-billing:ci-guard
 ```
@@ -94,54 +143,73 @@ pnpm hosted-local e2e stripe-billing-browser-matrix
 pnpm hosted-billing:live:cleanup
 ```
 
-Never run PR-controlled code with writable Stripe authority and never use
-`pull_request_target` to work around GitHub's secret boundary. The live lane
-runs only on pushes to `main` (`github.event_name == 'push'`), so no pull
-request event of any origin can start the secret-bearing job; absent or
-malformed sandbox configuration fails closed on those `main` runs. All pull
-requests run only the credential-free hermetic lane. The always-present
-`Required hosted Stripe billing boundary` job checks the event-applicable
-result so branch protection has one stable required context. The live job exposes the
-existing pinned `@openai/codex` workspace binary for
-hosted-local model-catalog preparation without adding another CLI dependency.
-Keep the key on preflight/matrix/cleanup steps only; within the scenario it
-reaches the web Stripe client and harness-owned
-`stripe listen` child, not the browser, Cloudflare, Temporal, setup, or runner
-children. Do not pass it as a CLI argument or write it to a repository file.
+Never run PR-controlled fork code with writable Stripe authority and never use
+`pull_request_target` to work around GitHub's secret boundary. The Actions
+classifier admits only same-repository heads (excluding dependency-bot heads)
+whose pull-request author and triggering actor are both non-Dependabot. Every
+eligible trusted head enters the live lane; absent or malformed sandbox
+configuration fails closed. Fork and dependency-bot pull requests run only the
+credential-free hermetic lane. The always-present
+`Required hosted Stripe billing boundary` job checks the applicable result so
+branch protection has one stable required context. The live job exposes the
+existing pinned `@openai/codex` workspace binary for hosted-local model-catalog
+preparation without adding another CLI dependency. Keep the key on
+preflight/matrix/cleanup steps only; within the scenario it reaches the web
+Stripe client and harness-owned `stripe listen` child, not the browser,
+Cloudflare, Temporal, setup, or runner children. Do not pass it as a CLI
+argument or write it to a repository file.
 
-Use stable pre-provisioned test prices and an active default Portal configuration
-with plan updates enabled that ends Trial upgrades and immediately invoices the
-resulting paid plan. The browser journey, rather than a cached configuration
-projection, proves that Stripe exposes the dedicated Pulse and Edge products.
-Test Clocks are reserved for the paused-Trial case.
-Synchronize on bounded Stripe object/event
-state and Murph's PostgreSQL projection; do not replace those assertions with a
-fixed sleep. Diagnostics may state only opaque run correlation, object
-type/status, and browser step/surface/status. Do not capture or upload
-screenshots, traces, raw webhook payloads, URLs, identities, or full Playwright
-reports. Cleanup must verify exact run ownership, remain idempotent, avoid shared
-catalog objects, and run even after a scenario failure. Use the standalone
-cleanup command with the same run id after an interrupted process.
+Use stable pre-provisioned test prices and an active default Portal
+configuration with plan updates enabled and immediate invoicing. The browser
+journey, rather than a cached configuration projection, proves that Stripe
+exposes the dedicated Pulse and Edge products. The matrix covers Starter
+activation followed by ordinary paid Pulse Checkout, paid Pulse to Edge through
+the Portal boundary, Edge to Pulse at renewal, Family Checkout plus invite
+activation, and paid individual-to-Family conversion in place. Synchronize on
+bounded Stripe object/event state and Murph's PostgreSQL projection; do not
+replace those assertions with a fixed sleep. Diagnostics may state only opaque
+run correlation, object type/status, and browser step/surface/status. Do not
+capture or upload screenshots, traces, raw webhook payloads, URLs, identities,
+or full Playwright reports. Cleanup must verify exact run ownership, remain
+idempotent, avoid shared catalog objects, and run even after a scenario
+failure. Use the standalone cleanup command with the same run id after an
+interrupted process.
 
-The paused-Trial regression deliberately makes a real unsupported Resume control
-call before the UI journey, then requires the corrected production sequence:
-Subscription Update carries the inherited Customer payment method while paused,
-Subscription Resume carries only supported resume fields, the browser observes
-the resulting open, positive-balance hosted invoice even before Stripe records
-an attempted charge, that exact test invoice is paid, and webhook
-reconciliation opens Murph paid entitlement. The Family Checkout scenario starts from an
-authenticated lapsed individual without an active subscription, while a separate
-browser case proves that an already-paid individual converts to Family through an
-in-place update of the same subscription. Edge to Pulse is verified as a renewal
-schedule, never an immediate downgrade. Stripe's
-official Subscription Update and Resume references are the authority for that
-request-shape boundary; the trial, Test Clock, Portal deep-link, webhook, and
-test-mode references linked from `packages/hosted-local-harness/README.md` own
-the remaining external-provider assumptions. Stripe's immutable paid
-invoices/events and terminal records remain as bounded audit history in the
-dedicated sandbox; cleanup removes only mutable resources whose exact run
-ownership was proved. Repository files contain only the protected Environment
-contract names; the sandbox values remain external to the checkout.
+Stripe Checkout completion uses the official CLI fixture. Paid plan changes use
+the supported Subscription Update and Schedule APIs, and provider events traverse
+the harness-owned webhook listener before Murph's projection is asserted. The
+Family Checkout case starts from an authenticated lapsed individual without an
+active subscription, while a separate browser case proves that an already-paid
+individual converts to Family through an in-place update of the same
+subscription. Edge to Pulse is verified as a renewal schedule, never an
+immediate downgrade. Stripe's immutable paid invoices, events, and terminal
+records remain as bounded audit history in the dedicated sandbox; cleanup
+removes only mutable resources whose exact run ownership was proved. Repository
+files contain only the protected Environment contract names; sandbox values
+remain external to the checkout.
+
+## Live Junction WHOOP Canary Verification
+
+The public live wearable canary is a protected-main external-provider proof,
+not a pull-request check. Its focused hermetic owner proof is:
+
+```bash
+pnpm --dir packages/hosted-local-harness exec vitest run \
+  --config vitest.config.ts --no-coverage \
+  test/junction-wearable-canary-workflow.test.ts
+```
+
+The workflow must expose and smoke-check the exact workspace Codex CLI installed
+by the frozen root dependency graph before hosted-local model-catalog
+preparation. That workspace pin currently matches the independently owned
+`Dockerfile.cloudflare-hosted-runner-base` pin; both owners remain visible in
+the guarded review context, but no executable cross-owner equality guard links
+them. Keep that setup step free of Environment secrets; only the final
+browser-canary step may receive Junction sandbox authority and the dedicated
+WHOOP login. A real sign-in proof remains available only after the exact
+workflow reaches protected `main`, where non-canceling concurrency serializes
+the dedicated provider account. Do not weaken the protected-branch gate or
+expose live credentials to a pull request to obtain earlier proof.
 
 ## Verification Execution Location
 
@@ -649,17 +717,22 @@ and completed all 229 static pages with the same heap policy. Repeated
 exact-head Standard previews remain the external acceptance proof. The
 next exact-head Standard preview still OOM-killed Turbopack, so the catalog
 correction remains a boundary fix but was not sufficient capacity proof on
-Next 16.2.6. Production and Linux CI now use Next 16.3's default Turbopack path
-through the same shared production-build selector. The Workflow integration
-runs through its native Next integration: exact-head CI proves the complete
-compile, type-validation, static-generation, and directive-discovery path,
-while focused Stripe and phone-call suites prove the existing
-`workflow/api.start` wrappers and step contracts. Two forced-cold exact-head
-Standard previews completed without OOM: compilation took 91 and 87 seconds,
-TypeScript validation took 54 and 55 seconds, all 233 pages took 10.0 and 10.8
-seconds, and each Vercel build stage completed in four minutes. These repeated
-previews remain the external memory acceptance proof. The accepted Next 16.3
-candidate preserves the heap policy and all route/type validation. The
+Next 16.2.6. Production and Linux CI now use Next 16.3's supported Webpack
+fallback through the same shared production-build selector, with the isolated
+Webpack build worker and memory optimizations enabled. Interactive development
+and the dev-smoke lane remain on Turbopack. A cache-local compiler epoch removes
+only `.next/cache` when a restored cache predates the Webpack cutover and writes
+the epoch only after a successful Next build, so a failed cold build retries
+cold while later successful builds retain normal warm caching. The Workflow
+integration runs through its native Next integration: exact-head CI proves the
+complete compile, type-validation, static-generation, and directive-discovery
+path, while focused Stripe and phone-call suites prove the existing
+`workflow/api.start` wrappers and step contracts. The exact-head Standard
+hosted proof on 2026-08-14 restored the prior cache, reset the incompatible
+epoch, compiled with Webpack in 2.7 minutes, and completed the full build and
+post-build runtime checks in eight minutes without OOM. This hosted proof is the
+current external memory acceptance evidence. The accepted Next 16.3 candidate
+preserves the heap policy and all route/type validation. The
 advisory budget is a cgroup-unit machine model
 for Vercel Standard's 8 GB build machine: 7.2 GB available to the build cgroup,
 with a 0.8 GB reserve for OS/container overhead outside it at the ceiling. The
@@ -772,19 +845,31 @@ the advisory budget.
 - Generated-delivery ref changes cross `runtime-state`, `operator-config`, `hosted-execution`, `assistant-engine`, `assistant-runtime`, and CLI packaging. Focused verification must cover the shared exact-flat-ref predicate and portability descriptor, both persisted codecs, initial and retry reads with assistant-runtime permission adoption and identity revalidation, same-target post-approval cross-turn replacement rejection with pre-decision distinct-request and exact-ref retry preservation, fail-closed quiescent cleanup across every active outbox state, encrypted checkpoint inclusion, and portable-package exclusion with generic `exports/**` retention. Producer activation additionally requires reader-compatible protected-main deployment gates and exact runner-fingerprint convergence before the writer release, followed by a hosted approval/checkpoint/destroy/restore delivery scenario and the ordinary protected-main deploy gates.
 - Query-owned strict reads and lexical search now share `.runtime/projections/query.sqlite`; inbox-owned local runtime is split between `.runtime/projections/inboxd.sqlite` and `.runtime/operations/inbox/*.json`.
 - Device sync state lives only at `.runtime/operations/device-sync/state.sqlite`; Murph's CLI-managed daemon launcher state, logs, and a separate `0600` local control-token file live under `.runtime/operations/device-sync/`, with the bearer kept out of ordinary `launcher.json`; provider OAuth sessions and encrypted tokens remain outside the canonical vault.
-- `vault-cli assistant ask|chat|deliver|status|doctor|run|stop|session` persist or inspect assistant runtime state under `vault/.runtime/operations/assistant/**`, including explicit conversation bindings, timestamps/turn counts, provider session references, local transcript files, inbox-routing and channel auto-reply cursors, enabled auto-reply channels, coarse turn receipts, replay-safe outbound intents, diagnostics events plus snapshots, and persisted assistant status snapshots. Hosted provider usage is not assistant runtime state; hosted runs record it directly into the web-owned usage ledger through the injected runtime platform. Durable user-facing memory now lives canonically in `bank/memory.md`, and durable scheduled assistant prompts live canonically in `bank/automations/*.md` through the top-level `memory` and `automation` command surfaces. If a datum is user-facing, queryable, or something future product features will build on, it must not start in assistant runtime first; it needs a canonical vault home or an explicit derived materialization from the start. Assistant runtime receipt/outbox/diagnostics/status mutations stay serialized under one shared assistant-runtime write lock. Scheduled newsletter parent intents may additionally carry the generated HTML and an address-free authorization proof; recipient addresses never enter this state, and the existing outbox child states remain the retry/terminal evidence. Provider-native transcript history plus channel-native send history may still stay external when adapters support them. Current outbound channel support covers Telegram, Linq, and AgentMail-backed email. Email setup can still reuse a discovered or explicit existing inbox when the API key cannot create new inboxes.
+- `vault-cli assistant ask|chat|deliver|status|doctor|run|stop|session` persist or inspect assistant runtime state under `vault/.runtime/operations/assistant/**`, including explicit conversation bindings, timestamps/turn counts, provider session references, local transcript files, inbox-routing and channel auto-reply cursors, enabled auto-reply channels, coarse turn receipts, replay-safe outbound intents, diagnostics events plus snapshots, and persisted assistant status snapshots. Hosted provider usage is not assistant runtime state; hosted runs record it directly into the web-owned usage ledger through the injected runtime platform. Durable user-facing memory now lives canonically in `bank/memory.md`, and durable scheduled assistant prompts live canonically in `bank/automations/*.md` through the top-level `memory` and `automation` command surfaces. If a datum is user-facing, queryable, or something future product features will build on, it must not start in assistant runtime first; it needs a canonical vault home or an explicit derived materialization from the start. Assistant runtime receipt/outbox/diagnostics/status mutations stay serialized under one shared assistant-runtime write lock. Generic scheduled group-email parent intents may additionally carry generated HTML and an address-free authorization proof; recipient addresses never enter this state, and the existing outbox child states remain the retry/terminal evidence. Provider-native transcript history plus channel-native send history may still stay external when adapters support them. Current shared assistant-engine channel support covers Telegram, Linq, and generic hosted email through an explicitly injected transport. Local setup configures Telegram only; it does not provision or discover an email inbox.
+
+### Live Telegram presentation previews
+
+Use `TELEGRAM_PREVIEW_CHAT_ID` as the opt-in target for manual Telegram UI
+previews. Keep its value in an ignored local env file, never in source, docs,
+fixtures, logs, or PR artifacts. When that variable exists, a user-facing
+Telegram presentation change must send representative live samples after
+focused local proof and before final review. Backend-only Telegram changes do
+not send a preview. Load the target together with `TELEGRAM_BOT_TOKEN`, and
+report provider message IDs without printing either environment value. Preview
+the current branch renderer, not hand-written provider markup. This standing
+preview consent covers only product evidence for the configured private target;
+it is not permission to send unrelated messages, deploy, or change the webhook.
 - Codex App Server assistant turns now default to `danger-full-access` plus `never` approvals. Murph still owns the shared prompt, transcript, tool/runtime planning, and session continuity, but Codex is treated as a privileged local adapter rather than a sandboxed authority boundary.
 - When the built CLI artifact is present, canonical `memory` and runtime-safe assistant operations are exposed to Codex through the bounded local tool surface rooted at the active vault/session context; CLI fallback remains available for direct operator use, and the live provider path should use that tool surface rather than a separate localhost bridge.
 - `vault-cli` and `murph` load local `.env.local` first and then `.env` from the launch cwd before command dispatch, while preserving already-exported shell variables as higher precedence. This keeps repo-local operator credentials out of the canonical vault without requiring manual `export` commands each shell session.
-- `vault-cli assistant run` uses the saved Codex assistant backend and no longer accepts per-run model/provider endpoint flags. It performs configured channel auto-reply such as Telegram, Linq, or AgentMail email, dedicated self-chat flows can opt into self-authored captures plus age-based session rollover, and due canonical automations are processed while that loop stays active for the selected vault. Email auto-reply remains limited to direct threads and reuses the inbound AgentMail inbox id as the reply identity; Linq auto-reply remains limited to direct chats and reuses the inbound Linq chat id thread binding for replies.
+- `vault-cli assistant run` uses the saved Codex assistant backend and no longer accepts per-run model/provider endpoint flags. It performs configured local channel auto-reply for Telegram and existing Linq routes, dedicated self-chat flows can opt into self-authored captures plus age-based session rollover, and due canonical automations are processed while that loop stays active for the selected vault. Linq auto-reply remains limited to direct chats and reuses the inbound Linq chat id thread binding for replies; hosted email delivery is supplied separately by the hosted runtime.
 - `vault-cli assistant status` and `vault-cli assistant doctor`, plus the root `vault-cli status` and `vault-cli doctor` shorthands, are read-only local diagnostics over assistant session files, transcripts, receipts, runtime automation state, outbox intents, diagnostics snapshots, and persisted status snapshots; they must tolerate missing or partially corrupted assistant runtime files without mutating vault data.
 - `vault-cli assistant stop`, plus the root `vault-cli stop` shorthand, is the supported operator recovery path when `assistant run` / `murph run` is already active for the same vault. It targets the recorded run-lock PID with `SIGTERM`, escalates only if needed, and clears stale run-lock state when the recorded process is already gone.
-- Onboarding attempts to provision an AgentMail inbox when `AGENTMAIL_API_KEY` is available through the shell or the CLI-loaded local `.env.local` / `.env` files, automatically reuses the single discovered inbox when create permission is forbidden but discovery succeeds, stores only the AgentMail inbox id plus email address in local inbox config, and uses mocked AgentMail HTTP interactions in repo automation rather than live sends.
 - `vault-cli device ...` targets the local device control plane, defaults to `DEVICE_SYNC_BASE_URL` or `http://localhost:8788`, authenticates with `DEVICE_SYNC_CONTROL_TOKEN`, rejects non-loopback base URLs whenever that bearer path is used, and can now start or reuse a Murph-managed local daemon for the selected vault when no explicit control-plane target is provided. `vault-cli device daemon start|status|stop` is the explicit lifecycle surface for that managed process, and managed bearer reuse comes from the separate local secret file rather than persisted launcher JSON.
 - `vault-cli assistant chat` uses an Ink-based stderr UI and expects `react` and `ink` to be installed in the CLI workspace.
 - The built `vault-cli` binary can be exercised locally with `node packages/cli/dist/bin.js ...` when a change requires an end-to-end runtime check beyond the standard repo scripts. Installed `murph` / `vault-cli` shims are intentionally thin repo-root resolvers that `exec` the built entrypoint without wrapper-owned auto-build or stdio/signal mediation, but direct built-entry execution is still the clearest debugging path for stdin-sensitive behavior such as `--input -` because installed shims can lag until setup refreshes them.
 - A dedicated onboarding entrypoint exists at `node packages/cli/dist/bin.js onboard ...`; it is routed from `packages/cli/src/bin.ts` instead of the main `vault-cli` manifest so installer-style host provisioning can happen without reshaping the data-plane command graph.
-- The built CLI package shape exposes a `murph` bin alias that targets the same built entrypoint as `vault-cli`; `murph`, `murph --help`, and `murph onboard ...` route to the onboarding surface, while other commands continue through the main operator surface. Interactive TTY onboarding now opens a compact assistant/channel/wearable stepper with inline readiness badges for Telegram, Linq, AgentMail email, Oura, and WHOOP, restores canonical wearable selections from `bank/preferences.json`, can prompt for missing runtime credentials for the current onboarding run without persisting them, can discover and reuse an existing AgentMail inbox or prompt for an explicit inbox id before provisioning when the API key is scoped, persists the selected wearable providers back into that canonical preferences singleton, opens any selected wearable connect flow that is ready before handoff, defers scheduled-update preset installation until the operator later binds an explicit outbound destination, and then routes to `assistant run` when a configured auto-reply channel remains enabled. The repo's release flow now publishes only `@murphai/murph`, `@murphai/openclaw-plugin`, `@murphai/contracts`, `@murphai/hosted-execution`, and `@murphai/gateway-core` under one shared version and one git tag. Workspace-private runtime and owner packages such as `@murphai/assistant-engine`, `@murphai/operator-config`, `@murphai/runtime-state`, `@murphai/assistantd`, and `@murphai/device-syncd` remain installable from a checkout and are bundled into the relevant public tarballs when needed. The tag-driven GitHub Actions publish job relies on npm trusted publishing for that smaller package set, and npm trust is package-level rather than repo-level, so live npm publication depends on each public `@murphai/*` package being bound to `cobuildwithus/murph` and `.github/workflows/release.yml`. The repo ships `pnpm release:trust:github` to bootstrap those package-level bindings from an npm-authenticated maintainer shell; if a package is already bound incorrectly in npm, maintainers must revoke that package's existing trust entry before rerunning the bootstrap helper.
+- The built CLI package shape exposes a `murph` bin alias that targets the same built entrypoint as `vault-cli`; `murph`, `murph --help`, and `murph onboard ...` route to the onboarding surface, while other commands continue through the main operator surface. Interactive TTY onboarding now opens a compact assistant/channel/wearable stepper with inline readiness badges for Telegram, Garmin, Oura, Strava, and WHOOP, restores canonical wearable selections from `bank/preferences.json`, can prompt for missing runtime credentials for the current onboarding run without persisting them, persists the selected wearable providers back into that canonical preferences singleton, opens any selected wearable connect flow that is ready before handoff, defers scheduled-update preset installation until the operator later binds an explicit outbound destination, and then routes to `assistant run` when a configured auto-reply channel remains enabled. The repo's release flow now publishes only `@murphai/murph`, `@murphai/openclaw-plugin`, `@murphai/contracts`, `@murphai/hosted-execution`, and `@murphai/gateway-core` under one shared version and one git tag. Workspace-private runtime and owner packages such as `@murphai/assistant-engine`, `@murphai/operator-config`, `@murphai/runtime-state`, `@murphai/assistantd`, and `@murphai/device-syncd` remain installable from a checkout and are bundled into the relevant public tarballs when needed. The tag-driven GitHub Actions publish job relies on npm trusted publishing for that smaller package set, and npm trust is package-level rather than repo-level, so live npm publication depends on each public `@murphai/*` package being bound to `cobuildwithus/murph` and `.github/workflows/release.yml`. The repo ships `pnpm release:trust:github` to bootstrap those package-level bindings from an npm-authenticated maintainer shell; if a package is already bound incorrectly in npm, maintainers must revoke that package's existing trust entry before rerunning the bootstrap helper.
 - Repo-local host bootstrap is handled by `scripts/setup-host.sh`, which delegates to the existing Homebrew-based `scripts/setup-macos.sh` path on macOS and can reuse or download Node 24.14.1+ locally on Linux before activating `pnpm` through corepack, installing workspace dependencies, building the workspace, and delegating to the built setup entrypoint. `scripts/setup-macos.sh` still hard-fails off macOS, `scripts/setup-linux.sh` hard-fails off non-Linux hosts, and `--dry-run` remains a wrapper-only planning mode for those shell entrypoints.
 - GitHub Actions host-support CI now runs `.github/workflows/host-support.yml`, which exercises the focused CLI setup/inbox host-support suite on both `ubuntu-latest` and `macos-latest`. Its Ubuntu release gate preserves the `pnpm release:check` surface but splits it into parallel jobs for release metadata, clean workspace build, typecheck, artifact hygiene, doc gardening, package coverage shards, app verification, and fixture coverage, with a final `Release checks (ubuntu)` aggregator so required-check naming stays stable. The Ubuntu app-verification shard alone provisions loopback PostgreSQL 17 and injects the dedicated supplement-search test database variable; this runs the transactional 100+ case search corpus in PR and `main` CI without changing the unreachable hosted-web build database placeholder used by the rest of the app verification.
 - Repo-local source-resolved workspace aliases are intentionally limited to the package allowlists exported from `config/workspace-source-resolution.ts`; within those allowlists, Vitest subpaths resolve only through explicit workspace entries plus package-declared public exports rather than wildcarding arbitrary internals. Packages outside that helper stay on their existing emitted-JS-shaped import conventions until a caller explicitly opts them into source resolution.

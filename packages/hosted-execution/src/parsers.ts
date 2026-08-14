@@ -32,6 +32,9 @@ import {
 import {
   parseHostedExecutionInitialGroupRoomModelMarkdown,
 } from "./pending-group-setup.ts";
+import {
+  parseHostedExecutionDailyMetricReportedPayload,
+} from "./daily-metric.ts";
 
 import type {
   HostedExecutionAssistantAskCompletedEvent,
@@ -41,6 +44,8 @@ import type {
   HostedExecutionAssistantNotificationDeliverySource,
   HostedExecutionAssistantNotificationFirstContactPolicy,
   HostedExecutionAssistantNotificationPromptProfile,
+  HostedExecutionPrivateAssistantAskCompletionDeliveryAuthority,
+  HostedExecutionPrivateAssistantAskCompletionNotification,
   HostedExecutionClinicalRecordsSyncRequestedEvent,
   HostedExecutionAssistantNotificationRequestedPayload,
   HostedExecutionAssistantNotificationResponsePolicy,
@@ -54,7 +59,6 @@ import type {
   HostedExecutionMealPhotoCapturedPayload,
   HostedExecutionDeviceSyncWakeEvent,
   HostedExecutionDirectRoute,
-  HostedExecutionGroupNewsletterEmailNeededEvent,
   HostedExecutionWake,
   HostedExecutionWakeKind,
   HostedExecutionEvent,
@@ -71,7 +75,11 @@ import type {
 import {
   parseHostedExecutionAssistantAskCompletedPayload,
   parseHostedExecutionAssistantAskRequestedPayload,
+  parseHostedExecutionAssistantAskTimestamp,
 } from "./assistant-ask-payload.ts";
+import {
+  createHostedExecutionPrivateAssistantAskCompletionDeliveryKey,
+} from "./assistant-identifiers.ts";
 import type {
   HostedExecutionLogLevel,
 } from "./observability.ts";
@@ -88,11 +96,11 @@ import {
   buildHostedExecutionMemberChannelsUpdatedWake,
   buildHostedExecutionMemberPreferencesUpdatedWake,
   buildHostedExecutionEnvironmentVoiceCapturedWake,
+  buildHostedExecutionDailyMetricReportedWake,
   buildHostedExecutionMealPhotoCapturedWake,
   buildHostedExecutionConversationMessageWake,
   buildHostedExecutionCodexAuthRequestedWake,
   buildHostedExecutionDeviceSyncWake,
-  buildHostedExecutionGroupNewsletterEmailNeededWake,
   buildHostedExecutionPendingEffectsReconcileRequestedWake,
   buildHostedExecutionRuntimeControlWake,
   buildHostedExecutionTelegramConversationMessageWake,
@@ -135,6 +143,9 @@ export {
   parseHostedExecutionAssistantAskCompletedPayload,
   parseHostedExecutionAssistantAskRequestedPayload,
 } from "./assistant-ask-payload.ts";
+export {
+  parseHostedExecutionDailyMetricReportedPayload,
+} from "./daily-metric.ts";
 export {
   buildHostedExecutionLayeredSnapshotRef,
   buildHostedExecutionWorkingSnapshotRef,
@@ -185,8 +196,8 @@ export {
   parseHostedRuntimeAssistantAskControlResponse,
   parseHostedRuntimeGroupToolRequest,
   parseHostedRuntimeGroupToolResponse,
-  parseHostedRuntimeNewsletterToolRequest,
-  parseHostedRuntimeNewsletterToolResponse,
+  parseHostedRuntimeGroupEmailEffectRequest,
+  parseHostedRuntimeGroupEmailEffectResponse,
   parseHostedRuntimeFamilyPlanToolRequest,
   parseHostedRuntimeFamilyPlanToolResponse,
   parseHostedRuntimeIMessageContactToolRequest,
@@ -396,30 +407,6 @@ export function parseHostedExecutionWake(value: unknown): HostedExecutionWake {
         reason: parseHostedExecutionDeviceSyncReason(record.reason),
         userId: wireUserId,
       });
-    case "group-newsletter.email-needed":
-      return buildHostedExecutionGroupNewsletterEmailNeededWake({
-        ...(record.directRoute === undefined
-          ? {}
-          : {
-              directRoute: record.directRoute === null
-                ? null
-                : parseHostedExecutionDirectRoute(
-                    record.directRoute,
-                    "Hosted execution wake group-newsletter.email-needed directRoute",
-                  ),
-            }),
-        eventId,
-        groupDisplayName: readNullableString(
-          record.groupDisplayName,
-          "Hosted execution wake group-newsletter.email-needed groupDisplayName",
-        ),
-        groupId: requireString(
-          record.groupId,
-          "Hosted execution wake group-newsletter.email-needed groupId",
-        ),
-        memberId: wireUserId,
-        occurredAt,
-      });
     case "runtime.pending-effects-reconcile-requested":
       assertExactHostedExecutionKeys(record, [
         "effectId",
@@ -457,6 +444,24 @@ export function parseHostedExecutionWake(value: unknown): HostedExecutionWake {
         memberId: wireUserId,
         occurredAt,
         sha256: mealPhoto.sha256,
+      });
+    }
+    case "health.daily-metric.reported": {
+      assertExactHostedExecutionKeys(record, [
+        "dailyMetric",
+        "eventId",
+        "kind",
+        "occurredAt",
+        "userId",
+      ], "Hosted execution health.daily-metric.reported wake");
+      const dailyMetric = parseHostedExecutionDailyMetricReportedPayload(
+        record.dailyMetric,
+      );
+      return buildHostedExecutionDailyMetricReportedWake({
+        ...dailyMetric,
+        eventId,
+        memberId: wireUserId,
+        occurredAt,
       });
     }
     case "environment-voice.captured": {
@@ -1445,29 +1450,6 @@ export function parseHostedExecutionEvent(value: unknown): HostedExecutionEvent 
         reason: parseHostedExecutionDeviceSyncReason(record.reason),
         userId,
       } satisfies HostedExecutionDeviceSyncWakeEvent;
-    case "group-newsletter.email-needed":
-      return {
-        ...(record.directRoute === undefined
-          ? {}
-          : {
-              directRoute: record.directRoute === null
-                ? null
-                : parseHostedExecutionDirectRoute(
-                    record.directRoute,
-                    "Hosted execution group-newsletter.email-needed directRoute",
-                  ),
-            }),
-        groupDisplayName: readNullableString(
-          record.groupDisplayName,
-          "Hosted execution group-newsletter.email-needed groupDisplayName",
-        ),
-        groupId: requireString(
-          record.groupId,
-          "Hosted execution group-newsletter.email-needed groupId",
-        ),
-        kind,
-        userId,
-      } satisfies HostedExecutionGroupNewsletterEmailNeededEvent;
     case "runtime.pending-effects-reconcile-requested":
       assertExactHostedExecutionKeys(record, [
         "effectId",
@@ -1572,6 +1554,15 @@ function parseHostedExecutionAssistantNotificationRequestedPayload(
                 `${label}.notificationPromptProfile`,
               ),
         }),
+    ...(record.privateAssistantAskCompletion === undefined
+      ? {}
+      : {
+          privateAssistantAskCompletion:
+            parseHostedExecutionPrivateAssistantAskCompletionNotification(
+              record.privateAssistantAskCompletion,
+              `${label}.privateAssistantAskCompletion`,
+            ),
+        }),
     ...(record.responsePolicy === undefined
       ? {}
       : {
@@ -1583,6 +1574,25 @@ function parseHostedExecutionAssistantNotificationRequestedPayload(
               ),
         }),
     route: parseHostedExecutionAssistantNotificationRoute(record.route, `${label}.route`),
+  };
+}
+
+function parseHostedExecutionPrivateAssistantAskCompletionNotification(
+  value: unknown,
+  label: string,
+): HostedExecutionPrivateAssistantAskCompletionNotification {
+  const record = requireObject(value, label);
+  assertExactHostedExecutionKeys(record, ["expiresAt", "requestId"], label);
+  const requestId = requireString(record.requestId, `${label}.requestId`);
+  if (!/^aask_req_[0-9a-f]{64}$/u.test(requestId)) {
+    throw new TypeError(`${label}.requestId is invalid.`);
+  }
+  return {
+    expiresAt: parseHostedExecutionAssistantAskTimestamp(
+      record.expiresAt,
+      `${label}.expiresAt`,
+    ),
+    requestId,
   };
 }
 
@@ -1663,7 +1673,7 @@ function parseHostedExecutionAssistantNotificationFirstContactPolicy(
   };
 }
 
-function parseHostedExecutionAssistantNotificationRoute(
+export function parseHostedExecutionAssistantNotificationRoute(
   value: unknown,
   label: string,
 ): HostedExecutionAssistantNotificationRequestedPayload["route"] {
@@ -1682,6 +1692,70 @@ function parseHostedExecutionAssistantNotificationRoute(
     threadIsDirect: record.threadIsDirect === null
       ? null
       : requireBoolean(record.threadIsDirect, `${label}.threadIsDirect`),
+  };
+}
+
+export function parseHostedExecutionPrivateAssistantAskCompletionDeliveryAuthority(
+  value: unknown,
+  label = "Hosted execution private Assistant Ask completion delivery authority",
+): HostedExecutionPrivateAssistantAskCompletionDeliveryAuthority {
+  const record = requireObject(value, label);
+  assertExactHostedExecutionKeys(record, [
+    "answeredMailboxItemIds",
+    "assistantAskCompletionExpiresAt",
+    "idempotencyKey",
+    "responseTextDigest",
+    "route",
+  ], label);
+  const answeredMailboxItemIds = requireArray(
+    record.answeredMailboxItemIds,
+    `${label}.answeredMailboxItemIds`,
+  ).map((entry, index) => requireString(
+    entry,
+    `${label}.answeredMailboxItemIds[${index}]`,
+  ));
+  const completionId = answeredMailboxItemIds[0] ?? "";
+  if (
+    answeredMailboxItemIds.length !== 1
+    || !completionId.trim()
+    || completionId.trim() !== completionId
+    || [...completionId].length > 256
+  ) {
+    throw new TypeError(`${label}.answeredMailboxItemIds is invalid.`);
+  }
+  const idempotencyKey = requireString(
+    record.idempotencyKey,
+    `${label}.idempotencyKey`,
+  );
+  if (
+    idempotencyKey.trim() !== idempotencyKey
+    || idempotencyKey
+      !== createHostedExecutionPrivateAssistantAskCompletionDeliveryKey(
+        completionId,
+      )
+  ) {
+    throw new TypeError(`${label}.idempotencyKey is invalid.`);
+  }
+  const responseTextDigest = requireString(
+    record.responseTextDigest,
+    `${label}.responseTextDigest`,
+  );
+  if (!/^[0-9a-f]{64}$/u.test(responseTextDigest)) {
+    throw new TypeError(`${label}.responseTextDigest is invalid.`);
+  }
+  return {
+    answeredMailboxItemIds,
+    assistantAskCompletionExpiresAt:
+      parseHostedExecutionAssistantAskTimestamp(
+        record.assistantAskCompletionExpiresAt,
+        `${label}.assistantAskCompletionExpiresAt`,
+      ),
+    idempotencyKey,
+    responseTextDigest,
+    route: parseHostedExecutionAssistantNotificationRoute(
+      record.route,
+      `${label}.route`,
+    ),
   };
 }
 

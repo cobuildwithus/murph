@@ -6,6 +6,10 @@ import {
   HOSTED_RUNTIME_GROUP_TOOL_PATH,
 } from "@murphai/hosted-execution/routes";
 import {
+  HOSTED_RUNTIME_GROUP_CURRENT_SENDER_PROTOCOL_MARKER,
+  HOSTED_RUNTIME_GROUP_CURRENT_SENDER_PROTOCOL_MARKER_VALUE,
+} from "@murphai/hosted-execution/runtime-control";
+import {
   buildHostedVaultShareProjectionScopeKey,
   HOSTED_VAULT_SHARE_KNOWN_PROJECTION_SCOPES,
 } from "@murphai/hosted-execution/vault-share";
@@ -19,6 +23,18 @@ const HOSTED_VAULT_SHARE_SUPPORTED_PROJECTION_SCOPE_PARAM = "supportedProjection
 const HOSTED_RUNTIME_GROUP_PARTICIPANT_DISPLAY_NAME_RESPONSE_MAX_BYTES =
   128 * 1024;
 const HOSTED_RUNTIME_GROUP_PARTICIPANT_DISPLAY_NAME_SOFT_TIMEOUT_MS = 1_000;
+
+export const HOSTED_GROUP_TOOL_RESPONSE_SCHEMA_INVALID =
+  "HOSTED_GROUP_TOOL_RESPONSE_SCHEMA_INVALID";
+
+export class HostedGroupToolResponseSchemaError extends Error {
+  readonly code = HOSTED_GROUP_TOOL_RESPONSE_SCHEMA_INVALID;
+
+  constructor() {
+    super("Hosted group tool returned an invalid response.");
+    this.name = "HostedGroupToolResponseSchemaError";
+  }
+}
 
 export function createHostedRuntimeGroupToolPort(input: {
   boundUserId: string;
@@ -44,12 +60,12 @@ export function createHostedRuntimeGroupToolPort(input: {
           : timeoutSignal;
       }
       const payload = await fetchHostedWebControlPlaneJson({
-        body: request,
+        body: encodeHostedRuntimeGroupToolRequest(request),
         boundUserId: input.boundUserId,
         description: "Hosted group tool",
         fetchImpl: input.fetchImpl,
         path: buildHostedRuntimeGroupToolPath(),
-        replayOnceOnRetryableFailure: isHostedAssistantAskGroupToolRequest(request),
+        replayOnceOnRetryableFailure: isHostedReplaySafeGroupToolRequest(request),
         ...(isParticipantDisplayNameRead
           ? {
               sensitiveResponseBody: {
@@ -65,21 +81,36 @@ export function createHostedRuntimeGroupToolPort(input: {
 
       try {
         return parseHostedRuntimeGroupToolResponse(payload);
-      } catch (error) {
-        throw new Error("Hosted group tool returned invalid JSON.", { cause: error });
+      } catch {
+        throw new HostedGroupToolResponseSchemaError();
       }
     },
   };
 }
 
-function isHostedAssistantAskGroupToolRequest(
+function encodeHostedRuntimeGroupToolRequest(
+  request: Parameters<
+    NonNullable<HostedRuntimePlatform["groupToolPort"]>["request"]
+  >[0],
+): unknown {
+  return request.action === "ask_current_sender"
+    ? {
+        ...request,
+        [HOSTED_RUNTIME_GROUP_CURRENT_SENDER_PROTOCOL_MARKER]:
+          HOSTED_RUNTIME_GROUP_CURRENT_SENDER_PROTOCOL_MARKER_VALUE,
+      }
+    : request;
+}
+
+function isHostedReplaySafeGroupToolRequest(
   request: Parameters<
     NonNullable<HostedRuntimePlatform["groupToolPort"]>["request"]
   >[0],
 ): boolean {
   return request.action === "ask"
     || request.action === "ask_current_sender"
-    || request.action === "ask_member";
+    || request.action === "ask_member"
+    || request.action === "record_current_sender_daily_metric";
 }
 
 function buildHostedRuntimeGroupToolPath(): string {

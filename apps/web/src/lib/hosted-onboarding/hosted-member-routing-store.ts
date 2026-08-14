@@ -3,7 +3,10 @@
  */
 import { Prisma } from "@prisma/client";
 
-import { buildHostedMemberRoutingPrivateColumns } from "./member-private-codecs";
+import {
+  buildHostedMemberRoutingPrivateColumns,
+  readHostedMemberRoutingHomeLinqRecipientPhones,
+} from "./member-private-codecs";
 import {
   createHostedLinqChatLookupKeyReadCandidates,
   createHostedPhoneLookupKeyReadCandidates,
@@ -28,6 +31,7 @@ export {
   acquireHostedMemberHomeLinqRouteLockTx,
   countHostedMemberHomeLinqBindingsByRecipientPhone,
   demoteHostedMemberLinqGroupChatBindingsTx,
+  readHostedMemberHomeLinqRouteAuthorityTx,
   upsertHostedMemberHomeLinqBindingTx,
   upsertHostedMemberHomeLinqRecipientPhoneTx,
   upsertHostedMemberPendingLinqBindingTx,
@@ -39,9 +43,12 @@ export {
   upsertHostedMemberTelegramRoutingBindingTx,
 } from "./hosted-member-routing-telegram";
 export {
+  hostedMemberRoutingRecordsEqual,
   projectHostedMemberRoutingState,
+  readHostedMemberRoutingControlRootKeyIds,
   type HostedMemberRoutingLookupMatch,
   type HostedMemberRoutingLookupSnapshot,
+  type HostedMemberRoutingRecord,
   type HostedMemberRoutingStateSnapshot,
 } from "./hosted-member-routing-state";
 
@@ -57,6 +64,38 @@ export type HostedMemberRoutingByTelegramUserIdResolution =
   | {
       status: "missing";
     };
+
+export type HostedMemberCoreLookupResolution =
+  | {
+      core: HostedMemberRoutingLookup["core"];
+      status: "found";
+    }
+  | {
+      memberIds: string[];
+      status: "ambiguous";
+    }
+  | {
+      status: "missing";
+    };
+
+const hostedMemberRoutingCoreLookupSelect =
+  Prisma.validator<Prisma.HostedMemberRoutingSelect>()({
+    memberId: true,
+    member: {
+      select: {
+        billingStatus: true,
+        createdAt: true,
+        id: true,
+        suspendedAt: true,
+        updatedAt: true,
+      },
+    },
+  });
+
+type HostedMemberRoutingCoreLookupRecord =
+  Prisma.HostedMemberRoutingGetPayload<{
+    select: typeof hostedMemberRoutingCoreLookupSelect;
+  }>;
 
 export async function readHostedMemberIdByReplyAliasLookupKey(input: {
   prisma: HostedOnboardingReadClient;
@@ -217,13 +256,130 @@ export async function lookupHostedMemberRoutingByPendingLinqParticipantContact(i
   });
 }
 
-export async function lookupHostedMemberRoutingByHomeLinqChatId(input: {
+/**
+ * Resolves pending-contact authority without decrypting unrelated routing
+ * state. Linq webhook admission consumes only member core fields here.
+ */
+export async function lookupHostedMemberCoreByPendingLinqParticipantContact(input: {
+  contact: HostedLinqParticipantContact;
+  linqChatId?: string | null;
+  prisma: HostedOnboardingReadClient;
+  recipientPhone?: string | null;
+}): Promise<HostedMemberRoutingLookup["core"] | null> {
+  const contactLookupKeys =
+    createHostedLinqParticipantContactLookupKeyReadCandidates({
+      kind: input.contact.kind,
+      value: input.contact.value,
+    });
+  const scopedToGroup =
+    input.linqChatId !== undefined || input.recipientPhone !== undefined;
+  if (
+    scopedToGroup
+    && (input.linqChatId === undefined || input.recipientPhone === undefined)
+  ) {
+    throw new TypeError(
+      "Pending Linq group contact lookup requires both chat and recipient line.",
+    );
+  }
+  const chatLookupKeys = scopedToGroup
+    ? createHostedLinqChatLookupKeyReadCandidates(input.linqChatId)
+    : [];
+  const recipientLookupKeys = scopedToGroup
+    ? createHostedPhoneLookupKeyReadCandidates(input.recipientPhone)
+    : [];
+  if (
+    contactLookupKeys.length === 0
+    || (scopedToGroup
+      && (chatLookupKeys.length === 0 || recipientLookupKeys.length === 0))
+  ) {
+    return null;
+  }
+
+  const resolution = resolveHostedMemberCoreLookup(
+    await input.prisma.hostedMemberRouting.findMany({
+      where: {
+        pendingLinqParticipantContactLookupKey: {
+          in: contactLookupKeys,
+        },
+        ...(scopedToGroup
+          ? {
+              pendingLinqChatLookupKey: {
+                in: chatLookupKeys,
+              },
+              pendingLinqRecipientPhoneLookupKey: {
+                in: recipientLookupKeys,
+              },
+            }
+          : {}),
+      },
+      select: hostedMemberRoutingCoreLookupSelect,
+    }),
+  );
+  if (resolution.status === "ambiguous") {
+    throw hostedOnboardingError({
+      code: "LINQ_PENDING_CONTACT_ROUTING_LOOKUP_AMBIGUOUS",
+      details: {
+        matchCount: resolution.memberIds.length,
+        matchedBy: "pendingLinqParticipantContactLookupKey",
+      },
+      httpStatus: 500,
+      message: "Hosted member routing lookup matched multiple members.",
+      retryable: true,
+    });
+  }
+  return resolution.status === "found" ? resolution.core : null;
+}
+
+export interface HostedMemberHomeLinqCoreLookup {
+  core: HostedMemberRoutingLookup["core"];
+  matchedBy: "linqChatLookupKey";
+}
+
+type HostedMemberRoutingByHomeLinqChatIdInput = {
   linqChatId: string | null | undefined;
   prisma: HostedOnboardingReadClient;
-}): Promise<HostedMemberRoutingLookup | null> {
+};
+
+export async function lookupHostedMemberRoutingByHomeLinqChatId(
+  input: HostedMemberRoutingByHomeLinqChatIdInput & { projection: "core" },
+): Promise<HostedMemberHomeLinqCoreLookup | null>;
+export async function lookupHostedMemberRoutingByHomeLinqChatId(
+  input: HostedMemberRoutingByHomeLinqChatIdInput,
+): Promise<HostedMemberRoutingLookup | null>;
+export async function lookupHostedMemberRoutingByHomeLinqChatId(
+  input: HostedMemberRoutingByHomeLinqChatIdInput & { projection?: "core" },
+): Promise<HostedMemberHomeLinqCoreLookup | HostedMemberRoutingLookup | null> {
   const lookupKeys = createHostedLinqChatLookupKeyReadCandidates(input.linqChatId);
   if (lookupKeys.length === 0) {
     return null;
+  }
+
+  if (input.projection === "core") {
+    const resolution = resolveHostedMemberCoreLookup(
+      await input.prisma.hostedMemberRouting.findMany({
+        where: {
+          linqChatLookupKey: {
+            in: lookupKeys,
+          },
+        },
+        select: hostedMemberRoutingCoreLookupSelect,
+      }),
+    );
+    if (resolution.status === "ambiguous") {
+      throw hostedOnboardingError({
+        code: "LINQ_HOME_CHAT_ROUTING_LOOKUP_AMBIGUOUS",
+        details: {
+          matchCount: resolution.memberIds.length,
+          matchedBy: "linqChatLookupKey",
+        },
+        httpStatus: 500,
+        message: "Hosted member routing lookup matched multiple members.",
+        retryable: true,
+      });
+    }
+    return resolution.status === "found"
+      ? { core: resolution.core, matchedBy: "linqChatLookupKey" }
+      : null;
   }
 
   const routingRecords = await input.prisma.hostedMemberRouting.findMany({
@@ -289,6 +445,56 @@ export async function resolveHostedMemberRoutingByTelegramUserId(input: {
       "telegramUserId",
       input.prisma,
     ),
+    status: "found",
+  };
+}
+
+/**
+ * Resolves Telegram sender authority without projecting encrypted routing
+ * state. Webhook admission consumes only member core fields and must not turn a
+ * blind-index lookup into private-field KMS work before or during planning.
+ */
+export async function resolveHostedMemberCoreByTelegramUserId(input: {
+  prisma: HostedOnboardingReadClient;
+  telegramUserId: string;
+}): Promise<HostedMemberCoreLookupResolution> {
+  const telegramUserLookupKeys = createHostedTelegramUserLookupKeyReadCandidates(
+    input.telegramUserId,
+  );
+  if (telegramUserLookupKeys.length === 0) {
+    return { status: "missing" };
+  }
+
+  const records = await input.prisma.hostedMemberRouting.findMany({
+    where: {
+      telegramUserLookupKey: {
+        in: telegramUserLookupKeys,
+      },
+    },
+    select: hostedMemberRoutingCoreLookupSelect,
+  });
+  return resolveHostedMemberCoreLookup(records);
+}
+
+function resolveHostedMemberCoreLookup(
+  records: readonly HostedMemberRoutingCoreLookupRecord[],
+): HostedMemberCoreLookupResolution {
+  const coreByMemberId = new Map<string, HostedMemberRoutingLookup["core"]>();
+  for (const record of records) {
+    coreByMemberId.set(record.memberId, record.member);
+  }
+  if (coreByMemberId.size === 0) {
+    return { status: "missing" };
+  }
+  if (coreByMemberId.size !== 1) {
+    return {
+      memberIds: [...coreByMemberId.keys()].sort(),
+      status: "ambiguous",
+    };
+  }
+
+  return {
+    core: [...coreByMemberId.values()][0]!,
     status: "found",
   };
 }
@@ -365,9 +571,76 @@ async function resolveUniqueHostedMemberRoutingLookup(input: {
     input.prisma,
   );
 }
+
+export interface HostedMemberRoutingHomeLinqRecipientPhoneRecord {
+  linqRecipientPhoneEncrypted: string | null;
+  linqRecipientPhoneLookupKey: string | null;
+  memberId: string;
+}
+
+export interface HostedMemberRoutingHomeLinqRecipientPhoneSnapshot
+  extends HostedMemberRoutingHomeLinqRecipientPhoneRecord {
+  linqRecipientPhone: string | null;
+}
+
+export async function readHostedMemberRoutingHomeLinqRecipientPhoneRecords(
+  input: {
+    memberIds: readonly string[];
+    prisma: HostedOnboardingReadClient;
+  },
+): Promise<HostedMemberRoutingHomeLinqRecipientPhoneRecord[]> {
+  const memberIds = [...new Set(input.memberIds)];
+  if (memberIds.length === 0) {
+    return [];
+  }
+  return input.prisma.hostedMemberRouting.findMany({
+    orderBy: { memberId: "asc" },
+    select: {
+      linqRecipientPhoneEncrypted: true,
+      linqRecipientPhoneLookupKey: true,
+      memberId: true,
+    },
+    where: { memberId: { in: memberIds } },
+  });
+}
+
+export async function readHostedMemberRoutingHomeLinqRecipientPhoneSnapshots(
+  input: {
+    memberIds: readonly string[];
+    prisma: HostedOnboardingReadClient;
+    retainFailureInScopedCache?: boolean;
+  },
+): Promise<HostedMemberRoutingHomeLinqRecipientPhoneSnapshot[]> {
+  const records = await readHostedMemberRoutingHomeLinqRecipientPhoneRecords(input);
+  return openHostedMemberRoutingHomeLinqRecipientPhoneRecords({
+    prisma: input.prisma,
+    records,
+    retainFailureInScopedCache: input.retainFailureInScopedCache,
+  });
+}
+
+export async function openHostedMemberRoutingHomeLinqRecipientPhoneRecords(
+  input: {
+    prisma: HostedOnboardingReadClient;
+    records: readonly HostedMemberRoutingHomeLinqRecipientPhoneRecord[];
+    retainFailureInScopedCache?: boolean;
+  },
+): Promise<HostedMemberRoutingHomeLinqRecipientPhoneSnapshot[]> {
+  const phones = await readHostedMemberRoutingHomeLinqRecipientPhones(
+    input.records,
+    input.prisma,
+    input.retainFailureInScopedCache,
+  );
+  return input.records.map((record, index) => ({
+    ...record,
+    linqRecipientPhone: phones[index] ?? null,
+  }));
+}
+
 export async function readHostedMemberRoutingState(input: {
   memberId: string;
   prisma: HostedOnboardingReadClient;
+  retainFailureInScopedCache?: boolean;
 }) {
   const routingRecord = await input.prisma.hostedMemberRouting.findUnique({
     where: {
@@ -376,7 +649,30 @@ export async function readHostedMemberRoutingState(input: {
     select: hostedMemberRoutingStateSelect,
   });
 
-  return routingRecord ? await projectHostedMemberRoutingState(routingRecord, input.prisma) : null;
+  return routingRecord
+    ? await projectHostedMemberRoutingState(
+        routingRecord,
+        input.prisma,
+        input.retainFailureInScopedCache,
+      )
+    : null;
+}
+
+/**
+ * Reads the exact persisted routing snapshot without decrypting it. Prepared
+ * webhook paths use this to bind an outside-transaction projection to the row
+ * re-read under their routing lock.
+ */
+export async function readHostedMemberRoutingRecord(input: {
+  memberId: string;
+  prisma: HostedOnboardingReadClient;
+}) {
+  return input.prisma.hostedMemberRouting.findUnique({
+    where: {
+      memberId: input.memberId,
+    },
+    select: hostedMemberRoutingStateSelect,
+  });
 }
 
 export async function lockHostedMemberRoutingStateTx(input: {

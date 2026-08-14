@@ -1,6 +1,6 @@
 import { Buffer } from "node:buffer";
 
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { HostedLinqWebhookEvent } from "@/src/lib/hosted-onboarding/linq";
 import {
@@ -34,14 +34,17 @@ import {
 } from "@/src/lib/hosted-onboarding/linq-provider-status";
 
 const inventoryMocks = vi.hoisted(() => ({
-  fetchLinqApi: vi.fn(),
+  listChats: vi.fn(),
+  listPhoneNumbers: vi.fn(),
+  runLinqApiRequest: vi.fn(),
   upsertHostedLinqLineForPhoneTx: vi.fn(),
 }));
 
 vi.mock("@/src/lib/linq/api", () => ({
-  fetchLinqApi: inventoryMocks.fetchLinqApi,
   LINQ_API_DEFAULT_TIMEOUT_MS: 10_000,
   LinqApiTimeoutError: class LinqApiTimeoutError extends Error {},
+  readLinqApiErrorStatus: () => null,
+  runLinqApiRequest: inventoryMocks.runLinqApiRequest,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
@@ -51,19 +54,43 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
   }),
 }));
 
-vi.mock("@/src/lib/hosted-onboarding/linq-line-store", () => ({
-  acquireHostedLinqInventoryApplyLockTx: async (
-    input: { prisma: { $executeRaw: (...args: unknown[]) => Promise<unknown> } },
-  ) => {
-    await input.prisma.$executeRaw();
-  },
-  upsertHostedLinqLineForPhoneTx:
-    inventoryMocks.upsertHostedLinqLineForPhoneTx,
-}));
+vi.mock("@/src/lib/hosted-onboarding/linq-line-store", async (importOriginal) => {
+  const actual = await importOriginal<
+    typeof import("@/src/lib/hosted-onboarding/linq-line-store")
+  >();
+  return {
+    ...actual,
+    upsertHostedLinqLineForPhoneTx:
+      inventoryMocks.upsertHostedLinqLineForPhoneTx,
+  };
+});
+
+const TEST_PRIVACY_KEY = Buffer.alloc(32, 7).toString("base64");
+let previousPrivacyKeys: string | undefined;
+let previousPrivacyVersion: string | undefined;
 
 beforeEach(() => {
-  inventoryMocks.fetchLinqApi.mockReset();
+  previousPrivacyKeys = process.env.HOSTED_CONTACT_PRIVACY_KEYS;
+  previousPrivacyVersion = process.env.HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION;
+  process.env.HOSTED_CONTACT_PRIVACY_KEYS = `v1:${TEST_PRIVACY_KEY}`;
+  process.env.HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION = "v1";
+  clearHostedOnboardingEnvCache();
+  inventoryMocks.listChats.mockReset();
+  inventoryMocks.listPhoneNumbers.mockReset();
+  inventoryMocks.runLinqApiRequest.mockReset();
+  inventoryMocks.runLinqApiRequest.mockImplementation(async (input: {
+    request: (client: unknown) => Promise<unknown>;
+  }) => input.request({
+    chats: { listChats: inventoryMocks.listChats },
+    phoneNumbers: { list: inventoryMocks.listPhoneNumbers },
+  }));
   inventoryMocks.upsertHostedLinqLineForPhoneTx.mockReset();
+});
+
+afterEach(() => {
+  restoreEnv("HOSTED_CONTACT_PRIVACY_KEYS", previousPrivacyKeys);
+  restoreEnv("HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION", previousPrivacyVersion);
+  clearHostedOnboardingEnvCache();
 });
 
 describe("Linq provider status parsing", () => {
@@ -176,16 +203,16 @@ describe("parseHostedLinqChatHealthInventoryRecord", () => {
 
 describe("listHostedLinqChatHealthInventory", () => {
   it("follows the global cursor beyond one hundred chats", async () => {
-    inventoryMocks.fetchLinqApi
-      .mockResolvedValueOnce(jsonResponse({
+    inventoryMocks.listChats
+      .mockResolvedValueOnce({
         chats: Array.from({ length: 100 }, (_, index) =>
           buildChatInventoryRecord(`chat-${index}`)),
         next_cursor: "page-2",
-      }))
-      .mockResolvedValueOnce(jsonResponse({
+      })
+      .mockResolvedValueOnce({
         chats: [buildChatInventoryRecord("chat-100")],
         next_cursor: null,
-      }));
+      });
 
     await expect(listHostedLinqChatHealthInventory({
       maxChats: 101,
@@ -193,26 +220,26 @@ describe("listHostedLinqChatHealthInventory", () => {
       chats: { length: 101 },
       skippedCount: 0,
     });
-    expect(inventoryMocks.fetchLinqApi).toHaveBeenNthCalledWith(
+    expect(inventoryMocks.listChats).toHaveBeenNthCalledWith(
       1,
-      expect.objectContaining({ path: "chats?limit=100" }),
+      { limit: 100 },
+      { signal: undefined },
     );
-    expect(inventoryMocks.fetchLinqApi).toHaveBeenNthCalledWith(
+    expect(inventoryMocks.listChats).toHaveBeenNthCalledWith(
       2,
-      expect.objectContaining({
-        path: "chats?limit=100&cursor=page-2",
-      }),
+      { cursor: "page-2", limit: 100 },
+      { signal: undefined },
     );
   });
 
   it("fails visibly instead of returning a partial fleet snapshot", async () => {
-    inventoryMocks.fetchLinqApi.mockResolvedValueOnce(jsonResponse({
+    inventoryMocks.listChats.mockResolvedValueOnce({
       chats: [
         buildChatInventoryRecord("chat-1"),
         buildChatInventoryRecord("chat-2"),
       ],
       next_cursor: null,
-    }));
+    });
 
     await expect(listHostedLinqChatHealthInventory({
       maxChats: 1,
@@ -226,91 +253,50 @@ describe("listHostedLinqChatHealthInventory", () => {
 describe("Linq provider health inventory synchronization", () => {
   it("projects independent provider state for every inventoried line", async () => {
     const observedAt = new Date("2026-07-29T16:08:00.000Z");
-    const updateMany = vi.fn().mockResolvedValue({ count: 1 });
-    const prisma = {
-      $executeRaw: vi.fn(),
-      hostedLinqLine: {
-        findMany: vi.fn().mockResolvedValue([]),
-        updateMany,
-      },
-    } as never;
-    inventoryMocks.fetchLinqApi.mockResolvedValueOnce(jsonResponse({
+    const queryRaw = vi.fn().mockResolvedValue([{ syncedCount: 1n }]);
+    inventoryMocks.listPhoneNumbers.mockResolvedValueOnce({
       phone_numbers: [{
         id: "line-1",
         phone_number: "+1 (202) 555-0123",
         reputation: { status: "AT_RISK" },
         status: "ACTIVE",
       }],
-    }));
-    inventoryMocks.upsertHostedLinqLineForPhoneTx.mockResolvedValueOnce({
-      phoneNumberLookupKey: "line-key",
     });
 
     await expect(syncHostedLinqPhoneNumberInventory({
       observedAt,
-      prisma,
+      prisma: { $queryRaw: queryRaw } as never,
     })).resolves.toEqual({ syncedCount: 1 });
 
-    expect(inventoryMocks.upsertHostedLinqLineForPhoneTx).toHaveBeenCalledWith({
+    expect(queryRaw).toHaveBeenCalledTimes(1);
+    const query = queryRaw.mock.calls[0]?.[0] as { values: unknown[] };
+    expect(query.values).toEqual(expect.arrayContaining([
+      "line-1",
+      "AT_RISK",
+      "ACTIVE",
       observedAt,
-      phoneNumber: "+12025550123",
-      prisma,
-      providerPhoneNumberId: "line-1",
-      source: "provider",
-    });
-    expect(updateMany).toHaveBeenCalledWith(expect.objectContaining({
-      data: expect.objectContaining({
-        providerReputationStatus: "AT_RISK",
-        providerReputationUpdatedAt: observedAt,
-      }),
-      where: expect.objectContaining({
-        phoneNumberLookupKey: "line-key",
-      }),
-    }));
-    expect(updateMany).toHaveBeenCalledWith(expect.objectContaining({
-      data: expect.objectContaining({
-        providerServiceStatus: "ACTIVE",
-        providerServiceUpdatedAt: observedAt,
-      }),
-      where: expect.objectContaining({
-        phoneNumberLookupKey: "line-key",
-      }),
-    }));
+    ]));
   });
 
   it("does not clear stored provider state from unknown inventory values", async () => {
-    const updateMany = vi.fn();
-    const prisma = {
-      $executeRaw: vi.fn(),
-      hostedLinqLine: {
-        findMany: vi.fn().mockResolvedValue([]),
-        updateMany,
-      },
-    } as never;
-    inventoryMocks.fetchLinqApi.mockResolvedValueOnce(jsonResponse({
+    const queryRaw = vi.fn().mockResolvedValue([{ syncedCount: 1n }]);
+    inventoryMocks.listPhoneNumbers.mockResolvedValueOnce({
       phone_numbers: [{
         id: "line-future",
         phone_number: "+1 (202) 555-0123",
         reputation: { status: "FUTURE_REPUTATION" },
         status: "FUTURE_SERVICE",
       }],
-    }));
-    inventoryMocks.upsertHostedLinqLineForPhoneTx.mockResolvedValueOnce({
-      phoneNumberLookupKey: "line-key",
     });
 
     await expect(syncHostedLinqPhoneNumberInventory({
       observedAt: new Date("2026-07-29T16:08:00.000Z"),
-      prisma,
+      prisma: { $queryRaw: queryRaw } as never,
     })).resolves.toEqual({ syncedCount: 1 });
 
-    // The only write is the freshness watermark for the confirmed line;
-    // unknown status values never clear stored provider state.
-    expect(updateMany).toHaveBeenCalledTimes(1);
-    expect(updateMany).toHaveBeenCalledWith({
-      data: { providerInventoryConfirmedAt: expect.any(Date) },
-      where: { phoneNumberLookupKey: "line-key" },
-    });
+    const query = queryRaw.mock.calls[0]?.[0] as { values: unknown[] };
+    expect(query.values).not.toContain("FUTURE_REPUTATION");
+    expect(query.values).not.toContain("FUTURE_SERVICE");
   });
 
   it("associates inventoried chat health with its resolved sending line", async () => {
@@ -323,10 +309,10 @@ describe("Linq provider health inventory synchronization", () => {
         updateMany: vi.fn(),
       },
     } as never;
-    inventoryMocks.fetchLinqApi.mockResolvedValueOnce(jsonResponse({
+    inventoryMocks.listChats.mockResolvedValueOnce({
       chats: [buildChatInventoryRecord("chat-1")],
       next_cursor: null,
-    }));
+    });
     inventoryMocks.upsertHostedLinqLineForPhoneTx.mockResolvedValueOnce({
       phoneNumberLookupKey: "line-key",
     });
@@ -618,10 +604,10 @@ describe("Linq provider health projections", () => {
   });
 
   it("moves an existing logical chat row to the current privacy key", async () => {
-    const restore = configureContactPrivacyKeyringForTest("v1");
+    const restoreV1 = configureContactPrivacyKeyringForTest("v1");
     const legacyLookupKey = createHostedLinqChatLookupKey("chat-health");
-    process.env.HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION = "v2";
-    clearHostedOnboardingEnvCache();
+    restoreV1();
+    const restoreV2 = configureContactPrivacyKeyringForTest("v2");
     const currentLookupKey = createHostedLinqChatLookupKey("chat-health");
     const updateMany = vi.fn().mockResolvedValue({ count: 1 });
     const createMany = vi.fn();
@@ -654,7 +640,7 @@ describe("Linq provider health projections", () => {
         }),
       }));
     } finally {
-      restore();
+      restoreV2();
     }
   });
 });
@@ -799,20 +785,14 @@ function buildChatInventoryRecord(id: string) {
   };
 }
 
-function jsonResponse(payload: unknown): Response {
-  return new Response(JSON.stringify(payload), {
-    headers: { "content-type": "application/json" },
-    status: 200,
-  });
-}
-
 function configureContactPrivacyKeyringForTest(currentVersion: string): () => void {
   const previousKeys = process.env.HOSTED_CONTACT_PRIVACY_KEYS;
   const previousVersion = process.env.HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION;
-  process.env.HOSTED_CONTACT_PRIVACY_KEYS = [
-    `v1:${Buffer.from("1".repeat(32), "utf8").toString("base64")}`,
-    `v2:${Buffer.from("2".repeat(32), "utf8").toString("base64")}`,
-  ].join(",");
+  const v1 = `v1:${Buffer.from("1".repeat(32), "utf8").toString("base64")}`;
+  const v2 = `v2:${Buffer.from("2".repeat(32), "utf8").toString("base64")}`;
+  process.env.HOSTED_CONTACT_PRIVACY_KEYS = currentVersion === "v1"
+    ? v1
+    : `${v1},${v2}`;
   process.env.HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION = currentVersion;
   clearHostedOnboardingEnvCache();
 

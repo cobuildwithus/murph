@@ -553,6 +553,27 @@ describe("hosted runtime Temporal signaling", () => {
     );
   });
 
+  it("keeps runtime maintenance durable when Temporal signaling fails", async () => {
+    mocks.signalWithStart.mockRejectedValueOnce(new Error("temporal unavailable"));
+
+    await expect(signalHostedRuntimeMaintenanceRuntime({
+      client: buildClient(),
+      userId: "member_123",
+    })).rejects.toThrow("temporal unavailable");
+
+    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledWith({
+      envelope: expect.objectContaining({
+        eventId: expect.stringMatching(/^runtime-control:maintenance:[0-9a-f]{32}$/u),
+        kind: "runtime.maintenance-requested",
+        userId: "member_123",
+      }),
+      tx: { kind: "tx" },
+    });
+    expect(mocks.appendHostedMailboxEnvelopeTx.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.signalWithStart.mock.invocationCallOrder[0] ?? 0,
+    );
+  });
+
   it("dedupes runtime maintenance mailbox work for the same workspace version within a short window", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-05-28T08:15:31.000Z"));
@@ -597,14 +618,40 @@ describe("hosted runtime Temporal signaling", () => {
     }
   });
 
-  it("dedupes browser-vault control mailbox work for the same workspace version within a short window", async () => {
+  it("does not wake the runtime again for the same browser-vault refresh request", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-05-28T08:15:31.000Z"));
+    mocks.appendHostedMailboxEnvelopeTx
+      .mockResolvedValueOnce({
+        dedupeConflict: false,
+        duplicate: false,
+        inserted: true,
+        item: {
+          id: "mailbox_runtime.browser-vault-refresh-requested",
+          kind: "runtime.browser-vault-refresh-requested",
+          lane: "system",
+          laneSeq: "77",
+          userId: "member_123",
+        },
+      })
+      .mockResolvedValueOnce({
+        dedupeConflict: false,
+        duplicate: true,
+        inserted: false,
+        item: {
+          id: "mailbox_runtime.browser-vault-refresh-requested",
+          kind: "runtime.browser-vault-refresh-requested",
+          lane: "system",
+          laneSeq: "77",
+          userId: "member_123",
+        },
+      });
     try {
       await signalHostedBrowserVaultRefreshRuntime({
         client: buildClient(),
         userId: "member_123",
       });
+      vi.setSystemTime(new Date("2026-05-28T08:17:31.000Z"));
       await signalHostedBrowserVaultRefreshRuntime({
         client: buildClient(),
         userId: "member_123",
@@ -619,24 +666,16 @@ describe("hosted runtime Temporal signaling", () => {
       );
       expect(envelopes[1]?.eventId).toBe(envelopes[0]?.eventId);
       expect(envelopes.map((envelope) => envelope.occurredAt)).toEqual([
-        "2026-05-28T08:15:00.000Z",
-        "2026-05-28T08:15:00.000Z",
+        "1970-01-01T00:00:00.000Z",
+        "1970-01-01T00:00:00.000Z",
       ]);
-      expect(mocks.signalWithStart).toHaveBeenCalledTimes(2);
-      expect(mocks.signalWithStart.mock.calls.map((call) => call[1].signalArgs[0])).toEqual([
-        {
-          kind: "mailbox_appended",
-          lane: "system",
-          laneSeq: "77",
-          mailboxItemId: "mailbox_runtime.browser-vault-refresh-requested",
-        },
-        {
-          kind: "mailbox_appended",
-          lane: "system",
-          laneSeq: "77",
-          mailboxItemId: "mailbox_runtime.browser-vault-refresh-requested",
-        },
-      ]);
+      expect(mocks.signalWithStart).toHaveBeenCalledTimes(1);
+      expect(mocks.signalWithStart.mock.calls[0]?.[1].signalArgs[0]).toEqual({
+        kind: "mailbox_appended",
+        lane: "system",
+        laneSeq: "77",
+        mailboxItemId: "mailbox_runtime.browser-vault-refresh-requested",
+      });
     } finally {
       vi.useRealTimers();
     }
@@ -672,8 +711,8 @@ describe("hosted runtime Temporal signaling", () => {
       );
       expect(envelopes[1]?.eventId).not.toBe(envelopes[0]?.eventId);
       expect(envelopes.map((envelope) => envelope.occurredAt)).toEqual([
-        "2026-05-28T08:15:00.000Z",
-        "2026-05-28T08:15:00.000Z",
+        "1970-01-01T00:00:00.000Z",
+        "1970-01-01T00:00:00.000Z",
       ]);
     } finally {
       vi.useRealTimers();
@@ -827,23 +866,22 @@ describe("hosted runtime Temporal signaling", () => {
       }) => Promise<{ status: "allowed" } | { status: "denied" }>;
     }>("@/src/lib/hosted-orchestration/runtime-usage-decision");
     const explicitPrisma = mocks.prisma;
-    mocks.prisma.$transaction.mockImplementationOnce(async (callback) =>
+    const runUsageTransaction = async (callback: (tx: unknown) => unknown) =>
       await callback({
         ...explicitPrisma,
+        $queryRaw: vi.fn(async () => []),
         hostedAiUsagePeriod: {
           findUnique: vi.fn(async () => null),
         },
-      })
-    );
+      });
+    mocks.prisma.$transaction.mockImplementationOnce(runUsageTransaction);
 
     await expect(resolveHostedRuntimeAiUsageGate({
-      mode: "read_first",
+      mode: "read_only",
       now: "2026-05-20T12:00:00.000Z",
       prisma: explicitPrisma,
       userId: "member_123",
-    })).resolves.toEqual({
-      status: "allowed",
-    });
+    })).resolves.toMatchObject({ status: "denied" });
 
     expect(mocks.hostedMemberFindUnique).toHaveBeenCalledWith({
       select: expect.any(Object),

@@ -1,6 +1,6 @@
 # Device Sync Ingestion Invariants
 
-Last verified: 2026-07-14
+Last verified: 2026-08-12
 
 ## Purpose
 
@@ -148,6 +148,35 @@ drain/batch service seam in `packages/device-syncd/src/service.ts`.
    (more imports, more visible skips); it must never make it quieter (a new
    silent skip, a deferred floor, a gated import).
 
+   Eligible hosted webhook imports emit a best-effort
+   `device-sync.import_completed` runtime log after the canonical job succeeds.
+   At ingress, the new timing fields on the existing dirty-resource carrier
+   reduce provider event time to a coarse event-to-send delay bucket, compute
+   the verified signed-envelope send-to-receipt duration, and preserve the
+   earliest Murph receipt long enough to derive receipt-to-import duration
+   after import. A timing-only source field carries attribution without
+   participating in dirty-resource identity, counters, provider job payloads,
+   or executor routing; execution `sourceProviderSlug` retains its existing
+   meaning. This reduction applies to the timing carrier and runtime log;
+   pre-existing ingestion fields still use provider occurrence for dirty-window
+   and clean-transition wake ownership. Coalesced hints
+   keep the slowest upstream bucket, longest signed delivery, and earliest
+   receipt without pairing timestamps from different events. Source attribution
+   coalesces only when every timing hint agrees; conflicting sources are omitted.
+   The runtime log contains only the coarse upstream bucket, connector provider,
+   normalized source provider when known, job kind, provider-send-to-receipt,
+   receipt-to-import, queue, and execution durations. `provider` names the
+   executor/transport owner, while `sourceProvider` distinguishes Garmin,
+   Fitbit, and other Junction-backed sources and falls back to the connector for
+   direct integrations or unknown Junction sources. It deliberately omits raw
+   stage timestamps, event/resource semantics, counts, and exactly reversible
+   event-origin intervals. Missing or negatively ordered clocks omit only the
+   affected measurement. The runtime timing association is pass-local, so a
+   compact job that remains queued or retrying beyond its admitting pass can
+   later succeed without a completion event. This telemetry is buffered and
+   cannot delay acceptance, import, or the pull floor; it is not a recovery
+   owner or an exhaustive import ledger.
+
 6. **Historical completion is source/resource coverage, not account-level
    traffic.** A useful activity record cannot complete an advertised sleep
    obligation, and one connected source cannot satisfy another source's
@@ -158,6 +187,47 @@ drain/batch service seam in `packages/device-syncd/src/service.ts`.
    Link-only provider filter. Availability is capability evidence, not proof
    that sparse resources such as workouts or body measurements should contain a
    row, so those resources do not become absence obligations.
+
+   Junction timeseries history follows the exhaustive static policy beside the
+   provider executor. Dense daily aggregates (`blood_oxygen`, `stress_level`,
+   `hrv`, `respiratory_rate`, and `glucose`) retain the bounded 14-day initial
+   window. Sparse daily aggregates (`afib_burden`, `vo2_max`,
+   `heart_rate_recovery_one_minute`, body and basal temperature resources,
+   `sleep_breathing_disturbance`, `caffeine`, `water`, and
+   `mindfulness_minutes`) use the summary-history window, 180 days by default.
+   Every date-mode timeseries request owns one complete provider calendar date,
+   so offset timestamps on opposite sides of UTC midnight reach the importer
+   together during both migration and normal reconcile. A provider-bearing date
+   with any row rejected by the canonical aggregate parser retries only that
+   date on the existing bounded ladder before it becomes terminal.
+   Historical-pull status is re-read at the first date and before
+   coverage. Source matching canonicalizes supported connect-route aliases on
+   both the persisted and introspection sides before applying the status table:
+   A matching pulled entry owns contradictory envelopes: `success` permits
+   terminal empty history, nonterminal state waits, and explicit failure remains
+   uncovered. Explicit `not_pulled` is no obligation only without a pulled entry.
+   Unavailable, malformed, or unmatched introspection can close only after a
+   canonical historical observation. Before coverage closes, the
+   migration recomputes the live reconcile-window boundary and appends the
+   uncovered segment; delayed continuations repeat that same derivation, so
+   stable dedupe cannot freeze a middle gap.
+   Blood pressure and notes retain their existing extended policies. An
+   explicit timeseries-window override governs both classes.
+
+   Extended work is admitted only for a persisted connected source that
+   advertises the exact resource. Each `(source provider, resource)` migration
+   keeps the existing one-day fetch continuation and per-account serialization.
+   Rollout-added resources end at the current UTC day so existing connections
+   receive one migration; blood pressure remains anchored to source first-seen
+   time. Source-scoped completion is stored in connection metadata. All extended
+   timeseries resources share one fixed-width, versioned source-by-resource
+   matrix in an existing blood-pressure or note coverage slot. Its append-only
+   route slots cover every configured Junction source within the 256-character
+   scalar bound, and deployed blood-pressure and note values remain legacy read
+   inputs. An unrepresentable route fails before history egress instead of
+   advancing coverage. Blood pressure retains exact per-reading repair and notes
+   retain complete-fetch semantics. No second queue, retry store, or persisted
+   lifecycle owns this history.
 
    The importer is the sole owner of raw summary semantics. Historical coverage
    consumes the bounded `(source provider, resource)` normalization evidence
@@ -226,11 +296,46 @@ drain/batch service seam in `packages/device-syncd/src/service.ts`.
    summary payloads whose inline source provenance is sufficient for direct
    import. Inline-looking Junction jobs that must fall back to a provider fetch
    remain connection-epoch scoped. Junction owns that exact inline predicate
-   beside its importer-backed executor. Web dynamically invokes the same public
-   predicate during reconnect cleanup; hosted runtime hydration loads it per
-   turn and passes it into the existing SQLite credential-replacement
-   transaction. Both paths keep provider/importer modules out of their static
-   boot closures. Recovery does not use an automatic export endpoint, operator
+   beside its importer-backed executor. Web derives the same authority while
+   preparing each encrypted dirty payload and persists only the resulting
+   boolean beside the ciphertext. The dirty store privately completes
+   compression, secure-box sealing, and any lazy Junction classifier load
+   before a store-owned transaction; callers cannot supply prepared bundles.
+   Consent-gated webhook and companion admissions first use a short member and
+   connection/source authority transaction, then do payload-bearing work outside
+   every database lock through a request-local non-serializable store capability.
+   Their final transaction reacquires the same admission locks, re-reads consent
+   and exact connection/source authority, and consumes the capability only if
+   the dirty-marker snapshot and, for payload work, device-domain root are
+   unchanged. Compact-only webhook hints do not mint a dirty crypto capability:
+   the preflight reads only whether the marker is expected to cross clean-to-dirty,
+   the canonical dirty store owns the final in-transaction update and actual
+   revision, and only an unexpected clean transition triggers a full replan.
+   Exact source admission reads use the connection id, provider slug, connected
+   status, and disconnect-fence predicate in SQL and return at most one minimally
+   projected candidate per check instead of hydrating connection-wide history.
+   Clean-to-dirty mailbox crypto is prepared outside the locks and revalidates
+   its exact ingress root in the final transaction. One fresh-cache full replan is allowed on
+   preparation drift, including the shared domain-root mismatch emitted by the
+   mailbox owner; repeated drift fails retryably. Built-in webhook providers
+   admit at most two dirty resources in one delivery (the Junction connection
+   event is the maximum), while companion admissions carry exactly one. Web
+   rejects a larger provider batch before admission so the composed preparation
+   and transaction bound cannot grow silently. A withdrawal that commits
+   during preparation therefore prevents every durable payload, receipt, signal,
+   trace-completion, and wake mutation. On a replacement epoch, the ordinary non-null path uses only a marker
+   compare-and-set plus set-based deletion of rows classified as
+   credential-scoped. Nullable rows left by mixed-version writers are the one
+   transitional exception: Web classifies at most 800 of them inside the
+   existing member-row transaction, after the health-data consent re-read and
+   after locking the dirty marker, so completed withdrawal orders before any
+   legacy decryption and both reconnect and acknowledgement take the marker
+   before touching payload rows. More than 800 null rows fail retryably until
+   runtime acknowledgement reduces that backlog.
+   Hosted runtime
+   hydration still loads the classifier per turn and passes it into the existing
+   SQLite credential-replacement transaction. Both paths keep provider/importer
+   modules out of their static boot closures. Recovery does not use an automatic export endpoint, operator
    action, or vendor support.
    Hosted runtime account hydration keys by the control plane's opaque hosted
    connection id before mutable provider identity. A terminal privacy scrub

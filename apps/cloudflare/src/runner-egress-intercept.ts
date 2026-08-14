@@ -211,6 +211,10 @@ const OPENAI_EGRESS_POLICY = [
   },
   {
     method: "POST",
+    pathname: "/v1/alpha/search",
+  },
+  {
+    method: "POST",
     pathname: "/v1/images/generations",
   },
   {
@@ -4043,6 +4047,7 @@ function readTelegramSentinelFilePath(pathname: string): string | null {
 function isAllowedTelegramOperation(operation: string): boolean {
   return operation === "sendMessage"
     || operation === "sendPhoto"
+    || operation === "sendRichMessage"
     || operation === "sendVoice"
     || operation === "sendChatAction"
     || operation === "deleteMessages"

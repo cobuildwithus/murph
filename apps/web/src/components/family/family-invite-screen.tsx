@@ -5,6 +5,7 @@ import type { ReactNode } from "react";
 import {
   FamilyInviteSignInButton,
   FamilyInviteWebAcceptButton,
+  type FamilyInviteWebAcceptInitialState,
 } from "@/src/components/family/family-invite-accept-client";
 import {
   JoinInviteEyebrow,
@@ -28,6 +29,7 @@ export function FamilyInviteScreen(input: {
   authenticated: boolean;
   messagesAcceptHref: string | null;
   view: FamilyInviteView;
+  webAcceptInitialState?: FamilyInviteWebAcceptInitialState;
 }): ReactNode {
   return (
     <div className="flex w-full flex-col gap-6">{renderInvite(input)}</div>
@@ -38,6 +40,7 @@ function renderInvite(input: {
   authenticated: boolean;
   messagesAcceptHref: string | null;
   view: FamilyInviteView;
+  webAcceptInitialState?: FamilyInviteWebAcceptInitialState;
 }): ReactNode {
   const { view } = input;
 
@@ -153,6 +156,9 @@ function renderInvite(input: {
           webSignInDescription: isFullyUnbound
             ? "Sign in with your own phone number or email address. We'll bring you back here."
             : undefined,
+          ...(input.webAcceptInitialState
+            ? { webAcceptInitialState: input.webAcceptInitialState }
+            : {}),
         })}
       </div>
     </>
@@ -163,6 +169,7 @@ function renderAcceptCta(input: {
   authenticated: boolean;
   messagesAcceptHref: string | null;
   view: NonNullable<FamilyInviteView>;
+  webAcceptInitialState?: FamilyInviteWebAcceptInitialState;
   webBindingLabel: string;
   webSignInDescription?: string;
 }): ReactNode {
@@ -170,6 +177,9 @@ function renderAcceptCta(input: {
   const isFullyUnbound = !view.isPhoneBound && !view.isEmailBound && !view.isTelegramBound;
   const webSignInDescriptionProps = input.webSignInDescription
     ? { description: input.webSignInDescription }
+    : {};
+  const webAcceptInitialStateProps = input.webAcceptInitialState
+    ? { initialState: input.webAcceptInitialState }
     : {};
   const unboundTelegramInviteLink = isFullyUnbound && view.telegramInviteUrl ? (
     <Button
@@ -188,7 +198,10 @@ function renderAcceptCta(input: {
     if (input.messagesAcceptHref) {
       return (
         <>
-          <FamilyInviteWebAcceptButton inviteCode={view.inviteCode} />
+          <FamilyInviteWebAcceptButton
+            inviteCode={view.inviteCode}
+            {...webAcceptInitialStateProps}
+          />
           <Button
             render={<a href={input.messagesAcceptHref} />}
             nativeButton={false}
@@ -209,11 +222,17 @@ function renderAcceptCta(input: {
 
     return unboundTelegramInviteLink ? (
       <>
-        <FamilyInviteWebAcceptButton inviteCode={view.inviteCode} />
+        <FamilyInviteWebAcceptButton
+          inviteCode={view.inviteCode}
+          {...webAcceptInitialStateProps}
+        />
         {unboundTelegramInviteLink}
       </>
     ) : (
-      <FamilyInviteWebAcceptButton inviteCode={view.inviteCode} />
+      <FamilyInviteWebAcceptButton
+        inviteCode={view.inviteCode}
+        {...webAcceptInitialStateProps}
+      />
     );
   }
 

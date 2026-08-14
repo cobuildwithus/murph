@@ -9,8 +9,8 @@ import type {
   HostedExecutionAssistantNotificationRequestedWake,
   HostedExecutionDeviceSyncWake,
   HostedExecutionDeviceSyncWakeEvent,
+  HostedExecutionDailyMetricReportedWake,
   HostedExecutionEnvironmentVoiceCapturedWake,
-  HostedExecutionGroupNewsletterEmailNeededWake,
   HostedExecutionEmailConversationMessagePayload,
   HostedExecutionLinqConversationMessagePayload,
   HostedExecutionLinqConversationMessage,
@@ -56,6 +56,9 @@ import {
 import {
   parseHostedExecutionInitialGroupRoomModelMarkdown,
 } from "./pending-group-setup.ts";
+import {
+  parseHostedExecutionDailyMetricReportedPayload,
+} from "./daily-metric.ts";
 
 function cloneLinqMessagePart(
   value: HostedExecutionLinqConversationMessagePart,
@@ -155,7 +158,6 @@ type HostedExecutionMemberOwnedWake =
   | HostedExecutionMemberActivatedWake
   | HostedExecutionMemberChannelsUpdatedWake
   | HostedExecutionMemberPreferencesUpdatedWake
-  | HostedExecutionGroupNewsletterEmailNeededWake
   | HostedExecutionVaultShareDeliveryWake
   | HostedExecutionVaultShareRevokeWake;
 
@@ -538,6 +540,13 @@ function cloneAssistantNotificationPayload(
     ...(value.firstContact === undefined
       ? {}
       : { firstContact: value.firstContact ? { ...value.firstContact } : null }),
+    ...(value.privateAssistantAskCompletion === undefined
+      ? {}
+      : {
+          privateAssistantAskCompletion: {
+            ...value.privateAssistantAskCompletion,
+          },
+        }),
     ...(value.responsePolicy === undefined
       ? {}
       : { responsePolicy: value.responsePolicy ? { ...value.responsePolicy } : null }),
@@ -823,27 +832,6 @@ export function buildHostedExecutionDeviceSyncWake(input: {
   };
 }
 
-export function buildHostedExecutionGroupNewsletterEmailNeededWake(input: {
-  directRoute?: HostedExecutionGroupNewsletterEmailNeededWake["directRoute"];
-  eventId: string;
-  groupDisplayName: string | null;
-  groupId: string;
-  memberId: string;
-  occurredAt: string;
-}): HostedExecutionGroupNewsletterEmailNeededWake {
-  return {
-    ...buildHostedExecutionMemberOwnedWakeBase({
-      eventId: input.eventId,
-      kind: "group-newsletter.email-needed",
-      memberId: input.memberId,
-      occurredAt: input.occurredAt,
-    }),
-    ...(input.directRoute === undefined ? {} : { directRoute: input.directRoute }),
-    groupDisplayName: input.groupDisplayName,
-    groupId: input.groupId,
-  };
-}
-
 export function buildHostedExecutionMealPhotoCapturedWake(input: {
   byteLength: number;
   captureId: string;
@@ -872,6 +860,31 @@ export function buildHostedExecutionMealPhotoCapturedWake(input: {
       mealPhotoKey: input.mealPhotoKey,
       sha256: input.sha256,
     },
+    occurredAt: input.occurredAt,
+    userId: input.memberId,
+  };
+}
+
+export function buildHostedExecutionDailyMetricReportedWake(input: {
+  date: string;
+  eventId: string;
+  memberId: string;
+  metric: string;
+  occurredAt: string;
+  unit: string;
+  value: number;
+}): HostedExecutionDailyMetricReportedWake {
+  const dailyMetric = parseHostedExecutionDailyMetricReportedPayload({
+    date: input.date,
+    metric: input.metric,
+    unit: input.unit,
+    value: input.value,
+  });
+
+  return {
+    dailyMetric,
+    eventId: input.eventId,
+    kind: "health.daily-metric.reported",
     occurredAt: input.occurredAt,
     userId: input.memberId,
   };

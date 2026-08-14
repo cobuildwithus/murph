@@ -10,6 +10,7 @@ import {
   buildMurphGroupRoomModelMaintenancePermissionProfileTomlLines,
   buildMurphMemberMemoryMaintenancePermissionProfileTomlLines,
   buildMurphMemberReadPermissionProfileTomlLines,
+  buildMurphMemberWorkspacePermissionProfileTomlLines,
 } from "@murphai/hosted-execution/assistant-permissions";
 import {
   HOSTED_RUNTIME_CODEX_APP_SERVER_COMMAND_ENV,
@@ -64,13 +65,15 @@ const DEFAULT_HOSTED_CODEX_REASONING_EFFORT = "low";
 const DEFAULT_HOSTED_CODEX_APPROVAL_POLICY = "never";
 const DEFAULT_HOSTED_CODEX_SANDBOX = "danger-full-access";
 const HOSTED_CODEX_MULTI_AGENT_USAGE_HINT_TEXT = [
-  "Proactively spawn a hosted child for bounded background parsing or import work and optional enrichment or research whose result is not needed in the current reply, and reply without waiting.",
-  "Follow the active route or skill contract for child design and completion proof.",
+  "When the active route or skill contract permits delegation, proactively spawn a hosted child for genuinely bounded, self-contained background work whose result is not needed in the current reply, then reply without waiting.",
+  "Use the child to replace a later root pass, not duplicate work; skip tiny tasks whose assignment and readback cost exceeds doing them once in the root.",
+  "Follow the active route or skill contract for the exact leaf assignment and completion proof.",
 ].join(" ");
 const HOSTED_CODEX_MULTI_AGENT_MODE_HINT_TEXT =
   "Murph bounded background delegation mode is active; reply-critical work stays in the root.";
 const HOSTED_CODEX_SUBAGENT_USAGE_HINT_TEXT = [
   "This hosted child is a one-shot leaf.",
+  "Complete only the self-contained assignment and stop.",
   "Do not spawn or delegate to another child.",
 ].join(" ");
 // Hosted thread cost scales linearly with this ceiling: every tool round-trip
@@ -159,6 +162,18 @@ export interface HostedCodexRuntimeEnvironmentResult {
   runtimeEnv: Record<string, string>;
 }
 
+export function projectHostedRuntimeProcessEnvironment(
+  input: Pick<HostedCodexRuntimeEnvironmentInput, "runtimeEnv">,
+): Record<string, string> {
+  const runtimeEnv = stripHostedCodexRejectedSeedEnv(input.runtimeEnv);
+  runtimeEnv.PATH = buildHostedRunnerExecutablePath(runtimeEnv.PATH);
+  Object.assign(runtimeEnv, {
+    [HOSTED_RUNTIME_PROCESS_ENV]: "1",
+    [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: resolveAssistantSkillsRoot(),
+  });
+  return runtimeEnv;
+}
+
 export async function prepareHostedCodexRuntimeEnvironment(
   input: HostedCodexRuntimeEnvironmentInput,
 ): Promise<HostedCodexRuntimeEnvironmentResult> {
@@ -223,14 +238,11 @@ export async function prepareHostedCodexRuntimeEnvironment(
     );
   }
 
-  const runtimeEnv = stripHostedCodexRejectedSeedEnv(input.runtimeEnv);
-  runtimeEnv.PATH = buildHostedRunnerExecutablePath(runtimeEnv.PATH);
+  const runtimeEnv = projectHostedRuntimeProcessEnvironment(input);
   const hostedModel = normalizeHostedCodexEnvString(input.runtimeEnv.HOSTED_ASSISTANT_MODEL);
   delete runtimeEnv.HOSTED_ASSISTANT_MODEL;
   Object.assign(runtimeEnv, {
     CODEX_HOME: codexHome,
-    [HOSTED_RUNTIME_PROCESS_ENV]: "1",
-    [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: resolveAssistantSkillsRoot(),
     ...(hostedModel ? { HOSTED_ASSISTANT_MODEL: hostedModel } : {}),
     HOSTED_ASSISTANT_REASONING_EFFORT:
       normalizeHostedCodexEnvString(input.runtimeEnv.HOSTED_ASSISTANT_REASONING_EFFORT)
@@ -617,6 +629,7 @@ export function buildHostedCodexConfigToml(input: {
     ...buildMurphGroupRoomModelMaintenancePermissionProfileTomlLines(),
     ...buildMurphMemberMemoryMaintenancePermissionProfileTomlLines(),
     ...buildMurphMemberReadPermissionProfileTomlLines(),
+    ...buildMurphMemberWorkspacePermissionProfileTomlLines(),
     "# Hosted runs should not perform Codex plugin marketplace or remote plugin",
     "# sync work on cold wake; Murph owns the hosted runtime tool surface.",
     "[features]",
@@ -631,6 +644,8 @@ export function buildHostedCodexConfigToml(input: {
     "",
     "# This table owns enablement and the proactive per-turn mode/tool hints.",
     "# A CLI boolean override would replace the table and silently drop them.",
+    // Keep per-spawn model overrides hidden until V2 activity emits authoritative
+    // effective child-model evidence before Murph writes immutable usage.
     "[features.multi_agent_v2]",
     "enabled = true",
     "# V2 counts the root in this limit: four means root plus three children.",

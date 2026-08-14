@@ -53,8 +53,8 @@ import type {
   HostedRuntimeGroupSharedRecord,
   HostedRuntimeGroupToolRequest,
   HostedRuntimeGroupToolResponse,
-  HostedRuntimeNewsletterToolRequest,
-  HostedRuntimeNewsletterToolResponse,
+  HostedRuntimeGroupEmailEffectRequest,
+  HostedRuntimeGroupEmailEffectResponse,
 } from '@murphai/hosted-execution/runtime-control'
 import type {
   HostedPhoneCallStartRequest,
@@ -81,6 +81,9 @@ import type {
 } from '@murphai/hosted-execution/subscription'
 import type { AssistantChannelDependencies } from './channel-adapters.js'
 import type { AssistantConnectedAppsPort } from './connected-apps-port.js'
+import type {
+  AssistantCronOccurrenceUnverifiedReason,
+} from './cron/timing-verification.js'
 import { normalizeNullableString } from './shared.js'
 
 export type AssistantChannelTypingDependencies = Pick<
@@ -164,6 +167,10 @@ export interface AssistantHostedLabsTool {
 
 export type AssistantHostedAutomationToolRequest =
   | {
+      action: 'inspect'
+      lookup: string
+    }
+  | {
       action: 'save'
       activeUntil?: string | null
       assistantTargetOverride?: AutomationAssistantTargetOverride | null
@@ -184,6 +191,7 @@ export type AssistantHostedAutomationToolRequest =
       activeUntil?: string | null
       assistantTargetOverride?: AutomationAssistantTargetOverride | null
       continuityPolicy?: AutomationContinuityPolicy
+      expectedUpdatedAt: string
       instructions?: string
       lookup: string
       retargetToCurrentConversation?: boolean
@@ -202,14 +210,39 @@ export type AssistantHostedAutomationToolRequest =
       supportSeriesId: string
     }
 
+export type AssistantAutomationTimingVerificationIssue =
+  | AssistantCronOccurrenceUnverifiedReason
+  | 'default_timezone_unverified'
+  | 'projection_unavailable'
+  | 'record_readback_mismatch'
+
 export type AssistantHostedAutomationToolResponse =
+  | {
+      action: 'inspect'
+      automationId: string
+      effectiveTimeZone: string | null
+      lookupId: string
+      nextOccurrenceAt: string | null
+      routeBinding: 'preserved'
+      schedule: AutomationSchedule
+      status: AutomationStatus
+      timingVerified: boolean
+      timingVerificationIssues?: readonly AssistantAutomationTimingVerificationIssue[]
+      updatedAt: string
+    }
   | {
       action: 'patch' | 'save'
       automationId: string
       created: boolean
+      effectiveTimeZone: string | null
       lookupId: string
+      nextOccurrenceAt: string | null
       routeBinding: 'current_conversation' | 'preserved'
+      schedule: AutomationSchedule
       status: AutomationStatus
+      timingVerified: boolean
+      timingVerificationIssues?: readonly AssistantAutomationTimingVerificationIssue[]
+      updatedAt: string
     }
   | {
       action: 'reconcile'
@@ -356,10 +389,10 @@ export interface AssistantHostedGroupSharedReader {
   ): Promise<AssistantHostedGroupSharedReadResponse>
 }
 
-export interface AssistantHostedNewsletterTool {
+export interface AssistantHostedGroupEmailEffect {
   request(
-    request: HostedRuntimeNewsletterToolRequest,
-  ): Promise<HostedRuntimeNewsletterToolResponse>
+    request: HostedRuntimeGroupEmailEffectRequest,
+  ): Promise<HostedRuntimeGroupEmailEffectResponse>
 }
 
 export interface AssistantPhoneCallPort {
@@ -480,7 +513,6 @@ export interface AssistantHostedExecutionContext {
   groupSharedReader?: AssistantHostedGroupSharedReader | null
   groupTool?: AssistantHostedGroupTool | null
   labsTool?: AssistantHostedLabsTool | null
-  newsletterTool?: AssistantHostedNewsletterTool | null
   planUsageTool?: AssistantHostedPlanUsageTool | null
   physicalNotes?: AssistantPhysicalNotePort | null
   privateImageUrlPublisher?: AssistantHostedPrivateImageUrlPublisher | null
@@ -588,7 +620,6 @@ export function normalizeAssistantExecutionContext(
     hosted?.groupSharedReader,
   )
   const labsTool = normalizeAssistantLabsTool(hosted?.labsTool)
-  const newsletterTool = normalizeAssistantNewsletterTool(hosted?.newsletterTool)
   const planUsageTool = normalizeAssistantPlanUsageTool(hosted?.planUsageTool)
   const subscriptionTool = normalizeAssistantSubscriptionTool(
     hosted?.subscriptionTool,
@@ -636,7 +667,6 @@ export function normalizeAssistantExecutionContext(
       ...(groupSharedReader ? { groupSharedReader } : {}),
       ...(groupTool ? { groupTool } : {}),
       ...(labsTool ? { labsTool } : {}),
-      ...(newsletterTool ? { newsletterTool } : {}),
       ...(planUsageTool ? { planUsageTool } : {}),
       ...(physicalNotes ? { physicalNotes } : {}),
       ...(privateImageUrlPublisher ? { privateImageUrlPublisher } : {}),
@@ -964,18 +994,6 @@ function normalizeAssistantGroupSharedReader(
 function normalizeAssistantLabsTool(
   input: AssistantHostedExecutionContext['labsTool'] | undefined,
 ): AssistantHostedLabsTool | undefined {
-  if (!input || typeof input.request !== 'function') {
-    return undefined
-  }
-
-  return {
-    request: input.request.bind(input),
-  }
-}
-
-function normalizeAssistantNewsletterTool(
-  input: AssistantHostedExecutionContext['newsletterTool'] | undefined,
-): AssistantHostedNewsletterTool | undefined {
   if (!input || typeof input.request !== 'function') {
     return undefined
   }

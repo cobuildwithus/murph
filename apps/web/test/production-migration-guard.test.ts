@@ -378,6 +378,41 @@ describe("hosted web production migration guard", () => {
     }
   });
 
+  test("limits the detached automatic-refill failure exception to constraint replacement", async () => {
+    const migrationsDir = await mkdtemp(
+      path.join(tmpdir(), "hosted-web-prisma-migrations-"),
+    );
+    const migrationId =
+      "20260810050000_relax_detached_automatic_refill_failure";
+
+    try {
+      await writeMigrationSql(
+        migrationsDir,
+        migrationId,
+        [
+          'ALTER TABLE "hosted_usage_credit_purchase"',
+          '  DROP CONSTRAINT "hosted_usage_credit_purchase_active_payer_required",',
+          '  ADD CONSTRAINT "hosted_usage_credit_purchase_active_payer_required"',
+          '    CHECK ("payer_member_id" IS NOT NULL);',
+          'DROP TABLE "hosted_member";',
+        ].join("\n"),
+      );
+
+      const destructiveMigrations =
+        await findHostedWebPrismaPredeployDestructiveMigrations(migrationsDir);
+
+      assert.deepEqual(
+        destructiveMigrations.map(({ migrationId: id, reason }) => ({
+          migrationId: id,
+          reason,
+        })),
+        [{ migrationId, reason: "DROP TABLE" }],
+      );
+    } finally {
+      await rm(migrationsDir, { force: true, recursive: true });
+    }
+  });
+
   test("limits the referral ledger constraint predeploy exception to its proved DDL", async () => {
     const migrationsDir = await mkdtemp(
       path.join(tmpdir(), "hosted-web-prisma-migrations-"),
@@ -467,6 +502,118 @@ describe("hosted web production migration guard", () => {
           '  ADD CONSTRAINT "sponsorship_shape"',
           '    CHECK ("group_sponsorship_authorization_id" IS NULL) NOT VALID;',
           'DROP INDEX "hosted_usage_credit_purchase_active_payer_key";',
+          'DROP TABLE "hosted_member";',
+        ].join("\n"),
+      );
+
+      const destructiveMigrations =
+        await findHostedWebPrismaPredeployDestructiveMigrations(migrationsDir);
+
+      assert.deepEqual(
+        destructiveMigrations.map(({ migrationId: id, reason }) => ({
+          migrationId: id,
+          reason,
+        })),
+        [{
+          migrationId,
+          reason: "DROP TABLE",
+        }],
+      );
+    } finally {
+      await rm(migrationsDir, { force: true, recursive: true });
+    }
+  });
+
+  test("limits the Starter ledger constraint predeploy exception to its proved DDL", async () => {
+    const migrationsDir = await mkdtemp(
+      path.join(tmpdir(), "hosted-web-prisma-migrations-"),
+    );
+    const migrationId = "20260807204000_non_expiring_starter_usage";
+
+    try {
+      await writeMigrationSql(
+        migrationsDir,
+        migrationId,
+        [
+          'ALTER TABLE "hosted_usage_credit_entry"',
+          '  DROP CONSTRAINT "hosted_usage_credit_entry_amount_direction_valid",',
+          '  ADD CONSTRAINT "hosted_usage_credit_entry_amount_direction_valid"',
+          '    CHECK ("kind" IN (\'starter_grant\', \'purchase_grant\')) NOT VALID;',
+          'DROP TABLE "hosted_member";',
+        ].join("\n"),
+      );
+
+      const destructiveMigrations =
+        await findHostedWebPrismaPredeployDestructiveMigrations(migrationsDir);
+
+      assert.deepEqual(
+        destructiveMigrations.map(({ migrationId: id, reason }) => ({
+          migrationId: id,
+          reason,
+        })),
+        [{
+          migrationId,
+          reason: "DROP TABLE",
+        }],
+      );
+    } finally {
+      await rm(migrationsDir, { force: true, recursive: true });
+    }
+  });
+
+  test("limits grant projection predeploy compatibility to its proved NOT NULL DDL", async () => {
+    const migrationsDir = await mkdtemp(
+      path.join(tmpdir(), "hosted-web-prisma-migrations-"),
+    );
+    const migrationId =
+      "20260810150000_hosted_usage_credit_grant_slot_release";
+
+    try {
+      await writeMigrationSql(
+        migrationsDir,
+        migrationId,
+        [
+          'ALTER TABLE "hosted_usage_credit_grant"',
+          '  ALTER COLUMN "beneficiary_member_id" SET NOT NULL,',
+          '  ALTER COLUMN "beneficiary_sequence" SET NOT NULL;',
+          'DROP TABLE "hosted_member";',
+        ].join("\n"),
+      );
+
+      const destructiveMigrations =
+        await findHostedWebPrismaPredeployDestructiveMigrations(migrationsDir);
+
+      assert.deepEqual(
+        destructiveMigrations.map(({ migrationId: id, reason }) => ({
+          migrationId: id,
+          reason,
+        })),
+        [{
+          migrationId,
+          reason: "DROP TABLE",
+        }],
+      );
+    } finally {
+      await rm(migrationsDir, { force: true, recursive: true });
+    }
+  });
+
+  test("limits the complete Family Max plan-code contract to its proved DDL", async () => {
+    const migrationsDir = await mkdtemp(
+      path.join(tmpdir(), "hosted-web-prisma-migrations-"),
+    );
+    const migrationId = "20260809160000_add_hosted_family_max_plan_code";
+
+    try {
+      await writeMigrationSql(
+        migrationsDir,
+        migrationId,
+        [
+          'ALTER TABLE "hosted_account_group_membership"',
+          '  ALTER COLUMN "plan_code" SET NOT NULL,',
+          '  DROP CONSTRAINT "hosted_account_group_membership_plan_code_check",',
+          '  ADD CONSTRAINT "hosted_account_group_membership_plan_code_check"',
+          '    CHECK ("plan_code" IN (\'pulse\', \'edge\', \'max\')) NOT VALID;',
           'DROP TABLE "hosted_member";',
         ].join("\n"),
       );
@@ -840,6 +987,7 @@ describe("hosted web production migration guard", () => {
     const migrations = await listHostedWebContractMigrations();
 
     for (const migrationId of [
+      "20260714150000_require_hosted_family_plan_codes",
       "20260720233000_hosted_group_usage_funding_invariants",
       "20260726123000_allow_hosted_usage_referral_credit_entries",
     ]) {
@@ -1265,6 +1413,7 @@ describe("hosted web production migration guard", () => {
       "pnpm --dir ../.. exec tsx apps/web/scripts/prepare-prisma-client-for-build.ts",
     );
     assert.match(buildScript, /pnpm typecheck:prepared/u);
+    assert.match(buildScript, /pnpm changelog:generate/u);
     assert.match(buildScript, /bash scripts\/run-production-next-build\.sh/u);
     assert.doesNotMatch(buildScript, /&& next build &&/u);
     assert.equal(
@@ -1273,11 +1422,11 @@ describe("hosted web production migration guard", () => {
     );
     assert.equal(
       preparedTypecheckScript,
-      "pnpm --dir ../.. exec tsx scripts/ensure-next-route-type-stubs.ts apps/web && node ../../scripts/run-typescript.mjs web -p tsconfig.json --pretty false",
+      "pnpm changelog:generate && pnpm --dir ../.. exec tsx scripts/ensure-next-route-type-stubs.ts apps/web && node ../../scripts/run-typescript.mjs web -p tsconfig.json --pretty false",
     );
     assert.equal(
       watchTypecheckScript,
-      "pnpm health-commons:generate && pnpm prisma:generate && pnpm --dir ../.. exec tsx scripts/ensure-next-route-type-stubs.ts apps/web && node ../../scripts/run-typescript.mjs watch -p tsconfig.json --pretty false --watch --tsBuildInfoFile typecheck.watch.tsbuildinfo",
+      "pnpm changelog:generate && pnpm health-commons:generate && pnpm prisma:generate && pnpm --dir ../.. exec tsx scripts/ensure-next-route-type-stubs.ts apps/web && node ../../scripts/run-typescript.mjs watch -p tsconfig.json --pretty false --watch --tsBuildInfoFile typecheck.watch.tsbuildinfo",
     );
     assert.match(
       buildScript,
@@ -1290,6 +1439,12 @@ describe("hosted web production migration guard", () => {
     assert.match(productionNextBuildScript, /^#!\/usr\/bin\/env bash\nset -euo pipefail$/mu);
     assert.match(productionNextBuildScript, /parent_old_space_mb=1024/u);
     assert.match(productionNextBuildScript, /typecheck_worker_old_space_mb=3072/u);
+    assert.match(productionNextBuildScript, /build_cache_epoch=webpack-next-16\.3-v1/u);
+    assert.match(
+      productionNextBuildScript,
+      /node \.\.\/\.\.\/scripts\/rm-paths\.mjs \.next\/cache/u,
+    );
+    assert.match(productionNextBuildScript, /murph-production-build-epoch/u);
     assert.match(
       productionNextBuildScript,
       /sed -E 's\/\(\^\|\[\[:space:\]\]\)--max\[-_\]old\[-_\]space\[-_\]size/u,
@@ -1300,9 +1455,9 @@ describe("hosted web production migration guard", () => {
     );
     assert.match(
       productionNextBuildScript,
-      /exec node "--max-old-space-size=\$parent_old_space_mb" "\$next_bin" build/u,
+      /node "--max-old-space-size=\$parent_old_space_mb" "\$next_bin" build --webpack/u,
     );
-    assert.doesNotMatch(productionNextBuildScript, /--webpack/u);
+    assert.match(productionNextBuildScript, /compiler=webpack/u);
     assert.match(
       verifyFastScript,
       /local next_build_command=\(bash "\$script_dir\/run-production-next-build\.sh"\)/u,
@@ -1315,6 +1470,11 @@ describe("hosted web production migration guard", () => {
       buildScript.indexOf("pnpm prisma:generate:build") <
         buildScript.indexOf("run-production-next-build.sh"),
       "non-mutating build prep must finish before next build",
+    );
+    assert.ok(
+      buildScript.indexOf("pnpm changelog:generate") <
+        buildScript.indexOf("pnpm typecheck:prepared"),
+      "the changelog module must exist before the TypeScript source check",
     );
     assert.ok(
       buildScript.indexOf("pnpm typecheck:prepared") <
@@ -1566,7 +1726,26 @@ describe("hosted web production migration guard", () => {
       ),
       {
         path: "/api/internal/hosted-execution/product-feedback/digest/cron",
-        schedule: "*/10 * * * *",
+        schedule: "*/10 22,23 * * *",
+      },
+    );
+    assert.deepEqual(
+      (vercelJson.crons ?? []).find(
+        (cron) =>
+          cron.path === "/api/internal/hosted-growth/usage-referral/cron",
+      ),
+      {
+        path: "/api/internal/hosted-growth/usage-referral/cron",
+        schedule: "* * * * *",
+      },
+    );
+    assert.deepEqual(
+      (vercelJson.crons ?? []).find(
+        (cron) => cron.path === "/api/internal/hosted-onboarding/stripe/cron",
+      ),
+      {
+        path: "/api/internal/hosted-onboarding/stripe/cron",
+        schedule: "* * * * *",
       },
     );
     assert.deepEqual(
@@ -1582,7 +1761,7 @@ describe("hosted web production migration guard", () => {
     assert.ok(!cronPaths.includes("/api/internal/device-sync/dirty-sweeper/cron"));
   });
 
-  test("enables only production and the explicit Turbopack preview branch", async () => {
+  test("enables only production deployments", async () => {
     const vercelJson = JSON.parse(
       await readFile(path.join(appRoot, "vercel.json"), "utf8"),
     ) as {

@@ -17,12 +17,15 @@ Two rollout gates control their respective mutations:
 
 Public referral marketing derives from those same gates at server render. The
 homepage section and footer link appear only when at least one earning path is
-enabled, and `/refer` lists only the enabled paths. When both gates are off,
-`/refer` shows one temporary-unavailability state without reward quantities or
-a share action. Gate-derived availability is program-level, not a promise that
-an individual member has enough rolling capacity for the next reward. Public
-signup-link copy therefore states that a completed signup can earn more usage only
-after the later settlement eligibility and rolling-limit checks pass.
+enabled. `/refer` lists the enabled earning paths and, while group rewards are
+enabled, also keeps the stable personal link visible as a share-only option.
+When the signup reward gate is off, that share-only card carries no reward
+quantity or promise. When both gates are off, `/refer` shows one
+temporary-unavailability state without reward quantities or a share action.
+Gate-derived availability is program-level, not a promise that an individual
+member has enough rolling capacity for the next reward. Public signup-link
+copy therefore states that a completed signup can earn more usage only after
+the later eligibility and rolling-limit checks pass.
 On the compact homepage referral section, each enabled path leads with a
 typical-use estimate (about 10 or 14 more days of Murph usage). These day labels
 are presentation estimates, not accounting units; the homepage says that actual
@@ -40,6 +43,12 @@ only when recovery atomically creates its receipt and grant under the same
 referrer lock.
 
 ## Product behavior
+
+Member-facing copy calls the earned group choices **referral options**, never
+missions. Internal action names, response fields, and persisted lifecycle
+terminology may retain `mission` while they remain compatibility surfaces, but
+the website, Settings, assistant explanations, and completion copy use plain
+referral language.
 
 Murph may offer conversational missions when trusted usage context says a
 personal or group Murph is running low. When the current sender explicitly asks
@@ -81,6 +90,8 @@ policy version on the referral receipt; every active-mission snapshot, grant,
 completion notice, and Settings projection thereafter derives the day estimate
 from those persisted facts.
 
+Referral rewards add usage capacity but never mint another Starter grant.
+
 ## Stable signup referral links
 
 Every eligible signed-in member has one deterministic, signed referral URL:
@@ -118,8 +129,8 @@ same-origin claim form retains the canonical `Origin` required by its mutation
 guard.
 
 The available landing has one action: `Join Murph`, above a single closing line
-stating that Murph credits whoever shared the link and that the referrer cannot
-see the recipient's conversations or health information.
+stating that the link tells Murph who made the introduction and that the
+referrer cannot see the recipient's conversations or health information.
 
 Known unavailable links render a human-readable recovery state instead of a
 generic 404. A temporarily exhausted claim allowance or unexpected read/claim
@@ -306,8 +317,14 @@ created, after invite expiry and a simulated ordinary-resume channel relabel.
 
 ## Recovery and completion notices
 
-The existing Vercel-authenticated referral recovery cron remains the only
-scheduler. Each bounded pass:
+The existing Vercel-authenticated minute referral recovery cron remains the
+only scheduler. For attributed stable-link activations, this scan is the normal
+settlement owner rather than a fallback after an immediate activation handoff.
+Conversational referrals may also reconcile immediately after qualification;
+the same scan remains their idempotent retry owner. It stays on its standalone
+route instead of sharing the billing-critical minute Stripe sweep: one pass may
+scan or re-signal up to 150 durable candidates, so each owner's timeout and
+failure semantics remain independent. Each bounded pass:
 
 1. scans up to 50 recent attributed `member.activated` events when signup-link
    rewards are enabled;
@@ -315,8 +332,37 @@ scheduler. Each bounded pass:
 3. reconciles up to 50 ordinary qualified missions, ordinary rewarded referrals
    awaiting their source celebration, or signup-link rewards awaiting their
    personal completion notice;
-4. re-signals up to 50 oldest unconsumed referral-notification mailbox items in
-   their actual `system` or `conversation` lane.
+4. selects up to 50 lanes containing a live pending referral notification and
+   re-signals only each lane's first live item above its canonical consumed
+   cursor. Live-row filtering skips retention-old or expired prefixes. That head
+   may be an earlier non-referral item; ordinary lane order remains authoritative.
+
+Referral notification producers carry the destination owner's validated
+external-route authority. A direct Linq source conversation remains an explicit
+delivery target so it cannot fall back to a different home conversation, and
+the hosted runtime treats that target as binding evidence only when the wake
+member, hosted member, channel, directness, and authority target all agree
+exactly.
+
+For the one legacy direct-Linq notice shape imported without that proof, Web
+never decrypts or rewrites the mailbox payload: the runtime may already have
+persisted the wake and advanced its import watermark. The local system-mailbox
+boundary admits only an exact usage-referral event whose mailbox dedupe key,
+event id, delivery dedupe token, delivery idempotency key, queue-only mode,
+required-send policy, direct Linq explicit route, hosted member, and absent
+authority all agree. Before model work it submits the frozen explicit target to
+the existing signed external-route authority owner. A current exact member,
+channel, directness, and target match adds that authority only to the in-memory
+wake, which then traverses the unchanged audience guard and provider-entry
+recheck. The target is never replaced by a current-home fallback.
+
+A definitive non-retryable `HOSTED_THREAD_ROUTE_EGRESS_UNAUTHORIZED` result
+records a typed terminal no-send outcome for that same local pending item, so its ordered lane
+can advance without provider work. Missing authority transport, timeout, or any
+other unavailable or retryable owner result retains the ordinary retry of that
+same item. The bounded Web recovery pass only re-signals the existing mailbox
+pointer; it does not append a replacement, rewind a cursor, alter ciphertext,
+or own a second reconciliation lifecycle.
 
 The first reward enablement intentionally applies the same oldest-first scan to
 at most the preceding 30 days of attributed activations. That bounded window

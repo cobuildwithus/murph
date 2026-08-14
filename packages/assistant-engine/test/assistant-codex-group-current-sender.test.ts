@@ -4,21 +4,27 @@ import type {
   AssistantHostedToolContext,
 } from "../src/assistant/hosted-tool-context.ts";
 import {
+  claimCurrentSenderTurnDecision,
   executeMurphDynamicToolRequest,
   MURPH_GROUP_TOOL,
   readMurphDynamicToolRequest,
 } from "../src/assistant-codex/dynamic-tools.ts";
 
-const SELECTED_INPUT_ID = `ain_${"a".repeat(32)}`;
-const OTHER_INPUT_ID = `ain_${"b".repeat(32)}`;
+const NEWEST_SENDER_INPUT_ID = `ain_${"a".repeat(32)}`;
+const EARLIER_SENDER_INPUT_ID = `ain_${"b".repeat(32)}`;
+const FOREIGN_INPUT_ID = `ain_${"c".repeat(32)}`;
 
 function groupToolCall(argumentsValue: unknown): Record<string, unknown> {
   return {
+    id: "request-test",
     method: "item/tool/call",
     params: {
       arguments: argumentsValue,
+      callId: "call-test",
       namespace: "murph",
+      threadId: "thread-test",
       tool: MURPH_GROUP_TOOL.name,
+      turnId: "turn-test",
     },
   };
 }
@@ -26,16 +32,17 @@ function groupToolCall(argumentsValue: unknown): Record<string, unknown> {
 function createHostedToolContext(input: {
   acceptedInputIds?: readonly string[];
   conversationScope?: "direct" | "group";
-  currentInvocationScope?: AssistantHostedToolContext["currentInvocationScope"];
   request?: NonNullable<AssistantHostedToolContext["groupTool"]>["request"];
 } = {}): AssistantHostedToolContext {
   return {
     computerToolsAvailable: false,
     currentHostedDeliveryContext: () => null,
     currentHostedMailboxItemIds: () => [],
-    currentInvocationScope: input.currentInvocationScope ?? (() => null),
+    currentInvocationScope: () => null,
     currentUserActionScope: () => ({
-      acceptedInputIds: [...(input.acceptedInputIds ?? [SELECTED_INPUT_ID])],
+      acceptedInputIds: [
+        ...(input.acceptedInputIds ?? [NEWEST_SENDER_INPUT_ID]),
+      ],
       conversationId: "conversation_group",
       conversationScope: input.conversationScope ?? "group",
       inboundMailboxItemIds: ["mailbox_item_1"],
@@ -55,10 +62,18 @@ function createHostedToolContext(input: {
   };
 }
 
-function parseCurrentSenderRequest(messageRef = SELECTED_INPUT_ID) {
+function parseCurrentSenderRequest(input: {
+  action?:
+    | "ask_current_sender"
+    | "clarify_current_sender"
+    | "continue_current_sender_in_group"
+    | "continue_current_sender_privately"
+    | "message_current_sender";
+  messageRef?: string;
+} = {}) {
   const request = readMurphDynamicToolRequest(groupToolCall({
-    action: "ask_current_sender",
-    message_ref: messageRef,
+    action: input.action ?? "ask_current_sender",
+    message_ref: input.messageRef ?? NEWEST_SENDER_INPUT_ID,
   }));
   if (!request || request.kind !== "group") {
     throw new Error("Expected a parsed murph.group request.");
@@ -66,39 +81,632 @@ function parseCurrentSenderRequest(messageRef = SELECTED_INPUT_ID) {
   return request;
 }
 
-describe("murph.group ask_current_sender", () => {
-  it("accepts only the exact Message ref as model input", () => {
+function sentProgressDelivery() {
+  return {
+    send: vi.fn(async () => ({
+      kind: "sent" as const,
+      source: "system" as const,
+    })),
+  };
+}
+
+function deferred<T>() {
+  let resolve: (value: T) => void = () => undefined;
+  const promise = new Promise<T>((resolvePromise) => {
+    resolve = resolvePromise;
+  });
+  return { promise, resolve };
+}
+
+async function executeCurrentSenderToolRequest(
+  input: Parameters<typeof executeMurphDynamicToolRequest>[0],
+) {
+  if (input.groupSharedReadTurnState) {
+    const claim = claimCurrentSenderTurnDecision({
+      request: input.request,
+      turnState: input.groupSharedReadTurnState,
+    });
+    if (claim === "conflict" || claim === "unavailable") {
+      return {
+        rpcResult: {
+          contentItems: [{
+            text: claim === "conflict"
+              ? "current-sender request conflicts with an earlier decision for this Message"
+              : "current-sender decision authority is unavailable for this turn",
+            type: "inputText" as const,
+          }],
+          success: false,
+        },
+      };
+    }
+  }
+  return await executeMurphDynamicToolRequest(input);
+}
+
+describe("murph.group current-sender intent", () => {
+  it("maps natural-intent actions to one exact Message ref", () => {
     expect(parseCurrentSenderRequest().request).toEqual({
       action: "ask_current_sender",
-      messageRef: SELECTED_INPUT_ID,
+      audience: "group",
+      messageRef: NEWEST_SENDER_INPUT_ID,
+      mode: "new",
+    });
+    expect(parseCurrentSenderRequest({
+      action: "message_current_sender",
+    }).request).toMatchObject({
+      audience: "current_sender",
+      mode: "new",
+    });
+    expect(parseCurrentSenderRequest({
+      action: "clarify_current_sender",
+    }).request).toEqual({
+      action: "ask_current_sender",
+      messageRef: NEWEST_SENDER_INPUT_ID,
+      mode: "clarification",
+    });
+    expect(parseCurrentSenderRequest({
+      action: "continue_current_sender_in_group",
+    }).request).toMatchObject({ audience: "group", mode: "continuation" });
+    expect(parseCurrentSenderRequest({
+      action: "continue_current_sender_privately",
+    }).request).toMatchObject({
+      audience: "current_sender",
+      mode: "continuation",
     });
 
-    const withQuestion = readMurphDynamicToolRequest(groupToolCall({
-      action: "ask_current_sender",
-      message_ref: SELECTED_INPUT_ID,
-      question: "model paraphrase",
-    }));
-    expect(withQuestion).toMatchObject({ kind: "invalid-group-arguments" });
+    for (const argumentsValue of [
+      { action: "message_current_sender" },
+      { action: "ask_current_sender" },
+      { action: "ask_current_sender", message_ref: "provider-message-id" },
+      {
+        action: "ask_current_sender",
+        message_ref: NEWEST_SENDER_INPUT_ID,
+        audience: "group",
+      },
+    ]) {
+      expect(readMurphDynamicToolRequest(groupToolCall(argumentsValue)))
+        .toMatchObject({ kind: "invalid-group-arguments" });
+    }
 
-    const withMember = readMurphDynamicToolRequest(groupToolCall({
-      action: "ask_current_sender",
-      memberId: "model_selected_member",
-      message_ref: SELECTED_INPUT_ID,
-    }));
-    expect(withMember).toMatchObject({ kind: "invalid-group-arguments" });
-
-    const withCamelCaseRef = readMurphDynamicToolRequest(groupToolCall({
-      action: "ask_current_sender",
-      messageRef: SELECTED_INPUT_ID,
-    }));
-    expect(withCamelCaseRef).toMatchObject({
-      kind: "invalid-group-arguments",
+    expect(MURPH_GROUP_TOOL.inputSchema.allOf[1].oneOf[1]).toMatchObject({
+      maxProperties: 2,
+      properties: {
+        action: {
+          enum: expect.arrayContaining([
+            "ask_current_sender",
+            "clarify_current_sender",
+            "continue_current_sender_in_group",
+            "continue_current_sender_privately",
+          ]),
+        },
+        message_ref: { pattern: "^ain_[0-9a-f]{32}$" },
+      },
+      required: ["action", "message_ref"],
     });
   });
 
-  it("replaces the Message ref with a trusted accepted-input origin", async () => {
+  it("sends the group notice before forwarding exact-source authority", async () => {
+    const events: string[] = [];
+    const groupRequest = vi.fn(async () => {
+      events.push("request");
+      return {
+        action: "ask_current_sender" as const,
+        result: { status: "accepted" as const },
+      };
+    });
+    const progressDelivery = {
+      send: vi.fn(async () => {
+        events.push("notice");
+        return { kind: "sent" as const, source: "system" as const };
+      }),
+    };
+    const result = await executeCurrentSenderToolRequest({
+      deliveryContextOrdinal: 3,
+      env: {},
+      fetchImpl: fetch,
+      groupSharedReadTurnState: {
+        currentSenderDecisionByMessageRef: new Map(),
+        invalid: false,
+        readProjectionScopeKeyBatches: [],
+        roster: [],
+      },
+      hostedToolContext: createHostedToolContext({
+        acceptedInputIds: [EARLIER_SENDER_INPUT_ID, NEWEST_SENDER_INPUT_ID],
+        request: groupRequest,
+      }),
+      nextUsageOrdinal: () => 1,
+      progressDelivery,
+      request: parseCurrentSenderRequest({
+        messageRef: EARLIER_SENDER_INPUT_ID,
+      }),
+    });
+
+    expect(events).toEqual(["notice", "request"]);
+    expect(progressDelivery.send).toHaveBeenCalledWith(
+      "I’ll ask your Murph and share the answer here.",
+      {
+        deliveryContextOrdinal: 3,
+        required: true,
+        source: "system",
+        targetInputId: EARLIER_SENDER_INPUT_ID,
+      },
+    );
+    expect(groupRequest).toHaveBeenCalledWith({
+      action: "ask_current_sender",
+      audience: "group",
+      mode: "new",
+      origin: {
+        assistantInputId: EARLIER_SENDER_INPUT_ID,
+        kind: "accepted_input",
+        sessionId: "session_group",
+      },
+    });
+    expect(result).toMatchObject({
+      externallyVisibleOutput: true,
+      finalActionPatch: { kind: "none", owner: "current-sender-ask" },
+      rpcResult: { success: true },
+    });
+  });
+
+  it("fails closed when the group notice cannot be sent", async () => {
+    const groupRequest = vi.fn();
+    const progressDelivery = {
+      send: vi.fn(async () => ({
+        kind: "failed" as const,
+        source: "system" as const,
+      })),
+    };
+    const sharedState = {
+      currentSenderDecisionByMessageRef: new Map(),
+      invalid: false,
+      readProjectionScopeKeyBatches: [],
+      roster: [],
+    };
+    const hostedToolContext = createHostedToolContext({ request: groupRequest });
+    const result = await executeCurrentSenderToolRequest({
+      deliveryContextOrdinal: 0,
+      env: {},
+      fetchImpl: fetch,
+      groupSharedReadTurnState: sharedState,
+      hostedToolContext,
+      nextUsageOrdinal: () => 1,
+      progressDelivery,
+      request: parseCurrentSenderRequest(),
+    });
+    const privateResult = await executeCurrentSenderToolRequest({
+      deliveryContextOrdinal: 1,
+      env: {},
+      fetchImpl: fetch,
+      groupSharedReadTurnState: sharedState,
+      hostedToolContext,
+      nextUsageOrdinal: () => 2,
+      progressDelivery,
+      request: parseCurrentSenderRequest({ action: "message_current_sender" }),
+    });
+
+    expect(result.rpcResult.success).toBe(false);
+    expect(privateResult.rpcResult.success).toBe(false);
+    expect(progressDelivery.send).toHaveBeenCalledTimes(1);
+    expect(groupRequest).not.toHaveBeenCalled();
+  });
+
+  it("binds simultaneous group notices to their own exact message refs", async () => {
     const groupRequest = vi.fn(async () => ({
       action: "ask_current_sender" as const,
+      result: { status: "accepted" as const },
+    }));
+    const progressDelivery = sentProgressDelivery();
+    const sharedState = {
+      currentSenderDecisionByMessageRef: new Map(),
+      invalid: false,
+      readProjectionScopeKeyBatches: [],
+      roster: [],
+    };
+    const hostedToolContext = createHostedToolContext({
+      acceptedInputIds: [EARLIER_SENDER_INPUT_ID, NEWEST_SENDER_INPUT_ID],
+      request: groupRequest,
+    });
+
+    await Promise.all(([
+      [0, EARLIER_SENDER_INPUT_ID],
+      [1, NEWEST_SENDER_INPUT_ID],
+    ] as const).map(([ordinal, messageRef]) =>
+      executeCurrentSenderToolRequest({
+        deliveryContextOrdinal: ordinal,
+        env: {},
+        fetchImpl: fetch,
+        groupSharedReadTurnState: sharedState,
+        hostedToolContext,
+        nextUsageOrdinal: () => ordinal + 1,
+        progressDelivery,
+        request: parseCurrentSenderRequest({ messageRef }),
+      }),
+    ));
+
+    expect(progressDelivery.send).toHaveBeenNthCalledWith(
+      1,
+      expect.any(String),
+      expect.objectContaining({ targetInputId: EARLIER_SENDER_INPUT_ID }),
+    );
+    expect(progressDelivery.send).toHaveBeenNthCalledWith(
+      2,
+      expect.any(String),
+      expect.objectContaining({ targetInputId: NEWEST_SENDER_INPUT_ID }),
+    );
+    expect(groupRequest).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        origin: expect.objectContaining({
+          assistantInputId: EARLIER_SENDER_INPUT_ID,
+        }),
+      }),
+    );
+    expect(groupRequest).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        origin: expect.objectContaining({
+          assistantInputId: NEWEST_SENDER_INPUT_ID,
+        }),
+      }),
+    );
+  });
+
+  it("does not duplicate a group notice when the same request replays", async () => {
+    const groupRequest = vi.fn(async () => ({
+      action: "ask_current_sender" as const,
+      result: { status: "accepted" as const },
+    }));
+    const progressDelivery = sentProgressDelivery();
+    const sharedState = {
+      currentSenderDecisionByMessageRef: new Map(),
+      invalid: false,
+      readProjectionScopeKeyBatches: [],
+      roster: [],
+    };
+    const execute = () => executeCurrentSenderToolRequest({
+      deliveryContextOrdinal: 0,
+      env: {},
+      fetchImpl: fetch,
+      groupSharedReadTurnState: sharedState,
+      hostedToolContext: createHostedToolContext({ request: groupRequest }),
+      nextUsageOrdinal: () => 1,
+      progressDelivery,
+      request: parseCurrentSenderRequest(),
+    });
+
+    await execute();
+    await execute();
+
+    expect(progressDelivery.send).toHaveBeenCalledTimes(1);
+    expect(groupRequest).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps a private decision from racing a group notice for the same ref", async () => {
+    const privateAdmission = deferred<{
+      action: "ask_current_sender";
+      result: { status: "accepted" };
+    }>();
+    const groupRequest = vi.fn(async (request) => request.audience === "current_sender"
+      ? privateAdmission.promise
+      : {
+          action: "ask_current_sender" as const,
+          result: { status: "accepted" as const },
+        });
+    const progressDelivery = sentProgressDelivery();
+    const sharedState = {
+      currentSenderDecisionByMessageRef: new Map(),
+      invalid: false,
+      readProjectionScopeKeyBatches: [],
+      roster: [],
+    };
+    const hostedToolContext = createHostedToolContext({ request: groupRequest });
+
+    const privateResult = executeCurrentSenderToolRequest({
+      deliveryContextOrdinal: 0,
+      env: {},
+      fetchImpl: fetch,
+      groupSharedReadTurnState: sharedState,
+      hostedToolContext,
+      nextUsageOrdinal: () => 1,
+      progressDelivery,
+      request: parseCurrentSenderRequest({ action: "message_current_sender" }),
+    });
+    const groupResult = await executeCurrentSenderToolRequest({
+      deliveryContextOrdinal: 1,
+      env: {},
+      fetchImpl: fetch,
+      groupSharedReadTurnState: sharedState,
+      hostedToolContext,
+      nextUsageOrdinal: () => 2,
+      progressDelivery,
+      request: parseCurrentSenderRequest(),
+    });
+
+    expect(groupResult.rpcResult.success).toBe(false);
+    expect(progressDelivery.send).not.toHaveBeenCalled();
+    expect(groupRequest).toHaveBeenCalledTimes(1);
+    privateAdmission.resolve({
+      action: "ask_current_sender",
+      result: { status: "accepted" },
+    });
+    await expect(privateResult).resolves.toMatchObject({
+      rpcResult: { success: true },
+    });
+  });
+
+  it("keeps a group decision from racing private admission for the same ref", async () => {
+    const groupNotice = deferred<{
+      kind: "sent";
+      source: "system";
+    }>();
+    const groupRequest = vi.fn(async () => ({
+      action: "ask_current_sender" as const,
+      result: { status: "accepted" as const },
+    }));
+    const progressDelivery = {
+      send: vi.fn(() => groupNotice.promise),
+    };
+    const sharedState = {
+      currentSenderDecisionByMessageRef: new Map(),
+      invalid: false,
+      readProjectionScopeKeyBatches: [],
+      roster: [],
+    };
+    const hostedToolContext = createHostedToolContext({ request: groupRequest });
+
+    const groupResult = executeCurrentSenderToolRequest({
+      deliveryContextOrdinal: 0,
+      env: {},
+      fetchImpl: fetch,
+      groupSharedReadTurnState: sharedState,
+      hostedToolContext,
+      nextUsageOrdinal: () => 1,
+      progressDelivery,
+      request: parseCurrentSenderRequest(),
+    });
+    const privateResult = await executeCurrentSenderToolRequest({
+      deliveryContextOrdinal: 1,
+      env: {},
+      fetchImpl: fetch,
+      groupSharedReadTurnState: sharedState,
+      hostedToolContext,
+      nextUsageOrdinal: () => 2,
+      progressDelivery,
+      request: parseCurrentSenderRequest({ action: "message_current_sender" }),
+    });
+
+    expect(privateResult.rpcResult.success).toBe(false);
+    expect(progressDelivery.send).toHaveBeenCalledTimes(1);
+    expect(groupRequest).not.toHaveBeenCalled();
+    groupNotice.resolve({ kind: "sent", source: "system" });
+    await expect(groupResult).resolves.toMatchObject({
+      rpcResult: { success: true },
+    });
+    expect(groupRequest).toHaveBeenCalledTimes(1);
+  });
+
+  it("shares one in-flight group notice for duplicate same-ref decisions", async () => {
+    const groupNotice = deferred<{
+      kind: "sent";
+      source: "system";
+    }>();
+    const groupRequest = vi.fn(async () => ({
+      action: "ask_current_sender" as const,
+      result: { status: "accepted" as const },
+    }));
+    const progressDelivery = {
+      send: vi.fn(() => groupNotice.promise),
+    };
+    const sharedState = {
+      currentSenderDecisionByMessageRef: new Map(),
+      invalid: false,
+      readProjectionScopeKeyBatches: [],
+      roster: [],
+    };
+    const hostedToolContext = createHostedToolContext({ request: groupRequest });
+    const execute = () => executeCurrentSenderToolRequest({
+      deliveryContextOrdinal: 0,
+      env: {},
+      fetchImpl: fetch,
+      groupSharedReadTurnState: sharedState,
+      hostedToolContext,
+      nextUsageOrdinal: () => 1,
+      progressDelivery,
+      request: parseCurrentSenderRequest(),
+    });
+
+    const first = execute();
+    const second = execute();
+
+    expect(progressDelivery.send).toHaveBeenCalledTimes(1);
+    expect(groupRequest).not.toHaveBeenCalled();
+    groupNotice.resolve({ kind: "sent", source: "system" });
+    await Promise.all([first, second]);
+    expect(groupRequest).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps clarification mutually exclusive with a same-ref private decision", async () => {
+    const clarificationAdmission = deferred<{
+      action: "ask_current_sender";
+      result: { status: "clarification_required" };
+    }>();
+    const groupRequest = vi.fn(async (request) => request.mode === "clarification"
+      ? clarificationAdmission.promise
+      : {
+          action: "ask_current_sender" as const,
+          result: { status: "accepted" as const },
+        });
+    const sharedState = {
+      currentSenderDecisionByMessageRef: new Map(),
+      invalid: false,
+      readProjectionScopeKeyBatches: [],
+      roster: [],
+    };
+    const hostedToolContext = createHostedToolContext({ request: groupRequest });
+
+    const clarificationResult = executeCurrentSenderToolRequest({
+      deliveryContextOrdinal: 0,
+      env: {},
+      fetchImpl: fetch,
+      groupSharedReadTurnState: sharedState,
+      hostedToolContext,
+      nextUsageOrdinal: () => 1,
+      progressDelivery: sentProgressDelivery(),
+      request: parseCurrentSenderRequest({ action: "clarify_current_sender" }),
+    });
+    const privateResult = await executeCurrentSenderToolRequest({
+      deliveryContextOrdinal: 1,
+      env: {},
+      fetchImpl: fetch,
+      groupSharedReadTurnState: sharedState,
+      hostedToolContext,
+      nextUsageOrdinal: () => 2,
+      progressDelivery: sentProgressDelivery(),
+      request: parseCurrentSenderRequest({ action: "message_current_sender" }),
+    });
+
+    expect(privateResult.rpcResult.success).toBe(false);
+    expect(groupRequest).toHaveBeenCalledTimes(1);
+    clarificationAdmission.resolve({
+      action: "ask_current_sender",
+      result: { status: "clarification_required" },
+    });
+    await expect(clarificationResult).resolves.toMatchObject({
+      rpcResult: { success: true },
+    });
+  });
+
+  it("keeps independent private and clarification paths silent in the group", async () => {
+    const groupRequest = vi.fn(async () => ({
+      action: "ask_current_sender" as const,
+      result: { status: "clarification_required" as const },
+    }));
+    const progressDelivery = sentProgressDelivery();
+    const sharedState = {
+      currentSenderDecisionByMessageRef: new Map(),
+      invalid: false,
+      readProjectionScopeKeyBatches: [],
+      roster: [],
+    };
+    const hostedToolContext = createHostedToolContext({
+      acceptedInputIds: [EARLIER_SENDER_INPUT_ID, NEWEST_SENDER_INPUT_ID],
+      request: groupRequest,
+    });
+    await executeCurrentSenderToolRequest({
+      deliveryContextOrdinal: 0,
+      env: {},
+      fetchImpl: fetch,
+      groupSharedReadTurnState: sharedState,
+      hostedToolContext,
+      nextUsageOrdinal: () => 1,
+      progressDelivery,
+      request: parseCurrentSenderRequest({ action: "clarify_current_sender" }),
+    });
+    await executeCurrentSenderToolRequest({
+      deliveryContextOrdinal: 1,
+      env: {},
+      fetchImpl: fetch,
+      groupSharedReadTurnState: sharedState,
+      hostedToolContext,
+      nextUsageOrdinal: () => 2,
+      progressDelivery,
+      request: parseCurrentSenderRequest({
+        action: "message_current_sender",
+        messageRef: EARLIER_SENDER_INPUT_ID,
+      }),
+    });
+
+    expect(progressDelivery.send).not.toHaveBeenCalled();
+    expect(groupRequest.mock.calls).toEqual([
+      [{
+        action: "ask_current_sender",
+        mode: "clarification",
+        origin: expect.objectContaining({
+          assistantInputId: NEWEST_SENDER_INPUT_ID,
+        }),
+      }],
+      [{
+        action: "ask_current_sender",
+        audience: "current_sender",
+        mode: "new",
+        origin: expect.objectContaining({
+          assistantInputId: EARLIER_SENDER_INPUT_ID,
+        }),
+      }],
+    ]);
+  });
+
+  it("rejects a foreign Message ref before any notice or Web request", async () => {
+    const groupRequest = vi.fn();
+    const progressDelivery = sentProgressDelivery();
+    const result = await executeCurrentSenderToolRequest({
+      deliveryContextOrdinal: 0,
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext: createHostedToolContext({
+        acceptedInputIds: [EARLIER_SENDER_INPUT_ID, NEWEST_SENDER_INPUT_ID],
+        request: groupRequest,
+      }),
+      nextUsageOrdinal: () => 1,
+      progressDelivery,
+      request: parseCurrentSenderRequest({ messageRef: FOREIGN_INPUT_ID }),
+    });
+
+    expect(result.rpcResult.success).toBe(false);
+    expect(progressDelivery.send).not.toHaveBeenCalled();
+    expect(groupRequest).not.toHaveBeenCalled();
+  });
+});
+
+describe("murph.group record_current_sender_daily_metric", () => {
+  function parseDailyMetricRequest(messageRef = NEWEST_SENDER_INPUT_ID) {
+    const request = readMurphDynamicToolRequest(groupToolCall({
+      action: "record_current_sender_daily_metric",
+      date: "2026-08-13",
+      message_ref: messageRef,
+      metric: "steps",
+      unit: "count",
+      value: 8_000,
+    }));
+    if (!request || request.kind !== "group") {
+      throw new Error("Expected a parsed murph.group request.");
+    }
+    return request;
+  }
+
+  it("accepts an exact dated metric without a model-selected member", () => {
+    expect(parseDailyMetricRequest().request).toEqual({
+      action: "record_current_sender_daily_metric",
+      dailyMetric: {
+        date: "2026-08-13",
+        metric: "steps",
+        unit: "count",
+        value: 8_000,
+      },
+      messageRef: NEWEST_SENDER_INPUT_ID,
+    });
+    expect(readMurphDynamicToolRequest(groupToolCall({
+      action: "record_current_sender_daily_metric",
+      date: "2026-02-30",
+      message_ref: NEWEST_SENDER_INPUT_ID,
+      metric: "steps",
+      unit: "count",
+      value: 8_000,
+    }))).toMatchObject({ kind: "invalid-group-arguments" });
+    expect(readMurphDynamicToolRequest(groupToolCall({
+      action: "record_current_sender_daily_metric",
+      date: "2026-08-13",
+      memberId: "model_selected_member",
+      message_ref: NEWEST_SENDER_INPUT_ID,
+      metric: "steps",
+      unit: "count",
+      value: 8_000,
+    }))).toMatchObject({ kind: "invalid-group-arguments" });
+  });
+
+  it("binds the report to the selected accepted group input", async () => {
+    const groupRequest = vi.fn(async () => ({
+      action: "record_current_sender_daily_metric" as const,
       result: { status: "accepted" as const },
     }));
     const result = await executeMurphDynamicToolRequest({
@@ -107,52 +715,93 @@ describe("murph.group ask_current_sender", () => {
       hostedToolContext: createHostedToolContext({ request: groupRequest }),
       nextUsageOrdinal: () => 1,
       progressDelivery: null,
-      request: parseCurrentSenderRequest(),
+      request: parseDailyMetricRequest(),
     });
 
     expect(groupRequest).toHaveBeenCalledWith({
-      action: "ask_current_sender",
+      action: "record_current_sender_daily_metric",
+      dailyMetric: {
+        date: "2026-08-13",
+        metric: "steps",
+        unit: "count",
+        value: 8_000,
+      },
       origin: {
-        assistantInputId: SELECTED_INPUT_ID,
+        assistantInputId: NEWEST_SENDER_INPUT_ID,
         kind: "accepted_input",
         sessionId: "session_group",
       },
     });
     expect(result.rpcResult.success).toBe(true);
     expect(result.rpcResult.contentItems[0]?.text).toContain(
-      '"action":"ask_current_sender"',
+      '"action":"record_current_sender_daily_metric"',
+    );
+    expect(result.rpcResult.contentItems[0]?.text).toContain(
+      '"status":"accepted"',
     );
   });
 
-  it("fails closed for a foreign Message ref or a private conversation", async () => {
-    for (const hostedToolContext of [
-      createHostedToolContext({ acceptedInputIds: [OTHER_INPUT_ID] }),
-      createHostedToolContext({ conversationScope: "direct" }),
-      createHostedToolContext({
-        currentInvocationScope: () => ({
-          conversationScope: null,
-          origin: {
-            automationId: "automation_group",
-            kind: "automation_occurrence",
-            occurrenceAt: "2026-07-27T20:00:00.000Z",
+  it("returns unavailable without presenting the report as accepted", async () => {
+    const result = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext: createHostedToolContext({
+        request: vi.fn(async () => ({
+          action: "record_current_sender_daily_metric" as const,
+          result: {
+            status: "unavailable" as const,
+            unavailableReason: "daily_metric_report_unavailable",
           },
+        })),
+      }),
+      nextUsageOrdinal: () => 1,
+      progressDelivery: null,
+      request: parseDailyMetricRequest(),
+    });
+
+    expect(result.rpcResult.success).toBe(true);
+    expect(result.rpcResult.contentItems[0]?.text).toContain(
+      '"status":"unavailable"',
+    );
+    expect(result.rpcResult.contentItems[0]?.text).not.toContain(
+      '"status":"accepted"',
+    );
+  });
+
+  it("reports an uncertain transport failure without inventing a result", async () => {
+    const result = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext: createHostedToolContext({
+        request: vi.fn(async () => {
+          throw new Error("synthetic transport failure");
         }),
       }),
-    ]) {
-      const groupRequest = hostedToolContext.groupTool?.request;
-      const result = await executeMurphDynamicToolRequest({
-        env: {},
-        fetchImpl: fetch,
-        hostedToolContext,
-        nextUsageOrdinal: () => 1,
-        progressDelivery: null,
-        request: parseCurrentSenderRequest(),
-      });
-      expect(result.rpcResult.success).toBe(false);
-      expect(result.rpcResult.contentItems[0]?.text).toMatch(
-        /selected accepted message|scheduled group invocations/u,
-      );
-      expect(groupRequest).not.toHaveBeenCalled();
-    }
+      nextUsageOrdinal: () => 1,
+      progressDelivery: null,
+      request: parseDailyMetricRequest(),
+    });
+
+    expect(result.rpcResult.success).toBe(false);
+    expect(result.rpcResult.contentItems[0]?.text).toBe(
+      "group tool request failed",
+    );
+    expect(result.rpcResult.contentItems[0]?.text).not.toContain("accepted");
+  });
+
+  it("fails closed for a foreign Message ref", async () => {
+    const hostedToolContext = createHostedToolContext({
+      acceptedInputIds: [FOREIGN_INPUT_ID],
+    });
+    const result = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext,
+      nextUsageOrdinal: () => 1,
+      progressDelivery: null,
+      request: parseDailyMetricRequest(),
+    });
+    expect(result.rpcResult.success).toBe(false);
+    expect(hostedToolContext.groupTool?.request).not.toHaveBeenCalled();
   });
 });

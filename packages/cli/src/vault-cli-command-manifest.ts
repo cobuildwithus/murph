@@ -177,6 +177,7 @@ import {
   wearablesBodyStateListResultSchema,
   wearablesDayResultSchema,
   wearablesDriftResultSchema,
+  wearablesPersonalPatternsResultSchema,
   wearablesLatestResultSchema,
   wearablesMetricLatestResultSchema,
   wearablesMetricTrendResultSchema,
@@ -1058,6 +1059,10 @@ export const vaultCliCommandDescriptors = [
         description: measurementCommandDescriptions.list,
       },
       {
+        path: ['measurement', 'entry', 'list'],
+        description: measurementCommandDescriptions.entryList,
+      },
+      {
         path: ['measurement', 'manifest'],
         description: measurementCommandDescriptions.manifest,
       },
@@ -1150,12 +1155,12 @@ export const vaultCliCommandDescriptors = [
       },
       {
         path: ['workout', 'import', 'inspect'],
-        description: 'Inspect one workout CSV file without writing anything.',
+        description: 'Inspect one workout CSV file without writing anything, including timezone and unit requirements.',
       },
       {
         path: ['workout', 'import', 'csv'],
         description:
-          'Copy one workout CSV export into raw/workouts/** and optionally map it into activity_session events.',
+          'Validate one complete workout CSV and bulk-commit replay-safe activity_session events with bounded output.',
       },
       {
         path: ['workout', 'format', 'save'],
@@ -1516,7 +1521,7 @@ export const vaultCliCommandDescriptors = [
       },
       {
         path: ['wearables', 'body', 'list'],
-        description: 'List semantic daily body-state summaries with deduped weight, body-fat, BMI, temperature, and source-confidence details.',
+        description: 'List semantic daily body-state and body-composition summaries with source-confidence details.',
         output: wearablesBodyStateListResultSchema,
       },
       {
@@ -1534,6 +1539,11 @@ export const vaultCliCommandDescriptors = [
         description: 'Explain the biggest normalized wearable drift Murph sees across the current wearable surfaces.',
         output: wearablesDriftResultSchema,
       },
+      {
+        path: ['wearables', 'patterns'],
+        description: 'Compare repeated activity and intervention days with next-day sleep and recovery outcomes.',
+        output: wearablesPersonalPatternsResultSchema,
+      },
     ],
     directVaultServiceBindings: assumeDirectVaultServiceBindings({
       query: [
@@ -1548,6 +1558,7 @@ export const vaultCliCommandDescriptors = [
         'listWearableRecovery',
         'listWearableSources',
         'showWearableDrift',
+        'showPersonalPatterns',
       ],
     }),
     register({ cli, services }) {

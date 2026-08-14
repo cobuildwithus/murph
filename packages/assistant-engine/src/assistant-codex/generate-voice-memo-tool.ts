@@ -5,6 +5,9 @@ import {
   type AssistantVoiceOptionId,
 } from '@murphai/contracts'
 import {
+  normalizeHostedAiUsageAllowanceElevenLabsTtsModelId,
+} from '@murphai/hosted-execution/runtime-control'
+import {
   assistantVoiceMemoMusicModelId,
   assistantVoiceMemoMusicOutputFormat,
   assistantVoiceMemoSpeechOutputFormat,
@@ -12,26 +15,21 @@ import {
   type AssistantVoiceMemoGeneration,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import {
-  generateElevenLabsVoiceMemoAudio,
   resolveElevenLabsApiKey,
   resolveElevenLabsModelId,
   resolveElevenLabsVoiceId,
 } from '@murphai/operator-config/elevenlabs-runtime'
-import {
-  resolveLinqApiToken,
-  uploadLinqAttachment,
-} from '@murphai/operator-config/linq-runtime'
-import {
-  normalizeHostedAiUsageAllowanceElevenLabsTtsModelId,
-} from '@murphai/hosted-execution/runtime-control'
 import { describeVaultCliFailure } from '@murphai/operator-config/vault-cli-errors'
 
 import { normalizeNullableString } from '../assistant/shared.js'
+import { createManagedLinqVoiceMemoRuntimeFromEnv } from './managed-voice-memo-runtime.js'
+
+export { createManagedLinqVoiceMemoRuntimeFromEnv }
 
 export interface GenerateVoiceMemoToolArgs {
   text: string
-  voiceId: string | null
-  voiceOptionId?: AssistantVoiceOptionId | null
+  /** One-off roster voice explicitly named by the current user for this memo or test. */
+  userRequestedVoiceOptionId?: AssistantVoiceOptionId | null
 }
 
 export interface GenerateSongToolArgs {
@@ -55,6 +53,34 @@ export interface VoiceMemoElevenLabsRuntimeConfig {
   voiceId: string | null
 }
 
+export type VoiceMemoToolRuntimeFailure =
+  | {
+      kind: 'generation_failed'
+      detail: string | null
+    }
+  | {
+      kind: 'invalid_audio'
+    }
+  | {
+      kind: 'upload_failed'
+      detail: string | null
+    }
+  | {
+      kind: 'missing_configuration'
+      variable: 'ELEVENLABS_API_KEY' | 'LINQ_API_TOKEN'
+    }
+
+export type VoiceMemoToolRuntimeResult =
+  | {
+      attachmentId: string
+      filename: string
+      ok?: true
+    }
+  | {
+      failure: VoiceMemoToolRuntimeFailure
+      ok: false
+    }
+
 export type VoiceMemoToolRuntime =
   | {
       elevenLabs: VoiceMemoElevenLabsRuntimeConfig
@@ -66,14 +92,38 @@ export type VoiceMemoToolRuntime =
         filenameBase: string
         generation: AssistantVoiceMemoGeneration
         signal?: AbortSignal | null
-      }): Promise<{
-        attachmentId: string
-        filename: string
-      }>
+      }): Promise<VoiceMemoToolRuntimeResult>
       kind: 'linq'
     }
 
-const MAX_VOICE_MEMO_BYTES = 10 * 1024 * 1024
+export function createVoiceMemoToolRuntimeFromEnv(input: {
+  env: NodeJS.ProcessEnv
+  fetchImpl: typeof fetch
+  preferredVoiceId?: string | null
+  publicFetchImpl?: typeof fetch | null
+  voiceMemoDeliveryChannel?: VoiceMemoDeliveryChannel | null
+}): VoiceMemoToolRuntime | null {
+  if (input.voiceMemoDeliveryChannel === 'linq') {
+    return createManagedLinqVoiceMemoRuntimeFromEnv(input)
+  }
+  if (input.voiceMemoDeliveryChannel !== 'telegram') {
+    return null
+  }
+
+  const defaultVoiceId = resolveElevenLabsVoiceId(input.env)
+  return {
+    elevenLabs: {
+      apiKeyAvailable: resolveElevenLabsApiKey(input.env) !== null,
+      defaultVoiceId,
+      modelId: normalizeHostedAiUsageAllowanceElevenLabsTtsModelId(
+        resolveElevenLabsModelId(input.env),
+      ),
+      voiceId:
+        normalizeNullableString(input.preferredVoiceId) ?? defaultVoiceId,
+    },
+    kind: 'telegram',
+  }
+}
 
 export async function executeGenerateVoiceMemoTool(input: {
   abortSignal?: AbortSignal | null
@@ -136,9 +186,10 @@ function resolveVoiceMemoVoiceId(input: {
   args: GenerateVoiceMemoToolArgs
   runtime: VoiceMemoToolRuntime
 }): string | null {
-  const voiceOptionId = input.args.voiceOptionId ?? null
-  if (voiceOptionId !== null) {
-    const voiceOption = resolveAssistantVoiceOption(voiceOptionId)
+  const userRequestedVoiceOptionId =
+    input.args.userRequestedVoiceOptionId ?? null
+  if (userRequestedVoiceOptionId !== null) {
+    const voiceOption = resolveAssistantVoiceOption(userRequestedVoiceOptionId)
     if (!voiceOption) {
       return null
     }
@@ -147,8 +198,7 @@ function resolveVoiceMemoVoiceId(input: {
       normalizeNullableString(input.runtime.elevenLabs.defaultVoiceId)
   }
 
-  return normalizeNullableString(input.args.voiceId) ??
-    input.runtime.elevenLabs.voiceId
+  return input.runtime.elevenLabs.voiceId
 }
 
 export async function executeGenerateSongTool(input: {
@@ -216,9 +266,9 @@ async function executeGeneratedVoiceMemo(input: {
     }
   }
 
-  let upload: Awaited<ReturnType<typeof input.runtime.generateAndUpload>>
+  let runtimeResult: VoiceMemoToolRuntimeResult
   try {
-    upload = await input.runtime.generateAndUpload({
+    runtimeResult = await input.runtime.generateAndUpload({
       filenameBase: input.filenameBase,
       generation: input.generation,
       signal: input.signal,
@@ -226,15 +276,6 @@ async function executeGeneratedVoiceMemo(input: {
   } catch (error) {
     if (isAbortError(error)) {
       throw error
-    }
-    if (
-      error instanceof VoiceMemoToolConfigurationError ||
-      error instanceof VoiceMemoToolGenerationError
-    ) {
-      return {
-        rpcSuccess: false,
-        rpcText: error.rpcText,
-      }
     }
     return {
       rpcSuccess: false,
@@ -245,14 +286,21 @@ async function executeGeneratedVoiceMemo(input: {
     }
   }
 
+  if (runtimeResult.ok === false) {
+    return {
+      rpcSuccess: false,
+      rpcText: describeVoiceMemoRuntimeFailure(label, runtimeResult.failure),
+    }
+  }
+
   return {
     responseMedia: [
       {
         kind: 'voice_memo',
-        filename: upload.filename,
+        filename: runtimeResult.filename,
         transcript,
         transport: {
-          attachmentId: upload.attachmentId,
+          attachmentId: runtimeResult.attachmentId,
           kind: 'linq_attachment',
         },
       },
@@ -263,6 +311,27 @@ async function executeGeneratedVoiceMemo(input: {
 }
 
 type VoiceMemoGenerationLabel = 'song' | 'voice memo'
+
+function describeVoiceMemoRuntimeFailure(
+  label: VoiceMemoGenerationLabel,
+  failure: VoiceMemoToolRuntimeFailure,
+): string {
+  switch (failure.kind) {
+    case 'generation_failed':
+      return appendFailureDetail(`${label} generation failed`, failure.detail)
+    case 'invalid_audio':
+      return `${label} generation returned invalid audio data`
+    case 'upload_failed':
+      return appendFailureDetail(
+        `${label} generated but Linq attachment upload failed`,
+        failure.detail,
+      )
+    case 'missing_configuration':
+      return failure.variable === 'LINQ_API_TOKEN'
+        ? `${failure.variable} is required for ${label} attachment upload`
+        : `${failure.variable} is required for ${label} generation`
+  }
+}
 
 function rejectIfResponseMediaConflicts(
   currentResponseMedia: readonly AssistantResponseMedia[],
@@ -299,133 +368,9 @@ function unavailableVoiceMemoResult(
   }
 }
 
-export function createVoiceMemoToolRuntimeFromEnv(input: {
-  env: NodeJS.ProcessEnv
-  fetchImpl: typeof fetch
-  preferredVoiceId?: string | null
-  publicFetchImpl?: typeof fetch | null
-  voiceMemoDeliveryChannel?: VoiceMemoDeliveryChannel | null
-}): VoiceMemoToolRuntime | null {
-  const deliveryChannel = resolveVoiceMemoDeliveryChannel(
-    input.voiceMemoDeliveryChannel,
-  )
-  if (!deliveryChannel) {
-    return null
-  }
-
-  const apiKey = resolveElevenLabsApiKey(input.env)
-  const defaultVoiceId = resolveElevenLabsVoiceId(input.env)
-  const elevenLabs: VoiceMemoElevenLabsRuntimeConfig = {
-    apiKeyAvailable: apiKey !== null,
-    defaultVoiceId,
-    modelId: normalizeHostedAiUsageAllowanceElevenLabsTtsModelId(
-      resolveElevenLabsModelId(input.env),
-    ),
-    voiceId:
-      normalizeNullableString(input.preferredVoiceId) ??
-      defaultVoiceId,
-  }
-
-  if (deliveryChannel === 'telegram') {
-    return {
-      elevenLabs,
-      kind: 'telegram',
-    }
-  }
-
-  const fetchImplementation = createStringFetchAdapter(input.fetchImpl)
-  const uploadFetchImplementation = createStringFetchAdapter(
-    input.publicFetchImpl ?? input.fetchImpl,
-  )
-
-  return {
-    elevenLabs,
-    kind: 'linq',
-    generateAndUpload: async (request) => {
-      const { label } = describeVoiceMemoGeneration(request.generation)
-      if (!apiKey) {
-        throw new VoiceMemoToolConfigurationError(
-          `ELEVENLABS_API_KEY is required for ${label} generation`,
-        )
-      }
-      const linqApiToken = resolveLinqApiToken(input.env)
-      if (!linqApiToken) {
-        throw new VoiceMemoToolConfigurationError(
-          `LINQ_API_TOKEN is required for ${label} attachment upload`,
-        )
-      }
-
-      let audio: Awaited<ReturnType<typeof generateElevenLabsVoiceMemoAudio>>
-      try {
-        audio = await generateElevenLabsVoiceMemoAudio({
-          apiKey,
-          fetchImplementation,
-          generation: request.generation,
-          signal: request.signal ?? undefined,
-        })
-      } catch (error) {
-        if (isAbortError(error)) {
-          throw error
-        }
-        throw new VoiceMemoToolGenerationError(
-          appendFailureDetail(
-            `${label} generation failed`,
-            warnVoiceMemoFailure(`${label} generation`, error),
-          ),
-          { cause: error },
-        )
-      }
-
-      if (
-        audio.bytes.byteLength === 0 ||
-        audio.bytes.byteLength > MAX_VOICE_MEMO_BYTES
-      ) {
-        throw new VoiceMemoToolGenerationError(
-          `${label} generation returned invalid audio data`,
-        )
-      }
-
-      const linqFilename = `${request.filenameBase}.${audio.filenameExtension}`
-      const upload = await uploadLinqAttachment(
-        {
-          bytes: audio.bytes,
-          contentType: audio.contentType,
-          filename: linqFilename,
-        },
-        {
-          env: input.env,
-          fetchImplementation,
-          publicFetchImplementation: uploadFetchImplementation,
-          signal: request.signal ?? undefined,
-        },
-      )
-
-      return {
-        attachmentId: upload.attachmentId,
-        filename: linqFilename,
-      }
-    },
-  }
-}
-
-class VoiceMemoToolConfigurationError extends Error {
-  constructor(readonly rpcText: string) {
-    super(rpcText)
-  }
-}
-
-class VoiceMemoToolGenerationError extends Error {
-  constructor(readonly rpcText: string, options?: ErrorOptions) {
-    super(rpcText, options)
-  }
-}
-
 /**
- * Logs a provider failure and returns its secret-safe summary for the rpc text.
- *
- * Both call sites used to collapse every failure into one fixed sentence and
- * log nothing, so an operator reading the transcript afterwards could not tell
- * a quota rejection from a timeout, and no log held the answer either.
+ * Logs an unexpected delivery-adapter failure and returns its secret-safe
+ * summary for the model-visible RPC result.
  */
 function warnVoiceMemoFailure(operation: string, error: unknown): string | null {
   const failure = describeVaultCliFailure(error)
@@ -438,28 +383,6 @@ function warnVoiceMemoFailure(operation: string, error: unknown): string | null 
 
 function appendFailureDetail(rpcText: string, failure: string | null): string {
   return failure === null ? rpcText : `${rpcText}: ${failure}`
-}
-
-function resolveVoiceMemoDeliveryChannel(
-  channel: VoiceMemoDeliveryChannel | null | undefined,
-): VoiceMemoDeliveryChannel | null {
-  if (channel === 'linq' || channel === 'telegram') {
-    return channel
-  }
-  return null
-}
-
-function createStringFetchAdapter(fetchImpl: typeof fetch) {
-  return async (
-    input: string,
-    init: {
-      body?: string | Blob
-      headers?: Record<string, string>
-      method: string
-      redirect?: RequestRedirect
-      signal?: AbortSignal
-    },
-  ) => fetchImpl(input, init)
 }
 
 function isAbortError(error: unknown): boolean {

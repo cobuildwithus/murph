@@ -118,6 +118,8 @@ export class HostedUserRunner {
     ).runnerContainerNamespace ?? null,
     runtimeRetryAnalytics: WorkerAnalyticsEngineDatasetLike | null = null,
   ) {
+    // Keep this first. The schema floor must reject an older Worker before it
+    // can construct any service capable of waking a runner or reading a workspace.
     this.stateStore = new RunnerStateStore(state);
     this.privateMediaBucket = bucket;
     this.privateMediaCapabilitySecret =
@@ -551,6 +553,23 @@ export class HostedUserRunner {
     expiresAt: string;
   }): Promise<HostedWorkspaceSnapshotUploadSession | null> {
     return await this.workspaceSnapshotSessions.rememberPresignedPut(input);
+  }
+
+  async admitHostedBrowserVaultReplicaDirectPut(input: {
+    admittedAt: string;
+    attemptId: string;
+    leaseGeneration: string;
+    userId: string;
+    writeId: string;
+  }): Promise<boolean> {
+    return await this.workspaceSnapshotSessions.admitBrowserVaultReplicaDirectPut(input);
+  }
+
+  async releaseHostedBrowserVaultReplicaDirectPut(input: {
+    userId: string;
+    writeId: string;
+  }): Promise<void> {
+    await this.workspaceSnapshotSessions.releaseBrowserVaultReplicaDirectPut(input);
   }
 
   async recordHostedWorkspaceSnapshotOrphanCandidate(

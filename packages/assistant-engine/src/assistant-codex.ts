@@ -7,6 +7,9 @@ import path from 'node:path'
 import type {
   HostedCodexAuthAction,
 } from '@murphai/hosted-execution/contracts'
+import {
+  MURPH_MEMBER_WORKSPACE_PERMISSION_PROFILE,
+} from '@murphai/hosted-execution/assistant-permissions'
 import { normalizeNullableString } from '@murphai/operator-config/text/shared'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
@@ -18,6 +21,9 @@ import type {
   AssistantResponseMedia,
   AssistantSandbox,
 } from '@murphai/operator-config/assistant-cli-contracts'
+import type {
+  AssistantAcceptedTurnInputReferenceWindow,
+} from './assistant/active-turn-input-journal.js'
 import {
   renderAssistantResponseCardText,
   renderAssistantResponseCardTranscriptText,
@@ -101,6 +107,12 @@ import {
   type PendingCodexRpcRequest,
 } from './assistant-codex/app-server-rpc.js'
 import {
+  readCodexNonEmptyString,
+  readCodexRecord,
+  readCodexThreadTokenUsage,
+  type CodexTokenUsageBreakdown,
+} from './assistant-codex/app-server-protocol.js'
+import {
   resolveCodexChildEnv,
   withHostedCodexModelCatalogConfigOverride,
 } from './assistant-codex/config.js'
@@ -126,8 +138,10 @@ import {
   readCodexCollabReceiverThreadIds,
 } from './assistant/providers/helpers.js'
 import {
-  materializeCodexImagePaths,
+  materializeCodexImages,
+  normalizeCodexAppServerImageDetails,
   type CodexAppServerImageInput,
+  type CodexAppServerPreparedImageInput,
 } from './assistant-codex/images.js'
 import type {
   AssistantWorkspaceArtifactMaterializer,
@@ -152,6 +166,7 @@ import type {
   AssistantRuntimeIssueInput,
 } from './assistant/issue-reporting.js'
 import {
+  ASSISTANT_AUTHORED_RESPONSE_MEDIA_MAX_ITEMS,
   normalizeAssistantResponseMediaList,
 } from './assistant/response-media.js'
 import type {
@@ -273,8 +288,8 @@ type CodexAppServerPreparedTurnInput = CodexAppServerTurnInput & {
   codexCommand: string
   env: NodeJS.ProcessEnv
   fetchImpl: typeof fetch
-  imagePaths: readonly string[]
   launchKey: string
+  preparedImages: readonly CodexAppServerPreparedImageInput[]
   publicInternetFetch: typeof fetch | null
   tempRoot: string
   workingDirectory: string
@@ -317,21 +332,20 @@ function prepareCodexRpcParams(
   return stripped
 }
 
-// Modern app-server clients receive compaction lifecycle as contextCompaction
-// items; `thread/compacted` is the legacy fan-out kept for protocol drift
-// tolerance.
+// Codex emits contextCompaction item lifecycle notifications and also retains
+// the canonical deprecated thread/compacted notification. Both exact pinned
+// protocol shapes are accepted; no dotted or alternate envelope aliases are.
 function isCodexContextCompactionStarted(message: CodexRpcMessage): boolean {
-  const method = typeof message.method === 'string' ? message.method : null
-  if (method !== 'item/started' && method !== 'item.started') {
+  if (message.method !== 'item/started') {
     return false
   }
-
-  return asCodexRecord(asCodexRecord(message.params)?.item)?.type === 'contextCompaction'
+  return readCodexRecord(readCodexRecord(message.params)?.item)?.type
+    === 'contextCompaction'
 }
 
 function readCodexContextCompactionItemId(message: CodexRpcMessage): string | null {
-  return normalizeNullableString(
-    asCodexString(asCodexRecord(asCodexRecord(message.params)?.item)?.id),
+  return readCodexNonEmptyString(
+    readCodexRecord(readCodexRecord(message.params)?.item)?.id,
   )
 }
 
@@ -339,67 +353,54 @@ function isCodexContextCompactionStartedForThread(
   message: CodexRpcMessage,
   threadId: string,
 ): boolean {
-  if (!isCodexContextCompactionStarted(message)) {
-    return false
-  }
-
-  const messageThreadId = extractCodexThreadIdFromMessage(message)
-  return messageThreadId === null || messageThreadId === threadId
+  return isCodexContextCompactionStarted(message)
+    && extractCodexThreadIdFromMessage(message) === threadId
 }
 
 function isCodexLegacyContextCompactionCompletion(message: CodexRpcMessage): boolean {
-  const method = typeof message.method === 'string' ? message.method : null
-  return method === 'thread/compacted' || method === 'thread.compacted'
+  return message.method === 'thread/compacted'
 }
 
 function isCodexContextCompactionCompletion(message: CodexRpcMessage): boolean {
   if (isCodexLegacyContextCompactionCompletion(message)) {
     return true
   }
-  const method = typeof message.method === 'string' ? message.method : null
-  if (method !== 'item/completed' && method !== 'item.completed') {
+  if (message.method !== 'item/completed') {
     return false
   }
-
-  return asCodexRecord(asCodexRecord(message.params)?.item)?.type === 'contextCompaction'
+  return readCodexRecord(readCodexRecord(message.params)?.item)?.type
+    === 'contextCompaction'
 }
 
 function isCodexContextCompactionCompletionForThread(
   message: CodexRpcMessage,
   threadId: string,
 ): boolean {
-  if (!isCodexContextCompactionCompletion(message)) {
-    return false
-  }
-
-  const messageThreadId = extractCodexThreadIdFromMessage(message)
-  return messageThreadId === null || messageThreadId === threadId
+  return isCodexContextCompactionCompletion(message)
+    && extractCodexThreadIdFromMessage(message) === threadId
 }
 
 function isCodexThreadTokenUsageUpdatedMethod(method: string | null): boolean {
-  return (
-    method === 'thread/tokenUsage/updated' ||
-    method === 'thread/token_usage/updated' ||
-    method === 'thread.tokenUsage.updated' ||
-    method === 'thread.token.usage.updated' ||
-    method === 'thread.token_usage.updated'
-  )
+  return method === 'thread/tokenUsage/updated'
 }
 
 function readCodexThreadTokenUsageUpdate(message: CodexRpcMessage): {
-  last: Record<string, unknown> | null
-  threadId: string | null
+  last: CodexTokenUsageBreakdown
+  threadId: string
 } | null {
-  const method = typeof message.method === 'string' ? message.method : null
-  if (!isCodexThreadTokenUsageUpdatedMethod(method)) {
+  if (!isCodexThreadTokenUsageUpdatedMethod(readCodexEventMethod(message))) {
     return null
   }
 
-  const params = asCodexRecord(message.params)
-  return {
-    last: asCodexRecord(asCodexRecord(params?.tokenUsage)?.last),
-    threadId: typeof params?.threadId === 'string' ? params.threadId : null,
-  }
+  const params = readCodexRecord(message.params)
+  const threadId = readCodexNonEmptyString(params?.threadId)
+  const tokenUsage = readCodexThreadTokenUsage(params?.tokenUsage)
+  return threadId && tokenUsage
+    ? {
+        last: tokenUsage.last,
+        threadId,
+      }
+    : null
 }
 
 function buildCodexAppServerNotFoundError(codexCommand: string): VaultCliError {
@@ -465,6 +466,7 @@ async function waitForCodexProgressDrain(
 
 export interface CodexAppServerTurnInput {
   allowFinishWithoutReply?: boolean | null
+  automationRelativeDateReferenceWindow?: AssistantAcceptedTurnInputReferenceWindow | null
   authorizeAcceptedMessageTarget?: AssistantAcceptedMessageTargetAuthorizer | null
   abortSignal?: AbortSignal
   approvalPolicy?: string
@@ -642,6 +644,7 @@ export type CodexAppServerSteerInput = {
   threadId: string
   turnId: string
   prompt: string
+  relativeDateReferenceWindow?: AssistantAcceptedTurnInputReferenceWindow | null
   images?: readonly CodexAppServerImageInput[] | null
 }
 
@@ -649,7 +652,7 @@ export type CodexAppServerSteerRequestInput = Omit<
   CodexAppServerSteerInput,
   'images'
 > & {
-  imagePaths?: readonly string[] | null
+  images?: readonly CodexAppServerPreparedImageInput[] | null
 }
 
 export interface CodexAppServerSteerRequest {
@@ -674,13 +677,53 @@ export function buildCodexAppServerSteerRequest(
 }
 
 function appendRequiredVaultFileApprovalUrls(
-  message: string,
+  message: string | null,
   approvalUrls: readonly string[],
 ): string {
   return [
     normalizeNullableString(message),
     ...approvalUrls,
   ].filter((part): part is string => part !== null).join('\n\n')
+}
+
+interface RequiredAutomationLocalAtClarification {
+  code: 'local_at_fold' | 'local_at_gap'
+  resolvedLocalDate: string
+  targetKey: string
+  targetLabel: string
+}
+
+function buildRequiredAutomationLocalAtClarificationKey(input: {
+  resolvedLocalDate: string
+  targetKey: string
+}): string {
+  return `${input.targetKey}:${input.resolvedLocalDate}`
+}
+
+function buildRequiredAutomationLocalAtClarification(
+  requirement: RequiredAutomationLocalAtClarification,
+): string {
+  const reminder = `reminder ${JSON.stringify(requirement.targetLabel)}`
+  return requirement.code === 'local_at_gap'
+    ? `For ${reminder}, the trusted date is ${requirement.resolvedLocalDate}. What other local time on ${requirement.resolvedLocalDate} should I use?`
+    : `For ${reminder}, the trusted date is ${requirement.resolvedLocalDate}. Should I use the earlier or later occurrence on ${requirement.resolvedLocalDate}?`
+}
+
+function appendRequiredAutomationLocalAtClarification(
+  message: string | null,
+  requirements: readonly RequiredAutomationLocalAtClarification[],
+): string | null {
+  if (requirements.length === 0) {
+    return message
+  }
+  const normalizedMessage = normalizeNullableString(message)
+  const missingClarifications = requirements
+    .map(buildRequiredAutomationLocalAtClarification)
+    .filter((clarification) => !normalizedMessage?.includes(clarification))
+
+  return [normalizedMessage, ...missingClarifications]
+    .filter((part): part is string => part !== null)
+    .join('\n\n')
 }
 
 export async function executeCodexAppServerTurn(
@@ -700,8 +743,13 @@ export async function executeCodexAppServerTurn(
   }
   const processInput = await prepareCodexAppServerProcessInput(input)
   const tempRoot = await mkdtemp(path.join(tmpdir(), 'murph-codex-'))
-  const imagePaths = await materializeCodexImagePaths({
-    images: input.images,
+  const preparedImages = await materializeCodexImages({
+    images: normalizeCodexAppServerImageDetails({
+      images: input.images,
+      model: input.model,
+      modelProvider: input.modelProvider,
+      turnKind: 'initial',
+    }),
     tempRoot,
   })
   const normalizedInput = {
@@ -718,7 +766,7 @@ export async function executeCodexAppServerTurn(
     ...processInput,
     fetchImpl: input.fetchImpl ?? fetch,
     materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts ?? null,
-    imagePaths,
+    preparedImages,
     publicInternetFetch: input.publicInternetFetch ?? null,
     tempRoot,
     voiceMemoRuntime: input.voiceMemoRuntime ?? null,
@@ -774,16 +822,32 @@ function assertCodexAppServerPermissionRequest(
     return
   }
 
+  const residentWorkspacePermissionRequest =
+    permissions === MURPH_MEMBER_WORKSPACE_PERMISSION_PROFILE
   const invalidFields = [
     ...(input.sandbox ? ['sandbox'] : []),
-    ...(normalizeNullableString(input.resumeSessionId) ? ['resumeSessionId'] : []),
-    ...(input.ephemeral === true ? [] : ['ephemeral']),
-    ...(input.processLifetime === 'one-shot' ? [] : ['processLifetime']),
+    ...(
+      residentWorkspacePermissionRequest || !normalizeNullableString(input.resumeSessionId)
+        ? []
+        : ['resumeSessionId']
+    ),
+    ...(
+      residentWorkspacePermissionRequest || input.ephemeral === true
+        ? []
+        : ['ephemeral']
+    ),
+    ...(
+      residentWorkspacePermissionRequest || input.processLifetime === 'one-shot'
+        ? []
+        : ['processLifetime']
+    ),
   ]
   if (invalidFields.length > 0) {
     throw new VaultCliError(
       'ASSISTANT_CODEX_APP_SERVER_REQUEST_INVALID',
-      'Named Codex permissions require a fresh ephemeral thread in a one-shot process without a legacy sandbox.',
+      residentWorkspacePermissionRequest
+        ? 'Named Codex permissions cannot be combined with a legacy sandbox.'
+        : 'Restricted named Codex permissions require a fresh ephemeral thread in a one-shot process without a legacy sandbox.',
       {
         invalidFields,
         retryable: false,
@@ -1847,7 +1911,7 @@ function readCodexSubagentActivity(message: CodexRpcMessage): {
   kind: 'interacted' | 'interrupted' | 'malformed' | 'started'
 } | null {
   const method = typeof message.method === 'string' ? message.method : null
-  if (method !== 'item/completed' && method !== 'item.completed') {
+  if (method !== 'item/completed') {
     return null
   }
   const item = asCodexRecord(asCodexRecord(message.params)?.item)
@@ -2550,7 +2614,7 @@ export interface CodexWarmThreadCompactionUsage {
   cachedInputTokens: number | null
   inputTokens: number
   outputTokens: number | null
-  source: 'estimated' | 'provider'
+  source: 'estimated'
   totalTokens: number
 }
 
@@ -2570,87 +2634,6 @@ function estimateCodexWarmThreadCompactionUsage(
     source: 'estimated',
     totalTokens: threadContextTokensBefore,
   }
-}
-
-function readCodexCompactionCompletionProviderUsage(
-  message: CodexRpcMessage,
-  threadId: string,
-): CodexWarmThreadCompactionUsage | null {
-  if (!isCodexContextCompactionCompletionForThread(message, threadId)) {
-    return null
-  }
-
-  const params = asCodexRecord(message.params)
-  const item = asCodexRecord(params?.item)
-  const candidates = [
-    ...readCodexProviderUsageCandidates(params),
-    ...readCodexProviderUsageCandidates(item),
-  ]
-
-  for (const candidate of candidates) {
-    const usage = readCodexCompactionProviderUsage(candidate)
-    if (usage) {
-      return usage
-    }
-  }
-
-  return null
-}
-
-function readCodexProviderUsageCandidates(
-  value: Record<string, unknown> | null,
-): readonly (Record<string, unknown> | null)[] {
-  if (!value) {
-    return []
-  }
-  const providerUsage = asCodexRecord(value.providerUsage)
-    ?? asCodexRecord(value.provider_usage)
-  return [providerUsage, asCodexRecord(providerUsage?.last)]
-}
-
-function readCodexCompactionProviderUsage(
-  value: Record<string, unknown> | null,
-): CodexWarmThreadCompactionUsage | null {
-  if (!value) {
-    return null
-  }
-
-  const inputTokens = readCodexUsageNumber(value, 'inputTokens', 'input_tokens')
-  const outputTokens = readCodexUsageNumber(value, 'outputTokens', 'output_tokens')
-  const totalTokens = readCodexUsageNumber(value, 'totalTokens', 'total_tokens')
-  if (inputTokens === null || outputTokens === null || totalTokens === null) {
-    return null
-  }
-  if (inputTokens <= 0 || outputTokens < 0 || totalTokens < inputTokens + outputTokens) {
-    return null
-  }
-  const cachedInputTokens = readCodexUsageNumber(
-    value,
-    'cachedInputTokens',
-    'cached_input_tokens',
-  )
-  if (cachedInputTokens !== null && cachedInputTokens > inputTokens) {
-    return null
-  }
-
-  return {
-    cachedInputTokens,
-    inputTokens,
-    outputTokens,
-    source: 'provider',
-    totalTokens,
-  }
-}
-
-function readCodexUsageNumber(
-  value: Record<string, unknown>,
-  camelKey: string,
-  snakeKey: string,
-): number | null {
-  const raw = value[camelKey] ?? value[snakeKey]
-  return typeof raw === 'number' && Number.isSafeInteger(raw) && raw >= 0
-    ? raw
-    : null
 }
 
 export type CodexWarmThreadCompactionOutcome =
@@ -2753,7 +2736,6 @@ export async function compactWarmCodexThread(input: {
   let compactRequestAccepted = false
   let compactStartedItemId: string | null = null
   let compactCompletionBuffered = false
-  let providerUsage: CodexWarmThreadCompactionUsage | null = null
   type CompactionSettleReason = 'aborted' | 'compacted' | 'process_exit' | 'rpc_error' | 'timeout'
   let compactionSettleReason: CompactionSettleReason | null = null
   let resolveCompaction!: (reason: CompactionSettleReason) => void
@@ -2835,8 +2817,6 @@ export async function compactWarmCodexThread(input: {
         if (!compactRequestAccepted) {
           return
         }
-        providerUsage = readCodexCompactionCompletionProviderUsage(message, vitals.threadId)
-          ?? providerUsage
         settleCompaction('compacted')
         return
       }
@@ -2849,8 +2829,6 @@ export async function compactWarmCodexThread(input: {
         if (compactStartedItemId === null || itemId !== compactStartedItemId) {
           return
         }
-        providerUsage = readCodexCompactionCompletionProviderUsage(message, vitals.threadId)
-          ?? providerUsage
         if (compactRequestAccepted) {
           settleCompaction('compacted')
         } else {
@@ -2903,8 +2881,7 @@ export async function compactWarmCodexThread(input: {
         threadContextTokensBefore: vitals.lastInputTokens,
         threadId: vitals.threadId,
         serviceTier: vitals.serviceTier,
-        usage: providerUsage
-          ?? estimateCodexWarmThreadCompactionUsage(vitals.lastInputTokens),
+        usage: estimateCodexWarmThreadCompactionUsage(vitals.lastInputTokens),
       }
     }
 
@@ -2940,17 +2917,11 @@ function hashCodexRawString(value: string): string {
 }
 
 function readCodexEventMethod(message: CodexRpcMessage): string | null {
-  return typeof message.method === 'string'
-    ? message.method
-    : typeof message.type === 'string'
-      ? message.type
-      : typeof message.event === 'string'
-        ? message.event
-        : null
+  return typeof message.method === 'string' ? message.method : null
 }
 
 function isCodexTurnStartedMethod(method: string | null): boolean {
-  return method === 'turn/started' || method === 'turn.started'
+  return method === 'turn/started'
 }
 
 function createCodexSubagentTurnUsageKey(input: {
@@ -2961,7 +2932,7 @@ function createCodexSubagentTurnUsageKey(input: {
 }
 
 function isCodexTurnCompletedMethod(method: string | null): boolean {
-  return method === 'turn/completed' || method === 'turn.completed'
+  return method === 'turn/completed'
 }
 
 type CodexTransportDiagnosticSource = {
@@ -3206,6 +3177,19 @@ async function runCodexAppServerTurnOnProcess(
   // Trusted turn-scoped murph.ask_grok provider-call ceiling: one counter per
   // assistant turn, owned here and threaded into the dynamic-tool executor.
   const askGrokTurnState = createAskGrokTurnState()
+  const groupSharedReadTurnState = {
+    currentSenderDecisionByMessageRef: new Map(),
+    invalid: false,
+    readProjectionScopeKeyBatches: [],
+    roster: null,
+  }
+  const automationRelativeDateReferenceWindows: Array<
+    AssistantAcceptedTurnInputReferenceWindow | null
+  > = [
+    input.automationRelativeDateReferenceWindow
+      ? { ...input.automationRelativeDateReferenceWindow }
+      : null,
+  ]
   const generateSongTurnState = input.generateSongPolicy
     ? {
         attemptCount: 0,
@@ -3226,6 +3210,8 @@ async function runCodexAppServerTurnOnProcess(
   const runtimeIssueInputs: AssistantRuntimeIssueInput[] = []
   let computerToolsLockedAfterUserPause = false
   const requiredVaultFileApprovalUrls: string[] = []
+  const requiredAutomationLocalAtClarifications =
+    new Map<string, RequiredAutomationLocalAtClarification>()
   const actionDiagnostics = input.onTraceEvent
     ? createCodexActionDiagnosticsReducer()
     : null
@@ -3243,7 +3229,9 @@ async function runCodexAppServerTurnOnProcess(
   let codexTimingTurnStartAckElapsedMs: number | null = null
   let codexTimingTurnStartedNotificationElapsedMs: number | null = null
   let codexTimingTurnCompletedNotificationElapsedMs: number | null = null
+  let currentTurnStartedNotificationObserved = false
   let liveInterruptRequested = false
+  let terminalNoReplyInterruptRequested = false
 
   let completeTurn: (() => void) | null = null
   let failTurn: ((error: unknown) => void) | null = null
@@ -3332,7 +3320,9 @@ async function runCodexAppServerTurnOnProcess(
     )].sort((left, right) => left - right)
 
   const hasRequiredUserVisibleOutput = (): boolean =>
-    computerToolsLockedAfterUserPause || requiredVaultFileApprovalUrls.length > 0
+    computerToolsLockedAfterUserPause ||
+    requiredAutomationLocalAtClarifications.size > 0 ||
+    requiredVaultFileApprovalUrls.length > 0
 
   const settleNoReplyFinalActions = async (): Promise<void> => {
     if (hasRequiredUserVisibleOutput() || noReplySettlementStarted) {
@@ -3914,6 +3904,12 @@ async function runCodexAppServerTurnOnProcess(
     const nextMedia = patch.op === 'replace'
       ? patch.media
       : normalizeAssistantResponseMediaList([...responseMedia, ...patch.media])
+    if (nextMedia.length > ASSISTANT_AUTHORED_RESPONSE_MEDIA_MAX_ITEMS) {
+      throw new VaultCliError(
+        'ASSISTANT_RESPONSE_MEDIA_LIMIT_EXCEEDED',
+        `Assistant responses may attach at most ${ASSISTANT_AUTHORED_RESPONSE_MEDIA_MAX_ITEMS} media items.`,
+      )
+    }
     if (responseCard !== null && nextMedia.length > 0) {
       throw new VaultCliError(
         'ASSISTANT_RESPONSE_CARD_MEDIA_CONFLICT',
@@ -4071,6 +4067,25 @@ async function runCodexAppServerTurnOnProcess(
     return true
   }
 
+  const applyTerminalExternalEffectNoReplyPatch = (
+    patch: Extract<MurphDynamicToolFinalActionPatch, { kind: 'none' }>,
+    deliveryContextOrdinal: number,
+  ): void => {
+    // A host-authorized external effect has crossed its delivery boundary.
+    // Its terminal disposition is not a model-requested finish_without_reply
+    // and must not depend on trace callback visibility.
+    finalActionPatches = [
+      ...finalActionPatches.filter(
+        (action) => action.deliveryContextOrdinal !== deliveryContextOrdinal,
+      ),
+      { deliveryContextOrdinal, patch },
+    ]
+    replyTargetPatches = replyTargetPatches.filter(
+      (entry) => entry.deliveryContextOrdinal !== deliveryContextOrdinal,
+    )
+    reservedNoReplyDeliveryContextOrdinals.delete(deliveryContextOrdinal)
+  }
+
   const resolveFinalActionPatch = (
     deliveryContextOrdinal: number,
   ): MurphDynamicToolFinalActionPatch | null =>
@@ -4150,12 +4165,18 @@ async function runCodexAppServerTurnOnProcess(
       return
     }
     const {
+      claimCurrentSenderTurnDecision,
       executeMurphDynamicToolRequest,
       isComputerDynamicToolRequest,
       readMurphDynamicToolRequest,
     } = dynamicToolRuntime
 
-    const dynamicToolRequest = readMurphDynamicToolRequest(message)
+    const dynamicToolRequest = readMurphDynamicToolRequest(message, {
+      automationRelativeDateReferenceWindow:
+        automationRelativeDateReferenceWindows[
+          dynamicToolRequestDeliveryContextOrdinal
+        ] ?? null,
+    })
     if (!dynamicToolRequest) {
       denyUnsupportedCodexServerRequest({
         message,
@@ -4223,6 +4244,29 @@ async function runCodexAppServerTurnOnProcess(
         request: dynamicToolRequest,
         reason: 'invalid_arguments',
       }))
+    }
+
+    const currentSenderDecisionClaim = claimCurrentSenderTurnDecision({
+      request: dynamicToolRequest,
+      turnState: groupSharedReadTurnState,
+    })
+    if (
+      currentSenderDecisionClaim === 'conflict'
+      || currentSenderDecisionClaim === 'unavailable'
+    ) {
+      void tryWriteRpcMessage({
+        id: requestId,
+        result: {
+          success: false,
+          contentItems: [{
+            type: 'inputText',
+            text: currentSenderDecisionClaim === 'conflict'
+              ? 'current-sender request conflicts with an earlier decision for this Message'
+              : 'current-sender decision authority is unavailable for this turn',
+          }],
+        },
+      })
+      return
     }
 
     if (
@@ -4384,6 +4428,7 @@ async function runCodexAppServerTurnOnProcess(
       closeLiveTurn()
     }
 
+    let dynamicToolRequestSettled = false
     const runDynamicTool = () => withHostedCanonicalWritePort(
       hostedCanonicalWritePort,
       async () => {
@@ -4421,6 +4466,83 @@ async function runCodexAppServerTurnOnProcess(
         await hostedToolContext?.beforeToolExecution?.(
           dynamicToolRequestDeliveryContextOrdinal,
         )
+        let requestedLocalAtRecovery: {
+          recoveryKey: string
+          resolvedLocalDate: string
+        } | null = null
+        if (
+          (dynamicToolRequest.kind === 'automation' ||
+            dynamicToolRequest.kind === 'invalid-automation-arguments') &&
+          dynamicToolRequest.localAtRecovery
+        ) {
+          requestedLocalAtRecovery = dynamicToolRequest.localAtRecovery
+        } else if (
+          dynamicToolRequest.kind ===
+          'automation-local-at-recovery-dismissal'
+        ) {
+          requestedLocalAtRecovery = {
+            recoveryKey: dynamicToolRequest.recoveryKey,
+            resolvedLocalDate: dynamicToolRequest.resolvedLocalDate,
+          }
+        }
+        if (requestedLocalAtRecovery) {
+          const clarificationKey =
+            buildRequiredAutomationLocalAtClarificationKey({
+              resolvedLocalDate:
+                requestedLocalAtRecovery.resolvedLocalDate,
+              targetKey: requestedLocalAtRecovery.recoveryKey,
+            })
+          if (!requiredAutomationLocalAtClarifications.has(clarificationKey)) {
+            return {
+              rpcResult: {
+                contentItems: [{
+                  text:
+                    'local-time recovery key or trusted date is not pending in this active root turn',
+                  type: 'inputText' as const,
+                }],
+                success: false,
+              },
+            }
+          }
+          if (
+            dynamicToolRequest.kind ===
+              'automation-local-at-recovery-dismissal'
+          ) {
+            requiredAutomationLocalAtClarifications.delete(clarificationKey)
+            return {
+              rpcResult: {
+                contentItems: [{
+                  text:
+                    'local-time reminder recovery dismissed; no automation was changed',
+                  type: 'inputText' as const,
+                }],
+                success: true,
+              },
+            }
+          }
+        }
+        if (
+          dynamicToolRequest.kind === 'invalid-automation-arguments' &&
+          (
+            dynamicToolRequest.safeFailureCode === 'local_at_gap' ||
+            dynamicToolRequest.safeFailureCode === 'local_at_fold'
+          ) &&
+          dynamicToolRequest.resolvedLocalDate &&
+          dynamicToolRequest.localAtTargetKey &&
+          dynamicToolRequest.localAtTargetLabel &&
+          !dynamicToolRequest.localAtRecovery
+        ) {
+          const requirement = {
+            code: dynamicToolRequest.safeFailureCode,
+            resolvedLocalDate: dynamicToolRequest.resolvedLocalDate,
+            targetKey: dynamicToolRequest.localAtTargetKey,
+            targetLabel: dynamicToolRequest.localAtTargetLabel,
+          }
+          requiredAutomationLocalAtClarifications.set(
+            buildRequiredAutomationLocalAtClarificationKey(requirement),
+            requirement,
+          )
+        }
         const result = await executeMurphDynamicToolRequest({
           authorizeAcceptedMessageTarget:
             input.authorizeAcceptedMessageTarget ?? null,
@@ -4447,6 +4569,13 @@ async function runCodexAppServerTurnOnProcess(
           materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts ?? null,
           currentResponseMedia: responseMedia,
           currentResponseCard: responseCard,
+          groupChallengeResponseCardAllowed:
+            input.groupConversation === true &&
+            input.dynamicTools.some((tool) =>
+              tool.namespace === 'murph' &&
+              tool.name === 'attach_response_card'
+            ),
+          groupSharedReadTurnState,
           privateDirectResponseCardAllowed: input.groupConversation === false,
           deliveryContextOrdinal: dynamicToolRequestDeliveryContextOrdinal,
           nextUsageOrdinal: () => nextDynamicToolUsageOrdinal++,
@@ -4456,7 +4585,9 @@ async function runCodexAppServerTurnOnProcess(
           progressDelivery:
             dynamicToolRequest.kind === 'send-progress-update'
               ? dynamicToolProgressDelivery
-              : null,
+              : dynamicToolRequest.kind === 'group'
+                ? resolveCodexAppServerProgressDelivery(input)
+                : null,
           publicFetchImpl: input.publicInternetFetch ?? null,
           request: dynamicToolRequest,
           requireHostedPrivateImageDelivery:
@@ -4491,6 +4622,37 @@ async function runCodexAppServerTurnOnProcess(
         !requiredVaultFileApprovalUrls.includes(result.requiredVaultFileApprovalUrl)
       ) {
         requiredVaultFileApprovalUrls.push(result.requiredVaultFileApprovalUrl)
+      }
+      if (
+        result.finalActionPatch?.kind === 'none' &&
+        (
+          result.finalActionPatch.owner === 'group-email'
+          || result.finalActionPatch.owner === 'current-sender-ask'
+        )
+      ) {
+        if (result.externallyVisibleOutput) {
+          markExternallyVisibleAssistantOutput(
+            dynamicToolRequestDeliveryContextOrdinal,
+          )
+        }
+        applyTerminalExternalEffectNoReplyPatch(
+          result.finalActionPatch,
+          dynamicToolRequestDeliveryContextOrdinal,
+        )
+        // Interrupt while the app-server is still waiting on this dynamic
+        // tool request. Returning the tool result first lets Codex start a
+        // follow-up provider request before the interrupt is processed, and
+        // an interrupt racing that continuation can leave the turn open.
+        // TurnAborted resolves the pending server request structurally, so a
+        // terminal external effect must not also write a tool response.
+        dynamicToolRequestSettled = true
+        await interruptLiveTurnForTerminalNoReply()
+        return
+      }
+      if (result.externallyVisibleOutput) {
+        markExternallyVisibleAssistantOutput(
+          dynamicToolRequestDeliveryContextOrdinal,
+        )
       }
       if (result.responseCardPatch) {
         try {
@@ -4591,13 +4753,35 @@ async function runCodexAppServerTurnOnProcess(
           dynamicToolDeliveryContextOrdinal ?? 0,
         )
       }
-      void tryWriteRpcMessage({
+      if (
+        dynamicToolRequest.kind === 'automation' &&
+        result.rpcResult.success &&
+        dynamicToolRequest.localAtRecovery
+      ) {
+        const recoveryKey = buildRequiredAutomationLocalAtClarificationKey({
+          resolvedLocalDate:
+            dynamicToolRequest.localAtRecovery.resolvedLocalDate,
+          targetKey: dynamicToolRequest.localAtRecovery.recoveryKey,
+        })
+        if (requiredAutomationLocalAtClarifications.has(recoveryKey)) {
+          requiredAutomationLocalAtClarifications.delete(recoveryKey)
+        }
+      }
+      const writeFailure = tryWriteRpcMessage({
         id: requestId,
         result: result.rpcResult,
       })
+      if (writeFailure) {
+        return
+      }
+      dynamicToolRequestSettled = true
     }).catch((error: unknown) => {
       if (dynamicToolRequest.kind === 'send-progress-update') {
         releaseDynamicProgressPending?.()
+      }
+      if (dynamicToolRequestSettled) {
+        rejectOnce(error)
+        return
       }
       pushRuntimeIssueInput(createDynamicToolRuntimeIssueInput({
         request: dynamicToolRequest,
@@ -4642,6 +4826,10 @@ async function runCodexAppServerTurnOnProcess(
     const providerRequestStartedAtMs = codexProviderRequestStartedAtMs
     const isTurnStartedNotification = isCodexTurnStartedMethod(method)
     const isTurnCompletedNotification = isCodexTurnCompletedMethod(method)
+    if (isTurnStartedNotification) {
+      currentTurnStartedNotificationObserved =
+        turnId !== null && extractCodexTurnIdFromMessage(message) === turnId
+    }
     const shouldCaptureTurnStartedNotification =
       providerRequestStartedAtMs !== null &&
       isTurnStartedNotification &&
@@ -4745,7 +4933,7 @@ async function runCodexAppServerTurnOnProcess(
 
     if (
       normalizedEvent.kind !== 'status_item' ||
-      normalizedEvent.itemType !== 'context.compaction'
+      normalizedEvent.itemType !== 'contextCompaction'
     ) {
       input.onTraceEvent?.({
         codexThreadId,
@@ -4842,6 +5030,14 @@ async function runCodexAppServerTurnOnProcess(
     }
 
     const status = extractCodexTurnStatus(message)
+    if (
+      status === 'interrupted' &&
+      terminalNoReplyInterruptRequested
+    ) {
+      turnTerminal = true
+      completeTurn?.()
+      return
+    }
     if (isFailedCodexTurnStatus(status)) {
       turnTerminal = true
       failTurn?.(
@@ -5077,7 +5273,19 @@ async function runCodexAppServerTurnOnProcess(
       return
     }
 
-    if (isReusedWarmProcess && messageTurnId === null) {
+    if (
+      messageTurnId === null &&
+      method === 'model/rerouted' &&
+      !currentTurnStartedNotificationObserved
+    ) {
+      return
+    }
+
+    if (
+      isReusedWarmProcess &&
+      messageTurnId === null &&
+      method !== 'model/rerouted'
+    ) {
       return
     }
 
@@ -5137,22 +5345,44 @@ async function runCodexAppServerTurnOnProcess(
     steerInput: Omit<CodexAppServerSteerInput, 'threadId' | 'turnId'>,
   ): Promise<void> => {
     const liveTurn = requireLiveTurnIds()
-    const steerImagePaths = await materializeCodexImagePaths({
-      images: steerInput.images,
+    const preparedSteerImages = await materializeCodexImages({
+      images: normalizeCodexAppServerImageDetails({
+        images: steerInput.images,
+        model: input.model,
+        modelProvider: input.modelProvider,
+        turnKind: 'steer',
+      }),
       tempRoot: input.tempRoot,
     })
-    await withCodexRpcTimeout(
-      sendRequest(
-        'turn/steer',
-        buildCodexTurnSteerParams({
-          ...liveTurn,
-          imagePaths: steerImagePaths,
-          prompt: steerInput.prompt,
-        }),
+    const deliveryContextOrdinal = automationRelativeDateReferenceWindows.length
+    automationRelativeDateReferenceWindows.push(
+      mergeAutomationRelativeDateReferenceWindows(
+        automationRelativeDateReferenceWindows.at(-1) ?? null,
+        steerInput.relativeDateReferenceWindow ?? null,
       ),
-      CODEX_RPC_STEER_TIMEOUT_MS,
-      'turn/steer',
     )
+    try {
+      await withCodexRpcTimeout(
+        sendRequest(
+          'turn/steer',
+          buildCodexTurnSteerParams({
+            ...liveTurn,
+            images: preparedSteerImages,
+            prompt: steerInput.prompt,
+          }),
+        ),
+        CODEX_RPC_STEER_TIMEOUT_MS,
+        'turn/steer',
+      )
+    } catch (error) {
+      if (
+        automationRelativeDateReferenceWindows.length ===
+          deliveryContextOrdinal + 1
+      ) {
+        automationRelativeDateReferenceWindows.pop()
+      }
+      throw error
+    }
   }
 
   const interruptLiveTurn = async (): Promise<void> => {
@@ -5161,6 +5391,22 @@ async function runCodexAppServerTurnOnProcess(
     scheduleInterruptCleanupTimeout()
     await withCodexRpcTimeout(
       sendRequest('turn/interrupt', buildCodexTurnInterruptParams(liveTurn)),
+      CODEX_RPC_STEER_TIMEOUT_MS,
+      'turn/interrupt',
+    )
+  }
+
+  const interruptLiveTurnForTerminalNoReply = async (): Promise<void> => {
+    if (!codexThreadId || !turnId || turnTerminal) {
+      throw buildLiveTurnInactiveError()
+    }
+    terminalNoReplyInterruptRequested = true
+    scheduleInterruptCleanupTimeout()
+    await withCodexRpcTimeout(
+      sendRequest('turn/interrupt', buildCodexTurnInterruptParams({
+        threadId: codexThreadId,
+        turnId,
+      })),
       CODEX_RPC_STEER_TIMEOUT_MS,
       'turn/interrupt',
     )
@@ -5316,7 +5562,7 @@ async function runCodexAppServerTurnOnProcess(
       'turn/start',
       buildCodexTurnStartParams({
         input,
-        imagePaths: input.imagePaths,
+        images: input.preparedImages,
         codexThreadId,
       }),
     )
@@ -5335,7 +5581,6 @@ async function runCodexAppServerTurnOnProcess(
     acceptTurnStartResultTurnId(extractCodexTurnIdFromResult(turnResult))
     lifecycleStage = 'turn_started'
     emitAppServerTimingTrace('turn-started')
-    registerLiveTurn()
 
     lifecycleStage = 'turn_running'
     await turnCompleted
@@ -5501,9 +5746,27 @@ async function runCodexAppServerTurnOnProcess(
   const semanticFinalMessage = finalResponseCard
     ? renderAssistantResponseCardText(finalResponseCard)
     : modelFinalMessage
+  const requiredAutomationLocalAtClarificationsInOrder =
+    [...requiredAutomationLocalAtClarifications.values()]
+  const deliveredFinalResponseCard =
+    requiredAutomationLocalAtClarificationsInOrder.length === 0
+      ? finalResponseCard
+      : null
   const finalMessage = appendRequiredVaultFileApprovalUrls(
-    semanticFinalMessage,
+    appendRequiredAutomationLocalAtClarification(
+      semanticFinalMessage,
+      requiredAutomationLocalAtClarificationsInOrder,
+    ),
     requiredVaultFileApprovalUrls,
+  )
+  const transcriptMessage = appendRequiredAutomationLocalAtClarification(
+    finalResponseCard
+      ? requiredAutomationLocalAtClarificationsInOrder.length === 0
+        ? renderAssistantResponseCardTranscriptText(finalResponseCard)
+        : renderAssistantResponseCardText(finalResponseCard)
+      : normalizeNullableString(modelFinalMessage) ??
+        (finalResponseMedia.length > 0 ? '' : null),
+    requiredAutomationLocalAtClarificationsInOrder,
   )
   if (
     noReplySelected &&
@@ -5522,7 +5785,8 @@ async function runCodexAppServerTurnOnProcess(
     ))
   const finalHasDeliverableOutput =
     normalizeNullableString(finalMessage) !== null ||
-    (!noReplySelected && (finalResponseMedia.length > 0 || finalResponseCard !== null))
+    (!noReplySelected &&
+      (finalResponseMedia.length > 0 || deliveredFinalResponseCard !== null))
 
   return {
     acceptedNoReplyDeliveryContextOrdinals:
@@ -5532,11 +5796,7 @@ async function runCodexAppServerTurnOnProcess(
       finalActionPatch?.kind === 'none' && !requiredUserVisibleOutput,
     finalMessage,
     providerAuthoredFinalMessage: modelFinalMessage,
-    transcriptMessage:
-      finalResponseCard
-        ? renderAssistantResponseCardTranscriptText(finalResponseCard)
-        : normalizeNullableString(modelFinalMessage) ??
-          (finalResponseMedia.length > 0 ? '' : null),
+    transcriptMessage,
     reactions: reactionPatches.map((entry) => ({
       deliveryContextOrdinal: entry.deliveryContextOrdinal,
       reaction: entry.patch.reaction,
@@ -5558,7 +5818,7 @@ async function runCodexAppServerTurnOnProcess(
       resolveReplyTargetPatch(finalDeliveryContextOrdinal)?.targetInputId ?? null,
     additionalUsages: [...additionalUsages, ...buildSubagentUsageDrafts()],
     responseMedia: finalHasDeliverableOutput ? [...finalResponseMedia] : [],
-    responseCard: finalHasDeliverableOutput ? finalResponseCard : null,
+    responseCard: finalHasDeliverableOutput ? deliveredFinalResponseCard : null,
     jsonEvents,
     providerActionCount,
     runtimeIssueInputs,
@@ -5568,6 +5828,34 @@ async function runCodexAppServerTurnOnProcess(
     stdout: stdout.trim(),
     threadId: codexThreadId,
     turnId,
+  }
+}
+
+function mergeAutomationRelativeDateReferenceWindows(
+  preceding: AssistantAcceptedTurnInputReferenceWindow | null,
+  current: AssistantAcceptedTurnInputReferenceWindow | null,
+): AssistantAcceptedTurnInputReferenceWindow | null {
+  if (current === null) {
+    return null
+  }
+  if (preceding === null) {
+    return { ...current }
+  }
+
+  const earliestAtMs = Math.min(
+    Date.parse(preceding.earliestAt),
+    Date.parse(current.earliestAt),
+  )
+  const latestAtMs = Math.max(
+    Date.parse(preceding.latestAt),
+    Date.parse(current.latestAt),
+  )
+  if (!Number.isFinite(earliestAtMs) || !Number.isFinite(latestAtMs)) {
+    return null
+  }
+  return {
+    earliestAt: new Date(earliestAtMs).toISOString(),
+    latestAt: new Date(latestAtMs).toISOString(),
   }
 }
 
@@ -5602,7 +5890,10 @@ function assertCodexThreadStartPermissionAttestation(input: {
   if (!actualCwd || path.resolve(actualCwd) !== input.input.workingDirectory) {
     mismatchedFields.push('cwd')
   }
-  if (instructionSources === null || instructionSources.length !== 0) {
+  if (
+    input.input.processLifetime === 'one-shot' &&
+    (instructionSources === null || instructionSources.length !== 0)
+  ) {
     mismatchedFields.push('instructionSources')
   }
   if (
@@ -5617,7 +5908,7 @@ function assertCodexThreadStartPermissionAttestation(input: {
 
   throw new VaultCliError(
     'ASSISTANT_CODEX_APP_SERVER_PERMISSION_ATTESTATION_FAILED',
-    'Codex app-server did not attest the requested read-only execution context.',
+    'Codex app-server did not attest the requested named-permission execution context.',
     {
       mismatchedFields,
       retryable: false,
@@ -5716,10 +6007,13 @@ function isSerializedDynamicToolRequest(
   request: MurphDynamicToolRequest,
 ): boolean {
   return request.kind === 'automation' ||
+    request.kind === 'automation-local-at-recovery-dismissal' ||
+    request.kind === 'invalid-automation-arguments' ||
     request.kind === 'device' ||
     request.kind === 'generate-image' ||
     request.kind === 'generate-voice-memo' ||
     request.kind === 'generate-song' ||
+    request.kind === 'attach-group-challenge-response-card' ||
     request.kind === 'attach-response-card' ||
     request.kind === 'attach-response-media' ||
     request.kind === 'send-vault-file' ||
@@ -5729,6 +6023,9 @@ function isSerializedDynamicToolRequest(
     request.kind === 'assistant-style' ||
     request.kind === 'personalization' ||
     request.kind === 'subscription' ||
+    (request.kind === 'group' &&
+      request.request.action === 'ask_current_sender' &&
+      request.request.mode !== 'new') ||
     request.kind === 'react-to-message' ||
     request.kind === 'select-reply-target' ||
     request.kind === 'computer-open' ||
@@ -5742,7 +6039,8 @@ function isSerializedDynamicToolRequest(
 function isResponseAttachmentDynamicToolRequest(
   request: MurphDynamicToolRequest,
 ): boolean {
-  return request.kind === 'attach-response-card' ||
+  return request.kind === 'attach-group-challenge-response-card' ||
+    request.kind === 'attach-response-card' ||
     request.kind === 'attach-response-media' ||
     request.kind === 'generate-image' ||
     request.kind === 'generate-song' ||
@@ -5754,6 +6052,7 @@ function isInvocationScopedRootToolRequest(
   request: MurphDynamicToolRequest,
 ): boolean {
   return request.kind === 'automation' ||
+    request.kind === 'automation-local-at-recovery-dismissal' ||
     request.kind === 'invalid-automation-arguments' ||
     request.kind === 'device' ||
     request.kind === 'invalid-device-arguments' ||
@@ -5865,6 +6164,7 @@ function assertCodexResumeContextMatches(input: {
 }): void {
   const result = asCodexRecord(input.threadResult)
   const actualCwd = normalizeNullableString(asCodexString(result?.cwd))
+  const expectedPermissions = normalizeNullableString(input.input.permissions)
   const checks: [field: string, expected: string | null, actual: string | null][] = [
     [
       'threadId',
@@ -5884,7 +6184,9 @@ function assertCodexResumeContextMatches(input: {
     ],
     [
       'sandbox',
-      mapCodexAppServerSandboxMode(input.input.sandbox) ?? null,
+      expectedPermissions
+        ? null
+        : mapCodexAppServerSandboxMode(input.input.sandbox) ?? null,
       readCodexResumeSandboxMode(result?.sandbox),
     ],
   ]
@@ -5892,6 +6194,28 @@ function assertCodexResumeContextMatches(input: {
   const mismatchedFields = checks
     .filter(([, expected, actual]) => expected !== null && actual !== expected)
     .map(([field]) => field)
+  if (expectedPermissions) {
+    const activePermissionProfile = asCodexRecord(result?.activePermissionProfile)
+    const actualRoots = asCodexStringArray(result?.runtimeWorkspaceRoots)
+    const expectedRoots = input.input.runtimeWorkspaceRoots ?? []
+    if (
+      normalizeNullableString(asCodexString(activePermissionProfile?.id)) !==
+        expectedPermissions ||
+      normalizeNullableString(asCodexString(activePermissionProfile?.extends)) !== null
+    ) {
+      mismatchedFields.push('activePermissionProfile')
+    }
+    if (
+      !actualRoots ||
+      actualRoots.length !== expectedRoots.length ||
+      actualRoots.some(
+        (root, index) =>
+          path.resolve(root) !== path.resolve(expectedRoots[index] ?? ''),
+      )
+    ) {
+      mismatchedFields.push('runtimeWorkspaceRoots')
+    }
+  }
   if (mismatchedFields.length === 0) {
     return
   }
@@ -5982,21 +6306,17 @@ function extractCodexProviderActionKey(
   normalizedEvent: CodexNormalizedEvent,
   rawEvent: CodexRpcMessage,
 ): string | null {
+  if (isCodexProductFeedbackDynamicToolEvent(rawEvent)) {
+    return null
+  }
   if (normalizedEvent.kind === 'status_item') {
     if (
-      normalizedEvent.itemType !== 'command.execution' &&
-      normalizedEvent.itemType !== 'dynamic.tool.call' &&
-      normalizedEvent.itemType !== 'file.change'
+      normalizedEvent.itemType !== 'commandExecution' &&
+      normalizedEvent.itemType !== 'dynamicToolCall' &&
+      normalizedEvent.itemType !== 'fileChange'
     ) {
       return null
     }
-    if (
-      normalizedEvent.itemType === 'dynamic.tool.call' &&
-      isCodexProductFeedbackDynamicToolEvent(rawEvent)
-    ) {
-      return null
-    }
-
     return (
       normalizedEvent.itemId ??
       providerActionFallbackKeyFromNormalized(normalizedEvent)
@@ -6019,19 +6339,11 @@ function extractCodexProviderActionKey(
 function isCodexProductFeedbackDynamicToolEvent(
   event: CodexRpcMessage,
 ): boolean {
-  const params = readCodexRecordField(event, 'params')
-  const data = readCodexRecordField(event, 'data')
-  const item =
-    readCodexRecordField(event, 'item') ??
-    readCodexRecordField(params, 'item') ??
-    readCodexRecordField(data, 'item')
-  const itemType = readCodexStringField(item, 'type')
-    ?.replaceAll(/[._-]/gu, '')
-    .toLowerCase()
+  const item = readCodexRecord(readCodexRecord(event.params)?.item)
   return (
-    itemType === 'dynamictoolcall' &&
-    readCodexStringField(item, 'namespace') === 'murph' &&
-    readCodexStringField(item, 'tool') === 'submit_product_feedback'
+    item?.type === 'dynamicToolCall' &&
+    item.namespace === 'murph' &&
+    item.tool === 'submit_product_feedback'
   )
 }
 

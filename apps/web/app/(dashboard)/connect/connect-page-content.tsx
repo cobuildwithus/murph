@@ -29,6 +29,7 @@ import { createMurphPageMetadata } from "@/src/lib/site-metadata";
 
 import { APPLE_HEALTH_RELAY_CONNECT_SOURCE_UI } from "./apple-health-relay-connect-sources";
 import { ConnectSourcesGrid } from "./connect-page-client";
+import { listHealthConnectRelayConnectSources } from "./health-connect-relay-connect-sources";
 import { sortConnectSourcesByConnectionState } from "./connect-source-order";
 import type {
   ConnectCallbackInput,
@@ -284,9 +285,11 @@ const CONNECT_SOURCE_UI = {
     name: "Abbott LibreView",
   },
   dexcom: {
-    description: "Real-time CGM glucose and trend arrows.",
+    description: "CGM glucose readings and trends.",
     logo: logoAsset("dexcom.png"),
     name: "Dexcom",
+    unavailableActionLabel: "Coming soon",
+    unavailableMessage: "Dexcom connections are coming soon.",
   },
   kardia: {
     description: "Portable ECG recordings and rhythm detection.",
@@ -315,7 +318,7 @@ const CONNECT_SOURCE_UI = {
   },
 } satisfies Record<string, ConnectSourceUi>;
 
-const CONNECT_SOURCES: readonly ConnectSource[] = listVisibleConnectSources();
+const CONNECTION_SOURCES: readonly ConnectSource[] = listVisibleDeviceConnectSources();
 
 export default async function ConnectPage({
   searchParams,
@@ -361,7 +364,7 @@ export default async function ConnectPage({
         member: auth.authenticatedMember,
       });
       for (const connection of resolveConnectSourceConnectionStates(
-        CONNECT_SOURCES,
+        CONNECTION_SOURCES,
         response.sources,
       )) {
         const sourceId = connection.sourceId;
@@ -401,7 +404,7 @@ export default async function ConnectPage({
       }
       historicalResetIncompleteSourceIds =
         resolveHistoricalResetIncompleteConnectSourceIds(
-          CONNECT_SOURCES,
+          CONNECTION_SOURCES,
           response.sources,
         );
     } catch (error) {
@@ -415,17 +418,20 @@ export default async function ConnectPage({
     }
   }
 
-  const sources = resolveConfiguredConnectSources(CONNECT_SOURCES, {
-    connectedSourceIds,
-    disconnectConnectionIdBySourceId,
-    disconnectScopeBySourceId,
-    disconnectSourceProviderSlugBySourceId,
-    historicalResetIncompleteSourceIds,
-    reconnectProviderBySourceId,
-    reconnectSourceIds,
-    reconnectTargetBySourceId,
-    recoveryKindBySourceId,
-  });
+  const sources = [
+    ...resolveConfiguredConnectSources(CONNECTION_SOURCES, {
+      connectedSourceIds,
+      disconnectConnectionIdBySourceId,
+      disconnectScopeBySourceId,
+      disconnectSourceProviderSlugBySourceId,
+      historicalResetIncompleteSourceIds,
+      reconnectProviderBySourceId,
+      reconnectSourceIds,
+      reconnectTargetBySourceId,
+      recoveryKindBySourceId,
+    }),
+    ...listHealthConnectRelayConnectSources(),
+  ];
 
   return (
     <div className="flex w-full min-w-0 flex-col gap-8 md:max-w-full">
@@ -454,7 +460,16 @@ export default async function ConnectPage({
   );
 }
 
-export function listVisibleConnectSources(): ConnectSource[] {
+export function listVisibleConnectSources(
+  env: Readonly<Record<string, string | undefined>> = process.env,
+): ConnectSource[] {
+  return [
+    ...listVisibleDeviceConnectSources(),
+    ...listHealthConnectRelayConnectSources(env),
+  ];
+}
+
+function listVisibleDeviceConnectSources(): ConnectSource[] {
   return DEVICE_CONNECT_SOURCES.flatMap((source) => {
     if (!isVisibleConnectSource(source)) {
       return [];
@@ -676,6 +691,7 @@ export function resolveConfiguredConnectSources(
     (source) =>
       source.connectionAvailable !== false ||
       Boolean(source.setupGuideId) ||
+      Boolean(source.unavailableMessage) ||
       source.connected === true ||
       source.requiresReconnect === true ||
       Boolean(source.recoveryKind) ||

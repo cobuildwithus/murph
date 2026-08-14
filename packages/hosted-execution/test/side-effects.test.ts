@@ -103,6 +103,66 @@ const NUTRITION_CARD: HostedAssistantResponseCard = {
   },
 };
 
+const CHALLENGE_CARD: HostedAssistantResponseCard = {
+  entries: [{
+    coverage: "complete",
+    detail: null,
+    label: "Maya",
+    points: 120,
+  }],
+  footer: null,
+  format: "individual",
+  kind: "challenge_standings",
+  objective: { kind: "ranking" },
+  subtitle: "Current verified progress",
+  title: "Weird Health Week",
+  version: 1,
+};
+
+const COMPACT_TABLE_CARD: HostedAssistantResponseCard = {
+  columns: ["Completed"],
+  footer: null,
+  kind: "compact_table",
+  rowHeader: "Exercise",
+  rows: [{ label: "Bench press", values: ["2 sets"] }],
+  subtitle: "Live workout",
+  title: "Upper body A",
+  tracking: null,
+  version: 1,
+};
+
+const WORKOUT_CARD: HostedAssistantResponseCard = {
+  kind: "compact_table",
+  version: 1,
+  title: "Push day",
+  subtitle: null,
+  footer: null,
+  tracking: {
+    kind: "workout",
+    entityId: "evt_01K1ABCDEFGHJKMNPQRSTVWXYZ",
+    snapshotAt: "2026-08-09T19:45:00.000Z",
+  },
+  workout: {
+    version: 1,
+    state: "active",
+    exercises: [{
+      name: "Bench press",
+      sets: [
+        {
+          status: "completed",
+          target: "185 lb × 8",
+          actual: "185 lb × 8",
+        },
+        {
+          status: "pending",
+          target: "185 lb × 6–8",
+          actual: null,
+        },
+      ],
+    }],
+  },
+};
+
 describe("hosted assistant delivery contracts", () => {
   it("reuses gateway-owned delivery target kinds", () => {
     expect(hostedAssistantDeliveryTargetKindValues).toEqual(gatewayDeliveryTargetKindValues);
@@ -137,6 +197,24 @@ describe("hosted assistant delivery contracts", () => {
     expect(parseHostedAssistantDeliverySideEffects(payload)).toEqual(payload);
   });
 
+  it("rejects the retired group-email proof wire field", () => {
+    const authorizationProof = "a".repeat(64);
+    const canonicalPayload = createHostedAssistantDeliveryPayload();
+    const legacyEffect = {
+      deliveryPhase: "foreground_current_turn",
+      effectId: "intent-legacy-group-email-proof",
+      fingerprint: "dedupe-legacy-group-email-proof",
+      kind: "assistant.delivery",
+      payload: {
+        ...canonicalPayload,
+        newsletterAuthorizationProof: authorizationProof,
+      },
+    };
+
+    expect(() => parseHostedAssistantDeliverySideEffect(legacyEffect))
+      .toThrow(/retired runner wire contract/u);
+  });
+
 
   it("propagates strict response cards and preserves legacy card omission", () => {
     const payload = createHostedAssistantDeliveryPayload({
@@ -160,6 +238,75 @@ describe("hosted assistant delivery contracts", () => {
       ...effect,
       payload: legacyPayload,
     }).payload).not.toHaveProperty("card");
+  });
+
+  it("admits challenge cards only for Linq groups and keeps other cards private", () => {
+    const challengeEffect = buildHostedAssistantDeliveryEffect({
+      dedupeKey: "dedupe-group-challenge-card",
+      effectId: "intent-group-challenge-card",
+      payload: createHostedAssistantDeliveryPayload({
+        card: CHALLENGE_CARD,
+        channel: "linq",
+        threadIsDirect: false,
+      }),
+    });
+    expect(parseHostedAssistantDeliverySideEffect(challengeEffect))
+      .toEqual(challengeEffect);
+
+    for (const payload of [
+      createHostedAssistantDeliveryPayload({
+        card: CHALLENGE_CARD,
+        channel: "linq",
+        threadIsDirect: true,
+      }),
+      createHostedAssistantDeliveryPayload({
+        card: CHALLENGE_CARD,
+        channel: "telegram",
+        threadIsDirect: false,
+      }),
+    ]) {
+      expect(() => buildHostedAssistantDeliveryEffect({
+        dedupeKey: "dedupe-invalid-group-challenge-card",
+        effectId: "intent-invalid-group-challenge-card",
+        payload,
+      })).toThrow(/requires an authenticated Linq group conversation/);
+    }
+
+    for (const card of [NUTRITION_CARD, COMPACT_TABLE_CARD]) {
+      expect(buildHostedAssistantDeliveryEffect({
+        dedupeKey: `dedupe-private-${card.kind}`,
+        effectId: `intent-private-${card.kind}`,
+        payload: createHostedAssistantDeliveryPayload({
+          card,
+          channel: "linq",
+          threadIsDirect: true,
+        }),
+      }).payload.card).toEqual(card);
+      expect(() => buildHostedAssistantDeliveryEffect({
+        dedupeKey: `dedupe-group-${card.kind}`,
+        effectId: `intent-group-${card.kind}`,
+        payload: createHostedAssistantDeliveryPayload({
+          card,
+          channel: "linq",
+          threadIsDirect: false,
+        }),
+      })).toThrow(/requires a private direct conversation/);
+    }
+  });
+
+  it("round-trips workout cards through hosted side-effect serialization", () => {
+    const effect = buildHostedAssistantDeliveryEffect({
+      dedupeKey: "dedupe-workout-card",
+      effectId: "intent-workout-card",
+      payload: createHostedAssistantDeliveryPayload({
+        card: WORKOUT_CARD,
+        channel: "linq",
+        message: "Active workout · 1/2 sets complete",
+      }),
+    });
+    const persisted = JSON.parse(JSON.stringify(effect)) as unknown;
+
+    expect(parseHostedAssistantDeliverySideEffect(persisted)).toEqual(effect);
   });
 
   it("rejects malformed hosted response cards and card-media coexistence", () => {

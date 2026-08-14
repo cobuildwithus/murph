@@ -17,6 +17,8 @@ model DeviceConnection {
   metadataJson               Json?                    @map("metadata_json")
   credentialKind             String                   @default("oauth_tokens") @map("credential_kind")
   providerConfigKey          String?                  @map("provider_config_key")
+  providerApplicationId      String?                  @map("provider_application_id")
+  providerApplicationRevision Int?                    @map("provider_application_revision")
   credentialMetadataJson     Json?                    @map("credential_metadata_json")
   setupPhase                 String?                  @map("setup_phase")
   setupExpiresAt             DateTime?                @map("setup_expires_at")
@@ -45,8 +47,10 @@ model DeviceConnection {
   dirtyState                 DeviceSyncDirtyConnection?
   dirtyPayloads              DeviceSyncDirtyPayload[]
   companionCaptureReceipts   DeviceSyncCompanionCaptureReceipt[]
+  providerApplication        DeviceProviderApplication? @relation(fields: [providerApplicationId], references: [id], onDelete: Restrict)
 
   @@unique([provider, providerAccountBlindIndex])
+  @@index([providerApplicationId])
   @@index([status, nextReconcileAt, updatedAt, id], map: "device_connection_due_reconcile_sweep_idx")
   @@index([userId, provider])
   @@index([setupPhase, setupExpiresAt])
@@ -100,18 +104,38 @@ model DeviceTokenAudit {
 }
 
 model DeviceOauthSession {
-  state        String    @id
-  userId       String?   @map("user_id")
-  provider     String
-  returnTo     String?   @map("return_to")
-  metadataJson Json?     @map("metadata_json")
-  createdAt    DateTime  @map("created_at")
-  expiresAt    DateTime  @map("expires_at")
-  consumedAt   DateTime? @map("consumed_at")
+  state                       String    @id
+  userId                      String?   @map("user_id")
+  provider                    String
+  providerApplicationId       String?   @map("provider_application_id")
+  providerApplicationRevision Int?      @map("provider_application_revision")
+  returnTo                    String?   @map("return_to")
+  metadataJson                Json?     @map("metadata_json")
+  createdAt                   DateTime  @map("created_at")
+  expiresAt                   DateTime  @map("expires_at")
+  consumedAt                  DateTime? @map("consumed_at")
+  providerApplication         DeviceProviderApplication? @relation(fields: [providerApplicationId], references: [id], onDelete: Cascade)
 
   @@index([expiresAt])
   @@index([userId, provider])
+  @@index([providerApplicationId])
   @@map("device_oauth_session")
+}
+
+model DeviceProviderApplication {
+  id                    String    @id
+  memberId              String    @map("member_id")
+  provider              String
+  revision              Int       @default(1)
+  configEncrypted       String    @map("config_encrypted")
+  createdAt             DateTime  @default(now()) @map("created_at")
+  updatedAt             DateTime  @updatedAt @map("updated_at")
+  member                HostedMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  connections           DeviceConnection[]
+  oauthSessions         DeviceOauthSession[]
+
+  @@unique([memberId, provider])
+  @@map("device_provider_application")
 }
 
 model DeviceConnectIntent {
@@ -202,13 +226,14 @@ model DeviceSyncDirtyConnection {
 }
 
 model DeviceSyncDirtyPayload {
-  id            String           @id
-  connectionId  String           @map("connection_id")
-  userId        String           @map("user_id")
-  provider      String
-  dirtyRevision BigInt           @map("dirty_revision")
-  resourceEncrypted String       @map("resource_encrypted")
-  createdAt     DateTime         @default(now()) @map("created_at")
+  id                    String           @id
+  connectionId          String           @map("connection_id")
+  userId                String           @map("user_id")
+  provider              String
+  dirtyRevision         BigInt           @map("dirty_revision")
+  resourceEncrypted     String           @map("resource_encrypted")
+  credentialIndependent Boolean?         @map("credential_independent")
+  createdAt             DateTime         @default(now()) @map("created_at")
   connection    DeviceConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
 
   @@index([connectionId, dirtyRevision])
@@ -443,6 +468,7 @@ enum HostedGroupSponsorshipAuthorizationStatus {
 }
 
 enum HostedUsageCreditEntryKind {
+  starter_grant
   purchase_grant
   referral_grant
   usage_debit
@@ -523,6 +549,16 @@ enum HostedPhysicalNoteStatus {
   failed
 }
 
+enum HostedPhysicalNoteFailureReason {
+  recipient_address
+  artwork
+  service_unavailable
+  request_invalid
+  prior_note_unresolved
+  prior_note_accepted
+  unknown
+}
+
 model HostedMember {
   id                             String                          @id
   billingStatus                  HostedBillingStatus             @default(not_started) @map("billing_status")
@@ -588,6 +624,7 @@ model HostedMember {
   hostedGroupMemberships         HostedGroupMember[]             @relation("HostedGroupMember")
   hostedGroupRuntime             HostedGroup?                    @relation("HostedGroupRuntimeMember")
   hostedCryptoEnvelopes          HostedUserCryptoEnvelope[]
+  deviceProviderApplications     DeviceProviderApplication[]
   hostedCryptoAudits             HostedUserCryptoAudit[]
   webSessions                    HostedWebSession[]
   mealPhotoCaptureEnrollments    HostedMealPhotoCaptureEnrollment[]
@@ -611,6 +648,8 @@ model HostedMember {
   ownedThreadContainers          HostedThreadContainer[]         @relation("HostedThreadContainerOwner")
   threadContainerParticipations  HostedThreadContainerParticipant[] @relation("HostedThreadContainerParticipantMember")
   pendingGroupSetup              HostedPendingGroupSetup?
+  groupCurrentSenderClarificationsAsRuntime HostedGroupCurrentSenderClarification[] @relation("HostedGroupCurrentSenderClarificationRuntime")
+  groupCurrentSenderClarificationsAsTarget  HostedGroupCurrentSenderClarification[] @relation("HostedGroupCurrentSenderClarificationTarget")
 
   @@index([billingStatus])
   @@map("hosted_member")
@@ -880,6 +919,7 @@ model HostedPhysicalNote {
   provider                 String                   @default("lob")
   providerLetterId         String?                  @unique @map("provider_letter_id")
   status                   HostedPhysicalNoteStatus @default(starting)
+  failureReason            HostedPhysicalNoteFailureReason? @map("failure_reason")
   complimentaryOfferCode   String?                  @map("complimentary_offer_code")
   providerCostUsdMicros    BigInt                   @map("provider_cost_usd_micros")
   pricingVersion           String                   @map("pricing_version")
@@ -890,6 +930,7 @@ model HostedPhysicalNote {
 
   @@unique([memberId, requestKey])
   @@unique([memberId, complimentaryOfferCode])
+  @@index([memberId, status, failureReason, createdAt])
   @@map("hosted_physical_note")
 }
 
@@ -1054,6 +1095,7 @@ model HostedMailboxItem {
   @@index([userId, expiresAt])
   @@index([expiresAt, id])
   @@index([createdAt, id])
+  @@index([consumedAt, id], map: "hosted_mailbox_item_consumed_at_id_idx")
   @@map("hosted_mailbox_item")
 }
 
@@ -1098,6 +1140,7 @@ model HostedIngressLatencyTrace {
 
   @@unique([userId, mailboxItemId])
   @@index([source, acceptedAt])
+  @@index([source, assistantInputStagedAt], map: "hosted_ingress_latency_trace_source_staged_at_idx")
   @@index([source, providerStartAt])
   @@index([userId, acceptedAt])
   @@index([acceptedAt, id])
@@ -1480,6 +1523,7 @@ model HostedUsageCreditPurchase {
   checkoutExpiresAt                 DateTime                             @map("checkout_expires_at")
   paidAt                            DateTime?                            @map("paid_at")
   terminalAt                        DateTime?                            @map("terminal_at")
+  grantSlotReleasedAt               DateTime?                            @map("grant_slot_released_at")
   lastReconciledAt                  DateTime?                            @map("last_reconciled_at")
   reconciliationVersion             BigInt                               @default(0) @map("reconciliation_version")
   createdAt                         DateTime                             @default(now()) @map("created_at")
@@ -1534,9 +1578,11 @@ model HostedGroupSponsorshipMoment {
   configurationDigest        String   @map("configuration_digest")
   creativeRequestEncrypted   String?  @map("creative_request_encrypted")
   publicAliasEncrypted       String?  @map("public_alias_encrypted")
+  fundingPageAliasConsent    String?  @map("funding_page_alias_consent")
   sponsorMessageEncrypted    String?  @map("sponsor_message_encrypted")
   runningBitRequestEncrypted String?  @map("running_bit_request_encrypted")
   activatedAt                DateTime? @map("activated_at")
+  fundingPageAliasPublishedAt DateTime? @map("funding_page_alias_published_at")
   expiresAt                  DateTime? @map("expires_at")
   createdAt                  DateTime  @default(now()) @map("created_at")
   updatedAt                  DateTime  @updatedAt @map("updated_at")
@@ -1580,13 +1626,16 @@ model HostedUsageCreditEntry {
 }
 
 /// Mutable remaining-capacity projection for one immutable positive grant
-/// entry. The entry ledger remains the canonical accounting history.
+/// entry. Beneficiary identity and FIFO sequence are immutable canonical-entry
+/// copies; the entry ledger remains the canonical accounting history.
 model HostedUsageCreditGrant {
-  entryId            String                 @id @map("entry_id")
-  remainingUsdMicros BigInt                 @map("remaining_usd_micros")
-  createdAt          DateTime               @default(now()) @map("created_at")
-  updatedAt          DateTime               @updatedAt @map("updated_at")
-  entry              HostedUsageCreditEntry @relation(fields: [entryId], references: [id], onDelete: Restrict)
+  entryId              String                 @id @map("entry_id")
+  beneficiaryMemberId  String                 @map("beneficiary_member_id")
+  beneficiarySequence  BigInt                 @map("beneficiary_sequence")
+  remainingUsdMicros   BigInt                 @map("remaining_usd_micros")
+  createdAt            DateTime               @default(now()) @map("created_at")
+  updatedAt            DateTime               @updatedAt @map("updated_at")
+  entry                HostedUsageCreditEntry @relation(fields: [entryId], references: [id], onDelete: Restrict)
 
   @@map("hosted_usage_credit_grant")
 }
@@ -1772,6 +1821,25 @@ model HostedGroupDisclosureGrant {
   @@index([membershipId, revokedAt, grantedAt])
   @@index([permissionId])
   @@map("hosted_group_disclosure_grant")
+}
+
+model HostedGroupCurrentSenderClarification {
+  groupRuntimeMemberId       String       @map("group_runtime_member_id")
+  targetMemberId             String       @map("target_member_id")
+  originAssistantInputId     String       @unique @map("origin_assistant_input_id")
+  originSessionId            String       @map("origin_session_id")
+  sourceCausalSeq            BigInt       @map("source_causal_seq")
+  resolvedByAssistantInputId String?      @map("resolved_by_assistant_input_id")
+  resolvedResultDestination  String?      @map("resolved_audience")
+  expiresAt                  DateTime     @map("expires_at")
+  createdAt                  DateTime     @default(now()) @map("created_at")
+  updatedAt                  DateTime     @updatedAt @map("updated_at")
+  groupRuntimeMember         HostedMember @relation("HostedGroupCurrentSenderClarificationRuntime", fields: [groupRuntimeMemberId], references: [id], onDelete: Cascade)
+  targetMember               HostedMember @relation("HostedGroupCurrentSenderClarificationTarget", fields: [targetMemberId], references: [id], onDelete: Cascade)
+
+  @@id([groupRuntimeMemberId, targetMemberId])
+  @@index([expiresAt])
+  @@map("hosted_group_current_sender_clarification")
 }
 
 model HostedVaultShare {
@@ -2038,6 +2106,7 @@ model HostedLinqDelivery {
   @@index([status, attemptedAt])
   @@index([linqChatLookupKey, attemptedAt])
   @@index([lastReceiptAt])
+  @@index([acceptedAt, id], map: "hosted_linq_delivery_accepted_at_id_idx")
   @@map("hosted_linq_delivery")
 }
 

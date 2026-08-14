@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { access } from "node:fs/promises";
 
-import { createElement } from "react";
+import { act, createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, test, vi } from "vitest";
 
@@ -13,6 +13,7 @@ import {
 import { listHealthCommonsExperimentBrowseProtocols } from "@/src/lib/health-commons/experiment-browse";
 
 const mocks = vi.hoisted(() => ({
+  refresh: vi.fn(async () => undefined),
   resolveHostedMurphContactOptions: vi.fn(),
   useBrowserVault: vi.fn(),
 }));
@@ -36,6 +37,11 @@ import HistoryPageClient from "../app/(dashboard)/history/history-page-client";
 import { metadata as historyMetadata } from "../app/(dashboard)/history/layout";
 import OverviewPageClient from "../app/(dashboard)/overview/overview-page-client";
 import { metadata as overviewMetadata } from "../app/(dashboard)/overview/layout";
+import PatternsPageClient from "../app/(dashboard)/patterns/patterns-page-client";
+import { metadata as patternsMetadata } from "../app/(dashboard)/patterns/layout";
+import { EnvironmentPrintStudy } from "../app/design/environment-print-study";
+import { PersonalPatternsComponentStudy } from "../app/design/personal-patterns-study";
+import { renderClientComponent } from "./render-client-component";
 
 type BrowserVaultEntity = Parameters<
   typeof createVaultReadModel
@@ -46,6 +52,7 @@ const experimentProtocols = listHealthCommonsExperimentBrowseProtocols();
 
 beforeEach(async () => {
   clientFixture = await createFixtureClient();
+  mocks.refresh.mockClear();
   mocks.resolveHostedMurphContactOptions.mockResolvedValue([
     {
       href: "sms:+15555550100?body=I%20want%20to%20update%20my%20environment.",
@@ -59,7 +66,7 @@ beforeEach(async () => {
     error: null,
     ref: null,
     refreshPending: false,
-    refresh: async () => {},
+    refresh: mocks.refresh,
     status: "ready",
   });
 });
@@ -69,6 +76,11 @@ test("dashboard routes define page-specific metadata with the shared preview ima
   assert.equal(
     overviewMetadata.description,
     "A quick read on your recent notes, experiments, and tracked trends.",
+  );
+  assert.equal(patternsMetadata.title, "Patterns — Murph");
+  assert.equal(
+    patternsMetadata.description,
+    "See which repeated actions and next-day outcomes tend to move together.",
   );
   assert.equal(historyMetadata.title, "History — Murph");
   assert.equal(
@@ -98,6 +110,7 @@ test("dashboard routes define page-specific metadata with the shared preview ima
 
   for (const routeMetadata of [
     overviewMetadata,
+    patternsMetadata,
     historyMetadata,
     experimentsMetadata,
   ]) {
@@ -142,7 +155,119 @@ test("OverviewPage renders the dashboard overview", () => {
   );
   assert.match(markup, /Morning walk/);
   assert.match(markup, /Travel recovery note/);
+  assert.doesNotMatch(markup, /What tends to move together/);
   assert.match(markup, /Weekly changes/);
+});
+
+test("PatternsPage renders personal comparisons on their own route", () => {
+  const markup = renderToStaticMarkup(createElement(PatternsPageClient));
+
+  assert.match(markup, /Personal patterns/);
+  assert.match(markup, /What tends to move together/);
+  assert.match(markup, /No clear comparison is ready yet/);
+  assert.doesNotMatch(markup, /Weekly changes/);
+});
+
+test("Personal Patterns comparison controls name their factor and next-day outcome", () => {
+  const markup = renderToStaticMarkup(
+    createElement(PersonalPatternsComponentStudy),
+  );
+
+  assert.match(markup, /aria-label="Running, next-day HRV\./);
+  assert.match(markup, /aria-label="Sauna, next-day Total sleep\./);
+  assert.match(markup, /data-patterns-layout="mobile"/u);
+  assert.match(markup, /data-patterns-layout="desktop"/u);
+  assert.equal((markup.match(/data-pattern-outcome-group=/gu) ?? []).length, 3);
+  assert.match(markup, /Sleep efficiency/u);
+  assert.match(markup, />14 days</u);
+  assert.doesNotMatch(markup, /Scroll sideways/u);
+});
+
+test("PatternsPage explains the bounded wait when a legacy replica has no patterns projection", async () => {
+  const legacyReplica = { ...clientFixture.replica };
+  delete legacyReplica.personalPatterns;
+  const legacyClient = createBrowserVaultQueryClient(legacyReplica);
+  mocks.useBrowserVault.mockReturnValue({
+    client: legacyClient,
+    dataVersion: legacyClient.replica.source.dataVersion,
+    error: null,
+    ref: null,
+    refreshPending: false,
+    refresh: mocks.refresh,
+    status: "ready",
+  });
+  const rendered = await renderClientComponent(
+    createElement(PatternsPageClient),
+    { requireButton: false },
+  );
+
+  try {
+    assert.match(
+      rendered.container.textContent ?? "",
+      /Patterns are getting ready/u,
+    );
+    assert.match(rendered.container.textContent ?? "", /within 24 hours/u);
+    assert.doesNotMatch(
+      rendered.container.textContent ?? "",
+      /No clear comparison is ready/u,
+    );
+    assert.doesNotMatch(rendered.container.textContent ?? "", /Refresh now/u);
+  } finally {
+    await rendered.cleanup();
+  }
+});
+
+test("PatternsPage keeps a legacy replica in the preparing state during refresh", () => {
+  const legacyReplica = { ...clientFixture.replica };
+  delete legacyReplica.personalPatterns;
+  const legacyClient = createBrowserVaultQueryClient(legacyReplica);
+  mocks.useBrowserVault.mockReturnValue({
+    client: legacyClient,
+    dataVersion: legacyClient.replica.source.dataVersion,
+    error: null,
+    ref: null,
+    refreshPending: true,
+    refresh: mocks.refresh,
+    status: "ready",
+  });
+  const markup = renderToStaticMarkup(createElement(PatternsPageClient));
+
+  assert.match(markup, /Preparing your patterns/u);
+  assert.doesNotMatch(markup, /No clear comparison is ready/u);
+});
+
+test("PatternsPage exposes the existing retry action after a load failure", async () => {
+  mocks.useBrowserVault.mockReturnValue({
+    client: null,
+    dataVersion: null,
+    error: "The private replica could not be opened.",
+    ref: null,
+    refreshPending: false,
+    refresh: mocks.refresh,
+    status: "error",
+  });
+  const rendered = await renderClientComponent(
+    createElement(PatternsPageClient),
+  );
+
+  try {
+    assert.match(
+      rendered.container.textContent ?? "",
+      /Could not load your patterns/u,
+    );
+    const retryButton = [...rendered.container.querySelectorAll("button")].find(
+      (button) => button.textContent === "Retry",
+    );
+    assert.ok(retryButton);
+    await act(async () => {
+      retryButton.dispatchEvent(
+        new rendered.window.Event("click", { bubbles: true }),
+      );
+    });
+    assert.equal(mocks.refresh.mock.calls.length, 1);
+  } finally {
+    await rendered.cleanup();
+  }
 });
 
 test("OverviewPage counts all tracked experiments while listing the most recent ones", async () => {
@@ -246,6 +371,51 @@ test("Environment print report renders the signed-in member's Browser Vault fact
   assert.match(markup, /blackout/);
   assert.match(markup, /href="\/environment"/);
   assert.doesNotMatch(markup, /fixture data|mock/i);
+});
+
+test("Environment print report uses a report-shaped accessible loading state", () => {
+  mocks.useBrowserVault.mockReturnValue({
+    client: null,
+    dataVersion: null,
+    error: null,
+    ref: null,
+    refreshPending: false,
+    refresh: mocks.refresh,
+    status: "loading",
+  });
+
+  const markup = renderToStaticMarkup(
+    createElement(EnvironmentPrintPageClient, {
+      generatedOn: "July 31, 2026",
+    }),
+  );
+
+  assert.match(markup, /data-environment-print-state="loading"/);
+  assert.match(markup, /aria-busy="true"/);
+  assert.match(markup, /aria-live="polite"/);
+  assert.match(markup, /role="status"/);
+  assert.match(markup, /Putting your report together/);
+  assert.match(
+    markup,
+    /Opening your private records and arranging the printable view\./,
+  );
+  assert.match(markup, /Preparing/);
+  assert.doesNotMatch(markup, /Unlocking your private Environment report/);
+
+  const animatedCount = markup.match(/animate-pulse/g)?.length ?? 0;
+  const motionSafeAnimatedCount =
+    markup.match(/motion-safe:animate-pulse/g)?.length ?? 0;
+  assert.ok(animatedCount > 0);
+  assert.equal(motionSafeAnimatedCount, animatedCount);
+});
+
+test("Environment print design study renders the real loading and ready states", () => {
+  const markup = renderToStaticMarkup(createElement(EnvironmentPrintStudy));
+
+  assert.match(markup, /data-design-state="loading"/);
+  assert.match(markup, /data-environment-print-state="loading"/);
+  assert.match(markup, /data-design-state="ready"/);
+  assert.match(markup, /data-environment-print-page="true"/);
 });
 
 test("EnvironmentPage gives zero-data members one clear start and previews the report", async () => {

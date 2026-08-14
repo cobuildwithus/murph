@@ -3,6 +3,9 @@ import { describe, expect, it } from "vitest";
 import {
   findProviderRequestBoundaryViolations,
   providerRequestScanRoots,
+  providerRequestSourceExtensions,
+  shouldSkipProviderRequestDirectory,
+  shouldScanProviderRequestSourceFile,
 } from "./check-provider-request-boundaries.ts";
 
 function blockedLines(source: string): number[] {
@@ -11,6 +14,12 @@ function blockedLines(source: string): number[] {
     source,
   ).filter((violation) => violation.kind === "object-spread").map(
     (violation) => violation.line,
+  );
+}
+
+function rawHttpViolations(source: string, relativePath = "scripts/example.mjs") {
+  return findProviderRequestBoundaryViolations(relativePath, source).filter(
+    (violation) => violation.kind === "raw-provider-http",
   );
 }
 
@@ -29,6 +38,130 @@ describe("check-provider-request-boundaries", () => {
         ].join("\n"),
       ).map((match) => match.line),
     ).toEqual([2]);
+  });
+
+  it("includes JavaScript operational scripts in the production scan", () => {
+    expect(providerRequestSourceExtensions).toContain(".cjs");
+    expect(providerRequestSourceExtensions).toContain(".js");
+    expect(providerRequestSourceExtensions).toContain(".mjs");
+  });
+
+  it("does not treat assembled deployment output as authored provider source", () => {
+    expect(shouldSkipProviderRequestDirectory(".deploy")).toBe(true);
+  });
+
+  it("excludes JavaScript tests and TypeScript declaration variants", () => {
+    for (const relativePath of [
+      "scripts/example.spec.cjs",
+      "scripts/example.test.cjs",
+      "scripts/example.spec.js",
+      "scripts/example.test.js",
+      "scripts/example.spec.mjs",
+      "scripts/example.test.mjs",
+      "scripts/example.d.cts",
+      "scripts/example.d.mts",
+      "scripts/example.d.ts",
+    ]) {
+      expect(shouldScanProviderRequestSourceFile(relativePath)).toBe(false);
+    }
+    for (const relativePath of [
+      "scripts/example.cjs",
+      "scripts/example.js",
+      "scripts/example.mjs",
+      "scripts/example.mts",
+      "scripts/example.ts",
+    ]) {
+      expect(shouldScanProviderRequestSourceFile(relativePath)).toBe(true);
+    }
+  });
+
+  it("blocks direct provider fetches without an SDK import", () => {
+    expect(rawHttpViolations([
+      "const openAiBaseUrl = 'https://api.openai.com/v1';",
+      "await fetch(`${openAiBaseUrl}/responses`, { method: 'POST' });",
+      "const resendRequest = new Request('https://api.resend.com/emails');",
+    ].join("\n"))).toEqual([
+      expect.objectContaining({
+        boundary: "Direct OpenAI provider HTTP",
+        line: 2,
+      }),
+      expect.objectContaining({
+        boundary: "Direct Resend provider HTTP",
+        line: 3,
+      }),
+    ]);
+  });
+
+  it("resolves direct provider origins through URL and request variables", () => {
+    expect(rawHttpViolations([
+      "const baseUrl = new URL('https://api.sandbox.eu.junction.com');",
+      "const target = new URL('/v2/users', baseUrl);",
+      "const request = new Request(target);",
+      "await globalThis.fetch(request);",
+    ].join("\n"))).toEqual([
+      expect.objectContaining({
+        boundary: "Direct Junction provider HTTP",
+        line: 3,
+      }),
+      expect.objectContaining({
+        boundary: "Direct Junction provider HTTP",
+        line: 4,
+      }),
+    ]);
+  });
+
+  it("allows only a matching official SDK transport adapter exception", () => {
+    expect(rawHttpViolations([
+      "import { Exa } from 'exa-js';",
+      "const baseUrl = 'https://api.exa.ai';",
+      "// provider-request-boundary-allow-next-line: sdk-transport-adapter",
+      "await fetchImpl(`${baseUrl}/search`, { method: 'POST' });",
+    ].join("\n"))).toEqual([]);
+
+    expect(rawHttpViolations([
+      "import { Resend } from 'resend';",
+      "// provider-request-boundary-allow-next-line: sdk-transport-adapter",
+      "await fetchImpl('https://api.exa.ai/search', { method: 'POST' });",
+    ].join("\n"))).toEqual([
+      expect.objectContaining({
+        boundary: "Invalid provider HTTP exception sdk-transport-adapter",
+        line: 3,
+      }),
+    ]);
+  });
+
+  it("allows only SDK-owned Linq presigned byte URL variables", () => {
+    expect(rawHttpViolations([
+      "import LinqAPIV3 from '@linqapp/sdk';",
+      "const uploadUrl = await prepareUploadUrl();",
+      "// provider-request-boundary-allow-next-line: linq-presigned-bytes",
+      "await fetch(uploadUrl, { body: bytes, method: 'PUT' });",
+    ].join("\n"))).toEqual([]);
+
+    expect(rawHttpViolations([
+      "import LinqAPIV3 from '@linqapp/sdk';",
+      "const apiUrl = 'https://api.linqapp.com/api/partner/v3/chats';",
+      "// provider-request-boundary-allow-next-line: linq-presigned-bytes",
+      "await fetch(apiUrl, { method: 'GET' });",
+    ].join("\n"))).toEqual([
+      expect.objectContaining({
+        boundary: "Invalid provider HTTP exception linq-presigned-bytes",
+        line: 4,
+      }),
+    ]);
+  });
+
+  it("rejects unknown provider HTTP exception reasons", () => {
+    expect(rawHttpViolations([
+      "import OpenAI from 'openai';",
+      "// provider-request-boundary-allow-next-line: legacy-client",
+      "await fetch('https://api.openai.com/v1/responses');",
+    ].join("\n"))).toEqual([
+      expect.objectContaining({
+        boundary: "Invalid provider HTTP exception legacy-client",
+        line: 3,
+      }),
+    ]);
   });
 
   it("blocks direct and nested object spreads in Stripe request arguments", () => {
@@ -120,6 +253,66 @@ describe("check-provider-request-boundaries", () => {
       "const client = new JunctionClient(config);",
       "client.listSummary({ resource, userId, ...window });",
     ].join("\n"))).toEqual([3, 7]);
+  });
+
+  it("covers Resend typed request builders and client operations", () => {
+    expect(blockedLines([
+      "import { Resend, type CreateBatchOptions, type CreateEmailOptions } from 'resend';",
+      "const email: CreateEmailOptions = { from, subject, text, to, ...optional };",
+      "const batch: CreateBatchOptions = [{ from, subject, text, to, ...optional }];",
+      "const resend = new Resend(apiKey);",
+      "resend.emails.send(email, { ...requestOptions });",
+      "resend.batch.send(batch);",
+    ].join("\n"))).toEqual([2, 3, 5]);
+  });
+
+  it("covers the newly adopted official provider clients", () => {
+    expect(blockedLines([
+      "import { ElevenLabsClient } from '@elevenlabs/elevenlabs-js';",
+      "import { KeyManagementServiceClient } from '@google-cloud/kms';",
+      "import { LettersApi } from '@lob/lob-typescript-sdk';",
+      "import { Exa } from 'exa-js';",
+      "import { GoogleAuth } from 'google-auth-library';",
+      "const elevenLabs = new ElevenLabsClient({ apiKey });",
+      "const kms = new KeyManagementServiceClient();",
+      "const letters = new LettersApi(configuration);",
+      "const exa = new Exa(apiKey);",
+      "const auth = new GoogleAuth(options);",
+      "elevenLabs.textToSpeech.convert(voiceId, { ...speech });",
+      "kms.encrypt({ ...request });",
+      "letters.create({ ...letter });",
+      "exa.search(query, { ...searchOptions });",
+      "auth.getClient({ ...authOptions });",
+    ].join("\n"))).toEqual([11, 12, 13, 14, 15]);
+  });
+
+  it("covers Composio typed builders and the generated provider client", () => {
+    expect(blockedLines([
+      "import Composio from '@composio/client';",
+      "import type { ToolExecuteParams } from '@composio/client/resources/tools';",
+      "function buildExecute(): ToolExecuteParams {",
+      "  return { arguments, ...identity };",
+      "}",
+      "const composio = new Composio({ apiKey });",
+      "composio.tools.execute(toolSlug, { arguments, ...identity });",
+    ].join("\n"))).toEqual([4, 7]);
+  });
+
+  it("rejects inferred Composio request variables", () => {
+    expect(
+      findProviderRequestBoundaryViolations(
+        "apps/web/src/example.ts",
+        [
+          "import Composio from '@composio/client';",
+          "const composio = new Composio({ apiKey });",
+          "const params = { arguments, user_id: userId, version };",
+          "composio.tools.execute(toolSlug, params);",
+        ].join("\n"),
+      ).map((violation) => ({
+        kind: violation.kind,
+        line: violation.line,
+      })),
+    ).toEqual([{ kind: "untyped-request-object", line: 3 }]);
   });
 
   it("blocks spreads in Kernel SDK request arguments", () => {

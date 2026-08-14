@@ -69,6 +69,7 @@ export COBUILD_AUDIT_CONTEXT_INCLUDE_DOCS_DEFAULT='0'
 export COBUILD_AUDIT_CONTEXT_INCLUDE_CI_DEFAULT='0'
 audit_context_binary_exclude_globs=(
   "apps/*/public/design-assets/**"
+  "apps/*/public/audio/**"
   "apps/*/public/legal/*.pdf"
   "apps/*/public/*.jpg"
   "apps/*/public/*.jpeg"
@@ -101,9 +102,11 @@ repo_tools_join_lines COBUILD_AUDIT_CONTEXT_EXCLUDE_GLOBS \
   "apps/*/**/*.spec.*"
 repo_tools_join_lines COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS \
   ".dockerignore" \
+  ".githooks/pre-commit" \
   "AGENTS.md" \
   "ARCHITECTURE.md" \
   "Dockerfile.cloudflare-hosted-runner" \
+  "Dockerfile.cloudflare-hosted-runner-base" \
   "README.md" \
   "PRODUCT.md" \
   "DESIGN.md" \

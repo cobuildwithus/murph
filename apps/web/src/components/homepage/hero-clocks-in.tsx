@@ -3,7 +3,6 @@
 import Link from "next/link";
 import {
   useEffect,
-  useLayoutEffect,
   useRef,
   useState,
 } from "react";
@@ -937,12 +936,12 @@ export function HeroClocksIn({
   // first scroll jumps instantly so a seeded thread doesn't animate on load;
   // later appends scroll smoothly.
   const hasAutoScrolledRef = useRef(false);
-  useLayoutEffect(() => {
+  useEffect(() => {
     const node = scrollerRef.current;
     if (!node) return;
     if (isAtBottomRef.current) {
       node.scrollTo({
-        top: node.scrollHeight,
+        top: Number.MAX_SAFE_INTEGER,
         behavior: hasAutoScrolledRef.current ? "smooth" : "auto",
       });
       hasAutoScrolledRef.current = true;
@@ -1298,7 +1297,7 @@ export function HeroClocksIn({
         </div>
 
         <div className="pointer-events-auto relative z-10 lg:col-span-5">
-          <div className="relative mx-auto w-full max-w-[320px] lg:aspect-[3/4] lg:max-w-[520px]">
+          <div className="relative mx-auto w-full max-w-[280px] sm:max-w-[320px] lg:aspect-[3/4] lg:max-w-[520px]">
             <div className="lg:absolute lg:left-1/2 lg:top-1/2 lg:w-[340px] lg:-translate-x-1/2 lg:-translate-y-1/2">
               <PhoneShell>
                 <StatusBar />
@@ -1783,7 +1782,7 @@ function ContactCard({
         className="mt-3 flex items-center gap-2"
       >
         <div className="h-px flex-1 bg-[#c4a882]/40" />
-        <span className="font-mono text-[9px] font-medium uppercase tracking-[0.18em] text-[#736a58]/70">
+        <span className="font-mono text-[9px] font-medium uppercase tracking-[0.18em] text-[#736a58]">
           or
         </span>
         <div className="h-px flex-1 bg-[#c4a882]/40" />
@@ -1854,7 +1853,7 @@ function BloodworkCard({ result }: { result: BloodworkResult }) {
           {result.eyebrow}
         </span>
         {result.sideLabel ? (
-          <span className="font-mono text-[8px] tracking-[0.08em] text-[#736a58]/70">
+          <span className="font-mono text-[8px] tracking-[0.08em] text-[#736a58]">
             {result.sideLabel}
           </span>
         ) : null}
@@ -2276,7 +2275,7 @@ function Composer({
             autoComplete="off"
             disabled={busy}
             className={cn(
-              "min-w-0 flex-1 bg-transparent text-[0.8125rem] tracking-tight text-[#2d3436] caret-[#5a6e32] outline-none placeholder:text-[#736a58]/45 disabled:cursor-wait",
+              "min-w-0 flex-1 bg-transparent text-[0.8125rem] tracking-tight text-[#2d3436] caret-[#5a6e32] outline-none placeholder:text-[#736a58] disabled:cursor-wait",
               hasText ? "pr-7" : "pr-4",
             )}
           />

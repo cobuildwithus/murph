@@ -17,11 +17,13 @@ const mocks = vi.hoisted(() => ({
     title: string;
   } | null,
   navigateHostedAuthRedirect: vi.fn(),
+  requestHostedOnboardingJson: vi.fn(),
+  routerPush: vi.fn(),
 }));
 
 vi.mock("next/navigation", () => ({
   useRouter: () => ({
-    push: vi.fn(),
+    push: mocks.routerPush,
   }),
 }));
 
@@ -42,9 +44,15 @@ vi.mock("@/src/components/hosted-onboarding/auth-dialog", () => ({
   },
 }));
 
-vi.mock("@/src/components/hosted-onboarding/client-api", () => ({
-  requestHostedOnboardingJson: vi.fn(),
-}));
+vi.mock("@/src/components/hosted-onboarding/client-api", async () => {
+  const actual = await vi.importActual<
+    typeof import("@/src/components/hosted-onboarding/client-api")
+  >("@/src/components/hosted-onboarding/client-api");
+  return {
+    ...actual,
+    requestHostedOnboardingJson: mocks.requestHostedOnboardingJson,
+  };
+});
 
 vi.mock("@/src/components/hosted-onboarding/hosted-auth-navigation", () => ({
   navigateHostedAuthRedirect: mocks.navigateHostedAuthRedirect,
@@ -117,4 +125,44 @@ test("renders the Messages alternative as a compact ghost button and opens sign-
   });
 
   expect(mocks.authDialogProps?.open).toBe(true);
+});
+
+test("links an active Family draft conflict to Settings and preserves the invite", async () => {
+  const { HostedOnboardingApiError } = await import(
+    "@/src/components/hosted-onboarding/client-api"
+  );
+  mocks.requestHostedOnboardingJson.mockRejectedValueOnce(
+    new HostedOnboardingApiError({
+      code: "HOSTED_FAMILY_DRAFT_CHECKOUT_ACTIVE",
+      message: "Resolve the unfinished Family checkout first.",
+    }),
+  );
+  const { FamilyInviteWebAcceptButton } = await import(
+    "@/src/components/family/family-invite-accept-client"
+  );
+  const inviteCode = "invite_return_target";
+  const rendered = await renderClientComponent(
+    createElement(FamilyInviteWebAcceptButton, { inviteCode }),
+  );
+  cleanupRender = rendered.cleanup;
+
+  await act(async () => {
+    rendered.button.dispatchEvent(
+      new rendered.window.Event("click", { bubbles: true }),
+    );
+  });
+
+  expect(rendered.container.textContent).toContain("Open Family settings");
+  const recoveryButton = [...rendered.window.document.querySelectorAll("button")]
+    .find((button) => button.textContent === "Open Family settings");
+  expect(recoveryButton).toBeTruthy();
+  await act(async () => {
+    recoveryButton?.dispatchEvent(
+      new rendered.window.Event("click", { bubbles: true }),
+    );
+  });
+
+  expect(mocks.routerPush).toHaveBeenCalledWith(
+    "/settings?familyInviteReturn=%2Ffamily%2Faccept%2Finvite_return_target#subscription",
+  );
 });

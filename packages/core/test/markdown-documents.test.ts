@@ -273,6 +273,126 @@ describe("markdown document primitives", () => {
     expect(updated.record.tags).toEqual(["sleep", "recovery"]);
   });
 
+  it("advances the schedule anchor only for timing transitions", async () => {
+    const vaultRoot = await makeVaultRoot();
+    const createdAt = "2026-07-29T12:00:00.000Z";
+    const created = await upsertAutomation({
+      vaultRoot,
+      now: new Date(createdAt),
+      ...createAutomationPayload({
+        schedule: { everyMs: 48 * 60 * 60 * 1_000, kind: "every" },
+      }),
+    });
+    expect(created.record.scheduleAnchorAt).toBe(createdAt);
+
+    const wordingEdit = await patchAutomation({
+      vaultRoot,
+      instructions: "Use refreshed availability without changing cadence.",
+      lookup: created.record.automationId,
+      now: new Date("2026-07-30T00:00:00.000Z"),
+    });
+    expect(wordingEdit.record.scheduleAnchorAt).toBe(createdAt);
+    expect(wordingEdit.record.updatedAt).toBe("2026-07-30T00:00:00.000Z");
+
+    const scheduleEdit = await patchAutomation({
+      vaultRoot,
+      lookup: created.record.automationId,
+      now: new Date("2026-07-30T01:00:00.000Z"),
+      schedule: { everyMs: 72 * 60 * 60 * 1_000, kind: "every" },
+    });
+    expect(scheduleEdit.record.scheduleAnchorAt).toBe(
+      "2026-07-30T01:00:00.000Z",
+    );
+
+    const paused = await patchAutomation({
+      vaultRoot,
+      lookup: created.record.automationId,
+      now: new Date("2026-07-30T02:00:00.000Z"),
+      status: "paused",
+    });
+    expect(paused.record.scheduleAnchorAt).toBe(
+      "2026-07-30T01:00:00.000Z",
+    );
+
+    const reactivated = await patchAutomation({
+      vaultRoot,
+      lookup: created.record.automationId,
+      now: new Date("2026-07-30T03:00:00.000Z"),
+      status: "active",
+    });
+    expect(reactivated.record.scheduleAnchorAt).toBe(
+      "2026-07-30T03:00:00.000Z",
+    );
+    expect(parseFrontmatterDocument(reactivated.record.markdown).attributes)
+      .toMatchObject({
+        scheduleAnchorAt: "2026-07-30T03:00:00.000Z",
+      });
+  });
+
+  it("preserves an explicit recurring timezone across a partial schedule patch", async () => {
+    const vaultRoot = await makeVaultRoot();
+    const created = await upsertAutomation({
+      vaultRoot,
+      ...createAutomationPayload({
+        schedule: {
+          kind: "dailyLocal",
+          localTime: "21:00",
+          timeZone: "America/Chicago",
+        },
+      }),
+    });
+
+    const patched = await patchAutomation({
+      vaultRoot,
+      lookup: created.record.automationId,
+      schedule: { kind: "dailyLocal", localTime: "22:00" },
+    });
+    expect(patched.record.schedule).toEqual({
+      kind: "dailyLocal",
+      localTime: "22:00",
+      timeZone: "America/Chicago",
+    });
+
+    const changedKind = await patchAutomation({
+      vaultRoot,
+      lookup: created.record.automationId,
+      schedule: { kind: "cron", expression: "0 23 * * *" },
+    });
+    expect(changedKind.record.schedule).toEqual({
+      kind: "cron",
+      expression: "0 23 * * *",
+      timeZone: "America/Chicago",
+    });
+
+    const changedZone = await patchAutomation({
+      vaultRoot,
+      lookup: created.record.automationId,
+      schedule: {
+        kind: "cron",
+        expression: "0 23 * * *",
+        timeZone: "America/Denver",
+      },
+    });
+    expect(changedZone.record.schedule).toEqual({
+      kind: "cron",
+      expression: "0 23 * * *",
+      timeZone: "America/Denver",
+    });
+
+    const vaultRelative = await upsertAutomation({
+      vaultRoot,
+      ...createAutomationPayload({
+        slug: "vault-relative-check-in",
+        schedule: { kind: "dailyLocal", localTime: "08:00" },
+        title: "Vault relative check-in",
+      }),
+    });
+    expect(vaultRelative.record.schedule).toEqual({
+      kind: "dailyLocal",
+      localTime: "08:00",
+    });
+  });
+
   it("round-trips activeUntil and archives only the current elapsed definition", async () => {
     const vaultRoot = await makeVaultRoot();
     const created = await upsertAutomation({
@@ -376,6 +496,34 @@ describe("markdown document primitives", () => {
       instructions: updated.record.instructions,
       updatedAt: updated.record.updatedAt,
     });
+  });
+
+  it("keeps create-only automation upserts atomic and leaves an existing record unchanged", async () => {
+    const vaultRoot = await makeVaultRoot();
+    const created = await upsertAutomation({
+      vaultRoot,
+      now: new Date("2031-02-14T12:00:00.000Z"),
+      ...createAutomationPayload({
+        slug: "create-only-reminder",
+        status: "paused",
+      }),
+    });
+
+    await expect(upsertAutomation({
+      vaultRoot,
+      createOnly: true,
+      now: new Date("2031-02-14T12:01:00.000Z"),
+      ...createAutomationPayload({
+        slug: "create-only-reminder",
+        status: "active",
+        title: "Replacement reminder",
+      }),
+    })).rejects.toMatchObject({ code: "VAULT_AUTOMATION_CONFLICT" });
+
+    await expect(showAutomation({
+      slug: "create-only-reminder",
+      vaultRoot,
+    })).resolves.toEqual(created.record);
   });
 
   it("allows first support-series assignment but preserves ownership thereafter", async () => {

@@ -319,6 +319,7 @@ export interface DeviceSyncWebhookTraceRecord {
 }
 
 export interface ClaimDeviceSyncWebhookTraceInput extends DeviceSyncWebhookTraceRecord {
+  claimedAt: string;
   claimToken: string;
   processingExpiresAt: string;
 }
@@ -489,6 +490,8 @@ export interface ProviderWebhookResult {
   eventType: string;
   traceId: string;
   occurredAt?: string;
+  /** Verified provider-envelope send time, when the webhook signature carries one. */
+  providerSentAt?: string;
   // Keep top-level parser data narrow; provider-owned jobs may carry sanitized payload hints.
   resourceCategory?: string | null;
   /** Source this provider event is attributable to, including lifecycle events. */
@@ -522,6 +525,8 @@ export interface DeviceSyncIngressWebhook {
   eventType: string;
   jobs: readonly DeviceSyncJobInput[];
   occurredAt?: string;
+  /** See `ProviderWebhookResult.providerSentAt`. */
+  providerSentAt?: string;
   // Accepted and unknown ingress hooks receive stripped summary plus provider-owned job hints.
   resourceCategory?: string | null;
   /** See `ProviderWebhookResult.sourceProviderSlug`. */
@@ -628,7 +633,8 @@ export interface DeviceSyncPublicIngressConnectionEstablishedResult {
 
 export type DeviceSyncPublicIngressConnectionSourceObservedResult =
   | { sourceAdmissionCommitted: true }
-  | { sourceRegistrationRemoved: true };
+  | { sourceRegistrationRemoved: true }
+  | { sourceAdmissionDeferred: true };
 
 export interface DeviceSyncPublicIngressConnectionSourceAdmissionRejectedInput {
   account: PublicDeviceSyncAccount;
@@ -658,6 +664,8 @@ export interface DeviceSyncPublicIngressWebhookAcceptedInput {
 
 export interface DeviceSyncPublicIngressWebhookAcceptedResult {
   webhookTraceCompleted: true;
+  /** The runtime owned receipt/source disposition inside its authority boundary. */
+  receiptStateOwned?: true;
 }
 
 export interface DeviceSyncPublicIngressWebhookAlreadySatisfiedInput {
@@ -733,11 +741,13 @@ export interface ProviderScheduleResult {
 
 export interface ProviderSnapshotImportReceipt {
   canonicalEventCount: number;
+  canonicalEventExternalRefResourceIds?: readonly string[];
   durableDeliveryAccepted: boolean;
 }
 
 export interface ProviderJobConnectionSource {
   displayName: string | null;
+  firstSeenAt?: string;
   lastErrorCode: string | null;
   lastErrorMessage: string | null;
   resourceAvailabilitySummary?: DeviceConnectionSourceResourceAvailabilitySummary;
@@ -750,6 +760,9 @@ export interface ProviderJobContext {
   account: DeviceSyncAccount;
   now: string;
   signal?: AbortSignal;
+  // Standalone sync discovers provider sub-sources from the provider API.
+  // Hosted sync must treat the Web projection as the admission authority.
+  connectionSourceAdmissionMode?: "discover_unlisted" | "listed_only";
   shouldYield?(): boolean;
   throwIfAborted?(): void;
   // Providers must route job-time side effects through this context instead of

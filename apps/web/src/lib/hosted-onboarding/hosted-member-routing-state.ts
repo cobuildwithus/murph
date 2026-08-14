@@ -11,6 +11,7 @@ import {
   type HostedLinqParticipantContactClaim,
 } from "./linq-participant-contact";
 import type { HostedOnboardingReadClient } from "./shared";
+import { readHostedUserSecureBoxStringRootReference } from "../hosted-crypto/secure-box";
 
 export const hostedMemberRoutingStateSelect =
   Prisma.validator<Prisma.HostedMemberRoutingSelect>()({
@@ -38,6 +39,67 @@ export const hostedMemberRoutingStateSelect =
 export type HostedMemberRoutingRecord = Prisma.HostedMemberRoutingGetPayload<{
   select: typeof hostedMemberRoutingStateSelect;
 }>;
+
+const HOSTED_MEMBER_ROUTING_RECORD_KEYS = [
+  "linqChatIdEncrypted",
+  "linqChatLookupKey",
+  "linqHomeLineAssignedAt",
+  "linqParticipantContactKind",
+  "linqParticipantContactLookupKey",
+  "linqRecipientPhoneEncrypted",
+  "linqRecipientPhoneLookupKey",
+  "memberId",
+  "pendingLinqChatIdEncrypted",
+  "pendingLinqChatLookupKey",
+  "pendingLinqParticipantContactEncrypted",
+  "pendingLinqParticipantContactKind",
+  "pendingLinqParticipantContactLookupKey",
+  "pendingLinqParticipantContactObservedAt",
+  "pendingLinqRecipientPhoneEncrypted",
+  "pendingLinqRecipientPhoneLookupKey",
+  "replyAliasLookupKey",
+  "telegramUserIdEncrypted",
+  "telegramUserLookupKey",
+] as const satisfies readonly (keyof HostedMemberRoutingRecord)[];
+
+export function hostedMemberRoutingRecordsEqual(
+  current: HostedMemberRoutingRecord | null,
+  prepared: HostedMemberRoutingRecord | null,
+): boolean {
+  if (!current || !prepared) {
+    return current === prepared;
+  }
+  return HOSTED_MEMBER_ROUTING_RECORD_KEYS.every((key) => {
+    const currentValue = current[key];
+    const preparedValue = prepared[key];
+    return currentValue instanceof Date && preparedValue instanceof Date
+      ? currentValue.getTime() === preparedValue.getTime()
+      : currentValue === preparedValue;
+  });
+}
+
+export function readHostedMemberRoutingControlRootKeyIds(
+  routing: HostedMemberRoutingRecord | null,
+): string[] {
+  if (!routing) {
+    return [];
+  }
+  const encryptedValues = [
+    routing.linqChatIdEncrypted,
+    routing.linqRecipientPhoneEncrypted,
+    routing.pendingLinqChatIdEncrypted,
+    routing.pendingLinqParticipantContactEncrypted,
+    routing.pendingLinqRecipientPhoneEncrypted,
+    routing.telegramUserIdEncrypted,
+  ];
+  return [...new Set(encryptedValues.flatMap((value) => {
+    const reference = readHostedUserSecureBoxStringRootReference({
+      lane: "hosted-member-private-field",
+      value,
+    });
+    return reference ? [reference.rootKeyId] : [];
+  }))];
+}
 
 export const hostedMemberRoutingLookupSelect =
   Prisma.validator<Prisma.HostedMemberRoutingSelect>()({
@@ -132,8 +194,13 @@ export interface HostedMemberRoutingLookup {
 export async function projectHostedMemberRoutingState(
   routing: HostedMemberRoutingRecord,
   prisma?: HostedOnboardingReadClient,
+  retainFailureInScopedCache?: boolean,
 ): Promise<HostedMemberRoutingStateSnapshot> {
-  const privateState = await readHostedMemberRoutingPrivateState(routing, prisma);
+  const privateState = await readHostedMemberRoutingPrivateState(
+    routing,
+    prisma,
+    retainFailureInScopedCache,
+  );
 
   return {
     hasPendingLinqRouteState: [

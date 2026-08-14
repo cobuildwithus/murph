@@ -6,6 +6,7 @@ import {
   summarizeRecentOverviewJournals,
 } from "../overview.ts";
 import type { VaultReadModel } from "../read-model.ts";
+import { emptyPersonalPatternReport } from "../personal-patterns.ts";
 import {
   selectBrowserVaultExperimentSummary as selectExperimentSummaryFromReplica,
   selectBrowserVaultTrackedExperiments as selectTrackedExperimentsFromReplica,
@@ -13,37 +14,39 @@ import {
 import {
   RECENT_JOURNAL_LIMIT,
   TIMELINE_LIMIT,
+  type BrowserVaultCoreCapableQueryClient,
+  type BrowserVaultCoreReplica,
   type BrowserVaultEntity,
   type BrowserVaultOverviewView,
-  type BrowserVaultQueryClient,
-  type BrowserVaultReplica,
   type BrowserVaultTimelineRow,
 } from "./shared.ts";
 
-export function selectBrowserVaultOverview(client: BrowserVaultQueryClient): BrowserVaultOverviewView {
+export function selectBrowserVaultOverview(client: BrowserVaultCoreCapableQueryClient): BrowserVaultOverviewView {
   const vault = vaultViewFromReplica(client.replica);
   return {
     experimentSummary: selectExperimentSummaryFromReplica(client),
     metrics: buildOverviewMetrics(vault),
+    personalPatterns: client.replica.personalPatterns
+      ?? emptyPersonalPatternReport(client.replica.generatedAt.slice(0, 10)),
     recentJournals: summarizeRecentOverviewJournals(vault, RECENT_JOURNAL_LIMIT),
     trackedExperiments: selectTrackedExperimentsFromReplica(client),
     weeklySampleSummaries: client.replica.weeklySampleSummaries.slice(),
   };
 }
 
-export function selectBrowserVaultHistory(client: BrowserVaultQueryClient): { timeline: BrowserVaultTimelineRow[] } {
+export function selectBrowserVaultHistory(client: BrowserVaultCoreCapableQueryClient): { timeline: BrowserVaultTimelineRow[] } {
   return { timeline: client.timeline.list().slice(0, TIMELINE_LIMIT) };
 }
 
-export function selectBrowserVaultTrackedExperiments(client: BrowserVaultQueryClient): OverviewExperiment[] {
+export function selectBrowserVaultTrackedExperiments(client: BrowserVaultCoreCapableQueryClient): OverviewExperiment[] {
   return selectTrackedExperimentsFromReplica(client);
 }
 
-export function selectBrowserVaultExperimentSummary(client: BrowserVaultQueryClient): OverviewExperimentSummary {
+export function selectBrowserVaultExperimentSummary(client: BrowserVaultCoreCapableQueryClient): OverviewExperimentSummary {
   return selectExperimentSummaryFromReplica(client);
 }
 
-function vaultViewFromReplica(replica: BrowserVaultReplica): VaultReadModel {
+function vaultViewFromReplica(replica: BrowserVaultCoreReplica): VaultReadModel {
   const byFamily: Partial<Record<CanonicalEntityFamily, CanonicalEntity[]>> = {};
   const entities = replica.entities.map(entityFromBrowserEntity);
   for (const entity of entities) {

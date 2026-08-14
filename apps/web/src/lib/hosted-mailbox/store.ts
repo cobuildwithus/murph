@@ -8,6 +8,7 @@ import {
   HOSTED_MAILBOX_PAYLOAD_SCHEMA,
   isHostedMailboxKind,
   isHostedMailboxLane,
+  isHostedRetiredMailboxKind,
   type HostedMailboxFetchCursorMode,
   type HostedMailboxItem,
   type HostedMailboxKind,
@@ -31,9 +32,23 @@ import type {
 import type {
   HostedRuntimeSubscriptionAction,
 } from "@murphai/hosted-execution/subscription";
-import { parseHostedEmailThreadTarget } from "@murphai/runtime-state";
+import {
+  getHostedCryptoDomainForLane,
+  parseHostedEmailThreadTarget,
+} from "@murphai/runtime-state";
 import { Prisma, type PrismaClient } from "@prisma/client";
 
+import {
+  prepareHostedDomainRootForWeb,
+  revalidatePreparedHostedDomainRootForWebTx,
+  HostedDomainRootPreparationMismatchError,
+  type PreparedHostedDomainRootForWeb,
+} from "../hosted-crypto/domain-root-store";
+import {
+  runWithFreshHostedDomainRootUnwrapCache,
+  runWithHostedDomainRootUnwrapCache,
+  type CachedUnwrappedHostedDomainRoot,
+} from "../hosted-crypto/domain-root-unwrap-cache";
 import {
   formatHostedExecutionSafeLogErrorDetails,
 } from "../hosted-execution/logging";
@@ -50,8 +65,13 @@ import {
   acquireHostedLinqChatOwnershipLockTx,
 } from "../hosted-routing/linq-chat-ownership-lock";
 import {
+  decryptHostedMailboxPayloadStringsWithPreparedRoots,
   decryptHostedMailboxPayloadString,
   encryptHostedMailboxPayloadString,
+  prewarmHostedMailboxPayloadActiveRoot,
+  prewarmHostedMailboxPayloadStrings,
+  type HostedMailboxPayloadCryptoMetadata,
+  encryptHostedMailboxPayloadStringFromPreparedRoot,
   type HostedMailboxPayloadStorage,
 } from "./encryption";
 import { hashHostedMailboxStoredPayload } from "./fingerprint";
@@ -119,6 +139,46 @@ export interface HostedMailboxSourceConversationEntry {
   itemId: string;
   userId: string;
   wake: HostedExecutionConversationMessageWake | null;
+}
+
+export interface HostedMailboxSourceConversationPreparationRow {
+  causalSeq: bigint | null;
+  createdAt: Date;
+  dedupeKey: string;
+  expiresAt: Date | null;
+  itemId: string;
+  kind: string;
+  lane: string;
+  laneSeq: bigint;
+  occurredAt: Date;
+  payloadInlineCiphertext: string | null;
+  payloadRef: string | null;
+  payloadSchema: string;
+  sidecarMailboxItemId: string | null;
+  sidecarPayloadCiphertext: string | null;
+  sidecarPayloadSchema: string | null;
+  sidecarUserId: string | null;
+  sourceMessageLookupKey: string | null;
+  userId: string;
+}
+
+export interface HostedMailboxSourceConversationPreparation {
+  preparedAt: Date;
+  rows: readonly HostedMailboxSourceConversationPreparationRow[];
+  sourceMessageLookupKeys: readonly string[];
+}
+
+export class HostedMailboxSourceConversationPreparationMismatchError extends Error {
+  constructor() {
+    super("Hosted mailbox source conversation changed after preparation.");
+    this.name = "HostedMailboxSourceConversationPreparationMismatchError";
+  }
+}
+
+export function isHostedMailboxSourceConversationPreparationMismatchError(
+  error: unknown,
+): error is HostedMailboxSourceConversationPreparationMismatchError {
+  return error instanceof HostedMailboxSourceConversationPreparationMismatchError;
 }
 
 export interface HostedMailboxLaneCursor {
@@ -228,48 +288,178 @@ interface AppendHostedMailboxItemInternalInput extends AppendHostedMailboxItemBa
   sourceMessageLookupKey?: string | null;
 }
 
+interface NormalizedHostedMailboxAppendInput {
+  dedupeKey: string;
+  expiresAt: Date | null;
+  kind: HostedMailboxKind;
+  lane: HostedMailboxLane;
+  occurredAt: Date;
+  payloadBytes: number;
+  payloadHash: string;
+  payloadSchema: string;
+  serialized: string;
+  userId: string;
+}
+
+type HostedMailboxAppendEncryptionOwner =
+  | { mode: "legacy-transaction" }
+  | {
+      mode: "prepared-root";
+      prepared: PreparedHostedMailboxItemAppendCrypto;
+    };
+
+type HostedMailboxPayloadEncryptionOwner =
+  | {
+      mode: "legacy-provider-capable";
+      prisma: HostedMailboxStoreClient;
+    }
+  | {
+      mode: "prepared-root-local-only";
+      root: Promise<CachedUnwrappedHostedDomainRoot>;
+      rootKeyId: string;
+    };
+
+const HOSTED_MAILBOX_APPEND_CRYPTO_DOMAIN =
+  getHostedCryptoDomainForLane("mailbox-payload");
+const HOSTED_MAILBOX_APPEND_CRYPTO_PREPARATION_ATTEMPTS = 2;
+export type PreparedHostedMailboxItemAppendCrypto =
+  PreparedHostedDomainRootForWeb;
+
+/**
+ * Provider-capable mailbox crypto preparation. The returned token contains
+ * crypto identity only, grants no member/workspace/route authority, and is
+ * usable solely while the exact unwrapped ingress root remains in the
+ * surrounding request-scoped cache.
+ */
+export async function prepareHostedMailboxItemAppendCrypto(input: {
+  prisma: PrismaClient;
+  userId: string;
+}): Promise<PreparedHostedMailboxItemAppendCrypto> {
+  const userId = requireNonEmptyString(input.userId, "Hosted mailbox userId");
+  return prepareHostedDomainRootForWeb({
+    domain: HOSTED_MAILBOX_APPEND_CRYPTO_DOMAIN,
+    prepareMissing: false,
+    prisma: input.prisma,
+    reason: "hosted-mailbox.append-payload",
+    userId,
+  });
+}
+
+async function revalidatePreparedHostedMailboxAppendCryptoTx(input: {
+  prepared: PreparedHostedMailboxItemAppendCrypto;
+  tx: HostedMailboxMutationTx;
+  userId: string;
+}): Promise<{
+  root: Promise<CachedUnwrappedHostedDomainRoot>;
+  rootKeyId: string;
+}> {
+  const prepared = input.prepared;
+  if (
+    !prepared
+    || typeof prepared !== "object"
+    || prepared.domain !== HOSTED_MAILBOX_APPEND_CRYPTO_DOMAIN
+    || prepared.userId !== input.userId
+    || typeof prepared.rootKeyId !== "string"
+    || prepared.rootKeyId.trim().length === 0
+  ) {
+    throw new TypeError(
+      "Hosted mailbox append prepared crypto identity does not match the append.",
+    );
+  }
+  return revalidatePreparedHostedDomainRootForWebTx({
+    prepared,
+    tx: input.tx,
+  });
+}
+
 export async function appendHostedMailboxItem(
   input: AppendHostedMailboxItemBaseInput & {
     prisma?: PrismaClient;
   },
 ): Promise<AppendHostedMailboxItemResult> {
   const prisma = input.prisma ?? getPrisma();
+  const normalized = normalizeHostedMailboxAppendInput(input);
+  const existingBeforePreparation = await findHostedMailboxItemByDedupeKeyTx({
+    dedupeKey: normalized.dedupeKey,
+    tx: prisma,
+    userId: normalized.userId,
+  });
+  if (existingBeforePreparation) {
+    const duplicate = await buildHostedMailboxDuplicateResult({
+      existing: existingBeforePreparation,
+      normalized,
+    });
+    recordHostedMailboxDedupeConflictLog({
+      dedupeConflict: duplicate.dedupeConflict,
+      existing: existingBeforePreparation,
+      kind: normalized.kind,
+      lane: normalized.lane,
+      payloadBytes: normalized.payloadBytes,
+      payloadHash: normalized.payloadHash,
+      payloadSchema: normalized.payloadSchema,
+    });
+    return duplicate;
+  }
 
   try {
-    return await prisma.$transaction((tx) => appendHostedMailboxItemTx({
-      ...input,
-      tx,
-    }));
+    for (
+      let attempt = 0;
+      attempt < HOSTED_MAILBOX_APPEND_CRYPTO_PREPARATION_ATTEMPTS;
+      attempt += 1
+    ) {
+      try {
+        const runAttempt = async () => {
+          const prepared = await prepareHostedMailboxItemAppendCrypto({
+            prisma,
+            userId: normalized.userId,
+          });
+          return prisma.$transaction((tx) =>
+            appendHostedMailboxItemWithPreparedCryptoTx({
+              dedupeKey: normalized.dedupeKey,
+              expiresAt: normalized.expiresAt,
+              kind: normalized.kind,
+              lane: normalized.lane,
+              occurredAt: normalized.occurredAt,
+              payloadSchema: normalized.payloadSchema,
+              payloadSerializedJson: normalized.serialized,
+              prepared,
+              tx,
+              userId: normalized.userId,
+            })
+          );
+        };
+        return await (attempt === 0
+          ? runWithHostedDomainRootUnwrapCache(runAttempt)
+          : runWithFreshHostedDomainRootUnwrapCache(runAttempt));
+      } catch (error) {
+        if (!(error instanceof HostedDomainRootPreparationMismatchError)) {
+          throw error;
+        }
+        if (
+          attempt + 1
+          >= HOSTED_MAILBOX_APPEND_CRYPTO_PREPARATION_ATTEMPTS
+        ) {
+          throw error;
+        }
+      }
+    }
+
+    throw new Error(
+      "Hosted mailbox append crypto preparation retry exhausted unexpectedly.",
+    );
   } catch (error) {
     if (isPrismaUniqueConstraintError(error)) {
       const existing = await findHostedMailboxItemByDedupeKeyTx({
-        dedupeKey: input.dedupeKey,
+        dedupeKey: normalized.dedupeKey,
         tx: prisma,
-        userId: input.userId,
+        userId: normalized.userId,
       });
 
       if (existing) {
-        const payloadMetadata = deriveHostedMailboxStoredPayloadMetadata({
-          payloadSerializedJson: input.payloadSerializedJson,
-          userId: input.userId,
+        return buildHostedMailboxDuplicateResult({
+          existing,
+          normalized,
         });
-
-        return {
-          duplicate: true,
-          dedupeConflict: hasHostedMailboxDedupeConflict({
-            existing,
-            kind: input.kind,
-            lane: input.lane,
-            payloadBytes: payloadMetadata.payloadBytes,
-            payloadHash: payloadMetadata.payloadHash,
-            payloadSchema: normalizeNullableString(input.payloadSchema)
-              ?? HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA,
-          }),
-          inserted: false,
-          item: await hydrateHostedMailboxItemTx({
-            record: existing,
-          }),
-        };
       }
     }
 
@@ -277,6 +467,10 @@ export async function appendHostedMailboxItem(
   }
 }
 
+/**
+ * Legacy provider-capable transaction surface retained for separately migrated
+ * callers. New generic owners must use the prepared transaction surface below.
+ */
 export async function appendHostedMailboxItemTx(
   input: AppendHostedMailboxItemBaseInput & {
     tx: HostedMailboxMutationTx;
@@ -288,27 +482,60 @@ export async function appendHostedMailboxItemTx(
   });
 }
 
+/**
+ * Transaction-safe generic append surface. Crypto must be prepared before the
+ * transaction begins; this owner revalidates root authority and seals only
+ * from the exact request-scoped cache entry represented by `prepared`. The
+ * token does not replace any caller-owned admission or target checks.
+ */
+export async function appendHostedMailboxItemWithPreparedCryptoTx(
+  input: AppendHostedMailboxItemBaseInput & {
+    prepared: PreparedHostedMailboxItemAppendCrypto;
+    tx: HostedMailboxMutationTx;
+  },
+): Promise<AppendHostedMailboxItemResult> {
+  return appendHostedMailboxItemWithEncryptionTx({
+    ...input,
+    assistantInputLookupKey: null,
+    encryption: {
+      mode: "prepared-root",
+      prepared: input.prepared,
+    },
+  });
+}
+
 async function appendHostedMailboxItemWithAssistantInputLookupKeyTx(
   input: AppendHostedMailboxItemInternalInput & {
     assistantInputLookupKey: string | null;
     tx: HostedMailboxMutationTx;
   },
 ): Promise<AppendHostedMailboxItemResult> {
-  const userId = requireNonEmptyString(input.userId, "Hosted mailbox userId");
-  const lane = requireHostedMailboxLane(input.lane);
-  const dedupeKey = requireNonEmptyString(input.dedupeKey, "Hosted mailbox dedupeKey");
-  const kind = requireHostedMailboxKind(input.kind);
-  const occurredAt = requireDate(input.occurredAt, "Hosted mailbox occurredAt");
-  const expiresAt = input.expiresAt === undefined || input.expiresAt === null
-    ? null
-    : requireDate(input.expiresAt, "Hosted mailbox expiresAt");
-  const payloadSchema = normalizeNullableString(input.payloadSchema)
-    ?? HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA;
-  const payloadMetadata = deriveHostedMailboxStoredPayloadMetadata({
-    payloadSerializedJson: input.payloadSerializedJson,
-    userId,
+  return appendHostedMailboxItemWithEncryptionTx({
+    ...input,
+    encryption: { mode: "legacy-transaction" },
   });
-  const { payloadBytes, payloadHash, serialized } = payloadMetadata;
+}
+
+async function appendHostedMailboxItemWithEncryptionTx(
+  input: AppendHostedMailboxItemInternalInput & {
+    assistantInputLookupKey: string | null;
+    encryption: HostedMailboxAppendEncryptionOwner;
+    tx: HostedMailboxMutationTx;
+  },
+): Promise<AppendHostedMailboxItemResult> {
+  const normalized = normalizeHostedMailboxAppendInput(input);
+  const {
+    dedupeKey,
+    expiresAt,
+    kind,
+    lane,
+    occurredAt,
+    payloadBytes,
+    payloadHash,
+    payloadSchema,
+    serialized,
+    userId,
+  } = normalized;
   const sourceMessageLookupKey = input.sourceMessageLookupKey === undefined
     || input.sourceMessageLookupKey === null
     ? null
@@ -316,6 +543,19 @@ async function appendHostedMailboxItemWithAssistantInputLookupKeyTx(
         input.sourceMessageLookupKey,
         "Hosted mailbox sourceMessageLookupKey",
       );
+  const payloadEncryption = input.encryption.mode === "prepared-root"
+    ? {
+        mode: "prepared-root-local-only" as const,
+        ...await revalidatePreparedHostedMailboxAppendCryptoTx({
+          prepared: input.encryption.prepared,
+          tx: input.tx,
+          userId,
+        }),
+      }
+    : {
+        mode: "legacy-provider-capable" as const,
+        prisma: input.tx,
+      };
   await acquireHostedMailboxDedupeAppendLockTx({
     dedupeKey,
     tx: input.tx,
@@ -374,6 +614,7 @@ async function appendHostedMailboxItemWithAssistantInputLookupKeyTx(
   });
   const payloadStorage = await encryptHostedMailboxPayloadStorage({
     dedupeKey,
+    encryption: payloadEncryption,
     itemId,
     kind,
     lane,
@@ -381,7 +622,6 @@ async function appendHostedMailboxItemWithAssistantInputLookupKeyTx(
     occurredAt,
     payloadBytes,
     payloadSchema,
-    prisma: input.tx,
     serialized,
     userId,
   });
@@ -514,7 +754,31 @@ export async function appendHostedMailboxEnvelopeTx(input: {
   envelope: HostedMailboxProducerEnvelope;
   tx: HostedMailboxMutationTx;
 }): Promise<AppendHostedMailboxItemResult> {
-  return appendHostedMailboxEnvelopeInternalTx(input);
+  return appendHostedMailboxEnvelopeInternalTx({
+    ...input,
+    encryption: { mode: "legacy-transaction" },
+  });
+}
+
+/**
+ * Transaction-safe envelope append surface for callers that prepared mailbox
+ * crypto before opening their owner transaction. Envelope target and workspace
+ * authority remain transaction-owned; the prepared token supplies only the
+ * exact local ingress-root capability used by the final append.
+ */
+export async function appendHostedMailboxEnvelopeWithPreparedCryptoTx(input: {
+  envelope: HostedMailboxProducerEnvelope;
+  prepared: PreparedHostedMailboxItemAppendCrypto;
+  sourceMessageLookupKey?: string;
+  tx: HostedMailboxMutationTx;
+}): Promise<AppendHostedMailboxItemResult> {
+  return appendHostedMailboxEnvelopeInternalTx({
+    ...input,
+    encryption: {
+      mode: "prepared-root",
+      prepared: input.prepared,
+    },
+  });
 }
 
 export async function appendHostedMailboxEnvelopeWithSourceMessageTx(input: {
@@ -522,12 +786,15 @@ export async function appendHostedMailboxEnvelopeWithSourceMessageTx(input: {
   sourceMessageLookupKey: string;
   tx: HostedMailboxMutationTx;
 }): Promise<AppendHostedMailboxItemResult> {
-  return appendHostedMailboxEnvelopeInternalTx(input);
+  return appendHostedMailboxEnvelopeInternalTx({
+    ...input,
+    encryption: { mode: "legacy-transaction" },
+  });
 }
 
 export async function appendHostedMailboxEnvelopeWithIdentityTx(input: {
   envelope: HostedMailboxProducerEnvelope;
-  expiresAt: Date | string;
+  expiresAt: Date | string | null;
   itemId: string;
   tx: HostedMailboxMutationTx;
 }): Promise<AppendHostedMailboxItemResult> {
@@ -535,10 +802,15 @@ export async function appendHostedMailboxEnvelopeWithIdentityTx(input: {
   if (itemId !== input.envelope.eventId) {
     throw new TypeError("Hosted mailbox item identity must equal the envelope event id.");
   }
-  return appendHostedMailboxEnvelopeInternalTx({ ...input, itemId });
+  return appendHostedMailboxEnvelopeInternalTx({
+    ...input,
+    encryption: { mode: "legacy-transaction" },
+    itemId,
+  });
 }
 
 async function appendHostedMailboxEnvelopeInternalTx(input: {
+  encryption: HostedMailboxAppendEncryptionOwner;
   envelope: HostedMailboxProducerEnvelope;
   expiresAt?: Date | string | null;
   itemId?: string;
@@ -574,7 +846,7 @@ async function appendHostedMailboxEnvelopeInternalTx(input: {
       )
     : null;
 
-  return appendHostedMailboxItemWithAssistantInputLookupKeyTx({
+  return appendHostedMailboxItemWithEncryptionTx({
     assistantInputLookupKey,
     dedupeKey: envelope.eventId,
     ...(input.expiresAt === undefined ? {} : { expiresAt: input.expiresAt }),
@@ -586,6 +858,7 @@ async function appendHostedMailboxEnvelopeInternalTx(input: {
     ...(input.sourceMessageLookupKey === undefined
       ? {}
       : { sourceMessageLookupKey: input.sourceMessageLookupKey }),
+    encryption: input.encryption,
     tx: input.tx,
     userId: envelope.userId,
   });
@@ -1412,13 +1685,90 @@ export async function readHostedMailboxWakeByDedupeKey(input: {
   return decoded ? parseHostedExecutionWake(decoded) : null;
 }
 
+export async function readHostedMailboxSourceConversationPreparation(input: {
+  preparedAt?: Date;
+  prisma?: HostedMailboxStoreClient;
+  sourceMessageLookupKeys: readonly string[];
+}): Promise<HostedMailboxSourceConversationPreparation> {
+  const sourceMessageLookupKeys = normalizeHostedMailboxSourceMessageLookupKeys(
+    input.sourceMessageLookupKeys,
+  );
+  const preparedAt = input.preparedAt ?? new Date();
+  return {
+    preparedAt,
+    rows: sourceMessageLookupKeys.length === 0
+      ? []
+      : await readHostedMailboxSourceConversationRows({
+          prisma: input.prisma ?? getPrisma(),
+          sourceMessageLookupKeys,
+        }),
+    sourceMessageLookupKeys,
+  };
+}
+
+export async function prewarmHostedMailboxSourceConversationPreparation(input: {
+  preparation: HostedMailboxSourceConversationPreparation;
+  prisma?: HostedMailboxStoreClient;
+}): Promise<void> {
+  const payloadEntries = input.preparation.rows.flatMap((row) => {
+    const payload = buildHostedMailboxSourceConversationPayloadEntry({
+      availableAt: input.preparation.preparedAt,
+      row,
+    });
+    return payload ? [payload.crypto] : [];
+  });
+
+  let firstError: unknown;
+  let hasError = false;
+  try {
+    await prewarmHostedMailboxPayloadStrings({
+      entries: payloadEntries,
+      prisma: input.prisma,
+    });
+  } catch (error) {
+    firstError = error;
+    hasError = true;
+  }
+
+  const sourceUserIds = new Set(input.preparation.rows.map((row) => row.userId));
+  const appendUserId = input.preparation.rows.length <= 6 && sourceUserIds.size === 1
+    ? input.preparation.rows[0]?.userId ?? null
+    : null;
+  if (appendUserId) {
+    try {
+      await prewarmHostedMailboxPayloadActiveRoot({
+        prisma: input.prisma,
+        userId: appendUserId,
+      });
+    } catch (error) {
+      if (!hasError) {
+        firstError = error;
+        hasError = true;
+      }
+    }
+  }
+
+  if (hasError) {
+    throw firstError;
+  }
+}
+
 export async function readHostedMailboxSourceConversationEntriesTx(input: {
+  preparation: HostedMailboxSourceConversationPreparation;
   sourceMessageLookupKeys: readonly string[];
   tx: HostedMailboxMutationTx;
 }): Promise<HostedMailboxSourceConversationEntry[]> {
   const sourceMessageLookupKeys = normalizeHostedMailboxSourceMessageLookupKeys(
     input.sourceMessageLookupKeys,
   );
+  if (
+    !areHostedMailboxSourceMessageLookupKeysEqual(
+      sourceMessageLookupKeys,
+      input.preparation.sourceMessageLookupKeys,
+    )
+  ) {
+    throw new TypeError("Hosted mailbox source preparation does not match its lookup keys.");
+  }
   if (sourceMessageLookupKeys.length === 0) {
     return [];
   }
@@ -1431,41 +1781,194 @@ export async function readHostedMailboxSourceConversationEntriesTx(input: {
     sourceMessageLookupKeys,
     tx: input.tx,
   });
-  const rows = await input.tx.hostedMailboxItem.findMany({
-    orderBy: [
-      { causalSeq: "asc" },
-      { id: "asc" },
-    ],
-    select: {
-      id: true,
-      userId: true,
-    },
-    // One original plus Linq's documented five-edit limit fits in six rows.
-    // Read one extra so callers can fail closed on impossible lineage.
-    take: 7,
-    where: {
-      kind: "conversation.message",
-      sourceMessageLookupKey: {
-        in: sourceMessageLookupKeys,
-      },
-    },
+  const rows = await readHostedMailboxSourceConversationRows({
+    prisma: input.tx,
+    sourceMessageLookupKeys,
   });
+  if (!areHostedMailboxSourceConversationRowsEqual(rows, input.preparation.rows)) {
+    throw new HostedMailboxSourceConversationPreparationMismatchError();
+  }
 
-  return Promise.all(rows.map(async (row) => {
-    const wake = await readHostedMailboxWakeByItemId({
-      mailboxItemId: row.id,
-      prisma: input.tx,
-    });
-    const conversationWake = wake?.kind === "conversation.message"
+  const availableAt = new Date();
+  const payloads = rows.map((row) =>
+    buildHostedMailboxSourceConversationPayloadEntry({ availableAt, row })
+  );
+  const decrypted = await decryptHostedMailboxPayloadStringsWithPreparedRoots({
+    entries: payloads.flatMap((payload) => payload ? [payload.crypto] : []),
+  });
+  let decryptedIndex = 0;
+  return rows.map((row, rowIndex) => {
+    const payload = payloads[rowIndex];
+    const serialized = payload ? decrypted[decryptedIndex++] ?? null : null;
+    if (!serialized) {
+      return {
+        contentAvailable: false,
+        itemId: row.itemId,
+        userId: row.userId,
+        wake: null,
+      };
+    }
+    const wake = parseHostedExecutionWake(JSON.parse(serialized));
+    const conversationWake = wake.kind === "conversation.message"
       ? wake
       : null;
     return {
       contentAvailable: conversationWake !== null,
-      itemId: row.id,
+      itemId: row.itemId,
       userId: row.userId,
       wake: conversationWake,
     };
-  }));
+  });
+}
+
+const HOSTED_MAILBOX_SOURCE_CONVERSATION_MAX_ROWS = 7;
+const HOSTED_MAILBOX_SOURCE_MESSAGE_MAX_LOOKUP_KEYS = 2;
+
+async function readHostedMailboxSourceConversationRows(input: {
+  prisma: HostedMailboxStoreClient;
+  sourceMessageLookupKeys: readonly string[];
+}): Promise<HostedMailboxSourceConversationPreparationRow[]> {
+  return input.prisma.$queryRaw<HostedMailboxSourceConversationPreparationRow[]>(
+    Prisma.sql`
+      SELECT
+        item.id AS "itemId",
+        item.user_id AS "userId",
+        item.source_message_lookup_key AS "sourceMessageLookupKey",
+        item.causal_seq AS "causalSeq",
+        item.lane,
+        item.lane_seq AS "laneSeq",
+        item.dedupe_key AS "dedupeKey",
+        item.kind,
+        item.occurred_at AS "occurredAt",
+        item.payload_schema AS "payloadSchema",
+        item.payload_inline_ciphertext AS "payloadInlineCiphertext",
+        item.payload_ref AS "payloadRef",
+        item.created_at AS "createdAt",
+        item.expires_at AS "expiresAt",
+        payload.mailbox_item_id AS "sidecarMailboxItemId",
+        payload.user_id AS "sidecarUserId",
+        payload.payload_ciphertext AS "sidecarPayloadCiphertext",
+        payload.payload_schema AS "sidecarPayloadSchema"
+      FROM hosted_mailbox_item AS item
+      LEFT JOIN hosted_mailbox_payload AS payload
+        ON payload.mailbox_item_id = item.id
+       AND item.payload_inline_ciphertext IS NULL
+       AND (
+         item.payload_ref = item.id
+         OR item.payload_ref = ${HOSTED_MAILBOX_PAYLOAD_REF_PREFIX} || item.id
+       )
+      WHERE item.kind = 'conversation.message'
+        AND item.source_message_lookup_key IN (${Prisma.join(input.sourceMessageLookupKeys)})
+      ORDER BY item.causal_seq ASC NULLS FIRST, item.id ASC
+      LIMIT ${HOSTED_MAILBOX_SOURCE_CONVERSATION_MAX_ROWS}
+    `,
+  );
+}
+
+function buildHostedMailboxSourceConversationPayloadEntry(input: {
+  availableAt: Date;
+  row: HostedMailboxSourceConversationPreparationRow;
+}): {
+  crypto: HostedMailboxPayloadCryptoMetadata & {
+    value: string;
+  };
+} | null {
+  if (isHostedMailboxItemExpired(input.row, input.availableAt)) {
+    return null;
+  }
+  const inlineCiphertext = normalizeNullableString(
+    input.row.payloadInlineCiphertext,
+  );
+  if (inlineCiphertext) {
+    return {
+      crypto: {
+        dedupeKey: input.row.dedupeKey,
+        itemId: input.row.itemId,
+        kind: input.row.kind,
+        lane: input.row.lane,
+        laneSeq: input.row.laneSeq,
+        occurredAt: input.row.occurredAt.toISOString(),
+        payloadSchema: input.row.payloadSchema,
+        payloadStorage: "inline",
+        userId: input.row.userId,
+        value: inlineCiphertext,
+      },
+    };
+  }
+
+  const payloadRef = normalizeNullableString(input.row.payloadRef);
+  const sidecarCiphertext = normalizeNullableString(
+    input.row.sidecarPayloadCiphertext,
+  );
+  if (
+    !payloadRef
+    || resolveHostedMailboxPayloadRef(payloadRef) !== input.row.itemId
+    || input.row.sidecarMailboxItemId !== input.row.itemId
+    || input.row.sidecarUserId !== input.row.userId
+    || !sidecarCiphertext
+  ) {
+    return null;
+  }
+  return {
+    crypto: {
+      dedupeKey: input.row.dedupeKey,
+      itemId: input.row.itemId,
+      kind: input.row.kind,
+      lane: input.row.lane,
+      laneSeq: input.row.laneSeq,
+      occurredAt: input.row.occurredAt.toISOString(),
+      payloadSchema: HOSTED_MAILBOX_PAYLOAD_SCHEMA,
+      payloadStorage: "sidecar",
+      userId: input.row.userId,
+      value: sidecarCiphertext,
+    },
+  };
+}
+
+function areHostedMailboxSourceConversationRowsEqual(
+  current: readonly HostedMailboxSourceConversationPreparationRow[],
+  prepared: readonly HostedMailboxSourceConversationPreparationRow[],
+): boolean {
+  return current.length === prepared.length
+    && current.every((row, index) => {
+      const candidate = prepared[index];
+      return candidate !== undefined
+        && row.itemId === candidate.itemId
+        && row.userId === candidate.userId
+        && row.sourceMessageLookupKey === candidate.sourceMessageLookupKey
+        && row.causalSeq === candidate.causalSeq
+        && row.lane === candidate.lane
+        && row.laneSeq === candidate.laneSeq
+        && row.dedupeKey === candidate.dedupeKey
+        && row.kind === candidate.kind
+        && row.occurredAt.getTime() === candidate.occurredAt.getTime()
+        && row.payloadSchema === candidate.payloadSchema
+        && row.payloadInlineCiphertext === candidate.payloadInlineCiphertext
+        && row.payloadRef === candidate.payloadRef
+        && row.createdAt.getTime() === candidate.createdAt.getTime()
+        && nullableHostedMailboxDateEquals(row.expiresAt, candidate.expiresAt)
+        && row.sidecarMailboxItemId === candidate.sidecarMailboxItemId
+        && row.sidecarUserId === candidate.sidecarUserId
+        && row.sidecarPayloadCiphertext === candidate.sidecarPayloadCiphertext
+        && row.sidecarPayloadSchema === candidate.sidecarPayloadSchema;
+    });
+}
+
+function nullableHostedMailboxDateEquals(
+  left: Date | null,
+  right: Date | null,
+): boolean {
+  return left === null
+    ? right === null
+    : right !== null && left.getTime() === right.getTime();
+}
+
+function areHostedMailboxSourceMessageLookupKeysEqual(
+  left: readonly string[],
+  right: readonly string[],
+): boolean {
+  return left.length === right.length
+    && left.every((value, index) => value === right[index]);
 }
 
 export async function readHostedMailboxWakeByItemId(input: {
@@ -1560,6 +2063,35 @@ export async function hasPendingHostedEnvironmentVoiceMailboxItem(input: {
     },
   });
   return item !== null;
+}
+
+export async function readHostedMailboxUserIdsByKind(input: {
+  kind: HostedMailboxKind | string;
+  prisma?: HostedMailboxStoreClient;
+  userIds: readonly string[];
+}): Promise<ReadonlySet<string>> {
+  const prisma = input.prisma ?? getPrisma();
+  const kind = requireHostedMailboxKind(input.kind);
+  const userIds = [
+    ...new Set(
+      input.userIds.map((userId) =>
+        requireNonEmptyString(userId, "Hosted mailbox userId")
+      ),
+    ),
+  ];
+  if (userIds.length === 0) {
+    return new Set();
+  }
+
+  const records = await prisma.hostedMailboxItem.groupBy({
+    by: ["userId"],
+    where: {
+      kind,
+      userId: { in: userIds },
+    },
+  });
+
+  return new Set(records.map((record) => record.userId));
 }
 
 export async function hasHostedMailboxItemByKind(input: {
@@ -2145,9 +2677,15 @@ export async function acquireHostedMailboxSourceMessageLocksTx(input: {
 function normalizeHostedMailboxSourceMessageLookupKeys(
   values: readonly string[],
 ): string[] {
-  return [...new Set(values.map((value) =>
+  const normalized = [...new Set(values.map((value) =>
     requireNonEmptyString(value, "Hosted mailbox sourceMessageLookupKey")
   ))].sort();
+  if (normalized.length > HOSTED_MAILBOX_SOURCE_MESSAGE_MAX_LOOKUP_KEYS) {
+    throw new TypeError(
+      `Hosted mailbox source lookup accepts at most ${HOSTED_MAILBOX_SOURCE_MESSAGE_MAX_LOOKUP_KEYS} privacy versions.`,
+    );
+  }
+  return normalized;
 }
 
 function recordHostedMailboxDedupeConflictLog(input: {
@@ -2358,8 +2896,48 @@ function deriveHostedMailboxStoredPayloadMetadata(input: {
   };
 }
 
+function normalizeHostedMailboxAppendInput(
+  input: AppendHostedMailboxItemBaseInput,
+): NormalizedHostedMailboxAppendInput {
+  const userId = requireNonEmptyString(input.userId, "Hosted mailbox userId");
+  const lane = requireHostedMailboxLane(input.lane);
+  const dedupeKey = requireNonEmptyString(
+    input.dedupeKey,
+    "Hosted mailbox dedupeKey",
+  );
+  const kind = requireHostedMailboxWritableKind(input.kind);
+  const occurredAt = new Date(
+    requireDate(input.occurredAt, "Hosted mailbox occurredAt").getTime(),
+  );
+  const expiresAt = input.expiresAt === undefined || input.expiresAt === null
+    ? null
+    : new Date(
+        requireDate(input.expiresAt, "Hosted mailbox expiresAt").getTime(),
+      );
+  const payloadSchema = normalizeNullableString(input.payloadSchema)
+    ?? HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA;
+  const payloadMetadata = deriveHostedMailboxStoredPayloadMetadata({
+    payloadSerializedJson: input.payloadSerializedJson,
+    userId,
+  });
+
+  return {
+    dedupeKey,
+    expiresAt,
+    kind,
+    lane,
+    occurredAt,
+    payloadBytes: payloadMetadata.payloadBytes,
+    payloadHash: payloadMetadata.payloadHash,
+    payloadSchema,
+    serialized: payloadMetadata.serialized,
+    userId,
+  };
+}
+
 async function encryptHostedMailboxPayloadStorage(input: {
   dedupeKey: string;
+  encryption: HostedMailboxPayloadEncryptionOwner;
   itemId: string;
   kind: HostedMailboxKind;
   lane: HostedMailboxLane;
@@ -2367,7 +2945,6 @@ async function encryptHostedMailboxPayloadStorage(input: {
   occurredAt: Date;
   payloadBytes: number;
   payloadSchema: string;
-  prisma?: HostedMailboxStoreClient;
   serialized: string;
   userId: string;
 }): Promise<HostedMailboxEncryptedPayloadStorage> {
@@ -2377,7 +2954,7 @@ async function encryptHostedMailboxPayloadStorage(input: {
   const aadPayloadSchema = payloadStorage === "inline"
     ? input.payloadSchema
     : HOSTED_MAILBOX_PAYLOAD_SCHEMA;
-  const ciphertext = await encryptHostedMailboxPayloadString({
+  const encryptionInput = {
     dedupeKey: input.dedupeKey,
     itemId: input.itemId,
     kind: input.kind,
@@ -2386,10 +2963,19 @@ async function encryptHostedMailboxPayloadStorage(input: {
     occurredAt: input.occurredAt.toISOString(),
     payloadSchema: aadPayloadSchema,
     payloadStorage,
-    prisma: input.prisma,
     userId: input.userId,
     value: input.serialized,
-  });
+  };
+  const ciphertext = input.encryption.mode === "prepared-root-local-only"
+    ? await encryptHostedMailboxPayloadStringFromPreparedRoot({
+        ...encryptionInput,
+        preparedRoot: input.encryption.root,
+        preparedRootKeyId: input.encryption.rootKeyId,
+      })
+    : await encryptHostedMailboxPayloadString({
+        ...encryptionInput,
+        prisma: input.encryption.prisma,
+      });
 
   if (!ciphertext) {
     throw new TypeError("Hosted mailbox payload encryption returned an empty ciphertext.");
@@ -2408,6 +2994,27 @@ async function encryptHostedMailboxPayloadStorage(input: {
       payloadRef: `${HOSTED_MAILBOX_PAYLOAD_REF_PREFIX}${input.itemId}`,
       storage: "ref",
     };
+}
+
+async function buildHostedMailboxDuplicateResult(input: {
+  existing: HostedMailboxItemRow;
+  normalized: NormalizedHostedMailboxAppendInput;
+}): Promise<AppendHostedMailboxItemResult> {
+  return {
+    duplicate: true,
+    dedupeConflict: hasHostedMailboxDedupeConflict({
+      existing: input.existing,
+      kind: input.normalized.kind,
+      lane: input.normalized.lane,
+      payloadBytes: input.normalized.payloadBytes,
+      payloadHash: input.normalized.payloadHash,
+      payloadSchema: input.normalized.payloadSchema,
+    }),
+    inserted: false,
+    item: await hydrateHostedMailboxItemTx({
+      record: input.existing,
+    }),
+  };
 }
 
 function requireHostedMailboxSerializedPayload(value: string): string {
@@ -2588,6 +3195,16 @@ function requireHostedMailboxKind(value: string): HostedMailboxKind {
   throw new TypeError(
     `Hosted mailbox kind must be one of ${HOSTED_MAILBOX_KINDS.join(", ")}.`,
   );
+}
+
+function requireHostedMailboxWritableKind(value: string): HostedMailboxKind {
+  const kind = requireHostedMailboxKind(value);
+
+  if (isHostedRetiredMailboxKind(kind)) {
+    throw new TypeError("Hosted mailbox retired kinds are read-only.");
+  }
+
+  return kind;
 }
 
 function requireNonEmptyString(value: string, label: string): string {

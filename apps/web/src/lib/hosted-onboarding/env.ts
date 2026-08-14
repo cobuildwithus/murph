@@ -6,9 +6,9 @@ import {
   getHostedBillingPlanDefinition,
   getHostedFamilyBillingOfferDefinition,
   HOSTED_BILLING_PLAN_CODES,
-  HOSTED_PLAN_CODES,
+  HOSTED_FAMILY_PLAN_CODES,
   type HostedBillingPlanCode,
-  type HostedPlanCode,
+  type HostedFamilyPlanCode,
 } from "./billing-plans";
 import { normalizePhoneNumber } from "./phone";
 import {
@@ -119,7 +119,9 @@ export interface HostedOnboardingEnvironment {
   privyVerificationKey: string | null;
   publicBaseUrl: string | null;
   stripePriceIdsByPlan: Readonly<Record<HostedBillingPlanCode, string | null>>;
-  stripeFamilyPriceIdsByPlan: Readonly<Record<HostedPlanCode, string | null>>;
+  stripeFamilyPriceIdsByPlan: Readonly<
+    Record<HostedFamilyPlanCode, string | null>
+  >;
   stripeUsageCreditPriceIdsByOffer: Readonly<
     Record<HostedUsageCreditOfferCode, string | null>
   >;
@@ -299,6 +301,12 @@ export function readHostedContactPrivacyKeyring(
     throw new TypeError("HOSTED_CONTACT_PRIVACY_KEYS must include at least one version:key entry.");
   }
 
+  if (entries.length > 2) {
+    throw new TypeError(
+      "HOSTED_CONTACT_PRIVACY_KEYS must contain only the current version and at most one prior version.",
+    );
+  }
+
   const keysByVersion: Record<string, Buffer> = {};
   const readVersions: string[] = [];
 
@@ -345,12 +353,22 @@ export function readHostedContactPrivacyKeyring(
     );
   }
 
+  const priorVersion = readVersions.find((version) => version !== currentVersion) ?? null;
+  if (
+    priorVersion !== null
+    && BigInt(priorVersion.slice(1)) >= BigInt(currentVersion.slice(1))
+  ) {
+    throw new TypeError(
+      "HOSTED_CONTACT_PRIVACY_KEYS may pair the current version only with one lower prior version.",
+    );
+  }
+
   return {
     currentVersion,
     keysByVersion,
     readVersions: [
       currentVersion,
-      ...readVersions.filter((version) => version !== currentVersion),
+      ...(priorVersion ? [priorVersion] : []),
     ],
   };
 }
@@ -550,13 +568,13 @@ function readHostedStripePriceIdsByPlan(
 
 function readHostedStripeFamilyPriceIdsByPlan(
   source: HostedOnboardingEnvSource,
-): Record<HostedPlanCode, string | null> {
+): Record<HostedFamilyPlanCode, string | null> {
   return Object.fromEntries(
-    HOSTED_PLAN_CODES.map((planCode) => {
+    HOSTED_FAMILY_PLAN_CODES.map((planCode) => {
       const offer = getHostedFamilyBillingOfferDefinition(planCode);
       return [planCode, readEnv(source, offer.priceIdEnvKey)];
     }),
-  ) as Record<HostedPlanCode, string | null>;
+  ) as Record<HostedFamilyPlanCode, string | null>;
 }
 
 function readHostedStripeUsageCreditPriceIdsByOffer(

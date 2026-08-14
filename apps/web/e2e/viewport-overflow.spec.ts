@@ -46,6 +46,89 @@ function isLoopbackUrl(rawUrl: string): boolean {
   }
 }
 
+test("challenge-card studies retain every semantic edge at mobile widths", async ({
+  page,
+}) => {
+  await page.route("**/*", (route) => {
+    if (isLoopbackUrl(route.request().url())) {
+      route.continue();
+    } else {
+      route.abort();
+    }
+  });
+  const response = await page.goto("/design?tab=components", {
+    waitUntil: "load",
+  });
+  expect(response?.status(), "design catalog should respond 200").toBe(200);
+
+  const study = page.locator(
+    '[data-design-component="imessage-challenge-standings-card"]',
+  );
+  await expect(study).toHaveCount(1);
+
+  for (const width of [320, 390] as const) {
+    await page.setViewportSize({ width, height: 900 });
+    await study.scrollIntoViewIfNeeded();
+    await page.evaluate(async () => {
+      await document.fonts?.ready;
+      await new Promise((resolve) =>
+        requestAnimationFrame(() => requestAnimationFrame(resolve)),
+      );
+    });
+
+    const frames = study.locator("[data-challenge-card-frame]:visible");
+    await expect(frames).toHaveCount(2);
+    for (const frame of await frames.all()) {
+      await expect.poll(async () =>
+        frame.evaluate((element) => {
+          const card = element.firstElementChild;
+          if (!(card instanceof HTMLElement)) return Number.POSITIVE_INFINITY;
+          return Math.abs(
+            card.getBoundingClientRect().width
+            - (element.getBoundingClientRect().width - 4),
+          );
+        })
+      ).toBeLessThanOrEqual(OVERFLOW_TOLERANCE_PX);
+      const bounds = await frame.evaluate((element) => {
+        const card = element.firstElementChild;
+        if (!(card instanceof HTMLElement)) {
+          throw new Error("Challenge study card is missing.");
+        }
+        const frameRect = element.getBoundingClientRect();
+        const cardRect = card.getBoundingClientRect();
+        return {
+          cardBottom: cardRect.bottom,
+          cardLeft: cardRect.left,
+          cardRight: cardRect.right,
+          cardTop: cardRect.top,
+          frameBottom: frameRect.bottom,
+          frameLeft: frameRect.left,
+          frameRight: frameRect.right,
+          frameTop: frameRect.top,
+          scale: Number(element.dataset.renderScale),
+        };
+      });
+      expect(bounds.scale).toBeGreaterThan(0);
+      expect(bounds.cardLeft).toBeGreaterThanOrEqual(
+        bounds.frameLeft - OVERFLOW_TOLERANCE_PX,
+      );
+      expect(bounds.cardRight, JSON.stringify(bounds)).toBeLessThanOrEqual(
+        bounds.frameRight + OVERFLOW_TOLERANCE_PX,
+      );
+      expect(bounds.cardTop).toBeGreaterThanOrEqual(
+        bounds.frameTop - OVERFLOW_TOLERANCE_PX,
+      );
+      expect(bounds.cardBottom).toBeLessThanOrEqual(
+        bounds.frameBottom + OVERFLOW_TOLERANCE_PX,
+      );
+      expect(bounds.frameLeft).toBeGreaterThanOrEqual(-OVERFLOW_TOLERANCE_PX);
+      expect(bounds.frameRight).toBeLessThanOrEqual(
+        width + OVERFLOW_TOLERANCE_PX,
+      );
+    }
+  }
+});
+
 // Evaluated in the browser: how far the document overflows the viewport
 // horizontally, plus the outermost elements that escape it. An element is a
 // "culprit" when its right edge passes the viewport while its parent stays
@@ -211,7 +294,7 @@ test("homepage footer link columns stay separate at the sm breakpoint", async ({
   ).toEqual([]);
 });
 
-test("health-data consent actions stay inline and contained", async ({ page }) => {
+test("health-data consent actions stay aligned and contained", async ({ page }) => {
   test.setTimeout(300_000);
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.route("**/*", (route) => {
@@ -228,13 +311,18 @@ test("health-data consent actions stay inline and contained", async ({ page }) =
   expect(response?.status(), "health-data consent study should respond 200").toBe(
     200,
   );
+  await page.addStyleTag({
+    content: "nextjs-portal { display: none !important; }",
+  });
 
-  const activeState = page.locator(
-    '[data-design-component="health-data-consent-settings"] ' +
-      '[data-design-state="active-source-and-consent-controls"]',
-  );
-  await expect(activeState).toHaveCount(1);
-  await expect(activeState).toBeVisible();
+  const consentStates = [
+    { active: true, name: "active-source-and-consent-controls" },
+    { active: false, name: "processing-paused" },
+    { active: false, name: "not-enabled" },
+    { active: false, name: "status-unavailable" },
+    { active: false, name: "checking-status" },
+    { active: false, name: "status-retry-failed" },
+  ] as const;
 
   for (const width of [320, 390, 1440] as const) {
     await page.setViewportSize({ width, height: 900 });
@@ -245,66 +333,257 @@ test("health-data consent actions stay inline and contained", async ({ page }) =
       );
     });
 
-    const layout = await activeState.evaluate((state) => {
-      const link = state.querySelector<HTMLAnchorElement>('a[href="/connect"]');
-      const button = Array.from(state.querySelectorAll("button")).find(
-        (candidate) => candidate.textContent?.trim() === "Withdraw consent",
+    for (const consentState of consentStates) {
+      const state = page.locator(
+        `[data-design-component="health-data-consent-settings"] ` +
+          `[data-design-state="${consentState.name}"]`,
       );
-      const group = link?.parentElement;
-      if (!link || !button || !group || button.parentElement !== group) {
-        throw new Error("Active health-data consent actions are missing.");
+      await expect(state).toBeVisible();
+      await state.evaluate((element) => {
+        element.scrollIntoView({ block: "center" });
+      });
+      if (consentState.active) {
+        await expect(
+          state.getByRole("link", { exact: true, name: "Manage sources" }),
+        ).toHaveAttribute("href", "/connect");
       }
 
-      const stateRect = state.getBoundingClientRect();
-      const groupRect = group.getBoundingClientRect();
-      const linkRect = link.getBoundingClientRect();
-      const buttonRect = button.getBoundingClientRect();
-      return {
-        buttonHeight: buttonRect.height,
-        buttonLeft: buttonRect.left,
-        buttonTop: buttonRect.top,
-        groupLeft: groupRect.left,
-        groupRight: groupRect.right,
-        linkHeight: linkRect.height,
-        linkLeft: linkRect.left,
-        linkTop: linkRect.top,
-        stateClientWidth: state.clientWidth,
-        stateLeft: stateRect.left,
-        stateRight: stateRect.right,
-        stateScrollWidth: state.scrollWidth,
-      };
-    });
+      const layout = await state.evaluate((frame) => {
+        const status = frame.querySelector<HTMLParagraphElement>(
+          "p[aria-live='polite']",
+        );
+        const content = status?.parentElement;
+        const title = content?.firstElementChild;
+        const button = frame.querySelector<HTMLButtonElement>("button");
+        const manageLink = Array.from(
+          frame.querySelectorAll<HTMLAnchorElement>('a[href="/connect"]'),
+        ).find((link) => link.textContent?.trim() === "Manage sources");
+        if (!content || !title || !button) {
+          throw new Error("Health-data consent action is missing.");
+        }
 
-    expect(
-      Math.abs(layout.linkTop - layout.buttonTop),
-      `actions should share one row at ${width}px`,
-    ).toBeLessThanOrEqual(OVERFLOW_TOLERANCE_PX);
-    expect(
-      layout.linkLeft,
-      `source management should stay first at ${width}px`,
-    ).toBeLessThan(layout.buttonLeft);
-    expect(
-      layout.linkHeight,
-      `source target should stay touchable at ${width}px`,
-    ).toBeGreaterThanOrEqual(40);
-    expect(
-      layout.buttonHeight,
-      `withdrawal target should stay touchable at ${width}px`,
-    ).toBeGreaterThanOrEqual(40);
-    expect(
-      layout.groupLeft,
-      `active action group should stay inside its frame at ${width}px`,
-    ).toBeGreaterThanOrEqual(layout.stateLeft - OVERFLOW_TOLERANCE_PX);
-    expect(
-      layout.groupRight,
-      `active action group should stay inside its frame at ${width}px`,
-    ).toBeLessThanOrEqual(layout.stateRight + OVERFLOW_TOLERANCE_PX);
-    expect(
-      layout.stateScrollWidth,
-      `active consent state should not overflow at ${width}px`,
-    ).toBeLessThanOrEqual(
-      layout.stateClientWidth + OVERFLOW_TOLERANCE_PX,
-    );
+        const buttonRect = button.getBoundingClientRect();
+        const contentRect = content.getBoundingClientRect();
+        const frameRect = frame.getBoundingClientRect();
+        const manageLinkRect = manageLink?.getBoundingClientRect();
+        const titleRect = title.getBoundingClientRect();
+        const inertAncestor = frame.closest<HTMLElement>("[inert]");
+        const inertValue = inertAncestor?.getAttribute("inert") ?? "";
+        inertAncestor?.removeAttribute("inert");
+        const linkOwnsPoint = (x: number, y: number) => {
+          const hit = document.elementFromPoint(x, y);
+          return Boolean(
+            manageLink &&
+              hit &&
+              (hit === manageLink || manageLink.contains(hit)),
+          );
+        };
+        const manageHitBottom = manageLinkRect
+          ? linkOwnsPoint(
+              manageLinkRect.left + manageLinkRect.width / 2,
+              manageLinkRect.bottom - 1,
+            )
+          : null;
+        const manageHitTop = manageLinkRect
+          ? linkOwnsPoint(
+              manageLinkRect.left + manageLinkRect.width / 2,
+              manageLinkRect.top + 1,
+            )
+          : null;
+        inertAncestor?.setAttribute("inert", inertValue);
+        return {
+          buttonHeight: buttonRect.height,
+          buttonLeft: buttonRect.left,
+          buttonRight: buttonRect.right,
+          buttonTop: buttonRect.top,
+          contentBottom: contentRect.bottom,
+          contentLeft: contentRect.left,
+          contentRight: contentRect.right,
+          frameClientWidth: frame.clientWidth,
+          frameLeft: frameRect.left,
+          frameRight: frameRect.right,
+          frameScrollWidth: frame.scrollWidth,
+          manageHitBottom,
+          manageHitTop,
+          manageLinkHeight: manageLinkRect?.height ?? null,
+          manageLinkTop: manageLinkRect?.top ?? null,
+          manageTargetHeight: manageLinkRect?.height ?? null,
+          titleBottom: titleRect.bottom,
+        };
+      });
+
+      expect(
+        layout.buttonHeight,
+        `${consentState.name} action should match Settings buttons at ${width}px`,
+      ).toBeGreaterThanOrEqual(36);
+      expect(
+        layout.buttonLeft,
+        `${consentState.name} action should stay inside its frame at ${width}px`,
+      ).toBeGreaterThanOrEqual(
+        layout.frameLeft - OVERFLOW_TOLERANCE_PX,
+      );
+      expect(
+        layout.buttonRight,
+        `${consentState.name} action should stay inside its frame at ${width}px`,
+      ).toBeLessThanOrEqual(
+        layout.frameRight + OVERFLOW_TOLERANCE_PX,
+      );
+      expect(
+        layout.frameScrollWidth,
+        `${consentState.name} consent state should not overflow at ${width}px`,
+      ).toBeLessThanOrEqual(
+        layout.frameClientWidth + OVERFLOW_TOLERANCE_PX,
+      );
+
+      if (width === 1440) {
+        expect(
+          layout.buttonLeft,
+          `${consentState.name} action should use the desktop action column`,
+        ).toBeGreaterThanOrEqual(
+          layout.contentRight - OVERFLOW_TOLERANCE_PX,
+        );
+      } else {
+        expect(
+          Math.abs(layout.buttonLeft - layout.contentLeft),
+          `${consentState.name} action should align with mobile row copy at ${width}px`,
+        ).toBeLessThanOrEqual(OVERFLOW_TOLERANCE_PX);
+        expect(
+          layout.buttonTop,
+          `${consentState.name} action should follow mobile row copy at ${width}px`,
+        ).toBeGreaterThanOrEqual(
+          layout.contentBottom - OVERFLOW_TOLERANCE_PX,
+        );
+      }
+
+      if (consentState.active) {
+        expect(layout.manageLinkHeight).toBeGreaterThanOrEqual(20);
+        expect(layout.manageTargetHeight).toBeGreaterThanOrEqual(40);
+        expect(layout.manageHitTop).toBe(true);
+        expect(layout.manageHitBottom).toBe(true);
+        expect(
+          layout.manageLinkTop,
+          `source management should follow the row title at ${width}px`,
+        ).toBeGreaterThanOrEqual(
+          layout.titleBottom - OVERFLOW_TOLERANCE_PX,
+        );
+
+        if (width === 1440) {
+          const button = state.getByRole("button", {
+            exact: true,
+            name: "Withdraw consent",
+          });
+          const readContrast = () => button.evaluate((element) => {
+            type RgbColor = [number, number, number];
+
+            const canvas = document.createElement("canvas");
+            canvas.width = 1;
+            canvas.height = 1;
+            const context = canvas.getContext("2d", {
+              willReadFrequently: true,
+            });
+            if (!context) {
+              throw new Error("Canvas color parsing is unavailable.");
+            }
+            const parseColor = (value: string) => {
+              context.clearRect(0, 0, 1, 1);
+              context.fillStyle = value;
+              context.fillRect(0, 0, 1, 1);
+              const [red, green, blue, alpha] = context.getImageData(
+                0,
+                0,
+                1,
+                1,
+              ).data;
+              return {
+                alpha: (alpha ?? 0) / 255,
+                rgb: [red ?? 0, green ?? 0, blue ?? 0] as RgbColor,
+              };
+            };
+            const blend = (
+              foreground: ReturnType<typeof parseColor>,
+              background: RgbColor,
+            ): RgbColor =>
+              background.map(
+                (channel, index) =>
+                  (foreground.rgb[index] ?? 0) * foreground.alpha +
+                  channel * (1 - foreground.alpha),
+              ) as RgbColor;
+            const linearize = (channel: number) => {
+              const normalized = channel / 255;
+              return normalized <= 0.04045
+                ? normalized / 12.92
+                : ((normalized + 0.055) / 1.055) ** 2.4;
+            };
+            const luminance = (rgb: number[]) =>
+              0.2126 * linearize(rgb[0] ?? 0) +
+              0.7152 * linearize(rgb[1] ?? 0) +
+              0.0722 * linearize(rgb[2] ?? 0);
+
+            const styles = getComputedStyle(element);
+            const ancestors: HTMLElement[] = [];
+            let ancestor = element.parentElement;
+            while (ancestor) {
+              ancestors.push(ancestor);
+              ancestor = ancestor.parentElement;
+            }
+            const surface = ancestors.reverse().reduce<RgbColor>(
+              (painted, node) =>
+                blend(parseColor(getComputedStyle(node).backgroundColor), painted),
+              [255, 255, 255],
+            );
+            const foreground = parseColor(styles.color);
+            const background = parseColor(styles.backgroundColor);
+            const paintedBackground = blend(background, surface);
+            const paintedForeground = blend(foreground, paintedBackground);
+            const foregroundLuminance = luminance(paintedForeground);
+            const backgroundLuminance = luminance(paintedBackground);
+            return (
+              (Math.max(foregroundLuminance, backgroundLuminance) + 0.05) /
+              (Math.min(foregroundLuminance, backgroundLuminance) + 0.05)
+            );
+          });
+
+          expect(
+            await readContrast(),
+            "default destructive contrast",
+          ).toBeGreaterThanOrEqual(4.5);
+          const inertProbe = page.locator(
+            "[data-playwright-consent-interaction-probe]",
+          );
+          await state.evaluate((frame) => {
+            const inertAncestor = frame.closest<HTMLElement>("[inert]");
+            if (!inertAncestor) {
+              throw new Error("Consent design study should be inert.");
+            }
+            inertAncestor.setAttribute(
+              "data-playwright-consent-interaction-probe",
+              "",
+            );
+            inertAncestor.removeAttribute("inert");
+          });
+          try {
+            await button.hover();
+            expect(
+              await readContrast(),
+              "hover destructive contrast",
+            ).toBeGreaterThanOrEqual(4.5);
+            await page.mouse.move(0, 0);
+            await button.focus();
+            expect(
+              await readContrast(),
+              "focus destructive contrast",
+            ).toBeGreaterThanOrEqual(4.5);
+          } finally {
+            await inertProbe.evaluate((element) => {
+              element.setAttribute("inert", "");
+              element.removeAttribute(
+                "data-playwright-consent-interaction-probe",
+              );
+            });
+          }
+        }
+      }
+    }
   }
 });
 
@@ -573,14 +852,14 @@ for (const width of [768, 1280] as const) {
       study.locator('[data-design-state="exhausted-without-credit"] [inert]'),
     ).toHaveCount(1);
     await expect(
-      study.locator('[data-design-state="trial-conversion"] [inert]'),
+      study.locator('[data-design-state="starter-exhausted"] [inert]'),
     ).toHaveCount(1);
     await expect(activeState.locator("[inert]")).toHaveCount(1);
     await expect(activeState.getByText("Reward pending", { exact: true })).toBeVisible();
     await expect(historyPreview).toHaveCount(1);
     await expect(
       historyPreview.getByText(
-        "Invite friends to Murph or ask about referral missions.",
+        "Your personal link is ready to share. Ask Murph if you want to explore a group referral option.",
       ),
     ).toBeVisible();
     await expect(historyPreview.getByText("Copy link", { exact: true })).toBeVisible();
@@ -611,9 +890,9 @@ for (const width of [768, 1280] as const) {
     });
     await expect(currentReferrals).toBeVisible();
     const referralDetailNames = [
-      "Details for Start an active group: In progress, Ends Aug 3 at 12:00 PM UTC",
-      "Details for Start an active group: Checking final activity, Closed Jul 27 at 12:00 PM UTC",
-      "Details for Start an active group: Reward pending, Qualified Jul 25",
+      "Details for Start a group conversation: In progress, Ends Aug 3 at 12:00 PM UTC",
+      "Details for Start a group conversation: Checking final activity, Closed Jul 27 at 12:00 PM UTC",
+      "Details for Start a group conversation: Reward pending, Qualified Jul 25",
     ];
     for (const name of referralDetailNames) {
       await expect(currentReferrals.getByRole("button", { name })).toHaveCount(1);
@@ -634,12 +913,16 @@ for (const width of [768, 1280] as const) {
     await page.keyboard.press("Enter");
     await expect(referralDetails).not.toHaveAttribute("open", "");
 
-    const trialConversion = study.locator(
-      '[data-design-state="trial-conversion"]',
+    const starterExhausted = study.locator(
+      '[data-design-state="starter-exhausted"]',
     );
-    await expect(trialConversion.getByText("Free trial", { exact: true })).toBeVisible();
     await expect(
-      trialConversion.locator("button").filter({ hasText: "Start Pulse plan" }),
+      starterExhausted.getByText("Starter usage exhausted", { exact: true }),
+    ).toBeVisible();
+    await expect(
+      starterExhausted
+        .getByRole("button", { name: "Choose Pulse", exact: true })
+        .first(),
     ).toBeVisible();
 
     const layout = await page.evaluate(() => {

@@ -10,6 +10,7 @@ import {
   APPLE_HEALTH_RELAY_CONNECT_SOURCE_UI,
   listAppleHealthRelayConnectSources,
 } from "@/app/(dashboard)/connect/apple-health-relay-connect-sources";
+import { MOBVOI_HEALTH_CONNECT_SOURCE } from "@/app/(dashboard)/connect/health-connect-relay-connect-sources";
 import type { ConnectSource } from "@/app/(dashboard)/connect/connect-page-types";
 import { buildAppleHealthRelaySetupGuide } from "@/src/lib/device-sync/apple-health-relay-setup-guide";
 import { buildZeppAppleHealthSetupGuide } from "@/src/lib/device-sync/zepp-apple-health-setup-guide";
@@ -30,6 +31,11 @@ const DESIGN_CONNECT_SOURCE_CASES: ConnectSourceCardStudyCase[] = [
     authenticated: true,
     errorMessage: null,
     source: ZEPP_CONNECT_SOURCE,
+  },
+  {
+    authenticated: true,
+    errorMessage: null,
+    source: MOBVOI_HEALTH_CONNECT_SOURCE,
   },
   {
     authenticated: true,
@@ -99,6 +105,46 @@ const DESIGN_CONNECT_SOURCE_CASES: ConnectSourceCardStudyCase[] = [
     },
   },
   {
+    authenticated: false,
+    errorMessage: null,
+    source: {
+      connectionAvailable: false,
+      description: "CGM glucose readings and trends.",
+      id: "dexcom",
+      logo: {
+        className: "h-auto max-h-8 w-auto max-w-[8rem] object-contain",
+        height: 36,
+        src: "/brand-logos/connect/dexcom.png",
+        width: 128,
+      },
+      name: "Dexcom",
+      unavailableActionLabel: "Coming soon",
+      unavailableMessage: "Dexcom connections are coming soon.",
+    },
+  },
+  {
+    authenticated: true,
+    errorMessage: null,
+    source: {
+      connectionAvailable: false,
+      connected: true,
+      description: "CGM glucose readings and trends.",
+      disconnectConnectionId: "design-dexcom-recovery",
+      disconnectScope: "junction_account",
+      id: "dexcom-recovery",
+      logo: {
+        className: "h-auto max-h-8 w-auto max-w-[8rem] object-contain",
+        height: 36,
+        src: "/brand-logos/connect/dexcom.png",
+        width: 128,
+      },
+      name: "Dexcom",
+      requiresReconnect: true,
+      unavailableActionLabel: "Coming soon",
+      unavailableMessage: "Dexcom connections are coming soon.",
+    },
+  },
+  {
     authenticated: true,
     errorMessage: null,
     source: {
@@ -144,7 +190,7 @@ const DESIGN_SOURCE_DISCONNECT_JOURNEY_CASES: ConnectSourceCardStudyCase[] = [
       connectTarget: "garmin",
       description: "Workouts, sleep, stress, heart rate, and body battery.",
       disconnectConnectionId: "design-shared-junction",
-      disconnectSourceProviderSlug: "garmin",
+      disconnectScope: "junction_account",
       id: "garmin-disconnect-journey",
       logo: {
         className: "h-auto max-h-8 w-auto max-w-[8rem] object-contain",
@@ -153,7 +199,28 @@ const DESIGN_SOURCE_DISCONNECT_JOURNEY_CASES: ConnectSourceCardStudyCase[] = [
         width: 128,
       },
       name: "Garmin",
-      requiresReconnect: true,
+      recoveryKind: "connection_reset",
+    },
+  },
+  {
+    authenticated: true,
+    errorMessage: null,
+    source: {
+      connectionAvailable: false,
+      connected: true,
+      description: "CGM glucose readings and trends.",
+      disconnectConnectionId: "design-shared-junction",
+      disconnectScope: "junction_account",
+      id: "dexcom-shared-disconnect-journey",
+      logo: {
+        className: "h-auto max-h-8 w-auto max-w-[8rem] object-contain",
+        height: 36,
+        src: "/brand-logos/connect/dexcom.png",
+        width: 128,
+      },
+      name: "Dexcom",
+      unavailableActionLabel: "Coming soon",
+      unavailableMessage: "Dexcom connections are coming soon.",
     },
   },
   {
@@ -196,16 +263,44 @@ const DESIGN_SOURCE_DISCONNECT_JOURNEY_CASES: ConnectSourceCardStudyCase[] = [
 
 const DESIGN_SOURCE_DISCONNECT_SUCCESS_SOURCES = markLocallyDisconnectedSources(
   DESIGN_SOURCE_DISCONNECT_JOURNEY_CASES.map(({ source }) => source),
+  new Set(["design-shared-junction"]),
   new Set(),
-  new Set(["garmin-disconnect-journey"]),
 );
 
-export function ConnectSourceCardStudy() {
+export function ConnectSourceCardStudy({
+  androidAppAvailable,
+}: {
+  androidAppAvailable: boolean;
+}) {
   const searchParams = useSearchParams();
   const studyState = searchParams?.get("connectDisconnectStudy") ?? null;
   const disconnectDialogSource = studyState === "source"
     ? DESIGN_CONNECT_SOURCE_CASES[0]?.source ?? null
-    : null;
+    : studyState === "dexcom-disconnect"
+      ? DESIGN_CONNECT_SOURCE_CASES.find(({ source }) =>
+          source.id === "dexcom-recovery"
+        )?.source ?? null
+      : studyState === "shared-dexcom-disconnect"
+        ? DESIGN_SOURCE_DISCONNECT_JOURNEY_CASES.find(({ source }) =>
+            source.id === "garmin-disconnect-journey"
+          )?.source ?? null
+      : null;
+  const disconnectUnavailableSourceNames = disconnectDialogSource
+    ? [
+        ...DESIGN_CONNECT_SOURCE_CASES,
+        ...DESIGN_SOURCE_DISCONNECT_JOURNEY_CASES,
+      ]
+        .filter(({ source }) =>
+          source.disconnectConnectionId === disconnectDialogSource.disconnectConnectionId
+          && source.connectionAvailable === false
+        )
+        .map(({ source }) => source.name)
+    : [];
+  const defaultStudyCases = androidAppAvailable
+    ? DESIGN_CONNECT_SOURCE_CASES
+    : DESIGN_CONNECT_SOURCE_CASES.filter(
+        ({ source }) => source.id !== MOBVOI_HEALTH_CONNECT_SOURCE.id,
+      );
   const studyCases = studyState === "source-reconnect"
     ? DESIGN_SOURCE_DISCONNECT_JOURNEY_CASES
     : studyState === "source-success"
@@ -213,7 +308,7 @@ export function ConnectSourceCardStudy() {
           ...studyCase,
           source: DESIGN_SOURCE_DISCONNECT_SUCCESS_SOURCES[index] ?? studyCase.source,
         }))
-      : DESIGN_CONNECT_SOURCE_CASES;
+      : defaultStudyCases;
 
   return (
     <>
@@ -241,6 +336,7 @@ export function ConnectSourceCardStudy() {
       </div>
 
       <ConnectDisconnectDialog
+        affectedUnavailableSourceNames={disconnectUnavailableSourceNames}
         errorMessage={null}
         inert
         pending={false}

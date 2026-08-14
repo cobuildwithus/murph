@@ -16,7 +16,6 @@ import {
   buildHostedRunnerContainerPlatformEnv,
   buildHostedRunnerChannelPlatformEnv,
   buildHostedRunnerLegacyDeviceSyncPlatformEnv,
-  buildHostedRunnerPlatformEnv,
   filterHostedRunnerSecrets,
 } from "../src/runner-env.js";
 import { readHostedDeployAutomationEnvironment } from "../scripts/deploy-automation.js";
@@ -401,37 +400,12 @@ describe("buildHostedRunnerContainerEnv", () => {
     });
   });
 
-  it("does not forward stale AgentMail hosted vars into the runner", () => {
+  it("ignores stale parser aliases and unknown environment keys", () => {
     expect(buildHostedRunnerContainerEnv({
       ...REQUIRED_OPENAI_PROVIDER_ENV,
-      AGENTMAIL_API_KEY: "agentmail-secret",
-      AGENTMAIL_BASE_URL: "https://mail.example.test/v0",
-    })).toEqual({
-      ...REQUIRED_OPENAI_PROVIDER_ENV,
-      HOSTED_EMAIL_INGRESS_READY: "false",
-      HOSTED_EMAIL_SEND_READY: "false",
-      NODE_ENV: "production",
-    });
-  });
-
-  it("ignores stale AgentMail and ffmpeg alias keys", () => {
-    expect(buildHostedRunnerContainerEnv({
-      ...REQUIRED_OPENAI_PROVIDER_ENV,
-      AGENTMAIL_BASE_URL: "https://mail.example.test/v0",
-      PARSER_FFMPEG_PATH: "/usr/local/bin/ffmpeg",
-    })).toEqual({
-      ...REQUIRED_OPENAI_PROVIDER_ENV,
-      HOSTED_EMAIL_INGRESS_READY: "false",
-      HOSTED_EMAIL_SEND_READY: "false",
-      NODE_ENV: "production",
-    });
-  });
-
-  it("ignores unknown AgentMail and ffmpeg-prefixed keys", () => {
-    expect(buildHostedRunnerContainerEnv({
-      ...REQUIRED_OPENAI_PROVIDER_ENV,
-      AGENTMAIL_TIMEOUT_MS: "5000",
       FFMPEG_THREADS: "2",
+      PARSER_FFMPEG_PATH: "/usr/local/bin/ffmpeg",
+      UNRECOGNIZED_PROVIDER_TIMEOUT_MS: "5000",
     })).toEqual({
       ...REQUIRED_OPENAI_PROVIDER_ENV,
       HOSTED_EMAIL_INGRESS_READY: "false",
@@ -1113,7 +1087,7 @@ describe("buildHostedRuntimeResolvedConfig", () => {
     });
   });
 
-  it("requires both device-sync secrets and provider credentials before enabling device sync", () => {
+  it("enables device sync from trusted runtime secrets without shared provider credentials", () => {
     expect(buildHostedRuntimeResolvedConfig({
       DEVICE_SYNC_PUBLIC_BASE_URL: "https://device-sync.example.test",
       DEVICE_SYNC_SECRET: "secret_123",
@@ -1122,7 +1096,11 @@ describe("buildHostedRuntimeResolvedConfig", () => {
         emailSendReady: false,
         telegramBotConfigured: false,
       },
-      deviceSync: null,
+      deviceSync: {
+        providerConfigs: {},
+        publicBaseUrl: "https://device-sync.example.test",
+        secret: "secret_123",
+      },
     });
 
     expect(buildHostedRuntimeResolvedConfig({
@@ -1221,6 +1199,7 @@ describe("hosted deploy automation device-sync surface", () => {
     expect(HOSTED_WORKER_OPTIONAL_VAR_NAMES).toEqual(
       expect.arrayContaining([
         "HOSTED_ASSISTANT_PROVIDER",
+        "MURPH_ANDROID_APP_ENABLED",
         "WHOOP_SCOPES",
       ]),
     );
@@ -1290,5 +1269,18 @@ describe("hosted private-media platform env", () => {
       CF_PUBLIC_BASE_URL: "https://hosted-runner-staging.example.test",
       HOSTED_PHYSICAL_NOTES_ENABLED: "true",
     });
+  });
+
+  it("projects the Android rollout gate only from the exact enabled value", () => {
+    expect(buildHostedRunnerContainerPlatformEnv({
+      MURPH_ANDROID_APP_ENABLED: "1",
+    })).toEqual({
+      MURPH_ANDROID_APP_ENABLED: "1",
+    });
+    for (const disabledValue of ["", "0", "true", " 1 "]) {
+      expect(buildHostedRunnerContainerPlatformEnv({
+        MURPH_ANDROID_APP_ENABLED: disabledValue,
+      })).not.toHaveProperty("MURPH_ANDROID_APP_ENABLED");
+    }
   });
 });

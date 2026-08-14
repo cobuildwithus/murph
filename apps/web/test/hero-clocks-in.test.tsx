@@ -83,10 +83,28 @@ test("HeroClocksIn renders the solo exchange without animation for reduced motio
   const topic = view.container.querySelector<HTMLButtonElement>(
     'button[aria-label="Ask Murph about Steps"]',
   );
+  const member = view.container.querySelector<HTMLButtonElement>(
+    'button[aria-label="Start a group chat with Theo"]',
+  );
   assert.ok(composer);
   assert.ok(topic);
+  assert.ok(member);
+  assert.ok(topic.classList.contains("text-[#c1baae]"));
+  assert.ok(topic.classList.contains("focus-visible:ring-2"));
+  assert.ok(member.classList.contains("text-[#736a58]"));
+  const phoneFrame = [...view.container.querySelectorAll("div")].find(
+    (element) => element.classList.contains("max-w-[280px]"),
+  );
+  assert.ok(phoneFrame);
+  assert.ok(phoneFrame.classList.contains("sm:max-w-[320px]"));
   const controls = [...view.container.querySelectorAll("input, button")];
   assert.ok(controls.indexOf(composer) < controls.indexOf(topic));
+  assert.ok(
+    view.scrollTo.mock.calls.some(
+      ([options]) =>
+        options?.top === Number.MAX_SAFE_INTEGER && options.behavior === "auto",
+    ),
+  );
 
   await view.cleanup();
 });
@@ -737,7 +755,11 @@ async function renderHero({
   flushInitialTimers?: boolean;
 }) {
   const { document, window } = parseHTML("<html><body><div id='root'></div></body></html>");
-  const cleanupGlobals = installGlobals(window, document, { reducedMotion });
+  const { cleanup: cleanupGlobals, scrollTo } = installGlobals(
+    window,
+    document,
+    { reducedMotion },
+  );
   activeCleanups.add(cleanupGlobals);
   const container = document.getElementById("root");
   assert.ok(container);
@@ -773,6 +795,7 @@ async function renderHero({
       activeCleanups.delete(cleanupGlobals);
     },
     container,
+    scrollTo,
     window,
   };
 }
@@ -805,9 +828,10 @@ function installGlobals(
     configurable: true,
     value: matchMedia,
   });
+  const scrollTo = vi.fn();
   Object.defineProperty(window.HTMLElement.prototype, "scrollTo", {
     configurable: true,
-    value() {},
+    value: scrollTo,
   });
   const originalFocusDescriptor = Object.getOwnPropertyDescriptor(
     window.HTMLElement.prototype,
@@ -895,10 +919,13 @@ function installGlobals(
     setGlobal("IS_REACT_ACT_ENVIRONMENT", true),
   ];
 
-  return () => {
-    for (const restore of restoreEntries.reverse()) {
-      restore();
-    }
+  return {
+    cleanup: () => {
+      for (const restore of restoreEntries.reverse()) {
+        restore();
+      }
+    },
+    scrollTo,
   };
 }
 

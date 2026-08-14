@@ -49,7 +49,7 @@ function buildEmailDeliveryContext(
 }
 
 describe("createHostedGroupToolWithCurrentTurnContext", () => {
-  it("forwards current-turn cancellation through Assistant Ask requests", async () => {
+  it("forwards current-turn cancellation through the neutral current-sender request", async () => {
     const request = vi.fn().mockResolvedValue({
       action: "ask_current_sender",
       result: { status: "accepted" },
@@ -59,8 +59,10 @@ describe("createHostedGroupToolWithCurrentTurnContext", () => {
       linqDeliveryContexts: [],
     });
     const signal = new AbortController().signal;
-    const askRequest = {
+    const currentSenderRequest = {
       action: "ask_current_sender" as const,
+      audience: "group" as const,
+      mode: "new" as const,
       origin: {
         assistantInputId: `ain_${"a".repeat(32)}`,
         kind: "accepted_input" as const,
@@ -68,11 +70,16 @@ describe("createHostedGroupToolWithCurrentTurnContext", () => {
       },
     };
 
-    await expect(groupTool.request(askRequest, { signal })).resolves.toEqual({
+    await expect(
+      groupTool.request(currentSenderRequest, { signal }),
+    ).resolves.toEqual({
       action: "ask_current_sender",
       result: { status: "accepted" },
     });
-    expect(request).toHaveBeenCalledExactlyOnceWith(askRequest, { signal });
+    expect(request).toHaveBeenCalledExactlyOnceWith(
+      currentSenderRequest,
+      { signal },
+    );
   });
 
   it("injects the exact current sender into referral actions", async () => {
@@ -222,6 +229,22 @@ describe("createHostedGroupToolWithCurrentTurnContext", () => {
       action: "create_signup_referral_link",
     })).resolves.toEqual({
       action: "create_signup_referral_link",
+      result: {
+        status: "unavailable",
+        unavailableReason: "authenticated_sender_required",
+      },
+    });
+    await expect(groupTool.request({
+      action: "ask_current_sender",
+      audience: "group",
+      mode: "new",
+      origin: {
+        assistantInputId: `ain_${"a".repeat(32)}`,
+        kind: "accepted_input",
+        sessionId: "session_group",
+      },
+    })).resolves.toEqual({
+      action: "ask_current_sender",
       result: {
         status: "unavailable",
         unavailableReason: "authenticated_sender_required",
@@ -1172,6 +1195,8 @@ describe("createHostedGroupToolWithCurrentTurnContext", () => {
     for (const actionRequest of [
       {
         action: "ask_current_sender" as const,
+        audience: "group" as const,
+        mode: "new" as const,
         origin: {
           assistantInputId: PRIVATE_ASSISTANT_INPUT_ID,
           kind: "accepted_input" as const,

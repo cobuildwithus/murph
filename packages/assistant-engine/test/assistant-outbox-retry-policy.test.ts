@@ -247,6 +247,53 @@ describe('assistant outbox retry policy', () => {
       message: 'temporary network timeout',
     })
   })
+
+  it('keeps bounded Linq rejection diagnostics through outbox normalization', () => {
+    const normalized = normalizeAssistantDeliveryError(Object.assign(
+      new Error('Linq request POST /chats/[chat]/messages failed with HTTP 400.'),
+      {
+        code: 'LINQ_API_REQUEST_FAILED',
+        context: {
+          failureStage: 'http',
+          hasIdempotencyKey: true,
+          hasReplyToMessageId: false,
+          method: 'POST',
+          operation: 'send_message',
+          path: '/chats/[chat]/messages',
+          provider: 'linq',
+          providerErrorCode: '1004',
+          providerRequestId: 'trace_safe_123',
+          requestAttachmentMediaPartCount: 1,
+          requestBodyShape: 'object:message|message:idempotency_key,parts',
+          requestMediaPartCount: 8,
+          requestMessageLength: 4_321,
+          requestMessagePartCount: 9,
+          requestPublicUrlMediaPartCount: 7,
+          requestTextPartCount: 1,
+          responseBodyKeyCount: 4,
+          responseBodyKeySummary: 'error,trace_id',
+          responseBodyKind: 'json_object',
+          responseBodySha256: 'a'.repeat(64),
+          responseBodyStringFieldCount: 2,
+          responseBodyStringFieldSummary: 'trace_id',
+          responseBodyTextLength: 246,
+          retryable: false,
+          status: 400,
+        },
+      },
+    ))
+
+    expect(normalized.diagnosticContext).toEqual(expect.objectContaining({
+      providerErrorCode: '1004',
+      providerRequestId: 'trace_safe_123',
+      requestMediaPartCount: 8,
+      requestMessageLength: 4_321,
+      responseBodySha256: 'a'.repeat(64),
+      responseBodyTextLength: 246,
+      retryable: false,
+      status: 400,
+    }))
+  })
 })
 
 function createIntent(

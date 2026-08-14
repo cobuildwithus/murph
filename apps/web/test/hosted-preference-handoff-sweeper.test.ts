@@ -263,6 +263,46 @@ describe("hosted preference handoff sweeper", () => {
     });
   });
 
+  it("selects pending browser-vault and maintenance wakes in the shared mailbox sweep", async () => {
+    mocks.queryRaw.mockResolvedValueOnce([{
+      mailboxItemId: "mailbox_browser_refresh",
+      userId: "member_browser_refresh",
+    }]);
+    const requestHandoff = vi.fn(async () => ({
+      signalAccepted: true as const,
+      workflowId: "hosted-user-runtime:synthetic",
+    }));
+
+    await runHostedPreferenceHandoffSweeper({
+      hasActiveAccess: vi.fn(async () => true),
+      logger: buildLogger(),
+      requestHandoff,
+    });
+
+    const query = mocks.queryRaw.mock.calls[0]?.[0] as {
+      strings?: readonly string[];
+    } | undefined;
+    const sql = query?.strings?.join("?") ?? "";
+    expect(sql).toContain('"pending_runtime_control_users"');
+    expect(sql).toContain(
+      "'runtime.browser-vault-refresh-requested'",
+    );
+    expect(sql).toContain(
+      "'runtime.maintenance-requested'",
+    );
+    expect(sql).toContain(
+      "'health.daily-metric.reported'",
+    );
+    expect(sql).toContain(
+      '"item"."lane_seq" > COALESCE("lane_counter"."consumed_seq", 0)',
+    );
+    expect(requestHandoff).toHaveBeenCalledWith({
+      abortSignal: expect.any(AbortSignal),
+      expectedUserId: "member_browser_refresh",
+      mailboxItemId: "mailbox_browser_refresh",
+    });
+  });
+
   it("retries an exact current Clinical Records wake after a hung shared handoff", async () => {
     const store = buildStore([{
       mailboxItemId: "mailbox_clinical_hung_retry",

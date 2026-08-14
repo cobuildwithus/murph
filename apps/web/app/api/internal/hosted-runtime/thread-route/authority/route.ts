@@ -1,4 +1,5 @@
 import {
+  parseHostedExecutionPrivateAssistantAskCompletionDeliveryAuthority,
   parseHostedExecutionExternalThreadRouteAuthority,
 } from "@murphai/hosted-execution/parsers";
 
@@ -16,9 +17,13 @@ import {
   assertHostedAssistantAskCompletionDeliveryAuthorityTx,
 } from "@/src/lib/hosted-groups/group-assistant-ask";
 import {
+  assertHostedGroupCurrentSenderPrivateCompletionDeliveryAuthorityTx,
+} from "@/src/lib/hosted-groups/group-current-sender-assistant-ask";
+import {
   assertHostedAssistantNotificationRouteAuthority,
 } from "@/src/lib/hosted-routing/assistant-notification-destination";
 import { readOptionalJsonObject } from "@/src/lib/http";
+import { handoffHostedMailboxWake } from "@/src/lib/hosted-orchestration/mailbox-wake";
 import { getPrisma } from "@/src/lib/prisma";
 
 const HOSTED_THREAD_ROUTE_AUTHORITY_BODY_LIMIT_BYTES = 8 * 1024;
@@ -31,6 +36,43 @@ export const POST = withJsonError(async (request: Request) => {
   const assistantAskCompletion = parseAssistantAskCompletionAuthority(
     body.assistantAskCompletion,
   );
+  const privateAssistantAskCompletion =
+    parsePrivateAssistantAskCompletionAuthority(
+      body.privateAssistantAskCompletion,
+      body.authority,
+    );
+  if (assistantAskCompletion && privateAssistantAskCompletion) {
+    throwInvalidAssistantAskCompletionAuthority();
+  }
+  if (privateAssistantAskCompletion) {
+    const bodyKeys = Object.keys(body);
+    if (
+      bodyKeys.length !== 2
+      || !bodyKeys.includes("authority")
+      || !bodyKeys.includes("privateAssistantAskCompletion")
+    ) {
+      throwInvalidAssistantAskCompletionAuthority();
+    }
+    const assertion = await getPrisma().$transaction(async (tx) => {
+      return await assertHostedGroupCurrentSenderPrivateCompletionDeliveryAuthorityTx({
+        ...privateAssistantAskCompletion,
+        boundRuntimeMemberId: memberId,
+        tx,
+      });
+    });
+    if (assertion?.assistantAskFallbackRequired) {
+      await handoffHostedMailboxWake({
+        ...assertion.mailboxWake,
+        directWakeSource: "assistant-ask-completion",
+        signal: request.signal,
+      });
+      return jsonOk({
+        assistantAskFallbackRequired: true,
+        authorized: false,
+      });
+    }
+    return jsonOk({ authorized: true });
+  }
   const authority = parseHostedExecutionExternalThreadRouteAuthority(
     assistantAskCompletion ? body.authority : body,
   );
@@ -70,6 +112,39 @@ interface AssistantAskCompletionAuthority {
   assistantAskCompletionExpiresAt: string;
   assistantAskFallback: boolean;
   idempotencyKey: string;
+}
+
+function parsePrivateAssistantAskCompletionAuthority(
+  value: unknown,
+  route: unknown,
+) {
+  if (value === undefined || value === null) {
+    return null;
+  }
+  if (typeof value !== "object" || Array.isArray(value)) {
+    throwInvalidAssistantAskCompletionAuthority();
+  }
+  const input = value as Record<string, unknown>;
+  const allowed = new Set([
+    "answeredMailboxItemIds",
+    "expiresAt",
+    "idempotencyKey",
+    "responseTextDigest",
+  ]);
+  if (Object.keys(input).some((key) => !allowed.has(key))) {
+    throwInvalidAssistantAskCompletionAuthority();
+  }
+  try {
+    return parseHostedExecutionPrivateAssistantAskCompletionDeliveryAuthority({
+      answeredMailboxItemIds: input.answeredMailboxItemIds,
+      assistantAskCompletionExpiresAt: input.expiresAt,
+      idempotencyKey: input.idempotencyKey,
+      responseTextDigest: input.responseTextDigest,
+      route,
+    });
+  } catch {
+    throwInvalidAssistantAskCompletionAuthority();
+  }
 }
 
 function parseAssistantAskCompletionAuthority(

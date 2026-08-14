@@ -8,6 +8,8 @@ const mocks = vi.hoisted(() => ({
   decryptStripeField: vi.fn(),
   encryptStripeField: vi.fn(),
   grantUsageCredit: vi.fn(),
+  lockPurchaseReservationOwners: vi.fn(),
+  readGrantCapacity: vi.fn(),
   reconcileDisputeNetReversal: vi.fn(),
   reconcileRefundNetReversal: vi.fn(),
   stripeApiMode: vi.fn(),
@@ -44,6 +46,10 @@ vi.mock("@/src/lib/hosted-execution/usage-credits", () => ({
     mocks.reconcileRefundNetReversal,
 }));
 
+vi.mock("@/src/lib/hosted-execution/usage-credit-grant-capacity", () => ({
+  readHostedUsageCreditGrantCapacityTx: mocks.readGrantCapacity,
+}));
+
 vi.mock("@/src/lib/hosted-onboarding/contact-privacy", () => ({
   createHostedStripeBillingEventLookupKey: (value: string | null | undefined) =>
     value ? `stripe-billing-event:${value}` : null,
@@ -77,6 +83,14 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-billing-store", () => ({
   }) => input.prisma.$transaction(input.run),
 }));
 
+vi.mock(
+  "@/src/lib/hosted-onboarding/usage-credit-purchase-reservation-lock",
+  () => ({
+    lockHostedUsageCreditPurchaseReservationOwnersTx:
+      mocks.lockPurchaseReservationOwners,
+  }),
+);
+
 vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
   requireHostedStripeApi: () => mocks.stripe,
   requireHostedStripeApiMode: mocks.stripeApiMode,
@@ -109,6 +123,10 @@ import {
   isHostedUsageCreditStripeRetryableError,
   reconcileHostedUsageCreditStripeEvent as reconcileHostedUsageCreditStripeEventImpl,
 } from "@/src/lib/hosted-onboarding/usage-credit-stripe-reconciliation";
+import {
+  isRetryableHostedUsageCreditDependencyError,
+  runHostedUsageCreditKmsOperation,
+} from "@/src/lib/hosted-onboarding/usage-credit-stripe-reconciliation-context";
 
 const BOUNDED_STRIPE_READ_OPTIONS = {
   maxNetworkRetries: 0,
@@ -168,6 +186,10 @@ describe("hosted usage-credit Stripe reconciliation", () => {
       granted: true,
       ledgerVersion: 1n,
     });
+    mocks.readGrantCapacity.mockResolvedValue({
+      expectedPurchaseOwnsReservation: false,
+      state: "available",
+    });
     mocks.reconcileDisputeNetReversal.mockResolvedValue({
       balanceUsdMicros: 2_500_000n,
       entryId: "huce_dispute_123",
@@ -221,6 +243,63 @@ describe("hosted usage-credit Stripe reconciliation", () => {
     );
     expect(HOSTED_USAGE_CREDIT_STRIPE_PREPARATION_BUDGET.timeoutMs)
       .toBe(5 * 60_000);
+  });
+
+  it("keeps transient official KMS provider failures retryable at reconciliation", async () => {
+    const kmsError = Object.assign(new Error("KMS unavailable"), {
+      code: "HOSTED_GCP_KMS_PROVIDER_ERROR",
+      providerReason: "UNAVAILABLE",
+      retryable: false,
+      status: null,
+    });
+
+    expect(isRetryableHostedUsageCreditDependencyError(kmsError)).toBe(true);
+    const error = await runHostedUsageCreditKmsOperation({
+      run: async () => {
+        throw kmsError;
+      },
+    }).catch((caught: unknown) => caught);
+    expect(isHostedUsageCreditStripeRetryableError(error)).toBe(true);
+    expect(error).toEqual(expect.objectContaining({
+      cause: kmsError,
+      code: "HOSTED_USAGE_CREDIT_STRIPE_RECONCILIATION_RETRYABLE",
+    }));
+  });
+
+  it("does not retry definitive official KMS provider failures", async () => {
+    const kmsError = Object.assign(new Error("KMS permission denied"), {
+      code: "HOSTED_GCP_KMS_PROVIDER_ERROR",
+      providerReason: "PERMISSION_DENIED",
+      retryable: false,
+      status: null,
+    });
+
+    expect(isRetryableHostedUsageCreditDependencyError(kmsError)).toBe(false);
+    const error = await runHostedUsageCreditKmsOperation({
+      run: async () => {
+        throw kmsError;
+      },
+    }).catch((caught: unknown) => caught);
+    expect(error).toBe(kmsError);
+  });
+
+  it("retains legacy and HTTP KMS retry classification compatibility", () => {
+    expect(isRetryableHostedUsageCreditDependencyError({
+      code: "GOOGLE_CLOUD_API_ERROR",
+      status: 503,
+    })).toBe(true);
+    expect(isRetryableHostedUsageCreditDependencyError({
+      code: "HOSTED_GCP_KMS_PROVIDER_ERROR",
+      providerReason: "PERMISSION_DENIED",
+      retryable: false,
+      status: 429,
+    })).toBe(true);
+    expect(isRetryableHostedUsageCreditDependencyError({
+      code: "HOSTED_GCP_KMS_PROVIDER_ERROR",
+      providerReason: "INVALID_ARGUMENT",
+      retryable: false,
+      status: 400,
+    })).toBe(false);
   });
 
   it("times out read-only preparation before entering the member transaction", async () => {
@@ -517,6 +596,7 @@ describe("hosted usage-credit Stripe reconciliation", () => {
       );
       expect(mocks.grantUsageCredit).not.toHaveBeenCalled();
       expect(harness.purchase).toEqual(expect.objectContaining({
+        grantSlotReleasedAt: null,
         status: HostedUsageCreditPurchaseStatus.payment_pending,
         terminalAt: null,
       }));
@@ -555,14 +635,17 @@ describe("hosted usage-credit Stripe reconciliation", () => {
     );
   });
 
-  it("keeps completed but unpaid Checkout pending without granting credit", async () => {
-    const harness = createUsageCreditStripePrismaHarness();
-    mocks.stripe.checkout.sessions.retrieve.mockResolvedValue(
-      makeCheckoutSession({ paymentStatus: "unpaid" }),
-    );
-    mocks.stripe.paymentIntents.retrieve.mockResolvedValue(
-      makePaymentIntent({ status: "processing" }),
-    );
+  it("restores a locally expired delayed Checkout reservation and later grants async success", async () => {
+    const harness = createUsageCreditStripePrismaHarness({
+      status: HostedUsageCreditPurchaseStatus.expired,
+      terminalAt: new Date("2026-07-16T04:50:01.000Z"),
+    });
+    mocks.stripe.checkout.sessions.retrieve
+      .mockResolvedValueOnce(makeCheckoutSession({ paymentStatus: "unpaid" }))
+      .mockResolvedValueOnce(makeCheckoutSession());
+    mocks.stripe.paymentIntents.retrieve
+      .mockResolvedValueOnce(makePaymentIntent({ status: "processing" }))
+      .mockResolvedValueOnce(makePaymentIntent());
 
     await expect(reconcileHostedUsageCreditStripeEvent({
       event: makeCheckoutEvent("checkout.session.completed"),
@@ -574,9 +657,20 @@ describe("hosted usage-credit Stripe reconciliation", () => {
 
     expect(mocks.grantUsageCredit).not.toHaveBeenCalled();
     expect(harness.purchase).toEqual(expect.objectContaining({
+      grantSlotReleasedAt: null,
       status: HostedUsageCreditPurchaseStatus.payment_pending,
       terminalAt: null,
     }));
+
+    await expect(reconcileHostedUsageCreditStripeEvent({
+      event: makeCheckoutEvent("checkout.session.async_payment_succeeded"),
+      prisma: harness.client,
+    })).resolves.toMatchObject({
+      granted: true,
+      handled: true,
+    });
+
+    expect(mocks.grantUsageCredit).toHaveBeenCalledOnce();
   });
 
   it("fulfills a delayed payment from asynchronous success", async () => {
@@ -636,6 +730,7 @@ describe("hosted usage-credit Stripe reconciliation", () => {
 
     expect(mocks.grantUsageCredit).not.toHaveBeenCalled();
     expect(harness.purchase).toEqual(expect.objectContaining({
+      grantSlotReleasedAt: null,
       status: HostedUsageCreditPurchaseStatus.payment_failed,
       terminalAt: new Date("2026-07-16T03:20:00.000Z"),
     }));
@@ -671,7 +766,7 @@ describe("hosted usage-credit Stripe reconciliation", () => {
     expect(mocks.grantUsageCredit).not.toHaveBeenCalled();
   });
 
-  it("closes an expired unpaid Session without granting credit", async () => {
+  it("releases a slot only from a live provider-expired unpaid Session and preserves it on replay", async () => {
     const harness = createUsageCreditStripePrismaHarness();
     mocks.stripe.checkout.sessions.retrieve.mockResolvedValue(
       makeCheckoutSession({ paymentIntentId: null, paymentStatus: "unpaid", status: "expired" }),
@@ -688,8 +783,81 @@ describe("hosted usage-credit Stripe reconciliation", () => {
     expect(mocks.stripe.paymentIntents.retrieve).not.toHaveBeenCalled();
     expect(mocks.grantUsageCredit).not.toHaveBeenCalled();
     expect(harness.purchase).toEqual(expect.objectContaining({
+      grantSlotReleasedAt: expect.any(Date),
       status: HostedUsageCreditPurchaseStatus.expired,
     }));
+    expect(mocks.lockPurchaseReservationOwners).toHaveBeenLastCalledWith({
+      beneficiaryMemberId: "member_beneficiary",
+      payerMemberId: "member_payer",
+      tx: harness.client,
+    });
+
+    const releasedAt = harness.purchase.grantSlotReleasedAt;
+    await expect(reconcileHostedUsageCreditStripeEvent({
+      event: makeCheckoutEvent("checkout.session.expired"),
+      prisma: harness.client,
+    })).resolves.toMatchObject({
+      granted: false,
+      handled: true,
+    });
+
+    expect(harness.purchase.grantSlotReleasedAt).toEqual(releasedAt);
+    expect(mocks.lockPurchaseReservationOwners).toHaveBeenCalledOnce();
+    const updateMany = vi.mocked(
+      harness.client.hostedUsageCreditPurchase.updateMany,
+    );
+    expect(updateMany).toHaveBeenCalledOnce();
+    expect(mocks.grantUsageCredit).not.toHaveBeenCalled();
+  });
+
+  it("replays a provider-final release after account deletion detached the payer", async () => {
+    const releasedAt = new Date("2026-07-16T04:55:00.000Z");
+    const harness = createUsageCreditStripePrismaHarness({
+      grantSlotReleasedAt: releasedAt,
+      payerMemberId: null,
+      status: HostedUsageCreditPurchaseStatus.expired,
+      stripeCheckoutSessionIdEncrypted: null,
+      terminalAt: new Date("2026-07-16T03:20:00.000Z"),
+    });
+    mocks.stripe.checkout.sessions.retrieve.mockResolvedValue(
+      makeCheckoutSession({
+        paymentIntentId: null,
+        paymentStatus: "unpaid",
+        status: "expired",
+      }),
+    );
+
+    await expect(reconcileHostedUsageCreditStripeEvent({
+      event: makeCheckoutEvent("checkout.session.expired"),
+      prisma: harness.client,
+    })).resolves.toMatchObject({
+      granted: false,
+      handled: true,
+      wakeRequired: false,
+    });
+
+    expect(harness.purchase.grantSlotReleasedAt).toEqual(releasedAt);
+    expect(harness.purchase.payerMemberId).toBeNull();
+    expect(mocks.lockPurchaseReservationOwners).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when live paid Checkout contradicts provider-final release", async () => {
+    const releasedAt = new Date("2026-07-16T04:55:00.000Z");
+    const harness = createUsageCreditStripePrismaHarness({
+      grantSlotReleasedAt: releasedAt,
+      status: HostedUsageCreditPurchaseStatus.expired,
+      terminalAt: new Date("2026-07-16T03:20:00.000Z"),
+    });
+
+    await expect(reconcileHostedUsageCreditStripeEvent({
+      event: makeCheckoutEvent("checkout.session.completed"),
+      prisma: harness.client,
+    })).rejects.toThrow(
+      "Provider-final usage-credit Checkout release contradicted live Stripe state.",
+    );
+
+    expect(harness.purchase.grantSlotReleasedAt).toEqual(releasedAt);
+    expect(mocks.grantUsageCredit).not.toHaveBeenCalled();
   });
 
   it("acknowledges an unknown safely expired Checkout after purchase deletion", async () => {
@@ -1544,6 +1712,47 @@ describe("hosted usage-credit Stripe reconciliation", () => {
     );
   });
 
+  it("keeps an overflowing final restoration retryable", async () => {
+    const harness = createUsageCreditStripePrismaHarness({
+      status: HostedUsageCreditPurchaseStatus.fulfilled,
+      stripeChargeLookupKey: "stripe-billing-event:ch_usage_123",
+      stripePaymentIntentLookupKey: "stripe-billing-event:pi_usage_123",
+    });
+    mocks.stripe.charges.retrieve.mockResolvedValue(
+      makeCharge({ amountRefunded: 0 }),
+    );
+    mocks.stripe.refunds.list.mockResolvedValue(
+      makeRefundList([makeRefund({ status: "failed" })]),
+    );
+    mocks.stripe.refunds.retrieve.mockResolvedValue(
+      makeRefund({ status: "failed" }),
+    );
+    mocks.readGrantCapacity.mockResolvedValue({
+      expectedPurchaseOwnsReservation: false,
+      state: "overflow",
+    });
+    mockExistingUsageCreditGrant(32_000_000n);
+
+    const reconciliation = reconcileHostedUsageCreditStripeEvent({
+      event: makeRefundEvent("refund.failed"),
+      prisma: harness.client,
+    });
+
+    await expect(reconciliation).rejects.toSatisfy(
+      isHostedUsageCreditStripeRetryableError,
+    );
+    expect(mocks.readGrantCapacity).toHaveBeenCalledTimes(1);
+    expect(mocks.readGrantCapacity).toHaveBeenCalledWith({
+      lockedBeneficiary: {
+        balanceUsdMicros: 2_500_000n,
+        beneficiaryMemberId: "member_beneficiary",
+        ledgerVersion: 2n,
+      },
+      tx: harness.client,
+    });
+    expect(harness.purchase.reconciliationVersion).toBe(0n);
+  });
+
   it("converges refunds and multiple disputes in two deterministic passes", async () => {
     const harness = createUsageCreditStripePrismaHarness({
       status: HostedUsageCreditPurchaseStatus.fulfilled,
@@ -1590,6 +1799,13 @@ describe("hosted usage-credit Stripe reconciliation", () => {
         : "dispute-b");
       return makeNetReversalResult({ balanceUsdMicros: 0n });
     });
+    mocks.readGrantCapacity.mockImplementation(async () => {
+      order.push("capacity");
+      return {
+        expectedPurchaseOwnsReservation: false,
+        state: "at_capacity",
+      };
+    });
 
     await expect(reconcileHostedUsageCreditStripeEvent({
       event: makeDisputeEvent("charge.dispute.funds_withdrawn", {
@@ -1608,7 +1824,17 @@ describe("hosted usage-credit Stripe reconciliation", () => {
       "refund",
       "dispute-a",
       "dispute-b",
+      "capacity",
     ]);
+    expect(mocks.readGrantCapacity).toHaveBeenCalledOnce();
+    expect(mocks.readGrantCapacity).toHaveBeenCalledWith({
+      lockedBeneficiary: {
+        balanceUsdMicros: 0n,
+        beneficiaryMemberId: "member_beneficiary",
+        ledgerVersion: 2n,
+      },
+      tx: harness.client,
+    });
     expect(mocks.reconcileRefundNetReversal).toHaveBeenCalledWith(
       expect.objectContaining({ targetNetReversalUsdMicros: 1_000_000n }),
     );
@@ -1725,6 +1951,7 @@ function makeUsageCreditPurchase(
     checkoutCancelUrl: string;
     checkoutRequestPolicyVersion: string;
     checkoutSuccessUrl: string;
+    grantSlotReleasedAt: Date | null;
     payerMemberId: string | null;
     status: HostedUsageCreditPurchaseStatus;
     stripeChargeLookupKey: string | null;
@@ -1753,6 +1980,7 @@ function makeUsageCreditPurchase(
       ? "https://murph.example/groups/fund/group_join_code_1234?usageCredit=success"
       : "https://murph.example/settings?usageCredit=success"),
     createdAt: new Date("2026-07-16T03:20:00.000Z"),
+    grantSlotReleasedAt: overrides?.grantSlotReleasedAt ?? null,
     grantUsdMicros: 5_000_000n,
     id: "hucp_purchase_123",
     lastReconciledAt: null as Date | null,

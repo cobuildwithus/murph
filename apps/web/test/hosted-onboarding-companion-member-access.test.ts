@@ -11,10 +11,11 @@ const mocks = vi.hoisted(() => ({
   assertHostedMemberNotSuspended: vi.fn(),
   completeHostedPrivyVerification: vi.fn(),
   createHostedDeviceSyncPublicIngressService: vi.fn(),
-  ensureHostedAutoPulseTrialEnrollment: vi.fn(),
+  ensureHostedStarterUsageEnrollment: vi.fn(),
   getPrisma: vi.fn(),
   lookupHostedMemberForPrivyPrincipal: vi.fn(),
   readActiveHostedMemberAccess: vi.fn(),
+  retryPendingHostedStarterUsageActivationRuntimeWake: vi.fn(),
   remapHostedPrivyCompletionLagError: vi.fn((error: unknown) => error),
   resolveHostedPrivySessionFromBearerToken: vi.fn(),
 }));
@@ -37,8 +38,10 @@ vi.mock("@/src/lib/hosted-onboarding/authentication-service", () => ({
   completeHostedPrivyVerification: mocks.completeHostedPrivyVerification,
 }));
 
-vi.mock("@/src/lib/hosted-onboarding/auto-trial-enrollment-service", () => ({
-  ensureHostedAutoPulseTrialEnrollment: mocks.ensureHostedAutoPulseTrialEnrollment,
+vi.mock("@/src/lib/hosted-onboarding/starter-usage-enrollment-service", () => ({
+  ensureHostedStarterUsageEnrollment: mocks.ensureHostedStarterUsageEnrollment,
+  retryPendingHostedStarterUsageActivationRuntimeWake:
+    mocks.retryPendingHostedStarterUsageActivationRuntimeWake,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/entitlement", () => ({
@@ -148,10 +151,12 @@ describe("native companion hosted member admission", () => {
     mocks.assertActiveHostedMemberAccessAllowed.mockResolvedValue(undefined);
     mocks.assertHostedMemberNotSuspended.mockReturnValue(undefined);
     mocks.completeHostedPrivyVerification.mockResolvedValue(completion());
-    mocks.ensureHostedAutoPulseTrialEnrollment.mockResolvedValue({
+    mocks.ensureHostedStarterUsageEnrollment.mockResolvedValue({
       redirectPath: "/home",
       status: "enrolled",
     });
+    mocks.retryPendingHostedStarterUsageActivationRuntimeWake
+      .mockResolvedValue(null);
   });
 
   it("requires bearer identity without falling back to browser authority", async () => {
@@ -189,7 +194,7 @@ describe("native companion hosted member admission", () => {
     expect(mocks.createHostedDeviceSyncPublicIngressService).not.toHaveBeenCalled();
   });
 
-  it("maps disabled trial enrollment to access recovery without device ingress", async () => {
+  it("maps blocked starter enrollment to access recovery without device ingress", async () => {
     const pendingMember = member();
     mocks.resolveHostedPrivySessionFromBearerToken.mockResolvedValue({ identity });
     mocks.lookupHostedMemberForPrivyPrincipal.mockResolvedValue(pendingMember);
@@ -197,11 +202,11 @@ describe("native companion hosted member admission", () => {
       .mockResolvedValueOnce(false)
       .mockResolvedValueOnce(false);
     mocks.completeHostedPrivyVerification.mockResolvedValue(completion());
-    mocks.ensureHostedAutoPulseTrialEnrollment.mockRejectedValueOnce(
+    mocks.ensureHostedStarterUsageEnrollment.mockRejectedValueOnce(
       hostedOnboardingError({
-        code: "HOSTED_AUTO_PULSE_TRIAL_DISABLED",
+        code: "HOSTED_STARTER_USAGE_ENROLLMENT_BLOCKED",
         httpStatus: 409,
-        message: "Automatic trial enrollment is disabled.",
+        message: "Starter usage enrollment is blocked.",
       }),
     );
 
@@ -217,7 +222,7 @@ describe("native companion hosted member admission", () => {
       memberId: pendingMember.id,
       prisma,
     });
-    expect(mocks.ensureHostedAutoPulseTrialEnrollment).toHaveBeenCalled();
+    expect(mocks.ensureHostedStarterUsageEnrollment).toHaveBeenCalled();
     expect(mocks.assertActiveHostedMemberAccessAllowed).not.toHaveBeenCalled();
     expect(mocks.createHostedDeviceSyncPublicIngressService).not.toHaveBeenCalled();
   });
@@ -237,12 +242,17 @@ describe("native companion hosted member admission", () => {
       prisma,
     });
     expect(mocks.completeHostedPrivyVerification).not.toHaveBeenCalled();
-    expect(mocks.ensureHostedAutoPulseTrialEnrollment).not.toHaveBeenCalled();
+    expect(mocks.ensureHostedStarterUsageEnrollment).not.toHaveBeenCalled();
+    expect(mocks.retryPendingHostedStarterUsageActivationRuntimeWake)
+      .toHaveBeenCalledWith({
+        memberId: activeMember.id,
+        prisma,
+      });
     expect(mocks.assertActiveHostedMemberAccessAllowed).not.toHaveBeenCalled();
     expect(mocks.createHostedDeviceSyncPublicIngressService).not.toHaveBeenCalled();
   });
 
-  it("admits a fresh consented phone signup without requiring an assignable Linq line and remains idempotent", async () => {
+  it("uses canonical welcome defaults for a fresh consented phone activation and remains idempotent", async () => {
     const activeMember = member(HostedBillingStatus.active);
     mocks.resolveHostedPrivySessionFromBearerToken.mockResolvedValue({ identity });
     mocks.lookupHostedMemberForPrivyPrincipal
@@ -251,21 +261,10 @@ describe("native companion hosted member admission", () => {
     mocks.readActiveHostedMemberAccess
       .mockResolvedValueOnce(false)
       .mockResolvedValueOnce(true);
-    mocks.ensureHostedAutoPulseTrialEnrollment.mockImplementation(
-      async (input: { suppressSignupWelcome?: boolean }) => {
-        if (!input.suppressSignupWelcome) {
-          throw hostedOnboardingError({
-            code: "LINQ_CONVERSATION_PHONE_REQUIRED",
-            httpStatus: 409,
-            message: "No assignable Linq line is available.",
-          });
-        }
-        return {
-          redirectPath: "/home",
-          status: "enrolled",
-        };
-      },
-    );
+    mocks.ensureHostedStarterUsageEnrollment.mockResolvedValueOnce({
+      redirectPath: "/home",
+      status: "enrolled",
+    });
 
     const firstResponse = await admissionRoute.POST(admissionRequest());
     const repeatedResponse = await admissionRoute.POST(admissionRequest());
@@ -275,8 +274,8 @@ describe("native companion hosted member admission", () => {
     expect(repeatedResponse.status).toBe(200);
     await expect(repeatedResponse.json()).resolves.toEqual({ ok: true });
     expect(mocks.completeHostedPrivyVerification).toHaveBeenCalledOnce();
-    expect(mocks.ensureHostedAutoPulseTrialEnrollment).toHaveBeenCalledOnce();
-    expect(mocks.ensureHostedAutoPulseTrialEnrollment).toHaveBeenCalledWith({
+    expect(mocks.ensureHostedStarterUsageEnrollment).toHaveBeenCalledOnce();
+    expect(mocks.ensureHostedStarterUsageEnrollment).toHaveBeenCalledWith({
       inviteCode: "invite_native",
       member: {
         id: "member_native",
@@ -284,14 +283,16 @@ describe("native companion hosted member admission", () => {
       },
       now: expect.any(Date),
       prisma,
-      pulseTrialStartSource: "companion_onboarding",
-      suppressSignupWelcome: true,
+      source: "companion_onboarding",
     });
+    expect(
+      mocks.ensureHostedStarterUsageEnrollment.mock.calls[0]?.[0],
+    ).not.toHaveProperty("suppressSignupWelcome");
     expect(mocks.assertActiveHostedMemberAccessAllowed).toHaveBeenCalledOnce();
     expect(mocks.createHostedDeviceSyncPublicIngressService).not.toHaveBeenCalled();
   });
 
-  it("admits a fresh consented verified-email signup without a welcome delivery", async () => {
+  it("uses canonical starter enrollment defaults for a fresh consented verified-email signup", async () => {
     mocks.resolveHostedPrivySessionFromBearerToken.mockResolvedValue({
       identity: emailIdentity,
     });
@@ -307,7 +308,7 @@ describe("native companion hosted member admission", () => {
       now: expect.any(Date),
       prisma,
     });
-    expect(mocks.ensureHostedAutoPulseTrialEnrollment).toHaveBeenCalledWith({
+    expect(mocks.ensureHostedStarterUsageEnrollment).toHaveBeenCalledWith({
       inviteCode: "invite_native",
       member: {
         id: "member_native",
@@ -315,8 +316,7 @@ describe("native companion hosted member admission", () => {
       },
       now: expect.any(Date),
       prisma,
-      pulseTrialStartSource: "companion_onboarding",
-      suppressSignupWelcome: true,
+      source: "companion_onboarding",
     });
     expect(mocks.assertActiveHostedMemberAccessAllowed).toHaveBeenCalledWith({
       memberId: "member_native",
@@ -341,11 +341,35 @@ describe("native companion hosted member admission", () => {
       prisma,
     });
     expect(mocks.completeHostedPrivyVerification).not.toHaveBeenCalled();
-    expect(mocks.ensureHostedAutoPulseTrialEnrollment).not.toHaveBeenCalled();
+    expect(mocks.ensureHostedStarterUsageEnrollment).not.toHaveBeenCalled();
     expect(mocks.assertActiveHostedMemberAccessAllowed).not.toHaveBeenCalled();
   });
 
-  it("creates the canonical member but stops at consent before trial or Junction admission", async () => {
+  it("returns retryable admission until a pending activation wake is accepted", async () => {
+    const activeMember = member(HostedBillingStatus.active);
+    mocks.resolveHostedPrivySessionFromBearerToken.mockResolvedValue({ identity });
+    mocks.lookupHostedMemberForPrivyPrincipal.mockResolvedValue(activeMember);
+    mocks.readActiveHostedMemberAccess.mockResolvedValue(true);
+    mocks.retryPendingHostedStarterUsageActivationRuntimeWake
+      .mockResolvedValueOnce({ accepted: false })
+      .mockResolvedValueOnce({ accepted: true });
+
+    const firstResponse = await admissionRoute.POST(admissionRequest());
+    const retryResponse = await admissionRoute.POST(admissionRequest());
+
+    expect(firstResponse.status).toBe(503);
+    await expect(firstResponse.json()).resolves.toMatchObject({
+      error: {
+        code: "COMPANION_ADMISSION_RETRYABLE",
+      },
+    });
+    expect(retryResponse.status).toBe(200);
+    await expect(retryResponse.json()).resolves.toEqual({ ok: true });
+    expect(mocks.retryPendingHostedStarterUsageActivationRuntimeWake)
+      .toHaveBeenCalledTimes(2);
+  });
+
+  it("creates the canonical member but stops at consent before starter access or Junction admission", async () => {
     const consentRequired = hostedOnboardingError({
       code: "HOSTED_CONSENT_REQUIRED",
       httpStatus: 403,
@@ -369,11 +393,11 @@ describe("native companion hosted member admission", () => {
       prisma,
       timeZone: "America/Denver",
     });
-    expect(mocks.ensureHostedAutoPulseTrialEnrollment).not.toHaveBeenCalled();
+    expect(mocks.ensureHostedStarterUsageEnrollment).not.toHaveBeenCalled();
     expect(mocks.assertActiveHostedMemberAccessAllowed).not.toHaveBeenCalled();
   });
 
-  it("reuses canonical completion and no-card Pulse trial after consent", async () => {
+  it("reuses canonical completion and starter usage after consent", async () => {
     const pendingMember = member();
     mocks.lookupHostedMemberForPrivyPrincipal.mockResolvedValue(pendingMember);
     mocks.readActiveHostedMemberAccess
@@ -392,7 +416,7 @@ describe("native companion hosted member admission", () => {
       now: new Date("2026-07-31T11:15:00.000Z"),
       prisma,
     });
-    expect(mocks.ensureHostedAutoPulseTrialEnrollment).toHaveBeenCalledWith({
+    expect(mocks.ensureHostedStarterUsageEnrollment).toHaveBeenCalledWith({
       inviteCode: "invite_native",
       member: {
         id: pendingMember.id,
@@ -400,7 +424,7 @@ describe("native companion hosted member admission", () => {
       },
       now: new Date("2026-07-31T11:15:00.000Z"),
       prisma,
-      pulseTrialStartSource: "companion_onboarding",
+      source: "companion_onboarding",
     });
     expect(mocks.assertActiveHostedMemberAccessAllowed).toHaveBeenCalledWith({
       memberId: pendingMember.id,
@@ -408,7 +432,7 @@ describe("native companion hosted member admission", () => {
     });
   });
 
-  it("does not reinterpret incomplete billing as a fresh native trial", async () => {
+  it("does not reinterpret incomplete billing as fresh starter access", async () => {
     const incompleteMember = member(HostedBillingStatus.incomplete);
     const accessRequired = hostedOnboardingError({
       code: "HOSTED_ACCESS_REQUIRED",
@@ -431,7 +455,7 @@ describe("native companion hosted member admission", () => {
       prisma,
     })).rejects.toBe(accessRequired);
 
-    expect(mocks.ensureHostedAutoPulseTrialEnrollment).not.toHaveBeenCalled();
+    expect(mocks.ensureHostedStarterUsageEnrollment).not.toHaveBeenCalled();
     expect(mocks.assertActiveHostedMemberAccessAllowed).toHaveBeenCalledWith({
       memberId: incompleteMember.id,
       prisma,
@@ -450,7 +474,7 @@ describe("native companion hosted member admission", () => {
       prisma,
     })).resolves.toBe(pendingMember.id);
 
-    expect(mocks.ensureHostedAutoPulseTrialEnrollment).not.toHaveBeenCalled();
+    expect(mocks.ensureHostedStarterUsageEnrollment).not.toHaveBeenCalled();
     expect(mocks.assertActiveHostedMemberAccessAllowed).not.toHaveBeenCalled();
   });
 });

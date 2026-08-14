@@ -138,9 +138,9 @@ function selectPointByPolicy(
   switch (policy.kind) {
     case "qualified-latest":
       selection = {
-        point: sortedLatest(
+        point: selectAuthoritativeMetricPoint(
           comparablePoints.filter((point) => qualifiersMatch(point, policy.requiredQualifiers)),
-        ).at(0) ?? null,
+        ),
       };
       break;
     case "daily-aggregate":
@@ -152,12 +152,14 @@ function selectPointByPolicy(
       break;
     case "latest-lab": {
       const labPoints = comparablePoints.filter((point) => point.source.kind === "test-result");
-      selection = { point: sortedLatest(labPoints, { preferFasting: policy.preferFasting }).at(0) ?? null };
+      selection = {
+        point: selectAuthoritativeMetricPoint(labPoints, { preferFasting: policy.preferFasting }),
+      };
       break;
     }
     case "latest-device-estimate":
     case "latest-valid":
-      selection = { point: sortedLatest(comparablePoints).at(0) ?? null };
+      selection = { point: selectAuthoritativeMetricPoint(comparablePoints) };
       break;
   }
 
@@ -194,7 +196,7 @@ function selectDailyAggregatePoint(
   policy: DailyAggregateSelectionPolicy,
   definition: MetricDefinition,
 ): MetricPolicySelectionResult {
-  const latest = sortedLatest(points).at(0) ?? null;
+  const latest = selectAuthoritativeMetricPoint(points);
   if (!latest) {
     return { point: null };
   }
@@ -297,11 +299,59 @@ function selectDailyAggregatePoint(
   };
 }
 
-function sortedLatest(
+export function selectAuthoritativeMetricPoint(
   points: readonly MetricPoint[],
   options: { preferFasting?: boolean } = {},
+): MetricPoint | null {
+  const precedenceCandidates = selectHighestPrecedenceCandidates(points, options);
+  return retainGreatestCausalSequence(precedenceCandidates).sort((left, right) =>
+    compareMetricPointsForSelection(left, right, options)
+  ).at(0) ?? null;
+}
+
+function selectHighestPrecedenceCandidates(
+  points: readonly MetricPoint[],
+  options: { preferFasting?: boolean },
 ): MetricPoint[] {
-  return points.slice().sort((left, right) => compareMetricPointsForSelection(left, right, options));
+  let candidates = points.slice();
+  if (options.preferFasting && candidates.length > 0) {
+    const highestFastingRank = Math.max(...candidates.map(fastingRank));
+    candidates = candidates.filter((candidate) =>
+      fastingRank(candidate) === highestFastingRank
+    );
+  }
+  const fastingCandidates = candidates;
+  const latestEffectiveDate = fastingCandidates.reduce(
+    (latest, candidate) => candidate.effectiveDate > latest ? candidate.effectiveDate : latest,
+    "",
+  );
+  candidates = fastingCandidates.filter((candidate) =>
+    candidate.effectiveDate === latestEffectiveDate
+  );
+  if (candidates.length === 0) {
+    return candidates;
+  }
+  const highestSourcePriority = Math.min(...candidates.map(sourcePriority));
+  return candidates.filter((candidate) =>
+    sourcePriority(candidate) === highestSourcePriority
+  );
+}
+
+function retainGreatestCausalSequence(points: readonly MetricPoint[]): MetricPoint[] {
+  const causalSequences = points.flatMap((point) => {
+    const causalSeq = readPositiveCausalSeq(point.context.causalSeq);
+    return causalSeq === null ? [] : [causalSeq];
+  });
+  if (causalSequences.length === 0) {
+    return points.slice();
+  }
+  const greatestCausalSeq = causalSequences.reduce((greatest, candidate) =>
+    candidate > greatest ? candidate : greatest
+  );
+  return points.filter((point) => {
+    const causalSeq = readPositiveCausalSeq(point.context.causalSeq);
+    return causalSeq === null || causalSeq === greatestCausalSeq;
+  });
 }
 
 function compareMetricPointsForSelection(
@@ -320,7 +370,20 @@ function compareMetricPointsForSelection(
   if (priorityDelta !== 0) return priorityDelta;
 
   if (left.observedAt !== right.observedAt) return right.observedAt.localeCompare(left.observedAt);
+  if (left.recordedAt !== right.recordedAt) {
+    if (left.recordedAt === null) return 1;
+    if (right.recordedAt === null) return -1;
+    return right.recordedAt.localeCompare(left.recordedAt);
+  }
   return left.id.localeCompare(right.id);
+}
+
+function readPositiveCausalSeq(value: string | undefined): bigint | null {
+  if (!value || !/^[1-9][0-9]{0,18}$/u.test(value)) {
+    return null;
+  }
+  const causalSeq = BigInt(value);
+  return causalSeq <= 9_223_372_036_854_775_807n ? causalSeq : null;
 }
 
 function sourcePriority(point: MetricPoint): number {

@@ -23,7 +23,10 @@ export function createHostedWebMailboxPort(input: {
   transport: HostedWebControlTransport;
 }) {
   return {
-    async fetch(request: Parameters<NonNullable<HostedRuntimePlatform["mailboxPort"]>["fetch"]>[0]) {
+    async fetch(
+      request: Parameters<NonNullable<HostedRuntimePlatform["mailboxPort"]>["fetch"]>[0],
+      context?: Parameters<NonNullable<HostedRuntimePlatform["mailboxPort"]>["fetch"]>[1],
+    ) {
       let payload: unknown;
       try {
         payload = await fetchReplaySafeHostedWebControlPlaneJson({
@@ -32,10 +35,14 @@ export function createHostedWebMailboxPort(input: {
           description: "Hosted mailbox fetch",
           fetchImpl: input.fetchImpl,
           path: HOSTED_RUNTIME_MAILBOX_FETCH_PATH,
+          ...(context?.signal ? { signal: context.signal } : {}),
           timeoutMs: input.timeoutMs,
           transport: input.transport,
         });
       } catch (error) {
+        if (context?.signal?.aborted) {
+          throw context.signal.reason;
+        }
         if (!isHostedMailboxAiUsageDeniedError(error)) {
           throw error;
         }

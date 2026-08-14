@@ -5,6 +5,8 @@ import { appendHostedMailboxEnvelopeTx } from "../hosted-mailbox/store";
 import {
   ensureHostedThreadContainerRouteTx,
   refreshHostedThreadContainerDeliveryRouteTx,
+  type PreparedHostedThreadContainerCreation,
+  type PreparedHostedThreadContainerDeliveryRoute,
 } from "../hosted-routing/thread-container-service";
 import {
   HOSTED_TELEGRAM_THREAD_ACCOUNT_LOOKUP_KEY,
@@ -24,12 +26,15 @@ import {
   isHostedMemberSuspended,
 } from "./entitlement";
 import {
+  hostedOnboardingError,
   isHostedOnboardingError,
 } from "./errors";
+import { parseHostedFamilyInviteCode } from "./app-routes";
 import {
   appendHostedFamilyChatNotificationTx,
   buildHostedFamilyInviteAcceptedNotification,
   acceptHostedFamilyInviteFromTelegramTx,
+  HOSTED_FAMILY_DRAFT_CHECKOUT_ACTIVE_ERROR_CODE,
   resolveHostedFamilyInviteTokenForInbound,
   resolveHostedFamilyChatNotificationRouteTx,
 } from "./family-plan";
@@ -41,7 +46,7 @@ import {
   summarizeHostedTelegramWebhook,
 } from "./telegram";
 import {
-  resolveHostedMemberRoutingByTelegramUserId,
+  resolveHostedMemberCoreByTelegramUserId,
   upsertHostedMemberTelegramRoutingBindingTx,
 } from "./hosted-member-routing-store";
 import {
@@ -56,12 +61,16 @@ import {
 
 export type HostedOnboardingTelegramWebhookResponse = {
   duplicate?: boolean;
+  familyInviteCode?: string;
   ignored?: boolean;
   ok: true;
   reason?: string;
 };
 
 export async function planHostedOnboardingTelegramWebhook(input: {
+  preparedSenderMemberId?: string;
+  preparedThreadContainerCreation?: PreparedHostedThreadContainerCreation;
+  preparedThreadDeliveryRoute?: PreparedHostedThreadContainerDeliveryRoute;
   prisma: Prisma.TransactionClient;
   update: ReturnType<typeof parseHostedTelegramWebhookUpdate>;
 }): Promise<HostedWebhookPlan<HostedOnboardingTelegramWebhookResponse>> {
@@ -94,6 +103,7 @@ export async function planHostedOnboardingTelegramWebhook(input: {
       text: telegramMessage.text ?? null,
     }) !== null;
     let familyInviteNotAccepted = false;
+    let familyDraftCheckoutConflictInviteCode: string | null = null;
     let familyAcceptance: Awaited<ReturnType<typeof acceptHostedFamilyInviteFromTelegramTx>> = null;
     let familyActivationWake: HostedWebhookWakeHandoff | null = null;
     try {
@@ -116,10 +126,27 @@ export async function planHostedOnboardingTelegramWebhook(input: {
         tx: input.prisma,
       });
     } catch (error) {
-      if (!isExpectedHostedTelegramFamilyInviteAcceptanceMiss(error)) {
+      if (
+        isHostedOnboardingError(error)
+        && error.code === HOSTED_FAMILY_DRAFT_CHECKOUT_ACTIVE_ERROR_CODE
+      ) {
+        const inviteCode = parseHostedFamilyInviteCode(error.details?.inviteCode);
+        if (!inviteCode) {
+          throw hostedOnboardingError({
+            cause: error,
+            code: "HOSTED_FAMILY_DRAFT_RECOVERY_INVITE_MISSING",
+            httpStatus: 500,
+            message:
+              "Family invite recovery could not preserve the accepted invite identity.",
+            retryable: true,
+          });
+        }
+        familyDraftCheckoutConflictInviteCode = inviteCode;
+      } else if (!isExpectedHostedTelegramFamilyInviteAcceptanceMiss(error)) {
         throw error;
+      } else {
+        familyInviteNotAccepted = true;
       }
-      familyInviteNotAccepted = true;
     }
     if (familyAcceptance) {
       const route = await resolveHostedFamilyChatNotificationRouteTx({
@@ -155,12 +182,24 @@ export async function planHostedOnboardingTelegramWebhook(input: {
       };
     }
 
+    if (familyDraftCheckoutConflictInviteCode) {
+      return {
+        desiredSideEffects: [],
+        response: {
+          familyInviteCode: familyDraftCheckoutConflictInviteCode,
+          ignored: true,
+          ok: true,
+          reason: "family-invite-draft-recovery-required",
+        },
+      };
+    }
+
     if (familyInviteTokenPresent || familyInviteNotAccepted) {
       return buildIgnoredTelegramWebhookPlan("family-invite-not-accepted");
     }
   }
 
-  const existingMemberLookup = await resolveHostedMemberRoutingByTelegramUserId({
+  const existingMemberLookup = await resolveHostedMemberCoreByTelegramUserId({
     prisma: input.prisma,
     telegramUserId: summary.senderTelegramUserId,
   });
@@ -170,10 +209,13 @@ export async function planHostedOnboardingTelegramWebhook(input: {
   }
 
   let existingMember = existingMemberLookup.status === "found"
-    ? existingMemberLookup.lookup.core
+    ? existingMemberLookup.core
     : null;
 
   if (!existingMember) {
+    if (input.preparedSenderMemberId) {
+      return buildIgnoredTelegramWebhookPlan("telegram-binding-changed");
+    }
     if (!summary.isDirect) {
       const route = await readHostedThreadRouteByThreadIdentity({
         channel: "telegram",
@@ -215,13 +257,13 @@ export async function planHostedOnboardingTelegramWebhook(input: {
   }
 
   await lockHostedMemberRow(input.prisma, existingMember.id);
-  const lockedMemberLookup = await resolveHostedMemberRoutingByTelegramUserId({
+  const lockedMemberLookup = await resolveHostedMemberCoreByTelegramUserId({
     prisma: input.prisma,
     telegramUserId: summary.senderTelegramUserId,
   });
   if (
     lockedMemberLookup.status !== "found"
-    || lockedMemberLookup.lookup.core.id !== existingMember.id
+    || lockedMemberLookup.core.id !== existingMember.id
   ) {
     return buildIgnoredTelegramWebhookPlan(
       lockedMemberLookup.status === "ambiguous"
@@ -229,7 +271,7 @@ export async function planHostedOnboardingTelegramWebhook(input: {
         : "telegram-binding-changed",
     );
   }
-  existingMember = lockedMemberLookup.lookup.core;
+  existingMember = lockedMemberLookup.core;
 
   if (isHostedMemberSuspended(existingMember.suspendedAt)) {
     return buildIgnoredTelegramWebhookPlan("suspended-member");
@@ -275,26 +317,41 @@ export async function planHostedOnboardingTelegramWebhook(input: {
           channel: "telegram",
           occurredAt: new Date(summary.occurredAt),
           ownerMemberId: existingMember.id,
+          ...(input.preparedThreadContainerCreation
+            ? {
+                preparedCreation: input.preparedThreadContainerCreation,
+              }
+            : {}),
           prisma: input.prisma,
           threadId: telegramMessage.threadId,
         });
-        runtimeMemberId = ensured.containerMemberId;
-        if (ensured.created) {
-          await bindArmedHostedUsageReferralToNewContainerTx({
-            occurredAt: new Date(summary.occurredAt),
-            ownerMemberId: existingMember.id,
-            targetChannel: "telegram",
-            targetLinqService: null,
-            targetContainerMemberId: ensured.containerMemberId,
-            tx: input.prisma,
+        if (!ensured.created) {
+          // This branch began from an observed-absent route and therefore has
+          // only creation material. An existing winner requires its own
+          // delivery-route package and mailbox-root prewarm in a fresh attempt.
+          throw hostedOnboardingError({
+            code: "HOSTED_THREAD_ROUTE_PREPARATION_REQUIRED",
+            httpStatus: 503,
+            message: "Hosted thread delivery-route preparation is required.",
+            retryable: true,
           });
         }
+        runtimeMemberId = ensured.containerMemberId;
+        await bindArmedHostedUsageReferralToNewContainerTx({
+          occurredAt: new Date(summary.occurredAt),
+          ownerMemberId: existingMember.id,
+          targetChannel: "telegram",
+          targetLinqService: null,
+          targetContainerMemberId: ensured.containerMemberId,
+          tx: input.prisma,
+        });
       } catch (error) {
         if (!isHostedOnboardingError(error) || error.code !== "HOSTED_THREAD_ROUTE_ALREADY_BOUND") {
           throw error;
         }
         // Another first group message may have committed the route while this
-        // webhook was in flight. Re-read and converge on that existing owner.
+        // webhook was in flight. Retry the whole planner so pre-transaction
+        // crypto preparation binds to that canonical winner.
         threadRoute = await readHostedThreadRouteByThreadIdentity({
           channel: "telegram",
           prisma: input.prisma,
@@ -303,18 +360,42 @@ export async function planHostedOnboardingTelegramWebhook(input: {
         if (!threadRoute) {
           return buildIgnoredTelegramWebhookPlan("group-chat-provision-unavailable");
         }
+        throw hostedOnboardingError({
+          code: "HOSTED_THREAD_ROUTE_PREPARATION_REQUIRED",
+          httpStatus: 503,
+          message: "Hosted thread delivery-route preparation is required.",
+          retryable: true,
+        });
       }
-    } else if (requiresHostedThreadDeliveryRouteRefresh({
-      accountLookupKey: HOSTED_TELEGRAM_THREAD_ACCOUNT_LOOKUP_KEY,
-      route: threadRoute,
-      threadId: telegramMessage.threadId,
-    })) {
-      await refreshHostedThreadContainerDeliveryRouteTx({
+    } else {
+      if (
+        !input.preparedThreadDeliveryRoute
+        || input.preparedThreadDeliveryRoute.containerMemberId
+          !== threadRoute.containerMemberId
+      ) {
+        // Existing-route preparation also warms the winner's mailbox ingress
+        // root. If the route changed after preflight, retry before appending
+        // under a transaction that has no matching warm root.
+        throw hostedOnboardingError({
+          code: "HOSTED_THREAD_ROUTE_PREPARATION_REQUIRED",
+          httpStatus: 503,
+          message: "Hosted thread delivery-route preparation is required.",
+          retryable: true,
+        });
+      }
+      if (requiresHostedThreadDeliveryRouteRefresh({
         accountLookupKey: HOSTED_TELEGRAM_THREAD_ACCOUNT_LOOKUP_KEY,
-        prisma: input.prisma,
         route: threadRoute,
         threadId: telegramMessage.threadId,
-      });
+      })) {
+        await refreshHostedThreadContainerDeliveryRouteTx({
+          accountLookupKey: HOSTED_TELEGRAM_THREAD_ACCOUNT_LOOKUP_KEY,
+          preparedDeliveryRoute: input.preparedThreadDeliveryRoute,
+          prisma: input.prisma,
+          route: threadRoute,
+          threadId: telegramMessage.threadId,
+        });
+      }
       runtimeMemberId = threadRoute.containerMemberId;
     }
     if (runtimeMemberId === existingMember.id && threadRoute) {
@@ -445,13 +526,14 @@ const HOSTED_TELEGRAM_FAMILY_INVITE_ACCEPTANCE_MISS_CODES = new Set([
   "HOSTED_FAMILY_INVITE_NOT_ACTIVE",
   "HOSTED_FAMILY_INVITE_NOT_FOUND",
   "HOSTED_FAMILY_INVITE_TELEGRAM_MISMATCH",
+  "HOSTED_FAMILY_MEMBER_ALREADY_IN_GROUP",
   "HOSTED_FAMILY_MEMBER_ALREADY_SPONSORED",
   "HOSTED_FAMILY_OWNER_ALREADY_IN_GROUP",
   "HOSTED_FAMILY_SEAT_LIMIT_REACHED",
   "HOSTED_FAMILY_TELEGRAM_IDENTITY_AMBIGUOUS",
 ]);
 
-function isExpectedHostedTelegramFamilyInviteAcceptanceMiss(error: unknown): boolean {
+export function isExpectedHostedTelegramFamilyInviteAcceptanceMiss(error: unknown): boolean {
   return isHostedOnboardingError(error)
     && !error.retryable
     && HOSTED_TELEGRAM_FAMILY_INVITE_ACCEPTANCE_MISS_CODES.has(error.code);

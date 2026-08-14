@@ -64,7 +64,10 @@ export function buildMetricProjection(
   });
   return {
     dailySampleSummaries,
-    metricPoints: applyWearableSummaryMetricPrecedence(metricPoints, wearableMetricEvidence.suppressionEvidence),
+    metricPoints: applyWearableSummaryMetricPrecedence(
+      applyJunctionPreciseBodyObservationPrecedence(metricPoints),
+      wearableMetricEvidence.suppressionEvidence,
+    ),
     wearableMetricRows,
   };
 }
@@ -153,6 +156,10 @@ const RECOVERY_METRIC_EVIDENCE = [
 
 const ACTIVITY_METRIC_EVIDENCE = [
   { metricKey: "steps", summaryField: "steps", sourceKind: "activity-summary" },
+  { metricKey: "activity-minutes", summaryField: "activityMinutes", sourceKind: "activity-summary" },
+  { metricKey: "low-activity-minutes", summaryField: "lowActivityMinutes", sourceKind: "activity-summary" },
+  { metricKey: "medium-activity-minutes", summaryField: "mediumActivityMinutes", sourceKind: "activity-summary" },
+  { metricKey: "high-activity-minutes", summaryField: "highActivityMinutes", sourceKind: "activity-summary" },
   { metricKey: "workout-minutes", summaryField: "sessionMinutes", sourceKind: "activity-summary" },
   { metricKey: "workout-count", summaryField: "sessionCount", sourceKind: "activity-summary" },
   { metricKey: "active-calories", summaryField: "activeCalories", sourceKind: "activity-summary" },
@@ -162,6 +169,9 @@ const ACTIVITY_METRIC_EVIDENCE = [
   { metricKey: "elevation-gain-meters", summaryField: "totalElevationGainMeters", sourceKind: "activity-summary" },
   { metricKey: "estimated-vo2-max", summaryField: "estimatedVo2Max", sourceKind: "activity-summary" },
   { metricKey: "floors-climbed", summaryField: "floorsClimbed", sourceKind: "activity-summary" },
+  { metricKey: "average-heart-rate", summaryField: "averageHeartRate", sourceKind: "activity-summary" },
+  { metricKey: "walking-average-heart-rate", summaryField: "walkingAverageHeartRate", sourceKind: "activity-summary" },
+  { metricKey: "lowest-heart-rate", summaryField: "lowestHeartRate", sourceKind: "activity-summary" },
   { metricKey: "max-heart-rate", summaryField: "maxHeartRate", sourceKind: "activity-summary" },
   { metricKey: "workout-strain", summaryField: "workoutStrain", sourceKind: "activity-summary" },
 ] as const satisfies readonly SummaryMetricEvidenceEntry<WearableResolvedMetricField<WearableActivitySummary>>[];
@@ -169,6 +179,10 @@ const ACTIVITY_METRIC_EVIDENCE = [
 const BODY_STATE_METRIC_EVIDENCE = [
   { metricKey: "body-weight", summaryField: "weightKg", sourceKind: "wearable-summary" },
   { metricKey: "body-fat-percentage", summaryField: "bodyFatPercentage", sourceKind: "wearable-summary" },
+  { metricKey: "body-water-percentage", summaryField: "bodyWaterPercentage", sourceKind: "wearable-summary" },
+  { metricKey: "bone-mass-percentage", summaryField: "boneMassPercentage", sourceKind: "wearable-summary" },
+  { metricKey: "muscle-mass-percentage", summaryField: "muscleMassPercentage", sourceKind: "wearable-summary" },
+  { metricKey: "visceral-fat-index", summaryField: "visceralFatIndex", sourceKind: "wearable-summary" },
 ] as const satisfies readonly SummaryMetricEvidenceEntry<WearableResolvedMetricField<WearableBodyStateSummary>>[];
 
 const SUMMARY_METRIC_EVIDENCE_ENTRIES = [
@@ -282,6 +296,107 @@ function heartRateZoneMetricEvidence(summary: WearableActivitySummary): Wearable
       },
     }];
   });
+}
+
+const JUNCTION_PRECISE_BODY_RESOURCE_BY_METRIC = new Map<string, string>([
+  [resolveMetricInputKey("bmi"), "body-mass-index"],
+  [resolveMetricInputKey("body-fat-percentage"), "fat"],
+  [resolveMetricInputKey("lean-body-mass"), "lean-body-mass"],
+  [resolveMetricInputKey("waist-circumference"), "waist-circumference"],
+]);
+
+interface JunctionBodyObservationIdentity {
+  kind: "precise" | "summary";
+  key: string;
+}
+
+function applyJunctionPreciseBodyObservationPrecedence(
+  points: readonly MetricPoint[],
+): MetricPoint[] {
+  const preciseIdentities = new Set(
+    points.flatMap((point) => {
+      const identity = resolveJunctionBodyObservationIdentity(point);
+      return identity?.kind === "precise" ? [identity.key] : [];
+    }),
+  );
+
+  if (preciseIdentities.size === 0) {
+    return [...points];
+  }
+
+  return points.filter((point) => {
+    const identity = resolveJunctionBodyObservationIdentity(point);
+    return identity?.kind !== "summary" || !preciseIdentities.has(identity.key);
+  });
+}
+
+function resolveJunctionBodyObservationIdentity(
+  point: MetricPoint,
+): JunctionBodyObservationIdentity | null {
+  const metricKey = resolveMetricInputKey(point.metricKey);
+  const preciseResource = JUNCTION_PRECISE_BODY_RESOURCE_BY_METRIC.get(metricKey);
+  if (!preciseResource) {
+    return null;
+  }
+
+  const externalRef = readPlainRecord(point.provenance.externalRef);
+  if (readPlainString(externalRef?.system) !== "junction") {
+    return null;
+  }
+  const dataOrigin = readPlainRecord(point.provenance.dataOrigin);
+  const sourceProviderSlug = normalizeJunctionIdentitySlug(
+    readPlainString(dataOrigin?.sourceProviderSlug),
+  );
+  const sourceInstanceId = readPlainString(dataOrigin?.sourceInstanceId);
+  const observedAtRaw = readPlainString(dataOrigin?.observedAtRaw);
+  if (!sourceProviderSlug || !sourceInstanceId || !observedAtRaw) {
+    return null;
+  }
+
+  const resourceType = readPlainString(externalRef?.resourceType);
+  const resourcePrefix = `junction-${sourceProviderSlug}-`;
+  const kind = resourceType === `${resourcePrefix}body`
+    ? "summary"
+    : resourceType === `${resourcePrefix}${preciseResource}`
+      ? "precise"
+      : null;
+  if (!kind) {
+    return null;
+  }
+
+  return {
+    kind,
+    key: [
+      metricKey,
+      sourceProviderSlug,
+      sourceInstanceId,
+      readPlainString(dataOrigin?.sourceType) ?? "",
+      observedAtRaw,
+    ].join("\0"),
+  };
+}
+
+function normalizeJunctionIdentitySlug(value: string | null): string | null {
+  if (!value) {
+    return null;
+  }
+  const normalized = value
+    .normalize("NFKC")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/gu, "-")
+    .replace(/^-+|-+$/gu, "");
+  return normalized || null;
+}
+
+function readPlainRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
+}
+
+function readPlainString(value: unknown): string | null {
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 }
 
 function applyWearableSummaryMetricPrecedence(

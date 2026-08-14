@@ -42,6 +42,7 @@ import {
 import {
   lookupHostedMemberIdentityByPhoneLookupKey,
   lookupHostedMemberIdentityByPhoneNumber,
+  lookupHostedMemberIdByPhoneNumber,
   lookupHostedMemberIdentityByPrivyUserId,
   type HostedMemberIdentityState,
   upsertHostedMemberIdentity,
@@ -49,12 +50,14 @@ import {
 import {
   countHostedMemberHomeLinqBindingsByRecipientPhone,
   demoteHostedMemberLinqGroupChatBindingsTx,
+  lookupHostedMemberCoreByPendingLinqParticipantContact,
   lookupHostedMemberRoutingByHomeLinqChatId,
   lookupHostedMemberRoutingByPendingLinqParticipantContact,
   lookupHostedMemberRoutingByTelegramUserId,
   lookupHostedMemberRoutingByTelegramUserLookupKey,
   readHostedMemberIdByReplyAliasLookupKey,
   readHostedMemberRoutingState,
+  resolveHostedMemberCoreByTelegramUserId,
   type HostedMemberRoutingStateSnapshot,
   upsertHostedMemberHomeLinqBindingTx,
   upsertHostedMemberPendingLinqBindingTx,
@@ -575,6 +578,35 @@ describe("hosted-member-store", () => {
     });
   });
 
+  it("reads only blind-index ownership when private identity projection is unnecessary", async () => {
+    const findMany = vi.fn().mockResolvedValue([
+      { memberId: "member_phone_owner" },
+    ]);
+    const prisma = {
+      hostedMemberIdentity: {
+        findMany,
+      },
+    } as never;
+
+    await expect(
+      lookupHostedMemberIdByPhoneNumber({
+        phoneNumber: "+15551234567",
+        prisma,
+      }),
+    ).resolves.toBe("member_phone_owner");
+
+    expect(findMany).toHaveBeenCalledWith({
+      where: {
+        phoneLookupKey: {
+          in: [expect.stringMatching(/^hbidx:phone:v1:/u)],
+        },
+      },
+      select: {
+        memberId: true,
+      },
+    });
+  });
+
   it("fails closed when rotated Privy user lookup candidates resolve to multiple members", async () => {
     setHostedContactPrivacyKeyring({
       currentVersion: "v2",
@@ -784,6 +816,163 @@ describe("hosted-member-store", () => {
         replyAliasLookupKey: true,
         telegramUserLookupKey: true,
         telegramUserIdEncrypted: true,
+      },
+    });
+  });
+
+  it("resolves Telegram sender core without selecting encrypted routing state", async () => {
+    const createdAt = new Date("2026-08-10T00:00:00.000Z");
+    const updatedAt = new Date("2026-08-10T01:00:00.000Z");
+    const findMany = vi.fn().mockResolvedValue([{
+      member: {
+        billingStatus: HostedBillingStatus.active,
+        createdAt,
+        id: "member_123",
+        suspendedAt: null,
+        updatedAt,
+      },
+      memberId: "member_123",
+    }]);
+
+    await expect(resolveHostedMemberCoreByTelegramUserId({
+      prisma: {
+        hostedMemberRouting: { findMany },
+      } as never,
+      telegramUserId: "456",
+    })).resolves.toEqual({
+      core: {
+        billingStatus: HostedBillingStatus.active,
+        createdAt,
+        id: "member_123",
+        suspendedAt: null,
+        updatedAt,
+      },
+      status: "found",
+    });
+
+    expect(findMany).toHaveBeenCalledExactlyOnceWith({
+      select: {
+        member: {
+          select: {
+            billingStatus: true,
+            createdAt: true,
+            id: true,
+            suspendedAt: true,
+            updatedAt: true,
+          },
+        },
+        memberId: true,
+      },
+      where: {
+        telegramUserLookupKey: {
+          in: expect.arrayContaining([
+            expect.stringMatching(/^hbidx:telegram-user:v1:/u),
+          ]),
+        },
+      },
+    });
+  });
+
+  it("resolves pending Linq sender core without selecting encrypted routing state", async () => {
+    const createdAt = new Date("2026-08-10T00:00:00.000Z");
+    const updatedAt = new Date("2026-08-10T01:00:00.000Z");
+    const findMany = vi.fn().mockResolvedValue([{
+      member: {
+        billingStatus: HostedBillingStatus.active,
+        createdAt,
+        id: "member_pending",
+        suspendedAt: null,
+        updatedAt,
+      },
+      memberId: "member_pending",
+    }]);
+
+    await expect(lookupHostedMemberCoreByPendingLinqParticipantContact({
+      contact: {
+        kind: "phone",
+        lookupKey: "hbidx:phone:v1:pending-participant",
+        value: "+15555550123",
+      },
+      linqChatId: "chat_pending",
+      prisma: {
+        hostedMemberRouting: { findMany },
+      } as never,
+      recipientPhone: "+15555550999",
+    })).resolves.toMatchObject({ id: "member_pending" });
+
+    expect(findMany).toHaveBeenCalledExactlyOnceWith({
+      select: {
+        member: {
+          select: {
+            billingStatus: true,
+            createdAt: true,
+            id: true,
+            suspendedAt: true,
+            updatedAt: true,
+          },
+        },
+        memberId: true,
+      },
+      where: {
+        pendingLinqChatLookupKey: {
+          in: expect.arrayContaining([
+            expect.stringMatching(/^hbidx:linq-chat:v1:/u),
+          ]),
+        },
+        pendingLinqParticipantContactLookupKey: {
+          in: expect.arrayContaining([
+            expect.stringMatching(/^hbidx:phone:v1:/u),
+          ]),
+        },
+        pendingLinqRecipientPhoneLookupKey: {
+          in: expect.arrayContaining([
+            expect.stringMatching(/^hbidx:phone:v1:/u),
+          ]),
+        },
+      },
+    });
+  });
+
+  it("fails closed when pending Linq contact candidates resolve to multiple members", async () => {
+    const createdAt = new Date("2026-08-10T00:00:00.000Z");
+    const updatedAt = new Date("2026-08-10T01:00:00.000Z");
+    const findMany = vi.fn().mockResolvedValue([
+      {
+        member: {
+          billingStatus: HostedBillingStatus.active,
+          createdAt,
+          id: "member_pending_a",
+          suspendedAt: null,
+          updatedAt,
+        },
+        memberId: "member_pending_a",
+      },
+      {
+        member: {
+          billingStatus: HostedBillingStatus.active,
+          createdAt,
+          id: "member_pending_b",
+          suspendedAt: null,
+          updatedAt,
+        },
+        memberId: "member_pending_b",
+      },
+    ]);
+
+    await expect(lookupHostedMemberCoreByPendingLinqParticipantContact({
+      contact: {
+        kind: "phone",
+        lookupKey: "hbidx:phone:v1:pending-participant",
+        value: "+15555550123",
+      },
+      prisma: {
+        hostedMemberRouting: { findMany },
+      } as never,
+    })).rejects.toMatchObject({
+      code: "LINQ_PENDING_CONTACT_ROUTING_LOOKUP_AMBIGUOUS",
+      details: {
+        matchCount: 2,
+        matchedBy: "pendingLinqParticipantContactLookupKey",
       },
     });
   });

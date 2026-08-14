@@ -18,6 +18,7 @@ import {
   readHostedConnectedAppsConfig,
 } from "../connected-apps/config";
 import { resolveHostedDeviceSyncBrowserProviderLabel } from "../device-sync/provider-label";
+import { resolveHostedDeviceSyncConnectionCleanup } from "../device-sync/provider-application-cleanup";
 import { acquireHostedWebhookTraceOwnerLockTx } from "../device-sync/webhook-trace-owner-lock";
 import { createHostedPrivyUserLookupKey } from "../hosted-onboarding/contact-privacy";
 import {
@@ -269,6 +270,12 @@ export const HOSTED_ACCOUNT_DATA_STORE_COVERAGE = [
     note: "Deletes the member's disclosure grants and every grant in generic groups they own or back. The Settings export remains vault-only; the private list_memberships response exposes the exact granted policy text without exposing other members' grants.",
   },
   {
+    slug: "prisma.hosted_group_current_sender_clarification",
+    label: "Pending group answer-audience clarifications",
+    deletion: "live-delete",
+    note: "Deletes short-lived exact-message pointers used to resume one ambiguous group request. The original question remains in the ordinary mailbox lifecycle and is not copied into this table.",
+  },
+  {
     slug: "prisma.hosted_account_deletion_cleanup",
     label: "Encrypted account-deletion cleanup receipt",
     deletion: "documented-retention",
@@ -459,6 +466,12 @@ export const HOSTED_ACCOUNT_DATA_STORE_COVERAGE = [
     label: "Device provider connections and tokens",
     deletion: "live-delete",
     note: "Best-effort provider revocation runs first, then connection rows and encrypted tokens are deleted.",
+  },
+  {
+    slug: "prisma.device_provider_application",
+    label: "Encrypted member-owned device provider applications",
+    deletion: "live-delete",
+    note: "Deletes each member-owned OAuth client application and encrypted client credentials after linked device connection rows are removed. Browser-vault export omits the client identity, ciphertext, and credentials.",
   },
   {
     slug: "prisma.device_sync_companion_capture_receipt",
@@ -2187,6 +2200,14 @@ async function deleteHostedAccountPrismaRows(input: {
       ],
     },
   }));
+  record("prisma.hosted_group_current_sender_clarification", await input.prisma.hostedGroupCurrentSenderClarification.deleteMany({
+    where: {
+      OR: [
+        { groupRuntimeMemberId: memberIdFilter },
+        { targetMemberId: memberIdFilter },
+      ],
+    },
+  }));
   record("prisma.hosted_group_disclosure_permission", await input.prisma.hostedGroupDisclosurePermission.deleteMany({
     where: {
       group: {
@@ -2260,6 +2281,7 @@ async function deleteHostedAccountPrismaRows(input: {
   record("prisma.device_browser_assertion_nonce", await input.prisma.deviceBrowserAssertionNonce.deleteMany({ where: { userId: memberIdFilter } }));
   record("prisma.hosted_web_internal_request_nonce", await input.prisma.hostedWebInternalRequestNonce.deleteMany({ where: { userId: memberIdFilter } }));
   record("prisma.device_connection", await input.prisma.deviceConnection.deleteMany({ where: { userId: memberIdFilter } }));
+  record("prisma.device_provider_application", await input.prisma.deviceProviderApplication.deleteMany({ where: { memberId: memberIdFilter } }));
   record("prisma.hosted_member", await input.prisma.hostedMember.deleteMany({ where: { id: memberIdFilter } }));
 
   return counts;
@@ -2441,11 +2463,30 @@ async function revokeDeviceProvidersBestEffort(input: {
         continue;
       }
 
-      registry ??= createHostedDeviceSyncRegistry(process.env);
-      const provider = registry.get(connection.provider);
-      const revokeAccess = provider?.connectionHandler?.revokeAccess;
+      const cleanup = await resolveHostedDeviceSyncConnectionCleanup({
+        connectionId: connection.id,
+        memberId: input.memberId,
+        prisma: controlPlane.store.prisma,
+        provider: connection.provider,
+        resolveSharedRegistry: () =>
+          (registry ??= createHostedDeviceSyncRegistry(process.env)),
+      });
+      const revokeAccess = cleanup.revokeAccessOverride === undefined
+        ? cleanup.registry?.get(connection.provider)?.connectionHandler?.revokeAccess
+        : cleanup.revokeAccessOverride ?? undefined;
 
       if (!revokeAccess) {
+        if (cleanup.repairRequired) {
+          results.push({
+            connectionId: connection.id,
+            errorCode: null,
+            providerLabel: resolveDeviceConnectionProviderLabel(connection),
+            status: "warning",
+            warningCode: cleanup.warning?.code ?? "DEVICE_PROVIDER_APPLICATION_REPAIR_REQUIRED",
+          });
+          continue;
+        }
+
         results.push({
           connectionId: connection.id,
           errorCode: storedAccount.credential.kind === "provider_config"

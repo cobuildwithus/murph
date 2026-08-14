@@ -1,6 +1,6 @@
 import "server-only";
 
-import type { PrismaClient } from "@prisma/client";
+import { Prisma, type PrismaClient } from "@prisma/client";
 import type {
   HostedExecutionAcceptedGroupMessageParticipant,
 } from "@murphai/hosted-execution/contracts";
@@ -8,6 +8,7 @@ import {
   HOSTED_RUNTIME_GROUP_CHAT_ICON_URL_MAX_LENGTH,
   HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX,
   HOSTED_RUNTIME_GROUP_DISPLAY_NAME_MAX_LENGTH,
+  HOSTED_RUNTIME_GROUP_JOIN_OFFER_LEGACY_MESSAGE_TEMPLATE,
   hostedRuntimeLinqProviderErrorMessageForCode,
   isHostedRuntimePrivateImageDeliveryUrl,
   type HostedRuntimeGroupChatParticipant,
@@ -22,12 +23,14 @@ import {
   type HostedRuntimeGroupToolSelfOptOutContext,
 } from "@murphai/hosted-execution/runtime-control";
 import type {
-  HostedVaultShareProjectionKind,
   HostedVaultShareProjectionScope,
 } from "@murphai/hosted-execution/vault-share";
 import {
   buildHostedVaultShareProjectionScopeKey,
   getHostedVaultShareDailyMetricProjectionSpec,
+  HOSTED_VAULT_SHARE_ACTIVITY_DISTANCE_PROJECTION_KIND,
+  HOSTED_VAULT_SHARE_ACTIVITY_SESSION_COUNT_PROJECTION_KIND,
+  isHostedVaultShareRecentDateProjectionKind,
 } from "@murphai/hosted-execution/vault-share";
 
 import {
@@ -38,13 +41,17 @@ import {
   assertHostedMemberNotSuspended,
 } from "../hosted-onboarding/entitlement";
 import { isHostedOnboardingError } from "../hosted-onboarding/errors";
-import { hasHostedMemberActivationProof } from "../hosted-onboarding/member-activation";
+import {
+  hasHostedMemberActivationProof,
+  readHostedMemberActivationProofMemberIds,
+} from "../hosted-onboarding/member-activation";
 import { readActiveHostedMemberAccess } from "../hosted-onboarding/member-access";
 import {
   getHostedLinqChatHandles,
   getHostedLinqChatSummary,
   type HostedLinqChatHandleSummary,
   sendHostedLinqChatMessage,
+  sendHostedLinqReactionBoundChatMessage,
   updateHostedLinqChatAvatar,
   updateHostedLinqChatDisplayName,
 } from "../hosted-onboarding/linq-client";
@@ -93,6 +100,9 @@ import {
   requestHostedGroupCurrentSenderAssistantAsk,
 } from "./group-current-sender-assistant-ask";
 import {
+  recordHostedGroupCurrentSenderDailyMetric,
+} from "./group-current-sender-daily-metric";
+import {
   admitHostedGroupDisclosurePermissionAppendTx,
   canonicalizeHostedGroupDisclosurePermissionText,
   createHostedGroupDisclosurePermissionProviderIdempotencyKey,
@@ -106,9 +116,7 @@ import {
   buildHostedGroupUsageFundingUrl,
   readHostedGroupFundingRecoveryStatus,
 } from "./group-usage-funding";
-import {
-  enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort,
-} from "./group-newsletter";
+import { prepareHostedGroupEmail } from "./group-email";
 import {
   createHostedGroupJoinLinkForOwnedThreadContainerTx,
   leaveHostedGroupMemberTx,
@@ -124,14 +132,15 @@ import {
   updateHostedGroupDisplayNameByRuntimeMemberIdTx,
 } from "./group-store";
 import {
-  normalizeHostedGroupAccessOfferProjectionScopes,
   normalizeHostedVaultShareProjectionScopes,
   projectHostedVaultShareProjectionDisplays,
+  resolveHostedGroupAccessOfferProjectionScopes,
 } from "./join-policy";
 import { sha256Hex } from "../primitives";
 import {
   lookupHostedGroupParticipantMemberByHandle,
   lookupHostedGroupParticipantMemberByProviderEvidence,
+  lookupHostedGroupParticipantMemberIdsByHandles,
 } from "./participant-member";
 import {
   armHostedPendingGroupSetupTx,
@@ -142,12 +151,13 @@ import {
 export const HOSTED_THREAD_CONTAINER_PARTICIPANT_RECONCILE_MAX =
   HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX;
 
-const HOSTED_GROUP_JOIN_OFFER_IDEMPOTENCY_PREFIX = "group-join-offer:v2:";
+const HOSTED_GROUP_JOIN_OFFER_IDEMPOTENCY_PREFIX = "group-join-offer:v3:";
 const HOSTED_GROUP_JOIN_OFFER_IDEMPOTENCY_DIGEST_LENGTH = 40;
 
 export function buildHostedGroupJoinOfferProviderIdempotencyKey(input: {
   groupId: string;
   joinCode: string;
+  offerGeneration: string;
   projectionScopes: readonly HostedVaultShareProjectionScope[];
 }): string {
   const projectionScopes = normalizeHostedVaultShareProjectionScopes(
@@ -162,6 +172,7 @@ export function buildHostedGroupJoinOfferProviderIdempotencyKey(input: {
   const digest = sha256Hex(JSON.stringify({
     groupId: input.groupId,
     joinCode: input.joinCode,
+    offerGeneration: input.offerGeneration,
     projectionScopeKeys,
   }));
   return `${HOSTED_GROUP_JOIN_OFFER_IDEMPOTENCY_PREFIX}${digest.slice(
@@ -178,6 +189,7 @@ export type HostedRuntimeGroupToolAccessClassification =
 export const HOSTED_RUNTIME_GROUP_TOOL_ACCESS_CLASSIFICATION = {
   ask: "personal_active",
   ask_current_sender: "participant_aware",
+  record_current_sender_daily_metric: "participant_aware",
   ask_member: "participant_aware",
   arm_usage_referral: "participant_aware",
   cancel_usage_referral: "participant_aware",
@@ -188,6 +200,7 @@ export const HOSTED_RUNTIME_GROUP_TOOL_ACCESS_CLASSIFICATION = {
   list_memberships: "personal_active",
   post_disclosure_request: "owner_active",
   post_join_offer: "owner_active",
+  prepare_email: "participant_aware",
   prepare_next_group: "personal_active",
   preflight_set_chat_avatar: "owner_active",
   read_chat_name: "participant_aware",
@@ -209,6 +222,7 @@ export const HOSTED_RUNTIME_GROUP_TOOL_ACCESS_CLASSIFICATION = {
 >;
 
 export async function handleHostedRuntimeGroupTool(input: {
+  logger?: Pick<Console, "warn">;
   memberId: string;
   request: HostedRuntimeGroupToolRequest;
   /**
@@ -238,7 +252,11 @@ export async function handleHostedRuntimeGroupTool(input: {
 
   if (input.request.action === "ask_current_sender") {
     const admission = await requestHostedGroupCurrentSenderAssistantAsk({
+      ...(input.request.audience === undefined
+        ? {}
+        : { audience: input.request.audience }),
       groupRuntimeMemberId: input.memberId,
+      mode: input.request.mode,
       origin: input.request.origin,
     });
     if (admission.mailboxWake) {
@@ -247,6 +265,32 @@ export async function handleHostedRuntimeGroupTool(input: {
     return { action: "ask_current_sender", result: admission.result };
   }
 
+  if (input.request.action === "record_current_sender_daily_metric") {
+    const admission = await recordHostedGroupCurrentSenderDailyMetric({
+      dailyMetric: input.request.dailyMetric,
+      groupRuntimeMemberId: input.memberId,
+      origin: input.request.origin,
+    });
+    if (admission.mailboxWake) {
+      try {
+        await input.scheduleMailboxWake?.(admission.mailboxWake);
+      } catch (error) {
+        (input.logger ?? console).warn(
+          "Hosted member-reported daily metric handoff failed; the mailbox recovery sweep will retry it.",
+          {
+            ...sanitizeHostedOnboardingStructuredLogDetails({
+              errorName: deriveHostedOnboardingTimingErrorName(error),
+              outcome: "post_commit_handoff_failed",
+            }),
+          },
+        );
+      }
+    }
+    return {
+      action: "record_current_sender_daily_metric",
+      result: admission.result,
+    };
+  }
   if (input.request.action === "ask_member") {
     const admission = await requestHostedGroupMemberAssistantAsk({
       grantId: input.request.grantId,
@@ -422,6 +466,15 @@ export async function handleHostedRuntimeGroupTool(input: {
     }
   }
 
+  if (input.request.action === "prepare_email") {
+    return {
+      action: "prepare_email",
+      result: await prepareHostedGroupEmail({
+        runtimeMemberId: input.memberId,
+      }),
+    };
+  }
+
   if (input.request.action === "read_usage") {
     const usage = await readHostedGroupFundingRecoveryStatus({
       runtimeMemberId: input.memberId,
@@ -434,6 +487,7 @@ export async function handleHostedRuntimeGroupTool(input: {
             usage: {
               fundingNeeded: usage.fundingNeeded,
               fundingUrl: usage.fundingUrl,
+              includedUsageUsedPercent: usage.includedUsageUsedPercent,
             },
           }
         : {
@@ -1049,10 +1103,9 @@ async function handleHostedRuntimeGroupCreateJoinLink(input: {
       return { kind: ownerAccess.unavailableReason };
     }
     const requestedVaultShareProjectionScopes =
-      normalizeHostedGroupAccessOfferProjectionScopes(
+      resolveHostedGroupAccessOfferProjectionScopes(
         input.joinLink?.requestedVaultShareProjectionScopes
-          ?? input.joinLink?.requestedVaultShareProjectionKinds
-          ?? [],
+          ?? input.joinLink?.requestedVaultShareProjectionKinds,
       );
     const result = await createHostedGroupJoinLinkForOwnedThreadContainerTx({
       actorMemberId: ownerAccess.ownerMemberId,
@@ -1090,12 +1143,6 @@ async function handleHostedRuntimeGroupCreateJoinLink(input: {
     // Durable grant already committed; the owner's runtime offers the
     // projection on a later wake if this best-effort signal fails.
   }
-  await enqueueGroupOwnerNewsletterEmailNeededNudgeIfGrantedBestEffort({
-    group: created.group,
-    ownerMemberId: created.ownerMemberId,
-    prisma,
-  });
-
   return {
     action: "create_join_link",
     result: {
@@ -1255,10 +1302,9 @@ async function handleHostedRuntimeGroupPostJoinOffer(input: {
 
   const prisma = getPrisma();
   const now = new Date();
-  const projectionScopes = normalizeHostedGroupAccessOfferProjectionScopes(
+  const projectionScopes = resolveHostedGroupAccessOfferProjectionScopes(
     input.joinOffer?.projectionScopes
-      ?? input.joinOffer?.projectionKinds
-      ?? [],
+      ?? input.joinOffer?.projectionKinds,
   );
   const created = await prisma.$transaction(async (tx) => {
     const ownerAccess = await readHostedRuntimeGroupOwnerActiveAccess({
@@ -1278,6 +1324,7 @@ async function handleHostedRuntimeGroupPostJoinOffer(input: {
     });
     const offerPost = await prepareHostedGroupJoinOfferPostTx({
       groupId: result.group.id,
+      now,
       projectionScopes,
       tx,
     });
@@ -1313,6 +1360,7 @@ async function handleHostedRuntimeGroupPostJoinOffer(input: {
       },
     };
   }
+  const offerGeneration = created.offerPost.offerGeneration;
 
   const message = buildHostedGroupJoinOfferMessage({
     joinUrl,
@@ -1321,11 +1369,12 @@ async function handleHostedRuntimeGroupPostJoinOffer(input: {
   const providerSendStartedAt = new Date();
   let sent: Awaited<ReturnType<typeof sendHostedLinqChatMessage>>;
   try {
-    sent = await sendHostedLinqChatMessage({
+    sent = await sendHostedLinqReactionBoundChatMessage({
       chatId: authorized.chatId,
       idempotencyKey: buildHostedGroupJoinOfferProviderIdempotencyKey({
         groupId: created.group.id,
         joinCode: created.offerPost.joinCode,
+        offerGeneration,
         projectionScopes,
       }),
       message,
@@ -1361,6 +1410,7 @@ async function handleHostedRuntimeGroupPostJoinOffer(input: {
   try {
     await prisma.$transaction(async (tx) => {
       await recordHostedGroupJoinOfferTx({
+        expectedOfferGeneration: offerGeneration,
         groupId: created.group.id,
         message: { channel: "linq", messageId: sent.messageId },
         postedAt,
@@ -1378,12 +1428,6 @@ async function handleHostedRuntimeGroupPostJoinOffer(input: {
     // The group and offer binding are durable; owner runtime maintenance can
     // catch up on its next organic wake.
   }
-  await enqueueGroupOwnerNewsletterEmailNeededNudgeIfGrantedBestEffort({
-    group: created.group,
-    ownerMemberId: created.ownerMemberId,
-    prisma,
-  });
-
   return {
     action: "post_join_offer",
     result: {
@@ -1537,41 +1581,20 @@ async function checkHostedRuntimeGroupLinqChatMutationAccess(input: {
   return { status: "ok", chatId: authorized.chatId };
 }
 
-function buildHostedGroupJoinOfferMessage(input: {
+export function buildHostedGroupJoinOfferMessage(input: {
   joinUrl: string;
   projectionScopes: readonly HostedVaultShareProjectionScope[];
 }): string {
-  // The link stays as the control for choosing different permissions, and works
-  // for everyone.
-  return `Like or heart this message if these default sharing choices look right: ${
-    renderHostedGroupJoinOfferScopeSentence(input.projectionScopes)
-  }. Use ${input.joinUrl} to choose different permissions.`;
+  return HOSTED_RUNTIME_GROUP_JOIN_OFFER_LEGACY_MESSAGE_TEMPLATE
+    .replace(
+      HOSTED_GROUP_JOIN_OFFER_SHARE_SCOPE_PLACEHOLDER,
+      () => renderHostedGroupJoinOfferScopeSentence(input.projectionScopes),
+    )
+    .replace(HOSTED_GROUP_JOIN_OFFER_JOIN_URL_PLACEHOLDER, () => input.joinUrl);
 }
 
-async function enqueueGroupOwnerNewsletterEmailNeededNudgeIfGrantedBestEffort(input: {
-  group: {
-    id: string;
-    members: readonly {
-      grantedVaultShareProjectionKinds: readonly HostedVaultShareProjectionKind[];
-      memberId: string;
-    }[];
-  };
-  ownerMemberId: string;
-  prisma: PrismaClient;
-}): Promise<void> {
-  if (!input.group.members.some((member) =>
-    member.memberId === input.ownerMemberId
-    && member.grantedVaultShareProjectionKinds.includes("group-email.v0")
-  )) {
-    return;
-  }
-
-  await enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort({
-    groupId: input.group.id,
-    memberId: input.ownerMemberId,
-    prisma: input.prisma,
-  });
-}
+const HOSTED_GROUP_JOIN_OFFER_SHARE_SCOPE_PLACEHOLDER = "{{share_scope}}";
+const HOSTED_GROUP_JOIN_OFFER_JOIN_URL_PLACEHOLDER = "{{join_url}}";
 
 function normalizeHostedGroupChatIconUrl(value: string): string | null {
   const normalized = value.trim();
@@ -1719,6 +1742,15 @@ function renderHostedGroupJoinOfferScopeSentence(
     .map((display) => formatHostedGroupJoinOfferShareScopeLabel(display.label));
   const sentence = `your ${formatHumanList(["Murph profile name", ...labels])}`;
   const disclosures: string[] = [];
+  if (projectionScopes.some((scope) =>
+    isHostedVaultShareRecentDateProjectionKind(scope.projectionKind)
+  )) {
+    disclosures.push(
+      projectionScopes.some(isHostedGroupSleepStageProjectionScope)
+        ? "health values include source names, and sleep stages include each source's recorded time"
+        : "health values include their source names",
+    );
+  }
   // Nutrition labels (e.g. "daily protein") read as a bare number; disclose that
   // the totals come from the member's meals, connected-app imports included, so a
   // like-to-consent reaction is not materially narrower than what is exported.
@@ -1727,9 +1759,35 @@ function renderHostedGroupJoinOfferScopeSentence(
       "nutrition totals come from your meals in Murph, including meals imported from connected apps",
     );
   }
-  if (projectionScopes.some(isHostedGroupSleepSourceProjectionScope)) {
+  const recentSleepLabels = [
+    ...(projectionScopes.some((scope) => scope.projectionKind === "sleep-times.v0")
+      ? ["sleep timing"]
+      : []),
+    ...(projectionScopes.some(
+      (scope) => scope.projectionKind === "sleep-duration-days.v0",
+    )
+      ? ["sleep duration"]
+      : []),
+  ];
+  if (recentSleepLabels.length > 0) {
     disclosures.push(
-      "by-source sleep includes every available source's value and name, plus when Murph recorded that source value",
+      `${formatHumanList(recentSleepLabels)} ${recentSleepLabels.length === 1 ? "covers" : "cover"} the last 7 days`,
+    );
+  }
+  const recentActivityLabels = projectionScopes.flatMap((scope) => {
+    if (scope.projectionKind === HOSTED_VAULT_SHARE_ACTIVITY_DISTANCE_PROJECTION_KIND) {
+      const activity = scope.selector.activityKind.replace(/-/gu, " ");
+      return [`${activity} distance and session count`];
+    }
+    if (scope.projectionKind === HOSTED_VAULT_SHARE_ACTIVITY_SESSION_COUNT_PROJECTION_KIND) {
+      const activity = scope.selector.activityKind.replace(/-/gu, " ");
+      return [`${activity} session count`];
+    }
+    return [];
+  });
+  if (recentActivityLabels.length > 0) {
+    disclosures.push(
+      `${formatHumanList(recentActivityLabels)} ${recentActivityLabels.length === 1 ? "covers" : "cover"} the last 7 days`,
     );
   }
   return disclosures.length > 0
@@ -1746,10 +1804,12 @@ function isHostedGroupMealNutritionProjectionScope(
   );
 }
 
-function isHostedGroupSleepSourceProjectionScope(
+function isHostedGroupSleepStageProjectionScope(
   scope: HostedVaultShareProjectionScope,
 ): boolean {
-  return scope.projectionKind === "deep-sleep-sources-days.v1"
+  return scope.projectionKind === "deep-sleep-days.v0"
+    || scope.projectionKind === "deep-sleep-sources-days.v1"
+    || scope.projectionKind === "rem-sleep-days.v0"
     || scope.projectionKind === "rem-sleep-sources-days.v1";
 }
 
@@ -1790,7 +1850,7 @@ async function authorizeHostedRuntimeDirectLinqChat(input: {
       prisma: getPrisma(),
       target: input.chatId,
     });
-    if (assertion.threadIsDirect !== true) {
+    if (assertion.resolvedRoute.threadIsDirect !== true) {
       return { unavailableReason: "linq_thread_unauthorized" };
     }
   } catch {
@@ -1856,30 +1916,33 @@ async function handleHostedRuntimeGroupReadChatParticipants(input: {
     containerMemberId: input.memberId,
     handles,
   });
-  const participants: HostedRuntimeGroupChatParticipant[] = [];
-  const resolvedParticipants: HostedThreadContainerResolvedParticipant[] = [];
+  let participants: HostedRuntimeGroupChatParticipant[];
+  let resolvedParticipants: HostedThreadContainerResolvedParticipant[];
   try {
-    for (const handle of participantHandles) {
-      const lookup = await lookupHostedGroupParticipantMemberByHandle({
-        handle: handle.handle,
-        prisma,
-      });
-      const participantMemberId = lookup?.core.id ?? null;
-      if (participantMemberId) {
-        resolvedParticipants.push({
-          handle: handle.handle,
-          participantMemberId,
-        });
-      }
-      participants.push({
+    const memberIdsByHandle = await lookupHostedGroupParticipantMemberIdsByHandles({
+      handles: participantHandles.map((handle) => handle.handle),
+      prisma,
+    });
+    resolvedParticipants = participantHandles.flatMap((handle) => {
+      const participantMemberId = memberIdsByHandle.get(handle.handle) ?? null;
+      return participantMemberId
+        ? [{ handle: handle.handle, participantMemberId }]
+        : [];
+    });
+    const activatedMemberIds = await readHostedMemberActivationProofMemberIds({
+      memberIds: resolvedParticipants.map(
+        (participant) => participant.participantMemberId,
+      ),
+      prisma,
+    });
+    participants = participantHandles.map((handle) => {
+      const participantMemberId = memberIdsByHandle.get(handle.handle) ?? null;
+      return {
         handle: handle.handle,
         hasOwnMurph: participantMemberId !== null
-          && await hasHostedMemberActivationProof({
-            memberId: participantMemberId,
-            prisma,
-          }),
-      });
-    }
+          && activatedMemberIds.has(participantMemberId),
+      };
+    });
   } catch {
     // A failed identity or activation lookup must not degrade into a guessed
     // hasOwnMurph value or an unstructured route error.
@@ -2120,30 +2183,65 @@ export async function reconcileHostedThreadContainerParticipants(input: {
       });
     }
 
-    const seenParticipantMemberIds = [...seenByMemberId.keys()];
-    for (const participant of seenByMemberId.values()) {
-      await input.prisma.hostedThreadContainerParticipant.upsert({
-        create: {
-          containerMemberId: input.containerMemberId,
-          firstSeenAt: now,
-          handleLookupKey: participant.handleLookupKey,
-          lastSeenAt: now,
-          participantMemberId: participant.participantMemberId,
-          removedAt: null,
-        },
-        update: {
-          handleLookupKey: participant.handleLookupKey,
-          lastSeenAt: now,
-          removedAt: null,
-        },
-        where: {
-          containerMemberId_participantMemberId: {
-            containerMemberId: input.containerMemberId,
-            participantMemberId: participant.participantMemberId,
-          },
-        },
-      });
-    }
+    const seenParticipants = [...seenByMemberId.values()];
+    const inputParticipantRows = seenParticipants.length === 0
+      ? Prisma.sql`
+          SELECT NULL::text, NULL::text
+          WHERE FALSE
+        `
+      : Prisma.sql`
+          VALUES ${Prisma.join(seenParticipants.map((participant) => Prisma.sql`
+            (${participant.participantMemberId}::text, ${participant.handleLookupKey}::text)
+          `))}
+        `;
+
+    await input.prisma.$executeRaw(Prisma.sql`
+      WITH input_participant(participant_member_id, handle_lookup_key) AS (
+        ${inputParticipantRows}
+      ),
+      upserted AS (
+        INSERT INTO hosted_thread_container_participant (
+          container_member_id,
+          participant_member_id,
+          handle_lookup_key,
+          first_seen_at,
+          last_seen_at,
+          removed_at,
+          created_at,
+          updated_at
+        )
+        SELECT
+          ${input.containerMemberId},
+          input_participant.participant_member_id,
+          input_participant.handle_lookup_key,
+          ${now},
+          ${now},
+          NULL,
+          ${now},
+          ${now}
+        FROM input_participant
+        ON CONFLICT (container_member_id, participant_member_id)
+        DO UPDATE SET
+          handle_lookup_key = EXCLUDED.handle_lookup_key,
+          last_seen_at = EXCLUDED.last_seen_at,
+          removed_at = NULL,
+          updated_at = EXCLUDED.updated_at
+        RETURNING participant_member_id
+      )
+      UPDATE hosted_thread_container_participant AS participant
+      SET
+        removed_at = ${now},
+        updated_at = ${now}
+      FROM (SELECT COUNT(*) FROM upserted) AS upsert_barrier
+      WHERE ${hasCompleteRoster}
+        AND participant.container_member_id = ${input.containerMemberId}
+        AND participant.removed_at IS NULL
+        AND NOT EXISTS (
+          SELECT 1
+          FROM input_participant
+          WHERE input_participant.participant_member_id = participant.participant_member_id
+        )
+    `);
 
     if (!hasCompleteRoster) {
       logHostedThreadContainerParticipantReconcileSkipped({
@@ -2151,21 +2249,7 @@ export async function reconcileHostedThreadContainerParticipants(input: {
         containerMemberId: input.containerMemberId,
         reason: "roster_exceeds_cap",
       });
-      return;
     }
-
-    await input.prisma.hostedThreadContainerParticipant.updateMany({
-      data: {
-        removedAt: now,
-      },
-      where: {
-        containerMemberId: input.containerMemberId,
-        ...(seenParticipantMemberIds.length > 0
-          ? { participantMemberId: { notIn: seenParticipantMemberIds } }
-          : {}),
-        removedAt: null,
-      },
-    });
   } catch (error) {
     logHostedThreadContainerParticipantReconcileSkipped({
       chatId: input.chatId,
@@ -2180,24 +2264,18 @@ async function resolveHostedThreadContainerParticipants(input: {
   handles: readonly HostedLinqChatHandleSummary[];
   prisma: HostedOnboardingReadClient;
 }): Promise<HostedThreadContainerResolvedParticipant[]> {
-  const resolvedParticipants: HostedThreadContainerResolvedParticipant[] = [];
-  for (const handle of input.handles) {
-    if (!isCurrentHostedLinqParticipantHandle(handle)) {
-      continue;
-    }
-    const lookup = await lookupHostedGroupParticipantMemberByHandle({
-      handle: handle.handle,
-      prisma: input.prisma,
-    });
-    const participantMemberId = lookup?.core.id ?? null;
-    if (participantMemberId) {
-      resolvedParticipants.push({
-        handle: handle.handle,
-        participantMemberId,
-      });
-    }
-  }
-  return resolvedParticipants;
+  const currentHandles = input.handles.filter(isCurrentHostedLinqParticipantHandle);
+  const memberIdsByHandle = await lookupHostedGroupParticipantMemberIdsByHandles({
+    handles: currentHandles.map((handle) => handle.handle),
+    prisma: input.prisma,
+  });
+
+  return currentHandles.flatMap((handle) => {
+    const participantMemberId = memberIdsByHandle.get(handle.handle) ?? null;
+    return participantMemberId
+      ? [{ handle: handle.handle, participantMemberId }]
+      : [];
+  });
 }
 
 function isActiveHostedLinqChatHandle(handle: HostedLinqChatHandleSummary): boolean {

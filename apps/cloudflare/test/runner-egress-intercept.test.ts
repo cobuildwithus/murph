@@ -77,6 +77,7 @@ import {
 import {
   HOSTED_VENICE_RESPONSES_MAX_BODY_BYTES,
 } from "../src/runner-egress-venice.ts";
+import { parseHostedXaiRequestBody } from "../src/runner-egress-xai.ts";
 import {
   sealHostedInferenceRuntimeTarget,
 } from "../src/hosted-inference-target-envelope.ts";
@@ -207,6 +208,8 @@ function createHostedXaiResponsesRequestBody(
     model: "grok-4.5",
     store: false,
     tools: [{
+      enable_image_understanding: true,
+      enable_video_understanding: true,
       from_date: "2026-07-16",
       to_date: "2026-07-23",
       type: "x_search",
@@ -362,7 +365,7 @@ describe("hostedRunnerIntercept", () => {
         revision: 7,
         schema: HOSTED_INFERENCE_RUNTIME_TARGET_SCHEMA,
         supportsImages: false,
-        verificationProfile: "murph-codex-0.145.0-portable-responses-v1",
+        verificationProfile: "murph-codex-0.147.0-portable-responses-v1",
       },
     });
     const validateRuntimeProviderEgressToken = vi.fn(async (input: {
@@ -1230,6 +1233,83 @@ describe("hostedRunnerIntercept", () => {
         message: "Hosted runner provider egress completed.",
       }),
     );
+  });
+
+  it("forwards Codex standalone OpenAI web-search requests through the provider boundary", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => Response.json({
+      encrypted_output: null,
+      output: "Synthetic search result.",
+      results: [],
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    const validateRuntimeProviderEgressCredential = vi.fn(async (input: {
+      providerKind: string;
+      runnerContainerName: string;
+      userId: string;
+    }) => createProviderEgressCredentialValidationResult(input));
+    const credential = await createTestProviderEgressCredential();
+    const requestBody = {
+      commands: {
+        search_query: [{ q: "synthetic current information" }],
+      },
+      id: "synthetic-search-session",
+      input: [{
+        content: [{ text: "Find current information.", type: "input_text" }],
+        role: "user",
+        type: "message",
+      }],
+      max_output_tokens: 2_500,
+      model: "gpt-5.6-terra",
+      settings: {
+        allowed_callers: ["direct"],
+        external_web_access: false,
+      },
+    };
+
+    const response = await hostedRunnerIntercept(
+      new Request("https://api.openai.com/v1/alpha/search", {
+        body: JSON.stringify(requestBody),
+        headers: {
+          authorization: `Bearer ${credential}`,
+          cookie: "session=user-supplied-cookie",
+          "content-type": "application/json",
+          "openai-organization": "org_user_supplied",
+          "openai-project": "proj_user_supplied",
+          "proxy-authorization": "Bearer user-supplied-proxy-token",
+          "x-api-key": "user-supplied-api-key",
+        },
+        method: "POST",
+      }),
+      createInterceptEnv({
+        OPENAI_API_KEY: "openai-worker-secret",
+        validateRuntimeProviderEgressCredential,
+      }),
+      { containerId: "opaque-container-id" },
+    );
+
+    expect(response.status).toBe(200);
+    expect(validateRuntimeProviderEgressCredential).toHaveBeenCalledWith({
+      providerKind: "openai",
+      runnerContainerName: RUNNER_CONTAINER_NAME,
+      userId: "member_123",
+    });
+    const forwarded = findFetchCall(fetchMock, "api.openai.com")?.[0];
+    expect(forwarded).toBeInstanceOf(Request);
+    const forwardedRequest = forwarded as Request;
+    expect(forwardedRequest.url).toBe("https://api.openai.com/v1/alpha/search");
+    expect(forwardedRequest.method).toBe("POST");
+    expect(forwardedRequest.headers.get("authorization"))
+      .toBe("Bearer openai-worker-secret");
+    expect(forwardedRequest.headers.has("cookie")).toBe(false);
+    expect(forwardedRequest.headers.has("openai-organization")).toBe(false);
+    expect(forwardedRequest.headers.has("openai-project")).toBe(false);
+    expect(forwardedRequest.headers.has("proxy-authorization")).toBe(false);
+    expect(forwardedRequest.headers.has("x-api-key")).toBe(false);
+    expect(forwardedRequest.headers.has(HOSTED_RUNNER_BOUND_USER_ID_HEADER))
+      .toBe(false);
+    expect(forwardedRequest.headers.has(HOSTED_PROVIDER_EGRESS_TOKEN_HEADER))
+      .toBe(false);
+    await expect(forwardedRequest.json()).resolves.toEqual(requestBody);
   });
 
   it("allows OpenAI image generation egress through the existing provider policy", async () => {
@@ -2266,9 +2346,16 @@ describe("hostedRunnerIntercept", () => {
       createHostedXaiResponsesRequestBody({
         tools: [{ type: "x_search" }, { type: "code_execution" }],
       }),
-      // undocumented tool filter key
+      // undocumented tool key
       createHostedXaiResponsesRequestBody({
-        tools: [{ enable_image_understanding: true, type: "x_search" }],
+        tools: [{ unknown_media_option: true, type: "x_search" }],
+      }),
+      // media-understanding flags must be booleans
+      createHostedXaiResponsesRequestBody({
+        tools: [{ enable_image_understanding: "true", type: "x_search" }],
+      }),
+      createHostedXaiResponsesRequestBody({
+        tools: [{ enable_video_understanding: 1, type: "x_search" }],
       }),
       // store must be false
       createHostedXaiResponsesRequestBody({ store: true }),
@@ -2331,6 +2418,26 @@ describe("hostedRunnerIntercept", () => {
     expect(nonJsonResponse.status).toBe(403);
 
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("accepts media-understanding flags and the earlier x_search shape", async () => {
+    for (const tools of [
+      [{
+        enable_image_understanding: true,
+        enable_video_understanding: true,
+        type: "x_search",
+      }],
+      [{ type: "x_search" }],
+    ]) {
+      const body = await new Response(JSON.stringify(
+        createHostedXaiResponsesRequestBody({ tools }),
+      )).arrayBuffer();
+
+      expect(parseHostedXaiRequestBody({
+        body,
+        contentType: "application/json",
+      })).toEqual({ model: "grok-4.5" });
+    }
   });
 
   it("rejects oversized xAI request bodies before upstream fetch", async () => {
@@ -5789,25 +5896,31 @@ describe("hostedRunnerIntercept", () => {
   });
 
   it("rejects wrong OpenAI methods on otherwise allowed paths", async () => {
-    const fetchMock = vi.fn<typeof fetch>(async () => new Response("unexpected"));
-    vi.stubGlobal("fetch", fetchMock);
-    const validateRuntimeWriteFence = vi.fn(async () => true);
+    for (const url of [
+      "https://api.openai.com/v1/responses",
+      "https://api.openai.com/v1/alpha/search",
+    ]) {
+      const fetchMock = vi.fn<typeof fetch>(async () => new Response("unexpected"));
+      vi.stubGlobal("fetch", fetchMock);
+      const validateRuntimeWriteFence = vi.fn(async () => true);
 
-    const response = await hostedRunnerIntercept(
-      new Request("https://api.openai.com/v1/responses", {
-        headers: BOUND_USER_WRITE_FENCE_WITH_BEARER_SENTINEL_HEADERS,
-        method: "GET",
-      }),
-      createInterceptEnv({
-        OPENAI_API_KEY: "openai-worker-secret",
-        validateRuntimeWriteFence,
-      }),
-      { containerId: "opaque-container-id" },
-    );
+      const response = await hostedRunnerIntercept(
+        new Request(url, {
+          headers: BOUND_USER_WRITE_FENCE_WITH_BEARER_SENTINEL_HEADERS,
+          method: "GET",
+        }),
+        createInterceptEnv({
+          OPENAI_API_KEY: "openai-worker-secret",
+          validateRuntimeWriteFence,
+        }),
+        { containerId: "opaque-container-id" },
+      );
 
-    expect(response.status).toBe(403);
-    expect(validateRuntimeWriteFence).not.toHaveBeenCalled();
-    expect(fetchMock).not.toHaveBeenCalled();
+      expect(response.status).toBe(403);
+      expect(validateRuntimeWriteFence).not.toHaveBeenCalled();
+      expect(fetchMock).not.toHaveBeenCalled();
+      vi.unstubAllGlobals();
+    }
   });
 
   it("rejects incomplete OpenAI Responses WebSocket upgrade requests", async () => {
@@ -8014,6 +8127,11 @@ describe("hostedRunnerIntercept", () => {
     {
       method: "POST",
       operation: "sendPhoto",
+      query: "",
+    },
+    {
+      method: "POST",
+      operation: "sendRichMessage",
       query: "",
     },
     {

@@ -7,6 +7,7 @@ import {
 } from './hosted-mailbox-input-items.js'
 import {
   listAssistantInputEvents,
+  resolveAssistantInputEventReferenceAt,
   type AssistantInputAttachmentEvidence,
   type AssistantInputAttachmentDescriptor,
   type AssistantInputConversationRef,
@@ -108,6 +109,9 @@ export interface AssistantInputSource {
   listNewConversationInputs(
     input: AssistantTurnConversationInputQuery,
   ): Promise<AssistantInputCandidateBatch>
+  // Exact admission sources may intentionally put a trusted system completion
+  // before a newer conversation input. Generic sources remain cursor ordered.
+  preserveInputCandidateOrder?: boolean
   refresh(
     input?: AssistantTurnInputRefreshInput,
   ): Promise<AssistantTurnInputRefreshResult>
@@ -304,6 +308,7 @@ function assistantInputCandidateFromStoredEventWithHostedMailboxItem(input: {
       : null
   return {
     acceptedInput: {
+      acceptedAt: resolveAssistantInputEventReferenceAt(event),
       id: event.inputId,
       source: 'assistant-input',
       captureIds,

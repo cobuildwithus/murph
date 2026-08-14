@@ -1,183 +1,89 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
-import { PrismaDeviceSyncControlPlaneStore } from "@/src/lib/device-sync/prisma-store";
+import {
+  PrismaHostedBrowserAssertionNonceStore,
+} from "@/src/lib/device-sync/prisma-store/browser-assertion-nonces";
 
-type MutableBrowserAssertionNonce = {
-  nonceHash: string;
-  userId: string;
-  method: string;
-  path: string;
-  createdAt: Date;
-  expiresAt: Date;
+const nonceInput = {
+  nonceHash: "nonce-hash-1",
+  userId: "user-123",
+  method: "POST",
+  path: "/api/device-sync/agents/pair",
+  now: "2026-03-25T12:00:00.000Z",
+  expiresAt: "2026-03-25T12:05:00.000Z",
 };
 
-function createStore(seed: MutableBrowserAssertionNonce[] = []) {
-  const nonces = new Map<string, MutableBrowserAssertionNonce>(
-    seed.map((record) => [
-      record.nonceHash,
-      {
-        ...record,
-      },
-    ]),
-  );
+function sqlOf(call: readonly unknown[]): string {
+  return (call[0] as TemplateStringsArray).join("?");
+}
 
-  const deviceBrowserAssertionNonce = {
-    deleteMany: async ({ where }: { where: Record<string, unknown> }) => {
-      let count = 0;
-
-      for (const [nonceHash, record] of nonces.entries()) {
-        if (!matchesExpiryWhere(record, where)) {
-          continue;
-        }
-
-        nonces.delete(nonceHash);
-        count += 1;
-      }
-
-      return { count };
-    },
-    create: async ({ data }: { data: Record<string, unknown> }) => {
-      const record = normalizeNonceRecord(data);
-
-      if (nonces.has(record.nonceHash)) {
-        const error = new Error("Unique constraint failed.");
-        (error as Error & { code: string }).code = "P2002";
-        throw error;
-      }
-
-      nonces.set(record.nonceHash, record);
-      return cloneNonce(record);
-    },
-  };
-
-  const tx = {
-    deviceBrowserAssertionNonce,
-  };
-
-  const prisma = {
-    deviceBrowserAssertionNonce,
-    $transaction: async <TResult>(callback: (transaction: typeof tx) => Promise<TResult>) => callback(tx),
-  };
-
-  const store = new PrismaDeviceSyncControlPlaneStore({
-    prisma: prisma as never,
-    codec: {
-      keyVersion: "v1",
-      encrypt: (value: string) => value,
-      decrypt: (value: string) => value,
-    },
-  });
+function createStore() {
+  const transaction = vi.fn();
+  const queryRaw = vi.fn();
+  const store = new PrismaHostedBrowserAssertionNonceStore({
+    $queryRaw: queryRaw,
+    $transaction: transaction,
+  } as never);
 
   return {
-    nonces,
+    queryRaw,
     store,
+    transaction,
   };
 }
 
-describe("PrismaDeviceSyncControlPlaneStore browser assertion nonces", () => {
-  it("consumes a fresh nonce once and rejects a replay", async () => {
-    const { store } = createStore();
+describe("PrismaHostedBrowserAssertionNonceStore", () => {
+  it("admits with one database-clock insert statement and no transaction", async () => {
+    const { queryRaw, store, transaction } = createStore();
+    queryRaw.mockResolvedValueOnce([{ admitted: true }]);
 
-    await expect(
-      store.consumeBrowserAssertionNonce({
-        nonceHash: "nonce-hash-1",
-        userId: "user-123",
-        method: "POST",
-        path: "/api/device-sync/agents/pair",
-        now: "2026-03-25T12:00:00.000Z",
-        expiresAt: "2026-03-25T12:05:00.000Z",
-      }),
-    ).resolves.toBe(true);
+    await expect(store.consumeBrowserAssertionNonce(nonceInput)).resolves.toBe(true);
 
-    await expect(
-      store.consumeBrowserAssertionNonce({
-        nonceHash: "nonce-hash-1",
-        userId: "user-123",
-        method: "POST",
-        path: "/api/device-sync/agents/pair",
-        now: "2026-03-25T12:00:10.000Z",
-        expiresAt: "2026-03-25T12:05:00.000Z",
-      }),
-    ).resolves.toBe(false);
+    expect(queryRaw).toHaveBeenCalledTimes(1);
+    const call = queryRaw.mock.calls[0]!;
+    const sql = sqlOf(call);
+    const returningIndex = sql.indexOf("RETURNING");
+    expect(sql).toContain(
+      'INSERT INTO "device_browser_assertion_nonce" AS browser_nonce',
+    );
+    expect(sql).toContain('ON CONFLICT ("nonce_hash") DO NOTHING');
+    expect(sql).toContain('browser_nonce."expires_at" > date_trunc(');
+    expect(sql).toContain("'milliseconds'");
+    expect(sql).toContain("clock_timestamp() AT TIME ZONE 'UTC'");
+    expect(returningIndex).toBeGreaterThan(-1);
+    expect(sql.indexOf("clock_timestamp()")).toBeGreaterThan(returningIndex);
+    expect(sql.slice(0, returningIndex)).not.toContain("clock_timestamp()");
+    expect(call.slice(1)).toEqual([
+      nonceInput.nonceHash,
+      nonceInput.userId,
+      nonceInput.method,
+      nonceInput.path,
+      nonceInput.now,
+      nonceInput.expiresAt,
+    ]);
+    expect(transaction).not.toHaveBeenCalled();
   });
 
-  it("drops expired nonce rows before accepting a fresh record for the same hash", async () => {
-    const { nonces, store } = createStore([
-      {
-        nonceHash: "nonce-hash-expired",
-        userId: "user-123",
-        method: "POST",
-        path: "/api/device-sync/agents/pair",
-        createdAt: new Date("2026-03-25T11:50:00.000Z"),
-        expiresAt: new Date("2026-03-25T11:55:00.000Z"),
-      },
-    ]);
+  it.each([
+    ["the nonce conflicts", []],
+    ["the inserted nonce is already expired", [{ admitted: false }]],
+  ])("returns false when %s", async (_label, rows) => {
+    const { queryRaw, store, transaction } = createStore();
+    queryRaw.mockResolvedValueOnce(rows);
 
-    await expect(
-      store.consumeBrowserAssertionNonce({
-        nonceHash: "nonce-hash-expired",
-        userId: "user-123",
-        method: "POST",
-        path: "/api/device-sync/agents/pair",
-        now: "2026-03-25T12:00:00.000Z",
-        expiresAt: "2026-03-25T12:05:00.000Z",
-      }),
-    ).resolves.toBe(true);
+    await expect(store.consumeBrowserAssertionNonce(nonceInput)).resolves.toBe(false);
 
-    expect(nonces.get("nonce-hash-expired")).toMatchObject({
-      userId: "user-123",
-      method: "POST",
-      path: "/api/device-sync/agents/pair",
-    });
-    expect(nonces.get("nonce-hash-expired")?.expiresAt.toISOString()).toBe("2026-03-25T12:05:00.000Z");
+    expect(queryRaw).toHaveBeenCalledTimes(1);
+    expect(transaction).not.toHaveBeenCalled();
+  });
+
+  it("rethrows database failures that are not nonce replays", async () => {
+    const failure = new Error("database unavailable");
+    const { queryRaw, store, transaction } = createStore();
+    queryRaw.mockRejectedValueOnce(failure);
+
+    await expect(store.consumeBrowserAssertionNonce(nonceInput)).rejects.toBe(failure);
+    expect(queryRaw).toHaveBeenCalledTimes(1);
+    expect(transaction).not.toHaveBeenCalled();
   });
 });
-
-function matchesExpiryWhere(
-  record: MutableBrowserAssertionNonce,
-  where: Record<string, unknown>,
-): boolean {
-  if (!isRecord(where.expiresAt)) {
-    return true;
-  }
-
-  if (!(where.expiresAt.lte instanceof Date)) {
-    return true;
-  }
-
-  return record.expiresAt <= where.expiresAt.lte;
-}
-
-function normalizeNonceRecord(data: Record<string, unknown>): MutableBrowserAssertionNonce {
-  if (
-    typeof data.nonceHash !== "string" ||
-    typeof data.userId !== "string" ||
-    typeof data.method !== "string" ||
-    typeof data.path !== "string" ||
-    !(data.createdAt instanceof Date) ||
-    !(data.expiresAt instanceof Date)
-  ) {
-    throw new TypeError("Invalid browser assertion nonce record.");
-  }
-
-  return {
-    nonceHash: data.nonceHash,
-    userId: data.userId,
-    method: data.method,
-    path: data.path,
-    createdAt: new Date(data.createdAt),
-    expiresAt: new Date(data.expiresAt),
-  };
-}
-
-function cloneNonce(record: MutableBrowserAssertionNonce): MutableBrowserAssertionNonce {
-  return {
-    ...record,
-    createdAt: new Date(record.createdAt),
-    expiresAt: new Date(record.expiresAt),
-  };
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
-}

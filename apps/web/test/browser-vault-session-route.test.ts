@@ -1,16 +1,27 @@
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
+import {
+  CloudflareHostedControlBrowserVaultReplicaNotFoundError,
+} from "@murphai/cloudflare-hosted-control/client";
 import { BROWSER_VAULT_REPLICA_CURRENT_GENERATION } from "@murphai/contracts";
 import { generateHostedUserRecipientKeyPair } from "@murphai/runtime-state";
 import {
   HOSTED_EXECUTION_LAYERED_SNAPSHOT_REF_SCHEMA,
   HOSTED_EXECUTION_WORKING_SNAPSHOT_REF_SCHEMA,
 } from "@murphai/hosted-execution/bundles";
+import type {
+  HostedBrowserVaultReplicaMetricBucketSetRef,
+} from "@murphai/hosted-execution/browser-vault";
 
 import { hostedOnboardingError } from "../src/lib/hosted-onboarding/errors";
 import { createJsonPostRequest } from "./route-test-helpers";
 
 vi.mock("server-only", () => ({}));
+
+const TEST_BROWSER_VAULT_METRIC_BUCKET_IDS = Array.from(
+  { length: 32 },
+  (_, index) => index.toString(16).padStart(2, "0"),
+);
 
 const mocks = vi.hoisted(() => ({
   assertBrowserVaultMemberAuthority: vi.fn(),
@@ -201,6 +212,27 @@ describe("browser vault session route", () => {
     });
   });
 
+  it("rejects an all-bucket interactive request reserved for export", async () => {
+    const browser = await generateHostedUserRecipientKeyPair();
+
+    const response = await browserVaultSessionRoute.POST(
+      createJsonPostRequest("https://join.example.test/api/browser-vault/session", {
+        browserPublicKeyJwk: browser.publicKeyJwk,
+        requestedMetricBuckets: TEST_BROWSER_VAULT_METRIC_BUCKET_IDS,
+        requestedShards: ["core", "metricsIndex"],
+      }),
+    );
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({
+      error: {
+        code: "BROWSER_VAULT_SESSION_INVALID_REQUEST",
+        message: "Interactive Browser Vault requests cannot load every metric bucket.",
+      },
+    });
+    expect(mocks.readHostedExecutionControlClientIfConfigured).not.toHaveBeenCalled();
+  });
+
   it("includes pending device import state without gating browser vault refresh", async () => {
     const browser = await generateHostedUserRecipientKeyPair();
     const createBrowserVaultSession = vi.fn();
@@ -262,14 +294,18 @@ describe("browser vault session route", () => {
       version: "1",
     });
     mocks.readHostedWorkspaceBrowserVaultSourceStateHash.mockReturnValue(replicaRef.sourceBundleHash);
-    const createBrowserVaultSession = vi.fn().mockResolvedValue({
+    const createBrowserVaultExportSession = vi.fn().mockResolvedValue({
       encryptedReplica: createReplicaEnvelope(),
       replicaAad: createReplicaAad(),
       replicaKeyEnvelope: createReplicaKeyEnvelope(),
       replicaRef,
       state: "ready",
     });
-    mocks.readHostedExecutionControlClientIfConfigured.mockReturnValue({ createBrowserVaultSession });
+    const createBrowserVaultSession = vi.fn();
+    mocks.readHostedExecutionControlClientIfConfigured.mockReturnValue({
+      createBrowserVaultExportSession,
+      createBrowserVaultSession,
+    });
 
     const response = await settingsVaultExportSessionRoute.POST(
       createJsonPostRequest("https://join.example.test/api/settings/vault-export/session", {
@@ -278,6 +314,8 @@ describe("browser vault session route", () => {
           token: "sac_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef",
         },
         browserPublicKeyJwk: browser.publicKeyJwk,
+        requestedMetricBuckets: TEST_BROWSER_VAULT_METRIC_BUCKET_IDS,
+        requestedShards: ["core", "labs", "metricsIndex"],
       }),
     );
 
@@ -299,13 +337,16 @@ describe("browser vault session route", () => {
       prisma: mocks.prismaClient,
       privyUserId: "privy-user-123",
     });
-    expect(createBrowserVaultSession).toHaveBeenCalledTimes(1);
+    expect(createBrowserVaultExportSession).toHaveBeenCalledTimes(1);
+    expect(createBrowserVaultSession).not.toHaveBeenCalled();
     expect(mocks.consumeSensitiveActionChallenge).toHaveBeenCalledTimes(1);
     // Consume must happen after the encrypted replica is fetched, so a fetch
     // failure aborts the response without releasing the one-time challenge.
     expect(
       mocks.consumeSensitiveActionChallenge.mock.invocationCallOrder[0],
-    ).toBeGreaterThan(createBrowserVaultSession.mock.invocationCallOrder[0]);
+    ).toBeGreaterThan(
+      createBrowserVaultExportSession.mock.invocationCallOrder[0],
+    );
   });
 
   it("exports the latest available replica after health-data withdrawal", async () => {
@@ -326,14 +367,16 @@ describe("browser vault session route", () => {
       version: "2",
     });
     mocks.readHostedWorkspaceBrowserVaultSourceStateHash.mockReturnValue("c".repeat(64));
-    const createBrowserVaultSession = vi.fn().mockResolvedValue({
+    const createBrowserVaultExportSession = vi.fn().mockResolvedValue({
       encryptedReplica: createReplicaEnvelope(),
       replicaAad: createReplicaAad(),
       replicaKeyEnvelope: createReplicaKeyEnvelope(),
       replicaRef,
       state: "ready",
     });
+    const createBrowserVaultSession = vi.fn();
     mocks.readHostedExecutionControlClientIfConfigured.mockReturnValue({
+      createBrowserVaultExportSession,
       createBrowserVaultSession,
     });
 
@@ -344,22 +387,65 @@ describe("browser vault session route", () => {
           token: "sac_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef",
         },
         browserPublicKeyJwk: browser.publicKeyJwk,
+        requestedMetricBuckets: TEST_BROWSER_VAULT_METRIC_BUCKET_IDS,
+        requestedShards: ["core", "labs", "metricsIndex"],
       }),
     );
 
     expect(response.status).toBe(200);
     expect(mocks.assertHostedLaunchRequiredConsentGranted).not.toHaveBeenCalled();
     expect(mocks.signalHostedBrowserVaultRefreshRuntime).not.toHaveBeenCalled();
-    expect(createBrowserVaultSession).toHaveBeenCalledWith({
+    expect(createBrowserVaultExportSession).toHaveBeenCalledWith({
       browserPublicKeyJwk: browser.publicKeyJwk,
       replicaRef,
       userId: "member_123",
     });
+    expect(createBrowserVaultSession).not.toHaveBeenCalled();
     await expect(response.json()).resolves.toMatchObject({
       deviceSyncImportPending: true,
       freshness: "stale",
       refreshPending: true,
       state: "ready",
+    });
+  });
+
+  it.each([
+    {
+      requestedShards: ["core", "labs", "metricsIndex"],
+    },
+    {
+      requestedMetricBuckets: TEST_BROWSER_VAULT_METRIC_BUCKET_IDS,
+    },
+    {
+      requestedMetricBuckets: TEST_BROWSER_VAULT_METRIC_BUCKET_IDS.slice(1),
+      requestedShards: ["core", "labs", "metricsIndex"],
+    },
+    {
+      requestedMetricBuckets: TEST_BROWSER_VAULT_METRIC_BUCKET_IDS,
+      requestedShards: ["core", "metricsIndex"],
+    },
+  ])("rejects partial Settings export capability %#", async (capability) => {
+    const browser = await generateHostedUserRecipientKeyPair();
+
+    const response = await settingsVaultExportSessionRoute.POST(
+      createJsonPostRequest(
+        "https://join.example.test/api/settings/vault-export/session",
+        {
+          authorization: {
+            signature: `0x${"11".repeat(65)}`,
+            token: "sac_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef",
+          },
+          browserPublicKeyJwk: browser.publicKeyJwk,
+          ...capability,
+        },
+      ),
+    );
+
+    expect(response.status).toBe(400);
+    expect(mocks.verifySensitiveActionChallenge).not.toHaveBeenCalled();
+    expect(mocks.readHostedExecutionControlClientIfConfigured).not.toHaveBeenCalled();
+    await expect(response.json()).resolves.toMatchObject({
+      error: { code: "BROWSER_VAULT_SESSION_INVALID_REQUEST" },
     });
   });
 
@@ -412,6 +498,111 @@ describe("browser vault session route", () => {
       refreshPending: true,
       state: "ready",
     });
+  });
+
+  it("does not wake processing when consent is withdrawn before the deferred refresh runs", async () => {
+    const browser = await generateHostedUserRecipientKeyPair();
+    const replicaRef = createReplicaRef();
+    let runAfterResponse: (() => void | Promise<void>) | undefined;
+    mocks.afterResponse.mockImplementationOnce((callback: () => void | Promise<void>) => {
+      runAfterResponse = callback;
+    });
+    mocks.hasPendingDirtyConnectionForUser.mockResolvedValueOnce(true);
+    mocks.readHostedWorkspace.mockResolvedValue({
+      browserVaultReplicaRef: replicaRef,
+      checkpointedAt: "2026-04-20T08:00:00.000Z",
+      createdAt: "2026-04-20T08:00:00.000Z",
+      nextWakeAt: null,
+      nextWakeReason: null,
+      redactedStatusJson: {},
+      snapshotRef: createSnapshotRef("d"),
+      updatedAt: "2026-04-20T08:00:00.000Z",
+      userId: "member_123",
+      version: "4",
+    });
+    mocks.readHostedWorkspaceBrowserVaultSourceStateHash.mockReturnValue("e".repeat(64));
+    mocks.readHostedExecutionControlClientIfConfigured.mockReturnValue({
+      createBrowserVaultSession: vi.fn().mockResolvedValue({
+        encryptedReplica: createReplicaEnvelope(),
+        replicaAad: createReplicaAad(),
+        replicaKeyEnvelope: createReplicaKeyEnvelope(),
+        replicaRef,
+        state: "ready",
+      }),
+    });
+
+    const response = await settingsVaultExportSessionRoute.POST(
+      createJsonPostRequest("https://join.example.test/api/settings/vault-export/session", {
+        authorization: {
+          signature: `0x${"11".repeat(65)}`,
+          token: "sac_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef",
+        },
+        browserPublicKeyJwk: browser.publicKeyJwk,
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(runAfterResponse).toBeTypeOf("function");
+    mocks.readHostedHealthDataConsentState.mockResolvedValue("revoked");
+    await runAfterResponse?.();
+    expect(mocks.readHostedHealthDataConsentState).toHaveBeenCalledTimes(3);
+    expect(mocks.signalHostedBrowserVaultRefreshRuntime).not.toHaveBeenCalled();
+  });
+
+  it("does not wake processing when consent is withdrawn while the retained replica is fetched", async () => {
+    const browser = await generateHostedUserRecipientKeyPair();
+    const replicaRef = createReplicaRef();
+    const readySession = {
+      encryptedReplica: createReplicaEnvelope(),
+      replicaAad: createReplicaAad(),
+      replicaKeyEnvelope: createReplicaKeyEnvelope(),
+      replicaRef,
+      state: "ready" as const,
+    };
+    let resolveBrowserVaultSession: ((session: typeof readySession) => void) | undefined;
+    const browserVaultSession = new Promise<typeof readySession>((resolve) => {
+      resolveBrowserVaultSession = resolve;
+    });
+    const createBrowserVaultSession = vi.fn(() => browserVaultSession);
+    mocks.hasPendingDirtyConnectionForUser.mockResolvedValueOnce(true);
+    mocks.readHostedWorkspace.mockResolvedValue({
+      browserVaultReplicaRef: replicaRef,
+      checkpointedAt: "2026-04-20T08:00:00.000Z",
+      createdAt: "2026-04-20T08:00:00.000Z",
+      nextWakeAt: null,
+      nextWakeReason: null,
+      redactedStatusJson: {},
+      snapshotRef: createSnapshotRef("e"),
+      updatedAt: "2026-04-20T08:00:00.000Z",
+      userId: "member_123",
+      version: "5",
+    });
+    mocks.readHostedWorkspaceBrowserVaultSourceStateHash.mockReturnValue("f".repeat(64));
+    mocks.readHostedExecutionControlClientIfConfigured.mockReturnValue({
+      createBrowserVaultSession,
+    });
+
+    const responsePromise = settingsVaultExportSessionRoute.POST(
+      createJsonPostRequest("https://join.example.test/api/settings/vault-export/session", {
+        authorization: {
+          signature: `0x${"11".repeat(65)}`,
+          token: "sac_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef",
+        },
+        browserPublicKeyJwk: browser.publicKeyJwk,
+      }),
+    );
+    await vi.waitFor(() => {
+      expect(createBrowserVaultSession).toHaveBeenCalledTimes(1);
+    });
+    mocks.readHostedHealthDataConsentState.mockResolvedValue("revoked");
+    resolveBrowserVaultSession?.(readySession);
+
+    const response = await responsePromise;
+    expect(response.status).toBe(200);
+    await vi.waitFor(() => {
+      expect(mocks.readHostedHealthDataConsentState).toHaveBeenCalledTimes(3);
+    });
+    expect(mocks.signalHostedBrowserVaultRefreshRuntime).not.toHaveBeenCalled();
   });
 
   it("refuses Settings vault export sessions without consuming the challenge when the replica is missing", async () => {
@@ -470,7 +661,7 @@ describe("browser vault session route", () => {
     });
   });
 
-  it("refuses Settings vault export sessions without consuming the challenge when the replica source state has moved", async () => {
+  it("exports the retained replica and schedules refresh when the source state has moved", async () => {
     const browser = await generateHostedUserRecipientKeyPair();
     const replicaRef = createReplicaRef();
     mocks.readHostedWorkspace.mockResolvedValue({
@@ -486,7 +677,13 @@ describe("browser vault session route", () => {
       version: "1",
     });
     mocks.readHostedWorkspaceBrowserVaultSourceStateHash.mockReturnValue("c".repeat(64));
-    const createBrowserVaultSession = vi.fn();
+    const createBrowserVaultSession = vi.fn().mockResolvedValue({
+      encryptedReplica: createReplicaEnvelope(),
+      replicaAad: createReplicaAad(),
+      replicaKeyEnvelope: createReplicaKeyEnvelope(),
+      replicaRef,
+      state: "ready",
+    });
     mocks.readHostedExecutionControlClientIfConfigured.mockReturnValue({ createBrowserVaultSession });
 
     const response = await settingsVaultExportSessionRoute.POST(
@@ -499,13 +696,77 @@ describe("browser vault session route", () => {
       }),
     );
 
-    expect(response.status).toBe(409);
+    expect(response.status).toBe(200);
     expect(mocks.verifySensitiveActionChallenge).toHaveBeenCalledTimes(1);
-    expect(mocks.consumeSensitiveActionChallenge).not.toHaveBeenCalled();
-    expect(createBrowserVaultSession).not.toHaveBeenCalled();
+    expect(mocks.consumeSensitiveActionChallenge).toHaveBeenCalledTimes(1);
+    expect(createBrowserVaultSession).toHaveBeenCalledWith({
+      browserPublicKeyJwk: browser.publicKeyJwk,
+      replicaRef,
+      userId: "member_123",
+    });
+    expect(mocks.signalHostedBrowserVaultRefreshRuntime).toHaveBeenCalledWith({
+      userId: "member_123",
+    });
+    await expect(response.json()).resolves.toMatchObject({
+      deviceSyncImportPending: false,
+      freshness: "stale",
+      refreshPending: true,
+      state: "ready",
+    });
   });
 
-  it("refuses Settings vault export sessions without consuming the challenge when dirty-state lookup fails", async () => {
+  it("exports the retained replica and schedules refresh when device import is pending", async () => {
+    const browser = await generateHostedUserRecipientKeyPair();
+    const replicaRef = createReplicaRef();
+    mocks.readHostedWorkspace.mockResolvedValue({
+      browserVaultReplicaRef: replicaRef,
+      createdAt: "2026-04-20T08:00:00.000Z",
+      checkpointedAt: "2026-04-20T08:00:00.000Z",
+      redactedStatusJson: {},
+      nextWakeAt: null,
+      nextWakeReason: null,
+      snapshotRef: createSnapshotRef("a"),
+      updatedAt: "2026-04-20T08:00:00.000Z",
+      userId: "member_123",
+      version: "1",
+    });
+    mocks.readHostedWorkspaceBrowserVaultSourceStateHash.mockReturnValue(replicaRef.sourceBundleHash);
+    mocks.hasPendingDirtyConnectionForUser.mockResolvedValueOnce(true);
+    const createBrowserVaultSession = vi.fn().mockResolvedValue({
+      encryptedReplica: createReplicaEnvelope(),
+      replicaAad: createReplicaAad(),
+      replicaKeyEnvelope: createReplicaKeyEnvelope(),
+      replicaRef,
+      state: "ready",
+    });
+    mocks.readHostedExecutionControlClientIfConfigured.mockReturnValue({ createBrowserVaultSession });
+
+    const response = await settingsVaultExportSessionRoute.POST(
+      createJsonPostRequest("https://join.example.test/api/settings/vault-export/session", {
+        authorization: {
+          signature: `0x${"11".repeat(65)}`,
+          token: "sac_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef",
+        },
+        browserPublicKeyJwk: browser.publicKeyJwk,
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.verifySensitiveActionChallenge).toHaveBeenCalledTimes(1);
+    expect(mocks.consumeSensitiveActionChallenge).toHaveBeenCalledTimes(1);
+    expect(createBrowserVaultSession).toHaveBeenCalledTimes(1);
+    expect(mocks.signalHostedBrowserVaultRefreshRuntime).toHaveBeenCalledWith({
+      userId: "member_123",
+    });
+    await expect(response.json()).resolves.toMatchObject({
+      deviceSyncImportPending: true,
+      freshness: "fresh",
+      refreshPending: true,
+      state: "ready",
+    });
+  });
+
+  it("exports the retained replica conservatively when dirty-state lookup fails", async () => {
     const browser = await generateHostedUserRecipientKeyPair();
     const replicaRef = createReplicaRef();
     mocks.readHostedWorkspace.mockResolvedValue({
@@ -524,7 +785,13 @@ describe("browser vault session route", () => {
     mocks.hasPendingDirtyConnectionForUser.mockRejectedValueOnce(
       new Error("dirty connection lookup failed"),
     );
-    const createBrowserVaultSession = vi.fn();
+    const createBrowserVaultSession = vi.fn().mockResolvedValue({
+      encryptedReplica: createReplicaEnvelope(),
+      replicaAad: createReplicaAad(),
+      replicaKeyEnvelope: createReplicaKeyEnvelope(),
+      replicaRef,
+      state: "ready",
+    });
     mocks.readHostedExecutionControlClientIfConfigured.mockReturnValue({ createBrowserVaultSession });
 
     const response = await settingsVaultExportSessionRoute.POST(
@@ -537,10 +804,18 @@ describe("browser vault session route", () => {
       }),
     );
 
-    expect(response.status).toBe(409);
-    expect(mocks.verifySensitiveActionChallenge).toHaveBeenCalledTimes(1);
-    expect(mocks.consumeSensitiveActionChallenge).not.toHaveBeenCalled();
-    expect(createBrowserVaultSession).not.toHaveBeenCalled();
+    expect(response.status).toBe(200);
+    expect(mocks.consumeSensitiveActionChallenge).toHaveBeenCalledTimes(1);
+    expect(createBrowserVaultSession).toHaveBeenCalledTimes(1);
+    expect(mocks.signalHostedBrowserVaultRefreshRuntime).toHaveBeenCalledWith({
+      userId: "member_123",
+    });
+    await expect(response.json()).resolves.toMatchObject({
+      deviceSyncImportPending: true,
+      freshness: "fresh",
+      refreshPending: true,
+      state: "ready",
+    });
   });
 
   it("rejects disallowed browser vault origins before reading app session state", async () => {
@@ -653,7 +928,7 @@ describe("browser vault session route", () => {
     }
   });
 
-  it("forwards the authenticated member and replica ref to the hosted control client when the known ref is stale", async () => {
+  it("keeps explicit refresh ownership out of a fresh ready response", async () => {
     const browser = await generateHostedUserRecipientKeyPair();
     mocks.readHostedWorkspace.mockResolvedValue({
       browserVaultReplicaRef: createReplicaRef(),
@@ -683,6 +958,7 @@ describe("browser vault session route", () => {
           ...createReplicaRef(),
           objectKey: "users/browser-vault-replicas/opaque/stale-replica.json",
         },
+        requestRefresh: true,
       }),
     );
 
@@ -691,6 +967,13 @@ describe("browser vault session route", () => {
       browserPublicKeyJwk: browser.publicKeyJwk,
       replicaRef: createReplicaRef(),
       userId: "member_123",
+    });
+    expect(mocks.signalHostedBrowserVaultRefreshRuntime).toHaveBeenCalledWith({
+      userId: "member_123",
+    });
+    await expect(response.json()).resolves.toMatchObject({
+      refreshPending: false,
+      state: "ready",
     });
   });
 
@@ -728,6 +1011,233 @@ describe("browser vault session route", () => {
       replicaKeyEnvelope: null,
       replicaRef,
       state: "not_modified",
+    });
+  });
+
+  it("reuses a legacy browser cache when its old parser omitted shard refs", async () => {
+    const browser = await generateHostedUserRecipientKeyPair();
+    const replicaRef = createShardedReplicaRef();
+    mocks.readHostedWorkspace.mockResolvedValue({
+      browserVaultReplicaRef: replicaRef,
+      createdAt: "2026-04-20T08:00:00.000Z",
+      checkpointedAt: "2026-04-20T08:00:00.000Z",
+      redactedStatusJson: {},
+      nextWakeAt: null,
+      nextWakeReason: null,
+      snapshotRef: createSnapshotRef("a"),
+      updatedAt: "2026-04-20T08:00:00.000Z",
+      userId: "member_123",
+      version: "1",
+    });
+    const createBrowserVaultSession = vi.fn();
+    mocks.readHostedExecutionControlClientIfConfigured.mockReturnValue({ createBrowserVaultSession });
+
+    const response = await browserVaultSessionRoute.POST(
+      createJsonPostRequest("https://join.example.test/api/browser-vault/session", {
+        browserPublicKeyJwk: browser.publicKeyJwk,
+        knownReplicaRef: createReplicaRef(),
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(createBrowserVaultSession).not.toHaveBeenCalled();
+    await expect(response.json()).resolves.toMatchObject({
+      replicaRef,
+      state: "not_modified",
+    });
+  });
+
+  it("requests only route shards missing from the matching browser replica", async () => {
+    const browser = await generateHostedUserRecipientKeyPair();
+    const replicaRef = createShardedReplicaRef();
+    mocks.readHostedWorkspace.mockResolvedValue({
+      browserVaultReplicaRef: replicaRef,
+      createdAt: "2026-04-20T08:00:00.000Z",
+      checkpointedAt: "2026-04-20T08:00:00.000Z",
+      redactedStatusJson: {},
+      nextWakeAt: null,
+      nextWakeReason: null,
+      snapshotRef: createSnapshotRef("a"),
+      updatedAt: "2026-04-20T08:00:00.000Z",
+      userId: "member_123",
+      version: "1",
+    });
+    const createBrowserVaultSession = vi.fn().mockResolvedValue({
+      encryptedReplica: createReplicaEnvelope(),
+      replicaAad: createReplicaAad(),
+      replicaKeyEnvelope: createReplicaKeyEnvelope(),
+      replicaRef,
+      state: "ready",
+    });
+    mocks.readHostedExecutionControlClientIfConfigured.mockReturnValue({ createBrowserVaultSession });
+
+    const response = await browserVaultSessionRoute.POST(
+      createJsonPostRequest("https://join.example.test/api/browser-vault/session", {
+        browserPublicKeyJwk: browser.publicKeyJwk,
+        knownReplicaRef: replicaRef,
+        knownShards: ["core"],
+        requestedShards: ["core", "metricsIndex"],
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(createBrowserVaultSession).toHaveBeenCalledWith({
+      browserPublicKeyJwk: browser.publicKeyJwk,
+      replicaRef,
+      requestedShards: ["metricsIndex"],
+      userId: "member_123",
+    });
+  });
+
+  it("returns not_modified when all requested shards are already loaded", async () => {
+    const browser = await generateHostedUserRecipientKeyPair();
+    const replicaRef = createShardedReplicaRef();
+    mocks.readHostedWorkspace.mockResolvedValue({
+      browserVaultReplicaRef: replicaRef,
+      createdAt: "2026-04-20T08:00:00.000Z",
+      checkpointedAt: "2026-04-20T08:00:00.000Z",
+      redactedStatusJson: {},
+      nextWakeAt: null,
+      nextWakeReason: null,
+      snapshotRef: createSnapshotRef("a"),
+      updatedAt: "2026-04-20T08:00:00.000Z",
+      userId: "member_123",
+      version: "1",
+    });
+    const createBrowserVaultSession = vi.fn();
+    mocks.readHostedExecutionControlClientIfConfigured.mockReturnValue({ createBrowserVaultSession });
+
+    const response = await browserVaultSessionRoute.POST(
+      createJsonPostRequest("https://join.example.test/api/browser-vault/session", {
+        browserPublicKeyJwk: browser.publicKeyJwk,
+        knownReplicaRef: replicaRef,
+        knownShards: ["core", "metricsIndex", "labs"],
+        requestedShards: ["core", "metricsIndex"],
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(createBrowserVaultSession).not.toHaveBeenCalled();
+    await expect(response.json()).resolves.toMatchObject({
+      replicaRef,
+      state: "not_modified",
+    });
+  });
+
+  it("forwards only the missing metric bucket when fixed route shards are cached", async () => {
+    const browser = await generateHostedUserRecipientKeyPair();
+    const replicaRef = createShardedReplicaRef();
+    mocks.readHostedWorkspace.mockResolvedValue({
+      browserVaultReplicaRef: replicaRef,
+      createdAt: "2026-04-20T08:00:00.000Z",
+      checkpointedAt: "2026-04-20T08:00:00.000Z",
+      redactedStatusJson: {},
+      nextWakeAt: null,
+      nextWakeReason: null,
+      snapshotRef: createSnapshotRef("a"),
+      updatedAt: "2026-04-20T08:00:00.000Z",
+      userId: "member_123",
+      version: "1",
+    });
+    const createBrowserVaultSession = vi.fn().mockResolvedValue({
+      metricBuckets: {},
+      replicaKeyEnvelope: createReplicaKeyEnvelope(),
+      replicaRef,
+      state: "ready",
+    });
+    mocks.readHostedExecutionControlClientIfConfigured.mockReturnValue({
+      createBrowserVaultSession,
+    });
+
+    const response = await browserVaultSessionRoute.POST(
+      createJsonPostRequest("https://join.example.test/api/browser-vault/session", {
+        browserPublicKeyJwk: browser.publicKeyJwk,
+        knownMetricBuckets: [],
+        knownReplicaRef: replicaRef,
+        knownShards: ["core", "metricsIndex"],
+        requestedMetricBuckets: ["00"],
+        requestedShards: ["core", "metricsIndex"],
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(createBrowserVaultSession).toHaveBeenCalledWith({
+      browserPublicKeyJwk: browser.publicKeyJwk,
+      replicaRef,
+      requestedMetricBuckets: ["00"],
+      userId: "member_123",
+    });
+  });
+
+  it("returns a retryable partial-load error when a selected child of the known sharded ref is missing", async () => {
+    const browser = await generateHostedUserRecipientKeyPair();
+    const replicaRef = createShardedReplicaRef();
+    mocks.readHostedWorkspace.mockResolvedValue({
+      browserVaultReplicaRef: replicaRef,
+      createdAt: "2026-04-20T08:00:00.000Z",
+      checkpointedAt: "2026-04-20T08:00:00.000Z",
+      redactedStatusJson: {},
+      nextWakeAt: null,
+      nextWakeReason: null,
+      snapshotRef: createSnapshotRef("a"),
+      updatedAt: "2026-04-20T08:00:00.000Z",
+      userId: "member_123",
+      version: "1",
+    });
+    const createBrowserVaultSession = vi.fn().mockRejectedValue(
+      new CloudflareHostedControlBrowserVaultReplicaNotFoundError(),
+    );
+    mocks.readHostedExecutionControlClientIfConfigured.mockReturnValue({
+      createBrowserVaultSession,
+    });
+
+    const response = await browserVaultSessionRoute.POST(
+      createJsonPostRequest("https://join.example.test/api/browser-vault/session", {
+        browserPublicKeyJwk: browser.publicKeyJwk,
+        knownMetricBuckets: ["00"],
+        knownReplicaRef: replicaRef,
+        knownShards: ["core", "metricsIndex"],
+        requestedMetricBuckets: ["00", "01"],
+        requestedShards: ["core", "metricsIndex"],
+      }),
+    );
+
+    expect(response.status).toBe(503);
+    expect(createBrowserVaultSession).toHaveBeenCalledWith({
+      browserPublicKeyJwk: browser.publicKeyJwk,
+      replicaRef,
+      requestedMetricBuckets: ["01"],
+      userId: "member_123",
+    });
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: "BROWSER_VAULT_PARTIAL_LOAD_UNAVAILABLE",
+        message: "Requested browser vault data is temporarily unavailable.",
+        retryable: true,
+      },
+    });
+    expect(mocks.signalHostedBrowserVaultRefreshRuntime).toHaveBeenCalledWith({
+      userId: "member_123",
+    });
+  });
+
+  it.each([
+    { knownShards: ["core"], requestedShards: undefined },
+    { requestedShards: [] },
+    { requestedShards: ["core", "core"] },
+    { requestedShards: ["private"] },
+  ])("rejects invalid shard capability input %#", async (shardInput) => {
+    const browser = await generateHostedUserRecipientKeyPair();
+    const response = await browserVaultSessionRoute.POST(
+      createJsonPostRequest("https://join.example.test/api/browser-vault/session", {
+        browserPublicKeyJwk: browser.publicKeyJwk,
+        ...shardInput,
+      }),
+    );
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({
+      error: { code: "BROWSER_VAULT_SESSION_INVALID_REQUEST" },
     });
   });
 
@@ -1117,11 +1627,12 @@ describe("browser vault session route", () => {
     });
   });
 
-  it("serves the immediately previous replica generation as stale and schedules refresh", async () => {
+  it("serves a fresh previous-generation replica as stale and schedules refresh", async () => {
     const browser = await generateHostedUserRecipientKeyPair();
     const replicaRef = createReplicaRef({
       generation: BROWSER_VAULT_REPLICA_CURRENT_GENERATION - 1,
     });
+    expect(replicaRef.generation).toBe(BROWSER_VAULT_REPLICA_CURRENT_GENERATION - 1);
     const createBrowserVaultSession = vi.fn().mockResolvedValue({
       encryptedReplica: createReplicaEnvelope(),
       replicaAad: createReplicaAad(),
@@ -1348,6 +1859,60 @@ describe("browser vault session route", () => {
     });
   });
 
+  it("signals a requested refresh without duplicating its pending owner", async () => {
+    const browser = await generateHostedUserRecipientKeyPair();
+    const replicaRef = createReplicaRef();
+    mocks.readHostedWorkspace.mockResolvedValue({
+      browserVaultReplicaRef: replicaRef,
+      createdAt: "2026-04-20T08:00:00.000Z",
+      checkpointedAt: "2026-04-20T08:00:00.000Z",
+      redactedStatusJson: {},
+      nextWakeAt: null,
+      nextWakeReason: null,
+      snapshotRef: createSnapshotRef("b"),
+      updatedAt: "2026-04-20T08:00:00.000Z",
+      userId: "member_123",
+      version: "1",
+    });
+
+    const response = await browserVaultSessionRoute.POST(
+      createJsonPostRequest("https://join.example.test/api/browser-vault/session", {
+        browserPublicKeyJwk: browser.publicKeyJwk,
+        knownReplicaRef: replicaRef,
+        requestRefresh: true,
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.signalHostedBrowserVaultRefreshRuntime).toHaveBeenCalledTimes(1);
+    expect(mocks.signalHostedBrowserVaultRefreshRuntime).toHaveBeenCalledWith({
+      userId: "member_123",
+    });
+    await expect(response.json()).resolves.toMatchObject({
+      replicaRef,
+      refreshPending: false,
+      state: "not_modified",
+    });
+  });
+
+  it("rejects a malformed explicit refresh flag", async () => {
+    const browser = await generateHostedUserRecipientKeyPair();
+    const response = await browserVaultSessionRoute.POST(
+      createJsonPostRequest("https://join.example.test/api/browser-vault/session", {
+        browserPublicKeyJwk: browser.publicKeyJwk,
+        requestRefresh: "yes",
+      }),
+    );
+
+    expect(response.status).toBe(400);
+    expect(mocks.signalHostedBrowserVaultRefreshRuntime).not.toHaveBeenCalled();
+    await expect(response.json()).resolves.toMatchObject({
+      error: {
+        code: "BROWSER_VAULT_SESSION_INVALID_REQUEST",
+      },
+    });
+  });
+
   it("does not return not_modified when only the dataVersion matches", async () => {
     const browser = await generateHostedUserRecipientKeyPair();
     const replicaRef = createReplicaRef();
@@ -1483,7 +2048,7 @@ describe("browser vault session route", () => {
       version: "1",
     });
     const createBrowserVaultSession = vi.fn().mockRejectedValue(
-      new Error("Hosted execution browser vault replica was not found."),
+      new CloudflareHostedControlBrowserVaultReplicaNotFoundError(),
     );
     mocks.readHostedExecutionControlClientIfConfigured.mockReturnValue({
       createBrowserVaultSession,
@@ -1527,6 +2092,48 @@ function createReplicaRef(input: {
     runtimeRootKeyId: "udrk:runtime:test-root",
     schema: "murph.hosted-browser-vault-replica-ref.v1" as const,
     sourceBundleHash: "a".repeat(64),
+  };
+}
+
+function createShardedReplicaRef() {
+  const ref = createReplicaRef();
+  return {
+    ...ref,
+    shards: {
+      schema: "murph.hosted-browser-vault-replica-shards.v1" as const,
+      core: createReplicaShardRef("core", 32),
+      labs: createReplicaShardRef("labs", 34),
+      metricsIndex: createReplicaShardRef("metricsIndex", 36),
+    },
+    metricBuckets: createReplicaMetricBucketRefs(),
+  };
+}
+
+function createReplicaShardRef(
+  shard: "core" | "labs" | "metricsIndex",
+  encodedByteLength: number,
+) {
+  return {
+    byteLength: encodedByteLength + 64,
+    contentEncoding: "gzip" as const,
+    encodedByteLength,
+    objectKey: `users/browser-vault-replicas/opaque/replica.${shard}.json`,
+  };
+}
+
+function createReplicaMetricBucketRefs(): HostedBrowserVaultReplicaMetricBucketSetRef {
+  const buckets = Object.fromEntries(TEST_BROWSER_VAULT_METRIC_BUCKET_IDS.map(
+    (bucketId) => [bucketId, {
+      byteLength: 2,
+      contentEncoding: "gzip" as const,
+      encodedByteLength: 1,
+      objectKey: `users/browser-vault-replicas/opaque/replica.metric-${bucketId}.json`,
+    }],
+  )) as HostedBrowserVaultReplicaMetricBucketSetRef["buckets"];
+  return {
+    bucketCount: 32,
+    buckets,
+    schema: "murph.hosted-browser-vault-replica-metric-buckets.v1",
   };
 }
 

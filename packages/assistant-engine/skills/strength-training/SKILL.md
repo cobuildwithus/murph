@@ -54,7 +54,7 @@ Apply only modifiers that change the plan:
 - `references/coaching.md` — adherence friction, habits, reminders, missed sessions, motivation, or reducing dependence on Murph
 - `references/safety.md` — pain, symptoms, health uncertainty, maximal or high-skill work, special populations, competition, or body-composition risk
 - `references/evidence.md` — source-level justification, disputed claims, confidence calibration, or maintenance of defaults
-- `$MURPH_ASSISTANT_SKILLS_ROOT/tracked-table/SKILL.md` — any request to put a workout log in a table, preserve set-by-set notation, or refresh a live workout table. On messaging routes, use its native compact-table flow instead of Markdown table syntax.
+- `$MURPH_ASSISTANT_SKILLS_ROOT/tracked-table/SKILL.md` — any private messaging request to start or resume a canonical live workout, put a workout log in a table, preserve set-by-set notation, or refresh its workout card. On messaging routes, use its native compact-table flow instead of Markdown table syntax.
 
 When presenting a named exercise, unfamiliar variation, or movement walkthrough, read `$MURPH_ASSISTANT_SKILLS_ROOT/shared/exercise-catalog-runtime.md` and follow its list/show, image-media, progressive-disclosure, and catalog-gap rules. This skill still owns exercise choice, programming, dose, progression, substitutions, and safety. If catalog media is unavailable, give compact form cues rather than inventing an image workflow.
 
@@ -84,7 +84,9 @@ Treat physique photos, body measurements, pain and symptom notes, training logs,
 
 ### Repeated-set logs and cumulative totals
 
-For several small sets spread across a day, read `$MURPH_ASSISTANT_SKILLS_ROOT/experiment-onboarding/SKILL.md` when an experiment owns the schedule or records. Treat each completion reply to one reminder as one occurrence, not as confirmation of an entire day.
+Repeated-set logging is private-only. In a group conversation, do not read or mutate a participant's private routine or experiment; acknowledge briefly and ask them to continue in their private Murph conversation. In a verified private conversation with several small sets spread across a day, read `$MURPH_ASSISTANT_SKILLS_ROOT/behavior-followthrough/SKILL.md` to resolve the current routine and read `$MURPH_ASSISTANT_SKILLS_ROOT/experiment-onboarding/SKILL.md` when an experiment owns the schedule or records. A terse completion that omits the exercise is not permission to infer it from conversational recency or the previous logged set. Read the full canonical plan records and resolve the unique exercise, owner, and per-set standard for the current member-local date before writing anything. If canonical state does not resolve all three, ask one narrow clarification and do not log a set.
+
+Treat each completion reply to one reminder as one occurrence, not as confirmation of an entire day. When one message explicitly confirms multiple sets, write one occurrence per confirmed set against the same resolved exercise and owner, attach the current per-set quantity to every occurrence, then re-read that owner's canonical progress before replying.
 
 An actual cumulative repetition total must come from explicit canonical per-session or per-set quantities. Never derive it from elapsed days, the planned rotation, assumed adherence, expected occurrences, or the current per-set standard. Keep the recorded total, theoretical full-compliance total, and any unknown historical quantity visibly separate. When old logs contain completed sets but not repetitions, give the exact known set count and an honest known subtotal or lower bound instead of fabricating precision.
 

@@ -184,15 +184,23 @@ describe('onboarding first personal read', () => {
       | null = null
     const automationTool: AssistantHostedAutomationTool = {
       async request(request, context) {
+        if (request.action !== 'save') {
+          throw new Error('Expected an automation save request.')
+        }
         received = request
         receivedContext = context
         return {
           action: 'save',
           automationId: MURPH_ONBOARDING_FIRST_PERSONAL_READ_AUTOMATION_ID,
           created: true,
+          effectiveTimeZone: null,
           lookupId: MURPH_ONBOARDING_FIRST_PERSONAL_READ_AUTOMATION_ID,
+          nextOccurrenceAt: '2026-08-07T13:00:00.000Z',
           routeBinding: 'current_conversation',
+          schedule: request.schedule,
           status: 'active',
+          timingVerified: true,
+          updatedAt: '2026-08-06T21:00:00.000Z',
         }
       },
     }
@@ -247,11 +255,13 @@ describe('onboarding first personal read', () => {
     const invalidRequests = [
       {
         action: 'patch',
+        expectedUpdatedAt: '2026-08-06T21:00:00.000Z',
         instructions: 'Replace the fixed policy.',
         lookup: MURPH_ONBOARDING_FIRST_PERSONAL_READ_AUTOMATION_ID,
       },
       {
         action: 'patch',
+        expectedUpdatedAt: '2026-08-06T21:00:00.000Z',
         lookup: MURPH_ONBOARDING_FIRST_PERSONAL_READ_AUTOMATION_SLUG,
         status: 'paused',
       },
@@ -269,6 +279,7 @@ describe('onboarding first personal read', () => {
     const cancellation = readAutomationDynamicToolRequest({
       arguments: {
         action: 'patch',
+        expectedUpdatedAt: '2026-08-06T21:00:00.000Z',
         lookup: MURPH_ONBOARDING_FIRST_PERSONAL_READ_AUTOMATION_SLUG,
         status: 'archived',
       },
@@ -278,6 +289,7 @@ describe('onboarding first personal read', () => {
       kind: 'automation',
       request: {
         action: 'patch',
+        expectedUpdatedAt: '2026-08-06T21:00:00.000Z',
         lookup: MURPH_ONBOARDING_FIRST_PERSONAL_READ_AUTOMATION_SLUG,
         status: 'archived',
       },

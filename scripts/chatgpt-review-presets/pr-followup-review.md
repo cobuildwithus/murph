@@ -1,6 +1,10 @@
 Continue the PR review in this conversation. Apply the review rules and output
 contract already given above. Do not start another conversation.
 
+Preserve the required `Complexity disposition:` for every finding, and give
+findings caused by one mechanism one shared root-cause correction instead of
+stacking another guard.
+
 Read the attached `codebase.zip` and then read `reviewScope` and `contextMode`
 from `review-gpt-pr-context/review-round.json` before choosing the round scope.
 

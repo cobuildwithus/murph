@@ -390,6 +390,7 @@ export async function deliverAssistantReaction(input: {
   })
   const outcome = await deliverAssistantOutboxReaction({
     ...deliveryFields,
+    answeredMailboxItemIds: input.input.answeredMailboxItemIds ?? [],
     dedupeToken: reactionDedupeToken,
     deliveryIdempotencyKey: reactionDedupeToken,
     dispatchMode: input.input.deliveryDispatchMode,

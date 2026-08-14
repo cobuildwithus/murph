@@ -12,7 +12,10 @@ vi.mock("@/src/lib/hosted-mailbox/store", () => ({
 }));
 vi.mock(
   "@/src/lib/hosted-routing/assistant-notification-destination",
-  () => ({
+  async (importOriginal) => ({
+    ...await importOriginal<
+      typeof import("@/src/lib/hosted-routing/assistant-notification-destination")
+    >(),
     resolveHostedAssistantNotificationDestination:
       mocks.resolveHostedAssistantNotificationDestination,
   }),
@@ -111,6 +114,11 @@ describe("hosted signup referral reward notice", () => {
     expect(wake.notification.route.delivery).toEqual({
       kind: "explicit",
       target: "provider-direct-thread",
+    });
+    expect(wake.notification.externalThreadRouteAuthority).toEqual({
+      channel: "linq",
+      containerMemberId: "member_referrer",
+      threadId: "provider-direct-thread",
     });
     expect(wake.notification.instructions).toContain(
       "someone completed Murph setup through their referral link",

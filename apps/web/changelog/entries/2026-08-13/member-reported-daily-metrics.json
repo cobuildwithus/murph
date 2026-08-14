@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-13",
+  "order": 300,
+  "item": {
+    "id": "member-reported-daily-metrics",
+    "kind": "improvement",
+    "priority": 4,
+    "title": "Correct a shared daily health value",
+    "summary": "When a group health value is out of date, you can tell Murph the correct dated value and Murph will keep it as a separate manual source.",
+    "details": "Murph keeps connected-device readings intact, treats a contradicted group snapshot as unverified, and refreshes existing group shares after the manual value is safely recorded.",
+    "relevanceTags": ["groups", "health-data", "wearables", "reliability"],
+    "sourcePullRequests": [1794]
+  }
+}

@@ -16,6 +16,7 @@ import {
   sanitizeAssistantDeliveryErrorForPersistence,
   sanitizeAssistantOutboxIntentForPersistence,
 } from '../redaction.js'
+import { readDeliveredProviderMessageEffects } from '../channels/helpers.js'
 import { reconcileAssistantCronDeliveryIntent } from '../cron/delivery-reconciliation.js'
 import { repairAssistantOutboxReceiptForIntent } from './receipt-repair.js'
 import {
@@ -125,7 +126,7 @@ export async function persistAssistantOutboxIntentDeliveryPendingConfirmation(in
       })
       return current
     }
-    const baseIntent = input.intent
+    const baseIntent = current ?? input.intent
     const pendingIntent = assistantOutboxIntentSchema.parse(
       sanitizeAssistantOutboxIntentForPersistence({
         ...baseIntent,
@@ -270,10 +271,17 @@ export async function markAssistantOutboxIntentSent(input: {
       return current
     }
 
-    const baseIntent =
-      input.preserveCurrentDispatchMetadata === false
-        ? input.intent
-        : current ?? input.intent
+    const baseIntent = input.preserveCurrentDispatchMetadata === false
+      ? {
+          ...input.intent,
+          ...(current?.privateCompletionContinuitySessionId === undefined
+            ? {}
+            : {
+                privateCompletionContinuitySessionId:
+                  current.privateCompletionContinuitySessionId,
+              }),
+        }
+      : current ?? input.intent
     const sentIntent = assistantOutboxIntentSchema.parse(
       sanitizeAssistantOutboxIntentForPersistence({
         ...baseIntent,
@@ -404,6 +412,8 @@ export async function updateAssistantOutboxAfterDispatchFailure(input: {
     const baseIntent = current ?? input.sending
     const preserveNonConfirmableLinqRichLinkCheckpoint =
       carriesNonConfirmableLinqRichLinkCheckpoint(baseIntent)
+    const retainLinqReactionConfirmation =
+      hasConcreteLinqMessageReactionReceipt(baseIntent)
     const attemptCount = baseIntent.attemptCount
     const failedAt = input.failedAt.toISOString()
     const retryExhausted = retryRequested &&
@@ -433,7 +443,7 @@ export async function updateAssistantOutboxAfterDispatchFailure(input: {
           : abandonedDelivery || retryExhausted
           ? false
           : input.deliveryMayHaveSucceeded
-            ? input.deliveryTransportIdempotent
+            ? input.deliveryTransportIdempotent || retainLinqReactionConfirmation
             : false,
         deliveryTransportIdempotent: abandonedDelivery
           ? false
@@ -687,7 +697,17 @@ function isLinqMessageReactionAmbiguityWithoutProviderIds(input: {
   return input.deliveryMayHaveSucceeded &&
     input.sending.channel === 'linq' &&
     input.sending.operation?.kind === 'message-reaction' &&
-    input.sending.deliveryTransportIdempotent === false
+    input.sending.deliveryTransportIdempotent === false &&
+    !hasConcreteLinqMessageReactionReceipt(input.sending)
+}
+
+function hasConcreteLinqMessageReactionReceipt(
+  intent: AssistantOutboxIntent,
+): boolean {
+  return intent.channel === 'linq' &&
+    intent.operation?.kind === 'message-reaction' &&
+    intent.delivery?.kind === 'message-reaction' &&
+    intent.delivery.channel === 'linq'
 }
 
 function readTelegramAmbiguousDeliveryFromError(input: {
@@ -775,6 +795,9 @@ function readLinqPartialDeliveryFromError(input: {
   if (!providerMessageIds || !target || !targetKind) {
     return null
   }
+  const providerMessageEffects = (
+    readDeliveredProviderMessageEffects(context) ?? []
+  ).filter((effect) => providerMessageIds.includes(effect.providerMessageId))
 
   return assistantChannelDeliverySchema.parse({
     channel: 'linq',
@@ -782,6 +805,9 @@ function readLinqPartialDeliveryFromError(input: {
     messageLength: input.sending.message.length,
     providerMessageId: providerMessageIds.at(-1) ?? null,
     providerMessageIds,
+    ...(providerMessageEffects.length > 0
+      ? { providerMessageEffects }
+      : {}),
     providerThreadId:
       readNonEmptyString(errorRecord?.providerThreadId) ??
       readNonEmptyString(context?.providerThreadId) ??
@@ -967,6 +993,7 @@ function sameAssistantDeliveryProviderMessageEffects(
     normalizedLeft.every((effect, index) => {
       const other = normalizedRight[index]
       return other !== undefined &&
+        effect.carriesIntentMedia === other.carriesIntentMedia &&
         effect.providerMessageId === other.providerMessageId &&
         effect.message === other.message
     })

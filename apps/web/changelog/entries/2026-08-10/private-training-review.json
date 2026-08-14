@@ -1,0 +1,18 @@
+{
+  "publishedOn": "2026-08-10",
+  "order": 650,
+  "item": {
+    "id": "private-training-review",
+    "kind": "feature",
+    "priority": 5,
+    "title": "Review your training in one private view",
+    "summary": "Open Training to see your active workout, recent sessions, 30-day consistency, and exercise progress from workouts already saved with Murph.",
+    "details": "The page is read-only and intentionally stays out of Home navigation. Keep logging and changes in your private Murph conversation; when you return, Training checks for the saved update while keeping the last private view visible.",
+    "relevanceTags": ["workouts", "training", "dashboard", "privacy"],
+    "sourcePullRequests": [1495],
+    "tryIt": {
+      "href": "/training",
+      "label": "Review training"
+    }
+  }
+}

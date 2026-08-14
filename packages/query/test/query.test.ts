@@ -102,6 +102,7 @@ test("root query export keeps runtime projection methods available as lazy wrapp
     "summarizeWearableMetricTrendRuntime",
     "summarizeWearableSleepRuntime",
     "summarizeWearableSleepPatternRuntime",
+    "buildPersonalPatternReportRuntime",
     "summarizeWearableActivityRuntime",
     "summarizeWearableBodyStateRuntime",
     "summarizeWearableRecoveryRuntime",
@@ -4565,7 +4566,7 @@ test("rebuildQueryProjection creates the compact metric point schema", async () 
       // Pin the literal version: a revert of the latest bump would keep every
       // constant-relative assertion green while legacy stores still carried old
       // projected metric point identities.
-      assert.equal(QUERY_PROJECTION_SQLITE_VERSION, 20);
+      assert.equal(QUERY_PROJECTION_SQLITE_VERSION, 22);
       assert.equal(readSqliteRuntimeUserVersion(database), QUERY_PROJECTION_SQLITE_VERSION);
 
       const columnRows = database
@@ -6369,6 +6370,344 @@ test("wearable projection preserves valid Apple HealthKit cycle fallback zero st
       true,
       eventOrder,
     );
+  }
+});
+
+test("Junction sparse observation metrics remain queryable through their public resource names", async () => {
+  const cases = [
+    ["body_mass_index", "bmi", 23.4, "kg_m2"],
+    ["carbohydrates", "carbohydrates", 48, "g"],
+    ["fat", "body-fat-percentage", 18.5, "%"],
+    ["forced_expiratory_volume_1", "forced-expiratory-volume-1", 3.52, "L"],
+    ["forced_vital_capacity", "forced-vital-capacity", 4.31, "L"],
+    ["heart_rate_alert", "heart-rate-alert", 1, "count"],
+    ["inhaler_usage", "inhaler-usage", 2, "count"],
+    ["lean_body_mass", "lean-body-mass", 61.2, "kg"],
+    ["peak_expiratory_flow_rate", "peak-expiratory-flow-rate", 475, "L/min"],
+    ["sleep_apnea_alert", "sleep-apnea-alert", 1, "count"],
+    ["waist_circumference", "waist-circumference", 82.4, "cm"],
+  ] as const;
+  const vaultRoot = await createMetricObservationVault(cases.map(([, metric, value, unit], index) => ({
+    id: `evt_junction_sparse_metric_${String(index).padStart(2, "0")}`,
+    metric,
+    observationGrain: "sample",
+    occurredAt: `2026-04-06T12:${String(index).padStart(2, "0")}:00Z`,
+    source: "device",
+    title: `Junction sparse metric ${metric}`,
+    unit,
+    value,
+  })));
+
+  try {
+    await rebuildQueryProjection(vaultRoot);
+
+    for (const [publicName, canonicalMetric, value] of cases) {
+      const points = await listMetricPointsRuntime(vaultRoot, {
+        limit: null,
+        metricKey: publicName,
+      });
+      assert.equal(points.length, 1, publicName);
+      assert.equal(points[0]?.metricKey, canonicalMetric, publicName);
+      assert.equal(points[0]?.value, value, publicName);
+    }
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
+test("Junction precise body readings suppress only exact body-summary overlaps", async () => {
+  const garminSourceA = "source-aaaaaaaaaaaaaaaaaaaaaaaa";
+  const garminSourceB = "source-bbbbbbbbbbbbbbbbbbbbbbbb";
+  const dataOrigin = (
+    sourceProviderSlug: string,
+    sourceInstanceId: string,
+    observedAtRaw: string,
+  ) => ({
+    version: 1,
+    aggregatorProvider: "junction",
+    sourceProviderSlug,
+    sourceType: "scale",
+    sourceInstanceId,
+    observedAtRaw,
+    timestampSemantics: "utc",
+    normalizerVersion: "junction-sparse-timeseries.v1",
+  });
+  const externalRef = (
+    sourceProviderSlug: string,
+    resource: string,
+    resourceId: string,
+    facet = "body-fat-percentage",
+  ) => ({
+    system: "junction",
+    resourceType: `junction-${sourceProviderSlug}-${resource}`,
+    resourceId,
+    facet,
+  });
+  const events: MetricObservationEventInput[] = [];
+  const addPair = (input: {
+    day: string;
+    sparseObservedAtRaw: string;
+    sparseProvider?: string;
+    sparseSourceInstanceId?: string;
+    summaryObservedAtRaw: string;
+    summaryProvider?: string;
+    summarySourceInstanceId?: string;
+    summaryValue: number;
+  }) => {
+    const sparseProvider = input.sparseProvider ?? "garmin";
+    const summaryProvider = input.summaryProvider ?? "garmin";
+    const sparseSourceInstanceId = input.sparseSourceInstanceId ?? garminSourceA;
+    const summarySourceInstanceId = input.summarySourceInstanceId ?? garminSourceA;
+    const idDay = input.day.replace(/-/gu, "_");
+    events.push({
+      id: `evt_junction_fat_sparse_${idDay}`,
+      metric: "body-fat-percentage",
+      observationGrain: "sample",
+      occurredAt: `${input.day}T08:00:00Z`,
+      source: "device",
+      title: "Junction precise body fat",
+      unit: "%",
+      value: 18.5,
+      dataOrigin: dataOrigin(
+        sparseProvider,
+        sparseSourceInstanceId,
+        input.sparseObservedAtRaw,
+      ),
+      externalRef: externalRef(sparseProvider, "fat", `fat-${input.day}`),
+    });
+    events.push({
+      id: `evt_junction_body_summary_${idDay}`,
+      metric: "body-fat-percentage",
+      observationGrain: "summary",
+      occurredAt: `${input.day}T08:00:00Z`,
+      source: "device",
+      title: "Junction body summary fat",
+      unit: "%",
+      value: input.summaryValue,
+      dataOrigin: dataOrigin(
+        summaryProvider,
+        summarySourceInstanceId,
+        input.summaryObservedAtRaw,
+      ),
+      externalRef: externalRef(summaryProvider, "body", `body-${input.day}`),
+    });
+  };
+
+  addPair({
+    day: "2026-04-07",
+    sparseObservedAtRaw: "2026-04-07T08:00:00Z",
+    summaryObservedAtRaw: "2026-04-07T08:00:00Z",
+    summaryValue: 21,
+  });
+  addPair({
+    day: "2026-04-08",
+    sparseObservedAtRaw: "2026-04-08T08:00:00Z",
+    summaryObservedAtRaw: "2026-04-08T08:00:00Z",
+    summarySourceInstanceId: garminSourceB,
+    summaryValue: 22,
+  });
+  addPair({
+    day: "2026-04-09",
+    sparseObservedAtRaw: "2026-04-09T08:00:00Z",
+    summaryObservedAtRaw: "2026-04-09T08:01:00Z",
+    summaryValue: 23,
+  });
+  addPair({
+    day: "2026-04-10",
+    sparseObservedAtRaw: "2026-04-10T08:00:00Z",
+    summaryObservedAtRaw: "2026-04-10T08:00:00Z",
+    summaryProvider: "withings",
+    summaryValue: 24,
+  });
+  events.push({
+    id: "evt_junction_body_summary_fallback",
+    metric: "body-fat-percentage",
+    observationGrain: "summary",
+    occurredAt: "2026-04-11T08:00:00Z",
+    source: "device",
+    title: "Junction body summary fallback",
+    unit: "%",
+    value: 25,
+    dataOrigin: dataOrigin("garmin", garminSourceA, "2026-04-11T08:00:00Z"),
+    externalRef: externalRef("garmin", "body", "body-fallback"),
+  });
+
+  const exactOverlapCases = [
+    {
+      day: "2026-04-12",
+      metric: "bmi",
+      preciseResource: "body-mass-index",
+      preciseValue: 23.4,
+      summaryValue: 24.1,
+      unit: "index",
+    },
+    {
+      day: "2026-04-13",
+      metric: "lean-body-mass",
+      preciseResource: "lean-body-mass",
+      preciseValue: 61.2,
+      summaryValue: 62.1,
+      unit: "kg",
+    },
+    {
+      day: "2026-04-14",
+      metric: "waist-circumference",
+      preciseResource: "waist-circumference",
+      preciseValue: 82.4,
+      summaryValue: 83.1,
+      unit: "cm",
+    },
+  ] as const;
+  for (const input of exactOverlapCases) {
+    const observedAt = `${input.day}T08:00:00Z`;
+    const idToken = input.preciseResource.replace(/-/gu, "_");
+    events.push({
+      id: `evt_junction_${idToken}_sparse`,
+      metric: input.metric,
+      observationGrain: "sample",
+      occurredAt: observedAt,
+      source: "device",
+      title: `Junction precise ${input.metric}`,
+      unit: input.unit,
+      value: input.preciseValue,
+      dataOrigin: dataOrigin("garmin", garminSourceA, observedAt),
+      externalRef: externalRef(
+        "garmin",
+        input.preciseResource,
+        `${input.preciseResource}-${input.day}`,
+        input.metric,
+      ),
+    });
+    events.push({
+      id: `evt_junction_${idToken}_summary`,
+      metric: input.metric,
+      observationGrain: "summary",
+      occurredAt: observedAt,
+      source: "device",
+      title: `Junction body summary ${input.metric}`,
+      unit: input.unit,
+      value: input.summaryValue,
+      dataOrigin: dataOrigin("garmin", garminSourceA, observedAt),
+      externalRef: externalRef("garmin", "body", `body-${input.day}`, input.metric),
+    });
+  }
+
+  const vaultRoot = await createMetricObservationVault(events);
+  try {
+    await rebuildQueryProjection(vaultRoot);
+    const points = await listMetricPointsRuntime(vaultRoot, {
+      limit: null,
+      metricKey: "fat",
+    });
+
+    assert.equal(
+      points.some((point) => point.source.recordId === "evt_junction_body_summary_2026_04_07"),
+      false,
+    );
+    assert.equal(points.filter((point) => point.effectiveDate === "2026-04-07").length, 1);
+    assert.equal(points.find((point) => point.effectiveDate === "2026-04-07")?.value, 18.5);
+    for (const [day, summaryValue] of [
+      ["2026-04-08", 22],
+      ["2026-04-09", 23],
+      ["2026-04-10", 24],
+    ] as const) {
+      const values = points
+        .filter((point) => point.effectiveDate === day)
+        .map((point) => point.value)
+        .sort((left, right) => (left ?? 0) - (right ?? 0));
+      assert.deepEqual(values, [18.5, summaryValue], day);
+    }
+    assert.equal(points.find((point) => point.effectiveDate === "2026-04-11")?.value, 25);
+
+    for (const input of exactOverlapCases) {
+      const metricPoints = await listMetricPointsRuntime(vaultRoot, {
+        limit: null,
+        metricKey: input.metric,
+      });
+      const dayPoints = metricPoints.filter((point) => point.effectiveDate === input.day);
+      assert.equal(dayPoints.length, 1, input.metric);
+      assert.equal(dayPoints[0]?.value, input.preciseValue, input.metric);
+    }
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
+test("Junction activity resource metrics remain queryable through exact opt-in names", async () => {
+  const cases = [
+    ["calories_basal", "basal-calories", 1450, "kcal"],
+    ["daylight_exposure", "daylight-exposure-minutes", 45, "minutes"],
+    ["fall", "fall-count", 1, "count"],
+    ["floors_climbed", "floors-climbed", 8, "count"],
+    ["handwashing", "handwashing-count", 1, "count"],
+    ["stand_duration", "stand-duration-minutes", 75, "minutes"],
+    ["stand_hour", "stand-hours", 2, "count"],
+    ["uv_exposure", "uv-exposure-index", 5, "index"],
+    ["wheelchair_push", "wheelchair-push-count", 300, "count"],
+    ["workout_distance", "workout-distance-km", 2, "km"],
+    ["workout_duration", "workout-minutes", 48, "minutes"],
+    ["workout_swimming_stroke", "swimming-stroke-count", 37, "count"],
+  ] as const;
+  const vaultRoot = await createMetricObservationVault(cases.map(([, metric, value, unit], index) => ({
+    id: `evt_junction_activity_metric_${String(index).padStart(2, "0")}`,
+    metric,
+    observationGrain: metric === "fall-count" ? "sample" : "summary",
+    occurredAt: `2026-04-07T12:${String(index).padStart(2, "0")}:00Z`,
+    source: "device",
+    title: `Junction activity metric ${metric}`,
+    unit,
+    value,
+  })));
+
+  try {
+    await rebuildQueryProjection(vaultRoot);
+
+    for (const [publicName, canonicalMetric, value] of cases) {
+      const points = await listMetricPointsRuntime(vaultRoot, {
+        limit: null,
+        metricKey: publicName,
+      });
+      assert.equal(points.length, 1, publicName);
+      assert.equal(points[0]?.metricKey, canonicalMetric, publicName);
+      assert.equal(points[0]?.value, value, publicName);
+    }
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
+test("Junction interval-owned workout duration stays on its UTC start day in query projection", async () => {
+  const vaultRoot = await createMetricObservationVault([{
+    id: "evt_junction_workout_duration_midnight_boundary",
+    metric: "workout-minutes",
+    observationGrain: "derived_fact",
+    occurredAt: "2026-04-02T23:12:00Z",
+    dayKey: "2026-04-02",
+    source: "device",
+    title: "Junction workout duration",
+    unit: "minutes",
+    value: 48,
+    externalRef: {
+      system: "junction",
+      resourceType: "garmin-workout-duration",
+      resourceId: "workout-duration-start-owned-hour",
+      facet: "workout-minutes",
+    },
+  }]);
+
+  try {
+    await rebuildQueryProjection(vaultRoot);
+    const points = await listMetricPointsRuntime(vaultRoot, {
+      limit: null,
+      metricKey: "workout_duration",
+    });
+
+    assert.equal(points.length, 1);
+    assert.equal(points[0]?.metricKey, "workout-minutes");
+    assert.equal(points[0]?.effectiveDate, "2026-04-02");
+    assert.equal(points[0]?.value, 48);
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
   }
 });
 

@@ -2,8 +2,11 @@ import { createHmac } from "node:crypto";
 
 import { describe, expect, it, vi } from "vitest";
 
-import { createStravaDeviceSyncProvider } from "../src/providers/strava.ts";
-import { resolveStravaWebhookPreflightResponse } from "../src/providers/strava.ts";
+import {
+  createStravaDeviceSyncProvider,
+  resolveStravaWebhookPreflightResponse,
+  revokeStravaDeviceSyncAccess,
+} from "../src/providers/strava.ts";
 import { readUrl } from "./helpers.ts";
 import type {
   DeviceSyncAccount,
@@ -736,6 +739,8 @@ describe("Strava device-sync provider", () => {
     expect(createResult?.acceptanceMode).toBe("durable_webhook_work");
     expect(createResult?.externalAccountId).toBe("12345");
     expect(createResult?.eventType).toBe("activity.create");
+    expect(createResult?.occurredAt).toBe("2026-04-16T00:00:00.000Z");
+    expect(createResult?.providerSentAt).toBe(STRAVA_WEBHOOK_NOW);
     expect(createResult?.jobs).toEqual([
       {
         kind: "resource",
@@ -778,6 +783,61 @@ describe("Strava device-sync provider", () => {
         },
       },
     ]);
+  });
+
+  it("does not invent a top-level event occurrence when Strava omits event_time", async () => {
+    const provider = createStravaDeviceSyncProvider({
+      clientId: "strava-client-id",
+      clientSecret: "strava-client-secret",
+      webhookSigningSecret: STRAVA_WEBHOOK_SIGNING_SECRET,
+    });
+    const verifyAndParseWebhook = requireStravaWebhookVerifier(provider);
+    const rawBody = Buffer.from(JSON.stringify({
+      aspect_type: "create",
+      object_id: 987654321,
+      object_type: "activity",
+      owner_id: 12345,
+      subscription_id: 444,
+    }));
+
+    const result = await verifyAndParseWebhook({
+      headers: signedStravaWebhookHeaders(rawBody),
+      rawBody,
+      now: STRAVA_WEBHOOK_NOW,
+    });
+
+    expect(result).not.toHaveProperty("occurredAt");
+    expect(result?.jobs[0]?.payload).toMatchObject({
+      occurredAt: STRAVA_WEBHOOK_NOW,
+    });
+  });
+
+  it("does not invent a top-level event occurrence when Strava event_time is malformed", async () => {
+    const provider = createStravaDeviceSyncProvider({
+      clientId: "strava-client-id",
+      clientSecret: "strava-client-secret",
+      webhookSigningSecret: STRAVA_WEBHOOK_SIGNING_SECRET,
+    });
+    const verifyAndParseWebhook = requireStravaWebhookVerifier(provider);
+    const rawBody = Buffer.from(JSON.stringify({
+      aspect_type: "create",
+      event_time: "not-an-instant",
+      object_id: 987654321,
+      object_type: "activity",
+      owner_id: 12345,
+      subscription_id: 444,
+    }));
+
+    const result = await verifyAndParseWebhook({
+      headers: signedStravaWebhookHeaders(rawBody),
+      rawBody,
+      now: STRAVA_WEBHOOK_NOW,
+    });
+
+    expect(result).not.toHaveProperty("occurredAt");
+    expect(result?.jobs[0]?.payload).toMatchObject({
+      occurredAt: STRAVA_WEBHOOK_NOW,
+    });
   });
 
   it("treats Strava athlete authorization revocation as a deauthorize job", async () => {
@@ -1274,6 +1334,22 @@ describe("Strava device-sync provider", () => {
     await expect(
       revokeAccess(buildStravaAccount()),
     ).resolves.toBeUndefined();
+  });
+
+  it("revokes stored Strava access without client credentials", async () => {
+    const fetchImpl = vi.fn(async () => new Response("", { status: 200 }));
+
+    await revokeStravaDeviceSyncAccess(buildStravaAccount({
+      accessToken: "cleanup-access-token",
+    }), {
+      authBaseUrl: "https://strava.example.test",
+      fetchImpl,
+    });
+
+    expect(fetchImpl).toHaveBeenCalledWith(
+      "https://strava.example.test/oauth/deauthorize?access_token=cleanup-access-token",
+      expect.objectContaining({ method: "POST" }),
+    );
   });
 
   it("imports delete jobs, validates malformed jobs and webhook payloads, and handles deauthorize edge cases", async () => {

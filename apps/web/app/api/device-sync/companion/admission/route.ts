@@ -34,7 +34,6 @@ export const POST = withJsonError(async (request: Request) => {
     await requireHostedCompanionMemberIdFromRequest({
       prisma: getPrisma(),
       request,
-      suppressSignupWelcome: true,
       ...(timeZone ? { timeZone } : {}),
     });
   } catch (error) {
@@ -45,9 +44,7 @@ export const POST = withJsonError(async (request: Request) => {
 });
 
 const COMPANION_ADMISSION_ACCESS_RECOVERY_CODES = new Set([
-  "HOSTED_AUTO_PULSE_TRIAL_BLOCKED",
-  "HOSTED_AUTO_PULSE_TRIAL_DISABLED",
-  "HOSTED_PULSE_TRIAL_ALREADY_REDEEMED",
+  "HOSTED_STARTER_USAGE_ENROLLMENT_BLOCKED",
 ]);
 const COMPANION_ADMISSION_PUBLIC_RECOVERY_CODES = new Set([
   "AUTH_REQUIRED",

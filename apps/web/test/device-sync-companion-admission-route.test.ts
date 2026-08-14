@@ -79,7 +79,7 @@ describe("POST /api/device-sync/companion/admission", () => {
     vi.restoreAllMocks();
   });
 
-  it("returns the exact non-identifying v1 response without device ingress", async () => {
+  it("uses canonical welcome defaults and returns the exact non-identifying v1 response without device ingress", async () => {
     const incoming = request({ timeZone: "America/Denver" });
     const response = await route.POST(incoming);
 
@@ -88,9 +88,11 @@ describe("POST /api/device-sync/companion/admission", () => {
     expect(mocks.requireHostedCompanionMemberIdFromRequest).toHaveBeenCalledWith({
       prisma: { label: "test-prisma" },
       request: incoming,
-      suppressSignupWelcome: true,
       timeZone: "America/Denver",
     });
+    expect(
+      mocks.requireHostedCompanionMemberIdFromRequest.mock.calls[0]?.[0],
+    ).not.toHaveProperty("suppressSignupWelcome");
     expect(mocks.createHostedDeviceSyncPublicIngressService).not.toHaveBeenCalled();
   });
 
@@ -105,7 +107,6 @@ describe("POST /api/device-sync/companion/admission", () => {
     expect(mocks.requireHostedCompanionMemberIdFromRequest).toHaveBeenCalledWith({
       prisma: { label: "test-prisma" },
       request: incoming,
-      suppressSignupWelcome: true,
       timeZone: "America/Denver",
     });
   });
@@ -120,7 +121,6 @@ describe("POST /api/device-sync/companion/admission", () => {
     expect(mocks.requireHostedCompanionMemberIdFromRequest).toHaveBeenCalledWith({
       prisma: { label: "test-prisma" },
       request: incoming,
-      suppressSignupWelcome: true,
       timeZone: "America/New_York",
     });
     expect(mocks.createHostedDeviceSyncPublicIngressService).not.toHaveBeenCalled();
@@ -238,15 +238,13 @@ describe("POST /api/device-sync/companion/admission", () => {
   });
 
   it.each([
-    "HOSTED_AUTO_PULSE_TRIAL_BLOCKED",
-    "HOSTED_AUTO_PULSE_TRIAL_DISABLED",
-    "HOSTED_PULSE_TRIAL_ALREADY_REDEEMED",
+    "HOSTED_STARTER_USAGE_ENROLLMENT_BLOCKED",
   ])("maps %s to the public access recovery", async (code) => {
     mocks.requireHostedCompanionMemberIdFromRequest.mockRejectedValueOnce(
       hostedOnboardingError({
         code,
         httpStatus: 409,
-        message: "Internal trial state is not directly actionable here.",
+        message: "Starter usage enrollment is not directly actionable here.",
       }),
     );
 

@@ -6,12 +6,16 @@ import type {
   HostedWorkspaceArtifactPersistInput,
 } from "@murphai/runtime-state/node";
 import type {
+  HostedExecutionResolvedLinqDeliveryRoute,
+} from "@murphai/hosted-execution/contracts";
+import type {
   HostedAssistantDeliveryRecord,
 } from "@murphai/hosted-execution/side-effects";
 
 import type {
   HostedRuntimeEffectsPort,
   HostedRuntimeArtifactStore,
+  HostedRuntimeLinqRecentInboundEngagementRequest,
 } from "../src/hosted-runtime/platform.ts";
 import type { HostedAssistantRuntimeResolvedConfig } from "../src/hosted-runtime/models.ts";
 
@@ -127,6 +131,33 @@ export function createHostedRuntimeArtifactStoreStub(initialEntries?: Record<str
   };
 }
 
+export function buildHostedRuntimeResolvedLinqRoute(
+  request: Partial<Pick<
+    HostedRuntimeLinqRecentInboundEngagementRequest,
+    | "directRecipientPhoneNumber"
+    | "fromPhoneNumber"
+    | "target"
+    | "targetKind"
+  >>,
+  overrides: Partial<HostedExecutionResolvedLinqDeliveryRoute> = {},
+) {
+  const target = request.target?.trim() || "linq_chat_123";
+  const targetKind = request.targetKind === "participant"
+    ? "participant"
+    : "thread";
+  return {
+    conversationThreadId: null,
+    directRecipientPhoneNumber:
+      request.directRecipientPhoneNumber?.trim()
+      || (targetKind === "participant" ? target : "+15550001"),
+    fromPhoneNumber: request.fromPhoneNumber?.trim() || "+15550002",
+    target,
+    targetKind,
+    threadIsDirect: true,
+    ...overrides,
+  } as const;
+}
+
 export function createHostedRuntimeEffectsPortStub(
   overrides: Partial<HostedRuntimeEffectsPort> = {},
 ): HostedRuntimeEffectsPort {
@@ -139,9 +170,12 @@ export function createHostedRuntimeEffectsPortStub(
       return null;
     },
     async assertLinqRecentInboundEngagement(request) {
-      return request.authorityCheckOnly === true
-        ? {}
-        : { providerDispatchClaimed: true };
+      return {
+        ...(request.authorityCheckOnly === true
+          ? {}
+          : { providerDispatchClaimed: true }),
+        resolvedRoute: buildHostedRuntimeResolvedLinqRoute(request),
+      };
     },
     async recordLinqDeliveryOutcome() {},
     async sendEmail() {},

@@ -29,10 +29,15 @@ import {
   findCanonicalAssistantCronRecordInList,
   listCanonicalAssistantCronRecords,
   projectCanonicalAssistantCronJob,
+  readCanonicalAssistantCronAutomationByRelativePath,
+  resolveCanonicalAssistantCronNextDeliverableOccurrenceProjection,
   resolveCanonicalAssistantCronJobId,
   resolveCanonicalRuntimeState,
   type ResolvedAssistantCronJob,
 } from './cron/canonical-jobs.ts'
+import type {
+  AssistantCronOccurrenceUnverifiedReason,
+} from './cron/timing-verification.js'
 import {
   assertAssistantCronJobRunnableInRuntime,
   buildRunnableAssistantCronJobProjection,
@@ -98,6 +103,11 @@ export {
   repairPendingAssistantCronDeliveries,
 }
 export { listAssistantCronPendingDeliveryIntentIds } from './cron/delivery-reconciliation.ts'
+export {
+  resolveAssistantCronDefaultTimeZone,
+  resolveAssistantCronDefaultTimeZoneProjection,
+  resolveAssistantCronVaultTimeZone,
+} from './cron/canonical-jobs.ts'
 export { addAssistantCronJob, installAssistantCronPreset, upsertAssistantCronAutomation }
 export type {
   AddAssistantCronJobInput,
@@ -186,7 +196,7 @@ async function projectResolvedAssistantCronJob(
   const paths = resolveAssistantStatePaths(vault)
   const [localStore, canonicalRecords, runtimeStore] = await Promise.all([
     readAssistantCronStore(paths),
-    listCanonicalAssistantCronRecords(vault),
+    listCanonicalAssistantCronRecords(vault, ['active', 'paused']),
     readAssistantCronCanonicalRuntimeStore(paths),
   ])
   const visibleLocalStore = buildVisibleLocalAssistantCronStore(localStore)
@@ -244,6 +254,40 @@ export async function getAssistantCronJob(
   job: string,
 ): Promise<AssistantCronJob> {
   return (await projectResolvedAssistantCronJob(vault, job)).job
+}
+
+export async function getAssistantCronAutomationTimingProjection(
+  vault: string,
+  relativePath: string,
+  defaultTimeZone: string,
+): Promise<{
+  job: AssistantCronJob
+  nextOccurrenceAt: string | null
+  occurrenceUnverifiedReason: AssistantCronOccurrenceUnverifiedReason | null
+  occurrenceVerified: boolean
+}> {
+  const paths = resolveAssistantStatePaths(vault)
+  const [source, runtimeStore] = await Promise.all([
+    readCanonicalAssistantCronAutomationByRelativePath({
+      defaultTimeZone,
+      relativePath,
+      vault,
+    }),
+    readAssistantCronCanonicalRuntimeStore(paths),
+  ])
+  const runtimeState = resolveCanonicalRuntimeState(source, runtimeStore)
+  const occurrenceProjection =
+    resolveCanonicalAssistantCronNextDeliverableOccurrenceProjection(
+      source,
+      runtimeState,
+      new Date(),
+    )
+  return {
+    job: projectCanonicalAssistantCronJob({ source, runtimeState }),
+    nextOccurrenceAt: occurrenceProjection.nextOccurrenceAt,
+    occurrenceUnverifiedReason: occurrenceProjection.unverifiedReason,
+    occurrenceVerified: occurrenceProjection.verified,
+  }
 }
 
 export async function getAssistantCronJobTarget(

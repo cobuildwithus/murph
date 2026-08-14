@@ -28,6 +28,123 @@ Runner bundle assembly esbuild-bundles two boot-critical surfaces with byte budg
 The device-sync package boundary suite also walks the static source graph from the runner's runtime-config entrypoint and rejects provider runtime modules, importer modules, and the Junction SDK. This focused gate catches boot-closure ownership regressions before the packed-bundle guard validates the final esbuild metafile.
 Hosted assistant delivery recovery now relies on committed side-effect state inside the encrypted workspace and the web-owned hosted workspace checkpoint.
 
+## Browser Vault Shard Rollout
+
+Deploy the Web dual reader first. It advertises fixed `core`, `metrics-index`,
+and `labs` demand plus explicit metric-bucket IDs only when the browser supports
+gzip decompression, accepts the legacy encrypted monolith, and retries that
+legacy transport when an older Web deployment ignores a missing-shard request.
+Next deploy the Worker and runner bundle together with
+`container_rollout=immediate`; the generation-10 runner rebuilds the replica
+while the Worker atomically publishes the legacy monolith, the three fixed
+children, and all 32 deterministic metric buckets. Each child independently
+uses identity or gzip encoding before encryption, whichever is smaller. Old Web
+and old browser clients omit the capability and continue to receive the
+monolith.
+
+Do not roll the Worker or runner below this release after the first
+generation-10 bucketed ref is written. That write establishes the bucket-aware
+Worker and producer as a hard rollback floor: an older cleanup alarm can consume
+the sole top-level orphan candidate without deleting its child objects, leaving
+those encrypted objects with no durable cleanup owner. The safe recovery is a
+forward fix on this Worker/runner bundle or newer. New Web still accepts an
+older Worker legacy response during the pre-write deploy window, but sharded
+responses always require an exact ref and authenticated child AAD match.
+
+Browser Vault orphan cleanup records only the top-level object candidate. An
+older Worker therefore cannot mistake a current child for an orphan. Current
+cleanup deletes the deterministic `.core`, `.metrics-index`, `.labs`, and 32
+metric-bucket siblings when their noncurrent top-level candidate becomes
+eligible. Because an older cleanup implementation cannot later rediscover
+those siblings after consuming the candidate, it is not an eligible rollback
+after bucketed publication. If an older Web restore is required, first stop
+generation-10 replica production, wait for every admitted Browser Vault direct
+PUT to drain, and keep the bucket-aware Worker/runner at or above the hard floor
+while the Web restore serves the retained legacy monolith. Keep producing that
+monolith until the dual-reader Web release has remained the production and
+rollback floor for at least 30 days, matching
+`HOSTED_APP_SESSION_MAX_AGE_SECONDS` in Web. After that authenticated
+open-browser window has drained and rollback artifacts below the reader floor
+are retired, a separate release may remove the legacy producer/ref/reader
+together.
+
+Browser Vault publication also participates in account-deletion draining. The
+UserRunner admits each publication under the exact runtime write fence, all 36
+bounded-concurrency object writes settle before that admission is released, and
+deletion stops the runner before inspecting the durable admission. If the
+publishing request died without releasing it, deletion establishes a 60-second
+post-stop drain before its final prefix sweep; this is longer than the Workers
+30-second post-disconnect extension window and prevents a late encrypted object
+from recreating member data after deletion completes.
+
+## Vault-Share Delivery Contract Rollout
+
+Deploy the Cloudflare Worker and runner bundle first with
+`container_rollout=immediate`, and require managed-container smoke to report the
+exact new bundle fingerprint before deploying Web's required
+`sourceWorkspaceVersion` parser, absolute effect-deadline parser, and conditional
+replacement writer. The runner also marks only actual Web responses so a
+proxy-local response cannot release publication ownership early. Old Web
+ignores the additive runner request fields, so the first phase keeps projection
+working; the source-version fence and shared deadline become authoritative only
+after Web deploys. Do not deploy Web first: an older runner omits required
+delivery fields and its projection fails closed, retaining the existing
+device-sync continuation until a compatible runner handles it.
+
+After both deploys, checkpoint one device-sync update with an active share,
+confirm the replacement is readable through the ordinary group shared-data
+path, and confirm the managed runner fingerprint still matches the deployed
+bundle. Once Web requires the field, the compatible runner is the rollback
+floor. Roll back Web before the runner only if necessary; otherwise forward-fix
+the pair. Do not add a second retry owner or compatibility watermark.
+
+## Generic Group-Email Cutover
+
+The newsletter deletion is a hard public-runtime and private-skill cutover.
+Old runners interpret an untagged `group-health-newsletter` record as email, so
+they must never claim an automation created or edited by the new ordinary
+recipe skill.
+
+Suspend hosted automation wake dispatch before either producer changes and let
+in-flight newsletter turns finish. Keep dispatch suspended while deploying the
+matching Web receiver, then the Cloudflare Worker and runner with
+`container_rollout=immediate`. Prove the exact runner-bundle fingerprint and
+record that public artifact as the hard rollback floor before publishing the
+private skill bundle or resuming wakes. The private skill must not deploy
+earlier. After it is published, rollback below that public floor or to the old
+skill is unsupported; use a forward fix.
+
+New outbox and HTTP writes use only generic group-email keys and proof fields.
+The current runner retains bounded readers for old persisted parents and
+instructions, but no old runner, Worker, or Web parser is part of the supported
+window. Remove the readers after legacy recipes are rewritten, legacy parents
+and children drain, and the retired mailbox inventory is empty.
+
+## Provider Media-Effect Rollout
+
+The first runner that writes the true-only physical media-owner fact inside a
+persisted provider-message effect must deploy with
+`container_rollout=immediate`. Require managed-container smoke to report the
+exact new runner-bundle fingerprint before admitting image or voice delivery.
+There is no Web deployment dependency.
+
+`HostedUserRunner` constructs its state store before creating any invocation,
+workspace snapshot, or container service. This release advances that Durable
+Object state to runner schema version 16 at construction. A version-15 Worker
+rejects version 16 before it can wake a runner or read an encrypted workspace,
+so it cannot send a marked record through the legacy strict outbox parser and
+quarantine it during idle snapshot maintenance.
+
+Runner schema version 16 is a hard Cloudflare/runner rollback floor after the
+deploy reaches a member's Durable Object. Do not roll Worker or runner below
+that floor; use a forward fix on version 16 or newer. Production preflight keeps
+the immediate-container requirement fail closed, and the existing bundle
+fingerprint admission prevents a stale warm runner from becoming the first
+writer. After deployment, prove the managed runner fingerprint, send one
+image-plus-link and one text-plus-voice response, checkpoint both workspaces,
+and confirm Workers Observability contains no outbox quarantine or runner schema
+version failures.
+
 ## Health-Data Consent Stop-Target Rollout
 
 Deploy the Cloudflare Worker that retains an exact user-control stop target
@@ -90,9 +207,13 @@ Before deploying the Worker version that introduces
 - the already-required `LINQ_API_TOKEN`.
 
 Deploy Cloudflare only; no Web or database migration is involved. Wrangler
-migration `v4` creates the SQLite Durable Object namespace and the generated
-config installs the five-minute cron. After deployment, confirm one scheduled
-invocation records an `ok` sample without a Linq send under healthy metrics.
+migration `v4` creates the database-health SQLite Durable Object namespace,
+migration `v5` creates the independent device-webhook Queue-health namespace,
+and the generated config installs the shared five-minute cron. The Queue-health
+owner reuses these two operator chats and the Linq token, but it has separate
+incident, pending-message, and pacing state and never reads Postgres. After
+deployment, confirm one scheduled invocation records healthy database and Queue
+observations without a Linq send.
 Then use the test-only fake-provider coverage for threshold and delivery proof;
 do not induce a production database failure or mutate a real counter for smoke.
 Confirm Workers Observability contains no configuration or collection failure
@@ -213,6 +334,62 @@ The prior bundle remains a safe rollback only before the first card-bearing
 value exists. After that point, the new bundle is the hard rollback floor for
 workspaces, checkpoints, retained outbox intents, and side effects. Forward-fix
 on that bundle or newer rather than restoring an older reader.
+
+## Exercise Routine Response-Card Rollout
+
+The `exercise_routine` discriminator extends the strict assistant outbox card
+union. Deploy the Cloudflare Worker operation allowlist before the new runner can
+emit `sendRichMessage`, then use `container_rollout=immediate`. An older Worker
+returns a non-Telegram policy response. The new runner treats that result as
+terminal ambiguity and does not send text fallback. Before routine traffic,
+require managed-container smoke to report the exact new runner-bundle fingerprint.
+
+The prior runner remains safe only before the first routine-card outbox intent
+is written. After that write, the new runner bundle is a hard rollback floor for
+that workspace because an older strict reader can quarantine the retained
+intent. Forward-fix on this bundle or newer. Monitor Workers Observability for
+`outbox.intent.quarantined`, strict outbox parse failures, and stale runner
+fingerprints after rollout.
+
+## Model-Authored Telegram Rich-Content Rollout
+
+The `telegram_rich_content` discriminator extends the same strict assistant
+outbox card union. The Worker already allows `sendRichMessage`, so this release
+needs no new provider operation or Worker egress rule. Deploy the new runner
+bundle with `container_rollout=immediate`, and require managed-container smoke
+to report its exact fingerprint before the model can attach this card.
+
+The prior runner remains safe only before the first rich-content card intent is
+written. After that write, the new runner bundle is a hard rollback floor for
+that workspace because an older strict reader can quarantine the retained
+intent. Forward-fix on this bundle or newer. Monitor `outbox.intent.quarantined`,
+strict outbox parse failures, and stale runner fingerprints after rollout.
+
+Telegram daily-nutrition Rich Messages reuse the existing queryless response-
+card image route. Keep that Web route available while sent Telegram or Linq
+cards can still fetch their immutable image.
+
+## Private Completion Continuity Rollout
+
+Deploy Web first, then deploy the Cloudflare Worker and runner bundle together
+with `container_rollout=immediate`. Only authenticated private-completion
+intents write the new strict outbox continuity fields; generic notifications
+remain compatible. An old runner cannot parse a retained new-format private
+intent, so the first such write is the rollback floor for that workspace.
+Forward-fix on this bundle or newer after the floor is crossed.
+
+Recent production evidence showed six total Assistant Ask completion mailbox
+items—an upper bound on private completions—and no matching private-completion
+or outbox-quarantine runtime-log events over 14 days. Recent successful
+protected deploy workflows completed in 8–13 minutes;
+immediate rollout makes that one workflow the expected compatibility window.
+Require managed-container smoke to report the new runner fingerprint, monitor
+`outbox.intent.quarantined` and strict outbox parse failures, then verify one
+same-channel private completion is delivered exactly once, never to the group,
+and is visible before the next ordinary direct turn, whether that consumer is
+an attended member turn, an exact-session scheduled occurrence, or an
+exact-session Assistant Ask continuation, and before a direct exact notification
+can append newer ordinary-session history.
 
 ## Audience-Key Rollout
 
@@ -426,27 +603,61 @@ New runners may send an optional `lineLookupKey` solely for post-send
 line-health attribution; old Web ignores it, and new Web retains its existing
 fallback when an older supported runner omits it.
 
+### Canonical Linq Send-Route Rollout
+
+Deploy Web first with the complete ephemeral `resolvedRoute` response while it
+continues returning the deprecated `threadIsDirect` and conditional
+`targetOverride` fields. The existing runtime ignores the additive route and
+continues using the legacy fields, so this short reader-first window preserves
+ordinary delivery. Then deploy Cloudflare and the runner bundle immediately
+with `container_rollout=immediate`; the new runtime requires `resolvedRoute`,
+uses it as the sole provider target/recipient/sender/directness source, and
+reasserts the exact value before capability lookup and provider dispatch.
+
+Do not deploy the new runtime before Web. It intentionally fails closed when
+the canonical route is absent. If rollback is required during the compatibility
+window, roll Cloudflare back first and Web second. Keep the legacy Web fields
+until a later independently reviewed cleanup after the old runtime is outside
+the rollback window; no database migration or persisted runtime-state floor is
+introduced by this protocol.
+
+After rollout, prove one authorized private scheduled native card, one ordinary
+direct reply, one group reply, and one private Assistant Ask continuation.
+Confirm no canonical-route protocol-unavailable or route-mismatch error appears
+for those controlled sends.
+
 ## Group Usage Projection Privacy and Monthly Sponsorship Rollout
 
-The group-tool `read_usage` parser temporarily accepts the exact current
-privacy-safe response and the immediately preceding exact response. This
-read-side tolerance is only the first deployment step.
+The current group-tool `read_usage` response is
+`{fundingNeeded,fundingUrl,includedUsageUsedPercent}`. The parser requires and
+preserves the bounded included-usage aggregate on that current successful shape
+and remains strict about unknown or private fields. It rejects the newer
+funding-only shape instead of retaining a field-specific rollout compatibility
+path. The existing sponsorship-era response branches remain legacy-facing only.
 
 1. Deploy the Cloudflare Worker and runner bundle first with
    `container_rollout=immediate`. Require managed-container smoke to report the
    new bundle fingerprint and drain older warm runners. The compatible runtime
-   accepts the current `{fundingNeeded,fundingUrl}` response, strips the
-   immediately preceding optional `sponsorshipStatus` field, and still accepts
+   accepts the current response, strips the immediately preceding optional
+   `sponsorshipStatus` field, and still accepts
    the older `{capacityState,fundingUrl,periodEnd,remainingPercent?}` response.
    It derives only whether funding is needed from that oldest shape and
    discards period, percentage, and funding-setup fields.
 2. Apply the additive capped-sponsorship migration, then deploy the compatible
    Web release. Confirm both the migration and new Web have converged before
-   enabling monthly authorization creation or automatic refill admission. Web
-   now emits only `{fundingNeeded,fundingUrl}`.
-3. Smoke group reads with and without an active automatic sponsor. The runtime
-   and assistant may learn only funding urgency and the first-party capability;
-   funding setup and quantitative fields must not reappear.
+   enabling monthly authorization creation or automatic refill admission.
+3. Smoke group reads with and without an active automatic sponsor and confirm
+   the runtime learns only funding urgency, the first-party capability, and the
+   bounded included-usage aggregate. Funding setup and other quantitative
+   fields must not reappear.
+
+The `includedUsageUsedPercent` producer, strict reader, and assistant policy
+ship as one product change. There is no strip-only reader phase or rollout-only
+feature flag. A mixed-version Web/runner window may temporarily make the strict
+read fail; that availability tradeoff is accepted. Deploy Web and Cloudflare as
+close together as practical, require managed-container smoke to prove the new
+runner fingerprint, then run a controlled explicit group usage-status question.
+Roll back both sides to a schema-compatible pair if rollback is required.
 
 The first monthly authorization is the old-Web rollback floor. The preceding
 Web reconciliation code cannot activate that authorization, so after the first
@@ -456,12 +667,14 @@ that schema and compatible Web/runtime bundle. Before the first authorization,
 Web may be rolled back only while monthly creation and refill admission remain
 disabled and the additive schema is retained.
 
-The legacy reader exists only for the bounded cutover window. Remove it after
+The legacy-shape reader branches exist only for their bounded cutover windows.
+Remove them after
 old Web is neither routable nor rollback-eligible, all pre-reader warm runners
 have drained, and production evidence shows no preceding-shape responses. This
 is a narrow read-side seam, not a permanent rollout framework, and it must never
-restore group percentages, period boundaries, or other quantitative accounting
-to runtime or assistant policy.
+restore legacy remaining percentages, period boundaries, or other quantitative
+accounting to runtime or assistant policy outside the reviewed included-usage
+aggregate.
 
 The current projection separates urgency from capability: `fundingNeeded`
 controls assistant-initiated depletion messaging, while a non-null `fundingUrl`
@@ -554,6 +767,30 @@ Set these in the selected GitHub environment as vars:
 - `HOSTED_DATABASE_ALERT_PLANETSCALE_ORGANIZATION`
 - `HOSTED_R2_PRESIGN_ACCOUNT_ID`
 - `HOSTED_R2_PRESIGN_BUCKET_NAME`
+
+`MURPH_ANDROID_APP_ENABLED` is an optional, fail-closed rollout variable. Leave
+it unset until the public Android app and the compatible Web, Worker, and runner
+code are deployed. Private `cobuildwithus/murph-cloud` must map the raw value in
+`.github/workflows/deploy-cloudflare-hosted.yml`, on the existing
+`Prepare deploy artifacts` step's `env`, from
+`${{ vars.MURPH_ANDROID_APP_ENABLED }}` after the `deploy` job selects the
+`preview` or `production` GitHub Environment name from its workflow input. A
+job-level `env` mapping is invalid because selected Environment variables are
+available only after the job starts.
+`production` is the current protected environment, while the absent preview
+value stays fail-closed. Adding either Environment value is inert until this
+private mapping has landed.
+
+To activate, set the exact value `1` in both the matching Vercel Web environment
+and the selected Cloudflare `preview` or `production` GitHub Environment. Deploy
+Web, then deploy Cloudflare with `container_rollout=immediate`. Confirm that the
+generated Wrangler config and deployed Worker binding contain canonical `1`,
+the new runner fingerprint is active, and a direct-assistant turn includes the
+Android Play guidance before checking the Connect Devices card. Disable by
+clearing both values and redeploying both sides; confirm that the generated
+Wrangler config, deployed binding, assistant guidance, and card no longer expose
+the Android journey. A missing value—or any value other than exact `1`—keeps it
+hidden.
 
 `CF_PUBLIC_BASE_URL` is a required non-secret Worker variable as well as the standard deploy-and-smoke target. Private-media capability creation uses that exact deployment origin, and hosted Web validates capabilities against its matching `HOSTED_EXECUTION_CONTROL_URL` origin. Production preflight pins both sides to `https://murph-hosted.cobuildwithus.workers.dev`; preview uses its isolated staging Worker origin and must reject production-origin capabilities. Change the production pin and deploy invariant together before moving the production origin. Runner internal-host requests use Cloudflare Container outbound interception instead of a public Worker callback route.
 `HOSTED_R2_PRESIGN_ACCOUNT_ID` must match `CLOUDFLARE_ACCOUNT_ID`, and `HOSTED_R2_PRESIGN_BUCKET_NAME` must match `CF_BUNDLES_BUCKET`; direct-R2 workspace snapshots upload and restore through presigned URLs and are verified through the canonical Worker R2 binding. Deploy preflight requires the canonical runtime and preview buckets to be ENAM Standard. Local S3-compatible endpoint flags are hosted-local only and must not be set for deploys.
@@ -691,6 +928,9 @@ Set these in the selected GitHub environment as secrets:
 - `MURPH_DATA_API_KEY`
 - `OPENAI_API_KEY`
 
+`CLOUDFLARE_API_TOKEN` must include account-scoped Workers Queues write access
+so deploy automation can create/update the producer, consumer, and DLQ binding.
+
 The protected GitHub Environment may also hold the optional
 `HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_KEYRING_JSON` secret. Deploy
 automation forwards it to the Worker secret store without exposing it to the
@@ -770,15 +1010,6 @@ Core execution tuning:
 - `CF_COMPATIBILITY_DATE` defaults to `2026-03-27`
 - `CF_CONTAINER_INSTANCE_TYPE` defaults to `{"vcpu":2,"memory_mib":6144,"disk_mb":6000}`
 - `CF_CONTAINER_MAX_INSTANCES` defaults to `1000`
-- `CF_CONTAINER_SSH_PUBLIC_KEY` optionally adds one `ssh-ed25519` public key to
-  both runner Container `authorized_keys` entries for Wrangler SSH debugging.
-  The deploy renderer keeps only the key type and key body, so local key
-  comments are not copied into the generated Wrangler config. When this is set,
-  deploy automation also adds the `containers_pid_namespace` compatibility flag
-  so SSH debug sessions do not see unrelated VM processes.
-- `CF_CONTAINER_SSH_KEY_NAME` optionally sets the displayed key name for
-  `CF_CONTAINER_SSH_PUBLIC_KEY`; use a neutral lowercase slug. Defaults to
-  `local-debug`.
 - `CF_MAX_EVENT_ATTEMPTS` defaults to `3`
 - `CF_RETRY_DELAY_MS` defaults to `30000`
 - `CF_WEB_CONTROL_TIMEOUT_MS` defaults to `30000`
@@ -935,6 +1166,7 @@ Opt-in runtime integrations:
 - `HOSTED_EMAIL_FROM_ADDRESS`
 - `HOSTED_EMAIL_LOCAL_PART`
 - `HOSTED_PHYSICAL_NOTES_ENABLED`
+- `MURPH_ANDROID_APP_ENABLED`
 - `LINQ_API_BASE_URL`
 - `TELEGRAM_API_BASE_URL`
 - `TELEGRAM_BOT_USERNAME`
@@ -967,6 +1199,48 @@ Correct the callback hostname before either Web or Worker deployment, and ship
 the Web start/build guard with the Cloudflare preflight change. During a skewed
 rollout the Web start guard still fails closed before OAuth state or provider
 authorization; do not bypass it to recover an invalid split-host environment.
+
+Device-webhook burst transport requires a main Queue and DLQ named from the
+deployed Worker (`<worker>-device-webhooks` and
+`<worker>-device-webhooks-dlq`). Create both before deploying the Worker config.
+Deploy the Queue-capable Worker and the Web batch-admission callback before
+setting Web's comma-separated `HOSTED_DEVICE_WEBHOOK_QUEUE_PROVIDERS` rollout
+gate. Start with one provider and prove Queue depth returns to zero, no DLQ rows
+appear, and Web admission stays serial before expanding. To roll back, clear the
+Web gate first, drain the main Queue through the still-deployed consumer, retain
+the encrypted DLQ for bounded recovery, and remove the consumer/bindings last.
+During Cloudflare automation-key rotation, keep the prior private key as
+`decrypt_only` until Web uses the new public key and both the main Queue and
+encrypted DLQ are proven free of envelopes wrapped to the prior key. Queue/DLQ
+retention is part of the key-retirement floor; elapsed rollout time alone is not
+proof that the old key is safe to disable.
+Prepared webhook parsers have the same retention floor: keep every decoder for
+an emitted `murph.device-sync-prepared-webhook.*` schema readable until both
+Queues and all supported redrive paths are proven free of that version. A
+provider signing-secret or parser rotation needs no overlap for already queued
+events because Web froze verified prepared meaning before provider acknowledgement.
+
+The Queue-health Durable Object reads only native main-Queue and DLQ metrics.
+It pages both configured operator chats immediately when the DLQ is nonempty,
+when the oldest main-Queue message reaches 15 minutes, or after two consecutive
+metric failures. A failed first page retains its exact body and Linq
+idempotency key for the next five-minute check, while hourly pacing applies
+only to successful repeat pages in the same continuously open incident. Keep
+`HOSTED_DATABASE_ALERT_ENABLED=1` and the existing Linq alert secrets configured
+for production so both independent monitors run.
+
+For encrypted DLQ recovery, first fix the admission failure and retain every
+Cloudflare automation private key still referenced by either Queue. Pause the
+main Queue consumer while producers continue writing. Temporarily configure the
+same Worker as the DLQ consumer with batch size 100, five-second batching,
+concurrency one, ten retries, a 30-second retry delay, and the paused main Queue
+as that temporary consumer's dead-letter target. Wait until DLQ metrics report
+zero, remove the temporary DLQ consumer, resume the ordinary main consumer, and
+verify that main depth returns to zero while the DLQ stays empty. Do not purge,
+download, decrypt, or manually copy messages. This redrive acknowledges only
+successful canonical admissions; work that still fails returns encrypted to the
+paused main Queue instead of being deleted. Keep both Queues at the configured
+14-day retention throughout recovery.
 
 Native parser binaries are owned by the runner image and passed to the hosted runtime through explicit parser toolchain config, not deploy-time env overrides. Hosted audio transcription has no in-image model: the parser toolchain points at the Worker-mediated `murph-transcribe.worker` host and the Worker calls the Workers AI `AI` binding (`@cf/openai/whisper-large-v3-turbo`).
 
@@ -1193,6 +1467,13 @@ pnpm --dir apps/cloudflare deploy:preflight
 pnpm --dir apps/cloudflare deploy:artifacts
 ```
 
+To inspect the runner bundle and generated Wrangler config independently:
+
+```bash
+pnpm --dir apps/cloudflare runner:bundle
+pnpm --dir apps/cloudflare deploy:config:render
+```
+
 Local deploys and Docker smoke checks also prepare the stable native base image:
 
 ```bash
@@ -1200,7 +1481,7 @@ pnpm --dir apps/cloudflare runner:docker:base
 ```
 
 That image is prepared in the local Docker cache under the stable GHCR tag
-`ghcr.io/cobuildwithus/murph-cloudflare-runner-base:node24.14.1-codex0.145.0`,
+`ghcr.io/cobuildwithus/murph-cloudflare-runner-base:node24.14.1-codex0.147.0`,
 which is also the final app-layer Dockerfile default. Using the pullable GHCR
 name avoids BuildKit treating the prepared base as a Docker Hub `library/*`
 image during local Wrangler container builds.
@@ -1301,6 +1582,37 @@ The gradual container rollout keeps the production `RunnerContainer` `rollout_ac
 Worker replacement is checkpoint-safe at the runtime fence rather than through rollout timing alone. The snapshot-session handshake has one six-second total deadline; the runtime starts its first exact durable upload-session heartbeat immediately after that response, then keeps serialized attempts on a two-second start-to-start cadence throughout publication. `UserRunner` retains the fence and retries after one second only for that exact attempt and lease generation while its heartbeat is less than 10 seconds old and completion is absent. Successful foreground preemption bypasses this preservation and stops heartbeat liveness before detached cleanup. After Web accepts the checkpoint, the runtime stops heartbeating and best-effort marks completion; marker failure falls back to stale-heartbeat expiry. Other starts remain immediate; live snapshots have no artificial publication deadline, while a dead runtime can defer replacement for the 10-second liveness window plus at most one additional retry interval (one second) after its final heartbeat.
 During gradual rollout, Worker code and runner container state may disagree for the rollout window. A newly deployed Worker version can handle provider egress or internal-host traffic from an already-running warm runner process whose bundle, process env, or provider-credential shape was created before the deploy. Treat this as expected rollout behavior, not proof that traffic is reaching an old Worker version. Any PR that changes a Worker/container contract, runner env shape, hosted provider credential, internal host route, parser/toolchain path, or bundle-owned runtime assumption must document the compatibility window in its PR description and final `DEPLOYMENT CONCERNS:` handoff: whether old containers can safely talk to new Worker code, whether new containers can safely talk to old web/control-plane code, whether `container_rollout=immediate` is required, and which deploy-smoke or Workers Observability checks prove the fleet has converged.
 
+The Junction scalar-timeseries continuation cutover is runner-only and requires
+`container_rollout=immediate`. The preceding production bundle could persist a
+canonical v1 `{v,a,i}` resource envelope in a hosted wake hint or local
+`device_job`; the compatible runner validates that exact envelope, projects
+only `a` into the existing scalar resource coordinate, and writes scalar
+successors. It does not restore phase or completed-resource state. Require
+managed-container smoke to report the compatible runner-bundle fingerprint
+before considering the fleet converged. Once any scalar successor has been
+written, that bundle is the rollback floor because the preceding runner cannot
+read the scalar shape. Keep the narrow v1 reader until separate aggregate proof
+shows no retained hosted wake hint or local device job can contain the envelope;
+without that proof, retain the reader rather than adding a migration or another
+state owner. Vercel/Web has no deployment ordering dependency for this cutover.
+
+The non-expiring Starter plan-usage schema was a bidirectional hard cut between
+Web and the runner bundle. Its production rollout is complete: compatible Web
+and Cloudflare code from the same current public `main` deployed without an
+intentional Render or execution pause, the protected Cloudflare workflow used
+`container_rollout=immediate`, managed-container and live-model smoke proved the
+new runner, and the post-deploy contract-migration workflow applied the
+migration after its declared drain.
+
+Do not remove `HOSTED_EXECUTION_CONTROL_URL` for a future plan-usage rollout.
+The value also authorizes privacy, export, media, and account-deletion paths, so
+removing it is not a route-scoped runtime-start pause and would disable
+unrelated operations. The migrated ledger is now a forward-only floor: repair
+or redeploy a compatible current Web/runner pair. Neither pre-Starter plane is
+a resumable target against the migrated database. The one-time legacy Stripe
+object drain is complete; the remaining delayed-event compatibility and final
+removal gate are owned by `agent-docs/product-specs/starter-usage.md`.
+
 The accepted group-message participant rollout is Web-first. Deploy the Web
 release that accepts both new exact `groupRequester` / `participant` evidence
 and the legacy mailbox / self-opt-out fallbacks before deploying the Worker and
@@ -1313,6 +1625,46 @@ additive source field, but conversation and exact participant authorization
 remain available. After convergence, smoke one profile-name label, one
 unverified owner-contact label, and one participant-scoped action selected by
 an opaque accepted-message ref.
+
+Member-reported daily metrics add the
+`health.daily-metric.reported` Web producer to that existing exact-participant
+path. An old runtime quarantines this kind and can stop its ordered system lane,
+so this release is consumer-first:
+
+1. Deploy Cloudflare and the runner with `container_rollout=immediate`. Do not
+   deploy Web until managed-container smoke reports the exact new runner-bundle
+   fingerprint and the immediate rollout has converged across eligible runtime
+   targets.
+2. Deploy Web, then run one synthetic granted `steps-days.v0` correction. The
+   action must return `accepted`; the member's system-lane consumed counter and
+   workspace checkpoint must advance; a later exact-scope `read_shared` must
+   retain the device record and add one `Manual` record. Confirm aggregate
+   runtime evidence contains no `unsupported_kind` route and no unconsumed
+   `health.daily-metric.reported` item behind its system-lane counter.
+3. The first Web producer enablement or imported report makes this exact
+   contracts/query/runner bundle a hard rollback floor. The canonical
+   observation permanently retains the strict `qualifiers` field and its
+   mailbox causal sequence after the transient mailbox item drains. Web may
+   roll back first to stop new reports, but never roll the runner below this
+   floor afterward; forward-fix on this bundle or newer. A pre-floor runner can
+   reject the persisted event while scanning the vault and cannot preserve the
+   report ordering during projection rebuild.
+
+If the post-commit signal fails, keep the accepted mailbox write and let the
+existing scheduled `/api/internal/device-sync/recovery-sweep` handoff select and
+signal the exact pending item. For a bounded manual repair, keep or redeploy the
+compatible runner, roll Web back to stop new production, invoke that existing
+recovery sweep once, and verify the system-lane counter advances before
+redeploying Web. Do not delete the item, edit a mailbox counter, send an
+unrelated member message, or add another repair queue.
+
+After a Web rollback, keep the exact compatible runner fingerprint and prove
+one existing meal-photo import, one ordinary conversation, and one projection
+rebuild against a vault containing a consumed report. The Manual correction
+must remain authoritative, existing canonical imports must still scan the
+strict event ledger, and restoring compatible Web must require no event rewrite
+or migration. Mailbox drain is progress evidence only; it never relaxes this
+persisted-state rollback floor.
 
 The scheduled Linq authority release has a Web-first hard gate. Deploy and
 verify Web's concrete-target/directness response before deploying Cloudflare
@@ -1419,39 +1771,19 @@ Optional smoke env:
 
 If neither managed-container smoke nor `HOSTED_EXECUTION_SMOKE_USER_ID` is configured, smoke stops after the public banner and health checks.
 
-## Wrangler SSH Debugging
+## Container Operator Access
 
-Wrangler SSH for Cloudflare Containers is an operator debug path only. It does
-not expose a public port, but it does let Cloudflare account writers connect to
-running Container instances when their local private key matches a public key in
-the rendered Container `authorized_keys`.
+Wrangler SSH is intentionally disabled for both runner Container classes. The
+checked-in scaffold and generated deploy config must set `ssh.enabled` to
+`false`, contain no `authorized_keys`, and expose no environment input that can
+re-enable the capability. This explicit setting is required because Cloudflare
+enables Wrangler SSH by default.
 
-Use a local `ssh-ed25519` key. If you create a dedicated key, use a neutral
-comment and keep the private key outside source control:
+Keep `containers_pid_namespace` enabled independently of SSH. Murph's current
+compatibility date predates Cloudflare's default for isolated Container PID
+namespaces, and removing the flag would change process topology and widen
+`/proc` visibility rather than merely remove operator access.
 
-```bash
-ssh-keygen -t ed25519 -C murph-cloudflare-containers -f <SSH_PRIVATE_KEY>
-ssh-add <SSH_PRIVATE_KEY>
-```
-
-Before rendering or deploying, export the public key without the local comment:
-
-```bash
-export CF_CONTAINER_SSH_PUBLIC_KEY="$(awk '{print $1 \" \" $2}' < <SSH_PUBLIC_KEY>)"
-export CF_CONTAINER_SSH_KEY_NAME=local-debug
-pnpm --dir apps/cloudflare runner:bundle
-pnpm --dir apps/cloudflare deploy:config:render
-```
-
-`pnpm --dir apps/cloudflare deploy:worker` also renders the config, so keep
-those env vars present for the deploy that should carry the debug key. After
-deploying, find a running instance and connect:
-
-```bash
-pnpm --dir apps/cloudflare exec wrangler containers instances <APPLICATION>
-pnpm --dir apps/cloudflare exec wrangler containers ssh <INSTANCE_ID>
-```
-
-SSH does not wake stopped Containers and does not keep an otherwise idle
-Container alive. Unset `CF_CONTAINER_SSH_PUBLIC_KEY` and redeploy when the debug
-window is over.
+Use bounded structured runtime logs, Durable Object status, Container
+application and instance inventory, and the managed deploy smoke for production
+diagnosis. Do not add an operator shell or per-deploy SSH key escape hatch.

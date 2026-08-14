@@ -2,10 +2,17 @@ import { createHash } from 'node:crypto'
 
 import { getAssistantBindingContextLines } from '../bindings.js'
 import {
+  readCodexNonEmptyString,
+  readCodexRecord,
+  readCodexServerNotification,
+  readCodexThreadTokenUsage,
+  type CodexThreadTokenUsage,
+  type CodexTokenUsageBreakdown,
+} from '../../assistant-codex/app-server-protocol.js'
+import {
   normalizeNullableString,
 } from '../shared.js'
 import {
-  supportsAssistantNativeResume,
   type AssistantProviderConfig,
 } from '@murphai/operator-config/assistant/provider-config'
 import {
@@ -54,19 +61,7 @@ function requireAssistantProviderUserPrompt(
 function hasAssistantProviderUsableNativeResume(
   input: AssistantProviderTurnExecutionInput,
 ): boolean {
-  const resumeCodexThreadId = normalizeNullableString(
-    input.resume?.codexThreadId,
-  )
-  if (!resumeCodexThreadId) {
-    return false
-  }
-
-  if (!supportsAssistantNativeResume(input.providerConfig)) {
-    return false
-  }
-
-  void resumeCodexThreadId
-  return true
+  return normalizeNullableString(input.resume?.codexThreadId) !== null
 }
 
 export type AssistantProviderHistoryMode =
@@ -312,216 +307,122 @@ export function extractCodexAssistantProviderUsage(input: {
   rawEvents: readonly unknown[]
   serviceTier?: AssistantProviderServiceTier | null
 }): AssistantProviderUsage {
-  const completionEvent = findAssistantCodexCompletionEvent(input.rawEvents)
-  const completionRecord = completionEvent ? readAssistantProviderRecord(completionEvent) : null
-  const completionParams = readAssistantProviderRecord(completionRecord?.params)
-  const completionTurn =
-    readAssistantProviderRecord(completionParams?.turn) ??
-    readAssistantProviderRecord(completionRecord?.turn)
-  const completionMetrics =
-    readAssistantProviderRecord(completionParams?.metrics) ??
-    readAssistantProviderRecord(completionRecord?.metrics)
-  const turnId = readAssistantCodexTurnIdFromCompletion({
-    completionParams,
-    completionRecord,
-    completionTurn,
-  })
-  const usageSource = resolveAssistantProviderUsageSource({
-    completionMetrics,
-    completionParams,
-    completionRecord,
-    completionTurn,
+  const completion = findAssistantCodexCompletionEvent(input.rawEvents)
+  const completionTurn = completion
+    ? readCodexRecord(completion.params.turn)
+    : null
+  const turnId = readCodexNonEmptyString(completionTurn?.id)
+  const usageSource = findAssistantCodexThreadTokenUsageSource({
     rawEvents: input.rawEvents,
     turnId,
   })
-  const usageRecord = usageSource?.record ?? null
-  const sanitizedRawUsageJson = sanitizeAssistantProviderRawUsageJson(
-    usageRecord ?? completionRecord,
-  )
+  const usage = usageSource?.record ?? null
+  const sanitizedRawUsageJson = usage ? sanitizeCodexUsage(usage) : null
   const turnProfileJson = buildAssistantCodexTurnProfileJson({
     rawEvents: input.rawEvents,
     turnId,
   })
-  const inputTokens = readAssistantProviderInteger(
-    usageRecord ?? completionRecord,
-    'inputTokens',
-    'input_tokens',
-    'prompt_tokens',
-    'promptTokens',
-  )
-  const outputTokens = readAssistantProviderInteger(
-    usageRecord ?? completionRecord,
-    'outputTokens',
-    'output_tokens',
-    'completion_tokens',
-    'completionTokens',
-  )
-  const providerName =
-    input.providerConfig.target.kind === 'codex-cli'
-      ? input.providerConfig.target.modelProvider
-      : null
+  const providerName = input.providerConfig.target.modelProvider
   const requestedModel = input.providerConfig.target.model
-  const servedModel = readAssistantProviderString(
-    completionTurn?.model,
-    completionRecord?.model,
-    completionRecord?.model_id,
-    completionRecord?.modelId,
-  ) ?? requestedModel
+  const servedModel = findAssistantCodexCurrentTurnReroutedModel({
+    rawEvents: input.rawEvents,
+    turnId,
+  }) ?? requestedModel
 
   return {
     apiKeyEnv: null,
     baseUrl: null,
-    cacheWriteTokens: readAssistantProviderInteger(
-      usageRecord ?? completionRecord,
-      'cacheWriteTokens',
-      'cache_write_tokens',
-    ),
-    cachedInputTokens: readAssistantProviderInteger(
-      usageRecord ?? completionRecord,
-      'cachedInputTokens',
-      'cached_input_tokens',
-    ) ?? readAssistantProviderNestedInteger(
-      usageRecord ?? completionRecord,
-      'input_tokens_details',
-      'cached_tokens',
-    ) ?? readAssistantProviderNestedInteger(
-      usageRecord ?? completionRecord,
-      'prompt_tokens_details',
-      'cached_tokens',
-    ),
-    inputTokens,
-    outputTokens,
-    providerMetadataJson: completionRecord ?? null,
+    cacheWriteTokens: usage?.cacheWriteInputTokens ?? null,
+    cachedInputTokens: usage?.cachedInputTokens ?? null,
+    inputTokens: usage?.inputTokens ?? null,
+    outputTokens: usage?.outputTokens ?? null,
+    providerMetadataJson: completion ?? null,
     providerName,
-    providerRequestId: readAssistantProviderString(
-      completionRecord?.request_id,
-      completionRecord?.requestId,
-      completionTurn?.id,
-      completionRecord?.id,
-    ),
+    providerRequestId: turnId,
     rawUsageJson: sanitizedRawUsageJson,
     rawUsageJsonHash: sanitizedRawUsageJson
       ? hashAssistantProviderStableJson(sanitizedRawUsageJson)
       : null,
-    reasoningTokens: readAssistantProviderInteger(
-      usageRecord ?? completionRecord,
-      'reasoningTokens',
-      'reasoning_tokens',
-      'reasoningOutputTokens',
-    ) ?? readAssistantProviderNestedInteger(
-      usageRecord ?? completionRecord,
-      'output_tokens_details',
-      'reasoning_tokens',
-    ),
+    reasoningTokens: usage?.reasoningOutputTokens ?? null,
     requestedModel,
     servedModel,
     tokenPricingBasis: resolveCodexAssistantProviderTokenPricingBasis({
-      model: requestedModel,
+      model: servedModel,
       modelProvider: providerName,
       serviceTier: input.serviceTier ?? null,
     }),
-    totalTokens:
-      readAssistantProviderInteger(usageRecord ?? completionRecord, 'totalTokens', 'total_tokens')
-      ?? resolveAssistantProviderTotalTokens({
-        inputTokens,
-        outputTokens,
-      }),
+    totalTokens: usage?.totalTokens ?? null,
     turnProfileJson,
-    usageExtractionSourcePath: usageSource?.sourcePath ?? (completionRecord ? 'completion' : null),
+    usageExtractionSourcePath: usageSource?.sourcePath ?? null,
     usageExtractionVersion: CODEX_USAGE_EXTRACTION_VERSION,
   }
 }
 
-function resolveAssistantProviderUsageSource(input: {
-  completionMetrics: Record<string, unknown> | null
-  completionParams: Record<string, unknown> | null
-  completionRecord: Record<string, unknown> | null
-  completionTurn: Record<string, unknown> | null
+function findAssistantCodexCurrentTurnReroutedModel(input: {
   rawEvents: readonly unknown[]
   turnId: string | null
-}): { record: Record<string, unknown>; sourcePath: string } | null {
-  const candidates = [
-    {
-      record: readAssistantProviderRecord(input.completionParams?.usage),
-      sourcePath: 'params.usage',
-    },
-    {
-      record: readAssistantProviderRecord(input.completionTurn?.usage),
-      sourcePath: input.completionParams?.turn ? 'params.turn.usage' : 'turn.usage',
-    },
-    {
-      record: readAssistantProviderRecord(input.completionMetrics?.usage),
-      sourcePath: input.completionParams?.metrics ? 'params.metrics.usage' : 'metrics.usage',
-    },
-    {
-      record: readAssistantProviderRecord(input.completionRecord?.usage),
-      sourcePath: 'usage',
-    },
-  ]
+}): string | null {
+  let currentTurnId = input.turnId
+  let currentTurnStarted = false
+  let servedModel: string | null = null
 
-  for (const candidate of candidates) {
-    if (hasAssistantProviderUsageTokenFields(candidate.record)) {
-      return {
-        record: candidate.record!,
-        sourcePath: candidate.sourcePath,
+  for (const rawEvent of input.rawEvents) {
+    const notification = readCodexServerNotification(rawEvent)
+    if (!notification) {
+      continue
+    }
+
+    if (notification.method === 'turn/started') {
+      const startedTurnId = readCodexNonEmptyString(
+        readCodexRecord(notification.params.turn)?.id,
+      )
+      if (startedTurnId) {
+        currentTurnId ??= startedTurnId
+        currentTurnStarted = startedTurnId === currentTurnId
+      }
+      continue
+    }
+
+    if (!currentTurnStarted) {
+      continue
+    }
+
+    if (notification.method === 'model/rerouted') {
+      servedModel = readCodexNonEmptyString(notification.params.toModel)
+        ?? servedModel
+      continue
+    }
+
+    if (notification.method === 'turn/completed') {
+      const completedTurnId = readCodexNonEmptyString(
+        readCodexRecord(notification.params.turn)?.id,
+      )
+      if (completedTurnId === currentTurnId) {
+        break
       }
     }
   }
 
-  return findAssistantCodexThreadTokenUsageSource({
-    rawEvents: input.rawEvents,
-    turnId: input.turnId,
-  })
+  return servedModel
 }
 
-function hasAssistantProviderUsageTokenFields(
-  record: Record<string, unknown> | null,
-): boolean {
-  if (!record) {
-    return false
-  }
-
-  return (
-    readAssistantProviderInteger(
-      record,
-      'cacheWriteTokens',
-      'cache_write_tokens',
-      'cachedInputTokens',
-      'cached_input_tokens',
-      'inputTokens',
-      'input_tokens',
-      'prompt_tokens',
-      'promptTokens',
-      'outputTokens',
-      'output_tokens',
-      'completion_tokens',
-      'completionTokens',
-      'reasoningTokens',
-      'reasoning_tokens',
-      'reasoningOutputTokens',
-      'totalTokens',
-      'total_tokens',
-    ) !== null ||
-    readAssistantProviderNestedInteger(
-      record,
-      'input_tokens_details',
-      'cached_tokens',
-    ) !== null ||
-    readAssistantProviderNestedInteger(
-      record,
-      'output_tokens_details',
-      'reasoning_tokens',
-    ) !== null
-  )
+interface AssistantCodexTokenUsageEvent {
+  index: number
+  last: CodexTokenUsageBreakdown
+  threadId: string
+  tokenUsage: CodexThreadTokenUsage
+  total: CodexTokenUsageBreakdown
+  turnId: string
 }
 
 function findAssistantCodexThreadTokenUsageSource(input: {
   rawEvents: readonly unknown[]
   turnId: string | null
-}): { record: Record<string, unknown>; sourcePath: string } | null {
+}): { record: CodexTokenUsageBreakdown; sourcePath: string } | null {
   const tokenUsageEvents = readAssistantCodexThreadTokenUsageEvents(input)
-  const totalDeltaUsage =
-    resolveAssistantCodexThreadTokenUsageTotalDelta(tokenUsageEvents)
+  const totalDeltaUsage = resolveAssistantCodexThreadTokenUsageTotalDelta(
+    tokenUsageEvents,
+  )
   if (totalDeltaUsage) {
     return {
       record: totalDeltaUsage,
@@ -529,32 +430,23 @@ function findAssistantCodexThreadTokenUsageSource(input: {
     }
   }
 
-  for (let index = tokenUsageEvents.length - 1; index >= 0; index -= 1) {
-    const event = tokenUsageEvents[index]!
-    if (hasAssistantProviderUsageTokenFields(event.last)) {
-      return {
-        record: event.last!,
+  const last = tokenUsageEvents.at(-1)?.last ?? null
+  return last
+    ? {
+        record: last,
         sourcePath: 'thread.tokenUsage.last',
       }
-    }
-  }
-
-  return null
+    : null
 }
 
 function readAssistantCodexThreadTokenUsageEvents(input: {
   rawEvents: readonly unknown[]
   turnId: string | null
-}): Array<{
-  last: Record<string, unknown> | null
-  tokenUsage: Record<string, unknown> | null
-  total: Record<string, unknown> | null
-}> {
+}): AssistantCodexTokenUsageEvent[] {
   const turnStartedEventIndex = findAssistantCodexTurnStartedEventIndex(input)
   const currentTurnOutputEventIndex =
     findAssistantCodexCurrentTurnOutputEventIndex({
-      rawEvents: input.rawEvents,
-      turnId: input.turnId,
+      ...input,
       turnStartedEventIndex,
     })
 
@@ -562,42 +454,36 @@ function readAssistantCodexThreadTokenUsageEvents(input: {
     const pair = readAssistantCodexTokenUsagePairFromEvent(rawEvent)
     if (
       !pair ||
+      (input.turnId !== null && pair.turnId !== input.turnId) ||
       (turnStartedEventIndex !== null && index < turnStartedEventIndex)
     ) {
       return []
     }
 
-    const record = readAssistantProviderRecord(rawEvent)
-    if (!isAssistantCodexTokenUsageEventForTurn(record, input.turnId)) {
-      return []
-    }
-
-    return [
-      {
-        index,
-        ...pair,
-      },
-    ]
+    return [{ index, ...pair }]
   })
 
   if (currentTurnOutputEventIndex === null) {
-    return events.map(({ last, tokenUsage, total }) => ({
-      last,
-      tokenUsage,
-      total,
-    }))
+    return events
   }
 
   const postOutputEvents = events.filter(
     (event) => event.index >= currentTurnOutputEventIndex,
   )
-  const selectedEvents = postOutputEvents.length > 0 ? postOutputEvents : events
+  return postOutputEvents.length > 0 ? postOutputEvents : events
+}
 
-  return selectedEvents.map(({ last, tokenUsage, total }) => ({
-    last,
-    tokenUsage,
-    total,
-  }))
+function sanitizeCodexUsage(
+  usage: CodexTokenUsageBreakdown,
+): Record<string, unknown> {
+  return {
+    cacheWriteInputTokens: usage.cacheWriteInputTokens,
+    cachedInputTokens: usage.cachedInputTokens,
+    inputTokens: usage.inputTokens,
+    outputTokens: usage.outputTokens,
+    reasoningOutputTokens: usage.reasoningOutputTokens,
+    totalTokens: usage.totalTokens,
+  }
 }
 
 const ASSISTANT_TURN_PROFILE_SAFE_TOKEN_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._/-]*$/u
@@ -658,48 +544,29 @@ export function buildAssistantCodexTurnProfileJson(input: {
   turnId: string | null
 }): Record<string, unknown> | null {
   const tokenUsageEvents = readAssistantCodexThreadTokenUsageEvents(input)
-  const requests: Array<Record<string, number>> = []
-  let modelContextWindow: number | null = null
-  for (const event of tokenUsageEvents) {
-    modelContextWindow =
-      readAssistantProviderInteger(
-        event.tokenUsage,
-        'modelContextWindow',
-        'model_context_window',
-      ) ?? modelContextWindow
-    if (event.last) {
-      requests.push({
-        cachedInput:
-          readAssistantProviderInteger(event.last, 'cachedInputTokens', 'cached_input_tokens')
-          ?? 0,
-        input: readAssistantProviderInteger(event.last, 'inputTokens', 'input_tokens') ?? 0,
-        output: readAssistantProviderInteger(event.last, 'outputTokens', 'output_tokens') ?? 0,
-      })
-    }
-  }
+  const requests = tokenUsageEvents.map((event) => ({
+    cachedInput: event.last.cachedInputTokens,
+    input: event.last.inputTokens,
+    output: event.last.outputTokens,
+  }))
+  const modelContextWindow = tokenUsageEvents.at(-1)?.tokenUsage.modelContextWindow
+    ?? null
 
   const toolsByLabel = new Map<string, AssistantTurnProfileToolAggregate>()
   const startIndex = findAssistantCodexTurnStartedEventIndex(input) ?? 0
   for (let index = startIndex; index < input.rawEvents.length; index += 1) {
-    const record = readAssistantProviderRecord(input.rawEvents[index])
-    const eventType = readAssistantProviderString(
-      record?.method,
-      record?.type,
-      record?.event,
-    )
-    if (eventType !== 'item/completed' && eventType !== 'item.completed') {
+    const notification = readCodexServerNotification(input.rawEvents[index])
+    if (notification?.method !== 'item/completed') {
+      continue
+    }
+    if (
+      input.turnId !== null &&
+      readCodexNonEmptyString(notification.params.turnId) !== input.turnId
+    ) {
       continue
     }
 
-    // Replayed foreign-turn items must not inflate this turn's aggregates;
-    // stay lenient when the event predates turn-id stamping.
-    const itemTurnId = readAssistantCodexTurnIdFromRecord(record)
-    if (input.turnId && itemTurnId && itemTurnId !== input.turnId) {
-      continue
-    }
-
-    const params = readAssistantProviderRecord(record?.params)
-    const item = readAssistantProviderRecord(params?.item)
+    const item = readCodexRecord(notification.params.item)
     const toolAggregates = readAssistantTurnProfileToolAggregates(item)
     if (!toolAggregates) {
       continue
@@ -755,7 +622,7 @@ function readAssistantTurnProfileToolAggregates(
   }
 
   if (itemType === 'commandExecution') {
-    const aggregatedOutput = item.aggregatedOutput ?? item.aggregated_output
+    const aggregatedOutput = item.aggregatedOutput
     const batchRead = readAssistantTurnProfileBatchToolAggregates(aggregatedOutput)
     if (batchRead !== null) {
       return batchRead
@@ -763,19 +630,21 @@ function readAssistantTurnProfileToolAggregates(
 
     return [{
       calls: 1,
-      durationMs: readAssistantProviderInteger(item, 'durationMs', 'duration_ms') ?? 0,
+      durationMs: readAssistantProviderInteger(item, 'durationMs') ?? 0,
       failedCalls: isAssistantTurnProfileFailedTool(item) ? 1 : 0,
       label: buildAssistantTurnProfileCommandLabel(
         readAssistantProviderString(item.command),
-        item.commandActions ?? item.command_actions,
+        item.commandActions,
       ),
       outputChars: readAssistantTurnProfileTextLength(aggregatedOutput),
     }]
   }
 
   if (itemType === 'mcpToolCall' || itemType === 'dynamicToolCall') {
-    const server = readAssistantProviderString(item.server)
-    const tool = readAssistantProviderString(item.tool, item.name)
+    const server = readAssistantProviderString(
+      itemType === 'mcpToolCall' ? item.server : item.namespace,
+    )
+    const tool = readAssistantProviderString(item.tool)
     const label = [server, tool]
       .filter((part): part is string =>
         part !== null && ASSISTANT_TURN_PROFILE_SAFE_TOKEN_PATTERN.test(part),
@@ -784,10 +653,12 @@ function readAssistantTurnProfileToolAggregates(
 
     return [{
       calls: 1,
-      durationMs: readAssistantProviderInteger(item, 'durationMs', 'duration_ms') ?? 0,
+      durationMs: readAssistantProviderInteger(item, 'durationMs') ?? 0,
       failedCalls: isAssistantTurnProfileFailedTool(item) ? 1 : 0,
       label: truncateAssistantTurnProfileLabel(label.length > 0 ? label : itemType),
-      outputChars: readAssistantTurnProfileTextLength(item.result),
+      outputChars: readAssistantTurnProfileTextLength(
+        itemType === 'mcpToolCall' ? item.result : item.contentItems,
+      ),
     }]
   }
 
@@ -877,13 +748,13 @@ function readAssistantTurnProfileBatchToolAggregates(
 }
 
 function isAssistantTurnProfileFailedTool(item: Record<string, unknown>): boolean {
-  const exitCode = readAssistantProviderInteger(item, 'exitCode', 'exit_code')
+  const exitCode = readAssistantProviderInteger(item, 'exitCode')
   if (exitCode !== null) {
     return exitCode !== 0
   }
 
   const status = readAssistantProviderString(item.status)?.toLowerCase()
-  return status === 'failed' || status === 'errored'
+  return status === 'failed'
 }
 
 // Tool labels must stay secret-safe: persist only the binary name unless the
@@ -1043,23 +914,22 @@ function findAssistantCodexTurnStartedEventIndex(input: {
   let fallbackIndex: number | null = null
 
   for (let index = 0; index < input.rawEvents.length; index += 1) {
-    const record = readAssistantProviderRecord(input.rawEvents[index])
-    const eventType = readAssistantProviderString(
-      record?.method,
-      record?.type,
-      record?.event,
-    )
-
-    if (eventType !== 'turn/started' && eventType !== 'turn.started') {
+    const notification = readCodexServerNotification(input.rawEvents[index])
+    if (notification?.method !== 'turn/started') {
       continue
     }
 
     fallbackIndex ??= index
-    if (!isAssistantCodexTurnEventForTurn(record, input.turnId)) {
-      continue
+    if (input.turnId === null) {
+      return index
     }
 
-    return index
+    const eventTurnId = readCodexNonEmptyString(
+      readCodexRecord(notification.params.turn)?.id,
+    )
+    if (eventTurnId === input.turnId) {
+      return index
+    }
   }
 
   return fallbackIndex
@@ -1071,14 +941,19 @@ function findAssistantCodexCurrentTurnOutputEventIndex(input: {
   turnStartedEventIndex: number | null
 }): number | null {
   const startIndex = input.turnStartedEventIndex ?? 0
-
   for (let index = startIndex; index < input.rawEvents.length; index += 1) {
-    const record = readAssistantProviderRecord(input.rawEvents[index])
-    if (!isAssistantCodexTurnEventForTurn(record, input.turnId)) {
+    const notification = readCodexServerNotification(input.rawEvents[index])
+    if (
+      !notification ||
+      (
+        input.turnId !== null &&
+        readCodexNotificationTurnId(notification) !== input.turnId
+      )
+    ) {
       continue
     }
 
-    if (isAssistantCodexCurrentTurnOutputEvent(record)) {
+    if (isAssistantCodexCurrentTurnOutputNotification(notification)) {
       return index
     }
   }
@@ -1086,254 +961,114 @@ function findAssistantCodexCurrentTurnOutputEventIndex(input: {
   return null
 }
 
-function isAssistantCodexCurrentTurnOutputEvent(
-  record: Record<string, unknown> | null,
-): boolean {
-  const eventType = readAssistantProviderString(
-    record?.method,
-    record?.type,
-    record?.event,
-  )
+function readCodexNotificationTurnId(
+  notification: NonNullable<ReturnType<typeof readCodexServerNotification>>,
+): string | null {
+  return readCodexNonEmptyString(notification.params.turnId) ??
+    readCodexNonEmptyString(readCodexRecord(notification.params.turn)?.id)
+}
 
+function isAssistantCodexCurrentTurnOutputNotification(
+  notification: NonNullable<ReturnType<typeof readCodexServerNotification>>,
+): boolean {
   if (
-    eventType === 'assistant.message.delta'
-    || eventType === 'agent.message.delta'
-    || eventType === 'item/agentMessage/delta'
-    || eventType === 'item/plan/delta'
-    || eventType === 'item/reasoning/summaryPartAdded'
-    || eventType === 'item/reasoning/summaryTextDelta'
-    || eventType === 'item/reasoning/textDelta'
-    || eventType === 'rawResponseItem/completed'
+    notification.method === 'item/agentMessage/delta' ||
+    notification.method === 'item/plan/delta' ||
+    notification.method === 'item/reasoning/summaryPartAdded' ||
+    notification.method === 'item/reasoning/summaryTextDelta' ||
+    notification.method === 'item/reasoning/textDelta' ||
+    notification.method === 'rawResponseItem/completed'
   ) {
     return true
   }
 
-  if (eventType !== 'item/started' && eventType !== 'item/completed') {
+  if (
+    notification.method !== 'item/started' &&
+    notification.method !== 'item/completed'
+  ) {
     return false
   }
 
-  const params = readAssistantProviderRecord(record?.params)
-  const item = readAssistantProviderRecord(params?.item)
-  const itemType = readAssistantProviderString(item?.type)
-
-  return (
-    itemType === 'agentMessage'
-    || itemType === 'plan'
-    || itemType === 'reasoning'
-    || itemType === 'commandExecution'
-    || itemType === 'fileChange'
-    || itemType === 'mcpToolCall'
-    || itemType === 'dynamicToolCall'
-    || itemType === 'webSearch'
+  const itemType = readCodexNonEmptyString(
+    readCodexRecord(notification.params.item)?.type,
   )
+  return itemType === 'agentMessage' ||
+    itemType === 'plan' ||
+    itemType === 'reasoning' ||
+    itemType === 'commandExecution' ||
+    itemType === 'fileChange' ||
+    itemType === 'mcpToolCall' ||
+    itemType === 'dynamicToolCall' ||
+    itemType === 'webSearch'
 }
 
-function isAssistantCodexTokenUsageEventForTurn(
-  record: Record<string, unknown> | null,
-  turnId: string | null,
+export function isAssistantCodexTokenUsageEventType(
+  eventType: string | null,
 ): boolean {
-  if (!turnId) {
-    return true
-  }
-
-  return readAssistantCodexTurnIdFromRecord(record) === turnId
+  return eventType === 'thread/tokenUsage/updated'
 }
 
-function isAssistantCodexTurnEventForTurn(
-  record: Record<string, unknown> | null,
-  turnId: string | null,
-): boolean {
-  if (!turnId) {
-    return true
-  }
-
-  return readAssistantCodexTurnIdFromRecord(record) === turnId
-}
-
-function readAssistantCodexTurnIdFromCompletion(input: {
-  completionParams: Record<string, unknown> | null
-  completionRecord: Record<string, unknown> | null
-  completionTurn: Record<string, unknown> | null
-}): string | null {
-  return (
-    readAssistantProviderString(input.completionTurn?.id) ??
-    readAssistantCodexTurnIdFromRecord(input.completionParams) ??
-    readAssistantCodexTurnIdFromRecord(input.completionRecord)
-  )
-}
-
-export function isAssistantCodexTokenUsageEventType(eventType: string | null): boolean {
-  return (
-    eventType === 'thread/tokenUsage/updated' ||
-    eventType === 'thread/token_usage/updated' ||
-    eventType === 'thread.tokenUsage.updated' ||
-    eventType === 'thread.token.usage.updated' ||
-    eventType === 'thread.token_usage.updated'
-  )
-}
-
-function readAssistantCodexTokenUsageRecord(
-  record: Record<string, unknown> | null,
-): Record<string, unknown> | null {
-  const params = readAssistantProviderRecord(record?.params)
-  const data = readAssistantProviderRecord(record?.data)
-
-  return (
-    readAssistantProviderRecord(params?.tokenUsage) ??
-    readAssistantProviderRecord(params?.token_usage) ??
-    readAssistantProviderRecord(data?.tokenUsage) ??
-    readAssistantProviderRecord(data?.token_usage) ??
-    readAssistantProviderRecord(record?.tokenUsage) ??
-    readAssistantProviderRecord(record?.token_usage)
-  )
-}
-
-function readAssistantCodexTokenUsagePairFromEvent(rawEvent: unknown): {
-  last: Record<string, unknown> | null
-  tokenUsage: Record<string, unknown> | null
-  total: Record<string, unknown> | null
-} | null {
-  const record = readAssistantProviderRecord(rawEvent)
-  const eventType = readAssistantProviderString(
-    record?.method,
-    record?.type,
-    record?.event,
-  )
-  if (!isAssistantCodexTokenUsageEventType(eventType)) {
+function readAssistantCodexTokenUsagePairFromEvent(
+  rawEvent: unknown,
+): Omit<AssistantCodexTokenUsageEvent, 'index'> | null {
+  const notification = readCodexServerNotification(rawEvent)
+  if (notification?.method !== 'thread/tokenUsage/updated') {
     return null
   }
 
-  const tokenUsage = readAssistantCodexTokenUsageRecord(record)
-  return {
-    last: readAssistantProviderRecord(tokenUsage?.last),
-    tokenUsage,
-    total: readAssistantProviderRecord(tokenUsage?.total),
+  const threadId = readCodexNonEmptyString(notification.params.threadId)
+  const turnId = readCodexNonEmptyString(notification.params.turnId)
+  const tokenUsage = readCodexThreadTokenUsage(notification.params.tokenUsage)
+  if (!threadId || !turnId || !tokenUsage) {
+    return null
   }
-}
 
-function readAssistantCodexTurnIdFromRecord(
-  record: Record<string, unknown> | null,
-): string | null {
-  const params = readAssistantProviderRecord(record?.params)
-  const data = readAssistantProviderRecord(record?.data)
-  const turn =
-    readAssistantProviderRecord(params?.turn) ??
-    readAssistantProviderRecord(data?.turn) ??
-    readAssistantProviderRecord(record?.turn)
-
-  return readAssistantProviderString(
-    turn?.id,
-    params?.turnId,
-    params?.turn_id,
-    data?.turnId,
-    data?.turn_id,
-    record?.turnId,
-    record?.turn_id,
-  )
+  return {
+    last: tokenUsage.last,
+    threadId,
+    tokenUsage,
+    total: tokenUsage.total,
+    turnId,
+  }
 }
 
 function resolveAssistantCodexThreadTokenUsageTotalDelta(
-  events: ReadonlyArray<{
-    last: Record<string, unknown> | null
-    total: Record<string, unknown> | null
-  }>,
-): Record<string, unknown> | null {
-  const first = events.find(
-    (event) =>
-      hasAssistantProviderUsageTokenFields(event.last)
-      && hasAssistantProviderUsageTokenFields(event.total),
-  )
-  const final = [...events].reverse().find(
-    (event) =>
-      hasAssistantProviderUsageTokenFields(event.last)
-      && hasAssistantProviderUsageTokenFields(event.total),
-  )
-
-  if (!first?.last || !first.total || !final?.total) {
+  events: ReadonlyArray<Pick<AssistantCodexTokenUsageEvent, 'last' | 'total'>>,
+): CodexTokenUsageBreakdown | null {
+  const first = events[0]
+  const final = events.at(-1)
+  if (!first || !final) {
     return null
   }
 
-  const priorThreadBaseline = subtractAssistantProviderUsageRecords(
+  const priorThreadBaseline = subtractCodexTokenUsage(
     first.total,
     first.last,
   )
-  const currentTurnUsage = subtractAssistantProviderUsageRecords(
-    final.total,
-    priorThreadBaseline,
-  )
-  if (readAssistantProviderInteger(currentTurnUsage, 'totalTokens') === null) {
-    const totalTokens = resolveAssistantProviderTotalTokens({
-      inputTokens: readAssistantProviderInteger(currentTurnUsage, 'inputTokens'),
-      outputTokens: readAssistantProviderInteger(currentTurnUsage, 'outputTokens'),
-    })
-    if (totalTokens !== null) {
-      currentTurnUsage.totalTokens = totalTokens
-    }
-  }
-
-  return hasAssistantProviderUsageTokenFields(currentTurnUsage)
-    ? currentTurnUsage
-    : null
+  return subtractCodexTokenUsage(final.total, priorThreadBaseline)
 }
 
-function subtractAssistantProviderUsageRecords(
-  minuend: Record<string, unknown>,
-  subtrahend: Record<string, unknown>,
-): Record<string, unknown> {
-  const result: Record<string, unknown> = {}
-  copyAssistantProviderUsageDifference(
-    result,
-    'cacheWriteTokens',
-    minuend,
-    subtrahend,
-    ['cacheWriteTokens', 'cache_write_tokens'],
-  )
-  copyAssistantProviderUsageDifference(
-    result,
-    'cachedInputTokens',
-    minuend,
-    subtrahend,
-    ['cachedInputTokens', 'cached_input_tokens'],
-    {
-      nested: [
-        ['input_tokens_details', 'cached_tokens'],
-        ['prompt_tokens_details', 'cached_tokens'],
-      ],
-    },
-  )
-  copyAssistantProviderUsageDifference(
-    result,
-    'inputTokens',
-    minuend,
-    subtrahend,
-    ['inputTokens', 'input_tokens', 'prompt_tokens', 'promptTokens'],
-  )
-  copyAssistantProviderUsageDifference(
-    result,
-    'outputTokens',
-    minuend,
-    subtrahend,
-    ['outputTokens', 'output_tokens', 'completion_tokens', 'completionTokens'],
-  )
-  copyAssistantProviderUsageDifference(
-    result,
-    'reasoningOutputTokens',
-    minuend,
-    subtrahend,
-    ['reasoningTokens', 'reasoning_tokens', 'reasoningOutputTokens'],
-    {
-      nested: [['output_tokens_details', 'reasoning_tokens']],
-    },
-  )
-  copyAssistantProviderUsageDifference(
-    result,
-    'totalTokens',
-    minuend,
-    subtrahend,
-    ['totalTokens', 'total_tokens'],
-  )
-
-  return result
+function subtractCodexTokenUsage(
+  minuend: CodexTokenUsageBreakdown,
+  subtrahend: CodexTokenUsageBreakdown,
+): CodexTokenUsageBreakdown {
+  return {
+    cacheWriteInputTokens: Math.max(
+      0,
+      minuend.cacheWriteInputTokens - subtrahend.cacheWriteInputTokens,
+    ),
+    cachedInputTokens: Math.max(
+      0,
+      minuend.cachedInputTokens - subtrahend.cachedInputTokens,
+    ),
+    inputTokens: Math.max(0, minuend.inputTokens - subtrahend.inputTokens),
+    outputTokens: Math.max(0, minuend.outputTokens - subtrahend.outputTokens),
+    reasoningOutputTokens: Math.max(
+      0,
+      minuend.reasoningOutputTokens - subtrahend.reasoningOutputTokens,
+    ),
+    totalTokens: Math.max(0, minuend.totalTokens - subtrahend.totalTokens),
+  }
 }
 
 export interface CodexSubagentTurnTokenUsageSample {
@@ -1378,37 +1113,35 @@ export function extractCodexSubagentUsageDrafts(input: {
   const spawnModelByThreadId = readCodexCollabSpawnModelsByThread(
     input.parentRawEvents,
   )
-  const attributedTurns = [...input.subagentTokenUsageByTurn.values()].filter(
-    (sample) => spawnModelByThreadId.has(sample.threadId),
-  )
   const drafts: AssistantProviderUsageDraft[] = []
   let ordinal = input.ordinalStart
-  for (const sample of attributedTurns) {
+
+  for (const sample of input.subagentTokenUsageByTurn.values()) {
+    if (!spawnModelByThreadId.has(sample.threadId)) {
+      continue
+    }
+
     const pairs = (
       sample.firstEvent === sample.lastEvent
         ? [sample.firstEvent]
         : [sample.firstEvent, sample.lastEvent]
     ).flatMap((event) => {
       const pair = readAssistantCodexTokenUsagePairFromEvent(event)
-      return pair ? [pair] : []
+      return pair &&
+        pair.threadId === sample.threadId &&
+        pair.turnId === sample.turnId
+        ? [pair]
+        : []
     })
     const delta = resolveAssistantCodexThreadTokenUsageTotalDelta(pairs)
     if (!delta) {
       continue
     }
 
-    const model =
-      spawnModelByThreadId.get(sample.threadId) ?? input.parentModel ?? null
-    const inputTokens = readAssistantProviderInteger(
-      delta,
-      'inputTokens',
-      'input_tokens',
-    )
-    const outputTokens = readAssistantProviderInteger(
-      delta,
-      'outputTokens',
-      'output_tokens',
-    )
+    const model = spawnModelByThreadId.get(sample.threadId)
+      ?? input.parentModel
+      ?? null
+    const rawUsageJson = sanitizeCodexUsage(delta)
     drafts.push({
       occurredAt: sample.occurredAt,
       provider: 'codex-cli',
@@ -1417,30 +1150,16 @@ export function extractCodexSubagentUsageDrafts(input: {
       usage: {
         apiKeyEnv: null,
         baseUrl: null,
-        cacheWriteTokens: readAssistantProviderInteger(
-          delta,
-          'cacheWriteTokens',
-          'cache_write_tokens',
-        ),
-        cachedInputTokens: readAssistantProviderInteger(
-          delta,
-          'cachedInputTokens',
-          'cached_input_tokens',
-        ),
-        inputTokens,
-        outputTokens,
+        cacheWriteTokens: delta.cacheWriteInputTokens,
+        cachedInputTokens: delta.cachedInputTokens,
+        inputTokens: delta.inputTokens,
+        outputTokens: delta.outputTokens,
         providerMetadataJson: null,
         providerName: input.modelProvider,
         providerRequestId: null,
-        rawUsageJson: delta,
-        rawUsageJsonHash: hashAssistantProviderStableJson(delta),
-        reasoningTokens: readAssistantProviderInteger(
-          delta,
-          'reasoningTokens',
-          'reasoning_tokens',
-          'reasoningOutputTokens',
-          'reasoning_output_tokens',
-        ),
+        rawUsageJson,
+        rawUsageJsonHash: hashAssistantProviderStableJson(rawUsageJson),
+        reasoningTokens: delta.reasoningOutputTokens,
         requestedModel: model,
         servedModel: model,
         tokenPricingBasis: resolveCodexAssistantProviderTokenPricingBasis({
@@ -1448,12 +1167,7 @@ export function extractCodexSubagentUsageDrafts(input: {
           modelProvider: input.modelProvider,
           serviceTier: input.serviceTier ?? null,
         }),
-        totalTokens:
-          readAssistantProviderInteger(delta, 'totalTokens', 'total_tokens') ??
-          resolveAssistantProviderTotalTokens({
-            inputTokens,
-            outputTokens,
-          }),
+        totalTokens: delta.totalTokens,
         usageExtractionSourcePath: 'subagent.turn.tokenUsage.total.delta',
         usageExtractionVersion: CODEX_USAGE_EXTRACTION_VERSION,
       },
@@ -1475,13 +1189,10 @@ export function resolveCodexAssistantProviderTokenPricingBasis(input: {
   })
 }
 
-// Spawn evidence map: every thread id named by a parent-thread collab tool
-// call item (V1: spawnAgent, sendInput, wait, resumeAgent, ...) or
-// subAgentActivity item (V2) is a key — that membership is what authorizes
-// billing a foreign thread's usage, covering both freshly spawned children
-// and reused existing children. V1 spawn items carry the effective model
-// directly. V2 activity may carry the effective model in newer protocol
-// versions; when absent, the child inherits the parent model.
+// Spawn evidence map: every thread id named by a canonical collab tool call
+// or subAgentActivity item is a key. That membership authorizes billing a
+// foreign thread's usage. Only spawnAgent carries an explicit model in the
+// pinned protocol; activity-only evidence inherits the parent model.
 function readCodexCollabSpawnModelsByThread(
   rawEvents: readonly unknown[],
 ): Map<string, string | null> {
@@ -1517,132 +1228,52 @@ function readCodexCollabToolCallFromEvent(rawEvent: unknown): {
   receiverThreadIds: string[]
   spawnModel: string | null
 } | null {
-  const record = readAssistantProviderRecord(rawEvent)
-  const params = readAssistantProviderRecord(record?.params)
-  const data = readAssistantProviderRecord(record?.data)
-  const item =
-    readAssistantProviderRecord(params?.item) ??
-    readAssistantProviderRecord(data?.item) ??
-    readAssistantProviderRecord(record?.item)
-  if (!item) {
+  const notification = readCodexServerNotification(rawEvent)
+  if (
+    notification?.method !== 'item/started' &&
+    notification?.method !== 'item/completed'
+  ) {
     return null
   }
 
-  const itemType = readAssistantProviderString(
-    item.type,
-    item.itemType,
-    item.item_type,
-  )
-  // Multi-agent V2 emits subAgentActivity items (started/interacted/
-  // interrupted) instead of collab tool calls; any of them names the child
-  // thread this parent turn engaged, which is exactly the spawn evidence the
-  // billing gate needs. Newer protocol versions may also carry the effective
-  // child model on that activity.
-  if (itemType === 'subAgentActivity' || itemType === 'sub_agent_activity') {
-    const agentThreadId = readAssistantProviderString(
-      item.agentThreadId,
-      item.agent_thread_id,
-    )
+  const item = readCodexRecord(notification.params.item)
+  const itemType = readCodexNonEmptyString(item?.type)
+  if (itemType === 'subAgentActivity') {
+    const agentThreadId = readCodexNonEmptyString(item?.agentThreadId)
     return agentThreadId
       ? {
           receiverThreadIds: [agentThreadId],
-          spawnModel: readAssistantProviderString(item.model) ?? null,
+          spawnModel: null,
         }
       : null
   }
-  if (itemType !== 'collabAgentToolCall') {
+  if (itemType !== 'collabAgentToolCall' || !Array.isArray(item?.receiverThreadIds)) {
     return null
   }
 
-  const rawReceiverThreadIds =
-    item.receiverThreadIds ?? item.receiver_thread_ids
-  if (!Array.isArray(rawReceiverThreadIds)) {
-    return null
-  }
-  const receiverThreadIds = rawReceiverThreadIds.flatMap((receiverThreadId) => {
-    const normalized = readAssistantProviderString(receiverThreadId)
+  const receiverThreadIds = item.receiverThreadIds.flatMap((receiverThreadId) => {
+    const normalized = readCodexNonEmptyString(receiverThreadId)
     return normalized ? [normalized] : []
   })
   if (receiverThreadIds.length === 0) {
     return null
   }
 
-  const tool = readAssistantProviderString(item.tool)
-  const isSpawnTool = tool === 'spawnAgent' || tool === 'spawn_agent'
   return {
     receiverThreadIds,
-    spawnModel: isSpawnTool
-      ? readAssistantProviderString(item.model) ?? null
+    spawnModel: item.tool === 'spawnAgent'
+      ? readCodexNonEmptyString(item.model)
       : null,
   }
 }
 
-function copyAssistantProviderUsageDifference(
-  target: Record<string, unknown>,
-  targetKey: string,
-  minuend: Record<string, unknown>,
-  subtrahend: Record<string, unknown>,
-  sourceKeys: readonly string[],
-  options: {
-    nested?: ReadonlyArray<readonly [objectKey: string, valueKey: string]>
-  } = {},
-): void {
-  const minuendValue = readAssistantProviderUsageInteger(
-    minuend,
-    sourceKeys,
-    options,
-  )
-  if (minuendValue === null) {
-    return
-  }
-
-  const subtrahendValue =
-    readAssistantProviderUsageInteger(subtrahend, sourceKeys, options) ?? 0
-  target[targetKey] = Math.max(0, minuendValue - subtrahendValue)
-}
-
-function readAssistantProviderUsageInteger(
-  source: Record<string, unknown>,
-  sourceKeys: readonly string[],
-  options: {
-    nested?: ReadonlyArray<readonly [objectKey: string, valueKey: string]>
-  } = {},
-): number | null {
-  const directValue = readAssistantProviderInteger(source, ...sourceKeys)
-  if (directValue !== null) {
-    return directValue
-  }
-
-  for (const nested of options.nested ?? []) {
-    const nestedValue = readAssistantProviderNestedInteger(
-      source,
-      nested[0],
-      nested[1],
-    )
-    if (nestedValue !== null) {
-      return nestedValue
-    }
-  }
-
-  return null
-}
-
 function findAssistantCodexCompletionEvent(
   rawEvents: readonly unknown[],
-): Record<string, unknown> | null {
+): ReturnType<typeof readCodexServerNotification> {
   for (let index = rawEvents.length - 1; index >= 0; index -= 1) {
-    const record = readAssistantProviderRecord(rawEvents[index])
-    const eventType = readAssistantProviderString(
-      record?.type,
-      record?.event,
-      record?.method,
-    )
-
-    if (
-      eventType === 'turn.completed' ||
-      eventType === 'turn/completed'
-    ) {
-      return record ?? null
+    const notification = readCodexServerNotification(rawEvents[index])
+    if (notification?.method === 'turn/completed') {
+      return notification
     }
   }
 
@@ -1696,100 +1327,6 @@ function readAssistantProviderInteger(
   return null
 }
 
-function readAssistantProviderNestedInteger(
-  record: Record<string, unknown> | null | undefined,
-  objectKey: string,
-  valueKey: string,
-): number | null {
-  return readAssistantProviderInteger(
-    readAssistantProviderRecord(record?.[objectKey]),
-    valueKey,
-  )
-}
-
-function sanitizeAssistantProviderRawUsageJson(
-  record: Record<string, unknown> | null | undefined,
-): Record<string, unknown> | null {
-  if (!record) {
-    return null
-  }
-
-  const sanitized: Record<string, unknown> = {}
-  copyAssistantProviderIntegerFields(sanitized, record, [
-    'cacheWriteTokens',
-    'cache_write_tokens',
-    'cachedInputTokens',
-    'cached_input_tokens',
-    'completionTokens',
-    'completion_tokens',
-    'inputTokens',
-    'input_tokens',
-    'outputTokens',
-    'output_tokens',
-    'promptTokens',
-    'prompt_tokens',
-    'reasoningTokens',
-    'reasoning_tokens',
-    'reasoningOutputTokens',
-    'totalTokens',
-    'total_tokens',
-  ])
-  copyAssistantProviderTokenDetails(
-    sanitized,
-    record,
-    'input_tokens_details',
-    ['cached_tokens'],
-  )
-  copyAssistantProviderTokenDetails(
-    sanitized,
-    record,
-    'prompt_tokens_details',
-    ['cached_tokens'],
-  )
-  copyAssistantProviderTokenDetails(
-    sanitized,
-    record,
-    'output_tokens_details',
-    ['reasoning_tokens'],
-  )
-
-  return Object.keys(sanitized).length > 0 ? sanitized : null
-}
-
-function copyAssistantProviderIntegerFields(
-  target: Record<string, unknown>,
-  source: Record<string, unknown>,
-  keys: readonly string[],
-): void {
-  for (const key of keys) {
-    const value = source[key]
-
-    if (typeof value === 'number' && Number.isInteger(value) && value >= 0) {
-      target[key] = value
-    }
-  }
-}
-
-function copyAssistantProviderTokenDetails(
-  target: Record<string, unknown>,
-  source: Record<string, unknown>,
-  objectKey: string,
-  valueKeys: readonly string[],
-): void {
-  const sourceDetails = readAssistantProviderRecord(source[objectKey])
-
-  if (!sourceDetails) {
-    return
-  }
-
-  const sanitizedDetails: Record<string, unknown> = {}
-  copyAssistantProviderIntegerFields(sanitizedDetails, sourceDetails, valueKeys)
-
-  if (Object.keys(sanitizedDetails).length > 0) {
-    target[objectKey] = sanitizedDetails
-  }
-}
-
 export function hashAssistantProviderStableJson(value: unknown): string {
   return `sha256:${createHash('sha256')
     .update(stableStringifyAssistantProviderJson(value))
@@ -1816,15 +1353,4 @@ function sortAssistantProviderJson(value: unknown): unknown {
   }
 
   return value
-}
-
-function resolveAssistantProviderTotalTokens(input: {
-  inputTokens: number | null
-  outputTokens: number | null
-}): number | null {
-  if (input.inputTokens === null && input.outputTokens === null) {
-    return null
-  }
-
-  return (input.inputTokens ?? 0) + (input.outputTokens ?? 0)
 }

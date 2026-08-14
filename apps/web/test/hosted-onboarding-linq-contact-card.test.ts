@@ -138,6 +138,26 @@ describe("hosted Linq contact card client", () => {
     );
   });
 
+  it("accepts the legacy single-card retrieve response", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => createJsonResponse({
+      first_name: "Murph",
+      image_url: null,
+      is_active: true,
+      last_name: null,
+      phone_number: "+15550000001",
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(listHostedLinqContactCards()).resolves.toEqual([{
+      firstName: "Murph",
+      imageUrl: null,
+      imageUrlPresent: true,
+      isActive: true,
+      lastName: null,
+      phoneNumber: "+15550000001",
+    }]);
+  });
+
   it("gets one contact card by phone number", async () => {
     const fetchMock = vi.fn<typeof fetch>(async () => createJsonResponse({
       contact_cards: [
@@ -307,7 +327,6 @@ describe("hosted Linq contact card client", () => {
     expect(linqInventoryMocks.syncHostedLinqPhoneNumberInventory).not.toHaveBeenCalled();
     expect(linqLineStoreMocks.readHostedLinqContactCardCandidacySnapshot).toHaveBeenCalledWith({
       limit: 50,
-      lockMode: "wait",
       observedAt: expect.any(Date),
       prisma,
     });
@@ -900,7 +919,6 @@ describe("hosted Linq contact card client", () => {
     expect(linqInventoryMocks.syncHostedLinqPhoneNumberInventory).not.toHaveBeenCalled();
     expect(linqLineStoreMocks.readHostedLinqContactCardCandidacySnapshot).toHaveBeenCalledWith({
       limit: 50,
-      lockMode: "wait",
       observedAt: expect.any(Date),
       prisma,
     });
@@ -1065,17 +1083,6 @@ describe("fetchMurphHostedLinqContactCardVcfPhoto", () => {
 });
 
 describe("resolveMurphHostedLinqContactCardBackupPhoneNumber", () => {
-  it("omits the backup instead of waiting when an inventory writer holds the lock", async () => {
-    // The snapshot returns null when the lock is unavailable; the member's
-    // primary card must still be served, just without the optional backup.
-    linqLineStoreMocks.readHostedLinqContactCardCandidacySnapshot.mockResolvedValue(null);
-
-    await expect(resolveMurphHostedLinqContactCardBackupPhoneNumber({
-      excludePhoneNumber: "+15550000001",
-      prisma: {} as never,
-    })).resolves.toBeNull();
-  });
-
   it("reads the existing projection and returns the first healthy alternate without provider sync", async () => {
     linqLineStoreMocks.readHostedLinqContactCardCandidacySnapshot.mockResolvedValue({
       configuredLineCount: 4,
@@ -1126,10 +1133,8 @@ describe("resolveMurphHostedLinqContactCardBackupPhoneNumber", () => {
     })).resolves.toBe("+15550000003");
 
     expect(linqLineStoreMocks.readHostedLinqContactCardCandidacySnapshot).toHaveBeenCalledOnce();
-    // Member-facing: never waits on an inventory writer.
     expect(linqLineStoreMocks.readHostedLinqContactCardCandidacySnapshot).toHaveBeenCalledWith({
       limit: 50,
-      lockMode: "skip",
       prisma,
     });
     expect(linqInventoryMocks.syncHostedLinqPhoneNumberInventory).not.toHaveBeenCalled();

@@ -5,6 +5,7 @@ import {
   type HostedAiUsageGateDecisionWithSource,
 } from "../hosted-execution/usage-allowance";
 import { readHostedRuntimeAiAccessDecision } from "../hosted-onboarding/member-access";
+import { HOSTED_STARTER_USAGE_GRANT_USD_MICROS } from "../hosted-onboarding/starter-usage";
 
 export type HostedRuntimeUsageGateCheck =
   | {
@@ -67,7 +68,10 @@ export async function resolveHostedRuntimeAiUsageGate(input: {
 function isHostedRuntimeUsageRunningLow(
   decision: Extract<HostedAiUsageGateDecisionWithSource, { allowed: true }>,
 ): boolean {
-  const lowThresholdUsdMicros = (decision.limitUsdMicros + 4n) / 5n;
+  const thresholdBasisUsdMicros = decision.allowanceSource === "direct_starter"
+    ? HOSTED_STARTER_USAGE_GRANT_USD_MICROS
+    : decision.limitUsdMicros;
+  const lowThresholdUsdMicros = (thresholdBasisUsdMicros + 4n) / 5n;
   return decision.remainingUsdMicros > 0n
     && decision.remainingUsdMicros <= lowThresholdUsdMicros;
 }

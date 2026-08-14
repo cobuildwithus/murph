@@ -7,7 +7,6 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   buildHostedWorkerSecretsPayload,
   buildHostedWranglerDeployConfig,
-  HOSTED_WORKER_OPTIONAL_VAR_NAMES,
   HOSTED_WORKER_REQUIRED_SECRET_NAMES,
   HOSTED_WORKER_REQUIRED_VAR_NAMES,
   parseHostedContainerImageListOutput,
@@ -15,8 +14,8 @@ import {
   resolveCloudflareDeployPaths,
   selectHostedContainerImageTagsForCleanup,
 } from "../scripts/deploy-automation.js";
-import { HOSTED_WORKER_OPTIONAL_SECRET_NAMES } from "../scripts/deploy-automation/worker-secret-names.ts";
 import { renderWorkerSecretsFile } from "../scripts/render-worker-secrets.ts";
+import { buildHostedRunnerContainerPlatformEnv } from "../src/runner-env.ts";
 import { parseJsoncObject } from "./helpers/jsonc.js";
 
 afterEach(() => {
@@ -113,8 +112,6 @@ const REQUIRED_R2_PRESIGN_WORKER_SECRETS = {
 const REQUIRED_PRIVATE_IMAGE_WORKER_SECRET = {
   HOSTED_PRIVATE_MEDIA_CAPABILITY_SECRET: "images-signing-fixture",
 } as const;
-const VALID_TEST_SSH_ED25519_PUBLIC_KEY =
-  "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEB";
 
 function expectedRequiredHostedCryptoWorkerVars(): Record<string, string> {
   return Object.fromEntries(
@@ -241,6 +238,7 @@ describe("hosted deploy automation helpers", () => {
         max_instances: number;
         rollout_active_grace_period: number;
         rollout_step_percentage: number[];
+        ssh: { enabled: boolean };
       }>;
       durable_objects: {
         bindings: Array<{
@@ -277,6 +275,18 @@ describe("hosted deploy automation helpers", () => {
       placement: {
         mode: string;
       };
+      queues: {
+        consumers: Array<{
+          dead_letter_queue: string;
+          max_batch_size: number;
+          max_batch_timeout: number;
+          max_concurrency: number;
+          max_retries: number;
+          queue: string;
+          retry_delay: number;
+        }>;
+        producers: Array<{ binding: string; queue: string }>;
+      };
       r2_buckets: Array<{
         binding: string;
         bucket_name: string;
@@ -307,6 +317,7 @@ describe("hosted deploy automation helpers", () => {
         max_instances: 250,
         rollout_active_grace_period: 300,
         rollout_step_percentage: [10, 25, 50, 100],
+        ssh: { enabled: false },
       },
       {
         class_name: "DeploySmokeRunnerContainer",
@@ -316,6 +327,7 @@ describe("hosted deploy automation helpers", () => {
         max_instances: 1,
         rollout_active_grace_period: 0,
         rollout_step_percentage: [100],
+        ssh: { enabled: false },
       },
     ]);
     expect(config.durable_objects.bindings).toEqual([
@@ -326,6 +338,10 @@ describe("hosted deploy automation helpers", () => {
       {
         class_name: "DatabaseHealthDurableObject",
         name: "DATABASE_HEALTH_MONITOR",
+      },
+      {
+        class_name: "DeviceWebhookQueueHealthDurableObject",
+        name: "DEVICE_WEBHOOK_QUEUE_MONITOR",
       },
       {
         class_name: "RunnerContainer",
@@ -359,13 +375,20 @@ describe("hosted deploy automation helpers", () => {
         new_sqlite_classes: ["DatabaseHealthDurableObject"],
         tag: "v4",
       },
+      {
+        new_sqlite_classes: ["DeviceWebhookQueueHealthDurableObject"],
+        tag: "v5",
+      },
     ]);
     expect(config).toMatchObject({
       triggers: {
         crons: ["*/5 * * * *"],
       },
     });
-    expect(config.compatibility_flags).toEqual(["nodejs_compat"]);
+    expect(config.compatibility_flags).toEqual([
+      "nodejs_compat",
+      "containers_pid_namespace",
+    ]);
     expect(config.placement).toEqual({ mode: "smart" });
     expect(config.r2_buckets).toEqual([
       {
@@ -374,7 +397,29 @@ describe("hosted deploy automation helpers", () => {
         preview_bucket_name: "hosted-bundles-preview",
       },
     ]);
-    expect(config).not.toHaveProperty("queues");
+    expect(config.queues).toEqual({
+      consumers: [
+        {
+          dead_letter_queue: "hosted-worker-device-webhooks-dlq",
+          max_batch_size: 100,
+          max_batch_timeout: 5,
+          max_concurrency: 1,
+          max_retries: 10,
+          queue: "hosted-worker-device-webhooks",
+          retry_delay: 30,
+        },
+      ],
+      producers: [
+        {
+          binding: "DEVICE_WEBHOOK_QUEUE",
+          queue: "hosted-worker-device-webhooks",
+        },
+        {
+          binding: "DEVICE_WEBHOOK_DLQ",
+          queue: "hosted-worker-device-webhooks-dlq",
+        },
+      ],
+    });
     expect(config.version_metadata).toEqual({ binding: "CF_VERSION_METADATA" });
     expect(config.observability).toEqual({
       enabled: true,
@@ -422,7 +467,6 @@ describe("hosted deploy automation helpers", () => {
     ]);
     expect(config.ai).toEqual({ binding: "AI" });
     expect(config.vars.HOSTED_WEB_BASE_URL).toBe("https://web.example.test");
-    expect(config.vars.AGENTMAIL_BASE_URL).toBeUndefined();
     expect(config.vars.TELEGRAM_BOT_USERNAME).toBe("hosted_bot");
     expect(config.vars.HOSTED_EXECUTION_RUNNER_BASE_URL).toBeUndefined();
     expect(config.secrets?.required).toEqual([...HOSTED_WORKER_REQUIRED_SECRET_NAMES]);
@@ -499,6 +543,7 @@ describe("hosted deploy automation helpers", () => {
         max_instances: number;
         rollout_active_grace_period?: number;
         rollout_step_percentage?: number[];
+        ssh: { enabled: boolean };
       }>;
       durable_objects: {
         bindings: Array<{
@@ -516,6 +561,10 @@ describe("hosted deploy automation helpers", () => {
       }>;
       placement: {
         mode: string;
+      };
+      queues: {
+        consumers: unknown[];
+        producers: unknown[];
       };
       r2_buckets: Array<{
         binding: string;
@@ -542,6 +591,7 @@ describe("hosted deploy automation helpers", () => {
         max_instances: number;
         rollout_active_grace_period?: number;
         rollout_step_percentage?: number[];
+        ssh: { enabled: boolean };
       }>;
       durable_objects: {
         bindings: Array<{
@@ -559,6 +609,10 @@ describe("hosted deploy automation helpers", () => {
       }>;
       placement: {
         mode: string;
+      };
+      queues: {
+        consumers: unknown[];
+        producers: unknown[];
       };
       r2_buckets: Array<{
         binding: string;
@@ -584,12 +638,14 @@ describe("hosted deploy automation helpers", () => {
     ]);
     expect(checkedInConfig.containers).toHaveLength(generatedConfig.containers.length);
     for (const [index, generatedContainer] of generatedConfig.containers.entries()) {
+      expect(generatedContainer.ssh).toEqual({ enabled: false });
       expect(checkedInConfig.containers[index]).toMatchObject({
         class_name: generatedContainer.class_name,
         instance_type: generatedContainer.instance_type,
         max_instances: generatedContainer.max_instances,
         rollout_active_grace_period: generatedContainer.rollout_active_grace_period,
         rollout_step_percentage: generatedContainer.rollout_step_percentage,
+        ssh: generatedContainer.ssh,
       });
     }
     expect(checkedInConfig.durable_objects.bindings).toEqual(generatedConfig.durable_objects.bindings);
@@ -599,8 +655,7 @@ describe("hosted deploy automation helpers", () => {
     expect(checkedInConfig.migrations).toEqual(generatedConfig.migrations);
     expect(checkedInConfig.placement).toEqual(generatedConfig.placement);
     expect(checkedInConfig.r2_buckets).toEqual(generatedConfig.r2_buckets);
-    expect(checkedInConfig).not.toHaveProperty("queues");
-    expect(generatedConfig).not.toHaveProperty("queues");
+    expect(checkedInConfig.queues).toEqual(generatedConfig.queues);
     expect(checkedInConfig.version_metadata).toEqual(generatedConfig.version_metadata);
     expect(checkedInConfig.triggers).toEqual(generatedConfig.triggers);
   });
@@ -668,6 +723,37 @@ describe("hosted deploy automation helpers", () => {
     expect(environment.workerVars.HOSTED_EXECUTION_RUNNER_ENV_PROFILES).toBe("telegram,mapbox");
   });
 
+  it("preserves exact Android gate semantics through generated Worker config", () => {
+    for (const [rawValue, expectedValue] of [
+      [undefined, undefined],
+      ["", undefined],
+      ["0", undefined],
+      ["true", undefined],
+      [" 1 ", undefined],
+      ["1 ", undefined],
+      ["\n1", undefined],
+      ["1", "1"],
+    ] as const) {
+      const environment = readHostedDeployAutomationEnvironment({
+        CF_BUNDLES_BUCKET: "hosted-bundles",
+        CF_BUNDLES_PREVIEW_BUCKET: "hosted-bundles-preview",
+        CF_WORKER_NAME: "hosted-worker",
+        ...REQUIRED_HOSTED_CRYPTO_WORKER_VARS,
+        ...(rawValue === undefined
+          ? {}
+          : { MURPH_ANDROID_APP_ENABLED: rawValue }),
+      });
+      const config = buildHostedWranglerDeployConfig(environment) as {
+        vars: Record<string, string>;
+      };
+      const platformEnv = buildHostedRunnerContainerPlatformEnv(config.vars);
+
+      expect(environment.workerVars.MURPH_ANDROID_APP_ENABLED).toBe(expectedValue);
+      expect(config.vars.MURPH_ANDROID_APP_ENABLED).toBe(expectedValue);
+      expect(platformEnv.MURPH_ANDROID_APP_ENABLED).toBe(expectedValue);
+    }
+  });
+
   it("defaults runner env profiles to the full hosted integration set", () => {
     const environment = readHostedDeployAutomationEnvironment({
       CF_BUNDLES_BUCKET: "hosted-bundles",
@@ -697,12 +783,12 @@ describe("hosted deploy automation helpers", () => {
     });
   });
 
-  it("renders an optional local container SSH public key without preserving comments", () => {
+  it("keeps container SSH disabled when retired SSH inputs are still present", () => {
     const environment = readHostedDeployAutomationEnvironment({
       CF_BUNDLES_BUCKET: "hosted-bundles",
       CF_BUNDLES_PREVIEW_BUCKET: "hosted-bundles-preview",
       CF_CONTAINER_SSH_KEY_NAME: "debug-key",
-      CF_CONTAINER_SSH_PUBLIC_KEY: `${VALID_TEST_SSH_ED25519_PUBLIC_KEY} local-comment`,
+      CF_CONTAINER_SSH_PUBLIC_KEY: "ssh-ed25519 retired-key-material",
       CF_WORKER_NAME: "hosted-worker",
       ...REQUIRED_HOSTED_CRYPTO_WORKER_VARS,
     });
@@ -710,58 +796,20 @@ describe("hosted deploy automation helpers", () => {
       compatibility_flags: string[];
       containers: Array<{
         authorized_keys?: Array<{ name: string; public_key: string }>;
-        ssh?: { enabled: boolean };
+        ssh: { enabled: boolean };
       }>;
     };
 
-    expect(config.compatibility_flags).toEqual(["nodejs_compat", "containers_pid_namespace"]);
+    expect(environment).not.toHaveProperty("containerSshKey");
+    expect(config.compatibility_flags).toEqual([
+      "nodejs_compat",
+      "containers_pid_namespace",
+    ]);
     expect(config.containers).toHaveLength(2);
     for (const container of config.containers) {
-      expect(container.ssh).toEqual({ enabled: true });
-      expect(container.authorized_keys).toEqual([{
-        name: "debug-key",
-        public_key: VALID_TEST_SSH_ED25519_PUBLIC_KEY,
-      }]);
+      expect(container.ssh).toEqual({ enabled: false });
+      expect(container).not.toHaveProperty("authorized_keys");
     }
-  });
-
-  it("rejects non-Ed25519 container SSH public keys", () => {
-    expect(() =>
-      readHostedDeployAutomationEnvironment({
-        CF_BUNDLES_BUCKET: "hosted-bundles",
-        CF_BUNDLES_PREVIEW_BUCKET: "hosted-bundles-preview",
-        CF_CONTAINER_SSH_PUBLIC_KEY:
-          "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQCinvalid",
-        CF_WORKER_NAME: "hosted-worker",
-        ...REQUIRED_HOSTED_CRYPTO_WORKER_VARS,
-      }),
-    ).toThrowError(/CF_CONTAINER_SSH_PUBLIC_KEY must be an ssh-ed25519 public key\./u);
-  });
-
-  it("rejects malformed Ed25519 container SSH public key bodies", () => {
-    expect(() =>
-      readHostedDeployAutomationEnvironment({
-        CF_BUNDLES_BUCKET: "hosted-bundles",
-        CF_BUNDLES_PREVIEW_BUCKET: "hosted-bundles-preview",
-        CF_CONTAINER_SSH_PUBLIC_KEY:
-          "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIMurphContainerDebugKey000000000000000",
-        CF_WORKER_NAME: "hosted-worker",
-        ...REQUIRED_HOSTED_CRYPTO_WORKER_VARS,
-      }),
-    ).toThrowError(/CF_CONTAINER_SSH_PUBLIC_KEY must be an ssh-ed25519 public key\./u);
-  });
-
-  it("rejects container SSH key names that are not neutral slugs", () => {
-    expect(() =>
-      readHostedDeployAutomationEnvironment({
-        CF_BUNDLES_BUCKET: "hosted-bundles",
-        CF_BUNDLES_PREVIEW_BUCKET: "hosted-bundles-preview",
-        CF_CONTAINER_SSH_KEY_NAME: "Debug Key",
-        CF_CONTAINER_SSH_PUBLIC_KEY: VALID_TEST_SSH_ED25519_PUBLIC_KEY,
-        CF_WORKER_NAME: "hosted-worker",
-        ...REQUIRED_HOSTED_CRYPTO_WORKER_VARS,
-      }),
-    ).toThrowError(/CF_CONTAINER_SSH_KEY_NAME must be a neutral lowercase slug/u);
   });
 
   it("rejects invalid custom container instance JSON", () => {
@@ -800,7 +848,6 @@ describe("hosted deploy automation helpers", () => {
 
     expect(buildHostedWorkerSecretsPayload({
       ...REQUIRED_PRIVATE_IMAGE_WORKER_SECRET,
-      AGENTMAIL_API_KEY: "agentmail-secret",
       GARMIN_API_BASE_URL: "https://apis.garmin.com/wellness-api/rest",
       GARMIN_CLIENT_ID: "garmin-client-id",
       GARMIN_CLIENT_SECRET: "garmin-client-secret",
@@ -1101,5 +1148,38 @@ describe("hosted deploy automation helpers", () => {
     expect(deployNoOcWorker).toBeGreaterThan(-1);
     expect(deleteOcBuckets).toBeGreaterThan(deployNoOcWorker);
     expect(removeWebGuard).toBeGreaterThan(deleteOcBuckets);
+  });
+
+  it("keeps the daily-report rollback floor after transient mailbox state drains", async () => {
+    const deployGuide = await readFile(new URL("../DEPLOY.md", import.meta.url), "utf8");
+    const groupChallengeContract = await readFile(
+      new URL("../../../agent-docs/product-specs/group-challenge-data-diagnostics.md", import.meta.url),
+      "utf8",
+    );
+    const sectionStart = deployGuide.indexOf("Member-reported daily metrics add the");
+    const sectionEnd = deployGuide.indexOf("The scheduled Linq authority release", sectionStart);
+    const contractStart = groupChallengeContract.indexOf("Member-reported daily metrics use");
+    const contractEnd = groupChallengeContract.indexOf("## Acceptance cases", contractStart);
+    expect(sectionStart).toBeGreaterThan(-1);
+    expect(sectionEnd).toBeGreaterThan(sectionStart);
+    expect(contractStart).toBeGreaterThan(-1);
+    expect(contractEnd).toBeGreaterThan(contractStart);
+
+    const dailyReportRollout = deployGuide.slice(sectionStart, sectionEnd);
+    const dailyReportContract = groupChallengeContract.slice(contractStart, contractEnd);
+    expect(dailyReportRollout).toContain("hard rollback floor");
+    expect(dailyReportRollout).toContain("after the transient mailbox item drains");
+    expect(dailyReportRollout).toMatch(/never roll the runner below this\s+floor afterward/u);
+    expect(dailyReportRollout).toContain("existing meal-photo import");
+    expect(dailyReportRollout).toContain("projection rebuild");
+    expect(dailyReportRollout).toContain("no event rewrite");
+    expect(dailyReportContract).toContain("`apps/cloudflare/DEPLOY.md` is the authoritative rollout and");
+    expect(dailyReportContract).toContain("permanent contracts/query/runner rollback floor");
+    expect(dailyReportContract).toMatch(/independent of retained, pending, unconsumed, or\s+drained mailbox work/u);
+
+    for (const owner of [dailyReportRollout, dailyReportContract]) {
+      expect(owner).not.toContain("rollback floor while any report is retained or unconsumed");
+      expect(owner).not.toContain("until the retained population has drained");
+    }
   });
 });

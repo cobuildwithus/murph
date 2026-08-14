@@ -36,6 +36,7 @@ export interface HostedMailboxImportCheckpointInput {
   deferConversationUntil?: HostedMailboxConversationDeferral | null;
   deferCheckpoint?: boolean;
   expectedUserId: string;
+  fetchSignal?: AbortSignal | null;
   importItem(item: HostedMailboxResolvedImportItem): Promise<HostedMailboxItemImportOutcome>;
   lanes?: readonly HostedMailboxLane[];
   limitPerLane: number;
@@ -108,6 +109,7 @@ export async function importHostedMailboxPrefixAndCheckpoint(
   const importResult = await fetchAndProcessHostedMailboxPrefix({
     deferConversationUntil: input.deferConversationUntil ?? null,
     expectedUserId: input.expectedUserId,
+    fetchSignal: input.fetchSignal ?? null,
     importItem: async (item) => {
       const outcome = await input.importItem(item);
       if (

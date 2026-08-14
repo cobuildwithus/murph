@@ -316,9 +316,6 @@ describe('channel helper seams', () => {
       canAutoReply() {
         return null
       },
-      isReadyForSetup() {
-        return true
-      },
       supportsIdempotencyKey: true,
       supportedResponseMediaKinds: [],
       targetRequiredMessage: 'target required',
@@ -381,9 +378,6 @@ describe('channel helper seams', () => {
       channel: 'telegram',
       canAutoReply() {
         return null
-      },
-      isReadyForSetup() {
-        return true
       },
       supportsIdempotencyKey: false,
       supportedResponseMediaKinds: [],
@@ -465,7 +459,7 @@ describe('channel helper seams', () => {
     })
   })
 
-  it('routes descriptor sends through channel-specific helpers and enforces email identity requirements', async () => {
+  it('routes descriptor sends through retained channel helpers and requires an injected email transport', async () => {
     const sendTelegram = vi.fn().mockResolvedValue({
       cleanupMessages: [
         { messageId: '  telegram-message-1  ', target: '  telegram-chat  ' },
@@ -740,7 +734,7 @@ describe('channel helper seams', () => {
         {},
       ),
     ).rejects.toMatchObject({
-      code: 'ASSISTANT_EMAIL_IDENTITY_REQUIRED',
+      code: 'ASSISTANT_EMAIL_DELIVERY_UNAVAILABLE',
     })
   })
 
@@ -1269,6 +1263,7 @@ describe('channel helper seams', () => {
           providerMessageId: 'linq-text-message',
         },
         {
+          carriesIntentMedia: true,
           message: null,
           providerMessageId: 'linq-voice-message',
         },

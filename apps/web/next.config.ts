@@ -13,6 +13,7 @@ import {
 } from "./kernel-live-view-origin";
 import {
   isHostedWebDevFileSystemCacheEnabled,
+  isHostedWebSmokeArtifactMode,
   resolveHostedWebDistDir,
 } from "./next-artifacts";
 
@@ -66,11 +67,13 @@ const TURNSTILE_SOURCES = ["https://challenges.cloudflare.com"] as const;
 // scripts/check-og-asset-traces.ts fails the build when a trace goes missing.
 const OG_SHARE_ASSET_TRACE_INCLUDES = [
   "app/fonts/*.ttf",
+  "public/icons/murph-mark.svg",
   "public/logo.svg",
 ];
 // The footer availability indicator reads the incident.io status-page summary
 // from the browser, so the status-page origin must be reachable client-side.
 const STATUS_PAGE_CONNECT_SOURCES = ["https://status.withmurph.ai"] as const;
+const HOSTED_WEB_SMOKE_SERVER_EXTERNAL_PACKAGES = ["@temporalio/client"];
 
 const appDir = path.dirname(fileURLToPath(import.meta.url));
 const require = createRequire(import.meta.url);
@@ -289,23 +292,31 @@ export function configureHostedWebWorkflowLocalDataDir(
   );
 }
 
-export function buildHostedWebNextConfig(phase: string): NextConfig {
+export function buildHostedWebNextConfig(
+  phase: string,
+  environment: NodeJS.ProcessEnv = process.env,
+): NextConfig {
   return {
     // The repository already owns agent guidance at its root. Avoid generating
     // nested AGENTS.md and CLAUDE.md files whenever an agent starts Next dev.
     agentRules: false,
     allowedDevOrigins: ["local.withmurph.ai"],
-    distDir: resolveHostedWebDistDir(phase, process.env),
-    env: buildHostedWebClientEnv(process.env),
+    distDir: resolveHostedWebDistDir(phase, environment),
+    env: buildHostedWebClientEnv(environment),
     experimental: {
       cpus: HOSTED_WEB_PRODUCTION_BUILD_CPUS,
       // Next 16.3 enables persistent production-build caching by default.
       // Keep builds independent until that new state owner is evaluated
       // separately.
       turbopackFileSystemCacheForBuild: false,
-      turbopackFileSystemCacheForDev: isHostedWebDevFileSystemCacheEnabled(process.env),
+      turbopackFileSystemCacheForDev: isHostedWebDevFileSystemCacheEnabled(environment),
       // Source-map emission is the largest proven build-memory cost.
       turbopackSourceMaps: false,
+      // Workflow contributes Webpack configuration, so select Next's isolated
+      // build worker explicitly and enable its memory-optimized compiler path.
+      // This is the repeatedly proven production path on Vercel's 8-GB builder.
+      webpackBuildWorker: true,
+      webpackMemoryOptimizations: true,
     },
     outputFileTracingIncludes: {
       "/experiments": [
@@ -344,8 +355,15 @@ export function buildHostedWebNextConfig(phase: string): NextConfig {
       "/opengraph-image": OG_SHARE_ASSET_TRACE_INCLUDES,
       "/changelog/card/v1/[items]": OG_SHARE_ASSET_TRACE_INCLUDES,
       "/experiments/[experimentId]/card": OG_SHARE_ASSET_TRACE_INCLUDES,
+      "/imessage/card/v1/[payload]": OG_SHARE_ASSET_TRACE_INCLUDES,
     },
     outputFileTracingRoot: path.resolve(appDir, "../.."),
+    // Hosted-local smoke processes preload a fault injector that patches the
+    // installed Temporal client. Keep that package external in smoke artifacts
+    // so the application and preload share one constructor and prototype.
+    ...(isHostedWebSmokeArtifactMode(environment)
+      ? { serverExternalPackages: HOSTED_WEB_SMOKE_SERVER_EXTERNAL_PACKAGES }
+      : {}),
     transpilePackages: [...WORKSPACE_SOURCE_PACKAGE_NAMES],
     turbopack: buildHostedWebTurbopackConfig(),
     typescript: {
@@ -354,7 +372,7 @@ export function buildHostedWebNextConfig(phase: string): NextConfig {
     headers: async () => [
       {
         source: HOSTED_WEB_HEADER_SOURCE,
-        headers: buildHostedWebSecurityHeaders(process.env),
+        headers: buildHostedWebSecurityHeaders(environment),
       },
       {
         source: MURPH_SAFE_HEADER_SOURCE,

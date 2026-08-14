@@ -393,17 +393,17 @@
                           "minLength": 1
                         },
                         "channel": {
-                          "description": "Optional channel label such as telegram or email.",
+                          "description": "Optional local channel label: telegram.",
                           "type": "string",
                           "minLength": 1
                         },
                         "identity": {
-                          "description": "Optional local assistant identity id for multi-user routing. Email routes should use the configured AgentMail inbox id.",
+                          "description": "Optional local assistant identity id for multi-user routing.",
                           "type": "string",
                           "minLength": 1
                         },
                         "participant": {
-                          "description": "Optional remote participant identifier when the transport addresses a person directly. Use the transport-native participant value, such as an email correspondent; thread-addressed transports may rely on --thread instead.",
+                          "description": "Optional remote participant identifier when the transport addresses a person directly; thread-addressed transports may rely on --thread instead.",
                           "type": "string",
                           "minLength": 1
                         },
@@ -466,7 +466,7 @@
                           "type": "boolean"
                         },
                         "deliveryTarget": {
-                          "description": "Optional one-send outbound destination in the transport-native send format. For Telegram use a chat id or `<chatId>:topic:<messageThreadId>`; for email use a recipient address. Reply-in-place sessions can often omit this and reuse the saved thread.",
+                          "description": "Optional one-send Telegram destination as a chat id or `<chatId>:topic:<messageThreadId>`. Reply-in-place sessions can often omit this and reuse the saved thread.",
                           "type": "string",
                           "minLength": 1
                         }
@@ -499,17 +499,17 @@
                           "minLength": 1
                         },
                         "channel": {
-                          "description": "Optional channel label such as telegram or email.",
+                          "description": "Optional local channel label: telegram.",
                           "type": "string",
                           "minLength": 1
                         },
                         "identity": {
-                          "description": "Optional local assistant identity id for multi-user routing. Email routes should use the configured AgentMail inbox id.",
+                          "description": "Optional local assistant identity id for multi-user routing.",
                           "type": "string",
                           "minLength": 1
                         },
                         "participant": {
-                          "description": "Optional remote participant identifier when the transport addresses a person directly. Use the transport-native participant value, such as an email correspondent; thread-addressed transports may rely on --thread instead.",
+                          "description": "Optional remote participant identifier when the transport addresses a person directly; thread-addressed transports may rely on --thread instead.",
                           "type": "string",
                           "minLength": 1
                         },
@@ -596,17 +596,17 @@
                           "minLength": 1
                         },
                         "channel": {
-                          "description": "Optional channel label such as telegram or email.",
+                          "description": "Optional local channel label: telegram.",
                           "type": "string",
                           "minLength": 1
                         },
                         "identity": {
-                          "description": "Optional local assistant identity id for multi-user routing. Email routes should use the configured AgentMail inbox id.",
+                          "description": "Optional local assistant identity id for multi-user routing.",
                           "type": "string",
                           "minLength": 1
                         },
                         "participant": {
-                          "description": "Optional remote participant identifier when the transport addresses a person directly. Use the transport-native participant value, such as an email correspondent; thread-addressed transports may rely on --thread instead.",
+                          "description": "Optional remote participant identifier when the transport addresses a person directly; thread-addressed transports may rely on --thread instead.",
                           "type": "string",
                           "minLength": 1
                         },
@@ -616,7 +616,7 @@
                           "minLength": 1
                         },
                         "deliveryTarget": {
-                          "description": "Optional one-send outbound destination in the transport-native send format. For Telegram use a chat id or `<chatId>:topic:<messageThreadId>`; for email use a recipient address. Reply-in-place sessions can often omit this and reuse the saved thread.",
+                          "description": "Optional one-send Telegram destination as a chat id or `<chatId>:topic:<messageThreadId>`. Reply-in-place sessions can often omit this and reuse the saved thread.",
                           "type": "string",
                           "minLength": 1
                         }
@@ -722,12 +722,12 @@
                                   "maxLength": 128
                                 },
                                 "identity": {
-                                  "description": "Optional local assistant identity id to reuse for this saved channel target. Email targets require the configured AgentMail inbox id here.",
+                                  "description": "Optional local assistant identity id to reuse for this saved channel target.",
                                   "type": "string",
                                   "minLength": 1
                                 },
                                 "participant": {
-                                  "description": "Optional remote participant identifier when the transport addresses a person directly. Use the transport-native participant value, such as an email correspondent; thread-addressed transports may rely on --thread instead.",
+                                  "description": "Optional remote participant identifier when the transport addresses a person directly; thread-addressed transports may rely on --thread instead.",
                                   "type": "string",
                                   "minLength": 1
                                 },
@@ -737,7 +737,7 @@
                                   "minLength": 1
                                 },
                                 "deliveryTarget": {
-                                  "description": "Optional saved outbound destination in the transport-native send format. For Telegram use a chat id or `<chatId>:topic:<messageThreadId>`; for email use a recipient address.",
+                                  "description": "Optional saved Telegram destination as a chat id or `<chatId>:topic:<messageThreadId>`.",
                                   "type": "string",
                                   "minLength": 1
                                 }
@@ -1022,17 +1022,17 @@
                   "minLength": 1
                 },
                 "channel": {
-                  "description": "Optional channel label such as telegram or email.",
+                  "description": "Optional local channel label: telegram.",
                   "type": "string",
                   "minLength": 1
                 },
                 "identity": {
-                  "description": "Optional local assistant identity id for multi-user routing. Email routes should use the configured AgentMail inbox id.",
+                  "description": "Optional local assistant identity id for multi-user routing.",
                   "type": "string",
                   "minLength": 1
                 },
                 "participant": {
-                  "description": "Optional remote participant identifier when the transport addresses a person directly. Use the transport-native participant value, such as an email correspondent; thread-addressed transports may rely on --thread instead.",
+                  "description": "Optional remote participant identifier when the transport addresses a person directly; thread-addressed transports may rely on --thread instead.",
                   "type": "string",
                   "minLength": 1
                 },
@@ -3583,6 +3583,36 @@
                       }
                     }
                   }
+                },
+                "knowledge": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "commands": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "search": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "properties": {
+                            "options": {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "properties": {
+                                "limit": {
+                                  "default": 3,
+                                  "type": "integer",
+                                  "exclusiveMinimum": 0,
+                                  "maximum": 3
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
                 }
               }
             }
@@ -5647,6 +5677,63 @@
                     }
                   }
                 },
+                "entry": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "commands": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "list": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "properties": {
+                            "options": {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "properties": {
+                                "requestId": {
+                                  "description": "Optional caller-supplied request id for audit correlation.",
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 128
+                                },
+                                "metric": {
+                                  "minItems": 1,
+                                  "type": "array",
+                                  "items": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 120
+                                  },
+                                  "description": "Measurement metric name or slug. Repeat --metric for OR matching. Registered aliases match their canonical metric identity; unknown custom metrics use normalized exact matching, never fuzzy matching."
+                                },
+                                "from": {
+                                  "description": "Optional inclusive lower date bound in YYYY-MM-DD form.",
+                                  "type": "string",
+                                  "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+                                },
+                                "to": {
+                                  "description": "Optional inclusive upper date bound in YYYY-MM-DD form.",
+                                  "type": "string",
+                                  "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+                                },
+                                "limit": {
+                                  "default": 10,
+                                  "description": "Maximum number of results to return.",
+                                  "type": "integer",
+                                  "exclusiveMinimum": 0,
+                                  "maximum": 200
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
                 "manifest": {
                   "type": "object",
                   "additionalProperties": false,
@@ -5953,6 +6040,10 @@
                                   "exclusiveMinimum": 0,
                                   "maximum": 9007199254740991,
                                   "description": "One-based set order. Read the active workout and pass it explicitly."
+                                },
+                                "requireExistingSet": {
+                                  "description": "Fail instead of appending when the selected set no longer exists.",
+                                  "type": "boolean"
                                 },
                                 "type": {
                                   "type": "string",
@@ -6682,16 +6773,35 @@
                                   "maxLength": 128
                                 },
                                 "source": {
-                                  "description": "Optional source hint such as strong or hevy.",
+                                  "description": "Strong or Hevy dialect; required when the headers are shared by both apps.",
                                   "type": "string",
-                                  "minLength": 1,
-                                  "maxLength": 80
+                                  "enum": [
+                                    "strong",
+                                    "hevy"
+                                  ]
                                 },
                                 "delimiter": {
                                   "description": "Optional single-character CSV delimiter override.",
                                   "type": "string",
                                   "minLength": 1,
                                   "maxLength": 1
+                                },
+                                "weightUnit": {
+                                  "description": "Required when positive CSV weights do not include unit metadata.",
+                                  "type": "string",
+                                  "enum": [
+                                    "lb",
+                                    "kg"
+                                  ]
+                                },
+                                "distanceUnit": {
+                                  "description": "Required when positive CSV distances do not include unit metadata.",
+                                  "type": "string",
+                                  "enum": [
+                                    "m",
+                                    "km",
+                                    "mi"
+                                  ]
                                 }
                               }
                             }
@@ -6712,10 +6822,12 @@
                                   "maxLength": 128
                                 },
                                 "source": {
-                                  "description": "Optional source hint such as strong or hevy.",
+                                  "description": "Strong or Hevy dialect; required when the headers are shared by both apps.",
                                   "type": "string",
-                                  "minLength": 1,
-                                  "maxLength": 80
+                                  "enum": [
+                                    "strong",
+                                    "hevy"
+                                  ]
                                 },
                                 "delimiter": {
                                   "description": "Optional single-character CSV delimiter override.",
@@ -6723,8 +6835,29 @@
                                   "minLength": 1,
                                   "maxLength": 1
                                 },
+                                "weightUnit": {
+                                  "description": "Required when positive CSV weights do not include unit metadata.",
+                                  "type": "string",
+                                  "enum": [
+                                    "lb",
+                                    "kg"
+                                  ]
+                                },
+                                "distanceUnit": {
+                                  "description": "Required when positive CSV distances do not include unit metadata.",
+                                  "type": "string",
+                                  "enum": [
+                                    "m",
+                                    "km",
+                                    "mi"
+                                  ]
+                                },
                                 "storeRawOnly": {
                                   "description": "Store the raw CSV + manifest without creating workout events.",
+                                  "type": "boolean"
+                                },
+                                "correctUnits": {
+                                  "description": "Explicitly supersede an exact prior import after correcting its unit choice.",
                                   "type": "boolean"
                                 }
                               }
@@ -10535,6 +10668,36 @@
                           "type": "integer",
                           "exclusiveMinimum": 0,
                           "maximum": 30
+                        }
+                      }
+                    }
+                  }
+                },
+                "patterns": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "options": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "requestId": {
+                          "description": "Optional caller-supplied request id for audit correlation.",
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128
+                        },
+                        "date": {
+                          "description": "Optional last action date in YYYY-MM-DD form. Defaults to today.",
+                          "type": "string",
+                          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+                        },
+                        "windowDays": {
+                          "default": 120,
+                          "description": "Calendar-day window for matched personal patterns. Defaults to 120 days.",
+                          "type": "integer",
+                          "minimum": 28,
+                          "maximum": 366
                         }
                       }
                     }

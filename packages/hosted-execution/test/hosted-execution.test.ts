@@ -13,7 +13,12 @@ import {
 } from "../src/auth.ts";
 import {
   getHostedBrowserVaultReplicaStorageKeyId,
+  HOSTED_BROWSER_VAULT_REPLICA_METRIC_BUCKET_COUNT,
+  HOSTED_BROWSER_VAULT_REPLICA_METRIC_BUCKET_IDS,
+  HOSTED_BROWSER_VAULT_REPLICA_METRIC_BUCKET_SET_REF_SCHEMA,
+  HOSTED_BROWSER_VAULT_REPLICA_SHARD_SET_REF_SCHEMA,
   parseHostedBrowserVaultReplicaRef,
+  type HostedBrowserVaultReplicaMetricBucketSetRef,
   type HostedBrowserVaultReplicaRef,
 } from "../src/browser-vault.ts";
 import {
@@ -56,6 +61,8 @@ import {
   HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV,
   HOSTED_RUNTIME_PROCESS_ENV,
   isHostedRuntimeProcessEnv,
+  isMurphAndroidAppEnabled,
+  MURPH_ANDROID_APP_ENABLED_ENV,
   normalizeHostedExecutionBaseUrl,
   normalizeHostedExecutionString,
 } from "../src/env.ts";
@@ -152,6 +159,92 @@ describe("hosted execution coverage gaps", () => {
     } satisfies HostedBrowserVaultReplicaRef;
 
     expect(parseHostedBrowserVaultReplicaRef(ref)).toEqual(ref);
+    const shards = {
+      core: {
+        byteLength: 1_000,
+        contentEncoding: "gzip" as const,
+        encodedByteLength: 200,
+        objectKey: `${ref.objectKey}.core`,
+      },
+      labs: {
+        byteLength: 500,
+        contentEncoding: "gzip" as const,
+        encodedByteLength: 100,
+        objectKey: `${ref.objectKey}.labs`,
+      },
+      metricsIndex: {
+        byteLength: 5_000,
+        contentEncoding: "identity" as const,
+        encodedByteLength: 5_000,
+        objectKey: `${ref.objectKey}.metrics-index`,
+      },
+      schema: HOSTED_BROWSER_VAULT_REPLICA_SHARD_SET_REF_SCHEMA,
+    };
+    const metricBuckets: HostedBrowserVaultReplicaMetricBucketSetRef = {
+      bucketCount: HOSTED_BROWSER_VAULT_REPLICA_METRIC_BUCKET_COUNT,
+      buckets: Object.fromEntries(HOSTED_BROWSER_VAULT_REPLICA_METRIC_BUCKET_IDS.map(
+        (bucketId) => [bucketId, {
+          byteLength: 2_000,
+          contentEncoding: "gzip" as const,
+          encodedByteLength: 300,
+          objectKey: `${ref.objectKey}.metric-bucket-${bucketId}`,
+        }],
+      )) as HostedBrowserVaultReplicaMetricBucketSetRef["buckets"],
+      schema: HOSTED_BROWSER_VAULT_REPLICA_METRIC_BUCKET_SET_REF_SCHEMA,
+    };
+    expect(parseHostedBrowserVaultReplicaRef({ ...ref, metricBuckets, shards })).toEqual({
+      ...ref,
+      metricBuckets,
+      shards,
+    });
+    expect(() => parseHostedBrowserVaultReplicaRef({
+      ...ref,
+      metricBuckets,
+      shards: { core: shards.core, labs: shards.labs, schema: shards.schema },
+    })).toThrow(/shards\.metricsIndex is required/u);
+    expect(() => parseHostedBrowserVaultReplicaRef({
+      ...ref,
+      metricBuckets,
+      shards: {
+        ...shards,
+        core: { ...shards.core, encodedByteLength: shards.core.byteLength },
+      },
+    })).toThrow(/encodedByteLength must be smaller/u);
+    expect(() => parseHostedBrowserVaultReplicaRef({
+      ...ref,
+      metricBuckets,
+      shards: {
+        ...shards,
+        metricsIndex: { ...shards.metricsIndex, encodedByteLength: 4_999 },
+      },
+    })).toThrow(/encodedByteLength must equal/u);
+    expect(() => parseHostedBrowserVaultReplicaRef({ ...ref, shards }))
+      .toThrow(/shards and .*metricBuckets must be present together/u);
+    const { "1f": _missingBucket, ...incompleteBuckets } = metricBuckets.buckets;
+    expect(() => parseHostedBrowserVaultReplicaRef({
+      ...ref,
+      metricBuckets: { ...metricBuckets, buckets: incompleteBuckets },
+      shards,
+    })).toThrow(/metricBuckets\.buckets\.1f is required/u);
+    expect(() => parseHostedBrowserVaultReplicaRef({
+      ...ref,
+      metricBuckets: {
+        ...metricBuckets,
+        buckets: { ...metricBuckets.buckets, "20": metricBuckets.buckets["00"] },
+      },
+      shards,
+    })).toThrow(/unsupported metric bucket id/u);
+    expect(() => parseHostedBrowserVaultReplicaRef({
+      ...ref,
+      metricBuckets: {
+        ...metricBuckets,
+        buckets: {
+          ...metricBuckets.buckets,
+          "00": { ...metricBuckets.buckets["00"], objectKey: shards.core.objectKey },
+        },
+      },
+      shards,
+    })).toThrow(/object keys must be distinct/u);
     expect(getHostedBrowserVaultReplicaStorageKeyId(ref)).toBe(ref.keyId);
     const dataKeyRef = {
       ...ref,
@@ -287,7 +380,7 @@ describe("hosted execution coverage gaps", () => {
   });
 
   it("centralizes browser-vault replica source hash and refresh decisions", () => {
-    expect(BROWSER_VAULT_REPLICA_CURRENT_GENERATION).toBe(3);
+    expect(BROWSER_VAULT_REPLICA_CURRENT_GENERATION).toBe(10);
     const base = {
       hash: "a".repeat(64),
       key: "cloudflare-workspace-snapshots/base.bundle",
@@ -514,11 +607,22 @@ describe("hosted execution coverage gaps", () => {
     expect(HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV).toBe(
       "MURPH_HOSTED_CODEX_MODEL_CATALOG_JSON",
     );
+    expect(MURPH_ANDROID_APP_ENABLED_ENV).toBe("MURPH_ANDROID_APP_ENABLED");
     expect(
       isHostedRuntimeProcessEnv({ [HOSTED_RUNTIME_PROCESS_ENV]: " 1 " }),
     ).toBe(true);
     expect(isHostedRuntimeProcessEnv({ [HOSTED_RUNTIME_PROCESS_ENV]: "0" })).toBe(false);
     expect(isHostedRuntimeProcessEnv({})).toBe(false);
+    expect(
+      isMurphAndroidAppEnabled({ [MURPH_ANDROID_APP_ENABLED_ENV]: " 1 " }),
+    ).toBe(false);
+    expect(
+      isMurphAndroidAppEnabled({ [MURPH_ANDROID_APP_ENABLED_ENV]: "1" }),
+    ).toBe(true);
+    expect(
+      isMurphAndroidAppEnabled({ [MURPH_ANDROID_APP_ENABLED_ENV]: "true" }),
+    ).toBe(false);
+    expect(isMurphAndroidAppEnabled({})).toBe(false);
   });
 
   it("exports canonical hosted execution contracts without staged payload helpers", async () => {
@@ -531,7 +635,6 @@ describe("hosted execution coverage gaps", () => {
       "assistant.ask.completed",
       "clinical-records.sync-requested",
       "device-sync.wake",
-      "group-newsletter.email-needed",
       "runtime.manual-requested",
       "runtime.pending-effects-reconcile-requested",
       "runtime.maintenance-requested",
@@ -727,7 +830,6 @@ describe("hosted execution coverage gaps", () => {
       "HOSTED_RUNTIME_LOG_PATH",
       "HOSTED_RUNTIME_MAILBOX_FETCH_PATH",
       "HOSTED_RUNTIME_MAILBOX_PAYLOAD_FETCH_PATH",
-      "HOSTED_RUNTIME_NEWSLETTER_TOOL_PATH",
       "HOSTED_RUNTIME_OWNER_RELEASED_PATH",
       "HOSTED_RUNTIME_OWNER_RELEASE_IMMEDIATE_RECHECK_QUERY",
       "HOSTED_RUNTIME_PLAN_USAGE_TOOL_PATH",
@@ -749,9 +851,6 @@ describe("hosted execution coverage gaps", () => {
     );
     expect(routeModule.HOSTED_RUNTIME_EMAIL_EGRESS_RECIPIENT_PATH).toBe(
       "/api/internal/hosted-runtime/email-egress/recipient",
-    );
-    expect(routeModule.HOSTED_RUNTIME_NEWSLETTER_TOOL_PATH).toBe(
-      "/api/internal/hosted-execution/groups/newsletter-tool",
     );
     expect(routeModule.HOSTED_RUNTIME_ASSISTANT_CONFIGURATION_TOOL_PATH).toBe(
       "/api/internal/hosted-execution/assistant-configuration/tool",

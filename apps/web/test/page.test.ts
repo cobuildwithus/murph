@@ -7,6 +7,7 @@ import { afterEach, expect, test, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   getMurphGithubStarCount: vi.fn(),
   getHostedPageAuthSnapshot: vi.fn(),
+  scheduleHomepageBrowserVaultPreparation: vi.fn(),
   headers: vi.fn(
     async () =>
       new Headers({
@@ -66,6 +67,11 @@ vi.mock("@/src/lib/hosted-onboarding/page-auth", () => ({
   getHostedDashboardPageAuthSnapshot: mocks.getHostedPageAuthSnapshot,
 }));
 
+vi.mock("@/src/lib/browser-vault/homepage-preparation", () => ({
+  scheduleHomepageBrowserVaultPreparation:
+    mocks.scheduleHomepageBrowserVaultPreparation,
+}));
+
 vi.mock("@/src/lib/github-stars", async () => {
   const actual =
     await vi.importActual<typeof import("@/src/lib/github-stars")>(
@@ -122,6 +128,7 @@ test("HomePage renders the canonical landing page at the root route", async () =
   const markup = renderToStaticMarkup(await HomePage());
 
   expect(mocks.getHostedPageAuthSnapshot).toHaveBeenCalledTimes(1);
+  expect(mocks.scheduleHomepageBrowserVaultPreparation).not.toHaveBeenCalled();
   expect(mocks.getMurphGithubStarCount).toHaveBeenCalledTimes(1);
   expect(mocks.headers).toHaveBeenCalledTimes(1);
   expect(mocks.LandingAuthActions).toHaveBeenCalledTimes(5);
@@ -216,9 +223,9 @@ test("HomePage renders the canonical landing page at the root route", async () =
     pricingStart,
     markup.indexOf("</section>", pricingStart),
   );
-  assert.match(pricingSection, /\$8\/mo/);
+  assert.match(pricingSection, /Free starter usage/);
   assert.match(pricingSection, /Open source/);
-  assert.match(pricingSection, /Cancel anytime\./);
+  assert.match(pricingSection, /Starter usage does not expire\./);
   assert.doesNotMatch(pricingSection, /free trial/i);
   assert.match(markup, /data-root-landing-auth-actions-label="Dashboard"/);
   assert.match(
@@ -266,6 +273,21 @@ test("HomePage renders the canonical landing page at the root route", async () =
   assert.doesNotMatch(markup, /Perplexity Health/);
   assert.doesNotMatch(markup, /Can I choose which AI provider Murph uses\?/);
   assert.doesNotMatch(markup, /Your wearable shows data/);
+  assert.match(
+    markup,
+    /\/murph-headshots\/murph-headshot-(?:01|02|03|04)-avatar\.avif/,
+  );
+  assert.match(markup, /\/personas\/athlete-avatar\.avif/);
+  assert.match(markup, /\/personas\/sleeper-avatar\.avif/);
+  assert.match(markup, /\/personas\/founder-avatar\.avif/);
+  assert.doesNotMatch(
+    markup,
+    /\/murph-headshots\/murph-headshot-(?:01|02|03|04)\.png/,
+  );
+  assert.doesNotMatch(
+    markup,
+    /\/personas\/(?:athlete|sleeper|founder)\.jpg/,
+  );
 });
 
 test("HomePage keeps the technical runtime section in order and honors both provider flags", async () => {
@@ -424,6 +446,7 @@ test("HomePage keeps the final CTA consistent for authenticated sessions", async
   vi.clearAllMocks();
   mocks.getHostedPageAuthSnapshot.mockResolvedValue({
     authenticated: true,
+    authenticatedMember: { id: "member_homepage" },
   });
   mocks.getMurphGithubStarCount.mockResolvedValue(null);
   mocks.headers.mockResolvedValue(new Headers({
@@ -434,6 +457,9 @@ test("HomePage keeps the final CTA consistent for authenticated sessions", async
 
   const markup = renderToStaticMarkup(await HomePage());
 
+  expect(mocks.scheduleHomepageBrowserVaultPreparation).toHaveBeenCalledWith({
+    memberId: "member_homepage",
+  });
   expect(mocks.headers).toHaveBeenCalledTimes(1);
   expect(mocks.LandingAuthActions).toHaveBeenCalledTimes(5);
   expect(mocks.LandingAuthActions).toHaveBeenNthCalledWith(

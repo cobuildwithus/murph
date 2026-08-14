@@ -11,7 +11,9 @@ export async function* readHostedRuntimeResponseBodyChunks(input: {
   signal?: AbortSignal | null;
   timeoutMs: number;
 }): AsyncIterable<Uint8Array> {
-  const timeoutSignal = AbortSignal.timeout(input.timeoutMs);
+  const timeoutSignal = input.timeoutMs === 0
+    ? AbortSignal.abort(new DOMException("The operation timed out.", "TimeoutError"))
+    : AbortSignal.timeout(input.timeoutMs);
   const readSignal = combineAbortSignalsWithCleanup(input.signal ?? null, timeoutSignal);
   const reader = input.body.getReader();
   let streamDone = false;

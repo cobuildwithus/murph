@@ -1,7 +1,12 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { Suspense } from "react";
 
-import { GroupFundingSignInButton } from "@/src/components/hosted-groups/group-funding-sign-in-button";
+import {
+  GroupFundingSignInButton,
+  GroupFundingSignInRequired,
+} from "@/src/components/hosted-groups/group-funding-sign-in-button";
+import { GroupFundingSupporters } from "@/src/components/hosted-groups/group-funding-supporters";
 import {
   GroupUsageFundingActions,
   GroupUsageFundingShell,
@@ -27,6 +32,7 @@ import {
 } from "@/src/components/ui/card";
 import {
   readHostedGroupUsageFundingTargetByJoinCode,
+  readHostedGroupUsageFundingManagementTargetByLocator,
   readHostedGroupUsageStatus,
 } from "@/src/lib/hosted-groups/group-usage-funding";
 import {
@@ -34,6 +40,7 @@ import {
 } from "@/src/lib/hosted-groups/group-sponsorship-authorization";
 import {
   hasHostedGroupSponsorshipCustomizationAuthority,
+  readHostedGroupFundingSupporters,
   readHostedGroupSponsorshipDraftForCreator,
 } from "@/src/lib/hosted-groups/group-sponsorship-store";
 import {
@@ -60,6 +67,7 @@ export const fetchCache = "force-no-store";
 export const revalidate = 0;
 
 const HOSTED_USAGE_CREDIT_PURCHASE_ID_PATTERN = /^hucp_[A-Za-z0-9_-]{16}$/u;
+const HOSTED_GROUP_FUNDING_SUPPORTERS_TIMEOUT_MS = 2_000;
 
 type GroupFundingSearchParams = {
   usageCheckout?: string | string[] | undefined;
@@ -87,19 +95,35 @@ export default async function GroupFundingPage({
     searchParams ?? Promise.resolve<GroupFundingSearchParams>({}),
   ]);
   const prisma = getPrisma();
-  const [auth, target] = await Promise.all([
+  const [auth, publicTarget] = await Promise.all([
     getHostedPageAuthSnapshot(),
     readHostedGroupUsageFundingTargetByJoinCode({ joinCode, prisma }),
   ]);
+  const member = auth.authenticatedMember;
+  const managementTarget = !publicTarget && member
+    ? await readHostedGroupUsageFundingManagementTargetByLocator({
+        locator: joinCode,
+        prisma,
+      })
+    : null;
+  const target = publicTarget ?? managementTarget;
   if (!target) {
-    return <GroupFundingUnavailable />;
+    return member ? <GroupFundingUnavailable /> : <GroupFundingSignInRequired />;
   }
 
-  const groupName = target.displayName?.trim() || describeGroupKind(target.kind);
-  const member = auth.authenticatedMember;
+  const managementOnly = publicTarget === null;
   const requestedPurchaseReturn = readUsageTopUpPurchaseReturn(
     resolvedSearchParams,
   );
+  const customizationAllowedPromise =
+    member && !managementOnly && !member.suspendedAt
+      ? hasHostedGroupSponsorshipCustomizationAuthority({
+          containerMemberId: target.runtimeMemberId,
+          now: new Date(),
+          participantMemberId: member.id,
+          prisma,
+        })
+      : Promise.resolve(false);
   const [
     usageStatus,
     activePurchase,
@@ -108,11 +132,13 @@ export default async function GroupFundingPage({
     sponsorshipManagement,
   ] =
     await Promise.all([
-      readHostedGroupUsageStatus({
-        prisma,
-        runtimeMemberId: target.runtimeMemberId,
-      }),
-      member
+      managementOnly
+        ? Promise.resolve({ sponsorshipStatus: "sponsored" } as const)
+        : readHostedGroupUsageStatus({
+            prisma,
+            runtimeMemberId: target.runtimeMemberId,
+          }),
+      member && !managementOnly && !member.suspendedAt
         ? readHostedActiveUsageCreditPurchaseForPayer({
             serverApprovedPayableTargets: [{
               beneficiaryMemberId: target.runtimeMemberId,
@@ -123,7 +149,7 @@ export default async function GroupFundingPage({
             prisma,
           }).catch(() => null)
         : Promise.resolve(null),
-      member && requestedPurchaseReturn
+      member && !managementOnly && !member.suspendedAt && requestedPurchaseReturn
         ? readHostedUsageCreditPurchaseStatus({
             beneficiaryMemberId: target.runtimeMemberId,
             payerMemberId: member.id,
@@ -131,15 +157,8 @@ export default async function GroupFundingPage({
             purchaseId: requestedPurchaseReturn.purchaseId,
           }).then(() => true).catch(() => false)
         : Promise.resolve(false),
-      member && !member.suspendedAt
-        ? hasHostedGroupSponsorshipCustomizationAuthority({
-            containerMemberId: target.runtimeMemberId,
-            now: new Date(),
-            participantMemberId: member.id,
-            prisma,
-          })
-        : Promise.resolve(false),
-      member && !member.suspendedAt
+      customizationAllowedPromise,
+      member
         ? readHostedGroupSponsorshipManagementProjection({
             beneficiaryMemberId: target.runtimeMemberId,
             payerMemberId: member.id,
@@ -147,9 +166,10 @@ export default async function GroupFundingPage({
           })
         : Promise.resolve(null),
     ]);
-  if (!usageStatus) {
+  if (!usageStatus || (managementOnly && !sponsorshipManagement)) {
     return <GroupFundingUnavailable />;
   }
+  const groupName = target.displayName?.trim() || describeGroupKind(target.kind);
   const activePurchaseMatchesTarget =
     activePurchase?.target.kind === "group" &&
     activePurchase.target.beneficiaryMemberId === target.runtimeMemberId;
@@ -171,7 +191,7 @@ export default async function GroupFundingPage({
           url: undefined,
         }
     : null;
-  const oneTimeOffers = member && !member.suspendedAt && !activePurchase
+  const oneTimeOffers = member && !managementOnly && !member.suspendedAt && !activePurchase
     ? projectHostedUsageTopUpOffers(
         readHostedConfiguredGroupSponsorshipOfferCodes({
           configuredOfferCodes: readHostedConfiguredUsageCreditOfferCodes(),
@@ -219,68 +239,96 @@ export default async function GroupFundingPage({
     <main className="mx-auto flex min-h-screen w-full max-w-lg flex-col justify-center px-4 py-8 sm:px-6 sm:py-12">
       <GroupUsageFundingShell
         action={
-          member ? (
-            sponsorshipManagement?.status === "pending_activation" &&
-            visibleActivePurchase ? (
-              <GroupSponsorshipDialog
-                activePurchase={visibleActivePurchase}
-                checkoutUrl={`/api/groups/fund/${encodeURIComponent(target.joinCode)}/usage-credit/checkout`}
-                customizationAllowed={customizationAllowed}
-                frozenSponsorship={frozenSponsorship}
-                initialOpen
-                mode="monthly"
-                monthlyCapMinor={sponsorshipManagement.monthlyCapMinor}
-                monthlyCapOptions={monthlyCapOptions}
-                offers={monthlyOffer}
-                payerMemberId={member.id}
-                purchaseReturn={purchaseReturn}
-              />
-            ) : sponsorshipManagement ? (
-              <div className="space-y-4">
-                <GroupSponsorshipManagementCard
-                  endpoint={`/api/groups/fund/${encodeURIComponent(target.joinCode)}/sponsorship`}
-                  management={sponsorshipManagement}
+          <div>
+            {member ? (
+              sponsorshipManagement?.status === "pending_activation" &&
+              visibleActivePurchase ? (
+                <GroupSponsorshipDialog
+                  activePurchase={visibleActivePurchase}
+                  checkoutUrl={`/api/groups/fund/${encodeURIComponent(target.joinCode)}/usage-credit/checkout`}
+                  customizationAllowed={customizationAllowed}
+                  frozenSponsorship={frozenSponsorship}
+                  initialOpen
+                  mode="monthly"
+                  monthlyCapMinor={sponsorshipManagement.monthlyCapMinor}
+                  monthlyCapOptions={monthlyCapOptions}
+                  offers={monthlyOffer}
+                  payerMemberId={member.id}
+                  purchaseReturn={purchaseReturn}
                 />
-                {oneTimeContributionAction}
-              </div>
-            ) : usageStatus.sponsorshipStatus === "sponsored" ? (
-              <div className="space-y-4">
-                <p className="py-2 text-center text-sm text-muted-foreground">
-                  Murph is sponsored in this chat.
-                </p>
-                {oneTimeContributionAction}
-              </div>
-            ) : visibleActivePurchase ? (
-              oneTimeContributionAction
-            ) : oneTimeOffers.length > 0 ? (
-              <GroupUsageFundingActions
-                monthlyAction={(
-                  <GroupSponsorshipDialog
-                    checkoutUrl={`/api/groups/fund/${encodeURIComponent(target.joinCode)}/usage-credit/checkout`}
-                    customizationAllowed={customizationAllowed}
-                    initialOpen
-                    mode="monthly"
-                    monthlyCapOptions={monthlyCapOptions}
-                    offers={monthlyOffer}
-                    payerMemberId={member.id}
-                    purchaseReturn={purchaseReturn}
+              ) : sponsorshipManagement ? (
+                <div className="space-y-4">
+                  <GroupSponsorshipManagementCard
+                    cancelOnly={managementOnly || Boolean(member.suspendedAt)}
+                    endpoint={`/api/groups/fund/${encodeURIComponent(target.joinCode)}/sponsorship`}
+                    management={sponsorshipManagement}
                   />
-                )}
-                oneTimeAction={oneTimeContributionDialog}
-              />
+                  {oneTimeContributionAction}
+                </div>
+              ) : usageStatus.sponsorshipStatus === "sponsored" ? (
+                <div className="space-y-4">
+                  <p className="py-2 text-center text-sm text-muted-foreground">
+                    Murph is sponsored in this chat.
+                  </p>
+                  {oneTimeContributionAction}
+                </div>
+              ) : visibleActivePurchase ? (
+                oneTimeContributionAction
+              ) : oneTimeOffers.length > 0 ? (
+                <GroupUsageFundingActions
+                  monthlyAction={(
+                    <GroupSponsorshipDialog
+                      checkoutUrl={`/api/groups/fund/${encodeURIComponent(target.joinCode)}/usage-credit/checkout`}
+                      customizationAllowed={customizationAllowed}
+                      initialOpen
+                      mode="monthly"
+                      monthlyCapOptions={monthlyCapOptions}
+                      offers={monthlyOffer}
+                      payerMemberId={member.id}
+                      purchaseReturn={purchaseReturn}
+                    />
+                  )}
+                  oneTimeAction={oneTimeContributionDialog}
+                />
+              ) : (
+                <p className="py-2 text-center text-sm text-muted-foreground">
+                  Sponsorship isn&apos;t available from this account right now.
+                </p>
+              )
             ) : (
-              <p className="py-2 text-center text-sm text-muted-foreground">
-                Sponsorship isn&apos;t available from this account right now.
-              </p>
-            )
-          ) : (
-            <GroupFundingSignInButton />
-          )
+              <GroupFundingSignInButton />
+            )}
+            {customizationAllowed ? (
+              <Suspense fallback={null}>
+                <GroupFundingSupportersStream
+                  beneficiaryMemberId={target.runtimeMemberId}
+                  prisma={prisma}
+                />
+              </Suspense>
+            ) : null}
+          </div>
         }
         groupName={groupName}
       />
     </main>
   );
+}
+
+async function GroupFundingSupportersStream({
+  beneficiaryMemberId,
+  prisma,
+}: {
+  beneficiaryMemberId: string;
+  prisma: ReturnType<typeof getPrisma>;
+}) {
+  const supporters = await readHostedGroupFundingSupporters({
+    beneficiaryMemberId,
+    prisma,
+    signal: AbortSignal.timeout(HOSTED_GROUP_FUNDING_SUPPORTERS_TIMEOUT_MS),
+  }).catch(() => null);
+  return supporters
+    ? <GroupFundingSupporters supporters={supporters} />
+    : null;
 }
 
 function projectHostedMonthlyCapOptions(): GroupSponsorshipMonthlyCapOption[] {

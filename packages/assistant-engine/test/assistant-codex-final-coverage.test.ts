@@ -10,6 +10,7 @@ import {
   MURPH_GROUP_ROOM_MODEL_MAINTENANCE_PERMISSION_PROFILE,
   MURPH_MEMBER_MEMORY_MAINTENANCE_PERMISSION_PROFILE,
   MURPH_MEMBER_READ_PERMISSION_PROFILE,
+  MURPH_MEMBER_WORKSPACE_PERMISSION_PROFILE,
 } from '@murphai/hosted-execution/assistant-permissions'
 
 const EXPECTED_NATIVE_CAPABILITIES_RESTRICTED_THREAD_CONFIG = {
@@ -27,35 +28,59 @@ const EXPECTED_NATIVE_CAPABILITIES_RESTRICTED_THREAD_CONFIG = {
   'memories.use_memories': false,
   web_search: 'disabled',
 } as const
+const EXPECTED_RESTRICTED_ONE_SHOT_INSTRUCTION_CONFIG = {
+  include_apps_instructions: false,
+  include_collaboration_mode_instructions: false,
+  include_environment_context: false,
+  include_permissions_instructions: false,
+  project_doc_max_bytes: 0,
+  'features.request_permissions_tool': false,
+  'skills.include_instructions': false,
+} as const
+const EXPECTED_GROUP_ROOM_MODEL_MAINTENANCE_THREAD_CONFIG = {
+  ...EXPECTED_NATIVE_CAPABILITIES_RESTRICTED_THREAD_CONFIG,
+  ...EXPECTED_RESTRICTED_ONE_SHOT_INSTRUCTION_CONFIG,
+} as const
+const EXPECTED_NATIVE_CAPABILITIES_RESTRICTED_CODEX_CONFIG_OVERRIDES = [
+  'features.shell_tool=true',
+  'features.apps=true',
+  'memories.use_memories=true',
+  'web_search="live"',
+  'memories.generate_memories=false',
+  'web_search="disabled"',
+  'features.web_search_request=false',
+  'features.standalone_web_search=false',
+  'features.apps=false',
+  'features.enable_mcp_apps=false',
+  'features.browser_use=false',
+  'features.plugins=false',
+  'features.multi_agent=false',
+  'features.multi_agent_v2=false',
+  'features.tool_suggest=false',
+  'memories.use_memories=false',
+  'features.shell_tool=false',
+] as const
 
 const providerMocks = vi.hoisted(() => ({
   executeCodexAssistantTurnAttemptFromInput: vi.fn(),
   resolveCodexAssistantCapabilities: vi.fn(),
   resolveCodexAssistantTargetCapabilities: vi.fn(),
-  resolveCodexAssistantLabel: vi.fn((profile) =>
-    (profile.target?.kind ?? profile.provider) === 'codex-cli'
-      ? 'Codex CLI'
-      : 'Unsupported provider',
-  ),
-  resolveCodexStaticModels: vi.fn((profile) =>
-    (profile.target?.kind ?? profile.provider) === 'codex-cli'
-      ? [
-          {
-            id: 'gpt-5.4',
-            label: 'GPT-5.4',
-            description: 'Frontier model',
-            source: 'static',
-            capabilities: {
-              images: true,
-              pdf: false,
-              reasoning: true,
-              streaming: true,
-              tools: true,
-            },
-          },
-        ]
-      : [],
-  ),
+  resolveCodexAssistantLabel: vi.fn(() => 'Codex CLI'),
+  resolveCodexStaticModels: vi.fn(() => [
+    {
+      id: 'gpt-5.4',
+      label: 'GPT-5.4',
+      description: 'Frontier model',
+      source: 'static',
+      capabilities: {
+        images: true,
+        pdf: false,
+        reasoning: true,
+        streaming: true,
+        tools: true,
+      },
+    },
+  ]),
 }))
 
 const providerTurnRunnerMocks = vi.hoisted(() => ({
@@ -152,10 +177,16 @@ import {
 } from '../src/assistant/onboarding-goal-checkin-automation.ts'
 import type { AssistantHostedToolContext } from '../src/assistant/hosted-tool-context.ts'
 import type {
+  AssistantActiveTurnLiveProviderSteering,
+} from '../src/assistant/turn-input.ts'
+import type {
   AssistantProviderTurnAttemptResult,
   AssistantProviderTurnExecutionResult,
 } from '../src/assistant/providers/types.ts'
-import type { AssistantTurnSharedPlan } from '../src/assistant/service-contracts.ts'
+import type {
+  AssistantHostedImageCompletionEffectRestriction,
+  AssistantTurnSharedPlan,
+} from '../src/assistant/service-contracts.ts'
 
 afterEach(() => {
   providerMocks.executeCodexAssistantTurnAttemptFromInput.mockReset()
@@ -417,41 +448,34 @@ describe('Codex model catalog', () => {
   })
 
   it('normalizes provider profiles and builds model catalogs with current and static models', () => {
-    providerMocks.resolveCodexAssistantLabel.mockImplementation((profile) =>
-      (profile.target?.kind ?? profile.provider) === 'codex-cli'
-        ? 'Codex CLI'
-        : 'Unsupported provider',
-    )
+    providerMocks.resolveCodexAssistantLabel.mockReturnValue('Codex CLI')
     providerMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
       supportedUserMessageContentTypes: ['text', 'image'],
       supportsReasoningEffort: true,
     })
-    providerMocks.resolveCodexStaticModels.mockImplementation((profile) =>
-      (profile.target?.kind ?? profile.provider) === 'codex-cli'
-        ? [
-            {
-              id: 'gpt-5.4',
-              label: 'GPT-5.4',
-              description: 'Frontier model',
-              source: 'static',
-              capabilities: {
-                images: true,
-                pdf: false,
-                reasoning: true,
-                streaming: true,
-                tools: true,
-              },
-            },
-          ]
-        : [],
-    )
+    providerMocks.resolveCodexStaticModels.mockReturnValue([
+      {
+        id: 'gpt-5.4',
+        label: 'GPT-5.4',
+        description: 'Frontier model',
+        source: 'static',
+        capabilities: {
+          images: true,
+          pdf: false,
+          reasoning: true,
+          streaming: true,
+          tools: true,
+        },
+      },
+    ])
 
     const profile = resolveCodexAssistantProfile({
       provider: 'codex-cli',
     })
     expect(profile).toMatchObject({
       target: {
-        kind: 'codex-cli',
+        model: null,
+        modelProvider: null,
       },
       providerLabel: 'Codex CLI',
     })
@@ -609,6 +633,18 @@ describe('Codex model catalog', () => {
       },
     })
     providerTurnRunnerMocks.buildCodexTurnExecutionPlan.mockResolvedValue({
+      acceptedInputItems: [
+        {
+          acceptedAt: '2031-02-15T09:59:58.000Z',
+          id: 'accepted-input-earlier',
+          source: 'manual',
+        },
+        {
+          acceptedAt: '2031-02-15T09:59:59.900Z',
+          id: 'accepted-input-latest',
+          source: 'manual',
+        },
+      ],
       activeTurnSteering: null,
       executionContext: { hosted: null },
       input,
@@ -669,6 +705,13 @@ describe('Codex model catalog', () => {
     }
     expect(outcome.providerTurn.responseCard).toEqual(card)
     expect(outcome.providerTurn.responseMedia).toEqual([])
+    expect(
+      providerMocks.executeCodexAssistantTurnAttemptFromInput.mock.calls[0]?.[0]
+        ?.automationRelativeDateReferenceWindow,
+    ).toEqual({
+      earliestAt: '2031-02-15T09:59:58.000Z',
+      latestAt: '2031-02-15T09:59:59.900Z',
+    })
   })
 
   it('enforces the output-only boundary at provider execution', async () => {
@@ -806,6 +849,220 @@ describe('Codex model catalog', () => {
     expect(providerInput).not.toHaveProperty('processLifetime')
     expect(unsafeDynamicTools).not.toEqual([])
     expect(unsafeProgressDelivery.send).not.toHaveBeenCalled()
+  })
+
+  it('restricts native completion capabilities without removing exact hosted effects', async () => {
+    const route = createRoute({
+      providerOptions: {
+        sandbox: 'danger-full-access',
+      },
+    })
+    const session = createAssistantSession({
+      providerOptions: route.providerOptions,
+    })
+    const restriction = {
+      authorizedOriginAssistantInputId: `ain_${'1'.repeat(32)}`,
+      completionAssistantInputId: `ain_${'2'.repeat(32)}`,
+      exactMedia: [{
+        alt: 'Generated completion image',
+        contentType: 'image/png',
+        filename: 'completion.png',
+        kind: 'vault_image',
+        ref: 'raw/captures/2026/08/completion/completion.png',
+        sha256: 'a'.repeat(64),
+        sizeBytes: 1,
+        source: 'gpt-image-2',
+      }],
+    } satisfies AssistantHostedImageCompletionEffectRestriction
+    let currentCompletionScope: typeof restriction | null = restriction
+    const materializeWorkspaceArtifacts = vi.fn()
+    const providerFetch = vi.fn<typeof fetch>(async () =>
+      new Response(null, { status: 204 })
+    )
+    const publicInternetFetch = vi.fn<typeof fetch>(async () =>
+      new Response(null, { status: 204 })
+    )
+    const progressDelivery = {
+      send: vi.fn(async () => ({
+        kind: 'sent' as const,
+        source: 'system' as const,
+      })),
+    }
+    const hostedToolContext: AssistantHostedToolContext = {
+      computerToolsAvailable: false,
+      currentHostedDeliveryContext: () => null,
+      currentHostedImageCompletionEffectScope: () => currentCompletionScope,
+      currentHostedMailboxItemIds: () => [],
+      sendVaultFile: vi.fn(),
+      vaultFileSendAvailable: true,
+    }
+    const activeTurnSteering = {
+      closeInputAdmission: vi.fn(),
+      registerLiveProviderTurn: vi.fn(() => vi.fn()),
+    } satisfies AssistantActiveTurnLiveProviderSteering
+    const input = {
+      codexConfigOverrides: [
+        'features.shell_tool=true',
+        'features.apps=true',
+        'memories.use_memories=true',
+        'web_search="live"',
+      ],
+      hostedImageCompletionEffectRestriction: restriction,
+      prompt: 'Complete the trusted image turn.',
+      vault: '/vaults/test',
+    } satisfies Parameters<typeof executeCodexTurnWithRecovery>[0]['input']
+    const dynamicTools = resolveMurphDynamicTools({
+      allowFinishWithoutReply: true,
+      groupAvailable: true,
+      physicalNotesAvailable: true,
+      vaultFileSendAvailable: true,
+    })
+
+    providerMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
+      supportedUserMessageContentTypes: ['text'],
+      supportsReasoningEffort: true,
+    })
+    providerMocks.executeCodexAssistantTurnAttemptFromInput.mockResolvedValue(
+      createProviderAttemptResult(),
+    )
+    providerTurnRunnerMocks.buildCodexTurnExecutionPlan.mockResolvedValue({
+      activeTurnSteering,
+      executionContext: {
+        hosted: {
+          materializeWorkspaceArtifacts,
+          memberId: 'member-completion-native-authority',
+          providerFetch,
+          publicInternetFetch,
+          userEnvKeys: [],
+        },
+      },
+      hostedToolContext,
+      input,
+      profile: {
+        promptProfile: 'conversation',
+        toolProfile: 'provider-turn',
+        threadScope: 'session-thread',
+      },
+      promptTimeContext: {
+        currentLocalDate: '2026-08-10',
+        currentTimeZone: 'UTC',
+      },
+      progressDelivery,
+      route,
+      sharedPlan: createSharedPlan(),
+      turnId: 'turn-completion-native-authority',
+    } satisfies AssistantCodexTurnExecutionPlan)
+    providerTurnRunnerMocks.buildCodexTurnAttemptPlan.mockResolvedValue({
+      attemptCount: 1,
+      route,
+      routePlan: {
+        assistantContractFingerprint: 'a'.repeat(64),
+        assistantCliContract: null,
+        cliEnv: {},
+        codexContinuation: {
+          kind: 'explicit-structured-history',
+        } satisfies AssistantCodexContinuation,
+        developerInstructions: null,
+        diagnosticsPolicy: {
+          environment: 'hosted',
+          privateIssueCaptureEnabled: false,
+          surface: 'linq',
+        },
+        dynamicTools,
+        environments: [{ PRIVATE_ENVIRONMENT: 'must-not-pass' }],
+        onboardingGuidanceInjected: false,
+        planningDiagnostics: createRoutePlanningDiagnostics(),
+        promptCacheMetadata: null,
+        resume: {
+          codexThreadId: 'thread-completion-native-authority',
+        },
+        sessionContext: undefined,
+        systemPrompt: 'Trusted completion system prompt.',
+        turnContextPrompt: null,
+        workingDirectory: '/work',
+      } satisfies AssistantRouteTurnPlan,
+      session,
+    } satisfies AssistantCodexAttemptPlan)
+
+    const completionOutcome = await executeCodexTurnWithRecovery({
+      input,
+      plan: createSharedPlan(),
+      resolvedSession: session,
+      route,
+      turnCreatedAt: '2026-08-10T00:00:00.000Z',
+      turnId: 'turn-completion-native-authority',
+    })
+
+    expect(completionOutcome.kind).toBe('succeeded')
+    const completionProviderInput =
+      providerMocks.executeCodexAssistantTurnAttemptFromInput.mock.calls[0]?.[0]
+    expect(completionProviderInput?.providerConfig).toMatchObject({
+      approvalPolicy: 'never',
+      sandbox: 'read-only',
+    })
+    expect(completionProviderInput?.codexThreadConfig).toEqual(
+      EXPECTED_NATIVE_CAPABILITIES_RESTRICTED_THREAD_CONFIG,
+    )
+    expect(completionProviderInput?.codexConfigOverrides).toEqual(
+      EXPECTED_NATIVE_CAPABILITIES_RESTRICTED_CODEX_CONFIG_OVERRIDES,
+    )
+    expect(completionProviderInput?.activeTurnSteering).toBeNull()
+    expect(completionProviderInput).toMatchObject({
+      dynamicTools,
+      environments: [],
+      hostedToolContext,
+      materializeWorkspaceArtifacts,
+      progressDelivery,
+      providerFetch: null,
+      publicInternetFetch: null,
+      requireHostedPrivateImageDelivery: true,
+      resume: {
+        codexThreadId: 'thread-completion-native-authority',
+      },
+      vaultRoot: '/vaults/test',
+      workingDirectory: '/work',
+    })
+
+    currentCompletionScope = null
+    providerMocks.executeCodexAssistantTurnAttemptFromInput.mockClear()
+    const foregroundOutcome = await executeCodexTurnWithRecovery({
+      input,
+      plan: createSharedPlan(),
+      resolvedSession: session,
+      route,
+      turnCreatedAt: '2026-08-10T00:01:00.000Z',
+      turnId: 'turn-current-foreground-authority',
+    })
+
+    expect(foregroundOutcome.kind).toBe('succeeded')
+    const foregroundProviderInput =
+      providerMocks.executeCodexAssistantTurnAttemptFromInput.mock.calls[0]?.[0]
+    expect(foregroundProviderInput?.providerConfig).toMatchObject({
+      approvalPolicy: null,
+      sandbox: 'danger-full-access',
+    })
+    expect(foregroundProviderInput?.codexThreadConfig).toBeNull()
+    expect(foregroundProviderInput?.activeTurnSteering).toBe(activeTurnSteering)
+    expect(foregroundProviderInput?.codexConfigOverrides).toEqual(
+      input.codexConfigOverrides,
+    )
+    expect(foregroundProviderInput?.environments).toEqual([
+      { PRIVATE_ENVIRONMENT: 'must-not-pass' },
+    ])
+    expect(foregroundProviderInput).toMatchObject({
+      hostedToolContext,
+      materializeWorkspaceArtifacts,
+      progressDelivery,
+      providerFetch,
+      publicInternetFetch,
+      permissions: MURPH_MEMBER_WORKSPACE_PERMISSION_PROFILE,
+      requireHostedPrivateImageDelivery: true,
+      resume: {
+        codexThreadId: 'thread-completion-native-authority',
+      },
+      runtimeWorkspaceRoots: ['/work'],
+    })
+    expect(foregroundProviderInput).not.toHaveProperty('processLifetime')
   })
 
   it('keeps only song generation while denying native creative-notification capabilities', async () => {
@@ -1034,6 +1291,10 @@ describe('Codex model catalog', () => {
 
     expect(outcome.kind).toBe('succeeded')
     expect(
+      providerMocks.executeCodexAssistantTurnAttemptFromInput.mock.calls[0]?.[0]
+        ?.codexThreadConfig,
+    ).toEqual(EXPECTED_GROUP_ROOM_MODEL_MAINTENANCE_THREAD_CONFIG)
+    expect(
       providerMocks.executeCodexAssistantTurnAttemptFromInput,
     ).toHaveBeenCalledWith(expect.objectContaining({
       dynamicTools: [MURPH_GROUP_ROOM_MODEL_TOOL],
@@ -1145,6 +1406,29 @@ describe('Codex model catalog', () => {
     })
 
     expect(outcome.kind).toBe('succeeded')
+    expect(
+      providerMocks.executeCodexAssistantTurnAttemptFromInput.mock.calls[0]?.[0]
+        ?.codexThreadConfig,
+    ).toEqual(EXPECTED_RESTRICTED_ONE_SHOT_INSTRUCTION_CONFIG)
+    expect(
+      providerMocks.executeCodexAssistantTurnAttemptFromInput.mock.calls[0]?.[0]
+        ?.codexThreadConfig,
+    ).not.toHaveProperty('features.shell_tool')
+    expect(
+      providerMocks.executeCodexAssistantTurnAttemptFromInput.mock.calls[0]?.[0]
+        ?.codexConfigOverrides,
+    ).toEqual(
+      expect.arrayContaining([
+        'features.apps=false',
+        'features.multi_agent=false',
+        'features.plugins=false',
+        'web_search="disabled"',
+      ]),
+    )
+    expect(
+      providerMocks.executeCodexAssistantTurnAttemptFromInput.mock.calls[0]?.[0]
+        ?.codexConfigOverrides,
+    ).not.toContain('features.shell_tool=false')
     expect(
       providerMocks.executeCodexAssistantTurnAttemptFromInput,
     ).toHaveBeenCalledWith(expect.objectContaining({
@@ -1281,6 +1565,12 @@ describe('Codex model catalog', () => {
     )
     expect(providerInput?.codexConfigOverrides).not.toContain(
       'features.shell_tool=false',
+    )
+    expect(providerInput?.codexThreadConfig).toEqual(
+      EXPECTED_RESTRICTED_ONE_SHOT_INSTRUCTION_CONFIG,
+    )
+    expect(providerInput?.codexThreadConfig).not.toHaveProperty(
+      'features.shell_tool',
     )
     expect(providerInput).toMatchObject({
       dynamicTools: [],

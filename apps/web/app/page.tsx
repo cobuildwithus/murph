@@ -11,10 +11,10 @@ import {
   type HeroMessengerChannel,
 } from "@/src/components/homepage/hero-clocks-in";
 import { HowItWorksSection } from "@/src/components/homepage/how-it-works-section";
-import { LandingBrowserVaultWarm } from "@/src/components/homepage/landing-browser-vault-warm";
 import { IntegrationsSection } from "@/src/components/homepage/integrations-section";
 import { LocalRunSection } from "@/src/components/homepage/local-run-section";
 import { MealPhotosSection } from "@/src/components/homepage/meal-photos-section";
+import { MurphCardHandoffGate } from "@/src/components/homepage/murph-card-handoff-dialog";
 import { NutritionSection } from "@/src/components/homepage/nutrition-section";
 import { pickRandomMurphHeadshotSrc } from "@/src/components/homepage/murph-headshot-avatar";
 import { PersonasSection } from "@/src/components/homepage/personas-section";
@@ -27,9 +27,9 @@ import { TogetherSection } from "@/src/components/homepage/together-section";
 import { TrustSection } from "@/src/components/homepage/trust-section";
 import type { HomepageSignupCta } from "@/src/components/homepage/types";
 import { HomepageAuthRuntimeProvider } from "@/src/components/hosted-onboarding/homepage-auth-runtime-provider";
+import { scheduleHomepageBrowserVaultPreparation } from "@/src/lib/browser-vault/homepage-preparation";
 import { fetchHeroContactInfo } from "@/src/lib/hero-contact-info";
 import { isHostedCustomInferenceEnabled } from "@/src/lib/hosted-inference/feature";
-import { formatHostedLandingPricingShortSummary } from "@/src/lib/hosted-onboarding/billing-plans";
 import { isHostedVeniceAssistantEnabled } from "@/src/lib/hosted-onboarding/assistant-model-preference";
 import { resolveHostedInstallScriptUrl } from "@/src/lib/hosted-onboarding/landing";
 import { getHostedPageAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
@@ -95,7 +95,7 @@ function resolveHeroMessengerChannel(country: string): HeroMessengerChannel {
 
 export default async function HomePage() {
   const [
-    { authenticated },
+    { authenticated, authenticatedMember },
     githubStarCount,
     heroContactInfo,
     headerList,
@@ -105,6 +105,12 @@ export default async function HomePage() {
     fetchHeroContactInfo(),
     headers(),
   ]);
+  if (authenticatedMember) {
+    scheduleHomepageBrowserVaultPreparation({
+      memberId: authenticatedMember.id,
+    });
+  }
+
   const country = headerList.get("x-vercel-ip-country") ?? "";
   const messengerChannel = resolveHeroMessengerChannel(country);
   const murphHeadshotSrc = pickRandomMurphHeadshotSrc();
@@ -123,16 +129,17 @@ export default async function HomePage() {
     : {
         body: null,
         eyebrow: "Sign up",
-        metaItems: [formatHostedLandingPricingShortSummary(), "Open source"],
-        note: "Cancel anytime.",
+        metaItems: ["Free starter usage", "Open source"],
+        note:
+          "Starter usage does not expire. No card required; choose a plan when you need more.",
         signupLabel: "Get started",
         title: "Whatever your goal, you don’t have to hit it alone.",
       };
 
   return (
     <HomepageAuthRuntimeProvider authenticated={authenticated}>
+      <MurphCardHandoffGate />
       <main className="min-h-screen bg-[#f5f0e8] antialiased">
-        {authenticated ? <LandingBrowserVaultWarm /> : null}
         <StickyNav
           authenticated={authenticated}
           githubStarCount={githubStarCount}

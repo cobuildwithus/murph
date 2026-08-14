@@ -2,31 +2,34 @@ import type { OverviewJournalEntry, OverviewMetric } from "../overview.ts";
 import {
   RECENT_JOURNAL_LIMIT,
   TIMELINE_LIMIT,
+  type BrowserVaultCoreCapableQueryClient,
   type BrowserVaultEntity,
   type BrowserVaultOverviewView,
-  type BrowserVaultQueryClient,
   type BrowserVaultTimelineRow,
 } from "./shared.ts";
 import {
   selectBrowserVaultExperimentSummary,
   selectBrowserVaultTrackedExperiments,
 } from "./tracked-experiments.ts";
+import { emptyPersonalPatternReport } from "../personal-patterns.ts";
 
-export function selectBrowserVaultOverview(client: BrowserVaultQueryClient): BrowserVaultOverviewView {
+export function selectBrowserVaultOverview(client: BrowserVaultCoreCapableQueryClient): BrowserVaultOverviewView {
   return {
     experimentSummary: selectBrowserVaultExperimentSummary(client),
     metrics: buildBrowserOverviewMetrics(client),
+    personalPatterns: client.replica.personalPatterns
+      ?? emptyPersonalPatternReport(client.replica.generatedAt.slice(0, 10)),
     recentJournals: summarizeRecentBrowserOverviewJournals(client, RECENT_JOURNAL_LIMIT),
     trackedExperiments: selectBrowserVaultTrackedExperiments(client),
     weeklySampleSummaries: client.replica.weeklySampleSummaries.slice(),
   };
 }
 
-export function selectBrowserVaultHistory(client: BrowserVaultQueryClient): { timeline: BrowserVaultTimelineRow[] } {
+export function selectBrowserVaultHistory(client: BrowserVaultCoreCapableQueryClient): { timeline: BrowserVaultTimelineRow[] } {
   return { timeline: client.timeline.list().slice(0, TIMELINE_LIMIT) };
 }
 
-function buildBrowserOverviewMetrics(client: BrowserVaultQueryClient): OverviewMetric[] {
+function buildBrowserOverviewMetrics(client: BrowserVaultCoreCapableQueryClient): OverviewMetric[] {
   const familyCounts = countEntityFamilies(client.replica.entities);
   const registryCount =
     readFamilyCount(familyCounts, "goal") +
@@ -71,7 +74,7 @@ function buildBrowserOverviewMetrics(client: BrowserVaultQueryClient): OverviewM
 }
 
 function summarizeRecentBrowserOverviewJournals(
-  client: BrowserVaultQueryClient,
+  client: BrowserVaultCoreCapableQueryClient,
   limit: number,
 ): OverviewJournalEntry[] {
   return client.replica.entities

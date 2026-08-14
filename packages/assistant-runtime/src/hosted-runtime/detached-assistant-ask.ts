@@ -2,6 +2,7 @@ import {
   executeConsentedReadOnlyAssistantAsk,
   executeReadOnlyAssistantAsk,
   type ConsentedReadOnlyAssistantAskInput,
+  type ConsentedReadOnlyAssistantAskResult,
   type ReadOnlyAssistantAskProviderUsageEvent,
   type ReadOnlyAssistantAskInput,
   type ReadOnlyAssistantAskResult,
@@ -18,8 +19,10 @@ import {
 import type {
   AssistantHostedGroupSharedReader,
 } from "@murphai/assistant-engine";
-import type {
-  HostedExecutionAssistantAskResult,
+import {
+  HOSTED_EXECUTION_CURRENT_SENDER_PRIVATE_PERMISSION_TEXT,
+  isHostedExecutionAssistantAskCurrentSenderTarget,
+  type HostedExecutionAssistantAskResult,
 } from "@murphai/hosted-execution/contracts";
 
 import type {
@@ -62,7 +65,7 @@ export interface HostedDetachedAssistantAskControllerInput {
   ) => Promise<ReadOnlyAssistantAskResult>;
   executeConsentedAsk?: (
     input: ConsentedReadOnlyAssistantAskInput,
-  ) => Promise<ReadOnlyAssistantAskResult>;
+  ) => Promise<ConsentedReadOnlyAssistantAskResult>;
   deferUsageUntilAfterDurableCheckpoint?: (
     effect: HostedWorkspaceDurableCheckpointEffect,
   ) => void;
@@ -217,7 +220,7 @@ async function runOneHostedDetachedAssistantAsk(input: {
   ) => Promise<ReadOnlyAssistantAskResult>;
   executeConsentedAsk: (
     input: ConsentedReadOnlyAssistantAskInput,
-  ) => Promise<ReadOnlyAssistantAskResult>;
+  ) => Promise<ConsentedReadOnlyAssistantAskResult>;
   deferUsageUntilAfterDurableCheckpoint: ((
     effect: HostedWorkspaceDurableCheckpointEffect,
   ) => void) | null;
@@ -272,7 +275,18 @@ async function runOneHostedDetachedAssistantAsk(input: {
     if (prepared.action !== "prepare") {
       throw new TypeError("Detached assistant ask prepare returned the wrong action.");
     }
+    if (prepared.status === "already_completed") {
+      await removeHostedDetachedAssistantAsk({ claimed, input });
+      return "settled";
+    }
     if (prepared.status === "terminal") {
+      if (isHostedExecutionAssistantAskCurrentSenderTarget(
+        claimed.wake.ask.target,
+      )) {
+        throw new TypeError(
+          "Current-sender assistant ask has no persisted terminal completion.",
+        );
+      }
       await removeHostedDetachedAssistantAsk({ claimed, input });
       return "settled";
     }
@@ -317,7 +331,7 @@ async function runOneHostedDetachedAssistantAsk(input: {
     };
     const reviewedPersonalAsk =
       claimed.wake.ask.target.kind !== "joined_group";
-    let answer: ReadOnlyAssistantAskResult;
+    let answer: ConsentedReadOnlyAssistantAskResult | ReadOnlyAssistantAskResult;
     if (claimed.wake.ask.target.kind !== "joined_group") {
       if (prepared.disclosure === undefined) {
         throw new TypeError(
@@ -326,6 +340,21 @@ async function runOneHostedDetachedAssistantAsk(input: {
       }
       answer = await input.executeConsentedAsk({
         ...executionInput,
+        // Web has already fixed and persisted the result destination. Former
+        // target kinds are drain-only; their Web-returned disclosure remains
+        // the compatibility authority for imported work.
+        answerMode:
+          isHostedExecutionAssistantAskCurrentSenderTarget(
+            claimed.wake.ask.target,
+          )
+          && (
+            "resultDestination" in claimed.wake.ask
+              ? claimed.wake.ask.resultDestination.kind === "requester_direct"
+              : prepared.disclosure.permissionText
+                === HOSTED_EXECUTION_CURRENT_SENDER_PRIVATE_PERMISSION_TEXT
+          )
+            ? "direct_recipient"
+            : "caller_handoff",
         permissionText: prepared.disclosure.permissionText,
       });
     } else {
@@ -355,6 +384,16 @@ async function runOneHostedDetachedAssistantAsk(input: {
     );
     if (completed.action !== "complete") {
       throw new TypeError("Detached assistant ask completion returned the wrong action.");
+    }
+    if (
+      completed.status === "terminal"
+      && isHostedExecutionAssistantAskCurrentSenderTarget(
+        claimed.wake.ask.target,
+      )
+    ) {
+      throw new TypeError(
+        "Current-sender assistant ask completion was not persisted.",
+      );
     }
     await removeHostedDetachedAssistantAsk({ claimed, input });
     return "settled";
@@ -517,7 +556,10 @@ function normalizeHostedDetachedAssistantAskResult(
   result: ReadOnlyAssistantAskResult,
 ): HostedExecutionAssistantAskResult {
   if (result.outcome === "answered") {
-    return result;
+    return {
+      answer: result.answer,
+      outcome: "answered",
+    };
   }
   return {
     answer: result.answer ?? null,

@@ -12,6 +12,12 @@ export {
   isCompletedOverviewExperimentStatus,
 } from "./overview-status.ts";
 export type {
+  BrowserVaultCoreCapableQueryClient,
+  BrowserVaultExperimentRunCard,
+  BrowserVaultExperimentRunCardDailyCadence,
+  BrowserVaultExperimentRunCardLookup,
+  BrowserVaultExperimentRunCardMetric,
+  BrowserVaultExperimentRunCardSummary,
   BrowserVaultOverviewView,
   BrowserVaultQueryClient,
   BrowserVaultTimelineRow,
@@ -26,3 +32,10 @@ export type {
   OverviewWeeklySampleSummary,
   OverviewWeeklyStat,
 } from "./overview-weekly-stats.ts";
+export type {
+  PersonalPatternCell,
+  PersonalPatternFactor,
+  PersonalPatternOutcome,
+  PersonalPatternReport,
+  PersonalPatternStage,
+} from "./personal-patterns.ts";

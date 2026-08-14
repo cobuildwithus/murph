@@ -13,6 +13,9 @@ import { beforeEach, test, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   getHostedPageAuthSnapshot: vi.fn(),
   useBrowserVault: vi.fn(),
+  useBrowserVaultLabsSelector: vi.fn(),
+  useBrowserVaultMetricKeyDemand: vi.fn(() => true),
+  useBrowserVaultMetricsSelector: vi.fn(),
   useBrowserVaultSelector: vi.fn(),
 }));
 
@@ -38,6 +41,9 @@ vi.mock("next/link", () => ({
 vi.mock("@/src/lib/browser-vault/context", () => ({
   BrowserVaultProvider: ({ children }: { children: ReactNode }) => children,
   useBrowserVault: mocks.useBrowserVault,
+  useBrowserVaultLabsSelector: mocks.useBrowserVaultLabsSelector,
+  useBrowserVaultMetricKeyDemand: mocks.useBrowserVaultMetricKeyDemand,
+  useBrowserVaultMetricsSelector: mocks.useBrowserVaultMetricsSelector,
   useBrowserVaultSelector: mocks.useBrowserVaultSelector,
 }));
 
@@ -69,6 +75,8 @@ beforeEach(() => {
     status: "ready",
   });
   mocks.useBrowserVaultSelector.mockReturnValue([]);
+  mocks.useBrowserVaultLabsSelector.mockReturnValue([]);
+  mocks.useBrowserVaultMetricsSelector.mockReturnValue([]);
   mocks.getHostedPageAuthSnapshot.mockResolvedValue({
     authenticated: true,
     authenticatedMember: {},
@@ -98,6 +106,16 @@ test("PitchPage metadata and route entrypoint render the deck landmark", () => {
   assert.match(markup, /data-pitch-chrome="true"/);
   assert.match(markup, /aria-label="Slide 1: Title"/);
   assert.match(markup, /The social layer for health experiments\./);
+  assert.match(markup, /MRR grew 103% in the last 30 days/);
+  assert.match(markup, /18% w\/w MRR growth/);
+  assert.match(markup, /\+82% paying customers/);
+  assert.match(markup, /10 msgs \/ day \/ active user/);
+  assert.match(markup, /3,003 messages exchanged last week/);
+  assert.match(markup, /73 per weekly active user/);
+  assert.match(markup, /12 group chats active last week/);
+  assert.match(markup, /255 messages to Murph last week/);
+  assert.doesNotMatch(markup, /2,400 messages exchanged last week/);
+  assert.doesNotMatch(markup, /107 messages to Murph last week/);
   assert.match(markup, /Scroll or use arrow keys/);
   assert.match(markup, /01 \/ 13/);
 });
@@ -220,7 +238,7 @@ test("BiomarkersPage asks signed-out visitors to sign in before offering lab syn
 
 test("Biomarker result route binds server auth and metric params to private history", async () => {
   const client = createBrowserVaultQueryClient(createBiomarkerRouteReplica());
-  mocks.useBrowserVaultSelector.mockImplementation(
+  mocks.useBrowserVaultLabsSelector.mockImplementation(
     (selector: (value: typeof client) => unknown) => selector(client),
   );
 

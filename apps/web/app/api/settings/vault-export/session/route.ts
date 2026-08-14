@@ -4,6 +4,10 @@ import {
 import {
   parseHostedBrowserVaultReplicaRef,
 } from "@murphai/hosted-execution/parsers";
+import {
+  HOSTED_BROWSER_VAULT_REPLICA_METRIC_BUCKET_IDS,
+  HOSTED_BROWSER_VAULT_REPLICA_SHARD_KINDS,
+} from "@murphai/hosted-execution/browser-vault";
 import { parseHostedUserRecipientPublicKeyJwk } from "@murphai/runtime-state";
 import { after } from "next/server";
 
@@ -43,8 +47,8 @@ export const POST = withJsonError(async (request: Request) => {
     memberId: auth.member.id,
     prisma,
   });
-  let allowLatestAvailableReplica = healthDataConsentState === "revoked";
-  if (!allowLatestAvailableReplica) {
+  let healthDataProcessingRevoked = healthDataConsentState === "revoked";
+  if (!healthDataProcessingRevoked) {
     await assertHostedLaunchRequiredConsentGranted({
       memberId: auth.member.id,
       prisma,
@@ -59,6 +63,10 @@ export const POST = withJsonError(async (request: Request) => {
     body.browserPublicKeyJwk,
     "Settings vault export browserPublicKeyJwk",
   );
+  const acceptsBucketedReplica = readSettingsVaultExportBucketCapability({
+    requestedMetricBuckets: body.requestedMetricBuckets,
+    requestedShards: body.requestedShards,
+  });
 
   // Verify the MFA-bound signature but do NOT consume the challenge yet:
   // the challenge stays valid through the workspace re-read and the replica
@@ -83,22 +91,23 @@ export const POST = withJsonError(async (request: Request) => {
     memberId: auth.member.id,
     prisma,
   });
-  allowLatestAvailableReplica = latestHealthDataConsentState === "revoked";
-  if (!allowLatestAvailableReplica) {
+  healthDataProcessingRevoked = latestHealthDataConsentState === "revoked";
+  if (!healthDataProcessingRevoked) {
     await assertHostedLaunchRequiredConsentGranted({
       memberId: auth.member.id,
       prisma,
     });
   }
 
-  // Re-read the workspace AFTER the slow Privy/signature path. Active
-  // processing still requires a complete, fresh export; withdrawn members get
-  // the newest retained replica without restarting processing.
+  // Re-read the workspace AFTER the slow Privy/signature path. Export the
+  // newest retained replica even when newer source changes are still being
+  // processed. Active members also request a refresh; withdrawn members never
+  // restart processing.
   let workspace: Awaited<ReturnType<typeof readHostedWorkspace>>;
   try {
     workspace = await readHostedWorkspace({ userId: auth.member.id });
   } catch {
-    if (allowLatestAvailableReplica) {
+    if (healthDataProcessingRevoked) {
       throw browserVaultRetainedReplicaUnavailableError();
     }
     scheduleBrowserVaultRefreshAfterResponse({ userId: auth.member.id });
@@ -111,10 +120,8 @@ export const POST = withJsonError(async (request: Request) => {
       await new PrismaHostedDirtyConnectionStore(prisma)
         .hasPendingDirtyConnectionForUser(auth.member.id);
   } catch {
-    if (!allowLatestAvailableReplica) {
-      scheduleBrowserVaultRefreshAfterResponse({ userId: auth.member.id });
-      throw browserVaultSessionNotFreshError();
-    }
+    // Keep the conservative pending state. A retained export remains useful
+    // and already declares that recent unprocessed changes may be absent.
   }
 
   const replicaRef = parseHostedBrowserVaultReplicaRef(
@@ -129,19 +136,10 @@ export const POST = withJsonError(async (request: Request) => {
     now: new Date().toISOString(),
     replicaRef,
   });
+  const refreshPending = freshness.shouldRefresh || deviceSyncImportPending;
 
-  if (
-    !replicaRef
-    || (
-      !allowLatestAvailableReplica
-      && (
-        freshness.freshness !== "fresh"
-        || freshness.shouldRefresh
-        || deviceSyncImportPending
-      )
-    )
-  ) {
-    if (allowLatestAvailableReplica) {
+  if (!replicaRef) {
+    if (healthDataProcessingRevoked) {
       throw browserVaultRetainedReplicaUnavailableError();
     }
     scheduleBrowserVaultRefreshAfterResponse({ userId: auth.member.id });
@@ -157,16 +155,21 @@ export const POST = withJsonError(async (request: Request) => {
     });
   }
 
-  let session: Awaited<ReturnType<typeof client.createBrowserVaultSession>>;
+  let session:
+    | Awaited<ReturnType<typeof client.createBrowserVaultExportSession>>
+    | Awaited<ReturnType<typeof client.createBrowserVaultSession>>;
   try {
-    session = await client.createBrowserVaultSession({
+    const sessionInput = {
       browserPublicKeyJwk,
       replicaRef,
       userId: auth.member.id,
-    });
+    };
+    session = acceptsBucketedReplica
+      ? await client.createBrowserVaultExportSession(sessionInput)
+      : await client.createBrowserVaultSession(sessionInput);
   } catch (error) {
     if (error instanceof Error && error.message === "Hosted execution browser vault replica was not found.") {
-      if (allowLatestAvailableReplica) {
+      if (healthDataProcessingRevoked) {
         throw browserVaultRetainedReplicaUnavailableError();
       }
       scheduleBrowserVaultRefreshAfterResponse({ userId: auth.member.id });
@@ -184,6 +187,10 @@ export const POST = withJsonError(async (request: Request) => {
     throw error;
   }
 
+  if (!healthDataProcessingRevoked && refreshPending) {
+    scheduleBrowserVaultRefreshAfterResponse({ userId: auth.member.id });
+  }
+
   // Consume the challenge atomically only once the encrypted replica is in
   // hand. A failure here aborts the response without releasing the session.
   await consumeSensitiveActionChallenge({ challenge, prisma });
@@ -192,7 +199,7 @@ export const POST = withJsonError(async (request: Request) => {
     ...session,
     deviceSyncImportPending,
     freshness: freshness.freshness,
-    refreshPending: freshness.shouldRefresh,
+    refreshPending,
     workspaceVersion: workspace?.version ?? null,
   });
 });
@@ -218,6 +225,13 @@ function browserVaultRetainedReplicaUnavailableError() {
 function scheduleBrowserVaultRefreshAfterResponse(input: { userId: string }): void {
   const task = async () => {
     try {
+      const healthDataConsentState = await readHostedHealthDataConsentState({
+        memberId: input.userId,
+        prisma: getPrisma(),
+      });
+      if (healthDataConsentState !== "granted") {
+        return;
+      }
       await signalHostedBrowserVaultRefreshRuntime({ userId: input.userId });
     } catch {
       // Browser-vault freshness is a best-effort derived read-model refresh.
@@ -229,4 +243,43 @@ function scheduleBrowserVaultRefreshAfterResponse(input: { userId: string }): vo
   } catch {
     void task();
   }
+}
+
+function readSettingsVaultExportBucketCapability(input: {
+  requestedMetricBuckets: unknown;
+  requestedShards: unknown;
+}): boolean {
+  if (
+    input.requestedMetricBuckets === undefined
+    && input.requestedShards === undefined
+  ) {
+    return false;
+  }
+  if (
+    !hasExactStringMembers(
+      input.requestedShards,
+      HOSTED_BROWSER_VAULT_REPLICA_SHARD_KINDS,
+    )
+    || !hasExactStringMembers(
+      input.requestedMetricBuckets,
+      HOSTED_BROWSER_VAULT_REPLICA_METRIC_BUCKET_IDS,
+    )
+  ) {
+    throw hostedOnboardingError({
+      code: "BROWSER_VAULT_SESSION_INVALID_REQUEST",
+      httpStatus: 400,
+      message: "Settings vault export capability must include the complete replica.",
+    });
+  }
+  return true;
+}
+
+function hasExactStringMembers(
+  value: unknown,
+  expected: readonly string[],
+): boolean {
+  return Array.isArray(value)
+    && value.length === expected.length
+    && new Set(value).size === expected.length
+    && expected.every((entry) => value.includes(entry));
 }

@@ -23,7 +23,7 @@ export const ASSISTANT_SKILLS = [
     slug: 'hosted-low-usage',
     name: 'hosted-low-usage',
     triggerHint:
-      'Use when trusted hosted turn context says Murph usage is running low; when a user asks about hosted plan, AI usage, billing, group funding, or the available ways to add or earn more usage; or when they ask how to keep a direct trial, paid plan, Family-sponsored Murph, or hosted group conversation going. In a hosted group, a request to start or manage a Murph Family plan, seats, or invites is not room funding or a room usage top-up; use murph-family unless the same request explicitly asks about funding or usage for the current room.',
+      'Use when trusted hosted turn context says Murph usage is running low; when a user asks about hosted plan, AI usage, billing, group funding, or the available ways to add or earn more usage; or when they ask how to keep Starter, Core, a paid plan, Family-sponsored Murph, or a hosted group conversation going. In a hosted group, a request to start or manage a Murph Family plan, seats, or invites is not room funding or a room usage top-up; use murph-family unless the same request explicitly asks about funding or usage for the current room.',
   },
   {
     slug: 'signup-link',
@@ -36,12 +36,6 @@ export const ASSISTANT_SKILLS = [
     name: 'experiment-onboarding',
     triggerHint:
       'Use for starting, configuring, modifying, supporting, or reviewing bounded health experiments, including Health Commons protocol resolution, vault-first setup, safety screens, typed run creation, first-session prep reminders, planned-session support reminders, and experiment outcomes.',
-  },
-  {
-    slug: 'red-light-therapy',
-    name: 'red-light-therapy',
-    triggerHint:
-      'Use for red light therapy or photobiomodulation questions, including dosing, session duration, treatment distance, wavelengths, device irradiance, Bestqool lamps, safety boundaries, and whether to set up a bounded Health Commons PBM experiment.',
   },
   {
     slug: 'sleep-improvement',
@@ -86,12 +80,6 @@ export const ASSISTANT_SKILLS = [
       'Use for VO2 max, cardio fitness estimates, aerobic capacity, zone interpretation, cardiorespiratory health framing, and wearable cardio marker trends. Use running-cardio or competition-training when the user wants a concrete training plan.',
   },
   {
-    slug: 'recovery-modalities',
-    name: 'recovery-modalities',
-    triggerHint:
-      'Use for sauna, cold plunge, contrast therapy, compression, massage, foam rolling, percussion guns, stretching-as-recovery, breathwork-as-recovery, and recovery modality tradeoffs. Use red-light-therapy for red/NIR photobiomodulation dose, duration, distance, wavelengths, device irradiance, or Bestqool questions.',
-  },
-  {
     slug: 'daily-activity',
     name: 'daily-activity',
     triggerHint:
@@ -107,7 +95,7 @@ export const ASSISTANT_SKILLS = [
     slug: 'cardiometabolic-health',
     name: 'cardiometabolic-health',
     triggerHint:
-      'Use for glucose, A1c, CGM, ApoB, LDL-C, triglycerides, HDL, blood pressure, home BP measurement, lab retest timing, and lifestyle levers for cardiometabolic markers. Keep medication decisions framed as clinician conversations.',
+      'Use for glucose, A1c, CGM, connected insulin records, ApoB, LDL-C, triglycerides, HDL, blood pressure, home BP measurement, lab retest timing, and lifestyle levers for cardiometabolic markers. Keep medication decisions framed as clinician conversations.',
   },
   {
     slug: 'micronutrients-supplements',
@@ -134,12 +122,6 @@ export const ASSISTANT_SKILLS = [
       'Use for bloating, reflux, constipation, diarrhea, IBS-style patterns, fiber changes, meal-timing experiments, elimination or reintroduction plans, and digestive symptom tracking. Route red flags or suspected disease to clinician support.',
   },
   {
-    slug: 'general-eye-health',
-    name: 'general-eye-health',
-    triggerHint:
-      'Use for digital eye strain, dry or irritated eyes, contact-lens comfort and safety, myopia or refractive questions, eye-health prevention, eye exams, and triage of eye pain, redness, light sensitivity, discharge, vision changes, flashes, floaters, injury, or chemical exposure.',
-  },
-  {
     slug: 'behavior-followthrough',
     name: 'behavior-followthrough',
     triggerHint:
@@ -155,13 +137,13 @@ export const ASSISTANT_SKILLS = [
     slug: 'tracked-table',
     name: 'tracked-table',
     triggerHint:
-      'Use when a private member asks for a table, workout table, structured tracker, live workout log, or an updated/refreshed table card. Owns native compact-table presentation and canonical workout-backed refreshes; use strength-training alongside it when workout programming or interpretation is also needed.',
+      'Use when a private member asks to start or resume a live workout, requests a table, workout table, structured tracker, live workout log, or an updated/refreshed table card. Owns native compact-table presentation and canonical workout-backed refreshes; use strength-training alongside it when workout programming or interpretation is also needed.',
   },
   {
     slug: 'strength-training',
     name: 'strength-training',
     triggerHint:
-      'Use for evidence-informed strength or resistance training plans, progression, plateaus, hypertrophy, maximal strength, power, gym, home, or calisthenics programming, competition preparation, and adherence coaching for generally healthy adults. Do not use for diagnosis, rehabilitation, medical clearance, aggressive weight cuts, eating-disorder treatment, or performance-enhancing-drug protocols.',
+      'Use for evidence-informed strength or resistance training plans, progression, plateaus, hypertrophy, maximal strength, power, gym, home, or calisthenics programming, logging completed strength sets, competition preparation, and adherence coaching for generally healthy adults. Do not use for diagnosis, rehabilitation, medical clearance, aggressive weight cuts, eating-disorder treatment, or performance-enhancing-drug protocols.',
   },
   {
     slug: 'stress-regulation',
@@ -179,13 +161,13 @@ export const ASSISTANT_SKILLS = [
     slug: 'food-journal',
     name: 'food-journal',
     triggerHint:
-      'Use when the user logs meals or asks Murph to notice patterns between food and digestion, symptoms, energy, appetite, or performance, especially when a photo, voice note, or rough description should be enough and calorie or macro tracking is not necessarily the goal.',
+      'Use when the user logs meals, asks what connected carbohydrate data recorded, or asks Murph to notice patterns between food and digestion, symptoms, energy, appetite, or performance, especially when a photo, voice note, or rough description should be enough and calorie or macro tracking is not necessarily the goal.',
   },
   {
     slug: 'nutrition-strategy',
     name: 'nutrition-strategy',
     triggerHint:
-      'Use for forward-looking nutrition decisions about meal structure and protein, healthy eating, training fuel and recovery eating, hydration, appetite or under-fueling, and real-life food-system execution. Use food-journal for meal capture, body-composition for fat loss/muscle gain/recomposition, and gut-digestion for digestive symptom strategy.',
+      'Use for forward-looking nutrition decisions about meal structure, named diets and dietary patterns, protein, healthy eating, training fuel and recovery eating, hydration, appetite or under-fueling, daily nutrition-card goal setup, and real-life food-system execution. Use food-journal for meal capture and retrospective patterns, body-composition for intentional body change, gut-digestion for digestive symptom strategy or elimination/reintroduction, and clinical owners for therapeutic diets or medically complex cases.',
   },
   {
     slug: 'sleep-recovery-readiness',

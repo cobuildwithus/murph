@@ -1,4 +1,4 @@
-import { type ReactNode } from "react";
+import { act, type ReactNode } from "react";
 import {
   BROWSER_VAULT_REPLICA_POLICY_ID,
   BROWSER_VAULT_REPLICA_SCHEMA,
@@ -14,6 +14,7 @@ import { beforeEach, expect, test, vi } from "vitest";
 import { renderClientComponent } from "./render-client-component";
 
 const browserVaultMock = vi.hoisted(() => ({
+  metricDemandLoaded: true,
   value: {
     client: null as BrowserVaultQueryClient | null,
     error: null as string | null,
@@ -27,6 +28,15 @@ const browserVaultMock = vi.hoisted(() => ({
 vi.mock("@/src/lib/browser-vault/context", () => ({
   useBrowserVault() {
     return browserVaultMock.value;
+  },
+  useBrowserVaultLabsSelector<T>(selector: (client: BrowserVaultQueryClient) => T) {
+    return browserVaultMock.value.client ? selector(browserVaultMock.value.client) : null;
+  },
+  useBrowserVaultMetricKeyDemand() {
+    return browserVaultMock.metricDemandLoaded;
+  },
+  useBrowserVaultMetricsSelector<T>(selector: (client: BrowserVaultQueryClient) => T) {
+    return browserVaultMock.value.client ? selector(browserVaultMock.value.client) : null;
   },
   useBrowserVaultSelector<T>(selector: (client: BrowserVaultQueryClient) => T) {
     return browserVaultMock.value.client ? selector(browserVaultMock.value.client) : null;
@@ -85,6 +95,7 @@ const DEVICE_BIOMARKERS: DeviceTrackedBiomarker[] = [
 ];
 
 beforeEach(() => {
+  browserVaultMock.metricDemandLoaded = true;
   browserVaultMock.value = {
     client: null,
     error: null,
@@ -93,6 +104,64 @@ beforeEach(() => {
     refreshPending: false,
     status: "empty",
   };
+});
+
+test("wearable-only biomarkers wait for demanded buckets before showing a genuine empty state", async () => {
+  browserVaultMock.value.client = clientWithMetricRows([]);
+  browserVaultMock.value.status = "ready";
+  browserVaultMock.metricDemandLoaded = false;
+
+  const rendered = await renderClientComponent(
+    <BiomarkersPageClient authenticated deviceBiomarkers={DEVICE_BIOMARKERS} />,
+    { requireButton: false },
+  );
+
+  try {
+    expect(rendered.container.querySelector('[aria-label="Loading biomarkers"]')).not.toBeNull();
+    expect(rendered.container.querySelector("[data-biomarker-index-state]")).toBeNull();
+    expect(rendered.container.textContent).not.toContain("What appears next");
+
+    browserVaultMock.metricDemandLoaded = true;
+    await rendered.rerender(
+      <BiomarkersPageClient authenticated deviceBiomarkers={DEVICE_BIOMARKERS} />,
+    );
+
+    expect(rendered.container.querySelector('[aria-label="Loading biomarkers"]')).toBeNull();
+    expect(rendered.container.querySelector('[data-biomarker-index-state="empty"]')).not.toBeNull();
+  } finally {
+    await rendered.cleanup();
+  }
+});
+
+test("failed wearable demand shows the recoverable alert without replacing ready data", async () => {
+  browserVaultMock.value.client = clientWithMetricRows([], [labRow()]);
+  browserVaultMock.value.error = "Your dashboard data is not available right now.";
+  browserVaultMock.value.status = "error";
+  browserVaultMock.metricDemandLoaded = false;
+
+  const rendered = await renderClientComponent(
+    <BiomarkersPageClient authenticated deviceBiomarkers={DEVICE_BIOMARKERS} />,
+    { requireButton: false },
+  );
+
+  try {
+    expect(rendered.container.textContent).toContain("Could not load your biomarkers");
+    expect(rendered.container.textContent).toContain("HbA1c");
+    expect(rendered.container.querySelector('[aria-label="Loading biomarkers"]')).toBeNull();
+    expect(rendered.container.querySelector("[data-biomarker-index-state]")).toBeNull();
+
+    const retry = [...rendered.container.querySelectorAll("button")].find(
+      (button) => button.textContent === "Retry",
+    );
+    expect(retry).toBeDefined();
+    await act(async () => {
+      retry?.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
+    });
+    expect(browserVaultMock.value.refresh).toHaveBeenCalledOnce();
+    expect(browserVaultMock.value.refresh).toHaveBeenCalledWith({ background: true });
+  } finally {
+    await rendered.cleanup();
+  }
 });
 
 test("only device-derived readings decide the latest card value without history metadata", async () => {

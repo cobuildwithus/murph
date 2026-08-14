@@ -6,7 +6,10 @@ import {
 import { getPrisma } from "../prisma";
 import { assertHostedHistoricalLaunchConsentGranted } from "../legal/consent";
 import { completeHostedPrivyVerification } from "./authentication-service";
-import { ensureHostedAutoPulseTrialEnrollment } from "./auto-trial-enrollment-service";
+import {
+  ensureHostedStarterUsageEnrollment,
+  retryPendingHostedStarterUsageActivationRuntimeWake,
+} from "./starter-usage-enrollment-service";
 import { assertHostedMemberNotSuspended } from "./entitlement";
 import { hostedOnboardingError } from "./errors";
 import {
@@ -24,12 +27,11 @@ import { resolveHostedPrivySessionFromBearerToken } from "./hosted-session";
  * Native companion admission reuses the hosted Web lifecycle rather than
  * creating a second signup or entitlement owner. The first authenticated
  * request may create the canonical member and invite, but consent is checked
- * before trial activation or Junction authority is issued.
+ * before Starter enrollment or Junction authority is issued.
  */
 export async function requireHostedCompanionMemberIdFromRequest(input: {
   prisma?: PrismaClient;
   request: Request;
-  suppressSignupWelcome?: boolean;
   timeZone?: string | null;
 }): Promise<string> {
   const prisma = input.prisma ?? getPrisma();
@@ -46,9 +48,6 @@ export async function requireHostedCompanionMemberIdFromRequest(input: {
   return ensureHostedCompanionMemberId({
     identity: session.identity,
     prisma,
-    ...(input.suppressSignupWelcome === undefined
-      ? {}
-      : { suppressSignupWelcome: input.suppressSignupWelcome }),
     ...(input.timeZone ? { timeZone: input.timeZone } : {}),
   });
 }
@@ -57,7 +56,6 @@ export async function ensureHostedCompanionMemberId(input: {
   identity: HostedPrivyIdentity;
   now?: Date;
   prisma?: PrismaClient;
-  suppressSignupWelcome?: boolean;
   timeZone?: string | null;
 }): Promise<string> {
   const prisma = input.prisma ?? getPrisma();
@@ -75,6 +73,10 @@ export async function ensureHostedCompanionMemberId(input: {
       prisma,
     })) {
       await assertHostedHistoricalLaunchConsentGranted({
+        memberId: existingMember.id,
+        prisma,
+      });
+      await requireHostedCompanionActivationRuntimeWake({
         memberId: existingMember.id,
         prisma,
       });
@@ -100,14 +102,18 @@ export async function ensureHostedCompanionMemberId(input: {
     memberId: completion.memberId,
     prisma,
   })) {
+    await requireHostedCompanionActivationRuntimeWake({
+      memberId: completion.memberId,
+      prisma,
+    });
     return completion.memberId;
   }
 
-  // Only the untouched hosted acquisition state may enter automatic trial
-  // enrollment here. Incomplete and lapsed billing retain their existing Web
+  // Only the untouched hosted acquisition state may enter Starter enrollment
+  // here. Incomplete and lapsed billing retain their existing Web
   // recovery owners instead of being reinterpreted as a native signup.
   if (completion.member.billingStatus === HostedBillingStatus.not_started) {
-    await ensureHostedAutoPulseTrialEnrollment({
+    await ensureHostedStarterUsageEnrollment({
       inviteCode: completion.inviteCode,
       member: {
         id: completion.member.id,
@@ -115,10 +121,7 @@ export async function ensureHostedCompanionMemberId(input: {
       },
       now,
       prisma,
-      pulseTrialStartSource: "companion_onboarding",
-      ...(input.suppressSignupWelcome === undefined
-        ? {}
-        : { suppressSignupWelcome: input.suppressSignupWelcome }),
+      source: "companion_onboarding",
     });
   }
 
@@ -128,4 +131,20 @@ export async function ensureHostedCompanionMemberId(input: {
   });
 
   return completion.memberId;
+}
+
+async function requireHostedCompanionActivationRuntimeWake(input: {
+  memberId: string;
+  prisma: PrismaClient;
+}): Promise<void> {
+  const runtimeWake =
+    await retryPendingHostedStarterUsageActivationRuntimeWake(input);
+  if (runtimeWake && !runtimeWake.accepted) {
+    throw hostedOnboardingError({
+      code: "HOSTED_STARTER_USAGE_RUNTIME_WAKE_REQUIRED",
+      httpStatus: 503,
+      message: "Murph account setup is waiting for runtime recovery.",
+      retryable: true,
+    });
+  }
 }

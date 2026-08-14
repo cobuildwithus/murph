@@ -10,16 +10,16 @@ const {
 } = vi.hoisted(() => ({
   lockHostedMemberRowMock: vi.fn(async () => undefined),
   openHostedUserSecureBoxStringMock: vi.fn(
-    async (_input: { prisma?: unknown; value?: unknown }) => "acct_456",
+    async (input: { prisma?: unknown; value?: unknown }) => {
+      void input;
+      return "acct_456";
+    },
   ),
   randomBytesMock: vi.fn((length: number) => Buffer.from(Array.from({ length }, (_, index) => index))),
   readHostedHealthDataConsentStateMock: vi.fn(
     async (): Promise<"granted" | "missing" | "revoked"> => "missing",
   ),
-  supersedeDirtyStateMock: vi.fn(async () => ({
-    retainedCredentialIndependentPayloadCount: 0,
-    supersededPayloadCount: 0,
-  })),
+  supersedeDirtyStateMock: vi.fn(async () => undefined),
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/shared", async (importOriginal) => ({
@@ -60,7 +60,12 @@ vi.mock("@/src/lib/device-sync/prisma-store/dirty-connections", async () => {
 });
 
 import { buildHostedProviderAccountBlindIndex } from "@/src/lib/device-sync/routing-index";
-import { PrismaDeviceSyncControlPlaneStore } from "@/src/lib/device-sync/prisma-store";
+import {
+  hostedConnectionRecordArgs,
+  hostedRuntimeRedactedConnectionRecordArgs,
+  PrismaDeviceSyncControlPlaneStore,
+  type HostedConnectionRecord,
+} from "@/src/lib/device-sync/prisma-store";
 
 type MutableOAuthSession = {
   state: string;
@@ -83,6 +88,8 @@ type MutableConnectionRecord = {
   credentialKind: "oauth_tokens" | "provider_config" | "none";
   credentialMetadataJson: Record<string, unknown> | null;
   providerConfigKey: string | null;
+  providerApplicationId: string | null;
+  providerApplicationRevision: number | null;
   displayName: string | null;
   externalAccountIdEncrypted: string | null;
   keyVersion: string | null;
@@ -119,6 +126,7 @@ describe("PrismaDeviceSyncControlPlaneStore oauth state ingress", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     readHostedHealthDataConsentStateMock.mockResolvedValue("missing");
+    supersedeDirtyStateMock.mockResolvedValue(undefined);
   });
 
   // Consume semantics (replay, expiry, mismatches) are owned by
@@ -182,6 +190,7 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     readHostedHealthDataConsentStateMock.mockResolvedValue("missing");
+    supersedeDirtyStateMock.mockResolvedValue(undefined);
   });
 
   it("denies health-data admission after locking and re-reading consent", async () => {
@@ -313,6 +322,7 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
       codec: TEST_CODEC,
       prisma: {
         $transaction: async <TResult>(callback: (transaction: typeof tx) => Promise<TResult>) => callback(tx),
+        deviceConnection: createRootConnectionPreflight(() => createdArtifacts.connection),
       } as never,
       providerAccountBlindIndexKey: BLIND_INDEX_KEY,
     });
@@ -367,6 +377,213 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
     expect(created.metadata).toEqual({});
   });
 
+  it("commits the exact provider application binding with a new OAuth connection", async () => {
+    let created: MutableConnectionRecord | null = null;
+    const tx = {
+      deviceConnection: {
+        findUnique: vi.fn(async () => null),
+        findFirst: vi.fn(async () => null),
+        create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => {
+          created = normalizeCreatedConnection(data);
+          return cloneConnection(created);
+        }),
+      },
+      deviceProviderApplication: {
+        findFirst: vi.fn(async () => ({
+          id: "dpa_123",
+          memberId: "user-123",
+          provider: "strava",
+          revision: 4,
+        })),
+      },
+    };
+    const store = new PrismaDeviceSyncControlPlaneStore({
+      codec: TEST_CODEC,
+      prisma: {
+        $transaction: async <TResult>(
+          callback: (transaction: typeof tx) => Promise<TResult>,
+        ) => callback(tx),
+      } as never,
+      providerAccountBlindIndexKey: BLIND_INDEX_KEY,
+    });
+
+    await store.upsertConnectionWithProviderApplication({
+      ownerId: "user-123",
+      existingAccountPolicy: "replace",
+      provider: "strava",
+      externalAccountId: "athlete-123",
+      displayName: "Strava",
+      scopes: ["activity:read_all"],
+      tokens: {
+        accessToken: "access-token",
+        refreshToken: "refresh-token",
+        accessTokenExpiresAt: "2026-03-25T04:00:00.000Z",
+      },
+      metadata: {},
+      connectedAt: "2026-03-25T00:00:00.000Z",
+      nextReconcileAt: "2026-03-25T05:00:00.000Z",
+    }, {
+      applicationId: "dpa_123",
+      provider: "strava",
+      revision: 4,
+    });
+
+    expect(tx.deviceProviderApplication.findFirst).toHaveBeenCalledWith({
+      select: {
+        id: true,
+        memberId: true,
+        provider: true,
+        revision: true,
+      },
+      where: {
+        id: "dpa_123",
+        memberId: "user-123",
+        provider: "strava",
+        revision: 4,
+      },
+    });
+    expect(created).toMatchObject({
+      provider: "strava",
+      providerApplicationId: "dpa_123",
+      providerApplicationRevision: 4,
+      userId: "user-123",
+    });
+  });
+
+  it("rejects a second active connection for the same member-owned provider", async () => {
+    const tx = {
+      deviceConnection: {
+        findUnique: vi.fn(async () => null),
+        findFirst: vi.fn(async () => ({ id: "dsc_existing" })),
+        create: vi.fn(),
+      },
+      deviceProviderApplication: {
+        findFirst: vi.fn(async () => ({
+          id: "dpa_123",
+          memberId: "user-123",
+          provider: "strava",
+          revision: 4,
+        })),
+      },
+    };
+    const store = new PrismaDeviceSyncControlPlaneStore({
+      codec: TEST_CODEC,
+      prisma: {
+        $transaction: async <TResult>(
+          callback: (transaction: typeof tx) => Promise<TResult>,
+        ) => callback(tx),
+      } as never,
+      providerAccountBlindIndexKey: BLIND_INDEX_KEY,
+    });
+
+    await expect(store.upsertConnectionWithProviderApplication({
+      ownerId: "user-123",
+      existingAccountPolicy: "replace",
+      provider: "strava",
+      externalAccountId: "athlete-new",
+      displayName: "Strava",
+      scopes: ["activity:read_all"],
+      tokens: {
+        accessToken: "access-token",
+        refreshToken: "refresh-token",
+        accessTokenExpiresAt: null,
+      },
+      metadata: {},
+      connectedAt: "2026-03-25T00:00:00.000Z",
+      nextReconcileAt: null,
+    }, {
+      applicationId: "dpa_123",
+      provider: "strava",
+      revision: 4,
+    })).rejects.toMatchObject({
+      code: "PROVIDER_APPLICATION_CONNECTION_CONFLICT",
+    });
+    expect(tx.deviceConnection.create).not.toHaveBeenCalled();
+  });
+
+  it("rechecks the exact application binding after a uniqueness race", async () => {
+    const existing = createConnection({
+      id: "dsc_existing",
+      provider: "strava",
+      providerApplicationId: "dpa_old",
+      providerApplicationRevision: 3,
+      status: "active",
+      userId: "user-123",
+    });
+    const application = {
+      id: "dpa_123",
+      memberId: "user-123",
+      provider: "strava",
+      revision: 4,
+    };
+    const create = vi.fn(async () => {
+      throw Object.assign(new Error("unique connection"), { code: "P2002" });
+    });
+    const createTx = {
+      deviceConnection: {
+        findUnique: vi.fn(async () => null),
+        findFirst: vi.fn(async () => null),
+        create,
+      },
+      deviceProviderApplication: {
+        findFirst: vi.fn(async () => application),
+      },
+    };
+    const retryTx = {
+      $executeRaw: vi.fn(async () => 0),
+      deviceConnection: {
+        findUnique: vi.fn(async () => cloneConnection(existing)),
+        findFirst: vi.fn(async () => null),
+        update: vi.fn(),
+      },
+      deviceProviderApplication: {
+        findFirst: vi.fn(async () => application),
+      },
+    };
+    const prisma = {
+      $transaction: vi
+        .fn()
+        .mockImplementationOnce(async (callback: (tx: typeof createTx) => unknown) =>
+          callback(createTx))
+        .mockImplementationOnce(async (callback: (tx: typeof retryTx) => unknown) =>
+          callback(retryTx)),
+      deviceConnection: {
+        findUnique: vi.fn(async () => cloneConnection(existing)),
+      },
+    };
+    const store = new PrismaDeviceSyncControlPlaneStore({
+      codec: TEST_CODEC,
+      prisma: prisma as never,
+      providerAccountBlindIndexKey: BLIND_INDEX_KEY,
+    });
+    await expect(store.upsertConnectionWithProviderApplication({
+      ownerId: "user-123",
+      existingAccountPolicy: "replace",
+      provider: "strava",
+      externalAccountId: "athlete-123",
+      displayName: "Strava",
+      scopes: ["activity:read_all"],
+      tokens: {
+        accessToken: "access-token",
+        refreshToken: "refresh-token",
+        accessTokenExpiresAt: null,
+      },
+      metadata: {},
+      connectedAt: "2026-03-25T00:00:00.000Z",
+      nextReconcileAt: null,
+    }, {
+      applicationId: "dpa_123",
+      provider: "strava",
+      revision: 4,
+    })).rejects.toMatchObject({
+      code: "PROVIDER_APPLICATION_CONNECTION_CONFLICT",
+    });
+    expect(create).toHaveBeenCalledTimes(1);
+    expect(prisma.$transaction).toHaveBeenCalledTimes(2);
+    expect(retryTx.deviceProviderApplication.findFirst).toHaveBeenCalledTimes(1);
+    expect(retryTx.deviceConnection.update).not.toHaveBeenCalled();
+  });
+
   it("keeps hosted device connection persistence provider-generic", async () => {
     const createdArtifacts: {
       connection: MutableConnectionRecord | null;
@@ -400,6 +617,7 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
       codec: TEST_CODEC,
       prisma: {
         $transaction: async <TResult>(callback: (transaction: typeof tx) => Promise<TResult>) => callback(tx),
+        deviceConnection: createRootConnectionPreflight(() => createdArtifacts.connection),
       } as never,
       providerAccountBlindIndexKey: BLIND_INDEX_KEY,
     });
@@ -457,6 +675,7 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
       codec: TEST_CODEC,
       prisma: {
         $transaction: async <TResult>(callback: (transaction: typeof tx) => Promise<TResult>) => callback(tx),
+        deviceConnection: createRootConnectionPreflight(() => createdArtifacts.connection),
       } as never,
       providerAccountBlindIndexKey: BLIND_INDEX_KEY,
     });
@@ -700,6 +919,7 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
       codec: TEST_CODEC,
       prisma: {
         $transaction: async <TResult>(callback: (transaction: typeof tx) => Promise<TResult>) => callback(tx),
+        deviceConnection: createRootConnectionPreflight(() => null),
       } as never,
       providerAccountBlindIndexKey: BLIND_INDEX_KEY,
     });
@@ -776,6 +996,7 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
       codec: TEST_CODEC,
       prisma: {
         $transaction: async <TResult>(callback: (transaction: typeof tx) => Promise<TResult>) => callback(tx),
+        deviceConnection: createRootConnectionPreflight(() => stored),
       } as never,
       providerAccountBlindIndexKey: BLIND_INDEX_KEY,
     });
@@ -863,6 +1084,7 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
       codec: TEST_CODEC,
       prisma: {
         $transaction: async <TResult>(callback: (transaction: typeof tx) => Promise<TResult>) => callback(tx),
+        deviceConnection: createRootConnectionPreflight(() => existing),
       } as never,
       providerAccountBlindIndexKey: BLIND_INDEX_KEY,
     });
@@ -900,6 +1122,243 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
     }));
     expect(tx.deviceConnection.create).not.toHaveBeenCalled();
     expect(tx.deviceConnection.update).not.toHaveBeenCalled();
+  });
+
+  it("never lets a static OAuth callback bypass an existing private application", async () => {
+    const tx = {
+      deviceConnection: {
+        findUnique: vi.fn(async () => null),
+        findFirst: vi.fn(async () => null),
+        create: vi.fn(),
+      },
+      deviceProviderApplication: {
+        findFirst: vi.fn(async () => ({ id: "dpa_123" })),
+      },
+    };
+    const store = new PrismaDeviceSyncControlPlaneStore({
+      codec: TEST_CODEC,
+      prisma: {
+        $transaction: async <TResult>(
+          callback: (transaction: typeof tx) => Promise<TResult>,
+        ) => callback(tx),
+      } as never,
+      providerAccountBlindIndexKey: BLIND_INDEX_KEY,
+    });
+
+    await expect(store.upsertConnectionWithPrevious({
+      ownerId: "user-123",
+      existingAccountPolicy: "replace",
+      provider: "strava",
+      externalAccountId: "athlete-123",
+      displayName: "Strava",
+      scopes: ["activity:read_all"],
+      tokens: {
+        accessToken: "static-access",
+        refreshToken: "static-refresh",
+        accessTokenExpiresAt: null,
+      },
+      metadata: {},
+      connectedAt: "2026-03-25T01:00:00.000Z",
+      nextReconcileAt: null,
+    })).rejects.toMatchObject({
+      code: "PROVIDER_APPLICATION_REQUIRED",
+      httpStatus: 409,
+    });
+    expect(tx.deviceConnection.create).not.toHaveBeenCalled();
+  });
+
+  it("never lets a static OAuth callback reuse an app-bound active connection", async () => {
+    const existing = createConnection({
+      id: "dsc_123",
+      provider: "strava",
+      providerApplicationId: "dpa_123",
+      providerApplicationRevision: 4,
+      status: "active",
+      userId: "user-123",
+    });
+    const tx = {
+      $executeRaw: vi.fn(async () => 0),
+      deviceConnection: {
+        findUnique: vi.fn(async () => cloneConnection(existing)),
+        update: vi.fn(),
+      },
+    };
+    const store = new PrismaDeviceSyncControlPlaneStore({
+      codec: TEST_CODEC,
+      prisma: {
+        $transaction: async <TResult>(
+          callback: (transaction: typeof tx) => Promise<TResult>,
+        ) => callback(tx),
+      } as never,
+      providerAccountBlindIndexKey: BLIND_INDEX_KEY,
+    });
+
+    await expect(store.upsertConnectionWithPrevious({
+      ownerId: "user-123",
+      existingAccountPolicy: "preserve_established",
+      provider: "strava",
+      externalAccountId: "acct_456",
+      displayName: "Strava",
+      scopes: ["activity:read_all"],
+      tokens: {
+        accessToken: "static-access",
+        refreshToken: "static-refresh",
+        accessTokenExpiresAt: null,
+      },
+      metadata: {},
+      connectedAt: "2026-03-25T01:00:00.000Z",
+      nextReconcileAt: null,
+    })).rejects.toMatchObject({
+      code: "PROVIDER_APPLICATION_REQUIRED",
+      httpStatus: 409,
+    });
+    expect(tx.deviceConnection.update).not.toHaveBeenCalled();
+  });
+
+  it("retries legacy classification once behind the consent and dirty-marker transaction", async () => {
+    let stored = createConnection({
+      accessTokenEncrypted: null,
+      id: "dsc_classification_retry",
+      keyVersion: null,
+      provider: "whoop",
+      refreshTokenEncrypted: null,
+      status: "disconnected",
+      tokenVersion: null,
+      userId: "user-123",
+    });
+    const tx = {
+      $executeRaw: vi.fn(async () => 0),
+      deviceConnection: {
+        findUnique: vi.fn(async () => cloneConnection(stored)),
+        update: vi.fn(async ({ data }: { data: Partial<MutableConnectionRecord> }) => {
+          stored = {
+            ...stored,
+            ...data,
+            updatedAt: new Date("2026-03-26T04:00:00.000Z"),
+          };
+          return cloneConnection(stored);
+        }),
+      },
+    };
+    const transaction = vi.fn(async <TResult>(
+      callback: (transactionClient: typeof tx) => Promise<TResult>,
+    ) => {
+      const snapshot = cloneConnection(stored)!;
+      try {
+        return await callback(tx);
+      } catch (error) {
+        stored = snapshot;
+        throw error;
+      }
+    });
+    const store = new PrismaDeviceSyncControlPlaneStore({
+      codec: TEST_CODEC,
+      prisma: {
+        $transaction: transaction,
+        deviceConnection: createRootConnectionPreflight(() => stored),
+      } as never,
+      providerAccountBlindIndexKey: BLIND_INDEX_KEY,
+    });
+    supersedeDirtyStateMock
+      .mockRejectedValueOnce({
+        code: "HOSTED_DEVICE_SYNC_DIRTY_PAYLOAD_CLASSIFICATION_PENDING",
+        retryable: true,
+      })
+      .mockResolvedValueOnce(undefined);
+
+    await expect(store.upsertConnection({
+      ownerId: "user-123",
+      existingAccountPolicy: "replace",
+      provider: "whoop",
+      externalAccountId: "acct_456",
+      displayName: "WHOOP",
+      scopes: ["read:recovery"],
+      tokens: {
+        accessToken: "new-access-token",
+        refreshToken: "new-refresh-token",
+      },
+      metadata: {},
+      connectedAt: "2026-03-26T03:00:00.000Z",
+      nextReconcileAt: null,
+    })).resolves.toEqual(expect.objectContaining({
+      id: "dsc_classification_retry",
+      status: "active",
+    }));
+
+    expect(supersedeDirtyStateMock).toHaveBeenCalledTimes(2);
+    expect(supersedeDirtyStateMock).toHaveBeenNthCalledWith(1, {
+      connectionId: "dsc_classification_retry",
+      tx,
+      userId: "user-123",
+    });
+    expect(lockHostedMemberRowMock.mock.invocationCallOrder[0]).toBeLessThan(
+      readHostedHealthDataConsentStateMock.mock.invocationCallOrder[0] ?? 0,
+    );
+    expect(readHostedHealthDataConsentStateMock.mock.invocationCallOrder[0]).toBeLessThan(
+      supersedeDirtyStateMock.mock.invocationCallOrder[0] ?? 0,
+    );
+    expect(transaction).toHaveBeenCalledTimes(2);
+  });
+
+  it("bounds repeated connection unique-conflict recovery to one retry", async () => {
+    const stored = createConnection({
+      connectedAt: new Date("2026-03-25T00:00:00.000Z"),
+      id: "dsc_unique_retry",
+      provider: "whoop",
+      status: "disconnected",
+      userId: "user-123",
+    });
+    const uniqueConflict = Object.assign(new Error("Unique constraint failed"), {
+      code: "P2002",
+    });
+    const transaction = vi.fn(async () => {
+      throw uniqueConflict;
+    });
+    const findUnique = vi.fn(async (input: {
+      select?: Record<string, boolean>;
+      where: { id?: string; provider_providerAccountBlindIndex?: unknown };
+    }) => {
+      if (input.where.id) {
+        return { userId: stored.userId };
+      }
+      if (input.select?.connectedAt && Object.keys(input.select).length === 5) {
+        return {
+          connectedAt: stored.connectedAt,
+          id: stored.id,
+          setupPhase: stored.setupPhase,
+          status: stored.status,
+          userId: stored.userId,
+        };
+      }
+      return cloneConnection(stored);
+    });
+    const store = new PrismaDeviceSyncControlPlaneStore({
+      codec: TEST_CODEC,
+      prisma: {
+        $transaction: transaction,
+        deviceConnection: { findUnique },
+      } as never,
+      providerAccountBlindIndexKey: BLIND_INDEX_KEY,
+    });
+
+    await expect(store.upsertConnection({
+      ownerId: "user-123",
+      existingAccountPolicy: "replace",
+      provider: "whoop",
+      externalAccountId: "acct_456",
+      displayName: "WHOOP",
+      scopes: ["read:recovery"],
+      tokens: {
+        accessToken: "new-access-token",
+        refreshToken: "new-refresh-token",
+      },
+      metadata: {},
+      connectedAt: "2026-03-26T03:00:00.000Z",
+      nextReconcileAt: null,
+    })).rejects.toBe(uniqueConflict);
+
+    expect(transaction).toHaveBeenCalledTimes(2);
+    expect(supersedeDirtyStateMock).not.toHaveBeenCalled();
   });
 
   it("reactivates a disconnected hosted connection on successful OAuth reconnect", async () => {
@@ -940,6 +1399,7 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
       codec: TEST_CODEC,
       prisma: {
         $transaction: async <TResult>(callback: (transaction: typeof tx) => Promise<TResult>) => callback(tx),
+        deviceConnection: createRootConnectionPreflight(() => stored),
       } as never,
       providerAccountBlindIndexKey: BLIND_INDEX_KEY,
     });
@@ -1018,6 +1478,7 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
       codec: TEST_CODEC,
       prisma: {
         $transaction: async <TResult>(callback: (transaction: typeof tx) => Promise<TResult>) => callback(tx),
+        deviceConnection: createRootConnectionPreflight(() => existing),
       } as never,
       providerAccountBlindIndexKey: BLIND_INDEX_KEY,
     });
@@ -1077,6 +1538,7 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
       codec: TEST_CODEC,
       prisma: {
         $transaction: async <TResult>(callback: (transaction: typeof tx) => Promise<TResult>) => callback(tx),
+        deviceConnection: createRootConnectionPreflight(() => existing),
       } as never,
       providerAccountBlindIndexKey: BLIND_INDEX_KEY,
     });
@@ -1130,6 +1592,7 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
       codec: TEST_CODEC,
       prisma: {
         $transaction: async <TResult>(callback: (transaction: typeof tx) => Promise<TResult>) => callback(tx),
+        deviceConnection: createRootConnectionPreflight(() => existing),
       } as never,
       providerAccountBlindIndexKey: BLIND_INDEX_KEY,
     });
@@ -1188,6 +1651,7 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
       codec: TEST_CODEC,
       prisma: {
         $transaction: async <TResult>(callback: (transaction: typeof tx) => Promise<TResult>) => callback(tx),
+        deviceConnection: createRootConnectionPreflight(() => existing),
       } as never,
       providerAccountBlindIndexKey: BLIND_INDEX_KEY,
     });
@@ -1481,6 +1945,86 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
     ]);
   });
 
+  it("uses an id-and-status-only member projection for companion status", async () => {
+    const findMany = vi.fn(async () => [{
+      id: "dsc_123",
+      status: "active",
+    }]);
+    const store = new PrismaDeviceSyncControlPlaneStore({
+      prisma: {
+        deviceConnection: { findMany },
+      } as never,
+    });
+
+    await expect(store.listMemberConnectionStatuses({
+      limit: 32,
+      provider: "junction",
+      status: "not_disconnected",
+      userId: "user-123",
+    })).resolves.toEqual([{
+      id: "dsc_123",
+      status: "active",
+    }]);
+    expect(findMany).toHaveBeenCalledWith({
+      orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
+      take: 33,
+      select: {
+        id: true,
+        status: true,
+      },
+      where: {
+        provider: "junction",
+        status: { not: "disconnected" },
+        userId: "user-123",
+      },
+    });
+    expect(openHostedUserSecureBoxStringMock).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when companion status connection authority exceeds its bound", async () => {
+    const findMany = vi.fn(async () =>
+      Array.from({ length: 33 }, (_, index) => ({
+        id: `dsc_${String(index).padStart(2, "0")}`,
+        status: "active",
+      }))
+    );
+    const store = new PrismaDeviceSyncControlPlaneStore({
+      prisma: {
+        deviceConnection: { findMany },
+      } as never,
+    });
+
+    await expect(store.listMemberConnectionStatuses({
+      limit: 32,
+      provider: "junction",
+      status: "not_disconnected",
+      userId: "user-123",
+    })).rejects.toMatchObject({
+      code: "MEMBER_CONNECTION_STATUS_SNAPSHOT_SATURATED",
+      httpStatus: 503,
+      retryable: false,
+    });
+    expect(findMany).toHaveBeenCalledWith(expect.objectContaining({ take: 33 }));
+    expect(openHostedUserSecureBoxStringMock).not.toHaveBeenCalled();
+  });
+
+  it("keeps redacted runtime SQL projections free of every device ciphertext", () => {
+    expect(hostedConnectionRecordArgs.select).toMatchObject({
+      accessTokenEncrypted: true,
+      externalAccountIdEncrypted: true,
+      refreshTokenEncrypted: true,
+    });
+    expect(hostedRuntimeRedactedConnectionRecordArgs.select).not.toHaveProperty(
+      "accessTokenEncrypted",
+    );
+    expect(hostedRuntimeRedactedConnectionRecordArgs.select).not.toHaveProperty(
+      "externalAccountIdEncrypted",
+    );
+    expect(hostedRuntimeRedactedConnectionRecordArgs.select).not.toHaveProperty(
+      "refreshTokenEncrypted",
+    );
+  });
+
   it("keeps webhook-ingress external-account lookups on the durable Prisma owner", async () => {
     const connection = createConnection({
       id: "dsc_123",
@@ -1705,39 +2249,261 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
     expect(serialized).not.toContain("refresh_token=secret");
   });
 
-  it("persists webhook receipt timestamps in durable Prisma state", async () => {
-    const connection = createConnection({
-      id: "dsc_123",
-      provider: "oura",
-      userId: "user-123",
-    });
-    const updateConnection = vi.fn(async () => undefined);
-
+  it("persists webhook receipt timestamps with one set-based write", async () => {
+    const updateMany = vi.fn()
+      .mockResolvedValueOnce({ count: 1 })
+      .mockResolvedValueOnce({ count: 0 });
     const store = new PrismaDeviceSyncControlPlaneStore({
       prisma: {
         deviceConnection: {
-          findUnique: async ({ where }: { where: { id?: string } | { provider_providerAccountBlindIndex?: { provider: string; providerAccountBlindIndex: string } } }) => {
-            if ("id" in where && where.id === connection.id) {
-              return cloneConnection(connection);
-            }
-
-            return null;
-          },
-          update: updateConnection,
+          updateMany,
         },
       } as never,
     });
 
     await store.markWebhookReceived("dsc_123", "2026-03-25T06:00:00.000Z");
+    await expect(
+      store.markWebhookReceived("dsc_missing", "2026-03-25T06:01:00.000Z"),
+    ).resolves.toBeUndefined();
 
-    expect(updateConnection).toHaveBeenCalledWith({
+    expect(updateMany).toHaveBeenNthCalledWith(1, {
       where: {
         id: "dsc_123",
+        OR: [
+          { lastWebhookAt: null },
+          { lastWebhookAt: { lt: new Date("2026-03-25T06:00:00.000Z") } },
+        ],
       },
       data: {
         lastWebhookAt: new Date("2026-03-25T06:00:00.000Z"),
       },
     });
+    expect(updateMany).toHaveBeenNthCalledWith(2, {
+      where: {
+        id: "dsc_missing",
+        OR: [
+          { lastWebhookAt: null },
+          { lastWebhookAt: { lt: new Date("2026-03-25T06:01:00.000Z") } },
+        ],
+      },
+      data: {
+        lastWebhookAt: new Date("2026-03-25T06:01:00.000Z"),
+      },
+    });
+  });
+
+  it("materializes a preloaded connection row without another connection query", async () => {
+    const findFirst = vi.fn();
+    const findUnique = vi.fn();
+    const connection = {
+      ...createConnection({
+        accessTokenEncrypted: "enc:access-token",
+        accessTokenExpiresAt: new Date("2026-03-25T06:30:00.000Z"),
+        externalAccountIdEncrypted: "enc:acct_456",
+        keyVersion: "v1",
+        refreshTokenEncrypted: "enc:refresh-token",
+        status: "active",
+        tokenVersion: 2,
+      }),
+      credentialMetadataJson: {},
+      metadataJson: {},
+      scopesJson: [],
+    } satisfies HostedConnectionRecord;
+    const store = new PrismaDeviceSyncControlPlaneStore({
+      codec: TEST_CODEC,
+      prisma: {
+        deviceConnection: {
+          findFirst,
+          findUnique,
+        },
+      } as never,
+    });
+
+    const stored = await store.materializeStoredConnectionAccount(connection);
+    const durable = await store.materializeDurableConnectionRecord(connection);
+
+    expect(stored).toMatchObject({
+      externalAccountId: "acct_456",
+      id: "dsc_123",
+      tokenVersion: 2,
+    });
+    expect(durable).toMatchObject({
+      externalAccountId: "acct_456",
+      id: "dsc_123",
+    });
+    expect(findFirst).not.toHaveBeenCalled();
+    expect(findUnique).not.toHaveBeenCalled();
+  });
+
+  it("persists a prepared runtime token write and clears only an obsolete refresh lease", async () => {
+    const record = {
+      ...createConnection({
+        credentialKind: "provider_config",
+        providerConfigKey: "legacy-profile",
+        refreshLeaseExpiresAt: new Date("2026-03-25T04:05:00.000Z"),
+        refreshLeaseOwner: "agent-refresh:obsolete",
+        refreshLeaseTokenVersion: 1,
+        tokenVersion: 2,
+      }),
+      credentialMetadataJson: { profile: "legacy" },
+      metadataJson: {},
+      scopesJson: [],
+    } satisfies HostedConnectionRecord;
+    const written = {
+      ...createConnection({
+        accessTokenEncrypted: "sealed-access-token",
+        accessTokenExpiresAt: new Date("2026-03-26T04:00:00.000Z"),
+        credentialKind: "oauth_tokens",
+        externalAccountIdEncrypted: "sealed-account-id",
+        keyVersion: "hosted-device-secure-box:v1",
+        providerConfigKey: null,
+        refreshLeaseExpiresAt: null,
+        refreshLeaseOwner: null,
+        refreshLeaseTokenVersion: null,
+        refreshTokenEncrypted: "sealed-refresh-token",
+        tokenVersion: 3,
+      }),
+      credentialMetadataJson: {},
+      metadataJson: {},
+      scopesJson: [],
+    } satisfies HostedConnectionRecord;
+    const update = vi.fn(async () => written);
+    const store = new PrismaDeviceSyncControlPlaneStore({
+      prisma: {} as never,
+    });
+
+    const result = await store.persistPreparedRuntimeApplyTokenWrite({
+      prepared: {
+        accessTokenEncrypted: "sealed-access-token",
+        accessTokenExpiresAt: "2026-03-26T04:00:00.000Z",
+        externalAccountIdEncrypted: "sealed-account-id",
+        keyVersion: "hosted-device-secure-box:v1",
+        refreshTokenEncrypted: "sealed-refresh-token",
+        rootKeyId: "device-root-active",
+        tokenVersion: 3,
+      },
+      record,
+      tx: {
+        deviceConnection: { update },
+      } as never,
+    });
+
+    expect(update).toHaveBeenCalledWith(expect.objectContaining({
+      data: {
+        accessTokenEncrypted: "sealed-access-token",
+        accessTokenExpiresAt: new Date("2026-03-26T04:00:00.000Z"),
+        credentialKind: "oauth_tokens",
+        credentialMetadataJson: {},
+        externalAccountIdEncrypted: "sealed-account-id",
+        keyVersion: "hosted-device-secure-box:v1",
+        providerConfigKey: null,
+        refreshLeaseExpiresAt: null,
+        refreshLeaseOwner: null,
+        refreshLeaseTokenVersion: null,
+        refreshTokenEncrypted: "sealed-refresh-token",
+        tokenVersion: 3,
+      },
+      where: { id: record.id },
+    }));
+    expect(result).toBe(written);
+  });
+
+  it("persists a prepared runtime token clear without changing credential ownership", async () => {
+    const record = {
+      ...createConnection({
+        accessTokenEncrypted: "enc:access-token",
+        credentialKind: "oauth_tokens",
+        externalAccountIdEncrypted: "enc:acct_456",
+        keyVersion: "v1",
+        refreshTokenEncrypted: "enc:refresh-token",
+        tokenVersion: 2,
+      }),
+      credentialMetadataJson: {},
+      metadataJson: {},
+      scopesJson: [],
+    } satisfies HostedConnectionRecord;
+    const written = {
+      ...createConnection({
+        credentialKind: "oauth_tokens",
+        externalAccountIdEncrypted: "sealed-account-id",
+      }),
+      credentialMetadataJson: {},
+      metadataJson: {},
+      scopesJson: [],
+    } satisfies HostedConnectionRecord;
+    const update = vi.fn(async () => written);
+    const store = new PrismaDeviceSyncControlPlaneStore({
+      prisma: {} as never,
+    });
+
+    const result = await store.persistPreparedRuntimeApplyTokenWrite({
+      prepared: {
+        accessTokenEncrypted: null,
+        accessTokenExpiresAt: null,
+        externalAccountIdEncrypted: "sealed-account-id",
+        keyVersion: null,
+        refreshTokenEncrypted: null,
+        rootKeyId: "device-root-active",
+        tokenVersion: null,
+      },
+      record,
+      tx: {
+        deviceConnection: { update },
+      } as never,
+    });
+
+    expect(update).toHaveBeenCalledWith(expect.objectContaining({
+      data: {
+        accessTokenEncrypted: null,
+        accessTokenExpiresAt: null,
+        credentialKind: "oauth_tokens",
+        externalAccountIdEncrypted: "sealed-account-id",
+        keyVersion: null,
+        providerConfigKey: null,
+        refreshTokenEncrypted: null,
+        tokenVersion: null,
+      },
+      where: { id: record.id },
+    }));
+    expect(result).toBe(written);
+  });
+
+  it("rejects a prepared runtime token write while the current refresh lease is active", async () => {
+    const record = {
+      ...createConnection({
+        refreshLeaseExpiresAt: new Date("2026-03-25T04:05:00.000Z"),
+        refreshLeaseOwner: "agent-refresh:active",
+        refreshLeaseTokenVersion: 2,
+        tokenVersion: 2,
+      }),
+      credentialMetadataJson: {},
+      metadataJson: {},
+      scopesJson: [],
+    } satisfies HostedConnectionRecord;
+    const update = vi.fn();
+    const store = new PrismaDeviceSyncControlPlaneStore({
+      prisma: {} as never,
+    });
+
+    await expect(store.persistPreparedRuntimeApplyTokenWrite({
+      prepared: {
+        accessTokenEncrypted: "sealed-access-token",
+        accessTokenExpiresAt: null,
+        externalAccountIdEncrypted: "sealed-account-id",
+        keyVersion: "hosted-device-secure-box:v1",
+        refreshTokenEncrypted: "sealed-refresh-token",
+        rootKeyId: "device-root-active",
+        tokenVersion: 3,
+      },
+      record,
+      tx: {
+        deviceConnection: { update },
+      } as never,
+    })).rejects.toMatchObject({
+      code: "TOKEN_REFRESH_IN_PROGRESS",
+      retryable: true,
+    });
+    expect(update).not.toHaveBeenCalled();
   });
 
   it("preserves the stored external account binding across token clears, tokenless reads, and retokenization", async () => {
@@ -2329,6 +3095,25 @@ function cloneOAuthSession(session: MutableOAuthSession | null): MutableOAuthSes
     : null;
 }
 
+function createRootConnectionPreflight(
+  readConnection: () => MutableConnectionRecord | null,
+) {
+  return {
+    findUnique: vi.fn(async () => {
+      const connection = readConnection();
+      return connection
+        ? {
+            connectedAt: connection.connectedAt,
+            id: connection.id,
+            setupPhase: connection.setupPhase,
+            status: connection.status,
+            userId: connection.userId,
+          }
+        : null;
+    }),
+  };
+}
+
 function cloneConnection(record: MutableConnectionRecord | null): MutableConnectionRecord | null {
   return record
     ? {
@@ -2363,6 +3148,8 @@ function createConnection(overrides: Partial<MutableConnectionRecord>): MutableC
     credentialKind: overrides.credentialKind ?? "oauth_tokens",
     credentialMetadataJson: overrides.credentialMetadataJson ?? {},
     providerConfigKey: overrides.providerConfigKey ?? null,
+    providerApplicationId: overrides.providerApplicationId ?? null,
+    providerApplicationRevision: overrides.providerApplicationRevision ?? null,
     displayName: overrides.displayName ?? "Oura ring",
     externalAccountIdEncrypted: overrides.externalAccountIdEncrypted ?? "enc:acct_456",
     keyVersion: overrides.keyVersion ?? null,
@@ -2402,6 +3189,12 @@ function normalizeCreatedConnection(data: Record<string, unknown>): MutableConne
       : null,
     metadataJson: (data.metadataJson as Record<string, unknown> | null) ?? {},
     providerConfigKey: typeof data.providerConfigKey === "string" ? data.providerConfigKey : null,
+    providerApplicationId: typeof data.providerApplicationId === "string"
+      ? data.providerApplicationId
+      : null,
+    providerApplicationRevision: typeof data.providerApplicationRevision === "number"
+      ? data.providerApplicationRevision
+      : null,
     refreshLeaseExpiresAt: data.refreshLeaseExpiresAt instanceof Date ? data.refreshLeaseExpiresAt : null,
     refreshLeaseOwner: typeof data.refreshLeaseOwner === "string" ? data.refreshLeaseOwner : null,
     refreshLeaseTokenVersion: typeof data.refreshLeaseTokenVersion === "number" ? data.refreshLeaseTokenVersion : null,

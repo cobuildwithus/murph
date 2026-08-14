@@ -179,29 +179,78 @@ test("uses the dedicated Family portal configuration when configured", async () 
   });
 });
 
-test("keeps billing self-serve available for canceled members with a stored Stripe customer", async () => {
-  mocks.requireHostedAppSessionFromRequest.mockResolvedValueOnce({
-    member: {
-      billingStatus: "canceled",
-      id: "member_123",
-      suspendedAt: null,
-    },
-  });
-
-  const response = await billingPortalRoute.POST(
-    new Request("https://join.example.test/api/settings/billing/portal", {
-      headers: {
-        origin: "https://join.example.test",
+test.each([
+  "paused",
+  "past_due",
+  "canceled",
+  "unpaid",
+  "incomplete",
+] as const)(
+  "keeps billing self-serve available for %s members with stored Stripe billing",
+  async (billingStatus) => {
+    mocks.requireHostedAppSessionFromRequest.mockResolvedValueOnce({
+      member: {
+        billingStatus,
+        id: "member_123",
+        suspendedAt: null,
       },
-      method: "POST",
-    }),
-  );
+    });
 
-  expect(response.status).toBe(200);
-  await expect(response.json()).resolves.toEqual({
-    url: "https://stripe.example.test/portal/session_123",
-  });
-});
+    const response = await billingPortalRoute.POST(
+      new Request("https://join.example.test/api/settings/billing/portal", {
+        headers: {
+          origin: "https://join.example.test",
+        },
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      url: "https://stripe.example.test/portal/session_123",
+    });
+  },
+);
+
+test.each([
+  { billingScope: undefined, customer: "cus_123", label: "personal" },
+  { billingScope: "family", customer: "cus_family_123", label: "Family" },
+] as const)(
+  "keeps $label billing self-serve available after account suspension",
+  async ({ billingScope, customer }) => {
+    mocks.requireHostedAppSessionFromRequest.mockResolvedValueOnce({
+      member: {
+        id: "member_123",
+        suspendedAt: new Date("2026-08-10T12:00:00.000Z"),
+      },
+    });
+
+    const response = await billingPortalRoute.POST(
+      new Request("https://join.example.test/api/settings/billing/portal", {
+        ...(billingScope
+          ? {
+              body: JSON.stringify({ billingScope }),
+              headers: {
+                "content-type": "application/json",
+                origin: "https://join.example.test",
+              },
+            }
+          : {
+              headers: {
+                origin: "https://join.example.test",
+              },
+            }),
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.stripeBillingPortalSessionCreate).toHaveBeenCalledWith({
+      customer,
+      return_url: "https://join.example.test/settings",
+    });
+  },
+);
 
 test("fails closed when the hosted member has no stored Stripe customer", async () => {
   mocks.readHostedMemberStripeBillingRef.mockResolvedValueOnce({

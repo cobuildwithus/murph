@@ -169,9 +169,115 @@ export const RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME = "dist-bundled";
 // the runner's lazy output. Exact ubuntu assembly measured a 9,887,441B total
 // on 2026-08-09; startup entry and static closure are unchanged, so ratchet
 // only the total ceiling and keep both startup baselines and all tolerances.
-const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 9_887_441 + 32_768;
-const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 1_641_254;
-const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 7_885_509;
+//
+// Generated-image delivery continuity adds runtime-owned transcript provenance,
+// exact sent-media reply binding, and provider-resume fallback handling to the
+// existing assistant chunks without adding a forbidden boot input. Exact macOS
+// full hosted-local assembly measured a 8,016,324B static closure and
+// 9,994,142B total on 2026-08-09. Ratchet both measurements while retaining
+// the established cross-platform tolerances and reviewed-addition allowance.
+// Adding the single-message group offer, exact reply ownership, and weekly
+// contextualization instructions grows only that lazy assistant output. Exact
+// ubuntu assembly measured a 9,933,709B total on 2026-08-10; retain the startup
+// baselines and established total tolerance.
+//
+// Subsequent reviewed biomarker ranges, hosted
+// runtime-control compaction, and named-diet guidance moved exact ubuntu total
+// output from 9,908,973B to 9,933,847B by 2026-08-10. Entry and static closure
+// remain within their existing ceilings and no forbidden subsystem enters the
+// boot graph, so ratchet only the total ceiling and keep both startup baselines
+// and all tolerances.
+//
+// Bounded group-tool failure diagnostics plus the strict included-usage read
+// contract measured a 9,938,038B total on ubuntu and a 7,983,431B static
+// closure on macOS before the mainline additions above were merged. Exact local
+// production assembly of the combined graph measured a 9,986,541B total on
+// 2026-08-10. Adding the workout response-card contract and canonical command
+// reconciliation to that mainline graph measured a 9,994,210B total and
+// 8,019,079B static closure on macOS. After adding the timezone and
+// deliverable-occurrence projection, exact local production assembly measured
+// a 1,674,361B entry, 8,046,334B static closure, and 10,024,188B total. The
+// later combined graph measured the same 1,674,361B entry, an 8,044,557B static
+// closure, and a 10,022,523B total. Retain the larger reviewed measurements and
+// established cross-platform tolerances. The reviewed current-sender private
+// completion path previously raised the exact combined macOS total to
+// 10,029,806B and the static closure to 8,049,480B without adding a forbidden
+// startup input. Adding the recurring-timezone and deliverable-occurrence
+// projection to that graph measured a 1,689,761B entry, 8,064,335B static
+// closure, and 10,044,661B total. Ratchet the entry and total baselines to the
+// exact combined graph while retaining the established cross-platform
+// tolerances.
+//
+// Preserving admitted identity and retry state for Junction blood-pressure
+// history extends the deferred provider's lazy output. After merging the later
+// mainline runtime boundaries, exact local production assembly of the combined
+// graph measured a 1,596,214B entry, 7,718,295B static closure, and 9,637,008B
+// total on 2026-08-10. Ratchet the total while retaining the reviewed startup
+// baselines and all fixed cross-platform allowances.
+//
+// Combining that reduced graph with the reviewed current-sender private
+// completion path measured a 1,614,630B entry, 7,757,204B static closure, and
+// 9,678,656B total on macOS. Both startup measurements remain within the
+// retained reviewed baselines, so ratchet only the total ceiling.
+//
+// Scorer-owned group challenge cards add the normalized score input,
+// deterministic scorer, bounded card mapper, and static presentation to that
+// combined graph. Exact local production assembly after the latest mainline
+// runtime additions measured a 1,619,381B entry, 7,815,801B static closure, and
+// 9,770,208B total on 2026-08-10. No forbidden subsystem entered the boot graph,
+// so ratchet all three measurements and retain the established narrow
+// cross-platform tolerances.
+//
+// Generated-avatar exact-byte binding plus the subsequent mainline health-
+// history and provider additions extend existing lazy outputs without adding a
+// forbidden boot input. Exact merged local assembly measured 9,808,583B total
+// on 2026-08-11, so ratchet the total only and retain the 32KB allowance.
+//
+// Bounded Junction sparse-resource policies and current conversation mailbox
+// recovery extend existing outputs without adding a forbidden boot input.
+// Exact merged production assembly measured a 7,943,465B static closure and
+// 9,957,576B total on 2026-08-11; ratchet those two baselines while retaining
+// the established cross-platform allowances.
+//
+// Frequency-aware Junction sparse-history recovery extends the existing
+// provider and importer outputs without adding a forbidden boot input. Exact
+// current-base Linux CI assembly measured 9,883,360B total on 2026-08-12;
+// retain the startup baselines and established 32KB allowance.
+//
+// The reviewed group-share readiness runtime combined with that current base
+// extends existing hosted-runtime chunks without adding a forbidden boot input.
+// Linux CI measured a 7,934,975B static closure on 2026-08-12; the matching
+// macOS production assembly measured 9,960,217B total. Ratchet both measurements
+// and retain the established cross-platform tolerances.
+//
+// Group-projection delivery ownership and its end-to-end deadline extend the
+// same hosted callback graph without adding a forbidden boot input or changing
+// runner permissions. Combined macOS assembly with group-share first
+// materialization measured a 1,689,721B entry, 7,992,470B static closure, and
+// 9,975,121B total. Ratchet each baseline to that integrated measurement and
+// retain the established cross-platform tolerances.
+//
+// The official provider-client migration externalizes the exact-pinned SDKs
+// already installed in the runner payload. Its lazy device-sync provider graph
+// measured 10,053,341B on macOS; preserve the boot-path ratchets and the
+// established 32KB total allowance. Exhaustive Junction activation then
+// measured 10,136,931B on macOS, so ratchet the combined integrated baseline.
+//
+// Source-complete group health sharing extends the existing hosted projection
+// and parser outputs without adding a forbidden boot input. Exact merged
+// production assembly measured 10,174,998B on Linux and 10,218,245B on macOS
+// on 2026-08-13, so ratchet the total to the larger cross-platform measurement
+// and retain the established 32KB allowance.
+//
+// Generation-10 Browser Vault projection adds the replica builder to lazy
+// runner output. A dedicated Query server facade keeps that graph off startup;
+// exact macOS assembly measured an 8,065,357B static closure and 10,325,065B
+// total after the merged AgentMail removal on 2026-08-14. Ratchet those
+// measurements while retaining the existing cross-platform tolerances and
+// forbidden-startup-input guards.
+const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 10_325_065 + 32_768;
+const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 1_689_721;
+const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 8_065_357;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_TOLERANCE_BYTES = 48_000;
 const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_TOLERANCE_BYTES = 96_000;
 // The @murphai package markers are path suffixes, not node_modules-anchored:
@@ -229,6 +335,7 @@ export async function bundleRunnerContainerEntrypoint(
     format: "esm",
     logLevel: "error",
     metafile: true,
+    minifySyntax: true,
     outdir: bundleOutDir,
     platform: "node",
     splitting: true,

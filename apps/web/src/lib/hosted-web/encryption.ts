@@ -2,10 +2,17 @@ import {
   openHostedUserSecureBoxString,
   openHostedUserSecureBoxStrings,
   sealHostedUserSecureBoxString,
+  sealHostedUserSecureBoxStringFromPreparedRoot,
   type HostedSecureBoxPrismaClient,
 } from "../hosted-crypto/secure-box";
+import type { CachedUnwrappedHostedDomainRoot } from "../hosted-crypto/domain-root-unwrap-cache";
 
 export type HostedWebEncryptionPrismaClient = HostedSecureBoxPrismaClient;
+
+export interface PreparedHostedWebEncryptionRoot {
+  preparedRoot: Promise<CachedUnwrappedHostedDomainRoot>;
+  preparedRootKeyId: string;
+}
 
 export async function encryptHostedWebNullableString(input: {
   field: string;
@@ -25,6 +32,28 @@ export async function encryptHostedWebNullableString(input: {
     prisma: input.prisma,
     scope: `hosted-member-private-field:${input.field}`,
     signal: input.signal,
+    userId: input.memberId,
+    value: input.value,
+  });
+}
+
+export async function encryptHostedWebNullableStringFromPreparedRoot(input: {
+  field: string;
+  memberId: string;
+  prepared: PreparedHostedWebEncryptionRoot;
+  value: string | null | undefined;
+}): Promise<string | null> {
+  return sealHostedUserSecureBoxStringFromPreparedRoot({
+    aad: {
+      field: input.field,
+      purpose: "hosted-member-private-field",
+      rowId: input.memberId,
+      table: "hosted_member",
+    },
+    lane: "hosted-member-private-field",
+    preparedRoot: input.prepared.preparedRoot,
+    preparedRootKeyId: input.prepared.preparedRootKeyId,
+    scope: `hosted-member-private-field:${input.field}`,
     userId: input.memberId,
     value: input.value,
   });
@@ -78,6 +107,7 @@ export async function decryptHostedWebNullableFields(input: {
     value: string | null | undefined;
   }>;
   prisma?: HostedWebEncryptionPrismaClient;
+  retainFailureInScopedCache?: boolean;
   signal?: AbortSignal;
 }): Promise<Array<string | null>> {
   return openHostedUserSecureBoxStrings({
@@ -94,6 +124,12 @@ export async function decryptHostedWebNullableFields(input: {
     })),
     lane: "hosted-member-private-field",
     prisma: input.prisma,
+    ...(input.retainFailureInScopedCache === undefined
+      ? {}
+      : {
+          retainFailureInScopedCache:
+            input.retainFailureInScopedCache,
+        }),
     signal: input.signal,
   });
 }

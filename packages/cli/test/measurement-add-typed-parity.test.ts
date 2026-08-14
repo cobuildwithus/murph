@@ -2,10 +2,13 @@ import assert from 'node:assert/strict'
 import { rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 
+import { findEventByExternalRef, importDeviceBatch } from '@murphai/core'
+import { normalizeJunctionSnapshot } from '@murphai/importers'
 import { createIntegratedVaultServices } from '@murphai/vault-usecases'
 import { Cli } from 'incur'
 import { afterEach } from 'vitest'
 
+import { registerEventCommands } from '../src/commands/event.js'
 import { registerMeasurementCommands } from '../src/commands/measurement.js'
 import { registerVaultCommands } from '../src/commands/vault.js'
 import { incurErrorBridge } from '../src/incur-error-bridge.js'
@@ -95,6 +98,36 @@ interface MeasurementShowResult {
   }
 }
 
+interface MeasurementEntryListResult {
+  filters: {
+    metric: string[]
+    from?: string
+    to?: string
+    limit: number
+  }
+  items: Array<{
+    eventId: string
+    recordKind: 'measurement' | 'body_measurement' | 'observation'
+    measurementIndex: number | null
+    occurredAt: string
+    source: string | null
+    metric: string
+    value: number
+    unit: string
+    qualifiers?: Record<string, string | number | boolean>
+    note?: string
+  }>
+  count: number
+  nextCursor: null
+}
+
+interface MeasurementListResult {
+  items: Array<{
+    id: string
+    data: Record<string, unknown>
+  }>
+}
+
 const cleanupPaths: string[] = []
 
 afterEach(async () => {
@@ -117,6 +150,7 @@ function createMeasurementCli() {
 
   const services = createIntegratedVaultServices()
   registerVaultCommands(cli, services)
+  registerEventCommands(cli, services)
   registerMeasurementCommands(cli)
 
   return cli
@@ -163,6 +197,30 @@ async function initVault(cli: Cli.Cli, vaultRoot: string) {
   assert.equal(requireData(initResult.envelope).created, true)
 }
 
+async function importEventPayload(input: {
+  cli: Cli.Cli
+  parentRoot: string
+  vaultRoot: string
+  fileName: string
+  payload: Record<string, unknown>
+}) {
+  const payloadPath = path.join(input.parentRoot, input.fileName)
+  await writeFile(payloadPath, JSON.stringify(input.payload), 'utf8')
+
+  return requireData(
+    (
+      await runInProcessJsonCli<{ eventId: string }>(input.cli, [
+        'event',
+        'import-json',
+        '--vault',
+        input.vaultRoot,
+        '--input',
+        `@${payloadPath}`,
+      ])
+    ).envelope,
+  )
+}
+
 test('measurement add schema exposes typed single-record and grouped-event fields', async () => {
   const schema = await readCommandSchema(createMeasurementCli(), ['measurement', 'add'])
 
@@ -205,6 +263,811 @@ test('measurement add guidance surfaces teach quoted metrics and indexed grouped
   assert.match(getOptionDescription(schema, 'qualifier'), /2:posture=seated/u)
   assert.match(getOptionDescription(schema, 'measurementNote'), /1:after coffee/u)
   assert.match(getOptionDescription(schema, 'measurementNote'), /2:five quiet minutes/u)
+})
+
+test('measurement entry list schema uses canonical metric identity and preserves lossless entry fields', async () => {
+  const schema = await readCommandSchema(createMeasurementCli(), [
+    'measurement',
+    'entry',
+    'list',
+  ])
+
+  assert.deepEqual(schema.args.required ?? [], [])
+  assert.equal(schema.options.required?.includes('metric') ?? false, true)
+  for (const field of ['metric', 'from', 'to', 'limit', 'vault']) {
+    assert.equal(field in schema.options.properties, true, field)
+  }
+  assert.match(getOptionDescription(schema, 'metric'), /canonical metric identity/u)
+  assert.match(getOptionDescription(schema, 'metric'), /never fuzzy matching/u)
+})
+
+test('measurement entry list returns primary, legacy, and device-observation scalars without changing event list', async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext('murph-measurement-entry-list-')
+  cleanupPaths.push(parentRoot)
+  const cli = createMeasurementCli()
+  await initVault(cli, vaultRoot)
+
+  const directBmi = requireData(
+    (
+      await runInProcessJsonCli<MeasurementAddResult>(cli, [
+        'measurement',
+        'add',
+        '--vault',
+        vaultRoot,
+        '--metric',
+        'body mass index',
+        '--value',
+        '17.2',
+        '--unit',
+        'kg_m2',
+        '--occurred-at',
+        '2026-07-02T07:30:00.000Z',
+        '--source',
+        'device',
+      ])
+    ).envelope,
+  )
+  const grouped = requireData(
+    (
+      await runInProcessJsonCli<MeasurementAddResult>(cli, [
+        'measurement',
+        'add',
+        '--vault',
+        vaultRoot,
+        '--metric',
+        'height',
+        '--value',
+        '175',
+        '--unit',
+        'cm',
+        '--metric',
+        'bodyweight',
+        '--value',
+        '50',
+        '--unit',
+        'kg',
+        '--occurred-at',
+        '2026-07-03T07:30:00.000Z',
+        '--source',
+        'manual',
+      ])
+    ).envelope,
+  )
+  requireData(
+    (
+      await runInProcessJsonCli<MeasurementAddResult>(cli, [
+        'measurement',
+        'add',
+        '--vault',
+        vaultRoot,
+        '--metric',
+        'body-weight-estimate',
+        '--value',
+        '55',
+        '--unit',
+        'kg',
+        '--occurred-at',
+        '2026-07-04T07:30:00.000Z',
+      ])
+    ).envelope,
+  )
+  const bodyMeasurement = await importEventPayload({
+    cli,
+    parentRoot,
+    vaultRoot,
+    fileName: 'body-measurement.json',
+    payload: {
+      kind: 'body_measurement',
+      occurredAt: '2026-07-05T07:30:00.000Z',
+      source: 'manual',
+      title: 'Legacy body check-in',
+      measurements: [
+        {
+          type: 'weight',
+          value: 49,
+          unit: 'kg',
+        },
+      ],
+    },
+  })
+  const junctionWeight = await importEventPayload({
+    cli,
+    parentRoot,
+    vaultRoot,
+    fileName: 'junction-weight.json',
+    payload: {
+      kind: 'observation',
+      occurredAt: '2026-07-06T07:30:00.000Z',
+      source: 'device',
+      title: 'Junction body weight',
+      metric: 'weight',
+      value: 48.5,
+      unit: 'kg',
+      observationGrain: 'summary',
+      externalRef: {
+        system: 'junction',
+        resourceType: 'junction-body',
+        resourceId: 'body-2026-07-06',
+        facet: 'weight',
+      },
+    },
+  })
+  const whoopBmi = await importEventPayload({
+    cli,
+    parentRoot,
+    vaultRoot,
+    fileName: 'whoop-bmi.json',
+    payload: {
+      kind: 'observation',
+      occurredAt: '2026-07-07T07:30:00.000Z',
+      source: 'device',
+      title: 'WHOOP BMI',
+      metric: 'bmi',
+      value: 16.8,
+      unit: 'kg_m2',
+      observationGrain: 'summary',
+      externalRef: {
+        system: 'whoop',
+        resourceType: 'body-measurement',
+        resourceId: 'body-2026-07-07',
+        facet: 'bmi',
+      },
+    },
+  })
+  const aliasedBmi = await importEventPayload({
+    cli,
+    parentRoot,
+    vaultRoot,
+    fileName: 'aliased-bmi.json',
+    payload: {
+      kind: 'observation',
+      occurredAt: '2026-07-09T07:30:00.000Z',
+      source: 'device',
+      title: 'Imported BMI alias',
+      metric: 'body-mass-index',
+      value: 16.7,
+      unit: 'kg/m2',
+      observationGrain: 'summary',
+    },
+  })
+  const normalBmi = await importEventPayload({
+    cli,
+    parentRoot,
+    vaultRoot,
+    fileName: 'normal-bmi.json',
+    payload: {
+      kind: 'observation',
+      occurredAt: '2026-07-01T07:30:00.000Z',
+      source: 'device',
+      title: 'Earlier device BMI',
+      metric: 'bmi',
+      value: 22.1,
+      unit: 'kg/m2',
+      observationGrain: 'summary',
+    },
+  })
+  await importEventPayload({
+    cli,
+    parentRoot,
+    vaultRoot,
+    fileName: 'stale-observation.json',
+    payload: {
+      kind: 'observation',
+      occurredAt: '2026-05-01T07:30:00.000Z',
+      source: 'device',
+      title: 'Stale device BMI',
+      metric: 'bmi',
+      value: 16.4,
+      unit: 'kg_m2',
+    },
+  })
+  await importEventPayload({
+    cli,
+    parentRoot,
+    vaultRoot,
+    fileName: 'unrelated-observation.json',
+    payload: {
+      kind: 'observation',
+      occurredAt: '2026-07-08T07:30:00.000Z',
+      source: 'device',
+      title: 'Device resting heart rate',
+      metric: 'resting-heart-rate',
+      value: 52,
+      unit: 'bpm',
+    },
+  })
+  await importEventPayload({
+    cli,
+    parentRoot,
+    vaultRoot,
+    fileName: 'junction-stale-positive-pregnancy-test.json',
+    payload: {
+      kind: 'measurement',
+      occurredAt: '2025-10-02T07:30:00.000Z',
+      source: 'device',
+      title: 'Junction pregnancy test',
+      measurements: [{
+        metric: 'pregnancy-test',
+        value: 1,
+        unit: 'result',
+        qualifiers: { result: 'positive' },
+      }],
+    },
+  })
+  const normalizedJunctionSnapshot = normalizeJunctionSnapshot({
+    importedAt: '2026-07-11T12:00:00.000Z',
+    summaries: {
+      menstrual_cycle: [{
+        id: 'cycle-2026-07',
+        period_start: '2026-07-01',
+        home_pregnancy_test: [{
+          date: '2026-07-10',
+          test_result: 'positive',
+        }],
+        source: {
+          provider: 'apple_health',
+          type: 'phone',
+        },
+      }],
+    },
+  })
+  const normalizedPositivePregnancyTest = normalizedJunctionSnapshot.events?.find(
+    (event) => event.title === 'Junction pregnancy test',
+  )
+  assert.ok(normalizedPositivePregnancyTest)
+  assert.equal(normalizedPositivePregnancyTest.kind, 'measurement')
+  assert.ok(normalizedPositivePregnancyTest.occurredAt)
+  assert.ok(normalizedPositivePregnancyTest.fields)
+  const junctionPositivePregnancyTest = await importEventPayload({
+    cli,
+    parentRoot,
+    vaultRoot,
+    fileName: 'junction-positive-pregnancy-test.json',
+    payload: {
+      kind: normalizedPositivePregnancyTest.kind,
+      occurredAt: normalizedPositivePregnancyTest.occurredAt,
+      source: normalizedPositivePregnancyTest.source,
+      title: normalizedPositivePregnancyTest.title,
+      ...normalizedPositivePregnancyTest.fields,
+      externalRef: normalizedPositivePregnancyTest.externalRef,
+    },
+  })
+
+  const entries = requireData(
+    (
+      await runInProcessJsonCli<MeasurementEntryListResult>(cli, [
+        'measurement',
+        'entry',
+        'list',
+        '--vault',
+        vaultRoot,
+        '--metric',
+        'BMI',
+        '--metric',
+        'height',
+        '--metric',
+        'weight',
+        '--metric',
+        'body_weight',
+        '--from',
+        '2026-07-01',
+        '--to',
+        '2026-07-31',
+        '--limit',
+        '200',
+      ])
+    ).envelope,
+  )
+
+  assert.deepEqual(entries.filters, {
+    metric: ['bmi', 'height', 'weight', 'body-weight'],
+    from: '2026-07-01',
+    to: '2026-07-31',
+    limit: 200,
+  })
+  assert.equal(entries.count, 8)
+  assert.equal(entries.nextCursor, null)
+  assert.deepEqual(entries.items, [
+    {
+      eventId: aliasedBmi.eventId,
+      recordKind: 'observation',
+      measurementIndex: null,
+      occurredAt: '2026-07-09T07:30:00.000Z',
+      source: 'device',
+      metric: 'body-mass-index',
+      value: 16.7,
+      unit: 'kg/m2',
+    },
+    {
+      eventId: whoopBmi.eventId,
+      recordKind: 'observation',
+      measurementIndex: null,
+      occurredAt: '2026-07-07T07:30:00.000Z',
+      source: 'device',
+      metric: 'bmi',
+      value: 16.8,
+      unit: 'kg_m2',
+    },
+    {
+      eventId: junctionWeight.eventId,
+      recordKind: 'observation',
+      measurementIndex: null,
+      occurredAt: '2026-07-06T07:30:00.000Z',
+      source: 'device',
+      metric: 'weight',
+      value: 48.5,
+      unit: 'kg',
+    },
+    {
+      eventId: bodyMeasurement.eventId,
+      recordKind: 'body_measurement',
+      measurementIndex: 0,
+      occurredAt: '2026-07-05T07:30:00.000Z',
+      source: 'manual',
+      metric: 'weight',
+      value: 49,
+      unit: 'kg',
+    },
+    {
+      eventId: grouped.eventId,
+      recordKind: 'measurement',
+      measurementIndex: 0,
+      occurredAt: '2026-07-03T07:30:00.000Z',
+      source: 'manual',
+      metric: 'height',
+      value: 175,
+      unit: 'cm',
+    },
+    {
+      eventId: grouped.eventId,
+      recordKind: 'measurement',
+      measurementIndex: 1,
+      occurredAt: '2026-07-03T07:30:00.000Z',
+      source: 'manual',
+      metric: 'body-weight',
+      value: 50,
+      unit: 'kg',
+    },
+    {
+      eventId: directBmi.eventId,
+      recordKind: 'measurement',
+      measurementIndex: 0,
+      occurredAt: '2026-07-02T07:30:00.000Z',
+      source: 'device',
+      metric: 'bmi',
+      value: 17.2,
+      unit: 'kg_m2',
+    },
+    {
+      eventId: normalBmi.eventId,
+      recordKind: 'observation',
+      measurementIndex: null,
+      occurredAt: '2026-07-01T07:30:00.000Z',
+      source: 'device',
+      metric: 'bmi',
+      value: 22.1,
+      unit: 'kg/m2',
+    },
+  ])
+
+  const pregnancyEntries = requireData(
+    (
+      await runInProcessJsonCli<MeasurementEntryListResult>(cli, [
+        'measurement',
+        'entry',
+        'list',
+        '--vault',
+        vaultRoot,
+        '--metric',
+        'pregnancy-test',
+        '--from',
+        '2025-10-03',
+        '--to',
+        '2026-07-30',
+        '--limit',
+        '200',
+      ])
+    ).envelope,
+  )
+  assert.deepEqual(pregnancyEntries.filters, {
+    metric: ['pregnancy-test'],
+    from: '2025-10-03',
+    to: '2026-07-30',
+    limit: 200,
+  })
+  assert.deepEqual(pregnancyEntries.items, [{
+    eventId: junctionPositivePregnancyTest.eventId,
+    recordKind: 'measurement',
+    measurementIndex: 0,
+    occurredAt: '2026-07-10T00:00:00.000Z',
+    source: 'device',
+    metric: 'pregnancy-test',
+    value: 1,
+    unit: 'result',
+    qualifiers: { result: 'positive' },
+  }])
+  assert.equal(pregnancyEntries.count, 1)
+  assert.equal(pregnancyEntries.nextCursor, null)
+
+  const saturated = requireData(
+    (
+      await runInProcessJsonCli<MeasurementEntryListResult>(cli, [
+        'measurement',
+        'entry',
+        'list',
+        '--vault',
+        vaultRoot,
+        '--metric',
+        'bmi',
+        '--from',
+        '2026-07-01',
+        '--to',
+        '2026-07-31',
+        '--limit',
+        '1',
+      ])
+    ).envelope,
+  )
+  assert.equal(saturated.count, 1)
+  assert.deepEqual(saturated.items, [entries.items[0]])
+
+  const events = requireData(
+    (
+      await runInProcessJsonCli<MeasurementListResult>(cli, [
+        'measurement',
+        'list',
+        '--vault',
+        vaultRoot,
+        '--from',
+        '2026-07-01',
+        '--to',
+        '2026-07-31',
+        '--limit',
+        '10',
+      ])
+    ).envelope,
+  )
+  const groupedEvent = events.items.find((item) => item.id === grouped.eventId)
+  assert.ok(groupedEvent)
+  assert.equal(groupedEvent.data.measurementsCount, 2)
+  assert.equal('measurements' in groupedEvent.data, false)
+  assert.equal(events.items.some((item) => item.id === whoopBmi.eventId), false)
+  assert.equal(events.items.some((item) => item.id === junctionWeight.eventId), false)
+})
+
+test('measurement entry list resolves every expanded assistant metric alias without confusing absence with an unsupported route', async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext('murph-expanded-assistant-metrics-')
+  cleanupPaths.push(parentRoot)
+  const cli = createMeasurementCli()
+  await initVault(cli, vaultRoot)
+
+  const cases = [
+    ['daylight_exposure', 'daylight-exposure-minutes', 45, 'minutes'],
+    ['fall', 'fall-count', 1, 'count'],
+    ['floors_climbed', 'floors-climbed', 8, 'count'],
+    ['handwashing', 'handwashing-count', 3, 'count'],
+    ['stand_duration', 'stand-duration-minutes', 75, 'minutes'],
+    ['stand_hour', 'stand-hours', 2, 'count'],
+    ['uv_exposure', 'uv-exposure-index', 5, 'index'],
+    ['wheelchair_push', 'wheelchair-push-count', 300, 'count'],
+    ['workout_distance', 'workout-distance-km', 2, 'km'],
+    ['workout_duration', 'workout-minutes', 48, 'minutes'],
+    ['workout_swimming_stroke', 'swimming-stroke-count', 37, 'count'],
+    ['body_mass_index', 'bmi', 23.4, 'kg_m2'],
+    ['fat', 'body-fat-percentage', 18.5, '%'],
+    ['lean_body_mass', 'lean-body-mass', 61.2, 'kg'],
+    ['waist_circumference', 'waist-circumference', 82.4, 'cm'],
+  ] as const
+
+  const imported = new Map<string, string>()
+  for (const [publicMetric, metric, value, unit] of cases) {
+    const resourceSlug = publicMetric.replaceAll('_', '-')
+    const result = await importEventPayload({
+      cli,
+      parentRoot,
+      vaultRoot,
+      fileName: `${publicMetric}.json`,
+      payload: {
+        kind: 'observation',
+        occurredAt: '2026-07-12T12:00:00.000Z',
+        source: 'device',
+        title: `Connected observation ${metric}`,
+        metric,
+        value,
+        unit,
+        observationGrain: metric === 'fall-count' ? 'sample' : 'summary',
+        externalRef: {
+          system: 'junction',
+          resourceType: `junction-${resourceSlug}`,
+          resourceId: `connected-${resourceSlug}`,
+          facet: metric,
+        },
+      },
+    })
+    imported.set(publicMetric, result.eventId)
+  }
+
+  for (const [publicMetric, canonicalMetric, value, unit] of cases) {
+    const result = requireData(
+      (
+        await runInProcessJsonCli<MeasurementEntryListResult>(cli, [
+          'measurement',
+          'entry',
+          'list',
+          '--vault',
+          vaultRoot,
+          '--metric',
+          publicMetric,
+          '--from',
+          '2026-07-12',
+          '--to',
+          '2026-07-12',
+          '--limit',
+          '50',
+        ])
+      ).envelope,
+    )
+
+    assert.equal(result.count, 1, publicMetric)
+    assert.deepEqual(result.items[0], {
+      eventId: imported.get(publicMetric),
+      measurementIndex: null,
+      metric: canonicalMetric,
+      occurredAt: '2026-07-12T12:00:00.000Z',
+      recordKind: 'observation',
+      source: 'device',
+      unit,
+      value,
+    }, publicMetric)
+  }
+
+  const absent = requireData(
+    (
+      await runInProcessJsonCli<MeasurementEntryListResult>(cli, [
+        'measurement',
+        'entry',
+        'list',
+        '--vault',
+        vaultRoot,
+        '--metric',
+        'daylight_exposure',
+        '--from',
+        '2026-07-13',
+        '--to',
+        '2026-07-13',
+        '--limit',
+        '50',
+      ])
+    ).envelope,
+  )
+  assert.equal(absent.count, 0)
+  assert.deepEqual(absent.items, [])
+
+})
+
+test('normalized Junction categorical facts survive canonical import and query', async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext('murph-junction-categorical-query-')
+  cleanupPaths.push(parentRoot)
+  const cli = createMeasurementCli()
+  await initVault(cli, vaultRoot)
+
+  const normalized = normalizeJunctionSnapshot({
+    importedAt: '2026-07-13T12:00:00.000Z',
+    summaries: {
+      profile: {
+        gender: 'other',
+        height: 181,
+        source_device_id: 'profile-source-instance-proof',
+        updated_at: '2026-07-09T08:30:00Z',
+        source: { provider: 'apple_health', type: 'phone' },
+      },
+      menstrual_cycle: [{
+        id: 'cycle-categorical-2026-07',
+        period_start: '2026-07-01',
+        home_progesterone_test: [{
+          date: '2026-07-12',
+          test_result: 'indeterminate',
+        }],
+        sexual_activity: [{
+          date: '2026-07-11',
+          protection_used: false,
+        }],
+        source: { provider: 'apple_health', type: 'phone' },
+      }],
+    },
+  })
+  const normalizedEvents = [
+    normalized.events?.find((event) => event.title === 'Junction gender'),
+    normalized.events?.find((event) => event.title === 'Junction home progesterone test'),
+    normalized.events?.find((event) => event.title === 'Junction sexual activity'),
+  ]
+  const profileArtifact = normalized.evidenceParts?.find(
+    (artifact) => artifact.role === 'junction-summary-profile',
+  )
+  const firstReplay = normalizeJunctionSnapshot({
+    importedAt: '2026-08-13T12:00:00.000Z',
+    summaries: { profile: profileArtifact?.content },
+  })
+  const firstReplayArtifact = firstReplay.evidenceParts?.find(
+    (artifact) => artifact.role === 'junction-summary-profile',
+  )
+  const secondReplay = normalizeJunctionSnapshot({
+    importedAt: '2026-09-13T12:00:00.000Z',
+    summaries: { profile: firstReplayArtifact?.content },
+  })
+  const genderReplayEvents = [
+    normalizedEvents[0],
+    firstReplay.events?.find((event) => event.title === 'Junction gender'),
+    secondReplay.events?.find((event) => event.title === 'Junction gender'),
+  ]
+  assert.ok(profileArtifact)
+  assert.deepEqual(firstReplayArtifact?.content, profileArtifact.content)
+  assert.deepEqual(
+    genderReplayEvents.map((event) => event?.externalRef),
+    genderReplayEvents.map(() => genderReplayEvents[0]?.externalRef),
+  )
+  assert.deepEqual(
+    genderReplayEvents.map((event) => event?.dataOrigin),
+    genderReplayEvents.map(() => genderReplayEvents[0]?.dataOrigin),
+  )
+  assert.equal(new Set(genderReplayEvents.map((event) => event?.occurredAt)).size, 1)
+  const accountId = 'junction-profile-replay-proof'
+  const currentHeightEvent = normalized.events?.find((event) => event.title === 'Junction height')
+  const legacyHeightRef = currentHeightEvent?.legacyExternalRefs?.[0]
+  assert.ok(currentHeightEvent)
+  assert.ok(legacyHeightRef)
+  assert.notEqual(legacyHeightRef.resourceId, currentHeightEvent.externalRef?.resourceId)
+  const historicalHeightImport = await importDeviceBatch({
+    vaultRoot,
+    provider: 'junction',
+    accountId,
+    importedAt: '2026-06-13T12:00:00.000Z',
+    events: [{
+      ...currentHeightEvent,
+      dataOrigin: currentHeightEvent.dataOrigin
+        ? { ...currentHeightEvent.dataOrigin, observedAtRaw: '2026-07-09T08:30:00Z' }
+        : undefined,
+      evidenceRoles: undefined,
+      externalRef: legacyHeightRef,
+      fields: currentHeightEvent.fields
+        ? { ...currentHeightEvent.fields, value: 180 }
+        : undefined,
+      legacyExternalRefs: undefined,
+    }],
+  })
+  const currentImport = await importDeviceBatch({
+    vaultRoot,
+    provider: 'junction',
+    accountId,
+    importedAt: '2026-07-13T12:00:00.000Z',
+    events: normalized.events?.map((event) => ({ ...event })),
+    evidenceParts: normalized.evidenceParts?.map((part) => ({ ...part })),
+  })
+  const readCanonicalProfileEvent = async (event: NonNullable<typeof currentHeightEvent>) => {
+    assert.ok(event.externalRef)
+    return findEventByExternalRef({
+      vaultRoot,
+      system: event.externalRef.system,
+      resourceType: event.externalRef.resourceType,
+      resourceId: event.externalRef.resourceId,
+      facet: event.externalRef.facet,
+    })
+  }
+  const currentGenderEvent = normalizedEvents[0]
+  assert.ok(currentGenderEvent)
+  const currentCanonicalHeight = await readCanonicalProfileEvent(currentHeightEvent)
+  const currentCanonicalGender = await readCanonicalProfileEvent(currentGenderEvent)
+  assert.equal(currentCanonicalHeight?.kind === 'observation' ? currentCanonicalHeight.value : null, 181)
+  assert.equal(await findEventByExternalRef({
+    vaultRoot,
+    system: legacyHeightRef.system,
+    resourceType: legacyHeightRef.resourceType,
+    resourceId: legacyHeightRef.resourceId,
+    facet: legacyHeightRef.facet,
+  }), null)
+  const firstReplayImport = await importDeviceBatch({
+    vaultRoot,
+    provider: 'junction',
+    accountId,
+    importedAt: '2026-08-13T12:00:00.000Z',
+    events: firstReplay.events?.map((event) => ({ ...event })),
+    evidenceParts: firstReplay.evidenceParts?.map((part) => ({ ...part })),
+  })
+  const firstReplayCanonicalHeight = await readCanonicalProfileEvent(currentHeightEvent)
+  const firstReplayCanonicalGender = await readCanonicalProfileEvent(currentGenderEvent)
+  const secondReplayImport = await importDeviceBatch({
+    vaultRoot,
+    provider: 'junction',
+    accountId,
+    importedAt: '2026-09-13T12:00:00.000Z',
+    events: secondReplay.events?.map((event) => ({ ...event })),
+    evidenceParts: secondReplay.evidenceParts?.map((part) => ({ ...part })),
+  })
+  const secondReplayCanonicalHeight = await readCanonicalProfileEvent(currentHeightEvent)
+  const secondReplayCanonicalGender = await readCanonicalProfileEvent(currentGenderEvent)
+  const importedEventIds = new Map(currentImport.events.map((event) => [event.title, event.id]))
+
+  const genderEventId = importedEventIds.get('Junction gender')
+  const heightEventId = importedEventIds.get('Junction height')
+  const progesteroneEventId = importedEventIds.get('Junction home progesterone test')
+  const sexualActivityEventId = importedEventIds.get('Junction sexual activity')
+  assert.ok(genderEventId)
+  assert.ok(heightEventId)
+  assert.ok(progesteroneEventId)
+  assert.ok(sexualActivityEventId)
+  assert.equal(historicalHeightImport.events[0]?.id, heightEventId)
+  const firstReplayEvents = new Map(firstReplayImport.events.map((event) => [event.title, event]))
+  const secondReplayEvents = new Map(secondReplayImport.events.map((event) => [event.title, event]))
+  assert.equal(firstReplayEvents.get('Junction gender')?.id, genderEventId)
+  assert.equal(secondReplayEvents.get('Junction gender')?.id, genderEventId)
+  assert.deepEqual(firstReplayCanonicalHeight, currentCanonicalHeight)
+  assert.deepEqual(secondReplayCanonicalHeight, currentCanonicalHeight)
+  assert.deepEqual(firstReplayCanonicalGender, currentCanonicalGender)
+  assert.deepEqual(secondReplayCanonicalGender, currentCanonicalGender)
+
+  const entries = requireData(
+    (
+      await runInProcessJsonCli<MeasurementEntryListResult>(cli, [
+        'measurement',
+        'entry',
+        'list',
+        '--vault',
+        vaultRoot,
+        '--metric',
+        'gender',
+        '--metric',
+        'home-progesterone-test',
+        '--metric',
+        'sexual-activity',
+        '--from',
+        '2026-07-01',
+        '--to',
+        '2026-07-31',
+        '--limit',
+        '200',
+      ])
+    ).envelope,
+  )
+
+  assert.deepEqual(entries.filters, {
+    metric: ['gender', 'home-progesterone-test', 'sexual-activity'],
+    from: '2026-07-01',
+    to: '2026-07-31',
+    limit: 200,
+  })
+  assert.deepEqual(entries.items, [{
+    eventId: progesteroneEventId,
+    recordKind: 'measurement',
+    measurementIndex: 0,
+    occurredAt: '2026-07-12T00:00:00.000Z',
+    source: 'device',
+    metric: 'home-progesterone-test',
+    value: 1,
+    unit: 'recording',
+    qualifiers: { result: 'indeterminate' },
+  }, {
+    eventId: sexualActivityEventId,
+    recordKind: 'measurement',
+    measurementIndex: 0,
+    occurredAt: '2026-07-11T00:00:00.000Z',
+    source: 'device',
+    metric: 'sexual-activity',
+    value: 1,
+    unit: 'recording',
+    qualifiers: { 'protection-used': false },
+  }, {
+    eventId: genderEventId,
+    recordKind: 'measurement',
+    measurementIndex: 0,
+    occurredAt: '2026-07-09T08:30:00.000Z',
+    source: 'device',
+    metric: 'gender',
+    value: 1,
+    unit: 'recording',
+    qualifiers: { gender: 'other' },
+  }])
+  assert.equal(entries.count, 3)
+  assert.equal(entries.nextCursor, null)
 })
 
 test('measurement import-json schema exposes the structured payload escape hatch', async () => {
@@ -590,7 +1453,7 @@ test('measurement import-json preserves nested links and import metadata', async
 
   assert.deepEqual(added.measurements, [
     {
-      metric: 'body-fat-pct',
+      metric: 'body-fat-percentage',
       value: 18.4,
       unit: 'percent',
       qualifiers: {

@@ -15,21 +15,28 @@ import {
 const SUBAGENT_PROVIDER_REQUEST_STARTED_AT = '2026-07-23T11:59:00.000Z'
 
 function tokenUsageEvent(input: {
-  method?: string
   threadId: string
   turnId: string
   total: Record<string, number>
   last: Record<string, number>
-  tokenUsageKey?: 'tokenUsage' | 'token_usage'
 }): Record<string, unknown> {
+  const completeBreakdown = (
+    breakdown: Record<string, number>,
+  ): Record<string, number> => ({
+    cacheWriteInputTokens: 0,
+    cachedInputTokens: 0,
+    reasoningOutputTokens: 0,
+    ...breakdown,
+  })
   return {
-    method: input.method ?? 'thread/tokenUsage/updated',
+    method: 'thread/tokenUsage/updated',
     params: {
       threadId: input.threadId,
       turnId: input.turnId,
-      [input.tokenUsageKey ?? 'tokenUsage']: {
-        total: input.total,
-        last: input.last,
+      tokenUsage: {
+        last: completeBreakdown(input.last),
+        modelContextWindow: null,
+        total: completeBreakdown(input.total),
       },
     },
   }
@@ -218,6 +225,7 @@ describe('extractCodexSubagentUsageDrafts', () => {
       },
     })
     expect(drafts[0]?.usage.rawUsageJson).toEqual({
+      cacheWriteInputTokens: 0,
       cachedInputTokens: 2_000,
       inputTokens: 4_000,
       outputTokens: 1_000,
@@ -240,6 +248,7 @@ describe('extractCodexSubagentUsageDrafts', () => {
       },
     })
     expect(drafts[1]?.usage.rawUsageJson).toEqual({
+      cacheWriteInputTokens: 0,
       cachedInputTokens: 100,
       inputTokens: 600,
       outputTokens: 100,
@@ -413,6 +422,7 @@ describe('extractCodexSubagentUsageDrafts', () => {
       },
     })
     expect(drafts[0]?.usage.rawUsageJson).toEqual({
+      cacheWriteInputTokens: 0,
       cachedInputTokens: 300,
       inputTokens: 900,
       outputTokens: 300,
@@ -491,6 +501,7 @@ describe('extractCodexSubagentUsageDrafts', () => {
       },
     })
     expect(drafts[0]?.usage.rawUsageJson).toEqual({
+      cacheWriteInputTokens: 0,
       cachedInputTokens: 0,
       inputTokens: 80,
       outputTokens: 20,
@@ -542,27 +553,29 @@ describe('extractCodexSubagentUsageDrafts', () => {
     expect(drafts).toEqual([])
   })
 
-  it('attributes one spawn model to every receiver thread and tolerates snake_case items', () => {
-    const sample = sampleFromEvents([
-      tokenUsageEvent({
-        method: 'thread/token_usage/updated',
+  it('rejects snake-case subagent aliases at the pinned protocol boundary', () => {
+    const snakeCaseEvent = {
+      method: 'thread/token_usage/updated',
+      params: {
         threadId: 'thread-child-snake',
         turnId: 'turn-child-snake',
-        tokenUsageKey: 'token_usage',
-        total: {
-          total_tokens: 50,
-          input_tokens: 40,
-          cached_input_tokens: 0,
-          output_tokens: 10,
+        token_usage: {
+          last: {
+            total_tokens: 50,
+            input_tokens: 40,
+            cached_input_tokens: 0,
+            output_tokens: 10,
+          },
+          total: {
+            total_tokens: 50,
+            input_tokens: 40,
+            cached_input_tokens: 0,
+            output_tokens: 10,
+          },
         },
-        last: {
-          total_tokens: 50,
-          input_tokens: 40,
-          cached_input_tokens: 0,
-          output_tokens: 10,
-        },
-      }),
-    ])
+      },
+    }
+    const sample = sampleFromEvents([snakeCaseEvent])
 
     const drafts = extractCodexSubagentUsageDrafts({
       modelProvider: null,
@@ -585,22 +598,7 @@ describe('extractCodexSubagentUsageDrafts', () => {
       ]),
     })
 
-    expect(drafts).toHaveLength(1)
-    expect(drafts[0]).toMatchObject({
-      usage: {
-        inputTokens: 40,
-        outputTokens: 10,
-        requestedModel: 'gpt-5.6-terra',
-        servedModel: 'gpt-5.6-terra',
-        totalTokens: 50,
-      },
-    })
-    expect(drafts[0]?.usage.rawUsageJson).toEqual({
-      cachedInputTokens: 0,
-      inputTokens: 40,
-      outputTokens: 10,
-      totalTokens: 50,
-    })
+    expect(drafts).toEqual([])
   })
 
   it('persists only the flat token delta and never leaks spawn prompt content', () => {
@@ -647,6 +645,7 @@ describe('extractCodexSubagentUsageDrafts', () => {
     expect(JSON.stringify(drafts)).not.toContain('prompt')
     expect(JSON.stringify(drafts)).not.toContain('thread-child-a')
     expect(drafts[0]?.usage.rawUsageJson).toEqual({
+      cacheWriteInputTokens: 0,
       cachedInputTokens: 0,
       inputTokens: 250,
       outputTokens: 50,
@@ -682,12 +681,10 @@ describe('extractCodexSubagentUsageDrafts', () => {
     expect(drafts).toEqual([])
   })
 
-  // Multi-agent V2 emits subAgentActivity items instead of collab tool
-  // calls; those items are the only spawn evidence a V2 turn produces, carry
-  // no model, and the child inherits the parent model by default. This case
-  // is pinned because V2 shipping a different item shape than V1 silently
-  // un-metered every delegated turn between June 29 and July 17, 2026.
-  it('authorizes billing via multi-agent V2 subAgentActivity items and falls back to the parent model', () => {
+  // Multi-agent V2 emits subAgentActivity items instead of collab tool calls.
+  // The canonical item carries no model, so the child inherits the parent
+  // model by default; alternate item aliases must not authorize billing.
+  it('authorizes exact V2 subAgentActivity items and rejects alternate aliases', () => {
     const childEvents = [
       tokenUsageEvent({
         threadId: 'thread-child-v2',
@@ -790,36 +787,29 @@ describe('extractCodexSubagentUsageDrafts', () => {
       ]),
     })
 
-    expect(drafts).toHaveLength(2)
+    expect(drafts).toHaveLength(1)
     expect(drafts[0]?.usage.servedModel).toBe('gpt-5.6-terra')
     expect(drafts[0]?.usage.requestedModel).toBe('gpt-5.6-terra')
     expect(drafts[0]?.providerRequestOrdinal).toBe(3)
     expect(drafts[0]?.usage.inputTokens).toBe(700)
     expect(drafts[0]?.usage.outputTokens).toBe(200)
     expect(drafts[0]?.usage.rawUsageJson).toEqual({
+      cacheWriteInputTokens: 0,
       cachedInputTokens: 300,
       inputTokens: 700,
       outputTokens: 200,
       reasoningOutputTokens: 40,
       totalTokens: 900,
     })
-    expect(drafts[1]?.usage.servedModel).toBe('gpt-5.6-terra')
-    expect(drafts[1]?.usage.rawUsageJson).toEqual({
-      cachedInputTokens: 0,
-      inputTokens: 250,
-      outputTokens: 50,
-      reasoningOutputTokens: 0,
-      totalTokens: 300,
-    })
     expect(
       drafts.reduce(
         (total, draft) => total + (draft.usage.totalTokens ?? 0),
         0,
       ),
-    ).toBe(1_200)
+    ).toBe(900)
   })
 
-  it('uses a protocol-carried V2 activity model instead of inheriting the parent model', () => {
+  it('ignores unsupported V2 activity model metadata and inherits the parent model', () => {
     const drafts = extractCodexSubagentUsageDrafts({
       modelProvider: 'openai',
       ordinalStart: 2,
@@ -874,8 +864,8 @@ describe('extractCodexSubagentUsageDrafts', () => {
       usage: {
         inputTokens: 250,
         outputTokens: 50,
-        requestedModel: 'gpt-5.6-terra',
-        servedModel: 'gpt-5.6-terra',
+        requestedModel: 'gpt-5.6-sol',
+        servedModel: 'gpt-5.6-sol',
         totalTokens: 300,
       },
     })

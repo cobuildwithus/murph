@@ -53,6 +53,7 @@ function normalizeMetricValueForScope(
     case "albumin":
       return normalizeAlbumin(input.value, unit);
     case "body-weight":
+    case "lean-body-mass":
       return normalizeWeight(input.value, unit);
     case "waist-circumference":
       return normalizeLengthCentimeters(input.value, unit, definition.displayName);
@@ -226,6 +227,7 @@ export function normalizeUnit(value: string | null): string | null {
     in: "in",
     inch: "in",
     inches: "in",
+    kg_m2: "kg/m^2",
     "kg/m2": "kg/m^2",
     "kg/m^2": "kg/m^2",
     lb: "lb",

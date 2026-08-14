@@ -282,49 +282,125 @@ describe("murph connected-app dynamic tools", () => {
     });
   });
 
-  it("surfaces calendar-create failures as no-retry ambiguous outcomes", async () => {
-    const connectedApps: AssistantConnectedAppsPort = {
-      request: vi.fn(async () => {
+  it.each([
+    {
+      calendarArguments: {
+        event_duration_hour: 0,
+        event_duration_minutes: 30,
+        start_datetime: "2026-07-01T10:00:00-04:00",
+        summary: "Annual physical",
+        timezone: "America/New_York",
+      },
+      calendarToolSlug: "GOOGLECALENDAR_CREATE_EVENT",
+      emailArguments: {
+        body: "Please help with my account.",
+        recipient_email: "support@example.com",
+        subject: "Account help",
+      },
+      emailToolSlug: "GMAIL_SEND_EMAIL",
+    },
+    {
+      calendarArguments: {
+        body: "Discuss annual physical results.",
+        end_datetime: "2026-07-01T10:30:00-04:00",
+        start_datetime: "2026-07-01T10:00:00-04:00",
+        subject: "Annual physical",
+        time_zone: "Eastern Standard Time",
+      },
+      calendarToolSlug: "OUTLOOK_CALENDAR_CREATE_EVENT",
+      emailArguments: {
+        body: "Please help with my account.",
+        subject: "Account help",
+        to_email: "support@example.com",
+      },
+      emailToolSlug: "OUTLOOK_SEND_EMAIL",
+    },
+  ] as const)(
+    "keeps direct scheduled $calendarToolSlug available while blocking $emailToolSlug",
+    async ({
+      calendarArguments,
+      calendarToolSlug,
+      emailArguments,
+      emailToolSlug,
+    }) => {
+      // A direct automation-cron occurrence has no current accepted input, so
+      // the hosted scope is intentionally null. Calendar authority comes from
+      // the saved direct automation; email authority never does.
+      const controlPlaneRequest = vi.fn(async () => {
         throw Object.assign(
           new Error(
             'Hosted connected apps failed with HTTP 400. {"error":{"code":"CONNECTED_APPS_PROVIDER_UNAVAILABLE","message":"The connected-app request could not be completed.","retryable":false}}',
           ),
           { status: 400, statusCode: 400 },
         );
-      }),
-    };
+      });
+      const connectedApps: AssistantConnectedAppsPort = {
+        request: controlPlaneRequest,
+      };
 
-    const result = await executeMurphDynamicToolRequest({
-      env: {},
-      fetchImpl: fetch,
-      hostedToolContext: createHostedToolContext(connectedApps),
-      nextUsageOrdinal: () => 1,
-      progressDelivery: createProgressDelivery(),
-      request: {
-        args: {
-          account: "calendar",
-          agentApproved: true,
-          arguments: {
-            event_duration_hour: 0,
-            event_duration_minutes: 30,
-            start_datetime: "2026-07-01T10:00:00-04:00",
-            summary: "Annual physical",
-            timezone: "America/New_York",
+      const hostedToolContext = createHostedToolContext(connectedApps);
+      const emailResult = await executeMurphDynamicToolRequest({
+        env: {},
+        fetchImpl: fetch,
+        hostedToolContext,
+        nextUsageOrdinal: () => 1,
+        progressDelivery: createProgressDelivery(),
+        request: {
+          args: {
+            account: "work",
+            agentApproved: true,
+            arguments: emailArguments,
+            toolSlug: emailToolSlug,
           },
-          toolSlug: "GOOGLECALENDAR_CREATE_EVENT",
+          kind: "connected-apps-execute",
         },
-        kind: "connected-apps-execute",
-      },
-    });
+      });
 
-    expect(connectedApps.request).toHaveBeenCalledTimes(1);
-    expect(result.rpcResult.success).toBe(false);
-    const text = result.rpcResult.contentItems[0]!.text;
-    expect(text).toContain("failed or returned an ambiguous result");
-    expect(text).toContain("Do not retry");
-    expect(text).toContain("Search the selected calendar");
-    expect(text).not.toContain("connected apps API is unavailable");
-  });
+      expect(emailResult.rpcResult.success).toBe(false);
+      expect(emailResult.rpcResult.contentItems[0]!.text).toContain(
+        "requires current user input in a private conversation",
+      );
+      expect(controlPlaneRequest).not.toHaveBeenCalled();
+
+      const calendarResult = await executeMurphDynamicToolRequest({
+        env: {},
+        fetchImpl: fetch,
+        hostedToolContext,
+        nextUsageOrdinal: () => 1,
+        progressDelivery: createProgressDelivery(),
+        request: {
+          args: {
+            account: "calendar",
+            agentApproved: true,
+            arguments: calendarArguments,
+            toolSlug: calendarToolSlug,
+          },
+          kind: "connected-apps-execute",
+        },
+      });
+
+      expect(controlPlaneRequest).toHaveBeenCalledTimes(1);
+      expect(controlPlaneRequest).toHaveBeenCalledWith(
+        {
+          input: {
+            account: "calendar",
+            agentApproved: true,
+            arguments: calendarArguments,
+            toolSlug: calendarToolSlug,
+          },
+          operation: "execute",
+        },
+        { signal: null },
+      );
+      expect(calendarResult.rpcResult.success).toBe(false);
+      const text = calendarResult.rpcResult.contentItems[0]!.text;
+      expect(text).toContain("failed or returned an ambiguous result");
+      expect(text).toContain("Do not retry");
+      expect(text).toContain("Search the selected calendar");
+      expect(text).not.toContain("connected apps API is unavailable");
+      expect(controlPlaneRequest).toHaveBeenCalledTimes(1);
+    },
+  );
 
   it("does not call the control plane when connected apps are unavailable", async () => {
     const fetchImpl = vi.fn(async (): Promise<Response> => new Response());
@@ -527,11 +603,15 @@ function dynamicToolCall(input: {
   tool: string;
 }): Record<string, unknown> {
   return {
+    id: "request-test",
     method: "item/tool/call",
     params: {
       arguments: input.argumentsValue,
+      callId: "call-test",
       namespace: "murph",
+      threadId: "thread-test",
       tool: input.tool,
+      turnId: "turn-test",
     },
   };
 }

@@ -167,11 +167,6 @@ function GroupSponsorshipDialog({
           offerCode: selectedOffer?.offerCode ?? null,
           offers,
         });
-        const publicAliasUsed =
-          creativeEnabled ||
-          Boolean(
-            runningBitDurationLabel && runningBitRequest.trim().length > 0,
-          );
         return (
           <div
             className="space-y-4 max-md:flex max-md:flex-1 max-md:flex-col max-md:space-y-0"
@@ -382,28 +377,29 @@ function GroupSponsorshipDialog({
                       </Field>
                     ) : null}
 
-                    {publicAliasUsed ? (
-                      <Field data-disabled={disabled || undefined}>
-                        <FieldLabel htmlFor={`${fieldId}-alias`}>
-                          Credit it as
-                        </FieldLabel>
-                        <Input
-                          id={`${fieldId}-alias`}
-                          className="focus-visible:ring-0"
-                          value={publicAlias}
-                          onChange={(event) => setPublicAlias(event.target.value)}
-                          maxLength={
-                            HOSTED_GROUP_SPONSORSHIP_PUBLIC_ALIAS_MAX_CODE_POINTS
-                          }
-                          disabled={disabled}
-                          placeholder="The Group Historian"
-                        />
-                        <FieldDescription>
-                          Used only with the creative response or temporary
-                          running bit. Murph never guesses your public name.
-                        </FieldDescription>
-                      </Field>
-                    ) : null}
+                    <Field data-disabled={disabled || undefined}>
+                      <FieldLabel htmlFor={`${fieldId}-alias`}>
+                        Credit it as
+                      </FieldLabel>
+                      <Input
+                        id={`${fieldId}-alias`}
+                        className="focus-visible:ring-0"
+                        value={publicAlias}
+                        onChange={(event) => setPublicAlias(event.target.value)}
+                        maxLength={
+                          HOSTED_GROUP_SPONSORSHIP_PUBLIC_ALIAS_MAX_CODE_POINTS
+                        }
+                        disabled={disabled}
+                        placeholder="The Group Historian"
+                      />
+                      <FieldDescription>
+                        Optional. Signed-in group members see this alias while
+                        your monthly sponsorship is active or while this is one
+                        of the 20 most recent contributions. It may also appear
+                        with your creative response or temporary running bit.
+                        Leave blank to show Anonymous.
+                      </FieldDescription>
+                    </Field>
                   </FieldGroup>
                 </CollapsibleContent>
               </Collapsible>

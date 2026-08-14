@@ -4,11 +4,33 @@ import {
 } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+type UsageCreditCapacityRead = (input: {
+  expectedPurchaseId?: string;
+}) => Promise<{
+  expectedPurchaseOwnsReservation: boolean;
+  state: "available" | "at_capacity" | "overflow";
+}>;
+
 const sharedMocks = vi.hoisted(() => ({
   lockHostedMemberRow: vi.fn(async (
     _tx: unknown,
     _memberId: string,
   ) => undefined),
+}));
+const usageCreditMocks = vi.hoisted(() => ({
+  lockHostedUsageCreditBeneficiaryTx: vi.fn(async (input: {
+    beneficiaryMemberId: string;
+  }) => ({
+    balanceUsdMicros: 0n,
+    beneficiaryMemberId: input.beneficiaryMemberId,
+    ledgerVersion: 0n,
+  })),
+  readHostedUsageCreditGrantCapacityTx: vi.fn<UsageCreditCapacityRead>(async (
+    input,
+  ) => ({
+    expectedPurchaseOwnsReservation: Boolean(input.expectedPurchaseId),
+    state: "available",
+  })),
 }));
 
 vi.mock("server-only", () => ({}));
@@ -21,6 +43,32 @@ vi.mock("@/src/lib/hosted-onboarding/shared", async (importOriginal) => {
     lockHostedMemberRow: sharedMocks.lockHostedMemberRow,
   };
 });
+vi.mock(
+  "@/src/lib/hosted-execution/usage-credit-grant-capacity",
+  async (importOriginal) => {
+    const actual = await importOriginal<
+      typeof import("@/src/lib/hosted-execution/usage-credit-grant-capacity")
+    >();
+    return {
+      ...actual,
+      readHostedUsageCreditGrantCapacityTx:
+        usageCreditMocks.readHostedUsageCreditGrantCapacityTx,
+    };
+  },
+);
+vi.mock(
+  "@/src/lib/hosted-execution/usage-credit-ledger",
+  async (importOriginal) => {
+    const actual = await importOriginal<
+      typeof import("@/src/lib/hosted-execution/usage-credit-ledger")
+    >();
+    return {
+      ...actual,
+      lockHostedUsageCreditBeneficiaryTx:
+        usageCreditMocks.lockHostedUsageCreditBeneficiaryTx,
+    };
+  },
+);
 
 import {
   addHostedGroupSponsorshipCalendarMonth,
@@ -47,6 +95,14 @@ const NOW = new Date("2026-08-01T12:00:00.000Z");
 
 beforeEach(() => {
   sharedMocks.lockHostedMemberRow.mockClear();
+  usageCreditMocks.lockHostedUsageCreditBeneficiaryTx.mockClear();
+  usageCreditMocks.readHostedUsageCreditGrantCapacityTx.mockReset();
+  usageCreditMocks.readHostedUsageCreditGrantCapacityTx.mockImplementation(
+    async (input) => ({
+      expectedPurchaseOwnsReservation: Boolean(input.expectedPurchaseId),
+      state: "available",
+    }),
+  );
 });
 
 function createAutomaticRefillReadHarness(input: {
@@ -327,6 +383,7 @@ function createRefillHarness(input: {
     checkoutCancelUrl?: string;
     checkoutSuccessUrl?: string;
     groupSponsorshipChargeOrdinal: number;
+    grantSlotReleasedAt?: Date | null;
     id: string;
     reconciliationVersion?: bigint;
     status: HostedUsageCreditPurchaseStatus;
@@ -344,6 +401,7 @@ function createRefillHarness(input: {
       `https://www.withmurph.ai/groups/fund/example?usageCheckout=cancel&usagePurchase=${purchase.id}`,
     checkoutSuccessUrl: purchase.checkoutSuccessUrl ??
       `https://www.withmurph.ai/groups/fund/example?usageCheckout=success&usagePurchase=${purchase.id}`,
+    grantSlotReleasedAt: purchase.grantSlotReleasedAt ?? null,
     reconciliationVersion: purchase.reconciliationVersion ?? 0n,
   }));
   const create = vi.fn(async ({ data }: { data: Record<string, unknown> }) => {
@@ -354,6 +412,7 @@ function createRefillHarness(input: {
       groupSponsorshipChargeOrdinal: Number(
         data.groupSponsorshipChargeOrdinal,
       ),
+      grantSlotReleasedAt: data.grantSlotReleasedAt as Date | null,
       id: String(data.id),
       reconciliationVersion: 0n,
       status: data.status as HostedUsageCreditPurchaseStatus,
@@ -390,7 +449,11 @@ function createRefillHarness(input: {
         };
       }),
       create,
-      findFirst: vi.fn(async () => buildActivationPurchase()),
+      findFirst: vi.fn(async ({ where }: {
+        where: Record<string, unknown>;
+      }) => where.status === HostedUsageCreditPurchaseStatus.payment_failed
+        ? null
+        : buildActivationPurchase()),
       findMany: vi.fn(async ({ where }: { where: {
         groupSponsorshipPeriodStartedAt: Date;
       } }) => purchases.filter(() =>
@@ -423,6 +486,94 @@ function createRefillHarness(input: {
     },
     purchases,
     tx,
+  };
+}
+
+function createFailedRecoveryHarness(input: {
+  grantSlotReleasedAt: Date | null;
+}) {
+  let authorization = buildAuthorization({
+    recoveryStartedAt: NOW,
+    status: HostedGroupSponsorshipAuthorizationStatus.recovery_required,
+  });
+  let purchase: Record<string, unknown> = {
+    beneficiaryMemberId: authorization.beneficiaryMemberId,
+    cashAmountMinor: 500,
+    checkoutCancelUrl:
+      "https://www.withmurph.ai/groups/fund/example?usageCheckout=cancel&usagePurchase=hucp_activation_123",
+    checkoutSuccessUrl:
+      "https://www.withmurph.ai/groups/fund/example?usageCheckout=success&usagePurchase=hucp_activation_123",
+    grantSlotReleasedAt: input.grantSlotReleasedAt,
+    groupSponsorshipAuthorizationId: authorization.id,
+    groupSponsorshipChargeOrdinal: 1,
+    groupSponsorshipPeriodStartedAt: authorization.periodStartedAt,
+    id: "hucp_refill_recovery",
+    lastReconciledAt: NOW,
+    payerMemberId: authorization.payerMemberId,
+    reconciliationVersion: 3n,
+    status: HostedUsageCreditPurchaseStatus.payment_failed,
+    stripeCheckoutSessionLookupKey: null,
+    stripePaymentIntentLookupKey: null,
+    terminalAt: NOW,
+  };
+  const updatePurchase = vi.fn(async ({ data, where }: {
+    data: Record<string, unknown>;
+    where: Record<string, unknown>;
+  }) => {
+    const currentRelease = purchase.grantSlotReleasedAt;
+    const expectedRelease = where.grantSlotReleasedAt;
+    const releaseMatches = currentRelease === expectedRelease ||
+      (
+        currentRelease instanceof Date &&
+        expectedRelease instanceof Date &&
+        currentRelease.getTime() === expectedRelease.getTime()
+      );
+    if (
+      purchase.id !== where.id ||
+      purchase.reconciliationVersion !== where.reconciliationVersion ||
+      purchase.status !== where.status ||
+      !releaseMatches
+    ) {
+      return { count: 0 };
+    }
+    const reconciliationVersion = data.reconciliationVersion;
+    purchase = {
+      ...purchase,
+      ...data,
+      reconciliationVersion:
+        typeof reconciliationVersion === "object" &&
+          reconciliationVersion !== null &&
+          "increment" in reconciliationVersion
+          ? (purchase.reconciliationVersion as bigint) +
+            (reconciliationVersion.increment as bigint)
+          : reconciliationVersion,
+    };
+    return { count: 1 };
+  });
+  const tx = {
+    hostedGroupSponsorshipAuthorization: {
+      findFirst: vi.fn(async () => authorization),
+      findUnique: vi.fn(async () => authorization),
+      updateMany: vi.fn(async ({ data }: { data: Record<string, unknown> }) => {
+        authorization = { ...authorization, ...data };
+        return { count: 1 };
+      }),
+    },
+    hostedUsageCreditPurchase: {
+      aggregate: vi.fn(async () => ({ _sum: { cashAmountMinor: 0 } })),
+      findFirst: vi.fn(async () => purchase),
+      updateMany: updatePurchase,
+    },
+  };
+  return {
+    get authorization() {
+      return authorization;
+    },
+    get purchase() {
+      return purchase;
+    },
+    tx,
+    updatePurchase,
   };
 }
 
@@ -657,7 +808,10 @@ describe("hosted capped group sponsorship authorization", () => {
   });
 
   it("keeps payer cleanup purchase-only and lazily cancels the activation under the beneficiary owner", async () => {
-    const purchaseUpdate = vi.fn(async () => ({ count: 1 }));
+    const purchaseUpdate = vi.fn(async (_input: {
+      data: Record<string, unknown>;
+      where: Record<string, unknown>;
+    }) => ({ count: 1 }));
     const payerCleanupTx = {
       hostedUsageCreditPurchase: { updateMany: purchaseUpdate },
     };
@@ -681,6 +835,9 @@ describe("hosted capped group sponsorship authorization", () => {
         status: HostedUsageCreditPurchaseStatus.created,
       },
     });
+    expect(purchaseUpdate.mock.calls[0]?.[0]?.data).not.toHaveProperty(
+      "grantSlotReleasedAt",
+    );
     expect(payerCleanupTx).not.toHaveProperty(
       "hostedGroupSponsorshipAuthorization",
     );
@@ -734,6 +891,149 @@ describe("hosted capped group sponsorship authorization", () => {
 
     expect(february.toISOString()).toBe("2027-02-28T18:45:00.000Z");
     expect(march.toISOString()).toBe("2027-03-31T18:45:00.000Z");
+  });
+
+  it("admits a new automatic refill with 31 occupied slots and reserves the 32nd", async () => {
+    usageCreditMocks.readHostedUsageCreditGrantCapacityTx.mockResolvedValueOnce({
+      expectedPurchaseOwnsReservation: false,
+      state: "available",
+    });
+    const harness = createRefillHarness();
+
+    await expect(admitHostedGroupSponsorshipRefillTx({
+      beneficiaryMemberId: "member_group_runtime",
+      capacityState: "low",
+      now: NOW,
+      tx: harness.tx as never,
+    })).resolves.toMatchObject({
+      authorizationId: "hgsa_abcdefghijklmnop",
+      purchaseId: expect.stringMatching(/^hucp_[A-Za-z0-9_-]{16}$/u),
+    });
+
+    expect(harness.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ grantSlotReleasedAt: null }),
+    });
+    expect(usageCreditMocks.readHostedUsageCreditGrantCapacityTx)
+      .toHaveBeenCalledWith({
+        lockedBeneficiary: expect.objectContaining({
+          beneficiaryMemberId: "member_group_runtime",
+        }),
+        tx: harness.tx,
+      });
+    expect(
+      usageCreditMocks.lockHostedUsageCreditBeneficiaryTx.mock
+        .invocationCallOrder[0],
+    ).toBeLessThan(sharedMocks.lockHostedMemberRow.mock.invocationCallOrder[0]!);
+  });
+
+  it("returns no automatic refill with 32 occupied slots", async () => {
+    usageCreditMocks.readHostedUsageCreditGrantCapacityTx.mockResolvedValueOnce({
+      expectedPurchaseOwnsReservation: false,
+      state: "at_capacity",
+    });
+    const harness = createRefillHarness();
+
+    await expect(admitHostedGroupSponsorshipRefillTx({
+      beneficiaryMemberId: "member_group_runtime",
+      capacityState: "exhausted",
+      now: NOW,
+      tx: harness.tx as never,
+    })).resolves.toBeNull();
+
+    expect(harness.create).not.toHaveBeenCalled();
+  });
+
+  it("replays a pending automatic refill's exact reservation without double admission", async () => {
+    const pendingPurchaseId = "hucp_pending_1234";
+    usageCreditMocks.readHostedUsageCreditGrantCapacityTx.mockResolvedValue({
+      expectedPurchaseOwnsReservation: true,
+      state: "at_capacity",
+    });
+    const harness = createRefillHarness({ purchases: [
+      {
+        cashAmountMinor: 500,
+        groupSponsorshipChargeOrdinal: 0,
+        id: "hucp_activation_123",
+        status: HostedUsageCreditPurchaseStatus.fulfilled,
+      },
+      {
+        cashAmountMinor: 500,
+        groupSponsorshipChargeOrdinal: 1,
+        id: pendingPurchaseId,
+        status: HostedUsageCreditPurchaseStatus.payment_pending,
+      },
+    ] });
+
+    const first = await admitHostedGroupSponsorshipRefillTx({
+      beneficiaryMemberId: "member_group_runtime",
+      capacityState: "low",
+      now: NOW,
+      tx: harness.tx as never,
+    });
+    const replay = await admitHostedGroupSponsorshipRefillTx({
+      beneficiaryMemberId: "member_group_runtime",
+      capacityState: "exhausted",
+      now: NOW,
+      tx: harness.tx as never,
+    });
+
+    expect(first).toEqual(replay);
+    expect(first).toEqual({
+      authorizationId: "hgsa_abcdefghijklmnop",
+      purchaseId: pendingPurchaseId,
+    });
+    expect(harness.create).not.toHaveBeenCalled();
+    expect(usageCreditMocks.readHostedUsageCreditGrantCapacityTx)
+      .toHaveBeenCalledTimes(2);
+    for (const [capacityInput] of
+      usageCreditMocks.readHostedUsageCreditGrantCapacityTx.mock.calls) {
+      expect(capacityInput).toMatchObject({
+        expectedPurchaseId: pendingPurchaseId,
+      });
+    }
+  });
+
+  it.each([
+    {
+      capacity: {
+        expectedPurchaseOwnsReservation: true,
+        state: "overflow" as const,
+      },
+      message: /capacity exceeds its contract/u,
+    },
+    {
+      capacity: {
+        expectedPurchaseOwnsReservation: false,
+        state: "at_capacity" as const,
+      },
+      message: /reservation is missing/u,
+    },
+  ])("rejects an unsafe pending-refill replay", async ({ capacity, message }) => {
+    usageCreditMocks.readHostedUsageCreditGrantCapacityTx.mockResolvedValueOnce(
+      capacity,
+    );
+    const harness = createRefillHarness({ purchases: [
+      {
+        cashAmountMinor: 500,
+        groupSponsorshipChargeOrdinal: 0,
+        id: "hucp_activation_123",
+        status: HostedUsageCreditPurchaseStatus.fulfilled,
+      },
+      {
+        cashAmountMinor: 500,
+        groupSponsorshipChargeOrdinal: 1,
+        id: "hucp_pending_unsafe",
+        status: HostedUsageCreditPurchaseStatus.payment_pending,
+      },
+    ] });
+
+    await expect(admitHostedGroupSponsorshipRefillTx({
+      beneficiaryMemberId: "member_group_runtime",
+      capacityState: "low",
+      now: NOW,
+      tx: harness.tx as never,
+    })).rejects.toThrow(message);
+    expect(harness.create).not.toHaveBeenCalled();
   });
 
   it("serializes duplicate low-capacity admission to one deterministic exact-$5 purchase", async () => {
@@ -1318,6 +1618,189 @@ describe("hosted capped group sponsorship authorization", () => {
     });
   });
 
+  it("resets a failed recovery that already owns its reservation without consuming another slot", async () => {
+    usageCreditMocks.readHostedUsageCreditGrantCapacityTx.mockResolvedValueOnce({
+      expectedPurchaseOwnsReservation: true,
+      state: "at_capacity",
+    });
+    const harness = createFailedRecoveryHarness({
+      grantSlotReleasedAt: null,
+    });
+
+    await expect(prepareHostedGroupSponsorshipRecoveryTx({
+      authorizationId: String(harness.authorization.id),
+      beneficiaryMemberId: String(harness.authorization.beneficiaryMemberId),
+      capacityState: "low",
+      checkoutExpiresAt: new Date("2026-08-01T13:30:00.000Z"),
+      now: NOW,
+      payerMemberId: String(harness.authorization.payerMemberId),
+      tx: harness.tx as never,
+    })).resolves.toEqual({
+      kind: "purchase",
+      purchaseId: "hucp_refill_recovery",
+    });
+
+    expect(usageCreditMocks.readHostedUsageCreditGrantCapacityTx)
+      .toHaveBeenCalledWith(expect.objectContaining({
+        expectedPurchaseId: "hucp_refill_recovery",
+      }));
+    expect(harness.updatePurchase).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ grantSlotReleasedAt: null }),
+      where: expect.objectContaining({ grantSlotReleasedAt: null }),
+    }));
+    expect(harness.purchase).toMatchObject({
+      grantSlotReleasedAt: null,
+      status: HostedUsageCreditPurchaseStatus.created,
+    });
+    expect(
+      usageCreditMocks.lockHostedUsageCreditBeneficiaryTx.mock
+        .invocationCallOrder[0],
+    ).toBeLessThan(sharedMocks.lockHostedMemberRow.mock.invocationCallOrder[0]!);
+  });
+
+  it("reacquires a released failed-row reservation when capacity is available", async () => {
+    const releasedAt = new Date("2026-08-01T11:45:00.000Z");
+    usageCreditMocks.readHostedUsageCreditGrantCapacityTx.mockResolvedValueOnce({
+      expectedPurchaseOwnsReservation: false,
+      state: "available",
+    });
+    const harness = createFailedRecoveryHarness({
+      grantSlotReleasedAt: releasedAt,
+    });
+
+    await expect(prepareHostedGroupSponsorshipRecoveryTx({
+      authorizationId: String(harness.authorization.id),
+      beneficiaryMemberId: String(harness.authorization.beneficiaryMemberId),
+      capacityState: "exhausted",
+      checkoutExpiresAt: new Date("2026-08-01T13:30:00.000Z"),
+      now: NOW,
+      payerMemberId: String(harness.authorization.payerMemberId),
+      tx: harness.tx as never,
+    })).resolves.toEqual({
+      kind: "purchase",
+      purchaseId: "hucp_refill_recovery",
+    });
+
+    expect(harness.updatePurchase).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ grantSlotReleasedAt: null }),
+      where: expect.objectContaining({ grantSlotReleasedAt: releasedAt }),
+    }));
+    expect(harness.purchase.grantSlotReleasedAt).toBeNull();
+  });
+
+  it("rejects released failed-row reservation reacquisition at capacity", async () => {
+    usageCreditMocks.readHostedUsageCreditGrantCapacityTx.mockResolvedValueOnce({
+      expectedPurchaseOwnsReservation: false,
+      state: "at_capacity",
+    });
+    const harness = createFailedRecoveryHarness({
+      grantSlotReleasedAt: new Date("2026-08-01T11:45:00.000Z"),
+    });
+
+    await expect(prepareHostedGroupSponsorshipRecoveryTx({
+      authorizationId: String(harness.authorization.id),
+      beneficiaryMemberId: String(harness.authorization.beneficiaryMemberId),
+      capacityState: "low",
+      checkoutExpiresAt: new Date("2026-08-01T13:30:00.000Z"),
+      now: NOW,
+      payerMemberId: String(harness.authorization.payerMemberId),
+      tx: harness.tx as never,
+    })).rejects.toMatchObject({
+      code: "HOSTED_GROUP_SPONSORSHIP_RECOVERY_UNAVAILABLE",
+    });
+    expect(harness.updatePurchase).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    {
+      capacity: {
+        expectedPurchaseOwnsReservation: true,
+        state: "overflow" as const,
+      },
+      message: /capacity exceeds its contract/u,
+    },
+    {
+      capacity: {
+        expectedPurchaseOwnsReservation: false,
+        state: "at_capacity" as const,
+      },
+      message: /reservation is missing/u,
+    },
+  ])("rejects an unsafe reserved recovery before reset", async ({
+    capacity,
+    message,
+  }) => {
+    usageCreditMocks.readHostedUsageCreditGrantCapacityTx.mockResolvedValueOnce(
+      capacity,
+    );
+    const harness = createFailedRecoveryHarness({
+      grantSlotReleasedAt: null,
+    });
+
+    await expect(prepareHostedGroupSponsorshipRecoveryTx({
+      authorizationId: String(harness.authorization.id),
+      beneficiaryMemberId: String(harness.authorization.beneficiaryMemberId),
+      capacityState: "low",
+      checkoutExpiresAt: new Date("2026-08-01T13:30:00.000Z"),
+      now: NOW,
+      payerMemberId: String(harness.authorization.payerMemberId),
+      tx: harness.tx as never,
+    })).rejects.toThrow(message);
+    expect(harness.updatePurchase).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { admitted: true, state: "available" as const },
+    { admitted: false, state: "at_capacity" as const },
+  ])("applies $state capacity to first-purchase recovery in a new period", async ({
+    admitted,
+    state,
+  }) => {
+    const newPeriodStartedAt = PERIOD_END;
+    const newPeriodNow = new Date("2026-08-31T12:00:00.000Z");
+    usageCreditMocks.readHostedUsageCreditGrantCapacityTx.mockResolvedValueOnce({
+      expectedPurchaseOwnsReservation: false,
+      state,
+    });
+    const harness = createRefillHarness({
+      authorization: buildAuthorization({
+        periodEndsAt: new Date("2026-09-30T12:00:00.000Z"),
+        periodStartedAt: newPeriodStartedAt,
+        recoveryStartedAt: newPeriodStartedAt,
+        status: HostedGroupSponsorshipAuthorizationStatus.recovery_required,
+      }),
+      purchases: [],
+    });
+    const recovery = prepareHostedGroupSponsorshipRecoveryTx({
+      authorizationId: "hgsa_abcdefghijklmnop",
+      beneficiaryMemberId: "member_group_runtime",
+      capacityState: "low",
+      checkoutExpiresAt: new Date("2026-08-31T13:30:00.000Z"),
+      now: newPeriodNow,
+      payerMemberId: "member_payer",
+      tx: harness.tx as never,
+    });
+
+    if (admitted) {
+      await expect(recovery).resolves.toMatchObject({
+        kind: "purchase",
+        purchaseId: expect.stringMatching(/^hucp_[A-Za-z0-9_-]{16}$/u),
+      });
+      expect(harness.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          grantSlotReleasedAt: null,
+          groupSponsorshipChargeOrdinal: 1,
+          groupSponsorshipPeriodStartedAt: newPeriodStartedAt,
+        }),
+      });
+    } else {
+      await expect(recovery).rejects.toMatchObject({
+        code: "HOSTED_GROUP_SPONSORSHIP_RECOVERY_UNAVAILABLE",
+      });
+      expect(harness.create).not.toHaveBeenCalled();
+    }
+  });
+
   it("fails closed after a safely canceled charge and reuses that exact purchase for payer recovery", async () => {
     let authorization = buildAuthorization();
     let purchase = {
@@ -1330,6 +1813,7 @@ describe("hosted capped group sponsorship authorization", () => {
       groupSponsorshipAuthorizationId: authorization.id,
       groupSponsorshipChargeOrdinal: 1,
       groupSponsorshipPeriodStartedAt: PERIOD_START,
+      grantSlotReleasedAt: null,
       id: "hucp_refill_123456",
       payerMemberId: "member_payer",
       reconciliationVersion: 0n,
@@ -1409,6 +1893,7 @@ describe("hosted capped group sponsorship authorization", () => {
       groupSponsorshipAuthorizationId: authorization.id,
       groupSponsorshipChargeOrdinal: 1,
       groupSponsorshipPeriodStartedAt: PERIOD_START,
+      grantSlotReleasedAt: null,
       id: "hucp_refill_failed_cap",
       payerMemberId: authorization.payerMemberId,
       reconciliationVersion: 1n,

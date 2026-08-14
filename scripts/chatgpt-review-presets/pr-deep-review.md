@@ -212,6 +212,21 @@ files, then inspect enough callers, state owners, trust boundaries, tests, and
 deployment paths inside the ZIP to judge the change in context. Do not review a
 diff hunk in isolation.
 
+For every changed database-touching collection path, apply
+`docs/contracts/00-invariants.md` § Database Load And Collection Fanout across
+the composed call tree at the maximum admitted cardinality. Trace callers and
+nested helpers for reachable N+1 reads, repeated owner-row loads, concurrent
+per-item transactions, and uncapped external or crypto work; compute peak query,
+pooled-connection, transaction, and external-call concurrency rather than
+reviewing each helper in isolation. Inspect deterministic maximum-cardinality
+call-count and concurrency proof for hot, locked, or transactional paths when
+present, but independently trace the production path and report
+only reachable failures that meet this prompt's finding bar. Any read reduction
+must reuse owner predicates or resolvers and preserve required
+live authority, lifetime, target, crypto, transaction, and irreversible-effect
+revalidation at their owning boundaries; do not mistake those checks for
+removable duplicate reads.
+
 Do not use app connectors, memory, pasted repository context, or out-of-band
 files as repository evidence.
 
@@ -242,7 +257,8 @@ proves why deletion, reordering, an existing owner, or derivation from an
 existing source of truth cannot preserve the requirement. If a serious defect
 cannot be corrected inside the existing ownership boundary without that
 machinery, return `RETROSPECTIVE_REQUIRED`; do not prescribe another
-compensating patch.
+compensating patch. Findings caused by one mechanism must share one root-cause
+correction instead of accumulating guards.
 
 # Change-shape anomaly
 
@@ -368,6 +384,10 @@ For each finding provide:
    merge
 4. the production-faithful scenario or end-to-end path that validates it
 5. the smallest safe correction and focused validation it needs
+6. `Complexity disposition:` followed by what the correction deletes, combines,
+   reorders, derives, reuses, adds, or changes outside production; when it adds
+   a production concept, branch, state, or owner, include the evidence that
+   rules out deletion, combination, reordering, derivation, and reuse
 
 For a Complexity Collapse, also state the expected net deletion, concepts or
 owners removed, and invariants the smaller shape preserves.
