@@ -16,9 +16,8 @@ import {
   type AssistantProviderConfig,
 } from '@murphai/operator-config/assistant/provider-config'
 import {
-  HOSTED_LOCAL_TEST_CODEX_MODEL_PROVIDER_ID,
-  HOSTED_OPENAI_CODEX_MODEL_PROVIDER_ID,
   isCodexReservedModelProviderId,
+  resolveAssistantCodexUsageProviderName,
   resolveAssistantCodexModelProviderConfig,
 } from '@murphai/operator-config/assistant/target-runtime'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
@@ -324,7 +323,7 @@ export function extractCodexAssistantProviderUsage(input: {
     rawEvents: input.rawEvents,
     turnId,
   })
-  const providerName = resolveCodexAssistantUsageProviderName(
+  const providerName = resolveAssistantCodexUsageProviderName(
     input.providerConfig.target.modelProvider,
   )
   const requestedModel = input.providerConfig.target.model
@@ -1159,7 +1158,7 @@ export function extractCodexSubagentUsageDrafts(input: {
         inputTokens: delta.inputTokens,
         outputTokens: delta.outputTokens,
         providerMetadataJson: null,
-        providerName: resolveCodexAssistantUsageProviderName(input.modelProvider),
+        providerName: resolveAssistantCodexUsageProviderName(input.modelProvider),
         providerRequestId: null,
         rawUsageJson,
         rawUsageJsonHash: hashAssistantProviderStableJson(rawUsageJson),
@@ -1188,17 +1187,9 @@ export function resolveCodexAssistantProviderTokenPricingBasis(input: {
 }): AssistantUsageTokenPricingBasis {
   return resolveHostedAiUsageTokenPricingBasis({
     model: input.model,
-    providerName: resolveCodexAssistantUsageProviderName(input.modelProvider),
+    providerName: resolveAssistantCodexUsageProviderName(input.modelProvider),
     serviceTier: input.serviceTier ?? null,
   })
-}
-
-function resolveCodexAssistantUsageProviderName(
-  modelProvider: string | null,
-): string | null {
-  return modelProvider === HOSTED_LOCAL_TEST_CODEX_MODEL_PROVIDER_ID
-    ? HOSTED_OPENAI_CODEX_MODEL_PROVIDER_ID
-    : modelProvider
 }
 
 // Spawn evidence map: every thread id named by a canonical collab tool call

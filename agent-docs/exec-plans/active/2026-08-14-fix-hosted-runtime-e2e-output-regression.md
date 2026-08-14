@@ -96,6 +96,14 @@ Updated: 2026-08-14
   requeue in reverse timestamp order, making the older correction stale. Start
   the third contender only after the second retry is blocked so the test proves
   its stated chronological schedule without changing production behavior.
+- Canonical shell success evidence belongs only to top-level protocol tool
+  output. Delete recursive request-envelope matching, and construct the marker
+  only after exact durable automation and single-audit checks succeed so test
+  input cannot satisfy its own assertion.
+- Local OpenAI route identity remains a sandbox and transport concern. Derive
+  its hosted OpenAI usage identity once in the existing operator-config owner,
+  then reuse that derivation before pricing and record construction in every
+  usage producer, including idle compaction.
 
 ## Verification
 
@@ -118,5 +126,9 @@ Updated: 2026-08-14
   lifecycle anomaly after an 8-second cold-start confirmation boundary. After
   the follow-up correction, 96 focused assistant-engine tests pass, both the
   assistant-engine and Cloudflare packages typecheck, and the isolated ordered
-  PostgreSQL contender proof passes. A new exact-head combined private matrix
-  is pending.
+  PostgreSQL contender proof passes. The ReviewGPT retrospective correction has
+  147 focused tests passing across Cloudflare support, operator config,
+  assistant-engine usage, and assistant-runtime idle maintenance, including
+  negative proof that command arguments cannot satisfy tool-output evidence and
+  local OpenAI Flex compaction records the hosted OpenAI identity. All four
+  changed owners typecheck. A new exact-head combined private matrix is pending.

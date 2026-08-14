@@ -38,6 +38,7 @@ import { hostedBrowserVaultReplicaObjectKey } from "../src/storage-paths.js";
 import {
   buildAssistantProviderMurphToolCall,
   buildAssistantProviderShellCommandCall,
+  readHostedLocalAssistantProviderToolOutputs,
 } from "./helpers/hosted-local-e2e-support.js";
 import {
   startHostedLocalFullStackScenario,
@@ -162,7 +163,6 @@ describe("hosted local canonical receipt lost-ack recovery e2e", () => {
       buildAssistantProviderShellCommandCall(
         buildCanonicalAutomationStateProbeCommand({
           dueAt,
-          marker: automationStateMarker,
         }),
       ),
       replyText,
@@ -205,11 +205,10 @@ describe("hosted local canonical receipt lost-ack recovery e2e", () => {
     const providerRequests = requireScenario().assistantProviderRequests
       .filter((request) => request.url === "/v1/responses")
       .slice(providerBaseline);
-    const providerRequestText = providerRequests
-      .map(readAssistantProviderRequestText)
+    const providerToolOutputText = providerRequests
+      .flatMap(readHostedLocalAssistantProviderToolOutputs)
       .join("\n\n");
-    expect(providerRequestText).toContain(automationSlug);
-    expect(providerRequestText).toContain(automationStateMarker);
+    expect(providerToolOutputText).toContain(automationStateMarker);
 
     const faultLogs = [
       requireScenario().harness.stdoutTail(2_000_000),
@@ -279,24 +278,24 @@ describe("hosted local canonical receipt lost-ack recovery e2e", () => {
     expect(BigInt(finalStatus.workspace!.version)).toBeGreaterThan(fixture.seededVersion);
     expect(requireLinqStub().countObservedSends(replyPath)).toBe(outboundBaseline + 1);
 
-    const providerRequestText = requireScenario().assistantProviderRequests
+    const providerToolOutputText = requireScenario().assistantProviderRequests
       .filter((request) => request.url === "/v1/responses")
       .slice(providerBaseline)
-      .map(readAssistantProviderRequestText)
+      .flatMap(readHostedLocalAssistantProviderToolOutputs)
       .join("\n\n");
-    expect(providerRequestText).toContain(
+    expect(providerToolOutputText).toContain(
       `PREFERENCE_RECOVERY_PREFERENCES_SHA256=${fixture.expectedPreferencesSha256}`,
     );
-    expect(providerRequestText).toContain(
+    expect(providerToolOutputText).toContain(
       `PREFERENCE_RECOVERY_MUTATIONS_SHA256=${fixture.expectedMutationsSha256}`,
     );
     for (const auditId of fixture.auditIds) {
-      expect(providerRequestText).toContain(
+      expect(providerToolOutputText).toContain(
         `PREFERENCE_RECOVERY_AUDIT_${auditId}=1`,
       );
     }
-    expect(providerRequestText).toContain("PREFERENCE_RECOVERY_PREFERENCE_AUDIT_COUNT=2");
-    expect(providerRequestText).toContain("PREFERENCE_RECOVERY_UNIQUE_PREFERENCE_AUDIT_COUNT=2");
+    expect(providerToolOutputText).toContain("PREFERENCE_RECOVERY_PREFERENCE_AUDIT_COUNT=2");
+    expect(providerToolOutputText).toContain("PREFERENCE_RECOVERY_UNIQUE_PREFERENCE_AUDIT_COUNT=2");
 
     const finalRedactedStatus = finalStatus.workspace?.redactedStatus ?? {};
     for (const key of HOSTED_CANONICAL_WRITE_RECEIPT_REDACTED_STATUS_KEYS) {
@@ -696,7 +695,6 @@ function buildCanonicalAutomationStateMarker(input: { dueAt: string }): string {
 
 function buildCanonicalAutomationStateProbeCommand(input: {
   dueAt: string;
-  marker: string;
 }): string {
   const script = [
     'const fs = require("node:fs");',
@@ -704,7 +702,6 @@ function buildCanonicalAutomationStateProbeCommand(input: {
     `const slug = ${JSON.stringify(automationSlug)};`,
     `const dueAt = ${JSON.stringify(input.dueAt)};`,
     `const chatId = ${JSON.stringify(chatId)};`,
-    `const marker = ${JSON.stringify(input.marker)};`,
     'const shown = JSON.parse(execFileSync("vault-cli", ["automation", "show", slug, "--format", "json"], { encoding: "utf8" }));',
     'const automation = shown && (shown.data || shown).automation;',
     'if (!automation || automation.slug !== slug || automation.status !== "active" || automation.continuityPolicy !== "fresh") throw new Error("Canonical automation readback mismatch.");',
@@ -715,7 +712,7 @@ function buildCanonicalAutomationStateProbeCommand(input: {
     'const auditRecords = fs.readdirSync("audit", { recursive: true }).filter((entry) => typeof entry === "string" && entry.endsWith(".jsonl")).flatMap((entry) => fs.readFileSync("audit/" + entry, "utf8").split(/\\r?\\n/u).filter(Boolean).map((line) => JSON.parse(line)));',
     'const matchingAudits = auditRecords.filter((record) => record.commandName === "core.upsertAutomation" && Array.isArray(record.targetIds) && record.targetIds.includes(automation.automationId));',
     'if (matchingAudits.length !== 1) throw new Error("Canonical automation audit count mismatch.");',
-    'console.log(marker);',
+    'console.log(["CANONICAL_AUTOMATION_STATE", automation.slug, automation.schedule.at, automation.route.threadId, "audit=" + matchingAudits.length].join("|"));',
   ].join("");
   return `node -e ${quoteShellArgument(script)}`;
 }
@@ -763,23 +760,6 @@ async function postSignedLinqWebhook(event: Record<string, unknown>): Promise<Re
     },
     method: "POST",
   });
-}
-
-function readAssistantProviderRequestText(request: { body: string }): string {
-  return collectJsonStrings(JSON.parse(request.body)).join("\n\n");
-}
-
-function collectJsonStrings(value: unknown): string[] {
-  if (typeof value === "string") {
-    return [value];
-  }
-  if (Array.isArray(value)) {
-    return value.flatMap((entry) => collectJsonStrings(entry));
-  }
-  if (value && typeof value === "object") {
-    return Object.values(value).flatMap((entry) => collectJsonStrings(entry));
-  }
-  return [];
 }
 
 function countResponsesApiRequests(): number {
