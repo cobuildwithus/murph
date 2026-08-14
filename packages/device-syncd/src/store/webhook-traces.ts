@@ -74,7 +74,7 @@ export function claimDeviceSyncWebhookTrace(
 
     if (
       existing.processing_expires_at
-      && Date.parse(existing.processing_expires_at) > Date.parse(input.receivedAt)
+      && Date.parse(existing.processing_expires_at) > Date.parse(input.claimedAt)
     ) {
       return "processing";
     }
@@ -104,7 +104,7 @@ export function claimDeviceSyncWebhookTrace(
       input.claimToken,
       input.provider,
       input.traceId,
-      input.receivedAt,
+      input.claimedAt,
     ) as { changes: number };
 
     return (result.changes ?? 0) > 0 ? "claimed" : "processing";

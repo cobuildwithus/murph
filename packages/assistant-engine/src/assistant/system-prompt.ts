@@ -1449,6 +1449,7 @@ function buildAssistantSkillRouteHintText(): string {
     "- Nutrition/metabolic: food-journal, nutrition-strategy, body-composition, gut-digestion, micronutrients-supplements, cardiometabolic-health, cycle-hormonal-health.",
     "- Eye-health evidence, symptom urgency, contact-lens safety, and refractive guidance come from the required Health Commons lookup. Use computer-use only after the answer establishes the safe action and exact care destination.",
     "- Training/movement: daily-activity owns factual wearable day/workout reads; running-cardio and strength-training own programming; aerobic-fitness, competition-training, mobility-posture, physical-therapy. Recovery-modality evidence and safety come from the required Health Commons lookup.",
+    "- Private repeated-set logging: strength-training owns it and resolves canonical routine context before writes. In groups, hand off to a private Murph conversation without private reads or writes.",
     "- Live workout/card: read strength-training and tracked-table.",
     "- Mind/substances: stress-regulation, cognitive-focus, substance-load. Chronic care: chronic-illness-support, chronic-pain-support.",
     "- Care logistics: appointment-scheduling. Transports and services: connected-apps, computer-use, phone-calls. Account products: murph-family. Artifacts: pdf, music-generation. Groups: group-chat, groupchat-comedy, group-challenge, group-newsletter.",
@@ -1775,7 +1776,7 @@ function buildAssistantSharedAutomationActionText(
     : "";
   const routeGuidance = hostedRuntime
     ? `A save always binds to the trusted current ${conversationScope === "group" ? "group room" : "conversation"}. A patch retargets only when ${code("retargetToCurrentConversation: true")} is explicit. The tool accepts no arbitrary route locator; do not target another route.${conversationScope === "group" ? " Never use saved personal/self targets in this group vault." : ""}`
-    : `Pass ${code("--channel")} with ${code("--delivery-target")}, ${code("--thread-id")}, or ${code("--participant-id")} for the intended destination.`;
+    : `Local automation delivery supports Telegram or Linq, not email. If the user requests email delivery, explain that limitation and offer Telegram or Linq before asking for any routing details. For a supported route, pass ${code("--channel")} with ${code("--delivery-target")}, ${code("--thread-id")}, or ${code("--participant-id")} for the intended destination.`;
   return `${actionGuidance} ${strictScheduleGuidance} ${routeGuidance}${hostedRuntime ? "" : ` Reserve ${code(
     "vault-cli automation import-json"
   )} for advanced payload imports that the typed surface cannot express.`}
@@ -1796,7 +1797,7 @@ function buildAssistantSharedAutomationPreferenceText(
     : "A preserve automation continues its resolved conversation.";
   const selfTargetPreference = hostedRuntime || conversationScope === "group"
     ? "Do not inspect or reuse saved personal phone, Telegram, or email self-targets for this chat-authored automation."
-    : "Before asking the user to repeat phone, Telegram, or email routing details for an automation route, inspect saved local self-targets. If the needed route is not already saved, ask for the missing details explicitly instead of guessing.";
+    : "Before asking the user to repeat Telegram or Linq routing details for a supported local automation route, inspect saved local self-targets. If the needed supported route is not already saved, ask for the missing details explicitly instead of guessing.";
   const outdoorLocationPreference = conversationScope === "group"
     ? "Keep a city or region the room gives for this purpose in the automation's stored instructions only; never write it into a participant's personal record."
     : `When the user gives a city or region for this purpose, also save that coarse location once with ${code(

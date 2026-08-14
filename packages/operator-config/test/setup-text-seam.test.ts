@@ -75,30 +75,11 @@ test('setup runtime resolver clones process env and surfaces ready channel and w
     missingEnv: [],
     ready: true,
   })
-  assert.deepEqual(
-    describeSetupChannelStatus('email', {
-      AGENTMAIL_API_KEY: 'agentmail-key',
-    }),
-    {
-      badge: 'ready',
-      detail:
-        'AgentMail API key is available for inbox discovery or provisioning in the current environment.',
-      missingEnv: [],
-      ready: true,
-    },
-  )
   assert.deepEqual(describeSetupChannelStatus('telegram', {}), {
     badge: 'needs token',
     detail:
       'Add TELEGRAM_BOT_TOKEN to the current environment to enable Telegram auto-reply.',
     missingEnv: ['TELEGRAM_BOT_TOKEN'],
-    ready: false,
-  })
-  assert.deepEqual(describeSetupChannelStatus('email', {}), {
-    badge: 'needs key',
-    detail:
-      'Add AGENTMAIL_API_KEY to the current environment to enable the email channel.',
-    missingEnv: ['AGENTMAIL_API_KEY'],
     ready: false,
   })
   assert.deepEqual(

@@ -16,7 +16,6 @@ import {
   buildHostedRunnerContainerPlatformEnv,
   buildHostedRunnerChannelPlatformEnv,
   buildHostedRunnerLegacyDeviceSyncPlatformEnv,
-  buildHostedRunnerPlatformEnv,
   filterHostedRunnerSecrets,
 } from "../src/runner-env.js";
 import { readHostedDeployAutomationEnvironment } from "../scripts/deploy-automation.js";
@@ -401,37 +400,12 @@ describe("buildHostedRunnerContainerEnv", () => {
     });
   });
 
-  it("does not forward stale AgentMail hosted vars into the runner", () => {
+  it("ignores stale parser aliases and unknown environment keys", () => {
     expect(buildHostedRunnerContainerEnv({
       ...REQUIRED_OPENAI_PROVIDER_ENV,
-      AGENTMAIL_API_KEY: "agentmail-secret",
-      AGENTMAIL_BASE_URL: "https://mail.example.test/v0",
-    })).toEqual({
-      ...REQUIRED_OPENAI_PROVIDER_ENV,
-      HOSTED_EMAIL_INGRESS_READY: "false",
-      HOSTED_EMAIL_SEND_READY: "false",
-      NODE_ENV: "production",
-    });
-  });
-
-  it("ignores stale AgentMail and ffmpeg alias keys", () => {
-    expect(buildHostedRunnerContainerEnv({
-      ...REQUIRED_OPENAI_PROVIDER_ENV,
-      AGENTMAIL_BASE_URL: "https://mail.example.test/v0",
-      PARSER_FFMPEG_PATH: "/usr/local/bin/ffmpeg",
-    })).toEqual({
-      ...REQUIRED_OPENAI_PROVIDER_ENV,
-      HOSTED_EMAIL_INGRESS_READY: "false",
-      HOSTED_EMAIL_SEND_READY: "false",
-      NODE_ENV: "production",
-    });
-  });
-
-  it("ignores unknown AgentMail and ffmpeg-prefixed keys", () => {
-    expect(buildHostedRunnerContainerEnv({
-      ...REQUIRED_OPENAI_PROVIDER_ENV,
-      AGENTMAIL_TIMEOUT_MS: "5000",
       FFMPEG_THREADS: "2",
+      PARSER_FFMPEG_PATH: "/usr/local/bin/ffmpeg",
+      UNRECOGNIZED_PROVIDER_TIMEOUT_MS: "5000",
     })).toEqual({
       ...REQUIRED_OPENAI_PROVIDER_ENV,
       HOSTED_EMAIL_INGRESS_READY: "false",

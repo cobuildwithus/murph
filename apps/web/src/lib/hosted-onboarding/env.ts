@@ -301,6 +301,12 @@ export function readHostedContactPrivacyKeyring(
     throw new TypeError("HOSTED_CONTACT_PRIVACY_KEYS must include at least one version:key entry.");
   }
 
+  if (entries.length > 2) {
+    throw new TypeError(
+      "HOSTED_CONTACT_PRIVACY_KEYS must contain only the current version and at most one prior version.",
+    );
+  }
+
   const keysByVersion: Record<string, Buffer> = {};
   const readVersions: string[] = [];
 
@@ -347,12 +353,22 @@ export function readHostedContactPrivacyKeyring(
     );
   }
 
+  const priorVersion = readVersions.find((version) => version !== currentVersion) ?? null;
+  if (
+    priorVersion !== null
+    && BigInt(priorVersion.slice(1)) >= BigInt(currentVersion.slice(1))
+  ) {
+    throw new TypeError(
+      "HOSTED_CONTACT_PRIVACY_KEYS may pair the current version only with one lower prior version.",
+    );
+  }
+
   return {
     currentVersion,
     keysByVersion,
     readVersions: [
       currentVersion,
-      ...readVersions.filter((version) => version !== currentVersion),
+      ...(priorVersion ? [priorVersion] : []),
     ],
   };
 }

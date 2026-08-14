@@ -49,11 +49,6 @@
       "import": "./dist/assistant/target-runtime.js",
       "default": "./dist/assistant/target-runtime.js"
     },
-    "./agentmail-runtime": {
-      "types": "./dist/agentmail-runtime.d.ts",
-      "import": "./dist/agentmail-runtime.js",
-      "default": "./dist/agentmail-runtime.js"
-    },
     "./command-helpers": {
       "types": "./dist/command-helpers.d.ts",
       "import": "./dist/command-helpers.js",
