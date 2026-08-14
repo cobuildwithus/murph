@@ -2969,11 +2969,14 @@ function splitLinqTextParts(
         decoration !== null
       )
 
-    parts.push({
-      ...(decorations.length > 0 ? { text_decorations: decorations } : {}),
+    const part: TextPart = {
       type: 'text',
       value: renderedText.text.slice(rangeStart, rangeEnd),
-    })
+    }
+    if (decorations.length > 0) {
+      part.text_decorations = decorations
+    }
+    parts.push(part)
     rangeStart = rangeEnd
   }
 
