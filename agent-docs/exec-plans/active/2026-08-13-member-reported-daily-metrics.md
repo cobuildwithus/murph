@@ -92,3 +92,14 @@ Updated: 2026-08-14
   full Cloudflare node suite (2,440 tests). Proxy and direct lost-response tests
   prove byte-identical replay; Web coverage proves one committed report resolves
   after authority/consent changes and changed values still conflict.
+- ReviewGPT round 3 found that two distinct reports can share the transport's
+  second-precision timestamp, leaving the opaque metric-point id to choose the
+  apparent latest correction. The importer now carries the mailbox owner's
+  existing causal sequence into a bounded canonical qualifier, the metric query
+  exposes it only for manual daily reports, and same-source selection compares
+  two valid causal sequences before the legacy recorded-time/id fallback.
+- Manual external references no longer enter the wearable summary resolver, so
+  a provider summary cannot suppress separately sourced member evidence. The
+  focused mixed-source proof writes 8,000 then 9,000 at one timestamp, chooses
+  ids that would otherwise prefer the older report, preserves 7,500 device
+  evidence, selects and projects 9,000, reloads the vault, and replays safely.

@@ -1,4 +1,7 @@
-import { resolveLocalDateAtNoon } from "@murphai/contracts";
+import {
+  HOSTED_MAILBOX_CAUSAL_SEQ_QUALIFIER,
+  resolveLocalDateAtNoon,
+} from "@murphai/contracts";
 import {
   ID_PREFIXES,
   deterministicContractId,
@@ -38,6 +41,10 @@ export async function importHostedReportedDailyMetricMailboxItem(input: {
   ) {
     return blockedReportedDailyMetricImport("daily_metric_report.decode_mismatch", false);
   }
+  const causalSeq = readPositiveCausalSeq(input.item.item.causalSeq);
+  if (!causalSeq) {
+    return blockedReportedDailyMetricImport("daily_metric_report.causal_seq_invalid", false);
+  }
 
   const eventId = deterministicContractId(
     ID_PREFIXES.event,
@@ -67,6 +74,7 @@ export async function importHostedReportedDailyMetricMailboxItem(input: {
 
   if (existing) {
     return reportedDailyMetricMatches({
+      causalSeq,
       eventId,
       existing,
       wake: input.wake,
@@ -98,6 +106,9 @@ export async function importHostedReportedDailyMetricMailboxItem(input: {
         metric: input.wake.dailyMetric.metric,
         observationGrain: "summary",
         occurredAt: eventOccurredAt,
+        qualifiers: {
+          [HOSTED_MAILBOX_CAUSAL_SEQ_QUALIFIER]: causalSeq,
+        },
         queryVisibility: "default",
         recordedAt: input.wake.occurredAt,
         source: "manual",
@@ -120,6 +131,7 @@ export async function importHostedReportedDailyMetricMailboxItem(input: {
 }
 
 function reportedDailyMetricMatches(input: {
+  causalSeq: string;
   eventId: string;
   existing: NonNullable<Awaited<ReturnType<typeof findEventByExternalRef>>>;
   wake: HostedExecutionDailyMetricReportedWake;
@@ -147,9 +159,17 @@ function reportedDailyMetricMatches(input: {
     && existing.value === wake.dailyMetric.value
     && existing.unit === wake.dailyMetric.unit
     && existing.observationGrain === "summary"
+    && existing.qualifiers?.[HOSTED_MAILBOX_CAUSAL_SEQ_QUALIFIER] === input.causalSeq
     && existing.queryVisibility === "default"
     && existing.visibility === "display"
     && existing.externalRef?.version === REPORTED_DAILY_METRIC_EXTERNAL_VERSION;
+}
+
+function readPositiveCausalSeq(value: string | null | undefined): string | null {
+  if (!value || !/^[1-9][0-9]{0,18}$/u.test(value)) {
+    return null;
+  }
+  return BigInt(value) <= 9_223_372_036_854_775_807n ? value : null;
 }
 
 function importedReportedDailyMetricOutcome(): HostedMailboxItemImportOutcome {

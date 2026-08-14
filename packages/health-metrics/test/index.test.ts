@@ -1577,6 +1577,40 @@ test("selects metric points by policy and exposes provenance warnings", () => {
   assert.equal(blankMetricKey.point, null);
 });
 
+test("uses shared causal order before opaque ids and preserves the legacy fallback", () => {
+  const common = {
+    effectiveDate: "2026-08-13",
+    metricKey: "steps",
+    observedAt: "2026-08-13T12:00:00.000Z",
+    recordedAt: "2026-08-13T18:00:00.000Z",
+    sourceKind: "observation" as const,
+    unit: "count",
+  };
+  const older = metricPoint({
+    ...common,
+    context: { causalSeq: "41" },
+    id: "metric-point:opaque-a",
+    recordId: "evt_older_report",
+    value: 8_000,
+  });
+  const newer = metricPoint({
+    ...common,
+    context: { causalSeq: "42" },
+    id: "metric-point:opaque-z",
+    recordId: "evt_newer_report",
+    value: 9_000,
+  });
+
+  assert.equal(selectMetricValue({ metricKey: "steps", points: [older, newer] }).value, 9_000);
+  assert.equal(selectMetricValue({
+    metricKey: "steps",
+    points: [
+      { ...older, context: {} },
+      { ...newer, context: {} },
+    ],
+  }).value, 8_000);
+});
+
 test("requires truthful unit evidence before catalog metrics become selections or series", () => {
   const unitlessLdl = {
     ...metricPoint({

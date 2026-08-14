@@ -324,12 +324,31 @@ function compareMetricPointsForSelection(
   if (priorityDelta !== 0) return priorityDelta;
 
   if (left.observedAt !== right.observedAt) return right.observedAt.localeCompare(left.observedAt);
+  const causalSeqDelta = compareCausalSeq(left.context.causalSeq, right.context.causalSeq);
+  if (causalSeqDelta !== 0) return causalSeqDelta;
   if (left.recordedAt !== right.recordedAt) {
     if (left.recordedAt === null) return 1;
     if (right.recordedAt === null) return -1;
     return right.recordedAt.localeCompare(left.recordedAt);
   }
   return left.id.localeCompare(right.id);
+}
+
+function compareCausalSeq(left: string | undefined, right: string | undefined): number {
+  const leftSeq = readPositiveCausalSeq(left);
+  const rightSeq = readPositiveCausalSeq(right);
+  if (leftSeq === null || rightSeq === null || leftSeq === rightSeq) {
+    return 0;
+  }
+  return leftSeq > rightSeq ? -1 : 1;
+}
+
+function readPositiveCausalSeq(value: string | undefined): bigint | null {
+  if (!value || !/^[1-9][0-9]{0,18}$/u.test(value)) {
+    return null;
+  }
+  const causalSeq = BigInt(value);
+  return causalSeq <= 9_223_372_036_854_775_807n ? causalSeq : null;
 }
 
 function sourcePriority(point: MetricPoint): number {

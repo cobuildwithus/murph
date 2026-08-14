@@ -91,6 +91,7 @@ export interface MetricPointProvenance {
 }
 
 export interface MetricPointContext {
+  causalSeq?: string;
   fastingStatus?: "fasting" | "non_fasting" | "unknown";
   flag?: string;
   measurementMethodKey?: string;
