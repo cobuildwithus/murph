@@ -126,6 +126,7 @@ async function interruptScriptAfterPath(
   harness: Harness,
   args: string[],
   readyPath: string,
+  signal: NodeJS.Signals = 'SIGINT',
 ): Promise<{
   signal: NodeJS.Signals | null
   status: number | null
@@ -162,7 +163,7 @@ async function interruptScriptAfterPath(
       await new Promise((resolve) => setTimeout(resolve, 10))
     }
     if (child.pid === undefined) throw new Error('create-worktree did not start')
-    process.kill(-child.pid, 'SIGINT')
+    process.kill(-child.pid, signal)
     return await completed
   } catch (error) {
     if (child.exitCode === null && child.pid !== undefined) {
@@ -171,6 +172,46 @@ async function interruptScriptAfterPath(
     }
     throw error
   }
+}
+
+async function runWithHeldOpenInput(
+  command: string,
+  args: string[],
+  cwd: string,
+  env: NodeJS.ProcessEnv,
+): Promise<{
+  signal: NodeJS.Signals | null
+  status: number | null
+  stderr: string
+  timedOut: boolean
+}> {
+  const child = spawn(command, args, {
+    cwd,
+    detached: true,
+    env,
+    stdio: ['pipe', 'ignore', 'pipe'],
+  })
+  let stderr = ''
+  let timedOut = false
+  child.stderr.setEncoding('utf8')
+  child.stderr.on('data', (chunk: string) => {
+    stderr += chunk
+  })
+
+  return await new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      timedOut = true
+      if (child.pid !== undefined) process.kill(-child.pid, 'SIGTERM')
+    }, 5_000)
+    child.once('error', (error) => {
+      clearTimeout(timeout)
+      reject(error)
+    })
+    child.once('close', (status, signal) => {
+      clearTimeout(timeout)
+      resolve({ signal, status, stderr, timedOut })
+    })
+  })
 }
 
 function installLegacyWorktreeEntrypoints(primary: string): void {
@@ -503,6 +544,14 @@ touch hook-installed
 
     expect(creation.status, creation.stderr).toBe(0)
     expect(existsSync(path.join(target, '.metadata_never_index'))).toBe(true)
+    const admin = runGit(target, [
+      'rev-parse',
+      '--path-format=absolute',
+      '--git-dir',
+    ])
+    expect(existsSync(path.join(admin, 'murph-storage-guard-authorized'))).toBe(
+      true,
+    )
     expect(runGit(target, ['check-ignore', '.metadata_never_index'])).toBe(
       '.metadata_never_index',
     )
@@ -572,6 +621,37 @@ git clean -fdX
       '.metadata_never_index',
     )
     expect(runGit(target, ['status', '--porcelain'])).toBe('')
+  })
+
+  it('rolls back when final authorization publication fails', () => {
+    const harness = createHarness()
+    const target = path.join(harness.root, 'authorization-publication-failure')
+    executable(
+      path.join(harness.primary, '.githooks', 'post-checkout'),
+      `#!/bin/sh
+admin=$(git rev-parse --path-format=absolute --git-dir)
+mkdir "$admin/murph-storage-guard-authorized"
+`,
+    )
+
+    const creation = runScript(harness, 'create-worktree', [
+      '-b',
+      'authorization-publication-failure',
+      target,
+    ])
+
+    expect(creation.status).not.toBe(0)
+    expect(runGit(harness.primary, ['worktree', 'list', '--porcelain'])).not.toContain(
+      target,
+    )
+    expect(existsSync(target)).toBe(false)
+    expect(
+      runGit(harness.primary, [
+        'rev-parse',
+        '--verify',
+        'refs/heads/authorization-publication-failure',
+      ]),
+    ).toMatch(/^[0-9a-f]{40,64}$/)
   })
 
   it('rolls back a marked worktree when checkout materialization fails', () => {
@@ -779,6 +859,160 @@ sleep 2
     expect(existsSync(path.join(target, '.metadata_never_index'))).toBe(true)
     expect(runGit(target, ['status', '--porcelain'])).toBe('')
   }, 15_000)
+
+  it('leaves an uncatchably interrupted materialization unauthorized', async () => {
+    const harness = createHarness()
+    const target = path.join(harness.root, 'killed-materialization')
+    const filterStarted = path.join(harness.root, 'killed-materialization-started')
+    const hookInvoked = path.join(harness.root, 'killed-materialization-hook')
+    executable(
+      path.join(harness.primary, '.githooks', 'post-checkout'),
+      `#!/bin/sh
+touch ${JSON.stringify(hookInvoked)}
+`,
+    )
+    runGit(harness.primary, [
+      'config',
+      'filter.killed-materialization.smudge',
+      `admin=$(git rev-parse --path-format=absolute --git-dir) && test ! -e "$admin/murph-storage-guard-authorized" && touch ${JSON.stringify(filterStarted)} && sleep 30`,
+    ])
+    runGit(harness.primary, [
+      'config',
+      'filter.killed-materialization.clean',
+      'cat',
+    ])
+    runGit(harness.primary, [
+      'config',
+      'filter.killed-materialization.required',
+      'true',
+    ])
+    writeFileSync(
+      path.join(harness.primary, '.gitattributes'),
+      'killed-materialization.txt filter=killed-materialization\n',
+    )
+    writeFileSync(path.join(harness.primary, 'killed-materialization.txt'), 'probe\n')
+    runGit(harness.primary, [
+      'add',
+      '.gitattributes',
+      'killed-materialization.txt',
+    ])
+    runGit(harness.primary, ['commit', '-m', 'add killed materialization probe'])
+
+    const creation = await interruptScriptAfterPath(
+      harness,
+      ['-b', 'killed-materialization', target],
+      filterStarted,
+      'SIGKILL',
+    )
+
+    expect(creation.status).toBe(null)
+    expect(creation.signal).toBe('SIGKILL')
+    expect(runGit(harness.primary, ['worktree', 'list', '--porcelain'])).toContain(
+      target,
+    )
+    expect(existsSync(target)).toBe(true)
+    expect(existsSync(hookInvoked)).toBe(false)
+    const admin = runGit(target, [
+      'rev-parse',
+      '--path-format=absolute',
+      '--git-dir',
+    ])
+    expect(existsSync(path.join(admin, 'murph-storage-guard-authorized'))).toBe(
+      false,
+    )
+    const guard = runScript(harness, 'worktree-storage-guard')
+    expect(guard.status).toBe(1)
+    expect(guard.stderr).toContain('bypassed scripts/create-worktree')
+    const retry = runScript(harness, 'create-worktree', [
+      '-B',
+      'killed-materialization',
+      target,
+    ])
+    expect(retry.status).toBe(1)
+    expect(retry.stderr).toContain('target is already a registered checkout')
+  }, 15_000)
+
+  it('leaves an uncatchably interrupted post-checkout hook unauthorized', async () => {
+    const harness = createHarness()
+    const target = path.join(harness.root, 'killed-post-checkout')
+    const hookStarted = path.join(harness.root, 'killed-post-checkout-started')
+    executable(
+      path.join(harness.primary, '.githooks', 'post-checkout'),
+      `#!/bin/sh
+admin=$(git rev-parse --path-format=absolute --git-dir)
+test ! -e "$admin/murph-storage-guard-authorized" || exit 25
+touch ${JSON.stringify(hookStarted)}
+sleep 30
+`,
+    )
+
+    const creation = await interruptScriptAfterPath(
+      harness,
+      ['-b', 'killed-post-checkout', target],
+      hookStarted,
+      'SIGKILL',
+    )
+
+    expect(creation.status).toBe(null)
+    expect(creation.signal).toBe('SIGKILL')
+    expect(runGit(harness.primary, ['worktree', 'list', '--porcelain'])).toContain(
+      target,
+    )
+    const admin = runGit(target, [
+      'rev-parse',
+      '--path-format=absolute',
+      '--git-dir',
+    ])
+    expect(existsSync(path.join(admin, 'murph-storage-guard-authorized'))).toBe(
+      false,
+    )
+    const guard = runScript(harness, 'worktree-storage-guard')
+    expect(guard.status).toBe(1)
+    expect(guard.stderr).toContain('bypassed scripts/create-worktree')
+  }, 15_000)
+
+  it('keeps a retained rollback failure unauthorized', () => {
+    const harness = createHarness()
+    const target = path.join(harness.root, 'rollback-removal-failure')
+    executable(
+      path.join(harness.fakeBin, 'git'),
+      `#!/bin/sh
+if [ "\${1-}" = -C ] && [ "\${3-}" = worktree ] && [ "\${4-}" = remove ]; then
+  exit 31
+fi
+PATH=/usr/bin:/bin exec git "$@"
+`,
+    )
+    executable(
+      path.join(harness.primary, '.githooks', 'post-checkout'),
+      '#!/bin/sh\nexit 29\n',
+    )
+
+    const creation = runScript(harness, 'create-worktree', [
+      '-b',
+      'rollback-removal-failure',
+      target,
+    ])
+
+    expect(creation.status).toBe(31)
+    expect(creation.stderr).toContain(
+      'setup failed (status 29); rollback failed (status 31)',
+    )
+    expect(runGit(harness.primary, ['worktree', 'list', '--porcelain'])).toContain(
+      target,
+    )
+    const admin = runGit(target, [
+      'rev-parse',
+      '--path-format=absolute',
+      '--git-dir',
+    ])
+    expect(existsSync(path.join(admin, 'murph-storage-guard-authorized'))).toBe(
+      false,
+    )
+    const guard = runScript(harness, 'worktree-storage-guard')
+    expect(guard.status).toBe(1)
+    expect(guard.stderr).toContain('bypassed scripts/create-worktree')
+  })
 
   it('does not register a worktree when shared Spotlight exclusion setup fails', () => {
     const harness = createHarness()
@@ -1825,6 +2059,101 @@ git -C ${JSON.stringify(secondary)} add secondary-only.txt
       'M  secondary-only.txt',
     )
   })
+
+  it('matches native post-checkout end-of-file input behavior', async () => {
+    const hookContents = `#!/bin/sh
+if IFS= read -r line; then
+  printf 'line:%s\\n' "$line" >"$MURPH_TEST_STDIN_LOG"
+else
+  printf 'eof\\n' >"$MURPH_TEST_STDIN_LOG"
+fi
+`
+
+    const nativeHarness = createHarness()
+    executable(
+      path.join(nativeHarness.primary, '.githooks', 'post-checkout'),
+      hookContents,
+    )
+    expect(runScript(nativeHarness, 'install-git-hooks').status).toBe(0)
+    const nativeBytesLog = path.join(nativeHarness.root, 'native-bytes-input')
+    const nativeBytesTarget = path.join(nativeHarness.root, 'native-bytes-target')
+    const nativeBytes = spawnSync(
+      'git',
+      ['worktree', 'add', '-b', 'native-bytes-input', nativeBytesTarget],
+      {
+        cwd: nativeHarness.primary,
+        encoding: 'utf8',
+        env: {
+          ...guardEnvironment(nativeHarness),
+          MURPH_TEST_STDIN_LOG: nativeBytesLog,
+        },
+        input: 'secret-input\n',
+      },
+    )
+    expect(nativeBytes.status, nativeBytes.stderr).toBe(0)
+    expect(readFileSync(nativeBytesLog, 'utf8')).toBe('eof\n')
+
+    const nativeOpenLog = path.join(nativeHarness.root, 'native-open-input')
+    const nativeOpenTarget = path.join(nativeHarness.root, 'native-open-target')
+    const nativeOpen = await runWithHeldOpenInput(
+      'git',
+      ['worktree', 'add', '-b', 'native-open-input', nativeOpenTarget],
+      nativeHarness.primary,
+      {
+        ...guardEnvironment(nativeHarness),
+        MURPH_TEST_STDIN_LOG: nativeOpenLog,
+      },
+    )
+    expect(nativeOpen.timedOut, nativeOpen.stderr).toBe(false)
+    expect(nativeOpen.status, nativeOpen.stderr).toBe(0)
+    expect(readFileSync(nativeOpenLog, 'utf8')).toBe('eof\n')
+
+    const helperHarness = createHarness()
+    executable(
+      path.join(helperHarness.primary, '.githooks', 'post-checkout'),
+      hookContents,
+    )
+    const helperBytesLog = path.join(helperHarness.root, 'helper-bytes-input')
+    const helperBytesTarget = path.join(helperHarness.root, 'helper-bytes-target')
+    const helperBytes = spawnSync(
+      'bash',
+      [
+        path.join('scripts', 'create-worktree'),
+        '-b',
+        'helper-bytes-input',
+        helperBytesTarget,
+      ],
+      {
+        cwd: helperHarness.primary,
+        encoding: 'utf8',
+        env: guardEnvironment(helperHarness, {
+          MURPH_TEST_STDIN_LOG: helperBytesLog,
+        }),
+        input: 'secret-input\n',
+      },
+    )
+    expect(helperBytes.status, helperBytes.stderr).toBe(0)
+    expect(readFileSync(helperBytesLog, 'utf8')).toBe('eof\n')
+
+    const helperOpenLog = path.join(helperHarness.root, 'helper-open-input')
+    const helperOpenTarget = path.join(helperHarness.root, 'helper-open-target')
+    const helperOpen = await runWithHeldOpenInput(
+      'bash',
+      [
+        path.join('scripts', 'create-worktree'),
+        '-b',
+        'helper-open-input',
+        helperOpenTarget,
+      ],
+      helperHarness.primary,
+      guardEnvironment(helperHarness, {
+        MURPH_TEST_STDIN_LOG: helperOpenLog,
+      }),
+    )
+    expect(helperOpen.timedOut, helperOpen.stderr).toBe(false)
+    expect(helperOpen.status, helperOpen.stderr).toBe(0)
+    expect(readFileSync(helperOpenLog, 'utf8')).toBe('eof\n')
+  }, 15_000)
 
   it('matches native unavailable post-checkout interpreter status', () => {
     const nativeHarness = createHarness()

@@ -138,7 +138,7 @@ run_post_checkout_hook() {
 
   (
     cd -P "$target_path"
-    "${hook_env[@]}" "$hook_path" "$null_oid" "$head_oid" 1
+    "${hook_env[@]}" "$hook_path" "$null_oid" "$head_oid" 1 </dev/null
   )
 }
 
@@ -212,11 +212,11 @@ if [[ -d "$target_path" ]] \
   case "$admin_dir" in
     "$common_dir"/worktrees/*)
       set +e
-      : >"$admin_dir/murph-storage-guard-authorized" \
-        && mark_worktree_non_indexable \
+      mark_worktree_non_indexable \
         && git -C "$target_path" reset --hard \
         && run_post_checkout_hook \
-        && mark_worktree_non_indexable
+        && mark_worktree_non_indexable \
+        && : >"$admin_dir/murph-storage-guard-authorized"
       setup_status=$?
       set -e
       ;;
