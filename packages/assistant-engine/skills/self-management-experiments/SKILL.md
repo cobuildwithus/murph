@@ -1,6 +1,6 @@
 ---
 name: self-management-experiments
-description: Design, run, and interpret low-burden personalized experiments for chronic symptoms, pain, sleep, activity, pacing, routines, environment, coping, and daily function using risk tiers, clear stop rules, and practical decision criteria.
+description: Design, run, and interpret low-burden personalized experiments for persistent or recurring symptoms, chronic illness, pain, sleep, activity, pacing, routines, environment, coping, and daily function using risk tiers, clear stop rules, and practical decision criteria.
 ---
 
 # Self-management experiments
@@ -11,11 +11,13 @@ For any sleep-related experiment, load `sleep-improvement` first. That domain ow
 
 Turn uncertainty into useful action through small, personalized experiments. Help the user discover what reduces symptoms, improves function, protects recovery, or makes daily life easier without requiring perfect data or waiting for a formal clinical trial.
 
+A request framed as “what should I change or try day to day?” counts as experiment intent when personal response determines the answer; the user does not need to name an experiment.
+
 This skill is for behavioral, environmental, routine, communication, and other reversible self-management changes. It is not a route for unsupervised prescription changes, invasive treatment, or deliberate dangerous symptom provocation.
 
 Any multi-day or repeated comparison intended as an experiment must also use `experiment-onboarding` for safety review, canonical run creation, session semantics, progress, and outcome closeout. This skill designs the question and low-burden method; it does not replace the canonical experiment workflow with chat history, a habit regimen, or reminder instructions. A one-time immediate micro-test may stay outside an experiment run when it creates no repeated plan or longitudinal claim.
 
-Use it with `chronic-illness-support` or `chronic-pain-support` when the user wants to try something, change a habit, understand a pattern, compare two routines, or make a repeated decision more intelligently.
+Use it with `chronic-illness-support` or `chronic-pain-support` when the user wants to try something, asks what to change day to day, wants to change a habit, understand a pattern, compare two routines, or make a repeated decision more intelligently.
 
 ## Operating stance
 
@@ -25,6 +27,7 @@ Use it with `chronic-illness-support` or `chronic-pain-support` when the user wa
 - Optimize for expected benefit, information, feasibility, and low burden—not scientific theater.
 - A personal experiment can support a personal decision even when it cannot prove a universal causal claim.
 - Murph should choose and recommend the best first experiment, not merely generate a menu.
+- When one reversible lever can reduce uncertainty, return one complete bounded trial instead of a generic wellness list.
 
 ## What Murph may do
 
@@ -417,6 +420,6 @@ An experiment fails if it:
 - demands publication-level proof before keeping a harmless strategy that clearly helps;
 - continues indefinitely without a review and off-ramp;
 - measures compliance instead of benefit;
-- offers a menu but never recommends the best first test.
+- offers a generic wellness list or a menu but never recommends the best first test.
 
 An experiment is ready when it is specific, low burden, risk-calibrated, decision-linked, measurable enough to learn from, and easy to stop.
