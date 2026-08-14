@@ -98,6 +98,55 @@ test("stageRawImportManifest keys manifest paths by import identity and imported
   assert.deepEqual(validation.issues, []);
 });
 
+test("exact document reuse ignores member documents with manifest-like names", async () => {
+  const vaultRoot = await makeTempDirectory("murph-core-document-exact-reuse-manifest-name");
+  const sourceRoot = await makeTempDirectory("murph-core-document-exact-reuse-manifest-name-source");
+  await initializeVault({ vaultRoot });
+
+  const memberArtifacts = new Map<string, { content: string; rawRef: string }>();
+  for (const fileName of ["manifest.json", "manifest.fixture.json"]) {
+    const content = `${JSON.stringify({ documentType: "member-owned", fileName })}\n`;
+    const sourcePath = path.join(sourceRoot, fileName);
+    await fs.writeFile(sourcePath, content, "utf8");
+    const imported = await importDocument({ vaultRoot, sourcePath });
+    memberArtifacts.set(fileName, { content, rawRef: imported.raw.relativePath });
+  }
+
+  const workoutSourcePath = path.join(sourceRoot, "workout-history.csv");
+  await fs.writeFile(workoutSourcePath, "session,exercise,reps\na,Squat,5\n", "utf8");
+  const firstWorkoutSource = await importDocument({
+    vaultRoot,
+    sourcePath: workoutSourcePath,
+    reuseExact: true,
+  });
+  const rawTreeBeforeReplay = (await fs.readdir(
+    path.join(vaultRoot, "raw", "documents"),
+    { recursive: true },
+  )).sort();
+
+  const replayedWorkoutSource = await importDocument({
+    vaultRoot,
+    sourcePath: workoutSourcePath,
+    reuseExact: true,
+  });
+  const rawTreeAfterReplay = (await fs.readdir(
+    path.join(vaultRoot, "raw", "documents"),
+    { recursive: true },
+  )).sort();
+
+  assert.equal(firstWorkoutSource.created, true);
+  assert.equal(replayedWorkoutSource.created, false);
+  assert.equal(replayedWorkoutSource.documentId, firstWorkoutSource.documentId);
+  assert.equal(replayedWorkoutSource.event.id, firstWorkoutSource.event.id);
+  assert.equal(replayedWorkoutSource.raw.relativePath, firstWorkoutSource.raw.relativePath);
+  assert.equal(replayedWorkoutSource.manifestPath, firstWorkoutSource.manifestPath);
+  assert.deepEqual(rawTreeAfterReplay, rawTreeBeforeReplay);
+
+  for (const { content, rawRef } of memberArtifacts.values()) {
+    assert.equal(await fs.readFile(path.join(vaultRoot, rawRef), "utf8"), content);
+  }
+});
+
 test("validateVault reports missing raw manifests by raw directory for immutable manifest files", async () => {
   const vaultRoot = await makeTempDirectory("murph-core-raw-manifest-missing");
   const sourceRoot = await makeTempDirectory("murph-core-raw-manifest-missing-source");

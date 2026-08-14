@@ -71,3 +71,9 @@ Updated: 2026-08-13
 
 - Commands to run: focused assistant prompt Vitest, assistant-engine typecheck, two independent assistant-turn journeys, synthetic Python CSV transformation followed by source-guarded JSONL dry-run/apply/readback, exact-head required CI, ReviewGPT specialist and final gates.
 - Expected outcomes: unknown CSV guidance is present and bounded; a synthetic batch creates only validated workouts, a later exact-source turn stops before regenerating a transformer, and no raw CSV content enters reusable prompt fixtures or public artifacts.
+
+## Round 4 exact-reuse lookup correction
+
+- Review finding: the exact-document lookup treated any `manifest.json` or `manifest.*.json` document artifact as internal metadata and allowed its JSON/schema parse failure to abort every later exact-source import.
+- Decision: retain the existing filename prefilter, but treat it only as a candidate. Read errors still surface; candidate JSON or manifest-contract mismatch makes that file ineligible and continues the scan. This fixes existing vaults without reserving member filenames or changing manifest storage.
+- Proof: a public core-boundary test first imports member-owned JSON documents with both manifest-like basename forms, then creates and reuses a separate workout CSV source, proves stable identities and no extra raw files, and verifies both unrelated member artifacts remain byte-identical.

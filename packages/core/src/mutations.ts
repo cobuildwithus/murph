@@ -3642,7 +3642,16 @@ async function findExactDocumentImport(input: {
     if (!isRawManifestFileName(manifestFileName)) {
       continue;
     }
-    const manifest = parseRawImportManifest(JSON.parse(await readUtf8File(input.vaultRoot, manifestPath)));
+    const candidateText = await readUtf8File(input.vaultRoot, manifestPath);
+    let manifest: ReturnType<typeof parseRawImportManifest>;
+    try {
+      manifest = parseRawImportManifest(JSON.parse(candidateText));
+    } catch {
+      // Documents may legitimately be named manifest.json or
+      // manifest.*.json. A matching basename is only a metadata candidate;
+      // member-owned JSON must not poison exact-source lookup vault-wide.
+      continue;
+    }
     if (
       manifest.importKind !== "document"
       || manifest.owner.kind !== "document"
