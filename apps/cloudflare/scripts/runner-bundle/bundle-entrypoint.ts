@@ -275,7 +275,13 @@ export const RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME = "dist-bundled";
 // total after the merged AgentMail removal on 2026-08-14. Ratchet those
 // measurements while retaining the existing cross-platform tolerances and
 // forbidden-startup-input guards.
-const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 10_325_065 + 32_768;
+//
+// Deterministic Messages workout actions extend the existing mailbox and
+// canonical-workout graphs without adding a boot dependency. Exact integrated
+// assembly after merging current main measured 10,414,883B on Linux and
+// 10,463,687B on macOS on 2026-08-14. Ratchet to the larger measurement and
+// retain the existing 32KB cross-platform allowance.
+const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 10_463_687 + 32_768;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 1_689_721;
 const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 8_065_357;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_TOLERANCE_BYTES = 48_000;
