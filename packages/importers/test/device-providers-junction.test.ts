@@ -167,6 +167,16 @@ function storedObservationValue(record: StoredJsonlRecord | undefined): unknown 
   return record.value;
 }
 
+function storedSourceInstanceId(record: StoredJsonlRecord | undefined): string | undefined {
+  const dataOrigin = record?.dataOrigin;
+  if (!dataOrigin || typeof dataOrigin !== "object" || Array.isArray(dataOrigin)) {
+    return undefined;
+  }
+  return typeof dataOrigin.sourceInstanceId === "string"
+    ? dataOrigin.sourceInstanceId
+    : undefined;
+}
+
 function junctionFallbackSummaryResourceId(
   input: {
     observedAtRaw: string;
@@ -4487,6 +4497,161 @@ test("Junction projected account source identity keeps revisions on one sparse s
     );
     assert.equal(records.length, 1);
     assert.equal(records[0]?.dayKey, "2026-04-22");
+  } finally {
+    await rm(vaultRoot, { force: true, recursive: true });
+  }
+});
+
+test("Junction routine calendar and corrected interval converge on one persisted source spine", async () => {
+  const vaultRoot = await makeTempDirectory("murph-junction-shared-writer-source-identity");
+  const sourceInstanceId = resolveJunctionOrigin({
+    sourceInstanceId: "jxn_src_hosted_connection_apple_health",
+    sourceProviderSlug: "apple_health",
+  }).sourceInstanceId;
+  assert.ok(sourceInstanceId);
+  const accountId = "junction-account-shared-writer-source-identity";
+  const recordFor = (input: {
+    dayKey: string;
+    updatedAt: string;
+    value: number;
+  }) => ({
+    calendarDate: input.dayKey,
+    end: `${input.dayKey}T08:01:00.000Z`,
+    id: "water-shared-writer-source-identity",
+    sourceInstanceId,
+    sourceProviderSlug: "apple_health",
+    sourceType: "phone",
+    start: `${input.dayKey}T08:00:00.000Z`,
+    updatedAt: input.updatedAt,
+    value: input.value,
+  });
+  const importSnapshot = (snapshot: Record<string, unknown>) =>
+    importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
+      { provider: "junction", vaultRoot, snapshot },
+      { corePort: coreRuntime },
+    );
+
+  try {
+    await coreRuntime.initializeVault({
+      createdAt: "2026-04-20T00:00:00.000Z",
+      vaultRoot,
+    });
+    const routine = await importSnapshot({
+      accountId,
+      importedAt: "2026-04-22T12:00:00.000Z",
+      timeseriesWindowKind: "calendar_day",
+      windowStart: "2026-04-21T00:00:00.000Z",
+      windowEnd: "2026-04-22T00:00:00.000Z",
+      timeseries: {
+        water: [recordFor({
+          dayKey: "2026-04-21",
+          updatedAt: "2026-04-22T08:00:00.000Z",
+          value: 250,
+        })],
+      },
+    });
+    const correctionSnapshot = {
+      accountId,
+      importedAt: "2026-04-23T12:00:00.000Z",
+      timeseriesWindowKind: "precise",
+      timeseries: {
+        water: [recordFor({
+          dayKey: "2026-04-22",
+          updatedAt: "2026-04-23T08:00:00.000Z",
+          value: 300,
+        })],
+      },
+    };
+    const correction = await importSnapshot(correctionSnapshot);
+    const repairedD1 = await importSnapshot({
+      accountId,
+      importedAt: "2026-04-23T13:00:00.000Z",
+      timeseriesWindowKind: "calendar_day",
+      windowStart: "2026-04-21T00:00:00.000Z",
+      windowEnd: "2026-04-22T00:00:00.000Z",
+      timeseries: {
+        water: [{
+          authoritativeEmptyCalendarSet: true,
+          calendarDate: "2026-04-21",
+          date: "2026-04-21",
+          sourceInstanceId,
+          sourceProviderSlug: "apple_health",
+          sourceType: "phone",
+          value: 0,
+        }],
+      },
+    });
+    const repairedD2 = await importSnapshot({
+      accountId,
+      importedAt: "2026-04-23T13:01:00.000Z",
+      timeseriesWindowKind: "calendar_day",
+      windowStart: "2026-04-22T00:00:00.000Z",
+      windowEnd: "2026-04-23T00:00:00.000Z",
+      timeseries: { water: correctionSnapshot.timeseries.water },
+    });
+    const staleReplay = await importSnapshot({
+      accountId,
+      importedAt: "2026-04-24T12:00:00.000Z",
+      timeseriesWindowKind: "precise",
+      timeseries: {
+        water: [recordFor({
+          dayKey: "2026-04-21",
+          updatedAt: "2026-04-22T08:00:00.000Z",
+          value: 250,
+        })],
+      },
+    });
+
+    const routineDaily = routine.events.find((event) =>
+      event.kind === "observation"
+      && event.metric === "water"
+    );
+    const repairedD1Daily = repairedD1.events.find((event) =>
+      event.kind === "observation"
+      && event.metric === "water"
+    );
+    assert.ok(routineDaily);
+    assert.ok(repairedD1Daily);
+    assert.equal(repairedD1Daily?.id, routineDaily?.id);
+    assert.equal(
+      repairedD1Daily?.kind === "observation" ? repairedD1Daily.value : undefined,
+      0,
+    );
+    assert.deepEqual(correction.affectedEventDayKeys, ["2026-04-21", "2026-04-22"]);
+    assert.equal(staleReplay.applied, false);
+    assert.equal(staleReplay.affectedSparseCalendarTargets, undefined);
+
+    const allRecords = (await Promise.all(
+      [...new Set([
+        ...routine.eventShardPaths,
+        ...correction.eventShardPaths,
+        ...repairedD1.eventShardPaths,
+        ...repairedD2.eventShardPaths,
+      ])].map((relativePath) => coreRuntime.readJsonlRecords({ vaultRoot, relativePath })),
+    )).flat();
+    const live = latestLiveRecords(allRecords);
+    const liveIntervals = live.filter((record) =>
+      record.kind === "measurement"
+      && typeof record.externalRef === "object"
+      && record.externalRef !== null
+      && !Array.isArray(record.externalRef)
+      && record.externalRef.facet === "interval"
+    );
+    const liveDaily = live.filter((record) =>
+      record.kind === "observation"
+      && record.metric === "water"
+    );
+    assert.equal(liveIntervals.length, 1);
+    assert.equal(liveIntervals[0]?.dayKey, "2026-04-22");
+    assert.equal(liveDaily.length, 2);
+    assert.equal(
+      live.every((record) => storedSourceInstanceId(record) === sourceInstanceId),
+      true,
+    );
+    assert.deepEqual(
+      liveDaily.map((record) => [record.dayKey, storedObservationValue(record)]).sort(),
+      [["2026-04-21", 0], ["2026-04-22", 300]],
+    );
   } finally {
     await rm(vaultRoot, { force: true, recursive: true });
   }

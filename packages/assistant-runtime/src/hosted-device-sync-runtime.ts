@@ -6,7 +6,10 @@ import {
   parseSerializedCompanionHrvRmssdObservation,
   serializeCompanionHrvRmssdObservation,
 } from "@murphai/contracts";
-import { buildJunctionProviderSourceInstanceKey } from "@murphai/device-syncd/connect-config";
+import {
+  areJunctionDeviceConnectProviderSlugsEquivalent,
+  buildJunctionProviderSourceInstanceKey,
+} from "@murphai/device-syncd/connect-config";
 import {
   isJunctionCompanionHrvRmssdJob,
   JUNCTION_COMPANION_HRV_OBSERVATION_INVALID_CODE,
@@ -234,12 +237,17 @@ export async function syncHostedDeviceSyncControlPlaneState(input: {
         sourceInstanceKey: source.sourceInstanceKey,
       });
       const localSource = localSourcesByKey.get(sourceInstanceKey);
+      const establishedLocalSource = localSource ?? (
+        entry.connection.provider.trim().toLowerCase() === "junction"
+          ? selectHostedJunctionSource(localSources, source.sourceProviderSlug)
+          : undefined
+      );
       if (
         !terminalStatus
-        && localSource
+        && establishedLocalSource
         && shouldPreserveLocalHydrationSource({
           hostedConnectionEpochChanged,
-          localSource,
+          localSource: establishedLocalSource,
           source,
         })
       ) {
@@ -249,7 +257,8 @@ export async function syncHostedDeviceSyncControlPlaneState(input: {
       const hydratedSource = store.upsertConnectionSource({
         connectionId: stored.id,
         sourceInstanceKey,
-        sourceProviderSlug: source.sourceProviderSlug,
+        sourceProviderSlug:
+          establishedLocalSource?.sourceProviderSlug ?? source.sourceProviderSlug,
         displayName: source.displayName,
         status: source.status,
         ...(source.resourceAvailabilitySummary === undefined
@@ -261,7 +270,10 @@ export async function syncHostedDeviceSyncControlPlaneState(input: {
         lastSeenAt: source.lastSeenAt,
         // Merged monotonically below rather than taken verbatim: Web and the
         // runner can each have seen an arrival the other has not.
-        lastDataAt: laterIsoTimestamp(source.lastDataAt ?? null, localSource?.lastDataAt ?? null),
+        lastDataAt: laterIsoTimestamp(
+          source.lastDataAt ?? null,
+          establishedLocalSource?.lastDataAt ?? null,
+        ),
       });
       localSourcesByKey.set(sourceInstanceKey, hydratedSource);
     }
@@ -335,17 +347,51 @@ function resolveHostedHydrationSourceInstanceKey(input: {
     connectionId: input.entry.connection.id,
     sourceProviderSlug: input.source.sourceProviderSlug,
   });
-  const matchingSource = input.localSources.find((source) =>
+  const matchingSource = selectHostedJunctionSource(
+    input.localSources,
+    input.source.sourceProviderSlug,
+  ) ?? input.localSources.find((source) =>
     source.sourceInstanceKey === canonicalSourceInstanceKey
-  ) ?? input.localSources.find((source) =>
-    source.sourceInstanceKey === input.sourceInstanceKey
-  ) ?? input.localSources.find((source) =>
-    source.sourceProviderSlug === input.source.sourceProviderSlug
+    || source.sourceInstanceKey === input.sourceInstanceKey
   );
 
   return matchingSource?.sourceInstanceKey
     ?? canonicalSourceInstanceKey
     ?? input.sourceInstanceKey;
+}
+
+function areHostedJunctionSourceSlugsEquivalent(left: string, right: string): boolean {
+  return areJunctionDeviceConnectProviderSlugsEquivalent(left, right);
+}
+
+function selectHostedJunctionSource(
+  sources: readonly StoredDeviceConnectionSource[],
+  sourceProviderSlug: string,
+): StoredDeviceConnectionSource | undefined {
+  return sources
+    .filter((source) => areHostedJunctionSourceSlugsEquivalent(
+      source.sourceProviderSlug,
+      sourceProviderSlug,
+    ))
+    .sort(compareHostedJunctionSources)[0];
+}
+
+function compareHostedJunctionSources(
+  left: StoredDeviceConnectionSource,
+  right: StoredDeviceConnectionSource,
+): number {
+  const leftFirstSeenAt = Date.parse(left.firstSeenAt);
+  const rightFirstSeenAt = Date.parse(right.firstSeenAt);
+  const leftFirstSeenRank = Number.isFinite(leftFirstSeenAt)
+    ? leftFirstSeenAt
+    : Number.POSITIVE_INFINITY;
+  const rightFirstSeenRank = Number.isFinite(rightFirstSeenAt)
+    ? rightFirstSeenAt
+    : Number.POSITIVE_INFINITY;
+  return leftFirstSeenRank !== rightFirstSeenRank
+    ? leftFirstSeenRank - rightFirstSeenRank
+    : left.sourceInstanceKey.localeCompare(right.sourceInstanceKey)
+      || left.sourceProviderSlug.localeCompare(right.sourceProviderSlug);
 }
 
 function shouldPreserveLocalHydrationSource(input: {

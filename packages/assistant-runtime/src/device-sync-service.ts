@@ -1,7 +1,10 @@
 import path from "node:path";
 
 import { DEVICE_SYNC_DB_RELATIVE_PATH } from "@murphai/runtime-state/node/runtime-paths";
-import { buildJunctionProviderSourceInstanceKey } from "@murphai/device-syncd/connect-config";
+import {
+  areJunctionDeviceConnectProviderSlugsEquivalent,
+  buildJunctionProviderSourceInstanceKey,
+} from "@murphai/device-syncd/connect-config";
 
 import {
   createDefaultImporterPort,
@@ -125,12 +128,20 @@ async function listHostedJobConnectionSources(input: {
   });
   return connection.sources
     .filter((source) =>
-      (!input.sourceProviderSlug || source.sourceProviderSlug === input.sourceProviderSlug)
+      (!input.sourceProviderSlug || areHostedJunctionSourcesEquivalent(
+        input.provider,
+        source.sourceProviderSlug,
+        input.sourceProviderSlug,
+      ))
       && (!input.status || source.status === input.status)
     )
     .map((source) => {
       const localSource = localSources.find(
-        (candidate) => candidate.sourceProviderSlug === source.sourceProviderSlug,
+        (candidate) => candidate.sourceInstanceKey === source.sourceInstanceKey,
+      ) ?? selectHostedJunctionSource(
+        input.provider,
+        localSources,
+        source.sourceProviderSlug,
       );
       const sourceInstanceKey = localSource?.sourceInstanceKey
         ?? source.sourceInstanceKey
@@ -146,8 +157,52 @@ async function listHostedJobConnectionSources(input: {
       return {
         ...source,
         ...(sourceInstanceKey ? { sourceInstanceKey } : {}),
+        sourceProviderSlug: localSource?.sourceProviderSlug ?? source.sourceProviderSlug,
       };
     });
+}
+
+function areHostedJunctionSourcesEquivalent(
+  provider: string,
+  left: string,
+  right: string,
+): boolean {
+  if (provider !== "junction") {
+    return left === right;
+  }
+  return areJunctionDeviceConnectProviderSlugsEquivalent(left, right);
+}
+
+function selectHostedJunctionSource(
+  provider: string,
+  sources: readonly ProviderJobConnectionSource[],
+  sourceProviderSlug: string,
+): ProviderJobConnectionSource | undefined {
+  return sources
+    .filter((source) => areHostedJunctionSourcesEquivalent(
+      provider,
+      source.sourceProviderSlug,
+      sourceProviderSlug,
+    ))
+    .sort(compareHostedJobSources)[0];
+}
+
+function compareHostedJobSources(
+  left: ProviderJobConnectionSource,
+  right: ProviderJobConnectionSource,
+): number {
+  const leftFirstSeenAt = left.firstSeenAt ? Date.parse(left.firstSeenAt) : Number.NaN;
+  const rightFirstSeenAt = right.firstSeenAt ? Date.parse(right.firstSeenAt) : Number.NaN;
+  const leftFirstSeenRank = Number.isFinite(leftFirstSeenAt)
+    ? leftFirstSeenAt
+    : Number.POSITIVE_INFINITY;
+  const rightFirstSeenRank = Number.isFinite(rightFirstSeenAt)
+    ? rightFirstSeenAt
+    : Number.POSITIVE_INFINITY;
+  return leftFirstSeenRank !== rightFirstSeenRank
+    ? leftFirstSeenRank - rightFirstSeenRank
+    : (left.sourceInstanceKey ?? "").localeCompare(right.sourceInstanceKey ?? "")
+      || left.sourceProviderSlug.localeCompare(right.sourceProviderSlug);
 }
 
 function hostedSourceStateUnavailable(cause?: unknown) {

@@ -68,7 +68,8 @@ Updated: 2026-08-13
 18. [x] Resolve round sixteen's grouped-source alias finding.
 19. [x] Resolve round seventeen's end-to-end alias-equivalence finding.
 20. [x] Resolve round eighteen's account-owned source identity finding.
-21. [ ] Obtain exact-head green CI and a ReviewGPT PASS, then merge and retire
+21. [x] Resolve round nineteen's split persisted-source authority finding.
+22. [ ] Obtain exact-head green CI and a ReviewGPT PASS, then merge and retire
     the task worktree.
 
 ## Decisions
@@ -201,6 +202,15 @@ Updated: 2026-08-13
   and rejects multiple route-equivalent source rows as ambiguous. Source
   projection updates that same row instead of minting an alias row. This adds
   no alias registry, migration, queue, or persisted state owner.
+- Round nineteen's review-induced identity finding is accepted. Hosted
+  hydration and job-time source listing now preserve the same established
+  local source key and provider spelling across route-equivalent aliases.
+  Routine calendar, dense direct, precise correction, and retained repair
+  imports all project rows onto that persisted authority. Legacy duplicate
+  route-equivalent rows choose the oldest keyed row deterministically instead
+  of failing every retry. This reuses the connect-route owner and existing
+  source rows; it adds no alias registry, migration, queue, schema, or second
+  identity owner.
 
 ## Verification
 
@@ -346,5 +356,18 @@ Updated: 2026-08-13
   scan, and `git diff --check` also pass. The full Junction importer file's one
   unrelated timeout passed when rerun alone, including the new real-core alias
   replay regression.
+- Round nineteen found that precise imports, routine calendar imports, and
+  retained repairs could each derive provenance from a different execution or
+  hosted connection identifier. Focused provider, hosted hydration, and
+  real-core regressions now prove one opaque persisted source key survives
+  Apple Health alias changes, value correction, D1-to-D2 migration, retained
+  D1/D2 repair, and stale replay on one interval/daily identity spine.
+- Passed all 996 device-sync tests, all 178 Junction importer tests, and all 92
+  hosted runtime device-sync tests. The affected device-sync, assistant-runtime,
+  and importer typechecks, docs drift, 204-scenario integrity check, targeted
+  privacy-path scan, and `git diff --check` also pass. The precise path reuses
+  its pre-fetch persisted authority for retry evidence and one post-fetch
+  source reread for both admission and canonical projection, so the correction
+  adds no extra post-fetch state round trip.
 - Pending: commit/push, exact-head CI, ReviewGPT PASS,
   merge, and worktree retirement.

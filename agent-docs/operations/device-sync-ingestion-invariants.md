@@ -175,8 +175,13 @@ drain/batch service seam in `packages/device-syncd/src/service.ts`.
    response, so one surviving row cannot certify a partial complete-set
    revision. The calendar path uses the existing Junction connect-route owner
    to compare provider aliases at authority and response-selection boundaries,
-   queries the route's canonical target, and projects selected rows back onto
-   the job-owned historical source identity before strict import. Core rejects more than
+   queries the route's canonical target, and projects selected rows onto the
+   account's established persisted source key and provider spelling before
+   strict import. Routine calendar imports, direct dense imports, precise sparse
+   corrections, and retained calendar repairs all perform that same projection;
+   none derives a replacement source key from an execution-local account id.
+   If legacy state contains route-equivalent duplicate rows, the oldest keyed
+   row wins deterministically so retries remain bounded and stable. Core rejects more than
    64 affected dates before its canonical write, and the provider repeats that
    bound before queue fanout. That path is the sole writer of their
    daily sums, so a UTC-normalized execution window cannot select the wrong provider
@@ -295,10 +300,11 @@ drain/batch service seam in `packages/device-syncd/src/service.ts`.
    connect surfaces keep projecting the manual-removal guidance across refresh
    until a fresh established connection clears it; there is no separate warning
    store. Junction source-only writes carry the same connection-epoch fence as
-   account writes. Hydration resolves Junction
-   sources by semantic provider identity and lets an accepted reconnect epoch
-   replace older local source state, so hosted/local keys or timestamps cannot
-   create competing source owners. Future aggregate-progress ownership comes
+   account writes. Hydration and hosted job-time source listing resolve Junction
+   sources by semantic provider identity, retain the established local source
+   key and spelling, and let an accepted reconnect epoch replace older local
+   source state, so hosted/local keys or timestamps cannot create competing
+   source owners. Future aggregate-progress ownership comes
    from the versioned status scalar rather than today's window fields; opaque
    future progress and evidence remain unchanged while canonical webhook import
    continues.
