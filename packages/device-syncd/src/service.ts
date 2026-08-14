@@ -1202,21 +1202,7 @@ class DeviceSyncServiceController {
               ...job,
               payload: {
                 ...job.payload,
-                ...(job.kind === "backfill"
-                  ? {
-                      timeseriesCursor: timeseriesProgress.windowStart,
-                      timeseriesPhase: timeseriesProgress.timeseriesPhase,
-                      timeseriesResourceCursor:
-                        timeseriesProgress.timeseriesResourceCursor ?? undefined,
-                    }
-                  : job.kind === "reconcile"
-                    ? {
-                        timeseriesPhase: timeseriesProgress.timeseriesPhase,
-                        timeseriesResourceCursor:
-                          timeseriesProgress.timeseriesResourceCursor ?? undefined,
-                        windowStart: timeseriesProgress.windowStart,
-                      }
-                    : { windowStart: timeseriesProgress.windowStart }),
+                windowStart: timeseriesProgress.windowStart,
                 workoutStreamCursor:
                   timeseriesProgress.workoutStreamCursor ?? undefined,
               },
