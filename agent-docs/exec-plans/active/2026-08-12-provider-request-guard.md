@@ -247,6 +247,24 @@ Updated: 2026-08-14
   helper implementations are pinned as well. Literal dynamic imports of Node
   HTTP/HTTPS and Undici are recognized in `.mjs`, `.mts`, and `.cts`, with
   computed and unrelated imports remaining provider-neutral.
+- The trusted round-10 full-snapshot Deep Research audit reviewed exact head
+  `6e52240fd047ead4fe965e372e9ab225d71ceee6` with ReviewGPT `0.5.126` and
+  returned `PASS`. It independently rechecked every registered SDK bridge,
+  handwritten provider contracts, dynamic imports, presigned transfers, Node
+  bootstrap/audit packaging, and the three prior High mechanisms; it found no
+  reachable Critical or High failure, complexity collapse, purpose drift, or
+  material UX failure.
+- The first exact-head CI attempt exposed two integration-fixture failures from
+  the newly merged current-sender work, not a guard exception. The stale docs
+  index now points to the completed PR #1705 plan. Assistant runtime tests now
+  build event-backed accepted input through the existing canonical helper,
+  preserving the fail-closed accepted-event timestamp check, and the mocked
+  successful provider turn supplies a valid final response. No production
+  invariant, provider request rule, or provider exception was relaxed.
+- Current `main` was merged through
+  `6a5b17194f9c1a75047cd15bc8a76f170f5ce2f9`. The only merge conflict retained
+  the accurate completed-plan index entry; provider policy and executable guard
+  ownership merged without conflict.
 
 ## Verification
 
@@ -259,12 +277,20 @@ Updated: 2026-08-14
 
 Current evidence:
 
-- Focused guard suite: 103 tests passed after the official-SDK hook and mutation
-  coverage follow-up.
-- Repository-tool suite: 35 files and 613 tests passed in the latest local run.
-- Tools and operator-config TypeScript no-emit checks: passed.
-- `pnpm provider-requests:guard`: passes in the integration workspace containing
-  the current-base sibling SDK migrations and the exact registered SDK hooks.
+- Focused guard/bootstrap suite: 104 tests passed on the current merged base.
+- `pnpm provider-requests:guard`: passes on the current merged base containing
+  the sibling SDK migrations and exact registered SDK hooks.
+- `bash scripts/doc-gardening.sh --fail-on-issues`: passes with zero issues.
+- Full workspace typecheck passed after the CI-fixture correction on the prior
+  integrated base; exact-head CI remains the authoritative check for the final
+  current-base merge.
+- The corrected assistant local-service runtime file passes all 103 tests with
+  the CI-owned heap. The package-wide coverage run passed 238 files and 3,722
+  tests before one unrelated 513-receipt stress fixture timed out under local
+  machine contention; that fixture passed independently both without coverage
+  and with coverage instrumentation in about five seconds.
+- The trusted round-10 full-snapshot ReviewGPT audit returned `PASS`; a fresh
+  exact-head review remains required after the final candidate is pushed.
 - Full affected integration evidence includes Cloudflare 2,435 tests, web
   branch-owned SDK clusters 113 tests, assistant engine 317 tests,
   assistant-runtime Linq 30 tests, hosted-local Linq 25 tests, device-sync
