@@ -1,6 +1,7 @@
 ---
 title: 'Interrupted retire-worktree can leave a registered checkout partially deleted'
 severity: 'minor'
+issue: 'cobuildwithus/murph#1767'
 ---
 
 ## Expected Behavior

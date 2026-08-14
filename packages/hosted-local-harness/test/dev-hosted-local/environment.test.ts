@@ -1621,12 +1621,20 @@ describe("buildWranglerLocalDevConfig", () => {
           class_name: "DatabaseHealthDurableObject",
           name: "DATABASE_HEALTH_MONITOR",
         },
+        {
+          class_name: "DeviceWebhookQueueHealthDurableObject",
+          name: "DEVICE_WEBHOOK_QUEUE_MONITOR",
+        },
       ]),
     });
     expect(config.migrations).toEqual(expect.arrayContaining([
       {
         new_sqlite_classes: ["DatabaseHealthDurableObject"],
         tag: "v4",
+      },
+      {
+        new_sqlite_classes: ["DeviceWebhookQueueHealthDurableObject"],
+        tag: "v5",
       },
     ]));
     expect(config.triggers).toEqual({

@@ -1,6 +1,7 @@
 ---
 title: 'Completion-specialists ReviewGPT prompt exceeds the ChatGPT composer limit'
 severity: 'minor'
+issue: 'cobuildwithus/murph#1755'
 ---
 
 The canonical `pnpm review:gpt completion-specialists --wait` command should submit the repository-required specialist prompt when the PR body satisfies every completion-workflow section.

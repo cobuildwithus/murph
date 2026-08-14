@@ -234,14 +234,9 @@ function assertJunctionWorkoutStreamRetryCoordinate(
   assert.equal(job.payload.windowEnd, JUNCTION_WORKOUT_STREAM_MULTI_DAY_WINDOW.windowEnd);
   if (jobKind === "backfill") {
     assert.equal(job.payload.windowStart, JUNCTION_WORKOUT_STREAM_DAY_ONE);
-    assert.equal(job.payload.timeseriesPhase, "dense");
     assert.equal(job.payload.timeseriesCursor, JUNCTION_WORKOUT_STREAM_DAY_TWO);
   } else {
     assert.equal(job.payload.windowStart, JUNCTION_WORKOUT_STREAM_DAY_TWO);
-    assert.equal(
-      job.payload.timeseriesPhase,
-      jobKind === "reconcile" ? "dense" : undefined,
-    );
     assert.equal(job.payload.timeseriesCursor, undefined);
   }
   if (resourceCursorExpected) {
@@ -1373,6 +1368,92 @@ test("Junction yielded full-sync continuations advance the watermark only at ter
   }
 });
 
+test("Junction deployed full-job progress resumes durably and rewrites its successor to scalar state", async () => {
+  const now = new Date("2026-04-23T00:05:00.000Z");
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-junction-deployed-progress");
+  const requestedResources: string[] = [];
+  const { service, store, close } = createServiceFixture({
+    secret: "secret-for-tests",
+    clock: { now: () => now },
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+    },
+    providers: [createJunctionDeviceSyncProvider({
+      apiKey: "sk_us_test_123",
+      clientUserIdSecret: "junction-client-user-id-secret",
+      environment: "sandbox",
+      region: "us",
+      summaryResources: [],
+      timeseriesResources: ["steps", "heartrate"],
+      fetchImpl: async (input) => {
+        const url = new URL(readUrl(input));
+        const resource = url.pathname.match(
+          /^\/v2\/timeseries\/junction-account\/([^/]+)\/grouped$/u,
+        )?.[1];
+        if (!resource) {
+          throw new Error(`Unexpected Junction request during deployed-progress test: ${url}`);
+        }
+        requestedResources.push(decodeURIComponent(resource));
+        return createJsonResponse({ groups: {} });
+      },
+    })],
+  });
+
+  try {
+    const account = store.upsertAccount({
+      provider: "junction",
+      externalAccountId: "junction-account",
+      displayName: "Junction",
+      scopes: [],
+      status: "active",
+      credential: {
+        kind: "provider_config",
+        providerConfigKey: "junction",
+        credentialMetadata: {},
+      },
+      connectedAt: "2026-04-20T00:00:00.000Z",
+      nextReconcileAt: null,
+    });
+    const legacy = store.enqueueJob({
+      accountId: account.id,
+      provider: "junction",
+      kind: "reconcile",
+      payload: {
+        timeseriesCursor: "2026-04-22T00:00:00.000Z",
+        timeseriesResourceCursor: JSON.stringify({ v: 1, a: "steps", i: [] }),
+        windowEnd: "2026-04-23T00:00:00.000Z",
+        windowStart: "2026-04-22T00:00:00.000Z",
+      },
+      priority: 40,
+      availableAt: now.toISOString(),
+    });
+
+    const resumed = await service.runWorkerOnce();
+    assert.equal(resumed?.id, legacy.id);
+    assert.equal(store.getJobById(legacy.id)?.status, "succeeded");
+    assert.equal(store.getAccountById(account.id)?.lastSyncCompletedAt, null);
+    const scalarSuccessorRow = readJobsForAccountForTesting(store, account.id)
+      .find((job) => job.status === "queued");
+    assert.ok(scalarSuccessorRow);
+    const scalarSuccessor = store.getJobById(scalarSuccessorRow.id);
+    assert.ok(scalarSuccessor);
+    assert.equal(scalarSuccessor.payload.timeseriesResourceCursor, "heartrate");
+    assert.equal(JSON.stringify(scalarSuccessor.payload).includes('"i"'), false);
+
+    await service.runWorkerOnce();
+    assert.equal(store.getJobById(scalarSuccessor.id)?.status, "succeeded");
+    assert.equal(
+      store.getAccountById(account.id)?.lastSyncCompletedAt,
+      now.toISOString(),
+    );
+    assert.deepEqual(requestedResources, ["steps", "heartrate"]);
+  } finally {
+    close();
+  }
+});
+
 test.each(["resource"] as const)(
   "Junction workout-stream %s failures keep exact progress on one cumulatively retried job",
   async (jobKind: JunctionWorkoutStreamServiceJobKind) => {
@@ -1454,7 +1535,6 @@ test.each(["resource"] as const)(
         assert.equal(storedActiveJob.maxAttempts, 5);
         if (jobKind === "backfill") {
           assert.equal(storedActiveJob.payload.windowStart, JUNCTION_WORKOUT_STREAM_DAY_ONE);
-          assert.equal(storedActiveJob.payload.timeseriesPhase, "dense");
           assert.equal(storedActiveJob.payload.timeseriesCursor, JUNCTION_WORKOUT_STREAM_DAY_TWO);
         } else {
           assert.equal(storedActiveJob.payload.windowStart, JUNCTION_WORKOUT_STREAM_DAY_TWO);
@@ -6952,7 +7032,7 @@ test("device sync service releases Junction backfill row when cooperative abort 
       windowStart: ownerWindowStart,
       windowEnd: ownerWindowEnd,
       timeseriesCursor: ownerWindowStart,
-      timeseriesResourceCursor: JSON.stringify({ v: 1, a: "stress_level", i: [] }),
+      timeseriesResourceCursor: "stress_level",
     });
 
     yieldRequested = false;
@@ -9818,6 +9898,7 @@ test("sqlite store persists the webhook trace claim lifecycle", async () => {
     store.claimWebhookTrace({
       ...baseTrace,
       traceId: "trace-processing",
+      claimedAt: "2099-03-27T00:00:00.000Z",
       receivedAt: "2099-03-27T00:00:00.000Z",
       processingExpiresAt: "2099-03-27T00:05:00.000Z",
     }),
@@ -9827,6 +9908,7 @@ test("sqlite store persists the webhook trace claim lifecycle", async () => {
     store.claimWebhookTrace({
       ...baseTrace,
       traceId: "trace-processing",
+      claimedAt: "2099-03-27T00:01:00.000Z",
       receivedAt: "2099-03-27T00:01:00.000Z",
       processingExpiresAt: "2099-03-27T00:06:00.000Z",
     }),
@@ -9838,6 +9920,7 @@ test("sqlite store persists the webhook trace claim lifecycle", async () => {
     store.claimWebhookTrace({
       ...baseTrace,
       traceId: "trace-processing",
+      claimedAt: "2099-03-27T00:02:00.000Z",
       receivedAt: "2099-03-27T00:02:00.000Z",
       processingExpiresAt: "2099-03-27T00:07:00.000Z",
     }),
@@ -9848,6 +9931,7 @@ test("sqlite store persists the webhook trace claim lifecycle", async () => {
     store.claimWebhookTrace({
       ...baseTrace,
       traceId: "trace-release",
+      claimedAt: "2099-03-27T00:03:00.000Z",
       receivedAt: "2099-03-27T00:03:00.000Z",
       processingExpiresAt: "2099-03-27T00:08:00.000Z",
     }),
@@ -9858,6 +9942,7 @@ test("sqlite store persists the webhook trace claim lifecycle", async () => {
     store.claimWebhookTrace({
       ...baseTrace,
       traceId: "trace-release",
+      claimedAt: "2099-03-27T00:04:00.000Z",
       receivedAt: "2099-03-27T00:04:00.000Z",
       processingExpiresAt: "2099-03-27T00:09:00.000Z",
     }),
@@ -9868,6 +9953,7 @@ test("sqlite store persists the webhook trace claim lifecycle", async () => {
     store.claimWebhookTrace({
       ...baseTrace,
       traceId: "trace-stale",
+      claimedAt: "2099-03-27T00:05:00.000Z",
       receivedAt: "2099-03-27T00:05:00.000Z",
       processingExpiresAt: "2099-03-27T00:06:00.000Z",
     }),
@@ -9877,6 +9963,7 @@ test("sqlite store persists the webhook trace claim lifecycle", async () => {
     store.claimWebhookTrace({
       ...baseTrace,
       traceId: "trace-stale",
+      claimedAt: "2099-03-27T00:07:00.000Z",
       receivedAt: "2099-03-27T00:07:00.000Z",
       processingExpiresAt: "2099-03-27T00:12:00.000Z",
     }),
@@ -9895,6 +9982,7 @@ test("sqlite store persists the webhook trace claim lifecycle", async () => {
     store.claimWebhookTrace({
       ...baseTrace,
       traceId: "trace-legacy",
+      claimedAt: "2099-03-27T00:09:00.000Z",
       receivedAt: "2099-03-27T00:09:00.000Z",
       processingExpiresAt: "2099-03-27T00:14:00.000Z",
     }),

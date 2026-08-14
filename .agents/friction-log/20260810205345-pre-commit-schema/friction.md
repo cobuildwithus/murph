@@ -1,6 +1,7 @@
 ---
 title: 'Pre-commit schema generation fails on a base-only merge in a fresh worktree'
 severity: 'minor'
+issue: 'cobuildwithus/murph#1635'
 ---
 
 ## Expected Behavior

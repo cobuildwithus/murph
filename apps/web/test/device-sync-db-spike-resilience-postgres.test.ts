@@ -83,6 +83,12 @@ describe.skipIf(!runPostgresProof)(
         store,
         "listBoundedConnectionSourcesForConnections",
       );
+      const boundedAdmissionSourceRead = vi.spyOn(
+        store,
+        "listConnectionSourceAdmissionCandidates",
+      );
+      const preparedDirtyWrite = vi.spyOn(store, "prepareDirtyConnectionUpsert");
+      const canonicalDirtyWrite = vi.spyOn(store, "upsertDirtyConnection");
       const memberId = `hbm_device_sync_spike_${suffix}`;
       const connectionId = `dsc_device_sync_spike_${suffix}`;
       const sourceId = `dcs_device_sync_spike_${suffix}`;
@@ -217,10 +223,6 @@ describe.skipIf(!runPostgresProof)(
                     sourceProviderSlug: "garmin",
                   },
                 });
-                await store.markWebhookReceived(
-                  connectionId,
-                  receipt.receivedAt.toISOString(),
-                );
               })
             );
 
@@ -308,6 +310,16 @@ describe.skipIf(!runPostgresProof)(
         expect(await prisma.deviceSyncSignal.count({
           where: { connectionId },
         })).toBe(INCIDENT_WEBHOOK_RECEIPTS);
+        expect(preparedDirtyWrite).not.toHaveBeenCalled();
+        expect(canonicalDirtyWrite).toHaveBeenCalledTimes(INCIDENT_WEBHOOK_RECEIPTS);
+        expect(boundedAdmissionSourceRead).toHaveBeenCalledTimes(
+          INCIDENT_WEBHOOK_RECEIPTS * 2,
+        );
+        expect(boundedAdmissionSourceRead.mock.calls.every(([sourceInput]) =>
+          sourceInput.connectionId === connectionId
+          && sourceInput.sourceProviderSlug === "garmin"
+          && sourceInput.tx !== undefined
+        )).toBe(true);
 
         const connection = await prisma.deviceConnection.findUniqueOrThrow({
           select: { lastWebhookAt: true },
@@ -335,21 +347,19 @@ describe.skipIf(!runPostgresProof)(
         expect(operationCounts.get("DeviceConnection.findMany") ?? 0).toBe(
           INCIDENT_SNAPSHOT_READS + 1,
         );
-        expect(operationCounts.get("DeviceConnection.findUnique") ?? 0).toBeGreaterThanOrEqual(
-          INCIDENT_WEBHOOK_RECEIPTS,
-        );
-        expect(operationCounts.get("DeviceConnection.findUnique") ?? 0).toBeLessThanOrEqual(
-          INCIDENT_WEBHOOK_RECEIPTS * 2,
+        expect(operationCounts.get("DeviceConnection.findUnique") ?? 0).toBe(
+          INCIDENT_WEBHOOK_RECEIPTS * 3,
         );
         expect(operationCounts.get("DeviceConnection.updateMany") ?? 0).toBe(
           INCIDENT_WEBHOOK_RECEIPTS,
         );
         // Each source-attributed webhook deliberately rechecks live source
-        // admission under the lock. Snapshot source projection uses one
+        // admission in both the preflight and final locked transaction.
+        // Snapshot source projection uses one
         // bounded raw set query per snapshot, independent of connection
         // cardinality, so it does not add model-level findMany calls here.
         expect(operationCounts.get("DeviceConnectionSource.findMany") ?? 0).toBe(
-          INCIDENT_WEBHOOK_RECEIPTS,
+          INCIDENT_WEBHOOK_RECEIPTS * 2,
         );
         expect(operationCounts.get("$queryRaw") ?? 0).toBeGreaterThanOrEqual(
           INCIDENT_SNAPSHOT_READS + 1,

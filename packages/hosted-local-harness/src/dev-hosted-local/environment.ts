@@ -1098,6 +1098,10 @@ export function buildWranglerLocalDevConfig(
           class_name: "DatabaseHealthDurableObject",
         },
         {
+          name: "DEVICE_WEBHOOK_QUEUE_MONITOR",
+          class_name: "DeviceWebhookQueueHealthDurableObject",
+        },
+        {
           name: "RUNNER_CONTAINER",
           class_name: "RunnerContainer",
         },
@@ -1124,9 +1128,36 @@ export function buildWranglerLocalDevConfig(
         tag: "v4",
         new_sqlite_classes: ["DatabaseHealthDurableObject"],
       },
+      {
+        tag: "v5",
+        new_sqlite_classes: ["DeviceWebhookQueueHealthDurableObject"],
+      },
     ],
     triggers: {
       crons: ["*/5 * * * *"],
+    },
+    queues: {
+      producers: [
+        {
+          binding: "DEVICE_WEBHOOK_QUEUE",
+          queue: `${workerName}-device-webhooks`,
+        },
+        {
+          binding: "DEVICE_WEBHOOK_DLQ",
+          queue: `${workerName}-device-webhooks-dlq`,
+        },
+      ],
+      consumers: [
+        {
+          dead_letter_queue: `${workerName}-device-webhooks-dlq`,
+          max_batch_size: 100,
+          max_batch_timeout: 5,
+          max_concurrency: 1,
+          max_retries: 10,
+          queue: `${workerName}-device-webhooks`,
+          retry_delay: 30,
+        },
+      ],
     },
     r2_buckets: [
       {

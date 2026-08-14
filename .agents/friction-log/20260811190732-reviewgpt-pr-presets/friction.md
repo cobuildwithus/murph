@@ -1,6 +1,7 @@
 ---
 title: 'ReviewGPT PR presets omit inferred PR URL and preliminary phase'
 severity: 'minor'
+issue: 'cobuildwithus/murph#1710'
 ---
 
 ## Expected Behavior

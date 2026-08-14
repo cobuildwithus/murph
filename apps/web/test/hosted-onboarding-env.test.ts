@@ -239,6 +239,45 @@ describe("readHostedOnboardingEnvironment", () => {
     expect(environment.contactPrivacyKeyring.keysByVersion.v1).toBeInstanceOf(Buffer);
   });
 
+  it("orders the current and one prior contact-privacy version", () => {
+    const environment = readHostedOnboardingEnvironment({
+      NODE_ENV: "development",
+      HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION: "v3",
+      HOSTED_CONTACT_PRIVACY_KEYS: [
+        `v2:${Buffer.alloc(32, 2).toString("base64url")}`,
+        `v3:${Buffer.alloc(32, 3).toString("base64url")}`,
+      ].join(","),
+    });
+
+    expect(environment.contactPrivacyKeyring.readVersions).toEqual([
+      "v3",
+      "v2",
+    ]);
+  });
+
+  it("rejects more than the current and one prior contact-privacy version", () => {
+    expect(() => readHostedOnboardingEnvironment({
+      NODE_ENV: "development",
+      HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION: "v3",
+      HOSTED_CONTACT_PRIVACY_KEYS: [
+        `v1:${Buffer.alloc(32, 1).toString("base64url")}`,
+        `v2:${Buffer.alloc(32, 2).toString("base64url")}`,
+        `v3:${Buffer.alloc(32, 3).toString("base64url")}`,
+      ].join(","),
+    })).toThrow(/only the current version and at most one prior version/u);
+  });
+
+  it("rejects a staged future contact-privacy version", () => {
+    expect(() => readHostedOnboardingEnvironment({
+      NODE_ENV: "development",
+      HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION: "v1",
+      HOSTED_CONTACT_PRIVACY_KEYS: [
+        `v1:${Buffer.alloc(32, 1).toString("base64url")}`,
+        `v2:${Buffer.alloc(32, 2).toString("base64url")}`,
+      ].join(","),
+    })).toThrow(/only with one lower prior version/u);
+  });
+
   it("rejects non-localhost HTTP public base URLs", () => {
     expect(() =>
       readHostedOnboardingEnvironment(createProcessEnv({

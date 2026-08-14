@@ -616,7 +616,7 @@ async function writeHostedMemberLinqBindingTx(input: {
   });
 
   const lockedHomeRoute = reservesHomeRecipient
-    ? await readHostedMemberHomeLinqRouteTx({
+    ? await readHostedMemberHomeLinqRouteAuthorityTx({
         memberId: input.memberId,
         tx: input.prisma,
       })
@@ -696,7 +696,7 @@ async function writeHostedMemberLinqBindingTx(input: {
   return participantContact;
 }
 
-async function readHostedMemberHomeLinqRouteTx(input: {
+export async function readHostedMemberHomeLinqRouteAuthorityTx(input: {
   memberId: string;
   tx: Prisma.TransactionClient;
 }): Promise<{

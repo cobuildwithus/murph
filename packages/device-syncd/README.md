@@ -45,12 +45,12 @@ Current providers:
   freezes that generation across durable continuations and retries. Persisted
   unversioned work remains v1 after an upgrade and cannot certify or downgrade
   v2 coverage.
-- Junction's default timeseries list includes `steps`, `distance`,
-  `calories_active`, `heartrate`, and `weight`. The code-owned
-  `timeseriesResources` policy also admits the later off-by-default resources.
-  Omitting the list uses those defaults; an explicit empty list disables all
-  timeseries; an explicit non-empty list resolves exactly to supported canonical
-  names and rejects unknown names instead of substituting defaults.
+- Junction's product-default labels include `steps`, `distance`,
+  `calories_active`, `heartrate`, and `weight`. Production configuration sets
+  the exhaustive 48-resource registry explicitly, and omitting the list at the
+  programmatic runtime seam resolves to that same registry. An explicit empty
+  list disables all timeseries; an explicit non-empty list remains exact and
+  rejects unknown names instead of substituting defaults.
 - Opted-in `steps` and `distance` use provider/source-partitioned UTC-day aggregates.
   Opted-in `calories_active` and `heartrate` use provider/source-partitioned UTC-hour
   features. These identities match the complete closed-day import boundary instead
@@ -81,8 +81,10 @@ Current providers:
   wait to 24 seconds. A page-heavy hourly/session feature retries as one complete
   hour; daily aggregates remain day-atomic. Workout streams use the same bounded
   three-page index and carry only at-most-32 completed workout identities between
-  serial stream reads. Each reduced unit is imported before the bounded completed-resource
-  names and window coordinate advance. Pagination remains in memory, and no provider
+  serial stream reads. Each reduced unit is imported before the scalar resource
+  and window coordinate advance. A deployed v1 resource envelope is accepted
+  only as read-only upgrade input and its validated active resource is immediately
+  rewritten as a scalar successor. Pagination remains in memory, and no provider
   row, vendor page cursor, waveform sample, or workout point enters job state. This
   adds no control-database collection path, pooled transaction, or vault persistence.
 - Successful Junction resource/webhook jobs preserve the full-sync completion
@@ -118,6 +120,15 @@ times. Provider adapters likewise omit top-level `occurredAt` when the signed
 payload does not identify the event time, even if an import window needs a
 receipt-time fallback internally. A missing timestamp means the provider did
 not supply a verified one, not that Murph should infer it.
+
+Hosted Queue admission freezes that verified meaning as
+`murph.device-sync-prepared-webhook.v1` before acknowledging the provider. The
+prepared event contains no raw signature headers or raw provider body. Delayed
+admission therefore survives provider-secret, parser, and timestamp-window
+rotation without verifying the same payload again, while current provider,
+connection, consent, source, and provider-application authority is still
+rechecked. A prepared-event decoder may be retired only after main Queue, DLQ,
+and every supported redrive path are proven free of its schema version.
 
 It does **not** own canonical health-data import. The local data plane should still be the only component that normalizes provider payloads and writes them into the Murph vault.
 It also does **not** own provider-specific webhook-admin secrets. If a provider

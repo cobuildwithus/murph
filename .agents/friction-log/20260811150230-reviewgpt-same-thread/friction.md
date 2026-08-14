@@ -1,6 +1,7 @@
 ---
 title: 'ReviewGPT same-thread replacement artifact downloads the earlier attachment'
 severity: 'minor'
+issue: 'cobuildwithus/murph#1744'
 ---
 
 ## Expected Behavior

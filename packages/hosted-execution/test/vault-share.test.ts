@@ -13,13 +13,17 @@ import {
   getHostedVaultShareDailyMetricProjectionSpec,
   HOSTED_VAULT_SHARE_CANONICAL_WORKOUT_DAY_SEMANTICS,
   HOSTED_VAULT_SHARE_CURRENT_STATE_PROJECTION_KINDS,
+  HOSTED_VAULT_SHARE_DATA_SOURCE_MAX_SOURCES,
   HOSTED_VAULT_SHARE_DAILY_METRIC_PROJECTION_KINDS,
   HOSTED_VAULT_SHARE_DAILY_METRIC_PROJECTION_SPECS,
   HOSTED_VAULT_SHARE_DELIVER_MAX_RECORDS,
   HOSTED_VAULT_SHARE_DELIVERY_PAYLOAD_SCHEMA,
   HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_MODE,
+  HOSTED_VAULT_SHARE_HEART_RATE_ZONE_LABEL_MAX_LENGTH,
+  HOSTED_VAULT_SHARE_HEART_RATE_ZONES_MAX_PER_DAY,
   HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS,
   HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES,
+  HOSTED_VAULT_SHARE_SOURCE_TAGGED_WORKOUTS_MAX_PER_DAY,
   HOSTED_VAULT_SHARE_WORKOUT_KIND_MAX_LENGTH,
   HOSTED_VAULT_SHARE_WORKOUT_TIME_SEMANTICS,
   HOSTED_VAULT_SHARE_WORKOUTS_MAX_PER_DAY,
@@ -108,6 +112,19 @@ const VALID_DAILY_METRIC_RECORD = {
   },
   occurredAt: "2026-07-03T00:00:00.000Z",
   recordKey: "2026-07-03",
+};
+
+const VALID_SOURCE_TAGGED_DEEP_SLEEP_RECORD = {
+  data: {
+    date: "2026-07-03",
+    metricKey: "deep-sleep-minutes",
+    recordedAt: "2026-07-03T07:01:00.000Z",
+    unit: "minutes",
+    value: 88,
+  },
+  occurredAt: "2026-07-03T00:00:00.000Z",
+  recordKey: "2026-07-03.garmin",
+  source: { label: "Garmin", source: "garmin" },
 };
 
 const VALID_SOURCE_AWARE_DEEP_SLEEP_RECORD = {
@@ -1039,6 +1056,38 @@ describe("daily metric vault-share delivery records", () => {
     });
   });
 
+  it("keeps every bounded public source and rejects a ninth source", () => {
+    const records = Array.from(
+      { length: HOSTED_VAULT_SHARE_DATA_SOURCE_MAX_SOURCES },
+      (_, index) => {
+        const source = `source-${index}`;
+        return {
+          ...VALID_DAILY_METRIC_RECORD,
+          recordKey: `2026-07-03.${source}`,
+          source: { label: source, source },
+        };
+      },
+    );
+
+    expect(parseHostedVaultShareDeliverRequest({
+      projectionKind: "steps-days.v0",
+      records,
+    }).records).toEqual(records);
+
+    const ninthSource = "source-8";
+    expect(() => parseHostedVaultShareDeliverRequest({
+      projectionKind: "steps-days.v0",
+      records: [
+        ...records,
+        {
+          ...VALID_DAILY_METRIC_RECORD,
+          recordKey: `2026-07-03.${ninthSource}`,
+          source: { label: ninthSource, source: ninthSource },
+        },
+      ],
+    })).toThrow(/at most 8 public sources/u);
+  });
+
   it("rejects daily scalar records that do not match the projection kind", () => {
     expect(() =>
       parseHostedVaultShareDeliverRequest({
@@ -1112,6 +1161,64 @@ describe("daily metric vault-share delivery records", () => {
         ).toThrow(/value must be between/u);
       }
     }
+  });
+
+  it("preserves each source-tagged sleep stage's recorded time", () => {
+    for (const [projectionScope, metricKey] of [
+      [DEEP_SLEEP_SCOPE, "deep-sleep-minutes"],
+      [DEEP_SLEEP_SOURCES_SCOPE, "deep-sleep-minutes"],
+      [REM_SLEEP_SCOPE, "rem-sleep-minutes"],
+      [REM_SLEEP_SOURCES_SCOPE, "rem-sleep-minutes"],
+    ] as const) {
+      const record = {
+        ...VALID_SOURCE_TAGGED_DEEP_SLEEP_RECORD,
+        data: {
+          ...VALID_SOURCE_TAGGED_DEEP_SLEEP_RECORD.data,
+          metricKey,
+        },
+      };
+      expect(parseHostedVaultShareDeliverRequest({
+        projectionKind: projectionScope.projectionKind,
+        records: [record],
+      }).records).toEqual([record]);
+
+      const recordWithoutProviderTime = {
+        ...record,
+        data: { ...record.data, recordedAt: null },
+      };
+      expect(parseHostedVaultShareDeliverRequest({
+        projectionKind: projectionScope.projectionKind,
+        records: [recordWithoutProviderTime],
+      }).records).toEqual([recordWithoutProviderTime]);
+    }
+  });
+
+  it("rejects missing, malformed, or misplaced source-recorded times", () => {
+    const { recordedAt: _recordedAt, ...missingRecordedAtData } =
+      VALID_SOURCE_TAGGED_DEEP_SLEEP_RECORD.data;
+    for (const data of [
+      missingRecordedAtData,
+      { ...VALID_SOURCE_TAGGED_DEEP_SLEEP_RECORD.data, recordedAt: "not-a-time" },
+      {
+        ...VALID_SOURCE_TAGGED_DEEP_SLEEP_RECORD.data,
+        recordedAt: "2999-01-01T00:00:00.000Z",
+      },
+    ]) {
+      expect(() => parseHostedVaultShareDeliverRequest({
+        projectionKind: DEEP_SLEEP_SCOPE.projectionKind,
+        records: [{ ...VALID_SOURCE_TAGGED_DEEP_SLEEP_RECORD, data }],
+      })).toThrow(/recordedAt|must not be in the future/u);
+    }
+
+    expect(() => parseHostedVaultShareDeliverRequest({
+      projectionKind: "steps-days.v0",
+      records: [{
+        ...VALID_DAILY_METRIC_RECORD,
+        data: { ...VALID_DAILY_METRIC_RECORD.data, recordedAt: null },
+        recordKey: "2026-07-03.garmin",
+        source: { label: "Garmin", source: "garmin" },
+      }],
+    })).toThrow(/does not accept recordedAt/u);
   });
 
   it("parses every bounded public sleep source with one canonical selection", () => {
@@ -1308,7 +1415,7 @@ describe("daily metric vault-share delivery records", () => {
       sources: validData.sources.map((source, index) => index === 0
         ? { ...source, label: "Junction", source: "junction" }
         : source),
-    }, /canonical public provider keys and labels/u);
+    }, /canonical public provider slugs/u);
     expectInvalidSources({
       ...validData,
       sources: validData.sources.map((source, index) => index === 0
@@ -1731,6 +1838,83 @@ describe("workouts.v0 delivery records", () => {
     );
   });
 
+  it("admits thirteen workouts per source across eight sources", () => {
+    const sources = Array.from(
+      { length: HOSTED_VAULT_SHARE_DATA_SOURCE_MAX_SOURCES },
+      (_, sourceIndex) => {
+        const source = `source-${sourceIndex}`;
+        return { label: source, source };
+      },
+    );
+    const workouts = sources.flatMap((source) =>
+      Array.from(
+        { length: HOSTED_VAULT_SHARE_WORKOUTS_MAX_PER_DAY },
+        (_, workoutIndex) => ({
+          kind: "running",
+          minutes: 1,
+          source,
+          startLocalMs: workoutIndex,
+        }),
+      )
+    );
+
+    expect(workouts).toHaveLength(
+      HOSTED_VAULT_SHARE_SOURCE_TAGGED_WORKOUTS_MAX_PER_DAY,
+    );
+    expect(parseHostedVaultShareDeliveryRecord(
+      {
+        ...VALID_WORKOUTS_RECORD,
+        data: { ...VALID_WORKOUTS_RECORD.data, workouts },
+      },
+      WORKOUTS_SCOPE,
+    ).data).toMatchObject({ workouts });
+
+    const firstSource = sources[0];
+    if (!firstSource) {
+      throw new Error("Missing bounded public source fixture.");
+    }
+    expect(() => parseHostedVaultShareDeliveryRecord(
+      {
+        ...VALID_WORKOUTS_RECORD,
+        data: {
+          ...VALID_WORKOUTS_RECORD.data,
+          workouts: Array.from(
+            { length: HOSTED_VAULT_SHARE_WORKOUTS_MAX_PER_DAY + 1 },
+            (_, workoutIndex) => ({
+              kind: "running",
+              minutes: 1,
+              source: firstSource,
+              startLocalMs: workoutIndex,
+            }),
+          ),
+        },
+      },
+      WORKOUTS_SCOPE,
+    )).toThrow(/at most 13 entries per public source/u);
+
+    expect(() => parseHostedVaultShareDeliveryRecord(
+      {
+        ...VALID_WORKOUTS_RECORD,
+        data: {
+          ...VALID_WORKOUTS_RECORD.data,
+          workouts: Array.from(
+            { length: HOSTED_VAULT_SHARE_DATA_SOURCE_MAX_SOURCES + 1 },
+            (_, sourceIndex) => {
+              const source = `source-${sourceIndex}`;
+              return {
+                kind: "running",
+                minutes: 1,
+                source: { label: source, source },
+                startLocalMs: sourceIndex,
+              };
+            },
+          ),
+        },
+      },
+      WORKOUTS_SCOPE,
+    )).toThrow(/across at most 8 sources/u);
+  });
+
   it("rejects invalid per-workout local clocks, durations, and kinds", () => {
     for (const startLocalMs of [-1, 1.5, 86_400_000]) {
       expect(() =>
@@ -2054,6 +2238,55 @@ describe("heart-rate-zones-days.v0 delivery records", () => {
         }],
       })
     ).toThrow(/identify the zone/u);
+  });
+
+  it("enforces the payload-safe zone count and label boundaries", () => {
+    const zones = Array.from(
+      { length: HOSTED_VAULT_SHARE_HEART_RATE_ZONES_MAX_PER_DAY },
+      (_, zone) => ({
+        durationMinutes: 24,
+        label: "x".repeat(HOSTED_VAULT_SHARE_HEART_RATE_ZONE_LABEL_MAX_LENGTH),
+        zone,
+      }),
+    );
+    const request = {
+      projectionKind: "heart-rate-zones-days.v0",
+      records: [{
+        ...VALID_HEART_RATE_ZONE_RECORD,
+        data: { ...VALID_HEART_RATE_ZONE_RECORD.data, zones },
+      }],
+    };
+
+    expect(() => parseHostedVaultShareDeliverRequest(request)).not.toThrow();
+    expect(() => parseHostedVaultShareDeliverRequest({
+      ...request,
+      records: [{
+        ...VALID_HEART_RATE_ZONE_RECORD,
+        data: {
+          ...VALID_HEART_RATE_ZONE_RECORD.data,
+          zones: [...zones, { durationMinutes: 1, zone: 0 }],
+        },
+      }],
+    })).toThrow(new RegExp(
+      `1-${HOSTED_VAULT_SHARE_HEART_RATE_ZONES_MAX_PER_DAY}`,
+      "u",
+    ));
+    expect(() => parseHostedVaultShareDeliverRequest({
+      ...request,
+      records: [{
+        ...VALID_HEART_RATE_ZONE_RECORD,
+        data: {
+          ...VALID_HEART_RATE_ZONE_RECORD.data,
+          zones: [{
+            durationMinutes: 1,
+            label: "x".repeat(
+              HOSTED_VAULT_SHARE_HEART_RATE_ZONE_LABEL_MAX_LENGTH + 1,
+            ),
+            zone: 1,
+          }],
+        },
+      }],
+    })).toThrow(/label/u);
   });
 });
 
