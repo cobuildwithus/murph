@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-14",
+  "order": 200,
+  "item": {
+    "id": "experiment-reminders-keep-their-place",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Experiment reminders keep their place",
+    "summary": "Scheduled experiment reminders now take priority over background syncing, and a reply stays attached to the exact reminder that prompted it.",
+    "details": "Murph verifies the current experiment plan before recording that occurrence. Plans with several sessions per day count each session separately and do not treat silence as completed work.",
+    "relevanceTags": ["assistant", "reminders", "experiments", "reliability"],
+    "sourcePullRequests": [1830]
+  }
+}
