@@ -276,6 +276,21 @@ export const providerHttpExceptionRegistry = Object.freeze([
       "The path-scoped xAI Responses request carrying exactly one x_search extension.",
     id: "xai-x-search-responses",
   },
+  {
+    description:
+      "A path-scoped official SDK fetch hook that forwards the SDK-owned URL and init while adding only fail-closed transport controls.",
+    id: "official-sdk-fetch-hook",
+  },
+  {
+    description:
+      "The path-scoped Resend fetchRequest override required because the official SDK has no fetch or AbortSignal option.",
+    id: "resend-sdk-fetch-request-override",
+  },
+  {
+    description:
+      "The path-scoped Exa request override required because the official SDK has no fetch or AbortSignal option.",
+    id: "exa-sdk-request-override",
+  },
 ] as const);
 
 const approvedPresignedTransferHeaderFactories = Object.freeze([
@@ -390,6 +405,7 @@ interface ParameterBinding {
 
 interface ProviderHttpSourceAnalysis {
   readonly exactFetchTypeNames: ReadonlySet<string>;
+  readonly fileFallbackProviderIds: ReadonlySet<string>;
   readonly fetchTypeNames: ReadonlySet<string>;
   readonly fileProviderIds: ReadonlySet<string>;
   readonly functionBindings: ReadonlyMap<string, readonly FunctionBinding[]>;
@@ -803,6 +819,10 @@ function analyzeProviderHttpSource(
 ): ProviderHttpSourceAnalysis {
   return {
     exactFetchTypeNames: collectFetchTypeNames(sourceFile, contents, true),
+    fileFallbackProviderIds: collectFileProviderFallbackIds(
+      sourceFile,
+      relativePath,
+    ),
     fetchTypeNames: collectFetchTypeNames(sourceFile, contents),
     fileProviderIds: collectFileProviderIds(sourceFile, relativePath),
     functionBindings: collectFunctionBindings(sourceFile),
@@ -847,6 +867,7 @@ function collectFetchTypeNames(
           (exact
             ? looksLikeExactFetchFunctionType(alias.typeText)
             : looksLikeFetchFunctionType(alias.typeText)) ||
+          looksLikeStandardFetchDerivedBivariantType(alias.typeText) ||
           typeTextIsFetchCallable(alias.typeText, fetchTypeNames)
         )
       ) {
@@ -1288,12 +1309,21 @@ function collectFileProviderIds(
   sourceFile: Node,
   relativePath: string,
 ): Set<string> {
-  const providerIds = providerIdsFromIdentifier(relativePath);
+  const providerIds = collectFileProviderFallbackIds(sourceFile, relativePath);
   traverseFast(sourceFile, (node) => {
     if (isImportDeclaration(node)) {
       addProviderIds(providerIds, providerIdsFromModule(node.source.value));
-      return;
     }
+  });
+  return providerIds;
+}
+
+function collectFileProviderFallbackIds(
+  sourceFile: Node,
+  relativePath: string,
+): Set<string> {
+  const providerIds = providerIdsFromIdentifier(relativePath);
+  traverseFast(sourceFile, (node) => {
     if (isStringLiteral(node)) {
       addProviderIds(providerIds, providerIdsFromStaticText(node.value));
       return;
@@ -1554,15 +1584,20 @@ function collectRawProviderHttpViolations(input: {
         }),
       );
     }
+    const insideSdkFetchAdapter = isInsideSdkFetchAdapter(
+      input.sourceFile,
+      node.start ?? 0,
+    );
     if (
       requestFacts.providerIds.size === 0 &&
       (
         exactTransportTarget ||
-        isInsideSdkFetchAdapter(input.sourceFile, node.start ?? 0)
+        insideSdkFetchAdapter
       )
     ) {
       addEnclosingProviderContextFacts({
         analysis: input.analysis,
+        allowFileFallback: insideSdkFetchAdapter,
         facts: requestFacts,
         position: node.start ?? 0,
         sourceFile: input.sourceFile,
@@ -1737,10 +1772,33 @@ function isInsideSdkFetchAdapter(sourceFile: Node, position: number): boolean {
 
 function addEnclosingProviderContextFacts(input: {
   readonly analysis: ProviderHttpSourceAnalysis;
+  readonly allowFileFallback: boolean;
   readonly facts: ProviderExpressionFacts;
   readonly position: number;
   readonly sourceFile: Node;
 }): void {
+  traverseFast(input.sourceFile, (node) => {
+    if (
+      (node.type === "ClassDeclaration" || node.type === "ClassExpression") &&
+      (node.start ?? 0) <= input.position &&
+      input.position <= (node.end ?? Number.MAX_SAFE_INTEGER)
+    ) {
+      if (node.id) {
+        addProviderIds(
+          input.facts.providerIds,
+          providerIdsFromIdentifier(node.id.name),
+        );
+      }
+      if (node.superClass) {
+        addProviderIds(
+          input.facts.providerIds,
+          providerIdsFromIdentifier(
+            readMemberPath(node.superClass)?.join(".") ?? "",
+          ),
+        );
+      }
+    }
+  });
   for (const callable of collectLocalFunctionRanges(input.sourceFile)) {
     if (callable.start <= input.position && input.position <= callable.end) {
       addProviderIds(
@@ -1750,6 +1808,7 @@ function addEnclosingProviderContextFacts(input: {
     }
   }
   if (
+    input.allowFileFallback &&
     input.facts.providerIds.size === 0 &&
     input.analysis.fileProviderIds.size === 1
   ) {
@@ -1924,7 +1983,9 @@ function inferProviderExpressionFacts(input: {
     addSingleProviderFileHint(
       facts.providerIds,
       node.name,
-      input.analysis.fileProviderIds,
+      isInsideSdkFetchAdapter(input.analysis.sourceFile, input.before)
+        ? input.analysis.fileProviderIds
+        : input.analysis.fileFallbackProviderIds,
     );
     return facts;
   }
@@ -1994,7 +2055,9 @@ function inferProviderExpressionFacts(input: {
       addSingleProviderFileHint(
         facts.providerIds,
         key,
-        input.analysis.fileProviderIds,
+        isInsideSdkFetchAdapter(input.analysis.sourceFile, input.before)
+          ? input.analysis.fileProviderIds
+          : input.analysis.fileFallbackProviderIds,
       );
     } else {
       mergeProviderExpressionFacts(
@@ -2157,7 +2220,7 @@ function mergeProviderExpressionFacts(
   addProviderIds(target.providerIds, source.providerIds);
 }
 
-function matchesRegisteredProviderHttpException(input: {
+interface RegisteredProviderHttpExceptionInput {
   readonly analysis: ProviderHttpSourceAnalysis;
   readonly bindings: ReadonlyMap<string, readonly VariableBinding[]>;
   readonly call: CallExpression | OptionalCallExpression;
@@ -2167,7 +2230,11 @@ function matchesRegisteredProviderHttpException(input: {
   readonly relativePath: string;
   readonly urlArgument: Node;
   readonly urlFacts: ProviderExpressionFacts;
-}): boolean {
+}
+
+function matchesRegisteredProviderHttpException(
+  input: RegisteredProviderHttpExceptionInput,
+): boolean {
   return providerHttpExceptionRegistry.some((exception) => {
     switch (exception.id) {
       case "presigned-byte-transfer":
@@ -2184,8 +2251,656 @@ function matchesRegisteredProviderHttpException(input: {
           });
       case "xai-x-search-responses":
         return isXaiXSearchResponsesRequest(input);
+      case "official-sdk-fetch-hook":
+        return isOfficialSdkFetchHook(input);
+      case "resend-sdk-fetch-request-override":
+        return isResendSdkFetchRequestOverride(input);
+      case "exa-sdk-request-override":
+        return isExaSdkRequestOverride(input);
     }
   });
+}
+
+const officialSdkFetchHookApprovals = Object.freeze([
+  {
+    functionName: "createJunctionLabsSdkFetch",
+    initKind: "junction-web",
+    moduleName: "@junction-api/sdk",
+    providerId: "junction",
+    relativePath: "apps/web/src/lib/labs/junction.ts",
+    transportPath: "input.fetchImpl.call",
+    urlParameterName: "request",
+    wiringName: "createJunctionLabsSdkFetch",
+  },
+  {
+    functionName: "createLobSdkFetch",
+    initKind: "call-forward",
+    moduleName: "@lob/lob-typescript-sdk",
+    providerId: "lob",
+    relativePath: "apps/web/src/lib/physical-notes/lob-runtime.ts",
+    transportPath: "fetchImpl.call",
+    urlParameterName: "request",
+    wiringName: "createLobSdkFetch",
+  },
+  {
+    functionName: "createComposioSdkFetch",
+    initKind: "call-forward",
+    moduleName: "@composio/client",
+    providerId: "composio",
+    relativePath: "apps/web/src/lib/connected-apps/composio.ts",
+    transportPath: "fetchImpl.call",
+    urlParameterName: "request",
+    wiringName: "createComposioSdkFetch",
+  },
+  {
+    functionName: "sdkFetch",
+    initKind: "junction",
+    moduleName: "@junction-api/sdk",
+    providerId: "junction",
+    relativePath: "packages/device-syncd/src/providers/junction-client.ts",
+    transportPath: "this.fetchImpl",
+    urlParameterName: "input",
+    wiringName: "sdkFetch",
+  },
+  {
+    functionName: "createElevenLabsSdkFetch",
+    initKind: "elevenlabs",
+    moduleName: "@elevenlabs/elevenlabs-js",
+    providerId: "elevenlabs",
+    relativePath: "packages/operator-config/src/elevenlabs-runtime.ts",
+    transportPath: "fetchImplementation",
+    urlParameterName: "input",
+    wiringName: "createElevenLabsSdkFetch",
+  },
+  {
+    functionName: "createLinqSdkFetch",
+    initKind: "linq",
+    moduleName: "@linqapp/sdk",
+    providerId: "linq",
+    relativePath: "packages/operator-config/src/linq-runtime.ts",
+    transportPath: "input.fetchImplementation.call",
+    urlParameterName: "request",
+    wiringName: "createLinqSdkFetch",
+  },
+] as const);
+
+function isOfficialSdkFetchHook(
+  input: RegisteredProviderHttpExceptionInput,
+): boolean {
+  const approval = officialSdkFetchHookApprovals.find(
+    (candidate) =>
+      candidate.providerId === input.provider.id &&
+      candidate.relativePath === normalizeRepoPath(input.relativePath),
+  );
+  if (
+    !approval ||
+    !hasExactProviderModuleImport(input.analysis.sourceFile, approval.moduleName) ||
+    readMemberPath(input.call.callee)?.join(".") !== approval.transportPath
+  ) {
+    return false;
+  }
+  const before = input.call.start ?? Number.MAX_SAFE_INTEGER;
+  const owner = findInnermostLocalFunction(
+    collectLocalFunctionRanges(input.analysis.sourceFile),
+    before,
+  );
+  if (
+    owner?.name !== approval.functionName ||
+    !isExactFunctionParameter(
+      input.analysis,
+      input.urlArgument,
+      before,
+      approval.urlParameterName,
+    ) ||
+    !hasExactSdkFetchWiring(
+      input.analysis.sourceFile,
+      approval.wiringName,
+    )
+  ) {
+    return false;
+  }
+  if (approval.initKind === "linq" || approval.initKind === "call-forward") {
+    return Boolean(
+      input.call.arguments.length === 3 &&
+      isIdentifier(input.call.arguments[0], { name: "undefined" }) &&
+      input.initArgument &&
+      input.initArgument.type !== "SpreadElement" &&
+      isExactFunctionParameter(
+        input.analysis,
+        input.initArgument,
+        before,
+        "init",
+      ),
+    );
+  }
+  return matchesForwardedSdkFetchInit({
+    analysis: input.analysis,
+    before,
+    initArgument: input.initArgument,
+    kind: approval.initKind,
+  });
+}
+
+function matchesForwardedSdkFetchInit(input: {
+  readonly analysis: ProviderHttpSourceAnalysis;
+  readonly before: number;
+  readonly initArgument: Node | null;
+  readonly kind: "elevenlabs" | "junction" | "junction-web";
+}): boolean {
+  if (!input.initArgument || input.initArgument.type === "SpreadElement") {
+    return false;
+  }
+  const init = unwrapExpression(input.initArgument);
+  if (!isObjectExpression(init)) {
+    return false;
+  }
+  let hasForwardedInit = false;
+  const properties = new Map<string, Node>();
+  for (const property of init.properties) {
+    if (isSpreadElement(property)) {
+      if (
+        hasForwardedInit ||
+        !isExactFunctionParameter(
+          input.analysis,
+          property.argument,
+          input.before,
+          "init",
+        )
+      ) {
+        return false;
+      }
+      hasForwardedInit = true;
+      continue;
+    }
+    if (!isObjectProperty(property) || property.computed) {
+      return false;
+    }
+    const name = readPropertyName(property.key);
+    if (!name || properties.has(name)) {
+      return false;
+    }
+    properties.set(name, property.value);
+  }
+  if (!hasForwardedInit) {
+    return false;
+  }
+  const redirect = properties.get("redirect");
+  if (!redirect || !isStringLiteral(redirect, { value: "error" })) {
+    return false;
+  }
+  if (input.kind === "elevenlabs") {
+    return properties.size === 1;
+  }
+  if (input.kind === "junction-web") {
+    const cache = properties.get("cache");
+    return properties.size === 2
+      && Boolean(cache && isStringLiteral(cache, { value: "no-store" }));
+  }
+  return properties.size === 2 &&
+    readMemberPath(properties.get("signal") ?? ({ type: "NullLiteral" } as Node))
+      ?.join(".") === "requestAbort.signal";
+}
+
+function hasExactSdkFetchWiring(sourceFile: Node, wiringName: string): boolean {
+  let matches = 0;
+  traverseFast(sourceFile, (node) => {
+    if (!isObjectProperty(node) || node.computed) {
+      return;
+    }
+    if (readPropertyName(node.key) !== "fetch") {
+      return;
+    }
+    const value = unwrapExpression(node.value);
+    if (isIdentifier(value, { name: wiringName })) {
+      matches += 1;
+      return;
+    }
+    if (
+      isCallExpression(value) &&
+      isIdentifier(unwrapExpression(value.callee), { name: wiringName })
+    ) {
+      matches += 1;
+    }
+  });
+  return matches === 1;
+}
+
+function isResendSdkFetchRequestOverride(
+  input: RegisteredProviderHttpExceptionInput,
+): boolean {
+  if (
+    input.provider.id !== "resend" ||
+    normalizeRepoPath(input.relativePath) !==
+      "apps/web/src/lib/hosted-onboarding/resend-plain-text-email.ts" ||
+    readMemberPath(input.call.callee)?.join(".") !== "this.fetchImpl" ||
+    !isInsideExactSdkSubclassMethod({
+      analysis: input.analysis,
+      baseClassName: "Resend",
+      call: input.call,
+      className: "HostedResendClient",
+      methodName: "fetchRequest",
+      moduleName: "resend",
+    }) ||
+    !isApprovedResendRequestUrl(input)
+  ) {
+    return false;
+  }
+  const initArgument = input.initArgument;
+  if (
+    !initArgument ||
+    initArgument.type === "SpreadElement" ||
+    !isIdentifier(unwrapExpression(initArgument), { name: "requestInit" })
+  ) {
+    return false;
+  }
+  return isApprovedResendRequestInit(input);
+}
+
+function isApprovedResendRequestUrl(
+  input: RegisteredProviderHttpExceptionInput,
+): boolean {
+  const url = unwrapExpression(input.urlArgument);
+  if (
+    !isTemplateLiteral(url) ||
+    url.expressions.length !== 2 ||
+    url.quasis.some((quasi) => (quasi.value.cooked ?? "") !== "") ||
+    readMemberPath(url.expressions[0] ?? ({ type: "NullLiteral" } as Node))
+      ?.join(".") !== "this.baseUrl"
+  ) {
+    return false;
+  }
+  const requestPath = url.expressions[1];
+  if (!requestPath || !isIdentifier(requestPath, { name: "requestPath" })) {
+    return false;
+  }
+  const binding = resolveBinding(
+    input.bindings,
+    requestPath.name,
+    input.call.start ?? Number.MAX_SAFE_INTEGER,
+  );
+  if (!binding?.definitive) {
+    return false;
+  }
+  const initializer = unwrapExpression(binding.initializer);
+  if (
+    initializer.type !== "ConditionalExpression" ||
+    !isIdentifier(initializer.consequent, { name: "path" }) ||
+    initializer.alternate.type !== "NullLiteral"
+  ) {
+    return false;
+  }
+  const test = unwrapExpression(initializer.test);
+  if (test.type !== "LogicalExpression" || test.operator !== "||") {
+    return false;
+  }
+  return isExactIdentifierConstantComparison({
+    bindings: input.bindings,
+    before: binding.start,
+    constantName: "RESEND_EMAILS_PATH",
+    identifierName: "path",
+    node: test.left,
+    value: "/emails",
+  }) && isExactIdentifierConstantComparison({
+    bindings: input.bindings,
+    before: binding.start,
+    constantName: "RESEND_BATCH_EMAILS_PATH",
+    identifierName: "path",
+    node: test.right,
+    value: "/emails/batch",
+  });
+}
+
+function isApprovedResendRequestInit(
+  input: RegisteredProviderHttpExceptionInput,
+): boolean {
+  const before = input.call.start ?? Number.MAX_SAFE_INTEGER;
+  const binding = resolveBinding(input.bindings, "requestInit", before);
+  if (!binding?.definitive || binding.typeAnnotation !== ": RequestInit") {
+    return false;
+  }
+  const initializer = unwrapExpression(binding.initializer);
+  const properties = readClosedObjectProperties(initializer);
+  if (
+    !properties ||
+    properties.size !== 2 ||
+    !isStringLiteral(properties.get("redirect")?.value, { value: "error" }) ||
+    readMemberPath(properties.get("signal")?.value ?? ({ type: "NullLiteral" } as Node))
+      ?.join(".") !== "this.requestSignal"
+  ) {
+    return false;
+  }
+  const owner = findInnermostLocalFunction(
+    collectLocalFunctionRanges(input.analysis.sourceFile),
+    before,
+  );
+  if (!owner) {
+    return false;
+  }
+  const assignmentCounts = new Map<string, number>();
+  let unsafeUse = false;
+  traverseFast(input.analysis.sourceFile, (node) => {
+    const start = node.start ?? 0;
+    if (start < owner.start || start > owner.end) {
+      return;
+    }
+    if (isAssignmentExpression(node)) {
+      const leftPath = readMemberPath(node.left);
+      if (leftPath?.[0] !== "requestInit") {
+        return;
+      }
+      const propertyName = leftPath.length === 2 ? leftPath[1] : null;
+      if (!propertyName || node.operator !== "=") {
+        unsafeUse = true;
+        return;
+      }
+      const valid = propertyName === "body"
+        ? readMemberPath(node.right)?.join(".") === "options.body"
+        : propertyName === "method"
+          ? readMemberPath(node.right)?.join(".") === "options.method"
+          : propertyName === "headers"
+            ? isExactCallWithMemberArgument(
+                node.right,
+                "normalizeResendRequestHeaders",
+                "options.headers",
+              )
+            : false;
+      if (!valid) {
+        unsafeUse = true;
+        return;
+      }
+      assignmentCounts.set(
+        propertyName,
+        (assignmentCounts.get(propertyName) ?? 0) + 1,
+      );
+      return;
+    }
+    if (
+      (isCallExpression(node) || isOptionalCallExpression(node)) &&
+      node.start !== input.call.start &&
+      node.arguments.some(
+        (argument) =>
+          argument.type !== "ArgumentPlaceholder" &&
+          argument.type !== "SpreadElement" &&
+          isIdentifier(unwrapExpression(argument), { name: "requestInit" }),
+      )
+    ) {
+      unsafeUse = true;
+    }
+  });
+  return !unsafeUse && ["body", "headers", "method"].every(
+    (name) => assignmentCounts.get(name) === 1,
+  );
+}
+
+function isExaSdkRequestOverride(
+  input: RegisteredProviderHttpExceptionInput,
+): boolean {
+  if (
+    input.provider.id !== "exa" ||
+    normalizeRepoPath(input.relativePath) !==
+      "packages/cli/src/research-scout-client.ts" ||
+    readMemberPath(input.call.callee)?.join(".") !== "this.fetchImpl" ||
+    !isInsideExactSdkSubclassMethod({
+      analysis: input.analysis,
+      baseClassName: "Exa",
+      call: input.call,
+      className: "RunnerScopedExaClient",
+      methodName: "request",
+      moduleName: "exa-js",
+    }) ||
+    !isApprovedExaRequestUrl(input)
+  ) {
+    return false;
+  }
+  const initArgument = input.initArgument;
+  if (!initArgument || initArgument.type === "SpreadElement") {
+    return false;
+  }
+  const properties = readClosedObjectProperties(unwrapExpression(initArgument));
+  if (!properties || properties.size !== 5) {
+    return false;
+  }
+  const before = input.call.start ?? Number.MAX_SAFE_INTEGER;
+  const headers = properties.get("headers")?.value;
+  const headerProperties = headers ? readClosedObjectProperties(headers) : null;
+  return Boolean(
+    properties.get("method") &&
+    isStringLiteral(properties.get("method")!.value, { value: "POST" }),
+  ) &&
+    Boolean(
+      headerProperties &&
+      headerProperties.size === 3 &&
+      isStringLiteral(headerProperties.get("accept")?.value, {
+        value: "application/json",
+      }) &&
+      isStringLiteral(headerProperties.get("content-type")?.value, {
+        value: "application/json; charset=utf-8",
+      }) &&
+      readMemberPath(headerProperties.get("x-api-key")?.value ?? ({
+        type: "NullLiteral",
+      } as Node))?.join(".") === "this.apiKey",
+    ) &&
+    isExactJsonStringifyOfParameter({
+      analysis: input.analysis,
+      before,
+      bindings: input.bindings,
+      node: properties.get("body")?.value,
+      parameterName: "body",
+    }) &&
+    isStringLiteral(properties.get("redirect")?.value, { value: "error" }) &&
+    isIdentifier(properties.get("signal")?.value, { name: "requestSignal" });
+}
+
+function isApprovedExaRequestUrl(
+  input: RegisteredProviderHttpExceptionInput,
+): boolean {
+  const url = unwrapExpression(input.urlArgument);
+  return isStringLiteral(url, { value: "https://api.exa.ai/search" });
+}
+
+function isInsideExactSdkSubclassMethod(input: {
+  readonly analysis: ProviderHttpSourceAnalysis;
+  readonly baseClassName: string;
+  readonly call: CallExpression | OptionalCallExpression;
+  readonly className: string;
+  readonly methodName: string;
+  readonly moduleName: string;
+}): boolean {
+  if (!hasExactNamedProviderImport(
+    input.analysis.sourceFile,
+    input.moduleName,
+    input.baseClassName,
+  )) {
+    return false;
+  }
+  const position = input.call.start ?? 0;
+  let matches = 0;
+  traverseFast(input.analysis.sourceFile, (node) => {
+    if (
+      node.type !== "ClassDeclaration" ||
+      node.id?.name !== input.className ||
+      !isIdentifier(node.superClass, { name: input.baseClassName }) ||
+      (node.start ?? 0) > position ||
+      position > (node.end ?? Number.MAX_SAFE_INTEGER)
+    ) {
+      return;
+    }
+    for (const member of node.body.body) {
+      if (
+        member.type === "ClassMethod" &&
+        readPropertyName(member.key) === input.methodName &&
+        (member.start ?? 0) <= position &&
+        position <= (member.end ?? Number.MAX_SAFE_INTEGER)
+      ) {
+        matches += 1;
+      }
+    }
+  });
+  return matches === 1;
+}
+
+function hasExactProviderModuleImport(
+  sourceFile: Node,
+  moduleName: string,
+): boolean {
+  let matches = 0;
+  traverseFast(sourceFile, (node) => {
+    if (
+      isImportDeclaration(node) &&
+      (node.source.value === moduleName ||
+        node.source.value.startsWith(`${moduleName}/`))
+    ) {
+      matches += 1;
+    }
+  });
+  return matches >= 1;
+}
+
+function hasExactNamedProviderImport(
+  sourceFile: Node,
+  moduleName: string,
+  importedName: string,
+): boolean {
+  let matches = 0;
+  traverseFast(sourceFile, (node) => {
+    if (!isImportDeclaration(node) || node.source.value !== moduleName) {
+      return;
+    }
+    for (const specifier of node.specifiers) {
+      if (
+        isImportSpecifier(specifier) &&
+        readImportedName(specifier) === importedName &&
+        specifier.local.name === importedName
+      ) {
+        matches += 1;
+      }
+    }
+  });
+  return matches === 1;
+}
+
+function isExactFunctionParameter(
+  analysis: ProviderHttpSourceAnalysis,
+  node: Node,
+  before: number,
+  name: string,
+): boolean {
+  const expression = unwrapExpression(node);
+  if (!isIdentifier(expression, { name })) {
+    return false;
+  }
+  const binding = resolveParameterBinding(
+    analysis.parameterBindings,
+    name,
+    before,
+  );
+  return Boolean(
+    binding &&
+    binding.defaultExpression === null &&
+    binding.propertyPath === null,
+  );
+}
+
+function isExactIdentifierConstantComparison(input: {
+  readonly before: number;
+  readonly bindings: ReadonlyMap<string, readonly VariableBinding[]>;
+  readonly constantName: string;
+  readonly identifierName: string;
+  readonly node: Node;
+  readonly value: string;
+}): boolean {
+  const comparison = unwrapExpression(input.node);
+  if (comparison.type !== "BinaryExpression" || comparison.operator !== "===") {
+    return false;
+  }
+  return isIdentifier(comparison.left, { name: input.identifierName }) &&
+    isExactConstantIdentifier({
+      bindings: input.bindings,
+      before: input.before,
+      name: input.constantName,
+      node: comparison.right,
+      value: input.value,
+    });
+}
+
+function isExactConstantIdentifier(input: {
+  readonly before: number;
+  readonly bindings: ReadonlyMap<string, readonly VariableBinding[]>;
+  readonly name: string;
+  readonly node: Node | undefined;
+  readonly value: string;
+}): boolean {
+  if (!input.node || !isIdentifier(unwrapExpression(input.node), {
+    name: input.name,
+  })) {
+    return false;
+  }
+  const binding = resolveBinding(input.bindings, input.name, input.before);
+  return Boolean(
+    binding?.definitive &&
+    isStringLiteral(unwrapExpression(binding.initializer), {
+      value: input.value,
+    }),
+  );
+}
+
+function isExactCallWithMemberArgument(
+  node: Node,
+  calleeName: string,
+  argumentPath: string,
+): boolean {
+  const expression = unwrapExpression(node);
+  if (
+    !isCallExpression(expression) ||
+    !isIdentifier(unwrapExpression(expression.callee), { name: calleeName }) ||
+    expression.arguments.length !== 1
+  ) {
+    return false;
+  }
+  const argument = expression.arguments[0];
+  return Boolean(
+    argument &&
+    argument.type !== "ArgumentPlaceholder" &&
+    argument.type !== "SpreadElement" &&
+    readMemberPath(argument)?.join(".") === argumentPath,
+  );
+}
+
+function isExactJsonStringifyOfParameter(input: {
+  readonly analysis: ProviderHttpSourceAnalysis;
+  readonly before: number;
+  readonly bindings: ReadonlyMap<string, readonly VariableBinding[]>;
+  readonly node: Node | undefined;
+  readonly parameterName: string;
+}): boolean {
+  if (!input.node || !isUnshadowedGlobalIdentifier({
+    analysis: input.analysis,
+    before: input.before,
+    bindings: input.bindings,
+    name: "JSON",
+  })) {
+    return false;
+  }
+  const expression = unwrapExpression(input.node);
+  if (
+    !isCallExpression(expression) ||
+    readMemberPath(expression.callee)?.join(".") !== "JSON.stringify" ||
+    expression.arguments.length !== 1
+  ) {
+    return false;
+  }
+  const argument = expression.arguments[0];
+  return Boolean(
+    argument &&
+    argument.type !== "ArgumentPlaceholder" &&
+    argument.type !== "SpreadElement" &&
+    isExactFunctionParameter(
+      input.analysis,
+      argument,
+      input.before,
+      input.parameterName,
+    ),
+  );
 }
 
 function isInternalSameOriginRequest(input: {
@@ -3378,6 +4093,14 @@ function looksLikeFetchFunctionType(typeText: string): boolean {
   const signature = readFetchCallableSignature(normalized);
   return normalized.startsWith("(") && signature?.separator === "=>" &&
     isFetchTargetParameter(signature.name, signature.type);
+}
+
+function looksLikeStandardFetchDerivedBivariantType(
+  typeText: string,
+): boolean {
+  const normalized = stripLeadingTypeAnnotation(typeText).replace(/\s+/gu, "");
+  return /^\{bivarianceHack\(input:Parameters<typeoffetch>\[0\],init\?:Parameters<typeoffetch>\[1\],?\):ReturnType<typeoffetch>;?\}\[(['"])bivarianceHack\1\]$/u
+    .test(normalized);
 }
 
 function looksLikeExactFetchFunctionType(typeText: string): boolean {

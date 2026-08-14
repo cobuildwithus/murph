@@ -36,6 +36,11 @@ function rawHttpViolations(source: string, relativePath = "scripts/example.mjs")
   return violationsOfKind("raw-provider-http", source, relativePath);
 }
 
+function replaceRequired(source: string, before: string, after: string): string {
+  expect(source).toContain(before);
+  return source.replace(before, after);
+}
+
 describe("check-provider-request-boundaries", () => {
   it("recognizes direct tsx execution even when the module URL has a query", () => {
     expect(
@@ -218,6 +223,37 @@ describe("check-provider-request-boundaries", () => {
     );
 
     expect(matches).toEqual([]);
+  });
+
+  it("does not attribute a neutral fetch helper to an unrelated SDK import", () => {
+    const matches = rawHttpViolations(
+      [
+        "import LinqAPIV3 from '@linqapp/sdk';",
+        "async function fetchWithTimeout(fetchImplementation: typeof fetch, url: URL) {",
+        "  return await fetchImplementation(url, { signal: AbortSignal.timeout(1000) });",
+        "}",
+        "const client = new LinqAPIV3({ apiKey: 'test' });",
+        "void client;",
+      ].join("\n"),
+      "apps/cloudflare/src/database-health/monitor.ts",
+    );
+
+    expect(matches).toEqual([]);
+  });
+
+  it("still attributes provider-neutral calls inside an SDK fetch adapter", () => {
+    const matches = rawHttpViolations(
+      [
+        "import LinqAPIV3 from '@linqapp/sdk';",
+        "function createSdkFetch(fetchImplementation: typeof fetch) {",
+        "  return async (url: URL) => await fetchImplementation(url);",
+        "}",
+        "void LinqAPIV3;",
+      ].join("\n"),
+      "apps/cloudflare/src/database-health/monitor.ts",
+    );
+
+    expect(matches.map((match) => match.line)).toEqual([3]);
   });
 
   it("does not allow source comments to suppress provider HTTP", () => {
@@ -539,7 +575,7 @@ describe("check-provider-request-boundaries", () => {
       "packages/device-syncd/src/providers/junction-http.ts",
     );
 
-    expect(matches.map((match) => match.line)).toEqual([4, 5, 7, 10]);
+    expect(matches.map((match) => match.line)).toEqual([4, 5, 7, 12]);
   });
 
   it("recognizes a constructor-injected fetch member by its call signature", () => {
@@ -1202,22 +1238,131 @@ describe("check-provider-request-boundaries", () => {
     ).not.toContain(886);
   });
 
-  it("reports executable SDK adapter and provider helper transports", () => {
+  it("admits only the exact production SDK transport hooks", () => {
     const owners = [
-      ["packages/device-syncd/src/providers/junction-client.ts", 837],
-      ["apps/web/src/lib/labs/junction.ts", 264],
-      ["packages/assistant-engine/src/assistant-codex/openai-image-generation.ts", 275],
-      ["apps/web/src/lib/hosted-onboarding/linq-first-contact-admission.ts", 910],
-      ["packages/operator-config/src/agentmail-runtime.ts", 522],
+      "apps/web/src/lib/connected-apps/composio.ts",
+      "apps/web/src/lib/hosted-onboarding/resend-plain-text-email.ts",
+      "apps/web/src/lib/labs/junction.ts",
+      "apps/web/src/lib/physical-notes/lob-runtime.ts",
+      "packages/cli/src/research-scout-client.ts",
+      "packages/device-syncd/src/providers/junction-client.ts",
+      "packages/operator-config/src/elevenlabs-runtime.ts",
+      "packages/operator-config/src/linq-runtime.ts",
     ] as const;
 
-    for (const [relativePath, line] of owners) {
+    for (const relativePath of owners) {
       expect(
         rawHttpViolations(
           readFileSync(relativePath, "utf8"),
           relativePath,
-        ).map((match) => match.line),
-      ).toContain(line);
+        ),
+      ).toEqual([]);
+    }
+  });
+
+  it("rejects URL, init, and wiring mutations in official SDK fetch hooks", () => {
+    const cases = [
+      {
+        after: "fetchImpl.call(undefined, new URL(String(request)), init)",
+        before: "fetchImpl.call(undefined, request, init)",
+        path: "apps/web/src/lib/connected-apps/composio.ts",
+      },
+      {
+        after: "fetchImpl.call(undefined, request, { ...init, method: \"GET\" })",
+        before: "fetchImpl.call(undefined, request, init)",
+        path: "apps/web/src/lib/physical-notes/lob-runtime.ts",
+      },
+      {
+        after: "cache: \"reload\",",
+        before: "cache: \"no-store\",",
+        path: "apps/web/src/lib/labs/junction.ts",
+      },
+      {
+        after: "this.fetchImpl(new URL(String(input)), {",
+        before: "this.fetchImpl(input, {",
+        path: "packages/device-syncd/src/providers/junction-client.ts",
+      },
+      {
+        after: "fetchImplementation(\n      new URL(String(input)),",
+        before: "fetchImplementation(\n      input,",
+        path: "packages/operator-config/src/elevenlabs-runtime.ts",
+      },
+      {
+        after:
+          "input.fetchImplementation.call(undefined, new URL(request), init)",
+        before: "input.fetchImplementation.call(undefined, request, init)",
+        path: "packages/operator-config/src/linq-runtime.ts",
+      },
+      {
+        after: "fetch: fetchImpl,",
+        before: "fetch: createLobSdkFetch(input.fetchImpl),",
+        path: "apps/web/src/lib/physical-notes/lob-runtime.ts",
+      },
+      {
+        after: "fetch: globalThis.fetch,",
+        before: "fetch: sdkFetch,",
+        path: "packages/device-syncd/src/providers/junction-client.ts",
+      },
+      {
+        after: "...init,\n        body: 'override',",
+        before: "...init,",
+        path: "packages/operator-config/src/elevenlabs-runtime.ts",
+      },
+    ] as const;
+
+    for (const testCase of cases) {
+      const source = readFileSync(testCase.path, "utf8");
+      expect(
+        rawHttpViolations(
+          replaceRequired(source, testCase.before, testCase.after),
+          testCase.path,
+        ),
+      ).toHaveLength(1);
+    }
+  });
+
+  it("rejects path, method, body, and SDK ownership mutations in gap overrides", () => {
+    const cases = [
+      {
+        after: "`${this.baseUrl}${path}`",
+        before: "`${this.baseUrl}${requestPath}`",
+        path: "apps/web/src/lib/hosted-onboarding/resend-plain-text-email.ts",
+      },
+      {
+        after: "requestInit.method = 'GET';",
+        before: "requestInit.method = options.method;",
+        path: "apps/web/src/lib/hosted-onboarding/resend-plain-text-email.ts",
+      },
+      {
+        after: "'https://api.exa.ai/contents'",
+        before: "'https://api.exa.ai/search'",
+        path: "packages/cli/src/research-scout-client.ts",
+      },
+      {
+        after: "method: 'GET',",
+        before: "method: 'POST',",
+        path: "packages/cli/src/research-scout-client.ts",
+      },
+      {
+        after: "body: JSON.stringify({ query: 'override' }),",
+        before: "body: JSON.stringify(body),",
+        path: "packages/cli/src/research-scout-client.ts",
+      },
+      {
+        after: "class RunnerScopedExaClient extends Resend {",
+        before: "class RunnerScopedExaClient extends Exa {",
+        path: "packages/cli/src/research-scout-client.ts",
+      },
+    ] as const;
+
+    for (const testCase of cases) {
+      const source = readFileSync(testCase.path, "utf8");
+      expect(
+        rawHttpViolations(
+          replaceRequired(source, testCase.before, testCase.after),
+          testCase.path,
+        ),
+      ).toHaveLength(1);
     }
   });
 
@@ -1227,8 +1372,6 @@ describe("check-provider-request-boundaries", () => {
       ["apps/web/src/lib/hosted-onboarding/linq-client.ts", 848],
       ["apps/web/src/lib/hosted-onboarding/linq-contact-card.ts", 589],
       ["packages/assistant-runtime/src/hosted-runtime/events/linq.ts", 490],
-      ["packages/inboxd/src/connectors/email/connector.ts", 128],
-      ["packages/operator-config/src/agentmail-runtime.ts", 482],
     ] as const;
 
     for (const [relativePath, line] of owners) {
@@ -1541,6 +1684,9 @@ describe("check-provider-request-boundaries", () => {
       "presigned-byte-transfer",
       "internal-same-origin",
       "xai-x-search-responses",
+      "official-sdk-fetch-hook",
+      "resend-sdk-fetch-request-override",
+      "exa-sdk-request-override",
     ]);
   });
 

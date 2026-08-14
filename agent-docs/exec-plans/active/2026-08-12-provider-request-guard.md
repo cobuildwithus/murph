@@ -2,7 +2,7 @@
 
 Status: active
 Created: 2026-08-12
-Updated: 2026-08-13
+Updated: 2026-08-14
 
 ## Goal
 
@@ -220,6 +220,21 @@ Updated: 2026-08-13
   admits exceptions only for direct closed array literals, while identifier,
   spread, and sparse tuples fail closed. No baseline, warning mode, comment
   suppression, SDK-import exemption, or new provider exception was added.
+- The implementation follow-up accepted three high-confidence guard findings:
+  provider identity could disappear at SDK/import helper boundaries, declared
+  values could be trusted after a later effective-value override, and aliased
+  `.call`/mutable `.apply` forwarding could lose transport provenance. The
+  correction retains provider identity through exact lexical boundaries,
+  resolves chronological effective values, derives `.call` provenance from its
+  underlying target, and admits `.apply` only for immutable closed tuples.
+- Current `main` now contains the sibling official-SDK migrations. The guard
+  recognizes only exact, path-scoped SDK transport hooks whose SDK import,
+  constructor wiring, provider identity, URL parameter, forwarded init, and
+  fail-closed transport additions all match the registry. Composio, Lob,
+  Junction, Linq, ElevenLabs, Resend, and Exa approvals are operation-specific;
+  mutation fixtures prove that URL, init, cache/redirect, wiring, and tuple
+  changes fail closed. This does not create an SDK-import exemption or authorize
+  another handwritten provider operation.
 
 ## Verification
 
@@ -232,17 +247,14 @@ Updated: 2026-08-13
 
 Current evidence:
 
-- Focused guard suite: 93 tests passed after the round-7 correction and the
-  conditional-assignment provenance follow-up.
-- Repository-tool suite: 35 files and 603 tests passed after refreshing the
-  already-declared, lockfile-frozen ElevenLabs dependency.
+- Focused guard suite: 97 tests passed after the official-SDK hook and mutation
+  coverage follow-up.
+- Repository-tool suite: 35 files and 607 tests passed in the final local run.
 - Tools and operator-config TypeScript no-emit checks: passed.
-- `pnpm provider-requests:guard`: intentionally exits 1 with 39 findings after
-  integrating the sibling SDK migrations. It continues to report the retained SDK fetch
-  adapters at their executable transport lines and handwritten response/fetch
-  contracts, plus the unchanged AgentMail clients and remaining Linq
-  operation-level calls. The actual Linq
-  and AgentMail presigned byte transfers remain outside the inventory as the
-  already-proven narrow byte-transfer exception.
-- Diff verification reaches the provider guard and stops on the same expected
-  findings.
+- `pnpm provider-requests:guard`: passes in the integration workspace containing
+  the current-base sibling SDK migrations and the exact registered SDK hooks.
+- Full affected integration evidence includes Cloudflare 2,435 tests, web
+  branch-owned SDK clusters 113 tests, assistant engine 317 tests,
+  assistant-runtime Linq 30 tests, hosted-local Linq 25 tests, device-sync
+  1,070 tests, operator configuration 318 tests, and contracts 280 tests.
+- Exact-head CI remains the authoritative broad PR gate for the authored patch.
