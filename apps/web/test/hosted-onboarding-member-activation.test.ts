@@ -30,8 +30,8 @@ function createDeferred<T>(): Deferred<T> {
 
 const mocks = vi.hoisted(() => ({
   clearHostedMemberPendingActivationTimeZone: vi.fn(),
-  hasHostedMailboxItemByKind: vi.fn(),
-  hasActiveHostedCryptoDomainRootsForUserTx: vi.fn(),
+  readHostedMailboxUserIdsByKind: vi.fn(),
+  readUserIdsWithActiveHostedCryptoDomainRootsTx: vi.fn(),
   readHostedMailboxItemByDedupeKey: vi.fn(),
   lockHostedMemberRow: vi.fn(),
   readHostedMemberActivationCoreState: vi.fn(),
@@ -48,7 +48,8 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("@/src/lib/hosted-crypto/domain-root-store", () => ({
-  hasActiveHostedCryptoDomainRootsForUserTx: mocks.hasActiveHostedCryptoDomainRootsForUserTx,
+  readUserIdsWithActiveHostedCryptoDomainRootsTx:
+    mocks.readUserIdsWithActiveHostedCryptoDomainRootsTx,
   provisionHostedCryptoDomainRootsForUserTx:
     mocks.provisionHostedCryptoDomainRootsForUserTx,
   provisionPreparedHostedCryptoDomainRootsTx:
@@ -57,7 +58,7 @@ vi.mock("@/src/lib/hosted-crypto/domain-root-store", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-mailbox/store", () => ({
-  hasHostedMailboxItemByKind: mocks.hasHostedMailboxItemByKind,
+  readHostedMailboxUserIdsByKind: mocks.readHostedMailboxUserIdsByKind,
   readHostedMailboxItemByDedupeKey: mocks.readHostedMailboxItemByDedupeKey,
   appendHostedMailboxEnvelopeTx: mocks.appendHostedMailboxEnvelopeTx,
 }));
@@ -105,6 +106,7 @@ import {
   activateHostedMemberForPositiveSourceTx,
   buildHostedMemberActivationWelcomeRoute,
   hasHostedMemberActivationProof,
+  readHostedMemberActivationProofMemberIds,
 } from "@/src/lib/hosted-onboarding/member-activation";
 import { renderUserFacingMessage } from "@/src/lib/hosted-messages/user-facing-messages";
 
@@ -206,8 +208,8 @@ describe("hosted onboarding member activation", () => {
     vi.spyOn(console, "info").mockImplementation(() => {});
 
     mocks.readHostedMailboxItemByDedupeKey.mockResolvedValue(null);
-    mocks.hasHostedMailboxItemByKind.mockResolvedValue(false);
-    mocks.hasActiveHostedCryptoDomainRootsForUserTx.mockResolvedValue(false);
+    mocks.readHostedMailboxUserIdsByKind.mockResolvedValue(new Set());
+    mocks.readUserIdsWithActiveHostedCryptoDomainRootsTx.mockResolvedValue(new Set());
     mocks.clearHostedMemberPendingActivationTimeZone.mockResolvedValue(undefined);
     mocks.lockHostedMemberRow.mockResolvedValue(undefined);
     setActivationMemberSnapshot(makeMemberSnapshot());
@@ -234,26 +236,89 @@ describe("hosted onboarding member activation", () => {
     });
   });
 
-  it("uses a durable activation marker or complete crypto roots as activation proof", async () => {
+  it("resolves a maximum activation set with two metadata reads and no unwrap", async () => {
     const prisma = makeTransactionHarness() as never;
+    const memberIds = Array.from({ length: 32 }, (_, index) => `member_${index}`);
+    const mailboxRead = createDeferred<ReadonlySet<string>>();
+    const cryptoRead = createDeferred<ReadonlySet<string>>();
+    let activeReads = 0;
+    let peakReads = 0;
+    const trackRead = async (
+      deferred: Deferred<ReadonlySet<string>>,
+    ): Promise<ReadonlySet<string>> => {
+      activeReads += 1;
+      peakReads = Math.max(peakReads, activeReads);
+      try {
+        return await deferred.promise;
+      } finally {
+        activeReads -= 1;
+      }
+    };
+    mocks.readHostedMailboxUserIdsByKind.mockImplementationOnce(
+      () => trackRead(mailboxRead),
+    );
+    mocks.readUserIdsWithActiveHostedCryptoDomainRootsTx.mockImplementationOnce(
+      () => trackRead(cryptoRead),
+    );
 
-    await expect(hasHostedMemberActivationProof({
-      memberId: "member_123",
+    const proof = readHostedMemberActivationProofMemberIds({
+      memberIds,
       prisma,
-    })).resolves.toBe(false);
+    });
 
-    mocks.hasHostedMailboxItemByKind.mockResolvedValueOnce(true);
+    expect(activeReads).toBe(1);
+    expect(peakReads).toBe(1);
+    expect(mocks.readUserIdsWithActiveHostedCryptoDomainRootsTx)
+      .not.toHaveBeenCalled();
+    mailboxRead.resolve(new Set(["member_1", "member_3"]));
+    await vi.waitFor(() => {
+      expect(mocks.readUserIdsWithActiveHostedCryptoDomainRootsTx)
+        .toHaveBeenCalledTimes(1);
+    });
+    expect(activeReads).toBe(1);
+    expect(peakReads).toBe(1);
+    cryptoRead.resolve(new Set(["member_2"]));
+
+    await expect(proof).resolves.toEqual(new Set([
+      "member_1",
+      "member_2",
+      "member_3",
+    ]));
+    expect(activeReads).toBe(0);
+    expect(peakReads).toBe(1);
+
+    expect(mocks.readHostedMailboxUserIdsByKind).toHaveBeenCalledExactlyOnceWith({
+      kind: "member.activated",
+      prisma,
+      userIds: memberIds,
+    });
+    expect(mocks.readUserIdsWithActiveHostedCryptoDomainRootsTx)
+      .toHaveBeenCalledExactlyOnceWith({
+        tx: prisma,
+        userIds: memberIds.filter(
+          (memberId) => !["member_1", "member_3"].includes(memberId),
+        ),
+      });
+    expect(mocks.unwrapHostedDomainRootForWeb).not.toHaveBeenCalled();
+  });
+
+  it("uses the same set policy for the point activation proof", async () => {
+    const prisma = makeTransactionHarness() as never;
+    mocks.readHostedMailboxUserIdsByKind.mockResolvedValueOnce(
+      new Set(["member_123"]),
+    );
+
     await expect(hasHostedMemberActivationProof({
       memberId: "member_123",
       prisma,
     })).resolves.toBe(true);
 
-    mocks.hasHostedMailboxItemByKind.mockResolvedValueOnce(false);
-    mocks.hasActiveHostedCryptoDomainRootsForUserTx.mockResolvedValueOnce(true);
-    await expect(hasHostedMemberActivationProof({
-      memberId: "member_123",
+    expect(mocks.readHostedMailboxUserIdsByKind).toHaveBeenCalledWith({
+      kind: "member.activated",
       prisma,
-    })).resolves.toBe(true);
+      userIds: ["member_123"],
+    });
+    expect(mocks.readUserIdsWithActiveHostedCryptoDomainRootsTx).not.toHaveBeenCalled();
   });
 
   it("keeps the Linq routing lookup and activation dispatch ownership together for Stripe activations", async () => {
@@ -845,6 +910,31 @@ describe("hosted onboarding member activation", () => {
     expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledTimes(1);
   });
 
+  it("forwards optional Linq-line admission only for an explicitly tolerant signup", async () => {
+    const member = makeMemberSnapshot();
+    mocks.resolveHostedMemberActivationLinqRoute.mockResolvedValueOnce({
+      welcomeRoute: null,
+    });
+
+    await activateHostedMemberForPositiveSourceTx({
+      allowSignupWelcomeWithoutAssignableLinqLine: true,
+      dispatchContext: {
+        eventCreatedAt: new Date("2026-04-12T00:00:00.000Z"),
+        occurredAt: "2026-04-12T00:00:00.000Z",
+        sourceEventId: "evt_optional_line",
+        sourceType: "hosted.starter_usage.enrolled",
+      },
+      memberId: member.core.id,
+      prisma: makeTransactionHarness() as never,
+    });
+
+    expect(mocks.resolveHostedMemberActivationLinqRoute).toHaveBeenCalledWith({
+      allowNoAssignableLine: true,
+      member,
+      prisma: expect.anything(),
+    });
+  });
+
   it("passes pending signup timezone into the activation wake and clears the hosted row", async () => {
     const member = makeMemberSnapshot({
       core: {
@@ -1223,8 +1313,9 @@ describe("hosted onboarding member activation", () => {
     });
     setActivationMemberSnapshot(member);
     mocks.readHostedMailboxItemByDedupeKey.mockResolvedValue({
+      consumedAt: null,
       dedupeKey: "member.activated:stripe.customer.subscription.updated:member_123:evt_123",
-      id: "mailbox_activation_existing",
+      id: "mailbox_existing_activation",
     });
 
     await expect(
@@ -1242,7 +1333,7 @@ describe("hosted onboarding member activation", () => {
     ).resolves.toEqual({
       activated: false,
       hostedExecutionEventId: "member.activated:stripe.customer.subscription.updated:member_123:evt_123",
-      hostedExecutionMailboxItemId: "mailbox_activation_existing",
+      hostedExecutionMailboxItemId: "mailbox_existing_activation",
       memberId: "member_123",
     });
 
@@ -1297,7 +1388,7 @@ describe("hosted onboarding member activation", () => {
       },
     });
     setActivationMemberSnapshot(member);
-    mocks.hasHostedMailboxItemByKind.mockResolvedValueOnce(true);
+    mocks.readHostedMailboxUserIdsByKind.mockResolvedValueOnce(new Set(["member_123"]));
 
     await expect(
       activateHostedMemberForPositiveSourceTx({
@@ -1318,12 +1409,12 @@ describe("hosted onboarding member activation", () => {
       memberId: "member_123",
     });
 
-    expect(mocks.hasHostedMailboxItemByKind).toHaveBeenCalledWith({
+    expect(mocks.readHostedMailboxUserIdsByKind).toHaveBeenCalledWith({
       kind: "member.activated",
       prisma: expect.anything(),
-      userId: "member_123",
+      userIds: ["member_123"],
     });
-    expect(mocks.hasActiveHostedCryptoDomainRootsForUserTx).not.toHaveBeenCalled();
+    expect(mocks.readUserIdsWithActiveHostedCryptoDomainRootsTx).not.toHaveBeenCalled();
     expect(mocks.clearHostedMemberPendingActivationTimeZone).toHaveBeenCalledWith({
       memberId: "member_123",
       prisma: expect.anything(),
@@ -1342,8 +1433,10 @@ describe("hosted onboarding member activation", () => {
       },
     });
     setActivationMemberSnapshot(member);
-    mocks.hasHostedMailboxItemByKind.mockResolvedValueOnce(false);
-    mocks.hasActiveHostedCryptoDomainRootsForUserTx.mockResolvedValueOnce(true);
+    mocks.readHostedMailboxUserIdsByKind.mockResolvedValueOnce(new Set());
+    mocks.readUserIdsWithActiveHostedCryptoDomainRootsTx.mockResolvedValueOnce(
+      new Set(["member_123"]),
+    );
 
     await expect(
       activateHostedMemberForPositiveSourceTx({
@@ -1364,14 +1457,14 @@ describe("hosted onboarding member activation", () => {
       memberId: "member_123",
     });
 
-    expect(mocks.hasHostedMailboxItemByKind).toHaveBeenCalledWith({
+    expect(mocks.readHostedMailboxUserIdsByKind).toHaveBeenCalledWith({
       kind: "member.activated",
       prisma: expect.anything(),
-      userId: "member_123",
+      userIds: ["member_123"],
     });
-    expect(mocks.hasActiveHostedCryptoDomainRootsForUserTx).toHaveBeenCalledWith({
+    expect(mocks.readUserIdsWithActiveHostedCryptoDomainRootsTx).toHaveBeenCalledWith({
       tx: expect.anything(),
-      userId: "member_123",
+      userIds: ["member_123"],
     });
     expect(mocks.clearHostedMemberPendingActivationTimeZone).toHaveBeenCalledWith({
       memberId: "member_123",

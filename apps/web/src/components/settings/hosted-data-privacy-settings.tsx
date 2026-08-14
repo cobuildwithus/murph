@@ -22,9 +22,9 @@ import {
 import { Input } from "@/src/components/ui/input";
 import { Label } from "@/src/components/ui/label";
 import {
-  loadBrowserVaultReplica,
-  normalizeBrowserVaultError,
-} from "@/src/lib/browser-vault/loader";
+  loadBrowserVaultExport,
+  normalizeBrowserVaultExportError,
+} from "@/src/lib/browser-vault/export";
 import {
   publishBrowserVaultSessionEnding,
   publishBrowserVaultSessionInvalidation,
@@ -61,7 +61,6 @@ interface HostedAccountDeleteResponse {
 }
 
 const DEFAULT_VAULT_EXPORT_FILENAME = "murph-vault-export.json";
-const VAULT_EXPORT_MIME_TYPE = "application/json; charset=utf-8";
 const POST_DELETE_REDIRECT_DELAY_MS = 2_500;
 const POST_DELETE_REDIRECT_FALLBACK_MS = 8_000;
 
@@ -142,23 +141,12 @@ function HostedDataPrivacySettingsAuthorized(props: {
 
     try {
       const authorization = await authorize("vault.export");
-      const result = await loadBrowserVaultReplica({
+      const result = await loadBrowserVaultExport({
         authorization,
-        emptyOnUnauthorized: false,
-        endpoint: "/api/settings/vault-export/session",
-        knownReplicaRef: null,
-      });
-
-      if (result.state !== "ready") {
-        throw new Error("Your data isn't ready to export yet.");
-      }
-
-      const blob = new Blob([JSON.stringify(result.client.replica, null, 2)], {
-        type: VAULT_EXPORT_MIME_TYPE,
       });
       triggerJsonDownload(
-        blob,
-        buildVaultExportFilename(result.client.replica.generatedAt),
+        result.blob,
+        buildVaultExportFilename(result.generatedAt),
       );
 
       closeExportDialog();
@@ -602,7 +590,7 @@ function formatVaultExportError(error: unknown): string {
     return "You don't have permission to export this data right now.";
   }
 
-  const normalizedMessage = normalizeBrowserVaultError(error);
+  const normalizedMessage = normalizeBrowserVaultExportError(error);
   return normalizedMessage === "Your dashboard data is not available right now."
     ? "Murph could not retrieve your retained export right now. Try again later."
     : normalizedMessage;

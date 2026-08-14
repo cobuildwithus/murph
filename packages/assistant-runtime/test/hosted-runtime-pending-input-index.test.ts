@@ -289,6 +289,84 @@ describe("hosted pending assistant input index", () => {
     })).resolves.toEqual(["item_prefix_telegram"]);
   });
 
+  it("keeps an uncovered reaction successor pending and outside handled checkpoint selection", async () => {
+    const vaultRoot = await createTempVault();
+    await saveAssistantAutomationState(vaultRoot, {
+      autoReply: [{
+        channel: "linq",
+        eligibleAfter: null,
+        enabledAt: "2026-04-23T00:00:00.000Z",
+      }],
+      updatedAt: "2026-04-23T00:00:00.000Z",
+      version: 1,
+    });
+    const accepted = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createAssistantInputEvent({
+        dedupeKey: "dedupe_reaction_accepted",
+        eventId: "evt_reaction_accepted",
+        itemId: "item_reaction_accepted",
+        laneSeq: "10",
+        messageId: "msg_reaction_accepted",
+        occurredAt: "2026-04-23T00:00:01.000Z",
+        receivedAt: "2026-04-23T00:00:02.000Z",
+        text: "accepted reaction input",
+      }),
+    });
+    const uncovered = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createAssistantInputEvent({
+        dedupeKey: "dedupe_reaction_uncovered",
+        eventId: "evt_reaction_uncovered",
+        itemId: "item_reaction_uncovered",
+        laneSeq: "20",
+        messageId: "msg_reaction_uncovered",
+        occurredAt: "2026-04-23T00:00:03.000Z",
+        receivedAt: "2026-04-23T00:00:04.000Z",
+        text: "uncovered reaction successor",
+      }),
+    });
+    for (const event of [accepted, uncovered]) {
+      await enqueueHostedPendingAssistantInputId({
+        inputId: event.inputId,
+        vaultRoot,
+      });
+    }
+    await recordHostedMailboxAssistantInputItem({
+      inputId: accepted.inputId,
+      mailboxItemId: "item_reaction_accepted",
+      vault: vaultRoot,
+    });
+    await recordHostedMailboxAssistantInputItem({
+      inputId: uncovered.inputId,
+      mailboxItemId: "item_reaction_uncovered",
+      vault: vaultRoot,
+    });
+
+    await writeTerminalEvidence({
+      evidenceId: accepted.inputId,
+      groupInputIds: [accepted.inputId],
+      terminal: {
+        deliveryIntentId: "intent_frozen_reaction",
+        kind: "reply_intent_committed",
+        sessionId: "session_frozen_reaction",
+      },
+      vaultRoot,
+    });
+
+    await expect(compactHostedPendingAssistantInputIds({ vaultRoot }))
+      .resolves.toEqual([uncovered.inputId]);
+    await expect(inspectHostedPendingAssistantInputWakeCandidate({ vaultRoot }))
+      .resolves.toEqual({ hasCandidate: true, indexComplete: true });
+    await expect(compactHostedConversationMailboxHandledItemSelection({
+      consumedThroughSeq: "0",
+      vaultRoot,
+    })).resolves.toEqual({
+      frontierSelected: false,
+      itemIds: ["item_reaction_accepted"],
+    });
+  });
+
   it("persists the exact handled-item batch cursor across checkpoint collection", async () => {
     const vaultRoot = await createTempVault();
     await saveAssistantAutomationState(vaultRoot, {

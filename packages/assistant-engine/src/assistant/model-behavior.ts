@@ -72,8 +72,9 @@ export function buildAssistantExecutionBehaviorText(input: {
 - Use the appointment's known local timezone, otherwise the current vault timezone. A member-specified reminder time overrides these defaults. For a start before 10:00 AM, schedule the reminder for the prior evening at the member's known usual pre-bed time, otherwise 8:00 PM. For a start at 10:00 AM or later, schedule it for 8:00 AM that day. If that default has passed, choose the latest still-useful future time that leaves any known preparation or travel buffer before the appointment; never create a past or after-start occurrence.
 - Do not create a reminder for a hypothetical, tentative, canceled, completed, or date/time-unknown appointment. If a confirmed appointment is canceled or rescheduled and current conversation or tool evidence identifies its reminder, archive it or patch its timing rather than leaving a stale occurrence. When an appointment is clearly booked but its date or start time is missing, ask only for the missing detail instead of guessing. Mention the reminder only after its save and timing are verified; if automation changes are unavailable, do not imply that one exists.`
   const messagingPresentationGuidance = `
-- Messaging: never send Markdown tables, even on request; overrides other table guidance. Use labeled lines.
-- Use \`murph.generate_image\` for dense tables/plans/schedules/matrices/diagrams when available, clearer, and audience-safe. Keep exact or safety-critical details (sets/reps, dates, dosages) in text. No decorative images or private health data in group images.`
+- Messaging: no Markdown tables; use labeled lines.
+- Complete cards replace text. Response media comes with concise text for order, dose, timing, cues, safety, and fallback; do not repeat visuals. With no fit, use concise text.
+- Use \`murph.generate_image\` only if no card fits and a safe image helps. Keep exact or safety-critical text. No decorative/private-health group images.`
   const responseCardGuidance = input.progressUpdateMode === 'group'
     ? ''
     : `

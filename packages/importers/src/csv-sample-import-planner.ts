@@ -961,7 +961,7 @@ function escapeRegex(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
 }
 
-function normalizeFlexibleTimestamp(value: unknown, timeZone: string): string | undefined {
+export function normalizeFlexibleTimestamp(value: unknown, timeZone: string): string | undefined {
   if (value === undefined || value === null) {
     return undefined;
   }

@@ -17,19 +17,11 @@ import {
   type ExperimentFrontmatter,
 } from "@murphai/contracts";
 
-import {
-  hashCanonicalQuerySources,
-  listMetricPoints,
-  readVault,
-} from "@murphai/query";
 import type {
   CanonicalQuerySourceHash,
   VaultReadModel,
 } from "@murphai/query";
-import {
-  createBrowserVaultReplica,
-  type BrowserVaultReplica,
-} from "@murphai/query/browser";
+import type { BrowserVaultReplica } from "@murphai/query/browser";
 import {
   assessBrowserVaultReplicaFreshness,
   HOSTED_BROWSER_VAULT_REPLICA_MAX_BYTES,
@@ -137,6 +129,11 @@ export async function createHostedBrowserVaultReplicaForSourceState(input: {
   sourceStateHash: string;
   vaultRoot: string;
 }): Promise<BrowserVaultReplica> {
+  const {
+    createBrowserVaultReplica,
+    listMetricPoints,
+    readVault,
+  } = await import("@murphai/query/browser-replica-server");
   const vault = await readVault(input.vaultRoot);
   const [metricPoints, outcomeProjection] = await Promise.all([
     listMetricPoints(input.vaultRoot, { limit: null }),
@@ -430,6 +427,10 @@ interface HostedBrowserVaultOutcomeProjection {
 export async function hashHostedBrowserVaultReplicaSources(
   vaultRoot: string,
 ): Promise<CanonicalQuerySourceHash> {
+  const {
+    hashCanonicalQuerySources,
+    readVault,
+  } = await import("@murphai/query/browser-replica-server");
   const [canonicalSource, vault] = await Promise.all([
     hashCanonicalQuerySources(vaultRoot),
     readVault(vaultRoot),

@@ -10,6 +10,7 @@ import {
   MURPH_GROUP_ROOM_MODEL_MAINTENANCE_PERMISSION_PROFILE,
   MURPH_MEMBER_MEMORY_MAINTENANCE_PERMISSION_PROFILE,
   MURPH_MEMBER_READ_PERMISSION_PROFILE,
+  MURPH_MEMBER_WORKSPACE_PERMISSION_PROFILE,
 } from '@murphai/hosted-execution/assistant-permissions'
 
 const EXPECTED_NATIVE_CAPABILITIES_RESTRICTED_THREAD_CONFIG = {
@@ -632,6 +633,18 @@ describe('Codex model catalog', () => {
       },
     })
     providerTurnRunnerMocks.buildCodexTurnExecutionPlan.mockResolvedValue({
+      acceptedInputItems: [
+        {
+          acceptedAt: '2031-02-15T09:59:58.000Z',
+          id: 'accepted-input-earlier',
+          source: 'manual',
+        },
+        {
+          acceptedAt: '2031-02-15T09:59:59.900Z',
+          id: 'accepted-input-latest',
+          source: 'manual',
+        },
+      ],
       activeTurnSteering: null,
       executionContext: { hosted: null },
       input,
@@ -692,6 +705,13 @@ describe('Codex model catalog', () => {
     }
     expect(outcome.providerTurn.responseCard).toEqual(card)
     expect(outcome.providerTurn.responseMedia).toEqual([])
+    expect(
+      providerMocks.executeCodexAssistantTurnAttemptFromInput.mock.calls[0]?.[0]
+        ?.automationRelativeDateReferenceWindow,
+    ).toEqual({
+      earliestAt: '2031-02-15T09:59:58.000Z',
+      latestAt: '2031-02-15T09:59:59.900Z',
+    })
   })
 
   it('enforces the output-only boundary at provider execution', async () => {
@@ -1035,11 +1055,14 @@ describe('Codex model catalog', () => {
       progressDelivery,
       providerFetch,
       publicInternetFetch,
+      permissions: MURPH_MEMBER_WORKSPACE_PERMISSION_PROFILE,
       requireHostedPrivateImageDelivery: true,
       resume: {
         codexThreadId: 'thread-completion-native-authority',
       },
+      runtimeWorkspaceRoots: ['/work'],
     })
+    expect(foregroundProviderInput).not.toHaveProperty('processLifetime')
   })
 
   it('keeps only song generation while denying native creative-notification capabilities', async () => {

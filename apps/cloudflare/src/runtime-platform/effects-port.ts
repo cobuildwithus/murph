@@ -247,12 +247,17 @@ export function createCloudflareEffectsPort(input: {
               timeoutMs: input.timeoutMs,
               transport: webControlTransport,
             });
+            const authorityResponse = payload as {
+              assistantAskFallbackRequired?: unknown;
+              authorized?: unknown;
+            } | null;
             if (
-              !payload
-              || typeof payload !== "object"
-              || Array.isArray(payload)
-              || (payload as { authorized?: unknown }).authorized !== true
+              authorityResponse?.authorized === false
+              && authorityResponse.assistantAskFallbackRequired === true
             ) {
+              return { assistantAskFallbackRequired: true };
+            }
+            if (authorityResponse?.authorized !== true) {
               throw new TypeError(
                 "Hosted Assistant Ask private completion authority response is invalid.",
               );

@@ -7,6 +7,7 @@ import {
 } from './hosted-mailbox-input-items.js'
 import {
   listAssistantInputEvents,
+  resolveAssistantInputEventReferenceAt,
   type AssistantInputAttachmentEvidence,
   type AssistantInputAttachmentDescriptor,
   type AssistantInputConversationRef,
@@ -307,6 +308,7 @@ function assistantInputCandidateFromStoredEventWithHostedMailboxItem(input: {
       : null
   return {
     acceptedInput: {
+      acceptedAt: resolveAssistantInputEventReferenceAt(event),
       id: event.inputId,
       source: 'assistant-input',
       captureIds,

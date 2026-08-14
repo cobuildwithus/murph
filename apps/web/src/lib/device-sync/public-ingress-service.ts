@@ -25,6 +25,7 @@ import {
   type DeviceSyncPublicIngressStore,
   type DeviceSyncRegistry,
 } from "@murphai/device-syncd/types";
+import type { PreparedDeviceSyncWebhookV1 } from "@murphai/device-syncd/prepared-webhook";
 import type { CompanionHrvRmssdObservation } from "@murphai/contracts";
 
 import { runWithHostedDomainRootUnwrapCache } from "../hosted-crypto/domain-root-unwrap-cache";
@@ -55,7 +56,6 @@ import {
   handleHostedDeviceSyncUnknownWebhook,
   handleHostedDeviceSyncWebhookAccepted,
   prepareHostedDeviceSyncConnectionSourceStart,
-  reconcileHostedDeviceSyncConnectionSourceRegistration,
 } from "./wake-service";
 import { readRawBodyBuffer } from "./http";
 import { HostedDeviceSyncWebhookAdminService } from "./webhook-admin-service";
@@ -101,6 +101,17 @@ export class HostedDeviceSyncPublicIngressService {
       registry: input.registry,
       store: input.store,
       hooks: {
+        // Hosted source lifecycle is admitted under the same consent/app/
+        // connection transaction as receipt, dirty state, and trace completion.
+        onConnectionSourceObserved: ({ eventType, sourceProviderSlug }) =>
+          normalizeJunctionProviderSlug(sourceProviderSlug)
+            === COMPANION_APPLE_HEALTH_SOURCE_PROVIDER
+            && (
+              eventType === "provider.connection.created"
+              || eventType === "provider.connection.updated"
+            )
+            ? { sourceAdmissionDeferred: true }
+            : undefined,
         onConnectionEstablished: async ({
           account,
           connection,
@@ -147,36 +158,6 @@ export class HostedDeviceSyncPublicIngressService {
             store: this.context.store,
           });
         },
-        onConnectionSourceObserved: async ({
-          account,
-          eventType,
-          sourceProviderSlug,
-        }) => {
-          if (
-            normalizeJunctionProviderSlug(sourceProviderSlug)
-              !== COMPANION_APPLE_HEALTH_SOURCE_PROVIDER
-          ) {
-            return;
-          }
-          if (
-            eventType === "provider.connection.created"
-            || eventType === "provider.connection.updated"
-          ) {
-            const reconciliation = await reconcileHostedDeviceSyncConnectionSourceRegistration({
-              account,
-              registry: input.registry,
-              sourceProviderSlug,
-              store: this.context.store,
-            });
-            if (reconciliation === "admitted") {
-              return { sourceAdmissionCommitted: true };
-            }
-            return reconciliation === "removed"
-              ? { sourceRegistrationRemoved: true }
-              : undefined;
-          }
-          return;
-        },
         onWebhookAccepted: async ({
           account,
           claimToken,
@@ -186,36 +167,20 @@ export class HostedDeviceSyncPublicIngressService {
           now,
         }) => {
           const ownerId = await this.context.store.getConnectionOwnerId(account.id);
-          if (
-            ownerId
-            && await this.hasWithdrawnHealthDataConsentForMember(ownerId)
-          ) {
-            const completed = await this.context.store.completeWebhookTrace(
-              provider.provider,
-              traceId,
-              claimToken,
-            );
-            if (!completed) {
-              throw deviceSyncError({
-                code: "WEBHOOK_TRACE_CLAIM_LOST",
-                message: "Webhook trace claim was lost before durable acceptance completed.",
-                retryable: true,
-                httpStatus: 503,
-              });
-            }
-            return DEVICE_SYNC_WEBHOOK_TRACE_COMPLETED;
-          }
-
           await handleHostedDeviceSyncWebhookAccepted({
             account,
             claimToken,
             now,
             ownerId,
+            registry: input.registry,
             store: this.context.store,
             traceId,
             webhook,
           });
-          return DEVICE_SYNC_WEBHOOK_TRACE_COMPLETED;
+          return {
+            ...DEVICE_SYNC_WEBHOOK_TRACE_COMPLETED,
+            receiptStateOwned: true,
+          };
         },
         onUnknownWebhook: handleHostedDeviceSyncUnknownWebhook,
       },
@@ -630,7 +595,32 @@ export class HostedDeviceSyncPublicIngressService {
     }
   }
 
-  async handleWebhook(provider: string, rawBody?: Buffer): Promise<HandleWebhookResult> {
+  async prepareWebhookForDurableEnqueue(
+    provider: string,
+    rawBody: Buffer,
+    receivedAt: Date,
+  ): Promise<PreparedDeviceSyncWebhookV1> {
+    return this.ingress.prepareWebhookForDurableEnqueue(
+      provider,
+      this.context.request.headers,
+      rawBody,
+      receivedAt,
+    );
+  }
+
+  async handlePreparedWebhook(
+    prepared: PreparedDeviceSyncWebhookV1,
+  ): Promise<HandleWebhookResult> {
+    return runWithHostedDomainRootUnwrapCache(() =>
+      this.ingress.handlePreparedWebhook(prepared),
+    );
+  }
+
+  async handleWebhook(
+    provider: string,
+    rawBody?: Buffer,
+    receivedAt?: Date,
+  ): Promise<HandleWebhookResult> {
     const resolvedRawBody = rawBody ?? (await this.readWebhookRawBody());
     // One webhook request opens and seals several secure-box fields under the
     // member's device domain roots. Scope the unwrap memo to the request so
@@ -640,7 +630,12 @@ export class HostedDeviceSyncPublicIngressService {
     // sealing payloads is a separate cache key whose first unwrap still runs
     // inside the transaction. Hosted-onboarding webhooks use the same seam.
     return runWithHostedDomainRootUnwrapCache(() =>
-      this.ingress.handleWebhook(provider, this.context.request.headers, resolvedRawBody),
+      this.ingress.handleWebhook(
+        provider,
+        this.context.request.headers,
+        resolvedRawBody,
+        receivedAt,
+      ),
     );
   }
 

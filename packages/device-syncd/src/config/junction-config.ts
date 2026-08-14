@@ -1,3 +1,5 @@
+import { JUNCTION_ALLOWED_TIMESERIES_RESOURCES } from "@murphai/contracts";
+
 import {
   JUNCTION_API_BASE_URL_ENV_KEYS,
   JUNCTION_API_KEY_ENV_KEYS,
@@ -30,6 +32,12 @@ import type {
   JunctionRegion,
 } from "./provider-types.ts";
 
+// Production sets the exhaustive code-owned list explicitly. Omitted runtime
+// configuration resolves to the same registry, while explicit subsets remain
+// exact and cannot be widened by member or environment data.
+export const JUNCTION_PRODUCTION_TIMESERIES_RESOURCES =
+  JUNCTION_ALLOWED_TIMESERIES_RESOURCES;
+
 export function readConfiguredJunctionDeviceSyncProviderConfig(
   env: DeviceSyncEnvSource,
 ): JunctionDeviceSyncProviderConfig | null {
@@ -57,6 +65,7 @@ export function readConfiguredJunctionDeviceSyncProviderConfig(
     apiBaseUrl: optionalEnv(env, JUNCTION_API_BASE_URL_ENV_KEYS),
     providerFilter: parseCsvEnv(env, JUNCTION_PROVIDER_FILTER_ENV_KEYS),
     summaryResources: parseCsvEnv(env, JUNCTION_SUMMARY_RESOURCES_ENV_KEYS),
+    timeseriesResources: [...JUNCTION_PRODUCTION_TIMESERIES_RESOURCES],
     summaryBackfillDays: parseIntegerEnv(env, JUNCTION_SUMMARY_BACKFILL_DAYS_ENV_KEYS),
     timeseriesBackfillDays: parseIntegerEnv(env, JUNCTION_TIMESERIES_BACKFILL_DAYS_ENV_KEYS),
     reconcileDays: parseIntegerEnv(env, JUNCTION_RECONCILE_DAYS_ENV_KEYS),

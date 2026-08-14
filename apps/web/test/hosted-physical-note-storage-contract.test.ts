@@ -6,6 +6,7 @@ const APPROVED_FIELDS = [
   "acceptedAt",
   "complimentaryOfferCode",
   "createdAt",
+  "failureReason",
   "id",
   "memberId",
   "pricingVersion",
@@ -47,6 +48,54 @@ describe("HostedPhysicalNote storage contract", () => {
       'ON "hosted_physical_note"("member_id", "request_key")',
     );
     expect(migration).toContain("ON DELETE CASCADE");
+  });
+
+  it("stores only the bounded safe rejection category", () => {
+    const migration = readFileSync(
+      new URL(
+        "../prisma/migrations/20260811170000_hosted_physical_note_failure_reason/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
+
+    expect(migration).toContain(
+      'ADD COLUMN "failure_reason" "HostedPhysicalNoteFailureReason"',
+    );
+    expect(migration).toContain("'recipient_address'");
+    expect(migration).toContain("'artwork'");
+    expect(migration).toContain("'service_unavailable'");
+    expect(migration).toContain("'request_invalid'");
+    expect(migration).toContain("'prior_note_unresolved'");
+    expect(migration).toContain("'prior_note_accepted'");
+    expect(migration).toContain("'unknown'");
+    expect(migration).toContain(
+      'CREATE INDEX CONCURRENTLY "hosted_physical_note_member_id_status_failure_reason_created_at_idx"',
+    );
+    expect(migration).toContain(
+      'ON "hosted_physical_note"("member_id", "status", "failure_reason", "created_at")',
+    );
+    expect(migration).not.toMatch(/message|address_line|artwork_url/iu);
+  });
+
+  it("pins compatible Web as the no-send authority rollback floor", () => {
+    const productContract = readFileSync(
+      new URL(
+        "../../../agent-docs/product-specs/physical-notes.md",
+        import.meta.url,
+      ),
+      "utf8",
+    );
+
+    expect(productContract).toMatch(
+      /Web artifact is a hard rollback\s+floor/iu,
+    );
+    expect(productContract).toMatch(
+      /never roll Web below the floor while physical-note sending remains enabled/iu,
+    );
+    expect(productContract).toMatch(
+      /disable\s+`HOSTED_PHYSICAL_NOTES_ENABLED`[\s\S]*drain every runner[\s\S]*keep the capability off until compatible Web and runner/iu,
+    );
   });
 });
 

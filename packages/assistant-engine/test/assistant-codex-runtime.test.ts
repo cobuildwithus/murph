@@ -10,6 +10,7 @@ import {
 } from '@murphai/hosted-execution/env'
 import {
   MURPH_MEMBER_READ_PERMISSION_PROFILE,
+  MURPH_MEMBER_WORKSPACE_PERMISSION_PROFILE,
 } from '@murphai/hosted-execution/assistant-permissions'
 import {
   HOSTED_ASSISTANT_PRODUCT_MODELS,
@@ -921,6 +922,26 @@ describe('assistant codex runtime', () => {
       modelProvider: 'vercel-ai-gateway',
       sandbox: 'workspace-write',
       threadId: 'thread-1',
+    })
+    expect(
+      buildCodexThreadResumeParams({
+        input: {
+          ...baseInput,
+          permissions: MURPH_MEMBER_WORKSPACE_PERMISSION_PROFILE,
+          runtimeWorkspaceRoots: ['/workspace'],
+          sandbox: undefined,
+        },
+        codexThreadId: 'thread-member-workspace',
+      }),
+    ).toEqual({
+      approvalPolicy: 'never',
+      cwd: '/workspace',
+      excludeTurns: true,
+      model: 'gpt-5',
+      modelProvider: 'vercel-ai-gateway',
+      permissions: MURPH_MEMBER_WORKSPACE_PERMISSION_PROFILE,
+      runtimeWorkspaceRoots: ['/workspace'],
+      threadId: 'thread-member-workspace',
     })
 
     const turnStart = buildCodexTurnStartParams({
@@ -3508,6 +3529,452 @@ describe('assistant codex runtime', () => {
     expect(sendVaultFile).toHaveBeenCalledOnce()
   })
 
+  it('orders current-sender clarification and continuation without blocking an independent ref', async () => {
+    const workingDirectory = await createTempDir(
+      'assistant-codex-current-sender-order-work-',
+    )
+    const clarificationStarted = createDeferred<void>()
+    const releaseClarification = createDeferred<void>()
+    const earlierInputId = `ain_${'a'.repeat(32)}`
+    const laterInputId = `ain_${'b'.repeat(32)}`
+    const independentInputId = `ain_${'c'.repeat(32)}`
+    const groupRequest = vi.fn<
+      NonNullable<AssistantHostedToolContext['groupTool']>['request']
+    >(async (request) => {
+      if (
+        request.action === 'ask_current_sender' &&
+        request.mode === 'clarification'
+      ) {
+        clarificationStarted.resolve()
+        await releaseClarification.promise
+      }
+      return {
+        action: 'ask_current_sender' as const,
+        result: { status: 'clarification_required' as const },
+      }
+    })
+    const groupTool: NonNullable<AssistantHostedToolContext['groupTool']> = {
+      request: groupRequest,
+    }
+    const hostedToolContext: AssistantHostedToolContext = {
+      ...createHostedToolContext({ groupTool }),
+      currentUserActionScope: () => ({
+        acceptedInputIds: [
+          earlierInputId,
+          independentInputId,
+          laterInputId,
+        ],
+        conversationId: 'conversation_group',
+        conversationScope: 'group',
+        inboundMailboxItemIds: ['mailbox_group'],
+        originSessionId: 'session_group',
+        recipientKey: 'recipient_group',
+      }),
+    }
+    const progressDelivery = createProgressDeliveryMock(
+      sentProgressResult('system'),
+    )
+    let requestsBeforeClarificationReleased = 0
+    let noticesBeforeClarificationReleased = 0
+
+    codexMocks.spawn.mockImplementation(() => {
+      const child = new MockChildProcess()
+
+      queueMicrotask(() => {
+        void (async () => {
+          await waitForRpcMethod(child, 'initialize')
+          child.stdout.write(jsonLine({ id: 1, result: {} }))
+          await waitForRpcMethod(child, 'thread/start')
+          child.stdout.write(jsonLine({
+            id: 2,
+            result: { thread: { id: 'thread-current-sender-order' } },
+          }))
+          await waitForRpcMethod(child, 'turn/start')
+          child.stdout.write(jsonLine({
+            id: 3,
+            result: { turn: { id: 'turn-current-sender-order' } },
+          }))
+
+          child.stdout.write(jsonLine({
+            id: 91,
+            method: 'item/tool/call',
+            params: {
+              arguments: {
+                action: 'clarify_current_sender',
+                message_ref: earlierInputId,
+              },
+              namespace: 'murph',
+              tool: 'group',
+            },
+          }))
+          child.stdout.write(jsonLine({
+            id: 93,
+            method: 'item/tool/call',
+            params: {
+              arguments: {
+                action: 'ask_current_sender',
+                message_ref: independentInputId,
+              },
+              namespace: 'murph',
+              tool: 'group',
+            },
+          }))
+          child.stdout.write(jsonLine({
+            id: 92,
+            method: 'item/tool/call',
+            params: {
+              arguments: {
+                action: 'continue_current_sender_in_group',
+                message_ref: laterInputId,
+              },
+              namespace: 'murph',
+              tool: 'group',
+            },
+          }))
+
+          await clarificationStarted.promise
+          await new Promise((resolve) => setTimeout(resolve, 0))
+          requestsBeforeClarificationReleased = groupRequest.mock.calls.length
+          noticesBeforeClarificationReleased =
+            progressDelivery.send.mock.calls.length
+          releaseClarification.resolve()
+
+          await expect(waitForRpcResponse(child, 91)).resolves.toMatchObject({
+            id: 91,
+            result: { success: true },
+          })
+          await expect(waitForRpcResponse(child, 92)).resolves.toMatchObject({
+            id: 92,
+            result: { success: true },
+          })
+          await expect(waitForRpcResponse(child, 93)).resolves.toMatchObject({
+            id: 93,
+            result: { success: true },
+          })
+          expect(groupRequest).toHaveBeenCalledTimes(3)
+
+          child.stdout.write(jsonLine({
+            method: 'item/completed',
+            params: {
+              item: {
+                id: 'assistant-current-sender-order',
+                text: 'I still need a destination.',
+                type: 'agentMessage',
+              },
+            },
+          }))
+          child.stdout.write(jsonLine({
+            method: 'turn/completed',
+            params: {
+              turn: {
+                id: 'turn-current-sender-order',
+                status: 'completed',
+              },
+            },
+          }))
+        })()
+      })
+
+      return child
+    })
+
+    await expect(executeCodexAppServerTurn({
+      hostedToolContext,
+      progressDelivery,
+      prompt: 'clarify in causal order',
+      workingDirectory,
+    })).resolves.toMatchObject({
+      finalMessage: 'I still need a destination.',
+    })
+    expect(requestsBeforeClarificationReleased).toBe(2)
+    expect(noticesBeforeClarificationReleased).toBe(1)
+  })
+
+  it('claims one current-sender decision before concurrent same-ref tool effects', async () => {
+    const workingDirectory = await createTempDir(
+      'assistant-codex-current-sender-decision-work-',
+    )
+    const privateStarted = createDeferred<void>()
+    const releasePrivate = createDeferred<void>()
+    const inputId = `ain_${'d'.repeat(32)}`
+    const groupRequest = vi.fn<
+      NonNullable<AssistantHostedToolContext['groupTool']>['request']
+    >(async (request) => {
+      if (
+        request.action === 'ask_current_sender' &&
+        request.audience === 'current_sender'
+      ) {
+        privateStarted.resolve()
+        await releasePrivate.promise
+      }
+      return {
+        action: 'ask_current_sender' as const,
+        result: { status: 'accepted' as const },
+      }
+    })
+    const groupTool: NonNullable<AssistantHostedToolContext['groupTool']> = {
+      request: groupRequest,
+    }
+    const hostedToolContext: AssistantHostedToolContext = {
+      ...createHostedToolContext({ groupTool }),
+      currentUserActionScope: () => ({
+        acceptedInputIds: [inputId],
+        conversationId: 'conversation_group',
+        conversationScope: 'group',
+        inboundMailboxItemIds: ['mailbox_group'],
+        originSessionId: 'session_group',
+        recipientKey: 'recipient_group',
+      }),
+    }
+    const progressDelivery = createProgressDeliveryMock(
+      sentProgressResult('system'),
+    )
+
+    codexMocks.spawn.mockImplementation(() => {
+      const child = new MockChildProcess()
+
+      queueMicrotask(() => {
+        void (async () => {
+          await waitForRpcMethod(child, 'initialize')
+          child.stdout.write(jsonLine({ id: 1, result: {} }))
+          await waitForRpcMethod(child, 'thread/start')
+          child.stdout.write(jsonLine({
+            id: 2,
+            result: { thread: { id: 'thread-current-sender-decision' } },
+          }))
+          await waitForRpcMethod(child, 'turn/start')
+          child.stdout.write(jsonLine({
+            id: 3,
+            result: { turn: { id: 'turn-current-sender-decision' } },
+          }))
+
+          child.stdout.write(jsonLine({
+            id: 94,
+            method: 'item/tool/call',
+            params: {
+              arguments: {
+                action: 'message_current_sender',
+                message_ref: inputId,
+              },
+              namespace: 'murph',
+              tool: 'group',
+            },
+          }))
+          await privateStarted.promise
+          child.stdout.write(jsonLine({
+            id: 95,
+            method: 'item/tool/call',
+            params: {
+              arguments: {
+                action: 'ask_current_sender',
+                message_ref: inputId,
+              },
+              namespace: 'murph',
+              tool: 'group',
+            },
+          }))
+
+          await expect(waitForRpcResponse(child, 95)).resolves.toMatchObject({
+            id: 95,
+            result: { success: false },
+          })
+          expect(progressDelivery.send).not.toHaveBeenCalled()
+          expect(groupRequest).toHaveBeenCalledTimes(1)
+
+          releasePrivate.resolve()
+          const interrupt = await waitForRpcMethod(child, 'turn/interrupt')
+          child.stdout.write(jsonLine({ id: interrupt.id, result: {} }))
+          child.stdout.write(jsonLine({
+            method: 'turn/completed',
+            params: {
+              turn: {
+                id: 'turn-current-sender-decision',
+                status: 'interrupted',
+              },
+            },
+          }))
+        })()
+      })
+
+      return child
+    })
+
+    await expect(executeCodexAppServerTurn({
+      hostedToolContext,
+      progressDelivery,
+      prompt: 'answer privately',
+      workingDirectory,
+    })).resolves.toMatchObject({
+      finalMessage: '',
+    })
+  })
+
+  it.each([
+    {
+      earlierAction: 'clarify_current_sender' as const,
+      expectedMode: 'clarification' as const,
+      expectedNoticeCount: 0,
+      label: 'clarification',
+      laterAction: 'ask_current_sender' as const,
+    },
+    {
+      earlierAction: 'continue_current_sender_in_group' as const,
+      expectedMode: 'continuation' as const,
+      expectedNoticeCount: 1,
+      label: 'group continuation',
+      laterAction: 'message_current_sender' as const,
+    },
+  ])('claims an earlier current-sender $label before a contradictory new request', async ({
+    earlierAction,
+    expectedMode,
+    expectedNoticeCount,
+    laterAction,
+  }) => {
+    const workingDirectory = await createTempDir(
+      'assistant-codex-current-sender-arrival-order-work-',
+    )
+    const releaseSecondPreTool = createDeferred<void>()
+    const inputId = `ain_${'e'.repeat(32)}`
+    let preToolCallCount = 0
+    let earlierResponse: unknown = null
+    let laterResponse: unknown = null
+    const groupRequest = vi.fn<
+      NonNullable<AssistantHostedToolContext['groupTool']>['request']
+    >(async (request) => ({
+      action: 'ask_current_sender' as const,
+      result: request.action === 'ask_current_sender'
+          && request.mode === 'clarification'
+        ? { status: 'clarification_required' as const }
+        : {
+            status: 'unavailable' as const,
+            unavailableReason: 'synthetic unavailable result',
+          },
+    }))
+    const groupTool: NonNullable<AssistantHostedToolContext['groupTool']> = {
+      request: groupRequest,
+    }
+    const hostedToolContext: AssistantHostedToolContext = {
+      ...createHostedToolContext({ groupTool }),
+      beforeToolExecution: async () => {
+        preToolCallCount += 1
+        if (preToolCallCount === 2) {
+          await releaseSecondPreTool.promise
+        }
+      },
+      currentUserActionScope: () => ({
+        acceptedInputIds: [inputId],
+        conversationId: 'conversation_group',
+        conversationScope: 'group',
+        inboundMailboxItemIds: ['mailbox_group'],
+        originSessionId: 'session_group',
+        recipientKey: 'recipient_group',
+      }),
+    }
+    const progressDelivery = createProgressDeliveryMock(
+      sentProgressResult('system'),
+    )
+
+    codexMocks.spawn.mockImplementation(() => {
+      const child = new MockChildProcess()
+
+      queueMicrotask(() => {
+        void (async () => {
+          await waitForRpcMethod(child, 'initialize')
+          child.stdout.write(jsonLine({ id: 1, result: {} }))
+          await waitForRpcMethod(child, 'thread/start')
+          child.stdout.write(jsonLine({
+            id: 2,
+            result: { thread: { id: 'thread-current-sender-arrival-order' } },
+          }))
+          await waitForRpcMethod(child, 'turn/start')
+          child.stdout.write(jsonLine({
+            id: 3,
+            result: { turn: { id: 'turn-current-sender-arrival-order' } },
+          }))
+
+          child.stdout.write([
+            jsonLine({
+              id: 96,
+              method: 'item/tool/call',
+              params: {
+                arguments: {
+                  action: earlierAction,
+                  message_ref: inputId,
+                },
+                namespace: 'murph',
+                tool: 'group',
+              },
+            }),
+            jsonLine({
+              id: 97,
+              method: 'item/tool/call',
+              params: {
+                arguments: {
+                  action: laterAction,
+                  message_ref: inputId,
+                },
+                namespace: 'murph',
+                tool: 'group',
+              },
+            }),
+          ].join(''))
+
+          try {
+            laterResponse = await waitForRpcResponse(child, 97)
+          } finally {
+            releaseSecondPreTool.resolve()
+          }
+          earlierResponse = await waitForRpcResponse(child, 96)
+
+          child.stdout.write(jsonLine({
+            method: 'item/completed',
+            params: {
+              item: {
+                id: 'assistant-current-sender-arrival-order',
+                text: 'Should I share that here or send it privately?',
+                type: 'agentMessage',
+              },
+            },
+          }))
+          child.stdout.write(jsonLine({
+            method: 'turn/completed',
+            params: {
+              turn: {
+                id: 'turn-current-sender-arrival-order',
+                status: 'completed',
+              },
+            },
+          }))
+        })()
+      })
+
+      return child
+    })
+
+    await expect(executeCodexAppServerTurn({
+      hostedToolContext,
+      progressDelivery,
+      prompt: 'clarify before choosing a destination',
+      workingDirectory,
+    })).resolves.toMatchObject({
+      finalMessage: 'Should I share that here or send it privately?',
+    })
+    expect(laterResponse).toMatchObject({
+      id: 97,
+      result: { success: false },
+    })
+    expect(earlierResponse).toMatchObject({
+      id: 96,
+      result: { success: true },
+    })
+    expect(progressDelivery.send).toHaveBeenCalledTimes(expectedNoticeCount)
+    expect(preToolCallCount).toBe(1)
+    expect(groupRequest).toHaveBeenCalledTimes(1)
+    expect(groupRequest.mock.calls[0]?.[0]).toMatchObject({
+      mode: expectedMode,
+    })
+  })
+
   it('allows response media for a later steered message after an approved vault send', async () => {
     const workingDirectory = await createTempDir(
       'assistant-codex-vault-send-steer-work-',
@@ -3757,10 +4224,12 @@ describe('assistant codex runtime', () => {
       0x00, 0x00, 0x00, 0x00,
       0x57, 0x45, 0x42, 0x50,
     ])
+    const imageFetchStarted = createDeferred<void>()
     let fetchAborted = false
     const fetchImpl = vi.fn(
       (_url: string | URL | Request, init?: RequestInit) =>
         new Promise<Response>((resolve) => {
+          imageFetchStarted.resolve()
           // Settle only after the failing turn aborts in-flight dynamic tools,
           // proving the drain waits for completed image usage.
           const respond = () => {
@@ -3823,6 +4292,7 @@ describe('assistant codex runtime', () => {
               },
             }),
           )
+          await imageFetchStarted.promise
           child.stdout.write(
             jsonLine({
               method: 'turn/completed',
@@ -4018,7 +4488,7 @@ describe('assistant codex runtime', () => {
     )
   })
 
-  it('reports a structured failure when a generated image exceeds the media limit', async () => {
+  it('stops synchronous image generation before exceeding the media limit', async () => {
     const workingDirectory = await createTempDir('assistant-codex-image-limit-work-')
     const vaultRoot = await createTempDir('assistant-codex-image-limit-vault-')
     await initializeVault({ vaultRoot })
@@ -4035,7 +4505,7 @@ describe('assistant codex runtime', () => {
         headers: { 'content-type': 'application/json' },
         status: 200,
       }))
-    const attachedMedia = Array.from({ length: 40 }, (_, index) => ({
+    const attachedMedia = Array.from({ length: 7 }, (_, index) => ({
       kind: 'image' as const,
       url: `https://cdn.example.test/assistant/full-${index}.png`,
       alt: `Image ${index}`,
@@ -4097,14 +4567,31 @@ describe('assistant codex runtime', () => {
               },
             }),
           )
+          child.stdout.write(
+            jsonLine({
+              id: 93,
+              method: 'item/tool/call',
+              params: {
+                namespace: 'murph',
+                tool: 'generate_image',
+                arguments: {
+                  prompt: 'Render one image after the limit is full.',
+                },
+              },
+            }),
+          )
 
-          const messages = await waitForRpcMessages(child, 6)
+          const messages = await waitForRpcMessages(child, 7)
           expect(messages[4]).toMatchObject({
             id: 91,
             result: { success: true },
           })
-          expect(messages[5]).toEqual({
+          expect(messages[5]).toMatchObject({
             id: 92,
+            result: { success: true },
+          })
+          expect(messages[6]).toEqual({
+            id: 93,
             result: {
               success: false,
               contentItems: [
@@ -4158,8 +4645,8 @@ describe('assistant codex runtime', () => {
     })
 
     expect(result.finalMessage).toBe('Media limit handled')
-    expect(result.responseMedia).toHaveLength(40)
-    // The image was generated and paid for, so its usage is still recorded.
+    expect(result.responseMedia).toHaveLength(8)
+    expect(fetchImpl).toHaveBeenCalledTimes(1)
     expect(result.additionalUsages).toMatchObject([
       { provider: 'openai-images' },
     ])
@@ -5582,6 +6069,28 @@ describe('assistant codex runtime', () => {
     expect(readWrittenRpcMessages(spawnedChild).filter(
       (message) => message.method === 'turn/start',
     )).toHaveLength(1)
+  })
+
+  it('keeps restricted named permissions on fresh one-shot threads', async () => {
+    const workingDirectory = await createTempDir(
+      'assistant-codex-restricted-permission-shape-',
+    )
+
+    await expect(executeCodexAppServerTurn({
+      approvalPolicy: 'never',
+      permissions: MURPH_MEMBER_READ_PERMISSION_PROFILE,
+      prompt: 'must not resume with a restricted permission profile',
+      resumeSessionId: 'thread-restricted-resume',
+      runtimeWorkspaceRoots: [workingDirectory],
+      workingDirectory,
+    })).rejects.toMatchObject({
+      code: 'ASSISTANT_CODEX_APP_SERVER_REQUEST_INVALID',
+      context: {
+        invalidFields: ['resumeSessionId', 'ephemeral', 'processLifetime'],
+        retryable: false,
+      },
+    })
+    expect(codexMocks.spawn).not.toHaveBeenCalled()
   })
 
   it('runs one-shot permission turns beside the occupied warm process and proves exact child exit', async () => {
@@ -13563,6 +14072,146 @@ describe('assistant codex runtime', () => {
     }
   })
 
+  it('attests the member-workspace profile on resident thread resume', async () => {
+    const workingDirectory = await createTempDir(
+      'assistant-codex-member-workspace-resume-',
+    )
+    const spawnedChildren: MockChildProcess[] = []
+    mockProcessGroupSignalsForChildren(spawnedChildren)
+
+    codexMocks.spawn.mockImplementation(() => {
+      const child = new MockChildProcess()
+      child.pid = 35_050
+      spawnedChildren.push(child)
+
+      queueMicrotask(() => {
+        void (async () => {
+          const initialize = await waitForRpcMethod(child, 'initialize')
+          child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
+
+          const threadResume = await waitForRpcMethod(child, 'thread/resume')
+          child.stdout.write(jsonLine({
+            id: threadResume.id,
+            result: {
+              activePermissionProfile: {
+                id: MURPH_MEMBER_WORKSPACE_PERMISSION_PROFILE,
+              },
+              approvalPolicy: 'never',
+              cwd: path.resolve(workingDirectory),
+              runtimeWorkspaceRoots: [path.resolve(workingDirectory)],
+              thread: {
+                id: 'thread-member-workspace-resume',
+              },
+            },
+          }))
+
+          const turnStart = await waitForRpcMethod(child, 'turn/start')
+          child.stdout.write(jsonLine({
+            id: turnStart.id,
+            result: {
+              turn: {
+                id: 'turn-member-workspace-resume',
+              },
+            },
+          }))
+          child.stdout.write(jsonLine({
+            method: 'turn/completed',
+            params: {
+              turn: {
+                id: 'turn-member-workspace-resume',
+                status: 'completed',
+              },
+            },
+          }))
+        })()
+      })
+
+      return child
+    })
+
+    await expect(executeCodexAppServerTurn({
+      approvalPolicy: 'never',
+      permissions: MURPH_MEMBER_WORKSPACE_PERMISSION_PROFILE,
+      prompt: 'resume the ordinary hosted member turn',
+      resumeSessionId: 'thread-member-workspace-resume',
+      runtimeWorkspaceRoots: [workingDirectory],
+      workingDirectory,
+    })).resolves.toMatchObject({
+      sessionId: 'thread-member-workspace-resume',
+      turnId: 'turn-member-workspace-resume',
+    })
+
+    const child = requireMockChildProcess(spawnedChildren[0] ?? null)
+    expect(asRecord((await waitForRpcMethod(child, 'thread/resume')).params)).toEqual({
+      approvalPolicy: 'never',
+      cwd: workingDirectory,
+      excludeTurns: true,
+      permissions: MURPH_MEMBER_WORKSPACE_PERMISSION_PROFILE,
+      runtimeWorkspaceRoots: [workingDirectory],
+      threadId: 'thread-member-workspace-resume',
+    })
+  })
+
+  it('fails closed when a resumed member-workspace profile drifts', async () => {
+    const workingDirectory = await createTempDir(
+      'assistant-codex-member-workspace-drift-',
+    )
+    const spawnedChildren: MockChildProcess[] = []
+    mockProcessGroupSignalsForChildren(spawnedChildren)
+
+    codexMocks.spawn.mockImplementation(() => {
+      const child = new MockChildProcess()
+      child.pid = 35_075
+      spawnedChildren.push(child)
+
+      queueMicrotask(() => {
+        void (async () => {
+          const initialize = await waitForRpcMethod(child, 'initialize')
+          child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
+          const threadResume = await waitForRpcMethod(child, 'thread/resume')
+          child.stdout.write(jsonLine({
+            id: threadResume.id,
+            result: {
+              activePermissionProfile: {
+                id: MURPH_MEMBER_READ_PERMISSION_PROFILE,
+              },
+              approvalPolicy: 'never',
+              cwd: path.resolve(workingDirectory),
+              runtimeWorkspaceRoots: [path.resolve(workingDirectory)],
+              thread: {
+                id: 'thread-member-workspace-drift',
+              },
+            },
+          }))
+        })()
+      })
+
+      return child
+    })
+
+    await expect(executeCodexAppServerTurn({
+      approvalPolicy: 'never',
+      permissions: MURPH_MEMBER_WORKSPACE_PERMISSION_PROFILE,
+      prompt: 'must not start under a different profile',
+      resumeSessionId: 'thread-member-workspace-drift',
+      runtimeWorkspaceRoots: [workingDirectory],
+      workingDirectory,
+    })).rejects.toMatchObject({
+      code: 'ASSISTANT_CODEX_RESUME_STALE',
+      context: {
+        mismatchedFields: ['activePermissionProfile'],
+        resumeContextMismatch: true,
+        retryable: true,
+        staleResume: true,
+      },
+    })
+
+    const child = requireMockChildProcess(spawnedChildren[0] ?? null)
+    expect(readWrittenRpcMessages(child).some(
+      (message) => message.method === 'turn/start',
+    )).toBe(false)
+  })
+
   it('fails closed when thread/resume reports stale execution context', async () => {
     const workingDirectory = await createTempDir('assistant-codex-stale-resume-context-')
     const staleWorkingDirectory = await createTempDir('assistant-codex-old-resume-context-')
@@ -15155,7 +15804,21 @@ describe('assistant codex runtime', () => {
         },
         status: 'paused' as const,
         timingVerified: true,
+        updatedAt: '2026-08-10T00:00:00.000Z',
       })),
+    }
+    const invalidGapAutomationArguments = {
+      action: 'save',
+      instructions: 'Send the reminder tomorrow.',
+      schedule: {
+        kind: 'at',
+        localAt: {
+          relativeDay: 'tomorrow',
+          time: '02:30',
+          timeZone: 'America/New_York',
+        },
+      },
+      title: 'Gap reminder',
     }
 
     codexMocks.spawn.mockImplementation(() => {
@@ -15218,10 +15881,10 @@ describe('assistant codex runtime', () => {
             id: 1000,
             method: 'item/tool/call',
             params: {
-              arguments: { action: 'list' },
+              arguments: invalidGapAutomationArguments,
               namespace: 'murph',
               threadId: 'thread-root-tool-scope',
-              tool: 'pending_vault_files',
+              tool: 'automation',
               turnId: 'turn-stale-root-tool-scope',
             },
           }))
@@ -15297,11 +15960,7 @@ describe('assistant codex runtime', () => {
             id: 103,
             method: 'item/tool/call',
             params: {
-              arguments: {
-                action: 'patch',
-                lookup: 'hidden',
-                status: 'paused',
-              },
+              arguments: invalidGapAutomationArguments,
               namespace: 'murph',
               threadId: 'thread-root-tool-scope',
               tool: 'automation',
@@ -15453,6 +16112,18 @@ describe('assistant codex runtime', () => {
           })
 
           child.stdout.write(jsonLine({
+            method: 'item/completed',
+            params: {
+              item: {
+                id: 'assistant-root-tool-scope-final',
+                type: 'agentMessage',
+                phase: 'final_answer',
+                text: 'Root tool scope verified.',
+              },
+            },
+          }))
+
+          child.stdout.write(jsonLine({
             method: 'turn/completed',
             params: {
               turn: {
@@ -15468,6 +16139,10 @@ describe('assistant codex runtime', () => {
     })
 
     await expect(executeCodexAppServerTurn({
+      automationRelativeDateReferenceWindow: {
+        earliestAt: '2026-03-08T04:59:00.000Z',
+        latestAt: '2026-03-08T04:59:00.000Z',
+      },
       authorizeAcceptedMessageTarget,
       hostedToolContext: {
         ...createHostedToolContext(),
@@ -15482,6 +16157,7 @@ describe('assistant codex runtime', () => {
       prompt: 'inspect connected devices',
       workingDirectory,
     })).resolves.toMatchObject({
+      finalMessage: 'Root tool scope verified.',
       sessionId: 'thread-root-tool-scope',
       turnId: 'turn-root-tool-scope',
     })

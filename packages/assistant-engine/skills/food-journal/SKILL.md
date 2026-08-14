@@ -1,6 +1,6 @@
 ---
 name: food-journal
-description: Use for low-friction meal capture and bounded pattern finding between food and digestion, symptoms, energy, appetite, or performance, providing calorie and macro estimates by default except in eating-disorder-risk, intuitive-eating, or number-sensitive contexts.
+description: Use for low-friction meal capture, connected carbohydrate-record questions, and bounded pattern finding between food and digestion, symptoms, energy, appetite, or performance, providing calorie and macro estimates by default except in eating-disorder-risk, intuitive-eating, or number-sensitive contexts.
 ---
 
 # Food journal
@@ -25,6 +25,13 @@ Infer the focus from the conversation:
 - explicit calorie or macro tracking
 
 Ask at most one question, and only when the missing detail materially changes safety, the chosen focus, or whether the record will be useful.
+
+For a connected carbohydrate-record question, use one bounded day or
+short-range read:
+`vault-cli measurement entry list --metric carbohydrates --from <date> --to <date> --limit 50 --format json`.
+Returned grams are partial intake evidence. Do not infer food identity, a
+complete meal, total daily carbohydrate, or eaten calories from them. No
+returned entry means unavailable, not zero.
 
 ## Capture with low friction
 

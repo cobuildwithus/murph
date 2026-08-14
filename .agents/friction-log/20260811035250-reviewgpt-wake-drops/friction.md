@@ -1,6 +1,7 @@
 ---
 title: 'ReviewGPT wake drops the managed browser endpoint selected by send'
 severity: 'minor'
+issue: 'cobuildwithus/murph#1661'
 ---
 
 ## Expected Behavior
