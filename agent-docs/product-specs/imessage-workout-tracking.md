@@ -151,6 +151,11 @@ sequence because it would have no observable structural effect. The canonical
 workout write records the request action id atomically with the final exercises.
 Only that persisted id proves exact replay; a stale workout that merely matches
 the intended visible projection still fails the complete binding precondition.
+The same bounded activity-session read resolves an exact persisted id before
+active-workout eligibility, so finishing that workout after its canonical write
+cannot turn a crash-replayed success into a rejection or retarget a newer active
+workout. Only a first application without that exact marker must satisfy the
+active-workout checks.
 
 Positions are one-based presentation coordinates, and each coordinate within
 its original-edit, original-remove, or final-append namespace may appear at most
@@ -180,7 +185,8 @@ Runtime then records an `applied`, `unchanged`, or typed
 `rejected` receipt through the same mailbox checkpoint. The editor stays locked
 while polling that receipt and says the changes were saved only after an applied
 or converged result. A missing, completed, ambiguous, bound-to-another, or
-changed workout is rejected without retargeting.
+changed workout is rejected without retargeting on first application; an exact
+persisted replay remains converged after its workout completes.
 
 This is the first family on the generic member-action delivery primitive. A
 future direct editor adds another explicit action variant and delegates to its

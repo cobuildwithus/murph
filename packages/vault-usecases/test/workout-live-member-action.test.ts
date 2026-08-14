@@ -13,6 +13,7 @@ import {
 
 const mocks = vi.hoisted(() => ({
   findActiveLiveWorkouts: vi.fn(),
+  findLiveWorkoutsForMemberAction: vi.fn(),
   updateLiveWorkoutExercises: vi.fn(),
   withLiveWorkoutMutationLock: vi.fn(),
 }));
@@ -20,6 +21,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock("../src/usecases/workout-live-state.js", async (importOriginal) => ({
   ...await importOriginal<typeof import("../src/usecases/workout-live-state.js")>(),
   findActiveLiveWorkouts: mocks.findActiveLiveWorkouts,
+  findLiveWorkoutsForMemberAction: mocks.findLiveWorkoutsForMemberAction,
   updateLiveWorkoutExercises: mocks.updateLiveWorkoutExercises,
   updateLiveWorkoutExercisesAfterValidatedSetRemoval:
     mocks.updateLiveWorkoutExercises,
@@ -187,6 +189,18 @@ describe("live workout member action", () => {
       async (_vault: string, run: () => Promise<unknown>) => await run(),
     );
     mocks.findActiveLiveWorkouts.mockResolvedValue([shownWorkout()]);
+    mocks.findLiveWorkoutsForMemberAction.mockImplementation(
+      async (vault: string, actionId: string) => {
+        const active = await mocks.findActiveLiveWorkouts(vault);
+        return {
+          active,
+          exactReplays: active.filter((shown: ReturnType<typeof shownWorkout>) =>
+            shown.entity.data.workout.lastMemberActionId
+              === actionId
+          ),
+        };
+      },
+    );
     mocks.updateLiveWorkoutExercises.mockResolvedValue(shownWorkout());
   });
 
@@ -250,6 +264,42 @@ describe("live workout member action", () => {
         sets: [{ order: 1, reps: 8 }],
       }],
     })]);
+
+    await expect(applyLiveWorkoutMemberAction({
+      acceptedAt: ACCEPTED_AT,
+      action: setAction({ kind: "reps", reps: 8 }),
+      vault: "/vault",
+    })).resolves.toEqual({ status: "unchanged" });
+    expect(mocks.updateLiveWorkoutExercises).not.toHaveBeenCalled();
+  });
+
+  it("resolves an exact persisted retry after its workout is completed", async () => {
+    mocks.findLiveWorkoutsForMemberAction.mockResolvedValueOnce({
+      active: [],
+      exactReplays: [shownWorkout({
+        ...BASE_WORKOUT,
+        endedAt: "2026-08-12T16:00:00.000Z",
+        lastMemberActionId: ACTION_ID,
+      })],
+    });
+
+    await expect(applyLiveWorkoutMemberAction({
+      acceptedAt: ACCEPTED_AT,
+      action: setAction({ kind: "reps", reps: 8 }),
+      vault: "/vault",
+    })).resolves.toEqual({ status: "unchanged" });
+    expect(mocks.updateLiveWorkoutExercises).not.toHaveBeenCalled();
+  });
+
+  it("resolves a completed retry before considering a later active workout", async () => {
+    mocks.findLiveWorkoutsForMemberAction.mockResolvedValueOnce({
+      active: [shownWorkout(BASE_WORKOUT, "evt_later_workout")],
+      exactReplays: [shownWorkout({
+        ...BASE_WORKOUT,
+        endedAt: "2026-08-12T16:00:00.000Z",
+        lastMemberActionId: ACTION_ID,
+      })],
+    });
 
     await expect(applyLiveWorkoutMemberAction({
       acceptedAt: ACCEPTED_AT,

@@ -19,6 +19,7 @@ import {
 } from './workout.js'
 import { showWorkoutRecord, workoutLookupSchema } from './workout-read.js'
 import {
+  LIVE_WORKOUT_SOURCE_APP,
   type LiveWorkoutExerciseLookup,
   type LiveWorkoutLookupInput,
   type LogLiveWorkoutSetInput,
@@ -96,23 +97,60 @@ export async function resolveLiveWorkout(
 }
 
 export async function findActiveLiveWorkouts(vault: string): Promise<WorkoutShowResult[]> {
+  const records = await findStructuredWorkoutRecords(vault)
+
+  return records
+    .filter(({ workout }) => isActiveLiveWorkout(workout))
+    .map(({ record }) => ({
+      vault,
+      entity: toCommandShowEntity(record),
+    }))
+}
+
+export async function findLiveWorkoutsForMemberAction(
+  vault: string,
+  actionId: string,
+): Promise<{
+  active: WorkoutShowResult[]
+  exactReplays: WorkoutShowResult[]
+}> {
+  const records = await findStructuredWorkoutRecords(vault)
+  const active: WorkoutShowResult[] = []
+  const exactReplays: WorkoutShowResult[] = []
+
+  for (const { record, workout } of records) {
+    const shown = {
+      vault,
+      entity: toCommandShowEntity(record),
+    }
+    if (isActiveLiveWorkout(workout)) {
+      active.push(shown)
+    }
+    if (
+      workout.sourceApp === LIVE_WORKOUT_SOURCE_APP
+      && typeof workout.startedAt === 'string'
+      && workout.lastMemberActionId === actionId
+    ) {
+      exactReplays.push(shown)
+    }
+  }
+
+  return { active, exactReplays }
+}
+
+async function findStructuredWorkoutRecords(vault: string) {
   const query = await loadQueryRuntime('live workout query reads')
   const readModel = await query.readVault(vault)
-  const records = query
+  return query
     .listEntities(readModel, {
       families: ['event'],
       kinds: ['activity_session'],
     })
-    .filter((record) => {
+    .flatMap((record) => {
       const parsed = workoutSessionSchema.safeParse(record.attributes.workout)
-      return parsed.success && isActiveLiveWorkout(parsed.data)
+      return parsed.success ? [{ record, workout: parsed.data }] : []
     })
-    .sort(compareByLatest)
-
-  return records.map((record) => ({
-    vault,
-    entity: toCommandShowEntity(record),
-  }))
+    .sort((left, right) => compareByLatest(left.record, right.record))
 }
 
 export function parseShownWorkout(shown: WorkoutShowResult): WorkoutSession {

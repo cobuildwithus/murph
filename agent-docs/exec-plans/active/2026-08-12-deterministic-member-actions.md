@@ -2,7 +2,7 @@
 
 Status: active
 Created: 2026-08-12
-Updated: 2026-08-13
+Updated: 2026-08-14
 
 ## Goal
 
@@ -18,8 +18,9 @@ Messages extension as the first action family.
 - Web owns authentication, validation, idempotent mailbox append, and runtime
   wake only; the assistant runtime dispatches deterministically to the existing
   vault-usecase owner without a model turn.
-- A workout edit targets one exact canonical workout snapshot and fails closed
-  on stale, ambiguous, completed, malformed, oversized, or unauthorized input.
+- A first workout edit targets one exact canonical active-workout snapshot and
+  fails closed on stale, ambiguous, completed, malformed, oversized, or
+  unauthorized input; an exact persisted retry still converges after completion.
 - Replayed requests converge without duplicate exercises or sets.
 - The client observes one durable terminal receipt and never reports an
   asynchronously rejected edit as saved.
@@ -114,6 +115,9 @@ Messages extension as the first action family.
   effect. The canonical workout write atomically stores the bounded action id;
   that exact marker replaces visible-state replay inference and avoids stable
   client-visible set ids or a second receipt store.
+- The canonical owner resolves that exact marker across the same bounded workout
+  read before enforcing active-only first-application rules. Completion retains
+  the marker, and a later active workout cannot capture or invalidate the replay.
 - The generic workout edit path retains its saved-set deletion guard. Only the
   live-workout member-action owner may use the narrow set-removal persistence
   path, after exact binding, full snapshot, exercise retention, and final-set

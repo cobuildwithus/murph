@@ -1497,7 +1497,10 @@ Admission also rejects any destructive set batch whose final visible projection
 equals its prestate because that request has no observable structural effect.
 The canonical workout write atomically records the action id with the mutation;
 only that exact persisted id proves replay. A merely matching visible result is
-never success for a stale destructive action. The serialized mailbox lane means
+never success for a stale destructive action. Replay lookup checks that marker
+across the bounded canonical workout collection before active-only eligibility,
+so workout completion or a newer active workout cannot replace a committed
+success with a terminal rejection. The serialized mailbox lane means
 one last-applied id is sufficient until its terminal outcome commits, without a
 second receipt store. Validated set removal uses one narrow canonical replacement
 operation, while every generic workout replacement remains fail-closed against

@@ -39,6 +39,7 @@ import {
   assertTargetableLiveWorkout,
   compactSetPatch,
   findActiveLiveWorkouts,
+  findLiveWorkoutsForMemberAction,
   normalizeLiveWorkoutActivityType,
   normalizeOptionalText,
   normalizeWorkoutTimestamp,
@@ -94,7 +95,22 @@ export async function applyLiveWorkoutMemberAction(
 async function applyLiveWorkoutMemberActionWithLockHeld(
   input: ApplyLiveWorkoutMemberActionInput,
 ): Promise<ApplyLiveWorkoutMemberActionResult> {
-  const active = await findActiveLiveWorkouts(input.vault)
+  const candidates = await findLiveWorkoutsForMemberAction(
+    input.vault,
+    input.actionId,
+  )
+  if (candidates.exactReplays.length > 0) {
+    if (
+      candidates.exactReplays.length !== 1
+      || input.action.expectedWorkout.actionBinding
+        !== deriveWorkoutActionBinding(candidates.exactReplays[0]!.entity.id)
+    ) {
+      return { reason: 'workout_changed', status: 'rejected' }
+    }
+    return { status: 'unchanged' }
+  }
+
+  const active = candidates.active
   if (active.length === 0) {
     return { reason: 'no_active_workout', status: 'rejected' }
   }
@@ -127,9 +143,6 @@ async function applyLiveWorkoutMemberActionWithLockHeld(
 
   const exercises = structuredClone(workout.exercises)
     .sort((left, right) => left.order - right.order)
-  if (workout.lastMemberActionId === input.actionId) {
-    return { status: 'unchanged' }
-  }
   if (
     input.action.mutations.some((mutation) => mutation.kind === 'set.remove')
     && input.action.expectedWorkout.setRemovalBinding

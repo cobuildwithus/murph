@@ -673,8 +673,10 @@ Last verified: 2026-08-13
   append rather than accepting a meaningless destructive command. Canonical
   persistence atomically records the bounded action id with the workout change,
   and only that exact marker—not visible-state coincidence—proves replay before
-  destructive preconditions. This adds no client-visible set id or second
-  receipt store. Canonical persistence keeps the generic no-deletion guard and exposes
+  active-only and destructive preconditions. The same bounded canonical workout
+  read resolves that marker after the target completes and before considering a
+  newer active workout, so replay cannot retarget. This adds no client-visible
+  set id or second receipt store. Canonical persistence keeps the generic no-deletion guard and exposes
   set removal only to the live-workout member-action owner after the exact
   binding and snapshot checks succeed. An editable note is admitted only when its exact
   canonical value fits the visible 40-character result field; a longer hidden

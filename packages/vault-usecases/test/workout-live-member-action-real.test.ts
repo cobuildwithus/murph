@@ -16,6 +16,7 @@ import { expect, test } from "vitest";
 import {
   addLiveWorkoutExercise,
   applyLiveWorkoutMemberAction as applyLiveWorkoutMemberActionWithId,
+  finishLiveWorkout,
   logLiveWorkoutSet,
   showActiveLiveWorkout,
   startLiveWorkout,
@@ -159,6 +160,62 @@ test("a member action can remove a saved set through the real vault boundary", a
       action,
       vault: fixture.vault,
     })).resolves.toEqual({ status: "unchanged" });
+  } finally {
+    await rm(fixture.vault, { force: true, recursive: true });
+  }
+});
+
+test("an exact member-action retry survives workout completion", async () => {
+  const fixture = await createLoggedWorkout([8, 10, 12]);
+  try {
+    const action = removeSetsAction({
+      removePositions: [3],
+      workout: fixture.workout,
+      workoutId: fixture.workoutId,
+    });
+
+    await expect(applyLiveWorkoutMemberAction({
+      acceptedAt: ACCEPTED_AT,
+      action,
+      vault: fixture.vault,
+    })).resolves.toEqual({ status: "applied" });
+    await finishLiveWorkout({
+      endedAt: "2026-08-13T16:00:00.000Z",
+      vault: fixture.vault,
+      workoutId: fixture.workoutId,
+    });
+
+    await expect(applyLiveWorkoutMemberAction({
+      acceptedAt: ACCEPTED_AT,
+      action,
+      vault: fixture.vault,
+    })).resolves.toEqual({ status: "unchanged" });
+    await expect(applyLiveWorkoutMemberAction({
+      acceptedAt: ACCEPTED_AT,
+      action,
+      actionId: "8676b264-9b91-4b50-8c73-184d7a63b901",
+      vault: fixture.vault,
+    })).resolves.toEqual({
+      reason: "no_active_workout",
+      status: "rejected",
+    });
+
+    await startLiveWorkout({
+      name: "Later workout",
+      startedAt: "2026-08-13T17:00:00.000Z",
+      vault: fixture.vault,
+    });
+    const later = await showActiveLiveWorkout({ vault: fixture.vault });
+    await expect(applyLiveWorkoutMemberAction({
+      acceptedAt: ACCEPTED_AT,
+      action,
+      vault: fixture.vault,
+    })).resolves.toEqual({ status: "unchanged" });
+    const unchangedLater = await showActiveLiveWorkout({ vault: fixture.vault });
+    expect(unchangedLater.entity.id).toBe(later.entity.id);
+    const laterWorkout = parseShownWorkout(unchangedLater);
+    expect(laterWorkout.exercises).toEqual([]);
+    expect(laterWorkout.lastMemberActionId).toBeUndefined();
   } finally {
     await rm(fixture.vault, { force: true, recursive: true });
   }
