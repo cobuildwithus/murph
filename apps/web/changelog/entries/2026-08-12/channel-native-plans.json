@@ -7,8 +7,8 @@
     "priority": 4,
     "title": "Plans use the best format for each chat",
     "summary": "Exercise routines, training plans, schedules, and other structured answers now use the available card or movement media instead of a long plain-text layout.",
-    "details": "Telegram uses Rich Messages when a structured layout makes the complete answer easier to scan, including when no standard Murph card fits. Existing nutrition, summary, and exercise cards keep their familiar layouts. Messages pairs its available card or ordered movement media with the concise instructions needed to complete the plan safely. Murph uses concise text alone when a richer layout would not help.",
+    "details": "Telegram uses Rich Messages when a structured layout makes the complete answer easier to scan, including when no standard Murph card fits. Exercise routine cards include available catalog images by default, unless you ask for a routine without them. Existing nutrition, summary, and exercise cards keep their familiar layouts. Messages pairs its available card or ordered movement media with the concise instructions needed to complete the plan safely. Murph uses concise text alone when a richer layout would not help.",
     "relevanceTags": ["assistant", "telegram", "imessage", "workouts", "cards"],
-    "sourcePullRequests": [1727, 1728, 1747]
+    "sourcePullRequests": [1727, 1728, 1747, 1810]
   }
 }
