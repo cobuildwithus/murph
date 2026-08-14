@@ -181,6 +181,7 @@ const workoutSessionEditorExerciseV1Schema = z
  */
 export const workoutSessionEditorProjectionV1Schema = z
   .object({
+    actionBinding: z.string().regex(/^[0-9a-f]{64}$/u),
     exercises: z
       .array(workoutSessionEditorExerciseV1Schema)
       .min(1)
@@ -298,16 +299,12 @@ export function buildWorkoutSessionAppCardEnvelopeV4(input: {
 }
 
 export function buildWorkoutSessionAppCardEnvelopeV6(input: {
-  actionBinding: string;
   editor: WorkoutSessionEditorProjectionV1;
   title: string;
   subtitle: string | null;
   footer: string | null;
   workout: WorkoutSessionDetailV1;
 }): WorkoutSessionAppCardEnvelopeV6 {
-  if (!isWorkoutActionBinding(input.actionBinding)) {
-    throw new TypeError("Workout action binding is invalid.");
-  }
   const editor = workoutSessionEditorProjectionV1Schema.parse(input.editor);
   if (
     input.workout.state !== "active"
@@ -353,7 +350,7 @@ export function buildWorkoutSessionAppCardEnvelopeV6(input: {
         ];
       }),
       f: input.footer,
-      b: input.actionBinding,
+      b: editor.actionBinding,
       d: editor.setRemovalBinding,
     },
   };

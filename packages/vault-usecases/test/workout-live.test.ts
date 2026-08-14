@@ -6,7 +6,10 @@ import {
   workoutTemplateSchema,
 } from '@murphai/contracts'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
-import { deriveWorkoutSetRemovalBinding } from '@murphai/operator-config/workout-action-binding'
+import {
+  deriveWorkoutActionBinding,
+  deriveWorkoutSetRemovalBinding,
+} from '@murphai/operator-config/workout-action-binding'
 
 import {
   buildLiveWorkoutSessionFromTemplate,
@@ -72,6 +75,7 @@ describe('live workout model', () => {
       workoutId: 'evt_test_workout',
     }), {
       editor: {
+        actionBinding: deriveWorkoutActionBinding('evt_test_workout'),
         version: 1,
         setRemovalBinding: deriveWorkoutSetRemovalBinding(
           'evt_test_workout',
@@ -169,6 +173,46 @@ describe('live workout model', () => {
       workout: workoutForNote('n'.repeat(400)),
       workoutId: 'evt_test_workout',
     }), null)
+  })
+
+  test('changes the editor action binding after a member action', () => {
+    const presentation = {
+      version: 1 as const,
+      state: 'active' as const,
+      exercises: [{
+        name: 'Push-up',
+        sets: [{ status: 'pending' as const, target: null, actual: null }],
+      }],
+    }
+    const workout = workoutSessionSchema.parse({
+      sourceApp: LIVE_WORKOUT_SOURCE_APP,
+      startedAt: '2026-08-09T18:00:00.000Z',
+      lastMemberActionId: '2f1c1fdc-c7b0-4d90-b902-8e6295959243',
+      exercises: [{
+        name: 'Push-up',
+        order: 1,
+        sets: [{ order: 1 }],
+      }],
+    })
+
+    assert.equal(
+      buildLiveWorkoutCardEditor({
+        presentation,
+        workout,
+        workoutId: 'evt_test_workout',
+      })?.editor.actionBinding,
+      deriveWorkoutActionBinding(
+        'evt_test_workout',
+        workout.lastMemberActionId,
+      ),
+    )
+    assert.notEqual(
+      deriveWorkoutActionBinding('evt_test_workout'),
+      deriveWorkoutActionBinding(
+        'evt_test_workout',
+        workout.lastMemberActionId,
+      ),
+    )
   })
 
   test.each([

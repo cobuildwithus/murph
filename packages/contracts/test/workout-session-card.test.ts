@@ -71,6 +71,7 @@ const TRACKED_WORKOUT_CARD: CompactTableResponseCardV1 = {
 };
 
 const TRACKED_WORKOUT_EDITOR = {
+  actionBinding: "a".repeat(64),
   setRemovalBinding: "b".repeat(64),
   version: 1 as const,
   exercises: [
@@ -173,7 +174,6 @@ describe("workout session compact-table contract", () => {
       throw new TypeError("Expected the workout card fixture.");
     }
     const envelope = buildWorkoutSessionAppCardEnvelopeV6({
-      actionBinding: "a".repeat(64),
       editor: TRACKED_WORKOUT_EDITOR,
       title: TRACKED_WORKOUT_CARD.title,
       subtitle: TRACKED_WORKOUT_CARD.subtitle,
@@ -193,8 +193,10 @@ describe("workout session compact-table contract", () => {
       workout: TRACKED_WORKOUT_CARD.workout,
     });
     expect(() => buildWorkoutSessionAppCardEnvelopeV6({
-      actionBinding: "A".repeat(64),
-      editor: TRACKED_WORKOUT_EDITOR,
+      editor: {
+        ...TRACKED_WORKOUT_EDITOR,
+        actionBinding: "A".repeat(64),
+      },
       title: TRACKED_WORKOUT_CARD.title,
       subtitle: TRACKED_WORKOUT_CARD.subtitle,
       footer: TRACKED_WORKOUT_CARD.footer,
@@ -225,8 +227,8 @@ describe("workout session compact-table contract", () => {
       }],
     };
     const envelope = buildWorkoutSessionAppCardEnvelopeV6({
-      actionBinding: "a".repeat(64),
       editor: {
+        actionBinding: "a".repeat(64),
         exercises: [{
           unitOverride: "lb",
           sets: [{
@@ -266,8 +268,8 @@ describe("workout session compact-table contract", () => {
     });
 
     const noteInput = {
-      actionBinding: "a".repeat(64),
       editor: {
+        actionBinding: "a".repeat(64),
         exercises: [{
           unitOverride: null,
           sets: [{

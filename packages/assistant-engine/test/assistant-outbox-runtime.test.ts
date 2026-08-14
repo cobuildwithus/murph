@@ -194,6 +194,7 @@ const WORKOUT_RESPONSE_CARD: AssistantResponseCard = {
     }],
   },
   editor: {
+    actionBinding: 'a'.repeat(64),
     version: 1,
     setRemovalBinding: 'b'.repeat(64),
     exercises: [{

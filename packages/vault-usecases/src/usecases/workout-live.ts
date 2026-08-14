@@ -100,11 +100,7 @@ async function applyLiveWorkoutMemberActionWithLockHeld(
     input.actionId,
   )
   if (candidates.exactReplays.length > 0) {
-    if (
-      candidates.exactReplays.length !== 1
-      || input.action.expectedWorkout.actionBinding
-        !== deriveWorkoutActionBinding(candidates.exactReplays[0]!.entity.id)
-    ) {
+    if (candidates.exactReplays.length !== 1) {
       return { reason: 'workout_changed', status: 'rejected' }
     }
     return { status: 'unchanged' }
@@ -119,17 +115,17 @@ async function applyLiveWorkoutMemberActionWithLockHeld(
   }
 
   const shown = active[0]!
-  if (
-    input.action.expectedWorkout.actionBinding
-      !== deriveWorkoutActionBinding(shown.entity.id)
-  ) {
-    return { reason: 'workout_changed', status: 'rejected' }
-  }
   let workout: WorkoutSession
   try {
     workout = parseShownWorkout(shown)
     assertTargetableLiveWorkout(workout, `Workout ${shown.entity.id}`)
   } catch {
+    return { reason: 'workout_changed', status: 'rejected' }
+  }
+  if (
+    input.action.expectedWorkout.actionBinding
+      !== deriveWorkoutActionBinding(shown.entity.id, workout.lastMemberActionId)
+  ) {
     return { reason: 'workout_changed', status: 'rejected' }
   }
   const acceptedAtMs = Date.parse(input.acceptedAt)

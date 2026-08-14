@@ -61,8 +61,10 @@ leaves the card as the existing readable V4 snapshot.
 Generic compact tables keep the existing schema-version-3 native envelope. The
 static workout image keeps the authority-free schema-version-4 envelope. The
 installed native editor uses schema version 6, which adds that compact typed
-projection and one opaque 64-character action binding while still staying under
-the existing 2,048-character URL ceiling.
+projection and one opaque 64-character workout-revision binding while still
+staying under the existing 2,048-character URL ceiling. The revision binds the
+canonical workout identity to its last applied member-action marker without
+exposing either value.
 
 The readable response-card contract remains object-shaped for authoring and
 runtime validation. V4 uses positional exercise tuples `[name, sets]` and set
@@ -145,26 +147,31 @@ complete ordered exercise/set state. The canonical owner recomputes that binding
 under its existing lock before removing a set, so any concurrent type, note,
 duration, distance, RPE, bodyweight, assistance, added-load, result, or mixed
 field change rejects the immutable card without exposing those hidden fields in
-the message URL. Admission rejects a destructive batch when original edits,
+the message URL. Before applying any different action, the same owner also
+recomputes the card's workout-revision binding from the canonical workout id and
+last applied member-action marker. A prior direct action therefore invalidates
+every older positional card even when repeated visible values make its intended
+result appear unchanged. Admission rejects a destructive batch when original edits,
 descending removals, and contiguous appends would recreate the same visible set
 sequence because it would have no observable structural effect. The canonical
 workout write records the request action id atomically with the final exercises.
 Only that persisted id proves exact replay; a stale workout that merely matches
 the intended visible projection still fails the complete binding precondition.
 The same bounded activity-session read resolves an exact persisted id before
-active-workout eligibility, so finishing that workout after its canonical write
-cannot turn a crash-replayed success into a rejection or retarget a newer active
-workout. Only a first application without that exact marker must satisfy the
-active-workout checks.
+revision and active-workout eligibility, because the original write necessarily
+changed the card's revision binding. Finishing that workout after its canonical
+write therefore cannot turn a crash-replayed success into a rejection or
+retarget a newer active workout. Only a first application without that exact
+marker must satisfy the revision and active-workout checks.
 
 Positions are one-based presentation coordinates, and each coordinate within
 its original-edit, original-remove, or final-append namespace may appear at most
 once. The action carries no member id or canonical workout id. Its stable
-one-way action binding and destructive-state binding are stale-card
+one-way workout-revision binding and destructive-state binding are stale-card
 preconditions, not authentication: the server derives the member from the scoped
 credential and requires exactly one active workout whose stable identity,
-ordered exercise names, set counts, logged states, and, for removal, complete
-canonical state still match. Each edit to an existing set also carries the
+last applied action marker, ordered exercise names, set counts, logged states,
+and, for removal, complete canonical state still match. Each edit to an existing set also carries the
 bounded previous result from the typed card projection; the canonical owner
 rejects the batch when that target changed instead of overwriting a newer
 correction.

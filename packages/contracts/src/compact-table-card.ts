@@ -226,7 +226,6 @@ const compactTableWorkoutResponseCardV1Schema = z
     try {
       addEncodedLengthIssues(
         buildWorkoutSessionAppCardEnvelopeV6({
-          actionBinding: "0".repeat(64),
           editor: card.editor,
           title: card.title,
           subtitle: card.subtitle,

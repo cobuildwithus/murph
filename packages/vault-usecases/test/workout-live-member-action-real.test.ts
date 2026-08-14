@@ -27,6 +27,7 @@ import { editWorkoutRecord } from "../src/usecases/workout.js";
 const STARTED_AT = "2026-08-13T14:00:00.000Z";
 const ACCEPTED_AT = "2026-08-13T15:00:00.000Z";
 const ACTION_ID = "2f1c1fdc-c7b0-4d90-b902-8e6295959243";
+const SECOND_ACTION_ID = "8676b264-9b91-4b50-8c73-184d7a63b901";
 
 function applyLiveWorkoutMemberAction(
   input: Omit<
@@ -130,6 +131,31 @@ function removeSetsAction(input: {
   };
 }
 
+function putFirstSetAction(input: {
+  actionBinding: string;
+  reps: number;
+}): WorkoutLiveApplyMemberActionV1 {
+  return {
+    expectedWorkout: {
+      actionBinding: input.actionBinding,
+      exercises: [{
+        name: "Push-up",
+        sets: [{ logged: true }, { logged: true }],
+      }],
+    },
+    kind: "workout.live.apply",
+    mutations: [{
+      exerciseName: "Push-up",
+      exercisePosition: 1,
+      expectedResult: { kind: "reps", reps: 10 },
+      kind: "set.put",
+      result: { kind: "reps", reps: input.reps },
+      setPosition: 1,
+    }],
+    version: 1,
+  };
+}
+
 async function expectStoredReps(vault: string, reps: readonly number[]) {
   const shown = await showActiveLiveWorkout({ vault });
   expect(parseShownWorkout(shown).exercises[0]?.sets).toEqual(
@@ -216,6 +242,82 @@ test("an exact member-action retry survives workout completion", async () => {
     const laterWorkout = parseShownWorkout(unchangedLater);
     expect(laterWorkout.exercises).toEqual([]);
     expect(laterWorkout.lastMemberActionId).toBeUndefined();
+  } finally {
+    await rm(fixture.vault, { force: true, recursive: true });
+  }
+});
+
+test("a stale card cannot retarget a set compacted by another member action", async () => {
+  const fixture = await createLoggedWorkout([10, 10]);
+  try {
+    await editWorkoutRecord({
+      lookup: fixture.workoutId,
+      set: [`workout.exercises=${JSON.stringify([{
+        ...fixture.workout.exercises[0],
+        sets: [
+          { order: 1, reps: 10, type: "warmup" },
+          { order: 2, reps: 10, type: "normal" },
+        ],
+      }])}`],
+      vault: fixture.vault,
+    });
+    const original = parseShownWorkout(
+      await showActiveLiveWorkout({ vault: fixture.vault }),
+    );
+    const originalBinding = deriveWorkoutActionBinding(fixture.workoutId);
+
+    await expect(applyLiveWorkoutMemberAction({
+      acceptedAt: ACCEPTED_AT,
+      action: removeSetsAction({
+        appendedReps: [20],
+        removePositions: [1],
+        workout: original,
+        workoutId: fixture.workoutId,
+      }),
+      vault: fixture.vault,
+    })).resolves.toEqual({ status: "applied" });
+
+    await expect(applyLiveWorkoutMemberAction({
+      acceptedAt: ACCEPTED_AT,
+      action: putFirstSetAction({
+        actionBinding: originalBinding,
+        reps: 12,
+      }),
+      actionId: SECOND_ACTION_ID,
+      vault: fixture.vault,
+    })).resolves.toEqual({
+      reason: "workout_changed",
+      status: "rejected",
+    });
+    let stored = parseShownWorkout(
+      await showActiveLiveWorkout({ vault: fixture.vault }),
+    );
+    expect(stored.exercises[0]?.sets).toEqual([
+      { order: 1, reps: 10, type: "normal" },
+      { order: 2, reps: 20 },
+    ]);
+    expect(stored.lastMemberActionId).toBe(ACTION_ID);
+
+    await expect(applyLiveWorkoutMemberAction({
+      acceptedAt: ACCEPTED_AT,
+      action: putFirstSetAction({
+        actionBinding: deriveWorkoutActionBinding(
+          fixture.workoutId,
+          ACTION_ID,
+        ),
+        reps: 12,
+      }),
+      actionId: SECOND_ACTION_ID,
+      vault: fixture.vault,
+    })).resolves.toEqual({ status: "applied" });
+    stored = parseShownWorkout(
+      await showActiveLiveWorkout({ vault: fixture.vault }),
+    );
+    expect(stored.exercises[0]?.sets).toEqual([
+      { order: 1, reps: 12, type: "normal" },
+      { order: 2, reps: 20 },
+    ]);
+    expect(stored.lastMemberActionId).toBe(SECOND_ACTION_ID);
   } finally {
     await rm(fixture.vault, { force: true, recursive: true });
   }

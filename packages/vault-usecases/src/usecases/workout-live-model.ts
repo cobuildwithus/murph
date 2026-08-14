@@ -11,7 +11,10 @@ import {
   type WorkoutTemplate,
   workoutSessionSchema,
 } from '@murphai/contracts'
-import { deriveWorkoutSetRemovalBinding } from '@murphai/operator-config/workout-action-binding'
+import {
+  deriveWorkoutActionBinding,
+  deriveWorkoutSetRemovalBinding,
+} from '@murphai/operator-config/workout-action-binding'
 
 import { deriveDurationMinutesFromTimestamps } from './workout-model.js'
 
@@ -201,6 +204,10 @@ export function buildLiveWorkoutCardEditor(input: {
 
   return {
     editor: {
+      actionBinding: deriveWorkoutActionBinding(
+        input.workoutId,
+        input.workout.lastMemberActionId,
+      ),
       exercises: editorExercises,
       setRemovalBinding: deriveWorkoutSetRemovalBinding(input.workoutId, exercises),
       version: 1,

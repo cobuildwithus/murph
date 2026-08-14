@@ -659,9 +659,9 @@ Last verified: 2026-08-13
 - The same narrow capability-less presentation exception includes V4/V6 workout
   envelopes and V5 challenge-standings envelopes. V3, V4, and V5 carry no
   tracking, identity, canonical references, credentials, tokens, or write
-  authority. V6 adds a 64-character lowercase SHA-256 action binding derived
-  from the canonical workout id plus a bounded typed projection of the same
-  completed-set values already visible in that private-direct card. It also
+  authority. V6 adds a 64-character lowercase SHA-256 workout-revision binding
+  derived from the canonical workout id plus its last applied member-action
+  marker. It also
   carries a separate opaque 64-character removal binding derived from the hidden
   canonical workout id and complete ordered canonical exercise/set state. That
   binding reveals no raw hidden field and is checked only as a destructive
@@ -673,7 +673,10 @@ Last verified: 2026-08-13
   append rather than accepting a meaningless destructive command. Canonical
   persistence atomically records the bounded action id with the workout change,
   and only that exact marker—not visible-state coincidence—proves replay before
-  active-only and destructive preconditions. The same bounded canonical workout
+  revision, active-only, and destructive preconditions. Every different action
+  must match the current revision before positional mutation, so a card that
+  predates another direct action fails closed even when repeated visible values
+  would make the wrong target appear unchanged. The same bounded canonical workout
   read resolves that marker after the target completes and before considering a
   newer active workout, so replay cannot retarget. This adds no client-visible
   set id or second receipt store. Canonical persistence keeps the generic no-deletion guard and exposes
@@ -686,7 +689,7 @@ Last verified: 2026-08-13
   bodyweight, assistance, added-load, or mixed result that the typed V6 families
   cannot fully represent; runtime preserves the original V4 actual rather than
   persisting a reduced editable projection.
-  The binding is never accepted as authentication and can authorize nothing
+  Neither binding is ever accepted as authentication and can authorize nothing
   without the separately enrolled scoped bearer; the workout owner uses it
   only as an exact stale-card precondition under the canonical mutation lock.
   V1-V5 presentation envelopes may also reach the bounded

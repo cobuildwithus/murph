@@ -11,9 +11,12 @@ type CanonicalWorkoutExercise = CompleteNullableProjection<
   Omit<WorkoutExercise, 'sets'>
 > & { sets: CanonicalWorkoutSet[] }
 
-export function deriveWorkoutActionBinding(workoutEntityId: string): string {
+export function deriveWorkoutActionBinding(
+  workoutEntityId: string,
+  lastMemberActionId?: string,
+): string {
   return createHash('sha256')
-    .update(`workout-action:v1:${workoutEntityId}`)
+    .update(`workout-action:v2:${workoutEntityId}:${lastMemberActionId ?? ''}`)
     .digest('hex')
 }
 

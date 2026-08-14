@@ -73,6 +73,9 @@ const ACTIVE_WORKOUT_CARD = {
     ],
   },
   editor: {
+    actionBinding: deriveWorkoutActionBinding(
+      'evt_01K1ABCDEFGHJKMNPQRSTVWXYZ',
+    ),
     version: 1,
     setRemovalBinding: 'b'.repeat(64),
     exercises: [
@@ -166,7 +169,7 @@ describe('workout session response cards', () => {
     expect(decodeAppCardUrl(url)).toEqual({
       schemaVersion: 6,
       card: {
-        b: deriveWorkoutActionBinding(ACTIVE_WORKOUT_CARD.tracking.entityId),
+        b: ACTIVE_WORKOUT_CARD.editor.actionBinding,
         d: ACTIVE_WORKOUT_CARD.editor.setRemovalBinding,
         k: 'w',
         v: 1,
@@ -271,6 +274,7 @@ describe('workout session response cards', () => {
         ...(state === 'active'
           ? {
               editor: {
+                actionBinding: 'a'.repeat(64),
                 version: 1 as const,
                 setRemovalBinding: 'b'.repeat(64),
                 exercises: workout.exercises.map((exercise) => ({

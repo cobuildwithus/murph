@@ -41,8 +41,6 @@ import {
 } from '@murphai/contracts'
 import * as z from '@murphai/contracts/zod-runtime'
 
-import { deriveWorkoutActionBinding } from './workout-action-binding.js'
-
 const NUTRITION_CARD_MONTHS = [
   'Jan',
   'Feb',
@@ -464,7 +462,6 @@ function encodeWorkoutSessionAppCardPayload(
     includeActionBinding
       && card.editor !== undefined
       ? buildWorkoutSessionAppCardEnvelopeV6({
-          actionBinding: deriveWorkoutActionBinding(card.tracking.entityId),
           editor: card.editor,
           title: card.title,
           subtitle: card.subtitle,

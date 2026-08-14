@@ -2160,10 +2160,11 @@ typed exercise/set mutations; it is not an arbitrary path, patch, database, or
 tool-call surface. At the existing response-card attachment boundary, runtime
 re-reads the exact canonical workout and may add one trusted typed editor
 projection to an active card. The native V6 wire carries that projection plus
-one opaque SHA-256 action binding; it contains no canonical id and grants no
-authority, but preserves exact nullable prior fields while letting the workout
-owner prove under its existing lock that an old card still names the exact
-active workout. Note-shaped results enter V6 only when the exact canonical note
+one opaque SHA-256 workout-revision binding derived from the canonical workout
+identity and its last applied member-action marker. It contains neither value
+and grants no authority, but preserves exact nullable prior fields while letting
+the workout owner prove under its existing lock that an old card still names
+the exact active workout and predates no direct action. Note-shaped results enter V6 only when the exact canonical note
 fits the visible card result; longer hidden notes cannot enter persisted or
 provider payloads and leave the card V4/read-only. Every other completed set
 must fit exactly one complete note, reps, or weight/reps family; duration,
@@ -2180,8 +2181,9 @@ finishes that reply first and then selects at most one due
 `member.action.requested` item before another provider pass or unrelated system
 work; the terminal `member.action.completed` receipt receives no such priority.
 The workout
-owner takes the existing live-workout mutation lock, requires exactly one active
-workout matching both that binding and the authority-free visible shape, applies
+owner takes the existing live-workout mutation lock, resolves an exact persisted
+action-id replay first, then requires exactly one active workout matching both
+the current revision binding and the authority-free visible shape, applies
 the complete batch in one canonical write, converges exact retries, and rejects
 stale or ambiguous state. Runtime appends a typed terminal outcome through the
 same mailbox owner before the original request checkpoint is released. The
@@ -2987,7 +2989,7 @@ table-and-details presentation. This is a narrow presentation exception to the
 fixed-URL rule: either URL may contain only the bounded values permitted by its
 versioned delivery contract. V1-V4 carry private-direct presentation values;
 V5 uses the identity-free public challenge projection, and native-only V6 adds
-the opaque exact-workout binding plus a bounded typed editable-set projection
+the opaque workout-revision binding plus a bounded typed editable-set projection
 derived from values already visible in that private-direct workout card. None may
 contain a member identity, canonical record reference, credential, tracking
 reference, or other authority.

@@ -46,6 +46,7 @@ const BASE_WORKOUT: WorkoutSession = {
 const ACCEPTED_AT = "2026-08-12T15:00:00.000Z";
 const ACTION_BINDING = deriveWorkoutActionBinding("evt_test_workout");
 const ACTION_ID = "2f1c1fdc-c7b0-4d90-b902-8e6295959243";
+const SECOND_ACTION_ID = "8676b264-9b91-4b50-8c73-184d7a63b901";
 
 function applyLiveWorkoutMemberAction(
   input: Omit<
@@ -306,6 +307,52 @@ describe("live workout member action", () => {
       action: setAction({ kind: "reps", reps: 8 }),
       vault: "/vault",
     })).resolves.toEqual({ status: "unchanged" });
+    expect(mocks.updateLiveWorkoutExercises).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { label: "would change the shifted set", reps: 12 },
+    { label: "would falsely look unchanged", reps: 10 },
+  ])("rejects a positional edit from a card predating another member action when it $label", async ({ reps }) => {
+    mocks.findActiveLiveWorkouts.mockResolvedValueOnce([shownWorkout({
+      ...BASE_WORKOUT,
+      lastMemberActionId: ACTION_ID,
+      exercises: [{
+        ...BASE_WORKOUT.exercises[0],
+        sets: [
+          { order: 1, reps: 10, type: "normal" },
+          { order: 2, reps: 20 },
+        ],
+      }],
+    })]);
+
+    await expect(applyLiveWorkoutMemberAction({
+      acceptedAt: ACCEPTED_AT,
+      action: {
+        expectedWorkout: {
+          actionBinding: ACTION_BINDING,
+          exercises: [{
+            name: "Leg press",
+            sets: [{ logged: true }, { logged: true }],
+          }],
+        },
+        kind: "workout.live.apply",
+        mutations: [{
+          exerciseName: "Leg press",
+          exercisePosition: 1,
+          expectedResult: { kind: "reps", reps: 10 },
+          kind: "set.put",
+          result: { kind: "reps", reps },
+          setPosition: 1,
+        }],
+        version: 1,
+      },
+      actionId: SECOND_ACTION_ID,
+      vault: "/vault",
+    })).resolves.toEqual({
+      reason: "workout_changed",
+      status: "rejected",
+    });
     expect(mocks.updateLiveWorkoutExercises).not.toHaveBeenCalled();
   });
 
