@@ -17,6 +17,7 @@ import {
 } from '@murphai/operator-config/assistant/provider-config'
 import {
   HOSTED_LOCAL_TEST_CODEX_MODEL_PROVIDER_ID,
+  HOSTED_OPENAI_CODEX_MODEL_PROVIDER_ID,
   isCodexReservedModelProviderId,
   resolveAssistantCodexModelProviderConfig,
 } from '@murphai/operator-config/assistant/target-runtime'
@@ -323,7 +324,9 @@ export function extractCodexAssistantProviderUsage(input: {
     rawEvents: input.rawEvents,
     turnId,
   })
-  const providerName = input.providerConfig.target.modelProvider
+  const providerName = resolveCodexAssistantUsageProviderName(
+    input.providerConfig.target.modelProvider,
+  )
   const requestedModel = input.providerConfig.target.model
   const servedModel = findAssistantCodexCurrentTurnReroutedModel({
     rawEvents: input.rawEvents,
@@ -1156,7 +1159,7 @@ export function extractCodexSubagentUsageDrafts(input: {
         inputTokens: delta.inputTokens,
         outputTokens: delta.outputTokens,
         providerMetadataJson: null,
-        providerName: input.modelProvider,
+        providerName: resolveCodexAssistantUsageProviderName(input.modelProvider),
         providerRequestId: null,
         rawUsageJson,
         rawUsageJsonHash: hashAssistantProviderStableJson(rawUsageJson),
@@ -1185,12 +1188,17 @@ export function resolveCodexAssistantProviderTokenPricingBasis(input: {
 }): AssistantUsageTokenPricingBasis {
   return resolveHostedAiUsageTokenPricingBasis({
     model: input.model,
-    providerName:
-      input.modelProvider === HOSTED_LOCAL_TEST_CODEX_MODEL_PROVIDER_ID
-        ? 'openai'
-        : input.modelProvider,
+    providerName: resolveCodexAssistantUsageProviderName(input.modelProvider),
     serviceTier: input.serviceTier ?? null,
   })
+}
+
+function resolveCodexAssistantUsageProviderName(
+  modelProvider: string | null,
+): string | null {
+  return modelProvider === HOSTED_LOCAL_TEST_CODEX_MODEL_PROVIDER_ID
+    ? HOSTED_OPENAI_CODEX_MODEL_PROVIDER_ID
+    : modelProvider
 }
 
 // Spawn evidence map: every thread id named by a canonical collab tool call

@@ -145,6 +145,9 @@ describe("hosted local canonical receipt lost-ack recovery e2e", () => {
     const outboundBaseline = requireLinqStub().countObservedSends(replyPath);
     const providerBaseline = countResponsesApiRequests();
     const dueAt = new Date(Date.now() + 24 * 60 * 60 * 1_000).toISOString();
+    const automationStateMarker = buildCanonicalAutomationStateMarker({
+      dueAt,
+    });
     requireScenario().queueAssistantResponses([
       buildAssistantProviderMurphToolCall("automation", {
         action: "save",
@@ -156,6 +159,12 @@ describe("hosted local canonical receipt lost-ack recovery e2e", () => {
         tags: ["assistant"],
         title: "Canonical receipt recovery probe",
       }),
+      buildAssistantProviderShellCommandCall(
+        buildCanonicalAutomationStateProbeCommand({
+          dueAt,
+          marker: automationStateMarker,
+        }),
+      ),
       replyText,
     ], {
       matchInputContains: inboundText,
@@ -200,19 +209,7 @@ describe("hosted local canonical receipt lost-ack recovery e2e", () => {
       .map(readAssistantProviderRequestText)
       .join("\n\n");
     expect(providerRequestText).toContain(automationSlug);
-    const automationWriteResults = providerRequests.flatMap((request) =>
-      collectAutomationWriteResults(JSON.parse(request.body))
-    );
-    expect(automationWriteResults).toEqual([
-      expect.objectContaining({
-        action: "save",
-        created: true,
-        lookupId: automationSlug,
-        routeBinding: "current_conversation",
-        status: "active",
-        timingVerified: true,
-      }),
-    ]);
+    expect(providerRequestText).toContain(automationStateMarker);
 
     const faultLogs = [
       requireScenario().harness.stdoutTail(2_000_000),
@@ -687,6 +684,42 @@ function buildPreferenceRecoveryStateProbeCommand(
   return `node -e ${quoteShellArgument(script)}`;
 }
 
+function buildCanonicalAutomationStateMarker(input: { dueAt: string }): string {
+  return [
+    "CANONICAL_AUTOMATION_STATE",
+    automationSlug,
+    input.dueAt,
+    chatId,
+    "audit=1",
+  ].join("|");
+}
+
+function buildCanonicalAutomationStateProbeCommand(input: {
+  dueAt: string;
+  marker: string;
+}): string {
+  const script = [
+    'const fs = require("node:fs");',
+    'const { execFileSync } = require("node:child_process");',
+    `const slug = ${JSON.stringify(automationSlug)};`,
+    `const dueAt = ${JSON.stringify(input.dueAt)};`,
+    `const chatId = ${JSON.stringify(chatId)};`,
+    `const marker = ${JSON.stringify(input.marker)};`,
+    'const shown = JSON.parse(execFileSync("vault-cli", ["automation", "show", slug, "--format", "json"], { encoding: "utf8" }));',
+    'const automation = shown && (shown.data || shown).automation;',
+    'if (!automation || automation.slug !== slug || automation.status !== "active" || automation.continuityPolicy !== "fresh") throw new Error("Canonical automation readback mismatch.");',
+    'if (automation.instructions !== "Record the hosted canonical checkpoint recovery probe." || automation.title !== "Canonical receipt recovery probe" || automation.summary !== "Hosted canonical checkpoint recovery probe.") throw new Error("Canonical automation content mismatch.");',
+    'if (!automation.schedule || automation.schedule.kind !== "at" || automation.schedule.at !== dueAt) throw new Error("Canonical automation schedule mismatch.");',
+    'if (!automation.route || automation.route.channel !== "linq" || automation.route.deliveryTarget !== chatId || automation.route.threadId !== chatId) throw new Error("Canonical automation route mismatch.");',
+    'if (!Array.isArray(automation.tags) || !automation.tags.includes("assistant")) throw new Error("Canonical automation tags mismatch.");',
+    'const auditRecords = fs.readdirSync("audit", { recursive: true }).filter((entry) => typeof entry === "string" && entry.endsWith(".jsonl")).flatMap((entry) => fs.readFileSync("audit/" + entry, "utf8").split(/\\r?\\n/u).filter(Boolean).map((line) => JSON.parse(line)));',
+    'const matchingAudits = auditRecords.filter((record) => record.commandName === "core.upsertAutomation" && Array.isArray(record.targetIds) && record.targetIds.includes(automation.automationId));',
+    'if (matchingAudits.length !== 1) throw new Error("Canonical automation audit count mismatch.");',
+    'console.log(marker);',
+  ].join("");
+  return `node -e ${quoteShellArgument(script)}`;
+}
+
 function quoteShellArgument(value: string): string {
   return `'${value.replaceAll("'", "'\\''")}'`;
 }
@@ -745,84 +778,6 @@ function collectJsonStrings(value: unknown): string[] {
   }
   if (value && typeof value === "object") {
     return Object.values(value).flatMap((entry) => collectJsonStrings(entry));
-  }
-  return [];
-}
-
-interface AutomationWriteResultSummary {
-  action: "patch" | "save";
-  created: boolean;
-  lookupId: string;
-  routeBinding: string;
-  status: string;
-  timingVerified: boolean;
-}
-
-function collectAutomationWriteResults(
-  value: unknown,
-): AutomationWriteResultSummary[] {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return [];
-  }
-  const request = value as Record<string, unknown>;
-  if (!Array.isArray(request.input)) {
-    return [];
-  }
-  return request.input.flatMap((entry) => {
-    if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
-      return [];
-    }
-    const item = entry as Record<string, unknown>;
-    if (
-      item.type !== "custom_tool_call_output"
-      && item.type !== "function_call_output"
-    ) {
-      return [];
-    }
-    return parseAutomationWriteResult(item.output);
-  });
-}
-
-function parseAutomationWriteResult(
-  value: unknown,
-): AutomationWriteResultSummary[] {
-  if (typeof value === "string") {
-    const trimmed = value.trim();
-    if (
-      (trimmed.startsWith("{") && trimmed.endsWith("}"))
-      || (trimmed.startsWith("[") && trimmed.endsWith("]"))
-    ) {
-      try {
-        return parseAutomationWriteResult(JSON.parse(trimmed));
-      } catch {
-        return [];
-      }
-    }
-    return [];
-  }
-  if (Array.isArray(value)) {
-    return value.flatMap(parseAutomationWriteResult);
-  }
-  if (value && typeof value === "object") {
-    const record = value as Record<string, unknown>;
-    if (
-      (record.action === "patch" || record.action === "save")
-      && typeof record.created === "boolean"
-      && typeof record.lookupId === "string"
-      && typeof record.routeBinding === "string"
-      && typeof record.status === "string"
-      && typeof record.timingVerified === "boolean"
-    ) {
-      return [{
-        action: record.action,
-        created: record.created,
-        lookupId: record.lookupId,
-        routeBinding: record.routeBinding,
-        status: record.status,
-        timingVerified: record.timingVerified,
-      }];
-    }
-    return Object.values(record).flatMap(parseAutomationWriteResult);
   }
   return [];
 }

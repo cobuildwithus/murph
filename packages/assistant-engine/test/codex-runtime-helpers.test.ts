@@ -662,6 +662,21 @@ describe('Codex assistant registry helpers', () => {
         providerConfig: normalizeAssistantProviderConfig({
           provider: 'codex-cli',
           model: 'gpt-5.6-terra',
+          modelProvider: HOSTED_LOCAL_TEST_CODEX_MODEL_PROVIDER_ID,
+          oss: false,
+        }),
+        rawEvents: [codexSettingsFlexEvent],
+        serviceTier: 'flex',
+      }),
+    ).toMatchObject({
+      providerName: 'hosted-openai',
+      tokenPricingBasis: 'openai-flex',
+    })
+    expect(
+      extractCodexAssistantProviderUsage({
+        providerConfig: normalizeAssistantProviderConfig({
+          provider: 'codex-cli',
+          model: 'gpt-5.6-terra',
           modelProvider: 'openai',
           oss: false,
         }),

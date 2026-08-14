@@ -81,15 +81,21 @@ Updated: 2026-08-14
   parser, an older current privacy key paired with a newer key, and a mock that
   does not implement the current signing and verification boundary. Repair the
   fixtures while leaving production validation unchanged.
-- Codex transports dynamic automation results to the Responses endpoint as
-  top-level `function_call_output` items. The lost-ack scenario had narrowed
-  its exact-result proof to `custom_tool_call_output`, so it ignored the real
-  result. Accept both protocol-owned top-level output item kinds while keeping
-  the exact automation result fields and values mandatory.
-- The reserved hosted-local OpenAI provider identity still has OpenAI pricing
-  semantics. Normalize only that identity at the assistant-engine pricing
-  boundary so flex selection and usage attribution agree; Venice and all
-  unsupported providers remain standard-priced.
+- The pinned Codex transport does not replay the dynamic automation result in
+  a stable Responses request-envelope item. Prove the exact effect through a
+  production-shaped follow-up shell call that reads the canonical automation
+  and requires exactly one matching `core.upsertAutomation` audit, then require
+  that state marker in the next provider request.
+- The reserved hosted-local OpenAI provider identity is a sandbox/credential
+  isolation detail, while usage retains the production hosted-OpenAI identity.
+  Translate it once at the assistant usage boundary so provider evidence,
+  Flex pricing, and ledger validation agree; Venice and unsupported providers
+  retain their own standard-priced identities.
+- The unchanged three-contender PostgreSQL proof admitted every contender
+  before the retry blocker. Preparation-mismatch retries can legitimately
+  requeue in reverse timestamp order, making the older correction stale. Start
+  the third contender only after the second retry is blocked so the test proves
+  its stated chronological schedule without changing production behavior.
 
 ## Verification
 
@@ -105,10 +111,12 @@ Updated: 2026-08-14
   rebuilt bundle. The Junction user stub has two focused response-contract
   tests passing and the Cloudflare package typechecks. The 33 affected
   PostgreSQL concurrency tests pass with the refreshed crypto fixtures and the
-  web package typechecks. On the first exact-head private matrix, eight scenario
-  groups passed. Two deterministic assertions exposed the protocol-output and
-  hosted-local OpenAI pricing follow-ups above; two other groups hit the same
-  fail-closed local Cloudflare container lifecycle anomaly after an 8-second
-  cold-start confirmation boundary. After the follow-up correction, 96 focused
-  assistant-engine tests pass and the assistant-engine and Cloudflare packages
-  typecheck. A new exact-head combined private matrix is pending.
+  web package typechecks. On exact-head private run 31832448208, eight scenario
+  groups passed. The remaining deterministic failures proved the transport,
+  usage-provider evidence, and contender retry-order findings above; the Linq
+  media group separately repeated the fail-closed local Cloudflare container
+  lifecycle anomaly after an 8-second cold-start confirmation boundary. After
+  the follow-up correction, 96 focused assistant-engine tests pass, both the
+  assistant-engine and Cloudflare packages typecheck, and the isolated ordered
+  PostgreSQL contender proof passes. A new exact-head combined private matrix
+  is pending.
