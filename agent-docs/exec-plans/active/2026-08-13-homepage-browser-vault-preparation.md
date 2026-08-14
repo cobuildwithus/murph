@@ -42,11 +42,11 @@ Updated: 2026-08-13
 
 1. [x] Diagnose the authenticated-only latency and identify the replica payload
    transfer as the differentiating path.
-2. [ ] Obtain an apply-ready implementation from ReviewGPT against the isolated
+2. [x] Obtain an apply-ready implementation from ReviewGPT against the isolated
    candidate worktree.
-3. [ ] Inspect and apply the smallest safe patch with focused regression tests
+3. [x] Inspect and apply the smallest safe patch with focused regression tests
    and durable documentation.
-4. [ ] Run focused verification, typecheck, and direct absence proof.
+4. [x] Run focused verification, typecheck, and direct absence proof.
 5. [ ] Push a PR candidate and complete concurrent CI and ReviewGPT gates.
 
 ## Decisions
@@ -67,3 +67,18 @@ Updated: 2026-08-13
   browser-vault session loader, Web Crypto key generation, decryption, or warm
   store.
 - Required GitHub checks and exact-head ReviewGPT completion evidence.
+
+Completed before the exact-head review candidate:
+
+- Hosted-web typecheck passed after changelog generation and Prisma client
+  generation.
+- Nine focused Vitest files passed 145 tests; the changelog route's four tests
+  were rerun successfully after restoring its static logo fixture in the sparse
+  verification checkout.
+- Source inspection confirmed the homepage and its preparation module do not
+  reference browser session loading, Web Crypto key generation, decryption, or
+  replica payload fields.
+- Desktop and mobile design-catalog evidence was captured and inspected. The
+  required Claude Code UI double-check could not start because the `claude`
+  executable is unavailable in this environment; no substitute review is
+  claimed.
