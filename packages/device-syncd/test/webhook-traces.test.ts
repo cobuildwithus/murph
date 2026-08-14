@@ -30,6 +30,7 @@ describe("claimDeviceSyncWebhookTrace", () => {
     const result = claimDeviceSyncWebhookTrace(database, {
       eventType: "sleep.updated",
       externalAccountId: "external-account-123",
+      claimedAt: "2026-04-12T00:00:00.000Z",
       claimToken: "claim-1",
       processingExpiresAt: "2026-04-12T00:05:00.000Z",
       provider: "oura",
@@ -80,6 +81,7 @@ describe("claimDeviceSyncWebhookTrace", () => {
     const result = claimDeviceSyncWebhookTrace(database, {
       eventType: "sleep.updated",
       externalAccountId: "external-account-456",
+      claimedAt: "2026-04-12T00:00:00.000Z",
       claimToken: "claim-2",
       processingExpiresAt: "2026-04-12T00:05:00.000Z",
       provider: "oura",
@@ -105,6 +107,7 @@ describe("claimDeviceSyncWebhookTrace", () => {
     expect(claimDeviceSyncWebhookTrace(database, {
       eventType: "sleep.updated",
       externalAccountId: "external-account-123",
+      claimedAt: "2026-04-12T00:00:00.000Z",
       claimToken: "claim-old",
       processingExpiresAt: "2026-04-12T00:05:00.000Z",
       provider: "oura",
@@ -114,6 +117,7 @@ describe("claimDeviceSyncWebhookTrace", () => {
     expect(claimDeviceSyncWebhookTrace(database, {
       eventType: "sleep.updated",
       externalAccountId: "external-account-123",
+      claimedAt: "2026-04-12T00:06:00.000Z",
       claimToken: "claim-new",
       processingExpiresAt: "2026-04-12T00:11:00.000Z",
       provider: "oura",
@@ -138,5 +142,39 @@ describe("claimDeviceSyncWebhookTrace", () => {
       claim_token: "claim-new",
       status: "processing",
     });
+  });
+
+  it("uses claim time for delayed receipt lease takeover", () => {
+    database = createDatabase();
+    expect(claimDeviceSyncWebhookTrace(database, {
+      claimedAt: "2026-04-12T12:00:00.000Z",
+      claimToken: "claim-old",
+      eventType: "sleep.updated",
+      externalAccountId: "external-account-123",
+      processingExpiresAt: "2026-04-12T12:03:00.000Z",
+      provider: "oura",
+      receivedAt: "2026-04-12T11:00:00.000Z",
+      traceId: "trace-delayed",
+    })).toBe("claimed");
+    expect(claimDeviceSyncWebhookTrace(database, {
+      claimedAt: "2026-04-12T12:02:00.000Z",
+      claimToken: "claim-too-early",
+      eventType: "sleep.updated",
+      externalAccountId: "external-account-123",
+      processingExpiresAt: "2026-04-12T12:07:00.000Z",
+      provider: "oura",
+      receivedAt: "2026-04-12T13:00:00.000Z",
+      traceId: "trace-delayed",
+    })).toBe("processing");
+    expect(claimDeviceSyncWebhookTrace(database, {
+      claimedAt: "2026-04-12T12:04:00.000Z",
+      claimToken: "claim-new",
+      eventType: "sleep.updated",
+      externalAccountId: "external-account-123",
+      processingExpiresAt: "2026-04-12T12:09:00.000Z",
+      provider: "oura",
+      receivedAt: "2026-04-12T11:00:00.000Z",
+      traceId: "trace-delayed",
+    })).toBe("claimed");
   });
 });

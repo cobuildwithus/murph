@@ -27,7 +27,8 @@ export class PrismaHostedWebhookTraceStore {
   }
 
   async claimWebhookTrace(input: ClaimDeviceSyncWebhookTraceInput): Promise<DeviceSyncWebhookTraceClaimResult> {
-    const claimedAt = new Date(input.receivedAt);
+    const claimedAt = new Date(input.claimedAt);
+    const receivedAt = new Date(input.receivedAt);
     const processingExpiresAt = new Date(input.processingExpiresAt);
     const providerAccountBlindIndex = this.buildProviderAccountBlindIndex({
       externalAccountId: input.externalAccountId,
@@ -42,7 +43,7 @@ export class PrismaHostedWebhookTraceStore {
           providerAccountBlindIndex,
           eventType: input.eventType,
           processingExpiresAt,
-          receivedAt: claimedAt,
+          receivedAt,
           status: "processing",
         },
         skipDuplicates: true,
@@ -98,7 +99,7 @@ export class PrismaHostedWebhookTraceStore {
           eventType: input.eventType,
           claimToken: input.claimToken,
           processingExpiresAt,
-          receivedAt: claimedAt,
+          receivedAt,
           status: "processing",
         },
       });
