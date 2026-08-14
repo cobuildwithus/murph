@@ -1001,6 +1001,14 @@ export const HOSTED_RUNTIME_ASSISTANT_ASK_DIAGNOSTIC_CODE_HEADER =
   "x-murph-assistant-ask-diagnostic-code";
 export const HOSTED_RUNTIME_ASSISTANT_ASK_REQUEST_ID_HEADER =
   "x-murph-assistant-ask-request-id";
+/**
+ * Body-only protocol marker. An old strict Web parser rejects this unknown
+ * field, so a new caller cannot silently enter the retired destination-bearing
+ * protocol during an ordered rollout.
+ */
+export const HOSTED_RUNTIME_GROUP_CURRENT_SENDER_PROTOCOL_MARKER =
+  "currentSenderProtocol";
+export const HOSTED_RUNTIME_GROUP_CURRENT_SENDER_PROTOCOL_MARKER_VALUE = "v3";
 
 export function isHostedRuntimeAssistantAskDiagnosticCode(
   value: unknown,
@@ -1045,6 +1053,10 @@ export type HostedRuntimeAssistantAskControlResponse =
       action: "prepare" | "complete";
       status: "terminal";
       terminalReason: HostedRuntimeAssistantAskTerminalReason;
+    }
+  | {
+      action: "prepare";
+      status: "already_completed";
     }
   | {
       action: "complete";
@@ -1457,13 +1469,8 @@ export type HostedRuntimeGroupToolRequest =
     }
   | {
       action: "ask_current_sender";
-      origin: Extract<
-        HostedExecutionAssistantAskOrigin,
-        { kind: "accepted_input" }
-      >;
-    }
-  | {
-      action: "message_current_sender";
+      audience?: "current_sender" | "group";
+      mode: "clarification" | "continuation" | "new";
       origin: Extract<
         HostedExecutionAssistantAskOrigin,
         { kind: "accepted_input" }
@@ -1603,8 +1610,9 @@ export type HostedRuntimeGroupMemberAskResult =
   | ({ status: "completed" } & HostedExecutionAssistantAskResult)
   | Extract<HostedRuntimeGroupAskResult, { status: "unavailable" }>;
 
-export type HostedRuntimeGroupCurrentSenderMessageResult =
+export type HostedRuntimeGroupCurrentSenderDirectResult =
   | { status: "accepted" }
+  | { status: "clarification_required" }
   | { status: "unavailable"; unavailableReason: string };
 
 export type HostedRuntimeGroupDailyMetricReportResult =
@@ -1616,10 +1624,9 @@ export type HostedRuntimeGroupToolResponse =
       action: "ask";
       result: HostedRuntimeGroupAskResult;
     }
-  | { action: "ask_current_sender"; result: HostedRuntimeGroupMemberAskResult }
   | {
-      action: "message_current_sender";
-      result: HostedRuntimeGroupCurrentSenderMessageResult;
+      action: "ask_current_sender";
+      result: HostedRuntimeGroupCurrentSenderDirectResult;
     }
   | {
       action: "record_current_sender_daily_metric";

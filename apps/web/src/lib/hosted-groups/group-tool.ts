@@ -23,7 +23,6 @@ import {
   type HostedRuntimeGroupToolSelfOptOutContext,
 } from "@murphai/hosted-execution/runtime-control";
 import type {
-  HostedVaultShareProjectionKind,
   HostedVaultShareProjectionScope,
 } from "@murphai/hosted-execution/vault-share";
 import {
@@ -99,7 +98,6 @@ import {
 } from "./group-assistant-ask";
 import {
   requestHostedGroupCurrentSenderAssistantAsk,
-  requestHostedGroupCurrentSenderPrivateAssistantAsk,
 } from "./group-current-sender-assistant-ask";
 import {
   recordHostedGroupCurrentSenderDailyMetric,
@@ -191,7 +189,6 @@ export type HostedRuntimeGroupToolAccessClassification =
 export const HOSTED_RUNTIME_GROUP_TOOL_ACCESS_CLASSIFICATION = {
   ask: "personal_active",
   ask_current_sender: "participant_aware",
-  message_current_sender: "participant_aware",
   record_current_sender_daily_metric: "participant_aware",
   ask_member: "participant_aware",
   arm_usage_referral: "participant_aware",
@@ -255,24 +252,17 @@ export async function handleHostedRuntimeGroupTool(input: {
 
   if (input.request.action === "ask_current_sender") {
     const admission = await requestHostedGroupCurrentSenderAssistantAsk({
+      ...(input.request.audience === undefined
+        ? {}
+        : { audience: input.request.audience }),
       groupRuntimeMemberId: input.memberId,
+      mode: input.request.mode,
       origin: input.request.origin,
     });
     if (admission.mailboxWake) {
       await input.scheduleMailboxWake?.(admission.mailboxWake);
     }
     return { action: "ask_current_sender", result: admission.result };
-  }
-
-  if (input.request.action === "message_current_sender") {
-    const admission = await requestHostedGroupCurrentSenderPrivateAssistantAsk({
-      groupRuntimeMemberId: input.memberId,
-      origin: input.request.origin,
-    });
-    if (admission.mailboxWake) {
-      await input.scheduleMailboxWake?.(admission.mailboxWake);
-    }
-    return { action: "message_current_sender", result: admission.result };
   }
 
   if (input.request.action === "record_current_sender_daily_metric") {
@@ -301,7 +291,6 @@ export async function handleHostedRuntimeGroupTool(input: {
       result: admission.result,
     };
   }
-
   if (input.request.action === "ask_member") {
     const admission = await requestHostedGroupMemberAssistantAsk({
       grantId: input.request.grantId,

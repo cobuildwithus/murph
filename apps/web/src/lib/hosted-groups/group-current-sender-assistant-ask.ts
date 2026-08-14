@@ -4,8 +4,10 @@ import { createHash } from "node:crypto";
 
 import type { Prisma, PrismaClient } from "@prisma/client";
 import {
+  buildHostedExecutionAssistantAskCompletedWake,
   buildHostedExecutionAssistantAskRequestedWake,
   buildHostedExecutionAssistantNotificationRequestedWake,
+  createHostedExecutionAssistantAskCompletionId,
   createHostedExecutionPrivateAssistantAskCompletionDeliveryKey,
 } from "@murphai/hosted-execution";
 import {
@@ -13,9 +15,13 @@ import {
   HOSTED_EXECUTION_ASSISTANT_ASK_PERMISSION_TEXT_MAX_CODE_POINTS,
   HOSTED_EXECUTION_ASSISTANT_ASK_QUESTION_MAX_CODE_POINTS,
   HOSTED_EXECUTION_ASSISTANT_ASK_REQUEST_TTL_MS,
+  HOSTED_EXECUTION_CURRENT_SENDER_GROUP_PERMISSION_TEXT,
+  HOSTED_EXECUTION_CURRENT_SENDER_PRIVATE_PERMISSION_TEXT,
+  isHostedExecutionAssistantAskCurrentSenderTarget,
   isHostedExecutionAssistantAskRequestedWake,
   readHostedExecutionConversationMessageText,
   type HostedExecutionAssistantAskAcceptedInputOrigin,
+  type HostedExecutionAssistantAskResultDestination,
   type HostedExecutionAssistantAskResult,
   type HostedExecutionAssistantNotificationRoute,
   type HostedExecutionConversationMessageWake,
@@ -23,14 +29,15 @@ import {
   type HostedExecutionPrivateAssistantAskCompletionDeliveryAuthority,
 } from "@murphai/hosted-execution/contracts";
 import type {
-  HostedRuntimeGroupCurrentSenderMessageResult,
-  HostedRuntimeGroupMemberAskResult,
+  HostedRuntimeGroupCurrentSenderDirectResult,
 } from "@murphai/hosted-execution/runtime-control";
 
 import {
   appendHostedMailboxEnvelopeWithIdentityTx,
+  readHostedMailboxConversationInputAuthorityByAssistantInputIdTx,
   readHostedMailboxConversationWakeByAssistantInputId,
   readHostedMailboxItemById,
+  readHostedMailboxWakeByDedupeKey,
   readHostedMailboxWakeByItemId,
 } from "../hosted-mailbox/store";
 import {
@@ -52,42 +59,48 @@ import {
 } from "./group-message-sender";
 
 const HOSTED_GROUP_CURRENT_SENDER_ASSISTANT_ASK_REQUEST_ID_NAMESPACE =
+  "murph.hosted-group-current-sender-assistant-ask.request.v3";
+const HOSTED_GROUP_CURRENT_SENDER_LEGACY_ASSISTANT_ASK_REQUEST_ID_NAMESPACE =
   "murph.hosted-group-current-sender-assistant-ask.request.v1";
-const HOSTED_GROUP_CURRENT_SENDER_PRIVATE_ASSISTANT_ASK_REQUEST_ID_NAMESPACE =
+const HOSTED_GROUP_CURRENT_SENDER_LEGACY_PRIVATE_ASSISTANT_ASK_REQUEST_ID_NAMESPACE =
   "murph.hosted-group-current-sender-private-assistant-ask.request.v1";
+const HOSTED_GROUP_CURRENT_SENDER_PRIVATE_DELIVERY_ID_NAMESPACE =
+  "murph.hosted-group-current-sender.private-delivery.v1";
+const HOSTED_GROUP_CURRENT_SENDER_LEGACY_PRIVATE_FALLBACK_ID_NAMESPACE =
+  "murph.hosted-group-current-sender.legacy-private-fallback.v1";
 const HOSTED_GROUP_CURRENT_SENDER_PRIVATE_NOTIFICATION_INSTRUCTIONS =
   "Private current-sender Assistant Ask completion; exact reviewed text is in responsePolicy.";
 const HOSTED_GROUP_CURRENT_SENDER_PRIVATE_UNAVAILABLE_TEXT =
   "I don't have enough context to answer that privately yet.";
+const HOSTED_GROUP_CURRENT_SENDER_DIRECT_ROUTE_GUIDANCE =
+  "Ask the sender to open a direct chat with Murph on this channel, then try again.";
+const HOSTED_GROUP_CURRENT_SENDER_CLARIFICATION_GUIDANCE =
+  "No pending result-destination clarification was found for this sender.";
 const HOSTED_ASSISTANT_ASK_ADVISORY_LOCK_NAMESPACE = "hosted-assistant-ask";
 const HOSTED_ASSISTANT_ASK_OPAQUE_ID_MAX_CODE_POINTS = 256;
 const HOSTED_EXECUTION_ASSISTANT_INPUT_ID_PATTERN = /^ain_[0-9a-f]{32}$/u;
 
-export const HOSTED_GROUP_CURRENT_SENDER_DISCLOSURE_PERMISSION_TEXT =
-  "The owner of this personal Murph authored the exact incoming group question and may authorize one answer to that same group. Answer only when that question clearly asks Murph to share information about the owner. Treat first-person references as the owner, disclose only the owner's information directly requested by the question, and disclose nothing about anyone else. This authorization applies once to this question and grants no future, scheduled, or broader access.";
-
-export const HOSTED_GROUP_CURRENT_SENDER_PRIVATE_PERMISSION_TEXT =
-  "The owner of this personal Murph authored the exact incoming group request and explicitly asked Murph to answer them privately. Answer as one direct private message to the owner. You may use only the owner's personal Murph context needed for this request. Do not disclose anyone else's private information, do not post anything back to the group, and do not perform actions. This authorization applies once to this request and grants no future, scheduled, or broader access.";
-
 for (const [label, permissionText] of [
-  [
-    "Hosted current-sender disclosure permission",
-    HOSTED_GROUP_CURRENT_SENDER_DISCLOSURE_PERMISSION_TEXT,
-  ],
-  [
-    "Hosted current-sender private permission",
-    HOSTED_GROUP_CURRENT_SENDER_PRIVATE_PERMISSION_TEXT,
-  ],
+  ["Hosted current-sender group permission", HOSTED_EXECUTION_CURRENT_SENDER_GROUP_PERMISSION_TEXT],
+  ["Hosted current-sender private permission", HOSTED_EXECUTION_CURRENT_SENDER_PRIVATE_PERMISSION_TEXT],
 ] as const) {
-  if (
-    [...permissionText].length
-      > HOSTED_EXECUTION_ASSISTANT_ASK_PERMISSION_TEXT_MAX_CODE_POINTS
-  ) {
+  if ([...permissionText].length > HOSTED_EXECUTION_ASSISTANT_ASK_PERMISSION_TEXT_MAX_CODE_POINTS) {
     throw new TypeError(`${label} is too long.`);
   }
 }
 
 type HostedCurrentSenderAssistantAskPrismaClient = Pick<PrismaClient, "$transaction">;
+export type HostedGroupCurrentSenderAudience = "group" | "current_sender";
+export type HostedGroupCurrentSenderAssistantAskTargetKind =
+  | "current_sender_personal"
+  | "group_sender"
+  | "group_sender_private";
+export type HostedGroupCurrentSenderResultDestination =
+  | { kind: "origin_context" }
+  | {
+      channel: "linq" | "telegram" | null;
+      kind: "requester_direct";
+    };
 
 export type HostedGroupCurrentSenderSourceChannel = "linq" | "telegram";
 
@@ -99,71 +112,97 @@ export interface HostedGroupCurrentSenderAuthority {
   targetMemberId: string;
 }
 
-type HostedGroupCurrentSenderQuestionAuthority =
-  Omit<HostedGroupCurrentSenderAuthority, "messageText"> & {
-    question: string;
-  };
+type HostedGroupCurrentSenderRawAuthority = HostedGroupCurrentSenderAuthority;
 
-export type HostedGroupCurrentSenderAssistantAskAuthority =
-  HostedGroupCurrentSenderQuestionAuthority & {
-    permissionDigest: string;
-    permissionText: string;
-  };
+interface HostedGroupCurrentSenderSourceAuthority
+  extends HostedGroupCurrentSenderRawAuthority {
+  causalSeq: string;
+  question: string;
+}
 
-export type HostedGroupCurrentSenderPrivateAssistantAskAuthority =
-  HostedGroupCurrentSenderQuestionAuthority & {
-    permissionDigest: string;
-    permissionText: string;
-  };
+export interface HostedGroupCurrentSenderAssistantAskAuthority {
+  groupRuntimeMemberId: string;
+  occurredAt: string;
+  permissionDigest: string;
+  permissionText: string;
+  personalReadAllowed: boolean;
+  question: string;
+  requestId: string;
+  resultDestination: HostedGroupCurrentSenderResultDestination;
+  sourceChannel: "linq" | "telegram" | null;
+  targetMemberId: string;
+}
 
-export type HostedGroupCurrentSenderPrivateCompletionAuthority =
-  HostedGroupCurrentSenderPrivateAssistantAskAuthority & {
+export type HostedGroupCurrentSenderCompletionAuthority =
+  HostedGroupCurrentSenderAssistantAskAuthority & {
     expiresAt: string;
     origin: HostedExecutionAssistantAskAcceptedInputOrigin;
   };
+export type HostedGroupCurrentSenderPrivateCompletionAuthority =
+  HostedGroupCurrentSenderCompletionAuthority;
 
 export interface HostedGroupCurrentSenderAssistantAskAdmission {
-  mailboxWake: {
-    expectedUserId: string;
-    mailboxItemId: string;
-  } | null;
-  result: HostedRuntimeGroupMemberAskResult;
+  mailboxWake: { expectedUserId: string; mailboxItemId: string } | null;
+  result: HostedRuntimeGroupCurrentSenderDirectResult;
 }
 
-export interface HostedGroupCurrentSenderPrivateAssistantAskAdmission {
-  mailboxWake: {
-    expectedUserId: string;
-    mailboxItemId: string;
-  } | null;
-  result: HostedRuntimeGroupCurrentSenderMessageResult;
+class HostedCurrentSenderAdmissionRollback extends Error {
+  constructor(
+    readonly admission: HostedGroupCurrentSenderAssistantAskAdmission,
+  ) {
+    super("Hosted current-sender admission did not commit.");
+  }
 }
 
 export function createHostedGroupCurrentSenderAssistantAskRequestId(input: {
   groupRuntimeMemberId: string;
   originAssistantInputId: string;
 }): string {
-  const groupRuntimeMemberId = normalizeHostedCurrentSenderOpaqueId(
-    input.groupRuntimeMemberId,
-    "Hosted current-sender group runtime member ID",
-  );
-  const originAssistantInputId = normalizeHostedCurrentSenderAssistantInputId(
-    input.originAssistantInputId,
-  );
-  return `aask_req_${createHash("sha256")
-    .update(HOSTED_GROUP_CURRENT_SENDER_ASSISTANT_ASK_REQUEST_ID_NAMESPACE)
-    .update("\0")
-    .update(groupRuntimeMemberId)
-    .update("\0")
-    .update(originAssistantInputId)
-    .update("\0")
-    .update(createHostedGroupCurrentSenderPermissionDigest())
-    .digest("hex")}`;
+  return createHostedGroupCurrentSenderRequestId(input, {
+    namespace: HOSTED_GROUP_CURRENT_SENDER_ASSISTANT_ASK_REQUEST_ID_NAMESPACE,
+  });
 }
 
-export function createHostedGroupCurrentSenderPrivateAssistantAskRequestId(input: {
+export function createHostedGroupCurrentSenderLegacyAssistantAskRequestId(input: {
+  audience: HostedGroupCurrentSenderAudience;
   groupRuntimeMemberId: string;
   originAssistantInputId: string;
 }): string {
+  return createHostedGroupCurrentSenderRequestId(
+    input,
+    input.audience === "current_sender"
+      ? {
+          namespace: HOSTED_GROUP_CURRENT_SENDER_LEGACY_PRIVATE_ASSISTANT_ASK_REQUEST_ID_NAMESPACE,
+          permissionText: HOSTED_EXECUTION_CURRENT_SENDER_PRIVATE_PERMISSION_TEXT,
+        }
+      : {
+          namespace: HOSTED_GROUP_CURRENT_SENDER_LEGACY_ASSISTANT_ASK_REQUEST_ID_NAMESPACE,
+          permissionText: HOSTED_EXECUTION_CURRENT_SENDER_GROUP_PERMISSION_TEXT,
+        },
+  );
+}
+
+export function readHostedGroupCurrentSenderAssistantAskRequestIds(input: {
+  groupRuntimeMemberId: string;
+  originAssistantInputId: string;
+}): readonly [string, string, string] {
+  return [
+    createHostedGroupCurrentSenderAssistantAskRequestId(input),
+    createHostedGroupCurrentSenderLegacyAssistantAskRequestId({
+      ...input,
+      audience: "group",
+    }),
+    createHostedGroupCurrentSenderLegacyAssistantAskRequestId({
+      ...input,
+      audience: "current_sender",
+    }),
+  ];
+}
+
+function createHostedGroupCurrentSenderRequestId(
+  input: { groupRuntimeMemberId: string; originAssistantInputId: string },
+  config: { namespace: string; permissionText?: string },
+): string {
   const groupRuntimeMemberId = normalizeHostedCurrentSenderOpaqueId(
     input.groupRuntimeMemberId,
     "Hosted current-sender group runtime member ID",
@@ -171,19 +210,24 @@ export function createHostedGroupCurrentSenderPrivateAssistantAskRequestId(input
   const originAssistantInputId = normalizeHostedCurrentSenderAssistantInputId(
     input.originAssistantInputId,
   );
-  return `aask_req_${createHash("sha256")
-    .update(HOSTED_GROUP_CURRENT_SENDER_PRIVATE_ASSISTANT_ASK_REQUEST_ID_NAMESPACE)
+  const hash = createHash("sha256")
+    .update(config.namespace)
     .update("\0")
     .update(groupRuntimeMemberId)
     .update("\0")
-    .update(originAssistantInputId)
-    .update("\0")
-    .update(createHostedGroupCurrentSenderPrivatePermissionDigest())
-    .digest("hex")}`;
+    .update(originAssistantInputId);
+  if (config.permissionText !== undefined) {
+    hash.update("\0").update(
+      createHostedGroupCurrentSenderPermissionDigest(config.permissionText),
+    );
+  }
+  return `aask_req_${hash.digest("hex")}`;
 }
 
 export async function requestHostedGroupCurrentSenderAssistantAsk(input: {
+  audience?: HostedGroupCurrentSenderAudience;
   groupRuntimeMemberId: string;
+  mode: "clarification" | "continuation" | "new";
   now?: Date;
   origin: HostedExecutionAssistantAskAcceptedInputOrigin;
   prisma?: HostedCurrentSenderAssistantAskPrismaClient;
@@ -195,175 +239,357 @@ export async function requestHostedGroupCurrentSenderAssistantAsk(input: {
     "Hosted current-sender group runtime member ID",
   );
   const origin = normalizeHostedCurrentSenderOrigin(input.origin);
-  const requestId = createHostedGroupCurrentSenderAssistantAskRequestId({
-    groupRuntimeMemberId,
-    originAssistantInputId: origin.assistantInputId,
-  });
-
-  return prisma.$transaction(async (tx) => {
-    await acquireHostedCurrentSenderAssistantAskLockTx(tx, requestId);
-    const existing = await readHostedMailboxItemById({
-      mailboxItemId: requestId,
-      prisma: tx,
+  if (
+    (input.mode === "clarification" && input.audience !== undefined)
+    || (input.mode !== "clarification" && input.audience === undefined)
+  ) {
+    throw new TypeError(
+      "Hosted current-sender audience must be omitted only for clarification.",
+    );
+  }
+  if (input.mode === "clarification") {
+    return await createHostedGroupCurrentSenderClarification({
+      groupRuntimeMemberId,
+      now,
+      origin,
+      prisma,
     });
-    if (existing) {
-      return replayHostedGroupCurrentSenderAssistantAskTx({
-        existingDedupeKey: existing.dedupeKey,
-        existingKind: existing.kind,
-        existingUserId: existing.userId,
-        expiresAt: existing.expiresAt ?? null,
-        groupRuntimeMemberId,
-        now,
-        origin,
-        requestId,
-        tx,
-      });
-    }
-
-    const authority = await readHostedGroupCurrentSenderAssistantAskAuthorityTx({
-      expectedGroupRuntimeMemberId: groupRuntimeMemberId,
+  }
+  if (input.mode === "continuation") {
+    return await continueHostedGroupCurrentSenderAssistantAsk({
+      audience: input.audience!,
+      groupRuntimeMemberId,
+      now,
+      origin,
+      prisma,
+    });
+  }
+  return await prisma.$transaction(async (tx) =>
+    await requestHostedGroupCurrentSenderAssistantAskTx({
+      audience: input.audience!,
+      groupRuntimeMemberId,
       now,
       origin,
       tx,
-    });
-    if (!authority) {
-      return unavailableHostedCurrentSenderAdmission("current_sender_unavailable");
-    }
+    })
+  );
+}
 
-    const occurredAt = now.toISOString();
-    const expiresAt = new Date(
-      now.getTime() + HOSTED_EXECUTION_ASSISTANT_ASK_REQUEST_TTL_MS,
-    ).toISOString();
-    const wake = buildHostedExecutionAssistantAskRequestedWake({
-      ask: {
-        expiresAt,
-        origin,
-        question: authority.question,
-        target: {
-          groupRuntimeMemberId,
-          kind: "group_sender",
-          permissionDigest: authority.permissionDigest,
-        },
-      },
-      eventId: requestId,
-      memberId: authority.targetMemberId,
-      occurredAt,
+async function requestHostedGroupCurrentSenderAssistantAskTx(input: {
+  audience: HostedGroupCurrentSenderAudience;
+  groupRuntimeMemberId: string;
+  now: Date;
+  origin: HostedExecutionAssistantAskAcceptedInputOrigin;
+  tx: Prisma.TransactionClient;
+}): Promise<HostedGroupCurrentSenderAssistantAskAdmission> {
+  const requestIds = readHostedGroupCurrentSenderAssistantAskRequestIds({
+    groupRuntimeMemberId: input.groupRuntimeMemberId,
+    originAssistantInputId: input.origin.assistantInputId,
+  });
+  const requestId = requestIds[0];
+
+  await acquireHostedCurrentSenderAssistantAskLocksTx(input.tx, requestIds);
+  const existingItems: Array<{
+    item: NonNullable<Awaited<ReturnType<typeof readHostedMailboxItemById>>>;
+    requestId: string;
+  }> = [];
+  for (const candidateId of requestIds) {
+    const item = await readHostedMailboxItemById({
+      mailboxItemId: candidateId,
+      prisma: input.tx,
     });
-    const append = await appendHostedMailboxEnvelopeWithIdentityTx({
-      envelope: wake,
+    if (item) existingItems.push({ item, requestId: candidateId });
+  }
+  if (existingItems.length > 1) {
+    return unavailableHostedCurrentSenderAdmission("request_conflict");
+  }
+  const existing = existingItems[0];
+  if (existing) {
+    return replayHostedGroupCurrentSenderAssistantAskTx({
+      audience: input.audience,
+      existingDedupeKey: existing.item.dedupeKey,
+      existingKind: existing.item.kind,
+      existingUserId: existing.item.userId,
+      expiresAt: existing.item.expiresAt ?? null,
+      groupRuntimeMemberId: input.groupRuntimeMemberId,
+      now: input.now,
+      origin: input.origin,
+      requestId: existing.requestId,
+      tx: input.tx,
+    });
+  }
+
+  const sourceAuthority = await readHostedGroupCurrentSenderSourceAuthorityTx({
+    expectedGroupRuntimeMemberId: input.groupRuntimeMemberId,
+    now: input.now,
+    origin: input.origin,
+    tx: input.tx,
+  });
+  if (!sourceAuthority) {
+    return unavailableHostedCurrentSenderAdmission("current_sender_unavailable");
+  }
+  const resultDestination = resultDestinationForHostedCurrentSenderAudience(
+    input.audience,
+    sourceAuthority.sourceChannel,
+  );
+  const permissionText = permissionTextForHostedCurrentSenderResultDestination(
+    resultDestination,
+  );
+  const authority = {
+    groupRuntimeMemberId: input.groupRuntimeMemberId,
+    occurredAt: sourceAuthority.occurredAt,
+    permissionDigest: createHostedGroupCurrentSenderPermissionDigest(permissionText),
+    permissionText,
+    personalReadAllowed: true,
+    question: sourceAuthority.question,
+    requestId,
+    resultDestination,
+    sourceChannel: sourceAuthority.sourceChannel,
+    targetMemberId: sourceAuthority.targetMemberId,
+  } satisfies HostedGroupCurrentSenderAssistantAskAuthority;
+  if (
+    resultDestination.kind === "requester_direct"
+    && !await resolveHostedGroupCurrentSenderPrivateDestination({
+      authority,
+      tx: input.tx,
+    })
+  ) {
+    return unavailableHostedCurrentSenderAdmission(HOSTED_GROUP_CURRENT_SENDER_DIRECT_ROUTE_GUIDANCE);
+  }
+
+  const occurredAt = input.now.toISOString();
+  const expiresAt = new Date(
+    input.now.getTime() + HOSTED_EXECUTION_ASSISTANT_ASK_REQUEST_TTL_MS,
+  ).toISOString();
+  const wake = buildHostedExecutionAssistantAskRequestedWake({
+    ask: {
       expiresAt,
-      itemId: requestId,
+      origin: input.origin,
+      question: authority.question,
+      resultDestination,
+      target: {
+        groupRuntimeMemberId: input.groupRuntimeMemberId,
+        kind: "current_sender_personal",
+        permissionDigest: authority.permissionDigest,
+      },
+    },
+    eventId: requestId,
+    memberId: authority.targetMemberId,
+    occurredAt,
+  });
+  const append = await appendHostedMailboxEnvelopeWithIdentityTx({
+    envelope: wake,
+    expiresAt,
+    itemId: requestId,
+    tx: input.tx,
+  });
+  if (append.dedupeConflict || append.item.id !== requestId) {
+    return unavailableHostedCurrentSenderAdmission("request_conflict");
+  }
+  return {
+    mailboxWake: { expectedUserId: authority.targetMemberId, mailboxItemId: requestId },
+    result: { status: "accepted" },
+  };
+}
+
+async function createHostedGroupCurrentSenderClarification(input: {
+  groupRuntimeMemberId: string;
+  now: Date;
+  origin: HostedExecutionAssistantAskAcceptedInputOrigin;
+  prisma: HostedCurrentSenderAssistantAskPrismaClient;
+}): Promise<HostedGroupCurrentSenderAssistantAskAdmission> {
+  return await input.prisma.$transaction(async (tx) => {
+    const source = await readHostedGroupCurrentSenderSourceAuthorityTx({
+      expectedGroupRuntimeMemberId: input.groupRuntimeMemberId,
+      now: input.now,
+      origin: input.origin,
       tx,
     });
-    if (append.dedupeConflict || append.item.id !== requestId) {
-      return unavailableHostedCurrentSenderAdmission("request_conflict");
+    if (!source) {
+      return unavailableHostedCurrentSenderAdmission(
+        "current_sender_unavailable",
+      );
+    }
+    await acquireHostedCurrentSenderAssistantAskLocksTx(tx, [
+      `clarification:${source.groupRuntimeMemberId}:${source.targetMemberId}`,
+    ]);
+    const existing = await tx.hostedGroupCurrentSenderClarification.findUnique({
+      where: {
+        groupRuntimeMemberId_targetMemberId: {
+          groupRuntimeMemberId: source.groupRuntimeMemberId,
+          targetMemberId: source.targetMemberId,
+        },
+      },
+    });
+    const sourceCausalSeq = BigInt(source.causalSeq);
+    const expiresAt = new Date(
+      input.now.getTime() + HOSTED_EXECUTION_ASSISTANT_ASK_REQUEST_TTL_MS,
+    );
+    if (existing) {
+      if (
+        existing.sourceCausalSeq > sourceCausalSeq
+        || (
+          existing.sourceCausalSeq === sourceCausalSeq
+          && (
+            existing.originAssistantInputId !== input.origin.assistantInputId
+            || existing.originSessionId !== input.origin.sessionId
+          )
+        )
+      ) {
+        return unavailableHostedCurrentSenderAdmission(
+          "newer_clarification_pending",
+        );
+      }
+      if (existing.sourceCausalSeq === sourceCausalSeq) {
+        return existing.resolvedByAssistantInputId === null
+          ? {
+              mailboxWake: null,
+              result: { status: "clarification_required" },
+            }
+          : unavailableHostedCurrentSenderAdmission(
+              "clarification_already_resolved",
+            );
+      }
+      await tx.hostedGroupCurrentSenderClarification.update({
+        data: {
+          expiresAt,
+          originAssistantInputId: input.origin.assistantInputId,
+          originSessionId: input.origin.sessionId,
+          resolvedResultDestination: null,
+          resolvedByAssistantInputId: null,
+          sourceCausalSeq,
+        },
+        where: {
+          groupRuntimeMemberId_targetMemberId: {
+            groupRuntimeMemberId: source.groupRuntimeMemberId,
+            targetMemberId: source.targetMemberId,
+          },
+        },
+      });
+    } else {
+      await tx.hostedGroupCurrentSenderClarification.create({
+        data: {
+          expiresAt,
+          groupRuntimeMemberId: source.groupRuntimeMemberId,
+          originAssistantInputId: input.origin.assistantInputId,
+          originSessionId: input.origin.sessionId,
+          sourceCausalSeq,
+          targetMemberId: source.targetMemberId,
+        },
+      });
     }
     return {
-      mailboxWake: {
-        expectedUserId: authority.targetMemberId,
-        mailboxItemId: requestId,
-      },
-      result: { status: "accepted" },
+      mailboxWake: null,
+      result: { status: "clarification_required" },
     };
   });
 }
 
-export async function requestHostedGroupCurrentSenderPrivateAssistantAsk(input: {
+async function continueHostedGroupCurrentSenderAssistantAsk(input: {
+  audience: HostedGroupCurrentSenderAudience;
   groupRuntimeMemberId: string;
-  now?: Date;
+  now: Date;
   origin: HostedExecutionAssistantAskAcceptedInputOrigin;
-  prisma?: HostedCurrentSenderAssistantAskPrismaClient;
-}): Promise<HostedGroupCurrentSenderPrivateAssistantAskAdmission> {
-  const prisma = input.prisma ?? getPrisma();
-  const now = input.now ?? new Date();
-  const groupRuntimeMemberId = normalizeHostedCurrentSenderOpaqueId(
-    input.groupRuntimeMemberId,
-    "Hosted current-sender group runtime member ID",
-  );
-  const origin = normalizeHostedCurrentSenderOrigin(input.origin);
-  const requestId = createHostedGroupCurrentSenderPrivateAssistantAskRequestId({
-    groupRuntimeMemberId,
-    originAssistantInputId: origin.assistantInputId,
-  });
-
-  return prisma.$transaction(async (tx) => {
-    await acquireHostedCurrentSenderAssistantAskLockTx(tx, requestId);
-    const existing = await readHostedMailboxItemById({
-      mailboxItemId: requestId,
-      prisma: tx,
-    });
-    if (existing) {
-      return replayHostedGroupCurrentSenderPrivateAssistantAskTx({
-        existingDedupeKey: existing.dedupeKey,
-        existingKind: existing.kind,
-        existingUserId: existing.userId,
-        expiresAt: existing.expiresAt ?? null,
-        groupRuntimeMemberId,
-        now,
-        origin,
-        requestId,
+  prisma: HostedCurrentSenderAssistantAskPrismaClient;
+}): Promise<HostedGroupCurrentSenderAssistantAskAdmission> {
+  let admission: HostedGroupCurrentSenderAssistantAskAdmission | null;
+  try {
+    admission = await input.prisma.$transaction(async (tx) => {
+      const responseSource = await readHostedGroupCurrentSenderSourceAuthorityTx({
+        expectedGroupRuntimeMemberId: input.groupRuntimeMemberId,
+        now: input.now,
+        origin: input.origin,
         tx,
       });
-    }
-
-    const authority =
-      await readHostedGroupCurrentSenderPrivateAssistantAskAuthorityTx({
-        expectedGroupRuntimeMemberId: groupRuntimeMemberId,
-        now,
-        origin,
-        tx,
-      });
-    if (!authority) {
-      return unavailableHostedCurrentSenderPrivateAdmission(
-        "current_sender_unavailable",
-      );
-    }
-    const destination = await resolveHostedGroupCurrentSenderPrivateDestination({
-      authority,
-      tx,
-    });
-    if (!destination) {
-      return unavailableHostedCurrentSenderPrivateAdmission(
-        "same_channel_direct_route_unavailable",
-      );
-    }
-
-    const occurredAt = now.toISOString();
-    const expiresAt = new Date(
-      now.getTime() + HOSTED_EXECUTION_ASSISTANT_ASK_REQUEST_TTL_MS,
-    ).toISOString();
-    const wake = buildHostedExecutionAssistantAskRequestedWake({
-      ask: {
-        expiresAt,
-        origin,
-        question: authority.question,
-        target: {
-          groupRuntimeMemberId,
-          kind: "group_sender_private",
-          permissionDigest: authority.permissionDigest,
+      if (!responseSource) {
+        return null;
+      }
+      const pending = await tx.hostedGroupCurrentSenderClarification.findUnique({
+        where: {
+          groupRuntimeMemberId_targetMemberId: {
+            groupRuntimeMemberId: responseSource.groupRuntimeMemberId,
+            targetMemberId: responseSource.targetMemberId,
+          },
         },
-      },
-      eventId: requestId,
-      memberId: authority.targetMemberId,
-      occurredAt,
+      });
+      if (
+        !pending
+        || pending.expiresAt <= input.now
+        || BigInt(responseSource.causalSeq) <= pending.sourceCausalSeq
+        || (
+          pending.resolvedByAssistantInputId !== null
+          && (
+            pending.resolvedByAssistantInputId !== input.origin.assistantInputId
+            || pending.resolvedResultDestination !== input.audience
+          )
+        )
+      ) {
+        return null;
+      }
+      if (pending.resolvedByAssistantInputId === null) {
+        const claimed = await tx.hostedGroupCurrentSenderClarification.updateMany({
+          data: {
+            resolvedResultDestination: input.audience,
+            resolvedByAssistantInputId: input.origin.assistantInputId,
+          },
+          where: {
+            expiresAt: pending.expiresAt,
+            groupRuntimeMemberId: responseSource.groupRuntimeMemberId,
+            originAssistantInputId: pending.originAssistantInputId,
+            originSessionId: pending.originSessionId,
+            resolvedByAssistantInputId: null,
+            targetMemberId: responseSource.targetMemberId,
+          },
+        });
+        if (claimed.count !== 1) {
+          const resolved = await tx.hostedGroupCurrentSenderClarification.findUnique({
+            where: {
+              groupRuntimeMemberId_targetMemberId: {
+                groupRuntimeMemberId: responseSource.groupRuntimeMemberId,
+                targetMemberId: responseSource.targetMemberId,
+              },
+            },
+          });
+          if (
+            !resolved
+            || resolved.expiresAt <= input.now
+            || resolved.originAssistantInputId !== pending.originAssistantInputId
+            || resolved.originSessionId !== pending.originSessionId
+            || resolved.resolvedResultDestination !== input.audience
+            || resolved.resolvedByAssistantInputId !== input.origin.assistantInputId
+          ) {
+            return null;
+          }
+        }
+      }
+      const originalAdmission = await requestHostedGroupCurrentSenderAssistantAskTx({
+        audience: input.audience,
+        groupRuntimeMemberId: input.groupRuntimeMemberId,
+        now: input.now,
+        origin: {
+          assistantInputId: pending.originAssistantInputId,
+          kind: "accepted_input",
+          sessionId: pending.originSessionId,
+        },
+        tx,
+      });
+      if (originalAdmission.result.status !== "accepted") {
+        throw new HostedCurrentSenderAdmissionRollback(originalAdmission);
+      }
+      return originalAdmission;
     });
-    const append = await appendHostedMailboxEnvelopeWithIdentityTx({
-      envelope: wake,
-      expiresAt,
-      itemId: requestId,
-      tx,
-    });
-    if (append.dedupeConflict || append.item.id !== requestId) {
-      return unavailableHostedCurrentSenderPrivateAdmission("request_conflict");
+  } catch (error) {
+    if (error instanceof HostedCurrentSenderAdmissionRollback) {
+      return error.admission;
     }
-    return {
-      mailboxWake: {
-        expectedUserId: authority.targetMemberId,
-        mailboxItemId: requestId,
-      },
-      result: { status: "accepted" },
-    };
-  });
+    throw error;
+  }
+  if (!admission) {
+    return unavailableHostedCurrentSenderAdmission(
+      HOSTED_GROUP_CURRENT_SENDER_CLARIFICATION_GUIDANCE,
+    );
+  }
+  return admission;
 }
 
 type HostedGroupCurrentSenderAuthorityReadInput = {
@@ -371,12 +597,14 @@ type HostedGroupCurrentSenderAuthorityReadInput = {
   expectedTargetMemberId?: string | null;
   now: Date;
   origin: HostedExecutionAssistantAskAcceptedInputOrigin;
+  persistedOccurredAt?: string | null;
+  persistedQuestion?: string | null;
   tx: Prisma.TransactionClient;
 };
 
-export async function readHostedGroupCurrentSenderAuthorityTx(
+async function readHostedGroupCurrentSenderRawAuthorityTx(
   input: HostedGroupCurrentSenderAuthorityReadInput,
-): Promise<HostedGroupCurrentSenderAuthority | null> {
+): Promise<HostedGroupCurrentSenderRawAuthority | null> {
   const groupRuntimeMemberId = normalizeHostedCurrentSenderOpaqueId(
     input.expectedGroupRuntimeMemberId,
     "Hosted current-sender group runtime member ID",
@@ -386,13 +614,7 @@ export async function readHostedGroupCurrentSenderAuthorityTx(
     select: { memberId: true },
     where: { memberId: groupRuntimeMemberId },
   });
-  if (
-    !groupContainer
-    || !await hasHostedCurrentSenderRuntimeAccessForUpdateTx({
-      memberId: groupRuntimeMemberId,
-      tx: input.tx,
-    })
-  ) {
+  if (!groupContainer || !await hasHostedCurrentSenderRuntimeAccessForUpdateTx({ memberId: groupRuntimeMemberId, tx: input.tx })) {
     return null;
   }
 
@@ -402,23 +624,12 @@ export async function readHostedGroupCurrentSenderAuthorityTx(
     memberId: groupRuntimeMemberId,
     prisma: input.tx,
   });
-  const source = sourceWake
-    ? readHostedCurrentSenderSource(sourceWake, groupRuntimeMemberId)
-    : null;
-  if (!source || !sourceWake) {
-    return null;
-  }
+  const source = sourceWake ? readHostedCurrentSenderSource(sourceWake, groupRuntimeMemberId) : null;
+  if (!source || !sourceWake) return null;
   try {
-    await assertHostedThreadRouteEgressAuthority({
-      authority: source.routeAuthority,
-      prisma: input.tx,
-    });
+    await assertHostedThreadRouteEgressAuthority({ authority: source.routeAuthority, prisma: input.tx });
   } catch (error) {
-    if (
-      isHostedOnboardingError(error)
-      && error.code === "HOSTED_THREAD_ROUTE_EGRESS_UNAUTHORIZED"
-      && !error.retryable
-    ) {
+    if (isHostedOnboardingError(error) && error.code === "HOSTED_THREAD_ROUTE_EGRESS_UNAUTHORIZED" && !error.retryable) {
       return null;
     }
     throw error;
@@ -429,32 +640,16 @@ export async function readHostedGroupCurrentSenderAuthorityTx(
     routeAuthority: source.routeAuthority,
     wake: sourceWake,
   });
-  if (!senderMemberId) {
-    return null;
-  }
+  if (!senderMemberId) return null;
   const expectedTargetMemberId = input.expectedTargetMemberId == null
     ? null
-    : normalizeHostedCurrentSenderOpaqueId(
-        input.expectedTargetMemberId,
-        "Hosted current-sender target member ID",
-      );
-  if (
-    expectedTargetMemberId !== null
-    && senderMemberId !== expectedTargetMemberId
-  ) {
-    return null;
-  }
+    : normalizeHostedCurrentSenderOpaqueId(input.expectedTargetMemberId, "Hosted current-sender target member ID");
+  if (expectedTargetMemberId !== null && senderMemberId !== expectedTargetMemberId) return null;
   const targetContainer = await input.tx.hostedThreadContainer.findUnique({
     select: { memberId: true },
     where: { memberId: senderMemberId },
   });
-  if (
-    targetContainer
-    || !await hasHostedCurrentSenderRuntimeAccessForUpdateTx({
-      memberId: senderMemberId,
-      tx: input.tx,
-    })
-  ) {
+  if (targetContainer || !await hasHostedCurrentSenderRuntimeAccessForUpdateTx({ memberId: senderMemberId, tx: input.tx })) {
     return null;
   }
 
@@ -467,40 +662,130 @@ export async function readHostedGroupCurrentSenderAuthorityTx(
   };
 }
 
-export async function readHostedGroupCurrentSenderAssistantAskAuthorityTx(
+export async function readHostedGroupCurrentSenderAuthorityTx(
   input: HostedGroupCurrentSenderAuthorityReadInput,
-): Promise<HostedGroupCurrentSenderAssistantAskAuthority | null> {
-  const authority = await readHostedGroupCurrentSenderAuthorityTx(input);
+): Promise<HostedGroupCurrentSenderAuthority | null> {
+  const authority = await readHostedGroupCurrentSenderRawAuthorityTx(input);
+  if (!authority) {
+    return null;
+  }
+  return authority;
+}
+
+async function readHostedGroupCurrentSenderSourceAuthorityTx(
+  input: HostedGroupCurrentSenderAuthorityReadInput,
+): Promise<HostedGroupCurrentSenderSourceAuthority | null> {
+  const authority = await readHostedGroupCurrentSenderRawAuthorityTx(input);
   const question = authority
     ? readHostedCurrentSenderQuestion(authority.messageText)
     : null;
-  return authority && question
-    ? {
-        ...hostedCurrentSenderQuestionAuthority(authority, question),
-        permissionDigest: createHostedGroupCurrentSenderPermissionDigest(),
-        permissionText: HOSTED_GROUP_CURRENT_SENDER_DISCLOSURE_PERMISSION_TEXT,
-      }
+  if (!authority || !question) {
+    return null;
+  }
+  const sourceInputAuthority =
+    await readHostedMailboxConversationInputAuthorityByAssistantInputIdTx({
+      assistantInputId: input.origin.assistantInputId,
+      memberId: authority.groupRuntimeMemberId,
+      prisma: input.tx,
+    });
+  return sourceInputAuthority
+    ? { ...authority, causalSeq: sourceInputAuthority.causalSeq, question }
     : null;
 }
 
-export async function readHostedGroupCurrentSenderPrivateAssistantAskAuthorityTx(
-  input: HostedGroupCurrentSenderAuthorityReadInput,
-): Promise<HostedGroupCurrentSenderPrivateAssistantAskAuthority | null> {
-  const authority = await readHostedGroupCurrentSenderAuthorityTx(input);
-  const question = authority
-    ? readHostedCurrentSenderQuestion(authority.messageText)
-    : null;
-  return authority && question
-    ? {
-        ...hostedCurrentSenderQuestionAuthority(authority, question),
-        permissionDigest:
-          createHostedGroupCurrentSenderPrivatePermissionDigest(),
-        permissionText: HOSTED_GROUP_CURRENT_SENDER_PRIVATE_PERMISSION_TEXT,
-      }
-    : null;
+export async function readHostedGroupCurrentSenderAssistantAskAuthorityTx(
+  input: HostedGroupCurrentSenderAuthorityReadInput & {
+    permissionDigest: string;
+    requestId: string;
+    resultDestination?: HostedExecutionAssistantAskResultDestination;
+    targetKind: HostedGroupCurrentSenderAssistantAskTargetKind;
+  },
+): Promise<HostedGroupCurrentSenderAssistantAskAuthority | null> {
+  const storedRequest = readHostedGroupCurrentSenderStoredRequest({
+    groupRuntimeMemberId: input.expectedGroupRuntimeMemberId,
+    originAssistantInputId: input.origin.assistantInputId,
+    permissionDigest: input.permissionDigest,
+    requestId: input.requestId,
+    resultDestination: input.resultDestination,
+    targetKind: input.targetKind,
+  });
+  if (!storedRequest) {
+    return null;
+  }
+  const sourceAuthority = await readHostedGroupCurrentSenderSourceAuthorityTx(
+    input,
+  );
+  if (!sourceAuthority) {
+    const targetMemberId = input.expectedTargetMemberId == null
+      ? null
+      : normalizeHostedCurrentSenderOpaqueId(
+          input.expectedTargetMemberId,
+          "Hosted current-sender target member ID",
+        );
+    const question = readHostedCurrentSenderPersistedQuestion(
+      input.persistedQuestion,
+    );
+    if (!targetMemberId || !question) {
+      return null;
+    }
+    const resultDestination = storedRequest.fixedResultDestination;
+    return {
+      groupRuntimeMemberId: normalizeHostedCurrentSenderOpaqueId(
+        input.expectedGroupRuntimeMemberId,
+        "Hosted current-sender group runtime member ID",
+      ),
+      occurredAt: input.persistedOccurredAt ?? input.now.toISOString(),
+      permissionDigest: input.permissionDigest,
+      permissionText:
+        permissionTextForHostedCurrentSenderResultDestination(
+          resultDestination,
+        ),
+      personalReadAllowed: false,
+      question,
+      requestId: input.requestId,
+      resultDestination,
+      sourceChannel: null,
+      targetMemberId,
+    };
+  }
+
+  const resultDestination = normalizeHostedCurrentSenderResultDestination({
+    persisted: storedRequest.fixedResultDestination,
+    sourceChannel: sourceAuthority.sourceChannel,
+  });
+  if (!resultDestination) {
+    return null;
+  }
+  const permissionText = permissionTextForHostedCurrentSenderResultDestination(
+    resultDestination,
+  );
+  const authority = {
+    groupRuntimeMemberId: sourceAuthority.groupRuntimeMemberId,
+    occurredAt: sourceAuthority.occurredAt,
+    permissionDigest: input.permissionDigest,
+    permissionText,
+    personalReadAllowed: true,
+    question: sourceAuthority.question,
+    requestId: input.requestId,
+    resultDestination,
+    sourceChannel: sourceAuthority.sourceChannel,
+    targetMemberId: sourceAuthority.targetMemberId,
+  } satisfies HostedGroupCurrentSenderAssistantAskAuthority;
+  if (
+    authority.personalReadAllowed
+    && authority.resultDestination.kind === "requester_direct"
+    && !await resolveHostedGroupCurrentSenderPrivateDestination({
+      authority,
+      tx: input.tx,
+    })
+  ) {
+    return { ...authority, personalReadAllowed: false };
+  }
+  return authority;
 }
 
 async function replayHostedGroupCurrentSenderAssistantAskTx(input: {
+  audience: HostedGroupCurrentSenderAudience;
   existingDedupeKey: string;
   existingKind: string;
   existingUserId: string;
@@ -514,10 +799,7 @@ async function replayHostedGroupCurrentSenderAssistantAskTx(input: {
   if (isHostedCurrentSenderAssistantAskExpired(input.expiresAt, input.now)) {
     return unavailableHostedCurrentSenderAdmission("request_expired");
   }
-  if (
-    input.existingDedupeKey !== input.requestId
-    || input.existingKind !== "assistant.ask.requested"
-  ) {
+  if (input.existingDedupeKey !== input.requestId || input.existingKind !== "assistant.ask.requested") {
     return unavailableHostedCurrentSenderAdmission("request_conflict");
   }
   const wake = await readHostedMailboxWakeByItemId({
@@ -533,15 +815,9 @@ async function replayHostedGroupCurrentSenderAssistantAskTx(input: {
     || wake.ask.expiresAt !== input.expiresAt
     || !("origin" in wake.ask)
     || wake.ask.origin.kind !== "accepted_input"
-    || wake.ask.target.kind !== "group_sender"
+    || !isHostedExecutionAssistantAskCurrentSenderTarget(wake.ask.target)
     || wake.ask.target.groupRuntimeMemberId !== input.groupRuntimeMemberId
-    || wake.ask.target.permissionDigest
-      !== createHostedGroupCurrentSenderPermissionDigest()
     || !hostedCurrentSenderOriginsEqual(wake.ask.origin, input.origin)
-    || createHostedGroupCurrentSenderAssistantAskRequestId({
-      groupRuntimeMemberId: input.groupRuntimeMemberId,
-      originAssistantInputId: wake.ask.origin.assistantInputId,
-    }) !== input.requestId
   ) {
     return unavailableHostedCurrentSenderAdmission("request_conflict");
   }
@@ -550,106 +826,155 @@ async function replayHostedGroupCurrentSenderAssistantAskTx(input: {
     expectedTargetMemberId: input.existingUserId,
     now: input.now,
     origin: input.origin,
+    permissionDigest: wake.ask.target.permissionDigest,
+    persistedOccurredAt: wake.occurredAt,
+    persistedQuestion: wake.ask.question,
+    requestId: input.requestId,
+    ...("resultDestination" in wake.ask
+      ? { resultDestination: wake.ask.resultDestination }
+      : {}),
+    targetKind: wake.ask.target.kind,
     tx: input.tx,
   });
   if (!authority || authority.question !== wake.ask.question) {
     return unavailableHostedCurrentSenderAdmission("current_sender_unavailable");
   }
+  if (
+    audienceForHostedCurrentSenderResultDestination(
+      authority.resultDestination,
+    ) !== input.audience
+  ) {
+    return unavailableHostedCurrentSenderAdmission("request_conflict");
+  }
   return {
-    mailboxWake: {
-      expectedUserId: input.existingUserId,
-      mailboxItemId: input.requestId,
-    },
+    mailboxWake: { expectedUserId: input.existingUserId, mailboxItemId: input.requestId },
     result: { status: "accepted" },
   };
 }
 
-async function replayHostedGroupCurrentSenderPrivateAssistantAskTx(input: {
-  existingDedupeKey: string;
-  existingKind: string;
-  existingUserId: string;
-  expiresAt: string | null;
+type HostedGroupCurrentSenderStoredRequest = {
+  fixedResultDestination: HostedGroupCurrentSenderResultDestination;
+};
+
+function readHostedGroupCurrentSenderStoredRequest(input: {
   groupRuntimeMemberId: string;
-  now: Date;
-  origin: HostedExecutionAssistantAskAcceptedInputOrigin;
+  originAssistantInputId: string;
+  permissionDigest: string;
   requestId: string;
-  tx: Prisma.TransactionClient;
-}): Promise<HostedGroupCurrentSenderPrivateAssistantAskAdmission> {
-  if (isHostedCurrentSenderAssistantAskExpired(input.expiresAt, input.now)) {
-    return unavailableHostedCurrentSenderPrivateAdmission("request_expired");
+  resultDestination?: HostedExecutionAssistantAskResultDestination;
+  targetKind: HostedGroupCurrentSenderAssistantAskTargetKind;
+}): HostedGroupCurrentSenderStoredRequest | null {
+  if (
+    input.requestId === createHostedGroupCurrentSenderAssistantAskRequestId(input)
+  ) {
+    const resultDestination = input.targetKind === "current_sender_personal"
+      ? input.resultDestination ?? null
+      : input.resultDestination === undefined
+        ? legacyResultDestinationForHostedCurrentSenderTargetKind(
+            input.targetKind,
+          )
+        : null;
+    if (!resultDestination) {
+      return null;
+    }
+    const permissionText =
+      permissionTextForHostedCurrentSenderResultDestination(resultDestination);
+    return input.permissionDigest
+        === createHostedGroupCurrentSenderPermissionDigest(permissionText)
+      ? { fixedResultDestination: resultDestination }
+      : null;
+  }
+  for (const legacyAudience of ["group", "current_sender"] as const) {
+    const legacyResultDestination =
+      legacyResultDestinationForHostedCurrentSenderTargetKind(input.targetKind);
+    if (
+      input.resultDestination === undefined
+      && legacyResultDestination
+      && audienceForHostedCurrentSenderResultDestination(
+        legacyResultDestination,
+      ) === legacyAudience
+      && input.requestId
+        === createHostedGroupCurrentSenderLegacyAssistantAskRequestId({
+          ...input,
+          audience: legacyAudience,
+        })
+      && input.permissionDigest
+        === createHostedGroupCurrentSenderPermissionDigest(
+          permissionTextForHostedCurrentSenderResultDestination(
+            legacyResultDestination,
+          ),
+        )
+    ) {
+      // Already-accepted former work keeps its persisted result destination.
+      // The source is still reloaded before personal-model work can continue.
+      return { fixedResultDestination: legacyResultDestination };
+    }
+  }
+  return null;
+}
+
+function legacyResultDestinationForHostedCurrentSenderTargetKind(
+  targetKind: HostedGroupCurrentSenderAssistantAskTargetKind,
+): HostedGroupCurrentSenderResultDestination | null {
+  if (targetKind === "group_sender_private") {
+    return { channel: null, kind: "requester_direct" };
+  }
+  return targetKind === "group_sender"
+    ? { kind: "origin_context" }
+    : null;
+}
+
+function resultDestinationForHostedCurrentSenderAudience(
+  audience: HostedGroupCurrentSenderAudience,
+  sourceChannel: "linq" | "telegram",
+): HostedExecutionAssistantAskResultDestination {
+  return audience === "current_sender"
+    ? { channel: sourceChannel, kind: "requester_direct" }
+    : { kind: "origin_context" };
+}
+
+function audienceForHostedCurrentSenderResultDestination(
+  resultDestination: HostedGroupCurrentSenderResultDestination,
+): HostedGroupCurrentSenderAudience {
+  return resultDestination.kind === "requester_direct"
+    ? "current_sender"
+    : "group";
+}
+
+function normalizeHostedCurrentSenderResultDestination(input: {
+  persisted: HostedGroupCurrentSenderResultDestination;
+  sourceChannel: "linq" | "telegram";
+}): HostedGroupCurrentSenderResultDestination | null {
+  if (input.persisted.kind === "origin_context") {
+    return input.persisted;
   }
   if (
-    input.existingDedupeKey !== input.requestId
-    || input.existingKind !== "assistant.ask.requested"
+    input.persisted.channel !== null
+    && input.persisted.channel !== input.sourceChannel
   ) {
-    return unavailableHostedCurrentSenderPrivateAdmission("request_conflict");
+    return null;
   }
-  const wake = await readHostedMailboxWakeByItemId({
-    availableAt: input.now,
-    mailboxItemId: input.requestId,
-    prisma: input.tx,
-  });
-  if (
-    !wake
-    || !isHostedExecutionAssistantAskRequestedWake(wake)
-    || wake.eventId !== input.requestId
-    || wake.userId !== input.existingUserId
-    || wake.ask.expiresAt !== input.expiresAt
-    || !("origin" in wake.ask)
-    || wake.ask.origin.kind !== "accepted_input"
-    || wake.ask.target.kind !== "group_sender_private"
-    || wake.ask.target.groupRuntimeMemberId !== input.groupRuntimeMemberId
-    || wake.ask.target.permissionDigest
-      !== createHostedGroupCurrentSenderPrivatePermissionDigest()
-    || !hostedCurrentSenderOriginsEqual(wake.ask.origin, input.origin)
-    || createHostedGroupCurrentSenderPrivateAssistantAskRequestId({
-      groupRuntimeMemberId: input.groupRuntimeMemberId,
-      originAssistantInputId: wake.ask.origin.assistantInputId,
-    }) !== input.requestId
-  ) {
-    return unavailableHostedCurrentSenderPrivateAdmission("request_conflict");
-  }
-  const authority =
-    await readHostedGroupCurrentSenderPrivateAssistantAskAuthorityTx({
-      expectedGroupRuntimeMemberId: input.groupRuntimeMemberId,
-      expectedTargetMemberId: input.existingUserId,
-      now: input.now,
-      origin: input.origin,
-      tx: input.tx,
-    });
-  if (!authority || authority.question !== wake.ask.question) {
-    return unavailableHostedCurrentSenderPrivateAdmission(
-      "current_sender_unavailable",
-    );
-  }
-  const destination = await resolveHostedGroupCurrentSenderPrivateDestination({
-    authority,
-    tx: input.tx,
-  });
-  if (!destination) {
-    return unavailableHostedCurrentSenderPrivateAdmission(
-      "same_channel_direct_route_unavailable",
-    );
-  }
-  return {
-    mailboxWake: {
-      expectedUserId: input.existingUserId,
-      mailboxItemId: input.requestId,
-    },
-    result: { status: "accepted" },
-  };
+  return { channel: input.sourceChannel, kind: "requester_direct" };
+}
+
+function permissionTextForHostedCurrentSenderResultDestination(
+  resultDestination: Pick<HostedGroupCurrentSenderResultDestination, "kind">,
+): string {
+  return resultDestination.kind === "requester_direct"
+    ? HOSTED_EXECUTION_CURRENT_SENDER_PRIVATE_PERMISSION_TEXT
+    : HOSTED_EXECUTION_CURRENT_SENDER_GROUP_PERMISSION_TEXT;
 }
 
 export async function readHostedGroupCurrentSenderPrivateCompletionMailboxWakeTx(
   input: {
     authority: HostedGroupCurrentSenderPrivateCompletionAuthority;
-    completionId: string;
-    existingCompletion: {
+    existingPrivateDelivery: {
       dedupeKey: string;
       expiresAt: string | null;
       kind: string;
       userId: string;
     };
+    privateDeliveryId: string;
     now: Date;
     tx: Prisma.TransactionClient;
   },
@@ -657,24 +982,104 @@ export async function readHostedGroupCurrentSenderPrivateCompletionMailboxWakeTx
   expectedUserId: string;
   mailboxItemId: string;
 } | null> {
-  if (
-    input.existingCompletion.dedupeKey !== input.completionId
-    || input.existingCompletion.expiresAt !== input.authority.expiresAt
-    || input.existingCompletion.kind !== "assistant.notification.requested"
-    || input.existingCompletion.userId !== input.authority.targetMemberId
-  ) {
+  if (!input.authority.personalReadAllowed) {
+    return null;
+  }
+  const stored = await readHostedGroupCurrentSenderPersistedPrivateCompletionTx(
+    input,
+  );
+  if (!stored) {
     return null;
   }
   const destination = await resolveHostedGroupCurrentSenderPrivateDestination({
     authority: input.authority,
     tx: input.tx,
   });
-  if (!destination) {
+  if (
+    !destination
+    || !hostedGroupCurrentSenderPrivateRoutesEqual(
+      stored.route,
+      destination.route,
+    )
+  ) {
+    return null;
+  }
+  return stored.mailboxWake;
+}
+
+export async function readHostedGroupCurrentSenderPersistedPrivateCompletionMailboxWakeTx(
+  input: {
+    authority: HostedGroupCurrentSenderPrivateCompletionAuthority;
+    existingPrivateDelivery: {
+      dedupeKey: string;
+      expiresAt: string | null;
+      kind: string;
+      userId: string;
+    };
+    privateDeliveryId: string;
+    now: Date;
+    tx: Prisma.TransactionClient;
+  },
+): Promise<{
+  expectedUserId: string;
+  mailboxItemId: string;
+} | null> {
+  const stored = await readHostedGroupCurrentSenderPersistedPrivateCompletionTx(
+    input,
+  );
+  return stored?.mailboxWake ?? null;
+}
+
+// Detached control may re-hand this already-committed effect after the personal
+// read deadline. Provider-entry authority still owns live route and expiry
+// checks before any external send.
+async function readHostedGroupCurrentSenderPersistedPrivateCompletionTx(input: {
+  authority: HostedGroupCurrentSenderPrivateCompletionAuthority;
+  existingPrivateDelivery: {
+    dedupeKey: string;
+    expiresAt: string | null;
+    kind: string;
+    userId: string;
+  };
+  privateDeliveryId: string;
+  now: Date;
+  tx: Prisma.TransactionClient;
+}): Promise<{
+  mailboxWake: {
+    expectedUserId: string;
+    mailboxItemId: string;
+  };
+  route: HostedExecutionAssistantNotificationRoute;
+} | null> {
+  if (
+    input.authority.resultDestination.kind !== "requester_direct"
+    || (
+      input.privateDeliveryId
+        !== createHostedGroupCurrentSenderPrivateDeliveryId(
+          input.authority.requestId,
+        )
+      && (
+        input.privateDeliveryId
+          !== createHostedExecutionAssistantAskCompletionId(
+            input.authority.requestId,
+          )
+        || input.authority.requestId
+          === createHostedGroupCurrentSenderAssistantAskRequestId({
+            groupRuntimeMemberId: input.authority.groupRuntimeMemberId,
+            originAssistantInputId:
+              input.authority.origin.assistantInputId,
+          })
+      )
+    )
+    || input.existingPrivateDelivery.dedupeKey !== input.privateDeliveryId
+    || input.existingPrivateDelivery.kind !== "assistant.notification.requested"
+    || input.existingPrivateDelivery.userId !== input.authority.targetMemberId
+  ) {
     return null;
   }
   const wake = await readHostedMailboxWakeByItemId({
     availableAt: input.now,
-    mailboxItemId: input.completionId,
+    mailboxItemId: input.privateDeliveryId,
     prisma: input.tx,
   });
   const responsePolicy = wake?.kind === "assistant.notification.requested"
@@ -689,17 +1094,13 @@ export async function readHostedGroupCurrentSenderPrivateCompletionMailboxWakeTx
     : null;
   const privateCompletion = notification?.privateAssistantAskCompletion;
   const deliveryKey = createHostedGroupCurrentSenderPrivateDeliveryKey(
-    input.completionId,
+    input.privateDeliveryId,
   );
-  const requestId =
-    createHostedGroupCurrentSenderPrivateAssistantAskRequestId({
-      groupRuntimeMemberId: input.authority.groupRuntimeMemberId,
-      originAssistantInputId: input.authority.origin.assistantInputId,
-    });
+  const requestId = input.authority.requestId;
   if (
     !wake
     || wake.kind !== "assistant.notification.requested"
-    || wake.eventId !== input.completionId
+    || wake.eventId !== input.privateDeliveryId
     || wake.userId !== input.authority.targetMemberId
     || !notification
     || notification.deliveryDedupeToken !== deliveryKey
@@ -712,27 +1113,38 @@ export async function readHostedGroupCurrentSenderPrivateCompletionMailboxWakeTx
     || (notification.notificationPromptProfile ?? null) !== null
     || !privateCompletion
     || privateCompletion.expiresAt !== input.authority.expiresAt
+    || !isHostedCurrentSenderPrivateCompletionEnvelopeValid({
+      completionExpiresAt: privateCompletion.expiresAt,
+      deliveryId: input.privateDeliveryId,
+      envelopeExpiresAt: input.existingPrivateDelivery.expiresAt,
+      occurredAt: wake.occurredAt,
+      requestId,
+    })
+    || isHostedCurrentSenderAssistantAskExpired(
+      input.existingPrivateDelivery.expiresAt,
+      input.now,
+    )
     || privateCompletion.requestId !== requestId
     || responsePolicy?.kind !== "require_send_exact_text"
     || responseText.length === 0
     || [...responseText].length
       > HOSTED_EXECUTION_ASSISTANT_ASK_ANSWER_MAX_CODE_POINTS
-    || !hostedGroupCurrentSenderPrivateRoutesEqual(
-      notification.route,
-      destination.route,
-    )
+    || notification.route.channel !== input.authority.resultDestination.channel
+    || notification.route.threadIsDirect !== true
   ) {
     return null;
   }
   return {
-    expectedUserId: input.authority.targetMemberId,
-    mailboxItemId: input.completionId,
+    mailboxWake: {
+      expectedUserId: input.authority.targetMemberId,
+      mailboxItemId: input.privateDeliveryId,
+    },
+    route: notification.route,
   };
 }
 
 export async function appendHostedGroupCurrentSenderPrivateCompletionTx(input: {
   authority: HostedGroupCurrentSenderPrivateCompletionAuthority;
-  completionId: string;
   now: Date;
   result: HostedExecutionAssistantAskResult;
   tx: Prisma.TransactionClient;
@@ -740,6 +1152,12 @@ export async function appendHostedGroupCurrentSenderPrivateCompletionTx(input: {
   expectedUserId: string;
   mailboxItemId: string;
 } | null> {
+  if (
+    input.authority.resultDestination.kind !== "requester_direct"
+    || !input.authority.personalReadAllowed
+  ) {
+    return null;
+  }
   const destination = await resolveHostedGroupCurrentSenderPrivateDestination({
     authority: input.authority,
     tx: input.tx,
@@ -747,19 +1165,21 @@ export async function appendHostedGroupCurrentSenderPrivateCompletionTx(input: {
   if (!destination) {
     return null;
   }
-  const deliveryKey = createHostedGroupCurrentSenderPrivateDeliveryKey(
-    input.completionId,
+  const privateDeliveryId = createHostedGroupCurrentSenderPrivateDeliveryId(
+    input.authority.requestId,
   );
-  const requestId =
-    createHostedGroupCurrentSenderPrivateAssistantAskRequestId({
-      groupRuntimeMemberId: input.authority.groupRuntimeMemberId,
-      originAssistantInputId: input.authority.origin.assistantInputId,
-    });
+  const deliveryKey = createHostedGroupCurrentSenderPrivateDeliveryKey(
+    privateDeliveryId,
+  );
+  const requestId = input.authority.requestId;
   const responseText = buildHostedGroupCurrentSenderPrivateResponseText(
     input.result,
   );
+  const deliveryExpiresAt = new Date(
+    input.now.getTime() + HOSTED_EXECUTION_ASSISTANT_ASK_REQUEST_TTL_MS,
+  ).toISOString();
   const wake = buildHostedExecutionAssistantNotificationRequestedWake({
-    eventId: input.completionId,
+    eventId: privateDeliveryId,
     memberId: input.authority.targetMemberId,
     notification: {
       deliveryDedupeToken: deliveryKey,
@@ -782,15 +1202,157 @@ export async function appendHostedGroupCurrentSenderPrivateCompletionTx(input: {
   });
   const append = await appendHostedMailboxEnvelopeWithIdentityTx({
     envelope: wake,
-    expiresAt: input.authority.expiresAt,
-    itemId: input.completionId,
+    expiresAt: deliveryExpiresAt,
+    itemId: privateDeliveryId,
     tx: input.tx,
   });
-  if (append.dedupeConflict || append.item.id !== input.completionId) {
+  if (append.dedupeConflict || append.item.id !== privateDeliveryId) {
     return null;
   }
   return {
     expectedUserId: input.authority.targetMemberId,
+    mailboxItemId: privateDeliveryId,
+  };
+}
+
+export function createHostedGroupCurrentSenderPrivateDeliveryId(
+  requestId: string,
+): string {
+  return createHostedCurrentSenderDerivedId({
+    namespace: HOSTED_GROUP_CURRENT_SENDER_PRIVATE_DELIVERY_ID_NAMESPACE,
+    prefix: "aask_private_",
+    requestId,
+  });
+}
+
+function createHostedGroupCurrentSenderLegacyPrivateFallbackId(
+  requestId: string,
+): string {
+  return createHostedCurrentSenderDerivedId({
+    namespace:
+      HOSTED_GROUP_CURRENT_SENDER_LEGACY_PRIVATE_FALLBACK_ID_NAMESPACE,
+    prefix: "aask_done_",
+    requestId,
+  });
+}
+
+function createHostedCurrentSenderDerivedId(input: {
+  namespace: string;
+  prefix: string;
+  requestId: string;
+}): string {
+  const requestId = normalizeHostedCurrentSenderOpaqueId(
+    input.requestId,
+    "Hosted current-sender request ID",
+  );
+  return `${input.prefix}${createHash("sha256")
+    .update(input.namespace)
+    .update("\0")
+    .update(requestId)
+    .digest("hex")}`;
+}
+
+export function createHostedGroupCurrentSenderFallbackCompletionId(input: {
+  privateDeliveryId: string | null;
+  requestId: string;
+}): string {
+  const canonicalCompletionId =
+    createHostedExecutionAssistantAskCompletionId(input.requestId);
+  return input.privateDeliveryId === canonicalCompletionId
+    ? createHostedGroupCurrentSenderLegacyPrivateFallbackId(input.requestId)
+    : canonicalCompletionId;
+}
+
+export async function readHostedGroupCurrentSenderFallbackCompletionMailboxWakeTx(input: {
+  authority: HostedGroupCurrentSenderCompletionAuthority;
+  completionId: string;
+  now: Date;
+  tx: Prisma.TransactionClient;
+}): Promise<{
+  expectedUserId: string;
+  mailboxItemId: string;
+} | null> {
+  const existing = await readHostedMailboxItemById({
+    mailboxItemId: input.completionId,
+    prisma: input.tx,
+  });
+  const existingWake = existing
+    ? await readHostedMailboxWakeByDedupeKey({
+        dedupeKey: input.completionId,
+        prisma: input.tx,
+        userId: input.authority.groupRuntimeMemberId,
+      })
+    : null;
+  if (
+    !existing
+    || existing.dedupeKey !== input.completionId
+    || existing.kind !== "assistant.ask.completed"
+    || existing.userId !== input.authority.groupRuntimeMemberId
+    || !existingWake
+    || existingWake.kind !== "assistant.ask.completed"
+    || existingWake.eventId !== input.completionId
+    || existingWake.userId !== input.authority.groupRuntimeMemberId
+    || existingWake.ask.requestId !== input.authority.requestId
+    || existingWake.ask.question !== input.authority.question
+    || existingWake.ask.targetLabel !== null
+    || !("origin" in existingWake.ask)
+    || existingWake.ask.origin.kind !== "accepted_input"
+    || !hostedCurrentSenderOriginsEqual(
+      existingWake.ask.origin,
+      input.authority.origin,
+    )
+    || existingWake.ask.result.outcome !== "cannot_answer"
+    || (existingWake.ask.result.answer ?? null) !== null
+    || existing.expiresAt !== existingWake.ask.expiresAt
+    || Date.parse(existingWake.ask.expiresAt)
+      !== Date.parse(existingWake.occurredAt)
+        + HOSTED_EXECUTION_ASSISTANT_ASK_REQUEST_TTL_MS
+    || Date.parse(existingWake.ask.expiresAt) <= input.now.getTime()
+  ) {
+    return null;
+  }
+  return {
+    expectedUserId: input.authority.groupRuntimeMemberId,
+    mailboxItemId: input.completionId,
+  };
+}
+
+export async function appendHostedGroupCurrentSenderFallbackCompletionTx(input: {
+  authority: HostedGroupCurrentSenderCompletionAuthority;
+  completionId: string;
+  now: Date;
+  tx: Prisma.TransactionClient;
+}): Promise<{
+  expectedUserId: string;
+  mailboxItemId: string;
+} | null> {
+  const expiresAt = new Date(
+    input.now.getTime() + HOSTED_EXECUTION_ASSISTANT_ASK_REQUEST_TTL_MS,
+  ).toISOString();
+  const wake = buildHostedExecutionAssistantAskCompletedWake({
+    ask: {
+      expiresAt,
+      origin: input.authority.origin,
+      question: input.authority.question,
+      requestId: input.authority.requestId,
+      result: { answer: null, outcome: "cannot_answer" },
+      targetLabel: null,
+    },
+    eventId: input.completionId,
+    memberId: input.authority.groupRuntimeMemberId,
+    occurredAt: input.now.toISOString(),
+  });
+  const append = await appendHostedMailboxEnvelopeWithIdentityTx({
+    envelope: wake,
+    expiresAt,
+    itemId: input.completionId,
+    tx: input.tx,
+  });
+  if (append.dedupeConflict || append.item.id !== input.completionId) {
+    return readHostedGroupCurrentSenderFallbackCompletionMailboxWakeTx(input);
+  }
+  return {
+    expectedUserId: input.authority.groupRuntimeMemberId,
     mailboxItemId: input.completionId,
   };
 }
@@ -801,13 +1363,16 @@ export async function assertHostedGroupCurrentSenderPrivateCompletionDeliveryAut
     now?: Date;
     tx: Prisma.TransactionClient;
   },
-): Promise<void> {
-  const completionId = input.answeredMailboxItemIds[0] ?? null;
+): Promise<{
+  assistantAskFallbackRequired: true;
+  mailboxWake: { expectedUserId: string; mailboxItemId: string };
+} | void> {
+  const privateDeliveryId = input.answeredMailboxItemIds[0] ?? null;
   let expectedDeliveryKey: string;
   try {
-    expectedDeliveryKey = completionId
+    expectedDeliveryKey = privateDeliveryId
       ? createHostedExecutionPrivateAssistantAskCompletionDeliveryKey(
-          completionId,
+          privateDeliveryId,
         )
       : "";
   } catch {
@@ -816,37 +1381,35 @@ export async function assertHostedGroupCurrentSenderPrivateCompletionDeliveryAut
   const now = input.now ?? new Date();
   const expiresAtMs = Date.parse(input.assistantAskCompletionExpiresAt);
   if (
-    !completionId
+    !privateDeliveryId
     || input.answeredMailboxItemIds.length !== 1
-    || completionId.trim() !== completionId
+    || privateDeliveryId.trim() !== privateDeliveryId
     || input.idempotencyKey !== expectedDeliveryKey
     || !Number.isFinite(expiresAtMs)
     || new Date(expiresAtMs).toISOString()
       !== input.assistantAskCompletionExpiresAt
-    || expiresAtMs <= now.getTime()
     || !/^[0-9a-f]{64}$/u.test(input.responseTextDigest)
   ) {
     throwHostedGroupCurrentSenderPrivateDeliveryAuthorityMismatch();
   }
 
   const completionItem = await readHostedMailboxItemById({
-    mailboxItemId: completionId,
+    mailboxItemId: privateDeliveryId,
     prisma: input.tx,
   });
   if (
     !completionItem
-    || completionItem.dedupeKey !== completionId
-    || completionItem.expiresAt !== input.assistantAskCompletionExpiresAt
+    || completionItem.dedupeKey !== privateDeliveryId
     || completionItem.kind !== "assistant.notification.requested"
     || completionItem.userId !== input.boundRuntimeMemberId
   ) {
     throwHostedGroupCurrentSenderPrivateDeliveryAuthorityMismatch();
   }
 
-  const completionWake = await readHostedMailboxWakeByItemId({
-    availableAt: now,
-    mailboxItemId: completionId,
+  const completionWake = await readHostedMailboxWakeByDedupeKey({
+    dedupeKey: privateDeliveryId,
     prisma: input.tx,
+    userId: input.boundRuntimeMemberId,
   });
   const notification = completionWake?.kind
       === "assistant.notification.requested"
@@ -860,7 +1423,7 @@ export async function assertHostedGroupCurrentSenderPrivateCompletionDeliveryAut
   if (
     !completionWake
     || completionWake.kind !== "assistant.notification.requested"
-    || completionWake.eventId !== completionId
+    || completionWake.eventId !== privateDeliveryId
     || completionWake.userId !== input.boundRuntimeMemberId
     || !notification
     || notification.deliveryDedupeToken !== expectedDeliveryKey
@@ -874,6 +1437,13 @@ export async function assertHostedGroupCurrentSenderPrivateCompletionDeliveryAut
     || !privateCompletion
     || privateCompletion.expiresAt
       !== input.assistantAskCompletionExpiresAt
+    || !isHostedCurrentSenderPrivateCompletionEnvelopeValid({
+      completionExpiresAt: privateCompletion.expiresAt,
+      deliveryId: privateDeliveryId,
+      envelopeExpiresAt: completionItem.expiresAt ?? null,
+      occurredAt: completionWake.occurredAt,
+      requestId: privateCompletion.requestId,
+    })
     || responsePolicy?.kind !== "require_send_exact_text"
     || responseText === null
     || responseText.trim().length === 0
@@ -894,10 +1464,10 @@ export async function assertHostedGroupCurrentSenderPrivateCompletionDeliveryAut
     prisma: input.tx,
   });
   const requestWake = requestItem
-    ? await readHostedMailboxWakeByItemId({
-        availableAt: now,
-        mailboxItemId: privateCompletion.requestId,
+    ? await readHostedMailboxWakeByDedupeKey({
+        dedupeKey: privateCompletion.requestId,
         prisma: input.tx,
+        userId: input.boundRuntimeMemberId,
       })
     : null;
   if (
@@ -913,52 +1483,139 @@ export async function assertHostedGroupCurrentSenderPrivateCompletionDeliveryAut
     || requestWake.ask.expiresAt !== input.assistantAskCompletionExpiresAt
     || !("origin" in requestWake.ask)
     || requestWake.ask.origin.kind !== "accepted_input"
-    || requestWake.ask.target.kind !== "group_sender_private"
+    || !isHostedExecutionAssistantAskCurrentSenderTarget(
+      requestWake.ask.target,
+    )
   ) {
     throwHostedGroupCurrentSenderPrivateDeliveryAuthorityMismatch();
   }
 
-  const expectedRequestId =
-    createHostedGroupCurrentSenderPrivateAssistantAskRequestId({
-      groupRuntimeMemberId: requestWake.ask.target.groupRuntimeMemberId,
-      originAssistantInputId: requestWake.ask.origin.assistantInputId,
-    });
-  if (expectedRequestId !== privateCompletion.requestId) {
+  const requestIds = readHostedGroupCurrentSenderAssistantAskRequestIds({
+    groupRuntimeMemberId: requestWake.ask.target.groupRuntimeMemberId,
+    originAssistantInputId: requestWake.ask.origin.assistantInputId,
+  });
+  await acquireHostedCurrentSenderAssistantAskLocksTx(input.tx, requestIds);
+  let storedRequestCount = 0;
+  for (const requestId of requestIds) {
+    if (await readHostedMailboxItemById({
+      mailboxItemId: requestId,
+      prisma: input.tx,
+    })) {
+      storedRequestCount += 1;
+    }
+  }
+  if (
+    storedRequestCount !== 1
+    || !requestIds.includes(privateCompletion.requestId)
+    || (
+      privateDeliveryId
+        !== createHostedGroupCurrentSenderPrivateDeliveryId(
+          privateCompletion.requestId,
+        )
+      && (
+        privateDeliveryId
+          !== createHostedExecutionAssistantAskCompletionId(
+            privateCompletion.requestId,
+          )
+        || privateCompletion.requestId
+          === createHostedGroupCurrentSenderAssistantAskRequestId({
+            groupRuntimeMemberId:
+              requestWake.ask.target.groupRuntimeMemberId,
+            originAssistantInputId:
+              requestWake.ask.origin.assistantInputId,
+          })
+      )
+    )
+  ) {
     throwHostedGroupCurrentSenderPrivateDeliveryAuthorityMismatch();
   }
+
   const authority =
-    await readHostedGroupCurrentSenderPrivateAssistantAskAuthorityTx({
+    await readHostedGroupCurrentSenderAssistantAskAuthorityTx({
       expectedGroupRuntimeMemberId:
         requestWake.ask.target.groupRuntimeMemberId,
       expectedTargetMemberId: input.boundRuntimeMemberId,
       now,
       origin: requestWake.ask.origin,
+      permissionDigest: requestWake.ask.target.permissionDigest,
+      persistedOccurredAt: requestWake.occurredAt,
+      persistedQuestion: requestWake.ask.question,
+      requestId: privateCompletion.requestId,
+      ...("resultDestination" in requestWake.ask
+        ? { resultDestination: requestWake.ask.resultDestination }
+        : {}),
+      targetKind: requestWake.ask.target.kind,
       tx: input.tx,
     });
   if (
     !authority
+    || authority.resultDestination.kind !== "requester_direct"
     || authority.permissionDigest !== requestWake.ask.target.permissionDigest
     || authority.question !== requestWake.ask.question
   ) {
     throwHostedGroupCurrentSenderPrivateDeliveryAuthorityMismatch();
+  }
+  const completionAuthority = {
+    ...authority,
+    expiresAt: requestWake.ask.expiresAt,
+    origin: requestWake.ask.origin,
+  } satisfies HostedGroupCurrentSenderCompletionAuthority;
+  const fallbackCompletionId =
+    createHostedGroupCurrentSenderFallbackCompletionId({
+      privateDeliveryId,
+      requestId: privateCompletion.requestId,
+    });
+  const fallbackItem = await readHostedMailboxItemById({
+    mailboxItemId: fallbackCompletionId,
+    prisma: input.tx,
+  });
+  if (fallbackItem) {
+    const existingFallback =
+      await readHostedGroupCurrentSenderFallbackCompletionMailboxWakeTx({
+        authority: completionAuthority,
+        completionId: fallbackCompletionId,
+        now,
+        tx: input.tx,
+      });
+    if (!existingFallback) {
+      throwHostedGroupCurrentSenderPrivateDeliveryAuthorityMismatch();
+    }
+    return {
+      assistantAskFallbackRequired: true,
+      mailboxWake: existingFallback,
+    };
   }
   const destination = await resolveHostedGroupCurrentSenderPrivateDestination({
     authority,
     tx: input.tx,
   });
   if (
-    !destination
-    || !hostedGroupCurrentSenderPrivateRoutesEqual(
+    expiresAtMs > now.getTime()
+    && authority.personalReadAllowed
+    && destination
+    && hostedGroupCurrentSenderPrivateRoutesEqual(
       destination.route,
       notification.route,
     )
-    || !hostedGroupCurrentSenderPrivateRoutesEqual(
+    && hostedGroupCurrentSenderPrivateRoutesEqual(
       destination.route,
       input.route,
     )
   ) {
+    return;
+  }
+
+  const mailboxWake =
+    await appendHostedGroupCurrentSenderFallbackCompletionTx({
+      authority: completionAuthority,
+      completionId: fallbackCompletionId,
+      now,
+      tx: input.tx,
+    });
+  if (!mailboxWake) {
     throwHostedGroupCurrentSenderPrivateDeliveryAuthorityMismatch();
   }
+  return { assistantAskFallbackRequired: true, mailboxWake };
 }
 
 export function buildHostedGroupCurrentSenderPrivateResponseText(
@@ -982,12 +1639,20 @@ export function buildHostedGroupCurrentSenderPrivateResponseText(
 async function resolveHostedGroupCurrentSenderPrivateDestination(input: {
   authority: Pick<
     HostedGroupCurrentSenderPrivateCompletionAuthority,
-    "sourceChannel" | "targetMemberId"
+    "resultDestination" | "sourceChannel" | "targetMemberId"
   >;
   tx: Prisma.TransactionClient;
 }): Promise<{
   route: HostedExecutionAssistantNotificationRoute;
 } | null> {
+  if (
+    input.authority.resultDestination.kind !== "requester_direct"
+    || input.authority.sourceChannel === null
+    || input.authority.resultDestination.channel
+      !== input.authority.sourceChannel
+  ) {
+    return null;
+  }
   const destination = await resolveHostedAssistantNotificationDestination({
     directChannel: input.authority.sourceChannel,
     memberId: input.authority.targetMemberId,
@@ -1048,14 +1713,14 @@ function readHostedCurrentSenderSource(
 ): {
   messageText: string | null;
   routeAuthority: HostedExecutionExternalThreadRouteAuthority;
-  sourceChannel: HostedGroupCurrentSenderSourceChannel;
+  sourceChannel: "linq" | "telegram";
 } | null {
   if (wake.userId !== groupRuntimeMemberId) {
     return null;
   }
   const message = wake.message;
   let routeAuthority: HostedExecutionExternalThreadRouteAuthority;
-  let sourceChannel: HostedGroupCurrentSenderSourceChannel;
+  let sourceChannel: "linq" | "telegram";
   if (message.channel === "linq") {
     const authority = message.routeAuthority;
     if (
@@ -1103,19 +1768,6 @@ function readHostedCurrentSenderQuestion(messageText: string | null): string | n
   return messageText;
 }
 
-function hostedCurrentSenderQuestionAuthority(
-  authority: HostedGroupCurrentSenderAuthority,
-  question: string,
-): HostedGroupCurrentSenderQuestionAuthority {
-  return {
-    groupRuntimeMemberId: authority.groupRuntimeMemberId,
-    occurredAt: authority.occurredAt,
-    question,
-    sourceChannel: authority.sourceChannel,
-    targetMemberId: authority.targetMemberId,
-  };
-}
-
 async function hasHostedCurrentSenderRuntimeAccessForUpdateTx(input: {
   memberId: string;
   tx: Prisma.TransactionClient;
@@ -1139,16 +1791,20 @@ async function hasHostedCurrentSenderRuntimeAccessForUpdateTx(input: {
   }
 }
 
-function createHostedGroupCurrentSenderPrivatePermissionDigest(): string {
-  return createHash("sha256")
-    .update(HOSTED_GROUP_CURRENT_SENDER_PRIVATE_PERMISSION_TEXT)
-    .digest("hex");
+function readHostedCurrentSenderPersistedQuestion(
+  value: string | null | undefined,
+): string | null {
+  return typeof value === "string"
+    && value.trim().length > 0
+    && [...value].length <= HOSTED_EXECUTION_ASSISTANT_ASK_QUESTION_MAX_CODE_POINTS
+    ? value
+    : null;
 }
 
-function createHostedGroupCurrentSenderPermissionDigest(): string {
-  return createHash("sha256")
-    .update(HOSTED_GROUP_CURRENT_SENDER_DISCLOSURE_PERMISSION_TEXT)
-    .digest("hex");
+function createHostedGroupCurrentSenderPermissionDigest(
+  permissionText: string,
+): string {
+  return createHash("sha256").update(permissionText).digest("hex");
 }
 
 function normalizeHostedCurrentSenderOrigin(
@@ -1211,6 +1867,32 @@ function isHostedCurrentSenderAssistantAskExpired(
   return !Number.isFinite(expiresAtMs) || expiresAtMs <= now.getTime();
 }
 
+function isHostedCurrentSenderPrivateCompletionEnvelopeValid(input: {
+  completionExpiresAt: string;
+  deliveryId: string;
+  envelopeExpiresAt: string | null;
+  occurredAt: string;
+  requestId: string;
+}): boolean {
+  if (!input.envelopeExpiresAt) {
+    return false;
+  }
+  const expiresAtMs = Date.parse(input.envelopeExpiresAt);
+  const occurredAtMs = Date.parse(input.occurredAt);
+  const freshEnvelope = Number.isFinite(expiresAtMs)
+    && Number.isFinite(occurredAtMs)
+    && new Date(expiresAtMs).toISOString() === input.envelopeExpiresAt
+    && new Date(occurredAtMs).toISOString() === input.occurredAt
+    && expiresAtMs
+      === occurredAtMs + HOSTED_EXECUTION_ASSISTANT_ASK_REQUEST_TTL_MS;
+  if (freshEnvelope) {
+    return true;
+  }
+  return input.deliveryId
+      === createHostedExecutionAssistantAskCompletionId(input.requestId)
+    && input.envelopeExpiresAt === input.completionExpiresAt;
+}
+
 function unavailableHostedCurrentSenderAdmission(
   unavailableReason: string,
 ): HostedGroupCurrentSenderAssistantAskAdmission {
@@ -1220,23 +1902,16 @@ function unavailableHostedCurrentSenderAdmission(
   };
 }
 
-function unavailableHostedCurrentSenderPrivateAdmission(
-  unavailableReason: string,
-): HostedGroupCurrentSenderPrivateAssistantAskAdmission {
-  return {
-    mailboxWake: null,
-    result: { status: "unavailable", unavailableReason },
-  };
-}
-
-async function acquireHostedCurrentSenderAssistantAskLockTx(
+async function acquireHostedCurrentSenderAssistantAskLocksTx(
   tx: Prisma.TransactionClient,
-  requestId: string,
+  requestIds: readonly string[],
 ): Promise<void> {
-  await tx.$executeRaw`
-    SELECT pg_advisory_xact_lock(
-      hashtext(${HOSTED_ASSISTANT_ASK_ADVISORY_LOCK_NAMESPACE}),
-      hashtext(${requestId})
-    )
-  `;
+  for (const requestId of [...new Set(requestIds)].sort()) {
+    await tx.$executeRaw`
+      SELECT pg_advisory_xact_lock(
+        hashtext(${HOSTED_ASSISTANT_ASK_ADVISORY_LOCK_NAMESPACE}),
+        hashtext(${requestId})
+      )
+    `;
+  }
 }

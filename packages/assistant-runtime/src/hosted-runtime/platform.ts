@@ -337,6 +337,10 @@ export interface HostedRuntimeAssistantAskCompletionAuthority {
 export type HostedRuntimeAssistantAskPrivateCompletionAuthority =
   HostedExecutionPrivateAssistantAskCompletionDeliveryAuthority;
 
+export interface HostedRuntimeAssistantAskPrivateCompletionAuthorityResult {
+  assistantAskFallbackRequired?: boolean | null;
+}
+
 export interface HostedRuntimeExternalThreadRouteAuthorityResult {
   assistantAskFallbackRequired?: boolean | null;
 }
@@ -409,7 +413,7 @@ type HostedRuntimeEffectsPortBase = {
   assertAssistantAskPrivateCompletionAuthority?(
     authority: HostedRuntimeAssistantAskPrivateCompletionAuthority,
     context?: { signal?: AbortSignal | null },
-  ): Promise<void>;
+  ): Promise<HostedRuntimeAssistantAskPrivateCompletionAuthorityResult | void>;
   resolveCurrentVerifiedEmailRecipient?(
     context?: { signal?: AbortSignal | null },
   ): Promise<string | null>;

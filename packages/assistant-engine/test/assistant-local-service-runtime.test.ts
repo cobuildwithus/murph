@@ -1788,6 +1788,157 @@ test('sendAssistantMessageLocal resolves one accepted-message ref for reply and 
   })
 })
 
+test('sendAssistantMessageLocal resolves required progress to one exact accepted message', async () => {
+  const context = await createTempVaultContext(
+    'assistant-local-service-selected-progress-target-',
+  )
+  tempRoots.push(context.parentRoot)
+  const acceptedMessage = await upsertAssistantInputEvent({
+    vault: context.vaultRoot,
+    now: new Date('2026-04-22T10:00:01.000Z'),
+    event: {
+      content: {
+        attachmentDescriptors: [],
+        text: 'Bind progress to this message.',
+      },
+      conversation: {
+        accountId: 'telegram-account',
+        actorId: 'telegram-actor',
+        actorIsSelf: false,
+        source: 'telegram',
+        threadId: 'thread-1',
+        threadIsDirect: false,
+      },
+      occurredAt: '2026-04-22T10:00:00.000Z',
+      receivedAt: '2026-04-22T10:00:00.000Z',
+      replyTarget: {
+        channel: 'telegram',
+        messageId: '987654329',
+        threadId: 'thread-1',
+      },
+      sourceMetadata: {
+        externalThreadRouteAuthorityPresent: true,
+        kind: 'telegram',
+        mediaGroupId: null,
+        replyContext: null,
+      },
+      sourceRef: createHostedMailboxSourceRef({
+        eventId: 'evt_selected_progress_target',
+        laneSeq: '1',
+      }),
+    },
+  })
+  const newerMessage = await upsertAssistantInputEvent({
+    vault: context.vaultRoot,
+    now: new Date('2026-04-22T10:00:02.000Z'),
+    event: {
+      content: {
+        attachmentDescriptors: [],
+        text: 'This newer speaker remains the generic context.',
+      },
+      conversation: {
+        accountId: 'telegram-account',
+        actorId: 'telegram-actor-newer',
+        actorIsSelf: false,
+        source: 'telegram',
+        threadId: 'thread-1',
+        threadIsDirect: false,
+      },
+      occurredAt: '2026-04-22T10:00:01.000Z',
+      receivedAt: '2026-04-22T10:00:01.000Z',
+      replyTarget: {
+        channel: 'telegram',
+        messageId: '987654330',
+        threadId: 'thread-1',
+      },
+      sourceMetadata: {
+        externalThreadRouteAuthorityPresent: true,
+        kind: 'telegram',
+        mediaGroupId: null,
+        replyContext: null,
+      },
+      sourceRef: createHostedMailboxSourceRef({
+        eventId: 'evt_newer_progress_context',
+        laneSeq: '2',
+      }),
+    },
+  })
+  const session = createAssistantSession()
+  const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
+    realMessageTargetSelection: true,
+    session,
+  })
+  let unavailableProgressKind: string | null = null
+  mocks.executeCodexTurnWithRecovery.mockImplementationOnce(async (providerInput) => {
+    await providerInput.progressDelivery?.send(
+      'Sharing after the exact source is reviewed.',
+      {
+        deliveryContextOrdinal: 0,
+        required: true,
+        source: 'system',
+        targetInputId: acceptedMessage.inputId,
+      },
+    )
+    unavailableProgressKind = (await providerInput.progressDelivery?.send(
+      'This target must fail closed.',
+      {
+        deliveryContextOrdinal: 0,
+        required: true,
+        source: 'system',
+        targetInputId: 'ain_ffffffffffffffffffffffffffffffff',
+      },
+    ))?.kind ?? null
+    return {
+      kind: 'succeeded',
+      providerTurn: {
+        onboardingGuidanceInjected: true,
+        codexContinuation: { kind: 'explicit-structured-history' },
+        response: '',
+        responseDeliveryContextOrdinal: 0,
+        session,
+        transcriptResponse: '',
+      },
+    }
+  })
+
+  await sendAssistantMessageLocal({
+    acceptedTurnInput: {
+      initialInputs: [
+        {
+          contentRef: {
+            kind: 'assistant-input-event',
+            refId: acceptedMessage.inputId,
+            version: acceptedMessage.schema,
+          },
+          id: acceptedMessage.inputId,
+          source: 'assistant-input',
+        },
+        {
+          contentRef: {
+            kind: 'assistant-input-event',
+            refId: newerMessage.inputId,
+            version: newerMessage.schema,
+          },
+          id: newerMessage.inputId,
+          source: 'assistant-input',
+        },
+      ],
+    },
+    deliverResponse: true,
+    deliveryReplyToMessageId: '987654330',
+    prompt: 'Review the selected source.',
+    vault: context.vaultRoot,
+  })
+
+  expect(mocks.deliverAssistantProgressUpdate).toHaveBeenCalledTimes(1)
+  expect(unavailableProgressKind).toBe('failed')
+  expect(mocks.deliverAssistantProgressUpdate.mock.calls[0]?.[0]?.input)
+    .toMatchObject({
+      deliveryNativeReplyRequested: true,
+      deliveryReplyToMessageId: '987654329',
+    })
+})
+
 test('sendAssistantMessageLocal fails closed before reply delivery when second-pass target authority is lost', async () => {
   const context = await createTempVaultContext(
     'assistant-local-service-stale-reply-target-',
@@ -3903,6 +4054,43 @@ test('sendAssistantMessageLocal attributes required progress after real live ste
       threadIsDirect: true,
     },
   })
+  const earlierHostedInput = await upsertAssistantInputEvent({
+    vault: context.vaultRoot,
+    now: new Date('2026-04-22T10:00:00.000Z'),
+    event: {
+      content: {
+        attachmentDescriptors: [],
+        text: 'Earlier accepted group message',
+      },
+      conversation: {
+        accountId: 'identity-1',
+        actorId: 'actor_earlier',
+        actorIsSelf: false,
+        source: 'linq',
+        threadId: 'thread-1',
+        threadIsDirect: false,
+      },
+      occurredAt: '2026-04-22T09:59:59.000Z',
+      receivedAt: '2026-04-22T09:59:59.000Z',
+      replyTarget: {
+        channel: 'linq',
+        messageId: 'message-event-earlier',
+        threadId: 'thread-1',
+      },
+      sourceMetadata: {
+        externalThreadRouteAuthorityPresent: true,
+        kind: 'linq',
+        partCount: 1,
+        reactionEligible: true,
+        replyToMessageId: null,
+        service: 'iMessage',
+      },
+      sourceRef: createHostedMailboxSourceRef({
+        eventId: 'evt_active_turn_event_earlier',
+        laneSeq: '0',
+      }),
+    },
+  })
   const hostedInput = await upsertAssistantInputEvent({
     vault: context.vaultRoot,
     now: new Date('2031-02-15T10:00:00.100Z'),
@@ -3912,12 +4100,12 @@ test('sendAssistantMessageLocal attributes required progress after real live ste
         text: 'Event-backed follow up',
       },
       conversation: {
-        accountId: 'acct_1',
+        accountId: 'identity-1',
         actorId: 'actor_1',
         actorIsSelf: false,
         source: 'linq',
         threadId: 'thread-1',
-        threadIsDirect: true,
+        threadIsDirect: false,
       },
       occurredAt: '2031-02-15T09:59:58.000Z',
       receivedAt: '2031-02-15T09:59:59.900Z',
@@ -3925,6 +4113,14 @@ test('sendAssistantMessageLocal attributes required progress after real live ste
         channel: 'linq',
         messageId: 'message-event-steer',
         threadId: 'thread-1',
+      },
+      sourceMetadata: {
+        externalThreadRouteAuthorityPresent: true,
+        kind: 'linq',
+        partCount: 1,
+        reactionEligible: true,
+        replyToMessageId: null,
+        service: 'iMessage',
       },
       sourceRef: createHostedMailboxSourceRef({
         eventId: 'evt_active_turn_event_steer',
@@ -3983,7 +4179,7 @@ test('sendAssistantMessageLocal attributes required progress after real live ste
       }
     },
   )
-  const sharedPlan = createDirectSharedPlan()
+  const sharedPlan = createSharedPlan()
   sharedPlan.conversationPolicy.audience.channel = 'linq'
   const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
     plan: {
@@ -3991,6 +4187,7 @@ test('sendAssistantMessageLocal attributes required progress after real live ste
       persistUserPromptOnFailure: false,
     },
     realAcceptedInputPersistence: true,
+    realMessageTargetSelection: true,
     session,
   })
   const { notifyAssistantActiveTurnInputAvailable } = await import(
@@ -4000,6 +4197,7 @@ test('sendAssistantMessageLocal attributes required progress after real live ste
     async (progressInput) => {
       await progressInput.dependencies?.sendLinq?.({
         message: progressInput.text,
+        replyToMessageId: progressInput.input.deliveryReplyToMessageId,
         target: 'thread-1',
         targetKind: 'thread',
       })
@@ -4036,6 +4234,7 @@ test('sendAssistantMessageLocal attributes required progress after real live ste
         deliveryContextOrdinal: 1,
         required: true,
         source: 'system',
+        targetInputId: earlierHostedInput.inputId,
       },
     )
     requiredProgressDelivered.resolve()
@@ -4057,6 +4256,19 @@ test('sendAssistantMessageLocal attributes required progress after real live ste
   })
 
   const resultPromise = sendAssistantMessageLocal({
+    acceptedTurnInput: {
+      initialInputs: [
+        {
+          contentRef: {
+            kind: 'assistant-input-event',
+            refId: earlierHostedInput.inputId,
+            version: earlierHostedInput.schema,
+          },
+          id: earlierHostedInput.inputId,
+          source: 'assistant-input',
+        },
+      ],
+    },
     activeTurnInput,
     deliverResponse: true,
     deliveryDispatchMode: 'queue-only',
@@ -4126,12 +4338,16 @@ test('sendAssistantMessageLocal attributes required progress after real live ste
     )
   expect(
     journalAfterRequiredProgress?.providerRequests[0]?.acceptedInputIds,
-  ).toEqual(['initial', hostedInput.inputId])
+  ).toEqual([earlierHostedInput.inputId, hostedInput.inputId])
   expect(providerRequestStarted).toHaveBeenCalledTimes(1)
   expect(progressDeliveryDependencies.sendLinq).toHaveBeenCalledWith(
     expect.objectContaining({
-      acceptedAssistantInputIds: ['initial', hostedInput.inputId],
+      acceptedAssistantInputIds: [
+        earlierHostedInput.inputId,
+        hostedInput.inputId,
+      ],
       message: 'Checking the live-steered follow up.',
+      replyToMessageId: 'message-event-earlier',
     }),
   )
   providerRelease.resolve()
@@ -4146,10 +4362,13 @@ test('sendAssistantMessageLocal attributes required progress after real live ste
     context.vaultRoot,
     'turn-1',
   )
-  expect(journal?.inputIds).toEqual(['initial', hostedInput.inputId])
+  expect(journal?.inputIds).toEqual([
+    earlierHostedInput.inputId,
+    hostedInput.inputId,
+  ])
   expect(journal?.providerRequests).toHaveLength(1)
   expect(journal?.providerRequests[0]?.acceptedInputIds).toEqual([
-    'initial',
+    earlierHostedInput.inputId,
     hostedInput.inputId,
   ])
 })
