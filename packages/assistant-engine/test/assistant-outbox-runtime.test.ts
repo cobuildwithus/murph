@@ -195,6 +195,7 @@ const WORKOUT_RESPONSE_CARD: AssistantResponseCard = {
   },
   editor: {
     version: 1,
+    setRemovalBinding: 'b'.repeat(64),
     exercises: [{
       unitOverride: 'lb',
       sets: [

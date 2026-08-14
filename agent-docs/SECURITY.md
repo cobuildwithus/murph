@@ -661,8 +661,13 @@ Last verified: 2026-08-13
   tracking, identity, canonical references, credentials, tokens, or write
   authority. V6 adds a 64-character lowercase SHA-256 action binding derived
   from the canonical workout id plus a bounded typed projection of the same
-  completed-set values already visible in that private-direct card. It reveals
-  no canonical id or member. An editable note is admitted only when its exact
+  completed-set values already visible in that private-direct card. It also
+  carries a separate opaque 64-character removal binding derived from the hidden
+  canonical workout id and complete ordered canonical exercise/set state. That
+  binding reveals no raw hidden field and is checked only as a destructive
+  stale-state precondition under the existing canonical workout lock; it never
+  grants identity or write authority. Neither binding reveals a canonical id or
+  member. An editable note is admitted only when its exact
   canonical value fits the visible 40-character result field; a longer hidden
   note forces the authority-free V4 presentation instead of entering either
   persisted card state or the Linq request.

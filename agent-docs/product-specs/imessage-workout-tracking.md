@@ -135,19 +135,30 @@ An active workout may have zero pending sets after the final result is logged; i
 ## Direct action loop
 
 The expanded native editor derives one bounded expected shape from the visible
-V6 workout snapshot and emits only closed `exercise.append`, `set.put`, and
-`set.remove` mutations. A removal carries the full typed set snapshot for that
-exercise, so the canonical owner can reject stale input and recognize an exact
-replay after positional compaction. Positions are one-based presentation coordinates, and each exercise
-or set coordinate may appear at most once so the batch has one exact,
-single-valued postcondition. The action carries no member id or canonical
-workout id. Its one-way action binding is a stale-card
-precondition, not authentication: the server derives the member from the scoped
-credential and the workout owner requires exactly one active workout whose
-binding, ordered exercise names, set counts, and logged states still match. Each
-edit to an existing set also carries the bounded previous result from the typed
-card projection; the canonical owner rejects the batch when that target changed instead of
-overwriting a newer correction.
+V6 workout snapshot and emits only closed `exercise.append`, `set.put`,
+`set.append`, and `set.remove` mutations. `set.put` addresses an original or
+in-batch exercise-placeholder coordinate. `set.append` addresses the contiguous
+final positions after all original-coordinate edits and descending removals,
+so deletion and creation never share one positional identity. A destructive
+batch also carries one opaque SHA-256 binding over the canonical workout id and
+complete ordered exercise/set state. The canonical owner recomputes that binding
+under its existing lock before removing a set, so any concurrent type, note,
+duration, distance, RPE, bodyweight, assistance, added-load, result, or mixed
+field change rejects the immutable card without exposing those hidden fields in
+the message URL. Exact replay instead proves the one final sequence: original
+edits, descending removals, then contiguous appends.
+
+Positions are one-based presentation coordinates, and each coordinate within
+its original-edit, original-remove, or final-append namespace may appear at most
+once. The action carries no member id or canonical workout id. Its stable
+one-way action binding and destructive-state binding are stale-card
+preconditions, not authentication: the server derives the member from the scoped
+credential and requires exactly one active workout whose stable identity,
+ordered exercise names, set counts, logged states, and, for removal, complete
+canonical state still match. Each edit to an existing set also carries the
+bounded previous result from the typed card projection; the canonical owner
+rejects the batch when that target changed instead of overwriting a newer
+correction.
 
 Web validates the whole envelope, re-checks active access and historical launch
 consent under the existing member locks, and durably appends the action before

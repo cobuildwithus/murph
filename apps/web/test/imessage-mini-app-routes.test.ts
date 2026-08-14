@@ -611,7 +611,6 @@ function validMemberActionRequest() {
           weightUnit: null,
         },
         kind: "set.put",
-        requiresExistingSet: true,
         result: { kind: "weight_reps", reps: 8, weight: 180, weightUnit: "lb" },
         setPosition: 1,
       }],

@@ -185,6 +185,7 @@ export const workoutSessionEditorProjectionV1Schema = z
       .array(workoutSessionEditorExerciseV1Schema)
       .min(1)
       .max(workoutSessionCardV1Bounds.exercises),
+    setRemovalBinding: z.string().regex(/^[0-9a-f]{64}$/u),
     version: z.literal(1),
   })
   .strict();
@@ -254,6 +255,7 @@ export type WorkoutSessionAppCardEnvelopeV6 = {
     >;
     f: string | null;
     b: string;
+    d: string;
   };
 };
 
@@ -352,13 +354,15 @@ export function buildWorkoutSessionAppCardEnvelopeV6(input: {
       }),
       f: input.footer,
       b: input.actionBinding,
+      d: editor.setRemovalBinding,
     },
   };
 }
 
 /**
  * Restores the readable presentation snapshot from either workout-card wire.
- * The V6 action binding is validated and intentionally omitted from presentation.
+ * The V6 action and removal bindings are validated and intentionally omitted
+ * from presentation.
  */
 export function parseWorkoutSessionAppCardEnvelopeV4(
   value: unknown,
@@ -369,7 +373,7 @@ export function parseWorkoutSessionAppCardEnvelopeV4(
     || !isExactRecord(
       value.card,
       value.schemaVersion === 6
-        ? ["k", "v", "t", "u", "s", "e", "f", "b"]
+        ? ["k", "v", "t", "u", "s", "e", "f", "b", "d"]
         : ["k", "v", "t", "u", "s", "e", "f"],
     )
   ) {
@@ -388,6 +392,7 @@ export function parseWorkoutSessionAppCardEnvelopeV4(
     || !Array.isArray(card.e)
     || !isNullableSingleLineText(card.f, workoutSessionCardV1Bounds.footer)
     || (value.schemaVersion === 6 && !isWorkoutActionBinding(card.b))
+    || (value.schemaVersion === 6 && !isWorkoutActionBinding(card.d))
     || (value.schemaVersion === 6 && card.s !== "a")
   ) {
     return null;

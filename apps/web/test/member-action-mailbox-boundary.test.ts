@@ -109,7 +109,6 @@ describe("member-action mailbox crypto boundary", () => {
             exercisePosition: 1,
             expectedResult: null,
             kind: "set.put",
-            requiresExistingSet: true,
             result: {
               kind: "weight_reps",
               reps: 8,

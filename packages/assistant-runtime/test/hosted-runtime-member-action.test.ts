@@ -30,7 +30,6 @@ describe("hosted member action runtime", () => {
         exercisePosition: 1,
         expectedResult: null,
         kind: "set.put" as const,
-        requiresExistingSet: true,
         result: { kind: "reps" as const, reps: 8 },
         setPosition: 1,
       }],
@@ -101,7 +100,6 @@ describe("hosted member action runtime", () => {
               exercisePosition: 1,
               expectedResult: null,
               kind: "set.put",
-              requiresExistingSet: true,
               result: { kind: "reps", reps: 8 },
               setPosition: 1,
             }],
@@ -144,7 +142,6 @@ describe("hosted member action runtime", () => {
             weightUnit: null,
           },
           kind: "set.put" as const,
-          requiresExistingSet: true,
           result: {
             kind: "weight_reps" as const,
             reps: 8,

@@ -4,8 +4,12 @@ import type {
   WorkoutMemberActionExpectedSetStateV1,
   WorkoutMemberActionSetResultV1,
   WorkoutSession,
+  WorkoutSet,
 } from "@murphai/contracts";
-import { deriveWorkoutActionBinding } from "@murphai/operator-config/workout-action-binding";
+import {
+  deriveWorkoutActionBinding,
+  deriveWorkoutSetRemovalBinding,
+} from "@murphai/operator-config/workout-action-binding";
 
 const mocks = vi.hoisted(() => ({
   findActiveLiveWorkouts: vi.fn(),
@@ -72,7 +76,6 @@ function setAction(
       exercisePosition: 1,
       expectedResult: input.expectedResult ?? null,
       kind: "set.put" as const,
-      requiresExistingSet: true,
       result,
       setPosition: 1,
     }],
@@ -101,7 +104,6 @@ function appendAction(setCount = 1) {
         exercisePosition: 2,
         expectedResult: null,
         kind: "set.put" as const,
-        requiresExistingSet: false,
         result: { kind: "reps" as const, reps: 12 },
         setPosition: 1,
       },
@@ -112,6 +114,7 @@ function appendAction(setCount = 1) {
 
 function removeAction(input: {
   expectedSets?: WorkoutMemberActionExpectedSetStateV1[];
+  setRemovalBinding?: string;
   setPosition?: number;
 } = {}) {
   const expectedSets = input.expectedSets ?? [
@@ -125,6 +128,30 @@ function removeAction(input: {
         name: "Leg press",
         sets: expectedSets.map(({ logged }) => ({ logged })),
       }],
+      setRemovalBinding: input.setRemovalBinding
+        ?? deriveWorkoutSetRemovalBinding("evt_test_workout", [{
+          ...BASE_WORKOUT.exercises[0],
+          sets: expectedSets.map((set, index) => ({
+            order: index + 1,
+            ...(set.result?.kind === "note" && set.result.note !== null
+              ? { note: set.result.note }
+              : {}),
+            ...(set.result?.kind === "reps" && set.result.reps !== null
+              ? { reps: set.result.reps }
+              : {}),
+            ...(set.result?.kind === "weight_reps"
+              ? {
+                  ...(set.result.reps !== null ? { reps: set.result.reps } : {}),
+                  ...(set.result.weight !== null
+                    ? { weight: set.result.weight }
+                    : {}),
+                  ...(set.result.weightUnit !== null
+                    ? { weightUnit: set.result.weightUnit }
+                    : {}),
+                }
+              : {}),
+          })),
+        }]),
     },
     kind: "workout.live.apply" as const,
     mutations: [{
@@ -225,18 +252,19 @@ describe("live workout member action", () => {
       }],
     })]);
 
+    const action = removeAction({
+      expectedSets: [
+        { logged: false, result: null },
+        { logged: true, result: { kind: "reps", reps: 8 } },
+        { logged: false, result: null },
+      ],
+    });
     await expect(applyLiveWorkoutMemberAction({
       acceptedAt: ACCEPTED_AT,
       action: {
-        ...removeAction({
-          expectedSets: [
-            { logged: false, result: null },
-            { logged: true, result: { kind: "reps", reps: 8 } },
-            { logged: false, result: null },
-          ],
-        }),
+        ...action,
         expectedWorkout: {
-          actionBinding: ACTION_BINDING,
+          ...action.expectedWorkout,
           exercises: [{
             name: "Leg press",
             sets: [{ logged: false }, { logged: true }, { logged: false }],
@@ -268,6 +296,83 @@ describe("live workout member action", () => {
     expect(mocks.updateLiveWorkoutExercises).not.toHaveBeenCalled();
   });
 
+  it("applies and exactly replays descending removals plus appended sets", async () => {
+    const expectedSets = [
+      { logged: false, result: null },
+      { logged: true, result: { kind: "reps" as const, reps: 8 } },
+      { logged: false, result: null },
+      { logged: true, result: { kind: "reps" as const, reps: 10 } },
+    ];
+    const initialWorkout: WorkoutSession = {
+      ...BASE_WORKOUT,
+      exercises: [{
+        ...BASE_WORKOUT.exercises[0],
+        sets: [
+          { order: 1 },
+          { order: 2, reps: 8 },
+          { order: 3 },
+          { order: 4, reps: 10 },
+        ],
+      }],
+    };
+    mocks.findActiveLiveWorkouts.mockResolvedValueOnce([
+      shownWorkout(initialWorkout),
+    ]);
+
+    const firstRemoval = removeAction({ expectedSets, setPosition: 2 });
+    const action = {
+      ...firstRemoval,
+      mutations: [
+        ...firstRemoval.mutations,
+        { ...firstRemoval.mutations[0], setPosition: 4 },
+        {
+          exerciseName: "Leg press",
+          exercisePosition: 1,
+          kind: "set.append" as const,
+          result: { kind: "reps" as const, reps: 12 },
+          setPosition: 3,
+        },
+        {
+          exerciseName: "Leg press",
+          exercisePosition: 1,
+          kind: "set.append" as const,
+          result: null,
+          setPosition: 4,
+        },
+      ],
+    };
+
+    await expect(applyLiveWorkoutMemberAction({
+      acceptedAt: ACCEPTED_AT,
+      action,
+      vault: "/vault",
+    })).resolves.toEqual({ status: "applied" });
+    const finalExercises = [{
+      ...BASE_WORKOUT.exercises[0],
+      sets: [
+        { order: 1 },
+        { order: 2 },
+        { order: 3, reps: 12 },
+        { order: 4 },
+      ],
+    }];
+    expect(mocks.updateLiveWorkoutExercises.mock.calls[0]?.[2]).toEqual(
+      finalExercises,
+    );
+
+    mocks.updateLiveWorkoutExercises.mockClear();
+    mocks.findActiveLiveWorkouts.mockResolvedValueOnce([shownWorkout({
+      ...BASE_WORKOUT,
+      exercises: finalExercises,
+    })]);
+    await expect(applyLiveWorkoutMemberAction({
+      acceptedAt: ACCEPTED_AT,
+      action,
+      vault: "/vault",
+    })).resolves.toEqual({ status: "unchanged" });
+    expect(mocks.updateLiveWorkoutExercises).not.toHaveBeenCalled();
+  });
+
   it("edits retained original positions before compacting removed sets", async () => {
     const expectedSets = [
       { logged: false, result: null },
@@ -294,7 +399,6 @@ describe("live workout member action", () => {
             exercisePosition: 1,
             expectedResult: { kind: "reps" as const, reps: 8 },
             kind: "set.put" as const,
-            requiresExistingSet: true,
             result: { kind: "reps" as const, reps: 10 },
             setPosition: 2,
           },
@@ -326,7 +430,6 @@ describe("live workout member action", () => {
             exercisePosition: 1,
             expectedResult: { kind: "reps" as const, reps: 8 },
             kind: "set.put" as const,
-            requiresExistingSet: true,
             result: { kind: "reps" as const, reps: 10 },
             setPosition: 2,
           },
@@ -363,18 +466,19 @@ describe("live workout member action", () => {
         sets: [{ order: 1 }, { order: 2 }],
       }],
     })]);
+    const lastSetAction = removeAction({
+      expectedSets: [
+        { logged: false, result: null },
+        { logged: false, result: null },
+      ],
+      setPosition: 1,
+    });
     await expect(applyLiveWorkoutMemberAction({
       acceptedAt: ACCEPTED_AT,
       action: {
-        ...removeAction({
-          expectedSets: [
-            { logged: false, result: null },
-            { logged: false, result: null },
-          ],
-          setPosition: 1,
-        }),
+        ...lastSetAction,
         expectedWorkout: {
-          actionBinding: ACTION_BINDING,
+          ...lastSetAction.expectedWorkout,
           exercises: [{ name: "Leg press", sets: [{ logged: false }] }],
         },
       },
@@ -404,6 +508,42 @@ describe("live workout member action", () => {
     });
     expect(mocks.updateLiveWorkoutExercises).not.toHaveBeenCalled();
   });
+
+  it.each([
+    ["type", { type: "warmup" as const }],
+    ["note", { note: "Pause at the bottom" }],
+    ["duration", { durationSeconds: 45 }],
+    ["distance", { distanceMeters: 100 }],
+    ["RPE", { rpe: 8 }],
+    ["bodyweight", { bodyweightKg: 82 }],
+    ["assistance", { assistanceKg: 20 }],
+    ["added load", { addedWeightKg: 10 }],
+    ["mixed fields", { note: "Controlled", rpe: 7 }],
+  ] satisfies Array<[string, Partial<WorkoutSet>]>)(
+    "rejects removal after a concurrent %s change outside its visible family",
+    async (_label, concurrentPatch) => {
+      mocks.findActiveLiveWorkouts.mockResolvedValueOnce([shownWorkout({
+        ...BASE_WORKOUT,
+        exercises: [{
+          ...BASE_WORKOUT.exercises[0],
+          sets: [
+            { order: 1 },
+            { order: 2, reps: 8, ...concurrentPatch },
+          ],
+        }],
+      })]);
+
+      await expect(applyLiveWorkoutMemberAction({
+        acceptedAt: ACCEPTED_AT,
+        action: removeAction(),
+        vault: "/vault",
+      })).resolves.toEqual({
+        reason: "workout_changed",
+        status: "rejected",
+      });
+      expect(mocks.updateLiveWorkoutExercises).not.toHaveBeenCalled();
+    },
+  );
 
   it("updates weight and reps while preserving unrelated set annotations", async () => {
     mocks.findActiveLiveWorkouts.mockResolvedValueOnce([shownWorkout({

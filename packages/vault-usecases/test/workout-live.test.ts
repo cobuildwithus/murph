@@ -6,6 +6,7 @@ import {
   workoutTemplateSchema,
 } from '@murphai/contracts'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
+import { deriveWorkoutSetRemovalBinding } from '@murphai/operator-config/workout-action-binding'
 
 import {
   buildLiveWorkoutSessionFromTemplate,
@@ -65,9 +66,17 @@ describe('live workout model', () => {
       ],
     }
 
-    assert.deepEqual(buildLiveWorkoutCardEditor({ presentation, workout }), {
+    assert.deepEqual(buildLiveWorkoutCardEditor({
+      presentation,
+      workout,
+      workoutId: 'evt_test_workout',
+    }), {
       editor: {
         version: 1,
+        setRemovalBinding: deriveWorkoutSetRemovalBinding(
+          'evt_test_workout',
+          workout.exercises,
+        ),
         exercises: [
           {
             unitOverride: 'lb',
@@ -146,16 +155,19 @@ describe('live workout model', () => {
       buildLiveWorkoutCardEditor({
         presentation,
         workout: workoutForNote('n'.repeat(40)),
+        workoutId: 'evt_test_workout',
       })?.editor.exercises[0]?.sets[0]?.result,
       { kind: 'note', note: 'n'.repeat(40) },
     )
     assert.equal(buildLiveWorkoutCardEditor({
       presentation,
       workout: workoutForNote('n'.repeat(41)),
+      workoutId: 'evt_test_workout',
     }), null)
     assert.equal(buildLiveWorkoutCardEditor({
       presentation,
       workout: workoutForNote('n'.repeat(400)),
+      workoutId: 'evt_test_workout',
     }), null)
   })
 
@@ -191,7 +203,11 @@ describe('live workout model', () => {
       }],
     })
 
-    assert.equal(buildLiveWorkoutCardEditor({ presentation, workout }), null)
+    assert.equal(buildLiveWorkoutCardEditor({
+      presentation,
+      workout,
+      workoutId: 'evt_test_workout',
+    }), null)
     assert.equal(presentation.exercises[0]?.sets[0]?.actual, 'Exact result')
   })
 
@@ -214,7 +230,11 @@ describe('live workout model', () => {
       }],
     })
 
-    assert.equal(buildLiveWorkoutCardEditor({ presentation, workout }), null)
+    assert.equal(buildLiveWorkoutCardEditor({
+      presentation,
+      workout,
+      workoutId: 'evt_test_workout',
+    }), null)
   })
 
   test.each([
@@ -242,7 +262,11 @@ describe('live workout model', () => {
       }],
     })
 
-    assert.equal(buildLiveWorkoutCardEditor({ presentation, workout }), null)
+    assert.equal(buildLiveWorkoutCardEditor({
+      presentation,
+      workout,
+      workoutId: 'evt_test_workout',
+    }), null)
   })
 
   test('starts saved routines as active sessions with unlogged placeholders', () => {

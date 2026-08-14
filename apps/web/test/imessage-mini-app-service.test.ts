@@ -258,7 +258,6 @@ function validMemberActionRequest() {
         exercisePosition: 1,
         expectedResult: null,
         kind: "set.put" as const,
-        requiresExistingSet: true,
         result: {
           kind: "weight_reps" as const,
           reps: 8,

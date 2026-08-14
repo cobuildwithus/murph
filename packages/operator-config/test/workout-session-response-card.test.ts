@@ -74,6 +74,7 @@ const ACTIVE_WORKOUT_CARD = {
   },
   editor: {
     version: 1,
+    setRemovalBinding: 'b'.repeat(64),
     exercises: [
       {
         unitOverride: 'lb',
@@ -166,6 +167,7 @@ describe('workout session response cards', () => {
       schemaVersion: 6,
       card: {
         b: deriveWorkoutActionBinding(ACTIVE_WORKOUT_CARD.tracking.entityId),
+        d: ACTIVE_WORKOUT_CARD.editor.setRemovalBinding,
         k: 'w',
         v: 1,
         t: 'Push day',
@@ -270,6 +272,7 @@ describe('workout session response cards', () => {
           ? {
               editor: {
                 version: 1 as const,
+                setRemovalBinding: 'b'.repeat(64),
                 exercises: workout.exercises.map((exercise) => ({
                   unitOverride: 'lb' as const,
                   sets: exercise.sets.map((set, setIndex) => ({
@@ -297,7 +300,7 @@ describe('workout session response cards', () => {
       return encodeWorkoutSessionAppCardUrl(card)
     })
 
-    expect(urls.map((url) => url.length)).toEqual([1529, 1811, 1624])
+    expect(urls.map((url) => url.length)).toEqual([1624, 1905, 1624])
     expect(urls.every((url) => url.length < 2_048)).toBe(true)
   })
 

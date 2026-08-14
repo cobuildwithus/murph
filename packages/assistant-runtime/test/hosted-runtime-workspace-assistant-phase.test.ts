@@ -18799,7 +18799,6 @@ function createMemberActionSystemMailboxItem() {
             exercisePosition: 1,
             expectedResult: null,
             kind: "set.put" as const,
-            requiresExistingSet: true,
             result: { kind: "reps" as const, reps: 8 },
             setPosition: 1,
           }],

@@ -71,6 +71,7 @@ const TRACKED_WORKOUT_CARD: CompactTableResponseCardV1 = {
 };
 
 const TRACKED_WORKOUT_EDITOR = {
+  setRemovalBinding: "b".repeat(64),
   version: 1 as const,
   exercises: [
     {
@@ -182,6 +183,7 @@ describe("workout session compact-table contract", () => {
 
     expect(envelope.schemaVersion).toBe(6);
     expect(envelope.card.b).toBe("a".repeat(64));
+    expect(envelope.card.d).toBe("b".repeat(64));
     expect(parseCompactTableAppCardEnvelope(envelope)).toEqual({
       kind: "compact_table",
       version: 1,
@@ -237,6 +239,7 @@ describe("workout session compact-table contract", () => {
             },
           }],
         }],
+        setRemovalBinding: "b".repeat(64),
         version: 1 as const,
       },
       title: TRACKED_WORKOUT_CARD.title,
@@ -272,6 +275,7 @@ describe("workout session compact-table contract", () => {
             result: { kind: "note" as const, note: "n".repeat(40) },
           }],
         }],
+        setRemovalBinding: "b".repeat(64),
         version: 1 as const,
       },
       title: TRACKED_WORKOUT_CARD.title,

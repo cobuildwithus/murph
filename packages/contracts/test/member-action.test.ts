@@ -19,7 +19,6 @@ function validRequest() {
           exercisePosition: 1,
           expectedResult: null,
           kind: "set.put" as const,
-          requiresExistingSet: true,
           result: {
             kind: "weight_reps" as const,
             reps: 8,
@@ -147,16 +146,18 @@ describe("member action contract", () => {
     }).success).toBe(false);
   });
 
-  it("rejects a previous result for a set that is expected to be new", () => {
+  it("requires new sets to append contiguously after retained sets", () => {
     const request = validRequest();
     expect(memberActionRequestV1Schema.safeParse({
       ...request,
       action: {
         ...request.action,
         mutations: [{
-          ...request.action.mutations[0],
-          expectedResult: { kind: "reps", reps: 7 },
-          requiresExistingSet: false,
+          exerciseName: "Leg press",
+          exercisePosition: 1,
+          kind: "set.append",
+          result: null,
+          setPosition: 3,
         }],
       },
     }).success).toBe(false);
@@ -245,6 +246,14 @@ describe("member action contract", () => {
 
   it("accepts a set removal only with its exact visible state", () => {
     const request = validRequest();
+    const expectedWorkout = {
+      ...request.action.expectedWorkout,
+      exercises: [{
+        name: "Leg press",
+        sets: [{ logged: false }, { logged: true }],
+      }],
+      setRemovalBinding: "b".repeat(64),
+    };
     const removal = {
       exerciseName: "Leg press",
       exercisePosition: 1,
@@ -257,17 +266,20 @@ describe("member action contract", () => {
     };
     expect(memberActionRequestV1Schema.safeParse({
       ...request,
-      action: { ...request.action, mutations: [removal] },
+      action: { ...request.action, expectedWorkout, mutations: [removal] },
     }).success).toBe(true);
     expect(memberActionRequestV1Schema.safeParse({
       ...request,
       action: {
         ...request.action,
+        expectedWorkout,
         mutations: [
           removal,
           {
-            ...request.action.mutations[0],
-            requiresExistingSet: false,
+            exerciseName: "Leg press",
+            exercisePosition: 1,
+            kind: "set.append",
+            result: request.action.mutations[0].result,
             setPosition: 2,
           },
         ],
@@ -277,6 +289,7 @@ describe("member action contract", () => {
       ...request,
       action: {
         ...request.action,
+        expectedWorkout,
         mutations: [{
           ...removal,
           expectedSets: [{
@@ -290,6 +303,7 @@ describe("member action contract", () => {
       ...request,
       action: {
         ...request.action,
+        expectedWorkout,
         mutations: [{
           ...removal,
           setPosition: 3,
@@ -300,6 +314,7 @@ describe("member action contract", () => {
       ...request,
       action: {
         ...request.action,
+        expectedWorkout,
         mutations: [{
           ...removal,
           expectedSets: [

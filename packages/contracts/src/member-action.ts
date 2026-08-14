@@ -164,7 +164,15 @@ export const workoutMemberActionMutationV1Schema = z.discriminatedUnion(
         exercisePosition: workoutExercisePositionSchema,
         expectedResult: workoutMemberActionExpectedSetResultV1Schema.nullable(),
         kind: z.literal("set.put"),
-        requiresExistingSet: z.boolean(),
+        result: workoutMemberActionSetResultV1Schema,
+        setPosition: workoutSetPositionSchema,
+      })
+      .strict(),
+    z
+      .object({
+        exerciseName: singleLineText(memberActionV1Bounds.exerciseName),
+        exercisePosition: workoutExercisePositionSchema,
+        kind: z.literal("set.append"),
         result: workoutMemberActionSetResultV1Schema.nullable(),
         setPosition: workoutSetPositionSchema,
       })
@@ -185,30 +193,7 @@ export const workoutMemberActionMutationV1Schema = z.discriminatedUnion(
 ).superRefine((mutation, context) => {
   if (
     mutation.kind === "set.put"
-    && !mutation.requiresExistingSet
     && mutation.expectedResult !== null
-  ) {
-    context.addIssue({
-      code: "custom",
-      message: "A new set cannot carry a previous result.",
-      path: ["expectedResult"],
-    });
-  }
-  if (
-    mutation.kind === "set.put"
-    && mutation.requiresExistingSet
-    && mutation.result === null
-  ) {
-    context.addIssue({
-      code: "custom",
-      message: "An existing set update must name the fields it owns.",
-      path: ["result"],
-    });
-  }
-  if (
-    mutation.kind === "set.put"
-    && mutation.expectedResult !== null
-    && mutation.result !== null
     && mutation.expectedResult.kind !== mutation.result.kind
   ) {
     context.addIssue({
@@ -241,6 +226,7 @@ export const workoutLiveApplyMemberActionV1Schema = z
           .array(workoutMemberActionExpectedExerciseV1Schema)
           .min(1)
           .max(memberActionV1Bounds.exercises),
+        setRemovalBinding: z.string().regex(/^[0-9a-f]{64}$/u).optional(),
       })
       .strict(),
     kind: z.literal("workout.live.apply"),
@@ -260,12 +246,11 @@ export const workoutLiveApplyMemberActionV1Schema = z
     action.mutations.forEach((mutation, index) => {
       const target = mutation.kind === "exercise.append"
         ? `exercise:${mutation.exercisePosition}`
+        : mutation.kind === "set.append"
+          ? `set-append:${mutation.exercisePosition}:${mutation.setPosition}`
         : `set:${mutation.exercisePosition}:${mutation.setPosition}`;
       const existing = targets.get(target);
-      const replacesRemovedSet = existing?.kind === "set.remove"
-        && mutation.kind === "set.put"
-        && !mutation.requiresExistingSet;
-      if (existing && !replacesRemovedSet) {
+      if (existing) {
         context.addIssue({
           code: "custom",
           message: "Each workout mutation target must be unique.",
@@ -298,6 +283,76 @@ export const workoutLiveApplyMemberActionV1Schema = z
         removalSnapshots.set(mutation.exercisePosition, snapshot);
       }
     });
+
+    const removals = action.mutations.filter(
+      (mutation) => mutation.kind === "set.remove",
+    );
+    if (removals.length > 0 && action.expectedWorkout.setRemovalBinding === undefined) {
+      context.addIssue({
+        code: "custom",
+        message: "Set removal requires an exact canonical-state binding.",
+        path: ["expectedWorkout", "setRemovalBinding"],
+      });
+    }
+
+    const appendsByExercise = new Map<
+      number,
+      Array<{
+        exerciseName: string;
+        index: number;
+        setPosition: number;
+      }>
+    >();
+    action.mutations.forEach((mutation, index) => {
+      if (mutation.kind !== "set.append") {
+        return;
+      }
+      const appends = appendsByExercise.get(mutation.exercisePosition) ?? [];
+      appends.push({
+        exerciseName: mutation.exerciseName,
+        index,
+        setPosition: mutation.setPosition,
+      });
+      appendsByExercise.set(mutation.exercisePosition, appends);
+    });
+    for (const [exercisePosition, appends] of appendsByExercise) {
+      const expectedExercise = action.expectedWorkout.exercises[
+        exercisePosition - 1
+      ];
+      if (expectedExercise === undefined) {
+        context.addIssue({
+          code: "custom",
+          message: "A set append must target an existing expected exercise.",
+          path: ["mutations", appends[0]!.index],
+        });
+        continue;
+      }
+      const removedPositions = new Set(
+        removals.flatMap((removal) =>
+          removal.exercisePosition === exercisePosition
+            ? [removal.setPosition]
+            : []
+        ),
+      );
+      const firstAppendPosition = expectedExercise.sets.length
+        - removedPositions.size
+        + 1;
+      const orderedAppends = appends.slice().sort((left, right) =>
+        left.setPosition - right.setPosition
+      );
+      orderedAppends.forEach((append, appendIndex) => {
+        if (
+          append.exerciseName !== expectedExercise.name
+          || append.setPosition !== firstAppendPosition + appendIndex
+        ) {
+          context.addIssue({
+            code: "custom",
+            message: "New sets must append contiguously after retained sets.",
+            path: ["mutations", append.index],
+          });
+        }
+      });
+    }
   });
 
 export type WorkoutLiveApplyMemberActionV1 = z.infer<
