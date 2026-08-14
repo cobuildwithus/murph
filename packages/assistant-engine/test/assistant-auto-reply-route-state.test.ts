@@ -320,7 +320,7 @@ describe('assistant auto-reply exact route state', () => {
         secondReceipt.turnId,
       ]),
       releasedAbandonedReceiptTurnIds: new Set(),
-      trusted: true,
+      trusted: false,
     })
     await expect(readFile(
       resolveAssistantAutoReplyRouteMigrationPath(paths),

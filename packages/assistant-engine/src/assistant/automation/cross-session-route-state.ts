@@ -546,7 +546,7 @@ export async function maintainAssistantAutoReplyRouteStateAtPaths(input: {
             .map((receipt) => receipt.turnId),
         ),
         releasedAbandonedReceiptTurnIds,
-        trusted: true,
+        trusted: false,
       }
     }
   }
