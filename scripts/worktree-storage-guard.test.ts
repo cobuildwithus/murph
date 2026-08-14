@@ -739,7 +739,7 @@ touch hook-installed
 printf '%s|%s|%s\n' "$1" "$2" "$3" >>${JSON.stringify(hookInvocations)}
 git clean -fdX
 exclude=$(git rev-parse --path-format=absolute --git-path info/exclude)
-printf '/hook-owned-only\n' >"$exclude"
+printf '# hook comment\n/hook-owned-only\n/.metadata_never_index\n!.*\n/.metadata_never_index\n!.*\n' >"$exclude"
 `,
     )
 
@@ -762,10 +762,12 @@ printf '/hook-owned-only\n' >"$exclude"
       'info/exclude',
     ])
     const excludeRules = readFileSync(excludeFile, 'utf8').trim().split('\n')
+    expect(excludeRules).toContain('# hook comment')
     expect(excludeRules).toContain('/hook-owned-only')
     expect(
       excludeRules.filter((rule) => rule === '/.metadata_never_index'),
     ).toHaveLength(1)
+    expect(excludeRules.at(-1)).toBe('/.metadata_never_index')
     expect(existsSync(path.join(target, '.metadata_never_index'))).toBe(true)
     expect(runGit(target, ['check-ignore', '.metadata_never_index'])).toBe(
       '.metadata_never_index',
@@ -775,6 +777,152 @@ printf '/hook-owned-only\n' >"$exclude"
     )
     expect(runGit(target, ['status', '--porcelain'])).toBe('')
     expect(runGit(sibling, ['status', '--porcelain'])).toBe('')
+  })
+
+  it('repairs shared Spotlight state before rolling back a failed hook', () => {
+    const harness = createHarness()
+    const sibling = path.join(harness.root, 'failed-hook-sibling')
+    expect(
+      runScript(harness, 'create-worktree', [
+        '-b',
+        'failed-hook-sibling',
+        sibling,
+      ]).status,
+    ).toBe(0)
+    executable(
+      path.join(harness.primary, '.githooks', 'post-checkout'),
+      `#!/bin/sh
+exclude=$(git rev-parse --path-format=absolute --git-path info/exclude)
+printf '# failed hook\n/hook-failure-owned\n' >"$exclude"
+exit 23
+`,
+    )
+    const target = path.join(harness.root, 'failed-hook-target')
+
+    const creation = runScript(harness, 'create-worktree', [
+      '-b',
+      'failed-hook-target',
+      target,
+    ])
+
+    expect(creation.status).toBe(23)
+    expect(runGit(harness.primary, ['worktree', 'list', '--porcelain'])).not.toContain(
+      target,
+    )
+    expect(existsSync(target)).toBe(false)
+    expect(
+      runGit(harness.primary, [
+        'rev-parse',
+        '--verify',
+        'refs/heads/failed-hook-target',
+      ]),
+    ).toMatch(/^[0-9a-f]{40,64}$/)
+    const excludeFile = runGit(sibling, [
+      'rev-parse',
+      '--path-format=absolute',
+      '--git-path',
+      'info/exclude',
+    ])
+    const excludeRules = readFileSync(excludeFile, 'utf8').trim().split('\n')
+    expect(excludeRules).toContain('# failed hook')
+    expect(excludeRules).toContain('/hook-failure-owned')
+    expect(
+      excludeRules.filter((rule) => rule === '/.metadata_never_index'),
+    ).toHaveLength(1)
+    expect(excludeRules.at(-1)).toBe('/.metadata_never_index')
+    expect(runGit(sibling, ['check-ignore', '.metadata_never_index'])).toBe(
+      '.metadata_never_index',
+    )
+    expect(runGit(sibling, ['status', '--porcelain'])).toBe('')
+  })
+
+  it('repairs shared Spotlight state before rolling back an interrupted hook', async () => {
+    const harness = createHarness()
+    const sibling = path.join(harness.root, 'interrupted-shared-rule-sibling')
+    expect(
+      runScript(harness, 'create-worktree', [
+        '-b',
+        'interrupted-shared-rule-sibling',
+        sibling,
+      ]).status,
+    ).toBe(0)
+    const hookStarted = path.join(harness.root, 'shared-rule-hook-started')
+    executable(
+      path.join(harness.primary, '.githooks', 'post-checkout'),
+      `#!/bin/sh
+exclude=$(git rev-parse --path-format=absolute --git-path info/exclude)
+printf '# interrupted hook\n/hook-interruption-owned\n!.*\n' >"$exclude"
+touch ${JSON.stringify(hookStarted)}
+sleep 2
+`,
+    )
+    const target = path.join(harness.root, 'interrupted-shared-rule-target')
+
+    const creation = await interruptScriptAfterPath(
+      harness,
+      ['-b', 'interrupted-shared-rule-target', target],
+      hookStarted,
+    )
+
+    expect(
+      creation.status === 130 ||
+        (creation.status === null && creation.signal === 'SIGINT'),
+      creation.stderr,
+    ).toBe(true)
+    expect(runGit(harness.primary, ['worktree', 'list', '--porcelain'])).not.toContain(
+      target,
+    )
+    expect(existsSync(target)).toBe(false)
+    const excludeFile = runGit(sibling, [
+      'rev-parse',
+      '--path-format=absolute',
+      '--git-path',
+      'info/exclude',
+    ])
+    const excludeRules = readFileSync(excludeFile, 'utf8').trim().split('\n')
+    expect(excludeRules).toContain('# interrupted hook')
+    expect(excludeRules).toContain('/hook-interruption-owned')
+    expect(excludeRules.at(-1)).toBe('/.metadata_never_index')
+    expect(runGit(sibling, ['check-ignore', '.metadata_never_index'])).toBe(
+      '.metadata_never_index',
+    )
+    expect(runGit(sibling, ['status', '--porcelain'])).toBe('')
+  }, 15_000)
+
+  it('reports shared Spotlight repair failure alongside hook failure', () => {
+    const harness = createHarness()
+    executable(
+      path.join(harness.primary, '.githooks', 'post-checkout'),
+      `#!/bin/sh
+exclude=$(git rev-parse --path-format=absolute --git-path info/exclude)
+rm -f "$exclude"
+mkdir "$exclude"
+exit 23
+`,
+    )
+    const target = path.join(harness.root, 'shared-rule-repair-failure')
+
+    const creation = runScript(harness, 'create-worktree', [
+      '-b',
+      'shared-rule-repair-failure',
+      target,
+    ])
+
+    expect(creation.status).toBe(23)
+    expect(creation.stderr).toContain(
+      'setup failed (status 23); Spotlight exclude repair failed',
+    )
+    expect(runGit(harness.primary, ['worktree', 'list', '--porcelain'])).not.toContain(
+      target,
+    )
+    expect(existsSync(target)).toBe(false)
+    expect(
+      runGit(harness.primary, [
+        'rev-parse',
+        '--verify',
+        'refs/heads/shared-rule-repair-failure',
+      ]),
+    ).toMatch(/^[0-9a-f]{40,64}$/)
   })
 
   it('rolls back when final authorization publication fails', () => {

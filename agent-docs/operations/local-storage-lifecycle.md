@@ -88,19 +88,21 @@ variables, sets Git's exec path and empty prefix, prepends the exec path to
 `PATH`, and removes Murph's lock-held flags so hook descendants must acquire the
 real creation lock instead of inheriting authority to bypass it. It also gives
 the hook native end-of-file standard input while preserving standard output and
-error. After the hook succeeds, the helper restores the shared exclude rule and
-the marker in case hook cleanup changed either one, then publishes storage-guard
-authorization as the final completion step. Keep the marker in place for the
-worktree's lifetime.
+error. After the hook terminates, the helper preserves hook-owned exclude
+content, removes duplicate exact sentinel rules, and appends one exact rule as
+the final effective match. A successful hook then proceeds through marker
+restoration and final storage-guard authorization. Keep the marker in place for
+the worktree's lifetime.
 
 Marker creation, materialization, hook completion, marker restoration, and
 final authorization publication form one post-registration boundary. If any
 step fails or the helper receives a catchable interruption, it removes only the
 exact worktree it just registered while the creation lock is still held,
-preserves the created branch for retry, and returns the failure or signal
-status. A failed rollback is reported explicitly and leaves the target
-registered but unauthorized for manual diagnosis instead of hiding the partial
-state.
+repairs shared Spotlight precedence before removal, preserves the created branch
+for retry, and returns the original failure or signal status. A failed shared
+repair is reported alongside that status. A failed rollback is reported
+explicitly and leaves the target registered but unauthorized for manual
+diagnosis instead of hiding the partial state.
 
 `scripts/worktree-storage-guard` scans only conventional direct-child
 `murph-*` Git checkouts in the system `/tmp` roots by default and matches the
