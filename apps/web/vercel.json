@@ -4,6 +4,7 @@
   "git": {
     "deploymentEnabled": {
       "main": true,
+      "codex/vercel-build-oom": true,
       "*": false
     }
   },
