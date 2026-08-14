@@ -10009,7 +10009,7 @@ describe("hosted workspace runtime entrypoint", () => {
       );
       assert.equal(fetchRequests[0]?.lanes[0]?.importedSeq, "1");
       assert.equal(deviceSyncPort.fetchSnapshotCalls, 1);
-      assert.equal(deviceSyncPort.fetchDirtyStatesCalls, 1);
+      assert.equal(deviceSyncPort.fetchDirtyStatesCalls, 0);
       assert.equal(mocks.prepareHostedCodexAssistantProcess.mock.calls.length, 0);
       assert.equal(mocks.prepareHostedCodexRuntimeEnvironment.mock.calls.length, 0);
       assert.equal(
@@ -10134,7 +10134,7 @@ describe("hosted workspace runtime entrypoint", () => {
 
       assert.equal(result.immediateRecheckRequested, true);
       assert.equal(deviceSyncPort.fetchSnapshotCalls, 1);
-      assert.equal(deviceSyncPort.fetchDirtyStatesCalls, 1);
+      assert.equal(deviceSyncPort.fetchDirtyStatesCalls, 0);
       expect(mocks.refreshHostedBrowserVaultReplicaFromRuntime).toHaveBeenCalledTimes(1);
       assert.equal(
         checkpointRequests.at(-1)?.redactedStatus?.hostedMailboxSystemHandledThroughSeq,
@@ -10714,7 +10714,7 @@ describe("hosted workspace runtime entrypoint", () => {
 
       assert.deepEqual(imported, ["system:device-sync.wake"]);
       assert.equal(deviceSyncPort.fetchSnapshotCalls, 1);
-      assert.equal(deviceSyncPort.fetchDirtyStatesCalls, 1);
+      assert.equal(deviceSyncPort.fetchDirtyStatesCalls, 0);
       assert.equal(
         checkpointRequests.at(-1)?.redactedStatus?.hostedMailboxSystemImportedSeq,
         "1",
@@ -34471,7 +34471,7 @@ describe("hosted workspace runtime entrypoint", () => {
       ]);
       const shouldRunDeviceSync = input.nextWakeReason === "device-sync.reconcile";
       assert.equal(deviceSyncPort.fetchSnapshotCalls, shouldRunDeviceSync ? 1 : 0);
-      assert.equal(deviceSyncPort.fetchDirtyStatesCalls, shouldRunDeviceSync ? 1 : 0);
+      assert.equal(deviceSyncPort.fetchDirtyStatesCalls, 0);
       assert.equal(checkpointRequests.length, 1);
       assert.equal(checkpointRequests[0]?.reason, "idle_shutdown");
       assert.equal(checkpointRequests[0]?.nextWakeAt, null);

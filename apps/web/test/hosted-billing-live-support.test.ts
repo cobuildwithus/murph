@@ -1,9 +1,10 @@
 import { readFile } from "node:fs/promises";
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   buildSanitizedBrowserEnvironmentForTest,
+  HostedBillingBrowserDriver,
   readStripeSurfaceForTest,
   redactHostedBillingBrowserErrorForTest,
 } from "./support/hosted-billing-browser-driver";
@@ -99,6 +100,118 @@ describe("hosted billing live browser support", () => {
     );
   });
 
+  it.each([
+    ["different path", "https://app.example.test/home", "goto"],
+    ["same path", "https://app.example.test/settings", "reload"],
+  ] as const)("waits for a complete settings document from a %s", async (
+    _label,
+    currentUrl,
+    expectedNavigation,
+  ) => {
+    const navigation = createNavigationResponse({ ok: true, status: 200 });
+    const subscriptionWaitFor = vi.fn(async () => undefined);
+    const page = createSettingsPageDouble({
+      currentUrl,
+      navigation,
+      subscriptionWaitFor,
+    });
+    const driver = new HostedBillingBrowserDriver({
+      diagnosticsPath: "/tmp/hosted-billing-browser-diagnostics.json",
+      runId: "billing-navigation-proof",
+      webBaseUrl: "https://app.example.test",
+    });
+
+    await driver.openSettings({
+      context: {} as never,
+      page: page as never,
+      close: vi.fn(),
+    });
+
+    expect(page[expectedNavigation]).toHaveBeenCalledWith(
+      ...(expectedNavigation === "goto"
+        ? ["https://app.example.test/settings#subscription", {
+            waitUntil: "domcontentloaded",
+          }]
+        : [{ waitUntil: "domcontentloaded" }]),
+    );
+    expect(subscriptionWaitFor).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    ["missing", null],
+    ["unsuccessful", createNavigationResponse({ ok: false, status: 503 })],
+  ] as const)("rejects a %s settings response before reading billing projections", async (
+    _label,
+    navigation,
+  ) => {
+    const subscriptionWaitFor = vi.fn(async () => undefined);
+    const page = createSettingsPageDouble({
+      currentUrl: "https://app.example.test/home",
+      navigation,
+      subscriptionWaitFor,
+    });
+    const driver = new HostedBillingBrowserDriver({
+      diagnosticsPath: "/tmp/hosted-billing-browser-diagnostics.json",
+      runId: "billing-navigation-failure-proof",
+      webBaseUrl: "https://app.example.test",
+    });
+
+    await expect(driver.openSettings({
+      context: {} as never,
+      page: page as never,
+      close: vi.fn(),
+    })).rejects.toThrow(/Murph settings navigation/u);
+    expect(subscriptionWaitFor).not.toHaveBeenCalled();
+  });
+
+  it("waits for the enrolled home document before opening settings", async () => {
+    const enrollmentResponse = createApiResponse({
+      method: "POST",
+      ok: true,
+      pathname: "/api/hosted-onboarding/starter/enroll",
+      status: 200,
+    });
+    const navigation = createNavigationResponse({ ok: true, status: 200 });
+    const waitForURL = vi.fn(async (
+      predicate: (url: URL) => boolean,
+    ) => {
+      expect(predicate(new URL("https://app.example.test/home"))).toBe(true);
+    });
+    const waitForLoadState = vi.fn(async () => undefined);
+    const page = {
+      goto: vi.fn(async () => navigation),
+      waitForLoadState,
+      waitForResponse: vi.fn(async (
+        predicate: (response: ReturnType<typeof createApiResponse>) => boolean,
+      ) => {
+        expect(predicate(enrollmentResponse)).toBe(true);
+        return enrollmentResponse;
+      }),
+      waitForURL,
+    };
+    const driver = new HostedBillingBrowserDriver({
+      diagnosticsPath: "/tmp/hosted-billing-browser-diagnostics.json",
+      runId: "billing-enrollment-navigation-proof",
+      webBaseUrl: "https://app.example.test",
+    });
+
+    await driver.activateStarterUsage({
+      context: {} as never,
+      page: page as never,
+      close: vi.fn(),
+    }, "starter-invite");
+
+    expect(page.goto).toHaveBeenCalledWith(
+      "https://app.example.test/join/starter-invite",
+      { waitUntil: "commit" },
+    );
+    expect(waitForURL).toHaveBeenCalledOnce();
+    expect(waitForLoadState).toHaveBeenCalledWith("domcontentloaded");
+    expect(waitForLoadState.mock.invocationCallOrder[0]).toBeGreaterThan(
+      waitForURL.mock.invocationCallOrder[0] ?? 0,
+    );
+  });
+
   it("finds interrupted Checkout metadata through the opaque run correlation", () => {
     const runId = "billing_pr_123_run_456";
     const token = buildHostedStripeRunCorrelationToken(runId);
@@ -133,3 +246,39 @@ describe("hosted billing live browser support", () => {
     })).rejects.toThrow(/requires a member id/u);
   });
 });
+
+function createNavigationResponse(input: { ok: boolean; status: number }) {
+  return {
+    ok: vi.fn(() => input.ok),
+    status: vi.fn(() => input.status),
+  };
+}
+
+function createApiResponse(input: {
+  method: string;
+  ok: boolean;
+  pathname: string;
+  status: number;
+}) {
+  return {
+    ok: vi.fn(() => input.ok),
+    request: vi.fn(() => ({ method: vi.fn(() => input.method) })),
+    status: vi.fn(() => input.status),
+    url: vi.fn(() => `https://app.example.test${input.pathname}`),
+  };
+}
+
+function createSettingsPageDouble(input: {
+  currentUrl: string;
+  navigation: ReturnType<typeof createNavigationResponse> | null;
+  subscriptionWaitFor: ReturnType<typeof vi.fn>;
+}) {
+  return {
+    getByText: vi.fn(() => ({
+      first: vi.fn(() => ({ waitFor: input.subscriptionWaitFor })),
+    })),
+    goto: vi.fn(async () => input.navigation),
+    reload: vi.fn(async () => input.navigation),
+    url: vi.fn(() => input.currentUrl),
+  };
+}

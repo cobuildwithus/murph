@@ -1056,6 +1056,7 @@ describe('assistant cron runtime orchestration', () => {
     expect(completed.job.state.nextRunAt).toBe('2026-08-10T17:00:00.000Z')
     expect(completed).toMatchObject({
       nextOccurrenceAt: null,
+      occurrenceUnverifiedReason: null,
       occurrenceVerified: true,
     })
 
@@ -1076,6 +1077,7 @@ describe('assistant cron runtime orchestration', () => {
     expect(retrying.job.state.nextRunAt).toBe('2026-08-10T16:30:00.000Z')
     expect(retrying).toMatchObject({
       nextOccurrenceAt: null,
+      occurrenceUnverifiedReason: 'runtime_state_pending',
       occurrenceVerified: false,
     })
   })
@@ -1232,6 +1234,7 @@ describe('assistant cron runtime orchestration', () => {
       'America/New_York',
     )).resolves.toMatchObject({
       nextOccurrenceAt: null,
+      occurrenceUnverifiedReason: 'stale_recurring_occurrence',
       occurrenceVerified: false,
     })
   })

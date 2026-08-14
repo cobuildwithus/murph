@@ -998,14 +998,9 @@ test('sendLinqMessage keeps raw Linq error text out of user-facing errors', asyn
             LINQ_API_BASE_URL: 'https://linq.example.test/api/partner/v3',
             LINQ_API_TOKEN: 'linq-token',
           },
-          fetchImplementation: async () => ({
-            ok: false,
+          fetchImplementation: async () => new Response('Plain Linq failure', {
+            headers: { 'content-type': 'text/plain' },
             status: 400,
-            json: async () => {
-              throw new Error('invalid json')
-            },
-            text: async () => 'Plain Linq failure',
-            arrayBuffer: async () => new ArrayBuffer(0),
           }),
         },
       ),

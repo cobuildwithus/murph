@@ -53,8 +53,9 @@ import {
 } from "../src/lib/device-sync/prisma-store/connection-secrets";
 
 const AUTHORITY_KEY_VERSION =
-  "projects/test/locations/global/keyRings/ring/cryptoKeys/sign/cryptoKeyVersions/1";
-const WEB_WRAP_KEY_NAME = "projects/test/locations/global/keyRings/ring/cryptoKeys/wrap";
+  "projects/murph-test/locations/global/keyRings/ring/cryptoKeys/sign/cryptoKeyVersions/1";
+const WEB_WRAP_KEY_NAME =
+  "projects/murph-test/locations/global/keyRings/ring/cryptoKeys/wrap";
 const decodeText = TextDecoder.prototype.decode;
 
 const gcpKmsMock = vi.hoisted(() => ({
@@ -106,7 +107,7 @@ test("web runtime crypto context reads already-provisioned signed ingress and ru
   });
   stubHostedCryptoEnv({
     authorityVerifyKeyringJson: JSON.stringify({
-      "projects/test/locations/global/keyRings/ring/cryptoKeys/sign/cryptoKeyVersions/2": {
+      "projects/murph-test/locations/global/keyRings/ring/cryptoKeys/sign/cryptoKeyVersions/2": {
         publicKeyPem: standbySigner.publicKeyPem,
         status: "verify_only",
       },
@@ -218,6 +219,7 @@ test("web runtime crypto context reads already-provisioned signed ingress and ru
   assert.equal(encryptCalls[0]?.keyName, WEB_WRAP_KEY_NAME);
   assert.match(encryptCalls[0]?.additionalAuthenticatedData, /"domain":"ingress"/u);
   assert.equal(signCalls.length, 2);
+  assert.ok(signCalls.every((call) => call.message.every((byte) => byte === 0)));
 });
 
 test("detects whether all active hosted crypto domain roots exist for a user", async () => {
@@ -474,6 +476,70 @@ test("candidate preparation drains every started KMS operation before returning 
   expect(observedPlaintexts.every((plaintext) =>
     plaintext.every((byte) => byte === 0)
   )).toBe(true);
+});
+
+test("candidate preparation bounds signing work to the requested concurrency", async () => {
+  const signer = await generateP256SigningKeyPair();
+  const cloudflareRecipient = await generateP256EcdhKeyPair();
+  const encryptCalls: GcpKmsEncryptInput[] = [];
+  const signCalls: GcpKmsAsymmetricSignInput[] = [];
+  const operationMetrics = createLocalKmsOperationMetrics();
+  gcpKmsMock.client = createLocalKmsClient({
+    encryptCalls,
+    operationMetrics,
+    signCalls,
+    signer: signer.privateKey,
+  });
+  stubHostedCryptoEnv({
+    cloudflarePublicJwk: cloudflareRecipient.publicJwk,
+    signerPublicKeyPem: signer.publicKeyPem,
+  });
+  const { prepareHostedCryptoDomainRootCandidates } = await import(
+    "../src/lib/hosted-crypto/domain-root-store"
+  );
+  const recorder = createCapturingTransaction();
+
+  const prepared = await prepareHostedCryptoDomainRootCandidates({
+    maxConcurrency: 2,
+    prisma: recorder.prisma,
+    userId: "member-test-bounded-candidate-signing",
+  });
+
+  assert.deepEqual([...prepared.keys()], [
+    "control",
+    "device",
+    "ingress",
+    "runtime",
+  ]);
+  assert.equal(encryptCalls.length, 3);
+  assert.equal(signCalls.length, 4);
+  assert.equal(operationMetrics.callCount, 7);
+  assert.equal(operationMetrics.maxConcurrent, 2);
+
+  const reused = await prepareHostedCryptoDomainRootCandidates({
+    maxConcurrency: 2,
+    prisma: recorder.prisma,
+    reusableCandidates: prepared,
+    userId: "member-test-bounded-candidate-signing",
+  });
+  assert.deepEqual(
+    [...reused].map(([domain, envelope]) => [domain, envelope.rootKeyId]),
+    [...prepared].map(([domain, envelope]) => [domain, envelope.rootKeyId]),
+  );
+  assert.equal(operationMetrics.callCount, 7);
+});
+
+test("candidate preparation rejects a non-positive concurrency bound", async () => {
+  const { prepareHostedCryptoDomainRootCandidates } = await import(
+    "../src/lib/hosted-crypto/domain-root-store"
+  );
+  const recorder = createCapturingTransaction();
+
+  await expect(prepareHostedCryptoDomainRootCandidates({
+    maxConcurrency: 0,
+    prisma: recorder.prisma,
+    userId: "member-test-invalid-candidate-concurrency",
+  })).rejects.toThrow(/positive integer/u);
 });
 
 test("legacy transaction provisioning prepares every candidate before its first advisory lock", async () => {

@@ -72,7 +72,9 @@ export const POST = withJsonError(async (request: Request) => {
     Math.max(0, effectDeadlineAtEpochMs - Date.now()),
   );
   const effectSignal = AbortSignal.any([request.signal, effectTimeoutSignal]);
-  const rawBody = await readOptionalJsonObject(request);
+  const rawBody = await readOptionalJsonObject(request, {
+    limitBytes: HOSTED_VAULT_SHARE_DELIVER_BODY_LIMIT_BYTES,
+  });
   if (rawBody.expectedGenerationToken === undefined) {
     throw hostedOnboardingError({
       code: "HOSTED_VAULT_SHARE_GENERATION_PROOF_REQUIRED",

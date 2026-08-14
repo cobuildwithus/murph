@@ -30,6 +30,8 @@ export interface DatabaseHealthAlertState {
   consecutiveScrapeFailures: number;
   deferredDirectErrorCheckedAtMs: number | null;
   deferredDirectErrorCount: number;
+  deferredPooledErrorCheckedAtMs: number | null;
+  deferredPooledErrorCount: number;
   incidentOpen: boolean;
   incidentSequence: number;
   lastAlertAttemptedAtMs: number | null;
@@ -41,8 +43,8 @@ export interface DatabaseHealthAlertState {
 
 export interface DatabaseHealthStoredSample {
   clientWaitSeconds: number | null;
+  connectionErrorDelta: number | null;
   conditions: DatabaseHealthCondition[];
-  directConnectionErrorDelta: number | null;
   failureCode: string | null;
   observedAtMs: number;
   postgresConnections: number | null;
@@ -58,6 +60,8 @@ interface DatabaseHealthMetaRow extends Record<string, DurableObjectSqlValue> {
   consecutive_scrape_failures: number;
   deferred_direct_error_checked_at_ms: number | null;
   deferred_direct_error_count: number;
+  deferred_pooled_error_checked_at_ms: number | null;
+  deferred_pooled_error_count: number;
   incident_open: number;
   incident_sequence: number;
   last_alert_attempted_at_ms: number | null;
@@ -69,6 +73,8 @@ interface DatabaseHealthMetaRow extends Record<string, DurableObjectSqlValue> {
 }
 
 interface DatabaseHealthCounterRow extends Record<string, DurableObjectSqlValue> {
+  // Physical name retained for rollback compatibility. The value is the
+  // generalized 5432/6432 counter baseline used by current Workers.
   direct_connection_error_counters_json: string;
 }
 
@@ -122,6 +128,9 @@ export class DatabaseHealthStore {
       deferredDirectErrorCheckedAtMs:
         row.deferred_direct_error_checked_at_ms,
       deferredDirectErrorCount: row.deferred_direct_error_count,
+      deferredPooledErrorCheckedAtMs:
+        row.deferred_pooled_error_checked_at_ms,
+      deferredPooledErrorCount: row.deferred_pooled_error_count,
       incidentOpen: row.incident_open === 1,
       incidentSequence: row.incident_sequence,
       lastAlertAttemptedAtMs: row.last_alert_attempted_at_ms,
@@ -186,7 +195,9 @@ export class DatabaseHealthStore {
          pending_alert_idempotency_key = ?,
          pending_alert_message = ?,
          deferred_direct_error_count = 0,
-         deferred_direct_error_checked_at_ms = NULL
+         deferred_direct_error_checked_at_ms = NULL,
+         deferred_pooled_error_count = 0,
+         deferred_pooled_error_checked_at_ms = NULL
        WHERE singleton = 1`,
       input.includesMonitoring ? 1 : 0,
       input.idempotencyKey,
@@ -208,18 +219,32 @@ export class DatabaseHealthStore {
     return this.readAlertState();
   }
 
-  deferDirectConnectionErrors(input: {
+  deferConnectionErrors(input: {
     checkedAtMs: number;
-    count: number;
+    directCount: number;
+    pooledCount: number;
   }): DatabaseHealthAlertState {
     this.sql.exec(
       `UPDATE database_health_meta
        SET
          deferred_direct_error_count =
            deferred_direct_error_count + ?,
-         deferred_direct_error_checked_at_ms = ?
+         deferred_direct_error_checked_at_ms = CASE
+           WHEN ? > 0 THEN ?
+           ELSE deferred_direct_error_checked_at_ms
+         END,
+         deferred_pooled_error_count =
+           deferred_pooled_error_count + ?,
+         deferred_pooled_error_checked_at_ms = CASE
+           WHEN ? > 0 THEN ?
+           ELSE deferred_pooled_error_checked_at_ms
+         END
        WHERE singleton = 1`,
-      input.count,
+      input.directCount,
+      input.directCount,
+      input.checkedAtMs,
+      input.pooledCount,
+      input.pooledCount,
       input.checkedAtMs,
     );
     return this.readAlertState();
@@ -249,11 +274,10 @@ export class DatabaseHealthStore {
     );
   }
 
-  readLatestDirectConnectionErrorCounters(): Record<string, number> | null {
+  readLatestConnectionErrorCounterBaseline(): Record<string, number> | null {
     const row = this.sql.exec<DatabaseHealthCounterRow>(
       `SELECT direct_connection_error_counters_json
        FROM database_health_samples
-       WHERE direct_connection_error_counters_json <> '{}'
        ORDER BY observed_at_ms DESC
        LIMIT 1`,
     ).toArray()[0];
@@ -263,8 +287,9 @@ export class DatabaseHealthStore {
   }
 
   recordSuccessfulSample(input: {
+    connectionErrorCounterBaseline: Readonly<Record<string, number>>;
+    connectionErrorDelta: number;
     conditions: readonly DatabaseHealthCondition[];
-    directConnectionErrorDelta: number;
     observedAtMs: number;
     snapshot: DatabaseMetricSnapshot;
   }): void {
@@ -314,15 +339,16 @@ export class DatabaseHealthStore {
       input.snapshot.postgresConnections,
       input.snapshot.postgresMaxConnections,
       JSON.stringify(input.snapshot.postgresConnectionStates),
-      input.directConnectionErrorDelta,
-      JSON.stringify(input.snapshot.directConnectionErrorCounters),
+      input.connectionErrorDelta,
+      JSON.stringify(input.connectionErrorCounterBaseline),
       JSON.stringify(input.conditions),
     );
   }
 
   recordFailedSample(input: {
+    connectionErrorCounterBaseline: Readonly<Record<string, number>>;
+    connectionErrorDelta: number | null;
     conditions: readonly DatabaseHealthCondition[];
-    directConnectionErrorDelta: number | null;
     failureCode: string;
     monitoringEvidence: DatabaseHealthMonitoringEvidence;
     observedAtMs: number;
@@ -378,8 +404,8 @@ export class DatabaseHealthStore {
       snapshot?.postgresConnections ?? null,
       snapshot?.postgresMaxConnections ?? null,
       JSON.stringify(snapshot?.postgresConnectionStates ?? {}),
-      input.directConnectionErrorDelta,
-      JSON.stringify(snapshot?.directConnectionErrorCounters ?? {}),
+      input.connectionErrorDelta,
+      JSON.stringify(input.connectionErrorCounterBaseline),
       JSON.stringify(input.monitoringEvidence),
       JSON.stringify(input.conditions),
     );
@@ -438,8 +464,8 @@ export class DatabaseHealthStore {
       safeLimit,
     ).toArray().map((row) => ({
       clientWaitSeconds: row.client_wait_seconds,
+      connectionErrorDelta: row.direct_connection_error_delta,
       conditions: parseConditions(row.conditions_json),
-      directConnectionErrorDelta: row.direct_connection_error_delta,
       failureCode: row.failure_code,
       observedAtMs: row.observed_at_ms,
       postgresConnections: row.postgres_connections,
@@ -461,6 +487,8 @@ export class DatabaseHealthStore {
          alert_sequence,
          deferred_direct_error_count,
          deferred_direct_error_checked_at_ms,
+         deferred_pooled_error_count,
+         deferred_pooled_error_checked_at_ms,
          last_alert_attempted_at_ms,
          monitoring_alert_owed_json,
          pending_alert_includes_monitoring,
@@ -508,6 +536,8 @@ function ensureDatabaseHealthSchema(sql: DurableObjectSqlStorageLike): void {
       alert_sequence INTEGER NOT NULL DEFAULT 0,
       deferred_direct_error_count INTEGER NOT NULL DEFAULT 0,
       deferred_direct_error_checked_at_ms INTEGER,
+      deferred_pooled_error_count INTEGER NOT NULL DEFAULT 0,
+      deferred_pooled_error_checked_at_ms INTEGER,
       last_alert_attempted_at_ms INTEGER,
       monitoring_alert_owed_json TEXT,
       pending_alert_includes_monitoring INTEGER NOT NULL DEFAULT 0
@@ -568,6 +598,18 @@ function ensureDatabaseHealthSchema(sql: DurableObjectSqlStorageLike): void {
       "Database health Durable Object schema is newer than this Worker.",
     );
   }
+  ensureDatabaseHealthTableColumn(
+    sql,
+    "database_health_meta",
+    "deferred_pooled_error_count",
+    "INTEGER NOT NULL DEFAULT 0",
+  );
+  ensureDatabaseHealthTableColumn(
+    sql,
+    "database_health_meta",
+    "deferred_pooled_error_checked_at_ms",
+    "INTEGER",
+  );
   ensureDatabaseHealthTableColumn(
     sql,
     "database_health_meta",

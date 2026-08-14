@@ -123,6 +123,7 @@ export class HostedBillingBrowserDriver {
         (url) => url.origin === new URL(this.webBaseUrl).origin
           && url.pathname === "/home",
       );
+      await actor.page.waitForLoadState("domcontentloaded");
     });
   }
 
@@ -361,14 +362,18 @@ export class HostedBillingBrowserDriver {
   async openSettings(actor: HostedBillingBrowserActor): Promise<void> {
     const target = new URL(this.murphUrl("/settings#subscription"));
     const current = new URL(actor.page.url());
+    let navigation: Response | null;
     if (current.origin === target.origin && current.pathname === target.pathname) {
       // A navigation that differs only by the subscription hash is a
       // same-document navigation and preserves a stale server projection.
       // Force a request when a workflow has mutated billing in another page.
-      await actor.page.reload({ waitUntil: "commit" });
+      navigation = await actor.page.reload({ waitUntil: "domcontentloaded" });
     } else {
-      await actor.page.goto(target.toString(), { waitUntil: "commit" });
+      navigation = await actor.page.goto(target.toString(), {
+        waitUntil: "domcontentloaded",
+      });
     }
+    assertSuccessfulNavigation(navigation, "Murph settings");
     await actor.page.getByText("Subscription", { exact: true }).first().waitFor();
   }
 

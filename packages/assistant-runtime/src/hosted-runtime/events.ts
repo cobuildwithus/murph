@@ -303,6 +303,7 @@ async function executeHostedSystemWake(input: {
       const deviceSyncMetrics = await runHostedDeviceSyncWakeLane({
         deviceSyncPort: input.runtime.platform.deviceSyncPort ?? null,
         platformEnv: input.runtime.platformEnv,
+        retainFollowUpWakeUntilCheckpoint: true,
         runtimeLogPlatform: input.runtime.platform,
         resolvedConfig: input.runtime.resolvedConfig,
         ...(input.shouldYieldDeviceSync

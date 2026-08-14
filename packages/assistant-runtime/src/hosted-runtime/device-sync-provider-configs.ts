@@ -54,9 +54,13 @@ export function resolveHostedRuntimeDeviceSyncProviderConfigs(
           [provider]: runtimeConfig,
         })[provider]
       : undefined;
+    const codeOwnedConfig = provider === "junction" && runtimeProviderConfigs.junction
+      ? { timeseriesResources: runtimeProviderConfigs.junction.timeseriesResources }
+      : {};
     runtimeProviderConfigs[provider] = {
       ...(serializableRuntimeConfig ?? {}),
       ...memberConfig,
+      ...codeOwnedConfig,
     } as never;
   }
 

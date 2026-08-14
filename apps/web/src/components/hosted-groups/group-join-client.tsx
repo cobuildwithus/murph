@@ -244,22 +244,6 @@ export function GroupJoinAcceptForm(props: {
     });
   }
 
-  function upgradeLegacyPermissionGroup(
-    scopeKeys: readonly string[],
-    legacyScopeKeys: readonly string[],
-  ) {
-    setSelected((current) => {
-      const next = new Set(current);
-      for (const scopeKey of legacyScopeKeys) {
-        next.delete(scopeKey);
-      }
-      for (const scopeKey of scopeKeys) {
-        next.add(scopeKey);
-      }
-      return next;
-    });
-  }
-
   async function submit() {
     setErrorMessage(null);
     setInviteMismatch(false);
@@ -390,31 +374,10 @@ export function GroupJoinAcceptForm(props: {
                     <span className="flex flex-col gap-0.5">
                       <span className="text-sm font-semibold text-foreground">{group.label}</span>
                       <span className="text-[13px] leading-5 text-muted-foreground">
-                        {legacySelected
-                          ? "Currently shares one daily value only. Source names and recorded times are not shared."
-                          : group.description}
+                        {group.description}
                       </span>
                     </span>
                   </label>
-                  {legacySelected ? (
-                    <div className="flex flex-col items-stretch gap-2 border-t border-primary/15 px-3.5 py-2.5 sm:flex-row sm:items-center sm:justify-between">
-                      <span className="text-xs leading-4 text-muted-foreground">
-                        Add source names and recorded times.
-                      </span>
-                      <Button
-                        className="w-full shrink-0 sm:w-auto"
-                        type="button"
-                        size="sm"
-                        variant="outline"
-                        onClick={() => upgradeLegacyPermissionGroup(
-                          group.scopeKeys,
-                          group.legacyScopeKeys,
-                        )}
-                      >
-                        Include source details
-                      </Button>
-                    </div>
-                  ) : null}
                 </div>
               );
             })}

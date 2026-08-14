@@ -71,7 +71,22 @@ function assertConnectBackfillRetryWake(
   },
 ): void {
   assert.equal(result.nextReconcileAt, "2026-04-03T00:15:00.000Z");
-  assert.equal((result.scheduledJobs ?? []).some((job) => job.kind === "backfill"), false);
+  assertFullTimeseriesContinuation(result);
+}
+
+function assertFullTimeseriesContinuation(result: {
+  scheduledJobs?: readonly DeviceSyncJobInput[];
+}): void {
+  const scheduledJobs = result.scheduledJobs ?? [];
+  assert.equal(scheduledJobs.length, 1);
+  const continuation = scheduledJobs[0];
+  assert.equal(continuation?.kind, "backfill");
+  assert.equal(continuation?.availableAt, "2026-04-03T00:00:00.000Z");
+  assert.equal(continuation?.payload?.timeseriesCursor, "2026-04-01T00:00:00.000Z");
+  assert.equal(
+    continuation?.payload?.timeseriesResourceCursor,
+    "blood_oxygen",
+  );
 }
 
 function createJobContext(importedSnapshots: unknown[]): ProviderJobContext {
@@ -109,6 +124,7 @@ function createProvider(summaryRecord: Record<string, unknown>) {
     environment: "sandbox",
     region: "us",
     summaryResources: ["sleep_cycle"],
+    timeseriesResources: ["blood_oxygen"],
     summaryBackfillDays: 2,
     fetchImpl: async (input) => {
       const url = readUrl(input);
@@ -189,7 +205,7 @@ test("Junction sleep-cycle historical backfill uses canonical importer evidence 
     junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
     junctionHistoricalBackfillWindowEnd: "2026-04-03T00:00:00.000Z",
   });
-  assert.equal(result.scheduledJobs, undefined);
+  assertFullTimeseriesContinuation(result);
   assert.equal(importedSnapshots.length, 1);
 });
 

@@ -6773,16 +6773,35 @@
                                   "maxLength": 128
                                 },
                                 "source": {
-                                  "description": "Optional source hint such as strong or hevy.",
+                                  "description": "Strong or Hevy dialect; required when the headers are shared by both apps.",
                                   "type": "string",
-                                  "minLength": 1,
-                                  "maxLength": 80
+                                  "enum": [
+                                    "strong",
+                                    "hevy"
+                                  ]
                                 },
                                 "delimiter": {
                                   "description": "Optional single-character CSV delimiter override.",
                                   "type": "string",
                                   "minLength": 1,
                                   "maxLength": 1
+                                },
+                                "weightUnit": {
+                                  "description": "Required when positive CSV weights do not include unit metadata.",
+                                  "type": "string",
+                                  "enum": [
+                                    "lb",
+                                    "kg"
+                                  ]
+                                },
+                                "distanceUnit": {
+                                  "description": "Required when positive CSV distances do not include unit metadata.",
+                                  "type": "string",
+                                  "enum": [
+                                    "m",
+                                    "km",
+                                    "mi"
+                                  ]
                                 }
                               }
                             }
@@ -6803,10 +6822,12 @@
                                   "maxLength": 128
                                 },
                                 "source": {
-                                  "description": "Optional source hint such as strong or hevy.",
+                                  "description": "Strong or Hevy dialect; required when the headers are shared by both apps.",
                                   "type": "string",
-                                  "minLength": 1,
-                                  "maxLength": 80
+                                  "enum": [
+                                    "strong",
+                                    "hevy"
+                                  ]
                                 },
                                 "delimiter": {
                                   "description": "Optional single-character CSV delimiter override.",
@@ -6814,8 +6835,29 @@
                                   "minLength": 1,
                                   "maxLength": 1
                                 },
+                                "weightUnit": {
+                                  "description": "Required when positive CSV weights do not include unit metadata.",
+                                  "type": "string",
+                                  "enum": [
+                                    "lb",
+                                    "kg"
+                                  ]
+                                },
+                                "distanceUnit": {
+                                  "description": "Required when positive CSV distances do not include unit metadata.",
+                                  "type": "string",
+                                  "enum": [
+                                    "m",
+                                    "km",
+                                    "mi"
+                                  ]
+                                },
                                 "storeRawOnly": {
                                   "description": "Store the raw CSV + manifest without creating workout events.",
+                                  "type": "boolean"
+                                },
+                                "correctUnits": {
+                                  "description": "Explicitly supersede an exact prior import after correcting its unit choice.",
                                   "type": "boolean"
                                 }
                               }

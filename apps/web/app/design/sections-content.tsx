@@ -112,7 +112,7 @@ export function SectionsContent() {
         <div
           id="homepage-solo-first-hero"
           data-design-section="homepage-solo-first-hero"
-          data-design-state="soft-topic-labels-mobile-narrow-phone"
+          data-design-state="light-topic-labels-mobile-narrow-phone"
           className="-mx-5 sm:-mx-8 lg:-mx-12"
           inert
         >
@@ -143,7 +143,7 @@ export function SectionsContent() {
 
       <Separator />
 
-      <StudySection title="Homepage authentication readiness and phone handoff">
+      <StudySection title="Homepage background readiness and phone handoff">
         <HomepageAuthWarmRuntimeStudy />
       </StudySection>
 
@@ -640,7 +640,7 @@ export function SectionsContent() {
 
       <Separator />
 
-      <StudySection title="Group join invites, current and legacy sharing, and setup recovery">
+      <StudySection title="Group join invites, source-aware sharing, and setup recovery">
         <GroupJoinStudy
           comprehensivePermissions={projectHostedVaultShareProjectionDisplays(
             resolveHostedGroupAccessOfferProjectionScopes(undefined),

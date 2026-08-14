@@ -1793,6 +1793,9 @@ describe('assistant consumption lookup guidance', () => {
       'Training/movement: daily-activity owns factual wearable day/workout reads; running-cardio and strength-training own programming; aerobic-fitness, competition-training, mobility-posture, physical-therapy. Recovery-modality evidence and safety come from the required Health Commons lookup.',
     )
     expect(prompt).toContain(
+      'Private repeated-set logging: strength-training owns it and resolves canonical routine context before writes. In groups, hand off to a private Murph conversation without private reads or writes.',
+    )
+    expect(prompt).toContain(
       'Live workout/card: read strength-training and tracked-table.',
     )
     expect(prompt).toContain(
@@ -1999,8 +2002,9 @@ describe('assistant system prompt cache stability', () => {
     // not a budget: raise it only for cross-route guidance that cannot live in
     // an owning skill. Capability-specific browser, connected-app, phone-call,
     // and Family mechanics are intentionally excluded from this resident layer.
-    // The local automation delivery limitation sets this ceiling.
-    expect(layers.stableRouteCapabilityPrompt.length).toBeLessThanOrEqual(57_698)
+    // The local automation delivery limitation plus the established Apple
+    // Health/WHOOP relay and cross-route repeated-set boundary set this ceiling.
+    expect(layers.stableRouteCapabilityPrompt.length).toBeLessThanOrEqual(57_744)
   })
 
   it('passes the injected CLI contract through byte-for-byte at the stable-route tail', () => {
@@ -3222,7 +3226,7 @@ describe('assistant conversation scope', () => {
       'Before correcting, pausing, reactivating, or archiving with `action: patch`, inspect the stored automation and pass its current `updatedAt` as `expectedUpdatedAt`',
     )
     expect(prompt).toContain(
-      'After saving or patching, inspect the returned stored `schedule`, `status`, `updatedAt`, `timingVerified`, `effectiveTimeZone`, and `nextOccurrenceAt`.',
+      'After saving or patching, inspect the returned stored `schedule`, `status`, `updatedAt`, `timingVerified`, `timingVerificationIssues`, `effectiveTimeZone`, and `nextOccurrenceAt`.',
     )
     for (const scheduleExample of [
       '`{"kind":"every","everyMs":3600000}`',
@@ -3271,8 +3275,12 @@ describe('assistant conversation scope', () => {
       'For an active one-shot with that verified null result, say its requested time is no longer deliverable and offer to reschedule it',
     )
     expect(prompt).toContain(
-      'When a time-based result has `timingVerified: false`, say that the save or patch succeeded but the next occurrence could not be verified, state no time, and offer one inspect-or-patch recovery action; do not retry the write.',
+      'A save or patch result already includes its host-owned read-only timing readback',
     )
+    expect(prompt).toContain(
+      'follow the tool contract and never issue a second inspection or recovery write.',
+    )
+    expect(prompt).not.toContain('Interpret `runtime_state_pending`')
     expect(prompt).not.toContain('save or update succeeded')
     expect(prompt).not.toContain('inspect-or-update recovery action')
     expect(prompt).toContain(

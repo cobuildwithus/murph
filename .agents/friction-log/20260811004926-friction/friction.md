@@ -1,6 +1,7 @@
 ---
 title: 'Generated Frog pull request bodies fail Murph metadata checks'
 severity: 'minor'
+issue: 'cobuildwithus/murph#1639'
 ---
 
 ## Expected Behavior
