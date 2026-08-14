@@ -6,6 +6,7 @@ import {
   ASSISTANT_SKILLS,
   resolveAssistantSkillsRoot,
 } from '../src/assistant-skill-assets.js'
+import { buildAssistantSystemPrompt } from '../src/assistant/system-prompt.js'
 
 function getSkill(slug: (typeof ASSISTANT_SKILLS)[number]['slug']) {
   const skill = ASSISTANT_SKILLS.find((candidate) => candidate.slug === slug)
@@ -20,6 +21,23 @@ async function readSkill(slug: (typeof ASSISTANT_SKILLS)[number]['slug']) {
     path.join(resolveAssistantSkillsRoot(), slug, 'SKILL.md'),
     'utf8',
   )
+}
+
+function buildPrompt(): string {
+  return buildAssistantSystemPrompt({
+    assistantCliContract: null,
+    assistantContextSnapshotPrompt: null,
+    assistantHostedDeviceConnectAvailable: false,
+    assistantHostedDeviceConnectProviders: [],
+    assistantKnowledgeToolsAvailable: false,
+    channel: 'imessage',
+    cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+    currentLocalDate: '2026-08-14',
+    currentTimeZone: 'America/Chicago',
+    modelBehaviorProfile: 'gpt5-agentic',
+    onboardingGuidance: false,
+    turnTrigger: null,
+  })
 }
 
 describe('bounded self-management experiment guidance', () => {
@@ -42,6 +60,20 @@ describe('bounded self-management experiment guidance', () => {
     expect(experiments.triggerHint).toContain(
       'what to change or try day to day is experiment intent',
     )
+  })
+
+  it('puts the symptom-experiment correction in the resident direct prompt', () => {
+    const prompt = buildPrompt()
+
+    expect(prompt).toContain('Persistent-symptom next steps:')
+    expect(prompt).toContain(
+      'treat that as experiment intent even if they do not use the word "experiment"',
+    )
+    expect(prompt).toContain(
+      'recommend one ranked symptom-targeted trial, not a bundle of generic wellness tips',
+    )
+    expect(prompt).toContain('a bounded duration or observation window')
+    expect(prompt).toContain('Urgent evaluation or a condition-specific owner still wins.')
   })
 
   it('requires one complete symptom-targeted trial with a safety off-ramp', async () => {
