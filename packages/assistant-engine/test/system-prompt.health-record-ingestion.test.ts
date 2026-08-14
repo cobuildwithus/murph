@@ -71,7 +71,7 @@ describe('assistant system prompt health record ingestion invariant', () => {
     )
 
     expect(skill?.triggerHint).toContain('Strong, Hevy, an unknown export format')
-    expect(prompt).toContain('workout-csv-import owns CSV/history import')
+    expect(prompt).toContain('workout-csv-import owns workout CSVs')
     expect(prompt).not.toContain('one `activity_session` row per grouped workout')
     expect(instructions).toContain('vault-cli workout import inspect')
     expect(instructions).toContain('vault-cli document import')

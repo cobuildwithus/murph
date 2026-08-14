@@ -1,6 +1,7 @@
 ---
 title: 'ReviewGPT later round lane cannot access bound thread'
 severity: 'minor'
+issue: 'cobuildwithus/murph#1754'
 ---
 
 ## Expected Behavior

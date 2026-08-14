@@ -357,8 +357,8 @@ test("disabling the browser-vault provider cannot restart an adopted warm reques
   installBrowserVaultCryptoMocks();
   vi.stubGlobal("fetch", fetchMock);
 
-  const landingLoad = startBrowserVaultWarmLoad();
-  await waitForCondition(() => fetchMock.mock.calls.length === 1, "landing warm fetch");
+  const sharedLoad = startBrowserVaultWarmLoad();
+  await waitForCondition(() => fetchMock.mock.calls.length === 1, "shared dashboard fetch");
 
   const rendered = await renderClientComponent(
     createAuthenticatedBrowserVaultElement(createElement(BrowserVaultStatusProbe)),
@@ -373,7 +373,7 @@ test("disabling the browser-vault provider cannot restart an adopted warm reques
     </AuthProvider>,
   );
 
-  assert.equal((await landingLoad).status, "superseded");
+  assert.equal((await sharedLoad).status, "superseded");
   for (let flush = 0; flush < 4; flush += 1) {
     await act(async () => {
       await Promise.resolve();
@@ -2427,8 +2427,8 @@ test("an invalidation before provider adoption makes an already-resolved ready o
   installBrowserVaultCryptoMocks();
   vi.stubGlobal("fetch", fetchMock);
 
-  const landingLoad = startBrowserVaultWarmLoad();
-  void landingLoad.then(() => {
+  const sharedLoad = startBrowserVaultWarmLoad();
+  void sharedLoad.then(() => {
     mocks.publishBrowserVaultSessionInvalidation();
   });
 
@@ -2445,7 +2445,7 @@ test("an invalidation before provider adoption makes an already-resolved ready o
     state: "ready",
   }));
 
-  await landingLoad;
+  await sharedLoad;
   await waitForText(rendered.container, "empty:none");
 
   assert.equal(mocks.publishBrowserVaultSessionInvalidation.mock.calls.length, 1);
@@ -2910,19 +2910,19 @@ test("cached UI authority cannot unlock a warm snapshot before current denial", 
   await rendered.cleanup();
 });
 
-test("browser-vault provider reuses an in-flight landing request before post-mount authority", async () => {
+test("browser-vault provider reuses an in-flight dashboard request before post-mount authority", async () => {
   const ref = createReplicaRef();
-  const landingResponse = createDeferred<Response>();
+  const sharedResponse = createDeferred<Response>();
   const providerResponse = createDeferred<Response>();
   const fetchMock = vi.fn()
-    .mockImplementationOnce(() => landingResponse.promise)
+    .mockImplementationOnce(() => sharedResponse.promise)
     .mockImplementationOnce(() => providerResponse.promise);
 
   installBrowserVaultCryptoMocks();
   vi.stubGlobal("fetch", fetchMock);
 
   void startBrowserVaultWarmLoad();
-  await waitForCondition(() => fetchMock.mock.calls.length === 1, "landing warm fetch");
+  await waitForCondition(() => fetchMock.mock.calls.length === 1, "shared dashboard fetch");
   assert.ok(peekBrowserVaultInFlightLoad());
 
   const rendered = await renderClientComponent(
@@ -2936,7 +2936,7 @@ test("browser-vault provider reuses an in-flight landing request before post-mou
   assert.equal(fetchMock.mock.calls.length, 1);
   assert.equal(rendered.container.textContent, "loading:none");
 
-  landingResponse.resolve(jsonResponse({
+  sharedResponse.resolve(jsonResponse({
     encryptedReplica: createReplicaEnvelope(),
     replicaAad: createReplicaAad(),
     replicaKeyEnvelope: createReplicaKeyEnvelope(),

@@ -101,7 +101,7 @@ export const ASSISTANT_SKILLS = [
     slug: 'cardiometabolic-health',
     name: 'cardiometabolic-health',
     triggerHint:
-      'Use for glucose, A1c, CGM, ApoB, LDL-C, triglycerides, HDL, blood pressure, home BP measurement, lab retest timing, and lifestyle levers for cardiometabolic markers. Keep medication decisions framed as clinician conversations.',
+      'Use for glucose, A1c, CGM, connected insulin records, ApoB, LDL-C, triglycerides, HDL, blood pressure, home BP measurement, lab retest timing, and lifestyle levers for cardiometabolic markers. Keep medication decisions framed as clinician conversations.',
   },
   {
     slug: 'micronutrients-supplements',
@@ -149,7 +149,7 @@ export const ASSISTANT_SKILLS = [
     slug: 'strength-training',
     name: 'strength-training',
     triggerHint:
-      'Use for evidence-informed strength or resistance training plans, progression, plateaus, hypertrophy, maximal strength, power, gym, home, or calisthenics programming, competition preparation, and adherence coaching for generally healthy adults. Do not use for diagnosis, rehabilitation, medical clearance, aggressive weight cuts, eating-disorder treatment, or performance-enhancing-drug protocols.',
+      'Use for evidence-informed strength or resistance training plans, progression, plateaus, hypertrophy, maximal strength, power, gym, home, or calisthenics programming, logging completed strength sets, competition preparation, and adherence coaching for generally healthy adults. Do not use for diagnosis, rehabilitation, medical clearance, aggressive weight cuts, eating-disorder treatment, or performance-enhancing-drug protocols.',
   },
   {
     slug: 'stress-regulation',
@@ -167,7 +167,7 @@ export const ASSISTANT_SKILLS = [
     slug: 'food-journal',
     name: 'food-journal',
     triggerHint:
-      'Use when the user logs meals or asks Murph to notice patterns between food and digestion, symptoms, energy, appetite, or performance, especially when a photo, voice note, or rough description should be enough and calorie or macro tracking is not necessarily the goal.',
+      'Use when the user logs meals, asks what connected carbohydrate data recorded, or asks Murph to notice patterns between food and digestion, symptoms, energy, appetite, or performance, especially when a photo, voice note, or rough description should be enough and calorie or macro tracking is not necessarily the goal.',
   },
   {
     slug: 'nutrition-strategy',

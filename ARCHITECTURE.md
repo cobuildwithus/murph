@@ -1,6 +1,6 @@
 # Murph Architecture
 
-Last verified: 2026-08-12
+Last verified: 2026-08-13
 
 ## Accepted-Message Targeting
 
@@ -295,6 +295,21 @@ clear it transactionally, and regrant rotates the share id. The explicit
 `device-sync-status.v0` grant instead authorizes one live bounded Web derivation
 of public source labels, coarse state, and honest timestamps; device facts are
 never stored in the share snapshot.
+
+Every newly produced shared health observation carries canonical public source
+provenance. Daily health records use a stable `date.source` key and expose one
+record per available source; `workouts.v0` keeps its seven-day envelope and tags
+each workout item. Its original thirteen-workout daily bound applies separately
+to each admitted source, so a legal eight-source day can retain 104 tagged
+workouts; legacy unsourced days remain bounded to thirteen. Cross-source values
+are never ranked, selected, merged, or dropped. Normalization is limited to
+duplicate facts that already belong to the same public source. Meal-derived
+totals identify Murph as their source, while
+single-owner profile, timezone, and group-email authority records remain
+unchanged. The existing `device-sync-status.v0` item list already represents
+each source independently. Source-bearing recent-date scopes admit up to eight
+public sources across seven civil dates, so their complete parser bound is 56
+records rather than a lossy seven-record cap.
 
 No shared projection lands in a personal or group workspace. Legacy
 `vault-share.delivery` and `vault-share.revoke` mailbox rows are skipped before
@@ -1257,13 +1272,19 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   family stays null and its canonical allowlisted name is retained, while
   available families continue to drive their own conditions. Missing data is
   never treated as zero. Unusable collections receive one bounded confirmation
-  attempt. Usable partial collections stay single-pass whenever available
-  evidence is unsafe; a safe observation missing only the direct-error counter
-  uses the same confirmation budget. The confirmation's available signals are
-  evaluated, a recovered counter joins the original complete gauge evidence,
-  and failure or continued absence retains the original incomplete observation.
-  A telemetry-only notification opens after two
-  consecutive incomplete or failed collections. The first two-check threshold
+  attempt. The connection-error family retains the expected ports 5432
+  and 6432 as independent region-plus-port monotonic series. Missing either
+  port leaves that family unknown, while an observed port can still contribute
+  unsafe evidence. Usable partial collections stay single-pass whenever
+  available evidence is unsafe; a safe observation missing only part or all of
+  the connection-error family uses the same confirmation budget. The
+  confirmation's available signals are evaluated, complementary observed ports
+  may join the original complete gauge evidence, and failure or continued
+  absence retains the original incomplete observation. Each observed port
+  advances only its usable baseline; an omitted port retains its prior baseline,
+  and new or reset region series are independently suppressed so an old delta is
+  never replayed. A telemetry-only notification opens after two consecutive
+  incomplete or failed collections. The first two-check threshold
   window counts incomplete versus unavailable observations, unions only
   canonical missing families observed on partial checks, and uses the threshold
   time as the window end; one bounded evidence value on each existing sample
@@ -1271,48 +1292,53 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   existing incident row survives a busy pending slot, restart, and recovery
   until a telemetry-bearing page is acknowledged. Recovery and another metric
   gap before that acknowledgment coalesce into the same unresolved operator
-  notification instead of creating a backlog; the first threshold window remains
-  authoritative. An owed telemetry page
-  alone does not occupy a closed provider fence. Before an incident admits its
-  first page, concrete evidence—including a direct-error delta—that appears on
-  the threshold or a later sample persists in one combined immutable body, so
-  the exact pressure and truthful
-  telemetry facts share the next eligible attempt and one acknowledgment cycle.
+  notification instead of creating a backlog; the first threshold window
+  remains authoritative. An owed telemetry page alone does not occupy a closed
+  provider fence. Before an incident admits its
+  first page, concrete evidence—including either connection-error category—that
+  appears on the threshold or a later sample persists in one combined immutable
+  body, so the exact pressure and truthful telemetry facts share the next
+  eligible attempt and one acknowledgment cycle.
   An acknowledged-incident recurrence waits for the eligible sample, which
-  includes any still-current unsafe evidence and labels
-  historical telemetry by its own observation time. A later complete collection rearms
-  telemetry only after the obligation is acknowledged. Its additive alert-state
-  and sample-evidence columns
-  preserve the existing schema
-  version; current code also recognizes a telemetry pending body cleared by the
+  includes any still-current unsafe evidence and labels historical telemetry by
+  its own observation time. A later complete collection rearms telemetry only
+  after the obligation is acknowledged. Its additive alert-state and
+  sample-evidence columns preserve the existing schema version; current code
+  also recognizes a telemetry pending body cleared by the
   prior Worker, preventing a duplicate after rollback and re-upgrade. Concrete
   unsafe conditions retain paced recurrence, but acknowledged monitoring
   evidence cannot enter their later pages without a currently owed obligation.
-  First-incident
-  and non-replayable direct-error alert
-  admission shares one synchronous SQLite transaction with sample/baseline
-  persistence; an inside-fence direct-error body excludes co-occurring
+  Port 5432 retains the direct migration-admission interpretation. Port 6432 is
+  reported only as pooled application connection errors because the provider
+  metric has no reason label and cannot identify a specific rejection cause.
+  First-incident and non-replayable connection-error alert admission shares one
+  synchronous SQLite transaction with sample/baseline
+  persistence; an inside-fence connection-error body excludes co-occurring
   replayable evidence, and acknowledged replayable recurrence is admitted only
-  from the current sample once the attempt fence opens. Any direct-error delta
-  observed while the single immutable message slot is occupied accumulates as
-  count-plus-check-time evidence in the same alert row and transaction that
-  advances the persisted sample baseline. After the older message is
-  acknowledged, the next run atomically promotes that evidence into the one
-  pending message slot; provider pacing still applies, and retry never mutates
-  a provider-entered body. Before posting, the monitor resolves both direct
-  chats and requires two distinct sole external recipients. Primary recipient
+  from the current sample once the attempt fence opens. Any connection-error
+  delta observed while the single immutable message slot is occupied
+  accumulates as category-specific count-plus-check-time evidence in the same
+  alert row and transaction that advances the persisted sample baseline. After
+  the older message is acknowledged, the next run atomically promotes that
+  evidence into the one pending message slot; provider pacing still applies,
+  and retry never mutates a provider-entered body. Before posting, the monitor
+  resolves both direct chats and requires two distinct sole external recipients.
+  Primary recipient
   identity is a prerequisite for secondary provider entry, so an unresolved
   primary identity suppresses both operations while an unresolved secondary
   identity may still allow the primary. Delivery health is independent from
   identity: a known but unhealthy primary destination does not block a healthy,
   distinct secondary. If distinct chats resolve to the same recipient, only
   the primary operation may enter Linq and the page stays pending until
-  configuration is corrected. Otherwise the two
-  direct-chat deliveries settle independently: the primary retains the existing
+  configuration is corrected. Otherwise the two direct-chat deliveries settle
+  independently: the primary retains the existing
   idempotency key, the secondary uses a stable derived key, and a partial
   failure retains the pending page for a later globally paced replay. Only
-  acknowledged entry to both distinct recipients clears a pending page. SQLite
-  contains no connection URL,
+  acknowledged entry to both distinct recipients clears a pending page. The
+  legacy physical SQLite sample column names remain deliberately compatible;
+  current code stores the generalized two-port baseline and aggregate delta in
+  them, while additive pooled-defer columns keep schema version 1 rollback-safe.
+  SQLite contains no connection URL,
   credential, query, member identifier, phone number, or raw response. This is
   operational monitoring history, never health truth, routing authority, or a
   product control plane.
@@ -1527,6 +1553,7 @@ application code.
 - The authenticated Codex-native memory HTTP/WebSocket relay, bounded response parsing, secret-safe diagnostics, and usage-accounting path remain implemented but dormant while the hosted Codex feature, read, and generation gates are false. Re-enabling those gates is an explicit configuration change; infrastructure presence alone does not admit memory work. After a provider terminal exists, the runner makes one bounded usage-recording attempt and reports a secret-safe warning on failure without turning already-completed provider work into a retryable provider failure.
 - Foreground assistant automation-directory receipts include an immediate assistant wake in the same status-only `canonical_runtime_commit` that publishes the receipt-log ref and retains the prior snapshot ref. The committed workspace wake is durable product truth; the Web checkpoint route registers its best-effort Temporal recheck as post-response work and never waits on that latency hint before returning the checkpoint.
 - Browser-vault replica refresh is normal hosted runtime work, not a detached container side path. Web owns browser-session freshness backstops for missing, unreadable, age-expired, generation-mismatched, or client-known-outdated replica refs and represents refreshes as low-priority system-mailbox runtime work after the browser response; source-hash freshness belongs to the assistant runtime because it can restore and hash canonical query sources. The shared browser-replica contract owns one current projection generation carried by both the encrypted payload and its published ref. Missing or mismatched generations remain readable for deploy compatibility but are always stale; any projection-shape or interpretation change that makes old sidecars incomplete must bump the shared generation instead of adding route-specific checks. Cloudflare stays a thin runner. The assistant runtime builds the replica from the restored `vaultRoot`, uses a stable canonical query-source hash that excludes mtimes and runtime paths, checks the hash again before publish, and may publish an empty current replica when query-visible content was deleted. Replica writes must use the runtime browser-vault store under the active write fence, and the old container `/internal/browser-vault-refresh` path is removed; deploy-skew callers receive an explicit removed response instead of executing a half-removed write path. Before each R2 PUT, the per-user runner records the planned replica ref and the Web-reported ref it may replace as delayed cleanup obligations. Its alarm waits 65 minutes, re-reads the Web-owned current workspace ref, deletes only non-current objects, and retains failed deletions for retry; current replicas therefore cannot use a blanket age-based R2 lifecycle rule. Browser-vault replica writes remain capped at 50 MiB; oversized or wake-interrupted refreshes degrade without blocking foreground assistant work, outbox delivery, runtime-owned idle checkpoints, or runner alarms. Web and Worker/runner skew stays fail-soft by serving readable stale replicas, while generation-bump deploys converge Worker and warm containers immediately so retries publish the current marker.
+- The public homepage never opens a browser-vault session, creates browser unwrap material, or receives, decrypts, parses, or retains replica payload bytes. For an authenticated member it may only register an after-response, best-effort server preparation; the scheduler must lazily load the preparation worker from inside that callback so anonymous and pre-response route initialization do not evaluate the mailbox or Temporal graph. The worker reuses browser-vault member authority and replica-ref freshness metadata, then appends the existing durable refresh mailbox work and signals Temporal when the ref is missing or stale. The persistent dashboard provider remains the sole browser payload owner.
 - Any inbox-to-canonical promotion idempotency must be stored in or derivable from canonical vault evidence, not `.runtime/` alone.
 - General assistant/session state belongs under `vault/.runtime/operations/assistant/**`, including local transcript files, per-turn decision receipts, replay-safe outbound intent journals, pending anonymized assistant-runtime issue records, bounded local diagnostics/runtime event logs, diagnostics snapshot counters and recent warnings, persisted assistant status snapshots, and runtime automation execution state plus run history. Hosted assistant provider usage, including the requested and served model reported by Codex App Server, is recorded directly through the hosted runtime platform into the web-owned usage ledger instead of becoming assistant runtime state. Durable user-facing memory belongs canonically in `bank/memory.md`, typed preferences such as workout unit defaults and desired wearable providers belong canonically in `bank/preferences.json`, and durable scheduled prompt configuration belongs canonically in `bank/automations/*.md`; capture-scoped rebuildable audit artifacts stay under `derived/inbox/**`, while durable compiled knowledge dossiers live under `derived/knowledge/**`.
 - Assistant tone, voice, and personality values remain canonical in the active runtime's `bank/preferences.json`: a person vault configures that private Murph, while a synthetic thread-container vault configures the room Murph. Nullable `HostedMember` assistant-style columns are the authenticated web mutation projection; only person-member rows feed personal Settings. Web emits strict sparse `member.preferences.updated` deltas, and the hosted system mailbox applies every delta in mailbox order; preference events are never latest-wins snapshots, and an older retry blocks newer deltas so sibling settings cannot be lost. The scheduled preference-handoff backstop selects active people and active synthetic rooms through the same owner-or-current-participant access derivation before its bounded limit, then rechecks canonical runtime access before signaling.

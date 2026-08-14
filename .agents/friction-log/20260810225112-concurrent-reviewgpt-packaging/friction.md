@@ -1,6 +1,7 @@
 ---
 title: 'Concurrent ReviewGPT packaging can collide on the timestamped audit ZIP'
 severity: 'minor'
+issue: 'cobuildwithus/murph#1637'
 ---
 
 ## Expected Behavior

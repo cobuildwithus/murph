@@ -1790,7 +1790,10 @@ describe('assistant consumption lookup guidance', () => {
     const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
 
     expect(prompt).toContain(
-      'Training/movement: daily-activity owns wearable facts; workout-csv-import owns CSV/history import; running-cardio and strength-training own programming; aerobic-fitness, competition-training, mobility-posture, physical-therapy. Use Health Commons for recovery-modality evidence and safety.',
+      'Training/movement: daily-activity owns wearable facts; workout-csv-import owns workout CSVs; running-cardio and strength-training own programming; aerobic-fitness, competition-training, mobility-posture, physical-therapy. Use Health Commons for recovery-modality evidence and safety.',
+    )
+    expect(prompt).toContain(
+      'Private repeated-set logging: strength-training owns it and resolves canonical routine context before writes. In groups, hand off to a private Murph conversation without private reads or writes.',
     )
     expect(prompt).toContain(
       'Live workout/card: read strength-training and tracked-table.',
@@ -1999,8 +2002,9 @@ describe('assistant system prompt cache stability', () => {
     // not a budget: raise it only for cross-route guidance that cannot live in
     // an owning skill. Capability-specific browser, connected-app, phone-call,
     // and Family mechanics are intentionally excluded from this resident layer.
-    // The established Apple Health/WHOOP relay contract sets this ceiling.
-    expect(layers.stableRouteCapabilityPrompt.length).toBeLessThanOrEqual(57_469)
+    // The established Apple Health/WHOOP relay plus the cross-route private
+    // repeated-set boundary set this ceiling.
+    expect(layers.stableRouteCapabilityPrompt.length).toBeLessThanOrEqual(57_514)
   })
 
   it('passes the injected CLI contract through byte-for-byte at the stable-route tail', () => {

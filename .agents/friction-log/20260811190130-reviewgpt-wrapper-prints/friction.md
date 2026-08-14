@@ -1,6 +1,7 @@
 ---
 title: 'ReviewGPT wrapper prints an absolute checkout path before redaction'
 severity: 'minor'
+issue: 'cobuildwithus/murph#1716'
 ---
 
 ## Expected Behavior
