@@ -53,24 +53,22 @@ mkdir -p "$state_dir"
 prepare_worktree_spotlight_exclusion() {
   local exclude_file="$common_dir/info/exclude"
   local exclude_rule='/.metadata_never_index'
-  local temp_file
+  local final_line
 
   mkdir -p "$common_dir/info" || return
-  if [[ -e "$exclude_file" && ! -f "$exclude_file" ]]; then
-    return 1
-  fi
-  if [[ ! -e "$exclude_file" ]]; then
+  if [[ -e "$exclude_file" || -L "$exclude_file" ]]; then
+    [[ -f "$exclude_file" ]] || return 1
+  else
     : >"$exclude_file" || return
   fi
-  temp_file="$(mktemp "$common_dir/info/exclude.murph.XXXXXX")" || return
-  if ! awk -v rule="$exclude_rule" '$0 != rule { print }' "$exclude_file" >"$temp_file" \
-    || ! printf '%s\n' "$exclude_rule" >>"$temp_file"; then
-    rm -f "$temp_file"
-    return 1
-  fi
-  if ! mv "$temp_file" "$exclude_file"; then
-    rm -f "$temp_file"
-    return 1
+  if [[ -s "$exclude_file" ]]; then
+    final_line="$(tail -n 1 "$exclude_file")" || return
+    if [[ "$final_line" == "$exclude_rule" ]]; then
+      return 0
+    fi
+    printf '\n%s\n' "$exclude_rule" >>"$exclude_file" || return
+  else
+    printf '%s\n' "$exclude_rule" >>"$exclude_file" || return
   fi
 }
 

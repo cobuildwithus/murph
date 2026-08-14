@@ -2,12 +2,14 @@ import { spawn, spawnSync } from 'node:child_process'
 import {
   chmodSync,
   existsSync,
+  linkSync,
   lstatSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
   realpathSync,
   rmSync,
+  statSync,
   symlinkSync,
   writeFileSync,
 } from 'node:fs'
@@ -764,9 +766,6 @@ printf '# hook comment\n/hook-owned-only\n/.metadata_never_index\n!.*\n/.metadat
     const excludeRules = readFileSync(excludeFile, 'utf8').trim().split('\n')
     expect(excludeRules).toContain('# hook comment')
     expect(excludeRules).toContain('/hook-owned-only')
-    expect(
-      excludeRules.filter((rule) => rule === '/.metadata_never_index'),
-    ).toHaveLength(1)
     expect(excludeRules.at(-1)).toBe('/.metadata_never_index')
     expect(existsSync(path.join(target, '.metadata_never_index'))).toBe(true)
     expect(runGit(target, ['check-ignore', '.metadata_never_index'])).toBe(
@@ -777,6 +776,94 @@ printf '# hook comment\n/hook-owned-only\n/.metadata_never_index\n!.*\n/.metadat
     )
     expect(runGit(target, ['status', '--porcelain'])).toBe('')
     expect(runGit(sibling, ['status', '--porcelain'])).toBe('')
+  })
+
+  it('preserves a shared exclude symlink while establishing final precedence', () => {
+    const harness = createHarness()
+    const commonDir = runGit(harness.primary, [
+      'rev-parse',
+      '--path-format=absolute',
+      '--git-common-dir',
+    ])
+    const excludeFile = path.join(commonDir, 'info', 'exclude')
+    const sharedExclude = path.join(harness.root, 'shared-exclude')
+    writeFileSync(sharedExclude, '/shared-only\n')
+    rmSync(excludeFile)
+    symlinkSync(sharedExclude, excludeFile)
+    const target = path.join(harness.root, 'symlink-exclude-target')
+
+    const creation = runScript(harness, 'create-worktree', [
+      '-b',
+      'symlink-exclude-target',
+      target,
+    ])
+
+    expect(creation.status, creation.stderr).toBe(0)
+    expect(lstatSync(excludeFile).isSymbolicLink()).toBe(true)
+    expect(readFileSync(sharedExclude, 'utf8').trim().split('\n').at(-1)).toBe(
+      '/.metadata_never_index',
+    )
+    expect(runGit(target, ['check-ignore', '.metadata_never_index'])).toBe(
+      '.metadata_never_index',
+    )
+  })
+
+  it('preserves shared exclude inode and mode while establishing precedence', () => {
+    const harness = createHarness()
+    const commonDir = runGit(harness.primary, [
+      'rev-parse',
+      '--path-format=absolute',
+      '--git-common-dir',
+    ])
+    const excludeFile = path.join(commonDir, 'info', 'exclude')
+    const linkedExclude = path.join(harness.root, 'linked-exclude')
+    chmodSync(excludeFile, 0o644)
+    linkSync(excludeFile, linkedExclude)
+    const before = statSync(excludeFile)
+    const target = path.join(harness.root, 'linked-exclude-target')
+
+    const creation = runScript(harness, 'create-worktree', [
+      '-b',
+      'linked-exclude-target',
+      target,
+    ])
+
+    expect(creation.status, creation.stderr).toBe(0)
+    const after = statSync(excludeFile)
+    expect(after.ino).toBe(before.ino)
+    expect(after.mode & 0o777).toBe(0o644)
+    expect(statSync(linkedExclude).ino).toBe(before.ino)
+    expect(readFileSync(linkedExclude, 'utf8').trim().split('\n').at(-1)).toBe(
+      '/.metadata_never_index',
+    )
+  })
+
+  it('preserves a shared exclude symlink when registration fails', () => {
+    const harness = createHarness()
+    const commonDir = runGit(harness.primary, [
+      'rev-parse',
+      '--path-format=absolute',
+      '--git-common-dir',
+    ])
+    const excludeFile = path.join(commonDir, 'info', 'exclude')
+    const sharedExclude = path.join(harness.root, 'failed-shared-exclude')
+    writeFileSync(sharedExclude, '/shared-only\n')
+    rmSync(excludeFile)
+    symlinkSync(sharedExclude, excludeFile)
+    const target = path.join(harness.root, 'failed-symlink-exclude-target')
+
+    const creation = runScript(harness, 'create-worktree', [
+      '-b',
+      'main',
+      target,
+    ])
+
+    expect(creation.status).not.toBe(0)
+    expect(lstatSync(excludeFile).isSymbolicLink()).toBe(true)
+    expect(readFileSync(sharedExclude, 'utf8').trim().split('\n').at(-1)).toBe(
+      '/.metadata_never_index',
+    )
+    expect(existsSync(target)).toBe(false)
   })
 
   it('repairs shared Spotlight state before rolling back a failed hook', () => {
@@ -826,9 +913,6 @@ exit 23
     const excludeRules = readFileSync(excludeFile, 'utf8').trim().split('\n')
     expect(excludeRules).toContain('# failed hook')
     expect(excludeRules).toContain('/hook-failure-owned')
-    expect(
-      excludeRules.filter((rule) => rule === '/.metadata_never_index'),
-    ).toHaveLength(1)
     expect(excludeRules.at(-1)).toBe('/.metadata_never_index')
     expect(runGit(sibling, ['check-ignore', '.metadata_never_index'])).toBe(
       '.metadata_never_index',

@@ -88,9 +88,9 @@ variables, sets Git's exec path and empty prefix, prepends the exec path to
 `PATH`, and removes Murph's lock-held flags so hook descendants must acquire the
 real creation lock instead of inheriting authority to bypass it. It also gives
 the hook native end-of-file standard input while preserving standard output and
-error. After the hook terminates, the helper preserves hook-owned exclude
-content, removes duplicate exact sentinel rules, and appends one exact rule as
-the final effective match. A successful hook then proceeds through marker
+error. After the hook terminates, the helper preserves the shared exclude
+file's identity and metadata while appending one exact rule when needed for
+final effective precedence. A successful hook then proceeds through marker
 restoration and final storage-guard authorization. Keep the marker in place for
 the worktree's lifetime.
 
