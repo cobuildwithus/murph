@@ -5795,7 +5795,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     }
   });
 
-  test("runtime wake interrupts background maintenance before late assistant input import finishes", async () => {
+  test("earlier staged foreground input cannot abort the next item before it stages", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
     const items = [
       createMailboxItem({
@@ -5810,6 +5810,8 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
     const yieldStates: boolean[] = [];
+    let heldImportSignal: AbortSignal | null = null;
+    const readHeldImportSignal = (): AbortSignal | null => heldImportSignal;
     let releaseLateImport = (): void => {};
     let lateImportStarted = (): void => {};
     let assistantPhaseReturned = (): void => {};
@@ -5850,9 +5852,12 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
             return { status: "imported" };
           }
 
-          lateImportStarted();
-          await lateImportReleasePromise;
-          context?.signal?.throwIfAborted();
+          if (item.item.laneSeq === "3") {
+            heldImportSignal = context?.signal ?? null;
+            lateImportStarted();
+            await lateImportReleasePromise;
+            context?.signal?.throwIfAborted();
+          }
           const staged = await upsertAssistantInputEvent({
             event: createStoredAssistantInputEventForMailboxItem(
               item.item,
@@ -5881,13 +5886,18 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         async runAssistantPhase(input) {
           yieldStates.push(input.shouldYieldBackgroundMaintenance?.() ?? false);
           items.push(createMailboxItem({
-            id: "mailbox_item_runner_yield_during_import_late",
+            id: "mailbox_item_runner_yield_during_import_first_late",
             laneSeq: "2",
             occurredAt: "2026-04-26T00:00:02.000Z",
           }));
+          items.push(createMailboxItem({
+            id: "mailbox_item_runner_yield_during_import_second_late",
+            laneSeq: "3",
+            occurredAt: "2026-04-26T00:00:03.000Z",
+          }));
           runtimeWakeSignal.notify();
           await lateImportStartedPromise;
-          assert.deepEqual(importedSeqs, ["1"]);
+          assert.deepEqual(importedSeqs, ["1", "2"]);
           yieldStates.push(input.shouldYieldBackgroundMaintenance?.() ?? false);
           if (input.shouldYieldBackgroundMaintenance?.() !== true) {
             throw new Error("Foreground yield must preempt lock-bound input staging.");
@@ -5917,14 +5927,16 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         setTimeout(resolve, 0);
       });
       assert.equal(runnerSettled, false);
-      assert.deepEqual(importedSeqs, ["1"]);
+      assert.deepEqual(importedSeqs, ["1", "2"]);
+      assert.equal(readHeldImportSignal()?.aborted, false);
       releaseLateImport();
       const result = await runner;
 
-      assert.deepEqual(importStartedSeqs, ["1", "2"]);
-      assert.deepEqual(importedSeqs, ["1", "2"]);
+      assert.deepEqual(importStartedSeqs, ["1", "2", "3"]);
+      assert.deepEqual(importedSeqs, ["1", "2", "3"]);
       assert.deepEqual(yieldStates, [false, true]);
-      assert.equal(result.latestMailboxImport.state.watermarks.conversation, "2");
+      assert.equal(readHeldImportSignal()?.aborted, true);
+      assert.equal(result.latestMailboxImport.state.watermarks.conversation, "3");
       assert.equal(
         result.assistantPhaseResult?.nextWakeAt,
         TEST_PENDING_INDEX_MAINTENANCE_WAKE_AT,

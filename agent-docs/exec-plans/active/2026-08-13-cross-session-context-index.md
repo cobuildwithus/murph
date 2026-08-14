@@ -147,6 +147,13 @@ Updated: 2026-08-14
   cancellation. A yielded partial migration can therefore return its actual
   mutation result for checkpointing while an unstaged import must finish before
   loop shutdown.
+- Final ReviewGPT round 4 found that the invocation-wide staged-work flag still
+  let an earlier durable item authorize aborting a later item before its own
+  stage. The correction keeps that invocation-wide fact only for wake
+  reconciliation and adds one loop-local current-item staging fact for stop-time
+  abort authority. Each serial item resets the local fact before import, sets it
+  at its existing durable callback, and clears it on completion, so prior work
+  cannot cancel a following unstaged message.
 
 ## Verification
 
@@ -162,3 +169,8 @@ Updated: 2026-08-14
   pre-staging lock test now resolves the runtime-write-lock module from the same
   reset module graph as the run loop, so the full-file proof exercises the
   in-process queue instead of producing a false external-lock collision.
+- ReviewGPT round 4 remediation: focused current-item tests prove that an
+  earlier staged item cannot abort the next item before its stage, the current
+  item's projection stall remains abortable after its stage, and a no-op import
+  releases cooperative yield. The two hosted-runtime suites still pass 402
+  tests, and assistant-runtime typecheck and build pass under Node 24.14.1.
