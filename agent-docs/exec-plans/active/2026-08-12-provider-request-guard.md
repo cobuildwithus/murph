@@ -261,10 +261,10 @@ Updated: 2026-08-14
   preserving the fail-closed accepted-event timestamp check, and the mocked
   successful provider turn supplies a valid final response. No production
   invariant, provider request rule, or provider exception was relaxed.
-- Current `main` was merged through
-  `6a5b17194f9c1a75047cd15bc8a76f170f5ce2f9`. The only merge conflict retained
-  the accurate completed-plan index entry; provider policy and executable guard
-  ownership merged without conflict.
+- The bounded post-acceptance base update merged current `main` through
+  `250941b1eb9cf7a12c605b1140e9135202cc5e57`. Its only conflict accepted
+  upstream's deletion of the obsolete completed PR #1705 index row; provider
+  policy and executable guard ownership merged without conflict.
 
 ## Verification
 
@@ -281,9 +281,10 @@ Current evidence:
 - `pnpm provider-requests:guard`: passes on the current merged base containing
   the sibling SDK migrations and exact registered SDK hooks.
 - `bash scripts/doc-gardening.sh --fail-on-issues`: passes with zero issues.
-- Full workspace typecheck passed after the CI-fixture correction on the prior
-  integrated base; exact-head CI remains the authoritative check for the final
-  current-base merge.
+- Exact-head CI on `41fc0d55d8d9a78d130cc4b35e34f847dcfe67d4`
+  passed release build/typecheck, all assistant/CLI/platform package coverage,
+  app verification, both CLI host matrices, frontend, billing, sandbox,
+  fixture, overflow, and tracked-artifact gates before the bounded base update.
 - The corrected assistant local-service runtime file passes all 103 tests with
   the CI-owned heap. The package-wide coverage run passed 238 files and 3,722
   tests before one unrelated 513-receipt stress fixture timed out under local
@@ -291,6 +292,9 @@ Current evidence:
   and with coverage instrumentation in about five seconds.
 - The trusted round-10 full-snapshot ReviewGPT audit returned `PASS`; a fresh
   exact-head review remains required after the final candidate is pushed.
+- The first round-11 exact-head Deep Research attempt produced no verdict or
+  response artifact after its managed-browser capture failed. It does not count
+  as a substantive review round; the current-base head requires a fresh retry.
 - Full affected integration evidence includes Cloudflare 2,435 tests, web
   branch-owned SDK clusters 113 tests, assistant engine 317 tests,
   assistant-runtime Linq 30 tests, hosted-local Linq 25 tests, device-sync
