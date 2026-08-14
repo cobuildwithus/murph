@@ -5011,6 +5011,17 @@ function readRequiredComputerProviderCredentials(
       retryable: true,
     });
   }
+  if (
+    Object.keys(record).length === 1
+    && record.kind === "no_application"
+  ) {
+    throw computerUseError({
+      code: "HOSTED_COMPUTER_PROVIDER_CREDENTIAL_CAPTURE_NO_APPLICATION",
+      httpStatus: 409,
+      message: "Provider application recovery proved that no application exists.",
+      retryable: true,
+    });
+  }
   const keys = Object.keys(record).sort();
   if (keys.length !== 2 || keys[0] !== "clientId" || keys[1] !== "clientSecret") {
     throw computerUseError({

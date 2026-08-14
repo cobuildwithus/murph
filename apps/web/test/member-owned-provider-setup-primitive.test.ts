@@ -227,6 +227,49 @@ describe("member-owned provider setup contract", () => {
     expect(page.clickSelectors).toEqual([".create"]);
   });
 
+  it("reports authoritative marker absence only from a recovery inspection", async () => {
+    const page = createFixturePage("<main>No owned applications</main>");
+    const code = buildBlindProviderCredentialCaptureCode({
+      applicationNameSelector: null,
+      applicationContainerSelector: "section[data-owned-application]",
+      clientIdSelector: ".client-id",
+      clientSecretSelector: ".client-secret",
+      creationFormSelector: "form[data-owned-creation]",
+      marker: "Murph Private Sync fixture",
+      revealSecretSelector: null,
+      safeLandingUrl: "about:blank",
+      submitSelector: null,
+    });
+    const run = new Function("page", `return (async () => {${code}})();`) as (
+      page: FixturePage,
+    ) => Promise<unknown>;
+
+    await expect(run(page)).resolves.toEqual({ kind: "no_application" });
+    expect(page.clickSelectors).toEqual([]);
+  });
+
+  it("keeps capture recovery fenced when the authoritative landing is unavailable", async () => {
+    const page = createFixturePage("<main>Transient provider page</main>");
+    page.setNavigationErrorOnce(new Error("safe landing unavailable"));
+    const code = buildBlindProviderCredentialCaptureCode({
+      applicationNameSelector: null,
+      applicationContainerSelector: "section[data-owned-application]",
+      clientIdSelector: ".client-id",
+      clientSecretSelector: ".client-secret",
+      creationFormSelector: "form[data-owned-creation]",
+      marker: "Murph Private Sync fixture",
+      revealSecretSelector: null,
+      safeLandingUrl: "about:blank",
+      submitSelector: null,
+    });
+    const run = new Function("page", `return (async () => {${code}})();`) as (
+      page: FixturePage,
+    ) => Promise<unknown>;
+
+    await expect(run(page)).rejects.toThrow("safe landing unavailable");
+    expect(page.clickSelectors).toEqual([]);
+  });
+
   it("executes trusted capture against the exact marked form and rejects cross-object selectors", async () => {
     const page = createFixturePage(`
         <form data-owned-application>
@@ -321,7 +364,7 @@ describe("member-owned provider setup contract", () => {
       await expect(run(page)).rejects.toThrow(/marker_ambiguous/u);
   });
 
-  it("rejects a transient marker forged into an unrelated application after trusted reload", async () => {
+  it("ignores a transient forged marker and trusts the reloaded landing absence", async () => {
     const forged = `
       <section data-owned-application>
         <input class="forged-name" value="Murph Private Sync fixture" />
@@ -355,7 +398,7 @@ describe("member-owned provider setup contract", () => {
       "page",
       `return (async () => {${capture}})();`,
     ) as (page: FixturePage) => Promise<unknown>;
-    await expect(runCapture(page)).rejects.toThrow(/marker_ambiguous/u);
+    await expect(runCapture(page)).resolves.toEqual({ kind: "no_application" });
 
     await page.setContent(forged);
     const deletion = buildBlindOwnedApplicationDeleteCode({

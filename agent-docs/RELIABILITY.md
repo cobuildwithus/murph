@@ -1,6 +1,6 @@
 # Reliability
 
-Last verified: 2026-08-12
+Last verified: 2026-08-13
 
 ## Current Guardrails
 
@@ -880,8 +880,10 @@ Last verified: 2026-08-12
   OAuth-in-progress, connected, disconnect-first, deletion-pending, and deleted
   outcomes survive page refresh and process restart. Ambiguous creation records
   the submission boundary before the provider call; the next missing inspection
-  clears ambiguity without creating, and only another independent inspection may
-  create. Permanent malformed or undecryptable application state enters repair;
+  fully loads and verifies the exact safe landing, clears ambiguity without
+  creating only when no ownership marker exists, and only another independent
+  invocation may create. Permanent malformed or undecryptable application state
+  enters repair;
   transient crypto, KMS, root-key, and database failures remain retryable
   infrastructure errors. Browser acquisition is part of that state machine: a
   newly acquired run is bound to the exact setup before navigation, an unrelated
@@ -889,10 +891,8 @@ Last verified: 2026-08-12
   inspecting that same owner binding. Re-entering an awaiting setup rotates or
   reuses its latest valid handoff without repeating provider submission. Completing
   the exact setup-owned handoff resumes that run without a conversation reply;
-  ordinary setup returns to `/connect`, while the exact suspended
-  `deletion_pending` owner returns to the authenticated data-privacy retry
-  surface and every generic or non-deletion suspended run remains rejected.
-  Generic handoffs retain their contact return. Provider
+  ordinary setup returns to `/connect`; suspended members and generic or foreign
+  setup runs remain rejected. Generic handoffs retain their contact return. Provider
   prerequisite cancellation is exact-owner and fails closed unless durable state
   proves no submission, application binding, or connection exists. Connection
   rows and upstream revoke results are authoritative; setup projection writes after
@@ -903,10 +903,13 @@ Last verified: 2026-08-12
   setup binding is CAS-cleared. A finish/clear interruption retains the exact
   application and run binding for bounded retry, never recaptures a known sealed
   credential, and never reports cleanup failure as success. Account deletion
-  commits the suspension fence before external cleanup;
-  cleanup failure preserves local setup, application, and run ownership for
-  retry. Late OAuth and disconnect transitions cannot overwrite deletion
-  ownership.
+  checks external cleanup under the same member lock immediately before
+  suspension, then performs only local cleanup afterward; any earlier cleanup
+  failure preserves setup, application, and run ownership for an authenticated
+  retry. Successful application deletion keeps its terminal setup active until
+  the exact browser run finishes, then deactivates it in the run-clearing CAS so
+  reconnect can create one fresh setup. Late OAuth and disconnect transitions
+  cannot overwrite deletion ownership.
 - Companion Apple Health metadata and WHOOP overnight summaries recheck their
   exact source inside the health-data admission lock and again before runtime
   import by rereading the durable source row rather than trusting the queued

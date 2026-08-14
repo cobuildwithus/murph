@@ -1,6 +1,6 @@
 # Product Sense
 
-Last verified: 2026-08-11
+Last verified: 2026-08-13
 
 ## Current Posture
 
@@ -146,9 +146,10 @@ default destination for every goal or the definition of activation.
   connection can be proved. Never turn developer credentials into a copy/paste
   chore or imply completion before the exact connection is active. `/connect` is
   the truthful provider-indexed progress and recovery surface, not a separate
-  setup owner. Provider-specific dashboard friction stays inside a finite adapter;
-  shared ownership, recovery, OAuth, disconnect, and deletion behavior must not
-  need a rewrite when the next permitted provider is added.
+  setup owner. Provider-specific dashboard coordinates stay inside a finite
+  registration; shared model-driven ownership, recovery, OAuth, disconnect,
+  and deletion behavior must not need a rewrite when the next lifecycle-equivalent
+  permitted provider is added.
 - Apple Health follows that exception narrowly: Murph can explain and hand off
   setup in a direct conversation with the canonical App Store listing, while
   the iOS app owns sign-in and the operating-system HealthKit permission flow.

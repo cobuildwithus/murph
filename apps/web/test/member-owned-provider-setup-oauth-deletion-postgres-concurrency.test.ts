@@ -4,6 +4,7 @@ import type { Prisma, PrismaClient } from "@prisma/client";
 import { describe, expect, it } from "vitest";
 
 import { PrismaDeviceSyncControlPlaneStore } from "@/src/lib/device-sync/prisma-store";
+import { MemberOwnedProviderSetupService } from "@/src/lib/device-sync/provider-setup/service";
 import { PrismaDeviceProviderSetupStore } from "@/src/lib/device-sync/provider-setup/store";
 import { createPrismaClient } from "@/src/lib/prisma";
 
@@ -171,6 +172,73 @@ function isClearlyLocalPostgresUrl(value: string): boolean {
 describe.skipIf(!runPostgresConcurrencyProof)(
   "member-owned provider OAuth/deletion PostgreSQL concurrency",
   () => {
+    it("deactivates a deleted tombstone before creating a successor setup", async () => {
+      const suffix = randomUUID().replaceAll("-", "");
+      const memberId = `member_provider_reconnect_${suffix}`;
+      const setupId = `dps_provider_reconnect_${suffix}`;
+      const prisma = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const store = new PrismaDeviceProviderSetupStore(prisma);
+      const unreachable = async (): Promise<never> => {
+        throw new Error("Unexpected provider browser call.");
+      };
+      const service = new MemberOwnedProviderSetupService("strava", {
+        computer: {
+          acquireOwnedRun: unreachable,
+          actOwnedRun: unreachable,
+          captureAndSealProviderCredentialsInOwnedRun: unreachable,
+          finishOwnedRun: unreachable,
+          hasOwnedRunHandoff: unreachable,
+          issueOwnedRunHandoff: unreachable,
+        },
+        store,
+      });
+
+      try {
+        await prisma.hostedMember.create({ data: { id: memberId } });
+        await prisma.deviceProviderSetup.create({
+          data: {
+            active: true,
+            completedAt: new Date("2026-08-13T12:00:00.000Z"),
+            connectSourceId: "strava",
+            connectTarget: "strava",
+            id: setupId,
+            memberId,
+            provider: "strava",
+            status: "deleted",
+            version: 2,
+          },
+        });
+
+        const successor = await service.ensure(memberId);
+        const rows = await prisma.deviceProviderSetup.findMany({
+          orderBy: { createdAt: "asc" },
+          where: { memberId },
+        });
+
+        expect(successor).toMatchObject({
+          active: true,
+          status: "pending",
+        });
+        expect(successor.id).not.toBe(setupId);
+        expect(rows).toHaveLength(2);
+        expect(rows[0]).toMatchObject({
+          active: false,
+          browserRunId: null,
+          id: setupId,
+          status: "deleted",
+        });
+        expect(rows[1]).toMatchObject({
+          active: true,
+          id: successor.id,
+          status: "pending",
+        });
+      } finally {
+        await prisma.deviceProviderSetup.deleteMany({ where: { memberId } });
+        await prisma.hostedMember.deleteMany({ where: { id: memberId } });
+        await prisma.$disconnect();
+      }
+    });
+
     it.each(["callback", "deletion"] as const)(
       "serializes the setup and connection when %s wins the member row",
       async (winner) => {

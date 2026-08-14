@@ -1,6 +1,6 @@
 # Murph Product Constitution
 
-Last verified: 2026-08-11
+Last verified: 2026-08-13
 
 Draft v0.1
 
@@ -175,9 +175,9 @@ permits a private member-owned application, Murph should perform the mechanical
 setup, preserve progress, and ask only for irreducible sign-in, provider-required
 prerequisites, or consent. Secret copying, opaque duplicate applications,
 hijacking unrelated browser work, and false success states are product failures,
-not acceptable setup friction. Shared
-setup behavior should remain provider-neutral while each provider's finite
-browser semantics stay explicit and checked in.
+not acceptable setup friction. Shared setup behavior should remain model-driven
+and provider-neutral while each provider's finite browser coordinates stay
+explicit and checked in.
 
 ### 13. Status Should Come From Useful Contribution, Not Biomarker Superiority.
 

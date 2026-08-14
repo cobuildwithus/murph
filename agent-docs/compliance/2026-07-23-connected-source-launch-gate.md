@@ -57,8 +57,10 @@ another source's launch requirements.
   application metadata. Ambiguous or unrelated applications fail closed.
 - `capturing` is the persisted irreversible-attempt fence: Cancel disappears and
   is rejected once submission may have begun, ambiguous failure never resets the
-  fence, and exact-run recovery captures without submitting again. `canceling`
-  remains the pre-submission cleanup fence.
+  fence, and exact-run recovery captures without submitting again. A fully loaded
+  exact safe landing with no marker may clear the fence without submitting; only
+  a later independent invocation may attempt creation again. `canceling` remains
+  the pre-submission cleanup fence.
 - Continue and setup-owned handoff Done persist one exact typed continuation in
   the existing system mailbox before the droppable runtime wake. Duplicate actions
   converge, and mailbox handoff recovery resumes work after a lost wake without a
@@ -76,6 +78,9 @@ another source's launch requirements.
   application save rejects the suspended member. Post-suspension cleanup
   is local-only and fails closed if that preflight is invalidated, so no provider
   browser handoff depends on suspended-member access.
+- Successful private-application deletion keeps its setup active while the exact
+  browser run is being released, then clears the run and active slot together so
+  a later connect or reconnect starts from one fresh pending setup.
 - Hermetic route, service, tool, prompt, browser-boundary, OAuth/token, device-sync,
   and concurrency tests cover setup, handoff resume, sealing, exact binding,
   backfill/polling, reconnect, disconnect, cancellation, and deletion without a

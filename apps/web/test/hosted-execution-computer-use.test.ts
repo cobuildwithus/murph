@@ -1161,6 +1161,37 @@ describe("ComputerUseService", () => {
     expect(consume).not.toHaveBeenCalled();
   });
 
+  it("classifies trusted recovery absence without sealing credentials", async () => {
+    const now = new Date("2026-06-17T12:00:00.000Z");
+    const kernel = createFakeKernel({
+      executeResult: {
+        result: { kind: "no_application" },
+        title: "Provider applications",
+        url: "https://provider.example.test/settings/application",
+      },
+    });
+    const service = new ComputerUseService({
+      kernel,
+      now: () => now,
+      store: new FakeComputerUseStore({
+        run: createRunRecord({ updatedAt: now }),
+      }),
+    });
+    const consume = vi.fn(async () => ({ applicationId: "dpa_unreachable" }));
+
+    await expect(service.captureAndSealProviderCredentials({
+      code: "return await inspectProviderApplicationInsideTrustedBoundary();",
+      consume,
+      memberId: "member_123",
+      runId: "hcr_run123",
+      timeoutMs: 1_000,
+    })).rejects.toMatchObject({
+      code: "HOSTED_COMPUTER_PROVIDER_CREDENTIAL_CAPTURE_NO_APPLICATION",
+      retryable: true,
+    });
+    expect(consume).not.toHaveBeenCalled();
+  });
+
   it("scrubs malformed provider credential execution results before rejecting them", async () => {
     const now = new Date("2026-06-17T12:00:00.000Z");
     const malformedCredentials = {

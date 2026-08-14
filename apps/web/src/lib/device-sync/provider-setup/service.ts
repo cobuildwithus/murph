@@ -268,14 +268,18 @@ export class MemberOwnedProviderSetupService {
   }
 
   async ensure(memberId: string): Promise<MemberOwnedProviderSetupRecord> {
-    const setup = await this.store.ensureActive({
+    const input = {
       connectSourceId: this.registration.coordinates.connectSourceId,
       connectTarget: this.registration.coordinates.connectTarget,
       memberId,
       provider: this.registration.coordinates.provider,
       sourceProviderSlug: this.registration.coordinates.sourceProviderSlug,
-    });
-    return this.reconcile(setup, true);
+    };
+    const setup = await this.reconcile(
+      await this.store.ensureActive(input),
+      true,
+    );
+    return setup.active ? setup : this.store.ensureActive(input);
   }
 
   async authorize(
@@ -499,7 +503,12 @@ export class MemberOwnedProviderSetupService {
         timeoutMs: PROVIDER_SETUP_BROWSER_TIMEOUT_MS,
       });
     } catch (error) {
-      if (!recovery && isTrustedPreSubmitCaptureFailure(error)) {
+      const missingApplicationProven = recovery
+        && isTrustedMissingApplicationCapture(error);
+      if (
+        (!recovery && isTrustedPreSubmitCaptureFailure(error))
+        || missingApplicationProven
+      ) {
         const latest = await this.store.readOwned({
           memberId,
           provider: setup.provider,
@@ -510,7 +519,10 @@ export class MemberOwnedProviderSetupService {
           && latest.version === captureVersion
           && latest.browserRunId === request.runId
         ) {
-          await this.transition(latest, { status: "browser_setup" });
+          const restored = await this.transition(latest, { status: "browser_setup" });
+          if (missingApplicationProven) {
+            return this.toView(restored);
+          }
         }
       }
       throw error;
@@ -787,30 +799,36 @@ export class MemberOwnedProviderSetupService {
     setup: MemberOwnedProviderSetupRecord,
   ): Promise<MemberOwnedProviderSetupRecord> {
     const runId = setup.browserRunId;
-    if (!runId) {
-      return setup;
-    }
     if (setup.status !== "oauth_ready" && setup.status !== "deleted") {
       throw setupBusyError(setup.status);
     }
-    await this.computer.finishOwnedRun({
-      memberId: setup.memberId,
-      outcome: "completed",
-      ownerKey: setup.id,
-      ownerPurpose: MEMBER_OWNED_PROVIDER_SETUP_COMPUTER_RUN_PURPOSE,
-      runId,
-    });
+    if (runId) {
+      await this.computer.finishOwnedRun({
+        memberId: setup.memberId,
+        outcome: "completed",
+        ownerKey: setup.id,
+        ownerPurpose: MEMBER_OWNED_PROVIDER_SETUP_COMPUTER_RUN_PURPOSE,
+        runId,
+      });
+    }
 
     let latest = setup;
     for (let attempt = 0; attempt < PROVIDER_SETUP_CAS_ATTEMPTS; attempt += 1) {
-      if (latest.browserRunId === null) {
+      if (
+        latest.browserRunId === null
+        && (latest.status !== "deleted" || !latest.active)
+      ) {
         return latest;
       }
-      if (latest.browserRunId !== runId || latest.status !== setup.status) {
+      if (
+        (latest.browserRunId !== null && latest.browserRunId !== runId)
+        || latest.status !== setup.status
+      ) {
         throw setupBusyError(latest.status);
       }
       try {
         return await this.transition(latest, {
+          ...(latest.status === "deleted" ? { active: false } : {}),
           browserRunId: null,
           status: latest.status,
         });
@@ -889,8 +907,10 @@ export class MemberOwnedProviderSetupService {
     let setup = await this.recoverApplicationBinding(input, persist);
     if (
       persist
-      && setup.browserRunId
-      && (setup.status === "oauth_ready" || setup.status === "deleted")
+      && (
+        setup.status === "deleted"
+        || (setup.status === "oauth_ready" && setup.browserRunId !== null)
+      )
     ) {
       setup = await this.releaseTerminalBrowserRun(setup);
     }
@@ -1057,6 +1077,8 @@ export function buildBlindProviderCredentialCaptureCode(input: {
   safeLandingUrl: string;
   submitSelector: string | null;
 }): string {
+  const recovery = input.submitSelector === null
+    && input.applicationNameSelector === null;
   return `
 const authorityAttribute = "data-murph-provider-authority";
 const readField = async (locator) => {
@@ -1082,7 +1104,8 @@ const deriveAuthority = async () => {
       element.removeAttribute(authorityAttribute);
     });
     const roots = Array.from(new Set(markers.map((marker) => marker.closest(containerSelector))));
-    if (markers.length === 0 || roots.length !== 1) return { kind: "marker_ambiguous" };
+    if (markers.length === 0) return { kind: "absent" };
+    if (roots.length !== 1) return { kind: "marker_ambiguous" };
     const root = roots[0];
     if (!root || root === document.body || root === document.documentElement) {
       return { kind: "container_ambiguous" };
@@ -1094,6 +1117,11 @@ const deriveAuthority = async () => {
     containerSelector: ${JSON.stringify(input.applicationContainerSelector)},
     expectedMarker: ${JSON.stringify(input.marker)},
   });
+  if (result.kind === "absent") {
+    ${recovery
+      ? 'return { kind: "no_application" };'
+      : 'throw new Error("provider application ownership marker mismatch: marker_ambiguous");'}
+  }
   if (result.kind !== "ok") {
     throw new Error("provider application ownership marker mismatch: " + result.kind);
   }
@@ -1137,8 +1165,20 @@ await trustedSubmit.click();
   throw error;
 }
 await page.waitForLoadState("domcontentloaded").catch(() => undefined);` : ""}
-await page.goto(${JSON.stringify(input.safeLandingUrl)}, { waitUntil: "domcontentloaded" });
-const root = await deriveAuthority();
+${recovery
+  ? `await page.goto(${JSON.stringify(input.safeLandingUrl)}, { waitUntil: "load" });
+await page.waitForLoadState("networkidle", { timeout: 15000 });
+const loadedUrl = new URL(await page.evaluate(() => window.location.href));
+const safeLandingUrl = new URL(${JSON.stringify(input.safeLandingUrl)});
+if (loadedUrl.origin !== safeLandingUrl.origin || loadedUrl.pathname !== safeLandingUrl.pathname) {
+  throw new Error("provider application safe landing is unavailable");
+}`
+  : `await page.goto(${JSON.stringify(input.safeLandingUrl)}, { waitUntil: "domcontentloaded" });`}
+const authority = await deriveAuthority();
+if (authority.kind === "no_application") {
+  return authority;
+}
+const root = authority;
 ${input.revealSecretSelector ? `await (await exactVisibleIn(root, ${JSON.stringify(input.revealSecretSelector)}, "secret reveal selector")).click();` : ""}
 const clientId = await readField(await exactVisibleIn(root, ${JSON.stringify(input.clientIdSelector)}, "client id selector"));
 const clientSecret = await readField(await exactVisibleIn(root, ${JSON.stringify(input.clientSecretSelector)}, "client secret selector"));
@@ -1269,6 +1309,15 @@ function isTrustedPreSubmitCaptureFailure(error: unknown): boolean {
     && typeof error === "object"
     && Reflect.get(error, "code")
       === "HOSTED_COMPUTER_PROVIDER_CREDENTIAL_CAPTURE_PRE_SUBMIT_FAILED"
+  );
+}
+
+function isTrustedMissingApplicationCapture(error: unknown): boolean {
+  return Boolean(
+    error
+    && typeof error === "object"
+    && Reflect.get(error, "code")
+      === "HOSTED_COMPUTER_PROVIDER_CREDENTIAL_CAPTURE_NO_APPLICATION"
   );
 }
 

@@ -1,4 +1,4 @@
-# PR 1675 OAuth/deletion fence
+# PR 1675 provider setup completion fences
 
 Status: active
 Created: 2026-08-13
@@ -6,9 +6,9 @@ Updated: 2026-08-13
 
 ## Goal
 
-Close ReviewGPT's OAuth/deletion race in the reusable member-owned provider
-setup primitive without adding another state owner or provider-specific
-automation layer.
+Close ReviewGPT's OAuth/deletion and terminal-recovery findings in the reusable
+member-owned provider setup primitive without adding another state owner or
+provider-specific automation layer.
 
 ## Success criteria
 
@@ -18,6 +18,10 @@ automation layer.
   connection state under the existing hosted-member lock.
 - External deletion rechecks live connection truth before browser mutation.
 - The ordinary successful-delete retry and callback projection remain safe.
+- Successful deletion releases the active setup slot only after its exact
+  browser run is released, and the next connect creates a fresh setup.
+- A later independent exact-landing inspection can clear an ambiguous submit
+  only after proving no marked application exists and without resubmitting.
 - Focused unit, TypeScript, lint, docs, and real-PostgreSQL proofs pass before
   the exact candidate head enters ReviewGPT and required CI.
 
@@ -70,6 +74,12 @@ automation layer.
    ReviewGPT concurrently with required CI.
 8. [ ] Merge only after ReviewGPT passes and required exact-head checks are
    green; verify the safe deployment boundary and retire the worktree.
+9. [x] Triage ReviewGPT round 8 and reproduce both terminal setup-slot and
+   ambiguous-submit recovery findings through their owning state machine.
+10. [x] Deactivate a deleted setup in the exact terminal-run release CAS and
+    require an independent trusted zero-marker inspection before resubmit.
+11. [x] Add service, trusted-boundary, computer-use, and real-PostgreSQL proof
+    for both corrections and re-audit their coupled state.
 
 ## Decisions
 
@@ -89,12 +99,31 @@ automation layer.
 - No new Frog entry is needed: the single-file hosted Web fanout and
   `open-exec-plan --help` behavior encountered here already have pending
   entries.
+- The deleted tombstone remains active while it can own browser work. The same
+  CAS that clears its exact run deactivates it; the existing member-locked
+  `ensureActive` owner then admits one successor through the partial unique
+  index.
+- `capturing` remains the only submit ambiguity fence. Recovery code contains
+  no submit controls, fully loads and verifies the exact safe landing, and
+  returns a typed zero-marker observation. The service restores
+  `browser_setup` and stops, so only a later independent invocation can submit.
 
 ## Verification
 
 - Focused member-owned provider and ingress lane: 9,956 passed, 411 skipped.
 - Direct affected behavior set: 104 passed.
-- Real PostgreSQL OAuth/deletion concurrency: 2 passed.
+- Real PostgreSQL OAuth/deletion concurrency and successor admission: 3 passed.
+- Round-8 direct service, trusted-boundary, computer-use, reconnect-link, and
+  internal-connect coverage: 244 passed.
+- Coupled-state audit: two reported findings confirmed and corrected; no
+  additional unresolved state inconsistency remains in the affected owner.
+- Corrected-head product-purpose verdict: no findings. The irreducible purpose
+  remains a credential-blind member-owned connection that recovers without
+  duplicate provider effects. The smallest experience still uses the existing
+  `/connect` card and conversation continuation; deletion now permits a later
+  reconnect, and proven provider absence becomes retryable without a new screen,
+  click, message, or setup owner. Existing rendered evidence remains applicable
+  because no presentation component or visible state shape changed.
 - Hosted Web TypeScript: passed.
 - Hosted Web ESLint: 0 errors; unrelated existing warnings remain.
 - `pnpm docs:drift` and `git diff --check` must pass with this active plan.

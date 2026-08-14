@@ -1,6 +1,6 @@
 # Security
 
-Last verified: 2026-08-12
+Last verified: 2026-08-13
 
 ## Non-Negotiable Rules
 
@@ -73,19 +73,18 @@ Last verified: 2026-08-12
   provider prerequisites, and consent use only the same-origin
   `/computer/handoff/` surface. A setup-owned completed handoff resumes only its
   exact member/setup run and returns ordinary setup to authenticated `/connect`,
-  without contact routing or an inbound-reply dependency. The sole suspended
-  exception is the exact `deletion_pending` member/setup/run binding, which may
-  return only to the authenticated data-privacy retry surface; generic, foreign,
-  stale, and non-deletion runs remain rejected. Prerequisite cancellation terminates
+  without contact routing or an inbound-reply dependency. Suspended, generic,
+  foreign, and stale setup runs remain rejected. Prerequisite cancellation terminates
   only that exact run and is rejected unless durable state proves there is no
-  provider submission, application binding, or connection. The Strava
-  adapter may inspect, create, repair, or delete only the exact deterministic
-  Murph marker and must fail closed around unrelated applications. A setup may
+  provider submission, application binding, or connection. The provider-neutral
+  trusted boundary may inspect, create, repair, or delete only the exact
+  deterministic Murph marker within the registered container coordinates and
+  must fail closed around unrelated applications. A setup may
   navigate only a browser run durably bound to that exact setup owner key; a
   generic active member run is never reusable for provider setup, and generic
-  computer actions reject setup-owned runs. Account deletion commits the member
-  suspension fence before external provider or decryption work, then uses only a
-  narrow deletion-only authority for the exact fenced setup/run pair. Current
+  computer actions reject setup-owned runs. Account deletion checks external
+  application and run cleanup under the member lock immediately before
+  suspension, then performs only local cleanup after suspension. Current
   Strava revocation uses the exact bound application's client authentication and
   puts the access token only in the form body; credentials and authorization
   headers never enter diagnostics. Permanently malformed application state is a

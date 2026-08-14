@@ -1,6 +1,6 @@
 # Murph Architecture
 
-Last verified: 2026-08-12
+Last verified: 2026-08-13
 
 ## Accepted-Message Targeting
 
@@ -1019,12 +1019,17 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   transient values, and returns no credential-bearing result. Owned deletion
   uses the same marker-derived boundary; ambiguous absence retains the local
   binding. `capturing` is the irreversible submission fence, so it cannot be
-  canceled or reset after an ambiguous failure and recovery of the exact run
-  never submits again. A persisted `canceling` transition remains the reversible
-  pre-submission fence. Once an exact application binding is
+  canceled after an ambiguous failure and recovery of the exact run never
+  submits again. One fully loaded exact safe-landing inspection with no marker
+  may restore `browser_setup` without submitting; only a later independent
+  invocation may attempt creation again. A persisted `canceling` transition
+  remains the reversible pre-submission fence. Once an exact application binding is
   durable, setup finishes that exact browser run and compare-and-set clears its
   run binding before OAuth can continue; an interrupted finish or clear remains
-  explicit and retryable. Account deletion requires the external provider
+  explicit and retryable. After application deletion, the same terminal-release
+  compare-and-set also deactivates the deleted setup, allowing the existing
+  member/provider uniqueness owner to admit one fresh setup without overlapping
+  browser ownership. Account deletion requires the external provider
   application and resumable run to be removed in the member-lock transaction
   immediately before suspension, including a setup-owned run not yet copied to
   the setup row. Application save rechecks the suspension fence. The suspension

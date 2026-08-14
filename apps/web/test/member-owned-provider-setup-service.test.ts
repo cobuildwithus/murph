@@ -85,6 +85,13 @@ class MemorySetupStore {
   readonly transitions: string[] = [];
 
   async ensureActive(): Promise<MemberOwnedProviderSetupRecord> {
+    if (!this.setup.active) {
+      this.setup = buildSetup({
+        createdAt: new Date(this.setup.createdAt.getTime() + 1_000),
+        id: `${SETUP_ID}_next`,
+        updatedAt: new Date(this.setup.updatedAt.getTime() + 1_000),
+      });
+    }
     return this.setup;
   }
 
@@ -295,6 +302,7 @@ class FakeProviderComputer implements ProviderSetupComputer {
   }));
   captureStarted: (() => void) | null = null;
   ambiguousCaptureErrorOnce: Error | null = null;
+  missingApplicationCaptureOnce = false;
   releaseCapture: Promise<void> | null = null;
 
   readonly captureCodes: string[] = [];
@@ -320,6 +328,12 @@ class FakeProviderComputer implements ProviderSetupComputer {
       const error = this.ambiguousCaptureErrorOnce;
       this.ambiguousCaptureErrorOnce = null;
       throw error;
+    }
+    if (this.missingApplicationCaptureOnce) {
+      this.missingApplicationCaptureOnce = false;
+      throw Object.assign(new Error("trusted recovery proved no application"), {
+        code: "HOSTED_COMPUTER_PROVIDER_CREDENTIAL_CAPTURE_NO_APPLICATION",
+      });
     }
     return {
       title: "Provider applications",
@@ -586,6 +600,31 @@ describe("member-owned provider setup service", () => {
     expect(code).toContain("provider application ownership marker mismatch");
   });
 
+  it("requires an independent zero-marker recovery before another submit", async () => {
+    const store = new MemorySetupStore();
+    store.setup = buildSetup({ browserRunId: RUN_ID, status: "browser_setup", version: 3 });
+    const computer = new FakeProviderComputer();
+    computer.ambiguousCaptureErrorOnce = new Error("browser result was ambiguous");
+    const service = createService({ computer, store });
+
+    await expect(service.captureAndSeal(MEMBER_ID, captureRequest())).rejects.toThrow(
+      "browser result was ambiguous",
+    );
+    expect(store.setup).toMatchObject({ status: "capturing", version: 4 });
+
+    computer.missingApplicationCaptureOnce = true;
+    await expect(service.captureAndSeal(MEMBER_ID, captureRequest())).resolves.toMatchObject({
+      status: "browser_setup",
+    });
+    expect(store.setup).toMatchObject({ status: "browser_setup", version: 5 });
+    expect(computer.captureCodes[1]).not.toContain("button.create-application");
+
+    await expect(service.captureAndSeal(MEMBER_ID, captureRequest())).resolves.toMatchObject({
+      status: "oauth_ready",
+    });
+    expect(computer.captureCodes[2]).toContain("button.create-application");
+  });
+
   it("restores browser setup after a trusted failure proven before submit", async () => {
     const store = new MemorySetupStore();
     store.setup = buildSetup({ browserRunId: RUN_ID, status: "browser_setup", version: 3 });
@@ -648,11 +687,59 @@ describe("member-owned provider setup service", () => {
     }));
     expect(result.status).toBe("deleted");
     expect(store.setup).toMatchObject({
+      active: false,
       browserRunId: null,
       providerApplicationId: null,
       providerApplicationRevision: null,
       status: "deleted",
     });
+    await expect(service.ensure(MEMBER_ID)).resolves.toMatchObject({
+      active: true,
+      id: `${SETUP_ID}_next`,
+      status: "pending",
+    });
+  });
+
+  it("keeps the deleted setup active until terminal run release can finish", async () => {
+    const store = new MemorySetupStore();
+    store.setup = buildSetup({
+      providerApplicationId: APPLICATION_ID,
+      providerApplicationRevision: 3,
+      status: "oauth_ready",
+    });
+    const computer = new FakeProviderComputer();
+    computer.finishOwnedRun.mockRejectedValueOnce(
+      new Error("synthetic terminal run release interruption"),
+    );
+    const deleteApplication = vi.fn(async (
+      input: Parameters<MemorySetupStore["deleteCapturedApplication"]>[0],
+    ) => {
+      store.deleteCapturedApplication(input);
+    });
+    const service = createService({ computer, deleteApplication, store });
+    const prepared = await service.prepareDeletion(MEMBER_ID);
+
+    await expect(service.deleteOwnedApplication(MEMBER_ID, {
+      action: "delete",
+      confirmSelector: "button.confirm-delete",
+      deleteSelector: "button.delete-application",
+      provider: "strava",
+      runId: prepared.run.runId,
+      setupId: prepared.setup.setupId,
+    })).rejects.toThrow("synthetic terminal run release interruption");
+    expect(store.setup).toMatchObject({
+      active: true,
+      browserRunId: RUN_ID,
+      status: "deleted",
+    });
+
+    await expect(service.ensure(MEMBER_ID)).resolves.toMatchObject({
+      active: true,
+      id: `${SETUP_ID}_next`,
+      status: "pending",
+    });
+    expect(computer.finishOwnedRun).toHaveBeenCalledTimes(2);
+    expect(deleteApplication).toHaveBeenCalledTimes(1);
   });
 
   it("converges deletion after the provider succeeded but its result was lost", async () => {

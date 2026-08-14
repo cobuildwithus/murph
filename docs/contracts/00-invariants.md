@@ -292,8 +292,13 @@ it has been explicitly elevated to a cross-cutting invariant.
   without conversation routing. Prerequisite cancellation is permitted only when
   durable state proves no provider submission, application binding, or connection.
   Once `capturing` records possible submission, ambiguous failure preserves that
-  fence and exact-run recovery cannot submit again. Continue and setup-owned
-  handoff completion append exact typed continuation work to the existing system
+  fence and exact-run recovery cannot submit again. A fully loaded exact safe
+  landing with no ownership marker may clear that fence without submitting;
+  only a later independent invocation may attempt creation again. Successful
+  application deletion deactivates the terminal setup only after its exact
+  browser run is released, so a fresh setup never overlaps owned browser work.
+  Continue and setup-owned handoff completion append exact typed continuation
+  work to the existing system
   mailbox before waking the runtime. Account deletion checks setup, application,
   and run ownership under its member suspension lock; provider application save
   rejects suspension, and local retry ownership survives later cleanup failure.
