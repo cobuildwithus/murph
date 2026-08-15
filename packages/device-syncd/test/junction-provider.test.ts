@@ -18327,6 +18327,69 @@ test("Junction workout_stream diagnostics use one bounded index read and serial 
   assert.equal(maximumActiveStreams, 1);
 });
 
+test("Junction workout_stream skips malformed metric cardinality without blocking valid workouts", async () => {
+  const importedSnapshots: unknown[] = [];
+  const warningCodes: string[] = [];
+  const harness = createJunctionWorkoutStreamTestProvider({
+    listWorkoutIds: () => ["workout-1", "workout-2", "workout-3"],
+    streamResponse: (workoutId) => createJsonResponse(
+      workoutId === "workout-1"
+        ? {
+            time: [1_775_131_200, 1_775_133_000],
+            heartrate: [100, 160],
+            distance: [0],
+          }
+        : workoutId === "workout-2"
+          ? {
+              time: [1_775_131_200, 1_775_133_000],
+              heartrate: [105],
+              distance: [0, 5_100],
+            }
+          : {
+              time: [1_775_131_200, 1_775_133_000],
+              heartrate: [105, 165],
+              distance: [0, 5_100],
+            },
+    ),
+  });
+
+  await executeJunctionJob(
+    harness.provider,
+    createJunctionJobContext({
+      importSnapshot: async (snapshot) => {
+        importedSnapshots.push(snapshot);
+        return { imported: true };
+      },
+      logger: {
+        warn: (_message, metadata) => {
+          if (typeof metadata?.errorCode === "string") warningCodes.push(metadata.errorCode);
+        },
+      },
+    }),
+    createJunctionWorkoutStreamResourceJob(),
+  );
+
+  assert.deepEqual(harness.streamRequests, ["workout-1", "workout-2", "workout-3"]);
+  const workoutIds = importedSnapshots.flatMap((snapshot) => {
+    if (!snapshot || typeof snapshot !== "object" || Array.isArray(snapshot)) return [];
+    const timeseries = Reflect.get(snapshot, "timeseries");
+    if (!timeseries || typeof timeseries !== "object" || Array.isArray(timeseries)) return [];
+    const features = Reflect.get(timeseries, "workout_stream");
+    if (!Array.isArray(features)) return [];
+    return features.map((feature) => {
+      assert.ok(feature && typeof feature === "object" && !Array.isArray(feature));
+      const workoutId = Reflect.get(feature, "workoutId");
+      assert.equal(typeof workoutId, "string");
+      return workoutId;
+    });
+  });
+  assert.deepEqual(workoutIds, ["workout-3"]);
+  assert.deepEqual(warningCodes, [
+    "JUNCTION_WORKOUT_STREAM_CARDINALITY_MISMATCH",
+    "JUNCTION_WORKOUT_STREAM_CARDINALITY_MISMATCH",
+  ]);
+});
+
 test("Junction workout_stream hard call bound is 100 index pages plus 32 serial streams", async () => {
   let indexPages = 0;
   let streamCalls = 0;

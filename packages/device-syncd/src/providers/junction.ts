@@ -4382,6 +4382,18 @@ export function createJunctionDeviceSyncProvider(
         continue;
       }
 
+      if (feature === undefined) {
+        input.context.logger.warn?.("Skipping Junction workout with unaligned metric cardinality.", {
+          errorCode: "JUNCTION_WORKOUT_STREAM_CARDINALITY_MISMATCH",
+          provider: "junction",
+          resource: "workout_stream",
+          resourceCategory: "timeseries",
+        });
+        completedIdentities.add(candidate.identity);
+        madeProgress = true;
+        continue;
+      }
+
       try {
         const preparedImport = await prepareJunctionImportSnapshot(
           input.context,
@@ -4895,12 +4907,15 @@ async function fetchJunctionTimeseriesWindow(
     const candidates = await listJunctionWorkoutStreamCandidates(junctionClient, input);
     const features: unknown[] = [];
     for (const candidate of candidates) {
-      features.push(await fetchJunctionWorkoutStreamFeature(
+      const feature = await fetchJunctionWorkoutStreamFeature(
         junctionClient,
         candidate,
         maxSamples,
         input.signal ?? null,
-      ));
+      );
+      if (feature !== undefined) {
+        features.push(feature);
+      }
     }
     return features;
   }
@@ -4952,7 +4967,7 @@ async function fetchJunctionWorkoutStreamFeature(
   maxSamples: number,
   signal: AbortSignal | null,
   collectionWorkLimit?: JunctionCollectionWorkLimit,
-): Promise<unknown> {
+): Promise<unknown | undefined> {
   const stream = await junctionClient.getWorkoutStream({
     collectionWorkLimit,
     signal,

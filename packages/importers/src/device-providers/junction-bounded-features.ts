@@ -118,7 +118,7 @@ export function selectJunctionWorkoutStreamCandidates(
 
 export function reduceJunctionWorkoutStreamPayload(
   input: JunctionWorkoutStreamReductionInput,
-): PlainObject {
+): PlainObject | undefined {
   positiveInteger(input.maxSamples, "workout sample limit");
   const summary = record(input.summary, "workout summary");
   const stream = record(input.stream, "workout stream");
@@ -126,8 +126,13 @@ export function reduceJunctionWorkoutStreamPayload(
   if (times.length === 0 || times.length > input.maxSamples) {
     invalid(`workout stream must contain 1-${input.maxSamples} timestamps`);
   }
-  const heartRates = parallelArray(stream.heartrate, times.length, "heartrate");
-  const distances = parallelArray(stream.distance, times.length, "distance");
+  const heartRateSeries = parallelArray(stream.heartrate, times.length, "heartrate");
+  const distanceSeries = parallelArray(stream.distance, times.length, "distance");
+  if (heartRateSeries.cardinalityMismatch || distanceSeries.cardinalityMismatch) {
+    return undefined;
+  }
+  const heartRates = heartRateSeries.values;
+  const distances = distanceSeries.values;
   if (!heartRates && !distances) invalid("workout stream had no supported metrics");
 
   let firstMs = Number.POSITIVE_INFINITY;
@@ -375,11 +380,16 @@ function compareSamples(left: EcgSample, right: EcgSample): number {
   return left.timestampMs - right.timestampMs || left.lead.localeCompare(right.lead);
 }
 
-function parallelArray(value: unknown, length: number, label: string): unknown[] | undefined {
-  if (value === undefined || value === null) return undefined;
+function parallelArray(
+  value: unknown,
+  length: number,
+  label: string,
+): { cardinalityMismatch: boolean; values?: unknown[] } {
+  if (value === undefined || value === null) return { cardinalityMismatch: false };
   const values = array(value, label);
-  if (values.length !== length) invalid(`${label} cardinality was invalid`);
-  return values;
+  return values.length === length
+    ? { cardinalityMismatch: false, values }
+    : { cardinalityMismatch: true };
 }
 
 function array(value: unknown, label: string): unknown[] {

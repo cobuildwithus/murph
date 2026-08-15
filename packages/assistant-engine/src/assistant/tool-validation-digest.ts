@@ -36,6 +36,7 @@ interface BuildSafeToolCallValidationDigestInput {
   requestedToolName?: string | null
   schemaFingerprint?: string | null
   schemaName?: string | null
+  schemaPaths?: readonly string[] | null
   schemaRootKeys?: readonly string[] | null
   toolName?: string | null
 }
@@ -53,6 +54,9 @@ const MAX_PATHS = 16
 const MAX_ISSUE_CODES = 12
 const MAX_PATH_ISSUES = 12
 const MAX_INPUT_SHAPE = 16
+const MAX_SCHEMA_PATHS = 256
+const MAX_SCHEMA_PATH_DEPTH = 16
+const MAX_SCHEMA_NODES = 1_024
 
 export function buildSafeToolCallValidationDigest(
   input: BuildSafeToolCallValidationDigestInput,
@@ -61,6 +65,7 @@ export function buildSafeToolCallValidationDigest(
   const rootRecord = asRecord(input.rawInput)
   const rootKeys = rootRecord ? Object.keys(rootRecord) : []
   const schemaRootKeySet = normalizeSchemaRootKeySet(input.schemaRootKeys)
+  const schemaPathSet = normalizeSchemaPathSet(input.schemaPaths)
   const schemaRootKeysPresent = schemaRootKeySet
     ? uniqueSorted(rootKeys.filter((key) => schemaRootKeySet.has(key))).slice(0, MAX_ROOT_KEYS)
     : []
@@ -68,7 +73,12 @@ export function buildSafeToolCallValidationDigest(
     ? rootKeys.length - schemaRootKeysPresent.length
     : rootKeys.length
   const inputShape = buildInputShape(input.rawInput, schemaRootKeysPresent)
-  const facts = readValidationFacts(input.error, input.rawInput, schemaRootKeySet)
+  const facts = readValidationFacts(
+    input.error,
+    input.rawInput,
+    schemaRootKeySet,
+    schemaPathSet,
+  )
 
   const fingerprintFacts = {
     invalidPaths: facts.invalidPaths,
@@ -117,10 +127,84 @@ export function isSafeSchemaLikeKey(key: string): boolean {
   )
 }
 
+/**
+ * Collect trusted validation paths from a provider-facing JSON schema.
+ *
+ * The returned paths contain only schema property names plus the `[]` array
+ * marker. They are safe to use as an allowlist for Zod issue paths because no
+ * submitted input is consulted while building them.
+ */
+export function collectSafeJsonSchemaValidationPaths(schema: unknown): string[] {
+  const paths = new Set<string>()
+  let nodeCount = 0
+
+  const visit = (
+    value: unknown,
+    segments: string[],
+    ancestors: ReadonlySet<object>,
+  ): void => {
+    if (
+      paths.size >= MAX_SCHEMA_PATHS ||
+      nodeCount >= MAX_SCHEMA_NODES ||
+      segments.length > MAX_SCHEMA_PATH_DEPTH
+    ) {
+      return
+    }
+    const record = asRecord(value)
+    if (!record || ancestors.has(record)) {
+      return
+    }
+    nodeCount += 1
+    const nextAncestors = new Set(ancestors)
+    nextAncestors.add(record)
+
+    const properties = asRecord(record.properties)
+    const patternProperties = asRecord(record.patternProperties)
+    if (properties) {
+      for (const [key, propertySchema] of Object.entries(properties)) {
+        if (!isSafeSchemaLikeKey(key) || paths.size >= MAX_SCHEMA_PATHS) {
+          continue
+        }
+        const propertySegments = [...segments, key]
+        paths.add(formatSchemaPath(propertySegments))
+        visit(propertySchema, propertySegments, nextAncestors)
+
+        if (patternProperties) {
+          for (const [pattern, patternSchema] of Object.entries(patternProperties)) {
+            if (matchesSchemaPropertyPattern(key, pattern)) {
+              visit(patternSchema, propertySegments, nextAncestors)
+            }
+          }
+        }
+      }
+    }
+
+    if (record.items !== undefined) {
+      const itemSegments = [...segments, '[]']
+      paths.add(formatSchemaPath(itemSegments))
+      visit(record.items, itemSegments, nextAncestors)
+    }
+
+    for (const branchKey of ['anyOf', 'oneOf', 'allOf'] as const) {
+      const branches = record[branchKey]
+      if (!Array.isArray(branches)) {
+        continue
+      }
+      for (const branch of branches) {
+        visit(branch, segments, nextAncestors)
+      }
+    }
+  }
+
+  visit(schema, [], new Set())
+  return uniqueSorted([...paths]).slice(0, MAX_SCHEMA_PATHS)
+}
+
 function readValidationFacts(
   error: unknown,
   rawInput: unknown,
   schemaRootKeySet: ReadonlySet<string> | null,
+  schemaPathSet: ReadonlySet<string> | null,
 ): ValidationFacts {
   if (!(error instanceof z.ZodError)) {
     return {
@@ -140,7 +224,11 @@ function readValidationFacts(
 
   for (const issue of error.issues) {
     const issueRecord = asRecord(issue)
-    const path = normalizeIssuePath(issueRecord?.path, schemaRootKeySet)
+    const path = normalizeIssuePath(
+      issueRecord?.path,
+      schemaRootKeySet,
+      schemaPathSet,
+    )
     const rawCode = typeof issueRecord?.code === 'string' ? issueRecord.code : null
 
     if (rawCode === 'unrecognized_keys') {
@@ -215,6 +303,16 @@ function normalizeIssueCode(
 
 function describeExpectedShape(issue: Record<string, unknown> | null): string | undefined {
   const code = typeof issue?.code === 'string' ? issue.code : null
+  if (code === 'custom') {
+    const expectedShape = asRecord(issue?.params)?.murphExpectedShape
+    if (
+      typeof expectedShape === 'string'
+      && expectedShape.length <= 96
+      && /^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$/.test(expectedShape)
+    ) {
+      return expectedShape
+    }
+  }
   const origin = typeof issue?.origin === 'string' ? normalizeShapeToken(issue.origin) : null
   if ((code === 'too_small' || code === 'too_big') && origin) {
     const bound = typeof issue?.minimum === 'number'
@@ -276,6 +374,7 @@ function readValueAtPath(rawInput: unknown, rawPath: unknown): unknown {
 function normalizeIssuePath(
   rawPath: unknown,
   schemaRootKeySet: ReadonlySet<string> | null,
+  schemaPathSet: ReadonlySet<string> | null,
 ): string | null {
   if (!Array.isArray(rawPath) || rawPath.length === 0) {
     return 'root'
@@ -291,7 +390,7 @@ function normalizeIssuePath(
         if (!schemaRootKeySet || !schemaRootKeySet.has(segment)) {
           return null
         }
-      } else {
+      } else if (!schemaPathSet) {
         return null
       }
       segments.push(segment)
@@ -304,7 +403,8 @@ function normalizeIssuePath(
     return null
   }
 
-  return segments.join('.')
+  const path = formatSchemaPath(segments)
+  return !schemaPathSet || schemaPathSet.has(path) ? path : null
 }
 
 function normalizeSchemaRootKeySet(keys: readonly string[] | null | undefined): ReadonlySet<string> | null {
@@ -312,6 +412,64 @@ function normalizeSchemaRootKeySet(keys: readonly string[] | null | undefined): 
     return null
   }
   return new Set(keys.filter(isSafeSchemaLikeKey).slice(0, MAX_ROOT_KEYS))
+}
+
+function normalizeSchemaPathSet(
+  paths: readonly string[] | null | undefined,
+): ReadonlySet<string> | null {
+  if (!paths || paths.length === 0) {
+    return null
+  }
+  const normalized = paths
+    .map(normalizeSchemaPath)
+    .filter((path): path is string => path !== null)
+    .slice(0, MAX_SCHEMA_PATHS)
+  return normalized.length > 0 ? new Set(normalized) : null
+}
+
+function normalizeSchemaPath(path: string): string | null {
+  if (path.length === 0 || path.length > 512) {
+    return null
+  }
+  const segments: string[] = []
+  for (const rawSegment of path.split('.')) {
+    if (rawSegment === '[]') {
+      segments.push(rawSegment)
+      continue
+    }
+    const hasArrayMarker = rawSegment.endsWith('[]')
+    const property = hasArrayMarker ? rawSegment.slice(0, -2) : rawSegment
+    if (!isSafeSchemaLikeKey(property)) {
+      return null
+    }
+    segments.push(property)
+    if (hasArrayMarker) {
+      segments.push('[]')
+    }
+  }
+  return segments.length <= MAX_SCHEMA_PATH_DEPTH
+    ? formatSchemaPath(segments)
+    : null
+}
+
+function formatSchemaPath(segments: readonly string[]): string {
+  return segments.reduce((path, segment) => {
+    if (segment === '[]') {
+      return `${path}[]`
+    }
+    return path.length === 0 ? segment : `${path}.${segment}`
+  }, '')
+}
+
+function matchesSchemaPropertyPattern(key: string, pattern: string): boolean {
+  if (pattern.length === 0 || pattern.length > 256) {
+    return false
+  }
+  try {
+    return new RegExp(pattern, 'u').test(key)
+  } catch {
+    return false
+  }
 }
 
 function describeValueShape(value: unknown): string | null {

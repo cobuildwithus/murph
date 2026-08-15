@@ -46,34 +46,77 @@ export async function requireHostedRuntimeActiveAccessForUpdateTx(
     prisma: Prisma.TransactionClient;
   },
 ): Promise<void> {
-  const ownerMemberId = await readHostedThreadContainerOwnerMemberIdTx({
-    prisma: options.prisma,
-    userId,
-  });
-  if (ownerMemberId) {
+  await requireHostedRuntimeMembersActiveAccessForUpdateTx([userId], options);
+}
+
+/**
+ * Locks owner clusters in owner-id order, with each owner before its requested
+ * runtimes. This composes with account deletion's owner-before-runtime order,
+ * while reciprocal cross-owned requests still share one first owner cluster.
+ */
+export async function requireHostedRuntimeMembersActiveAccessForUpdateTx(
+  userIds: readonly string[],
+  options: Omit<HostedRuntimeActiveAccessOptions, "prisma"> & {
+    prisma: Prisma.TransactionClient;
+  },
+): Promise<void> {
+  const sortedUserIds = [...new Set(userIds)].sort();
+  const ownerMemberIdsByUserId = new Map<string, string | null>();
+
+  for (const userId of sortedUserIds) {
+    ownerMemberIdsByUserId.set(
+      userId,
+      await readHostedThreadContainerOwnerMemberIdTx({
+        prisma: options.prisma,
+        userId,
+      }),
+    );
+  }
+
+  const requestedMemberIdsByOwner = new Map<string, Set<string>>();
+  for (const userId of sortedUserIds) {
+    const ownerMemberId = ownerMemberIdsByUserId.get(userId) ?? userId;
+    const requestedMemberIds = requestedMemberIdsByOwner.get(ownerMemberId)
+      ?? new Set<string>();
+    requestedMemberIds.add(userId);
+    requestedMemberIdsByOwner.set(ownerMemberId, requestedMemberIds);
+  }
+
+  for (const ownerMemberId of [...requestedMemberIdsByOwner.keys()].sort()) {
     await lockHostedRuntimeMemberForUpdateTx({
       memberId: ownerMemberId,
       prisma: options.prisma,
     });
-  }
-  await lockHostedRuntimeMemberForUpdateTx({
-    memberId: userId,
-    prisma: options.prisma,
-  });
-  const lockedOwnerMemberId = await lockHostedThreadContainerOwnerMemberIdTx({
-    prisma: options.prisma,
-    userId,
-  });
-  if (lockedOwnerMemberId !== ownerMemberId) {
-    throw hostedOnboardingError({
-      code: "HOSTED_RUNTIME_ACCESS_AUTHORITY_CHANGED",
-      httpStatus: 409,
-      message: "Hosted runtime access changed while validating authority. Retry the request.",
-      retryable: true,
-    });
+    const requestedRuntimeIds = [...(requestedMemberIdsByOwner.get(ownerMemberId)
+      ?? [])]
+      .filter((memberId) => memberId !== ownerMemberId)
+      .sort();
+    for (const memberId of requestedRuntimeIds) {
+      await lockHostedRuntimeMemberForUpdateTx({
+        memberId,
+        prisma: options.prisma,
+      });
+    }
   }
 
-  await requireHostedRuntimeActiveAccess(userId, options);
+  for (const userId of sortedUserIds) {
+    const lockedOwnerMemberId = await lockHostedThreadContainerOwnerMemberIdTx({
+      prisma: options.prisma,
+      userId,
+    });
+    if (lockedOwnerMemberId !== ownerMemberIdsByUserId.get(userId)) {
+      throw hostedOnboardingError({
+        code: "HOSTED_RUNTIME_ACCESS_AUTHORITY_CHANGED",
+        httpStatus: 409,
+        message: "Hosted runtime access changed while validating authority. Retry the request.",
+        retryable: true,
+      });
+    }
+  }
+
+  for (const userId of sortedUserIds) {
+    await requireHostedRuntimeActiveAccess(userId, options);
+  }
 }
 
 async function lockHostedRuntimeMemberForUpdateTx(input: {
