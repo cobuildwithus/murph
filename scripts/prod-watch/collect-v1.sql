@@ -51,6 +51,7 @@ issue_fingerprints AS (
     coalesce(issue.error_code, 'none'),
     coalesce(issue.operation, 'none'),
     coalesce(issue.surface, 'none')
+  HAVING count(*) FILTER (WHERE issue.occurred_at >= params.current_start) > 0
   ORDER BY
     (
       concat_ws(' ', issue.component, issue.phase, issue.issue_kind, coalesce(issue.error_code, 'none'), coalesce(issue.operation, 'none'), coalesce(issue.surface, 'none'))

@@ -35,6 +35,7 @@ import {
   parseProviderEvidence,
   renderActiveIncidents,
   renderIncidentHistory,
+  renderMonitorStatus,
   safeErrorCode,
   transitionIncident,
   updateStateFromSnapshot,
@@ -1363,6 +1364,7 @@ describe("production-watch snapshot contract", () => {
       const cloudflareIncidents = state.incidents.filter((incident) => incident.source === "cloudflare");
       expect(cloudflareIncidents.length).toBeGreaterThan(0);
       expect(cloudflareIncidents.every((incident) => incident.category === "monitor")).toBe(true);
+      expect(state.monitor.sourceFailureStreaks.cloudflare).toBe(2);
     }
 
     const firstFresh = makeSnapshot("fresh", new Date("2026-08-09T20:00:00.000Z"));
@@ -1378,6 +1380,8 @@ describe("production-watch snapshot contract", () => {
     freshState = updateStateFromSnapshot(freshState, firstFresh).state;
     freshState = updateStateFromSnapshot(freshState, secondFresh).state;
     expect(freshState.incidents.some((incident) => incident.source === "cloudflare")).toBe(false);
+    expect(freshState.monitor.sourceFailureStreaks.cloudflare).toBe(0);
+    expect(renderMonitorStatus(freshState)).toContain("| cloudflare | ok | ok | on_demand | 120 | — | 0 |");
   });
 
   it("treats clinical, consent, and integrity code paths as sensitive", () => {
@@ -2543,13 +2547,14 @@ describe("production-watch locking and dry-run behavior", () => {
       sharedEnv,
     );
     expect(seeded.status, seeded.stderr).toBe(0);
+    const statePath = path.join(runtimeRoot, "operations", "prod-watch", "state.v1.json");
+    const stateAfterSeed = JSON.parse(readFileSync(statePath, "utf8")) as ProductionWatchState;
     const validShadow = runProdWatch(
       ["run", "--provider-shadow", "--settling-delay-seconds", "0"],
       runtimeRoot,
       sharedEnv,
     );
     expect(validShadow.status, validShadow.stderr).toBe(0);
-    const statePath = path.join(runtimeRoot, "operations", "prod-watch", "state.v1.json");
     const stateAfterValidShadow = JSON.parse(readFileSync(statePath, "utf8")) as ProductionWatchState;
 
     const failedShadow = runProdWatch(
@@ -2563,6 +2568,8 @@ describe("production-watch locking and dry-run behavior", () => {
     expect(failedShadow.status, failedShadow.stderr).toBe(0);
     const stateAfterFailedShadow = JSON.parse(readFileSync(statePath, "utf8")) as ProductionWatchState;
     const providerState = (state: ProductionWatchState) => ({
+      lastMonitorStatus: state.monitor.lastMonitorStatus,
+      lastEvidenceComplete: state.monitor.lastEvidenceComplete,
       sourceFailureStreaks: Object.fromEntries(Object.entries(state.monitor.sourceFailureStreaks)
         .filter(([source]) => source !== "database")),
       sourceObservations: Object.fromEntries(Object.entries(state.monitor.sourceObservations)
@@ -2572,6 +2579,7 @@ describe("production-watch locking and dry-run behavior", () => {
         .filter(([, streak]) => streak.source !== "database")),
       incidents: state.incidents.filter((incident) => incident.source !== "database"),
     });
+    expect(providerState(stateAfterValidShadow)).toEqual(providerState(stateAfterSeed));
     expect(providerState(stateAfterFailedShadow)).toEqual(providerState(stateAfterValidShadow));
     const failedSnapshot = JSON.parse(readFileSync(
       path.join(runtimeRoot, "projections", "prod-watch", "latest.snapshot.v1.json"),
@@ -3261,6 +3269,8 @@ describe("production-watch static safety contracts", () => {
     expect(sql).toContain("md5(concat_ws(E'\\x1f', fingerprint, operation, surface))");
     expect(sql).toContain("~* '(auth|billing|canonical|clinical|consent|corrupt|credential|");
     expect(sql.indexOf("~* '(auth|billing")).toBeLessThan(sql.indexOf("LIMIT 13"));
+    expect(sql).toContain("HAVING count(*) FILTER (WHERE issue.occurred_at >= params.current_start) > 0");
+    expect(sql.indexOf("HAVING count(*) FILTER")).toBeLessThan(sql.indexOf("ORDER BY"));
     expect(sql).toContain("issue.severity IN ('info', 'warning', 'error')");
     expect(runtimeIssueDomain).toContain('AssistantRuntimeIssueEnvironment = "hosted" | "local"');
     expect(runtimeIssueWriter).toContain("operation,");

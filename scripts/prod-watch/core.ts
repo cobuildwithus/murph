@@ -699,21 +699,7 @@ export function buildSnapshot(input: BuildSnapshotInput): ProductionWatchSnapsho
   const collectedSources = sourceHealth
     .filter((source) => source.status === "ok" || source.status === "degraded")
     .map((source) => source.source);
-  const evidenceComplete = sourceHealth.every(
-    (source) => source.coverage === "complete"
-      && source.auth !== "failed"
-      && (source.freshnessSeconds ?? Number.POSITIVE_INFINITY) <= 1_800,
-  );
-  const monitorStatus = failures.length > 0 || sourceHealth.some(
-    (source) => source.status === "unavailable"
-      || source.status === "degraded"
-      || source.auth === "failed"
-      || (source.freshnessSeconds ?? 0) > 1_800,
-  )
-    ? "degraded"
-    : evidenceComplete
-      ? "healthy"
-      : "partial";
+  const monitorSummary = summarizeSourceHealth(sourceHealth);
 
   return {
     schemaVersion: SNAPSHOT_SCHEMA_VERSION,
@@ -739,8 +725,8 @@ export function buildSnapshot(input: BuildSnapshotInput): ProductionWatchSnapsho
       },
     },
     monitor: {
-      status: monitorStatus,
-      evidenceComplete,
+      status: monitorSummary.status,
+      evidenceComplete: monitorSummary.evidenceComplete,
       configuredSources: [...input.configuredSources],
       collectedSources,
     },
@@ -1250,19 +1236,63 @@ function sourceObservationsFromSnapshot(
       classification = "unavailable";
     } else if ((health.freshnessSeconds ?? Number.POSITIVE_INFINITY) > 1_800) {
       classification = "stale";
-    } else if (health.status === "degraded" || health.coverage !== "complete") {
-      classification = "degraded";
     } else if (
       health.status === "ok"
       && (health.auth === "ok" || health.auth === "not_required")
+      && (health.freshnessSeconds ?? Number.POSITIVE_INFINITY) <= 1_800
     ) {
       classification = "scorable";
+    } else if (health.status === "degraded" || health.coverage !== "complete") {
+      classification = "degraded";
     } else {
       classification = "unavailable";
     }
     observations.set(health.source, { observedAt, classification });
   }
   return observations;
+}
+
+function summarizeSourceHealth(
+  sourceHealth: SourceHealth[],
+): Pick<ProductionWatchSnapshot["monitor"], "evidenceComplete" | "status"> {
+  const evidenceComplete = sourceHealth.length > 0 && sourceHealth.every(
+    (source) => source.coverage === "complete"
+      && source.auth !== "failed"
+      && (source.freshnessSeconds ?? Number.POSITIVE_INFINITY) <= 1_800,
+  );
+  const degraded = sourceHealth.some(
+    (source) => source.errorCode !== undefined
+      || source.status === "unavailable"
+      || source.status === "degraded"
+      || source.auth === "failed"
+      || (source.freshnessSeconds ?? 0) > 1_800,
+  );
+  return {
+    evidenceComplete,
+    status: degraded ? "degraded" : evidenceComplete ? "healthy" : "partial",
+  };
+}
+
+function mergeSourceHealthForState(
+  previousSourceHealth: SourceHealth[],
+  snapshot: ProductionWatchSnapshot,
+  advancingSourceObservations: Map<WatchSource, SourceObservation>,
+): SourceHealth[] {
+  const bySource = new Map<WatchSource, SourceHealth>();
+  for (const health of previousSourceHealth) {
+    if (snapshot.monitor.configuredSources.includes(health.source)) {
+      bySource.set(health.source, structuredClone(health) as SourceHealth);
+    }
+  }
+  for (const health of snapshot.sourceHealth) {
+    if (advancingSourceObservations.has(health.source) || !bySource.has(health.source)) {
+      bySource.set(health.source, structuredClone(health) as SourceHealth);
+    }
+  }
+  return snapshot.monitor.configuredSources.flatMap((source) => {
+    const health = bySource.get(source);
+    return health === undefined ? [] : [health];
+  });
 }
 
 export function updateStateFromSnapshot(
@@ -1276,9 +1306,6 @@ export function updateStateFromSnapshot(
   next.monitor.lastRunAt = snapshot.generatedAt;
   next.monitor.lastDurationMs = snapshot.run.durationMs;
   next.monitor.configuredSources = [...snapshot.monitor.configuredSources];
-  next.monitor.lastMonitorStatus = snapshot.monitor.status;
-  next.monitor.lastEvidenceComplete = snapshot.monitor.evidenceComplete;
-  next.monitor.lastSourceHealth = structuredClone(snapshot.sourceHealth) as SourceHealth[];
   if (snapshot.run.schedulerLagMs !== undefined) {
     next.monitor.lastSchedulerLagMs = snapshot.run.schedulerLagMs;
   }
@@ -1294,6 +1321,14 @@ export function updateStateFromSnapshot(
       next.monitor.sourceObservations[source] = observation;
     }
   }
+  next.monitor.lastSourceHealth = mergeSourceHealthForState(
+    next.monitor.lastSourceHealth,
+    snapshot,
+    advancingSourceObservations,
+  );
+  const mergedMonitorSummary = summarizeSourceHealth(next.monitor.lastSourceHealth);
+  next.monitor.lastMonitorStatus = mergedMonitorSummary.status;
+  next.monitor.lastEvidenceComplete = mergedMonitorSummary.evidenceComplete;
   const databaseObservation = advancingSourceObservations.get("database");
   if (databaseObservation !== undefined) {
     const databaseHealthy = databaseObservation.classification === "scorable";
