@@ -9,7 +9,10 @@ import {
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import { retireMaterializedExportPack } from '@murphai/vault-usecases/export-packs'
 import { recordAssistantDiagnosticEvent } from '../diagnostics.js'
-import { hasAssistantOutboxDeliveryEvidence } from '../response-media.js'
+import {
+  carriesAssistantOutboxPersistedDeliveryCompletionCheckpoint,
+  hasAssistantOutboxDeliveryEvidence,
+} from '../response-media.js'
 import { withAssistantRuntimeWriteLock } from '../runtime-write-lock.js'
 import { ensureAssistantState } from '../store/persistence.js'
 import { writeJsonFileAtomic } from '../shared.js'
@@ -415,7 +418,7 @@ export async function updateAssistantOutboxAfterDispatchFailure(input: {
     const baseIntent = current ?? input.sending
     if (
       input.deliveryMayHaveSucceeded &&
-      carriesPersistedDeliveryCompletionCheckpoint(baseIntent)
+      carriesAssistantOutboxPersistedDeliveryCompletionCheckpoint(baseIntent)
     ) {
       return baseIntent
     }
@@ -553,17 +556,6 @@ function carriesNonConfirmableLinqRichLinkCheckpoint(
     delivery?.channel === 'linq' &&
     intent.deliveryConfirmationPending === false &&
     delivery.providerMessageIds?.length === 1
-}
-
-function carriesPersistedDeliveryCompletionCheckpoint(
-  intent: AssistantOutboxIntent,
-): boolean {
-  return intent.status === 'sending' &&
-    intent.delivery !== null &&
-    (
-      intent.deliveryConfirmationPending ||
-      !intent.deliveryTransportIdempotent
-    )
 }
 
 function isAmbiguousDeliveryWithoutProviderIds(input: {

@@ -177,6 +177,17 @@ Updated: 2026-08-14
   every recovery terminalization, and retains that checkpoint if the optional
   post-persistence hook fails. No provider replay or new persisted field is
   introduced.
+- Final ReviewGPT round 8 found that route cleanup, marker-missing migration,
+  and exact-reply lookup still rejected that durable message-delivery
+  checkpoint during its stale-recovery grace window. The correction promotes
+  the existing completion-checkpoint predicate into the shared delivery
+  evidence owner and reuses it only in the already-authorized non-sent evidence
+  mode. Sent-only unanchored selection remains unchanged, and message reactions
+  retain their separate exact-consume confirmation path. No new state, repair
+  loop, migration version, scheduler, or selector exception is introduced. A
+  proposed legacy media fallback was rejected because production delivery
+  already records explicit media-effect metadata; the existing recovery test
+  fixture now represents that contract directly instead.
 
 ## Verification
 
@@ -225,3 +236,10 @@ Updated: 2026-08-14
   diagnostic, cron success, and next-run state derive from actual completion.
   The three affected Vitest files, assistant-engine typecheck, build, and diff
   validation pass under Node 24.14.1.
+- ReviewGPT round 8 remediation: the 32-test exact route-state suite covers
+  checkpoint authority retention, marker-missing migration, sent-only
+  exclusion, ambiguous retry exclusion, non-idempotent message checkpoints,
+  and actual authority removal. Four focused outbox recovery tests cover
+  post-persistence message completion, reaction confirmation, stale reaction
+  recovery, and non-idempotent no-replay behavior; the 30-test dispatch-state
+  suite and assistant-engine typecheck also pass.

@@ -26,6 +26,10 @@ import {
 import {
   AUTO_REPLY_RECEIPT_CROSS_SESSION_CONTEXT_INTENT_ID_KEY,
 } from '../src/assistant/automation/auto-reply-retry.ts'
+import {
+  carriesAssistantOutboxPersistedDeliveryCompletionCheckpoint,
+  hasAssistantOutboxDeliveryEvidence,
+} from '../src/assistant/response-media.ts'
 import { withAssistantRuntimeWriteLock } from '../src/assistant/runtime-write-lock.ts'
 import {
   appendAssistantTurnReceiptEvent,
@@ -1193,6 +1197,149 @@ describe('assistant auto-reply exact route state', () => {
     })
   })
 
+  it('keeps exact route authority for full Linq delivery checkpoints during confirmation grace', async () => {
+    const vault = await createTempVault('full-delivery-checkpoint-authority')
+    const outboxIntent = createPersistedLinqMediaCompletionCheckpoint({
+      intentId: 'intent-full-delivery-checkpoint-authority',
+    })
+    const route = requireRoute(resolveAssistantAutoReplyOutboxExactRoute(
+      outboxIntent,
+    ))
+    const deliveryOrder = order(outboxIntent.intentId, BASE_TIME)
+    const delivery = outboxIntent.delivery
+    if (!delivery || delivery.kind === 'message-reaction') {
+      throw new Error('expected message delivery')
+    }
+
+    expect(carriesAssistantOutboxPersistedDeliveryCompletionCheckpoint(
+      outboxIntent,
+    )).toBe(true)
+    expect(hasAssistantOutboxDeliveryEvidence(outboxIntent, true)).toBe(true)
+    expect(hasAssistantOutboxDeliveryEvidence(outboxIntent, false)).toBe(false)
+    expect(delivery.providerMessageIds).toEqual([
+      `provider-${outboxIntent.intentId}-media`,
+      `provider-${outboxIntent.intentId}-rich-link`,
+    ])
+
+    await completeMigration(vault)
+    const running = await createRunningReceipt({
+      intentId: outboxIntent.intentId,
+      turnId: 'turn-full-delivery-checkpoint-authority',
+      vault,
+    })
+    await claimAssistantAutoReplyRouteContext({
+      anchored: true,
+      order: deliveryOrder,
+      routeDigest: route.digest,
+      turnId: running.turnId,
+      vault,
+    })
+    const completed = await finalizeAssistantTurnReceipt({
+      completedAt: LATER_TIME,
+      status: 'completed',
+      turnId: running.turnId,
+      vault,
+    })
+    if (!completed) {
+      throw new Error('expected completed full-checkpoint receipt')
+    }
+
+    await maintainAtVault({
+      outboxIntents: [outboxIntent],
+      receipts: [completed],
+      vault,
+    })
+    await expect(readAssistantAutoReplyRouteState({
+      routeDigest: route.digest,
+      vault,
+    })).resolves.toEqual({
+      kind: 'ready',
+      settledThrough: deliveryOrder,
+    })
+
+    const retryablePending = assistantOutboxIntentSchema.parse({
+      ...outboxIntent,
+      lastError: {
+        code: 'ASSISTANT_DELIVERY_CONFIRMATION_PENDING',
+        message: 'Assistant delivery confirmation is pending.',
+      },
+      nextAttemptAt: LATER_TIME,
+      status: 'retryable',
+      updatedAt: LATER_TIME,
+    })
+    expect(carriesAssistantOutboxPersistedDeliveryCompletionCheckpoint(
+      retryablePending,
+    )).toBe(false)
+    expect(hasAssistantOutboxDeliveryEvidence(retryablePending, true))
+      .toBe(false)
+
+    await maintainAtVault({
+      outboxIntents: [],
+      receipts: [completed],
+      vault,
+    })
+    await expect(readAssistantAutoReplyRouteState({
+      routeDigest: route.digest,
+      vault,
+    })).resolves.toEqual({
+      kind: 'ready',
+      settledThrough: null,
+    })
+  })
+
+  it('migrates completed receipts through full delivery checkpoints before the route marker exists', async () => {
+    const cases = [
+      {
+        label: 'idempotent-pending',
+        outboxIntent: createPersistedLinqMediaCompletionCheckpoint({
+          intentId: 'intent-full-checkpoint-idempotent-pending',
+        }),
+      },
+      {
+        label: 'non-idempotent',
+        outboxIntent: createPersistedLinqMediaCompletionCheckpoint({
+          deliveryConfirmationPending: false,
+          deliveryTransportIdempotent: false,
+          intentId: 'intent-full-checkpoint-non-idempotent',
+        }),
+      },
+    ]
+
+    for (const testCase of cases) {
+      const vault = await createTempVault(
+        `full-delivery-checkpoint-migration-${testCase.label}`,
+      )
+      const paths = resolveAssistantStatePaths(vault)
+      const route = requireRoute(resolveAssistantAutoReplyOutboxExactRoute(
+        testCase.outboxIntent,
+      ))
+      const receipt = createReceipt({
+        intentId: testCase.outboxIntent.intentId,
+        status: 'completed',
+        turnId: `turn-${testCase.outboxIntent.intentId}`,
+      })
+
+      await expect(maintainAssistantAutoReplyRouteStateAtPaths({
+        outboxIntents: [testCase.outboxIntent],
+        outboxTrusted: true,
+        paths,
+        receipts: [receipt],
+        receiptsTrusted: true,
+      })).resolves.toMatchObject({ changed: true, trusted: true })
+      await expect(readFile(
+        resolveAssistantAutoReplyRouteMigrationPath(paths),
+        'utf8',
+      )).resolves.toContain('murph.assistant-auto-reply-route-migration')
+      await expect(readAssistantAutoReplyRouteState({
+        routeDigest: route.digest,
+        vault,
+      })).resolves.toEqual({
+        kind: 'ready',
+        settledThrough: order(testCase.outboxIntent.intentId, BASE_TIME),
+      })
+    }
+  })
+
   it('restores the opaque route watermark with the portable assistant auto-reply subtree', async () => {
     const sourceVault = await createTempVault('restore-source')
     const restoredVault = await createTempVault('restore-target')
@@ -1351,6 +1498,47 @@ function createAcceptedNonSentLinqMediaIntent(input: {
     sentAt: null,
     status: 'retryable',
     updatedAt: BASE_TIME,
+  })
+}
+
+function createPersistedLinqMediaCompletionCheckpoint(input: {
+  deliveryConfirmationPending?: boolean
+  deliveryTransportIdempotent?: boolean
+  intentId: string
+}): AssistantOutboxIntent {
+  const intent = createAcceptedNonSentLinqMediaIntent({
+    intentId: input.intentId,
+  })
+  if (!intent.delivery || intent.delivery.kind === 'message-reaction') {
+    throw new Error('expected message delivery')
+  }
+  const mediaProviderMessageId = `provider-${input.intentId}-media`
+  const richLinkProviderMessageId = `provider-${input.intentId}-rich-link`
+  return assistantOutboxIntentSchema.parse({
+    ...intent,
+    delivery: {
+      ...intent.delivery,
+      providerMessageEffects: [
+        {
+          carriesIntentMedia: true,
+          message: 'Generated image',
+          providerMessageId: mediaProviderMessageId,
+        },
+      ],
+      providerMessageId: richLinkProviderMessageId,
+      providerMessageIds: [mediaProviderMessageId, richLinkProviderMessageId],
+      sentAt: BASE_TIME,
+    },
+    deliveryConfirmationPending: input.deliveryConfirmationPending ?? true,
+    deliveryTransportIdempotent: input.deliveryTransportIdempotent ?? true,
+    lastError: {
+      code: 'ASSISTANT_DELIVERY_CONFIRMATION_PENDING',
+      message: 'Assistant delivery confirmation is pending.',
+    },
+    nextAttemptAt: null,
+    sentAt: null,
+    status: 'sending',
+    updatedAt: LATER_TIME,
   })
 }
 

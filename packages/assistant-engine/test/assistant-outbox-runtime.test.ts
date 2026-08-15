@@ -3166,6 +3166,11 @@ describe('assistant outbox runtime', () => {
       delivery: createDelivery({
         channel: 'linq',
         idempotencyKey: seeded.deliveryIdempotencyKey,
+        providerMessageEffects: [{
+          carriesIntentMedia: true,
+          message: 'Checkpoint hook recovery reminder',
+          providerMessageId: 'provider-completion-checkpoint-media',
+        }],
         providerMessageId: 'provider-completion-checkpoint-media',
         providerMessageIds: ['provider-completion-checkpoint-media'],
         providerThreadId: 'linq-thread-completion-checkpoint-hook',
@@ -3200,6 +3205,11 @@ describe('assistant outbox runtime', () => {
       delivery: createDelivery({
         channel: 'linq',
         idempotencyKey: seeded.deliveryIdempotencyKey,
+        providerMessageEffects: [{
+          carriesIntentMedia: true,
+          message: 'Checkpoint hook recovery reminder',
+          providerMessageId: 'provider-completion-checkpoint-media',
+        }],
         providerMessageId: 'provider-completion-checkpoint-media',
         providerMessageIds: [
           'provider-completion-checkpoint-media',
