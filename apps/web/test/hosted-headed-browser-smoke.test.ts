@@ -32,8 +32,10 @@ describe("hosted headed browser boundary", () => {
             '<span id="continue-label">Continue synthetic-private-marker</span>',
             '<div style="width:10px;height:10px" role="button"',
             ' aria-labelledby="continue-label" aria-disabled="true"></div>',
+            '<button>Proceed synthetic-private-marker</button>',
             '<a href="#">Privacy policy synthetic-private-marker</a>',
             '<iframe srcdoc="<button>Authorize synthetic-private-marker</button>',
+            '<button>Proceed synthetic-private-marker</button>',
             '<input type=checkbox aria-label=&quot;Required consent',
             ' synthetic-private-marker&quot;>"></iframe>',
           ].join(""),
@@ -46,18 +48,6 @@ describe("hosted headed browser boundary", () => {
         await expect(page.getByRole("button", { name: /continue/iu }).isEnabled())
           .resolves.toBe(false);
 
-        let now = 0;
-        const timedPage = new Proxy(page, {
-          get(target, property) {
-            if (property === "waitForTimeout") {
-              return async (duration: number) => {
-                now += duration;
-              };
-            }
-            const value = Reflect.get(target, property, target);
-            return typeof value === "function" ? value.bind(target) : value;
-          },
-        });
         const config = readHostedLocalJunctionBrowserConfigForTest({
           CI: "1",
           NODE_ENV: "test",
@@ -71,28 +61,69 @@ describe("hosted headed browser boundary", () => {
           MURPH_E2E_PROVIDER_TIMEOUT_MS: "30000",
           MURPH_E2E_WEB_BASE_URL: "https://app.example.test",
         });
+        const readFailure = async (subjectPage: typeof page) => {
+          let now = 0;
+          const timedPage = new Proxy(subjectPage, {
+            get(target, property) {
+              if (property === "waitForTimeout") {
+                return async (duration: number) => {
+                  now += duration;
+                };
+              }
+              const value = Reflect.get(target, property, target);
+              return typeof value === "function" ? value.bind(target) : value;
+            },
+          });
+          let failure: Error | undefined;
+          try {
+            await completeExternalJunctionAuthorizationForTest(
+              timedPage,
+              config,
+              () => now,
+            );
+          } catch (error) {
+            if (error instanceof Error) failure = error;
+          }
+          return { failure, now };
+        };
 
-        let failure: Error | undefined;
-        try {
-          await completeExternalJunctionAuthorizationForTest(
-            timedPage,
-            config,
-            () => now,
-          );
-        } catch (error) {
-          if (error instanceof Error) failure = error;
-        }
-
-        expect(failure?.message).toContain([
+        const complex = await readFailure(page);
+        expect(complex.failure?.message).toContain([
           "Authorization surface: childFrames=1 mainActions=1",
-          "mainEnabledActions=0 childActions=1 childEnabledActions=1",
+          "mainEnabledActions=0 mainOtherActions=2 childActions=1",
+          "childEnabledActions=1 childOtherActions=1",
           "mainUncheckedCheckboxes=0 childUncheckedCheckboxes=1.",
         ].join(" "));
-        expect(failure?.message).not.toContain("synthetic-private-marker");
-        expect(failure?.message).not.toContain("id.whoop.com");
-        expect(failure?.message).not.toContain("browser-canary@example.invalid");
-        expect(failure?.message).not.toContain("opaque-password");
-        expect(now).toBe(15_000);
+        expect(complex.failure?.message).not.toContain("synthetic-private-marker");
+        expect(complex.failure?.message).not.toContain("id.whoop.com");
+        expect(complex.failure?.message).not.toContain("browser-canary@example.invalid");
+        expect(complex.failure?.message).not.toContain("opaque-password");
+        expect(complex.now).toBe(15_000);
+
+        const emptyPage = await browser.newPage();
+        await emptyPage.route("https://id.whoop.com/empty", (route) =>
+          route.fulfill({ body: "", contentType: "text/html" })
+        );
+        await emptyPage.goto("https://id.whoop.com/empty");
+        const empty = await readFailure(emptyPage);
+
+        const unknownPage = await browser.newPage();
+        await unknownPage.route("https://id.whoop.com/unknown", (route) =>
+          route.fulfill({
+            body: "<button>Proceed synthetic-private-marker</button>",
+            contentType: "text/html",
+          })
+        );
+        await unknownPage.goto("https://id.whoop.com/unknown");
+        const unknown = await readFailure(unknownPage);
+
+        expect(empty.failure?.message).toContain(
+          "mainOtherActions=0 childActions=0",
+        );
+        expect(unknown.failure?.message).toContain(
+          "mainOtherActions=1 childActions=0",
+        );
+        expect(unknown.failure?.message).not.toContain("synthetic-private-marker");
       } finally {
         await browser.close();
       }

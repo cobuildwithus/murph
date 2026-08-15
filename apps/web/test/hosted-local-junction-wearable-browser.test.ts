@@ -212,7 +212,8 @@ describe("hosted-local Junction wearable browser authorization", () => {
       [
         "WHOOP did not expose an automated authorization action.",
         "Authorization surface: childFrames=0 mainActions=0",
-        "mainEnabledActions=0 childActions=0 childEnabledActions=0",
+        "mainEnabledActions=0 mainOtherActions=0 childActions=0",
+        "childEnabledActions=0 childOtherActions=0",
         "mainUncheckedCheckboxes=0 childUncheckedCheckboxes=0.",
       ].join(" "),
     );
@@ -223,11 +224,14 @@ describe("hosted-local Junction wearable browser authorization", () => {
   it("uses Playwright action state and attributes child-frame controls", async () => {
     let now = 0;
     const mainFrame = authorizationFrame({
-      buttons: [{ accessibleName: "Continue", enabled: false, text: "" }],
+      buttons: [
+        { accessibleName: "Continue", enabled: false, text: "" },
+        { text: "Proceed" },
+      ],
       links: [{ text: "Privacy policy" }],
     });
     const childFrame = authorizationFrame({
-      buttons: [{ text: "Authorize" }],
+      buttons: [{ text: "Authorize" }, { text: "Proceed" }],
       checkboxes: [{ checked: false, text: "Required consent" }],
     });
     const page = {
@@ -248,7 +252,8 @@ describe("hosted-local Junction wearable browser authorization", () => {
       () => now,
     )).rejects.toThrow([
       "Authorization surface: childFrames=1 mainActions=1",
-      "mainEnabledActions=0 childActions=1 childEnabledActions=1",
+      "mainEnabledActions=0 mainOtherActions=2 childActions=1",
+      "childEnabledActions=1 childOtherActions=1",
       "mainUncheckedCheckboxes=0 childUncheckedCheckboxes=1.",
     ].join(" "));
   });

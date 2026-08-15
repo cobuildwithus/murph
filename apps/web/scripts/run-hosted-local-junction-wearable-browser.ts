@@ -393,15 +393,27 @@ async function readAuthorizationActionState(
 
 async function describeAuthorizationSurface(page: Page): Promise<string> {
   const countScope = async (scope: Pick<Page, "getByRole">) => {
-    let actions = 0;
-    let enabledActions = 0;
-    for (const role of ["button", "link"] as const) {
-      const controls = scope.getByRole(role, { name: AUTH_ACTION_PATTERN });
+    const countActions = async (controls: Locator) => {
+      let actions = 0;
+      let enabledActions = 0;
       for (let index = 0; index < await controls.count(); index += 1) {
         const state = await readAuthorizationActionState(controls.nth(index));
         if (state !== null) actions += 1;
         if (state === "enabled") enabledActions += 1;
       }
+      return { actions, enabledActions };
+    };
+    let actions = 0;
+    let allActions = 0;
+    let enabledActions = 0;
+    for (const role of ["button", "link"] as const) {
+      const all = await countActions(scope.getByRole(role));
+      const recognized = await countActions(
+        scope.getByRole(role, { name: AUTH_ACTION_PATTERN }),
+      );
+      allActions += all.actions;
+      actions += recognized.actions;
+      enabledActions += recognized.enabledActions;
     }
     const checkboxes = scope.getByRole("checkbox");
     let uncheckedCheckboxes = 0;
@@ -414,7 +426,12 @@ async function describeAuthorizationSurface(page: Page): Promise<string> {
         uncheckedCheckboxes += 1;
       }
     }
-    return { actions, enabledActions, uncheckedCheckboxes };
+    return {
+      actions,
+      enabledActions,
+      otherActions: Math.max(0, allActions - actions),
+      uncheckedCheckboxes,
+    };
   };
   const mainFrame = page.mainFrame();
   const childFrames = page.frames().filter((frame) => frame !== mainFrame);
@@ -425,16 +442,24 @@ async function describeAuthorizationSurface(page: Page): Promise<string> {
   const child = children.reduce((total, current) => ({
     actions: total.actions + current.actions,
     enabledActions: total.enabledActions + current.enabledActions,
+    otherActions: total.otherActions + current.otherActions,
     uncheckedCheckboxes:
       total.uncheckedCheckboxes + current.uncheckedCheckboxes,
-  }), { actions: 0, enabledActions: 0, uncheckedCheckboxes: 0 });
+  }), {
+    actions: 0,
+    enabledActions: 0,
+    otherActions: 0,
+    uncheckedCheckboxes: 0,
+  });
   return [
     "Authorization surface:",
     `childFrames=${childFrames.length}`,
     `mainActions=${main.actions}`,
     `mainEnabledActions=${main.enabledActions}`,
+    `mainOtherActions=${main.otherActions}`,
     `childActions=${child.actions}`,
     `childEnabledActions=${child.enabledActions}`,
+    `childOtherActions=${child.otherActions}`,
     `mainUncheckedCheckboxes=${main.uncheckedCheckboxes}`,
     `childUncheckedCheckboxes=${child.uncheckedCheckboxes}.`,
   ].join(" ");
