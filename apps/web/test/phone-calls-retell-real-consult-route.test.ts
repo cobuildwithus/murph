@@ -254,6 +254,7 @@ function buildHostedPhoneCall(overrides: Partial<HostedPhoneCall> = {}): HostedP
     requestKey: "phone_call_request_1",
     resultEncrypted: null,
     resultJson: null,
+    resultNotificationChannel: null,
     status: "calling",
     updatedAt: now,
     ...overrides,

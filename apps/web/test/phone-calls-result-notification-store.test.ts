@@ -85,18 +85,18 @@ const BRIEF: HostedPhoneCallBrief = {
   },
 };
 
-const DESTINATION: HostedAssistantNotificationDestination = {
+const TELEGRAM_DESTINATION: HostedAssistantNotificationDestination = {
   conversationShape: "direct-member",
   externalThreadRouteAuthority: null,
   route: {
     actorId: MEMBER_ID,
-    channel: "linq",
+    channel: "telegram",
     delivery: {
       kind: "thread",
-      target: "linq_home_result_notification_store",
+      target: "telegram_home_result_notification_store",
     },
-    identityId: "identity_result_notification_store",
-    threadId: "thread_result_notification_store",
+    identityId: "telegram_identity_result_notification_store",
+    threadId: "telegram_thread_result_notification_store",
     threadIsDirect: true,
   },
 };
@@ -110,7 +110,11 @@ describe("default phone-call result notification store", () => {
     const phases: string[] = [];
     const resultPhase = createBlockedPhase("result", RESULT, phases);
     const briefPhase = createBlockedPhase("brief", BRIEF, phases);
-    const destinationPhase = createBlockedPhase("destination", DESTINATION, phases);
+    const destinationPhase = createBlockedPhase(
+      "destination",
+      TELEGRAM_DESTINATION,
+      phases,
+    );
     const rootKey = new Uint8Array([1, 2, 3, 4]);
     const rootPhase = createBlockedPhase("root", {
       envelope: { rootKeyId: "root_result_notification_store" },
@@ -119,6 +123,9 @@ describe("default phone-call result notification store", () => {
     let transactionOpen = false;
     const transactionClient = { kind: "mailbox-transaction" };
     const prisma = buildPrisma({
+      call: buildStoredAnalyzedCall({
+        resultNotificationChannel: "telegram",
+      }),
       onTransaction: async (callback) => {
         phases.push("transaction:start");
         expect([...rootKey]).toEqual([0, 0, 0, 0]);
@@ -216,6 +223,13 @@ describe("default phone-call result notification store", () => {
       retainFailureInScopedCache: true,
       userId: MEMBER_ID,
     });
+    expect(
+      mocks.requireHostedAssistantNotificationDestination,
+    ).toHaveBeenCalledWith({
+      directChannel: "telegram",
+      memberId: MEMBER_ID,
+      prisma,
+    });
   });
 
   it("returns the canonical mailbox item without opening a transaction", async () => {
@@ -248,9 +262,10 @@ describe("default phone-call result notification store", () => {
 });
 
 function buildPrisma(input: {
+  call?: HostedPhoneCall;
   onTransaction?: (callback: (tx: unknown) => Promise<unknown>) => Promise<unknown>;
 } = {}) {
-  const call = buildStoredAnalyzedCall();
+  const call = input.call ?? buildStoredAnalyzedCall();
   return {
     $transaction: vi.fn(async (callback: (tx: unknown) => Promise<unknown>) => {
       if (input.onTransaction) {
@@ -267,7 +282,9 @@ function buildPrisma(input: {
   };
 }
 
-function buildStoredAnalyzedCall(): HostedPhoneCall {
+function buildStoredAnalyzedCall(
+  overrides: Partial<HostedPhoneCall> = {},
+): HostedPhoneCall {
   const now = new Date("2026-08-09T00:00:00.000Z");
   return {
     analyzedAt: now,
@@ -283,8 +300,10 @@ function buildStoredAnalyzedCall(): HostedPhoneCall {
     requestKey: "request_result_notification_store",
     resultEncrypted: "encrypted-result",
     resultJson: null,
+    resultNotificationChannel: null,
     status: "completed",
     updatedAt: now,
+    ...overrides,
   };
 }
 

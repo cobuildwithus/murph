@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-15",
+  "order": 100,
+  "item": {
+    "id": "scheduled-phone-calls-in-telegram",
+    "kind": "feature",
+    "priority": 4,
+    "title": "Scheduled phone calls in Telegram",
+    "summary": "A direct Telegram conversation can now run an approved scheduled phone call and bring the result back to Telegram.",
+    "details": "Murph rechecks the direct Telegram route before dialing and when the result is ready. Group and email schedules remain ineligible, and a missing route retries instead of sending the result somewhere else.",
+    "relevanceTags": ["telegram", "phone-calls", "automations", "follow-through"],
+    "sourcePullRequests": [1351]
+  }
+}

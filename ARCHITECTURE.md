@@ -1,6 +1,6 @@
 # Murph Architecture
 
-Last verified: 2026-08-13
+Last verified: 2026-08-15
 ## Local Frog Autofix
 
 Murph's optional local Frog repair loop is an operator-owned macOS process, not
@@ -1006,7 +1006,14 @@ enter runner env, prompts, diagnostics, or workspace state. Transfer numbers are
 resolved server-side from verified hosted member identity when the brief allows a
 live transfer. `apps/web` stores one member-bound `HostedPhoneCall` row per real
 call for request-key idempotency, provider call id, status, bounded call brief,
-and final analysis. Briefs and results are encrypted before persistence with the
+  and final analysis. A direct Linq or Telegram call also stores only the bounded
+  initiating channel enum, never a phone number or thread identifier. Web resolves
+  that exact current direct route before provider dispatch and resolves the same
+  channel again when the asynchronous result is ready; route loss remains
+  retryable instead of falling back to another surface. Group calls keep the
+  channel null and continue to use their durable thread-container authority.
+  Request-key replay compares the stored channel exactly, including legacy null,
+  so a retry cannot change the eventual result audience. Briefs and results are encrypted before persistence with the
 control-domain hosted secure-box lane and AAD bound to the member, table, row,
 field, and scope; only provider/status/timestamp identifiers remain operational
 metadata. During account deletion, the member is suspended before `apps/web`

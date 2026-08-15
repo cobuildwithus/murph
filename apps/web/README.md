@@ -377,7 +377,13 @@ The hosted Prisma schema keeps ownership sharp and nested:
   with a bounded call brief, provider call id, status, and final analysis
   result. Briefs and results use member/table/row/field/scope-bound hosted
   secure-box ciphertext; new writes never populate the nullable legacy JSON
-  columns. Retell credentials stay in web env, transfer destinations are resolved
+  columns. Direct Linq and Telegram calls additionally persist only the bounded
+  initiating channel enum. Web resolves that exact current direct-member route
+  before provider dispatch and again when the result is ready; it never stores
+  a phone number or thread id as call-result routing. Group calls leave the
+  discriminator null and retain their existing thread-container authority.
+  Exact request-key replay requires the stored discriminator, including null,
+  to match. Retell credentials stay in web env, transfer destinations are resolved
   from verified member identity, and raw transcripts/audio are not stored in
   Murph. The call row persists the exact initiating resident-session id for
   request-key idempotency. The reserved `phone_call_scheduled_` request-key
@@ -439,6 +445,17 @@ caller and prove runner convergence before deploying a web build that uses the
 build; a 30-second caller does not remain compatible with the 40-second web
 deadline, so do not roll Cloudflare back below 45 seconds while that web build
 is active.
+
+The direct result-channel rollout is consumer-first: apply the additive
+`result_notification_channel` migration, deploy Web, then deploy the hosted
+assistant runner with immediate container rollout. An old runner omits the
+optional field and remains compatible with new Web. A new runner against old
+strict Web is rejected before Retell dispatch. Roll the runner back first; keep
+the new Web consumer until every call with a non-null result channel has
+completed, because an older Web result path does not preserve that exact
+surface at completion. Post-deploy proof should cover one direct Telegram
+scheduled call, same-channel result delivery, a route-loss retry, and unchanged
+group behavior.
 
 - `HostedComputerRun` and `HostedComputerHandoff`
   own member-scoped Kernel profile names, resumable run state, and durable

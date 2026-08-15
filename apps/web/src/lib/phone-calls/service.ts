@@ -9,6 +9,7 @@ import type {
 import type {
   HostedPhoneCallBrief,
   HostedPhoneCallGroupRequester,
+  HostedPhoneCallResultNotificationChannel,
   HostedPhoneCallStartResponse,
 } from "@murphai/hosted-execution/phone-calls";
 import {
@@ -70,6 +71,7 @@ interface HostedPhoneCallReservationData {
   originSessionId: string;
   provider: "retell";
   requestKey: string;
+  resultNotificationChannel: HostedPhoneCallResultNotificationChannel | null;
   status: "starting";
 }
 
@@ -108,6 +110,7 @@ type HostedPhoneCallReconciliationWorkflowStarter = (
 ) => Promise<unknown>;
 
 type HostedPhoneCallNotificationDestinationResolver = (input: {
+  directChannel?: HostedPhoneCallResultNotificationChannel;
   memberId: string;
   signal?: AbortSignal;
 }) => Promise<HostedAssistantNotificationDestination>;
@@ -131,6 +134,7 @@ export async function createHostedPhoneCall(input: {
   prisma?: HostedPhoneCallStore;
   reconciliationWorkflowStarter?: HostedPhoneCallReconciliationWorkflowStarter;
   requestKey: string;
+  resultNotificationChannel?: HostedPhoneCallResultNotificationChannel;
   runtime?: PhoneCallRuntime;
   signal?: AbortSignal;
   transferNumberResolver?: (resolverInput: {
@@ -162,12 +166,30 @@ async function createHostedPhoneCallWithinDeadline(input: Parameters<
   const resolveNotificationDestination = input.notificationDestinationResolver
     ?? requireHostedAssistantNotificationDestination;
   const notificationDestination = await resolveNotificationDestination({
+    ...(input.resultNotificationChannel
+      ? { directChannel: input.resultNotificationChannel }
+      : {}),
     memberId: input.memberId,
     signal: input.signal,
   });
   input.signal.throwIfAborted();
+  const threadContainerDestination =
+    isHostedThreadContainerNotificationDestination(notificationDestination);
+  if (
+    input.resultNotificationChannel
+    && (
+      threadContainerDestination
+      || notificationDestination.route.threadIsDirect !== true
+      || notificationDestination.route.channel
+        !== input.resultNotificationChannel
+    )
+  ) {
+    throw new Error(
+      "Hosted phone call result notification channel does not match the direct route.",
+    );
+  }
   let reassertGroupRequesterAuthority: (() => Promise<void>) | null = null;
-  if (isHostedThreadContainerNotificationDestination(notificationDestination)) {
+  if (threadContainerDestination) {
     const routeAuthority = notificationDestination.externalThreadRouteAuthority;
     if (!routeAuthority) {
       throw new Error(
@@ -208,6 +230,7 @@ async function createHostedPhoneCallWithinDeadline(input: Parameters<
       crypto,
       memberId: input.memberId,
       originSessionId: input.originSessionId,
+      resultNotificationChannel: input.resultNotificationChannel ?? null,
       runtime,
       signal: input.signal,
       startReconciliationWorkflow,
@@ -252,6 +275,7 @@ async function createHostedPhoneCallWithinDeadline(input: Parameters<
       originSessionId: input.originSessionId,
       provider: "retell",
       requestKey: input.requestKey,
+      resultNotificationChannel: input.resultNotificationChannel ?? null,
       status: "starting",
     },
   });
@@ -263,6 +287,7 @@ async function createHostedPhoneCallWithinDeadline(input: Parameters<
       crypto,
       memberId: input.memberId,
       originSessionId: input.originSessionId,
+      resultNotificationChannel: input.resultNotificationChannel ?? null,
       runtime,
       signal: input.signal,
       startReconciliationWorkflow,
@@ -604,6 +629,7 @@ async function resolveExistingHostedPhoneCall(input: {
   crypto: HostedPhoneCallCrypto;
   memberId: string;
   originSessionId: string;
+  resultNotificationChannel: HostedPhoneCallResultNotificationChannel | null;
   runtime: PhoneCallRuntime;
   signal: AbortSignal;
   startReconciliationWorkflow: HostedPhoneCallReconciliationWorkflowStarter;
@@ -615,6 +641,11 @@ async function resolveExistingHostedPhoneCall(input: {
   if (
     input.call.originSessionId !== input.originSessionId
     && !isHostedScheduledPhoneCallRequestKey(input.call.requestKey)
+  ) {
+    throw new Error("Hosted phone call request key collision.");
+  }
+  if (
+    input.call.resultNotificationChannel !== input.resultNotificationChannel
   ) {
     throw new Error("Hosted phone call request key collision.");
   }

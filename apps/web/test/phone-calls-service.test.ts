@@ -73,6 +73,22 @@ const DIRECT_NOTIFICATION_DESTINATION: HostedAssistantNotificationDestination = 
   },
 };
 
+const TELEGRAM_NOTIFICATION_DESTINATION: HostedAssistantNotificationDestination = {
+  conversationShape: "direct-member",
+  externalThreadRouteAuthority: null,
+  route: {
+    actorId: "telegram-member-actor",
+    channel: "telegram",
+    delivery: {
+      kind: "thread",
+      target: "telegram-direct-chat",
+    },
+    identityId: "telegram-direct-identity",
+    threadId: "telegram-direct-thread",
+    threadIsDirect: true,
+  },
+};
+
 const GROUP_REQUESTER = {
   assistantInputId: `ain_${"1".repeat(32)}`,
   senderHandle: "+12125550123",
@@ -139,6 +155,7 @@ describe("createHostedPhoneCall", () => {
       originSessionId: "session_phone_call",
       provider: "retell",
       requestKey: "phone_call_request_1",
+      resultNotificationChannel: null,
       status: "starting",
     });
     expect(store.createCalls[0]!.data).not.toHaveProperty("briefJson");
@@ -163,6 +180,60 @@ describe("createHostedPhoneCall", () => {
         status: "starting",
       },
     }]);
+  });
+
+  it("validates and persists a direct Telegram result route before provider dispatch", async () => {
+    const store = createPhoneCallStore({ created: buildHostedPhoneCall() });
+    const runtime = createPhoneCallRuntime({ providerCallId: "retell_telegram" });
+    const notificationDestinationResolver = vi.fn(async () =>
+      TELEGRAM_NOTIFICATION_DESTINATION);
+
+    await expect(createHostedPhoneCall({
+      brief: VALID_BRIEF,
+      memberId: "member_1",
+      notificationDestinationResolver,
+      prisma: store.prisma,
+      requestKey: "phone_call_telegram_request",
+      resultNotificationChannel: "telegram",
+      runtime: runtime.runtime,
+    })).resolves.toMatchObject({ status: "calling" });
+
+    expect(notificationDestinationResolver).toHaveBeenCalledWith({
+      directChannel: "telegram",
+      memberId: "member_1",
+      signal: expect.any(AbortSignal),
+    });
+    expect(store.createCalls[0]?.data).toMatchObject({
+      resultNotificationChannel: "telegram",
+    });
+    expect(runtime.startCalls).toHaveLength(1);
+  });
+
+  it("rejects a non-direct destination for a requested direct result channel before storage or dispatch", async () => {
+    const store = createPhoneCallStore({ created: buildHostedPhoneCall() });
+    const runtime = createPhoneCallRuntime({ providerCallId: "retell_unused" });
+    const notificationDestinationResolver = vi.fn(async () =>
+      GROUP_NOTIFICATION_DESTINATION);
+
+    await expect(createHostedPhoneCall({
+      brief: VALID_BRIEF,
+      memberId: "member_1",
+      notificationDestinationResolver,
+      prisma: store.prisma,
+      requestKey: "phone_call_invalid_telegram_route",
+      resultNotificationChannel: "telegram",
+      runtime: runtime.runtime,
+    })).rejects.toThrow(
+      "result notification channel does not match the direct route",
+    );
+
+    expect(notificationDestinationResolver).toHaveBeenCalledWith({
+      directChannel: "telegram",
+      memberId: "member_1",
+      signal: expect.any(AbortSignal),
+    });
+    expect(store.createCalls).toEqual([]);
+    expect(runtime.startCalls).toEqual([]);
   });
 
   it.each([
@@ -977,6 +1048,79 @@ describe("createHostedPhoneCall", () => {
 
     expect(runtime.startCalls).toEqual([]);
     expect(store.updateManyCalls).toEqual([]);
+  });
+
+  it("fails closed when a legacy replay adds a result notification channel", async () => {
+    const existing = buildHostedPhoneCall({
+      providerCallId: "retell_existing",
+      resultNotificationChannel: null,
+      status: "calling",
+    });
+    const store = createPhoneCallStore({ existing });
+    const runtime = createPhoneCallRuntime({ providerCallId: "retell_unused" });
+
+    await expect(createHostedPhoneCall({
+      brief: VALID_BRIEF,
+      memberId: existing.memberId,
+      notificationDestinationResolver: async () =>
+        TELEGRAM_NOTIFICATION_DESTINATION,
+      prisma: store.prisma,
+      requestKey: existing.requestKey,
+      resultNotificationChannel: "telegram",
+      runtime: runtime.runtime,
+    })).rejects.toThrow("request key collision");
+
+    expect(store.createCalls).toEqual([]);
+    expect(runtime.startCalls).toEqual([]);
+  });
+
+  it("fails closed when a replay changes the exact result notification channel", async () => {
+    const existing = buildHostedPhoneCall({
+      providerCallId: "retell_existing",
+      resultNotificationChannel: "telegram",
+      status: "calling",
+    });
+    const store = createPhoneCallStore({ existing });
+    const runtime = createPhoneCallRuntime({ providerCallId: "retell_unused" });
+
+    await expect(createHostedPhoneCall({
+      brief: VALID_BRIEF,
+      memberId: existing.memberId,
+      prisma: store.prisma,
+      requestKey: existing.requestKey,
+      resultNotificationChannel: "linq",
+      runtime: runtime.runtime,
+    })).rejects.toThrow("request key collision");
+
+    expect(store.createCalls).toEqual([]);
+    expect(runtime.startCalls).toEqual([]);
+  });
+
+  it("replays an existing call only when the result notification channel matches", async () => {
+    const existing = buildHostedPhoneCall({
+      providerCallId: "retell_existing",
+      resultNotificationChannel: "telegram",
+      status: "calling",
+    });
+    const store = createPhoneCallStore({ existing });
+    const runtime = createPhoneCallRuntime({ providerCallId: "retell_unused" });
+
+    await expect(createHostedPhoneCall({
+      brief: VALID_BRIEF,
+      memberId: existing.memberId,
+      notificationDestinationResolver: async () =>
+        TELEGRAM_NOTIFICATION_DESTINATION,
+      prisma: store.prisma,
+      requestKey: existing.requestKey,
+      resultNotificationChannel: "telegram",
+      runtime: runtime.runtime,
+    })).resolves.toEqual({
+      phoneCallId: existing.id,
+      status: "calling",
+    });
+
+    expect(store.createCalls).toEqual([]);
+    expect(runtime.startCalls).toEqual([]);
   });
 
   it("replays one scheduled occurrence across resident sessions", async () => {
@@ -2362,6 +2506,7 @@ function buildHostedPhoneCall(overrides: Partial<HostedPhoneCall> = {}): HostedP
     requestKey: "phone_call_request_1",
     resultEncrypted: null,
     resultJson: null,
+    resultNotificationChannel: null,
     status: "starting",
     updatedAt: now,
     ...overrides,

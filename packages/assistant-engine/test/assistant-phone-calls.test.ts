@@ -135,7 +135,7 @@ describe("assistant phone calls", () => {
   it.each([
     ["exact direct Linq occurrence", "linq", "direct", "automation-cron", "2026-08-05T18:00:00.000Z", true],
     ["direct email occurrence", "email", "direct", "automation-cron", "2026-08-05T18:00:00.000Z", false],
-    ["direct Telegram occurrence", "telegram", "direct", "automation-cron", "2026-08-05T18:00:00.000Z", false],
+    ["direct Telegram occurrence", "telegram", "direct", "automation-cron", "2026-08-05T18:00:00.000Z", true],
     ["group occurrence", "linq", "group", "automation-cron", "2026-08-05T18:00:00.000Z", false],
     ["mismatched occurrence", "linq", "direct", "automation-cron", "2026-08-05T18:01:00.000Z", false],
     ["manual trigger", "linq", "direct", "manual-ask", "2026-08-05T18:00:00.000Z", false],
@@ -171,7 +171,7 @@ describe("assistant phone calls", () => {
     }
   });
 
-  it("keeps generic scheduled authority route-neutral while phone authority stays direct Linq", () => {
+  it("keeps generic scheduled authority route-neutral while phone authority stays on a supported direct surface", () => {
     const messageInput = {
       scheduledInvocationAuthority: {
         automationId: "automation-scheduled-tools",

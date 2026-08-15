@@ -1,6 +1,6 @@
 # Reliability
 
-Last verified: 2026-08-14
+Last verified: 2026-08-15
 ## Local Frog autofix scheduling
 
 - One macOS user-session LaunchAgent owns the optional local schedule with
@@ -1799,6 +1799,18 @@ Last verified: 2026-08-14
   success, terminally records a definitive stale route without sending, and
   leaves unavailable or retryable authority-owner failures on the ordinary
   same-item retry path. This recovery never falls back, appends, or rewinds.
+- Direct phone-call result delivery freezes only the bounded initiating channel
+  (`linq` or `telegram`). Web proves the exact current direct-member route on
+  that channel before provider dispatch and repeats the same resolution at
+  completion; a lost route is retryable and never falls back to another
+  surface. Request-key replay requires exact stored-channel equality, including
+  legacy null, before any provider effect. Group calls keep null and retain the
+  existing thread-container authority and rechecks. Deploy the additive schema
+  and Web consumer before the runner producer. Old runners remain compatible
+  because omission preserves legacy behavior; a new runner against old strict
+  Web fails before provider dispatch. Use immediate runner rollout. Roll back
+  the runner first, and do not roll Web back while a non-null-channel call can
+  still complete unless every such call has drained.
 - A legacy joined-group `cannot_answer` queues the fixed
   unavailable-evidence response exactly. It must not start a private provider
   continuation that can invent an expiry, provider failure, or execution

@@ -534,6 +534,11 @@ enum HostedComputerHandoffStatus {
   expired
 }
 
+enum HostedPhoneCallResultNotificationChannel {
+  linq
+  telegram
+}
+
 enum HostedPhoneCallStatus {
   starting
   calling
@@ -899,6 +904,7 @@ model HostedPhoneCall {
   briefEncrypted String?               @map("brief_encrypted")
   resultJson     Json?                 @map("result_json")
   resultEncrypted String?              @map("result_encrypted")
+  resultNotificationChannel HostedPhoneCallResultNotificationChannel? @map("result_notification_channel")
   endedAt        DateTime?             @map("ended_at")
   analyzedAt     DateTime?             @map("analyzed_at")
   createdAt      DateTime              @default(now()) @map("created_at")

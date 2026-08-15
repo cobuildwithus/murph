@@ -31,6 +31,9 @@ const HOSTED_PHONE_CALL_FIELD_CLASSIFICATION = {
   requestKey: operational("Opaque idempotency identity."),
   resultEncrypted: encrypted("Member-private bounded final call analysis."),
   resultJson: legacyDebt(),
+  resultNotificationChannel: operational(
+    "Bounded initiating direct-channel discriminator used to route asynchronous results.",
+  ),
   status: operational("Bounded call lifecycle enum."),
   updatedAt: operational("Row concurrency timestamp; contains no call content."),
 } satisfies Record<string, PrivateStorageClassification>;
@@ -75,6 +78,26 @@ describe("HostedPhoneCall private-storage classification", () => {
     expect(migration).toContain("ADD COLUMN \"result_encrypted\" TEXT");
     expect(migration).toContain("ALTER COLUMN \"brief_json\" DROP NOT NULL");
     expect(migration).not.toMatch(/DROP COLUMN/iu);
+    expect(migration).not.toMatch(/SET NOT NULL/iu);
+  });
+
+  it("adds only a nullable bounded result-routing discriminator", () => {
+    const migration = readFileSync(
+      new URL(
+        "../prisma/migrations/20260815120000_hosted_phone_call_result_notification_channel/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
+
+    expect(migration).toContain(
+      'CREATE TYPE "HostedPhoneCallResultNotificationChannel"',
+    );
+    expect(migration).toContain("AS ENUM ('linq', 'telegram')");
+    expect(migration).toContain(
+      'ADD COLUMN "result_notification_channel"',
+    );
+    expect(migration).not.toMatch(/DROP (?:COLUMN|TABLE|TYPE)/iu);
     expect(migration).not.toMatch(/SET NOT NULL/iu);
   });
 });
