@@ -4,6 +4,7 @@ import {
 } from "@murphai/device-syncd/public-account";
 import { buildJunctionProviderSourceInstanceKey } from "@murphai/device-syncd/connect-config";
 import { DEFAULT_DEVICE_SYNC_HTTP_BODY_LIMIT_BYTES } from "@murphai/device-syncd/public-ingress";
+import { clearJunctionScheduleTimeExtendedHistoryCoverageForProvider } from "@murphai/device-syncd/hosted-runtime";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => {
@@ -312,6 +313,7 @@ function buildHostedConnectionSource(
     lastErrorCode: string | null;
     lastErrorMessage: string | null;
     lastSeenAt: string;
+    lifecycleEpoch: number;
     status: "connected" | "disconnected" | "error" | "unavailable";
   }> = {},
 ) {
@@ -333,6 +335,7 @@ function buildHostedConnectionSource(
     lastErrorCode: null,
     lastErrorMessage: null,
     lastSeenAt: "2026-03-26T12:00:00.000Z",
+    lifecycleEpoch: 1,
     resourceAvailabilitySummary: { sleep: true },
     sourceInstanceKey,
     sourceProviderSlug,
@@ -462,10 +465,12 @@ import { getHostedDomainRootUnwrapCache } from "@/src/lib/hosted-crypto/domain-r
 import { getPrisma } from "@/src/lib/prisma";
 import {
   appendHostedDeviceSyncScheduledReconcileWake,
+  buildHostedDeviceSyncScheduledReconcileWakeEventId,
   cleanupRejectedHostedDeviceSyncConnectionSource,
   handleHostedDeviceSyncConnectionEstablished,
   handleHostedDeviceSyncWebhookAccepted,
   persistHostedDeviceSyncCompanionMetadata,
+  prepareHostedDeviceSyncConnectionSourceStart,
   reconcileHostedDeviceSyncConnectionSourceRegistration,
 } from "@/src/lib/device-sync/wake-service";
 import { buildHostedDeviceSyncWakeEventId } from "@/src/lib/device-sync/wake";
@@ -1160,6 +1165,16 @@ describe("hosted device-sync wakes", () => {
     });
   });
 
+  it("versions scheduled wake identity past legacy unhashed envelopes", () => {
+    expect(buildHostedDeviceSyncScheduledReconcileWakeEventId({
+      connectionId: "dsc_123",
+      expectedConnectedAt: "2026-03-26T12:00:00.000Z",
+      nextReconcileAt: "2026-03-26T12:30:00.000Z",
+    })).toBe(
+      "device-sync:scheduled-reconcile:v2:dsc_123:2026-03-26T12:00:00.000Z:2026-03-26T12:30:00.000Z",
+    );
+  });
+
   it("does not append scheduled reconcile work after explicit consent withdrawal", async () => {
     mocks.prisma.hostedConsentGrant.findUnique.mockResolvedValueOnce({
       scope: "launch.health-data",
@@ -1196,7 +1211,10 @@ describe("hosted device-sync wakes", () => {
       const request = new Request(
         "https://control.example.test/api/internal/device-sync/reconcile",
         {
-          body: JSON.stringify({ connectionId: "dsc_123" }),
+          body: JSON.stringify({
+            connectionId: "dsc_123",
+            memberEditConflictResolution: "keep_member",
+          }),
           method: "POST",
         },
       );
@@ -1214,7 +1232,10 @@ describe("hosted device-sync wakes", () => {
         expect.objectContaining({
           envelope: expect.objectContaining({
             connectionId: "dsc_123",
-            hint: expect.objectContaining({ reason: "manual_reconcile" }),
+            hint: expect.objectContaining({
+              memberEditConflictResolution: "keep_member",
+              reason: "manual_reconcile",
+            }),
             reason: "reconcile_due",
           }),
           tx: mocks.prismaTx,
@@ -1903,6 +1924,7 @@ describe("hosted device-sync wakes", () => {
         lastErrorCode: input.lastErrorCode ?? null,
         lastErrorMessage: input.lastErrorMessage ?? null,
         lastSeenAt: input.lastSeenAt ?? existing.lastSeenAt,
+        lifecycleEpoch: input.lifecycleEpoch ?? existing.lifecycleEpoch,
         status: input.status ?? existing.status,
       };
       sources = sources.map((source) => source.id === existing.id ? updated : source);
@@ -2033,6 +2055,129 @@ describe("hosted device-sync wakes", () => {
     expect(mocks.upsertConnectionSource).toHaveBeenCalledTimes(3);
     expect(mocks.createSignal).toHaveBeenCalledTimes(2);
     expect(mocks.appendHostedMailboxEnvelope).toHaveBeenCalledTimes(1);
+  });
+
+  it("reopens only schedule-time history when a disconnected Junction source reconnects", async () => {
+    let currentConnection = buildHostedConnection({
+      displayName: "Junction",
+      externalAccountId: "junction-user-reestablished",
+      id: "dsc_junction_reestablished",
+      metadata: {
+        junctionBloodPressureHistoryBackfillCoverage: "v2|garmin,oura",
+        junctionNoteHistoryBackfillCoverage: "v2|garmin,oura",
+      },
+      provider: "junction",
+      scopes: [],
+      setupPhase: "source_confirmed",
+    });
+    let sources = [
+      buildHostedConnectionSource(currentConnection.id, "garmin", {
+        lastSeenAt: "2026-03-26T12:01:00.000Z",
+      }),
+      buildHostedConnectionSource(currentConnection.id, "oura"),
+    ];
+    const storedConnection = buildProviderConfigStoredConnection(currentConnection);
+    const revokeSourceAccess = vi.fn(async () => undefined);
+    mocks.getConnectionForUser.mockImplementation(async () => currentConnection);
+    mocks.getStoredConnectionAccountForUser.mockResolvedValue(storedConnection);
+    mocks.listConnectionSources.mockImplementation(async () => sources);
+    mocks.registryGet.mockReturnValue({
+      connectionHandler: { revokeSourceAccess },
+    });
+    mocks.syncDurableConnectionState.mockImplementation(async (connection) => {
+      currentConnection = connection;
+    });
+    mocks.upsertConnectionSource.mockImplementation(async (input) => {
+      const existing = sources.find((source) => source.sourceInstanceKey === input.sourceInstanceKey);
+      if (!existing) {
+        throw new Error("Test source was not found.");
+      }
+      const updated = {
+        ...existing,
+        lastErrorCode: input.lastErrorCode ?? null,
+        lastErrorMessage: input.lastErrorMessage ?? null,
+        lastSeenAt: input.lastSeenAt ?? existing.lastSeenAt,
+        lifecycleEpoch: input.lifecycleEpoch ?? existing.lifecycleEpoch,
+        status: input.status ?? existing.status,
+      };
+      sources = sources.map((source) => source.id === existing.id ? updated : source);
+      return updated;
+    });
+    const sourceLifecycleProof = await prepareHostedDeviceSyncConnectionSourceStart({
+      connectionId: currentConnection.id,
+      registry: {
+        get: mocks.registryGet,
+        list: mocks.registryList,
+        register: vi.fn(),
+      },
+      sourceProviderSlug: "garmin",
+      store: new PrismaDeviceSyncControlPlaneStore({ prisma: getPrisma() }),
+      userId: "user-123",
+    });
+    expect(revokeSourceAccess).toHaveBeenCalledWith(storedConnection, "garmin");
+    expect(sources).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        lifecycleEpoch: 1,
+        sourceProviderSlug: "garmin",
+        status: "disconnected",
+      }),
+      expect.objectContaining({
+        lifecycleEpoch: 1,
+        sourceProviderSlug: "oura",
+        status: "connected",
+      }),
+    ]));
+
+    const establish = () =>
+      handleHostedDeviceSyncConnectionEstablished({
+        account: {
+          connectedAt: currentConnection.connectedAt,
+          id: currentConnection.id,
+          provider: "junction",
+          scopes: [],
+          status: "active",
+        },
+        connection: { initialJobs: [], nextReconcileAt: null },
+        connectionStartedAt: sourceLifecycleProof.lastSeenAt,
+        now: "2026-03-26T12:02:00.000Z",
+        sourceProviderSlug: "garmin",
+        store: new PrismaDeviceSyncControlPlaneStore({ prisma: getPrisma() }),
+      });
+
+    await expect(establish()).resolves.toBeUndefined();
+
+    expect(mocks.syncDurableConnectionState).toHaveBeenCalledTimes(1);
+    expect(currentConnection.metadata.junctionBloodPressureHistoryBackfillCoverage).toBe(
+      "v2|garmin,oura",
+    );
+    expect([
+      currentConnection.metadata.junctionBloodPressureHistoryBackfillCoverage,
+      currentConnection.metadata.junctionNoteHistoryBackfillCoverage,
+    ].filter((value) => typeof value === "string" && /^m1\|/u.test(value))).toHaveLength(1);
+    expect(clearJunctionScheduleTimeExtendedHistoryCoverageForProvider({
+      metadata: currentConnection.metadata,
+      providerSlug: "garmin",
+    })).toEqual(currentConnection.metadata);
+    expect(clearJunctionScheduleTimeExtendedHistoryCoverageForProvider({
+      metadata: currentConnection.metadata,
+      providerSlug: "oura",
+    })).not.toEqual(currentConnection.metadata);
+    expect(sources).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        lifecycleEpoch: 2,
+        sourceProviderSlug: "garmin",
+        status: "connected",
+      }),
+      expect.objectContaining({
+        lifecycleEpoch: 1,
+        sourceProviderSlug: "oura",
+        status: "connected",
+      }),
+    ]));
+
+    await expect(establish()).resolves.toBeUndefined();
+    expect(mocks.syncDurableConnectionState).toHaveBeenCalledTimes(1);
+    expect(sources.find((source) => source.sourceProviderSlug === "garmin")?.lifecycleEpoch).toBe(2);
   });
 
   it("restores the selected Junction source when provider revoke fails", async () => {

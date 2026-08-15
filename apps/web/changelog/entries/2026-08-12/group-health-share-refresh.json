@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-12",
+  "order": 100,
+  "item": {
+    "id": "group-health-share-refresh",
+    "kind": "improvement",
+    "priority": 4,
+    "title": "Shared health data stays fresh after sync",
+    "summary": "When a connected health source refreshes personal data, consented group views now pick up the newer shared snapshot on their next read.",
+    "details": "Fresh messages keep priority. Murph checkpoints first and keeps personal sync and group sharing decoupled, without widening any sharing permission.",
+    "relevanceTags": ["groups", "wearables", "health-data", "reliability"],
+    "sourcePullRequests": [1726]
+  }
+}

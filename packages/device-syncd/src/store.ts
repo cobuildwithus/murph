@@ -6,6 +6,8 @@ import {
   withImmediateTransaction,
 } from "@murphai/runtime-state/node";
 
+import { clearJunctionScheduleTimeExtendedHistoryCoverageForProvider } from "./junction-historical-backfill-progress.ts";
+import { stringifyJson } from "./shared.ts";
 import {
   decodeDeviceSyncSummaryRow,
   disconnectAccount as disconnectStoredAccount,
@@ -38,6 +40,7 @@ import {
   completeDeviceSyncJobIfOwned,
   completeDeviceSyncJobsIfOwned,
   completeDeviceSyncJobsIfOwnedInTransaction,
+  updateDeviceSyncJobContinuationIfOwnedInTransaction,
   enqueueDeviceSyncJobInTransaction,
   failDeviceSyncJob,
   failDeviceSyncJobIfOwned,
@@ -61,6 +64,7 @@ import {
 import {
   listConnectionSources as listStoredConnectionSources,
   markConnectionSourceDataReceived as markStoredConnectionSourceDataReceived,
+  upsertJunctionConnectionSourceProjection as upsertStoredJunctionConnectionSourceProjection,
   upsertConnectionSource as upsertStoredConnectionSource,
   upsertConnectionSourceInTransaction as upsertStoredConnectionSourceInTransaction,
 } from "./store/sources.ts";
@@ -70,6 +74,7 @@ import {
   markSyncStarted as markStoredSyncStarted,
   markSyncSucceeded as markStoredSyncSucceeded,
   markSyncSucceededInTransaction as markStoredSyncSucceededInTransaction,
+  patchSyncContinuationMetadataInTransaction as patchStoredSyncContinuationMetadataInTransaction,
   markWebhookReceived as markStoredWebhookReceived,
   readNextActiveReconcileAt as readNextStoredActiveReconcileAt,
 } from "./store/sync-state.ts";
@@ -229,6 +234,12 @@ export class SqliteDeviceSyncStore {
     return upsertStoredConnectionSource(this.database, input);
   }
 
+  upsertJunctionConnectionSourceProjection(
+    input: UpsertDeviceConnectionSourceInput,
+  ): StoredDeviceConnectionSource {
+    return upsertStoredJunctionConnectionSourceProjection(this.database, input);
+  }
+
   listConnectionSources(input: ListDeviceConnectionSourcesInput): StoredDeviceConnectionSource[] {
     return listStoredConnectionSources(this.database, input);
   }
@@ -241,6 +252,7 @@ export class SqliteDeviceSyncStore {
       firstSeenAt: source.firstSeenAt,
       lastErrorCode: source.lastErrorCode,
       lastErrorMessage: source.lastErrorMessage,
+      lifecycleEpoch: source.lifecycleEpoch,
       lastDataAt: source.lastDataAt,
       lastSeenAt: source.lastSeenAt,
       resourceCount: countConnectionSourceResources(source.resourceAvailabilitySummary),
@@ -419,7 +431,47 @@ export class SqliteDeviceSyncStore {
   }): DeviceSyncJobRecord[] {
     return withImmediateTransaction(this.database, () => {
       if (input.source) {
-        upsertStoredConnectionSourceInTransaction(this.database, input.source);
+        const existingSource = input.provider === "junction" && input.source.status === "connected"
+          ? listStoredConnectionSources(this.database, {
+              connectionId: input.source.connectionId,
+              sourceProviderSlug: input.source.sourceProviderSlug,
+            }).find((source) => source.sourceInstanceKey === input.source?.sourceInstanceKey)
+          : null;
+        const reconnectsJunctionSource = existingSource?.status === "disconnected";
+        if (reconnectsJunctionSource) {
+          // Local and tunneled callbacks own the same exact-source lifecycle
+          // transition as hosted admission. Keep its coverage clear, epoch
+          // advance, connected source, and initial work in this transaction.
+          const account = getStoredAccountById(this.database, input.accountId);
+          if (!account) {
+            throw new TypeError(`Unknown account ${input.accountId}`);
+          }
+          const metadata = clearJunctionScheduleTimeExtendedHistoryCoverageForProvider({
+            metadata: account.metadata,
+            providerSlug: input.source.sourceProviderSlug,
+          });
+          this.database.prepare(`
+            update device_connection
+            set metadata_json = ?, updated_at = ?
+            where id = ?
+          `).run(
+            stringifyJson(metadata),
+            input.source.lastSeenAt,
+            input.accountId,
+          );
+          this.database.prepare(`
+            update device_observation_state
+            set local_connection_revision = local_connection_revision + 1,
+                updated_at = ?
+            where account_id = ?
+          `).run(input.source.lastSeenAt, input.accountId);
+        }
+        upsertStoredConnectionSourceInTransaction(this.database, {
+          ...input.source,
+          ...(reconnectsJunctionSource
+            ? { lifecycleEpoch: existingSource.lifecycleEpoch + 1 }
+            : {}),
+        });
       }
 
       return input.jobs.map((job) =>
@@ -541,6 +593,7 @@ export class SqliteDeviceSyncStore {
       localConnectionRevision?: number | null;
       metadataPatch?: Record<string, unknown>;
       nextReconcileAt?: string | null;
+      updatesLastSyncCompletedAt?: boolean;
     };
     workerId: string;
   }): boolean {
@@ -586,6 +639,59 @@ export class SqliteDeviceSyncStore {
     } catch (error) {
       if (error instanceof DeviceSyncSuccessFenceRejectedError) {
         return false;
+      }
+
+      throw error;
+    }
+  }
+
+  updateJobContinuationAndPatchSyncMetadataIfOwned(input: {
+    accountId: string;
+    availableAt: string;
+    disconnectGeneration: number | null;
+    jobId: string;
+    localConnectionRevision: number;
+    metadataPatch?: Record<string, unknown>;
+    now: string;
+    payload: Record<string, unknown>;
+    releaseLease: boolean;
+    workerId: string;
+  }): StoredDeviceSyncAccount | null {
+    try {
+      return withImmediateTransaction(this.database, () => {
+        const continued = updateDeviceSyncJobContinuationIfOwnedInTransaction(this.database, {
+          availableAt: input.availableAt,
+          jobId: input.jobId,
+          now: input.now,
+          payload: input.payload,
+          releaseLease: input.releaseLease,
+          workerId: input.workerId,
+        });
+
+        if (!continued) {
+          return null;
+        }
+
+        const updatedAccount = patchStoredSyncContinuationMetadataInTransaction(
+          this.database,
+          input.accountId,
+          input.now,
+          input.disconnectGeneration,
+          {
+            localConnectionRevision: input.localConnectionRevision,
+            ...(input.metadataPatch ? { metadataPatch: input.metadataPatch } : {}),
+          },
+        );
+
+        if (!updatedAccount) {
+          throw new DeviceSyncSuccessFenceRejectedError();
+        }
+
+        return updatedAccount;
+      });
+    } catch (error) {
+      if (error instanceof DeviceSyncSuccessFenceRejectedError) {
+        return null;
       }
 
       throw error;

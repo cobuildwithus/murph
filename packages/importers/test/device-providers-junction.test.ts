@@ -7,6 +7,8 @@ import {
   COMPANION_HRV_RMSSD_METHOD_VERSION,
   COMPANION_HRV_RMSSD_SCHEMA,
   ID_PREFIXES,
+  JUNCTION_WEARABLE_TAG_EXTERNAL_REF_FACET,
+  JUNCTION_WEARABLE_TAG_NOTE_TYPE,
   eventRevisionFromLifecycle,
   isDeletedEventLifecycle,
   serializeCompanionHrvRmssdObservation,
@@ -199,6 +201,25 @@ function storedExternalRefResourceType(record: StoredJsonlRecord | undefined): s
   }
 
   return typeof externalRef.resourceType === "string" ? externalRef.resourceType : undefined;
+}
+
+function storedExternalRefField(
+  record: StoredJsonlRecord | undefined,
+  field: "facet" | "version",
+): string | undefined {
+  const externalRef = record?.externalRef;
+  if (!externalRef || typeof externalRef !== "object" || Array.isArray(externalRef)) {
+    return undefined;
+  }
+  return typeof externalRef[field] === "string" ? externalRef[field] : undefined;
+}
+
+function storedDataOriginObservedAtRaw(record: StoredJsonlRecord | undefined): string | undefined {
+  const dataOrigin = record?.dataOrigin;
+  if (!dataOrigin || typeof dataOrigin !== "object" || Array.isArray(dataOrigin)) {
+    return undefined;
+  }
+  return typeof dataOrigin.observedAtRaw === "string" ? dataOrigin.observedAtRaw : undefined;
 }
 
 function storedObservationValue(record: StoredJsonlRecord | undefined): unknown {
@@ -3831,62 +3852,177 @@ test("Junction normalizer lands sparse paired blood pressure readings as measure
   assert.doesNotMatch(artifactText, /"value":350|"systolic":350|"diastolic":95/u);
 });
 
-test("Junction normalizer lands Oura note tags without retaining note text", async () => {
-  const snapshot = {
+test("Junction normalizer lands note tags on one neutral, revision-stable spine", async () => {
+  const snapshot = (entries: readonly Record<string, unknown>[]) => ({
     importedAt: "2026-04-23T12:00:00.000Z",
     timeseries: {
       note: {
         groups: {
           oura: [{
-            data: [
-              {
-                start: "2026-04-22T18:05:00+02:00",
-                end: "2026-04-22T18:10:00+02:00",
-                tags: ["Sauna", "late meal", "Sauna"],
-                unit: "text",
-                value: "SENSITIVE_VALUE_SENTINEL_A",
-              },
-              {
-                start: "2026-04-22T18:05:00+02:00",
-                end: "2026-04-22T18:10:00+02:00",
-                tags: ["Alcohol"],
-                unit: "text",
-                value: "SENSITIVE_VALUE_SENTINEL_B",
-              },
-            ],
+            data: entries,
             source: { provider: "oura", type: "ring" },
           }],
         },
       },
     },
-  };
+  });
+  const initialSnapshot = snapshot([
+    {
+      start: "2026-04-22T18:05:00+02:00",
+      end: "2026-04-22T18:10:00+02:00",
+      tags: ["Sauna", "late meal", "Sauna"],
+      unit: "text",
+      value: "SENSITIVE_VALUE_SENTINEL_A",
+    },
+    {
+      start: "2026-04-22T18:05:00+02:00",
+      end: "2026-04-22T18:10:00+02:00",
+      tags: ["Alcohol"],
+      unit: "text",
+      value: "SENSITIVE_VALUE_SENTINEL_B",
+    },
+  ]);
   const payload = await prepareDeviceProviderSnapshotImport({
     provider: "junction",
     connectionId: "conn-junction-oura",
     sourceKind: "poll",
     deliveryMode: "scheduled_reconcile",
     normalizerVersion: "junction-normalizer.v1",
-    snapshot,
+    snapshot: initialSnapshot,
   });
-  const tagEvents = (payload.events ?? []).filter((event) => event.kind === "intervention_session");
+  const noteEvents = (payload.events ?? []).filter((event) => event.kind === "note");
+  const changed = normalizeJunctionSnapshot(snapshot([{
+    start: "2026-04-22T18:05:00+02:00",
+    end: "2026-04-22T18:10:00+02:00",
+    tags: ["Headache"],
+    value: "SENSITIVE_VALUE_SENTINEL_C",
+  }]));
+  const cleared = normalizeJunctionSnapshot(snapshot([{
+    start: "2026-04-22T18:05:00+02:00",
+    end: "2026-04-22T18:10:00+02:00",
+    tags: [],
+    value: "SENSITIVE_VALUE_SENTINEL_D",
+  }]));
+  const missingTags = normalizeJunctionSnapshot(snapshot([{
+    start: "2026-04-22T18:05:00+02:00",
+    end: "2026-04-22T18:10:00+02:00",
+    value: "SENSITIVE_VALUE_SENTINEL_E",
+  }]));
+  const stableInitial = normalizeJunctionSnapshot(snapshot([{
+    id: "provider-note-1",
+    start: "2026-04-22T18:05:00+02:00",
+    tags: ["Sauna"],
+    value: "SENSITIVE_VALUE_SENTINEL_F",
+  }]));
+  const stableChanged = normalizeJunctionSnapshot(snapshot([{
+    id: "provider-note-1",
+    start: "2026-04-22T19:05:00+02:00",
+    tags: ["Headache"],
+    value: "SENSITIVE_VALUE_SENTINEL_G",
+  }]));
+  const changedNote = changed.events?.find((event) => event.kind === "note");
+  const clearedNote = cleared.events?.find((event) => event.kind === "note");
+  const stableInitialNote = stableInitial.events?.find((event) => event.kind === "note");
+  const stableChangedNote = stableChanged.events?.find((event) => event.kind === "note");
 
   assert.deepEqual(payload.provenance?.timeseriesResources, ["note"]);
-  assert.deepEqual(
-    tagEvents.map((event) => event.fields?.interventionType).sort(),
-    ["alcohol", "late-meal", "sauna"],
-  );
-  assert.ok(tagEvents.every((event) => event.fields?.sessionStatus === "completed"));
-  assert.ok(tagEvents.every((event) => event.dayKey === "2026-04-22"));
-  assert.ok(tagEvents.every((event) => event.dataOrigin?.sourceProviderSlug === "oura"));
-  assert.equal(new Set(tagEvents.map((event) => event.externalRef?.resourceId)).size, 2);
-  assert.equal(new Set(tagEvents.map((event) => event.externalRef?.facet)).size, 3);
-  assert.equal(findJunctionNoteArtifacts(payload).length, 2);
+  assert.equal(noteEvents.length, 1);
+  assert.equal((payload.events ?? []).some((event) => event.kind === "intervention_session"), false);
+  assert.equal(noteEvents[0]?.fields?.noteType, JUNCTION_WEARABLE_TAG_NOTE_TYPE);
+  assert.equal(noteEvents[0]?.note, "Wearable tags");
+  assert.deepEqual(noteEvents[0]?.tags, ["alcohol", "late-meal", "sauna"]);
+  assert.equal(noteEvents[0]?.dayKey, "2026-04-22");
+  assert.equal(noteEvents[0]?.dataOrigin?.sourceProviderSlug, "oura");
+  assert.equal(noteEvents[0]?.externalRef?.facet, JUNCTION_WEARABLE_TAG_EXTERNAL_REF_FACET);
+  assert.match(noteEvents[0]?.externalRef?.resourceId ?? "", /^note-[a-f0-9]{16}$/u);
+  assert.equal(findJunctionNoteArtifacts(payload).length, 1);
   assertNoFullJunctionTimeseriesArtifacts(payload);
   assertEventRawArtifactRolesExist(payload);
-  assert.doesNotMatch(JSON.stringify(payload.evidenceParts), /SENSITIVE_VALUE_SENTINEL/u);
-  assert.doesNotMatch(
-    JSON.stringify(payload),
-    /SENSITIVE_VALUE_SENTINEL/u,
+
+  // Source + timestamp is the bounded fallback spine when Junction omits an
+  // upstream note id. A changed or cleared tag set revises that same note.
+  assert.deepEqual(changedNote?.externalRef, noteEvents[0]?.externalRef);
+  assert.deepEqual(clearedNote?.externalRef, noteEvents[0]?.externalRef);
+  assert.deepEqual(changedNote?.tags, ["headache"]);
+  assert.deepEqual(clearedNote?.tags, []);
+  assert.equal(changed.events?.some((event) => event.kind === "intervention_session"), false);
+  assert.equal(cleared.events?.some((event) => event.kind === "intervention_session"), false);
+  assert.equal(findJunctionNoteArtifacts(changed).length, 1);
+  assert.equal(findJunctionNoteArtifacts(cleared).length, 1);
+
+  // A free-text-only row with no tag field stays out of canonical storage. An
+  // explicit provider id wins over mutable timestamps for later revisions.
+  assert.deepEqual(missingTags.events, []);
+  assert.equal(findJunctionNoteArtifacts(missingTags).length, 0);
+  assert.deepEqual(stableChangedNote?.externalRef, stableInitialNote?.externalRef);
+  assert.deepEqual(stableInitialNote?.tags, ["sauna"]);
+  assert.deepEqual(stableChangedNote?.tags, ["headache"]);
+  assert.notEqual(stableChangedNote?.occurredAt, stableInitialNote?.occurredAt);
+  assert.equal(stableChanged.events?.some((event) => event.kind === "intervention_session"), false);
+  assert.equal(
+    stableInitialNote?.externalRef?.resourceId,
+    createHash("sha256")
+      .update(JSON.stringify(["junction-oura-note", "ring", undefined, "provider-note-1"]))
+      .digest("hex")
+      .slice(0, 16),
+  );
+
+  assert.doesNotMatch(JSON.stringify(payload), /SENSITIVE_VALUE_SENTINEL/u);
+  assert.doesNotMatch(JSON.stringify(changed), /SENSITIVE_VALUE_SENTINEL/u);
+  assert.doesNotMatch(JSON.stringify(cleared), /SENSITIVE_VALUE_SENTINEL/u);
+  assert.doesNotMatch(JSON.stringify(missingTags), /SENSITIVE_VALUE_SENTINEL/u);
+  assert.doesNotMatch(JSON.stringify(stableInitial), /SENSITIVE_VALUE_SENTINEL/u);
+  assert.doesNotMatch(JSON.stringify(stableChanged), /SENSITIVE_VALUE_SENTINEL/u);
+});
+
+test("Junction note ids remain scoped to their same-provider source instance", () => {
+  const snapshot = (firstSourceTags: readonly string[]) => ({
+    importedAt: "2026-04-23T12:00:00.000Z",
+    timeseries: {
+      note: [{
+        id: "provider-local-note-1",
+        sourceInstanceId: "source-aaaaaaaaaaaaaaaaaaaaaaaa",
+        sourceProviderSlug: "oura",
+        sourceType: "ring",
+        start: "2026-04-22T18:05:00.000Z",
+        tags: firstSourceTags,
+      }, {
+        id: "provider-local-note-1",
+        sourceInstanceId: "source-bbbbbbbbbbbbbbbbbbbbbbbb",
+        sourceProviderSlug: "oura",
+        sourceType: "ring",
+        start: "2026-04-22T18:05:00.000Z",
+        tags: ["sauna"],
+      }],
+    },
+  });
+  const initial = normalizeJunctionSnapshot(snapshot(["headache"]));
+  const edited = normalizeJunctionSnapshot(snapshot([]));
+  const initialNotes = initial.events?.filter((event) => event.kind === "note") ?? [];
+  const editedNotes = edited.events?.filter((event) => event.kind === "note") ?? [];
+
+  assert.equal(initialNotes.length, 2);
+  assert.equal(findJunctionNoteArtifacts(initial).length, 2);
+  assert.equal(new Set(initialNotes.map((event) => event.externalRef?.resourceId)).size, 2);
+  assert.deepEqual(
+    initialNotes.map((event) => event.dataOrigin?.sourceInstanceId).sort(),
+    ["source-aaaaaaaaaaaaaaaaaaaaaaaa", "source-bbbbbbbbbbbbbbbbbbbbbbbb"],
+  );
+  assert.deepEqual(
+    editedNotes.map((event) => event.externalRef?.resourceId).sort(),
+    initialNotes.map((event) => event.externalRef?.resourceId).sort(),
+  );
+  assert.deepEqual(
+    editedNotes.find((event) =>
+      event.dataOrigin?.sourceInstanceId === "source-aaaaaaaaaaaaaaaaaaaaaaaa"
+    )?.tags,
+    [],
+  );
+  assert.deepEqual(
+    editedNotes.find((event) =>
+      event.dataOrigin?.sourceInstanceId === "source-bbbbbbbbbbbbbbbbbbbbbbbb"
+    )?.tags,
+    ["sauna"],
   );
 });
 
@@ -5427,13 +5563,14 @@ test("Junction normalizer maps menstrual cycle summaries to cycle and daily face
   });
   assert.deepEqual(readMeasurement(flowEvents[1])?.qualifiers, { flow: "light" });
   assert.equal(flowEvents[0]?.dayKey, "2026-04-10");
-  // Stable ordinal facets let a newer complete snapshot revise one value while
-  // preserving simultaneously reported same-day facts.
-  assert.equal(flowEvents[0]?.externalRef?.facet, "menstrual-flow-2026-04-10-1");
+  // Opaque semantic facets preserve simultaneously reported same-day facts
+  // without exposing their values or remapping siblings after insertion.
+  assert.match(flowEvents[0]?.externalRef?.facet ?? "", /^menstrual-flow-2026-04-10-[a-f0-9]{16}$/u);
+  assert.equal(flowEvents[0]?.externalRef?.facet?.includes("medium"), false);
 
   const ovulationEvents = measurementEvents.filter((event) => event.title === "Junction ovulation test");
   // Two same-day tests with different results land as two events with
-  // distinct ordinal facets; the indeterminate row stays raw-only.
+  // distinct opaque semantic facets; the indeterminate row stays raw-only.
   assert.equal(ovulationEvents.length, 2);
   assert.deepEqual(readMeasurement(ovulationEvents[0]), {
     metric: "ovulation-test",
@@ -5448,7 +5585,8 @@ test("Junction normalizer maps menstrual cycle summaries to cycle and daily face
     qualifiers: { result: "negative" },
   });
   assert.notEqual(ovulationEvents[0]?.externalRef?.facet, ovulationEvents[1]?.externalRef?.facet);
-  assert.equal(ovulationEvents[0]?.externalRef?.facet, "ovulation-test-2026-04-19-1");
+  assert.match(ovulationEvents[0]?.externalRef?.facet ?? "", /^ovulation-test-2026-04-19-[a-f0-9]{16}$/u);
+  assert.equal(ovulationEvents[0]?.externalRef?.facet?.includes("surge"), false);
 
   const pregnancyEvent = measurementEvents.find((event) => event.title === "Junction pregnancy test");
   assert.deepEqual(readMeasurement(pregnancyEvent), {
@@ -5541,9 +5679,9 @@ test("Junction normalizer maps menstrual cycle summaries to cycle and daily face
     unit: "flag",
     qualifiers: { deviation: "irregular_menstrual_cycles" },
   });
-  assert.equal(
-    deviationEvent?.externalRef?.facet,
-    "menstrual-cycle-deviation-2026-04-30-1",
+  assert.match(
+    deviationEvent?.externalRef?.facet ?? "",
+    /^menstrual-cycle-deviation-2026-04-30-[a-f0-9]{16}$/u,
   );
 
   // Predicted cycles are forecasts and must not become normalized facts.
@@ -5578,6 +5716,122 @@ test("Junction normalizer maps menstrual cycle summaries to cycle and daily face
     "raw-cycle-source-name",
   ]);
   assertEventRawArtifactRolesExist(payload);
+});
+
+test("Junction normalizer preserves dated menstrual categorical facts without inventing certainty", () => {
+  const oversizedContraceptiveType = `type-${"x".repeat(120)}`;
+  const snapshot = {
+    importedAt: "2026-05-02T12:00:00.000Z",
+    summaries: {
+      menstrual_cycle: [{
+        id: "cycle-categorical-facts",
+        period_start: "2026-04-07",
+        cervical_mucus: [
+          { date: "2026-04-16", quality: "egg_white" },
+          { date: "2026-04-17", quality: "unknown" },
+        ],
+        intermenstrual_bleeding: [{ date: "2026-04-18" }],
+        contraceptive: [
+          { date: "2026-04-08", type: oversizedContraceptiveType },
+          { date: "2026-04-09", type: "unknown" },
+        ],
+        home_progesterone_test: [
+          { date: "2026-04-23", test_result: "positive" },
+          { date: "2026-04-24", test_result: "indeterminate" },
+        ],
+        sexual_activity: [
+          { date: "2026-04-13", protection_used: false },
+          { date: "2026-04-13" },
+          // Non-boolean values are not coerced into certainty.
+          { date: "2026-04-14", protection_used: "false" },
+        ],
+        source: { provider: "apple_health", type: "phone" },
+      }, {
+        id: "cycle-categorical-facts-predicted",
+        is_predicted: true,
+        period_start: "2026-05-05",
+        cervical_mucus: [{ date: "2026-05-10", quality: "watery" }],
+        intermenstrual_bleeding: [{ date: "2026-05-11" }],
+        contraceptive: [{ date: "2026-05-12", type: "oral" }],
+        home_progesterone_test: [{ date: "2026-05-13", test_result: "positive" }],
+        sexual_activity: [{ date: "2026-05-14", protection_used: true }],
+        source: { provider: "apple_health", type: "phone" },
+      }],
+    },
+  };
+  const payload = normalizeJunctionSnapshot(snapshot);
+  const events = payload.events ?? [];
+  const measurementEvents = events.filter((event) => event.kind === "measurement");
+  const readMeasurement = (event: (typeof events)[number] | undefined) =>
+    (event?.fields?.measurements as Array<Record<string, unknown>> | undefined)?.[0];
+  const eventsForMetric = (metric: string) => measurementEvents.filter((event) =>
+    readMeasurement(event)?.metric === metric
+  );
+
+  const cervicalMucusEvents = eventsForMetric("cervical-mucus");
+  assert.equal(cervicalMucusEvents.length, 1);
+  assert.deepEqual(readMeasurement(cervicalMucusEvents[0]), {
+    metric: "cervical-mucus",
+    value: 1,
+    unit: "observation",
+    qualifiers: { quality: "egg_white" },
+  });
+
+  const intermenstrualBleedingEvent = eventsForMetric("intermenstrual-bleeding")[0];
+  assert.deepEqual(readMeasurement(intermenstrualBleedingEvent), {
+    metric: "intermenstrual-bleeding",
+    value: 1,
+    unit: "event",
+    qualifiers: { bleeding: "intermenstrual" },
+  });
+
+  assert.equal(eventsForMetric("contraceptive-use").length, 0);
+
+  const progesteroneEvents = eventsForMetric("progesterone-test");
+  assert.equal(progesteroneEvents.length, 1);
+  assert.deepEqual(readMeasurement(progesteroneEvents[0]), {
+    metric: "progesterone-test",
+    value: 1,
+    unit: "result",
+    qualifiers: { result: "positive" },
+  });
+
+  const sexualActivityEvents = eventsForMetric("sexual-activity");
+  assert.equal(sexualActivityEvents.length, 2);
+  const explicitlyUnprotected = sexualActivityEvents.find((event) =>
+    (readMeasurement(event)?.qualifiers as Record<string, unknown> | undefined)?.["protection-used"] === false
+  );
+  const protectionUnspecified = sexualActivityEvents.find((event) =>
+    Object.keys((readMeasurement(event)?.qualifiers as Record<string, unknown> | undefined) ?? {}).length === 0
+  );
+  assert.deepEqual(readMeasurement(explicitlyUnprotected), {
+    metric: "sexual-activity",
+    value: 1,
+    unit: "event",
+    qualifiers: { "protection-used": false },
+  });
+  assert.deepEqual(readMeasurement(protectionUnspecified), {
+    metric: "sexual-activity",
+    value: 1,
+    unit: "event",
+    qualifiers: {},
+  });
+
+  assert.equal(events.length, 5);
+  assert.ok(events.every((event) => event.dataOrigin?.sourceProviderSlug === "apple-health"));
+  assert.equal(events.some((event) => event.dayKey?.startsWith("2026-05")), false);
+  assertEventRawArtifactRolesExist(payload);
+
+  // Replay from a later sync window keeps the provider/date/category identity
+  // stable instead of minting replacement facts.
+  const replayPayload = normalizeJunctionSnapshot({
+    ...snapshot,
+    importedAt: "2026-06-02T12:00:00.000Z",
+  });
+  assert.deepEqual(
+    replayPayload.events?.map((event) => event.externalRef),
+    events.map((event) => event.externalRef),
+  );
 });
 
 test("Junction normalizer maps electrocardiogram summaries to per-recording events", () => {
@@ -5663,6 +5917,7 @@ test("Junction normalizer maps profile summaries to height and demographics", ()
         gender: "male",
         sex: "female",
         wheelchair_use: true,
+        created_at: "2026-04-19T09:00:00Z",
         updated_at: "2026-04-20T09:00:00Z",
         source: { provider: "apple_health_kit", type: "phone" },
       },
@@ -5688,13 +5943,14 @@ test("Junction normalizer maps profile summaries to height and demographics", ()
   assert.equal(demographics?.title, "Junction profile");
   assert.equal(demographics?.externalRef?.facet, "profile-demographics");
   assert.equal(demographics?.externalRef?.resourceId, height?.externalRef?.resourceId);
-  assert.equal(demographics?.recordedAt, "2026-04-20T09:00:00.000Z");
-  // The full event time is pinned to the provider's updated_at — never the
-  // sync window — so reconciles don't revise the spine and month-boundary
-  // syncs can't duplicate the profile.
-  assert.equal(demographics?.occurredAt, "2026-04-20T09:00:00.000Z");
-  assert.equal(demographics?.dayKey, "2026-04-20");
-  assert.equal(height?.occurredAt, "2026-04-20T09:00:00.000Z");
+  assert.equal(demographics?.recordedAt, "2026-04-19T09:00:00.000Z");
+  // The semantic occurrence is pinned to created_at while externalRef.version
+  // remains updated_at, so a source revision orders correctly without moving
+  // an otherwise unchanged profile across event shards.
+  assert.equal(demographics?.occurredAt, "2026-04-19T09:00:00.000Z");
+  assert.equal(demographics?.dayKey, "2026-04-19");
+  assert.equal(height?.occurredAt, "2026-04-19T09:00:00.000Z");
+  assert.equal(demographics?.externalRef?.version, "2026-04-20T09:00:00.000Z");
   assertEventRawArtifactRolesExist(payload);
 
   // A profile with no provider timestamp at all stays raw-only: inventing
@@ -5718,6 +5974,13 @@ test("Junction normalizer maps profile summaries to height and demographics", ()
   // normalized events carry the structured fields.
   const profileArtifact = payload.evidenceParts?.find((artifact) => artifact.role === "junction-summary-profile");
   assertJsonOmits(JSON.stringify(profileArtifact?.content), ["1990-05-14", "183"]);
+  assert.deepEqual(profileArtifact?.content, {
+    reportedGender: "male",
+    sourceProviderSlug: "apple-health-kit",
+    sourceType: "phone",
+    stableResourceId: height?.externalRef?.resourceId,
+    updatedAt: "2026-04-20T09:00:00.000Z",
+  });
 
   // "Unknown" enum values carry no canonical information and stay only in
   // the identity-sanitized, bounded profile evidence.
@@ -5740,6 +6003,7 @@ test("Junction normalizer maps profile summaries to height and demographics", ()
     sourceProviderSlug: "oura",
     sourceType: "ring",
     reportedGender: "unknown",
+    stableResourceId: "profile-89ed7051cb0f1169",
   });
 });
 
@@ -5951,10 +6215,210 @@ test("Junction corrected profile and cycle snapshots retract omitted sensitive f
     assert.equal(correction.samples.length, 0);
     assert.equal(replay.samples.length, 0);
     assert.ok(firstPregnancy?.id);
-    assert.equal(correctedPregnancy?.id, firstPregnancy.id);
-    assert.equal(correctedPregnancy?.lifecycle?.revision, 2);
+    assert.notEqual(correctedPregnancy?.id, firstPregnancy.id);
+    assert.equal(eventRevisionFromLifecycle(correctedPregnancy?.lifecycle), 1);
+    assert.ok(records.some((record) =>
+      record.id === firstPregnancy.id && isDeletedEventLifecycle(record.lifecycle)
+    ));
     assert.equal(correction.applied, true);
     assert.equal(replay.applied, false);
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
+test("Junction profile revisions preserve an unchanged member-edited gender while updating height", async () => {
+  const vaultRoot = await makeTempDirectory("murph-junction-profile-member-edit");
+  const snapshot = (input: { gender: string; height: number; updatedAt: string }) => ({
+    importedAt: input.updatedAt,
+    summaries: {
+      profile: {
+        id: "stable-profile-member-edit",
+        created_at: "2026-05-01T09:00:00Z",
+        updated_at: input.updatedAt,
+        gender: input.gender,
+        height: input.height,
+        source: { provider: "apple_health_kit", type: "phone" },
+      },
+    },
+  });
+
+  try {
+    await coreRuntime.initializeVault({
+      vaultRoot,
+      createdAt: "2026-05-01T00:00:00.000Z",
+      timezone: "UTC",
+    });
+    const importSnapshot = (input: { gender: string; height: number; updatedAt: string }) =>
+      importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
+        { provider: "junction", vaultRoot, snapshot: snapshot(input) },
+        { corePort: coreRuntime },
+      );
+    const first = await importSnapshot({
+      gender: "male",
+      height: 180,
+      updatedAt: "2026-05-20T09:00:00.000Z",
+    });
+    const demographics = first.events.find((event) => event.kind === "note");
+    assert.ok(demographics);
+    await coreRuntime.upsertEvent({
+      vaultRoot,
+      payload: {
+        ...demographics,
+        note: "Reported gender: female.",
+        reportedGender: "female",
+        source: "manual",
+      },
+    });
+
+    const update = await importSnapshot({
+      gender: "male",
+      height: 181,
+      updatedAt: "2026-05-21T09:00:00.000Z",
+    });
+    const records = (
+      await Promise.all(
+        [...new Set([...first.eventShardPaths, ...update.eventShardPaths])].map((relativePath) =>
+          coreRuntime.readJsonlRecords({ vaultRoot, relativePath })
+        ),
+      )
+    ).flat();
+    const live = latestLiveRecords(records);
+    const liveDemographics = live.find((event) => event.id === demographics.id);
+    const liveHeight = live.find((event) => event.kind === "observation" && event.metric === "height");
+
+    assert.equal(storedObservationValue(liveHeight), 181);
+    assert.equal(liveDemographics?.reportedGender, "female");
+    assert.equal(liveDemographics?.source, "manual");
+    assert.equal(storedExternalRefField(liveDemographics, "version"), "2026-05-20T09:00:00.000Z");
+    assert.equal(storedDataOriginObservedAtRaw(liveDemographics), "2026-05-01T09:00:00.000Z");
+    assert.ok(records.some((event) =>
+      event.id === demographics.id
+      && event.source === "device"
+      && storedExternalRefField(event, "version") === "2026-05-21T09:00:00.000Z"
+    ), "the provider ordering baseline advances behind the retained member revision");
+
+    await assert.rejects(
+      importSnapshot({
+        gender: "other",
+        height: 182,
+        updatedAt: "2026-05-22T09:00:00.000Z",
+      }),
+      (error) => (error as { code?: unknown }).code === "EVENT_EXTERNAL_REF_ALIAS_CONFLICT",
+    );
+    const afterConflict = (
+      await Promise.all(
+        [...new Set([...first.eventShardPaths, ...update.eventShardPaths])].map((relativePath) =>
+          coreRuntime.readJsonlRecords({ vaultRoot, relativePath })
+        ),
+      )
+    ).flat();
+    assert.equal(
+      storedObservationValue(
+        latestLiveRecords(afterConflict).find((event) =>
+          event.kind === "observation" && event.metric === "height"
+        ),
+      ),
+      181,
+      "the unrelated height update must remain atomic with the rejected gender conflict",
+    );
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
+test("Junction menstrual fact fingerprints survive insertion and reordering while edits protect omissions", async () => {
+  const vaultRoot = await makeTempDirectory("murph-junction-menstrual-semantic-facets");
+  const snapshot = (input: { qualities: string[]; updatedAt: string }) => ({
+    importedAt: input.updatedAt,
+    summaries: {
+      menstrual_cycle: [{
+        id: "stable-cycle-member-edit",
+        created_at: "2026-05-01T09:00:00Z",
+        updated_at: input.updatedAt,
+        period_start: "2026-05-01",
+        cervical_mucus: input.qualities.map((quality) => ({
+          date: "2026-05-12",
+          quality,
+        })),
+        source: { provider: "apple_health", type: "phone" },
+      }],
+    },
+  });
+
+  try {
+    await coreRuntime.initializeVault({
+      vaultRoot,
+      createdAt: "2026-05-01T00:00:00.000Z",
+      timezone: "UTC",
+    });
+    const importSnapshot = (
+      input: { qualities: string[]; updatedAt: string },
+      memberEditConflictResolution?: "keep_member" | "use_provider",
+    ) => importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
+      {
+        provider: "junction",
+        vaultRoot,
+        snapshot: snapshot(input),
+        memberEditConflictResolution,
+      },
+      { corePort: coreRuntime },
+    );
+    const first = await importSnapshot({
+      qualities: ["egg_white"],
+      updatedAt: "2026-05-20T09:00:00.000Z",
+    });
+    const editedFact = first.events.find((event) =>
+      storedMeasurements(event).some((measurement) =>
+        measurement.metric === "cervical-mucus"
+        && measurement.qualifiers?.quality === "egg_white"
+      )
+    );
+    assert.ok(editedFact);
+    await coreRuntime.upsertEvent({
+      vaultRoot,
+      payload: { ...editedFact, note: "member context", source: "manual" },
+    });
+
+    const inserted = await importSnapshot({
+      qualities: ["watery", "egg_white"],
+      updatedAt: "2026-05-21T09:00:00.000Z",
+    });
+    const replay = await importSnapshot({
+      qualities: ["egg_white", "watery"],
+      updatedAt: "2026-05-21T09:00:00.000Z",
+    });
+    const rows = (
+      await Promise.all(
+        [...new Set([...first.eventShardPaths, ...inserted.eventShardPaths])].map((relativePath) =>
+          coreRuntime.readJsonlRecords({ vaultRoot, relativePath })
+        ),
+      )
+    ).flat();
+    const liveFacts = latestLiveRecords(rows).filter((event) =>
+      storedMeasurements(event).some((measurement) => measurement.metric === "cervical-mucus")
+    );
+    const liveEditedFact = liveFacts.find((event) => event.id === editedFact.id);
+
+    assert.equal(replay.applied, false);
+    assert.equal(liveFacts.length, 2);
+    assert.equal(liveEditedFact?.note, "member context");
+    assert.equal(liveEditedFact?.source, "manual");
+    assert.equal(storedExternalRefField(liveEditedFact, "facet"), editedFact.externalRef?.facet);
+    assert.ok(liveFacts.every((event) =>
+      /^cervical-mucus-2026-05-12-[a-f0-9]{16}$/u.test(storedExternalRefField(event, "facet") ?? "")
+    ));
+    assert.ok(liveFacts.every((event) =>
+      !/(egg|white|watery)/u.test(storedExternalRefField(event, "facet") ?? "")
+    ));
+
+    await assert.rejects(
+      importSnapshot({
+        qualities: ["watery"],
+        updatedAt: "2026-05-22T09:00:00.000Z",
+      }),
+      (error) => (error as { code?: unknown }).code === "EVENT_EXTERNAL_REF_ALIAS_CONFLICT",
+    );
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
   }
@@ -9972,6 +10436,46 @@ test("Junction sleep summaries accept documented snake-case latency minutes", ()
   assert.equal(payload.samples?.length ?? 0, 0);
 });
 
+test("Junction sleep latency only bypasses seconds conversion for minute-named fields", () => {
+  const secondsPayload = normalizeJunctionSnapshot({
+    importedAt: "2026-05-20T12:00:00.000Z",
+    summaries: {
+      sleep: [{
+        source: { provider: "garmin", type: "watch" },
+        id: "sleep-latency-seconds",
+        date: "2026-05-20T08:00:00+00:00",
+        sleep_latency: 900,
+        unit: "minutes",
+      }],
+    },
+  });
+  const minutesPayload = normalizeJunctionSnapshot({
+    importedAt: "2026-05-20T12:00:00.000Z",
+    summaries: {
+      sleep: [{
+        source: { provider: "garmin", type: "watch" },
+        id: "sleep-latency-minutes",
+        date: "2026-05-20T08:00:00+00:00",
+        latency_minutes: 15,
+        unit: "seconds",
+      }],
+    },
+  });
+  const latencyObservation = (payload: ReturnType<typeof normalizeJunctionSnapshot>) =>
+    payload.events?.find((event) => event.fields?.metric === "sleep-latency-minutes");
+
+  for (const payload of [secondsPayload, minutesPayload]) {
+    const observation = latencyObservation(payload);
+    assert.equal(observation?.fields?.value, 15);
+    assert.equal(observation?.fields?.unit, "minutes");
+    assert.equal(observation?.externalRef?.facet, "sleep-latency-minutes");
+    assert.equal(observation?.externalRef?.resourceType, "junction-garmin-sleep");
+    assert.equal(observation?.dataOrigin?.aggregatorProvider, "junction");
+    assert.equal(observation?.dataOrigin?.sourceProviderSlug, "garmin");
+    assert.deepEqual(observation?.evidenceRoles, ["junction-summary-sleep"]);
+  }
+});
+
 test("Junction normalizer maps documented activity and body summary scalar fields", () => {
   const payload = normalizeJunctionSnapshot({
     importedAt: "2026-05-20T12:00:00.000Z",
@@ -10033,6 +10537,9 @@ test("Junction normalizer maps documented activity and body summary scalar field
   assert.equal(activityMinutes?.fields?.value, 128);
   assert.equal(activityMinutes?.fields?.unit, "minutes");
   assert.equal(activityMinutes?.externalRef?.facet, "activity-minutes");
+  assert.equal(metricValue("low-activity-minutes"), 84);
+  assert.equal(metricValue("medium-activity-minutes"), 15);
+  assert.equal(metricValue("high-activity-minutes"), 29);
   assert.equal(metricValue("daily-steps"), 9400);
   assert.equal(metricValue("active-calories"), 640);
   assert.equal(metricValue("total-calories"), 2400);
@@ -10049,9 +10556,39 @@ test("Junction normalizer maps documented activity and body summary scalar field
   assert.equal(metricValue("walking-average-heart-rate"), 83);
   assert.equal(metricValue("minimum-heart-rate"), 44);
   assert.equal(metricValue("resting-heart-rate"), 52);
-  assert.equal(metricValue("low-activity-minutes"), 84);
-  assert.equal(metricValue("medium-activity-minutes"), 15);
-  assert.equal(metricValue("high-activity-minutes"), 29);
+
+  const activityFidelityMetrics = [
+    "activity-minutes",
+    "low-activity-minutes",
+    "medium-activity-minutes",
+    "high-activity-minutes",
+    "activity-average-heart-rate",
+    "walking-average-heart-rate",
+    "minimum-heart-rate",
+  ];
+  const activityFidelityObservations = activityFidelityMetrics.map((metric) =>
+    observations.find((event) => event.fields?.metric === metric)
+  );
+  assert.equal(activityFidelityObservations.every((event) => event !== undefined), true);
+  assert.deepEqual(
+    activityFidelityObservations.map((event) => event?.externalRef?.facet),
+    activityFidelityMetrics,
+  );
+  const activityFidelityResourceIds = activityFidelityObservations.map(
+    (event) => event?.externalRef?.resourceId,
+  );
+  assert.equal(
+    activityFidelityResourceIds.every((resourceId) => typeof resourceId === "string"),
+    true,
+  );
+  assert.equal(new Set(activityFidelityResourceIds).size, 1);
+  assert.ok(activityFidelityObservations.every((event) =>
+    event?.externalRef?.resourceType === "junction-garmin-activity"
+    && event?.dataOrigin?.aggregatorProvider === "junction"
+    && event?.dataOrigin?.sourceProviderSlug === "garmin"
+    && event?.evidenceRoles?.length === 1
+    && event?.evidenceRoles?.[0] === "junction-summary-activity"
+  ));
   assert.equal(metricValue("weight"), 80);
   assert.equal(metricValue("bmi"), 22.3);
   assert.equal(metricValue("body-fat-percentage"), 30);
@@ -10060,6 +10597,80 @@ test("Junction normalizer maps documented activity and body summary scalar field
   assert.equal(metricValue("temperature"), 36.7);
   assert.match(JSON.stringify(rawBodyArtifact?.content), /"lean_body_mass_kilogram":40.1/u);
   assert.ok(observations.every((event) => event.fields?.observationGrain === "summary"));
+});
+
+test("Junction body composition summaries preserve distinct facts, provenance, and replay identity", () => {
+  const snapshot = {
+    importedAt: "2026-05-20T12:00:00.000Z",
+    summaries: {
+      body: [{
+        source: {
+          provider: "withings",
+          type: "scale",
+        },
+        id: "body-composition-fidelity",
+        date: "2026-05-20T08:00:00+00:00",
+        unit: "kg",
+        bone_mass_percentage: 4.2,
+        muscle_mass_percentage: 61.8,
+        visceral_fat_index: 7,
+        water_percentage: 54.6,
+        height: 1.82,
+      }],
+    },
+  };
+
+  const first = normalizeJunctionSnapshot(snapshot);
+  const replay = normalizeJunctionSnapshot(snapshot);
+  const expectedMetrics = new Set([
+    "body-water-percentage",
+    "bone-mass-percentage",
+    "muscle-mass-percentage",
+    "visceral-fat-index",
+  ]);
+  const observations = (first.events ?? []).filter(
+    (event) => event.kind === "observation" && expectedMetrics.has(String(event.fields?.metric)),
+  );
+  const replayObservations = (replay.events ?? []).filter(
+    (event) => event.kind === "observation" && expectedMetrics.has(String(event.fields?.metric)),
+  );
+  const evidenceParts = (first.evidenceParts ?? []).filter(
+    (part) => part.role === "junction-summary-body",
+  );
+
+  assert.deepEqual(
+    observations
+      .map((event) => ({
+        facet: event.externalRef?.facet,
+        metric: event.fields?.metric,
+        unit: event.fields?.unit,
+        value: event.fields?.value,
+      }))
+      .sort((left, right) => String(left.metric).localeCompare(String(right.metric))),
+    [
+      { facet: "body-water-percentage", metric: "body-water-percentage", unit: "%", value: 54.6 },
+      { facet: "bone-mass-percentage", metric: "bone-mass-percentage", unit: "%", value: 4.2 },
+      { facet: "muscle-mass-percentage", metric: "muscle-mass-percentage", unit: "%", value: 61.8 },
+      { facet: "visceral-fat-index", metric: "visceral-fat-index", unit: "index", value: 7 },
+    ],
+  );
+  assert.equal(new Set(observations.map((event) => event.externalRef?.resourceId)).size, 1);
+  assert.ok(observations.every((event) => event.externalRef?.system === "junction"));
+  assert.ok(observations.every((event) => event.externalRef?.resourceType === "junction-withings-body"));
+  assert.ok(observations.every((event) => event.dataOrigin?.aggregatorProvider === "junction"));
+  assert.ok(observations.every((event) => event.dataOrigin?.sourceProviderSlug === "withings"));
+  assert.ok(observations.every((event) => event.dataOrigin?.sourceType === "scale"));
+  assert.ok(observations.every((event) => event.evidenceRoles?.join(",") === "junction-summary-body"));
+  assert.deepEqual(
+    replayObservations.map((event) => event.externalRef),
+    observations.map((event) => event.externalRef),
+  );
+  assert.equal(evidenceParts.length, 1);
+  assert.match(JSON.stringify(evidenceParts[0]?.content), /"bone_mass_percentage":4.2/u);
+  assert.match(JSON.stringify(evidenceParts[0]?.content), /"muscle_mass_percentage":61.8/u);
+  assert.match(JSON.stringify(evidenceParts[0]?.content), /"visceral_fat_index":7/u);
+  assert.match(JSON.stringify(evidenceParts[0]?.content), /"water_percentage":54.6/u);
+  assert.equal(first.events?.some((event) => event.fields?.metric === "height"), false);
 });
 
 test("Junction normalizer rejects incomplete or invalid daily activity minute buckets", () => {
@@ -10073,6 +10684,8 @@ test("Junction normalizer rejects incomplete or invalid daily activity minute bu
     { low: 20, medium: -1, high: 10 },
     { low: 20, medium: 10, high: "Infinity" },
     { low: 1_441, medium: 1, high: 0 },
+    { low: 1440, medium: 1, high: 0 },
+    { low: 20, medium: 10, high: 1441 },
   ];
   const payload = normalizeJunctionSnapshot({
     importedAt: "2026-05-20T12:00:00.000Z",
@@ -10087,6 +10700,12 @@ test("Junction normalizer rejects incomplete or invalid daily activity minute bu
   });
 
   assert.equal(payload.events?.some((event) => event.fields?.metric === "activity-minutes"), false);
+  assert.equal(payload.events?.filter((event) => event.fields?.metric === "low-activity-minutes").length, 5);
+  assert.equal(payload.events?.filter((event) => event.fields?.metric === "medium-activity-minutes").length, 5);
+  assert.equal(payload.events?.filter((event) => event.fields?.metric === "high-activity-minutes").length, 3);
+  assert.equal(payload.events?.some((event) =>
+    event.fields?.metric === "high-activity-minutes" && event.fields.value === 1441
+  ), false);
 });
 
 test("Junction normalizer rejects invalid sleep latency and activity heart rates", () => {
@@ -10116,7 +10735,7 @@ test("Junction normalizer rejects invalid sleep latency and activity heart rates
   );
 
   assert.equal(metrics.has("sleep-latency-minutes"), false);
-  assert.equal(metrics.has("average-heart-rate"), false);
+  assert.equal(metrics.has("activity-average-heart-rate"), false);
   assert.equal(metrics.has("walking-average-heart-rate"), false);
   assert.equal(metrics.has("minimum-heart-rate"), false);
 });

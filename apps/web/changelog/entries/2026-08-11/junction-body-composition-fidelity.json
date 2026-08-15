@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-11",
+  "order": 100,
+  "item": {
+    "id": "junction-body-composition-fidelity",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Keep more connected body composition data",
+    "summary": "Connected health syncs now preserve bone mass, muscle mass, body water, and visceral fat readings as separate structured measurements.",
+    "details": "Murph keeps the upstream provider and units attached to each fact, omits missing values, and leaves profile height with its existing owner.",
+    "relevanceTags": ["wearables", "body-composition"],
+    "sourcePullRequests": [1695]
+  }
+}

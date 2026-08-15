@@ -151,7 +151,10 @@ export interface OAuthStateRecord {
 
 export type PublicDeviceSyncAccount = DeviceSyncAccountRecord;
 export type PublicDeviceConnectionSource = DeviceConnectionSourceRecord;
-export type StoredDeviceConnectionSource = PublicDeviceConnectionSource;
+export type StoredDeviceConnectionSource = Omit<
+  PublicDeviceConnectionSource,
+  "lifecycleEpoch"
+> & { lifecycleEpoch: number };
 
 export interface StoredDeviceSyncAccount extends PublicDeviceSyncAccount {
   externalAccountId: string;
@@ -389,6 +392,7 @@ export interface DeviceSyncPublicIngressStore {
     PublicDeviceConnectionSource,
     | "connectionId"
     | "lastErrorCode"
+    | "lifecycleEpoch"
     | "lastSeenAt"
     | "sourceInstanceKey"
     | "sourceProviderSlug"
@@ -398,6 +402,7 @@ export interface DeviceSyncPublicIngressStore {
       PublicDeviceConnectionSource,
       | "connectionId"
       | "lastErrorCode"
+      | "lifecycleEpoch"
       | "lastSeenAt"
       | "sourceInstanceKey"
       | "sourceProviderSlug"
@@ -428,6 +433,8 @@ export interface DeviceSyncJobInput {
   maxAttempts?: number;
   dedupeKey?: string;
 }
+
+export type DeviceMemberEditConflictResolution = "keep_member" | "use_provider";
 
 export interface ProviderCallbackContext {
   callbackUrl: string;
@@ -745,6 +752,7 @@ export interface ProviderSnapshotImportReceipt {
 export interface ProviderJobConnectionSource {
   displayName: string | null;
   firstSeenAt?: string;
+  lifecycleEpoch?: number;
   lastErrorCode: string | null;
   lastErrorMessage: string | null;
   resourceAvailabilitySummary?: DeviceConnectionSourceResourceAvailabilitySummary;
@@ -764,6 +772,11 @@ export interface ProviderJobContext {
   connectionSourceAdmissionMode?: "discover_unlisted" | "listed_only";
   shouldYield?(): boolean;
   throwIfAborted?(): void;
+  memberEditConflictResolution?: DeviceMemberEditConflictResolution;
+  checkpointJobContinuation?(input: {
+    metadataPatch?: Record<string, unknown>;
+    payload: Record<string, unknown>;
+  }): Promise<void>;
   // Providers must route job-time side effects through this context instead of
   // reaching into service/store internals directly.
   importSnapshot(
@@ -785,6 +798,16 @@ export interface ProviderJobResult {
   scheduledJobs?: DeviceSyncJobInput[];
   metadataPatch?: Record<string, unknown>;
   nextReconcileAt?: string | null;
+  updatesLastSyncCompletedAt?: boolean;
+  /**
+   * Requeue the exact claimed job with replacement payload progress without
+   * publishing account-wide sync success. The current job row remains the
+   * only durable continuation owner.
+   */
+  jobContinuation?: {
+    availableAt?: string;
+    payload: Record<string, unknown>;
+  };
 }
 
 export interface ProviderJobBatchDescriptor {
@@ -1011,6 +1034,7 @@ export interface DeviceSyncImporterPort {
     provider: string;
     snapshot: unknown;
     vaultRoot?: string;
+    memberEditConflictResolution?: DeviceMemberEditConflictResolution;
   }): Promise<unknown>;
   resolveDeviceProviderSnapshotDefaultTimeZone?(input: {
     vaultRoot?: string;

@@ -31,6 +31,7 @@ import {
 } from "@murphai/device-syncd/public-account";
 import {
   bucketHostedDeviceSyncEventToProviderSendDelay,
+  clearJunctionScheduleTimeExtendedHistoryCoverageForProvider,
   measureHostedDeviceSyncProviderSendToWebhookMs,
   sanitizeHostedRuntimeErrorCode,
   sanitizeHostedRuntimeErrorText,
@@ -82,7 +83,8 @@ import {
   toIsoTimestamp,
 } from "./shared";
 
-const HOSTED_DEVICE_SYNC_WAKE_EVENT_SCHEMA = "v1";
+const HOSTED_DEVICE_SYNC_DIRTY_WAKE_EVENT_SCHEMA = "v1";
+const HOSTED_DEVICE_SYNC_SCHEDULED_RECONCILE_WAKE_EVENT_SCHEMA = "v2";
 const COMPANION_HEALTH_MAX_PENDING_PAYLOADS = 16;
 
 const HISTORICAL_RESET_REVOKE_WARNING_MESSAGE =
@@ -420,6 +422,7 @@ function hostedConnectionSourceMatchesReconnectProof(
   return expected.id === current.id
     && expected.lastErrorCode === current.lastErrorCode
     && expected.lastErrorMessage === current.lastErrorMessage
+    && expected.lifecycleEpoch === current.lifecycleEpoch
     && expected.lastSeenAt === current.lastSeenAt
     && expected.sourceInstanceKey === current.sourceInstanceKey
     && expected.status === current.status;
@@ -505,11 +508,19 @@ export async function reconcileHostedDeviceSyncConnectionSourceRegistration(inpu
         return "admitted" as const;
       }
       if (source.status === "disconnected" && source.lastErrorCode === null) {
+        await input.store.syncDurableConnectionState({
+          ...connection,
+          metadata: clearJunctionScheduleTimeExtendedHistoryCoverageForProvider({
+            metadata: connection.metadata,
+            providerSlug: sourceProviderSlug,
+          }),
+        }, tx);
         await input.store.upsertConnectionSource({
           connectionId: input.account.id,
           sourceInstanceKey: source.sourceInstanceKey,
           sourceProviderSlug,
           status: "connected",
+          lifecycleEpoch: nextHostedSourceLifecycleEpoch(source.lifecycleEpoch),
           lastErrorCode: null,
           lastErrorMessage: null,
           lastSeenAt: nextHostedSourceLifecycleAt(source.lastSeenAt),
@@ -1385,11 +1396,27 @@ export async function handleHostedDeviceSyncConnectionEstablished(input: {
         ) {
           throw connectionEstablishmentStaleError();
         }
+        if (currentSource?.status === "disconnected") {
+          await input.store.syncDurableConnectionState({
+            ...current,
+            metadata: clearJunctionScheduleTimeExtendedHistoryCoverageForProvider({
+              metadata: current.metadata,
+              providerSlug: linkedSource.sourceProviderSlug,
+            }),
+          }, tx);
+        }
         await input.store.upsertConnectionSource({
           connectionId: input.account.id,
           sourceInstanceKey: linkedSource.sourceInstanceKey,
           sourceProviderSlug: linkedSource.sourceProviderSlug,
           status: "connected",
+          ...(currentSource?.status === "disconnected"
+            ? {
+                lifecycleEpoch: nextHostedSourceLifecycleEpoch(
+                  currentSource.lifecycleEpoch,
+                ),
+              }
+            : {}),
           firstSeenAt: input.now,
           lastSeenAt: input.now,
           tx,
@@ -1594,6 +1621,18 @@ function nextHostedSourceLifecycleAt(previous: string | null): string {
     Date.now(),
     Number.isFinite(previousMs) ? previousMs + 1 : 0,
   )));
+}
+
+function nextHostedSourceLifecycleEpoch(previous: number): number {
+  if (!Number.isSafeInteger(previous) || previous < 1 || previous >= Number.MAX_SAFE_INTEGER) {
+    throw deviceSyncError({
+      code: "CONNECTION_SOURCE_LIFECYCLE_EPOCH_INVALID",
+      message: "Device source lifecycle state was invalid. Reconnect the parent connection.",
+      retryable: false,
+      httpStatus: 409,
+    });
+  }
+  return previous + 1;
 }
 
 function isHostedSourceConnectionStartOlder(
@@ -1930,6 +1969,7 @@ export interface HostedDeviceSyncReconcileWakeResult {
 export async function appendHostedDeviceSyncManualReconcileWake(input: {
   connectionId: string;
   expectedConnectedAt: string;
+  memberEditConflictResolution?: "keep_member" | "use_provider";
   occurredAt: string;
   provider: string;
   userId: string;
@@ -1941,6 +1981,9 @@ export async function appendHostedDeviceSyncManualReconcileWake(input: {
     connectionId: input.connectionId,
     expectedConnectedAt: input.expectedConnectedAt,
     hint: {
+      ...(input.memberEditConflictResolution
+        ? { memberEditConflictResolution: input.memberEditConflictResolution }
+        : {}),
       occurredAt: input.occurredAt,
       reason: "manual_reconcile",
     },
@@ -2058,7 +2101,7 @@ export function buildHostedDeviceSyncScheduledReconcileWakeEventId(input: {
   return [
     "device-sync",
     "scheduled-reconcile",
-    HOSTED_DEVICE_SYNC_WAKE_EVENT_SCHEMA,
+    HOSTED_DEVICE_SYNC_SCHEDULED_RECONCILE_WAKE_EVENT_SCHEMA,
     input.connectionId,
     input.expectedConnectedAt,
     input.nextReconcileAt,
@@ -2386,7 +2429,7 @@ function buildHostedDeviceSyncDirtyTransitionWakeEventId(input: {
   return [
     "device-sync",
     "dirty",
-    HOSTED_DEVICE_SYNC_WAKE_EVENT_SCHEMA,
+    HOSTED_DEVICE_SYNC_DIRTY_WAKE_EVENT_SCHEMA,
     input.userId,
     input.provider,
     input.connectionId,

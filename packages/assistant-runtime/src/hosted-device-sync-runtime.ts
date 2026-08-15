@@ -21,6 +21,8 @@ import type {
 } from "@murphai/device-syncd/types";
 import {
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_UPDATE_LIMIT,
+  HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_HYDRATION_LIMIT,
+  HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PAGE_LIMIT,
   mergeHostedDeviceSyncConnectionMetadata,
   mergeHostedDeviceSyncEventToProviderSendBuckets,
   normalizeHostedDeviceSyncJobHints,
@@ -59,6 +61,11 @@ import { requireHostedRuntimeDeviceSyncStore } from "./device-sync-service.ts";
 import {
   HOSTED_DEVICE_SYNC_DIRTY_PENDING_FETCH_LIMIT,
 } from "./hosted-device-sync-limits.ts";
+import {
+  fetchCompleteHostedDeviceSyncRuntimeSnapshot,
+} from "./hosted-runtime/device-sync-snapshot-pagination.ts";
+
+export { fetchCompleteHostedDeviceSyncRuntimeSnapshot };
 
 export interface HostedDeviceSyncRuntimeSyncState {
   hostedToLocalAccountIds: Map<string, string>;
@@ -142,12 +149,11 @@ export async function syncHostedDeviceSyncControlPlaneState(input: {
   }
 
   const snapshot = input.snapshot === undefined
-    ? (input.signal
-      ? await client.fetchSnapshot({
-          includeCredentialMaterial: true,
-          signal: input.signal,
-        })
-      : await client.fetchSnapshot({ includeCredentialMaterial: true }))
+    ? await fetchCompleteHostedDeviceSyncRuntimeSnapshot({
+        deviceSyncPort: client,
+        includeCredentialMaterial: true,
+        signal: input.signal ?? null,
+      })
     : input.snapshot;
   const state = createEmptyHostedDeviceSyncRuntimeSyncState(
     snapshot ? { ...snapshot, connections: [] } : null,
@@ -251,6 +257,9 @@ export async function syncHostedDeviceSyncControlPlaneState(input: {
           : { resourceAvailabilitySummary: source.resourceAvailabilitySummary }),
         lastErrorCode: source.lastErrorCode,
         lastErrorMessage: source.lastErrorMessage,
+        ...(source.lifecycleEpoch === undefined
+          ? {}
+          : { lifecycleEpoch: source.lifecycleEpoch }),
         firstSeenAt: source.firstSeenAt,
         lastSeenAt: source.lastSeenAt,
         // Merged monotonically below rather than taken verbatim: Web and the
@@ -349,6 +358,11 @@ function shouldPreserveLocalHydrationSource(input: {
 }): boolean {
   if (input.hostedConnectionEpochChanged) {
     return false;
+  }
+
+  const hostedLifecycleEpoch = input.source.lifecycleEpoch ?? 1;
+  if (input.localSource.lifecycleEpoch !== hostedLifecycleEpoch) {
+    return input.localSource.lifecycleEpoch > hostedLifecycleEpoch;
   }
 
   // An arrival can advance with no other field moving, so a lastSeenAt-only
@@ -574,7 +588,11 @@ async function applyHostedDeviceSyncWakeHint(input: {
     input.wake.reason === "reconcile_due"
     && wake.hint?.reason === "manual_reconcile"
   ) {
-    input.service.queueManualReconcile(localAccountId);
+    input.service.queueManualReconcile(localAccountId, {
+      ...(wake.hint.memberEditConflictResolution
+        ? { memberEditConflictResolution: wake.hint.memberEditConflictResolution }
+        : {}),
+    });
     return false;
   }
 
@@ -1329,6 +1347,12 @@ function buildHostedDeviceSyncRuntimeConnectionSourceUpdates(
         sourceInstanceKey: source.sourceInstanceKey,
         sourceProviderSlug: source.sourceProviderSlug,
         observedLastSeenAt: baseline?.lastSeenAt ?? null,
+        ...(baseline?.lifecycleEpoch === undefined
+          ? {}
+          : {
+              lifecycleEpoch: source.lifecycleEpoch,
+              observedLifecycleEpoch: baseline.lifecycleEpoch,
+            }),
         displayName: source.displayName ?? null,
         status: source.status,
         resourceAvailabilitySummary: { ...source.resourceAvailabilitySummary },
@@ -1364,6 +1388,10 @@ function hostedDeviceSyncRuntimeSourceUpdateMatchesBaseline(
     )
     && (baseline.lastErrorCode ?? null) === (update.lastErrorCode ?? null)
     && (baseline.lastErrorMessage ?? null) === (update.lastErrorMessage ?? null)
+    && (
+      update.lifecycleEpoch === undefined
+      || (baseline.lifecycleEpoch ?? 1) === update.lifecycleEpoch
+    )
     && baseline.firstSeenAt === (update.firstSeenAt ?? null)
     && baseline.lastSeenAt === update.lastSeenAt
     && (baseline.lastDataAt ?? null) === (update.lastDataAt ?? null);
@@ -1592,6 +1620,11 @@ function shouldUseRawHostedMetadataBaseline(input: {
   stored: StoredDeviceSyncAccount;
 }): boolean {
   return mergeHostedDeviceSyncConnectionMetadata({
+    authoritativeScheduleTimeCoverageClearProviderSlugs:
+      resolveReestablishedJunctionSourceProviderSlugs({
+        entry: input.entry,
+        existing: input.stored,
+      }),
     hostedMetadata: input.entry.connection.metadata,
     localConnectionStateUnpublished: Boolean(
       input.stored.hostedObservedUpdatedAt
@@ -1668,7 +1701,14 @@ function buildHostedAccountHydrationInput(input: {
       && !hostedConnectionEpochChanged
       && input.existing.localConnectionRevision !== input.existing.hostedObservedConnectionRevision,
   );
+  const reestablishedJunctionSourceProviderSlugs =
+    resolveReestablishedJunctionSourceProviderSlugs({
+      entry: input.entry,
+      existing: input.existing,
+    });
   const hydratedMetadata = mergeHostedDeviceSyncConnectionMetadata({
+    authoritativeScheduleTimeCoverageClearProviderSlugs:
+      reestablishedJunctionSourceProviderSlugs,
     hostedMetadata: hostedConnection.metadata,
     localConnectionStateUnpublished,
     localMetadata: hostedConnectionEpochChanged ? undefined : input.existing?.metadata,
@@ -1745,6 +1785,35 @@ function buildHostedAccountHydrationInput(input: {
         }
       : {}),
   };
+}
+
+function resolveReestablishedJunctionSourceProviderSlugs(input: {
+  entry: HostedDeviceSyncRuntimeConnectionSnapshot;
+  existing: StoredDeviceSyncAccount | null;
+}): string[] {
+  if (
+    input.entry.connection.provider !== "junction"
+    || input.existing?.provider !== "junction"
+  ) {
+    return [];
+  }
+
+  const reestablished = new Set<string>();
+  for (const hostedSource of input.entry.sources ?? []) {
+    if (hostedSource.status !== "connected") {
+      continue;
+    }
+    const previousSources = (input.existing.sources ?? []).filter(
+      (source) => source.sourceProviderSlug === hostedSource.sourceProviderSlug,
+    );
+    const hostedLifecycleEpoch = hostedSource.lifecycleEpoch ?? 1;
+    if (previousSources.some((source) =>
+      hostedLifecycleEpoch > (source.lifecycleEpoch ?? 1)
+    )) {
+      reestablished.add(hostedSource.sourceProviderSlug);
+    }
+  }
+  return [...reestablished].sort((left, right) => left.localeCompare(right));
 }
 
 function buildHostedAccountHydrationCredential(input: {

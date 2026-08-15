@@ -93,6 +93,7 @@ const deviceProviderSnapshotImportSchema = z
     cursor: optionalTrimmedStringSchema("cursor"),
     signatureVerified: z.boolean().optional(),
     normalizerVersion: optionalTrimmedStringSchema("normalizerVersion"),
+    memberEditConflictResolution: z.enum(["keep_member", "use_provider"]).optional(),
   })
   .passthrough();
 
@@ -152,6 +153,7 @@ export async function prepareDeviceProviderSnapshotImport(
     samples: normalized.samples,
     evidenceParts: normalized.evidenceParts,
     authoritativeEventSets: normalized.authoritativeEventSets,
+    memberEditConflictResolution: request.memberEditConflictResolution,
     provenance: normalized.provenance,
   });
   const payloadWithEvidence = ensureProviderEvidencePart(basePayload, sanitizedSnapshot);

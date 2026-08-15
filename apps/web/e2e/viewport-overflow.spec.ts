@@ -46,6 +46,89 @@ function isLoopbackUrl(rawUrl: string): boolean {
   }
 }
 
+test("challenge-card studies retain every semantic edge at mobile widths", async ({
+  page,
+}) => {
+  await page.route("**/*", (route) => {
+    if (isLoopbackUrl(route.request().url())) {
+      route.continue();
+    } else {
+      route.abort();
+    }
+  });
+  const response = await page.goto("/design?tab=components", {
+    waitUntil: "load",
+  });
+  expect(response?.status(), "design catalog should respond 200").toBe(200);
+
+  const study = page.locator(
+    '[data-design-component="imessage-challenge-standings-card"]',
+  );
+  await expect(study).toHaveCount(1);
+
+  for (const width of [320, 390] as const) {
+    await page.setViewportSize({ width, height: 900 });
+    await study.scrollIntoViewIfNeeded();
+    await page.evaluate(async () => {
+      await document.fonts?.ready;
+      await new Promise((resolve) =>
+        requestAnimationFrame(() => requestAnimationFrame(resolve)),
+      );
+    });
+
+    const frames = study.locator("[data-challenge-card-frame]:visible");
+    await expect(frames).toHaveCount(2);
+    for (const frame of await frames.all()) {
+      await expect.poll(async () =>
+        frame.evaluate((element) => {
+          const card = element.firstElementChild;
+          if (!(card instanceof HTMLElement)) return Number.POSITIVE_INFINITY;
+          return Math.abs(
+            card.getBoundingClientRect().width
+            - (element.getBoundingClientRect().width - 4),
+          );
+        })
+      ).toBeLessThanOrEqual(OVERFLOW_TOLERANCE_PX);
+      const bounds = await frame.evaluate((element) => {
+        const card = element.firstElementChild;
+        if (!(card instanceof HTMLElement)) {
+          throw new Error("Challenge study card is missing.");
+        }
+        const frameRect = element.getBoundingClientRect();
+        const cardRect = card.getBoundingClientRect();
+        return {
+          cardBottom: cardRect.bottom,
+          cardLeft: cardRect.left,
+          cardRight: cardRect.right,
+          cardTop: cardRect.top,
+          frameBottom: frameRect.bottom,
+          frameLeft: frameRect.left,
+          frameRight: frameRect.right,
+          frameTop: frameRect.top,
+          scale: Number(element.dataset.renderScale),
+        };
+      });
+      expect(bounds.scale).toBeGreaterThan(0);
+      expect(bounds.cardLeft).toBeGreaterThanOrEqual(
+        bounds.frameLeft - OVERFLOW_TOLERANCE_PX,
+      );
+      expect(bounds.cardRight, JSON.stringify(bounds)).toBeLessThanOrEqual(
+        bounds.frameRight + OVERFLOW_TOLERANCE_PX,
+      );
+      expect(bounds.cardTop).toBeGreaterThanOrEqual(
+        bounds.frameTop - OVERFLOW_TOLERANCE_PX,
+      );
+      expect(bounds.cardBottom).toBeLessThanOrEqual(
+        bounds.frameBottom + OVERFLOW_TOLERANCE_PX,
+      );
+      expect(bounds.frameLeft).toBeGreaterThanOrEqual(-OVERFLOW_TOLERANCE_PX);
+      expect(bounds.frameRight).toBeLessThanOrEqual(
+        width + OVERFLOW_TOLERANCE_PX,
+      );
+    }
+  }
+});
+
 // Evaluated in the browser: how far the document overflows the viewport
 // horizontally, plus the outermost elements that escape it. An element is a
 // "culprit" when its right edge passes the viewport while its parent stays

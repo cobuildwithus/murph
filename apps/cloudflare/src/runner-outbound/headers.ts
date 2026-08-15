@@ -15,6 +15,8 @@ export const HOSTED_RUNTIME_LEASE_GENERATION_HEADER =
   "x-hosted-runtime-lease-generation";
 export const HOSTED_RUNTIME_WORKSPACE_VERSION_HEADER =
   "x-hosted-runtime-workspace-version";
+export const HOSTED_WEB_CONTROL_FORWARDED_RESPONSE_HEADER =
+  "x-hosted-web-control-forwarded-response";
 export const HOSTED_RUNTIME_ARTIFACT_READ_PURPOSE_HEADER =
   "x-hosted-runtime-artifact-read-purpose";
 export const HOSTED_RUNTIME_ARTIFACT_FETCH_CORRELATION_ID_HEADER =

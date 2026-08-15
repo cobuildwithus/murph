@@ -59,8 +59,10 @@ function makeActivityDay(date: string, provider: string, conflictingProviders: s
     activityAverageHeartRate: makeMetric("activityAverageHeartRate", 112),
     activityScore: makeMetric("activityScore", 91),
     activeCalories: makeMetric("activeCalories", 315),
+    activityMinutes: makeMetric("activityMinutes", 78),
     activityTypes: ["Running"],
     altitudeChangeMeters: makeMetric("altitudeChangeMeters", 33),
+    averageHeartRate: makeMetric("averageHeartRate", 76),
     date,
     dayStrain: makeMetric("dayStrain", 7.5),
     distanceKm: makeMetric("distanceKm", 5.2),
@@ -69,6 +71,7 @@ function makeActivityDay(date: string, provider: string, conflictingProviders: s
     heartRateZones: [],
     highActivityMinutes: makeMetric("highActivityMinutes", 18),
     lowActivityMinutes: makeMetric("lowActivityMinutes", 70),
+    lowestHeartRate: makeMetric("lowestHeartRate", 44),
     maxHeartRate: makeMetric("maxHeartRate", 168),
     mediumActivityMinutes: makeMetric("mediumActivityMinutes", 32),
     minimumHeartRate: makeMetric("minimumHeartRate", 51),
@@ -86,8 +89,8 @@ function makeActivityDay(date: string, provider: string, conflictingProviders: s
     },
     totalCalories: makeMetric("totalCalories", 530),
     totalElevationGainMeters: makeMetric("totalElevationGainMeters", 42),
+    walkingAverageHeartRate: makeMetric("walkingAverageHeartRate", 101),
     workoutStrain: makeMetric("workoutStrain", 11.1),
-    walkingAverageHeartRate: makeMetric("walkingAverageHeartRate", 83),
   };
 }
 
@@ -276,7 +279,7 @@ test("buildWearableSourceHealth aggregates duplicates, conflicts, staleness, and
   assert.equal(alpha?.candidateMetrics, 1);
   assert.equal(alpha?.exactDuplicatesSuppressed, 1);
   assert.equal(alpha?.activityDays, 1);
-  assert.equal(alpha?.selectedMetrics, 21);
+  assert.equal(alpha?.selectedMetrics, 28);
   assert.equal(alpha?.conflictCount, 1);
   assert.equal(alpha?.stalenessVsNewestDays, 2);
   assert.deepEqual(alpha?.metricsContributed, ["steps"]);
@@ -546,4 +549,37 @@ test("sleep freshness ignores generic cardiorespiratory observations unless anch
   assert.equal(sourceHealth.get("alpha")?.sleepStalenessVsNewestDays, 7);
   assert.equal(sourceHealth.get("beta")?.lastSleepDate, "2026-04-08");
   assert.equal(sourceHealth.get("beta")?.sleepStalenessVsNewestDays, 0);
+});
+
+test("activity-owned lowest heart rate contributes activity without fabricating sleep freshness", () => {
+  const activityLowestHeartRate = makeMetricCandidate({
+    candidateId: "garmin:activity-lowest-heart-rate:1",
+    date: "2026-04-08",
+    externalRef: {
+      facet: "lowest-heart-rate",
+      resourceId: "activity-summary-1",
+      resourceType: "junction-garmin-activity",
+      system: "junction",
+      version: null,
+    },
+    metric: "lowestHeartRate",
+    occurredAt: "2026-04-08T12:00:00Z",
+    provider: "garmin",
+    recordedAt: "2026-04-08T12:05:00Z",
+    sourceFamily: "event",
+    sourceKind: "observation:lowest-heart-rate",
+    unit: "bpm",
+    value: 44,
+  });
+  const bundle = buildWearableSummaryBundleFromDataset(makeDataset({
+    metricCandidates: [activityLowestHeartRate],
+    rawMetricCandidates: [activityLowestHeartRate],
+  }));
+  const sourceHealth = rowsByProvider(bundle.sourceHealth).get("garmin");
+
+  assert.equal(bundle.activityDays[0]?.lowestHeartRate.selection.value, 44);
+  assert.equal(sourceHealth?.activityDays, 1);
+  assert.equal(sourceHealth?.sleepNights, 0);
+  assert.equal(sourceHealth?.lastSleepDate, null);
+  assert.equal(sourceHealth?.sleepStalenessVsNewestDays, null);
 });

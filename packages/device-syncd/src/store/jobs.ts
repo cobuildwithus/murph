@@ -499,6 +499,8 @@ export function releaseDeviceSyncJobIfOwned(
         lease_owner = null,
         lease_expires_at = null,
         attempts = max(attempts - 1, 0),
+        last_error_code = null,
+        last_error_message = null,
         updated_at = ?
     where id = ?
       and status = 'running'
@@ -506,6 +508,62 @@ export function releaseDeviceSyncJobIfOwned(
       and lease_expires_at is not null
       and lease_expires_at > ?
   `).run(input.now, input.now, input.jobId, input.workerId, input.now) as { changes: number };
+
+  return (result.changes ?? 0) > 0;
+}
+
+export function updateDeviceSyncJobContinuationIfOwnedInTransaction(
+  database: DatabaseSync,
+  input: {
+    availableAt: string;
+    jobId: string;
+    now: string;
+    payload: Record<string, unknown>;
+    releaseLease: boolean;
+    workerId: string;
+  },
+): boolean {
+  const result = input.releaseLease
+    ? database.prepare(`
+        update device_job
+        set status = 'queued',
+            payload_json = ?,
+            available_at = ?,
+            lease_owner = null,
+            lease_expires_at = null,
+            attempts = 0,
+            last_error_code = null,
+            last_error_message = null,
+            updated_at = ?
+        where id = ?
+          and status = 'running'
+          and lease_owner = ?
+          and lease_expires_at is not null
+          and lease_expires_at > ?
+      `).run(
+        stringifyJson(input.payload),
+        input.availableAt,
+        input.now,
+        input.jobId,
+        input.workerId,
+        input.now,
+      ) as { changes: number }
+    : database.prepare(`
+        update device_job
+        set payload_json = ?,
+            updated_at = ?
+        where id = ?
+          and status = 'running'
+          and lease_owner = ?
+          and lease_expires_at is not null
+          and lease_expires_at > ?
+      `).run(
+        stringifyJson(input.payload),
+        input.now,
+        input.jobId,
+        input.workerId,
+        input.now,
+      ) as { changes: number };
 
   return (result.changes ?? 0) > 0;
 }

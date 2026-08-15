@@ -10,6 +10,7 @@ import {
 } from '@murphai/hosted-execution/env'
 import {
   MURPH_MEMBER_READ_PERMISSION_PROFILE,
+  MURPH_MEMBER_WORKSPACE_PERMISSION_PROFILE,
 } from '@murphai/hosted-execution/assistant-permissions'
 import {
   HOSTED_ASSISTANT_PRODUCT_MODELS,
@@ -921,6 +922,26 @@ describe('assistant codex runtime', () => {
       modelProvider: 'vercel-ai-gateway',
       sandbox: 'workspace-write',
       threadId: 'thread-1',
+    })
+    expect(
+      buildCodexThreadResumeParams({
+        input: {
+          ...baseInput,
+          permissions: MURPH_MEMBER_WORKSPACE_PERMISSION_PROFILE,
+          runtimeWorkspaceRoots: ['/workspace'],
+          sandbox: undefined,
+        },
+        codexThreadId: 'thread-member-workspace',
+      }),
+    ).toEqual({
+      approvalPolicy: 'never',
+      cwd: '/workspace',
+      excludeTurns: true,
+      model: 'gpt-5',
+      modelProvider: 'vercel-ai-gateway',
+      permissions: MURPH_MEMBER_WORKSPACE_PERMISSION_PROFILE,
+      runtimeWorkspaceRoots: ['/workspace'],
+      threadId: 'thread-member-workspace',
     })
 
     const turnStart = buildCodexTurnStartParams({
@@ -4018,7 +4039,7 @@ describe('assistant codex runtime', () => {
     )
   })
 
-  it('reports a structured failure when a generated image exceeds the media limit', async () => {
+  it('stops synchronous image generation before exceeding the media limit', async () => {
     const workingDirectory = await createTempDir('assistant-codex-image-limit-work-')
     const vaultRoot = await createTempDir('assistant-codex-image-limit-vault-')
     await initializeVault({ vaultRoot })
@@ -4035,7 +4056,7 @@ describe('assistant codex runtime', () => {
         headers: { 'content-type': 'application/json' },
         status: 200,
       }))
-    const attachedMedia = Array.from({ length: 40 }, (_, index) => ({
+    const attachedMedia = Array.from({ length: 7 }, (_, index) => ({
       kind: 'image' as const,
       url: `https://cdn.example.test/assistant/full-${index}.png`,
       alt: `Image ${index}`,
@@ -4097,14 +4118,31 @@ describe('assistant codex runtime', () => {
               },
             }),
           )
+          child.stdout.write(
+            jsonLine({
+              id: 93,
+              method: 'item/tool/call',
+              params: {
+                namespace: 'murph',
+                tool: 'generate_image',
+                arguments: {
+                  prompt: 'Render one image after the limit is full.',
+                },
+              },
+            }),
+          )
 
-          const messages = await waitForRpcMessages(child, 6)
+          const messages = await waitForRpcMessages(child, 7)
           expect(messages[4]).toMatchObject({
             id: 91,
             result: { success: true },
           })
-          expect(messages[5]).toEqual({
+          expect(messages[5]).toMatchObject({
             id: 92,
+            result: { success: true },
+          })
+          expect(messages[6]).toEqual({
+            id: 93,
             result: {
               success: false,
               contentItems: [
@@ -4158,8 +4196,8 @@ describe('assistant codex runtime', () => {
     })
 
     expect(result.finalMessage).toBe('Media limit handled')
-    expect(result.responseMedia).toHaveLength(40)
-    // The image was generated and paid for, so its usage is still recorded.
+    expect(result.responseMedia).toHaveLength(8)
+    expect(fetchImpl).toHaveBeenCalledTimes(1)
     expect(result.additionalUsages).toMatchObject([
       { provider: 'openai-images' },
     ])
@@ -5582,6 +5620,28 @@ describe('assistant codex runtime', () => {
     expect(readWrittenRpcMessages(spawnedChild).filter(
       (message) => message.method === 'turn/start',
     )).toHaveLength(1)
+  })
+
+  it('keeps restricted named permissions on fresh one-shot threads', async () => {
+    const workingDirectory = await createTempDir(
+      'assistant-codex-restricted-permission-shape-',
+    )
+
+    await expect(executeCodexAppServerTurn({
+      approvalPolicy: 'never',
+      permissions: MURPH_MEMBER_READ_PERMISSION_PROFILE,
+      prompt: 'must not resume with a restricted permission profile',
+      resumeSessionId: 'thread-restricted-resume',
+      runtimeWorkspaceRoots: [workingDirectory],
+      workingDirectory,
+    })).rejects.toMatchObject({
+      code: 'ASSISTANT_CODEX_APP_SERVER_REQUEST_INVALID',
+      context: {
+        invalidFields: ['resumeSessionId', 'ephemeral', 'processLifetime'],
+        retryable: false,
+      },
+    })
+    expect(codexMocks.spawn).not.toHaveBeenCalled()
   })
 
   it('runs one-shot permission turns beside the occupied warm process and proves exact child exit', async () => {
@@ -13563,6 +13623,146 @@ describe('assistant codex runtime', () => {
     }
   })
 
+  it('attests the member-workspace profile on resident thread resume', async () => {
+    const workingDirectory = await createTempDir(
+      'assistant-codex-member-workspace-resume-',
+    )
+    const spawnedChildren: MockChildProcess[] = []
+    mockProcessGroupSignalsForChildren(spawnedChildren)
+
+    codexMocks.spawn.mockImplementation(() => {
+      const child = new MockChildProcess()
+      child.pid = 35_050
+      spawnedChildren.push(child)
+
+      queueMicrotask(() => {
+        void (async () => {
+          const initialize = await waitForRpcMethod(child, 'initialize')
+          child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
+
+          const threadResume = await waitForRpcMethod(child, 'thread/resume')
+          child.stdout.write(jsonLine({
+            id: threadResume.id,
+            result: {
+              activePermissionProfile: {
+                id: MURPH_MEMBER_WORKSPACE_PERMISSION_PROFILE,
+              },
+              approvalPolicy: 'never',
+              cwd: path.resolve(workingDirectory),
+              runtimeWorkspaceRoots: [path.resolve(workingDirectory)],
+              thread: {
+                id: 'thread-member-workspace-resume',
+              },
+            },
+          }))
+
+          const turnStart = await waitForRpcMethod(child, 'turn/start')
+          child.stdout.write(jsonLine({
+            id: turnStart.id,
+            result: {
+              turn: {
+                id: 'turn-member-workspace-resume',
+              },
+            },
+          }))
+          child.stdout.write(jsonLine({
+            method: 'turn/completed',
+            params: {
+              turn: {
+                id: 'turn-member-workspace-resume',
+                status: 'completed',
+              },
+            },
+          }))
+        })()
+      })
+
+      return child
+    })
+
+    await expect(executeCodexAppServerTurn({
+      approvalPolicy: 'never',
+      permissions: MURPH_MEMBER_WORKSPACE_PERMISSION_PROFILE,
+      prompt: 'resume the ordinary hosted member turn',
+      resumeSessionId: 'thread-member-workspace-resume',
+      runtimeWorkspaceRoots: [workingDirectory],
+      workingDirectory,
+    })).resolves.toMatchObject({
+      sessionId: 'thread-member-workspace-resume',
+      turnId: 'turn-member-workspace-resume',
+    })
+
+    const child = requireMockChildProcess(spawnedChildren[0] ?? null)
+    expect(asRecord((await waitForRpcMethod(child, 'thread/resume')).params)).toEqual({
+      approvalPolicy: 'never',
+      cwd: workingDirectory,
+      excludeTurns: true,
+      permissions: MURPH_MEMBER_WORKSPACE_PERMISSION_PROFILE,
+      runtimeWorkspaceRoots: [workingDirectory],
+      threadId: 'thread-member-workspace-resume',
+    })
+  })
+
+  it('fails closed when a resumed member-workspace profile drifts', async () => {
+    const workingDirectory = await createTempDir(
+      'assistant-codex-member-workspace-drift-',
+    )
+    const spawnedChildren: MockChildProcess[] = []
+    mockProcessGroupSignalsForChildren(spawnedChildren)
+
+    codexMocks.spawn.mockImplementation(() => {
+      const child = new MockChildProcess()
+      child.pid = 35_075
+      spawnedChildren.push(child)
+
+      queueMicrotask(() => {
+        void (async () => {
+          const initialize = await waitForRpcMethod(child, 'initialize')
+          child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
+          const threadResume = await waitForRpcMethod(child, 'thread/resume')
+          child.stdout.write(jsonLine({
+            id: threadResume.id,
+            result: {
+              activePermissionProfile: {
+                id: MURPH_MEMBER_READ_PERMISSION_PROFILE,
+              },
+              approvalPolicy: 'never',
+              cwd: path.resolve(workingDirectory),
+              runtimeWorkspaceRoots: [path.resolve(workingDirectory)],
+              thread: {
+                id: 'thread-member-workspace-drift',
+              },
+            },
+          }))
+        })()
+      })
+
+      return child
+    })
+
+    await expect(executeCodexAppServerTurn({
+      approvalPolicy: 'never',
+      permissions: MURPH_MEMBER_WORKSPACE_PERMISSION_PROFILE,
+      prompt: 'must not start under a different profile',
+      resumeSessionId: 'thread-member-workspace-drift',
+      runtimeWorkspaceRoots: [workingDirectory],
+      workingDirectory,
+    })).rejects.toMatchObject({
+      code: 'ASSISTANT_CODEX_RESUME_STALE',
+      context: {
+        mismatchedFields: ['activePermissionProfile'],
+        resumeContextMismatch: true,
+        retryable: true,
+        staleResume: true,
+      },
+    })
+
+    const child = requireMockChildProcess(spawnedChildren[0] ?? null)
+    expect(readWrittenRpcMessages(child).some(
+      (message) => message.method === 'turn/start',
+    )).toBe(false)
+  })
+
   it('fails closed when thread/resume reports stale execution context', async () => {
     const workingDirectory = await createTempDir('assistant-codex-stale-resume-context-')
     const staleWorkingDirectory = await createTempDir('assistant-codex-old-resume-context-')
@@ -15155,7 +15355,21 @@ describe('assistant codex runtime', () => {
         },
         status: 'paused' as const,
         timingVerified: true,
+        updatedAt: '2026-08-10T00:00:00.000Z',
       })),
+    }
+    const invalidGapAutomationArguments = {
+      action: 'save',
+      instructions: 'Send the reminder tomorrow.',
+      schedule: {
+        kind: 'at',
+        localAt: {
+          relativeDay: 'tomorrow',
+          time: '02:30',
+          timeZone: 'America/New_York',
+        },
+      },
+      title: 'Gap reminder',
     }
 
     codexMocks.spawn.mockImplementation(() => {
@@ -15218,10 +15432,10 @@ describe('assistant codex runtime', () => {
             id: 1000,
             method: 'item/tool/call',
             params: {
-              arguments: { action: 'list' },
+              arguments: invalidGapAutomationArguments,
               namespace: 'murph',
               threadId: 'thread-root-tool-scope',
-              tool: 'pending_vault_files',
+              tool: 'automation',
               turnId: 'turn-stale-root-tool-scope',
             },
           }))
@@ -15297,11 +15511,7 @@ describe('assistant codex runtime', () => {
             id: 103,
             method: 'item/tool/call',
             params: {
-              arguments: {
-                action: 'patch',
-                lookup: 'hidden',
-                status: 'paused',
-              },
+              arguments: invalidGapAutomationArguments,
               namespace: 'murph',
               threadId: 'thread-root-tool-scope',
               tool: 'automation',
@@ -15453,6 +15663,18 @@ describe('assistant codex runtime', () => {
           })
 
           child.stdout.write(jsonLine({
+            method: 'item/completed',
+            params: {
+              item: {
+                id: 'assistant-root-tool-scope-final',
+                type: 'agentMessage',
+                phase: 'final_answer',
+                text: 'Root tool scope verified.',
+              },
+            },
+          }))
+
+          child.stdout.write(jsonLine({
             method: 'turn/completed',
             params: {
               turn: {
@@ -15468,6 +15690,10 @@ describe('assistant codex runtime', () => {
     })
 
     await expect(executeCodexAppServerTurn({
+      automationRelativeDateReferenceWindow: {
+        earliestAt: '2026-03-08T04:59:00.000Z',
+        latestAt: '2026-03-08T04:59:00.000Z',
+      },
       authorizeAcceptedMessageTarget,
       hostedToolContext: {
         ...createHostedToolContext(),
@@ -15482,6 +15708,7 @@ describe('assistant codex runtime', () => {
       prompt: 'inspect connected devices',
       workingDirectory,
     })).resolves.toMatchObject({
+      finalMessage: 'Root tool scope verified.',
       sessionId: 'thread-root-tool-scope',
       turnId: 'turn-root-tool-scope',
     })

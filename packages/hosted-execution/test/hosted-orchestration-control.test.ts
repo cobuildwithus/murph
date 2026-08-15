@@ -135,6 +135,31 @@ describe("hosted orchestration control contracts", () => {
       blocked: null,
       mailboxLag,
       workspace: {
+        ...workspace,
+        hostedMailboxSystemHandledThroughSeq: "11",
+      },
+    })).toEqual({
+      blocked: null,
+      mailboxLag,
+      workspace: {
+        ...workspace,
+        hostedMailboxSystemHandledThroughSeq: "11",
+      },
+    });
+    expect(() => parseHostedRuntimeReconciliationFacts({
+      blocked: null,
+      mailboxLag,
+      workspace: {
+        ...workspace,
+        hostedMailboxSystemHandledThroughSeq: "not-a-sequence",
+      },
+    })).toThrow(
+      "Hosted runtime reconciliation facts workspace hostedMailboxSystemHandledThroughSeq must be a non-negative base-10 integer string.",
+    );
+    expect(parseHostedRuntimeReconciliationFacts({
+      blocked: null,
+      mailboxLag,
+      workspace: {
         nextWakeAt: null,
         nextWakeReason: null,
         version: "7",

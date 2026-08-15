@@ -1,6 +1,9 @@
 import type { AssistantDeliverySource } from '@murphai/operator-config/assistant-cli-contracts'
 
-import type { AssistantAcceptedTurnInputItemInput } from './active-turn-input-journal.js'
+import type {
+  AssistantAcceptedTurnInputItemInput,
+  AssistantAcceptedTurnInputReferenceWindow,
+} from './active-turn-input-journal.js'
 import type { AssistantUserMessageContentPart } from './content-types.js'
 import type { AssistantOutboxDispatchMode } from './outbox.js'
 
@@ -77,6 +80,7 @@ export type AssistantActiveTurnInputCheckpointHook = (
 
 export interface AssistantActiveTurnLiveProviderSteerInput {
   prompt: string
+  relativeDateReferenceWindow: AssistantAcceptedTurnInputReferenceWindow | null
   userMessageContent?: readonly AssistantUserMessageContentPart[] | null
 }
 

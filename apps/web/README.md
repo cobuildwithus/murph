@@ -1082,6 +1082,12 @@ Callback auth contract:
 - Hosted member private fields, device-sync credentials, mailbox payloads, and
   runtime execution state use signed hosted domain-root secure-box envelopes;
   lookup fingerprints/indexes use separate HMAC-only keys.
+- The generic hosted-mailbox append validates a durable dedupe replay before
+  crypto preparation, then warms the exact active ingress root before opening
+  its transaction. Its prepared transaction surface locks and re-reads root
+  authority and seals only from that scoped cache entry, with one full retry on
+  typed root drift. Legacy transaction append surfaces remain for separately
+  migrated callers and are not the transaction-safe generic entrypoint.
 - `POST /api/internal/hosted-runtime/owner-released` is the payload-free
   completion handoff. Web accepts a zero-byte body and either no query or the
   exact signature-bound `immediateRecheckRequested=1` positive edge, binds the
@@ -1805,6 +1811,13 @@ Internal hosted maintenance and Cloudflare callback routes:
 - `GET /api/internal/hosted-onboarding/stripe/cron`
 - `GET /api/internal/hosted-growth/usage-referral/cron`
 - `GET /api/internal/hosted-runtime/latency-alert/cron`
+
+The signed device-sync reconcile request always includes `connectionId` and
+may include `memberEditConflictResolution: "keep_member" | "use_provider"`
+after the authenticated member explicitly resolves a
+`DEVICE_DATA_MEMBER_EDIT_CONFLICT`. Web places that one-shot choice on the
+existing manual-reconcile wake; it does not store a standing overwrite policy
+or expose canonical health-event identities to the control plane.
 
 The old staged-payload and deleted import completion/release callback routes
 are gone. Cloudflare no longer round-trips through broad mirror CRUD routes,
