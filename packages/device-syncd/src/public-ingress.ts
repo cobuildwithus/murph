@@ -1528,7 +1528,9 @@ export class DeviceSyncPublicIngress {
       throw new TypeError("Prepared device webhook batches must contain one provider account.");
     }
     const traceClaims: DeviceSyncWebhookTraceClaimResult[] = [];
-    if (this.store.claimWebhookTraceBatch) {
+    if (admissions.length === 1) {
+      traceClaims.push(await this.store.claimWebhookTrace(admissions[0]!.traceClaimInput));
+    } else if (this.store.claimWebhookTraceBatch) {
       traceClaims.push(...await this.store.claimWebhookTraceBatch(
         admissions.map((admission) => admission.traceClaimInput),
       ));

@@ -3336,6 +3336,11 @@ test("public ingress batch-claims prepared trace admission while preserving per-
     "fulfilled",
     "fulfilled",
   ]);
+  const singleton = await ingress.handlePreparedWebhookBatch([prepared[0]!]);
+  assert.equal(singleton.length, 1);
+  assert.equal(singleton[0]?.status, "fulfilled");
+  assert.equal(store.claimWebhookTraceBatchCalls, 1);
+  assert.equal(store.claimWebhookTraceCalls, 4);
   await assert.rejects(
     () => ingress.handlePreparedWebhookBatch([
       prepared[0]!,
