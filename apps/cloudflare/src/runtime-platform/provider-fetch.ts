@@ -540,6 +540,7 @@ const HOSTED_RUNTIME_INTERNAL_OPERATION_DESCRIPTIONS: Record<string, string> = {
   mailbox_fetch: "Hosted mailbox fetch",
   mailbox_payload_decode: "Hosted mailbox payload decode",
   mailbox_payload_fetch: "Hosted mailbox payload fetch",
+  member_action_outcome: "Hosted member action outcome",
   meal_photo_delete: "Hosted meal photo delete",
   meal_photo_read: "Hosted meal photo read",
   product_feedback_recording: "Hosted product feedback recording",
