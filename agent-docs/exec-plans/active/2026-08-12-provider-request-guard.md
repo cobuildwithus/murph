@@ -420,6 +420,20 @@ Updated: 2026-08-15
   is visible from both aggregate and referenced-object call paths. No scanner,
   registry, exception, compatibility path, second provenance owner, or
   provider request was added.
+- Exact full-snapshot round 16 at
+  `3be2572f7963d69559eeb26960140126e4cc1036` ran with confirmed
+  `gpt-5.6-sol` metadata and found one High in the existing fail-closed
+  mutation boundary. A nested opaque segment such as `holder[key].send`
+  caused the complete member path, including its live lexical root, to be
+  discarded before the provider-bound value was inspected.
+- The correction changes only the existing opaque-target predicate. It
+  recovers the live lexical root and member depth independently from whether
+  every segment is statically named, marks any non-literal computed segment as
+  opaque, and sends both direct writes and `Object.assign` through the existing
+  provider-bound transport fact reader. Focused regressions cover both bypass
+  shapes plus shadowed, provider-neutral, and literal-computed controls. No
+  scanner, registry, exception, compatibility path, second provenance owner,
+  or provider request was added.
 
 ## Verification
 
@@ -432,13 +446,13 @@ Updated: 2026-08-15
 
 Current evidence:
 
-- Focused guard suite: 122 tests passed on the current merged base, including
+- Focused guard suite: 123 tests passed on the current merged base, including
   direct ReviewGPT reproductions and negative controls for unrelated objects,
   imports, namespace aliases, closed member origins and mutations, callables,
   ambiguous provider evidence, and domain models.
 - Full repository-tool suite: 36 files and 650 tests passed.
 - Repo-tools TypeScript compilation passes with `tsconfig.tools.json`.
-- The combined guard and Node-bootstrap suite passes 123 tests after the final
+- The combined guard and Node-bootstrap suite passes 124 tests after the final
   base merge.
 - `pnpm provider-requests:guard`: passes on the current merged base containing
   the sibling SDK migrations and exact registered SDK hooks.

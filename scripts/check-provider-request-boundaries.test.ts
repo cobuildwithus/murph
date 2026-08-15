@@ -2700,6 +2700,41 @@ describe("check-provider-request-boundaries", () => {
     expect(matches.map((match) => match.line)).toEqual([4, 8]);
   });
 
+  it("rejects provider transports stored through nested opaque member roots", () => {
+    const matches = violationsOfKind(
+      "raw-provider-http",
+      [
+        "const transport = { send: async (_url: string) => ({ ok: true }) };",
+        "const holder = { current: transport };",
+        "const key = 'current';",
+        "holder[key].send = globalThis.fetch.bind(undefined, 'https://api.openai.com/v1/responses');",
+        "await transport.send();",
+        "const assignedTransport = { send: async (_url: string) => ({ ok: true }) };",
+        "const assignedHolder = { current: assignedTransport };",
+        "const assignedKey = 'current';",
+        "Object.assign(assignedHolder[assignedKey], { send: globalThis.fetch.bind(undefined, 'https://api.openai.com/v1/responses') });",
+        "await assignedTransport.send();",
+        "const literalTransport = { send: async (_url: string) => ({ ok: true }) };",
+        "const literalHolder = { current: literalTransport };",
+        "literalHolder['current'].send = async (_url: string) => ({ ok: true });",
+        "await literalTransport.send();",
+        "const benignTransport = { send: async (_url: string) => ({ ok: true }) };",
+        "const benignHolder = { current: benignTransport };",
+        "const benignKey = 'current';",
+        "benignHolder[benignKey].send = async (_url: string) => ({ ok: true });",
+        "await benignTransport.send();",
+        "{",
+        "  const holder = { current: { send: async (_url: string) => ({ ok: true }) } };",
+        "  const key = 'current';",
+        "  holder[key].send = async (_url: string) => ({ ok: true });",
+        "}",
+      ].join("\n"),
+      "scripts/nested-opaque-provider-member-aliases.mts",
+    );
+
+    expect(matches.map((match) => match.line)).toEqual([4, 9]);
+  });
+
   it("retains earlier transports across conditional benign reassignment", () => {
     const matches = violationsOfKind(
       "raw-provider-http",

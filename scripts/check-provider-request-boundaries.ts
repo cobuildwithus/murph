@@ -1831,18 +1831,65 @@ function collectOpaqueProviderTransportMutationViolations(input: {
   readonly sourceFile: Node;
   readonly violationsByKey: Map<string, ProviderRequestBoundaryViolation>;
 }): void {
+  const readLocalMemberRoot = (
+    node: Node,
+  ): {
+    readonly hasOpaqueSegment: boolean;
+    readonly memberDepth: number;
+    readonly root: string;
+  } | null => {
+    const expression = unwrapExpression(node);
+    if (isIdentifier(expression)) {
+      return {
+        hasOpaqueSegment: false,
+        memberDepth: 0,
+        root: expression.name,
+      };
+    }
+    if (isCallExpression(expression) || isOptionalCallExpression(expression)) {
+      return readLocalMemberRoot(expression.callee);
+    }
+    if (
+      !isMemberExpression(expression) &&
+      !isOptionalMemberExpression(expression)
+    ) {
+      return null;
+    }
+    const objectRoot = readLocalMemberRoot(expression.object);
+    if (!objectRoot) {
+      return null;
+    }
+    const hasStaticProperty =
+      (!expression.computed && isIdentifier(expression.property)) ||
+      (expression.computed &&
+        (isStringLiteral(expression.property) ||
+          isNumericLiteral(expression.property)));
+    return {
+      hasOpaqueSegment: objectRoot.hasOpaqueSegment || !hasStaticProperty,
+      memberDepth: objectRoot.memberDepth + 1,
+      root: objectRoot.root,
+    };
+  };
   const hasOpaqueLocalRoot = (
     node: Node,
     before: number,
     allowRootOnly = false,
   ): boolean => {
+    const localRoot = readLocalMemberRoot(node);
+    if (
+      !localRoot ||
+      (!allowRootOnly && localRoot.memberDepth < 1) ||
+      resolvePossibleBindings(input.bindings, localRoot.root, before).length ===
+        0
+    ) {
+      return false;
+    }
+    if (localRoot.hasOpaqueSegment) {
+      return true;
+    }
     const path = readMemberPath(node);
-    const root = path?.[0];
     return Boolean(
       path &&
-      (allowRootOnly || path.length >= 2) &&
-      root &&
-      resolvePossibleBindings(input.bindings, root, before).length > 0 &&
       resolvePossibleStaticMemberPaths(
         path,
         input.bindings,
