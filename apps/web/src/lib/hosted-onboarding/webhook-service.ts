@@ -127,6 +127,9 @@ import {
   startHostedRuntimeShellPrewarmBestEffort,
 } from "../hosted-execution/direct-runtime-wake";
 import {
+  rearmHostedPhoneCallResultNotificationRecovery,
+} from "../phone-calls/reconciliation-workflow-start";
+import {
   assertHostedThreadRouteEgressAuthority,
   markHostedLinqThreadRouteParticipantAdditionPendingTx,
   readHostedThreadRouteByThreadIdentity,
@@ -1972,8 +1975,52 @@ export async function handleHostedOnboardingTelegramWebhook(input: {
       referralIds: plan.postCommitUsageReferralIds ?? [],
       scheduleAfterResponse: input.scheduleAfterResponse,
     });
+    await rearmHostedPhoneCallResultRecoveriesAfterCommitBestEffort({
+      prisma,
+      recoveries: plan.postCommitPhoneCallResultRecoveries ?? [],
+      scheduleAfterResponse: input.scheduleAfterResponse,
+    });
   }
   return plan.response;
+}
+
+async function rearmHostedPhoneCallResultRecoveriesAfterCommitBestEffort(input: {
+  prisma: PrismaClient;
+  recoveries: readonly {
+    memberId: string;
+    resultNotificationChannel: "linq" | "telegram";
+  }[];
+  scheduleAfterResponse?: HostedWebhookPostResponseScheduler;
+}): Promise<void> {
+  const recoveries = [...new Map(input.recoveries.map((recovery) => [
+    `${recovery.memberId}:${recovery.resultNotificationChannel}`,
+    recovery,
+  ])).values()];
+  if (recoveries.length === 0) {
+    return;
+  }
+  const rearm = async () => {
+    for (const recovery of recoveries) {
+      try {
+        await rearmHostedPhoneCallResultNotificationRecovery({
+          ...recovery,
+          prisma: input.prisma,
+        });
+      } catch (error) {
+        logHostedOnboardingDiagnostic(
+          "hosted-onboarding.phone-call-result-recovery-rearm-failed",
+          {
+            errorName: deriveHostedOnboardingTimingErrorName(error),
+          },
+        );
+      }
+    }
+  };
+  if (input.scheduleAfterResponse) {
+    input.scheduleAfterResponse(rearm);
+    return;
+  }
+  await rearm();
 }
 
 async function reconcileHostedUsageReferralRewardsAfterCommitBestEffort(input: {

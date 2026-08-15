@@ -1271,8 +1271,14 @@ Last verified: 2026-08-15
   channel enum (`linq` or `telegram`) needed for asynchronous result routing.
   Never persist a result-routing phone number, account identifier, or thread id
   on the call row. Web requires the matching current direct-member route before
-  provider dispatch and again at completion. Group calls omit the enum and keep
-  their existing thread-container authority.
+  reservation and revalidates it immediately before provider entry; exact
+  request-key replay consults the durable call before mutable route admission.
+  At completion, Web resolves the persisted channel, binds a direct thread
+  authority into the queued notification, and revalidates it again at message
+  provider entry. Route loss keeps analyzed-result reconciliation pending, and
+  route restoration may re-arm only the newest bounded member/channel call
+  after checking its deterministic mailbox dedupe key. Group calls omit the
+  enum and keep their existing thread-container authority.
 - The mechanical private-storage field-classification guard currently covers `HostedPhoneCall` only. It is not evidence that every other Prisma model has completed the same field-by-field audit; extend or add an owner guard when another private-content model is materially changed.
 - Kernel browser automation is an `apps/web`-owned hosted control surface. `KERNEL_API_KEY` must stay in web environment configuration only and must not be forwarded into Cloudflare runner env, Codex prompts, dynamic tool payloads, logs, fixtures, or user-facing output. Cloudflare may proxy only the narrow signed `/api/internal/computer/**` routes through `web-control.worker`; it must not receive raw Kernel API credentials or raw live-view URLs.
 - The persistent Kernel profile requires `HOSTED_COMPUTER_PROFILE_NAMESPACE` in `apps/web`; set it to a stable value per trust boundary so production, previews, and other deployments do not share saved cookies or authenticated browser state. Keep production's namespace stable, and use branch/deployment-specific preview namespaces or disable the persistent computer-use profile outside production.

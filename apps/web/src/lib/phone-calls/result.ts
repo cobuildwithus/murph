@@ -28,6 +28,7 @@ import {
   signalHostedMailboxAppendRuntime,
 } from "../hosted-orchestration/signal-runtime";
 import {
+  bindHostedAssistantNotificationDestination,
   isHostedThreadContainerNotificationDestination,
   requireHostedAssistantNotificationDestination,
   type HostedAssistantNotificationDestination,
@@ -298,6 +299,33 @@ export async function finalizePreparedRetellCallResult(
   });
 }
 
+export async function finalizeStoredHostedPhoneCallResult(
+  call: HostedPhoneCall,
+  options: {
+    abortSignal?: AbortSignal;
+    prisma?: HostedPhoneCallWebhookStore;
+    signalRuntime?: typeof signalHostedMailboxAppendRuntime;
+  } = {},
+): Promise<void> {
+  if (!call.analyzedAt || !hasStoredHostedPhoneCallResult(call)) {
+    return;
+  }
+  const prisma = resolveHostedPhoneCallWebhookStore(options.prisma);
+  const result = await appendRetellCallAnalyzedNotification({
+    call,
+    prisma,
+    requiresTransferFollowUp: false,
+  });
+  if (!result.notificationMailboxItemId) {
+    return;
+  }
+  await (options.signalRuntime ?? signalHostedMailboxAppendRuntime)({
+    abortSignal: options.abortSignal,
+    expectedUserId: result.notificationUserId,
+    mailboxItemId: result.notificationMailboxItemId,
+  });
+}
+
 async function appendRetellCallAnalyzedNotification(input: {
   call: HostedPhoneCall;
   prisma: HostedPhoneCallWebhookStore;
@@ -434,6 +462,10 @@ export function buildPhoneCallResultNotificationWake(input: {
   const notificationKey = buildPhoneCallResultNotificationKey(input.callId);
   const requireSend = input.requiresTransferFollowUp === true
     || isHostedThreadContainerNotificationDestination(input.destination);
+  const boundDestination = bindHostedAssistantNotificationDestination({
+    destination: input.destination,
+    memberId: input.memberId,
+  });
   return buildHostedExecutionAssistantNotificationRequestedWake({
     eventId: buildPhoneCallResultNotificationEventId(input.callId),
     memberId: input.memberId,
@@ -441,10 +473,10 @@ export function buildPhoneCallResultNotificationWake(input: {
       deliveryDedupeToken: notificationKey,
       deliveryDispatchMode: "queue-only",
       deliveryIdempotencyKey: notificationKey,
-      ...(input.destination.externalThreadRouteAuthority
+      ...(boundDestination.externalThreadRouteAuthority
         ? {
             externalThreadRouteAuthority:
-              input.destination.externalThreadRouteAuthority,
+              boundDestination.externalThreadRouteAuthority,
           }
         : {}),
       instructions: buildPhoneCallResultNotificationInstructions({
@@ -459,7 +491,7 @@ export function buildPhoneCallResultNotificationWake(input: {
       responsePolicy: requireSend
         ? { kind: "require_send" }
         : { kind: "allow_send_or_skip" },
-      route: input.destination.route,
+      route: boundDestination.route,
     },
     occurredAt: new Date().toISOString(),
   });
@@ -469,7 +501,7 @@ function buildPhoneCallResultNotificationKey(callId: string): string {
   return `phone-call-result:${callId}`;
 }
 
-function buildPhoneCallResultNotificationEventId(callId: string): string {
+export function buildPhoneCallResultNotificationEventId(callId: string): string {
   return `assistant.notification.requested:${buildPhoneCallResultNotificationKey(callId)}`;
 }
 

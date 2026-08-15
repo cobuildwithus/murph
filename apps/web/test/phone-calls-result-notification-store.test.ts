@@ -259,6 +259,65 @@ describe("default phone-call result notification store", () => {
     expect(mocks.unwrapHostedDomainRootForWeb).not.toHaveBeenCalled();
     expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
   });
+
+  it("converges concurrent webhook and reconciliation appends on one mailbox item", async () => {
+    const prisma = buildPrisma({
+      call: buildStoredAnalyzedCall({
+        resultNotificationChannel: "telegram",
+      }),
+    });
+    mocks.getPrisma.mockReturnValue(prisma);
+    const bothDedupeReads = createDeferred<void>();
+    let dedupeReadCount = 0;
+    mocks.readHostedMailboxItemByDedupeKey.mockImplementation(async () => {
+      dedupeReadCount += 1;
+      if (dedupeReadCount === 2) {
+        bothDedupeReads.resolve();
+      }
+      return null;
+    });
+    mocks.readHostedPhoneCallResult.mockResolvedValue(RESULT);
+    mocks.readHostedPhoneCallBrief.mockResolvedValue(BRIEF);
+    mocks.requireHostedAssistantNotificationDestination.mockResolvedValue(
+      TELEGRAM_DESTINATION,
+    );
+    mocks.unwrapHostedDomainRootForWeb.mockImplementation(async () => {
+      await bothDedupeReads.promise;
+      return {
+        envelope: { rootKeyId: "root_concurrent_result" },
+        rootKey: new Uint8Array([1, 2, 3, 4]),
+      };
+    });
+    let durableAppendCount = 0;
+    let durableItem: { id: string; userId: string } | null = null;
+    mocks.appendHostedMailboxEnvelopeTx.mockImplementation(async () => {
+      if (!durableItem) {
+        durableAppendCount += 1;
+        durableItem = {
+          id: "mailbox_result_notification_concurrent",
+          userId: MEMBER_ID,
+        };
+      }
+      return { item: durableItem };
+    });
+
+    const results = await Promise.all([
+      handleRetellCallAnalyzed({ call: buildAnalyzedRetellCallPayload() }),
+      handleRetellCallAnalyzed({ call: buildAnalyzedRetellCallPayload() }),
+    ]);
+
+    expect(results).toEqual([
+      {
+        notificationMailboxItemId: "mailbox_result_notification_concurrent",
+        notificationUserId: MEMBER_ID,
+      },
+      {
+        notificationMailboxItemId: "mailbox_result_notification_concurrent",
+        notificationUserId: MEMBER_ID,
+      },
+    ]);
+    expect(durableAppendCount).toBe(1);
+  });
 });
 
 function buildPrisma(input: {

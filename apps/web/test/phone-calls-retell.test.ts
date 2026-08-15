@@ -844,6 +844,50 @@ describe("Retell phone-call result handling", () => {
     );
   });
 
+  it("binds a direct Telegram result wake to the exact live thread authority", () => {
+    const wake = buildPhoneCallResultNotificationWake({
+      brief: VALID_BRIEF,
+      callId: "hpc_telegram_direct",
+      destination: {
+        conversationShape: "direct-member",
+        externalThreadRouteAuthority: null,
+        route: {
+          actorId: "member_123",
+          channel: "telegram",
+          delivery: {
+            kind: "thread",
+            target: "telegram_direct_123",
+          },
+          identityId: "telegram_identity_123",
+          threadId: "telegram_thread_123",
+          threadIsDirect: true,
+        },
+      },
+      memberId: "member_123",
+      result: {
+        outcome: "completed",
+        summary: "The office confirmed the appointment.",
+      },
+    });
+
+    expect(wake.notification.externalThreadRouteAuthority).toEqual({
+      channel: "telegram",
+      containerMemberId: "member_123",
+      threadId: "telegram_direct_123",
+    });
+    expect(wake.notification.route).toMatchObject({
+      channel: "telegram",
+      delivery: {
+        kind: "thread",
+        target: "telegram_direct_123",
+      },
+      threadIsDirect: true,
+    });
+    expect(wake.notification.deliveryDedupeToken).toBe(
+      "phone-call-result:hpc_telegram_direct",
+    );
+  });
+
   it("signals the runtime only after a prepared result appends its mailbox item", async () => {
     const store = createWebhookStore({
       call: buildHostedPhoneCall({ id: "hpc_finalize" }),

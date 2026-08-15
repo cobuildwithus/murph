@@ -165,28 +165,63 @@ async function createHostedPhoneCallWithinDeadline(input: Parameters<
     input.transferNumberResolver ?? resolveVerifiedMemberTransferNumber;
   const resolveNotificationDestination = input.notificationDestinationResolver
     ?? requireHostedAssistantNotificationDestination;
-  const notificationDestination = await resolveNotificationDestination({
-    ...(input.resultNotificationChannel
-      ? { directChannel: input.resultNotificationChannel }
-      : {}),
-    memberId: input.memberId,
-    signal: input.signal,
-  });
+  const resolveReplay = (call: HostedPhoneCall) =>
+    resolveExistingHostedPhoneCall({
+      brief: input.brief,
+      call,
+      crypto,
+      memberId: input.memberId,
+      originSessionId: input.originSessionId,
+      resultNotificationChannel: input.resultNotificationChannel ?? null,
+      runtime,
+      signal: input.signal,
+      startReconciliationWorkflow,
+      store,
+    });
+  if (input.resultNotificationChannel) {
+    const existing = await findHostedPhoneCallByRequestKey({
+      memberId: input.memberId,
+      requestKey: input.requestKey,
+      store,
+    });
+    if (existing) {
+      return await resolveReplay(existing);
+    }
+  }
+
+  let notificationDestination: HostedAssistantNotificationDestination;
+  try {
+    notificationDestination = await resolveNotificationDestination({
+      ...(input.resultNotificationChannel
+        ? { directChannel: input.resultNotificationChannel }
+        : {}),
+      memberId: input.memberId,
+      signal: input.signal,
+    });
+  } catch (error) {
+    // An exact replay remains authoritative even if its mutable delivery route
+    // was removed after the provider effect began. Re-read after route failure
+    // to close the concurrent-reservation race without admitting a new call.
+    if (input.resultNotificationChannel) {
+      const existing = await findHostedPhoneCallByRequestKey({
+        memberId: input.memberId,
+        requestKey: input.requestKey,
+        store,
+      });
+      if (existing) {
+        return await resolveReplay(existing);
+      }
+    }
+    throw error;
+  }
   input.signal.throwIfAborted();
   const threadContainerDestination =
     isHostedThreadContainerNotificationDestination(notificationDestination);
-  if (
-    input.resultNotificationChannel
-    && (
-      threadContainerDestination
-      || notificationDestination.route.threadIsDirect !== true
-      || notificationDestination.route.channel
-        !== input.resultNotificationChannel
-    )
-  ) {
-    throw new Error(
-      "Hosted phone call result notification channel does not match the direct route.",
-    );
+  if (input.resultNotificationChannel) {
+    assertHostedPhoneCallDirectNotificationDestination({
+      channel: input.resultNotificationChannel,
+      destination: notificationDestination,
+    });
   }
   let reassertGroupRequesterAuthority: (() => Promise<void>) | null = null;
   if (threadContainerDestination) {
@@ -346,6 +381,17 @@ async function createHostedPhoneCallWithinDeadline(input: Parameters<
     try {
       input.signal.throwIfAborted();
       await reassertGroupRequesterAuthority?.();
+      if (input.resultNotificationChannel) {
+        const currentDestination = await resolveNotificationDestination({
+          directChannel: input.resultNotificationChannel,
+          memberId: input.memberId,
+          signal: input.signal,
+        });
+        assertHostedPhoneCallDirectNotificationDestination({
+          channel: input.resultNotificationChannel,
+          destination: currentDestination,
+        });
+      }
       input.signal.throwIfAborted();
     } catch (error) {
       throw markPhoneCallRuntimeNoActiveEffect(error);
@@ -531,6 +577,36 @@ async function createHostedPhoneCallWithinDeadline(input: Parameters<
     phoneCallId: call.id,
     status: "calling",
   };
+}
+
+async function findHostedPhoneCallByRequestKey(input: {
+  memberId: string;
+  requestKey: string;
+  store: HostedPhoneCallStore;
+}): Promise<HostedPhoneCall | null> {
+  return input.store.hostedPhoneCall.findUnique({
+    where: {
+      memberId_requestKey: {
+        memberId: input.memberId,
+        requestKey: input.requestKey,
+      },
+    },
+  });
+}
+
+function assertHostedPhoneCallDirectNotificationDestination(input: {
+  channel: HostedPhoneCallResultNotificationChannel;
+  destination: HostedAssistantNotificationDestination;
+}): void {
+  if (
+    isHostedThreadContainerNotificationDestination(input.destination)
+    || input.destination.route.threadIsDirect !== true
+    || input.destination.route.channel !== input.channel
+  ) {
+    throw new Error(
+      "Hosted phone call result notification channel does not match the direct route.",
+    );
+  }
 }
 
 function normalizeHostedPhoneCallBriefForConversation(input: {

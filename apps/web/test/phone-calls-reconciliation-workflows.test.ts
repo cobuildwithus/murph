@@ -2,8 +2,13 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { RetryableError } from "workflow";
 
 const mocks = vi.hoisted(() => ({
+  getPrisma: vi.fn(),
   processHostedPhoneCallRecoveryById: vi.fn(),
   start: vi.fn(),
+}));
+
+vi.mock("@/src/lib/prisma", () => ({
+  getPrisma: mocks.getPrisma,
 }));
 
 vi.mock("workflow/api", () => ({
@@ -20,7 +25,10 @@ vi.mock("@/src/lib/phone-calls/reconciliation", async () => {
   };
 });
 
-import { startHostedPhoneCallReconciliationWorkflow } from "@/src/lib/phone-calls/reconciliation-workflow-start";
+import {
+  rearmHostedPhoneCallResultNotificationRecovery,
+  startHostedPhoneCallReconciliationWorkflow,
+} from "@/src/lib/phone-calls/reconciliation-workflow-start";
 import { reconcileHostedPhoneCallStep } from "@/src/lib/phone-calls/reconciliation-workflow-steps";
 import { HOSTED_PHONE_CALL_RECONCILIATION_WORKFLOW_STEP_MAX_RETRIES } from "@/src/lib/phone-calls/reconciliation-workflow-types";
 import { hostedPhoneCallReconciliationWorkflow } from "@/src/lib/phone-calls/reconciliation-workflows";
@@ -53,6 +61,56 @@ describe("hosted phone-call reconciliation Workflow", () => {
     }, { signal: new AbortController().signal })).rejects.toMatchObject({
       code: "HOSTED_PHONE_CALL_RECONCILIATION_WORKFLOW_START_RETRY_REQUIRED",
       retryable: true,
+    });
+  });
+
+  it("re-arms the newest analyzed Telegram result only while its mailbox item is absent", async () => {
+    const findFirst = vi.fn(async () => ({ id: "hpc_result_pending" }));
+    const prisma = {
+      hostedPhoneCall: { findFirst },
+    };
+    mocks.getPrisma.mockReturnValue(prisma);
+    const readMailboxItem = vi.fn()
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({
+        id: "mailbox_phone_call_result",
+        userId: "member_123",
+      });
+    const workflowStarter = vi.fn(async () => ({ runId: "run_result_recovery" }));
+
+    await expect(rearmHostedPhoneCallResultNotificationRecovery({
+      memberId: "member_123",
+      readMailboxItem,
+      resultNotificationChannel: "telegram",
+      workflowStarter,
+    })).resolves.toBe(true);
+    await expect(rearmHostedPhoneCallResultNotificationRecovery({
+      memberId: "member_123",
+      readMailboxItem,
+      resultNotificationChannel: "telegram",
+      workflowStarter,
+    })).resolves.toBe(false);
+
+    expect(findFirst).toHaveBeenCalledWith(expect.objectContaining({
+      orderBy: { createdAt: "desc" },
+      select: { id: true },
+      where: expect.objectContaining({
+        analyzedAt: { not: null },
+        memberId: "member_123",
+        resultNotificationChannel: "telegram",
+      }),
+    }));
+    expect(readMailboxItem).toHaveBeenNthCalledWith(1, {
+      dedupeKey:
+        "assistant.notification.requested:phone-call-result:hpc_result_pending",
+      prisma,
+      userId: "member_123",
+    });
+    expect(workflowStarter).toHaveBeenCalledOnce();
+    expect(workflowStarter).toHaveBeenCalledWith({
+      phoneCallId: "hpc_result_pending",
+    }, {
+      signal: expect.any(AbortSignal),
     });
   });
 

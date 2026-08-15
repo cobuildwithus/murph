@@ -1009,8 +1009,16 @@ call for request-key idempotency, provider call id, status, bounded call brief,
 and final analysis. A direct Linq or Telegram call also stores only the bounded
 initiating channel enum, never a phone number or thread identifier. Web resolves
 that exact current direct route before provider dispatch and resolves the same
-channel again when the asynchronous result is ready; route loss remains
-retryable instead of falling back to another surface. Group calls keep the
+channel again immediately before entering the provider. Exact request-key
+replays read the durable call before mutable route admission, so route removal
+cannot turn an already-started call into a definitive no-call result. When the
+asynchronous result is ready, Web binds the current direct thread as egress
+authority on the queued notification; provider entry revalidates that authority
+so a later route removal or rebind cannot disclose the result to a stale chat.
+The existing phone-call reconciliation workflow keeps an analyzed result
+pending until its deduped mailbox notification is durable, and a restored direct
+route re-arms the newest affected call without falling back to another surface.
+Group calls keep the
 channel null and continue to use their durable thread-container authority.
 Request-key replay compares the stored channel exactly, including legacy null,
 so a retry cannot change the eventual result audience. Briefs and results are

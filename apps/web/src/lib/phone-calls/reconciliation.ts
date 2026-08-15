@@ -9,6 +9,7 @@ import {
 } from "./authority";
 import {
   finalizePreparedRetellCallResult,
+  finalizeStoredHostedPhoneCallResult,
 } from "./result";
 import { createRetellPhoneCallRuntime } from "./retell-runtime";
 import {
@@ -55,6 +56,7 @@ export interface HostedPhoneCallReconciliationStore {
 
 export async function processHostedPhoneCallRecoveryById(input: {
   finalizeResult?: typeof finalizePreparedRetellCallResult;
+  finalizeStoredResult?: typeof finalizeStoredHostedPhoneCallResult;
   phoneCallId: string;
   prisma?: HostedPhoneCallReconciliationStore;
   runtime?: PhoneCallRuntime;
@@ -63,6 +65,8 @@ export async function processHostedPhoneCallRecoveryById(input: {
   const store = input.prisma ?? resolveHostedPhoneCallReconciliationStore();
   const runtime = input.runtime ?? createRetellPhoneCallRuntime();
   const finalizeResult = input.finalizeResult ?? finalizePreparedRetellCallResult;
+  const finalizeStoredResult = input.finalizeStoredResult
+    ?? finalizeStoredHostedPhoneCallResult;
   let call = await waitForAbortableOperation(input.signal, () =>
     store.hostedPhoneCall.findUnique({
       where: { id: input.phoneCallId },
@@ -172,10 +176,37 @@ export async function processHostedPhoneCallRecoveryById(input: {
         return "pending";
       }
     }
+    if (!resolution.terminalTransfer && hasStoredHostedPhoneCallResult(call)) {
+      try {
+        await waitForAbortableOperation(input.signal, () =>
+          finalizeStoredResult(call, {
+            abortSignal: input.signal,
+          }));
+      } catch {
+        input.signal.throwIfAborted();
+        return "pending";
+      }
+    }
     return "complete";
   }
 
+  if (hasStoredHostedPhoneCallResult(call)) {
+    try {
+      await waitForAbortableOperation(input.signal, () =>
+        finalizeStoredResult(call, {
+          abortSignal: input.signal,
+        }));
+    } catch {
+      input.signal.throwIfAborted();
+      return "pending";
+    }
+  }
   return hasPhoneCallAdvancedBeyondStart(call) ? "complete" : "pending";
+}
+
+function hasStoredHostedPhoneCallResult(call: HostedPhoneCall): boolean {
+  return call.analyzedAt !== null
+    && (call.resultEncrypted !== null || call.resultJson !== null);
 }
 
 export async function stopHostedPhoneCallCleanupAuthority(input: {

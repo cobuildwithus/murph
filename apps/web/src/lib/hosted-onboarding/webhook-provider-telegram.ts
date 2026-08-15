@@ -495,6 +495,14 @@ export async function planHostedOnboardingTelegramWebhook(input: {
       ? { postCommitUsageReferralIds: qualificationCandidateReferralIds }
       : {}),
     postCommitGroupJoinConfirmationMemberIds: [existingMember.id],
+    ...(summary.isDirect
+      ? {
+          postCommitPhoneCallResultRecoveries: [{
+            memberId: existingMember.id,
+            resultNotificationChannel: "telegram",
+          }],
+        }
+      : {}),
     response: {
       ok: true,
       reason: summary.isDirect
