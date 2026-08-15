@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-15",
+  "order": 300,
+  "item": {
+    "id": "workout-card-saves-finish",
+    "kind": "improvement",
+    "priority": 4,
+    "title": "Workout cards save clearly from Messages",
+    "summary": "Workout cards in Messages now keep entered reps and the saved confirmation visible, and equivalent phone and server timestamp formats no longer block the update from reaching Murph.",
+    "details": "The draft and saved state remain in memory while the Messages extension is alive. A failed save keeps its retry path, while earlier rejected attempts are not replayed automatically.",
+    "relevanceTags": ["imessage", "workouts", "companion", "reliability"],
+    "sourcePullRequests": [1914, 79]
+  }
+}
