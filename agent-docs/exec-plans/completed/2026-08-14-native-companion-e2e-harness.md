@@ -92,8 +92,8 @@ OTP credential and simulator/native runner authority.
 
 ## Verification
 
-- `node --test apps/web/scripts/native-ios-hosted-e2e.test.mjs`
-- `node --check apps/web/scripts/native-ios-hosted-e2e*.mjs`
+- `node --test scripts/native-ios-hosted-e2e.test.mjs`
+- `node --check scripts/native-ios-hosted-e2e*.mjs`
 - `pnpm --dir apps/web exec tsc --noEmit --pretty false` when dependencies for
   the exact head are available.
 - Parse `.github/workflows/native-ios-hosted-e2e.yml` as YAML and run

@@ -173,7 +173,7 @@ jobs:
           PR_HEAD_REF: ${{ needs.select-pr.outputs.head_ref }}
           PR_HEAD_SHA: ${{ needs.select-pr.outputs.head_sha }}
         run: >-
-          node apps/web/scripts/native-ios-hosted-e2e.mjs pr
+          node scripts/native-ios-hosted-e2e.mjs pr
           --sha "${PR_HEAD_SHA}"
           --ref "${PR_HEAD_REF}"
           --correlation-id "murph-pr-${PR_HEAD_SHA}-${{ github.run_id }}-${{ github.run_attempt }}"
@@ -286,7 +286,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          node apps/web/scripts/native-ios-hosted-e2e.mjs canary \
+          node scripts/native-ios-hosted-e2e.mjs canary \
             --web-sha "${DEPLOYED_SHA}" \
             --web-base-url "${PRODUCTION_BASE_URL}" \
             --correlation-id "murph-production-${DEPLOYED_SHA}-${{ github.run_id }}-${{ github.run_attempt }}"

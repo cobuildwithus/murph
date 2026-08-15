@@ -7,7 +7,7 @@ export const NATIVE_IOS_HOSTED_E2E_VERCEL_TARGET = "native-ios-e2e";
 export const NATIVE_IOS_HOSTED_E2E_LANE_MARKER = "native-ios-hosted-e2e";
 export const HTTP_TIMEOUT_MS = 15_000;
 export const POLL_MS = 5_000;
-export const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
+export const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 export function requiredEnv(name) {
   const value = process.env[name]?.trim();
