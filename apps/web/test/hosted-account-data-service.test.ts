@@ -4373,10 +4373,13 @@ describe("deleteHostedAccountData", () => {
     expect(operationOrder).not.toContain("delete:hostedMember");
   });
 
-  it("fails closed when durable device cleanup authority cannot initialize, then retries", async () => {
+  it("retains reauthorization cleanup authority when initialization fails, then retries", async () => {
     const operationOrder: string[] = [];
     const revokeAccess = vi.fn(async () => undefined);
-    const storedAccount = buildStoredOAuthDeviceAccountForDeletion();
+    const storedAccount = {
+      ...buildStoredOAuthDeviceAccountForDeletion(),
+      status: "reauthorization_required" as const,
+    };
     serviceMocks.createHostedDeviceSyncControlPlane
       .mockImplementationOnce(() => {
         throw Object.assign(new Error("device cleanup unavailable"), {
@@ -4397,6 +4400,7 @@ describe("deleteHostedAccountData", () => {
         id: "dsc_oauth_cleanup",
         provider: "oura",
         providerAccountBlindIndex: "blind-index",
+        status: "reauthorization_required",
       }],
       onTransaction: () => undefined,
       operationOrder,

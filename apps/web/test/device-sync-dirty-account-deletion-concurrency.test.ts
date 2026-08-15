@@ -27,6 +27,7 @@ import { createPrismaClient } from "@/src/lib/prisma";
 import {
   createDeviceSyncPublicIngress,
   createDeviceSyncRegistry,
+  deviceSyncError,
 } from "@murphai/device-syncd/public-ingress";
 import type { DeviceSyncProvider } from "@murphai/device-syncd/types";
 
@@ -1822,7 +1823,7 @@ describe.skipIf(!runPostgresConcurrencyProof)(
       }
     });
 
-    it("blocks suspension after an ambiguous refresh replaces its lease with a reconnect fence", async () => {
+    it("preserves ambiguous and provider-classified refresh authority across suspension", async () => {
       if (!databaseUrl) {
         throw new Error("DATABASE_URL is required for the PostgreSQL concurrency proof.");
       }
@@ -1981,6 +1982,109 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           refreshLeaseOwner: null,
           refreshLeaseTokenVersion: null,
           status: "reauthorization_required",
+        });
+
+        // A provider-classified reconnect result keeps the old generation as
+        // cleanup-only authority. Suspension may then commit without creating
+        // an OAuth row whose cleanup material has already been erased.
+        await observer.deviceSyncSignal.deleteMany({ where: { connectionId } });
+        await observer.deviceConnection.update({
+          data: {
+            accessTokenEncrypted: "access-token",
+            accessTokenExpiresAt: new Date("2026-08-11T13:00:00.000Z"),
+            credentialKind: "oauth_tokens",
+            externalAccountIdEncrypted: "provider-account",
+            keyVersion: "test-device-key-v1",
+            lastErrorCode: null,
+            lastErrorMessage: null,
+            refreshTokenEncrypted: "refresh-token",
+            status: "active",
+            tokenVersion: 1,
+          },
+          where: { id: connectionId },
+        });
+        await expect(store.withHealthDataAdmissionLock(
+          userId,
+          connectionId,
+          async (tx) => store.claimConnectionRefreshLease({
+            connectionId,
+            leaseExpiresAt: "2026-08-11T12:15:00.000Z",
+            leaseOwner,
+            now: "2026-08-11T12:10:00.000Z",
+            tokenVersion: 1,
+            tx,
+            userId,
+          }),
+          { requireActiveMember: true },
+        )).resolves.toEqual({ status: "claimed" });
+        await store.withConnectionMutationLock(connectionId, async (tx) => {
+          await persistProviderTokenRefreshErrorStatus({
+            account,
+            currentTokenBundle,
+            error: deviceSyncError({
+              accountStatus: "reauthorization_required",
+              code: "OURA_REFRESH_TOKEN_MISSING",
+              message: "Oura account does not have a refresh token and must be reconnected.",
+              retryable: false,
+            }),
+            now: "2026-08-11T12:10:30.000Z",
+            refreshLeaseOwner: leaseOwner,
+            store,
+            tx,
+            userId,
+          });
+          await expect(store.clearConnectionRefreshLease({
+            connectionId,
+            leaseOwner,
+            tx,
+          })).resolves.toBe(true);
+        });
+        await expect(store.getStoredConnectionAccountForUser(
+          userId,
+          connectionId,
+        )).resolves.toMatchObject({
+          credential: {
+            kind: "oauth_tokens",
+            tokens: {
+              accessToken: "access-token",
+              refreshToken: "refresh-token",
+            },
+          },
+          lastErrorCode: "OURA_REFRESH_TOKEN_MISSING",
+          status: "reauthorization_required",
+          tokenVersion: 1,
+        });
+
+        await expect(deletionClient.$transaction(async (tx) => {
+          await tx.$queryRaw`SELECT 1 FROM hosted_member WHERE id = ${userId} FOR UPDATE`;
+          await assertNoDeviceRefreshLeasesBeforeAccountSuspensionTx({
+            memberIds: [userId],
+            prisma: tx,
+          });
+          await tx.hostedMember.update({
+            data: { suspendedAt: new Date("2026-08-11T12:11:00.000Z") },
+            where: { id: userId },
+          });
+        })).resolves.toBeUndefined();
+        await expect(observer.deviceConnection.findUnique({
+          select: {
+            accessTokenEncrypted: true,
+            credentialKind: true,
+            lastErrorCode: true,
+            refreshLeaseOwner: true,
+            refreshTokenEncrypted: true,
+            status: true,
+            tokenVersion: true,
+          },
+          where: { id: connectionId },
+        })).resolves.toEqual({
+          accessTokenEncrypted: "access-token",
+          credentialKind: "oauth_tokens",
+          lastErrorCode: "OURA_REFRESH_TOKEN_MISSING",
+          refreshLeaseOwner: null,
+          refreshTokenEncrypted: "refresh-token",
+          status: "reauthorization_required",
+          tokenVersion: 1,
         });
       } finally {
         await observer.deviceSyncSignal.deleteMany({ where: { connectionId } });

@@ -251,7 +251,13 @@ describe("HostedDeviceSyncAgentSessionService.refreshTokenBundle", () => {
     expect(persistStoredConnectionTokenBundle).toHaveBeenCalledWith(expect.objectContaining({
       connectionId: "conn-1",
       refreshLeaseOwner: expect.stringMatching(/^agent-refresh:/u),
-      tokenBundle: null,
+      tokenBundle: {
+        accessToken: "access-token",
+        accessTokenExpiresAt: new Date("2026-04-01T00:30:00.000Z"),
+        keyVersion: "v1",
+        refreshToken: "refresh-token",
+        tokenVersion: 2,
+      },
     }));
     expect(touchAgentSession).not.toHaveBeenCalled();
   });

@@ -242,8 +242,9 @@ export async function persistProviderTokenRefreshErrorStatus(input: {
     tx: input.tx,
   });
   await input.store.syncDurableConnectionState(seedAccount, input.tx);
-  const shouldClearTokenBundle = accountStatus === "reauthorization_required"
-    || accountStatus === "disconnected";
+  const providerClassifiedFailure = persistedError === input.error;
+  const shouldClearTokenBundle = accountStatus === "disconnected"
+    || !providerClassifiedFailure;
 
   await input.store.persistStoredConnectionTokenBundle({
     connectionId: input.account.id,
