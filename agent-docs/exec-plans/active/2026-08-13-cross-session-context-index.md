@@ -2,7 +2,7 @@
 
 Status: active
 Created: 2026-08-13
-Updated: 2026-08-14
+Updated: 2026-08-15
 
 ## Goal
 
@@ -205,6 +205,15 @@ Updated: 2026-08-14
   membership update complete. This adds one ephemeral controller operation and
   no durable state, journal, queue, scheduler, lease, timeout, repair loop,
   migration version, or lifecycle owner.
+- Final ReviewGPT round 11 found that a successor arriving after the
+  acknowledged input had been dequeued could still bypass that barrier while
+  the acknowledged input's local acceptance commit was in flight. The
+  correction keeps the acknowledged item as the existing queue head, returns
+  it to the serialized local admission owner without removing it, and commits
+  that exact item only after its acceptance receipt, checkpoint, and provider
+  request membership are durable. The commit removes the queue head and starts
+  its successor through the existing steering path. No second queue, durable
+  flag, scheduler, timeout, repair path, or lifecycle owner is introduced.
 
 ## Verification
 
@@ -271,3 +280,12 @@ Updated: 2026-08-14
   request update. The 22-test controller suite, 102-test local-service suite,
   81-test reply-event suite, 32-test exact route-state suite, assistant-engine
   typecheck, and assistant-engine build pass.
+- ReviewGPT round 11 remediation: the production-shaped local-service test now
+  injects the successor only after the predecessor's local checkpoint has
+  started. The prior head admits that successor into the shared journal and
+  fails provider-request journal validation; the corrected head leaves it
+  behind the acknowledged queue head until commit. A manual-input controller
+  test covers the same late-arrival ordering. The 23-test controller suite,
+  102-test local-service suite, 81-test reply-event suite, 32-test exact
+  route-state suite, assistant-engine typecheck, assistant-engine build, and
+  diff validation pass.

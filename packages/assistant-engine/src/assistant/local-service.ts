@@ -1284,7 +1284,7 @@ export async function sendAssistantMessageLocal(
                 providerRequestAcceptedInputIds
               acceptedInputItemsForProviderRequest =
                 providerRequestAcceptedInputItems
-              turnInputController.resumeLiveSteersAfterLocalAdmission()
+              turnInputController.commitLiveSteeredLocalAdmission(activeTurnInput)
             }
           })
           liveSteeredActiveTurnInputDrainTail = drain.catch(() => undefined)

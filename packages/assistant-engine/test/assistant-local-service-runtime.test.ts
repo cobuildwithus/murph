@@ -3795,17 +3795,6 @@ test('sendAssistantMessageLocal serializes concurrent hosted tool preflights at 
   await vi.waitFor(() => {
     expect(liveSteeredPrompts).toEqual(['Event-backed follow up'])
   })
-  await notifyAssistantActiveTurnInputAvailable({
-    conversation: {
-      channel: 'telegram',
-      identityId: 'identity-1',
-      threadId: 'thread-1',
-      directness: 'group',
-    },
-    inputIds: [uncoveredHostedInput.inputId],
-    vault: context.vaultRoot,
-  })
-  expect(liveSteeredPrompts).toEqual(['Event-backed follow up'])
   toolExecutionRequested.resolve()
   await ordinalZeroPreflightChecked.promise
 
@@ -3819,6 +3808,17 @@ test('sendAssistantMessageLocal serializes concurrent hosted tool preflights at 
   ).toEqual([earlierHostedInput.inputId])
 
   ordinalOnePreflightRequested.resolve()
+  await firstCheckpointStarted.promise
+  await notifyAssistantActiveTurnInputAvailable({
+    conversation: {
+      channel: 'telegram',
+      identityId: 'identity-1',
+      threadId: 'thread-1',
+      directness: 'group',
+    },
+    inputIds: [uncoveredHostedInput.inputId],
+    vault: context.vaultRoot,
+  })
   await secondPreflightRequested.promise
   expect(liveSteeredPrompts).toEqual(['Event-backed follow up'])
   firstCheckpointRelease.resolve()

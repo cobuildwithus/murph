@@ -257,20 +257,43 @@ class AssistantActiveTurnInputController {
   async admitLiveSteered(): Promise<AssistantActiveTurnInputAdmissionResult | undefined> {
     this.throwFatalAdmissionError()
     await this.waitForInputAvailableAdmission()
-    return await this.admitPending({ requireProviderAcknowledged: true })
+    return await this.admitPending({
+      requireProviderAcknowledged: true,
+      retainPending: true,
+    })
   }
 
-  resumeLiveSteersAfterLocalAdmission(): void {
+  commitLiveSteeredLocalAdmission(
+    admission: Extract<AssistantActiveTurnInputAdmissionResult, { kind: 'accepted' }>,
+  ): void {
+    const first = this.pending[0]
+    if (
+      admission.providerAlreadySteered !== true ||
+      !first ||
+      first.admission.acceptedInputs !== admission.acceptedInputs ||
+      first.providerInputAcknowledgedTurnKey === null
+    ) {
+      throw new Error(
+        'Live-steered local admission does not match the acknowledged queue head.',
+      )
+    }
+
+    this.pending.shift()
+    if (first.manualCompletion) {
+      first.manualCompletion.accepted = true
+    }
     this.tryStartLiveSteers()
   }
 
   private async admitPending(input?: {
     requireProviderAcknowledged?: boolean
+    retainPending?: boolean
   }): Promise<AssistantActiveTurnInputAdmissionResult | undefined> {
     const providerTurnKey = this.resolveProviderAcknowledgementKey()
-    const accepted = await this.dequeueAdmissiblePendingPrefix({
+    const accepted = await this.resolveAdmissiblePendingPrefix({
       providerTurnKey,
       requireProviderAcknowledged: input?.requireProviderAcknowledged,
+      retainPending: input?.retainPending,
     })
     if (accepted.length === 0) {
       return undefined
@@ -481,9 +504,10 @@ class AssistantActiveTurnInputController {
     return this.liveProviderTurnKey ?? this.completedProviderTurnKey
   }
 
-  private async dequeueAdmissiblePendingPrefix(input: {
+  private async resolveAdmissiblePendingPrefix(input: {
     providerTurnKey: AssistantActiveTurnLiveProviderTurnKey | null
     requireProviderAcknowledged?: boolean
+    retainPending?: boolean
   }): Promise<QueuedAssistantActiveTurnInputAdmission[]> {
     const first = this.pending[0]
     if (!first) {
@@ -521,10 +545,12 @@ class AssistantActiveTurnInputController {
       accepted.push(item)
     }
 
-    this.pending.splice(0, accepted.length)
-    for (const item of accepted) {
-      if (item.manualCompletion) {
-        item.manualCompletion.accepted = true
+    if (input.retainPending !== true) {
+      this.pending.splice(0, accepted.length)
+      for (const item of accepted) {
+        if (item.manualCompletion) {
+          item.manualCompletion.accepted = true
+        }
       }
     }
     return accepted
@@ -675,7 +701,9 @@ export function createAssistantActiveTurnInputController(input: {
     signal?: AbortSignal
   }): Promise<AssistantActiveTurnInputAdmissionResult | undefined>
   registerLiveProviderTurn(input: AssistantActiveTurnLiveProviderTurn): () => void
-  resumeLiveSteersAfterLocalAdmission(): void
+  commitLiveSteeredLocalAdmission(
+    admission: Extract<AssistantActiveTurnInputAdmissionResult, { kind: 'accepted' }>,
+  ): void
 } {
   const keys = resolveAssistantActiveTurnInputControllerKeys(input)
   const controller = new AssistantActiveTurnInputController({
@@ -711,6 +739,8 @@ export function createAssistantActiveTurnInputController(input: {
   return {
     admitAvailable: (input) => controller.admitAvailable(input),
     admitLiveSteered: () => controller.admitLiveSteered(),
+    commitLiveSteeredLocalAdmission: (admission) =>
+      controller.commitLiveSteeredLocalAdmission(admission),
     close() {
       controller.close()
       dispose()
@@ -724,8 +754,6 @@ export function createAssistantActiveTurnInputController(input: {
     notifyInputAvailable: (notificationInput) =>
       controller.notifyInputAvailable(notificationInput),
     registerLiveProviderTurn: (turn) => controller.registerLiveProviderTurn(turn),
-    resumeLiveSteersAfterLocalAdmission: () =>
-      controller.resumeLiveSteersAfterLocalAdmission(),
   }
 }
 
