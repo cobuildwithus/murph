@@ -1329,9 +1329,12 @@ describe('monorepo release flow coverage audit', () => {
     expect(tooFastGuard).toContain('throw new Error(responseResult.responseDurationFailure')
     expect(tooFastGuard).not.toContain('writeCompletedResponseArtifacts')
     expect(tooFastGuard).not.toContain('modelVerification')
-    expect(
-      reviewGptDriver.indexOf('assertMarkedResponseDurationTrusted(responseResult'),
-    ).toBeLessThan(completedArtifactWriteStart)
+    const tooFastGuardInvocationStart = reviewGptDriver.indexOf(
+      'assertMarkedResponseDurationTrusted(responseResult',
+      tooFastGuardEnd,
+    )
+    expect(tooFastGuardInvocationStart).toBeGreaterThan(tooFastGuardEnd)
+    expect(tooFastGuardInvocationStart).toBeLessThan(completedArtifactWriteStart)
     expect(reviewGptDriver).toContain('process.exit(1);')
     expect(reviewGptDriver).toContain(
       [
