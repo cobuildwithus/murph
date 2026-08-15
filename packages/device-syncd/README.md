@@ -69,15 +69,20 @@ Current providers:
   dense-timeseries fetch window and never persist raw sample arrays or full provider
   snapshots. Opted-in `weight` uses sparse canonical measurements with compact
   per-reading evidence and the existing long summary-history backfill window.
-- Twelve additional sparse Junction timeseries are code-owned opt-ins: BMI,
-  carbohydrates, body fat, FEV1, FVC, heart-rate alerts,
-  inhaler usage, insulin injections, lean body mass, peak expiratory flow,
-  sleep-apnea alerts, and waist circumference. The contract default remains off,
-  while the production provider assembly enables this exact audited resource set;
-  member overlays and environment variables cannot widen or narrow it. Enabled resources use the same
-  extended-history horizon as summaries, fetched in bounded 30-day windows;
-  dense/default timeseries retain their one-day windows. `fat` remains the
-  public resource name while the client requests Junction's `body_fat` path.
+- Seven sparse clinical and safety resources are product-default labels: FEV1,
+  FVC, heart-rate alerts, inhaler usage, peak expiratory flow, sleep-apnea
+  alerts, and falls. Each resource is fetched in a one-day unit with at most
+  128 provider records and retains at most 100 deterministic canonical facts;
+  an overflow leaves only a compact count marker. The source lifecycle epoch
+  is checked again after each provider read so a reconnect retries the same
+  resource/day instead of importing a stale response. Stable provider row IDs
+  may inform hashing but are omitted from compact evidence.
+- BMI, carbohydrates, body fat, insulin injections, lean body mass, and waist
+  circumference remain product opt-in labels. The production provider assembly
+  still enables the exhaustive exact code-owned registry; member overlays and
+  environment variables cannot widen or narrow it. These six resources retain
+  bounded 30-day fetch chunks. `fat` remains the public resource name while the
+  client requests Junction's `body_fat` path.
 - `electrocardiogram_voltage` and `workout_stream` are separate exact opt-ins in
   that same code-owned production set. ECG voltage uses one-day grouped windows capped at
   100,000 admitted samples and 64 recordings, then reduces each recording to one
@@ -85,8 +90,8 @@ Current providers:
   uses the ordinary workout index only to admit at most 32 stable workouts per
   one-day window, then reads Junction's dedicated per-workout stream endpoint
   serially and caps each stream at 100,000 points. The exact production assembly has
-  48 production timeseries resources: 13 wide and 35 dense, including 34 ordinary
-  dense resources plus `workout_stream`. A full-job continuation owns one resource
+  48 production timeseries resources: 6 wide and 42 one-day resources, including
+  41 ordinary one-day resources plus `workout_stream`. A full-job continuation owns one resource
   and one closed UTC day. An ordinary collection permits at most three sequential
   pages with one attempt and an eight-second timeout per page, limiting provider
   wait to 24 seconds. A page-heavy hourly/session feature retries as one complete

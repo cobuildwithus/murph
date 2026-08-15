@@ -15712,7 +15712,70 @@ test("Junction direct-Link body data activates the existing extended-history own
   }
 });
 
-test("Junction activity opt-ins keep fall on bounded sparse history while dense aggregates and features stay daily", async () => {
+test("Junction timeseries continuations retry the same resource after a source reconnect", async () => {
+  let liveSource = createConnectionSource({ lifecycleEpoch: 1 });
+  let advanceLifecycleDuringFetch = true;
+  let requestCount = 0;
+  const importedSnapshots: unknown[] = [];
+  const provider = createJunctionProvider(async (input) => {
+    const url = new URL(readUrl(input));
+    if (url.pathname !== "/v2/timeseries/junction-user-1/heart_rate_alert/grouped") {
+      throw new Error(`Unexpected request: ${url.toString()}`);
+    }
+    requestCount += 1;
+    if (advanceLifecycleDuringFetch) {
+      liveSource = createConnectionSource({ lifecycleEpoch: 2 });
+      advanceLifecycleDuringFetch = false;
+    }
+    return createJsonResponse({
+      groups: {
+        garmin: [{
+          data: [{
+            end: "2026-04-02T10:01:00.000Z",
+            id: "heart-alert-reconnect",
+            start: "2026-04-02T10:00:00.000Z",
+            type: "irregular_rhythm",
+            unit: "count",
+            value: 1,
+          }],
+          source: { provider: "garmin", type: "watch" },
+        }],
+      },
+    });
+  }, {
+    summaryResources: [],
+    timeseriesResources: ["heart_rate_alert"],
+  });
+  const context = createJunctionJobContext({
+    importSnapshot: async (snapshot) => {
+      importedSnapshots.push(snapshot);
+      return { canonicalEventCount: 1, durableDeliveryAccepted: true };
+    },
+    listConnectionSources: () => [liveSource],
+  });
+  const job = createJob("reconcile", {
+    timeseriesCursor: "2026-04-02T00:00:00.000Z",
+    timeseriesResourceCursor: "heart_rate_alert",
+    windowEnd: "2026-04-03T00:00:00.000Z",
+    windowStart: "2026-04-02T00:00:00.000Z",
+  });
+
+  const first = await executeJunctionJob(provider, context, job);
+  const retry = requireValue(
+    first.scheduledJobs?.[0],
+    "A superseded timeseries fetch should retain its exact continuation.",
+  );
+  assert.equal(importedSnapshots.length, 0);
+  assert.equal(retry.payload?.timeseriesCursor, job.payload.timeseriesCursor);
+  assert.equal(retry.payload?.timeseriesResourceCursor, "heart_rate_alert");
+
+  await executeJunctionJob(provider, context, createJobFromInput(retry));
+
+  assert.equal(requestCount, 2);
+  assert.equal(importedSnapshots.length, 1);
+});
+
+test("Junction activity resources keep fall sparse while dense aggregates and features stay daily", async () => {
   const denseResources = ["calories_basal", "handwashing", "workout_distance"];
   const requests: string[] = [];
   const provider = createJunctionProvider(async (input) => {
@@ -16179,15 +16242,15 @@ test("Junction production timeseries resources and direct provider bound match d
   const wideResources = productionResources.filter(
     (resource) => (resolveJunctionTimeseriesResourcePolicy(resource)?.fetchChunkDays ?? 1) > 1,
   );
-  const denseResources = productionResources.filter(
+  const oneDayResources = productionResources.filter(
     (resource) => (resolveJunctionTimeseriesResourcePolicy(resource)?.fetchChunkDays ?? 1) === 1,
   );
-  const ordinaryDenseResources = denseResources.filter(
+  const ordinaryOneDayResources = oneDayResources.filter(
     (resource) => resource !== "workout_stream",
   );
   assert.deepEqual(
-    [productionResources.length, wideResources.length, denseResources.length, ordinaryDenseResources.length],
-    [48, 13, 35, 34],
+    [productionResources.length, wideResources.length, oneDayResources.length, ordinaryOneDayResources.length],
+    [48, 6, 42, 41],
   );
 
   const readme = await readFile(new URL("../README.md", import.meta.url), "utf8");
@@ -16197,7 +16260,7 @@ test("Junction production timeseries resources and direct provider bound match d
   );
   for (const documentation of [readme, compatibilityMatrix]) {
     assert.match(documentation, /48 production timeseries resources/u);
-    assert.match(documentation, /13 wide and 35 dense/u);
+    assert.match(documentation, /6 wide and 42 one-day/u);
     assert.match(documentation, /three\s+sequential\s+pages/u);
     assert.match(documentation, /one attempt/u);
     assert.match(documentation, /24 seconds/u);

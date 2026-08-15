@@ -216,7 +216,7 @@ test("Junction missing-resource slice preserves sparse official facts and compac
     const encoded = JSON.stringify(part.content);
     assert.match(encoded, /junction\.sparse_timeseries_record\.v1/u);
     assert.match(encoded, /"sourceInstanceId"/u);
-    assert.doesNotMatch(encoded, /"groups"|"data"/u);
+    assert.doesNotMatch(encoded, /"groups"|"data"|"providerRowId"/u);
   }
 
   assert.equal(
@@ -226,6 +226,58 @@ test("Junction missing-resource slice preserves sparse official facts and compac
   const retainedEvidenceJson = JSON.stringify(payload.evidenceParts ?? []);
   assert.doesNotMatch(retainedEvidenceJson, /"groups"|"data"/u);
   assert.equal(payload.ingestReceipt?.rawArtifactCount, payload.evidenceParts?.length);
+});
+
+test("Junction sparse clinical imports retain a deterministic bounded prefix", () => {
+  const records = Array.from({ length: 128 }, (_, index) => {
+    const startAt = new Date(Date.parse("2026-02-01T00:00:00.000Z") + index * 60_000);
+    return {
+      end: new Date(startAt.getTime() + 30_000).toISOString(),
+      id: `clinical-row-${String(index).padStart(3, "0")}`,
+      start: startAt.toISOString(),
+      timestamp: startAt.toISOString(),
+      unit: "L",
+      value: 3.5,
+    };
+  });
+  const normalize = (data: readonly Record<string, unknown>[]) => normalizeJunctionSnapshot({
+    importedAt: "2026-02-02T00:00:00.000Z",
+    timeseries: {
+      forced_expiratory_volume_1: grouped(
+        "apple_health_kit",
+        "phone",
+        "iphone-1",
+        data,
+      ),
+    },
+  });
+
+  const forward = normalize(records);
+  const reversed = normalize([...records].reverse());
+  const identities = (payload: DeviceBatchImportPayload) => (payload.events ?? [])
+    .map((event) => event.externalRef?.resourceId)
+    .sort();
+  const overflow = forward.evidenceParts?.find((part) =>
+    part.role.endsWith(":bounded-overflow")
+  );
+
+  assert.equal(forward.events?.length, 100);
+  assert.equal(forward.evidenceParts?.length, 101);
+  assert.deepEqual(identities(forward), identities(reversed));
+  assert.deepEqual(overflow?.content, {
+    schema: "junction.sparse_timeseries_overflow.v1",
+    provider: "junction",
+    resource: "forced_expiratory_volume_1",
+    validatedRecordCount: 128,
+    retainedRecordCount: 100,
+    droppedRecordCount: 28,
+    status: "bounded_overflow",
+  });
+  assert.equal(
+    (forward.events ?? []).at(-1)?.occurredAt,
+    "2026-02-01T01:39:00.000Z",
+  );
+  assert.doesNotMatch(JSON.stringify(forward.evidenceParts), /clinical-row-/u);
 });
 
 test("Junction missing-resource slice rejects malformed values, units, intervals, and alert types", () => {

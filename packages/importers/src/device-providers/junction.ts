@@ -2320,8 +2320,53 @@ function pushJunctionSparseTimeseriesRecords(
       .map(([identityHash]) => identityHash),
   );
   const seenRecordIdentityHashes = new Set<string>();
+  const uniqueCandidates = candidates.filter((candidate) => {
+    if (
+      conflictingProviderIdentityHashes.has(candidate.identityHash)
+      || seenRecordIdentityHashes.has(candidate.identityHash)
+    ) {
+      return false;
+    }
+    seenRecordIdentityHashes.add(candidate.identityHash);
+    return true;
+  });
+  const maximumRecords = resolveJunctionTimeseriesResourcePolicy(resource)
+    ?.maxCanonicalRecordsPerWindow;
+  const retainedCandidates = maximumRecords === undefined
+    ? uniqueCandidates
+    : [...uniqueCandidates]
+        .sort((left, right) =>
+          left.occurredAt.localeCompare(right.occurredAt)
+          || left.identityHash.localeCompare(right.identityHash)
+          || left.semanticContentKey.localeCompare(right.semanticContentKey)
+        )
+        .slice(0, maximumRecords);
 
-  for (const candidate of candidates) {
+  if (maximumRecords !== undefined && uniqueCandidates.length > maximumRecords) {
+    const role = `${baseArtifactRole}:bounded-overflow`;
+    pushEvidencePart(
+      context.evidenceParts,
+      withJunctionCompactTimeseriesMetadata(
+        resource,
+        createEvidencePart(
+          role,
+          `${role}.json`,
+          {
+            schema: "junction.sparse_timeseries_overflow.v1",
+            provider: "junction",
+            resource,
+            validatedRecordCount: uniqueCandidates.length,
+            retainedRecordCount: retainedCandidates.length,
+            droppedRecordCount: uniqueCandidates.length - retainedCandidates.length,
+            status: "bounded_overflow",
+          },
+        ),
+        "timeseries_reading",
+      ),
+    );
+  }
+
+  for (const candidate of retainedCandidates) {
     const {
       dayKey,
       entry,
@@ -2331,14 +2376,6 @@ function pushJunctionSparseTimeseriesRecords(
       resourceContext,
       timestamp,
     } = candidate;
-    if (
-      conflictingProviderIdentityHashes.has(identityHash)
-      || seenRecordIdentityHashes.has(identityHash)
-    ) {
-      continue;
-    }
-    seenRecordIdentityHashes.add(identityHash);
-
     const role = `${baseArtifactRole}:${dayKey}:${identityHash}`;
     pushEvidencePart(
       context.evidenceParts,
@@ -2355,7 +2392,6 @@ function pushJunctionSparseTimeseriesRecords(
             sourceProviderSlug: resourceContext.sourceProviderSlug,
             sourceType: resourceContext.origin.sourceType,
             sourceInstanceId: resourceContext.origin.sourceInstanceId,
-            providerRowId: record.providerRowId,
             observedAtRaw: record.observedAtRaw,
             occurredAt,
             recordedAt: timestamp.recordedAt,

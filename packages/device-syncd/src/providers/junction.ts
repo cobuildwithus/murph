@@ -179,6 +179,8 @@ interface JunctionTimeseriesImportResult {
   yieldedAt: string | null;
 }
 
+type JunctionSourceLifecycleFence = ReadonlyMap<string, number>;
+
 interface JunctionFullJobTimeseriesContinuation {
   timeseriesCursor: string;
   timeseriesResourceCursor: string;
@@ -3550,7 +3552,7 @@ export function createJunctionDeviceSyncProvider(
         madeProgress = true;
       } else {
         try {
-          await importJunctionTimeseriesResourceSnapshot({
+          const lifecycleCurrent = await importJunctionTimeseriesResourceSnapshot({
             context,
             dateQueryFormat: "date",
             resource,
@@ -3560,6 +3562,12 @@ export function createJunctionDeviceSyncProvider(
             windowEnd: window.windowEnd,
             windowStart: window.windowStart,
           });
+          if (!lifecycleCurrent) {
+            return {
+              workoutStreamCursor,
+              yieldedAt: window.windowStart,
+            };
+          }
         } catch (error) {
           if (isJunctionJobSignalAbort(error, context.signal)) {
             if (madeProgress) {
@@ -3685,7 +3693,7 @@ export function createJunctionDeviceSyncProvider(
       }
     } else {
       try {
-        await importJunctionTimeseriesResourceSnapshot({
+        const lifecycleCurrent = await importJunctionTimeseriesResourceSnapshot({
           collectionWorkLimit: JUNCTION_FULL_JOB_TIMESERIES_COLLECTION_WORK_LIMIT,
           context,
           dateQueryFormat: timeseriesWindowHours === 1 ? "datetime" : "date",
@@ -3695,6 +3703,20 @@ export function createJunctionDeviceSyncProvider(
           windowEnd: executionWindowEnd,
           windowStart: timeseriesCursor,
         });
+        if (!lifecycleCurrent) {
+          return buildFullJobTimeseriesContinuationResult({
+            context,
+            job,
+            skippedOptionalResources,
+            continuation: {
+              timeseriesCursor,
+              timeseriesResourceCursor: resource,
+              timeseriesWindowHours,
+              workoutStreamCursor: null,
+            },
+            window,
+          });
+        }
       } catch (error) {
         if (
           isJunctionTimeseriesWindowTooLarge(error)
@@ -3744,7 +3766,8 @@ export function createJunctionDeviceSyncProvider(
     sourceProviders: readonly JunctionProviderConnection[];
     windowEnd: string;
     windowStart: string;
-  }): Promise<void> {
+  }): Promise<boolean> {
+    const sourceLifecycleFence = await captureJunctionSourceLifecycleFence(input.context);
     const records = await fetchTimeseriesResourceInChunks(
       input.context,
       input.resource,
@@ -3757,8 +3780,11 @@ export function createJunctionDeviceSyncProvider(
         dateQueryFormat: input.dateQueryFormat,
       },
     );
+    if (!await isJunctionSourceLifecycleFenceCurrent(input.context, sourceLifecycleFence)) {
+      return false;
+    }
     if (records.length === 0) {
-      return;
+      return true;
     }
 
     const preparedImport = await prepareJunctionImportSnapshot(
@@ -3767,7 +3793,7 @@ export function createJunctionDeviceSyncProvider(
       input.sourceProviders,
     );
     if (!hasJunctionSnapshotRecords(preparedImport.snapshots)) {
-      return;
+      return true;
     }
     await input.context.importSnapshot({
       provider: "junction",
@@ -3780,6 +3806,7 @@ export function createJunctionDeviceSyncProvider(
       summaries: {},
       timeseries: preparedImport.snapshots,
     });
+    return true;
   }
 
   async function importJunctionWorkoutStreamWindow(input: {
@@ -9184,6 +9211,36 @@ function readJunctionSourceLifecycleEpoch(source: { lifecycleEpoch?: number }): 
   return typeof lifecycleEpoch === "number" && Number.isSafeInteger(lifecycleEpoch) && lifecycleEpoch >= 1
     ? lifecycleEpoch
     : 1;
+}
+
+async function captureJunctionSourceLifecycleFence(
+  context: ProviderJobContext,
+): Promise<JunctionSourceLifecycleFence | null> {
+  if (!context.listConnectionSources) {
+    return null;
+  }
+  return new Map(
+    [...buildJunctionCurrentLifecycleSourceMap(await context.listConnectionSources())]
+      .map(([sourceProviderSlug, sources]) => [
+        sourceProviderSlug,
+        readJunctionSourceLifecycleEpoch(sources[0]!),
+      ] as const),
+  );
+}
+
+async function isJunctionSourceLifecycleFenceCurrent(
+  context: ProviderJobContext,
+  expected: JunctionSourceLifecycleFence | null,
+): Promise<boolean> {
+  if (!expected) {
+    return true;
+  }
+  const current = await captureJunctionSourceLifecycleFence(context);
+  return current !== null
+    && current.size === expected.size
+    && [...expected].every(([sourceProviderSlug, lifecycleEpoch]) =>
+      current.get(sourceProviderSlug) === lifecycleEpoch
+    );
 }
 
 function buildJunctionCurrentLifecycleSourceMap<TSource extends JunctionImportAdmissionSource>(
