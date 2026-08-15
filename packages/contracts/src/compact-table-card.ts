@@ -5,8 +5,10 @@ import { contractIdMaxLength, idPattern } from "./ids.ts";
 import { isStrictIsoDateTime } from "./time.ts";
 import {
   buildWorkoutSessionAppCardEnvelopeV4,
+  buildWorkoutSessionAppCardEnvelopeV6,
   parseWorkoutSessionAppCardEnvelopeV4,
   workoutSessionDetailV1Schema,
+  workoutSessionEditorProjectionV1Schema,
 } from "./workout-session-card.ts";
 
 export const compactTableCardV1Bounds = {
@@ -104,9 +106,15 @@ function addEncodedLengthIssues(
   envelope: unknown,
   context: z.RefinementCtx,
   subject: string,
+  targets: { image: boolean; inline: boolean } = {
+    image: true,
+    inline: true,
+  },
 ): void {
   const encodedLength = encodedAppCardPayloadLength(envelope);
   if (
+    targets.inline
+    &&
     IMESSAGE_APP_CARD_URL_PREFIX.length + encodedLength >=
     IMESSAGE_APP_CARD_URL_MAX_LENGTH
   ) {
@@ -116,7 +124,10 @@ function addEncodedLengthIssues(
       path: [],
     });
   }
-  if (encodedLength > IMESSAGE_APP_CARD_IMAGE_PAYLOAD_MAX_LENGTH) {
+  if (
+    targets.image
+    && encodedLength > IMESSAGE_APP_CARD_IMAGE_PAYLOAD_MAX_LENGTH
+  ) {
     context.addIssue({
       code: "custom",
       message: `The ${subject} exceeds the static image payload limit.`,
@@ -178,7 +189,7 @@ export const compactTableWorkoutSemanticResponseCardV1Schema = z
   })
   .strict();
 
-const compactTableWorkoutResponseCardV1Schema =
+const compactTableWorkoutResponseCardAuthoringV1Schema =
   compactTableWorkoutSemanticResponseCardV1Schema.superRefine((card, context) => {
     const envelope = buildWorkoutSessionAppCardEnvelopeV4({
       title: card.title,
@@ -188,6 +199,58 @@ const compactTableWorkoutResponseCardV1Schema =
     });
     addEncodedLengthIssues(envelope, context, "workout session");
   });
+
+const compactTableWorkoutResponseCardV1Schema = z
+  .object({
+    ...compactTableResponseCardHeaderV1Shape,
+    editor: workoutSessionEditorProjectionV1Schema.optional(),
+    footer: singleLineText(compactTableCardV1Bounds.footer).nullable(),
+    tracking: compactTableTrackingSourceV1Schema,
+    workout: workoutSessionDetailV1Schema,
+  })
+  .strict()
+  .superRefine((card, context) => {
+    const presentationEnvelope = buildWorkoutSessionAppCardEnvelopeV4({
+      title: card.title,
+      subtitle: card.subtitle,
+      footer: card.footer,
+      workout: card.workout,
+    });
+    addEncodedLengthIssues(
+      presentationEnvelope,
+      context,
+      "workout session",
+      { image: true, inline: card.editor === undefined },
+    );
+    if (card.editor === undefined) {
+      return;
+    }
+    try {
+      addEncodedLengthIssues(
+        buildWorkoutSessionAppCardEnvelopeV6({
+          editor: card.editor,
+          title: card.title,
+          subtitle: card.subtitle,
+          footer: card.footer,
+          workout: card.workout,
+        }),
+        context,
+        "workout editor",
+        { image: false, inline: true },
+      );
+    } catch {
+      context.addIssue({
+        code: "custom",
+        message: "The workout editor projection does not match the card.",
+        path: ["editor"],
+      });
+    }
+  });
+
+export const compactTableResponseCardAuthoringV1Schema = z.union([
+  compactTableGenericResponseCardV1Schema,
+  compactTableWorkoutResponseCardAuthoringV1Schema,
+]);
 
 export const compactTableResponseCardV1Schema = z.union([
   compactTableGenericResponseCardV1Schema,
@@ -199,7 +262,7 @@ export type CompactTableGenericResponseCardV1 = z.infer<
 >;
 
 export type CompactTableWorkoutResponseCardV1 = z.infer<
-  typeof compactTableWorkoutSemanticResponseCardV1Schema
+  typeof compactTableWorkoutResponseCardV1Schema
 >;
 
 export type CompactTableResponseCardV1 = z.infer<
@@ -241,7 +304,7 @@ export function parseCompactTableAppCardEnvelope(
     return presentation;
   }
 
-  if (value.schemaVersion === 4) {
+  if (value.schemaVersion === 4 || value.schemaVersion === 6) {
     const parsed = parseWorkoutSessionAppCardEnvelopeV4(value);
     return parsed === null
       ? null

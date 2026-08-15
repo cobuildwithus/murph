@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   assistantResponseCardSchema,
   buildWorkoutSessionAppCardEnvelopeV4,
+  buildWorkoutSessionAppCardEnvelopeV6,
   compactTableResponseCardV1Schema,
   parseCompactTableAppCardEnvelope,
   workoutSessionCardV1Bounds,
@@ -69,6 +70,63 @@ const TRACKED_WORKOUT_CARD: CompactTableResponseCardV1 = {
   },
 };
 
+const TRACKED_WORKOUT_EDITOR = {
+  actionBinding: "a".repeat(64),
+  setRemovalBinding: "b".repeat(64),
+  version: 1 as const,
+  exercises: [
+    {
+      unitOverride: "lb" as const,
+      sets: [
+        {
+          logged: true,
+          result: {
+            kind: "weight_reps" as const,
+            reps: 8,
+            weight: 185,
+            weightUnit: null,
+          },
+        },
+        {
+          logged: true,
+          result: {
+            kind: "weight_reps" as const,
+            reps: 7,
+            weight: 185,
+            weightUnit: "lb" as const,
+          },
+        },
+        {
+          logged: false,
+          result: null,
+        },
+      ],
+    },
+    {
+      unitOverride: "lb" as const,
+      sets: [
+        {
+          logged: true,
+          result: {
+            kind: "weight_reps" as const,
+            reps: 10,
+            weight: 55,
+            weightUnit: null,
+          },
+        },
+        {
+          logged: false,
+          result: null,
+        },
+        {
+          logged: false,
+          result: null,
+        },
+      ],
+    },
+  ],
+};
+
 describe("workout session compact-table contract", () => {
   it("accepts one bounded active workout backed by canonical state", () => {
     expect(
@@ -109,6 +167,156 @@ describe("workout session compact-table contract", () => {
         e: [["Bench press", [["c", "185 lb × 8", null]]]],
       },
     })).toBeNull();
+  });
+
+  it("validates but does not expose the V6 workout action binding", () => {
+    if (!("workout" in TRACKED_WORKOUT_CARD)) {
+      throw new TypeError("Expected the workout card fixture.");
+    }
+    const envelope = buildWorkoutSessionAppCardEnvelopeV6({
+      editor: TRACKED_WORKOUT_EDITOR,
+      title: TRACKED_WORKOUT_CARD.title,
+      subtitle: TRACKED_WORKOUT_CARD.subtitle,
+      footer: TRACKED_WORKOUT_CARD.footer,
+      workout: TRACKED_WORKOUT_CARD.workout,
+    });
+
+    expect(envelope.schemaVersion).toBe(6);
+    expect(envelope.card.b).toBe("a".repeat(64));
+    expect(envelope.card.d).toBe("b".repeat(64));
+    expect(parseCompactTableAppCardEnvelope(envelope)).toEqual({
+      kind: "compact_table",
+      version: 1,
+      title: TRACKED_WORKOUT_CARD.title,
+      subtitle: TRACKED_WORKOUT_CARD.subtitle,
+      footer: TRACKED_WORKOUT_CARD.footer,
+      workout: TRACKED_WORKOUT_CARD.workout,
+    });
+    expect(() => buildWorkoutSessionAppCardEnvelopeV6({
+      editor: {
+        ...TRACKED_WORKOUT_EDITOR,
+        actionBinding: "A".repeat(64),
+      },
+      title: TRACKED_WORKOUT_CARD.title,
+      subtitle: TRACKED_WORKOUT_CARD.subtitle,
+      footer: TRACKED_WORKOUT_CARD.footer,
+      workout: TRACKED_WORKOUT_CARD.workout,
+    })).toThrow(/binding/iu);
+    expect(parseCompactTableAppCardEnvelope({
+      ...envelope,
+      card: { ...envelope.card, s: "c" },
+    })).toBeNull();
+    expect(parseCompactTableAppCardEnvelope({
+      ...envelope,
+      card: {
+        ...envelope.card,
+        e: [["Bench press", "l", [["p", null, ["r", 8]]]]],
+      },
+    })).toBeNull();
+  });
+
+  it("keeps canonical zero and large finite snapshot values in the V6 wire", () => {
+    if (!("workout" in TRACKED_WORKOUT_CARD)) {
+      throw new TypeError("Expected the workout card fixture.");
+    }
+    const workout = {
+      ...TRACKED_WORKOUT_CARD.workout,
+      exercises: [{
+        name: "Bench press",
+        sets: [{ status: "completed" as const, target: null, actual: "Logged" }],
+      }],
+    };
+    const envelope = buildWorkoutSessionAppCardEnvelopeV6({
+      editor: {
+        actionBinding: "a".repeat(64),
+        exercises: [{
+          unitOverride: "lb",
+          sets: [{
+            logged: true,
+            result: {
+              kind: "weight_reps",
+              reps: 1e100,
+              weight: 0,
+              weightUnit: null,
+            },
+          }],
+        }],
+        setRemovalBinding: "b".repeat(64),
+        version: 1 as const,
+      },
+      title: TRACKED_WORKOUT_CARD.title,
+      subtitle: null,
+      footer: null,
+      workout,
+    });
+
+    expect(envelope.card.e[0]?.[2][0]?.[2]).toEqual(["w", 1e100, 0, null]);
+    const parsed = parseCompactTableAppCardEnvelope(envelope);
+    if (!parsed || !("workout" in parsed)) {
+      throw new TypeError("Expected the parsed workout card.");
+    }
+    expect(parsed.workout).toEqual({
+      ...workout,
+      exercises: [{
+        name: "Bench press",
+        sets: [{
+          status: "completed",
+          target: null,
+          actual: "0 lb × 1e+100",
+        }],
+      }],
+    });
+
+    const noteInput = {
+      editor: {
+        actionBinding: "a".repeat(64),
+        exercises: [{
+          unitOverride: null,
+          sets: [{
+            logged: true,
+            result: { kind: "note" as const, note: "n".repeat(40) },
+          }],
+        }],
+        setRemovalBinding: "b".repeat(64),
+        version: 1 as const,
+      },
+      title: TRACKED_WORKOUT_CARD.title,
+      subtitle: null,
+      footer: null,
+      workout,
+    };
+    const noteEnvelope = buildWorkoutSessionAppCardEnvelopeV6(noteInput);
+    const parsedNote = parseCompactTableAppCardEnvelope(noteEnvelope);
+    if (!parsedNote || !("workout" in parsedNote)) {
+      throw new TypeError("Expected the parsed note workout card.");
+    }
+    expect(parsedNote.workout.exercises[0]?.sets[0]?.actual).toBe("n".repeat(40));
+    expect(() => buildWorkoutSessionAppCardEnvelopeV6({
+      ...noteInput,
+      editor: {
+        ...noteInput.editor,
+        exercises: [{
+          unitOverride: null,
+          sets: [{
+            logged: true,
+            result: { kind: "note", note: "n".repeat(41) },
+          }],
+        }],
+      },
+    })).toThrow(/fully visible/iu);
+    expect(() => buildWorkoutSessionAppCardEnvelopeV6({
+      ...noteInput,
+      editor: {
+        ...noteInput.editor,
+        exercises: [{
+          unitOverride: null,
+          sets: [{
+            logged: true,
+            result: { kind: "note", note: "n".repeat(400) },
+          }],
+        }],
+      },
+    })).toThrow(/fully visible/iu);
   });
 
   it("accepts a completed workout with completed and skipped sets", () => {

@@ -89,11 +89,13 @@ import {
   exerciseRoutineResponseCardV1Schema,
   assistantResponseCardAuthoringSchema,
   assistantWorkoutResponseCardSemanticSchema,
+  assistantResponseCardSchema,
   telegramRichContentResponseCardV1Schema,
   type AssistantResponseCard,
   type CompactTableWorkoutResponseCardV1,
 } from '@murphai/operator-config/assistant-response-cards'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
+import { readLiveWorkoutCardEditor } from '@murphai/vault-usecases/workouts'
 import { normalizeNullableString } from '@murphai/operator-config/text/shared'
 import {
   type AssistantHostedGroupSharedMember,
@@ -2178,9 +2180,13 @@ export async function executeMurphDynamicToolRequest(input: {
           'response cards cannot be combined with response media',
         )
       }
+      const card = await attachTrustedWorkoutCardEditor({
+        card: input.request.card,
+        vaultRoot: input.vaultRoot ?? null,
+      })
       return {
         ...toolTextResult(true, 'response card attached'),
-        responseCardPatch: { card: input.request.card },
+        responseCardPatch: { card },
       }
     }
     case 'attach-response-media': {
@@ -3217,6 +3223,38 @@ export async function executeMurphDynamicToolRequest(input: {
         unknownOutcomeOnTransportError: true,
       })
     }
+  }
+}
+
+async function attachTrustedWorkoutCardEditor(input: {
+  card: AssistantResponseCard
+  vaultRoot: string | null
+}): Promise<AssistantResponseCard> {
+  if (
+    input.vaultRoot === null
+    || input.card.kind !== 'compact_table'
+    || !('workout' in input.card)
+    || input.card.workout.state !== 'active'
+  ) {
+    return input.card
+  }
+  try {
+    const trusted = await readLiveWorkoutCardEditor({
+      presentation: input.card.workout,
+      vault: input.vaultRoot,
+      workoutId: input.card.tracking.entityId,
+    })
+    if (trusted === null) {
+      return input.card
+    }
+    const candidate = assistantResponseCardSchema.safeParse({
+      ...input.card,
+      editor: trusted.editor,
+      workout: trusted.workout,
+    })
+    return candidate.success ? candidate.data : input.card
+  } catch {
+    return input.card
   }
 }
 

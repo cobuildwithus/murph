@@ -1,6 +1,6 @@
 ---
 name: food-journal
-description: Use for low-friction meal capture, connected carbohydrate-record questions, and bounded pattern finding between food and digestion, symptoms, energy, appetite, or performance, providing calorie and macro estimates by default except in eating-disorder-risk, intuitive-eating, or number-sensitive contexts.
+description: Use for low-friction meal capture, connected meal and nutrient questions, and bounded pattern finding between food and digestion, symptoms, energy, appetite, or performance, providing calorie and macro estimates by default except in eating-disorder-risk, intuitive-eating, or number-sensitive contexts.
 ---
 
 # Food journal
@@ -32,6 +32,35 @@ short-range read:
 Returned grams are partial intake evidence. Do not infer food identity, a
 complete meal, total daily carbohydrate, or eaten calories from them. No
 returned entry means unavailable, not zero.
+
+For a connected or saved-meal vitamin, mineral, or water question, use one
+bounded day or short-range read:
+`vault-cli meal nutrients --from <date> --to <date> --format json`.
+The response lists every supported nutrient field. A `null` total with zero
+contributing meals means unavailable, not zero. A `contributingMealCount` below
+the enclosing `mealCount` means the total is partial across the selected stored
+meals; do not extrapolate the missing meals. Equal counts mean every selected
+stored meal record supplied that field, not that every meal eaten that day was
+logged. The aggregate may combine connected and manually saved meals. Do not
+attribute its totals or coverage to one provider or claim that provider was
+complete unless separate provider-specific evidence establishes that.
+
+Treat this as a bounded sum of stored meal fields, not a copy of the source
+app's daily dashboard. Source-app targets, daily percentages, and completeness
+claims are not imported. When asked what is "low," report the observed total and
+coverage first. Do not call an intake low, adequate, deficient, or excessive
+unless a trustworthy target applies to this member and the stored unit and
+nutrient form are compatible with it; name the target basis and remaining
+uncertainty. If the member asks for a reference comparison, use a current
+authoritative source rather than a remembered target and obtain the age, sex,
+and pregnancy or lactation context needed for that source. Do not directly
+compare provider fields for folic acid, vitamin A, vitamin E, or niacin to DFE,
+RAE, alpha-tocopherol, or niacin-equivalent targets unless the imported form and
+conversion basis are known. One day of food records does not diagnose a
+deficiency. Use
+`nutrition-strategy` for food-first suggestions and
+`micronutrients-supplements` for labs, supplement dosing, or deficiency-risk
+questions.
 
 ## Capture with low friction
 
