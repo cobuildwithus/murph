@@ -2,7 +2,7 @@
 
 Status: active
 Created: 2026-08-12
-Updated: 2026-08-14
+Updated: 2026-08-15
 
 ## Goal
 
@@ -411,15 +411,14 @@ Updated: 2026-08-14
 
 Current evidence:
 
-- Focused guard suite: 114 tests passed on the current merged base, including
+- Focused guard suite: 119 tests passed on the current merged base, including
   direct ReviewGPT reproductions and negative controls for unrelated objects,
   imports, namespace aliases, closed member origins and mutations, callables,
   ambiguous provider evidence, and domain models.
 - Full repository-tool suite: 36 files and 650 tests passed.
 - Repo-tools TypeScript compilation passes with `tsconfig.tools.json`.
-- The combined guard and Node-bootstrap suite passes 110 tests after the final
-  base merge. The conflicted assistant local-service runtime file passes all
-  103 tests with the CI-owned heap ceiling.
+- The combined guard and Node-bootstrap suite passes 120 tests after the final
+  base merge.
 - `pnpm provider-requests:guard`: passes on the current merged base containing
   the sibling SDK migrations and exact registered SDK hooks.
 - Repo-tools TypeScript compilation and the production provider scan pass after
