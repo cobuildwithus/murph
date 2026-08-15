@@ -2828,6 +2828,208 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
   )
 })
 
+describeRealCodex('real Codex generated-music fallback e2e', () => {
+  it(
+    'honors an explicit request without turning unrelated context into provider input',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const explicitDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-explicit-song-fallback-e2e-'),
+      )
+      const ordinaryDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-ordinary-text-fallback-e2e-'),
+      )
+      const generations: unknown[] = []
+      const privateContextMarker = 'PRIVATE_ACCOUNT_MARKER_M9'
+      const privateContextSnapshot = [
+        'Private assistant context snapshot:',
+        `- Unrelated account reconciliation reference: ${privateContextMarker}.`,
+      ].join('\n')
+
+      try {
+        const explicitSkillsRoot = path.join(explicitDirectory, 'skills')
+        await materializeAssistantSkill({
+          skillsRoot: explicitSkillsRoot,
+          slug: 'music-generation',
+        })
+        const explicit = await executeRealCodexAppServerTurn({
+          approvalPolicy: 'never',
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions:
+            buildDirectConversationDeveloperInstructions(
+              false,
+              privateContextSnapshot,
+            ),
+          dynamicTools: [MURPH_GENERATE_SONG_TOOL],
+          env: {
+            ...config.env,
+            [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: explicitSkillsRoot,
+          },
+          excludeResumeTurns: true,
+          model: config.model,
+          modelProvider: config.modelProvider,
+          prompt: [
+            'Generate one original instrumental track, exactly 12 seconds long.',
+            'Make it bright synth-pop at about 118 BPM with glockenspiel and crisp handclaps, with no vocals.',
+            'Send only the song.',
+          ].join(' '),
+          reasoningEffort: 'low',
+          sandbox: 'workspace-write',
+          voiceMemoRuntime: {
+            elevenLabs: {
+              apiKeyAvailable: true,
+              modelId: 'eleven_multilingual_v2',
+              voiceId: 'voice_murph',
+            },
+            generateAndUpload: async (input) => {
+              generations.push(input.generation)
+              return {
+                attachmentId: 'attachment_explicit_song_fallback',
+                filename: 'explicit-song-fallback.mp3',
+              }
+            },
+            kind: 'linq',
+          },
+          workingDirectory: explicitDirectory,
+        })
+        const explicitActions = readCapabilityRoutingActions(
+          explicit.jsonEvents,
+        )
+        const skillRead = explicitActions.find((action) =>
+          action.kind === 'command'
+          && action.command.includes('music-generation/SKILL.md')
+          && action.output.includes('# Music generation')
+        )
+        const songCalls = explicitActions.filter((action) =>
+          action.kind === 'dynamic'
+          && action.tool === MURPH_GENERATE_SONG_TOOL.name
+        )
+
+        expect(skillRead, 'music-generation fallback read').toBeDefined()
+        expect(songCalls).toHaveLength(1)
+        const songCall = songCalls[0]
+        if (songCall?.kind !== 'dynamic') {
+          throw new Error('Expected one real generated-song tool call.')
+        }
+        expect(songCall.argumentsValue).toMatchObject({
+          durationSeconds: 12,
+          instrumental: true,
+          prompt: expect.any(String),
+        })
+        const providerPrompt = String(songCall.argumentsValue.prompt)
+        expect(providerPrompt).toMatch(/synth[ -]?pop/iu)
+        expect(providerPrompt).toMatch(/118\s*BPM/iu)
+        expect(providerPrompt).toMatch(/glockenspiel/iu)
+        expect(providerPrompt).toMatch(/handclap/iu)
+        expect(providerPrompt).not.toContain(privateContextMarker)
+        expect(generations).toEqual([
+          expect.objectContaining({
+            durationMs: 12_000,
+            forceInstrumental: true,
+            kind: 'elevenlabs_music',
+            prompt: expect.not.stringContaining(privateContextMarker),
+          }),
+        ])
+        expect(explicit.responseMedia).toEqual([
+          {
+            filename: 'explicit-song-fallback.mp3',
+            kind: 'voice_memo',
+            transcript: null,
+            transport: {
+              attachmentId: 'attachment_explicit_song_fallback',
+              kind: 'linq_attachment',
+            },
+          },
+        ])
+        expect(explicit.finalMessage.trim()).toBe('')
+
+        const ordinarySkillsRoot = path.join(ordinaryDirectory, 'skills')
+        await materializeAssistantSkill({
+          skillsRoot: ordinarySkillsRoot,
+          slug: 'music-generation',
+        })
+        const ordinary = await executeRealCodexAppServerTurn({
+          approvalPolicy: 'never',
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions:
+            buildDirectConversationDeveloperInstructions(
+              false,
+              privateContextSnapshot,
+            ),
+          dynamicTools: [MURPH_GENERATE_SONG_TOOL],
+          env: {
+            ...config.env,
+            [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: ordinarySkillsRoot,
+          },
+          excludeResumeTurns: true,
+          model: config.model,
+          modelProvider: config.modelProvider,
+          prompt: [
+            'Read your active music-generation skill.',
+            'Then give me a concise two-line bedtime wind-down reminder for 10:30 tonight.',
+            'Do not generate or attach music.',
+          ].join(' '),
+          reasoningEffort: 'low',
+          sandbox: 'workspace-write',
+          voiceMemoRuntime: {
+            elevenLabs: {
+              apiKeyAvailable: true,
+              modelId: 'eleven_multilingual_v2',
+              voiceId: 'voice_murph',
+            },
+            generateAndUpload: async (input) => {
+              generations.push(input.generation)
+              return {
+                attachmentId: 'unexpected_ordinary_song',
+                filename: 'unexpected-ordinary-song.mp3',
+              }
+            },
+            kind: 'linq',
+          },
+          workingDirectory: ordinaryDirectory,
+        })
+        const ordinaryActions = readCapabilityRoutingActions(
+          ordinary.jsonEvents,
+        )
+        const ordinarySkillRead = ordinaryActions.find((action) =>
+          action.kind === 'command'
+          && action.command.includes('music-generation/SKILL.md')
+          && action.output.includes('# Music generation')
+        )
+        const ordinarySongCalls = ordinaryActions.filter((action) =>
+          action.kind === 'dynamic'
+          && action.tool === MURPH_GENERATE_SONG_TOOL.name
+        )
+
+        expect(
+          ordinarySkillRead,
+          'loaded skill without authorization',
+        ).toBeDefined()
+        expect(ordinarySongCalls).toHaveLength(0)
+        expect(generations).toHaveLength(1)
+        expect(ordinary.responseMedia).toHaveLength(0)
+        expect(ordinary.finalMessage.trim().length).toBeGreaterThan(0)
+        expect(ordinary.finalMessage).not.toContain(privateContextMarker)
+      } finally {
+        await removeRealCodexTemporaryPaths([
+          explicitDirectory,
+          ordinaryDirectory,
+          ...config.temporaryPaths,
+        ])
+      }
+    },
+    720_000,
+  )
+})
+
 describeRealCodex('real Codex official weather-alert context e2e', () => {
   it(
     'uses one fixed alert read, falls back on failure, and keeps alert-only outreach quiet',
@@ -9053,10 +9255,11 @@ function buildHostedUsageProgressDeveloperInstructions(
 
 function buildDirectConversationDeveloperInstructions(
   onboardingGuidance = false,
+  assistantContextSnapshotPrompt: string | null = null,
 ): string {
   return buildAssistantSystemPrompt({
     assistantCliContract: null,
-    assistantContextSnapshotPrompt: null,
+    assistantContextSnapshotPrompt,
     assistantHostedDeviceConnectAvailable: false,
     assistantHostedDeviceConnectProviders: [],
     assistantKnowledgeToolsAvailable: false,

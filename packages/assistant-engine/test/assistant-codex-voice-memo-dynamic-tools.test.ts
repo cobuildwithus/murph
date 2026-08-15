@@ -396,13 +396,24 @@ describe('murph.generate_voice_memo dynamic tool execution', () => {
       kind: 'generate-voice-memo',
     })
 
+    const recordPhaseTiming = vi.fn()
     const generateAndUpload = vi.fn<
       LinqVoiceMemoRuntime['generateAndUpload']
-    >(async () => ({
-      attachmentId: 'attachment_dynamic_1',
-      filename: 'dynamic-voice-memo.mp3',
-      ok: true,
-    }))
+    >(async (runtimeRequest) => {
+      runtimeRequest.recordPhaseTiming?.({
+        deliveryMode: 'synchronous',
+        generationDurationMs: 21,
+        mediaKind: 'voice_memo',
+        outcome: 'succeeded',
+        terminalPhase: 'upload',
+        uploadDurationMs: 13,
+      })
+      return {
+        attachmentId: 'attachment_dynamic_1',
+        filename: 'dynamic-voice-memo.mp3',
+        ok: true,
+      }
+    })
     const fetchImpl = vi.fn<typeof fetch>()
     const nextUsageOrdinal = vi.fn(() => 99)
     const result = await executeMurphDynamicToolRequest({
@@ -411,10 +422,19 @@ describe('murph.generate_voice_memo dynamic tool execution', () => {
       nextUsageOrdinal,
       progressDelivery: null,
       request: request!,
+      voiceMemoPhaseTimingRecorder: recordPhaseTiming,
       voiceMemoRuntime: createLinqRuntime(generateAndUpload),
     })
 
     expect(generateAndUpload).toHaveBeenCalledTimes(1)
+    expect(recordPhaseTiming).toHaveBeenCalledWith({
+      deliveryMode: 'synchronous',
+      generationDurationMs: 21,
+      mediaKind: 'voice_memo',
+      outcome: 'succeeded',
+      terminalPhase: 'upload',
+      uploadDurationMs: 13,
+    })
     expect(nextUsageOrdinal).not.toHaveBeenCalled()
     expect(result.rpcResult).toEqual({
       success: true,
