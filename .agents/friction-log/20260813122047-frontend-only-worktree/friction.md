@@ -1,6 +1,7 @@
 ---
 title: 'Frontend-only worktree helper ignores Temporal disable override'
 severity: 'minor'
+issue: 'cobuildwithus/murph#1780'
 ---
 
 ## Expected Behavior

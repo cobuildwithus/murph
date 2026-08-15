@@ -1,6 +1,7 @@
 ---
 title: 'test:diff runs unprepared full CLI package tests for prompt-only tooling changes'
 severity: 'major'
+issue: 'cobuildwithus/murph#1798'
 ---
 
 ## What happened
