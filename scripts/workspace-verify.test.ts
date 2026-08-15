@@ -1287,6 +1287,101 @@ run_test_diff_package_tests packages/core
     expect(result.stdout).not.toContain("boundary-called");
   });
 
+  it("prepares reverse-dependent CLI artifacts without enabling release packaging", () => {
+    const diffScopeResult = spawnSync(
+      process.execPath,
+      [
+        "scripts/workspace-diff-scope.mjs",
+        "packages/health-commons/src/runtime.ts",
+      ],
+      {
+        cwd: repoRoot,
+        encoding: "utf8",
+      },
+    );
+    expect(diffScopeResult.status, diffScopeResult.stderr).toBe(0);
+    const diffScope = JSON.parse(diffScopeResult.stdout) as {
+      runVerifyCli: boolean;
+      testDirs: string[];
+    };
+    expect(diffScope.runVerifyCli).toBe(false);
+    expect(diffScope.testDirs).toContain("packages/health-commons");
+    expect(diffScope.testDirs).toContain("packages/cli");
+
+    const runTestDiffPackageTests = extractWorkspaceVerifyFunction(
+      "run_test_diff_package_tests",
+    );
+    const selectedPackageDirs = diffScope.testDirs
+      .map((packageDir) => JSON.stringify(packageDir))
+      .join(" ");
+    const result = runShellHarness(`#!/usr/bin/env bash
+set -euo pipefail
+
+test_diff_workspace_concurrency=2
+test_diff_vitest_max_workers=1
+
+run_timed_step() {
+  local label="$1"
+  shift
+  printf 'step:%s\n' "$label"
+  "$@"
+}
+
+prepare_repo_vitest_runtime_artifacts() {
+  printf 'artifacts:prepared\n'
+}
+
+run_command_with_retry() {
+  printf '%s | %s\n' "$1" "\${*:2}"
+}
+
+run_diff_contracts_test_with_workspace_artifact_lock() {
+  return 0
+}
+
+run_diff_package_boundary_verification() {
+  printf 'boundary:%s\n' "$1"
+}
+
+${runTestDiffPackageTests}
+
+run_test_diff_package_tests ${selectedPackageDirs}
+`);
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toContain(
+      "step:Prepared CLI runtime artifacts for affected package tests\n",
+    );
+    expect(result.stdout).toContain("artifacts:prepared\n");
+    expect(result.stdout).toContain(
+      "Affected package tests | env MURPH_PREPARED_CLI_RUNTIME_ARTIFACTS=1 MURPH_VITEST_MAX_WORKERS=1 pnpm -r --no-sort --workspace-concurrency=2",
+    );
+    expect(result.stdout).toContain("--filter ./packages/health-commons");
+    expect(result.stdout).toContain("--filter ./packages/cli");
+    expect(result.stdout).not.toContain("MURPH_CLI_RELEASE_TARBALL_TEST");
+    expect(result.stdout.indexOf("artifacts:prepared\n")).toBeLessThan(
+      result.stdout.indexOf("Affected package tests |"),
+    );
+    expect(result.stdout.match(/artifacts:prepared/gu)).toHaveLength(1);
+
+    const releaseCoverageAudit = readFileSync(
+      path.join(
+        repoRoot,
+        "packages",
+        "cli",
+        "test",
+        "release-script-coverage-audit.test.ts",
+      ),
+      "utf8",
+    );
+    expect(releaseCoverageAudit).toContain(
+      "it.skipIf(process.env.MURPH_CLI_RELEASE_TARBALL_TEST !== '1')",
+    );
+    expect(releaseCoverageAudit).not.toContain(
+      "it.skipIf(process.env.MURPH_PREPARED_CLI_RUNTIME_ARTIFACTS !== '1')",
+    );
+  });
+
   it("gives affected Assistant Engine tests the proven heap ceiling", () => {
     const runTestDiffPackageTests = extractWorkspaceVerifyFunction(
       "run_test_diff_package_tests",
