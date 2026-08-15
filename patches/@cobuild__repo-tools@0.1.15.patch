@@ -1,7 +1,0 @@
-diff --git a/src/check-agent-docs-drift.sh b/src/check-agent-docs-drift.sh
-index f004f56d1b6623fac7423b2b0d23aa77d8c9bd6b..392445fd95466142281c684e77fb97064759b2c8 100755
---- a/src/check-agent-docs-drift.sh
-+++ b/src/check-agent-docs-drift.sh
-@@ -73 +73 @@ has_change() {
--  echo "$changed_files" | grep -Eq "$pattern"
-+  grep -Eq "$pattern" <<< "$changed_files"
