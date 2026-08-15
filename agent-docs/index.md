@@ -120,6 +120,9 @@ failure inventory, is
 specified by `agent-docs/SECURITY.md`,
 `agent-docs/references/testing-ci-map.md`, and
 `agent-docs/exec-plans/active/2026-08-12-provider-request-guard.md`.
+The guard's transport classifier and provider-expression facts share that
+effective-value provenance instead of maintaining separate declaration-time
+container fallbacks.
 
 Personal-to-group projection convergence, including attempt-local foreground
 preemption, abort/shutdown admission before every scope, its single forwarded deadline, and
