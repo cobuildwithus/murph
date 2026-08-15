@@ -160,6 +160,21 @@ describe("hosted phone-call result delivery ownership", () => {
     expect(store.updateMany).not.toHaveBeenCalled();
   });
 
+  it("fails closed when a tracked delivery has no generation", async () => {
+    const store = createDeliveryStore("queued", null);
+    mocks.getPrisma.mockReturnValue(store.prisma);
+
+    await expect(recordHostedPhoneCallResultDeliveryOutcome({
+      memberId: MEMBER_ID,
+      request: deliveryRequest("sending"),
+    })).rejects.toMatchObject({
+      code: "HOSTED_PHONE_CALL_RESULT_DELIVERY_TRANSITION_INVALID",
+      retryable: false,
+    });
+
+    expect(store.updateMany).not.toHaveBeenCalled();
+  });
+
   it("replays terminal callbacks to repair a failed recovery re-arm", async () => {
     const store = createDeliveryStore("delivered");
     mocks.getPrisma.mockReturnValue(store.prisma);
@@ -186,7 +201,7 @@ function deliveryRequest(
 
 function createDeliveryStore(
   initialStatus: HostedPhoneCallResultDeliveryStatus,
-  initialGeneration = 1,
+  initialGeneration: number | null = 1,
 ) {
   const generation = initialGeneration;
   let status = initialStatus;

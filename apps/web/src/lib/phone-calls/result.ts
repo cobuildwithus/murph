@@ -371,6 +371,18 @@ function isHostedPhoneCallResultDeliveryTerminal(
   return status === "delivered" || status === "failed" || status === "ambiguous";
 }
 
+function requireHostedPhoneCallResultDeliveryGeneration(
+  call: HostedPhoneCall,
+): number {
+  if (call.resultDeliveryGeneration === null) {
+    throw hostedPhoneCallResultNotificationError(
+      "HOSTED_PHONE_CALL_RESULT_DELIVERY_STATE_INVALID",
+      "Hosted phone call result delivery state is invalid.",
+    );
+  }
+  return call.resultDeliveryGeneration;
+}
+
 async function appendRetellCallAnalyzedNotification(input: {
   call: HostedPhoneCall;
   prisma: HostedPhoneCallWebhookStore;
@@ -415,15 +427,15 @@ async function appendPhoneCallResultNotification(input: {
   if (trackedTelegramResult && call.resultDeliveryStatus === "sending") {
     return await readExistingPhoneCallResultNotification({
       call,
-      generation: call.resultDeliveryGeneration,
+      generation: requireHostedPhoneCallResultDeliveryGeneration(call),
       prisma: input.prisma,
     });
   }
 
   const deliveryGeneration = trackedTelegramResult
     ? call.resultDeliveryStatus === "pending"
-      ? call.resultDeliveryGeneration + 1
-      : call.resultDeliveryGeneration
+      ? requireHostedPhoneCallResultDeliveryGeneration(call) + 1
+      : requireHostedPhoneCallResultDeliveryGeneration(call)
     : null;
   if (trackedTelegramResult && (!deliveryGeneration || deliveryGeneration < 1)) {
     throw hostedPhoneCallResultNotificationError(
@@ -525,7 +537,8 @@ async function appendPhoneCallResultNotification(input: {
         where: {
           id: call.id,
           memberId: call.memberId,
-          resultDeliveryGeneration: call.resultDeliveryGeneration,
+          resultDeliveryGeneration:
+            requireHostedPhoneCallResultDeliveryGeneration(call),
           resultDeliveryStatus: "pending",
           resultNotificationChannel: "telegram",
         },

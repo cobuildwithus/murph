@@ -914,7 +914,7 @@ model HostedPhoneCall {
   resultEncrypted String?              @map("result_encrypted")
   resultNotificationChannel HostedPhoneCallResultNotificationChannel? @map("result_notification_channel")
   resultDeliveryStatus HostedPhoneCallResultDeliveryStatus? @map("result_delivery_status")
-  resultDeliveryGeneration Int         @default(0) @map("result_delivery_generation")
+  resultDeliveryGeneration Int?        @default(0) @map("result_delivery_generation")
   resultDeliveryTerminalAt DateTime?   @map("result_delivery_terminal_at")
   endedAt        DateTime?             @map("ended_at")
   analyzedAt     DateTime?             @map("analyzed_at")

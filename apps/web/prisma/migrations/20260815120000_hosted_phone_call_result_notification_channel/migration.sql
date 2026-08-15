@@ -14,7 +14,7 @@ ALTER TABLE "hosted_phone_call"
     "HostedPhoneCallResultNotificationChannel",
   ADD COLUMN "result_delivery_status"
     "HostedPhoneCallResultDeliveryStatus",
-  ADD COLUMN "result_delivery_generation" INTEGER NOT NULL DEFAULT 0,
+  ADD COLUMN "result_delivery_generation" INTEGER DEFAULT 0,
   ADD COLUMN "result_delivery_terminal_at" TIMESTAMP(3);
 
 CREATE INDEX "hosted_phone_call_result_delivery_idx"

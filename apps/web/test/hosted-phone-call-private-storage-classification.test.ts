@@ -113,7 +113,10 @@ describe("HostedPhoneCall private-storage classification", () => {
       'ADD COLUMN "result_delivery_status"',
     );
     expect(migration).toContain(
-      'ADD COLUMN "result_delivery_generation" INTEGER NOT NULL DEFAULT 0',
+      'ADD COLUMN "result_delivery_generation" INTEGER DEFAULT 0',
+    );
+    expect(migration).not.toMatch(
+      /ADD COLUMN "result_delivery_generation" INTEGER NOT NULL/u,
     );
     expect(migration).toContain(
       'ADD COLUMN "result_delivery_terminal_at" TIMESTAMP(3)',

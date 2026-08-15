@@ -327,6 +327,28 @@ describe("default phone-call result notification store", () => {
     ]);
     expect(durableAppendCount).toBe(1);
   });
+
+  it("fails closed when a tracked result has no delivery generation", async () => {
+    const prisma = buildPrisma({
+      call: buildStoredAnalyzedCall({
+        resultDeliveryGeneration: null,
+        resultDeliveryStatus: "pending",
+        resultNotificationChannel: "telegram",
+      }),
+    });
+    mocks.getPrisma.mockReturnValue(prisma);
+
+    await expect(handleRetellCallAnalyzed({
+      call: buildAnalyzedRetellCallPayload(),
+    })).rejects.toMatchObject({
+      code: "HOSTED_PHONE_CALL_RESULT_DELIVERY_STATE_INVALID",
+      retryable: true,
+    });
+
+    expect(mocks.readHostedMailboxItemByDedupeKey).not.toHaveBeenCalled();
+    expect(mocks.requireHostedAssistantNotificationDestination).not.toHaveBeenCalled();
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
 });
 
 function buildPrisma(input: {

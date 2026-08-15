@@ -57,6 +57,9 @@ export async function recordHostedPhoneCallResultDeliveryOutcome(input: {
         message: "Hosted phone call result delivery was not found.",
       });
     }
+    if (current.resultDeliveryGeneration === null) {
+      throwHostedPhoneCallResultDeliveryTransitionInvalid();
+    }
 
     if (input.request.generation < current.resultDeliveryGeneration) {
       if (input.request.status === "sending") {
