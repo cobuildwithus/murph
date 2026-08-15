@@ -2449,6 +2449,7 @@ describe("assistant delivery orchestration seam", () => {
       nativeReplyRequested: undefined,
       replyToMessageId: "reply-input",
       reviewedAssistantAskCompletionExpiresAt: null,
+      scheduledOccurrenceAt: null,
       sessionId: session.sessionId,
       subject: null,
       threadId: "audience-thread",
