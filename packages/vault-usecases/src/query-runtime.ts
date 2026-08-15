@@ -5,6 +5,9 @@ import type {
   EntityFilter as SharedEntityFilter,
   ExportPack as SharedExportPack,
   ExportPackFile as SharedExportPackFile,
+  MealNutrientDayTotal as SharedMealNutrientDayTotal,
+  MealNutrientTotal as SharedMealNutrientTotal,
+  MealNutrientTotalsResult as SharedMealNutrientTotalsResult,
   MealNutritionDayTotal as SharedMealNutritionDayTotal,
   MealNutritionMetricTotal as SharedMealNutritionMetricTotal,
   MealNutritionTotals as SharedMealNutritionTotals,
@@ -57,6 +60,9 @@ export type QueryTimelineEntry = SharedTimelineEntry
 export type QueryExportPackFile = SharedExportPackFile
 export type QueryExportPackOptions = SharedBuildExportPackOptions
 export type QueryExportPack = SharedExportPack
+export type QueryMealNutrientTotal = SharedMealNutrientTotal
+export type QueryMealNutrientDayTotal = SharedMealNutrientDayTotal
+export type QueryMealNutrientTotalsResult = SharedMealNutrientTotalsResult
 export type QueryMealNutritionMetricTotal = SharedMealNutritionMetricTotal
 export type QueryMealNutritionTotals = SharedMealNutritionTotals
 export type QueryMealNutritionDayTotal = SharedMealNutritionDayTotal
