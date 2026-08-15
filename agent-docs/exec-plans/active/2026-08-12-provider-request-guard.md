@@ -313,6 +313,14 @@ Updated: 2026-08-14
   a second owner. Production-owner duplicate-effect and adjacent mutation
   fixtures fail closed. The live PR disclosure is updated before the next
   exact-head audit.
+- The final current-base merge advanced Junction timeseries response
+  normalization without changing `requestSdkResource`, its one raw
+  `this.fetchImpl` effect, SDK import, or same-owner wiring. Because that
+  deliberately conservative approval pins the complete Junction client file,
+  the unrelated response-normalization delta invalidated its authority digest.
+  Parent audit confirmed the transport boundary was unchanged before updating
+  only the whole-file digest; the existing URL/init/effect/import/wiring
+  mutation matrix still rejects request-boundary drift.
 
 ## Verification
 

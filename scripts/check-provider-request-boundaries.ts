@@ -2798,7 +2798,7 @@ const officialSdkFetchHookApprovals = Object.freeze([
   },
   {
     adapterReferenceMode: "same-owner",
-    authorityFileSha256: "90198aa61651d946bf90f8f9d2ecf7d0d07edfaf97a78d5332c524a01c00dd5c",
+    authorityFileSha256: "ed96eb5527c8bc10bd77653f1fcd5ad0bd7e2edced7737e5a859c7fb4d661929",
     authorityFunctions: [],
     functionName: "requestSdkResource",
     implementationSha256:
