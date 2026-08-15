@@ -417,8 +417,12 @@ Required:
   (`ffmpeg -i clip.webm -c:v libx264 -pix_fmt yuv420p -movflags +faststart clip.mp4`),
   then host it as a GitHub attachment: paste it into the PR editor, or upload
   with
-  `curl -s "https://uploads.github.com/user-attachments/assets?name=<file>.mp4&content_type=video/mp4&repository_id=<repo-id>" -X POST -H "Authorization: Bearer $(gh auth token)" -H "Accept: application/json" --data-binary @<file>.mp4`
-  (`gh api repos/{owner}/{repo} --jq .id` prints the repository id) and embed
+  `gh api --method POST "https://uploads.github.com/user-attachments/assets?name=<file>.mp4&content_type=video/mp4&repository_id=<repo-id>" --input <file>.mp4`
+  (`gh api repos/{owner}/{repo} --jq .id` prints the repository id). `gh`
+  supplies its own authentication; never materialize a token into the command
+  line, an environment assignment, or this document, and never write a
+  credential-shaped header literal here — the Frog autofix diff guard rejects
+  any nearby future edit whose diff context contains one. Embed
   the returned `url` on its own bare Markdown line, not inside an `![]()`
   image link. Video attachments can 404 briefly while GitHub finishes
   processing; confirm the clip plays in the rendered PR body before completion.
