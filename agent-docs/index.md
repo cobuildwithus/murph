@@ -1,6 +1,6 @@
 # Murph Agent Docs Index
 
-Last verified: 2026-08-12
+Last verified: 2026-08-15
 
 ## Purpose
 
@@ -37,6 +37,14 @@ authority, credential-free stored-token cleanup without operator fallback, and
 permanent-versus-transient credential failure handling are jointly specified by
 `ARCHITECTURE.md`, `agent-docs/SECURITY.md`, and
 `agent-docs/RELIABILITY.md`.
+
+Junction exact-workout execution requires local lifecycle proof plus connected
+provider-id continuity across the bounded stream fetch. Exact-linked
+`workout_duration` history imports atomically with its companion sessions;
+malformed or partial chunks exhaust bounded retry without certifying coverage.
+This contract is specified by `agent-docs/RELIABILITY.md`,
+`packages/device-syncd/README.md`, and
+`docs/device-provider-compatibility-matrix.md`.
 
 Checkpointed personal health state gets one wake-raced share-projection
 opportunity before device-sync maintenance or dirty acknowledgement resumes;

@@ -53,7 +53,11 @@ Current providers:
   retention. Coverage policy version 2 reopens note history completed under the
   legacy intervention normalizer while preserving unrelated resource coverage.
 - Junction fetches sparse `workout_duration` facts with stable interval
-  identity; duration is never linked by time overlap. The high-frequency
+  identity; duration is never linked by time overlap. When a duration row
+  names an exact workout, the bounded history chunk imports atomically only
+  after every selected id yields a canonical duration and matching companion
+  session. Malformed exact-linked rows stay on the existing bounded retry path
+  and terminally close without certifying coverage. The high-frequency
   `workout_distance` and `workout_swimming_stroke` row feeds remain excluded.
   Shallow `workout_stream` webhooks schedule an exact durable
   `/v2/timeseries/workouts/{workout_id}/stream` job with a three-execution
@@ -68,7 +72,9 @@ Current providers:
   without a stream request or import where the source is known before fetch,
   and the epoch is rechecked after fetch to fence a racing reconnect. The
   fetched stream's source identity is also revalidated against remote
-  connection authority without projecting or mutating the full source catalog.
+  connection authority. The fetched slug must retain at least one identical
+  connected provider id across the pre/post fetch listings, without projecting
+  or mutating the full source catalog.
   The raw response is then discarded after reduction to a capped feature
   envelope and at most 64 fixed-distance splits. A newer exact
   correction authoritatively replaces those feature and split facets, so

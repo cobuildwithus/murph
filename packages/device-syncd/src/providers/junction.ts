@@ -1971,8 +1971,9 @@ export function createJunctionDeviceSyncProvider(
         return {};
       }
 
+      const preFetchProviders = await loadSourceProviders();
       const matchingProviders = sourceProviderSlug
-        ? (await loadSourceProviders()).filter((provider) =>
+        ? preFetchProviders.filter((provider) =>
             normalizeProviderSlug(provider.origin.sourceProviderSlug ?? provider.slug) === sourceProviderSlug
             && provider.status.trim().toLowerCase() === "connected"
           )
@@ -1988,8 +1989,15 @@ export function createJunctionDeviceSyncProvider(
             .filter((value): value is string => Boolean(value)),
         ),
       ];
-      const projectedProviderConnectionIds = new Set(
-        matchingProviders
+      const preFetchProviderConnectionIds = new Set(
+        preFetchProviders
+          .filter((provider) =>
+            provider.status.trim().toLowerCase() === "connected"
+            && (
+              sourceProviderSlug === null
+              || normalizeProviderSlug(provider.origin.sourceProviderSlug ?? provider.slug) === sourceProviderSlug
+            )
+          )
           .map((provider) => normalizeString(provider.id))
           .filter((value): value is string => Boolean(value)),
       );
@@ -2086,11 +2094,10 @@ export function createJunctionDeviceSyncProvider(
         return {};
       }
       if (
-        projectedProviderConnectionIds.size > 0
-        && !connectedFetchedSourceProviders.some((provider) => {
+        !connectedFetchedSourceProviders.some((provider) => {
           const providerConnectionId = normalizeString(provider.id);
           return providerConnectionId !== undefined
-            && projectedProviderConnectionIds.has(providerConnectionId);
+            && preFetchProviderConnectionIds.has(providerConnectionId);
         })
       ) {
         return {};

@@ -1117,6 +1117,22 @@ export function classifyJunctionWorkoutDurationCompanionCoverage(
     "connections" | "importedAt" | "summaries" | "timeseries" | "windowEnd" | "windowStart"
   >,
 ): JunctionWorkoutDurationCompanionCoverage {
+  const selectedExactWorkoutIds = new Set(
+    allowedResourceEntries(snapshot.timeseries, TIMESERIES_RESOURCE_ALLOWLIST)
+      .filter(([resource]) => resource === JUNCTION_WORKOUT_DURATION_RESOURCE)
+      .flatMap(([, payload]) => timeseriesResourceEntries(payload))
+      .flatMap(({ entry }) => {
+        const workoutId = trimOptionalToLength(firstStringFromPaths(entry, [
+          "workoutId",
+          "workout_id",
+          "metadata.workoutId",
+          "metadata.workout_id",
+          "source.workoutId",
+          "source.workout_id",
+        ]), 200);
+        return workoutId ? [workoutId] : [];
+      }),
+  );
   const events = normalizeJunctionSnapshot(snapshot).events ?? [];
   const sessionIdentities = new Set(events.flatMap((event) => {
     const identity = event.kind === "activity_session"
@@ -1136,8 +1152,8 @@ export function classifyJunctionWorkoutDurationCompanionCoverage(
     .length;
 
   return {
-    complete: matchedExactLinkedDurationCount === exactLinkedDurationIdentities.size,
-    exactLinkedDurationCount: exactLinkedDurationIdentities.size,
+    complete: matchedExactLinkedDurationCount === selectedExactWorkoutIds.size,
+    exactLinkedDurationCount: selectedExactWorkoutIds.size,
     matchedExactLinkedDurationCount,
   };
 }

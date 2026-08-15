@@ -14627,10 +14627,115 @@ test("Junction source-less workout stream uses fetched identity for final local 
   assert.deepEqual(result, {});
   assert.deepEqual(localAuthorityCheckPhases, ["after-fetch"]);
   assert.deepEqual(requests.map((url) => new URL(url).pathname), [
+    "/v2/user/providers/junction-user-1",
     "/v2/timeseries/workouts/workout-locally-revoked/stream",
     "/v2/user/providers/junction-user-1",
   ]);
   assert.equal(importedSnapshots.length, 0);
+});
+
+test.each([
+  {
+    label: "rejects a same-slug remote replacement",
+    preFetchProviders: [
+      { id: "provider-garmin-before", slug: "garmin", status: "connected" },
+    ],
+    postFetchProviders: [
+      { id: "provider-garmin-after", slug: "garmin", status: "connected" },
+    ],
+    expectedImportCount: 0,
+  },
+  {
+    label: "imports through an unchanged remote connection",
+    preFetchProviders: [
+      { id: "provider-garmin-stable", slug: "garmin", status: "connected" },
+    ],
+    postFetchProviders: [
+      { id: "provider-garmin-stable", slug: "garmin", status: "connected" },
+    ],
+    expectedImportCount: 1,
+  },
+  {
+    label: "compares only the fetched slug when another admitted source changes",
+    preFetchProviders: [
+      { id: "provider-garmin-stable", slug: "garmin", status: "connected" },
+      { id: "provider-fitbit-before", slug: "fitbit", status: "connected" },
+    ],
+    postFetchProviders: [
+      { id: "provider-garmin-stable", slug: "garmin", status: "connected" },
+      { id: "provider-fitbit-after", slug: "fitbit", status: "connected" },
+    ],
+    expectedImportCount: 1,
+  },
+])("Junction source-less workout stream $label", async ({
+  expectedImportCount,
+  postFetchProviders,
+  preFetchProviders,
+}) => {
+  let providerListCount = 0;
+  let sourceCatalogMutationCount = 0;
+  let streamRequestCount = 0;
+  const importedSnapshots: unknown[] = [];
+  const provider = createJunctionProvider(async (input) => {
+    const url = readUrl(input);
+    if (url.endsWith("/v2/user/providers/junction-user-1")) {
+      providerListCount += 1;
+      return createJsonResponse({
+        providers: providerListCount === 1 ? preFetchProviders : postFetchProviders,
+      });
+    }
+    if (url.endsWith("/v2/timeseries/workouts/workout-source-less-remote/stream")) {
+      streamRequestCount += 1;
+      return createJsonResponse({
+        distance: [0, 1_000],
+        source: { provider: "garmin", type: "watch" },
+        time: [1_776_859_200, 1_776_859_260],
+      });
+    }
+    throw new Error(`Unexpected request: ${url}`);
+  });
+  const account = createAccount({ sources: [
+    createConnectionSource({
+      id: "src-fitbit",
+      lifecycleEpoch: 1,
+      resourceAvailabilitySummary: { workouts: true },
+      sourceProviderSlug: "fitbit",
+    }),
+    createConnectionSource({
+      id: "src-garmin",
+      lifecycleEpoch: 1,
+      resourceAvailabilitySummary: { workouts: true },
+      sourceProviderSlug: "garmin",
+    }),
+  ] });
+
+  await executeJunctionJob(
+    provider,
+    createJunctionJobContext({
+      account,
+      importSnapshot: async (snapshot) => {
+        importedSnapshots.push(snapshot);
+        return { imported: true };
+      },
+      upsertConnectionSource: (input) => {
+        sourceCatalogMutationCount += 1;
+        return createConnectionSource(input);
+      },
+    }),
+    createJob("resource", {
+      objectId: "workout-source-less-remote",
+      resource: "workout_stream",
+      resourceCategory: "timeseries",
+      sourceLifecycleEpochs: "fitbit:1,garmin:1",
+      windowStart: "2026-04-02T00:00:00.000Z",
+      windowEnd: "2026-04-03T00:00:00.000Z",
+    }),
+  );
+
+  assert.equal(providerListCount, 2);
+  assert.equal(sourceCatalogMutationCount, 0);
+  assert.equal(streamRequestCount, 1);
+  assert.equal(importedSnapshots.length, expectedImportCount);
 });
 
 test("Junction workout stream fences a superseded source epoch before provider work", async () => {
@@ -15469,6 +15574,10 @@ test.each([404, 422])(
 );
 
 async function runUnmatchedWorkoutDurationHistoryScenario(input: {
+  durationData?: (
+    workoutId: string,
+    index: number,
+  ) => readonly Record<string, unknown>[];
   executions: number;
   summaries: readonly Record<string, unknown>[];
   workoutIds: readonly string[];
@@ -15506,7 +15615,7 @@ async function runUnmatchedWorkoutDurationHistoryScenario(input: {
       if (url.pathname === "/v2/timeseries/junction-user-1/workout_duration/grouped") {
         durationRequestCount += 1;
         return createJsonResponse({ groups: { garmin: input.workoutIds.map((workoutId, index) => ({
-          data: [{
+          data: input.durationData?.(workoutId, index) ?? [{
             start: `2026-02-13T${String(10 + index).padStart(2, "0")}:00:00.000Z`,
             end: `2026-02-13T${String(10 + index).padStart(2, "0")}:30:00.000Z`,
             unit: "minutes",
@@ -15662,90 +15771,82 @@ test.each([
   ), true);
 });
 
-test("Junction workout summaries cannot turn malformed duration history into canonical coverage", async () => {
-  const provider = createJunctionDeviceSyncProvider({
-    apiKey: "sk_us_test_123",
-    clientUserIdSecret: "junction-client-user-id-secret",
-    environment: "sandbox",
-    region: "us",
-    summaryResources: [],
-    timeseriesResources: ["workout_duration"],
-    fetchImpl: async (input) => {
-      const url = new URL(readUrl(input));
-      if (url.pathname === "/v2/user/providers/junction-user-1") {
-        return createJsonResponse({ providers: [{
-          id: "provider-garmin-workout-invalid",
-          slug: "garmin",
-          status: "connected",
-          resource_availability: { workout_duration: true, workouts: true },
-        }] });
-      }
-      if (url.pathname === "/v2/summary/workouts/junction-user-1") {
-        return createJsonResponse({ workouts: [{
-          id: "workout-invalid-duration",
-          time_start: "2026-02-13T10:00:00.000Z",
-          time_end: "2026-02-13T10:30:00.000Z",
-          source: { provider: "garmin", type: "watch" },
-        }] });
-      }
-      if (url.pathname === "/v2/timeseries/junction-user-1/workout_duration/grouped") {
-        return createJsonResponse({ groups: { garmin: [{
-          data: [{
-            start: "2026-02-13T10:00:00.000Z",
+test.each([
+  {
+    durationData: () => [{
+      start: "2026-02-13T10:00:00.000Z",
+      unit: "fortnights",
+      value: "not-a-number",
+    }],
+    label: "malformed exact rows",
+    summaries: [{
+      id: "workout-malformed",
+      source: { provider: "garmin", type: "watch" },
+      time_start: "2026-02-13T10:00:00.000Z",
+      time_end: "2026-02-13T10:30:00.000Z",
+    }],
+    workoutIds: ["workout-malformed"],
+  },
+  {
+    durationData: (_workoutId: string, index: number) => [{
+      start: `2026-02-13T${String(10 + index).padStart(2, "0")}:00:00.000Z`,
+      ...(index === 0
+        ? {
+            end: "2026-02-13T10:30:00.000Z",
+            unit: "minutes",
+            value: 30,
+          }
+        : {
             unit: "fortnights",
             value: "not-a-number",
-          }],
-          source: {
-            provider: "garmin",
-            type: "watch",
-            workout_id: "workout-invalid-duration",
-          },
-        }] } });
-      }
-      throw new Error(`Unexpected request: ${url.toString()}`);
-    },
+          }),
+    }],
+    label: "mixed valid and malformed exact rows",
+    summaries: [
+      {
+        id: "workout-valid",
+        source: { provider: "garmin", type: "watch" },
+        time_start: "2026-02-13T10:00:00.000Z",
+        time_end: "2026-02-13T10:30:00.000Z",
+      },
+      {
+        id: "workout-malformed",
+        source: { provider: "garmin", type: "watch" },
+        time_start: "2026-02-13T11:00:00.000Z",
+        time_end: "2026-02-13T11:30:00.000Z",
+      },
+    ],
+    workoutIds: ["workout-valid", "workout-malformed"],
+  },
+])("Junction workout-duration history never certifies $label", async ({
+  durationData,
+  summaries,
+  workoutIds,
+}) => {
+  const result = await runUnmatchedWorkoutDurationHistoryScenario({
+    durationData,
+    executions: 5,
+    summaries,
+    workoutIds,
   });
-  const source = {
-    sourceProviderSlug: "garmin",
-    displayName: null,
-    status: "connected" as const,
-    resourceCount: 2,
-    resourceAvailabilitySummary: { workout_duration: true, workouts: true },
-    lastErrorCode: null,
-    lastErrorMessage: null,
-    firstSeenAt: "2026-04-03T00:00:00.000Z",
-    lastSeenAt: "2026-08-11T00:00:00.000Z",
-    lastDataAt: null,
-  };
-  const scheduled = requireValue(provider.jobExecutor).createScheduledJobs?.(
-    createStoredAccount({ sources: [source] }),
-    "2026-08-11T12:00:00.000Z",
-  );
-  const initialJob = requireValue(scheduled?.jobs.find((candidate) =>
-    candidate.payload?.resource === "workout_duration"
-  ));
 
-  const result = await executeJunctionJob(
-    provider,
-    createJunctionJobContext({
-      account: createAccount({ sources: [source] }),
-      importSnapshot: async () => ({
-        canonicalEventCount: 1,
-        canonicalEventKinds: ["activity_session"],
-        durableDeliveryAccepted: true,
-      }),
-      now: "2026-08-11T12:00:00.000Z",
-    }),
-    {
-      ...createJob("resource", initialJob.payload ?? {}),
-      dedupeKey: initialJob.dedupeKey ?? null,
-    },
-  );
-
-  const continuation = requireValue(result.scheduledJobs?.find((candidate) =>
-    candidate.payload?.resource === "workout_duration"
-  ));
-  assert.equal(continuation.payload?.historicalRecordsSeen, false);
+  assert.equal(result.summaryRequestCount, 5);
+  assert.equal(result.durationRequestCount, 5);
+  assert.equal(result.importCount, 0);
+  assert.equal(result.lastResult.scheduledJobs, undefined);
+  assert.equal(result.nextScheduledHistoryCount, 0);
+  assert.equal(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
+    result.lastResult.metadataPatch ?? {},
+    "garmin",
+    "workout_duration",
+    JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_POLICY_VERSION,
+  ), false);
+  assert.equal(hasJunctionExtendedTimeseriesHistoryBackfillTerminal(
+    result.lastResult.metadataPatch ?? {},
+    "garmin",
+    "workout_duration",
+    JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_POLICY_VERSION,
+  ), true);
 });
 
 test("Junction workout-duration history retries the same chunk when its companion summary fetch fails", async () => {

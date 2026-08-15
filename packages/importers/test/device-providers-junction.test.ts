@@ -85,6 +85,39 @@ test("Junction workout-duration companion coverage uses normalizable canonical w
   });
   assert.deepEqual(classifyJunctionWorkoutDurationCompanionCoverage({
     ...shared,
+    summaries: { workouts: [validSummary("malformed")] },
+    timeseries: { workout_duration: [{
+      ...exactDuration("malformed"),
+      end: undefined,
+      unit: "fortnights",
+      value: "not-a-number",
+    }] },
+  }), {
+    complete: false,
+    exactLinkedDurationCount: 1,
+    matchedExactLinkedDurationCount: 0,
+  });
+  assert.deepEqual(classifyJunctionWorkoutDurationCompanionCoverage({
+    ...shared,
+    summaries: { workouts: [validSummary("matched"), validSummary("malformed")] },
+    timeseries: {
+      workout_duration: [
+        exactDuration("matched"),
+        {
+          ...exactDuration("malformed"),
+          end: undefined,
+          unit: "fortnights",
+          value: "not-a-number",
+        },
+      ],
+    },
+  }), {
+    complete: false,
+    exactLinkedDurationCount: 2,
+    matchedExactLinkedDurationCount: 1,
+  });
+  assert.deepEqual(classifyJunctionWorkoutDurationCompanionCoverage({
+    ...shared,
     summaries: { workouts: [] },
     timeseries: { workout_duration: [{
       sourceProviderSlug: "garmin",
@@ -6237,6 +6270,7 @@ test("Junction workout duration emits fixed-shape evidence for nonempty all-inva
           start: invalidMarker,
           unit: "minutes",
           value: "not-a-number",
+          workout_id: invalidMarker,
           source: { private_raw_group: invalidMarker },
         }],
       },
