@@ -623,6 +623,7 @@ describe.sequential("hosted local foreground reply priority e2e", () => {
         .filter((entry) =>
           entry.eventCode === "mailbox.imported"
           || entry.eventCode === "mailbox.system_processed"
+          || entry.eventCode === "runner.error"
         )
         .map((entry) => ({
           at: entry.at,
