@@ -206,10 +206,12 @@ Current candidate proof:
 - Current-base proof: the first later `main` advance required one index-only
   conflict resolution, which retained current-main entries plus the exact Frog
   additions. Subsequent advances, including ReviewGPT 0.5.127 and its complete
-  idle-draft/release-audit alignment, were integrated from their merged source
-  changes. No Frog runtime file changed. Current `origin/main` and the immutable
-  first-reviewed head are ancestors, and `git merge-tree --write-tree
-  origin/main HEAD` completes without conflict.
+  idle-draft/release-audit alignment and the deterministic member-actions
+  feature, were integrated from their merged source changes. The latest merge's
+  sole security-doc conflict retained both independent threat-model sections.
+  No Frog runtime file changed. Current `origin/main` and the immutable first-
+  reviewed head are ancestors, and `git merge-tree --write-tree origin/main
+  HEAD` completes without conflict.
 - Frog suite: 56 tests, including fresh protected-main instruction drift,
   two-process pre/post-neutral-restamp lease recovery, foreign remote rejection,
   and fixed content-free foreground phase output.
