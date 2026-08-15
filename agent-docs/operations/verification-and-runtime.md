@@ -223,11 +223,13 @@ credentials, or member data. Keep the terminal probe itself bounded: classify
 each role and frame through one coherent browser-side structural aggregate that
 treats composed `aria-hidden` ancestry as hidden for both positive actions and
 checkboxes, plus a direct negative accessible-name count; never use separate
-derived positive snapshots or per-pattern element-handle reacquisition. Keep
+derived positive snapshots or per-pattern element-handle reacquisition. Before
+classifying inner controls, derive one ephemeral exposure value per child frame
+from its embedding element and composed ancestors, and propagate hidden
+parent-frame exposure through nested frames. Keep
 the click owner on the established action-first vocabulary precedence; only the
 read-only terminal aggregate may collapse those actions into one union locator.
-A real sign-in
-proof remains available only after the exact
+A real sign-in proof remains available only after the exact
 workflow reaches protected `main`, where non-canceling concurrency serializes
 the dedicated provider account. Do not weaken the protected-branch gate or
 expose live credentials to a pull request to obtain earlier proof.

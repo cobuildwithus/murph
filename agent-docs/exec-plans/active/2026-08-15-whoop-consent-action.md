@@ -87,6 +87,10 @@ Updated: 2026-08-15
   owners but the probe had labeled it visible. Actions and checkboxes now share
   one browser-side structural aggregate that excludes composed ARIA-hidden
   ancestry from visible, enabled, checked, and unchecked classifications.
+- Accepted final round 6's frame-exposure finding: child-document geometry does
+  not prove that its embedding iframe is exposed. Each child root now receives
+  one ephemeral exposure value from its iframe and composed ancestors, inherited
+  through nested frames; hidden-frame controls retain structural totals only.
 
 ## Verification
 
@@ -109,5 +113,8 @@ Updated: 2026-08-15
 - Passed the same focused and real-browser sets after aligning ARIA-hidden
   semantics; the structural summary counts the background action and checkbox
   but does not classify either as visible, actionable, or checkbox-gating.
+- Passed the same sets after propagating embedding-frame exposure; the visible
+  child action remains enabled, while an action and checkbox in an ARIA-hidden
+  iframe contribute only to structural action/frame and checkbox totals.
 - Expected outcome: diagnostics first prove the current consent structure, then
   the corrected driver completes the full provider and persisted-state journey.

@@ -69,7 +69,11 @@ interface AuthorizationSurfaceSummary {
   readyState: "complete" | "interactive" | "loading" | "unknown";
 }
 
-type AuthorizationRoot = Frame | Page;
+interface AuthorizationRoot {
+  exposed: boolean;
+  inChildFrame: boolean;
+  root: Frame | Page;
+}
 
 const RUNNER_NAME = "Hosted-local Junction wearable browser runner";
 const AUTH_ACTION_PATTERNS = [
@@ -434,7 +438,7 @@ async function summarizeAuthorizationSurface(
   const pageOrigin = readOrigin(page.url());
   const frames = page.frames();
   const frameUrls = frames.map((frame) => frame.url());
-  const roots: AuthorizationRoot[] = [page, ...frames.slice(1)];
+  const roots = await readAuthorizationRoots(page, frames);
   const readyState = await page.evaluate(() => document.readyState).catch(() => "unknown");
 
   return {
@@ -471,12 +475,8 @@ async function summarizeAuthorizationActions(
     positiveVisibleEnabledInChildFrames: 0,
   };
 
-  for (let rootIndex = 0; rootIndex < roots.length; rootIndex += 1) {
-    const root = roots[rootIndex];
-    if (!root) {
-      continue;
-    }
-    const inChildFrame = rootIndex > 0;
+  for (const target of roots) {
+    const { exposed, inChildFrame, root } = target;
     for (const role of ["button", "link"] as const) {
       summary.negative += await root
         .getByRole(role, {
@@ -489,7 +489,10 @@ async function summarizeAuthorizationActions(
         includeHidden: true,
         name: SAFE_AUTH_ACTION_PATTERN,
       });
-      const positive = await summarizeAuthorizationControls(allPositiveControls);
+      const positive = await summarizeAuthorizationControls(
+        allPositiveControls,
+        exposed,
+      );
 
       summary.positive += positive.total;
       summary.positiveHidden += positive.total - positive.visible;
@@ -515,9 +518,12 @@ async function summarizeAuthorizationCheckboxes(
     visibleChecked: 0,
     visibleUnchecked: 0,
   };
-  for (const root of roots) {
+  for (const { exposed, root } of roots) {
     const checkboxes = root.getByRole("checkbox", { includeHidden: true });
-    const checkboxSummary = await summarizeAuthorizationControls(checkboxes);
+    const checkboxSummary = await summarizeAuthorizationControls(
+      checkboxes,
+      exposed,
+    );
     summary.total += checkboxSummary.total;
     summary.visible += checkboxSummary.visible;
     summary.visibleChecked += checkboxSummary.visibleChecked;
@@ -530,9 +536,13 @@ async function summarizeAuthorizationCheckboxes(
 
 async function summarizeAuthorizationControls(
   controls: Locator,
+  rootExposed: boolean,
 ): Promise<AuthorizationControlStructuralSummary> {
-  return controls.evaluateAll((elements) => {
+  return controls.evaluateAll((elements, exposed) => {
     const readComposedParent = (element: Element): Element | null => {
+      if (element.assignedSlot) {
+        return element.assignedSlot;
+      }
       if (element.parentElement) {
         return element.parentElement;
       }
@@ -542,6 +552,15 @@ async function summarizeAuthorizationControls(
     let visible = 0;
     let visibleChecked = 0;
     let visibleEnabled = 0;
+
+    if (!exposed) {
+      return {
+        total: elements.length,
+        visible,
+        visibleChecked,
+        visibleEnabled,
+      };
+    }
 
     for (const element of elements) {
       let accessibilityHidden = false;
@@ -595,7 +614,7 @@ async function summarizeAuthorizationControls(
       visibleChecked,
       visibleEnabled,
     };
-  }).catch(() => ({
+  }, rootExposed).catch(() => ({
     total: 0,
     visible: 0,
     visibleChecked: 0,
@@ -603,12 +622,100 @@ async function summarizeAuthorizationControls(
   }));
 }
 
+async function readAuthorizationRoots(
+  page: Page,
+  frames: readonly Frame[],
+): Promise<AuthorizationRoot[]> {
+  const exposureByFrame = new Map<Frame, Promise<boolean>>();
+  const readFrameExposure = (frame: Frame): Promise<boolean> => {
+    const cached = exposureByFrame.get(frame);
+    if (cached) {
+      return cached;
+    }
+    const exposure = (async () => {
+      const parent = frame.parentFrame();
+      if (!parent) {
+        return true;
+      }
+      if (!await readFrameExposure(parent)) {
+        return false;
+      }
+      return readEmbeddingFrameExposure(frame);
+    })();
+    exposureByFrame.set(frame, exposure);
+    return exposure;
+  };
+
+  const mainFrame = frames[0];
+  if (mainFrame) {
+    exposureByFrame.set(mainFrame, Promise.resolve(true));
+  }
+  const roots: AuthorizationRoot[] = [{
+    exposed: true,
+    inChildFrame: false,
+    root: page,
+  }];
+  for (let index = 1; index < frames.length; index += 1) {
+    const frame = frames[index];
+    if (!frame) {
+      continue;
+    }
+    roots.push({
+      exposed: await readFrameExposure(frame),
+      inChildFrame: true,
+      root: frame,
+    });
+  }
+  return roots;
+}
+
+async function readEmbeddingFrameExposure(frame: Frame): Promise<boolean> {
+  const frameElement = await frame.frameElement().catch(() => null);
+  if (!frameElement) {
+    return false;
+  }
+  try {
+    return await frameElement.evaluate((element) => {
+      if (!(element instanceof Element)) {
+        return false;
+      }
+      const readComposedParent = (current: Element): Element | null => {
+        if (current.assignedSlot) {
+          return current.assignedSlot;
+        }
+        if (current.parentElement) {
+          return current.parentElement;
+        }
+        const root = current.getRootNode();
+        return root instanceof ShadowRoot ? root.host : null;
+      };
+      for (
+        let current: Element | null = element;
+        current;
+        current = readComposedParent(current)
+      ) {
+        if (current.getAttribute("aria-hidden")?.toLowerCase() === "true") {
+          return false;
+        }
+      }
+      const bounds = element.getBoundingClientRect();
+      const style = window.getComputedStyle(element);
+      return style.visibility !== "hidden"
+        && style.visibility !== "collapse"
+        && bounds.width > 0
+        && bounds.height > 0;
+    }).catch(() => false);
+  } finally {
+    await frameElement.dispose().catch(() => undefined);
+  }
+}
+
 async function sumLocatorCounts(
   roots: readonly AuthorizationRoot[],
   selector: string,
 ): Promise<number> {
   let total = 0;
-  for (const root of roots) {
+  for (const { root } of roots) {
     total += await root.locator(selector).count().catch(() => 0);
   }
   return total;

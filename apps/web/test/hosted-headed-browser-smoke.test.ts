@@ -58,7 +58,13 @@ describe("hosted headed browser boundary", () => {
               />
             </div>
           </form>
-          <iframe srcdoc='<button>Grant</button>'></iframe>
+          <iframe name="visible-consent" srcdoc='<button>Grant</button>'></iframe>
+          <div aria-hidden="true">
+            <iframe
+              name="inactive-consent"
+              srcdoc='<button>Grant inactive frame</button><input aria-label="Authorization required inactive frame" type="checkbox" />'
+            ></iframe>
+          </div>
         `);
         await expect(
           page.getByRole("button", { name: "Grant inactive pane" }).count(),
@@ -68,10 +74,19 @@ describe("hosted headed browser boundary", () => {
             name: "Authorization required inactive pane",
           }).count(),
         ).resolves.toBe(0);
-        await expect.poll(() => page.frames().length).toBe(2);
+        await expect.poll(() => page.frames().length).toBe(3);
+        const visibleConsentFrame = page.frame({ name: "visible-consent" });
+        const inactiveConsentFrame = page.frame({ name: "inactive-consent" });
+        expect(visibleConsentFrame).not.toBeNull();
+        expect(inactiveConsentFrame).not.toBeNull();
         await expect.poll(async () =>
-          page.frames()[1]?.getByRole("button", { name: "Grant" }).isEnabled()
+          visibleConsentFrame?.getByRole("button", { name: "Grant" }).isEnabled()
             .catch(() => false) ?? false
+        ).toBe(true);
+        await expect.poll(async () =>
+          inactiveConsentFrame?.getByRole("button", {
+            name: "Grant inactive frame",
+          }).isEnabled().catch(() => false) ?? false
         ).toBe(true);
 
         let now = 0;
@@ -106,24 +121,24 @@ describe("hosted headed browser boundary", () => {
         const summary = JSON.parse(match?.[1] ?? "{}");
         expect(summary.actions).toEqual({
           negative: 1,
-          positive: 4,
-          positiveHidden: 2,
-          positiveInChildFrames: 1,
+          positive: 5,
+          positiveHidden: 3,
+          positiveInChildFrames: 2,
           positiveVisible: 2,
           positiveVisibleDisabled: 1,
           positiveVisibleEnabled: 1,
           positiveVisibleEnabledInChildFrames: 1,
         });
         expect(summary.checkboxes).toEqual({
-          total: 2,
+          total: 3,
           visible: 1,
           visibleChecked: 0,
           visibleUnchecked: 1,
         });
         expect(summary.formCount).toBe(1);
-        expect(summary.frameCount).toBe(2);
+        expect(summary.frameCount).toBe(3);
         expect(failure).not.toMatch(
-          /Don't allow|Grant access|inactive pane|aria-labelledby|browser-canary|opaque-password/u,
+          /Don't allow|Grant access|inactive pane|inactive frame|aria-labelledby|browser-canary|opaque-password/u,
         );
       } finally {
         await browser.close();
@@ -241,8 +256,14 @@ describe("hosted headed browser boundary", () => {
                 return new Proxy(controls, {
                   get(locatorTarget, locatorProperty, locatorReceiver) {
                     if (locatorProperty === "evaluateAll") {
-                      return async (callback: (elements: Element[]) => unknown) => {
-                        const result = await locatorTarget.evaluateAll(callback);
+                      return async (
+                        callback: (elements: Element[], exposed?: boolean) => unknown,
+                        exposed?: boolean,
+                      ) => {
+                        const result = await locatorTarget.evaluateAll(
+                          callback,
+                          exposed,
+                        );
                         if (!controlsReplaced) {
                           await target.locator("main").evaluate((element) => {
                             element.replaceChildren();
