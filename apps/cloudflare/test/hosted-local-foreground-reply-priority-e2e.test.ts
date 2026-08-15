@@ -27,6 +27,7 @@ import {
   buildHostedExecutionAssistantAskRequestedWake,
   buildHostedExecutionAssistantNotificationRequestedWake,
   buildHostedExecutionCodexAuthRequestedWake,
+  buildHostedExecutionDailyMetricReportedWake,
   buildHostedExecutionDeviceSyncWake,
   buildHostedExecutionEnvironmentVoiceCapturedWake,
   buildHostedExecutionMealPhotoCapturedWake,
@@ -2306,6 +2307,15 @@ function buildEverySystemWake(
       occurredAt: requestedAt,
       reason: "webhook_hint",
       userId: identity.userId,
+    }),
+    buildHostedExecutionDailyMetricReportedWake({
+      date: requestedAt.slice(0, 10),
+      eventId: `health.daily-metric.reported:priority:${runId}`,
+      memberId: identity.userId,
+      metric: "steps",
+      occurredAt: requestedAt,
+      unit: "count",
+      value: 8_000,
     }),
     buildHostedExecutionEnvironmentVoiceCapturedWake({
       audioKey: environmentVoice.audioKey,

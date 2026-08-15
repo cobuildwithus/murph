@@ -387,6 +387,7 @@ describe("hosted Stripe event reconciliation", () => {
     mocks.applyStripeInvoicePaid.mockResolvedValue({
       activatedMemberId: "member_123",
       hostedExecutionEventId: "dispatch_123",
+      hostedExecutionMailboxItemId: "mailbox_dispatch_123",
       welcomeEmailMemberId: "member_123",
     });
     mocks.applyStripeInvoicePaymentFailed.mockResolvedValue(undefined);
@@ -542,6 +543,7 @@ describe("hosted Stripe event reconciliation", () => {
       activatedMemberId: "member_123",
       eventId: "evt_invoice_paid_123",
       hostedExecutionEventId: "dispatch_123",
+      hostedExecutionMailboxItemId: "mailbox_dispatch_123",
       status: "completed",
     });
 
@@ -577,6 +579,10 @@ describe("hosted Stripe event reconciliation", () => {
       expect.objectContaining(HOSTED_ONBOARDING_TRANSACTION_OPTIONS),
     );
     expect(prisma.rows[0]).toEqual(expect.objectContaining({
+      activationResultJson: {
+        activationMailboxItemIds: ["mailbox_dispatch_123"],
+        schema: "hosted.stripe.activation-result.v1",
+      },
       eventId: "evt_invoice_paid_123",
       lastErrorCode: null,
       lastErrorMessage: null,
@@ -1215,14 +1221,16 @@ describe("hosted Stripe event reconciliation", () => {
     mocks.stripe.events.retrieve.mockResolvedValue(event);
     mocks.applyStripeInvoicePaid
       .mockResolvedValueOnce({
-        activatedMemberId: null,
-        hostedExecutionEventId: null,
+        activatedMemberId: "member_123",
+        hostedExecutionEventId: "dispatch_retry",
+        hostedExecutionMailboxItemId: "mailbox_dispatch_retry",
         runtimeRecheckMemberIds: ["member_123"],
         welcomeEmailMemberId: null,
       })
       .mockResolvedValueOnce({
-        activatedMemberId: null,
-        hostedExecutionEventId: null,
+        activatedMemberId: "member_123",
+        hostedExecutionEventId: "dispatch_retry",
+        hostedExecutionMailboxItemId: "mailbox_dispatch_retry",
         runtimeRecheckMemberIds: [],
         welcomeEmailMemberId: null,
       });
@@ -1256,6 +1264,10 @@ describe("hosted Stripe event reconciliation", () => {
     expect(mocks.applyStripeInvoicePaid).toHaveBeenCalledTimes(2);
     expect(mocks.signalHostedRuntimeRecheckRuntime).toHaveBeenCalledTimes(2);
     expect(prisma.rows[0]).toEqual(expect.objectContaining({
+      activationResultJson: {
+        activationMailboxItemIds: ["mailbox_dispatch_retry"],
+        schema: "hosted.stripe.activation-result.v1",
+      },
       attemptCount: 7,
       processedAt: expect.any(Date),
       status: HostedStripeEventStatus.completed,
@@ -2691,6 +2703,7 @@ describe("hosted Stripe event reconciliation", () => {
       activatedMemberId: "member_123",
       eventId: "evt_invoice_paid_123",
       hostedExecutionEventId: "dispatch_123",
+      hostedExecutionMailboxItemId: "mailbox_dispatch_123",
       status: "completed",
     });
 
@@ -2738,10 +2751,12 @@ describe("hosted Stripe event reconciliation", () => {
         {
           activatedMemberId: "member_family_owner",
           hostedExecutionEventId: "member.activated:family:owner",
+          hostedExecutionMailboxItemId: "mailbox_family_owner",
         },
         {
           activatedMemberId: "member_family_child",
           hostedExecutionEventId: "member.activated:family:child",
+          hostedExecutionMailboxItemId: "mailbox_family_child",
         },
       ],
       hostedExecutionEventId: "member.activated:family:owner",
@@ -2764,14 +2779,17 @@ describe("hosted Stripe event reconciliation", () => {
         {
           activatedMemberId: "member_family_owner",
           hostedExecutionEventId: "member.activated:family:owner",
+          hostedExecutionMailboxItemId: "mailbox_family_owner",
         },
         {
           activatedMemberId: "member_family_child",
           hostedExecutionEventId: "member.activated:family:child",
+          hostedExecutionMailboxItemId: "mailbox_family_child",
         },
       ],
       eventId: event.id,
       hostedExecutionEventId: "member.activated:family:owner",
+      hostedExecutionMailboxItemId: "mailbox_family_owner",
       status: "completed",
     });
 
@@ -2800,6 +2818,16 @@ describe("hosted Stripe event reconciliation", () => {
       mocks.prepareHostedStripeDirectMemberActivationCrypto,
     ).not.toHaveBeenCalled();
     expect(mocks.stripe.subscriptions.retrieve).toHaveBeenCalledWith("sub_123");
+    expect(prisma.rows[0]).toEqual(expect.objectContaining({
+      activationResultJson: {
+        activationMailboxItemIds: [
+          "mailbox_family_owner",
+          "mailbox_family_child",
+        ],
+        schema: "hosted.stripe.activation-result.v1",
+      },
+      status: HostedStripeEventStatus.completed,
+    }));
   });
 
   it("prepares Family candidates when a reused subscription still resolves its direct owner", async () => {

@@ -437,6 +437,18 @@ Last verified: 2026-08-14
   activation failure falls back to the existing signup-link path, while the
   single-owner wait remains provider-retryable, without creating a second
   entitlement, queue, or runtime.
+- Linq signup-link terminal failures recompute suppression under the existing
+  member-row lock without reading delivery history into application memory.
+  One scalar statement checks only the exact five source references for the
+  failed generic or source-event-digest identity and whether any syntactically
+  valid five-attempt identity remains live for that member/day. Both probes use
+  the concurrent partial `source_ref text_pattern_ops` index restricted to live
+  `invite_signup` and `invite_signup_fallback` rows. Receipt ordering remains
+  the terminal authority: a same-identity live attempt suppresses reopen, a
+  different group-aware identity may reopen only its group context while
+  retaining daily suppression, and the daily marker is released only after no
+  live identity remains. No cache, queue, or duplicate projection owns this
+  state.
 - Web and companion onboarding use the same semantic-keyed starter grant with
   their own bounded source references. A repeated enrollment cannot replace the
   accepted grant or add balance. Historical trial metadata remains only for
@@ -552,6 +564,13 @@ Last verified: 2026-08-14
   retryable obligation. Replay-safe cleanup or notification work does not gain
   blanket retry authority merely because it runs post-commit. No second queue
   owns redrive.
+- A completed Stripe receipt persists the exact mailbox item identifiers for
+  every `member.activated` result it committed. Runtime-wake replay reads only
+  those identifiers and revalidates the mailbox kind; a malformed non-null
+  projection fails closed. Receipts written before this additive field was
+  deployed retain the legacy lookup solely as a mixed-deploy transition, while
+  account deletion may legitimately cascade a pointed-to mailbox item without
+  changing the completed billing outcome.
 - Immediate paid-plan upgrades use a one-item Customer Portal
   `subscription_update_confirm` session rather than a Murph-owned Subscription
   mutation or pending-invoice retry loop. Web takes the member lock only to
@@ -1761,3 +1780,44 @@ reader and an ephemeral update could arrive after the final outbox reply. The
 planner therefore continues to omit `send_progress_update` while exposing the
 durable/final-result tools. Accepted-input personalization retains its existing
 message and route checks.
+
+## Deterministic member action delivery
+
+Direct editors reuse the existing encrypted system mailbox rather than adding a
+queue or result table. Admission deduplicates the exact action id, body, and
+client timestamp and re-signals an exact duplicate. Admission and terminal
+outcome recording prepare provider-backed mailbox crypto before opening their
+transactions, then use only the exact prepared root while database locks are
+held; root drift retries the full preparation once with a fresh request cache.
+Runtime applies the closed action through its canonical domain owner. Fresh conversation work keeps its
+foreground priority, but its first successful reply checkpoint includes one
+bounded selection restricted to due `member.action.requested` work. That
+provider-free service point ignores unrelated system backlog and a newly
+arrived conversation cannot defer the already-accepted action into another
+provider pass. Runtime then records the typed terminal
+outcome as an existing post-checkpoint effect before releasing the requested
+item. The scoped client reads that action-id-keyed outcome from the same member
+mailbox and reports success only for `applied` or `unchanged`; a rejected or
+missing outcome retains the local draft. The first workout editor additionally
+requires the V6 card's opaque workout-revision binding under the existing
+workout mutation lock. That binding combines the canonical workout identity,
+ordered hidden exercise/set-slot identity, and the last applied member-action
+generation. Delayed or forwarded cards therefore cannot retarget a later
+workout, a set shifted by another direct action, or a same-name exercise moved
+by the generic workout editor. Mutable set results and annotations remain under
+their existing result-family optimistic comparisons rather than the positional
+identity binding.
+Admission also rejects any destructive set batch whose final visible projection
+equals its prestate because that request has no observable structural effect.
+The canonical workout write atomically records the action id with the mutation;
+only that exact persisted id proves replay. A merely matching visible result is
+never success for a stale destructive action. Replay lookup checks that marker
+across the bounded canonical workout collection before revision and active-only
+eligibility, so the generation change caused by the original write, workout
+completion, or a newer active workout cannot replace a committed success with a
+terminal rejection. Every different action must match the current revision
+before positional mutation. The serialized mailbox lane means
+one last-applied id is sufficient until its terminal outcome commits, without a
+second receipt store. Validated set removal uses one narrow canonical replacement
+operation, while every generic workout replacement remains fail-closed against
+saved-set loss.

@@ -74,7 +74,7 @@ test("stale launch-document versions do not stop chat-adjacent companion actions
   // launch grants; members with no grant at all still fail closed.
   const nonblockingCompanionPaths = [
     "src/lib/device-sync/meal-photo-capture.ts",
-    "app/api/device-sync/companion/imessage-mini-app/proof-action/route.ts",
+    "src/lib/member-actions/submit.ts",
   ];
 
   for (const relativePath of nonblockingCompanionPaths) {

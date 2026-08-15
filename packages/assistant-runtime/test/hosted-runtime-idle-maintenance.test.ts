@@ -171,7 +171,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
     expect(compactWarmCodexThread).not.toHaveBeenCalled();
   });
 
-  it("records provider compaction usage from the warm thread's actual model", async () => {
+  it("records local OpenAI compaction usage with hosted Flex evidence", async () => {
     compactWarmCodexThread.mockResolvedValue({
       kind: "compacted",
       durationMs: 1_200,
@@ -193,7 +193,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
       credentialSource: "member",
       memberId: "member_1",
       model: "gpt-5.6-sol",
-      providerName: "hosted-openai",
+      providerName: "openai-local-test",
       pendingWork: false,
       recordUsage: async (record) => {
         recorded.push(record);
