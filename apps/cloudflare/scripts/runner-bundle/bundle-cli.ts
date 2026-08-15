@@ -393,7 +393,7 @@ async function assertVaultCliBundleParity(input: {
   }
 }
 
-function runVaultCliParityPair(input: {
+function runVaultCliParityPair(options: {
   args: readonly string[];
   bundledEntryPath: string;
   cwd: string;
@@ -405,22 +405,22 @@ function runVaultCliParityPair(input: {
 }): { bundled: VaultCliParityResult; unbundled: VaultCliParityResult } {
   const unbundledStartedAt = performance.now();
   const unbundled = runVaultCliParityProbe({
-    args: input.args,
-    cwd: input.cwd,
-    entryPath: input.unbundledEntryPath,
-    healthCommonsPackageRoot: input.healthCommonsPackageRoot,
-    homeRoot: input.homeRoot,
-    vaultRoot: input.vaultRoot,
+    args: options.args,
+    cwd: options.cwd,
+    entryPath: options.unbundledEntryPath,
+    healthCommonsPackageRoot: options.healthCommonsPackageRoot,
+    homeRoot: options.homeRoot,
+    vaultRoot: options.vaultRoot,
   });
   const unbundledDurationMs = Math.round(performance.now() - unbundledStartedAt);
   const bundledStartedAt = performance.now();
   const bundled = runVaultCliParityProbe({
-    args: input.args,
-    cwd: input.cwd,
-    entryPath: input.bundledEntryPath,
-    healthCommonsPackageRoot: input.healthCommonsPackageRoot,
-    homeRoot: input.homeRoot,
-    vaultRoot: input.vaultRoot,
+    args: options.args,
+    cwd: options.cwd,
+    entryPath: options.bundledEntryPath,
+    healthCommonsPackageRoot: options.healthCommonsPackageRoot,
+    homeRoot: options.homeRoot,
+    vaultRoot: options.vaultRoot,
   });
   const bundledDurationMs = Math.round(performance.now() - bundledStartedAt);
 
@@ -428,7 +428,7 @@ function runVaultCliParityPair(input: {
   // this into a hard assertion: shared CI runners make wall-time budgets
   // flake, and a budget loose enough to be stable would catch nothing.
   console.log(
-    `parity probe \`${input.label}\`: unbundled ${unbundledDurationMs}ms, bundled ${bundledDurationMs}ms`,
+    `parity probe \`${options.label}\`: unbundled ${unbundledDurationMs}ms, bundled ${bundledDurationMs}ms`,
   );
 
   return { bundled, unbundled };
