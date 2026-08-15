@@ -716,12 +716,12 @@ function buildCanonicalAutomationStateProbeCommand(input: {
     'if (!automation || automation.slug !== slug || automation.status !== "active" || automation.continuityPolicy !== "fresh") throw new Error("Canonical automation readback mismatch.");',
     'if (automation.instructions !== "Record the hosted canonical checkpoint recovery probe." || automation.title !== "Canonical receipt recovery probe" || automation.summary !== "Hosted canonical checkpoint recovery probe.") throw new Error("Canonical automation content mismatch.");',
     'if (!automation.schedule || automation.schedule.kind !== "at" || automation.schedule.at !== dueAt) throw new Error("Canonical automation schedule mismatch.");',
-    'if (!automation.route || automation.route.channel !== "linq" || automation.route.deliveryTarget !== chatId || automation.route.threadId !== chatId) throw new Error("Canonical automation route mismatch.");',
+    'if (!automation.route || automation.route.channel !== "linq" || automation.route.deliveryTarget !== chatId || automation.route.threadIsDirect !== true) throw new Error("Canonical automation route mismatch.");',
     'if (!Array.isArray(automation.tags) || !automation.tags.includes("assistant")) throw new Error("Canonical automation tags mismatch.");',
     'const auditRecords = fs.readdirSync("audit", { recursive: true }).filter((entry) => typeof entry === "string" && entry.endsWith(".jsonl")).flatMap((entry) => fs.readFileSync("audit/" + entry, "utf8").split(/\\r?\\n/u).filter(Boolean).map((line) => JSON.parse(line)));',
     'const matchingAudits = auditRecords.filter((record) => record.commandName === "core.upsertAutomation" && Array.isArray(record.targetIds) && record.targetIds.includes(automation.automationId));',
     'if (matchingAudits.length !== 1) throw new Error("Canonical automation audit count mismatch.");',
-    'console.log(["CANONICAL_AUTOMATION_STATE", automation.slug, automation.schedule.at, automation.route.threadId, "audit=" + matchingAudits.length].join("|"));',
+    'console.log(["CANONICAL_AUTOMATION_STATE", automation.slug, automation.schedule.at, automation.route.deliveryTarget, "audit=" + matchingAudits.length].join("|"));',
   ].join("");
   return `node -e ${quoteShellArgument(script)}`;
 }
