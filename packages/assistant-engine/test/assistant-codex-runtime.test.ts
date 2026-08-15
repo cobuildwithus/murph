@@ -1335,7 +1335,7 @@ describe('assistant codex runtime', () => {
               contentItems: [
                 {
                   type: 'inputText',
-                  text: 'invalid response media arguments',
+                  text: '{"error":"invalid_response_media_arguments"}',
                 },
               ],
             },

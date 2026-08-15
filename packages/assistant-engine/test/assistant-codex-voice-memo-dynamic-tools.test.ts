@@ -104,7 +104,7 @@ describe('murph.generate_voice_memo dynamic tool execution', () => {
       contentItems: [
         {
           type: 'inputText',
-          text: 'invalid response media arguments',
+          text: '{"error":"invalid_response_media_arguments"}',
         },
       ],
     })
@@ -114,13 +114,14 @@ describe('murph.generate_voice_memo dynamic tool execution', () => {
   })
 
   it('returns an invalid-arguments result for malformed voice memo tool calls', async () => {
+    const privateMarker = 'synthetic-private-voice-marker'
     const request = readTestMurphDynamicToolRequest({
       id: 11,
       method: 'item/tool/call',
       params: {
         arguments: {
           modelId: 'eleven_monolingual_v1',
-          text: 'Send a short reminder.',
+          text: { privateMarker },
         },
         namespace: 'murph',
         tool: 'generate_voice_memo',
@@ -128,6 +129,7 @@ describe('murph.generate_voice_memo dynamic tool execution', () => {
     })
     const fetchImpl = vi.fn<typeof fetch>()
     const nextUsageOrdinal = vi.fn(() => 99)
+    const generateAndUpload = vi.fn<LinqVoiceMemoRuntime['generateAndUpload']>()
 
     expect(request).toMatchObject({
       kind: 'invalid-generate-voice-memo-arguments',
@@ -139,17 +141,57 @@ describe('murph.generate_voice_memo dynamic tool execution', () => {
       nextUsageOrdinal,
       progressDelivery: null,
       request: request!,
+      voiceMemoRuntime: createLinqRuntime(generateAndUpload),
     })
 
-    expect(result.rpcResult).toEqual({
-      success: false,
-      contentItems: [
-        {
-          type: 'inputText',
-          text: 'invalid voice memo generation arguments',
+    const feedback = result.rpcResult.contentItems[0]?.text ?? ''
+    expect(result.rpcResult.success).toBe(false)
+    expect(feedback).toContain(
+      '"field":"text","code":"invalid_type","expected":"string"',
+    )
+    expect(feedback).not.toContain(privateMarker)
+    expect(feedback).not.toContain('privateMarker')
+    expect(feedback).not.toContain('modelId')
+    expect(feedback).not.toContain('"received"')
+    expect(fetchImpl).not.toHaveBeenCalled()
+    expect(nextUsageOrdinal).not.toHaveBeenCalled()
+    expect(generateAndUpload).not.toHaveBeenCalled()
+  })
+
+  it('returns value-free response-media hints without attaching media', async () => {
+    const privateMarker = 'synthetic-private-media-marker'
+    const request = readTestMurphDynamicToolRequest({
+      id: 14,
+      method: 'item/tool/call',
+      params: {
+        arguments: {
+          media: { privateMarker },
         },
-      ],
+        namespace: 'murph',
+        tool: 'attach_response_media',
+      },
     })
+    expect(request).toMatchObject({ kind: 'invalid-response-media-arguments' })
+
+    const fetchImpl = vi.fn<typeof fetch>()
+    const nextUsageOrdinal = vi.fn(() => 99)
+    const result = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl,
+      nextUsageOrdinal,
+      progressDelivery: null,
+      request: request!,
+    })
+    const feedback = result.rpcResult.contentItems[0]?.text ?? ''
+
+    expect(result.rpcResult.success).toBe(false)
+    expect(feedback).toContain(
+      '"field":"media","code":"invalid_type","expected":"array"',
+    )
+    expect(feedback).not.toContain(privateMarker)
+    expect(feedback).not.toContain('privateMarker')
+    expect(feedback).not.toContain('"received"')
+    expect(result.responseMediaPatch).toBeUndefined()
     expect(fetchImpl).not.toHaveBeenCalled()
     expect(nextUsageOrdinal).not.toHaveBeenCalled()
   })

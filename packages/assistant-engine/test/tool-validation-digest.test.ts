@@ -2,12 +2,102 @@ import * as z from '@murphai/contracts/zod-runtime'
 import { describe, expect, it } from 'vitest'
 
 import {
+  buildToolCallValidationFeedback,
+} from '../src/assistant/tool-validation-feedback.ts'
+import {
   buildSafeToolCallValidationDigest,
   collectSafeJsonSchemaValidationPaths,
   isSafeSchemaLikeKey,
 } from '../src/assistant/tool-validation-digest.ts'
 
 describe('buildSafeToolCallValidationDigest', () => {
+  it('formats only bounded value-free repair hints', () => {
+    const schema = z.object({
+      alpha: z.string(),
+      beta: z.string(),
+      delta: z.string(),
+      epsilon: z.string(),
+      gamma: z.string(),
+    }).strict()
+    const rawInput = {
+      alpha: { marker: 'synthetic-private-alpha' },
+      beta: { marker: 'synthetic-private-beta' },
+      delta: { marker: 'synthetic-private-delta' },
+      epsilon: { marker: 'synthetic-private-epsilon' },
+      gamma: { marker: 'synthetic-private-gamma' },
+      privateField: 'synthetic-private-root',
+    }
+    const parsed = schema.safeParse(rawInput)
+    expect(parsed.success).toBe(false)
+    if (parsed.success) {
+      throw new Error('expected schema validation to fail')
+    }
+
+    const feedback = buildToolCallValidationFeedback(
+      buildSafeToolCallValidationDigest({
+        error: parsed.error,
+        rawInput,
+        schemaPaths: collectSafeJsonSchemaValidationPaths(
+          z.toJSONSchema(schema, { io: 'input' }),
+        ),
+        schemaRootKeys: Object.keys(schema.shape),
+        toolName: 'murph.synthetic',
+      }),
+      { error: 'invalid_synthetic_arguments' },
+    )
+
+    expect(JSON.parse(feedback)).toMatchObject({
+      error: 'invalid_synthetic_arguments',
+      hints: [
+        { field: 'alpha', code: 'invalid_type', expected: 'string' },
+        { field: 'beta', code: 'invalid_type', expected: 'string' },
+        { field: 'delta', code: 'invalid_type', expected: 'string' },
+        { field: 'epsilon', code: 'invalid_type', expected: 'string' },
+      ],
+    })
+    expect(feedback.length).toBeLessThanOrEqual(1_600)
+    expect(feedback).not.toContain('received')
+    expect(feedback).not.toContain('privateField')
+    expect(feedback).not.toContain('synthetic-private')
+  })
+
+  it('does not reveal submitted or allowed enum values in repair hints', () => {
+    const submittedEnum = 'synthetic-private-enum'
+    const allowedEnums = ['first_allowed', 'second_allowed'] as const
+    const schema = z.object({
+      mode: z.enum(allowedEnums),
+    }).strict()
+    const rawInput = { mode: submittedEnum }
+    const parsed = schema.safeParse(rawInput)
+    expect(parsed.success).toBe(false)
+    if (parsed.success) {
+      throw new Error('expected schema validation to fail')
+    }
+
+    const feedback = buildToolCallValidationFeedback(
+      buildSafeToolCallValidationDigest({
+        error: parsed.error,
+        rawInput,
+        schemaPaths: collectSafeJsonSchemaValidationPaths(
+          z.toJSONSchema(schema, { io: 'input' }),
+        ),
+        schemaRootKeys: Object.keys(schema.shape),
+        toolName: 'murph.synthetic',
+      }),
+      { error: 'invalid_synthetic_arguments' },
+    )
+
+    expect(JSON.parse(feedback)).toMatchObject({
+      error: 'invalid_synthetic_arguments',
+      hints: [{ field: 'mode', code: 'invalid_value' }],
+    })
+    expect(feedback).not.toContain(submittedEnum)
+    for (const allowedEnum of allowedEnums) {
+      expect(feedback).not.toContain(allowedEnum)
+    }
+    expect(feedback).not.toContain('received')
+  })
+
   it('keeps mutually exclusive union failures coarse', () => {
     const schema = z.object({
       card: z.union([
