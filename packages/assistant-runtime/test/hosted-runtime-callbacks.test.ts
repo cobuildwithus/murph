@@ -10121,20 +10121,36 @@ describe("hosted runtime callbacks", () => {
       }),
     );
     mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(
-      async ({ dependencies }) => {
+      async ({ dependencies, dispatchHooks }) => {
         const delivery = await dependencies.sendTelegram({
           idempotencyKey,
           message: "The call is complete.",
           replyToMessageId: null,
           target,
         });
+        const acceptedDelivery = createDelivery({
+          idempotencyKey,
+          providerMessageId: delivery.providerMessageId,
+          target,
+          targetKind: "thread",
+        });
+        await dispatchHooks?.confirmTerminalIntent?.({
+          intent: createPendingHostedDeliveryIntent({
+            delivery: acceptedDelivery,
+            deliveryConfirmationPending: true,
+            deliveryIdempotencyKey: idempotencyKey,
+            intentId: effect.effectId,
+            status: "retryable",
+          }) as AssistantOutboxIntent,
+          outcome: {
+            delivery: acceptedDelivery,
+            deliveryError: null,
+            status: "sent",
+          },
+          vault: HOSTED_WAKE.vaultRoot,
+        });
         return createDispatchResult({
-          delivery: createDelivery({
-            idempotencyKey,
-            providerMessageId: delivery.providerMessageId,
-            target,
-            targetKind: "thread",
-          }),
+          delivery: acceptedDelivery,
           status: "sent",
         });
       },
@@ -10361,14 +10377,38 @@ describe("hosted runtime callbacks", () => {
       }),
     );
     mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(
-      async ({ dependencies }) => {
-        await dependencies.sendTelegram({
-          idempotencyKey,
-          message: "The call is complete.",
-          replyToMessageId: null,
-          target,
-        });
-        throw new Error("unreachable after route revocation");
+      async ({ dependencies, dispatchHooks }) => {
+        try {
+          await dependencies.sendTelegram({
+            idempotencyKey,
+            message: "The call is complete.",
+            replyToMessageId: null,
+            target,
+          });
+          throw new Error("unreachable after route revocation");
+        } catch (error) {
+          const deliveryError = mocks.normalizeAssistantDeliveryError(error);
+          const intent = createPendingHostedDeliveryIntent({
+            deliveryConfirmationPending: true,
+            deliveryIdempotencyKey: idempotencyKey,
+            intentId: effect.effectId,
+            lastError: deliveryError,
+            status: "retryable",
+          }) as AssistantOutboxIntent;
+          await dispatchHooks?.confirmTerminalIntent?.({
+            intent,
+            outcome: {
+              delivery: null,
+              deliveryError,
+              status: "failed",
+            },
+            vault: HOSTED_WAKE.vaultRoot,
+          });
+          return createDispatchResult({
+            ...intent,
+            status: "failed",
+          }, deliveryError);
+        }
       },
     );
     const routeError = new VaultCliError(
@@ -10401,7 +10441,12 @@ describe("hosted runtime callbacks", () => {
       providerFetch,
       vaultRoot: HOSTED_WAKE.vaultRoot,
       wake: HOSTED_WAKE.wake,
-    })).rejects.toBe(routeError);
+    })).resolves.toEqual([
+      expect.objectContaining({
+        deliveryErrorCode: "HOSTED_THREAD_ROUTE_EGRESS_UNAUTHORIZED",
+        deliveryStatus: "failed",
+      }),
+    ]);
 
     expect(recordPhoneCallResultDeliveryOutcome).toHaveBeenCalledWith({
       deliveryErrorCode: "HOSTED_THREAD_ROUTE_EGRESS_UNAUTHORIZED",
@@ -10434,11 +10479,34 @@ describe("hosted runtime callbacks", () => {
       idempotencyKey:
         "phone-call-result:hpc_result_delivery:generation:4",
     });
-    mocks.dispatchAssistantOutboxIntent.mockResolvedValueOnce(
-      createDispatchResult({ status: outboxStatus }, {
-        code: deliveryErrorCode,
-        message: "bounded delivery failure",
-      }),
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(
+      async ({ dispatchHooks }) => {
+        const deliveryError = {
+          code: deliveryErrorCode,
+          message: "bounded delivery failure",
+        };
+        const intent = createPendingHostedDeliveryIntent({
+          deliveryConfirmationPending: true,
+          deliveryIdempotencyKey:
+            "phone-call-result:hpc_result_delivery:generation:4",
+          intentId: effect.effectId,
+          lastError: deliveryError,
+          status: "retryable",
+        }) as AssistantOutboxIntent;
+        await dispatchHooks?.confirmTerminalIntent?.({
+          intent,
+          outcome: {
+            delivery: null,
+            deliveryError,
+            status: expectedStatus,
+          },
+          vault: HOSTED_WAKE.vaultRoot,
+        });
+        return createDispatchResult({
+          ...intent,
+          status: outboxStatus,
+        }, deliveryError);
+      },
     );
     const recordPhoneCallResultDeliveryOutcome = vi.fn(async () => undefined);
 

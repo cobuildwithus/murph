@@ -1806,8 +1806,14 @@ Last verified: 2026-08-15
   transport and wake machinery; their existence or retention expiry never
   proves result delivery. Web atomically advances `pending` to a new queued
   generation with its mailbox append. The write-fenced runtime reports provider
-  entry and the terminal outbox outcome through the signed Web control plane
-  before checkpointing that outcome. At the first provider fetch, the runtime
+  entry through the signed Web control plane. After provider entry, the existing
+  outbox intent retains the provider receipt or terminal failure as transport
+  evidence and stays retryable until Web acknowledges the matching terminal
+  callback. A later runtime pass replays only that idempotent callback from the
+  persisted evidence; it never re-enters the Telegram provider. The outbox marks
+  the intent ordinarily terminal and nonselectable only after Web acknowledges
+  the call-row transition and its next-obligation re-arm. At the first provider
+  fetch, the runtime
   gives Web the exact queued Telegram authority; Web revalidates that authority
   and compare-and-sets the same generation from `queued` to `sending` in the
   callback operation. A lost callback response sends nothing on that attempt,

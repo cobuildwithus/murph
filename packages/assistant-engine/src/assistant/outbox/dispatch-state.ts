@@ -111,6 +111,7 @@ export async function persistAssistantOutboxIntentDeliveryPendingConfirmation(in
   deliveryTransportIdempotent: boolean
   intent: AssistantOutboxIntent
   intentPath: string
+  terminalConfirmationRequired?: boolean
   vault: string
 }): Promise<AssistantOutboxIntent> {
   return withAssistantRuntimeWriteLock(input.vault, async (paths) => {
@@ -127,17 +128,24 @@ export async function persistAssistantOutboxIntentDeliveryPendingConfirmation(in
       return current
     }
     const baseIntent = current ?? input.intent
+    const terminalConfirmationRequired = input.terminalConfirmationRequired === true
     const pendingIntent = assistantOutboxIntentSchema.parse(
       sanitizeAssistantOutboxIntentForPersistence({
         ...baseIntent,
-        deliveryConfirmationPending: input.deliveryTransportIdempotent,
+        deliveryConfirmationPending:
+          terminalConfirmationRequired || input.deliveryTransportIdempotent,
         deliveryTransportIdempotent: input.deliveryTransportIdempotent,
         preparedDispatchToken: baseIntent.preparedDispatchToken,
         deliveryIdempotencyKey:
           input.delivery.idempotencyKey ?? baseIntent.deliveryIdempotencyKey,
         updatedAt: input.delivery.sentAt,
-        nextAttemptAt: null,
-        status: 'sending',
+        nextAttemptAt: terminalConfirmationRequired
+          ? buildAssistantOutboxRetryTimestamp(
+              new Date(input.delivery.sentAt),
+              baseIntent.attemptCount,
+            )
+          : null,
+        status: terminalConfirmationRequired ? 'retryable' : 'sending',
         delivery: input.delivery,
         lastError: createAssistantDeliveryConfirmationPendingError(),
       }),
@@ -353,6 +361,7 @@ export async function updateAssistantOutboxAfterDispatchFailure(input: {
   failedAt: Date
   intentPath: string
   sending: AssistantOutboxIntent
+  terminalConfirmationRequired?: boolean
   vault: string
 }): Promise<AssistantOutboxIntent> {
   const linqPartialDelivery = readLinqPartialDeliveryFromError({
@@ -419,7 +428,11 @@ export async function updateAssistantOutboxAfterDispatchFailure(input: {
     const retryExhausted = retryRequested &&
       !input.deliveryMayHaveSucceeded &&
       isAssistantOutboxRetryBudgetExhausted(baseIntent)
-    const retryable = retryRequested && !retryExhausted
+    const terminalConfirmationPending =
+      input.terminalConfirmationRequired === true &&
+      (abandonedDelivery || retryExhausted || !retryRequested)
+    const retryable = (retryRequested && !retryExhausted) ||
+      terminalConfirmationPending
     const deliveryError = retryExhausted
       ? sanitizeAssistantDeliveryErrorForPersistence(
           createAssistantDeliveryRetryExhaustedError(input.error),
@@ -436,15 +449,16 @@ export async function updateAssistantOutboxAfterDispatchFailure(input: {
           linqPartialDelivery ??
           current?.delivery ??
           input.sending.delivery,
-        deliveryConfirmationPending:
-          recoverableLinqRichLinkPartial ||
-          preserveNonConfirmableLinqRichLinkCheckpoint
-          ? false
-          : abandonedDelivery || retryExhausted
-          ? false
-          : input.deliveryMayHaveSucceeded
-            ? input.deliveryTransportIdempotent || retainLinqReactionConfirmation
-            : false,
+        deliveryConfirmationPending: terminalConfirmationPending
+          ? true
+          : recoverableLinqRichLinkPartial ||
+              preserveNonConfirmableLinqRichLinkCheckpoint
+            ? false
+            : abandonedDelivery || retryExhausted
+              ? false
+              : input.deliveryMayHaveSucceeded
+                ? input.deliveryTransportIdempotent || retainLinqReactionConfirmation
+                : false,
         deliveryTransportIdempotent: abandonedDelivery
           ? false
           : input.deliveryMayHaveSucceeded
@@ -453,7 +467,13 @@ export async function updateAssistantOutboxAfterDispatchFailure(input: {
                 input.sending.deliveryTransportIdempotent),
         updatedAt: failedAt,
         nextAttemptAt,
-        status: abandonedDelivery ? 'abandoned' : retryable ? 'retryable' : 'failed',
+        status: terminalConfirmationPending
+          ? 'retryable'
+          : abandonedDelivery
+            ? 'abandoned'
+            : retryable
+              ? 'retryable'
+              : 'failed',
         lastError: deliveryError,
       }),
     )

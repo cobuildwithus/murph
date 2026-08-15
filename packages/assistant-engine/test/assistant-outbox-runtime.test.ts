@@ -5513,6 +5513,185 @@ describe('assistant outbox runtime', () => {
     )
   })
 
+  it('replays a tracked terminal success callback after restart without resending the provider effect', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-08-15T13:00:00.000Z'))
+    const { vaultRoot } = await createAssistantVault(
+      'assistant-outbox-phone-call-success-confirmation-',
+    )
+    const deliveryIdempotencyKey =
+      'phone-call-result:hpc_terminal_success:generation:1'
+    const seeded = await createIntent(vaultRoot, {
+      deliveryIdempotencyKey,
+      deliveryTransportIdempotent: true,
+      explicitTarget: 'telegram-call-result',
+      message: 'The scheduled call completed.',
+      sessionId: 'session-phone-call-success-confirmation',
+      threadId: 'telegram-call-result',
+      turnId: 'turn-phone-call-success-confirmation',
+    })
+    mockedDeliverAssistantMessageOverBinding.mockResolvedValueOnce({
+      delivery: createDelivery({
+        idempotencyKey: deliveryIdempotencyKey,
+        providerMessageId: 'provider-phone-call-success',
+        sentAt: '2026-08-15T13:00:00.000Z',
+        target: 'telegram-call-result',
+        targetKind: 'explicit',
+      }),
+      deliveryDeduplicated: false,
+      deliveryTransportIdempotent: true,
+      outboxIntentId: null,
+      session: undefined,
+    })
+    const requiresTerminalConfirmation = vi.fn(
+      ({ intent }: { intent: AssistantOutboxIntent }) =>
+        intent.deliveryIdempotencyKey === deliveryIdempotencyKey,
+    )
+    const confirmTerminalIntent = vi.fn()
+      .mockRejectedValueOnce(new Error('terminal callback response lost'))
+      .mockResolvedValueOnce(undefined)
+    const dispatchHooks = {
+      confirmTerminalIntent,
+      requiresTerminalConfirmation,
+    }
+
+    const first = await dispatchAssistantOutboxIntent({
+      dispatchHooks,
+      force: true,
+      intentId: seeded.intentId,
+      vault: vaultRoot,
+    })
+
+    expect(first.intent).toMatchObject({
+      delivery: expect.objectContaining({
+        providerMessageId: 'provider-phone-call-success',
+      }),
+      deliveryConfirmationPending: true,
+      status: 'retryable',
+    })
+    expect(first.deliveryError).toMatchObject({
+      code: 'ASSISTANT_DELIVERY_CONFIRMATION_PENDING',
+    })
+    expect(confirmTerminalIntent).toHaveBeenNthCalledWith(1, {
+      intent: expect.objectContaining({
+        deliveryConfirmationPending: true,
+        deliveryIdempotencyKey,
+      }),
+      outcome: expect.objectContaining({
+        deliveryError: null,
+        status: 'sent',
+      }),
+      vault: vaultRoot,
+    })
+
+    const persisted = await readAssistantOutboxIntent(vaultRoot, seeded.intentId)
+    expect(persisted).toMatchObject({
+      deliveryConfirmationPending: true,
+      status: 'retryable',
+    })
+
+    const restarted = await dispatchAssistantOutboxIntent({
+      dispatchHooks,
+      intentId: seeded.intentId,
+      now: new Date('2026-08-15T13:01:00.000Z'),
+      vault: vaultRoot,
+    })
+
+    expect(restarted.intent.status).toBe('sent')
+    expect(restarted.intent.deliveryConfirmationPending).toBe(false)
+    expect(restarted.deliveryError).toBeNull()
+    expect(mockedDeliverAssistantMessageOverBinding).toHaveBeenCalledTimes(1)
+    expect(confirmTerminalIntent).toHaveBeenCalledTimes(2)
+  })
+
+  it.each([
+    {
+      error: Object.assign(new Error('route revoked before provider entry'), {
+        code: 'HOSTED_THREAD_ROUTE_EGRESS_UNAUTHORIZED',
+        context: { retryable: false },
+      }),
+      expectedCallbackStatus: 'failed' as const,
+      expectedOutboxStatus: 'failed' as const,
+      label: 'definite pre-provider failure',
+    },
+    {
+      error: Object.assign(new Error('provider outcome is ambiguous'), {
+        code: 'ASSISTANT_TELEGRAM_DELIVERY_AMBIGUOUS',
+        deliveryMayHaveSucceeded: true,
+      }),
+      expectedCallbackStatus: 'failed_ambiguous' as const,
+      expectedOutboxStatus: 'abandoned' as const,
+      label: 'effect-ambiguous provider failure',
+    },
+  ])('replays a tracked $label callback after restart without entering the provider again', async ({
+    error,
+    expectedCallbackStatus,
+    expectedOutboxStatus,
+  }) => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-08-15T13:00:00.000Z'))
+    const { vaultRoot } = await createAssistantVault(
+      `assistant-outbox-phone-call-${expectedCallbackStatus}-confirmation-`,
+    )
+    const deliveryIdempotencyKey =
+      `phone-call-result:hpc_terminal_${expectedCallbackStatus}:generation:2`
+    const seeded = await createIntent(vaultRoot, {
+      deliveryIdempotencyKey,
+      deliveryTransportIdempotent: true,
+      explicitTarget: 'telegram-call-result',
+      message: 'The scheduled call completed.',
+      sessionId: `session-phone-call-${expectedCallbackStatus}-confirmation`,
+      threadId: 'telegram-call-result',
+      turnId: `turn-phone-call-${expectedCallbackStatus}-confirmation`,
+    })
+    mockedDeliverAssistantMessageOverBinding.mockRejectedValueOnce(error)
+    const requiresTerminalConfirmation = vi.fn(
+      ({ intent }: { intent: AssistantOutboxIntent }) =>
+        intent.deliveryIdempotencyKey === deliveryIdempotencyKey,
+    )
+    const confirmTerminalIntent = vi.fn()
+      .mockRejectedValueOnce(new Error('terminal callback response lost'))
+      .mockResolvedValueOnce(undefined)
+    const dispatchHooks = {
+      confirmTerminalIntent,
+      requiresTerminalConfirmation,
+    }
+
+    const first = await dispatchAssistantOutboxIntent({
+      dispatchHooks,
+      force: true,
+      intentId: seeded.intentId,
+      vault: vaultRoot,
+    })
+
+    expect(first.intent).toMatchObject({
+      deliveryConfirmationPending: true,
+      status: 'retryable',
+    })
+    expect(confirmTerminalIntent).toHaveBeenNthCalledWith(1, {
+      intent: expect.objectContaining({
+        deliveryConfirmationPending: true,
+        deliveryIdempotencyKey,
+      }),
+      outcome: expect.objectContaining({
+        status: expectedCallbackStatus,
+      }),
+      vault: vaultRoot,
+    })
+
+    const restarted = await dispatchAssistantOutboxIntent({
+      dispatchHooks,
+      intentId: seeded.intentId,
+      now: new Date('2026-08-15T13:01:00.000Z'),
+      vault: vaultRoot,
+    })
+
+    expect(restarted.intent.status).toBe(expectedOutboxStatus)
+    expect(restarted.intent.deliveryConfirmationPending).toBe(false)
+    expect(mockedDeliverAssistantMessageOverBinding).toHaveBeenCalledTimes(1)
+    expect(confirmTerminalIntent).toHaveBeenCalledTimes(2)
+  })
+
   it('keeps accepted Linq consume-stamp failures on the existing outbox retry path', async () => {
     const { vaultRoot } = await createAssistantVault('assistant-outbox-linq-consume-retry-')
     const answeredMailboxItemIds = Array.from(
@@ -6775,6 +6954,7 @@ async function createIntent(
     channel: string | null
     createdAt: string
     deliveryIdempotencyKey: string | null
+    deliveryTransportIdempotent: boolean
     dedupeToken: string | null
     explicitTarget: string | null
     identityId: string | null
@@ -6802,6 +6982,7 @@ async function createIntent(
     channel: overrides.channel ?? 'telegram',
     createdAt: overrides.createdAt,
     deliveryIdempotencyKey: overrides.deliveryIdempotencyKey,
+    deliveryTransportIdempotent: overrides.deliveryTransportIdempotent,
     dedupeToken:
       overrides.dedupeToken === undefined
         ? `${sessionId}:${turnId}`

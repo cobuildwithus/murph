@@ -452,6 +452,11 @@ assistant runner with immediate container rollout. An old runner omits the
 optional field and remains compatible with new Web. A new runner against old
 strict Web is rejected before Retell dispatch. Pause tracked admission and drain
 every nonterminal tracked call before rolling the runner below callback support.
+For tracked result delivery, the runner keeps the existing outbox intent
+retryable after any provider-terminal outcome until Web acknowledges the signed
+terminal callback. Callback retry derives from the persisted provider receipt or
+failure, never re-enters Telegram, and repeats Web's idempotent next-result re-arm
+when the first response is lost.
 Generation-aware Web is a hard rollback floor after the first call stores a
 non-null result channel: terminal rows still suppress duplicate analyzed
 webhooks under generation-scoped keys, while older Web uses a different key and

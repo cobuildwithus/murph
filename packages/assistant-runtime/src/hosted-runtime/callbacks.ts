@@ -37,7 +37,6 @@ import {
   parseHostedActionApprovalOutcomeEffectId,
 } from "@murphai/hosted-execution/action-approval";
 import {
-  isHostedPhoneCallResultPreProviderRouteFailureCode,
   parseHostedPhoneCallResultDeliveryKey,
   type HostedPhoneCallResultDeliveryOutcomeRequest,
 } from "@murphai/hosted-execution/phone-calls";
@@ -71,6 +70,7 @@ import {
   type AssistantHostedProgressDeliveryDependencies,
   type AssistantOutboxDispatchPreflightResult,
   type AssistantOutboxPreparedDispatchState,
+  type AssistantOutboxTerminalOutcome,
 } from "@murphai/assistant-engine";
 import {
   parseHostedEmailThreadTarget,
@@ -2180,19 +2180,7 @@ export async function drainHostedPreparedAssistantDeliveries(input: {
             currentEffectTypingStopRecorded = true;
           },
         });
-        await recordHostedPhoneCallResultDeliveryTerminalOutcomeRequired({
-          effect: assistantDeliveryEffect,
-          effectsPort: input.effectsPort,
-          outcome,
-          signal: input.signal ?? null,
-        });
       } catch (error) {
-        await recordHostedPhoneCallResultPreProviderRouteFailureRequired({
-          effect: assistantDeliveryEffect,
-          effectsPort: input.effectsPort,
-          error,
-          signal: input.signal ?? null,
-        });
         pendingTypingStopEffectIndex = currentEffectTypingStopRecorded
           ? index + 1
           : index;
@@ -3212,6 +3200,14 @@ async function deliverHostedPreparedAssistantDelivery(input: {
         : null;
     const dispatched = await dispatchAssistantOutboxIntent({
       dispatchHooks: {
+        confirmTerminalIntent: async ({ intent, outcome }) => {
+          await recordHostedPhoneCallResultTerminalConfirmationRequired({
+            effectsPort: input.effectsPort,
+            intent,
+            outcome,
+            signal: input.signal,
+          });
+        },
         persistDeliveredIntent: async ({ intent }) => {
           await confirmHostedAcceptedLinqReactionDelivery({
             effectsPort: input.effectsPort,
@@ -3246,6 +3242,10 @@ async function deliverHostedPreparedAssistantDelivery(input: {
             timing: null,
           });
         },
+        requiresTerminalConfirmation: ({ intent }) =>
+          parseHostedPhoneCallResultDeliveryKey(
+            intent.deliveryIdempotencyKey,
+          ) !== null,
         shouldRethrowDispatchError: ({ error }) =>
           input.preparedDispatch !== null
           && isHostedBackgroundDeliveryDeferredError(error),
@@ -4017,59 +4017,6 @@ function requireHostedPhoneCallResultTelegramRouteAuthority(input: {
   };
 }
 
-async function recordHostedPhoneCallResultPreProviderRouteFailureRequired(
-  input: {
-    effect: HostedAssistantDeliveryEffect;
-    effectsPort: HostedRuntimeEffectsPort;
-    error: unknown;
-    signal: AbortSignal | null;
-  },
-): Promise<void> {
-  const delivery = readHostedPhoneCallResultDeliveryFromEffect(input.effect);
-  if (!delivery) {
-    return;
-  }
-  const deliveryErrorCode = normalizeAssistantDeliveryError(input.error).code;
-  if (!isHostedPhoneCallResultPreProviderRouteFailureCode(deliveryErrorCode)) {
-    return;
-  }
-  await recordHostedPhoneCallResultDeliveryOutcomeRequired({
-    effectsPort: input.effectsPort,
-    request: {
-      deliveryErrorCode,
-      ...delivery,
-      status: "failed",
-    },
-    signal: input.signal,
-  });
-}
-
-async function recordHostedPhoneCallResultDeliveryTerminalOutcomeRequired(
-  input: {
-    effect: HostedAssistantDeliveryEffect;
-    effectsPort: HostedRuntimeEffectsPort;
-    outcome: HostedAssistantDeliveryOutcome;
-    signal: AbortSignal | null;
-  },
-): Promise<void> {
-  const delivery = readHostedPhoneCallResultDeliveryFromEffect(input.effect);
-  const status = mapHostedPhoneCallResultDeliveryOutcomeStatus(
-    input.outcome.deliveryStatus,
-  );
-  if (!delivery || !status) {
-    return;
-  }
-  await recordHostedPhoneCallResultDeliveryOutcomeRequired({
-    effectsPort: input.effectsPort,
-    request: {
-      deliveryErrorCode: input.outcome.deliveryErrorCode,
-      ...delivery,
-      status,
-    },
-    signal: input.signal,
-  });
-}
-
 function readHostedPhoneCallResultDeliveryFromEffect(
   effect: HostedAssistantDeliveryEffect,
 ): { generation: number; phoneCallId: string } | null {
@@ -4078,21 +4025,27 @@ function readHostedPhoneCallResultDeliveryFromEffect(
   );
 }
 
-function mapHostedPhoneCallResultDeliveryOutcomeStatus(
-  status: HostedAssistantDeliveryOutcome["deliveryStatus"],
-): "failed" | "failed_ambiguous" | "sent" | null {
-  switch (status) {
-    case "sent":
-      return "sent";
-    case "failed":
-      return "failed";
-    case "abandoned":
-    case "failed_ambiguous":
-    case "missing-result":
-      return "failed_ambiguous";
-    default:
-      return null;
+async function recordHostedPhoneCallResultTerminalConfirmationRequired(input: {
+  effectsPort: HostedRuntimeEffectsPort;
+  intent: AssistantOutboxIntent;
+  outcome: AssistantOutboxTerminalOutcome;
+  signal: AbortSignal | null;
+}): Promise<void> {
+  const delivery = parseHostedPhoneCallResultDeliveryKey(
+    input.intent.deliveryIdempotencyKey,
+  );
+  if (!delivery) {
+    return;
   }
+  await recordHostedPhoneCallResultDeliveryOutcomeRequired({
+    effectsPort: input.effectsPort,
+    request: {
+      deliveryErrorCode: input.outcome.deliveryError?.code ?? null,
+      ...delivery,
+      status: input.outcome.status,
+    },
+    signal: input.signal,
+  });
 }
 
 async function recordHostedPhoneCallResultDeliveryOutcomeRequired(input: {

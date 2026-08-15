@@ -90,5 +90,26 @@ the member's current authorized Telegram route.
 - Web ESLint passed with only pre-existing warnings. The Assistant Engine
   wrapper again expanded one requested file to the full package and exceeded
   its 4 GB heap; the direct focused file passed 9 tests.
-- Exact-head CI and zero-finding ReviewGPT round 3 remain pending on the next
-  pushed candidate.
+- ReviewGPT rounds 3 and 4 findings were remediated and their affected proof
+  passed. Exact-head CI was green at
+  `a9d718f05bd39626e810f4787aef964464c919dc`.
+- ReviewGPT round 5 found that a provider-terminal outbox intent became
+  nonselectable before Web acknowledged its signed terminal callback. The
+  remediation retains the provider receipt or terminal failure on the existing
+  retryable outbox intent, retries only the idempotent Web callback after a
+  restart, and marks the outbox terminal only after acknowledgement. It adds no
+  schema, queue, or durable owner.
+- `pnpm --filter @murphai/assistant-engine typecheck` and
+  `pnpm --filter @murphai/assistant-runtime typecheck` passed after the round 5
+  remediation.
+- The full Assistant Runtime suite passed 88 files / 2,327 tests with 4 skipped.
+  The focused Assistant Engine outbox suite passed 105 tests, including
+  restart proof for accepted, definite-failure, and ambiguous Telegram outcomes
+  with one provider call. The focused Assistant Runtime callback suite passed
+  259 tests.
+- The Assistant Engine package umbrella test exhausted a worker near the
+  default 4 GB heap and then stalled while terminating that worker. The exact
+  session was interrupted after the directly affected 105-test suite passed;
+  the repository friction is recorded in Frog.
+- Exact-head CI and a zero-finding ReviewGPT round remain pending on the next
+  pushed remediation candidate.
