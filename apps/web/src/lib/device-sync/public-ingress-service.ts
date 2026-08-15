@@ -158,6 +158,7 @@ export class HostedDeviceSyncPublicIngressService {
         onWebhookAccepted: async ({
           account,
           claimToken,
+          sourceAdmissionDeferred,
           traceId,
           webhook,
           provider,
@@ -170,6 +171,7 @@ export class HostedDeviceSyncPublicIngressService {
             now,
             ownerId,
             registry: input.registry,
+            sourceAdmissionDeferred,
             store: this.context.store,
             traceId,
             webhook,

@@ -1942,8 +1942,9 @@ test("public ingress keeps pending external-link accounts inert unless runtime o
           ? { sourceAdmissionDeferred: true as const }
           : undefined;
       },
-      onWebhookAccepted({ account, claimToken, traceId }) {
+      onWebhookAccepted({ account, claimToken, sourceAdmissionDeferred, traceId }) {
         acceptedCalls += 1;
+        assert.equal(sourceAdmissionDeferred, true);
         const sourceInstanceKey = buildJunctionProviderSourceInstanceKey({
           connectionId: account.id,
           sourceProviderSlug: "garmin",

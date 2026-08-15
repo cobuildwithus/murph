@@ -110,8 +110,11 @@ The contract is jointly specified by
 
 Hosted Junction setup recovery treats a signed source-attributed webhook as a
 trigger, not as connection proof. Web reads the live provider source list, then
-atomically confirms the matching pending setup, source receipt, dirty work, and
-webhook trace under the existing health-data admission lock. The trust and
+atomically confirms the matching pending setup, callback-equivalent source
+initial work, its mandatory mailbox handoff, source receipt, dirty work, and
+webhook trace under the existing health-data admission lock. The handoff is
+required even when dirty state exists. Established sources skip the recovery
+provider read. The trust and
 failure contracts require an explicit active provider status; ambiguous or
 error states stay pending and retry. If another admission changes the source
 while that provider read runs, durable event work retries and merges its exact

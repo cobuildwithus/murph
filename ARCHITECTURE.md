@@ -2500,7 +2500,9 @@ owns its trace and a live Junction provider-list read confirms the exact
 prepared source. The webhook is a trigger, not proof by itself. The runtime
 rechecks consent, shared-app binding, connection and credential epochs, source
 epoch, and disconnect fences. It then commits `source_confirmed`, source
-admission, dirty state, and trace completion in one locked transaction. A
+admission, the callback-equivalent source-scoped initial jobs, a mandatory
+mailbox handoff, dirty state, and trace completion in one locked transaction.
+The initial handoff is committed even when the connection is already dirty. A
 failed or ambiguous provider read leaves setup pending and retryable. After an
 account reaches
 `source_confirmed`, adding or retrying another Junction-backed source preserves
@@ -2760,7 +2762,9 @@ Apple Health registration observation uses two passes through that existing
 admission owner: the first returns an ephemeral exact connection, source, and
 stored-account proof; provider access runs with no database transaction open;
 the second revalidates that proof and atomically commits source activation,
-receipt state, dirty work, mailbox/signal effects, and trace completion.
+callback-equivalent source-scoped initial work, its mandatory mailbox handoff,
+receipt state, dirty work, signal effects, and trace completion. Established
+sources bypass this recovery preparation and provider read.
 Revoked consent, removed provider registration, a private-application rebind,
 or a superseded connection/source epoch terminally completes only the trace.
 An unresolved canonical read, credential change across provider access, or

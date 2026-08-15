@@ -228,6 +228,25 @@ function buildCompanionHrvRmssdObservation() {
   };
 }
 
+function buildJunctionSourceConnectionWork(input: {
+  now: string;
+  sourceProviderSlug: string;
+}) {
+  return {
+    initialJobs: [
+      {
+        kind: "backfill" as const,
+        payload: { sourceProviderSlug: input.sourceProviderSlug },
+      },
+      {
+        kind: "reconcile" as const,
+        payload: { sourceProviderSlug: input.sourceProviderSlug },
+      },
+    ],
+    nextReconcileAt: input.now,
+  };
+}
+
 function acceptTestCompanionHrvRmssdObservation(options: {
   acceptedAt?: string;
   observation?: ReturnType<typeof buildCompanionHrvRmssdObservation>;
@@ -705,6 +724,8 @@ describe("hosted device-sync wakes", () => {
             provider: preparedWebhook.provider,
           },
           claimToken: "claim-token",
+          sourceAdmissionDeferred: preparedWebhook.provider === "junction"
+            && Boolean(preparedWebhook.sourceProviderSlug),
           traceId: preparedWebhook.traceId,
           webhook: {
             acceptanceMode: preparedWebhook.acceptanceMode,
@@ -1102,7 +1123,12 @@ describe("hosted device-sync wakes", () => {
     );
 
     const isSourceAccessActive = vi.fn(async () => true);
-    mocks.registryGet.mockReturnValue({ connectionHandler: { isSourceAccessActive } });
+    mocks.registryGet.mockReturnValue({
+      connectionHandler: {
+        buildSourceConnectionWork: buildJunctionSourceConnectionWork,
+        isSourceAccessActive,
+      },
+    });
     const registry = { get: mocks.registryGet, list: mocks.registryList, register: vi.fn() };
     const store = new PrismaDeviceSyncControlPlaneStore({ prisma: getPrisma() });
 
@@ -1818,7 +1844,10 @@ describe("hosted device-sync wakes", () => {
     const providerRead = vi.fn(async () => true);
     mocks.listConnectionSources.mockResolvedValue([source]);
     mocks.registryGet.mockReturnValue({
-      connectionHandler: { isSourceAccessActive: providerRead },
+      connectionHandler: {
+        buildSourceConnectionWork: buildJunctionSourceConnectionWork,
+        isSourceAccessActive: providerRead,
+      },
     });
     mocks.withHealthDataAdmissionLock.mockRejectedValueOnce(deviceSyncError({
       code: "HEALTH_DATA_CONSENT_REQUIRED",
@@ -1856,7 +1885,10 @@ describe("hosted device-sync wakes", () => {
   it("terminally settles prepared Junction work before provider I/O after application rebind", async () => {
     const providerRead = vi.fn(async () => true);
     mocks.registryGet.mockReturnValue({
-      connectionHandler: { isSourceAccessActive: providerRead },
+      connectionHandler: {
+        buildSourceConnectionWork: buildJunctionSourceConnectionWork,
+        isSourceAccessActive: providerRead,
+      },
     });
     mocks.getConnectionRecordForUser.mockResolvedValueOnce({
       ...buildWebhookAdmissionRecord({ provider: "junction", setupPhase: "source_confirmed" }),
@@ -1903,7 +1935,10 @@ describe("hosted device-sync wakes", () => {
     });
     const providerRead = vi.fn(async () => true);
     mocks.registryGet.mockReturnValue({
-      connectionHandler: { isSourceAccessActive: providerRead },
+      connectionHandler: {
+        buildSourceConnectionWork: buildJunctionSourceConnectionWork,
+        isSourceAccessActive: providerRead,
+      },
     });
     mocks.getConnectionRecordForUser.mockResolvedValue(pendingRecord);
     mocks.listConnectionSourceAdmissionCandidates.mockResolvedValue([
@@ -1931,6 +1966,7 @@ describe("hosted device-sync wakes", () => {
         list: mocks.registryList,
         register: vi.fn(),
       },
+      sourceAdmissionDeferred: true,
       store: new PrismaDeviceSyncControlPlaneStore({ prisma: getPrisma() }),
       traceId: "trace_pending_source",
       webhook: {
@@ -1957,12 +1993,75 @@ describe("hosted device-sync wakes", () => {
       tx: mocks.prismaTx,
     }));
     expect(mocks.upsertDirtyConnection).toHaveBeenCalledOnce();
+    expect(mocks.appendHostedMailboxEnvelope).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        envelope: expect.objectContaining({
+          hint: expect.objectContaining({
+            jobs: [
+              expect.objectContaining({
+                kind: "backfill",
+                payload: expect.objectContaining({ sourceProviderSlug: "garmin" }),
+              }),
+              expect.objectContaining({
+                kind: "reconcile",
+                payload: expect.objectContaining({ sourceProviderSlug: "garmin" }),
+              }),
+            ],
+          }),
+          reason: "connected",
+        }),
+        tx: mocks.prismaTx,
+      }),
+    );
     expect(mocks.completeWebhookTrace).toHaveBeenCalledWith(
       "junction",
       "trace_pending_source",
       "claim-token",
       mocks.prismaTx,
     );
+  });
+
+  it("keeps established source webhooks off the recovery read path", async () => {
+    const source = buildHostedConnectionSource("dsc_123", "garmin", {
+      status: "connected",
+    });
+    mocks.prismaTx.deviceConnection.findUnique.mockResolvedValue(
+      buildWebhookAdmissionRecord({ provider: "junction" }),
+    );
+    mocks.listConnectionSourceAdmissionCandidates.mockResolvedValue([
+      buildHostedConnectionSourceAdmissionCandidate(source),
+    ]);
+
+    await handleHostedDeviceSyncWebhookAccepted({
+      account: {
+        connectedAt: "2026-03-26T12:00:00.000Z",
+        id: "dsc_123",
+        provider: "junction",
+      },
+      claimToken: "claim-token",
+      now: "2026-03-26T12:00:00.000Z",
+      ownerId: "user-123",
+      registry: {
+        get: mocks.registryGet,
+        list: mocks.registryList,
+        register: vi.fn(),
+      },
+      sourceAdmissionDeferred: false,
+      store: new PrismaDeviceSyncControlPlaneStore({ prisma: getPrisma() }),
+      traceId: "trace_established_source",
+      webhook: {
+        acceptanceMode: "level_dirty_hint",
+        eventType: "daily.data.heartrate.created",
+        jobs: [],
+        sourceProviderSlug: "garmin",
+      },
+    });
+
+    expect(mocks.withHealthDataAdmissionLock).toHaveBeenCalledTimes(2);
+    expect(mocks.getConnectionRecordForUser).not.toHaveBeenCalled();
+    expect(mocks.materializeStoredConnectionAccount).not.toHaveBeenCalled();
+    expect(mocks.registryGet).not.toHaveBeenCalled();
   });
 
   it("terminally settles prepared Junction work when the source epoch changes across provider I/O", async () => {
@@ -1975,7 +2074,10 @@ describe("hosted device-sync wakes", () => {
       return true;
     });
     mocks.registryGet.mockReturnValue({
-      connectionHandler: { isSourceAccessActive: providerRead },
+      connectionHandler: {
+        buildSourceConnectionWork: buildJunctionSourceConnectionWork,
+        isSourceAccessActive: providerRead,
+      },
     });
     mocks.listConnectionSourceAdmissionCandidates
       .mockResolvedValueOnce([buildHostedConnectionSourceAdmissionCandidate(initialSource)])
@@ -2044,7 +2146,10 @@ describe("hosted device-sync wakes", () => {
       return buildProviderConfigStoredConnection({ provider: "junction" });
     });
     mocks.registryGet.mockReturnValue({
-      connectionHandler: { isSourceAccessActive: providerRead },
+      connectionHandler: {
+        buildSourceConnectionWork: buildJunctionSourceConnectionWork,
+        isSourceAccessActive: providerRead,
+      },
     });
     mocks.listConnectionSourceAdmissionCandidates.mockResolvedValue([
       buildHostedConnectionSourceAdmissionCandidate(source),
@@ -2111,7 +2216,10 @@ describe("hosted device-sync wakes", () => {
     });
     const providerRead = vi.fn(async () => true);
     mocks.registryGet.mockReturnValue({
-      connectionHandler: { isSourceAccessActive: providerRead },
+      connectionHandler: {
+        buildSourceConnectionWork: buildJunctionSourceConnectionWork,
+        isSourceAccessActive: providerRead,
+      },
     });
     mocks.listConnectionSourceAdmissionCandidates.mockResolvedValue([
       buildHostedConnectionSourceAdmissionCandidate(source),
@@ -5770,7 +5878,10 @@ describe("hosted device-sync wakes", () => {
     });
     const providerRead = vi.fn(async () => false);
     mocks.registryGet.mockReturnValue({
-      connectionHandler: { isSourceAccessActive: providerRead },
+      connectionHandler: {
+        buildSourceConnectionWork: buildJunctionSourceConnectionWork,
+        isSourceAccessActive: providerRead,
+      },
     });
     mocks.getConnectionRecordForUser.mockResolvedValue(currentConnection);
     mocks.materializeStoredConnectionAccount.mockResolvedValue(

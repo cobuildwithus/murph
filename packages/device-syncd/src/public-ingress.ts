@@ -1797,6 +1797,7 @@ export class DeviceSyncPublicIngress {
       const acceptedResult = await onWebhookAccepted?.({
         account,
         claimToken,
+        sourceAdmissionDeferred,
         traceId,
         webhook,
         provider,

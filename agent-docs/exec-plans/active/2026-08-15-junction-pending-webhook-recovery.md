@@ -2,7 +2,7 @@
 
 Status: active
 Created: 2026-08-15
-Updated: 2026-08-15
+Updated: 2026-08-16
 
 ## Goal
 
@@ -16,7 +16,8 @@ Updated: 2026-08-15
 - A focused regression test reproduces the current `WEBHOOK_ACCOUNT_NOT_READY`
   loop for a pending Junction connection.
 - The same event confirms the connection, admits the exact source, persists the
-  webhook, and schedules normal dirty work in one hosted admission flow.
+  webhook, and schedules both callback-equivalent initial work and normal dirty
+  work in one hosted admission flow.
 - Unattributed events, inactive sources, changed credentials, withdrawn
   consent, stale source epochs, and private provider applications stay closed.
 - Focused package and hosted Web tests pass on the final file state.
@@ -28,9 +29,11 @@ Updated: 2026-08-15
   - Pending Junction webhook admission in `packages/device-syncd`.
   - Hosted source verification and atomic setup confirmation in `apps/web`.
   - Focused regression coverage for both owner boundaries.
+  - Pull request merge, Web deploy confirmation, and retained DLQ redrive after
+    the fixed Web version is live.
 - Out of scope:
   - Queue retry policy, dead-letter retention, and monitoring thresholds.
-  - Automatic production deploys or dead-letter redrive.
+  - Purging, copying, or decrypting dead-letter payloads.
   - The separate PlanetScale telemetry-omission alert.
 
 ## Constraints
@@ -39,8 +42,8 @@ Updated: 2026-08-15
   - Reuse the existing `onConnectionSourceObserved` and hosted admission flow.
   - Do not accept a webhook from the pending state without provider proof.
   - Keep provider I/O outside database transactions.
-  - Commit setup, source, dirty state, and trace under the existing health-data
-    admission lock.
+  - Commit setup, source, initial mailbox work, dirty state, and trace under the
+    existing health-data admission lock.
 - Product/process constraints:
   - Do not drop queued health data to clear the alert.
   - Use a task worktree, focused proof, a pull request, ReviewGPT, and green CI.
@@ -51,8 +54,8 @@ Updated: 2026-08-15
    Mitigation: Treat the webhook only as a trigger. Verify the exact source live,
    then recheck its credential epoch, connection epoch, application, and status.
 2. Risk: Setup confirmation could commit without webhook work.
-   Mitigation: Write setup, source admission, dirty state, and trace in the same
-   final locked transaction.
+   Mitigation: Write setup, source admission, initial mailbox work, dirty state,
+   and trace in the same final locked transaction.
 3. Risk: Web and queue deploy order could lose recovery coverage.
    Mitigation: Keep the queue envelope contract unchanged and deploy Web before
    redriving the dead-letter queue.
@@ -60,6 +63,14 @@ Updated: 2026-08-15
    it, then cause that webhook to be acknowledged without its exact payload.
    Mitigation: Retry durable work when source proof changes. On replay, the
    already-admitted source follows normal persistence before trace completion.
+5. Risk: Recovery could confirm the source without the source-scoped historical
+   import and runtime handoff that callback completion creates.
+   Mitigation: Both paths use the same transaction owner. Recovery commits the
+   provider-owned initial jobs and mailbox handoff even when dirty state exists.
+6. Risk: Established Junction webhooks could pay for an unnecessary recovery
+   lock and provider preparation read.
+   Mitigation: Shared ingress carries its transient defer decision to Web. Only
+   deferred source admission enters the recovery preparation path.
 
 ## Tasks
 
@@ -95,10 +106,13 @@ Updated: 2026-08-15
   - Existing failure and race tests remain green.
 - Completed local proof:
   - `packages/device-syncd/test/public-ingress.test.ts`: 80 passed.
-  - `apps/web/test/device-sync-hosted-wake.test.ts`: 161 passed.
+  - `apps/web/test/device-sync-hosted-wake.test.ts`: 162 passed after final
+    review remediation, including the established-source fast path.
   - `packages/device-syncd/test/junction-provider.test.ts`: 278 passed.
   - `apps/web/test/device-sync-prepared-webhook-authority-postgres.test.ts`:
     5 passed against an isolated migrated PostgreSQL database.
+  - `apps/web/test/device-sync-db-spike-resilience-postgres.test.ts`: 6 passed;
+    the 1,641-receipt replay retains its established-source read bounds.
   - `packages/device-syncd` typecheck: passed.
   - `apps/web` typecheck: passed.
   - `pnpm docs:drift`: passed.
@@ -109,3 +123,12 @@ Updated: 2026-08-15
     supersede live proof and terminally settle durable work before its payload
     merged. Durable work now retries, and real PostgreSQL replay proof persists
     the exact payload once before trace completion.
+  - Final ReviewGPT round 1 finding accepted: source recovery could confirm
+    setup without callback-equivalent initial work or a guaranteed runtime
+    handoff. Recovery now reuses the callback transaction owner and the
+    provider's exact source-work builder. Real PostgreSQL proves the encrypted
+    initial mailbox and runtime signal persist even when dirty state exists.
+  - Final ReviewGPT round 1 finding accepted: established source webhooks always
+    entered an extra recovery preparation lock. Shared ingress now passes its
+    transient defer decision, and established sources keep the normal two-pass
+    durable admission path without a provider read.

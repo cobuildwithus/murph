@@ -1187,8 +1187,10 @@ Last verified: 2026-08-15
   source-attributed webhook. The webhook is only a reconciliation trigger. It
   cannot confirm setup by itself. Hosted recovery rechecks consent, shared-app
   binding, connection epoch, credential epoch, source epoch, and disconnect
-  fences before it commits `source_confirmed`, source admission, dirty state,
-  and trace completion in one locked transaction. A pending webhook without
+  fences before it commits `source_confirmed`, source admission,
+  callback-equivalent source-scoped initial work, its mandatory mailbox
+  handoff, dirty state, and trace completion in one locked transaction. The
+  initial handoff is required even when dirty state already exists. A pending webhook without
   that exact provider proof releases its trace claim and returns a retryable
   not-ready response. Manual reconcile, due scheduling, ordinary queued jobs,
   and sync-success promotion apply the same account phase gate. After a shared

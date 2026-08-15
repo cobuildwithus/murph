@@ -1,4 +1,4 @@
-import { createHmac, randomUUID } from "node:crypto";
+import { createHmac, generateKeyPairSync, randomUUID } from "node:crypto";
 
 import type { PrismaClient } from "@prisma/client";
 import {
@@ -17,9 +17,25 @@ import type { HostedDeviceSyncControlPlaneContext } from "@/src/lib/device-sync/
 import { PrismaDeviceSyncControlPlaneStore } from "@/src/lib/device-sync/prisma-store";
 import { HostedDeviceSyncPublicIngressService } from "@/src/lib/device-sync/public-ingress-service";
 import { HostedDeviceSyncWebhookAdminService } from "@/src/lib/device-sync/webhook-admin-service";
+import { provisionActiveHostedDomainRootEnvelopeForUserOnly } from "@/src/lib/hosted-crypto/domain-root-store";
 import { setHostedSecureBoxStringTestCodecForTests } from "@/src/lib/hosted-crypto/secure-box";
+import { readHostedMailboxWakeByItemId } from "@/src/lib/hosted-mailbox/store";
 import { revokeHostedConsentScope } from "@/src/lib/legal/consent";
 import { createPrismaClient } from "@/src/lib/prisma";
+
+const runtimeMocks = vi.hoisted(() => ({
+  signalHostedDeviceSyncMailboxRuntime: vi.fn(async () => ({
+    signalAccepted: true as const,
+    workflowId: "hosted-user-runtime:test",
+  })),
+}));
+
+vi.mock("@/src/lib/hosted-orchestration/signal-runtime", async (importOriginal) => ({
+  ...(await importOriginal<
+    typeof import("@/src/lib/hosted-orchestration/signal-runtime")
+  >()),
+  signalHostedDeviceSyncMailboxRuntime: runtimeMocks.signalHostedDeviceSyncMailboxRuntime,
+}));
 
 const databaseUrl = process.env.DATABASE_URL?.trim() ?? "";
 const runPostgresProof = process.env.MURPH_TEST_POSTGRES_CONCURRENCY === "1";
@@ -46,6 +62,7 @@ type Fixture = {
   observer: PrismaClient;
   prisma: PrismaClient;
   receivedAt: Date;
+  restoreCryptoEnvironment: () => void;
   sourceId: string;
   store: PrismaDeviceSyncControlPlaneStore;
   traceIds: string[];
@@ -57,6 +74,7 @@ async function createFixture(input: {
   sourceProviderSlug?: string;
 }): Promise<Fixture> {
   const suffix = randomUUID().replaceAll("-", "");
+  const restoreCryptoEnvironment = configureLocalCryptoForTest();
   const memberId = `member_prepared_webhook_authority_${suffix}`;
   const externalAccountId = `junction_prepared_webhook_${suffix}`;
   const receivedAt = new Date();
@@ -76,7 +94,14 @@ async function createFixture(input: {
     decrypt: (codecInput) => codecInput.value,
     encrypt: (codecInput) => codecInput.value,
   });
+  runtimeMocks.signalHostedDeviceSyncMailboxRuntime.mockClear();
   await prisma.hostedMember.create({ data: { id: memberId } });
+  await provisionActiveHostedDomainRootEnvelopeForUserOnly({
+    domain: "ingress",
+    prisma,
+    reason: "prepared-webhook-authority-test",
+    userId: memberId,
+  });
   await prisma.hostedConsentGrant.create({
     data: {
       createdAt: receivedAt,
@@ -135,6 +160,7 @@ async function createFixture(input: {
     observer,
     prisma,
     receivedAt,
+    restoreCryptoEnvironment,
     sourceId: source.id,
     store,
     traceIds: [],
@@ -370,6 +396,7 @@ async function cleanupFixture(fixture: Fixture): Promise<void> {
     fixture.prisma.$disconnect(),
   ]);
   setHostedSecureBoxStringTestCodecForTests(null);
+  fixture.restoreCryptoEnvironment();
 }
 
 describe.skipIf(!runPostgresProof)(
@@ -479,10 +506,34 @@ describe.skipIf(!runPostgresProof)(
         })).resolves.toBe(1);
         await expect(fixture.prisma.deviceSyncSignal.count({
           where: { connectionId: fixture.connectionId },
-        })).resolves.toBe(1);
-        await expect(fixture.prisma.hostedMailboxItem.count({
+        })).resolves.toBe(2);
+        const mailboxItem = await fixture.prisma.hostedMailboxItem.findFirstOrThrow({
+          select: { id: true },
           where: { userId: fixture.memberId },
-        })).resolves.toBe(0);
+        });
+        const sourceWake = await readHostedMailboxWakeByItemId({
+          mailboxItemId: mailboxItem.id,
+          prisma: fixture.prisma,
+        });
+        expect(sourceWake).toMatchObject({
+          connectionId: fixture.connectionId,
+          hint: {
+            jobs: [
+              expect.objectContaining({
+                kind: "backfill",
+                payload: expect.objectContaining({ sourceProviderSlug }),
+              }),
+              expect.objectContaining({
+                kind: "reconcile",
+                payload: expect.objectContaining({ sourceProviderSlug }),
+              }),
+            ],
+          },
+          reason: "connected",
+        });
+        expect(runtimeMocks.signalHostedDeviceSyncMailboxRuntime).toHaveBeenCalledWith({
+          mailboxItemId: mailboxItem.id,
+        });
       } finally {
         await cleanupFixture(fixture);
       }
@@ -849,4 +900,56 @@ function isClearlyLocalPostgresUrl(value: string): boolean {
   } catch {
     return false;
   }
+}
+
+const LOCAL_CRYPTO_ENV_KEYS = [
+  "HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID",
+  "HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PUBLIC_JWK",
+  "HOSTED_CRYPTO_ENV",
+  "HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_KEY_VERSION",
+  "HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_PUBLIC_KEY_PEM",
+  "HOSTED_CRYPTO_GCP_KMS_API_ROOT",
+  "HOSTED_CRYPTO_GCP_WEB_WRAP_KEY_NAME",
+  "HOSTED_CRYPTO_LOCAL_AUTHORITY_SIGN_PRIVATE_JWK",
+  "HOSTED_CRYPTO_LOCAL_KMS_WRAP_KEY",
+] as const;
+
+function configureLocalCryptoForTest(): () => void {
+  const previous = new Map(
+    LOCAL_CRYPTO_ENV_KEYS.map((key) => [key, process.env[key]]),
+  );
+  const authorityKey = generateKeyPairSync("ec", {
+    namedCurve: "prime256v1",
+    privateKeyEncoding: { format: "jwk" },
+    publicKeyEncoding: { format: "pem", type: "spki" },
+  });
+  const automationKey = generateKeyPairSync("ec", {
+    namedCurve: "prime256v1",
+    privateKeyEncoding: { format: "jwk" },
+    publicKeyEncoding: { format: "jwk" },
+  });
+  Object.assign(process.env, {
+    HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID: "prepared-webhook-authority-test-key",
+    HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PUBLIC_JWK:
+      JSON.stringify(automationKey.publicKey),
+    HOSTED_CRYPTO_ENV: "test",
+    HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_KEY_VERSION:
+      "projects/murph-test/locations/global/keyRings/test/cryptoKeys/authority/cryptoKeyVersions/1",
+    HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_PUBLIC_KEY_PEM: authorityKey.publicKey,
+    HOSTED_CRYPTO_GCP_KMS_API_ROOT: "local://murph-hosted-kms",
+    HOSTED_CRYPTO_GCP_WEB_WRAP_KEY_NAME:
+      "projects/murph-test/locations/global/keyRings/test/cryptoKeys/web-wrap",
+    HOSTED_CRYPTO_LOCAL_AUTHORITY_SIGN_PRIVATE_JWK:
+      JSON.stringify(authorityKey.privateKey),
+    HOSTED_CRYPTO_LOCAL_KMS_WRAP_KEY: Buffer.alloc(32, 23).toString("base64"),
+  });
+  return () => {
+    for (const [key, value] of previous) {
+      if (value === undefined) {
+        delete process.env[key];
+      } else {
+        process.env[key] = value;
+      }
+    }
+  };
 }

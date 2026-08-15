@@ -9194,6 +9194,15 @@ test("Junction completeConnection treats Link callback as weak and enqueues scal
     sourceConnection.initialJobs?.[0]?.dedupeKey,
     connection.initialJobs?.[0]?.dedupeKey,
   );
+  const sourceRecoveryWork = requireJunctionConnectionHandler(provider)
+    .buildSourceConnectionWork?.({
+      now: "2026-04-03T00:00:00.000Z",
+      sourceProviderSlug: "fitbit",
+    });
+  assert.deepEqual(sourceRecoveryWork, {
+    initialJobs: sourceConnection.initialJobs,
+    nextReconcileAt: sourceConnection.nextReconcileAt,
+  });
 
   // Every initial job crosses the configured-manifest boundary inside the OAuth
   // callback handler before the connection is persisted. An undeclared payload

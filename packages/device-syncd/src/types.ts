@@ -720,6 +720,8 @@ export interface DeviceSyncPublicIngressConnectionSourceObservedInput {
 export interface DeviceSyncPublicIngressWebhookAcceptedInput {
   account: PublicDeviceSyncAccount;
   claimToken: string;
+  /** True only when hosted admission must finish exact-source recovery. */
+  sourceAdmissionDeferred: boolean;
   traceId: string;
   webhook: DeviceSyncIngressWebhook;
   provider: DeviceSyncProvider;
@@ -922,6 +924,10 @@ export interface DeviceSyncProviderDiagnostics {
 export interface DeviceConnectionHandler {
   beginConnection(input: ProviderBeginConnectionContext): Promise<ProviderBeginConnectionResult>;
   completeConnection(input: ProviderCompleteConnectionContext): Promise<ProviderConnectionResult>;
+  buildSourceConnectionWork?(input: {
+    now: string;
+    sourceProviderSlug: string;
+  }): Pick<ProviderConnectionResult, "initialJobs" | "nextReconcileAt">;
   refreshTokens?(account: DeviceSyncAccount, options?: { signal?: AbortSignal | null }): Promise<ProviderAuthTokens>;
   revokeAccess?(account: DeviceSyncAccount): Promise<void>;
   revokeSourceAccess?(account: DeviceSyncAccount, sourceProviderSlug: string): Promise<void>;
