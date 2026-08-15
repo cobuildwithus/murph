@@ -636,7 +636,7 @@ async function inspectHostedPreCheckpointSystemMailboxPrefetch(
   hasSystemWork: boolean;
 }> {
   const response = await prefetch.response;
-  const reachesEveryLaneHighWater = prefetch.lanes.every((lane) => {
+  const reachesLaneHighWater = (lane: HostedMailboxLane): boolean => {
     const laneHighWaters = response.maxSeqByLane.filter((entry) => entry.lane === lane);
     if (laneHighWaters.length !== 1) {
       return false;
@@ -665,7 +665,10 @@ async function inspectHostedPreCheckpointSystemMailboxPrefetch(
     return visibleMaxSeq === null
       ? maxSeq <= importedSeq
       : visibleMaxSeq === maxSeq;
-  });
+  };
+  const reachesEveryLaneHighWater = prefetch.lanes.every(reachesLaneHighWater);
+  const reachesSystemLaneHighWater = prefetch.lanes.includes("system")
+    && reachesLaneHighWater("system");
   const initialSystemSeq = parseHostedMailboxSeqOrNull(
     prefetch.importedSeqByLane.system,
   );
@@ -674,7 +677,7 @@ async function inspectHostedPreCheckpointSystemMailboxPrefetch(
   // activation continuation signals it. The shared prefetch can still hold
   // that conversation prefix after it has been imported, so classify only
   // the complete system lane here.
-  const containsOnlyInitialMemberActivation = reachesEveryLaneHighWater
+  const containsOnlyInitialMemberActivation = reachesSystemLaneHighWater
     && initialSystemSeq === 0n
     && systemItems.length === 1
     && systemItems[0]?.kind === "member.activated"

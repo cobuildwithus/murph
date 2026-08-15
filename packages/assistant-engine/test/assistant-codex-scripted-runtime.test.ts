@@ -270,6 +270,7 @@ interface ScriptedResponseRoute {
   delayMs?: number
   requestExcludes?: readonly string[]
   requestIncludes?: readonly string[]
+  usageInputTokens?: number
 }
 
 type ScriptedResponse = ScriptedResponseRoute & (
@@ -8221,10 +8222,25 @@ text(JSON.stringify(result));
     ])
   })
 
-  it('compacts the warm thread off-turn and keeps it resumable', {
+  it('compacts a 95k personal warm thread off-turn and keeps its task resumable', {
     timeout: TURN_TIMEOUT_MS,
   }, async () => {
     const scenario = await prepareScriptedTurnScenario()
+    const goalSentinel = 'IDLE_COMPACTION_GOAL'
+    const constraintSentinel = 'IDLE_COMPACTION_CONSTRAINT'
+    const toolResultSentinel = 'IDLE_COMPACTION_TOOL_RESULT'
+    const compactedSummary = [
+      'SCRIPTED_COMPACT_SUMMARY',
+      goalSentinel,
+      constraintSentinel,
+      toolResultSentinel,
+    ].join(' ')
+    const resumedReply = [
+      'POST_COMPACT_OK',
+      goalSentinel,
+      constraintSentinel,
+      toolResultSentinel,
+    ].join(' ')
     scenario.stub.queue({ text: 'COMPACT_SEED_OK' })
     const seeded = await executeCodexAppServerTurn({
       ...scenario.turnInput,
@@ -8233,10 +8249,19 @@ text(JSON.stringify(result));
     })
     expect(seeded.finalMessage).toBe('COMPACT_SEED_OK')
 
-    scenario.stub.queue({ text: 'COMPACT_STANDARD_OK' })
+    scenario.stub.queue({
+      text: 'COMPACT_STANDARD_OK',
+      usageInputTokens: 95_000,
+    })
     const standard = await executeCodexAppServerTurn({
       ...scenario.turnInput,
-      prompt: 'Reply exactly COMPACT_STANDARD_OK.',
+      prompt: [
+        'Preserve this task across the next idle checkpoint.',
+        `Goal: ${goalSentinel}`,
+        `Constraint: ${constraintSentinel}`,
+        `Completed tool result: ${toolResultSentinel}`,
+        'Reply exactly COMPACT_STANDARD_OK.',
+      ].join('\n'),
       resumeSessionId: seeded.sessionId,
     })
     expect(standard.finalMessage).toBe('COMPACT_STANDARD_OK')
@@ -8247,7 +8272,7 @@ text(JSON.stringify(result));
     // turn's tokenUsage events, not a placeholder.
     scenario.stub.markRequestBaseline()
     const skipped = await compactWarmCodexThread({
-      minThreadTokens: 50_000,
+      minThreadTokens: 100_000,
       timeoutMs: 30_000,
     })
     expect(skipped).toMatchObject({
@@ -8256,15 +8281,15 @@ text(JSON.stringify(result));
     })
     expect(
       skipped.kind === 'skipped' && typeof skipped.threadContextTokensBefore === 'number'
-        && skipped.threadContextTokensBefore > 0,
+        && skipped.threadContextTokensBefore === 95_000,
     ).toBe(true)
     expect(scenario.stub.requestCountSinceBaseline()).toBe(0)
 
     // Above threshold: the local-provider compaction summarization request is
     // served by the stub and the thread reports compacted.
-    scenario.stub.queue({ text: 'SCRIPTED_COMPACT_SUMMARY' })
+    scenario.stub.queue({ text: compactedSummary })
     const compacted = await compactWarmCodexThread({
-      minThreadTokens: 1,
+      minThreadTokens: 90_000,
       timeoutMs: 60_000,
     })
     expect(compacted).toMatchObject({
@@ -8311,13 +8336,16 @@ text(JSON.stringify(result));
     // disk — the actual production payoff path (compact -> snapshot ->
     // container dies -> next wake resumes small).
     await stopWarmCodexAppServer('post-compact-cold-resume')
-    scenario.stub.queue({ text: 'POST_COMPACT_OK' })
+    scenario.stub.queue({
+      requestIncludes: [goalSentinel, constraintSentinel, toolResultSentinel],
+      text: resumedReply,
+    })
     const resumed = await executeCodexAppServerTurn({
       ...scenario.turnInput,
-      prompt: 'Reply exactly POST_COMPACT_OK.',
+      prompt: 'Finish the preserved task after the idle checkpoint.',
       resumeSessionId: seeded.sessionId,
     })
-    expect(resumed.finalMessage).toBe('POST_COMPACT_OK')
+    expect(resumed.finalMessage).toBe(resumedReply)
     expect(resumed.threadId).toBe(seeded.threadId)
   })
 
@@ -9605,6 +9633,7 @@ async function startScriptedResponsesStub(): Promise<ScriptedStub> {
       outputItems,
       response,
       responseId,
+      usageInputTokens: scripted.usageInputTokens,
     })
     if (scripted.completionLabel) {
       completedResponseLabels.push(scripted.completionLabel)
@@ -9787,13 +9816,15 @@ function writeScriptedSseResponse(input: {
   outputItems: readonly Record<string, unknown>[]
   response: ServerResponse
   responseId: string
+  usageInputTokens?: number
 }): void {
+  const inputTokens = input.usageInputTokens ?? 12
   const usage = {
-    input_tokens: 12,
+    input_tokens: inputTokens,
     input_tokens_details: { cached_tokens: 0 },
     output_tokens: 7,
     output_tokens_details: { reasoning_tokens: 0 },
-    total_tokens: 19,
+    total_tokens: inputTokens + 7,
   }
   const completedResponse = {
     created_at: Math.floor(Date.now() / 1000),
