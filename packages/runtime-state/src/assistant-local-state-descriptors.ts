@@ -38,6 +38,20 @@ function definePortableAssistantFile(
   });
 }
 
+function definePortableRebuildableAssistantFile(
+  relativePath: string,
+  description: string,
+): VaultLocalStatePathDescriptor {
+  return defineLocalStateFileDescriptor({
+    classification: "operational",
+    description,
+    owner: ASSISTANT_OWNER,
+    portability: "portable",
+    rebuildable: true,
+    relativePath,
+  });
+}
+
 function definePortableAssistantSubtree(
   relativePath: string,
   description: string,
@@ -141,9 +155,9 @@ export const assistantLocalStateDescriptors: readonly VaultLocalStatePathDescrip
     ".runtime/operations/assistant/state",
     "Assistant state container used for portable onboarding continuity descendants.",
   ),
-  definePortableAssistantSubtree(
-    ".runtime/operations/assistant/state/session-routing",
-    "Assistant exact alias and conversation-key routing records that must move with hosted session continuity.",
+  definePortableRebuildableAssistantFile(
+    ".runtime/operations/assistant/state/session-routing.sqlite",
+    "Assistant exact alias and conversation-key routing projection that moves with hosted continuity and can be rebuilt from durable sessions.",
   ),
   definePortableAssistantDirectory(
     ".runtime/operations/assistant/state/onboarding",
@@ -183,7 +197,7 @@ export const assistantLocalStateDescriptors: readonly VaultLocalStatePathDescrip
   ),
   definePortableAssistantFile(
     ".runtime/operations/assistant/indexes.json",
-    "Assistant bounded recent-session index and routing format marker that keep hosted resume available without rebuilding session files.",
+    "Legacy assistant aggregate routing projection retained only when an older runtime rebuilds it during rollback.",
   ),
   definePortableAssistantSubtree(
     ".runtime/operations/assistant/journals",

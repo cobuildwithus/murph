@@ -1,4 +1,4 @@
-import { access, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { access, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 
 import {
@@ -26,13 +26,14 @@ import {
   isAssistantSessionExpired,
   loadAndPersistResolvedSession,
   pruneAssistantTranscriptRetention,
+  readAssistantRecentSessionIds,
   readAssistantSession,
   readAssistantSessionRouting,
   readAssistantTranscriptEntries,
   readAutomationState,
   replaceTranscriptEntries,
   resolveAssistantSessionPath,
-  resolveAssistantSessionRoutingRecordPath,
+  resolveAssistantSessionRoutingDatabasePath,
   resolveAssistantTranscriptPath,
   synchronizeAssistantIndexes,
   writeAssistantSession,
@@ -497,7 +498,7 @@ describe('assistant store persistence seams', () => {
       .resolves.toEqual(legacyEntries)
   })
 
-  it('initializes and synchronizes exact session routing records', async () => {
+  it('initializes and synchronizes the transactional session routing projection', async () => {
     const paths = await createAssistantPaths('assistant-store-persistence-indexes-')
     await ensureAssistantState(paths)
 
@@ -507,10 +508,12 @@ describe('assistant store persistence seams', () => {
     })
     expect(initial.aliasSessionId).toBeNull()
     expect([...initial.conversationKeySessionIds]).toEqual([])
-    expect(JSON.parse(await readFile(paths.indexesPath, 'utf8'))).toEqual({
-      version: 2,
-      recentSessions: {},
+    await expect(access(paths.indexesPath)).rejects.toMatchObject({
+      code: 'ENOENT',
     })
+    await expect(access(
+      resolveAssistantSessionRoutingDatabasePath(paths),
+    )).resolves.toBeUndefined()
 
     const previous = createSession({
       alias: 'alpha',
@@ -541,28 +544,18 @@ describe('assistant store persistence seams', () => {
     expect([...routing.conversationKeySessionIds]).toEqual([
       ['telegram:user-1:thread-2', 'session-index-shared'],
     ])
-    await expect(
-      readFile(
-        resolveAssistantSessionRoutingRecordPath(paths, 'alias', 'alpha'),
-        'utf8',
-      ),
-    ).rejects.toMatchObject({ code: 'ENOENT' })
-    expect(JSON.parse(await readFile(
-      resolveAssistantSessionRoutingRecordPath(paths, 'alias', 'beta'),
-      'utf8',
-    ))).toEqual({
-      version: 1,
-      sessionId: 'session-index-shared',
-    })
-    expect(JSON.parse(await readFile(paths.indexesPath, 'utf8'))).toEqual({
-      version: 2,
-      recentSessions: {
-        'session-index-shared': '2026-04-08T00:06:00.000Z',
-      },
+    await expect(readAssistantSessionRouting(paths, {
+      alias: 'alpha',
+      conversationKeys: [],
+    })).resolves.toMatchObject({ aliasSessionId: null })
+    await expect(readAssistantRecentSessionIds(paths, { limit: 50 }))
+      .resolves.toEqual(['session-index-shared'])
+    await expect(access(paths.indexesPath)).rejects.toMatchObject({
+      code: 'ENOENT',
     })
   })
 
-  it('updates one route without rewriting unrelated exact routing records', async () => {
+  it('updates one route without deleting a foreign-owned route', async () => {
     const paths = await createAssistantPaths('assistant-store-persistence-indexes-fresh-')
     await ensureAssistantState(paths)
     await readAssistantSessionRouting(paths, {
@@ -570,16 +563,13 @@ describe('assistant store persistence seams', () => {
       conversationKeys: [],
     })
 
-    const externalPath = resolveAssistantSessionRoutingRecordPath(
-      paths,
-      'alias',
-      'external',
-    )
-    const externalRaw = JSON.stringify({
-      version: 1,
+    const external = createSession({
+      alias: 'external',
+      conversationKey: null,
       sessionId: 'session-external',
+      updatedAt: '2026-04-08T00:05:00.000Z',
     })
-    await writeFile(externalPath, externalRaw)
+    await synchronizeAssistantIndexes(paths, external, null)
 
     const current = createSession({
       alias: 'local',
@@ -595,7 +585,6 @@ describe('assistant store persistence seams', () => {
     })
     await synchronizeAssistantIndexes(paths, current, previous)
 
-    await expect(readFile(externalPath, 'utf8')).resolves.toBe(externalRaw)
     await expect(readAssistantSessionRouting(paths, {
       alias: 'external',
       conversationKeys: [],
@@ -608,38 +597,31 @@ describe('assistant store persistence seams', () => {
     })).resolves.toMatchObject({
       aliasSessionId: 'session-local',
     })
-    expect(JSON.parse(await readFile(paths.indexesPath, 'utf8'))).toEqual({
-      version: 2,
-      recentSessions: {
-        'session-local': '2026-04-08T00:07:00.000Z',
-      },
+    await expect(access(paths.indexesPath)).rejects.toMatchObject({
+      code: 'ENOENT',
     })
   })
 
   it('rejects stale exact routes before they can rebind a canonical session', async () => {
     const paths = await createAssistantPaths('assistant-store-persistence-index-stale-')
     await ensureAssistantState(paths)
+    const staleSession = createSession({
+      alias: 'stale-alias',
+      conversationKey: 'telegram:user-1:thread-stale',
+      sessionId: 'session-current',
+      threadId: 'thread-stale',
+    })
     const session = createSession({
       alias: 'current-alias',
       conversationKey: 'telegram:user-1:thread-current',
       sessionId: 'session-current',
       threadId: 'thread-current',
     })
+    await writeAssistantSession(paths, staleSession)
+    await synchronizeAssistantIndexes(paths, staleSession, null)
+    // Simulate an interrupted session/index pair: the canonical session write
+    // landed, but the derived routing transaction did not.
     await writeAssistantSession(paths, session)
-    await synchronizeAssistantIndexes(paths, session, null)
-
-    await writeFile(
-      resolveAssistantSessionRoutingRecordPath(paths, 'alias', 'stale-alias'),
-      JSON.stringify({ version: 1, sessionId: session.sessionId }),
-    )
-    await writeFile(
-      resolveAssistantSessionRoutingRecordPath(
-        paths,
-        'conversation-key',
-        'telegram:user-1:thread-stale',
-      ),
-      JSON.stringify({ version: 1, sessionId: session.sessionId }),
-    )
     const stale = await readAssistantSessionRouting(paths, {
       alias: 'stale-alias',
       conversationKeys: ['telegram:user-1:thread-stale'],
@@ -713,20 +695,13 @@ describe('assistant store persistence seams', () => {
     expect(rebuilt.conversationKeySessionIds.get(
       'telegram:user-1:thread-good',
     )).toBe('session-good')
-    expect(JSON.parse(await readFile(paths.indexesPath, 'utf8'))).toEqual({
-      version: 2,
-      recentSessions: {
-        'session-good': '2026-04-08T00:05:00.000Z',
-      },
+    await expect(access(paths.indexesPath)).rejects.toMatchObject({
+      code: 'ENOENT',
     })
 
     const quarantines = await listAssistantQuarantineEntriesAtPaths(paths)
     expect(quarantines).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({
-          artifactKind: 'indexes',
-          originalPath: paths.indexesPath,
-        }),
         expect.objectContaining({
           artifactKind: 'session',
           originalPath: resolveAssistantSessionPath(paths, corruptedSessionId),
@@ -741,16 +716,13 @@ describe('assistant store persistence seams', () => {
           kind: 'indexes.rebuilt',
         }),
         expect.objectContaining({
-          kind: 'indexes.quarantined',
-        }),
-        expect.objectContaining({
           kind: 'session.quarantined',
         }),
       ]),
     )
   })
 
-  it('rebuilds corrupted exact routing records from durable sessions', async () => {
+  it('quarantines and atomically rebuilds an incomplete routing database', async () => {
     const paths = await createAssistantPaths('assistant-store-persistence-route-rebuild-')
     await ensureAssistantState(paths)
     await readAssistantSessionRouting(paths, {
@@ -766,12 +738,8 @@ describe('assistant store persistence seams', () => {
     await writeAssistantSession(paths, session)
     await synchronizeAssistantIndexes(paths, session, null)
 
-    const routePath = resolveAssistantSessionRoutingRecordPath(
-      paths,
-      'alias',
-      'repair-alias',
-    )
-    await writeFile(routePath, '{bad-route', 'utf8')
+    const databasePath = resolveAssistantSessionRoutingDatabasePath(paths)
+    await writeFile(databasePath, 'not-a-complete-sqlite-projection', 'utf8')
 
     await expect(readAssistantSessionRouting(paths, {
       alias: 'repair-alias',
@@ -783,7 +751,7 @@ describe('assistant store persistence seams', () => {
       expect.arrayContaining([
         expect.objectContaining({
           artifactKind: 'indexes',
-          originalPath: routePath,
+          originalPath: databasePath,
         }),
       ]),
     )
@@ -832,12 +800,8 @@ describe('assistant store persistence seams', () => {
     })).resolves.toMatchObject({
       aliasSessionId: 'session-older',
     })
-    expect(JSON.parse(await readFile(paths.indexesPath, 'utf8'))).toEqual({
-      version: 2,
-      recentSessions: {
-        'session-newer': expect.any(String),
-        'session-older': expect.any(String),
-      },
+    await expect(access(paths.indexesPath)).rejects.toMatchObject({
+      code: 'ENOENT',
     })
 
     const runtimeEvents = await listAssistantRuntimeEventsAtPath(paths.runtimeEventsPath)
@@ -894,6 +858,8 @@ describe('assistant store persistence seams', () => {
     })).resolves.toMatchObject({
       aliasSessionId: 'session-older',
     })
+    await expect(readAssistantRecentSessionIds(paths, { limit: 2 }))
+      .resolves.toEqual(['session-newer', 'session-older'])
   })
 
   it('applies recent-session limits before reading durable session files', async () => {
@@ -914,18 +880,12 @@ describe('assistant store persistence seams', () => {
     })
     const olderSessionId = 'session-older-corrupt'
     await writeAssistantSession(paths, newest)
+    await synchronizeAssistantIndexes(paths, newest, null)
     await writeFile(
       resolveAssistantSessionPath(paths, olderSessionId),
       '{bad-json',
       'utf8',
     )
-    await writeFile(paths.indexesPath, JSON.stringify({
-      version: 2,
-      recentSessions: {
-        'session-newest': '2026-04-08T00:03:00.000Z',
-        [olderSessionId]: '2026-04-08T00:01:00.000Z',
-      },
-    }), 'utf8')
 
     await expect(listAssistantSessions(context.vaultRoot, {
       limit: 1,
@@ -965,21 +925,22 @@ describe('assistant store persistence seams', () => {
       }),
     ])
 
-    const rebuilt = JSON.parse(await readFile(paths.indexesPath, 'utf8')) as {
-      version?: number
-      recentSessions?: Record<string, string>
-    }
-    expect(rebuilt.version).toBe(2)
-    expect(Object.keys(rebuilt.recentSessions ?? {})).toHaveLength(50)
-    expect(rebuilt.recentSessions?.['session-legacy-59']).toBe(
-      '2026-04-08T00:59:00.000Z',
-    )
+    await expect(access(paths.indexesPath)).rejects.toMatchObject({
+      code: 'ENOENT',
+    })
+    await expect(readAssistantRecentSessionIds(paths, { limit: 100 }))
+      .resolves.toHaveLength(50)
+    await expect(readAssistantRecentSessionIds(paths, { limit: 1 }))
+      .resolves.toEqual(['session-legacy-59'])
     await expect(readAssistantSessionRouting(paths, {
       alias: 'legacy-59',
       conversationKeys: ['local:legacy:59'],
     })).resolves.toMatchObject({
       aliasSessionId: 'session-legacy-59',
     })
+    expect(await readdir(paths.stateDirectory)).toEqual([
+      path.basename(resolveAssistantSessionRoutingDatabasePath(paths)),
+    ])
   })
 
   it('treats corrupted session files as missing and ignores corrupted legacy sidecars for Codex sessions', async () => {

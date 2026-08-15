@@ -6,19 +6,20 @@ Updated: 2026-08-15
 
 ## Goal
 
-- Replace the unbounded shared assistant alias/conversation routing maps with
-  exact per-route records so ordinary lookup and update work stays proportional
+- Replace the shared assistant alias/conversation routing maps with one bounded-
+  file SQLite projection so ordinary lookup and update work stays proportional
   to the requested routing keys, while preserving bounded recent-session
   listing and automatic recovery from the currently deployed aggregate index.
 
 ## Success criteria
 
-- Exact alias and conversation-key updates write only their own deterministic
-  routing record and do not rewrite unrelated routes.
+- Exact alias and conversation-key updates mutate only their own keyed rows in
+  one transaction and do not rewrite unrelated routes.
 - Existing aggregate indexes migrate from durable session files without losing
   valid routing or bounded recent-session behavior.
-- Stale or corrupt routing records fail closed and recover from durable session
-  state; removed bindings no longer resolve.
+- Stale routes fail closed against the durable session, while a corrupt or
+  unsupported projection is quarantined and rebuilt; removed bindings no longer
+  resolve.
 - Assistant-engine and runtime-state focused verification, workspace typecheck,
   exact-head CI, preliminary coverage review, and the final ReviewGPT loop pass.
 - The PR contains no unresolved accepted finding and remains cleanly mergeable
@@ -35,8 +36,9 @@ Updated: 2026-08-15
 ## Constraints
 
 - Technical constraints: preserve one canonical durable session record per
-  session; routing files are derived operational indexes, use atomic writes,
-  and must recover deterministically after partial migration or corruption.
+  session; routing state is a derived operational projection, uses SQLite
+  transactions plus atomic rebuild publication, stays one steady-state file,
+  and recovers deterministically after partial migration or corruption.
 - Product/process constraints: start from current `origin/main`, treat the
   supplied patch as intent, prefer deletion and existing ownership boundaries,
   keep unrelated work untouched, and complete the repository's PR/ReviewGPT
@@ -45,16 +47,14 @@ Updated: 2026-08-15
 ## Risks and mitigations
 
 1. Risk: a migration or interrupted write leaves routing partially converted.
-   Mitigation: rebuild exact routes from durable sessions and write the v2
-   format marker last; prove interrupted/missing/corrupt cases with tests.
+   Mitigation: build a temporary SQLite projection, publish it with one atomic
+   rename, and treat a rollback-created legacy aggregate as a rebuild signal.
 2. Risk: a stale route silently rebinds a canonical session.
    Mitigation: validate the expected alias or conversation key against the
    loaded session before applying any binding patch.
-3. Risk: replacing one shared file with many files creates speculative state or
-   cleanup machinery.
-   Mitigation: keep records content-minimal, deterministically named, derived
-   from existing session files, and avoid new services, locks, queues, or
-   reconciliation loops.
+3. Risk: routing cardinality creates an unbounded hosted workspace file family.
+   Mitigation: keep all exact keyed rows in one existing-helper-backed SQLite
+   projection with `DELETE` journaling and close every handle before checkpoint.
 
 ## Tasks
 
@@ -77,6 +77,14 @@ Updated: 2026-08-15
   not applicable unless the final diff broadens.
 - Changelog is not applicable because this is internal assistant runtime
   persistence with no member-visible behavior change.
+- ReviewGPT round 1 accepted one complexity-collapse finding: the initial
+  per-route JSON design violated the hosted file-count contract. The correction
+  replaces that file family with one transactional rebuildable SQLite
+  projection and does not add another service, queue, lock, or canonical owner.
+- The PR description's initial claim that a schema-valid stale route was
+  quarantined was inaccurate. The implementation intentionally fails that route
+  closed when the canonical session is loaded; only corrupt or unsupported
+  projection files are quarantined and rebuilt.
 
 ## Verification
 
@@ -84,6 +92,20 @@ Updated: 2026-08-15
   Vitest, `pnpm typecheck`, `git diff --check`, exact-head required CI,
   preliminary `completion-specialists`, final `pr-review`, and
   `git merge-tree --write-tree` against current `origin/main`.
-- Expected outcomes: all commands pass; migration and exact-route regression
-  tests exercise production persistence code; ReviewGPT returns its required
+- Expected outcomes: all commands pass; migration, transactional update,
+  bounded-file, timestamp-order, stale-route, and corruption regression tests
+  exercise production persistence code; ReviewGPT returns its required
   completion markers with no unresolved accepted findings.
+
+## Progress evidence
+
+- ReviewGPT preliminary specialist: pass on the first pushed head with no
+  coverage gap or finding.
+- ReviewGPT substantive round 1: one accepted complexity-collapse finding for
+  the per-route portable file family; no other finding.
+- Corrected implementation: one 4.1 MB SQLite projection after a measured cold
+  rebuild from 10,000 durable sessions in 48.9 seconds; the requested route
+  resolved and the state directory contained exactly one file.
+- Corrected-head local verification: assistant persistence 24/24, runtime-state
+  coverage 212/212, runtime-state and assistant-engine typechecks, scenario
+  integrity for 206 scenarios, and `git diff --check` all pass.
