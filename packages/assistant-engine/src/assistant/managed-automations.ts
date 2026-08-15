@@ -444,6 +444,7 @@ export const MURPH_MANAGED_AUTOMATIONS = [
     continuityPolicy: 'fresh',
     ownerScope: 'member',
     assistantTargetOverride: {
+      model: 'gpt-5.6-sol',
       reasoningEffort: 'high',
     },
     tags: [
@@ -542,6 +543,7 @@ export const MURPH_MANAGED_AUTOMATIONS = [
     continuityPolicy: 'fresh',
     ownerScope: 'member',
     assistantTargetOverride: {
+      model: 'gpt-5.6-sol',
       reasoningEffort: 'high',
     },
     tags: [
