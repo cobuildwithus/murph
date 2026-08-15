@@ -453,6 +453,7 @@ function loadReviewGptOpenTargetHarness(
   ])
   const browserTransportTimeoutMs = moduleRecord.exports.__browserTransportTimeoutMsTest
   const pageCommandTimeoutMs = moduleRecord.exports.__pageCommandTimeoutMsTest
+  const createWebSocketOwner = moduleRecord.exports.createWebSocketOwner
   const openNewTarget = moduleRecord.exports.__openTargetTest
   const connectTarget = moduleRecord.exports.__connectTargetTest
   const draftPrompt = moduleRecord.exports.__draftPromptTest
@@ -471,6 +472,7 @@ function loadReviewGptOpenTargetHarness(
   if (
     typeof browserTransportTimeoutMs !== 'number' ||
     typeof pageCommandTimeoutMs !== 'number' ||
+    typeof createWebSocketOwner !== 'function' ||
     typeof openNewTarget !== 'function' ||
     typeof connectTarget !== 'function' ||
     typeof draftPrompt !== 'string' ||
@@ -489,11 +491,12 @@ function loadReviewGptOpenTargetHarness(
   ) {
     throw new Error('ReviewGPT lifecycle functions were not available to the test harness')
   }
+  const socketOwner = Reflect.apply(createWebSocketOwner, undefined, [])
 
   return {
     commands,
     connectTarget: async (desiredUrl: string) => {
-      return Reflect.apply(connectTarget, undefined, [desiredUrl])
+      return Reflect.apply(connectTarget, undefined, [desiredUrl, socketOwner])
     },
     getCloseCommandAttemptCount: () => closeCommandAttemptCount,
     getCreateSendAttemptCount: () => createSendAttemptCount,
@@ -568,7 +571,10 @@ function loadReviewGptOpenTargetHarness(
       snapshot: ReviewGptAssistantSnapshot | null
     },
     openNewTarget: async (desiredUrl: string) => {
-      const target: unknown = await Reflect.apply(openNewTarget, undefined, [desiredUrl])
+      const target: unknown = await Reflect.apply(openNewTarget, undefined, [
+        desiredUrl,
+        socketOwner,
+      ])
       if (
         !target ||
         typeof target !== 'object' ||
@@ -607,7 +613,12 @@ function loadReviewGptOpenTargetHarness(
       responseFilePath,
       responseText,
       evidence,
-    ]) as { evidencePath: string; evidenceWarning: string; responseFilePath: string },
+    ]) as {
+      captureMetadataPath: string
+      evidencePath: string
+      evidenceWarning: string
+      responseFilePath: string
+    },
   }
 }
 
@@ -944,13 +955,13 @@ describe('monorepo release flow coverage audit', () => {
     expect(existsSync(path.join(repoRoot, 'scripts', 'chatgpt-managed-browser.test.mjs'))).toBe(false)
     expect(existsSync(path.join(repoRoot, 'scripts', 'review-gpt.sh'))).toBe(false)
     expect(existsSync(path.join(repoRoot, 'scripts', 'review-gpt-cli.sh'))).toBe(false)
-    expect(rootPackageJson.devDependencies?.['@cobuild/review-gpt']).toBe('^0.5.126')
+    expect(rootPackageJson.devDependencies?.['@cobuild/review-gpt']).toBe('^0.5.127')
     expect(
       pnpmWorkspace
         .match(/^minimumReleaseAgeExclude:\n((?:  - .+\n)+)/mu)?.[1]
         ?.split('\n')
         .filter((line) => line.includes('@cobuild/review-gpt')),
-    ).toEqual(["  - '@cobuild/review-gpt@0.5.126'"])
+    ).toEqual(["  - '@cobuild/review-gpt@0.5.127'"])
     expect(
       pnpmWorkspace
         .match(/^patchedDependencies:\n((?:  .+\n)+)/mu)?.[1]
@@ -983,10 +994,10 @@ describe('monorepo release flow coverage audit', () => {
         '      return { ws, target };',
         '    } catch (error) {',
         '      try {',
-        '        ws?.close();',
+        '        socketOwner.close(ws);',
         '      } catch {}',
         '      try {',
-        '        await closeBackgroundTarget(target?.id);',
+        '        await closeBackgroundTarget(target?.id, socketOwner);',
         '      } catch (cleanupError) {',
         '        throw addTargetCleanupContext(cleanupError, error);',
         '      }',
@@ -1111,7 +1122,7 @@ describe('monorepo release flow coverage audit', () => {
     expect(reviewGptDriver).toContain('REVIEW_GPT_TURN_NONCE:')
     expect(reviewGptDriver).not.toContain("value.includes('MODEL_CONFIRMATION:')")
     expect(reviewGptDriver).toContain('precedingUserMessageSignature')
-    expect(reviewGptDriver).toContain('sendResult.committedUserTurnSignature')
+    expect(reviewGptDriver).toContain('sendResult.committedUserTurn,')
     expect(reviewGptDriver).toContain('schemaVersion: 1')
     expect(reviewGptDriver).toContain("createHash('sha256')")
     expect(reviewGptDriver).toContain('mode: 0o600')
@@ -1127,9 +1138,13 @@ describe('monorepo release flow coverage audit', () => {
         'if (require.main === module) {',
         '  prepareRuntimeConfig();',
         '  const removeSignalCleanup = installOwnedTargetSignalCleanup();',
-        '  mainWithRetry()',
-        '    .then(() => removeSignalCleanup())',
-        '    .catch((error) => {',
+        '  mainWithRetry().then(',
+        '    async () => {',
+        '      removeSignalCleanup();',
+        '      await flushProcessOutput();',
+        '      process.exit(0);',
+        '    },',
+        '    async (error) => {',
       ].join('\n'),
     )
     const completedArtifactWriteStart = reviewGptDriver.indexOf(
@@ -1172,13 +1187,19 @@ describe('monorepo release flow coverage audit', () => {
     expect(reviewGptDriver).toContain('process.exit(1);')
     expect(reviewGptDriver).toContain(
       [
-        '  });',
+        '  let ws = initialConnection.ws;',
+        '  const { target } = initialConnection;',
         "  const pageTargetId = String(target?.id || '');",
         '  let ownedTargetId = pageTargetId;',
-        '  ownedTargetIdForSignalCleanup = ownedTargetId;',
+        '  const closeOwnedTargetOnSignal = async () => {',
+        '    await closeBackgroundTarget(pageTargetId, socketOwner);',
+        '  };',
+        '  ownedTargetSignalCleanup = closeOwnedTargetOnSignal;',
         '  let operationError = null;',
         '  let completedResponseCapture = null;',
         '  let waitedAttachmentCleanupPending = false;',
+        "  let retainedIdleDraftTargetId = '';",
+        '  let acceptedSendProven = false;',
         '  let releasePageFocusEmulation = async () => {};',
         '  try {',
       ].join('\n'),
@@ -1209,8 +1230,11 @@ describe('monorepo release flow coverage audit', () => {
         '      // draft-only runs retain the generated artifacts.',
         "      console.log('Retained generated local attachment artifact(s) for the unsent draft.');",
         '    }',
+        '    retainedIdleDraftTargetId = ownedTargetId;',
         "    ownedTargetId = '';",
-        "    ownedTargetIdForSignalCleanup = '';",
+        '    if (ownedTargetSignalCleanup === closeOwnedTargetOnSignal) {',
+        '      ownedTargetSignalCleanup = null;',
+        '    }',
       ].join('\n'),
     )
     expect(unsentDraft).not.toContain('cleanupConfirmedDraftAttachments')
@@ -1219,7 +1243,9 @@ describe('monorepo release flow coverage audit', () => {
       [
         '      if (!shouldWaitForResponse) {',
         "        ownedTargetId = '';",
-        "        ownedTargetIdForSignalCleanup = '';",
+        '        if (ownedTargetSignalCleanup === closeOwnedTargetOnSignal) {',
+        '          ownedTargetSignalCleanup = null;',
+        '        }',
         '      }',
         '    } else {',
         '      throw new Error(`Auto-send failed: ${JSON.stringify(sendResult?.lastAttempt || sendResult || { status: \'unknown\' })}`);',
@@ -1230,17 +1256,17 @@ describe('monorepo release flow coverage audit', () => {
         '  let cleanupError = null;',
         '  if (ownedTargetId) {',
         '    try {',
-        '      await closeBackgroundTarget(ownedTargetId);',
+        '      await closeBackgroundTarget(ownedTargetId, socketOwner);',
         '    } catch (error) {',
         '      cleanupError = addTargetCleanupContext(error, operationError);',
         '    } finally {',
-        '      if (ownedTargetIdForSignalCleanup === ownedTargetId) {',
-        "        ownedTargetIdForSignalCleanup = '';",
+        '      if (ownedTargetSignalCleanup === closeOwnedTargetOnSignal) {',
+        '        ownedTargetSignalCleanup = null;',
         '      }',
         '    }',
         '  }',
         '  try {',
-        '    ws.close();',
+        '    socketOwner.close(ws);',
         '  } catch {}',
       ].join('\n'),
     )
@@ -1793,6 +1819,7 @@ describe('monorepo release flow coverage audit', () => {
           env: {
             ...withoutNodeV8Coverage(),
             HOME: harnessRoot,
+            REVIEW_GPT_BROWSER_LANE: 'main',
             REVIEW_GPT_BROWSER_LANE_COUNT: '1',
             XDG_CONFIG_HOME: localConfigRoot,
           },
@@ -1956,6 +1983,8 @@ printf '%s|%s|%s|%s|%s|%s|%s\n' \
 set -euo pipefail
 # Keep live local CDP ports out of the lock fixture.
 curl() { return 1; }
+# Keep host Spotlight latency out of this configuration-only fixture.
+mdfind() { return 0; }
 review_gpt_register_dir_preset() { :; }
 review_gpt_register_preset_group() { :; }
 source "$REPO_ROOT/scripts/review-gpt.config.sh"
@@ -2803,6 +2832,7 @@ printf '%s|%s|%s|%s|%s\n' \
       expect(
         harness.writeCompletedResponseArtifacts(responseFile, responseText, evidence),
       ).toEqual({
+        captureMetadataPath: '',
         evidencePath: evidenceFile,
         evidenceWarning: '',
         responseFilePath: responseFile,
@@ -2823,6 +2853,7 @@ printf '%s|%s|%s|%s|%s\n' \
       expect(
         harness.writeCompletedResponseArtifacts(failedResponseFile, responseText, evidence),
       ).toEqual({
+        captureMetadataPath: '',
         evidencePath: '',
         evidenceWarning: expect.stringContaining('Optional model verification was not persisted'),
         responseFilePath: failedResponseFile,
@@ -2933,7 +2964,7 @@ printf '%s|%s|%s|%s|%s\n' \
     expect(persistentCloseAttempts.every(
       (command) => command.params.targetId === 'target-1',
     )).toBe(true)
-    expect(unconfirmedCleanup.getNow()).toBe(5000)
+    expect(unconfirmedCleanup.getNow()).toBe(6000)
 
     const recoveredVersionLookup = loadReviewGptOpenTargetHarness(1, undefined, {
       failPageCommandAtMethod: 'Runtime.enable',
