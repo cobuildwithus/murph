@@ -6,6 +6,7 @@ import {
   mkdtempSync,
   readdirSync,
   readFileSync,
+  realpathSync,
   rmSync,
   statSync,
   symlinkSync,
@@ -99,6 +100,7 @@ import {
   branchPullRequests,
   parseBranchPullRequestPages,
   resolveWorkerMode,
+  worktreeCreationIntentPath,
   type BranchPullRequestRecord,
 } from "./frog-autofix-recovery.ts";
 import {
@@ -1141,6 +1143,13 @@ describe("Frog autofix guards", () => {
       "utf8",
     );
     const runOnce = source.slice(source.indexOf("async function runOnce()"));
+    const creationGate = runOnce.indexOf("const registeredIssueWorktree =");
+    expect(creationGate).toBeGreaterThanOrEqual(0);
+    expect(creationGate).toBeLessThan(runOnce.indexOf("recoverMergedIssueClosure("));
+    expect(creationGate).toBeLessThan(runOnce.indexOf(
+      "restoreRecoveredHandoffBeforeWorktreeRecovery(",
+    ));
+    expect(creationGate).toBeLessThan(runOnce.indexOf("prepareIssueWorktree("));
     const localNoPullRequestHandoff = runOnce.indexOf(
       'if (localBody && bodyHandoffRecord(localBody)?.kind === "review-findings")',
     );
@@ -1334,6 +1343,9 @@ describe("Frog autofix guards", () => {
               events.push("fetch");
             },
             findWorktree: () => worktree,
+            requireCompletedCreation: () => {
+              events.push("creation");
+            },
             refreshAndVerifyIssue: () => {
               events.push("verify");
             },
@@ -1348,7 +1360,7 @@ describe("Frog autofix guards", () => {
             },
           },
         )).toBe(true);
-        expect(events).toEqual(["fetch", "verify", "restamp"]);
+        expect(events).toEqual(["creation", "fetch", "verify", "restamp"]);
         expect(bodyHandoff(current.body, currentHead)).toBe("review-findings");
         expect(readFileSync(path.join(worktree, "human-in-progress.txt")))
           .toEqual(dirtyBefore);
@@ -2002,6 +2014,7 @@ describe("Frog autofix guards", () => {
       git("init", "--quiet");
       git("config", "user.name", "Automation");
       git("config", "user.email", "automation@example.invalid");
+      git("config", "core.hooksPath", "/dev/null");
       const selected = ".agents/friction-log/selected/friction.md";
       const unrelated = ".agents/friction-log/unrelated/friction.md";
       const frogSkill = ".agents/skills/frog/SKILL.md";
@@ -2412,6 +2425,7 @@ esac
     const implementationHead = "b".repeat(40);
     const runScenario = (options: {
       ahead: number;
+      creationIncomplete?: boolean;
       dirty?: boolean;
       localBodyHead?: string | null;
       localHead: string;
@@ -2419,7 +2433,25 @@ esac
       remoteBranch: boolean;
       remoteTrackingBranch?: boolean;
     }) => {
-      const worktree = mkdtempSync(path.join(tmpdir(), "frog-recovery-"));
+      const worktree = realpathSync(
+        mkdtempSync(path.join(tmpdir(), "frog-recovery-")),
+      );
+      const commonDir = path.join(worktree, "common");
+      mkdirSync(commonDir);
+      if (options.creationIncomplete) {
+        const stateDir = path.join(commonDir, "murph-worktree-storage-guard");
+        const intentPath = worktreeCreationIntentPath(stateDir, worktree);
+        mkdirSync(path.dirname(intentPath), { recursive: true });
+        writeFileSync(
+          intentPath,
+          `${JSON.stringify({
+            schema: 1,
+            target: worktree,
+            branch: `refs/heads/${branch}`,
+            head: options.localHead,
+          })}\n`,
+        );
+      }
       const required: string[] = [];
       let recovered = false;
       const remoteTrackingBranch = options.remoteTrackingBranch
@@ -2441,6 +2473,14 @@ esac
           require: (command, args) => {
             const invocation = args.join(" ");
             required.push(`${command} ${invocation}`);
+            if (
+              command === "git"
+              && invocation
+                === "rev-parse --path-format=absolute --git-common-dir"
+            ) return commonDir;
+            if (command === "git" && invocation === "rev-parse --show-toplevel") {
+              return worktree;
+            }
             if (command === "gh") {
               return pullRequestPages(options.pullRequest ? [{
                 ...pullRequestAuthority(branch),
@@ -2495,6 +2535,13 @@ esac
 
     expect(runScenario({ ahead: 0, localHead: mainHead, remoteBranch: false }))
       .toMatchObject({ mode: "implement" });
+    expect(() => runScenario({
+      ahead: 0,
+      creationIncomplete: true,
+      dirty: true,
+      localHead: mainHead,
+      remoteBranch: false,
+    })).toThrow("creation is incomplete; refusing destructive recovery");
     const recovered = runScenario({
       ahead: 0,
       dirty: true,
@@ -4395,7 +4442,9 @@ try {
   });
 
   it("rejects unusable patches and publishes an empty neutral handoff tree", () => {
-    const root = mkdtempSync(path.join(tmpdir(), "frog-empty-handoff-"));
+    const root = realpathSync(
+      mkdtempSync(path.join(tmpdir(), "frog-empty-handoff-")),
+    );
     const git = (...args: string[]) => {
       const result = spawnSync("git", args, { cwd: root, encoding: "utf8" });
       expect(result.status, result.stderr).toBe(0);
@@ -4405,6 +4454,7 @@ try {
       git("init", "--quiet");
       git("config", "user.name", "Automation");
       git("config", "user.email", "automation@example.invalid");
+      git("config", "core.hooksPath", "/dev/null");
       writeFileSync(path.join(root, ".gitignore"), "audit-packages/\n");
       writeFileSync(path.join(root, "AGENTS.md"), "trusted instructions\n");
       writeFileSync(path.join(root, "tracked.txt"), "main\n");
@@ -4445,6 +4495,32 @@ try {
       writeFileSync(rejectedPatch, "not a patch\n");
       expect(() => applyImplementationPatch(root, rejectedPatch, taskIdentity.path))
         .toThrow(TerminalPrePullRequestFailure);
+
+      const commonDir = git(
+        "rev-parse",
+        "--path-format=absolute",
+        "--git-common-dir",
+      );
+      const creationIntent = worktreeCreationIntentPath(
+        path.join(commonDir, "murph-worktree-storage-guard"),
+        root,
+      );
+      mkdirSync(path.dirname(creationIntent), { recursive: true });
+      const writeCreationIntent = (head: string) => writeFileSync(
+        creationIntent,
+        `${JSON.stringify({
+          schema: 1,
+          target: root,
+          branch: `refs/heads/${git("symbolic-ref", "--short", "HEAD")}`,
+          head,
+        })}\n`,
+      );
+      writeCreationIntent(pendingHead);
+      expect(() => createEmptyRepairHandoffCommit(root, 42))
+        .toThrow("creation is incomplete; refusing destructive recovery");
+      expect(readFileSync(path.join(root, "tracked.txt"), "utf8"))
+        .toBe("candidate\n");
+      rmSync(creationIntent);
 
       const head = createEmptyRepairHandoffCommit(root, 42);
       expect(isEmptyRepairHandoffCommit(root, head, 42)).toBe(true);
@@ -4499,6 +4575,14 @@ try {
       git("add", "tracked.txt");
       git("commit", "--quiet", "-m", "local descendant");
       const descendantHead = git("rev-parse", "HEAD");
+      writeCreationIntent(descendantHead);
+      expect(() => normalizeUnpushedDescendantToPullRequestHead(
+        root,
+        descendantHead,
+        head,
+      )).toThrow("creation is incomplete; refusing destructive recovery");
+      expect(git("rev-parse", "HEAD")).toBe(descendantHead);
+      rmSync(creationIntent);
       expect(normalizeUnpushedDescendantToPullRequestHead(
         root,
         descendantHead,
