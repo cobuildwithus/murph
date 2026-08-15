@@ -33,6 +33,34 @@ interface BrowserConfig {
   webOrigin: string;
 }
 
+interface AuthorizationControlSummary {
+  negative: number;
+  positive: number;
+  positiveVisible: number;
+  positiveVisibleEnabled: number;
+  total: number;
+  visible: number;
+  visibleEnabled: number;
+}
+
+interface AuthorizationCheckboxSummary {
+  total: number;
+  visible: number;
+  visibleChecked: number;
+  visibleUnchecked: number;
+}
+
+interface AuthorizationSurfaceSummary {
+  buttons: AuthorizationControlSummary;
+  challengeFrameCount: number;
+  checkboxes: AuthorizationCheckboxSummary;
+  crossOriginFrameCount: number;
+  formCount: number;
+  frameCount: number;
+  links: AuthorizationControlSummary;
+  readyState: "complete" | "interactive" | "loading" | "unknown";
+}
+
 const RUNNER_NAME = "Hosted-local Junction wearable browser runner";
 const AUTH_ACTIONS = [
   /\baccept\b/i,
@@ -260,8 +288,9 @@ async function completeExternalAuthorization(
           `${config.label} authorization was blocked by an external provider challenge.`,
         );
       }
+      const surface = await summarizeAuthorizationSurface(page);
       throw new Error(
-        `${config.label} did not expose an automated authorization action. Manual completion is available only in a headed non-CI run.`,
+        `${config.label} did not expose an automated authorization action. Manual completion is available only in a headed non-CI run. Authorization surface: ${JSON.stringify(surface)}.`,
       );
     }
     await page.waitForTimeout(1_000);
@@ -378,6 +407,114 @@ async function clickFirstVisibleAction(
   return false;
 }
 
+async function summarizeAuthorizationSurface(
+  page: Page,
+): Promise<AuthorizationSurfaceSummary> {
+  const pageOrigin = readOrigin(page.url());
+  const frameUrls = page.frames().map((frame) => frame.url());
+  const readyState = await page.evaluate(() => document.readyState).catch(() => "unknown");
+
+  return {
+    buttons: await summarizeAuthorizationControls(page, "button"),
+    challengeFrameCount: frameUrls.filter((url) =>
+      isHostedLocalProviderChallengeSurface({ frameUrls: [url], title: "" })
+    ).length,
+    checkboxes: await summarizeAuthorizationCheckboxes(page),
+    crossOriginFrameCount: frameUrls.filter((url) => {
+      const origin = readOrigin(url);
+      return origin !== null && pageOrigin !== null && origin !== pageOrigin;
+    }).length,
+    formCount: await page.locator("form").count().catch(() => 0),
+    frameCount: frameUrls.length,
+    links: await summarizeAuthorizationControls(page, "link"),
+    readyState: readyState === "complete"
+        || readyState === "interactive"
+        || readyState === "loading"
+      ? readyState
+      : "unknown",
+  };
+}
+
+async function summarizeAuthorizationControls(
+  page: Page,
+  role: "button" | "link",
+): Promise<AuthorizationControlSummary> {
+  const summary: AuthorizationControlSummary = {
+    negative: 0,
+    positive: 0,
+    positiveVisible: 0,
+    positiveVisibleEnabled: 0,
+    total: 0,
+    visible: 0,
+    visibleEnabled: 0,
+  };
+  const controls = page.getByRole(role);
+  summary.total = await controls.count();
+
+  for (let index = 0; index < summary.total; index += 1) {
+    const control = controls.nth(index);
+    const [ariaLabel, innerText, value, visible, enabled] = await Promise.all([
+      control.getAttribute("aria-label").catch(() => null),
+      control.innerText().catch(() => ""),
+      control.getAttribute("value").catch(() => null),
+      control.isVisible().catch(() => false),
+      control.isEnabled().catch(() => false),
+    ]);
+    const actionText = [ariaLabel, innerText, value].filter(Boolean).join(" ");
+    const positive = AUTH_ACTIONS.some((pattern) => pattern.test(actionText));
+    const negative = NEGATIVE_AUTH_ACTION_PATTERN.test(actionText);
+
+    if (visible) {
+      summary.visible += 1;
+    }
+    if (visible && enabled) {
+      summary.visibleEnabled += 1;
+    }
+    if (positive) {
+      summary.positive += 1;
+    }
+    if (positive && visible) {
+      summary.positiveVisible += 1;
+    }
+    if (positive && visible && enabled) {
+      summary.positiveVisibleEnabled += 1;
+    }
+    if (negative) {
+      summary.negative += 1;
+    }
+  }
+
+  return summary;
+}
+
+async function summarizeAuthorizationCheckboxes(
+  page: Page,
+): Promise<AuthorizationCheckboxSummary> {
+  const summary: AuthorizationCheckboxSummary = {
+    total: 0,
+    visible: 0,
+    visibleChecked: 0,
+    visibleUnchecked: 0,
+  };
+  const checkboxes = page.getByRole("checkbox");
+  summary.total = await checkboxes.count();
+
+  for (let index = 0; index < summary.total; index += 1) {
+    const checkbox = checkboxes.nth(index);
+    if (!await checkbox.isVisible().catch(() => false)) {
+      continue;
+    }
+    summary.visible += 1;
+    if (await checkbox.isChecked().catch(() => false)) {
+      summary.visibleChecked += 1;
+    } else {
+      summary.visibleUnchecked += 1;
+    }
+  }
+
+  return summary;
+}
+
 async function assertWearableConnectionState(
   page: Page,
   config: BrowserConfig,
@@ -489,6 +626,7 @@ export {
   completeAuthorizationAndRequireCallback as completeHostedLocalJunctionAuthorizationForTest,
   completeExternalAuthorization as completeExternalJunctionAuthorizationForTest,
   readBrowserConfig as readHostedLocalJunctionBrowserConfigForTest,
+  summarizeAuthorizationSurface as summarizeHostedLocalJunctionAuthorizationSurfaceForTest,
 };
 
 function assertTrustedAuthorizationUrl(
