@@ -48,14 +48,25 @@ const response = {
 } as never;
 
 type DirectEnsureInput = {
-  onTiming: (timing: {
-    directEnsureRequestStartedAtEpochMs: number;
-    directEnsureResponseReceivedAtEpochMs: number;
-    orchestrationAttemptId: string;
-    tokenAcquiredAtEpochMs: number;
-    tokenAcquireStartedAtEpochMs: number;
-  }) => void;
+  commandTimeoutMs: number;
+  onTiming: (timing:
+    & {
+      directEnsureRequestStartedAtEpochMs: number;
+      directEnsureResponseReceivedAtEpochMs: number;
+      orchestrationAttemptId: string;
+      tokenAcquiredAtEpochMs: number;
+      tokenAcquireStartedAtEpochMs: number;
+    }
+    & (
+      | { directEnsureResultKind: "legacy_accepted" | "retry_later" }
+      | {
+          directEnsureAction: "woken";
+          directEnsureResultKind: "runtime_processing_accepted";
+          directEnsureRuntimeAttemptId: string;
+        }
+    )) => void;
   orchestrationAttemptId: string;
+  signal: AbortSignal;
 };
 
 function buildWakeHandoff(
@@ -109,10 +120,13 @@ describe("maybeHandoffHostedExecutionWebhookWake direct ensure fast path", () =>
     mocks.ensureRuntimeProcessing.mockImplementationOnce(async (input: DirectEnsureInput) => {
       wakeOrder.push("direct");
       input.onTiming({
+        directEnsureAction: "woken",
         tokenAcquireStartedAtEpochMs: 1_777_000_000_000,
         tokenAcquiredAtEpochMs: 1_777_000_000_010,
         directEnsureRequestStartedAtEpochMs: 1_777_000_000_012,
         directEnsureResponseReceivedAtEpochMs: 1_777_000_000_120,
+        directEnsureResultKind: "runtime_processing_accepted",
+        directEnsureRuntimeAttemptId: "runtime-attempt-test",
         orchestrationAttemptId: input.orchestrationAttemptId,
       });
       return {
@@ -163,8 +177,10 @@ describe("maybeHandoffHostedExecutionWebhookWake direct ensure fast path", () =>
     expect(wakeOrder).toEqual(["temporal", "direct"]);
     expect(mocks.ensureRuntimeProcessing).toHaveBeenCalledTimes(1);
     expect(mocks.ensureRuntimeProcessing).toHaveBeenCalledWith({
+      commandTimeoutMs: 25_000,
       onTiming: expect.any(Function),
       orchestrationAttemptId: expect.stringMatching(/^web-ingress-[0-9a-f-]{36}$/u),
+      signal: expect.any(AbortSignal),
       userId: "member_123",
     });
     expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
@@ -191,6 +207,9 @@ describe("maybeHandoffHostedExecutionWebhookWake direct ensure fast path", () =>
           directEnsureOrchestrationAttemptId: expect.stringMatching(
             /^web-ingress-[0-9a-f-]{36}$/u,
           ),
+          directEnsureResultKind: "runtime_processing_accepted",
+          directEnsureAction: "woken",
+          directEnsureRuntimeAttemptId: "runtime-attempt-test",
         },
       },
       source: "linq",
@@ -206,6 +225,7 @@ describe("maybeHandoffHostedExecutionWebhookWake direct ensure fast path", () =>
         tokenAcquiredAtEpochMs: 1_777_000_000_010,
         directEnsureRequestStartedAtEpochMs: 1_777_000_000_012,
         directEnsureResponseReceivedAtEpochMs: 1_777_000_000_025,
+        directEnsureResultKind: "legacy_accepted",
         orchestrationAttemptId: input.orchestrationAttemptId,
       });
       return {
@@ -229,6 +249,10 @@ describe("maybeHandoffHostedExecutionWebhookWake direct ensure fast path", () =>
       "Hosted direct ensure wake accepted.",
       {
         accepted: true,
+        attemptNumber: 1,
+        orchestrationAttemptId: expect.stringMatching(
+          /^web-ingress-[0-9a-f-]{36}$/u,
+        ),
         source: "linq",
       },
     );
@@ -245,11 +269,127 @@ describe("maybeHandoffHostedExecutionWebhookWake direct ensure fast path", () =>
           directEnsureOrchestrationAttemptId: expect.stringMatching(
             /^web-ingress-[0-9a-f-]{36}$/u,
           ),
+          directEnsureResultKind: "legacy_accepted",
         },
       },
       source: "linq",
     });
     consoleInfo.mockRestore();
+  });
+
+  it("uses one bounded retry after retry_later without another Temporal signal", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-02T00:00:00.000Z"));
+    const consoleInfo = vi.spyOn(console, "info").mockImplementation(() => undefined);
+    const afterResponseTasks: Array<() => Promise<void>> = [];
+    mocks.ensureRuntimeProcessing
+      .mockImplementationOnce(async (input: DirectEnsureInput) => {
+        input.onTiming({
+          directEnsureRequestStartedAtEpochMs: 1_777_000_000_012,
+          directEnsureResponseReceivedAtEpochMs: 1_777_000_000_020,
+          directEnsureResultKind: "retry_later",
+          orchestrationAttemptId: input.orchestrationAttemptId,
+          tokenAcquiredAtEpochMs: 1_777_000_000_010,
+          tokenAcquireStartedAtEpochMs: 1_777_000_000_000,
+        });
+        return {
+        kind: "retry_later",
+        retryAt: "2026-07-02T00:00:03.000Z",
+        };
+      })
+      .mockImplementationOnce(async (input: DirectEnsureInput) => {
+        input.onTiming({
+          directEnsureAction: "woken",
+          directEnsureRequestStartedAtEpochMs: 1_777_000_003_012,
+          directEnsureResponseReceivedAtEpochMs: 1_777_000_003_120,
+          directEnsureResultKind: "runtime_processing_accepted",
+          directEnsureRuntimeAttemptId: "runtime-attempt-final",
+          orchestrationAttemptId: input.orchestrationAttemptId,
+          tokenAcquiredAtEpochMs: 1_777_000_003_010,
+          tokenAcquireStartedAtEpochMs: 1_777_000_003_000,
+        });
+        return {
+          action: "woken",
+          kind: "runtime_processing_accepted",
+          recommendedRecheckAt: "2026-07-02T00:03:00.000Z",
+          runtimeAttemptId: "runtime-attempt-final",
+        };
+      });
+
+    try {
+      await expect(maybeHandoffHostedExecutionWebhookWake({
+        response,
+        scheduleAfterResponse: (task) => {
+          afterResponseTasks.push(task);
+        },
+        wakeHandoff: buildWakeHandoff(),
+      })).resolves.toMatchObject({
+        reason: "temporal-signaled",
+        signalAccepted: true,
+      });
+      await vi.waitFor(() => {
+        expect(mocks.ensureRuntimeProcessing).toHaveBeenCalledTimes(1);
+      });
+      await vi.advanceTimersByTimeAsync(3_000);
+      await vi.waitFor(() => {
+        expect(mocks.ensureRuntimeProcessing).toHaveBeenCalledTimes(2);
+      });
+      await Promise.all(afterResponseTasks.map((task) => task()));
+
+      const firstInput = mocks.ensureRuntimeProcessing.mock.calls[0]?.[0] as
+        DirectEnsureInput;
+      const secondInput = mocks.ensureRuntimeProcessing.mock.calls[1]?.[0] as
+        DirectEnsureInput;
+      expect(firstInput).toMatchObject({ commandTimeoutMs: 25_000 });
+      expect(secondInput).toMatchObject({ commandTimeoutMs: 25_000 });
+      expect(secondInput.orchestrationAttemptId).toBe(
+        firstInput.orchestrationAttemptId,
+      );
+      expect(secondInput.signal).toBe(firstInput.signal);
+      expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledTimes(1);
+      expect(mocks.recordHostedIngressDirectEnsureTiming).toHaveBeenCalledWith({
+        expectedUserId: "member_123",
+        mailboxItemId: "mailbox_123",
+        phaseBreakdown: {
+          schemaVersion: 1,
+          orchestration: expect.objectContaining({
+            directEnsureAction: "woken",
+            directEnsureRequestStartedAtEpochMs: 1_777_000_003_012,
+            directEnsureResponseReceivedAtEpochMs: 1_777_000_003_120,
+            directEnsureResultKind: "runtime_processing_accepted",
+            directEnsureRuntimeAttemptId: "runtime-attempt-final",
+          }),
+        },
+        source: "linq",
+      });
+    } finally {
+      consoleInfo.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not retry when retry_later falls outside the direct wake deadline", async () => {
+    const consoleInfo = vi.spyOn(console, "info").mockImplementation(() => undefined);
+    mocks.ensureRuntimeProcessing.mockResolvedValueOnce({
+      kind: "retry_later",
+      retryAt: new Date(Date.now() + 30_000).toISOString(),
+    });
+
+    try {
+      await expect(maybeHandoffHostedExecutionWebhookWake({
+        response,
+        wakeHandoff: buildWakeHandoff(),
+      })).resolves.toMatchObject({ signalAccepted: true });
+      await vi.waitFor(() => {
+        expect(mocks.ensureRuntimeProcessing).toHaveBeenCalledTimes(1);
+        expect(consoleInfo).toHaveBeenCalledWith(
+          "Hosted direct ensure wake retry skipped.",
+          expect.objectContaining({ reason: "retry_outside_deadline" }),
+        );
+      });
+    } finally {
+      consoleInfo.mockRestore();
+    }
   });
 
   it("keeps the Temporal signal and handoff result intact when the direct ensure fails", async () => {
@@ -312,6 +452,44 @@ describe("maybeHandoffHostedExecutionWebhookWake direct ensure fast path", () =>
 
     expect(mocks.ensureRuntimeProcessing).toHaveBeenCalledTimes(1);
     expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledTimes(1);
+  });
+
+  it("bounds an unresolved direct ensure with the shared sub-thirty-second deadline", async () => {
+    const consoleWarn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const deadline = new AbortController();
+    const timeout = vi.spyOn(AbortSignal, "timeout").mockReturnValue(
+      deadline.signal,
+    );
+    const afterResponseTasks: Array<() => Promise<void>> = [];
+    mocks.ensureRuntimeProcessing.mockImplementationOnce(
+      (input: DirectEnsureInput) => new Promise((_resolve, reject) => {
+        input.signal.addEventListener("abort", () => reject(input.signal.reason), {
+          once: true,
+        });
+      }),
+    );
+
+    try {
+      await expect(maybeHandoffHostedExecutionWebhookWake({
+        response,
+        scheduleAfterResponse: (task) => {
+          afterResponseTasks.push(task);
+        },
+        wakeHandoff: buildWakeHandoff(),
+      })).resolves.toMatchObject({ signalAccepted: true });
+      expect(timeout).toHaveBeenCalledWith(29_000);
+      expect(mocks.ensureRuntimeProcessing).toHaveBeenCalledTimes(1);
+
+      deadline.abort(new DOMException("Timed out", "TimeoutError"));
+      await Promise.all(afterResponseTasks.map((task) => task()));
+      expect(consoleWarn).toHaveBeenCalledWith(
+        "Hosted direct ensure wake failed.",
+        expect.objectContaining({ source: "linq" }),
+      );
+    } finally {
+      timeout.mockRestore();
+      consoleWarn.mockRestore();
+    }
   });
 
   it("skips the direct ensure for non-Linq sources even with checkpoint facts", async () => {

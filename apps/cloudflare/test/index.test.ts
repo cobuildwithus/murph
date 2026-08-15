@@ -3006,6 +3006,7 @@ describe("cloudflare worker routes", () => {
       });
       expect(stub.ensureRuntimeProcessingForUser).toHaveBeenCalledWith({
         orchestrationAttemptId: "orchestration-attempt-test",
+        commandStartedAtEpochMs: expect.any(Number),
         commandTimeoutMs: 10_000,
         orchestration: {
           temporalActivityStartedAtEpochMs: 1_776_999_999_000,
@@ -3095,7 +3096,9 @@ describe("cloudflare worker routes", () => {
       expect(reconcileRuntimeHealthDataConsentForUser).not.toHaveBeenCalled();
     });
 
-    it("acks web-plane OIDC runtime ensure-processing requests early and schedules the Durable Object call", async () => {
+    it("returns the real Durable Object outcome to web-plane OIDC callers", async () => {
+      const infoLog = vi.spyOn(console, "info").mockImplementation(() => {});
+      vi.stubEnv("MURPH_HOSTED_EXECUTION_STDIO_LOGS", "1");
       let resolveEnsure!: (value: {
         action: "woken";
         kind: "runtime_processing_accepted";
@@ -3110,13 +3113,17 @@ describe("cloudflare worker routes", () => {
       }>((resolve) => {
         resolveEnsure = resolve;
       });
+      const ensureRuntimeProcessingForUser = vi.fn<
+        UserRunnerDurableObjectStubLike["ensureRuntimeProcessingForUser"]
+      >(() => ensurePromise);
       const stub = createUserRunnerStub({
-        ensureRuntimeProcessingForUser: vi.fn(() => ensurePromise),
+        ensureRuntimeProcessingForUser,
       });
       const env = createWorkerEnv(stub);
       const execution = createWorkerExecutionContextForTest();
 
-      const response = await worker.fetch(
+      let requestSettled = false;
+      const responsePromise = worker.fetch(
         await signControlRequest(
           new Request("https://runner.example.test/internal/users/test-user/runtime/ensure-processing", {
             body: JSON.stringify({
@@ -3137,15 +3144,17 @@ describe("cloudflare worker routes", () => {
         env,
         execution.ctx,
       );
-
-      expect(response.status).toBe(202);
-      await expect(response.json()).resolves.toEqual({
-        accepted: true,
+      void responsePromise.finally(() => {
+        requestSettled = true;
       });
-      expect(execution.waitUntil).toHaveBeenCalledTimes(1);
-      expect(execution.waitUntilPromises).toHaveLength(1);
+      await vi.waitFor(() => {
+        expect(stub.ensureRuntimeProcessingForUser).toHaveBeenCalledTimes(1);
+      });
+      expect(requestSettled).toBe(false);
+      expect(execution.waitUntil).not.toHaveBeenCalled();
       expect(stub.ensureRuntimeProcessingForUser).toHaveBeenCalledWith({
         orchestrationAttemptId: "web-ingress-attempt-test",
+        commandStartedAtEpochMs: expect.any(Number),
         orchestration: {
           cloudflareRouteReceivedAtEpochMs: expect.any(Number),
           directEnsureRequestStartedAtEpochMs: 1_777_000_000_012,
@@ -3157,21 +3166,36 @@ describe("cloudflare worker routes", () => {
         },
         userId: "test-user",
       });
+      const directInput = ensureRuntimeProcessingForUser.mock.calls[0]?.[0];
+      expect(directInput?.commandStartedAtEpochMs).toBe(
+        directInput?.orchestration?.runtimeControlAuthStartedAtEpochMs,
+      );
       resolveEnsure({
         action: "woken",
         kind: "runtime_processing_accepted",
         recommendedRecheckAt: "2026-04-27T00:03:00.000Z",
         runtimeAttemptId: "runtime-attempt-test",
       });
-      await expect(execution.waitUntilPromises[0]).resolves.toEqual({
+      const response = await responsePromise;
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toEqual({
         action: "woken",
         kind: "runtime_processing_accepted",
         recommendedRecheckAt: "2026-04-27T00:03:00.000Z",
         runtimeAttemptId: "runtime-attempt-test",
       });
+      const serializedInfoLogs = infoLog.mock.calls
+        .map(([payload]) => String(payload))
+        .join("\n");
+      expect(serializedInfoLogs).toContain(
+        "runtime-ensure-processing-direct-completed",
+      );
+      expect(serializedInfoLogs).toContain("web-ingress-attempt-test");
+      expect(serializedInfoLogs).toContain("runtime_processing_accepted");
+      expect(serializedInfoLogs).toContain("runtime-attempt-test");
     });
 
-    it("logs web-plane OIDC waitUntil ensure-processing failures without rethrowing", async () => {
+    it("returns and logs web-plane OIDC ensure-processing failures", async () => {
       const errorLog = vi.spyOn(console, "error").mockImplementation(() => {});
       vi.stubEnv("MURPH_HOSTED_EXECUTION_STDIO_LOGS", "1");
       const stub = createUserRunnerStub({
@@ -3198,17 +3222,17 @@ describe("cloudflare worker routes", () => {
         execution.ctx,
       );
 
-      expect(response.status).toBe(202);
+      expect(response.status).toBe(500);
       await expect(response.json()).resolves.toEqual({
-        accepted: true,
+        code: "runtime_ensure_processing_failed",
+        error: "Internal error.",
       });
-      expect(execution.waitUntilPromises).toHaveLength(1);
-      await expect(execution.waitUntilPromises[0]).resolves.toBeUndefined();
+      expect(execution.waitUntilPromises).toHaveLength(0);
       expect(errorLog).toHaveBeenCalledTimes(1);
       const serializedErrorLogs = errorLog.mock.calls
         .map(([payload]) => String(payload))
         .join("\n");
-      expect(serializedErrorLogs).toContain("runtime-ensure-processing-waituntil-failed");
+      expect(serializedErrorLogs).toContain("runtime-ensure-processing-direct-failed");
       expect(serializedErrorLogs).toContain("/internal/users/<REDACTED_USER>/runtime/ensure-processing");
       expect(serializedErrorLogs).toContain("direct ensure failed");
     });
@@ -3323,6 +3347,7 @@ describe("cloudflare worker routes", () => {
         runtimeAttemptId: "runtime-attempt-test",
       });
       expect(stub.ensureRuntimeProcessingForUser).toHaveBeenCalledWith({
+        commandStartedAtEpochMs: expect.any(Number),
         orchestrationAttemptId: "orchestration-attempt-test",
         orchestration: {
           cloudflareRouteReceivedAtEpochMs: expect.any(Number),

@@ -999,6 +999,9 @@ describe("hosted runtime latency dashboard store", () => {
           directEnsureResponseReceivedAtEpochMs: 1_777_000_000_120,
           directEnsureOrchestrationAttemptId:
             "web-ingress-bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+          directEnsureResultKind: "runtime_processing_accepted",
+          directEnsureAction: "woken",
+          directEnsureRuntimeAttemptId: "runtime-attempt-direct",
         },
       },
       prisma,
@@ -1018,6 +1021,9 @@ describe("hosted runtime latency dashboard store", () => {
         directEnsureResponseReceivedAtEpochMs: 1_777_000_000_120,
         directEnsureOrchestrationAttemptId:
           "web-ingress-bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+        directEnsureResultKind: "runtime_processing_accepted",
+        directEnsureAction: "woken",
+        directEnsureRuntimeAttemptId: "runtime-attempt-direct",
       },
     });
 
@@ -1050,6 +1056,9 @@ describe("hosted runtime latency dashboard store", () => {
         directEnsureResponseReceivedAtEpochMs: 1_777_000_000_120,
         directEnsureOrchestrationAttemptId:
           "web-ingress-bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+        directEnsureResultKind: "runtime_processing_accepted",
+        directEnsureAction: "woken",
+        directEnsureRuntimeAttemptId: "runtime-attempt-direct",
         cloudflareRouteReceivedAtEpochMs: 1_777_000_000_020,
         freshStartRequestedAtEpochMs: 1_777_000_000_030,
         runtimeInvocationOrchestrationAttemptId:
@@ -1101,6 +1110,40 @@ describe("hosted runtime latency dashboard store", () => {
       },
     });
     expect(prisma.readTraceInsertSql()).toContain("ON CONFLICT (mailbox_item_id) DO NOTHING");
+  });
+
+  it("stores retry_later as a bounded outcome without retry or error detail", async () => {
+    const prisma = createLatencyWritePrisma({
+      mailboxAcceptedAtEpochMs: BigInt(Date.parse("2026-06-09T10:00:00.000Z")),
+    });
+
+    await expect(recordHostedIngressDirectEnsureTiming({
+      expectedUserId: "member_latency_1",
+      mailboxItemId: "mailbox_latency_1",
+      phaseBreakdown: {
+        schemaVersion: 1,
+        orchestration: {
+          directEnsureOrchestrationAttemptId:
+            "web-ingress-bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+          directEnsureRequestStartedAtEpochMs: 1_777_000_000_012,
+          directEnsureResponseReceivedAtEpochMs: 1_777_000_000_120,
+          directEnsureResultKind: "retry_later",
+        },
+      },
+      prisma,
+      source: "linq",
+    })).resolves.toMatchObject({ recorded: true });
+
+    expect(prisma.readTrace()?.phaseBreakdownJson).toEqual({
+      schemaVersion: 1,
+      orchestration: {
+        directEnsureOrchestrationAttemptId:
+          "web-ingress-bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+        directEnsureRequestStartedAtEpochMs: 1_777_000_000_012,
+        directEnsureResponseReceivedAtEpochMs: 1_777_000_000_120,
+        directEnsureResultKind: "retry_later",
+      },
+    });
   });
 
   it("rejects provider start from a different runtime attempt", async () => {

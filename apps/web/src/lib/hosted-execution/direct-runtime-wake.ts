@@ -3,6 +3,10 @@ import { randomUUID } from "node:crypto";
 import type {
   CloudflareHostedControlRuntimeEnsureProcessingTiming,
 } from "@murphai/cloudflare-hosted-control/client";
+import {
+  HOSTED_RUNTIME_PROCESSING_COMMAND_RESPONSE_MARGIN_MS,
+  MIN_HOSTED_RUNTIME_PROCESSING_TIMEOUT_MS,
+} from "@murphai/hosted-execution/contracts";
 
 import { readHostedExecutionControlClientIfConfigured } from "./control";
 import { describeHostedExecutionSafeLogErrorCode } from "./logging";
@@ -11,6 +15,10 @@ export type HostedDirectRuntimeWakeSource =
   | "assistant-ask-completion"
   | "assistant-ask-request"
   | "linq";
+
+const HOSTED_DIRECT_RUNTIME_WAKE_DEADLINE_MS = 29_000;
+const HOSTED_DIRECT_RUNTIME_WAKE_COMMAND_TIMEOUT_MS = 25_000;
+const HOSTED_DIRECT_RUNTIME_WAKE_MAX_ATTEMPTS = 2;
 
 /**
  * Issues a consent-serialized container start hint and always settles. This
@@ -91,51 +99,11 @@ export function startHostedDirectRuntimeWakeBestEffort(input: {
   }
 
   try {
-    let timing: CloudflareHostedControlRuntimeEnsureProcessingTiming | null = null;
-    return client
-      .ensureRuntimeProcessing({
-        onTiming: (value) => {
-          timing = value;
-        },
-        orchestrationAttemptId: `web-ingress-${randomUUID()}`,
-        userId: input.userId,
-      })
-      .then((ensureResult) => {
-        if ("kind" in ensureResult) {
-          console.info("Hosted direct ensure wake completed.", {
-            kind: ensureResult.kind,
-            ...(ensureResult.kind === "runtime_processing_accepted"
-              ? { action: ensureResult.action }
-              : {}),
-            source: wakeSource,
-          });
-          return;
-        }
-
-        console.info("Hosted direct ensure wake accepted.", {
-          accepted: ensureResult.accepted,
-          source: wakeSource,
-        });
-      })
-      .catch((error: unknown) => {
-        console.warn("Hosted direct ensure wake failed.", {
-          errorName: describeHostedExecutionSafeLogErrorCode(error),
-          source: wakeSource,
-        });
-      })
-      .finally(async () => {
-        if (!timing || !input.onTiming) {
-          return;
-        }
-        try {
-          await input.onTiming(timing);
-        } catch (error) {
-          console.warn("Hosted direct ensure wake timing callback failed.", {
-            errorName: describeHostedExecutionSafeLogErrorCode(error),
-            source: wakeSource,
-          });
-        }
-      });
+    return runHostedDirectRuntimeWakeBestEffort({
+      client,
+      input,
+      wakeSource,
+    });
   } catch (error) {
     console.warn("Hosted direct ensure wake failed.", {
       errorName: describeHostedExecutionSafeLogErrorCode(error),
@@ -143,4 +111,152 @@ export function startHostedDirectRuntimeWakeBestEffort(input: {
     });
     return Promise.resolve();
   }
+}
+
+async function runHostedDirectRuntimeWakeBestEffort(input: {
+  client: NonNullable<ReturnType<typeof readHostedExecutionControlClientIfConfigured>>;
+  input: {
+    onTiming?: (
+      timing: CloudflareHostedControlRuntimeEnsureProcessingTiming,
+    ) => Promise<void> | void;
+    source: HostedDirectRuntimeWakeSource;
+    userId: string;
+  };
+  wakeSource: HostedDirectRuntimeWakeSource;
+}): Promise<void> {
+  const orchestrationAttemptId = `web-ingress-${randomUUID()}`;
+  const deadlineAtEpochMs = Date.now() + HOSTED_DIRECT_RUNTIME_WAKE_DEADLINE_MS;
+  const signal = AbortSignal.timeout(HOSTED_DIRECT_RUNTIME_WAKE_DEADLINE_MS);
+  let timing: CloudflareHostedControlRuntimeEnsureProcessingTiming | null = null;
+
+  try {
+    for (
+      let attemptNumber = 1;
+      attemptNumber <= HOSTED_DIRECT_RUNTIME_WAKE_MAX_ATTEMPTS;
+      attemptNumber += 1
+    ) {
+      const commandTimeoutMs = Math.min(
+        HOSTED_DIRECT_RUNTIME_WAKE_COMMAND_TIMEOUT_MS,
+        deadlineAtEpochMs - Date.now()
+          - HOSTED_RUNTIME_PROCESSING_COMMAND_RESPONSE_MARGIN_MS,
+      );
+      if (commandTimeoutMs < MIN_HOSTED_RUNTIME_PROCESSING_TIMEOUT_MS) {
+        console.info("Hosted direct ensure wake retry skipped.", {
+          attemptNumber,
+          orchestrationAttemptId,
+          reason: "deadline_exhausted",
+          source: input.wakeSource,
+        });
+        return;
+      }
+
+      // Do not persist the previous parsed result if a later attempted request
+      // fails before returning a parseable control response.
+      timing = null;
+      const ensureResult = await input.client.ensureRuntimeProcessing({
+        commandTimeoutMs,
+        onTiming: (value) => {
+          timing = value;
+        },
+        orchestrationAttemptId,
+        signal,
+        userId: input.input.userId,
+      });
+      if (!("kind" in ensureResult)) {
+        console.info("Hosted direct ensure wake accepted.", {
+          accepted: ensureResult.accepted,
+          attemptNumber,
+          orchestrationAttemptId,
+          source: input.wakeSource,
+        });
+        return;
+      }
+
+      console.info("Hosted direct ensure wake completed.", {
+        attemptNumber,
+        kind: ensureResult.kind,
+        orchestrationAttemptId,
+        ...(ensureResult.kind === "runtime_processing_accepted"
+          ? { action: ensureResult.action }
+          : {}),
+        source: input.wakeSource,
+      });
+      if (
+        ensureResult.kind !== "retry_later"
+        || attemptNumber === HOSTED_DIRECT_RUNTIME_WAKE_MAX_ATTEMPTS
+      ) {
+        return;
+      }
+
+      const retryAtEpochMs = Date.parse(ensureResult.retryAt);
+      const retryDelayMs = Number.isFinite(retryAtEpochMs)
+        ? Math.max(0, retryAtEpochMs - Date.now())
+        : Number.POSITIVE_INFINITY;
+      const remainingAfterDelayMs = deadlineAtEpochMs - Date.now() - retryDelayMs;
+      if (
+        !Number.isFinite(retryDelayMs)
+        || remainingAfterDelayMs
+          < MIN_HOSTED_RUNTIME_PROCESSING_TIMEOUT_MS
+            + HOSTED_RUNTIME_PROCESSING_COMMAND_RESPONSE_MARGIN_MS
+      ) {
+        console.info("Hosted direct ensure wake retry skipped.", {
+          attemptNumber,
+          orchestrationAttemptId,
+          reason: "retry_outside_deadline",
+          source: input.wakeSource,
+        });
+        return;
+      }
+
+      console.info("Hosted direct ensure wake retry scheduled.", {
+        attemptNumber,
+        orchestrationAttemptId,
+        retryDelayMs,
+        source: input.wakeSource,
+      });
+      await waitForHostedDirectRuntimeWakeRetry(retryDelayMs, signal);
+    }
+  } catch (error) {
+    console.warn("Hosted direct ensure wake failed.", {
+      errorName: describeHostedExecutionSafeLogErrorCode(error),
+      orchestrationAttemptId,
+      source: input.wakeSource,
+    });
+  } finally {
+    if (timing && input.input.onTiming) {
+      try {
+        await input.input.onTiming(timing);
+      } catch (error) {
+        console.warn("Hosted direct ensure wake timing callback failed.", {
+          errorName: describeHostedExecutionSafeLogErrorCode(error),
+          orchestrationAttemptId,
+          source: input.wakeSource,
+        });
+      }
+    }
+  }
+}
+
+function waitForHostedDirectRuntimeWakeRetry(
+  delayMs: number,
+  signal: AbortSignal,
+): Promise<void> {
+  if (signal.aborted) {
+    return Promise.reject(signal.reason);
+  }
+  if (delayMs <= 0) {
+    return Promise.resolve();
+  }
+
+  return new Promise<void>((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      signal.removeEventListener("abort", onAbort);
+      resolve();
+    }, delayMs);
+    const onAbort = () => {
+      clearTimeout(timeout);
+      reject(signal.reason);
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
 }

@@ -185,6 +185,14 @@ async function recordHostedDirectEnsureWakeTimingBestEffort(timingRecord: {
         timingRecord.timing.directEnsureResponseReceivedAtEpochMs,
       directEnsureOrchestrationAttemptId:
         timingRecord.timing.orchestrationAttemptId,
+      directEnsureResultKind: timingRecord.timing.directEnsureResultKind,
+      ...(timingRecord.timing.directEnsureResultKind === "runtime_processing_accepted"
+        ? {
+            directEnsureAction: timingRecord.timing.directEnsureAction,
+            directEnsureRuntimeAttemptId:
+              timingRecord.timing.directEnsureRuntimeAttemptId,
+          }
+        : {}),
     },
   };
 

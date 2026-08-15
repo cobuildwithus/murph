@@ -38,6 +38,7 @@ import {
   type RuntimeProcessingStartFailureRetryReason,
 } from "./diagnostics.js";
 import {
+  RUNTIME_PROCESSING_COMMAND_BUDGET_TIMEOUT_MESSAGE,
   createRuntimeProcessingCommandBudget,
   isRuntimeProcessingCommandBudgetTimeout,
   readRuntimeProcessingCommandStepTimeoutMs,
@@ -76,9 +77,19 @@ import type {
 
 const RUNTIME_SHELL_PREWARM_TIMEOUT_MS = 20_000;
 const RUNTIME_PROCESSING_STARTUP_GRACE_MS = 30_000;
-const RUNTIME_PROCESSING_STARTUP_CONFIRM_TIMEOUT_MS = 8_000;
+// Readiness may trigger a fail-closed container stop. Reserve the container's
+// bounded 5s stop settlement plus a 1s caller-side guard before the 25s direct
+// command budget expires.
+const RUNTIME_PROCESSING_STARTUP_CONFIRM_TIMEOUT_MS = 15_000;
+const RUNTIME_PROCESSING_STARTUP_CLEANUP_SETTLEMENT_MS = 5_000;
+const RUNTIME_PROCESSING_STARTUP_OUTER_GUARD_MS = 1_000;
+const RUNTIME_PROCESSING_STARTUP_STEP_TIMEOUT_MS =
+  RUNTIME_PROCESSING_STARTUP_CONFIRM_TIMEOUT_MS
+  + RUNTIME_PROCESSING_STARTUP_CLEANUP_SETTLEMENT_MS
+  + RUNTIME_PROCESSING_STARTUP_OUTER_GUARD_MS;
 
 export type RuntimeProcessingInput = HostedRuntimeEnsureProcessingRequest & {
+  commandStartedAtEpochMs?: number;
   commandTimeoutMs?: number;
   orchestration?: RuntimeProcessingOrchestrationDiagnostics | null;
   userId: string;
@@ -198,6 +209,7 @@ export class RuntimeProcessingController {
   ) {}
 
   private createRetryLater(input: {
+    orchestrationAttemptId: string;
     reason: RuntimeProcessingRetryReason;
     userId: string;
   }): HostedRuntimeEnsureProcessingResponse {
@@ -268,7 +280,8 @@ export class RuntimeProcessingController {
     });
     const commandBudget = createRuntimeProcessingCommandBudget({
       commandTimeoutMs: processingInput.commandTimeoutMs ?? null,
-      startedAtMs: runtimeWakeStartedAt,
+      startedAtMs:
+        processingInput.commandStartedAtEpochMs ?? runtimeWakeStartedAt,
       webControlTimeoutMs: this.input.env.webControlTimeoutMs,
     });
     await this.input.stateStore.bindUser(processingInput.userId);
@@ -399,6 +412,7 @@ export class RuntimeProcessingController {
     if (!record.writeFence) {
       if (!this.hasRuntimeProcessingCommandBudgetRemaining(input.commandBudget)) {
         return this.createRetryLater({
+          orchestrationAttemptId: input.input.orchestrationAttemptId,
           reason: "command_budget_exhausted",
           userId: input.input.userId,
         });
@@ -414,6 +428,7 @@ export class RuntimeProcessingController {
     const activeFence = record.writeFence;
     if (activeFence.kind !== "runtime") {
       return this.createRetryLater({
+        orchestrationAttemptId: input.input.orchestrationAttemptId,
         reason: "container_busy",
         userId: input.input.userId,
       });
@@ -451,6 +466,7 @@ export class RuntimeProcessingController {
         }
 
         return this.createRetryLater({
+          orchestrationAttemptId: input.input.orchestrationAttemptId,
           reason: "container_busy",
           userId: input.input.userId,
         });
@@ -481,6 +497,7 @@ export class RuntimeProcessingController {
       }
       if (activeRuntimeState.outcome !== "exact-active") {
         return this.createRetryLater({
+          orchestrationAttemptId: input.input.orchestrationAttemptId,
           reason: "container_rpc_error",
           userId: input.input.userId,
         });
@@ -577,6 +594,7 @@ export class RuntimeProcessingController {
     }
 
     return this.createRetryLater({
+      orchestrationAttemptId: input.input.orchestrationAttemptId,
       reason: mapRunnerProcessingRetryReason(containerResult.reason),
       userId: input.input.userId,
     });
@@ -598,6 +616,7 @@ export class RuntimeProcessingController {
       && this.shouldPreserveStartingWriteFence(activeFence)
     ) {
       return this.createRetryLater({
+        orchestrationAttemptId: input.input.orchestrationAttemptId,
         reason: "starting_fence_preserved",
         userId: input.input.userId,
       });
@@ -608,6 +627,7 @@ export class RuntimeProcessingController {
       && await this.hasLiveCheckpointHandoff(activeFence, record.userId)
     ) {
       return this.createRetryLater({
+        orchestrationAttemptId: input.input.orchestrationAttemptId,
         reason: "checkpoint_handoff_pending",
         userId: input.input.userId,
       });
@@ -638,6 +658,7 @@ export class RuntimeProcessingController {
     }
     if (!this.hasRuntimeProcessingCommandBudgetRemaining(input.commandBudget)) {
       return this.createRetryLater({
+        orchestrationAttemptId: input.input.orchestrationAttemptId,
         reason: "command_budget_exhausted",
         userId: input.input.userId,
       });
@@ -672,6 +693,7 @@ export class RuntimeProcessingController {
     const abortResult = await this.abortActiveRuntimeFence({
       activeFence,
       commandBudget: input.commandBudget,
+      orchestrationAttemptId: input.input.orchestrationAttemptId,
       record,
       runnerContainerName,
     });
@@ -694,6 +716,7 @@ export class RuntimeProcessingController {
   private async abortActiveRuntimeFence(input: {
     activeFence: NonNullable<RunnerStateRecord["writeFence"]>;
     commandBudget: RuntimeProcessingCommandBudget;
+    orchestrationAttemptId: string;
     record: RunnerStateRecord;
     runnerContainerName?: string | null;
   }): Promise<
@@ -711,6 +734,7 @@ export class RuntimeProcessingController {
       return {
         aborted: false,
         response: this.createRetryLater({
+          orchestrationAttemptId: input.orchestrationAttemptId,
           reason: "container_rpc_error",
           userId: input.record.userId,
         }),
@@ -722,6 +746,7 @@ export class RuntimeProcessingController {
       return {
         aborted: false,
         response: this.createRetryLater({
+          orchestrationAttemptId: input.orchestrationAttemptId,
           reason: "container_busy",
           userId: input.record.userId,
         }),
@@ -748,6 +773,7 @@ export class RuntimeProcessingController {
       return {
         aborted: false,
         response: this.createRetryLater({
+          orchestrationAttemptId: input.orchestrationAttemptId,
           reason: abortStatus === "failed"
             ? "container_rpc_error"
             : "container_busy",
@@ -766,6 +792,7 @@ export class RuntimeProcessingController {
       return {
         aborted: false,
         response: this.createRetryLater({
+          orchestrationAttemptId: input.orchestrationAttemptId,
           reason: isRuntimeProcessingCommandBudgetTimeout(error)
             ? "container_rpc_timeout"
             : "container_rpc_error",
@@ -872,6 +899,7 @@ export class RuntimeProcessingController {
 
     if (!this.input.runnerContainerNamespace) {
       return this.createRetryLater({
+        orchestrationAttemptId: processingInput.orchestrationAttemptId,
         reason: "missing_container_binding",
         userId: processingInput.userId,
       });
@@ -900,6 +928,7 @@ export class RuntimeProcessingController {
       });
       if (!destroyed.ok) {
         return this.createRetryLater({
+          orchestrationAttemptId: processingInput.orchestrationAttemptId,
           reason: "container_rpc_error",
           userId: processingInput.userId,
         });
@@ -911,6 +940,7 @@ export class RuntimeProcessingController {
         });
       if (!cleared) {
         return this.createRetryLater({
+          orchestrationAttemptId: processingInput.orchestrationAttemptId,
           reason: "container_busy",
           userId: processingInput.userId,
         });
@@ -1201,6 +1231,7 @@ export class RuntimeProcessingController {
       return {
         confirmed: false,
         response: this.createRetryLater({
+          orchestrationAttemptId: input.input.orchestrationAttemptId,
           reason: "missing_container_binding",
           userId: input.input.userId,
         }),
@@ -1219,22 +1250,57 @@ export class RuntimeProcessingController {
       });
     }
 
+    let readinessRpcDispatched = false;
     try {
       let timeoutMs = RUNTIME_PROCESSING_STARTUP_CONFIRM_TIMEOUT_MS;
       const readinessResult = await runRuntimeProcessingCommandStep({
         budget: input.commandBudget,
         operation: async () => {
-          timeoutMs = readRuntimeProcessingCommandStepTimeoutMs({
+          const guardedTimeoutMs = readRuntimeProcessingCommandStepTimeoutMs({
             budget: input.commandBudget,
-            stepTimeoutMs: RUNTIME_PROCESSING_STARTUP_CONFIRM_TIMEOUT_MS,
+            stepTimeoutMs: RUNTIME_PROCESSING_STARTUP_STEP_TIMEOUT_MS,
           });
+          if (guardedTimeoutMs <= RUNTIME_PROCESSING_STARTUP_OUTER_GUARD_MS) {
+            throw new Error(RUNTIME_PROCESSING_COMMAND_BUDGET_TIMEOUT_MESSAGE);
+          }
+          timeoutMs = Math.max(
+            1,
+            Math.min(
+              RUNTIME_PROCESSING_STARTUP_CONFIRM_TIMEOUT_MS,
+              guardedTimeoutMs - RUNTIME_PROCESSING_STARTUP_OUTER_GUARD_MS,
+            ),
+          );
+          readinessRpcDispatched = true;
           return await container.ensureReadyForProcessing!({
             timeoutMs,
             userId: input.input.userId,
           });
         },
-        stepTimeoutMs: RUNTIME_PROCESSING_STARTUP_CONFIRM_TIMEOUT_MS,
+        stepTimeoutMs: RUNTIME_PROCESSING_STARTUP_STEP_TIMEOUT_MS,
       });
+      if (readinessResult.kind === "cleanup_unsettled") {
+        emitHostedExecutionStructuredLog({
+          component: "hosted.runner",
+          details: {
+            orchestrationAttemptId: input.input.orchestrationAttemptId,
+            runtimeProcessingRetryReason: "container_rpc_timeout",
+            runtimeStartupWriteFencePreserved: true,
+            workspaceAttemptId: input.token.attemptId,
+          },
+          level: "warn",
+          message: "Hosted runner runtime processing startup cleanup did not settle.",
+          phase: "runtime.starting",
+          userId: input.input.userId,
+        });
+        return {
+          confirmed: false,
+          response: this.createRetryLater({
+            orchestrationAttemptId: input.input.orchestrationAttemptId,
+            reason: "container_rpc_timeout",
+            userId: input.input.userId,
+          }),
+        };
+      }
       emitHostedExecutionStructuredLog({
         component: "hosted.runner",
         details: {
@@ -1253,11 +1319,41 @@ export class RuntimeProcessingController {
         }),
       };
     } catch (error) {
+      if (
+        isRuntimeProcessingCommandBudgetTimeout(error)
+        && readinessRpcDispatched
+      ) {
+        // The outer guard cannot prove that the container RPC has settled.
+        // Preserve the fence so a late RPC cannot overlap cleanup or a second
+        // fresh start; the ordinary startup-grace convergence path will retry.
+        emitHostedExecutionStructuredLog({
+          component: "hosted.runner",
+          details: {
+            ...buildHostedRunnerMetadataOnlyErrorDetails(error),
+            orchestrationAttemptId: input.input.orchestrationAttemptId,
+            runtimeProcessingRetryReason: "container_rpc_timeout",
+            runtimeStartupWriteFencePreserved: true,
+            workspaceAttemptId: input.token.attemptId,
+          },
+          level: "warn",
+          message: "Hosted runner runtime processing startup confirmation guard elapsed.",
+          phase: "runtime.starting",
+          userId: input.input.userId,
+        });
+        return {
+          confirmed: false,
+          response: this.createRetryLater({
+            orchestrationAttemptId: input.input.orchestrationAttemptId,
+            reason: "container_rpc_timeout",
+            userId: input.input.userId,
+          }),
+        };
+      }
       return await this.clearWriteFenceAfterStartupConfirmationFailure({
         error,
         input: input.input,
         retryReason: isRuntimeProcessingCommandBudgetTimeout(error)
-          ? "container_rpc_timeout"
+          ? "command_budget_exhausted"
           : undefined,
         token: input.token,
       });
@@ -1315,6 +1411,7 @@ export class RuntimeProcessingController {
     return {
       confirmed: false,
       response: this.createRetryLater({
+        orchestrationAttemptId: input.input.orchestrationAttemptId,
         reason: retryReason,
         userId: input.input.userId,
       }),

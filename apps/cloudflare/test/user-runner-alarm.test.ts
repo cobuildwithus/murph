@@ -389,6 +389,142 @@ describe("HostedUserRunner execution coordination", () => {
     expect(destroyInstance).toHaveBeenCalledOnce();
   });
 
+  it("bounds consent admission inside the runtime command deadline", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const admissionStarted = createDeferred<void>();
+    const releaseAdmission = createDeferred<void>();
+    const ensureReadyForProcessing = vi.fn<
+      NonNullable<HostedExecutionContainerStubLike["ensureReadyForProcessing"]>
+    >(async () => ({ kind: "ready" }));
+    const { runner, sql } = createRunnerHarness({
+      ensureReadyForProcessing,
+      readHealthDataConsentState: async () => {
+        admissionStarted.resolve(undefined);
+        await releaseAdmission.promise;
+        return "granted" as const;
+      },
+    });
+    await runner.bindUser(TEST_USER_ID);
+
+    const response = runner.ensureRuntimeProcessingForUser({
+      commandTimeoutMs: 5_000,
+      orchestrationAttemptId: "bounded-consent-admission",
+      userId: TEST_USER_ID,
+    });
+    await admissionStarted.promise;
+    await vi.advanceTimersByTimeAsync(4_000);
+
+    await expect(response).resolves.toEqual({
+      kind: "retry_later",
+      retryAt: "2026-04-27T00:00:14.000Z",
+    });
+    expect(ensureReadyForProcessing).not.toHaveBeenCalled();
+    expect(readRunnerMeta(sql)).toMatchObject({
+      active_attempt_id: null,
+      failure_count: 0,
+    });
+
+    releaseAdmission.resolve(undefined);
+    await vi.waitFor(() => {
+      expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+        expect.objectContaining({
+          details: expect.objectContaining({
+            runtimeProcessingRetryReason: "command_budget_exhausted",
+          }),
+        }),
+      );
+    });
+  });
+
+  it("does not restart the server command budget after delayed Durable Object dispatch", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const admissionStarted = createDeferred<void>();
+    const releaseAdmission = createDeferred<void>();
+    const ensureReadyForProcessing = vi.fn<
+      NonNullable<HostedExecutionContainerStubLike["ensureReadyForProcessing"]>
+    >(async () => ({ kind: "ready" }));
+    const { runner, sql } = createRunnerHarness({
+      ensureReadyForProcessing,
+      readHealthDataConsentState: async () => {
+        admissionStarted.resolve(undefined);
+        await releaseAdmission.promise;
+        return "granted" as const;
+      },
+    });
+    await runner.bindUser(TEST_USER_ID);
+
+    const response = runner.ensureRuntimeProcessingForUser({
+      commandStartedAtEpochMs: Date.now() - 3_000,
+      commandTimeoutMs: 5_000,
+      orchestrationAttemptId: "delayed-server-dispatch",
+      userId: TEST_USER_ID,
+    });
+    await admissionStarted.promise;
+    await vi.advanceTimersByTimeAsync(1_000);
+
+    await expect(response).resolves.toEqual({
+      kind: "retry_later",
+      retryAt: "2026-04-27T00:00:11.000Z",
+    });
+    expect(ensureReadyForProcessing).not.toHaveBeenCalled();
+    expect(readRunnerMeta(sql)).toMatchObject({
+      active_attempt_id: null,
+      failure_count: 0,
+    });
+
+    releaseAdmission.resolve(undefined);
+  });
+
+  it("bounds consent-lock queue time inside the runtime command deadline", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const lockOwnerAdmissionStarted = createDeferred<void>();
+    const releaseLockOwnerAdmission = createDeferred<void>();
+    let admissionReads = 0;
+    const ensureReadyForProcessing = vi.fn<
+      NonNullable<HostedExecutionContainerStubLike["ensureReadyForProcessing"]>
+    >(async () => ({ kind: "ready" }));
+    const { runner } = createRunnerHarness({
+      ensureReadyForProcessing,
+      readHealthDataConsentState: async () => {
+        admissionReads += 1;
+        if (admissionReads === 1) {
+          lockOwnerAdmissionStarted.resolve(undefined);
+          await releaseLockOwnerAdmission.promise;
+        }
+        return "granted" as const;
+      },
+    });
+    await runner.bindUser(TEST_USER_ID);
+
+    const lockOwner = runner.reconcileRuntimeHealthDataConsentForUser(
+      TEST_USER_ID,
+    );
+    await lockOwnerAdmissionStarted.promise;
+    const response = runner.ensureRuntimeProcessingForUser({
+      commandTimeoutMs: 5_000,
+      orchestrationAttemptId: "bounded-consent-lock",
+      userId: TEST_USER_ID,
+    });
+    await vi.advanceTimersByTimeAsync(4_000);
+
+    await expect(response).resolves.toEqual({
+      kind: "retry_later",
+      retryAt: "2026-04-27T00:00:14.000Z",
+    });
+    expect(admissionReads).toBe(1);
+    expect(ensureReadyForProcessing).not.toHaveBeenCalled();
+
+    releaseLockOwnerAdmission.resolve(undefined);
+    await expect(lockOwner).resolves.toMatchObject({
+      processingAllowed: true,
+    });
+    await vi.waitFor(() => expect(admissionReads).toBe(1));
+    expect(ensureReadyForProcessing).not.toHaveBeenCalled();
+  });
+
   it("lets a new Worker withdraw the exact prior-version shell while prewarm is pending", async () => {
     let consentState: "granted" | "revoked" = "granted";
     const runnerRuntimeEnvSource: Record<string, unknown> = {
@@ -950,10 +1086,13 @@ describe("HostedUserRunner execution coordination", () => {
       acceptedSettled = true;
     });
 
-    await vi.waitFor(() => expect(ensureReadyForProcessing).toHaveBeenCalledWith({
-      timeoutMs: 8_000,
-      userId: TEST_USER_ID,
-    }));
+    await vi.waitFor(() => expect(ensureReadyForProcessing).toHaveBeenCalledOnce());
+    expect(ensureReadyForProcessing.mock.calls[0]?.[0].timeoutMs).toBeGreaterThanOrEqual(
+      7_900,
+    );
+    expect(ensureReadyForProcessing.mock.calls[0]?.[0].timeoutMs).toBeLessThanOrEqual(
+      8_000,
+    );
     expect(invoke).not.toHaveBeenCalled();
     await Promise.resolve();
     expect(acceptedSettled).toBe(false);
@@ -1815,10 +1954,13 @@ describe("HostedUserRunner execution coordination", () => {
         }),
       )
     );
-    await vi.waitFor(() => expect(ensureReadyForProcessing).toHaveBeenCalledWith({
-      timeoutMs: 8_000,
-      userId: TEST_USER_ID,
-    }));
+    await vi.waitFor(() => expect(ensureReadyForProcessing).toHaveBeenCalledOnce());
+    expect(ensureReadyForProcessing.mock.calls[0]?.[0].timeoutMs).toBeGreaterThanOrEqual(
+      7_900,
+    );
+    expect(ensureReadyForProcessing.mock.calls[0]?.[0].timeoutMs).toBeLessThanOrEqual(
+      8_000,
+    );
     expect(invoke).not.toHaveBeenCalled();
     expect(acceptedSettled).toBe(false);
     expect(workspaceReadTimeouts).toHaveLength(1);
@@ -1997,11 +2139,9 @@ describe("HostedUserRunner execution coordination", () => {
     expect(workspaceReadTimeouts).toEqual([4_000]);
     expect(mocks.fetchHostedExecutionWebControlPlaneResponse.mock.calls.filter(
       ([input]) => input.path === HOSTED_RUNTIME_CRYPTO_CONTEXT_PATH,
-    )).toEqual([
-      [expect.objectContaining({ timeoutMs: 4_000 })],
-    ]);
+    )).toHaveLength(1);
     expect(ensureReadyForProcessing).toHaveBeenCalledWith({
-      timeoutMs: 4_000,
+      timeoutMs: 3_000,
       userId: TEST_USER_ID,
     });
     await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
@@ -2034,9 +2174,77 @@ describe("HostedUserRunner execution coordination", () => {
 
     expect(workspaceReadTimeouts).toEqual([29_000]);
     expect(ensureReadyForProcessing).toHaveBeenCalledWith({
-      timeoutMs: 8_000,
+      timeoutMs: 15_000,
       userId: TEST_USER_ID,
     });
+  });
+
+  it("accepts a fresh start whose container becomes ready after twelve seconds", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const ensureReadyForProcessing = vi.fn<
+      NonNullable<HostedExecutionContainerStubLike["ensureReadyForProcessing"]>
+    >(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 12_000));
+      return { kind: "ready" };
+    });
+    const { invoke, runner } = createRunnerHarness({
+      ensureReadyForProcessing,
+      workspace: createWorkspaceState({ version: "5" }),
+    });
+    await runner.bindUser(TEST_USER_ID);
+
+    const response = runner.ensureRuntimeProcessingForUser({
+      commandTimeoutMs: 25_000,
+      orchestrationAttemptId: "test-orchestration-attempt",
+      userId: TEST_USER_ID,
+    });
+    await vi.waitFor(() => expect(ensureReadyForProcessing).toHaveBeenCalledWith({
+      timeoutMs: 15_000,
+      userId: TEST_USER_ID,
+    }));
+    await vi.advanceTimersByTimeAsync(12_000);
+
+    await expect(response).resolves.toMatchObject({
+      action: "started",
+      kind: "runtime_processing_accepted",
+    });
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
+  });
+
+  it("keeps eight seconds of useful readiness under the default command budget", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const ensureReadyForProcessing = vi.fn<
+      NonNullable<HostedExecutionContainerStubLike["ensureReadyForProcessing"]>
+    >(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 7_500));
+      return { kind: "ready" };
+    });
+    const { invoke, runner } = createRunnerHarness({
+      ensureReadyForProcessing,
+      workspace: createWorkspaceState({ version: "5" }),
+    });
+    await runner.bindUser(TEST_USER_ID);
+
+    const response = runner.ensureRuntimeProcessingForUser({
+      orchestrationAttemptId: "default-budget-tail-readiness",
+      userId: TEST_USER_ID,
+    });
+    await vi.waitFor(() => expect(ensureReadyForProcessing).toHaveBeenCalledOnce());
+    expect(ensureReadyForProcessing.mock.calls[0]?.[0].timeoutMs).toBeGreaterThanOrEqual(
+      7_900,
+    );
+    expect(ensureReadyForProcessing.mock.calls[0]?.[0].timeoutMs).toBeLessThanOrEqual(
+      8_000,
+    );
+    await vi.advanceTimersByTimeAsync(7_500);
+
+    await expect(response).resolves.toMatchObject({
+      action: "started",
+      kind: "runtime_processing_accepted",
+    });
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
   });
 
   it("returns retry_later when fresh-start preparation exhausts the caller command budget", async () => {
@@ -2103,19 +2311,19 @@ describe("HostedUserRunner execution coordination", () => {
     await runner.bindUser(TEST_USER_ID);
 
     const response = runner.ensureRuntimeProcessingForUser({
-      commandTimeoutMs: 5_000,
+      commandTimeoutMs: 10_000,
       orchestrationAttemptId: "test-orchestration-attempt",
       userId: TEST_USER_ID,
     });
     await runnerSecretsReadStarted.promise;
-    await vi.advanceTimersByTimeAsync(4_000);
+    await vi.advanceTimersByTimeAsync(9_000);
 
     await expect(response).resolves.toEqual({
       kind: "retry_later",
-      retryAt: "2026-04-27T00:00:14.000Z",
+      retryAt: "2026-04-27T00:00:19.000Z",
     });
     expect(ensureReadyForProcessing).toHaveBeenCalledWith({
-      timeoutMs: 4_000,
+      timeoutMs: 8_000,
       userId: TEST_USER_ID,
     });
     expect(invoke).not.toHaveBeenCalled();
@@ -2705,7 +2913,107 @@ describe("HostedUserRunner execution coordination", () => {
     );
   });
 
-  it("bounds unresolved startup readiness RPCs with timeout retry cadence", async () => {
+  it("settles 15-second readiness cleanup before the 21-second controller guard", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const readinessStartedAt = createDeferred<number>();
+    const cleanupStarted = createDeferred<void>();
+    const cleanupSettled = createDeferred<void>();
+    const ensureReadyForProcessing = vi.fn<
+      NonNullable<HostedExecutionContainerStubLike["ensureReadyForProcessing"]>
+    >(async () => {
+      readinessStartedAt.resolve(Date.now());
+      await new Promise((resolve) => setTimeout(resolve, 15_000));
+      cleanupStarted.resolve(undefined);
+      await cleanupSettled.promise;
+      throw createRuntimeStartupTimeoutError();
+    });
+    const { invoke, runner, sql } = createRunnerHarness({
+      ensureReadyForProcessing,
+      workspace: createWorkspaceState({ version: "5" }),
+    });
+    await runner.bindUser(TEST_USER_ID);
+
+    const response = runner.ensureRuntimeProcessingForUser({
+      commandTimeoutMs: 25_000,
+      orchestrationAttemptId: "test-cleanup-settlement",
+      userId: TEST_USER_ID,
+    });
+    let responseSettled = false;
+    void response.finally(() => {
+      responseSettled = true;
+    });
+    await vi.waitFor(() => expect(ensureReadyForProcessing).toHaveBeenCalledWith({
+      timeoutMs: 15_000,
+      userId: TEST_USER_ID,
+    }));
+    const readinessStartedAtMs = await readinessStartedAt.promise;
+    await vi.advanceTimersByTimeAsync(
+      readinessStartedAtMs + 15_000 - Date.now(),
+    );
+    await cleanupStarted.promise;
+
+    expect(responseSettled).toBe(false);
+    expect(readRunnerMeta(sql).active_attempt_id).toMatch(/^runtime-write-/u);
+    await vi.advanceTimersByTimeAsync(4_999);
+    expect(Date.now()).toBe(readinessStartedAtMs + 19_999);
+    expect(responseSettled).toBe(false);
+    expect(readRunnerMeta(sql).active_attempt_id).toMatch(/^runtime-write-/u);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(Date.now()).toBe(readinessStartedAtMs + 20_000);
+    expect(responseSettled).toBe(false);
+    expect(readRunnerMeta(sql).active_attempt_id).toMatch(/^runtime-write-/u);
+    cleanupSettled.resolve(undefined);
+
+    await expect(response).resolves.toEqual({
+      kind: "retry_later",
+      retryAt: expect.any(String),
+    });
+    expect(Date.now()).toBe(readinessStartedAtMs + 20_000);
+    expect(readRunnerMeta(sql)).toMatchObject({
+      active_attempt_id: null,
+      failure_count: 1,
+    });
+    expect(invoke).not.toHaveBeenCalled();
+  });
+
+  it("preserves the fresh fence when readiness reports unsettled cleanup", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const ensureReadyForProcessing = vi.fn<
+      NonNullable<HostedExecutionContainerStubLike["ensureReadyForProcessing"]>
+    >(async () => ({ kind: "cleanup_unsettled" }));
+    const { invoke, runner, sql } = createRunnerHarness({
+      ensureReadyForProcessing,
+      workspace: createWorkspaceState({ version: "5" }),
+    });
+    await runner.bindUser(TEST_USER_ID);
+
+    await expect(runner.ensureRuntimeProcessingForUser({
+      commandTimeoutMs: 25_000,
+      orchestrationAttemptId: "test-unsettled-cleanup",
+      userId: TEST_USER_ID,
+    })).resolves.toEqual({
+      kind: "retry_later",
+      retryAt: "2026-04-27T00:00:10.000Z",
+    });
+
+    expect(invoke).not.toHaveBeenCalled();
+    expect(readRunnerMeta(sql)).toMatchObject({
+      active_attempt_id: expect.stringMatching(/^runtime-write-/u),
+      failure_count: 0,
+    });
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        details: expect.objectContaining({
+          runtimeProcessingRetryReason: "container_rpc_timeout",
+          runtimeStartupWriteFencePreserved: true,
+        }),
+      }),
+    );
+  });
+
+  it("preserves the fresh fence when only the outer startup guard settles", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
     const neverReady = new Promise<never>(() => undefined);
@@ -2727,30 +3035,81 @@ describe("HostedUserRunner execution coordination", () => {
       orchestrationAttemptId: "test-orchestration-attempt",
       userId: TEST_USER_ID,
     });
-    await vi.waitFor(() => expect(ensureReadyForProcessing).toHaveBeenCalledWith({
-      timeoutMs: 8_000,
-      userId: TEST_USER_ID,
-    }));
+    await vi.waitFor(() => expect(ensureReadyForProcessing).toHaveBeenCalledOnce());
+    expect(ensureReadyForProcessing.mock.calls[0]?.[0].timeoutMs).toBeGreaterThanOrEqual(
+      7_900,
+    );
+    expect(ensureReadyForProcessing.mock.calls[0]?.[0].timeoutMs).toBeLessThanOrEqual(
+      8_000,
+    );
     if (readinessStartedAt === null) {
       throw new Error("Expected startup readiness to begin.");
     }
 
-    await vi.advanceTimersByTimeAsync(8_000);
+    await vi.advanceTimersByTimeAsync(9_000);
     await expect(response).resolves.toEqual({
       kind: "retry_later",
-      retryAt: new Date(readinessStartedAt + 18_000).toISOString(),
+      retryAt: "2026-04-27T00:00:19.000Z",
     });
 
     expect(invoke).not.toHaveBeenCalled();
     expect(readRunnerMeta(sql)).toMatchObject({
-      active_attempt_id: null,
-      failure_count: 1,
+      active_attempt_id: expect.stringMatching(/^runtime-write-/u),
+      failure_count: 0,
       wake_at: null,
     });
     expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
       expect.objectContaining({
         details: expect.objectContaining({
           runtimeProcessingRetryReason: "container_rpc_timeout",
+          runtimeStartupWriteFencePreserved: true,
+        }),
+      }),
+    );
+  });
+
+  it("clears a fresh fence when the command budget expires before readiness dispatch", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const ensureReadyForProcessing = vi.fn<
+      NonNullable<HostedExecutionContainerStubLike["ensureReadyForProcessing"]>
+    >(async () => ({ kind: "ready" }));
+    const { invoke, runner, sql } = createRunnerHarness({
+      ensureReadyForProcessing,
+      runnerContainerStubForName(_name, stub) {
+        vi.setSystemTime(new Date("2026-04-27T00:00:05.000Z"));
+        return stub;
+      },
+      workspace: createWorkspaceState({ version: "5" }),
+    });
+    await runner.bindUser(TEST_USER_ID);
+
+    await expect(runner.ensureRuntimeProcessingForUser({
+      commandTimeoutMs: 5_000,
+      orchestrationAttemptId: "pre-dispatch-budget-expired",
+      userId: TEST_USER_ID,
+    })).resolves.toEqual({
+      kind: "retry_later",
+      retryAt: "2026-04-27T00:00:15.000Z",
+    });
+
+    expect(ensureReadyForProcessing).not.toHaveBeenCalled();
+    expect(invoke).not.toHaveBeenCalled();
+    expect(readRunnerMeta(sql)).toMatchObject({
+      active_attempt_id: null,
+      failure_count: 1,
+    });
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        details: expect.objectContaining({
+          transportFailureFenceCleared: true,
+        }),
+      }),
+    );
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        details: expect.objectContaining({
+          runtimeProcessingRetryReason: "command_budget_exhausted",
         }),
       }),
     );
@@ -5348,7 +5707,7 @@ describe("HostedUserRunner execution coordination", () => {
     );
   });
 
-  it("serializes simultaneous fresh ensure calls behind one write fence", async () => {
+  it("converges simultaneous direct and Temporal ensures on one fresh write fence", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
     const invocationResult = createDeferred<HostedWorkspaceInvocationResult>();
@@ -5367,11 +5726,15 @@ describe("HostedUserRunner execution coordination", () => {
 
     const results = await Promise.all([
       runner.ensureRuntimeProcessingForUser({
-        orchestrationAttemptId: "test-orchestration-attempt-first",
+        orchestration: { triggeredByWebDirect: true },
+        orchestrationAttemptId: "web-ingress-direct-test",
         userId: TEST_USER_ID,
       }),
       runner.ensureRuntimeProcessingForUser({
-        orchestrationAttemptId: "test-orchestration-attempt-second",
+        orchestration: {
+          temporalActivityStartedAtEpochMs: Date.now(),
+        },
+        orchestrationAttemptId: "temporal-activity-test",
         userId: TEST_USER_ID,
       }),
     ]);
