@@ -3872,6 +3872,123 @@ describe('assistant auto-reply event-first path', () => {
     expect(sendInput.turnContext).toContain('telegram reminder')
   })
 
+  it('anchors a Telegram native reply to the exact older reminder without hiding newer context', async () => {
+    const vault = await createTempVault()
+    replyEventPathMocks.resolveAssistantSession.mockResolvedValue({
+      created: false,
+      session: {
+        lastTurnAt: '2026-04-08T00:02:00.000Z',
+        sessionId: 'session-chat',
+      },
+    })
+    replyEventPathMocks.listAssistantOutboxIntents.mockResolvedValue([
+      createOutboxMessage({
+        channel: 'telegram',
+        identityId: null,
+        intentId: 'intent-telegram-reminder-a',
+        message: 'Reminder A with repeated copy.',
+        providerMessageId: 'telegram-message-a',
+        providerThreadId: 'thread-1',
+        sentAt: '2026-04-08T00:05:00.000Z',
+        sessionId: 'session-reminder-a',
+      }),
+      createOutboxMessage({
+        channel: 'telegram',
+        identityId: null,
+        intentId: 'intent-telegram-reminder-b',
+        message: 'Reminder B with repeated copy.',
+        providerMessageId: 'telegram-message-b',
+        providerThreadId: 'thread-1',
+        sentAt: '2026-04-08T00:06:00.000Z',
+        sessionId: 'session-reminder-b',
+      }),
+    ])
+    await completeAutoReplyRouteMigration(vault)
+    const candidate = createAssistantInputCandidate({
+      accountId: null,
+      occurredAt: '2026-04-08T00:10:00.000Z',
+      optionalInboxCaptureId: null,
+      source: 'telegram',
+      sourceMetadata: {
+        kind: 'telegram',
+        mediaGroupId: null,
+        replyContext: 'Replying to an earlier Telegram message',
+        replyToMessageId: 'telegram-message-a',
+      },
+      text: 'Done',
+      threadIsDirect: true,
+    })
+
+    await processAssistantAutoReplyGroup({
+      allowSelfAuthored: false,
+      context: createReplyContext(candidate),
+      enabledChannels: ['telegram'],
+      inboxServices: createInboxServices(),
+      requestId: null,
+      sessionMaxAgeMs: null,
+      vault,
+    })
+
+    const sendInput = readSentInput()
+    expect(sendInput.turnContext).toContain('Reminder A with repeated copy.')
+    expect(sendInput.turnContext).toContain('Reminder B with repeated copy.')
+    expect(sendInput.turnContext).toContain('Prior message 1 (native reply target):')
+    expect(sendInput.turnContext).toContain('Prior message 2:')
+    expect(sendInput.receiptMetadata).toEqual(expect.objectContaining({
+      [AUTO_REPLY_RECEIPT_CROSS_SESSION_CONTEXT_INTENT_ID_KEY]:
+        'intent-telegram-reminder-a',
+    }))
+  })
+
+  it('does not guess a Telegram reminder when the native reply target is unknown', async () => {
+    const vault = await createTempVault()
+    replyEventPathMocks.listAssistantOutboxIntents.mockResolvedValue([
+      createOutboxMessage({
+        channel: 'telegram',
+        identityId: null,
+        intentId: 'intent-telegram-reminder-known',
+        message: 'A reminder with the same visible wording.',
+        providerMessageId: 'telegram-message-known',
+        providerThreadId: 'thread-1',
+        sentAt: '2026-04-08T00:05:00.000Z',
+        sessionId: 'session-reminder-known',
+      }),
+    ])
+    await completeAutoReplyRouteMigration(vault)
+    const candidate = createAssistantInputCandidate({
+      accountId: null,
+      occurredAt: '2026-04-08T00:10:00.000Z',
+      optionalInboxCaptureId: null,
+      source: 'telegram',
+      sourceMetadata: {
+        kind: 'telegram',
+        mediaGroupId: null,
+        replyContext: 'Replying to: A reminder with the same visible wording.',
+        replyToMessageId: 'telegram-message-not-retained',
+      },
+      text: 'Done',
+      threadIsDirect: true,
+    })
+
+    await processAssistantAutoReplyGroup({
+      allowSelfAuthored: false,
+      context: createReplyContext(candidate),
+      enabledChannels: ['telegram'],
+      inboxServices: createInboxServices(),
+      requestId: null,
+      sessionMaxAgeMs: null,
+      vault,
+    })
+
+    const sendInput = readSentInput()
+    expect(sendInput.turnContext ?? '').not.toContain(
+      'The assistant previously sent these provider-accepted messages',
+    )
+    expect(sendInput.receiptMetadata ?? {}).not.toHaveProperty(
+      AUTO_REPLY_RECEIPT_CROSS_SESSION_CONTEXT_INTENT_ID_KEY,
+    )
+  })
+
   it('matches Linq materialized provider threads before cron route fields align', async () => {
     const vault = await createTempVault()
     replyEventPathMocks.resolveAssistantSession.mockResolvedValue({

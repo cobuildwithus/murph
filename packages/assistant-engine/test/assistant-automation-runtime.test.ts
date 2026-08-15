@@ -13990,6 +13990,7 @@ describe('assistant automation run loop', () => {
                   media_group_id: 'group-local-1',
                   message_id: 101,
                   reply_context_preview: 'Replying to: earlier Telegram message',
+                  reply_to_message_id: 99,
                   schema: 'murph.telegram-capture.v1',
                 },
                 source: 'telegram',
@@ -14104,6 +14105,7 @@ describe('assistant automation run loop', () => {
       kind: 'telegram',
       mediaGroupId: expect.stringMatching(/^lid_[0-9a-f]{32}$/u),
       replyContext: 'Replying to: earlier Telegram message',
+      replyToMessageId: '99',
     })
     expect(JSON.stringify(stagedInputs[0]?.event)).not.toContain(
       'photo-local',

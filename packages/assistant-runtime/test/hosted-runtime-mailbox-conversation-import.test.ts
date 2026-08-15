@@ -1331,6 +1331,8 @@ describe("hosted mailbox conversation import adapter", () => {
         telegramMessage: {
           attachments: [],
           messageId: "778",
+          replyContextPreview: "Replying to: an earlier reminder",
+          replyToMessageId: "777",
           schema: HOSTED_EXECUTION_TELEGRAM_MESSAGE_SCHEMA,
           text: "telegram already enabled input",
           threadId: "123456789",
@@ -1380,6 +1382,12 @@ describe("hosted mailbox conversation import adapter", () => {
       vault: vaultRoot,
     });
     assert.equal(listed.events.length, 1);
+    assert.deepEqual(listed.events[0]?.sourceMetadata, {
+      kind: "telegram",
+      mediaGroupId: null,
+      replyContext: "Replying to: an earlier reminder",
+      replyToMessageId: "777",
+    });
     assert.deepEqual(await readHostedPendingAssistantInputIds({ vaultRoot }), [
       listed.events[0]!.inputId,
     ]);

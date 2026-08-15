@@ -1877,7 +1877,10 @@ function readPromptInputsCrossSessionReplyContext(
   let hasNativeReplyReference = false
   for (let index = inputs.length - 1; index >= 0; index -= 1) {
     const metadata = inputs[index]?.sourceMetadata
-    if (metadata?.kind === 'linq' && metadata.replyToMessageId) {
+    if (
+      (metadata?.kind === 'linq' || metadata?.kind === 'telegram') &&
+      metadata.replyToMessageId
+    ) {
       hasNativeReplyReference = true
       const replyToMessageId = readAssistantTargetProviderScalar(
         metadata.replyToMessageId,
@@ -1900,6 +1903,9 @@ function promptInputCarriesNativeReplyReference(
   candidate: AssistantInputCandidate,
 ): boolean {
   const metadata = candidate.event.sourceMetadata
+  if (metadata?.kind === 'telegram') {
+    return metadata.replyToMessageId !== undefined
+  }
   return metadata?.kind === 'linq' &&
     metadata.replyToMessageId !== null &&
     metadata.editedTextPartIndex === undefined
