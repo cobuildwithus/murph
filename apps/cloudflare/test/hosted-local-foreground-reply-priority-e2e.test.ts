@@ -608,7 +608,12 @@ describe.sequential("hosted local foreground reply priority e2e", () => {
         activeFence: await readActiveRuntimeFenceForTest(identity.userId),
         conversationConsumed: consumedConversation.consumedAt !== null,
         lastErrorCode: status.lastErrorCode ?? null,
-        mailboxCaughtUp: status.mailboxLag.every((lane) => lane.lag === "0"),
+        mailboxLag: status.mailboxLag.map(({ importedSeq, lag, lane, maxSeq }) => ({
+          importedSeq,
+          lag,
+          lane,
+          maxSeq,
+        })),
         systemHandledThroughSeq:
           status.workspace?.redactedStatus?.hostedMailboxSystemHandledThroughSeq
             ?? null,
@@ -625,7 +630,20 @@ describe.sequential("hosted local foreground reply priority e2e", () => {
       activeFence: conversationFence,
       conversationConsumed: true,
       lastErrorCode: null,
-      mailboxCaughtUp: true,
+      mailboxLag: [
+        {
+          importedSeq: conversationItem.laneSeq,
+          lag: "0",
+          lane: "conversation",
+          maxSeq: conversationItem.laneSeq,
+        },
+        {
+          importedSeq: activationAppend.wake.seq,
+          lag: "0",
+          lane: "system",
+          maxSeq: activationAppend.wake.seq,
+        },
+      ],
       systemHandledThroughSeq: activationAppend.wake.seq,
       systemImportedSeq: activationAppend.wake.seq,
       systemMailboxPreparedObserved: 0,
