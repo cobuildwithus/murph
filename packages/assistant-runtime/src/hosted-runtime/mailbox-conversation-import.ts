@@ -435,7 +435,6 @@ export async function importHostedConversationMailboxItem(input: {
 
   const linqDeliveryContext = buildHostedAssistantLinqDeliveryContextFromWake(decoded.wake);
   const emailDeliveryContext = buildHostedAssistantEmailDeliveryContextFromWake(decoded.wake);
-  assertHostedConversationMailboxImportLive(input.signal ?? null);
   if (!requiresHostedConversationInboxProjection({
     attachmentDescriptorCount: stagedInput.attachmentDescriptorCount,
     wake: decoded.wake,
@@ -675,9 +674,9 @@ async function projectHostedConversationAssistantInputBestEffort(input: {
     });
     timing.projectionImportMs = elapsedHostedConversationImportMs(importStartedAt);
   } catch (error) {
-    if (isHostedConversationMailboxAbortError(error, input.signal ?? null)) {
-      throw readHostedConversationMailboxAbortReason(error, input.signal ?? null);
-    }
+    // Staging is the durable mailbox-import boundary. Cancellation may stop
+    // the optional inbox projection, but it must not replay already-staged
+    // assistant input by withholding the mailbox watermark.
     if (timing.projectionPrepareMs === undefined && prepareStartedAt !== null) {
       timing.projectionPrepareMs = elapsedHostedConversationImportMs(prepareStartedAt);
     }
@@ -836,21 +835,6 @@ function assertHostedConversationMailboxImportLive(signal: AbortSignal | null): 
       signal,
     );
   }
-}
-
-function isHostedConversationMailboxAbortError(
-  error: unknown,
-  signal: AbortSignal | null,
-): boolean {
-  return signal?.aborted === true
-    || (
-      error instanceof DOMException
-      && error.name === "AbortError"
-    )
-    || (
-      error instanceof Error
-      && error.name === "AbortError"
-    );
 }
 
 function readHostedConversationMailboxAbortReason(

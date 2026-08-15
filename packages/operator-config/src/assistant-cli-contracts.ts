@@ -376,7 +376,19 @@ const assistantImageResponseMediaSchema = z
     url: z
       .string()
       .url()
-      .transform((value) => normalizeAssistantResponseMediaUrl(value)),
+      .transform((value, context) => {
+        try {
+          return normalizeAssistantResponseMediaUrl(value)
+        } catch {
+          context.addIssue({
+            code: 'custom',
+            message:
+              'Assistant response media URLs must be valid public HTTPS image URLs.',
+            params: { murphExpectedShape: 'public_https_image_url' },
+          })
+          return z.NEVER
+        }
+      }),
     alt: z.string().trim().min(1).max(500).nullable().default(null),
     source: z.string().trim().min(1).max(200).nullable().default(null),
   })
@@ -410,6 +422,20 @@ const assistantVaultImageResponseMediaSchema = z
     source: z.string().trim().min(1).max(200).nullable().default(null),
   })
   .strict()
+
+export const assistantAuthoredResponseMediaSchema = z.preprocess(
+  (value) =>
+    typeof value === 'object' &&
+    value !== null &&
+    !Array.isArray(value) &&
+    !Object.hasOwn(value, 'kind')
+      ? { ...value, kind: 'image' }
+      : value,
+  z.discriminatedUnion('kind', [
+    assistantImageResponseMediaSchema,
+    assistantVaultImageResponseMediaSchema,
+  ]),
+)
 
 export const assistantVoiceMemoGenerationSchema = z.discriminatedUnion('kind', [
   z

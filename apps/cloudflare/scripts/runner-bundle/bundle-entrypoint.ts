@@ -9,6 +9,8 @@ import {
 } from "@murphai/health-commons/runtime";
 
 import {
+  collectLazyRunnerBundleOutputPaths,
+  collectStaticRunnerBundleOutputPaths,
   RUNNER_BUNDLE_SHARED_EXTERNALS,
   RUNNER_BUNDLE_SHARED_FORBIDDEN_INPUT_MARKERS,
 } from "./bundle-shared.js";
@@ -416,7 +418,7 @@ export function assertRunnerEntrypointBundleWithinBudgets(
       `runner entrypoint bundle metafile is missing output ${entryPath}; cannot enforce the entry-chunk byte budget.`,
     );
   }
-  const staticBootOutputPaths = collectStaticRunnerEntrypointOutputPaths(
+  const staticBootOutputPaths = collectStaticRunnerBundleOutputPaths(
     metafile,
     entryPath,
   );
@@ -517,93 +519,11 @@ function assertRunnerEntrypointBundleBootInputsAllowed(
   }
 }
 
-type MetafileOutputImport = Metafile["outputs"][string]["imports"][number];
-
-function collectStaticRunnerEntrypointOutputPaths(
-  metafile: Metafile,
-  entryPath: string,
-): Set<string> {
-  return collectRunnerEntrypointOutputPaths(
-    metafile,
-    entryPath,
-    (imported) => imported.kind !== "dynamic-import",
-  );
-}
-
 export function collectLazyRunnerEntrypointOutputPaths(
   metafile: Metafile,
   entryPath: string,
 ): Set<string> {
-  const staticOutputPaths = collectStaticRunnerEntrypointOutputPaths(
-    metafile,
-    entryPath,
-  );
-  const outputPaths = collectRunnerEntrypointOutputPaths(
-    metafile,
-    entryPath,
-    () => true,
-  );
-
-  for (const outputPath of staticOutputPaths) {
-    outputPaths.delete(outputPath);
-  }
-
-  return outputPaths;
-}
-
-function collectRunnerEntrypointOutputPaths(
-  metafile: Metafile,
-  entryPath: string,
-  shouldFollowImport: (imported: MetafileOutputImport) => boolean,
-): Set<string> {
-  const outputPaths = new Set<string>();
-  const pending = [normalizeMetafilePath(entryPath)];
-
-  while (pending.length > 0) {
-    const outputPath = pending.pop();
-    if (!outputPath || outputPaths.has(outputPath)) {
-      continue;
-    }
-    outputPaths.add(outputPath);
-
-    const output = metafile.outputs[outputPath];
-    if (!output) {
-      continue;
-    }
-    for (const imported of output.imports) {
-      if (!shouldFollowImport(imported)) {
-        continue;
-      }
-      const importedOutputPath = resolveMetafileOutputImportPath({
-        importedPath: imported.path,
-        importerOutputPath: outputPath,
-        outputPaths: metafile.outputs,
-      });
-      if (importedOutputPath in metafile.outputs) {
-        pending.push(importedOutputPath);
-      }
-    }
-  }
-
-  return outputPaths;
-}
-
-function resolveMetafileOutputImportPath(input: {
-  importedPath: string;
-  importerOutputPath: string;
-  outputPaths: Metafile["outputs"];
-}): string {
-  const { importedPath, importerOutputPath, outputPaths } = input;
-  const normalizedImportedPath = normalizeMetafilePath(importedPath);
-  if (normalizedImportedPath in outputPaths) {
-    return normalizedImportedPath;
-  }
-  if (!normalizedImportedPath.startsWith(".")) {
-    return normalizedImportedPath;
-  }
-  return normalizeMetafilePath(
-    path.join(path.dirname(importerOutputPath), normalizedImportedPath),
-  );
+  return collectLazyRunnerBundleOutputPaths(metafile, entryPath);
 }
 
 function normalizeMetafilePath(inputPath: string): string {

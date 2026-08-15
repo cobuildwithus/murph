@@ -36,6 +36,7 @@ import {
 } from '../../assistant/onboarding-first-personal-read-automation.js'
 import {
   buildSafeToolCallValidationDigest,
+  collectSafeJsonSchemaValidationPaths,
   type SafeToolCallValidationDigest,
 } from '../../assistant/tool-validation-digest.js'
 import { parseDynamicToolArguments } from './dynamic-tool-wrapper.js'
@@ -399,6 +400,9 @@ export const MURPH_AUTOMATION_TOOL = {
   inputSchema: z.toJSONSchema(automationArgumentsSchema, { io: 'input' }),
 } as const
 
+const AUTOMATION_VALIDATION_PATHS =
+  collectSafeJsonSchemaValidationPaths(MURPH_AUTOMATION_TOOL.inputSchema)
+
 export type AutomationDynamicToolRequest =
   | {
       kind: 'automation-local-at-recovery-dismissal'
@@ -438,6 +442,7 @@ export function readAutomationDynamicToolRequest(input: {
 
   const parsed = parseDynamicToolArguments({
     schema: automationArgumentsSchema,
+    schemaPaths: AUTOMATION_VALIDATION_PATHS,
     schemaRootKeys: AUTOMATION_ARGUMENT_ROOT_KEYS,
     toolName: 'murph.automation',
     value: input.arguments,

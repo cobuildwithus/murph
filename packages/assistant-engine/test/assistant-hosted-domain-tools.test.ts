@@ -847,6 +847,43 @@ describe('hosted domain dynamic tools', () => {
     }
   })
 
+  it('returns schema-owned automation repair hints without calling the port', async () => {
+    const privateMarker = 'synthetic-private-automation-marker'
+    const request = readToolRequest('automation', {
+      action: 'inspect',
+      lookup: { privateMarker },
+    })
+    expect(request).toMatchObject({ kind: 'invalid-automation-arguments' })
+    if (!request || request.kind !== 'invalid-automation-arguments') {
+      throw new Error('Expected invalid automation arguments.')
+    }
+
+    const automationRequest = vi.fn(async () => {
+      throw new Error('Automation port must not be called for invalid arguments.')
+    })
+    const result = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext: createHostedToolContext({
+        automationTool: { request: automationRequest },
+      }),
+      nextUsageOrdinal: () => 0,
+      progressDelivery: null,
+      request,
+    })
+    const feedback = result.rpcResult.contentItems[0]?.text ?? ''
+
+    expect(result.rpcResult.success).toBe(false)
+    expect(feedback).toContain('"error":"invalid_automation_arguments"')
+    expect(feedback).toContain(
+      '"field":"lookup","code":"invalid_type","expected":"string"',
+    )
+    expect(feedback).not.toContain(privateMarker)
+    expect(feedback).not.toContain('privateMarker')
+    expect(feedback).not.toContain('"received"')
+    expect(automationRequest).not.toHaveBeenCalled()
+  })
+
   it('keeps privileged and generic execution fields out of both schemas', () => {
     const propertyKeys = new Set([
       ...collectJsonSchemaPropertyKeys(MURPH_AUTOMATION_TOOL.inputSchema),
