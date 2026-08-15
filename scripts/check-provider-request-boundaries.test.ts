@@ -719,6 +719,49 @@ describe("check-provider-request-boundaries", () => {
     expect(exaMatches.map((match) => match.line)).toEqual([3]);
   });
 
+  it("uses unambiguous transport evidence for generically named wire contracts", () => {
+    const matches = violationsOfKind(
+      "handwritten-provider-transport",
+      [
+        "const OPENAI_URL = 'https://api.openai.com/v1/responses';",
+        "interface RequestOptions {",
+        "  method: 'POST';",
+        "  headers: Record<string, string>;",
+        "  body: string;",
+        "}",
+        "interface ResponseBody {",
+        "  json(): Promise<unknown>;",
+        "  status: number;",
+        "}",
+        "interface Payload {",
+        "  method: 'POST';",
+        "  headers: Record<string, string>;",
+        "  body: string;",
+        "}",
+        "interface DomainResponse {",
+        "  json(): Promise<unknown>;",
+        "  status: number;",
+        "}",
+      ].join("\n"),
+      "packages/contracts/src/provider-wire.ts",
+    );
+    const ambiguousMatches = violationsOfKind(
+      "handwritten-provider-transport",
+      [
+        "const OPENAI_URL = 'https://api.openai.com/v1/responses';",
+        "const LINQ_URL = 'https://api.linqapp.com/api/partner/v3/chats';",
+        "interface RequestOptions {",
+        "  method: 'POST';",
+        "  body: string;",
+        "}",
+      ].join("\n"),
+      "packages/contracts/src/ambiguous-provider-wire.ts",
+    );
+
+    expect(matches.map((match) => match.line)).toEqual([2, 7, 11]);
+    expect(ambiguousMatches).toEqual([]);
+  });
+
   it("reports only the primitive inside provider-domain orchestration helpers", () => {
     const matches = violationsOfKind(
       "raw-provider-http",
@@ -856,6 +899,36 @@ describe("check-provider-request-boundaries", () => {
 
     expect(commonJsMatches.map((match) => match.line)).toEqual([6, 7, 8, 9, 10, 12]);
     expect(namespaceMatches.map((match) => match.line)).toEqual([3]);
+  });
+
+  it("reports destructured global fetch aliases without trusting shadowed objects", () => {
+    const matches = violationsOfKind(
+      "raw-provider-http",
+      [
+        "const { fetch } = globalThis;",
+        "const { fetch: send } = self;",
+        "const { fetch: windowSend } = window;",
+        "const { ['fetch']: computedSend } = globalThis;",
+        "const { fetch: defaultedSend = () => undefined } = globalThis;",
+        "const { ...globalCopy } = globalThis;",
+        "const unrelated = { fetch: (url: string) => url };",
+        "const { fetch: localSend } = unrelated;",
+        "await fetch('https://api.openai.com/v1/responses');",
+        "await send('https://api.openai.com/v1/responses');",
+        "await windowSend('https://api.openai.com/v1/responses');",
+        "await computedSend('https://api.openai.com/v1/responses');",
+        "await defaultedSend('https://api.openai.com/v1/responses');",
+        "await globalCopy.fetch('https://api.openai.com/v1/responses');",
+        "await localSend('https://api.openai.com/v1/responses');",
+        "function shadow(globalThis: { fetch: (url: string) => string }) {",
+        "  const { fetch: shadowed } = globalThis;",
+        "  return shadowed('https://api.openai.com/v1/responses');",
+        "}",
+      ].join("\n"),
+      "scripts/destructured-global-fetch.mts",
+    );
+
+    expect(matches.map((match) => match.line)).toEqual([9, 10, 11, 12, 13, 14]);
   });
 
   it("preserves exact fetch types on destructured provider transports", () => {
@@ -1015,6 +1088,64 @@ describe("check-provider-request-boundaries", () => {
     }
   });
 
+  it("reports default fetch exports from literal dynamic imports", () => {
+    const cases = [
+      {
+        path: "scripts/dynamic-node-fetch.mjs",
+        source: [
+          "const { default: send } = await import('node-fetch');",
+          "await send('https://api.openai.com/v1/responses');",
+          "const nodeFetch = await import('node-fetch');",
+          "await nodeFetch.default('https://api.openai.com/v1/responses');",
+        ].join("\n"),
+      },
+      {
+        path: "scripts/dynamic-cross-fetch.mts",
+        source: [
+          "const { default: send } = await import('cross-fetch');",
+          "await send('https://api.openai.com/v1/responses');",
+          "const crossFetch = await import('cross-fetch');",
+          "await crossFetch.default('https://api.openai.com/v1/responses');",
+        ].join("\n"),
+      },
+      {
+        path: "scripts/dynamic-fetch-default.cts",
+        source: [
+          "const nodeFetch = await import('node-fetch');",
+          "await nodeFetch.default('https://api.openai.com/v1/responses');",
+          "const { default: send } = await import('cross-fetch');",
+          "await send('https://api.openai.com/v1/responses');",
+        ].join("\n"),
+      },
+    ] as const;
+
+    for (const testCase of cases) {
+      expect(
+        violationsOfKind("raw-provider-http", testCase.source, testCase.path)
+          .map((match) => match.line),
+        testCase.path,
+      ).toEqual([2, 4]);
+    }
+  });
+
+  it("reports direct, computed, defaulted, and rest dynamic fetch exports", () => {
+    const matches = violationsOfKind(
+      "raw-provider-http",
+      [
+        "await (await import('node-fetch')).default('https://api.openai.com/v1/responses');",
+        "const { ['default']: computed } = await import('node-fetch');",
+        "await computed('https://api.openai.com/v1/responses');",
+        "const { default: defaulted = () => undefined } = await import('cross-fetch');",
+        "await defaulted('https://api.openai.com/v1/responses');",
+        "const { ...namespaceCopy } = await import('cross-fetch');",
+        "await namespaceCopy.default('https://api.openai.com/v1/responses');",
+      ].join("\n"),
+      "scripts/dynamic-fetch-variants.mjs",
+    );
+
+    expect(matches.map((match) => match.line)).toEqual([1, 3, 5, 7]);
+  });
+
   it("does not infer HTTP transports from computed or unrelated dynamic imports", () => {
     const matches = violationsOfKind(
       "raw-provider-http",
@@ -1024,6 +1155,9 @@ describe("check-provider-request-boundaries", () => {
         "computed.request('https://api.openai.com/v1/responses');",
         "const unrelated = await import('unrelated');",
         "unrelated.request('https://api.openai.com/v1/responses');",
+        "unrelated.default('https://api.openai.com/v1/responses');",
+        "const { default: localSend } = await import('unrelated');",
+        "localSend('https://api.openai.com/v1/responses');",
       ].join("\n"),
       "scripts/unrelated-dynamic-provider-transport.mjs",
     );
@@ -2162,6 +2296,50 @@ describe("check-provider-request-boundaries", () => {
     expect(untypedMatches.map((match) => match.line)).toEqual([2, 6]);
     expect(wrapperMatches.map((match) => match.line)).toEqual([3, 15]);
     expect(typedMatches.map((match) => match.line)).toEqual([2, 6]);
+  });
+
+  it("composes statically bound transport arguments and fails closed on opaque binds", () => {
+    const matches = violationsOfKind(
+      "raw-provider-http",
+      [
+        "const send = globalThis.fetch.bind(undefined, 'https://api.openai.com/v1/responses', { method: 'POST' });",
+        "await send();",
+        "const onlyThis = globalThis.fetch.bind(undefined);",
+        "await onlyThis('https://api.openai.com/v1/responses');",
+        "const mixed = globalThis.fetch.bind(undefined, 'https://api.openai.com/v1/responses');",
+        "await mixed(undefined);",
+        "const internal = globalThis.fetch.bind(undefined);",
+        "await internal('/api/status');",
+        "const args = ['https://api.openai.com/v1/responses'] as const;",
+        "const opaque = globalThis.fetch.bind(undefined, ...args);",
+        "await opaque();",
+        "const unrelated = ((url: string) => url).bind(undefined, 'https://api.openai.com/v1/responses');",
+        "unrelated();",
+        "const applied = globalThis.fetch.bind(undefined, 'https://api.openai.com/v1/responses');",
+        "await applied.apply(undefined, []);",
+        "class OpenAiTransport {",
+        "  send = globalThis.fetch.bind(undefined, 'https://api.openai.com/v1/responses');",
+        "  async run() { await this.send(); }",
+        "}",
+      ].join("\n"),
+      "scripts/bound-provider-transports.mts",
+    );
+
+    expect(matches.map((match) => match.line)).toEqual([2, 4, 6, 11, 15, 18]);
+  });
+
+  it("composes pre-bound Node request options", () => {
+    const matches = violationsOfKind(
+      "raw-provider-http",
+      [
+        "import * as https from 'node:https';",
+        "const send = https.request.bind(https, { hostname: 'api.openai.com', path: '/v1/responses' });",
+        "send();",
+      ].join("\n"),
+      "scripts/bound-node-provider-transport.mts",
+    );
+
+    expect(matches.map((match) => match.line)).toEqual([3]);
   });
 
 });

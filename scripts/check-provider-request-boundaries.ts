@@ -896,8 +896,17 @@ function collectHttpTransportBindings(
     initializer: Expression | null = null,
     inheritedScope: Pick<TransportBinding, "scopeEnd" | "scopeStart"> | null = null,
   ): boolean => {
-    const current = bindings.get(name) ?? [];
+    let current = bindings.get(name) ?? [];
     const start = node.start ?? 0;
+    if (kind !== "shadow") {
+      const withoutSameDeclarationShadow = current.filter(
+        (binding) => binding.kind !== "shadow" || binding.start !== start,
+      );
+      if (withoutSameDeclarationShadow.length !== current.length) {
+        current = withoutSameDeclarationShadow;
+        bindings.set(name, current);
+      }
+    }
     if (
       current.some((binding) =>
         binding.kind === kind &&
@@ -971,78 +980,22 @@ function collectHttpTransportBindings(
     }
   });
 
-  let changed = true;
-  while (changed) {
-    changed = false;
-    traverseFast(sourceFile, (node) => {
-      if (!isVariableDeclarator(node) || !node.init) {
-        return;
-      }
-      const init = unwrapExpression(node.init);
-      const staticModuleName = readStaticTransportModuleName(init);
-      const directTransport = staticModuleName
-        ? classifyHttpTransportModule(staticModuleName)
-        : null;
-
-      if (isIdentifier(node.id)) {
-        if (directTransport) {
-          changed = addBinding(
-            node.id.name,
-            directTransport === "fetch-package" ? "call" : "namespace",
-            node,
-            directTransport,
-          ) || changed;
-          return;
-        }
-        const memberTransport = readTransportMemberBinding(
-          init,
-          bindings,
-          node.start ?? 0,
-        );
-        if (memberTransport) {
-          changed = addBinding(
-            node.id.name,
-            "call",
-            node,
-            memberTransport,
-          ) || changed;
-        }
-        return;
-      }
-
-      if (node.id.type !== "ObjectPattern") {
-        return;
-      }
-      const namespaceTransport = directTransport ??
-        readTransportNamespaceKind(init, bindings, node.start ?? 0);
-      if (!namespaceTransport) {
-        return;
-      }
-      for (const property of node.id.properties) {
-        if (
-          !isObjectProperty(property) ||
-          property.computed ||
-          !isIdentifier(property.value)
-        ) {
-          continue;
-        }
-        const importedName = readPropertyName(property.key);
-        if (
-          importedName &&
-          isHttpTransportMethod(namespaceTransport, importedName)
-        ) {
-          changed = addBinding(
-            property.value.name,
-            "call",
-            node,
-            namespaceTransport,
-          ) || changed;
-        }
-      }
-    });
-  }
-
   traverseFast(sourceFile, (node) => {
+    if (isFunction(node)) {
+      const functionScope = findInnermostLexicalScope(
+        scopes,
+        node.body.start ?? node.start ?? 0,
+      );
+      for (const parameter of node.params) {
+        for (const entry of readParameterBindingEntries(parameter)) {
+          addBinding(entry.name, "shadow", parameter, null, null, {
+            scopeEnd: functionScope.end,
+            scopeStart: functionScope.start,
+          });
+        }
+      }
+      return;
+    }
     if (isImportDeclaration(node)) {
       for (const specifier of node.specifiers) {
         if (
@@ -1106,6 +1059,100 @@ function collectHttpTransportBindings(
       }
     }
   });
+
+  let changed = true;
+  while (changed) {
+    changed = false;
+    traverseFast(sourceFile, (node) => {
+      if (!isVariableDeclarator(node) || !node.init) {
+        return;
+      }
+      const init = unwrapExpression(node.init);
+      const staticModule = readStaticTransportModule(init);
+      const directTransport = staticModule
+        ? classifyHttpTransportModule(staticModule.moduleName)
+        : null;
+
+      if (isIdentifier(node.id)) {
+        if (directTransport) {
+          changed = addBinding(
+            node.id.name,
+            directTransport === "fetch-package" &&
+              staticModule?.source === "require"
+              ? "call"
+              : "namespace",
+            node,
+            directTransport,
+          ) || changed;
+          return;
+        }
+        const memberTransport = readTransportMemberBinding(
+          init,
+          bindings,
+          node.start ?? 0,
+        );
+        if (memberTransport) {
+          changed = addBinding(
+            node.id.name,
+            "call",
+            node,
+            memberTransport,
+          ) || changed;
+        }
+        return;
+      }
+
+      if (node.id.type !== "ObjectPattern") {
+        return;
+      }
+      const namespaceTransport = directTransport ??
+        readTransportNamespaceKind(init, bindings, node.start ?? 0);
+      if (!namespaceTransport) {
+        return;
+      }
+      for (const property of node.id.properties) {
+        if (
+          property.type === "RestElement" &&
+          isIdentifier(property.argument)
+        ) {
+          changed = addBinding(
+            property.argument.name,
+            "namespace",
+            node,
+            namespaceTransport,
+          ) || changed;
+          continue;
+        }
+        if (
+          !isObjectProperty(property) ||
+          (property.computed && !isStringLiteral(property.key))
+        ) {
+          continue;
+        }
+        const localIdentifier = isIdentifier(property.value)
+          ? property.value
+          : property.value.type === "AssignmentPattern" &&
+              isIdentifier(property.value.left)
+            ? property.value.left
+            : null;
+        if (!localIdentifier) {
+          continue;
+        }
+        const importedName = readPropertyName(property.key);
+        if (
+          importedName &&
+          isHttpTransportMethod(namespaceTransport, importedName)
+        ) {
+          changed = addBinding(
+            localIdentifier.name,
+            "call",
+            node,
+            namespaceTransport,
+          ) || changed;
+        }
+      }
+    });
+  }
 
   return bindings;
 }
@@ -1188,7 +1235,16 @@ function readParameterBindingEntries(
   });
 }
 
-type HttpTransportModuleKind = "fetch-package" | "node-http" | "undici";
+type HttpTransportModuleKind =
+  | "fetch-package"
+  | "node-http"
+  | "undici"
+  | "web-global";
+
+interface StaticTransportModule {
+  readonly moduleName: string;
+  readonly source: "dynamic-import" | "require";
+}
 
 function classifyHttpTransportModule(
   moduleName: string,
@@ -1215,7 +1271,10 @@ function isHttpTransportMethod(
   if (transport === "undici") {
     return /^(?:fetch|request)$/u.test(method);
   }
-  return method === "fetch";
+  if (transport === "web-global") {
+    return method === "fetch";
+  }
+  return /^(?:default|fetch)$/u.test(method);
 }
 
 function readRequiredModuleName(node: Node): string | null {
@@ -1229,14 +1288,14 @@ function readRequiredModuleName(node: Node): string | null {
   return moduleName && isStringLiteral(moduleName) ? moduleName.value : null;
 }
 
-function readStaticTransportModuleName(node: Node): string | null {
+function readStaticTransportModule(node: Node): StaticTransportModule | null {
   const expression = unwrapExpression(node);
   if (expression.type === "AwaitExpression") {
-    return readStaticTransportModuleName(expression.argument);
+    return readStaticTransportModule(expression.argument);
   }
   if (expression.type === "ImportExpression") {
     return isStringLiteral(expression.source) && expression.options === null
-      ? expression.source.value
+      ? { moduleName: expression.source.value, source: "dynamic-import" }
       : null;
   }
   if (
@@ -1251,10 +1310,13 @@ function readStaticTransportModuleName(node: Node): string | null {
       moduleName.type !== "ArgumentPlaceholder" &&
       moduleName.type !== "SpreadElement" &&
       isStringLiteral(moduleName)
-      ? moduleName.value
+      ? { moduleName: moduleName.value, source: "dynamic-import" }
       : null;
   }
-  return readRequiredModuleName(expression);
+  const requiredModule = readRequiredModuleName(expression);
+  return requiredModule
+    ? { moduleName: requiredModule, source: "require" }
+    : null;
 }
 
 function readImportEqualsModuleName(node: Node): string | null {
@@ -1278,6 +1340,12 @@ function readTransportNamespaceKind(
     return null;
   }
   const binding = resolveTransportBinding(bindings, expression.name, before);
+  if (
+    /^(?:globalThis|self|window)$/u.test(expression.name) &&
+    binding === null
+  ) {
+    return "web-global";
+  }
   return binding?.kind === "namespace" ? binding.transport : null;
 }
 
@@ -1295,9 +1363,9 @@ function readTransportMemberBinding(
   if (!method) {
     return null;
   }
-  const requiredModule = readRequiredModuleName(node.object);
-  const directTransport = requiredModule
-    ? classifyHttpTransportModule(requiredModule)
+  const staticModule = readStaticTransportModule(node.object);
+  const directTransport = staticModule
+    ? classifyHttpTransportModule(staticModule.moduleName)
     : null;
   const binding = directTransport
     ? null
@@ -1579,7 +1647,12 @@ function collectRawProviderHttpViolations(input: {
     ) {
       return;
     }
-    const callShape = readProviderHttpCallShape(node);
+    const callShape = readProviderHttpCallShape({
+      analysis: input.analysis,
+      bindings: input.bindings,
+      call: node,
+      contents: input.contents,
+    });
     if (!callShape) {
       return;
     }
@@ -1711,30 +1784,139 @@ function collectRawProviderHttpViolations(input: {
   }
 }
 
-function readProviderHttpCallShape(
-  call: CallExpression | OptionalCallExpression,
-): ProviderHttpCallShape | null {
+interface BoundTransportCall {
+  readonly arguments: readonly Node[];
+  readonly evidenceNode: Node;
+  readonly transportTarget: Node;
+  readonly unresolved: boolean;
+}
+
+function readBoundTransportCall(input: {
+  readonly analysis: ProviderHttpSourceAnalysis;
+  readonly before: number;
+  readonly bindings: ReadonlyMap<string, readonly VariableBinding[]>;
+  readonly contents: string;
+  readonly node: Node;
+  readonly resolving: ReadonlySet<string>;
+}): BoundTransportCall | null {
+  const expression = unwrapExpression(input.node);
+  if (isIdentifier(expression)) {
+    const binding = resolveBinding(
+      input.bindings,
+      expression.name,
+      input.before,
+    );
+    if (!binding) {
+      return null;
+    }
+    const key = `bound-transport:${expression.name}:${binding.start}`;
+    if (input.resolving.has(key)) {
+      return null;
+    }
+    const resolving = new Set(input.resolving);
+    resolving.add(key);
+    return readBoundTransportCall({
+      ...input,
+      before: binding.start,
+      node: binding.initializer,
+      resolving,
+    });
+  }
+  if (
+    isMemberExpression(expression) ||
+    isOptionalMemberExpression(expression)
+  ) {
+    const path = readMemberPath(expression);
+    if (path?.[0] !== "this") {
+      return null;
+    }
+    const binding = resolveMemberBinding(
+      input.analysis.memberBindings,
+      path.join("."),
+      input.before,
+    );
+    if (!binding?.initializer) {
+      return null;
+    }
+    const key = `bound-transport-member:${path.join(".")}:${binding.start}`;
+    if (input.resolving.has(key)) {
+      return null;
+    }
+    const resolving = new Set(input.resolving);
+    resolving.add(key);
+    return readBoundTransportCall({
+      ...input,
+      before: binding.start,
+      node: binding.initializer,
+      resolving,
+    });
+  }
+  if (!isCallExpression(expression) && !isOptionalCallExpression(expression)) {
+    return null;
+  }
+  const bindCallee = unwrapExpression(expression.callee);
+  if (
+    (!isMemberExpression(bindCallee) &&
+      !isOptionalMemberExpression(bindCallee)) ||
+    readPropertyName(bindCallee.property) !== "bind" ||
+    !isFetchLikeCallTarget({
+      analysis: input.analysis,
+      before: expression.start ?? input.before,
+      bindings: input.bindings,
+      contents: input.contents,
+      node: bindCallee.object,
+      resolving: new Set(),
+    })
+  ) {
+    return null;
+  }
+  const inner = readBoundTransportCall({
+    ...input,
+    before: expression.start ?? input.before,
+    node: bindCallee.object,
+  });
+  const hasOpaqueArgument = expression.arguments.some(
+    (argument) =>
+      argument.type === "ArgumentPlaceholder" ||
+      argument.type === "SpreadElement",
+  );
+  if (hasOpaqueArgument || inner?.unresolved) {
+    return {
+      arguments: [],
+      evidenceNode: expression,
+      transportTarget: inner?.transportTarget ?? bindCallee.object,
+      unresolved: true,
+    };
+  }
+  return {
+    arguments: [
+      ...(inner?.arguments ?? []),
+      ...expression.arguments.slice(1),
+    ],
+    evidenceNode: expression,
+    transportTarget: inner?.transportTarget ?? bindCallee.object,
+    unresolved: false,
+  };
+}
+
+function readProviderHttpCallShape(input: {
+  readonly analysis: ProviderHttpSourceAnalysis;
+  readonly bindings: ReadonlyMap<string, readonly VariableBinding[]>;
+  readonly call: CallExpression | OptionalCallExpression;
+  readonly contents: string;
+}): ProviderHttpCallShape | null {
+  const { call } = input;
   const callee = unwrapExpression(call.callee);
+  let emptyApplyEvidence: Node | null = null;
+  let invocationArguments: readonly Node[];
+  let transportTarget: Node = call.callee;
   if (isMemberExpression(callee) || isOptionalMemberExpression(callee)) {
     const method = readPropertyName(callee.property);
     if (method === "call") {
-      const urlArgument = call.arguments[1];
-      return urlArgument && urlArgument.type !== "ArgumentPlaceholder"
-        ? {
-            evidenceNode: urlArgument.type === "SpreadElement"
-              ? urlArgument.argument
-              : urlArgument,
-            initArgument: call.arguments[2] ?? null,
-            supportsRegisteredExceptions: true,
-            transportTarget: callee.object,
-            unresolvedProviderBoundary: false,
-            urlArgument: urlArgument.type === "SpreadElement"
-              ? urlArgument.argument
-              : urlArgument,
-          }
-        : null;
-    }
-    if (method === "apply") {
+      invocationArguments = call.arguments.slice(1);
+      transportTarget = callee.object;
+    } else if (method === "apply") {
+      transportTarget = callee.object;
       const tuple = call.arguments[1];
       if (!tuple || tuple.type === "ArgumentPlaceholder") {
         return null;
@@ -1745,44 +1927,76 @@ function readProviderHttpCallShape(
       if (
         tuple.type !== "SpreadElement" &&
         tupleExpression.type === "ArrayExpression" &&
-        tupleExpression.elements.length > 0 &&
         tupleExpression.elements.every(
           (element) => element !== null && element.type !== "SpreadElement",
         )
       ) {
-        const urlArgument = tupleExpression.elements[0];
-        if (urlArgument) {
-          return {
-            evidenceNode: tupleExpression,
-            initArgument: tupleExpression.elements[1] ?? null,
-            supportsRegisteredExceptions: true,
-            transportTarget: callee.object,
-            unresolvedProviderBoundary: false,
-            urlArgument,
-          };
+        invocationArguments = tupleExpression.elements.flatMap((element) =>
+          element ? [element] : []
+        );
+        if (invocationArguments.length === 0) {
+          emptyApplyEvidence = tupleExpression;
         }
+      } else {
+        return {
+          evidenceNode: tupleExpression,
+          initArgument: null,
+          supportsRegisteredExceptions: false,
+          transportTarget,
+          unresolvedProviderBoundary: true,
+          urlArgument: tupleExpression,
+        };
       }
-      return {
-        evidenceNode: tupleExpression,
-        initArgument: null,
-        supportsRegisteredExceptions: false,
-        transportTarget: callee.object,
-        unresolvedProviderBoundary: true,
-        urlArgument: tupleExpression,
-      };
+    } else {
+      invocationArguments = call.arguments;
     }
+  } else {
+    invocationArguments = call.arguments;
   }
-  const [urlArgument] = call.arguments.filter(
+
+  const bound = readBoundTransportCall({
+    analysis: input.analysis,
+    before: call.start ?? Number.MAX_SAFE_INTEGER,
+    bindings: input.bindings,
+    contents: input.contents,
+    node: transportTarget,
+    resolving: new Set(),
+  });
+  if (bound?.unresolved) {
+    return {
+      evidenceNode: bound.evidenceNode,
+      initArgument: null,
+      supportsRegisteredExceptions: false,
+      transportTarget: bound.transportTarget,
+      unresolvedProviderBoundary: true,
+      urlArgument: bound.evidenceNode,
+    };
+  }
+  const effectiveArguments = [
+    ...(bound?.arguments ?? []),
+    ...invocationArguments,
+  ];
+  const [urlArgument] = effectiveArguments.filter(
     (argument) => argument.type !== "ArgumentPlaceholder",
   );
+  if (!urlArgument && emptyApplyEvidence) {
+    return {
+      evidenceNode: emptyApplyEvidence,
+      initArgument: null,
+      supportsRegisteredExceptions: false,
+      transportTarget: bound?.transportTarget ?? transportTarget,
+      unresolvedProviderBoundary: true,
+      urlArgument: emptyApplyEvidence,
+    };
+  }
   return urlArgument
     ? {
         evidenceNode: urlArgument.type === "SpreadElement"
           ? urlArgument.argument
           : urlArgument,
-        initArgument: call.arguments[1] ?? null,
-        supportsRegisteredExceptions: true,
-        transportTarget: call.callee,
+        initArgument: effectiveArguments[1] ?? null,
+        supportsRegisteredExceptions: bound === null,
+        transportTarget: bound?.transportTarget ?? transportTarget,
         unresolvedProviderBoundary: false,
         urlArgument: urlArgument.type === "SpreadElement"
           ? urlArgument.argument
@@ -1914,7 +2128,30 @@ function collectHandwrittenProviderTransportViolations(input: {
     if (!declaration) {
       return;
     }
+    const declarationText = readNodeText(node, input.contents);
     const providerIds = providerIdsFromIdentifier(declaration.name);
+    const providerNamedConcrete = providerIds.size > 0 &&
+      isConcreteHandwrittenTransportDeclaration(
+        declaration.name,
+        declarationText,
+      );
+    const genericWireConcrete = providerIds.size === 0 &&
+      isStrongGenericHttpWireDeclaration(
+        declaration.name,
+        declarationText,
+      );
+    if (!providerNamedConcrete && !genericWireConcrete) {
+      return;
+    }
+    if (
+      genericWireConcrete &&
+      input.analysis.transportEvidenceProviderIds.size === 1
+    ) {
+      addProviderIds(
+        providerIds,
+        input.analysis.transportEvidenceProviderIds,
+      );
+    }
     const providers = providerBoundaryRegistry.filter(
       (provider) =>
         providerIds.has(provider.id) &&
@@ -1922,10 +2159,6 @@ function collectHandwrittenProviderTransportViolations(input: {
         input.analysis.transportEvidenceProviderIds.has(provider.id),
     );
     if (providers.length === 0) {
-      return;
-    }
-    const declarationText = readNodeText(node, input.contents);
-    if (!isConcreteHandwrittenTransportDeclaration(declaration.name, declarationText)) {
       return;
     }
     recordViolationAtPosition(
@@ -4121,6 +4354,34 @@ function isConcreteHandwrittenTransportDeclaration(
   return false;
 }
 
+function isStrongGenericHttpWireDeclaration(
+  name: string,
+  declarationText: string,
+): boolean {
+  const normalizedName = normalizeIdentifierForMatch(name);
+  if (
+    /(?:domain|event|normalized|parsed|projection|report|result|state|summary)(?:request|response)$/u
+      .test(normalizedName) ||
+    !/(?:interface|type)\s+[A-Za-z0-9_$]+/u.test(declarationText)
+  ) {
+    return false;
+  }
+  const requestSignals = ["body", "headers", "method", "path", "url"]
+    .filter((property) =>
+      new RegExp(`\\b${property}\\??\\s*:`, "u").test(declarationText)
+    );
+  if (
+    requestSignals.length >= 2 &&
+    requestSignals.some((property) =>
+      property === "headers" || property === "method"
+    )
+  ) {
+    return true;
+  }
+  return /\b(?:arrayBuffer|json|text)\s*\(/u.test(declarationText) &&
+    /\b(?:headers|ok|status)\??\s*:/u.test(declarationText);
+}
+
 function hasLowLevelHttpClientContract(declarationText: string): boolean {
   const member = /(?:^|[;{]\s*)(?:readonly\s+)?(?:fetch|request)\s*(?:\??\s*:|\()/imu
     .exec(declarationText);
@@ -4755,17 +5016,22 @@ function isFetchLikeCallTarget(input: {
         node: expression.object,
       });
     }
-    const directRequiredModule = readRequiredModuleName(expression.object);
-    if (directRequiredModule) {
-      if (!isUnshadowedGlobalIdentifier({
-        analysis: input.analysis,
-        before: input.before,
-        bindings: input.bindings,
-        name: "require",
-      })) {
+    const directStaticModule = readStaticTransportModule(expression.object);
+    if (directStaticModule) {
+      if (
+        directStaticModule.source === "require" &&
+        !isUnshadowedGlobalIdentifier({
+          analysis: input.analysis,
+          before: input.before,
+          bindings: input.bindings,
+          name: "require",
+        })
+      ) {
         return false;
       }
-      const directTransport = classifyHttpTransportModule(directRequiredModule);
+      const directTransport = classifyHttpTransportModule(
+        directStaticModule.moduleName,
+      );
       const directMethod = readPropertyName(expression.property);
       return Boolean(
         directTransport &&

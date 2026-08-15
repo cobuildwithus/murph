@@ -265,6 +265,25 @@ Updated: 2026-08-14
   `250941b1eb9cf7a12c605b1140e9135202cc5e57`. Its only conflict accepted
   upstream's deletion of the obsolete completed PR #1705 index row; provider
   policy and executable guard ownership merged without conflict.
+- A round-11 exact-head normal-Pro contingency returned four High mechanisms
+  after more than five minutes, but its required model self-attestation was
+  `UNKNOWN`, so it remains diagnostic rather than a substantive round. All four
+  mechanisms were nevertheless accepted and reproduced: object destructuring
+  could erase global fetch provenance, pre-bound `.bind` arguments were omitted
+  from the effective call shape, generically named low-level wire contracts
+  could lose unambiguous provider ownership, and literal dynamic imports of
+  default-export fetch packages were treated as CommonJS callables.
+- The correction stays inside the existing owners. Transport bindings now
+  preserve lexical shadows while resolving direct, aliased, computed,
+  defaulted, and rest destructuring from exact web globals or transport
+  namespaces. Static transport module facts retain `require` versus dynamic
+  `import` provenance, including exact default exports. Bound transport calls
+  compose immutable pre-bound and invocation arguments across direct, aliased,
+  member, `.call`, and closed `.apply` forms; opaque bound spreads fail closed.
+  Strong generic request/response wire shapes inherit a provider only from one
+  unambiguous transport-evidence provider, while provider-neutral fetch
+  callable aliases and ambiguous files remain clean. No exception, suppression,
+  baseline, or handwritten production request was added.
 
 ## Verification
 
@@ -277,7 +296,11 @@ Updated: 2026-08-14
 
 Current evidence:
 
-- Focused guard/bootstrap suite: 104 tests passed on the current merged base.
+- Focused guard suite: 109 tests passed on the current merged base, including
+  direct ReviewGPT reproductions and negative controls for unrelated objects,
+  imports, callables, ambiguous provider evidence, and domain models.
+- Full repository-tool suite: 36 files and 650 tests passed.
+- Repo-tools TypeScript compilation passes with `tsconfig.tools.json`.
 - `pnpm provider-requests:guard`: passes on the current merged base containing
   the sibling SDK migrations and exact registered SDK hooks.
 - `bash scripts/doc-gardening.sh --fail-on-issues`: passes with zero issues.
@@ -285,6 +308,10 @@ Current evidence:
   passed release build/typecheck, all assistant/CLI/platform package coverage,
   app verification, both CLI host matrices, frontend, billing, sandbox,
   fixture, overflow, and tracked-artifact gates before the bounded base update.
+- Exact-head CI on bounded-base head
+  `e6c52ea3cf102973b575792cb3e298eaa73da183` passed the same complete required
+  matrix, including the final release aggregate, before the round-11 diagnostic
+  findings were remediated.
 - The corrected assistant local-service runtime file passes all 103 tests with
   the CI-owned heap. The package-wide coverage run passed 238 files and 3,722
   tests before one unrelated 513-receipt stress fixture timed out under local
