@@ -29,6 +29,14 @@ test("the design catalog renders each Browser Vault loading transition with synt
   expect(markup).toContain('data-design-state="complete"');
   expect(markup).toContain("From your devices");
   expect(markup).toContain("Nutrients &amp; fatty acids");
+  expect(markup).toContain('data-design-transition="biomarker-result-detail"');
+  expect(markup).toContain('data-design-state="stale-populated"');
+  expect(markup).toContain('data-design-state="refresh-pending-populated"');
+  expect(markup).toContain('data-design-state="stale-empty"');
+  expect(markup).toContain("Ferritin");
+  expect(markup).toContain("No results found");
+  expect(markup).not.toContain("Refreshing this history");
+  expect(markup).not.toContain("last saved results remain visible");
   expect(markup).toContain('inert=""');
   expect(markup).not.toMatch(/hbm_[A-Za-z0-9]+/u);
 });

@@ -103,6 +103,17 @@ Updated: 2026-08-14
   - The production skeleton rendered in the sections catalog at desktop and
     mobile breakpoints. The inspected crops are private-data-free and meet the
     repository's 2x-or-higher, 700-pixel-minimum, 2400-pixel-maximum rules.
+  - The first specialist pass was correctly marked invalid because its two
+    loading screenshots did not cover the changed stale populated,
+    refresh-pending populated, and stale empty states. The catalog now renders
+    the real shared production presentation for all three states, and the
+    inspected corrected desktop/mobile evidence covers each state without the
+    removed notice or manual action.
+  - The final catalog cold compile completed in 15.9 minutes after shorter
+    bounded attempts expired; the task Frog entry records this proof-loop
+    friction.
 - Remaining completion proof:
-  - Exact-head PR CI plus the routed completion-specialists and Claude UI
-    reviews.
+  - Exact-head PR CI and the corrected routed completion-specialists review.
+  - The Claude UI check could not start because Claude Code is not installed in
+    this environment; repository guidance requires recording that exact gap
+    without a substitute local reviewer.

@@ -635,7 +635,7 @@ export function SectionsContent() {
 
       <Separator />
 
-      <StudySection title="Browser Vault progressive loading transitions">
+      <StudySection title="Browser Vault progressive loading and biomarker result detail transitions">
         <BrowserVaultLoadingTransitionsStudy />
       </StudySection>
 

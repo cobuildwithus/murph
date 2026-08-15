@@ -9,7 +9,7 @@ After the documented generated artifacts are prepared, opening the Sections desi
 
 ## Current Behavior
 
-The first Sections request spends several minutes discovering workflow directives and then several more minutes compiling the design route. In a clean reproduction, the successful request completed after more than eight minutes; shorter browser and command timeouts expired first even though the server was still compiling.
+The first Sections request spends several minutes discovering workflow directives and then several more minutes compiling the design route. In repeated clean reproductions, 10-minute and 15-minute browser requests expired while the server was still compiling; a retained readiness request finally completed after 15.9 minutes. Shorter browser and command timeouts therefore fail even though the server is still making progress.
 
 ## Possible Solution
 
@@ -24,4 +24,4 @@ Split the sections catalog into lazily loaded study groups, cache workflow-direc
 
 ## Context
 
-The requested synthetic study rendered correctly after compilation and subsequent requests completed in seconds. This is repository-required frontend-proof friction, not a production runtime report.
+The requested synthetic study rendered correctly after compilation and subsequent requests completed in tens of seconds. This is repository-required frontend-proof friction, not a production runtime report.
