@@ -15712,9 +15712,10 @@ test("Junction direct-Link body data activates the existing extended-history own
   }
 });
 
-test("Junction timeseries continuations retry the same resource after a source reconnect", async () => {
+test("Junction timeseries continuations fail retryably after a source reconnect", async () => {
   let liveSource = createConnectionSource({ lifecycleEpoch: 1 });
   let advanceLifecycleDuringFetch = true;
+  let sourceListReads = 0;
   let requestCount = 0;
   const importedSnapshots: unknown[] = [];
   const provider = createJunctionProvider(async (input) => {
@@ -15759,13 +15760,17 @@ test("Junction timeseries continuations retry the same resource after a source r
     sourceProviderSlug: liveSource.sourceProviderSlug,
     status: liveSource.status,
   });
-  const createContext = () => createJunctionJobContext({
-    account: createAccount({ sources: [currentSourceSummary()] }),
+  const accountSources = [currentSourceSummary()];
+  const context = createJunctionJobContext({
+    account: createAccount({ sources: accountSources }),
     importSnapshot: async (snapshot) => {
       importedSnapshots.push(snapshot);
       return { canonicalEventCount: 1, durableDeliveryAccepted: true };
     },
-    listConnectionSources: () => [liveSource],
+    listConnectionSources: () => {
+      sourceListReads += 1;
+      return [liveSource];
+    },
   });
   const job = createJob("reconcile", {
     timeseriesCursor: "2026-04-02T00:00:00.000Z",
@@ -15774,18 +15779,20 @@ test("Junction timeseries continuations retry the same resource after a source r
     windowStart: "2026-04-02T00:00:00.000Z",
   });
 
-  const first = await executeJunctionJob(provider, createContext(), job);
-  const retry = requireValue(
-    first.scheduledJobs?.[0],
-    "A superseded timeseries fetch should retain its exact continuation.",
+  await assert.rejects(
+    () => executeJunctionJob(provider, context, job),
+    (error) => error instanceof DeviceSyncError
+      && error.code === "JUNCTION_TIMESERIES_SOURCE_LIFECYCLE_SUPERSEDED"
+      && error.retryable,
   );
   assert.equal(importedSnapshots.length, 0);
-  assert.equal(retry.payload?.timeseriesCursor, job.payload.timeseriesCursor);
-  assert.equal(retry.payload?.timeseriesResourceCursor, "heart_rate_alert");
+  assert.equal(sourceListReads, 1);
 
-  await executeJunctionJob(provider, createContext(), createJobFromInput(retry));
+  accountSources[0] = currentSourceSummary();
+  await executeJunctionJob(provider, context, job);
 
   assert.equal(requestCount, 2);
+  assert.equal(sourceListReads, 2);
   assert.equal(importedSnapshots.length, 1);
 });
 

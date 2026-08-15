@@ -3552,7 +3552,7 @@ export function createJunctionDeviceSyncProvider(
         madeProgress = true;
       } else {
         try {
-          const lifecycleCurrent = await importJunctionTimeseriesResourceSnapshot({
+          await importJunctionTimeseriesResourceSnapshot({
             context,
             dateQueryFormat: "date",
             resource,
@@ -3562,12 +3562,6 @@ export function createJunctionDeviceSyncProvider(
             windowEnd: window.windowEnd,
             windowStart: window.windowStart,
           });
-          if (!lifecycleCurrent) {
-            return {
-              workoutStreamCursor,
-              yieldedAt: window.windowStart,
-            };
-          }
         } catch (error) {
           if (isJunctionJobSignalAbort(error, context.signal)) {
             if (madeProgress) {
@@ -3693,7 +3687,7 @@ export function createJunctionDeviceSyncProvider(
       }
     } else {
       try {
-        const lifecycleCurrent = await importJunctionTimeseriesResourceSnapshot({
+        await importJunctionTimeseriesResourceSnapshot({
           collectionWorkLimit: JUNCTION_FULL_JOB_TIMESERIES_COLLECTION_WORK_LIMIT,
           context,
           dateQueryFormat: timeseriesWindowHours === 1 ? "datetime" : "date",
@@ -3703,20 +3697,6 @@ export function createJunctionDeviceSyncProvider(
           windowEnd: executionWindowEnd,
           windowStart: timeseriesCursor,
         });
-        if (!lifecycleCurrent) {
-          return buildFullJobTimeseriesContinuationResult({
-            context,
-            job,
-            skippedOptionalResources,
-            continuation: {
-              timeseriesCursor,
-              timeseriesResourceCursor: resource,
-              timeseriesWindowHours,
-              workoutStreamCursor: null,
-            },
-            window,
-          });
-        }
       } catch (error) {
         if (
           isJunctionTimeseriesWindowTooLarge(error)
@@ -3766,7 +3746,7 @@ export function createJunctionDeviceSyncProvider(
     sourceProviders: readonly JunctionProviderConnection[];
     windowEnd: string;
     windowStart: string;
-  }): Promise<boolean> {
+  }): Promise<void> {
     const sourceLifecycleFence = resolveJunctionTimeseriesResourcePolicy(input.resource)
       ?.maxCanonicalRecordsPerWindow !== undefined
       && input.context.listConnectionSources
@@ -3784,20 +3764,38 @@ export function createJunctionDeviceSyncProvider(
         dateQueryFormat: input.dateQueryFormat,
       },
     );
-    if (!await isJunctionSourceLifecycleFenceCurrent(input.context, sourceLifecycleFence)) {
-      return false;
+    const currentSources = sourceLifecycleFence && input.context.listConnectionSources
+      ? await input.context.listConnectionSources()
+      : null;
+    if (
+      sourceLifecycleFence
+      && (!currentSources
+        || !isJunctionSourceLifecycleFenceCurrent(sourceLifecycleFence, currentSources))
+    ) {
+      throw junctionTimeseriesSourceLifecycleSuperseded();
     }
     if (records.length === 0) {
-      return true;
+      return;
     }
 
-    const preparedImport = await prepareJunctionImportSnapshot(
-      input.context,
-      { [input.resource]: records },
-      input.sourceProviders,
-    );
+    const preparedImport = currentSources
+      ? prepareJunctionImportSnapshotForSources(
+          { [input.resource]: records },
+          input.sourceProviders,
+          currentSources,
+          {},
+          {
+            allowUnlistedSources: input.context.connectionSourceAdmissionMode !== "listed_only",
+            sourceStatusRequirement: "not_disconnected",
+          },
+        )
+      : await prepareJunctionImportSnapshot(
+          input.context,
+          { [input.resource]: records },
+          input.sourceProviders,
+        );
     if (!hasJunctionSnapshotRecords(preparedImport.snapshots)) {
-      return true;
+      return;
     }
     await input.context.importSnapshot({
       provider: "junction",
@@ -3810,7 +3808,6 @@ export function createJunctionDeviceSyncProvider(
       summaries: {},
       timeseries: preparedImport.snapshots,
     });
-    return true;
   }
 
   async function importJunctionWorkoutStreamWindow(input: {
@@ -9229,21 +9226,24 @@ function captureJunctionSourceLifecycleFence(
   );
 }
 
-async function isJunctionSourceLifecycleFenceCurrent(
-  context: ProviderJobContext,
-  expected: JunctionSourceLifecycleFence | null,
-): Promise<boolean> {
-  if (!expected) {
-    return true;
-  }
-  if (!context.listConnectionSources) {
-    return false;
-  }
-  const current = captureJunctionSourceLifecycleFence(await context.listConnectionSources());
+function isJunctionSourceLifecycleFenceCurrent(
+  expected: JunctionSourceLifecycleFence,
+  currentSources: readonly JunctionImportAdmissionSource[],
+): boolean {
+  const current = captureJunctionSourceLifecycleFence(currentSources);
   return current.size === expected.size
     && [...expected].every(([sourceProviderSlug, lifecycleEpoch]) =>
       current.get(sourceProviderSlug) === lifecycleEpoch
     );
+}
+
+function junctionTimeseriesSourceLifecycleSuperseded(): DeviceSyncError {
+  return deviceSyncError({
+    code: "JUNCTION_TIMESERIES_SOURCE_LIFECYCLE_SUPERSEDED",
+    message: "Junction source authorization changed during collection. Retry shortly.",
+    retryable: true,
+    httpStatus: 503,
+  });
 }
 
 function buildJunctionCurrentLifecycleSourceMap<TSource extends JunctionImportAdmissionSource>(

@@ -35,13 +35,6 @@ const EXPECTED_DEFAULTS = [
   "calories_active",
   "heartrate",
   "weight",
-  "forced_expiratory_volume_1",
-  "forced_vital_capacity",
-  "heart_rate_alert",
-  "inhaler_usage",
-  "peak_expiratory_flow_rate",
-  "sleep_apnea_alert",
-  "fall",
 ];
 
 const EXPECTED_NEW_SPARSE_OPT_INS = [
@@ -105,17 +98,38 @@ const EXPECTED_OPT_IN = [
   ...EXPECTED_DENSE_FEATURE_OPT_INS,
 ];
 
+const EXPECTED_ALLOWED_IN_PARENT_ORDER = [
+  ...EXPECTED_DEFAULTS,
+  "body_mass_index",
+  "carbohydrates",
+  "fat",
+  "forced_expiratory_volume_1",
+  "forced_vital_capacity",
+  "heart_rate_alert",
+  "inhaler_usage",
+  "insulin_injection",
+  "lean_body_mass",
+  "peak_expiratory_flow_rate",
+  "sleep_apnea_alert",
+  "waist_circumference",
+  "calories_basal",
+  "daylight_exposure",
+  "fall",
+  ...EXPECTED_NEXT_OPT_INS.slice(2),
+  ...EXPECTED_DENSE_FEATURE_OPT_INS,
+];
+
 describe("Junction timeseries resource policy", () => {
   it("derives unique exact known/default/opt-in/allowed projections", () => {
     const names = JUNCTION_TIMESERIES_RESOURCE_POLICIES.map((entry) => entry.resource);
     expect(new Set(names).size).toBe(names.length);
     expect(JUNCTION_KNOWN_TIMESERIES_RESOURCES).toEqual(names);
-    expect(JUNCTION_DEFAULT_TIMESERIES_RESOURCES).toEqual(EXPECTED_DEFAULTS);
-    expect(JUNCTION_OPT_IN_TIMESERIES_RESOURCES).toEqual(EXPECTED_OPT_IN);
-    expect(JUNCTION_ALLOWED_TIMESERIES_RESOURCES).toEqual([
+    expect(JUNCTION_DEFAULT_TIMESERIES_RESOURCES).toEqual([
       ...EXPECTED_DEFAULTS,
-      ...EXPECTED_OPT_IN,
+      ...EXPECTED_SPARSE_CLINICAL_DEFAULTS,
     ]);
+    expect(JUNCTION_OPT_IN_TIMESERIES_RESOURCES).toEqual(EXPECTED_OPT_IN);
+    expect(JUNCTION_ALLOWED_TIMESERIES_RESOURCES).toEqual(EXPECTED_ALLOWED_IN_PARENT_ORDER);
   });
 
   it("keeps the remaining sparse slice off by default with extended bounded history", () => {
