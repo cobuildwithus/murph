@@ -1,6 +1,7 @@
 import {
   createDeviceWebhookTransportPrivateKeyringFromJson,
   DEVICE_WEBHOOK_ADMISSION_BATCH_SCHEMA,
+  DEVICE_WEBHOOK_ADMISSION_MAX_BODY_BYTES,
   DEVICE_WEBHOOK_ADMISSION_MAX_BATCH_SIZE,
   DEVICE_WEBHOOK_ADMISSION_TIMEOUT_MS,
   DEVICE_WEBHOOK_TRANSPORT_USER_ID,
@@ -17,6 +18,15 @@ import { asWorkerStringEnvironment, type WorkerEnvironmentContract } from "./wor
 import {
   fetchHostedExecutionWebControlPlaneResponse,
 } from "./web-control-plane.ts";
+
+const deviceWebhookAdmissionBodyEncoder = new TextEncoder();
+const deviceWebhookAdmissionBodyPrefix = "{\"entries\":[";
+const deviceWebhookAdmissionBodySuffix = `],\"schema\":${JSON.stringify(
+  DEVICE_WEBHOOK_ADMISSION_BATCH_SCHEMA,
+)}}`;
+const deviceWebhookAdmissionEmptyBodyBytes = deviceWebhookAdmissionBodyEncoder
+  .encode(deviceWebhookAdmissionBodyPrefix + deviceWebhookAdmissionBodySuffix)
+  .byteLength;
 
 export async function handleHostedDeviceWebhookQueueBatch(
   batch: MessageBatch<DeviceWebhookQueueEnvelopeV1>,
@@ -96,10 +106,61 @@ export async function handleHostedDeviceWebhookQueueBatch(
     });
   }
 
-  for (let index = 0; index < deliveries.length; index += DEVICE_WEBHOOK_ADMISSION_MAX_BATCH_SIZE) {
-    const subbatch = deliveries.slice(index, index + DEVICE_WEBHOOK_ADMISSION_MAX_BATCH_SIZE);
+  for (const subbatch of partitionDeviceWebhookDeliveries(deliveries)) {
     await deliverDeviceWebhookSubbatch(subbatch, environment);
   }
+}
+
+function partitionDeviceWebhookDeliveries(
+  deliveries: readonly {
+    messages: readonly Message<DeviceWebhookQueueEnvelopeV1>[];
+    payload: DeviceWebhookQueuePayloadV1;
+  }[],
+): Array<Array<{
+  messages: readonly Message<DeviceWebhookQueueEnvelopeV1>[];
+  payload: DeviceWebhookQueuePayloadV1;
+}>> {
+  const batches: Array<Array<{
+    messages: readonly Message<DeviceWebhookQueueEnvelopeV1>[];
+    payload: DeviceWebhookQueuePayloadV1;
+  }>> = [];
+  let current: Array<{
+    messages: readonly Message<DeviceWebhookQueueEnvelopeV1>[];
+    payload: DeviceWebhookQueuePayloadV1;
+  }> = [];
+  let currentBodyBytes = deviceWebhookAdmissionEmptyBodyBytes;
+  for (const delivery of deliveries) {
+    const payloadBytes = deviceWebhookAdmissionBodyEncoder
+      .encode(JSON.stringify(delivery.payload))
+      .byteLength;
+    const candidateBodyBytes = currentBodyBytes
+      + (current.length > 0 ? 1 : 0)
+      + payloadBytes;
+    if (
+      current.length > 0
+      && (
+        current.length + 1 > DEVICE_WEBHOOK_ADMISSION_MAX_BATCH_SIZE
+        || candidateBodyBytes > DEVICE_WEBHOOK_ADMISSION_MAX_BODY_BYTES
+      )
+    ) {
+      batches.push(current);
+      current = [delivery];
+      currentBodyBytes = deviceWebhookAdmissionEmptyBodyBytes + payloadBytes;
+      continue;
+    }
+    current.push(delivery);
+    currentBodyBytes = candidateBodyBytes;
+  }
+  if (current.length > 0) batches.push(current);
+  return batches;
+}
+
+function serializeDeviceWebhookAdmissionBody(
+  deliveries: readonly { payload: DeviceWebhookQueuePayloadV1 }[],
+): string {
+  return deviceWebhookAdmissionBodyPrefix
+    + deliveries.map(({ payload }) => JSON.stringify(payload)).join(",")
+    + deviceWebhookAdmissionBodySuffix;
 }
 
 async function deliverDeviceWebhookSubbatch(
@@ -109,10 +170,9 @@ async function deliverDeviceWebhookSubbatch(
   }[],
   environment: ReturnType<typeof readHostedExecutionEnvironment>,
 ): Promise<void> {
-  const body = JSON.stringify({
-    entries: subbatch.map(({ payload }) => payload),
-    schema: DEVICE_WEBHOOK_ADMISSION_BATCH_SCHEMA,
-  });
+  const startedAt = Date.now();
+  let failureCode = "device-webhook-admission-request-failed";
+  const body = serializeDeviceWebhookAdmissionBody(subbatch);
   try {
     const response = await fetchHostedExecutionWebControlPlaneResponse({
       baseUrl: environment.hostedWebBaseUrl,
@@ -124,12 +184,16 @@ async function deliverDeviceWebhookSubbatch(
       timeoutMs: DEVICE_WEBHOOK_ADMISSION_TIMEOUT_MS,
     });
     if (!response.ok) {
+      failureCode = "device-webhook-admission-response-rejected";
       throw new Error("Device webhook admission callback failed.");
     }
+    failureCode = "device-webhook-admission-response-invalid";
     const result = parseDeviceWebhookAdmissionResult(await response.json());
     const expectedIds = new Set(subbatch.map(({ payload }) => payload.transportId));
+    const returnedIds = new Set(result.entries.map((entry) => entry.transportId));
     if (
       result.entries.length !== subbatch.length
+      || returnedIds.size !== subbatch.length
       || result.entries.some((entry) => !expectedIds.has(entry.transportId))
     ) {
       throw new Error("Device webhook admission callback returned incomplete dispositions.");
@@ -145,14 +209,34 @@ async function deliverDeviceWebhookSubbatch(
         for (const message of messages) retryDeviceWebhookMessage(message);
       }
     }
-  } catch (error) {
+    const acceptedCount = result.entries.filter(
+      (entry) => entry.disposition === "accepted",
+    ).length;
+    const duplicateCount = result.entries.filter(
+      (entry) => entry.disposition === "duplicate",
+    ).length;
+    emitHostedExecutionStructuredLog({
+      component: "worker",
+      details: {
+        acceptedCount,
+        batchSize: subbatch.length,
+        duplicateCount,
+        durationMs: Date.now() - startedAt,
+        reason: "device-webhook-admission-callback-completed",
+        retryCount: result.entries.length - acceptedCount - duplicateCount,
+      },
+      level: "info",
+      message: "Device webhook Queue consumer completed a Web admission batch.",
+      phase: "checkpoint",
+    });
+  } catch {
     emitHostedExecutionStructuredLog({
       component: "worker",
       details: {
         batchSize: subbatch.length,
-        reason: "device-webhook-admission-callback-failed",
+        durationMs: Date.now() - startedAt,
+        reason: failureCode,
       },
-      error,
       level: "warn",
       message: "Device webhook Queue consumer retained a subbatch after Web admission did not complete.",
       phase: "failed",
