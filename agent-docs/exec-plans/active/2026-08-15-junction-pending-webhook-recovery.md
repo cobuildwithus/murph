@@ -56,6 +56,10 @@ Updated: 2026-08-15
 3. Risk: Web and queue deploy order could lose recovery coverage.
    Mitigation: Keep the queue envelope contract unchanged and deploy Web before
    redriving the dead-letter queue.
+4. Risk: A callback could admit the source while a durable webhook is checking
+   it, then cause that webhook to be acknowledged without its exact payload.
+   Mitigation: Retry durable work when source proof changes. On replay, the
+   already-admitted source follows normal persistence before trace completion.
 
 ## Tasks
 
@@ -94,10 +98,14 @@ Updated: 2026-08-15
   - `apps/web/test/device-sync-hosted-wake.test.ts`: 161 passed.
   - `packages/device-syncd/test/junction-provider.test.ts`: 278 passed.
   - `apps/web/test/device-sync-prepared-webhook-authority-postgres.test.ts`:
-    4 passed against an isolated migrated PostgreSQL database.
+    5 passed against an isolated migrated PostgreSQL database.
   - `packages/device-syncd` typecheck: passed.
   - `apps/web` typecheck: passed.
   - `pnpm docs:drift`: passed.
   - Preliminary ReviewGPT finding accepted: ambiguous Junction source status
     was not positive proof. The provider predicate and real PostgreSQL retry
     proof now fail closed.
+  - Preliminary ReviewGPT finding accepted: concurrent source admission could
+    supersede live proof and terminally settle durable work before its payload
+    merged. Durable work now retries, and real PostgreSQL replay proof persists
+    the exact payload once before trace completion.

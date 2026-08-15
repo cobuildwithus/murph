@@ -2964,6 +2964,14 @@ async function inspectHostedDeviceSyncWebhookAdmissionTx(
         input.sourceObservation.source,
         source,
       )) {
+        if (input.acceptanceMode === "durable_webhook_work") {
+          throw deviceSyncError({
+            code: "WEBHOOK_SOURCE_NOT_READY",
+            message: "Device source authority changed while webhook work was prepared. Retry shortly.",
+            retryable: true,
+            httpStatus: 503,
+          });
+        }
         await completeHostedWebhookTraceTx(input, tx);
         return "completed";
       }

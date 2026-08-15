@@ -586,6 +586,138 @@ describe.skipIf(!runPostgresProof)(
       }
     });
 
+    it("retries durable daily data when concurrent source admission supersedes live proof", async () => {
+      const sourceProviderSlug = "garmin";
+      const fixture = await createFixture({
+        setupPhase: "pending_link",
+        sourceLastErrorCode: null,
+        sourceProviderSlug,
+      });
+      const supersedingLastSeenAt = new Date(fixture.receivedAt.getTime() + 1_000);
+      const providerFetch = vi.fn(async () => {
+        await fixture.observer.$transaction([
+          fixture.observer.deviceConnectionSource.update({
+            data: {
+              lastErrorCode: null,
+              lastErrorMessage: null,
+              lastSeenAt: supersedingLastSeenAt,
+              status: "connected",
+            },
+            where: { id: fixture.sourceId },
+          }),
+          fixture.observer.deviceConnection.update({
+            data: {
+              setupExpiresAt: null,
+              setupPhase: "source_confirmed",
+            },
+            where: { id: fixture.connectionId },
+          }),
+        ]);
+        return new Response(JSON.stringify({
+          data: [{ slug: sourceProviderSlug, status: "connected" }],
+        }), {
+          headers: { "content-type": "application/json" },
+          status: 200,
+        });
+      });
+      const registry = createJunctionRegistry(providerFetch);
+
+      try {
+        const prepared = await prepareDailyData({
+          fixture,
+          registry,
+          sourceProviderSlug,
+        });
+        expect(prepared.acceptanceMode).toBe("durable_webhook_work");
+        await fixture.prisma.deviceSyncDirtyConnection.create({
+          data: {
+            connectionId: fixture.connectionId,
+            dirtyRevision: 1n,
+            eventCount: 1n,
+            firstDirtyAt: new Date(fixture.receivedAt.getTime() - 1_000),
+            latestDirtyAt: new Date(fixture.receivedAt.getTime() - 1_000),
+            processedRevision: 0n,
+            provider: "junction",
+            userId: fixture.memberId,
+          },
+        });
+        const consumeService = createIngressService({
+          fixture,
+          headers: new Headers(),
+          registry,
+        });
+
+        await expect(consumeService.handlePreparedWebhook(prepared)).rejects.toMatchObject({
+          code: "WEBHOOK_SOURCE_NOT_READY",
+          retryable: true,
+        });
+
+        expect(providerFetch).toHaveBeenCalledOnce();
+        await expect(fixture.prisma.deviceWebhookTrace.findUnique({
+          where: {
+            provider_traceId: {
+              provider: "junction",
+              traceId: prepared.traceId,
+            },
+          },
+        })).resolves.toBeNull();
+        await expect(fixture.prisma.deviceSyncDirtyPayload.count({
+          where: { connectionId: fixture.connectionId },
+        })).resolves.toBe(0);
+
+        await expect(consumeService.handlePreparedWebhook(prepared)).resolves.toMatchObject({
+          accepted: true,
+          duplicate: false,
+        });
+
+        expect(providerFetch).toHaveBeenCalledOnce();
+        await expect(fixture.prisma.deviceSyncDirtyPayload.count({
+          where: { connectionId: fixture.connectionId },
+        })).resolves.toBe(1);
+        const dirty = await fixture.store.getDirtyConnection({
+          connectionId: fixture.connectionId,
+          userId: fixture.memberId,
+        });
+        expect(Object.values(dirty?.dirtyResources ?? {})).toEqual([
+          expect.objectContaining({
+            jobKind: "resource",
+            payload: expect.objectContaining({
+              eventType: "daily.data.steps.created",
+              resource: "steps",
+              resourceCategory: "timeseries",
+              sourceProviderSlug,
+            }),
+          }),
+        ]);
+        await expect(fixture.prisma.deviceSyncDirtyConnection.findUniqueOrThrow({
+          select: {
+            dirtyRevision: true,
+            eventCount: true,
+            latestEventType: true,
+          },
+          where: { connectionId: fixture.connectionId },
+        })).resolves.toEqual({
+          dirtyRevision: 1n,
+          eventCount: 1n,
+          latestEventType: null,
+        });
+        await expect(fixture.prisma.deviceSyncSignal.count({
+          where: { connectionId: fixture.connectionId },
+        })).resolves.toBe(1);
+        await expect(fixture.prisma.deviceWebhookTrace.findUniqueOrThrow({
+          select: { status: true },
+          where: {
+            provider_traceId: {
+              provider: "junction",
+              traceId: prepared.traceId,
+            },
+          },
+        })).resolves.toEqual({ status: "processed" });
+      } finally {
+        await cleanupFixture(fixture);
+      }
+    });
+
     it("terminally settles a delayed signed Junction registration after consent is revoked during source cleanup", async () => {
       const fixture = await createFixture({
         sourceLastErrorCode: DEVICE_SYNC_SOURCE_DISCONNECT_IN_PROGRESS_ERROR_CODE,
