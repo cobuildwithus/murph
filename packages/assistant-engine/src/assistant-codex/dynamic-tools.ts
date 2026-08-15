@@ -197,6 +197,7 @@ import {
 import {
   type GenerateSongToolArgs,
   type GenerateVoiceMemoToolArgs,
+  type VoiceMemoPhaseTimingRecorder,
   type VoiceMemoToolRuntime,
 } from './generate-voice-memo-tool.js'
 import {
@@ -2047,6 +2048,7 @@ export async function executeMurphDynamicToolRequest(input: {
   request: MurphDynamicToolRequest
   requireHostedPrivateImageDelivery?: boolean | null
   vaultRoot?: string | null
+  voiceMemoPhaseTimingRecorder?: VoiceMemoPhaseTimingRecorder | null
   voiceMemoRuntime?: VoiceMemoToolRuntime | null
   askGrokRuntime?: AskGrokToolRuntime | null
   askGrokTurnState?: AskGrokTurnState | null
@@ -3250,6 +3252,7 @@ export async function executeMurphDynamicToolRequest(input: {
         abortSignal: input.abortSignal ?? null,
         args: input.request.args,
         currentResponseMedia: input.currentResponseMedia ?? [],
+        recordPhaseTiming: input.voiceMemoPhaseTimingRecorder ?? null,
         voiceMemoRuntime: input.voiceMemoRuntime ?? null,
       })
     }
@@ -3261,6 +3264,7 @@ export async function executeMurphDynamicToolRequest(input: {
         abortSignal: input.abortSignal ?? null,
         args: input.request.args,
         currentResponseMedia: input.currentResponseMedia ?? [],
+        recordPhaseTiming: input.voiceMemoPhaseTimingRecorder ?? null,
         turnState: input.generateSongTurnState ?? null,
         voiceMemoRuntime: input.voiceMemoRuntime ?? null,
       })
