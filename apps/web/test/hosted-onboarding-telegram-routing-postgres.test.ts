@@ -15,6 +15,12 @@ import { describe, expect, it, vi } from "vitest";
 import {
   getHostedDomainRootUnwrapCache,
 } from "@/src/lib/hosted-crypto/domain-root-unwrap-cache";
+import {
+  prepareHostedDomainRootForWeb,
+} from "@/src/lib/hosted-crypto/domain-root-store";
+import {
+  prepareHostedMailboxItemAppendCrypto,
+} from "@/src/lib/hosted-mailbox/store";
 
 import {
   readHostedMemberRoutingState,
@@ -58,6 +64,23 @@ vi.mock("@/src/lib/hosted-crypto/domain-root-store", async () => {
     ...actual,
     lockAndReadActiveHostedDomainRootKeyIdTx:
       rootAuthority.lockAndReadActiveHostedDomainRootKeyIdTx,
+    revalidatePreparedHostedDomainRootForWebTx: async (
+      input: Parameters<
+        typeof actual.revalidatePreparedHostedDomainRootForWebTx
+      >[0],
+    ) => {
+      const local = actual.readPreparedHostedDomainRootForWebLocal(
+        input.prepared,
+      );
+      const activeRootKeyId = await rootAuthority
+        .lockAndReadActiveHostedDomainRootKeyIdTx({
+          domain: input.prepared.domain,
+        });
+      if (activeRootKeyId !== input.prepared.rootKeyId) {
+        throw new actual.HostedDomainRootPreparationMismatchError();
+      }
+      return local;
+    },
   };
 });
 
@@ -350,18 +373,6 @@ describe.skipIf(!runPostgresConcurrencyProof)(
         if (!routingRecord?.telegramUserIdEncrypted) {
           throw new Error("Expected an encrypted Telegram routing fixture.");
         }
-        const preparedDirectTelegramRouting = {
-          activeControlRootKeyId,
-          existingControlRootKeyId: null,
-          initialSenderResolution: "found" as const,
-          kind: "member" as const,
-          mailboxRootKeyId,
-          memberId,
-          senderResolution: "found" as const,
-          telegramThreadId,
-          telegramUserId,
-        };
-
         rootAuthority.activeRootKeyIdsByDomain.clear();
         rootAuthority.activeRootKeyIdsByDomain.set("control", [
           activeControlRootKeyId,
@@ -371,9 +382,9 @@ describe.skipIf(!runPostgresConcurrencyProof)(
         ]);
         await expect(runPreparedTelegramPlanTransaction({
           activeControlRootKeyId,
+          existingControlRootKeyId: null,
           mailboxRootKeyId,
           memberId,
-          preparedDirectTelegramRouting,
           prisma: observer,
           update,
         })).rejects.toMatchObject({
@@ -404,9 +415,9 @@ describe.skipIf(!runPostgresConcurrencyProof)(
         ]);
         await expect(runPreparedTelegramPlanTransaction({
           activeControlRootKeyId,
+          existingControlRootKeyId: null,
           mailboxRootKeyId,
           memberId,
-          preparedDirectTelegramRouting,
           prisma: observer,
           update,
         })).resolves.toMatchObject({
@@ -442,23 +453,29 @@ describe.skipIf(!runPostgresConcurrencyProof)(
 
 async function runPreparedTelegramPlanTransaction(input: {
   activeControlRootKeyId: string;
+  existingControlRootKeyId: string | null;
   mailboxRootKeyId: string;
   memberId: string;
-  preparedDirectTelegramRouting: NonNullable<
-    Parameters<typeof planHostedOnboardingTelegramWebhook>[0][
-      "preparedDirectTelegramRouting"
-    ]
-  >;
   prisma: PrismaClient;
   update: ReturnType<typeof buildDirectTelegramUpdate>;
 }) {
+  let preparedDirectTelegramRouting: NonNullable<
+    Parameters<typeof planHostedOnboardingTelegramWebhook>[0][
+      "preparedDirectTelegramRouting"
+    ]
+  > | undefined;
   return runHostedOnboardingWebhookTransaction(
     input.prisma,
-    (transaction) => planHostedOnboardingTelegramWebhook({
-      preparedDirectTelegramRouting: input.preparedDirectTelegramRouting,
-      prisma: transaction,
-      update: input.update,
-    }),
+    (transaction) => {
+      if (!preparedDirectTelegramRouting) {
+        throw new Error("Expected prepared direct Telegram routing.");
+      }
+      return planHostedOnboardingTelegramWebhook({
+        preparedDirectTelegramRouting,
+        prisma: transaction,
+        update: input.update,
+      });
+    },
     async () => {
       seedPreparedTelegramRoot({
         domain: "control",
@@ -470,6 +487,30 @@ async function runPreparedTelegramPlanTransaction(input: {
         rootKeyId: input.mailboxRootKeyId,
         userId: input.memberId,
       });
+      const [preparedControlRoot, preparedMailboxCrypto] = await Promise.all([
+        prepareHostedDomainRootForWeb({
+          domain: "control",
+          prepareMissing: false,
+          prisma: input.prisma,
+          reason: "test.direct-telegram-control-root",
+          userId: input.memberId,
+        }),
+        prepareHostedMailboxItemAppendCrypto({
+          prisma: input.prisma,
+          userId: input.memberId,
+        }),
+      ]);
+      preparedDirectTelegramRouting = {
+        existingControlRootKeyId: input.existingControlRootKeyId,
+        initialSenderResolution: "found",
+        kind: "member",
+        memberId: input.memberId,
+        preparedControlRoot,
+        preparedMailboxCrypto,
+        senderResolution: "found",
+        telegramThreadId,
+        telegramUserId,
+      };
     },
   );
 }

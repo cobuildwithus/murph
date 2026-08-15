@@ -6,9 +6,15 @@ import {
 } from "@murphai/runtime-state";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  areHostedDomainRootProviderCallsDisabled,
   getHostedDomainRootUnwrapCache,
   type CachedUnwrappedHostedDomainRoot,
 } from "@/src/lib/hosted-crypto/domain-root-unwrap-cache";
+import {
+  HostedDomainRootPreparationMismatchError,
+  readPreparedHostedDomainRootForWebLocal,
+  type PreparedHostedDomainRootForWeb,
+} from "@/src/lib/hosted-crypto/domain-root-store";
 import {
   setHostedSecureBoxStringTestCodecForTests,
 } from "@/src/lib/hosted-crypto/secure-box";
@@ -63,6 +69,8 @@ const mocks = vi.hoisted(() => {
     memberRowLockOutcomes: [] as boolean[],
     preparedRootKeyIdsByDomain: new Map<string, string[]>(),
     providerKmsWork: vi.fn(),
+    providerCallsDisabledDuringTransactionRootReads: [] as boolean[],
+    revalidatePreparedHostedDomainRootForWebTx: vi.fn(),
     rootApiCalls: [] as Array<{
       domain: HostedCryptoDomain;
       mode: "active" | "exact";
@@ -193,6 +201,7 @@ const mocks = vi.hoisted(() => {
         userId?: string;
       };
       eventId?: string;
+      prepared?: PreparedHostedDomainRootForWeb;
       tx?: unknown;
       wake?: { eventId: string };
     }) => {
@@ -200,12 +209,19 @@ const mocks = vi.hoisted(() => {
         input.envelope?.message?.telegramMessage?.threadIsDirect === true
         && input.envelope.userId
       ) {
-        const root = await state.unwrapHostedDomainRootForWeb({
-          domain: "ingress",
-          prisma: input.tx,
-          userId: input.envelope.userId,
-        });
-        root.rootKey.fill(0);
+        if (input.prepared) {
+          await state.revalidatePreparedHostedDomainRootForWebTx({
+            prepared: input.prepared,
+            tx: input.tx,
+          });
+        } else {
+          const root = await state.unwrapHostedDomainRootForWeb({
+            domain: "ingress",
+            prisma: input.tx,
+            userId: input.envelope.userId,
+          });
+          root.rootKey.fill(0);
+        }
       }
       await state.enqueueHostedExecutionOutbox(input);
       const eventId = typeof input.eventId === "string"
@@ -234,6 +250,8 @@ vi.mock("@/src/lib/hosted-mailbox/store", async () => {
   return {
     ...actual,
     appendHostedMailboxEnvelopeTx: mocks.appendHostedMailboxEnvelopeTx,
+    appendHostedMailboxEnvelopeWithPreparedCryptoTx:
+      mocks.appendHostedMailboxEnvelopeTx,
     readHostedMailboxItemByDedupeKey: mocks.readHostedMailboxItemByDedupeKey,
     readHostedMailboxItemOwnerById: mocks.readHostedMailboxItemOwnerById,
   };
@@ -335,6 +353,15 @@ vi.mock("@/src/lib/hosted-crypto/domain-root-store", async () => {
       mocks.lockAndReadActiveHostedDomainRootKeyIdTx,
     provisionActiveHostedDomainRootEnvelopeForUserOnly:
       mocks.provisionActiveHostedDomainRootEnvelopeForUserOnly,
+    prepareHostedDomainRootForWeb: async (
+      input: Parameters<typeof actual.prepareHostedDomainRootForWeb>[0],
+    ) => {
+      const root = await mocks.unwrapHostedDomainRootForWeb(input);
+      root.rootKey.fill(0);
+      return actual.prepareHostedDomainRootForWeb(input);
+    },
+    revalidatePreparedHostedDomainRootForWebTx:
+      mocks.revalidatePreparedHostedDomainRootForWebTx,
     unwrapHostedDomainRootForWeb: mocks.unwrapHostedDomainRootForWeb,
     unwrapHostedDomainRootForWebByRootKeyId:
       mocks.unwrapHostedDomainRootForWebByRootKeyId,
@@ -385,14 +412,38 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
     mocks.familyInboundResolutionOverrides.length = 0;
     mocks.memberRowLockOutcomes.length = 0;
     mocks.preparedRootKeyIdsByDomain.clear();
+    mocks.providerCallsDisabledDuringTransactionRootReads.length = 0;
     installDefaultHostedSecureBoxStringTestCodec();
     mocks.rootApiCalls.length = 0;
     mocks.transactionDepth = 0;
     mocks.providerKmsWork.mockResolvedValue(undefined);
+    mocks.revalidatePreparedHostedDomainRootForWebTx.mockImplementation(
+      async (input: {
+        prepared: PreparedHostedDomainRootForWeb;
+        tx: unknown;
+      }) => {
+        const local = readPreparedHostedDomainRootForWebLocal(input.prepared);
+        const activeRootKeyId = await mocks
+          .lockAndReadActiveHostedDomainRootKeyIdTx({
+            domain: input.prepared.domain,
+            tx: input.tx,
+            userId: input.prepared.userId,
+          });
+        if (activeRootKeyId !== input.prepared.rootKeyId) {
+          throw new HostedDomainRootPreparationMismatchError();
+        }
+        return local;
+      },
+    );
     mocks.unwrapHostedDomainRootForWeb.mockImplementation(async (input: {
       domain: HostedCryptoDomain;
       userId: string;
     }) => {
+      if (mocks.transactionDepth > 0) {
+        mocks.providerCallsDisabledDuringTransactionRootReads.push(
+          areHostedDomainRootProviderCallsDisabled(),
+        );
+      }
       mocks.rootApiCalls.push({
         domain: input.domain,
         mode: "active",
@@ -420,6 +471,11 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
         rootKeyId: string;
         userId: string;
       }) => {
+        if (mocks.transactionDepth > 0) {
+          mocks.providerCallsDisabledDuringTransactionRootReads.push(
+            areHostedDomainRootProviderCallsDisabled(),
+          );
+        }
         mocks.rootApiCalls.push({
           domain: input.domain,
           mode: "exact",
@@ -859,20 +915,25 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
           transactionOpen: true,
           userId: member.id,
         },
-        {
-          domain: "ingress",
-          mode: "active",
-          transactionOpen: true,
-          userId: member.id,
-        },
       ]);
       expect(
         mocks.providerKmsWork.mock.calls.every(
           ([call]) => call.transactionOpen === false,
         ),
       ).toBe(true);
+      expect(
+        mocks.providerCallsDisabledDuringTransactionRootReads.every(Boolean),
+      ).toBe(true);
       expect(hostedMemberRoutingUpsert).toHaveBeenCalledTimes(1);
       expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledTimes(1);
+      expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledWith(
+        expect.objectContaining({
+          prepared: expect.objectContaining({
+            domain: "ingress",
+            userId: member.id,
+          }),
+        }),
+      );
     } finally {
       installDefaultHostedSecureBoxStringTestCodec();
     }
@@ -1275,8 +1336,9 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
         throw new Error("Expected the Telegram mailbox append mock.");
       }
       mocks.appendHostedMailboxEnvelopeTx.mockImplementation(async (input) => {
+        const appended = await defaultAppend(input);
         executionOrder.push("append");
-        return defaultAppend(input);
+        return appended;
       });
       const defaultTransaction = prisma.$transaction.bind(prisma);
       let activeTransactions = 0;
@@ -1332,7 +1394,7 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
         "append",
       ]);
       expect(mocks.rootApiCalls.filter((call) => call.transactionOpen))
-        .toHaveLength(3);
+        .toHaveLength(2);
     } finally {
       installDefaultHostedSecureBoxStringTestCodec();
     }
@@ -1457,7 +1519,8 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
 
     expect(prisma.$transaction).toHaveBeenCalledTimes(2);
     expect(hostedMemberRoutingUpsert).toHaveBeenCalledTimes(2);
-    expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledTimes(2);
+    expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
     expect(mocks.lockAndReadActiveHostedDomainRootKeyIdTx).toHaveBeenCalledTimes(4);
     expect(mocks.providerKmsWork).toHaveBeenCalledTimes(4);
     expect(

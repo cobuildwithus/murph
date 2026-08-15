@@ -98,6 +98,8 @@ import {
 import { getHostedCryptoDomainForLane } from "@murphai/runtime-state";
 import {
   isHostedMailboxSourceConversationPreparationMismatchError,
+  prepareHostedMailboxItemAppendCrypto,
+  type PreparedHostedMailboxItemAppendCrypto,
 } from "../hosted-mailbox/store";
 import {
   runWithPrismaOperationTimings,
@@ -2065,12 +2067,12 @@ interface HostedDirectTelegramFamilyRoutingCryptoPreparation {
 }
 
 interface HostedDirectTelegramMemberRoutingCryptoPreparation {
-  activeControlRootKeyId: string | null;
   existingControlRootKeyId: string | null;
   initialSenderResolution: "ambiguous" | "found" | "missing";
   kind: "member";
-  mailboxRootKeyId: string | null;
   memberId: string | null;
+  preparedControlRoot: PreparedHostedDomainRootForWeb | null;
+  preparedMailboxCrypto: PreparedHostedMailboxItemAppendCrypto | null;
   senderResolution: "ambiguous" | "found" | "missing";
   telegramThreadId: string;
   telegramUserId: string;
@@ -2418,13 +2420,13 @@ async function prepareHostedDirectTelegramThreadRoutingCrypto(input: {
     telegramUserId: input.senderTelegramUserId,
   });
   const preparedDirectTelegramRouting: HostedDirectTelegramMemberRoutingCryptoPreparation = {
-    activeControlRootKeyId: null,
     existingControlRootKeyId: null,
     initialSenderResolution:
       input.initialSenderResolution ?? memberLookup.status,
     kind: "member",
-    mailboxRootKeyId: null,
     memberId: memberLookup.status === "found" ? memberLookup.core.id : null,
+    preparedControlRoot: null,
+    preparedMailboxCrypto: null,
     senderResolution: memberLookup.status,
     telegramThreadId: input.threadId,
     telegramUserId: input.senderTelegramUserId,
@@ -2466,21 +2468,6 @@ async function prepareHostedDirectTelegramThreadRoutingCrypto(input: {
     value: routeEncrypted,
   });
 
-  const prewarmActiveRoot = async (
-    domain: Parameters<typeof unwrapHostedDomainRootForWeb>[0]["domain"],
-  ): Promise<string> => {
-    const root = await unwrapHostedDomainRootForWeb({
-      domain,
-      prisma: input.prisma,
-      retainFailureInScopedCache: true,
-      userId: memberLookup.core.id,
-    });
-    try {
-      return root.envelope.rootKeyId;
-    } finally {
-      root.rootKey.fill(0);
-    }
-  };
   let firstRootPreparationError: unknown;
   let hasRootPreparationError = false;
   const preserveFirstRootPreparationError = async <T>(
@@ -2499,14 +2486,23 @@ async function prepareHostedDirectTelegramThreadRoutingCrypto(input: {
   const [controlRootResult, mailboxRootResult] = await Promise.allSettled([
     preserveFirstRootPreparationError(() =>
       controlRootRequired
-        ? prewarmActiveRoot(
-            getHostedCryptoDomainForLane("hosted-member-private-field"),
-          )
+        ? prepareHostedDomainRootForWeb({
+            domain: getHostedCryptoDomainForLane(
+              "hosted-member-private-field",
+            ),
+            prepareMissing: false,
+            prisma: input.prisma,
+            reason: "hosted-onboarding.direct-telegram-control-root",
+            userId: memberLookup.core.id,
+          })
         : Promise.resolve(null)
     ),
     preserveFirstRootPreparationError(() =>
       mailboxRootRequired
-        ? prewarmActiveRoot(getHostedCryptoDomainForLane("mailbox-payload"))
+        ? prepareHostedMailboxItemAppendCrypto({
+            prisma: input.prisma,
+            userId: memberLookup.core.id,
+          })
         : Promise.resolve(null)
     ),
   ]);
@@ -2520,10 +2516,10 @@ async function prepareHostedDirectTelegramThreadRoutingCrypto(input: {
     throw mailboxRootResult.reason;
   }
 
-  const activeControlRootKeyId = controlRootResult.value;
+  const preparedControlRoot = controlRootResult.value;
   if (
     existingControlRoot
-    && existingControlRoot.rootKeyId !== activeControlRootKeyId
+    && existingControlRoot.rootKeyId !== preparedControlRoot?.rootKeyId
   ) {
     const root = await unwrapHostedDomainRootForWebByRootKeyId({
       domain: existingControlRoot.domain,
@@ -2549,9 +2545,9 @@ async function prepareHostedDirectTelegramThreadRoutingCrypto(input: {
   return {
     preparedDirectTelegramRouting: {
       ...preparedDirectTelegramRouting,
-      activeControlRootKeyId,
       existingControlRootKeyId: existingControlRoot?.rootKeyId ?? null,
-      mailboxRootKeyId: mailboxRootResult.value,
+      preparedControlRoot,
+      preparedMailboxCrypto: mailboxRootResult.value,
     },
   };
 }

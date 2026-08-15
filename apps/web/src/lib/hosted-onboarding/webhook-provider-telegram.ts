@@ -1,17 +1,22 @@
 import { type Prisma } from "@prisma/client";
 import { buildHostedExecutionTelegramConversationMessageWake } from "@murphai/hosted-execution";
-import { getHostedCryptoDomainForLane } from "@murphai/runtime-state";
 
 import {
-  getHostedDomainRootUnwrapCache,
+  runWithHostedDomainRootProviderCallsDisabled,
 } from "../hosted-crypto/domain-root-unwrap-cache";
 import {
-  lockAndReadActiveHostedDomainRootKeyIdTx,
+  HostedDomainRootPreparationMismatchError,
+  revalidatePreparedHostedDomainRootForWebTx,
+  type PreparedHostedDomainRootForWeb,
 } from "../hosted-crypto/domain-root-store";
 import {
   readHostedUserSecureBoxStringRootReference,
 } from "../hosted-crypto/secure-box";
-import { appendHostedMailboxEnvelopeTx } from "../hosted-mailbox/store";
+import {
+  appendHostedMailboxEnvelopeTx,
+  appendHostedMailboxEnvelopeWithPreparedCryptoTx,
+  type PreparedHostedMailboxItemAppendCrypto,
+} from "../hosted-mailbox/store";
 import {
   ensureHostedThreadContainerRouteTx,
   refreshHostedThreadContainerDeliveryRouteTx,
@@ -84,12 +89,12 @@ interface HostedDirectTelegramFamilyRoutingPreparation {
 }
 
 interface HostedDirectTelegramMemberRoutingPreparation {
-  activeControlRootKeyId: string | null;
   existingControlRootKeyId: string | null;
   initialSenderResolution: "ambiguous" | "found" | "missing";
   kind: "member";
-  mailboxRootKeyId: string | null;
   memberId: string | null;
+  preparedControlRoot: PreparedHostedDomainRootForWeb | null;
+  preparedMailboxCrypto: PreparedHostedMailboxItemAppendCrypto | null;
   senderResolution: "ambiguous" | "found" | "missing";
   telegramThreadId: string;
   telegramUserId: string;
@@ -121,6 +126,7 @@ export async function planHostedOnboardingTelegramWebhook(input: {
   if (!summary.senderTelegramUserId) {
     return buildIgnoredTelegramWebhookPlan("missing-sender");
   }
+  const senderTelegramUserId = summary.senderTelegramUserId;
 
   const telegramMessagePayload = buildHostedTelegramMessagePayload(input.update);
   const telegramMessage = telegramMessagePayload
@@ -323,16 +329,14 @@ export async function planHostedOnboardingTelegramWebhook(input: {
 
   if (
     preparedDirectAuthority
-    && preparedDirectAuthority.activeControlRootKeyId
+    && preparedDirectAuthority.preparedControlRoot
   ) {
     // Domain-root lifecycle code takes this authority lock before member rows.
     // Preserve that global order, then hold both locks through route decrypt and
     // rewrite so a control-root rotation cannot invalidate the prepared cache.
-    await revalidatePreparedDirectTelegramRootTx({
-      expectedRootKeyId: preparedDirectAuthority.activeControlRootKeyId,
-      lane: "hosted-member-private-field",
+    await revalidatePreparedDirectTelegramControlRootTx({
       memberId: existingMember.id,
-      preparationTarget: "control_root",
+      prepared: preparedDirectAuthority.preparedControlRoot,
       tx: input.prisma,
     });
     if (!(await tryLockPreparedDirectTelegramMemberRowTx({
@@ -386,7 +390,7 @@ export async function planHostedOnboardingTelegramWebhook(input: {
 
   if (summary.isDirect) {
     if (preparedDirectAuthority) {
-      if (!preparedDirectAuthority.activeControlRootKeyId) {
+      if (!preparedDirectAuthority.preparedControlRoot) {
         throw hostedDirectTelegramPreparationRequired("control_root");
       }
       await revalidatePreparedDirectTelegramRouteTx({
@@ -395,12 +399,21 @@ export async function planHostedOnboardingTelegramWebhook(input: {
         tx: input.prisma,
       });
     }
-    await upsertHostedMemberTelegramRoutingBindingTx({
-      memberId: existingMember.id,
-      prisma: input.prisma,
-      telegramThreadId: telegramMessage.threadId,
-      telegramUserId: summary.senderTelegramUserId,
-    });
+    try {
+      await runWithHostedDomainRootProviderCallsDisabled(() =>
+        upsertHostedMemberTelegramRoutingBindingTx({
+          memberId: existingMember.id,
+          prisma: input.prisma,
+          telegramThreadId: telegramMessage.threadId,
+          telegramUserId: senderTelegramUserId,
+        }),
+      );
+    } catch (error) {
+      if (error instanceof HostedDomainRootPreparationMismatchError) {
+        throw hostedDirectTelegramPreparationRequired("sender_route");
+      }
+      throw error;
+    }
   }
 
   if (!accessDecision.allowed) {
@@ -551,34 +564,45 @@ export async function planHostedOnboardingTelegramWebhook(input: {
           ? { senderUsername: summary.senderTelegramDisplayUsername }
           : {}),
       };
+  const mailboxEnvelope = buildHostedExecutionTelegramConversationMessageWake({
+    eventId,
+    occurredAt: summary.occurredAt,
+    ...(!summary.isDirect
+      ? {
+          routeAuthority: {
+            channel: "telegram" as const,
+            containerMemberId: runtimeMemberId,
+            threadId: telegramMessage.threadId,
+          },
+          senderMemberId: existingMember.id,
+        }
+      : {}),
+    telegramMessage: groupTelegramMessage,
+    userId: runtimeMemberId,
+  });
+  let mailboxAppend: Awaited<ReturnType<typeof appendHostedMailboxEnvelopeTx>>;
   if (summary.isDirect && preparedDirectAuthority) {
-    await revalidatePreparedDirectTelegramRootTx({
-      expectedRootKeyId: preparedDirectAuthority.mailboxRootKeyId,
-      lane: "mailbox-payload",
-      memberId: existingMember.id,
-      preparationTarget: "mailbox_root",
+    if (!preparedDirectAuthority.preparedMailboxCrypto) {
+      throw hostedDirectTelegramPreparationRequired("mailbox_root");
+    }
+    try {
+      mailboxAppend = await appendHostedMailboxEnvelopeWithPreparedCryptoTx({
+        envelope: mailboxEnvelope,
+        prepared: preparedDirectAuthority.preparedMailboxCrypto,
+        tx: input.prisma,
+      });
+    } catch (error) {
+      if (error instanceof HostedDomainRootPreparationMismatchError) {
+        throw hostedDirectTelegramPreparationRequired("mailbox_root");
+      }
+      throw error;
+    }
+  } else {
+    mailboxAppend = await appendHostedMailboxEnvelopeTx({
+      envelope: mailboxEnvelope,
       tx: input.prisma,
     });
   }
-  const mailboxAppend = await appendHostedMailboxEnvelopeTx({
-    envelope: buildHostedExecutionTelegramConversationMessageWake({
-      eventId,
-      occurredAt: summary.occurredAt,
-      ...(!summary.isDirect
-        ? {
-            routeAuthority: {
-              channel: "telegram" as const,
-              containerMemberId: runtimeMemberId,
-              threadId: telegramMessage.threadId,
-            },
-            senderMemberId: existingMember.id,
-          }
-        : {}),
-      telegramMessage: groupTelegramMessage,
-      userId: runtimeMemberId,
-    }),
-    tx: input.prisma,
-  });
   let qualificationCandidateReferralIds: string[] = [];
   if (!summary.isDirect) {
     const eventKey = createHostedTelegramMessageLookupKey({
@@ -659,19 +683,10 @@ async function revalidatePreparedDirectTelegramRouteTx(input: {
       && rootReference.rootKeyId
         !== input.preparation.existingControlRootKeyId
       && rootReference.rootKeyId
-        !== input.preparation.activeControlRootKeyId
+        !== input.preparation.preparedControlRoot?.rootKeyId
     )
   ) {
     throw hostedDirectTelegramPreparationRequired("sender_route");
-  }
-  if (rootReference) {
-    await assertPreparedDirectTelegramRootCached({
-      cacheRootKey: rootReference.rootKeyId,
-      expectedRootKeyId: rootReference.rootKeyId,
-      lane: "hosted-member-private-field",
-      memberId: input.memberId,
-      preparationTarget: "sender_route",
-    });
   }
 }
 
@@ -688,60 +703,27 @@ async function tryLockPreparedDirectTelegramMemberRowTx(input: {
   return rows.length > 0;
 }
 
-async function revalidatePreparedDirectTelegramRootTx(input: {
-  expectedRootKeyId: string | null;
-  lane: "hosted-member-private-field" | "mailbox-payload";
+async function revalidatePreparedDirectTelegramControlRootTx(input: {
   memberId: string;
-  preparationTarget: "control_root" | "mailbox_root";
+  prepared: PreparedHostedDomainRootForWeb;
   tx: Prisma.TransactionClient;
 }): Promise<void> {
-  if (!input.expectedRootKeyId) {
-    throw hostedDirectTelegramPreparationRequired(input.preparationTarget);
-  }
-  const domain = getHostedCryptoDomainForLane(input.lane);
-  const activeRootKeyId = await lockAndReadActiveHostedDomainRootKeyIdTx({
-    domain,
-    tx: input.tx,
-    userId: input.memberId,
-  });
-  if (activeRootKeyId !== input.expectedRootKeyId) {
-    throw hostedDirectTelegramPreparationRequired(input.preparationTarget);
-  }
-  await assertPreparedDirectTelegramRootCached({
-    cacheRootKey: "@active",
-    expectedRootKeyId: input.expectedRootKeyId,
-    lane: input.lane,
-    memberId: input.memberId,
-    preparationTarget: input.preparationTarget,
-  });
-}
-
-async function assertPreparedDirectTelegramRootCached(input: {
-  cacheRootKey: string;
-  expectedRootKeyId: string;
-  lane: "hosted-member-private-field" | "mailbox-payload";
-  memberId: string;
-  preparationTarget: "control_root" | "mailbox_root" | "sender_route";
-}): Promise<void> {
-  const domain = getHostedCryptoDomainForLane(input.lane);
-  const pendingRoot = getHostedDomainRootUnwrapCache()?.get(
-    `${input.memberId}|${domain}|${input.cacheRootKey}`,
-  );
-  if (!pendingRoot) {
-    throw hostedDirectTelegramPreparationRequired(input.preparationTarget);
-  }
-  let root: Awaited<NonNullable<typeof pendingRoot>>;
-  try {
-    root = await pendingRoot;
-  } catch {
-    throw hostedDirectTelegramPreparationRequired(input.preparationTarget);
-  }
   if (
-    root.envelope.domain !== domain
-    || root.envelope.rootKeyId !== input.expectedRootKeyId
-    || root.envelope.userId !== input.memberId
+    input.prepared.domain !== "control"
+    || input.prepared.userId !== input.memberId
   ) {
-    throw hostedDirectTelegramPreparationRequired(input.preparationTarget);
+    throw hostedDirectTelegramPreparationRequired("control_root");
+  }
+  try {
+    await revalidatePreparedHostedDomainRootForWebTx({
+      prepared: input.prepared,
+      tx: input.tx,
+    });
+  } catch (error) {
+    if (error instanceof HostedDomainRootPreparationMismatchError) {
+      throw hostedDirectTelegramPreparationRequired("control_root");
+    }
+    throw error;
   }
 }
 
