@@ -1430,11 +1430,12 @@ export async function seedHostedGroupEmailAuthorizationForTest(input: {
         });
       }
       for (const projectionScope of input.projectionScopes) {
-        const share = (await projectionStore.findActiveHostedVaultShares({
+        const shares = await projectionStore.findActiveHostedVaultShares({
           grantorMemberId: participant.memberId,
           prisma: deps.prisma,
           projectionScope,
-        })).find((candidate) =>
+        });
+        const share = shares.find((candidate) =>
           candidate.destinationMemberId === input.runtimeMemberId
         );
         if (!share) {

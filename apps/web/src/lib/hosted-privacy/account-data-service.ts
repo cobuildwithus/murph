@@ -1157,22 +1157,10 @@ async function deleteHostedAccountDataInternal(input: {
     const transactionDeletionMemberIdFilter = buildStringInFilter(
       transactionDeletionMemberIds,
     );
-    const projectionSnapshot =
-      await readHostedGroupJoinOutreachDeletionSnapshot({
-        memberIdFilter: transactionDeletionMemberIdFilter,
-        prisma: tx,
-      });
-    const projectionMemberIds = uniqueStrings(
-      readHostedLinqSignupProjectionIdentities(
-        projectionSnapshot.deliveries,
-      ).map((identity) => identity.memberId),
-    );
-    const remainingLockedMemberIds = uniqueStrings([
-      ...transactionDeletionMemberIds,
-      ...projectionMemberIds,
-    ]).filter((memberId) => memberId !== input.memberId);
     await lockHostedMembersForAccountDeletionTx({
-      memberIds: remainingLockedMemberIds,
+      memberIds: transactionDeletionMemberIds.filter(
+        (memberId) => memberId !== input.memberId,
+      ),
       prisma: tx,
       requiredMemberIds: transactionDeletionMemberIds.filter(
         (memberId) => memberId !== input.memberId,
