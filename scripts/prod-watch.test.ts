@@ -2164,6 +2164,40 @@ describe("production-watch locking and dry-run behavior", () => {
     expect(readdirSync(providerActiveRoot)).toEqual([]);
   });
 
+  it("keeps deterministic provider evidence when Cloudflare setup fails", () => {
+    const runtimeRoot = makeTempRoot();
+    const result = runProdWatch([
+      "collect",
+      "--provider-child",
+      "--settling-delay-seconds",
+      "0",
+    ], runtimeRoot, {
+      ...installDatabaseFixtureHelper(runtimeRoot, "healthy"),
+      ...installSchemaFaithfulFakeCodex(runtimeRoot),
+      CODEX_HOME: "relative-codex-home",
+    });
+
+    expect(result.status, result.stderr).toBe(0);
+    const snapshot = JSON.parse(result.stdout) as ProductionWatchSnapshot;
+    for (const source of ["vercel", "stripe"] as const) {
+      expect(snapshot.sourceHealth.find((health) => health.source === source)).toMatchObject({
+        status: "ok",
+        auth: "ok",
+      });
+    }
+    expect(snapshot.sourceHealth.find((source) => source.source === "cloudflare")).toMatchObject({
+      status: "unavailable",
+      auth: "failed",
+    });
+    expect(snapshot.collectorFailures.filter((failure) => failure.source !== "database"))
+      .toEqual([{
+        source: "cloudflare",
+        class: "auth",
+        code: "codex_profile_unconfigured",
+        retryable: false,
+      }]);
+  });
+
   it("keeps provider shadow setup failures out of persisted provider state", () => {
     const runtimeRoot = makeTempRoot();
     const databaseEnv = installDatabaseFixtureHelper(runtimeRoot, "healthy");
@@ -2272,8 +2306,9 @@ describe("production-watch locking and dry-run behavior", () => {
     const promptPath = path.join(runtimeRoot, "provider-prompt.txt");
     const argsPath = path.join(runtimeRoot, "provider-args.txt");
     const codexEnv = installFakeCodex(runtimeRoot);
-    mkdirSync(codexEnv.CODEX_HOME!, { recursive: true });
-    writeFileSync(path.join(codexEnv.CODEX_HOME!, "config.toml"), [
+    const sourceCodexHome = path.join(runtimeRoot, "source-codex-profile");
+    mkdirSync(sourceCodexHome, { recursive: true });
+    writeFileSync(path.join(sourceCodexHome, "config.toml"), [
       'model = "unreviewed-model"',
       'model_reasoning_effort = "max"',
       'developer_instructions = "unreviewed instruction"',
@@ -2285,12 +2320,16 @@ describe("production-watch locking and dry-run behavior", () => {
       'remote_plugin = true',
       '',
     ].join("\n"), { mode: 0o600 });
+    writeFakeCodexExecutable(codexEnv.MURPH_PROD_WATCH_CODEX_BIN!, {
+      codexHomeBasename: "codex-home",
+    });
     const result = runProdWatch(
       ["collect", "--provider-child", "--settling-delay-seconds", "0"],
       runtimeRoot,
       {
         ...installDatabaseFixtureHelper(runtimeRoot, "healthy"),
         ...codexEnv,
+        CODEX_HOME: sourceCodexHome,
         TEST_CODEX_ARGS_CAPTURE: argsPath,
         TEST_CODEX_PROMPT_CAPTURE: promptPath,
       },
@@ -2303,6 +2342,7 @@ describe("production-watch locking and dry-run behavior", () => {
       "Use only the Cloudflare Observability MCP and only the production Worker named murph-hosted.",
       "Never retrieve individual event bodies.",
       "Do not request or include individual events, requests, customers, charges, invoices, payment methods, prompts, transcripts, log bodies, direct identifiers, credentials, URLs, local paths, or provider payloads.",
+      "A successful aggregate query that proves zero matching events is complete evidence: emit all required counters as numeric zero for that window. Do not turn a proven zero into a failure.",
       "Missing auth, rate limits, timeouts, unavailable tools, and partial coverage must be represented as source failures or degraded/unavailable source evidence, never as healthy zero counters.",
     ]) {
       expect(prompt).toContain(clause);
@@ -2330,6 +2370,12 @@ describe("production-watch locking and dry-run behavior", () => {
     expect(args).toContain('web_search="disabled"');
     for (const feature of ["shell_tool", "apps", "hooks", "multi_agent", "remote_plugin"]) {
       expect(args).toContain(feature);
+    }
+    for (const unsupportedFeature of ["recommended_plugins", "skill_search", "view_image"]) {
+      expect(args).not.toContain(unsupportedFeature);
+    }
+    for (const ignoredServer of ["palmier-pro", "vercel", "stripe", "openaiDeveloperDocs"]) {
+      expect(args).not.toContain(`mcp_servers.${ignoredServer}.enabled=false`);
     }
     expect(args.some((argument) => argument.includes("mcp_servers.cloudflare_observability_oauth.command=")))
       .toBe(true);

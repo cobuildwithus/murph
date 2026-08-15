@@ -3,7 +3,7 @@
 import { spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { constants as fsConstants } from "node:fs";
-import { access, chmod, lstat, mkdtemp, open, readFile, realpath, rename, rm, unlink } from "node:fs/promises";
+import { access, chmod, lstat, mkdtemp, open, readFile, realpath, rename, rm, symlink, unlink } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import process from "node:process";
@@ -171,15 +171,12 @@ const CODEX_DISABLED_FEATURES = [
   "multi_agent_v2",
   "network_proxy",
   "plugins",
-  "recommended_plugins",
   "remote_plugin",
   "shell_snapshot",
   "shell_tool",
   "skill_mcp_dependency_install",
-  "skill_search",
   "tool_suggest",
   "unified_exec",
-  "view_image",
 ] as const;
 const CODEX_PACKAGE_VERSION = "0.144.4";
 const CODEX_REQUIRED_VERSION = `codex-cli ${CODEX_PACKAGE_VERSION}`;
@@ -720,7 +717,18 @@ async function collectProviderEvidenceWithCodex(input: {
     ...input,
     env: input.codexRuntime?.env,
   });
-  const cloudflarePromise = collectCloudflareProviderEvidenceWithCodex(input);
+  const cloudflarePromise = collectCloudflareProviderEvidenceWithCodex(input).catch((error) => {
+    throwIfAborted(input.signal);
+    const failure = classifyProviderChildFailure(error);
+    return {
+      source: unavailableProviderEvidence(
+        "cloudflare",
+        input.end,
+        failure.class === "auth" ? "failed" : "unknown",
+      ),
+      failures: [{ ...failure, source: "cloudflare" as const }],
+    };
+  });
   let firstRejection: unknown;
   let hasFirstRejection = false;
   for (const branch of [deterministicPromise, cloudflarePromise]) {
@@ -768,7 +776,7 @@ async function collectCloudflareProviderEvidenceWithCodex(input: {
     const codex = input.codexRuntime?.executable ?? await resolveTrustedCodexExecutable();
     const mcpRemote = await resolveTrustedMcpRemoteExecutable();
     throwIfAborted(input.signal);
-    const childEnv = buildIsolatedCodexChildEnv(tempRoot, input.codexRuntime?.env);
+    const childEnv = await buildIsolatedCodexChildEnv(tempRoot, input.codexRuntime?.env);
     const mcpConfigArgs = cloudflareOnlyMcpConfigArgs(mcpRemote);
     const schemaPath = path.join(
       repoRoot,
@@ -856,21 +864,6 @@ async function collectCloudflareProviderEvidenceWithCodex(input: {
 }
 
 function cloudflareOnlyMcpConfigArgs(mcpRemoteExecutable: string): string[] {
-  const disabledMcpArgs = [
-    "palmier-pro",
-    "vercel",
-    "stripe",
-    "cloudflare_api",
-    "cloudflare_docs",
-    "cloudflare_observability",
-    "cloudflare_bindings",
-    "cloudflare_builds",
-    "cloudflare_logpush",
-    "cloudflare_graphql",
-    "cloudflare_auditlogs",
-    "cloudflare_radar",
-    "openaiDeveloperDocs",
-  ].flatMap((server) => ["-c", `mcp_servers.${server}.enabled=false`]);
   const featureArgs = CODEX_DISABLED_FEATURES.flatMap((feature) => ["--disable", feature]);
   return [
     "-c",
@@ -882,7 +875,6 @@ function cloudflareOnlyMcpConfigArgs(mcpRemoteExecutable: string): string[] {
     "-c",
     'mcp_oauth_credentials_store="file"',
     ...featureArgs,
-    ...disabledMcpArgs,
     "-c",
     `mcp_servers.${CLOUDFLARE_OBSERVABILITY_MCP}.command=${JSON.stringify(mcpRemoteExecutable)}`,
     "-c",
@@ -976,6 +968,7 @@ function buildProviderEvidencePrompt(input: {
     "Do not request or include individual events, requests, customers, charges, invoices, payment methods, prompts, transcripts, log bodies, direct identifiers, credentials, URLs, local paths, or provider payloads.",
     "Return exactly one JSON object conforming to the supplied output schema and no prose.",
     "Return each provider source exactly once because the output schema is shared. Vercel and Stripe must be neutral unavailable stubs with empty evidence arrays; collect only Cloudflare evidence and emit only Cloudflare failures.",
+    "A successful aggregate query that proves zero matching events is complete evidence: emit all required counters as numeric zero for that window. Do not turn a proven zero into a failure.",
     "Missing auth, rate limits, timeouts, unavailable tools, and partial coverage must be represented as source failures or degraded/unavailable source evidence, never as healthy zero counters.",
     "An ok source requires auth ok plus provider_request_count, provider_error_count, and provider_timeout_count with exact dimensions {source}.",
     JSON.stringify({
@@ -991,25 +984,56 @@ function buildProviderEvidencePrompt(input: {
   ].join("\n");
 }
 
-function buildIsolatedCodexChildEnv(
+async function buildIsolatedCodexChildEnv(
   privateHome: string,
   sourceEnv?: NodeJS.ProcessEnv,
-): NodeJS.ProcessEnv {
+): Promise<NodeJS.ProcessEnv> {
   const inherited = sourceEnv ?? process.env;
+  const sourceCodexHome = inherited.CODEX_HOME
+    ?? path.join(os.homedir(), SCHEDULER_CODEX_HOME_BASENAME);
+  if (
+    !path.isAbsolute(sourceCodexHome)
+    || sourceCodexHome.includes("\0")
+  ) {
+    throw new Error("codex_profile_unconfigured");
+  }
+  const isolatedCodexHome = path.join(privateHome, "codex-home");
+  await ensurePrivateDirectory(isolatedCodexHome);
+  if (testOverrides === undefined) {
+    const authPath = path.join(sourceCodexHome, "auth.json");
+    let profileMetadata;
+    let authMetadata;
+    try {
+      [profileMetadata, authMetadata] = await Promise.all([
+        lstat(sourceCodexHome),
+        lstat(authPath),
+      ]);
+    } catch {
+      throw new Error("codex_profile_unconfigured");
+    }
+    const currentUid = process.getuid?.();
+    if (
+      !profileMetadata.isDirectory()
+      || !authMetadata.isFile()
+      || (currentUid !== undefined
+        && (profileMetadata.uid !== currentUid || authMetadata.uid !== currentUid))
+      || (process.platform !== "win32"
+        && ((profileMetadata.mode & 0o077) !== 0 || (authMetadata.mode & 0o077) !== 0))
+    ) {
+      throw new Error("codex_profile_invalid");
+    }
+    await symlink(authPath, path.join(isolatedCodexHome, "auth.json"));
+  }
   const env: NodeJS.ProcessEnv = {
     PATH: sourceEnv?.PATH ?? SCHEDULER_SYSTEM_PATHS.join(":"),
     HOME: privateHome,
+    CODEX_HOME: isolatedCodexHome,
+    MCP_REMOTE_CONFIG_DIR: path.join(sourceCodexHome, "mcp-remote"),
     CI: "1",
     LANG: "C.UTF-8",
     LC_ALL: "C.UTF-8",
     NO_COLOR: "1",
   };
-  const codexHome = inherited.CODEX_HOME;
-  if (codexHome === undefined || !path.isAbsolute(codexHome) || codexHome.includes("\0")) {
-    throw new Error("codex_home_unconfigured");
-  }
-  env.CODEX_HOME = codexHome;
-  env.MCP_REMOTE_CONFIG_DIR = path.join(codexHome, "mcp-remote");
   if (testOverrides !== undefined) {
     env.TEST_PROVIDER_FIXTURE = testOverrides.providerFixture;
     env.TEST_CODEX_EXTRA_MCP = testOverrides.extraMcp === true ? "1" : undefined;
