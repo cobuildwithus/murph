@@ -473,16 +473,27 @@ export async function refreshOAuthTokens<T extends {
     client_secret: input.clientSecret,
   }, input.extraParameters);
   const tokenPayload = await input.postTokenRequest(parameters);
-  const tokens = input.tokenResponseToAuthTokens(tokenPayload);
+  try {
+    const tokens = input.tokenResponseToAuthTokens(tokenPayload);
 
-  if (input.resolveRefreshToken) {
-    tokens.refreshToken = input.resolveRefreshToken({
-      currentRefreshToken,
-      responseRefreshToken: tokens.refreshToken ?? null,
+    if (input.resolveRefreshToken) {
+      tokens.refreshToken = input.resolveRefreshToken({
+        currentRefreshToken,
+        responseRefreshToken: tokens.refreshToken ?? null,
+      });
+    }
+
+    return tokens;
+  } catch (error) {
+    throw deviceSyncError({
+      accountStatus: "reauthorization_required",
+      cause: error,
+      code: "TOKEN_REFRESH_STATE_UNKNOWN",
+      httpStatus: 409,
+      message: "Device sync token refresh state is unknown. Reconnect this source before syncing again.",
+      retryable: false,
     });
   }
-
-  return tokens;
 }
 
 function appendOAuthTokenRequestExtraParameters(

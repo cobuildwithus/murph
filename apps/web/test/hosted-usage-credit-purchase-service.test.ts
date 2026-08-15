@@ -5581,6 +5581,59 @@ describe("expireHostedUsageCreditCheckout", () => {
 });
 
 describe("usage-credit account-deletion convergence", () => {
+  it("detaches high-cardinality terminal payer history with one set update", async () => {
+    const fake = createFakePrisma();
+    for (let index = 0; index < 512; index += 1) {
+      fake.purchases.set(`hucp_history_${index}`, {
+        beneficiaryMemberId: `member_beneficiary_${index}`,
+        grantSlotReleasedAt: NOW,
+        groupSponsorshipAuthorizationId: null,
+        groupSponsorshipChargeOrdinal: null,
+        id: `hucp_history_${index}`,
+        lastReconciledAt: NOW,
+        paidAt: NOW,
+        payerMemberId: MEMBER_ID,
+        reconciliationVersion: 0n,
+        status: "fulfilled",
+        stripeChargeIdEncrypted: "encrypted:charge",
+        stripeChargeLookupKey: `charge:${index}`,
+        stripeCheckoutSessionIdEncrypted: null,
+        stripeCheckoutSessionLookupKey: null,
+        stripeCheckoutUrlEncrypted: null,
+        stripeCustomerIdEncrypted: "encrypted:customer",
+        stripePaymentIntentIdEncrypted: "encrypted:intent",
+        stripePaymentIntentLookupKey: `intent:${index}`,
+        stripePriceIdEncrypted: "encrypted:price",
+        terminalAt: NOW,
+        updatedAt: NOW,
+      });
+    }
+
+    fake.member.suspendedAt = NOW;
+    await expect(closeHostedUsageCreditPurchasesForAccountDeletion({
+      memberIds: [MEMBER_ID],
+      now: new Date(NOW.getTime() + 500),
+      prisma: fake.prisma as never,
+    })).resolves.toBeUndefined();
+    expect(fake.prisma.$transaction).not.toHaveBeenCalled();
+    expect(fake.prisma.hostedUsageCreditPurchase.findMany).toHaveBeenCalledOnce();
+    expectNoStripeProviderIo();
+    fake.prisma.hostedUsageCreditPurchase.findMany.mockClear();
+
+    await expect(assertHostedUsageCreditPurchasesReadyForAccountDeletionTx({
+      memberIds: [MEMBER_ID],
+      now: new Date(NOW.getTime() + 1_000),
+      prisma: fake.prisma as never,
+    })).resolves.toBeUndefined();
+
+    expect(fake.prisma.hostedUsageCreditPurchase.findMany).toHaveBeenCalledOnce();
+    expect(fake.prisma.hostedUsageCreditPurchase.updateMany).toHaveBeenCalledOnce();
+    expect([...fake.purchases.values()].every((purchase) =>
+      purchase.payerMemberId === null
+      && purchase.reconciliationVersion === 1n
+    )).toBe(true);
+  });
+
   it("detaches a terminal payer and later permits the group beneficiary deletion", async () => {
     const fake = createFakePrisma();
     const purchase = {
@@ -5742,6 +5795,31 @@ describe("usage-credit account-deletion convergence", () => {
     const fixture = installAutomaticGroupRefillFixture(fake, {
       status: "payment_pending",
     });
+    for (let index = 0; index < 64; index += 1) {
+      fake.purchases.set(`hucp_safe_mixed_${index}`, {
+        beneficiaryMemberId: `member_safe_beneficiary_${index}`,
+        grantSlotReleasedAt: NOW,
+        groupSponsorshipAuthorizationId: null,
+        groupSponsorshipChargeOrdinal: null,
+        id: `hucp_safe_mixed_${index}`,
+        lastReconciledAt: NOW,
+        paidAt: NOW,
+        payerMemberId: MEMBER_ID,
+        reconciliationVersion: 0n,
+        status: "fulfilled",
+        stripeChargeIdEncrypted: `encrypted:charge:safe:${index}`,
+        stripeChargeLookupKey: `charge:safe:${index}`,
+        stripeCheckoutSessionIdEncrypted: null,
+        stripeCheckoutSessionLookupKey: null,
+        stripeCheckoutUrlEncrypted: null,
+        stripeCustomerIdEncrypted: null,
+        stripePaymentIntentIdEncrypted: `encrypted:intent:safe:${index}`,
+        stripePaymentIntentLookupKey: `intent:safe:${index}`,
+        stripePriceIdEncrypted: null,
+        terminalAt: NOW,
+        updatedAt: NOW,
+      });
+    }
     const requiresConfirmation = buildSavedCardPaymentIntent({
       amount: 500,
       amountReceived: 0,
@@ -5763,6 +5841,10 @@ describe("usage-credit account-deletion convergence", () => {
       memberIds: [MEMBER_ID],
       now: deletionAt,
     })).resolves.toBeUndefined();
+
+    // Only the one unresolved payment enters the locked prepare and terminal
+    // persistence transactions; the 64 safe history rows add no transactions.
+    expect(fake.prisma.$transaction).toHaveBeenCalledTimes(2);
 
     expect(mocks.stripePaymentIntentRetrieve).toHaveBeenCalledWith(
       "pi_saved_card_123",
@@ -6901,6 +6983,9 @@ function matchesPurchaseWhere(
     }
     if (isFakeRecord(expected) && Array.isArray(expected.in)) {
       return expected.in.includes(record[key]);
+    }
+    if (isFakeRecord(expected) && Array.isArray(expected.notIn)) {
+      return !expected.notIn.includes(record[key]);
     }
     if (isFakeRecord(expected) && "not" in expected) {
       return record[key] !== expected.not;

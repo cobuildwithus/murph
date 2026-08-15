@@ -180,15 +180,17 @@ const compactTableGenericResponseCardV1Schema = z
     addEncodedLengthIssues(envelope, context, "compact table");
   });
 
-const compactTableWorkoutResponseCardAuthoringV1Schema = z
+export const compactTableWorkoutSemanticResponseCardV1Schema = z
   .object({
     ...compactTableResponseCardHeaderV1Shape,
     footer: singleLineText(compactTableCardV1Bounds.footer).nullable(),
     tracking: compactTableTrackingSourceV1Schema,
     workout: workoutSessionDetailV1Schema,
   })
-  .strict()
-  .superRefine((card, context) => {
+  .strict();
+
+const compactTableWorkoutResponseCardAuthoringV1Schema =
+  compactTableWorkoutSemanticResponseCardV1Schema.superRefine((card, context) => {
     const envelope = buildWorkoutSessionAppCardEnvelopeV4({
       title: card.title,
       subtitle: card.subtitle,

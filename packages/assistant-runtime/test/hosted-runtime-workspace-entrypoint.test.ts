@@ -7564,30 +7564,42 @@ describe("hosted workspace runtime entrypoint", () => {
 
   for (const completion of [
     {
+      dedupeKey: "member.activated:initial-owner-synthetic",
+      kind: "member.activated",
+      label: "member activation",
+      preCheckpointSafe: true,
+      withConversationPrefix: true,
+    },
+    {
       dedupeKey:
         "assistant.notification.requested:phone-call-result:phone_call_synthetic",
+      kind: "assistant.notification.requested",
       label: "phone-call result",
       preCheckpointSafe: true,
     },
     {
       dedupeKey:
         "assistant.notification.requested:usage-referral-reward:referral_synthetic",
+      kind: "assistant.notification.requested",
       label: "usage-referral reward",
       preCheckpointSafe: true,
     },
     {
       dedupeKey: "aask_done_private_synthetic",
+      kind: "assistant.notification.requested",
       label: "legacy private Assistant Ask completion",
       preCheckpointSafe: true,
     },
     {
       dedupeKey: "aask_private_synthetic",
+      kind: "assistant.notification.requested",
       label: "current private Assistant Ask completion",
       preCheckpointSafe: true,
     },
     {
       dedupeKey:
         "assistant.notification.requested:generic:notification_synthetic",
+      kind: "assistant.notification.requested",
       label: "generic notification",
       preCheckpointSafe: false,
     },
@@ -7606,6 +7618,25 @@ describe("hosted workspace runtime entrypoint", () => {
 
       try {
         await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+        const withConversationPrefix = "withConversationPrefix" in completion
+          && completion.withConversationPrefix;
+        if (withConversationPrefix) {
+          mailboxItems.push(
+            createMailboxItem({
+              id: "mailbox_item_entrypoint_external_completion_conversation",
+              kind: "conversation.message",
+              lane: "conversation",
+              laneSeq: "1",
+            }),
+            createMailboxItem({
+              dedupeKey: completion.dedupeKey,
+              id: "mailbox_item_entrypoint_external_completion",
+              kind: completion.kind,
+              lane: "system",
+              laneSeq: "1",
+            }),
+          );
+        }
         const resultPromise = runHostedWorkspaceRuntimeJobInProcess(
           createWorkspaceRuntimeJobInput({
             request: {
@@ -7649,12 +7680,12 @@ describe("hosted workspace runtime entrypoint", () => {
             runtimeWakeSignal,
             async runAssistantPhase() {
               assistantPhaseCalls += 1;
-              if (assistantPhaseCalls === 1) {
+              if (assistantPhaseCalls === 1 && !withConversationPrefix) {
                 setTimeout(() => {
                   mailboxItems.push(createMailboxItem({
                     dedupeKey: completion.dedupeKey,
                     id: "mailbox_item_entrypoint_external_completion",
-                    kind: "assistant.notification.requested",
+                    kind: completion.kind,
                     lane: "system",
                     laneSeq: "1",
                   }));
@@ -7690,7 +7721,10 @@ describe("hosted workspace runtime entrypoint", () => {
         } else {
           assert.ok(idleCheckpointIndex < importIndex, events.join(","));
         }
-        assert.equal(result.status, "idle");
+        assert.equal(
+          result.status,
+          withConversationPrefix ? "scheduled" : "idle",
+        );
       } finally {
         await removeTempRoot(vaultRoot);
       }
@@ -14413,7 +14447,7 @@ describe("hosted workspace runtime entrypoint", () => {
                 if (scenario.systemItemId) {
                   mailboxItems.push(createMailboxItem({
                     id: scenario.systemItemId,
-                    kind: "member.activated",
+                    kind: "member.channels.updated",
                     lane: "system",
                     laneSeq: "1",
                     occurredAt: "2026-04-27T00:00:01.000Z",
@@ -16116,7 +16150,7 @@ describe("hosted workspace runtime entrypoint", () => {
               assistantOneObserved.resolve();
               mailboxItems.push(createMailboxItem({
                 id: "mailbox_item_collapse_system_after_checkpoint",
-                kind: "member.activated",
+                kind: "member.channels.updated",
                 lane: "system",
                 laneSeq: "1",
                 occurredAt: "2026-04-27T00:00:01.000Z",

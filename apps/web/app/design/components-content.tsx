@@ -1135,7 +1135,16 @@ export function ComponentsContent() {
         <Section title="Input OTP">
           <div className="grid gap-2">
             <Label htmlFor="otp-ds">Verification code</Label>
-            <InputOTP id="otp-ds" maxLength={6} autoComplete="one-time-code">
+            <InputOTP
+              id="otp-ds"
+              maxLength={6}
+              autoComplete="one-time-code"
+              data-1p-ignore
+              data-bwignore="true"
+              data-form-type="other"
+              data-lpignore="true"
+              pushPasswordManagerStrategy="none"
+            >
               <InputOTPGroup>
                 <InputOTPSlot index={0} className="size-11 bg-card text-base" />
                 <InputOTPSlot index={1} className="size-11 bg-card text-base" />

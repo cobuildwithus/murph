@@ -70,7 +70,14 @@ result-family compare-and-merge path can preserve unrelated canonical fields.
 
 The readable response-card contract remains object-shaped for authoring and
 runtime validation. V4 uses positional exercise tuples `[name, sets]` and set
-tuples `[status, target, actual]`. V6 uses `[name, exerciseUnit, sets]`; a
+tuples `[status, target, actual]`. Its logical reader and authoring bounds admit
+up to 16 exercises and 16 sets per exercise, while validation of the actual
+encoded fragment and image path remains the final capacity authority. This
+admits realistic higher-cardinality snapshots, including eleven-exercise,
+three-set late-active sessions, without adding another projection owner; a
+specific snapshot that exceeds the existing URL ceiling still uses complete
+semantic text recovery instead of truncating or changing canonical workout
+data. V6 uses `[name, exerciseUnit, sets]`; a
 completed set replaces the actual display string with a closed compact
 note/reps/weight-reps tuple, while a pending set carries `null`. Native derives
 display and optimistic preconditions from that typed tuple. Removing repeated
@@ -224,22 +231,25 @@ operations, assistant tools, or a new queue.
 
 ## Rollout
 
-Deploy the native schema-version-6 reader first, the shared Web action and image
-routes second, and the Worker and runner producer last. Older app versions retain
+For a new V4 workout, an expansion of V4's strict bounds, or the V6 editor,
+deploy the native reader first, the shared Web action and image routes second,
+and the Worker and runner producer last. Older app versions retain
 truthful captions and the static image but do not provide the drill-down workout
 interface. Keep the Web route available while any sent image URL may still be
 fetched.
 
-The backend also has a persisted-state compatibility floor. Deploy V6-capable
-Worker and runner bundles before any V6 card can be emitted. The accepted outbox
-intent and hosted delivery side effect both persist the full response card;
-after the first V6-bearing record exists, those bundle versions are the rollback
-floor. A warm older bundle must not process that state because its strict parser
+The backend also has a persisted-state compatibility floor. Deploy a Worker and
+runner bundle that accepts the current V4 bounds and V6 before a card using
+either expanded shape can be emitted. The accepted outbox intent and hosted
+delivery side effect both persist the full response card; after the first
+expanded V4- or V6-bearing record exists, those Web and bundle versions are the
+rollback floor. A warm older bundle must not process that state because its strict parser
 rejects the workout branch, and the local runner can quarantine the pending
 intent out of the retry inventory. Recovery is a coordinated forward fix or
 explicit restoration of the quarantined intent after the compatible bundle is
-live, not rollback below the floor. Focused local-outbox and hosted-side-effect
-round-trip tests pin both persisted owners.
+live, not rollback below the floor. Focused static-route, local-outbox, and
+hosted-side-effect round-trip tests pin all three strict readers with the same
+expanded fixture shape.
 
 Static rollout also requires physical macOS and no-extension iPhone proof of the
 final balloon, image-failure behavior, accessibility behavior, and App Store
