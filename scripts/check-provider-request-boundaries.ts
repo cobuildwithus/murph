@@ -1670,6 +1670,7 @@ function collectRawProviderHttpViolations(input: {
   readonly sourceFile: Node;
   readonly violationsByKey: Map<string, ProviderRequestBoundaryViolation>;
 }): void {
+  collectOpaqueProviderTransportMutationViolations(input);
   const candidates: ProviderHttpCandidate[] = [];
   traverseFast(input.sourceFile, (node) => {
     if (
@@ -1817,6 +1818,134 @@ function collectRawProviderHttpViolations(input: {
         violationsByKey: input.violationsByKey,
       },
       candidate.call.callee,
+      "raw-provider-http",
+    );
+  }
+}
+
+function collectOpaqueProviderTransportMutationViolations(input: {
+  readonly analysis: ProviderHttpSourceAnalysis;
+  readonly bindings: ReadonlyMap<string, readonly VariableBinding[]>;
+  readonly contents: string;
+  readonly relativePath: string;
+  readonly sourceFile: Node;
+  readonly violationsByKey: Map<string, ProviderRequestBoundaryViolation>;
+}): void {
+  const hasOpaqueLocalRoot = (
+    node: Node,
+    before: number,
+    allowRootOnly = false,
+  ): boolean => {
+    const path = readMemberPath(node);
+    const root = path?.[0];
+    return Boolean(
+      path &&
+      (allowRootOnly || path.length >= 2) &&
+      root &&
+      resolvePossibleBindings(input.bindings, root, before).length > 0 &&
+      resolvePossibleStaticMemberPaths(path, input.bindings, before).some(
+        (resolution) => resolution.opaque,
+      ),
+    );
+  };
+  const findBoundProviderFacts = (
+    node: Node,
+    before: number,
+  ): ProviderExpressionFacts | null => {
+    let found: ProviderExpressionFacts | null = null;
+    traverseFast(node, (candidate) => {
+      if (found) {
+        return;
+      }
+      const bound = readBoundTransportCall({
+        analysis: input.analysis,
+        before,
+        bindings: input.bindings,
+        contents: input.contents,
+        node: candidate,
+        resolving: new Set(),
+      });
+      if (!bound) {
+        return;
+      }
+      const facts = inferProviderExpressionFacts({
+        analysis: input.analysis,
+        before,
+        bindings: input.bindings,
+        contents: input.contents,
+        node: bound.evidenceNode,
+        resolving: new Set(),
+      });
+      if (
+        providerBoundaryRegistry.some(
+          (provider) =>
+            provider.rawHttpPolicy === "require-official-sdk" &&
+            facts.providerIds.has(provider.id),
+        )
+      ) {
+        found = facts;
+      }
+    });
+    return found;
+  };
+
+  for (const mutation of collectStaticMemberMutationCandidates(
+    input.sourceFile,
+  )) {
+    const before = mutation.start ?? Number.MAX_SAFE_INTEGER;
+    let target: Node | null = null;
+    let targetMayBeRootOnly = false;
+    const values: Node[] = [];
+    if (isAssignmentExpression(mutation)) {
+      target = mutation.left;
+      values.push(mutation.right);
+    } else if (
+      (isCallExpression(mutation) || isOptionalCallExpression(mutation)) &&
+      readMemberPath(mutation.callee)?.join(".") === "Object.assign"
+    ) {
+      targetMayBeRootOnly = true;
+      const [assigned, ...sources] = mutation.arguments;
+      if (
+        assigned &&
+        assigned.type !== "ArgumentPlaceholder" &&
+        assigned.type !== "SpreadElement"
+      ) {
+        target = assigned;
+      }
+      values.push(
+        ...sources.filter(
+          (source): source is Exclude<typeof source, { type: "ArgumentPlaceholder" | "SpreadElement" }> =>
+            source.type !== "ArgumentPlaceholder" &&
+            source.type !== "SpreadElement",
+        ),
+      );
+    }
+    if (
+      !target ||
+      !hasOpaqueLocalRoot(target, before, targetMayBeRootOnly)
+    ) {
+      continue;
+    }
+    const facts = values
+      .map((value) => findBoundProviderFacts(value, before))
+      .find((candidate) => candidate !== null);
+    if (!facts) {
+      continue;
+    }
+    const providers = providerBoundaryRegistry.filter(
+      (provider) =>
+        provider.rawHttpPolicy === "require-official-sdk" &&
+        facts.providerIds.has(provider.id),
+    );
+    recordViolation(
+      {
+        boundary:
+          `${providers.map((provider) => provider.label).join("/")} provider transport stored through an opaque member alias`,
+        contents: input.contents,
+        relativePath: input.relativePath,
+        violationsByKey: input.violationsByKey,
+      },
+      target,
       "raw-provider-http",
     );
   }
@@ -4454,48 +4583,109 @@ function collectStaticMemberMutationCandidates(sourceFile: Node): readonly Node[
   return candidates;
 }
 
-function canonicalizeStaticMemberPath(
+interface StaticMemberPathResolution {
+  readonly opaque: boolean;
+  readonly path: readonly string[];
+  readonly rootBinding: VariableBinding;
+}
+
+function readPossibleReferencePaths(node: Node): readonly string[][] {
+  const value = unwrapExpression(node);
+  const direct = isIdentifier(value) ||
+      isMemberExpression(value) ||
+      isOptionalMemberExpression(value)
+    ? readMemberPath(value)
+    : null;
+  if (direct) {
+    return [direct];
+  }
+  if (value.type === "ConditionalExpression") {
+    return [value.consequent, value.alternate].flatMap((branch) =>
+      readPossibleReferencePaths(branch)
+    );
+  }
+  if (value.type === "LogicalExpression") {
+    return [value.left, value.right].flatMap((branch) =>
+      readPossibleReferencePaths(branch)
+    );
+  }
+  if (value.type === "SequenceExpression") {
+    return value.expressions.flatMap((expression) =>
+      readPossibleReferencePaths(expression)
+    );
+  }
+  return [];
+}
+
+function isClosedNonAliasValue(node: Node): boolean {
+  const value = unwrapExpression(node);
+  return isObjectExpression(value) ||
+    value.type === "ArrayExpression" ||
+    isFunction(value) ||
+    isStringLiteral(value) ||
+    value.type === "NumericLiteral" ||
+    value.type === "BooleanLiteral" ||
+    value.type === "NullLiteral" ||
+    value.type === "BigIntLiteral" ||
+    value.type === "RegExpLiteral";
+}
+
+function resolvePossibleStaticMemberPaths(
   path: readonly string[],
   bindings: ReadonlyMap<string, readonly VariableBinding[]>,
   before: number,
-): {
-  readonly path: readonly string[];
-  readonly rootBinding: VariableBinding;
-} | null {
-  let canonicalPath = [...path];
-  let position = before;
-  const resolving = new Set<string>();
-  while (canonicalPath.length > 0) {
-    const root = canonicalPath[0];
-    if (!root || root === "this") {
-      return null;
-    }
-    const binding = resolveBinding(bindings, root, position);
-    if (!binding?.definitive) {
-      return null;
-    }
+  resolving: ReadonlySet<string> = new Set(),
+): StaticMemberPathResolution[] {
+  const root = path[0];
+  if (!root || root === "this") {
+    return [];
+  }
+  const possibleBindings = resolvePossibleBindings(bindings, root, before);
+  const resolutions: StaticMemberPathResolution[] = [];
+  for (const binding of possibleBindings) {
     const key = `${root}:${binding.start}`;
     if (resolving.has(key)) {
-      return null;
+      continue;
     }
-    resolving.add(key);
-    if (binding.defaultExpression) {
-      return { path: canonicalPath, rootBinding: binding };
+    const nextResolving = new Set(resolving);
+    nextResolving.add(key);
+    const values = readVariableBindingPossibleValues(binding, bindings);
+    let retainedLocalRoot = false;
+    for (const value of values) {
+      const referencePaths = readPossibleReferencePaths(value);
+      if (referencePaths.length === 0) {
+        resolutions.push({
+          opaque: !isClosedNonAliasValue(value),
+          path,
+          rootBinding: binding,
+        });
+        retainedLocalRoot = true;
+        continue;
+      }
+      for (const referencePath of referencePaths) {
+        resolutions.push(
+          ...resolvePossibleStaticMemberPaths(
+            [...referencePath, ...path.slice(1)],
+            bindings,
+            binding.start - 1,
+            nextResolving,
+          ),
+        );
+      }
     }
-    const initializerPath = readMemberPath(
-      unwrapExpression(binding.initializer),
-    );
-    if (!initializerPath) {
-      return { path: canonicalPath, rootBinding: binding };
+    if (values.length === 0 && !retainedLocalRoot) {
+      resolutions.push({ opaque: true, path, rootBinding: binding });
     }
-    canonicalPath = [
-      ...initializerPath,
-      ...(binding.propertyPath ?? []),
-      ...canonicalPath.slice(1),
-    ];
-    position = binding.start - 1;
   }
-  return null;
+  return resolutions.filter((resolution, index) =>
+    resolutions.findIndex((candidate) =>
+      candidate.opaque === resolution.opaque &&
+      candidate.path.join(".") === resolution.path.join(".") &&
+      candidate.rootBinding.start === resolution.rootBinding.start &&
+      candidate.rootBinding.scopeStart === resolution.rootBinding.scopeStart &&
+      candidate.rootBinding.scopeEnd === resolution.rootBinding.scopeEnd
+    ) === index
+  );
 }
 
 function readStaticMemberMutationInitializers(
@@ -4508,23 +4698,29 @@ function readStaticMemberMutationInitializers(
   if (!initialTargetPath || initialTargetPath.length < 2) {
     return [];
   }
-  const target = canonicalizeStaticMemberPath(
+  const targets = resolvePossibleStaticMemberPaths(
     initialTargetPath,
     bindings,
     before,
   );
-  if (!target) {
+  if (targets.length === 0) {
     return [];
   }
-  const targetPath = target.path;
-  const hasSameRootBinding = (binding: VariableBinding): boolean =>
-    binding.start === target.rootBinding.start &&
-    binding.scopeStart === target.rootBinding.scopeStart &&
-    binding.scopeEnd === target.rootBinding.scopeEnd;
-  const startsWithTargetPath = (candidate: readonly string[]): boolean =>
-    candidate.length >= 1 &&
-    candidate.length <= targetPath.length &&
-    candidate.every((part, index) => targetPath[index] === part);
+  const hasSameRootBinding = (
+    left: VariableBinding,
+    right: VariableBinding,
+  ): boolean =>
+    left.start === right.start &&
+    left.scopeStart === right.scopeStart &&
+    left.scopeEnd === right.scopeEnd;
+  const isMutationPrefix = (
+    mutation: StaticMemberPathResolution,
+    target: StaticMemberPathResolution,
+  ): boolean =>
+    hasSameRootBinding(mutation.rootBinding, target.rootBinding) &&
+    mutation.path.length >= 1 &&
+    mutation.path.length <= target.path.length &&
+    mutation.path.every((part, index) => target.path[index] === part);
   const readNestedValues = (
     value: Node,
     remainingPath: readonly string[],
@@ -4553,21 +4749,26 @@ function readStaticMemberMutationInitializers(
     }
     if (isAssignmentExpression(candidate)) {
       const assignedPath = readMemberPath(candidate.left);
-      const canonicalAssignedPath = assignedPath
-        ? canonicalizeStaticMemberPath(assignedPath, bindings, position)
-        : null;
-      if (
-        canonicalAssignedPath &&
-        hasSameRootBinding(canonicalAssignedPath.rootBinding) &&
-        startsWithTargetPath(canonicalAssignedPath.path)
-      ) {
-        values.push(
-          ...readNestedValues(
-            candidate.right,
-            targetPath.slice(canonicalAssignedPath.path.length),
-            position,
-          ),
-        );
+      const assignedResolutions = assignedPath
+        ? resolvePossibleStaticMemberPaths(assignedPath, bindings, position)
+        : [];
+      let matchedDirectAssignment = false;
+      for (const target of targets) {
+        for (const assignedResolution of assignedResolutions) {
+          if (!isMutationPrefix(assignedResolution, target)) {
+            continue;
+          }
+          values.push(
+            ...readNestedValues(
+              candidate.right,
+              target.path.slice(assignedResolution.path.length),
+              position,
+            ),
+          );
+          matchedDirectAssignment = true;
+        }
+      }
+      if (matchedDirectAssignment) {
         continue;
       }
       if (
@@ -4576,21 +4777,22 @@ function readStaticMemberMutationInitializers(
         candidate.left.computed
       ) {
         const objectPath = readMemberPath(candidate.left.object);
-        const canonicalObjectPath = objectPath
-          ? canonicalizeStaticMemberPath(objectPath, bindings, position)
-          : null;
-        if (
-          canonicalObjectPath &&
-          hasSameRootBinding(canonicalObjectPath.rootBinding) &&
-          startsWithTargetPath(canonicalObjectPath.path)
-        ) {
-          values.push(
-            ...readNestedValues(
-              candidate.right,
-              targetPath.slice(canonicalObjectPath.path.length + 1),
-              position,
-            ),
-          );
+        const objectResolutions = objectPath
+          ? resolvePossibleStaticMemberPaths(objectPath, bindings, position)
+          : [];
+        for (const target of targets) {
+          for (const objectResolution of objectResolutions) {
+            if (!isMutationPrefix(objectResolution, target)) {
+              continue;
+            }
+            values.push(
+              ...readNestedValues(
+                candidate.right,
+                target.path.slice(objectResolution.path.length + 1),
+                position,
+              ),
+            );
+          }
         }
       }
       continue;
@@ -4608,30 +4810,30 @@ function readStaticMemberMutationInitializers(
         continue;
       }
       const assignedPath = readMemberPath(assigned);
-      const canonicalAssignedPath = assignedPath
-        ? canonicalizeStaticMemberPath(assignedPath, bindings, position)
-        : null;
-      if (
-        !canonicalAssignedPath ||
-        !hasSameRootBinding(canonicalAssignedPath.rootBinding) ||
-        !startsWithTargetPath(canonicalAssignedPath.path)
-      ) {
-        continue;
-      }
-      for (const source of sources) {
-        if (
-          source.type === "ArgumentPlaceholder" ||
-          source.type === "SpreadElement"
-        ) {
-          continue;
+      const assignedResolutions = assignedPath
+        ? resolvePossibleStaticMemberPaths(assignedPath, bindings, position)
+        : [];
+      for (const target of targets) {
+        for (const assignedResolution of assignedResolutions) {
+          if (!isMutationPrefix(assignedResolution, target)) {
+            continue;
+          }
+          for (const source of sources) {
+            if (
+              source.type === "ArgumentPlaceholder" ||
+              source.type === "SpreadElement"
+            ) {
+              continue;
+            }
+            values.push(
+              ...readNestedValues(
+                source,
+                target.path.slice(assignedResolution.path.length),
+                position,
+              ),
+            );
+          }
         }
-        values.push(
-          ...readNestedValues(
-            source,
-            targetPath.slice(canonicalAssignedPath.path.length),
-            position,
-          ),
-        );
       }
     }
   }

@@ -579,8 +579,10 @@ Last verified: 2026-08-14
   array members retain their bound request arguments through direct, `.call`,
   and closed `.apply` invocation; spreads, conditional origins, member writes,
   and `Object.assign` remain possible values and fail closed when any branch
-  carries provider transport provenance, including when the mutated container
-  is reached through a definitive chronological local alias. Destructured
+  carries provider transport provenance, including every chronologically
+  possible local alias root retained by a conditional assignment or expression.
+  An opaque alias-producing call cannot prove safety: storing a provider-bound
+  transport through that member fails at the mutation boundary. Destructured
   declaration/assignment values, nested property paths, and defaults enter the
   same binding census, so provider URL and transport facts do not disappear
   when a closed local configuration or namespace is unpacked. The guard also follows strict fetch-shaped

@@ -2503,6 +2503,17 @@ describe("check-provider-request-boundaries", () => {
         "let webSend = async (_url: string) => ({ ok: true });",
         "({ fetch: webSend } = web);",
         "await webSend('https://api.openai.com/v1/responses');",
+        "const conditionalTarget = { send: async (_url: string) => ({ ok: true }) };",
+        "const conditionalOther = { send: async (_url: string) => ({ ok: true }) };",
+        "let conditionalAlias = conditionalTarget;",
+        "if (Date.now() > 0) conditionalAlias = conditionalOther;",
+        "conditionalAlias.send = globalThis.fetch.bind(undefined, 'https://api.openai.com/v1/responses');",
+        "await conditionalTarget.send();",
+        "const selectedTarget = { send: async (_url: string) => ({ ok: true }) };",
+        "const selectedOther = { send: async (_url: string) => ({ ok: true }) };",
+        "const selectedAlias = Date.now() > 0 ? selectedTarget : selectedOther;",
+        "selectedAlias.send = globalThis.fetch.bind(undefined, 'https://api.openai.com/v1/responses');",
+        "await selectedTarget.send();",
       ].join("\n"),
       "scripts/aliased-member-provider-transports.mts",
     );
@@ -2517,6 +2528,8 @@ describe("check-provider-request-boundaries", () => {
       26,
       31,
       35,
+      41,
+      46,
     ]);
   });
 
@@ -2564,6 +2577,26 @@ describe("check-provider-request-boundaries", () => {
     );
 
     expect(matches).toEqual([]);
+  });
+
+  it("rejects provider transports stored through opaque alias-producing calls", () => {
+    const matches = violationsOfKind(
+      "raw-provider-http",
+      [
+        "declare function selectTable<T>(value: T): T;",
+        "const direct = { send: async (_url: string) => ({ ok: true }) };",
+        "const opaque = selectTable(direct);",
+        "opaque.send = globalThis.fetch.bind(undefined, 'https://api.openai.com/v1/responses');",
+        "await direct.send();",
+        "const assigned = { send: async (_url: string) => ({ ok: true }) };",
+        "const assignedOpaque = selectTable(assigned);",
+        "Object.assign(assignedOpaque, { send: globalThis.fetch.bind(undefined, 'https://api.openai.com/v1/responses') });",
+        "await assigned.send();",
+      ].join("\n"),
+      "scripts/opaque-provider-member-aliases.mts",
+    );
+
+    expect(matches.map((match) => match.line)).toEqual([4, 8]);
   });
 
 });

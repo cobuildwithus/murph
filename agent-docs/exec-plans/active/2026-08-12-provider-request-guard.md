@@ -340,6 +340,50 @@ Updated: 2026-08-14
   negative shadow/reassignment cases. No exception or provider request was
   added.
 
+### ReviewGPT round 13 requirement-level retrospective
+
+- Exact full-snapshot head `32292f89b4d6bae2c511f3293937d67fe53316e1`
+  changed 9,853 lines versus 3,097 at the immutable first-reviewed head.
+  ReviewGPT returned `RETROSPECTIVE_REQUIRED` because a conditional alias
+  assignment repeats round 12's effective-value ownership seam: the variable
+  resolver is set-valued, but member-mutation root canonicalization remained
+  definitive-only.
+- Requirement decision: local effective-value provenance is set-valued. One
+  resolver must follow every chronologically possible lexical root for
+  provider facts, transport targets, member reads, and member mutations.
+  A conditional alias such as `alias = other` inside a branch therefore keeps
+  both the prior and branch roots; neither may erase a provider transport.
+- Supported bounded syntax is explicit: identifier/member aliases, closed
+  object and array origins, property/array destructuring and defaults,
+  chronological simple assignments, conditional/logical/sequence alternatives,
+  direct member writes, and `Object.assign`. Scope identity, later definitive
+  reassignment, and lexical shadows remain authoritative negative controls.
+- Unsupported alias-producing calls, opaque computed roots, or spreads do not
+  prove safety. When such a member mutation carries a provider-bound transport,
+  the existing raw-boundary analysis must reject it conservatively rather than
+  inventing a second scanner, exception, baseline, or compatibility path.
+- Redesign decision: replace the single-result member-path canonicalizer with
+  a set-valued resolver built on `resolvePossibleBindings` and the same binding
+  value/path decomposition already used by provider and transport facts.
+  Mutation matching consumes that set. The existing mutation candidate census
+  remains only an AST index; it does not become a policy or provenance owner.
+  If implementation requires another registry, walker, or exception, pause for
+  a new retrospective instead of extending the patch.
+- Implemented that redesign without a new census or policy owner. The
+  member-path resolver now returns the deduplicated set of roots obtained from
+  `resolvePossibleBindings` and decomposes identifier/member,
+  conditional/logical/sequence, destructured, and closed local values through
+  the shared binding values. Mutation matching compares every source/target
+  root pair. Call-produced opaque roots stay marked; the existing mutation
+  candidate index and bound-call/provider-fact analysis reject a provider
+  transport stored through such a member at the mutation boundary.
+- The new regression extends the round-12 matrix with both conditional simple
+  assignment and conditional-expression aliases plus opaque direct-write and
+  `Object.assign` targets. Scope shadows and later unconditional reassignment
+  remain clean. The combined guard and Node-bootstrap suite passes 116 tests;
+  production provider scan, repo-tools TypeScript compilation, docs drift, and
+  doc gardening pass on the retrospective implementation.
+
 ## Verification
 
 - `pnpm provider-requests:guard`

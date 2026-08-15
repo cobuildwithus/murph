@@ -113,7 +113,7 @@ structural presigned/internal/xAI exceptions, raw HTTP transport discovery,
 conditional-aware effective assignment and fetch invocation provenance, SDK
 fetch-adapter and handwritten wire-contract detection, literal dynamic-import
 transports and their exact namespace aliases, closed-member bound transport
-composition, alias-canonical member mutation closure, destructured/defaulted
+composition, set-valued alias-root member mutation closure, destructured/defaulted
 effective-value provenance, owner-specific digest-pinned transfer URL
 normalizers, digest-pinned adapter authority closure, and exact current
 failure inventory, is
