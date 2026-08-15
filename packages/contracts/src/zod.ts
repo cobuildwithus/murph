@@ -726,6 +726,7 @@ export const workoutSessionSchema = z
     movingTimeMinutes: numberSchema(0).optional(),
     routineId: boundedString(1, 200).optional(),
     routineName: boundedString(1, 160).optional(),
+    lastMemberActionId: z.string().length(36).uuid().optional(),
     sessionNote: boundedString(1, 4000).optional(),
     metrics: workoutSessionMetricsSchema.optional(),
     heartRateZones: z.array(workoutHeartRateZoneSchema).max(20).optional(),

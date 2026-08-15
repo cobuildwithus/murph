@@ -12,6 +12,8 @@ import type {
   AssistantPersonalitySettingId,
   AssistantTonePreference,
   AssistantVoiceOptionId,
+  MemberActionRequestV1,
+  MemberActionOutcomeV1,
 } from "@murphai/contracts";
 import {
   BROWSER_VAULT_METRIC_BUCKET_COUNT,
@@ -70,6 +72,8 @@ export const HOSTED_EXECUTION_EVENT_KINDS = [
   "assistant.ask.completed",
   "clinical-records.sync-requested",
   "device-sync.wake",
+  "member.action.requested",
+  "member.action.completed",
   ...HOSTED_EXECUTION_RUNTIME_CONTROL_WAKE_KINDS,
 ] as const;
 
@@ -94,6 +98,8 @@ export const HOSTED_EXECUTION_WAKE_KINDS = [
   "environment-voice.captured",
   "health.daily-metric.reported",
   "meal-photo.captured",
+  "member.action.requested",
+  "member.action.completed",
   "vault-share.delivery",
   "vault-share.revoke",
   ...HOSTED_EXECUTION_RUNTIME_CONTROL_WAKE_KINDS,
@@ -523,6 +529,18 @@ export interface HostedExecutionClinicalRecordsSyncRequestedEvent
   runId: string;
 }
 
+export interface HostedExecutionMemberActionRequestedEvent
+  extends HostedExecutionBaseEvent {
+  kind: "member.action.requested";
+  request: MemberActionRequestV1;
+}
+
+export interface HostedExecutionMemberActionCompletedEvent
+  extends HostedExecutionBaseEvent {
+  kind: "member.action.completed";
+  outcome: MemberActionOutcomeV1;
+}
+
 export type HostedExecutionDirectRoute =
   | {
       channel: "linq" | "telegram";
@@ -568,6 +586,8 @@ export type HostedExecutionEvent =
   | HostedExecutionAssistantAskCompletedEvent
   | HostedExecutionClinicalRecordsSyncRequestedEvent
   | HostedExecutionDeviceSyncWakeEvent
+  | HostedExecutionMemberActionRequestedEvent
+  | HostedExecutionMemberActionCompletedEvent
   | HostedExecutionRuntimeControlRequestedEvent;
 
 export interface HostedExecutionBaseWake {
@@ -878,6 +898,18 @@ export interface HostedExecutionMealPhotoCapturedWake extends HostedExecutionBas
   mealPhoto: HostedExecutionMealPhotoCapturedPayload;
 }
 
+export interface HostedExecutionMemberActionRequestedWake
+  extends HostedExecutionBaseWake {
+  kind: "member.action.requested";
+  request: MemberActionRequestV1;
+}
+
+export interface HostedExecutionMemberActionCompletedWake
+  extends HostedExecutionBaseWake {
+  kind: "member.action.completed";
+  outcome: MemberActionOutcomeV1;
+}
+
 export interface HostedExecutionPlainRuntimeControlWake extends HostedExecutionBaseWake {
   kind: HostedExecutionPlainRuntimeControlWakeKind;
 }
@@ -917,6 +949,8 @@ export type HostedExecutionWake =
   | HostedExecutionEnvironmentVoiceCapturedWake
   | HostedExecutionDailyMetricReportedWake
   | HostedExecutionMealPhotoCapturedWake
+  | HostedExecutionMemberActionRequestedWake
+  | HostedExecutionMemberActionCompletedWake
   | HostedExecutionVaultShareDeliveryWake
   | HostedExecutionVaultShareRevokeWake
   | HostedExecutionRuntimeControlWake;
