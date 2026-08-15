@@ -91,8 +91,8 @@ Updated: 2026-08-14
 - Passed: normalized complete first-provider request capture with the pinned
   real Codex App Server, `gpt-5.6-terra`, low reasoning, production code mode,
   identical synthetic direct/group turns, and `gpt-tokenizer` 3.4.0
-  `o200k_harmony`. Direct changed from 29,245 tokens / 135,018 bytes to 29,258
-  / 135,071 (+13 tokens, +0.0445%; +53 bytes, +0.0393%). Group remained
+  `o200k_harmony`. Direct changed from 29,245 tokens / 135,018 bytes to 29,255
+  / 135,065 (+10 tokens, +0.0342%; +47 bytes, +0.0348%). Group remained
   23,467 tokens / 107,773 bytes. The selected provider fields were `include`,
   `input`, `instructions`, `parallel_tool_calls`, `text`, `tool_choice`, and
   `tools` when present; model/reasoning/storage/streaming/service-tier/account/
