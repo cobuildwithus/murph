@@ -2439,11 +2439,11 @@ async function installScheduler(): Promise<void> {
     throw new Error("launchd_service_loaded_without_managed_plist");
   }
   const previousWasLoaded = previousState === "loaded";
-  if (previousWasLoaded) {
-    await stopLaunchdService(domain, plistPath);
-  }
 
   try {
+    if (previousWasLoaded) {
+      await stopLaunchdService(domain, plistPath);
+    }
     await atomicWriteText(plistPath, renderedPlist, { privateDirectory: false });
     await startLaunchdService(domain, plistPath);
   } catch (error) {

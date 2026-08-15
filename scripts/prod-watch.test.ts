@@ -3422,6 +3422,12 @@ describe("production-watch static safety contracts", () => {
           "  bootout)",
           "    if [ \"${LAUNCHCTL_FAIL_BOOTOUT:-0}\" = \"1\" ]; then exit 1; fi",
           "    printf 'absent\\n' > \"$LAUNCHCTL_STATE\"",
+          "    if [ -n \"${LAUNCHCTL_UNKNOWN_AFTER_BOOTOUT_ONCE:-}\" ] && [ ! -e \"$LAUNCHCTL_UNKNOWN_AFTER_BOOTOUT_ONCE\" ]; then",
+          "      printf 'armed\\n' > \"$LAUNCHCTL_UNKNOWN_AFTER_BOOTOUT_ONCE\"",
+          "    fi",
+          "    if [ -n \"${LAUNCHCTL_UNKNOWN_AFTER_BOOTOUT_ALWAYS:-}\" ]; then",
+          "      : > \"$LAUNCHCTL_UNKNOWN_AFTER_BOOTOUT_ALWAYS\"",
+          "    fi",
           "    ;;",
           "  bootstrap)",
           "    if [ -n \"${LAUNCHCTL_FAIL_BOOTSTRAP_ONCE:-}\" ] && [ ! -e \"$LAUNCHCTL_FAIL_BOOTSTRAP_ONCE\" ]; then",
@@ -3442,6 +3448,15 @@ describe("production-watch static safety contracts", () => {
           "    ;;",
           "  print)",
           "    if [ \"${LAUNCHCTL_PRINT_UNKNOWN:-0}\" = \"1\" ]; then printf 'unknown failure\\n' >&2; exit 1; fi",
+          "    if [ -n \"${LAUNCHCTL_UNKNOWN_AFTER_BOOTOUT_ONCE:-}\" ] && [ \"$(cat \"$LAUNCHCTL_UNKNOWN_AFTER_BOOTOUT_ONCE\" 2>/dev/null)\" = \"armed\" ]; then",
+          "      printf 'used\\n' > \"$LAUNCHCTL_UNKNOWN_AFTER_BOOTOUT_ONCE\"",
+          "      printf 'unknown failure\\n' >&2",
+          "      exit 1",
+          "    fi",
+          "    if [ -n \"${LAUNCHCTL_UNKNOWN_AFTER_BOOTOUT_ALWAYS:-}\" ] && [ -e \"$LAUNCHCTL_UNKNOWN_AFTER_BOOTOUT_ALWAYS\" ]; then",
+          "      printf 'unknown failure\\n' >&2",
+          "      exit 1",
+          "    fi",
           "    if [ -n \"${LAUNCHCTL_UNKNOWN_AFTER_ENABLE_ONCE:-}\" ] && [ \"$(cat \"$LAUNCHCTL_UNKNOWN_AFTER_ENABLE_ONCE\" 2>/dev/null)\" = \"armed\" ]; then",
           "      printf 'used\\n' > \"$LAUNCHCTL_UNKNOWN_AFTER_ENABLE_ONCE\"",
           "      printf 'unknown failure\\n' >&2",
@@ -3612,6 +3627,34 @@ describe("production-watch static safety contracts", () => {
         { LAUNCHCTL_UNKNOWN_AFTER_ENABLE_ONCE: path.join(testRoot, "confirmation-failed-once") },
         "launchd_install_state_unconfirmed_previous_restored",
       );
+
+      expectExactLoadedRollback(
+        "post-bootout-uncertainty",
+        { LAUNCHCTL_UNKNOWN_AFTER_BOOTOUT_ONCE: path.join(testRoot, "bootout-unknown-once") },
+        "launchd_service_state_unknown_previous_restored",
+      );
+
+      const persistentlyUncertainPlist = installedPlist.replace(
+        "<!-- murph-prod-watch-managed:v1 -->",
+        "<!-- murph-prod-watch-managed:v1 -->\n<!-- previous-persistent-uncertainty -->",
+      );
+      writeFileSync(plistPath, persistentlyUncertainPlist, { mode: 0o600 });
+      writeFileSync(launchctlState, "loaded\n");
+      writeFileSync(launchctlLog, "");
+      const persistentlyUncertainReplacement = runProdWatchFromCheckout(
+        ["scheduler", "install"],
+        runtimeRoot,
+        checkoutRoot,
+        {
+          ...sharedEnv,
+          LAUNCHCTL_UNKNOWN_AFTER_BOOTOUT_ALWAYS: path.join(testRoot, "bootout-always-unknown"),
+        },
+      );
+      expect(persistentlyUncertainReplacement.status).toBe(1);
+      expect(persistentlyUncertainReplacement.stderr).toContain(
+        "launchd_service_state_unknown_previous_restore_failed",
+      );
+      expect(readFileSync(plistPath, "utf8")).toBe(persistentlyUncertainPlist);
 
       writeFileSync(launchctlLog, "");
       writeFileSync(launchctlState, "loaded\n");
