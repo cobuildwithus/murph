@@ -28,6 +28,10 @@ const mocks = vi.hoisted(() => ({
   hydrateHostedExecutionDefaultTarget: vi.fn(),
   listAssistantInputEvents: vi.fn(),
   listPendingAssistantAutoReplyLinqCleanupEvidence: vi.fn(),
+  maintainAssistantAutoReplyRouteState: vi.fn(async () => ({
+    changed: false,
+    trusted: true,
+  })),
   markAssistantAutoReplyLinqCleanupQueued: vi.fn(),
   prepareHostedAssistantAutomationForWake: vi.fn(),
   prepareHostedAssistantDeliveryEffectsForDispatch: vi.fn(),
@@ -55,6 +59,17 @@ vi.mock("@murphai/assistant-engine/assistant-automation", () => ({
     mocks.listPendingAssistantAutoReplyLinqCleanupEvidence,
   markAssistantAutoReplyLinqCleanupQueued: mocks.markAssistantAutoReplyLinqCleanupQueued,
 }));
+
+vi.mock("@murphai/assistant-engine/assistant-runtime-residue", async (importOriginal) => {
+  const actual = await importOriginal<
+    typeof import("@murphai/assistant-engine/assistant-runtime-residue")
+  >();
+  return {
+    ...actual,
+    maintainAssistantAutoReplyRouteState:
+      mocks.maintainAssistantAutoReplyRouteState,
+  };
+});
 
 vi.mock("@murphai/assistant-engine", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@murphai/assistant-engine")>();

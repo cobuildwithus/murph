@@ -419,6 +419,182 @@ describe("workout session compact-table contract", () => {
     expect(compactTableResponseCardV1Schema.parse(card)).toEqual(card);
   });
 
+  it("accepts complete higher-cardinality workouts when their actual envelope fits", () => {
+    if (!("workout" in TRACKED_WORKOUT_CARD)) {
+      throw new TypeError("Expected the workout card fixture.");
+    }
+
+    const exerciseNames = [
+      "Back squat",
+      "Romanian deadlift",
+      "Leg press",
+      "Leg extension",
+      "Hamstring curl",
+      "Walking lunge",
+      "Calf raise",
+      "Hip thrust",
+      "Cable row",
+      "Push-up",
+      "Farmer carry",
+    ];
+    const largerWorkoutCard: CompactTableResponseCardV1 = {
+      ...TRACKED_WORKOUT_CARD,
+      subtitle: null,
+      footer: "Reply with the exercise, set, and result.",
+      workout: {
+        version: 1,
+        state: "active",
+        exercises: exerciseNames.map((name, exerciseIndex) => ({
+          name,
+          sets: Array.from({ length: 3 }, (_, setIndex) => {
+            const isCompleted = exerciseIndex * 3 + setIndex < 30;
+            return isCompleted
+              ? {
+                  status: "completed" as const,
+                  target: "8 reps",
+                  actual: "8 reps",
+                }
+              : {
+                  status: "pending" as const,
+                  target: "8 reps",
+                  actual: null,
+                };
+          }),
+        })),
+      },
+    };
+
+    expect(compactTableResponseCardV1Schema.parse(largerWorkoutCard)).toEqual(
+      largerWorkoutCard,
+    );
+    expect(largerWorkoutCard.workout.exercises).toHaveLength(11);
+    expect(largerWorkoutCard.workout.exercises.flatMap(
+      (exercise) => exercise.sets,
+    )).toHaveLength(33);
+
+    const manySetCard: CompactTableResponseCardV1 = {
+      ...largerWorkoutCard,
+      workout: {
+        version: 1,
+        state: "active",
+        exercises: [{
+          name: "Pull-up",
+          sets: Array.from({ length: 12 }, (_, index) =>
+            index < 11
+              ? {
+                  status: "completed" as const,
+                  target: "5 reps",
+                  actual: "5 reps",
+                }
+              : {
+                  status: "pending" as const,
+                  target: "5 reps",
+                  actual: null,
+                }),
+        }],
+      },
+    };
+
+    expect(compactTableResponseCardV1Schema.parse(manySetCard)).toEqual(
+      manySetCard,
+    );
+  });
+
+  it("pins the literal 16-exercise and 16-set V4 boundaries", () => {
+    const sixteenExerciseWorkout = {
+      version: 1 as const,
+      state: "active" as const,
+      exercises: Array.from({ length: 16 }, (_, index) => ({
+        name: `Exercise ${index + 1}`,
+        sets: [{ status: "pending" as const, target: null, actual: null }],
+      })),
+    };
+    const sixteenExerciseCard = {
+      ...TRACKED_WORKOUT_CARD,
+      title: "Exercise boundary",
+      subtitle: null,
+      footer: null,
+      workout: sixteenExerciseWorkout,
+    } satisfies CompactTableResponseCardV1;
+
+    expect(
+      compactTableResponseCardV1Schema.parse(sixteenExerciseCard),
+    ).toEqual(sixteenExerciseCard);
+    const decodedExerciseCard = parseCompactTableAppCardEnvelope(
+      buildWorkoutSessionAppCardEnvelopeV4({
+        title: sixteenExerciseCard.title,
+        subtitle: sixteenExerciseCard.subtitle,
+        footer: sixteenExerciseCard.footer,
+        workout: sixteenExerciseCard.workout,
+      }),
+    );
+    if (decodedExerciseCard === null || !("workout" in decodedExerciseCard)) {
+      throw new TypeError("Expected the 16-exercise V4 workout envelope.");
+    }
+    expect(decodedExerciseCard.workout.exercises).toHaveLength(16);
+    expect(decodedExerciseCard.workout.exercises[15]?.name).toBe(
+      "Exercise 16",
+    );
+
+    const sixteenSetWorkout = {
+      version: 1 as const,
+      state: "active" as const,
+      exercises: [{
+        name: "Exercise 1",
+        sets: Array.from({ length: 16 }, (_, index) => ({
+          status: "pending" as const,
+          target: `Set ${index + 1}`,
+          actual: null,
+        })),
+      }],
+    };
+    const sixteenSetCard = {
+      ...TRACKED_WORKOUT_CARD,
+      title: "Set boundary",
+      subtitle: null,
+      footer: null,
+      workout: sixteenSetWorkout,
+    } satisfies CompactTableResponseCardV1;
+
+    expect(compactTableResponseCardV1Schema.parse(sixteenSetCard)).toEqual(
+      sixteenSetCard,
+    );
+    const decodedSetCard = parseCompactTableAppCardEnvelope(
+      buildWorkoutSessionAppCardEnvelopeV4({
+        title: sixteenSetCard.title,
+        subtitle: sixteenSetCard.subtitle,
+        footer: sixteenSetCard.footer,
+        workout: sixteenSetCard.workout,
+      }),
+    );
+    if (decodedSetCard === null || !("workout" in decodedSetCard)) {
+      throw new TypeError("Expected the 16-set V4 workout envelope.");
+    }
+    expect(decodedSetCard.workout.exercises[0]?.sets).toHaveLength(16);
+    expect(decodedSetCard.workout.exercises[0]?.sets[15]?.target).toBe(
+      "Set 16",
+    );
+
+    expect(workoutSessionDetailV1Schema.safeParse({
+      ...sixteenExerciseWorkout,
+      exercises: Array.from({ length: 17 }, (_, index) => ({
+        name: `Exercise ${index + 1}`,
+        sets: [{ status: "pending" as const, target: null, actual: null }],
+      })),
+    }).success).toBe(false);
+    expect(workoutSessionDetailV1Schema.safeParse({
+      ...sixteenSetWorkout,
+      exercises: [{
+        name: "Exercise 1",
+        sets: Array.from({ length: 17 }, () => ({
+          status: "pending" as const,
+          target: null,
+          actual: null,
+        })),
+      }],
+    }).success).toBe(false);
+  });
+
   it("keeps generic table fields out of the workout branch", () => {
     expect(
       compactTableResponseCardV1Schema.safeParse({

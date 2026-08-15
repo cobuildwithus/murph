@@ -50,6 +50,7 @@ export function parseDynamicToolArguments<T extends z.ZodTypeAny>(
   input: {
     schema: T
     schemaName?: string
+    schemaPaths?: readonly string[]
     /**
      * Root-key list used in the validation digest. Auto-derived from
      * `schema.shape` for plain ZodObject schemas. Should be passed explicitly
@@ -74,6 +75,7 @@ export function parseDynamicToolArguments<T extends z.ZodTypeAny>(
         rawInput: input.value,
         requestedToolName: input.toolName,
         schemaName: input.schemaName ?? `${input.toolName}.input`,
+        schemaPaths: input.schemaPaths,
         schemaRootKeys: input.schemaRootKeys ?? resolveSchemaRootKeys(input.schema),
         toolName: input.toolName,
       }),

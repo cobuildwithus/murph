@@ -247,6 +247,19 @@ const WORKOUT_CARD: Extract<
   },
 };
 
+const EXPANDED_WORKOUT_CARD: typeof WORKOUT_CARD = {
+  ...WORKOUT_CARD,
+  title: "Expanded strength session",
+  workout: {
+    version: 1,
+    state: "active",
+    exercises: Array.from({ length: 11 }, (_, index) => ({
+      name: `Exercise ${index + 1}`,
+      sets: [{ status: "pending", target: "8 reps", actual: null }],
+    })),
+  },
+};
+
 const STANDINGS_CARD: ChallengeStandingsResponseCardV1 = {
   kind: "challenge_standings",
   version: 1,
@@ -553,6 +566,27 @@ test("response-card image route restores and renders the exact compact V4 workou
   assert.match(serialized, /<h1/u);
   assert.doesNotMatch(serialized, /evt_|snapshotAt/u);
   assert.doesNotMatch(serialized, /border-radius:105px/u);
+});
+
+test("response-card image route renders the final exercise from an expanded V4 workout", async () => {
+  const { GET } = await import("../app/imessage/card/v1/[payload]/route");
+  const payload = encodePayload(buildWorkoutSessionAppCardEnvelopeV4({
+    title: EXPANDED_WORKOUT_CARD.title,
+    subtitle: EXPANDED_WORKOUT_CARD.subtitle,
+    footer: EXPANDED_WORKOUT_CARD.footer,
+    workout: EXPANDED_WORKOUT_CARD.workout,
+  }));
+  const response = await GET(
+    new Request(`https://www.withmurph.ai/imessage/card/v1/${payload}`),
+    { params: Promise.resolve({ payload }) },
+  );
+
+  assert.equal(response.status, 200);
+  const [imageTree] = getImageResponseCall();
+  const serialized = renderToStaticMarkup(imageTree);
+  assert.match(serialized, /Expanded strength session/u);
+  assert.match(serialized, /Exercise 1/u);
+  assert.match(serialized, /Exercise 11/u);
 });
 
 test("workout images ignore legacy subtitles in both pixels and height", async () => {

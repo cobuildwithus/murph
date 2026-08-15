@@ -155,6 +155,7 @@ export async function startHostedLocalDevHarness(input: {
   streamLogs?: boolean;
   testControls?: boolean;
   webProcessEnvOverrides?: NodeJS.ProcessEnv;
+  webTemporalMailboxSignalFaultUserId?: string;
 }): Promise<HostedLocalDevHarness> {
   const config = resolveHostedLocalDevConfig(input.env);
   const workerBaseUrl =
@@ -220,6 +221,12 @@ export async function startHostedLocalDevHarness(input: {
       ...(input.webProcessEnvOverrides
         ? { webProcessEnvOverrides: input.webProcessEnvOverrides }
         : {}),
+      ...(input.webTemporalMailboxSignalFaultUserId === undefined
+        ? {}
+        : {
+          webTemporalMailboxSignalFaultUserId:
+            input.webTemporalMailboxSignalFaultUserId,
+        }),
     });
 
     try {

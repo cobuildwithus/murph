@@ -55,7 +55,7 @@
     "exercise-library:generate": "pnpm --dir packages/exercise-library generate",
     "health-commons:generate": "node scripts/ensure-health-commons-generated.mjs",
     "health-commons:generate:watch": "node scripts/watch-health-commons-generated.mjs",
-    "test:scenario-integrity": "tsx e2e/smoke/verify-scenario-integrity.ts",
+    "test:scenario-integrity": "tsx e2e/smoke/verify-scenario-integrity.ts --coverage",
     "verify:cli": "bash scripts/workspace-verify.sh verify:cli",
     "hosted-crypto:guard": "node scripts/check-hosted-crypto-hardcut.mjs",
     "hosted-temporal:guard": "tsx scripts/check-hosted-temporal-orchestration-guards.ts",
@@ -94,7 +94,7 @@
   "devDependencies": {
     "@babel/parser": "^7.29.3",
     "@babel/types": "^7.29.0",
-    "@cobuild/repo-tools": "^0.1.15",
+    "@cobuild/repo-tools": "^0.1.17",
     "@cobuild/review-gpt": "^0.5.131",
     "@elevenlabs/elevenlabs-js": "2.62.0",
     "@murphai/health-metrics": "workspace:*",

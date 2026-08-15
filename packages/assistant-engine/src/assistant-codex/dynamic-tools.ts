@@ -1,5 +1,10 @@
 import * as z from '@murphai/contracts/zod-runtime'
-import { isStrictIsoDate } from '@murphai/contracts'
+import {
+  compactTableGenericResponseCardV1Schema,
+  compactTableWorkoutResponseCardAuthoringV1Schema,
+  dailyNutritionResponseCardV2AuthoringSchema,
+  isStrictIsoDate,
+} from '@murphai/contracts'
 import {
   hostedRuntimeAssistantPersonalizationModelToolRequestSchema,
   type HostedRuntimeAssistantPersonalizationModelToolRequest,
@@ -81,6 +86,7 @@ import {
   type HostedComputerPauseForUserRequest,
 } from '@murphai/hosted-execution/computer-use'
 import {
+  assistantAuthoredResponseMediaSchema,
   assistantMessageReactionSchema,
   type AssistantMessageReaction,
   type AssistantResponseMedia,
@@ -88,9 +94,11 @@ import {
 import {
   exerciseRoutineResponseCardV1Schema,
   assistantResponseCardAuthoringSchema,
+  assistantWorkoutResponseCardSemanticSchema,
   assistantResponseCardSchema,
   telegramRichContentResponseCardV1Schema,
   type AssistantResponseCard,
+  type CompactTableWorkoutResponseCardV1,
 } from '@murphai/operator-config/assistant-response-cards'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import { readLiveWorkoutCardEditor } from '@murphai/vault-usecases/workouts'
@@ -136,11 +144,16 @@ import type {
 } from '../assistant/providers/types.js'
 import {
   ASSISTANT_AUTHORED_RESPONSE_MEDIA_MAX_ITEMS,
+  dedupeAssistantResponseMediaList,
   matchesExactAssistantVaultImageResponseMedia,
   normalizeAssistantResponseMediaList,
 } from '../assistant/response-media.js'
 import {
+  buildToolCallValidationFeedback,
+} from '../assistant/tool-validation-feedback.js'
+import {
   buildSafeToolCallValidationDigest,
+  collectSafeJsonSchemaValidationPaths,
   type SafeToolCallValidationDigest,
 } from '../assistant/tool-validation-digest.js'
 import type {
@@ -183,6 +196,7 @@ import {
 import {
   type GenerateSongToolArgs,
   type GenerateVoiceMemoToolArgs,
+  type VoiceMemoPhaseTimingRecorder,
   type VoiceMemoToolRuntime,
 } from './generate-voice-memo-tool.js'
 import {
@@ -245,6 +259,9 @@ import {
   type PhysicalNoteDynamicToolRequest,
 } from './dynamic-tools/physical-notes.js'
 import {
+  buildResponseCardValidationFeedback,
+} from './response-card-validation-feedback.js'
+import {
   executeGenerateSongDynamicTool,
   MURPH_GENERATE_SONG_TOOL,
   parseGenerateSongArguments,
@@ -293,24 +310,65 @@ import {
 } from './dynamic-tool-catalog.js'
 const CODEX_DYNAMIC_TOOL_CALL_METHOD = 'item/tool/call'
 
+function addAttachResponseCardArgumentIssues(
+  value: { card: AssistantResponseCard },
+  context: z.RefinementCtx,
+): void {
+  if (
+    value.card.kind === 'compact_table' &&
+    'workout' in value.card &&
+    value.card.subtitle !== null
+  ) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'Structured workout card subtitles must be null.',
+      params: { murphExpectedShape: 'null_for_workout_card' },
+      path: ['card', 'subtitle'],
+    })
+  }
+}
+
 const attachResponseCardArgumentsSchema = z
   .object({
     card: assistantResponseCardAuthoringSchema,
   })
   .strict()
-  .superRefine((value, context) => {
-    if (
-      value.card.kind === 'compact_table' &&
-      'workout' in value.card &&
-      value.card.subtitle !== null
-    ) {
-      context.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: 'Structured workout card subtitles must be null.',
-        path: ['card', 'subtitle'],
-      })
-    }
+  .superRefine(addAttachResponseCardArgumentIssues)
+
+const attachDailyNutritionResponseCardArgumentsSchema = z
+  .object({
+    card: dailyNutritionResponseCardV2AuthoringSchema,
   })
+  .strict()
+
+const attachCompactTableGenericResponseCardArgumentsSchema = z
+  .object({
+    card: compactTableGenericResponseCardV1Schema,
+  })
+  .strict()
+
+const attachCompactTableWorkoutResponseCardArgumentsSchema = z
+  .object({
+    card: compactTableWorkoutResponseCardAuthoringV1Schema,
+  })
+  .strict()
+  .superRefine(addAttachResponseCardArgumentIssues)
+
+const attachResponseCardValidationPaths =
+  collectSafeJsonSchemaValidationPaths(MURPH_ATTACH_RESPONSE_CARD_TOOL.inputSchema)
+const attachExerciseRoutineCardValidationPaths =
+  collectSafeJsonSchemaValidationPaths(
+    MURPH_ATTACH_EXERCISE_ROUTINE_CARD_TOOL.inputSchema,
+  )
+const attachResponseMediaValidationPaths =
+  collectSafeJsonSchemaValidationPaths(MURPH_ATTACH_RESPONSE_MEDIA_TOOL.inputSchema)
+
+const attachSemanticWorkoutResponseCardArgumentsSchema = z
+  .object({
+    card: assistantWorkoutResponseCardSemanticSchema,
+  })
+  .strict()
+  .superRefine(addAttachResponseCardArgumentIssues)
 
 const attachGroupChallengeResponseCardArgumentsSchema =
   groupChallengeResponseCardToolInputSchema
@@ -329,7 +387,9 @@ const attachTelegramRichContentArgumentsSchema = z
 
 const attachResponseMediaArgumentsSchema = z
   .object({
-    media: z.array(z.unknown()).max(ASSISTANT_AUTHORED_RESPONSE_MEDIA_MAX_ITEMS),
+    media: z
+      .array(assistantAuthoredResponseMediaSchema)
+      .max(ASSISTANT_AUTHORED_RESPONSE_MEDIA_MAX_ITEMS),
   })
   .strict()
 
@@ -1005,6 +1065,9 @@ export interface MurphDynamicToolExecutionResult {
   requiredVaultFileApprovalUrl?: string
   responseMediaPatch?: MurphDynamicToolResponseMediaPatch
   responseCardPatch?: { card: AssistantResponseCard }
+  responseCardTextFallbackPatch?: {
+    card: CompactTableWorkoutResponseCardV1
+  }
   rpcResult: MurphDynamicToolRpcResult
   // Specific runtime issues a tool wants recorded off-path via the assistant
   // runtime's existing issue owner (e.g. a generated-media delivery failure).
@@ -1242,6 +1305,10 @@ export type MurphDynamicToolRequest =
       validationDigest: SafeToolCallValidationDigest
     }
   | {
+      card: CompactTableWorkoutResponseCardV1
+      kind: 'response-card-envelope-too-large'
+    }
+  | {
       kind: 'invalid-response-media-arguments'
       validationDigest: SafeToolCallValidationDigest
     }
@@ -1402,6 +1469,7 @@ export function readMurphDynamicToolRequest(
   message: CodexRpcMessage,
   input?: {
     automationRelativeDateReferenceWindow?: AssistantAcceptedTurnInputReferenceWindow | null
+    responseCardAudience?: 'group' | 'private' | null
   },
 ): MurphDynamicToolRequest | null {
   const request = parseDynamicToolCallRequest(message)
@@ -1517,8 +1585,17 @@ export function readMurphDynamicToolRequest(
       }
     }
     case MURPH_ATTACH_RESPONSE_CARD_TOOL.name: {
-      const parsed = parseAttachResponseCardArguments(request.arguments)
+      const parsed = parseAttachResponseCardArguments(
+        request.arguments,
+        input?.responseCardAudience ?? null,
+      )
       if (!parsed.ok) {
+        if (parsed.reason === 'workout-envelope-too-large') {
+          return {
+            card: parsed.card,
+            kind: 'response-card-envelope-too-large',
+          }
+        }
         return {
           kind: 'invalid-response-card-arguments',
           validationDigest: parsed.validationDigest,
@@ -1970,6 +2047,7 @@ export async function executeMurphDynamicToolRequest(input: {
   request: MurphDynamicToolRequest
   requireHostedPrivateImageDelivery?: boolean | null
   vaultRoot?: string | null
+  voiceMemoPhaseTimingRecorder?: VoiceMemoPhaseTimingRecorder | null
   voiceMemoRuntime?: VoiceMemoToolRuntime | null
   askGrokRuntime?: AskGrokToolRuntime | null
   askGrokTurnState?: AskGrokTurnState | null
@@ -2032,7 +2110,10 @@ export async function executeMurphDynamicToolRequest(input: {
             'the accepted messages span different calendar dates in that timezone; ask the user for an explicit calendar date before retrying',
           )
         default:
-          return toolTextResult(false, 'invalid automation arguments')
+          return invalidDynamicToolArgumentsResult(
+            'invalid_automation_arguments',
+            input.request.validationDigest,
+          )
       }
     }
     case 'invalid-device-arguments':
@@ -2052,7 +2133,10 @@ export async function executeMurphDynamicToolRequest(input: {
     case 'invalid-computer-arguments':
       return toolTextResult(false, 'invalid computer tool arguments')
     case 'invalid-generate-voice-memo-arguments':
-      return toolTextResult(false, 'invalid voice memo generation arguments')
+      return invalidDynamicToolArgumentsResult(
+        'invalid_generate_voice_memo_arguments',
+        input.request.validationDigest,
+      )
     case 'invalid-generate-song-arguments':
       return toolTextResult(false, 'invalid song generation arguments')
     case 'invalid-ask-grok-arguments':
@@ -2082,9 +2166,38 @@ export async function executeMurphDynamicToolRequest(input: {
     case 'invalid-finish-without-reply-arguments':
       return toolTextResult(false, 'invalid no-reply arguments')
     case 'invalid-response-card-arguments':
-      return toolTextResult(false, 'invalid response card arguments')
+      return toolTextResult(
+        false,
+        buildResponseCardValidationFeedback(input.request.validationDigest),
+      )
+    case 'response-card-envelope-too-large':
+      if (input.privateDirectResponseCardAllowed !== true) {
+        return toolTextResult(
+          false,
+          'response cards require a private direct conversation',
+        )
+      }
+      if (input.currentResponseCard !== null && input.currentResponseCard !== undefined) {
+        return toolTextResult(false, 'a response card is already attached')
+      }
+      if ((input.currentResponseMedia ?? []).length > 0) {
+        return toolTextResult(
+          false,
+          'response cards cannot be combined with response media',
+        )
+      }
+      return {
+        ...toolTextResult(
+          true,
+          'workout card envelope too large; full text recovery selected',
+        ),
+        responseCardTextFallbackPatch: { card: input.request.card },
+      }
     case 'invalid-response-media-arguments':
-      return toolTextResult(false, 'invalid response media arguments')
+      return invalidDynamicToolArgumentsResult(
+        'invalid_response_media_arguments',
+        input.request.validationDigest,
+      )
     case 'invalid-send-vault-file-arguments':
       return toolTextResult(false, 'invalid vault file arguments')
     case 'invalid-phone-call-arguments':
@@ -3052,6 +3165,7 @@ export async function executeMurphDynamicToolRequest(input: {
         abortSignal: input.abortSignal ?? null,
         args: input.request.args,
         currentResponseMedia: input.currentResponseMedia ?? [],
+        recordPhaseTiming: input.voiceMemoPhaseTimingRecorder ?? null,
         voiceMemoRuntime: input.voiceMemoRuntime ?? null,
       })
     }
@@ -3063,6 +3177,7 @@ export async function executeMurphDynamicToolRequest(input: {
         abortSignal: input.abortSignal ?? null,
         args: input.request.args,
         currentResponseMedia: input.currentResponseMedia ?? [],
+        recordPhaseTiming: input.voiceMemoPhaseTimingRecorder ?? null,
         turnState: input.generateSongTurnState ?? null,
         voiceMemoRuntime: input.voiceMemoRuntime ?? null,
       })
@@ -6255,6 +6370,16 @@ function toolTextResult(
   }
 }
 
+function invalidDynamicToolArgumentsResult(
+  error: string,
+  validationDigest: SafeToolCallValidationDigest,
+): MurphDynamicToolExecutionResult {
+  return toolTextResult(
+    false,
+    buildToolCallValidationFeedback(validationDigest, { error }),
+  )
+}
+
 function parseDynamicToolCallRequest(
   message: CodexRpcMessage,
 ): ParsedDynamicToolCallRequest | null {
@@ -7055,6 +7180,7 @@ function parseComputerArguments<TArgs>(input: {
 
 function parseAttachResponseCardArguments(
   value: unknown,
+  audience: 'group' | 'private' | null,
 ):
   | { ok: true; card: AssistantResponseCard; groupChallenge: false }
   | {
@@ -7062,27 +7188,56 @@ function parseAttachResponseCardArguments(
       groupChallenge: true
       input: GroupChallengeResponseCardToolInput
     }
-  | { ok: false; validationDigest: SafeToolCallValidationDigest } {
+  | {
+      ok: false
+      reason: 'invalid'
+      validationDigest: SafeToolCallValidationDigest
+    }
+  | {
+      card: CompactTableWorkoutResponseCardV1
+      ok: false
+      reason: 'workout-envelope-too-large'
+    } {
   const schemaName = 'murph.attach_response_card.input'
   const toolName = 'murph.attach_response_card'
-  const parsed = attachResponseCardArgumentsSchema.safeParse(value)
-  if (parsed.success) {
-    return {
-      card: parsed.data.card,
-      groupChallenge: false,
-      ok: true,
+  if (audience !== 'group') {
+    const parsed = attachResponseCardArgumentsSchema.safeParse(value)
+    if (parsed.success) {
+      return {
+        card: parsed.data.card,
+        groupChallenge: false,
+        ok: true,
+      }
     }
-  }
-  if (Object.hasOwn(asRecord(value) ?? {}, 'card')) {
-    return {
-      ok: false,
-      validationDigest: buildDynamicToolValidationDigest({
-        error: parsed.error,
-        rawInput: value,
-        schemaName,
-        schemaRootKeys: ['card'],
-        toolName,
-      }),
+    if (
+      audience === 'private'
+      || Object.hasOwn(asRecord(value) ?? {}, 'card')
+    ) {
+      const semanticWorkout =
+        attachSemanticWorkoutResponseCardArgumentsSchema.safeParse(value)
+      if (semanticWorkout.success) {
+        return {
+          card: semanticWorkout.data.card,
+          ok: false,
+          reason: 'workout-envelope-too-large',
+        }
+      }
+      const diagnosticError = readAttachResponseCardDiagnosticError(
+        value,
+        parsed.error,
+      )
+      return {
+        ok: false,
+        validationDigest: buildDynamicToolValidationDigest({
+          error: diagnosticError,
+          rawInput: value,
+          schemaName,
+          schemaPaths: attachResponseCardValidationPaths,
+          schemaRootKeys: ['card'],
+          toolName,
+        }),
+        reason: 'invalid',
+      }
     }
   }
   const groupChallengeParsed =
@@ -7090,6 +7245,7 @@ function parseAttachResponseCardArguments(
   if (!groupChallengeParsed.success) {
     return {
       ok: false,
+      reason: 'invalid',
       validationDigest: buildDynamicToolValidationDigest({
         error: groupChallengeParsed.error,
         rawInput: value,
@@ -7109,6 +7265,52 @@ function parseAttachResponseCardArguments(
   }
 }
 
+function readAttachResponseCardDiagnosticError(
+  value: unknown,
+  fallbackError: z.ZodError,
+): z.ZodError {
+  const card = asRecord(asRecord(value)?.card)
+  if (card?.kind === 'daily_nutrition') {
+    const parsed = attachDailyNutritionResponseCardArgumentsSchema.safeParse(value)
+    return parsed.success ? fallbackError : parsed.error
+  }
+  if (card?.kind === 'compact_table') {
+    const hasExplicitWorkoutShape = Object.hasOwn(card, 'workout')
+    const hasWorkoutTracking = asRecord(card.tracking)?.kind === 'workout'
+    const hasGenericShape = ['rowHeader', 'columns', 'rows']
+      .some((key) => Object.hasOwn(card, key))
+    if (
+      (hasExplicitWorkoutShape && hasGenericShape)
+      || (!hasGenericShape && !hasExplicitWorkoutShape && !hasWorkoutTracking)
+    ) {
+      return new z.ZodError([{
+        code: z.ZodIssueCode.custom,
+        message: 'Choose one compact-table card shape.',
+        params: {
+          murphExpectedShape: 'compact_table.generic_or_workout_shape',
+        },
+        path: ['card'],
+      }])
+    }
+    const diagnosticSchema = hasGenericShape
+      ? attachCompactTableGenericResponseCardArgumentsSchema
+      : attachCompactTableWorkoutResponseCardArgumentsSchema
+    const parsed = diagnosticSchema.safeParse(value)
+    return parsed.success ? fallbackError : parsed.error
+  }
+  if (card) {
+    return new z.ZodError([{
+      code: z.ZodIssueCode.custom,
+      message: 'Choose a supported response-card family.',
+      params: {
+        murphExpectedShape: 'daily_nutrition_or_compact_table',
+      },
+      path: ['card', 'kind'],
+    }])
+  }
+  return fallbackError
+}
+
 function parseAttachExerciseRoutineCardArguments(
   value: unknown,
 ):
@@ -7124,6 +7326,7 @@ function parseAttachExerciseRoutineCardArguments(
         error: parsed.error,
         rawInput: value,
         schemaName,
+        schemaPaths: attachExerciseRoutineCardValidationPaths,
         schemaRootKeys: readZodObjectRootKeys(
           attachExerciseRoutineCardArgumentsSchema,
         ),
@@ -7174,46 +7377,24 @@ function parseAttachResponseMediaArguments(
   | { ok: false; validationDigest: SafeToolCallValidationDigest } {
   const schemaName = 'murph.attach_response_media.input'
   const toolName = 'murph.attach_response_media'
-  try {
-    const parsed = attachResponseMediaArgumentsSchema.safeParse(value)
-    if (!parsed.success) {
-      return {
-        ok: false,
-        validationDigest: buildDynamicToolValidationDigest({
-          error: parsed.error,
-          rawInput: value,
-          schemaName,
-          schemaRootKeys: readZodObjectRootKeys(attachResponseMediaArgumentsSchema),
-          toolName,
-        }),
-      }
-    }
-
-    const media = normalizeAssistantResponseMediaList(parsed.data.media)
-    const unsupportedMedia = media.find(
-      (item) => item.kind !== 'image' && item.kind !== 'vault_image',
-    )
-    if (unsupportedMedia) {
-      throw new Error(
-        `murph.attach_response_media only supports image or vault_image media, received ${unsupportedMedia.kind}.`,
-      )
-    }
-
-    return {
-      ok: true,
-      media,
-    }
-  } catch (error) {
+  const parsed = attachResponseMediaArgumentsSchema.safeParse(value)
+  if (!parsed.success) {
     return {
       ok: false,
       validationDigest: buildDynamicToolValidationDigest({
-        error,
+        error: parsed.error,
         rawInput: value,
         schemaName,
+        schemaPaths: attachResponseMediaValidationPaths,
         schemaRootKeys: readZodObjectRootKeys(attachResponseMediaArgumentsSchema),
         toolName,
       }),
     }
+  }
+
+  return {
+    ok: true,
+    media: dedupeAssistantResponseMediaList(parsed.data.media),
   }
 }
 
@@ -7221,6 +7402,7 @@ function buildDynamicToolValidationDigest(input: {
   error: unknown
   rawInput: unknown
   schemaName: string
+  schemaPaths?: readonly string[]
   schemaRootKeys: readonly string[]
   toolName: string
 }): SafeToolCallValidationDigest {
@@ -7229,6 +7411,7 @@ function buildDynamicToolValidationDigest(input: {
     rawInput: input.rawInput,
     requestedToolName: input.toolName,
     schemaName: input.schemaName,
+    schemaPaths: input.schemaPaths,
     schemaRootKeys: input.schemaRootKeys,
     toolName: input.toolName,
   })

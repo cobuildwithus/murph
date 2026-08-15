@@ -118,6 +118,11 @@ retry; Temporal remains the only durable retry and reconciliation owner.
 - [x] Upgrade the workspace ReviewGPT dependency from `0.5.127` to the latest
   published `0.5.131`; the dedicated ReviewGPT/Frog guard suite and frozen
   lockfile check pass.
+- [x] Reconcile the branch once with current `main`. The only conflicts were
+  the workspace manifest and lockfile; the resolution keeps `main`'s newer
+  repo tooling together with ReviewGPT `0.5.131`. Post-merge Web, Cloudflare,
+  hosted-local harness, workflow-guard, typecheck, and frozen-lockfile checks
+  pass.
 - [ ] Resolve the exact-head final Review GPT gate and CI, archive this plan,
   and push the final reviewed head.
 
@@ -169,6 +174,13 @@ retry; Temporal remains the only durable retry and reconciliation owner.
   `opaque_identifier` rule and therefore dropped the accepted runtime attempt
   id. Adding that bounded rule preserved the complete outcome, and the rerun
   passed end to end.
+- The first round-three browser submission on the pre-base-update head did not
+  retain its repository ZIP. It is preserved only as an unusable recovery
+  artifact and does not count as a review round. The required current-base
+  reconciliation then made a new exact-head full audit necessary.
+- Current `main` moved the data-privacy route while a generated `.next` type
+  stub still named its old location. Removing only that generated tree made
+  Web typecheck pass on the merged source without another code change.
 
 ## Decision log
 

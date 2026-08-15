@@ -27,7 +27,10 @@ import type {
 import {
   renderAssistantResponseCardText,
   renderAssistantResponseCardTranscriptText,
+  renderAssistantWorkoutResponseCardText,
+  renderAssistantWorkoutResponseCardTranscriptText,
   type AssistantResponseCard,
+  type CompactTableWorkoutResponseCardV1,
 } from '@murphai/operator-config/assistant-response-cards'
 import type {
   CodexNormalizedEvent,
@@ -64,8 +67,8 @@ import {
   resolveSupportedCodexAppServerApprovalPolicy,
 } from './assistant-codex/app-server-requests.js'
 import {
-  buildRuntimeIssueInputForFailedCodexAction,
   createCodexActionDiagnosticsReducer,
+  createCodexActionRuntimeIssueTracker,
 } from './assistant-codex/action-diagnostics.js'
 import type {
   MurphDynamicToolFinalActionPatch,
@@ -79,6 +82,7 @@ import {
   type AssistantStyleTurnSettingsOverlay,
 } from './assistant-codex/dynamic-tool-catalog.js'
 import type {
+  VoiceMemoPhaseTiming,
   VoiceMemoToolRuntime,
 } from './assistant-codex/generate-voice-memo-tool.js'
 import {
@@ -233,6 +237,10 @@ const CODEX_TRANSPORT_DIAGNOSTICS_TRACE_SCHEMA =
   'murph.assistant-codex-transport-diagnostics.v1'
 const CODEX_TRANSPORT_DIAGNOSTICS_TRACE_TYPE =
   'assistant.codex.transport_diagnostics'
+const CODEX_GENERATED_AUDIO_PHASE_TIMING_TRACE_SCHEMA =
+  'murph.assistant-codex-generated-audio-phase-timing.v1'
+const CODEX_GENERATED_AUDIO_PHASE_TIMING_TRACE_TYPE =
+  'assistant.codex.generated_audio_phase_timing'
 const CODEX_APP_SERVER_STARTUP_STDERR_MAX_LENGTH = 16_384
 // Bound on distinct subagent threads whose token usage is tracked per parent
 // turn. Far above any sane spawn fan-out; threads past the cap are ignored.
@@ -638,6 +646,7 @@ export interface CodexAppServerResponseSegment {
 interface CodexAppServerTrailingResponseCandidate
   extends Omit<CodexAppServerResponseSegment, 'transcriptResponse'> {
   card: AssistantResponseCard | null
+  cardTextFallback: CompactTableWorkoutResponseCardV1 | null
 }
 
 export type CodexAppServerSteerInput = {
@@ -3154,6 +3163,7 @@ async function runCodexAppServerTurnOnProcess(
   let lastEventErrorInfo: CodexStructuredErrorInfo | null = null
   let responseMedia: AssistantResponseMedia[] = []
   let responseCard: AssistantResponseCard | null = null
+  let responseCardTextFallback: CompactTableWorkoutResponseCardV1 | null = null
   const assistantStyleSettingsOverlay: AssistantStyleTurnSettingsOverlay = {
     settings: {},
   }
@@ -3208,6 +3218,7 @@ async function runCodexAppServerTurnOnProcess(
   const providerActionItemIds = new Set<string>()
   const jsonEvents: unknown[] = []
   const runtimeIssueInputs: AssistantRuntimeIssueInput[] = []
+  const actionRuntimeIssueTracker = createCodexActionRuntimeIssueTracker()
   let computerToolsLockedAfterUserPause = false
   const requiredVaultFileApprovalUrls: string[] = []
   const requiredAutomationLocalAtClarifications =
@@ -3710,10 +3721,18 @@ async function runCodexAppServerTurnOnProcess(
 
     const response = trailingSteerCandidate.card
       ? renderAssistantResponseCardText(trailingSteerCandidate.card)
-      : trailingSteerCandidate.response
+      : trailingSteerCandidate.cardTextFallback
+        ? renderAssistantWorkoutResponseCardText(
+            trailingSteerCandidate.cardTextFallback,
+          )
+        : trailingSteerCandidate.response
     const transcriptResponse = trailingSteerCandidate.card
       ? renderAssistantResponseCardTranscriptText(trailingSteerCandidate.card)
-      : response
+      : trailingSteerCandidate.cardTextFallback
+        ? renderAssistantWorkoutResponseCardTranscriptText(
+            trailingSteerCandidate.cardTextFallback,
+          )
+        : response
     precedingAgentMessageSegments.push({
       deliveryContextOrdinal: trailingSteerCandidate.deliveryContextOrdinal,
       media: [...trailingSteerCandidate.media],
@@ -3916,6 +3935,12 @@ async function runCodexAppServerTurnOnProcess(
         'Response media cannot be combined with a response card.',
       )
     }
+    if (responseCardTextFallback !== null && nextMedia.length > 0) {
+      throw new VaultCliError(
+        'ASSISTANT_RESPONSE_CARD_MEDIA_CONFLICT',
+        'Response media cannot be combined with response card text recovery.',
+      )
+    }
     responseMedia = nextMedia
   }
 
@@ -3944,6 +3969,12 @@ async function runCodexAppServerTurnOnProcess(
         'Only one response card may be attached to a final response.',
       )
     }
+    if (responseCardTextFallback !== null) {
+      throw new VaultCliError(
+        'ASSISTANT_RESPONSE_CARD_LIMIT_REACHED',
+        'Only one response card outcome may be attached to a final response.',
+      )
+    }
     if (responseMedia.length > 0) {
       throw new VaultCliError(
         'ASSISTANT_RESPONSE_CARD_MEDIA_CONFLICT',
@@ -3957,6 +3988,46 @@ async function runCodexAppServerTurnOnProcess(
       )
     }
     responseCard = card
+  }
+
+  const applyResponseCardTextFallbackPatch = (
+    card: CompactTableWorkoutResponseCardV1,
+    deliveryContextOrdinal: number,
+  ): void => {
+    if (
+      deliveryContextOrdinal !== 0 ||
+      currentDeliveryContextOrdinal() !== deliveryContextOrdinal
+    ) {
+      throw new VaultCliError(
+        'ASSISTANT_RESPONSE_CARD_CONTEXT_ADVANCED',
+        'Response card text recovery cannot attach after accepted input advances the response context.',
+      )
+    }
+    if (hasAcceptedNoReplyPatchForDeliveryContext(deliveryContextOrdinal)) {
+      throw new VaultCliError(
+        'ASSISTANT_RESPONSE_CARD_AFTER_NO_REPLY',
+        'Response card text recovery cannot attach after finish_without_reply.',
+      )
+    }
+    if (responseCard !== null || responseCardTextFallback !== null) {
+      throw new VaultCliError(
+        'ASSISTANT_RESPONSE_CARD_LIMIT_REACHED',
+        'Only one response card outcome may be attached to a final response.',
+      )
+    }
+    if (responseMedia.length > 0) {
+      throw new VaultCliError(
+        'ASSISTANT_RESPONSE_CARD_MEDIA_CONFLICT',
+        'Response card text recovery cannot be combined with response media.',
+      )
+    }
+    if (requiredVaultFileApprovalUrls.length > 0) {
+      throw new VaultCliError(
+        'ASSISTANT_RESPONSE_CARD_VAULT_FILE_CONFLICT',
+        'Response card text recovery cannot replace a required vault-file approval link.',
+      )
+    }
+    responseCardTextFallback = card
   }
 
   const canApplyNoReplyPatch = (deliveryContextOrdinal: number): boolean => {
@@ -3978,6 +4049,9 @@ async function runCodexAppServerTurnOnProcess(
       return false
     }
     if (responseCard !== null) {
+      return false
+    }
+    if (responseCardTextFallback !== null) {
       return false
     }
     if (
@@ -4176,6 +4250,11 @@ async function runCodexAppServerTurnOnProcess(
         automationRelativeDateReferenceWindows[
           dynamicToolRequestDeliveryContextOrdinal
         ] ?? null,
+      responseCardAudience: input.groupConversation === true
+        ? 'group'
+        : input.groupConversation === false
+          ? 'private'
+          : null,
     })
     if (!dynamicToolRequest) {
       denyUnsupportedCodexServerRequest({
@@ -4568,7 +4647,7 @@ async function runCodexAppServerTurnOnProcess(
           hostedToolContext,
           materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts ?? null,
           currentResponseMedia: responseMedia,
-          currentResponseCard: responseCard,
+          currentResponseCard: responseCard ?? responseCardTextFallback,
           groupChallengeResponseCardAllowed:
             input.groupConversation === true &&
             input.dynamicTools.some((tool) =>
@@ -4593,6 +4672,18 @@ async function runCodexAppServerTurnOnProcess(
           requireHostedPrivateImageDelivery:
             input.requireHostedPrivateImageDelivery ?? false,
           vaultRoot: input.vaultRoot ?? null,
+          voiceMemoPhaseTimingRecorder:
+            (dynamicToolRequest.kind === 'generate-voice-memo' ||
+              dynamicToolRequest.kind === 'generate-song') &&
+            input.onTraceEvent
+              ? (timing) => {
+                  emitCodexGeneratedAudioPhaseTimingTrace({
+                    codexThreadId,
+                    onTraceEvent: input.onTraceEvent,
+                    timing,
+                  })
+                }
+              : null,
           voiceMemoRuntime:
             dynamicToolRequest.kind === 'generate-voice-memo' ||
             dynamicToolRequest.kind === 'generate-song'
@@ -4658,6 +4749,26 @@ async function runCodexAppServerTurnOnProcess(
         try {
           applyResponseCardPatch(
             result.responseCardPatch.card,
+            dynamicToolRequestDeliveryContextOrdinal,
+          )
+        } catch {
+          void tryWriteRpcMessage({
+            id: requestId,
+            result: {
+              success: false,
+              contentItems: [{
+                type: 'inputText',
+                text: 'response card unavailable for this final response',
+              }],
+            },
+          })
+          return
+        }
+      }
+      if (result.responseCardTextFallbackPatch) {
+        try {
+          applyResponseCardTextFallbackPatch(
+            result.responseCardTextFallbackPatch.card,
             dynamicToolRequestDeliveryContextOrdinal,
           )
         } catch {
@@ -4864,7 +4975,8 @@ async function runCodexAppServerTurnOnProcess(
     lastEventErrorInfo = extractCodexErrorInfo(message) ?? lastEventErrorInfo
 
     const normalizedEvent = normalizeCodexEvent(message)
-    const runtimeIssueInput = buildRuntimeIssueInputForFailedCodexAction({
+    const runtimeIssueInput = actionRuntimeIssueTracker.recordEvent({
+      activeTurnId: turnId,
       normalizedEvent,
       rawEvent: message,
     })
@@ -4990,6 +5102,7 @@ async function runCodexAppServerTurnOnProcess(
           response: completedFinalAgentMessage,
           media: [...responseMedia],
           card: responseCard,
+          cardTextFallback: responseCardTextFallback,
           ...(completedResponseTargetInputId
             ? { targetInputId: completedResponseTargetInputId }
             : {}),
@@ -5000,6 +5113,7 @@ async function runCodexAppServerTurnOnProcess(
         responseMedia = []
       }
       responseCard = null
+      responseCardTextFallback = null
       completedUserMessageOrdinal += 1
     }
 
@@ -5697,7 +5811,8 @@ async function runCodexAppServerTurnOnProcess(
         (
           normalizeNullableString(extractedFinalMessage) !== null ||
           responseMedia.length > 0 ||
-          responseCard !== null
+          responseCard !== null ||
+          responseCardTextFallback !== null
         )
       )
     )
@@ -5732,6 +5847,19 @@ async function runCodexAppServerTurnOnProcess(
         ? latestDeliveryContextOrdinal
         : finalTrailingSteerCandidate?.deliveryContextOrdinal ??
           latestDeliveryContextOrdinal
+  const finalResponseCardTextFallback =
+    latestFinalActionPatch?.kind === 'none'
+      ? responseCardTextFallback
+      : suppressTrailingSteerCandidateForEarlierNoReply
+        ? responseCardTextFallback
+        : finalTrailingSteerCandidate?.cardTextFallback
+          ?? responseCardTextFallback
+  if (finalResponseCardTextFallback !== null && finalResponseMedia.length > 0) {
+    throw new VaultCliError(
+      'ASSISTANT_RESPONSE_CARD_MEDIA_CONFLICT',
+      'Response card text recovery cannot be combined with response media.',
+    )
+  }
   const finalActionPatch = resolveFinalActionPatch(finalDeliveryContextOrdinal)
   const requiredUserVisibleOutput = hasRequiredUserVisibleOutput()
   const noReplySelected =
@@ -5745,7 +5873,9 @@ async function runCodexAppServerTurnOnProcess(
       : selectedFinalMessage
   const semanticFinalMessage = finalResponseCard
     ? renderAssistantResponseCardText(finalResponseCard)
-    : modelFinalMessage
+    : finalResponseCardTextFallback
+      ? renderAssistantWorkoutResponseCardText(finalResponseCardTextFallback)
+      : modelFinalMessage
   const requiredAutomationLocalAtClarificationsInOrder =
     [...requiredAutomationLocalAtClarifications.values()]
   const deliveredFinalResponseCard =
@@ -5764,8 +5894,12 @@ async function runCodexAppServerTurnOnProcess(
       ? requiredAutomationLocalAtClarificationsInOrder.length === 0
         ? renderAssistantResponseCardTranscriptText(finalResponseCard)
         : renderAssistantResponseCardText(finalResponseCard)
-      : normalizeNullableString(modelFinalMessage) ??
-        (finalResponseMedia.length > 0 ? '' : null),
+      : finalResponseCardTextFallback
+        ? renderAssistantWorkoutResponseCardTranscriptText(
+            finalResponseCardTextFallback,
+          )
+        : normalizeNullableString(modelFinalMessage) ??
+          (finalResponseMedia.length > 0 ? '' : null),
     requiredAutomationLocalAtClarificationsInOrder,
   )
   if (
@@ -5785,8 +5919,11 @@ async function runCodexAppServerTurnOnProcess(
     ))
   const finalHasDeliverableOutput =
     normalizeNullableString(finalMessage) !== null ||
-    (!noReplySelected &&
-      (finalResponseMedia.length > 0 || deliveredFinalResponseCard !== null))
+    (!noReplySelected && (
+      finalResponseMedia.length > 0 ||
+      deliveredFinalResponseCard !== null ||
+      finalResponseCardTextFallback !== null
+    ))
 
   return {
     acceptedNoReplyDeliveryContextOrdinals:
@@ -5942,6 +6079,42 @@ function emitCodexSuppressedFinalMessageTrace(input: {
   }
 }
 
+function emitCodexGeneratedAudioPhaseTimingTrace(input: {
+  codexThreadId: string | null
+  onTraceEvent?: ((event: AssistantProviderTraceEvent) => void) | null
+  timing: VoiceMemoPhaseTiming
+}): void {
+  if (!input.onTraceEvent) {
+    return
+  }
+
+  try {
+    input.onTraceEvent({
+      codexThreadId: input.codexThreadId,
+      rawEvent: {
+        schema: CODEX_GENERATED_AUDIO_PHASE_TIMING_TRACE_SCHEMA,
+        type: CODEX_GENERATED_AUDIO_PHASE_TIMING_TRACE_TYPE,
+        generatedAudioDeliveryMode: input.timing.deliveryMode,
+        ...(input.timing.generationDurationMs === undefined
+          ? {}
+          : {
+              generatedAudioGenerationDurationMs:
+                input.timing.generationDurationMs,
+            }),
+        generatedAudioKind: input.timing.mediaKind,
+        generatedAudioOutcome: input.timing.outcome,
+        generatedAudioTerminalPhase: input.timing.terminalPhase,
+        ...(input.timing.uploadDurationMs === undefined
+          ? {}
+          : { generatedAudioUploadDurationMs: input.timing.uploadDurationMs }),
+      },
+      updates: [],
+    })
+  } catch {
+    // Phase timing is diagnostic-only and must not block assistant turns.
+  }
+}
+
 function notifyCodexAppServerProviderRequestStartedBestEffort(input: {
   hook?: ((event: AssistantProviderRequestStartedEvent) => Promise<void> | void) | null
   startedAt: string
@@ -6015,6 +6188,7 @@ function isSerializedDynamicToolRequest(
     request.kind === 'generate-song' ||
     request.kind === 'attach-group-challenge-response-card' ||
     request.kind === 'attach-response-card' ||
+    request.kind === 'response-card-envelope-too-large' ||
     request.kind === 'attach-response-media' ||
     request.kind === 'send-vault-file' ||
     request.kind === 'pending-vault-files-list' ||
@@ -6041,6 +6215,7 @@ function isResponseAttachmentDynamicToolRequest(
 ): boolean {
   return request.kind === 'attach-group-challenge-response-card' ||
     request.kind === 'attach-response-card' ||
+    request.kind === 'response-card-envelope-too-large' ||
     request.kind === 'attach-response-media' ||
     request.kind === 'generate-image' ||
     request.kind === 'generate-song' ||

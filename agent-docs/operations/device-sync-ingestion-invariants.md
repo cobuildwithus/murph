@@ -334,9 +334,10 @@ drain/batch service seam in `packages/device-syncd/src/service.ts`.
    confirm the connection-wide disconnect, then reconnect Garmin. That reset can
    disconnect other wearables on the same Junction connection, so the UI and
    assistant must explain the scope before confirmation. If provider-side
-   deregistration fails, local disconnect still completes, but the member must
-   remove the connection in the Garmin account before reconnecting.
-   That unfinished-reset state rides the disconnected connection's existing
+   deregistration fails, the cleanup credential and source ownership remain
+   nonterminal so disconnect can retry, and the member must remove the
+   connection in the Garmin account before reconnecting.
+   That unfinished-reset state rides the connection's existing
    durable error code (`HISTORICAL_RESET_REVOKE_FAILED`), so the settings and
    connect surfaces keep projecting the manual-removal guidance across refresh
    until a fresh established connection clears it; there is no separate warning

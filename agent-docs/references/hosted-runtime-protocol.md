@@ -1588,8 +1588,10 @@ The same existing `provider_started` phase breakdown may subdivide
 readiness, input selection, pass setup, candidate scan, group/operation scope,
 terminal evidence, session preflight, cross-session context, prompt preparation,
 and service handoff. When present, those ten values sum exactly to their parent;
-outbox and receipt-scan timings remain nested within cross-session context, and
-the subdivision adds no I/O or awaited reporting work. The emitter omits a
+outbox timing remains nested within cross-session context. Route-scoped
+cross-session consumption reads one exact route record and at most one exact
+pending receipt; it never inventories receipts on this foreground path. The
+subdivision adds no reporting I/O or awaited reporting work. The emitter omits a
 partial or non-additive subdivision, and Web's best-effort parser drops the
 malformed phase breakdown without losing the core provider-start milestone.
 The complete subdivision is emitted only when the provider-producing group is

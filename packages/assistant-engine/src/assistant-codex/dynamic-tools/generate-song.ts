@@ -10,6 +10,7 @@ import type { SafeToolCallValidationDigest } from '../../assistant/tool-validati
 import {
   executeGenerateSongTool,
   type GenerateSongToolArgs,
+  type VoiceMemoPhaseTimingRecorder,
   type VoiceMemoToolRuntime,
 } from '../generate-voice-memo-tool.js'
 import {
@@ -86,6 +87,7 @@ export async function executeGenerateSongDynamicTool(input: {
   abortSignal?: AbortSignal | null
   args: GenerateSongToolArgs
   currentResponseMedia?: readonly AssistantResponseMedia[] | null
+  recordPhaseTiming?: VoiceMemoPhaseTimingRecorder | null
   turnState?: GenerateSongTurnState | null
   voiceMemoRuntime?: VoiceMemoToolRuntime | null
 }): Promise<DynamicToolResult> {
@@ -111,6 +113,7 @@ export async function executeGenerateSongDynamicTool(input: {
           }
         : input.args,
       currentResponseMedia: input.currentResponseMedia ?? [],
+      recordPhaseTiming: input.recordPhaseTiming ?? null,
       runtime: input.voiceMemoRuntime ?? null,
     }),
   )

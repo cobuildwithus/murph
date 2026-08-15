@@ -6,6 +6,8 @@ import {
 import {
   buildHostedMailboxPayloadScope,
   buildHostedMailboxPayloadSecureBoxAad,
+  HOSTED_MAILBOX_PREPARED_PAYLOAD_AAD_SEQUENCE,
+  HOSTED_MAILBOX_PREPARED_PAYLOAD_CIPHERTEXT_PREFIX,
   type HostedMailboxPayloadCryptoMetadata,
 } from "@murphai/hosted-execution/runtime-control";
 
@@ -63,15 +65,29 @@ export async function decryptHostedMailboxPayloadCiphertext(input: {
   environment: HostedMailboxEncryptionEnvironment;
   metadata: HostedMailboxPayloadCryptoMetadata;
 }): Promise<unknown> {
-  const envelope = parseSerializedHostedSecureBoxEnvelope(input.ciphertext);
+  const prepared = input.ciphertext.startsWith(
+    HOSTED_MAILBOX_PREPARED_PAYLOAD_CIPHERTEXT_PREFIX,
+  );
+  const ciphertext = prepared
+    ? input.ciphertext.slice(
+      HOSTED_MAILBOX_PREPARED_PAYLOAD_CIPHERTEXT_PREFIX.length,
+    )
+    : input.ciphertext;
+  const metadata = prepared
+    ? {
+      ...input.metadata,
+      laneSeq: HOSTED_MAILBOX_PREPARED_PAYLOAD_AAD_SEQUENCE,
+    }
+    : input.metadata;
+  const envelope = parseSerializedHostedSecureBoxEnvelope(ciphertext);
   const ingressRoot = await input.environment.readIngressRoot(envelope.rootKeyId);
-  const scope = buildHostedMailboxPayloadScope(input.metadata.payloadStorage);
+  const scope = buildHostedMailboxPayloadScope(metadata.payloadStorage);
   const aad = buildHostedSecureBoxAad({
-    ...buildHostedMailboxPayloadSecureBoxAad(input.metadata),
+    ...buildHostedMailboxPayloadSecureBoxAad(metadata),
     domain: "ingress",
     lane: "mailbox-payload",
     scope,
-    userId: input.metadata.userId,
+    userId: metadata.userId,
   });
   const plaintext = await openHostedSecureBox({
     aad,
