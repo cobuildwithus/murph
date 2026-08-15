@@ -3531,19 +3531,6 @@ async function withHostedAutoReplyRouteMaintenanceAfterDelivery(input: {
     ...input.result,
     afterCheckpoint: async () => {
       const postDelivery = await afterDeliveryCheckpoint();
-      const afterDurableCheckpoint = postDelivery?.afterDurableCheckpoint ?? null;
-      if (postDelivery && afterDurableCheckpoint) {
-        return {
-          ...postDelivery,
-          afterDurableCheckpoint: composeHostedAssistantPhaseDurableCheckpointEffects(
-            afterDurableCheckpoint,
-            async () => {
-              const changed = await maintainHostedAutoReplyRouteState(input.input);
-              return changed ? { requiresFollowUpCheckpoint: true } : null;
-            },
-          ),
-        };
-      }
       const changed = await maintainHostedAutoReplyRouteState(input.input);
       return postDelivery ?? (changed
         ? { checkpointReason: "assistant_runtime_commit" }
