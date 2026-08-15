@@ -56,6 +56,7 @@ const mocks = vi.hoisted(() => ({
   linqProviderFetchAttemptCount: vi.fn(() => 1),
   markAssistantOutboxIntentMirrorTerminalById: vi.fn(),
   normalizeAssistantDeliveryError: vi.fn(),
+  persistAssistantPrivateCompletionContinuityAfterDelivery: vi.fn(),
   readAssistantAutomationState: vi.fn(),
   readAssistantOutboxIntent: vi.fn(),
   readAssistantOutboxIntentMirrorState: vi.fn(),
@@ -110,6 +111,8 @@ vi.mock("@murphai/assistant-engine", async () => {
     markAssistantOutboxIntentMirrorTerminalById:
       mocks.markAssistantOutboxIntentMirrorTerminalById,
     normalizeAssistantDeliveryError: mocks.normalizeAssistantDeliveryError,
+    persistAssistantPrivateCompletionContinuityAfterDelivery:
+      mocks.persistAssistantPrivateCompletionContinuityAfterDelivery,
     readAssistantAutomationState: mocks.readAssistantAutomationState,
     readAssistantOutboxIntent: mocks.readAssistantOutboxIntent,
     readAssistantOutboxIntentMirrorState:
@@ -9010,14 +9013,15 @@ describe("hosted runtime callbacks", () => {
           replyToMessageId: null,
           target,
         });
+        const persistedDelivery = createDelivery({
+          idempotencyKey,
+          messageLength: responseText.length,
+          providerMessageId: delivery.providerMessageId,
+          target: delivery.target,
+          targetKind: "thread",
+        });
         return createDispatchResult({
-          delivery: createDelivery({
-            idempotencyKey,
-            messageLength: responseText.length,
-            providerMessageId: delivery.providerMessageId,
-            target: delivery.target,
-            targetKind: "thread",
-          }),
+          delivery: persistedDelivery,
           status: "sent",
         });
       },
@@ -9026,6 +9030,8 @@ describe("hosted runtime callbacks", () => {
       async () => undefined,
     );
     const providerFetch = vi.fn<typeof fetch>();
+    mocks.persistAssistantPrivateCompletionContinuityAfterDelivery
+      .mockRejectedValueOnce(new Error("Synthetic local continuity interruption."));
 
     await expect(drainHostedPreparedAssistantDeliveries({
       assistantDeliveryEffects: [effect],
@@ -9067,6 +9073,32 @@ describe("hosted runtime callbacks", () => {
     expect(
       assertAssistantAskPrivateCompletionAuthority.mock.invocationCallOrder[0],
     ).toBeLessThan(providerFetch.mock.invocationCallOrder[0] ?? 0);
+    expect(
+      providerFetch.mock.invocationCallOrder[0],
+    ).toBeLessThan(
+      mocks.persistAssistantPrivateCompletionContinuityAfterDelivery.mock
+        .invocationCallOrder[0] ?? 0,
+    );
+    expect(
+      mocks.persistAssistantPrivateCompletionContinuityAfterDelivery,
+    ).toHaveBeenCalledWith({
+      intent: expect.objectContaining({
+        delivery: expect.objectContaining({
+          providerMessageId: "provider_private_telegram_123",
+        }),
+        intentId: storedIntent.intentId,
+        status: "sent",
+      }),
+      vault: HOSTED_WAKE.vaultRoot,
+    });
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        component: "assistant-delivery",
+        level: "warn",
+        message: "Hosted private completion continuity persistence failed.",
+        phase: "outbox",
+      }),
+    );
   });
 
   it("pins private Telegram delivery against provider migration", async () => {
@@ -9165,7 +9197,7 @@ describe("hosted runtime callbacks", () => {
       deliveryMayHaveSucceeded: false,
       retryable: false,
     });
-    expect(assertAssistantAskPrivateCompletionAuthority).toHaveBeenCalledOnce();
+    expect(assertAssistantAskPrivateCompletionAuthority).toHaveBeenCalledTimes(2);
     expect(providerFetch).toHaveBeenCalledOnce();
     expect(mocks.sendTelegramMessage).not.toHaveBeenCalled();
   });
@@ -9234,6 +9266,7 @@ describe("hosted runtime callbacks", () => {
     );
     const assertAssistantAskPrivateCompletionAuthority = vi.fn()
       .mockResolvedValueOnce(undefined)
+      .mockResolvedValueOnce(undefined)
       .mockRejectedValueOnce(new VaultCliError(
         "ASSISTANT_ASK_PRIVATE_COMPLETION_ROUTE_STALE",
         "Private Assistant Ask route changed before retry.",
@@ -9268,7 +9301,7 @@ describe("hosted runtime callbacks", () => {
     })).rejects.toMatchObject({
       code: "ASSISTANT_ASK_PRIVATE_COMPLETION_ROUTE_STALE",
     });
-    expect(assertAssistantAskPrivateCompletionAuthority).toHaveBeenCalledTimes(2);
+    expect(assertAssistantAskPrivateCompletionAuthority).toHaveBeenCalledTimes(3);
     expect(providerFetch).toHaveBeenCalledOnce();
     expect(mocks.sendTelegramMessage).not.toHaveBeenCalled();
   });
@@ -9342,6 +9375,9 @@ describe("hosted runtime callbacks", () => {
     const assertAssistantAskPrivateCompletionAuthority = vi.fn(async () => {
       authorityAttempt += 1;
       if (authorityAttempt === 2) {
+        return;
+      }
+      if (authorityAttempt === 3) {
         throw new VaultCliError(
           "ASSISTANT_ASK_PRIVATE_COMPLETION_ROUTE_STALE",
           "Private Assistant Ask route changed.",
@@ -9366,16 +9402,19 @@ describe("hosted runtime callbacks", () => {
     })).rejects.toMatchObject({
       code: "ASSISTANT_ASK_PRIVATE_COMPLETION_ROUTE_STALE",
     });
-    expect(assertAssistantAskPrivateCompletionAuthority).toHaveBeenCalledTimes(2);
+    expect(assertAssistantAskPrivateCompletionAuthority).toHaveBeenCalledTimes(3);
     expect([
       ...assertAssistantAskPrivateCompletionAuthority.mock.invocationCallOrder
         .map((order) => ({ kind: "authority", order })),
       ...providerFetch.mock.invocationCallOrder
         .map((order) => ({ kind: "provider", order })),
     ].sort((left, right) => left.order - right.order).map(({ kind }) => kind))
-      .toEqual(["authority", "provider", "authority"]);
+      .toEqual(["authority", "authority", "provider", "authority"]);
     expect(providerFetch).toHaveBeenCalledOnce();
     expect(mocks.sendLinqMessage).not.toHaveBeenCalled();
+    expect(
+      mocks.persistAssistantPrivateCompletionContinuityAfterDelivery,
+    ).not.toHaveBeenCalled();
   });
 
   it("does not re-home a missing private Linq thread", async () => {
@@ -9496,7 +9535,7 @@ describe("hosted runtime callbacks", () => {
     expect(mocks.sendLinqMessage).not.toHaveBeenCalled();
   });
 
-  it("terminally expires a private Linq completion that crosses expiry after preflight", async () => {
+  it("persists the group fallback when a private Linq completion crosses expiry", async () => {
     vi.useFakeTimers();
     const completionId = "aask_done_private_linq_expired_at_provider_entry";
     const expiresAt = "2026-04-08T00:15:00.000Z";
@@ -9544,7 +9583,7 @@ describe("hosted runtime callbacks", () => {
     );
     mocks.readAssistantOutboxIntent.mockResolvedValue(storedIntent);
     const assertAssistantAskPrivateCompletionAuthority = vi.fn(
-      async () => undefined,
+      async () => ({ assistantAskFallbackRequired: true }),
     );
     mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(
       async ({ dependencies, dispatchHooks }) => {
@@ -9579,12 +9618,15 @@ describe("hosted runtime callbacks", () => {
         vaultRoot: HOSTED_WAKE.vaultRoot,
         wake: HOSTED_WAKE.wake,
       })).rejects.toMatchObject({
-        code: "ASSISTANT_ASK_PRIVATE_COMPLETION_EXPIRED",
+        code: "ASSISTANT_ASK_PRIVATE_COMPLETION_FALLBACK_PERSISTED",
         context: expect.objectContaining({ retryable: false }),
       });
-      expect(assertAssistantAskPrivateCompletionAuthority).not.toHaveBeenCalled();
+      expect(assertAssistantAskPrivateCompletionAuthority).toHaveBeenCalledOnce();
       expect(mocks.sendLinqMessage).not.toHaveBeenCalled();
       expect(mocks.saveAssistantOutboxIntentIfUnchanged).not.toHaveBeenCalled();
+      expect(
+        mocks.persistAssistantPrivateCompletionContinuityAfterDelivery,
+      ).not.toHaveBeenCalled();
     } finally {
       vi.useRealTimers();
     }
@@ -11182,12 +11224,11 @@ describe("hosted runtime callbacks", () => {
     expect(entries).toHaveLength(1);
     expect(entries[0]).toMatchObject({
       component: "outbox",
-      errorCode: "syntax_error",
+      errorCode: "LINQ_API_REQUEST_FAILED",
       eventCode: "outbox.linq_app_card_fallback_error",
       level: "warn",
       phase: "outbox",
       redactedJson: {
-        errorName: "SyntaxError",
         fallbackKind: "text",
         reason: "capability_check_failed",
       },

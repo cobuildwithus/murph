@@ -12,7 +12,7 @@ description: One-pass seam audit prompt for the apps/cloudflare user-runner seam
 
 ## Focus
 
-- hosted workspace nudge flow, `nextRuntimeWakeAt`, timer wake persistence, and runtime callback fencing
+- hosted workspace nudge flow, retained device-sync system-mailbox wakes, timer wake persistence, and runtime callback fencing
 - retry, replay, poison, and resume behavior around hosted workspace-runtime work
 - Durable Object coordination staying non-authoritative relative to web-owned hosted-runtime state
 

@@ -35,6 +35,25 @@ function buildSleepSessionPayload(dayOfMonth: number) {
   }
 }
 
+function buildActivitySessionPayload() {
+  return {
+    kind: 'activity_session',
+    occurredAt: '2026-03-13T17:00:00.000Z',
+    source: 'import',
+    title: 'Strength training',
+    activityType: 'strength-training',
+    workout: {
+      exercises: [
+        {
+          name: 'Squat',
+          order: 1,
+          sets: [{ order: 1, reps: 5 }],
+        },
+      ],
+    },
+  }
+}
+
 function toJsonl(payloads: Array<Record<string, unknown>>): string {
   return `${payloads.map((payload) => JSON.stringify(payload)).join('\n')}\n`
 }
@@ -140,6 +159,39 @@ test('event import-jsonl accepts stdin and rejects invalid lines atomically', as
     throw new Error('expected the unparsable batch to fail')
   }
   assert.equal(unparsableImport.error.code, 'invalid_payload')
+})
+
+test('event import-jsonl requires activity-session duration before writing', async () => {
+  const workDir = await mkdtemp(path.join(tmpdir(), 'murph-cli-import-jsonl-workout-'))
+  const vaultRoot = path.join(workDir, 'vault')
+  await runCli(['init', '--vault', vaultRoot])
+
+  const invalidImport = await runCli<EventImportJsonlResult>(
+    ['event', 'import-jsonl', '--input', '-', '--apply', '--vault', vaultRoot],
+    { stdin: toJsonl([buildActivitySessionPayload()]) },
+  )
+
+  assert.equal(invalidImport.ok, false)
+  if (invalidImport.ok) {
+    throw new Error('expected durationless activity session to fail')
+  }
+  assert.equal(invalidImport.error.code, 'contract_invalid')
+
+  const listAfterInvalid = await runCli<{ count: number }>(
+    ['event', 'list', '--kind', 'activity_session', '--vault', vaultRoot],
+  )
+  assert.equal(requireData(listAfterInvalid).count, 0)
+
+  const validImport = await runCli<EventImportJsonlResult>(
+    ['event', 'import-jsonl', '--input', '-', '--apply', '--vault', vaultRoot],
+    {
+      stdin: toJsonl([
+        { ...buildActivitySessionPayload(), durationMinutes: 45 },
+      ]),
+    },
+  )
+  assert.equal(validImport.ok, true)
+  assert.equal(requireData(validImport).createdCount, 1)
 })
 
 // The CLI error envelope only carries code/message, so per-line failure

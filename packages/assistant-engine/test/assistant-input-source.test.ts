@@ -126,6 +126,7 @@ describe('store-backed assistant input source', () => {
     expect(result.inputs).toHaveLength(1)
     expect(result.inputs[0]).toMatchObject({
       acceptedInput: {
+        acceptedAt: '2026-04-22T10:00:01.000Z',
         id: stored.inputId,
         source: 'assistant-input',
         captureIds: [],
@@ -181,6 +182,38 @@ describe('store-backed assistant input source', () => {
         usageRunningLow: true,
       }],
     ]))
+  })
+
+  it('uses occurredAt only when a legacy stored event has no receipt timestamp', async () => {
+    const { vaultRoot } = await createAssistantInputSourceVault(
+      'assistant-input-source-legacy-reference-',
+    )
+    const stored = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: {
+        content: {
+          text: 'legacy input text',
+        },
+        occurredAt: '2026-04-22T10:00:00.000Z',
+        receivedAt: null,
+        sourceRef: {
+          captureId: 'cap_legacy_reference',
+          kind: 'inbox-capture',
+          source: 'linq',
+          version: null,
+        },
+      },
+    })
+
+    const result = await createStoreBackedAssistantInputSource({
+      vault: vaultRoot,
+    }).listInputCandidates({})
+
+    expect(result.inputs[0]?.acceptedInput).toMatchObject({
+      acceptedAt: stored.occurredAt,
+      id: stored.inputId,
+      source: 'assistant-input',
+    })
   })
 
   it('projects literal group context from the sidecar without persisting it in the input event', async () => {

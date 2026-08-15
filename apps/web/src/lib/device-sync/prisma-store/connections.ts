@@ -9,8 +9,12 @@ import {
   toRedactedPublicDeviceSyncAccount,
 } from "@murphai/device-syncd/public-account";
 import {
+  type ClearPublicDeviceSyncOAuthCredentialInput,
+  type DeviceSyncAccount,
+  type GetPublicDeviceSyncOAuthCleanupAccountInput,
   type MarkPublicDeviceSyncConnectionSetupFailedInput,
   type MarkPublicDeviceSyncConnectionSetupFailedResult,
+  type OAuthStateConsumeClaim,
   type ProviderAuthTokens,
   type PublicDeviceSyncAccount,
   type UpsertPublicDeviceSyncConnectionInput,
@@ -29,9 +33,15 @@ import {
   HOSTED_HEALTH_DATA_CONSENT_SCOPE,
   readHostedHealthDataConsentState,
 } from "../../legal/consent";
-import { lockHostedMemberRow } from "../../hosted-onboarding/shared";
+import {
+  lockHostedMemberRow,
+  readHostedMemberSuspensionAfterLockTx,
+} from "../../hosted-onboarding/shared";
 import { buildHostedProviderAccountBlindIndex } from "../routing-index";
-import { buildHostedPublicDeviceSyncAccount } from "../internal-runtime";
+import {
+  buildHostedPublicDeviceSyncAccount,
+  type HostedStaticDeviceSyncConnectionRecord,
+} from "../internal-runtime";
 import {
   maybeDate,
   toIsoTimestamp,
@@ -67,9 +77,14 @@ export { sanitizeHostedDeviceSyncConnectionMetadata } from "./connection-records
 import {
   HOSTED_DEVICE_SYNC_SECURE_BOX_KEY_VERSION,
   encryptHostedConnectionSecret,
+  prepareHostedRuntimeApplyTokenWrites,
+  readHostedRuntimeConnectionSecretMaterial,
   readHostedStoredExternalAccountId,
   readHostedStoredTokenBundle,
+  type HostedRuntimeConnectionSecretMaterial,
   type HostedDeviceSyncSecretTestCodec,
+  type HostedRuntimeApplyPreparedTokenWrite,
+  type HostedRuntimeApplyTokenWritePreparation,
 } from "./connection-secrets";
 import {
   isHostedDirtyPayloadClassificationPendingError,
@@ -79,10 +94,14 @@ import { toPrismaJsonObject } from "./prisma-json";
 
 export {
   hostedConnectionRecordArgs,
+  hostedRuntimeRedactedConnectionRecordArgs,
   mapHostedConnectionRecord,
+  mapHostedRuntimeRedactedConnectionRecord,
 } from "./connection-records";
 export type {
   HostedConnectionRecord,
+  HostedRuntimeConnectionRecord,
+  HostedRuntimeRedactedConnectionRecord,
   HostedStoredDeviceSyncAccount,
 } from "./connection-records";
 
@@ -113,6 +132,34 @@ type HostedConnectionSetupWrite = {
 
 const DEFAULT_HOSTED_DEVICE_SYNC_SETUP_TTL_MS = 30 * 60_000;
 const HOSTED_CONNECTION_UPSERT_MAX_ATTEMPTS = 2;
+
+async function requireExactOAuthClaimResolutionTx(
+  tx: HostedPrismaTransactionClient,
+  claim: OAuthStateConsumeClaim | undefined,
+): Promise<void> {
+  if (!claim) {
+    return;
+  }
+  const resolved = await tx.deviceOauthSession.deleteMany({
+    where: {
+      consumedAt: new Date(claim.consumedAt),
+      state: claim.state,
+    },
+  });
+  if (resolved.count !== 1) {
+    throw deviceSyncError({
+      code: "OAUTH_STATE_CHANGED",
+      message: "OAuth callback ownership changed before its durable outcome committed.",
+      retryable: true,
+      httpStatus: 409,
+    });
+  }
+}
+
+export interface HostedMemberDeviceConnectionStatus {
+  id: string;
+  status: HostedStaticDeviceSyncConnectionRecord["status"];
+}
 
 export class PrismaHostedConnectionStore {
   readonly prisma: PrismaClient;
@@ -197,6 +244,23 @@ export class PrismaHostedConnectionStore {
     const providerAccountBlindIndex = this.buildProviderAccountBlindIndex(input.provider, input.externalAccountId);
     const credential = resolveHostedUpsertConnectionCredential(input);
     const setupWrite = buildHostedConnectionSetupWrite(input, connectedAt, "create");
+    const ownsFailedOauthProviderCleanup =
+      input.cleanupOwnership === "oauth_provider_revoke";
+    if (
+      ownsFailedOauthProviderCleanup
+      && (
+        input.status !== "reauthorization_required"
+        || input.setupPhase !== "failed"
+        || input.nextReconcileAt !== null
+      )
+    ) {
+      throw deviceSyncError({
+        code: "CONNECTION_CLEANUP_OWNER_INVALID",
+        message: "Provider cleanup ownership must be stored as failed reauthorization state.",
+        retryable: false,
+        httpStatus: 400,
+      });
+    }
     if (!ownerId) {
       throw deviceSyncError({
         code: "CONNECTION_OWNER_REQUIRED",
@@ -208,7 +272,27 @@ export class PrismaHostedConnectionStore {
 
     const result = await this.prisma.$transaction(async (tx) => {
       await lockHostedMemberRow(tx, ownerId);
-      if (await readHostedHealthDataConsentState({
+      const ownerStatus = await readHostedMemberSuspensionAfterLockTx(
+        tx,
+        ownerId,
+      );
+      if (ownerStatus === "missing") {
+        throw deviceSyncError({
+          code: "CONNECTION_OWNER_REQUIRED",
+          message: "Hosted device-sync connection owner no longer exists.",
+          retryable: false,
+          httpStatus: 404,
+        });
+      }
+      if (ownerStatus === "suspended" && !ownsFailedOauthProviderCleanup) {
+        throw deviceSyncError({
+          code: "CONNECTION_OWNER_SUSPENDED",
+          message: "Device connections cannot be completed while account deletion is active.",
+          retryable: false,
+          httpStatus: 409,
+        });
+      }
+      if (!ownsFailedOauthProviderCleanup && await readHostedHealthDataConsentState({
         memberId: ownerId,
         prisma: tx,
       }) === "revoked") {
@@ -263,7 +347,7 @@ export class PrismaHostedConnectionStore {
           tx,
         });
 
-        if (isDeviceSyncDisconnectInProgress(existing)) {
+        if (isDeviceSyncDisconnectInProgress(existing) && !ownsFailedOauthProviderCleanup) {
           throw deviceSyncError({
             code: "CONNECTION_DISCONNECT_IN_PROGRESS",
             message: "Device sync disconnect is still in progress. Retry later.",
@@ -280,6 +364,7 @@ export class PrismaHostedConnectionStore {
           && ownerId
           && existing.userId === ownerId
         ) {
+          await requireExactOAuthClaimResolutionTx(tx, input.oauthClaim);
           return {
             record: existing,
             previousRecord: existing,
@@ -349,6 +434,7 @@ export class PrismaHostedConnectionStore {
             userId: existing.userId,
           });
         }
+        await requireExactOAuthClaimResolutionTx(tx, input.oauthClaim);
         return {
           record: updated,
           previousRecord: existing,
@@ -404,6 +490,7 @@ export class PrismaHostedConnectionStore {
         },
         ...hostedConnectionRecordArgs,
       });
+      await requireExactOAuthClaimResolutionTx(tx, input.oauthClaim);
       return {
         record: created,
         previousRecord: null,
@@ -479,9 +566,13 @@ export class PrismaHostedConnectionStore {
     return record ? await this.buildDurableConnectionRecord(record) : null;
   }
 
-  async markWebhookReceived(accountId: string, now: string): Promise<void> {
+  async markWebhookReceived(
+    accountId: string,
+    now: string,
+    tx?: HostedPrismaTransactionClient,
+  ): Promise<void> {
     const lastWebhookAt = new Date(now);
-    await this.prisma.deviceConnection.updateMany({
+    await (tx ?? this.prisma).deviceConnection.updateMany({
       where: {
         id: accountId,
         OR: [
@@ -508,14 +599,40 @@ export class PrismaHostedConnectionStore {
       });
 
       if (!existing) {
-        return { applied: false, record: null };
+        return {
+          applied: false,
+          blockedByRefreshLease: false,
+          oauthTokenVersion: null,
+          record: null,
+        };
       }
       if (
         input.expectedConnectedAt === null
         || existing.connectedAt.toISOString() !== input.expectedConnectedAt
         || existing.status === "disconnected"
       ) {
-        return { applied: false, record: existing };
+        return {
+          applied: false,
+          blockedByRefreshLease: false,
+          oauthTokenVersion: existing.credentialKind === "oauth_tokens"
+            ? existing.tokenVersion
+            : null,
+          record: existing,
+        };
+      }
+      if (
+        existing.refreshLeaseOwner !== null
+        || existing.refreshLeaseExpiresAt !== null
+        || existing.refreshLeaseTokenVersion !== null
+      ) {
+        return {
+          applied: false,
+          blockedByRefreshLease: true,
+          oauthTokenVersion: existing.credentialKind === "oauth_tokens"
+            ? existing.tokenVersion
+            : null,
+          record: existing,
+        };
       }
 
       const record = await tx.deviceConnection.update({
@@ -523,40 +640,111 @@ export class PrismaHostedConnectionStore {
           id: input.accountId,
         },
         data: {
-          accessTokenEncrypted: null,
-          accessTokenExpiresAt: null,
-          keyVersion: null,
           lastErrorCode: normalizeNullableString(input.code) ?? "OAUTH_SETUP_FAILED",
           lastErrorMessage: sanitizeHostedConnectionLastErrorMessage(input.message),
           lastSyncErrorAt: new Date(input.now),
           nextReconcileAt: null,
-          refreshLeaseExpiresAt: null,
-          refreshLeaseOwner: null,
-          refreshLeaseTokenVersion: null,
-          refreshTokenEncrypted: null,
           setupExpiresAt: null,
           setupPhase: "failed",
           status: "reauthorization_required",
-          tokenVersion: null,
         },
         ...hostedConnectionRecordArgs,
       });
-      return { applied: true, record };
+      await requireExactOAuthClaimResolutionTx(tx, input.oauthClaim);
+      return {
+        applied: true,
+        blockedByRefreshLease: false,
+        oauthTokenVersion: record.credentialKind === "oauth_tokens"
+          ? record.tokenVersion
+          : null,
+        record,
+      };
     });
 
     return {
       account: result.record ? await this.buildDurableConnectionRecord(result.record) : null,
       applied: result.applied,
+      blockedByRefreshLease: result.blockedByRefreshLease,
+      oauthTokenVersion: result.oauthTokenVersion,
     };
+  }
+
+  async getOAuthCleanupAccount(
+    input: GetPublicDeviceSyncOAuthCleanupAccountInput,
+  ): Promise<DeviceSyncAccount | null> {
+    const record = await this.prisma.deviceConnection.findFirst({
+      where: {
+        id: input.accountId,
+        connectedAt: new Date(input.expectedConnectedAt),
+        credentialKind: "oauth_tokens",
+        refreshLeaseExpiresAt: null,
+        refreshLeaseOwner: null,
+        refreshLeaseTokenVersion: null,
+        setupPhase: "failed",
+        status: "reauthorization_required",
+        tokenVersion: input.expectedTokenVersion,
+      },
+      ...hostedConnectionRecordArgs,
+    });
+    return record ? await this.buildStoredConnectionAccount(record) : null;
+  }
+
+  async clearOAuthCredentialAfterConfirmedRevoke(
+    input: ClearPublicDeviceSyncOAuthCredentialInput,
+  ): Promise<boolean> {
+    return this.prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`select pg_advisory_xact_lock(hashtext(${input.accountId}))`;
+      const existing = await tx.deviceConnection.findUnique({
+        where: {
+          id: input.accountId,
+        },
+        ...hostedConnectionRecordArgs,
+      });
+
+      if (
+        !existing
+        || existing.connectedAt.toISOString() !== input.expectedConnectedAt
+        || existing.status !== "reauthorization_required"
+        || existing.setupPhase !== "failed"
+        || normalizeHostedDeviceSyncCredentialKind(existing.credentialKind) !== "oauth_tokens"
+        || existing.tokenVersion !== input.expectedTokenVersion
+        || existing.refreshLeaseOwner !== null
+        || existing.refreshLeaseExpiresAt !== null
+        || existing.refreshLeaseTokenVersion !== null
+      ) {
+        return false;
+      }
+
+      await tx.deviceConnection.update({
+        where: {
+          id: input.accountId,
+        },
+        data: {
+          accessTokenEncrypted: null,
+          accessTokenExpiresAt: null,
+          credentialKind: "none",
+          credentialMetadataJson: toPrismaJsonObject({}),
+          keyVersion: null,
+          providerConfigKey: null,
+          refreshLeaseExpiresAt: null,
+          refreshLeaseOwner: null,
+          refreshLeaseTokenVersion: null,
+          refreshTokenEncrypted: null,
+          tokenVersion: null,
+          updatedAt: new Date(input.now),
+        },
+      });
+      return true;
+    });
   }
 
   async syncDurableConnectionState(
     account: PublicDeviceSyncAccount,
     tx?: HostedPrismaTransactionClient,
-  ): Promise<void> {
+  ): Promise<HostedConnectionRecord> {
     const prisma = tx ?? this.prisma;
 
-    await prisma.deviceConnection.update({
+    return prisma.deviceConnection.update({
       where: {
         id: account.id,
       },
@@ -577,6 +765,7 @@ export class PrismaHostedConnectionStore {
         setupExpiresAt: maybeDate(account.setupExpiresAt ?? null),
         setupPhase: normalizeHostedDeviceSyncSetupPhase(account.setupPhase ?? null),
       },
+      ...hostedConnectionRecordArgs,
     });
   }
 
@@ -584,15 +773,26 @@ export class PrismaHostedConnectionStore {
     account: Pick<PublicDeviceSyncAccount, "externalAccountId" | "id">,
     localState: HostedLocalHeartbeatStateUpdate,
     tx?: HostedPrismaTransactionClient,
-  ): Promise<PublicDeviceSyncAccount> {
+  ): Promise<PublicDeviceSyncAccount | null> {
     const prisma = tx ?? this.prisma;
-    const record = await prisma.deviceConnection.update({
+    const update = await prisma.deviceConnection.updateMany({
       where: {
         id: account.id,
+        status: { not: "reauthorization_required" },
       },
       data: buildHostedLocalHeartbeatUpdateData(localState),
+    });
+    if (update.count === 0) {
+      return null;
+    }
+
+    const record = await prisma.deviceConnection.findFirst({
+      where: { id: account.id },
       ...hostedConnectionRecordArgs,
     });
+    if (!record) {
+      return null;
+    }
 
     return await this.buildDurableConnectionRecord(
       record,
@@ -606,6 +806,62 @@ export class PrismaHostedConnectionStore {
   async listConnectionsForUser(userId: string): Promise<PublicDeviceSyncAccount[]> {
     const records = await this.listConnectionRecordsForUser(userId);
     return Promise.all(records.map((record) => this.buildDurableConnectionRecord(record)));
+  }
+
+  async listConnectionsRequiringCleanupForUser(
+    userId: string,
+  ): Promise<PublicDeviceSyncAccount[]> {
+    const records = (await this.listConnectionRecordsForUser(userId))
+      .filter((record) =>
+        record.status !== "disconnected" || record.credentialKind !== "none"
+      );
+    return Promise.all(records.map((record) => this.buildDurableConnectionRecord(record)));
+  }
+
+  async listMemberConnectionStatuses(input: {
+    limit: number;
+    provider: string;
+    status: "active" | "not_disconnected";
+    userId: string;
+  }): Promise<HostedMemberDeviceConnectionStatus[]> {
+    const provider = normalizeNullableString(input.provider);
+    const userId = normalizeNullableString(input.userId);
+    if (!provider || !userId) {
+      throw new TypeError("Hosted device-sync member connection status query requires member and provider ids.");
+    }
+    if (!Number.isSafeInteger(input.limit) || input.limit < 1) {
+      throw new TypeError("Hosted device-sync member connection status query requires a positive safe limit.");
+    }
+
+    const records = await this.prisma.deviceConnection.findMany({
+      where: {
+        provider,
+        status: input.status === "active"
+          ? "active"
+          : { not: "disconnected" },
+        userId,
+      },
+      orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
+      take: input.limit + 1,
+      select: {
+        id: true,
+        status: true,
+      },
+    });
+
+    if (records.length > input.limit) {
+      throw deviceSyncError({
+        code: "MEMBER_CONNECTION_STATUS_SNAPSHOT_SATURATED",
+        httpStatus: 503,
+        message: `Hosted device-sync member connection status authority exceeds the ${input.limit}-connection bound.`,
+        retryable: false,
+      });
+    }
+
+    return records.map((record) => ({
+      id: record.id,
+      status: normalizeHostedDeviceSyncLifecycleStatus(record.status),
+    }));
   }
 
   async getConnectionForUser(
@@ -649,6 +905,30 @@ export class PrismaHostedConnectionStore {
     return this.buildStoredConnectionAccount(record, prisma);
   }
 
+  async prepareRuntimeApplyTokenWrites(
+    entries: readonly HostedRuntimeApplyTokenWritePreparation[],
+  ): Promise<Map<string, HostedRuntimeApplyPreparedTokenWrite>> {
+    return prepareHostedRuntimeApplyTokenWrites({
+      entries,
+      prisma: this.prisma,
+      testCodec: this.testCodec,
+    });
+  }
+
+  async readRuntimeConnectionSecretMaterial(input: {
+    records: readonly HostedConnectionRecord[];
+    tokenConnectionIds: ReadonlySet<string>;
+  }, prisma: HostedSecureBoxPrismaClient = this.prisma): Promise<
+    Map<string, HostedRuntimeConnectionSecretMaterial>
+  > {
+    return readHostedRuntimeConnectionSecretMaterial({
+      prisma,
+      records: input.records,
+      testCodec: this.testCodec,
+      tokenConnectionIds: input.tokenConnectionIds,
+    });
+  }
+
   async claimConnectionRefreshLease(input: {
     connectionId: string;
     userId: string;
@@ -664,6 +944,7 @@ export class PrismaHostedConnectionStore {
         id: input.connectionId,
         userId: input.userId,
         tokenVersion: input.tokenVersion,
+        status: "active",
         refreshLeaseExpiresAt: null,
         refreshLeaseOwner: null,
         refreshLeaseTokenVersion: null,
@@ -732,7 +1013,88 @@ export class PrismaHostedConnectionStore {
     return result.count > 0;
   }
 
+  async clearStaleConnectionRefreshLease(input: {
+    connectionId: string;
+    tx?: HostedPrismaTransactionClient;
+    userId: string;
+  }): Promise<boolean> {
+    const prisma = input.tx ?? this.prisma;
+    const result = await prisma.deviceConnection.updateMany({
+      where: {
+        id: input.connectionId,
+        userId: input.userId,
+        OR: [
+          { refreshLeaseExpiresAt: { not: null } },
+          { refreshLeaseOwner: { not: null } },
+          { refreshLeaseTokenVersion: { not: null } },
+        ],
+      },
+      data: {
+        refreshLeaseExpiresAt: null,
+        refreshLeaseOwner: null,
+        refreshLeaseTokenVersion: null,
+      },
+    });
+
+    return result.count > 0;
+  }
+
+  async persistPreparedRuntimeApplyTokenWrite(input: {
+    prepared: HostedRuntimeApplyPreparedTokenWrite;
+    record: HostedConnectionRecord;
+    tx: HostedPrismaTransactionClient;
+  }): Promise<HostedConnectionRecord> {
+    const refreshLeaseOwner = normalizeNullableString(input.record.refreshLeaseOwner);
+    const obsoleteRefreshLease = Boolean(
+      refreshLeaseOwner
+      && input.record.refreshLeaseTokenVersion !== null
+      && input.record.refreshLeaseTokenVersion !== input.record.tokenVersion,
+    );
+
+    if (refreshLeaseOwner && !obsoleteRefreshLease) {
+      throw deviceSyncError({
+        code: "TOKEN_REFRESH_IN_PROGRESS",
+        message: "A hosted device-sync token refresh is already in progress for this connection.",
+        retryable: true,
+        httpStatus: 409,
+      });
+    }
+
+    const hasTokenBundle = input.prepared.tokenVersion !== null;
+    if (hasTokenBundle && !input.prepared.accessTokenEncrypted) {
+      throw new TypeError("Hosted device-sync runtime apply token preparation is missing its access token.");
+    }
+
+    return input.tx.deviceConnection.update({
+      where: {
+        id: input.record.id,
+      },
+      data: {
+        accessTokenEncrypted: input.prepared.accessTokenEncrypted,
+        accessTokenExpiresAt: maybeDate(input.prepared.accessTokenExpiresAt),
+        credentialKind: hasTokenBundle
+          ? "oauth_tokens"
+          : normalizeHostedDeviceSyncCredentialKind(input.record.credentialKind),
+        ...(hasTokenBundle ? { credentialMetadataJson: toPrismaJsonObject({}) } : {}),
+        externalAccountIdEncrypted: input.prepared.externalAccountIdEncrypted,
+        keyVersion: input.prepared.keyVersion,
+        providerConfigKey: hasTokenBundle ? null : input.record.providerConfigKey,
+        ...(obsoleteRefreshLease
+          ? {
+              refreshLeaseExpiresAt: null,
+              refreshLeaseOwner: null,
+              refreshLeaseTokenVersion: null,
+            }
+          : {}),
+        refreshTokenEncrypted: input.prepared.refreshTokenEncrypted,
+        tokenVersion: input.prepared.tokenVersion,
+      },
+      ...hostedConnectionRecordArgs,
+    });
+  }
+
   async persistStoredConnectionTokenBundle(input: {
+    clearCredential?: boolean;
     clearExternalAccountId?: boolean;
     connectionId: string;
     externalAccountId?: string | null;
@@ -795,7 +1157,7 @@ export class PrismaHostedConnectionStore {
     const existingCredentialKind = normalizeHostedDeviceSyncCredentialKind(record.credentialKind);
     const nextCredentialKind: DeviceAccountCredentialKind = input.tokenBundle
       ? "oauth_tokens"
-      : existingCredentialKind;
+      : input.clearCredential === true ? "none" : existingCredentialKind;
     const accessTokenEncrypted = input.tokenBundle
       ? await encryptHostedConnectionSecret({
         connectionId: input.connectionId,
@@ -840,8 +1202,13 @@ export class PrismaHostedConnectionStore {
         accessTokenEncrypted,
         accessTokenExpiresAt: maybeDate(input.tokenBundle?.accessTokenExpiresAt ?? null),
         credentialKind: nextCredentialKind,
-        ...(input.tokenBundle ? { credentialMetadataJson: toPrismaJsonObject({}) } : {}),
-        providerConfigKey: input.tokenBundle ? null : record.providerConfigKey,
+        ...(input.tokenBundle || input.clearCredential === true
+          ? { credentialMetadataJson: toPrismaJsonObject({}) }
+          : {}),
+        providerConfigKey:
+          input.tokenBundle || input.clearCredential === true
+            ? null
+            : record.providerConfigKey,
         externalAccountIdEncrypted,
         keyVersion: input.tokenBundle
           ? this.testCodec?.keyVersion ?? HOSTED_DEVICE_SYNC_SECURE_BOX_KEY_VERSION

@@ -301,6 +301,29 @@ describe("public loader seams", () => {
       "utf8",
     );
 
+    const loadVaultMock = vi.fn(async () => ({
+      metadata: { timezone: "America/Chicago" },
+    }));
+    const planWorkoutCsvImportMock = vi.fn(() => ({
+      source: "strong",
+      detectedSource: "strong",
+      delimiter: ",",
+      timeZone: "America/Chicago",
+      weightUnit: null,
+      distanceUnit: null,
+      headers: ["workout name", "date", "exercise name", "weight", "reps"],
+      rowCount: 1,
+      repairedRowCount: 0,
+      ignoredRowCount: 0,
+      skippedRowCount: 0,
+      skipReasons: [],
+      estimatedWorkouts: 1,
+      requiresWeightUnit: false,
+      requiresDistanceUnit: false,
+      importable: true,
+      warnings: [],
+      sessions: [],
+    }));
     const loadRuntimeModuleMock = vi.fn(async (specifier: string) => {
       switch (specifier) {
         case "@murphai/core":
@@ -338,11 +361,11 @@ describe("public loader seams", () => {
                 bodyMeasurement: "in",
               },
             }),
+            loadVault: loadVaultMock,
           };
         case "@murphai/importers":
           return {
-            parseDelimitedRows: (text: string, delimiter: string) =>
-              text.split(/\r?\n/u).map((line) => line.split(delimiter)),
+            planWorkoutCsvImport: planWorkoutCsvImportMock,
           };
         case "@murphai/runtime-state":
           return {
@@ -389,17 +412,20 @@ describe("public loader seams", () => {
     expect(loadRuntimeModuleMock).toHaveBeenCalledTimes(2);
     expect(loadRuntimeModuleMock).toHaveBeenLastCalledWith("@murphai/core");
 
-    await expect(
-      workoutsModule.inspectWorkoutCsvImport({
-        vault: "./vault",
-        file: csvFile,
-      }),
-    ).resolves.toMatchObject({
+    const inspection = await workoutsModule.inspectWorkoutCsvImport({
+      vault: "./vault",
+      file: csvFile,
+    });
+    expect(inspection).toMatchObject({
       sourceFile: csvFile,
-      headers: ["workout name", "date", "exercise name", "weight", "reps"],
       importable: true,
     });
-    expect(loadRuntimeModuleMock).toHaveBeenCalledTimes(3);
+    expect(inspection).not.toHaveProperty("headers");
+    expect(loadRuntimeModuleMock).toHaveBeenCalledTimes(4);
     expect(loadRuntimeModuleMock).toHaveBeenLastCalledWith("@murphai/importers");
+    expect(loadVaultMock).toHaveBeenCalledWith({ vaultRoot: "./vault" });
+    expect(planWorkoutCsvImportMock).toHaveBeenCalledWith(expect.objectContaining({
+      timeZone: "America/Chicago",
+    }));
   });
 });

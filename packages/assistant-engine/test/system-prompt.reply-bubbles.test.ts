@@ -27,6 +27,40 @@ describe('assistant reply bubble prompt guidance', () => {
         "use the current channel's available presentation",
       )
       expect(layers.threadContextPrompt).toContain(
+        'A semantic card that carries the complete answer replaces final text.',
+      )
+      if (channel === 'telegram') {
+        expect(layers.threadContextPrompt).toContain(
+          'A private Telegram movement routine keeps its exercise-routine card when the member repeats it or improves its layout',
+        )
+        expect(layers.threadContextPrompt).toContain(
+          'Text styling is not a Rich Message.',
+        )
+        expect(layers.threadContextPrompt).toContain(
+          'use it only for a complete structured guide, checklist, detailed comparison, or multi-section summary',
+        )
+        expect(layers.threadContextPrompt).toContain(
+          'Keep short or simple replies as text.',
+        )
+        expect(layers.threadContextPrompt).toContain(
+          'Nutrition, compact-table, tracked-workout, and catalog exercise content must use its owning card',
+        )
+        expect(layers.threadContextPrompt).toContain(
+          'If the owning card cannot attach, use ordinary text, never generic rich content',
+        )
+      } else {
+        expect(layers.threadContextPrompt).not.toContain(
+          'Telegram rich-content tool',
+        )
+      }
+      expect(layers.threadContextPrompt).toContain(
+        'Response media accompanies concise semantic text; do not recreate its visual content as long prose.',
+      )
+      expect(layers.threadContextPrompt).not.toContain('response media alone')
+      expect(layers.threadContextPrompt).toContain(
+        'If no owned presentation fits, send concise text.',
+      )
+      expect(layers.threadContextPrompt).toContain(
         'Telegram and iMessage have different capabilities',
       )
       expect(layers.threadContextPrompt).toContain(
@@ -41,6 +75,22 @@ describe('assistant reply bubble prompt guidance', () => {
       )
     },
   )
+
+  it('does not demand a private exercise card in Telegram groups', () => {
+    const layers = buildAssistantSystemPromptLayers(
+      createPromptInput({ channel: 'telegram', conversationScope: 'group' }),
+    )
+
+    expect(layers.threadContextPrompt).not.toContain(
+      'keeps its exercise-routine card',
+    )
+    expect(layers.threadContextPrompt).not.toContain(
+      'Telegram rich-content tool',
+    )
+    expect(layers.threadContextPrompt).toContain(
+      'If no owned presentation fits, send concise text.',
+    )
+  })
 
   it.each(['linq', 'telegram'])(
     'uses one bubble and sparse progress guidance for %s groups',

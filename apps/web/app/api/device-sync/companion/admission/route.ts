@@ -34,7 +34,6 @@ export const POST = withJsonError(async (request: Request) => {
     await requireHostedCompanionMemberIdFromRequest({
       prisma: getPrisma(),
       request,
-      suppressSignupWelcome: true,
       ...(timeZone ? { timeZone } : {}),
     });
   } catch (error) {

@@ -19,8 +19,17 @@ import {
   decryptHostedWebNullableString,
   decryptHostedWebNullableStrings,
   encryptHostedWebNullableString,
+  encryptHostedWebNullableStringFromPreparedRoot,
+  type PreparedHostedWebEncryptionRoot,
 } from "../hosted-web/encryption";
-import { runWithHostedDomainRootUnwrapCache } from "../hosted-crypto/domain-root-unwrap-cache";
+import {
+  runWithHostedDomainRootProviderCallsDisabled,
+  runWithHostedDomainRootUnwrapCache,
+} from "../hosted-crypto/domain-root-unwrap-cache";
+import {
+  revalidatePreparedHostedDomainRootForWebTx,
+  type PreparedHostedDomainRootForWeb,
+} from "../hosted-crypto/domain-root-store";
 import {
   type HostedMemberStripeBillingRefSnapshot,
   projectHostedMemberStripeBillingRefSnapshot,
@@ -84,6 +93,15 @@ const hostedMemberEmailAuthorizationLookupSelect =
     },
   });
 
+const hostedMemberVerifiedEmailCoreLookupSelect =
+  Prisma.validator<Prisma.HostedMemberEmailAuthorizationSelect>()({
+    memberId: true,
+    verifiedEmailVerifiedAt: true,
+    member: {
+      select: hostedMemberCoreStateSelect,
+    },
+  });
+
 const hostedMemberVerifiedEmailSelect =
   Prisma.validator<Prisma.HostedMemberEmailAuthorizationSelect>()({
     memberId: true,
@@ -136,6 +154,11 @@ export interface HostedMemberEmailAuthorizationLookup {
   matchedBy: "verifiedEmail";
 }
 
+export interface HostedMemberVerifiedEmailCoreLookup {
+  core: HostedMemberCoreState;
+  matchedBy: "verifiedEmail";
+}
+
 export interface HostedMemberEmailSnapshot {
   core: HostedMemberCoreState;
   emailAuthorization: HostedMemberEmailAuthorizationState | null;
@@ -152,6 +175,7 @@ export interface HostedMemberEmailAuthorizationWriteInput {
     authorizedAt: Date;
   } | null;
   memberId: string;
+  preparedControlRoot?: PreparedHostedDomainRootForWeb;
   prisma: Prisma.TransactionClient;
   stripeCheckoutEmail?: {
     address: string;
@@ -166,6 +190,7 @@ export interface HostedMemberEmailAuthorizationWriteInput {
 export interface HostedMemberVerifiedEmailSyncInput {
   address: string;
   memberId: string;
+  preparedControlRoot?: PreparedHostedDomainRootForWeb;
   prisma?: Prisma.TransactionClient | HostedOnboardingReadClient;
   replyAliasLookupKey?: string | null;
   verifiedAt: Date;
@@ -488,14 +513,41 @@ export async function readHostedMemberIdByAuthorizedDirectPublicSenderAddress(in
     : null;
 }
 
-export async function lookupHostedMemberByVerifiedEmailAddress(input: {
+type HostedMemberByVerifiedEmailAddressInput = {
   address: string | null | undefined;
   prisma: HostedOnboardingReadClient;
-}): Promise<HostedMemberEmailAuthorizationLookup | null> {
+};
+
+export async function lookupHostedMemberByVerifiedEmailAddress(
+  input: HostedMemberByVerifiedEmailAddressInput & { projection: "core" },
+): Promise<HostedMemberVerifiedEmailCoreLookup | null>;
+export async function lookupHostedMemberByVerifiedEmailAddress(
+  input: HostedMemberByVerifiedEmailAddressInput,
+): Promise<HostedMemberEmailAuthorizationLookup | null>;
+export async function lookupHostedMemberByVerifiedEmailAddress(
+  input: HostedMemberByVerifiedEmailAddressInput & { projection?: "core" },
+): Promise<
+  HostedMemberEmailAuthorizationLookup | HostedMemberVerifiedEmailCoreLookup | null
+> {
   const lookupKeys = createHostedEmailLookupKeyReadCandidates(input.address);
 
   if (lookupKeys.length === 0) {
     return null;
+  }
+
+  if (input.projection === "core") {
+    const records = await input.prisma.hostedMemberEmailAuthorization.findMany({
+      where: {
+        verifiedEmailLookupKey: {
+          in: lookupKeys,
+        },
+        verifiedEmailVerifiedAt: {
+          not: null,
+        },
+      },
+      select: hostedMemberVerifiedEmailCoreLookupSelect,
+    });
+    return resolveHostedMemberVerifiedEmailCoreLookup(records);
   }
 
   const records = await input.prisma.hostedMemberEmailAuthorization.findMany({
@@ -524,12 +576,19 @@ export async function upsertHostedMemberEmailAuthorization(
     throw new TypeError("Hosted member email authorization updates require at least one fact.");
   }
 
+  const preparedRoot = input.preparedControlRoot
+    ? await revalidateHostedMemberEmailPreparedRootTx({
+        memberId: input.memberId,
+        prepared: input.preparedControlRoot,
+        tx: input.prisma,
+      })
+    : undefined;
   const record = await input.prisma.hostedMemberEmailAuthorization.upsert({
     where: {
       memberId: input.memberId,
     },
-    create: await buildHostedMemberEmailAuthorizationCreateData(input),
-    update: await buildHostedMemberEmailAuthorizationUpdateData(input),
+    create: await buildHostedMemberEmailAuthorizationCreateData(input, preparedRoot),
+    update: await buildHostedMemberEmailAuthorizationUpdateData(input, preparedRoot),
     select: hostedMemberEmailAuthorizationStateSelect,
   });
 
@@ -644,18 +703,22 @@ export async function syncHostedMemberVerifiedEmailAuthorization(
   const prismaClient = input.prisma;
 
   if (prismaClient && "$transaction" in prismaClient && typeof prismaClient.$transaction === "function") {
-    return prismaClient.$transaction((tx: Prisma.TransactionClient) =>
-      runWithHostedDomainRootUnwrapCache(() =>
+    return prismaClient.$transaction((tx: Prisma.TransactionClient) => {
+      const write = () => runWithHostedDomainRootUnwrapCache(() =>
         upsertHostedMemberVerifiedEmailAuthorizationTx({
           ...input,
           prisma: tx,
         })
-      )
-    );
+      );
+      return input.preparedControlRoot
+        ? runWithHostedDomainRootProviderCallsDisabled(write)
+        : write();
+    });
   }
 
   return upsertHostedMemberVerifiedEmailAuthorizationTx({
     memberId: input.memberId,
+    preparedControlRoot: input.preparedControlRoot,
     prisma: input.prisma as Prisma.TransactionClient,
     replyAliasLookupKey: input.replyAliasLookupKey,
     address: input.address,
@@ -674,6 +737,7 @@ async function upsertHostedMemberVerifiedEmailAuthorizationTx(
       authorizedAt: input.verifiedAt,
     },
     memberId: input.memberId,
+    preparedControlRoot: input.preparedControlRoot,
     prisma: input.prisma,
     verifiedEmail: {
       address: input.address,
@@ -878,6 +942,40 @@ async function resolveHostedMemberVerifiedEmailLookup(
   return await projectHostedMemberEmailAuthorizationLookup(record, prisma);
 }
 
+function resolveHostedMemberVerifiedEmailCoreLookup(
+  records: readonly Prisma.HostedMemberEmailAuthorizationGetPayload<{
+    select: typeof hostedMemberVerifiedEmailCoreLookupSelect;
+  }>[],
+): HostedMemberVerifiedEmailCoreLookup | null {
+  const coreByMemberId = new Map<string, HostedMemberCoreState>();
+  for (const record of records) {
+    if (!record.verifiedEmailVerifiedAt) {
+      continue;
+    }
+    coreByMemberId.set(record.memberId, record.member);
+  }
+  if (coreByMemberId.size === 0) {
+    return null;
+  }
+  if (coreByMemberId.size !== 1) {
+    throw hostedOnboardingError({
+      code: "HOSTED_MEMBER_VERIFIED_EMAIL_LOOKUP_AMBIGUOUS",
+      details: {
+        matchCount: coreByMemberId.size,
+        matchedBy: "verifiedEmail",
+      },
+      httpStatus: 500,
+      message:
+        "Hosted member verified email lookup matched multiple accounts during blind-index rotation. Repair the duplicate binding before retrying.",
+      retryable: true,
+    });
+  }
+  return {
+    core: coreByMemberId.values().next().value!,
+    matchedBy: "verifiedEmail",
+  };
+}
+
 export async function updateHostedMemberCoreState(input: {
   billingStatus?: HostedMember["billingStatus"];
   memberId: string;
@@ -1072,8 +1170,9 @@ function projectHostedMemberCoreState(
 
 async function buildHostedMemberEmailAuthorizationCreateData(
   input: HostedMemberEmailAuthorizationWriteInput,
+  preparedRoot?: PreparedHostedWebEncryptionRoot,
 ): Promise<Prisma.HostedMemberEmailAuthorizationUncheckedCreateInput> {
-  const data = await buildHostedMemberEmailAuthorizationMutationData(input);
+  const data = await buildHostedMemberEmailAuthorizationMutationData(input, preparedRoot);
   return {
     ...data,
     memberId: input.memberId,
@@ -1082,12 +1181,14 @@ async function buildHostedMemberEmailAuthorizationCreateData(
 
 async function buildHostedMemberEmailAuthorizationUpdateData(
   input: HostedMemberEmailAuthorizationWriteInput,
+  preparedRoot?: PreparedHostedWebEncryptionRoot,
 ): Promise<Prisma.HostedMemberEmailAuthorizationUncheckedUpdateInput> {
-  return buildHostedMemberEmailAuthorizationMutationData(input);
+  return buildHostedMemberEmailAuthorizationMutationData(input, preparedRoot);
 }
 
 async function buildHostedMemberEmailAuthorizationMutationData(
   input: HostedMemberEmailAuthorizationWriteInput,
+  preparedRoot?: PreparedHostedWebEncryptionRoot,
 ): Promise<Omit<Prisma.HostedMemberEmailAuthorizationUncheckedCreateInput, "memberId">> {
   const data: Omit<Prisma.HostedMemberEmailAuthorizationUncheckedCreateInput, "memberId"> = {};
 
@@ -1097,6 +1198,7 @@ async function buildHostedMemberEmailAuthorizationMutationData(
       field: HOSTED_MEMBER_EMAIL_AUTH_VERIFIED_EMAIL_FIELD,
       memberId: input.memberId,
       occurredAt: input.verifiedEmail?.verifiedAt ?? null,
+      preparedRoot,
       prisma: input.prisma,
       label: "Hosted verified email",
     });
@@ -1112,6 +1214,7 @@ async function buildHostedMemberEmailAuthorizationMutationData(
       field: HOSTED_MEMBER_EMAIL_AUTH_DIRECT_PUBLIC_SENDER_FIELD,
       memberId: input.memberId,
       occurredAt: input.directPublicSender?.authorizedAt ?? null,
+      preparedRoot,
       prisma: input.prisma,
       label: "Hosted direct-public sender authorization",
     });
@@ -1127,6 +1230,7 @@ async function buildHostedMemberEmailAuthorizationMutationData(
       field: HOSTED_MEMBER_EMAIL_AUTH_STRIPE_CHECKOUT_EMAIL_FIELD,
       memberId: input.memberId,
       occurredAt: input.stripeCheckoutEmail?.collectedAt ?? null,
+      preparedRoot,
       prisma: input.prisma,
       label: "Hosted Stripe checkout email",
     });
@@ -1144,6 +1248,7 @@ async function buildHostedMemberEmailFactColumns(input: {
   label: string;
   memberId: string;
   occurredAt: Date | null;
+  preparedRoot?: PreparedHostedWebEncryptionRoot;
   prisma: Prisma.TransactionClient;
 }) {
   if (input.address === null) {
@@ -1165,13 +1270,38 @@ async function buildHostedMemberEmailFactColumns(input: {
   }
 
   return {
-    addressEncrypted: await encryptHostedWebNullableString({
-      field: input.field,
-      memberId: input.memberId,
-      prisma: input.prisma,
-      value: input.address,
-    }),
+    addressEncrypted: await (input.preparedRoot
+      ? encryptHostedWebNullableStringFromPreparedRoot({
+          field: input.field,
+          memberId: input.memberId,
+          prepared: input.preparedRoot,
+          value: input.address,
+        })
+      : encryptHostedWebNullableString({
+          field: input.field,
+          memberId: input.memberId,
+          prisma: input.prisma,
+          value: input.address,
+        })),
     lookupKey,
     occurredAt: input.occurredAt,
+  };
+}
+
+async function revalidateHostedMemberEmailPreparedRootTx(input: {
+  memberId: string;
+  prepared: PreparedHostedDomainRootForWeb;
+  tx: Prisma.TransactionClient;
+}): Promise<PreparedHostedWebEncryptionRoot> {
+  if (input.prepared.domain !== "control" || input.prepared.userId !== input.memberId) {
+    throw new TypeError("Prepared hosted member email root does not match the member.");
+  }
+  const prepared = await revalidatePreparedHostedDomainRootForWebTx({
+    prepared: input.prepared,
+    tx: input.tx,
+  });
+  return {
+    preparedRoot: prepared.root,
+    preparedRootKeyId: prepared.rootKeyId,
   };
 }

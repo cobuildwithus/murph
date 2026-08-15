@@ -13,6 +13,9 @@ import {
   buildHostedExecutionMemberActivatedWake,
 } from "@murphai/hosted-execution";
 import {
+  createHostedMailboxAssistantInputId,
+} from "@murphai/hosted-execution/assistant-identifiers";
+import {
   HOSTED_EXECUTION_USER_ID_HEADER,
   type HostedBrowserVaultReplicaRef,
   type HostedExecutionSnapshotRef,
@@ -39,6 +42,7 @@ import {
   startHostedLocalLinqStub,
   type HostedLocalLinqStub,
 } from "./helpers/hosted-local-linq-support.js";
+import { createHostedPhoneLookupKey } from "./helpers/hosted-contact-privacy.js";
 
 const runId = Date.now();
 const ownerMemberId = `member_local_group_sleep_source_owner_${runId}`;
@@ -55,11 +59,18 @@ const offerReplyText = "The exact by-source sharing choice is ready.";
 const readReplyText = "The stored Deep and REM source values are available to this room.";
 const invalidReadReplyText = "No valid sleep-stage correction is shared for that date.";
 const correctionReplyText = "I saved that sleep-stage correction.";
+const dailyMetricCorrectionReplyText = "Noted: 8,000 steps for that date.";
+const dailyMetricReadReplyText = "The shared records now show both sources.";
 const groupReplyPath = `/chats/${encodeURIComponent(groupChatId)}/messages`;
 const personalReplyPath = `/chats/${encodeURIComponent(personalChatId)}/messages`;
 const deepProjectionKind = "deep-sleep-sources-days.v1";
 const remProjectionKind = "rem-sleep-sources-days.v1";
-const projectionKinds = [deepProjectionKind, remProjectionKind] as const;
+const stepsProjectionKind = "steps-days.v0";
+const projectionKinds = [
+  deepProjectionKind,
+  remProjectionKind,
+  stepsProjectionKind,
+] as const;
 const sleepDate = new Date(Date.now() - 24 * 60 * 60 * 1_000)
   .toISOString()
   .slice(0, 10);
@@ -124,7 +135,7 @@ describe("hosted local group sleep-source sharing e2e", () => {
     ));
   }, 180_000);
 
-  it("refreshes an active grant from sequential typed manual corrections before authorized group read", async () => {
+  it("refreshes active grants from a group-reported daily metric and typed manual corrections", async () => {
     await requireScenario().seedActiveHostedLinqMember({
       homePhone,
       memberId: ownerMemberId,
@@ -207,6 +218,8 @@ describe("hosted local group sleep-source sharing e2e", () => {
       baselineVersion: personalVersionBeforeConsent,
       userId: ownerMemberId,
     });
+
+    await runGroupDailyMetricCorrection(route.containerMemberId);
 
     await runManualCorrection({
       metric: "sleep-deep-minutes",
@@ -373,6 +386,128 @@ function buildActivationWake() {
   });
 }
 
+async function runGroupDailyMetricCorrection(
+  groupRuntimeMemberId: string,
+): Promise<void> {
+  const correctionEventId = `evt_group_daily_metric_correction_${runId}`;
+  const correctionText = `That step count is wrong. I had 8000 steps on ${sleepDate}.`;
+  const accountLookupKey = createHostedPhoneLookupKey(homePhone);
+  if (!accountLookupKey) {
+    throw new Error("Expected the hosted-local Linq account lookup key.");
+  }
+  const messageRef = createHostedMailboxAssistantInputId({
+    dedupeKey: correctionEventId,
+    eventId: correctionEventId,
+    lane: "conversation",
+    secret: accountLookupKey,
+    userId: groupRuntimeMemberId,
+  });
+  const toolCall = buildAssistantProviderMurphToolCall("group", {
+    action: "record_current_sender_daily_metric",
+    date: sleepDate,
+    message_ref: messageRef,
+    metric: "steps",
+    unit: "count",
+    value: 8_000,
+  });
+  const personalVersion = await readWorkspaceVersion(ownerMemberId);
+  const personalSendBaseline = requireLinqStub().countObservedSends(personalReplyPath);
+  const groupSendBaseline = requireLinqStub().countObservedSends(groupReplyPath);
+  const providerRequestBaseline = requireScenario().assistantProviderRequests.length;
+  requireScenario().queueAssistantResponses([
+    toolCall,
+    toolCall,
+    dailyMetricCorrectionReplyText,
+  ], { matchInputContains: correctionText });
+
+  const webhook = await postSignedLinqWebhook(buildHostedLinqInboundEvent(
+    ownerMemberId,
+    groupChatId,
+    {
+      eventId: correctionEventId,
+      isGroup: true,
+      messageId: `msg_group_daily_metric_correction_${runId}`,
+      service: "iMessage",
+      text: correctionText,
+    },
+  ));
+  expect(webhook.status).toBe(202);
+  const sends = await requireLinqStub().waitForMatchingSendCount({
+    expectedCount: groupSendBaseline + 1,
+    expectedPath: groupReplyPath,
+    scenario: requireScenario(),
+    userId: groupRuntimeMemberId,
+  });
+  expect(sends.slice(groupSendBaseline).map((request) =>
+    requireLinqStub().readObservedMessageText(request)
+  )).toContain(dailyMetricCorrectionReplyText);
+  expect((await requireScenario().waitForHostedCompletion(
+    groupRuntimeMemberId,
+  )).lastErrorCode ?? null).toBeNull();
+  await waitForWorkspaceVersionAdvance({
+    baselineVersion: personalVersion,
+    userId: ownerMemberId,
+  });
+  expect(requireLinqStub().countObservedSends(personalReplyPath))
+    .toBe(personalSendBaseline);
+
+  const correctionToolOutputs = requireScenario().assistantProviderRequests
+    .slice(providerRequestBaseline)
+    .flatMap((request) => collectJsonStrings(JSON.parse(request.body)))
+    .filter((value) =>
+      value.includes('"action":"record_current_sender_daily_metric"')
+      && value.includes('"status":"accepted"')
+    );
+  expect(correctionToolOutputs.length).toBeGreaterThanOrEqual(2);
+
+  const readRequestText = "Show the step records shared after my correction.";
+  const readProviderBaseline = requireScenario().assistantProviderRequests.length;
+  const readSendBaseline = requireLinqStub().countObservedSends(groupReplyPath);
+  requireScenario().queueAssistantResponses([
+    buildAssistantProviderMurphToolCall("group", {
+      action: "read_shared",
+      projectionScopes: [{ projectionKind: stepsProjectionKind }],
+    }),
+    dailyMetricReadReplyText,
+  ], { matchInputContains: readRequestText });
+  const readWebhook = await postSignedLinqWebhook(buildHostedLinqInboundEvent(
+    ownerMemberId,
+    groupChatId,
+    {
+      eventId: `evt_group_daily_metric_read_${runId}`,
+      isGroup: true,
+      messageId: `msg_group_daily_metric_read_${runId}`,
+      service: "iMessage",
+      text: readRequestText,
+    },
+  ));
+  expect(readWebhook.status).toBe(202);
+  await requireLinqStub().waitForMatchingSendCount({
+    expectedCount: readSendBaseline + 1,
+    expectedPath: groupReplyPath,
+    scenario: requireScenario(),
+    userId: groupRuntimeMemberId,
+  });
+  expect((await requireScenario().waitForHostedCompletion(
+    groupRuntimeMemberId,
+  )).lastErrorCode ?? null).toBeNull();
+
+  const stepsOutputs = requireScenario().assistantProviderRequests
+    .slice(readProviderBaseline)
+    .flatMap((request) => collectJsonStrings(JSON.parse(request.body)))
+    .filter((value) =>
+      value.includes(stepsProjectionKind)
+      && value.includes('"records"')
+    );
+  expect(stepsOutputs).toHaveLength(1);
+  expect(stepsOutputs[0]).toContain('"source":"garmin"');
+  expect(stepsOutputs[0]).toContain('"source":"manual"');
+  expect(stepsOutputs[0]).toContain('"label":"Manual"');
+  expect(stepsOutputs[0]).toContain('"value":7000');
+  expect(stepsOutputs[0]).toContain('"value":8000');
+  expect(stepsOutputs[0]?.match(/"source":"manual"/gu)).toHaveLength(1);
+}
+
 async function runManualCorrection(input: {
   metric: "sleep-deep-minutes" | "sleep-rem-minutes";
   ordinal: number;
@@ -447,7 +582,7 @@ async function seedPersonalSleepSourceSnapshot(): Promise<void> {
     { provider: "oura", value: 108 },
     { provider: "polar", value: 82 },
   ] as const;
-  const wearableRecords = providers.flatMap(({ provider, value }, index) => {
+  const wearableRecords = [...providers.flatMap(({ provider, value }, index) => {
     const recordedAt = `${sleepDate}T07:0${index}:00.000Z`;
     const externalRef = {
       system: "junction",
@@ -507,7 +642,30 @@ async function seedPersonalSleepSourceSnapshot(): Promise<void> {
         externalRef,
       },
     ];
-  });
+  }), {
+    schemaVersion: "murph.event.v1",
+    id: `evt_group_steps_device_${runId}`,
+    kind: "observation",
+    occurredAt: `${sleepDate}T18:00:00.000Z`,
+    recordedAt: `${sleepDate}T18:01:00.000Z`,
+    dayKey: sleepDate,
+    source: "device",
+    title: "Daily steps",
+    metric: "steps",
+    value: 7_000,
+    unit: "count",
+    dataOrigin: {
+      aggregatorProvider: "junction",
+      originConfidence: "high",
+      sourceProviderSlug: "garmin",
+      version: 1,
+    },
+    externalRef: {
+      system: "junction",
+      resourceType: "daily-summary",
+      resourceId: `group_steps_device_${runId}`,
+    },
+  }];
   await mkdir(path.join(vaultRoot, "ledger", "events", sleepDate.slice(0, 4)), {
     recursive: true,
   });

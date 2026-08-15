@@ -641,7 +641,13 @@ describe("hosted provider effects", () => {
 
     expect(onAppCardFallbackError).toHaveBeenCalledOnce();
     expect(onAppCardFallbackError).toHaveBeenCalledWith({
-      error: expect.any(SyntaxError),
+      error: expect.objectContaining({
+        code: "LINQ_API_REQUEST_FAILED",
+        context: expect.objectContaining({
+          failureStage: "transport",
+          transportErrorName: "SyntaxError",
+        }),
+      }),
       reason: "capability_check_failed",
     });
   });

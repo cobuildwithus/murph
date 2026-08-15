@@ -14,7 +14,7 @@ const mocks = vi.hoisted(() => ({
   requireHostedAppSessionFromRequest: vi.fn(),
   resolveHostedPublicBaseUrl: vi.fn(),
   signalHostedGroupJoinConfirmationRuntimeBestEffort: vi.fn(),
-  signalHostedRuntimeMaintenanceRuntime: vi.fn(),
+  signalHostedMailboxAppendRuntime: vi.fn(),
 }));
 
 vi.mock("@/src/lib/hosted-groups/group-store", () => ({
@@ -46,7 +46,7 @@ vi.mock("@/src/lib/hosted-onboarding/invite-service", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
-  signalHostedRuntimeMaintenanceRuntime: mocks.signalHostedRuntimeMaintenanceRuntime,
+  signalHostedMailboxAppendRuntime: mocks.signalHostedMailboxAppendRuntime,
 }));
 
 vi.mock("@/src/lib/hosted-web/public-url", () => ({
@@ -83,7 +83,7 @@ beforeEach(async () => {
     revokedVaultShareProjectionKinds: ["sleep-times.v0"],
   });
   mocks.signalHostedGroupJoinConfirmationRuntimeBestEffort.mockResolvedValue(undefined);
-  mocks.signalHostedRuntimeMaintenanceRuntime.mockResolvedValue(undefined);
+  mocks.signalHostedMailboxAppendRuntime.mockResolvedValue(undefined);
   mocks.materializePendingHostedGroupJoinConfirmationsBestEffort.mockResolvedValue(undefined);
 
   route = await import("../app/api/groups/join/[joinCode]/accept/route");
@@ -184,7 +184,7 @@ test("returns a group permission revocation without exposing internal metadata",
     selectedVaultShareProjectionScopes: [],
     tx: { tx: true },
   });
-  expect(mocks.signalHostedRuntimeMaintenanceRuntime).not.toHaveBeenCalled();
+  expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
 });
 
 test("signals a first-join confirmation without exposing mailbox metadata", async () => {
@@ -240,7 +240,7 @@ test("signals a first-join confirmation without exposing mailbox metadata", asyn
   });
 });
 
-test("bounds a stalled maintenance wake after confirmation recovery", async () => {
+test("starts a bounded projection wake without blocking confirmation recovery", async () => {
   vi.useFakeTimers();
   try {
     mocks.acceptHostedGroupJoinCodeTx.mockResolvedValueOnce({
@@ -248,9 +248,15 @@ test("bounds a stalled maintenance wake after confirmation recovery", async () =
       grantedVaultShareProjectionKinds: ["profile-name.v0"],
       groupId: "group_1",
       membershipId: "membership_created",
+      projectionMaintenanceSignal: {
+        lane: "system",
+        laneSeq: "2",
+        mailboxItemId: "mailbox_projection_1",
+        memberId: "member_grantor",
+      },
       revokedVaultShareProjectionKinds: [],
     });
-    mocks.signalHostedRuntimeMaintenanceRuntime.mockReturnValueOnce(new Promise(() => {}));
+    mocks.signalHostedMailboxAppendRuntime.mockReturnValueOnce(new Promise(() => {}));
     const request = new Request("https://join.example.test/api/groups/join/JOIN123/accept", {
       body: JSON.stringify({
         expectedMembershipId: null,
@@ -270,10 +276,13 @@ test("bounds a stalled maintenance wake after confirmation recovery", async () =
 
     await expect(responsePromise).resolves.toMatchObject({ status: 200 });
     expect(
-      mocks.materializePendingHostedGroupJoinConfirmationsBestEffort.mock.invocationCallOrder[0],
+      mocks.signalHostedMailboxAppendRuntime.mock.invocationCallOrder[0],
     ).toBeLessThan(
-      mocks.signalHostedRuntimeMaintenanceRuntime.mock.invocationCallOrder[0],
+      mocks.materializePendingHostedGroupJoinConfirmationsBestEffort.mock.invocationCallOrder[0],
     );
+    expect(
+      mocks.signalHostedMailboxAppendRuntime.mock.calls[0]?.[0]?.abortSignal,
+    ).not.toBe(request.signal);
   } finally {
     vi.useRealTimers();
   }

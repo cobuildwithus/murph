@@ -29,6 +29,8 @@ export function createHostedWebPhysicalNotePort(input: {
           fetchImpl: input.fetchImpl,
           method: "POST",
           path: HOSTED_PHYSICAL_NOTES_PATH,
+          preserveInitialFailureOnReplayFailure: true,
+          replayOnceOnRetryableFailure: true,
           signal: options?.signal ?? null,
           timeoutMs: Math.max(
             input.timeoutMs,
@@ -42,6 +44,7 @@ export function createHostedWebPhysicalNotePort(input: {
           error instanceof HostedWebControlPlaneResponseError
           && error.status >= 400
           && error.status < 500
+          && error.status !== 408
         ) {
           return {
             complimentary: false,

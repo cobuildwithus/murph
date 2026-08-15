@@ -10,13 +10,19 @@ import {
   assistantResponseCardV1Bounds,
   assistantResponseCardSchema,
   buildWorkoutSessionAppCardEnvelopeV4,
+  buildWorkoutSessionAppCardEnvelopeV6,
   challengeStandingsResponseCardV1Schema,
   compactTableCardV1Bounds,
+  compactTableResponseCardAuthoringV1Schema,
   compactTableResponseCardV1Schema,
+  compactTableWorkoutSemanticResponseCardV1Schema,
   dailyNutritionResponseCardV2AuthoringSchema,
   dailyNutritionResponseCardV2Schema,
   exerciseRoutineResponseCardV1Schema,
   renderExerciseRoutineResponseCardTextV1,
+  renderTelegramRichContentResponseCardTextV1,
+  telegramRichContentCardV1Bounds,
+  telegramRichContentResponseCardV1Schema,
   nutritionCardGoalStatusLabels,
   nutritionCardGoalStatusValues,
   workoutSessionCardStateValues,
@@ -27,12 +33,14 @@ import {
   type ChallengeStandingsResponseCardV1,
   type CompactTableGenericResponseCardV1,
   type CompactTableResponseCardV1,
+  type CompactTableWorkoutResponseCardV1,
   type DailyNutritionResponseCard,
   type DailyNutritionResponseCardV1,
   type DailyNutritionResponseCardV2,
   type ExerciseRoutineCardExerciseV1,
   type ExerciseRoutineCardImageV1,
   type ExerciseRoutineResponseCardV1,
+  type TelegramRichContentResponseCardV1,
   type NutritionCardGoalSnapshot,
   type NutritionCardMetric,
   type WorkoutSessionDetailV1,
@@ -114,6 +122,8 @@ export {
   dailyNutritionResponseCardSchema,
   exerciseRoutineCardV1Bounds,
   exerciseRoutineResponseCardV1Schema,
+  telegramRichContentCardV1Bounds,
+  telegramRichContentResponseCardV1Schema,
   nutritionCardGoalStatusValues,
   rankedChallengeStandingsResponseCardV1Schema,
   type ChallengeStandingsCoverage,
@@ -140,6 +150,7 @@ export {
   type ExerciseRoutineCardExerciseV1,
   type ExerciseRoutineCardImageV1,
   type ExerciseRoutineResponseCardV1,
+  type TelegramRichContentResponseCardV1,
   type NutritionCardGoalSnapshot,
   type NutritionCardGoalStatus,
   type NutritionCardMetric,
@@ -156,13 +167,30 @@ export const assistantResponseCardAuthoringSchema: z.ZodType<
   AssistantResponseCard
 > = z.union([
   dailyNutritionResponseCardV2AuthoringSchema,
-  compactTableResponseCardV1Schema,
+  compactTableResponseCardAuthoringV1Schema,
 ])
+
+export const assistantWorkoutResponseCardSemanticSchema =
+  compactTableWorkoutSemanticResponseCardV1Schema
 
 export const assistantResponseCardJsonSchema =
   createAssistantResponseCardJsonSchema()
 export const exerciseRoutineResponseCardJsonSchema =
   createExerciseRoutineResponseCardJsonSchema()
+export const telegramRichContentResponseCardJsonSchema = {
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    kind: { const: 'telegram_rich_content' },
+    version: { const: 1 },
+    html: {
+      type: 'string',
+      minLength: 1,
+      maxLength: telegramRichContentCardV1Bounds.htmlLength,
+    },
+  },
+  required: ['kind', 'version', 'html'],
+} as const
 export const challengeStandingsResponseCardJsonSchema =
   createChallengeStandingsResponseCardJsonSchema()
 
@@ -181,9 +209,29 @@ export function renderAssistantResponseCardText(
       return renderCompactTableResponseCardText(parsed, false)
     case 'exercise_routine':
       return renderExerciseRoutineResponseCardTextV1(parsed)
+    case 'telegram_rich_content':
+      return renderTelegramRichContentResponseCardTextV1(parsed)
     case 'challenge_standings':
       return renderChallengeStandingsResponseCardText(parsed)
   }
+}
+
+export function renderAssistantWorkoutResponseCardText(
+  card: CompactTableWorkoutResponseCardV1,
+): string {
+  return renderCompactTableResponseCardText(
+    assistantWorkoutResponseCardSemanticSchema.parse(card),
+    false,
+  )
+}
+
+export function renderAssistantWorkoutResponseCardTranscriptText(
+  card: CompactTableWorkoutResponseCardV1,
+): string {
+  return renderCompactTableResponseCardText(
+    assistantWorkoutResponseCardSemanticSchema.parse(card),
+    true,
+  )
 }
 
 /**
@@ -202,6 +250,8 @@ export function renderAssistantResponseCardTranscriptText(
       return renderCompactTableResponseCardText(parsed, true)
     case 'exercise_routine':
       return renderExerciseRoutineResponseCardTextV1(parsed)
+    case 'telegram_rich_content':
+      return renderTelegramRichContentResponseCardTextV1(parsed)
     case 'challenge_standings':
       return renderChallengeStandingsResponseCardText(parsed)
   }
@@ -209,6 +259,7 @@ export function renderAssistantResponseCardTranscriptText(
 
 export type TelegramRichMessage = {
   html: string
+  skip_entity_detection?: true
 }
 
 /** Build one Telegram-native rich message from a frozen response card. */
@@ -223,6 +274,8 @@ export function buildTelegramRichMessage(
       return { html: renderTelegramCompactTableCardHtml(parsed) }
     case 'exercise_routine':
       return { html: renderTelegramExerciseRoutineCardHtml(parsed) }
+    case 'telegram_rich_content':
+      return { html: parsed.html, skip_entity_detection: true }
     case 'challenge_standings':
       return { html: renderTelegramChallengeStandingsCardHtml(parsed) }
   }
@@ -233,6 +286,7 @@ export function buildLinqIMessageAppFallbackText(
 ):
   | 'Challenge standings. Ask Murph for this card in text'
   | 'Exercise routine. Ask Murph for this card in text'
+  | 'Your Murph guide. Ask Murph for this card in text'
   | 'Your daily nutrition. Ask Murph for this card in text'
   | 'Your Murph summary. Ask Murph for this card in text'
   | 'Your workout. Ask Murph for this card in text' {
@@ -253,6 +307,8 @@ export function buildLinqIMessageAppFallbackText(
       return 'Challenge standings. Ask Murph for this card in text'
     case 'exercise_routine':
       return 'Exercise routine. Ask Murph for this card in text'
+    case 'telegram_rich_content':
+      return 'Your Murph guide. Ask Murph for this card in text'
   }
 }
 
@@ -263,6 +319,11 @@ export function buildLinqIMessageAppLayout(
   if (parsed.kind === 'exercise_routine') {
     throw new TypeError(
       'Exercise routine response cards do not have a native iMessage layout.',
+    )
+  }
+  if (parsed.kind === 'telegram_rich_content') {
+    throw new TypeError(
+      'Telegram rich content cards do not have a native iMessage layout.',
     )
   }
   if (parsed.kind === 'compact_table') {
@@ -312,10 +373,15 @@ export function buildLinqIMessageAppCardImageUrl(
       'Exercise routine response cards do not have a native iMessage image URL.',
     )
   }
+  if (parsed.kind === 'telegram_rich_content') {
+    throw new TypeError(
+      'Telegram rich content cards do not have a native iMessage image URL.',
+    )
+  }
   const encoded = parsed.kind === 'daily_nutrition'
     ? encodeDailyNutritionAppCardPayload(parsed)
     : parsed.kind === 'compact_table'
-      ? encodeCompactTableAppCardPayload(parsed)
+      ? encodeCompactTableAppCardPayload(parsed, false)
       : encodeChallengeStandingsAppCardPayload(
           buildIdentityFreeChallengeStandingsImageCard(parsed),
         )
@@ -346,6 +412,10 @@ export function buildLinqIMessageAppCardUrl(
       throw new TypeError(
         'Exercise routine response cards do not have a native iMessage app URL.',
       )
+    case 'telegram_rich_content':
+      throw new TypeError(
+        'Telegram rich content cards do not have a native iMessage app URL.',
+      )
   }
 }
 
@@ -372,7 +442,7 @@ function encodeDailyNutritionAppCardPayload(
 export function encodeCompactTableAppCardUrl(
   card: CompactTableResponseCardV1,
 ): string {
-  return encodeAppCardEnvelopeUrl(encodeCompactTableAppCardPayload(card))
+  return encodeAppCardEnvelopeUrl(encodeCompactTableAppCardPayload(card, true))
 }
 
 export function encodeWorkoutSessionAppCardUrl(
@@ -384,15 +454,16 @@ export function encodeWorkoutSessionAppCardUrl(
       'Expected a compact table with workout session detail.',
     )
   }
-  return encodeAppCardEnvelopeUrl(encodeWorkoutSessionAppCardPayload(parsed))
+  return encodeAppCardEnvelopeUrl(encodeWorkoutSessionAppCardPayload(parsed, true))
 }
 
 function encodeCompactTableAppCardPayload(
   card: CompactTableResponseCardV1,
+  includeActionBinding: boolean,
 ): string {
   const parsed = compactTableResponseCardV1Schema.parse(card)
   if ('workout' in parsed) {
-    return encodeWorkoutSessionAppCardPayload(parsed)
+    return encodeWorkoutSessionAppCardPayload(parsed, includeActionBinding)
   }
 
   const { tracking: _tracking, ...presentationCard } = parsed
@@ -453,14 +524,24 @@ function buildIdentityFreeChallengeStandingsImageCard(
 
 function encodeWorkoutSessionAppCardPayload(
   card: Extract<CompactTableResponseCardV1, { workout: unknown }>,
+  includeActionBinding: boolean,
 ): string {
   return encodeAppCardEnvelopePayload(
-    buildWorkoutSessionAppCardEnvelopeV4({
-      title: card.title,
-      subtitle: card.subtitle,
-      footer: card.footer,
-      workout: card.workout,
-    }),
+    includeActionBinding
+      && card.editor !== undefined
+      ? buildWorkoutSessionAppCardEnvelopeV6({
+          editor: card.editor,
+          title: card.title,
+          subtitle: card.subtitle,
+          footer: card.footer,
+          workout: card.workout,
+        })
+      : buildWorkoutSessionAppCardEnvelopeV4({
+          title: card.title,
+          subtitle: card.subtitle,
+          footer: card.footer,
+          workout: card.workout,
+        }),
   )
 }
 
@@ -470,7 +551,8 @@ function encodeAppCardEnvelopePayload(
     | AppCardEnvelopeV2
     | AppCardEnvelopeV3
     | AppCardEnvelopeV5
-    | ReturnType<typeof buildWorkoutSessionAppCardEnvelopeV4>,
+    | ReturnType<typeof buildWorkoutSessionAppCardEnvelopeV4>
+    | ReturnType<typeof buildWorkoutSessionAppCardEnvelopeV6>,
 ): string {
   return Buffer.from(JSON.stringify(envelope), 'utf8')
     .toString('base64url')

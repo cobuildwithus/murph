@@ -3,10 +3,13 @@ import assert from "node:assert/strict";
 import { test } from "vitest";
 
 import {
+  DEVICE_SYNC_DISCONNECT_IN_PROGRESS_ERROR_CODE,
+  DEVICE_SYNC_DISCONNECT_RECOVERY_REQUIRED_ERROR_CODE,
   DEVICE_SYNC_HISTORICAL_DATA_RECONNECT_REQUIRED_ERROR_CODE,
   isDeviceSyncConnectionSetupConfirmed,
   isDeviceSyncConnectionSetupPending,
   isEstablishedDeviceSyncConnection,
+  isDeviceSyncDisconnectRecoveryRequired,
   isJunctionHistoricalResetProviderSlug,
   redactPublicDeviceSyncMetadata,
   requiresHistoricalResetDeviceSyncSource,
@@ -110,5 +113,27 @@ test("historical connection reset recovery is limited to Garmin error sources", 
     lastErrorCode: DEVICE_SYNC_HISTORICAL_DATA_RECONNECT_REQUIRED_ERROR_CODE,
     sourceProviderSlug: "garmin",
     status: "connected",
+  }), false);
+});
+
+test("disconnect recovery preserves pending intent across crashes and provider failures", () => {
+  for (const lastErrorCode of [
+    DEVICE_SYNC_DISCONNECT_IN_PROGRESS_ERROR_CODE,
+    DEVICE_SYNC_DISCONNECT_RECOVERY_REQUIRED_ERROR_CODE,
+    "PROVIDER_REVOKE_FAILED",
+  ]) {
+    assert.equal(isDeviceSyncDisconnectRecoveryRequired({
+      lastErrorCode,
+      status: "reauthorization_required",
+    }), true);
+  }
+
+  assert.equal(isDeviceSyncDisconnectRecoveryRequired({
+    lastErrorCode: DEVICE_SYNC_DISCONNECT_RECOVERY_REQUIRED_ERROR_CODE,
+    status: "active",
+  }), false);
+  assert.equal(isDeviceSyncDisconnectRecoveryRequired({
+    lastErrorCode: "TOKEN_REFRESH_FAILED",
+    status: "reauthorization_required",
   }), false);
 });
