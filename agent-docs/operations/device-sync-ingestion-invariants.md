@@ -158,11 +158,12 @@ drain/batch service seam in `packages/device-syncd/src/service.ts`.
    horizon is clamped to `1..14` authoritative local days. A scheduled
    reconcile imports the newest eligible day immediately and enqueues each
    older resource/day coordinate on the existing durable device-job queue,
-   newest day first. A succeeded job row proves either populated or
-   successful-empty completion and is reused by later scheduler passes,
-   including after restart; queued/running rows remain the retry owner, and
-   failed, dead, or yielded work never grants day authority. Dead work may be
-   recreated by a later reconcile. A failed, unavailable, or yielded immediate
+   newest day first. Queued or running rows remain the retry and deduplication
+   owner across restart. Succeeded rows remain execution history, not permanent
+   completion proof, because a later scheduled pull can observe newly admitted
+   sources or newly available provider data. Failed, dead, or yielded work never
+   grants day authority, and any terminal row may be recreated by a later
+   reconcile. A failed, unavailable, or yielded immediate
    resource becomes the same stable resource/day job ahead of the older
    backlog; a retryable failure does not block an independent temporal sibling.
    Temporal resource/day children never advance generic account completion.

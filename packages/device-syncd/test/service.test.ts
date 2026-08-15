@@ -7877,6 +7877,187 @@ test("Junction reconcile atomically replaces a yielded temporal continuation wit
   }
 });
 
+test("Junction scheduled temporal history refetches after a new source and late data arrive", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-junction-temporal-source-widening");
+  const databasePath = path.join(vaultRoot, ".runtime", "device-syncd.sqlite");
+  const externalAccountId = "junction-temporal-source-widening";
+  let now = new Date("2026-08-12T12:00:00.000Z");
+  let sourceRosterWidened = false;
+  const requestedDays: string[] = [];
+  const importerResults: unknown[] = [];
+
+  await initializeVault({ vaultRoot, timezone: "UTC" });
+  const canonicalImporter = createImporters();
+  const provider = createJunctionDeviceSyncProvider({
+    apiKey: "sk_us_fake_test_placeholder",
+    clientUserIdSecret: "test-only-hmac-secret",
+    environment: "sandbox",
+    region: "us",
+    reconcileDays: 2,
+    reconcileIntervalMs: 60 * 60_000,
+    summaryResources: ["activity"],
+    timeseriesResources: ["blood_oxygen"],
+    fetchImpl: async (input) => {
+      const url = new URL(readUrl(input));
+      if (url.pathname === `/v2/user/providers/${externalAccountId}`) {
+        return createJsonResponse({
+          providers: [
+            {
+              id: "provider-garmin-temporal-source-widening",
+              slug: "garmin",
+              name: "Garmin",
+              status: "connected",
+              resource_availability: {
+                activity: true,
+                blood_oxygen: true,
+              },
+            },
+            ...(sourceRosterWidened
+              ? [{
+                  id: "provider-oura-temporal-source-widening",
+                  slug: "oura",
+                  name: "Oura",
+                  status: "connected",
+                  resource_availability: {
+                    blood_oxygen: true,
+                  },
+                }]
+              : []),
+          ],
+        });
+      }
+      if (url.pathname === `/v2/summary/activity/${externalAccountId}`) {
+        return createJsonResponse({ data: [] });
+      }
+      if (url.pathname === `/v2/timeseries/${externalAccountId}/blood_oxygen/grouped`) {
+        const day = url.searchParams.get("start_date");
+        requestedDays.push(day ?? "");
+        if (!sourceRosterWidened || day !== "2026-08-09T00:00:00.000Z") {
+          return createJsonResponse({ groups: {} });
+        }
+        return createJsonResponse({
+          groups: {
+            oura: [{
+              data: [
+                {
+                  timestamp: "2026-08-09T10:00:00.000Z",
+                  unit: "%",
+                  value: 97,
+                },
+                {
+                  timestamp: "2026-08-09T10:10:00.000Z",
+                  unit: "%",
+                  value: 96,
+                },
+              ],
+              source: { provider: "oura", type: "ring" },
+            }],
+          },
+        });
+      }
+      throw new Error(`Unexpected Junction source-widening request: ${url.pathname}`);
+    },
+  });
+  const openFixture = () => createServiceFixture({
+    secret: "secret-for-tests",
+    clock: { now: () => now },
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: databasePath,
+    },
+    importer: {
+      async importDeviceProviderSnapshot(input) {
+        importerResults.push(await prepareDeviceProviderSnapshotImport(input, {
+          defaultTimeZone: "UTC",
+        }));
+        const result = await canonicalImporter.importDeviceProviderSnapshot(input);
+        return result;
+      },
+      resolveDeviceProviderSnapshotDefaultTimeZone(input) {
+        return canonicalImporter.resolveDeviceProviderSnapshotDefaultTimeZone(input);
+      },
+    },
+    providers: [provider],
+  });
+  const fixture = openFixture();
+  let fixtureClosed = false;
+
+  try {
+    const account = fixture.store.upsertAccount({
+      provider: "junction",
+      externalAccountId,
+      displayName: "Junction",
+      scopes: [],
+      status: "active",
+      credential: {
+        kind: "provider_config",
+        providerConfigKey: "junction",
+        credentialMetadata: {},
+      },
+      connectedAt: "2026-08-01T00:00:00.000Z",
+      nextReconcileAt: now.toISOString(),
+    });
+
+    const firstSchedule = await fixture.service.runSchedulerOnce(account.id);
+    assert.equal(firstSchedule.some((job) => job.kind === "reconcile"), true);
+    assert.equal((await fixture.service.runWorkerOnce(account.id))?.kind, "reconcile");
+    const firstOlderDay = await fixture.service.runWorkerOnce(account.id);
+    assert.equal(firstOlderDay?.kind, "resource");
+    assert.equal(firstOlderDay.payload.temporalAuthorityDayKey, "2026-08-09");
+    assert.equal(
+      requestedDays.filter((day) => day === "2026-08-09T00:00:00.000Z").length,
+      1,
+    );
+
+    fixture.close();
+    fixtureClosed = true;
+    sourceRosterWidened = true;
+    now = new Date("2026-08-12T14:00:00.000Z");
+    const restarted = openFixture();
+    try {
+      const secondSchedule = await restarted.service.runSchedulerOnce(account.id);
+      assert.equal(secondSchedule.some((job) => job.kind === "reconcile"), true);
+      assert.equal((await restarted.service.runWorkerOnce(account.id))?.kind, "reconcile");
+      assert.equal(
+        restarted.store.listConnectionSources({
+          connectionId: account.id,
+          sourceProviderSlug: "oura",
+        })[0]?.status,
+        "connected",
+      );
+
+      const repeatedOlderDay = await restarted.service.runWorkerOnce(account.id);
+      assert.equal(repeatedOlderDay?.kind, "resource");
+      assert.equal(repeatedOlderDay.payload.temporalAuthorityDayKey, "2026-08-09");
+      assert.notEqual(repeatedOlderDay.id, firstOlderDay.id);
+      assert.equal(
+        requestedDays.filter((day) => day === "2026-08-09T00:00:00.000Z").length,
+        2,
+      );
+      const importedEvents = (importerResults as Array<{
+        events?: Array<{
+          dataOrigin?: { sourceProviderSlug?: string };
+          fields?: { metric?: string };
+        }>;
+      }>).flatMap((result) => result.events ?? []);
+      assert.equal(
+        importedEvents.some((event) =>
+          event.fields?.metric === "spo2"
+          && event.dataOrigin?.sourceProviderSlug === "oura"
+        ),
+        true,
+      );
+    } finally {
+      restarted.close();
+    }
+  } finally {
+    if (!fixtureClosed) {
+      fixture.close();
+    }
+  }
+});
+
 test.each([
   {
     expectedProviderDays: ["2030-08-10", "2030-08-11"],

@@ -3718,8 +3718,8 @@ test("device sync store reuses queued jobs with the same dedupe key", async () =
   }
 });
 
-test("device sync store retains completed Junction temporal days across restart and drains newer backlog first", async () => {
-  const tempDir = await makeTempDirectory("murph-device-syncd-store-temporal-history");
+test("device sync store requeues completed Junction temporal days after restart and drains newer backlog first", async () => {
+  const tempDir = await makeTempDirectory("murph-device-syncd-store-temporal-requeue");
   const databasePath = path.join(tempDir, "state.sqlite");
   let store = new SqliteDeviceSyncStore(databasePath);
 
@@ -3760,7 +3760,7 @@ test("device sync store retains completed Junction temporal days across restart 
     store.close();
 
     store = new SqliteDeviceSyncStore(databasePath);
-    const duplicate = store.enqueueJob({
+    const enqueueRepeatedDay = () => store.enqueueJob({
       accountId: account.id,
       availableAt: "2026-04-06T01:00:00.000Z",
       dedupeKey: "junction-temporal-authority:completed",
@@ -3776,8 +3776,16 @@ test("device sync store retains completed Junction temporal days across restart 
       priority: 45,
       provider: "junction",
     });
-    assert.equal(duplicate.id, completed.id);
-    assert.equal(duplicate.status, "succeeded");
+    const repeated = enqueueRepeatedDay();
+    assert.notEqual(repeated.id, completed.id);
+    assert.equal(repeated.status, "queued");
+    assert.equal(enqueueRepeatedDay().id, repeated.id);
+    assert.equal(
+      store.claimDueJob("worker-repeated", "2026-04-06T01:00:00.000Z", 60_000)?.id,
+      repeated.id,
+    );
+    assert.equal(enqueueRepeatedDay().id, repeated.id);
+    store.completeJob(repeated.id, "2026-04-06T01:00:00.001Z");
 
     const older = store.enqueueJob({
       accountId: account.id,

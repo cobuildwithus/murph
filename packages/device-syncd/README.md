@@ -107,10 +107,11 @@ Current providers:
   failed or yielded work grants no authority.
 - The temporal horizon is clamped to 1–14 authoritative vault-local days. The
   newest eligible day imports inline, while older resource/day coordinates use
-  the existing durable queue in newest-first order. Succeeded populated or
-  empty history prevents duplicate work across restarts. At the failure/yield
-  ceiling, 28 temporal rows plus one ordinary reconcile follow-up remain
-  serialized by the existing per-account fence.
+  the existing durable queue in newest-first order. Queued or running work
+  deduplicates across restarts, while succeeded rows remain history rather than
+  suppressing a later scheduled pull whose source roster or provider data may
+  have widened. At the failure/yield ceiling, 28 temporal rows plus one ordinary
+  reconcile follow-up remain serialized by the existing per-account fence.
 - Temporal children never advance generic account completion. That watermark is
   account activity state rather than complete floor coverage, so every scheduled
   reconcile still refetches configured ordinary resources. Collection remains
