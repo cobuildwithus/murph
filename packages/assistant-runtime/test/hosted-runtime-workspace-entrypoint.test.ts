@@ -17710,21 +17710,29 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
-  test("foreground conversation import survives failing same-wake system item", async () => {
-    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runtime-foreground-system-failure-"));
+  test.each([
+    { label: "successful", systemImportFails: false },
+    { label: "failing", systemImportFails: true },
+  ])("foreground conversation stays fresh across $label same-wake activation import", async ({
+    systemImportFails,
+  }) => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runtime-foreground-activation-"));
     const events: string[] = [];
     const fetchRequests: HostedMailboxFetchRequest[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const imported: string[] = [];
+    const phaseInputIds: string[][] = [];
     const mailboxItems: HostedMailboxItem[] = [];
     const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+    let assistantPhaseCalls = 0;
+    let conversationInputId: string | null = null;
 
     try {
       await initializeVault({ createdAt: TEST_NOW, vaultRoot });
       const result = await runHostedWorkspaceRuntimeJobInProcess(
         createWorkspaceRuntimeJobInput({
           request: {
-            attemptId: "attempt_synthetic_runtime_foreground_system_failure",
+            attemptId: "attempt_synthetic_runtime_foreground_activation",
             idleCheckpointDelayMs: 1,
             leaseGeneration: "9",
             userId: TEST_USER_ID,
@@ -17737,23 +17745,26 @@ describe("hosted workspace runtime entrypoint", () => {
             return {
               snapshotRef: createBundleRef({
                 hash: "a".repeat(64),
-                key: "users/bundles/member-synthetic/foreground-system-failure.bundle.json",
+                key: "users/bundles/member-synthetic/foreground-activation.bundle.json",
                 size: 640,
               }),
             };
           },
           async importItem(item) {
-            if (item.item.lane === "system") {
-              events.push(`import:${item.item.lane}:${item.item.laneSeq}`);
-              throw new Error("Synthetic system import failure.");
-            }
-            imported.push(`${item.item.lane}:${item.item.laneSeq}`);
             events.push(`import:${item.item.lane}:${item.item.laneSeq}`);
+            if (item.item.lane === "system") {
+              if (systemImportFails) {
+                throw new Error("Synthetic activation import failure.");
+              }
+              return { status: "imported" };
+            }
+            conversationInputId = await stageAssistantInputEventForMailboxItem({
+              item: item.item,
+              vaultRoot,
+            });
+            imported.push(`${item.item.lane}:${item.item.laneSeq}`);
             return {
-              assistantInputId: await stageAssistantInputEventForMailboxItem({
-                item: item.item,
-                vaultRoot,
-              }),
+              assistantInputId: conversationInputId,
               status: "imported",
             };
           },
@@ -17770,23 +17781,41 @@ describe("hosted workspace runtime entrypoint", () => {
             }),
           }),
           runtimeWakeSignal,
-          async runAssistantPhase() {
-            mailboxItems.push(createMailboxItem({
-              id: "mailbox_item_entrypoint_foreground_system_failure_system_001",
-              kind: "runtime.manual-requested",
-              lane: "system",
-              laneSeq: "1",
-              occurredAt: "2026-04-27T00:00:01.000Z",
-            }));
-            mailboxItems.push(createMailboxItem({
-              id: "mailbox_item_entrypoint_foreground_system_failure_conversation_001",
-              laneSeq: "1",
-              occurredAt: "2026-04-27T00:00:01.500Z",
-            }));
-            runtimeWakeSignal.notify();
-            await waitUntil(() => {
-              assert.ok(imported.includes("conversation:1"));
-            });
+          async runAssistantPhase(input) {
+            assistantPhaseCalls += 1;
+            phaseInputIds.push([
+              ...(input.initialAssistantInputBatch?.assistantInputIds
+                ?? input.initialMailboxImport.importResult.assistantInputIds
+                ?? []),
+            ]);
+            events.push(`assistant:${assistantPhaseCalls}`);
+            if (assistantPhaseCalls === 1) {
+              return {
+                afterCheckpoint: async () => {
+                  mailboxItems.push(createMailboxItem({
+                    id: "mailbox_item_entrypoint_foreground_activation_system_001",
+                    kind: "member.activated",
+                    lane: "system",
+                    laneSeq: "1",
+                    occurredAt: "2026-04-27T00:00:01.000Z",
+                  }));
+                  mailboxItems.push(createMailboxItem({
+                    id: "mailbox_item_entrypoint_foreground_activation_conversation_001",
+                    laneSeq: "1",
+                    occurredAt: "2026-04-27T00:00:01.500Z",
+                  }));
+                  runtimeWakeSignal.notify();
+                  return null;
+                },
+                checkpointReason: "canonical_runtime_commit",
+                progressed: true,
+              };
+            } else if (conversationInputId) {
+              await writeSyntheticAssistantAutoReplyTerminalEvidence({
+                inputId: conversationInputId,
+                vaultRoot,
+              });
+            }
 
             return {
               checkpointReason: "canonical_runtime_commit",
@@ -17798,6 +17827,9 @@ describe("hosted workspace runtime entrypoint", () => {
       );
 
       assert.deepEqual(imported, ["conversation:1"]);
+      assert.equal(assistantPhaseCalls, 2);
+      assert.ok(conversationInputId);
+      assert.deepEqual(phaseInputIds[1], [conversationInputId]);
       assert.equal(result.redactedStatus?.hostedMailboxConversationImportedSeq, "1");
       assert.equal(
         checkpointRequests[0]?.redactedStatus?.hostedMailboxConversationImportedSeq,
@@ -17806,6 +17838,10 @@ describe("hosted workspace runtime entrypoint", () => {
       assert.ok(
         requireEventIndex(events, "import:conversation:1")
         < requireEventIndex(events, "import:system:1"),
+      );
+      assert.ok(
+        requireEventIndex(events, "import:system:1")
+        < requireEventIndex(events, "assistant:2"),
       );
     } finally {
       await removeTempRoot(vaultRoot);
