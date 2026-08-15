@@ -39,7 +39,7 @@ Run the watcher scheduler uninstall command. This unloads only its managed launc
 - The correction pass removed the out-of-scope diagnosis, remediation, review, branch, and draft-PR lifecycle rather than leaving dormant code behind.
 - Provider-child execution now ignores mutable user configuration, pins its model and effort, disables unrelated capabilities, and exposes only the pinned Cloudflare Observability MCP executable.
 - Database collection has a deterministic one-session aggregate query with explicit cardinality tests. Subprocess cancellation now remains connected while waiting for the durable state lock.
-- ReviewGPT `0.5.127` matches the latest published package. Its latest exact-head audit found two launch blockers: Vercel/Stripe raw provider-record ingestion and non-transactional launchd replacement. The correction removes row/event ingestion in favor of ignored-stdio status probes and restores the prior plist/job state after candidate activation failure; a fresh review of the final pushed head remains an activation gate.
+- ReviewGPT `0.5.127` matches the latest published package. Its latest exact-head audit confirmed the prior provider-boundary and transactional-cutover fixes, then found two launch blockers: pre-Node scheduler Git checks still trusted a mutable PATH and ambient configuration, and the Codex child retained obsolete event semantics. The correction uses absolute system Git with an isolated configuration and fsmonitor disabled across installation and launch, proves hostile home Git/global fsmonitor cannot run while wrong or dirty trees still fail closed, and reduces Codex stdout handling to byte counting only. A fresh review of the final pushed head remains an activation gate.
 
 ## Decisions
 

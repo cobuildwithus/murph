@@ -135,6 +135,13 @@ const SCHEDULER_INTERVAL_MS = 300_000;
 const LAUNCHD_LABEL = "com.murph.prod-watch";
 const LAUNCHD_MANAGED_MARKER = "murph-prod-watch-managed:v1";
 const SCHEDULER_SYSTEM_PATHS = ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin"] as const;
+const SCHEDULER_GIT_EXECUTABLE = "/usr/bin/git";
+const SCHEDULER_GIT_CONFIG_ARGS = [
+  "-c",
+  "core.fsmonitor=false",
+  "-c",
+  "core.untrackedCache=false",
+] as const;
 const SCHEDULER_CODEX_HOME_BASENAME = ".codex-6";
 const CODEX_BIN_ENV = "MURPH_PROD_WATCH_CODEX_BIN";
 const CODEX_SHA256_ENV = "MURPH_PROD_WATCH_CODEX_SHA256";
@@ -1320,7 +1327,7 @@ async function readOverlapEvent(): Promise<{ at: string } | undefined> {
 
 async function resolveRepositorySha(signal?: AbortSignal): Promise<string | undefined> {
   throwIfAborted(signal);
-  const result = await spawnCaptured("git", ["rev-parse", "HEAD"], {
+  const result = await spawnSchedulerGit(["rev-parse", "HEAD"], {
     timeoutMs: 2_000,
     outputLimitBytes: 1_024,
     signal,
@@ -1531,12 +1538,6 @@ export async function spawnStatusOnly(
   });
 }
 
-interface CodexJsonSummary {
-  sessionId?: string;
-  threadId?: string;
-  terminalStatus?: string;
-}
-
 export async function spawnCodexJsonChild(
   command: string,
   args: string[],
@@ -1552,7 +1553,6 @@ export async function spawnCodexJsonChild(
   status: number;
   timedOut: boolean;
   outputTooLarge: boolean;
-  summary: CodexJsonSummary;
 }> {
   if (options.signal?.aborted === true) {
     throw Object.assign(new Error("provider_child_aborted"), { code: "ABORT_ERR" });
@@ -1572,15 +1572,13 @@ export async function spawnCodexJsonChild(
     let terminationPromise: Promise<void> | undefined;
     let pendingError: unknown;
     let stdoutBytes = 0;
-    let lineRemainder = "";
-    const summary: CodexJsonSummary = {};
     const finish = (status: number) => {
       if (settled) {
         return;
       }
       settled = true;
       cleanup();
-      resolve({ status, timedOut, outputTooLarge, summary });
+      resolve({ status, timedOut, outputTooLarge });
     };
     const fail = (error: unknown) => {
       if (settled) {
@@ -1630,21 +1628,12 @@ export async function spawnCodexJsonChild(
         outputTooLarge = true;
         pendingError = Object.assign(new Error("provider_child_output_too_large"), { code: "EFBIG" });
         terminate();
-        return;
-      }
-      const lines = `${lineRemainder}${chunk}`.split(/\r?\n/u);
-      lineRemainder = lines.pop() ?? "";
-      for (const line of lines) {
-        updateCodexJsonSummary(summary, line);
       }
     });
     child.on("close", (status, signal) => {
       void (async () => {
         terminationPromise ??= terminateOwnedProcessGroup(child.pid);
         await terminationPromise;
-        if (lineRemainder.length > 0) {
-          updateCodexJsonSummary(summary, lineRemainder);
-        }
         if (pendingError !== undefined) {
           fail(pendingError);
           return;
@@ -1654,40 +1643,6 @@ export async function spawnCodexJsonChild(
     });
     child.stdin?.end(options.stdin);
   });
-}
-
-function updateCodexJsonSummary(summary: CodexJsonSummary, line: string): void {
-  const trimmed = line.trim();
-  if (trimmed.length === 0 || !trimmed.startsWith("{") || !trimmed.endsWith("}")) {
-    return;
-  }
-  let parsed: Record<string, unknown>;
-  try {
-    parsed = JSON.parse(trimmed) as Record<string, unknown>;
-  } catch {
-    return;
-  }
-  const type = typeof parsed.type === "string" ? normalizeToken(parsed.type, 64) : undefined;
-  const status = typeof parsed.status === "string" ? normalizeToken(parsed.status, 64) : undefined;
-  const sessionId = typeof parsed.session_id === "string"
-    ? parsed.session_id
-    : typeof parsed.sessionId === "string"
-      ? parsed.sessionId
-      : undefined;
-  const threadId = typeof parsed.thread_id === "string"
-    ? parsed.thread_id
-    : typeof parsed.threadId === "string"
-      ? parsed.threadId
-      : undefined;
-  if (sessionId !== undefined) {
-    summary.sessionId = normalizeToken(sessionId, 96);
-  }
-  if (threadId !== undefined) {
-    summary.threadId = normalizeToken(threadId, 96);
-  }
-  if (status !== undefined && type !== undefined && /(?:complete|completed|error|failed|turn)/iu.test(type)) {
-    summary.terminalStatus = status;
-  }
 }
 
 function appendWithinByteLimit(current: string, chunk: string, limitBytes: number): string {
@@ -1971,6 +1926,7 @@ export function renderLaunchdPlistTemplate(
     .replaceAll("__LABEL__", xmlEscape(LAUNCHD_LABEL))
     .replaceAll("__REPO_HOME_RELATIVE__", xmlEscape(portableRepoPath))
     .replaceAll("__NODE_EXECUTABLE__", xmlEscape(portableNodeExecutable))
+    .replaceAll("__GIT_EXECUTABLE__", xmlEscape(SCHEDULER_GIT_EXECUTABLE))
     .replaceAll("__CODEX_EXECUTABLE__", xmlEscape(portableCodexExecutable))
     .replaceAll("__CODEX_SHA256__", xmlEscape(codexSha256))
     .replaceAll("__CODEX_HOME_BASENAME__", xmlEscape(SCHEDULER_CODEX_HOME_BASENAME))
@@ -1981,12 +1937,12 @@ export function renderLaunchdPlistTemplate(
 
 async function resolveSchedulerApprovedHead(): Promise<string> {
   const [headResult, statusResult] = await Promise.all([
-    spawnCaptured("git", ["rev-parse", "--verify", "HEAD"], {
+    spawnSchedulerGit(["rev-parse", "--verify", "HEAD"], {
       cwd: repoRoot,
       timeoutMs: 10_000,
       outputLimitBytes: 1_024,
     }),
-    spawnCaptured("git", ["status", "--porcelain=v1", "--untracked-files=no"], {
+    spawnSchedulerGit(["status", "--porcelain=v1", "--untracked-files=no"], {
       cwd: repoRoot,
       timeoutMs: 10_000,
       outputLimitBytes: 64 * 1_024,
@@ -2011,7 +1967,7 @@ async function resolveSchedulerApprovedHead(): Promise<string> {
 }
 
 async function preparePinnedSchedulerRuntime(approvedHead: string): Promise<{ root: string; head: string }> {
-  const object = await spawnCaptured("git", ["cat-file", "-e", `${approvedHead}^{commit}`], {
+  const object = await spawnSchedulerGit(["cat-file", "-e", `${approvedHead}^{commit}`], {
     cwd: repoRoot,
     timeoutMs: 10_000,
     outputLimitBytes: 1_024,
@@ -2068,8 +2024,39 @@ function buildParentPackageInstallEnv(): NodeJS.ProcessEnv {
   return env;
 }
 
+function buildSchedulerGitEnvironment(): NodeJS.ProcessEnv {
+  return {
+    PATH: SCHEDULER_SYSTEM_PATHS.join(":"),
+    HOME: os.homedir(),
+    TMPDIR: os.tmpdir(),
+    LANG: "C.UTF-8",
+    LC_ALL: "C.UTF-8",
+    NO_COLOR: "1",
+    GIT_CONFIG_NOSYSTEM: "1",
+    GIT_CONFIG_GLOBAL: "/dev/null",
+    GIT_TERMINAL_PROMPT: "0",
+    GIT_OPTIONAL_LOCKS: "0",
+  };
+}
+
+async function spawnSchedulerGit(
+  args: string[],
+  options: {
+    timeoutMs: number;
+    outputLimitBytes: number;
+    cwd?: string;
+    signal?: AbortSignal;
+  },
+): Promise<{ status: number; stdout: string; stderr: string; timedOut: boolean }> {
+  return await spawnCaptured(
+    SCHEDULER_GIT_EXECUTABLE,
+    [...SCHEDULER_GIT_CONFIG_ARGS, ...args],
+    { ...options, env: buildSchedulerGitEnvironment() },
+  );
+}
+
 async function resolveRequiredGitHead(cwd: string): Promise<string> {
-  const result = await spawnCaptured("git", ["rev-parse", "HEAD"], {
+  const result = await spawnSchedulerGit(["rev-parse", "HEAD"], {
     cwd,
     timeoutMs: 10_000,
     outputLimitBytes: 1_024,
@@ -2089,8 +2076,7 @@ async function createSelfContainedSchedulerRuntime(
 ): Promise<void> {
   const stagingRoot = path.join(parent, `.creating-${approvedHead}-${randomUUID()}`);
   try {
-    const initialized = await spawnCaptured(
-      "git",
+    const initialized = await spawnSchedulerGit(
       ["init", "--quiet", stagingRoot],
       { cwd: parent, timeoutMs: 10_000, outputLimitBytes: 4 * 1_024 },
     );
@@ -2101,10 +2087,11 @@ async function createSelfContainedSchedulerRuntime(
     for (const [key, value] of [
       ["core.hooksPath", "/dev/null"],
       ["core.logAllRefUpdates", "false"],
+      ["core.fsmonitor", "false"],
+      ["core.untrackedCache", "false"],
       ["gc.auto", "0"],
     ] as const) {
-      const configured = await spawnCaptured(
-        "git",
+      const configured = await spawnSchedulerGit(
         ["config", key, value],
         { cwd: stagingRoot, timeoutMs: 10_000, outputLimitBytes: 4 * 1_024 },
       );
@@ -2112,8 +2099,7 @@ async function createSelfContainedSchedulerRuntime(
         throw new Error("scheduler_pinned_runtime_create_failed");
       }
     }
-    const fetched = await spawnCaptured(
-      "git",
+    const fetched = await spawnSchedulerGit(
       [
         "-c",
         "protocol.file.allow=always",
@@ -2130,8 +2116,7 @@ async function createSelfContainedSchedulerRuntime(
     if (fetched.status !== 0 || fetched.timedOut) {
       throw new Error("scheduler_pinned_runtime_create_failed");
     }
-    const checkedOut = await spawnCaptured(
-      "git",
+    const checkedOut = await spawnSchedulerGit(
       ["checkout", "--quiet", "--detach", approvedHead],
       { cwd: stagingRoot, timeoutMs: 120_000, outputLimitBytes: 64 * 1_024 },
     );
@@ -2155,12 +2140,12 @@ async function createSelfContainedSchedulerRuntime(
 async function assertPinnedSchedulerRuntime(root: string, approvedHead: string): Promise<void> {
   const [head, status, commonDirectory] = await Promise.all([
     resolveRequiredGitHead(root),
-    spawnCaptured("git", ["status", "--porcelain=v1", "--untracked-files=no"], {
+    spawnSchedulerGit(["status", "--porcelain=v1", "--untracked-files=no"], {
       cwd: root,
       timeoutMs: 10_000,
       outputLimitBytes: 64 * 1_024,
     }),
-    spawnCaptured("git", ["rev-parse", "--path-format=absolute", "--git-common-dir"], {
+    spawnSchedulerGit(["rev-parse", "--path-format=absolute", "--git-common-dir"], {
       cwd: root,
       timeoutMs: 10_000,
       outputLimitBytes: 4 * 1_024,
@@ -2194,6 +2179,7 @@ export async function verifySchedulerExecutableChain(
 ): Promise<void> {
   const requiredPaths: Array<[string, number]> = [
     [nodeExecutable, fsConstants.X_OK],
+    [SCHEDULER_GIT_EXECUTABLE, fsConstants.X_OK],
     [path.join(repositoryRoot, "node_modules", "tsx", "dist", "cli.mjs"), fsConstants.R_OK],
     [path.join(repositoryRoot, "tsconfig.tools.json"), fsConstants.R_OK],
     [path.join(repositoryRoot, "scripts", "prod-watch.ts"), fsConstants.R_OK],

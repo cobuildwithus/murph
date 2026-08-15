@@ -105,6 +105,20 @@ describe("production-watch snapshot contract", () => {
     expect(existsSync(markerPath)).toBe(false);
   });
 
+  it("drains Codex JSON output without retaining event semantics", async () => {
+    const result = await spawnCodexJsonChild(
+      process.execPath,
+      ["-e", "process.stdout.write('{\"type\":\"turn.completed\",\"session_id\":\"discarded\",\"status\":\"completed\"}\\n')"],
+      {
+        stdin: "",
+        timeoutMs: 5_000,
+        outputLimitBytes: 1_024,
+      },
+    );
+
+    expect(result).toEqual({ status: 0, timedOut: false, outputTooLarge: false });
+  });
+
   it("publishes a subprocess timeout before a resistant child settles", async () => {
     const runtimeRoot = makeTempRoot();
     const childPath = path.join(runtimeRoot, "resistant-child.cjs");
@@ -3030,6 +3044,7 @@ describe("production-watch static safety contracts", () => {
     expect(template).toContain("murph-prod-watch-managed:v1");
     expect(template).toContain("__REPO_HOME_RELATIVE__");
     expect(template).toContain("__NODE_EXECUTABLE__");
+    expect(template).toContain("__GIT_EXECUTABLE__");
     expect(template).toContain("__SCHEDULER_PATH__");
     expect(template).toContain("<string>-f</string>\n    <string>-c</string>");
     expect(template).toContain("<string>-c</string>");
@@ -3056,16 +3071,20 @@ describe("production-watch static safety contracts", () => {
     expect(rendered).toContain("$HOME/tools/node");
     expect(rendered).toContain("$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin");
     expect(rendered).toContain("export HOME=~;");
+    expect(rendered).toContain("exec /usr/bin/env -i HOME=&quot;$HOME&quot;");
     expect(rendered).toContain("node_modules/tsx/dist/cli.mjs");
     expect(rendered).toContain("scripts/prod-watch.ts&quot; run --scheduled");
-    expect(rendered).toContain("export CODEX_HOME=&quot;$HOME/.codex-6&quot;");
+    expect(rendered).toContain("CODEX_HOME=&quot;$HOME/.codex-6&quot;");
     expect(rendered).not.toContain("MURPH_PROD_WATCH_CODEX_PROFILE");
-    expect(rendered).toContain("export MURPH_PROD_WATCH_CODEX_BIN=&quot;$HOME/tools/codex&quot;");
-    expect(rendered).toContain("export MURPH_PROD_WATCH_CODEX_SHA256=&quot;");
+    expect(rendered).toContain("MURPH_PROD_WATCH_CODEX_BIN=&quot;$HOME/tools/codex&quot;");
+    expect(rendered).toContain("MURPH_PROD_WATCH_CODEX_SHA256=&quot;");
     expect(rendered).toContain("unset NODE_ENV NODE_OPTIONS MURPH_PROD_WATCH_TEST_RUNTIME_ROOT");
-    expect(rendered).toContain("tracked_status=&quot;$(git status --porcelain=v1 --untracked-files=no)&quot;");
+    expect(rendered).toContain("GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null");
+    expect(rendered).toContain("/usr/bin/git&quot; -c core.fsmonitor=false -c core.untrackedCache=false");
+    expect(rendered).toContain("tracked_status=&quot;$(&quot;/usr/bin/git&quot;");
     expect(rendered).toContain("test -z &quot;$tracked_status&quot;");
     expect(rendered).not.toContain("test -z &quot;$(git status");
+    expect(rendered).not.toContain("__GIT_EXECUTABLE__");
     expect(rendered).not.toContain("__CODEX_EXECUTABLE__");
     expect(rendered).not.toContain("__CODEX_SHA256__");
     expect(rendered).toContain("--provider-child");
@@ -3176,6 +3195,28 @@ describe("production-watch static safety contracts", () => {
       const schedulerCodexPath = path.join(helperRoot, "codex");
       writeFakeCodexExecutable(schedulerCodexPath);
       writeFakeProviderCliExecutables(helperRoot);
+      const ambientGitMarkerPath = path.join(schedulerHome, "ambient-git-marker");
+      const globalFsmonitorMarkerPath = path.join(schedulerHome, "global-fsmonitor-marker");
+      const blockingFsmonitorPath = path.join(helperRoot, "blocking-fsmonitor");
+      writeFileSync(path.join(helperRoot, "git"), [
+        "#!/bin/sh",
+        ": > \"$HOME/ambient-git-marker\"",
+        "sleep 30",
+        "exit 75",
+        "",
+      ].join("\n"), { mode: 0o755 });
+      writeFileSync(blockingFsmonitorPath, [
+        "#!/bin/sh",
+        ": > \"$HOME/global-fsmonitor-marker\"",
+        "sleep 30",
+        "exit 76",
+        "",
+      ].join("\n"), { mode: 0o755 });
+      writeFileSync(
+        path.join(schedulerHome, ".gitconfig"),
+        `[core]\n\tfsmonitor = ${JSON.stringify(blockingFsmonitorPath)}\n`,
+        { mode: 0o600 },
+      );
       const template = readFileSync(
         path.join(repoRoot, "scripts", "prod-watch", "com.murph.prod-watch.plist.template"),
         "utf8",
@@ -3206,6 +3247,10 @@ describe("production-watch static safety contracts", () => {
         .replace(
           "unset NODE_ENV NODE_OPTIONS MURPH_PROD_WATCH_TEST_RUNTIME_ROOT TEST_PROVIDER_FIXTURE TEST_NODE_MODULES_SOURCE TEST_MCP_REMOTE_BIN TEST_CODEX_ARGS_CAPTURE TEST_CODEX_PROMPT_CAPTURE TEST_CODEX_EXTRA_MCP; ",
           "",
+        )
+        .replace(
+          "exec /usr/bin/env -i ",
+          "exec /usr/bin/env -i NODE_ENV=\"$NODE_ENV\" MURPH_PROD_WATCH_TEST_RUNTIME_ROOT=\"$MURPH_PROD_WATCH_TEST_RUNTIME_ROOT\" TEST_DATABASE_FIXTURE=\"$TEST_DATABASE_FIXTURE\" TEST_MCP_REMOTE_BIN=\"$TEST_MCP_REMOTE_BIN\" TEST_NODE_EXECUTABLE=\"$TEST_NODE_EXECUTABLE\" TMPDIR=\"$TMPDIR\" ",
         );
       const run = spawnSync("/bin/zsh", ["-f", "-c", testCommand], {
         cwd: path.parse(checkoutRoot).root,
@@ -3239,25 +3284,15 @@ describe("production-watch static safety contracts", () => {
       expect(snapshot.collectorFailures.some((failure) => failure.code === "helper_not_found"))
         .toBe(false);
       expect(existsSync(startupMarkerPath)).toBe(false);
+      expect(existsSync(ambientGitMarkerPath)).toBe(false);
+      expect(existsSync(globalFsmonitorMarkerPath)).toBe(false);
 
       const failClosedMarkerPath = path.join(schedulerHome, "fail-closed-marker");
       const markerNodePath = path.join(helperRoot, "marker-node");
       writeFileSync(markerNodePath, [
         "#!/bin/sh",
-        ": > \"$TEST_FAIL_CLOSED_MARKER\"",
+        `: > ${JSON.stringify(failClosedMarkerPath)}`,
         "exit 0",
-        "",
-      ].join("\n"), { mode: 0o755 });
-      writeFileSync(path.join(helperRoot, "git"), [
-        "#!/bin/sh",
-        "if [ \"$1\" = \"rev-parse\" ] && [ \"$2\" = \"HEAD\" ]; then",
-        "  printf '%s\\n' \"$TEST_SCHEDULER_APPROVED_HEAD\"",
-        "  exit 0",
-        "fi",
-        "if [ \"$1\" = \"status\" ]; then",
-        "  exit 73",
-        "fi",
-        "exit 74",
         "",
       ].join("\n"), { mode: 0o755 });
       const failClosedPlistPath = path.join(testRoot, "scheduler-fail-closed.plist");
@@ -3269,7 +3304,7 @@ describe("production-watch static safety contracts", () => {
           schedulerHome,
           markerNodePath,
           runtimeRoot,
-          approvedHead,
+          "f".repeat(40),
           schedulerCodexPath,
           createHash("sha256").update(readFileSync(schedulerCodexPath)).digest("hex"),
         ),
@@ -3289,14 +3324,46 @@ describe("production-watch static safety contracts", () => {
           env: {
             HOME: schedulerHome,
             PATH: "/usr/bin:/bin",
-            TEST_FAIL_CLOSED_MARKER: failClosedMarkerPath,
-            TEST_SCHEDULER_APPROVED_HEAD: approvedHead,
           },
           timeout: 5_000,
         },
       );
       expect(failClosedRun.status).not.toBe(0);
       expect(existsSync(failClosedMarkerPath)).toBe(false);
+      expect(existsSync(ambientGitMarkerPath)).toBe(false);
+      expect(existsSync(globalFsmonitorMarkerPath)).toBe(false);
+
+      const trackedPath = path.join(checkoutRoot, "scripts", "prod-watch.ts");
+      writeFileSync(trackedPath, `${readFileSync(trackedPath, "utf8")}\n`);
+      writeFileSync(
+        failClosedPlistPath,
+        renderLaunchdPlistTemplate(
+          template,
+          checkoutRoot,
+          schedulerHome,
+          markerNodePath,
+          runtimeRoot,
+          approvedHead,
+          schedulerCodexPath,
+          createHash("sha256").update(readFileSync(schedulerCodexPath)).digest("hex"),
+        ),
+      );
+      const dirtyCommandResult = spawnSync(
+        "/usr/libexec/PlistBuddy",
+        ["-c", "Print :ProgramArguments:3", failClosedPlistPath],
+        { encoding: "utf8" },
+      );
+      expect(dirtyCommandResult.status).toBe(0);
+      const dirtyRun = spawnSync("/bin/zsh", ["-f", "-c", dirtyCommandResult.stdout.trim()], {
+        cwd: path.parse(checkoutRoot).root,
+        encoding: "utf8",
+        env: { HOME: schedulerHome, PATH: "/usr/bin:/bin" },
+        timeout: 5_000,
+      });
+      expect(dirtyRun.status).not.toBe(0);
+      expect(existsSync(failClosedMarkerPath)).toBe(false);
+      expect(existsSync(ambientGitMarkerPath)).toBe(false);
+      expect(existsSync(globalFsmonitorMarkerPath)).toBe(false);
     },
   );
 
@@ -3318,7 +3385,38 @@ describe("production-watch static safety contracts", () => {
       mkdirSync(binRoot, { recursive: true });
       mkdirSync(launchAgentsRoot, { recursive: true });
       mkdirSync(schedulerHelperRoot, { recursive: true });
-      symlinkSync(repoRoot, checkoutRoot, "dir");
+      mkdirSync(path.join(checkoutRoot, "scripts"), { recursive: true });
+      for (const relativePath of [
+        "package.json",
+        "pnpm-lock.yaml",
+        "tsconfig.base.json",
+        "tsconfig.tools.json",
+        "scripts/prod-watch.ts",
+        "scripts/prod-watch.test-entry.ts",
+      ]) {
+        copyFileSync(path.join(repoRoot, relativePath), path.join(checkoutRoot, relativePath));
+      }
+      cpSync(
+        path.join(repoRoot, "scripts", "prod-watch"),
+        path.join(checkoutRoot, "scripts", "prod-watch"),
+        { recursive: true },
+      );
+      const checkoutGit = (...args: string[]) => spawnSync("/usr/bin/git", args, {
+        cwd: checkoutRoot,
+        encoding: "utf8",
+        env: {
+          PATH: "/usr/bin:/bin",
+          HOME: fakeHome,
+          GIT_CONFIG_NOSYSTEM: "1",
+          GIT_CONFIG_GLOBAL: "/dev/null",
+        },
+      });
+      expect(checkoutGit("init", "--quiet").status).toBe(0);
+      expect(checkoutGit("config", "user.name", "Production Watch").status).toBe(0);
+      expect(checkoutGit("config", "user.email", "prod-watch@example.invalid").status).toBe(0);
+      expect(checkoutGit("add", ".").status).toBe(0);
+      expect(checkoutGit("commit", "--quiet", "-m", "scheduler fixture").status).toBe(0);
+      const approvedHead = checkoutGit("rev-parse", "HEAD").stdout.trim();
       writeFileSync(schedulerHelperPath, "#!/bin/sh\nexit 0\n", { mode: 0o755 });
       chmodSync(schedulerHelperPath, 0o755);
 
@@ -3374,22 +3472,14 @@ describe("production-watch static safety contracts", () => {
         LAUNCHCTL_LOG: launchctlLog,
         LAUNCHCTL_STATE: launchctlState,
         MURPH_PROD_WATCH_CODEX_BIN: path.join(binRoot, "codex"),
-        MURPH_PROD_WATCH_APPROVED_HEAD: spawnSync(
-          "git",
-          ["rev-parse", "HEAD"],
-          { cwd: repoRoot, encoding: "utf8" },
-        ).stdout.trim(),
+        MURPH_PROD_WATCH_APPROVED_HEAD: approvedHead,
         PATH: `${binRoot}:${process.env.PATH ?? ""}`,
         TEST_NODE_MODULES_SOURCE: path.join(repoRoot, "node_modules"),
         TEST_MCP_REMOTE_BIN: path.join(binRoot, "codex"),
         TEST_PROVIDER_FIXTURE: path.join(fixtureRoot, "healthy.providers.json"),
       };
 
-      const conflictingHead = spawnSync(
-        "git",
-        ["rev-parse", "HEAD^"],
-        { cwd: repoRoot, encoding: "utf8" },
-      ).stdout.trim();
+      const conflictingHead = "f".repeat(40);
       const conflictingInstall = runProdWatchFromCheckout(
         ["scheduler", "install"],
         runtimeRoot,
@@ -3631,6 +3721,7 @@ describe("production-watch static safety contracts", () => {
     expect(skill).not.toContain("If invoked by the provider-child prompt");
     expect(skill).not.toContain("--provider-evidence");
     expect(operations).toContain("The Cloudflare child is an internal adapter, not an operator command.");
+    expect(operations).toContain("it retains no event text or semantics");
     expect(operations).not.toContain("--provider-evidence");
     expect(operations).not.toContain("tells Codex to use the production-watch skill");
     expect(skill).toContain(
@@ -3786,6 +3877,7 @@ function installDatabaseFixtureHelper(
   const helperScriptPath = path.join(binRoot, "database-fixture.cjs");
   writeFileSync(helperScriptPath, [
     "const { readFileSync } = require('node:fs');",
+    "const { spawn } = require('node:child_process');",
     "const tracker = process.env.TEST_PROVIDER_TRACKER_PATH === undefined ? { withTrackedProviderWork: async (_label, _gated, operation) => await operation() } : require(process.env.TEST_PROVIDER_TRACKER_PATH);",
     "void tracker.withTrackedProviderWork('database', false, async () => {",
     "  const evidence = JSON.parse(readFileSync(process.env.TEST_DATABASE_FIXTURE, 'utf8'));",
@@ -3793,6 +3885,10 @@ function installDatabaseFixtureHelper(
     "  evidence.collectedAt = flags.window_end;",
     "  evidence.freshnessSeconds = 0;",
     "  evidence.fingerprints = evidence.fingerprints.map((entry) => ({ ...entry, firstSeenAt: flags.previous_start, lastSeenAt: flags.window_end }));",
+    "  if (process.env.TEST_SIGNALER_PATH !== undefined) {",
+    "    const child = spawn(process.env.TEST_SIGNALER_PATH, [String(process.ppid)], { detached: true, stdio: 'ignore' });",
+    "    child.unref();",
+    "  }",
     "  process.stdout.write(`${JSON.stringify(evidence)}\\n`);",
     "}).catch((error) => { console.error(error instanceof Error ? error.message : 'database_fixture_failed'); process.exitCode = 1; });",
     "",
