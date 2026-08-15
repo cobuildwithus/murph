@@ -7352,6 +7352,48 @@ test("Junction workout streams enforce their narrower response cap before SDK pa
   assert.equal(bodyCancelled, true);
 });
 
+test("Junction workout streams enforce their narrower response cap for chunked bodies", async () => {
+  let bodyCancelled = false;
+  let requests = 0;
+  let chunkIndex = 0;
+  const chunks = [
+    new Uint8Array(JUNCTION_WORKOUT_STREAM_MAX_RESPONSE_BYTES),
+    new Uint8Array([0x20]),
+  ];
+  const client = new JunctionClient({
+    apiKey: "sk_us_test_123",
+    environment: "sandbox",
+    region: "us",
+    fetchImpl: async () => {
+      requests += 1;
+      return new Response(new ReadableStream<Uint8Array>({
+        pull(controller) {
+          const chunk = chunks[chunkIndex];
+          chunkIndex += 1;
+          if (chunk) {
+            controller.enqueue(chunk);
+          }
+        },
+        cancel() {
+          bodyCancelled = true;
+        },
+      }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    },
+  });
+
+  await assert.rejects(
+    () => client.getWorkoutStream({ workoutId: "workout-chunked-over-limit" }),
+    (error) => error instanceof DeviceSyncError
+      && error.code === "JUNCTION_API_RESPONSE_TOO_LARGE"
+      && !error.retryable,
+  );
+  assert.equal(requests, 1);
+  assert.equal(bodyCancelled, true);
+});
+
 test("Junction optional user lookup cancels unread 404 response bodies", async () => {
   let bodyCancelled = false;
   const client = new JunctionClient({

@@ -32,8 +32,11 @@ Use this as Murph operating guidance, not as a consumer article. Ground the answ
   `vault-cli wearables day <date> --format json`; for all workouts, types,
   count, duration, or normalized detail, next run
   `vault-cli wearables activity list --date <date> --format json`. Its canonical
-  workout-day rollup owns the answer; do not stop at one selected activity or
-  rebuild the rollup from provider records.
+  workout-day rollup owns the answer. When available, `workoutFeatures`
+  associates bounded heart-rate, cadence, power, speed, and split details with
+  each workout by provider and start time. Use that association for multiple
+  workouts on the same date; do not stop at one selected activity or rebuild
+  the rollup from provider records.
 - When the day or activity summary omits the specific signal the user asked
   about, use the lossless global observation read
   `vault-cli measurement entry list --metric <metric> --from <date> --to <date> --limit 50 --format json`.
@@ -80,8 +83,10 @@ Ask: "Do you want more total steps, fewer long sitting blocks, or a simple movem
 
 - For a factual day or workout request, answer the question directly from the
   normalized result: give the canonical count and total, then list only the
-  activity types or session details that result actually exposes. Do not force
-  coaching or invent a session label that the normalized surface omits.
+  activity types or workout details that result actually exposes. Treat an
+  empty `splits` array as no retained split facets for that workout, including
+  after a provider correction. Do not force coaching or invent a session label
+  that the normalized surface omits.
 - For a coaching request, give one baseline-relative target and one
   friction-reduction tactic. Prefer movement the user can repeat daily over a
   heroic one-day goal, and say how to reassess after 1-2 weeks.

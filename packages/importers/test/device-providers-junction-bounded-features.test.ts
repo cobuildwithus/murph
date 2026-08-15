@@ -234,6 +234,37 @@ test("workout stream reduction is bounded by admitted samples and never preserve
   }), /1-1 timestamps/u);
 });
 
+test("workout stream reduction preserves heart-rate halves and cycling cadence semantics", () => {
+  const feature = reduceJunctionWorkoutStreamPayload({
+    maxSamples: 4,
+    summary: {
+      id: "ride-1",
+      sourceProviderSlug: "garmin",
+      sport: "road_cycling",
+      updated_at: "2026-07-01T13:00:00.000Z",
+    },
+    stream: {
+      time: [1_783_000_000, 1_783_000_010, 1_783_000_070, 1_783_000_100],
+      heart_rate: [100, 120, 160, 180],
+      cadence: [80, 90, 100, 110],
+      power: [200, 220, 260, 300],
+      velocity_smooth: [5, 6, 7, 8],
+    },
+  });
+
+  assert.equal(feature.averageHeartRate, 140);
+  assert.equal(feature.maxHeartRate, 180);
+  assert.equal(feature.firstHalfAverageHeartRate, 110);
+  assert.equal(feature.secondHalfAverageHeartRate, 170);
+  assert.equal(feature.averageCadence, 95);
+  assert.equal(feature.maxCadence, 110);
+  assert.equal(feature.cadenceUnit, "rpm");
+  assert.equal(feature.averagePower, 245);
+  assert.equal(feature.maxPower, 300);
+  assert.equal(feature.averageSpeed, 6.5);
+  assert.equal(feature.maxSpeed, 8);
+});
+
 test("workout stream splits interpolate fixed boundaries and omit partial starts", () => {
   const run = reduceJunctionWorkoutStreamPayload({
     maxSamples: 10,

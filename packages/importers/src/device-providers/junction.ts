@@ -2190,6 +2190,10 @@ function pushJunctionWorkoutStreamFeature(
   const maxPower = firstNonNegativeNumberFromPaths(entry, ["maxPower"]);
   const averageSpeed = firstNonNegativeNumberFromPaths(entry, ["averageSpeed"]);
   const maxSpeed = firstNonNegativeNumberFromPaths(entry, ["maxSpeed"]);
+  const sport = firstStringFromPaths(entry, ["sport"]);
+  const workoutTags = sport
+    ? [`workout-sport-${trimSlugToLength(slugify(sport, "workout"), 60)}`]
+    : undefined;
   const measurements = [
     ...(durationSeconds === undefined
       ? []
@@ -2248,6 +2252,7 @@ function pushJunctionWorkoutStreamFeature(
     dayKey: timestamp.dayKey,
     source: "device",
     title: "Junction workout stream features",
+    tags: workoutTags,
     evidenceRoles: resourceContext.evidenceRoles,
     externalRef: makeJunctionExternalRef(
       resourceContext,
@@ -2304,9 +2309,10 @@ function pushJunctionWorkoutStreamFeature(
       kind: "measurement",
       occurredAt: splitEndedAt,
       recordedAt: timestamp.recordedAt,
-      dayKey: extractIsoDatePrefix(splitEndedAt) ?? timestamp.dayKey,
+      dayKey: timestamp.dayKey,
       source: "device",
       title: `Junction workout split ${splitIndex}`,
+      tags: workoutTags,
       evidenceRoles: resourceContext.evidenceRoles,
       externalRef: makeJunctionExternalRef(
         resourceContext,

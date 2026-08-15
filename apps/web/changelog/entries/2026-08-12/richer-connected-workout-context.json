@@ -7,7 +7,7 @@
     "priority": 4,
     "title": "Richer context for connected workouts",
     "summary": "Murph can now retain bounded cadence, power, heart-rate, split, distance, duration, and swimming features from supported workouts.",
-    "details": "Murph reduces each exact workout stream into compact features and does not retain coordinates, raw points, complete curves, or provider response arrays.",
+    "details": "Workout context can now include compact heart-rate, cadence, power, speed, and split details for each connected workout. Murph does not retain coordinates, raw points, complete curves, or provider response arrays.",
     "relevanceTags": ["wearables", "workouts", "running", "cycling", "swimming", "privacy"],
     "sourcePullRequests": [1699]
   }
