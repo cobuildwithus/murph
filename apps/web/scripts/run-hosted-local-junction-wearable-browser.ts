@@ -52,9 +52,10 @@ interface AuthorizationCheckboxSummary {
   visibleUnchecked: number;
 }
 
-interface PositiveAuthorizationControlSummary {
+interface AuthorizationControlStructuralSummary {
   total: number;
   visible: number;
+  visibleChecked: number;
   visibleEnabled: number;
 }
 
@@ -488,46 +489,7 @@ async function summarizeAuthorizationActions(
         includeHidden: true,
         name: SAFE_AUTH_ACTION_PATTERN,
       });
-      const positive = await allPositiveControls.evaluateAll((elements) => {
-        let visible = 0;
-        let visibleEnabled = 0;
-
-        for (const element of elements) {
-          const bounds = element.getBoundingClientRect();
-          const style = window.getComputedStyle(element);
-          if (
-            style.visibility === "hidden"
-            || style.visibility === "collapse"
-            || bounds.width === 0
-            || bounds.height === 0
-          ) {
-            continue;
-          }
-
-          visible += 1;
-          let disabled = element.matches(":disabled");
-          for (
-            let current: Element | null = element;
-            !disabled && current;
-            current = current.parentElement
-          ) {
-            disabled = current.getAttribute("aria-disabled")?.toLowerCase() === "true";
-          }
-          if (!disabled) {
-            visibleEnabled += 1;
-          }
-        }
-
-        return {
-          total: elements.length,
-          visible,
-          visibleEnabled,
-        };
-      }).catch((): PositiveAuthorizationControlSummary => ({
-        total: 0,
-        visible: 0,
-        visibleEnabled: 0,
-      }));
+      const positive = await summarizeAuthorizationControls(allPositiveControls);
 
       summary.positive += positive.total;
       summary.positiveHidden += positive.total - positive.visible;
@@ -555,23 +517,90 @@ async function summarizeAuthorizationCheckboxes(
   };
   for (const root of roots) {
     const checkboxes = root.getByRole("checkbox", { includeHidden: true });
-    const count = await checkboxes.count().catch(() => 0);
-    summary.total += count;
-    for (let index = 0; index < count; index += 1) {
-      const checkbox = checkboxes.nth(index);
-      if (!await checkbox.isVisible().catch(() => false)) {
-        continue;
-      }
-      summary.visible += 1;
-      if (await checkbox.isChecked().catch(() => false)) {
-        summary.visibleChecked += 1;
-      } else {
-        summary.visibleUnchecked += 1;
-      }
-    }
+    const checkboxSummary = await summarizeAuthorizationControls(checkboxes);
+    summary.total += checkboxSummary.total;
+    summary.visible += checkboxSummary.visible;
+    summary.visibleChecked += checkboxSummary.visibleChecked;
+    summary.visibleUnchecked += checkboxSummary.visible
+      - checkboxSummary.visibleChecked;
   }
 
   return summary;
+}
+
+async function summarizeAuthorizationControls(
+  controls: Locator,
+): Promise<AuthorizationControlStructuralSummary> {
+  return controls.evaluateAll((elements) => {
+    const readComposedParent = (element: Element): Element | null => {
+      if (element.parentElement) {
+        return element.parentElement;
+      }
+      const root = element.getRootNode();
+      return root instanceof ShadowRoot ? root.host : null;
+    };
+    let visible = 0;
+    let visibleChecked = 0;
+    let visibleEnabled = 0;
+
+    for (const element of elements) {
+      let accessibilityHidden = false;
+      for (
+        let current: Element | null = element;
+        current;
+        current = readComposedParent(current)
+      ) {
+        if (current.getAttribute("aria-hidden")?.toLowerCase() === "true") {
+          accessibilityHidden = true;
+          break;
+        }
+      }
+
+      const bounds = element.getBoundingClientRect();
+      const style = window.getComputedStyle(element);
+      if (
+        accessibilityHidden
+        || style.visibility === "hidden"
+        || style.visibility === "collapse"
+        || bounds.width === 0
+        || bounds.height === 0
+      ) {
+        continue;
+      }
+
+      visible += 1;
+      if (
+        element.matches(":checked")
+        || element.getAttribute("aria-checked")?.toLowerCase() === "true"
+      ) {
+        visibleChecked += 1;
+      }
+
+      let disabled = element.matches(":disabled");
+      for (
+        let current: Element | null = element;
+        !disabled && current;
+        current = readComposedParent(current)
+      ) {
+        disabled = current.getAttribute("aria-disabled")?.toLowerCase() === "true";
+      }
+      if (!disabled) {
+        visibleEnabled += 1;
+      }
+    }
+
+    return {
+      total: elements.length,
+      visible,
+      visibleChecked,
+      visibleEnabled,
+    };
+  }).catch(() => ({
+    total: 0,
+    visible: 0,
+    visibleChecked: 0,
+    visibleEnabled: 0,
+  }));
 }
 
 async function sumLocatorCounts(

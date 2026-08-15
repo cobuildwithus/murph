@@ -50,9 +50,24 @@ describe("hosted headed browser boundary", () => {
             <span id="grant-label">Grant access</span>
             <button aria-labelledby="grant-label" disabled></button>
             <input aria-label="Optional choice" type="checkbox" />
+            <div aria-hidden="true">
+              <button>Grant inactive pane</button>
+              <input
+                aria-label="Authorization required inactive pane"
+                type="checkbox"
+              />
+            </div>
           </form>
           <iframe srcdoc='<button>Grant</button>'></iframe>
         `);
+        await expect(
+          page.getByRole("button", { name: "Grant inactive pane" }).count(),
+        ).resolves.toBe(0);
+        await expect(
+          page.getByRole("checkbox", {
+            name: "Authorization required inactive pane",
+          }).count(),
+        ).resolves.toBe(0);
         await expect.poll(() => page.frames().length).toBe(2);
         await expect.poll(async () =>
           page.frames()[1]?.getByRole("button", { name: "Grant" }).isEnabled()
@@ -91,8 +106,8 @@ describe("hosted headed browser boundary", () => {
         const summary = JSON.parse(match?.[1] ?? "{}");
         expect(summary.actions).toEqual({
           negative: 1,
-          positive: 3,
-          positiveHidden: 1,
+          positive: 4,
+          positiveHidden: 2,
           positiveInChildFrames: 1,
           positiveVisible: 2,
           positiveVisibleDisabled: 1,
@@ -100,7 +115,7 @@ describe("hosted headed browser boundary", () => {
           positiveVisibleEnabledInChildFrames: 1,
         });
         expect(summary.checkboxes).toEqual({
-          total: 1,
+          total: 2,
           visible: 1,
           visibleChecked: 0,
           visibleUnchecked: 1,
@@ -108,7 +123,7 @@ describe("hosted headed browser boundary", () => {
         expect(summary.formCount).toBe(1);
         expect(summary.frameCount).toBe(2);
         expect(failure).not.toMatch(
-          /Don't allow|Grant access|aria-labelledby|browser-canary|opaque-password/u,
+          /Don't allow|Grant access|inactive pane|aria-labelledby|browser-canary|opaque-password/u,
         );
       } finally {
         await browser.close();

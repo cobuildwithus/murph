@@ -220,11 +220,13 @@ Playwright's computed accessible names, whether positive actions are hidden,
 disabled, or inside child frames, and visible checked/unchecked checkbox
 counts. It must never log control text, attributes, HTML, screenshots,
 credentials, or member data. Keep the terminal probe itself bounded: classify
-each role and frame through one coherent safe-positive browser-side aggregate
-plus a direct negative accessible-name count, never separate derived positive
-snapshots or per-pattern element-handle reacquisition. Keep the click owner on
-the established action-first vocabulary precedence; only the read-only terminal
-aggregate may collapse those actions into one union locator. A real sign-in
+each role and frame through one coherent browser-side structural aggregate that
+treats composed `aria-hidden` ancestry as hidden for both positive actions and
+checkboxes, plus a direct negative accessible-name count; never use separate
+derived positive snapshots or per-pattern element-handle reacquisition. Keep
+the click owner on the established action-first vocabulary precedence; only the
+read-only terminal aggregate may collapse those actions into one union locator.
+A real sign-in
 proof remains available only after the exact
 workflow reaches protected `main`, where non-canceling concurrency serializes
 the dedicated provider account. Do not weaken the protected-branch gate or

@@ -82,6 +82,11 @@ Updated: 2026-08-15
   had also replaced the existing action-first click precedence with role/DOM
   order. The click owner again evaluates the ordered vocabulary first, while
   the read-only terminal aggregate alone uses the union locator.
+- Accepted final round 5's accessibility-semantics finding: a visually rendered
+  control inside an `aria-hidden` subtree is absent from the real click/check
+  owners but the probe had labeled it visible. Actions and checkboxes now share
+  one browser-side structural aggregate that excludes composed ARIA-hidden
+  ancestry from visible, enabled, checked, and unchecked classifications.
 
 ## Verification
 
@@ -101,5 +106,8 @@ Updated: 2026-08-15
 - Passed 13 focused browser-driver tests and all four real headed-browser
   scenarios after restoring action precedence; competing button/link order and
   a positive-plus-negative label now prove the higher-priority safe action wins.
+- Passed the same focused and real-browser sets after aligning ARIA-hidden
+  semantics; the structural summary counts the background action and checkbox
+  but does not classify either as visible, actionable, or checkbox-gating.
 - Expected outcome: diagnostics first prove the current consent structure, then
   the corrected driver completes the full provider and persisted-state journey.
