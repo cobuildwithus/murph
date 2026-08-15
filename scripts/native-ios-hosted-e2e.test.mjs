@@ -50,7 +50,7 @@ const COMMAND_TREE_FIXTURE = path.join(
   "fixtures",
   "native-ios-hosted-e2e-command-tree.mjs",
 );
-const CONTROLLER_OWNERS = [
+const TRUSTED_DEFAULT_BRANCH_CONTROLLERS = [
   "scripts/native-ios-hosted-e2e-identity.mjs",
   "scripts/native-ios-hosted-e2e-native.mjs",
   "scripts/native-ios-hosted-e2e-support.mjs",
@@ -81,18 +81,19 @@ test("cross-repo contract is minimal, versioned, and names lifecycle ownership t
   }).identity_lifecycle, "non_destructive_existing_identity");
 });
 
-test("PR selector owns all five production controllers and previous-filename renames", async () => {
+test("PR selector targets Web candidates and leaves controller rollout to trusted default branch", async () => {
   const workflow = await readFile(
     path.join(REPO_ROOT, ".github", "workflows", "native-ios-hosted-e2e.yml"),
     "utf8",
   );
   assert.ok(
     workflow.includes("--jq '.[] | .filename, (.previous_filename // empty)'"),
-    "renamed controller paths must be evaluated through previous_filename",
+    "renamed paths must be evaluated through previous_filename",
   );
-  assert.equal(CONTROLLER_OWNERS.length, 5);
-  for (const controller of CONTROLLER_OWNERS) {
-    assert.equal(runWorkflowSelector(workflow, controller), "selected", controller);
+  assert.equal(runWorkflowSelector(workflow, "apps/web/app/page.tsx"), "selected");
+  assert.equal(TRUSTED_DEFAULT_BRANCH_CONTROLLERS.length, 5);
+  for (const controller of TRUSTED_DEFAULT_BRANCH_CONTROLLERS) {
+    assert.equal(runWorkflowSelector(workflow, controller), "neutral", controller);
   }
   assert.equal(
     runWorkflowSelector(workflow, "scripts/native-ios-hosted-e2e.test.mjs"),

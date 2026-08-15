@@ -74,8 +74,6 @@ jobs:
                 packages/device-syncd/*|packages/gateway-core/*|packages/health-commons/*|packages/health-metrics/*|\
                 packages/hosted-execution/*|packages/importers/*|packages/inboxd/*|packages/messaging-ingress/*|packages/parsers/*|packages/query/*|packages/runtime-state/*|\
                 .github/workflows/native-ios-hosted-e2e.yml|.github/workflows/repo-hygiene.yml|\
-                scripts/native-ios-hosted-e2e-identity.mjs|scripts/native-ios-hosted-e2e-native.mjs|scripts/native-ios-hosted-e2e-support.mjs|\
-                scripts/native-ios-hosted-e2e-vercel.mjs|scripts/native-ios-hosted-e2e.mjs|\
                 config/workspace-source-resolution.ts|package.json|pnpm-lock.yaml|pnpm-workspace.yaml|tsconfig.base.json)
                   selected=true
                   break
@@ -207,7 +205,7 @@ jobs:
             description='Repo Hygiene must pass before native iOS hosted E2E.'
           elif [[ "${SELECT_RESULT}" == success && "${SELECTED}" != true ]]; then
             state=success
-            description='PR does not change native auth/control/device-sync owners.'
+            description='PR does not require the hosted Web native E2E lane.'
           elif [[ "${SELECT_RESULT}" == success && "${TRUSTED}" != true ]]; then
             description='Selected PR requires a reviewed same-repository human-authored head.'
           elif [[ "${SELECT_RESULT}" == success && "${LIVE_RESULT}" == success ]]; then
