@@ -215,7 +215,7 @@ jobs:
         run: |
           for package_dir in ${{ matrix.packages }}; do
             if [[ "$package_dir" == "packages/cli" ]]; then
-              env MURPH_PREPARED_CLI_RUNTIME_ARTIFACTS=1 MURPH_VITEST_MAX_WORKERS=50% pnpm exec vitest run --config packages/cli/vitest.workspace.ts --coverage
+              env MURPH_PREPARED_CLI_RUNTIME_ARTIFACTS=1 MURPH_CLI_RELEASE_TARBALL_TEST=1 MURPH_VITEST_MAX_WORKERS=50% pnpm exec vitest run --config packages/cli/vitest.workspace.ts --coverage
             elif [[ "$package_dir" == "packages/assistant-engine" ]]; then
               # The serialized coverage worker exceeds V8's default heap near
               # the end of this package's 2,000-test suite.

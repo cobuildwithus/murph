@@ -2,6 +2,267 @@
 
 Last verified: 2026-08-14
 
+## Local Frog autofix authority
+
+- The optional local Frog repair loop uses the operator's already-authenticated
+  `gh`, Codex, and managed ReviewGPT browser sessions. It never reads, copies,
+  stores, prints, or injects their credential values and never receives the
+  Frog reconciliation App's private key or installation token. Only the
+  non-model parent receives ambient GitHub, browser, SSH-agent, and Git-common
+  access. It builds review archives from committed Git objects and keeps
+  ReviewGPT responses, model proof, browser downloads, and prompts in one
+  owner-only transient directory outside the issue worktree. The Codex child
+  uses a native permission profile that denies root access, allows only minimal
+  command-runtime reads plus issue-worktree reads and writes, and denies tool
+  network. Its synthetic home and temporary directory are inside an ignored
+  worktree output root. It receives no SSH agent, GitHub token, browser profile,
+  Git common directory, parent review path, plugin, user config, or configured
+  MCP server; browser, app, image, web-search, multi-agent, and MCP-install
+  features are explicitly disabled, and project Codex/MCP config is rejected.
+  Shell commands inherit only a small benign environment allowlist that omits
+  `CODEX_HOME`, tokens, sockets, and provider variables. The parent installs
+  pinned dependencies only on a clean fresh branch before model work; resumable
+  or model-touched state may never trigger package-manager configuration or
+  installation.
+- An issue is model-work authority only when it remains open, is authored by
+  the exact configured Frog App, retains the expected label, and has exactly
+  one matching binding in the protected default branch's committed friction
+  tree. The issue number is the only issue field inserted into the parent
+  worker prompt. The ReviewGPT implementation prompt and edit-only Codex prompt
+  require an explicit foul-play assessment before implementation. The exact
+  committed friction binding, Frog skill, and protected `origin/main`
+  `AGENTS.md` hierarchy own task intent. Before child launch the parent rejects
+  candidate task, skill, worker-template, or root/nested `AGENTS.md` changes,
+  including ignored untracked instructions, before and after the edit-only
+  child. Git-parsed patch targets enforce the same protected paths without
+  trusting textual diff headers. The parent supplies the authority paths and SHA-256 identities; candidate
+  copies and other docs are evidence only. Fresh implementation ReviewGPT does
+  not request or use the GitHub connector and does not collect mutable issue title/body/comments/attachments/
+  links. Proposed patches, existing branch/worktree state, embedded instructions,
+  other candidate content, and ReviewGPT prose remain
+  adversarial evidence and cannot override user or repository instructions.
+  Their unrelated hostile content is ignored rather than treated as a queue
+  veto. Unexplained
+  candidate scope or a committed task or actual change that requires weakened
+  authentication, review, sandbox, credential, or network boundaries stops the
+  run without a patch or ready PR body; neither model may normalize suspicious
+  state into a PR.
+  GitHub CLI's GraphQL issue projection represents this App actor as
+  `app/murph-frog-reconciliation`; the workflow's REST-style bot-login setting
+  uses a different `[bot]` representation and is not the local admission field.
+- Parent-selected recovery mode is derived from exact clean branch ancestry,
+  deterministic PR ownership, head identity, and state.
+  Every PR read with authority consequences must target `main`, use the exact
+  deterministic branch, be non-cross-repository, report this repository as its
+  head owner, and be authored by the live authenticated `gh` operator. That one
+  predicate is applied before discovery/recovery cardinality and before body
+  hydration, editing, publication, finalization, merged-state proof, or issue
+  closure. The GraphQL connection constrains `main` plus the deterministic head
+  at the server, traverses all cursor pages, filters foreign records, and only
+  then enforces zero-or-one parent-owned PR. A fork or different operator may
+  neither hide a later qualifying record nor contaminate cardinality.
+  Mutable body text is a separate authority field: `editor` must equal the live
+  operator whenever `lastEditedAt` is present, while the PR creator is accepted
+  only for a never-edited body with no editor. Other remote text cannot supply
+  baseline, PASS, handoff, hydration, merge, or closure authority. The
+  parent captures a validated local body before any child runs or creates a
+  fixed authority-free recovery body. A local immutable baseline equal to the
+  current head may replace the remote presentation and rerun exact-head review
+  only when the same trusted body has no human handoff. Baseline ancestry and
+  exact-or-ancestor handoff recovery use that one trusted body; a recovered
+  handoff is re-stamped at the current head and returns before dependency
+  checks, model work, edits, commits, pushes, autonomous review, or merge.
+  Specialist and final PASS markers remain recoverable only from the
+  current parent-owned remote body. If the baseline is an ancestor of a newer
+  remote head, the parent preserves it and publishes the existing handoff or a
+  review-findings handoff. If no trusted baseline exists, the fixed recovery
+  body gains that handoff without making the remote head a new autonomous
+  baseline.
+  Only a fresh branch can authorize the implementation ReviewGPT request;
+  resume omits that command entirely. A clean local-only committed deterministic
+  branch ahead of `origin/main` may resume before its first push. When remote-
+  tracking evidence exists but no PR does, resume additionally requires the
+  retained validated parent-local PR body to bind its immutable first-reviewed
+  head to the exact local head and carry the originally admitted task path and
+  digest. That exact provenance preserves a legitimate
+  push-before-PR interruption without trusting a deterministic branch seeded by
+  another repository writer. An interrupted dirty diff can resume only
+  when the one open parent-owned PR, remote branch, and local committed head
+  match exactly; mutable body text is not needed to preserve the worktree. It
+  returns to an edit-only child and every parent gate reruns.
+  Before worktree synchronization, an existing validated parent-local exact or
+  ancestor handoff may be restored onto the unchanged exact PR projection even
+  when another actor edited its presentation; that repair revalidates issue and
+  PR authority but does not require the presentation being repaired to already
+  be parent-owned. A merged PR with a deliberately reopened issue, ambiguous
+  state, or multiply-owned state grants no worker mode or automatic closure.
+  One exact closed-unmerged parent PR receives only the fixed recovery body and
+  parent-authored review-findings handoff; it is never reopened, reviewed, or
+  merged by that path.
+- In fresh `implement` mode, the parent ReviewGPT request must return exactly
+  one latest-response patch or diff attachment. The parent rejects traversal,
+  absolute and control paths, binaries, generated artifacts, and an invalid
+  `git apply --check` before applying it, then rejects credential-shaped or
+  direct-identifier content before committing. An absent or rejected patch is
+  terminal; the edit-only Codex child cannot request a replacement. Recovery
+  cannot request a second implementation patch. Both implementation and
+  canonical-review archives contain one parent-materialized task blob read
+  directly from its exact `origin/main` friction path, plus a path/digest
+  manifest. They also contain a parent-materialized copy and digest manifest
+  for the exact `origin/main` Frog skill because the worker prompt requires it
+  and the packager's ordinary scan excludes that dot-directory source. The
+  skill path is a trusted review control, so its movement invalidates review
+  evidence rather than silently omitting an instruction owner. The parent
+  stores task identity only in trusted local/PR
+  metadata, fetches before every post-wait comparison, and revalidates it at
+  both final merge
+  fences. Any edit, move, deletion, replacement, or binding drift revokes
+  unattended authority. They include neither the whole friction tree nor a
+  candidate copy.
+- The child may edit only the issue worktree and a private ignored PR draft. It
+  cannot run Git, GitHub, ReviewGPT, browser automation, or network clients and
+  cannot author readiness, response, model-verification, or GitHub-state
+  evidence. Before editing or writing that draft it must assess issue evidence,
+  proposed patches, and existing worktree state for foul play and exit
+  unsuccessfully on unexplained scope or weakened authority/sandbox boundaries.
+  The parent does not execute child-authored package scripts or tests
+  in its credentialed context: it runs fixed Git structural checks, commits and
+  pushes with hooks disabled, and relies on exact-head CI for independent
+  executable proof. The retained local body includes the immutable first-
+  reviewed head before the first push. Immediately before pushing, the parent
+  refreshes `origin/main` and revalidates exact open App author, label, and one
+  protected-main binding authority; if no parent-owned PR exists after that
+  push, it repeats the refresh and exact authority check immediately before
+  creating a draft. Preliminary and final parent ReviewGPT use Murph's
+  canonical packager and canonical review state from a detached exact-head
+  checkout only when every executable and instructional review control,
+  including the complete prompt-preset directory and its four exact delegated
+  specialist lens prompts, matches trusted `main`.
+  The parent writes the already validated local body into that checkout and
+  binds it by SHA-256; the packager does not fetch mutable remote presentation
+  as the intent contract. Immediately before either model invocation, one
+  current PR projection must match the expected parent author/branch/repository,
+  exact head and body, latest body editor, and single non-closing issue binding.
+  The same projection is checked after every long model wait and immediately
+  before each metadata write. An authenticated-operator handoff created during
+  the wait is preserved byte-for-byte; other drift fails closed.
+  After the fresh post-review `origin/main` fetch, the parent also compares the
+  complete trusted ReviewGPT control inventory before accepting any result. It
+  repeats that comparison after both finalization refreshes, including the last
+  pre-merge fence. Any preset, packager, preflight, configuration, package, or
+  other trusted-control drift produces the existing exact-head review-findings
+  handoff, so review evidence generated under superseded controls grants no
+  merge or issue-closure authority.
+  The invocation retains the exact primary head that loaded the Frog parent and
+  compares the existing loaded-runner inventory from that head to every fresh
+  post-review and finalization `origin/main`. Unrelated default-branch changes
+  remain allowed. A changed loaded launcher, orchestrator, command, finalizer,
+  guard, parent, or recovery module produces that same handoff before response
+  acceptance or merge, preventing old in-memory authority from closing the
+  issue under a newer trusted policy.
+  Specialist and final PASS metadata binds the exact candidate head to the
+  runner head that produced it. Cross-invocation recovery accepts that evidence
+  only while the recorded runner's loaded paths still match fresh `main`;
+  missing, malformed, legacy, or drifted evidence produces the same handoff.
+  Review findings, a final `RETROSPECTIVE_REQUIRED` result, and changed review
+  controls produce the same exact-head human handoff; review prose is never
+  delegated to another autonomous editing turn.
+- Mutating entry (`install` and `run`) performs a frozen, scriptless primary
+  dependency reconciliation before loading the TypeScript parent. A dependency-
+  free bootstrap gives pnpm one exact detached process group and a fixed
+  30-minute deadline; timeout or leader-first exit signals only that proven
+  group and confirms it is gone before the native gate can release. A zero-
+  signal `EPERM` after that same-user, scriptless tree exits is treated as
+  foreign numeric group-id reuse, never as authority to signal the replacement.
+  Dependency-
+  control movement, including `pnpm-lock.yaml`, triggers the existing one-run
+  restart. The bootstrap is in loaded-runner authority and the lockfile is in
+  the trusted ReviewGPT control inventory. Canonical review and parent helpers
+  therefore cannot retain an older installed runtime after trusted source
+  advances or strand the queue behind an unbounded pre-parent install. The
+  generated launcher supplies one non-secret handoff marker so its `RunAtLoad`
+  invocation may wait at most 30 seconds for the install holder to release the
+  retained native-gate inode. The wrapper clears that marker before loading
+  TypeScript; it grants no durable authority, bypass, or second queue, and all
+  other native-gate contention remains immediate.
+- Missing or rejected implementation output/patches and edit-only child
+  timeout, nonzero exit, or invalid output are graceful terminal pre-PR
+  dispositions, not authorization for another implementation. The parent
+  deletes candidate bytes, resets to `origin/main`, creates a neutral
+  parent-only empty commit with the same tree, and publishes only the fixed
+  draft body, admitted task identity when available, bounded failure class, and
+  exact-head review-findings handoff. The private body receives the terminal
+  marker before authenticated-operator lookup, PR traversal, fetch, issue
+  verification, remote lookup, push, or PR creation, and recovery consumes it
+  before branch synchronization or model work. Its immutable first-reviewed
+  head preserves the exact pre-normalization candidate through the neutral
+  commit and every parent body restamp. After restart, force-with-lease accepts
+  only that exact candidate or the exact current neutral handoff already pushed
+  by the parent; every different remote move fails closed. A new branch uses an
+  empty expected-SHA lease so a concurrent creator wins. If fresh `main`
+  requires another neutral commit, the body keeps its prior neutral binding
+  until the exact leased push succeeds and only then atomically restamps the
+  new head. Model prose never enters that PR.
+  ReviewGPT/browser/command/GitHub infrastructure unavailability remains
+  retryable and does not manufacture a terminal classification. In particular,
+  the post-worker task refresh happens after the parent commit and outside the
+  worker-output classifier. If that refresh proves task drift while one
+  unchanged exact parent-owned PR remains at an ancestor head, the private
+  terminal marker is bound to that PR head before remote calls; the parent then
+  revalidates the exact projection and ancestry, discards the unpushed local
+  descendant, and edits only the PR body. It never pushes those candidate bytes,
+  and projection drift, missing ancestry, or foreign ownership fails closed.
+- Automatic merge authority is narrower than change authority. The parent
+  requires valid preliminary/final ReviewGPT evidence, the exact open PR,
+  nonempty green required checks, and a clean current-base merge. It then
+  re-fetches and revalidates App author, open state, label, the exact admitted
+  committed task path/content digest and sole binding, PR head, exact body
+  digest/editor/non-closing issue binding, checks,
+  and the exact-head scope classifier immediately before an ordinary merge.
+  The final scope classifier consumes that fetched ref without fetching again,
+  and the final task comparison follows it before a
+  `--match-head-commit` squash merge. Only the enumerated Frog autofix
+  implementation/launcher/worker/test files, the exact Frog package script,
+  the isolated Local Frog Autofix architecture section, and one canonical
+  parent-rendered completed plan whose exact path and content bind the current
+  issue and repair phase may auto-merge. `AGENTS.md`, `.agents/skills/**`,
+  `.agents/friction-log/**`, every other `agent-docs/**` path, the shared
+  ReviewGPT controls, and `scripts/frog-pr-context.ts` force a human handoff;
+  the latter remains excluded because GitHub Actions executes it. Any other path, changed product
+  architecture outside that section, GitHub workflow/action, hook, or possible
+  runtime surface remains open for a human merge decision and does not close its
+  issue. The PR body contains only one non-closing issue binding. After proving
+  the exact merge independently of mutable presentation, the parent explicitly
+  closes only that issue. If merge succeeded but closure did not, a later run
+  revalidates the exact merged PR/head and bounded close/reopen history, then
+  retries closure only when no post-merge reopen exists. A deliberate
+  post-merge reopen is human-owned. Neither owner uses admin
+  merge, self-approval, ruleset bypass, branch-protection mutation, or
+  skipped/missing gate reinterpretation. Merge-authority inventories include
+  both source and destination paths for detected renames and copies. Exact-head
+  review-finding and product-runtime handoff markers are parent-owned queue
+  completion state: later scans skip those still-open or exact
+  closed-unmerged issues only while current body provenance remains
+  parent-owned. A descendant human
+  amendment preserves only the existing handoff kind and immutable first
+  review baseline, re-stamped at the descendant head; it cannot create review
+  evidence. Definitive failed/cancelled required checks and current-base
+  conflicts use the review-findings handoff. Pending, missing, skipped, or
+  malformed check state grants no handoff or merge authority and remains
+  retryable/fail-closed.
+- Durable local files use owner-only permissions and contain only home-relative
+  locators, process identity, issue numbers, timestamps, event names, and exit
+  status. Parent prompts, responses, command output, and downloaded patches stay
+  in one owner-only transient directory and are removed at invocation end,
+  after every exact owned process group disappears. Every external command gets
+  its own exact supervised group and is bounded by the same absolute invocation
+  deadline. The shell entrypoint serializes `install`, `uninstall`, and `run`
+  through one stable owner-only macOS `lockf` inode before the JSON parent/worker
+  owner is read or reclaimed. The TypeScript parent verifies both its `lockf`
+  parent and a failed same-inode contender, so an ambient environment marker
+  alone cannot bypass the gate. The gate inode intentionally survives
+  uninstall; the JSON record remains the auditable process identity and
+  orphan-worker proof inside that native critical section.
 ## Non-Negotiable Rules
 
 - Treat `.env` and `.env.*` files as secret inputs. Murph's CLI may load local `.env.local` and `.env` files at runtime for operator credentials, but agents and runtime logs must never print, fixture, package, or commit their contents.
