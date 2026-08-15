@@ -175,6 +175,18 @@ identifiers, payload-like env values, and sensitive command args are redacted.
    copies before resolving profiles or starting helpers. Only the web child may
    receive the key, from the loaded web environment or the deterministic local
    fallback; Cloudflare, Temporal, database, and preparatory children never do.
+10. Hosted-local E2E must not inject TypeScript Web preloads through
+   `NODE_OPTIONS` or add test hooks to the production Web graph. The Retell
+   scenario selects a typed, fixed harness capability; the harness compiles the
+   repository-owned test preload to CommonJS under `apps/web/.test-dist` and
+   injects that emitted JavaScript with `--require` into either source `next
+   dev` or prepared `next start`. The compiled preload resolves the Web app's
+   physical `@temporalio/client` package, which Next externalizes in every
+   server artifact rather than only in smoke mode. The preload itself requires
+   an exact E2E profile, hosted-local test routes, and the scenario's exact
+   member. Focused coverage proves the compiled preload patches that physical
+   module while the real source and emitted Next instrumentation `register()`
+   remain unchanged.
 
 Use `pnpm hosted-local` as the single hosted-local entrypoint.
 
