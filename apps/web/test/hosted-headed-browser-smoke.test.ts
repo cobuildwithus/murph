@@ -162,16 +162,16 @@ describe("hosted headed browser boundary", () => {
 
                 return new Proxy(controls, {
                   get(locatorTarget, locatorProperty, locatorReceiver) {
-                    if (locatorProperty === "count") {
-                      return async () => {
-                        const count = await locatorTarget.count();
+                    if (locatorProperty === "evaluateAll") {
+                      return async (callback: (elements: Element[]) => unknown) => {
+                        const result = await locatorTarget.evaluateAll(callback);
                         if (!controlsReplaced) {
                           await target.locator("main").evaluate((element) => {
                             element.replaceChildren();
                           });
                           controlsReplaced = true;
                         }
-                        return count;
+                        return result;
                       };
                     }
                     const value = Reflect.get(
@@ -204,6 +204,18 @@ describe("hosted headed browser boundary", () => {
         }
 
         expect(failure).toMatch(/Authorization surface: \{.*\}\.$/u);
+        const match = failure.match(/Authorization surface: (\{.*\})\.$/u);
+        const summary = JSON.parse(match?.[1] ?? "{}");
+        expect(summary.actions).toEqual({
+          negative: 0,
+          positive: 3,
+          positiveHidden: 0,
+          positiveInChildFrames: 0,
+          positiveVisible: 3,
+          positiveVisibleDisabled: 3,
+          positiveVisibleEnabled: 0,
+          positiveVisibleEnabledInChildFrames: 0,
+        });
         expect(performance.now() - startedAt).toBeLessThan(750);
         expect(controlsReplaced).toBe(true);
         await expect.poll(() => page.getByRole("button").count()).toBe(0);

@@ -220,8 +220,9 @@ Playwright's computed accessible names, whether positive actions are hidden,
 disabled, or inside child frames, and visible checked/unchecked checkbox
 counts. It must never log control text, attributes, HTML, screenshots,
 credentials, or member data. Keep the terminal probe itself bounded: classify
-each role and frame through direct safe-positive and negative accessible-name
-locators, never per-pattern element-handle reacquisition. A real sign-in
+each role and frame through one coherent safe-positive browser-side aggregate
+plus a direct negative accessible-name count, never separate derived positive
+snapshots or per-pattern element-handle reacquisition. A real sign-in
 proof remains available only after the exact
 workflow reaches protected `main`, where non-canceling concurrency serializes
 the dedicated provider account. Do not weaken the protected-branch gate or

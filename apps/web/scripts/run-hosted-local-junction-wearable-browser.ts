@@ -52,6 +52,12 @@ interface AuthorizationCheckboxSummary {
   visibleUnchecked: number;
 }
 
+interface PositiveAuthorizationControlSummary {
+  total: number;
+  visible: number;
+  visibleEnabled: number;
+}
+
 interface AuthorizationSurfaceSummary {
   actions: AuthorizationActionSummary;
   challengeFrameCount: number;
@@ -455,32 +461,55 @@ async function summarizeAuthorizationActions(
         includeHidden: true,
         name: SAFE_AUTH_ACTION_PATTERN,
       });
-      const positiveCount = await allPositiveControls.count().catch(() => 0);
-      const visibleCount = Math.min(
-        positiveCount,
-        await allPositiveControls.filter({ visible: true }).count().catch(() => 0),
-      );
-      const visibleEnabledCount = Math.min(
-        visibleCount,
-        await root
-          .getByRole(role, {
-            disabled: false,
-            includeHidden: true,
-            name: SAFE_AUTH_ACTION_PATTERN,
-          })
-          .filter({ visible: true })
-          .count()
-          .catch(() => 0),
-      );
+      const positive = await allPositiveControls.evaluateAll((elements) => {
+        let visible = 0;
+        let visibleEnabled = 0;
 
-      summary.positive += positiveCount;
-      summary.positiveHidden += Math.max(0, positiveCount - visibleCount);
-      summary.positiveVisible += visibleCount;
-      summary.positiveVisibleDisabled += visibleCount - visibleEnabledCount;
-      summary.positiveVisibleEnabled += visibleEnabledCount;
+        for (const element of elements) {
+          const bounds = element.getBoundingClientRect();
+          const style = window.getComputedStyle(element);
+          if (
+            style.visibility === "hidden"
+            || style.visibility === "collapse"
+            || bounds.width === 0
+            || bounds.height === 0
+          ) {
+            continue;
+          }
+
+          visible += 1;
+          let disabled = element.matches(":disabled");
+          for (
+            let current: Element | null = element;
+            !disabled && current;
+            current = current.parentElement
+          ) {
+            disabled = current.getAttribute("aria-disabled")?.toLowerCase() === "true";
+          }
+          if (!disabled) {
+            visibleEnabled += 1;
+          }
+        }
+
+        return {
+          total: elements.length,
+          visible,
+          visibleEnabled,
+        };
+      }).catch((): PositiveAuthorizationControlSummary => ({
+        total: 0,
+        visible: 0,
+        visibleEnabled: 0,
+      }));
+
+      summary.positive += positive.total;
+      summary.positiveHidden += positive.total - positive.visible;
+      summary.positiveVisible += positive.visible;
+      summary.positiveVisibleDisabled += positive.visible - positive.visibleEnabled;
+      summary.positiveVisibleEnabled += positive.visibleEnabled;
       if (inChildFrame) {
-        summary.positiveInChildFrames += positiveCount;
-        summary.positiveVisibleEnabledInChildFrames += visibleEnabledCount;
+        summary.positiveInChildFrames += positive.total;
+        summary.positiveVisibleEnabledInChildFrames += positive.visibleEnabled;
       }
     }
   }

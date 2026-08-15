@@ -24,13 +24,15 @@ function createConfig(environment: Record<string, string | undefined> = {}) {
 }
 
 function emptyLocator() {
-  const locator = {
+  return {
     count: vi.fn(async () => 0),
-    filter: vi.fn(),
+    evaluateAll: vi.fn(async () => ({
+      total: 0,
+      visible: 0,
+      visibleEnabled: 0,
+    })),
     nth: vi.fn(),
   };
-  locator.filter.mockReturnValue(locator);
-  return locator;
 }
 
 function actionLocator(click: () => void) {

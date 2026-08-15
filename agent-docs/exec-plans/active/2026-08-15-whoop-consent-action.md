@@ -74,6 +74,10 @@ Updated: 2026-08-15
   reacquisition could outlive the browser-parent timeout on a changing page.
   The probe now uses one safe positive locator per role/frame plus one negative
   count, with short-timeout dynamic-DOM headed-browser proof.
+- Accepted final round 3's coherence finding: separate total, visible, and
+  enabled queries could combine observations from different DOM states. Each
+  role/frame now derives the positive partition synchronously from one matched
+  element set; the dynamic-DOM proof asserts the complete pre-replacement state.
 
 ## Verification
 
@@ -87,5 +91,8 @@ Updated: 2026-08-15
   tests, all three real headed-browser scenarios, seven workflow-contract tests,
   Web, hosted-local harness, and Cloudflare typechecks, targeted ESLint, docs
   drift, diff checks, and the privacy scan.
+- Passed the same full focused verification set after the coherent-snapshot
+  remediation; the dynamic-DOM scenario now asserts the complete emitted action
+  partition as well as its elapsed bound and eventual control replacement.
 - Expected outcome: diagnostics first prove the current consent structure, then
   the corrected driver completes the full provider and persisted-state journey.
