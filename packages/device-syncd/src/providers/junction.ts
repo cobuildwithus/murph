@@ -55,8 +55,10 @@ import {
   sanitizeHostedRuntimeDiagnosticText,
 } from "../hosted-runtime.ts";
 import {
+  areJunctionProviderSlugsDataEquivalent,
   classifyDeviceSyncJunctionInlineSourceProviderSlug,
   isJunctionCredentialIndependentInlineImportJob,
+  isJunctionInlineImportJob,
   resolveDeviceSyncJunctionInlineSourceProviderSlug,
 } from "../junction-inline-authority.ts";
 import {
@@ -134,7 +136,6 @@ import {
   type JunctionWindowInput,
 } from "./junction-client.ts";
 import {
-  areJunctionDeviceConnectProviderSlugsEquivalent,
   JUNCTION_FITBIT_LEGACY_PROVIDER_SLUG,
   JUNCTION_GOOGLE_HEALTH_PROVIDER_SLUG,
   resolveJunctionDeviceConnectRouteByProviderSlug,
@@ -1658,7 +1659,7 @@ export function createJunctionDeviceSyncProvider(
     if (!webhookDataJson) {
       return null;
     }
-    if (!isJunctionCredentialIndependentInlineImportJob({
+    if (!isJunctionInlineImportJob({
       kind: job.kind,
       payload: job.payload,
     })) {
@@ -6367,28 +6368,6 @@ function resolveJunctionProviderRouteSlug(value: unknown): string | null {
   }
   return resolveJunctionDeviceConnectRouteByProviderSlug(normalized)?.route.sourceProviderSlug
     ?? normalized;
-}
-
-function areJunctionProviderSlugsDataEquivalent(left: unknown, right: unknown): boolean {
-  const normalizedLeft = normalizeProviderSlug(left);
-  const normalizedRight = normalizeProviderSlug(right);
-  if (!normalizedLeft || !normalizedRight) {
-    return false;
-  }
-  if (normalizedLeft === normalizedRight) {
-    return true;
-  }
-  const isFitbitMigrationPair = (
-    normalizedLeft === JUNCTION_FITBIT_LEGACY_PROVIDER_SLUG
-    && normalizedRight === JUNCTION_GOOGLE_HEALTH_PROVIDER_SLUG
-  ) || (
-    normalizedLeft === JUNCTION_GOOGLE_HEALTH_PROVIDER_SLUG
-    && normalizedRight === JUNCTION_FITBIT_LEGACY_PROVIDER_SLUG
-  );
-  return !isFitbitMigrationPair && areJunctionDeviceConnectProviderSlugsEquivalent(
-    normalizedLeft,
-    normalizedRight,
-  );
 }
 
 interface JunctionAccountSourceIdentity {

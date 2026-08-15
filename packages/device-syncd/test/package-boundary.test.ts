@@ -22,6 +22,7 @@ test("@murphai/device-syncd package manifest exposes narrow public subpaths", as
     "./client",
     "./config",
     "./connect-config",
+    "./connect-routes",
     "./errors",
     "./fitbit-migration",
     "./hosted-hints",
@@ -55,6 +56,10 @@ test("@murphai/device-syncd package manifest exposes narrow public subpaths", as
   assert.deepEqual(packageManifest.exports?.["./connect-config"], {
     default: "./dist/connect-config.js",
     types: "./dist/connect-config.d.ts",
+  });
+  assert.deepEqual(packageManifest.exports?.["./connect-routes"], {
+    default: "./dist/connect-routes.js",
+    types: "./dist/connect-routes.d.ts",
   });
   assert.deepEqual(packageManifest.exports?.["./errors"], {
     default: "./dist/errors.js",

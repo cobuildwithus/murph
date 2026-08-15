@@ -42,6 +42,10 @@
       "types": "./dist/connect-config.d.ts",
       "default": "./dist/connect-config.js"
     },
+    "./connect-routes": {
+      "types": "./dist/connect-routes.d.ts",
+      "default": "./dist/connect-routes.js"
+    },
     "./errors": {
       "types": "./dist/errors.d.ts",
       "default": "./dist/errors.js"

@@ -5,6 +5,12 @@ import {
   normalizeJunctionResourceName,
 } from "@murphai/importers/device-providers/junction-resources";
 
+import {
+  areJunctionDeviceConnectProviderSlugsEquivalent,
+  JUNCTION_FITBIT_LEGACY_PROVIDER_SLUG,
+  JUNCTION_GOOGLE_HEALTH_PROVIDER_SLUG,
+} from "./config/connect-routes.ts";
+
 const JUNCTION_CREDENTIAL_INDEPENDENT_INLINE_SUMMARY_RESOURCES = new Set<string>(
   JUNCTION_ALLOWED_SUMMARY_RESOURCES,
 );
@@ -16,15 +22,38 @@ const JUNCTION_INLINE_NESTED_RECORD_KEYS = Object.freeze([
 ] as const);
 
 /**
- * Returns true only when a Junction resource job carries everything the
- * provider needs to reach a canonical import without connection credentials.
+ * Returns true when a Junction resource job carries a complete inline import.
+ */
+export function isJunctionInlineImportJob(input: {
+  kind?: string | null;
+  payload?: Record<string, unknown> | null;
+}): boolean {
+  return readJunctionInlineImportJob(input) !== null;
+}
+
+/**
+ * Returns true only when an inline import is owned by the job's executor source
+ * and can therefore survive replacement of that source's credentials.
  */
 export function isJunctionCredentialIndependentInlineImportJob(input: {
   kind?: string | null;
   payload?: Record<string, unknown> | null;
 }): boolean {
+  const inlineImport = readJunctionInlineImportJob(input);
+  return inlineImport !== null && areJunctionProviderSlugsDataEquivalent(
+    input.payload?.sourceProviderSlug,
+    inlineImport.sourceProviderSlug,
+  );
+}
+
+function readJunctionInlineImportJob(input: {
+  kind?: string | null;
+  payload?: Record<string, unknown> | null;
+}): {
+  sourceProviderSlug: string;
+} | null {
   if (input.kind !== "resource" || input.payload?.resourceCategory !== "summary") {
-    return false;
+    return null;
   }
   const resource = normalizeJunctionResourceName(input.payload.resource);
   if (
@@ -33,26 +62,30 @@ export function isJunctionCredentialIndependentInlineImportJob(input: {
     || typeof input.payload.webhookDataJson !== "string"
     || input.payload.webhookDataJson.trim().length === 0
   ) {
-    return false;
+    return null;
   }
 
   let parsed: unknown;
   try {
     parsed = JSON.parse(input.payload.webhookDataJson);
   } catch {
-    return false;
+    return null;
   }
   const record = readJunctionInlineRecord(parsed);
   if (!record) {
-    return false;
+    return null;
   }
   const sourceProviderSlug = resolveDeviceSyncJunctionInlineSourceProviderSlug(record);
   if (!sourceProviderSlug) {
-    return false;
+    return null;
   }
 
-  return resource !== "sleep_cycle"
-    || canNormalizeJunctionSleepCycleRecordToCompactStages(record, sourceProviderSlug);
+  return (
+    resource !== "sleep_cycle"
+    || canNormalizeJunctionSleepCycleRecordToCompactStages(record, sourceProviderSlug)
+  )
+    ? { sourceProviderSlug }
+    : null;
 }
 
 export function resolveDeviceSyncJunctionInlineSourceProviderSlug(
@@ -67,6 +100,31 @@ export function resolveDeviceSyncJunctionInlineSourceProviderSlug(
 export type DeviceSyncJunctionInlineSourceProviderClassification =
   | { status: "ambiguous" | "missing" }
   | { sourceProviderSlug: string; status: "resolved" };
+
+export function areJunctionProviderSlugsDataEquivalent(
+  left: unknown,
+  right: unknown,
+): boolean {
+  const normalizedLeft = normalizeHostedJunctionProviderSlug(left);
+  const normalizedRight = normalizeHostedJunctionProviderSlug(right);
+  if (!normalizedLeft || !normalizedRight) {
+    return false;
+  }
+  if (normalizedLeft === normalizedRight) {
+    return true;
+  }
+  const isFitbitMigrationPair = (
+    normalizedLeft === JUNCTION_FITBIT_LEGACY_PROVIDER_SLUG
+    && normalizedRight === JUNCTION_GOOGLE_HEALTH_PROVIDER_SLUG
+  ) || (
+    normalizedLeft === JUNCTION_GOOGLE_HEALTH_PROVIDER_SLUG
+    && normalizedRight === JUNCTION_FITBIT_LEGACY_PROVIDER_SLUG
+  );
+  return !isFitbitMigrationPair && areJunctionDeviceConnectProviderSlugsEquivalent(
+    normalizedLeft,
+    normalizedRight,
+  );
+}
 
 export function classifyDeviceSyncJunctionInlineSourceProviderSlug(
   record: Record<string, unknown>,

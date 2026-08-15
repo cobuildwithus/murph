@@ -273,6 +273,9 @@
       "@murphai/device-syncd/connect-config": [
         "../../packages/device-syncd/src/connect-config.ts"
       ],
+      "@murphai/device-syncd/connect-routes": [
+        "../../packages/device-syncd/src/connect-routes.ts"
+      ],
       "@murphai/device-syncd/errors": [
         "../../packages/device-syncd/src/errors.ts"
       ],
