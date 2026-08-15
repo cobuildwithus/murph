@@ -421,6 +421,17 @@ interface ProviderExpressionFacts {
   readonly providerIds: Set<string>;
 }
 
+type ProviderCallParameterValues = ReadonlyMap<
+  string,
+  readonly ProviderCallParameterValue[]
+>;
+
+interface ProviderCallParameterValue {
+  readonly before: number;
+  readonly callParameterValues?: ProviderCallParameterValues;
+  readonly node: Node;
+}
+
 interface TransportBinding {
   readonly initializer: Expression | null;
   readonly kind: "call" | "expression" | "namespace" | "shadow";
@@ -489,6 +500,7 @@ export function findProviderRequestBoundaryViolations(
     sourceFile,
     relativePath,
     contents,
+    bindings,
   );
   const violationsByKey = new Map<string, ProviderRequestBoundaryViolation>();
 
@@ -816,6 +828,7 @@ function analyzeProviderHttpSource(
   sourceFile: Node,
   relativePath: string,
   contents: string,
+  variableBindings: ReadonlyMap<string, readonly VariableBinding[]>,
 ): ProviderHttpSourceAnalysis {
   return {
     contents,
@@ -830,7 +843,10 @@ function analyzeProviderHttpSource(
     memberBindings: collectMemberBindings(sourceFile, contents),
     parameterBindings: collectParameterBindings(sourceFile, contents),
     sourceFile,
-    transportBindings: collectHttpTransportBindings(sourceFile),
+    transportBindings: collectHttpTransportBindings(
+      sourceFile,
+      variableBindings,
+    ),
     transportEvidenceProviderIds: collectTransportEvidenceProviderIds(
       sourceFile,
       contents,
@@ -883,6 +899,7 @@ function collectFetchTypeNames(
 
 function collectHttpTransportBindings(
   sourceFile: Node,
+  variableBindings: ReadonlyMap<string, readonly VariableBinding[]>,
 ): Map<string, TransportBinding[]> {
   const scopes = collectLexicalScopes(sourceFile);
   const bindings = new Map<string, TransportBinding[]>();
@@ -1088,7 +1105,9 @@ function collectHttpTransportBindings(
           : readTransportNamespaceKinds(
             init,
             bindings,
+            variableBindings,
             node.start ?? 0,
+            sourceFile,
           );
         if (namespaceTransports.length === 0) {
           return;
@@ -1144,12 +1163,20 @@ function collectHttpTransportBindings(
 
       const target = isVariableDeclarator(node) && node.init &&
           isIdentifier(node.id)
-        ? { initializer: node.init, name: node.id.name }
+        ? { inheritedScope: null, initializer: node.init, name: node.id.name }
         : isAssignmentExpression(node) &&
             node.operator === "=" &&
             isIdentifier(node.left) &&
             isExpression(node.right)
-          ? { initializer: node.right, name: node.left.name }
+          ? {
+            inheritedScope: resolveTransportBinding(
+              bindings,
+              node.left.name,
+              node.start ?? 0,
+            ),
+            initializer: node.right,
+            name: node.left.name,
+          }
           : null;
       if (!target) {
         return;
@@ -1169,13 +1196,17 @@ function collectHttpTransportBindings(
             : "namespace",
           node,
           directTransport,
+          null,
+          target.inheritedScope,
         ) || changed;
         return;
       }
       const namespaceTransports = readTransportNamespaceKinds(
         init,
         bindings,
+        variableBindings,
         node.start ?? 0,
+        sourceFile,
       );
       if (namespaceTransports.length > 0) {
         for (const transport of namespaceTransports) {
@@ -1184,6 +1215,8 @@ function collectHttpTransportBindings(
             "namespace",
             node,
             transport,
+            null,
+            target.inheritedScope,
           ) || changed;
         }
         return;
@@ -1191,7 +1224,9 @@ function collectHttpTransportBindings(
       const memberTransports = readTransportMemberBindings(
         init,
         bindings,
+        variableBindings,
         node.start ?? 0,
+        sourceFile,
       );
       for (const transport of memberTransports) {
         changed = addBinding(
@@ -1199,6 +1234,8 @@ function collectHttpTransportBindings(
           "call",
           node,
           transport,
+          null,
+          target.inheritedScope,
         ) || changed;
       }
     });
@@ -1382,11 +1419,17 @@ function readImportEqualsModuleName(node: Node): string | null {
 
 function readTransportNamespaceKinds(
   node: Node,
-  bindings: ReadonlyMap<string, readonly TransportBinding[]>,
+  transportBindings: ReadonlyMap<string, readonly TransportBinding[]>,
+  variableBindings: ReadonlyMap<string, readonly VariableBinding[]>,
   before: number,
+  sourceFile: Node,
 ): readonly HttpTransportModuleKind[] {
   const transports = new Set<HttpTransportModuleKind>();
-  const visit = (candidate: Node): void => {
+  const visit = (
+    candidate: Node,
+    position: number,
+    resolving: ReadonlySet<string>,
+  ): void => {
     const expression = unwrapExpression(candidate);
     const staticModule = readStaticTransportModule(expression);
     if (staticModule) {
@@ -1400,10 +1443,29 @@ function readTransportNamespaceKinds(
       return;
     }
     if (isIdentifier(expression)) {
-      const resolved = resolvePossibleTransportBindings(
-        bindings,
+      for (const binding of resolvePossibleBindings(
+        variableBindings,
         expression.name,
-        before,
+        position,
+      )) {
+        const key = `transport-variable:${expression.name}:${binding.start}`;
+        if (resolving.has(key)) {
+          continue;
+        }
+        const nextResolving = new Set(resolving);
+        nextResolving.add(key);
+        for (const value of readVariableBindingPossibleValues(
+          binding,
+          variableBindings,
+          sourceFile,
+        )) {
+          visit(value, binding.start - 1, nextResolving);
+        }
+      }
+      const resolved = resolvePossibleTransportBindings(
+        transportBindings,
+        expression.name,
+        position,
       );
       if (
         /^(?:globalThis|self|window)$/u.test(expression.name) &&
@@ -1419,29 +1481,31 @@ function readTransportNamespaceKinds(
       return;
     }
     if (expression.type === "ConditionalExpression") {
-      visit(expression.consequent);
-      visit(expression.alternate);
+      visit(expression.consequent, position, resolving);
+      visit(expression.alternate, position, resolving);
       return;
     }
     if (expression.type === "LogicalExpression") {
-      visit(expression.left);
-      visit(expression.right);
+      visit(expression.left, position, resolving);
+      visit(expression.right, position, resolving);
       return;
     }
     if (expression.type === "SequenceExpression") {
       for (const child of expression.expressions) {
-        visit(child);
+        visit(child, position, resolving);
       }
     }
   };
-  visit(node);
+  visit(node, before, new Set());
   return [...transports];
 }
 
 function readTransportMemberBindings(
   node: Node,
-  bindings: ReadonlyMap<string, readonly TransportBinding[]>,
+  transportBindings: ReadonlyMap<string, readonly TransportBinding[]>,
+  variableBindings: ReadonlyMap<string, readonly VariableBinding[]>,
   before: number,
+  sourceFile: Node,
 ): readonly HttpTransportModuleKind[] {
   if (!isMemberExpression(node) && !isOptionalMemberExpression(node)) {
     return [];
@@ -1464,23 +1528,13 @@ function readTransportMemberBindings(
   if (!root) {
     return [];
   }
-  const transports: HttpTransportModuleKind[] = [];
-  for (const binding of resolvePossibleTransportBindings(
-    bindings,
-    root,
+  return readTransportNamespaceKinds(
+    node.object,
+    transportBindings,
+    variableBindings,
     before,
-  )) {
-    if (
-      binding.kind !== "namespace" ||
-      binding.transport === null ||
-      !isHttpTransportMethod(binding.transport, method) ||
-      transports.includes(binding.transport)
-    ) {
-      continue;
-    }
-    transports.push(binding.transport);
-  }
-  return transports;
+    sourceFile,
+  ).filter((transport) => isHttpTransportMethod(transport, method));
 }
 
 function collectFunctionBindings(sourceFile: Node): Map<string, FunctionBinding[]> {
@@ -2482,10 +2536,264 @@ function collectHandwrittenProviderTransportViolations(input: {
   });
 }
 
+function readProviderCallParameterValues(input: {
+  readonly bindings: ReadonlyMap<string, readonly VariableBinding[]>;
+  readonly call: CallExpression | OptionalCallExpression;
+  readonly callerParameterValues?: ProviderCallParameterValues;
+  readonly callable: Node;
+  readonly sourceFile: Node;
+}): ProviderCallParameterValues {
+  const valuesByName = new Map<string, ProviderCallParameterValue[]>();
+  if (!isFunction(input.callable)) {
+    return valuesByName;
+  }
+
+  for (const [index, parameter] of input.callable.params.entries()) {
+    if (parameter.type === "RestElement") {
+      continue;
+    }
+    const argument = input.call.arguments[index];
+    const parameterDefault = readParameterDefaultExpression(parameter);
+    const roots = readProviderCallPossibleValues({
+      before: argument?.start ?? input.call.start ?? 0,
+      bindings: input.bindings,
+      callParameterValues: input.callerParameterValues,
+      defaultExpression: parameterDefault && isExpression(parameterDefault)
+        ? parameterDefault
+        : null,
+      defaultCallParameterValues: valuesByName,
+      node: argument &&
+          argument.type !== "ArgumentPlaceholder" &&
+          argument.type !== "SpreadElement" &&
+          isExpression(argument)
+        ? argument
+        : null,
+      resolving: new Set(),
+    });
+
+    for (const entry of readParameterBindingEntries(parameter)) {
+      const values = valuesByName.get(entry.name) ?? [];
+      const propertyPath = entry.propertyPath ?? [];
+      for (const root of roots) {
+        const projection = readProviderCallPropertyPathValues({
+          bindings: input.bindings,
+          propertyPath,
+          sourceFile: input.sourceFile,
+          value: root,
+        });
+        for (const projected of projection.values) {
+          values.push(...readProviderCallPossibleValues({
+            before: projected.before,
+            bindings: input.bindings,
+            callParameterValues: projected.callParameterValues,
+            defaultExpression: entry.defaultExpression,
+            defaultCallParameterValues: valuesByName,
+            node: projected.node,
+            resolving: new Set(),
+          }));
+        }
+        if (projection.missing && entry.defaultExpression) {
+          values.push({
+            before: entry.defaultExpression.start ?? input.callable.start ?? 0,
+            callParameterValues: valuesByName,
+            node: entry.defaultExpression,
+          });
+        }
+      }
+      valuesByName.set(entry.name, dedupeProviderCallValues(values));
+    }
+  }
+  return valuesByName;
+}
+
+function readProviderCallPossibleValues(input: {
+  readonly before: number;
+  readonly bindings: ReadonlyMap<string, readonly VariableBinding[]>;
+  readonly callParameterValues?: ProviderCallParameterValues;
+  readonly defaultExpression: Expression | null;
+  readonly defaultCallParameterValues?: ProviderCallParameterValues;
+  readonly node: Node | null;
+  readonly resolving: ReadonlySet<string>;
+}): ProviderCallParameterValue[] {
+  const useDefault = (): ProviderCallParameterValue[] =>
+    input.defaultExpression
+      ? [{
+        before: input.defaultExpression.start ?? input.before,
+        callParameterValues: input.defaultCallParameterValues,
+        node: input.defaultExpression,
+      }]
+      : [];
+  if (!input.node) {
+    return useDefault();
+  }
+  const expression = unwrapExpression(input.node);
+  if (
+    (isIdentifier(expression, { name: "undefined" }) &&
+      resolvePossibleBindings(
+        input.bindings,
+        expression.name,
+        input.before,
+      ).length === 0) ||
+    (expression.type === "UnaryExpression" && expression.operator === "void")
+  ) {
+    return useDefault();
+  }
+  if (isIdentifier(expression)) {
+    const possible = resolvePossibleBindings(
+      input.bindings,
+      expression.name,
+      input.before,
+    );
+    if (possible.length > 0) {
+      return dedupeProviderCallValues(possible.flatMap((binding) => {
+        const key = `provider-call-value:${expression.name}:${binding.start}`;
+        if (input.resolving.has(key)) {
+          return [];
+        }
+        const resolving = new Set(input.resolving);
+        resolving.add(key);
+        return readVariableBindingPossibleValues(binding, input.bindings)
+          .flatMap((value) => readProviderCallPossibleValues({
+            ...input,
+            before: binding.start - 1,
+            node: value,
+            resolving,
+          }));
+      }));
+    }
+  }
+  if (
+    expression.type === "ConditionalExpression" ||
+    expression.type === "LogicalExpression"
+  ) {
+    const branches = expression.type === "ConditionalExpression"
+      ? [expression.consequent, expression.alternate]
+      : [expression.left, expression.right];
+    return dedupeProviderCallValues(branches.flatMap((branch) =>
+      readProviderCallPossibleValues({ ...input, node: branch })
+    ));
+  }
+  if (expression.type === "SequenceExpression") {
+    return readProviderCallPossibleValues({
+      ...input,
+      node: expression.expressions.at(-1) ?? null,
+    });
+  }
+  if (expression.type === "AssignmentExpression") {
+    return readProviderCallPossibleValues({ ...input, node: expression.right });
+  }
+  if (expression.type === "AwaitExpression") {
+    return readProviderCallPossibleValues({ ...input, node: expression.argument });
+  }
+  return [{
+    before: input.before,
+    callParameterValues: input.callParameterValues,
+    node: expression,
+  }];
+}
+
+function readProviderCallPropertyPathValues(input: {
+  readonly bindings: ReadonlyMap<string, readonly VariableBinding[]>;
+  readonly propertyPath: readonly string[];
+  readonly sourceFile: Node;
+  readonly value: ProviderCallParameterValue;
+}): {
+  readonly missing: boolean;
+  readonly values: readonly ProviderCallParameterValue[];
+} {
+  const [propertyName, ...remaining] = input.propertyPath;
+  if (!propertyName) {
+    return { missing: false, values: [input.value] };
+  }
+  let missing = false;
+  const values: ProviderCallParameterValue[] = [];
+  const alternatives = readProviderCallPossibleValues({
+    before: input.value.before,
+    bindings: input.bindings,
+    callParameterValues: input.value.callParameterValues,
+    defaultExpression: null,
+    defaultCallParameterValues: undefined,
+    node: input.value.node,
+    resolving: new Set(),
+  });
+  for (const alternative of alternatives) {
+    const projected = readEffectiveStaticPropertyPathValues(
+      alternative.node,
+      [propertyName],
+      input.bindings,
+      alternative.before,
+      input.sourceFile,
+    );
+    if (projected.length === 0) {
+      missing = missing || isStaticallyMissingProviderCallProperty(
+        alternative.node,
+        propertyName,
+      );
+      continue;
+    }
+    for (const node of projected) {
+      const nested = readProviderCallPropertyPathValues({
+        ...input,
+        propertyPath: remaining,
+        value: { ...alternative, node },
+      });
+      missing = missing || nested.missing;
+      values.push(...nested.values);
+    }
+  }
+  return { missing, values: dedupeProviderCallValues(values) };
+}
+
+function isStaticallyMissingProviderCallProperty(
+  node: Node,
+  propertyName: string,
+): boolean {
+  const expression = unwrapExpression(node);
+  if (isObjectExpression(expression)) {
+    for (const property of expression.properties) {
+      if (isSpreadElement(property) || property.computed) {
+        return false;
+      }
+      if (
+        (isObjectProperty(property) || property.type === "ObjectMethod") &&
+        readPropertyName(property.key) === propertyName
+      ) {
+        return false;
+      }
+    }
+    return true;
+  }
+  if (
+    expression.type === "ArrayExpression" &&
+    /^(?:0|[1-9][0-9]*)$/u.test(propertyName)
+  ) {
+    if (expression.elements.some((element) => element && isSpreadElement(element))) {
+      return false;
+    }
+    return expression.elements[Number(propertyName)] == null;
+  }
+  return false;
+}
+
+function dedupeProviderCallValues(
+  values: readonly ProviderCallParameterValue[],
+): ProviderCallParameterValue[] {
+  return values.filter((value, valueIndex) =>
+    values.findIndex((candidate) =>
+      candidate.node.type === value.node.type &&
+      candidate.node.start === value.node.start &&
+      candidate.node.end === value.node.end &&
+      candidate.before === value.before &&
+      candidate.callParameterValues === value.callParameterValues
+    ) === valueIndex
+  );
+}
+
 function inferProviderExpressionFacts(input: {
   readonly analysis: ProviderHttpSourceAnalysis;
   readonly before: number;
   readonly bindings: ReadonlyMap<string, readonly VariableBinding[]>;
+  readonly callParameterValues?: ProviderCallParameterValues;
   readonly contents: string;
   readonly node: Node;
   readonly resolving: ReadonlySet<string>;
@@ -2520,6 +2828,28 @@ function inferProviderExpressionFacts(input: {
       node.name,
       input.before,
     );
+    const callParameterValues = parameter
+      ? input.callParameterValues?.get(node.name) ?? []
+      : [];
+    if (parameter && callParameterValues.length > 0) {
+      const bindingKey = `provider-parameter:${node.name}:${parameter.scopeStart}`;
+      if (!input.resolving.has(bindingKey)) {
+        const resolving = new Set(input.resolving);
+        resolving.add(bindingKey);
+        for (const value of callParameterValues) {
+          mergeProviderExpressionFacts(
+            facts,
+            inferProviderExpressionFacts({
+              ...input,
+              before: value.before,
+              callParameterValues: value.callParameterValues,
+              node: value.node,
+              resolving,
+            }),
+          );
+        }
+      }
+    }
     if (parameter?.propertyPath) {
       for (const property of parameter.propertyPath) {
         addExplicitProviderIds(facts, providerIdsFromIdentifier(property));
@@ -2740,6 +3070,13 @@ function inferProviderExpressionFacts(input: {
       ) {
         const resolving = new Set(input.resolving);
         resolving.add(bindingKey);
+        const callParameterValues = readProviderCallParameterValues({
+          bindings: input.bindings,
+          call: node,
+          callerParameterValues: input.callParameterValues,
+          callable: callable.node,
+          sourceFile: input.analysis.sourceFile,
+        });
         for (const returned of readDirectFunctionReturnExpressions(
           callable.node,
         )) {
@@ -2748,6 +3085,7 @@ function inferProviderExpressionFacts(input: {
             inferProviderExpressionFacts({
               ...input,
               before: returned.start ?? callable.start,
+              callParameterValues,
               node: returned,
               resolving,
               suppressFileFallback: true,
@@ -6183,6 +6521,25 @@ function isFetchLikeCallTarget(input: {
     }
     const terminal = pathParts.at(-1) ?? "";
     const root = pathParts[0];
+    const effectiveNamespaceTransports = readTransportNamespaceKinds(
+      expression.object,
+      input.analysis.transportBindings,
+      input.bindings,
+      input.before,
+      input.analysis.sourceFile,
+    );
+    if (
+      effectiveNamespaceTransports.some((transport) =>
+        isHttpTransportMethod(transport, terminal)
+      ) &&
+      !resolveParameterBinding(
+        input.analysis.parameterBindings,
+        root ?? "",
+        input.before,
+      )
+    ) {
+      return true;
+    }
     const transportBindings = root
       ? resolvePossibleTransportBindings(
           input.analysis.transportBindings,

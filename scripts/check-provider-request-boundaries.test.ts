@@ -2272,6 +2272,59 @@ describe("check-provider-request-boundaries", () => {
     }
   });
 
+  it("applies local URL helper parameter defaults only when reachable", () => {
+    const source = [
+      "function makeTarget(endpoint = 'https://api.openai.com/v1/responses') {",
+      "  return endpoint;",
+      "}",
+      "function readTarget({ endpoint = 'https://api.openai.com/v1/images' } = {}) {",
+      "  return endpoint;",
+      "}",
+      "function forwardTarget(endpoint = '/internal') {",
+      "  return makeTarget(endpoint);",
+      "}",
+      "function defaultForward(endpoint = 'https://api.openai.com/v1/audio') {",
+      "  return makeTarget(endpoint);",
+      "}",
+      "const opaque = loadOptions();",
+      "const spread = { ...opaque };",
+      "await fetch(makeTarget(), { method: 'POST' });",
+      "await fetch(makeTarget(undefined), { method: 'POST' });",
+      "await fetch(makeTarget('https://api.openai.com/v1/models'), { method: 'POST' });",
+      "await fetch(makeTarget('/internal'), { method: 'POST' });",
+      "await fetch(makeTarget(Date.now() > 0 ? undefined : '/internal'), { method: 'POST' });",
+      "await fetch(readTarget(), { method: 'POST' });",
+      "await fetch(readTarget({}), { method: 'POST' });",
+      "await fetch(readTarget({ endpoint: '/internal' }), { method: 'POST' });",
+      "await fetch(readTarget({ endpoint: undefined }), { method: 'POST' });",
+      "await fetch(readTarget(opaque), { method: 'POST' });",
+      "await fetch(readTarget(spread), { method: 'POST' });",
+      "await fetch(readTarget(Date.now() > 0 ? {} : opaque), { method: 'POST' });",
+      "await fetch(forwardTarget(), { method: 'POST' });",
+      "await fetch(forwardTarget('https://api.openai.com/v1/files'), { method: 'POST' });",
+      "await fetch(defaultForward(), { method: 'POST' });",
+    ].join("\n");
+
+    for (const relativePath of [
+      "scripts/defaulted-local-provider-url-helper.mjs",
+      "scripts/defaulted-local-provider-url-helper.mts",
+    ]) {
+      const matches = violationsOfKind("raw-provider-http", source, relativePath);
+      expect(matches.map((match) => match.line)).toEqual([
+        15,
+        16,
+        17,
+        19,
+        20,
+        21,
+        23,
+        26,
+        28,
+        29,
+      ]);
+    }
+  });
+
   it("keeps internal, shadowed, nested, and recursive URL helpers clean", () => {
     const matches = violationsOfKind(
       "raw-provider-http",
@@ -2529,6 +2582,51 @@ describe("check-provider-request-boundaries", () => {
       ]);
     }
     expect(clean).toEqual([]);
+  });
+
+  it("retains transport namespaces across conditionally executed assignments", () => {
+    const source = [
+      "import * as https from 'node:https';",
+      "import * as undici from 'undici';",
+      "const inert = { get(_url) {}, request(_url) {}, fetch(_url) {} };",
+      "let selected = https;",
+      "if (Date.now() > 0) { selected = inert; }",
+      "selected.get('https://api.openai.com/v1/models');",
+      "const copied = selected;",
+      "copied.request('https://api.openai.com/v1/responses');",
+      "const { request: send } = selected;",
+      "send('https://api.openai.com/v1/responses');",
+      "let logical = undici;",
+      "Date.now() > 0 && (logical = inert);",
+      "await logical.fetch('https://api.openai.com/v1/responses');",
+      "let switched = https;",
+      "switch (Date.now() > 0) { case true: switched = inert; break; }",
+      "switched.request('https://api.openai.com/v1/responses');",
+      "let looped = undici;",
+      "for (const ignored of []) { looped = inert; }",
+      "await looped.fetch('https://api.openai.com/v1/responses');",
+      "let mixed = https;",
+      "if (Date.now() > 0) { mixed = undici; }",
+      "mixed.get('https://api.openai.com/v1/models');",
+      "await mixed.fetch('https://api.openai.com/v1/responses');",
+    ].join("\n");
+
+    for (const relativePath of [
+      "scripts/conditional-transport-namespace-assignments.mjs",
+      "scripts/conditional-transport-namespace-assignments.mts",
+    ]) {
+      const matches = violationsOfKind("raw-provider-http", source, relativePath);
+      expect(matches.map((match) => match.line)).toEqual([
+        6,
+        8,
+        10,
+        13,
+        16,
+        19,
+        22,
+        23,
+      ]);
+    }
   });
 
   it("composes pre-bound transports stored in closed local members", () => {

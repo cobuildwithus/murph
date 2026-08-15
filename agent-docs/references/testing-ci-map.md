@@ -1,14 +1,16 @@
 # Testing And CI Map
 
-Last verified: 2026-08-14
+Last verified: 2026-08-15
 
 ## Current Repo Checks
 
 Provider-request guard closure is fail-closed beyond the summary row below:
 literal dynamic imports of Node HTTP/HTTPS and Undici are transports in every
 scanned module extension, including through set-valued conditional, logical,
-sequence, and copied namespace aliases; uniquely resolved local URL helpers
-contribute direct-return provider facts without inheriting module fallback hints;
+sequence, and copied namespace aliases and through assignment histories whose
+later writes may be skipped by conditional control flow; uniquely resolved local
+URL helpers contribute call-site arguments, reachable parameter defaults, and
+direct-return provider facts without inheriting module fallback hints;
 presigned transfer owners and header factories are implementation-digest
 pinned, while a URL normalizer is usable only by its exact digest-pinned owner;
 and an approved SDK bridge must

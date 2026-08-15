@@ -492,6 +492,31 @@ Updated: 2026-08-15
   definitive-reassignment, nested-function, recursive, and generic-Request
   controls are executable. No scanner, registry, exception, compatibility
   path, second provenance owner, or provider request was added.
+- A non-Eragon full-snapshot round-20 diagnostic at
+  `b616a818e7a7aa13514be1568802805e0d52da1e` ran for about 52 minutes on
+  Phlebas. Captured response metadata identified the compatible
+  `gpt-5-6-pro` backend, but the response's required self-attestation remained
+  `MODEL_CONFIRMATION: UNKNOWN`; the run is therefore diagnostic evidence and
+  cannot close the final review gate. It found two review-induced High gaps:
+  same-file URL helpers did not map omitted or explicitly undefined arguments
+  to parameter defaults, and a conditionally executed benign transport
+  assignment could erase an earlier possible Node/Undici namespace.
+- The correction maps call-site arguments, parameter defaults, destructured
+  property defaults, and bounded conditional/logical alternatives into the
+  existing direct-return provider-fact traversal. Call context is carried
+  through nested same-file helpers so an explicit internal override remains
+  authoritative. Transport consumers now use the shared set-valued variable
+  chronology, retaining an earlier namespace only when a later assignment may
+  be skipped. Copied aliases, destructuring, logical assignments, switches,
+  loops, mixed Node/Undici possibilities, lexical shadows, and definitive
+  reassignment are executable controls. No scanner, registry, exception,
+  compatibility path, second provenance owner, or provider request was added.
+- At the user's request, the repository's package-backed ReviewGPT runner and
+  release-contract fixture were upgraded from `0.5.127` to `0.5.132`. The
+  exact minimum-release-age allowlist and lockfile now identify the same
+  version, including the package's configurable marked-response trust
+  threshold contract. Eragon is excluded from subsequent review routing
+  because its rate limit is silent.
 
 ## Verification
 
@@ -504,6 +529,18 @@ Updated: 2026-08-15
 
 Current evidence:
 
+- Round-20 correction focused provider-guard suite: 131 tests passed across
+  `.mjs` and `.mts` fixtures. Repo-tools TypeScript compilation, the production
+  provider scan, frozen lockfile installation, doc gardening, and the focused
+  ReviewGPT release-contract test pass. The full workspace command completed
+  every package/app typecheck; its independent workspace-boundary phase still
+  reports the unchanged CLI-test relative import into `apps/web`.
+- The global affected-change verifier passed all 387 CLI tests and 759 of 762
+  repo-tool tests. Three unrelated process-heavy fixtures reached their fixed
+  local timeouts under shared-host contention; isolated retries remained
+  resource-bound, so exact-head CI remains authoritative for those fixtures.
+- A fresh exact-head non-Eragon ReviewGPT round remains required after the
+  correction is committed and pushed.
 - Round-19 correction focused provider-guard suite: 129 tests passed.
 - Full repository-tool suite after the round-19 correction: 39 files and 760
   tests passed.

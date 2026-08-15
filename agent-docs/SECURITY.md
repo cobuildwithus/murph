@@ -1,6 +1,6 @@
 # Security
 
-Last verified: 2026-08-14
+Last verified: 2026-08-15
 
 ## Local Frog autofix authority
 
@@ -601,7 +601,11 @@ Last verified: 2026-08-14
   returns from one uniquely resolved, unshadowed same-file function declaration;
   nested functions and recursive cycles are excluded, and file-level fallback
   hints are disabled inside the callee so a generic returned `Request` cannot
-  inherit an unrelated provider marker elsewhere in the module. Untyped fetch parameters retain
+  inherit an unrelated provider marker elsewhere in the module. Call-local
+  helper facts map supplied arguments to those direct returns, use a parameter
+  or destructured-property default only for a missing or statically undefined
+  value, and retain every bounded conditional/logical alternative; an explicit
+  internal override remains authoritative. Untyped fetch parameters retain
   their exact default expressions, and identifier reads resolve the nearest
   chronological declaration or simple assignment in the variable's lexical
   owner. Assignments reached only through conditional branches, short-circuit
