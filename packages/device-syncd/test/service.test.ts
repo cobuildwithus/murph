@@ -1904,7 +1904,7 @@ test("Junction deployed full-job progress resumes durably and rewrites its succe
   }
 });
 
-test("Junction lifecycle supersession retries one timeseries job with normal backoff", async () => {
+test("Junction lifecycle supersession retries one webhook resource job with normal backoff", async () => {
   let now = new Date("2030-04-03T12:00:00.000Z");
   const vaultRoot = await makeTempDirectory("murph-device-syncd-junction-lifecycle-retry");
   let requestCount = 0;
@@ -1933,6 +1933,17 @@ test("Junction lifecycle supersession retries one timeseries job with normal bac
       timeseriesResources: ["heart_rate_alert"],
       fetchImpl: async (input) => {
         const url = new URL(readUrl(input));
+        if (url.pathname === "/v2/user/providers/junction-lifecycle-retry") {
+          return createJsonResponse({
+            providers: [{
+              id: "provider-garmin-1",
+              name: "Garmin",
+              resource_availability: { heart_rate_alert: true },
+              slug: "garmin",
+              status: "connected",
+            }],
+          });
+        }
         if (
           url.pathname
             !== "/v2/timeseries/junction-lifecycle-retry/heart_rate_alert/grouped"
@@ -1995,10 +2006,14 @@ test("Junction lifecycle supersession retries one timeseries job with normal bac
     const job = store.enqueueJob({
       accountId: account.id,
       provider: "junction",
-      kind: "reconcile",
+      kind: "resource",
       payload: {
-        timeseriesCursor: "2026-04-02T00:00:00.000Z",
-        timeseriesResourceCursor: "heart_rate_alert",
+        eventType: "daily.data.heart_rate_alert.created",
+        objectId: "heart-alert-lifecycle-retry",
+        occurredAt: "2026-04-02T10:01:00.000Z",
+        resource: "heart_rate_alert",
+        resourceCategory: "timeseries",
+        sourceProviderSlug: "garmin",
         windowEnd: "2026-04-03T00:00:00.000Z",
         windowStart: "2026-04-02T00:00:00.000Z",
       },
