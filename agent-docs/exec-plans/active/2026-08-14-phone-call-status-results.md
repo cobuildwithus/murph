@@ -111,8 +111,9 @@ Updated: 2026-08-15
   rejects origin-less new direct rows but preserves legacy idempotent replay and
   group starts during the immediate runner cutover.
 - Make reconciliation the only Retell stop owner. Foreground control writes the
-  compare-and-set stop fence, best-effort wakes reconciliation, and returns
-  `start_pending`. The 90-second workflow step budget covers four possible
+  compare-and-set stop fence, confirms reconciliation was started, and only
+  then returns `start_pending`. A failed start propagates retryably while the
+  durable fence remains available to an exact retry. The 90-second workflow step budget covers four possible
   serial 15-second provider requests—list, stop-status retrieve, conditional
   stop, and terminal-usage retrieve—and durable terminal and notification
   settlement.
@@ -280,6 +281,15 @@ Updated: 2026-08-15
   assistant-runtime suite passes 2,318 tests with 4 skipped across 88 files;
   package/workspace typecheck, docs drift, privacy scan, and `git diff --check`
   pass.
+- Final ReviewGPT round 12 found that a nonterminal stop could return
+  `start_pending` after swallowing a reconciliation-start failure, while a
+  compare-and-set loser could return the same state without attempting a start.
+  The parent accepted the finding. All nonterminal stop paths now share one
+  confirmed-start tail; a starter failure remains retryable with the durable
+  fence intact, and a concurrent loser re-arms reconciliation before promising
+  asynchronous resolution. Focused tests cover new fences, existing fences,
+  nonterminal compare-and-set loss, exact retry, and terminal race truth. All
+  14 phone-call Web test files pass 242 tests, and Web typecheck passes.
 - Corrected-head product-experience revalidation finds the implementation is
   again the smallest complete experience for the incident: status is durable,
   stop state is truthful, fallback outcomes are canonical, and an exact result

@@ -85,58 +85,54 @@ export async function stopHostedPhoneCall(input: {
   if (isHostedPhoneCallTerminalForStop(call)) {
     return toAlreadyTerminalResponse(call);
   }
-  if (call.stopRequestedAt) {
-    await wakeHostedPhoneCallStopReconciliation({
-      phoneCallId: call.id,
-      reconciliationWorkflowStarter: input.reconciliationWorkflowStarter,
-      signal: input.signal,
-    });
-    return toStopPendingResponse(call);
-  }
-  const fenced = await waitForAbortableOperation(input.signal, () =>
-    store.hostedPhoneCall.updateMany({
-      data: {
-        stopRequestedAt: new Date(),
-      },
-      where: {
-        analyzedAt: null,
-        endedAt: null,
-        id: call.id,
-        memberId: input.memberId,
-        status: {
-          in: ["starting", "calling", "ended", "failed"],
+  let pendingCall = call;
+  if (!call.stopRequestedAt) {
+    const fenced = await waitForAbortableOperation(input.signal, () =>
+      store.hostedPhoneCall.updateMany({
+        data: {
+          stopRequestedAt: new Date(),
         },
-        stopRequestedAt: null,
-      },
-    })
-  );
-  if (fenced.count === 0) {
-    const current = await readOwnedPhoneCall({
-      memberId: input.memberId,
-      phoneCallId: input.phoneCallId,
-      signal: input.signal,
-      store,
-    });
-    if (!current) {
-      return {
+        where: {
+          analyzedAt: null,
+          endedAt: null,
+          id: call.id,
+          memberId: input.memberId,
+          status: {
+            in: ["starting", "calling", "ended", "failed"],
+          },
+          stopRequestedAt: null,
+        },
+      })
+    );
+    if (fenced.count === 0) {
+      const current = await readOwnedPhoneCall({
+        memberId: input.memberId,
         phoneCallId: input.phoneCallId,
-        state: "not_found",
-        status: null,
-      };
+        signal: input.signal,
+        store,
+      });
+      if (!current) {
+        return {
+          phoneCallId: input.phoneCallId,
+          state: "not_found",
+          status: null,
+        };
+      }
+      if (isHostedPhoneCallTerminalForStop(current)) {
+        return toAlreadyTerminalResponse(current);
+      }
+      pendingCall = current;
     }
-    return isHostedPhoneCallTerminalForStop(current)
-      ? toAlreadyTerminalResponse(current)
-      : toStopPendingResponse(current);
   }
   await wakeHostedPhoneCallStopReconciliation({
-    phoneCallId: call.id,
+    phoneCallId: pendingCall.id,
     reconciliationWorkflowStarter: input.reconciliationWorkflowStarter,
     signal: input.signal,
   });
   // The existing durable reconciliation workflow is the sole provider-stop
   // owner. Foreground control records the member's intent and returns without
   // spending a second, competing Retell deadline.
-  return toStopPendingResponse(call);
+  return toStopPendingResponse(pendingCall);
 }
 
 async function wakeHostedPhoneCallStopReconciliation(input: {
@@ -144,17 +140,11 @@ async function wakeHostedPhoneCallStopReconciliation(input: {
   reconciliationWorkflowStarter?: HostedPhoneCallReconciliationWorkflowStarter;
   signal: AbortSignal;
 }): Promise<void> {
-  try {
-    await (input.reconciliationWorkflowStarter
-      ?? startHostedPhoneCallReconciliationWorkflow)(
-        { phoneCallId: input.phoneCallId },
-        { signal: input.signal },
-      );
-  } catch {
-    input.signal.throwIfAborted();
-    // The durable stop fence remains available to an exact retry even when
-    // this best-effort workflow wake cannot be confirmed.
-  }
+  await (input.reconciliationWorkflowStarter
+    ?? startHostedPhoneCallReconciliationWorkflow)(
+      { phoneCallId: input.phoneCallId },
+      { signal: input.signal },
+    );
 }
 
 async function readOwnedPhoneCall(input: {

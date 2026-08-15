@@ -96,8 +96,9 @@ describe("hosted phone-call control", () => {
     );
   });
 
-  it("keeps the durable fence when the best-effort workflow wake fails", async () => {
+  it("keeps the durable fence but rejects when the workflow wake fails", async () => {
     const updateMany = vi.fn(async () => ({ count: 1 }));
+    const workflowError = new Error("workflow unavailable");
 
     await expect(stopHostedPhoneCall({
       memberId: "member_stop_owner",
@@ -117,16 +118,42 @@ describe("hosted phone-call control", () => {
         },
       },
       reconciliationWorkflowStarter: vi.fn(async () => {
-        throw new Error("workflow unavailable");
+        throw workflowError;
       }),
       signal: new AbortController().signal,
-    })).resolves.toEqual({
-      phoneCallId: "hpc_stop_wake_retry",
-      state: "start_pending",
-      status: "starting",
-    });
+    })).rejects.toBe(workflowError);
 
     expect(updateMany).toHaveBeenCalledOnce();
+  });
+
+  it("rejects when an existing durable stop cannot re-arm reconciliation", async () => {
+    const updateMany = vi.fn();
+    const workflowError = new Error("workflow unavailable");
+
+    await expect(stopHostedPhoneCall({
+      memberId: "member_stop_owner",
+      phoneCallId: "hpc_stop_existing_wake_retry",
+      prisma: {
+        hostedPhoneCall: {
+          findFirst: vi.fn(async () => ({
+            analyzedAt: null,
+            endedAt: null,
+            id: "hpc_stop_existing_wake_retry",
+            memberId: "member_stop_owner",
+            providerCallId: "provider_stop_existing_wake_retry",
+            status: "calling" as const,
+            stopRequestedAt: new Date("2026-09-01T15:00:00.000Z"),
+          })),
+          updateMany,
+        },
+      },
+      reconciliationWorkflowStarter: vi.fn(async () => {
+        throw workflowError;
+      }),
+      signal: new AbortController().signal,
+    })).rejects.toBe(workflowError);
+
+    expect(updateMany).not.toHaveBeenCalled();
   });
 
   it("treats an already-terminal call as an idempotent no-op", async () => {
@@ -211,5 +238,48 @@ describe("hosted phone-call control", () => {
       state: "already_terminal",
       status: "completed",
     });
+  });
+
+  it("re-arms reconciliation when the fence loses a nonterminal race", async () => {
+    const current = {
+      analyzedAt: null,
+      endedAt: null,
+      id: "hpc_stop_pending_race",
+      memberId: "member_stop_owner",
+      providerCallId: "provider_stop_pending_race",
+      status: "calling" as const,
+      stopRequestedAt: new Date("2026-09-01T15:00:00.000Z"),
+    };
+    const findFirst = vi.fn()
+      .mockResolvedValueOnce({
+        ...current,
+        stopRequestedAt: null,
+      })
+      .mockResolvedValueOnce(current);
+    const reconciliationWorkflowStarter = vi.fn(async () => ({
+      runId: "run_stop_pending_race",
+    }));
+
+    await expect(stopHostedPhoneCall({
+      memberId: current.memberId,
+      phoneCallId: current.id,
+      prisma: {
+        hostedPhoneCall: {
+          findFirst,
+          updateMany: vi.fn(async () => ({ count: 0 })),
+        },
+      },
+      reconciliationWorkflowStarter,
+      signal: new AbortController().signal,
+    })).resolves.toEqual({
+      phoneCallId: current.id,
+      state: "start_pending",
+      status: "calling",
+    });
+
+    expect(reconciliationWorkflowStarter).toHaveBeenCalledWith(
+      { phoneCallId: current.id },
+      { signal: expect.any(AbortSignal) },
+    );
   });
 });
