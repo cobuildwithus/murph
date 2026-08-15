@@ -4624,18 +4624,20 @@ async function resolveAssistantAutoReplyLatestCrossSessionDelivery(input: {
   // Every consumer of this resolver quotes delivery text (latest fallback,
   // reaction context, cross-session context), so media-only records stay out
   // and its behavior is unchanged by their attestation elsewhere.
+  const replyToMessageId = input.replyToMessageId
   const matchingDeliveries =
     (await listAssistantAutoReplyMatchingOutboxDeliveries({
+      allowAcceptedNonSentMedia: replyToMessageId !== null,
       deliveryTarget,
       historyReader: input.historyReader,
       input: input.input,
     })).filter((delivery) => delivery.message !== null)
-  const replyToMessageId = input.replyToMessageId
   const replyTargetDelivery = replyToMessageId === null
     ? null
-    : matchingDeliveries.find((delivery) =>
-        delivery.providerMessageIds.includes(replyToMessageId),
-      ) ?? null
+    : resolveAssistantAutoReplyExactOutboxDelivery(
+        matchingDeliveries,
+        replyToMessageId,
+      )
   const sessionEligible = matchingDeliveries
     .filter((delivery) =>
       input.session === null || delivery.sessionId !== input.session.sessionId,
@@ -4654,9 +4656,10 @@ async function resolveAssistantAutoReplyLatestCrossSessionDelivery(input: {
   // claim as an unanchored selection; a completed older anchor can never move
   // settledThrough backwards.
   if (replyToMessageId) {
-    const selected = sessionEligible.find((delivery) =>
-      delivery.providerMessageIds.includes(replyToMessageId),
-    ) ?? null
+    const selected = resolveAssistantAutoReplyExactOutboxDelivery(
+      sessionEligible,
+      replyToMessageId,
+    )
     if (!selected) {
       return {
         delivery: null,

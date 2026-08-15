@@ -4405,6 +4405,73 @@ describe('assistant auto-reply event-first path', () => {
     expect(sendInput.turnContext).toContain('reminder that user replied to')
   })
 
+  it('resolves a direct anchored reaction from a persisted delivery completion checkpoint', async () => {
+    const vault = await createTempVault()
+    replyEventPathMocks.resolveAssistantSession.mockResolvedValue({
+      created: false,
+      session: {
+        lastTurnAt: '2026-04-08T00:02:00.000Z',
+        sessionId: 'session-chat',
+      },
+    })
+    const sentShape = createOutboxMessage({
+      channel: 'linq',
+      intentId: 'intent-direct-completion-checkpoint',
+      message: 'direct reminder with a persisted delivery checkpoint',
+      providerMessageId: 'linq-msg-direct-completion-checkpoint',
+      sentAt: '2026-04-08T12:00:00.000Z',
+      sessionId: 'session-automation',
+    })
+    replyEventPathMocks.listAssistantOutboxIntents.mockResolvedValue([{
+      ...sentShape,
+      deliveryConfirmationPending: true,
+      deliveryTransportIdempotent: true,
+      sentAt: null,
+      status: 'sending',
+      updatedAt: '2026-04-08T12:00:01.000Z',
+    }])
+    const candidate = createAssistantInputCandidate({
+      occurredAt: '2026-04-08T12:00:02.000Z',
+      optionalInboxCaptureId: null,
+      replyTarget: {
+        channel: 'linq',
+        messageId: 'reaction-event-direct-completion-checkpoint',
+        threadId: 'thread-1',
+      },
+      source: 'linq',
+      sourceMetadata: {
+        affirmativeReaction: true,
+        kind: 'linq',
+        partCount: 1,
+        reactionEligible: false,
+        replyToMessageId: 'linq-msg-direct-completion-checkpoint',
+        service: 'iMessage',
+      },
+      text: 'Reacted with a like reaction.',
+      threadIsDirect: true,
+    })
+
+    const result = await processAssistantAutoReplyGroup({
+      allowSelfAuthored: false,
+      context: createReplyContext(candidate),
+      enabledChannels: ['linq'],
+      inboxServices: createInboxServices(),
+      requestId: null,
+      sessionMaxAgeMs: null,
+      vault,
+    })
+
+    expect(result).toMatchObject({
+      failed: 0,
+      replied: 1,
+      skipped: 0,
+    })
+    const sendInput = replyEventPathMocks.sendAssistantMessage.mock.calls[0]?.[0]
+    expect(sendInput.turnContext).toContain(
+      'direct reminder with a persisted delivery checkpoint',
+    )
+  })
+
   it('selects cross-session context from the newest grouped Linq input with a native reply target, not the oldest grouped input', async () => {
     const vault = await createTempVault()
     replyEventPathMocks.resolveAssistantSession.mockResolvedValue({

@@ -188,6 +188,14 @@ Updated: 2026-08-14
   proposed legacy media fallback was rejected because production delivery
   already records explicit media-effect metadata; the existing recovery test
   fixture now represents that contract directly instead.
+- Final ReviewGPT round 9 found that the non-group Linq/iMessage exact-reply
+  resolver still built its candidate list with sent-only evidence, so a native
+  reply or reaction could lose its exact assistant context during the durable
+  completion checkpoint's stale-recovery grace window. The correction enables
+  the existing non-sent evidence mode only when a provider reply anchor is
+  present and replaces both ad hoc provider-id searches with the existing
+  fail-closed exact-delivery resolver. Unanchored selection remains sent-only;
+  no state, owner, migration, repair, or lifecycle mechanism is added.
 
 ## Verification
 
@@ -243,3 +251,8 @@ Updated: 2026-08-14
   post-persistence message completion, reaction confirmation, stale reaction
   recovery, and non-idempotent no-replay behavior; the 30-test dispatch-state
   suite and assistant-engine typecheck also pass.
+- ReviewGPT round 9 remediation: a focused direct Linq/iMessage reaction test
+  proves that a native provider anchor resolves the exact assistant message
+  from a persisted message-delivery completion checkpoint instead of being
+  terminally suppressed. The full 81-test reply-event suite, 32-test exact
+  route-state suite, and assistant-engine typecheck pass.
