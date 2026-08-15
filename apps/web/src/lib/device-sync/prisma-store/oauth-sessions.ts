@@ -30,16 +30,8 @@ export class PrismaHostedOAuthSessionStore {
     this.prisma = prisma;
   }
 
-  async deleteExpiredOAuthStates(now: string): Promise<number> {
-    const result = await this.prisma.deviceOauthSession.deleteMany({
-      where: {
-        consumedAt: null,
-        expiresAt: {
-          lte: new Date(now),
-        },
-      },
-    });
-    return result.count;
+  async deleteExpiredOAuthStates(_now?: string): Promise<number> {
+    return 0;
   }
 
   async resolveOAuthStateWithoutProviderAuthority(
@@ -264,6 +256,15 @@ export class PrismaHostedOAuthSessionStore {
     state: string;
   }): Promise<ConsumeOAuthStateResult> {
     return this.prisma.$transaction(async (tx) => {
+      // The hourly retention owner skips locked rows. Own this exact state
+      // before classifying it so cleanup cannot turn a first consume into a
+      // fabricated replay between the read and the conditional update.
+      await tx.$queryRaw<Array<{ state: string }>>`
+        SELECT oauth_session."state"
+        FROM "device_oauth_session" AS oauth_session
+        WHERE oauth_session."state" = ${input.state}
+        FOR UPDATE OF oauth_session
+      `;
       const record = await tx.deviceOauthSession.findUnique({
         where: {
           state: input.state,

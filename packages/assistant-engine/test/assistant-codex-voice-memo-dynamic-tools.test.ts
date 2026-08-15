@@ -63,7 +63,9 @@ describe('murph.generate_voice_memo dynamic tool execution', () => {
     )
   })
 
-  it('rejects voice memo payloads on the image-only attach response media tool', async () => {
+  it('returns value-free item-kind hints without executing unsupported media', async () => {
+    const privateFilename = 'synthetic-private-memo.mp3'
+    const privateAttachmentId = 'synthetic-private-attachment-ref'
     const request = readTestMurphDynamicToolRequest({
       id: 10,
       method: 'item/tool/call',
@@ -72,9 +74,9 @@ describe('murph.generate_voice_memo dynamic tool execution', () => {
           media: [
             {
               kind: 'voice_memo',
-              filename: 'memo.mp3',
+              filename: privateFilename,
               transport: {
-                attachmentId: 'attachment_voice_1',
+                attachmentId: privateAttachmentId,
                 kind: 'linq_attachment',
               },
             },
@@ -86,6 +88,7 @@ describe('murph.generate_voice_memo dynamic tool execution', () => {
     })
     const fetchImpl = vi.fn<typeof fetch>()
     const nextUsageOrdinal = vi.fn(() => 99)
+    const generateAndUpload = vi.fn<LinqVoiceMemoRuntime['generateAndUpload']>()
 
     expect(request).toMatchObject({
       kind: 'invalid-response-media-arguments',
@@ -97,30 +100,84 @@ describe('murph.generate_voice_memo dynamic tool execution', () => {
       nextUsageOrdinal,
       progressDelivery: null,
       request: request!,
+      voiceMemoRuntime: createLinqRuntime(generateAndUpload),
     })
 
-    expect(result.rpcResult).toEqual({
-      success: false,
-      contentItems: [
-        {
-          type: 'inputText',
-          text: 'invalid response media arguments',
-        },
-      ],
-    })
+    const feedback = result.rpcResult.contentItems[0]?.text ?? ''
+    expect(result.rpcResult.success).toBe(false)
+    expect(feedback).toContain(
+      '"field":"media[].kind","code":"invalid_union"',
+    )
+    expect(feedback).not.toContain('voice_memo')
+    expect(feedback).not.toContain('image/jpeg')
+    expect(feedback).not.toContain('vault_image')
+    expect(feedback).not.toContain(privateFilename)
+    expect(feedback).not.toContain(privateAttachmentId)
+    expect(feedback).not.toContain('filename')
+    expect(feedback).not.toContain('transport')
+    expect(feedback).not.toContain('"received"')
     expect(result.responseMediaPatch).toBeUndefined()
     expect(fetchImpl).not.toHaveBeenCalled()
     expect(nextUsageOrdinal).not.toHaveBeenCalled()
+    expect(generateAndUpload).not.toHaveBeenCalled()
+  })
+
+  it('returns value-free URL hints without executing invalid public media', async () => {
+    const privateUrl =
+      'http://synthetic-private.example.test/catalog/private-file.png?token=private'
+    const request = readTestMurphDynamicToolRequest({
+      id: 15,
+      method: 'item/tool/call',
+      params: {
+        arguments: {
+          media: [{ kind: 'image', url: privateUrl }],
+        },
+        namespace: 'murph',
+        tool: 'attach_response_media',
+      },
+    })
+    const fetchImpl = vi.fn<typeof fetch>()
+    const nextUsageOrdinal = vi.fn(() => 99)
+    const generateAndUpload = vi.fn<LinqVoiceMemoRuntime['generateAndUpload']>()
+
+    expect(request).toMatchObject({
+      kind: 'invalid-response-media-arguments',
+    })
+
+    const result = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl,
+      nextUsageOrdinal,
+      progressDelivery: null,
+      request: request!,
+      voiceMemoRuntime: createLinqRuntime(generateAndUpload),
+    })
+
+    const feedback = result.rpcResult.contentItems[0]?.text ?? ''
+    expect(result.rpcResult.success).toBe(false)
+    expect(feedback).toContain(
+      '"field":"media[].url","code":"custom","expected":"public_https_image_url"',
+    )
+    expect(feedback).not.toContain(privateUrl)
+    expect(feedback).not.toContain('synthetic-private.example.test')
+    expect(feedback).not.toContain('private-file.png')
+    expect(feedback).not.toContain('token=private')
+    expect(feedback).not.toContain('"received"')
+    expect(result.responseMediaPatch).toBeUndefined()
+    expect(fetchImpl).not.toHaveBeenCalled()
+    expect(nextUsageOrdinal).not.toHaveBeenCalled()
+    expect(generateAndUpload).not.toHaveBeenCalled()
   })
 
   it('returns an invalid-arguments result for malformed voice memo tool calls', async () => {
+    const privateMarker = 'synthetic-private-voice-marker'
     const request = readTestMurphDynamicToolRequest({
       id: 11,
       method: 'item/tool/call',
       params: {
         arguments: {
           modelId: 'eleven_monolingual_v1',
-          text: 'Send a short reminder.',
+          text: { privateMarker },
         },
         namespace: 'murph',
         tool: 'generate_voice_memo',
@@ -128,6 +185,7 @@ describe('murph.generate_voice_memo dynamic tool execution', () => {
     })
     const fetchImpl = vi.fn<typeof fetch>()
     const nextUsageOrdinal = vi.fn(() => 99)
+    const generateAndUpload = vi.fn<LinqVoiceMemoRuntime['generateAndUpload']>()
 
     expect(request).toMatchObject({
       kind: 'invalid-generate-voice-memo-arguments',
@@ -139,17 +197,57 @@ describe('murph.generate_voice_memo dynamic tool execution', () => {
       nextUsageOrdinal,
       progressDelivery: null,
       request: request!,
+      voiceMemoRuntime: createLinqRuntime(generateAndUpload),
     })
 
-    expect(result.rpcResult).toEqual({
-      success: false,
-      contentItems: [
-        {
-          type: 'inputText',
-          text: 'invalid voice memo generation arguments',
+    const feedback = result.rpcResult.contentItems[0]?.text ?? ''
+    expect(result.rpcResult.success).toBe(false)
+    expect(feedback).toContain(
+      '"field":"text","code":"invalid_type","expected":"string"',
+    )
+    expect(feedback).not.toContain(privateMarker)
+    expect(feedback).not.toContain('privateMarker')
+    expect(feedback).not.toContain('modelId')
+    expect(feedback).not.toContain('"received"')
+    expect(fetchImpl).not.toHaveBeenCalled()
+    expect(nextUsageOrdinal).not.toHaveBeenCalled()
+    expect(generateAndUpload).not.toHaveBeenCalled()
+  })
+
+  it('returns value-free response-media hints without attaching media', async () => {
+    const privateMarker = 'synthetic-private-media-marker'
+    const request = readTestMurphDynamicToolRequest({
+      id: 14,
+      method: 'item/tool/call',
+      params: {
+        arguments: {
+          media: { privateMarker },
         },
-      ],
+        namespace: 'murph',
+        tool: 'attach_response_media',
+      },
     })
+    expect(request).toMatchObject({ kind: 'invalid-response-media-arguments' })
+
+    const fetchImpl = vi.fn<typeof fetch>()
+    const nextUsageOrdinal = vi.fn(() => 99)
+    const result = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl,
+      nextUsageOrdinal,
+      progressDelivery: null,
+      request: request!,
+    })
+    const feedback = result.rpcResult.contentItems[0]?.text ?? ''
+
+    expect(result.rpcResult.success).toBe(false)
+    expect(feedback).toContain(
+      '"field":"media","code":"invalid_type","expected":"array"',
+    )
+    expect(feedback).not.toContain(privateMarker)
+    expect(feedback).not.toContain('privateMarker')
+    expect(feedback).not.toContain('"received"')
+    expect(result.responseMediaPatch).toBeUndefined()
     expect(fetchImpl).not.toHaveBeenCalled()
     expect(nextUsageOrdinal).not.toHaveBeenCalled()
   })
@@ -298,13 +396,24 @@ describe('murph.generate_voice_memo dynamic tool execution', () => {
       kind: 'generate-voice-memo',
     })
 
+    const recordPhaseTiming = vi.fn()
     const generateAndUpload = vi.fn<
       LinqVoiceMemoRuntime['generateAndUpload']
-    >(async () => ({
-      attachmentId: 'attachment_dynamic_1',
-      filename: 'dynamic-voice-memo.mp3',
-      ok: true,
-    }))
+    >(async (runtimeRequest) => {
+      runtimeRequest.recordPhaseTiming?.({
+        deliveryMode: 'synchronous',
+        generationDurationMs: 21,
+        mediaKind: 'voice_memo',
+        outcome: 'succeeded',
+        terminalPhase: 'upload',
+        uploadDurationMs: 13,
+      })
+      return {
+        attachmentId: 'attachment_dynamic_1',
+        filename: 'dynamic-voice-memo.mp3',
+        ok: true,
+      }
+    })
     const fetchImpl = vi.fn<typeof fetch>()
     const nextUsageOrdinal = vi.fn(() => 99)
     const result = await executeMurphDynamicToolRequest({
@@ -313,10 +422,19 @@ describe('murph.generate_voice_memo dynamic tool execution', () => {
       nextUsageOrdinal,
       progressDelivery: null,
       request: request!,
+      voiceMemoPhaseTimingRecorder: recordPhaseTiming,
       voiceMemoRuntime: createLinqRuntime(generateAndUpload),
     })
 
     expect(generateAndUpload).toHaveBeenCalledTimes(1)
+    expect(recordPhaseTiming).toHaveBeenCalledWith({
+      deliveryMode: 'synchronous',
+      generationDurationMs: 21,
+      mediaKind: 'voice_memo',
+      outcome: 'succeeded',
+      terminalPhase: 'upload',
+      uploadDurationMs: 13,
+    })
     expect(nextUsageOrdinal).not.toHaveBeenCalled()
     expect(result.rpcResult).toEqual({
       success: true,
