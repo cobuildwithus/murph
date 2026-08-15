@@ -383,7 +383,7 @@ export function buildHostedMemberActivationWelcomeRoute(input: {
   telegramThreadId: string | null;
   telegramUserId: string | null;
 }): HostedExecutionAssistantNotificationRoute | null {
-  const route = resolveHostedMemberAssistantNotificationRoute({
+  return resolveHostedMemberAssistantNotificationRoute({
     linqChatId: input.linqChatId,
     linqContactLookupKey: input.linqContactLookupKey,
     linqRecipientPhone: input.linqRecipientPhone ?? null,
@@ -402,8 +402,6 @@ export function buildHostedMemberActivationWelcomeRoute(input: {
       },
     }),
   });
-
-  return route?.channel === "linq" ? route : null;
 }
 
 async function resolveHostedMemberActivationWelcomeLinqRoute(input: {
