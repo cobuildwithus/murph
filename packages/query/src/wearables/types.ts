@@ -305,10 +305,7 @@ export interface WearableBodyStateDay {
   bodyFatPercentage: WearableResolvedMetric;
   bodyWaterPercentage: WearableResolvedMetric;
   boneMassPercentage: WearableResolvedMetric;
-  carbohydrateIntake: WearableResolvedMetric;
   date: string;
-  glucoseCoefficientOfVariation: WearableResolvedMetric;
-  glucoseStandardDeviation: WearableResolvedMetric;
   leanBodyMassKg: WearableResolvedMetric;
   muscleMassPercentage: WearableResolvedMetric;
   notes: string[];
@@ -730,9 +727,6 @@ export const BODY_METRIC_KEYS = new Set<WearableMetricKey>([
   "bodyFatPercentage",
   "bodyWaterPercentage",
   "boneMassPercentage",
-  "carbohydrateIntake",
-  "glucoseCoefficientOfVariation",
-  "glucoseStandardDeviation",
   "leanBodyMassKg",
   "muscleMassPercentage",
   "temperature",

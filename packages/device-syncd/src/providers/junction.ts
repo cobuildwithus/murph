@@ -2856,7 +2856,10 @@ export function createJunctionDeviceSyncProvider(
       ?? null;
     if (
       retryDelayMs === null
-      && (!input.importResult.fetchComplete || unresolvedProviderRecordsSeen)
+      && (
+        !input.importResult.fetchComplete
+        || unresolvedProviderRecords.identities.length > 0
+      )
     ) {
       emptyBackfillAttempts = EMPTY_HISTORICAL_BACKFILL_RETRY_DELAYS_MS.length;
       retryDelayMs =
@@ -7817,7 +7820,7 @@ function resolveJunctionHistoricalUnresolvedProviderRecords(
   return {
     identities: [...identities].sort(),
     withoutStableIdentity:
-      carried.withoutStableIdentity
+      (!importResult.fetchComplete && carried.withoutStableIdentity)
       || importResult.unresolvedProviderRecordsWithoutStableIdentity,
   };
 }

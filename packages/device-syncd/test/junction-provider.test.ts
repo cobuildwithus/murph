@@ -15557,6 +15557,148 @@ test("Junction metabolic resources reuse exact-record extended history", () => {
   }
 });
 
+test("Junction metabolic history clears stale count-only ambiguity after a complete fetch", async () => {
+  const source = createConnectionSource({
+    lifecycleEpoch: 1,
+    resourceAvailabilitySummary: { carbohydrates: true },
+  });
+  const provider = createJunctionProvider(async (input) => {
+    const url = new URL(readUrl(input));
+    if (url.pathname === "/v2/user/providers/junction-user-1") {
+      return createJsonResponse({
+        providers: [{
+          id: "provider-garmin-1",
+          slug: "garmin",
+          status: "connected",
+          resource_availability: { carbohydrates: true },
+        }],
+      });
+    }
+    if (url.pathname === "/v2/timeseries/junction-user-1/carbohydrates/grouped") {
+      return createJsonResponse({ groups: {} });
+    }
+    throw new Error(`Unexpected request: ${url.toString()}`);
+  }, {
+    summaryResources: [],
+    timeseriesResources: ["carbohydrates"],
+  });
+  const result = await executeJunctionJob(
+    provider,
+    createJunctionJobContext({
+      listConnectionSources: () => [source],
+      now: "2026-04-03T00:00:00.000Z",
+    }),
+    createJob("resource", {
+      emptyBackfillAttempts: 4,
+      historicalBackfill: true,
+      historicalProviderRecordsSeen: true,
+      historicalRecordsSeen: true,
+      historicalUnresolvedProviderRecordCount: 1,
+      historicalUnresolvedProviderRecordIdentitiesJson: JSON.stringify({
+        v: 1,
+        i: [],
+        u: true,
+      }),
+      historicalWindowStart: "2026-04-01T00:00:00.000Z",
+      resource: "carbohydrates",
+      resourceCategory: "timeseries",
+      sourceLifecycleEpoch: 1,
+      sourceProviderSlug: "garmin",
+      windowEnd: "2026-04-02T00:00:00.000Z",
+      windowStart: "2026-04-01T00:00:00.000Z",
+    }),
+  );
+
+  assert.equal(result.scheduledJobs, undefined);
+  assert.equal(
+    hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
+      result.metadataPatch ?? {},
+      "garmin",
+      "carbohydrates",
+      1,
+    ),
+    true,
+  );
+});
+
+test("Junction metabolic history terminalizes deterministic count-only rejects", async () => {
+  const source = createConnectionSource({
+    lifecycleEpoch: 1,
+    resourceAvailabilitySummary: { carbohydrates: true },
+  });
+  const provider = createJunctionProvider(async (input) => {
+    const url = new URL(readUrl(input));
+    if (url.pathname === "/v2/user/providers/junction-user-1") {
+      return createJsonResponse({
+        providers: [{
+          id: "provider-garmin-1",
+          slug: "garmin",
+          status: "connected",
+          resource_availability: { carbohydrates: true },
+        }],
+      });
+    }
+    if (url.pathname === "/v2/timeseries/junction-user-1/carbohydrates/grouped") {
+      return createJsonResponse({
+        groups: {
+          garmin: [{
+            data: [{
+              timestamp: "2026-04-01T12:00:00.000Z",
+              unit: "g",
+              value: "invalid",
+            }],
+            source: { provider: "garmin", type: "nutrition" },
+          }],
+        },
+      });
+    }
+    throw new Error(`Unexpected request: ${url.toString()}`);
+  }, {
+    summaryResources: [],
+    timeseriesResources: ["carbohydrates"],
+  });
+  const context = createJunctionJobContext({
+    importSnapshot: async () => ({
+      canonicalEventCount: 0,
+      durableDeliveryAccepted: true,
+    }),
+    listConnectionSources: () => [source],
+    now: "2026-04-03T00:00:00.000Z",
+  });
+  let job = createJob("resource", {
+    historicalBackfill: true,
+    historicalWindowStart: "2026-04-01T00:00:00.000Z",
+    resource: "carbohydrates",
+    resourceCategory: "timeseries",
+    sourceLifecycleEpoch: 1,
+    sourceProviderSlug: "garmin",
+    windowEnd: "2026-04-02T00:00:00.000Z",
+    windowStart: "2026-04-01T00:00:00.000Z",
+  });
+  let result = await executeJunctionJob(provider, context, job);
+
+  for (let attempt = 1; attempt < 5; attempt += 1) {
+    const followUp = requireValue(
+      result.scheduledJobs?.find((candidate) => candidate.kind === "resource"),
+      `metabolic history retry ${attempt}`,
+    );
+    assert.equal(followUp.payload?.emptyBackfillAttempts, attempt);
+    job = createJob(followUp.kind, followUp.payload ?? {});
+    result = await executeJunctionJob(provider, context, job);
+  }
+
+  assert.equal(result.scheduledJobs, undefined);
+  assert.equal(
+    hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
+      result.metadataPatch ?? {},
+      "garmin",
+      "carbohydrates",
+      1,
+    ),
+    true,
+  );
+});
+
 test("Junction direct-Link body data activates the existing extended-history owner", async () => {
   const connectedAt = "2026-04-03T00:00:00.000Z";
   const now = "2026-07-01T12:00:00.000Z";
