@@ -2593,6 +2593,7 @@ export function createEmptyRepairHandoffCommit(
   worktree: string,
   issueNumber: number,
 ): string {
+  requireCompletedWorktreeCreation(worktree, recoveryCommands);
   const neutralIdentity: NodeJS.ProcessEnv = {
     GIT_AUTHOR_EMAIL: "frog-autofix@users.noreply.github.com",
     GIT_AUTHOR_NAME: "Frog Autofix",
