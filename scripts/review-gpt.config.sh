@@ -3,6 +3,7 @@
 review_gpt_config_dir="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 review_gpt_repo_root="$(CDPATH= cd -- "$review_gpt_config_dir/.." && pwd -P)"
 review_gpt_local_config="${XDG_CONFIG_HOME:-$HOME/.config}/murph/review-gpt.conf"
+readonly review_gpt_direct_browser_lane="${REVIEW_GPT_BROWSER_LANE-}"
 
 if [[ -r "$review_gpt_local_config" ]]; then
   # This optional user-owned file contains local workflow preferences only.
@@ -80,9 +81,58 @@ review_gpt_browser_lane_is_usable() {
   [[ ! -e "$review_gpt_lane_lock" && ! -L "$review_gpt_lane_lock" ]]
 }
 
-review_gpt_requested_browser_lane="${REVIEW_GPT_BROWSER_LANE:-${MURPH_REVIEW_GPT_BROWSER_LANE:-${MURPH_REVIEW_GPT_PROFILE_SLUG:-auto}}}"
+review_gpt_review_phase="${REVIEW_GPT_REVIEW_PHASE:-final}"
+review_gpt_round_number="${REVIEW_GPT_ROUND_NUMBER:-}"
+review_gpt_full_review_reason="${REVIEW_GPT_FULL_REVIEW_REASON:-}"
+review_gpt_pr_review_prompt_file="pr-deep-review.md"
+review_gpt_reuses_existing_thread=0
+if [[ -n "$review_gpt_full_review_reason" ]] \
+  && [[ -z "${review_gpt_full_review_reason//[[:space:]]/}" ]]; then
+  echo "Error: REVIEW_GPT_FULL_REVIEW_REASON must contain a concrete reason." >&2
+  return 1 2>/dev/null || exit 1
+fi
+if [[ "$review_gpt_review_phase" == "final" ]] \
+  && [[ "$review_gpt_round_number" =~ ^([2-9]|[1-9][0-9]+)$ ]]; then
+  if [[ -n "$review_gpt_full_review_reason" ]]; then
+    : # A full-patch audit starts a new ChatGPT conversation.
+  else
+    review_gpt_thread_url="${REVIEW_GPT_THREAD_URL:-}"
+    case "$review_gpt_thread_url" in
+      https://chatgpt.com/c/*)
+        chatgpt_url="$review_gpt_thread_url"
+        review_gpt_pr_review_prompt_file="pr-followup-review.md"
+        review_gpt_reuses_existing_thread=1
+        ;;
+      *)
+        echo "Error: later ReviewGPT rounds require REVIEW_GPT_THREAD_URL for the current context conversation." >&2
+        return 1 2>/dev/null || exit 1
+        ;;
+    esac
+  fi
+elif [[ -n "$review_gpt_full_review_reason" ]]; then
+  echo "Error: REVIEW_GPT_FULL_REVIEW_REASON is only valid for round 2 or later." >&2
+  return 1 2>/dev/null || exit 1
+fi
+
+if [[ "$review_gpt_reuses_existing_thread" == "1" ]]; then
+  # A ChatGPT conversation belongs to the workspace selected by the command
+  # that created it. Only an explicit value on this invocation can prove that
+  # continuity; compatibility and user-local defaults are not thread metadata.
+  review_gpt_requested_browser_lane="$review_gpt_direct_browser_lane"
+else
+  review_gpt_requested_browser_lane="${REVIEW_GPT_BROWSER_LANE:-${MURPH_REVIEW_GPT_BROWSER_LANE:-${MURPH_REVIEW_GPT_PROFILE_SLUG:-auto}}}"
+fi
 review_gpt_requested_browser_lane="$(printf '%s' "$review_gpt_requested_browser_lane" | tr '[:upper:]' '[:lower:]')"
 review_gpt_browser_lane_count="${REVIEW_GPT_BROWSER_LANE_COUNT:-${MURPH_REVIEW_GPT_BROWSER_LANE_COUNT:-4}}"
+
+if [[ "$review_gpt_reuses_existing_thread" == "1" ]]; then
+  case "$review_gpt_requested_browser_lane" in
+    "" | auto | random)
+      echo "Error: later ReviewGPT rounds that reuse REVIEW_GPT_THREAD_URL require REVIEW_GPT_BROWSER_LANE=<first-round-lane> on the current command. Compatibility and local-config defaults cannot select a same-thread workspace." >&2
+      return 1 2>/dev/null || exit 1
+      ;;
+  esac
+fi
 
 if [[ ! "$review_gpt_browser_lane_count" =~ ^[1-4]$ ]]; then
   echo "Error: REVIEW_GPT_BROWSER_LANE_COUNT must be an integer from 1 to 4." >&2
@@ -186,37 +236,6 @@ app_connector="current"
 model="gpt-5.6-sol"
 thinking="current"
 response_timeout_ms="${response_timeout_ms:-$((180 * 60 * 1000))}"
-
-review_gpt_review_phase="${REVIEW_GPT_REVIEW_PHASE:-final}"
-review_gpt_round_number="${REVIEW_GPT_ROUND_NUMBER:-}"
-review_gpt_full_review_reason="${REVIEW_GPT_FULL_REVIEW_REASON:-}"
-review_gpt_pr_review_prompt_file="pr-deep-review.md"
-if [[ -n "$review_gpt_full_review_reason" ]] \
-  && [[ -z "${review_gpt_full_review_reason//[[:space:]]/}" ]]; then
-  echo "Error: REVIEW_GPT_FULL_REVIEW_REASON must contain a concrete reason." >&2
-  return 1 2>/dev/null || exit 1
-fi
-if [[ "$review_gpt_review_phase" == "final" ]] \
-  && [[ "$review_gpt_round_number" =~ ^([2-9]|[1-9][0-9]+)$ ]]; then
-  if [[ -n "$review_gpt_full_review_reason" ]]; then
-    : # A full-patch audit starts a new ChatGPT conversation.
-  else
-    review_gpt_thread_url="${REVIEW_GPT_THREAD_URL:-}"
-    case "$review_gpt_thread_url" in
-      https://chatgpt.com/c/*)
-        chatgpt_url="$review_gpt_thread_url"
-        review_gpt_pr_review_prompt_file="pr-followup-review.md"
-        ;;
-      *)
-        echo "Error: later ReviewGPT rounds require REVIEW_GPT_THREAD_URL for the current context conversation." >&2
-        return 1 2>/dev/null || exit 1
-        ;;
-    esac
-  fi
-elif [[ -n "$review_gpt_full_review_reason" ]]; then
-  echo "Error: REVIEW_GPT_FULL_REVIEW_REASON is only valid for round 2 or later." >&2
-  return 1 2>/dev/null || exit 1
-fi
 
 review_gpt_register_dir_preset "security" "security-audit.md" \
   "General correctness and security audit focused on trust boundaries." \

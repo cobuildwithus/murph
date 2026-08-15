@@ -25,6 +25,7 @@ export * from "./exercise-routine-card.ts";
 export * from "./telegram-rich-content-card.ts";
 export * from "./workout-session-card.ts";
 export * from "./memory.ts";
+export * from "./member-action.ts";
 export * from "./message-links.ts";
 export * from "./preferences.ts";
 export * from "./public-products.ts";

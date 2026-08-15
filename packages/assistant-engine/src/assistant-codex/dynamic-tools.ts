@@ -88,10 +88,14 @@ import {
 import {
   exerciseRoutineResponseCardV1Schema,
   assistantResponseCardAuthoringSchema,
+  assistantWorkoutResponseCardSemanticSchema,
+  assistantResponseCardSchema,
   telegramRichContentResponseCardV1Schema,
   type AssistantResponseCard,
+  type CompactTableWorkoutResponseCardV1,
 } from '@murphai/operator-config/assistant-response-cards'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
+import { readLiveWorkoutCardEditor } from '@murphai/vault-usecases/workouts'
 import { normalizeNullableString } from '@murphai/operator-config/text/shared'
 import {
   type AssistantHostedGroupSharedMember,
@@ -302,6 +306,21 @@ const attachResponseCardArgumentsSchema = z
       'workout' in value.card &&
       value.card.subtitle !== null
     ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Structured workout card subtitles must be null.',
+        path: ['card', 'subtitle'],
+      })
+    }
+  })
+
+const attachSemanticWorkoutResponseCardArgumentsSchema = z
+  .object({
+    card: assistantWorkoutResponseCardSemanticSchema,
+  })
+  .strict()
+  .superRefine((value, context) => {
+    if (value.card.subtitle !== null) {
       context.addIssue({
         code: z.ZodIssueCode.custom,
         message: 'Structured workout card subtitles must be null.',
@@ -1003,6 +1022,9 @@ export interface MurphDynamicToolExecutionResult {
   requiredVaultFileApprovalUrl?: string
   responseMediaPatch?: MurphDynamicToolResponseMediaPatch
   responseCardPatch?: { card: AssistantResponseCard }
+  responseCardTextFallbackPatch?: {
+    card: CompactTableWorkoutResponseCardV1
+  }
   rpcResult: MurphDynamicToolRpcResult
   // Specific runtime issues a tool wants recorded off-path via the assistant
   // runtime's existing issue owner (e.g. a generated-media delivery failure).
@@ -1238,6 +1260,10 @@ export type MurphDynamicToolRequest =
   | {
       kind: 'invalid-response-card-arguments'
       validationDigest: SafeToolCallValidationDigest
+    }
+  | {
+      card: CompactTableWorkoutResponseCardV1
+      kind: 'response-card-envelope-too-large'
     }
   | {
       kind: 'invalid-response-media-arguments'
@@ -1517,6 +1543,12 @@ export function readMurphDynamicToolRequest(
     case MURPH_ATTACH_RESPONSE_CARD_TOOL.name: {
       const parsed = parseAttachResponseCardArguments(request.arguments)
       if (!parsed.ok) {
+        if (parsed.reason === 'workout-envelope-too-large') {
+          return {
+            card: parsed.card,
+            kind: 'response-card-envelope-too-large',
+          }
+        }
         return {
           kind: 'invalid-response-card-arguments',
           validationDigest: parsed.validationDigest,
@@ -2081,6 +2113,29 @@ export async function executeMurphDynamicToolRequest(input: {
       return toolTextResult(false, 'invalid no-reply arguments')
     case 'invalid-response-card-arguments':
       return toolTextResult(false, 'invalid response card arguments')
+    case 'response-card-envelope-too-large':
+      if (input.privateDirectResponseCardAllowed !== true) {
+        return toolTextResult(
+          false,
+          'response cards require a private direct conversation',
+        )
+      }
+      if (input.currentResponseCard !== null && input.currentResponseCard !== undefined) {
+        return toolTextResult(false, 'a response card is already attached')
+      }
+      if ((input.currentResponseMedia ?? []).length > 0) {
+        return toolTextResult(
+          false,
+          'response cards cannot be combined with response media',
+        )
+      }
+      return {
+        ...toolTextResult(
+          true,
+          'workout card envelope too large; full text recovery selected',
+        ),
+        responseCardTextFallbackPatch: { card: input.request.card },
+      }
     case 'invalid-response-media-arguments':
       return toolTextResult(false, 'invalid response media arguments')
     case 'invalid-send-vault-file-arguments':
@@ -2125,9 +2180,13 @@ export async function executeMurphDynamicToolRequest(input: {
           'response cards cannot be combined with response media',
         )
       }
+      const card = await attachTrustedWorkoutCardEditor({
+        card: input.request.card,
+        vaultRoot: input.vaultRoot ?? null,
+      })
       return {
         ...toolTextResult(true, 'response card attached'),
-        responseCardPatch: { card: input.request.card },
+        responseCardPatch: { card },
       }
     }
     case 'attach-response-media': {
@@ -3164,6 +3223,38 @@ export async function executeMurphDynamicToolRequest(input: {
         unknownOutcomeOnTransportError: true,
       })
     }
+  }
+}
+
+async function attachTrustedWorkoutCardEditor(input: {
+  card: AssistantResponseCard
+  vaultRoot: string | null
+}): Promise<AssistantResponseCard> {
+  if (
+    input.vaultRoot === null
+    || input.card.kind !== 'compact_table'
+    || !('workout' in input.card)
+    || input.card.workout.state !== 'active'
+  ) {
+    return input.card
+  }
+  try {
+    const trusted = await readLiveWorkoutCardEditor({
+      presentation: input.card.workout,
+      vault: input.vaultRoot,
+      workoutId: input.card.tracking.entityId,
+    })
+    if (trusted === null) {
+      return input.card
+    }
+    const candidate = assistantResponseCardSchema.safeParse({
+      ...input.card,
+      editor: trusted.editor,
+      workout: trusted.workout,
+    })
+    return candidate.success ? candidate.data : input.card
+  } catch {
+    return input.card
   }
 }
 
@@ -7024,7 +7115,16 @@ function parseAttachResponseCardArguments(
       groupChallenge: true
       input: GroupChallengeResponseCardToolInput
     }
-  | { ok: false; validationDigest: SafeToolCallValidationDigest } {
+  | {
+      ok: false
+      reason: 'invalid'
+      validationDigest: SafeToolCallValidationDigest
+    }
+  | {
+      card: CompactTableWorkoutResponseCardV1
+      ok: false
+      reason: 'workout-envelope-too-large'
+    } {
   const schemaName = 'murph.attach_response_card.input'
   const toolName = 'murph.attach_response_card'
   const parsed = attachResponseCardArgumentsSchema.safeParse(value)
@@ -7036,8 +7136,18 @@ function parseAttachResponseCardArguments(
     }
   }
   if (Object.hasOwn(asRecord(value) ?? {}, 'card')) {
+    const semanticWorkout =
+      attachSemanticWorkoutResponseCardArgumentsSchema.safeParse(value)
+    if (semanticWorkout.success) {
+      return {
+        card: semanticWorkout.data.card,
+        ok: false,
+        reason: 'workout-envelope-too-large',
+      }
+    }
     return {
       ok: false,
+      reason: 'invalid',
       validationDigest: buildDynamicToolValidationDigest({
         error: parsed.error,
         rawInput: value,
@@ -7052,6 +7162,7 @@ function parseAttachResponseCardArguments(
   if (!groupChallengeParsed.success) {
     return {
       ok: false,
+      reason: 'invalid',
       validationDigest: buildDynamicToolValidationDigest({
         error: groupChallengeParsed.error,
         rawInput: value,

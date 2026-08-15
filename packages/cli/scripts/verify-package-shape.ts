@@ -254,9 +254,9 @@ assert(
     packageJson.scripts?.['verify:package-shape'] ===
       'pnpm build && node --import=tsx ./scripts/verify-package-shape.ts' &&
     packageJson.scripts?.['test:built-runtime'] ===
-      'MURPH_PREPARED_CLI_RUNTIME_ARTIFACTS=1 pnpm --dir ../.. exec vitest run --config packages/cli/vitest.workspace.ts --no-coverage' &&
+      'MURPH_PREPARED_CLI_RUNTIME_ARTIFACTS=1 MURPH_CLI_RELEASE_TARBALL_TEST=1 pnpm --dir ../.. exec vitest run --config packages/cli/vitest.workspace.ts --no-coverage' &&
     packageJson.scripts?.['test:built-runtime:coverage'] ===
-      'MURPH_PREPARED_CLI_RUNTIME_ARTIFACTS=1 pnpm --dir ../.. exec vitest run --config packages/cli/vitest.workspace.ts --coverage' &&
+      'MURPH_PREPARED_CLI_RUNTIME_ARTIFACTS=1 MURPH_CLI_RELEASE_TARBALL_TEST=1 pnpm --dir ../.. exec vitest run --config packages/cli/vitest.workspace.ts --coverage' &&
     packageJson.scripts?.verify ===
       'pnpm verify:prepared-runtime && pnpm verify:package-shape && pnpm test:built-runtime' &&
     packageJson.scripts?.['verify:coverage'] ===

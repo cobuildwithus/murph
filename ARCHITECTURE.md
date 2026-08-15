@@ -1,6 +1,235 @@
 # Murph Architecture
 
 Last verified: 2026-08-13
+## Local Frog Autofix
+
+Murph's optional local Frog repair loop is an operator-owned macOS process, not
+product runtime, hosted automation, or Frog publication authority. One
+user-session LaunchAgent invokes the repository's primary checkout at load and
+every two hours. Each invocation handles at most one issue and uses GitHub as
+its durable queue and completion ledger; owner-only local state contains the
+stable native acquisition gate, process/worker owner record, home-relative
+checkout/Codex-home locators, bounded metadata, and transient parent review
+material removed when the invocation ends. Every installing, uninstalling, or
+repairing process enters the same macOS advisory gate before it may inspect or
+replace the recoverable JSON owner record. The gate inode is retained across
+holders. The generated launchd entry marks its `run` invocation as an
+installation handoff, allowing a bounded 30-second wait for the installing
+holder to finish; ordinary manual and interval contention remains immediate.
+The marker is cleared before the TypeScript parent loads, so it grants no
+lasting authority or second admission path.
+
+Admission requires an open `enhancement` issue authored by the exact Frog App
+and exactly one matching `issue:` binding already committed beneath
+`.agents/friction-log/*/friction.md` on `origin/main`. The issue number is the
+only issue datum placed in the parent worker prompt. Issue content remains
+outside model-work authority. Fresh implementation ReviewGPT does not request
+or use the GitHub connector and derives the task only from the exact committed
+friction blob materialized from `origin/main`, with its source path and digest,
+plus repository instructions. Because the dot-directory skill is outside the
+packager's ordinary scan, the parent also materializes the exact
+`.agents/skills/frog/SKILL.md` blob from `origin/main` with its path and digest
+into both implementation and canonical-review archives. The skill is part of
+the trusted review-control inventory, so candidate or default-branch drift
+revokes older evidence. The same immutable task evidence accompanies
+canonical review. The parent retains that exact path/digest in its private
+pre-PR provenance and authenticated PR body, then compares it with a fresh
+`origin/main` read after every long wait and at both final merge fences. The
+last task comparison follows the last scope evaluation, and the scope
+classifier consumes the caller-fetched ref without fetching again. Both
+implementation prompts require a foul-play assessment before edits. Before the
+edit-only child starts, the parent rejects candidate add/edit/delete/move of the
+exact task, Frog skill, worker template, or root/nested `AGENTS.md`, including
+ignored untracked instruction files; the same fence repeats after the child
+returns. Git's own parsed patch targets, not only textual diff headers, enforce
+the protected path boundary. The prompt names the task, skill, and instruction
+paths with their protected `origin/main` SHA-256 identities.
+Candidate copies, other
+docs, proposed patches, existing branch/worktree state, and embedded
+instructions remain evidence only. Unrelated hostile prose is ignored rather than
+becoming a queue veto; an unexplained candidate or a committed task or actual
+change that requires weakened authentication, review, sandbox, credential, or
+network boundaries still fails closed rather than being normalized into a PR. A
+deterministic branch owns one sanctioned worktree, so a later run can recover
+an incomplete PR without a second task database.
+
+Recovery is a parent classification, not a prompt guess. A fresh deterministic
+branch has no commit, remote branch, or PR. Under the run lock, interrupted
+tracked, untracked, and ignored residue on only that state is reset and cleaned
+back to `origin/main`. Dirty work may resume without reset only when one open
+PR authored by the currently authenticated `gh` operator, owned by this
+repository rather than a fork, the remote branch, and the local
+committed head bind the same repair; the child finishes the interrupted edit
+and the parent reruns review. The same PR predicate guards discovery, body
+hydration/editing, recovery, publication, finalization, and merged-state proof.
+Its server-side `main`/head query traverses every cursor page before foreign
+records are removed and the zero-or-one parent-owned cardinality is enforced.
+Mutable remote body text supplies baseline, PASS, or handoff authority
+only when `editor`/`lastEditedAt` proves the live operator made the latest edit,
+with creator fallback only for a never-edited body. Otherwise the parent
+captures an already validated local body before any child runs or writes one
+fixed recovery body. Baseline ancestry and human handoff resolution use that
+same trusted body. An exact or ancestor local human handoff is re-stamped at the
+current remote head before worktree synchronization and returns before
+dependency checks, model work, worktree edits,
+commits, pushes, canonical review, or merge, while specialist and
+final PASS markers remain recoverable only from a current operator-owned remote
+body. A retained baseline equal to the current head with no handoff may replace
+the remote presentation and rerun exact-head reviews. A retained ancestor
+baseline paired with a newer remote head becomes a durable review-findings
+handoff; a recovery body with no trusted baseline also becomes that handoff
+without establishing the remote head as a fresh baseline.
+A clean implementation commit interrupted before its first remote push, or an
+open PR, may resume without requesting a second implementation patch. A clean
+local-only no-PR commit remains resumable. Once the deterministic branch has
+remote-tracking provenance but no PR, resume additionally requires the retained
+validated parent-local PR body to bind its immutable first-reviewed head to the
+exact local head and to carry the admitted friction-task path/digest; this
+preserves push-before-PR recovery while rejecting a same-repository branch
+seeded by another writer. Divergence, missing or stale
+parent-local provenance, mismatched ownership, merged or multiply-owned PR
+state, and other ambiguity fail closed. One exact
+closed-unmerged parent PR that lacks a trusted handoff is rewritten with the
+fixed recovery body plus a review-findings handoff, without reopening or
+reviewing it, so cancellation cannot pin later issues. After an unrelated
+clean primary fast-forward the same invocation continues discovery; it exits
+once only when a module already loaded by the launcher changed.
+
+The non-model parent opens a fresh ReviewGPT Pro thread, builds the review
+archive itself from committed Git objects, requires exactly one latest-response
+patch attachment, validates it, and applies it. Missing or rejected
+implementation output/patches and edit-only child timeout, nonzero exit, or
+invalid output are terminal for that candidate. Before any PR exists, the
+parent discards candidate bytes, creates one neutral empty commit whose tree is
+exactly `origin/main`, and publishes the fixed draft body with an exact-head
+`review-findings` handoff. The private body records that disposition before any
+remote operation, so recovery recognizes it before branch synchronization or
+another implementation turn. A newly appeared remote ref is preserved; only
+the exact pre-normalization candidate retained as the immutable first-reviewed
+head, or the exact current neutral handoff after its own interrupted push, can
+authorize a lease-based refresh. Neutral normalization and every body restamp
+preserve that candidate proof across process restarts; a branch-creation push
+uses an explicit nonexistence lease. When fresh `main` requires another neutral
+commit, the prior body binding remains in place until the exact leased push
+succeeds, then the parent atomically restamps the new neutral head. It never
+requests a second implementation; browser, ReviewGPT, command, and GitHub
+infrastructure unavailability remains retryable.
+The post-worker task refresh runs only after the parent has committed the local
+candidate and outside deterministic worker-output classification, so an
+infrastructure failure preserves that exact resumable commit while an actual
+task-identity change remains a typed terminal handoff.
+Review responses, model proof,
+browser access, and downloaded patches remain in an owner-only parent transient
+directory outside the issue worktree. Only a clean fresh branch may install
+pinned dependencies, before any Codex child runs. One ephemeral Codex child
+then receives a native permission profile that denies root filesystem access,
+allows only minimal command-runtime reads plus issue-worktree reads and writes,
+and denies tool network. Its synthetic home and temporary directory live inside
+the ignored worktree output root. User config, plugins, configured MCP servers,
+SSH agents, browser roots, Git common metadata, and parent evidence paths are
+unavailable. Shell commands inherit only a small benign environment allowlist,
+so the authentication-only `CODEX_HOME` locator does not enter model-visible
+command output. It may integrate code, tests, docs, the plan, and a private PR
+draft, but cannot commit, push, publish, review, merge, close, or manufacture
+authority evidence.
+
+The parent structurally validates the diff, commits with hooks disabled, and
+binds the retained private PR body to the immutable first-reviewed head and
+admitted friction-task path/digest. It
+refreshes `origin/main` and revalidates exact open Frog App author, label, and
+one protected-main binding authority immediately before push, then repeats that
+refresh and revalidation immediately before creating a new draft PR. Existing
+PR recovery still edits the one parent-owned PR after the first checkpoint.
+If that checkpoint discovers task drift after a clean unpushed local descendant
+was committed, the parent first persists a private marker for the unchanged
+exact PR head, proves the expected parent-owned projection is unchanged and
+that its head is an ancestor of the local candidate, discards the descendant,
+and updates only that PR body. It never pushes the stale candidate; projection
+drift, missing ancestry, or foreign ownership fails closed.
+Preliminary and final ReviewGPT run through Murph's canonical packager and
+state files from a detached parent-only checkout. The archive contains the
+exact validated parent-local body rather than refetching mutable presentation;
+concurrent packagers stage that body and their PR metadata in separate private
+temporary directories, append them under the fixed
+`review-gpt-pr-context/**` archive prefix, and use collision-resistant names in
+the shared default audit-package directory. PR-bound packaging accepts only an
+explicit ZIP mode and rejects any repo-visible candidate already occupying that
+canonical archive namespace before producing an artifact. Explicit output
+directories retain caller-owned naming, and no lock or shared cleanup lifecycle
+is introduced.
+One current parent-owned PR projection must match its head, body, editor,
+non-closing issue binding, and digest before either model invocation. The same
+exact projection is checked after each long model wait and immediately before
+metadata persistence; an operator handoff created during a wait is preserved
+and any other drift fails closed. Review
+controls, including the complete prompt-preset directory and the four exact
+specialist lens prompts that it delegates to, exactly match trusted `main`.
+That comparison repeats after every long canonical review once the
+parent has refreshed `origin/main`, and at both finalization refreshes including
+immediately before merge. Review-control drift uses the existing exact-head
+review-findings handoff; superseded review evidence never retains unattended
+merge or issue-closure authority. The primary head that loaded the Frog parent
+is also retained for the invocation. The existing loaded-runner path inventory
+is compared from that head to each freshly fetched `origin/main` at the same
+post-review and finalization fences. Unrelated main movement remains allowed;
+loaded authority drift uses the same handoff so an old in-memory parent cannot
+accept review evidence, merge, or close under superseded policy. Each persisted
+specialist and final PASS also binds its candidate head to the exact producing
+runner head. Recovery reuses it only when that runner's loaded paths still match
+fresh `main`; legacy, malformed, or drifted PASS metadata becomes the existing
+exact-head handoff. Either review returning findings, a final
+review requiring a scope retrospective, or a candidate changing those controls creates the same
+durable human-review handoff; the automation does not ask another child to
+remediate review prose. After both reviews pass, it waits for required CI.
+Definitive failed or cancelled required checks and a current-base conflict
+become that same review-findings handoff; pending, missing, or indeterminate
+checks remain retryable. A human-authored descendant of an already handed-off
+head carries the same disposition forward and re-stamps it at the new exact
+head without another model turn. An exact closed-unmerged handoff also remains
+queue-complete, while a merged PR never substitutes for a newly verified
+repair of a reopened issue. The body carries one non-closing exact issue
+binding. After the guarded merge is independently proven, the parent explicitly
+closes only that issue; a later presentation edit cannot negate the proven
+merge. A merged-but-open issue receives one finalization-recovery path: the
+parent revalidates the exact merged PR/head and bounded close/reopen history,
+retries closure only when the issue was never closed after merge, and leaves a
+deliberate reopen for a human without re-entering worker or review execution.
+Immediately before merge it revalidates App author, label, the exact admitted
+committed task path/content digest and sole binding, PR head, exact parent body
+digest/editor/non-closing issue binding,
+checks, and current-base mergeability. A deterministic exact-file allowlist,
+using both sides of detected renames and copies, permits automatic merge only
+for the enumerated Frog autofix implementation, launcher, worker, and focused
+test scripts, with semantic exceptions limited to the Frog script entry in
+`package.json`, this section of `ARCHITECTURE.md`, and the one canonical
+parent-rendered completed repair plan whose filename and content are bound to
+the current issue and repair phase. `AGENTS.md`, `.agents/skills/**`,
+`.agents/friction-log/**`, every other `agent-docs/**` path, and the GitHub
+Actions-owned `scripts/frog-pr-context.ts` are explicitly outside that
+authority. Any possible policy, successor-task, product-runtime, deployment,
+shared ReviewGPT-control, or GitHub-workflow change stays as a reviewed ready
+PR with its issue open for a human merge decision. Exact-head open or
+closed-unmerged handoff markers remove that issue from later automated scans so
+it cannot starve the queue. Only a newly verified parent merge may precede
+issue closure. The invocation has one eight-hour deadline; each model
+worker is bounded to two hours and every spawned command or worker has exact
+process-group ownership.
+An admitted foreground run emits fixed, content-free progress lines before its
+implementation/worker, review, required-check, and merge waits, plus an explicit
+success or existing durable-handoff terminal line. Those messages contain no
+issue content, model/provider detail, or local path and add no durable state.
+
+The native mutating shell entry reconciles the clean primary dependency tree
+with `pnpm install --frozen-lockfile --ignore-scripts` before loading the
+TypeScript parent. A dependency-free Node bootstrap starts pnpm in its own exact
+process group, applies a fixed 30-minute deadline, and after timeout or an
+early leader exit confirms the whole group is gone before returning and
+releasing the native invocation gate. Dependency-control changes, including
+lock-only resolution updates, make an automatic primary advance exit once so
+the next invocation reconciles and loads the new executable graph. The
+bootstrap is loaded-runner authority and the lockfile is part of the trusted
+ReviewGPT control inventory, so runner or dependency drift during review or CI
+revokes older evidence through the same handoff.
 
 ## Accepted-Message Targeting
 
@@ -1627,6 +1856,7 @@ application code.
 - Machine-facing truth lives in append-only JSONL ledgers for inbox captures, events, display-grade metric samples, explicit raw/debug samples, and audit records, with inbox capture intake canonicalized first through `ledger/inbox-captures/**`. Device observation events distinguish raw sample, compact summary, and derived-fact grain so dense telemetry admission does not depend on default query/search visibility.
 - Raw imported artifacts are immutable once copied into `raw/`, and they now live under owner-scoped directories derived from the owning canonical record or import session (`kind` + `id`, plus a partition only for batch families such as device/sample/workout imports). Dated media captures use the same owner-scoped raw path under `raw/captures/**` while staying durable as tagged note events rather than a separate medical record family. Each raw import directory keeps a `manifest.json` sidecar that records the same explicit owner metadata used to resolve the on-disk path, while normalized device/provider API snapshots continue to live under `raw/integrations/**`. Lookup-backed generated-image captures may also write a portable retry lookup in the compact index at `derived/captures/generated-image-lookups.json`; those capture events are immutable after creation except for `deleteEvent`, so the lookup can resolve the original event shard and raw media without scanning while still treating a tombstone as deleted. `raw/inbox/**` media bytes are the scoped privacy exception: image/audio/video bytes can be retention-expired after 14 days by an append-only retention ledger, while documents/PDFs and explicit promoted owner paths remain durable.
 - Raw-artifact repair helpers must stay explicit and proof-driven. `packages/core` keeps tested wearable storage repair primitives that may compact legacy payload-bearing wearable receipts, tombstone derived canonical-record artifacts, report legacy dense sample-debug ledger candidates without deleting them in v1, and tombstone dense raw provider timeseries only when an operator explicitly asks for dense raw pruning or the hosted device-sync runtime runs its bounded post-drain retention step. Each repair must prove manifest byte/sha state, preserve durable product facts, update raw manifests when raw tombstones are written, and emit metadata-only `vault_repair` audit entries; the hosted path must use the named core dense-prune primitive with recent dense raw excluded, bounded file/byte budgets, and metadata-only runtime logs. There is no separate hosted cron, generic raw delete API, or content-addressed raw store for this repair lane.
+- Wearable provider timeseries should not be retained as full provider sample arrays by default. Product, assistant, and CLI wearable summaries consume compact summary observations, derived facts, or display-grade metric samples; any timeseries-derived product fact must come from an explicit importer/projector step that reduces provider samples in memory and persists only compact evidence. Junction preserves its existing daily facts for `glucose`, `blood_oxygen`, and `stress_level`, and adds exactly one deterministic 24-hour feature envelope and one measurement of queryable derived facts per source/day. The envelope uses capped-gap estimated coverage and capped episode summaries, so it never represents discrete samples as clinically exact duration. Only rows with a provider-supplied clock enter temporal derivation; date-only rows remain in the established daily aggregates and produce a zero-coverage envelope with no invented hourly, overnight, rate, peak, or episode facts. Dense reconcile and direct-resource jobs share the existing closed-calendar-day importer as their only owner; precise resource windows cannot emit a partial day under a complete-day identity. Every scheduled reconcile refreshes the latest globally closed provider date for the six fidelity resources, while the account's existing UTC-day gate retains the broader seven-day correction sweep across all configured resources. Sparse Junction `caffeine`, `water`, and `mindfulness_minutes` intervals retain one exact-start canonical measurement with start/end qualifiers and one compact per-record evidence part in addition to their existing daily sums. Their direct-resource jobs keep precise windows but emit intervals only, then use the canonical import receipt's provider-local day keys to refresh each closed corrected date through the calendar-day path; that path alone writes daily sums, so UTC-normalized execution windows cannot select the wrong provider date and partial set growth cannot freeze or conflict with the completed aggregate. Date-only fetches retain the complete provider-local calendar response rather than applying a UTC post-filter, and publication waits until that date has closed at UTC-12, the latest admitted civil offset. Daily sums and dense feature envelopes are complete collection facts, so they do not borrow a maximum child-row revision as a resource/day version; serialized complete-calendar imports reconcile non-empty set growth or removal through the canonical event spine, and exact replays collapse. An empty provider collection emits no aggregate tombstone and therefore does not delete a previously published fact. Explicit provider revisions remain attached only to stable sparse interval identities: one versioned interval may migrate its pre-versioning baseline, stale revisions cannot overwrite newer facts, and changed unversioned or equal-revision bodies fail closed without another state owner. Both seams fail closed at explicit response, source/day, and normalized-output bounds, preserve source/local-day provenance, and never write raw dense samples. Junction `note` is a sparse product input: the importer keeps normalized dated tags on a kind-stable neutral `note` spine with compact evidence and drops the free-text value before raw snapshot retention. Personal Patterns owns the narrower semantic projection and currently admits only a provenance-verified Oura `sauna` tag as an action factor. The neutral external-reference facet is distinct from the legacy per-tag intervention facets, so existing event kinds are never rewritten in place. Note-history coverage version 2 performs one bounded semantic reimport for sources covered by the legacy intervention normalizer; query excludes the recognizable legacy rows while neutral replacements arrive. The existing resource-job payload freezes the admitted note-history generation across continuations and retries: unversioned persisted work remains v1 and only a complete admitted v2 chain can certify v2 coverage. Dense raw retention remains a legacy/debug cleanup lane for already-written high-volume timeseries roles; other sparse or higher-sensitivity resources such as weight need a separate product/debug policy before any default ingestion or pruning.
 - Wearable provider timeseries should not be retained as full provider sample arrays by default. Product, assistant, and CLI wearable summaries consume compact summary observations, derived facts, or display-grade metric samples; any timeseries-derived product fact must come from an explicit importer/projector step that reduces provider samples in memory and persists only compact evidence. Junction's contracts-owned policy admits bounded daily aggregates, compact UTC-hour features, sparse readings/events, note tags, and two bounded dense-resource projections; optional resources stay disabled until exact code-owned opt-in, and the production provider assembly owns one fixed 26-resource addition that member or environment overlays cannot alter. Grouped provider arrays never become canonical evidence, and the importer does not invent coverage metadata. Junction `note` keeps normalized dated tags on a kind-stable neutral note spine and drops free text before retention; its payload freezes the admitted history generation. `fall` remains a sparse alert fact. `electrocardiogram_voltage` reduces at most 100,000 one-day samples into 64 compact recording measurements; dedicated `workout_stream` processes at most 32 indexed workouts serially with 100,000 points each. Each feature uses its own deterministic measurement identity, so it cannot replace the richer ECG summary or workout session. Neither path retains waveform or stream arrays. Dense raw retention remains a legacy/debug cleanup lane for already-written high-volume timeseries roles.
 - Audio/video transcript outputs under `derived/inbox/**` are rebuildable and never canonical health facts. They may survive an earlier raw-media byte pass, but the owning inbound message-content pass deletes them at the receipt-plus-14-day deadline. PDFs, documents, CSVs, and other inspectable attachment files follow their existing raw-inbox lifecycle unless a user or importer creates durable promoted artifacts; they are not reclassified as message-body text by this policy.
 - `bank/library/**` is the stable health reference layer for durable shared entities such as biomarkers, domains, protocol variants, and source artifacts.
@@ -2345,13 +2575,52 @@ deletion-first enrollment fails closed, while enrollment-first deletion removes
 the committed session. Only the credential's Messages-domain-separated lookup
 hash enters the existing short-lived session store, so a rollback to the
 historical unscoped device-agent hash reader cannot resolve it; current
-device-agent authority also rejects its `hbds_imessage_` prefix. Every proof
-action re-checks active access plus launch consent. Authenticated self-revocation
+device-agent authority also rejects its `hbds_imessage_` prefix. Every member
+action re-checks active access plus historical launch consent. Authenticated self-revocation
 remains available after access or consent is lost. The containing app may share
 only this derived credential through an explicitly addressed Keychain group;
 Privy tokens remain host-private and never enter the extension or capability-less
-message URL. The proof action is non-durable and does not create a second poll
-source of truth.
+message URL.
+
+The Messages bridge submits one generic, versioned `MemberActionRequestV1`
+envelope whose `action` is a closed discriminated union. The first action family,
+`workout.live.apply`, contains only bounded workout snapshot preconditions and
+typed exercise/set mutations; it is not an arbitrary path, patch, database, or
+tool-call surface. At the existing response-card attachment boundary, runtime
+re-reads the exact canonical workout and may add one trusted typed editor
+projection to an active card. The native V6 wire carries that projection plus
+one opaque SHA-256 workout-revision binding derived from the canonical workout
+identity and its last applied member-action marker. It contains neither value
+and grants no authority, but preserves exact nullable prior fields while letting
+the workout owner prove under its existing lock that an old card still names
+the exact active workout and predates no direct action. Note-shaped results enter V6 only when the exact canonical note
+fits the visible card result; longer hidden notes cannot enter persisted or
+provider payloads and leave the card V4/read-only. Every other completed set
+must fit exactly one complete note, reps, or weight/reps family; duration,
+distance, RPE, bodyweight, assistance, added-load, and mixed results preserve
+the original V4 actual. Unsupported exercise modes remain V4 before their first
+result as well. A failed read, presentation mismatch, completed workout,
+or oversized V6 likewise stays V4/read-only instead of guessing. Web authenticates and validates the request, locks and
+re-checks member access and consent, then appends one encrypted
+`member.action.requested:<actionId>` item to the existing system mailbox before
+signaling the existing Temporal runtime. Runtime dispatches the action directly
+to the canonical vault use case without starting an assistant turn. When a
+conversation reply already owns the foreground pass, the existing scheduler
+finishes that reply first and then selects at most one due
+`member.action.requested` item before another provider pass or unrelated system
+work; the terminal `member.action.completed` receipt receives no such priority.
+The workout
+owner takes the existing live-workout mutation lock, resolves an exact persisted
+action-id replay first, then requires exactly one active workout matching both
+the current revision binding and the authority-free visible shape, applies
+the complete batch in one canonical write, converges exact retries, and rejects
+stale or ambiguous state. Runtime appends a typed terminal outcome through the
+same mailbox owner before the original request checkpoint is released. The
+scoped client reads that action-id-keyed receipt and reports success only for an
+applied or already-converged result. A future data
+editor extends the closed action union and delegates to its
+existing domain owner; it reuses this auth, idempotency, mailbox, and wake path
+instead of adding another queue, state store, or generic mutation engine.
 
 Production companion auth diagnostics remain hidden until `MURPH_COMPANION_AUTH_DIAGNOSTICS_ENABLED=1`; operators must install the exact-path Vercel WAF fixed-window limit before enabling that route in production.
 The authenticated companion overnight PRV ingress is one strict derived-data
@@ -3172,19 +3441,19 @@ for recipients without the extension. A compact card is a bounded
 presentation snapshot, never a mutable tracker: canonical workout events remain
 the only workout authority, qualitative set annotations live on canonical set
 notes, and an update is complete only after a successful workout re-read
-followed by a new V4 workout snapshot. Generic compact tables continue to use
-V3.
+followed by a new V6 native workout snapshot and V4 static fallback. Generic
+compact tables continue to use V3.
 
 The optional tracking reference is one exact canonical event ULID plus a
 canonical UTC snapshot instant. That reference remains in semantic transcript
 history so a later turn can reopen the workout without a second table store;
 both presentation projections omit it before encoding the card URL. Linq
-requires an HTTPS app-card URL, so V3 generic-table and V4 workout envelopes use
-a bounded Base64URL fragment on the fixed canonical
+requires an HTTPS app-card URL, so V3 generic-table and V6 native-workout
+envelopes use a bounded Base64URL fragment on the fixed canonical
 `https://www.withmurph.ai/` origin. The fragment stays inside the immutable
 message URL, is not sent to the Web origin by an HTTPS request, and is decoded
 locally by the Messages extension. Recipients without that extension receive a
-provider static layout whose `image_url` carries the exact same authority-free
+provider static layout whose `image_url` carries the authority-free V4 workout
 envelope in the bounded queryless `/imessage/card/v1/:payload.png` path. The
 stateless Web renderer accepts only strict V1-V5 presentation envelopes, reads
 no database or remote service, logs no card values, and returns private
@@ -3192,8 +3461,10 @@ no-store/no-index headers. Linq uses that image as its static card fallback;
 Telegram daily-nutrition Rich Messages reuse the same image inside their native
 table-and-details presentation. This is a narrow presentation exception to the
 fixed-URL rule: either URL may contain only the bounded values permitted by its
-versioned delivery contract. V1-V4 carry the same private-direct presentation
-values; V5 uses the identity-free public challenge projection. Neither may
+versioned delivery contract. V1-V4 carry private-direct presentation values;
+V5 uses the identity-free public challenge projection, and native-only V6 adds
+the opaque workout-revision binding plus a bounded typed editable-set projection
+derived from values already visible in that private-direct workout card. None may
 contain a member identity, canonical record reference, credential, tracking
 reference, or other authority.
 Generic V3 tables choose their one shared-header grid solely from the exact
@@ -3204,11 +3475,20 @@ The provider request rejects encoded URLs at 2,048 characters, while the
 contract applies the tighter of the fragment and image-path bounds before
 delivery. Compact-table provider chrome uses only bounded title, optional
 generic subtitle, and derived workout-progress fields; complete detail remains
-owned by the semantic text renderer. Nutrition V1 and V2 cards use the
-same bounded fragment and image-path family without a tracking field. The
-Messages extension remains offline and read-only. This adds no card API,
-database, background synchronization owner, authentication surface, or mutable
-message state.
+owned by the semantic text renderer. V4 workout authoring and native decoding
+admit up to 16 exercises and 16 sets per exercise, but those logical bounds do
+not replace the measured fragment and image-path gates. A complete snapshot is
+attempted first; a real encoded-envelope rejection recovers through complete
+semantic text without truncating or rewriting the canonical workout. Nutrition
+V1 and V2 cards use the same bounded fragment and image-path family without a
+tracking field. The card remains offline, read-only presentation. For an active
+V6 workout only, the
+Messages extension may use the separately enrolled Messages-scoped credential
+to submit a bounded member action derived from the visible snapshot. The URL
+still carries no identity, canonical id, credential, or authority, and all other
+card kinds remain local presentation. This adds no mutable card state, card
+database, background synchronization owner, queue, or model turn. V4 workout
+cards already in transcripts remain readable but cannot open the direct editor.
 
 ## Scheduled assistant tool authority
 

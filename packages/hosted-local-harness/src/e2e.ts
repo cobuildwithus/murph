@@ -86,6 +86,7 @@ export type HostedLocalE2eScenarioName =
   | "linq-home-line-reroute-retry"
   | "linq-unknown-first-contact-fallback"
   | "openai-egress-authority"
+  | "personalized-next-trials"
   | "provider-egress-token-bridge"
   | "retell-call-result-roundtrip"
   | "retryable-outbox-foreground-restart"
@@ -292,6 +293,13 @@ export const hostedLocalE2eScenarios: readonly HostedLocalE2eScenario[] = [
     file: "apps/cloudflare/test/hosted-local-openai-egress-authority-e2e.test.ts",
     name: "openai-egress-authority",
     dedicatedVitestProcess: true,
+  },
+  {
+    dedicatedVitestProcess: true,
+    file: "apps/cloudflare/test/hosted-local-personalized-next-trials-e2e.test.ts",
+    manualOnly: true,
+    name: "personalized-next-trials",
+    testControls: true,
   },
   {
     file: "apps/cloudflare/test/hosted-local-provider-egress-token-bridge-e2e.test.ts",

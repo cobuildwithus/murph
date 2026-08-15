@@ -536,6 +536,23 @@ test("prepareMealImport accepts ingredients-only structured meals", async () => 
   assert.equal(payload.nutrition, undefined);
 });
 
+test("prepareMealImport accepts micronutrient-only structured meals", async () => {
+  const payload = await prepareMealImport({
+    vaultRoot: "/tmp/example-vault",
+    nutrition: {
+      micros: {
+        vitaminB12Mcg: 2.4,
+      },
+    },
+  });
+
+  assert.deepEqual(payload.nutrition, {
+    micros: {
+      vitaminB12Mcg: 2.4,
+    },
+  });
+});
+
 test("prepareCsvSampleImport skips blank rows and omits empty metadata columns", async () => {
   const vaultRoot = await mkdtemp(join(tmpdir(), "murph-vault-"));
   await coreRuntime.initializeVault({ vaultRoot });

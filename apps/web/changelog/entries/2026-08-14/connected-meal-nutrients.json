@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-14",
+  "order": 100,
+  "item": {
+    "id": "connected-meal-nutrients",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Connected meal nutrients are easier to review",
+    "summary": "Murph can now total the supported vitamins, minerals, and water found in connected or saved meal records.",
+    "details": "Each nutrient shows how many meals contributed data, so missing or partial fields stay distinct from zero. Source-app daily targets and dashboard percentages remain in the source app.",
+    "relevanceTags": ["nutrition", "integrations", "cronometer"],
+    "sourcePullRequests": [1841]
+  }
+}

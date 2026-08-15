@@ -7,8 +7,16 @@ import path from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 
 import type { AssistantResponseMedia } from '@murphai/operator-config/assistant-cli-contracts'
-import type { AssistantResponseCard } from '@murphai/operator-config/assistant-response-cards'
+import type {
+  AssistantResponseCard,
+  CompactTableWorkoutResponseCardV1,
+} from '@murphai/operator-config/assistant-response-cards'
+import {
+  sendLinqIMessageAppCard,
+  type LinqFetch,
+} from '@murphai/operator-config/linq-runtime'
 import { createIntegratedVaultServices } from '@murphai/vault-usecases/vault-services'
+import { addStructuredWorkoutRecord } from '@murphai/vault-usecases/workouts'
 
 import {
   executeMurphDynamicToolRequest,
@@ -29,6 +37,10 @@ import {
   digestGroupChallengeDefinition,
   renderGroupChallengeDefinitionSection,
 } from '../src/assistant/group-challenge-response-card-schema.ts'
+import {
+  createAssistantOutboxIntent,
+  readAssistantOutboxIntent,
+} from '../src/assistant/outbox.ts'
 
 const LEGACY_CARD_V1: AssistantResponseCard = {
   kind: 'daily_nutrition',
@@ -210,6 +222,31 @@ const REALISTIC_LATE_WORKOUT_CARD: AssistantResponseCard = {
   },
 }
 
+const OVERSIZED_WORKOUT_CARD: CompactTableWorkoutResponseCardV1 = {
+  kind: 'compact_table',
+  version: 1,
+  title: 'Full workout recovery',
+  subtitle: null,
+  footer: 'Reply with the exercise, set, and result to log or correct it.',
+  tracking: {
+    kind: 'workout',
+    entityId: 'evt_01K1ABCDEFGHJKMNPQRSTVWXYZ',
+    snapshotAt: '2026-08-09T19:45:00.000Z',
+  },
+  workout: {
+    version: 1,
+    state: 'active',
+    exercises: Array.from({ length: 16 }, (_, exerciseIndex) => ({
+      name: `Capacity exercise ${exerciseIndex + 1}`,
+      sets: Array.from({ length: 16 }, (_, setIndex) => ({
+        status: 'pending',
+        target: `Exercise ${exerciseIndex + 1} set ${setIndex + 1} target ${'x'.repeat(12)}`,
+        actual: null,
+      })),
+    })),
+  },
+}
+
 const IMAGE: AssistantResponseMedia = {
   alt: null,
   kind: 'image',
@@ -276,6 +313,198 @@ async function createChallengeVault(input: {
     })
   }
   return root
+}
+
+async function createLiveWorkoutCardVault(input: {
+  ambiguousDuplicate?: boolean
+  hiddenNote?: string
+  unsupportedSet?: {
+    actual: string
+    canonical: Record<string, number | string | undefined>
+    mode?:
+      | 'assisted_bodyweight'
+      | 'bodyweight'
+      | 'cardio'
+      | 'duration'
+      | 'weighted_bodyweight'
+  }
+} = {}): Promise<{
+  card: AssistantResponseCard
+  root: string
+}> {
+  const root = await mkdtemp(path.join(tmpdir(), 'murph-workout-card-tool-'))
+  cleanupPaths.push(root)
+  await createIntegratedVaultServices().core.init({
+    requestId: 'workout-card-tool-test',
+    timezone: 'UTC',
+    vault: root,
+  })
+  const shown = await addStructuredWorkoutRecord({
+    vault: root,
+    draft: {
+      activityType: 'strength-training',
+      durationMinutes: 1,
+      occurredAt: '2026-08-12T14:00:00.000Z',
+      recordedAt: '2026-08-12T14:00:00.000Z',
+      title: 'Strength',
+      workout: {
+        sourceApp: 'murph-live',
+        startedAt: '2026-08-12T14:00:00.000Z',
+        exercises: input.ambiguousDuplicate === true
+          ? [8, 12].map((reps, index) => ({
+              mode: 'bodyweight' as const,
+              name: 'Single-arm row',
+              order: index + 1,
+              sets: [{ order: 1, reps }],
+            }))
+          : input.unsupportedSet !== undefined
+          ? [{
+              ...(input.unsupportedSet.mode === undefined
+                ? {}
+                : { mode: input.unsupportedSet.mode }),
+              name: 'Exercise',
+              order: 1,
+              sets: [{ ...input.unsupportedSet.canonical, order: 1 }],
+            }]
+          : input.hiddenNote === undefined
+          ? [{
+              mode: 'weight_reps',
+              name: 'Leg press',
+              order: 1,
+              unitOverride: 'lb',
+              sets: [
+                { order: 1, reps: 0, weight: 0 },
+                { order: 2, reps: 8, weight: 185, weightUnit: 'lb' },
+                { order: 3 },
+              ],
+            }]
+          : [{
+              name: 'Plank',
+              order: 1,
+              sets: [{ note: input.hiddenNote, order: 1 }],
+            }],
+      },
+    },
+  })
+  return {
+    root,
+    card: {
+      kind: 'compact_table',
+      version: 1,
+      title: 'Strength',
+      subtitle: null,
+      footer: null,
+      tracking: {
+        kind: 'workout',
+        entityId: shown.eventId,
+        snapshotAt: '2026-08-12T14:00:00.000Z',
+      },
+      workout: {
+        version: 1,
+        state: 'active',
+        exercises: input.ambiguousDuplicate === true
+          ? [8, 12].map((reps) => ({
+              name: 'Single-arm row',
+              sets: [{
+                status: 'completed' as const,
+                target: null,
+                actual: `${reps} reps`,
+              }],
+            }))
+          : input.unsupportedSet !== undefined
+          ? [{
+              name: 'Exercise',
+              sets: [{
+                status: 'completed',
+                target: null,
+                actual: input.unsupportedSet.actual,
+              }],
+            }]
+          : input.hiddenNote === undefined
+          ? [{
+              name: 'Leg press',
+              sets: [
+                { status: 'completed', target: '185 lb × 8', actual: '0 lb × 0' },
+                { status: 'completed', target: '185 lb × 8', actual: '185 lb × 8' },
+                { status: 'pending', target: '185 lb × 8', actual: null },
+              ],
+            }]
+          : [{
+              name: 'Plank',
+              sets: [{ status: 'completed', target: null, actual: 'Logged' }],
+            }],
+      },
+    },
+  }
+}
+
+async function persistWorkoutCardThroughLinq(input: {
+  card: AssistantResponseCard
+  idSuffix: string
+  vaultRoot: string
+}) {
+  const intent = await createAssistantOutboxIntent({
+    actorId: '+15550001',
+    card: input.card,
+    channel: 'linq',
+    dedupeToken: `workout-card-${input.idSuffix}`,
+    message: 'ignored model prose',
+    sessionId: `session-${input.idSuffix}`,
+    threadId: `thread-${input.idSuffix}`,
+    threadIsDirect: true,
+    turnId: `turn-${input.idSuffix}`,
+    vault: input.vaultRoot,
+  })
+  const persisted = await readAssistantOutboxIntent(
+    input.vaultRoot,
+    intent.intentId,
+  )
+  const persistedCard = persisted?.card
+  if (
+    !persistedCard
+    || persistedCard.kind !== 'compact_table'
+    || !('workout' in persistedCard)
+  ) {
+    throw new TypeError('Expected the persisted workout card.')
+  }
+
+  const requests: unknown[] = []
+  const fetchImplementation: LinqFetch = async (_url, init) => {
+    requests.push(
+      typeof init.body === 'string' ? JSON.parse(init.body) : null,
+    )
+    return {
+      arrayBuffer: async () => new ArrayBuffer(0),
+      json: async () => ({ message: { id: 'msg_workout_card' } }),
+      ok: true,
+      status: 200,
+      text: async () => '',
+    }
+  }
+  await sendLinqIMessageAppCard({
+    card: persistedCard,
+    chatId: 'chat_workout_card',
+    idempotencyKey: `workout-card-${input.idSuffix}`,
+  }, {
+    env: { LINQ_API_TOKEN: 'test-token' },
+    fetchImplementation,
+  })
+
+  const request = requests[0] as {
+    message: { parts: Array<{ fallback_text: string; url: string }> }
+  }
+  const encoded = request.message.parts[0]?.url.split('#murph-card=')[1]
+  if (encoded === undefined) {
+    throw new TypeError('Expected the encoded workout card URL.')
+  }
+  return {
+    envelope: JSON.parse(
+      Buffer.from(encoded, 'base64url').toString('utf8'),
+    ) as { card?: unknown; schemaVersion?: unknown },
+    persisted,
+    persistedCard,
+    request,
+  }
 }
 
 function readCardToolRequest(
@@ -471,6 +700,7 @@ describe('murph.attach_response_card', () => {
     expect(privateSchema).toContain('daily_nutrition')
     expect(privateSchema).toContain('compact_table')
     expect(privateSchema).toContain('fiberGrams')
+    expect(privateSchema).not.toContain('editor')
     expect(privateSchema).not.toContain('challenge_standings')
     expect(groupSchema).toContain('participantObservations')
     expect(groupSchema).toContain('challengeSlug')
@@ -486,6 +716,15 @@ describe('murph.attach_response_card', () => {
     expect(groupSchema).not.toContain('coverageCounts')
     expect(groupSchema).not.toContain('daily_nutrition')
     expect(groupSchema).not.toContain('compact_table')
+    expect(readCardToolRequest({
+      card: {
+        ...REALISTIC_LATE_WORKOUT_CARD,
+        editor: {
+          exercises: [],
+          version: 1,
+        },
+      },
+    })).toMatchObject({ kind: 'invalid-response-card-arguments' })
     expect(readCardToolRequest({
       ...CHALLENGE_CARD_AUTHORING_INPUT,
       scoreInput: {
@@ -590,6 +829,15 @@ describe('murph.attach_response_card', () => {
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
       'Workout footers span native and static cards; never promise native-only taps',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'let input validation decide whether its actual encoded envelope fits',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'never refuse from an estimated exercise or set count',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'use the full deterministic text recovery',
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
       'New authoring uses V2 with fiber and five required goal snapshots; nullable V2 goals and nutrition V1 remain legacy replay and rendering compatibility only',
@@ -957,6 +1205,44 @@ describe('murph.attach_response_card', () => {
     })
   })
 
+  it('selects trusted full-text recovery only for a semantic workout that exceeds the envelope', async () => {
+    const request = readCardToolRequest({ card: OVERSIZED_WORKOUT_CARD })
+    expect(request).toEqual({
+      card: OVERSIZED_WORKOUT_CARD,
+      kind: 'response-card-envelope-too-large',
+    })
+    if (request === null) {
+      throw new TypeError('Expected an oversized workout card request.')
+    }
+
+    const result = await executeCardTool({ request })
+    expect(result).toMatchObject({
+      responseCardTextFallbackPatch: { card: OVERSIZED_WORKOUT_CARD },
+      rpcResult: {
+        contentItems: [{
+          text: 'workout card envelope too large; full text recovery selected',
+          type: 'inputText',
+        }],
+        success: true,
+      },
+    })
+    expect(result).not.toHaveProperty('responseCardPatch')
+
+    const invalidWorkout = {
+      ...OVERSIZED_WORKOUT_CARD,
+      workout: {
+        ...OVERSIZED_WORKOUT_CARD.workout,
+        exercises: Array.from({ length: 17 }, (_, exerciseIndex) => ({
+          name: `Invalid exercise ${exerciseIndex + 1}`,
+          sets: [{ status: 'pending', target: null, actual: null }],
+        })),
+      },
+    }
+    expect(readCardToolRequest({ card: invalidWorkout })).toMatchObject({
+      kind: 'invalid-response-card-arguments',
+    })
+  })
+
   it('enforces audience-specific card kinds without weakening duplicate checks', async () => {
     const groupNutrition = await executeCardTool({
       privateDirectResponseCardAllowed: false,
@@ -1046,6 +1332,185 @@ describe('murph.attach_response_card', () => {
       }],
       success: false,
     })
+  })
+
+  it('hydrates active workout cards with trusted exact editor state', async () => {
+    const fixture = await createLiveWorkoutCardVault()
+    const result = await executeCardTool({
+      request: {
+        card: fixture.card,
+        kind: 'attach-response-card',
+      },
+      vaultRoot: fixture.root,
+    })
+
+    expect(result.responseCardPatch?.card).toMatchObject({
+      editor: {
+        version: 1,
+        exercises: [{
+          unitOverride: 'lb',
+          sets: [
+            {
+              logged: true,
+              result: {
+                kind: 'weight_reps',
+                reps: 0,
+                weight: 0,
+                weightUnit: null,
+              },
+            },
+            {
+              logged: true,
+              result: {
+                kind: 'weight_reps',
+                reps: 8,
+                weight: 185,
+                weightUnit: 'lb',
+              },
+            },
+            {
+              logged: false,
+              result: null,
+            },
+          ],
+        }],
+      },
+    })
+  })
+
+  it('keeps ambiguous duplicate exercise coordinates on the V4 card', async () => {
+    const fixture = await createLiveWorkoutCardVault({
+      ambiguousDuplicate: true,
+    })
+    const attached = await executeCardTool({
+      request: {
+        card: fixture.card,
+        kind: 'attach-response-card',
+      },
+      vaultRoot: fixture.root,
+    })
+    const card = attached.responseCardPatch?.card
+    if (!card || card.kind !== 'compact_table' || !('workout' in card)) {
+      throw new TypeError('Expected the attached workout card.')
+    }
+
+    expect(card).not.toHaveProperty('editor')
+    const delivery = await persistWorkoutCardThroughLinq({
+      card,
+      idSuffix: 'ambiguous-duplicate',
+      vaultRoot: fixture.root,
+    })
+    expect(delivery.envelope.schemaVersion).toBe(4)
+  })
+
+  it('keeps a hidden canonical note out of the persisted card and Linq request', async () => {
+    const hiddenNote = 'n'.repeat(41)
+    const fixture = await createLiveWorkoutCardVault({ hiddenNote })
+    const attached = await executeCardTool({
+      request: {
+        card: fixture.card,
+        kind: 'attach-response-card',
+      },
+      vaultRoot: fixture.root,
+    })
+    const card = attached.responseCardPatch?.card
+    if (!card || card.kind !== 'compact_table' || !('workout' in card)) {
+      throw new TypeError('Expected the attached workout card.')
+    }
+
+    expect(card).not.toHaveProperty('editor')
+    expect(JSON.stringify(card)).not.toContain(hiddenNote)
+
+    const delivery = await persistWorkoutCardThroughLinq({
+      card,
+      idSuffix: 'note-privacy',
+      vaultRoot: fixture.root,
+    })
+
+    expect(delivery.persistedCard).not.toHaveProperty('editor')
+    expect(JSON.stringify(delivery.persistedCard)).not.toContain(hiddenNote)
+    expect(JSON.stringify(delivery.request)).not.toContain(hiddenNote)
+    expect(delivery.envelope.schemaVersion).toBe(4)
+    expect(JSON.stringify(delivery.envelope)).not.toContain(hiddenNote)
+  })
+
+  it.each([
+    {
+      actual: '60 seconds',
+      canonical: { durationSeconds: 60 },
+      label: 'duration',
+      mode: 'duration' as const,
+    },
+    {
+      actual: '500 meters in 120 seconds',
+      canonical: { distanceMeters: 500, durationSeconds: 120 },
+      label: 'distance and duration',
+      mode: 'cardio' as const,
+    },
+    {
+      actual: '8 reps with 20 kg assistance',
+      canonical: { assistanceKg: 20, reps: 8 },
+      label: 'assistance',
+      mode: 'assisted_bodyweight' as const,
+    },
+    {
+      actual: '8 reps at 80 kg bodyweight',
+      canonical: { bodyweightKg: 80, reps: 8 },
+      label: 'bodyweight',
+      mode: 'bodyweight' as const,
+    },
+    {
+      actual: '8 reps with 10 kg added',
+      canonical: { addedWeightKg: 10, reps: 8 },
+      label: 'added load',
+      mode: 'weighted_bodyweight' as const,
+    },
+    {
+      actual: 'RPE 8',
+      canonical: { rpe: 8 },
+      label: 'RPE',
+    },
+    {
+      actual: '100 kg × 8 at RPE 8',
+      canonical: { reps: 8, rpe: 8, weight: 100 },
+      label: 'mixed RPE',
+    },
+    {
+      actual: '8 reps · Slow tempo',
+      canonical: { note: 'Slow tempo', reps: 8 },
+      label: 'mixed note',
+    },
+  ])('preserves a canonical $label result through the V4 delivery path', async (fixtureInput, testIndex) => {
+    const fixture = await createLiveWorkoutCardVault({
+      unsupportedSet: fixtureInput,
+    })
+    const attached = await executeCardTool({
+      request: {
+        card: fixture.card,
+        kind: 'attach-response-card',
+      },
+      vaultRoot: fixture.root,
+    })
+    const card = attached.responseCardPatch?.card
+    if (!card || card.kind !== 'compact_table' || !('workout' in card)) {
+      throw new TypeError('Expected the attached workout card.')
+    }
+    expect(card).not.toHaveProperty('editor')
+    expect(card.workout.exercises[0]?.sets[0]?.actual)
+      .toBe(fixtureInput.actual)
+
+    const delivery = await persistWorkoutCardThroughLinq({
+      card,
+      idSuffix: `unsupported-${testIndex}`,
+      vaultRoot: fixture.root,
+    })
+    expect(delivery.persistedCard).not.toHaveProperty('editor')
+    expect(delivery.persistedCard.workout.exercises[0]?.sets[0]?.actual)
+      .toBe(fixtureInput.actual)
+    expect(delivery.persisted?.message).toContain(fixtureInput.actual)
+    expect(delivery.request.message.parts[0]?.fallback_text).toContain('workout')
+    expect(delivery.envelope.schemaVersion).toBe(4)
+    expect(JSON.stringify(delivery.envelope)).toContain(fixtureInput.actual)
   })
 
   it('refuses group cards without a complete read, authorized participants, backed definition scopes, or canonical page', async () => {

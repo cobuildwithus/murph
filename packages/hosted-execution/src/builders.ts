@@ -1,4 +1,12 @@
 import type {
+  MemberActionOutcomeV1,
+  MemberActionRequestV1,
+} from "@murphai/contracts";
+import {
+  parseMemberActionOutcomeV1,
+  parseMemberActionRequestV1,
+} from "@murphai/contracts";
+import type {
   HostedExecutionAssistantAskCompletedPayload,
   HostedExecutionAssistantAskCompletedWake,
   HostedExecutionAssistantAskRequestedPayload,
@@ -25,6 +33,8 @@ import type {
   HostedExecutionMemberPreferences,
   HostedExecutionMemberPreferencesUpdatedWake,
   HostedExecutionMealPhotoCapturedWake,
+  HostedExecutionMemberActionRequestedWake,
+  HostedExecutionMemberActionCompletedWake,
   HostedExecutionRuntimeTimerWake,
   HostedExecutionRuntimeControlWake,
   HostedExecutionPlainRuntimeControlWakeKind,
@@ -158,6 +168,8 @@ type HostedExecutionMemberOwnedWake =
   | HostedExecutionMemberActivatedWake
   | HostedExecutionMemberChannelsUpdatedWake
   | HostedExecutionMemberPreferencesUpdatedWake
+  | HostedExecutionMemberActionRequestedWake
+  | HostedExecutionMemberActionCompletedWake
   | HostedExecutionVaultShareDeliveryWake
   | HostedExecutionVaultShareRevokeWake;
 
@@ -728,6 +740,40 @@ export function buildHostedExecutionMemberPreferencesUpdatedWake(input: {
     ...(input.requestedFields
       ? { requestedFields: [...input.requestedFields] }
       : {}),
+  };
+}
+
+export function buildHostedExecutionMemberActionRequestedWake(input: {
+  eventId: string;
+  memberId: string;
+  occurredAt: string;
+  request: MemberActionRequestV1;
+}): HostedExecutionMemberActionRequestedWake {
+  return {
+    ...buildHostedExecutionMemberOwnedWakeBase({
+      eventId: input.eventId,
+      kind: "member.action.requested",
+      memberId: input.memberId,
+      occurredAt: input.occurredAt,
+    }),
+    request: parseMemberActionRequestV1(input.request),
+  };
+}
+
+export function buildHostedExecutionMemberActionCompletedWake(input: {
+  eventId: string;
+  memberId: string;
+  occurredAt: string;
+  outcome: MemberActionOutcomeV1;
+}): HostedExecutionMemberActionCompletedWake {
+  return {
+    ...buildHostedExecutionMemberOwnedWakeBase({
+      eventId: input.eventId,
+      kind: "member.action.completed",
+      memberId: input.memberId,
+      occurredAt: input.occurredAt,
+    }),
+    outcome: parseMemberActionOutcomeV1(input.outcome),
   };
 }
 

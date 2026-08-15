@@ -14,6 +14,7 @@ import type {
 import type {
   HostedClinicalRecordsRecordOutcomeRequest,
 } from "@murphai/hosted-execution/clinical-records";
+import type { MemberActionOutcomeV1 } from "@murphai/contracts";
 import type {
   HostedRuntimePlatform,
 } from "./platform.ts";
@@ -178,7 +179,12 @@ export type HostedSystemMailboxPostCheckpointRecord =
       nextWakeAt?: null;
       phase: "connected" | "disconnected";
     }
-  | {
+    | {
+      kind: "member-action.outcome-recorded";
+      nextWakeAt?: null;
+      outcome: MemberActionOutcomeV1;
+    }
+    | {
       kind: "vault-share.projection";
       nextWakeAt?: null;
     };
@@ -198,6 +204,7 @@ export type HostedMailboxLane =
   | "member-activated"
   | "member-channels-updated"
   | "member-preferences-updated"
+  | "member-action"
   | "runtime-control";
 
 export interface HostedMailboxExecutionMetrics extends HostedMailboxEffect {
