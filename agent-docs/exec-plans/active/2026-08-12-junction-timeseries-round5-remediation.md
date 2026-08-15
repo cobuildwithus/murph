@@ -556,3 +556,9 @@ Updated: 2026-08-14
   one local source uses the oldest identity, newest lifecycle/error state, and
   maximum last-data time; job-time listing returns that same identity. All 103
   hosted device-sync runtime tests and the assistant-runtime typecheck pass.
+- Integrated current `main` at `36089c2935` with the two runner-budget conflicts
+  resolved entirely to `main`'s superseding 10% total-cap policy. The Junction
+  runtime patch is unchanged by that resolution. The 42 runner-budget tests,
+  Cloudflare typecheck, all 103 hosted device-sync runtime tests, and
+  assistant-runtime typecheck pass. The two assistant-engine tests that failed
+  on the prior integrated base now pass with `main`'s fixture correction.
