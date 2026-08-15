@@ -579,7 +579,11 @@ Last verified: 2026-08-14
   array members retain their bound request arguments through direct, `.call`,
   and closed `.apply` invocation; spreads, conditional origins, member writes,
   and `Object.assign` remain possible values and fail closed when any branch
-  carries provider transport provenance. The guard also follows strict fetch-shaped
+  carries provider transport provenance, including when the mutated container
+  is reached through a definitive chronological local alias. Destructured
+  declaration/assignment values, nested property paths, and defaults enter the
+  same binding census, so provider URL and transport facts do not disappear
+  when a closed local configuration or namespace is unpacked. The guard also follows strict fetch-shaped
   wrappers at their nearest lexical binding when they resolve to provider
   literals or provider-configured URL data. Untyped fetch parameters retain
   their exact default expressions, and identifier reads resolve the nearest

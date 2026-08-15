@@ -2464,4 +2464,106 @@ describe("check-provider-request-boundaries", () => {
     ]);
   });
 
+  it("retains provider provenance through aliased member mutation and destructuring", () => {
+    const matches = violationsOfKind(
+      "raw-provider-http",
+      [
+        "const transports = { send: async (_url: string) => ({ ok: true }) };",
+        "const alias = transports;",
+        "alias.send = globalThis.fetch.bind(undefined, 'https://api.openai.com/v1/responses');",
+        "await transports.send();",
+        "const assigned = { send: async (_url: string) => ({ ok: true }) };",
+        "const assignedAlias = assigned;",
+        "Object.assign(assignedAlias, { send: globalThis.fetch.bind(undefined, 'https://api.openai.com/v1/responses') });",
+        "await assigned.send();",
+        "const nested = { provider: { send: async (_url: string) => ({ ok: true }) } };",
+        "const nestedAlias = nested.provider;",
+        "nestedAlias.send = globalThis.fetch.bind(undefined, 'https://api.openai.com/v1/responses');",
+        "await nested.provider.send();",
+        "const tuple = [async (_url: string) => ({ ok: true })];",
+        "const tupleAlias = tuple;",
+        "tupleAlias[0] = globalThis.fetch.bind(undefined, 'https://api.openai.com/v1/responses');",
+        "await tuple[0]();",
+        "const routes = { endpoint: '/internal' };",
+        "routes.endpoint = 'https://api.openai.com/v1/responses';",
+        "await fetch(routes.endpoint, { method: 'POST' });",
+        "const aliasedRoutes = { endpoint: '/internal' };",
+        "const routesAlias = aliasedRoutes;",
+        "routesAlias.endpoint = 'https://api.openai.com/v1/responses';",
+        "await fetch(aliasedRoutes.endpoint, { method: 'POST' });",
+        "const grouped = { provider: { responses: 'https://api.openai.com/v1/responses' } };",
+        "const { provider: { responses: endpoint } } = grouped;",
+        "await fetch(endpoint, { method: 'POST' });",
+        "const imported = await import('node-fetch');",
+        "const importedAlias = imported;",
+        "let dynamicSend = async (_url: string) => ({ ok: true });",
+        "({ default: dynamicSend } = importedAlias);",
+        "await dynamicSend('https://api.openai.com/v1/responses');",
+        "const web = globalThis;",
+        "let webSend = async (_url: string) => ({ ok: true });",
+        "({ fetch: webSend } = web);",
+        "await webSend('https://api.openai.com/v1/responses');",
+      ].join("\n"),
+      "scripts/aliased-member-provider-transports.mts",
+    );
+
+    expect(matches.map((match) => match.line)).toEqual([
+      4,
+      8,
+      12,
+      16,
+      19,
+      23,
+      26,
+      31,
+      35,
+    ]);
+  });
+
+  it("uses effective provider-valued members and destructured defaults", () => {
+    const matches = violationsOfKind(
+      "raw-provider-http",
+      [
+        "const routes = { endpoint: '/internal' };",
+        "routes.endpoint = 'https://api.openai.com/v1/responses';",
+        "await fetch(routes.endpoint, { method: 'POST' });",
+        "const aliasedRoutes = { endpoint: '/internal' };",
+        "const routesAlias = aliasedRoutes;",
+        "routesAlias.endpoint = 'https://api.openai.com/v1/responses';",
+        "await fetch(aliasedRoutes.endpoint, { method: 'POST' });",
+        "const grouped = { provider: { responses: 'https://api.openai.com/v1/responses' } };",
+        "const { provider: { responses: endpoint } } = grouped;",
+        "await fetch(endpoint, { method: 'POST' });",
+        "const optional = { endpoint: undefined };",
+        "const { endpoint: fallbackEndpoint = 'https://api.openai.com/v1/responses' } = optional;",
+        "await fetch(fallbackEndpoint, { method: 'POST' });",
+      ].join("\n"),
+      "scripts/effective-provider-member-values.mts",
+    );
+
+    expect(matches.map((match) => match.line)).toEqual([3, 7, 10, 13]);
+  });
+
+  it("does not cross aliased member shadows or unrelated reassignments", () => {
+    const matches = violationsOfKind(
+      "raw-provider-http",
+      [
+        "const transports = { send: async (_url: string) => ({ ok: true }) };",
+        "const alias = transports;",
+        "{",
+        "  const alias = { send: async (_url: string) => ({ ok: true }) };",
+        "  alias.send = globalThis.fetch.bind(undefined, 'https://api.openai.com/v1/responses');",
+        "}",
+        "await transports.send();",
+        "const original = { send: async (_url: string) => ({ ok: true }) };",
+        "let reassigned = original;",
+        "reassigned = { send: globalThis.fetch.bind(undefined, 'https://api.openai.com/v1/responses') };",
+        "await original.send();",
+      ].join("\n"),
+      "scripts/shadowed-aliased-member-provider-transports.mts",
+    );
+
+    expect(matches).toEqual([]);
+  });
+
 });

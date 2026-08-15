@@ -375,9 +375,11 @@ type ProviderRequestBoundaryViolationKind =
   | "untyped-request-object";
 
 interface VariableBinding {
+  readonly defaultExpression: Expression | null;
   readonly definitive: boolean;
   readonly identifierStart: number;
   readonly initializer: Expression;
+  readonly propertyPath: readonly string[] | null;
   readonly scopeEnd: number;
   readonly scopeStart: number;
   readonly start: number;
@@ -1066,12 +1068,17 @@ function collectHttpTransportBindings(
   while (changed) {
     changed = false;
     traverseFast(sourceFile, (node) => {
-      if (
-        isVariableDeclarator(node) &&
-        node.init &&
-        node.id.type === "ObjectPattern"
-      ) {
-        const init = unwrapExpression(node.init);
+      const destructuringTarget = isVariableDeclarator(node) &&
+          node.init &&
+          node.id.type === "ObjectPattern"
+        ? { initializer: node.init, pattern: node.id }
+        : isAssignmentExpression(node) &&
+            node.operator === "=" &&
+            node.left.type === "ObjectPattern"
+          ? { initializer: node.right, pattern: node.left }
+          : null;
+      if (destructuringTarget) {
+        const init = unwrapExpression(destructuringTarget.initializer);
         const staticModule = readStaticTransportModule(init);
         const directTransport = staticModule
           ? classifyHttpTransportModule(staticModule.moduleName)
@@ -1081,7 +1088,7 @@ function collectHttpTransportBindings(
         if (!namespaceTransport) {
           return;
         }
-        for (const property of node.id.properties) {
+        for (const property of destructuringTarget.pattern.properties) {
           if (
             property.type === "RestElement" &&
             isIdentifier(property.argument)
@@ -1832,26 +1839,48 @@ function readBoundTransportCall(input: {
 }): BoundTransportCall | null {
   const expression = unwrapExpression(input.node);
   if (isIdentifier(expression)) {
-    const binding = resolveBinding(
+    const possibleBindings = resolvePossibleBindings(
       input.bindings,
       expression.name,
       input.before,
     );
-    if (!binding) {
+    if (possibleBindings.length === 0) {
       return null;
     }
-    const key = `bound-transport:${expression.name}:${binding.start}`;
-    if (input.resolving.has(key)) {
+    const possibleBoundCalls: BoundTransportCall[] = [];
+    let possibleValueCount = 0;
+    for (const binding of possibleBindings) {
+      const key = `bound-transport:${expression.name}:${binding.start}`;
+      if (input.resolving.has(key)) {
+        continue;
+      }
+      const resolving = new Set(input.resolving);
+      resolving.add(key);
+      const values = readVariableBindingPossibleValues(binding, input.bindings);
+      possibleValueCount += values.length;
+      for (const value of values) {
+        const possibleBound = readBoundTransportCall({
+          ...input,
+          before: binding.start,
+          node: value,
+          resolving,
+        });
+        if (possibleBound) {
+          possibleBoundCalls.push(possibleBound);
+        }
+      }
+    }
+    const [bound] = possibleBoundCalls;
+    if (!bound) {
       return null;
     }
-    const resolving = new Set(input.resolving);
-    resolving.add(key);
-    return readBoundTransportCall({
-      ...input,
-      before: binding.start,
-      node: binding.initializer,
-      resolving,
-    });
+    return possibleBindings.length === 1 &&
+        possibleValueCount === 1 &&
+        possibleBoundCalls.length === 1 &&
+        possibleBindings[0]?.definitive &&
+        !bound.unresolved
+      ? bound
+      : { ...bound, arguments: [], unresolved: true };
   }
   if (
     isMemberExpression(expression) ||
@@ -2304,15 +2333,20 @@ function inferProviderExpressionFacts(input: {
       }
       const resolving = new Set(input.resolving);
       resolving.add(bindingKey);
-      mergeProviderExpressionFacts(
-        facts,
-        inferProviderExpressionFacts({
-          ...input,
-          before: binding.start - 1,
-          node: binding.initializer,
-          resolving,
-        }),
-      );
+      for (const value of readVariableBindingPossibleValues(
+        binding,
+        input.bindings,
+      )) {
+        mergeProviderExpressionFacts(
+          facts,
+          inferProviderExpressionFacts({
+            ...input,
+            before: binding.start - 1,
+            node: value,
+            resolving,
+          }),
+        );
+      }
     }
     addSingleProviderFileHint(
       facts.providerIds,
@@ -2336,7 +2370,15 @@ function inferProviderExpressionFacts(input: {
           input.before,
           input.analysis.sourceFile,
         );
-        if (staticInitializer) {
+        const possibleInitializers = staticInitializer
+          ? [staticInitializer]
+          : readPossibleStaticMemberInitializers(
+              node,
+              input.bindings,
+              input.before,
+              input.analysis.sourceFile,
+            );
+        for (const possibleInitializer of possibleInitializers) {
           const resolving = new Set(input.resolving);
           resolving.add(bindingKey);
           mergeProviderExpressionFacts(
@@ -2344,29 +2386,10 @@ function inferProviderExpressionFacts(input: {
             inferProviderExpressionFacts({
               ...input,
               before: node.start ?? input.before,
-              node: staticInitializer,
+              node: possibleInitializer,
               resolving,
             }),
           );
-        } else {
-          const staticContainer = resolveStaticMemberContainer(
-            node,
-            input.bindings,
-            input.before,
-          );
-          if (staticContainer) {
-            const resolving = new Set(input.resolving);
-            resolving.add(bindingKey);
-            mergeProviderExpressionFacts(
-              facts,
-              inferProviderExpressionFacts({
-                ...input,
-                before: node.start ?? input.before,
-                node: staticContainer,
-                resolving,
-              }),
-            );
-          }
         }
         const binding = resolveMemberBinding(
           input.analysis.memberBindings,
@@ -4161,7 +4184,11 @@ function resolveStaticMemberInitializer(
   ) {
     return null;
   }
-  let current = unwrapExpression(binding.initializer);
+  const bindingValues = readVariableBindingPossibleValues(binding, bindings);
+  if (bindingValues.length !== 1) {
+    return null;
+  }
+  let current = unwrapExpression(bindingValues[0] ?? binding.initializer);
   const resolving = new Set([`${root}:${binding.start}`]);
   for (const propertyName of pathParts.slice(1)) {
     while (isIdentifier(current)) {
@@ -4176,8 +4203,17 @@ function resolveStaticMemberInitializer(
       if (!currentBinding?.definitive || resolving.has(key)) {
         return null;
       }
+      const currentValues = readVariableBindingPossibleValues(
+        currentBinding,
+        bindings,
+      );
+      if (currentValues.length !== 1) {
+        return null;
+      }
       resolving.add(key);
-      current = unwrapExpression(currentBinding.initializer);
+      current = unwrapExpression(
+        currentValues[0] ?? currentBinding.initializer,
+      );
     }
     if (isObjectExpression(current)) {
       const property = readClosedObjectProperties(current)?.get(propertyName);
@@ -4225,15 +4261,20 @@ function readPossibleStaticPropertyValues(
       }
       const nextResolving = new Set(resolving);
       nextResolving.add(key);
-      values.push(
-        ...readPossibleStaticPropertyValues(
-          binding.initializer,
-          propertyName,
-          bindings,
-          binding.start,
-          nextResolving,
-        ),
-      );
+      for (const bindingValue of readVariableBindingPossibleValues(
+        binding,
+        bindings,
+      )) {
+        values.push(
+          ...readPossibleStaticPropertyValues(
+            bindingValue,
+            propertyName,
+            bindings,
+            binding.start,
+            nextResolving,
+          ),
+        );
+      }
     }
     return values;
   }
@@ -4328,6 +4369,28 @@ function readPossibleStaticPropertyValues(
   return [];
 }
 
+function readVariableBindingPossibleValues(
+  binding: VariableBinding,
+  bindings: ReadonlyMap<string, readonly VariableBinding[]>,
+): Node[] {
+  let values: Node[] = [unwrapExpression(binding.initializer)];
+  for (const propertyName of binding.propertyPath ?? []) {
+    values = values.flatMap((candidate) =>
+      readPossibleStaticPropertyValues(
+        candidate,
+        propertyName,
+        bindings,
+        binding.start - 1,
+        new Set(),
+      )
+    );
+  }
+  if (binding.defaultExpression) {
+    values.push(unwrapExpression(binding.defaultExpression));
+  }
+  return values;
+}
+
 function readPossibleStaticMemberInitializers(
   node: Node,
   bindings: ReadonlyMap<string, readonly VariableBinding[]>,
@@ -4340,8 +4403,8 @@ function readPossibleStaticMemberInitializers(
     return [];
   }
 
-  let current = resolvePossibleBindings(bindings, root, before).map(
-    (binding) => unwrapExpression(binding.initializer),
+  let current = resolvePossibleBindings(bindings, root, before).flatMap(
+    (binding) => readVariableBindingPossibleValues(binding, bindings),
   );
   for (const propertyName of pathParts.slice(1)) {
     current = current.flatMap((candidate) =>
@@ -4391,31 +4454,73 @@ function collectStaticMemberMutationCandidates(sourceFile: Node): readonly Node[
   return candidates;
 }
 
+function canonicalizeStaticMemberPath(
+  path: readonly string[],
+  bindings: ReadonlyMap<string, readonly VariableBinding[]>,
+  before: number,
+): {
+  readonly path: readonly string[];
+  readonly rootBinding: VariableBinding;
+} | null {
+  let canonicalPath = [...path];
+  let position = before;
+  const resolving = new Set<string>();
+  while (canonicalPath.length > 0) {
+    const root = canonicalPath[0];
+    if (!root || root === "this") {
+      return null;
+    }
+    const binding = resolveBinding(bindings, root, position);
+    if (!binding?.definitive) {
+      return null;
+    }
+    const key = `${root}:${binding.start}`;
+    if (resolving.has(key)) {
+      return null;
+    }
+    resolving.add(key);
+    if (binding.defaultExpression) {
+      return { path: canonicalPath, rootBinding: binding };
+    }
+    const initializerPath = readMemberPath(
+      unwrapExpression(binding.initializer),
+    );
+    if (!initializerPath) {
+      return { path: canonicalPath, rootBinding: binding };
+    }
+    canonicalPath = [
+      ...initializerPath,
+      ...(binding.propertyPath ?? []),
+      ...canonicalPath.slice(1),
+    ];
+    position = binding.start - 1;
+  }
+  return null;
+}
+
 function readStaticMemberMutationInitializers(
   node: Node,
   bindings: ReadonlyMap<string, readonly VariableBinding[]>,
   before: number,
   sourceFile: Node,
 ): Node[] {
-  const targetPath = readMemberPath(node);
-  const root = targetPath?.[0];
-  if (!targetPath || targetPath.length < 2 || !root || root === "this") {
+  const initialTargetPath = readMemberPath(node);
+  if (!initialTargetPath || initialTargetPath.length < 2) {
     return [];
   }
-  const targetBinding = resolveBinding(bindings, root, before);
-  if (!targetBinding) {
+  const target = canonicalizeStaticMemberPath(
+    initialTargetPath,
+    bindings,
+    before,
+  );
+  if (!target) {
     return [];
   }
-
-  const hasTargetBindingAt = (position: number): boolean => {
-    const binding = resolveBinding(bindings, root, position);
-    return Boolean(
-      binding &&
-      binding.start === targetBinding.start &&
-      binding.scopeStart === targetBinding.scopeStart &&
-      binding.scopeEnd === targetBinding.scopeEnd,
-    );
-  };
+  const targetPath = target.path;
+  const hasSameRootBinding = (binding: VariableBinding): boolean =>
+    binding.start === target.rootBinding.start &&
+    binding.scopeStart === target.rootBinding.scopeStart &&
+    binding.scopeEnd === target.rootBinding.scopeEnd;
   const startsWithTargetPath = (candidate: readonly string[]): boolean =>
     candidate.length >= 1 &&
     candidate.length <= targetPath.length &&
@@ -4443,16 +4548,23 @@ function readStaticMemberMutationInitializers(
   const values: Node[] = [];
   for (const candidate of collectStaticMemberMutationCandidates(sourceFile)) {
     const position = candidate.start ?? Number.MAX_SAFE_INTEGER;
-    if (position >= before || !hasTargetBindingAt(position)) {
+    if (position >= before) {
       continue;
     }
     if (isAssignmentExpression(candidate)) {
       const assignedPath = readMemberPath(candidate.left);
-      if (assignedPath && startsWithTargetPath(assignedPath)) {
+      const canonicalAssignedPath = assignedPath
+        ? canonicalizeStaticMemberPath(assignedPath, bindings, position)
+        : null;
+      if (
+        canonicalAssignedPath &&
+        hasSameRootBinding(canonicalAssignedPath.rootBinding) &&
+        startsWithTargetPath(canonicalAssignedPath.path)
+      ) {
         values.push(
           ...readNestedValues(
             candidate.right,
-            targetPath.slice(assignedPath.length),
+            targetPath.slice(canonicalAssignedPath.path.length),
             position,
           ),
         );
@@ -4464,11 +4576,18 @@ function readStaticMemberMutationInitializers(
         candidate.left.computed
       ) {
         const objectPath = readMemberPath(candidate.left.object);
-        if (objectPath && startsWithTargetPath(objectPath)) {
+        const canonicalObjectPath = objectPath
+          ? canonicalizeStaticMemberPath(objectPath, bindings, position)
+          : null;
+        if (
+          canonicalObjectPath &&
+          hasSameRootBinding(canonicalObjectPath.rootBinding) &&
+          startsWithTargetPath(canonicalObjectPath.path)
+        ) {
           values.push(
             ...readNestedValues(
               candidate.right,
-              targetPath.slice(objectPath.length + 1),
+              targetPath.slice(canonicalObjectPath.path.length + 1),
               position,
             ),
           );
@@ -4489,7 +4608,14 @@ function readStaticMemberMutationInitializers(
         continue;
       }
       const assignedPath = readMemberPath(assigned);
-      if (!assignedPath || !startsWithTargetPath(assignedPath)) {
+      const canonicalAssignedPath = assignedPath
+        ? canonicalizeStaticMemberPath(assignedPath, bindings, position)
+        : null;
+      if (
+        !canonicalAssignedPath ||
+        !hasSameRootBinding(canonicalAssignedPath.rootBinding) ||
+        !startsWithTargetPath(canonicalAssignedPath.path)
+      ) {
         continue;
       }
       for (const source of sources) {
@@ -4502,7 +4628,7 @@ function readStaticMemberMutationInitializers(
         values.push(
           ...readNestedValues(
             source,
-            targetPath.slice(assignedPath.length),
+            targetPath.slice(canonicalAssignedPath.path.length),
             position,
           ),
         );
@@ -4510,25 +4636,6 @@ function readStaticMemberMutationInitializers(
     }
   }
   return values;
-}
-
-function resolveStaticMemberContainer(
-  node: Node,
-  bindings: ReadonlyMap<string, readonly VariableBinding[]>,
-  before: number,
-): Node | null {
-  const root = readMemberPath(node)?.[0];
-  if (!root || root === "this") {
-    return null;
-  }
-  const initializer = resolveBinding(bindings, root, before)?.initializer;
-  if (!initializer) {
-    return null;
-  }
-  const container = unwrapExpression(initializer);
-  return isObjectExpression(container) || container.type === "ArrayExpression"
-    ? container
-    : null;
 }
 
 function isProvablyBinaryTransferBody(input: {
@@ -5305,23 +5412,26 @@ function isFetchLikeCallTarget(input: {
       }
       const resolving = new Set(input.resolving);
       resolving.add(key);
-      return isFetchLikeCallTarget({
-        ...input,
-        before: variable.start,
-        node: variable.initializer,
-        resolving,
-      }) ||
-        functionHasFetchCallSignature(
-          variable.initializer,
-          input.contents,
-          input.exact,
-        ) ||
-        functionDirectlyForwardsToFetch({
-          ...input,
-          before: variable.start,
-          node: variable.initializer,
-          resolving,
-        });
+      return readVariableBindingPossibleValues(variable, input.bindings).some(
+        (value) =>
+          isFetchLikeCallTarget({
+            ...input,
+            before: variable.start,
+            node: value,
+            resolving,
+          }) ||
+          functionHasFetchCallSignature(
+            value,
+            input.contents,
+            input.exact,
+          ) ||
+          functionDirectlyForwardsToFetch({
+            ...input,
+            before: variable.start,
+            node: value,
+            resolving,
+          }),
+      );
     }
 
     const callable = resolveFunctionBinding(
@@ -5618,53 +5728,158 @@ function collectVariableBindings(
     sourceFile,
   );
   const bindings = new Map<string, VariableBinding[]>();
+
+  const addPatternBindings = (input: {
+    readonly assignment: boolean;
+    readonly definitive: boolean;
+    readonly initializer: Expression;
+    readonly node: Node;
+    readonly pattern: Node;
+  }): void => {
+    const lexicalScope = findInnermostLexicalScope(
+      scopes,
+      input.node.start ?? 0,
+    );
+    for (const entry of readVariablePatternEntries(input.pattern, contents)) {
+      const current = bindings.get(entry.name) ?? [];
+      const previous = resolveBinding(
+        bindings,
+        entry.name,
+        input.node.start ?? 0,
+      );
+      current.push({
+        defaultExpression: entry.defaultExpression,
+        definitive:
+          input.definitive &&
+          (
+            !input.assignment ||
+            previous === null ||
+            previous.scopeStart === lexicalScope.start
+          ),
+        identifierStart: entry.identifierStart,
+        initializer: input.initializer,
+        propertyPath: entry.propertyPath.length > 0
+          ? entry.propertyPath
+          : null,
+        scopeEnd: input.assignment
+          ? previous?.scopeEnd ?? lexicalScope.end
+          : lexicalScope.end,
+        scopeStart: input.assignment
+          ? previous?.scopeStart ?? lexicalScope.start
+          : lexicalScope.start,
+        start: input.node.start ?? 0,
+        typeAnnotation: entry.typeAnnotation ??
+          (input.assignment ? previous?.typeAnnotation ?? null : null),
+      });
+      bindings.set(entry.name, current);
+    }
+  };
+
   traverseFast(sourceFile, (node) => {
     if (
       isAssignmentExpression(node) &&
       node.operator === "=" &&
-      isIdentifier(node.left) &&
       isExpression(node.right)
     ) {
-      const current = bindings.get(node.left.name) ?? [];
-      const previous = resolveBinding(
-        bindings,
-        node.left.name,
-        node.start ?? 0,
-      );
-      const lexicalScope = findInnermostLexicalScope(scopes, node.start ?? 0);
-      current.push({
-        definitive:
-          !conditionalAssignmentStarts.has(node.start ?? 0) &&
-          (previous === null || previous.scopeStart === lexicalScope.start),
-        identifierStart: node.left.start ?? node.start ?? 0,
+      addPatternBindings({
+        assignment: true,
+        definitive: !conditionalAssignmentStarts.has(node.start ?? 0),
         initializer: node.right,
-        scopeEnd: previous?.scopeEnd ?? lexicalScope.end,
-        scopeStart: previous?.scopeStart ?? lexicalScope.start,
-        start: node.start ?? 0,
-        typeAnnotation: previous?.typeAnnotation ?? null,
+        node,
+        pattern: node.left,
       });
-      bindings.set(node.left.name, current);
       return;
     }
-    if (!isVariableDeclarator(node) || !isIdentifier(node.id) || !node.init) {
+    if (!isVariableDeclarator(node) || !node.init) {
       return;
     }
-    const current = bindings.get(node.id.name) ?? [];
-    const scope = findInnermostLexicalScope(scopes, node.start ?? 0);
-    current.push({
+    addPatternBindings({
+      assignment: false,
       definitive: true,
-      identifierStart: node.id.start ?? node.start ?? 0,
       initializer: node.init,
-      scopeEnd: scope.end,
-      scopeStart: scope.start,
-      start: node.start ?? 0,
-      typeAnnotation: node.id.typeAnnotation
-        ? readNodeText(node.id.typeAnnotation, contents)
-        : null,
+      node,
+      pattern: node.id,
     });
-    bindings.set(node.id.name, current);
   });
   return bindings;
+}
+
+function readVariablePatternEntries(
+  node: Node,
+  contents: string,
+  propertyPath: readonly string[] = [],
+  defaultExpression: Expression | null = null,
+): Array<{
+  readonly defaultExpression: Expression | null;
+  readonly identifierStart: number;
+  readonly name: string;
+  readonly propertyPath: readonly string[];
+  readonly typeAnnotation: string | null;
+}> {
+  if (isIdentifier(node)) {
+    return [{
+      defaultExpression,
+      identifierStart: node.start ?? 0,
+      name: node.name,
+      propertyPath,
+      typeAnnotation: node.typeAnnotation
+        ? readNodeText(node.typeAnnotation, contents)
+        : null,
+    }];
+  }
+  if (node.type === "AssignmentPattern") {
+    return readVariablePatternEntries(
+      node.left,
+      contents,
+      propertyPath,
+      node.right,
+    );
+  }
+  if (node.type === "RestElement") {
+    return readVariablePatternEntries(
+      node.argument,
+      contents,
+      propertyPath,
+      defaultExpression,
+    );
+  }
+  if (node.type === "ObjectPattern") {
+    return node.properties.flatMap((property) => {
+      if (property.type === "RestElement") {
+        return readVariablePatternEntries(
+          property.argument,
+          contents,
+          propertyPath,
+          defaultExpression,
+        );
+      }
+      if (!isObjectProperty(property)) {
+        return [];
+      }
+      const propertyName = readPropertyName(property.key);
+      return propertyName
+        ? readVariablePatternEntries(
+            property.value,
+            contents,
+            [...propertyPath, propertyName],
+            defaultExpression,
+          )
+        : [];
+    });
+  }
+  if (node.type === "ArrayPattern") {
+    return node.elements.flatMap((element, index) =>
+      element
+        ? readVariablePatternEntries(
+            element,
+            contents,
+            [...propertyPath, String(index)],
+            defaultExpression,
+          )
+        : []
+    );
+  }
+  return [];
 }
 
 function collectConditionalAssignmentStarts(sourceFile: Node): Set<number> {

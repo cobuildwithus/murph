@@ -321,6 +321,24 @@ Updated: 2026-08-14
   Parent audit confirmed the transport boundary was unchanged before updating
   only the whole-file digest; the existing URL/init/effect/import/wiring
   mutation matrix still rejects request-boundary drift.
+- ReviewGPT round 12 returned one accepted High against exact current-base head
+  `80b80058f90e3a2aa7ac2ed006ee412ab5054e46`: the direct member-mutation fix
+  still compared root spellings, provider facts retained a declaration-time
+  container fallback, and ordinary destructured local values were absent from
+  the chronological binding census. Together, those paths could lose a bound
+  provider transport or provider URL through a definitive container alias or
+  destructuring refactor.
+- The correction consolidates those paths into existing owners. Member
+  mutations canonicalize definitive alias chains back to one lexical root
+  binding; provider facts consume the same possible member initializers as
+  transport analysis; and declaration/assignment destructuring, nested paths,
+  array indices, and defaults are represented in the existing variable
+  bindings. The competing declaration-time container fallback is deleted.
+  Focused fixtures cover aliased direct writes and `Object.assign`, nested and
+  array aliases, direct and aliased provider URL mutation, nested/defaulted
+  destructuring, web/dynamic-import namespace destructuring assignments, and
+  negative shadow/reassignment cases. No exception or provider request was
+  added.
 
 ## Verification
 
@@ -333,7 +351,7 @@ Updated: 2026-08-14
 
 Current evidence:
 
-- Focused guard suite: 111 tests passed on the current merged base, including
+- Focused guard suite: 114 tests passed on the current merged base, including
   direct ReviewGPT reproductions and negative controls for unrelated objects,
   imports, namespace aliases, closed member origins and mutations, callables,
   ambiguous provider evidence, and domain models.
