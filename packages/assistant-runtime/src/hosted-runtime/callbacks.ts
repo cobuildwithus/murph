@@ -266,7 +266,7 @@ export async function collectHostedAssistantDeliverySideEffects(
       intent.status === "retryable"
       && !intent.deliveryTransportIdempotent
       && intent.lastError?.code === "ASSISTANT_DELIVERY_CONFIRMATION_PENDING"
-      && !readHostedAcceptedLinqReactionDeliveryAwaitingConsume(intent)
+      && !hasHostedAssistantOutboxConfirmationRetryPath(intent)
     ) {
       continue;
     }
@@ -1738,7 +1738,7 @@ function resolveHostedAssistantOutboxIntentWakeAt(
         intent.status === "retryable"
         && !intent.deliveryTransportIdempotent
         && intent.lastError?.code === "ASSISTANT_DELIVERY_CONFIRMATION_PENDING"
-        && !readHostedAcceptedLinqReactionDeliveryAwaitingConsume(intent)
+        && !hasHostedAssistantOutboxConfirmationRetryPath(intent)
       ) {
         return null;
       }
@@ -1765,6 +1765,19 @@ function resolveHostedAssistantOutboxIntentWakeAt(
     default:
       return null;
   }
+}
+
+function hasHostedAssistantOutboxConfirmationRetryPath(
+  intent: AssistantOutboxIntent,
+): boolean {
+  if (readHostedAcceptedLinqReactionDeliveryAwaitingConsume(intent)) {
+    return true;
+  }
+  return intent.deliveryConfirmationPending === true
+    && intent.delivery !== null
+    && parseHostedPhoneCallResultDeliveryKey(
+      intent.deliveryIdempotencyKey,
+    ) !== null;
 }
 
 export async function prepareHostedAssistantDeliveryEffectsForDispatch(input: {

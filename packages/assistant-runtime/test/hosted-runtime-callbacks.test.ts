@@ -3976,6 +3976,55 @@ describe("hosted runtime callbacks", () => {
     ]);
   });
 
+  it("keeps tracked non-idempotent phone-call confirmation on its callback-only retry path", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-08T00:02:00.000Z"));
+    const deliveryIdempotencyKey =
+      "phone-call-result:hpc_callback_retry:generation:3";
+    const intent = createPendingHostedDeliveryIntent({
+      delivery: createDelivery({
+        idempotencyKey: deliveryIdempotencyKey,
+        providerMessageId: "provider_phone_call_result",
+      }),
+      deliveryConfirmationPending: true,
+      deliveryIdempotencyKey,
+      deliveryTransportIdempotent: false,
+      intentId: "intent_phone_call_result_callback_retry",
+      lastError: {
+        code: "ASSISTANT_DELIVERY_CONFIRMATION_PENDING",
+        message: "delivery confirmation is still pending",
+      },
+      nextAttemptAt: "2026-04-08T00:02:00.000Z",
+      status: "retryable",
+    }) as AssistantOutboxIntent;
+    mocks.listAssistantOutboxIntents.mockResolvedValue([intent]);
+    mocks.shouldDispatchAssistantOutboxIntent.mockImplementation(
+      (candidate) => candidate.intentId === intent.intentId,
+    );
+
+    const sideEffects = await collectHostedAssistantDeliverySideEffects({
+      includeBackgroundDueIntents: true,
+      preferredIntentIds: [],
+      vaultRoot: "/tmp/vault",
+    });
+
+    expect(sideEffects).toEqual([
+      expect.objectContaining({
+        deliveryPhase: "background_retry",
+        effectId: intent.intentId,
+        payload: expect.objectContaining({
+          idempotencyKey: deliveryIdempotencyKey,
+          transportIdempotent: false,
+        }),
+      }),
+    ]);
+    await expect(resolveHostedAssistantOutboxNextWakeAt({
+      now: new Date(),
+      vaultRoot: "/tmp/vault",
+    })).resolves.toBe("2026-04-08T00:02:00.000Z");
+    vi.useRealTimers();
+  });
+
   it("schedules concrete reaction confirmation without blocking a preferred later reply", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-04-08T00:01:00.000Z"));

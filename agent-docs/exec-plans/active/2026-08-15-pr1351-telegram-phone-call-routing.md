@@ -102,14 +102,28 @@ the member's current authorized Telegram route.
 - `pnpm --filter @murphai/assistant-engine typecheck` and
   `pnpm --filter @murphai/assistant-runtime typecheck` passed after the round 5
   remediation.
-- The full Assistant Runtime suite passed 88 files / 2,327 tests with 4 skipped.
-  The focused Assistant Engine outbox suite passed 105 tests, including
+- The full Assistant Runtime suite passed 88 files / 2,328 tests with 4 skipped.
+  The focused Assistant Engine outbox suite passed 107 tests, including
   restart proof for accepted, definite-failure, and ambiguous Telegram outcomes
   with one provider call. The focused Assistant Runtime callback suite passed
-  259 tests.
+  260 tests.
 - The Assistant Engine package umbrella test exhausted a worker near the
   default 4 GB heap and then stalled while terminating that worker. The exact
   session was interrupted after the directly affected 105-test suite passed;
   the repository friction is recorded in Frog.
-- Exact-head CI and a zero-finding ReviewGPT round remain pending on the next
-  pushed remediation candidate.
+- A zero-finding ReviewGPT round remains pending on the next pushed remediation
+  candidate.
+- Exact-head CI passed at
+  `fcedbadcd3ca440f64eb620c350443e45bb39271`. ReviewGPT round 6 found that a
+  process loss while the tracked non-idempotent Telegram intent was still
+  durably `sending` reached stale recovery before the terminal-confirmation
+  policy and could terminalize the outbox without acknowledging Web. The
+  remediation keeps the no-resend decision but persists either the exact
+  receipt or an ambiguous failure on the existing callback-replayable intent,
+  invokes the same signed callback, and terminalizes the outbox only after Web
+  acknowledgement. While exercising the production non-idempotent
+  classification, the hosted scheduler was also shown to exclude a concrete
+  callback-pending receipt from both its next wake and retry candidates. The
+  narrow scheduler correction recognizes only that persisted phone-call result
+  receipt as a callback retry path; ordinary non-idempotent ambiguity remains
+  parked. The hosted test proves both wake and candidate selection.
