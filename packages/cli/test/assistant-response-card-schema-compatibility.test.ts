@@ -197,6 +197,40 @@ describe('attach_response_card schema compatibility', () => {
   })
 
   it('keeps refinement-only failures runtime-owned and repairable', () => {
+    const excessNutritionMealCount = {
+      card: {
+        ...NUTRITION_CARD,
+        totals: {
+          ...NUTRITION_CARD.totals,
+          proteinGrams: { total: 90, mealCount: 3 },
+        },
+      },
+    }
+    assert.equal(offeredSchemaAccepts(excessNutritionMealCount), true)
+    const nutritionResult = attachResponseCardRuntimeSchema.safeParse(
+      excessNutritionMealCount,
+    )
+    assert.equal(nutritionResult.success, false)
+    if (nutritionResult.success) {
+      throw new TypeError('Expected nutrition meal-count relation to fail.')
+    }
+    assert.ok(nutritionResult.error.issues.some((issue) =>
+      issue.code === 'custom'
+      && issue.params?.murphExpectedShape === 'at_most_card.meal_count'
+      && JSON.stringify(issue.path) === JSON.stringify([
+        'card',
+        'totals',
+        'proteinGrams',
+        'mealCount',
+      ])
+    ))
+    assert.equal(offeredSchemaAccepts({ card: NUTRITION_CARD }), true)
+    assert.equal(
+      attachResponseCardRuntimeSchema.safeParse({ card: NUTRITION_CARD })
+        .success,
+      true,
+    )
+
     const pendingActual = {
       card: {
         ...WORKOUT_CARD,

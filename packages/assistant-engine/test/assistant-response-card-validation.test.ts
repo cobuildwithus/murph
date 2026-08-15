@@ -42,6 +42,18 @@ const INVALID_NUTRITION_CARD = {
   },
 } as const
 
+const INVALID_NUTRITION_MEAL_COUNT_CARD = {
+  ...INVALID_NUTRITION_CARD,
+  goals: {
+    ...INVALID_NUTRITION_CARD.goals,
+    carbsGrams: { target: 200, status: 'under_target' },
+  },
+  totals: {
+    ...INVALID_NUTRITION_CARD.totals,
+    proteinGrams: { total: 90, mealCount: 3 },
+  },
+} as const
+
 const INVALID_PENDING_ACTUAL_WORKOUT_CARD = {
   kind: 'compact_table',
   version: 1,
@@ -375,6 +387,38 @@ describe('response-card validation feedback', () => {
   })
 
   it('returns refinement-owned semantics for provider-permissive failures', () => {
+    const nutritionMealCountRequest = readCardToolRequest(
+      INVALID_NUTRITION_MEAL_COUNT_CARD,
+    )
+    expect(nutritionMealCountRequest).toMatchObject({
+      kind: 'invalid-response-card-arguments',
+      validationDigest: {
+        pathIssues: expect.arrayContaining([
+          expect.objectContaining({
+            path: 'card.totals.proteinGrams.mealCount',
+            code: 'custom',
+            expected: 'at_most_card.meal_count',
+          }),
+        ]),
+      },
+    })
+    if (
+      !nutritionMealCountRequest
+      || nutritionMealCountRequest.kind !== 'invalid-response-card-arguments'
+    ) {
+      throw new Error('expected nutrition meal-count relation to fail')
+    }
+    expect(buildResponseCardValidationFeedback(
+      nutritionMealCountRequest.validationDigest,
+    )).toContain('"expected":"at_most_card.meal_count"')
+    expect(readCardToolRequest({
+      ...INVALID_NUTRITION_MEAL_COUNT_CARD,
+      totals: {
+        ...INVALID_NUTRITION_MEAL_COUNT_CARD.totals,
+        proteinGrams: { total: 90, mealCount: 2 },
+      },
+    })).toMatchObject({ kind: 'attach-response-card' })
+
     const pendingActualRequest = readCardToolRequest(
       INVALID_PENDING_ACTUAL_WORKOUT_CARD,
     )

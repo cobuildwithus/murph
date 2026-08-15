@@ -167,3 +167,19 @@ Updated: 2026-08-15
   exact corrected retries, same-turn terminal delivery, ambiguity retention,
   and metadata-only privacy coverage. Oversized generic cards now receive the
   payload-limit hint and never the ambiguity hint.
+
+## Final review round 3 disposition
+
+- Completed the mandatory round-three retrospective. Review remediation grew
+  authored source by +41/-18 (net +23) from the immutable first-reviewed head;
+  the two accepted mechanisms are distinct, use existing owners, and are kept
+  together because splitting authoritative refinements from the safe
+  digest/formatter would weaken the one-retry invariant.
+- Accepted the lowercase-token finding. The nutrition meal-count refinement's
+  `at_most_card.mealCount` token was rejected by the intentionally strict safe
+  token grammar, so it is now `at_most_card.meal_count`; the sanitizer remains
+  unchanged and the deleted path map remains deleted.
+- Added provider-valid/runtime-invalid nutrition meal-count compatibility,
+  digest/formatter, strict mixed-case rejection, and corrected-parser proofs.
+  Focused assistant and CLI tests and the assistant/contracts/CLI typechecks
+  pass; exact-head broad CI remains the final verification owner.

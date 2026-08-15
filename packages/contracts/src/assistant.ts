@@ -168,7 +168,7 @@ function addNutritionCardMealCountIssues(
       context.addIssue({
         code: "custom",
         message: "A metric cannot have more supporting meals than the card.",
-        params: { murphExpectedShape: "at_most_card.mealCount" },
+        params: { murphExpectedShape: "at_most_card.meal_count" },
         path: ["totals", metricName, "mealCount"],
       });
     }

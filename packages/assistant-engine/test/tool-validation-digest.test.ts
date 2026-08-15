@@ -22,6 +22,12 @@ describe('buildSafeToolCallValidationDigest', () => {
         params: { murphExpectedShape: 'unsafe relation marker!' },
         path: ['card'],
       })
+      context.addIssue({
+        code: 'custom',
+        message: 'Synthetic mixed-case relation.',
+        params: { murphExpectedShape: 'mixedCase_relation' },
+        path: ['card'],
+      })
     })
     const rawInput = { card: 'neutral synthetic value' }
     const parsed = schema.safeParse(rawInput)
@@ -45,6 +51,7 @@ describe('buildSafeToolCallValidationDigest', () => {
     ]))
     const serialized = JSON.stringify(digest)
     expect(serialized).not.toContain('unsafe relation marker')
+    expect(serialized).not.toContain('mixedCase_relation')
     expect(serialized).not.toContain('neutral synthetic value')
   })
 
