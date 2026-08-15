@@ -149,7 +149,15 @@ drift, missing ancestry, or foreign ownership fails closed.
 Preliminary and final ReviewGPT run through Murph's canonical packager and
 state files from a detached parent-only checkout. The archive contains the
 exact validated parent-local body rather than refetching mutable presentation;
-one current parent-owned PR projection must match its head, body, editor,
+concurrent packagers stage that body and their PR metadata in separate private
+temporary directories, append them under the fixed
+`review-gpt-pr-context/**` archive prefix, and use collision-resistant names in
+the shared default audit-package directory. PR-bound packaging accepts only an
+explicit ZIP mode and rejects any repo-visible candidate already occupying that
+canonical archive namespace before producing an artifact. Explicit output
+directories retain caller-owned naming, and no lock or shared cleanup lifecycle
+is introduced.
+One current parent-owned PR projection must match its head, body, editor,
 non-closing issue binding, and digest before either model invocation. The same
 exact projection is checked after each long model wait and immediately before
 metadata persistence; an operator handoff created during a wait is preserved
