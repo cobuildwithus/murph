@@ -3,7 +3,7 @@ import type Stripe from "stripe";
 
 const mocks = vi.hoisted(() => ({
   after: vi.fn<(task: () => Promise<void>) => void>(),
-  assertNoHostedMemberStripeEffectTx: vi.fn(),
+  assertNoHostedDirectSubscriptionStripeEffectTx: vi.fn(),
   assertHostedOnboardingMutationOrigin: vi.fn(),
   getPrisma: vi.fn(),
   lookupHostedMemberStripeBillingRefByStripeSubscriptionScheduleId: vi.fn(),
@@ -59,7 +59,8 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-billing-store", () => ({
-  assertNoHostedMemberStripeEffectTx: mocks.assertNoHostedMemberStripeEffectTx,
+  assertNoHostedDirectSubscriptionStripeEffectTx:
+    mocks.assertNoHostedDirectSubscriptionStripeEffectTx,
   lookupHostedMemberStripeBillingRefByStripeSubscriptionScheduleId:
     mocks.lookupHostedMemberStripeBillingRefByStripeSubscriptionScheduleId,
   readHostedMemberStripeBillingRef: mocks.readHostedMemberStripeBillingRef,
@@ -90,7 +91,7 @@ import {
 describe("scheduleHostedBillingPlanSwitchToPulse", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.assertNoHostedMemberStripeEffectTx.mockResolvedValue(undefined);
+    mocks.assertNoHostedDirectSubscriptionStripeEffectTx.mockResolvedValue(undefined);
     mocks.getPrisma.mockReturnValue(mocks.prismaClient);
     mocks.assertHostedOnboardingMutationOrigin.mockImplementation(() => {});
     mocks.requireHostedAppSessionFromRequest.mockResolvedValue({
@@ -170,8 +171,8 @@ describe("scheduleHostedBillingPlanSwitchToPulse", () => {
     });
   });
 
-  test("does not read Stripe while a future effect owns the member", async () => {
-    mocks.assertNoHostedMemberStripeEffectTx.mockRejectedValueOnce(
+  test("does not read Stripe while a future effect owns the direct subscription", async () => {
+    mocks.assertNoHostedDirectSubscriptionStripeEffectTx.mockRejectedValueOnce(
       Object.assign(new Error("Billing is already changing."), {
         code: "HOSTED_STRIPE_EFFECT_PENDING",
         retryable: true,
@@ -189,6 +190,11 @@ describe("scheduleHostedBillingPlanSwitchToPulse", () => {
     expect(mocks.stripe.subscriptions.retrieve).not.toHaveBeenCalled();
     expect(mocks.stripe.subscriptionSchedules.create).not.toHaveBeenCalled();
     expect(mocks.stripe.subscriptionSchedules.update).not.toHaveBeenCalled();
+    expect(mocks.assertNoHostedDirectSubscriptionStripeEffectTx).toHaveBeenCalledWith({
+      memberId: "member_123",
+      stripeSubscriptionId: "sub_123",
+      tx: mocks.prismaClient,
+    });
   });
 
   afterEach(() => {

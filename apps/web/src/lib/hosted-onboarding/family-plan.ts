@@ -331,6 +331,7 @@ const hostedFamilyOwnerDraftSelect =
         stripeCheckoutSessionLookupKey: true,
         stripeCustomerIdEncrypted: true,
         stripeCustomerLookupKey: true,
+        stripeEffectClaimId: true,
         stripeSubscriptionIdEncrypted: true,
         stripeSubscriptionItemIdEncrypted: true,
         stripeSubscriptionItemLookupKey: true,
@@ -6858,7 +6859,8 @@ function classifyHostedFamilyOwnerDraft(
     return "inert";
   }
   if (
-    billingRef.stripeCustomerIdEncrypted
+    billingRef.stripeEffectClaimId != null
+    || billingRef.stripeCustomerIdEncrypted
     || billingRef.stripeCustomerLookupKey
     || billingRef.stripeSubscriptionIdEncrypted
     || billingRef.stripeSubscriptionLookupKey

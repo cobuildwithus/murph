@@ -2,20 +2,60 @@ import { Prisma } from "@prisma/client";
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  assertNoHostedDirectSubscriptionStripeEffectTx,
   assertHostedStripeEffectClaimAbsent,
   HostedMemberStripeMutationLockBusyError,
   withHostedMemberStripeMutationLockForOps,
 } from "@/src/lib/hosted-onboarding/hosted-member-billing-store";
 
 describe("hosted Stripe effect compatibility fence", () => {
-  it("allows an empty future claim and rejects an opaque owned claim", () => {
+  it("allows only an absent future claim and rejects every persisted claim", () => {
     expect(() => assertHostedStripeEffectClaimAbsent(null)).not.toThrow();
-    expect(() => assertHostedStripeEffectClaimAbsent("opaque-future-claim"))
-      .toThrow(expect.objectContaining({
-        code: "HOSTED_STRIPE_EFFECT_PENDING",
-        httpStatus: 409,
-        retryable: true,
-      }));
+    expect(() => assertHostedStripeEffectClaimAbsent(undefined)).not.toThrow();
+    for (const claimId of ["", "opaque-future-claim"]) {
+      expect(() => assertHostedStripeEffectClaimAbsent(claimId))
+        .toThrow(expect.objectContaining({
+          code: "HOSTED_STRIPE_EFFECT_PENDING",
+          httpStatus: 409,
+          retryable: true,
+        }));
+    }
+  });
+
+  it("blocks an owner-group claim for the exact direct subscription until terminal removal", async () => {
+    const memberFindFirst = vi.fn().mockResolvedValue(null);
+    const familyFindFirst = vi.fn()
+      .mockResolvedValueOnce({ stripeEffectClaimId: "opaque-family-conversion" })
+      .mockResolvedValueOnce(null);
+    const tx = {
+      hostedAccountGroupBillingRef: { findFirst: familyFindFirst },
+      hostedMemberBillingRef: { findFirst: memberFindFirst },
+    };
+
+    await expect(assertNoHostedDirectSubscriptionStripeEffectTx({
+      memberId: "member_123",
+      stripeSubscriptionId: "sub_direct_123",
+      tx: tx as never,
+    })).rejects.toMatchObject({
+      code: "HOSTED_STRIPE_EFFECT_PENDING",
+      retryable: true,
+    });
+
+    await expect(assertNoHostedDirectSubscriptionStripeEffectTx({
+      memberId: "member_123",
+      stripeSubscriptionId: "sub_direct_123",
+      tx: tx as never,
+    })).resolves.toBeUndefined();
+    expect(familyFindFirst).toHaveBeenCalledWith({
+      select: { stripeEffectClaimId: true },
+      where: {
+        group: { ownerMemberId: "member_123" },
+        stripeEffectClaimId: { not: null },
+        stripeEffectDirectSubscriptionLookupKey: {
+          in: expect.arrayContaining([expect.any(String)]),
+        },
+      },
+    });
   });
 });
 

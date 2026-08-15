@@ -1,6 +1,6 @@
 # Reliability
 
-Last verified: 2026-08-14
+Last verified: 2026-08-15
 ## Local Frog autofix scheduling
 
 - One macOS user-session LaunchAgent owns the optional local schedule with
@@ -731,10 +731,22 @@ Last verified: 2026-08-14
   cutover. The expand release adds nullable scalar claim state and only reads
   it under the existing member-row authority locks; legacy direct, Family,
   sponsorship, and account-deletion writers reject a present opaque claim
-  before provider work or relationship mutation. The cutover must converge and
-  drain before any later owner writes a claim. Once the first claim exists, the
-  cutover is the rollback floor. The exact release and removal sequence lives
-  in `agent-docs/operations/stripe-effect-compatibility-cutover.md`.
+  before provider work or relationship mutation. Linq and direct Telegram
+  Family acceptance classify that exact retryable rejection into their existing
+  visible-secondary reply owner; a failed reply keeps the webhook retryable.
+  Account deletion keeps its confirmation dialog and typed phrase in place for
+  the same exact rejection instead of reloading away the recovery action.
+  Direct Subscription admissions also reject an exact owner-group conversion
+  claim, claim-only Family drafts are billing authority rather than removable
+  setup, and account deletion locks every implicated Family owner before its
+  beneficiary. Customer Portal admissions perform the same claim-aware owner
+  check before and after session creation. Before any later owner writes a
+  claim, its claim-disabled phase must stop issuing mutation-capable Portal
+  sessions, preserve cancellation through the replacement owner, and drain or
+  provider-invalidate previously issued sessions. Once the first claim exists,
+  the cutover is the rollback floor. The exact release and removal sequence
+  lives in
+  `agent-docs/operations/stripe-effect-compatibility-cutover.md`.
 - A never-paid Family owner draft is recoverable without a repair queue or new
   status. Invite acceptance may treat only an exact inert owner-only group as
   removable, then claim the invite, write the destination membership, and

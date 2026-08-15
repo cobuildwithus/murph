@@ -26,6 +26,7 @@ type HostedThreadDeliveryRouteRefresher =
 
 const mocks = vi.hoisted(() => {
   const state = {
+    acceptHostedFamilyInviteFromTelegramTx: vi.fn(),
     drainHostedExecutionOutboxBestEffort: vi.fn(),
     enqueueHostedExecutionOutbox: vi.fn(),
     bindArmedHostedUsageReferralToNewContainerTx: vi.fn(async () => ({
@@ -223,6 +224,21 @@ vi.mock("@/src/lib/hosted-onboarding/privy", () => ({
   hasHostedPrivyPhoneAuthConfig: vi.fn(() => false),
 }));
 
+vi.mock("@/src/lib/hosted-onboarding/family-plan", async () => {
+  const actual = await vi.importActual<
+    typeof import("@/src/lib/hosted-onboarding/family-plan")
+  >("@/src/lib/hosted-onboarding/family-plan");
+  mocks.acceptHostedFamilyInviteFromTelegramTx.mockImplementation(
+    actual.acceptHostedFamilyInviteFromTelegramTx,
+  );
+
+  return {
+    ...actual,
+    acceptHostedFamilyInviteFromTelegramTx:
+      mocks.acceptHostedFamilyInviteFromTelegramTx,
+  };
+});
+
 vi.mock("@/src/lib/hosted-onboarding/webhook-service-stripe", () => ({
   handleHostedStripeWebhook: vi.fn(),
 }));
@@ -253,6 +269,9 @@ vi.mock("@/src/lib/hosted-crypto/domain-root-store", async () => {
 });
 
 import { handleHostedOnboardingTelegramWebhook as handleHostedOnboardingTelegramWebhookImpl } from "@/src/lib/hosted-onboarding/webhook-service";
+import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
+import { parseHostedTelegramWebhookUpdate } from "@/src/lib/hosted-onboarding/telegram";
+import { planHostedOnboardingTelegramWebhook } from "@/src/lib/hosted-onboarding/webhook-provider-telegram";
 
 const actualThreadContainerService = await vi.importActual<
   typeof import("@/src/lib/hosted-routing/thread-container-service")
@@ -321,6 +340,54 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
   afterEach(() => {
     vi.restoreAllMocks();
     vi.useRealTimers();
+  });
+
+  it("classifies an accepted-member Stripe effect as visible Family recovery", async () => {
+    mocks.acceptHostedFamilyInviteFromTelegramTx.mockRejectedValueOnce(
+      hostedOnboardingError({
+        code: "HOSTED_STRIPE_EFFECT_PENDING",
+        httpStatus: 409,
+        message: "Billing is already changing. Try again shortly.",
+        retryable: true,
+      }),
+    );
+    const update = parseHostedTelegramWebhookUpdate(JSON.stringify({
+      message: {
+        chat: { id: 123, type: "private" },
+        date: 1_774_522_600,
+        from: {
+          first_name: "Invitee",
+          id: 456,
+          username: "invitee_user",
+        },
+        message_id: 4,
+        text: "/start family_pending_effect",
+      },
+      update_id: 333,
+    }));
+    const hostedAccountGroupInviteFindUnique = vi.fn().mockResolvedValue({
+      id: "invite_pending_effect",
+    });
+    const prisma = withPrismaTransaction({
+      hostedAccountGroupInvite: {
+        findUnique: hostedAccountGroupInviteFindUnique,
+      },
+    });
+
+    await expect(planHostedOnboardingTelegramWebhook({
+      prisma: prisma as never,
+      update,
+    })).resolves.toEqual({
+      desiredSideEffects: [],
+      response: {
+        ignored: true,
+        ok: true,
+        reason: "stripe-effect-pending",
+      },
+    });
+    expect(mocks.acceptHostedFamilyInviteFromTelegramTx).toHaveBeenCalledOnce();
+    expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+    expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
   });
 
   it("reuses an existing transaction when dispatching linked active-member Telegram messages", async () => {

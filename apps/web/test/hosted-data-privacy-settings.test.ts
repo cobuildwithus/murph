@@ -32,6 +32,7 @@ const mocks = vi.hoisted(() => ({
   reloadCurrentHostedAuthDocument: vi.fn(),
   requestHostedOnboardingJson: vi.fn(),
   loadBrowserVaultExport: vi.fn(),
+  useStateSetters: [] as Array<ReturnType<typeof vi.fn>>,
   useStateValues: [] as unknown[],
 }));
 
@@ -45,7 +46,9 @@ vi.mock("react", async () => {
         ? (initialState as () => unknown)()
         : initialState;
       const value = mocks.useStateValues.length > 0 ? mocks.useStateValues.shift() : resolvedInitial;
-      return [value, vi.fn()] as ReturnType<typeof actual.useState>;
+      const setter = vi.fn();
+      mocks.useStateSetters.push(setter);
+      return [value, setter] as ReturnType<typeof actual.useState>;
     }) as typeof actual.useState,
   };
 });
@@ -138,6 +141,8 @@ let cleanupRender: (() => Promise<void> | void) | null = null;
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.useStateSetters = [];
+  mocks.useStateValues = [];
   mocks.authorize.mockResolvedValue({
     signature: `0x${"11".repeat(65)}`,
     token: "sac_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef",
@@ -779,6 +784,55 @@ describe("HostedDataPrivacySettings", () => {
     expect(mocks.publishBrowserVaultSessionEnding).toHaveBeenCalledTimes(1);
     expect(mocks.publishBrowserVaultSessionInvalidation).toHaveBeenCalledTimes(1);
     expect(mocks.reloadCurrentHostedAuthDocument).not.toHaveBeenCalled();
+  });
+
+  test("keeps Stripe-pending deletion retryable in the current dialog", async () => {
+    mockHostedDataPrivacyDeleteFlowState();
+    const { HostedOnboardingApiError } = await import(
+      "@/src/components/hosted-onboarding/client-api"
+    );
+    mocks.requestHostedOnboardingJson.mockRejectedValueOnce(
+      new HostedOnboardingApiError({
+        code: "HOSTED_STRIPE_EFFECT_PENDING",
+        message: "Billing is already changing. Try again shortly.",
+      }),
+    );
+
+    const { document, window } = loadLinkedom().parseHTML(
+      "<html><body><div id='root'></div></body></html>",
+    );
+    installGlobals(window, document);
+    const container = document.getElementById("root");
+    assert.ok(container);
+
+    const root: Root = createRoot(container);
+    cleanupRender = async () => {
+      await act(async () => {
+        root.unmount();
+      });
+    };
+
+    await act(async () => {
+      root.render(createElement(HostedDataPrivacySettings, { authenticated: true }));
+    });
+
+    await clickButton(container, "Delete account", window);
+
+    expect(mocks.publishBrowserVaultSessionEnding).toHaveBeenCalledTimes(1);
+    expect(mocks.publishBrowserVaultSessionInvalidation).toHaveBeenCalledTimes(1);
+    expect(mocks.reloadCurrentHostedAuthDocument).not.toHaveBeenCalled();
+    expect(mocks.useStateSetters[6]).not.toHaveBeenCalledWith(false);
+    expect(mocks.useStateSetters[10]).not.toHaveBeenCalledWith("");
+    expect(mocks.useStateSetters[11]).toHaveBeenCalledWith(
+      "Billing is already changing. Try again shortly.",
+    );
+
+    await clickButton(container, "Delete account", window);
+
+    expect(mocks.authorize).toHaveBeenCalledTimes(2);
+    expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledTimes(2);
+    expect(mocks.useStateSetters[6]).toHaveBeenCalledWith(false);
+    expect(mocks.useStateSetters[10]).toHaveBeenCalledWith("");
   });
 
   test("links reconnect-required deletion guidance to the wearables recovery surface", async () => {

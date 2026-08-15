@@ -1,11 +1,15 @@
 import type Stripe from "stripe";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
+import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
+
 type BillingPortalSessionCreateArguments = Parameters<
   Stripe["billingPortal"]["sessions"]["create"]
 >;
 
 const mocks = vi.hoisted(() => ({
+  assertNoHostedDirectSubscriptionStripeEffectTx: vi.fn(),
+  assertNoHostedFamilyStripeEffectTx: vi.fn(),
   assertHostedOnboardingMutationOrigin: vi.fn(),
   getPrisma: vi.fn(),
   readHostedAccountGroupStripeBillingRef: vi.fn(),
@@ -16,6 +20,7 @@ const mocks = vi.hoisted(() => ({
   stripeBillingPortalSessionCreate: vi.fn<
     (...args: BillingPortalSessionCreateArguments) => Promise<unknown>
   >(),
+  withHostedMemberStripeMutationLock: vi.fn(),
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/csrf", () => ({
@@ -27,10 +32,14 @@ vi.mock("@/src/lib/prisma", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-billing-store", () => ({
+  assertNoHostedDirectSubscriptionStripeEffectTx:
+    mocks.assertNoHostedDirectSubscriptionStripeEffectTx,
   readHostedMemberStripeBillingRef: mocks.readHostedMemberStripeBillingRef,
+  withHostedMemberStripeMutationLock: mocks.withHostedMemberStripeMutationLock,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/family-plan", () => ({
+  assertNoHostedFamilyStripeEffectTx: mocks.assertNoHostedFamilyStripeEffectTx,
   readHostedAccountGroupStripeBillingRef: mocks.readHostedAccountGroupStripeBillingRef,
   readHostedFamilyOwnerSnapshotForMember: mocks.readHostedFamilyOwnerSnapshotForMember,
 }));
@@ -53,7 +62,13 @@ beforeEach(async () => {
   vi.clearAllMocks();
   delete process.env.HOSTED_ONBOARDING_STRIPE_FAMILY_PORTAL_CONFIGURATION_ID;
   mocks.assertHostedOnboardingMutationOrigin.mockImplementation(() => {});
-  mocks.getPrisma.mockReturnValue({} as never);
+  const prisma = {};
+  mocks.getPrisma.mockReturnValue(prisma as never);
+  mocks.withHostedMemberStripeMutationLock.mockImplementation(
+    async (input: { run: (tx: unknown) => Promise<unknown> }) => input.run(prisma),
+  );
+  mocks.assertNoHostedDirectSubscriptionStripeEffectTx.mockResolvedValue(undefined);
+  mocks.assertNoHostedFamilyStripeEffectTx.mockResolvedValue(undefined);
   mocks.requireHostedAppSessionFromRequest.mockResolvedValue({
     member: {
       id: "member_123",
@@ -120,6 +135,8 @@ test("creates a Stripe billing portal session for an authenticated hosted member
     customer: "cus_123",
     return_url: "https://join.example.test/settings",
   });
+  expect(mocks.withHostedMemberStripeMutationLock).toHaveBeenCalledTimes(2);
+  expect(mocks.assertNoHostedDirectSubscriptionStripeEffectTx).toHaveBeenCalledTimes(2);
 });
 
 test("creates a Stripe billing portal session for a family owner group", async () => {
@@ -153,6 +170,75 @@ test("creates a Stripe billing portal session for a family owner group", async (
     customer: "cus_family_123",
     return_url: "https://join.example.test/settings",
   });
+  expect(mocks.assertNoHostedFamilyStripeEffectTx).toHaveBeenCalledTimes(2);
+});
+
+test.each([
+  { billingScope: undefined, guard: "member" as const },
+  { billingScope: "family", guard: "family" as const },
+])("does not create a $guard Portal session while its future effect owns billing", async ({
+  billingScope,
+  guard,
+}) => {
+  const rejection = hostedOnboardingError({
+    code: "HOSTED_STRIPE_EFFECT_PENDING",
+    httpStatus: 409,
+    message: "Billing is already changing.",
+    retryable: true,
+  });
+  if (guard === "family") {
+    mocks.assertNoHostedFamilyStripeEffectTx.mockRejectedValueOnce(rejection);
+  } else {
+    mocks.assertNoHostedDirectSubscriptionStripeEffectTx.mockRejectedValueOnce(rejection);
+  }
+
+  const response = await billingPortalRoute.POST(
+    new Request("https://join.example.test/api/settings/billing/portal", {
+      ...(billingScope
+        ? {
+            body: JSON.stringify({ billingScope }),
+            headers: {
+              "content-type": "application/json",
+              origin: "https://join.example.test",
+            },
+          }
+        : {
+            headers: { origin: "https://join.example.test" },
+          }),
+      method: "POST",
+    }),
+  );
+
+  expect(response.status).toBe(409);
+  await expect(response.json()).resolves.toMatchObject({
+    error: { code: "HOSTED_STRIPE_EFFECT_PENDING" },
+  });
+  expect(mocks.stripeBillingPortalSessionCreate).not.toHaveBeenCalled();
+});
+
+test("does not return a newly created Portal URL when a claim wins the final owner check", async () => {
+  mocks.assertNoHostedDirectSubscriptionStripeEffectTx
+    .mockResolvedValueOnce(undefined)
+    .mockRejectedValueOnce(hostedOnboardingError({
+      code: "HOSTED_STRIPE_EFFECT_PENDING",
+      httpStatus: 409,
+      message: "Billing is already changing.",
+      retryable: true,
+    }));
+
+  const response = await billingPortalRoute.POST(
+    new Request("https://join.example.test/api/settings/billing/portal", {
+      headers: { origin: "https://join.example.test" },
+      method: "POST",
+    }),
+  );
+
+  expect(response.status).toBe(409);
+  await expect(response.json()).resolves.toMatchObject({
+    error: { code: "HOSTED_STRIPE_EFFECT_PENDING" },
+  });
+  expect(mocks.stripeBillingPortalSessionCreate).toHaveBeenCalledOnce();
+  expect(mocks.assertNoHostedDirectSubscriptionStripeEffectTx).toHaveBeenCalledTimes(2);
 });
 
 test("uses the dedicated Family portal configuration when configured", async () => {

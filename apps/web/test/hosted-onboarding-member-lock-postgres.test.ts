@@ -14,8 +14,12 @@ import {
   createHostedEmailLookupKey,
   createHostedPhoneLookupKey,
   createHostedPrivyUserLookupKey,
+  createHostedStripeCustomerLookupKey,
+  createHostedStripeSubscriptionLookupKey,
   createHostedTelegramUserLookupKey,
 } from "@/src/lib/hosted-onboarding/contact-privacy";
+import { upgradeHostedBillingPlan } from "@/src/lib/hosted-onboarding/billing-plan-change-service";
+import { scheduleHostedBillingPlanSwitch } from "@/src/lib/hosted-onboarding/billing-plan-switch-to-pulse-service";
 import { completeHostedPrivyVerification } from "@/src/lib/hosted-onboarding/authentication-service";
 import { ensureHostedCompanionMemberId } from "@/src/lib/hosted-onboarding/companion-member-access";
 import {
@@ -23,6 +27,7 @@ import {
   updateHostedFamilyPlanCapacities,
 } from "@/src/lib/hosted-onboarding/family-plan";
 import {
+  assertNoHostedDirectSubscriptionStripeEffectTx,
   HostedMemberStripeMutationLockBusyError,
   withHostedMemberStripeMutationLockForOps,
 } from "@/src/lib/hosted-onboarding/hosted-member-billing-store";
@@ -479,6 +484,14 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           status: kind === "account-deletion-claim-beneficiary" ? "removed" : "active",
         },
       });
+      if (kind === "account-deletion-claim-beneficiary") {
+        await observer.hostedAccountGroupBillingRef.create({
+          data: {
+            groupId,
+            stripeEffectBeneficiaryMemberId: beneficiaryMemberId,
+          },
+        });
+      }
       const [writerBackend] = await writer.$queryRaw<Array<{ pid: number }>>(
         Prisma.sql`SELECT pg_backend_pid()::int AS pid`,
       );
@@ -490,7 +503,7 @@ describe.skipIf(!runPostgresConcurrencyProof)(
         await tx.$queryRaw`
           SELECT "id"
           FROM "hosted_member"
-          WHERE "id" = ${deletionMemberId}
+          WHERE "id" = ${memberId}
           FOR UPDATE
         `;
         if (kind === "direct-customer") {
@@ -502,15 +515,22 @@ describe.skipIf(!runPostgresConcurrencyProof)(
               stripeEffectKind: "member.customer-create",
             },
           });
+        } else if (kind === "account-deletion-claim-beneficiary") {
+          await tx.hostedAccountGroupBillingRef.update({
+            data: {
+              stripeEffectClaimedAt: new Date("2026-08-12T12:00:00.000Z"),
+              stripeEffectClaimId: `family-capacity:${fixtureId}`,
+              stripeEffectKind: "family.capacity",
+            },
+            where: { groupId },
+          });
         } else {
           await tx.hostedAccountGroupBillingRef.create({
             data: {
               groupId,
               stripeEffectClaimedAt: new Date("2026-08-12T12:00:00.000Z"),
               stripeEffectClaimId: `family-capacity:${fixtureId}`,
-              stripeEffectBeneficiaryMemberId: kind === "account-deletion-claim-beneficiary"
-                ? beneficiaryMemberId
-                : null,
+              stripeEffectBeneficiaryMemberId: null,
               stripeEffectKind: "family.capacity",
             },
           });
@@ -571,6 +591,102 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           where: { id: { in: [beneficiaryMemberId, memberId] } },
         });
         await disconnectClients([claimOwner, observer, writer]);
+      }
+    });
+
+    it("blocks direct upgrade and scheduling on an exact owner-group claim until terminal removal", async () => {
+      const client = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const fixtureId = randomUUID();
+      const memberId = `hbm_direct_effect_${fixtureId}`;
+      const groupId = `hbag_direct_effect_${fixtureId}`;
+      const stripeCustomerId = `cus_direct_effect_${fixtureId}`;
+      const stripeSubscriptionId = `sub_direct_effect_${fixtureId}`;
+      stripeProvider.subscriptionsRetrieve.mockClear();
+      setHostedSecureBoxStringTestCodecForTests({
+        decrypt(input) {
+          return input.value;
+        },
+        encrypt(input) {
+          return input.value;
+        },
+      });
+
+      try {
+        await client.hostedMember.create({
+          data: {
+            billingStatus: HostedBillingStatus.active,
+            id: memberId,
+          },
+        });
+        await client.hostedMemberBillingRef.create({
+          data: {
+            currentBillingPhase: "paid",
+            currentBillingPlanCode: "launch_edge_monthly",
+            currentCheckoutOffer: "standard",
+            memberId,
+            stripeCustomerIdEncrypted: stripeCustomerId,
+            stripeCustomerLookupKey:
+              createHostedStripeCustomerLookupKey(stripeCustomerId),
+            stripeSubscriptionIdEncrypted: stripeSubscriptionId,
+            stripeSubscriptionLookupKey:
+              createHostedStripeSubscriptionLookupKey(stripeSubscriptionId),
+          },
+        });
+        await client.hostedAccountGroup.create({
+          data: {
+            billingStatus: HostedBillingStatus.not_started,
+            id: groupId,
+            ownerMemberId: memberId,
+          },
+        });
+        await client.hostedAccountGroupBillingRef.create({
+          data: {
+            groupId,
+            stripeEffectClaimedAt: new Date("2026-08-12T12:00:00.000Z"),
+            stripeEffectClaimId: `direct-to-family:${fixtureId}`,
+            stripeEffectDirectSubscriptionLookupKey:
+              createHostedStripeSubscriptionLookupKey(stripeSubscriptionId),
+            stripeEffectKind: "family.direct-conversion",
+          },
+        });
+
+        await expect(upgradeHostedBillingPlan({
+          memberId,
+          prisma: client,
+          targetPlanCode: "launch_max_monthly",
+        })).rejects.toMatchObject({
+          code: "HOSTED_STRIPE_EFFECT_PENDING",
+          retryable: true,
+        });
+        await expect(scheduleHostedBillingPlanSwitch({
+          memberId,
+          now: new Date("2026-08-12T12:05:00.000Z"),
+          prisma: client,
+          targetPlanCode: "launch_monthly",
+        })).rejects.toMatchObject({
+          code: "HOSTED_STRIPE_EFFECT_PENDING",
+          retryable: true,
+        });
+        expect(stripeProvider.subscriptionsRetrieve).not.toHaveBeenCalled();
+
+        await client.hostedAccountGroupBillingRef.update({
+          data: {
+            stripeEffectClaimId: null,
+          },
+          where: { groupId },
+        });
+        await expect(client.$transaction((tx) =>
+          assertNoHostedDirectSubscriptionStripeEffectTx({
+            memberId,
+            stripeSubscriptionId,
+            tx,
+          })
+        )).resolves.toBeUndefined();
+      } finally {
+        setHostedSecureBoxStringTestCodecForTests(null);
+        await client.hostedAccountGroup.deleteMany({ where: { id: groupId } });
+        await client.hostedMember.deleteMany({ where: { id: memberId } });
+        await disconnectClients([client]);
       }
     });
 

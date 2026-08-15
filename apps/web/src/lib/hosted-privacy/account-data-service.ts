@@ -153,6 +153,7 @@ const HOSTED_ACCOUNT_DELETION_SUSPENSION_FENCE_TRANSACTION_OPTIONS = {
 const HOSTED_PRIVY_PHONE_TRANSFER_STRIPE_AUTHORITY_TIMEOUT_MS = 5_000;
 const HOSTED_PRIVY_PHONE_TRANSFER_MIN_TRIAL_REMAINING_SECONDS = 10;
 const HOSTED_ACCOUNT_DELETION_REFRESH_LEASE_RECOVERY_LIMIT = 32;
+const HOSTED_ACCOUNT_DELETION_MAX_FAMILY_CLAIM_OWNER_ROWS = 4;
 const HOSTED_PRIVY_PHONE_TRANSFER_STRIPE_AUTHORITY_REQUEST_OPTIONS: Stripe.RequestOptions = {
   maxNetworkRetries: 0,
   timeout: HOSTED_PRIVY_PHONE_TRANSFER_STRIPE_AUTHORITY_TIMEOUT_MS,
@@ -1118,6 +1119,13 @@ async function deleteHostedAccountDataInternal(input: {
           input.phoneTransfer.targetPhoneNumberBeforeTransfer,
         transferPhoneNumber: input.phoneTransfer.transfer.phoneNumber,
       });
+    }
+    const lockedFamilyClaimOwnerIds =
+      await lockHostedFamilyClaimOwnersForAccountDeletionTx({
+        memberIds: deletionMemberIds,
+        prisma: tx,
+      });
+    if (input.phoneTransfer && phoneTransferSession) {
       await lockHostedMembersForAccountDeletionTx({
         memberIds: [
           input.phoneTransfer.targetMember.id,
@@ -1134,14 +1142,19 @@ async function deleteHostedAccountDataInternal(input: {
         prisma: tx,
       });
     }
+    await lockHostedMembersForAccountDeletionTx({
+      memberIds: deletionMemberIds.filter(
+        (memberId) => !lockedFamilyClaimOwnerIds.includes(memberId),
+      ),
+      prisma: tx,
+      requiredMemberIds: deletionMemberIds.filter(
+        (memberId) => !lockedFamilyClaimOwnerIds.includes(memberId),
+      ),
+    });
     await cancelHostedGroupSponsorshipsForPayerAccountDeletionTx({
       now: deletionStartedAt,
       payerMemberIds: deletionMemberIds,
       tx,
-    });
-    await lockHostedMemberForAccountDeletionTx({
-      memberId: input.memberId,
-      prisma: tx,
     });
     const transactionDeletionMemberIds = uniqueStrings([
       input.memberId,
@@ -1150,6 +1163,14 @@ async function deleteHostedAccountDataInternal(input: {
         prisma: tx,
       }),
     ]);
+    if (!haveSameStrings(transactionDeletionMemberIds, deletionMemberIds)) {
+      throwHostedAccountDeletionRuntimeSetChanged();
+    }
+    await assertHostedFamilyClaimOwnersUnchangedForAccountDeletionTx({
+      expectedOwnerMemberIds: lockedFamilyClaimOwnerIds,
+      memberIds: transactionDeletionMemberIds,
+      prisma: tx,
+    });
     const transactionDeletionMemberIdFilter = buildStringInFilter(
       transactionDeletionMemberIds,
     );
@@ -1839,9 +1860,26 @@ async function markHostedMembersSuspendedForAccountDeletion(input: {
   providerAccessRemovalConfirmationToken: string | null;
 }): Promise<string[]> {
   return input.prisma.$transaction(async (tx) => {
-    await lockHostedMemberForAccountDeletionTx({
-      memberId: input.ownerMemberId,
+    const preparedMemberIds = uniqueStrings([
+      input.ownerMemberId,
+      ...await listOwnedHostedThreadContainerMemberIds({
+        ownerMemberId: input.ownerMemberId,
+        prisma: tx,
+      }),
+    ]);
+    const lockedFamilyClaimOwnerIds =
+      await lockHostedFamilyClaimOwnersForAccountDeletionTx({
+        memberIds: preparedMemberIds,
+        prisma: tx,
+      });
+    await lockHostedMembersForAccountDeletionTx({
+      memberIds: preparedMemberIds.filter(
+        (memberId) => !lockedFamilyClaimOwnerIds.includes(memberId),
+      ),
       prisma: tx,
+      requiredMemberIds: preparedMemberIds.filter(
+        (memberId) => !lockedFamilyClaimOwnerIds.includes(memberId),
+      ),
     });
     const memberIds = uniqueStrings([
       input.ownerMemberId,
@@ -1850,10 +1888,13 @@ async function markHostedMembersSuspendedForAccountDeletion(input: {
         prisma: tx,
       }),
     ]);
-    await lockHostedMembersForAccountDeletionTx({
-      memberIds: memberIds.slice(1),
+    if (!haveSameStrings(memberIds, preparedMemberIds)) {
+      throwHostedAccountDeletionRuntimeSetChanged();
+    }
+    await assertHostedFamilyClaimOwnersUnchangedForAccountDeletionTx({
+      expectedOwnerMemberIds: lockedFamilyClaimOwnerIds,
+      memberIds,
       prisma: tx,
-      requiredMemberIds: memberIds.slice(1),
     });
     await assertNoDeviceRefreshLeasesBeforeAccountSuspensionTx({
       memberIds,
@@ -2205,6 +2246,91 @@ async function assertNoHostedStripeEffectClaimsForAccountDeletionTx(input: {
   ]);
   assertHostedStripeEffectClaimAbsent(memberClaim?.stripeEffectClaimId);
   assertHostedStripeEffectClaimAbsent(familyClaim?.stripeEffectClaimId);
+}
+
+async function lockHostedFamilyClaimOwnersForAccountDeletionTx(input: {
+  memberIds: readonly string[];
+  prisma: Prisma.TransactionClient;
+}): Promise<string[]> {
+  const ownerMemberIds = await listHostedFamilyClaimOwnerMemberIdsForAccountDeletionTx(
+    input,
+  );
+  await lockHostedMembersForAccountDeletionTx({
+    memberIds: ownerMemberIds,
+    prisma: input.prisma,
+    requiredMemberIds: ownerMemberIds,
+  });
+  return ownerMemberIds;
+}
+
+async function assertHostedFamilyClaimOwnersUnchangedForAccountDeletionTx(input: {
+  expectedOwnerMemberIds: readonly string[];
+  memberIds: readonly string[];
+  prisma: Prisma.TransactionClient;
+}): Promise<void> {
+  const currentOwnerMemberIds =
+    await listHostedFamilyClaimOwnerMemberIdsForAccountDeletionTx(input);
+  if (!haveSameStrings(currentOwnerMemberIds, input.expectedOwnerMemberIds)) {
+    throwHostedAccountDeletionFamilyAuthorityChanged();
+  }
+}
+
+async function listHostedFamilyClaimOwnerMemberIdsForAccountDeletionTx(input: {
+  memberIds: readonly string[];
+  prisma: Prisma.TransactionClient;
+}): Promise<string[]> {
+  const memberIds = uniqueStrings(input.memberIds);
+  if (memberIds.length === 0) {
+    return [];
+  }
+  const memberIdFilter = buildStringInFilter(memberIds);
+  const groups = await input.prisma.hostedAccountGroup.findMany({
+    orderBy: { ownerMemberId: "asc" },
+    select: { ownerMemberId: true },
+    take: HOSTED_ACCOUNT_DELETION_MAX_FAMILY_CLAIM_OWNER_ROWS,
+    where: {
+      OR: [
+        { ownerMemberId: memberIdFilter },
+        {
+          memberships: {
+            some: {
+              memberId: memberIdFilter,
+              status: "active",
+            },
+          },
+        },
+        {
+          billingRef: {
+            is: {
+              stripeEffectBeneficiaryMemberId: memberIdFilter,
+            },
+          },
+        },
+      ],
+    },
+  });
+  if (groups.length === HOSTED_ACCOUNT_DELETION_MAX_FAMILY_CLAIM_OWNER_ROWS) {
+    throwHostedAccountDeletionFamilyAuthorityChanged();
+  }
+  return uniqueStrings(groups.map((group) => group.ownerMemberId)).sort();
+}
+
+function throwHostedAccountDeletionFamilyAuthorityChanged(): never {
+  throw hostedOnboardingError({
+    code: "ACCOUNT_DELETION_FAMILY_AUTHORITY_CHANGED",
+    httpStatus: 503,
+    message: "Family billing changed while account deletion was starting. Retry account deletion.",
+    retryable: true,
+  });
+}
+
+function throwHostedAccountDeletionRuntimeSetChanged(): never {
+  throw hostedOnboardingError({
+    code: "ACCOUNT_DELETION_RUNTIME_SET_CHANGED",
+    httpStatus: 503,
+    message: "Your account changed during deletion. Retry so every hosted runtime is included.",
+    retryable: true,
+  });
 }
 
 function uniqueStrings(values: readonly string[]): string[] {
@@ -3676,17 +3802,6 @@ async function listDeviceConnectionIdentities(input: {
       tokenVersion: true,
     },
     where: { userId: input.memberId },
-  });
-}
-
-async function lockHostedMemberForAccountDeletionTx(input: {
-  memberId: string;
-  prisma: Prisma.TransactionClient;
-}): Promise<void> {
-  await lockHostedMembersForAccountDeletionTx({
-    memberIds: [input.memberId],
-    prisma: input.prisma,
-    requiredMemberIds: [input.memberId],
   });
 }
 

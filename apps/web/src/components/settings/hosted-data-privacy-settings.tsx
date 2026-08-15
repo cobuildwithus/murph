@@ -31,6 +31,7 @@ import {
   publishBrowserVaultSessionInvalidation,
 } from "@/src/lib/browser-vault/session-invalidation";
 import { reloadCurrentHostedAuthDocument } from "@/src/components/hosted-onboarding/hosted-auth-navigation";
+import { HOSTED_STRIPE_EFFECT_PENDING_ERROR_CODE } from "@/src/lib/hosted-onboarding/errors";
 import {
   HOSTED_ACCOUNT_DELETION_CONFIRMATION_PHRASE,
   type HostedAccountExitReasonCode,
@@ -216,9 +217,16 @@ function HostedDataPrivacySettingsAuthorized(props: {
         requestError instanceof HostedOnboardingApiError
         && requestError.code
           === "ACCOUNT_DELETION_DEVICE_TOKEN_REFRESH_RECOVERY_REQUIRED";
+      const stripeEffectPending =
+        requestError instanceof HostedOnboardingApiError
+        && requestError.code === HOSTED_STRIPE_EFFECT_PENDING_ERROR_CODE;
       if (sessionEndingDispatched && !receivedReplacementHeaders) {
         publishBrowserVaultSessionInvalidation();
-        if (!providerRecoveryRequired && !deviceTokenRefreshRecoveryRequired) {
+        if (
+          !providerRecoveryRequired
+          && !deviceTokenRefreshRecoveryRequired
+          && !stripeEffectPending
+        ) {
           reloadCurrentHostedAuthDocument();
         }
       }
@@ -379,20 +387,10 @@ function HostedDataPrivacySettingsAuthorized(props: {
             </DialogDescription>
           </DialogHeader>
           {dialogError ? (
-            <div
-              role="alert"
-              className="flex flex-col gap-2 rounded-lg border border-destructive/20 bg-destructive/5 p-3 text-sm leading-5 text-destructive [overflow-wrap:anywhere]"
-            >
-              <p>{dialogError}</p>
-              {deviceReconnectRequired ? (
-                <Link
-                  className="self-start font-medium underline underline-offset-4"
-                  href="/connect"
-                >
-                  Manage wearables
-                </Link>
-              ) : null}
-            </div>
+            <HostedAccountDeletionErrorAlert
+              deviceReconnectRequired={deviceReconnectRequired}
+              message={dialogError}
+            />
           ) : null}
           {dialogStep === "reason" ? (
             <AccountExitReasonStep
@@ -453,6 +451,31 @@ function HostedDataPrivacySettingsAuthorized(props: {
           )}
         </DialogContent>
       </Dialog>
+    </div>
+  );
+}
+
+export function HostedAccountDeletionErrorAlert({
+  deviceReconnectRequired = false,
+  message,
+}: {
+  deviceReconnectRequired?: boolean;
+  message: string;
+}) {
+  return (
+    <div
+      role="alert"
+      className="flex flex-col gap-2 rounded-lg border border-destructive/20 bg-destructive/5 p-3 text-sm leading-5 text-destructive [overflow-wrap:anywhere]"
+    >
+      <p>{message}</p>
+      {deviceReconnectRequired ? (
+        <Link
+          className="self-start font-medium underline underline-offset-4"
+          href="/connect"
+        >
+          Manage wearables
+        </Link>
+      ) : null}
     </div>
   );
 }

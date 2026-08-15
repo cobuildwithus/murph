@@ -21,7 +21,7 @@ import {
   isHostedOnboardingError,
 } from "./errors";
 import {
-  assertNoHostedMemberStripeEffectTx,
+  assertNoHostedDirectSubscriptionStripeEffectTx,
   readHostedMemberStripeBillingRef,
   withHostedMemberStripeMutationLock,
   type HostedMemberStripeBillingRefSnapshot,
@@ -242,10 +242,6 @@ async function readHostedBillingPlanUpgradeOwner(input: {
           message: "Finish signup from your latest Murph link before continuing.",
         });
       }
-      await assertNoHostedMemberStripeEffectTx({
-        memberId: input.memberId,
-        tx,
-      });
       const billingRef = await readHostedMemberStripeBillingRef({
         memberId: input.memberId,
         prisma: tx,
@@ -254,11 +250,17 @@ async function readHostedBillingPlanUpgradeOwner(input: {
         ...member,
         billingRef,
       });
-      return buildHostedBillingPlanUpgradeOwnerSnapshot({
+      const owner = buildHostedBillingPlanUpgradeOwnerSnapshot({
         billingRef,
         expectedCurrentPlanCode: input.expectedCurrentPlanCode,
         targetPlanCode: input.targetPlanCode,
       });
+      await assertNoHostedDirectSubscriptionStripeEffectTx({
+        memberId: input.memberId,
+        stripeSubscriptionId: owner.stripeSubscriptionId,
+        tx,
+      });
+      return owner;
     },
   });
 }

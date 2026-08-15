@@ -1,7 +1,7 @@
 # Stripe effect compatibility cutover
 
-Status: active
-Updated: 2026-08-12
+Status: completed
+Updated: 2026-08-15
 
 ## Goal
 
@@ -35,6 +35,9 @@ and can be deployed and fully drained before any claim-enabled Web revision.
 - Existing no-claim behavior and Stripe request construction are unchanged.
 - This revision deploys alone and fully drains before a later revision may
   persist its first claim.
+- A later claim writer remains disabled until mutation-capable Customer Portal
+  issuance has stopped and every previously issued session is provider-invalid
+  or past Stripe's activity-relative expiry contract.
 
 ## Implementation
 
@@ -69,8 +72,14 @@ is the hard rollback floor and incident recovery below it is prohibited.
 - [x] Publish draft PR #1750.
 - [x] Merge current `origin/main` exactly once after prevalidating the only two
   conflicts as mechanical documentation-index and migration-inventory unions.
-- [ ] Complete exact-head CI plus zero-actionable specialist and final
-  ReviewGPT rounds.
+- [x] Pass required exact-head CI on `d80f5a0ff4` and remediate the preliminary
+  specialist findings plus the parent-audited persisted-empty-claim edge case.
+- [x] Remediate final ReviewGPT round-one findings for owner-group direct
+  claims, claim-only drafts, Portal session capabilities, and beneficiary
+  deletion serialization.
+- [ ] Complete exact-head CI plus a zero-actionable final ReviewGPT remediation
+  round. The preliminary specialist pass is complete and is not rerun after
+  substantive remediation.
 
 ## Verification evidence
 
@@ -94,7 +103,46 @@ is the hard rollback floor and incident recovery below it is prohibited.
   both targeted pre-merge head `80e8555638` while the PR was already
   non-mergeable, then terminated during response capture. They establish no
   review baseline. Fresh reviews will target the clean merged head.
-- After the one-time base merge, a fresh loopback database applied all 180 Web
+- After the one-time base merge, a fresh loopback database applied all 189 Web
   migrations. The 30-case PostgreSQL barrier suite passed after its test-only
   crypto provider double was brought up to the current signing contract; no
   production owner or provider request changed.
+- Required GitHub checks passed on candidate `d80f5a0ff4`. One broad host-suite
+  Frog autofix test exceeded its bounded Git runtime; the exact timed-out test
+  passed locally on focused reproduction, and the remaining broad jobs passed.
+- The preliminary specialist review found three recovery/coverage gaps on that
+  candidate: Linq and Telegram Family acceptance needed to surface the exact
+  Stripe-pending retry through their existing visible-secondary owner; account
+  deletion needed to preserve its current confirmation state for the same
+  retryable response; and accepted-member claim refusal needed direct
+  service-level proof. The remediation adds those paths and preserves provider
+  reply failures as retryable webhook failures. Parent review also tightened
+  claim absence to mean only database `NULL`/missing, not an invalid persisted
+  empty string.
+- The remediated focused slice passed 558 tests. The full changed compatibility
+  slice passed 857 tests with the separately proven 30-case PostgreSQL suite
+  excluded by its opt-in gate. Web typecheck, scoped lint, hosted-billing CI,
+  documentation gardening, privacy/diff inspection, and desktop/mobile design
+  proof passed; documentation drift will be rerun with this plan update.
+- Final ReviewGPT round one found three high-risk compatibility gaps on
+  `d80f5a0ff4`: direct plan admissions did not see a matching owner-group
+  conversion claim, a claim-only Family draft could still be deleted, generic
+  and deep-linked Portal sessions could outlive their admission check, and a
+  distinct beneficiary deletion did not lock the production Family claim
+  owner. The remediation adds one exact direct-Subscription resolver, treats a
+  draft claim as billing authority, checks generic Portal ownership before and
+  after session creation, makes later claim enablement depend on retiring and
+  draining mutation-capable Portal sessions, and locks bounded implicated
+  Family owners before deletion members at suspension and final delete.
+- After final-round remediation, the six-file unit slice passed 454 tests and
+  the targeted migration/Portal/claim/deletion slice passed 411 tests. Web
+  typecheck passed. The production-faithful PostgreSQL suite passed 31 tests,
+  including direct upgrade/schedule refusal, terminal-removal recovery, and
+  group-owner-before-distinct-beneficiary contention.
+- The final changed compatibility slice passed 794 tests with the 31-case
+  PostgreSQL suite excluded by its opt-in gate. Scoped lint reported no errors
+  and only the two existing navigation warnings. The hosted-billing guard,
+  documentation drift, documentation gardening, Prisma validation, diff check,
+  and privacy scan passed. Desktop and mobile design proof remain attached to
+  the PR for the account-deletion recovery state.
+Completed: 2026-08-15

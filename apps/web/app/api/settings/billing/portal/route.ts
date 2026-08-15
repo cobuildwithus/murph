@@ -1,12 +1,18 @@
+import type { Prisma, PrismaClient } from "@prisma/client";
 import type Stripe from "stripe";
 
 import { assertHostedOnboardingMutationOrigin } from "@/src/lib/hosted-onboarding/csrf";
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import {
+  assertNoHostedFamilyStripeEffectTx,
   readHostedAccountGroupStripeBillingRef,
   readHostedFamilyOwnerSnapshotForMember,
 } from "@/src/lib/hosted-onboarding/family-plan";
-import { readHostedMemberStripeBillingRef } from "@/src/lib/hosted-onboarding/hosted-member-billing-store";
+import {
+  assertNoHostedDirectSubscriptionStripeEffectTx,
+  readHostedMemberStripeBillingRef,
+  withHostedMemberStripeMutationLock,
+} from "@/src/lib/hosted-onboarding/hosted-member-billing-store";
 import { jsonOk, readOptionalJsonObject, withJsonError } from "@/src/lib/hosted-onboarding/http";
 import { requireHostedAppSessionFromRequest } from "@/src/lib/hosted-onboarding/app-session";
 import { requireHostedStripeApi } from "@/src/lib/hosted-onboarding/runtime";
@@ -19,18 +25,13 @@ export const POST = withJsonError(async (request: Request) => {
   const auth = await requireHostedAppSessionFromRequest(request);
   const body = await readOptionalJsonObject(request, { limitBytes: 1_024 });
   const billingScope = body.billingScope === "family" ? "family" : "member";
-  const stripeCustomerId =
-    billingScope === "family"
-      ? await readFamilyStripeCustomerId({
-          memberId: auth.member.id,
-          prisma,
-        })
-      : await readMemberStripeCustomerId({
-          memberId: auth.member.id,
-          prisma,
-        });
+  const owner = await readBillingPortalOwner({
+    billingScope,
+    memberId: auth.member.id,
+    prisma,
+  });
 
-  if (!stripeCustomerId) {
+  if (!owner.stripeCustomerId) {
     throw hostedOnboardingError({
       code: "STRIPE_CUSTOMER_NOT_READY",
       message:
@@ -46,7 +47,7 @@ export const POST = withJsonError(async (request: Request) => {
     process.env.HOSTED_ONBOARDING_STRIPE_FAMILY_PORTAL_CONFIGURATION_ID,
   );
   const sessionParams: Stripe.BillingPortal.SessionCreateParams = {
-    customer: stripeCustomerId,
+    customer: owner.stripeCustomerId,
     return_url: new URL("/settings", request.url).toString(),
   };
   if (billingScope === "family" && familyPortalConfigurationId) {
@@ -62,30 +63,73 @@ export const POST = withJsonError(async (request: Request) => {
     });
   }
 
+  await assertBillingPortalOwnerStillCurrent({
+    expected: owner,
+    memberId: auth.member.id,
+    prisma,
+  });
+
   return jsonOk({
     url: session.url,
   });
 });
 
-async function readMemberStripeCustomerId(input: {
+type BillingPortalOwner = {
+  billingScope: "family" | "member";
+  groupId: string | null;
+  stripeCustomerId: string | null;
+  stripeSubscriptionId: string | null;
+};
+
+async function readBillingPortalOwner(input: {
+  billingScope: "family" | "member";
   memberId: string;
-  prisma: ReturnType<typeof getPrisma>;
-}): Promise<string | null> {
-  const billingRef = await readHostedMemberStripeBillingRef({
+  prisma: PrismaClient;
+}): Promise<BillingPortalOwner> {
+  return withHostedMemberStripeMutationLock({
     memberId: input.memberId,
     prisma: input.prisma,
+    run: (tx) =>
+      input.billingScope === "family"
+        ? readFamilyBillingPortalOwner({
+            memberId: input.memberId,
+            tx,
+          })
+        : readMemberBillingPortalOwner({
+            memberId: input.memberId,
+            tx,
+          }),
   });
-
-  return billingRef?.stripeCustomerId ?? null;
 }
 
-async function readFamilyStripeCustomerId(input: {
+async function readMemberBillingPortalOwner(input: {
   memberId: string;
-  prisma: ReturnType<typeof getPrisma>;
-}): Promise<string | null> {
+  tx: Prisma.TransactionClient;
+}): Promise<BillingPortalOwner> {
+  const billingRef = await readHostedMemberStripeBillingRef({
+    memberId: input.memberId,
+    prisma: input.tx,
+  });
+  await assertNoHostedDirectSubscriptionStripeEffectTx({
+    memberId: input.memberId,
+    stripeSubscriptionId: billingRef?.stripeSubscriptionId,
+    tx: input.tx,
+  });
+  return {
+    billingScope: "member",
+    groupId: null,
+    stripeCustomerId: billingRef?.stripeCustomerId ?? null,
+    stripeSubscriptionId: billingRef?.stripeSubscriptionId ?? null,
+  };
+}
+
+async function readFamilyBillingPortalOwner(input: {
+  memberId: string;
+  tx: Prisma.TransactionClient;
+}): Promise<BillingPortalOwner> {
   const familyOwner = await readHostedFamilyOwnerSnapshotForMember({
     memberId: input.memberId,
-    prisma: input.prisma,
+    prisma: input.tx,
   });
 
   if (!familyOwner) {
@@ -98,8 +142,41 @@ async function readFamilyStripeCustomerId(input: {
 
   const billingRef = await readHostedAccountGroupStripeBillingRef({
     groupId: familyOwner.groupId,
-    prisma: input.prisma,
+    prisma: input.tx,
+  });
+  await assertNoHostedFamilyStripeEffectTx({
+    groupId: familyOwner.groupId,
+    tx: input.tx,
   });
 
-  return billingRef?.stripeCustomerId ?? null;
+  return {
+    billingScope: "family",
+    groupId: familyOwner.groupId,
+    stripeCustomerId: billingRef?.stripeCustomerId ?? null,
+    stripeSubscriptionId: billingRef?.stripeSubscriptionId ?? null,
+  };
+}
+
+async function assertBillingPortalOwnerStillCurrent(input: {
+  expected: BillingPortalOwner;
+  memberId: string;
+  prisma: PrismaClient;
+}): Promise<void> {
+  const current = await readBillingPortalOwner({
+    billingScope: input.expected.billingScope,
+    memberId: input.memberId,
+    prisma: input.prisma,
+  });
+  if (
+    current.groupId !== input.expected.groupId
+    || current.stripeCustomerId !== input.expected.stripeCustomerId
+    || current.stripeSubscriptionId !== input.expected.stripeSubscriptionId
+  ) {
+    throw hostedOnboardingError({
+      code: "HOSTED_BILLING_PORTAL_OWNER_CHANGED",
+      httpStatus: 409,
+      message: "Billing changed before the management link was ready. Refresh and try again.",
+      retryable: true,
+    });
+  }
 }

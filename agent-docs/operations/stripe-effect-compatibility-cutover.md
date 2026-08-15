@@ -14,13 +14,30 @@ reclaims, executes, or clears a claim, and it does not change a Stripe request.
 3. Drain invocations admitted before convergence. Use the normal deployment
    drain window plus the bounded billing/provider request timeout; confirm no
    pre-cutover Web invocation remains in flight.
-4. Deploy the member owner, then the Family owner, then the sponsored-cleanup
+4. Before any claim writer is reachable, deploy its claim-disabled admission
+   phase. That phase must replace every Stripe Customer Portal path that can
+   update or cancel a Subscription, including generic member and Family Portal
+   sessions and `subscription_update_confirm` deep links, with the matching
+   claim-owned mutation. Keep invoice and payment-method self-service only
+   through a Portal configuration that cannot mutate a Subscription. Preserve
+   suspended-member cancellation access through the replacement claim owner;
+   do not remove that user-critical escape path.
+5. Retire the mutation-capable Portal configurations, then drain already-issued
+   sessions before enabling claims. Stripe documents that an unopened Portal
+   session expires after five minutes and that an opened session expires within
+   one hour of its most recent activity. Reset the one-hour drain on any later
+   observed activity. If the last activity cannot be proven, keep claims
+   disabled until Stripe confirms that the old sessions are invalid or an
+   operator invalidates them through a provider-supported mechanism. The
+   session lifetime contract is documented in Stripe's
+   [Customer Portal guide](https://docs.stripe.com/customer-management).
+6. Deploy the member owner, then the Family owner, then the sponsored-cleanup
    owner only after each predecessor is terminal. Each claim-enabled release
-   depends on this cutover and may persist claims only after steps 1-3.
-5. The first persisted claim makes this release the rollback floor. Roll back a
+   depends on this cutover and may persist claims only after steps 1-5.
+7. The first persisted claim makes this release the rollback floor. Roll back a
    later owner only to this revision or to a newer claim-aware revision; never
    roll back below it while a claim can exist.
-6. Remove the compatibility-only assertions and columns only in a later
+8. Remove the compatibility-only assertions and columns only in a later
    contract change after all three owners are deployed, all pre-owner
    revisions and invocations are impossible, no live claim remains, and no
    supported rollback target needs these columns.
@@ -41,8 +58,11 @@ DATABASE_URL="$LOCAL_POSTGRES_URL" MURPH_TEST_POSTGRES_CONCURRENCY=1 \
 ```
 
 The compatibility cases seed a future claim while holding the production
-member row, start an independent current-revision writer, prove PostgreSQL
+claim-owner row, start an independent current-revision writer, prove PostgreSQL
 reports that writer waiting on the row lock, then commit the claim. Direct
-customer creation, Family capacity, owner relationship authority, and owner
-and beneficiary account deletion must all reject retryably without a provider
-request or partial suspension.
+customer creation, exact direct Subscription upgrade and scheduling, Family
+capacity, owner relationship authority, and owner and beneficiary account
+deletion must all reject retryably without a provider request or partial
+suspension. Family claims serialize on the group owner before a distinct
+beneficiary; a removed member remains discoverable through the immutable claim
+beneficiary. Terminal claim removal restores direct admission.

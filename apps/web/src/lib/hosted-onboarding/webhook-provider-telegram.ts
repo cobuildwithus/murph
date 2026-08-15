@@ -28,6 +28,8 @@ import {
 import {
   hostedOnboardingError,
   isHostedOnboardingError,
+  isHostedStripeEffectPendingError,
+  HOSTED_STRIPE_EFFECT_PENDING_VISIBLE_REASON,
 } from "./errors";
 import { parseHostedFamilyInviteCode } from "./app-routes";
 import {
@@ -104,6 +106,7 @@ export async function planHostedOnboardingTelegramWebhook(input: {
     }) !== null;
     let familyInviteNotAccepted = false;
     let familyDraftCheckoutConflictInviteCode: string | null = null;
+    let familyStripeEffectPending = false;
     let familyAcceptance: Awaited<ReturnType<typeof acceptHostedFamilyInviteFromTelegramTx>> = null;
     let familyActivationWake: HostedWebhookWakeHandoff | null = null;
     try {
@@ -142,6 +145,8 @@ export async function planHostedOnboardingTelegramWebhook(input: {
           });
         }
         familyDraftCheckoutConflictInviteCode = inviteCode;
+      } else if (isHostedStripeEffectPendingError(error)) {
+        familyStripeEffectPending = true;
       } else if (!isExpectedHostedTelegramFamilyInviteAcceptanceMiss(error)) {
         throw error;
       } else {
@@ -192,6 +197,12 @@ export async function planHostedOnboardingTelegramWebhook(input: {
           reason: "family-invite-draft-recovery-required",
         },
       };
+    }
+
+    if (familyStripeEffectPending) {
+      return buildIgnoredTelegramWebhookPlan(
+        HOSTED_STRIPE_EFFECT_PENDING_VISIBLE_REASON,
+      );
     }
 
     if (familyInviteTokenPresent || familyInviteNotAccepted) {

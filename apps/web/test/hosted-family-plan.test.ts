@@ -1583,6 +1583,32 @@ describe("hosted Family plan", () => {
     expect(tx.hostedAccountGroupMembership.upsert).not.toHaveBeenCalled();
   });
 
+  it("rejects invite acceptance while the accepted member owns a Stripe effect", async () => {
+    const tx = createTxMock();
+    const onAcceptedMemberActivated = vi.fn();
+    tx.hostedMemberBillingRef.findUnique.mockResolvedValueOnce({
+      stripeEffectClaimId: "future-stripe-effect-claim",
+    });
+
+    await expect(acceptHostedFamilyInviteTx({
+      acceptedMemberId: "member_relative",
+      inviteCode: "FAMILY123",
+      onAcceptedMemberActivated,
+      tx,
+    })).rejects.toMatchObject({
+      code: "HOSTED_STRIPE_EFFECT_PENDING",
+      httpStatus: 409,
+      retryable: true,
+    });
+
+    expect(tx.hostedAccountGroupInvite.updateMany).not.toHaveBeenCalled();
+    expect(tx.hostedAccountGroupMembership.upsert).not.toHaveBeenCalled();
+    expect(onAcceptedMemberActivated).not.toHaveBeenCalled();
+    expect(mailboxMocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+    expect(mailboxMocks.appendHostedMailboxEnvelopeWithPreparedCryptoTx)
+      .not.toHaveBeenCalled();
+  });
+
   it("accepts a plain Telegram /start when one pending invite is pre-bound to that username", async () => {
     const tx = createTxMock();
     tx.hostedAccountGroupInvite.findMany.mockResolvedValueOnce([
@@ -4613,6 +4639,36 @@ describe("hosted Family plan", () => {
     expect(tx.hostedAccountGroupMembership.upsert).not.toHaveBeenCalled();
   });
 
+  it("preserves a claim-only owner draft during invite acceptance", async () => {
+    const tx = createTxMock({
+      activeMembershipCount: 1,
+      billedSeatCount: 2,
+    });
+    tx.hostedAccountGroupInvite.findUnique.mockResolvedValueOnce(
+      createPendingInvite(),
+    );
+    tx.hostedAccountGroupMembership.findFirst
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(createNeverPaidFamilyDraftMembership());
+    tx.hostedAccountGroup.findUnique.mockResolvedValueOnce(
+      createNeverPaidFamilyDraftRecord({
+        stripeEffectClaimId: "opaque-future-draft-claim",
+      }),
+    );
+
+    await expect(acceptHostedFamilyInviteTx({
+      acceptedMemberId: "member_mom",
+      inviteCode: "invite_phone",
+      tx,
+    })).rejects.toMatchObject({
+      code: "HOSTED_FAMILY_DRAFT_BILLING_SYNCING",
+    });
+
+    expect(tx.hostedAccountGroup.deleteMany).not.toHaveBeenCalled();
+    expect(tx.hostedAccountGroupInvite.updateMany).not.toHaveBeenCalled();
+    expect(tx.hostedAccountGroupMembership.upsert).not.toHaveBeenCalled();
+  });
+
   it("abandons an unchanged inert draft with its exact rendered null claim", async () => {
     const draft = createNeverPaidFamilyDraftRecord();
     const tx = createTxMock();
@@ -4636,6 +4692,33 @@ describe("hosted Family plan", () => {
     expect(runtimeMocks.requireHostedStripeApi).not.toHaveBeenCalled();
     expect(prisma.$transaction).toHaveBeenCalledOnce();
     expect(tx.hostedAccountGroup.deleteMany).toHaveBeenCalledOnce();
+  });
+
+  it("preserves a claim-only owner draft during explicit abandonment", async () => {
+    const tx = createTxMock();
+    tx.hostedAccountGroup.findUnique.mockResolvedValueOnce(
+      createNeverPaidFamilyDraftRecord({
+        stripeEffectClaimId: "opaque-future-draft-claim",
+      }),
+    );
+    const prisma = tx as FamilyPlanTxMock & {
+      $transaction: ReturnType<typeof vi.fn>;
+    };
+    prisma.$transaction = vi.fn((callback) => callback(tx));
+
+    await expect(abandonHostedFamilyDraftForOwner({
+      expectedDraftClaim: {
+        checkoutAttemptId: null,
+        groupId: "hbag_draft",
+      },
+      ownerMemberId: "member_mom",
+      prisma: prisma as never,
+    })).rejects.toMatchObject({
+      code: "HOSTED_FAMILY_DRAFT_BILLING_SYNCING",
+    });
+
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+    expect(tx.hostedAccountGroup.deleteMany).not.toHaveBeenCalled();
   });
 
   it("keeps an abandonment retry idempotent without adopting a replacement group", async () => {
@@ -9998,6 +10081,7 @@ function createNeverPaidFamilyDraftRecord(input: {
   ownerMemberId?: string;
   planCapacities?: Array<{ groupId: string }>;
   stripeCheckoutSessionId?: string | null;
+  stripeEffectClaimId?: string | null;
   stripeSubscriptionId?: string | null;
   suspendedAt?: Date | null;
 } = {}) {
@@ -10022,6 +10106,7 @@ function createNeverPaidFamilyDraftRecord(input: {
         createHostedStripeCheckoutSessionLookupKey(stripeCheckoutSessionId),
       stripeCustomerIdEncrypted: null,
       stripeCustomerLookupKey: null,
+      stripeEffectClaimId: input.stripeEffectClaimId ?? null,
       stripeSubscriptionIdEncrypted: stripeSubscriptionId
         ? `encrypted:${stripeSubscriptionId}`
         : null,
