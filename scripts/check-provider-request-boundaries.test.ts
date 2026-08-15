@@ -2533,6 +2533,107 @@ describe("check-provider-request-boundaries", () => {
     ]);
   });
 
+  it("retains member mutations through reference-valued closed containers", () => {
+    const matches = violationsOfKind(
+      "raw-provider-http",
+      [
+        "const objectTransport = { send: async (_url: string) => ({ ok: true }) };",
+        "const objectHolder = { current: objectTransport };",
+        "objectHolder.current.send = globalThis.fetch.bind(undefined, 'https://api.openai.com/v1/responses', { method: 'POST' });",
+        "await objectTransport.send();",
+        "const arrayTransport = { send: async (_url: string) => ({ ok: true }) };",
+        "const arrayHolder = [arrayTransport];",
+        "arrayHolder[0].send = globalThis.fetch.bind(undefined, 'https://api.openai.com/v1/responses', { method: 'POST' });",
+        "await arrayTransport.send();",
+        "const writtenTransport = { send: async (_url: string) => ({ ok: true }) };",
+        "const writtenHolder = { current: { send: async (_url: string) => ({ ok: true }) } };",
+        "writtenHolder.current = writtenTransport;",
+        "writtenHolder.current.send = globalThis.fetch.bind(undefined, 'https://api.openai.com/v1/responses', { method: 'POST' });",
+        "await writtenTransport.send();",
+        "const assignedTransport = { send: async (_url: string) => ({ ok: true }) };",
+        "const assignedHolder = { current: { send: async (_url: string) => ({ ok: true }) } };",
+        "Object.assign(assignedHolder, { current: assignedTransport });",
+        "assignedHolder.current.send = globalThis.fetch.bind(undefined, 'https://api.openai.com/v1/responses', { method: 'POST' });",
+        "await assignedTransport.send();",
+        "const conditionalFirst = { send: async (_url: string) => ({ ok: true }) };",
+        "const conditionalSecond = { send: async (_url: string) => ({ ok: true }) };",
+        "const conditionalHolder = { current: Date.now() > 0 ? conditionalFirst : conditionalSecond };",
+        "conditionalHolder.current.send = globalThis.fetch.bind(undefined, 'https://api.openai.com/v1/responses', { method: 'POST' });",
+        "await conditionalFirst.send();",
+        "await conditionalSecond.send();",
+        "const nestedTransport = { send: async (_url: string) => ({ ok: true }) };",
+        "const nestedHolder = { slot: { current: nestedTransport } };",
+        "nestedHolder.slot.current.send = globalThis.fetch.bind(undefined, 'https://api.openai.com/v1/responses', { method: 'POST' });",
+        "await nestedTransport.send();",
+        "const aliasedWriteTransport = { send: async (_url: string) => ({ ok: true }) };",
+        "const aliasedWriteHolder = { current: { send: async (_url: string) => ({ ok: true }) } };",
+        "const aliasedWriteHolderAlias = aliasedWriteHolder;",
+        "aliasedWriteHolderAlias.current = aliasedWriteTransport;",
+        "aliasedWriteHolderAlias.current.send = globalThis.fetch.bind(undefined, 'https://api.openai.com/v1/responses', { method: 'POST' });",
+        "await aliasedWriteTransport.send();",
+        "const aliasedAssignTransport = { send: async (_url: string) => ({ ok: true }) };",
+        "const aliasedAssignHolder = { current: { send: async (_url: string) => ({ ok: true }) } };",
+        "const aliasedAssignHolderAlias = aliasedAssignHolder;",
+        "Object.assign(aliasedAssignHolderAlias, { current: aliasedAssignTransport });",
+        "aliasedAssignHolderAlias.current.send = globalThis.fetch.bind(undefined, 'https://api.openai.com/v1/responses', { method: 'POST' });",
+        "await aliasedAssignTransport.send();",
+      ].join("\n"),
+      "scripts/closed-container-provider-transport-aliases.mts",
+    );
+
+    expect(matches.map((match) => match.line)).toEqual([
+      4,
+      8,
+      13,
+      18,
+      23,
+      24,
+      28,
+      34,
+      40,
+    ]);
+  });
+
+  it("does not cross closed-container shadows or definitive reassignments", () => {
+    const matches = violationsOfKind(
+      "raw-provider-http",
+      [
+        "const outer = { send: async (_url: string) => ({ ok: true }) };",
+        "{",
+        "  const inner = { send: async (_url: string) => ({ ok: true }) };",
+        "  const holder = { current: inner };",
+        "  holder.current.send = globalThis.fetch.bind(undefined, 'https://api.openai.com/v1/responses', { method: 'POST' });",
+        "}",
+        "await outer.send();",
+        "const original = { send: async (_url: string) => ({ ok: true }) };",
+        "const replacement = { send: async (_url: string) => ({ ok: true }) };",
+        "let reassignedHolder = { current: original };",
+        "reassignedHolder = { current: replacement };",
+        "reassignedHolder.current.send = globalThis.fetch.bind(undefined, 'https://api.openai.com/v1/responses', { method: 'POST' });",
+        "await original.send();",
+      ].join("\n"),
+      "scripts/shadowed-closed-container-provider-transport-aliases.mts",
+    );
+
+    expect(matches).toEqual([]);
+  });
+
+  it("exposes referenced-object mutations through their aggregate path", () => {
+    const matches = violationsOfKind(
+      "raw-provider-http",
+      [
+        "const transport = { send: async (_url: string) => ({ ok: true }) };",
+        "const holder = { current: { send: async (_url: string) => ({ ok: true }) } };",
+        "holder.current = transport;",
+        "transport.send = globalThis.fetch.bind(undefined, 'https://api.openai.com/v1/responses', { method: 'POST' });",
+        "await holder.current.send();",
+      ].join("\n"),
+      "scripts/referenced-provider-transport-through-aggregate.mts",
+    );
+
+    expect(matches.map((match) => match.line)).toEqual([5]);
+  });
+
   it("uses effective provider-valued members and destructured defaults", () => {
     const matches = violationsOfKind(
       "raw-provider-http",

@@ -399,6 +399,27 @@ Updated: 2026-08-15
   bounded fallback only when the shared variable census has no accessible
   binding. Lexical shadows remain negative controls. No new registry,
   exception, scanner, or provider request was added.
+- Exact full-snapshot round 15 at
+  `33bfd94e0a922f379a7d83ca030eb1222f89d2cd` ran for 11 minutes 10 seconds
+  with confirmed `gpt-5.6-sol` metadata and found one review-induced High:
+  a closed object or array containing a reference-valued member remained a
+  terminal textual mutation root instead of sharing the referenced object's
+  runtime identity.
+- The production-faithful reproduction proved that mutating
+  `holder.current.send` can execute through `transport.send` without a guard
+  violation. The correction keeps the round-13 one-owner design: the existing
+  set-valued member-root resolver projects reference-valued closed members
+  through the effective property-path reader before declaring the aggregate a
+  terminal root. The existing mutation-candidate index is only a bounded
+  relevance filter; declaration and effective member values remain the single
+  authority. Separate alias-capture and member-observation positions preserve
+  object identity while admitting later writes through an alias.
+- Regressions cover closed objects and arrays, nested containers, direct writes
+  and `Object.assign`, aliased aggregate writes, conditional alternatives,
+  lexical shadows, and later definitive reassignment. The resulting mutation
+  is visible from both aggregate and referenced-object call paths. No scanner,
+  registry, exception, compatibility path, second provenance owner, or
+  provider request was added.
 
 ## Verification
 
@@ -411,13 +432,13 @@ Updated: 2026-08-15
 
 Current evidence:
 
-- Focused guard suite: 119 tests passed on the current merged base, including
+- Focused guard suite: 122 tests passed on the current merged base, including
   direct ReviewGPT reproductions and negative controls for unrelated objects,
   imports, namespace aliases, closed member origins and mutations, callables,
   ambiguous provider evidence, and domain models.
 - Full repository-tool suite: 36 files and 650 tests passed.
 - Repo-tools TypeScript compilation passes with `tsconfig.tools.json`.
-- The combined guard and Node-bootstrap suite passes 120 tests after the final
+- The combined guard and Node-bootstrap suite passes 123 tests after the final
   base merge.
 - `pnpm provider-requests:guard`: passes on the current merged base containing
   the sibling SDK migrations and exact registered SDK hooks.

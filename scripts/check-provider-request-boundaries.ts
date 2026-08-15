@@ -1843,7 +1843,12 @@ function collectOpaqueProviderTransportMutationViolations(input: {
       (allowRootOnly || path.length >= 2) &&
       root &&
       resolvePossibleBindings(input.bindings, root, before).length > 0 &&
-      resolvePossibleStaticMemberPaths(path, input.bindings, before).some(
+      resolvePossibleStaticMemberPaths(
+        path,
+        input.bindings,
+        before,
+        input.sourceFile,
+      ).some(
         (resolution) => resolution.opaque,
       ),
     );
@@ -4514,6 +4519,9 @@ function readEffectiveStaticPropertyPathValues(
   bindings: ReadonlyMap<string, readonly VariableBinding[]>,
   before: number,
   sourceFile: Node,
+  referencePaths: readonly (readonly string[])[] = readPossibleReferencePaths(
+    node,
+  ),
 ): Node[] {
   let values: Node[] = [unwrapExpression(node)];
   for (const propertyName of propertyPath) {
@@ -4528,13 +4536,14 @@ function readEffectiveStaticPropertyPathValues(
     );
   }
   if (propertyPath.length > 0) {
-    for (const referencePath of readPossibleReferencePaths(node)) {
+    for (const referencePath of referencePaths) {
       values.push(
         ...readStaticMemberMutationInitializersForPath(
           [...referencePath, ...propertyPath],
           bindings,
           before,
           sourceFile,
+          false,
         ),
       );
     }
@@ -4696,10 +4705,89 @@ function isClosedNonAliasValue(node: Node): boolean {
     value.type === "RegExpLiteral";
 }
 
+function hasPossibleStaticMemberMutationForPath(input: {
+  readonly before: number;
+  readonly bindings: ReadonlyMap<string, readonly VariableBinding[]>;
+  readonly memberPath: readonly string[];
+  readonly rootBinding: VariableBinding;
+  readonly sourceFile: Node;
+}): boolean {
+  const hasSameRootBinding = (candidate: VariableBinding): boolean =>
+    candidate.start === input.rootBinding.start &&
+    candidate.scopeStart === input.rootBinding.scopeStart &&
+    candidate.scopeEnd === input.rootBinding.scopeEnd;
+  for (const candidate of collectStaticMemberMutationCandidates(
+    input.sourceFile,
+  )) {
+    const position = candidate.start ?? Number.MAX_SAFE_INTEGER;
+    if (position >= input.before) {
+      continue;
+    }
+    let targetPath: readonly string[] | null = null;
+    let hasUnknownComputedMember = false;
+    if (isAssignmentExpression(candidate)) {
+      if (
+        !isMemberExpression(candidate.left) &&
+        !isOptionalMemberExpression(candidate.left)
+      ) {
+        continue;
+      }
+      targetPath = readMemberPath(candidate.left);
+      if (!targetPath && candidate.left.computed) {
+        targetPath = readMemberPath(candidate.left.object);
+        hasUnknownComputedMember = true;
+      }
+    } else if (
+      (isCallExpression(candidate) || isOptionalCallExpression(candidate)) &&
+      readMemberPath(candidate.callee)?.join(".") === "Object.assign"
+    ) {
+      const target = candidate.arguments[0];
+      if (
+        target &&
+        target.type !== "ArgumentPlaceholder" &&
+        target.type !== "SpreadElement"
+      ) {
+        targetPath = readMemberPath(target);
+      }
+    }
+    const targetRoot = targetPath?.[0];
+    if (!targetPath || !targetRoot) {
+      continue;
+    }
+    const targetsSameRoot = resolvePossibleStaticMemberPaths(
+      [targetRoot],
+      input.bindings,
+      position,
+      input.sourceFile,
+      false,
+    ).some((resolution) => hasSameRootBinding(resolution.rootBinding));
+    if (!targetsSameRoot) {
+      continue;
+    }
+    const targetMemberPath = targetPath.slice(1);
+    if (
+      targetMemberPath.length <= input.memberPath.length &&
+      targetMemberPath.every(
+        (part, index) => input.memberPath[index] === part,
+      ) &&
+      (
+        !hasUnknownComputedMember ||
+        targetMemberPath.length < input.memberPath.length
+      )
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
 function resolvePossibleStaticMemberPaths(
   path: readonly string[],
   bindings: ReadonlyMap<string, readonly VariableBinding[]>,
   before: number,
+  sourceFile: Node,
+  includeMemberMutations = true,
+  memberBefore = before,
   resolving: ReadonlySet<string> = new Set(),
 ): StaticMemberPathResolution[] {
   const root = path[0];
@@ -4718,6 +4806,7 @@ function resolvePossibleStaticMemberPaths(
     const values = readVariableBindingPossibleValues(binding, bindings);
     let retainedLocalRoot = false;
     for (const value of values) {
+      const closedValue = unwrapExpression(value);
       const referencePaths = readPossibleReferencePaths(value);
       if (referencePaths.length === 0) {
         resolutions.push({
@@ -4726,6 +4815,55 @@ function resolvePossibleStaticMemberPaths(
           rootBinding: binding,
         });
         retainedLocalRoot = true;
+        if (
+          (isObjectExpression(closedValue) ||
+            closedValue.type === "ArrayExpression") &&
+          path.length > 1
+        ) {
+          for (
+            let prefixLength = 1;
+            prefixLength < path.length;
+            prefixLength += 1
+          ) {
+            const projectedValues = readEffectiveStaticPropertyPathValues(
+              value,
+              path.slice(1, prefixLength + 1),
+              bindings,
+              memberBefore,
+              sourceFile,
+              includeMemberMutations &&
+                  hasPossibleStaticMemberMutationForPath({
+                    before: memberBefore,
+                    bindings,
+                    memberPath: path.slice(1, prefixLength + 1),
+                    rootBinding: binding,
+                    sourceFile,
+                  })
+                ? [[root]]
+                : [],
+            );
+            for (const projectedValue of projectedValues) {
+              for (const projectedReferencePath of readPossibleReferencePaths(
+                projectedValue,
+              )) {
+                resolutions.push(
+                  ...resolvePossibleStaticMemberPaths(
+                    [
+                      ...projectedReferencePath,
+                      ...path.slice(prefixLength + 1),
+                    ],
+                    bindings,
+                    projectedValue.start ?? before,
+                    sourceFile,
+                    includeMemberMutations,
+                    memberBefore,
+                    nextResolving,
+                  ),
+                );
+              }
+            }
+          }
+        }
         continue;
       }
       for (const referencePath of referencePaths) {
@@ -4734,6 +4872,9 @@ function resolvePossibleStaticMemberPaths(
             [...referencePath, ...path.slice(1)],
             bindings,
             binding.start - 1,
+            sourceFile,
+            includeMemberMutations,
+            memberBefore,
             nextResolving,
           ),
         );
@@ -4777,10 +4918,14 @@ function readStaticMemberMutationInitializersForPath(
   bindings: ReadonlyMap<string, readonly VariableBinding[]>,
   before: number,
   sourceFile: Node,
+  includeTargetMemberMutations = true,
 ): Node[] {
   const targets = resolvePossibleStaticMemberPaths(
     initialTargetPath,
     bindings,
+    before,
+    sourceFile,
+    includeTargetMemberMutations,
     before,
   );
   if (targets.length === 0) {
@@ -4823,7 +4968,12 @@ function readStaticMemberMutationInitializersForPath(
     if (isAssignmentExpression(candidate)) {
       const assignedPath = readMemberPath(candidate.left);
       const assignedResolutions = assignedPath
-        ? resolvePossibleStaticMemberPaths(assignedPath, bindings, position)
+        ? resolvePossibleStaticMemberPaths(
+            assignedPath,
+            bindings,
+            position,
+            sourceFile,
+          )
         : [];
       let matchedDirectAssignment = false;
       for (const target of targets) {
@@ -4851,7 +5001,12 @@ function readStaticMemberMutationInitializersForPath(
       ) {
         const objectPath = readMemberPath(candidate.left.object);
         const objectResolutions = objectPath
-          ? resolvePossibleStaticMemberPaths(objectPath, bindings, position)
+          ? resolvePossibleStaticMemberPaths(
+              objectPath,
+              bindings,
+              position,
+              sourceFile,
+            )
           : [];
         for (const target of targets) {
           for (const objectResolution of objectResolutions) {
@@ -4884,7 +5039,12 @@ function readStaticMemberMutationInitializersForPath(
       }
       const assignedPath = readMemberPath(assigned);
       const assignedResolutions = assignedPath
-        ? resolvePossibleStaticMemberPaths(assignedPath, bindings, position)
+        ? resolvePossibleStaticMemberPaths(
+            assignedPath,
+            bindings,
+            position,
+            sourceFile,
+          )
         : [];
       for (const target of targets) {
         for (const assignedResolution of assignedResolutions) {
