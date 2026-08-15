@@ -97,11 +97,14 @@ Updated: 2026-08-15
   and put routing authority in prompt prose. Remove that entire active-skill
   addition rather than adding new health-record or transport machinery.
 - Upgrade the repository-backed ReviewGPT runner from 0.5.127 to the registry's
-  current 0.5.131 release and update its release-contract assertions.
+  current 0.5.132 release and update its release-contract assertions.
 - Pin `ORACLE_DRAFT_MINIMUM_MARKED_RESPONSE_MS=300000` at Murph's package-runner
   boundary. ReviewGPT 0.5.131 intentionally makes that value configurable for
   direct callers, but Murph's completion gate must not inherit an ambient value
   that can weaken the repository's five-minute marked-response trust floor.
+- Follow the registry to ReviewGPT 0.5.132 when it appears during the gate.
+  That release fixes Deep Research conversation identity and timestamped
+  submitted-attachment matching; retain Murph's wrapper-owned trust floor.
 
 ## Verification
 
@@ -115,7 +118,8 @@ Updated: 2026-08-15
   `pnpm --dir packages/assistant-engine typecheck`, and
   `pnpm --dir packages/cli typecheck` passed.
 - `pnpm exec vitest run --config packages/cli/vitest.workspace.ts --no-coverage packages/cli/test/release-script-coverage-audit.test.ts`
-  passed after the trust-floor remediation: 46 tests, 1 skipped. The new child
+  passed after the trust-floor remediation and again on ReviewGPT 0.5.132: 46
+  tests, 1 skipped. The new child
   process regression starts with an ambient value of `1` and observes `300000`
   at the package boundary; the in-memory package harness uses that same
   repository-owned value, while the existing boundary cases prove `299999`
@@ -124,7 +128,8 @@ Updated: 2026-08-15
   `features.multi_agent_v2.hide_spawn_agent_metadata = true` and reported
   multi-agent V2 enabled.
 - `npm view @cobuild/review-gpt version --json` and
-  `pnpm exec cobuild-review-gpt --version` both reported 0.5.131.
+  `pnpm exec cobuild-review-gpt --version` both reported 0.5.132 after the
+  release appeared during the final-review cycle.
 - `git diff --check` passed after applying the separately authored ReviewGPT
   patch; the candidate diff and patch were scanned for direct identifiers.
 - After specialist remediation removed the speculative active-skill contract,
@@ -138,3 +143,8 @@ Updated: 2026-08-15
   it. A fresh final pass and exact-head CI remain pending. Two pre-send browser
   failures and one rejected nine-second response were not treated as reviews;
   no Eragon lane was used.
+- Two later marked `PASS` candidates on the trust-floor remediation were also
+  rejected: they completed in 19 and 18 seconds and each exact committed turn
+  rendered as two assistant DOM nodes. A 0.5.131 Deep Research retry could not
+  prove one accepted conversation URL. None counts as substantive round 3;
+  retry on 0.5.132 after pushing the dependency update.
