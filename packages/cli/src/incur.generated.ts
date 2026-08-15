@@ -207,6 +207,7 @@ declare module 'incur' {
       'meal import-json': { args: {}; options: { requestId?: string; input: string; photo?: string; audio?: string; note?: string; occurredAt?: string | string; source?: "manual" | "import" | "device" | "derived"; ingredient?: string[]; nutritionCalories?: number; nutritionProteinGrams?: number; nutritionCarbsGrams?: number; nutritionFatGrams?: number; nutritionFiberGrams?: number; nutritionSource?: "user" | "label" | "database" | "inherited" | "estimated"; nutritionConfidence?: "low" | "medium" | "high"; nutritionSourceDetail?: string } }
       'meal list': { args: {}; options: { requestId?: string; from?: string; to?: string; limit: number } }
       'meal manifest': { args: { id: string }; options: { requestId?: string } }
+      'meal nutrients': { args: {}; options: { requestId?: string; from?: string; to?: string } }
       'meal remove-photo': { args: { id: string }; options: { requestId?: string } }
       'meal show': { args: { id: string }; options: { requestId?: string } }
       'meal totals': { args: {}; options: { requestId?: string; from?: string; to?: string } }

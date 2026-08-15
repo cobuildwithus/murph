@@ -523,6 +523,7 @@ const ASSISTANT_TURN_PROFILE_BATCH_COMMAND_PATHS = new Set([
   'meal edit',
   'meal show',
   'meal totals',
+  'meal nutrients',
 ])
 
 interface AssistantTurnProfileToolAggregate {

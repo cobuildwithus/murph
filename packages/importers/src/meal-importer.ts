@@ -65,6 +65,7 @@ function hasMealNutritionContent(nutrition: MealNutrition | undefined): boolean 
 
   return Boolean(
     (nutrition.totals && Object.keys(nutrition.totals).length > 0)
+    || (nutrition.micros && Object.keys(nutrition.micros).length > 0)
     || (nutrition.provenance && Object.keys(nutrition.provenance).length > 0),
   );
 }

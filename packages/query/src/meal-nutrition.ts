@@ -1,4 +1,8 @@
-import { extractIsoDatePrefix } from "@murphai/contracts";
+import {
+  extractIsoDatePrefix,
+  MEAL_MICRONUTRIENT_DEFINITIONS,
+  type MealMicronutrientKey,
+} from "@murphai/contracts";
 import type { CanonicalEntity } from "./canonical-entities.ts";
 
 import {
@@ -39,6 +43,33 @@ export interface MealNutritionTotalsResult {
   days: MealNutritionDayTotal[];
 }
 
+export type MealNutrientKey = "waterGrams" | MealMicronutrientKey;
+export type MealNutrientCategory = "water" | "mineral" | "trace_element" | "vitamin";
+export type MealNutrientUnit = "g" | "mg" | "mcg";
+
+export interface MealNutrientTotal {
+  key: MealNutrientKey;
+  label: string;
+  category: MealNutrientCategory;
+  unit: MealNutrientUnit;
+  total: number | null;
+  contributingMealCount: number;
+}
+
+export interface MealNutrientDayTotal {
+  date: string;
+  mealCount: number;
+  nutrients: MealNutrientTotal[];
+}
+
+export interface MealNutrientTotalsResult {
+  from: string | null;
+  to: string | null;
+  mealCount: number;
+  nutrients: MealNutrientTotal[];
+  days: MealNutrientDayTotal[];
+}
+
 type NutritionMetricKey =
   | "calories"
   | "proteinGrams"
@@ -53,6 +84,16 @@ type NutritionMetricState = {
 
 type NutritionAccumulator = Record<NutritionMetricKey, NutritionMetricState>;
 
+interface MealNutrientDefinition {
+  key: MealNutrientKey;
+  label: string;
+  category: MealNutrientCategory;
+  unit: MealNutrientUnit;
+  source: "totals" | "micros";
+}
+
+type MealNutrientAccumulator = Map<MealNutrientKey, NutritionMetricState>;
+
 const NUTRITION_METRIC_KEYS: NutritionMetricKey[] = [
   "calories",
   "proteinGrams",
@@ -60,6 +101,20 @@ const NUTRITION_METRIC_KEYS: NutritionMetricKey[] = [
   "fatGrams",
   "fiberGrams",
 ];
+
+const MEAL_NUTRIENT_DEFINITIONS: readonly MealNutrientDefinition[] = Object.freeze([
+  {
+    category: "water",
+    key: "waterGrams",
+    label: "Water",
+    source: "totals",
+    unit: "g",
+  },
+  ...MEAL_MICRONUTRIENT_DEFINITIONS.map((definition) => ({
+    ...definition,
+    source: "micros" as const,
+  })),
+]);
 
 function createNutritionAccumulator(): NutritionAccumulator {
   return {
@@ -69,6 +124,15 @@ function createNutritionAccumulator(): NutritionAccumulator {
     fatGrams: { total: 0, mealCount: 0 },
     fiberGrams: { total: 0, mealCount: 0 },
   };
+}
+
+function createMealNutrientAccumulator(): MealNutrientAccumulator {
+  return new Map(
+    MEAL_NUTRIENT_DEFINITIONS.map(({ key }) => [
+      key,
+      { total: 0, mealCount: 0 },
+    ]),
+  );
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -103,6 +167,19 @@ function readNutritionMetricValue(
   return totals ? asFiniteNumber(totals[metric]) : null;
 }
 
+function readMealNutrientValue(
+  attributes: Record<string, unknown>,
+  definition: MealNutrientDefinition,
+): number | null {
+  const nutrition = attributes.nutrition;
+  if (!isRecord(nutrition)) {
+    return null;
+  }
+
+  const source = nutrition[definition.source];
+  return isRecord(source) ? asFiniteNumber(source[definition.key]) : null;
+}
+
 function toMealNutritionTotals(
   accumulator: NutritionAccumulator,
 ): MealNutritionTotals {
@@ -135,6 +212,24 @@ function toMealNutritionTotals(
       mealCount: accumulator.fiberGrams.mealCount,
     },
   };
+}
+
+function toMealNutrientTotals(
+  accumulator: MealNutrientAccumulator,
+): MealNutrientTotal[] {
+  return MEAL_NUTRIENT_DEFINITIONS.map((definition) => {
+    const state = accumulator.get(definition.key);
+    const contributingMealCount = state?.mealCount ?? 0;
+
+    return {
+      category: definition.category,
+      contributingMealCount,
+      key: definition.key,
+      label: definition.label,
+      total: contributingMealCount > 0 ? state?.total ?? null : null,
+      unit: definition.unit,
+    };
+  });
 }
 
 function mealDate(record: CanonicalEntity): string | null {
@@ -221,16 +316,23 @@ function selectLatestMealRevisions(meals: readonly CanonicalEntity[]): Canonical
   return [...unkeyedMeals, ...latestByKey.values()];
 }
 
-export function summarizeMealNutritionTotals(
+function selectMealNutritionRecords(
   readModel: VaultReadModel,
-  options: MealNutritionTotalsOptions = {},
-): MealNutritionTotalsResult {
-  const meals = selectLatestMealRevisions(listEntities(readModel, {
+  options: MealNutritionTotalsOptions,
+): CanonicalEntity[] {
+  return selectLatestMealRevisions(listEntities(readModel, {
     families: ["event"],
     kinds: ["meal"],
     from: options.from,
     to: options.to,
   }));
+}
+
+export function summarizeMealNutritionTotals(
+  readModel: VaultReadModel,
+  options: MealNutritionTotalsOptions = {},
+): MealNutritionTotalsResult {
+  const meals = selectMealNutritionRecords(readModel, options);
 
   const totals = createNutritionAccumulator();
   const days = new Map<
@@ -290,10 +392,85 @@ export function summarizeMealNutritionTotals(
   };
 }
 
+export function summarizeMealNutrientTotals(
+  readModel: VaultReadModel,
+  options: MealNutritionTotalsOptions = {},
+): MealNutrientTotalsResult {
+  const meals = selectMealNutritionRecords(readModel, options);
+  const nutrients = createMealNutrientAccumulator();
+  const days = new Map<
+    string,
+    {
+      mealCount: number;
+      nutrients: MealNutrientAccumulator;
+    }
+  >();
+
+  for (const meal of meals) {
+    if (!isRecord(meal.attributes)) {
+      continue;
+    }
+
+    const date = mealDate(meal);
+    const dayState = date
+      ? days.get(date) ?? {
+          mealCount: 0,
+          nutrients: createMealNutrientAccumulator(),
+        }
+      : null;
+
+    for (const definition of MEAL_NUTRIENT_DEFINITIONS) {
+      const nutrientValue = readMealNutrientValue(meal.attributes, definition);
+      if (nutrientValue === null) {
+        continue;
+      }
+
+      const nutrientState = nutrients.get(definition.key);
+      if (nutrientState) {
+        nutrientState.total += nutrientValue;
+        nutrientState.mealCount += 1;
+      }
+
+      const dayNutrientState = dayState?.nutrients.get(definition.key);
+      if (dayNutrientState) {
+        dayNutrientState.total += nutrientValue;
+        dayNutrientState.mealCount += 1;
+      }
+    }
+
+    if (date && dayState) {
+      dayState.mealCount += 1;
+      days.set(date, dayState);
+    }
+  }
+
+  return {
+    from: options.from ?? null,
+    to: options.to ?? null,
+    mealCount: meals.length,
+    nutrients: toMealNutrientTotals(nutrients),
+    days: [...days.entries()]
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([date, day]) => ({
+        date,
+        mealCount: day.mealCount,
+        nutrients: toMealNutrientTotals(day.nutrients),
+      })),
+  };
+}
+
 export async function readMealNutritionTotals(
   vaultRoot: string,
   options: MealNutritionTotalsOptions = {},
 ): Promise<MealNutritionTotalsResult> {
   const readModel = await readVault(vaultRoot);
   return summarizeMealNutritionTotals(readModel, options);
+}
+
+export async function readMealNutrientTotals(
+  vaultRoot: string,
+  options: MealNutritionTotalsOptions = {},
+): Promise<MealNutrientTotalsResult> {
+  const readModel = await readVault(vaultRoot);
+  return summarizeMealNutrientTotals(readModel, options);
 }

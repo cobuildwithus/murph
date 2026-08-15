@@ -69,6 +69,27 @@ describe('assistant food journal skill', () => {
       'A photo, voice note, or rough phrase can be a complete meal log.',
     )
     expect(skill).toContain(
+      'vault-cli meal nutrients --from <date> --to <date> --format json',
+    )
+    expect(skill).toContain(
+      'A `null` total with zero\ncontributing meals means unavailable, not zero.',
+    )
+    expect(skill).toContain(
+      'A `contributingMealCount` below\nthe enclosing `mealCount` means the total is partial',
+    )
+    expect(skill).toContain(
+      "Source-app targets, daily percentages, and completeness\nclaims are not imported.",
+    )
+    expect(skill).toContain(
+      'use a current\nauthoritative source rather than a remembered target',
+    )
+    expect(skill).toContain(
+      'folic acid, vitamin A, vitamin E, or niacin to DFE,\nRAE, alpha-tocopherol, or niacin-equivalent targets',
+    )
+    expect(skill).toContain(
+      'One day of food records does not diagnose a\ndeficiency.',
+    )
+    expect(skill).toContain(
       'Use `behavior-followthrough` only when repeated support or missed logs become central.',
     )
     expect(skill).toContain(
