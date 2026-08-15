@@ -4,7 +4,10 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { HostedRuntimeLogRequest } from "@murphai/hosted-execution/runtime-control";
+import {
+  HOSTED_RUNTIME_LOG_REQUEST_MAX_ENTRIES,
+  type HostedRuntimeLogRequest,
+} from "@murphai/hosted-execution/runtime-control";
 import { SqliteDeviceSyncStore } from "@murphai/device-syncd/service";
 import {
   restoreHostedExecutionContext,
@@ -137,6 +140,9 @@ import {
   runHostedDeviceSyncPass,
   runHostedDeviceSyncWakeLane,
 } from "../src/hosted-runtime/device-sync-maintenance.ts";
+import {
+  HOSTED_DEVICE_SYNC_PASS_JOB_LIMIT,
+} from "../src/hosted-device-sync-limits.ts";
 import {
   readHostedSystemMailboxState,
 } from "../src/hosted-runtime/system-mailbox-state.ts";
@@ -3606,7 +3612,7 @@ describe("runHostedDeviceSyncPass", () => {
     expect(close).toHaveBeenCalledTimes(1);
   });
 
-  it("writes sanitized durable logs for newly failed device-sync jobs", async () => {
+  it("emits exactly one sanitized job-failed event for a failed device-sync attempt", async () => {
     const close = vi.fn();
     const drainWorker = vi.fn(async () => 1);
     const runSchedulerOnce = vi.fn(async () => undefined);
@@ -3730,8 +3736,11 @@ describe("runHostedDeviceSyncPass", () => {
       processedJobs: 1,
       skipped: false,
     });
-    assert.equal(logRequests.length, 1);
-    const entry = logRequests[0]?.entries[0];
+    const jobFailureEntries = logRequests
+      .flatMap((request) => request.entries)
+      .filter((entry) => entry.eventCode === "device-sync.job_failed");
+    assert.equal(jobFailureEntries.length, 1);
+    const entry = jobFailureEntries[0];
     assert.ok(entry);
     assert.equal(entry.component, "device-sync");
     assert.equal(entry.errorCode, "SYNC_JOB_FAILED");
@@ -3792,7 +3801,127 @@ describe("runHostedDeviceSyncPass", () => {
     expect(close).toHaveBeenCalledTimes(1);
   });
 
-  it("logs webhook-triggered job failures even when a later success cleared account error state", async () => {
+  it("emits every failed-attempt event at the full hosted pass limit", async () => {
+    const close = vi.fn();
+    const drainWorker = vi.fn(async () => HOSTED_DEVICE_SYNC_PASS_JOB_LIMIT);
+    const runSchedulerOnce = vi.fn(async () => undefined);
+    const logRequests: HostedRuntimeLogRequest[] = [];
+    const operationOrder: string[] = [];
+    const failureDiagnostics = Array.from(
+      { length: HOSTED_DEVICE_SYNC_PASS_JOB_LIMIT },
+      (_, index) => ({
+        accountId: "local_account_full_failure_pass",
+        accountStatus: null,
+        code: `SYNTHETIC_JOB_FAILURE_${index}`,
+        details: {},
+        retryable: true,
+      }),
+    );
+
+    mocks.createHostedRuntimeDeviceSyncService.mockReturnValue({
+      close,
+      drainWorker,
+      getNextJobWakeAt: () => "2026-04-08T02:00:00.000Z",
+      getNextWakeAt: () => "2026-04-08T02:00:00.000Z",
+      listJobFailureDiagnostics: vi.fn(() => failureDiagnostics),
+      listAccounts: vi.fn(() => [
+        {
+          id: "local_account_full_failure_pass",
+          lastErrorCode: "SYNTHETIC_JOB_FAILURE_99",
+          lastErrorMessage: "Synthetic device-sync job failure.",
+          lastSyncCompletedAt: null,
+          lastSyncErrorAt: "2026-04-08T00:00:03.000Z",
+          lastSyncStartedAt: "2026-04-08T00:00:01.000Z",
+          nextReconcileAt: "2026-04-08T02:00:00.000Z",
+          provider: "demo",
+          setupPhase: null,
+          status: "active",
+        },
+      ]),
+      runSchedulerOnce,
+    });
+    mocks.syncHostedDeviceSyncControlPlaneState.mockResolvedValue({
+      hostedToLocalAccountIds: new Map([
+        ["hosted_connection_full_failure_pass", "local_account_full_failure_pass"],
+      ]),
+      localToHostedAccountIds: new Map([
+        ["local_account_full_failure_pass", "hosted_connection_full_failure_pass"],
+      ]),
+      observedTokenVersions: new Map(),
+      pendingDirtyAcks: [],
+      pendingDirtyPayloadJobs: [],
+      snapshot: {
+        connections: [
+          {
+            connection: {
+              id: "hosted_connection_full_failure_pass",
+            },
+            localState: {
+              lastErrorCode: null,
+              lastErrorMessage: null,
+              lastSyncCompletedAt: null,
+              lastSyncErrorAt: null,
+              lastSyncStartedAt: null,
+            },
+          },
+        ],
+      },
+    });
+    mocks.reconcileHostedDeviceSyncControlPlaneState.mockImplementationOnce(async () => {
+      operationOrder.push("reconcile");
+    });
+
+    const result = await runHostedDeviceSyncPass(
+      {
+        eventId: "evt_device_sync_full_failure_pass",
+        hint: null,
+        kind: "device-sync.wake",
+        occurredAt: "2026-04-08T00:00:00.000Z",
+        reason: "webhook_hint",
+        userId: "member_123",
+      },
+      "/tmp/vault-root",
+      DEVICE_SYNC_CONFIG,
+      createMaintenanceDeviceSyncPortStub(),
+      45_000,
+      {
+        runtimeLogPlatform: {
+          logPort: {
+            async write(request) {
+              logRequests.push(request);
+              operationOrder.push(`log:${request.entries.length}`);
+              return {
+                loggedCount: request.entries.length,
+              };
+            },
+          },
+        },
+      },
+    );
+
+    assert.equal(result.processedJobs, HOSTED_DEVICE_SYNC_PASS_JOB_LIMIT);
+    assert.equal(logRequests.length, 2);
+    for (const request of logRequests) {
+      assert.ok(request.entries.length <= HOSTED_RUNTIME_LOG_REQUEST_MAX_ENTRIES);
+      assert.ok(JSON.stringify(request).length <= 64 * 1024);
+    }
+    assert.deepEqual(operationOrder, ["log:50", "log:50", "reconcile"]);
+    const jobFailureEntries = logRequests
+      .flatMap((request) => request.entries)
+      .filter((entry) => entry.eventCode === "device-sync.job_failed");
+    assert.equal(jobFailureEntries.length, HOSTED_DEVICE_SYNC_PASS_JOB_LIMIT);
+    assert.deepEqual(
+      jobFailureEntries.map((entry) => entry.errorCode),
+      failureDiagnostics.map((diagnostic) => diagnostic.code),
+    );
+    expect(drainWorker).toHaveBeenCalledWith(
+      HOSTED_DEVICE_SYNC_PASS_JOB_LIMIT,
+      "local_scheduled_account",
+    );
+    expect(close).toHaveBeenCalledTimes(1);
+  });
+
+  it("retains the earlier failed-attempt event when a later success clears account error state", async () => {
     const close = vi.fn();
     const drainWorker = vi.fn(async () => 2);
     const runSchedulerOnce = vi.fn(async () => undefined);
@@ -3893,8 +4022,11 @@ describe("runHostedDeviceSyncPass", () => {
       },
     );
 
-    assert.equal(logRequests.length, 1);
-    const entry = logRequests[0]?.entries[0];
+    const jobFailureEntries = logRequests
+      .flatMap((request) => request.entries)
+      .filter((entry) => entry.eventCode === "device-sync.job_failed");
+    assert.equal(jobFailureEntries.length, 1);
+    const entry = jobFailureEntries[0];
     assert.ok(entry);
     assert.equal(entry.at, "2026-06-08T02:00:02.000Z");
     assert.equal(entry.component, "device-sync");

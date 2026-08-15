@@ -10,6 +10,7 @@ import {
   drainHostedRuntimeLogWritesBestEffort,
   HOSTED_RUNTIME_LOG_MAX_QUEUED_ENTRIES,
   writeHostedRuntimeLogBestEffort,
+  writeHostedRuntimeLogEntriesBestEffort,
 } from "../src/hosted-runtime/runtime-logs.ts";
 
 interface ControlledLogWrite {
@@ -150,6 +151,30 @@ describe("hosted runtime log write queue", () => {
     },
   );
 
+  it("checks foreground yield between direct diagnostic batches", async () => {
+    const write = vi.fn(async (request: { entries: HostedRuntimeLogEntry[] }) => ({
+      loggedCount: request.entries.length,
+    }));
+    const shouldYieldBetweenBatches = vi.fn(() => true);
+    const entries = Array.from(
+      { length: HOSTED_RUNTIME_LOG_REQUEST_MAX_ENTRIES + 1 },
+      () => buildQueueLogEntry("warn"),
+    );
+
+    await writeHostedRuntimeLogEntriesBestEffort({
+      entries,
+      now: () => "2026-06-12T00:00:03.000Z",
+      platform: { logPort: { write } },
+      shouldYieldBetweenBatches,
+    });
+
+    expect(write).toHaveBeenCalledTimes(1);
+    expect(write.mock.calls[0]?.[0].entries).toHaveLength(
+      HOSTED_RUNTIME_LOG_REQUEST_MAX_ENTRIES,
+    );
+    expect(shouldYieldBetweenBatches).toHaveBeenCalledTimes(1);
+  });
+
   it("bounded drain returns on timeout while queued writes keep flushing", async () => {
     const consoleWarn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     const { port, writes } = createControlledLogPort();
@@ -249,8 +274,8 @@ describe("hosted runtime log write queue", () => {
 
   it("splits oversized diagnostics so one request never exceeds the body limit", async () => {
     const { port, writes } = createControlledLogPort();
-    // Two entries that individually fit the 128 KiB batch budget but together
-    // exceed it must not share a request.
+    // An oversized single entry gets its own request instead of wedging the
+    // transport; two such entries must never share a request.
     const bulkyDiagnostic = { statusSummary: "x".repeat(100 * 1024) };
 
     await writeHostedRuntimeLogBestEffort({

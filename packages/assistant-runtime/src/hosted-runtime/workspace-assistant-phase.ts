@@ -4108,7 +4108,7 @@ function deferHostedDeviceSyncDirtyPostCheckpointRecord(input: Parameters<
           entry: {
             component: "device-sync",
             errorCode: failure.errorCode,
-            eventCode: "device-sync.job_failed",
+            eventCode: "device-sync.dirty_ack_persistence_failed",
             level: "warn",
             phase: "checkpoint",
             redactedJson: {
@@ -4732,7 +4732,7 @@ async function writeHostedIdleDeviceSyncFailureRuntimeLog(input: {
         : failure.errorCode,
       eventCode: moduleLoadErrorCode
         ? "device-sync.module_load_failed"
-        : "device-sync.job_failed",
+        : "device-sync.maintenance_failed",
       level: "warn",
       phase: "idle",
       redactedJson: {
@@ -4761,7 +4761,7 @@ async function writeHostedDeviceActivityAutomationScheduleFailureRuntimeLog(inpu
     entry: {
       component: "runtime",
       errorCode: failure.errorCode,
-      eventCode: "device-sync.job_failed",
+      eventCode: "assistant.device_activity_automation_failed",
       level: "warn",
       phase: "idle",
       redactedJson: {

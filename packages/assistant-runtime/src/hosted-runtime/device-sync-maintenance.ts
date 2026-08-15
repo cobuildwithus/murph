@@ -52,6 +52,7 @@ import type {
 import {
   toHostedRuntimeLogCode,
   writeHostedRuntimeLogBestEffort,
+  writeHostedRuntimeLogEntriesBestEffort,
 } from "./runtime-logs.ts";
 import {
   closeHostedRuntimeDeviceSyncService,
@@ -279,9 +280,22 @@ export async function runHostedDeviceSyncPass(
       platform: options.runtimeLogPlatform ?? null,
       processedJobs,
       service,
+      shouldYield,
       state: syncState,
       wake,
     });
+
+    if (shouldYieldHostedDeviceSync(shouldYield)) {
+      return buildHostedDeviceSyncYieldedPassResult({
+        processedJobs,
+        retainFollowUpWakeUntilCheckpoint:
+          options.retainFollowUpWakeUntilCheckpoint ?? false,
+        service,
+        syncState,
+        wake,
+      });
+    }
+
     await writeHostedDeviceSyncSourceStalledRuntimeLogs({
       platform: options.runtimeLogPlatform ?? null,
       service,
@@ -1121,6 +1135,7 @@ async function writeHostedDeviceSyncJobFailureRuntimeLogs(input: {
   platform: Pick<HostedRuntimePlatform, "logPort"> | null;
   processedJobs: number;
   service: HostedDeviceSyncRuntimeService;
+  shouldYield: (() => boolean) | null;
   state: HostedDeviceSyncRuntimeSyncState;
   wake: HostedRuntimeEvent;
 }): Promise<void> {
@@ -1128,11 +1143,11 @@ async function writeHostedDeviceSyncJobFailureRuntimeLogs(input: {
     return;
   }
 
-  // Per-attempt failure diagnostics are recorded by the worker at the moment a
-  // job attempt fails, so they survive a later job success that clears the
-  // account-level last_sync_error_at state in the same drain. Webhook-triggered
-  // wakes and idle maintenance both reach this writer through
-  // runHostedDeviceSyncPass.
+  // This maintenance pass is the sole owner of per-attempt failure telemetry.
+  // It records the worker diagnostic at the moment a job attempt fails, so the
+  // event survives a later job success that clears account-level failure state
+  // in the same drain. Webhook-triggered wakes and idle maintenance both reach
+  // this writer through runHostedDeviceSyncPass.
   const failureDiagnostics = input.service.listJobFailureDiagnostics();
   if (failureDiagnostics.length === 0) {
     return;
@@ -1145,7 +1160,7 @@ async function writeHostedDeviceSyncJobFailureRuntimeLogs(input: {
     input.service.listAccounts().map((account) => [account.id, account]),
   );
 
-  for (const failureDiagnostic of failureDiagnostics) {
+  const entries = failureDiagnostics.map((failureDiagnostic) => {
     const account = accountsByLocalAccountId.get(failureDiagnostic.accountId) ?? null;
     const hostedConnectionId =
       input.state.localToHostedAccountIds.get(failureDiagnostic.accountId) ?? null;
@@ -1153,26 +1168,28 @@ async function writeHostedDeviceSyncJobFailureRuntimeLogs(input: {
       ? baselineByHostedConnectionId.get(hostedConnectionId) ?? null
       : null;
 
-    await writeHostedRuntimeLogBestEffort({
-      entry: {
-        ...(failureDiagnostic.at ? { at: failureDiagnostic.at } : {}),
-        component: "device-sync",
-        errorCode: toHostedRuntimeLogCode(failureDiagnostic.code),
-        eventCode: "device-sync.job_failed",
-        level: "warn",
-        phase: "invoke",
-        redactedJson: buildHostedDeviceSyncFailureLogRedactedJson({
-          account,
-          baseline,
-          failureDiagnostic,
-          hostedConnectionKnown: Boolean(hostedConnectionId),
-          processedJobs: input.processedJobs,
-          wake: input.wake,
-        }),
-      },
-      platform: input.platform,
-    });
-  }
+    return {
+      ...(failureDiagnostic.at ? { at: failureDiagnostic.at } : {}),
+      component: "device-sync" as const,
+      errorCode: toHostedRuntimeLogCode(failureDiagnostic.code),
+      eventCode: "device-sync.job_failed" as const,
+      level: "warn" as const,
+      phase: "invoke" as const,
+      redactedJson: buildHostedDeviceSyncFailureLogRedactedJson({
+        account,
+        baseline,
+        failureDiagnostic,
+        hostedConnectionKnown: Boolean(hostedConnectionId),
+        processedJobs: input.processedJobs,
+        wake: input.wake,
+      }),
+    };
+  });
+  await writeHostedRuntimeLogEntriesBestEffort({
+    entries,
+    platform: input.platform,
+    shouldYieldBetweenBatches: input.shouldYield,
+  });
 }
 
 async function writeHostedLegacyDeviceSyncPlatformEnvLog(input: {

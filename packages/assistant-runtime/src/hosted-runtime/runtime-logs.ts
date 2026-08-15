@@ -106,6 +106,43 @@ export async function writeHostedRuntimeLogBestEffort(input: {
   startHostedRuntimeLogWriter();
 }
 
+/**
+ * Writes a finite set of direct diagnostics through the same bounded transport
+ * used by the verbose queue. This keeps warn/error durability ahead of control
+ * flow without paying one runner-to-Web round trip per entry.
+ */
+export async function writeHostedRuntimeLogEntriesBestEffort(input: {
+  entries: readonly (Omit<HostedRuntimeLogEntry, "at"> & { at?: string })[];
+  platform: Pick<HostedRuntimePlatform, "logPort">;
+  now?: () => string;
+  shouldYieldBetweenBatches?: (() => boolean) | null;
+}): Promise<void> {
+  const logPort = input.platform.logPort ?? null;
+  if (!logPort || input.entries.length === 0) {
+    return;
+  }
+
+  const entries = input.entries.map((entry): HostedRuntimeLogEntry => {
+    const { at, ...rest } = entry;
+    return {
+      ...rest,
+      at: at ?? input.now?.() ?? new Date().toISOString(),
+    };
+  });
+  let offset = 0;
+  while (offset < entries.length) {
+    const batch = takeBoundedHostedRuntimeLogEntries(entries.slice(offset));
+    await writeHostedRuntimeLogEntries(logPort, batch);
+    offset += batch.length;
+    if (
+      offset < entries.length
+      && input.shouldYieldBetweenBatches?.() === true
+    ) {
+      return;
+    }
+  }
+}
+
 // One writer at a time keeps requests in enqueue order and lets everything
 // logged during an in-flight request coalesce into the next one.
 function startHostedRuntimeLogWriter(): void {
@@ -140,16 +177,31 @@ function takeHostedRuntimeLogBatch(): {
   }
 
   const { logPort } = head;
-  const entries: HostedRuntimeLogEntry[] = [];
-  let jsonLength = 0;
+  const candidates: HostedRuntimeLogEntry[] = [];
   while (
-    queuedHostedRuntimeLogEntries.length > 0
-    && queuedHostedRuntimeLogEntries[0]!.logPort === logPort
-    && entries.length < HOSTED_RUNTIME_LOG_BATCH_MAX_ENTRIES
+    candidates.length < queuedHostedRuntimeLogEntries.length
+    && queuedHostedRuntimeLogEntries[candidates.length]!.logPort === logPort
+    && candidates.length < HOSTED_RUNTIME_LOG_BATCH_MAX_ENTRIES
   ) {
-    const entryJsonLength = JSON.stringify(
-      queuedHostedRuntimeLogEntries[0]!.entry,
-    ).length;
+    candidates.push(queuedHostedRuntimeLogEntries[candidates.length]!.entry);
+  }
+  const entries = takeBoundedHostedRuntimeLogEntries(candidates);
+  queuedHostedRuntimeLogEntries.splice(0, entries.length);
+
+  return { entries, logPort };
+}
+
+function takeBoundedHostedRuntimeLogEntries(
+  candidates: readonly HostedRuntimeLogEntry[],
+): HostedRuntimeLogEntry[] {
+  const entries: HostedRuntimeLogEntry[] = [];
+  let jsonLength = JSON.stringify({ entries: [] }).length;
+  for (const entry of candidates) {
+    if (entries.length >= HOSTED_RUNTIME_LOG_BATCH_MAX_ENTRIES) {
+      break;
+    }
+    const entryJsonLength = JSON.stringify(entry).length
+      + (entries.length === 0 ? 0 : 1);
     if (
       entries.length > 0
       && jsonLength + entryJsonLength > HOSTED_RUNTIME_LOG_BATCH_MAX_JSON_LENGTH
@@ -157,10 +209,10 @@ function takeHostedRuntimeLogBatch(): {
       break;
     }
     jsonLength += entryJsonLength;
-    entries.push(queuedHostedRuntimeLogEntries.shift()!.entry);
+    entries.push(entry);
   }
 
-  return { entries, logPort };
+  return entries;
 }
 
 async function writeHostedRuntimeLogEntries(

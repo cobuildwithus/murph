@@ -20,7 +20,6 @@ import {
   parseHostedExecutionDeviceSyncDirtyPendingRequest,
   parseHostedExecutionDeviceSyncRuntimeSnapshotRequest,
   readJunctionHistoricalBackfillProgress,
-  sanitizeHostedRuntimeDiagnosticText,
   sanitizeHostedExecutionDeviceSyncRuntimeCredentialMetadata,
   type HostedExecutionDeviceSyncRuntimeApplyEntry,
   type HostedExecutionDeviceSyncRuntimeApplyResponse,
@@ -42,18 +41,8 @@ import {
   resolveConfiguredDeviceSyncProviderCredentialPolicy,
 } from "@murphai/device-syncd/provider-credential-policy";
 import { resolveDeviceProviderMatchKeys } from "@murphai/device-syncd/provider-match";
-import {
-  HOSTED_RUNTIME_LOG_REQUEST_MAX_ENTRIES,
-  type HostedRuntimeLogEntry,
-  type HostedRuntimeRedactedJson,
-} from "@murphai/hosted-execution/runtime-control";
-
 import { lockAndReadActiveHostedDomainRootKeyIdTx } from "../hosted-crypto/domain-root-store";
 import { runWithHostedDomainRootUnwrapCache } from "../hosted-crypto/domain-root-unwrap-cache";
-import {
-  formatHostedExecutionSafeLogErrorDetails,
-} from "../hosted-execution/logging";
-import { writeHostedRuntimeLogs } from "../hosted-runtime-log/write";
 import { createHostedDeviceSyncControlPlane } from "./control-plane";
 import { isHostedSourceDisconnectFenced } from "./connection-source-lifecycle";
 import {
@@ -90,11 +79,6 @@ import {
 import { normalizeNullableString } from "./shared";
 
 type HostedRuntimeConnectionSnapshot = HostedExecutionDeviceSyncRuntimeConnectionSnapshot;
-
-interface HostedRuntimeFailureApplyResult {
-  failureDiagnostic: HostedRuntimeLogEntry | null;
-  update: HostedExecutionDeviceSyncRuntimeApplyEntry;
-}
 
 interface HostedRuntimePreparedApplyConnection {
   record: HostedConnectionRecord;
@@ -325,7 +309,6 @@ function requireHostedRuntimeSnapshotExternalAccountPlaintexts(
 
 export async function applyHostedDeviceSyncRuntimeResult(input: {
   request: Request;
-  scheduleFailureDiagnostics?: (task: () => Promise<void>) => void;
   trustedUserId: string;
 }): Promise<HostedExecutionDeviceSyncRuntimeApplyResponse> {
   const parsed = parseHostedExecutionDeviceSyncRuntimeApplyRequest(
@@ -347,8 +330,9 @@ export async function applyHostedDeviceSyncRuntimeResult(input: {
     userId: input.trustedUserId,
   });
   const updates: HostedExecutionDeviceSyncRuntimeApplyEntry[] = [];
-  const failureDiagnostics: HostedRuntimeLogEntry[] = [];
 
+  // Assistant-runtime maintenance owns per-attempt job failure telemetry. Web
+  // applies only the resulting canonical connection state.
   for (const update of parsed.updates) {
     const preparedConnection = preparedConnections.get(update.connectionId) ?? null;
     const applied = await controlPlane.store.withConnectionMutationLock(
@@ -364,15 +348,12 @@ export async function applyHostedDeviceSyncRuntimeResult(input: {
 
         if (!record || !preparedConnection) {
           return {
-            failureDiagnostic: null,
-            update: {
-              connection: null,
-              connectionId: update.connectionId,
-              status: "missing",
-              tokenUpdate: "missing",
-              writeUpdate: "missing",
-            },
-          } satisfies HostedRuntimeFailureApplyResult;
+            connection: null,
+            connectionId: update.connectionId,
+            status: "missing",
+            tokenUpdate: "missing",
+            writeUpdate: "missing",
+          } satisfies HostedExecutionDeviceSyncRuntimeApplyEntry;
         }
 
         const secretAuthorityCurrent = isHostedRuntimeApplySecretAuthorityCurrent(
@@ -641,55 +622,27 @@ export async function applyHostedDeviceSyncRuntimeResult(input: {
           });
         }
 
-        const failureDiagnostic =
-          !versionMismatch && (stateMutationRequested || credentialMutationRequested)
-            ? buildHostedRuntimeFailureApplyDiagnostic({
-                appliedAt,
-                baseline,
-                nextAccount,
-                update,
-              })
-            : null;
-
         return {
-          failureDiagnostic,
-          update: {
-            connection: buildHostedRuntimeConnectionSnapshot(
-              writtenRecord ?? record,
-              null,
-              durableExternalAccountId,
-              [],
-              {
-                forceReauthorizationRequired:
-                  !providerApplicationBindingCurrent,
-                includeCredentialMaterial: false,
-              },
-            ).connection,
-            connectionId: update.connectionId,
-            status: "updated",
-            tokenUpdate,
-            writeUpdate,
-          },
-        } satisfies HostedRuntimeFailureApplyResult;
+          connection: buildHostedRuntimeConnectionSnapshot(
+            writtenRecord ?? record,
+            null,
+            durableExternalAccountId,
+            [],
+            {
+              forceReauthorizationRequired:
+                !providerApplicationBindingCurrent,
+              includeCredentialMaterial: false,
+            },
+          ).connection,
+          connectionId: update.connectionId,
+          status: "updated",
+          tokenUpdate,
+          writeUpdate,
+        } satisfies HostedExecutionDeviceSyncRuntimeApplyEntry;
       },
-    ).catch(async (error: unknown) => {
-      await flushHostedRuntimeFailureApplyDiagnostics({
-        entries: failureDiagnostics,
-        schedule: input.scheduleFailureDiagnostics,
-        userId: input.trustedUserId,
-      });
-      throw error;
-    });
-    updates.push(applied.update);
-    if (applied.failureDiagnostic) {
-      failureDiagnostics.push(applied.failureDiagnostic);
-    }
+    );
+    updates.push(applied);
   }
-  await flushHostedRuntimeFailureApplyDiagnostics({
-    entries: failureDiagnostics,
-    schedule: input.scheduleFailureDiagnostics,
-    userId: input.trustedUserId,
-  });
 
   return {
     appliedAt,
@@ -1736,305 +1689,6 @@ function hostedRuntimeCredentialMutationRequiresTokenFence(
   update: HostedExecutionDeviceSyncRuntimeConnectionUpdate,
 ): boolean {
   return update.credential !== undefined;
-}
-
-function buildHostedRuntimeFailureApplyDiagnostic(input: {
-  appliedAt: string;
-  baseline: HostedRuntimeConnectionSnapshot;
-  nextAccount: PublicDeviceSyncAccount;
-  update: HostedExecutionDeviceSyncRuntimeConnectionUpdate;
-}): HostedRuntimeLogEntry | null {
-  if (!didHostedRuntimeFailureStateAdvance(
-    input.baseline.localState.lastSyncErrorAt,
-    input.nextAccount.lastSyncErrorAt,
-  )) {
-    return null;
-  }
-
-  return {
-    at: input.nextAccount.lastSyncErrorAt ?? input.appliedAt,
-    component: "device-sync",
-    errorCode: toHostedRuntimeApplyLogCode(
-      input.nextAccount.lastErrorCode ?? input.update.failureDiagnostic?.code ?? null,
-    ),
-    eventCode: "device-sync.job_failed",
-    level: "warn",
-    phase: "invoke",
-    redactedJson: buildHostedRuntimeFailureApplyRedactedJson(input),
-  };
-}
-
-async function writeHostedRuntimeFailureApplyDiagnosticsBestEffort(input: {
-  entries: readonly HostedRuntimeLogEntry[];
-  userId: string;
-}): Promise<void> {
-  for (
-    let offset = 0;
-    offset < input.entries.length;
-    offset += HOSTED_RUNTIME_LOG_REQUEST_MAX_ENTRIES
-  ) {
-    const entries = input.entries.slice(
-      offset,
-      offset + HOSTED_RUNTIME_LOG_REQUEST_MAX_ENTRIES,
-    );
-    try {
-      await writeHostedRuntimeLogs({
-        entries,
-        userId: input.userId,
-      });
-    } catch (error) {
-      const first = entries[0];
-      const provider = first?.redactedJson?.provider;
-      console.warn("Hosted device-sync failure diagnostic log write failed.", {
-        ...formatHostedExecutionSafeLogErrorDetails(error, {
-          code: "HOSTED_DEVICE_SYNC_FAILURE_DIAGNOSTIC_LOG_WRITE_FAILED",
-        }),
-        batchSize: entries.length,
-        provider: typeof provider === "string" ? provider : null,
-        runtimeFailureCode: first?.errorCode ?? null,
-      });
-    }
-  }
-}
-
-async function flushHostedRuntimeFailureApplyDiagnostics(input: {
-  entries: readonly HostedRuntimeLogEntry[];
-  schedule?: (task: () => Promise<void>) => void;
-  userId: string;
-}): Promise<void> {
-  if (input.entries.length === 0) {
-    return;
-  }
-
-  const entries = [...input.entries];
-  const task = async () => {
-    await writeHostedRuntimeFailureApplyDiagnosticsBestEffort({
-      entries,
-      userId: input.userId,
-    });
-  };
-  if (!input.schedule) {
-    await task();
-    return;
-  }
-
-  try {
-    input.schedule(task);
-  } catch (error) {
-    console.warn(
-      "Hosted device-sync failure diagnostic scheduling failed.",
-      formatHostedExecutionSafeLogErrorDetails(error, {
-        code: "HOSTED_DEVICE_SYNC_FAILURE_DIAGNOSTIC_SCHEDULING_FAILED",
-      }),
-    );
-  }
-}
-
-function buildHostedRuntimeFailureApplyRedactedJson(input: {
-  baseline: HostedRuntimeConnectionSnapshot;
-  nextAccount: PublicDeviceSyncAccount;
-  update: HostedExecutionDeviceSyncRuntimeConnectionUpdate;
-}): HostedRuntimeRedactedJson {
-  const diagnostic = input.update.failureDiagnostic ?? null;
-  const summary = sanitizeHostedRuntimeDiagnosticText(
-    input.update.localState?.lastErrorMessage ?? input.nextAccount.lastErrorMessage ?? null,
-  );
-
-  return {
-    failureCode: toHostedRuntimeApplyLogCode(input.nextAccount.lastErrorCode ?? diagnostic?.code ?? null),
-    failureSummary: summary ?? "Hosted device-sync runtime failure state advanced.",
-    ...buildHostedRuntimeFailureDiagnosticRedactedJson(diagnostic),
-    hadPriorFailure: Boolean(input.baseline.localState.lastSyncErrorAt),
-    hadPriorSuccess: Boolean(input.baseline.localState.lastSyncCompletedAt),
-    nextReconcileAt: input.nextAccount.nextReconcileAt,
-    provider: toHostedRuntimeApplyLogCode(input.nextAccount.provider),
-    setupPhase: input.nextAccount.setupPhase ?? null,
-    status: toHostedRuntimeApplyLogCode(input.nextAccount.status),
-    syncCompletedAt: input.nextAccount.lastSyncCompletedAt,
-    syncFailedAt: input.nextAccount.lastSyncErrorAt,
-    syncStartedAt: input.nextAccount.lastSyncStartedAt,
-  };
-}
-
-function buildHostedRuntimeFailureDiagnosticRedactedJson(
-  diagnostic: HostedExecutionDeviceSyncRuntimeConnectionUpdate["failureDiagnostic"] | null,
-): HostedRuntimeRedactedJson {
-  if (!diagnostic) {
-    return {};
-  }
-
-  return {
-    failureRetryable: diagnostic.retryable,
-    ...(diagnostic.accountStatus
-      ? { providerAccountStatus: toHostedRuntimeApplyLogCode(diagnostic.accountStatus) }
-      : {}),
-    ...buildHostedRuntimeFailureDiagnosticDetailsRedactedJson(diagnostic.details),
-  };
-}
-
-type HostedRuntimeFailureDiagnosticDetails =
-  NonNullable<HostedExecutionDeviceSyncRuntimeConnectionUpdate["failureDiagnostic"]>["details"];
-type HostedRuntimeFailureDiagnosticStringField = {
-  [Key in keyof HostedRuntimeFailureDiagnosticDetails]: HostedRuntimeFailureDiagnosticDetails[Key] extends
-    string | undefined ? Key : never;
-}[keyof HostedRuntimeFailureDiagnosticDetails];
-type HostedRuntimeFailureDiagnosticNumberField = {
-  [Key in keyof HostedRuntimeFailureDiagnosticDetails]: HostedRuntimeFailureDiagnosticDetails[Key] extends
-    number | undefined ? Key : never;
-}[keyof HostedRuntimeFailureDiagnosticDetails];
-type HostedRuntimeFailureDiagnosticBooleanField = {
-  [Key in keyof HostedRuntimeFailureDiagnosticDetails]: HostedRuntimeFailureDiagnosticDetails[Key] extends
-    boolean | undefined ? Key : never;
-}[keyof HostedRuntimeFailureDiagnosticDetails];
-
-const HOSTED_RUNTIME_FAILURE_DIAGNOSTIC_CODE_FIELDS = [
-  "failureCauseCode",
-  "failureCauseName",
-  "failureErrorName",
-  "providerRequestAuthKind",
-  "providerRequestAuthPlacement",
-  "providerRequestBodyFieldNames",
-  "providerRequestBodyKind",
-  "providerRequestContentType",
-  "providerRequestEndpointKind",
-  "providerRequestMethod",
-  "providerRequestQueryParameterNames",
-  "providerResponseErrorCode",
-  "providerResponseShapeKind",
-  "providerOAuthErrorCode",
-  "providerOAuthGrantType",
-  "providerOAuthRequestBodyBuilderKind",
-  "providerOAuthRequestClientAuthPlacement",
-  "providerOAuthRequestContentType",
-  "providerOAuthRequestEncodingKind",
-  "providerOAuthRequestMethod",
-  "providerOAuthRequestParameterNames",
-  "providerOAuthRequestScopeValue",
-  "providerOAuthRequestTokenEndpointKind",
-  "providerOAuthResponseShapeKind",
-] as const satisfies readonly HostedRuntimeFailureDiagnosticStringField[];
-
-const HOSTED_RUNTIME_FAILURE_DIAGNOSTIC_REASON_FIELDS = [
-  "failureErrorCause",
-  "providerHttpStatusText",
-  "providerResponseErrorDescription",
-  "providerOAuthErrorDescription",
-] as const satisfies readonly HostedRuntimeFailureDiagnosticStringField[];
-
-const HOSTED_RUNTIME_FAILURE_DIAGNOSTIC_NUMBER_FIELDS = [
-  "providerHttpStatus",
-  "providerRequestBodyFieldCount",
-  "providerRequestQueryParameterCount",
-  "providerOAuthRequestDuplicateParameterCount",
-  "providerOAuthRequestParameterCount",
-  "providerOAuthRequestScopeCount",
-] as const satisfies readonly HostedRuntimeFailureDiagnosticNumberField[];
-
-const HOSTED_RUNTIME_FAILURE_DIAGNOSTIC_BOOLEAN_FIELDS = [
-  "providerRequestCredentialPresent",
-  "providerResponseErrorDescriptionFieldPresent",
-  "providerResponseErrorFieldPresent",
-  "providerOAuthRequestClientCredentialPresent",
-  "providerOAuthRequestClientIdPresent",
-  "providerOAuthRequestHasDuplicateParameters",
-  "providerOAuthRequestOfflineScopePresent",
-  "providerOAuthRequestRefreshCredentialPresent",
-  "providerOAuthRequestScopePresent",
-  "providerOAuthResponseErrorDescriptionFieldPresent",
-  "providerOAuthResponseErrorFieldPresent",
-] as const satisfies readonly HostedRuntimeFailureDiagnosticBooleanField[];
-
-function buildHostedRuntimeFailureDiagnosticDetailsRedactedJson(
-  details: HostedRuntimeFailureDiagnosticDetails,
-): HostedRuntimeRedactedJson {
-  const redacted: HostedRuntimeRedactedJson = {};
-
-  for (const field of HOSTED_RUNTIME_FAILURE_DIAGNOSTIC_CODE_FIELDS) {
-    appendHostedRuntimeDiagnosticCode(redacted, field, details[field]);
-  }
-
-  for (const field of HOSTED_RUNTIME_FAILURE_DIAGNOSTIC_REASON_FIELDS) {
-    appendHostedRuntimeDiagnosticReason(redacted, field, details[field]);
-  }
-
-  for (const field of HOSTED_RUNTIME_FAILURE_DIAGNOSTIC_NUMBER_FIELDS) {
-    appendHostedRuntimeDiagnosticNumber(redacted, field, details[field]);
-  }
-
-  for (const field of HOSTED_RUNTIME_FAILURE_DIAGNOSTIC_BOOLEAN_FIELDS) {
-    appendHostedRuntimeDiagnosticBoolean(redacted, field, details[field]);
-  }
-
-  return redacted;
-}
-
-function appendHostedRuntimeDiagnosticBoolean(
-  redacted: HostedRuntimeRedactedJson,
-  key: string,
-  value: boolean | undefined,
-): void {
-  if (value !== undefined) {
-    redacted[key] = value;
-  }
-}
-
-function appendHostedRuntimeDiagnosticNumber(
-  redacted: HostedRuntimeRedactedJson,
-  key: string,
-  value: number | undefined,
-): void {
-  if (value !== undefined) {
-    redacted[key] = value;
-  }
-}
-
-function appendHostedRuntimeDiagnosticCode(
-  redacted: HostedRuntimeRedactedJson,
-  key: string,
-  value: string | undefined,
-): void {
-  if (value) {
-    redacted[key] = toHostedRuntimeApplyLogCode(value);
-  }
-}
-
-function appendHostedRuntimeDiagnosticReason(
-  redacted: HostedRuntimeRedactedJson,
-  key: string,
-  value: string | undefined,
-): void {
-  const sanitized = sanitizeHostedRuntimeDiagnosticText(value ?? null);
-  if (sanitized) {
-    redacted[key] = sanitized;
-  }
-}
-
-function didHostedRuntimeFailureStateAdvance(
-  previousValue: string | null,
-  nextValue: string | null,
-): boolean {
-  if (!nextValue || nextValue === previousValue) {
-    return false;
-  }
-
-  if (!previousValue) {
-    return true;
-  }
-
-  const previousMs = Date.parse(previousValue);
-  const nextMs = Date.parse(nextValue);
-
-  return !Number.isNaN(nextMs) && (Number.isNaN(previousMs) || nextMs > previousMs);
-}
-
-function toHostedRuntimeApplyLogCode(value: string | null | undefined): string {
-  const normalized = value?.trim();
-
-  return normalized
-    && normalized.length <= 96
-    && /^[A-Za-z0-9][A-Za-z0-9._:-]*$/u.test(normalized)
-    ? normalized
-    : "unclassified";
 }
 
 function resolveHostedRuntimeCredentialUpdate(

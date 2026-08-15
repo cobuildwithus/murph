@@ -996,7 +996,24 @@ Last verified: 2026-08-14
   runner rebuilds from those owners; it never projects local retry timing into
   `nextReconcileAt`. Per-connection mailbox ordering and scheduler scoping
   prevent a future retry for one connection from blocking or advancing due work
-  for another.
+  for another. Per-attempt `device-sync.job_failed` telemetry has one owner:
+  assistant-runtime maintenance emits it from the failed local job diagnostic
+  before Web state application. Web persists canonical failure state and never
+  translates state application or a persistence failure into another provider or
+  job-attempt event. Dirty-ack persistence uses
+  `device-sync.dirty_ack_persistence_failed`, outer maintenance uses
+  `device-sync.maintenance_failed`, and activity scheduling uses
+  `assistant.device_activity_automation_failed`; none increments the
+  failed-attempt metric.
+  This event taxonomy is a strict Web parser boundary. Shared workspace packages
+  are build inputs, not separately deployed planes. Deploy the Web artifact that
+  contains its parser first, then deploy and fully recycle the Cloudflare
+  runner, verifying its exact fingerprint across the fleet. During that window,
+  Web accepts and ignores the legacy optional `failureDiagnostic` apply field from
+  old runners. New runners stop producing that redundant field. Keep the
+  compatibility parser until no old runner can send it, then remove it in a
+  separate change. Roll back the runner first and verify the old producer is
+  active before rolling Web below the new event codes.
   The focused WHOOP regression fixes one canonical schedule-event identity and
   one durable mailbox-item identity. The fixture first commits the clean input
   workspace through the production v2 checkpoint bridge. The initial incident

@@ -3540,7 +3540,7 @@ describe("hosted device-sync runtime", () => {
     }
   });
 
-  test("reconciliation includes provider failure diagnostics when sync failure advances", async () => {
+  test("reconciliation omits redundant provider diagnostics when sync failure advances", async () => {
     const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace(
       "hosted-device-sync-runtime-",
     );
@@ -3561,30 +3561,7 @@ describe("hosted device-sync runtime", () => {
                 accountStatus: "disconnected",
                 code: "TOKEN_REQUEST_FAILED",
                 details: {
-                  httpStatusText: "Bad Request",
-                  oauthErrorCode: "invalid_grant",
                   oauthErrorDescription: "Refresh token expired. Reconnect provider.",
-                  oauthGrantType: "refresh_token",
-                  oauthRequestBodyBuilderKind: "url_search_params_record",
-                  oauthRequestClientAuthPlacement: "body_parameters",
-                  oauthRequestClientCredentialPresent: true,
-                  oauthRequestClientIdPresent: true,
-                  oauthRequestContentType: "application_x_www_form_urlencoded",
-                  oauthRequestDuplicateParameterCount: 0,
-                  oauthRequestEncodingKind: "form_urlencoded",
-                  oauthRequestHasDuplicateParameters: false,
-                  oauthRequestMethod: "POST",
-                  oauthRequestOfflineScopePresent: true,
-                  oauthRequestParameterCount: 5,
-                  oauthRequestParameterNames: "client_id.client_secret.grant_type.refresh_token.scope",
-                  oauthRequestRefreshCredentialPresent: true,
-                  oauthRequestScopeCount: 1,
-                  oauthRequestScopePresent: true,
-                  oauthRequestScopeValue: "offline",
-                  oauthRequestTokenEndpointKind: "whoop_oauth_token",
-                  oauthResponseErrorDescriptionFieldPresent: true,
-                  oauthResponseErrorFieldPresent: true,
-                  oauthResponseShapeKind: "json_object",
                 },
                 httpStatus: 400,
                 message: "Provider token request failed.",
@@ -3666,38 +3643,7 @@ describe("hosted device-sync runtime", () => {
       assert.equal(request.occurredAt, "2026-04-06T09:18:00.000Z");
       assert.equal(request.updates.length, 1);
       assert.equal(request.updates[0]?.connectionId, "hosted_conn_failure_diagnostic");
-      assert.deepEqual(request.updates[0]?.failureDiagnostic, {
-        accountStatus: "disconnected",
-        code: "TOKEN_REQUEST_FAILED",
-        details: {
-          providerHttpStatus: 400,
-          providerHttpStatusText: "Bad Request",
-          providerOAuthErrorCode: "invalid_grant",
-          providerOAuthErrorDescription: "Refresh token expired. Reconnect provider.",
-          providerOAuthGrantType: "refresh_token",
-          providerOAuthRequestBodyBuilderKind: "url_search_params_record",
-          providerOAuthRequestClientAuthPlacement: "body_parameters",
-          providerOAuthRequestClientCredentialPresent: true,
-          providerOAuthRequestClientIdPresent: true,
-          providerOAuthRequestContentType: "application_x_www_form_urlencoded",
-          providerOAuthRequestDuplicateParameterCount: 0,
-          providerOAuthRequestEncodingKind: "form_urlencoded",
-          providerOAuthRequestHasDuplicateParameters: false,
-          providerOAuthRequestMethod: "POST",
-          providerOAuthRequestOfflineScopePresent: true,
-          providerOAuthRequestParameterCount: 5,
-          providerOAuthRequestParameterNames: "client_id.client_secret.grant_type.refresh_token.scope",
-          providerOAuthRequestRefreshCredentialPresent: true,
-          providerOAuthRequestScopeCount: 1,
-          providerOAuthRequestScopePresent: true,
-          providerOAuthRequestScopeValue: "offline",
-          providerOAuthRequestTokenEndpointKind: "whoop_oauth_token",
-          providerOAuthResponseErrorDescriptionFieldPresent: true,
-          providerOAuthResponseErrorFieldPresent: true,
-          providerOAuthResponseShapeKind: "json_object",
-        },
-        retryable: false,
-      });
+      assert.equal(request.updates[0]?.failureDiagnostic, undefined);
       assert.equal(
         request.updates[0]?.localState?.lastErrorMessage,
         "Provider token request failed. Provider reason: Refresh token expired. Reconnect provider.",

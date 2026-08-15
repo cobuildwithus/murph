@@ -2,7 +2,10 @@ import { rm } from "node:fs/promises";
 import path from "node:path";
 
 import {
+  buildHostedExecutionSafeErrorDiagnostics,
+  deriveHostedExecutionErrorCode,
   readHostedRuntimeSafeErrorText,
+  sanitizeHostedExecutionStructuredLogText,
 } from "@murphai/hosted-execution";
 import {
   HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_MODE,
@@ -61,6 +64,9 @@ import {
   selectHostedRuntimeWakeCandidate,
   type HostedRuntimeWakeCandidate,
 } from "./wake-candidates.ts";
+import {
+  writeHostedRuntimeLogBestEffort,
+} from "./runtime-logs.ts";
 
 const HOSTED_CODEX_HOME_DIR_NAME = ".codex-hosted";
 const HOSTED_CODEX_AUTH_FILE_NAME = "auth.json";
@@ -727,6 +733,12 @@ export async function recordHostedSystemMailboxItemAfterCheckpoint(input: {
       },
       vaultRoot: input.vaultRoot,
     });
+    if (isHostedDeviceSyncDirtyPostCheckpointRecord(input.item.postCheckpointRecord)) {
+      await writeHostedDeviceSyncDirtyAckPersistenceFailureLog({
+        error,
+        runtime: input.runtime,
+      });
+    }
     const nextWakeAt = await resolveHostedSystemMailboxNextWakeAt({
       vaultRoot: input.vaultRoot,
     });
@@ -1233,4 +1245,37 @@ function normalizeHostedSystemMailboxError(error: unknown): {
     code: "HOSTED_SYSTEM_MAILBOX_AMBIGUOUS",
     message: readHostedRuntimeSafeErrorText(error) ?? "Hosted system mailbox effect failed.",
   };
+}
+
+async function writeHostedDeviceSyncDirtyAckPersistenceFailureLog(input: {
+  error: unknown;
+  runtime: HostedSystemMailboxRuntime;
+}): Promise<void> {
+  const diagnostics = buildHostedExecutionSafeErrorDiagnostics(input.error);
+  const diagnosticErrorCode = typeof diagnostics?.errorCode === "string"
+    ? diagnostics.errorCode
+    : null;
+  const diagnosticErrorMessage = typeof diagnostics?.errorMessage === "string"
+    ? diagnostics.errorMessage
+    : null;
+  const errorCode = diagnosticErrorCode ?? deriveHostedExecutionErrorCode(input.error);
+  const safeErrorMessage = sanitizeHostedExecutionStructuredLogText(
+    diagnosticErrorMessage ?? "Hosted device-sync dirty checkpoint ack failed.",
+  ) ?? "Hosted execution runtime failed.";
+
+  await writeHostedRuntimeLogBestEffort({
+    entry: {
+      component: "device-sync",
+      errorCode,
+      eventCode: "device-sync.dirty_ack_persistence_failed",
+      level: "warn",
+      phase: "checkpoint",
+      redactedJson: {
+        errorCode,
+        nextWakeAtPresent: true,
+        safeErrorMessage,
+      },
+    },
+    platform: input.runtime.platform,
+  });
 }
