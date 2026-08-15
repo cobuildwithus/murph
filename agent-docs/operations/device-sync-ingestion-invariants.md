@@ -141,6 +141,49 @@ drain/batch service seam in `packages/device-syncd/src/service.ts`.
    optimization is unnecessary: re-fetching is cheap and correct, not a
    correctness risk.
 
+   Day-scoped Junction blood-oxygen and stress temporal facts have a narrower
+   owner than ordinary daily aggregates. Only a closed date-by-date pull may
+   pass transient complete-source-day authority into the importer; precise
+   resource windows and webhook imports must not publish temporal features
+   from their partial payloads. The authorized result treats the fixed feature
+   facets as a replacement set: emitted facets use versioned canonical upserts,
+   and omitted facets use the existing canonical event retraction seam. Thus a
+   later insufficient or capped day removes stale derived facts, and retries
+   converge without another queue, merge store, or lifecycle owner. Date-only
+   and floating provider responses are filtered by raw calendar day only under
+   that complete local-day authority; absolute timestamps use the exact UTC
+   bounds, and precise partial windows do not manufacture instants with the
+   worker process timezone. Generic account completion does not satisfy this
+   resource-specific proof. For temporal resources, the configured reconcile
+   horizon is clamped to `1..14` authoritative local days. A scheduled
+   reconcile imports the newest eligible day immediately and enqueues each
+   older resource/day coordinate on the existing durable device-job queue,
+   newest day first. A succeeded job row proves either populated or
+   successful-empty completion and is reused by later scheduler passes,
+   including after restart; queued/running rows remain the retry owner, and
+   failed, dead, or yielded work never grants day authority. Dead work may be
+   recreated by a later reconcile. A failed, unavailable, or yielded immediate
+   resource becomes the same stable resource/day job ahead of the older
+   backlog; a retryable failure does not block an independent temporal sibling.
+   Temporal resource/day children never advance generic account completion.
+   Generic completion is account activity state, not complete-resource or
+   complete-floor coverage, so it never gates ordinary reconcile collection.
+   When a parent also retains ordinary work, its one durable ordinary reconcile
+   follow-up preserves that work without becoming a separate coverage ledger.
+   With two temporal resources, one reconcile therefore performs at most two
+   immediate one-day collections and normally schedules at most 26 older
+   one-resource/one-day jobs. If both immediate resources require durable
+   continuation, the queue bound is 28 resource/day jobs across the full
+   14-day horizon plus at most one ordinary reconcile follow-up, for 29
+   serialized rows. Each child performs at most one canonical import transaction,
+   while the provider transport independently caps the collection at 100 pages
+   and 25,000 records with no more than three attempts for each page request.
+   The existing one-running-job-per-account fence bounds composition with other
+   device work. The ordinary completion optimization remains limited to
+   non-temporal resources. These rules do not relax the no-full-timeseries
+   retention boundary; base daily observations and compact evidence remain the
+   only non-temporal outputs.
+
 5. **Louder, never quieter.** Drops and skips surface as persisted
    `device-sync.job_failed`/skip metadata. But observability is not recovery:
    the persisted signal exists to explain *why*, while the floor (invariant 1)

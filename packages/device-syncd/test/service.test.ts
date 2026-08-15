@@ -8,7 +8,8 @@ import {
   COMPANION_HRV_RMSSD_SCHEMA,
   serializeCompanionHrvRmssdObservation,
 } from "@murphai/contracts";
-import { prepareDeviceProviderSnapshotImport } from "@murphai/importers";
+import { initializeVault } from "@murphai/core";
+import { createImporters, prepareDeviceProviderSnapshotImport } from "@murphai/importers";
 import { openSqliteRuntimeDatabase, writeSqliteRuntimeUserVersion } from "@murphai/runtime-state/node";
 import { DEVICE_SYNC_DB_RELATIVE_PATH } from "@murphai/runtime-state/node/runtime-paths";
 
@@ -1378,7 +1379,7 @@ test("local Junction reconnect fences in-flight blood-pressure completion before
 });
 
 test("local Junction workers exclude a disconnected source from production-normalized evidence", async () => {
-  const now = new Date("2026-07-28T10:00:00.000Z");
+  const now = new Date("2026-07-29T10:00:00.000Z");
   const vaultRoot = await makeTempDirectory("murph-device-syncd-junction-source-admission");
   const importerInputs: unknown[] = [];
   const importerResults: unknown[] = [];
@@ -1393,9 +1394,14 @@ test("local Junction workers exclude a disconnected source from production-norma
       stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
     },
     importer: {
+      async resolveDeviceProviderSnapshotDefaultTimeZone() {
+        return "UTC";
+      },
       async importDeviceProviderSnapshot(input) {
         importerInputs.push(input);
-        const result = await prepareDeviceProviderSnapshotImport(input);
+        const result = await prepareDeviceProviderSnapshotImport(input, {
+          defaultTimeZone: "UTC",
+        });
         importerResults.push(result);
         return { events: result.events ?? [] };
       },
@@ -1541,9 +1547,10 @@ test("local Junction workers exclude a disconnected source from production-norma
       })[0]?.status,
       "disconnected",
     );
-    const continuation = await service.runWorkerOnce();
-    assert.equal(continuation?.kind, "reconcile");
-    assert.equal(importerInputs.length, 2);
+    const temporalCatchUp = await service.runWorkerOnce();
+    assert.equal(temporalCatchUp?.kind, "resource");
+    assert.equal(await service.runWorkerOnce(), null);
+    assert.equal(importerInputs.length, 3);
     const durableInput = JSON.stringify(importerInputs);
     assert.match(durableInput, /garmin-activity-1|garmin-blood-oxygen-1/u);
     assert.doesNotMatch(durableInput, /fitbit|provider-fitbit-1|1234|"value":91/u);
@@ -1899,6 +1906,168 @@ test("Junction deployed full-job progress resumes durably and rewrites its succe
       now.toISOString(),
     );
     assert.deepEqual(requestedResources, ["steps", "heartrate"]);
+  } finally {
+    close();
+  }
+});
+
+test("device sync service reports canonical counts separately from durable delivery acceptance", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-import-receipt");
+  const importerInputs: unknown[] = [];
+  const importReceipts: unknown[] = [];
+  let importAttempt = 0;
+  const { service, close } = createServiceFixture({
+    secret: "secret-for-tests",
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+    },
+    importer: {
+      async importDeviceProviderSnapshot(input) {
+        importerInputs.push(input);
+        importAttempt += 1;
+        return importAttempt === 1
+          ? { events: [{ kind: "activity" }, { kind: "sleep" }] }
+          : { applied: false, events: [] };
+      },
+    },
+    providers: [createFakeProvider({
+      async executeJob(context) {
+        importReceipts.push(await context.importSnapshot(
+          { provider: "demo" },
+          {
+            completeSourceDay: {
+              connectionId: "demo-connection",
+              dayKey: "2026-03-16",
+              resources: ["demo-resource"],
+              revisionAt: "2026-03-17T12:00:00.000Z",
+              timeZone: "UTC",
+            },
+          },
+        ));
+        return {};
+      },
+    })],
+  });
+
+  try {
+    const begin = await service.startConnection({ provider: "demo" });
+    const connected = await service.handleOAuthCallback({
+      provider: "demo",
+      state: begin.state,
+      code: "import-receipt",
+    });
+    await service.runWorkerOnce();
+    service.queueManualReconcile(connected.account.id);
+    await service.runWorkerOnce();
+
+    assert.deepEqual(importReceipts, [
+      {
+        canonicalEventCount: 2,
+        canonicalEventExternalRefResourceIds: [],
+        durableDeliveryAccepted: true,
+      },
+      {
+        canonicalEventCount: 0,
+        canonicalEventExternalRefResourceIds: [],
+        durableDeliveryAccepted: true,
+      },
+    ]);
+    assert.deepEqual(importerInputs, [
+      {
+        completeSourceDay: {
+          connectionId: "demo-connection",
+          dayKey: "2026-03-16",
+          resources: ["demo-resource"],
+          revisionAt: "2026-03-17T12:00:00.000Z",
+          timeZone: "UTC",
+        },
+        provider: "demo",
+        snapshot: { provider: "demo" },
+        vaultRoot,
+      },
+      {
+        completeSourceDay: {
+          connectionId: "demo-connection",
+          dayKey: "2026-03-16",
+          resources: ["demo-resource"],
+          revisionAt: "2026-03-17T12:00:00.000Z",
+          timeZone: "UTC",
+        },
+        provider: "demo",
+        snapshot: { provider: "demo" },
+        vaultRoot,
+      },
+    ]);
+  } finally {
+    close();
+  }
+});
+
+test("device sync service supplies the vault timezone to Junction jobs", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-junction-timezone");
+  const observedTimeZones: Array<string | undefined> = [];
+  const demoDescriptor = createFakeProvider().descriptor;
+  const provider = createFakeProvider({
+    provider: "junction",
+    credentialPolicy: {
+      kind: "provider_config",
+      providerConfigKey: "junction",
+    },
+    descriptor: {
+      ...demoDescriptor,
+      provider: "junction",
+      oauth: demoDescriptor.oauth
+        ? { ...demoDescriptor.oauth, callbackPath: "/oauth/junction/callback" }
+        : undefined,
+    },
+    async exchangeAuthorizationCode() {
+      return {
+        externalAccountId: "junction-timezone-test",
+        displayName: "Junction timezone test",
+        scopes: ["offline", "read:data"],
+        metadata: {},
+        credential: {
+          kind: "provider_config",
+          providerConfigKey: "junction",
+        },
+        initialJobs: [{ kind: "backfill", payload: {} }],
+        nextReconcileAt: "2026-03-17T12:00:00.000Z",
+      };
+    },
+    async executeJob(context) {
+      observedTimeZones.push(context.vaultTimeZone);
+      return {};
+    },
+  });
+  const { service, close } = createServiceFixture({
+    secret: "secret-for-tests",
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+    },
+    importer: {
+      async importDeviceProviderSnapshot() {
+        return { events: [] };
+      },
+      async resolveDeviceProviderSnapshotDefaultTimeZone() {
+        return "America/Los_Angeles";
+      },
+    },
+    providers: [provider],
+  });
+
+  try {
+    const begin = await service.startConnection({ provider: "junction" });
+    await service.handleOAuthCallback({
+      provider: "junction",
+      state: begin.state,
+      code: "timezone",
+    });
+    await service.runWorkerOnce();
+    assert.deepEqual(observedTimeZones, ["America/Los_Angeles"]);
   } finally {
     close();
   }
@@ -7402,7 +7571,7 @@ test("device sync service releases Junction backfill row when cooperative abort 
         summaryBackfillDays: 3,
         summaryResources: ["activity"],
         timeseriesBackfillDays: 3,
-        timeseriesResources: ["stress"],
+        timeseriesResources: ["hrv"],
         fetchImpl: async (input, init) => {
           const url = new URL(readUrl(input));
 
@@ -7423,7 +7592,7 @@ test("device sync service releases Junction backfill row when cooperative abort 
             });
           }
 
-          if (url.pathname === "/v2/timeseries/junction-account/stress_level/grouped") {
+          if (url.pathname === "/v2/timeseries/junction-account/hrv/grouped") {
             yieldRequested = true;
             return await new Promise<Response>((_resolve, reject) => {
               const signal = init?.signal;
@@ -7492,7 +7661,7 @@ test("device sync service releases Junction backfill row when cooperative abort 
       windowStart: ownerWindowStart,
       windowEnd: ownerWindowEnd,
       timeseriesCursor: ownerWindowStart,
-      timeseriesResourceCursor: "stress_level",
+      timeseriesResourceCursor: "hrv",
     });
 
     yieldRequested = false;
@@ -7508,6 +7677,407 @@ test("device sync service releases Junction backfill row when cooperative abort 
     assert.equal(released.dedupeKey, expectedDedupeKey);
   } finally {
     close();
+  }
+});
+
+test("Junction reconcile atomically replaces a yielded temporal continuation with durable jobs", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-junction-temporal-yield");
+  const databasePath = path.join(vaultRoot, ".runtime", "device-syncd.sqlite");
+  const now = new Date("2026-08-12T12:00:00.000Z");
+  let yieldRequested = false;
+  let yieldAfterNewestBloodOxygen = true;
+  const requestedWindows: Array<{ end: string | null; resource: string; start: string | null }> = [];
+  await initializeVault({ vaultRoot });
+  const canonicalImporter = createImporters();
+  const provider = createJunctionDeviceSyncProvider({
+    apiKey: "sk_us_fake_test_placeholder",
+    clientUserIdSecret: "test-only-hmac-secret",
+    environment: "sandbox",
+    region: "us",
+    reconcileDays: 2,
+    reconcileIntervalMs: 60_000,
+    summaryResources: ["activity"],
+    timeseriesResources: ["blood_oxygen", "stress_level", "hrv"],
+    fetchImpl: async (input) => {
+      const url = new URL(readUrl(input));
+      if (url.pathname === "/v2/user/providers/junction-temporal-yield") {
+        return createJsonResponse({
+          providers: [{
+            id: "provider-garmin-temporal-yield",
+            slug: "garmin",
+            name: "Garmin",
+            status: "connected",
+            resource_availability: {
+              blood_oxygen: true,
+              hrv: true,
+              stress_level: true,
+            },
+          }],
+        });
+      }
+      if (url.pathname === "/v2/summary/activity/junction-temporal-yield") {
+        return createJsonResponse({ data: [] });
+      }
+      const resource = url.pathname.match(
+        /^\/v2\/timeseries\/junction-temporal-yield\/(blood_oxygen|stress_level|hrv)\/grouped$/u,
+      )?.[1];
+      if (resource) {
+        requestedWindows.push({
+          end: url.searchParams.get("end_date"),
+          resource,
+          start: url.searchParams.get("start_date"),
+        });
+        return createJsonResponse({ groups: {} });
+      }
+      throw new Error(`Unexpected Junction temporal-yield request: ${url.pathname}`);
+    },
+  });
+  const openFixture = () => createServiceFixture({
+    secret: "secret-for-tests",
+    clock: { now: () => now },
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: databasePath,
+      shouldYieldJobExecution: () => yieldRequested,
+    },
+    importer: {
+      async importDeviceProviderSnapshot(input) {
+        const result = await canonicalImporter.importDeviceProviderSnapshot(input);
+        const timeseries = (input.snapshot as { timeseries?: Record<string, unknown[]> })
+          .timeseries;
+        if (
+          yieldAfterNewestBloodOxygen
+          && timeseries
+          && Object.hasOwn(timeseries, "blood_oxygen")
+        ) {
+          yieldAfterNewestBloodOxygen = false;
+          yieldRequested = true;
+        }
+        return result;
+      },
+      resolveDeviceProviderSnapshotDefaultTimeZone(input) {
+        return canonicalImporter.resolveDeviceProviderSnapshotDefaultTimeZone(input);
+      },
+    },
+    providers: [provider],
+  });
+  const fixture = openFixture();
+  let fixtureClosed = false;
+
+  try {
+    const account = fixture.store.upsertAccount({
+      provider: "junction",
+      externalAccountId: "junction-temporal-yield",
+      displayName: "Junction",
+      scopes: [],
+      status: "active",
+      credential: {
+        kind: "provider_config",
+        providerConfigKey: "junction",
+        credentialMetadata: {},
+      },
+      connectedAt: now.toISOString(),
+      nextReconcileAt: null,
+    });
+    const parent = fixture.store.enqueueJob({
+      accountId: account.id,
+      provider: "junction",
+      kind: "reconcile",
+      payload: {
+        windowStart: "2026-08-10T00:00:00.000Z",
+        windowEnd: "2026-08-12T00:00:00.000Z",
+      },
+      availableAt: now.toISOString(),
+      priority: 20,
+      dedupeKey: "junction-temporal-yield-fixed-window",
+    });
+
+    assert.equal((await fixture.service.runWorkerOnce())?.id, parent.id);
+    const jobs = readJobsForAccountForTesting(fixture.store, account.id);
+    const queuedRows = jobs.filter((job) => job.status === "queued");
+    const queuedJobs = queuedRows.map((job) => fixture.store.getJobById(job.id));
+    const temporalJobs = queuedJobs.filter((job) =>
+      job?.kind === "resource" && job.payload.temporalAuthorityDayKey
+    );
+    const reconcileFollowUp = queuedJobs.find((job) => job?.kind === "reconcile");
+
+    assert.equal(fixture.store.getJobById(parent.id)?.status, "succeeded");
+    assert.equal(fixture.store.getJobById(parent.id)?.lastErrorCode, null);
+    assert.equal(temporalJobs.length, 3);
+    assert.deepEqual(
+      new Set(temporalJobs.map((job) =>
+        `${String(job?.payload.temporalAuthorityDayKey)}:${String(job?.payload.resource)}`
+      )),
+      new Set([
+        "2026-08-10:stress_level",
+        "2026-08-09:blood_oxygen",
+        "2026-08-09:stress_level",
+      ]),
+    );
+    assert.ok(reconcileFollowUp);
+    assert.notEqual(reconcileFollowUp.dedupeKey, parent.dedupeKey);
+    assert.deepEqual(reconcileFollowUp.payload, {
+      timeseriesCursor: "2026-08-10T00:00:00.000Z",
+      timeseriesResourceCursor: "hrv",
+      windowEnd: "2026-08-12T00:00:00.000Z",
+      windowStart: "2026-08-10T00:00:00.000Z",
+    });
+    assert.equal(fixture.store.getAccountById(account.id)?.lastSyncCompletedAt, null);
+
+    fixture.close();
+    fixtureClosed = true;
+    const restarted = openFixture();
+    try {
+      const restartedJobs = readJobsForAccountForTesting(restarted.store, account.id);
+      assert.equal(restartedJobs.filter((job) => job.status === "queued").length, 4);
+      assert.equal(restartedJobs.find((job) => job.id === parent.id)?.status, "succeeded");
+      yieldRequested = false;
+      for (let temporalRun = 0; temporalRun < 3; temporalRun += 1) {
+        const processed = await restarted.service.runWorkerOnce();
+        assert.equal(processed?.kind, "resource");
+        assert.equal(restarted.store.getAccountById(account.id)?.lastSyncCompletedAt, null);
+      }
+
+      const processedFollowUp = await restarted.service.runWorkerOnce();
+      assert.equal(processedFollowUp?.id, reconcileFollowUp.id);
+      assert.equal(restarted.store.getAccountById(account.id)?.lastSyncCompletedAt, null);
+      const terminalFollowUp = await restarted.service.runWorkerOnce();
+      assert.equal(terminalFollowUp?.kind, "reconcile");
+      assert.equal(restarted.store.getAccountById(account.id)?.lastSyncCompletedAt, now.toISOString());
+      assert.deepEqual(
+        requestedWindows
+          .filter(({ resource }) => resource === "hrv")
+          .map(({ end, start }) => [start, end]),
+        [
+          ["2026-08-10", "2026-08-10"],
+          ["2026-08-11", "2026-08-11"],
+        ],
+      );
+      assert.equal(
+        requestedWindows.filter(({ resource }) => resource === "blood_oxygen").length,
+        2,
+      );
+      assert.equal(
+        requestedWindows.filter(({ resource }) => resource === "stress_level").length,
+        2,
+      );
+      assert.equal(
+        readJobsForAccountForTesting(restarted.store, account.id)
+          .filter((job) => job.status === "queued").length,
+        0,
+      );
+    } finally {
+      restarted.close();
+    }
+  } finally {
+    if (!fixtureClosed) {
+      fixture.close();
+    }
+  }
+});
+
+test.each([
+  {
+    expectedProviderDays: ["2030-08-10", "2030-08-11"],
+    now: "2030-08-12T00:30:00.000Z",
+    timeZone: "UTC",
+  },
+  {
+    expectedProviderDays: ["2030-08-10", "2030-08-11"],
+    now: "2030-08-12T07:30:00.000Z",
+    timeZone: "America/Los_Angeles",
+  },
+  {
+    expectedProviderDays: ["2030-08-09", "2030-08-10"],
+    now: "2030-08-11T15:30:00.000Z",
+    timeZone: "Asia/Tokyo",
+  },
+])("Junction ordinary pull floor survives a higher-priority webhook and restart at the $timeZone boundary", async ({
+  expectedProviderDays,
+  now: nowIso,
+  timeZone,
+}) => {
+  const now = new Date(nowIso);
+  const zoneSlug = timeZone.replaceAll(/[^a-z]+/giu, "-").replaceAll(/^-|-$/gu, "");
+  const vaultRoot = await makeTempDirectory(`murph-device-syncd-junction-floor-${zoneSlug}`);
+  const databasePath = path.join(vaultRoot, ".runtime", "device-syncd.sqlite");
+  const externalAccountId = `junction-floor-${zoneSlug}`;
+  const activityRecord = {
+    id: `activity-${zoneSlug}`,
+    start: new Date(now.getTime() - 8 * 60 * 60_000).toISOString(),
+    end: new Date(now.getTime() - 60_000).toISOString(),
+    calories: 512,
+    heart_rate: 92,
+    source: { provider: "garmin" },
+  };
+  const requestedProviderDays: Array<[string | null, string | null]> = [];
+  const activityEvents: Array<{ id: string; revision: number }> = [];
+  let activityImportCount = 0;
+
+  await initializeVault({ vaultRoot, timezone: timeZone });
+  const canonicalImporter = createImporters();
+  const provider = createJunctionDeviceSyncProvider({
+    apiKey: "sk_us_fake_test_placeholder",
+    clientUserIdSecret: "test-only-hmac-secret",
+    environment: "sandbox",
+    region: "us",
+    reconcileDays: 2,
+    reconcileIntervalMs: 6 * 60 * 60_000,
+    summaryResources: ["activity"],
+    timeseriesResources: ["hrv"],
+    webhookSecret: "whsec_d2ViaG9vay10ZXN0LXNlY3JldA==",
+    fetchImpl: async (input) => {
+      const url = new URL(readUrl(input));
+      if (url.pathname === `/v2/user/providers/${externalAccountId}`) {
+        return createJsonResponse({
+          providers: [{
+            id: `provider-garmin-${zoneSlug}`,
+            slug: "garmin",
+            name: "Garmin",
+            status: "connected",
+            resource_availability: { activity: true, hrv: true },
+          }],
+        });
+      }
+      if (url.pathname === `/v2/summary/activity/${externalAccountId}`) {
+        return createJsonResponse({ data: [activityRecord] });
+      }
+      if (url.pathname === `/v2/timeseries/${externalAccountId}/hrv/grouped`) {
+        requestedProviderDays.push([
+          url.searchParams.get("start_date"),
+          url.searchParams.get("end_date"),
+        ]);
+        return createJsonResponse({ groups: {} });
+      }
+      throw new Error(`Unexpected Junction ordinary-floor request: ${url.pathname}`);
+    },
+  });
+  const openFixture = () => createServiceFixture({
+    secret: "secret-for-tests",
+    clock: { now: () => now },
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: databasePath,
+    },
+    importer: {
+      async importDeviceProviderSnapshot(input) {
+        const result = await canonicalImporter.importDeviceProviderSnapshot(input) as {
+          events?: Array<{ id: string; lifecycle?: { revision?: number } }>;
+        };
+        const activity = (input.snapshot as {
+          summaries?: { activity?: unknown[] };
+        }).summaries?.activity;
+        if ((activity?.length ?? 0) > 0) {
+          activityImportCount += 1;
+          activityEvents.push(...(result.events ?? []).map((event) => ({
+            id: event.id,
+            revision: event.lifecycle?.revision ?? 1,
+          })));
+        }
+        return result;
+      },
+      resolveDeviceProviderSnapshotDefaultTimeZone(input) {
+        return canonicalImporter.resolveDeviceProviderSnapshotDefaultTimeZone(input);
+      },
+    },
+    providers: [provider],
+  });
+  const fixture = openFixture();
+  let fixtureClosed = false;
+
+  try {
+    const account = fixture.store.upsertAccount({
+      provider: "junction",
+      externalAccountId,
+      displayName: "Junction",
+      scopes: [],
+      status: "active",
+      credential: {
+        kind: "provider_config",
+        providerConfigKey: "junction",
+        credentialMetadata: {},
+      },
+      connectedAt: new Date(now.getTime() - 30 * 24 * 60 * 60_000).toISOString(),
+      nextReconcileAt: new Date(now.getTime() - 60_000).toISOString(),
+    });
+    const webhook = createJunctionSvixWebhook({
+      body: {
+        event_type: "daily.data.activity.updated",
+        user_id: externalAccountId,
+        data: activityRecord,
+      },
+      messageId: `msg-ordinary-floor-${zoneSlug}`,
+    });
+
+    assert.equal(
+      (await fixture.service.handleWebhook("junction", webhook.headers, webhook.rawBody)).accepted,
+      true,
+    );
+    await fixture.service.runSchedulerOnce();
+    const queuedBeforeDrain = readJobsForAccountForTesting(fixture.store, account.id)
+      .map((job) => fixture.store.getJobById(job.id))
+      .filter((job): job is DeviceSyncJobRecord => job?.status === "queued");
+    assert.equal(
+      queuedBeforeDrain.some((job) => job.kind === "resource" && job.priority === 65),
+      true,
+      `expected priority-65 resource job; queued=${JSON.stringify(queuedBeforeDrain.map((job) => ({
+        kind: job.kind,
+        priority: job.priority,
+      })))}`,
+    );
+    assert.equal(
+      queuedBeforeDrain.some((job) => job.kind === "reconcile" && job.priority === 40),
+      true,
+    );
+
+    const processedWebhook = await fixture.service.runWorkerOnce();
+    assert.equal(processedWebhook?.kind, "resource");
+    assert.equal(processedWebhook?.priority, 65);
+    assert.equal(fixture.store.getAccountById(account.id)?.lastSyncCompletedAt, null);
+    assert.equal(requestedProviderDays.length, 0);
+    assert.equal(activityImportCount, 1);
+    const webhookEventIds = new Set(activityEvents.map((event) => event.id));
+    assert.ok(webhookEventIds.size > 0);
+
+    fixture.close();
+    fixtureClosed = true;
+    const restarted = openFixture();
+    try {
+      const processedReconcile = await restarted.service.runWorkerOnce();
+      assert.equal(processedReconcile?.kind, "reconcile");
+      assert.equal(processedReconcile?.priority, 40);
+      assert.equal(requestedProviderDays.length, 0);
+      assert.equal(restarted.store.getAccountById(account.id)?.lastSyncCompletedAt, null);
+      const firstContinuation = await restarted.service.runWorkerOnce();
+      assert.equal(firstContinuation?.kind, "reconcile");
+      assert.equal(restarted.store.getAccountById(account.id)?.lastSyncCompletedAt, null);
+      const terminalContinuation = await restarted.service.runWorkerOnce();
+      assert.equal(terminalContinuation?.kind, "reconcile");
+      assert.equal(
+        restarted.store.getAccountById(account.id)?.lastSyncCompletedAt,
+        nowIso,
+      );
+      assert.deepEqual(
+        requestedProviderDays,
+        expectedProviderDays.map((day) => [day, day]),
+      );
+      assert.equal(activityImportCount, 2);
+      assert.deepEqual(new Set(activityEvents.map((event) => event.id)), webhookEventIds);
+      assert.equal(activityEvents.every((event) => event.revision === 1), true);
+      assert.equal(
+        readJobsForAccountForTesting(restarted.store, account.id)
+          .filter((job) => job.status === "queued" && job.kind === "reconcile").length,
+        0,
+      );
+    } finally {
+      restarted.close();
+    }
+  } finally {
+    if (!fixtureClosed) {
+      fixture.close();
+    }
   }
 });
 
