@@ -273,8 +273,8 @@ test("Junction missing-resource slice rejects malformed values, units, intervals
       }]),
       waist_circumference: grouped("withings", "scale", "scale-1", [{
         end: END,
-        start: START,
-        timestamp: "not-a-timestamp",
+        start: "not-a-timestamp",
+        timestamp: TIMESTAMP,
         unit: "cm",
         value: 82,
       }]),
