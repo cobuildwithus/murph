@@ -390,6 +390,10 @@ export async function startHostedLocalDevStack(input: {
       useVercelDatabaseUrl: config.useVercelDatabaseUrl,
     });
     vercelEnv.NODE_ENV = "development";
+    const temporalEnvironmentOverlay = buildHostedLocalTemporalRuntimeEnv({
+      config,
+      env: vercelEnv,
+    });
     requireHostedLocalAssistantProviderEnv(vercelEnv);
     // Interactive dev runs hosted Codex model turns on the local ChatGPT
     // subscription instead of the API key; the key stays for image generation.
@@ -486,6 +490,7 @@ export async function startHostedLocalDevStack(input: {
         ...(minioServer?.env ?? {}),
         HOSTED_EXECUTION_RUNNER_HOST_ALIAS: containerReachableHost,
         ...(shouldPreserveTestNodeEnvForLocalTestMode ? { NODE_ENV: "test" } : {}),
+        ...temporalEnvironmentOverlay,
       },
     });
     throwIfAbortSignalAborted(input.abortSignal);
@@ -495,13 +500,7 @@ export async function startHostedLocalDevStack(input: {
     const runtimeEnv: NodeJS.ProcessEnv = {
       ...vercelEnv,
       ...localOverrides,
-      ...buildHostedLocalTemporalRuntimeEnv({
-        config,
-        env: {
-          ...vercelEnv,
-          ...localOverrides,
-        },
-      }),
+      ...temporalEnvironmentOverlay,
       TSX_TSCONFIG_PATH: tsxTsconfigPath,
       VERCEL_OIDC_TOKEN: oidcToken,
       ...(isolatedDockerConfigDir !== null ? { DOCKER_CONFIG: isolatedDockerConfigDir } : {}),
@@ -521,6 +520,7 @@ export async function startHostedLocalDevStack(input: {
         ...runtimeEnv,
         ...cloudflareDevVars,
         ...localOverrides,
+        ...temporalEnvironmentOverlay,
       }),
       ...(hostedLocalCodexModelCatalogJson !== null
         ? { [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]: hostedLocalCodexModelCatalogJson }
@@ -889,6 +889,9 @@ export async function startHostedLocalDevStack(input: {
       ...runtimeEnv,
       ...(input.webProcessEnvOverrides ?? {}),
       HOSTED_APP_SESSION_HMAC_KEY: hostedAppSessionHmacKey,
+      // Keep disabled mode fail-closed even when dev-local subsequently
+      // loads apps/web/.env.local and .env into the child process.
+      ...temporalEnvironmentOverlay,
     };
     if (input.webTemporalMailboxSignalFaultUserId !== undefined) {
       hostedWebTestPreloadOutputDir = path.join(
