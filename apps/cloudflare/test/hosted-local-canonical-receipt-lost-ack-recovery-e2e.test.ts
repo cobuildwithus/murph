@@ -145,7 +145,9 @@ describe("hosted local canonical receipt lost-ack recovery e2e", () => {
     const replyPath = `/chats/${encodeURIComponent(chatId)}/messages`;
     const outboundBaseline = requireLinqStub().countObservedSends(replyPath);
     const providerBaseline = countResponsesApiRequests();
-    const dueAt = new Date(Date.now() + 24 * 60 * 60 * 1_000).toISOString();
+    const dueAtDate = new Date(Date.now() + 24 * 60 * 60 * 1_000);
+    dueAtDate.setUTCSeconds(0, 0);
+    const dueAt = dueAtDate.toISOString();
     const automationStateMarker = buildCanonicalAutomationStateMarker({
       dueAt,
     });
@@ -154,7 +156,14 @@ describe("hosted local canonical receipt lost-ack recovery e2e", () => {
         action: "save",
         continuityPolicy: "fresh",
         instructions: "Record the hosted canonical checkpoint recovery probe.",
-        schedule: { at: dueAt, kind: "at" },
+        schedule: {
+          kind: "at",
+          localAt: {
+            date: dueAt.slice(0, 10),
+            time: dueAt.slice(11, 16),
+            timeZone: "UTC",
+          },
+        },
         slug: automationSlug,
         summary: "Hosted canonical checkpoint recovery probe.",
         tags: ["assistant"],
