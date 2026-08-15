@@ -1,6 +1,7 @@
 ---
 title: 'ReviewGPT visual audits exclude exact-head screenshot bytes'
 severity: 'minor'
+issue: 'cobuildwithus/murph#1833'
 ---
 
 ## Expected Behavior
