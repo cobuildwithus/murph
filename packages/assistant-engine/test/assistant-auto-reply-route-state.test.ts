@@ -129,6 +129,20 @@ describe('assistant auto-reply exact route state', () => {
       target: 'telegram-target-1',
       threadIsDirect: false,
     }))).toBeNull()
+    expect(resolveAssistantAutoReplyInputExactRoute({
+      conversation: createConversation({
+        actorId: null,
+        source: 'telegram',
+        threadIsDirect: null,
+      }),
+      deliveryTarget: 'telegram-target-1',
+    })).toBeNull()
+    expect(resolveAssistantAutoReplyOutboxExactRoute(createOutboxIntent({
+      actorId: null,
+      channel: 'telegram',
+      target: 'telegram-target-1',
+      threadIsDirect: null,
+    }))).toBeNull()
     expect(resolveAssistantAutoReplyOutboxExactRoute(createOutboxIntent({
       channel: 'linq',
       providerThreadId: null,
