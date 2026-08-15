@@ -132,6 +132,12 @@ Updated: 2026-08-15
   existing encrypted call-result field before delivery. A conditional write
   leaves `analyzedAt` null, preserves provider analysis that wins the race, and
   makes proactive delivery and later status reads consume one canonical truth.
+- When the foreground-only mailbox pass has already selected one exact
+  phone-call result, let that result keep its non-idempotent Telegram effect and
+  reuse the existing `outbox_sending` checkpoint plus post-checkpoint drain.
+  Continue filtering non-idempotent effects for every other foreground-only
+  preparation, and collect only the selected result's delivery intent so
+  unrelated pending outbox work remains deferred.
 - Treat every accepted `call_analyzed` event as terminal even when Retell omits
   `end_timestamp`: preserve an existing provider end or persist the analysis
   time as the fallback. Publish a required deduped not-completed result when
@@ -235,9 +241,26 @@ Updated: 2026-08-15
   notification; mailbox failure leaves that result inspectable, stop-fenced
   provider absence stores it without a competing ordinary notification, and a
   provider analysis that wins the conditional write remains authoritative.
-- Remaining gates: final lint/docs/privacy inspection, commit and push the
-  remediation head, exact-head CI, final ReviewGPT `ROUND_OUTCOME: PASS`, corrected-head
-  product-experience revalidation, clean merge-tree proof, and plan closure.
+- Final ReviewGPT round 9 found that exact phone-call results selected ahead of
+  newer input were still filtered out on Telegram because that transport is
+  non-idempotent. The parent accepted the finding. The selected phone result
+  now owns the existing checkpointed post-checkpoint delivery pass on either
+  transport; usage rewards and generic notifications remain deferred, and the
+  change does not mark Telegram idempotent or introduce another queue owner.
+  Focused phase tests pass 3 cases, the production-style Telegram proof passes,
+  all 8 real external-completion route cases pass, and the two affected runtime
+  files pass 596 tests. Assistant-runtime typecheck passes. Its package has no
+  ESLint target or config; the changed runtime code is instead covered by its
+  typecheck, tests, and repository formatting checks.
+- Corrected-head product-experience revalidation finds the implementation is
+  again the smallest complete experience for the incident: status is durable,
+  stop state is truthful, fallback outcomes are canonical, and an exact result
+  reaches the member before Murph admits a newer message on both supported
+  direct transports. The remaining evidence gap is live-provider timing, not a
+  known product-flow gap.
+- Remaining gates: docs/privacy inspection, commit and push the remediation
+  head, exact-head CI, final ReviewGPT `ROUND_OUTCOME: PASS`, clean merge-tree
+  proof, and plan closure.
 - Direct proof: a synthetic call result arrives while one hosted invocation is
   active and newer conversation input is waiting; Murph receives the result in
   the next turn and a later status query returns the same terminal truth.

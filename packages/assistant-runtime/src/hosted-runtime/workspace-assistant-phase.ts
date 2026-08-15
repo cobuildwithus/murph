@@ -4192,6 +4192,21 @@ function isForegroundCausalSystemMailboxPreparation(
     && preparation.item.wake.kind === "assistant.ask.completed";
 }
 
+function isUrgentPhoneCallResultSystemMailboxPreparation(
+  preparation: HostedSystemMailboxPreparation,
+): boolean {
+  return "item" in preparation
+    && (
+      preparation.status === "processed"
+      || preparation.status === "recording"
+    )
+    && preparation.item.routeAction === "dispatch-assistant-notification"
+    && preparation.item.wake.kind === "assistant.notification.requested"
+    && preparation.item.mailboxDedupeKey.startsWith(
+      HOSTED_PRE_CHECKPOINT_URGENT_EXTERNAL_COMPLETION_DEDUPE_KEY_PREFIXES[0],
+    );
+}
+
 type HostedAssistantDeliveryEffects = Awaited<
   ReturnType<typeof collectHostedAssistantDeliverySideEffects>
 >;
@@ -5639,8 +5654,14 @@ async function runSystemMailboxMaintenancePhase(input: {
         vaultRoot: phaseInput.restored.vaultRoot,
       })
       : [];
+  const urgentPhoneCallResultOwnsForegroundDelivery =
+    phaseInput.foregroundCausalOnly === true
+    && isUrgentPhoneCallResultSystemMailboxPreparation(
+      systemMailboxPreparation,
+    );
   const systemMailboxDeliveryEffectsForDispatch =
     phaseInput.foregroundCausalOnly === true
+      && !urgentPhoneCallResultOwnsForegroundDelivery
       ? systemMailboxDeliveryEffects.filter(
           (effect) => effect.payload.transportIdempotent === true,
         )
@@ -5653,7 +5674,10 @@ async function runSystemMailboxMaintenancePhase(input: {
         })
       : null;
   const foregroundCausalDeliveryOwnsThisPass =
-    isForegroundCausalSystemMailboxPreparation(systemMailboxPreparation)
+    (
+      isForegroundCausalSystemMailboxPreparation(systemMailboxPreparation)
+      || urgentPhoneCallResultOwnsForegroundDelivery
+    )
     && systemMailboxDeliveryEffectsForDispatch.length > 0;
   const foregroundCausalPreparationCompletedWithoutDelivery =
     isForegroundCausalSystemMailboxPreparation(systemMailboxPreparation)
@@ -5861,6 +5885,8 @@ async function runSystemMailboxMaintenancePhase(input: {
                 systemMailboxDeliveryPreparation,
                 systemMailboxDeliveryEffects:
                   systemMailboxDeliveryEffectsForDispatch,
+                systemMailboxDeliveryIsForegroundCausal:
+                  foregroundCausalDeliveryOwnsThisPass,
                 systemMailboxPreparation,
                 systemMailboxWake,
                 systemMailboxWakeAt,
@@ -5966,6 +5992,7 @@ async function runSystemMailboxPostCheckpointPhase(input: {
   systemMailboxMetricsWakeAt: string | null;
   systemMailboxMetricsWakeReason: string | null;
   systemMailboxDeliveryEffects: HostedAssistantDeliveryEffects;
+  systemMailboxDeliveryIsForegroundCausal: boolean;
   systemMailboxDeliveryPreparation: HostedAssistantDeliveryPreparation | null;
   systemMailboxPreparation: NonNullable<
     Awaited<ReturnType<typeof prepareHostedSystemMailboxItemForCheckpoint>>
@@ -6108,9 +6135,7 @@ async function runSystemMailboxPostCheckpointPhase(input: {
           hostedSystemMailboxRecordFailed: statusCallback.failed,
           hostedSystemMailboxRecorded: statusCallback.recorded,
         },
-        shouldYieldBackgroundDrain: isForegroundCausalSystemMailboxPreparation(
-          input.systemMailboxPreparation,
-        )
+        shouldYieldBackgroundDrain: input.systemMailboxDeliveryIsForegroundCausal
           ? null
           : input.input.shouldYieldBackgroundMaintenance ?? null,
         wake: input.systemMailboxPreparation.item.wake,

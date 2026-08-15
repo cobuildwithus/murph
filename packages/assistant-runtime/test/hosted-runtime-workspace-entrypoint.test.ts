@@ -7758,10 +7758,18 @@ describe("hosted workspace runtime entrypoint", () => {
             "assistant.notification.requested:",
             "",
           );
+      const telegramPhoneResultMustOutrankPendingInput =
+        completion.label === "phone-call result"
+        && transport.channel === "telegram";
       const requestId = `aask_req_${"a".repeat(64)}`;
       let activeVaultRoot = vaultRoot;
       let assistantPhaseCalls = 0;
       let currentPhaseIsForegroundCausal = false;
+      let newerPendingInputId: string | null = null;
+      let unrelatedPendingIntentId: string | null = null;
+      let unrelatedIntentStayedPendingDuringPhoneResult = false;
+      let phoneResultCheckpointPreparedBeforeProviderDispatch = false;
+      let phoneResultCheckpointPrepared = false;
       let providerDispatchWasForegroundCausal: boolean | null = null;
       const providerFetch = vi.fn<typeof fetch>(async (request, init) => {
         const method =
@@ -7778,9 +7786,21 @@ describe("hosted workspace runtime entrypoint", () => {
             || (transport.channel === "telegram" && url.endsWith("/sendMessage"))
           )
         ) {
-          providerDispatchWasForegroundCausal =
-            currentPhaseIsForegroundCausal;
-          events.push(`provider.send:${deliveryKey}`);
+          const requestBody = typeof init?.body === "string" ? init.body : "";
+          const isUnrelatedPendingDelivery = requestBody.includes(
+            "Unrelated pending delivery.",
+          );
+          if (isUnrelatedPendingDelivery) {
+            events.push("provider.send:unrelated-pending");
+          } else {
+            providerDispatchWasForegroundCausal =
+              currentPhaseIsForegroundCausal;
+            if (telegramPhoneResultMustOutrankPendingInput) {
+              phoneResultCheckpointPreparedBeforeProviderDispatch =
+                phoneResultCheckpointPrepared;
+            }
+            events.push(`provider.send:${deliveryKey}`);
+          }
           if (transport.channel === "telegram") {
             return new Response(
               JSON.stringify({
@@ -8082,6 +8102,35 @@ describe("hosted workspace runtime entrypoint", () => {
                     operatorHomeRoot: input.restored.operatorHomeRoot,
                   },
                 );
+                if (telegramPhoneResultMustOutrankPendingInput) {
+                  newerPendingInputId =
+                    await stagePendingLinqAssistantInputForMailboxItem({
+                      item: createMailboxItem({
+                        createdAt: "2026-04-27T00:00:01.000Z",
+                        id: "mailbox_item_phone_result_newer_input",
+                        laneSeq: "1",
+                        occurredAt: "2026-04-27T00:00:01.000Z",
+                        updatedAt: "2026-04-27T00:00:01.000Z",
+                      }),
+                      threadId: "thread_phone_result_newer_input",
+                      vaultRoot: activeVaultRoot,
+                    });
+                  const unrelatedIntent = await createAssistantOutboxIntent({
+                    channel: "telegram",
+                    dedupeToken: "unrelated-pending-delivery",
+                    deliveryTransportIdempotent: false,
+                    explicitTarget: "987654321",
+                    identityId: "telegram-bot",
+                    message: "Unrelated pending delivery.",
+                    sessionId: "session_unrelated_pending_delivery",
+                    threadId: "987654321",
+                    threadIsDirect: true,
+                    turnId: "turn_unrelated_pending_delivery",
+                    vault: activeVaultRoot,
+                  });
+                  unrelatedPendingIntentId = unrelatedIntent.intentId;
+                  events.push("assistant.input:newer-accepted");
+                }
                 if (!completion.privateCompletion) {
                   setTimeout(() => {
                     mailboxItems.push(createMailboxItem({
@@ -8118,17 +8167,60 @@ describe("hosted workspace runtime entrypoint", () => {
                   }],
                   events.join(","),
                 );
-                assert.equal(
+                const pendingAssistantInputWakeAt =
                   await resolveHostedPendingAssistantInputWakeAt({
                     vaultRoot: activeVaultRoot,
-                  }),
-                  null,
-                );
+                  });
+                if (telegramPhoneResultMustOutrankPendingInput) {
+                  assert.ok(pendingAssistantInputWakeAt);
+                } else {
+                  assert.equal(pendingAssistantInputWakeAt, null);
+                }
+              }
+              if (
+                telegramPhoneResultMustOutrankPendingInput
+                && assistantPhaseCalls > 2
+                && input.foregroundCausalOnly !== true
+              ) {
+                assert.ok(newerPendingInputId);
+                events.push("assistant.input:newer-lane-admitted");
+                await writeSyntheticAssistantAutoReplyTerminalEvidence({
+                  inputId: newerPendingInputId,
+                  vaultRoot: activeVaultRoot,
+                });
               }
               const phaseResult = await runHostedWorkspaceAssistantPhase(input);
-              const outboxStatuses =
-                (await listAssistantOutboxIntents(activeVaultRoot))
-                  .map((intent) => intent.status);
+              if (
+                telegramPhoneResultMustOutrankPendingInput
+                && assistantPhaseCalls === 2
+              ) {
+                phoneResultCheckpointPrepared =
+                  phaseResult.checkpointReason === "outbox_sending";
+                events.push(
+                  `runtime.checkpoint-prepared:${phaseResult.checkpointReason}`,
+                );
+              }
+              const outboxIntents =
+                await listAssistantOutboxIntents(activeVaultRoot);
+              const completionIntent = outboxIntents.find((intent) =>
+                intent.deliveryIdempotencyKey === deliveryKey
+              );
+              if (completionIntent) {
+                events.push(
+                  `outbox.completion.after-phase:${completionIntent.status}`,
+                );
+              }
+              if (
+                telegramPhoneResultMustOutrankPendingInput
+                && assistantPhaseCalls === 2
+                && unrelatedPendingIntentId
+              ) {
+                unrelatedIntentStayedPendingDuringPhoneResult =
+                  outboxIntents.find((intent) =>
+                    intent.intentId === unrelatedPendingIntentId
+                  )?.status === "pending";
+              }
+              const outboxStatuses = outboxIntents.map((intent) => intent.status);
               events.push(
                 `outbox.after-phase:${outboxStatuses.join("|")}`,
               );
@@ -8181,7 +8273,10 @@ describe("hosted workspace runtime entrypoint", () => {
           );
         }
 
-        if (transport.channel === "telegram") {
+        if (
+          transport.channel === "telegram"
+          && !telegramPhoneResultMustOutrankPendingInput
+        ) {
           const finalIntents = await listAssistantOutboxIntents(activeVaultRoot);
           const telegramDiagnostics = JSON.stringify(
             finalIntents.map((intent) => ({
@@ -8217,14 +8312,22 @@ describe("hosted workspace runtime entrypoint", () => {
           1,
           events.join(","),
         );
-        assert.ok(
-          requireEventIndex(events, "outbox.after-phase:sending")
-            < requireEventIndex(events, providerEvent),
-          events.join(","),
-        );
+        if (telegramPhoneResultMustOutrankPendingInput) {
+          assert.ok(
+            requireEventIndex(events, "outbox.completion.after-phase:pending")
+              < requireEventIndex(events, providerEvent),
+            events.join(","),
+          );
+        } else {
+          assert.ok(
+            requireEventIndex(events, "outbox.completion.after-phase:sending")
+              < requireEventIndex(events, providerEvent),
+            events.join(","),
+          );
+        }
         assert.ok(
           requireEventIndex(events, providerEvent)
-            < requireEventIndex(events, "outbox.after-phase:sent"),
+            < requireEventIndex(events, "outbox.completion.after-phase:sent"),
           events.join(","),
         );
         assert.ok(
@@ -8232,6 +8335,27 @@ describe("hosted workspace runtime entrypoint", () => {
             < requireEventIndex(events, "snapshot:idle_shutdown"),
           events.join(","),
         );
+        if (telegramPhoneResultMustOutrankPendingInput) {
+          assert.ok(newerPendingInputId);
+          assert.ok(unrelatedPendingIntentId);
+          assert.equal(
+            phoneResultCheckpointPreparedBeforeProviderDispatch,
+            true,
+          );
+          assert.equal(unrelatedIntentStayedPendingDuringPhoneResult, true);
+          assert.ok(
+            requireEventIndex(events, providerEvent)
+              < requireEventIndex(events, "assistant.input:newer-lane-admitted"),
+            events.join(","),
+          );
+          if (events.includes("provider.send:unrelated-pending")) {
+            assert.ok(
+              requireEventIndex(events, providerEvent)
+                < requireEventIndex(events, "provider.send:unrelated-pending"),
+              events.join(","),
+            );
+          }
+        }
         assert.ok(assistantPhaseCalls >= 3);
       } finally {
         privateAskExecutionRelease.resolve();
