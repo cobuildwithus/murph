@@ -1,6 +1,6 @@
 # Repair response-card validation feedback and schema compatibility
 
-Status: active
+Status: completed
 Created: 2026-08-14
 Updated: 2026-08-15
 
@@ -62,7 +62,7 @@ Updated: 2026-08-15
 6. Completed: remediate final-review rounds two through four while preserving
    authoritative refinement ownership, exact accepted values, and provider
    schema compatibility.
-7. In progress: remove alternative-union flattening from diagnostics, add one
+7. Completed: remove alternative-union flattening from diagnostics, add one
    truthful family-choice hint for absent or invalid card kinds, run focused and
    proportional verification, and complete the remaining ReviewGPT/CI gates
    without merging.
@@ -140,6 +140,15 @@ Updated: 2026-08-15
   The two conflicts were the compact-table dynamic-tool boundary and compact
   table contract; resolution preserves main's semantic workout capacity/fallback
   and this PR's privacy-safe, audience-scoped repair hints.
+- Passed on exact reviewed production head `fcf53e4f73b3323476db5e549d1f481bdf0d32f2`:
+  safe digest and response-card validation (12 tests), response-card tool (27
+  tests), CLI schema compatibility (3 tests), operator response-card and schema
+  size (25 tests), and the assistant-engine, contracts, CLI, and operator-config
+  typechecks. The provider schema remains 4,913 bytes and the prior provider
+  input measurement remains +10 direct tokens and zero group tokens.
+- Passed: exact-head GitHub build/typecheck, app verification, assistant/CLI/
+  platform package coverage, host matrices, sandbox, billing, fixture, artifact,
+  frontend, and overflow checks.
 
 ## Preliminary review dispositions
 
@@ -222,3 +231,16 @@ Updated: 2026-08-15
 - Added generic union non-flattening coverage plus missing-kind, malformed-kind,
   privacy, exact-feedback, and corrected-retry response-card proofs. Existing
   selected-family nested repair coverage remains the regression owner.
+
+## Final review round 6 disposition
+
+- ReviewGPT returned `ROUND_OUTCOME: PASS` and `REVIEW_COMPLETE` with no
+  qualifying findings after a fresh full-snapshot audit of the exact reviewed
+  production head.
+- The configured ReviewGPT/Pro staging evidence is accepted for this task. The
+  response itself reported `MODEL_CONFIRMATION: UNKNOWN`; that self-confirmation
+  limitation is recorded and was not represented as stronger evidence.
+- Corrected the PR-body-only source arithmetic to +419/-63, total +1,908/-65,
+  and net -17 authored-source remediation versus the immutable first-reviewed
+  head. No production, test, schema, or runtime behavior changed after the PASS.
+Completed: 2026-08-15
