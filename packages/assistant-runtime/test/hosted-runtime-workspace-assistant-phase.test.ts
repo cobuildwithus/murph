@@ -16030,7 +16030,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       shouldYieldBackgroundMaintenance: null,
     }));
     expect(postCheckpoint).toEqual(expect.objectContaining({
-      afterDurableCheckpoint: expect.any(Function),
+      afterDurableCheckpoint: expect.any(Array),
       checkpointReason: "system_mailbox_receipt",
     }));
     expect(mocks.recordHostedSystemMailboxItemAfterCheckpoint).not.toHaveBeenCalled();
@@ -16050,6 +16050,21 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
   it("finishes member activation after the first foreground reply", async () => {
     const sequence: string[] = [];
     const activationItem = createMemberActivationSignupWelcomeSystemMailboxItem();
+    mocks.recordHostedSystemMailboxItemAfterCheckpoint.mockImplementationOnce(async () => {
+      sequence.push("member-activation-recorded");
+      return {
+        failed: 0,
+        nextWakeAt: null,
+        recorded: 1,
+      };
+    });
+    mocks.maintainAssistantAutoReplyRouteState.mockImplementationOnce(async () => {
+      sequence.push("route-maintenance");
+      return {
+        changed: true,
+        trusted: true,
+      };
+    });
     mocks.prepareHostedSystemMailboxItemForCheckpoint.mockImplementation(
       async (preparationInput) => {
         if (
@@ -16098,6 +16113,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     const postCheckpoint = await result.afterCheckpoint?.();
 
     expect(sequence).toEqual(["provider", "member-activation"]);
+    expect(mocks.maintainAssistantAutoReplyRouteState).not.toHaveBeenCalled();
     expect(
       mocks.prepareHostedSystemMailboxItemForCheckpoint.mock.calls.at(-1)?.[0],
     ).toEqual(expect.objectContaining({
@@ -16112,8 +16128,20 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       shouldYieldBackgroundMaintenance: null,
     }));
     expect(postCheckpoint).toEqual(expect.objectContaining({
+      afterDurableCheckpoint: expect.any(Array),
       checkpointReason: "system_mailbox_receipt",
     }));
+
+    await runHostedWorkspaceDurableCheckpointEffects(
+      postCheckpoint?.afterDurableCheckpoint,
+    );
+
+    expect(sequence).toEqual([
+      "provider",
+      "member-activation",
+      "member-activation-recorded",
+      "route-maintenance",
+    ]);
   });
 
   it("removes a real queued member activation after the first foreground reply", async () => {
