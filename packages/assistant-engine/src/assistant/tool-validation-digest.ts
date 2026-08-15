@@ -169,7 +169,7 @@ export function collectSafeJsonSchemaValidationPaths(schema: unknown): string[] 
           continue
         }
         const propertySegments = [...segments, key]
-        paths.add(propertySegments.join('.'))
+        paths.add(formatSchemaPath(propertySegments))
         visit(propertySchema, propertySegments, nextAncestors)
 
         if (patternProperties) {
@@ -184,7 +184,7 @@ export function collectSafeJsonSchemaValidationPaths(schema: unknown): string[] 
 
     if (record.items !== undefined) {
       const itemSegments = [...segments, '[]']
-      paths.add(itemSegments.join('.'))
+      paths.add(formatSchemaPath(itemSegments))
       visit(record.items, itemSegments, nextAncestors)
     }
 
@@ -399,7 +399,7 @@ function normalizeIssuePath(
     return null
   }
 
-  const path = segments.join('.')
+  const path = formatSchemaPath(segments)
   return !schemaPathSet || schemaPathSet.has(path) ? path : null
 }
 
@@ -417,7 +417,8 @@ function normalizeSchemaPathSet(
     return null
   }
   const normalized = paths
-    .filter((path) => isSafeSchemaPath(path))
+    .map(normalizeSchemaPath)
+    .filter((path): path is string => path !== null)
     .slice(0, MAX_SCHEMA_PATHS)
   return normalized.length > 0 ? new Set(normalized) : null
 }
@@ -474,14 +475,38 @@ function pathStartsWith(
   return prefix.every((segment, index) => path[index] === segment)
 }
 
-function isSafeSchemaPath(path: string): boolean {
+function normalizeSchemaPath(path: string): string | null {
   if (path.length === 0 || path.length > 512) {
-    return false
+    return null
   }
-  const segments = path.split('.')
-  return segments.length <= MAX_SCHEMA_PATH_DEPTH && segments.every((segment) =>
-    segment === '[]' || isSafeSchemaLikeKey(segment)
-  )
+  const segments: string[] = []
+  for (const rawSegment of path.split('.')) {
+    if (rawSegment === '[]') {
+      segments.push(rawSegment)
+      continue
+    }
+    const hasArrayMarker = rawSegment.endsWith('[]')
+    const property = hasArrayMarker ? rawSegment.slice(0, -2) : rawSegment
+    if (!isSafeSchemaLikeKey(property)) {
+      return null
+    }
+    segments.push(property)
+    if (hasArrayMarker) {
+      segments.push('[]')
+    }
+  }
+  return segments.length <= MAX_SCHEMA_PATH_DEPTH
+    ? formatSchemaPath(segments)
+    : null
+}
+
+function formatSchemaPath(segments: readonly string[]): string {
+  return segments.reduce((path, segment) => {
+    if (segment === '[]') {
+      return `${path}[]`
+    }
+    return path.length === 0 ? segment : `${path}.${segment}`
+  }, '')
 }
 
 function matchesSchemaPropertyPattern(key: string, pattern: string): boolean {

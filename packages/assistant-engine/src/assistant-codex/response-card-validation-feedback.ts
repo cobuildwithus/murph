@@ -11,7 +11,7 @@ const CUSTOM_EXPECTED_SHAPES: Readonly<Record<string, string>> = {
   'card.goals.fatGrams.status': 'consistent_with_total_and_target',
   'card.goals.fiberGrams.status': 'consistent_with_total_and_target',
   'card.goals.proteinGrams.status': 'consistent_with_total_and_target',
-  'card.rows.[].values': 'same_count_as_card.columns',
+  'card.rows[].values': 'same_count_as_card.columns',
   'card.subtitle': 'null_for_workout_card',
   'card.totals.calories.mealCount': 'at_most_card.mealCount',
   'card.totals.carbsGrams.mealCount': 'at_most_card.mealCount',

@@ -61,12 +61,12 @@ describe('response-card validation feedback', () => {
 
     expect(request.validationDigest.pathIssues).toEqual(expect.arrayContaining([
       expect.objectContaining({
-        path: 'card.rows.[].values',
+        path: 'card.rows[].values',
         code: 'too_small',
         expected: 'array.min_1',
       }),
       expect.objectContaining({
-        path: 'card.rows.[].values',
+        path: 'card.rows[].values',
         code: 'custom',
       }),
     ]))
@@ -83,7 +83,7 @@ describe('response-card validation feedback', () => {
       validationDigest: {
         pathIssues: expect.arrayContaining([
           expect.objectContaining({
-            path: 'card.rows.[].values.[]',
+            path: 'card.rows[].values[]',
             code: 'invalid_type',
             expected: 'string',
           }),
@@ -122,10 +122,10 @@ describe('response-card validation feedback', () => {
     const feedback = result.rpcResult.contentItems[0]?.text ?? ''
     expect(result.rpcResult.success).toBe(false)
     expect(feedback).toContain(
-      '"field":"card.rows.[].values","code":"too_small","expected":"array.min_1"',
+      '"field":"card.rows[].values","code":"too_small","expected":"array.min_1"',
     )
     expect(feedback).toContain(
-      '"field":"card.rows.[].values","code":"custom","expected":"same_count_as_card.columns"',
+      '"field":"card.rows[].values","code":"custom","expected":"same_count_as_card.columns"',
     )
     expect(feedback.length).toBeLessThanOrEqual(1_600)
     expect(feedback).not.toContain('"received"')

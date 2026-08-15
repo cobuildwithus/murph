@@ -217,8 +217,8 @@ describe('buildSafeToolCallValidationDigest', () => {
     expect(schemaPaths).toEqual([
       'card',
       'card.rows',
-      'card.rows.[]',
-      'card.rows.[].values',
+      'card.rows[]',
+      'card.rows[].values',
     ])
     const digest = buildSafeToolCallValidationDigest({
       error: parsed.error,
@@ -230,7 +230,7 @@ describe('buildSafeToolCallValidationDigest', () => {
 
     expect(digest.pathIssues).toEqual(expect.arrayContaining([
       expect.objectContaining({
-        path: 'card.rows.[].values',
+        path: 'card.rows[].values',
         code: 'too_small',
         expected: 'array.min_2',
       }),
@@ -238,6 +238,37 @@ describe('buildSafeToolCallValidationDigest', () => {
     const serialized = JSON.stringify(digest)
     expect(serialized).not.toContain('privateNote')
     expect(serialized).not.toContain('neutral synthetic value')
+
+    const smuggledPathDigest = buildSafeToolCallValidationDigest({
+      error: new z.ZodError([
+        {
+          code: 'custom',
+          message: 'Synthetic rejected path.',
+          path: ['card', 'rows[]', 'values'],
+        },
+        {
+          code: 'custom',
+          message: 'Synthetic rejected path.',
+          path: ['card', 'rows', '[]', 'values'],
+        },
+      ]),
+      rawInput: {
+        card: {
+          rows: {
+            '[]': { values: 'neutral synthetic value' },
+          },
+        },
+      },
+      schemaPaths,
+      schemaRootKeys: ['card'],
+      toolName: 'murph.attach_response_card',
+    })
+    expect(smuggledPathDigest.pathIssues).toBeUndefined()
+    expect(smuggledPathDigest.invalidPaths).toBeUndefined()
+    expect(JSON.stringify(smuggledPathDigest)).not.toContain('rows[]')
+    expect(JSON.stringify(smuggledPathDigest)).not.toContain(
+      'neutral synthetic value',
+    )
   })
 })
 
