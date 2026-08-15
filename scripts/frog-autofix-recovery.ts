@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+import { lstatSync, readFileSync, realpathSync } from "node:fs";
 import { homedir, userInfo } from "node:os";
 import path from "node:path";
 
@@ -37,6 +39,93 @@ export interface BranchPullRequestRecord extends PullRequestAuthorityRecord {
   mergedAt: string | null;
   number: number;
   state: "CLOSED" | "MERGED" | "OPEN";
+}
+
+export const WORKTREE_CREATION_INTENT_DIRECTORY = "worktree-create-intents";
+
+export function worktreeCreationIntentPath(
+  stateDir: string,
+  worktree: string,
+): string {
+  return path.join(
+    stateDir,
+    WORKTREE_CREATION_INTENT_DIRECTORY,
+    `${createHash("sha256").update(worktree).digest("hex")}.json`,
+  );
+}
+
+export function requireCompletedWorktreeCreation(
+  worktree: string,
+  commands: Pick<RecoveryCommandAdapter, "require">,
+): void {
+  const commonDir = commands.require(
+    "git",
+    ["rev-parse", "--path-format=absolute", "--git-common-dir"],
+    worktree,
+  );
+  const topLevel = commands.require(
+    "git",
+    ["rev-parse", "--show-toplevel"],
+    worktree,
+  );
+  if (!path.isAbsolute(commonDir) || !path.isAbsolute(topLevel)) {
+    throw new Error("issue worktree creation state could not be verified");
+  }
+  let canonicalWorktree: string;
+  try {
+    canonicalWorktree = realpathSync(topLevel);
+  } catch {
+    throw new Error("issue worktree creation state could not be verified");
+  }
+  const configuredStateDir = process.env.MURPH_WORKTREE_GUARD_STATE_DIR;
+  const stateDir = configuredStateDir ?? path.join(
+    commonDir,
+    "murph-worktree-storage-guard",
+  );
+  if (!path.isAbsolute(stateDir)) {
+    throw new Error("issue worktree creation state could not be verified");
+  }
+  const intentPath = worktreeCreationIntentPath(stateDir, canonicalWorktree);
+  let stats;
+  try {
+    stats = lstatSync(intentPath);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+    throw new Error("issue worktree creation state could not be verified");
+  }
+  if (!stats.isFile() || stats.isSymbolicLink() || stats.size > 4096) {
+    throw new Error("issue worktree creation state could not be verified");
+  }
+  let intent: unknown;
+  try {
+    intent = JSON.parse(readFileSync(intentPath, "utf8"));
+  } catch {
+    throw new Error("issue worktree creation state could not be verified");
+  }
+  if (
+    !intent
+    || typeof intent !== "object"
+    || Array.isArray(intent)
+    || (intent as { schema?: unknown }).schema !== 1
+    || (intent as { target?: unknown }).target !== canonicalWorktree
+    || !/^[0-9a-f]{40}$/u.test(
+      String((intent as { head?: unknown }).head ?? ""),
+    )
+    || (
+      (intent as { branch?: unknown }).branch !== null
+      && (
+        typeof (intent as { branch?: unknown }).branch !== "string"
+        || !/^refs\/heads\/[^\n\0]{1,1024}$/u.test(
+          String((intent as { branch?: unknown }).branch),
+        )
+      )
+    )
+  ) {
+    throw new Error("issue worktree creation state could not be verified");
+  }
+  throw new Error(
+    "issue worktree creation is incomplete; refusing destructive recovery",
+  );
 }
 
 export function branchOpenPullRequest(
@@ -341,6 +430,7 @@ export function resolveWorkerMode(
   issueNumber: number,
   commands: RecoveryCommandAdapter,
 ): FrogAutofixWorkerMode {
+  requireCompletedWorktreeCreation(worktree, commands);
   if (
     commands.require(
       "git",

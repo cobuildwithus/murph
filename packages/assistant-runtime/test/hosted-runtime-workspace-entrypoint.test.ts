@@ -7571,6 +7571,13 @@ describe("hosted workspace runtime entrypoint", () => {
       withConversationPrefix: true,
     },
     {
+      conversationHighWaterAhead: true,
+      dedupeKey: "member.activated:consumed-conversation-prefix-synthetic",
+      kind: "member.activated",
+      label: "member activation after a consumed conversation prefix",
+      preCheckpointSafe: true,
+    },
+    {
       dedupeKey:
         "assistant.notification.requested:phone-call-result:phone_call_synthetic",
       kind: "assistant.notification.requested",
@@ -7620,6 +7627,9 @@ describe("hosted workspace runtime entrypoint", () => {
         await initializeVault({ createdAt: TEST_NOW, vaultRoot });
         const withConversationPrefix = "withConversationPrefix" in completion
           && completion.withConversationPrefix;
+        const conversationHighWaterAhead =
+          "conversationHighWaterAhead" in completion
+          && completion.conversationHighWaterAhead;
         if (withConversationPrefix) {
           mailboxItems.push(
             createMailboxItem({
@@ -7637,6 +7647,29 @@ describe("hosted workspace runtime entrypoint", () => {
             }),
           );
         }
+        const baseMailboxPort = createMailboxPort({
+          events,
+          items: mailboxItems,
+        });
+        const mailboxPort: HostedRuntimeMailboxPort = conversationHighWaterAhead
+          ? {
+              ...baseMailboxPort,
+              async fetch(request) {
+                const response = await baseMailboxPort.fetch(request);
+                if (!mailboxItems.some((item) => item.lane === "system")) {
+                  return response;
+                }
+                return {
+                  ...response,
+                  maxSeqByLane: response.maxSeqByLane.map((entry) =>
+                    entry.lane === "conversation"
+                      ? { ...entry, maxSeq: "1" }
+                      : entry
+                  ),
+                };
+              },
+            }
+          : baseMailboxPort;
         const resultPromise = runHostedWorkspaceRuntimeJobInProcess(
           createWorkspaceRuntimeJobInput({
             request: {
@@ -7667,10 +7700,7 @@ describe("hosted workspace runtime entrypoint", () => {
               return { status: "imported" };
             },
             platform: createPlatform({
-              mailboxPort: createMailboxPort({
-                events,
-                items: mailboxItems,
-              }),
+              mailboxPort,
               workspacePort: createWorkspacePort({
                 checkpointRequests,
                 events,
@@ -7723,7 +7753,9 @@ describe("hosted workspace runtime entrypoint", () => {
         }
         assert.equal(
           result.status,
-          withConversationPrefix ? "scheduled" : "idle",
+          withConversationPrefix || conversationHighWaterAhead
+            ? "scheduled"
+            : "idle",
         );
       } finally {
         await removeTempRoot(vaultRoot);
@@ -32356,6 +32388,9 @@ describe("hosted workspace runtime entrypoint", () => {
           { importedSeq: "3", lane: "conversation" },
           { importedSeq: "0", lane: "system" },
         ],
+        [
+          { importedSeq: "0", lane: "system" },
+        ],
       ]);
       assert.equal(readConversationImportedSeqs(fetchRequests).length, 1);
       assert.deepEqual(fetchRequests[0]?.lanes, [
@@ -32368,6 +32403,7 @@ describe("hosted workspace runtime entrypoint", () => {
         "workspace.read",
         "mailbox.fetch",
         "mailbox.import",
+        "mailbox.fetch",
         "snapshot:4",
         "workspace.checkpoint",
       ]);
