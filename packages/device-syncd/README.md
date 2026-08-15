@@ -71,10 +71,12 @@ Current providers:
   the existing durable job queue in newest-first order. Succeeded job history
   proves populated or successful-empty completion across restarts and repeated
   scheduling; failed, yielded, or dead jobs grant no authority. Temporal
-  children never advance generic account completion; the parent or its one
-  durable ordinary reconcile follow-up retains that owner. At the failure/yield
-  ceiling, 28 temporal resource/day rows plus that follow-up remain serialized
-  by the existing per-account fence. Each child owns one resource/day
+  children never advance generic account completion. Generic completion is
+  account activity state, not proof that the complete ordinary pull floor ran;
+  every scheduled reconcile therefore refetches configured ordinary resources.
+  At the failure/yield ceiling, 28 temporal resource/day rows plus one durable
+  ordinary reconcile follow-up remain serialized by the existing per-account
+  fence. Each child owns one resource/day
   collection and one canonical import transaction. Collection
   remains capped at 100 pages and 25,000 records, with at most three attempts
   per page request, and full timeseries values are never retained.

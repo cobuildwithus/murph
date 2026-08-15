@@ -1291,7 +1291,6 @@ export function createJunctionDeviceSyncProvider(
     const deferredNewestTemporalResources = new Set<string>();
     let yieldedTimeseriesAt: string | null = null;
     let reconcileTimeseriesContinuation: JunctionDailyTimeseriesCursor | null = null;
-    let reconcileIncludesOrdinaryTimeseries = false;
     if (jobTimeseriesResources.length > 0 && job.kind === "backfill") {
       yieldedTimeseriesAt = (await importTimeseriesDailySnapshots(
         context,
@@ -1302,12 +1301,6 @@ export function createJunctionDeviceSyncProvider(
         jobTimeseriesResources,
       )).yieldedAt;
     } else if (jobTimeseriesResources.length > 0) {
-      const importNonTemporalResources = shouldImportClosedTimeseriesForReconcile(
-        context.account.lastSyncCompletedAt,
-        context.now,
-        context.vaultTimeZone,
-      );
-      reconcileIncludesOrdinaryTimeseries = importNonTemporalResources;
       const ordinaryDailyWindows = buildClosedDailyWindows(
         timeseriesWindowStart,
         window.windowEnd,
@@ -1319,9 +1312,8 @@ export function createJunctionDeviceSyncProvider(
         .filter(({ resource, resourceIndex }) =>
           resourceIndex >= startingResourceIndex
           && (
-            JUNCTION_TEMPORAL_AUTHORITY_RESOURCES.has(resource)
-              ? newestTemporalWindow !== null
-              : importNonTemporalResources
+            !JUNCTION_TEMPORAL_AUTHORITY_RESOURCES.has(resource)
+            || newestTemporalWindow !== null
           )
         );
       for (const [eligibleIndex, { resource, resourceIndex }] of eligibleResources.entries()) {
@@ -1409,7 +1401,6 @@ export function createJunctionDeviceSyncProvider(
       const queuedReconcileCursor = job.kind === "reconcile"
         && reconcileTimeseriesContinuation
         && temporalContinuationJobs.length > 0
-        && reconcileIncludesOrdinaryTimeseries
         ? resolveQueuedOrdinaryReconcileCursor(
             reconcileTimeseriesContinuation,
             jobTimeseriesResources,
@@ -6835,18 +6826,6 @@ function isFullUtcDayWindow(window: { windowStart: string; windowEnd: string }):
   return Date.parse(window.windowStart) < Date.parse(window.windowEnd)
     && window.windowStart === floorUtcDayTimestamp(window.windowStart)
     && window.windowEnd === floorUtcDayTimestamp(window.windowEnd);
-}
-
-function shouldImportClosedTimeseriesForReconcile(
-  lastSyncCompletedAt: string | null | undefined,
-  now: string,
-  timeZone: string | undefined,
-): boolean {
-  if (!lastSyncCompletedAt || !timeZone) {
-    return true;
-  }
-  return latestAuthoritativeVaultDayKey(lastSyncCompletedAt, timeZone)
-    !== latestAuthoritativeVaultDayKey(now, timeZone);
 }
 
 function normalizeJunctionTemporalReconcileDays(value: number): number {

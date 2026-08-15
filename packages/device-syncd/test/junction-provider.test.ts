@@ -8373,7 +8373,7 @@ test("Junction historical reconcile jobs preserve their summary window", async (
   assertJunctionWindowQuery(summaryRequest, "2026-04-01", "2026-04-01");
 });
 
-test("Junction skips same closed-day timeseries after a completed reconcile", async () => {
+test("Junction imports same closed-day ordinary timeseries after unrelated generic completion", async () => {
   const requests: string[] = [];
   const provider = createJunctionProvider(async (input) => {
     const url = readUrl(input);
@@ -8385,9 +8385,12 @@ test("Junction skips same closed-day timeseries after a completed reconcile", as
     if (url.startsWith("https://api.sandbox.us.junction.com/v2/summary/activity/junction-user-1")) {
       return createJsonResponse({ data: [] });
     }
+    if (url.startsWith("https://api.sandbox.us.junction.com/v2/timeseries/junction-user-1/hrv/grouped")) {
+      return createJsonResponse({ groups: {} });
+    }
 
     throw new Error(`Unexpected request: ${url}`);
-  });
+  }, { timeseriesResources: ["hrv"] });
   const importedSnapshots: unknown[] = [];
 
   await executeJunctionJob(
@@ -8409,7 +8412,10 @@ test("Junction skips same closed-day timeseries after a completed reconcile", as
   );
 
   assert.equal(importedSnapshots.length, 1);
-  assert.equal(requests.some((url) => url.includes("/v2/timeseries/")), false);
+  assert.equal(
+    requests.filter((url) => url.includes("/v2/timeseries/junction-user-1/hrv/grouped")).length,
+    7,
+  );
 });
 
 test("Junction temporal reconcile ignores generic job success and stays bounded to one day", async () => {

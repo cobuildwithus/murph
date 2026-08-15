@@ -165,9 +165,11 @@ drain/batch service seam in `packages/device-syncd/src/service.ts`.
    recreated by a later reconcile. A failed, unavailable, or yielded immediate
    resource becomes the same stable resource/day job ahead of the older
    backlog; a retryable failure does not block an independent temporal sibling.
-   Temporal resource/day children never advance generic account completion;
-   when a parent also retains ordinary work, the parent or its one durable
-   ordinary reconcile follow-up remains that completion owner.
+   Temporal resource/day children never advance generic account completion.
+   Generic completion is account activity state, not complete-resource or
+   complete-floor coverage, so it never gates ordinary reconcile collection.
+   When a parent also retains ordinary work, its one durable ordinary reconcile
+   follow-up preserves that work without becoming a separate coverage ledger.
    With two temporal resources, one reconcile therefore performs at most two
    immediate one-day collections and normally schedules at most 26 older
    one-resource/one-day jobs. If both immediate resources require durable

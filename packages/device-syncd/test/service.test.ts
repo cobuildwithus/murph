@@ -7957,6 +7957,199 @@ test("Junction reconcile atomically replaces a yielded temporal continuation wit
   }
 });
 
+test.each([
+  {
+    expectedProviderDays: ["2030-08-10", "2030-08-11"],
+    now: "2030-08-12T00:30:00.000Z",
+    timeZone: "UTC",
+  },
+  {
+    expectedProviderDays: ["2030-08-10", "2030-08-11"],
+    now: "2030-08-12T07:30:00.000Z",
+    timeZone: "America/Los_Angeles",
+  },
+  {
+    expectedProviderDays: ["2030-08-09", "2030-08-10"],
+    now: "2030-08-11T15:30:00.000Z",
+    timeZone: "Asia/Tokyo",
+  },
+])("Junction ordinary pull floor survives a higher-priority webhook and restart at the $timeZone boundary", async ({
+  expectedProviderDays,
+  now: nowIso,
+  timeZone,
+}) => {
+  const now = new Date(nowIso);
+  const zoneSlug = timeZone.replaceAll(/[^a-z]+/giu, "-").replaceAll(/^-|-$/gu, "");
+  const vaultRoot = await makeTempDirectory(`murph-device-syncd-junction-floor-${zoneSlug}`);
+  const databasePath = path.join(vaultRoot, ".runtime", "device-syncd.sqlite");
+  const externalAccountId = `junction-floor-${zoneSlug}`;
+  const activityRecord = {
+    id: `activity-${zoneSlug}`,
+    start: new Date(now.getTime() - 8 * 60 * 60_000).toISOString(),
+    end: new Date(now.getTime() - 60_000).toISOString(),
+    calories: 512,
+    heart_rate: 92,
+    source: { provider: "garmin" },
+  };
+  const requestedProviderDays: Array<[string | null, string | null]> = [];
+  const activityEvents: Array<{ id: string; revision: number }> = [];
+  let activityImportCount = 0;
+
+  await initializeVault({ vaultRoot, timezone: timeZone });
+  const canonicalImporter = createImporters();
+  const provider = createJunctionDeviceSyncProvider({
+    apiKey: "sk_us_fake_test_placeholder",
+    clientUserIdSecret: "test-only-hmac-secret",
+    environment: "sandbox",
+    region: "us",
+    reconcileDays: 2,
+    reconcileIntervalMs: 6 * 60 * 60_000,
+    summaryResources: ["activity"],
+    timeseriesResources: ["hrv"],
+    webhookSecret: "whsec_d2ViaG9vay10ZXN0LXNlY3JldA==",
+    fetchImpl: async (input) => {
+      const url = new URL(readUrl(input));
+      if (url.pathname === `/v2/user/providers/${externalAccountId}`) {
+        return createJsonResponse({
+          providers: [{
+            id: `provider-garmin-${zoneSlug}`,
+            slug: "garmin",
+            name: "Garmin",
+            status: "connected",
+            resource_availability: { activity: true, hrv: true },
+          }],
+        });
+      }
+      if (url.pathname === `/v2/summary/activity/${externalAccountId}`) {
+        return createJsonResponse({ data: [activityRecord] });
+      }
+      if (url.pathname === `/v2/timeseries/${externalAccountId}/hrv/grouped`) {
+        requestedProviderDays.push([
+          url.searchParams.get("start_date"),
+          url.searchParams.get("end_date"),
+        ]);
+        return createJsonResponse({ groups: {} });
+      }
+      throw new Error(`Unexpected Junction ordinary-floor request: ${url.pathname}`);
+    },
+  });
+  const openFixture = () => createServiceFixture({
+    secret: "secret-for-tests",
+    clock: { now: () => now },
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: databasePath,
+    },
+    importer: {
+      async importDeviceProviderSnapshot(input) {
+        const result = await canonicalImporter.importDeviceProviderSnapshot(input) as {
+          events?: Array<{ id: string; lifecycle?: { revision?: number } }>;
+        };
+        const activity = (input.snapshot as {
+          summaries?: { activity?: unknown[] };
+        }).summaries?.activity;
+        if ((activity?.length ?? 0) > 0) {
+          activityImportCount += 1;
+          activityEvents.push(...(result.events ?? []).map((event) => ({
+            id: event.id,
+            revision: event.lifecycle?.revision ?? 1,
+          })));
+        }
+        return result;
+      },
+      resolveDeviceProviderSnapshotDefaultTimeZone(input) {
+        return canonicalImporter.resolveDeviceProviderSnapshotDefaultTimeZone(input);
+      },
+    },
+    providers: [provider],
+  });
+  const fixture = openFixture();
+  let fixtureClosed = false;
+
+  try {
+    const account = fixture.store.upsertAccount({
+      provider: "junction",
+      externalAccountId,
+      displayName: "Junction",
+      scopes: [],
+      status: "active",
+      credential: {
+        kind: "provider_config",
+        providerConfigKey: "junction",
+        credentialMetadata: {},
+      },
+      connectedAt: new Date(now.getTime() - 30 * 24 * 60 * 60_000).toISOString(),
+      nextReconcileAt: new Date(now.getTime() - 60_000).toISOString(),
+    });
+    const webhook = createJunctionSvixWebhook({
+      body: {
+        event_type: "daily.data.activity.updated",
+        user_id: externalAccountId,
+        data: activityRecord,
+      },
+      messageId: `msg-ordinary-floor-${zoneSlug}`,
+    });
+
+    assert.equal(
+      (await fixture.service.handleWebhook("junction", webhook.headers, webhook.rawBody)).accepted,
+      true,
+    );
+    await fixture.service.runSchedulerOnce();
+    const queuedBeforeDrain = readJobsForAccountForTesting(fixture.store, account.id)
+      .map((job) => fixture.store.getJobById(job.id))
+      .filter((job): job is DeviceSyncJobRecord => job?.status === "queued");
+    assert.equal(
+      queuedBeforeDrain.some((job) => job.kind === "resource" && job.priority === 65),
+      true,
+      `expected priority-65 resource job; queued=${JSON.stringify(queuedBeforeDrain.map((job) => ({
+        kind: job.kind,
+        priority: job.priority,
+      })))}`,
+    );
+    assert.equal(
+      queuedBeforeDrain.some((job) => job.kind === "reconcile" && job.priority === 40),
+      true,
+    );
+
+    const processedWebhook = await fixture.service.runWorkerOnce();
+    assert.equal(processedWebhook?.kind, "resource");
+    assert.equal(processedWebhook?.priority, 65);
+    assert.equal(fixture.store.getAccountById(account.id)?.lastSyncCompletedAt, nowIso);
+    assert.equal(requestedProviderDays.length, 0);
+    assert.equal(activityImportCount, 1);
+    const webhookEventIds = new Set(activityEvents.map((event) => event.id));
+    assert.ok(webhookEventIds.size > 0);
+
+    fixture.close();
+    fixtureClosed = true;
+    const restarted = openFixture();
+    try {
+      const processedReconcile = await restarted.service.runWorkerOnce();
+      assert.equal(processedReconcile?.kind, "reconcile");
+      assert.equal(processedReconcile?.priority, 40);
+      assert.deepEqual(
+        requestedProviderDays,
+        expectedProviderDays.map((day) => [day, day]),
+      );
+      assert.equal(activityImportCount, 2);
+      assert.deepEqual(new Set(activityEvents.map((event) => event.id)), webhookEventIds);
+      assert.equal(activityEvents.every((event) => event.revision === 1), true);
+      assert.equal(
+        readJobsForAccountForTesting(restarted.store, account.id)
+          .filter((job) => job.status === "queued" && job.kind === "reconcile").length,
+        0,
+      );
+    } finally {
+      restarted.close();
+    }
+  } finally {
+    if (!fixtureClosed) {
+      fixture.close();
+    }
+  }
+});
+
 test("Junction reconcile checkpoints each completed day-resource before an in-flight cutoff", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-syncd-junction-reconcile-cursor");
   let now = new Date("2026-08-12T12:00:00.000Z");
