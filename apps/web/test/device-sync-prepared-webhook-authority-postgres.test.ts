@@ -383,6 +383,95 @@ describe.skipIf(!runPostgresProof)(
       }
     });
 
+    it("terminally settles a delayed signed Junction registration superseded by a replacement setup", async () => {
+      const fixture = await createFixture({ sourceLastErrorCode: null });
+      const providerFetch = vi.fn(async () => {
+        throw new Error("Superseded prepared work must not call Junction.");
+      });
+      const registry = createJunctionRegistry(providerFetch);
+      const replacementConnectedAt = new Date(fixture.receivedAt.getTime() + 60_000);
+      const replacementSetupExpiresAt = new Date(
+        replacementConnectedAt.getTime() + 15 * 60_000,
+      );
+
+      try {
+        const prepared = await prepareRegistration({ fixture, registry });
+        await fixture.store.upsertConnection({
+          connectedAt: replacementConnectedAt.toISOString(),
+          credential: {
+            kind: "provider_config",
+            providerConfigKey: "junction",
+          },
+          displayName: "Junction",
+          existingAccountPolicy: "replace",
+          externalAccountId: fixture.externalAccountId,
+          metadata: {},
+          nextReconcileAt: null,
+          ownerId: fixture.memberId,
+          provider: "junction",
+          scopes: [],
+          setupExpiresAt: replacementSetupExpiresAt.toISOString(),
+          setupPhase: "pending_link",
+          status: "active",
+        });
+        const connectionBefore = await fixture.prisma.deviceConnection.findUniqueOrThrow({
+          select: {
+            connectedAt: true,
+            setupExpiresAt: true,
+            setupPhase: true,
+            updatedAt: true,
+          },
+          where: { id: fixture.connectionId },
+        });
+        const sourceBefore = await fixture.prisma.deviceConnectionSource.findUniqueOrThrow({
+          select: {
+            lastDataAt: true,
+            lastErrorCode: true,
+            lastErrorMessage: true,
+            lastSeenAt: true,
+            status: true,
+            updatedAt: true,
+          },
+          where: { id: fixture.sourceId },
+        });
+        const consumeService = createIngressService({
+          fixture,
+          headers: new Headers(),
+          registry,
+        });
+
+        await expect(consumeService.handlePreparedWebhook(prepared)).resolves.toMatchObject({
+          accepted: true,
+          duplicate: false,
+        });
+
+        expect(providerFetch).not.toHaveBeenCalled();
+        await expectNoWebhookEffects(fixture, {
+          connectionUpdatedAt: connectionBefore.updatedAt,
+          expectedSource: sourceBefore,
+          traceId: prepared.traceId,
+        });
+        await expect(fixture.prisma.deviceConnection.findUniqueOrThrow({
+          select: {
+            connectedAt: true,
+            setupExpiresAt: true,
+            setupPhase: true,
+          },
+          where: { id: fixture.connectionId },
+        })).resolves.toEqual({
+          connectedAt: replacementConnectedAt,
+          setupExpiresAt: replacementSetupExpiresAt,
+          setupPhase: "pending_link",
+        });
+        await expect(consumeService.handlePreparedWebhook(prepared)).resolves.toMatchObject({
+          accepted: true,
+          duplicate: true,
+        });
+      } finally {
+        await cleanupFixture(fixture);
+      }
+    });
+
     it("keeps a newer source epoch when it supersedes delayed authority during provider I/O", async () => {
       const fixture = await createFixture({ sourceLastErrorCode: null });
       const supersedingLastSeenAt = new Date(fixture.receivedAt.getTime() + 1_000);
