@@ -95,6 +95,7 @@ import {
   normalizeMealNutrition,
 } from "./nutrition.ts";
 import {
+  isRawManifestFileName,
   parseRawImportManifest,
   resolveRawManifestPath,
   stageRawImportManifest,
@@ -107,7 +108,12 @@ import {
 import { assertCanonicalWriteLockScope } from "./operations/canonical-write-lock.ts";
 import { resolveVaultPath } from "./path-safety.ts";
 import { sanitizePathSegment } from "./path-safety.ts";
-import { prepareInlineRawArtifact, prepareRawArtifact, resolveRawAssetDirectory } from "./raw.ts";
+import {
+  prepareInlineRawArtifact,
+  prepareRawArtifact,
+  rawDirectoryMatchesOwner,
+  resolveRawAssetDirectory,
+} from "./raw.ts";
 import {
   buildIntegrationEvidencePart,
   buildIntegrationIngestAppendPlan,
@@ -3826,6 +3832,93 @@ function rejectDamagedExactDocumentEvidence(input: {
   );
 }
 
+async function inspectVerifiedExactDocumentManifestClaims(input: {
+  vaultRoot: string;
+  sourceReceipt: CommittedPayloadReceipt;
+}): Promise<Map<string, string>> {
+  const manifestPaths = await walkVaultFiles(input.vaultRoot, VAULT_LAYOUT.rawDocumentsDirectory, {
+    extension: ".json",
+  });
+  const claims = new Map<string, string>();
+
+  for (const manifestPath of manifestPaths) {
+    const fileName = manifestPath.slice(manifestPath.lastIndexOf("/") + 1);
+    if (!isRawManifestFileName(fileName)) {
+      continue;
+    }
+    const manifestText = await readUtf8File(input.vaultRoot, manifestPath);
+    let manifest: ReturnType<typeof parseRawImportManifest>;
+    try {
+      manifest = parseRawImportManifest(JSON.parse(manifestText));
+    } catch {
+      // A member document may legitimately have a manifest-like name. It is
+      // evidence only when the full internal manifest contract is intact.
+      continue;
+    }
+    const sourceArtifacts = manifest.artifacts.filter((artifact) =>
+      artifact.role === "source_document"
+    );
+    const artifact = sourceArtifacts[0];
+    if (
+      manifest.importKind !== "document"
+      || manifest.owner.kind !== "document"
+      || manifest.owner.id !== manifest.importId
+      || !rawDirectoryMatchesOwner(manifest.rawDirectory, manifest.owner)
+      || sourceArtifacts.length !== 1
+      || !artifact
+      || artifact.byteSize !== input.sourceReceipt.byteLength
+      || artifact.sha256 !== input.sourceReceipt.sha256
+    ) {
+      continue;
+    }
+    let resolvedManifestPath: string;
+    try {
+      resolvedManifestPath = resolveRawManifestPath({
+        artifacts: manifest.artifacts,
+        rawDirectory: manifest.rawDirectory,
+        importId: manifest.importId,
+        importedAt: manifest.importedAt,
+      });
+    } catch {
+      continue;
+    }
+    if (resolvedManifestPath !== manifestPath) {
+      continue;
+    }
+
+    const integrity = await statAndHashVaultFile(input.vaultRoot, artifact.relativePath);
+    if (!integrity) {
+      throw new VaultError(
+        "RAW_REFERENCE_MISSING",
+        "Preserved exact source evidence is missing its immutable raw artifact. Exact reuse will not create a replacement identity.",
+        { documentId: manifest.importId, manifestPath, relativePath: artifact.relativePath },
+      );
+    }
+    if (
+      integrity.byteSize !== artifact.byteSize
+      || integrity.sha256 !== artifact.sha256
+    ) {
+      rejectDamagedExactDocumentEvidence({
+        documentId: manifest.importId,
+        manifestPath,
+        reason: "raw artifact bytes do not match the immutable manifest",
+      });
+    }
+
+    const existing = claims.get(manifest.importId);
+    if (existing && existing !== manifestPath) {
+      rejectDamagedExactDocumentEvidence({
+        documentId: manifest.importId,
+        manifestPath,
+        reason: "multiple immutable manifests claim one exact document identity",
+      });
+    }
+    claims.set(manifest.importId, manifestPath);
+  }
+
+  return claims;
+}
+
 async function inspectExactDocumentSourceSet(input: {
   vaultRoot: string;
   sourceReceipt: CommittedPayloadReceipt;
@@ -3854,11 +3947,10 @@ async function inspectExactDocumentSourceSet(input: {
       latestDocuments.set(entry.record.id, entry);
     }
   }
-  // Canonical document history owns exact-source identity. Select the first
-  // immutable source attachment for each stable event id that claims the
-  // incoming digest, then verify only its derived sidecar and raw artifact.
-  // This distinguishes true absence from damaged owned evidence and keeps
-  // member documents named manifest.json out of metadata discovery.
+  // Reconcile the lifecycle ledger with immutable manifest evidence. A valid
+  // event supplies canonical lifecycle; a fully owner-bound manifest preserves
+  // the identity needed to distinguish an absent/invalid event from true source
+  // absence. Member files with manifest-like names do not satisfy that proof.
   const claims = new Map<string, {
     entry: EventSpineEntry<DocumentEventRecord>;
     raw: EventAttachment;
@@ -3876,8 +3968,21 @@ async function inspectExactDocumentSourceSet(input: {
       claims.set(entry.record.id, { entry, raw });
     }
   }
-  if (claims.size === 0) {
+  const manifestClaims = await inspectVerifiedExactDocumentManifestClaims(input);
+  if (claims.size === 0 && manifestClaims.size === 0) {
     return { deletedExactSourceExists: false, liveSources: [] };
+  }
+  const eventClaimDocumentIds = new Set(
+    [...claims.values()].map((claim) => claim.entry.record.documentId),
+  );
+  for (const [documentId, manifestPath] of manifestClaims) {
+    if (!eventClaimDocumentIds.has(documentId)) {
+      rejectDamagedExactDocumentEvidence({
+        documentId,
+        manifestPath,
+        reason: "immutable source evidence has no valid canonical document event",
+      });
+    }
   }
 
   const verified = new Map<string, {
@@ -3952,6 +4057,7 @@ async function inspectExactDocumentSourceSet(input: {
       || manifest.importedAt !== claim.entry.record.recordedAt
       || manifest.owner.kind !== "document"
       || manifest.owner.id !== documentId
+      || !rawDirectoryMatchesOwner(manifest.rawDirectory, manifest.owner)
       || resolvedManifestPath !== manifestPath
       || sourceArtifacts.length !== 1
       || !artifact
@@ -3967,23 +4073,11 @@ async function inspectExactDocumentSourceSet(input: {
         reason: "raw manifest does not match its canonical document owner",
       });
     }
-
-    const integrity = await statAndHashVaultFile(input.vaultRoot, artifact.relativePath);
-    if (!integrity) {
-      throw new VaultError(
-        "RAW_REFERENCE_MISSING",
-        "Preserved exact source evidence is missing its immutable raw artifact. Exact reuse will not create a replacement identity.",
-        { documentId, manifestPath, relativePath: artifact.relativePath },
-      );
-    }
-    if (
-      integrity.byteSize !== artifact.byteSize
-      || integrity.sha256 !== artifact.sha256
-    ) {
+    if (manifestClaims.get(documentId) !== manifestPath) {
       rejectDamagedExactDocumentEvidence({
         documentId,
         manifestPath,
-        reason: "raw artifact bytes do not match the immutable manifest",
+        reason: "raw manifest and artifact do not form one verified source claim",
       });
     }
 

@@ -1025,13 +1025,25 @@ function createIntegratedQueryServices(): QueryServices {
     },
     async resolveWorkoutImportStatusForRawSource(input: CommandContext & { rawRef: string }) {
       const core = await loadCoreRuntime()
+      let status: Awaited<ReturnType<typeof core.resolveWorkoutSourceImportStatus>>
+      try {
+        status = await core.resolveWorkoutSourceImportStatus({
+          vaultRoot: input.vault,
+          rawRef: input.rawRef,
+        })
+      } catch (error) {
+        throw toVaultCliError(error, {
+          DOCUMENT_EXACT_SOURCE_DELETED: { code: 'conflict' },
+          EVENT_BATCH_SOURCE_DOCUMENT_NOT_LIVE: { code: 'conflict' },
+          EVENT_BATCH_SOURCE_RAW_REF_MISSING: { code: 'conflict' },
+          RAW_MANIFEST_INVALID: { code: 'conflict' },
+          RAW_REFERENCE_MISSING: { code: 'conflict' },
+        })
+      }
       return {
         vault: input.vault,
         rawRef: input.rawRef,
-        status: await core.resolveWorkoutSourceImportStatus({
-          vaultRoot: input.vault,
-          rawRef: input.rawRef,
-        }),
+        status,
       }
     },
     async showDocumentManifest(input: CommandContext & {

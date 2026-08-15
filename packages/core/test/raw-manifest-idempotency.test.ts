@@ -264,6 +264,53 @@ test("exact document reuse distinguishes damaged owned evidence from source abse
   }
 });
 
+test("exact document reuse rejects verified raw evidence without a valid canonical document event", async () => {
+  const cases = [
+    {
+      name: "missing-document-event",
+      damage: async (vaultRoot: string, imported: Awaited<ReturnType<typeof importDocument>>) => {
+        await fs.writeFile(path.join(vaultRoot, imported.eventPath), "", "utf8");
+      },
+    },
+    {
+      name: "contract-invalid-document-event",
+      damage: async (vaultRoot: string, imported: Awaited<ReturnType<typeof importDocument>>) => {
+        await fs.writeFile(
+          path.join(vaultRoot, imported.eventPath),
+          `${JSON.stringify({ ...imported.event, schemaVersion: "invalid" })}\n`,
+          "utf8",
+        );
+      },
+    },
+  ] as const;
+
+  for (const testCase of cases) {
+    const vaultRoot = await makeTempDirectory(`murph-core-document-exact-reuse-${testCase.name}`);
+    const sourceRoot = await makeTempDirectory(`murph-core-document-exact-reuse-${testCase.name}-source`);
+    await initializeVault({ vaultRoot });
+    const sourcePath = path.join(sourceRoot, "workout-history.csv");
+    await fs.writeFile(sourcePath, "session,exercise,reps\na,Squat,5\n", "utf8");
+    const imported = await importDocument({ vaultRoot, sourcePath, reuseExact: true });
+    await testCase.damage(vaultRoot, imported);
+    const treeBeforeReplay = (await fs.readdir(vaultRoot, { recursive: true })).sort();
+
+    await assert.rejects(
+      importDocument({ vaultRoot, sourcePath, reuseExact: true }),
+      (error: unknown) => {
+        assert.equal(error instanceof VaultError, true);
+        assert.equal((error as VaultError).code, "RAW_MANIFEST_INVALID");
+        return true;
+      },
+    );
+    assert.deepEqual((await fs.readdir(vaultRoot, { recursive: true })).sort(), treeBeforeReplay);
+    assert.equal(
+      await fs.readFile(path.join(vaultRoot, imported.raw.relativePath), "utf8"),
+      await fs.readFile(sourcePath, "utf8"),
+    );
+    assert.ok((await fs.readFile(path.join(vaultRoot, imported.manifestPath), "utf8")).length > 0);
+  }
+});
+
 test("validateVault reports missing raw manifests by raw directory for immutable manifest files", async () => {
   const vaultRoot = await makeTempDirectory("murph-core-raw-manifest-missing");
   const sourceRoot = await makeTempDirectory("murph-core-raw-manifest-missing-source");

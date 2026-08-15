@@ -1507,9 +1507,23 @@ text(result.output);
     )
   })
 
-  it('stops before transformation when preserved exact-source evidence is damaged', {
+  it.sequential.each([
+    {
+      evidenceState: '{"canonicalDocumentExists":true,"requiredManifestPresent":false}\n',
+      name: 'missing manifest',
+      stateAssertions: `grep -q '"canonicalDocumentExists":true' source-evidence-state.json
+grep -q '"requiredManifestPresent":false' source-evidence-state.json`,
+    },
+    {
+      evidenceState: '{"canonicalDocumentEventValid":false,"rawManifestPresent":true,"rawArtifactVerified":true}\n',
+      name: 'missing canonical document event',
+      stateAssertions: `grep -q '"canonicalDocumentEventValid":false' source-evidence-state.json
+grep -q '"rawManifestPresent":true' source-evidence-state.json
+grep -q '"rawArtifactVerified":true' source-evidence-state.json`,
+    },
+  ])('stops before transformation when preserved exact-source evidence is damaged ($name)', {
     timeout: TURN_TIMEOUT_MS,
-  }, async () => {
+  }, async ({ evidenceState, stateAssertions }) => {
     const scenario = await prepareScriptedTurnScenario()
     const workdir = scenario.turnInput.workingDirectory
     const skillsRoot = path.join(workdir, 'skills')
@@ -1526,7 +1540,7 @@ text(result.output);
     )
     await writeFile(
       path.join(workdir, 'source-evidence-state.json'),
-      '{"canonicalDocumentExists":true,"requiredManifestPresent":false}\n',
+      evidenceState,
       'utf8',
     )
     await writeFile(
@@ -1539,8 +1553,7 @@ if [ "$1 $2 $3" = "workout import inspect" ]; then
   exit 0
 fi
 if [ "$1 $2" = "document import" ]; then
-  grep -q '"canonicalDocumentExists":true' source-evidence-state.json
-  grep -q '"requiredManifestPresent":false' source-evidence-state.json
+  ${stateAssertions}
   printf '%s\\n' '{"ok":false,"error":{"code":"conflict","message":"Preserved exact source evidence is incomplete or damaged. Exact reuse will not create a replacement identity."}}' >&2
   exit 2
 fi
@@ -1608,14 +1621,18 @@ text(result.output);
     expect(result.finalMessage).toContain('source evidence is incomplete or damaged')
     expect(result.finalMessage).toContain('stopped before rebuilding or importing')
     expect(result.finalMessage).toContain('needs explicit recovery')
-    expect((await readFile(path.join(workdir, 'commands.log'), 'utf8')).trim().split('\n'))
+    const toolOutputs = scenario.stub.requestSummariesSinceBaseline()
+      .flatMap((summary) => summary.customToolCallOutputs ?? [])
+      .join('\n')
+    const commandLog = await readFile(path.join(workdir, 'commands.log'), 'utf8')
+      .catch(() => null)
+    expect(commandLog, toolOutputs).not.toBeNull()
+    expect(commandLog?.trim().split('\n'))
       .toEqual([
         'workout import inspect workout-history.csv --format json',
         'document import workout-history.csv --source import --title Workout CSV source --reuse-exact --format json',
       ])
-    expect(scenario.stub.requestSummariesSinceBaseline()
-      .flatMap((summary) => summary.customToolCallOutputs ?? [])
-      .join('\n')).toContain(
+    expect(toolOutputs).toContain(
       '{"status":"damaged_exact_source","transformed":false,"writeAttempted":false}',
     )
   })

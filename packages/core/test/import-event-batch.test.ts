@@ -377,6 +377,26 @@ test("damaged document evidence cannot become a fresh workout source", async () 
         await fs.writeFile(path.join(vaultRoot, source.raw.relativePath), "changed source\n", "utf8");
       },
     },
+    {
+      exactReuseCode: "RAW_MANIFEST_INVALID",
+      guardedCode: "RAW_MANIFEST_INVALID",
+      name: "missing-document-event",
+      damage: async (vaultRoot: string, source: Awaited<ReturnType<typeof importWorkoutSourceDocument>>) => {
+        await fs.writeFile(path.join(vaultRoot, source.eventPath), "", "utf8");
+      },
+    },
+    {
+      exactReuseCode: "RAW_MANIFEST_INVALID",
+      guardedCode: "RAW_MANIFEST_INVALID",
+      name: "contract-invalid-document-event",
+      damage: async (vaultRoot: string, source: Awaited<ReturnType<typeof importWorkoutSourceDocument>>) => {
+        await fs.writeFile(
+          path.join(vaultRoot, source.eventPath),
+          `${JSON.stringify({ ...source.event, schemaVersion: "invalid" })}\n`,
+          "utf8",
+        );
+      },
+    },
   ] as const;
 
   for (const testCase of cases) {
@@ -429,9 +449,16 @@ test("damaged document evidence cannot become a fresh workout source", async () 
       },
     );
 
-    const [sourceMatches] = await findEventsByRawRefs({ vaultRoot, rawRefs: [rawRef] });
+    const workoutRecords = (await Promise.all(applied.eventShardPaths.map((relativePath) =>
+      readJsonlRecords({ vaultRoot, relativePath })
+    ))).flat();
     assert.equal(
-      sourceMatches?.filter((match) => match.latest.kind === "activity_session").length,
+      workoutRecords.filter((record) =>
+        typeof record === "object"
+        && record !== null
+        && "kind" in record
+        && record.kind === "activity_session"
+      ).length,
       1,
     );
     assert.equal(

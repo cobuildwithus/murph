@@ -76,6 +76,67 @@ function toJsonl(payloads: Array<Record<string, unknown>>): string {
   return `${payloads.map((payload) => JSON.stringify(payload)).join('\n')}\n`
 }
 
+async function rewriteDocumentEvent(
+  vaultRoot: string,
+  eventId: string,
+  mode: 'remove' | 'invalidate',
+): Promise<void> {
+  const eventRoot = path.join(vaultRoot, 'ledger', 'events')
+  const relativePaths = (await readdir(eventRoot, { recursive: true }))
+    .filter((relativePath) => relativePath.endsWith('.jsonl'))
+
+  for (const relativePath of relativePaths) {
+    const absolutePath = path.join(eventRoot, relativePath)
+    const lines = (await readFile(absolutePath, 'utf8')).split('\n').filter(Boolean)
+    let found = false
+    const rewritten = lines.flatMap((line) => {
+      const record: unknown = JSON.parse(line)
+      if (
+        typeof record !== 'object'
+        || record === null
+        || !('id' in record)
+        || record.id !== eventId
+      ) {
+        return [line]
+      }
+      found = true
+      return mode === 'remove'
+        ? []
+        : [JSON.stringify({ ...record, schemaVersion: 'invalid' })]
+    })
+    if (!found) {
+      continue
+    }
+    await writeFile(
+      absolutePath,
+      rewritten.length > 0 ? `${rewritten.join('\n')}\n` : '',
+      'utf8',
+    )
+    return
+  }
+
+  throw new Error(`Could not locate document event ${eventId}.`)
+}
+
+async function snapshotVaultFiles(vaultRoot: string): Promise<Array<[string, string]>> {
+  const entries = await readdir(vaultRoot, { recursive: true })
+  const snapshot: Array<[string, string]> = []
+  for (const relativePath of entries) {
+    try {
+      snapshot.push([
+        relativePath,
+        (await readFile(path.join(vaultRoot, relativePath))).toString('base64'),
+      ])
+    } catch (error) {
+      if (error instanceof Error && 'code' in error && error.code === 'EISDIR') {
+        continue
+      }
+      throw error
+    }
+  }
+  return snapshot.sort(([left], [right]) => left.localeCompare(right))
+}
+
 function withRawRef(rawFile: string, durationMinutes = 45) {
   const { externalRef: _externalRef, ...payload } = buildActivitySessionPayload()
   return { ...payload, durationMinutes, rawRefs: [rawFile] }
@@ -285,6 +346,68 @@ test('damaged exact-source evidence stops before replacement identity or workout
   ])
   assert.equal(workouts.ok, true)
   assert.equal(requireData(workouts).count, 1)
+}, 180_000)
+
+test('orphaned exact-source evidence stops before replacement identity or workout replay', async () => {
+  const cases = [
+    { mode: 'remove', name: 'missing-document-event' },
+    { mode: 'invalidate', name: 'contract-invalid-document-event' },
+  ] as const
+
+  for (const testCase of cases) {
+    const workDir = await mkdtemp(path.join(tmpdir(), `murph-cli-import-jsonl-${testCase.name}-`))
+    const vaultRoot = path.join(workDir, 'vault')
+    const sourcePath = path.join(workDir, 'workout-history.csv')
+    await writeFile(sourcePath, 'session,exercise,reps\nsession-a,Squat,5\n', 'utf8')
+    await runCli(['init', '--vault', vaultRoot])
+
+    const sourceImport = await runCli<DocumentImportResult>([
+      'document', 'import', sourcePath, '--reuse-exact', '--vault', vaultRoot,
+    ])
+    assert.equal(sourceImport.ok, true)
+    const source = requireData(sourceImport)
+    const inputPath = path.join(workDir, 'events.jsonl')
+    await writeFile(inputPath, toJsonl([withRawRef(source.rawFile)]), 'utf8')
+    const applied = await runCli<EventImportJsonlResult>([
+      'event', 'import-jsonl',
+      '--input', `@${inputPath}`,
+      '--source-raw-ref-once', source.rawFile,
+      '--apply',
+      '--vault', vaultRoot,
+    ])
+    assert.equal(applied.ok, true)
+    assert.equal(requireData(applied).createdCount, 1)
+
+    await rewriteDocumentEvent(vaultRoot, source.eventId, testCase.mode)
+    const filesBeforeReplay = await snapshotVaultFiles(vaultRoot)
+    const rejectedReplay = await runCli<DocumentImportResult>([
+      'document', 'import', sourcePath, '--reuse-exact', '--vault', vaultRoot,
+    ])
+    assert.equal(rejectedReplay.ok, false)
+    if (rejectedReplay.ok) throw new Error('expected orphaned exact-source reuse to fail')
+    assert.equal(rejectedReplay.error.code, 'conflict')
+    assert.match(rejectedReplay.error.message ?? '', /source evidence is incomplete or damaged/iu)
+
+    const rejectedStatus = await runCli<{ status: string }>([
+      'document', 'workout-import-status', source.rawFile, '--vault', vaultRoot,
+    ])
+    assert.equal(rejectedStatus.ok, false)
+    if (rejectedStatus.ok) throw new Error('expected orphaned source status to fail')
+    assert.equal(rejectedStatus.error.code, 'conflict')
+    assert.match(rejectedStatus.error.message ?? '', /source evidence is incomplete or damaged/iu)
+
+    const rejectedApply = await runCli<EventImportJsonlResult>([
+      'event', 'import-jsonl',
+      '--input', `@${inputPath}`,
+      '--source-raw-ref-once', source.rawFile,
+      '--apply',
+      '--vault', vaultRoot,
+    ])
+    assert.equal(rejectedApply.ok, false)
+    if (rejectedApply.ok) throw new Error('expected orphaned source apply to fail')
+    assert.equal(rejectedApply.error.code, 'conflict')
+    assert.deepEqual(await snapshotVaultFiles(vaultRoot), filesBeforeReplay)
+  }
 }, 180_000)
 
 test('workout import status exposes partial history without a completion receipt', async () => {
