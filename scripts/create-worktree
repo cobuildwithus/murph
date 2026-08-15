@@ -238,6 +238,78 @@ if (( registered_before == 1 )); then
   exit 1
 fi
 
+intent_branch=''
+intent_start="$start_point"
+if [[ "$mode" == -b || "$mode" == -B ]]; then
+  intent_branch="refs/heads/$branch"
+elif [[ "$mode" != --detach ]]; then
+  if [[ -n "$start_point" ]]; then
+    symbolic_start="$(
+      git -C "$repo_root" rev-parse --symbolic-full-name "$start_point" \
+        2>/dev/null || true
+    )"
+    case "$symbolic_start" in
+      refs/heads/*) intent_branch="$symbolic_start" ;;
+    esac
+  else
+    inferred_branch="$(basename "$target_path")"
+    git check-ref-format --branch "$inferred_branch" >/dev/null
+    intent_branch="refs/heads/$inferred_branch"
+    if git -C "$repo_root" show-ref --verify --quiet "$intent_branch"; then
+      intent_start="$intent_branch"
+    fi
+  fi
+fi
+[[ -n "$intent_start" ]] || intent_start=HEAD
+intent_head="$(
+  git -C "$repo_root" rev-parse --verify "$intent_start^{commit}"
+)"
+[[ "$intent_head" =~ ^[0-9a-f]{40}$ ]] || {
+  printf 'create-worktree: target head could not be resolved\n' >&2
+  exit 1
+}
+
+creation_intent_dir="$state_dir/worktree-create-intents"
+mkdir -p "$creation_intent_dir"
+creation_intent_key="$(
+  MURPH_WORKTREE_INTENT_TARGET="$target_path" node -e '
+    const { createHash } = require("node:crypto");
+    process.stdout.write(
+      createHash("sha256")
+        .update(process.env.MURPH_WORKTREE_INTENT_TARGET ?? "")
+        .digest("hex"),
+    );
+  '
+)"
+[[ "$creation_intent_key" =~ ^[0-9a-f]{64}$ ]] || {
+  printf 'create-worktree: creation intent identity could not be derived\n' >&2
+  exit 1
+}
+creation_intent_file="$creation_intent_dir/$creation_intent_key.json"
+if [[ -e "$creation_intent_file" || -L "$creation_intent_file" ]]; then
+  printf 'create-worktree: matching incomplete creation already exists\n' >&2
+  exit 1
+fi
+creation_intent_tmp="$creation_intent_file.tmp.$$"
+MURPH_WORKTREE_INTENT_BRANCH="$intent_branch" \
+MURPH_WORKTREE_INTENT_HEAD="$intent_head" \
+MURPH_WORKTREE_INTENT_TARGET="$target_path" \
+  node -e '
+    const { writeFileSync } = require("node:fs");
+    const branch = process.env.MURPH_WORKTREE_INTENT_BRANCH || null;
+    writeFileSync(
+      process.argv[1],
+      `${JSON.stringify({
+        schema: 1,
+        target: process.env.MURPH_WORKTREE_INTENT_TARGET,
+        branch,
+        head: process.env.MURPH_WORKTREE_INTENT_HEAD,
+      })}\n`,
+      { encoding: "utf8", flag: "wx", mode: 0o600 },
+    );
+  ' "$creation_intent_tmp"
+mv "$creation_intent_tmp" "$creation_intent_file"
+
 prepare_worktree_spotlight_exclusion
 
 set +e
@@ -287,5 +359,6 @@ if (( setup_status != 0 )); then
   rollback_registered_worktree "$setup_status"
 fi
 
+rm -f -- "$creation_intent_file"
 trap - EXIT INT TERM HUP
 exit 0

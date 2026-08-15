@@ -5,13 +5,17 @@ import { renderClientComponent } from "./render-client-component";
 
 const mocks = vi.hoisted(() => ({
   authDialogProps: null as {
+    description?: string;
     onCompleted?: (payload: {
       activationPending: boolean;
       inviteCode: string;
       joinUrl: string;
+      launchConsentGranted?: boolean;
       stage: string;
     }) => Promise<void> | void;
     open?: boolean;
+    requireLaunchConsentOnCompletion?: boolean;
+    title?: string;
   } | null,
   sessionInvalidationListener: null as null | ((
     source:
@@ -25,13 +29,17 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("@/src/components/hosted-onboarding/auth-dialog", () => ({
   AuthDialog(props: {
+    description?: string;
     onCompleted?: (payload: {
       activationPending: boolean;
       inviteCode: string;
       joinUrl: string;
+      launchConsentGranted?: boolean;
       stage: string;
     }) => Promise<void> | void;
     open?: boolean;
+    requireLaunchConsentOnCompletion?: boolean;
+    title?: string;
   }) {
     mocks.authDialogProps = props;
     return props.open
@@ -554,7 +562,7 @@ test("AuthProvider resumes a private computer handoff after sign-in completion",
   await rendered.cleanup();
 });
 
-test("AuthProvider resumes the data privacy settings handoff after sign-in completion", async () => {
+test("AuthProvider resumes privacy-only authentication without consent or stage gating", async () => {
   const { AuthProvider, useAuth } = await import(
     "@/src/components/hosted-onboarding/auth-dialog-provider"
   );
@@ -562,12 +570,12 @@ test("AuthProvider resumes the data privacy settings handoff after sign-in compl
   const reload = vi.fn();
 
   function OpenAuthButton() {
-    const { openAuthDialog } = useAuth();
+    const { openDataPrivacyAuthDialog } = useAuth();
     return createElement(
       "button",
       {
         type: "button",
-        onClick: openAuthDialog,
+        onClick: openDataPrivacyAuthDialog,
       },
       "Sign in",
     );
@@ -600,9 +608,21 @@ test("AuthProvider resumes the data privacy settings handoff after sign-in compl
     (button) => button.textContent === "Complete auth",
   );
   expect(completeButton).toBeTruthy();
+  expect(mocks.authDialogProps).toMatchObject({
+    description:
+      "Use the email address or phone number already linked to your Murph account.",
+    requireLaunchConsentOnCompletion: false,
+    title: "Log in to manage your data",
+  });
 
   await act(async () => {
-    completeButton?.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
+    await mocks.authDialogProps?.onCompleted?.({
+      activationPending: false,
+      inviteCode: "invite-code",
+      joinUrl: "/join/invite-code",
+      launchConsentGranted: false,
+      stage: "checkout",
+    });
   });
 
   expect(reload).toHaveBeenCalledTimes(1);

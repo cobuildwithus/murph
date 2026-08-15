@@ -4,7 +4,10 @@ import {
 } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { requireHostedRuntimeActiveAccessForUpdateTx } from "@/src/lib/hosted-mailbox/runtime-access";
+import {
+  requireHostedRuntimeActiveAccessForUpdateTx,
+  requireHostedRuntimeMembersActiveAccessForUpdateTx,
+} from "@/src/lib/hosted-mailbox/runtime-access";
 
 function buildRuntimeAccessTx(
   ownerReads: Array<string | null>,
@@ -75,12 +78,111 @@ function buildRuntimeAccessTx(
   };
 }
 
+function createBarrier(parties: number): () => Promise<void> {
+  let arrivals = 0;
+  let release!: () => void;
+  const opened = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+
+  return async () => {
+    arrivals += 1;
+    if (arrivals === parties) {
+      release();
+    }
+    await opened;
+  };
+}
+
+function createMemberLockManager() {
+  const owners = new Map<string, string>();
+  const waiters = new Map<string, Array<() => void>>();
+
+  return {
+    async acquire(transactionId: string, memberId: string): Promise<void> {
+      while (true) {
+        const owner = owners.get(memberId);
+        if (!owner || owner === transactionId) {
+          owners.set(memberId, transactionId);
+          return;
+        }
+
+        await new Promise<void>((resolve) => {
+          const memberWaiters = waiters.get(memberId) ?? [];
+          memberWaiters.push(resolve);
+          waiters.set(memberId, memberWaiters);
+        });
+      }
+    },
+    release(transactionId: string): void {
+      for (const [memberId, owner] of owners) {
+        if (owner !== transactionId) {
+          continue;
+        }
+        owners.delete(memberId);
+        waiters.get(memberId)?.shift()?.();
+      }
+    },
+  };
+}
+
+function buildReciprocalRuntimeAccessTx(input: {
+  awaitPeerAtFirstMemberLock: () => Promise<void>;
+  containerOwnerByMemberId?: ReadonlyMap<string, string>;
+  lockManager: ReturnType<typeof createMemberLockManager>;
+  transactionId: string;
+}): {
+  memberLockOrder: string[];
+  tx: Prisma.TransactionClient;
+} {
+  const memberLockOrder: string[] = [];
+  let firstMemberLock = true;
+  const tx = {
+    $queryRaw: vi.fn(async (strings: TemplateStringsArray, ...values: unknown[]) => {
+      const sql = Array.from(strings).join("?");
+      if (sql.includes("FROM hosted_thread_container")) {
+        const ownerMemberId = input.containerOwnerByMemberId?.get(
+          String(values[0]),
+        );
+        return ownerMemberId ? [{ ownerMemberId }] : [];
+      }
+      if (sql.includes("FROM hosted_member")) {
+        const memberId = String(values[0]);
+        if (firstMemberLock) {
+          firstMemberLock = false;
+          await input.awaitPeerAtFirstMemberLock();
+        }
+        memberLockOrder.push(memberId);
+        await input.lockManager.acquire(input.transactionId, memberId);
+        return [{ id: memberId }];
+      }
+      return [];
+    }),
+    hostedMember: {
+      findUnique: vi.fn(async () => ({
+        accountGroupMemberships: [],
+        billingStatus: HostedBillingStatus.active,
+        suspendedAt: null,
+        threadContainer: null,
+      })),
+    },
+    hostedThreadContainerParticipant: {
+      findFirst: vi.fn(async () => null),
+    },
+  };
+
+  return {
+    memberLockOrder,
+    tx: tx as unknown as Prisma.TransactionClient,
+  };
+}
+
 describe("requireHostedRuntimeActiveAccessForUpdateTx", () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
-  it("locks thread-container owner before the runtime member", async () => {
+  it("locks the owner before its runtime and thread-container revalidation", async () => {
     const { lockOrder, tx } = buildRuntimeAccessTx(["member_owner", "member_owner"]);
 
     await expect(requireHostedRuntimeActiveAccessForUpdateTx("member_group_runtime", {
@@ -130,4 +232,63 @@ describe("requireHostedRuntimeActiveAccessForUpdateTx", () => {
 
     expect(tx.hostedMember.findUnique).not.toHaveBeenCalled();
   });
+
+  it("completes reciprocal cross-owned runtime checks in owner-cluster order", async () => {
+    const awaitPeerAtFirstMemberLock = createBarrier(2);
+    const lockManager = createMemberLockManager();
+    const first = buildReciprocalRuntimeAccessTx({
+      awaitPeerAtFirstMemberLock,
+      containerOwnerByMemberId: new Map([
+        ["member_group_b", "member_b"],
+      ]),
+      lockManager,
+      transactionId: "transaction-a-to-b",
+    });
+    const second = buildReciprocalRuntimeAccessTx({
+      awaitPeerAtFirstMemberLock,
+      containerOwnerByMemberId: new Map([
+        ["member_group_a", "member_a"],
+      ]),
+      lockManager,
+      transactionId: "transaction-b-to-a",
+    });
+
+    const run = async (
+      transactionId: string,
+      tx: Prisma.TransactionClient,
+      memberIds: readonly string[],
+    ) => {
+      try {
+        await requireHostedRuntimeMembersActiveAccessForUpdateTx(memberIds, {
+          prisma: tx,
+        });
+      } finally {
+        lockManager.release(transactionId);
+      }
+    };
+
+    await Promise.all([
+      run(
+        "transaction-a-to-b",
+        first.tx,
+        ["member_a", "member_group_b"],
+      ),
+      run(
+        "transaction-b-to-a",
+        second.tx,
+        ["member_b", "member_group_a"],
+      ),
+    ]);
+
+    expect(first.memberLockOrder).toEqual([
+      "member_a",
+      "member_b",
+      "member_group_b",
+    ]);
+    expect(second.memberLockOrder).toEqual([
+      "member_a",
+      "member_group_a",
+      "member_b",
+    ]);
+  }, 1_000);
 });

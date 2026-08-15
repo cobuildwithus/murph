@@ -7,6 +7,8 @@ import {
   DEVICE_WEBHOOK_ADMISSION_TIMEOUT_MS,
   openDeviceWebhookQueueEnvelope,
   parseDeviceWebhookQueueEnvelope,
+  readDeviceWebhookQueuePersistenceFailureCode,
+  reencryptDeviceWebhookQueueEnvelopeForPersistence,
   sealDeviceWebhookQueueEnvelope,
 } from "../src/device-webhook-queue.ts";
 import {
@@ -62,21 +64,61 @@ describe("device webhook queue transport", () => {
       recipientPublicJwk: keys.publicJwk,
     });
 
-    await expect(openDeviceWebhookQueueEnvelope({
-      env: "production",
-      envelope,
-      privateKeyring,
-    })).rejects.toThrow("context mismatch");
+    await expectPersistenceFailureCode(
+      openDeviceWebhookQueueEnvelope({
+        env: "production",
+        envelope,
+        privateKeyring,
+      }),
+      "transport_context_mismatch",
+    );
 
     const tampered = structuredClone(envelope);
     tampered.encryptedPayload.ciphertext = replaceFirstBase64Character(
       tampered.encryptedPayload.ciphertext,
     );
-    await expect(openDeviceWebhookQueueEnvelope({
+    await expectPersistenceFailureCode(
+      openDeviceWebhookQueueEnvelope({
+        env: "test",
+        envelope: tampered,
+        privateKeyring,
+      }),
+      "transport_payload_open_failed",
+    );
+  });
+
+  it("distinguishes unavailable recipients from a mismatched private key", async () => {
+    const sealingKeys = await createRecipientKeys();
+    const workerKeys = await createRecipientKeys();
+    const envelope = await sealDeviceWebhookQueueEnvelope({
       env: "test",
-      envelope: tampered,
-      privateKeyring,
-    })).rejects.toThrow();
+      preparedWebhook: createPreparedWebhook(),
+      recipientKeyId: "automation:sealing",
+      recipientPublicJwk: sealingKeys.publicJwk,
+    });
+
+    await expectPersistenceFailureCode(
+      openDeviceWebhookQueueEnvelope({
+        env: "test",
+        envelope,
+        privateKeyring: createDeviceWebhookTransportPrivateKeyring({
+          activePrivateJwk: workerKeys.privateJwk,
+          activeRecipientKeyId: "automation:worker",
+        }),
+      }),
+      "transport_recipient_key_unavailable",
+    );
+    await expectPersistenceFailureCode(
+      openDeviceWebhookQueueEnvelope({
+        env: "test",
+        envelope,
+        privateKeyring: createDeviceWebhookTransportPrivateKeyring({
+          activePrivateJwk: workerKeys.privateJwk,
+          activeRecipientKeyId: "automation:sealing",
+        }),
+      }),
+      "transport_root_key_unwrap_failed",
+    );
   });
 
   it("rejects malformed prepared meaning at the Queue contract boundary", () => {
@@ -97,23 +139,77 @@ describe("device webhook queue transport", () => {
       recipientPublicJwk: oldKeys.publicJwk,
     });
 
+    const privateKeyring = createDeviceWebhookTransportPrivateKeyring({
+      activePrivateJwk: activeKeys.privateJwk,
+      activeRecipientKeyId: "automation:active",
+      keyringJson: JSON.stringify({
+        "automation:old": {
+          privateJwk: oldKeys.privateJwk,
+          recipient: "cloudflare-automation-secret",
+          status: "decrypt_only",
+        },
+      }),
+    });
     await expect(openDeviceWebhookQueueEnvelope({
       env: "test",
       envelope,
+      privateKeyring,
+    })).resolves.toMatchObject({
+      preparedWebhook: { provider: "whoop" },
+    });
+
+    const persisted = await reencryptDeviceWebhookQueueEnvelopeForPersistence({
+      activeRecipientKeyId: "automation:active",
+      env: "test",
+      envelope,
+      privateKeyring,
+    });
+    expect(persisted.transportId).not.toBe(envelope.transportId);
+    await expect(openDeviceWebhookQueueEnvelope({
+      env: "test",
+      envelope: persisted,
       privateKeyring: createDeviceWebhookTransportPrivateKeyring({
         activePrivateJwk: activeKeys.privateJwk,
         activeRecipientKeyId: "automation:active",
-        keyringJson: JSON.stringify({
-          "automation:old": {
-            privateJwk: oldKeys.privateJwk,
-            recipient: "cloudflare-automation-secret",
-            status: "decrypt_only",
-          },
-        }),
       }),
     })).resolves.toMatchObject({
       preparedWebhook: { provider: "whoop" },
     });
+  });
+
+  it("classifies an unusable active persistence key before Queue storage", async () => {
+    const oldKeys = await createRecipientKeys();
+    const activeKeys = await createRecipientKeys();
+    const envelope = await sealDeviceWebhookQueueEnvelope({
+      env: "test",
+      preparedWebhook: createPreparedWebhook(),
+      recipientKeyId: "automation:old",
+      recipientPublicJwk: oldKeys.publicJwk,
+    });
+    const privateKeyring = createDeviceWebhookTransportPrivateKeyring({
+      activePrivateJwk: {
+        ...activeKeys.privateJwk,
+        x: "not-base64url",
+      },
+      activeRecipientKeyId: "automation:active",
+      keyringJson: JSON.stringify({
+        "automation:old": {
+          privateJwk: oldKeys.privateJwk,
+          recipient: "cloudflare-automation-secret",
+          status: "decrypt_only",
+        },
+      }),
+    });
+
+    await expectPersistenceFailureCode(
+      reencryptDeviceWebhookQueueEnvelopeForPersistence({
+        activeRecipientKeyId: "automation:active",
+        env: "test",
+        envelope,
+        privateKeyring,
+      }),
+      "persistence_reseal_failed",
+    );
   });
 });
 
@@ -143,6 +239,18 @@ async function createRecipientKeys(): Promise<{
     privateJwk: await crypto.subtle.exportKey("jwk", keys.privateKey),
     publicJwk: await crypto.subtle.exportKey("jwk", keys.publicKey),
   };
+}
+
+async function expectPersistenceFailureCode(
+  promise: Promise<unknown>,
+  expectedCode: ReturnType<typeof readDeviceWebhookQueuePersistenceFailureCode>,
+): Promise<void> {
+  try {
+    await promise;
+    throw new Error("Expected device webhook Queue persistence to fail.");
+  } catch (error) {
+    expect(readDeviceWebhookQueuePersistenceFailureCode(error)).toBe(expectedCode);
+  }
 }
 
 function replaceFirstBase64Character(value: string): string {

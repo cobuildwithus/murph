@@ -1,6 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { DEVICE_SYNC_DISCONNECT_IN_PROGRESS_ERROR_CODE } from "@murphai/device-syncd/public-account";
+import {
+  DEVICE_SYNC_DISCONNECT_IN_PROGRESS_ERROR_CODE,
+  DEVICE_SYNC_DISCONNECT_RECOVERY_REQUIRED_ERROR_CODE,
+} from "@murphai/device-syncd/public-account";
 
 const { openHostedUserSecureBoxStringMock } = vi.hoisted(() => ({
   openHostedUserSecureBoxStringMock: vi.fn(
@@ -94,12 +97,26 @@ function createHeartbeatStore(seed: Partial<Pick<
     updatedAt: new Date("2026-03-25T00:00:00.000Z"),
     ...seed,
   };
-  const findFirst = vi.fn(async ({ where }: { where: { id: string; userId: string } }) =>
-    where.id === staticRecord.id && where.userId === staticRecord.userId ? { ...staticRecord } : null,
+  const findFirst = vi.fn(async ({ where }: {
+    where: { id: string; userId?: string };
+  }) =>
+    where.id === staticRecord.id
+      && (where.userId === undefined || where.userId === staticRecord.userId)
+      ? { ...staticRecord }
+      : null,
   );
   const executeRaw = vi.fn(async () => 0);
-  const updateConnection = vi.fn(async ({ data }: { data: Record<string, unknown> }) => {
+  const updateConnection = vi.fn(async ({ data, where }: {
+    data: Record<string, unknown>;
+    where: { id: string; status?: { not?: string } };
+  }) => {
     options.beforeUpdate?.(staticRecord);
+    if (
+      where.id !== staticRecord.id
+      || where.status?.not === staticRecord.status
+    ) {
+      return { count: 0 };
+    }
     Object.assign(staticRecord, {
       status: typeof data.status === "string" ? data.status : staticRecord.status,
       connectedAt: data.connectedAt instanceof Date ? data.connectedAt : staticRecord.connectedAt,
@@ -166,31 +183,27 @@ function createHeartbeatStore(seed: Partial<Pick<
       updatedAt: new Date(staticRecord.updatedAt.getTime() + 60_000),
     });
 
-    return {
-      ...staticRecord,
-      metadataJson: staticRecord.metadataJson ? { ...staticRecord.metadataJson } : null,
-      scopesJson: staticRecord.scopesJson ? [...staticRecord.scopesJson] : null,
-    };
+    return { count: 1 };
   });
   const store = new PrismaDeviceSyncControlPlaneStore({
     prisma: {
       deviceConnection: {
         findFirst,
-        update: updateConnection,
+        updateMany: updateConnection,
       },
       $transaction: async (
         callback: (tx: {
           $executeRaw: typeof executeRaw;
           deviceConnection: {
             findFirst: typeof findFirst;
-            update: typeof updateConnection;
+            updateMany: typeof updateConnection;
           };
         }) => Promise<unknown>,
       ) => callback({
         $executeRaw: executeRaw,
         deviceConnection: {
           findFirst,
-          update: updateConnection,
+          updateMany: updateConnection,
         },
       }),
     } as never,
@@ -276,14 +289,14 @@ describe("PrismaDeviceSyncControlPlaneStore local heartbeat updates", () => {
       $executeRaw: vi.fn(async () => 0),
       deviceConnection: {
         findFirst: vi.fn(async () => ({ ...record })),
-        update: vi.fn(async () => ({ ...record })),
+        updateMany: vi.fn(async () => ({ count: 1 })),
       },
     };
     const store = new PrismaDeviceSyncControlPlaneStore({
       prisma: {
         deviceConnection: {
           findFirst: failOnRootClientUse,
-          update: failOnRootClientUse,
+          updateMany: failOnRootClientUse,
         },
         $transaction: async (callback: (client: typeof tx) => Promise<unknown>) => callback(tx),
       } as never,
@@ -460,8 +473,40 @@ describe("PrismaDeviceSyncControlPlaneStore local heartbeat updates", () => {
     expect(updateConnection).not.toHaveBeenCalled();
   });
 
-  it("preserves concurrent non-heartbeat connection updates across a later heartbeat write", async () => {
-    const { executeRaw, store, updateConnection } = createHeartbeatStore({
+  it.each([
+    ["unknown token refresh", "TOKEN_REFRESH_STATE_UNKNOWN"],
+    ["unfinished provider disconnect", DEVICE_SYNC_DISCONNECT_RECOVERY_REQUIRED_ERROR_CODE],
+  ])("preserves the %s recovery fence against later heartbeats", async (_label, lastErrorCode) => {
+    const lastSyncErrorAt = new Date("2026-03-25T01:06:00.000Z");
+    const { staticRecord, store, updateConnection } = createHeartbeatStore({
+      lastErrorCode,
+      lastErrorMessage: "Reconnect before retrying cleanup.",
+      lastSyncErrorAt,
+      lastSyncStartedAt: new Date("2026-03-25T01:00:00.000Z"),
+      status: "reauthorization_required",
+    });
+
+    await expect(store.updateConnectionFromLocalHeartbeat("user-123", "dsc_123", {
+      lastSyncStartedAt: "2026-03-25T01:10:00.000Z",
+    })).rejects.toMatchObject({
+      accountStatus: "reauthorization_required",
+      code: "ACCOUNT_REAUTHORIZATION_REQUIRED",
+      httpStatus: 409,
+      retryable: false,
+    });
+
+    expect(updateConnection).not.toHaveBeenCalled();
+    expect(staticRecord).toMatchObject({
+      lastErrorCode,
+      lastErrorMessage: "Reconnect before retrying cleanup.",
+      lastSyncErrorAt,
+      lastSyncStartedAt: new Date("2026-03-25T01:00:00.000Z"),
+      status: "reauthorization_required",
+    });
+  });
+
+  it("rejects a heartbeat when a concurrent durable update requires reauthorization", async () => {
+    const { executeRaw, staticRecord, store, updateConnection } = createHeartbeatStore({
       displayName: "Oura ring",
       metadataJson: {
         source: "stale",
@@ -483,22 +528,26 @@ describe("PrismaDeviceSyncControlPlaneStore local heartbeat updates", () => {
       },
     });
 
-    const updated = await store.updateConnectionFromLocalHeartbeat("user-123", "dsc_123", {
+    await expect(store.updateConnectionFromLocalHeartbeat("user-123", "dsc_123", {
       lastSyncCompletedAt: "2026-03-25T01:30:00.000Z",
+    })).rejects.toMatchObject({
+      accountStatus: "reauthorization_required",
+      code: "ACCOUNT_REAUTHORIZATION_REQUIRED",
     });
 
-    expect(updated).toMatchObject({
+    expect(staticRecord).toMatchObject({
       displayName: "Oura ring 2",
-      nextReconcileAt: "2026-03-25T03:00:00.000Z",
-      scopes: ["daily", "workouts"],
+      lastSyncCompletedAt: null,
+      nextReconcileAt: new Date("2026-03-25T03:00:00.000Z"),
+      scopesJson: ["daily", "workouts"],
       status: "reauthorization_required",
-      lastSyncCompletedAt: "2026-03-25T01:30:00.000Z",
     });
     expect(executeRaw).toHaveBeenCalledTimes(1);
 
     const updateCall = updateConnection.mock.calls[0]?.[0];
-    expect(updateCall?.data).toEqual({
-      lastSyncCompletedAt: expect.any(Date),
+    expect(updateCall?.where).toEqual({
+      id: "dsc_123",
+      status: { not: "reauthorization_required" },
     });
   });
 });

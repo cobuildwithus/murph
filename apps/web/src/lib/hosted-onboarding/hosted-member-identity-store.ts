@@ -5,6 +5,7 @@ import {
   type HostedMember,
   type HostedMemberIdentity,
   Prisma,
+  type PrismaClient,
 } from "@prisma/client";
 
 import {
@@ -107,6 +108,40 @@ export interface HostedMemberIdentityWriteInput {
   signupPhoneCodeSendAttemptStartedAt: Date | null;
   signupPhoneCodeSentAt: Date | null;
   signupPhoneNumber: string | null;
+}
+
+export interface PreparedHostedMemberIdentityWrite {
+  create: Prisma.HostedMemberIdentityUncheckedCreateInput;
+  update: Prisma.HostedMemberIdentityUncheckedUpdateInput;
+}
+
+export async function prepareHostedMemberIdentityWrite(input: Omit<
+  HostedMemberIdentityWriteInput,
+  "prisma"
+> & { prisma: PrismaClient }): Promise<PreparedHostedMemberIdentityWrite> {
+  await provisionActiveHostedDomainRootEnvelopeForUserOnly({
+    domain: "control",
+    prisma: input.prisma,
+    reason: "hosted-member.identity-private-fields",
+    userId: input.memberId,
+  });
+  const mutation = await buildHostedMemberIdentityMutationData(input);
+  return {
+    create: { memberId: input.memberId, ...mutation },
+    update: mutation,
+  };
+}
+
+export async function commitPreparedHostedMemberIdentityWriteTx(input: {
+  memberId: string;
+  prepared: PreparedHostedMemberIdentityWrite;
+  prisma: Prisma.TransactionClient;
+}): Promise<void> {
+  await input.prisma.hostedMemberIdentity.upsert({
+    create: input.prepared.create,
+    update: input.prepared.update,
+    where: { memberId: input.memberId },
+  });
 }
 
 export interface HostedMemberSignupPhoneStateWriteInput {
