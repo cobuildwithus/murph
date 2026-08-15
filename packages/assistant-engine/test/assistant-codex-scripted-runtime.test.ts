@@ -5401,6 +5401,98 @@ if (!tool) {
     }
   })
 
+  it('repairs an invalid private response-card call and attaches it in the same App Server turn', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const scenario = await prepareScriptedTurnScenario()
+    const correctedCard = {
+      kind: 'compact_table',
+      version: 1,
+      title: 'Synthetic plan',
+      subtitle: null,
+      rowHeader: 'Day',
+      columns: ['Focus'],
+      rows: [{ label: 'Monday', values: ['Strength'] }],
+      footer: null,
+      tracking: null,
+    } as const
+    scenario.stub.queue(
+      {
+        functionCall: {
+          arguments: {
+            typo: { marker: 'synthetic-private-marker' },
+          },
+          name: 'attach_response_card',
+          namespace: 'murph',
+        },
+      },
+      {
+        functionCall: {
+          arguments: { card: correctedCard },
+          name: 'attach_response_card',
+          namespace: 'murph',
+        },
+      },
+      { text: 'CARD_REPAIRED' },
+    )
+
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      dynamicTools: [MURPH_ATTACH_RESPONSE_CARD_TOOL],
+      groupConversation: false,
+      prompt: 'Attach the requested synthetic response card.',
+    })
+
+    const summaries = scenario.stub.requestSummariesSinceBaseline()
+    const invalidOutput = summaries[1]?.functionCallOutputs?.join('\n') ?? ''
+    expect(invalidOutput).toContain('invalid_response_card_arguments')
+    expect(invalidOutput).toContain('"field":"card"')
+    expect(invalidOutput).not.toContain('challengeSlug')
+    expect(invalidOutput).not.toContain('synthetic-private-marker')
+    expect(invalidOutput).not.toContain('typo')
+    expect(summaries[2]?.functionCallOutputs?.join('\n')).toContain(
+      'response card attached',
+    )
+    expect(result.responseCard).toEqual(correctedCard)
+    expect(result.finalMessage).toContain(correctedCard.title)
+    expect(result.finalMessage).toContain(correctedCard.rows[0].values[0])
+    expect(result.finalMessage).not.toBe('CARD_REPAIRED')
+    expect(scenario.stub.requestCountSinceBaseline()).toBe(3)
+  })
+
+  it('keeps malformed group-card repair feedback on the group contract', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const scenario = await prepareScriptedTurnScenario()
+    scenario.stub.queue(
+      {
+        functionCall: {
+          arguments: {},
+          name: 'attach_response_card',
+          namespace: 'murph',
+        },
+      },
+      { text: 'GROUP_CARD_REJECTED' },
+    )
+
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      dynamicTools: GROUP_CHALLENGE_DYNAMIC_TOOLS,
+      groupConversation: true,
+      prompt: 'Try the requested synthetic group challenge card.',
+    })
+
+    const invalidOutput = scenario.stub.requestSummariesSinceBaseline()[1]
+      ?.functionCallOutputs?.join('\n') ?? ''
+    expect(invalidOutput).toContain('invalid_response_card_arguments')
+    expect(invalidOutput).toContain('"field":"challengeSlug"')
+    expect(invalidOutput).toContain('"field":"pageRevisionDigest"')
+    expect(invalidOutput).not.toContain('"field":"card"')
+    expect(result.responseCard).toBeNull()
+    expect(result.finalMessage).toBe('GROUP_CARD_REJECTED')
+    expect(scenario.stub.requestCountSinceBaseline()).toBe(2)
+  })
+
   it('proves complete Goal and safety discovery before nutrition targets and cards', {
     timeout: 720_000,
   }, async () => {

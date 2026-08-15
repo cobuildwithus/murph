@@ -1428,41 +1428,14 @@ function createAssistantResponseCardJsonSchema() {
       'tracking',
     ],
   } as const
-  const alignedRowsForColumnCount = (columnCount: number) => ({
-    properties: {
-      columns: {
-        minItems: columnCount,
-        maxItems: columnCount,
-      },
-      rows: {
-        items: {
-          properties: {
-            values: {
-              minItems: columnCount,
-              maxItems: columnCount,
-            },
-          },
-        },
-      },
-    },
-  })
   const compactTable = {
     allOf: [
       compactTableFields,
       {
         oneOf: [
           {
-            allOf: [
-              {
-                required: ['rowHeader', 'columns', 'rows'],
-              },
-              {
-                oneOf: Array.from(
-                  { length: compactTableCardV1Bounds.columns },
-                  (_value, index) => alignedRowsForColumnCount(index + 1),
-                ),
-              },
-            ],
+            properties: { workout: false },
+            required: ['rowHeader', 'columns', 'rows'],
           },
           {
             properties: {

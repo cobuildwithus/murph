@@ -1431,6 +1431,7 @@ export function readMurphDynamicToolRequest(
   message: CodexRpcMessage,
   input?: {
     automationRelativeDateReferenceWindow?: AssistantAcceptedTurnInputReferenceWindow | null
+    responseCardAudience?: 'group' | 'private' | null
   },
 ): MurphDynamicToolRequest | null {
   const request = parseDynamicToolCallRequest(message)
@@ -1546,7 +1547,10 @@ export function readMurphDynamicToolRequest(
       }
     }
     case MURPH_ATTACH_RESPONSE_CARD_TOOL.name: {
-      const parsed = parseAttachResponseCardArguments(request.arguments)
+      const parsed = parseAttachResponseCardArguments(
+        request.arguments,
+        input?.responseCardAudience ?? null,
+      )
       if (!parsed.ok) {
         return {
           kind: 'invalid-response-card-arguments',
@@ -7087,6 +7091,7 @@ function parseComputerArguments<TArgs>(input: {
 
 function parseAttachResponseCardArguments(
   value: unknown,
+  audience: 'group' | 'private' | null,
 ):
   | { ok: true; card: AssistantResponseCard; groupChallenge: false }
   | {
@@ -7097,29 +7102,34 @@ function parseAttachResponseCardArguments(
   | { ok: false; validationDigest: SafeToolCallValidationDigest } {
   const schemaName = 'murph.attach_response_card.input'
   const toolName = 'murph.attach_response_card'
-  const parsed = attachResponseCardArgumentsSchema.safeParse(value)
-  if (parsed.success) {
-    return {
-      card: parsed.data.card,
-      groupChallenge: false,
-      ok: true,
+  if (audience !== 'group') {
+    const parsed = attachResponseCardArgumentsSchema.safeParse(value)
+    if (parsed.success) {
+      return {
+        card: parsed.data.card,
+        groupChallenge: false,
+        ok: true,
+      }
     }
-  }
-  if (Object.hasOwn(asRecord(value) ?? {}, 'card')) {
-    const diagnosticError = readAttachResponseCardDiagnosticError(
-      value,
-      parsed.error,
-    )
-    return {
-      ok: false,
-      validationDigest: buildDynamicToolValidationDigest({
-        error: diagnosticError,
-        rawInput: value,
-        schemaName,
-        schemaPaths: attachResponseCardValidationPaths,
-        schemaRootKeys: ['card'],
-        toolName,
-      }),
+    if (
+      audience === 'private'
+      || Object.hasOwn(asRecord(value) ?? {}, 'card')
+    ) {
+      const diagnosticError = readAttachResponseCardDiagnosticError(
+        value,
+        parsed.error,
+      )
+      return {
+        ok: false,
+        validationDigest: buildDynamicToolValidationDigest({
+          error: diagnosticError,
+          rawInput: value,
+          schemaName,
+          schemaPaths: attachResponseCardValidationPaths,
+          schemaRootKeys: ['card'],
+          toolName,
+        }),
+      }
     }
   }
   const groupChallengeParsed =

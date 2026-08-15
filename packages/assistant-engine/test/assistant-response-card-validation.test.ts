@@ -39,19 +39,66 @@ const INVALID_NUTRITION_CARD = {
   },
 } as const
 
-function readCardToolRequest(card: unknown) {
+function readCardToolArguments(
+  argumentsValue: unknown,
+  responseCardAudience: 'group' | 'private',
+) {
   return readTestMurphDynamicToolRequest({
     id: 1,
     method: 'item/tool/call',
     params: {
-      arguments: { card },
+      arguments: argumentsValue,
       namespace: 'murph',
       tool: MURPH_ATTACH_RESPONSE_CARD_TOOL.name,
     },
+  }, {
+    responseCardAudience,
   })
 }
 
+function readCardToolRequest(card: unknown) {
+  return readCardToolArguments({ card }, 'private')
+}
+
 describe('response-card validation feedback', () => {
+  it('keeps missing-root diagnostics scoped to the offered audience', () => {
+    const privateRequest = readCardToolArguments({
+      typo: { marker: 'synthetic-private-marker' },
+    }, 'private')
+    expect(privateRequest).toMatchObject({
+      kind: 'invalid-response-card-arguments',
+      validationDigest: {
+        pathIssues: expect.arrayContaining([
+          expect.objectContaining({ path: 'card' }),
+        ]),
+      },
+    })
+    expect(JSON.stringify(privateRequest)).not.toContain('challengeSlug')
+    expect(JSON.stringify(privateRequest)).not.toContain(
+      'synthetic-private-marker',
+    )
+    expect(JSON.stringify(privateRequest)).not.toContain('typo')
+
+    const groupRequest = readCardToolArguments({}, 'group')
+    expect(groupRequest).toMatchObject({
+      kind: 'invalid-response-card-arguments',
+      validationDigest: {
+        pathIssues: expect.arrayContaining([
+          expect.objectContaining({ path: 'challengeSlug' }),
+          expect.objectContaining({ path: 'pageRevisionDigest' }),
+          expect.objectContaining({ path: 'participantObservations' }),
+        ]),
+      },
+    })
+    expect(
+      groupRequest?.kind === 'invalid-response-card-arguments'
+        ? groupRequest.validationDigest.pathIssues
+        : [],
+    ).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ path: 'card' }),
+    ]))
+  })
+
   it('returns bounded schema-owned repair hints and accepts the corrected retry', async () => {
     const request = readCardToolRequest(INVALID_TABLE)
     expect(request?.kind).toBe('invalid-response-card-arguments')

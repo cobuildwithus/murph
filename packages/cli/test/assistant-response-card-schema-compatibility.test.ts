@@ -97,21 +97,12 @@ function offeredSchemaAccepts(value: unknown): boolean {
   ).validate(value).valid
 }
 
-describe('attach_response_card schema parity', () => {
+describe('attach_response_card schema compatibility', () => {
   it('keeps representative provider and authoritative runtime decisions aligned', () => {
     const cases = [
       { value: { card: NUTRITION_CARD }, valid: true },
       { value: { card: GENERIC_TABLE_CARD }, valid: true },
       { value: { card: WORKOUT_CARD }, valid: true },
-      {
-        value: {
-          card: {
-            ...GENERIC_TABLE_CARD,
-            rows: [{ label: 'Monday', values: ['Strength'] }],
-          },
-        },
-        valid: false,
-      },
       {
         value: {
           card: {
@@ -129,6 +120,16 @@ describe('attach_response_card schema parity', () => {
         value: { card: { ...WORKOUT_CARD, rowHeader: 'Set' } },
         valid: false,
       },
+      {
+        value: {
+          card: {
+            ...GENERIC_TABLE_CARD,
+            tracking: WORKOUT_CARD.tracking,
+            workout: WORKOUT_CARD.workout,
+          },
+        },
+        valid: false,
+      },
     ]
 
     for (const testCase of cases) {
@@ -140,5 +141,36 @@ describe('attach_response_card schema parity', () => {
       assert.equal(runtimeAccepted, testCase.valid)
       assert.equal(providerAccepted, runtimeAccepted)
     }
+  })
+
+  it('keeps cross-array cardinality runtime-owned and repairable', () => {
+    const invalid = {
+      card: {
+        ...GENERIC_TABLE_CARD,
+        rows: [{ label: 'Monday', values: ['Strength'] }],
+      },
+    }
+    assert.equal(offeredSchemaAccepts(invalid), true)
+    const runtimeResult = attachResponseCardRuntimeSchema.safeParse(invalid)
+    assert.equal(runtimeResult.success, false)
+    if (runtimeResult.success) {
+      throw new TypeError('Expected runtime cardinality validation to fail.')
+    }
+    assert.ok(runtimeResult.error.issues.some((issue) =>
+      issue.code === 'custom'
+      && JSON.stringify(issue.path) === JSON.stringify([
+        'card',
+        'rows',
+        0,
+        'values',
+      ])
+    ))
+
+    const repaired = { card: GENERIC_TABLE_CARD }
+    assert.equal(offeredSchemaAccepts(repaired), true)
+    assert.equal(
+      attachResponseCardRuntimeSchema.safeParse(repaired).success,
+      true,
+    )
   })
 })

@@ -467,7 +467,10 @@ describe('workout session response cards', () => {
             },
             {
               oneOf: [
-                { required: ['rowHeader', 'columns', 'rows'] },
+                {
+                  properties: { workout: false },
+                  required: ['rowHeader', 'columns', 'rows'],
+                },
                 {
                   properties: {
                     subtitle: { type: 'null' },
