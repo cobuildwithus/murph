@@ -5971,13 +5971,14 @@ function buildJunctionMealNutrition(
 }
 
 // Micronutrients land bounded and compactly: only the documented Junction
-// micro keys are read, and null/zero entries are skipped.
+// micro keys are read. Preserve an explicit finite zero so downstream coverage
+// can distinguish a recorded zero from an absent provider field.
 function readJunctionMealMicros(entry: PlainObject): Partial<MealMicronutrients> | undefined {
   const micros: Partial<MealMicronutrients> = {};
 
   for (const key of MEAL_MICRONUTRIENT_KEYS) {
     const value = roundMealNutritionValue(finiteNumber(readPath(entry, JUNCTION_MEAL_MICRO_PATHS[key])));
-    if (value !== undefined && value > 0) {
+    if (value !== undefined && value >= 0) {
       micros[key] = value;
     }
   }

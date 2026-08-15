@@ -96,6 +96,22 @@ Updated: 2026-08-14
   capture and same-thread export failed at the local browser boundary. The
   candidate still requires the normal exact-head preliminary and final
   ReviewGPT gates.
+- The preliminary specialist pass and final round 1 both found that Junction's
+  `> 0` micronutrient predicate contradicted the new recorded-zero contract.
+  Preserve finite zero at that existing normalization boundary and prove null
+  versus zero separately.
+- The specialist pass found that aggregate coverage spans every selected stored
+  meal, not one provider. Describe that denominator directly, prohibit
+  provider-specific completeness claims without separate evidence, and prove
+  the mixed connected/manual limitation at the real App Server boundary.
+- Final round 1 found that date filtering preceded provider-revision collapse.
+  Collapse first in the shared meal-query owner and then filter the surviving
+  effective meal date so daily and combined ranges cannot count one corrected
+  meal inconsistently.
+- Final round 1 could not inspect frontend images because only the preliminary
+  specialist packet carries the required rendered evidence. The specialist
+  pass inspected both packaged viewports and returned no frontend finding, so
+  no product remediation is required for that packet-scope gap.
 
 ## Verification
 

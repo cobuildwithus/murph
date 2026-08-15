@@ -203,6 +203,89 @@ test("summarizeMealNutrientTotals keeps only the latest imported meal revision",
   });
 });
 
+test("meal nutrition date bounds apply after imported revision collapse", () => {
+  const externalRef = {
+    system: "junction",
+    resourceType: "junction-cronometer-meal",
+    resourceId: "meal-date-correction",
+    facet: "meal",
+  };
+  const readModel = createVaultReadModel({
+    vaultRoot: "./vault",
+    entities: [
+      createMealEntity("evt_old_date", "2026-04-14T23:30:00.000Z", {
+        externalRef,
+        mealId: "meal_imported_date_correction",
+        nutrition: {
+          micros: { magnesiumMg: 40 },
+          totals: { calories: 200 },
+        },
+        recordedAt: "2026-04-14T23:35:00.000Z",
+        source: "device",
+      }),
+      createMealEntity("evt_corrected_date", "2026-04-15T00:30:00.000Z", {
+        externalRef,
+        mealId: "meal_imported_date_correction",
+        nutrition: {
+          micros: { magnesiumMg: 55 },
+          totals: { calories: 250 },
+        },
+        recordedAt: "2026-04-15T01:00:00.000Z",
+        source: "device",
+      }),
+    ],
+  });
+
+  const oldDayNutrients = summarizeMealNutrientTotals(readModel, {
+    from: "2026-04-14",
+    to: "2026-04-14",
+  });
+  const newDayNutrients = summarizeMealNutrientTotals(readModel, {
+    from: "2026-04-15",
+    to: "2026-04-15",
+  });
+  const combinedNutrients = summarizeMealNutrientTotals(readModel, {
+    from: "2026-04-14",
+    to: "2026-04-15",
+  });
+  const oldDayMacros = summarizeMealNutritionTotals(readModel, {
+    from: "2026-04-14",
+    to: "2026-04-14",
+  });
+  const newDayMacros = summarizeMealNutritionTotals(readModel, {
+    from: "2026-04-15",
+    to: "2026-04-15",
+  });
+  const combinedMacros = summarizeMealNutritionTotals(readModel, {
+    from: "2026-04-14",
+    to: "2026-04-15",
+  });
+
+  assert.equal(oldDayNutrients.mealCount, 0);
+  assert.equal(
+    requireNutrient(oldDayNutrients.nutrients, "magnesiumMg").total,
+    null,
+  );
+  assert.equal(newDayNutrients.mealCount, 1);
+  assert.equal(
+    requireNutrient(newDayNutrients.nutrients, "magnesiumMg").total,
+    55,
+  );
+  assert.equal(combinedNutrients.mealCount, 1);
+  assert.equal(
+    requireNutrient(combinedNutrients.nutrients, "magnesiumMg").total,
+    55,
+  );
+
+  assert.deepEqual(
+    [oldDayMacros.mealCount, newDayMacros.mealCount, combinedMacros.mealCount],
+    [0, 1, 1],
+  );
+  assert.equal(oldDayMacros.totals.calories.total, null);
+  assert.equal(newDayMacros.totals.calories.total, 250);
+  assert.equal(combinedMacros.totals.calories.total, 250);
+});
+
 test("summarizeMealNutritionTotals aggregates range and day totals from meal nutrition", () => {
   const readModel = createVaultReadModel({
     vaultRoot: "./vault",

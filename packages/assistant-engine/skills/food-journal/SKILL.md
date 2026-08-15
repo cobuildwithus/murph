@@ -38,9 +38,12 @@ bounded day or short-range read:
 `vault-cli meal nutrients --from <date> --to <date> --format json`.
 The response lists every supported nutrient field. A `null` total with zero
 contributing meals means unavailable, not zero. A `contributingMealCount` below
-the enclosing `mealCount` means the total is partial; do not extrapolate the
-missing meals. Equal counts mean every imported meal record supplied that field,
-not that every meal eaten that day was logged.
+the enclosing `mealCount` means the total is partial across the selected stored
+meals; do not extrapolate the missing meals. Equal counts mean every selected
+stored meal record supplied that field, not that every meal eaten that day was
+logged. The aggregate may combine connected and manually saved meals. Do not
+attribute its totals or coverage to one provider or claim that provider was
+complete unless separate provider-specific evidence establishes that.
 
 Treat this as a bounded sum of stored meal fields, not a copy of the source
 app's daily dashboard. Source-app targets, daily percentages, and completeness

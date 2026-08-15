@@ -2049,10 +2049,11 @@ test("Junction meal micronutrients and water land bounded on the meal event", ()
     proteinGrams: 30,
     waterGrams: 170,
   });
-  // Only the documented micro keys land; zero/null entries and undocumented
-  // keys stay out, and per-item values sum.
+  // Only the documented micro keys land; explicit zero stays distinguishable
+  // from the null/absent and undocumented fields, and per-item values sum.
   assert.deepEqual(nutrition?.micros, {
     sodiumGrams: 0.4,
+    calciumMg: 0,
     ironMg: 3.9,
     magnesiumMg: 79,
     seleniumMcg: 38,
@@ -2060,6 +2061,7 @@ test("Junction meal micronutrients and water land bounded on the meal event", ()
     vitaminDMcg: 12.5,
     folicAcidMg: 0.19,
   });
+  assert.equal(Object.hasOwn(nutrition?.micros ?? {}, "zincMg"), false);
 });
 
 test("Junction direct meal micros win over summed item micros", () => {

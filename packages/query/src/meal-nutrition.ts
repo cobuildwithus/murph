@@ -320,12 +320,21 @@ function selectMealNutritionRecords(
   readModel: VaultReadModel,
   options: MealNutritionTotalsOptions,
 ): CanonicalEntity[] {
-  return selectLatestMealRevisions(listEntities(readModel, {
+  const latestMeals = selectLatestMealRevisions(listEntities(readModel, {
     families: ["event"],
     kinds: ["meal"],
-    from: options.from,
-    to: options.to,
   }));
+
+  return latestMeals.filter((meal) => {
+    const date = mealDate(meal);
+    if (options.from && (!date || date < options.from)) {
+      return false;
+    }
+    if (options.to && date && date > options.to) {
+      return false;
+    }
+    return true;
+  });
 }
 
 export function summarizeMealNutritionTotals(

@@ -78,6 +78,12 @@ describe('assistant food journal skill', () => {
       'A `contributingMealCount` below\nthe enclosing `mealCount` means the total is partial',
     )
     expect(skill).toContain(
+      'The aggregate may combine connected and manually saved meals.',
+    )
+    expect(skill).toContain(
+      'Do not\nattribute its totals or coverage to one provider',
+    )
+    expect(skill).toContain(
       "Source-app targets, daily percentages, and completeness\nclaims are not imported.",
     )
     expect(skill).toContain(
