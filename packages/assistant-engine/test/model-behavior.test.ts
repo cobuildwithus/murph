@@ -106,7 +106,7 @@ describe('assistant execution prompt contract', () => {
       'Use `murph.generate_image` only if no card fits',
     )
     expect(prompt).toContain(
-      'trim introductions, repetition, reassurance, and optional background first',
+      'trim introductions, repetition, reassurance, optional background, and unrelated wellness advice first',
     )
     expect(prompt).not.toContain('Final replies should briefly state')
     expect(prompt).not.toContain('extra nudges')
@@ -2006,9 +2006,10 @@ describe('assistant system prompt cache stability', () => {
     // not a budget: raise it only for cross-route guidance that cannot live in
     // an owning skill. Capability-specific browser, connected-app, phone-call,
     // and Family mechanics are intentionally excluded from this resident layer.
-    // The local automation delivery limitation plus the established Apple
-    // Health/WHOOP relay and cross-route repeated-set boundary set this ceiling.
-    expect(layers.stableRouteCapabilityPrompt.length).toBeLessThanOrEqual(57_744)
+    // The local automation delivery limitation, the established Apple
+    // Health/WHOOP relay and cross-route repeated-set boundary, plus the private
+    // longitudinal recommendation policy set this ceiling.
+    expect(layers.stableRouteCapabilityPrompt.length).toBeLessThanOrEqual(58_910)
   })
 
   it('passes the injected CLI contract through byte-for-byte at the stable-route tail', () => {
@@ -2359,7 +2360,13 @@ describe('assistant system prompt cache stability', () => {
     expect(openStablePrefix).toEqual(closedStablePrefix)
     expect(openStablePrefix).toContain('Murph skill router:')
     expect(openStablePrefix).toContain(
-      'Setup: murph-onboarding, hosted-low-usage, signup-link (explicit requests), experiment-onboarding, behavior-followthrough, self-management-experiments.',
+      'Setup: murph-onboarding, hosted-low-usage, signup-link (explicit requests), experiment-onboarding, behavior-followthrough.',
+    )
+    expect(openStablePrefix).toContain(
+      'Proactive recommendation is expected, not merely permitted.',
+    )
+    expect(openStablePrefix).not.toContain(
+      'behavior-followthrough, self-management-experiments.',
     )
     expect(openStablePrefix).not.toContain('Murph onboarding:')
     expect(openDynamicSuffix).toContain('Murph onboarding:')
@@ -2449,7 +2456,15 @@ describe('assistant experiment onboarding guidance', () => {
     expect(prompt).toContain('Preserve symptoms, medicines, timing, dose, pregnancy/fertility, and recent adverse events.')
     expect(prompt).toContain('If unavailable or empty, continue honestly.')
     expect(prompt).toContain('Skip jokes, thanks, logs, logistics, and non-health turns.')
-    expect(prompt).toContain('only when asked to try, test, track, or set one up.')
+    expect(prompt).toContain(
+      'the lookup must not suppress a bounded trial called for by the private longitudinal policy',
+    )
+    expect(prompt).toContain(
+      'Knowledge retrieval never authorizes or creates an experiment run.',
+    )
+    expect(prompt).not.toContain(
+      'Suggest experiments only when asked to try, test, track, or set one up.',
+    )
     expect(prompt).not.toContain('overall evidence')
     expect(prompt).not.toContain('topicResolved')
     expect(prompt).not.toContain('same catalogHash')
@@ -2497,7 +2512,37 @@ describe('assistant experiment onboarding guidance', () => {
       'Keep the first setup small, reversible, and easy to stop.',
     )
     expect(prompt).toContain(
-      'For a chosen health intervention, use its domain owner. Add experiment-onboarding only when the user wants to test or compare the intervention, and add behavior-followthrough only when recurring support matters.',
+      'For a chosen health intervention, use its domain owner.',
+    )
+    expect(prompt).toContain(
+      'Add self-management-experiments when the private longitudinal policy identifies a safe reversible uncertainty',
+    )
+    expect(prompt).toContain(
+      'the member does not need to name a candidate intervention or ask for an experiment',
+    )
+    expect(prompt).toContain(
+      'For any multi-day or repeated comparison, also read experiment-onboarding',
+    )
+    expect(prompt).toContain(
+      'Recommendation is not activation: do not create a run, reminder, check-in, or tracking plan without authorization.',
+    )
+    expect(prompt).toContain(
+      'default the useful answer to a working assessment plus one context-grounded bounded trial',
+    )
+    expect(prompt).toContain(
+      'Use the one or two prior facts or attempts that materially change the lever, technique, timing, dose, comparison, or outcome',
+    )
+    expect(prompt).toContain(
+      'when the member is seeking help beyond facts, logging, or being heard',
+    )
+    expect(prompt).toContain(
+      'Do not wait for experiment vocabulary or an explicit action verb',
+    )
+    expect(prompt).toContain(
+      'Ask at most one question first only when its answer changes safety or which lever wins.',
+    )
+    expect(prompt).toContain(
+      'the bounded trial is the answer, not an optional offer after a generic advice list',
     )
     expect(prompt).toContain(
       'Sleep safety outranks fatigue/clock routing:',
@@ -2602,7 +2647,10 @@ describe('assistant experiment onboarding guidance', () => {
       'do not force a heavier flow.',
     )
     expect(prompt).toContain(
-      'For personal health, ground in available sources, then follow the understand-before-recommending rules; a context-building question is a valid complete turn.',
+      'For personal health, ground in available sources, then follow the understand-before-recommending rules.',
+    )
+    expect(prompt).toContain(
+      'A context-building question is a valid complete turn only when it clears that decision.',
     )
 
     // Quick/general/safety and low-capacity asks bypass discovery when it would delay help.
@@ -2680,7 +2728,7 @@ describe('assistant experiment onboarding guidance', () => {
     expect(prompt).toContain(
       'Do not preload skills or call a discovery CLI just to route.',
     )
-    expect(prompt).toContain('Setup: murph-onboarding, hosted-low-usage, signup-link (explicit requests), experiment-onboarding, behavior-followthrough, self-management-experiments.')
+    expect(prompt).toContain('Setup: murph-onboarding, hosted-low-usage, signup-link (explicit requests), experiment-onboarding, behavior-followthrough.')
     expect(prompt).toContain('Sleep/readiness: sleep-improvement, circadian-rhythm, sleep-recovery-readiness, hrv-resting-heart-rate, energy-fatigue.')
     expect(prompt).toContain('Nutrition/metabolic: food-journal, nutrition-strategy, body-composition, gut-digestion, micronutrients-supplements, cardiometabolic-health, cycle-hormonal-health.')
     expect(prompt).toContain(
@@ -2838,7 +2886,7 @@ describe('assistant Murph onboarding guidance', () => {
     }))
 
     expect(prompt).toContain(
-      'Setup: murph-onboarding, hosted-low-usage, signup-link (explicit requests), experiment-onboarding, behavior-followthrough, self-management-experiments.',
+      'Setup: murph-onboarding, hosted-low-usage, signup-link (explicit requests), experiment-onboarding, behavior-followthrough.',
     )
     expect(prompt).toContain('Murph skill router:')
     expect(prompt).not.toContain('Murph onboarding:')

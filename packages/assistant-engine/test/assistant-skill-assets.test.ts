@@ -263,6 +263,71 @@ describe('assistant skill assets', () => {
     expect(shared).toContain('current-local-day value as provisional: say "so far"')
   })
 
+  it('makes returning unresolved patterns proactively experiment-shaped without auto-activation', async () => {
+    const experimentSkill = ASSISTANT_SKILLS.find(
+      (skill) => skill.slug === 'self-management-experiments',
+    )
+    expect(experimentSkill).toBeTruthy()
+    if (!experimentSkill) return
+
+    expect(experimentSkill.triggerHint).toContain(
+      'proactively use it when a persistent or recurring problem',
+    )
+    expect(experimentSkill.triggerHint).toContain(
+      'a partial response, or a prior failed attempt',
+    )
+    expect(experimentSkill.triggerHint).toContain(
+      'The member need not say experiment, ask what to change, or nominate an intervention.',
+    )
+
+    const raw = await readSkillFile(experimentSkill)
+    const compact = raw.replace(/\s+/gu, ' ')
+    expect(raw).toContain('## Private longitudinal default')
+    expect(compact).toContain(
+      'A returning unresolved pattern is enough intent to recommend the next bounded trial when the member is seeking help.',
+    )
+    expect(compact).toContain(
+      'one clearly indicated direct action makes comparison unnecessary',
+    )
+    expect(compact).toContain(
+      'Use longitudinal context as a decision input, not decoration',
+    )
+    expect(compact).toContain(
+      'let prior partial benefit refine technique, timing, dose, or comparison',
+    )
+    expect(compact).toContain(
+      'Lead the first useful response with a calibrated working assessment, the one or two longitudinal facts that changed the choice, and one selected trial.',
+    )
+    expect(compact).toContain(
+      'Do not answer an eligible request with a list of hydration, sleep, stress, diet, trigger avoidance, or other general wellness ideas.',
+    )
+    expect(compact).toContain(
+      'Do not withhold it because run creation, reminders, check-ins, or tracking still need authorization.',
+    )
+    expect(compact).toContain(
+      'waits for experiment vocabulary, an explicit action verb, or a user-nominated intervention',
+    )
+    expect(compact).toContain(
+      'mentions history without letting it change the lever, technique, timing, dose, comparison, or outcome',
+    )
+    expect(compact).toContain(
+      'ends with generic wellness advice when one safe bounded trial could answer the member\'s decision',
+    )
+
+    const onboarding = ASSISTANT_SKILLS.find(
+      (skill) => skill.slug === 'experiment-onboarding',
+    )
+    expect(onboarding).toBeTruthy()
+    if (!onboarding) return
+    const onboardingRaw = await readSkillFile(onboarding)
+    expect(onboardingRaw).toContain(
+      'This restriction is about persistence and activation, not about withholding a useful proposal.',
+    )
+    expect(onboardingRaw).toContain(
+      'create the run and support only after authorization.',
+    )
+  })
+
   it('routes bedtime transition, external disruption, and sleep-breathing concerns before skill loading', () => {
     const sleepSkill = ASSISTANT_SKILLS.find(
       (skill) => skill.slug === 'sleep-improvement',
