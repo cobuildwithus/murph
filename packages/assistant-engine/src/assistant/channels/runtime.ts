@@ -4,7 +4,7 @@ import {
   type TelegramThreadTarget,
 } from '@murphai/messaging-ingress/telegram-webhook'
 import {
-  assertLinqMessageTextPartWithinLimit,
+  assertLinqMessagePartsWithinLimits,
   checkLinqIMessageCapability,
   createLinqChat,
   isDefinitiveLinqIMessageAppCardRejection,
@@ -810,7 +810,7 @@ export async function sendLinqMessage(
   const message = responseMedia.some((item) => item.kind === 'vault_file')
     ? ''
     : appendImageAlternativeText(input.message, responseMedia)
-  assertLinqMessageTextPartWithinLimit({
+  assertLinqMessagePartsWithinLimits({
     message,
     operation: participantFromPhoneNumber ? 'create_chat' : 'send_message',
     requestAttachmentMediaPartCount: responseMedia.filter((item) =>
