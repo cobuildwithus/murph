@@ -1289,9 +1289,7 @@ describe('assistant codex runtime', () => {
                 arguments: {
                   media: [
                     {
-                      url: 'https://cdn.example.test/assistant/cat.png',
-                      alt: 'A cat image',
-                      source: 'cat-catalog-item',
+                      url: 'http://cdn.example.test/assistant/not-https.png',
                     },
                   ],
                 },
@@ -1303,11 +1301,11 @@ describe('assistant codex runtime', () => {
           expect(messages[4]).toEqual({
             id: 17,
             result: {
-              success: true,
+              success: false,
               contentItems: [
                 {
                   type: 'inputText',
-                  text: '1 response image attached',
+                  text: '{"error":"invalid_response_media_arguments","hints":[{"field":"media[].url","code":"custom","expected":"public_https_image_url"}]}',
                 },
               ],
             },
@@ -1322,7 +1320,9 @@ describe('assistant codex runtime', () => {
                 arguments: {
                   media: [
                     {
-                      url: 'http://cdn.example.test/assistant/not-https.png',
+                      url: 'https://cdn.example.test/assistant/cat.png',
+                      alt: 'A cat image',
+                      source: 'cat-catalog-item',
                     },
                   ],
                 },
@@ -1334,11 +1334,11 @@ describe('assistant codex runtime', () => {
           expect(messages[5]).toEqual({
             id: 18,
             result: {
-              success: false,
+              success: true,
               contentItems: [
                 {
                   type: 'inputText',
-                  text: 'invalid response media arguments',
+                  text: '1 response image attached',
                 },
               ],
             },
@@ -16858,10 +16858,17 @@ describe('assistant codex runtime', () => {
         phase: 'tool_call',
         issueKind: 'schema_rejection',
         severity: 'warning',
+        summary: 'Tool input failed schema validation.',
         errorCode: 'TOOL_INPUT_SCHEMA_REJECTION',
         details: expect.objectContaining({
           detailsSchema: 'murph.tool-call-validation-digest.v1',
-          invalidPaths: ['intentIds.[]'],
+          invalidPaths: ['intentIds[]'],
+          pathIssues: [{
+            code: 'invalid_format',
+            expected: 'string',
+            path: 'intentIds[]',
+            received: 'string.len_1_32',
+          }],
           schemaName: 'murph.pending_vault_files.input',
           toolName: 'murph.pending_vault_files',
         }),
