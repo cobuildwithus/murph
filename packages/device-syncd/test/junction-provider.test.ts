@@ -15841,6 +15841,129 @@ test("Junction timeseries continuations fail retryably after a source reconnect"
   assert.equal(importedSnapshots.length, 1);
 });
 
+test("Junction clinical webhook pulls reuse the lifecycle-fenced resource owner", async () => {
+  let liveSource = createConnectionSource({
+    lifecycleEpoch: 1,
+    resourceAvailabilitySummary: { heart_rate_alert: true },
+  });
+  let advanceLifecycleDuringFetch = true;
+  let sourceListReads = 0;
+  let requestCount = 0;
+  const sourceListReadsAtFetch: number[] = [];
+  const importedSnapshots: unknown[] = [];
+  const provider = createJunctionProvider(async (input) => {
+    const url = new URL(readUrl(input));
+    if (url.pathname === "/v2/user/providers/junction-user-1") {
+      return createJsonResponse({
+        providers: [{
+          id: "provider-garmin-1",
+          name: "Garmin",
+          resource_availability: { heart_rate_alert: true },
+          slug: "garmin",
+          status: "connected",
+        }],
+      });
+    }
+    if (url.pathname !== "/v2/timeseries/junction-user-1/heart_rate_alert/grouped") {
+      throw new Error(`Unexpected request: ${url.toString()}`);
+    }
+    requestCount += 1;
+    sourceListReadsAtFetch.push(sourceListReads);
+    if (advanceLifecycleDuringFetch) {
+      liveSource = createConnectionSource({
+        lifecycleEpoch: 2,
+        resourceAvailabilitySummary: { heart_rate_alert: true },
+      });
+      advanceLifecycleDuringFetch = false;
+    }
+    return createJsonResponse({
+      groups: {
+        garmin: [{
+          data: [{
+            end: "2026-04-02T10:01:00.000Z",
+            id: "heart-alert-webhook-reconnect",
+            start: "2026-04-02T10:00:00.000Z",
+            type: "irregular_rhythm",
+            unit: "count",
+            value: 1,
+          }],
+          source: { provider: "garmin", type: "watch" },
+        }],
+      },
+    });
+  }, {
+    summaryResources: [],
+    timeseriesResources: ["heart_rate_alert"],
+    webhookSecret: "whsec_d2ViaG9vay10ZXN0LXNlY3JldA==",
+  });
+  const webhook = createJunctionSvixWebhook({
+    body: {
+      event_type: "daily.data.heart_rate_alert.created",
+      user_id: "junction-user-1",
+      data: {
+        data: [{
+          end: "2026-04-02T10:01:00.000Z",
+          start: "2026-04-02T10:00:00.000Z",
+        }],
+        source: { provider: "garmin", type: "watch" },
+      },
+    },
+    messageId: "msg_heart_alert_webhook_reconnect_1",
+    timestamp: "1775174400",
+  });
+  const parsed = await requireJunctionWebhookHandler(provider).verifyAndParseWebhook({
+    headers: webhook.headers,
+    rawBody: webhook.rawBody,
+    now: "2026-04-03T00:00:00.000Z",
+  });
+  const parsedJob = requireValue(parsed.jobs[0]);
+  assert.equal(parsedJob.kind, "resource");
+  assert.equal(parsedJob.payload?.resource, "heart_rate_alert");
+
+  const currentSourceSummary = () => ({
+    displayName: liveSource.displayName,
+    firstSeenAt: liveSource.firstSeenAt,
+    lastDataAt: liveSource.lastDataAt,
+    lastErrorCode: liveSource.lastErrorCode,
+    lastErrorMessage: liveSource.lastErrorMessage,
+    lastSeenAt: liveSource.lastSeenAt,
+    lifecycleEpoch: liveSource.lifecycleEpoch,
+    resourceAvailabilitySummary: liveSource.resourceAvailabilitySummary,
+    resourceCount: Object.keys(liveSource.resourceAvailabilitySummary).length,
+    sourceProviderSlug: liveSource.sourceProviderSlug,
+    status: liveSource.status,
+  });
+  const accountSources = [currentSourceSummary()];
+  const context = createJunctionJobContext({
+    account: createAccount({ sources: accountSources }),
+    importSnapshot: async (snapshot) => {
+      importedSnapshots.push(snapshot);
+      return { canonicalEventCount: 1, durableDeliveryAccepted: true };
+    },
+    listConnectionSources: () => {
+      sourceListReads += 1;
+      return [liveSource];
+    },
+  });
+  const job = createJob(parsedJob.kind, parsedJob.payload ?? {});
+
+  await assert.rejects(
+    () => executeJunctionJob(provider, context, job),
+    (error) => error instanceof DeviceSyncError
+      && error.code === "JUNCTION_TIMESERIES_SOURCE_LIFECYCLE_SUPERSEDED"
+      && error.retryable,
+  );
+  assert.equal(importedSnapshots.length, 0);
+  assert.equal(sourceListReads - (sourceListReadsAtFetch[0] ?? 0), 1);
+
+  accountSources[0] = currentSourceSummary();
+  await executeJunctionJob(provider, context, job);
+
+  assert.equal(requestCount, 2);
+  assert.equal(sourceListReads - (sourceListReadsAtFetch[1] ?? 0), 1);
+  assert.equal(importedSnapshots.length, 1);
+});
+
 test("Junction activity resources keep fall sparse while dense aggregates and features stay daily", async () => {
   const denseResources = ["calories_basal", "handwashing", "workout_distance"];
   const requests: string[] = [];

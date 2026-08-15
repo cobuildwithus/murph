@@ -2408,6 +2408,23 @@ export function createJunctionDeviceSyncProvider(
             skippedOptionalResources,
           );
         }
+        if (timeseriesPolicy?.maxCanonicalRecordsPerWindow !== undefined) {
+          await importJunctionTimeseriesResourceSnapshot({
+            context,
+            dateQueryFormat: "datetime",
+            resource: effectiveResource,
+            skippedOptionalResources,
+            sourceProviderSlug,
+            sourceProviders,
+            windowEnd: window.windowEnd,
+            windowStart: window.windowStart,
+          });
+          return withJunctionSkippedResourceMetadata(
+            context,
+            { nextReconcileAt: clampWebhookJobNextReconcileAt(context) },
+            skippedOptionalResources,
+          );
+        }
         const timeseriesImport = await importTimeseriesPreciseSnapshots(
           context,
           sourceProviders,
