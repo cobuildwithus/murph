@@ -131,8 +131,11 @@ export async function processHostedPhoneCallRecoveryById(input: {
   const providerCallId = call.providerCallId;
   const resolveTerminalUsage = runtime.resolveTerminalUsage;
   const recordTerminalUsage = store.recordTerminalUsage;
+  let resultPending = false;
+  let terminalTransferKnown = false;
+  let usagePending = false;
   if (providerCallId && resolveTerminalUsage && recordTerminalUsage) {
-    let resolution;
+    let resolution: Awaited<ReturnType<typeof resolveTerminalUsage>> | null = null;
     try {
       resolution = await waitForAbortableOperation(input.signal, () =>
         resolveTerminalUsage.call(runtime, providerCallId, {
@@ -140,72 +143,67 @@ export async function processHostedPhoneCallRecoveryById(input: {
         }));
     } catch {
       input.signal.throwIfAborted();
-      return "pending";
+      usagePending = true;
     }
-    if (resolution.state === "pending") {
-      return "pending";
+    if (resolution?.state === "pending") {
+      usagePending = true;
     }
-    try {
-      await waitForAbortableOperation(input.signal, () =>
-        recordTerminalUsage({
-          call,
-          usage: resolution.usage,
-        }));
-    } catch {
-      input.signal.throwIfAborted();
-      return "pending";
-    }
-    if (resolution.terminalTransfer) {
-      const prepared = prepareRetellCallResult({
-        call: {
-          call_id: resolution.terminalTransfer.providerCallId,
-          data_storage_setting: "basic_attributes_only",
-          disconnection_reason: "call_transfer",
-          end_timestamp: resolution.terminalTransfer.endedAt.toISOString(),
-          transfer_end_timestamp: resolution.terminalTransfer.endedAt.toISOString(),
-        },
-        event: "transfer_ended",
-      });
+    if (resolution?.state === "ready") {
       try {
         await waitForAbortableOperation(input.signal, () =>
-          finalizeResult(prepared, {
-            abortSignal: input.signal,
+          recordTerminalUsage({
+            call,
+            usage: resolution.usage,
           }));
       } catch {
         input.signal.throwIfAborted();
-        return "pending";
+        usagePending = true;
       }
-    }
-    if (!resolution.terminalTransfer && hasStoredHostedPhoneCallResult(call)) {
-      try {
-        const storedResult = await waitForAbortableOperation(input.signal, () =>
-          finalizeStoredResult(call, {
-            abortSignal: input.signal,
-          }));
-        if (storedResult === "pending") {
-          return "pending";
+      if (resolution.terminalTransfer) {
+        terminalTransferKnown = true;
+        const prepared = prepareRetellCallResult({
+          call: {
+            call_id: resolution.terminalTransfer.providerCallId,
+            data_storage_setting: "basic_attributes_only",
+            disconnection_reason: "call_transfer",
+            end_timestamp: resolution.terminalTransfer.endedAt.toISOString(),
+            transfer_end_timestamp: resolution.terminalTransfer.endedAt.toISOString(),
+          },
+          event: "transfer_ended",
+        });
+        try {
+          await waitForAbortableOperation(input.signal, () =>
+            finalizeResult(prepared, {
+              abortSignal: input.signal,
+            }));
+        } catch {
+          input.signal.throwIfAborted();
+          resultPending = true;
         }
-      } catch {
-        input.signal.throwIfAborted();
-        return "pending";
       }
     }
-    return "complete";
   }
 
-  if (hasStoredHostedPhoneCallResult(call)) {
+  if (!terminalTransferKnown && hasStoredHostedPhoneCallResult(call)) {
     try {
       const storedResult = await waitForAbortableOperation(input.signal, () =>
         finalizeStoredResult(call, {
           abortSignal: input.signal,
         }));
       if (storedResult === "pending") {
-        return "pending";
+        resultPending = true;
       }
     } catch {
       input.signal.throwIfAborted();
-      return "pending";
+      resultPending = true;
     }
+  }
+
+  if (usagePending || resultPending) {
+    return "pending";
+  }
+  if (providerCallId && resolveTerminalUsage && recordTerminalUsage) {
+    return "complete";
   }
   return hasPhoneCallAdvancedBeyondStart(call) ? "complete" : "pending";
 }

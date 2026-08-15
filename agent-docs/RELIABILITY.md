@@ -1821,6 +1821,13 @@ Last verified: 2026-08-15
   already in `sending` becomes terminally ambiguous. A definitive runtime
   failure before that provider-entry callback commits instead terminalizes the
   queued generation as `failed`; provider success from queued remains invalid.
+  Callback-loss recovery treats a stored result and terminal Retell usage as
+  sibling obligations in the same reconciliation pass. A ready stored result
+  is finalized even while usage lookup or ledger persistence remains pending,
+  and the workflow completes only after every applicable obligation settles.
+  When Retell reports a terminal transfer, its transfer-specific result
+  finalizer remains the result obligation and runs independently of usage
+  persistence.
   At the first provider fetch, the runtime
   gives Web the exact queued Telegram authority; Web revalidates that authority
   and compare-and-sets the same generation from `queued` to `sending` in the

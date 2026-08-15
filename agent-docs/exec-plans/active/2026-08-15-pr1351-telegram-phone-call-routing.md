@@ -158,3 +158,13 @@ the member's current authorized Telegram route.
   test timing out at 60 seconds. That exact test passed in 58.6 seconds when
   rerun alone with a local 120-second harness bound, and the merged receipt
   replay plus retry-exhaustion regressions pass directly.
+- ReviewGPT round 9 at
+  `40ad8a0cf00a4ac2b7bdc196491bdfeafa18f8e4` found that recovery returned early
+  when terminal Retell usage lookup or persistence remained pending, delaying
+  an already stored call result behind an unrelated obligation. The existing
+  reconciliation pass now attempts stored-result or terminal-transfer
+  finalization independently of usage accounting and completes only after all
+  applicable sibling obligations settle. It adds no state, queue, workflow, or
+  owner.
+- The round 9 remediation passes 97 focused Web phone-call service, delivery,
+  notification-store, and reconciliation tests. Web typecheck also passes.

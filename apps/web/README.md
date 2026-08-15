@@ -406,6 +406,11 @@ The hosted Prisma schema keeps ownership sharp and nested:
   so the durable row remains blocking authority while the bounded Workflow
   reconciles ambiguous starts, provider-id binding failures, unsafe cleanup,
   and terminal provider usage after callback loss.
+  Stored-result finalization and terminal Retell usage are sibling obligations
+  in that reconciliation pass: a ready result is finalized while usage lookup
+  or persistence is still pending, and the Workflow completes only after every
+  applicable obligation settles. A known terminal transfer continues through
+  its transfer-specific result finalizer independently of usage persistence.
   Immediately before Retell dispatch, web advances the reservation epoch; a
   reconciliation attempt may mutate only the exact epoch it read, preventing an
   older no-match result from releasing a newly dispatched call. Recovery resolves

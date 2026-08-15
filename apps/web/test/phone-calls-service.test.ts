@@ -674,6 +674,98 @@ describe("createHostedPhoneCall", () => {
     expect(runtime.startCalls).toEqual([]);
   });
 
+  it.each([
+    "pending",
+    "retrieval-error",
+    "recording-error",
+  ] as const)("recovers a stored result independently when terminal usage is %s", async (
+    usageFailure,
+  ) => {
+    const analyzedAt = new Date("2026-06-25T01:00:00.000Z");
+    const providerCallId = `retell_result_usage_${usageFailure}`;
+    const existing = buildHostedPhoneCall({
+      analyzedAt,
+      endedAt: analyzedAt,
+      id: `hpc_result_usage_${usageFailure}`,
+      providerCallId,
+      resultDeliveryGeneration: 1,
+      resultDeliveryStatus: "pending",
+      resultJson: {
+        outcome: "completed",
+        summary: "The requested office confirmed the appointment.",
+      },
+      resultNotificationChannel: "telegram",
+      status: "completed",
+    });
+    const store = createPhoneCallStore({ existing });
+    const usage = {
+      combinedCostUsdMicros: 125_000,
+      occurredAt: analyzedAt,
+      providerCallId,
+    };
+    let usageReady = false;
+    const resolveTerminalUsage = vi.fn(async () => {
+      if (!usageReady && usageFailure === "retrieval-error") {
+        throw new Error("Retell usage unavailable");
+      }
+      if (!usageReady && usageFailure === "pending") {
+        return { state: "pending" as const };
+      }
+      return {
+        state: "ready" as const,
+        usage,
+      };
+    });
+    const recordTerminalUsage = vi.fn(async () => {
+      if (!usageReady && usageFailure === "recording-error") {
+        throw new Error("usage ledger unavailable");
+      }
+    });
+    const runtime = {
+      ...createPhoneCallRuntime({ providerCallId: "retell_unused" }).runtime,
+      resolveTerminalUsage,
+    };
+    const prisma = {
+      ...store.prisma,
+      recordTerminalUsage,
+    };
+    let notificationSignals = 0;
+    const finalizeStoredResult = vi.fn(async (call: HostedPhoneCall) => {
+      if (call.resultDeliveryStatus === "pending") {
+        notificationSignals += 1;
+        store.advanceCurrentCall({ resultDeliveryStatus: "queued" });
+      }
+      return "complete" as const;
+    });
+    const signal = new AbortController().signal;
+
+    await expect(processHostedPhoneCallRecoveryById({
+      finalizeStoredResult,
+      phoneCallId: existing.id,
+      prisma,
+      runtime,
+      signal,
+    })).resolves.toBe("pending");
+
+    expect(notificationSignals).toBe(1);
+    expect(store.currentCall().resultDeliveryStatus).toBe("queued");
+    usageReady = true;
+
+    await expect(processHostedPhoneCallRecoveryById({
+      finalizeStoredResult,
+      phoneCallId: existing.id,
+      prisma,
+      runtime,
+      signal,
+    })).resolves.toBe("complete");
+
+    expect(notificationSignals).toBe(1);
+    expect(recordTerminalUsage).toHaveBeenLastCalledWith({
+      call: expect.objectContaining({ id: existing.id }),
+      usage,
+    });
+  });
+
   it("retries callback-loss recovery until a terminal transfer result is finalized", async () => {
     const existing = buildHostedPhoneCall({
       id: "hpc_transfer_recovery",
@@ -687,7 +779,9 @@ describe("createHostedPhoneCall", () => {
       providerCallId: "retell_transfer_recovery",
     };
     const transferEndedAt = new Date("2026-06-25T01:05:00.000Z");
-    const recordTerminalUsage = vi.fn(async () => undefined);
+    const recordTerminalUsage = vi.fn()
+      .mockRejectedValueOnce(new Error("usage ledger unavailable"))
+      .mockResolvedValue(undefined);
     const runtime = {
       ...createPhoneCallRuntime({ providerCallId: "retell_unused" }).runtime,
       resolveTerminalUsage: vi.fn(async () => ({
