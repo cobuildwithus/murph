@@ -55,6 +55,7 @@ import {
   branchHasMergedPullRequest,
   branchOpenPullRequest,
   branchPullRequests,
+  requireCompletedWorktreeCreation,
   resolveWorkerMode,
   type BranchPullRequestRecord,
   type RecoveryCommandAdapter,
@@ -822,6 +823,7 @@ export interface EarlyHandoffDependencies {
   ) => BranchPullRequestRecord | null;
   fetchRemoteBranch: (worktree: string, branch: string) => void;
   findWorktree: (root: string, branch: string) => string | null;
+  requireCompletedCreation: (worktree: string) => void;
   refreshAndVerifyIssue: (root: string, issueNumber: number) => void;
   restampBody: (
     primary: string,
@@ -851,6 +853,9 @@ export function restoreRecoveredHandoffBeforeWorktreeRecovery(
       worktree,
     ),
     findWorktree: findBranchWorktree,
+    requireCompletedCreation: (worktree) => {
+      requireCompletedWorktreeCreation(worktree, recoveryCommands);
+    },
     refreshAndVerifyIssue: refreshAndVerifyExactIssue,
     restampBody: updateParentPullRequestBody,
   },
@@ -873,6 +878,7 @@ export function restoreRecoveredHandoffBeforeWorktreeRecovery(
       : null;
   if (!recoveredExistingBody) return false;
 
+  dependencies.requireCompletedCreation(worktree);
   dependencies.fetchRemoteBranch(worktree, branch);
   requireCommand("git", ["cat-file", "-e", `${existing.headRefOid}^{commit}`], worktree);
   const recoveredHandoffBody = recoveredReviewHandoffBody({
@@ -2772,6 +2778,7 @@ export function normalizeUnpushedDescendantToPullRequestHead(
   localHead: string,
   pullRequestHead: string,
 ): string {
+  requireCompletedWorktreeCreation(worktree, recoveryCommands);
   for (const head of [localHead, pullRequestHead]) {
     if (!/^[0-9a-f]{40}$/u.test(head)) {
       throw new Error("existing pull request handoff head is invalid");
@@ -4342,6 +4349,13 @@ async function runOnce() {
     const admittedTask = committedFrictionTask(primary, issue.number);
     console.log("Frog autofix admitted one trusted repair task.");
     const branch = `${FROG_AUTOFIX_BRANCH_PREFIX}${issue.number}`;
+    const registeredIssueWorktree = findBranchWorktree(primary, branch);
+    if (registeredIssueWorktree) {
+      requireCompletedWorktreeCreation(
+        registeredIssueWorktree,
+        recoveryCommands,
+      );
+    }
     const repairPullRequests = branchPullRequests(
       primary,
       branch,
