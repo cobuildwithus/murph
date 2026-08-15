@@ -164,7 +164,7 @@ Updated: 2026-08-15
   assertions.
 - Hosted transport package: 7 focused tests passed.
 - Web, device-syncd, Cloudflare Worker, and hosted-control typechecks passed.
-- ReviewGPT was updated from 0.5.127 to 0.5.131. Frozen-lockfile installation,
+- ReviewGPT was updated from 0.5.127 to 0.5.132. Frozen-lockfile installation,
   CLI version output, and the focused release-contract test passed.
 - Preliminary ReviewGPT returned two coverage findings. The telemetry finding
   is resolved. The maximum-cardinality finding led first to an inadequate
