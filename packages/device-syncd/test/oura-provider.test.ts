@@ -277,7 +277,7 @@ test("Oura provider requires a replacement refresh token during refresh", async 
     provider.oauthAdapter.refreshTokens(createAccount(["personal"])),
     (error) =>
       error instanceof DeviceSyncError &&
-      error.code === "OURA_REFRESH_TOKEN_ROTATION_MISSING" &&
+      error.code === "TOKEN_REFRESH_STATE_UNKNOWN" &&
       error.accountStatus === "reauthorization_required",
   );
 });
@@ -1044,7 +1044,7 @@ test("Oura provider turns non-operation webhook events into reconcile hints and 
     externalAccountId: "oura-user-1",
     eventType: "sync_completed",
     traceId: parsed?.traceId,
-    occurredAt: "2026-03-16T10:00:00.000Z",
+    providerSentAt: timestamp,
     resourceCategory: "workout",
     jobs: [
       {
@@ -1104,6 +1104,7 @@ test("Oura provider validates webhook signatures and turns notifications into re
     eventType: "daily_sleep.updated",
     traceId: parsed?.traceId,
     occurredAt: "2026-03-16T09:58:00.000Z",
+    providerSentAt: "2026-03-16T09:58:10.000Z",
     resourceCategory: "daily_sleep",
     jobs: [
       {
@@ -1219,7 +1220,7 @@ test("Oura provider accepts uppercase hexadecimal webhook signatures", async () 
   assert.equal(parsed?.resourceCategory, "daily_sleep");
 });
 
-test("Oura provider accepts base64 webhook signatures and falls back to the request time when event_time is absent", async () => {
+test("Oura provider keeps the request-time import fallback without claiming a missing event time", async () => {
   const provider = createOuraDeviceSyncProvider({
     clientId: "oura-client-id",
     clientSecret: "oura-client-secret",
@@ -1252,7 +1253,7 @@ test("Oura provider accepts base64 webhook signatures and falls back to the requ
     externalAccountId: "oura-user-1",
     eventType: "workout.updated",
     traceId: parsed?.traceId,
-    occurredAt: now,
+    providerSentAt: timestamp,
     resourceCategory: "workout",
     jobs: [
       {
@@ -1392,6 +1393,7 @@ test("Oura provider accepts documented numeric-second timestamps, uses event_tim
     eventType: "session.deleted",
     traceId: parsed?.traceId,
     occurredAt: "2026-03-16T09:58:00.000Z",
+    providerSentAt: "2026-03-16T10:00:00.000Z",
     resourceCategory: "session",
     jobs: [
       {

@@ -12,8 +12,13 @@ import type {
   AssistantPersonalitySettingId,
   AssistantTonePreference,
   AssistantVoiceOptionId,
+  MemberActionRequestV1,
+  MemberActionOutcomeV1,
 } from "@murphai/contracts";
-import type {
+import {
+  BROWSER_VAULT_METRIC_BUCKET_COUNT,
+  BROWSER_VAULT_METRIC_BUCKET_IDS,
+  type BrowserVaultMetricBucketId,
   BROWSER_VAULT_REPLICA_SCHEMA,
 } from "@murphai/contracts/browser-vault";
 import type {
@@ -67,7 +72,8 @@ export const HOSTED_EXECUTION_EVENT_KINDS = [
   "assistant.ask.completed",
   "clinical-records.sync-requested",
   "device-sync.wake",
-  "group-newsletter.email-needed",
+  "member.action.requested",
+  "member.action.completed",
   ...HOSTED_EXECUTION_RUNTIME_CONTROL_WAKE_KINDS,
 ] as const;
 
@@ -90,8 +96,10 @@ export const HOSTED_EXECUTION_WAKE_KINDS = [
   "clinical-records.sync-requested",
   "device-sync.wake",
   "environment-voice.captured",
-  "group-newsletter.email-needed",
+  "health.daily-metric.reported",
   "meal-photo.captured",
+  "member.action.requested",
+  "member.action.completed",
   "vault-share.delivery",
   "vault-share.revoke",
   ...HOSTED_EXECUTION_RUNTIME_CONTROL_WAKE_KINDS,
@@ -133,6 +141,20 @@ export type HostedExecutionTelegramExternalThreadRouteAuthority =
   HostedExecutionExternalThreadRouteAuthority & {
     channel: "telegram";
   };
+
+/**
+ * Ephemeral, send-time Linq route authority resolved by the hosted Web control
+ * plane. Raw provider coordinates must never be copied into durable runtime
+ * state, prompts, logs, or outbox payloads.
+ */
+export interface HostedExecutionResolvedLinqDeliveryRoute {
+  conversationThreadId: string | null;
+  directRecipientPhoneNumber: string | null;
+  fromPhoneNumber: string | null;
+  target: string;
+  targetKind: "participant" | "thread";
+  threadIsDirect: boolean;
+}
 
 /**
  * Provider-authenticated sender evidence for one exact accepted group message.
@@ -293,23 +315,59 @@ export interface HostedExecutionAssistantAskConsentedMemberTarget {
   permissionDigest: string;
 }
 
-export interface HostedExecutionAssistantAskGroupSenderTarget {
+/**
+ * Fixed one-time permissions selected by Web from the exact source message
+ * before personal-model work. The outgoing reviewer may only allow or deny the
+ * answer for this already-persisted audience.
+ */
+export const HOSTED_EXECUTION_CURRENT_SENDER_GROUP_PERMISSION_TEXT =
+  "The owner of this personal Murph authored the exact incoming group question and may authorize one answer to that same group. Answer only when that question clearly asks Murph to share information about the owner. Treat first-person references as the owner, disclose only the owner's information directly requested by the question, and disclose nothing about anyone else. This authorization applies once to this question and grants no future, scheduled, or broader access.";
+
+export const HOSTED_EXECUTION_CURRENT_SENDER_PRIVATE_PERMISSION_TEXT =
+  "The owner of this personal Murph authored the exact incoming group request and explicitly asked Murph to answer them privately. Answer as one direct private message to the owner. You may use only the owner's personal Murph context needed for this request. Do not disclose anyone else's private information, do not post anything back to the group, and do not perform actions. This authorization applies once to this request and grants no future, scheduled, or broader access.";
+
+/** The one personal context resolved from the exact current group sender. */
+export interface HostedExecutionAssistantAskCurrentSenderPersonalTarget {
   groupRuntimeMemberId: string;
-  kind: "group_sender";
+  kind: "current_sender_personal";
   permissionDigest: string;
 }
 
-export interface HostedExecutionAssistantAskPrivateGroupSenderTarget {
+/**
+ * Drain-only target shapes written by the former audience-coupled protocol.
+ * New requests must use current_sender_personal plus resultDestination.
+ */
+export type HostedExecutionAssistantAskLegacyGroupSenderTarget = {
   groupRuntimeMemberId: string;
-  kind: "group_sender_private";
   permissionDigest: string;
-}
+} & (
+  | { kind: "group_sender" }
+  | { kind: "group_sender_private" }
+);
+
+export type HostedExecutionAssistantAskCurrentSenderTarget =
+  | HostedExecutionAssistantAskCurrentSenderPersonalTarget
+  | HostedExecutionAssistantAskLegacyGroupSenderTarget;
+
+export type HostedExecutionAssistantAskResultDestination =
+  | { kind: "origin_context" }
+  | {
+      channel: "linq" | "telegram";
+      kind: "requester_direct";
+    };
 
 export type HostedExecutionAssistantAskTarget =
   | HostedExecutionAssistantAskJoinedGroupTarget
   | HostedExecutionAssistantAskConsentedMemberTarget
-  | HostedExecutionAssistantAskGroupSenderTarget
-  | HostedExecutionAssistantAskPrivateGroupSenderTarget;
+  | HostedExecutionAssistantAskCurrentSenderTarget;
+
+export function isHostedExecutionAssistantAskCurrentSenderTarget(
+  target: HostedExecutionAssistantAskTarget,
+): target is HostedExecutionAssistantAskCurrentSenderTarget {
+  return target.kind === "current_sender_personal"
+    || target.kind === "group_sender"
+    || target.kind === "group_sender_private";
+}
 
 export interface HostedExecutionAssistantAskAcceptedInputOrigin {
   assistantInputId: string;
@@ -352,25 +410,26 @@ export interface HostedExecutionAssistantAskConsentedMemberRequestedPayload {
   target: HostedExecutionAssistantAskConsentedMemberTarget;
 }
 
-export interface HostedExecutionAssistantAskGroupSenderRequestedPayload {
+export interface HostedExecutionAssistantAskCurrentSenderRequestedPayload {
   expiresAt: string;
   origin: HostedExecutionAssistantAskAcceptedInputOrigin;
   question: string;
-  target: HostedExecutionAssistantAskGroupSenderTarget;
+  resultDestination: HostedExecutionAssistantAskResultDestination;
+  target: HostedExecutionAssistantAskCurrentSenderPersonalTarget;
 }
 
-export interface HostedExecutionAssistantAskPrivateGroupSenderRequestedPayload {
+export interface HostedExecutionAssistantAskLegacyGroupSenderRequestedPayload {
   expiresAt: string;
   origin: HostedExecutionAssistantAskAcceptedInputOrigin;
   question: string;
-  target: HostedExecutionAssistantAskPrivateGroupSenderTarget;
+  target: HostedExecutionAssistantAskLegacyGroupSenderTarget;
 }
 
 export type HostedExecutionAssistantAskRequestedPayload =
   | HostedExecutionAssistantAskJoinedGroupRequestedPayload
   | HostedExecutionAssistantAskConsentedMemberRequestedPayload
-  | HostedExecutionAssistantAskGroupSenderRequestedPayload
-  | HostedExecutionAssistantAskPrivateGroupSenderRequestedPayload;
+  | HostedExecutionAssistantAskCurrentSenderRequestedPayload
+  | HostedExecutionAssistantAskLegacyGroupSenderRequestedPayload;
 
 export interface HostedExecutionAssistantAskJoinedGroupCompletedPayload {
   expiresAt: string;
@@ -470,6 +529,18 @@ export interface HostedExecutionClinicalRecordsSyncRequestedEvent
   runId: string;
 }
 
+export interface HostedExecutionMemberActionRequestedEvent
+  extends HostedExecutionBaseEvent {
+  kind: "member.action.requested";
+  request: MemberActionRequestV1;
+}
+
+export interface HostedExecutionMemberActionCompletedEvent
+  extends HostedExecutionBaseEvent {
+  kind: "member.action.completed";
+  outcome: MemberActionOutcomeV1;
+}
+
 export type HostedExecutionDirectRoute =
   | {
       channel: "linq" | "telegram";
@@ -482,20 +553,6 @@ export type HostedExecutionDirectRoute =
 
 export type HostedExecutionDirectRouteChannel =
   HostedExecutionDirectRoute["channel"];
-
-/** @deprecated Use HostedExecutionDirectRouteChannel. */
-export type HostedExecutionGroupNewsletterEmailNeededDirectRouteChannel =
-  HostedExecutionDirectRouteChannel;
-/** @deprecated Use HostedExecutionDirectRoute. */
-export type HostedExecutionGroupNewsletterEmailNeededDirectRoute =
-  HostedExecutionDirectRoute;
-
-export interface HostedExecutionGroupNewsletterEmailNeededEvent extends HostedExecutionBaseEvent {
-  directRoute?: HostedExecutionDirectRoute | null;
-  groupDisplayName: string | null;
-  groupId: string;
-  kind: "group-newsletter.email-needed";
-}
 
 export interface HostedExecutionPlainRuntimeControlRequestedEvent
   extends HostedExecutionBaseEvent {
@@ -529,7 +586,8 @@ export type HostedExecutionEvent =
   | HostedExecutionAssistantAskCompletedEvent
   | HostedExecutionClinicalRecordsSyncRequestedEvent
   | HostedExecutionDeviceSyncWakeEvent
-  | HostedExecutionGroupNewsletterEmailNeededEvent
+  | HostedExecutionMemberActionRequestedEvent
+  | HostedExecutionMemberActionCompletedEvent
   | HostedExecutionRuntimeControlRequestedEvent;
 
 export interface HostedExecutionBaseWake {
@@ -808,11 +866,20 @@ export interface HostedExecutionEnvironmentVoiceCapturedWake
   kind: "environment-voice.captured";
 }
 
-export interface HostedExecutionGroupNewsletterEmailNeededWake extends HostedExecutionBaseWake {
-  directRoute?: HostedExecutionDirectRoute | null;
-  groupDisplayName: string | null;
-  groupId: string;
-  kind: "group-newsletter.email-needed";
+export const HOSTED_EXECUTION_DAILY_METRIC_MAX_METRIC_LENGTH = 120;
+export const HOSTED_EXECUTION_DAILY_METRIC_MAX_UNIT_LENGTH = 80;
+
+export interface HostedExecutionDailyMetricReportedPayload {
+  date: string;
+  metric: string;
+  unit: string;
+  value: number;
+}
+
+export interface HostedExecutionDailyMetricReportedWake
+  extends HostedExecutionBaseWake {
+  dailyMetric: HostedExecutionDailyMetricReportedPayload;
+  kind: "health.daily-metric.reported";
 }
 
 export const HOSTED_EXECUTION_MEAL_PHOTO_MAX_BYTES = 4 * 1024 * 1024;
@@ -829,6 +896,18 @@ export interface HostedExecutionMealPhotoCapturedWake extends HostedExecutionBas
   directRoute: HostedExecutionDirectRoute;
   kind: "meal-photo.captured";
   mealPhoto: HostedExecutionMealPhotoCapturedPayload;
+}
+
+export interface HostedExecutionMemberActionRequestedWake
+  extends HostedExecutionBaseWake {
+  kind: "member.action.requested";
+  request: MemberActionRequestV1;
+}
+
+export interface HostedExecutionMemberActionCompletedWake
+  extends HostedExecutionBaseWake {
+  kind: "member.action.completed";
+  outcome: MemberActionOutcomeV1;
 }
 
 export interface HostedExecutionPlainRuntimeControlWake extends HostedExecutionBaseWake {
@@ -868,8 +947,10 @@ export type HostedExecutionWake =
   | HostedExecutionClinicalRecordsSyncRequestedWake
   | HostedExecutionDeviceSyncWake
   | HostedExecutionEnvironmentVoiceCapturedWake
-  | HostedExecutionGroupNewsletterEmailNeededWake
+  | HostedExecutionDailyMetricReportedWake
   | HostedExecutionMealPhotoCapturedWake
+  | HostedExecutionMemberActionRequestedWake
+  | HostedExecutionMemberActionCompletedWake
   | HostedExecutionVaultShareDeliveryWake
   | HostedExecutionVaultShareRevokeWake
   | HostedExecutionRuntimeControlWake;
@@ -901,6 +982,56 @@ export type HostedExecutionBundleRef = RuntimeHostedExecutionBundleRef;
 
 export const HOSTED_BROWSER_VAULT_REPLICA_REF_SCHEMA = "murph.hosted-browser-vault-replica-ref.v1";
 
+export const HOSTED_BROWSER_VAULT_REPLICA_SHARD_SET_REF_SCHEMA =
+  "murph.hosted-browser-vault-replica-shards.v1";
+
+export const HOSTED_BROWSER_VAULT_REPLICA_SHARD_KINDS = [
+  "core",
+  "labs",
+  "metricsIndex",
+] as const;
+
+export type HostedBrowserVaultReplicaShardKind =
+  (typeof HOSTED_BROWSER_VAULT_REPLICA_SHARD_KINDS)[number];
+
+export const HOSTED_BROWSER_VAULT_REPLICA_METRIC_BUCKET_COUNT =
+  BROWSER_VAULT_METRIC_BUCKET_COUNT;
+export const HOSTED_BROWSER_VAULT_REPLICA_METRIC_BUCKET_IDS =
+  BROWSER_VAULT_METRIC_BUCKET_IDS;
+export const HOSTED_BROWSER_VAULT_REPLICA_METRIC_BUCKET_SET_REF_SCHEMA =
+  "murph.hosted-browser-vault-replica-metric-buckets.v1";
+
+export type HostedBrowserVaultReplicaMetricBucketId =
+  BrowserVaultMetricBucketId;
+
+export type HostedBrowserVaultReplicaContentEncoding = "gzip" | "identity";
+
+export interface HostedBrowserVaultReplicaShardRef {
+  byteLength: number;
+  contentEncoding: HostedBrowserVaultReplicaContentEncoding;
+  encodedByteLength: number;
+  objectKey: string;
+}
+
+export type HostedBrowserVaultReplicaMetricBucketRef =
+  HostedBrowserVaultReplicaShardRef;
+
+export interface HostedBrowserVaultReplicaShardSetRef {
+  core: HostedBrowserVaultReplicaShardRef;
+  labs: HostedBrowserVaultReplicaShardRef;
+  metricsIndex: HostedBrowserVaultReplicaShardRef;
+  schema: typeof HOSTED_BROWSER_VAULT_REPLICA_SHARD_SET_REF_SCHEMA;
+}
+
+export interface HostedBrowserVaultReplicaMetricBucketSetRef {
+  bucketCount: typeof HOSTED_BROWSER_VAULT_REPLICA_METRIC_BUCKET_COUNT;
+  buckets: Record<
+    HostedBrowserVaultReplicaMetricBucketId,
+    HostedBrowserVaultReplicaMetricBucketRef
+  >;
+  schema: typeof HOSTED_BROWSER_VAULT_REPLICA_METRIC_BUCKET_SET_REF_SCHEMA;
+}
+
 export interface HostedBrowserVaultReplicaRef {
   byteLength: number;
   dataKeyEnvelope?: HostedDataKeyEnvelopeV1;
@@ -913,6 +1044,10 @@ export interface HostedBrowserVaultReplicaRef {
   replicaSchema: typeof BROWSER_VAULT_REPLICA_SCHEMA;
   runtimeRootKeyId: string;
   schema: typeof HOSTED_BROWSER_VAULT_REPLICA_REF_SCHEMA;
+  /** Absent together with shards on legacy refs created before route-aware children shipped. */
+  metricBuckets?: HostedBrowserVaultReplicaMetricBucketSetRef;
+  /** Absent together with metricBuckets on legacy refs created before route-aware children shipped. */
+  shards?: HostedBrowserVaultReplicaShardSetRef;
   sourceBundleHash: string;
 }
 

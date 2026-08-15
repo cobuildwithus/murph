@@ -123,6 +123,16 @@ export class HostedBillingBrowserDriver {
         (url) => url.origin === new URL(this.webBaseUrl).origin
           && url.pathname === "/home",
       );
+      // router.replace() changes the URL before the new React Server Component
+      // tree is necessarily committed. Waiting on DOMContentLoaded here only
+      // observes the invite document's already-fired lifecycle event, so a
+      // following document navigation can race the still-pending Home commit.
+      const homeEyebrow = actor.page.getByText("Live Well", { exact: true });
+      await homeEyebrow.waitFor();
+      await homeEyebrow.locator("xpath=parent::div").getByRole("heading", {
+        exact: true,
+        name: "Welcome to Murph",
+      }).waitFor();
     });
   }
 
@@ -155,6 +165,13 @@ export class HostedBillingBrowserDriver {
   ): Promise<HostedBillingCheckoutStart> {
     return this.runStep("family-checkout-open", "murph-settings", async () => {
       await this.openSettings(actor);
+      await clickHydratedMurphControl(
+        actor.page,
+        actor.page.getByRole("button", {
+          exact: true,
+          name: "Start your own Family plan",
+        }),
+      );
       const [response] = await Promise.all([
         actor.page.waitForResponse(
           isApiResponse("/api/settings/billing/family/checkout", "POST"),
@@ -163,7 +180,7 @@ export class HostedBillingBrowserDriver {
           actor.page,
           actor.page.getByRole("button", {
             exact: true,
-            name: "Choose Family",
+            name: "Start a plan I pay for",
           }),
         ),
       ]);
@@ -178,6 +195,13 @@ export class HostedBillingBrowserDriver {
   ): Promise<void> {
     await this.runStep("settings-convert-paid-individual-to-family", "murph-settings", async () => {
       await this.openSettings(actor);
+      await clickHydratedMurphControl(
+        actor.page,
+        actor.page.getByRole("button", {
+          exact: true,
+          name: "Start your own Family plan",
+        }),
+      );
       const [response] = await Promise.all([
         actor.page.waitForResponse(
           isApiResponse("/api/settings/billing/family/checkout", "POST"),
@@ -186,7 +210,7 @@ export class HostedBillingBrowserDriver {
           actor.page,
           actor.page.getByRole("button", {
             exact: true,
-            name: "Choose Family",
+            name: "Start a plan I pay for",
           }),
         ),
       ]);
@@ -347,14 +371,18 @@ export class HostedBillingBrowserDriver {
   async openSettings(actor: HostedBillingBrowserActor): Promise<void> {
     const target = new URL(this.murphUrl("/settings#subscription"));
     const current = new URL(actor.page.url());
+    let navigation: Response | null;
     if (current.origin === target.origin && current.pathname === target.pathname) {
       // A navigation that differs only by the subscription hash is a
       // same-document navigation and preserves a stale server projection.
       // Force a request when a workflow has mutated billing in another page.
-      await actor.page.reload({ waitUntil: "commit" });
+      navigation = await actor.page.reload({ waitUntil: "domcontentloaded" });
     } else {
-      await actor.page.goto(target.toString(), { waitUntil: "commit" });
+      navigation = await actor.page.goto(target.toString(), {
+        waitUntil: "domcontentloaded",
+      });
     }
+    assertSuccessfulNavigation(navigation, "Murph settings");
     await actor.page.getByText("Subscription", { exact: true }).first().waitFor();
   }
 
@@ -591,56 +619,6 @@ async function clickHydratedMurphControl(
     await element.dispose();
   }
   await control.click();
-}
-
-async function waitForExpectedBillingControl(input: {
-  control: Locator;
-  label: string;
-  page: Page;
-  webBaseUrl: string;
-}): Promise<void> {
-  try {
-    await input.control.waitFor({ state: "visible", timeout: 30_000 });
-  } catch {
-    const state = await classifyMurphBillingPage(input.page, input.webBaseUrl);
-    throw new Error(`${input.label} control was unavailable (rendered-state=${state}).`);
-  }
-}
-
-async function classifyMurphBillingPage(
-  page: Page,
-  webBaseUrl: string,
-): Promise<string> {
-  const current = new URL(page.url());
-  const expectedOrigin = new URL(webBaseUrl).origin;
-  if (current.origin !== expectedOrigin) {
-    return readStripeSurfaceForTest(current) ?? "external";
-  }
-
-  const route = current.pathname.startsWith("/join/")
-    ? "join"
-    : current.pathname === "/settings"
-      ? "settings"
-      : "other-murph-route";
-  const markers = [
-    ["checkout-panel", page.getByRole("button", { exact: true, name: "Get Pulse" })],
-    ["auto-trial", page.getByText("Setting up your Murph", { exact: true })],
-    ["legal-consent", page.getByRole("heading", { exact: true, name: "One quick step" })],
-    [
-      "session-mismatch",
-      page.getByText("This browser is signed in with a different Murph account.", {
-        exact: true,
-      }),
-    ],
-    ["application-error", page.getByText(/Application error/iu)],
-  ] as const;
-  const visibleMarkers: string[] = [];
-  for (const [label, locator] of markers) {
-    if (await locator.first().isVisible().catch(() => false)) {
-      visibleMarkers.push(label);
-    }
-  }
-  return `${route}:${visibleMarkers.join(",") || "unknown"}`;
 }
 
 async function assertSuccessfulResponse(response: Response): Promise<void> {

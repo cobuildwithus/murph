@@ -22,10 +22,16 @@ const mocks = vi.hoisted(() => ({
   createIntegratedVaultServices: vi.fn(),
   detectWearableStorageMigrationCandidates: vi.fn(),
   emitHostedExecutionStructuredLog: vi.fn(),
+  fetchCompleteHostedDeviceSyncRuntimeSnapshot: vi.fn(),
+  applyHostedPendingDirtyDeviceSyncStateForWake: vi.fn(),
   initInboxRuntime: vi.fn(),
   readConfiguredJunctionDeviceSyncProviderConfig: vi.fn(),
   readHostedAssistantRuntimeState: vi.fn(),
+  requireHostedRuntimeDeviceSyncStore: vi.fn(),
   reconcileHostedDeviceSyncControlPlaneState: vi.fn(),
+  resolveHostedDeviceSyncSchedulerAccountId: vi.fn(),
+  resolveHostedDeviceSyncWakeLocalAccountId: vi.fn(),
+  resolveHostedDeviceSyncWakeRecovery: vi.fn(),
   runAssistantAutomationPass: vi.fn(),
   selectHostedAssistantInputIds: vi.fn(),
   pruneWearableDenseRawTimeseries: vi.fn(),
@@ -53,6 +59,7 @@ vi.mock("@murphai/device-syncd/registry", () => ({
 vi.mock("../src/device-sync-service.ts", () => ({
   closeHostedRuntimeDeviceSyncService: mocks.closeHostedRuntimeDeviceSyncService,
   createHostedRuntimeDeviceSyncService: mocks.createHostedRuntimeDeviceSyncService,
+  requireHostedRuntimeDeviceSyncStore: mocks.requireHostedRuntimeDeviceSyncStore,
 }));
 
 vi.mock("@murphai/assistant-engine", () => ({
@@ -84,10 +91,20 @@ vi.mock("@murphai/core", () => ({
 }));
 
 vi.mock("../src/hosted-device-sync-runtime.ts", () => ({
+  applyHostedPendingDirtyDeviceSyncStateForWake:
+    mocks.applyHostedPendingDirtyDeviceSyncStateForWake,
+  fetchCompleteHostedDeviceSyncRuntimeSnapshot:
+    mocks.fetchCompleteHostedDeviceSyncRuntimeSnapshot,
   promoteHostedCompletedDirtyPayloadAcks:
     mocks.promoteHostedCompletedDirtyPayloadAcks,
   reconcileHostedDeviceSyncControlPlaneState:
     mocks.reconcileHostedDeviceSyncControlPlaneState,
+  resolveHostedDeviceSyncSchedulerAccountId:
+    mocks.resolveHostedDeviceSyncSchedulerAccountId,
+  resolveHostedDeviceSyncWakeLocalAccountId:
+    mocks.resolveHostedDeviceSyncWakeLocalAccountId,
+  resolveHostedDeviceSyncWakeRecovery:
+    mocks.resolveHostedDeviceSyncWakeRecovery,
   syncHostedDeviceSyncControlPlaneState: mocks.syncHostedDeviceSyncControlPlaneState,
 }));
 
@@ -238,6 +255,13 @@ beforeEach(async () => {
   mocks.closeHostedRuntimeDeviceSyncService.mockImplementation((service: { close?: () => void }) => {
     service.close?.();
   });
+  mocks.fetchCompleteHostedDeviceSyncRuntimeSnapshot.mockImplementation(async (input: {
+    deviceSyncPort: ReturnType<typeof createMaintenanceDeviceSyncPortStub>;
+    signal: AbortSignal | null;
+  }) => input.deviceSyncPort.fetchSnapshot({
+    includeCredentialMaterial: true,
+    signal: input.signal,
+  }));
   mocks.initInboxRuntime.mockResolvedValue({
     configPath: ".runtime/operations/inbox/config.json",
     createdPaths: [],
@@ -331,6 +355,12 @@ beforeEach(async () => {
   mocks.createDeviceSyncRegistry.mockReturnValue({
     list: () => ["oura"],
   });
+  mocks.requireHostedRuntimeDeviceSyncStore.mockReturnValue({
+    readNextJobWakeAtForAccount: () => null,
+  });
+  mocks.resolveHostedDeviceSyncWakeRecovery.mockReturnValue(null);
+  mocks.resolveHostedDeviceSyncSchedulerAccountId.mockReturnValue("local_scheduled_account");
+  mocks.resolveHostedDeviceSyncWakeLocalAccountId.mockReturnValue("local_scheduled_account");
   mocks.syncHostedDeviceSyncControlPlaneState.mockResolvedValue({
     hostedToLocalAccountIds: new Map(),
     localToHostedAccountIds: new Map(),
@@ -1469,7 +1499,7 @@ describe("resolveHostedDeviceSyncNextWakeAt", () => {
     );
 
     try {
-      store.upsertAccount({
+      const account = store.upsertAccount({
         provider: "junction",
         externalAccountId: "junction-account",
         displayName: "Junction Account",
@@ -1482,22 +1512,56 @@ describe("resolveHostedDeviceSyncNextWakeAt", () => {
         nextReconcileAt: "2026-04-08T01:00:00.000Z",
       });
 
-      const wakeAt = resolveHostedDeviceSyncNextWakeAt({
-        deviceSyncConfig: {
-          providerConfigs: {
-            junction: {
-              environment: "sandbox",
-              providerFilter: ["fitbit"],
-              region: "us",
-            },
+      const deviceSyncConfig: NonNullable<
+        Parameters<typeof resolveHostedDeviceSyncNextWakeAt>[0]["deviceSyncConfig"]
+      > = {
+        providerConfigs: {
+          junction: {
+            environment: "sandbox",
+            providerFilter: ["fitbit"],
+            region: "us",
           },
-          publicBaseUrl: "https://device-sync.example.test",
-          secret: "secret_123",
         },
-        vaultRoot,
-      });
+        publicBaseUrl: "https://device-sync.example.test",
+        secret: "secret_123",
+      };
+      const futureCadenceWakeAt = await withHostedMaintenanceNow(
+        "2026-04-08T00:00:00.000Z",
+        async () => resolveHostedDeviceSyncNextWakeAt({
+          deviceSyncConfig,
+          vaultRoot,
+        }),
+      );
+      assert.equal(futureCadenceWakeAt, "2026-04-08T01:00:00.000Z");
 
-      assert.equal(wakeAt, "2026-04-08T01:00:00.000Z");
+      const dueCadenceWakeAt = await withHostedMaintenanceNow(
+        "2026-04-08T01:00:00.000Z",
+        async () => resolveHostedDeviceSyncNextWakeAt({
+          deviceSyncConfig,
+          vaultRoot,
+        }),
+      );
+      assert.equal(dueCadenceWakeAt, null);
+
+      store.enqueueJob({
+        accountId: account.id,
+        availableAt: "2026-04-08T00:30:00.000Z",
+        kind: "reconcile",
+        payload: {},
+        provider: account.provider,
+      });
+      const dueJobWakeAt = await withHostedMaintenanceNow(
+        "2026-04-08T01:00:00.000Z",
+        async () => resolveHostedDeviceSyncNextWakeAt({
+          deviceSyncConfig: {
+            providerConfigs: {},
+            publicBaseUrl: "https://device-sync.example.test",
+            secret: "secret_123",
+          },
+          vaultRoot,
+        }),
+      );
+      assert.equal(dueJobWakeAt, "2026-04-08T00:30:00.000Z");
       expect(mocks.readConfiguredJunctionDeviceSyncProviderConfig).not.toHaveBeenCalled();
       expect(mocks.createConfiguredDeviceSyncProvidersFromConfigs).not.toHaveBeenCalled();
       expect(mocks.createHostedRuntimeDeviceSyncService).not.toHaveBeenCalled();
@@ -1662,6 +1726,7 @@ describe("runHostedDeviceSyncPass", () => {
     const service = {
       close,
       drainWorker: vi.fn(async () => 0),
+      getNextJobWakeAt: () => null,
       getNextWakeAt: () => null,
       listJobFailureDiagnostics: vi.fn(() => []),
       listAccounts: vi.fn(() => []),
@@ -1694,7 +1759,7 @@ describe("runHostedDeviceSyncPass", () => {
 
     expect(mocks.syncHostedDeviceSyncControlPlaneState).toHaveBeenCalledWith(
       expect.objectContaining({
-        skipDirtyPendingFetch: false,
+        skipDirtyPendingFetch: true,
         stagedDirtyAcks: [
           {
             connectionId: "dsc_123",
@@ -1723,6 +1788,7 @@ describe("runHostedDeviceSyncPass", () => {
     const service = {
       close: vi.fn(),
       drainWorker: vi.fn(async () => 0),
+      getNextJobWakeAt: () => null,
       getNextWakeAt: () => null,
       listJobFailureDiagnostics: vi.fn(() => []),
       listAccounts: vi.fn(() => []),
@@ -1771,6 +1837,142 @@ describe("runHostedDeviceSyncPass", () => {
     ).toBe(snapshot);
   });
 
+  it("logs stage-specific wearable import latency after successful dirty payload work", async () => {
+    const service = {
+      close: vi.fn(),
+      drainWorker: vi.fn(async () => 1),
+      getNextJobWakeAt: () => null,
+      getNextWakeAt: () => null,
+      listJobFailureDiagnostics: vi.fn(() => []),
+      listAccounts: vi.fn(() => []),
+      runSchedulerOnce: vi.fn(async () => undefined),
+    };
+    const logPort = {
+      write: vi.fn(async (request: HostedRuntimeLogRequest) => ({
+        loggedCount: request.entries.length,
+      })),
+    };
+    mocks.createHostedRuntimeDeviceSyncService.mockReturnValue(service);
+    mocks.promoteHostedCompletedDirtyPayloadAcks.mockReturnValueOnce([{
+      eventToProviderSendBucket: "under_5_minutes",
+      firstWebhookReceivedAt: "2026-04-08T00:04:00.000Z",
+      importCompletedAt: "2026-04-08T00:06:00.000Z",
+      importExecutionStartedAt: "2026-04-08T00:05:00.000Z",
+      jobCreatedAt: "2026-04-08T00:04:30.000Z",
+      jobKind: "resource",
+      provider: "junction",
+      providerSendToWebhookMs: 60_000,
+      sourceProvider: "garmin",
+    }, {
+      eventToProviderSendBucket: "5_to_30_minutes",
+      firstWebhookReceivedAt: "2026-04-08T00:03:00.000Z",
+      importCompletedAt: "2026-04-08T00:06:00.000Z",
+      importExecutionStartedAt: null,
+      jobCreatedAt: "2026-04-08T00:07:00.000Z",
+      jobKind: "resource",
+      provider: "strava",
+      providerSendToWebhookMs: null,
+      sourceProvider: "strava",
+    }, {
+      eventToProviderSendBucket: "under_5_minutes",
+      firstWebhookReceivedAt: "2026-04-08T00:04:00.000Z",
+      importCompletedAt: "2026-04-08T00:06:00.000Z",
+      importExecutionStartedAt: "2026-04-08T00:05:00.000Z",
+      jobCreatedAt: "2026-04-08T00:04:30.000Z",
+      jobKind: "reconcile",
+      provider: "junction",
+      providerSendToWebhookMs: 60_000,
+      sourceProvider: null,
+    }]);
+
+    await runHostedDeviceSyncPass(
+      {
+        eventId: "evt_import_timing",
+        kind: "runtime.timer",
+        occurredAt: "2026-04-08T00:06:00.000Z",
+        triggerKind: "runtime_timer",
+        userId: "member_123",
+      },
+      "/tmp/vault-root",
+      DEVICE_SYNC_CONFIG,
+      createMaintenanceDeviceSyncPortStub(),
+      45_000,
+      {
+        runtimeLogPlatform: { logPort },
+      },
+    );
+
+    await vi.waitFor(() => {
+      expect(logPort.write).toHaveBeenCalled();
+    });
+    const requests = logPort.write.mock.calls.map(([request]) => request);
+    const entry = requests
+      .flatMap((request) => request.entries)
+      .find((candidate) => candidate.eventCode === "device-sync.import_completed");
+    assert.ok(entry);
+    expect(entry).toEqual({
+      at: "2026-04-08T00:06:00.000Z",
+      component: "device-sync",
+      eventCode: "device-sync.import_completed",
+      level: "info",
+      phase: "invoke",
+      redactedJson: {
+        eventToProviderSendBucket: "under_5_minutes",
+        importExecutionMs: 60_000,
+        jobKind: "resource",
+        provider: "junction",
+        providerSendToWebhookMs: 60_000,
+        runtimeQueueMs: 30_000,
+        sourceProvider: "garmin",
+        webhookToImportMs: 120_000,
+      },
+    });
+    const skewedEntry = requests
+      .flatMap((request) => request.entries)
+      .find((candidate) => candidate.redactedJson?.provider === "strava");
+    assert.ok(skewedEntry);
+    expect(skewedEntry.redactedJson).toMatchObject({
+      eventToProviderSendBucket: "5_to_30_minutes",
+      provider: "strava",
+      sourceProvider: "strava",
+      webhookToImportMs: 180_000,
+    });
+    expect(skewedEntry.redactedJson).not.toHaveProperty("providerSendToWebhookMs");
+    expect(skewedEntry.redactedJson).not.toHaveProperty("runtimeQueueMs");
+    expect(skewedEntry.redactedJson).not.toHaveProperty("importExecutionMs");
+    const mixedSourceEntry = requests
+      .flatMap((request) => request.entries)
+      .find((candidate) => candidate.redactedJson?.jobKind === "reconcile");
+    assert.ok(mixedSourceEntry);
+    expect(mixedSourceEntry.redactedJson).not.toHaveProperty("sourceProvider");
+    for (const privateField of [
+      "connectionId",
+      "deviceId",
+      "eventCount",
+      "eventToImportMs",
+      "eventToProviderSendMs",
+      "eventType",
+      "externalAccountId",
+      "healthValue",
+      "importCompletedAt",
+      "importExecutionStartedAt",
+      "jobCreatedAt",
+      "memberId",
+      "oldestEventOccurredAt",
+      "oldestProviderSentAt",
+      "oldestWebhookReceivedAt",
+      "resource",
+      "resourceCategory",
+      "sourceProviderSlug",
+      "userId",
+      "webhookBody",
+    ]) {
+      expect(entry.redactedJson).not.toHaveProperty(privateField);
+      expect(skewedEntry.redactedJson).not.toHaveProperty(privateField);
+      expect(mixedSourceEntry.redactedJson).not.toHaveProperty(privateField);
+    }
+  });
+
   it("stops a superseded connection wake after hydration without running device-sync work", async () => {
     const close = vi.fn();
     const drainWorker = vi.fn(async () => 0);
@@ -1778,6 +1980,7 @@ describe("runHostedDeviceSyncPass", () => {
     const service = {
       close,
       drainWorker,
+      getNextJobWakeAt: () => "2026-04-08T01:00:00.000Z",
       getNextWakeAt: () => "2026-04-08T01:00:00.000Z",
       listJobFailureDiagnostics: vi.fn(() => []),
       listAccounts: vi.fn(() => []),
@@ -1841,6 +2044,7 @@ describe("runHostedDeviceSyncPass", () => {
       const service = {
         close,
         drainWorker: vi.fn(async () => 0),
+        getNextJobWakeAt: () => null,
         getNextWakeAt: () => null,
         listJobFailureDiagnostics: vi.fn(() => []),
         listAccounts: vi.fn(() => []),
@@ -1906,6 +2110,7 @@ describe("runHostedDeviceSyncPass", () => {
     mocks.createHostedRuntimeDeviceSyncService.mockReturnValue({
       close,
       drainWorker,
+      getNextJobWakeAt: () => null,
       getNextWakeAt: () => null,
       listJobFailureDiagnostics: vi.fn(() => []),
       listAccounts: vi.fn(() => []),
@@ -1984,6 +2189,7 @@ describe("runHostedDeviceSyncPass", () => {
     mocks.createHostedRuntimeDeviceSyncService.mockReturnValue({
       close,
       drainWorker,
+      getNextJobWakeAt: () => null,
       getNextWakeAt: () => null,
       listJobFailureDiagnostics: vi.fn(() => []),
       listAccounts: vi.fn(() => []),
@@ -2073,6 +2279,7 @@ describe("runHostedDeviceSyncPass", () => {
     mocks.createHostedRuntimeDeviceSyncService.mockReturnValue({
       close,
       drainWorker,
+      getNextJobWakeAt: () => null,
       getNextWakeAt: () => null,
       listJobFailureDiagnostics: vi.fn(() => []),
       listAccounts: vi.fn(() => []),
@@ -2104,6 +2311,43 @@ describe("runHostedDeviceSyncPass", () => {
     expect(close).toHaveBeenCalledTimes(1);
   });
 
+  it("does not turn due provider cadence into a runtime-timer wake loop", async () => {
+    await withHostedMaintenanceNow("2026-04-08T00:00:00.000Z", async () => {
+      const runSchedulerOnce = vi.fn(async () => undefined);
+      const service = {
+        close: vi.fn(),
+        drainWorker: vi.fn(async () => 0),
+        getNextJobWakeAt: () => null,
+        getNextWakeAt: () => "2026-04-08T00:00:00.000Z",
+        listJobFailureDiagnostics: vi.fn(() => []),
+        listAccounts: vi.fn(() => []),
+        runSchedulerOnce,
+      };
+      mocks.createHostedRuntimeDeviceSyncService.mockReturnValue(service);
+      mocks.resolveHostedDeviceSyncSchedulerAccountId.mockReturnValueOnce(null);
+      mocks.resolveHostedDeviceSyncWakeLocalAccountId.mockReturnValueOnce(null);
+
+      const result = await runHostedDeviceSyncPass(
+        {
+          eventId: "evt_due_provider_cadence_timer",
+          kind: "runtime.timer",
+          occurredAt: "2026-04-08T00:00:00.000Z",
+          triggerKind: "runtime_timer",
+          userId: "member_123",
+        },
+        "/tmp/vault-root",
+        DEVICE_SYNC_CONFIG,
+        createMaintenanceDeviceSyncPortStub(),
+        45_000,
+      );
+
+      assert.equal(result.nextWakeAt, null);
+      expect(runSchedulerOnce).not.toHaveBeenCalled();
+      expect(service.drainWorker).not.toHaveBeenCalled();
+      expect(service.close).toHaveBeenCalledTimes(1);
+    });
+  });
+
   it("fails closed on control-plane reconcile failures when hosted device sync is configured", async () => {
     const close = vi.fn();
     const runSchedulerOnce = vi.fn(async () => undefined);
@@ -2112,6 +2356,7 @@ describe("runHostedDeviceSyncPass", () => {
     mocks.createHostedRuntimeDeviceSyncService.mockReturnValue({
       close,
       drainWorker,
+      getNextJobWakeAt: () => null,
       getNextWakeAt: () => null,
       listJobFailureDiagnostics: vi.fn(() => []),
       listAccounts: vi.fn(() => []),
@@ -2150,6 +2395,7 @@ describe("runHostedDeviceSyncPass", () => {
     mocks.createHostedRuntimeDeviceSyncService.mockReturnValue({
       close,
       drainWorker,
+      getNextJobWakeAt: () => "2026-04-08T02:00:00.000Z",
       getNextWakeAt: () => "2026-04-08T02:00:00.000Z",
       listJobFailureDiagnostics: vi.fn(() => []),
       listAccounts: vi.fn(() => []),
@@ -2178,7 +2424,7 @@ describe("runHostedDeviceSyncPass", () => {
     });
     expect(runSchedulerOnce).toHaveBeenCalledTimes(1);
     expect(drainWorker).toHaveBeenCalledTimes(1);
-    expect(drainWorker).toHaveBeenCalledWith(100);
+    expect(drainWorker).toHaveBeenCalledWith(100, "local_scheduled_account");
     expect(mocks.reconcileHostedDeviceSyncControlPlaneState).toHaveBeenCalledTimes(1);
     expect(close).toHaveBeenCalledTimes(1);
   });
@@ -2189,6 +2435,7 @@ describe("runHostedDeviceSyncPass", () => {
     mocks.createHostedRuntimeDeviceSyncService.mockReturnValue({
       close: vi.fn(),
       drainWorker: vi.fn(async () => 0),
+      getNextJobWakeAt: () => "2026-04-08T02:00:00.000Z",
       getNextWakeAt: () => "2026-04-08T02:00:00.000Z",
       listJobFailureDiagnostics: vi.fn(() => []),
       listAccounts: vi.fn(() => [
@@ -2277,6 +2524,7 @@ describe("runHostedDeviceSyncPass", () => {
     mocks.createHostedRuntimeDeviceSyncService.mockReturnValue({
       close: vi.fn(),
       drainWorker: vi.fn(async () => 3),
+      getNextJobWakeAt: () => "2026-04-08T02:00:00.000Z",
       getNextWakeAt: () => "2026-04-08T02:00:00.000Z",
       listJobFailureDiagnostics: vi.fn(() => []),
       listAccounts: vi.fn(() => {
@@ -2322,6 +2570,7 @@ describe("runHostedDeviceSyncPass", () => {
     mocks.createHostedRuntimeDeviceSyncService.mockReturnValue({
       close,
       drainWorker,
+      getNextJobWakeAt: () => "2026-04-08T02:00:00.000Z",
       getNextWakeAt: () => "2026-04-08T02:00:00.000Z",
       listJobFailureDiagnostics: vi.fn(() => []),
       listAccounts: vi.fn(() => []),
@@ -2415,6 +2664,7 @@ describe("runHostedDeviceSyncPass", () => {
     mocks.createHostedRuntimeDeviceSyncService.mockReturnValue({
       close,
       drainWorker,
+      getNextJobWakeAt: () => null,
       getNextWakeAt: () => null,
       listJobFailureDiagnostics: vi.fn(() => []),
       listAccounts: vi.fn(() => []),
@@ -2473,6 +2723,7 @@ describe("runHostedDeviceSyncPass", () => {
       mocks.createHostedRuntimeDeviceSyncService.mockReturnValue({
         close,
         drainWorker: vi.fn(async () => 0),
+        getNextJobWakeAt: () => null,
         getNextWakeAt: () => null,
         listJobFailureDiagnostics: vi.fn(() => []),
         listAccounts: vi.fn(() => []),
@@ -2543,6 +2794,7 @@ describe("runHostedDeviceSyncPass", () => {
     mocks.createHostedRuntimeDeviceSyncService.mockReturnValue({
       close,
       drainWorker,
+      getNextJobWakeAt: () => null,
       getNextWakeAt: () => null,
       listJobFailureDiagnostics: vi.fn(() => []),
       listAccounts: vi.fn(() => []),
@@ -2603,6 +2855,7 @@ describe("runHostedDeviceSyncPass", () => {
     mocks.createHostedRuntimeDeviceSyncService.mockReturnValue({
       close,
       drainWorker,
+      getNextJobWakeAt: () => null,
       getNextWakeAt: () => null,
       listJobFailureDiagnostics: vi.fn(() => []),
       listAccounts: vi.fn(() => []),
@@ -2645,6 +2898,7 @@ describe("runHostedDeviceSyncPass", () => {
     mocks.createHostedRuntimeDeviceSyncService.mockReturnValue({
       close,
       drainWorker,
+      getNextJobWakeAt: () => "2026-04-08T02:00:00.000Z",
       getNextWakeAt: () => "2026-04-08T02:00:00.000Z",
       listJobFailureDiagnostics: vi.fn(() => []),
       listAccounts: vi.fn(() => []),
@@ -2712,6 +2966,7 @@ describe("runHostedDeviceSyncPass", () => {
     mocks.createHostedRuntimeDeviceSyncService.mockReturnValue({
       close,
       drainWorker,
+      getNextJobWakeAt: () => null,
       getNextWakeAt: () => null,
       listJobFailureDiagnostics: vi.fn(() => []),
       listAccounts: vi.fn(() => []),
@@ -2798,6 +3053,7 @@ describe("runHostedDeviceSyncPass", () => {
     const service = {
       close,
       drainWorker: vi.fn(async () => 0),
+      getNextJobWakeAt: () => retryAt,
       getNextWakeAt: () => retryAt,
       listJobFailureDiagnostics: vi.fn(() => []),
       listAccounts: vi.fn(() => []),
@@ -2859,6 +3115,143 @@ describe("runHostedDeviceSyncPass", () => {
     expect(close).toHaveBeenCalledTimes(1);
   });
 
+  it("retains an exact connection wake while that connection has local retry work", async () => {
+    const retryAt = "2026-04-08T00:05:00.000Z";
+    const service = {
+      close: vi.fn(),
+      drainWorker: vi.fn(async () => 1),
+      getNextJobWakeAt: () => retryAt,
+      getNextWakeAt: () => retryAt,
+      listJobFailureDiagnostics: vi.fn(() => []),
+      listAccounts: vi.fn(() => []),
+      runSchedulerOnce: vi.fn(async () => undefined),
+    };
+    mocks.createHostedRuntimeDeviceSyncService.mockReturnValue(service);
+    mocks.requireHostedRuntimeDeviceSyncStore.mockReturnValue({
+      getAccountById: (accountId: string) =>
+        accountId === "local_retry_account" ? { provider: "oura" } : null,
+      listPendingJobsForAccount: () => [{
+              accountId: "local_retry_account",
+              attempts: 1,
+              availableAt: retryAt,
+              createdAt: "2026-04-08T00:00:00.000Z",
+              dedupeKey: "initial-history",
+              finishedAt: null,
+              id: "job_exact_retry",
+              kind: "resource",
+              lastErrorCode: "PROVIDER_RETRYABLE",
+              lastErrorMessage: "retryable",
+              leaseExpiresAt: null,
+              leaseOwner: null,
+              maxAttempts: 5,
+              payload: {
+                windowEnd: "2026-04-08T00:00:00.000Z",
+                windowStart: "2025-10-10T00:00:00.000Z",
+              },
+              priority: 0,
+              provider: "oura",
+              startedAt: "2026-04-08T00:00:00.000Z",
+              status: "queued",
+              updatedAt: retryAt,
+            }],
+      readNextJobWakeAtForAccount: (accountId: string) =>
+        accountId === "local_retry_account" ? retryAt : null,
+    });
+    mocks.syncHostedDeviceSyncControlPlaneState.mockResolvedValueOnce({
+      hostedToLocalAccountIds: new Map([
+        ["hosted_retry_connection", "local_retry_account"],
+      ]),
+      localToHostedAccountIds: new Map([
+        ["local_retry_account", "hosted_retry_connection"],
+      ]),
+      observedTokenVersions: new Map(),
+      pendingDirtyAcks: [],
+      pendingDirtyPayloadJobs: [],
+      snapshot: null,
+    });
+    mocks.resolveHostedDeviceSyncWakeRecovery.mockReturnValueOnce({
+      retryAt,
+      wake: {
+        connectionId: "hosted_retry_connection",
+        eventId: "evt_device_sync_exact_retry",
+        expectedConnectedAt: "2026-04-08T00:00:00.000Z",
+        hint: {
+          jobs: [{
+            availableAt: retryAt,
+            dedupeKey: "initial-history",
+            kind: "resource",
+            maxAttempts: 4,
+            payload: {
+              windowEnd: "2026-04-08T00:00:00.000Z",
+              windowStart: "2025-10-10T00:00:00.000Z",
+            },
+          }],
+        },
+        kind: "device-sync.wake",
+        occurredAt: "2026-04-08T00:00:00.000Z",
+        provider: "oura",
+        reason: "connected",
+        userId: "member_123",
+      },
+    });
+
+    const result = await runHostedDeviceSyncPass(
+      {
+        connectionId: "hosted_retry_connection",
+        eventId: "evt_device_sync_exact_retry",
+        expectedConnectedAt: "2026-04-08T00:00:00.000Z",
+        hint: {
+          jobs: [{
+            dedupeKey: "initial-history",
+            kind: "resource",
+            payload: {
+              windowEnd: "2026-04-08T00:00:00.000Z",
+              windowStart: "2025-10-10T00:00:00.000Z",
+            },
+          }],
+        },
+        kind: "device-sync.wake",
+        occurredAt: "2026-04-08T00:00:00.000Z",
+        provider: "oura",
+        reason: "connected",
+        userId: "member_123",
+      },
+      "/tmp/vault-root",
+      DEVICE_SYNC_CONFIG,
+      createMaintenanceDeviceSyncPortStub(),
+      45_000,
+    );
+
+    assert.deepEqual(result.postCheckpointRecord, {
+      kind: "device-sync.dirty-processed-batch",
+      records: [],
+      retainMailboxItemUntil: retryAt,
+      retainedWake: {
+        connectionId: "hosted_retry_connection",
+        eventId: "evt_device_sync_exact_retry",
+        expectedConnectedAt: "2026-04-08T00:00:00.000Z",
+        hint: {
+          jobs: [{
+            availableAt: retryAt,
+            dedupeKey: "initial-history",
+            kind: "resource",
+            maxAttempts: 4,
+            payload: {
+              windowEnd: "2026-04-08T00:00:00.000Z",
+              windowStart: "2025-10-10T00:00:00.000Z",
+            },
+          }],
+        },
+        kind: "device-sync.wake",
+        occurredAt: "2026-04-08T00:00:00.000Z",
+        provider: "oura",
+        reason: "connected",
+        userId: "member_123",
+      },
+    });
+    assert.equal(result.nextWakeAt, retryAt);
+  });
+
   it("yields before dirty control-plane fetch when foreground input is waiting", async () => {
     const close = vi.fn();
     const runSchedulerOnce = vi.fn(async () => undefined);
@@ -2868,6 +3261,7 @@ describe("runHostedDeviceSyncPass", () => {
     mocks.createHostedRuntimeDeviceSyncService.mockReturnValue({
       close,
       drainWorker,
+      getNextJobWakeAt: () => null,
       getNextWakeAt: () => null,
       listJobFailureDiagnostics: vi.fn(() => []),
       listAccounts: vi.fn(() => []),
@@ -2918,6 +3312,7 @@ describe("runHostedDeviceSyncPass", () => {
     mocks.createHostedRuntimeDeviceSyncService.mockReturnValue({
       close,
       drainWorker,
+      getNextJobWakeAt: () => "2026-04-08T02:00:00.000Z",
       getNextWakeAt: () => "2026-04-08T02:00:00.000Z",
       listJobFailureDiagnostics: vi.fn(() => []),
       listAccounts: vi.fn(() => []),
@@ -2998,6 +3393,7 @@ describe("runHostedDeviceSyncPass", () => {
     mocks.createHostedRuntimeDeviceSyncService.mockReturnValue({
       close,
       drainWorker,
+      getNextJobWakeAt: () => "2026-04-08T02:00:00.000Z",
       getNextWakeAt: () => "2026-04-08T02:00:00.000Z",
       listJobFailureDiagnostics: vi.fn(() => []),
       listAccounts: vi.fn(() => []),
@@ -3074,6 +3470,7 @@ describe("runHostedDeviceSyncPass", () => {
     mocks.createHostedRuntimeDeviceSyncService.mockReturnValue({
       close,
       drainWorker,
+      getNextJobWakeAt: () => "2026-04-08T02:00:00.000Z",
       getNextWakeAt: () => "2026-04-08T02:00:00.000Z",
       listJobFailureDiagnostics: vi.fn(() => []),
       listAccounts: vi.fn(() => []),
@@ -3108,7 +3505,7 @@ describe("runHostedDeviceSyncPass", () => {
     });
     expect(runSchedulerOnce).toHaveBeenCalledTimes(1);
     expect(drainWorker).toHaveBeenCalledTimes(1);
-    expect(drainWorker).toHaveBeenCalledWith(1);
+    expect(drainWorker).toHaveBeenCalledWith(1, "local_scheduled_account");
     expect(shouldYield).toHaveBeenCalled();
     expect(mocks.reconcileHostedDeviceSyncControlPlaneState).not.toHaveBeenCalled();
     expect(close).toHaveBeenCalledTimes(1);
@@ -3123,6 +3520,7 @@ describe("runHostedDeviceSyncPass", () => {
     mocks.createHostedRuntimeDeviceSyncService.mockReturnValue({
       close,
       drainWorker,
+      getNextJobWakeAt: () => null,
       getNextWakeAt: () => null,
       listJobFailureDiagnostics: vi.fn(() => []),
       listAccounts: vi.fn(() => []),
@@ -3154,7 +3552,7 @@ describe("runHostedDeviceSyncPass", () => {
     });
     expect(runSchedulerOnce).toHaveBeenCalledTimes(1);
     expect(drainWorker).toHaveBeenCalledTimes(100);
-    expect(drainWorker).toHaveBeenCalledWith(1);
+    expect(drainWorker).toHaveBeenCalledWith(1, "local_scheduled_account");
     expect(shouldYield).toHaveBeenCalled();
     expect(mocks.reconcileHostedDeviceSyncControlPlaneState).toHaveBeenCalledTimes(1);
     expect(close).toHaveBeenCalledTimes(1);
@@ -3171,6 +3569,7 @@ describe("runHostedDeviceSyncPass", () => {
     mocks.createHostedRuntimeDeviceSyncService.mockReturnValue({
       close,
       drainWorker,
+      getNextJobWakeAt: () => "2026-04-08T00:00:00.000Z",
       getNextWakeAt: () => "2026-04-08T00:00:00.000Z",
       runSchedulerOnce,
     });
@@ -3216,6 +3615,7 @@ describe("runHostedDeviceSyncPass", () => {
     mocks.createHostedRuntimeDeviceSyncService.mockReturnValue({
       close,
       drainWorker,
+      getNextJobWakeAt: () => "2026-04-08T02:00:00.000Z",
       getNextWakeAt: () => "2026-04-08T02:00:00.000Z",
       listJobFailureDiagnostics: vi.fn(() => [
         {
@@ -3401,6 +3801,7 @@ describe("runHostedDeviceSyncPass", () => {
     mocks.createHostedRuntimeDeviceSyncService.mockReturnValue({
       close,
       drainWorker,
+      getNextJobWakeAt: () => "2026-06-08T03:00:00.000Z",
       getNextWakeAt: () => "2026-06-08T03:00:00.000Z",
       listJobFailureDiagnostics: vi.fn(() => [
         {
@@ -3538,6 +3939,7 @@ describe("runHostedDeviceSyncPass", () => {
     mocks.createHostedRuntimeDeviceSyncService.mockReturnValue({
       close,
       drainWorker: vi.fn(),
+      getNextJobWakeAt: () => null,
       getNextWakeAt: () => null,
       runSchedulerOnce: vi.fn(),
     });
@@ -3571,6 +3973,7 @@ describe("runHostedDeviceSyncPass", () => {
     mocks.createHostedRuntimeDeviceSyncService.mockReturnValue({
       close,
       drainWorker: vi.fn(async () => 1),
+      getNextJobWakeAt: () => null,
       getNextWakeAt: () => null,
       runSchedulerOnce: vi.fn(async () => undefined),
     });
@@ -5022,6 +5425,7 @@ describe("runHostedAssistantAutomationLane", () => {
     const service = {
       close: vi.fn(),
       drainWorker: vi.fn(async () => 1),
+      getNextJobWakeAt: () => "2026-04-08T00:30:00.000Z",
       getNextWakeAt: () => "2026-04-08T00:30:00.000Z",
       runSchedulerOnce: vi.fn(async () => undefined),
     };
@@ -5189,6 +5593,7 @@ describe("runHostedDeviceSyncWakeLane", () => {
     mocks.createHostedRuntimeDeviceSyncService.mockReturnValue({
       close: vi.fn(),
       drainWorker,
+      getNextJobWakeAt: () => "2026-04-08T00:30:00.000Z",
       getNextWakeAt: () => "2026-04-08T00:30:00.000Z",
       runSchedulerOnce: vi.fn(async () => undefined),
     });
@@ -5230,9 +5635,73 @@ describe("runHostedDeviceSyncWakeLane", () => {
       parserProcessed: 0,
       postCheckpointRecord: null,
     });
-    expect(drainWorker).toHaveBeenCalledWith(1);
+    expect(drainWorker).toHaveBeenCalledWith(1, "local_scheduled_account");
     expect(shouldYieldDeviceSync).toHaveBeenCalled();
     expect(mocks.runAssistantAutomationPass).not.toHaveBeenCalled();
+  });
+
+  it("uses one lane-wide deadline for in-flight device-sync control requests", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-08T00:00:00.000Z"));
+    try {
+      const observedSignals: AbortSignal[] = [];
+      const fetchSnapshot = vi.fn(async (input?: { signal?: AbortSignal | null }) => {
+        const signal = input?.signal ?? null;
+        if (!signal) {
+          throw new Error("Expected the device-sync wake lane to provide a cancellation signal.");
+        }
+        observedSignals.push(signal);
+        return await new Promise<never>((_resolve, reject) => {
+          const rejectForAbort = () => reject(new Error(
+            "Hosted device-sync runtime snapshot request failed.",
+            { cause: signal.reason },
+          ));
+          if (signal.aborted) {
+            rejectForAbort();
+            return;
+          }
+          signal.addEventListener("abort", rejectForAbort, { once: true });
+        });
+      });
+
+      const resultPromise = runHostedDeviceSyncWakeLane({
+        deviceSyncPort: {
+          ackDirtyStateProcessed: vi.fn(),
+          applyUpdates: vi.fn(),
+          createConnectLink: vi.fn(),
+          fetchDirtyStates: vi.fn(),
+          fetchSnapshot,
+        },
+        wake: {
+          eventId: "evt_device_sync_lane_timeout",
+          kind: "device-sync.wake",
+          occurredAt: "2026-04-08T00:00:00.000Z",
+          reason: "webhook_hint",
+          userId: "member_123",
+        },
+        resolvedConfig: {
+          deviceSync: DEVICE_SYNC_CONFIG,
+        },
+        timeoutMs: 100,
+        vaultRoot: "/tmp/vault-root",
+      });
+
+      await vi.advanceTimersByTimeAsync(100);
+      await expect(resultPromise).resolves.toEqual({
+        deviceSyncProcessed: 0,
+        deviceSyncSkipped: true,
+        nextWakeAt: "2026-04-08T00:00:30.100Z",
+        nextWakeReason: "device-sync.reconcile",
+        parserProcessed: 0,
+        postCheckpointRecord: null,
+      });
+      expect(fetchSnapshot).toHaveBeenCalledTimes(1);
+      const observedSignal = observedSignals[0];
+      expect(observedSignal?.aborted).toBe(true);
+      expect(observedSignal?.reason).toMatchObject({ name: "AbortError" });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

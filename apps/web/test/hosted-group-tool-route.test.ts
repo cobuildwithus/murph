@@ -1,6 +1,8 @@
 import {
   HOSTED_RUNTIME_ASSISTANT_ASK_DIAGNOSTIC_CODE_HEADER,
   HOSTED_RUNTIME_ASSISTANT_ASK_REQUEST_ID_HEADER,
+  HOSTED_RUNTIME_GROUP_CURRENT_SENDER_PROTOCOL_MARKER,
+  HOSTED_RUNTIME_GROUP_CURRENT_SENDER_PROTOCOL_MARKER_VALUE,
   HOSTED_RUNTIME_GROUP_TOOL_REQUEST_MAX_BYTES,
 } from "@murphai/hosted-execution/runtime-control";
 import {
@@ -111,10 +113,54 @@ describe("hosted group tool route", () => {
     expect(handled.requestStartedAtMs).toBeLessThanOrEqual(Date.now());
   });
 
+  it("accepts an eight-scope group email preparation callback", async () => {
+    const body = {
+      action: "prepare_email",
+      projectionScopes: [
+        { projectionKind: "steps-days.v0" },
+        { projectionKind: "activity-days.v0" },
+        { projectionKind: "workout-days.v0" },
+        { projectionKind: "workouts.v0" },
+        { projectionKind: "sleep-duration-days.v0" },
+        { projectionKind: "sleep-times.v0" },
+        { projectionKind: "resting-heart-rate-days.v0" },
+        { projectionKind: "hrv-days.v0" },
+      ],
+    };
+    mocks.handleTool.mockResolvedValueOnce({
+      action: "prepare_email",
+      result: {
+        authorizationProof: "a".repeat(64),
+        groupId: "hgrp_test",
+        missingEmailParticipants: [],
+        participants: [],
+        status: "ok",
+      },
+    });
+    const request = new Request(
+      `https://join.example.test${HOSTED_RUNTIME_GROUP_TOOL_PATH}`,
+      {
+        body: JSON.stringify(body),
+        headers: { "content-type": "application/json" },
+        method: "POST",
+      },
+    );
+
+    const response = await route.POST(request);
+
+    expect(response.status).toBe(200);
+    expect(mocks.handleTool).toHaveBeenCalledWith({
+      memberId: "member_group_runtime",
+      request: body,
+      requestStartedAtMs: expect.any(Number),
+      scheduleMailboxWake: expect.any(Function),
+    });
+  });
+
   it.each([
     ["P2010", "P2010"],
     ["PRIVATE_CODE", null],
-  ])(
+  ] as const)(
     "returns bounded Assistant Ask diagnostics for unexpected admission code %s",
     async (errorCode, expectedDiagnosticCode) => {
       const originAssistantInputId = `ain_${"a".repeat(32)}`;
@@ -248,6 +294,251 @@ describe("hosted group tool route", () => {
 
   it.each([
     {
+      expectedRequest: {
+        action: "ask_current_sender",
+        audience: "group",
+        mode: "new",
+        origin: {
+          assistantInputId: `ain_${"b".repeat(32)}`,
+          kind: "accepted_input",
+          sessionId: "session_group",
+        },
+      },
+      expectedResponse: {
+        action: "ask_current_sender",
+        result: { status: "accepted" },
+      },
+      label: "strict body-marked protocol",
+      requestBody: {
+        action: "ask_current_sender",
+        audience: "group",
+        [HOSTED_RUNTIME_GROUP_CURRENT_SENDER_PROTOCOL_MARKER]:
+          HOSTED_RUNTIME_GROUP_CURRENT_SENDER_PROTOCOL_MARKER_VALUE,
+        mode: "new",
+        origin: {
+          assistantInputId: `ain_${"b".repeat(32)}`,
+          kind: "accepted_input",
+          sessionId: "session_group",
+        },
+      },
+    },
+    {
+      expectedRequest: {
+        action: "ask_current_sender",
+        audience: "current_sender",
+        mode: "new",
+        origin: {
+          assistantInputId: `ain_${"d".repeat(32)}`,
+          kind: "accepted_input",
+          sessionId: "session_group",
+        },
+      },
+      expectedResponse: {
+        action: "message_current_sender",
+        result: { status: "accepted" },
+      },
+      label: "bounded legacy action",
+      requestBody: {
+        action: "message_current_sender",
+        origin: {
+          assistantInputId: `ain_${"d".repeat(32)}`,
+          kind: "accepted_input",
+          sessionId: "session_group",
+        },
+      },
+    },
+  ])(
+    "keeps $label compatible while admission receives trusted audience authority",
+    async ({ expectedRequest, expectedResponse, requestBody }) => {
+      mocks.handleTool.mockResolvedValueOnce({
+        action: "ask_current_sender",
+        result: { status: "accepted" },
+      });
+      const request = new Request(
+        `https://join.example.test${HOSTED_RUNTIME_GROUP_TOOL_PATH}`,
+        {
+          body: JSON.stringify(requestBody),
+          headers: { "content-type": "application/json" },
+          method: "POST",
+        },
+      );
+
+      const response = await route.POST(request);
+
+      expect(response.status).toBe(200);
+      expect(mocks.handleTool).toHaveBeenCalledWith({
+        memberId: "member_group_runtime",
+        request: expectedRequest,
+        requestStartedAtMs: expect.any(Number),
+        scheduleMailboxWake: expect.any(Function),
+      });
+      await expect(response.json()).resolves.toEqual(expectedResponse);
+    },
+  );
+
+  it("rejects an unmarked legacy group request before admission", async () => {
+    const request = new Request(
+      `https://join.example.test${HOSTED_RUNTIME_GROUP_TOOL_PATH}`,
+      {
+        body: JSON.stringify({
+          action: "ask_current_sender",
+          origin: {
+            assistantInputId: `ain_${"c".repeat(32)}`,
+            kind: "accepted_input",
+            sessionId: "session_group",
+          },
+        }),
+        headers: { "content-type": "application/json" },
+        method: "POST",
+      },
+    );
+
+    const response = await route.POST(request);
+
+    expect(response.status).toBe(400);
+    expect(mocks.handleTool).not.toHaveBeenCalled();
+    expect(mocks.handoffHostedMailboxWake).not.toHaveBeenCalled();
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: "INVALID_REQUEST",
+        message: "Invalid request.",
+      },
+    });
+  });
+
+  it.each([
+    {
+      label: "an undeployed intermediate marker",
+      requestBody: {
+        action: "ask_current_sender",
+        currentSenderAudienceReview: "v1",
+        origin: {
+          assistantInputId: `ain_${"1".repeat(32)}`,
+          kind: "accepted_input",
+          sessionId: "session_group",
+        },
+      },
+    },
+    {
+      label: "a strict marker mixed with the undeployed marker",
+      requestBody: {
+        action: "ask_current_sender",
+        [HOSTED_RUNTIME_GROUP_CURRENT_SENDER_PROTOCOL_MARKER]:
+          HOSTED_RUNTIME_GROUP_CURRENT_SENDER_PROTOCOL_MARKER_VALUE,
+        audience: "group",
+        mode: "new",
+        currentSenderAudienceReview: "v1",
+        origin: {
+          assistantInputId: `ain_${"4".repeat(32)}`,
+          kind: "accepted_input",
+          sessionId: "session_group",
+        },
+      },
+    },
+  ])("rejects $label", async ({ requestBody }) => {
+    const request = new Request(
+      `https://join.example.test${HOSTED_RUNTIME_GROUP_TOOL_PATH}`,
+      {
+        body: JSON.stringify(requestBody),
+        headers: { "content-type": "application/json" },
+        method: "POST",
+      },
+    );
+
+    const response = await route.POST(request);
+
+    expect(response.status).toBe(400);
+    expect(mocks.handleTool).not.toHaveBeenCalled();
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: "INVALID_REQUEST",
+        message: "Invalid request.",
+      },
+    });
+  });
+
+  it.each([
+    {
+      label: "the legacy direct action",
+      requestBody: {
+        action: "message_current_sender",
+        [HOSTED_RUNTIME_GROUP_CURRENT_SENDER_PROTOCOL_MARKER]:
+          HOSTED_RUNTIME_GROUP_CURRENT_SENDER_PROTOCOL_MARKER_VALUE,
+        audience: "group",
+        mode: "new",
+        origin: {
+          assistantInputId: `ain_${"a".repeat(32)}`,
+          kind: "accepted_input",
+          sessionId: "session_group",
+        },
+      },
+    },
+    {
+      label: "a model-authored destination",
+      requestBody: {
+        action: "ask_current_sender",
+        [HOSTED_RUNTIME_GROUP_CURRENT_SENDER_PROTOCOL_MARKER]:
+          HOSTED_RUNTIME_GROUP_CURRENT_SENDER_PROTOCOL_MARKER_VALUE,
+        audience: "group",
+        mode: "new",
+        origin: {
+          assistantInputId: `ain_${"b".repeat(32)}`,
+          kind: "accepted_input",
+          sessionId: "session_group",
+        },
+        responseDestination: "group",
+      },
+    },
+    {
+      label: "an unknown marker version",
+      requestBody: {
+        action: "ask_current_sender",
+        [HOSTED_RUNTIME_GROUP_CURRENT_SENDER_PROTOCOL_MARKER]: "v1",
+        origin: {
+          assistantInputId: `ain_${"c".repeat(32)}`,
+          kind: "accepted_input",
+          sessionId: "session_group",
+        },
+      },
+    },
+    {
+      label: "an extra canonical field",
+      requestBody: {
+        action: "ask_current_sender",
+        [HOSTED_RUNTIME_GROUP_CURRENT_SENDER_PROTOCOL_MARKER]:
+          HOSTED_RUNTIME_GROUP_CURRENT_SENDER_PROTOCOL_MARKER_VALUE,
+        origin: {
+          assistantInputId: `ain_${"d".repeat(32)}`,
+          kind: "accepted_input",
+          sessionId: "session_group",
+        },
+        unexpected: true,
+      },
+    },
+  ])("rejects strict protocol paired with $label", async ({ requestBody }) => {
+    const request = new Request(
+      `https://join.example.test${HOSTED_RUNTIME_GROUP_TOOL_PATH}`,
+      {
+        body: JSON.stringify(requestBody),
+        headers: { "content-type": "application/json" },
+        method: "POST",
+      },
+    );
+
+    const response = await route.POST(request);
+
+    expect(response.status).toBe(400);
+    expect(mocks.handleTool).not.toHaveBeenCalled();
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: "INVALID_REQUEST",
+        message: "Invalid request.",
+      },
+    });
+  });
+
+  it.each([
+    {
       body: {
         action: "ask_member",
         grantId: "grant_sleep",
@@ -260,11 +551,18 @@ describe("hosted group tool route", () => {
       },
       expectedUserId: "member-grantor",
       mailboxItemId: "aask_req_disclosure_one",
-      responseAction: "ask_member",
+      toolResponse: {
+        action: "ask_member",
+        result: { status: "accepted" },
+      },
     },
     {
       body: {
         action: "ask_current_sender",
+        audience: "group",
+        [HOSTED_RUNTIME_GROUP_CURRENT_SENDER_PROTOCOL_MARKER]:
+          HOSTED_RUNTIME_GROUP_CURRENT_SENDER_PROTOCOL_MARKER_VALUE,
+        mode: "new",
         origin: {
           assistantInputId: `ain_${"c".repeat(32)}`,
           kind: "accepted_input",
@@ -273,11 +571,18 @@ describe("hosted group tool route", () => {
       },
       expectedUserId: "member-sender",
       mailboxItemId: "aask_req_current_sender",
-      responseAction: "ask_current_sender",
+      toolResponse: {
+        action: "ask_current_sender",
+        result: { status: "accepted" },
+      },
     },
     {
       body: {
-        action: "message_current_sender",
+        action: "ask_current_sender",
+        audience: "current_sender",
+        [HOSTED_RUNTIME_GROUP_CURRENT_SENDER_PROTOCOL_MARKER]:
+          HOSTED_RUNTIME_GROUP_CURRENT_SENDER_PROTOCOL_MARKER_VALUE,
+        mode: "new",
         origin: {
           assistantInputId: `ain_${"d".repeat(32)}`,
           kind: "accepted_input",
@@ -286,20 +591,25 @@ describe("hosted group tool route", () => {
       },
       expectedUserId: "member-sender",
       mailboxItemId: "aask_req_private_sender",
-      responseAction: "message_current_sender",
+      toolResponse: {
+        action: "ask_current_sender",
+        result: { status: "accepted" },
+      },
     },
-  ])(
-    "does not acknowledge an accepted $responseAction when its durable handoff rejects",
-    async ({ body, expectedUserId, mailboxItemId, responseAction }) => {
+  ] as const)(
+    "does not acknowledge an accepted $toolResponse.action when its durable handoff rejects",
+    async ({
+      body,
+      expectedUserId,
+      mailboxItemId,
+      toolResponse,
+    }) => {
       mocks.handoffHostedMailboxWake.mockRejectedValueOnce(
         new Error("Temporal unavailable"),
       );
       mocks.handleTool.mockImplementationOnce(async (input) => {
         await input.scheduleMailboxWake({ expectedUserId, mailboxItemId });
-        return {
-          action: responseAction,
-          result: { status: "accepted" },
-        };
+        return toolResponse;
       });
       const request = new Request(
         `https://join.example.test${HOSTED_RUNTIME_GROUP_TOOL_PATH}`,

@@ -1,25 +1,38 @@
 import { execFile } from 'node:child_process'
+import { createHash } from 'node:crypto'
 import { createServer, type Server, type ServerResponse } from 'node:http'
 import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
+import { crc32, deflateSync } from 'node:zlib'
 
 import {
   HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV,
 } from '@murphai/hosted-execution/env'
+import {
+  buildMurphGroupRoomModelMaintenancePermissionProfileTomlLines,
+  buildMurphMemberMemoryMaintenancePermissionProfileTomlLines,
+  buildMurphMemberReadPermissionProfileTomlLines,
+  MURPH_GROUP_ROOM_MODEL_MAINTENANCE_PERMISSION_PROFILE,
+  MURPH_MEMBER_MEMORY_MAINTENANCE_PERMISSION_PROFILE,
+  MURPH_MEMBER_READ_PERMISSION_PROFILE,
+} from '@murphai/hosted-execution/assistant-permissions'
 import type {
   HostedRuntimeAssistantConfigurationSnapshot,
 } from '@murphai/hosted-execution/runtime-control'
 import {
   createDefaultLocalAssistantModelTarget,
 } from '@murphai/operator-config/assistant-backend'
+import {
+  HOSTED_OPENAI_CODEX_MODEL_PROVIDER_ID,
+} from '@murphai/operator-config/assistant/target-runtime'
 import { createIntegratedVaultServices } from '@murphai/vault-usecases/vault-services'
 import type {
   AssistantResponseCard,
 } from '@murphai/operator-config/assistant-response-cards'
-import { afterAll, afterEach, describe, expect, it } from 'vitest'
+import { afterAll, afterEach, describe, expect, it, vi } from 'vitest'
 
 import {
   MURPH_ASSISTANT_SKILLS_ROOT_ENV,
@@ -36,11 +49,13 @@ import type { CodexAppServerLiveTurn } from '../src/assistant-codex.ts'
 import {
   MURPH_AUTOMATION_TOOL,
   MURPH_GROUP_ASSISTANT_CONFIGURATION_TOOL,
+  MURPH_GROUP_ROOM_MODEL_TOOL,
   MURPH_GROUP_SHARED_READ_TOOL,
   MURPH_GROUP_TOOL,
 } from '../src/assistant-codex/dynamic-tools.ts'
 import {
   MURPH_ATTACH_RESPONSE_CARD_TOOL,
+  MURPH_FINISH_WITHOUT_REPLY_TOOL,
 } from '../src/assistant-codex/dynamic-tool-catalog.ts'
 import type {
   VoiceMemoToolRuntime,
@@ -95,6 +110,52 @@ const SCRIPTED_MODEL = 'gpt-5.6-terra'
 const SCRIPTED_MODEL_PROVIDER = 'local-stub'
 const TURN_TIMEOUT_MS = 90_000
 const execFileAsync = promisify(execFile)
+const RESTRICTED_ONE_SHOT_INSTRUCTION_CONFIG = {
+  include_apps_instructions: false,
+  include_collaboration_mode_instructions: false,
+  include_environment_context: false,
+  include_permissions_instructions: false,
+  project_doc_max_bytes: 0,
+  'features.request_permissions_tool': false,
+  'skills.include_instructions': false,
+} as const
+const GROUP_ROOM_MODEL_MAINTENANCE_THREAD_CONFIG = {
+  ...RESTRICTED_ONE_SHOT_INSTRUCTION_CONFIG,
+  'features.apps': false,
+  'features.browser_use': false,
+  'features.enable_mcp_apps': false,
+  'features.multi_agent': false,
+  'features.multi_agent_v2': false,
+  'features.plugins': false,
+  'features.shell_tool': false,
+  'features.standalone_web_search': false,
+  'features.tool_suggest': false,
+  'features.web_search_request': false,
+  'memories.generate_memories': false,
+  'memories.use_memories': false,
+  web_search: 'disabled',
+} as const
+const SCRIPTED_HOSTED_SHELL_ENVIRONMENT_TOML_LINES = [
+  '[shell_environment_policy]',
+  'inherit = "all"',
+  'ignore_default_excludes = true',
+  'include_only = ["HOME", "PATH", "TMPDIR", "VAULT"]',
+  '',
+] as const
+// GitHub's restricted Linux runner cannot create the uid map required by
+// Codex's named-permission bubblewrap shell. Exact-profile startup still runs
+// there below; only the shell execution proof uses a capable host.
+const scriptedPermissionShellIt =
+  process.env.GITHUB_ACTIONS === 'true'
+    && process.env.RUNNER_OS === 'Linux'
+    ? it.skip
+    : it
+
+function buildTestAutomationLocalAtRecoveryKey(identity: string): string {
+  return createHash('sha256')
+    .update(JSON.stringify(identity))
+    .digest('hex')
+}
 
 const GROUP_CHALLENGE_DEFINITION = {
   format: {
@@ -214,6 +275,16 @@ interface ScriptedResponseRoute {
 type ScriptedResponse = ScriptedResponseRoute & (
   | { text: string }
   | {
+      commentaryAndFunctionCall: {
+        commentary: string
+        functionCall: {
+          arguments: Record<string, unknown>
+          name: string
+          namespace?: string
+        }
+      }
+    }
+  | {
       customToolCall: {
         input: string
         name: string
@@ -249,16 +320,18 @@ interface ScriptedStub {
 interface ScriptedProviderRequestSummary {
   customToolCallOutputs?: string[]
   functionCallOutputs?: string[]
+  imageWidths?: number[]
   model: string | null
   providerRequestDiagnostics?: {
     bytes: number
     includesAllTools: boolean
+    includesExecCommand: boolean
     includesAutomation: boolean
     includesGroup: boolean
     includesReadShared: boolean
     includesResponseCardCompactTableShape: boolean
     includesResponseCardNutritionV2Shape: boolean
-    includesSaveNewsletter: boolean
+    includesGroupEmail: boolean
     includesToolSearch: boolean
   }
   serviceTier: string | null
@@ -335,6 +408,658 @@ describe('real codex app-server with scripted provider', () => {
     expect(result.sessionId).toEqual(expect.any(String))
     expect(scenario.stub.requestCountSinceBaseline()).toBe(1)
   })
+
+  it('carries expanded connected-health questions through the production prompt, skill, command, evidence, and answer boundary', {
+    timeout: 360_000,
+  }, async () => {
+    const cases = [
+      {
+        answer: 'Your connected device recorded 45 minutes of daylight on July 12.',
+        command: 'measurement entry list --metric daylight_exposure --from 2026-07-12 --to 2026-07-12 --limit 50 --format json',
+        evidence: {
+          count: 1,
+          items: [{
+            eventId: 'evt_daylight_summary',
+            metric: 'daylight-exposure-minutes',
+            occurredAt: '2026-07-12T12:00:00.000Z',
+            recordKind: 'observation',
+            source: 'device',
+            unit: 'minutes',
+            value: 45,
+          }],
+        },
+        prompt: 'How much daylight did I get on July 12?',
+        skillHeading: '# Daily Activity',
+        skillSlug: 'daily-activity',
+      },
+      {
+        answer: 'Your connected device recorded a 48-minute workout on July 12.',
+        command: 'measurement entry list --metric workout_duration --from 2026-07-12 --to 2026-07-12 --limit 50 --format json',
+        evidence: {
+          count: 1,
+          items: [{
+            eventId: 'evt_workout_duration_summary',
+            metric: 'workout-minutes',
+            occurredAt: '2026-07-12T15:00:00.000Z',
+            recordKind: 'observation',
+            source: 'device',
+            unit: 'minutes',
+            value: 48,
+          }],
+        },
+        prompt: 'How long was my workout on July 12?',
+        skillHeading: '# Daily Activity',
+        skillSlug: 'daily-activity',
+      },
+      {
+        answer: 'Your connected device recorded 1,640 basal calories on July 12.',
+        command: 'measurement entry list --metric calories_basal --from 2026-07-12 --to 2026-07-12 --limit 50 --format json',
+        evidence: {
+          count: 1,
+          items: [{
+            eventId: 'evt_basal_calories_summary',
+            metric: 'basal-calories',
+            occurredAt: '2026-07-12T23:59:00.000Z',
+            recordKind: 'observation',
+            source: 'device',
+            unit: 'kcal',
+            value: 1640,
+          }],
+        },
+        prompt: 'How many basal calories did my connected device record on July 12?',
+        skillHeading: '# Daily Activity',
+        skillSlug: 'daily-activity',
+      },
+      {
+        answer: 'Your connected device recorded a 4-unit insulin dose on July 12.',
+        command: 'event list --kind intervention_session --from 2026-07-12 --to 2026-07-12 --limit 200 --format json',
+        evidence: {
+          count: 1,
+          items: [{
+            data: {
+              fields: {
+                'dose-amount': 4,
+                'dose-unit': 'unit',
+              },
+              interventionType: 'insulin-injection',
+              sessionStatus: 'completed',
+              source: 'device',
+            },
+            id: 'evt_insulin_dose',
+            kind: 'intervention_session',
+            links: [],
+            occurredAt: '2026-07-12T19:15:00.000Z',
+            path: 'events/2026/07/evt_insulin_dose.md',
+            title: 'Connected insulin injection',
+          }],
+        },
+        prompt: 'How much insulin did my connected device record on July 12?',
+        skillHeading: '# Cardiometabolic Health',
+        skillSlug: 'cardiometabolic-health',
+      },
+      {
+        answer: 'Your connected device recorded 48 g of carbohydrates on July 12; that is partial intake evidence, not a complete meal or eaten-calorie total.',
+        command: 'measurement entry list --metric carbohydrates --from 2026-07-12 --to 2026-07-12 --limit 50 --format json',
+        evidence: {
+          count: 1,
+          items: [{
+            eventId: 'evt_carbohydrates_summary',
+            metric: 'carbohydrates',
+            occurredAt: '2026-07-12T19:15:00.000Z',
+            recordKind: 'observation',
+            source: 'device',
+            unit: 'g',
+            value: 48,
+          }],
+        },
+        prompt: 'How many carbohydrates did my connected device record on July 12?',
+        skillHeading: '# Food journal',
+        skillSlug: 'food-journal',
+      },
+      {
+        answer: 'For July 12, the selected stored meals show iron at 4 mg from 1 of 2 meals (partial), zinc at a recorded 0 mg from 2 of 2, vitamin C at 50 mg from 2 of 2, and potassium as unavailable. This aggregate may combine connected and manually saved meals, so it cannot prove what Cronometer recorded. Source targets and dashboard percentages are not imported, and one day does not diagnose a deficiency.',
+        command: 'meal nutrients --from 2026-07-12 --to 2026-07-12 --format json',
+        evidence: {
+          days: [{
+            date: '2026-07-12',
+            mealCount: 2,
+            nutrients: [
+              { category: 'mineral', contributingMealCount: 1, key: 'ironMg', label: 'Iron', total: 4, unit: 'mg' },
+              { category: 'mineral', contributingMealCount: 2, key: 'zincMg', label: 'Zinc', total: 0, unit: 'mg' },
+              { category: 'mineral', contributingMealCount: 0, key: 'potassiumGrams', label: 'Potassium', total: null, unit: 'g' },
+              { category: 'vitamin', contributingMealCount: 2, key: 'vitaminCMg', label: 'Vitamin C', total: 50, unit: 'mg' },
+            ],
+          }],
+          filters: { from: '2026-07-12', to: '2026-07-12' },
+          mealCount: 2,
+          nutrients: [
+            { category: 'mineral', contributingMealCount: 1, key: 'ironMg', label: 'Iron', total: 4, unit: 'mg' },
+            { category: 'mineral', contributingMealCount: 2, key: 'zincMg', label: 'Zinc', total: 0, unit: 'mg' },
+            { category: 'mineral', contributingMealCount: 0, key: 'potassiumGrams', label: 'Potassium', total: null, unit: 'g' },
+            { category: 'vitamin', contributingMealCount: 2, key: 'vitaminCMg', label: 'Vitamin C', total: 50, unit: 'mg' },
+          ],
+          vault: 'synthetic-vault',
+        },
+        prompt: 'Which nutrients are low on July 12, and did Cronometer record all my iron?',
+        skillHeading: '# Food journal',
+        skillSlug: 'food-journal',
+      },
+      {
+        answer: 'Your connected-device body-fat estimate moved from 19.2% to 18.5%; keep the same source and conditions before treating that as a trend.',
+        command: 'measurement entry list --metric fat --from 2026-07-01 --to 2026-07-12 --limit 50 --format json',
+        evidence: {
+          count: 2,
+          items: [
+            {
+              eventId: 'evt_body_fat_latest',
+              metric: 'body-fat-percentage',
+              occurredAt: '2026-07-12T07:00:00.000Z',
+              recordKind: 'observation',
+              source: 'device',
+              unit: '%',
+              value: 18.5,
+            },
+            {
+              eventId: 'evt_body_fat_prior',
+              metric: 'body-fat-percentage',
+              occurredAt: '2026-07-01T07:00:00.000Z',
+              recordKind: 'observation',
+              source: 'device',
+              unit: '%',
+              value: 19.2,
+            },
+          ],
+        },
+        prompt: 'What is my body-fat trend from July 1 through July 12?',
+        skillHeading: '# Body Composition',
+        skillSlug: 'body-composition',
+      },
+      {
+        answer: 'I found no daylight entries for July 13, so that reading is unavailable—not zero and not proof you had no daylight exposure.',
+        command: 'measurement entry list --metric daylight_exposure --from 2026-07-13 --to 2026-07-13 --limit 50 --format json',
+        evidence: { count: 0, items: [] },
+        prompt: 'How much daylight did I get on July 13?',
+        skillHeading: '# Daily Activity',
+        skillSlug: 'daily-activity',
+      },
+    ] as const
+
+    for (const input of cases) {
+      const scenario = await prepareScriptedTurnScenario()
+      const skillsRoot = path.join(scenario.turnInput.workingDirectory, 'skills')
+      const commandLog = path.join(scenario.turnInput.workingDirectory, 'expanded-health-command.log')
+      const skillRead = `sed -n '1,220p' skills/${input.skillSlug}/SKILL.md`
+      await Promise.all([
+        mkdir(skillsRoot, { recursive: true }),
+        writeFile(commandLog, '', 'utf8'),
+      ])
+      await cp(
+        path.join(resolveAssistantSkillsRoot(), input.skillSlug),
+        path.join(skillsRoot, input.skillSlug),
+        { recursive: true },
+      )
+      await writeFile(
+        path.join(scenario.turnInput.workingDirectory, 'vault-cli'),
+        [
+          '#!/bin/sh',
+          'set -eu',
+          `printf '%s\\n' "$*" >> ${quotePosixShellLiteral(commandLog)}`,
+          `if [ "$*" != ${quotePosixShellLiteral(input.command)} ]; then`,
+          "  printf '%s\\n' '{\"error\":\"unexpected command\"}' >&2",
+          '  exit 64',
+          'fi',
+          `printf '%s\\n' ${quotePosixShellLiteral(JSON.stringify(input.evidence))}`,
+          '',
+        ].join('\n'),
+        { encoding: 'utf8', mode: 0o755 },
+      )
+      scenario.stub.queue(
+        {
+          customToolCall: {
+            input: `
+const result = await tools.exec_command({
+  cmd: ${JSON.stringify(skillRead)},
+  yield_time_ms: 30000,
+});
+text(result.output);
+`,
+            name: 'exec',
+          },
+        },
+        {
+          customToolCall: {
+            input: `
+const result = await tools.exec_command({
+  cmd: ${JSON.stringify(`./vault-cli ${input.command}`)},
+  yield_time_ms: 30000,
+});
+text(result.output);
+`,
+            name: 'exec',
+          },
+        },
+        {
+          text: input.answer,
+        },
+      )
+
+      try {
+        const result = await executeCodexAppServerTurn({
+          ...scenario.turnInput,
+          baseInstructions: buildScriptedHostedSystemPrompt('direct'),
+          env: {
+            ...scenario.turnInput.env,
+            [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
+          },
+          prompt: input.prompt,
+          sandbox: 'danger-full-access',
+        })
+
+        const providerToolOutputs = scenario.stub
+          .requestSummariesSinceBaseline()
+          .flatMap((summary) => summary.customToolCallOutputs ?? [])
+          .join('\n')
+        expect(providerToolOutputs, 'skill and CLI tool outputs').toContain(input.skillHeading)
+        expect(providerToolOutputs, 'CLI evidence output').toContain(JSON.stringify(input.evidence))
+        expect((await readFile(commandLog, 'utf8')).trim()).toBe(input.command)
+        expect(result.finalMessage).toBe(input.answer)
+      } finally {
+        await stopWarmCodexAppServer()
+      }
+    }
+  })
+
+  it('keeps raw dense streams and partial carbohydrate observations outside complete-answer claims', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const scenario = await prepareScriptedTurnScenario()
+    const answer = [
+      'Raw ECG voltage/workout points are not stored; I can use only their compact imported summaries.',
+      'A 48 g carbohydrate observation is not a complete meal or eaten-calorie log, so complete intake is unavailable without meal records.',
+    ].join(' ')
+    scenario.stub.queue({
+      requestIncludes: [
+        'Raw ECG voltage/workout points are not stored',
+        'Burned calories are expenditure; carbs can be partial intake evidence',
+      ],
+      text: answer,
+    })
+
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      baseInstructions: buildScriptedHostedSystemPrompt('direct'),
+      prompt: 'Show me raw ECG voltages and raw workout points, and use my 48 g carbohydrate observation as my complete eaten-calorie log.',
+    })
+
+    expect(scenario.stub.requestCountSinceBaseline()).toBe(1)
+    expect(result.finalMessage).toBe(answer)
+  })
+
+  it.each([
+    {
+      label: 'member-memory',
+      permissionProfile: MURPH_MEMBER_MEMORY_MAINTENANCE_PERMISSION_PROFILE,
+      profileLines:
+        buildMurphMemberMemoryMaintenancePermissionProfileTomlLines(),
+    },
+    {
+      label: 'onboarding read-only',
+      permissionProfile: MURPH_MEMBER_READ_PERMISSION_PROFILE,
+      profileLines: buildMurphMemberReadPermissionProfileTomlLines(),
+    },
+  ])('attests exact $label instructions while preserving shell availability', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async ({ permissionProfile, profileLines }) => {
+    const scenario = await prepareScriptedTurnScenario({
+      additionalTomlLines: [
+        ...SCRIPTED_HOSTED_SHELL_ENVIRONMENT_TOML_LINES,
+        ...profileLines,
+      ],
+    })
+    const vaultRoot = scenario.turnInput.workingDirectory
+    const operatorHome = path.join(vaultRoot, 'operator-home')
+    await mkdir(operatorHome, { recursive: true })
+    await writeFile(
+      path.join(vaultRoot, 'AGENTS.md'),
+      'UNTRUSTED_WORKSPACE_INSTRUCTION_SHOULD_NOT_LOAD\n',
+    )
+    scenario.stub.captureProviderRequestDiagnostics()
+    scenario.stub.queue({ text: 'RESTRICTED_PROFILE_START_OK' })
+
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      approvalPolicy: 'never',
+      configOverrides: [
+        'memories.generate_memories=false',
+        'web_search="disabled"',
+        'features.apps=false',
+        'features.browser_use=false',
+        'features.plugins=false',
+        'features.multi_agent=false',
+      ],
+      dynamicTools: [],
+      env: {
+        ...scenario.turnInput.env,
+        HOME: operatorHome,
+        VAULT: vaultRoot,
+      },
+      ephemeral: true,
+      permissions: permissionProfile,
+      processLifetime: 'one-shot',
+      prompt: 'Reply exactly RESTRICTED_PROFILE_START_OK.',
+      runtimeWorkspaceRoots: [vaultRoot],
+      sandbox: undefined,
+      threadConfig: RESTRICTED_ONE_SHOT_INSTRUCTION_CONFIG,
+    })
+
+    expect(result.finalMessage).toBe('RESTRICTED_PROFILE_START_OK')
+    const diagnostics = scenario.stub.requestSummariesSinceBaseline()[0]
+      ?.providerRequestDiagnostics
+    expect(diagnostics).toMatchObject({
+      includesExecCommand: true,
+    })
+  })
+
+  scriptedPermissionShellIt('attests member-memory instructions while preserving the hosted vault shell and permitted write', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const scenario = await prepareScriptedTurnScenario({
+      additionalTomlLines: [
+        ...SCRIPTED_HOSTED_SHELL_ENVIRONMENT_TOML_LINES,
+        ...buildMurphMemberMemoryMaintenancePermissionProfileTomlLines(),
+      ],
+    })
+    const vaultRoot = scenario.turnInput.workingDirectory
+    const operatorHome = path.join(vaultRoot, 'operator-home')
+    const memoryDirectory = path.join(vaultRoot, 'bank')
+    const memoryPath = path.join(memoryDirectory, 'memory.md')
+    await Promise.all([
+      mkdir(operatorHome, { recursive: true }),
+      mkdir(memoryDirectory, { recursive: true }),
+      writeFile(
+        path.join(vaultRoot, 'AGENTS.md'),
+        'UNTRUSTED_WORKSPACE_INSTRUCTION_SHOULD_NOT_LOAD\n',
+      ),
+    ])
+    await writeFile(
+      path.join(vaultRoot, 'vault-cli'),
+      `#!/bin/sh
+set -eu
+test "\${VAULT:-}" = ${quotePosixShellLiteral(vaultRoot)}
+test "\${HOME:-}" = ${quotePosixShellLiteral(operatorHome)}
+case "$*" in
+  "memory show --format json")
+    printf '%s\\n' 'MEMORY_SHOW_OK'
+    ;;
+  "memory upsert --fact scripted")
+    printf '%s\\n' 'scripted durable memory' > "\${VAULT}/bank/memory.md"
+    printf '%s\\n' 'MEMORY_UPSERT_OK'
+    ;;
+  *)
+    printf '%s\\n' 'unexpected command' >&2
+    exit 4
+    ;;
+esac
+`,
+      { encoding: 'utf8', mode: 0o755 },
+    )
+    scenario.stub.captureProviderRequestDiagnostics()
+    scenario.stub.queue(
+      {
+        customToolCall: {
+          input: `
+const result = await tools.exec_command({
+  cmd: "./vault-cli memory show --format json && ./vault-cli memory upsert --fact scripted",
+});
+text(result.output);
+`,
+          name: 'exec',
+        },
+      },
+      { text: 'RESTRICTED_MEMBER_MEMORY_OK' },
+    )
+
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      approvalPolicy: 'never',
+      configOverrides: [
+        'memories.generate_memories=false',
+        'web_search="disabled"',
+        'features.apps=false',
+        'features.browser_use=false',
+        'features.plugins=false',
+        'features.multi_agent=false',
+      ],
+      dynamicTools: [],
+      env: {
+        ...scenario.turnInput.env,
+        HOME: operatorHome,
+        VAULT: vaultRoot,
+      },
+      ephemeral: true,
+      permissions: MURPH_MEMBER_MEMORY_MAINTENANCE_PERMISSION_PROFILE,
+      processLifetime: 'one-shot',
+      prompt: 'Run the scripted memory read and write, then reply exactly RESTRICTED_MEMBER_MEMORY_OK.',
+      runtimeWorkspaceRoots: [vaultRoot],
+      sandbox: undefined,
+      threadConfig: RESTRICTED_ONE_SHOT_INSTRUCTION_CONFIG,
+    })
+
+    expect(result.finalMessage).toBe('RESTRICTED_MEMBER_MEMORY_OK')
+    expect(await readFile(memoryPath, 'utf8')).toBe('scripted durable memory\n')
+    const summaries = scenario.stub.requestSummariesSinceBaseline()
+    expect(summaries[0]?.providerRequestDiagnostics).toMatchObject({
+      includesExecCommand: true,
+    })
+    expect(
+      summaries.flatMap((summary) => summary.customToolCallOutputs ?? []).join('\n'),
+    ).toContain('MEMORY_SHOW_OK\nMEMORY_UPSERT_OK')
+  })
+
+  scriptedPermissionShellIt('attests onboarding instructions while preserving reads and denying mutation', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const scenario = await prepareScriptedTurnScenario({
+      additionalTomlLines: [
+        ...SCRIPTED_HOSTED_SHELL_ENVIRONMENT_TOML_LINES,
+        ...buildMurphMemberReadPermissionProfileTomlLines(),
+      ],
+    })
+    const vaultRoot = scenario.turnInput.workingDirectory
+    const operatorHome = path.join(vaultRoot, 'operator-home')
+    const goalsDirectory = path.join(vaultRoot, 'goals')
+    const goalPath = path.join(goalsDirectory, 'current.md')
+    await Promise.all([
+      mkdir(operatorHome, { recursive: true }),
+      mkdir(goalsDirectory, { recursive: true }),
+      writeFile(
+        path.join(vaultRoot, 'AGENTS.md'),
+        'UNTRUSTED_WORKSPACE_INSTRUCTION_SHOULD_NOT_LOAD\n',
+      ),
+    ])
+    await writeFile(goalPath, 'ONBOARDING_GOAL_READ_OK\n', 'utf8')
+    await writeFile(
+      path.join(vaultRoot, 'vault-cli'),
+      `#!/bin/sh
+set -eu
+test "\${VAULT:-}" = ${quotePosixShellLiteral(vaultRoot)}
+test "\${HOME:-}" = ${quotePosixShellLiteral(operatorHome)}
+test "$*" = "goals show --format json"
+cat "\${VAULT}/goals/current.md"
+`,
+      { encoding: 'utf8', mode: 0o755 },
+    )
+    scenario.stub.captureProviderRequestDiagnostics()
+    scenario.stub.queue(
+      {
+        customToolCall: {
+          input: `
+const result = await tools.exec_command({
+  cmd: "./vault-cli goals show --format json",
+});
+text(result.output);
+`,
+          name: 'exec',
+        },
+      },
+      {
+        customToolCall: {
+          input: `
+const result = await tools.exec_command({
+  cmd: "printf '%s\\n' 'MUTATION_SHOULD_FAIL' > goals/current.md",
+});
+text(JSON.stringify(result));
+`,
+          name: 'exec',
+        },
+      },
+      { text: 'RESTRICTED_ONBOARDING_OK' },
+    )
+
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      approvalPolicy: 'never',
+      configOverrides: [
+        'memories.generate_memories=false',
+        'web_search="disabled"',
+        'features.apps=false',
+        'features.browser_use=false',
+        'features.plugins=false',
+        'features.multi_agent=false',
+      ],
+      dynamicTools: [],
+      env: {
+        ...scenario.turnInput.env,
+        HOME: operatorHome,
+        VAULT: vaultRoot,
+      },
+      ephemeral: true,
+      permissions: MURPH_MEMBER_READ_PERMISSION_PROFILE,
+      processLifetime: 'one-shot',
+      prompt: 'Read the scripted goal, attempt the scripted mutation, then reply exactly RESTRICTED_ONBOARDING_OK.',
+      runtimeWorkspaceRoots: [vaultRoot],
+      sandbox: undefined,
+      threadConfig: RESTRICTED_ONE_SHOT_INSTRUCTION_CONFIG,
+    })
+
+    expect(result.finalMessage).toBe('RESTRICTED_ONBOARDING_OK')
+    expect(await readFile(goalPath, 'utf8')).toBe('ONBOARDING_GOAL_READ_OK\n')
+    const summaries = scenario.stub.requestSummariesSinceBaseline()
+    expect(summaries[0]?.providerRequestDiagnostics).toMatchObject({
+      includesExecCommand: true,
+    })
+    const outputs = summaries
+      .flatMap((summary) => summary.customToolCallOutputs ?? [])
+      .join('\n')
+    expect(outputs).toContain('ONBOARDING_GOAL_READ_OK')
+    expect(outputs).not.toContain('MUTATION_SHOULD_FAIL')
+  })
+
+  it('attests group-room instructions while exposing its fixed tool without shell', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const scenario = await prepareScriptedTurnScenario({
+      additionalTomlLines:
+        buildMurphGroupRoomModelMaintenancePermissionProfileTomlLines(),
+    })
+    const vaultRoot = scenario.turnInput.workingDirectory
+    await writeFile(
+      path.join(vaultRoot, 'AGENTS.md'),
+      'UNTRUSTED_WORKSPACE_INSTRUCTION_SHOULD_NOT_LOAD\n',
+    )
+    const forbiddenShellPath = path.join(vaultRoot, 'shell-should-not-run')
+    scenario.stub.captureProviderRequestDiagnostics()
+    scenario.stub.queue(
+      {
+        customToolCall: {
+          input: `
+const result = await tools.exec_command({
+  cmd: "printf '%s\\n' 'SHELL_RAN' > shell-should-not-run",
+});
+text(JSON.stringify(result));
+`,
+          name: 'exec',
+        },
+      },
+      {
+        functionCall: {
+          arguments: { action: 'show' },
+          name: 'group_room_model',
+          namespace: 'murph',
+        },
+      },
+      { text: 'RESTRICTED_GROUP_ROOM_OK' },
+    )
+
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      approvalPolicy: 'never',
+      dynamicTools: [MURPH_GROUP_ROOM_MODEL_TOOL],
+      ephemeral: true,
+      groupRoomModelMaintenanceAuthorized: true,
+      permissions: MURPH_GROUP_ROOM_MODEL_MAINTENANCE_PERMISSION_PROFILE,
+      processLifetime: 'one-shot',
+      prompt: 'Show the room model, then reply exactly RESTRICTED_GROUP_ROOM_OK.',
+      runtimeWorkspaceRoots: [vaultRoot],
+      sandbox: undefined,
+      threadConfig: GROUP_ROOM_MODEL_MAINTENANCE_THREAD_CONFIG,
+      vaultRoot,
+    })
+
+    expect(result.finalMessage).toBe('RESTRICTED_GROUP_ROOM_OK')
+    const summaries = scenario.stub.requestSummariesSinceBaseline()
+    await expect(readFile(forbiddenShellPath, 'utf8')).rejects.toMatchObject({
+      code: 'ENOENT',
+    })
+    expect(
+      summaries.flatMap((summary) => summary.functionCallOutputs ?? []).join('\n'),
+    ).toContain('"status":"missing"')
+  })
+
+  it.each(['gpt-5.6-luna', 'gpt-5.6-sol'])(
+    'preserves original width for %s and bounds gallery widths through the real app server',
+    { timeout: TURN_TIMEOUT_MS },
+    async (model) => {
+      const scenario = await prepareScriptedTurnScenario({
+        model,
+        modelProvider: HOSTED_OPENAI_CODEX_MODEL_PROVIDER_ID,
+      })
+      const imagePath = path.join(
+        scenario.turnInput.workingDirectory,
+        'fine-detail.png',
+      )
+      await writeFile(imagePath, createDeterministicPng(3072, 64))
+      scenario.stub.queue(
+        { text: 'SCRIPTED_ORIGINAL_IMAGE_OK' },
+        { text: 'SCRIPTED_GALLERY_IMAGE_OK' },
+      )
+
+      const originalResult = await executeCodexAppServerTurn({
+        ...scenario.turnInput,
+        images: [{
+          detail: 'original',
+          mimeType: 'image/png',
+          path: imagePath,
+        }],
+        prompt: 'Reply exactly SCRIPTED_ORIGINAL_IMAGE_OK.',
+      })
+      const galleryResult = await executeCodexAppServerTurn({
+        ...scenario.turnInput,
+        images: [
+          { detail: 'original', mimeType: 'image/png', path: imagePath },
+          { detail: 'original', mimeType: 'image/png', path: imagePath },
+        ],
+        prompt: 'Reply exactly SCRIPTED_GALLERY_IMAGE_OK.',
+      })
+
+      expect(originalResult.finalMessage).toBe('SCRIPTED_ORIGINAL_IMAGE_OK')
+      expect(galleryResult.finalMessage).toBe('SCRIPTED_GALLERY_IMAGE_OK')
+      expect(scenario.stub.requestSummariesSinceBaseline()).toMatchObject([
+        { imageWidths: [3072] },
+        { imageWidths: [2048, 2048] },
+      ])
+    },
+  )
 
   it('keeps a fresh onboarding greeting on the compact root and bounded resume read', {
     timeout: TURN_TIMEOUT_MS,
@@ -660,6 +1385,7 @@ text(JSON.stringify(result));
               schedule: request.schedule,
               status: 'active',
               timingVerified: true,
+              updatedAt: '2026-08-06T21:00:00.000Z',
             }
           },
         },
@@ -1523,8 +2249,9 @@ text(result.output);
         customToolCall: {
           input: `
 const tool = ALL_TOOLS.find(({ name }) => name === "murph__automation");
+const groupTool = ALL_TOOLS.find(({ name }) => name === "murph__group");
 if (!tool) {
-  text(JSON.stringify({ found: false }));
+  text(JSON.stringify({ found: false, foundGroup: Boolean(groupTool) }));
 } else {
   const result = await tools.murph__automation({
     action: "save",
@@ -1532,7 +2259,7 @@ if (!tool) {
     schedule: { kind: "dailyLocal", localTime: "09:00" },
     title: "Morning reminder",
   });
-  text(JSON.stringify({ found: true, result }));
+  text(JSON.stringify({ found: true, foundGroup: Boolean(groupTool), result }));
 }
 `,
           name: 'exec',
@@ -1566,6 +2293,7 @@ if (!tool) {
               schedule: request.schedule,
               status: 'active',
               timingVerified: true,
+              updatedAt: '2026-08-08T12:00:00.000Z',
             }
           },
         },
@@ -1586,12 +2314,13 @@ if (!tool) {
         includesAllTools: true,
         includesAutomation: false,
         includesGroup: false,
-        includesSaveNewsletter: false,
+        includesGroupEmail: false,
       },
     })
     expect(summaries[0]?.providerRequestDiagnostics?.bytes).toBeGreaterThan(0)
     const automationOutput =
       summaries[1]?.customToolCallOutputs?.join('\n') ?? ''
+    expect(automationOutput).toContain('"foundGroup":true')
     expect(automationOutput).toContain('automation-native-deferred')
     expect(automationOutput).toContain('morning-reminder')
     expect(automationOutput).toContain('active')
@@ -1630,7 +2359,7 @@ if (!tool) {
       providerRequestDiagnostics: {
         includesAutomation: true,
         includesGroup: true,
-        includesSaveNewsletter: true,
+        includesGroupEmail: true,
       },
     })
     expect(
@@ -1650,6 +2379,7 @@ if (!tool) {
           input: `
 const result = await tools.murph__automation({
   action: "patch",
+  expectedUpdatedAt: "2026-08-10T00:00:00.000Z",
   lookup: "evening-reminder",
   schedule: { kind: "dailyLocal", localTime: "22:00" },
 });
@@ -1687,6 +2417,7 @@ text(JSON.stringify(result));
               },
               status: 'active',
               timingVerified: true,
+              updatedAt: '2026-08-10T00:01:00.000Z',
             }
           },
         },
@@ -1703,6 +2434,7 @@ text(JSON.stringify(result));
 
     expect(automationRequests).toEqual([{
       action: 'patch',
+      expectedUpdatedAt: '2026-08-10T00:00:00.000Z',
       lookup: 'evening-reminder',
       schedule: { kind: 'dailyLocal', localTime: '22:00' },
     }])
@@ -1716,6 +2448,2460 @@ text(JSON.stringify(result));
     )
   })
 
+  it('inspects existing reminder timing without issuing a mutation', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const scenario = await prepareScriptedTurnScenario()
+    const automationRequests: AssistantHostedAutomationToolRequest[] = []
+    scenario.stub.queue(
+      {
+        customToolCall: {
+          input: `
+const result = await tools.murph__automation({
+  action: "inspect",
+  lookup: "evening-reminder",
+});
+text(JSON.stringify(result));
+`,
+          name: 'exec',
+        },
+      },
+      { text: 'Your reminder is set for 10 PM Central.' },
+    )
+
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      baseInstructions: buildScriptedHostedSystemPrompt('direct', true),
+      dynamicTools: [MURPH_AUTOMATION_TOOL],
+      hostedToolContext: {
+        automationTool: {
+          request: async (request) => {
+            if (request.action !== 'inspect') {
+              throw new Error('Expected an automation inspection request.')
+            }
+            automationRequests.push(request)
+            return {
+              action: 'inspect',
+              automationId: 'automation-central-evening',
+              effectiveTimeZone: 'America/Chicago',
+              lookupId: 'evening-reminder',
+              nextOccurrenceAt: '2026-08-11T03:00:00.000Z',
+              routeBinding: 'preserved',
+              schedule: {
+                kind: 'dailyLocal',
+                localTime: '22:00',
+                timeZone: 'America/Chicago',
+              },
+              status: 'active',
+              timingVerified: true,
+              updatedAt: '2026-08-10T00:00:00.000Z',
+            }
+          },
+        },
+        computerToolsAvailable: false,
+        currentHostedDeliveryContext: () => null,
+        currentHostedMailboxItemIds: () => [],
+        sendVaultFile: async () => {
+          throw new Error('Vault file sends are unavailable in this test.')
+        },
+        vaultFileSendAvailable: false,
+      },
+      prompt: 'What time is my evening reminder scheduled for?',
+    })
+
+    expect(automationRequests).toEqual([{
+      action: 'inspect',
+      lookup: 'evening-reminder',
+    }])
+    const toolOutputs = scenario.stub.requestSummariesSinceBaseline()
+      .flatMap((summary) => summary.customToolCallOutputs ?? [])
+      .join('\n')
+    expect(toolOutputs).toContain('America/Chicago')
+    expect(toolOutputs).toContain('2026-08-11T03:00:00.000Z')
+    expect(result.finalMessage).toBe(
+      'Your reminder is set for 10 PM Central.',
+    )
+  })
+
+  it('resolves a group one-shot local time before saving and exposes verified readback', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const scenario = await prepareScriptedTurnScenario()
+    const automationRequests: AssistantHostedAutomationToolRequest[] = []
+    scenario.stub.queue(
+      {
+        customToolCall: {
+          input: `
+const result = await tools.murph__automation({
+  action: "save",
+  instructions: "Send the group a short reminder.",
+  schedule: {
+    kind: "at",
+    localAt: {
+      relativeDay: "today",
+      time: "23:20",
+      timeZone: "Pacific/Honolulu",
+    },
+  },
+  title: "Group one-shot reminder",
+});
+text(JSON.stringify(result));
+`,
+          name: 'exec',
+        },
+      },
+      { text: 'The group reminder is saved for the verified local time.' },
+    )
+
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      automationRelativeDateReferenceWindow: {
+        earliestAt: '2031-02-15T09:59:59.900Z',
+        latestAt: '2031-02-15T09:59:59.900Z',
+      },
+      baseInstructions: buildScriptedHostedSystemPrompt('group', true),
+      dynamicTools: [MURPH_AUTOMATION_TOOL],
+      hostedToolContext: {
+        automationTool: {
+          request: async (request) => {
+            if (request.action !== 'save') {
+              throw new Error('Expected an automation save request.')
+            }
+            automationRequests.push(request)
+            return {
+              action: 'save',
+              automationId: 'automation-group-one-shot',
+              created: true,
+              effectiveTimeZone: null,
+              lookupId: 'group-one-shot-reminder',
+              nextOccurrenceAt: '2031-02-15T09:20:00.000Z',
+              routeBinding: 'current_conversation',
+              schedule: {
+                at: '2031-02-15T09:20:00.000Z',
+                kind: 'at',
+              },
+              status: 'active',
+              timingVerified: true,
+              updatedAt: '2031-02-14T12:00:00.000Z',
+            }
+          },
+        },
+        computerToolsAvailable: false,
+        currentHostedDeliveryContext: () => null,
+        currentHostedMailboxItemIds: () => [],
+        sendVaultFile: async () => {
+          throw new Error('Vault file sends are unavailable in this test.')
+        },
+        vaultFileSendAvailable: false,
+      },
+      prompt: 'Save a one-time reminder for this authenticated group.',
+    })
+
+    expect(automationRequests).toEqual([{
+      action: 'save',
+      instructions: 'Send the group a short reminder.',
+      schedule: {
+        at: '2031-02-15T09:20:00.000Z',
+        kind: 'at',
+      },
+      title: 'Group one-shot reminder',
+    }])
+    const toolOutputs = scenario.stub.requestSummariesSinceBaseline()
+      .flatMap((summary) => summary.customToolCallOutputs ?? [])
+      .join('\n')
+      .replace(/\\"/gu, '"')
+    expect(toolOutputs).toContain('"timingVerified":true')
+    expect(toolOutputs).toContain('"effectiveTimeZone":null')
+    expect(toolOutputs).toContain('"nextOccurrenceAt":"2031-02-15T09:20:00.000Z"')
+    expect(result.finalMessage).toBe(
+      'The group reminder is saved for the verified local time.',
+    )
+  })
+
+  it.each([
+    {
+      expectedClarification:
+        'For reminder "Gap reminder", the trusted date is 2026-03-08. What other local time on 2026-03-08 should I use?',
+      finalMessage:
+        '2:30 AM does not exist on 2026-03-08 because of daylight saving time.',
+      referenceAt: '2026-03-08T04:59:00.000Z',
+      time: '02:30',
+      title: 'Gap reminder',
+    },
+    {
+      expectedClarification:
+        'For reminder "Fold reminder", the trusted date is 2026-11-01. Should I use the earlier or later occurrence on 2026-11-01?',
+      finalMessage:
+        '1:30 AM occurs twice on 2026-11-01 because of daylight saving time.',
+      referenceAt: '2026-11-01T03:59:00.000Z',
+      time: '01:30',
+      title: 'Fold reminder',
+    },
+  ])('retains the trusted date in the $title clarification transcript', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async ({
+    expectedClarification,
+    finalMessage,
+    referenceAt,
+    time,
+    title,
+  }) => {
+    const scenario = await prepareScriptedTurnScenario()
+    const automationRequest = vi.fn(async () => {
+      throw new Error('DST clarification must not mutate an automation.')
+    })
+    scenario.stub.queue(
+      {
+        customToolCall: {
+          input: `
+const result = await tools.murph__automation({
+  action: "save",
+  instructions: "Send the reminder tomorrow.",
+  schedule: {
+    kind: "at",
+    localAt: {
+      relativeDay: "tomorrow",
+      time: "${time}",
+      timeZone: "America/New_York",
+    },
+  },
+  title: "${title}",
+});
+text(JSON.stringify(result));
+`,
+          name: 'exec',
+        },
+      },
+      { text: finalMessage },
+    )
+
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      automationRelativeDateReferenceWindow: {
+        earliestAt: referenceAt,
+        latestAt: referenceAt,
+      },
+      dynamicTools: [MURPH_AUTOMATION_TOOL],
+      hostedToolContext: {
+        automationTool: { request: automationRequest },
+        computerToolsAvailable: false,
+        currentHostedDeliveryContext: () => null,
+        currentHostedMailboxItemIds: () => [],
+        sendVaultFile: async () => {
+          throw new Error('Vault file sends are unavailable in this test.')
+        },
+        vaultFileSendAvailable: false,
+      },
+      prompt: `Remind me tomorrow at ${time} in New York.`,
+    })
+
+    expect(automationRequest).not.toHaveBeenCalled()
+    expect(result.finalMessage).toBe(`${finalMessage}\n\n${expectedClarification}`)
+    expect(result.transcriptMessage).toBe(
+      `${finalMessage}\n\n${expectedClarification}`,
+    )
+  })
+
+  it.each([
+    {
+      expectedAt: '2026-03-08T07:30:00.000Z',
+      failedTime: '02:30',
+      finalMessage: 'Done — your reminder is set for 3:30 AM on March 8.',
+      initialSlug: null,
+      kind: 'gap',
+      retrySlug: 'morning-meds',
+      retryTitle: 'Morning meds',
+      referenceAt: '2026-03-08T04:59:00.000Z',
+      retryLocalAt: {
+        date: '2026-03-08',
+        time: '03:30',
+        timeZone: 'America/New_York',
+      },
+      staleClarification:
+        'For reminder "Spring reminder", the trusted date is 2026-03-08. What other local time on 2026-03-08 should I use?',
+      steerAt: '2026-03-08T05:01:00.000Z',
+      steerPrompt: 'Actually, use 3:30 AM.',
+      title: 'Spring reminder',
+    },
+    {
+      expectedAt: '2026-11-01T05:30:00.000Z',
+      failedTime: '01:30',
+      finalMessage:
+        'Done — your reminder is set for the earlier 1:30 AM on November 1.',
+      initialSlug: 'fall-reminder',
+      kind: 'fold',
+      retrySlug: null,
+      retryTitle: 'Evening meds',
+      referenceAt: '2026-11-01T03:59:00.000Z',
+      retryLocalAt: {
+        date: '2026-11-01',
+        fold: 'earlier' as const,
+        time: '01:30',
+        timeZone: 'America/New_York',
+      },
+      staleClarification:
+        'For reminder "Fall reminder (fall-reminder)", the trusted date is 2026-11-01. Should I use the earlier or later occurrence on 2026-11-01?',
+      steerAt: '2026-11-01T04:01:00.000Z',
+      steerPrompt: 'Use the earlier occurrence.',
+      title: 'Fall reminder',
+    },
+  ])('clears a $kind clarification after a renamed live-steered save retry', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async ({
+    expectedAt,
+    failedTime,
+    finalMessage,
+    initialSlug,
+    referenceAt,
+    retryLocalAt,
+    retrySlug,
+    retryTitle,
+    staleClarification,
+    steerAt,
+    steerPrompt,
+    title,
+  }) => {
+    const scenario = await prepareScriptedTurnScenario()
+    const automationRequests: AssistantHostedAutomationToolRequest[] = []
+    let steered: Promise<void> | null = null
+    const failedRequest = {
+      action: 'save',
+      instructions: 'Send the reminder tomorrow.',
+      schedule: {
+        kind: 'at',
+        localAt: {
+          relativeDay: 'tomorrow',
+          time: failedTime,
+          timeZone: 'America/New_York',
+        },
+      },
+      ...(initialSlug ? { slug: initialSlug } : {}),
+      title,
+    }
+    const retryRequest = {
+      action: 'save',
+      instructions: 'Send the reminder tomorrow.',
+      localAtRecoveryKey: buildTestAutomationLocalAtRecoveryKey(
+        initialSlug ?? title.toLowerCase().replace(/\s+/gu, '-'),
+      ),
+      schedule: {
+        kind: 'at',
+        localAt: retryLocalAt,
+      },
+      ...(retrySlug ? { slug: retrySlug } : {}),
+      title: retryTitle,
+    }
+    scenario.stub.queue(
+      {
+        customToolCall: {
+          input: `
+const result = await tools.murph__automation(${JSON.stringify(failedRequest)});
+text(JSON.stringify(result));
+`,
+          name: 'exec',
+        },
+      },
+      {
+        delayMs: 4_000,
+        text: 'Tell me the missing DST choice and I can finish this reminder.',
+      },
+      {
+        customToolCall: {
+          input: `
+const result = await tools.murph__automation(${JSON.stringify(retryRequest)});
+text(JSON.stringify(result));
+`,
+          name: 'exec',
+        },
+      },
+      { text: finalMessage },
+    )
+
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      automationRelativeDateReferenceWindow: {
+        earliestAt: referenceAt,
+        latestAt: referenceAt,
+      },
+      dynamicTools: [MURPH_AUTOMATION_TOOL],
+      hostedToolContext: {
+        automationTool: {
+          request: async (request) => {
+            if (request.action !== 'save') {
+              throw new Error('Expected an automation save request.')
+            }
+            automationRequests.push(request)
+            return {
+              action: 'save',
+              automationId:
+                `automation-${retryTitle.toLowerCase().replace(/\s+/gu, '-')}`,
+              created: true,
+              effectiveTimeZone: null,
+              lookupId: retrySlug
+                ?? retryTitle.toLowerCase().replace(/\s+/gu, '-'),
+              nextOccurrenceAt: expectedAt,
+              routeBinding: 'current_conversation',
+              schedule: request.schedule,
+              status: 'active',
+              timingVerified: true,
+              updatedAt: steerAt,
+            }
+          },
+        },
+        computerToolsAvailable: false,
+        currentHostedDeliveryContext: () => null,
+        currentHostedMailboxItemIds: () => [],
+        sendVaultFile: async () => {
+          throw new Error('Vault file sends are unavailable in this test.')
+        },
+        vaultFileSendAvailable: false,
+      },
+      onLiveTurn: (turn: CodexAppServerLiveTurn) => {
+        steered = delay(1_000).then(() =>
+          turn.steer({
+            prompt: steerPrompt,
+            relativeDateReferenceWindow: {
+              earliestAt: steerAt,
+              latestAt: steerAt,
+            },
+          }))
+      },
+      prompt: `Remind me tomorrow at ${failedTime} in New York.`,
+    })
+
+    expect(steered).not.toBeNull()
+    await steered
+    expect(automationRequests).toEqual([{
+      action: 'save',
+      instructions: 'Send the reminder tomorrow.',
+      schedule: { at: expectedAt, kind: 'at' },
+      ...(retrySlug ? { slug: retrySlug } : {}),
+      title: retryTitle,
+    }])
+    expect(result.finalMessage).toBe(finalMessage)
+    expect(result.transcriptMessage).toBe(finalMessage)
+    expect(result.finalMessage).not.toContain(staleClarification)
+    expect(result.transcriptMessage).not.toContain(staleClarification)
+  })
+
+  it('honors a conditional withdrawal after a DST gap', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const scenario = await prepareScriptedTurnScenario()
+    const recoveryKey = buildTestAutomationLocalAtRecoveryKey('gap-reminder')
+    scenario.stub.queue(
+      {
+        customToolCall: {
+          input: `
+const result = await tools.murph__automation({
+  action: "save",
+  instructions: "Send the reminder tomorrow.",
+  schedule: {
+    kind: "at",
+    localAt: {
+      relativeDay: "tomorrow",
+      time: "02:30",
+      timeZone: "America/New_York",
+    },
+  },
+  title: "Gap reminder",
+});
+text(JSON.stringify(result));
+`,
+          name: 'exec',
+        },
+      },
+      {
+        customToolCall: {
+          input: `
+const result = await tools.murph__automation({
+  action: "dismiss_local_at_recovery",
+  localAtRecoveryKey: "${recoveryKey}",
+  resolvedLocalDate: "2026-03-08",
+});
+text(JSON.stringify(result));
+`,
+          name: 'exec',
+        },
+      },
+      {
+        text:
+          'That time is invalid, so I did not create the reminder as requested.',
+      },
+    )
+
+    const automationRequest = vi.fn(async () => {
+      throw new Error('A conditionally withdrawn reminder must not be saved.')
+    })
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      automationRelativeDateReferenceWindow: {
+        earliestAt: '2026-03-08T04:59:00.000Z',
+        latestAt: '2026-03-08T04:59:00.000Z',
+      },
+      dynamicTools: [MURPH_AUTOMATION_TOOL],
+      hostedToolContext: {
+        automationTool: { request: automationRequest },
+        computerToolsAvailable: false,
+        currentHostedDeliveryContext: () => null,
+        currentHostedMailboxItemIds: () => [],
+        sendVaultFile: async () => {
+          throw new Error('Vault file sends are unavailable in this test.')
+        },
+        vaultFileSendAvailable: false,
+      },
+      prompt:
+        'Remind me tomorrow at 2:30 AM in New York, but if that time does not exist, do not create anything.',
+    })
+
+    expect(automationRequest).not.toHaveBeenCalled()
+    expect(result.finalMessage).toBe(
+      'That time is invalid, so I did not create the reminder as requested.',
+    )
+    expect(result.transcriptMessage).toBe(result.finalMessage)
+    expect(result.finalMessage).not.toContain('What other local time')
+  })
+
+  it('honors a live withdrawal of a pending DST reminder', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const scenario = await prepareScriptedTurnScenario()
+    const recoveryKey = buildTestAutomationLocalAtRecoveryKey('gap-reminder')
+    let steered: Promise<void> | null = null
+    scenario.stub.queue(
+      {
+        customToolCall: {
+          input: `
+const result = await tools.murph__automation({
+  action: "save",
+  instructions: "Send the reminder tomorrow.",
+  schedule: {
+    kind: "at",
+    localAt: {
+      relativeDay: "tomorrow",
+      time: "02:30",
+      timeZone: "America/New_York",
+    },
+  },
+  title: "Gap reminder",
+});
+text(JSON.stringify(result));
+`,
+          name: 'exec',
+        },
+      },
+      {
+        delayMs: 4_000,
+        text: 'That time does not exist on March 8. What should I do?',
+      },
+      {
+        customToolCall: {
+          input: `
+const result = await tools.murph__automation({
+  action: "dismiss_local_at_recovery",
+  localAtRecoveryKey: "${recoveryKey}",
+  resolvedLocalDate: "2026-03-08",
+});
+text(JSON.stringify(result));
+`,
+          name: 'exec',
+        },
+      },
+      { text: 'Okay — I did not create that reminder.' },
+    )
+
+    const automationRequest = vi.fn(async () => {
+      throw new Error('A withdrawn reminder must not reach the owner.')
+    })
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      automationRelativeDateReferenceWindow: {
+        earliestAt: '2026-03-08T04:59:00.000Z',
+        latestAt: '2026-03-08T04:59:00.000Z',
+      },
+      dynamicTools: [MURPH_AUTOMATION_TOOL],
+      groupConversation: false,
+      hostedToolContext: {
+        automationTool: { request: automationRequest },
+        computerToolsAvailable: false,
+        currentHostedDeliveryContext: () => null,
+        currentHostedMailboxItemIds: () => [],
+        sendVaultFile: async () => {
+          throw new Error('Vault file sends are unavailable in this test.')
+        },
+        vaultFileSendAvailable: false,
+      },
+      onLiveTurn: (turn: CodexAppServerLiveTurn) => {
+        steered = delay(1_000).then(() =>
+          turn.steer({
+            prompt: 'Never mind. Do not create that reminder.',
+            relativeDateReferenceWindow: {
+              earliestAt: '2026-03-08T05:01:00.000Z',
+              latestAt: '2026-03-08T05:01:00.000Z',
+            },
+          }))
+      },
+      prompt: 'Remind me tomorrow at 2:30 AM in New York.',
+    })
+
+    expect(steered).not.toBeNull()
+    await steered
+    expect(automationRequest).not.toHaveBeenCalled()
+    expect(result.finalMessage).toBe(
+      'Okay — I did not create that reminder.',
+    )
+    expect(result.transcriptMessage).toBe(result.finalMessage)
+    expect(result.finalMessage).not.toContain('What other local time')
+    expect(result.transcriptMessage).not.toContain('What other local time')
+  })
+
+  it('dismisses a superseded DST date before saving its replacement', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const scenario = await prepareScriptedTurnScenario()
+    const recoveryKey = buildTestAutomationLocalAtRecoveryKey('gap-reminder')
+    scenario.stub.queue(
+      {
+        customToolCall: {
+          input: `
+const result = await tools.murph__automation({
+  action: "save",
+  instructions: "Send the reminder.",
+  schedule: {
+    kind: "at",
+    localAt: {
+      relativeDay: "tomorrow",
+      time: "02:30",
+      timeZone: "America/New_York",
+    },
+  },
+  title: "Gap reminder",
+});
+text(JSON.stringify(result));
+`,
+          name: 'exec',
+        },
+      },
+      {
+        customToolCall: {
+          input: `
+const result = await tools.murph__automation({
+  action: "dismiss_local_at_recovery",
+  localAtRecoveryKey: "${recoveryKey}",
+  resolvedLocalDate: "2026-03-08",
+});
+text(JSON.stringify(result));
+`,
+          name: 'exec',
+        },
+      },
+      {
+        customToolCall: {
+          input: `
+const result = await tools.murph__automation({
+  action: "save",
+  instructions: "Send the reminder.",
+  schedule: {
+    kind: "at",
+    localAt: {
+      date: "2026-03-09",
+      time: "03:30",
+      timeZone: "America/New_York",
+    },
+  },
+  title: "Replacement reminder",
+});
+text(JSON.stringify(result));
+`,
+          name: 'exec',
+        },
+      },
+      { text: 'The replacement reminder is set for March 9 at 3:30 AM.' },
+    )
+
+    const automationRequest = vi.fn(async (
+      request: AssistantHostedAutomationToolRequest,
+    ) => {
+      if (request.action !== 'save') {
+        throw new Error('Expected one replacement save.')
+      }
+      return {
+        action: 'save' as const,
+        automationId: 'automation-replacement-reminder',
+        created: true,
+        effectiveTimeZone: 'America/New_York',
+        lookupId: 'replacement-reminder',
+        nextOccurrenceAt: '2026-03-09T07:30:00.000Z',
+        routeBinding: 'current_conversation' as const,
+        schedule: request.schedule,
+        status: 'active' as const,
+        timingVerified: true,
+        updatedAt: '2026-03-08T05:01:00.000Z',
+      }
+    })
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      automationRelativeDateReferenceWindow: {
+        earliestAt: '2026-03-08T04:59:00.000Z',
+        latestAt: '2026-03-08T04:59:00.000Z',
+      },
+      dynamicTools: [MURPH_AUTOMATION_TOOL],
+      hostedToolContext: {
+        automationTool: { request: automationRequest },
+        computerToolsAvailable: false,
+        currentHostedDeliveryContext: () => null,
+        currentHostedMailboxItemIds: () => [],
+        sendVaultFile: async () => {
+          throw new Error('Vault file sends are unavailable in this test.')
+        },
+        vaultFileSendAvailable: false,
+      },
+      prompt:
+        'Remind me tomorrow at 2:30 AM in New York; if that is invalid, use March 9 at 3:30 AM instead.',
+    })
+
+    expect(automationRequest).toHaveBeenCalledTimes(1)
+    expect(automationRequest).toHaveBeenCalledWith({
+      action: 'save',
+      instructions: 'Send the reminder.',
+      schedule: { at: '2026-03-09T07:30:00.000Z', kind: 'at' },
+      title: 'Replacement reminder',
+    }, expect.anything())
+    expect(result.finalMessage).toBe(
+      'The replacement reminder is set for March 9 at 3:30 AM.',
+    )
+    expect(result.transcriptMessage).toBe(result.finalMessage)
+    expect(result.finalMessage).not.toContain('What other local time')
+  })
+
+  it.each([
+    {
+      expectedAt: '2026-03-08T07:30:00.000Z',
+      failedLookup: 'medication-reminder',
+      failedTime: '02:30',
+      referenceAt: '2026-03-08T04:59:00.000Z',
+      responseLookup: 'medication-reminder',
+      retryLocalAt: {
+        date: '2026-03-08',
+        time: '03:30',
+        timeZone: 'America/New_York',
+      },
+      retryLookup: 'automation-medication-reminder',
+    },
+    {
+      expectedAt: '2026-03-08T07:30:00.000Z',
+      failedLookup: 'automation-medication-reminder',
+      failedTime: '02:30',
+      referenceAt: '2026-03-08T04:59:00.000Z',
+      responseLookup: 'medication-reminder',
+      retryLocalAt: {
+        date: '2026-03-08',
+        time: '03:30',
+        timeZone: 'America/New_York',
+      },
+      retryLookup: 'medication-reminder',
+    },
+    {
+      expectedAt: '2026-03-08T07:30:00.000Z',
+      failedLookup: 'medication-reminder',
+      failedTime: '02:30',
+      referenceAt: '2026-03-08T04:59:00.000Z',
+      requestedSlug: 'morning-meds',
+      responseLookup: 'morning-meds',
+      retryLocalAt: {
+        date: '2026-03-08',
+        time: '03:30',
+        timeZone: 'America/New_York',
+      },
+      retryLookup: 'medication-reminder',
+    },
+    {
+      expectedAt: '2026-11-01T06:30:00.000Z',
+      failedLookup: 'medication-reminder',
+      failedTime: '01:30',
+      referenceAt: '2026-11-01T03:59:00.000Z',
+      requestedSlug: 'evening-meds',
+      responseLookup: 'evening-meds',
+      retryLocalAt: {
+        date: '2026-11-01',
+        fold: 'later' as const,
+        time: '01:30',
+        timeZone: 'America/New_York',
+      },
+      retryLookup: 'medication-reminder',
+    },
+  ])('clears a patch clarification across canonical and renamed aliases', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async ({
+    expectedAt,
+    failedLookup,
+    failedTime,
+    referenceAt,
+    requestedSlug,
+    responseLookup,
+    retryLocalAt,
+    retryLookup,
+  }) => {
+    const scenario = await prepareScriptedTurnScenario()
+    const responseCard = {
+      kind: 'compact_table',
+      version: 1,
+      title: 'Medication reminder',
+      subtitle: 'March 8 at 3:30 AM',
+      rowHeader: 'Status',
+      columns: ['Schedule'],
+      rows: [{ label: 'Active', values: ['3:30 AM'] }],
+      footer: null,
+      tracking: null,
+    } satisfies AssistantResponseCard
+    const failedRequest = {
+      action: 'patch',
+      expectedUpdatedAt: '2026-03-07T20:00:00.000Z',
+      lookup: failedLookup,
+      ...(requestedSlug ? { slug: requestedSlug } : {}),
+      schedule: {
+        kind: 'at',
+        localAt: {
+          relativeDay: 'tomorrow',
+          time: failedTime,
+          timeZone: 'America/New_York',
+        },
+      },
+    }
+    const retryRequest = {
+      action: 'patch',
+      expectedUpdatedAt: '2026-03-07T20:00:00.000Z',
+      localAtRecoveryKey: buildTestAutomationLocalAtRecoveryKey(failedLookup),
+      lookup: retryLookup,
+      ...(requestedSlug ? { slug: requestedSlug } : {}),
+      schedule: {
+        kind: 'at',
+        localAt: retryLocalAt,
+      },
+    }
+    scenario.stub.queue(
+      {
+        customToolCall: {
+          input: `
+const result = await tools.murph__automation(${JSON.stringify(failedRequest)});
+text(JSON.stringify(result));
+`,
+          name: 'exec',
+        },
+      },
+      {
+        customToolCall: {
+          input: `
+const result = await tools.murph__automation(${JSON.stringify(retryRequest)});
+text(JSON.stringify(result));
+`,
+          name: 'exec',
+        },
+      },
+      {
+        functionCall: {
+          arguments: { card: responseCard },
+          name: 'attach_response_card',
+          namespace: 'murph',
+        },
+      },
+      { text: 'CARD_ATTACHED' },
+    )
+
+    const automationRequest = vi.fn(async (
+      request: AssistantHostedAutomationToolRequest,
+    ) => {
+      if (request.action !== 'patch') {
+        throw new Error('Expected an automation patch request.')
+      }
+      return {
+        action: 'patch' as const,
+        automationId: 'automation-medication-reminder',
+        created: false,
+        effectiveTimeZone: 'America/New_York',
+        lookupId: responseLookup,
+        nextOccurrenceAt: expectedAt,
+        routeBinding: 'current_conversation' as const,
+        schedule: request.schedule ?? {
+          at: expectedAt,
+          kind: 'at' as const,
+        },
+        status: 'active' as const,
+        timingVerified: true,
+        updatedAt: '2026-03-08T05:01:00.000Z',
+      }
+    })
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      automationRelativeDateReferenceWindow: {
+        earliestAt: referenceAt,
+        latestAt: referenceAt,
+      },
+      dynamicTools: [
+        MURPH_AUTOMATION_TOOL,
+        MURPH_ATTACH_RESPONSE_CARD_TOOL,
+      ],
+      groupConversation: false,
+      hostedToolContext: {
+        automationTool: { request: automationRequest },
+        computerToolsAvailable: false,
+        currentHostedDeliveryContext: () => null,
+        currentHostedMailboxItemIds: () => [],
+        sendVaultFile: async () => {
+          throw new Error('Vault file sends are unavailable in this test.')
+        },
+        vaultFileSendAvailable: false,
+      },
+      prompt: `Move my medication reminder to tomorrow at ${failedTime}.`,
+    })
+
+    expect(automationRequest).toHaveBeenCalledTimes(1)
+    expect(automationRequest).toHaveBeenCalledWith({
+      action: 'patch',
+      expectedUpdatedAt: '2026-03-07T20:00:00.000Z',
+      lookup: retryLookup,
+      ...(requestedSlug ? { slug: requestedSlug } : {}),
+      schedule: { at: expectedAt, kind: 'at' },
+    }, expect.anything())
+    expect(result.responseCard).toEqual(responseCard)
+    expect(result.finalMessage).not.toContain('the trusted date is')
+    expect(result.transcriptMessage).not.toContain('the trusted date is')
+  })
+
+  it('contains local one-shot slug failures and accepts a corrected retry', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const scenario = await prepareScriptedTurnScenario()
+    const localizedRequest = {
+      action: 'save',
+      instructions: 'Send the reminder.',
+      schedule: {
+        kind: 'at',
+        localAt: {
+          date: '2026-03-08',
+          time: '03:30',
+          timeZone: 'America/New_York',
+        },
+      },
+      title: '薬を飲む',
+    }
+    const correctedRequest = {
+      ...localizedRequest,
+      slug: 'take-medicine',
+    }
+    scenario.stub.queue(
+      {
+        customToolCall: {
+          input: `
+const result = await tools.murph__automation(${JSON.stringify(localizedRequest)});
+text(JSON.stringify(result));
+`,
+          name: 'exec',
+        },
+      },
+      {
+        customToolCall: {
+          input: `
+const result = await tools.murph__automation(${JSON.stringify(correctedRequest)});
+text(JSON.stringify(result));
+`,
+          name: 'exec',
+        },
+      },
+      { text: 'The reminder is set for March 8 at 3:30 AM.' },
+    )
+
+    const automationRequest = vi.fn(async (
+      request: AssistantHostedAutomationToolRequest,
+    ) => ({
+      action: 'save' as const,
+      automationId: 'automation-take-medicine',
+      created: true,
+      effectiveTimeZone: 'America/New_York',
+      lookupId: 'take-medicine',
+      nextOccurrenceAt: '2026-03-08T07:30:00.000Z',
+      routeBinding: 'current_conversation' as const,
+      schedule: request.action === 'save'
+        ? request.schedule
+        : { at: '2026-03-08T07:30:00.000Z', kind: 'at' as const },
+      status: 'active' as const,
+      timingVerified: true,
+      updatedAt: '2026-03-08T05:01:00.000Z',
+    }))
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      dynamicTools: [MURPH_AUTOMATION_TOOL],
+      hostedToolContext: {
+        automationTool: { request: automationRequest },
+        computerToolsAvailable: false,
+        currentHostedDeliveryContext: () => null,
+        currentHostedMailboxItemIds: () => [],
+        sendVaultFile: async () => {
+          throw new Error('Vault file sends are unavailable in this test.')
+        },
+        vaultFileSendAvailable: false,
+      },
+      prompt: 'Remind me to take medicine on March 8 at 3:30 AM.',
+    })
+
+    expect(automationRequest).toHaveBeenCalledTimes(1)
+    expect(result.finalMessage).toBe(
+      'The reminder is set for March 8 at 3:30 AM.',
+    )
+    expect(result.transcriptMessage).toBe(result.finalMessage)
+  })
+
+  it('does not clear a pending DST clarification for an unrelated automation', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const scenario = await prepareScriptedTurnScenario()
+    const automationRequests: AssistantHostedAutomationToolRequest[] = []
+    const failedRequest = {
+      action: 'save',
+      instructions: 'Send the medication reminder tomorrow.',
+      schedule: {
+        kind: 'at',
+        localAt: {
+          relativeDay: 'tomorrow',
+          time: '02:30',
+          timeZone: 'America/New_York',
+        },
+      },
+      title: 'Medication reminder',
+    }
+    const unrelatedRequest = {
+      action: 'save',
+      instructions: 'Send the breakfast reminder tomorrow.',
+      schedule: {
+        kind: 'at',
+        localAt: {
+          date: '2026-03-08',
+          time: '04:00',
+          timeZone: 'America/New_York',
+        },
+      },
+      title: 'Breakfast reminder',
+    }
+    scenario.stub.queue(
+      {
+        customToolCall: {
+          input: `
+const result = await tools.murph__automation(${JSON.stringify(failedRequest)});
+text(JSON.stringify(result));
+`,
+          name: 'exec',
+        },
+      },
+      {
+        customToolCall: {
+          input: `
+const result = await tools.murph__automation(${JSON.stringify(unrelatedRequest)});
+text(JSON.stringify(result));
+`,
+          name: 'exec',
+        },
+      },
+      { text: 'The breakfast reminder is set for 4 AM on March 8.' },
+    )
+
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      automationRelativeDateReferenceWindow: {
+        earliestAt: '2026-03-08T04:59:00.000Z',
+        latestAt: '2026-03-08T04:59:00.000Z',
+      },
+      dynamicTools: [MURPH_AUTOMATION_TOOL],
+      hostedToolContext: {
+        automationTool: {
+          request: async (request) => {
+            if (request.action !== 'save') {
+              throw new Error('Expected an automation save request.')
+            }
+            automationRequests.push(request)
+            return {
+              action: 'save',
+              automationId: 'automation-breakfast-reminder',
+              created: true,
+              effectiveTimeZone: null,
+              lookupId: 'breakfast-reminder',
+              nextOccurrenceAt: '2026-03-08T08:00:00.000Z',
+              routeBinding: 'current_conversation',
+              schedule: request.schedule,
+              status: 'active',
+              timingVerified: true,
+              updatedAt: '2026-03-08T05:01:00.000Z',
+            }
+          },
+        },
+        computerToolsAvailable: false,
+        currentHostedDeliveryContext: () => null,
+        currentHostedMailboxItemIds: () => [],
+        sendVaultFile: async () => {
+          throw new Error('Vault file sends are unavailable in this test.')
+        },
+        vaultFileSendAvailable: false,
+      },
+      prompt: 'Set two reminders for tomorrow.',
+    })
+
+    const requiredClarification =
+      'For reminder "Medication reminder", the trusted date is 2026-03-08. What other local time on 2026-03-08 should I use?'
+    expect(automationRequests).toEqual([{
+      action: 'save',
+      instructions: 'Send the breakfast reminder tomorrow.',
+      schedule: { at: '2026-03-08T08:00:00.000Z', kind: 'at' },
+      title: 'Breakfast reminder',
+    }])
+    expect(result.finalMessage).toBe(
+      `The breakfast reminder is set for 4 AM on March 8.\n\n${requiredClarification}`,
+    )
+    expect(result.transcriptMessage).toBe(result.finalMessage)
+  })
+
+  it('keeps a correlated DST clarification pending after create conflict', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const scenario = await prepareScriptedTurnScenario()
+    const slug = 'medication-reminder'
+    const failedRequest = {
+      action: 'save',
+      instructions: 'Send the medication reminder tomorrow.',
+      schedule: {
+        kind: 'at',
+        localAt: {
+          relativeDay: 'tomorrow',
+          time: '02:30',
+          timeZone: 'America/New_York',
+        },
+      },
+      slug,
+      title: 'Medication reminder',
+    }
+    const retryRequest = {
+      ...failedRequest,
+      localAtRecoveryKey: buildTestAutomationLocalAtRecoveryKey(slug),
+      schedule: {
+        kind: 'at',
+        localAt: {
+          date: '2026-03-08',
+          time: '03:30',
+          timeZone: 'America/New_York',
+        },
+      },
+    }
+    for (const request of [failedRequest, retryRequest]) {
+      scenario.stub.queue({
+        customToolCall: {
+          input: `
+const result = await tools.murph__automation(${JSON.stringify(request)});
+text(JSON.stringify(result));
+`,
+          name: 'exec',
+        },
+      })
+    }
+    scenario.stub.queue({ text: 'I found an existing reminder.' })
+
+    const automationRequest = vi.fn(async () => {
+      throw Object.assign(new Error('automation already exists'), {
+        code: 'VAULT_AUTOMATION_CONFLICT' as const,
+      })
+    })
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      automationRelativeDateReferenceWindow: {
+        earliestAt: '2026-03-08T04:59:00.000Z',
+        latestAt: '2026-03-08T04:59:00.000Z',
+      },
+      dynamicTools: [MURPH_AUTOMATION_TOOL],
+      hostedToolContext: {
+        automationTool: { request: automationRequest },
+        computerToolsAvailable: false,
+        currentHostedDeliveryContext: () => null,
+        currentHostedMailboxItemIds: () => [],
+        sendVaultFile: async () => {
+          throw new Error('Vault file sends are unavailable in this test.')
+        },
+        vaultFileSendAvailable: false,
+      },
+      prompt: 'Set my medication reminder for tomorrow.',
+    })
+
+    const question =
+      'For reminder "Medication reminder (medication-reminder)", the trusted date is 2026-03-08. What other local time on 2026-03-08 should I use?'
+    expect(automationRequest).toHaveBeenCalledTimes(1)
+    expect(result.finalMessage).toContain(question)
+    expect(result.transcriptMessage).toContain(question)
+  })
+
+  it.each([
+    {
+      date: '2026-03-08',
+      failedTime: '02:30',
+      mismatchLocalAt: {
+        date: '2026-11-01',
+        time: '01:30',
+        timeZone: 'America/New_York',
+      },
+      question:
+        'For reminder "Medication reminder", the trusted date is 2026-03-08. What other local time on 2026-03-08 should I use?',
+      referenceAt: '2026-03-08T04:59:00.000Z',
+      resolvedAt: '2026-03-08T07:30:00.000Z',
+      resolvedLocalAt: {
+        date: '2026-03-08',
+        time: '03:30',
+        timeZone: 'America/New_York',
+      },
+    },
+    {
+      date: '2026-11-01',
+      failedTime: '01:30',
+      mismatchLocalAt: {
+        date: '2026-03-08',
+        time: '02:30',
+        timeZone: 'America/New_York',
+      },
+      question:
+        'For reminder "Medication reminder", the trusted date is 2026-11-01. Should I use the earlier or later occurrence on 2026-11-01?',
+      referenceAt: '2026-11-01T03:59:00.000Z',
+      resolvedAt: '2026-11-01T06:30:00.000Z',
+      resolvedLocalAt: {
+        date: '2026-11-01',
+        fold: 'later' as const,
+        time: '01:30',
+        timeZone: 'America/New_York',
+      },
+    },
+  ])('keeps invalid correlated $date retries from minting recovery state', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async ({
+    date,
+    failedTime,
+    mismatchLocalAt,
+    question,
+    referenceAt,
+    resolvedAt,
+    resolvedLocalAt,
+  }) => {
+    const recoveryKey = buildTestAutomationLocalAtRecoveryKey(
+      'medication-reminder',
+    )
+    const failedRequest = {
+      action: 'save',
+      instructions: 'Send the medication reminder tomorrow.',
+      schedule: {
+        kind: 'at',
+        localAt: {
+          relativeDay: 'tomorrow',
+          time: failedTime,
+          timeZone: 'America/New_York',
+        },
+      },
+      title: 'Medication reminder',
+    }
+    const matchingInvalidRetry = {
+      ...failedRequest,
+      instructions: 'Send the renamed medication reminder.',
+      localAtRecoveryKey: recoveryKey,
+      schedule: {
+        kind: 'at',
+        localAt: {
+          date,
+          time: failedTime,
+          timeZone: 'America/New_York',
+        },
+      },
+      title: 'Renamed medication reminder',
+    }
+    const validRetry = {
+      ...failedRequest,
+      localAtRecoveryKey: recoveryKey,
+      schedule: { kind: 'at', localAt: resolvedLocalAt },
+    }
+    const responseCard = {
+      kind: 'compact_table',
+      version: 1,
+      title: 'Reminder result',
+      subtitle: date,
+      rowHeader: 'Reminder',
+      columns: ['Status'],
+      rows: [{ label: 'Medication', values: ['Saved'] }],
+      footer: null,
+      tracking: null,
+    } satisfies AssistantResponseCard
+
+    for (const mode of [
+      'unknown-then-valid',
+      'wrong-date-then-valid',
+      'matching-invalid',
+      'dismiss-then-stale',
+      'success-then-stale',
+    ] as const) {
+      const scenario = await prepareScriptedTurnScenario()
+      const automationRequest = vi.fn(async (
+        request: AssistantHostedAutomationToolRequest,
+      ) => {
+        if (request.action !== 'save' || request.schedule.kind !== 'at') {
+          throw new TypeError('Expected an exact one-shot save request.')
+        }
+        return {
+          action: 'save' as const,
+          automationId: 'automation-medication-reminder',
+          created: true,
+          effectiveTimeZone: 'America/New_York',
+          lookupId: 'medication-reminder',
+          nextOccurrenceAt: resolvedAt,
+          routeBinding: 'current_conversation' as const,
+          schedule: request.schedule,
+          status: 'active' as const,
+          timingVerified: true,
+          updatedAt: '2026-03-08T05:01:00.000Z',
+        }
+      })
+      const calls: unknown[] = [failedRequest]
+      if (mode === 'unknown-then-valid') {
+        calls.push({
+          ...matchingInvalidRetry,
+          localAtRecoveryKey: 'f'.repeat(64),
+          title: 'Unknown reminder',
+        }, validRetry)
+      } else if (mode === 'wrong-date-then-valid') {
+        calls.push({
+          ...matchingInvalidRetry,
+          schedule: { kind: 'at', localAt: mismatchLocalAt },
+        }, validRetry)
+      } else if (mode === 'matching-invalid') {
+        calls.push(matchingInvalidRetry)
+      } else if (mode === 'dismiss-then-stale') {
+        calls.push({
+          action: 'dismiss_local_at_recovery',
+          localAtRecoveryKey: recoveryKey,
+          resolvedLocalDate: date,
+        }, matchingInvalidRetry)
+      } else {
+        calls.push(validRetry, matchingInvalidRetry)
+      }
+      for (const request of calls) {
+        scenario.stub.queue({
+          customToolCall: {
+            input: `
+const result = await tools.murph__automation(${JSON.stringify(request)});
+text(JSON.stringify(result));
+`,
+            name: 'exec',
+          },
+        })
+      }
+      scenario.stub.queue(
+        {
+          functionCall: {
+            arguments: { card: responseCard },
+            name: 'attach_response_card',
+            namespace: 'murph',
+          },
+        },
+        { text: 'CARD_ATTACHED' },
+      )
+
+      const result = await executeCodexAppServerTurn({
+        ...scenario.turnInput,
+        automationRelativeDateReferenceWindow: {
+          earliestAt: referenceAt,
+          latestAt: referenceAt,
+        },
+        dynamicTools: [MURPH_AUTOMATION_TOOL, MURPH_ATTACH_RESPONSE_CARD_TOOL],
+        groupConversation: false,
+        hostedToolContext: {
+          automationTool: { request: automationRequest },
+          computerToolsAvailable: false,
+          currentHostedDeliveryContext: () => null,
+          currentHostedMailboxItemIds: () => [],
+          sendVaultFile: async () => {
+            throw new Error('Vault file sends are unavailable in this test.')
+          },
+          vaultFileSendAvailable: false,
+        },
+        prompt: 'Set my medication reminder for tomorrow.',
+      })
+
+      if (mode === 'matching-invalid') {
+        expect(automationRequest).not.toHaveBeenCalled()
+        expect(result.responseCard).toBeNull()
+        expect(result.finalMessage).toContain(question)
+        expect(result.transcriptMessage).toContain(question)
+        expect(result.finalMessage).not.toContain(
+          'For reminder "Renamed medication reminder"',
+        )
+        continue
+      }
+
+      expect(automationRequest).toHaveBeenCalledTimes(
+        mode === 'dismiss-then-stale' ? 0 : 1,
+      )
+      expect(result.responseCard, `${mode}: ${result.finalMessage}`).toEqual(
+        responseCard,
+      )
+      expect(result.finalMessage).not.toContain('the trusted date is')
+      expect(result.transcriptMessage).not.toContain('the trusted date is')
+    }
+  })
+
+  it.each([
+    {
+      date: '2026-03-08',
+      failedTime: '02:30',
+      kind: 'gap',
+      mismatchDate: '2026-03-09',
+      referenceAt: '2026-03-08T04:59:00.000Z',
+      recoveryA: {
+        date: '2026-03-08',
+        time: '03:30',
+        timeZone: 'America/New_York',
+      },
+      recoveryAtA: '2026-03-08T07:30:00.000Z',
+      recoveryAtB: '2026-03-08T08:00:00.000Z',
+      recoveryB: {
+        date: '2026-03-08',
+        time: '04:00',
+        timeZone: 'America/New_York',
+      },
+    },
+    {
+      date: '2026-11-01',
+      failedTime: '01:30',
+      kind: 'fold',
+      mismatchDate: '2026-11-02',
+      referenceAt: '2026-11-01T03:59:00.000Z',
+      recoveryA: {
+        date: '2026-11-01',
+        fold: 'earlier' as const,
+        time: '01:30',
+        timeZone: 'America/New_York',
+      },
+      recoveryAtA: '2026-11-01T05:30:00.000Z',
+      recoveryAtB: '2026-11-01T06:30:00.000Z',
+      recoveryB: {
+        date: '2026-11-01',
+        fold: 'later' as const,
+        time: '01:30',
+        timeZone: 'America/New_York',
+      },
+    },
+  ])('composes multiple unresolved $kind reminders independently', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async ({
+    date,
+    failedTime,
+    mismatchDate,
+    referenceAt,
+    recoveryA,
+    recoveryAtA,
+    recoveryAtB,
+    recoveryB,
+  }) => {
+    const failureA = {
+      action: 'save',
+      instructions: 'Send the medication reminder tomorrow.',
+      schedule: {
+        kind: 'at',
+        localAt: {
+          relativeDay: 'tomorrow',
+          time: failedTime,
+          timeZone: 'America/New_York',
+        },
+      },
+      title: 'Medication reminder',
+    }
+    const failureB = {
+      action: 'save',
+      instructions: 'Send the call reminder tomorrow.',
+      schedule: {
+        kind: 'at',
+        localAt: {
+          relativeDay: 'tomorrow',
+          time: failedTime,
+          timeZone: 'America/New_York',
+        },
+      },
+      title: 'Call reminder',
+    }
+    const successA = {
+      ...failureA,
+      localAtRecoveryKey: buildTestAutomationLocalAtRecoveryKey(
+        'medication-reminder',
+      ),
+      schedule: { kind: 'at', localAt: recoveryA },
+    }
+    const successB = {
+      ...failureB,
+      localAtRecoveryKey: buildTestAutomationLocalAtRecoveryKey('call-reminder'),
+      schedule: { kind: 'at', localAt: recoveryB },
+    }
+    const responseCard = {
+      kind: 'compact_table',
+      version: 1,
+      title: 'Reminder results',
+      subtitle: null,
+      rowHeader: 'Reminder',
+      columns: ['Status'],
+      rows: [
+        { label: 'Medication', values: ['Pending'] },
+        { label: 'Call', values: ['Saved'] },
+      ],
+      footer: null,
+      tracking: null,
+    } satisfies AssistantResponseCard
+    const questionA = `For reminder "Medication reminder", the trusted date is ${date}. ${
+      'fold' in recoveryA
+        ? `Should I use the earlier or later occurrence on ${date}?`
+        : `What other local time on ${date} should I use?`
+    }`
+    const questionB = `For reminder "Call reminder", the trusted date is ${date}. ${
+      'fold' in recoveryB
+        ? `Should I use the earlier or later occurrence on ${date}?`
+        : `What other local time on ${date} should I use?`
+    }`
+
+    for (const mode of [
+      'both-pending',
+      'second-resolved',
+      'both-resolved',
+      'first-dismissed',
+      'unrelated-and-date-mismatch',
+      'matching-without-correlation',
+      'unknown-correlation',
+      'unknown-dismissal',
+      'date-mismatched-dismissal',
+    ] as const) {
+      const scenario = await prepareScriptedTurnScenario()
+      const automationRequests: Array<Extract<
+        AssistantHostedAutomationToolRequest,
+        { action: 'save' }
+      >> = []
+      scenario.stub.queue(
+        {
+          customToolCall: {
+            input: `
+const result = await tools.murph__automation(${JSON.stringify(failureA)});
+text(JSON.stringify(result));
+`,
+            name: 'exec',
+          },
+        },
+        {
+          customToolCall: {
+            input: `
+const result = await tools.murph__automation(${JSON.stringify(failureB)});
+text(JSON.stringify(result));
+`,
+            name: 'exec',
+          },
+        },
+      )
+      if (mode === 'second-resolved' || mode === 'both-resolved') {
+        scenario.stub.queue({
+          customToolCall: {
+            input: `
+const result = await tools.murph__automation(${JSON.stringify(successB)});
+text(JSON.stringify(result));
+`,
+            name: 'exec',
+          },
+        })
+      }
+      if (mode === 'both-resolved') {
+        scenario.stub.queue({
+          customToolCall: {
+            input: `
+const result = await tools.murph__automation(${JSON.stringify(successA)});
+text(JSON.stringify(result));
+`,
+            name: 'exec',
+          },
+        })
+      }
+      if (mode === 'first-dismissed') {
+        for (let attempt = 0; attempt < 2; attempt += 1) {
+          scenario.stub.queue({
+            customToolCall: {
+              input: `
+const result = await tools.murph__automation({
+  action: "dismiss_local_at_recovery",
+  localAtRecoveryKey: "${buildTestAutomationLocalAtRecoveryKey('medication-reminder')}",
+  resolvedLocalDate: "${date}",
+});
+text(JSON.stringify(result));
+`,
+              name: 'exec',
+            },
+          })
+        }
+      }
+      if (mode === 'unrelated-and-date-mismatch') {
+        const unrelated = {
+          action: 'save',
+          instructions: 'Send an unrelated breakfast reminder.',
+          schedule: {
+            kind: 'at',
+            localAt: {
+              date,
+              time: '05:00',
+              timeZone: 'America/New_York',
+            },
+          },
+          title: 'Breakfast reminder',
+        }
+        const mismatchedA = {
+          ...failureA,
+          localAtRecoveryKey: buildTestAutomationLocalAtRecoveryKey(
+            'medication-reminder',
+          ),
+          schedule: {
+            kind: 'at',
+            localAt: {
+              date: mismatchDate,
+              time: '05:30',
+              timeZone: 'America/New_York',
+            },
+          },
+        }
+        scenario.stub.queue(
+          {
+            customToolCall: {
+              input: `
+const result = await tools.murph__automation(${JSON.stringify(unrelated)});
+text(JSON.stringify(result));
+`,
+              name: 'exec',
+            },
+          },
+          {
+            customToolCall: {
+              input: `
+const result = await tools.murph__automation(${JSON.stringify(mismatchedA)});
+text(JSON.stringify(result));
+`,
+              name: 'exec',
+            },
+          },
+        )
+      }
+      if (mode === 'unknown-correlation') {
+        const unknownCorrelation = {
+          action: 'save',
+          instructions: 'Send an unrelated breakfast reminder.',
+          localAtRecoveryKey: 'f'.repeat(64),
+          schedule: {
+            kind: 'at',
+            localAt: {
+              date,
+              time: '05:00',
+              timeZone: 'America/New_York',
+            },
+          },
+          title: 'Breakfast reminder',
+        }
+        scenario.stub.queue({
+          customToolCall: {
+            input: `
+const result = await tools.murph__automation(${JSON.stringify(unknownCorrelation)});
+text(JSON.stringify(result));
+`,
+            name: 'exec',
+          },
+        })
+      }
+      if (mode === 'unknown-dismissal') {
+        scenario.stub.queue({
+          customToolCall: {
+            input: `
+const result = await tools.murph__automation({
+  action: "dismiss_local_at_recovery",
+  localAtRecoveryKey: "${'f'.repeat(64)}",
+  resolvedLocalDate: "${date}",
+});
+text(JSON.stringify(result));
+`,
+            name: 'exec',
+          },
+        })
+      }
+      if (mode === 'date-mismatched-dismissal') {
+        scenario.stub.queue({
+          customToolCall: {
+            input: `
+const result = await tools.murph__automation({
+  action: "dismiss_local_at_recovery",
+  localAtRecoveryKey: "${buildTestAutomationLocalAtRecoveryKey('medication-reminder')}",
+  resolvedLocalDate: "${mismatchDate}",
+});
+text(JSON.stringify(result));
+`,
+            name: 'exec',
+          },
+        })
+      }
+      if (mode === 'matching-without-correlation') {
+        const matchingWithoutCorrelation = {
+          ...failureA,
+          schedule: { kind: 'at', localAt: recoveryA },
+        }
+        scenario.stub.queue({
+          customToolCall: {
+            input: `
+const result = await tools.murph__automation(${JSON.stringify(matchingWithoutCorrelation)});
+text(JSON.stringify(result));
+`,
+            name: 'exec',
+          },
+        })
+      }
+      if (mode === 'second-resolved' || mode === 'both-resolved') {
+        scenario.stub.queue({
+          functionCall: {
+            arguments: { card: responseCard },
+            name: 'attach_response_card',
+            namespace: 'murph',
+          },
+        })
+      }
+      if (mode === 'second-resolved') {
+        scenario.stub.queue(
+          {
+            functionCall: {
+              arguments: {},
+              name: 'finish_without_reply',
+              namespace: 'murph',
+            },
+          },
+          { text: '' },
+        )
+      } else {
+        scenario.stub.queue({
+          text: mode === 'both-resolved'
+            ? 'CARD_ATTACHED'
+            : 'I handled the reminder requests I could complete.',
+        })
+      }
+
+      const result = await executeCodexAppServerTurn({
+        ...scenario.turnInput,
+        allowFinishWithoutReply: true,
+        automationRelativeDateReferenceWindow: {
+          earliestAt: referenceAt,
+          latestAt: referenceAt,
+        },
+        dynamicTools: [
+          MURPH_AUTOMATION_TOOL,
+          MURPH_ATTACH_RESPONSE_CARD_TOOL,
+          MURPH_FINISH_WITHOUT_REPLY_TOOL,
+        ],
+        groupConversation: false,
+        hostedToolContext: {
+          automationTool: {
+            request: async (request) => {
+              if (request.action !== 'save') {
+                throw new Error('Expected an automation save request.')
+              }
+              if (request.schedule.kind !== 'at') {
+                throw new Error('Expected an exact one-shot schedule.')
+              }
+              automationRequests.push(request)
+              const lookupId = request.title.toLowerCase().replace(/\s+/gu, '-')
+              return {
+                action: 'save',
+                automationId: `automation-${lookupId}`,
+                created: true,
+                effectiveTimeZone: 'America/New_York',
+                lookupId,
+                nextOccurrenceAt: request.schedule.at,
+                routeBinding: 'current_conversation',
+                schedule: request.schedule,
+                status: 'active',
+                timingVerified: true,
+                updatedAt: '2026-03-08T05:01:00.000Z',
+              }
+            },
+          },
+          computerToolsAvailable: false,
+          currentHostedDeliveryContext: () => null,
+          currentHostedMailboxItemIds: () => [],
+          sendVaultFile: async () => {
+            throw new Error('Vault file sends are unavailable in this test.')
+          },
+          vaultFileSendAvailable: false,
+        },
+        prompt: 'Set my medication and call reminders for tomorrow.',
+      })
+
+      if (mode === 'both-resolved') {
+        expect(automationRequests).toHaveLength(2)
+        expect(automationRequests.map((request) => request.schedule)).toEqual([
+          { at: recoveryAtB, kind: 'at' },
+          { at: recoveryAtA, kind: 'at' },
+        ])
+        expect(result.responseCard).toEqual(responseCard)
+        expect(result.finalMessage).not.toContain('the trusted date is')
+        expect(result.transcriptMessage).not.toContain('the trusted date is')
+        continue
+      }
+
+      expect(result.responseCard).toBeNull()
+      if (mode === 'first-dismissed') {
+        expect(result.finalMessage).not.toContain(questionA)
+        expect(result.transcriptMessage).not.toContain(questionA)
+      } else {
+        expect(result.finalMessage).toContain(questionA)
+        expect(result.transcriptMessage).toContain(questionA)
+      }
+      if (mode === 'second-resolved') {
+        expect(automationRequests).toHaveLength(1)
+        expect(automationRequests[0]?.schedule).toEqual({
+          at: recoveryAtB,
+          kind: 'at',
+        })
+        expect(result.finalAction).toBeNull()
+        expect(result.finalMessage).not.toContain(questionB)
+        expect(result.transcriptMessage).not.toContain(questionB)
+      } else {
+        expect(result.finalMessage).toContain(questionB)
+        expect(result.transcriptMessage).toContain(questionB)
+        if (mode !== 'first-dismissed') {
+          expect(result.finalMessage.indexOf(questionA)).toBeLessThan(
+            result.finalMessage.indexOf(questionB),
+          )
+        }
+        if (
+          mode === 'both-pending' ||
+          mode === 'first-dismissed' ||
+          mode === 'unknown-correlation' ||
+          mode === 'unknown-dismissal' ||
+          mode === 'date-mismatched-dismissal'
+        ) {
+          expect(automationRequests).toHaveLength(0)
+        } else if (
+          mode === 'matching-without-correlation' ||
+          mode === 'unrelated-and-date-mismatch'
+        ) {
+          expect(automationRequests).toHaveLength(1)
+        } else {
+          expect(automationRequests).toHaveLength(0)
+        }
+      }
+    }
+  })
+
+  it.each([
+    {
+      date: '2026-03-08',
+      failedTime: '02:30',
+      fold: null,
+      newSlug: 'morning-meds',
+      patchLookup: 'medication-reminder',
+      referenceAt: '2026-03-08T04:59:00.000Z',
+      resolvedAt: '2026-03-08T07:30:00.000Z',
+      resolvedTime: '03:30',
+      secondPending: false,
+    },
+    {
+      date: '2026-03-08',
+      failedTime: '02:30',
+      fold: null,
+      newSlug: null,
+      patchLookup: 'automation-medication-reminder',
+      referenceAt: '2026-03-08T04:59:00.000Z',
+      resolvedAt: '2026-03-08T07:30:00.000Z',
+      resolvedTime: '03:30',
+      secondPending: false,
+    },
+    {
+      date: '2026-11-01',
+      failedTime: '01:30',
+      fold: 'later' as const,
+      newSlug: null,
+      patchLookup: 'medication-reminder',
+      referenceAt: '2026-11-01T03:59:00.000Z',
+      resolvedAt: '2026-11-01T06:30:00.000Z',
+      resolvedTime: '01:30',
+      secondPending: false,
+    },
+    {
+      date: '2026-11-01',
+      failedTime: '01:30',
+      fold: 'earlier' as const,
+      newSlug: 'evening-meds',
+      patchLookup: 'automation-medication-reminder',
+      referenceAt: '2026-11-01T03:59:00.000Z',
+      resolvedAt: '2026-11-01T05:30:00.000Z',
+      resolvedTime: '01:30',
+      secondPending: true,
+    },
+  ])('settles $date save recovery through create conflict and versioned patch', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async ({
+    date,
+    failedTime,
+    fold,
+    newSlug,
+    patchLookup,
+    referenceAt,
+    resolvedAt,
+    resolvedTime,
+    secondPending,
+  }) => {
+    const scenario = await prepareScriptedTurnScenario()
+    const slug = 'medication-reminder'
+    const automationId = 'automation-medication-reminder'
+    const updatedAt = '2026-03-07T20:00:00.000Z'
+    const failedSave = {
+      action: 'save',
+      instructions: 'Send the medication reminder tomorrow.',
+      schedule: {
+        kind: 'at',
+        localAt: {
+          relativeDay: 'tomorrow',
+          time: failedTime,
+          timeZone: 'America/New_York',
+        },
+      },
+      slug,
+      title: 'Medication reminder',
+    }
+    const recoveryLocalAt = {
+      date,
+      ...(fold ? { fold } : {}),
+      time: resolvedTime,
+      timeZone: 'America/New_York',
+    }
+    const retrySave = {
+      ...failedSave,
+      localAtRecoveryKey: buildTestAutomationLocalAtRecoveryKey(slug),
+      schedule: { kind: 'at', localAt: recoveryLocalAt },
+    }
+    const inspect = { action: 'inspect', lookup: slug }
+    const patch = {
+      action: 'patch',
+      expectedUpdatedAt: updatedAt,
+      localAtRecoveryKey: buildTestAutomationLocalAtRecoveryKey(slug),
+      lookup: patchLookup,
+      ...(newSlug ? { slug: newSlug } : {}),
+      schedule: { kind: 'at', localAt: recoveryLocalAt },
+    }
+    const secondFailure = {
+      action: 'save',
+      instructions: 'Send the call reminder tomorrow.',
+      schedule: {
+        kind: 'at',
+        localAt: {
+          relativeDay: 'tomorrow',
+          time: failedTime,
+          timeZone: 'America/New_York',
+        },
+      },
+      slug: 'call-reminder',
+      title: 'Call reminder',
+    }
+    const responseCard = {
+      kind: 'compact_table',
+      version: 1,
+      title: 'Medication reminder',
+      subtitle: `${date} at ${resolvedTime}`,
+      rowHeader: 'Status',
+      columns: ['Schedule'],
+      rows: [{ label: 'Active', values: [resolvedTime] }],
+      footer: null,
+      tracking: null,
+    } satisfies AssistantResponseCard
+    const calls = [
+      failedSave,
+      ...(secondPending ? [secondFailure] : []),
+      retrySave,
+      inspect,
+      patch,
+    ]
+    for (const request of calls) {
+      scenario.stub.queue({
+        customToolCall: {
+          input: `
+const result = await tools.murph__automation(${JSON.stringify(request)});
+text(JSON.stringify(result));
+`,
+          name: 'exec',
+        },
+      })
+    }
+    scenario.stub.queue({
+      functionCall: {
+        arguments: { card: responseCard },
+        name: 'attach_response_card',
+        namespace: 'murph',
+      },
+    })
+    if (secondPending) {
+      scenario.stub.queue(
+        {
+          functionCall: {
+            arguments: {},
+            name: 'finish_without_reply',
+            namespace: 'murph',
+          },
+        },
+        { text: '' },
+      )
+    } else {
+      scenario.stub.queue({ text: 'CARD_ATTACHED' })
+    }
+
+    const ownerRequests: AssistantHostedAutomationToolRequest[] = []
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      allowFinishWithoutReply: true,
+      automationRelativeDateReferenceWindow: {
+        earliestAt: referenceAt,
+        latestAt: referenceAt,
+      },
+      dynamicTools: [
+        MURPH_AUTOMATION_TOOL,
+        MURPH_ATTACH_RESPONSE_CARD_TOOL,
+        MURPH_FINISH_WITHOUT_REPLY_TOOL,
+      ],
+      groupConversation: false,
+      hostedToolContext: {
+        automationTool: {
+          request: async (request) => {
+            ownerRequests.push(request)
+            if (request.action === 'save') {
+              throw Object.assign(new Error('automation already exists'), {
+                code: 'VAULT_AUTOMATION_CONFLICT' as const,
+              })
+            }
+            if (request.action === 'inspect') {
+              return {
+                action: 'inspect',
+                automationId,
+                effectiveTimeZone: 'America/New_York',
+                lookupId: slug,
+                nextOccurrenceAt: '2026-03-07T21:00:00.000Z',
+                routeBinding: 'preserved',
+                schedule: {
+                  at: '2026-03-07T21:00:00.000Z',
+                  kind: 'at',
+                },
+                status: 'active',
+                timingVerified: true,
+                updatedAt,
+              }
+            }
+            if (request.action !== 'patch') {
+              throw new Error('Expected a versioned patch request.')
+            }
+            return {
+              action: 'patch',
+              automationId,
+              created: false,
+              effectiveTimeZone: 'America/New_York',
+              lookupId: newSlug ?? slug,
+              nextOccurrenceAt: resolvedAt,
+              routeBinding: 'current_conversation',
+              schedule: request.schedule ?? { at: resolvedAt, kind: 'at' },
+              status: 'active',
+              timingVerified: true,
+              updatedAt: '2026-03-08T05:01:00.000Z',
+            }
+          },
+        },
+        computerToolsAvailable: false,
+        currentHostedDeliveryContext: () => null,
+        currentHostedMailboxItemIds: () => [],
+        sendVaultFile: async () => {
+          throw new Error('Vault file sends are unavailable in this test.')
+        },
+        vaultFileSendAvailable: false,
+      },
+      prompt: 'Set or update my medication reminder for tomorrow.',
+    })
+
+    expect(ownerRequests.map((request) => request.action)).toEqual([
+      'save',
+      'inspect',
+      'patch',
+    ])
+    for (const request of ownerRequests) {
+      expect(request).not.toHaveProperty('localAtRecoveryKey')
+    }
+    expect(ownerRequests[2]).toMatchObject({
+      action: 'patch',
+      expectedUpdatedAt: updatedAt,
+      lookup: patchLookup,
+      ...(newSlug ? { slug: newSlug } : {}),
+      schedule: { at: resolvedAt, kind: 'at' },
+    })
+    const medicationQuestion =
+      `For reminder "Medication reminder (${slug})", the trusted date is ${date}.`
+    expect(result.finalMessage).not.toContain(medicationQuestion)
+    expect(result.transcriptMessage).not.toContain(medicationQuestion)
+    if (secondPending) {
+      const callQuestion =
+        `For reminder "Call reminder (call-reminder)", the trusted date is ${date}.`
+      expect(result.finalAction).toBeNull()
+      expect(result.responseCard).toBeNull()
+      expect(result.finalMessage).toContain(callQuestion)
+      expect(result.transcriptMessage).toContain(callQuestion)
+    } else {
+      expect(result.responseCard).toEqual(responseCard)
+      expect(result.finalMessage).not.toContain('the trusted date is')
+      expect(result.transcriptMessage).not.toContain('the trusted date is')
+    }
+  })
+
+  it('suppresses a response card until the trusted DST clarification is delivered', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const scenario = await prepareScriptedTurnScenario()
+    const responseCard = {
+      kind: 'compact_table',
+      version: 1,
+      title: 'Strength session',
+      subtitle: null,
+      rowHeader: 'Exercise',
+      columns: ['Set 1'],
+      rows: [{ label: 'Bench press', values: ['185 lb × 8'] }],
+      footer: null,
+      tracking: {
+        kind: 'workout',
+        entityId: 'evt_01K1ABCDEFGHJKMNPQRSTVWXYZ',
+        snapshotAt: '2026-08-04T21:30:00.000Z',
+      },
+    } satisfies AssistantResponseCard
+    scenario.stub.queue(
+      {
+        customToolCall: {
+          input: `
+const result = await tools.murph__automation({
+  action: "save",
+  instructions: "Send the reminder tomorrow.",
+  schedule: {
+    kind: "at",
+    localAt: {
+      relativeDay: "tomorrow",
+      time: "02:30",
+      timeZone: "America/New_York",
+    },
+  },
+  title: "Gap reminder",
+});
+text(JSON.stringify(result));
+`,
+          name: 'exec',
+        },
+      },
+      {
+        functionCall: {
+          arguments: { card: responseCard },
+          name: 'attach_response_card',
+          namespace: 'murph',
+        },
+      },
+      {
+        text:
+          '2:30 AM does not exist on 2026-03-08 because of daylight saving time.',
+      },
+    )
+
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      automationRelativeDateReferenceWindow: {
+        earliestAt: '2026-03-08T04:59:00.000Z',
+        latestAt: '2026-03-08T04:59:00.000Z',
+      },
+      dynamicTools: [
+        MURPH_AUTOMATION_TOOL,
+        MURPH_ATTACH_RESPONSE_CARD_TOOL,
+      ],
+      groupConversation: false,
+      hostedToolContext: {
+        automationTool: {
+          request: async () => {
+            throw new Error('DST clarification must not mutate an automation.')
+          },
+        },
+        computerToolsAvailable: false,
+        currentHostedDeliveryContext: () => null,
+        currentHostedMailboxItemIds: () => [],
+        sendVaultFile: async () => {
+          throw new Error('Vault file sends are unavailable in this test.')
+        },
+        vaultFileSendAvailable: false,
+      },
+      prompt: 'Show my workout and remind me tomorrow at 2:30 AM.',
+    })
+
+    const publicCardText =
+      'Strength session\n\nBench press: Set 1: 185 lb × 8'
+    const requiredClarification =
+      'For reminder "Gap reminder", the trusted date is 2026-03-08. What other local time on 2026-03-08 should I use?'
+    const expectedDeliveredText = `${publicCardText}\n\n${requiredClarification}`
+    expect(result.responseCard).toBeNull()
+    expect(result.finalMessage).toBe(expectedDeliveredText)
+    expect(result.transcriptMessage).toBe(expectedDeliveredText)
+    expect(result.transcriptMessage).not.toContain('Murph tracked workout source')
+  })
+
+  it('overrides finish-without-reply when a trusted DST date must be clarified', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const scenario = await prepareScriptedTurnScenario()
+    scenario.stub.queue(
+      {
+        customToolCall: {
+          input: `
+const result = await tools.murph__automation({
+  action: "save",
+  instructions: "Send the reminder tomorrow.",
+  schedule: {
+    kind: "at",
+    localAt: {
+      relativeDay: "tomorrow",
+      time: "02:30",
+      timeZone: "America/New_York",
+    },
+  },
+  title: "Gap reminder",
+});
+text(JSON.stringify(result));
+`,
+          name: 'exec',
+        },
+      },
+      {
+        functionCall: {
+          arguments: {},
+          name: 'finish_without_reply',
+          namespace: 'murph',
+        },
+      },
+      { text: '' },
+    )
+
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      allowFinishWithoutReply: true,
+      automationRelativeDateReferenceWindow: {
+        earliestAt: '2026-03-08T04:59:00.000Z',
+        latestAt: '2026-03-08T04:59:00.000Z',
+      },
+      dynamicTools: [
+        MURPH_AUTOMATION_TOOL,
+        MURPH_FINISH_WITHOUT_REPLY_TOOL,
+      ],
+      hostedToolContext: {
+        automationTool: {
+          request: async () => {
+            throw new Error('DST clarification must not mutate an automation.')
+          },
+        },
+        computerToolsAvailable: false,
+        currentHostedDeliveryContext: () => null,
+        currentHostedMailboxItemIds: () => [],
+        sendVaultFile: async () => {
+          throw new Error('Vault file sends are unavailable in this test.')
+        },
+        vaultFileSendAvailable: false,
+      },
+      prompt: 'Remind me tomorrow at 2:30 AM in New York.',
+    })
+
+    const requiredClarification =
+      'For reminder "Gap reminder", the trusted date is 2026-03-08. What other local time on 2026-03-08 should I use?'
+    expect(result.finalAction).toBeNull()
+    expect(result.finalActionExplicit).toBe(false)
+    expect(result.finalMessage).toBe(requiredClarification)
+    expect(result.transcriptMessage).toBe(requiredClarification)
+  })
+
+  it('keeps a live-steered relative reminder on its accepted delivery-context date', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const scenario = await prepareScriptedTurnScenario()
+    const automationRequests: AssistantHostedAutomationToolRequest[] = []
+    let steered: Promise<void> | null = null
+    scenario.stub.queue(
+      {
+        delayMs: 2_000,
+        text: 'STEER_REMINDER_FIRST_REPLY',
+      },
+      {
+        customToolCall: {
+          input: `
+const result = await tools.murph__automation({
+  action: "save",
+  instructions: "Send the reminder tonight.",
+  schedule: {
+    kind: "at",
+    localAt: {
+      relativeDay: "today",
+      time: "23:20",
+      timeZone: "Pacific/Honolulu",
+    },
+  },
+  title: "Steered one-shot reminder",
+});
+text(JSON.stringify(result));
+`,
+          name: 'exec',
+        },
+      },
+      { text: 'STEER_REMINDER_OK' },
+    )
+
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      automationRelativeDateReferenceWindow: {
+        earliestAt: '2031-02-15T09:59:59.800Z',
+        latestAt: '2031-02-15T09:59:59.800Z',
+      },
+      dynamicTools: [MURPH_AUTOMATION_TOOL],
+      hostedToolContext: {
+        automationTool: {
+          request: async (request) => {
+            if (request.action !== 'save') {
+              throw new Error('Expected an automation save request.')
+            }
+            automationRequests.push(request)
+            return {
+              action: 'save',
+              automationId: 'automation-steered-one-shot',
+              created: true,
+              effectiveTimeZone: null,
+              lookupId: 'steered-one-shot-reminder',
+              nextOccurrenceAt: '2031-02-15T09:20:00.000Z',
+              routeBinding: 'current_conversation',
+              schedule: {
+                at: '2031-02-15T09:20:00.000Z',
+                kind: 'at',
+              },
+              status: 'active',
+              timingVerified: true,
+              updatedAt: '2031-02-15T09:59:59.950Z',
+            }
+          },
+        },
+        computerToolsAvailable: false,
+        currentHostedDeliveryContext: () => null,
+        currentHostedMailboxItemIds: () => [],
+        sendVaultFile: async () => {
+          throw new Error('Vault file sends are unavailable in this test.')
+        },
+        vaultFileSendAvailable: false,
+      },
+      onLiveTurn: (turn: CodexAppServerLiveTurn) => {
+        steered = delay(500).then(() =>
+          turn.steer({
+            prompt: 'Remind me tonight at 11:20 PM Honolulu time.',
+            relativeDateReferenceWindow: {
+              earliestAt: '2031-02-15T09:59:59.900Z',
+              latestAt: '2031-02-15T09:59:59.900Z',
+            },
+          }))
+      },
+      prompt: 'Reply before I send another message.',
+    })
+
+    expect(steered).not.toBeNull()
+    await steered
+    expect(automationRequests).toEqual([{
+      action: 'save',
+      instructions: 'Send the reminder tonight.',
+      schedule: {
+        at: '2031-02-15T09:20:00.000Z',
+        kind: 'at',
+      },
+      title: 'Steered one-shot reminder',
+    }])
+    expect(result.finalMessage).toBe('STEER_REMINDER_OK')
+    expect(result.responseDeliveryContextOrdinal).toBe(1)
+  })
+
+  it('fails closed when a live-steered relative reminder spans local midnight', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const scenario = await prepareScriptedTurnScenario()
+    const automationRequest = vi.fn(async () => {
+      throw new Error('The ambiguous reminder must not reach the automation port.')
+    })
+    let steered: Promise<void> | null = null
+    scenario.stub.queue(
+      {
+        delayMs: 2_000,
+        text: 'STEER_MIDNIGHT_FIRST_REPLY',
+      },
+      {
+        customToolCall: {
+          input: `
+const result = await tools.murph__automation({
+  action: "save",
+  instructions: "Send the reminder tomorrow.",
+  schedule: {
+    kind: "at",
+    localAt: {
+      relativeDay: "tomorrow",
+      time: "09:00",
+      timeZone: "America/New_York",
+    },
+  },
+  title: "Midnight-spanning reminder",
+});
+text(JSON.stringify(result));
+`,
+          name: 'exec',
+        },
+      },
+      { text: 'STEER_MIDNIGHT_ASK_EXPLICIT_DATE' },
+    )
+
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      automationRelativeDateReferenceWindow: {
+        earliestAt: '2031-07-15T03:59:59.900Z',
+        latestAt: '2031-07-15T03:59:59.900Z',
+      },
+      dynamicTools: [MURPH_AUTOMATION_TOOL],
+      hostedToolContext: {
+        automationTool: { request: automationRequest },
+        computerToolsAvailable: false,
+        currentHostedDeliveryContext: () => null,
+        currentHostedMailboxItemIds: () => [],
+        sendVaultFile: async () => {
+          throw new Error('Vault file sends are unavailable in this test.')
+        },
+        vaultFileSendAvailable: false,
+      },
+      onLiveTurn: (turn: CodexAppServerLiveTurn) => {
+        steered = delay(500).then(() =>
+          turn.steer({
+            prompt: 'Actually, make it 10 AM.',
+            relativeDateReferenceWindow: {
+              earliestAt: '2031-07-15T04:00:00.100Z',
+              latestAt: '2031-07-15T04:00:00.100Z',
+            },
+          }))
+      },
+      prompt: 'Remind me tomorrow at 9 AM New York time.',
+    })
+
+    expect(steered).not.toBeNull()
+    await steered
+    expect(automationRequest).not.toHaveBeenCalled()
+    const toolOutputs = scenario.stub.requestSummariesSinceBaseline()
+      .flatMap((summary) => summary.customToolCallOutputs ?? [])
+      .join('\n')
+    expect(toolOutputs).toContain(
+      'accepted messages span different calendar dates in that timezone',
+    )
+    expect(result.finalMessage).toBe('STEER_MIDNIGHT_ASK_EXPLICIT_DATE')
+    expect(result.responseDeliveryContextOrdinal).toBe(1)
+  })
+
   it('reports a reactivated stale one-shot as needing a new time', {
     timeout: TURN_TIMEOUT_MS,
   }, async () => {
@@ -1727,6 +4913,7 @@ text(JSON.stringify(result));
           input: `
 const result = await tools.murph__automation({
   action: "patch",
+  expectedUpdatedAt: "2026-08-10T00:00:00.000Z",
   lookup: "one-time-evening-reminder",
   status: "active",
 });
@@ -1765,6 +4952,7 @@ text(JSON.stringify(result));
               },
               status: 'active',
               timingVerified: true,
+              updatedAt: '2026-08-10T00:01:00.000Z',
             }
           },
         },
@@ -1781,6 +4969,7 @@ text(JSON.stringify(result));
 
     expect(automationRequests).toEqual([{
       action: 'patch',
+      expectedUpdatedAt: '2026-08-10T00:00:00.000Z',
       lookup: 'one-time-evening-reminder',
       status: 'active',
     }])
@@ -1795,16 +4984,18 @@ text(JSON.stringify(result));
     expect(result.finalMessage).toMatch(/new time|reschedule/iu)
   })
 
-  it('does not describe an unverified stale recurrence as exhausted', {
+  it('uses host-recovered timing without another model-selected tool call', {
     timeout: TURN_TIMEOUT_MS,
   }, async () => {
     const scenario = await prepareScriptedTurnScenario()
+    const automationRequests: unknown[] = []
     scenario.stub.queue(
       {
         customToolCall: {
           input: `
 const result = await tools.murph__automation({
   action: "patch",
+  expectedUpdatedAt: "2026-08-10T00:00:00.000Z",
   instructions: "Send the revised daily interval reminder.",
   lookup: "daily-interval-reminder",
 });
@@ -1814,7 +5005,7 @@ text(JSON.stringify(result));
         },
       },
       {
-        text: 'The reminder wording was updated, but I could not verify its next occurrence. I can inspect or update the schedule if you want.',
+        text: 'The reminder wording was updated. I checked the scheduler and confirmed the daily schedule is active.',
       },
     )
 
@@ -1825,6 +5016,7 @@ text(JSON.stringify(result));
       hostedToolContext: {
         automationTool: {
           request: async (request) => {
+            automationRequests.push(request)
             if (request.action !== 'patch') {
               throw new Error('Expected an automation patch request.')
             }
@@ -1834,11 +5026,13 @@ text(JSON.stringify(result));
               created: false,
               effectiveTimeZone: null,
               lookupId: 'daily-interval-reminder',
-              nextOccurrenceAt: null,
+              nextOccurrenceAt: '2026-08-11T00:01:00.000Z',
               routeBinding: 'preserved',
               schedule: { everyMs: 86_400_000, kind: 'every' },
               status: 'active',
-              timingVerified: false,
+              timingVerified: true,
+              timingVerificationIssues: [],
+              updatedAt: '2026-08-10T00:01:00.000Z',
             }
           },
         },
@@ -1858,13 +5052,99 @@ text(JSON.stringify(result));
       .join('\n')
       .replace(/\\"/gu, '"')
     expect(toolOutputs).toContain('"kind":"every"')
-    expect(toolOutputs).toContain('"nextOccurrenceAt":null')
-    expect(toolOutputs).toContain('"timingVerified":false')
-    expect(result.finalMessage).toMatch(/could not verify/iu)
-    expect(result.finalMessage).toMatch(/inspect|update/iu)
-    expect(result.finalMessage).not.toMatch(
-      /no (?:future|later) delivery|nothing (?:else )?(?:is )?scheduled/iu,
+    expect(toolOutputs).toContain('"nextOccurrenceAt":"2026-08-11T00:01:00.000Z"')
+    expect(toolOutputs).toContain('"timingVerified":true')
+    expect(automationRequests).toEqual([
+      {
+        action: 'patch',
+        expectedUpdatedAt: '2026-08-10T00:00:00.000Z',
+        instructions: 'Send the revised daily interval reminder.',
+        lookup: 'daily-interval-reminder',
+      },
+    ])
+    expect(result.finalMessage).toMatch(/checked|confirmed/iu)
+    expect(result.finalMessage).not.toMatch(/could not verify|if you want/iu)
+    expect(scenario.stub.requestCountSinceBaseline()).toBe(2)
+  })
+
+  it('reports persistent timing uncertainty without offering more inspection', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const scenario = await prepareScriptedTurnScenario()
+    const automationRequests: unknown[] = []
+    scenario.stub.queue(
+      {
+        customToolCall: {
+          input: `
+const result = await tools.murph__automation({
+  action: "patch",
+  expectedUpdatedAt: "2026-08-10T00:00:00.000Z",
+  instructions: "Send the revised daily interval reminder.",
+  lookup: "daily-interval-reminder",
+});
+text(JSON.stringify(result));
+`,
+          name: 'exec',
+        },
+      },
+      {
+        text: 'The reminder wording is updated and the daily schedule remains active. The scheduler is still finishing existing work, so the next run is not confirmed yet.',
+      },
     )
+
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      baseInstructions: buildScriptedHostedSystemPrompt('direct', true),
+      dynamicTools: [MURPH_AUTOMATION_TOOL],
+      hostedToolContext: {
+        automationTool: {
+          request: async (request) => {
+            automationRequests.push(request)
+            const response = {
+              automationId: 'automation-daily-interval',
+              effectiveTimeZone: null,
+              lookupId: 'daily-interval-reminder',
+              nextOccurrenceAt: null,
+              routeBinding: 'preserved' as const,
+              schedule: { everyMs: 86_400_000, kind: 'every' as const },
+              status: 'active' as const,
+              timingVerified: false,
+              timingVerificationIssues: ['runtime_state_pending'] as const,
+              updatedAt: '2026-08-10T00:01:00.000Z',
+            }
+            if (request.action !== 'patch') {
+              throw new Error('Expected an automation patch request.')
+            }
+            return {
+              action: 'patch' as const,
+              ...response,
+              created: false,
+            }
+          },
+        },
+        computerToolsAvailable: false,
+        currentHostedDeliveryContext: () => null,
+        currentHostedMailboxItemIds: () => [],
+        sendVaultFile: async () => {
+          throw new Error('Vault file sends are unavailable in this test.')
+        },
+        vaultFileSendAvailable: false,
+      },
+      prompt: 'Update the wording of my daily interval reminder now.',
+    })
+
+    expect(automationRequests).toEqual([
+      {
+        action: 'patch',
+        expectedUpdatedAt: '2026-08-10T00:00:00.000Z',
+        instructions: 'Send the revised daily interval reminder.',
+        lookup: 'daily-interval-reminder',
+      },
+    ])
+    expect(result.finalMessage).toMatch(/updated|active/iu)
+    expect(result.finalMessage).toMatch(/next run is not confirmed yet/iu)
+    expect(result.finalMessage).not.toMatch(/if you want|inspect|10:30|tomorrow/iu)
+    expect(scenario.stub.requestCountSinceBaseline()).toBe(2)
   })
 
   it('keeps active device-triggered saves distinct from exhausted clock schedules', {
@@ -1925,6 +5205,7 @@ if (!tool) {
               schedule: request.schedule,
               status: 'active',
               timingVerified: true,
+              updatedAt: '2026-08-08T12:00:00.000Z',
             }
           },
         },
@@ -4524,7 +7805,7 @@ text(result.output);
         currentHostedMailboxItemIds: () => [],
         groupSharedReader: {
           request: async () => ({
-            members: Array.from({ length: 32 }, (_unused, index) => ({
+            members: Array.from({ length: 200 }, (_unused, index) => ({
               currentTurnHandles: [],
               displayName: `Member ${index}`,
               memberId: `member_oversized_${index}`,
@@ -4590,6 +7871,12 @@ text(result.output);
       {
         toolSearchCall: {
           limit: 8,
+          query: 'Murph group set_chat_avatar current chat icon',
+        },
+      },
+      {
+        toolSearchCall: {
+          limit: 8,
           query: 'create a durable Murph automation reminder',
         },
       },
@@ -4629,6 +7916,7 @@ text(result.output);
               schedule: request.schedule,
               status: 'active',
               timingVerified: true,
+              updatedAt: '2026-08-08T12:00:00.000Z',
             }
           },
         },
@@ -4641,7 +7929,7 @@ text(result.output);
         vaultFileSendAvailable: false,
       },
       model: 'gpt-5.4',
-      prompt: 'Save the reminder, then reply exactly NATIVE_TOOL_SEARCH_OK.',
+      prompt: 'Discover the supported group-avatar path, save the reminder, then reply exactly NATIVE_TOOL_SEARCH_OK.',
     })
 
     const summaries = scenario.stub.requestSummariesSinceBaseline()
@@ -4651,11 +7939,14 @@ text(result.output);
         includesAllTools: false,
         includesAutomation: false,
         includesGroup: false,
-        includesSaveNewsletter: false,
+        includesGroupEmail: false,
         includesToolSearch: true,
       },
     })
     expect(JSON.stringify(summaries[1]?.toolSearchOutputTools)).toContain(
+      '"name":"group"',
+    )
+    expect(JSON.stringify(summaries[2]?.toolSearchOutputTools)).toContain(
       '"name":"automation"',
     )
     expect(automationRequests).toEqual([{
@@ -4665,7 +7956,7 @@ text(result.output);
       title: 'Morning reminder',
     }])
     expect(result.finalMessage).toBe('NATIVE_TOOL_SEARCH_OK')
-    expect(scenario.stub.requestCountSinceBaseline()).toBe(3)
+    expect(scenario.stub.requestCountSinceBaseline()).toBe(4)
   })
 
   it('keeps narrow group reads eager beside deferred Terra tools', {
@@ -4733,7 +8024,7 @@ text(JSON.stringify(result));
         includesAutomation: false,
         includesGroup: false,
         includesReadShared: true,
-        includesSaveNewsletter: false,
+        includesGroupEmail: false,
       },
     })
     expect(groupSharedRequests).toEqual([{
@@ -5320,6 +8611,76 @@ text(JSON.stringify(result));
     expect(progressUpdates).toEqual(['Scripted progress update.'])
     expect(result.finalMessage).toBe('DYNAMIC_TOOL_OK')
     expect(scenario.stub.requestCountSinceBaseline()).toBe(2)
+  })
+
+  it('ends an accepted group email effect without another provider request', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const scenario = await prepareScriptedTurnScenario()
+    const groupEmailRequests: unknown[] = []
+    const groupEmailSendResultRecorder = vi.fn()
+    const traceEvents: unknown[] = []
+    scenario.stub.queue({
+      commentaryAndFunctionCall: {
+        commentary: 'Preparing the scheduled group update.',
+        functionCall: {
+          arguments: {
+            action: 'send_email',
+            html: '<p>Scheduled update</p>',
+            subject: 'Scheduled update',
+            text: 'Scheduled update',
+          },
+          name: 'group',
+          namespace: 'murph',
+        },
+      },
+    })
+
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      dynamicTools: resolveMurphDynamicTools({
+        groupAvailable: true,
+        progressUpdatesAvailable: false,
+      }),
+      hostedToolContext: {
+        ...createScriptedGroupToolContext(async () => ({
+          action: 'read_chat_participants',
+          result: { participants: [], status: 'ok' },
+        })),
+        groupEmailEffect: {
+          request: async (request) => {
+            groupEmailRequests.push(request)
+            return {
+              action: 'send_email',
+              result: {
+                participantCount: 1,
+                skippedNoEmailMemberIds: [],
+                status: 'accepted',
+              },
+            }
+          },
+        },
+        recordGroupEmailSendResult: groupEmailSendResultRecorder,
+      },
+      onTraceEvent: (event) => {
+        traceEvents.push(event)
+      },
+      prompt: 'Send the prepared scheduled group email.',
+    })
+
+    expect(groupEmailRequests).toEqual([{
+      action: 'send_email',
+      html: '<p>Scheduled update</p>',
+      subject: 'Scheduled update',
+      text: 'Scheduled update',
+    }])
+    expect(result.finalAction).toEqual({ kind: 'none' })
+    expect(result.finalMessage).toBe('')
+    expect(JSON.stringify(traceEvents)).toContain(
+      'Preparing the scheduled group update.',
+    )
+    expect(groupEmailSendResultRecorder).toHaveBeenCalledOnce()
+    expect(scenario.stub.requestCountSinceBaseline()).toBe(1)
   })
 
   it.each([
@@ -5922,6 +9283,9 @@ function buildScriptedHostedSystemPrompt(
 
 async function prepareScriptedTurnScenario(
   options: {
+    additionalTomlLines?: readonly string[]
+    model?: string
+    modelProvider?: string
     multiAgentV2?: boolean
   } = {},
 ): Promise<{
@@ -5939,6 +9303,7 @@ async function prepareScriptedTurnScenario(
 }> {
   const scriptedStub = await requireScriptedStub()
   scriptedStub.markRequestBaseline()
+  const modelProvider = options.modelProvider ?? SCRIPTED_MODEL_PROVIDER
   const codexHome = await mkdtemp(path.join(tmpdir(), 'murph-codex-scripted-home-'))
   temporaryPaths.push(codexHome)
   const workingDirectory = await mkdtemp(
@@ -5947,7 +9312,10 @@ async function prepareScriptedTurnScenario(
   temporaryPaths.push(workingDirectory)
   await writeFile(
     path.join(codexHome, 'config.toml'),
-    buildScriptedCodexConfigToml(scriptedStub.baseUrl, options),
+    buildScriptedCodexConfigToml(scriptedStub.baseUrl, {
+      ...options,
+      modelProvider,
+    }),
     {
       encoding: 'utf8',
       mode: 0o600,
@@ -5965,8 +9333,8 @@ async function prepareScriptedTurnScenario(
         PATH: process.env.PATH,
         TMPDIR: process.env.TMPDIR,
       },
-      model: SCRIPTED_MODEL,
-      modelProvider: SCRIPTED_MODEL_PROVIDER,
+      model: options.model ?? SCRIPTED_MODEL,
+      modelProvider,
       reasoningEffort: 'low',
       sandbox: 'workspace-write',
       workingDirectory,
@@ -6026,12 +9394,15 @@ async function writeOpenAiFlexModelCatalogJson(input: {
 function buildScriptedCodexConfigToml(
   baseUrl: string,
   options: {
+    additionalTomlLines?: readonly string[]
+    modelProvider?: string
     multiAgentV2?: boolean
   } = {},
 ): string {
+  const modelProvider = options.modelProvider ?? SCRIPTED_MODEL_PROVIDER
   return [
     `model = "${SCRIPTED_MODEL}"`,
-    `model_provider = "${SCRIPTED_MODEL_PROVIDER}"`,
+    `model_provider = "${modelProvider}"`,
     'model_reasoning_effort = "low"',
     'approval_policy = "never"',
     'sandbox_mode = "workspace-write"',
@@ -6040,7 +9411,7 @@ function buildScriptedCodexConfigToml(
     '[history]',
     'persistence = "none"',
     '',
-    `[model_providers.${SCRIPTED_MODEL_PROVIDER}]`,
+    `[model_providers."${modelProvider}"]`,
     'name = "Local scripted stub"',
     `base_url = "${baseUrl}"`,
     `env_key = "${SCRIPTED_STUB_KEY_ENV}"`,
@@ -6057,7 +9428,44 @@ function buildScriptedCodexConfigToml(
           '',
         ]
       : []),
+    ...(options.additionalTomlLines ?? []),
   ].join('\n')
+}
+
+function createDeterministicPng(width: number, height: number): Buffer {
+  const rowBytes = width * 3 + 1
+  const pixels = Buffer.alloc(rowBytes * height)
+  let state = 0x4d555250
+  for (let row = 0; row < height; row += 1) {
+    const rowOffset = row * rowBytes
+    pixels[rowOffset] = 0
+    for (let offset = rowOffset + 1; offset < rowOffset + rowBytes; offset += 1) {
+      state = (Math.imul(state, 1_664_525) + 1_013_904_223) >>> 0
+      pixels[offset] = state & 0xff
+    }
+  }
+
+  const header = Buffer.alloc(13)
+  header.writeUInt32BE(width, 0)
+  header.writeUInt32BE(height, 4)
+  header[8] = 8
+  header[9] = 2
+  return Buffer.concat([
+    Buffer.from('89504e470d0a1a0a', 'hex'),
+    createPngChunk('IHDR', header),
+    createPngChunk('IDAT', deflateSync(pixels)),
+    createPngChunk('IEND', Buffer.alloc(0)),
+  ])
+}
+
+function createPngChunk(type: string, data: Buffer): Buffer {
+  const typeBytes = Buffer.from(type, 'ascii')
+  const chunk = Buffer.alloc(data.length + 12)
+  chunk.writeUInt32BE(data.length, 0)
+  typeBytes.copy(chunk, 4)
+  data.copy(chunk, 8)
+  chunk.writeUInt32BE(crc32(Buffer.concat([typeBytes, data])), data.length + 8)
+  return chunk
 }
 
 async function startScriptedResponsesStub(): Promise<ScriptedStub> {
@@ -6110,56 +9518,91 @@ async function startScriptedResponsesStub(): Promise<ScriptedStub> {
 
     responseSequence += 1
     const responseId = `resp_scripted_${responseSequence}`
-    const outputItem = 'toolSearchCall' in scripted
-      ? {
-          arguments: {
-            query: scripted.toolSearchCall.query,
-            ...(scripted.toolSearchCall.limit === undefined
-              ? {}
-              : { limit: scripted.toolSearchCall.limit }),
+    const outputItems = 'commentaryAndFunctionCall' in scripted
+      ? [
+          {
+            content: [
+              {
+                annotations: [],
+                text: scripted.commentaryAndFunctionCall.commentary,
+                type: 'output_text',
+              },
+            ],
+            id: `msg_${responseId}_commentary`,
+            phase: 'commentary',
+            role: 'assistant',
+            status: 'completed',
+            type: 'message',
           },
-          call_id: `call_${responseId}`,
-          execution: 'client',
-          id: `tsearch_${responseId}`,
-          status: 'completed',
-          type: 'tool_search_call',
-        }
-      : 'customToolCall' in scripted
-      ? {
-          call_id: `call_${responseId}`,
-          id: `ctcall_${responseId}`,
-          input: scripted.customToolCall.input,
-          name: scripted.customToolCall.name,
-          status: 'completed',
-          type: 'custom_tool_call',
-        }
-      : 'functionCall' in scripted
-      ? {
-          arguments: JSON.stringify(scripted.functionCall.arguments),
-          call_id: `call_${responseId}`,
-          id: `fcall_${responseId}`,
-          name: scripted.functionCall.name,
-          ...(scripted.functionCall.namespace
-            ? { namespace: scripted.functionCall.namespace }
-            : {}),
-          status: 'completed',
-          type: 'function_call',
-        }
-      : {
-          content: [
-            {
-              annotations: [],
-              text: scripted.text,
-              type: 'output_text',
-            },
-          ],
-          id: `msg_${responseId}`,
-          role: 'assistant',
-          status: 'completed',
-          type: 'message',
-        }
+          {
+            arguments: JSON.stringify(
+              scripted.commentaryAndFunctionCall.functionCall.arguments,
+            ),
+            call_id: `call_${responseId}_group_email`,
+            id: `fcall_${responseId}_group_email`,
+            name: scripted.commentaryAndFunctionCall.functionCall.name,
+            ...(scripted.commentaryAndFunctionCall.functionCall.namespace
+              ? {
+                  namespace:
+                    scripted.commentaryAndFunctionCall.functionCall.namespace,
+                }
+              : {}),
+            status: 'completed',
+            type: 'function_call',
+          },
+        ]
+      : [
+          'toolSearchCall' in scripted
+            ? {
+                arguments: {
+                  query: scripted.toolSearchCall.query,
+                  ...(scripted.toolSearchCall.limit === undefined
+                    ? {}
+                    : { limit: scripted.toolSearchCall.limit }),
+                },
+                call_id: `call_${responseId}`,
+                execution: 'client',
+                id: `tsearch_${responseId}`,
+                status: 'completed',
+                type: 'tool_search_call',
+              }
+            : 'customToolCall' in scripted
+              ? {
+                  call_id: `call_${responseId}`,
+                  id: `ctcall_${responseId}`,
+                  input: scripted.customToolCall.input,
+                  name: scripted.customToolCall.name,
+                  status: 'completed',
+                  type: 'custom_tool_call',
+                }
+              : 'functionCall' in scripted
+                ? {
+                    arguments: JSON.stringify(scripted.functionCall.arguments),
+                    call_id: `call_${responseId}`,
+                    id: `fcall_${responseId}`,
+                    name: scripted.functionCall.name,
+                    ...(scripted.functionCall.namespace
+                      ? { namespace: scripted.functionCall.namespace }
+                      : {}),
+                    status: 'completed',
+                    type: 'function_call',
+                  }
+                : {
+                    content: [
+                      {
+                        annotations: [],
+                        text: scripted.text,
+                        type: 'output_text',
+                      },
+                    ],
+                    id: `msg_${responseId}`,
+                    role: 'assistant',
+                    status: 'completed',
+                    type: 'message',
+                  },
+        ]
     writeScriptedSseResponse({
-      outputItem,
+      outputItems,
       response,
       responseId,
     })
@@ -6243,18 +9686,35 @@ function readScriptedProviderRequestSummary(
       .filter((item) => item?.type === 'tool_search_output')
       .flatMap((item) => Array.isArray(item?.tools) ? item.tools : [])
     : []
+  const imageWidths = Array.isArray(body?.input)
+    ? body.input.flatMap((inputItem) => {
+        const content = readRecord(inputItem)?.content
+        if (!Array.isArray(content)) {
+          return []
+        }
+        return content
+          .map(readRecord)
+          .filter((item) => item?.type === 'input_image')
+          .map((item) => readString(item?.image_url))
+          .filter((imageUrl): imageUrl is string => imageUrl !== null)
+          .map(readPngDataUrlWidth)
+          .filter((width): width is number => width !== null)
+      })
+    : []
   const tools = Array.isArray(body?.tools)
     ? body.tools.map(readRecord)
     : []
   return {
     ...(customToolCallOutputs.length > 0 ? { customToolCallOutputs } : {}),
     ...(functionCallOutputs.length > 0 ? { functionCallOutputs } : {}),
+    ...(imageWidths.length > 0 ? { imageWidths } : {}),
     model: readString(body?.model),
     ...(includeDiagnostics
       ? {
           providerRequestDiagnostics: {
             bytes: Buffer.byteLength(requestBody),
             includesAllTools: requestBody.includes('ALL_TOOLS'),
+            includesExecCommand: requestBody.includes('exec_command'),
             includesAutomation: requestBody.includes('"name":"automation"'),
             includesGroup: requestBody.includes('"name":"group"'),
             includesReadShared: requestBody.includes('read_shared'),
@@ -6275,7 +9735,7 @@ function readScriptedProviderRequestSummary(
               'target',
               'totals',
             ].every((field) => requestBody.includes(field)),
-            includesSaveNewsletter: requestBody.includes('save_newsletter'),
+            includesGroupEmail: requestBody.includes('send_email'),
             includesToolSearch: tools.some((tool) => tool?.type === 'tool_search'),
           },
         }
@@ -6297,6 +9757,17 @@ function readString(value: unknown): string | null {
   return typeof value === 'string' ? value : null
 }
 
+function readPngDataUrlWidth(value: string): number | null {
+  const match = /^data:image\/png;base64,(.+)$/su.exec(value)
+  if (!match?.[1]) {
+    return null
+  }
+  const image = Buffer.from(match[1], 'base64')
+  return image.length >= 24 && image.subarray(12, 16).toString('ascii') === 'IHDR'
+    ? image.readUInt32BE(16)
+    : null
+}
+
 function readProviderToolOutputText(value: unknown): string | null {
   if (typeof value === 'string') {
     return value
@@ -6313,7 +9784,7 @@ function readProviderToolOutputText(value: unknown): string | null {
 }
 
 function writeScriptedSseResponse(input: {
-  outputItem: Record<string, unknown>
+  outputItems: readonly Record<string, unknown>[]
   response: ServerResponse
   responseId: string
 }): void {
@@ -6328,7 +9799,7 @@ function writeScriptedSseResponse(input: {
     created_at: Math.floor(Date.now() / 1000),
     id: input.responseId,
     model: SCRIPTED_MODEL,
-    output: [input.outputItem],
+    output: input.outputItems,
     status: 'completed',
     usage,
   }
@@ -6344,19 +9815,21 @@ function writeScriptedSseResponse(input: {
     },
     type: 'response.created',
   })
-  writeScriptedSseEvent(input.response, 'response.output_item.added', {
-    item: {
-      ...input.outputItem,
-      status: 'in_progress',
-    },
-    output_index: 0,
-    type: 'response.output_item.added',
-  })
-  writeScriptedSseEvent(input.response, 'response.output_item.done', {
-    item: input.outputItem,
-    output_index: 0,
-    type: 'response.output_item.done',
-  })
+  for (const [outputIndex, outputItem] of input.outputItems.entries()) {
+    writeScriptedSseEvent(input.response, 'response.output_item.added', {
+      item: {
+        ...outputItem,
+        status: 'in_progress',
+      },
+      output_index: outputIndex,
+      type: 'response.output_item.added',
+    })
+    writeScriptedSseEvent(input.response, 'response.output_item.done', {
+      item: outputItem,
+      output_index: outputIndex,
+      type: 'response.output_item.done',
+    })
+  }
   writeScriptedSseEvent(input.response, 'response.completed', {
     response: completedResponse,
     type: 'response.completed',

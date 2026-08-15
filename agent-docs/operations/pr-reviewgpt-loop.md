@@ -1,6 +1,6 @@
 # PR ReviewGPT Completion Loops
 
-Last verified: 2026-08-10
+Last verified: 2026-08-11
 
 This document owns two distinct managed-browser ReviewGPT stages for PR-lane
 completion:
@@ -64,6 +64,11 @@ can still deprioritize unrelated renderers and occluded windows. Balanced mode
 passes none of Chromium's background-timer, occluded-window, or renderer
 backgrounding opt-out flags; use the fully unthrottled fallback only for a
 browser version with a proven capture stall.
+The lanes also default to headful display mode. Headless is an explicit local
+override for removing visible UI, not a resource-saving default: it preserves
+ChatGPT's renderer and page JavaScript, and the settled one-page comparison used
+more CPU and memory than headful. A fresh profile must complete sign-in once in
+headful mode before it can run headless.
 Leaving completed waited targets open still accumulates active renderers across
 rounds even when ordinary browser history and site data have been cleared.
 
@@ -86,9 +91,12 @@ Run one preliminary specialist pass when any of these lenses apply:
 - coverage: the diff changes executable behavior or changes the tests, fixtures,
   configuration, or direct-proof scaffolding that establishes its proof.
 
-The task must use a clean worktree/PR lane. Commit and push the review candidate,
-open or update the PR, and run
-`scripts/review-gpt-pr-head-preflight.sh <pr-url-or-number>`. The PR body must
+The task must use a clean worktree/PR lane. Commit and push the review candidate
+and open or update the PR. The canonical `pnpm --silent review:gpt` command
+suppresses pnpm's pre-wrapper working-directory banner, recognizes the PR-only
+preset, resolves the current branch PR, checks the clean local head
+against its pushed head, and exports the required PR ref and phase before the
+package can create an attachment. The PR body must
 declare each lens `applicable` or `not applicable`, name the product outcome and
 direct journey evidence or exact gap when applicable, name the focused local
 proof and current exact-head CI status, and list the redacted rendered-evidence
@@ -106,10 +114,8 @@ The repo config defaults response capture to 180 minutes. The workflow commands
 inherit that timeout; use `--wait-timeout` only for an intentional per-run override.
 
 ```bash
-REVIEW_GPT_PR_URL=<pr-url-or-number> \
-REVIEW_GPT_REVIEW_PHASE=preliminary \
 REVIEW_GPT_RENDERED_EVIDENCE_PATHS=$'audit-packages/<desktop>.png\naudit-packages/<mobile>.png' \
-  pnpm review:gpt completion-specialists \
+  pnpm --silent review:gpt completion-specialists \
     --wait \
     --response-marker SPECIALIST_REVIEW_COMPLETE \
     --response-file audit-packages/pr-<number>-specialists.md \
@@ -122,6 +128,24 @@ applicable. Evidence paths must be repo-relative PNG, JPEG, or WebP files under
 Redact direct identifiers and private content before packaging them. The
 packager rejects absolute paths, traversal, symlinks, missing files, unsupported
 types, and paths outside those two roots.
+
+Set `REVIEW_GPT_PR_URL` only when intentionally targeting a PR other than the
+one associated with the current branch. The guard still requires the local
+head to equal that PR's pushed head. An explicit `REVIEW_GPT_REVIEW_PHASE` must
+match the selected PR preset or the command fails before invoking ReviewGPT.
+
+Keep the invocation's `--prompt` to the compact target/head instruction shown
+above. The completion-specialists preset delegates detailed lens criteria to
+the canonical files already inside `codebase.zip`; do not paste the PR body or
+those lens documents into the composer. The wrapper rejects an assembled
+completion-specialists prompt above 6,500 UTF-8 bytes, counting the preset plus
+every `--prompt` and `--prompt-file` value; both the canonical command and
+Frog's strict marker-bearing command must remain under that shared budget. Run
+completion-specialists as the only preset so another preset cannot escape the
+assembled-size check. If the ZIP tile is ready while Send remains disabled,
+treat that as composer validation, not a second hydration lifecycle: remove
+duplicated prompt text before retrying instead of extending browser waits or
+rotating lanes.
 
 The guarded ZIP contains:
 
@@ -252,16 +276,18 @@ the current user explicitly asks for it.
 
 ## One Round
 
-1. Verify the local checkout is the pushed PR head:
+1. The canonical command verifies that the local checkout is the pushed PR
+   head before invoking ReviewGPT. For a standalone preflight without starting
+   ReviewGPT, run:
 
    ```bash
    scripts/review-gpt-pr-head-preflight.sh <pr-url-or-number>
    ```
 
 2. Run ReviewGPT with the PR preset and the default randomized usable managed
-   browser lane. Set `REVIEW_GPT_REVIEW_PHASE=final` and pass the PR ref and
-   substantive round through `REVIEW_GPT_PR_URL` and
-   `REVIEW_GPT_ROUND_NUMBER`. Round 1 adds the full PR body, current patch,
+   browser lane. The command derives the final phase and current branch PR;
+   pass the substantive round through `REVIEW_GPT_ROUND_NUMBER`. Round 1 adds
+   the full PR body, current patch,
    exact round metadata, and guarded repository snapshot to `codebase.zip`:
 
    - `review-gpt-pr-context/pr-body.md`
@@ -278,13 +304,15 @@ the current user explicitly asks for it.
    Round 1 defaults `REVIEW_GPT_FIRST_REVIEWED_HEAD` to the current PR head and
    leaves the remediation delta empty. For round 2 or later, preserve the
    original first-reviewed head and provide both it and the immediately previous
-   reviewed head:
+   reviewed head. Set the context anchor to the current PR head when the next
+   package is expected to be a full snapshot; set it to the most recent prior
+   full-snapshot head only when the next package is expected to be a same-thread
+   delta:
 
    ```bash
-   REVIEW_GPT_PR_URL=<pr-url-or-number> \
-   REVIEW_GPT_REVIEW_PHASE=final \
+   REVIEW_GPT_BROWSER_LANE=<round-1-lane> \
    REVIEW_GPT_ROUND_NUMBER=1 \
-     pnpm review:gpt pr-review \
+     pnpm --silent review:gpt pr-review \
        --wait \
        --response-marker REVIEW_COMPLETE \
        --response-file audit-packages/pr-<number>-round-<k>.md \
@@ -292,19 +320,50 @@ the current user explicitly asks for it.
    ```
 
    ```bash
-   REVIEW_GPT_PR_URL=<pr-url-or-number> \
-   REVIEW_GPT_REVIEW_PHASE=final \
+   # Expected sensitive, undeclared, large, or explicitly requested full snapshot:
+   review_gpt_context_anchor_head="$(git rev-parse HEAD)"
+   # For an expected routine, small same-thread delta, use this instead:
+   # review_gpt_context_anchor_head=<most-recent-prior-full-snapshot-head>
+
    REVIEW_GPT_ROUND_NUMBER=<k> \
    REVIEW_GPT_FIRST_REVIEWED_HEAD=<round-1-full-sha> \
    REVIEW_GPT_PREVIOUS_REVIEWED_HEAD=<round-k-minus-1-full-sha> \
-   REVIEW_GPT_CONTEXT_ANCHOR_HEAD=<most-recent-full-snapshot-head> \
+   REVIEW_GPT_CONTEXT_ANCHOR_HEAD="$review_gpt_context_anchor_head" \
    REVIEW_GPT_THREAD_URL=<current-context-chatgpt-url> \
-     pnpm review:gpt pr-review \
+   REVIEW_GPT_BROWSER_LANE=<round-1-lane> \
+     pnpm --silent review:gpt pr-review \
        --wait \
        --response-marker REVIEW_COMPLETE \
        --response-file audit-packages/pr-<number>-round-<k>.md \
        --prompt "Review target: <pr-url-or-number>. Checked commit: $(git rev-parse --short HEAD). First-reviewed head: <round-1-full-sha>. Substantive round <k>; follow review-round.json for full-audit versus correction scope. Prior findings, dispositions, landed fixes, and mechanisms: <compact-summary>. Retrospective status: <not-required-or-current-decision>."
    ```
+
+   When the existing conversation or its original lane cannot continue, retry
+   the same substantive round as an explicitly fresh full audit. Do not pass
+   `REVIEW_GPT_THREAD_URL`, and replace any inherited stale anchor with the
+   current pushed head:
+
+   ```bash
+   REVIEW_GPT_ROUND_NUMBER=<k> \
+   REVIEW_GPT_FIRST_REVIEWED_HEAD=<round-1-full-sha> \
+   REVIEW_GPT_PREVIOUS_REVIEWED_HEAD=<round-k-minus-1-full-sha> \
+   REVIEW_GPT_CONTEXT_ANCHOR_HEAD="$(git rev-parse HEAD)" \
+   REVIEW_GPT_FULL_REVIEW_REASON="The prior conversation or lane is unavailable." \
+   REVIEW_GPT_BROWSER_LANE=<fresh-lane> \
+     pnpm --silent review:gpt pr-review \
+       --wait \
+       --response-marker REVIEW_COMPLETE \
+       --response-file audit-packages/pr-<number>-round-<k>.md \
+       --prompt "Review target: <pr-url-or-number>. Checked commit: $(git rev-parse --short HEAD). First-reviewed head: <round-1-full-sha>. Fresh full audit for substantive round <k>. Prior findings, dispositions, landed fixes, and mechanisms: <compact-summary>. Retrospective status: <not-required-or-current-decision>."
+   ```
+
+   Choose a healthy lane for round 1 and keep that value with the conversation
+   URL in the round handoff. Every later round that reuses that conversation
+   must set the same `REVIEW_GPT_BROWSER_LANE` directly on that invocation; a
+   compatibility variable or local config default cannot supply same-thread
+   identity. The wrapper fails before packaging when that direct value is
+   absent or automatic. An explicit full-review reason starts a new conversation
+   and may choose a fresh lane.
 
    The later-round summary is required process metadata. Include each prior
    finding's accepted/rejected/out-of-scope disposition, the landed correction,
@@ -361,20 +420,24 @@ the current user explicitly asks for it.
    and fails loudly if the profile needs operator cleanup.
 
    The wrapper requests the configured Pro review model on the selected lane.
-   If ChatGPT reports that the selected lane has reached its model limit, rerun
-   the same round on a different lane with `REVIEW_GPT_BROWSER_LANE` instead of
+   If ChatGPT reports that the selected lane has reached its model limit, do not
+   move an existing conversation to another workspace. Reuse its original lane,
+   or use the fresh-full recovery command above with a different lane instead of
    downgrading the model.
 
-   To pin a specific lane while recovering or debugging one profile, set
-   `REVIEW_GPT_BROWSER_LANE=eragon|phlebas|hercules|mountain` on that command.
-   `aragon` is accepted as an alias for `eragon`. Leave it unset for normal
-   PR-review rounds.
+   To pin a specific lane, preserve a conversation's workspace, or debug one
+   profile, set `REVIEW_GPT_BROWSER_LANE=eragon|phlebas|hercules|mountain` on
+   that command.
+   `aragon` is accepted as an alias for `eragon`. A first round may leave it
+   unset to select a usable lane automatically, but its handoff must record the
+   selected lane before a later same-thread round. Never use `auto` or `random`
+   with `REVIEW_GPT_THREAD_URL`.
 
-   After a concrete pre-completion staging, attachment, or profile failure, do
-   not leave the immediate retry on the random selector: pin a different lane
-   already known to be healthy and retry the same round number against the same
-   pushed head. This prevents the random selector from choosing the failed
-   profile again; return to the normal unpinned path on later independent runs.
+   After a concrete pre-completion staging, attachment, or profile failure on a
+   fresh-conversation run, do not leave the immediate retry on the random
+   selector: pin a different healthy lane and retry the same round number against
+   the same pushed head. A same-thread retry must instead pin its original lane;
+   if that lane cannot continue, use the fresh-full recovery command.
 
    Use `--wait` for normal review runs so ReviewGPT closes the tab it created
    after capture. Do not resend an accepted prompt during recovery; continue
@@ -427,8 +490,9 @@ the current user explicitly asks for it.
    too-fast-response retries never advance the round counter. If evidence shows
    a different or downgraded model, incomplete response, missing snapshot, or
    shallow/templated output, discard the round regardless of duration, correct
-   the profile or invocation, and retry. If only one lane is healthy, pin it
-   with `REVIEW_GPT_BROWSER_LANE` and note the temporary override in handoff.
+   the profile or invocation, and retry. A different-lane retry must use a fresh
+   conversation and full snapshot. If only one lane is healthy, pin it with
+   `REVIEW_GPT_BROWSER_LANE` and note the temporary override in handoff.
 
 4. Triage every finding locally before fixing:
    - **Accepted bug/edge case**: confirm the issue through a
@@ -565,16 +629,31 @@ contract, fix a review finding, or include feature work or unrelated
 behavior/test/config/doc edits. Conflict count is orientation only and does not
 decide eligibility.
 
-When an authorized merge is blocked by strict up-to-date checks, use the merge
-queue when available or perform one normal base update at the merge boundary.
-Record any conflict paths and preservation reasons, run focused verification
-for affected surfaces, and let required PR CI gate the new head. Merge promptly
-when it clears instead of starting a repeated pre-merge refresh loop. Do not
-rerun ReviewGPT solely for that update. If any resolution
-authors behavior not already represented by the reviewed PR or current base,
-materially changes the implemented contract, includes another branch-authored
-change, or cannot be confidently classified as mechanical, use the ordinary
-next-substantive-round rule.
+At an authorized merge boundary, wait only for the routed review gates and
+required GitHub checks. Do not wait for optional or non-required status checks
+after those gates are green unless a failing check is relevant to the changed
+surface or the user explicitly requested it.
+
+When strict up-to-date checks block the merge, prefer the merge queue. If no
+queue is available, the unchanged reviewed patch has a one-update budget for
+this completion attempt: perform one normal base update, record any conflict
+paths and preservation reasons, run focused verification for affected surfaces,
+and let required PR CI gate that head. The budget remains consumed until merge
+or handoff; a later base advance, CI retry, or agent turn does not reset it. Do
+not rerun ReviewGPT solely for that update. If any resolution authors behavior
+not already represented by the reviewed PR or current base, materially changes
+the implemented contract, includes another branch-authored change, or cannot be
+confidently classified as mechanical, use the ordinary next-substantive-round
+rule instead of the base-only budget.
+
+If the base advances again after required CI is green on that one updated head,
+do not update the branch or restart CI. Fetch the current base and rerun
+`git merge-tree --write-tree`. When it is clean, use only an already-authorized
+non-refresh merge path: the merge queue or an explicit stale-head/admin bypass.
+Such a bypass may relax only strict-current status; it never bypasses required
+CI or routed review gates. If the merge-tree conflicts, or no non-refresh path
+is both available and authorized, report `moving-base race`, leave the PR and
+worktree active, and stop. Do not poll for a quiet base.
 
 ## Stop Condition
 

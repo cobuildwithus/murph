@@ -397,6 +397,7 @@ describe("hosted provider effects", () => {
       fetchImplementation: fetchMock as typeof fetch,
     })).resolves.toEqual({
       providerMessageEffects: [{
+        carriesIntentMedia: true,
         message: "hello\n\nDead bug setup",
         providerMessageId: "recovered-message",
       }],
@@ -640,7 +641,13 @@ describe("hosted provider effects", () => {
 
     expect(onAppCardFallbackError).toHaveBeenCalledOnce();
     expect(onAppCardFallbackError).toHaveBeenCalledWith({
-      error: expect.any(SyntaxError),
+      error: expect.objectContaining({
+        code: "LINQ_API_REQUEST_FAILED",
+        context: expect.objectContaining({
+          failureStage: "transport",
+          transportErrorName: "SyntaxError",
+        }),
+      }),
       reason: "capability_check_failed",
     });
   });
@@ -867,6 +874,7 @@ describe("hosted provider effects", () => {
       fetchImplementation,
     })).resolves.toEqual({
       providerMessageEffects: [{
+        carriesIntentMedia: true,
         message: "hello\n\nDead bug setup",
         providerMessageId: "recovered-message",
       }],

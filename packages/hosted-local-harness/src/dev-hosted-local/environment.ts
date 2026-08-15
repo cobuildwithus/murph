@@ -43,7 +43,7 @@ const HOSTED_LOCAL_KMS_API_ROOT = "local://murph-hosted-kms";
 const HOSTED_LOCAL_WEB_WRAP_KEY_NAME =
   "projects/murph-local/locations/global/keyRings/hosted-local/cryptoKeys/web-wrap";
 const HOSTED_LOCAL_AUTHORITY_SIGN_KEY_VERSION_PREFIX =
-  "projects/murph-local/locations/global/keyRings/hosted-local/cryptoKeys/authority-sign/cryptoKeyVersions/local-";
+  "projects/murph-local/locations/global/keyRings/hosted-local/cryptoKeys/authority-sign/cryptoKeyVersions/";
 const HOSTED_LOCAL_MAILBOX_FINGERPRINT_KEY =
   "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc";
 const HOSTED_LOCAL_CONTACT_PRIVACY_KEY_VERSION = "v1";
@@ -508,7 +508,8 @@ function buildHostedLocalAuthoritySignKeyVersion(publicKeyPem: string): string {
     .update(normalizePublicKeyPem(publicKeyPem))
     .digest("hex")
     .slice(0, 16);
-  return `${HOSTED_LOCAL_AUTHORITY_SIGN_KEY_VERSION_PREFIX}${publicKeyFingerprint}`;
+  const keyVersion = BigInt(`0x${publicKeyFingerprint}`) + 1n;
+  return `${HOSTED_LOCAL_AUTHORITY_SIGN_KEY_VERSION_PREFIX}${keyVersion}`;
 }
 
 function buildHostedAuthorityVerifyKeyringJson(input: {
@@ -1071,6 +1072,7 @@ export function buildWranglerLocalDevConfig(
     },
     instance_type: "standard-1",
     max_instances: input.maxInstances,
+    ssh: { enabled: false },
   });
 
   return {
@@ -1080,7 +1082,7 @@ export function buildWranglerLocalDevConfig(
       path.join(cloudflareAppDir, "src", resolveWranglerLocalDevWorkerEntrypoint(source)),
     ),
     compatibility_date: "2026-03-27",
-    compatibility_flags: ["nodejs_compat"],
+    compatibility_flags: ["nodejs_compat", "containers_pid_namespace"],
     containers: [
       buildRunnerContainerConfig({ className: "RunnerContainer", maxInstances: 50 }),
       buildRunnerContainerConfig({ className: "DeploySmokeRunnerContainer", maxInstances: 1 }),
@@ -1094,6 +1096,10 @@ export function buildWranglerLocalDevConfig(
         {
           name: "DATABASE_HEALTH_MONITOR",
           class_name: "DatabaseHealthDurableObject",
+        },
+        {
+          name: "DEVICE_WEBHOOK_QUEUE_MONITOR",
+          class_name: "DeviceWebhookQueueHealthDurableObject",
         },
         {
           name: "RUNNER_CONTAINER",
@@ -1122,9 +1128,36 @@ export function buildWranglerLocalDevConfig(
         tag: "v4",
         new_sqlite_classes: ["DatabaseHealthDurableObject"],
       },
+      {
+        tag: "v5",
+        new_sqlite_classes: ["DeviceWebhookQueueHealthDurableObject"],
+      },
     ],
     triggers: {
       crons: ["*/5 * * * *"],
+    },
+    queues: {
+      producers: [
+        {
+          binding: "DEVICE_WEBHOOK_QUEUE",
+          queue: `${workerName}-device-webhooks`,
+        },
+        {
+          binding: "DEVICE_WEBHOOK_DLQ",
+          queue: `${workerName}-device-webhooks-dlq`,
+        },
+      ],
+      consumers: [
+        {
+          dead_letter_queue: `${workerName}-device-webhooks-dlq`,
+          max_batch_size: 100,
+          max_batch_timeout: 5,
+          max_concurrency: 1,
+          max_retries: 10,
+          queue: `${workerName}-device-webhooks`,
+          retry_delay: 30,
+        },
+      ],
     },
     r2_buckets: [
       {

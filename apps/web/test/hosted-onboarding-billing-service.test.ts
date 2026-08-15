@@ -32,7 +32,6 @@ const mocks = vi.hoisted(() => {
   return {
     readActiveHostedFamilySponsorship: vi.fn(),
     readHostedMemberFamilyBillingClaim: vi.fn(),
-    retireHostedLegacyPulseTrialToStarter: vi.fn(),
     requireHostedInviteForBillingCheckout: vi.fn(),
     requireHostedOnboardingPublicBaseUrl: vi.fn(),
     requireHostedStripeCheckoutConfig: vi.fn(),
@@ -62,11 +61,6 @@ vi.mock("@/src/lib/hosted-onboarding/member-access", async () => {
     readActiveHostedFamilySponsorship: mocks.readActiveHostedFamilySponsorship,
   };
 });
-
-vi.mock("@/src/lib/hosted-onboarding/pulse-trial-subscription-cleanup", () => ({
-  retireHostedLegacyPulseTrialToStarter:
-    mocks.retireHostedLegacyPulseTrialToStarter,
-}));
 
 vi.mock("@/src/lib/hosted-onboarding/invite-service", async () => {
   const actual = await vi.importActual<
@@ -110,7 +104,10 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
 }));
 
 import { createHostedBillingCheckout } from "@/src/lib/hosted-onboarding/billing-service";
-import { createHostedStripeCustomerLookupKey } from "@/src/lib/hosted-onboarding/contact-privacy";
+import {
+  createHostedStripeCustomerLookupKey,
+  createHostedStripeSubscriptionLookupKey,
+} from "@/src/lib/hosted-onboarding/contact-privacy";
 import { buildHostedMemberBillingPrivateColumns } from "@/src/lib/hosted-onboarding/member-private-codecs";
 
 afterEach(() => {
@@ -145,7 +142,6 @@ describe("createHostedBillingCheckout", () => {
     vi.spyOn(console, "info").mockImplementation(() => {});
     mocks.readActiveHostedFamilySponsorship.mockResolvedValue(false);
     mocks.readHostedMemberFamilyBillingClaim.mockResolvedValue(null);
-    mocks.retireHostedLegacyPulseTrialToStarter.mockResolvedValue(true);
     mocks.requireHostedOnboardingPublicBaseUrl.mockReturnValue("https://join.example.test");
     mocks.requireHostedStripeCheckoutConfig.mockReturnValue({
       billingPlanCode: "launch_monthly",
@@ -492,7 +488,7 @@ describe("createHostedBillingCheckout", () => {
     ["Max", "launch_max_monthly", "price_max_monthly_123"],
     ["Core", "launch_group_monthly", "price_group_monthly_123"],
   ] as const)(
-    "converts the legacy Pulse source before %s checkout",
+    "creates %s checkout without retrieving or canceling a legacy Pulse subscription",
     async (_label, billingPlanCode, destinationPriceId) => {
       const prices = {
         launch_edge_monthly: "price_edge_monthly_123",
@@ -534,27 +530,70 @@ describe("createHostedBillingCheckout", () => {
         url: "https://billing.example.test/session_123",
       });
 
-      expect(mocks.retireHostedLegacyPulseTrialToStarter).toHaveBeenCalledWith({
-        memberId: "member_123",
-        priceId: "price_monthly_123",
-        prisma: expect.any(Object),
-        stripe: mocks.stripe,
+      expect(mocks.requireHostedStripeCheckoutConfig).toHaveBeenCalledOnce();
+      expect(mocks.requireHostedStripeCheckoutConfig).toHaveBeenCalledWith({
+        billingPlanCode,
       });
+      expect(mocks.stripe.subscriptions.retrieve).not.toHaveBeenCalled();
+      expect(mocks.stripe.subscriptions.cancel).not.toHaveBeenCalled();
       expect(mocks.stripe.checkout.sessions.create).toHaveBeenCalledWith(
         expect.objectContaining({
           line_items: [{ price: destinationPriceId, quantity: 1 }],
         }),
         expect.any(Object),
       );
-      expect(
-        mocks.retireHostedLegacyPulseTrialToStarter.mock.invocationCallOrder[0]
-          ?? Number.POSITIVE_INFINITY,
-      ).toBeLessThan(
-        mocks.stripe.checkout.sessions.create.mock.invocationCallOrder[0]
-          ?? Number.NEGATIVE_INFINITY,
-      );
     },
   );
+
+  it("fails closed on a persisted legacy subscription instead of starting a second checkout", async () => {
+    mocks.requireHostedInviteForBillingCheckout.mockResolvedValue(makeInvite({
+      member: {
+        billingRef: {
+          currentBillingPhase: "trial",
+          currentCheckoutOffer: "pulse_trial",
+          stripeSubscriptionLookupKey: "subscription_lookup_legacy_trial",
+        },
+        billingStatus: HostedBillingStatus.active,
+        id: "member_123",
+        identity: { phoneLookupKey: "hbidx:phone:v1:test" },
+        routing: null,
+        suspendedAt: null,
+      },
+    }));
+    const stripeCustomerId = "cus_legacy_trial";
+    const stripeSubscriptionId = "sub_legacy_trial";
+    const prisma = makePrisma({
+      billingRef: {
+        currentBillingPhase: "trial",
+        currentCheckoutOffer: "pulse_trial",
+        memberId: "member_123",
+        ...await buildHostedMemberBillingPrivateColumns({
+          memberId: "member_123",
+          stripeCustomerId,
+          stripeSubscriptionId,
+        }),
+        stripeCustomerLookupKey:
+          createHostedStripeCustomerLookupKey(stripeCustomerId),
+        stripeSubscriptionLookupKey:
+          createHostedStripeSubscriptionLookupKey(stripeSubscriptionId),
+      },
+    });
+
+    await expect(createHostedBillingCheckout({
+      inviteCode: "invite-code",
+      member: makeAuthenticatedMember(),
+      now: new Date("2026-03-27T12:00:00.000Z"),
+      prisma: prisma as never,
+    })).rejects.toMatchObject({
+      code: "HOSTED_BILLING_SUBSCRIPTION_ALREADY_EXISTS",
+      httpStatus: 409,
+    });
+
+    expect(mocks.requireHostedStripeCheckoutConfig).toHaveBeenCalledOnce();
+    expect(mocks.stripe.subscriptions.retrieve).not.toHaveBeenCalled();
+    expect(mocks.stripe.subscriptions.cancel).not.toHaveBeenCalled();
+    expect(mocks.stripe.checkout.sessions.create).not.toHaveBeenCalled();
+  });
 
   it("rechecks Core eligibility after taking the billing lock", async () => {
     mocks.requireHostedStripeCheckoutConfig.mockReturnValue({

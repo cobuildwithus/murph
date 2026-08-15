@@ -229,6 +229,20 @@ async function executeHostedSystemWake(input: {
         conversationMetrics: null,
         mailboxLane: "member-preferences-updated",
       });
+    case "member.action.requested": {
+      const { executeHostedMemberActionWake } = await import(
+        "./events/member-action.ts"
+      );
+      return executeHostedMemberActionWake({
+        vaultRoot: input.vaultRoot,
+        wake: input.wake,
+      });
+    }
+    case "member.action.completed":
+      return createNoopMailboxEffect({
+        conversationMetrics: null,
+        mailboxLane: "member-action",
+      });
     case "assistant.notification.requested": {
       const { executeHostedAssistantNotificationWake } = await import(
         "./events/assistant-notification.ts"
@@ -303,11 +317,13 @@ async function executeHostedSystemWake(input: {
       const deviceSyncMetrics = await runHostedDeviceSyncWakeLane({
         deviceSyncPort: input.runtime.platform.deviceSyncPort ?? null,
         platformEnv: input.runtime.platformEnv,
+        retainFollowUpWakeUntilCheckpoint: true,
         runtimeLogPlatform: input.runtime.platform,
         resolvedConfig: input.runtime.resolvedConfig,
         ...(input.shouldYieldDeviceSync
           ? { shouldYieldDeviceSync: input.shouldYieldDeviceSync }
           : {}),
+        ...(input.signal ? { signal: input.signal } : {}),
         timeoutMs: input.runtime.commitTimeoutMs,
         vaultRoot: input.vaultRoot,
         wake: input.wake,
@@ -359,13 +375,22 @@ async function executeHostedSystemWake(input: {
     }
     case "runtime.manual-requested":
     case "runtime.pending-effects-reconcile-requested":
-    case "runtime.maintenance-requested":
     case "runtime.browser-vault-refresh-requested":
     case "runtime.device-sync-recovery-requested":
     case "runtime.mailbox-lag-observed":
       return createNoopMailboxEffect({
         conversationMetrics: null,
         mailboxLane: "runtime-control",
+      });
+    case "runtime.maintenance-requested":
+      return createNoopMailboxEffect({
+        conversationMetrics: null,
+        mailboxLane: "runtime-control",
+        postCheckpointRecord: input.wake.eventId.startsWith(
+            "runtime-control:group-share-projection:",
+          )
+          ? { kind: "vault-share.projection" }
+          : null,
       });
     case "runtime.codex-auth-requested": {
       const { executeHostedCodexAuthWake } = await import(
@@ -398,18 +423,20 @@ async function executeHostedSystemWake(input: {
       throw new TypeError(
         "Retired hosted vault-share revoke wakes must never reach system wake execution.",
       );
-    case "group-newsletter.email-needed":
-      // Group newsletter email-needed wakes stage a private system note at
-      // mailbox import and never enter the system wake execution path.
-      throw new TypeError(
-        'Hosted group newsletter email-needed wakes are staged at mailbox import and must never reach system wake execution.',
-      );
     case "meal-photo.captured":
       // Meal photos become canonical meal records at mailbox import so their
       // staged object can be cleaned up only after the workspace checkpoint.
       throw new TypeError(
         "Hosted meal-photo wakes are landed at mailbox import and must never reach system wake execution.",
       );
+    case "health.daily-metric.reported":
+      // The canonical observation landed at mailbox import. After that write
+      // checkpoints, refresh any already-granted group projections.
+      return createNoopMailboxEffect({
+        conversationMetrics: null,
+        mailboxLane: "runtime-control",
+        postCheckpointRecord: { kind: "vault-share.projection" },
+      });
   }
 
   const exhaustiveWake: never = input.wake;

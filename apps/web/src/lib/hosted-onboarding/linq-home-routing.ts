@@ -27,6 +27,7 @@ import {
   claimHostedLinqProactiveConversationCapacityTx,
   type HostedLinqAssignableHomeLine,
   listHostedLinqAssignableHomeLines,
+  readHostedLinqIncomingLineState,
   readHostedLinqRecentMessageEffectCountsTx,
   listHostedLinqHealthyProactiveLines,
 } from "./linq-line-store";
@@ -308,11 +309,13 @@ type HostedLinqHomeLineRouteBindingDecision =
     };
 
 export async function resolveHostedMemberLinqHomeLineRouteBindingTx(input: {
+  acceptManagedInboundLine?: boolean;
   incomingChatId: string;
   incomingDirectAttested: boolean;
   incomingRecipientPhone: string | null;
   memberAuthority?: HostedLinqHomeLineRouteBindingAuthority | null;
   memberId: string;
+  preparedRoutingState?: HostedMemberRoutingStateSnapshot | null;
   prisma: Prisma.TransactionClient;
 }): Promise<HostedLinqHomeLineRouteBindingResult> {
   // One member owns one home route. Serializing only that member keeps
@@ -324,6 +327,37 @@ export async function resolveHostedMemberLinqHomeLineRouteBindingTx(input: {
   const decision = await resolveHostedMemberLinqHomeLineRouteBindingDecision(input);
   if (decision.kind === "done") {
     return decision.result;
+  }
+
+  if (
+    input.acceptManagedInboundLine === true
+    && input.incomingDirectAttested
+    && input.memberAuthority?.kind === "member-identity"
+  ) {
+    const recipientPhone = normalizePhoneNumber(decision.preferredRecipientPhone);
+    const incomingLineState = await readHostedLinqIncomingLineState({
+      phoneNumberLookupKeys:
+        createHostedPhoneLookupKeyReadCandidates(recipientPhone),
+      prisma: input.prisma,
+    });
+    if (
+      recipientPhone
+      && (
+        incomingLineState.kind === "assignable"
+        || incomingLineState.kind === "at_risk"
+        || incomingLineState.kind === "degraded_unavailable"
+      )
+    ) {
+      // A provider-attested direct message from an active, exact member
+      // identity establishes the relationship itself. The contacted managed
+      // line only needs to be safe for a reply; proactive assignment health
+      // and capacity must not discard the member's already-arrived message.
+      return {
+        homeLineAssignedAt: new Date(),
+        kind: "bind",
+        recipientPhone,
+      };
+    }
   }
 
   const reservationResult = await reserveHostedLinqHomeLineFromAssignablePoolTx({
@@ -353,12 +387,15 @@ async function resolveHostedMemberLinqHomeLineRouteBindingDecision(input: {
   incomingRecipientPhone: string | null;
   memberAuthority?: HostedLinqHomeLineRouteBindingAuthority | null;
   memberId: string;
+  preparedRoutingState?: HostedMemberRoutingStateSnapshot | null;
   prisma: Prisma.TransactionClient;
 }): Promise<HostedLinqHomeLineRouteBindingDecision> {
-  const routing = await readHostedMemberRoutingState({
-    memberId: input.memberId,
-    prisma: input.prisma,
-  });
+  const routing = input.preparedRoutingState === undefined
+    ? await readHostedMemberRoutingState({
+        memberId: input.memberId,
+        prisma: input.prisma,
+      })
+    : input.preparedRoutingState;
   const authority = readHostedLinqHomeLineAuthority(routing);
 
   if (!hostedLinqRouteBindingAuthorityMatchesCurrentRoute({
@@ -438,6 +475,7 @@ async function resolveHostedMemberLinqHomeLineRouteBindingDecision(input: {
 }
 
 export async function resolveHostedMemberActivationLinqRoute(input: {
+  allowNoAssignableLine?: boolean;
   member: HostedMemberSnapshot;
   prisma: Prisma.TransactionClient;
 }): Promise<HostedMemberActivationLinqRouteResolution> {
@@ -446,12 +484,16 @@ export async function resolveHostedMemberActivationLinqRoute(input: {
     prisma: input.prisma,
   });
   return resolveHostedMemberActivationLinqRouteAttempt({
+    ...(input.allowNoAssignableLine
+      ? { allowNoAssignableLine: true }
+      : {}),
     member: input.member,
     prisma: input.prisma,
   });
 }
 
 async function resolveHostedMemberActivationLinqRouteAttempt(input: {
+  allowNoAssignableLine?: boolean;
   member: HostedMemberSnapshot;
   prisma: Prisma.TransactionClient;
 }): Promise<HostedMemberActivationLinqRouteResolution> {
@@ -532,6 +574,11 @@ async function resolveHostedMemberActivationLinqRouteAttempt(input: {
   const targetRecipientPhone = normalizePhoneNumber(target.recipientPhone);
 
   if (!targetRecipientPhone) {
+    if (input.allowNoAssignableLine) {
+      return {
+        welcomeRoute: null,
+      };
+    }
     throw hostedOnboardingError({
       code: "LINQ_CONVERSATION_PHONE_REQUIRED",
       message: "Configure an enabled hosted_linq_line row before activating members without an existing Linq conversation thread.",
@@ -545,6 +592,20 @@ async function resolveHostedMemberActivationLinqRouteAttempt(input: {
       message: "A verified hosted member phone number is required before a Linq home line can be assigned.",
       httpStatus: 500,
     });
+  }
+
+  // Companion activation may succeed without proactive capacity. When this
+  // member did not already own routing authority, leave the route empty so
+  // their first provider-attested inbound can bind the managed line they
+  // actually contacted instead of redirecting from an undisclosed fallback.
+  if (
+    input.allowNoAssignableLine
+    && authority.kind === "none"
+    && !target.proactiveConversationReserved
+  ) {
+    return {
+      welcomeRoute: null,
+    };
   }
 
   await upsertHostedMemberHomeLinqRecipientPhoneTx({

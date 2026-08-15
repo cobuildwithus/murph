@@ -69,6 +69,9 @@ import {
   type HostedRuntimeEffectsPort,
   type HostedWorkspaceRunnerRuntimeStatusCheckpointInput,
 } from "../src/hosted-runtime.ts";
+import type {
+  HostedRuntimeLinqRecentInboundEngagementRequest,
+} from "../src/hosted-runtime/platform.ts";
 import {
   HOSTED_CANONICAL_WRITE_RECEIPT_LOG_MAX_ENTRIES,
 } from "../src/hosted-runtime/canonical-write-receipt-log.ts";
@@ -4720,7 +4723,14 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const events: string[] = [];
     let admissionCount = 0;
-    const liveSteerInputs: unknown[] = [];
+    const liveSteerInputs: Array<{
+      prompt: string;
+      relativeDateReferenceWindow: {
+        earliestAt: string;
+        latestAt: string;
+      } | null;
+      userMessageContent?: unknown;
+    }> = [];
     const logRequests: HostedRuntimeLogRequest[] = [];
     const workspacePort = createWorkspacePort({
       checkpointRequests,
@@ -4845,11 +4855,13 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
             turnId: "turn-runner-active-turn",
           });
           items.push(createMailboxItem({
+            createdAt: "2026-04-26T00:00:02.000Z",
             id: "mailbox_item_runner_late",
             laneSeq: "2",
             occurredAt: "2026-04-26T00:00:02.000Z",
           }));
           items.push(createMailboxItem({
+            createdAt: "2026-04-26T00:00:03.000Z",
             id: "mailbox_item_runner_late_second",
             laneSeq: "3",
             occurredAt: "2026-04-26T00:00:03.000Z",
@@ -4890,7 +4902,16 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       assert.deepEqual(importedSeqs, ["1", "2", "3"]);
       assert.equal(admissionCount, 1);
       assert.equal(liveSteerInputs.length, 1);
-      assert.deepEqual(liveSteerInputs[0], {
+      const liveSteerInput = liveSteerInputs[0];
+      assert.ok(liveSteerInput);
+      assert.deepEqual(liveSteerInput.relativeDateReferenceWindow, {
+        earliestAt: "2026-04-26T00:00:02.000Z",
+        latestAt: "2026-04-26T00:00:03.000Z",
+      });
+      assert.deepEqual({
+        prompt: liveSteerInput.prompt,
+        userMessageContent: liveSteerInput.userMessageContent,
+      }, {
         prompt: "late same-conversation input 2\n\nlate same-conversation input 3",
         userMessageContent: [
           {
@@ -9137,12 +9158,26 @@ function createPlatform(input: {
       },
     },
     effectsPort: {
-      async assertLinqRecentInboundEngagement(request: {
-        authorityCheckOnly: boolean;
-      }) {
-        return request.authorityCheckOnly === true
-          ? {}
-          : { providerDispatchClaimed: true };
+      async assertLinqRecentInboundEngagement(
+        request: HostedRuntimeLinqRecentInboundEngagementRequest,
+      ) {
+        const target = request.target ?? "linq-thread";
+        return {
+          ...(request.authorityCheckOnly === true
+            ? {}
+            : { providerDispatchClaimed: true }),
+          resolvedRoute: {
+            conversationThreadId: null,
+            directRecipientPhoneNumber:
+              request.directRecipientPhoneNumber ?? null,
+            fromPhoneNumber: request.fromPhoneNumber ?? null,
+            target,
+            targetKind: request.targetKind === "participant"
+              ? "participant"
+              : "thread",
+            threadIsDirect: true,
+          },
+        } as const;
       },
       async readRawEmailMessage() {
         return null;

@@ -3,6 +3,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
+import type { InboxServices } from '@murphai/inbox-services'
 import {
   defaultAssistantVoiceOptionId,
   preferencesDocumentRelativePath,
@@ -40,6 +41,7 @@ const planningMocks = vi.hoisted(() => ({
   resolveCodexAssistantTargetCapabilities: vi.fn(() => ({
     supportsNativeResume: false,
   })),
+  sendAssistantMessage: vi.fn(),
 }))
 
 vi.mock('../src/assistant/cli-surface-bootstrap.js', () => ({
@@ -62,6 +64,10 @@ vi.mock('../src/assistant/cli-surface-bootstrap.js', () => ({
 vi.mock('../src/assistant/codex-runtime.js', () => ({
   resolveCodexAssistantTargetCapabilities:
     planningMocks.resolveCodexAssistantTargetCapabilities,
+}))
+
+vi.mock('../src/assistant/service.js', () => ({
+  sendAssistantMessage: planningMocks.sendAssistantMessage,
 }))
 
 vi.mock('../src/assistant/context-snapshot.js', () => ({
@@ -90,6 +96,19 @@ import {
   type AssistantCodexTurnResolvedExecutionProfile,
 } from '../src/assistant/codex-turn/planning.js'
 import {
+  assistantAutomationInputSummaryFromCandidate,
+} from '../src/assistant/automation/input-summary.js'
+import {
+  createAssistantAutoReplyGroupContext,
+  processAssistantAutoReplyGroup,
+} from '../src/assistant/automation/reply.js'
+import {
+  renderAssistantHostedImageCompletionSystemText,
+} from '../src/assistant/hosted-image-completion.js'
+import type {
+  AssistantInputCandidate,
+} from '../src/assistant/input-source.js'
+import {
   buildAssistantCodexContractFingerprint,
 } from '../src/assistant/codex-contract-fingerprint.js'
 import {
@@ -115,11 +134,15 @@ import {
 } from '../src/assistant-skill-assets.js'
 import { appendAssistantTranscriptEntries } from '../src/assistant/store.js'
 import {
+  buildAssistantGeneratedImageDeliveryTranscriptMarkerText,
+} from '../src/assistant/response-media.js'
+import {
   pruneAssistantTranscriptRetention,
   replaceTranscriptEntries,
 } from '../src/assistant/store/persistence.js'
 import { resolveAssistantStatePaths } from '../src/assistant/store/paths.js'
 import {
+  applyAssistantSessionCodexResumeStateAction,
   ASSISTANT_NO_REPLY_TRANSCRIPT_HISTORY_TEXT,
   ASSISTANT_NO_REPLY_TRANSCRIPT_MARKER_PREFIX,
 } from '../src/assistant/turn-finalizer.js'
@@ -127,6 +150,9 @@ import type {
   AssistantMessageInput,
   AssistantTurnSharedPlan,
 } from '../src/assistant/service-contracts.js'
+import {
+  ASSISTANT_BOUNDED_CONVERSATION_HISTORY_INCOMPLETE_TEXT,
+} from '../src/assistant/shared.js'
 import type { AssistantHostedToolContext } from '../src/assistant/hosted-tool-context.js'
 import type { AssistantSession } from '@murphai/operator-config/assistant-cli-contracts'
 import type { CodexThreadIdentity } from '../src/assistant/codex-thread-route.js'
@@ -143,6 +169,7 @@ afterEach(() => {
   planningMocks.readAssistantGroupRoomModelPrompt.mockReset()
   planningMocks.readAssistantGroupRoomModelPrompt.mockResolvedValue(null)
   planningMocks.resolveCodexAssistantTargetCapabilities.mockReset()
+  planningMocks.sendAssistantMessage.mockReset()
 })
 
 describe('assistant Codex turn planning', () => {
@@ -351,6 +378,42 @@ describe('assistant Codex turn planning', () => {
     const removedRouteEnvProperty = ['turnCli', 'Env'].join('')
     expect(Object.prototype.hasOwnProperty.call(plan, removedRouteEnvProperty)).toBe(false)
     expect(plan).not.toHaveProperty(removedRouteEnvProperty)
+  })
+
+  it('reuses one UTC-only time authority when the member timezone is unknown', async () => {
+    const promptTimeContext = {
+      canonicalTimeZoneAvailable: false,
+      currentLocalDate: '2026-08-11',
+      currentTimeZone: 'UTC',
+    } as const
+    const session = createSession()
+    const executionPlan = await buildCodexTurnExecutionPlan({
+      input: {
+        ...createMessageInput(),
+        promptTimeContext,
+      },
+      plan: createSharedPlan(),
+      resolvedSession: session,
+      route: createRoute(),
+      turnCreatedAt: '2026-08-11T00:00:00.000Z',
+      turnId: 'turn-utc-only-time-authority',
+    })
+    const attemptPlan = await buildCodexTurnAttemptPlan({
+      attemptCount: 1,
+      executionPlan,
+      session,
+    })
+
+    expect(executionPlan.promptTimeContext).toBe(promptTimeContext)
+    expect(attemptPlan.routePlan.systemPrompt).toContain(
+      "The member's canonical timezone is unknown for this turn.",
+    )
+    expect(attemptPlan.routePlan.systemPrompt).toContain(
+      'The current UTC date is August 11, 2026; the member-local date is unknown for this turn.',
+    )
+    expect(attemptPlan.routePlan.systemPrompt).not.toContain(
+      "The user's canonical timezone for this vault is UTC.",
+    )
   })
 
   it('projects the fail-closed Android app gate into direct assistant guidance', async () => {
@@ -1051,7 +1114,11 @@ describe('assistant Codex turn planning', () => {
       resolveAssistantVoiceOptionElevenLabsVoiceId('drill-sergeant'),
     )
     expect(scheduledNewsletterPlan.dynamicTools.map((tool) => tool.name)).toEqual(
-      ordinaryToolNames.filter((name) => name !== 'attach_response_card'),
+      ordinaryToolNames.filter((name) =>
+        name !== 'attach_response_card' &&
+        name !== 'attach_exercise_routine_card' &&
+        name !== 'attach_telegram_rich_content'
+      ),
     )
 
     const onboardingGoalCheckinPlan = await resolveAssistantRouteTurnPlan({
@@ -2077,6 +2144,271 @@ describe('assistant Codex turn planning', () => {
 
   })
 
+  it('joins a trusted image completion into the foreground provider thread before a later follow-up', async () => {
+    planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue(
+      'bootstrap contract',
+    )
+    planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
+    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
+      supportsNativeResume: true,
+    })
+
+    const vault = await mkdtemp(path.join(os.tmpdir(), 'assistant-avatar-continuity-'))
+    try {
+      const route = createRoute()
+      const providerThreadId = 'thread-generated-avatar-continuity'
+      const groupThreadId = 'linq-generated-avatar-group'
+      const originAssistantInputId = `ain_${'a'.repeat(32)}`
+      const completionAssistantInputId = `ain_${'b'.repeat(32)}`
+      const laterAssistantInputId = `ain_${'c'.repeat(32)}`
+      const savedImageRef =
+        'raw/captures/2026/08/generated-avatar/generated-avatar.webp'
+      const media = {
+        alt: 'Generated group avatar',
+        contentType: 'image/webp',
+        filename: 'generated-avatar.webp',
+        kind: 'vault_image',
+        ref: savedImageRef,
+        sha256: 'd'.repeat(64),
+        sizeBytes: 12,
+        source: 'gpt-image-2',
+      } as const
+      const profile: AssistantCodexTurnResolvedExecutionProfile = {
+        promptProfile: 'conversation',
+        threadScope: 'session-thread',
+        toolProfile: 'provider-turn',
+      }
+      const promptTimeContext = {
+        currentLocalDate: '2026-08-08',
+        currentTimeZone: 'America/New_York',
+      }
+      const sharedPlan = createSharedPlan({}, {
+        actorId: null,
+        channel: 'linq',
+        effectiveThreadIsDirect: false,
+        identityId: 'identity-generated-avatar-group',
+        threadId: groupThreadId,
+        threadIsDirect: false,
+      })
+      const hostedToolContext: AssistantHostedToolContext = {
+        ...createHostedToolContext(),
+        groupTool: { request: vi.fn() },
+        personalizationTool: { request: vi.fn() },
+      }
+      const executionContext = {
+        hosted: {
+          dynamicContextPrompts: [],
+          groupTool: hostedToolContext.groupTool,
+          memberId: 'member-generated-avatar-continuity',
+          personalizationTool: hostedToolContext.personalizationTool,
+          productFeedbackCandidateSink: {
+            acceptProductFeedbackCandidate: vi.fn(),
+          },
+          providerFetch: null,
+          userEnvKeys: [],
+        },
+      }
+      const foregroundInput: AssistantMessageInput = {
+        ...createMessageInput(),
+        acceptedTurnInput: {
+          initialInputs: [{ id: originAssistantInputId, source: 'assistant-input' }],
+        },
+        actorId: null,
+        channel: 'linq',
+        conversation: {
+          channel: 'linq',
+          directness: 'group',
+          identityId: 'identity-generated-avatar-group',
+          participantId: null,
+          threadId: groupThreadId,
+        },
+        deliveryKind: 'thread',
+        deliveryTarget: groupThreadId,
+        deliverResponse: true,
+        executionContext,
+        identityId: 'identity-generated-avatar-group',
+        prompt: 'Generate a square image we can use as this group avatar.',
+        sessionId: 'session-test',
+        threadId: groupThreadId,
+        threadIsDirect: false,
+        turnTrigger: 'automation-auto-reply',
+        vault,
+        workingDirectory: vault,
+      }
+      const plan = async (input: {
+        acceptedInputItems: NonNullable<
+          AssistantMessageInput['acceptedTurnInput']
+        >['initialInputs']
+        messageInput: AssistantMessageInput
+        session: AssistantSession
+      }) => await resolveAssistantRouteTurnPlan({
+        acceptedInputItems: input.acceptedInputItems,
+        executionContext,
+        hostedToolContext,
+        input: input.messageInput,
+        profile,
+        promptTimeContext,
+        route,
+        session: input.session,
+        sharedPlan,
+      })
+
+      const foregroundPlan = await plan({
+        acceptedInputItems: [{
+          id: originAssistantInputId,
+          source: 'assistant-input',
+        }],
+        messageInput: foregroundInput,
+        session: createSession(),
+      })
+      expect(foregroundPlan.dynamicTools.map((tool) => tool.name)).toEqual(
+        expect.arrayContaining([
+          'assistant_style',
+          'generate_image',
+          'group',
+          'personalization',
+          'submit_product_feedback',
+        ]),
+      )
+      expect(
+        foregroundPlan.dynamicTools.find((tool) => tool.name === 'group'),
+      ).toMatchObject({ deferLoading: true })
+
+      const foregroundSession = await applyAssistantSessionCodexResumeStateAction({
+        action: 'persist-from-provider-turn',
+        assistantContractFingerprint:
+          foregroundPlan.assistantContractFingerprint,
+        codexRolloutRelativePath: null,
+        codexThreadId: providerThreadId,
+        routeFingerprint: route.routeFingerprint ?? route.routeId,
+        session: createSession(),
+        vault,
+      })
+      const completionText = renderAssistantHostedImageCompletionSystemText({
+        originAssistantInputId,
+        originAssistantInputIdExact: true,
+        result: {
+          media,
+          runtimeIssue: null,
+          savedImageRef,
+        },
+      })
+      const completionCandidate = createTrustedGroupImageCompletionCandidate({
+        completionAssistantInputId,
+        occurredAt: '2026-08-08T16:02:00.000Z',
+        text: completionText,
+        threadId: groupThreadId,
+      })
+      expect(completionCandidate.event.conversation?.actorId).toBeNull()
+      const completionContext = createAssistantAutoReplyGroupContext([{
+        inputCandidate: completionCandidate,
+        summary: assistantAutomationInputSummaryFromCandidate(
+          completionCandidate,
+        ),
+        telegramMetadata: null,
+      }])
+      if (!completionContext) {
+        throw new Error('Expected a trusted completion auto-reply context.')
+      }
+      planningMocks.sendAssistantMessage.mockResolvedValue({
+        delivery: {
+          channel: 'linq',
+          target: groupThreadId,
+          sentAt: '2026-08-08T16:02:01.000Z',
+        },
+        deliveryDeferred: false,
+        deliveryError: null,
+        deliveryIntentId: null,
+        response: 'The image is ready.',
+        session: foregroundSession,
+      })
+
+      await processAssistantAutoReplyGroup({
+        allowSelfAuthored: false,
+        context: completionContext,
+        enabledChannels: ['linq'],
+        executionContext,
+        historyReader: createEmptyAutoReplyHistoryReader(),
+        inboxServices: createUnreachableInboxServices(),
+        requestId: null,
+        sessionMaxAgeMs: null,
+        vault,
+      })
+
+      expect(planningMocks.sendAssistantMessage).toHaveBeenCalledTimes(1)
+      const completionInput = planningMocks.sendAssistantMessage.mock
+        .calls[0]?.[0] as AssistantMessageInput | undefined
+      if (!completionInput) {
+        throw new Error('Expected the completion send input.')
+      }
+      expect(completionInput).not.toHaveProperty(
+        'assistantStyleSettingsAuthorized',
+      )
+      expect(completionInput.hostedImageCompletionEffectRestriction).toEqual({
+        authorizedOriginAssistantInputId: originAssistantInputId,
+        completionAssistantInputId,
+        exactMedia: [media],
+      })
+      expect(completionInput.turnContext).toContain(savedImageRef)
+      const completionAcceptedInputItems =
+        completionInput.acceptedTurnInput?.initialInputs ?? []
+      expect(completionAcceptedInputItems).toMatchObject([{
+        id: completionAssistantInputId,
+        source: 'assistant-input',
+      }])
+
+      const completionPlan = await plan({
+        acceptedInputItems: completionAcceptedInputItems,
+        messageInput: completionInput,
+        session: foregroundSession,
+      })
+      expect(completionPlan.resume?.codexThreadId).toBe(providerThreadId)
+      expect(completionPlan.assistantContractFingerprint).toBe(
+        foregroundPlan.assistantContractFingerprint,
+      )
+      expect(completionPlan.turnContextPrompt).toContain(savedImageRef)
+      expect(completionPlan.conversationHistoryMessages).toBeUndefined()
+
+      const completionSession =
+        await applyAssistantSessionCodexResumeStateAction({
+          action: 'persist-from-provider-turn',
+          assistantContractFingerprint:
+            completionPlan.assistantContractFingerprint,
+          codexRolloutRelativePath: null,
+          codexThreadId: completionPlan.resume?.codexThreadId ?? null,
+          routeFingerprint: route.routeFingerprint ?? route.routeId,
+          session: foregroundSession,
+          vault,
+        })
+      const laterInput: AssistantMessageInput = {
+        ...foregroundInput,
+        acceptedTurnInput: {
+          initialInputs: [{
+            id: laterAssistantInputId,
+            source: 'assistant-input',
+          }],
+        },
+        prompt: 'Use that exact generated image as this group avatar.',
+      }
+      const laterPlan = await plan({
+        acceptedInputItems: [{
+          id: laterAssistantInputId,
+          source: 'assistant-input',
+        }],
+        messageInput: laterInput,
+        session: completionSession,
+      })
+
+      expect(laterPlan.resume?.codexThreadId).toBe(providerThreadId)
+      expect(laterPlan.assistantContractFingerprint).toBe(
+        foregroundPlan.assistantContractFingerprint,
+      )
+      expect(laterPlan.conversationHistoryMessages).toBeUndefined()
+    } finally {
+      await rm(vault, { force: true, recursive: true })
+    }
+  })
+
   it('keeps scheduled Linq delivery policy authoritative on new and resumed threads', async () => {
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue(
       'bootstrap contract',
@@ -2230,6 +2562,8 @@ describe('assistant Codex turn planning', () => {
         developerInstructions: first.developerInstructions,
         dynamicTools: resolveMurphDynamicTools({
           assistantStyleSettingsAvailable: true,
+          exerciseRoutineResponseCardsAvailable: true,
+          telegramRichContentResponseCardsAvailable: true,
           progressUpdatesAvailable: false,
           responseCardsAvailable: true,
           voiceMemoGenerationAvailable: false,
@@ -2257,7 +2591,7 @@ describe('assistant Codex turn planning', () => {
       route: createRoute(),
       session: createSession(),
     }
-    const cardTool = async (options: {
+    const dynamicToolsFor = async (options: {
       executionContext?: Parameters<typeof resolveAssistantRouteTurnPlan>[0]['executionContext']
       hostedToolContext?: AssistantHostedToolContext | null
       input: AssistantMessageInput
@@ -2270,19 +2604,53 @@ describe('assistant Codex turn planning', () => {
         input: options.input,
         sharedPlan: options.sharedPlan ?? createSharedPlan(),
       })
-      return plan.dynamicTools.find(
+      return plan.dynamicTools
+    }
+    const cardTool = async (options: Parameters<typeof dynamicToolsFor>[0]) => {
+      const dynamicTools = await dynamicToolsFor(options)
+      return dynamicTools.find(
         (tool) => tool.name === 'attach_response_card',
       )
     }
 
-    const privateTool = await cardTool({ input: createMessageInput() })
+    const privateTools = await dynamicToolsFor({ input: createMessageInput() })
+    const privateTool = privateTools.find(
+      (tool) => tool.name === 'attach_response_card',
+    )
     expect(privateTool).toBeDefined()
+    expect(privateTools.map((tool) => tool.name)).toContain(
+      'attach_exercise_routine_card',
+    )
+    expect(privateTools.map((tool) => tool.name)).toContain(
+      'attach_telegram_rich_content',
+    )
     const privateSchema = JSON.stringify(privateTool!.inputSchema)
     expect(privateSchema).toContain('daily_nutrition')
     expect(privateSchema).toContain('compact_table')
     expect(privateSchema).not.toContain('challenge_standings')
 
-    await expect(cardTool({
+    const linqPrivateTools = await dynamicToolsFor({
+      input: {
+        ...createMessageInput(),
+        channel: 'linq',
+        threadId: 'linq-private-routine-card',
+        threadIsDirect: true,
+      },
+      sharedPlan: createSharedPlan({}, {
+        channel: 'linq',
+        effectiveThreadIsDirect: true,
+        threadId: 'linq-private-routine-card',
+        threadIsDirect: true,
+      }),
+    })
+    expect(linqPrivateTools.map((tool) => tool.name)).not.toContain(
+      'attach_exercise_routine_card',
+    )
+    expect(linqPrivateTools.map((tool) => tool.name)).not.toContain(
+      'attach_telegram_rich_content',
+    )
+
+    const scheduledPrivateOptions = {
       input: {
         ...createMessageInput(),
         scheduledInvocationAuthority: {
@@ -2292,7 +2660,14 @@ describe('assistant Codex turn planning', () => {
         scheduledOccurrenceAt: '2026-07-28T21:00:00.000-04:00',
         turnTrigger: 'automation-cron',
       },
-    })).resolves.toBeDefined()
+    } satisfies Parameters<typeof dynamicToolsFor>[0]
+    await expect(cardTool(scheduledPrivateOptions)).resolves.toBeDefined()
+    await expect(dynamicToolsFor(scheduledPrivateOptions)).resolves.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: 'attach_exercise_routine_card' }),
+        expect.objectContaining({ name: 'attach_telegram_rich_content' }),
+      ]),
+    )
 
     const hostedExecutionContext = {
       hosted: {
@@ -2698,7 +3073,11 @@ describe('assistant Codex turn planning', () => {
     expect(scheduled.dynamicTools.map((tool) => tool.name)).toEqual(
       direct.dynamicTools
         .map((tool) => tool.name)
-        .filter((name) => name !== 'attach_response_card'),
+        .filter((name) =>
+          name !== 'attach_response_card' &&
+          name !== 'attach_exercise_routine_card' &&
+          name !== 'attach_telegram_rich_content'
+        ),
     )
     expect(scheduled.systemPrompt).toContain('Lab test discovery:')
     expect(outputOnly.dynamicTools.map((tool) => tool.name)).not.toContain('labs')
@@ -2780,6 +3159,8 @@ describe('assistant Codex turn planning', () => {
         developerInstructions: telegramReplyPlan.developerInstructions,
         dynamicTools: resolveMurphDynamicTools({
           assistantStyleSettingsAvailable: true,
+          exerciseRoutineResponseCardsAvailable: true,
+          telegramRichContentResponseCardsAvailable: true,
           messageTargetingAvailable: true,
           progressUpdatesAvailable: false,
           responseCardsAvailable: true,
@@ -2955,6 +3336,8 @@ describe('assistant Codex turn planning', () => {
         developerInstructions: telegramBusinessReplyPlan.developerInstructions,
         dynamicTools: resolveMurphDynamicTools({
           assistantStyleSettingsAvailable: true,
+          exerciseRoutineResponseCardsAvailable: true,
+          telegramRichContentResponseCardsAvailable: true,
           messageTargetingAvailable: true,
           voiceMemoGenerationAvailable: false,
           progressUpdatesAvailable: false,
@@ -2980,6 +3363,8 @@ describe('assistant Codex turn planning', () => {
         developerInstructions: telegramInferredBindingPlan.developerInstructions,
         dynamicTools: resolveMurphDynamicTools({
           assistantStyleSettingsAvailable: true,
+          exerciseRoutineResponseCardsAvailable: true,
+          telegramRichContentResponseCardsAvailable: true,
           messageTargetingAvailable: true,
           voiceMemoGenerationAvailable: false,
           progressUpdatesAvailable: false,
@@ -3058,6 +3443,8 @@ describe('assistant Codex turn planning', () => {
         dynamicTools: resolveMurphDynamicTools({
           assistantStyleSettingsAvailable: true,
           computerToolsAvailable: true,
+          exerciseRoutineResponseCardsAvailable: true,
+          telegramRichContentResponseCardsAvailable: true,
           progressUpdatesAvailable: false,
           responseCardsAvailable: true,
           voiceMemoGenerationAvailable: plan.voiceMemoDeliveryChannel !== null,
@@ -3282,13 +3669,16 @@ describe('assistant Codex turn planning', () => {
       familyPlanTool: { request: vi.fn() },
       groupTool: { request: vi.fn() },
       labsTool: { request: vi.fn() },
-      newsletterTool: { request: vi.fn() },
+      groupEmailEffect: { request: vi.fn() },
       personalizationTool: { request: vi.fn() },
       planUsageTool: { read: vi.fn() },
       phoneCalls: { start: vi.fn() },
       subscriptionTool: { request: vi.fn() },
     }
-    const plan = await resolveAssistantRouteTurnPlan({
+    const groupPlanInput: Omit<
+      Parameters<typeof resolveAssistantRouteTurnPlan>[0],
+      'preferenceContext'
+    > = {
       acceptedInputItems: [{ id: 'group-phone-request', source: 'manual' }],
       executionContext: {
         hosted: {
@@ -3304,16 +3694,6 @@ describe('assistant Codex turn planning', () => {
         ...createMessageInput(),
         channel: 'linq',
         deliverResponse: true,
-      },
-      preferenceContext: {
-        assistantPersona: 'navy-seal',
-        assistantPersonality: {
-          detail: 7,
-          humor: 9,
-          push: 8,
-        },
-        assistantTone: 'casual',
-        assistantVoice: 'warm',
       },
       profile: {
         promptProfile: 'conversation',
@@ -3332,6 +3712,17 @@ describe('assistant Codex turn planning', () => {
         threadId: 'group-thread',
         threadIsDirect: false,
       }),
+    }
+    const plan = await resolveAssistantRouteTurnPlan({
+      ...groupPlanInput,
+      preferenceContext: {
+        assistantPersona: 'scientist-with-classic',
+        assistantPersonality: {
+          humor: 9,
+        },
+        assistantTone: 'casual',
+        assistantVoice: 'warm',
+      },
     })
 
     expect(plan.developerInstructions).toContain('Conversation scope: hosted group chat.')
@@ -3340,22 +3731,22 @@ describe('assistant Codex turn planning', () => {
     expect(planningMocks.readAssistantContextSnapshotPrompt).not.toHaveBeenCalled()
     expect(plan.developerInstructions).not.toContain('/settings?voice=true')
     expect(plan.developerInstructions).toContain(
-      'Tone, Voice, Humor, Push, Detail, and Unhinged belong to this room',
+      "This room owns Murph's personality, tone, voice, Humor, Push, Detail, and Unhinged",
     )
     expect(plan.developerInstructions).toContain(
       'Assistant personality preferences for this group room:',
     )
     expect(plan.developerInstructions).toContain('Humor 9/10')
-    expect(plan.developerInstructions).toContain('Push 8/10')
-    expect(plan.developerInstructions).toContain('Detail 7/10')
-    expect(plan.developerInstructions).not.toContain(
-      'Be direct, disciplined, and accountable.',
+    expect(plan.developerInstructions).toContain('Push 4/10')
+    expect(plan.developerInstructions).toContain('Detail 9/10')
+    expect(plan.developerInstructions).toContain(
+      'Lead with rigorous curiosity and calibrated evidence, while keeping the explanation warm, balanced, and easy to use.',
     )
     expect(plan.developerInstructions).toContain(
       'Casual is a persistent user-facing writing invariant',
     )
     expect(plan.developerInstructions).toContain(
-      'never read or change any participant\'s private Murph settings',
+      'never read or change a participant\'s private Murph settings',
     )
     expect(plan.developerInstructions).toContain(
       'select Luna, Terra, or Sol for the room',
@@ -3372,12 +3763,27 @@ describe('assistant Codex turn planning', () => {
     expect(plan.assistantPreferredElevenLabsVoiceId).toBe(
       resolveAssistantVoiceOptionElevenLabsVoiceId('warm'),
     )
+    const personaDefaultPlan = await resolveAssistantRouteTurnPlan({
+      ...groupPlanInput,
+      preferenceContext: {
+        assistantPersona: 'hype-coach',
+        assistantPersonality: null,
+        assistantTone: null,
+        assistantVoice: null,
+      },
+    })
+    expect(personaDefaultPlan.developerInstructions).toContain(
+      'Casual is a persistent user-facing writing invariant',
+    )
+    expect(personaDefaultPlan.assistantPreferredElevenLabsVoiceId).toBe(
+      resolveAssistantVoiceOptionElevenLabsVoiceId('football-announcer'),
+    )
     expect(plan.developerInstructions).not.toContain('Hosted wearable connection links are available')
     expect(plan.developerInstructions).toContain(
       'Scheduled automation changes for this group room are available through `murph.automation`.',
     )
     expect(plan.developerInstructions).toContain(
-      'Use `murph.automation` with `action: save` to create an ordinary automation and `action: patch` to change one.',
+      'Use `murph.automation` with `action: save` to create an ordinary automation, `action: inspect` to read one without mutation, and `action: patch` to change one.',
     )
     expect(plan.developerInstructions).toContain(
       'Patch `status` to pause, reactivate, or archive an existing automation.',
@@ -3407,7 +3813,6 @@ describe('assistant Codex turn planning', () => {
         'connected_apps_execute',
         'automation',
         'group',
-        'newsletter',
         'assistant_configuration',
         'assistant_style',
         'personalization',
@@ -3992,7 +4397,7 @@ describe('assistant Codex turn planning', () => {
       familyPlanTool: { request: vi.fn() },
       groupTool: { request: vi.fn() },
       labsTool: { request: vi.fn() },
-      newsletterTool: { request: vi.fn() },
+      groupEmailEffect: { request: vi.fn() },
       phoneCalls: { start: vi.fn() },
     }
     await expect(resolveAssistantRouteTurnPlan({
@@ -4622,6 +5027,70 @@ describe('assistant Codex turn planning', () => {
     }
   })
 
+  it.each([
+    {
+      clarification:
+        'The trusted reminder date is 2026-03-08. What other local time on 2026-03-08 should I use?',
+      request: 'Remind me tomorrow at 2:30 AM.',
+    },
+    {
+      clarification:
+        'The trusted reminder date is 2026-11-01. Should I use the earlier or later occurrence on 2026-11-01?',
+      request: 'Remind me tomorrow at 1:30 AM.',
+    },
+  ])('replays the trusted DST date when native resume is unavailable', async ({
+    clarification,
+    request,
+  }) => {
+    planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue(
+      'bootstrap contract',
+    )
+    planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
+    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
+      supportsNativeResume: false,
+    })
+    const vault = await mkdtemp(path.join(
+      os.tmpdir(),
+      'assistant-route-plan-dst-recovery-',
+    ))
+    const session = createSession({ turnCount: 1 })
+
+    try {
+      await appendAssistantTranscriptEntries(vault, session.sessionId, [
+        { kind: 'user', text: request },
+        { kind: 'assistant', text: clarification },
+      ])
+      const plan = await resolveAssistantRouteTurnPlan({
+        executionContext: null,
+        input: {
+          ...createMessageInput(),
+          prompt: 'Use the other choice.',
+          vault,
+        },
+        profile: {
+          promptProfile: 'conversation',
+          threadScope: 'session-thread',
+          toolProfile: 'provider-turn',
+        },
+        promptTimeContext: {
+          currentLocalDate: '2026-11-01',
+          currentTimeZone: 'America/New_York',
+        },
+        route: createRoute(),
+        session,
+        sharedPlan: createPrivateSharedPlan(),
+      })
+
+      expect(plan.resume).toBeNull()
+      expect(plan.conversationHistoryMessages).toEqual([
+        { content: request, role: 'user' },
+        { content: clarification, role: 'assistant' },
+      ])
+    } finally {
+      await rm(vault, { force: true, recursive: true })
+    }
+  })
+
   it('keeps recent legacy user and assistant history paired for fresh and stale-resume fallback', async () => {
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
     planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
@@ -4728,6 +5197,162 @@ describe('assistant Codex turn planning', () => {
     }
   })
 
+  it('marks cold conversation history incomplete after transcript text retention', async () => {
+    planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
+    planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
+    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
+      supportsNativeResume: false,
+    })
+    const vault = await mkdtemp(path.join(
+      os.tmpdir(),
+      'assistant-route-plan-retired-human-history-',
+    ))
+    const answeredSession = {
+      ...createSession({ turnCount: 1 }),
+      conversationId: 'session-retired-human-answer',
+      sessionId: 'session-retired-human-answer',
+    }
+    const unansweredSession = {
+      ...createSession({ turnCount: 1 }),
+      conversationId: 'session-no-human-answer',
+      sessionId: 'session-no-human-answer',
+    }
+    const cadenceQuestion =
+      'Monthly room reset. Should I keep these, change them, or pause?'
+    const executionProfile: AssistantCodexTurnResolvedExecutionProfile = {
+      promptProfile: 'conversation',
+      threadScope: 'session-thread',
+      toolProfile: 'provider-turn',
+    }
+
+    try {
+      await appendAssistantTranscriptEntries(vault, answeredSession.sessionId, [
+        {
+          createdAt: '2026-01-01T10:00:00.000Z',
+          kind: 'assistant',
+          text: cadenceQuestion,
+        },
+        {
+          contentReceivedAt: '2026-01-01T10:01:00.000Z',
+          createdAt: '2026-01-01T10:01:00.000Z',
+          kind: 'user',
+          text: 'Keep it.',
+        },
+      ])
+      await appendAssistantTranscriptEntries(vault, unansweredSession.sessionId, [
+        {
+          createdAt: '2026-01-01T10:00:00.000Z',
+          kind: 'assistant',
+          text: cadenceQuestion,
+        },
+      ])
+      await expect(pruneAssistantTranscriptRetention(
+        resolveAssistantStatePaths(vault),
+        { now: new Date('2026-02-01T10:00:00.000Z') },
+      )).resolves.toMatchObject({
+        entriesRedacted: 1,
+      })
+
+      const buildPlan = async (session: AssistantSession) =>
+        resolveAssistantRouteTurnPlan({
+          executionContext: null,
+          input: {
+            ...createMessageInput(),
+            vault,
+          },
+          profile: executionProfile,
+          promptTimeContext: {
+            currentLocalDate: '2026-02-01',
+            currentTimeZone: 'UTC',
+          },
+          route: createRoute(),
+          session,
+          sharedPlan: createPrivateSharedPlan(),
+        })
+
+      await expect(buildPlan(answeredSession)).resolves.toMatchObject({
+        conversationHistoryMessages: [
+          {
+            content: ASSISTANT_BOUNDED_CONVERSATION_HISTORY_INCOMPLETE_TEXT,
+            role: 'assistant',
+          },
+          { content: cadenceQuestion, role: 'assistant' },
+        ],
+      })
+      await expect(buildPlan(unansweredSession)).resolves.toMatchObject({
+        conversationHistoryMessages: [
+          { content: cadenceQuestion, role: 'assistant' },
+        ],
+      })
+    } finally {
+      await rm(vault, { force: true, recursive: true })
+    }
+  })
+
+  it('marks cold conversation history incomplete when the message-count bound omits details', async () => {
+    planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
+    planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
+    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
+      supportsNativeResume: false,
+    })
+    const vault = await mkdtemp(path.join(
+      os.tmpdir(),
+      'assistant-route-plan-bounded-history-',
+    ))
+    const executionProfile: AssistantCodexTurnResolvedExecutionProfile = {
+      promptProfile: 'conversation',
+      threadScope: 'session-thread',
+      toolProfile: 'provider-turn',
+    }
+    const buildPlan = async (session: AssistantSession) =>
+      resolveAssistantRouteTurnPlan({
+        executionContext: null,
+        input: {
+          ...createMessageInput(),
+          vault,
+        },
+        profile: executionProfile,
+        promptTimeContext: {
+          currentLocalDate: '2026-02-01',
+          currentTimeZone: 'UTC',
+        },
+        route: createRoute(),
+        session,
+        sharedPlan: createPrivateSharedPlan(),
+      })
+
+    try {
+      const countBoundSession = {
+        ...createSession({ turnCount: 1 }),
+        conversationId: 'session-count-bounded-history',
+        sessionId: 'session-count-bounded-history',
+      }
+      await appendAssistantTranscriptEntries(
+        vault,
+        countBoundSession.sessionId,
+        Array.from({ length: 30 }, (_, index) => ({
+          kind: 'assistant' as const,
+          text: `Committed message ${index + 1}`,
+        })),
+      )
+
+      const countBoundPlan = await buildPlan(countBoundSession)
+      expect(countBoundPlan.conversationHistoryMessages).toHaveLength(24)
+      expect(countBoundPlan.conversationHistoryMessages).toEqual([
+        {
+          content: ASSISTANT_BOUNDED_CONVERSATION_HISTORY_INCOMPLETE_TEXT,
+          role: 'assistant',
+        },
+        ...Array.from({ length: 23 }, (_, index) => ({
+          content: `Committed message ${index + 8}`,
+          role: 'assistant' as const,
+        })),
+      ])
+    } finally {
+      await rm(vault, { force: true, recursive: true })
+    }
+  })
+
   it('replays explicit no-reply transcript markers as assistant history', async () => {
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
     planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
@@ -4829,7 +5454,10 @@ describe('assistant Codex turn planning', () => {
 
       const history = plan.conversationHistoryMessages ?? []
       expect(history).toHaveLength(3)
-      expect(history[0]?.content).toEqual(expect.stringMatching(/^message-2:/u))
+      expect(history[0]?.content).toBe(
+        ASSISTANT_BOUNDED_CONVERSATION_HISTORY_INCOMPLETE_TEXT,
+      )
+      expect(history[1]?.content).toEqual(expect.stringMatching(/^message-3:/u))
       expect(history[2]?.content).toEqual(expect.stringMatching(/^message-4:/u))
       let totalBytes = 0
       for (const message of history) {
@@ -4891,13 +5519,17 @@ describe('assistant Codex turn planning', () => {
 
       expect(plan.conversationHistoryMessages).toEqual([
         {
+          content: ASSISTANT_BOUNDED_CONVERSATION_HISTORY_INCOMPLETE_TEXT,
+          role: 'assistant',
+        },
+        {
           content: expect.stringMatching(
             /^\[This response included an image attachment\.\]/u,
           ),
           role: 'assistant',
         },
       ])
-      const content = plan.conversationHistoryMessages?.[0]?.content
+      const content = plan.conversationHistoryMessages?.[1]?.content
       const contentBytes =
         typeof content === 'string' ? Buffer.byteLength(content, 'utf8') : 0
       expect(contentBytes).toBeLessThanOrEqual(4_000)
@@ -4905,6 +5537,100 @@ describe('assistant Codex turn planning', () => {
       await rm(vault, { force: true, recursive: true })
     }
   })
+
+  it.each([
+    ['provider route without native resume', false, 'f'.repeat(64)],
+    ['assistant contract fingerprint rotation', true, '0'.repeat(64)],
+  ] as const)(
+    'restores truthfully labeled generated capture provenance after %s',
+    async (_label, supportsNativeResume, assistantContractFingerprint) => {
+      planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue(
+        'bootstrap contract',
+      )
+      planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
+      planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
+        supportsNativeResume,
+      })
+      const vault = await mkdtemp(path.join(
+        os.tmpdir(),
+        'assistant-route-plan-generated-image-history-',
+      ))
+      const session = createSession({
+        resumeState: {
+          assistantContractFingerprint,
+          routeFingerprint: 'route-primary',
+          threadId: 'thread-stale-generated-image-history',
+        },
+        turnCount: 2,
+      })
+      const firstRef =
+        'raw/captures/2026/08/first-generated/first-generated.png'
+      const secondRef =
+        'raw/captures/2026/08/second-generated/second-generated.png'
+      try {
+        await appendAssistantTranscriptEntries(vault, session.sessionId, [
+          {
+            kind: 'assistant',
+            text: 'The first image is ready.',
+          },
+          {
+            kind: 'status',
+            text: buildAssistantGeneratedImageDeliveryTranscriptMarkerText({
+              contentType: 'image/png',
+              deliveryContextOrdinal: 0,
+              ref: firstRef,
+              sha256: '1'.repeat(64),
+              sizeBytes: 101,
+              turnId: 'turn-first-generated-image',
+            }),
+          },
+          {
+            kind: 'assistant',
+            text: 'The second image is ready.',
+          },
+          {
+            kind: 'status',
+            text: buildAssistantGeneratedImageDeliveryTranscriptMarkerText({
+              contentType: 'image/png',
+              deliveryContextOrdinal: 0,
+              ref: secondRef,
+              sha256: '2'.repeat(64),
+              sizeBytes: 202,
+              turnId: 'turn-second-generated-image',
+            }),
+          },
+        ])
+        const plan = await resolveAssistantRouteTurnPlan({
+          executionContext: null,
+          input: {
+            ...createMessageInput(),
+            prompt: 'Use the first delivered image as the group avatar.',
+            vault,
+          },
+          profile: {
+            promptProfile: 'conversation',
+            threadScope: 'session-thread',
+            toolProfile: 'provider-turn',
+          },
+          promptTimeContext: {
+            currentLocalDate: '2026-08-09',
+            currentTimeZone: 'America/New_York',
+          },
+          route: createRoute(),
+          session,
+          sharedPlan: createPrivateSharedPlan(),
+        })
+
+        expect(plan.resume).toBeNull()
+        const historyText = JSON.stringify(plan.conversationHistoryMessages)
+        expect(historyText).toContain(firstRef)
+        expect(historyText).toContain(secondRef)
+        expect(historyText).toContain('neither delivery nor effect authority')
+      } finally {
+        await rm(vault, { force: true, recursive: true })
+      }
+    },
+  )
 
   it('does not replay an oversized committed current user prompt', async () => {
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
@@ -5752,6 +6478,139 @@ function createHostedToolContext(): AssistantHostedToolContext {
       throw new Error('Vault-file sending is unavailable for this turn.')
     }),
     vaultFileSendAvailable: false,
+  }
+}
+
+
+function createTrustedGroupImageCompletionCandidate(input: {
+  completionAssistantInputId: string
+  occurredAt: string
+  text: string
+  threadId: string
+}): AssistantInputCandidate {
+  const sourceIdentity = `image-completion:${'e'.repeat(64)}`
+  return {
+    acceptedInput: {
+      captureIds: [],
+      contentRef: {
+        kind: 'assistant-input-event',
+        refId: input.completionAssistantInputId,
+        version: 'murph.assistant-input-event.v1',
+      },
+      id: input.completionAssistantInputId,
+      source: 'assistant-input',
+      transcriptRef: null,
+    },
+    event: {
+      attachmentCount: 0,
+      attachmentDescriptors: [],
+      attachmentEvidence: {
+        attachments: [],
+        optionalInboxCaptureId: null,
+        reasonCode: null,
+        source: null,
+        status: 'not_attempted',
+        updatedAt: null,
+      },
+      conversation: {
+        accountId: 'identity-generated-avatar-group',
+        actorId: null,
+        actorIsSelf: false,
+        source: 'linq',
+        threadId: input.threadId,
+        threadIsDirect: false,
+      },
+      cursor: {
+        createdAt: input.occurredAt,
+        inputId: input.completionAssistantInputId,
+        occurredAt: input.occurredAt,
+        sourceKind: 'hosted-mailbox',
+        sourcePosition: sourceIdentity,
+      },
+      inputId: input.completionAssistantInputId,
+      occurredAt: input.occurredAt,
+      receivedAt: input.occurredAt,
+      replyTarget: {
+        channel: 'linq',
+        messageId: sourceIdentity,
+        threadId: input.threadId,
+      },
+      source: 'linq',
+      sourceMetadata: {
+        externalThreadRouteAuthorityPresent: true,
+        kind: 'linq',
+        partCount: 1,
+        reactionEligible: true,
+        replyToMessageId: null,
+        service: 'iMessage',
+      },
+      sourceRef: {
+        dedupeKey: sourceIdentity,
+        eventId: sourceIdentity,
+        itemId: sourceIdentity,
+        kind: 'hosted-mailbox',
+        lane: 'system',
+        laneSeq: sourceIdentity,
+        payloadSchema: 'murph.hosted-image-completion.v1',
+        payloadSource: 'inline',
+        source: 'hosted-mailbox',
+        wakeSchema: 'murph.hosted-image-completion.v1',
+      },
+      text: input.text,
+      transcriptText: null,
+      userMessageContent: null,
+    },
+    projection: {
+      captureId: null,
+      reasonCode: null,
+      status: 'not_attempted',
+    },
+  }
+}
+
+function createEmptyAutoReplyHistoryReader() {
+  return {
+    readMetrics: () => ({
+      outboxScanPerformed: false,
+      receiptScanPerformed: false,
+    }),
+    readOutboxIntents: async () => [],
+    readReceipts: async () => [],
+  }
+}
+
+function createUnreachableInboxServices(): InboxServices {
+  const unreachable = async () => {
+    throw new Error('unreachable inbox service call')
+  }
+  return {
+    bootstrap: unreachable,
+    init: unreachable,
+    sourceAdd: unreachable,
+    sourceList: unreachable,
+    sourceRemove: unreachable,
+    sourceSetEnabled: unreachable,
+    doctor: unreachable,
+    setup: unreachable,
+    repairEnvelopes: unreachable,
+    compactParserAttempts: unreachable,
+    parse: unreachable,
+    requeue: unreachable,
+    backfill: unreachable,
+    run: unreachable,
+    status: unreachable,
+    stop: unreachable,
+    list: unreachable,
+    listAttachments: unreachable,
+    showAttachment: unreachable,
+    showAttachmentStatus: unreachable,
+    show: unreachable,
+    search: unreachable,
+    preserveDocumentAttachments: unreachable,
+    promoteMeal: unreachable,
+    promoteDocument: unreachable,
+    promoteJournal: unreachable,
+    promoteExperimentNote: unreachable,
   }
 }
 

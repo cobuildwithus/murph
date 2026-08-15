@@ -43,6 +43,11 @@ describe("hosted mailbox routing", () => {
         lane: "system",
       },
       {
+        action: "apply-member-action",
+        kind: "member.action.requested",
+        lane: "system",
+      },
+      {
         action: "dispatch-assistant-notification",
         kind: "assistant.notification.requested",
         lane: "system",
@@ -73,13 +78,18 @@ describe("hosted mailbox routing", () => {
         lane: "system",
       },
       {
-        action: "import-group-newsletter-email-needed",
-        kind: "group-newsletter.email-needed",
+        action: "import-reported-daily-metric",
+        kind: "health.daily-metric.reported",
         lane: "system",
       },
       {
         action: "import-meal-photo",
         kind: "meal-photo.captured",
+        lane: "system",
+      },
+      {
+        action: "skip-retired-mailbox-item",
+        kind: "group-newsletter.email-needed",
         lane: "system",
       },
       {
@@ -139,14 +149,18 @@ describe("hosted mailbox routing", () => {
     assert.equal(resolveExpectedLaneForHostedMailboxKind("member.activated"), "system");
     assert.equal(resolveExpectedLaneForHostedMailboxKind("member.channels.updated"), "system");
     assert.equal(resolveExpectedLaneForHostedMailboxKind("member.preferences.updated"), "system");
+    assert.equal(resolveExpectedLaneForHostedMailboxKind("member.action.requested"), "system");
     assert.equal(resolveExpectedLaneForHostedMailboxKind("assistant.notification.requested"), "system");
     assert.equal(resolveExpectedLaneForHostedMailboxKind("assistant.ask.requested"), "system");
     assert.equal(resolveExpectedLaneForHostedMailboxKind("assistant.ask.completed"), "system");
     assert.equal(resolveExpectedLaneForHostedMailboxKind("clinical-records.sync-requested"), "system");
     assert.equal(resolveExpectedLaneForHostedMailboxKind("device-sync.wake"), "system");
     assert.equal(resolveExpectedLaneForHostedMailboxKind("environment-voice.captured"), "system");
-    assert.equal(resolveExpectedLaneForHostedMailboxKind("group-newsletter.email-needed"), "system");
     assert.equal(resolveExpectedLaneForHostedMailboxKind("meal-photo.captured"), "system");
+    assert.equal(
+      resolveExpectedLaneForHostedMailboxKind("group-newsletter.email-needed"),
+      "system",
+    );
     assert.equal(resolveExpectedLaneForHostedMailboxKind("runtime.manual-requested"), "system");
     assert.equal(
       resolveExpectedLaneForHostedMailboxKind("runtime.pending-effects-reconcile-requested"),

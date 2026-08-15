@@ -224,96 +224,73 @@ export function HostedHealthDataConsentControl({
   const unavailable = presentation === "unavailable";
 
   return (
-    <div
-      className={`grid grid-cols-1 items-start gap-4 border-b border-border pb-4 ${
-        active ? "" : "sm:grid-cols-[minmax(0,1fr)_auto]"
-      }`}
-    >
-      <div className="flex min-w-0 items-start gap-3">
-        {active ? (
-          <ShieldCheck
-            aria-hidden="true"
-            className="mt-0.5 size-[18px] shrink-0 text-muted-foreground"
-            strokeWidth={1.6}
-          />
-        ) : (
-          <ShieldOff
-            aria-hidden="true"
-            className="mt-0.5 size-[18px] shrink-0 text-muted-foreground"
-            strokeWidth={1.6}
-          />
-        )}
-        <div className="min-w-0">
-          <div className="font-serif text-base tracking-tight text-foreground">
-            Health data use
-          </div>
-          <p
-            aria-live="polite"
-            className={`mt-0.5 text-xs leading-5 ${
-              unavailable && errorMessage
-                ? "text-destructive"
-                : "text-muted-foreground"
-            }`}
-          >
-            {active
-              ? "Used to personalize Murph"
-              : paused
-                ? "Processing paused"
-                : presentation === "not-enabled"
-                  ? "Not enabled"
-                  : statusPending
-                    ? "Checking status..."
-                    : errorMessage ?? "Status unavailable"}
-          </p>
-          {paused ? (
-            <div className="mt-2">
-              <Link
-                className="relative inline-flex min-h-10 items-center self-start text-sm font-medium text-primary underline-offset-4 hover:underline before:absolute before:-inset-x-2 before:content-['']"
-                href="/connect"
-              >
-                Review source disconnections
-              </Link>
-            </div>
-          ) : null}
-        </div>
-      </div>
+    <div className="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-x-3 gap-y-2 border-b border-border pb-4 sm:grid-cols-[auto_minmax(0,1fr)_auto]">
       {active ? (
-        <div className="ml-[30px] flex min-w-0 items-center gap-2 justify-self-stretch">
-          <Link
-            className="relative inline-flex min-h-10 items-center text-sm font-medium text-primary underline-offset-4 hover:underline before:absolute before:-inset-x-2 before:content-['']"
-            href="/connect"
-          >
-            Manage sources
-          </Link>
-          <Button
-            className="min-h-10 border-destructive/30 bg-transparent hover:border-destructive/40 hover:bg-destructive/[0.05] focus-visible:border-ring focus-visible:ring-ring/50 dark:bg-transparent dark:hover:bg-destructive/[0.05] dark:focus-visible:ring-ring/50"
-            disabled={pending}
-            onClick={onAction}
-            size="sm"
-            type="button"
-            variant="destructive"
-          >
-            Withdraw consent
-          </Button>
-        </div>
+        <ShieldCheck
+          aria-hidden="true"
+          className="mt-0.5 size-[18px] shrink-0 self-start text-muted-foreground"
+          strokeWidth={1.6}
+        />
       ) : (
-        <Button
-          className={
-            paused
-              ? "w-full sm:col-span-2"
-              : "w-full sm:w-auto sm:self-start"
-          }
-          disabled={pending}
-          onClick={onAction}
-          type="button"
+        <ShieldOff
+          aria-hidden="true"
+          className="mt-0.5 size-[18px] shrink-0 self-start text-muted-foreground"
+          strokeWidth={1.6}
+        />
+      )}
+      <div className="min-w-0">
+        <div className="font-serif text-base tracking-tight text-foreground">
+          Health data use
+        </div>
+        <p
+          aria-live="polite"
+          className={`mt-0.5 text-xs leading-5 ${
+            unavailable && errorMessage
+              ? "text-destructive"
+              : "text-muted-foreground"
+          }`}
         >
-          {paused
+          {active ? (
+            <Link
+              className="inline-flex min-h-10 items-center font-medium text-primary underline-offset-4 hover:underline"
+              href="/connect"
+            >
+              Manage sources
+            </Link>
+          ) : paused
+              ? "Processing paused"
+              : presentation === "not-enabled"
+                ? "Not enabled"
+                : statusPending
+                  ? "Checking status..."
+                  : errorMessage ?? "Status unavailable"}
+        </p>
+        {paused ? (
+          <div className="mt-2">
+            <Link
+              className="relative inline-flex min-h-10 items-center self-start text-sm font-medium text-primary underline-offset-4 hover:underline before:absolute before:-inset-x-2 before:content-['']"
+              href="/connect"
+            >
+              Review source disconnections
+            </Link>
+          </div>
+        ) : null}
+      </div>
+      <Button
+        className="col-start-2 justify-self-start sm:col-start-3 sm:row-start-1 sm:justify-self-end"
+        disabled={pending}
+        onClick={onAction}
+        type="button"
+        variant={active ? "destructive" : "default"}
+      >
+        {active
+          ? "Withdraw consent"
+          : paused
             ? "Use Murph again"
             : unavailable
               ? statusPending ? "Checking..." : "Retry status"
               : "Review"}
-        </Button>
-      )}
+      </Button>
     </div>
   );
 }

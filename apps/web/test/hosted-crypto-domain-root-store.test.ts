@@ -8,8 +8,13 @@ import {
   type HostedMemberIdentity,
 } from "@prisma/client";
 import {
+  buildHostedSecureBoxAad,
   findHostedDomainRootWrap,
+  HOSTED_DOMAIN_ROOT_KEY_ENVELOPE_SCHEMA,
   parseHostedDomainRootKeyEnvelope,
+  parseSerializedHostedSecureBoxEnvelope,
+  sealHostedSecureBox,
+  serializeHostedSecureBoxEnvelope,
   verifyHostedDomainRootEnvelopeSignatureWithPublicKey,
   type HostedDomainRootKeyEnvelopeV1,
 } from "@murphai/runtime-state";
@@ -30,7 +35,10 @@ import {
   buildHostedMemberRoutingPrivateColumns,
 } from "../src/lib/hosted-onboarding/member-private-codecs";
 import {
+  openHostedUserSecureBoxStringFromPreparedRoot,
   openHostedUserSecureBoxStrings,
+  openHostedUserSecureBoxStringsWithPreparedRoots,
+  prewarmHostedUserSecureBoxStrings,
   sealHostedUserSecureBoxStrings,
   setHostedSecureBoxStringTestCodecForTests,
 } from "../src/lib/hosted-crypto/secure-box";
@@ -40,10 +48,17 @@ import type {
   GcpKmsEncryptInput,
   HostedGcpKmsClient,
 } from "../src/lib/hosted-crypto/gcp-kms";
+import type { HostedConnectionRecord } from "../src/lib/device-sync/prisma-store/connection-records";
+import {
+  encryptHostedConnectionSecret,
+  readHostedRuntimeConnectionSecretMaterial,
+} from "../src/lib/device-sync/prisma-store/connection-secrets";
 
 const AUTHORITY_KEY_VERSION =
-  "projects/test/locations/global/keyRings/ring/cryptoKeys/sign/cryptoKeyVersions/1";
-const WEB_WRAP_KEY_NAME = "projects/test/locations/global/keyRings/ring/cryptoKeys/wrap";
+  "projects/murph-test/locations/global/keyRings/ring/cryptoKeys/sign/cryptoKeyVersions/1";
+const WEB_WRAP_KEY_NAME =
+  "projects/murph-test/locations/global/keyRings/ring/cryptoKeys/wrap";
+const decodeText = TextDecoder.prototype.decode;
 
 const gcpKmsMock = vi.hoisted(() => ({
   client: null as HostedGcpKmsClient | null,
@@ -94,7 +109,7 @@ test("web runtime crypto context reads already-provisioned signed ingress and ru
   });
   stubHostedCryptoEnv({
     authorityVerifyKeyringJson: JSON.stringify({
-      "projects/test/locations/global/keyRings/ring/cryptoKeys/sign/cryptoKeyVersions/2": {
+      "projects/murph-test/locations/global/keyRings/ring/cryptoKeys/sign/cryptoKeyVersions/2": {
         publicKeyPem: standbySigner.publicKeyPem,
         status: "verify_only",
       },
@@ -206,6 +221,7 @@ test("web runtime crypto context reads already-provisioned signed ingress and ru
   assert.equal(encryptCalls[0]?.keyName, WEB_WRAP_KEY_NAME);
   assert.match(encryptCalls[0]?.additionalAuthenticatedData, /"domain":"ingress"/u);
   assert.equal(signCalls.length, 2);
+  assert.ok(signCalls.every((call) => call.message.every((byte) => byte === 0)));
 });
 
 test("detects whether all active hosted crypto domain roots exist for a user", async () => {
@@ -281,6 +297,35 @@ test("detects whether all active hosted crypto domain roots exist for a user", a
     tx: tx.prisma,
     userId: "member-test-1",
   })).resolves.toBe(true);
+});
+
+test("reads a maximum activation root set with one narrow query and no KMS", async () => {
+  const { readUserIdsWithActiveHostedCryptoDomainRootsTx } = await import(
+    "../src/lib/hosted-crypto/domain-root-store"
+  );
+  const memberIds = Array.from({ length: 32 }, (_, index) => `member-batch-${index}`);
+  const queryRaw = vi.fn(async (query: Prisma.Sql) => {
+    expect(query).toBeDefined();
+    return [
+      { userId: memberIds[0] },
+      { userId: memberIds[31] },
+    ];
+  });
+
+  await expect(readUserIdsWithActiveHostedCryptoDomainRootsTx({
+    tx: { $queryRaw: queryRaw } as never,
+    userIds: memberIds,
+  })).resolves.toEqual(new Set([memberIds[0], memberIds[31]]));
+
+  expect(queryRaw).toHaveBeenCalledTimes(1);
+  const query = queryRaw.mock.calls[0]?.[0] as Prisma.Sql | undefined;
+  expect(query?.sql).toContain('SELECT user_id AS "userId"');
+  expect(query?.sql).toContain("GROUP BY user_id");
+  expect(query?.sql).toContain("HAVING COUNT(DISTINCT domain)");
+  expect(query?.sql).not.toContain("signed_envelope_json");
+  expect(query?.sql).not.toContain("root_key_id");
+  expect(query?.values).toEqual(expect.arrayContaining(memberIds));
+  expect(gcpKmsMock.client).toBeNull();
 });
 
 test("signs hosted domain root envelopes before the provisioning transaction opens", async () => {
@@ -462,6 +507,70 @@ test("candidate preparation drains every started KMS operation before returning 
   expect(observedPlaintexts.every((plaintext) =>
     plaintext.every((byte) => byte === 0)
   )).toBe(true);
+});
+
+test("candidate preparation bounds signing work to the requested concurrency", async () => {
+  const signer = await generateP256SigningKeyPair();
+  const cloudflareRecipient = await generateP256EcdhKeyPair();
+  const encryptCalls: GcpKmsEncryptInput[] = [];
+  const signCalls: GcpKmsAsymmetricSignInput[] = [];
+  const operationMetrics = createLocalKmsOperationMetrics();
+  gcpKmsMock.client = createLocalKmsClient({
+    encryptCalls,
+    operationMetrics,
+    signCalls,
+    signer: signer.privateKey,
+  });
+  stubHostedCryptoEnv({
+    cloudflarePublicJwk: cloudflareRecipient.publicJwk,
+    signerPublicKeyPem: signer.publicKeyPem,
+  });
+  const { prepareHostedCryptoDomainRootCandidates } = await import(
+    "../src/lib/hosted-crypto/domain-root-store"
+  );
+  const recorder = createCapturingTransaction();
+
+  const prepared = await prepareHostedCryptoDomainRootCandidates({
+    maxConcurrency: 2,
+    prisma: recorder.prisma,
+    userId: "member-test-bounded-candidate-signing",
+  });
+
+  assert.deepEqual([...prepared.keys()], [
+    "control",
+    "device",
+    "ingress",
+    "runtime",
+  ]);
+  assert.equal(encryptCalls.length, 3);
+  assert.equal(signCalls.length, 4);
+  assert.equal(operationMetrics.callCount, 7);
+  assert.equal(operationMetrics.maxConcurrent, 2);
+
+  const reused = await prepareHostedCryptoDomainRootCandidates({
+    maxConcurrency: 2,
+    prisma: recorder.prisma,
+    reusableCandidates: prepared,
+    userId: "member-test-bounded-candidate-signing",
+  });
+  assert.deepEqual(
+    [...reused].map(([domain, envelope]) => [domain, envelope.rootKeyId]),
+    [...prepared].map(([domain, envelope]) => [domain, envelope.rootKeyId]),
+  );
+  assert.equal(operationMetrics.callCount, 7);
+});
+
+test("candidate preparation rejects a non-positive concurrency bound", async () => {
+  const { prepareHostedCryptoDomainRootCandidates } = await import(
+    "../src/lib/hosted-crypto/domain-root-store"
+  );
+  const recorder = createCapturingTransaction();
+
+  await expect(prepareHostedCryptoDomainRootCandidates({
+    maxConcurrency: 0,
+    prisma: recorder.prisma,
+    userId: "member-test-invalid-candidate-concurrency",
+  })).rejects.toThrow(/positive integer/u);
 });
 
 test("legacy transaction provisioning prepares every candidate before its first advisory lock", async () => {
@@ -817,7 +926,7 @@ test("web runtime crypto context fails closed instead of provisioning missing wo
   await expect(readHostedRuntimeCryptoContextForWorker({
     prisma: tx.prisma,
     userId: "member-test-1",
-  })).rejects.toThrow(/ingress domain root envelope is not provisioned/u);
+  })).rejects.toThrow(/ingress domain root envelope is not available for decrypt/u);
   assert.equal(tx.persistedEnvelopes.length, 0);
   assert.equal(encryptCalls.length, 0);
   assert.equal(signCalls.length, 0);
@@ -831,7 +940,7 @@ test("hosted web private-field encryption fails closed when control roots are mi
     memberId: "member-test-missing-control",
     prisma: tx.prisma,
     value: "redacted-phone-token",
-  })).rejects.toThrow(/control domain root envelope is not provisioned/u);
+  })).rejects.toThrow(/control domain root envelope is not available for decrypt/u);
 
   assert.equal(tx.persistedEnvelopes.length, 0);
   assert.equal(encryptCalls.length, 0);
@@ -879,9 +988,138 @@ test("hosted web private-field encryption uses already-provisioned control roots
   assert.equal(tx.persistedEnvelopes.length, 1);
 });
 
-test("member email batches use one envelope query with bounded KMS unwraps", async () => {
+test("runtime device-secret pages batch 32 distinct roots with bounded KMS unwraps", async () => {
   const { decryptMetrics, tx } = await createHostedWebCryptoTransactionFixture();
-  const memberIds = Array.from({ length: 6 }, (_, index) => `member-batch-${index + 1}`);
+  const { provisionActiveHostedDomainRootEnvelopeForUserOnly } = await import(
+    "../src/lib/hosted-crypto/domain-root-store"
+  );
+  const records: HostedConnectionRecord[] = [];
+
+  for (let index = 0; index < 32; index += 1) {
+    const connectionId = `dsc-runtime-${String(index + 1).padStart(2, "0")}`;
+    const tokenVersion = index + 1;
+    const userId = `member-runtime-${String(index + 1).padStart(2, "0")}`;
+    await provisionActiveHostedDomainRootEnvelopeForUserOnly({
+      domain: "device",
+      prisma: tx.prisma,
+      reason: "test.runtime-device-secret-page",
+      userId,
+    });
+    const externalAccountIdEncrypted = await encryptHostedConnectionSecret({
+      connectionId,
+      provider: "junction",
+      prisma: tx.prisma,
+      purpose: "device-sync-external-account-id",
+      userId,
+      value: `junction-external-${index + 1}`,
+    });
+    const accessTokenEncrypted = await encryptHostedConnectionSecret({
+      connectionId,
+      provider: "junction",
+      prisma: tx.prisma,
+      purpose: "device-sync-access-token",
+      tokenVersion,
+      userId,
+      value: `junction-access-${index + 1}`,
+    });
+    const refreshTokenEncrypted = await encryptHostedConnectionSecret({
+      connectionId,
+      provider: "junction",
+      prisma: tx.prisma,
+      purpose: "device-sync-refresh-token",
+      tokenVersion,
+      userId,
+      value: `junction-refresh-${index + 1}`,
+    });
+    records.push(createHostedRuntimeDeviceSecretRecord({
+      accessTokenEncrypted,
+      connectionId,
+      externalAccountIdEncrypted,
+      refreshTokenEncrypted,
+      tokenVersion,
+      userId,
+    }));
+  }
+
+  const rootKeyIds = new Set(records.flatMap((record) => [
+    record.externalAccountIdEncrypted,
+    record.accessTokenEncrypted,
+    record.refreshTokenEncrypted,
+  ]).map((ciphertext) =>
+    parseSerializedHostedSecureBoxEnvelope(ciphertext!).rootKeyId
+  ));
+  expect(rootKeyIds.size).toBe(32);
+
+  const envelopeFindMany = createBatchEnvelopeFindMany(tx);
+  const prisma = Object.assign(tx.prisma, {
+    hostedUserCryptoEnvelope: { findMany: envelopeFindMany },
+  });
+  const openedPlaintexts = captureDecodedPlaintexts();
+  resetLocalKmsDecryptMetrics(decryptMetrics, { yieldBeforeReturn: true });
+
+  const material = await readHostedRuntimeConnectionSecretMaterial({
+    prisma,
+    records,
+    tokenConnectionIds: new Set(records.map((record) => record.id)),
+  });
+
+  expect(material.size).toBe(32);
+  records.forEach((record, index) => {
+    expect(material.get(record.id)).toEqual({
+      externalAccountId: `junction-external-${index + 1}`,
+      tokenBundle: {
+        accessToken: `junction-access-${index + 1}`,
+        accessTokenExpiresAt: "2026-08-12T00:00:00.000Z",
+        keyVersion: "hosted-device-secure-box:v1",
+        refreshToken: `junction-refresh-${index + 1}`,
+        tokenVersion: index + 1,
+      },
+    });
+  });
+  expect(envelopeFindMany).toHaveBeenCalledTimes(1);
+  expect(decryptMetrics.calls).toHaveLength(32);
+  expect(decryptMetrics.maxConcurrent).toBeGreaterThanOrEqual(1);
+  expect(decryptMetrics.maxConcurrent).toBeLessThanOrEqual(4);
+  expect(decryptMetrics.returnedPlaintexts.every((plaintext) =>
+    plaintext.every((byte) => byte === 0)
+  )).toBe(true);
+  expect(openedPlaintexts).toHaveLength(96);
+  expect(openedPlaintexts.every((plaintext) =>
+    new Uint8Array(plaintext).every((byte) => byte === 0)
+  )).toBe(true);
+
+  const openedPlaintextCountBeforeMismatch = openedPlaintexts.length;
+  resetLocalKmsDecryptMetrics(decryptMetrics, { yieldBeforeReturn: true });
+  await expect(readHostedRuntimeConnectionSecretMaterial({
+    prisma,
+    records: [
+      { ...records[0]!, provider: "junction-mismatch" },
+      ...records.slice(1),
+    ],
+    tokenConnectionIds: new Set(records.map((record) => record.id)),
+  })).rejects.toThrow();
+  expect(decryptMetrics.activeCount).toBe(0);
+  expect(decryptMetrics.maxConcurrent).toBeLessThanOrEqual(4);
+  expect(decryptMetrics.returnedPlaintexts.every((plaintext) =>
+    plaintext.every((byte) => byte === 0)
+  )).toBe(true);
+  expect(openedPlaintexts.slice(openedPlaintextCountBeforeMismatch).every((plaintext) =>
+    new Uint8Array(plaintext).every((byte) => byte === 0)
+  )).toBe(true);
+
+  resetLocalKmsDecryptMetrics(decryptMetrics, { yieldBeforeReturn: true });
+  await expect(readHostedRuntimeConnectionSecretMaterial({
+    prisma,
+    records: [{ ...records[0]!, accessTokenEncrypted: null }],
+    tokenConnectionIds: new Set([records[0]!.id]),
+  })).rejects.toThrow(/missing its access token/u);
+  expect(envelopeFindMany).toHaveBeenCalledTimes(2);
+  expect(decryptMetrics.calls).toHaveLength(0);
+});
+
+test("K=32 private-field batches use one envelope query with at most four concurrent KMS unwraps", async () => {
+  const { decryptMetrics, tx } = await createHostedWebCryptoTransactionFixture();
+  const memberIds = Array.from({ length: 32 }, (_, index) => `member-batch-${index + 1}`);
   const records = await createBatchPrivateFieldRecords({ memberIds, tx });
   const envelopeFindMany = createBatchEnvelopeFindMany(tx);
   const emailFindMany = vi.fn().mockResolvedValue(records.emailRecords);
@@ -917,6 +1155,272 @@ test("member email batches use one envelope query with bounded KMS unwraps", asy
   )).toBe(true);
 });
 
+test("prepared max-cardinality secure-box batches do no metadata or KMS work while opening", async () => {
+  const { decryptMetrics, tx } = await createHostedWebCryptoTransactionFixture();
+  const memberIds = Array.from(
+    { length: 7 },
+    (_, index) => `member-prepared-batch-${index + 1}`,
+  );
+  const records = await createBatchPrivateFieldRecords({ memberIds, tx });
+  const envelopeFindMany = createBatchEnvelopeFindMany(tx);
+  const prisma = Object.assign(tx.prisma, {
+    hostedUserCryptoEnvelope: { findMany: envelopeFindMany },
+  });
+  const entries = records.identityRecords.map((record) => ({
+    aad: {
+      field: "hosted-member-identity.phone-number",
+      purpose: "hosted-member-private-field",
+      rowId: record.memberId,
+      table: "hosted_member",
+    },
+    scope: "hosted-member-private-field:hosted-member-identity.phone-number",
+    userId: record.memberId,
+    value: record.phoneNumberEncrypted,
+  }));
+  const { runWithHostedDomainRootUnwrapCache } = await import(
+    "../src/lib/hosted-crypto/domain-root-unwrap-cache"
+  );
+  const { unwrapHostedDomainRootForWeb } = await import(
+    "../src/lib/hosted-crypto/domain-root-store"
+  );
+
+  resetLocalKmsDecryptMetrics(decryptMetrics, { yieldBeforeReturn: true });
+  await runWithHostedDomainRootUnwrapCache(async () => {
+    await prewarmHostedUserSecureBoxStrings({
+      entries,
+      lane: "hosted-member-private-field",
+      prisma,
+    });
+
+    expect(envelopeFindMany).toHaveBeenCalledOnce();
+    expect(envelopeFindMany.mock.calls[0]?.[0]?.where?.OR).toHaveLength(7);
+    expect(decryptMetrics.calls).toHaveLength(7);
+    expect(decryptMetrics.maxConcurrent).toBeGreaterThan(1);
+    expect(decryptMetrics.maxConcurrent).toBeLessThanOrEqual(4);
+
+    const metadataQueriesAfterPrepare = envelopeFindMany.mock.calls.length;
+    const kmsCallsAfterPrepare = decryptMetrics.calls.length;
+    await expect(openHostedUserSecureBoxStringsWithPreparedRoots({
+      entries,
+      lane: "hosted-member-private-field",
+    })).resolves.toEqual(
+      memberIds.map((_, index) =>
+        `+12125550${String(index + 1).padStart(3, "0")}`
+      ),
+    );
+    expect(envelopeFindMany).toHaveBeenCalledTimes(
+      metadataQueriesAfterPrepare,
+    );
+    expect(decryptMetrics.calls).toHaveLength(kmsCallsAfterPrepare);
+
+    const activeRoot = await unwrapHostedDomainRootForWeb({
+      domain: "control",
+      prisma,
+      userId: memberIds[0]!,
+    });
+    activeRoot.rootKey.fill(0);
+    expect(decryptMetrics.calls).toHaveLength(kmsCallsAfterPrepare);
+  });
+  await Promise.resolve();
+
+  expect(decryptMetrics.returnedPlaintexts.every((plaintext) =>
+    plaintext.every((byte) => byte === 0)
+  )).toBe(true);
+});
+
+test("prepared root reads fail closed for missing and mismatched cache bindings without external work", async () => {
+  const { decryptMetrics, tx } = await createHostedWebCryptoTransactionFixture();
+  const {
+    HostedDomainRootPreparationRequiredError,
+    provisionActiveHostedDomainRootEnvelopeForUserOnly,
+    readPreparedHostedDomainRootsForWebByRootKeyIds,
+  } = await import("../src/lib/hosted-crypto/domain-root-store");
+  const {
+    getHostedDomainRootUnwrapCache,
+    runWithHostedDomainRootUnwrapCache,
+  } = await import("../src/lib/hosted-crypto/domain-root-unwrap-cache");
+
+  await provisionActiveHostedDomainRootEnvelopeForUserOnly({
+    domain: "ingress",
+    prisma: tx.prisma,
+    reason: "test.prepared-binding",
+    userId: "member-prepared-binding-owner",
+  });
+  const envelope = tx.persistedEnvelopes[0];
+  assert.ok(envelope);
+  const envelopeFindMany = vi.spyOn(
+    tx.prisma.hostedUserCryptoEnvelope,
+    "findMany",
+  );
+  envelopeFindMany.mockClear();
+  resetLocalKmsDecryptMetrics(decryptMetrics);
+
+  const missingReference = {
+    domain: "ingress" as const,
+    rootKeyId: "udrk:prepared-missing",
+    userId: "member-prepared-missing",
+  };
+  await runWithHostedDomainRootUnwrapCache(async () => {
+    await expect(readPreparedHostedDomainRootsForWebByRootKeyIds({
+      references: [missingReference],
+    })).rejects.toMatchObject({
+      name: HostedDomainRootPreparationRequiredError.name,
+      reference: missingReference,
+    });
+  });
+
+  const mismatchedRootKey = new Uint8Array(32).fill(19);
+  const mismatchedReference = {
+    domain: "ingress" as const,
+    rootKeyId: envelope.rootKeyId,
+    userId: "member-prepared-binding-request",
+  };
+  await runWithHostedDomainRootUnwrapCache(async () => {
+    const cache = getHostedDomainRootUnwrapCache();
+    assert.ok(cache);
+    cache.set(
+      createHostedDomainRootReferenceCacheKey(mismatchedReference),
+      Promise.resolve({ envelope, rootKey: mismatchedRootKey }),
+    );
+
+    await expect(readPreparedHostedDomainRootsForWebByRootKeyIds({
+      references: [mismatchedReference],
+    })).rejects.toThrow(
+      "Prepared hosted domain root does not match its requested reference.",
+    );
+    expect(mismatchedRootKey.every((byte) => byte === 19)).toBe(true);
+  });
+  await Promise.resolve();
+
+  expect(envelopeFindMany).not.toHaveBeenCalled();
+  expect(decryptMetrics.calls).toHaveLength(0);
+  expect(mismatchedRootKey.every((byte) => byte === 0)).toBe(true);
+});
+
+test("prepared root reads drain mixed cached failures and zeroize every successful copy", async () => {
+  const { decryptMetrics, tx } = await createHostedWebCryptoTransactionFixture();
+  const {
+    provisionActiveHostedDomainRootEnvelopeForUserOnly,
+    readPreparedHostedDomainRootsForWebByRootKeyIds,
+  } = await import("../src/lib/hosted-crypto/domain-root-store");
+  const {
+    getHostedDomainRootUnwrapCache,
+    runWithHostedDomainRootUnwrapCache,
+  } = await import("../src/lib/hosted-crypto/domain-root-unwrap-cache");
+
+  await provisionActiveHostedDomainRootEnvelopeForUserOnly({
+    domain: "ingress",
+    prisma: tx.prisma,
+    reason: "test.prepared-mixed-failure",
+    userId: "member-prepared-mixed-success",
+  });
+  const successEnvelope = tx.persistedEnvelopes[0];
+  assert.ok(successEnvelope);
+  const envelopeFindMany = vi.spyOn(
+    tx.prisma.hostedUserCryptoEnvelope,
+    "findMany",
+  );
+  envelopeFindMany.mockClear();
+  resetLocalKmsDecryptMetrics(decryptMetrics);
+
+  const firstReference = {
+    domain: "ingress" as const,
+    rootKeyId: "udrk:prepared-first-failure",
+    userId: "member-prepared-mixed-first",
+  };
+  const successReference = {
+    domain: "ingress" as const,
+    rootKeyId: successEnvelope.rootKeyId,
+    userId: successEnvelope.userId,
+  };
+  const laterReference = {
+    domain: "ingress" as const,
+    rootKeyId: "udrk:prepared-later-failure",
+    userId: "member-prepared-mixed-later",
+  };
+  const firstFailure = new Error("Prepared first cached failure.");
+  const laterFailure = new Error("Prepared later cached failure.");
+  const successMaster = new Uint8Array(32).fill(23);
+  const successDeferred = createDeferredValue<{
+    envelope: HostedDomainRootKeyEnvelopeV1;
+    rootKey: Uint8Array;
+  }>();
+  const zeroizedBuffers: Uint8Array[] = [];
+  const originalFill = Uint8Array.prototype.fill;
+  const fillSpy = vi.spyOn(Uint8Array.prototype, "fill").mockImplementation(
+    function (
+      this: Uint8Array,
+      value: number,
+      start?: number,
+      end?: number,
+    ): Uint8Array {
+      if (value === 0) {
+        zeroizedBuffers.push(this);
+      }
+      return originalFill.call(this, value, start, end);
+    },
+  );
+
+  try {
+    let readSettled = false;
+    await runWithHostedDomainRootUnwrapCache(async () => {
+      const cache = getHostedDomainRootUnwrapCache();
+      assert.ok(cache);
+      const firstRejected = Promise.reject(firstFailure);
+      const laterRejected = Promise.reject(laterFailure);
+      void firstRejected.catch(() => undefined);
+      void laterRejected.catch(() => undefined);
+      cache.set(
+        createHostedDomainRootReferenceCacheKey(firstReference),
+        firstRejected,
+      );
+      cache.set(
+        createHostedDomainRootReferenceCacheKey(successReference),
+        successDeferred.promise,
+      );
+      cache.set(
+        createHostedDomainRootReferenceCacheKey(laterReference),
+        laterRejected,
+      );
+
+      const read = readPreparedHostedDomainRootsForWebByRootKeyIds({
+        references: [firstReference, successReference, laterReference],
+      });
+      void read.then(
+        () => {
+          readSettled = true;
+        },
+        () => {
+          readSettled = true;
+        },
+      );
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(readSettled).toBe(false);
+
+      successDeferred.resolve({
+        envelope: successEnvelope,
+        rootKey: successMaster,
+      });
+      await expect(read).rejects.toBe(firstFailure);
+      expect(readSettled).toBe(true);
+      expect(successMaster.every((byte) => byte === 23)).toBe(true);
+      expect(zeroizedBuffers.some((candidate) =>
+        candidate !== successMaster
+        && candidate.length === successMaster.length
+        && candidate.every((byte) => byte === 0)
+      )).toBe(true);
+    });
+    await Promise.resolve();
+
+    expect(envelopeFindMany).not.toHaveBeenCalled();
+    expect(decryptMetrics.calls).toHaveLength(0);
+    expect(successMaster.every((byte) => byte === 0)).toBe(true);
+  } finally {
+    fillSpy.mockRestore();
+  }
+});
+
 test("batch private-field decrypt deduplicates roots and fails closed on missing envelopes", async () => {
   const { decryptMetrics, tx } = await createHostedWebCryptoTransactionFixture();
   const memberIds = ["member-batch-present", "member-batch-missing"];
@@ -945,14 +1449,17 @@ test("batch private-field decrypt deduplicates roots and fails closed on missing
     buildBatchEnvelopeRows(tx).filter((row) => row.userId !== second.memberId)
   );
   resetLocalKmsDecryptMetrics(decryptMetrics, { yieldBeforeReturn: true });
-  await expect(decryptHostedWebNullableStrings({
+  const missingEnvelopeError = await decryptHostedWebNullableStrings({
     field: "hosted-member-identity.phone-number",
     prisma,
     values: records.identityRecords.map((record) => ({
       memberId: record.memberId,
       value: record.phoneNumberEncrypted,
     })),
-  })).rejects.toThrow(/domain root envelope is not available/u);
+  }).then(() => null, (error: unknown) => error);
+  expect(missingEnvelopeError).toBeInstanceOf(Error);
+  expect((missingEnvelopeError as Error).message)
+    .toMatch(/domain root envelope is not available/u);
   expect(decryptMetrics.calls).toHaveLength(0);
 
   const [firstEnvelope, secondEnvelope] = tx.persistedEnvelopes;
@@ -1224,6 +1731,98 @@ test("batch metadata query failures are retryable in the same cache scope withou
   expect(decryptMetrics.calls).toHaveLength(1);
 });
 
+test("historical authority verify-key omissions stay retryable across request scopes", async () => {
+  setHostedSecureBoxStringTestCodecForTests(null);
+  const historicalAuthorityKeyVersion = `${AUTHORITY_KEY_VERSION}/historical`;
+  const historicalSigner = await generateP256SigningKeyPair();
+  const currentSigner = await generateP256SigningKeyPair();
+  const cloudflareRecipient = await generateP256EcdhKeyPair();
+  const decryptMetrics = createLocalKmsDecryptMetrics();
+  gcpKmsMock.client = createLocalKmsClient({
+    decryptMetrics,
+    encryptCalls: [],
+    signCalls: [],
+    signer: historicalSigner.privateKey,
+  });
+  stubHostedCryptoEnv({
+    authorityKeyVersionName: historicalAuthorityKeyVersion,
+    cloudflarePublicJwk: cloudflareRecipient.publicJwk,
+    signerPublicKeyPem: historicalSigner.publicKeyPem,
+  });
+  const tx = createCapturingTransaction();
+  const memberId = "member-historical-authority-root";
+  const {
+    provisionActiveHostedDomainRootEnvelopeForUserOnly,
+    unwrapHostedDomainRootsForWebByRootKeyIds,
+  } = await import("../src/lib/hosted-crypto/domain-root-store");
+  const { runWithHostedDomainRootUnwrapCache } = await import(
+    "../src/lib/hosted-crypto/domain-root-unwrap-cache"
+  );
+
+  await provisionActiveHostedDomainRootEnvelopeForUserOnly({
+    domain: "control",
+    prisma: tx.prisma,
+    reason: "test.historical-authority",
+    userId: memberId,
+  });
+  const envelope = tx.persistedEnvelopes[0];
+  assert.ok(envelope);
+  expect(envelope.authoritySignature.keyVersionName)
+    .toBe(historicalAuthorityKeyVersion);
+  const references = [{
+    domain: "control" as const,
+    rootKeyId: envelope.rootKeyId,
+    userId: memberId,
+  }];
+
+  gcpKmsMock.client = createLocalKmsClient({
+    decryptMetrics,
+    encryptCalls: [],
+    signCalls: [],
+    signer: currentSigner.privateKey,
+  });
+  stubHostedCryptoEnv({
+    cloudflarePublicJwk: cloudflareRecipient.publicJwk,
+    signerPublicKeyPem: currentSigner.publicKeyPem,
+  });
+  resetLocalKmsDecryptMetrics(decryptMetrics);
+  let missingKeyError: unknown = null;
+  await runWithHostedDomainRootUnwrapCache(async () => {
+    missingKeyError = await unwrapHostedDomainRootsForWebByRootKeyIds({
+      prisma: tx.prisma,
+      references,
+      retainFailureInScopedCache: true,
+    }).then(() => null, (error: unknown) => error);
+  });
+  expect(missingKeyError).toBeInstanceOf(Error);
+  expect((missingKeyError as Error).message)
+    .toMatch(/not trusted for verification/u);
+  expect(decryptMetrics.calls).toHaveLength(0);
+
+  stubHostedCryptoEnv({
+    authorityVerifyKeyringJson: JSON.stringify({
+      [historicalAuthorityKeyVersion]: {
+        publicKeyPem: historicalSigner.publicKeyPem,
+        status: "verify_only",
+      },
+    }),
+    cloudflarePublicJwk: cloudflareRecipient.publicJwk,
+    signerPublicKeyPem: currentSigner.publicKeyPem,
+  });
+  resetLocalKmsDecryptMetrics(decryptMetrics);
+  await runWithHostedDomainRootUnwrapCache(async () => {
+    const [root] = await unwrapHostedDomainRootsForWebByRootKeyIds({
+      prisma: tx.prisma,
+      references,
+      retainFailureInScopedCache: true,
+    });
+    assert.ok(root);
+    expect(root.rootKey.some((byte) => byte !== 0)).toBe(true);
+    root.rootKey.fill(0);
+  });
+  expect(decryptMetrics.calls).toHaveLength(1);
+});
+
 test("Linq authority batch retains metadata validation failures only for the current request", async () => {
   type MetadataTestRow = Omit<
     ReturnType<typeof buildBatchEnvelopeRows>[number],
@@ -1366,7 +1965,7 @@ test("a retained root failure stops a mixed batch before new metadata or KMS wor
 
   resetLocalKmsDecryptMetrics(decryptMetrics, { failAtCall: 1 });
   await runWithHostedDomainRootUnwrapCache(async () => {
-    await expect(decryptHostedWebNullableFields({
+    const transientError = await decryptHostedWebNullableFields({
       entries: [{
         field: "hosted-member-identity.phone-number",
         memberId: first.memberId,
@@ -1374,7 +1973,12 @@ test("a retained root failure stops a mixed batch before new metadata or KMS wor
       }],
       prisma,
       retainFailureInScopedCache: true,
-    })).rejects.toThrow("Test KMS decrypt failure.");
+    }).then(
+      () => null,
+      (error: unknown) => error,
+    );
+    expect(transientError).toBeInstanceOf(Error);
+    expect((transientError as Error).message).toBe("Test KMS decrypt failure.");
     const envelopeCallsBeforeMixedBatch = envelopeFindMany.mock.calls.length;
     const kmsCallsBeforeMixedBatch = decryptMetrics.calls.length;
     decryptMetrics.failAtCall = null;
@@ -1415,14 +2019,17 @@ test("batch private-field decrypt zeroizes invalid KMS plaintext and stops befor
     invalidPlaintextAtCall: 2,
     yieldBeforeReturn: true,
   });
-  await expect(decryptHostedWebNullableStrings({
+  const invalidRootError = await decryptHostedWebNullableStrings({
     field: "hosted-member-identity.phone-number",
     prisma,
     values: records.identityRecords.map((record) => ({
       memberId: record.memberId,
       value: record.phoneNumberEncrypted,
     })),
-  })).rejects.toThrow(/decrypt returned invalid root length/u);
+  }).then(() => null, (error: unknown) => error);
+  expect(invalidRootError).toBeInstanceOf(Error);
+  expect((invalidRootError as Error).message)
+    .toMatch(/decrypt returned invalid root length/u);
   expect(envelopeFindMany).toHaveBeenCalledTimes(1);
   expect(decryptMetrics.calls).toHaveLength(4);
   expect(decryptMetrics.maxConcurrent).toBeGreaterThanOrEqual(1);
@@ -1494,6 +2101,38 @@ test("domain root unwraps are memoized inside the scoped cache and wiped at scop
   assert.ok(outside.readCount() > outsideFirst);
 });
 
+test("a prepared-only root scope rejects cache misses before KMS", async () => {
+  const { decryptMetrics, tx } = await createHostedWebCryptoTransactionFixture();
+  const {
+    HostedDomainRootPreparationMismatchError,
+    provisionActiveHostedDomainRootEnvelopeForUserOnly,
+    unwrapHostedDomainRootForWeb,
+  } = await import("../src/lib/hosted-crypto/domain-root-store");
+  const {
+    runWithHostedDomainRootProviderCallsDisabled,
+    runWithHostedDomainRootUnwrapCache,
+  } = await import("../src/lib/hosted-crypto/domain-root-unwrap-cache");
+  const userId = "member-test-prepared-only-cache-miss";
+  await provisionActiveHostedDomainRootEnvelopeForUserOnly({
+    domain: "control",
+    prisma: tx.prisma,
+    reason: "test.prepared-only-cache-miss",
+    userId,
+  });
+
+  await runWithHostedDomainRootUnwrapCache(async () => {
+    await expect(runWithHostedDomainRootProviderCallsDisabled(() =>
+      unwrapHostedDomainRootForWeb({
+        domain: "control",
+        prisma: tx.prisma,
+        userId,
+      })
+    )).rejects.toBeInstanceOf(HostedDomainRootPreparationMismatchError);
+  });
+
+  assert.equal(decryptMetrics.calls.length, 0);
+});
+
 test("a prepared domain root warms the scoped active key before its row exists", async () => {
   const { decryptMetrics, tx } =
     await createHostedWebCryptoTransactionFixture();
@@ -1531,6 +2170,76 @@ test("a prepared domain root warms the scoped active key before its row exists",
   assert.equal(counting.readCount(), 0);
   assert.equal(decryptMetrics.calls.length, 1);
   assert.equal(tx.persistedEnvelopes.length, 0);
+});
+
+test("the prepared Web root token commits and reuses only its exact scoped root", async () => {
+  const { tx } = await createHostedWebCryptoTransactionFixture();
+  const {
+    prepareHostedDomainRootForWeb,
+    readPreparedHostedDomainRootForWebLocal,
+    revalidatePreparedHostedDomainRootForWebTx,
+  } = await import("../src/lib/hosted-crypto/domain-root-store");
+  const { runWithHostedDomainRootUnwrapCache } = await import(
+    "../src/lib/hosted-crypto/domain-root-unwrap-cache"
+  );
+  const userId = "member-test-prepared-web-root";
+
+  await runWithHostedDomainRootUnwrapCache(async () => {
+    const prepared = await prepareHostedDomainRootForWeb({
+      domain: "control",
+      prisma: tx.prisma,
+      reason: "test.prepared-web-root",
+      userId,
+    });
+    const serializedClone = JSON.parse(JSON.stringify(prepared)) as typeof prepared;
+    expect(() => readPreparedHostedDomainRootForWebLocal(serializedClone)).toThrow(
+      /not the exact prepared scoped cache entry/u,
+    );
+    assert.equal(tx.persistedEnvelopes.length, 0);
+    const local = readPreparedHostedDomainRootForWebLocal(prepared);
+    const committed = await revalidatePreparedHostedDomainRootForWebTx({
+      prepared,
+      tx: tx.prisma as Prisma.TransactionClient,
+    });
+    assert.equal(committed.rootKeyId, prepared.rootKeyId);
+    assert.equal(committed.root, local.root);
+  });
+
+  assert.equal(tx.persistedEnvelopes.length, 1);
+});
+
+test("the prepared Web root token rejects an exact winner drift", async () => {
+  const { tx } = await createHostedWebCryptoTransactionFixture();
+  const {
+    HostedDomainRootPreparationMismatchError,
+    prepareHostedDomainRootForWeb,
+    provisionActiveHostedDomainRootEnvelopeForUserOnly,
+    revalidatePreparedHostedDomainRootForWebTx,
+  } = await import("../src/lib/hosted-crypto/domain-root-store");
+  const { runWithHostedDomainRootUnwrapCache } = await import(
+    "../src/lib/hosted-crypto/domain-root-unwrap-cache"
+  );
+  const userId = "member-test-prepared-web-root-drift";
+
+  await runWithHostedDomainRootUnwrapCache(async () => {
+    const prepared = await prepareHostedDomainRootForWeb({
+      domain: "control",
+      prisma: tx.prisma,
+      reason: "test.prepared-web-root-drift",
+      userId,
+    });
+    const winner = await provisionActiveHostedDomainRootEnvelopeForUserOnly({
+      domain: "control",
+      prisma: tx.prisma,
+      reason: "test.prepared-web-root-winner",
+      userId,
+    });
+    assert.notEqual(winner.rootKeyId, prepared.rootKeyId);
+    await expect(revalidatePreparedHostedDomainRootForWebTx({
+      prepared,
+      tx: tx.prisma as Prisma.TransactionClient,
+    })).rejects.toBeInstanceOf(HostedDomainRootPreparationMismatchError);
+  });
 });
 
 test("Stripe activation preflight keeps activation proof false and reuses KMS roots for private projection", async () => {
@@ -1614,6 +2323,7 @@ test("Stripe activation preflight keeps activation proof false and reuses KMS ro
     },
     hostedMailboxItem: {
       findFirst: async () => null,
+      groupBy: async () => [],
     },
     hostedMemberRouting: {
       findUnique: async () => null,
@@ -1692,6 +2402,7 @@ test("Stripe activation preflight failure cannot create complete-root activation
     ) => run(tx.prisma),
     hostedMailboxItem: {
       findFirst: async () => null,
+      groupBy: async () => [],
     },
   });
   resetLocalKmsDecryptMetrics(decryptMetrics, { failAtCall: 1 });
@@ -1736,6 +2447,47 @@ test("nested domain root cache scopes reuse the transaction-owned cache", async 
   assert.ok(outerCache);
   assert.equal(nestedCache, outerCache);
   assert.equal(resumedOuterCache, outerCache);
+  assert.equal(getHostedDomainRootUnwrapCache(), undefined);
+});
+
+test("fresh domain root cache scopes isolate retry aliases and wipe only the child", async () => {
+  const {
+    getHostedDomainRootUnwrapCache,
+    runWithFreshHostedDomainRootUnwrapCache,
+    runWithHostedDomainRootUnwrapCache,
+  } = await import("../src/lib/hosted-crypto/domain-root-unwrap-cache");
+  const outerRootKey = Uint8Array.from({ length: 32 }, () => 7);
+  const childRootKey = Uint8Array.from({ length: 32 }, () => 9);
+  let outerCache: ReturnType<typeof getHostedDomainRootUnwrapCache> = undefined;
+  let childCache: ReturnType<typeof getHostedDomainRootUnwrapCache> = undefined;
+  let resumedOuterCache: ReturnType<typeof getHostedDomainRootUnwrapCache> =
+    undefined;
+
+  await runWithHostedDomainRootUnwrapCache(async () => {
+    outerCache = getHostedDomainRootUnwrapCache();
+    assert.ok(outerCache);
+    outerCache.set("outer", Promise.resolve({
+      envelope: {} as never,
+      rootKey: outerRootKey,
+    }));
+
+    await runWithFreshHostedDomainRootUnwrapCache(async () => {
+      childCache = getHostedDomainRootUnwrapCache();
+      assert.ok(childCache);
+      childCache.set("child", Promise.resolve({
+        envelope: {} as never,
+        rootKey: childRootKey,
+      }));
+    });
+
+    resumedOuterCache = getHostedDomainRootUnwrapCache();
+    assert.equal(resumedOuterCache, outerCache);
+    assert.notEqual(childCache, outerCache);
+    assert.deepEqual([...childRootKey], Array.from({ length: 32 }, () => 0));
+    assert.deepEqual([...outerRootKey], Array.from({ length: 32 }, () => 7));
+  });
+
+  assert.deepEqual([...outerRootKey], Array.from({ length: 32 }, () => 0));
   assert.equal(getHostedDomainRootUnwrapCache(), undefined);
 });
 
@@ -1944,6 +2696,79 @@ test("webhook-style multi-field crypto reuses one unwrap per domain inside the s
   });
 });
 
+test("prepared secure-box opening uses only the exact request-scoped root", async () => {
+  setHostedSecureBoxStringTestCodecForTests(null);
+  const {
+    getHostedDomainRootUnwrapCache,
+    runWithHostedDomainRootUnwrapCache,
+  } = await import("../src/lib/hosted-crypto/domain-root-unwrap-cache");
+  const userId = "member-test-prepared-open";
+  const rootKeyId = "udrk:control:prepared-open";
+  const rootKey = Uint8Array.from({ length: 32 }, (_, index) => index + 1);
+  const cachedRootKey = Uint8Array.from(rootKey);
+  const scope = "hosted-pending-group-setup:payload:v1";
+  const aad = {
+    field: "payload_encrypted",
+    purpose: "pending-group-setup",
+    rowId: "hpgs_prepared_open",
+    table: "hosted_pending_group_setup",
+  } as const;
+  const cachedEnvelope: HostedDomainRootKeyEnvelopeV1 = {
+    authoritySignature: {
+      alg: "GCP-KMS-EC-P256-SHA256",
+      keyVersionName: "test-key-version",
+      signedAt: "2026-08-10T18:00:00.000Z",
+      signature: "test-signature",
+    },
+    createdAt: "2026-08-10T18:00:00.000Z",
+    domain: "control",
+    generation: 1,
+    rootKeyId,
+    schema: HOSTED_DOMAIN_ROOT_KEY_ENVELOPE_SCHEMA,
+    updatedAt: "2026-08-10T18:00:00.000Z",
+    userId,
+    wraps: [],
+  };
+  const ciphertext = serializeHostedSecureBoxEnvelope(
+    await sealHostedSecureBox({
+      aad: buildHostedSecureBoxAad({
+        ...aad,
+        domain: "control",
+        lane: "hosted-member-private-field",
+        scope,
+        userId,
+      }),
+      domain: "control",
+      lane: "hosted-member-private-field",
+      plaintext: new TextEncoder().encode("authenticated plaintext"),
+      rootKey,
+      rootKeyId,
+      scope,
+    }),
+  );
+
+  await runWithHostedDomainRootUnwrapCache(async () => {
+    const cache = getHostedDomainRootUnwrapCache();
+    assert.ok(cache);
+    cache.set(`${userId}|control|${rootKeyId}`, Promise.resolve({
+      envelope: cachedEnvelope,
+      rootKey: cachedRootKey,
+    }));
+
+    await expect(openHostedUserSecureBoxStringFromPreparedRoot({
+      aad,
+      lane: "hosted-member-private-field",
+      preparedRootKeyId: rootKeyId,
+      scope,
+      userId,
+      value: ciphertext,
+    })).resolves.toBe("authenticated plaintext");
+    expect([...cachedRootKey]).toEqual([...rootKey]);
+  });
+
+  expect([...cachedRootKey]).toEqual(Array.from({ length: 32 }, () => 0));
+});
+
 test("batch private-field sealing unwraps once and preserves member-bound AAD", async () => {
   const { tx } = await createHostedWebCryptoTransactionFixture();
   const { provisionActiveHostedDomainRootEnvelopeForUserOnly } = await import(
@@ -2026,6 +2851,102 @@ test("batch private-field sealing unwraps once and preserves member-bound AAD", 
     lane: "hosted-member-private-field",
     prisma,
   })).rejects.toThrow();
+});
+
+test("batch secure-box opening drains all work and preserves the first observed failure", async () => {
+  const { decryptMetrics, tx } = await createHostedWebCryptoTransactionFixture();
+  const { provisionActiveHostedDomainRootEnvelopeForUserOnly } = await import(
+    "../src/lib/hosted-crypto/domain-root-store"
+  );
+  const memberId = "member-test-first-observed-batch-failure";
+  const scope = "hosted-address-book-advisory-name:v1";
+  const entries = [
+    {
+      aad: {
+        field: "advisory_name",
+        purpose: "hosted-address-book-advisory-name",
+        rowId: "1:first-observed-a",
+        table: "hosted_address_book_contact",
+      },
+      scope,
+      value: "First",
+    },
+    {
+      aad: {
+        field: "advisory_name",
+        purpose: "hosted-address-book-advisory-name",
+        rowId: "1:first-observed-b",
+        table: "hosted_address_book_contact",
+      },
+      scope,
+      value: "Second",
+    },
+  ] as const;
+  await provisionActiveHostedDomainRootEnvelopeForUserOnly({
+    domain: "control",
+    prisma: tx.prisma,
+    reason: "test.first-observed-batch-failure",
+    userId: memberId,
+  });
+  const prisma = Object.assign(tx.prisma, {
+    hostedUserCryptoEnvelope: {
+      findMany: createBatchEnvelopeFindMany(tx),
+    },
+  });
+  const sealed = await sealHostedUserSecureBoxStrings({
+    entries,
+    lane: "hosted-member-private-field",
+    prisma,
+    userId: memberId,
+  });
+
+  const firstObservedFailure = new Error("first observed secure-box failure");
+  const laterFailure = new Error("later secure-box failure");
+  let activeOpens = 0;
+  let decryptCalls = 0;
+  let releaseLaterFailure!: () => void;
+  const laterFailureGate = new Promise<void>((resolve) => {
+    releaseLaterFailure = resolve;
+  });
+  vi.spyOn(crypto.subtle, "decrypt").mockImplementation(async () => {
+    decryptCalls += 1;
+    activeOpens += 1;
+    try {
+      if (decryptCalls === 1) {
+        await laterFailureGate;
+        throw laterFailure;
+      }
+      throw firstObservedFailure;
+    } finally {
+      activeOpens -= 1;
+    }
+  });
+
+  let returned = false;
+  const opened = openHostedUserSecureBoxStrings({
+    entries: entries.map((entry, index) => ({
+      aad: entry.aad,
+      scope: entry.scope,
+      userId: memberId,
+      value: sealed[index],
+    })),
+    lane: "hosted-member-private-field",
+    prisma,
+  }).finally(() => {
+    returned = true;
+  });
+
+  await vi.waitFor(() => expect(decryptCalls).toBe(2));
+  await Promise.resolve();
+  expect(returned).toBe(false);
+  expect(activeOpens).toBe(1);
+  releaseLaterFailure();
+  await expect(opened).rejects.toBe(firstObservedFailure);
+  expect(activeOpens).toBe(0);
+  expect(decryptMetrics.activeCount).toBe(0);
+  expect(decryptMetrics.returnedPlaintexts.every((plaintext) =>
+    plaintext.every((byte) => byte === 0)
+  )).toBe(true);
 });
 
 function createEnvelopeReadCountingClient(
@@ -2157,6 +3078,53 @@ async function createHostedWebCryptoTransactionFixture(
   };
 }
 
+function createHostedRuntimeDeviceSecretRecord(input: {
+  accessTokenEncrypted: string;
+  connectionId: string;
+  externalAccountIdEncrypted: string;
+  refreshTokenEncrypted: string;
+  tokenVersion: number;
+  userId: string;
+}): HostedConnectionRecord {
+  const createdAt = new Date("2026-08-11T12:00:00.000Z");
+  return {
+    accessTokenEncrypted: input.accessTokenEncrypted,
+    accessTokenExpiresAt: new Date("2026-08-12T00:00:00.000Z"),
+    connectedAt: createdAt,
+    createdAt,
+    credentialKind: "oauth_tokens",
+    credentialMetadataJson: {},
+    displayName: "Junction",
+    externalAccountIdEncrypted: input.externalAccountIdEncrypted,
+    id: input.connectionId,
+    keyVersion: "hosted-device-secure-box:v1",
+    lastErrorCode: null,
+    lastErrorMessage: null,
+    lastSyncCompletedAt: null,
+    lastSyncErrorAt: null,
+    lastSyncStartedAt: null,
+    lastWebhookAt: null,
+    metadataJson: {},
+    nextReconcileAt: null,
+    provider: "junction",
+    providerAccountBlindIndex: `blind-${input.connectionId}`,
+    providerApplicationId: null,
+    providerApplicationRevision: null,
+    providerConfigKey: null,
+    refreshLeaseExpiresAt: null,
+    refreshLeaseOwner: null,
+    refreshLeaseTokenVersion: null,
+    refreshTokenEncrypted: input.refreshTokenEncrypted,
+    scopesJson: [],
+    setupExpiresAt: null,
+    setupPhase: null,
+    status: "active",
+    tokenVersion: input.tokenVersion,
+    updatedAt: createdAt,
+    userId: input.userId,
+  };
+}
+
 async function createBatchPrivateFieldRecords(input: {
   memberIds: readonly string[];
   tx: HostedCryptoTestTransaction;
@@ -2259,7 +3227,6 @@ function buildBatchEnvelopeRows(tx: HostedCryptoTestTransaction) {
 
 function captureDecodedPlaintexts(): Uint8Array[] {
   const outputs: Uint8Array[] = [];
-  const decode = TextDecoder.prototype.decode;
   vi.spyOn(TextDecoder.prototype, "decode").mockImplementation(function (
     this: TextDecoder,
     input,
@@ -2268,7 +3235,7 @@ function captureDecodedPlaintexts(): Uint8Array[] {
     if (input instanceof Uint8Array) {
       outputs.push(input);
     }
-    return decode.call(this, input, options);
+    return decodeText.call(this, input, options);
   });
   return outputs;
 }
@@ -2291,11 +3258,13 @@ function createCapturingTransaction(): HostedCryptoTestTransaction {
     $queryRaw: async <T = unknown>(
       ...args: Parameters<Prisma.TransactionClient["$queryRaw"]>
     ): Promise<T> => {
-      const strings = args[0] as TemplateStringsArray;
-      const sql = strings.join("?");
-      const values = args.slice(1);
-      const userId = values.find((value): value is string =>
+      const query = args[0] as TemplateStringsArray | Prisma.Sql;
+      const isPrismaSql = !Array.isArray(query) && "sql" in query;
+      const sql = isPrismaSql ? query.sql : query.join("?");
+      const values = isPrismaSql ? query.values : args.slice(1);
+      const userIds = values.filter((value): value is string =>
         typeof value === "string" && (value.startsWith("member-") || value.startsWith("hbm_")));
+      const userId = userIds[0];
       if (sql.includes("SELECT DISTINCT domain")) {
         const domains = new Set(
           persistedEnvelopes
@@ -2306,14 +3275,18 @@ function createCapturingTransaction(): HostedCryptoTestTransaction {
         return [...domains].map((domain) => ({ domain })) as T;
       }
 
-      if (sql.includes("COUNT(DISTINCT domain)")) {
-        const domains = new Set(
-          persistedEnvelopes
-            .filter((candidate) => candidate.userId === userId)
-            .filter((candidate) => !inactiveEnvelopeKeys.has(createEnvelopeStatusKey(candidate)))
-            .map((candidate) => candidate.domain),
-        );
-        return [{ domainCount: domains.size }] as T;
+      if (sql.includes("HAVING COUNT(DISTINCT domain)")) {
+        return userIds.flatMap((candidateUserId) => {
+          const domains = new Set(
+            persistedEnvelopes
+              .filter((candidate) => candidate.userId === candidateUserId)
+              .filter((candidate) =>
+                !inactiveEnvelopeKeys.has(createEnvelopeStatusKey(candidate))
+              )
+              .map((candidate) => candidate.domain),
+          );
+          return domains.size >= 4 ? [{ userId: candidateUserId }] : [];
+        }) as T;
       }
 
       const rootKeyId = values.find((value): value is string =>
@@ -2775,6 +3748,25 @@ function resetLocalKmsDecryptMetrics(
   metrics.yieldBeforeReturn = input?.yieldBeforeReturn ?? false;
 }
 
+function createHostedDomainRootReferenceCacheKey(input: {
+  domain: string;
+  rootKeyId: string;
+  userId: string;
+}): string {
+  return `${input.userId}|${input.domain}|${input.rootKeyId}`;
+}
+
+function createDeferredValue<T>(): {
+  promise: Promise<T>;
+  resolve: (value: T) => void;
+} {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((resolvePromise) => {
+    resolve = resolvePromise;
+  });
+  return { promise, resolve };
+}
+
 function restoreHostedSecureBoxTestCodec(): void {
   setHostedSecureBoxStringTestCodecForTests({
     decrypt(input) {
@@ -2808,6 +3800,7 @@ function restoreHostedSecureBoxTestCodec(): void {
 }
 
 function stubHostedCryptoEnv(input: {
+  authorityKeyVersionName?: string;
   authorityVerifyKeyringJson?: string;
   cloudflarePublicKeyringJson?: string;
   cloudflarePublicJwk: JsonWebKey;
@@ -2819,7 +3812,10 @@ function stubHostedCryptoEnv(input: {
     JSON.stringify(input.cloudflarePublicJwk),
   );
   vi.stubEnv("HOSTED_CRYPTO_ENV", "test");
-  vi.stubEnv("HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_KEY_VERSION", AUTHORITY_KEY_VERSION);
+  vi.stubEnv(
+    "HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_KEY_VERSION",
+    input.authorityKeyVersionName ?? AUTHORITY_KEY_VERSION,
+  );
   vi.stubEnv(
     "HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_PUBLIC_KEY_PEM",
     input.signerPublicKeyPem.replace(/\n/gu, "\\n"),

@@ -13,6 +13,7 @@ import type {
 import {
   GroupFundingSignInRequired,
 } from "@/src/components/hosted-groups/group-funding-sign-in-button";
+import { GroupFundingSupporters } from "@/src/components/hosted-groups/group-funding-supporters";
 import {
   GroupUsageFundingActions,
   GroupUsageFundingShell,
@@ -62,6 +63,17 @@ const DESIGN_GROUP_MONTHLY_CAPS = [
   { amountLabel: "$10", monthlyCapMinor: 1_000 },
   { amountLabel: "$20", monthlyCapMinor: 2_000 },
 ] as const;
+
+const DESIGN_GROUP_FUNDING_SUPPORTERS = {
+  monthlySponsor: {
+    id: "hucp_design_monthly_sponsor",
+    name: "The Group Historian",
+  },
+  oneTimeContributions: [
+    { id: "hucp_design_one_time_1", name: "Night Shift" },
+    { id: "hucp_design_one_time_2", name: "Anonymous" },
+  ],
+};
 
 const DESIGN_TOP_UP_CONTACT_OPTIONS: MurphContactOption[] = [
   {
@@ -323,6 +335,7 @@ function GroupUsageFundingStudy() {
           />
         )}
       />
+      <GroupFundingSupporters supporters={DESIGN_GROUP_FUNDING_SUPPORTERS} />
     </div>
   );
   const oneTimeRecovery = () => (
@@ -531,6 +544,18 @@ function GroupUsageFundingStudy() {
           />
         </DesignSponsorshipState>
       </div>
+    </div>
+  );
+}
+
+export function GroupFundingSupportersStudy() {
+  return (
+    <div
+      className="w-full max-w-lg rounded-3xl border border-border bg-background px-6 pb-8"
+      data-design-component="group-funding-supporters"
+      inert
+    >
+      <GroupFundingSupporters supporters={DESIGN_GROUP_FUNDING_SUPPORTERS} />
     </div>
   );
 }

@@ -12,9 +12,14 @@ import {
 import { serializeHostedEmailThreadTarget } from "@murphai/runtime-state";
 import { describe, expect, it, vi } from "vitest";
 
+import { buildHostedDeviceSyncWake } from "@/src/lib/device-sync/wake";
+import {
+  buildHostedDeviceSyncScheduledReconcileWakeEventId,
+} from "@/src/lib/device-sync/wake-service";
 import {
   advanceHostedMailboxConsumedSeqByLane,
   appendHostedMailboxEnvelopeTx,
+  appendPreparedHostedMailboxEnvelopeTx,
   appendHostedMailboxEnvelopeWithIdentityTx,
   appendHostedMailboxEnvelopeWithSourceMessageTx,
   appendHostedEnvironmentVoiceMailboxEnvelopeTx,
@@ -31,16 +36,18 @@ import {
   HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA,
   HOSTED_MAILBOX_PAYLOAD_SCHEMA,
   projectHostedMailboxItem,
+  prepareHostedMailboxEnvelopeAppend,
   readHostedMailboxConsumedSeqByLane,
-  readHostedMailboxLiveItemById,
-  readHostedMailboxRecentLiveConversationItemIds,
-  readHostedMailboxWakeByItemId,
-  readHostedMailboxLatestPendingConversationItem,
-  readHostedMailboxItemCheckpointById,
-  readHostedMailboxMaxSeqByLane,
   readHostedMailboxConversationInputAuthorityByAssistantInputIdTx,
   readHostedMailboxConversationWakeByAssistantInputId,
+  readHostedMailboxItemCheckpointById,
+  readHostedMailboxLatestPendingConversationItem,
+  readHostedMailboxLiveItemById,
+  readHostedMailboxMaxSeqByLane,
+  readHostedMailboxRecentLiveConversationItemIds,
+  readHostedMailboxUserIdsByKind,
   readHostedMailboxWakeAfterDedupeLockTx,
+  readHostedMailboxWakeByItemId,
   resolveHostedMailboxRuntimeFetchLaneCursors,
   tryMarkHostedMailboxConversationAiUsageDenied,
   type HostedMailboxItemRow,
@@ -764,6 +771,26 @@ describe("tryMarkHostedMailboxConversationAiUsageDenied", () => {
 });
 
 describe("appendHostedMailboxItemTx", () => {
+  it("rejects writes for retired mailbox kinds before touching storage", async () => {
+    const tx = createHostedMailboxTx({
+      hostedMailboxItem: createHostedMailboxItemDelegate(),
+      hostedMailboxPayload: createHostedMailboxPayloadDelegate(),
+    });
+
+    await expect(appendHostedMailboxItemTx({
+      dedupeKey: "dedupe_retired_newsletter_1",
+      kind: "group-newsletter.email-needed",
+      lane: "system",
+      occurredAt: "2026-04-26T00:00:00.000Z",
+      payloadSerializedJson: JSON.stringify({ kind: "retired" }),
+      tx,
+      userId: "member_mailbox_1",
+    })).rejects.toThrow("Hosted mailbox retired kinds are read-only.");
+
+    expect(tx.$executeRaw).not.toHaveBeenCalled();
+    expect(tx.$queryRaw).not.toHaveBeenCalled();
+  });
+
   it("allocates a lane sequence and stores small opaque payload ciphertext inline", async () => {
     const hostedMailboxItem = createHostedMailboxItemDelegate();
     const hostedMailboxPayload = createHostedMailboxPayloadDelegate();
@@ -1165,6 +1192,91 @@ describe("appendHostedMailboxItemTx", () => {
 });
 
 describe("appendHostedMailboxEnvelopeTx", () => {
+  it("does not reserve ordering sequences when prepared encryption fails", async () => {
+    const tx = createHostedMailboxTx({
+      hostedMailboxItem: createHostedMailboxItemDelegate(),
+      hostedMailboxPayload: createHostedMailboxPayloadDelegate(),
+    });
+    setHostedSecureBoxStringTestCodecForTests({
+      decrypt(input) {
+        return input.value;
+      },
+      encrypt() {
+        throw new Error("forced prepared mailbox encryption failure");
+      },
+    });
+    const prisma = Object.assign(Object.create(null), tx, {
+      $transaction: async <TResult>(
+        callback: (transaction: typeof tx) => Promise<TResult>,
+      ) => callback(tx),
+    });
+
+    try {
+      await expect(prepareHostedMailboxEnvelopeAppend({
+        envelope: buildHostedEnvironmentVoiceEnvelope(
+          "environment-voice/member_mailbox_1/failed-preparation.webm",
+        ),
+        prisma,
+      })).rejects.toThrow("forced prepared mailbox encryption failure");
+      expect(tx.$queryRaw).not.toHaveBeenCalled();
+    } finally {
+      restoreDefaultHostedSecureBoxTestCodec();
+    }
+  });
+
+  it("pre-encrypts a prepared append before its database-only commit", async () => {
+    const hostedMailboxItem = createHostedMailboxItemDelegate();
+    const tx = createHostedMailboxTx({
+      hostedMailboxItem,
+      hostedMailboxPayload: createHostedMailboxPayloadDelegate(),
+    });
+    let terminalTransactionActive = false;
+    let encryptionCalls = 0;
+    let encryptionCallsDuringTerminalTransaction = 0;
+    setHostedSecureBoxStringTestCodecForTests({
+      decrypt(input) {
+        return input.value;
+      },
+      encrypt(input) {
+        encryptionCalls += 1;
+        if (terminalTransactionActive) {
+          encryptionCallsDuringTerminalTransaction += 1;
+        }
+        return `hsb-prepared-test:${Buffer.from(input.value).toString("base64url")}`;
+      },
+    });
+    const prisma = Object.assign(Object.create(null), tx, {
+      $transaction: async <TResult>(
+        callback: (transaction: typeof tx) => Promise<TResult>,
+      ) => callback(tx),
+    });
+
+    try {
+      const prepared = await prepareHostedMailboxEnvelopeAppend({
+        envelope: buildHostedEnvironmentVoiceEnvelope(
+          "environment-voice/member_mailbox_1/prepared.webm",
+        ),
+        prisma,
+      });
+      expect(encryptionCalls).toBeGreaterThan(0);
+
+      terminalTransactionActive = true;
+      await expect(appendPreparedHostedMailboxEnvelopeTx({
+        prepared,
+        tx,
+      })).resolves.toMatchObject({
+        mailboxItemId: expect.any(String),
+      });
+      terminalTransactionActive = false;
+
+      expect(encryptionCallsDuringTerminalTransaction).toBe(0);
+      expect(hostedMailboxItem.create).toHaveBeenCalledOnce();
+    } finally {
+      terminalTransactionActive = false;
+      restoreDefaultHostedSecureBoxTestCodec();
+    }
+  });
+
   it("indexes accepted Linq input without an extra source-lock query", async () => {
     let insertedRow: HostedMailboxItemRow | null = null;
     const hostedMailboxItem = createHostedMailboxItemDelegate({
@@ -1494,6 +1606,95 @@ describe("appendHostedMailboxEnvelopeTx", () => {
       /^hbidx:assistant-input:v[0-9]+:[a-f0-9]{64}$/u,
     );
     expect(hostedMailboxItem.create).toHaveBeenCalledTimes(1);
+  });
+
+  it("admits a scheduled v3 wake after its matching v2 wake was consumed", async () => {
+    const rows: HostedMailboxItemRow[] = [];
+    const hostedMailboxItem = createHostedMailboxItemDelegate({
+      create: vi.fn<HostedMailboxCreate>(async (args) => {
+        const row = buildHostedMailboxItemRow(args.data);
+        rows.push(row);
+        return row;
+      }),
+      findUnique: vi.fn<HostedMailboxFindUnique>(async (args) => {
+        const where = readHostedMailboxFindUniqueWhere(args);
+        return rows.find((row) => (
+          row.userId === where.userId && row.dedupeKey === where.dedupeKey
+        )) ?? null;
+      }),
+    });
+    const tx = createHostedMailboxTx({
+      hostedMailboxItem,
+      hostedMailboxPayload: createHostedMailboxPayloadDelegate(),
+    });
+    const identity = {
+      connectionId: "dsc_scheduled_cutover",
+      expectedConnectedAt: "2026-04-25T00:00:00.000Z",
+      nextReconcileAt: "2026-04-26T00:00:00.000Z",
+    };
+    const legacyEventId = [
+      "device-sync",
+      "scheduled-reconcile",
+      "v2",
+      identity.connectionId,
+      identity.expectedConnectedAt,
+      identity.nextReconcileAt,
+    ].join(":");
+    const currentEventId = buildHostedDeviceSyncScheduledReconcileWakeEventId(identity);
+    const buildEnvelope = (eventId: string) => buildHostedDeviceSyncWake({
+      connectionId: identity.connectionId,
+      eventId,
+      expectedConnectedAt: identity.expectedConnectedAt,
+      occurredAt: identity.nextReconcileAt,
+      provider: "oura",
+      source: "scheduled-reconcile",
+      userId: "member_mailbox_1",
+    });
+
+    const legacy = await appendHostedMailboxEnvelopeTx({
+      envelope: buildEnvelope(legacyEventId),
+      tx,
+    });
+    const legacyRow = rows[0];
+    if (!legacyRow) {
+      throw new TypeError("Expected the legacy scheduled wake to be stored.");
+    }
+    rows[0] = {
+      ...legacyRow,
+      consumedAt: new Date("2026-04-26T00:01:00.000Z"),
+    };
+    const recovered = await appendHostedMailboxEnvelopeTx({
+      envelope: buildEnvelope(currentEventId),
+      tx,
+    });
+    const retry = await appendHostedMailboxEnvelopeTx({
+      envelope: buildEnvelope(currentEventId),
+      tx,
+    });
+
+    expect(legacy.inserted).toBe(true);
+    expect(currentEventId).not.toBe(legacyEventId);
+    expect(recovered).toMatchObject({
+      dedupeConflict: false,
+      duplicate: false,
+      inserted: true,
+    });
+    expect(retry).toMatchObject({
+      dedupeConflict: false,
+      duplicate: true,
+      inserted: false,
+      item: {
+        id: recovered.item.id,
+      },
+    });
+    expect(rows).toHaveLength(2);
+    expect(rows.map((row) => row.dedupeKey)).toEqual([
+      legacyEventId,
+      currentEventId,
+    ]);
+    expect(rows[0]?.consumedAt).toEqual(new Date("2026-04-26T00:01:00.000Z"));
+    expect(rows[1]?.consumedAt).toBeNull();
+    expect(hostedMailboxItem.create).toHaveBeenCalledTimes(2);
   });
 
   it("rejects group email when the target group names another runtime workspace", async () => {
@@ -2449,6 +2650,30 @@ describe("fetchHostedMailboxItemsAfterLaneCursors", () => {
     });
   });
 
+  it("reads activation mailbox facts for a maximum member set in one narrow query", async () => {
+    const userIds = Array.from({ length: 32 }, (_, index) => `member_${index}`);
+    const groupBy = vi.fn().mockResolvedValue([
+      { userId: "member_1" },
+      { userId: "member_31" },
+    ]);
+
+    await expect(readHostedMailboxUserIdsByKind({
+      kind: "member.activated",
+      prisma: {
+        hostedMailboxItem: { groupBy },
+      } as never,
+      userIds,
+    })).resolves.toEqual(new Set(["member_1", "member_31"]));
+
+    expect(groupBy).toHaveBeenCalledExactlyOnceWith({
+      by: ["userId"],
+      where: {
+        kind: "member.activated",
+        userId: { in: userIds },
+      },
+    });
+  });
+
   it("reads the latest unconsumed pending conversation item after the replay floor", async () => {
     const hostedMailboxItem = createHostedMailboxItemDelegate({
       findFirst: vi.fn<HostedMailboxItemFindFirst>(async () => buildHostedMailboxItemRow({
@@ -2696,7 +2921,7 @@ describe("fetchHostedRuntimeMailboxProjection", () => {
         itemDedupeKey: "system-dedupe-3",
         itemExpiresAt: null,
         itemId: "mailbox_system_3",
-        itemKind: "runtime.manual-requested",
+        itemKind: "group-newsletter.email-needed",
         itemLane: "system",
         itemLaneSeq: 3n,
         itemOccurredAt: new Date("2026-04-26T00:00:03.000Z"),
@@ -2758,6 +2983,7 @@ describe("fetchHostedRuntimeMailboxProjection", () => {
       {
         consumedAt: null,
         id: "mailbox_system_3",
+        kind: "group-newsletter.email-needed",
         laneSeq: "3",
         payloadInlineCiphertext: null,
         payloadRef: "hosted-mailbox-payload:mailbox_system_3",

@@ -69,6 +69,14 @@ vi.mock('../src/assistant-codex/dynamic-tools.ts', async (importOriginal) => {
                   kind: 'none' as const,
                 },
               }
+            : input.request.kind === 'group' &&
+                input.request.request.action === 'send_email'
+              ? {
+                  finalActionPatch: {
+                    kind: 'none' as const,
+                    owner: 'group-email' as const,
+                  },
+                }
             : {}),
           rpcResult: {
             success: true,
@@ -137,6 +145,63 @@ afterEach(async () => {
 })
 
 describe('Codex dynamic tool runtime routing', () => {
+  it('ends a group-email turn while its accepted send tool request is pending', async () => {
+    const workingDirectory = await createTempDir(
+      'assistant-codex-group-email-terminal-work-',
+    )
+    const codexHome = await createTempDir(
+      'assistant-codex-group-email-terminal-home-',
+    )
+
+    codexMocks.spawn.mockImplementation(() => {
+      const child = new MockChildProcess()
+      queueMicrotask(() => {
+        void runScriptedTerminalGroupEmailTurn(child)
+      })
+      return child
+    })
+
+    await expect(
+      executeCodexAppServerTurn({
+        approvalPolicy: 'never',
+        codexCommand: 'codex',
+        codexHome,
+        dynamicTools: resolveMurphDynamicTools({ groupAvailable: true }),
+        env: {
+          CODEX_HOME: codexHome,
+          PATH: '/usr/bin',
+        },
+        hostedToolContext: {
+          beforeToolExecution: vi.fn(async () => undefined),
+          computerToolsAvailable: false,
+          currentHostedDeliveryContext: () => null,
+          currentHostedMailboxItemIds: () => [],
+          sendVaultFile: vi.fn(async () => {
+            throw new Error('Vault-file sending is unavailable for this turn.')
+          }),
+          vaultFileSendAvailable: false,
+        },
+        prompt: 'Send the prepared group email.',
+        sandbox: 'workspace-write',
+        workingDirectory,
+      }),
+    ).resolves.toMatchObject({
+      acceptedNoReplyDeliveryContextOrdinals: [0],
+      finalAction: { kind: 'none' },
+      finalMessage: '',
+      threadId: 'thread-group-email-terminal',
+      turnId: 'turn-group-email-terminal',
+    })
+
+    expect(codexMocks.dynamicToolCalls).toEqual([
+      {
+        deliveryContextOrdinal: 0,
+        kind: 'group',
+        voiceMemoRuntime: null,
+      },
+    ])
+  })
+
   it('keeps cold and cached tool requests bound to their request-time delivery contexts', async () => {
     const workingDirectory = await createTempDir(
       'assistant-codex-request-context-work-',
@@ -585,6 +650,59 @@ describe('Codex dynamic tool runtime routing', () => {
     ])
   })
 })
+
+async function runScriptedTerminalGroupEmailTurn(
+  child: MockChildProcess,
+): Promise<void> {
+  const initialize = await child.waitForRpcMethod('initialize')
+  child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
+  const threadStart = await child.waitForRpcMethod('thread/start')
+  child.stdout.write(jsonLine({
+    id: threadStart.id,
+    result: { thread: { id: 'thread-group-email-terminal' } },
+  }))
+  const turnStart = await child.waitForRpcMethod('turn/start')
+  child.stdout.write(jsonLine({
+    id: turnStart.id,
+    result: { turn: { id: 'turn-group-email-terminal' } },
+  }))
+  child.stdout.write(jsonLine({
+    method: 'turn/started',
+    params: { turn: { id: 'turn-group-email-terminal' } },
+  }))
+  child.stdout.write(jsonLine({
+    id: 41,
+    method: 'item/tool/call',
+    params: {
+      arguments: {
+        action: 'send_email',
+        html: '<p>Group update</p>',
+        subject: 'Group update',
+        text: 'Group update',
+      },
+      callId: 'call-41',
+      namespace: 'murph',
+      threadId: 'thread-group-email-terminal',
+      tool: 'group',
+      turnId: 'turn-group-email-terminal',
+    },
+  }))
+  const interrupt = await child.waitForRpcMethod('turn/interrupt')
+  child.stdout.write(jsonLine({ id: interrupt.id, result: {} }))
+  child.stdout.write(jsonLine({
+    method: 'serverRequest/resolved',
+    params: {
+      requestId: 41,
+      threadId: 'thread-group-email-terminal',
+    },
+  }))
+  child.stdout.write(jsonLine({
+    method: 'turn/completed',
+    params: {
+      turn: { id: 'turn-group-email-terminal', status: 'interrupted' },
+    },
+  }))
+}
 
 async function runScriptedOverlappingPendingVaultFilesTurn(
   child: MockChildProcess,

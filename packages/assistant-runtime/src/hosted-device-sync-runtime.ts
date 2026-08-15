@@ -6,22 +6,35 @@ import {
   parseSerializedCompanionHrvRmssdObservation,
   serializeCompanionHrvRmssdObservation,
 } from "@murphai/contracts";
-import { buildJunctionProviderSourceInstanceKey } from "@murphai/device-syncd/connect-config";
+import {
+  areJunctionDeviceConnectProviderSlugsEquivalent,
+} from "@murphai/device-syncd/connect-config";
+import { shapeHostedDeviceSyncJobHintPayload } from "@murphai/device-syncd/hosted-hints";
 import {
   isJunctionCompanionHrvRmssdJob,
   JUNCTION_COMPANION_HRV_OBSERVATION_INVALID_CODE,
 } from "@murphai/device-syncd/junction-resources";
 import { buildDeviceSyncTokenCipherOptions, createSecretCodec } from "@murphai/device-syncd/local-secret-codec";
+import {
+  compareDeviceSyncSourceIdentity,
+  dedupeDeviceSyncSourcesByIdentity,
+  mergeDeviceSyncSourceLastDataAt,
+  resolveDeviceSyncSourceState,
+} from "@murphai/device-syncd/public-account";
 import type { DeviceSyncService } from "@murphai/device-syncd/service";
 import type {
   DeviceSyncJobInput,
   DeviceSyncJobFailureDiagnostic,
+  DeviceSyncJobRecord,
   StoredDeviceConnectionSource,
   StoredDeviceSyncAccount,
 } from "@murphai/device-syncd/types";
 import {
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_UPDATE_LIMIT,
+  HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_HYDRATION_LIMIT,
+  HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PAGE_LIMIT,
   mergeHostedDeviceSyncConnectionMetadata,
+  mergeHostedDeviceSyncEventToProviderSendBuckets,
   normalizeHostedDeviceSyncJobHints,
   resolveHostedDeviceSyncWakeContext,
   sanitizeHostedExecutionDeviceSyncRuntimeCredentialMetadata,
@@ -32,8 +45,10 @@ import type {
   HostedExecutionDeviceSyncRuntimeCredentialUpdate as HostedDeviceSyncRuntimeCredentialUpdate,
   HostedExecutionDeviceSyncDirtyResource,
   HostedExecutionDeviceSyncDirtyStateResponse,
+  HostedDeviceSyncEventToProviderSendBucket,
   HostedExecutionDeviceSyncJobHint,
   HostedExecutionDeviceSyncRuntimeConnectionSnapshot as HostedDeviceSyncRuntimeConnectionSnapshot,
+  HostedExecutionDeviceSyncRuntimeConnectionSourceSnapshot as HostedDeviceSyncRuntimeConnectionSourceSnapshot,
   HostedExecutionDeviceSyncRuntimeConnectionSourceUpdate as HostedDeviceSyncRuntimeConnectionSourceUpdate,
   HostedExecutionDeviceSyncRuntimeConnectionUpdate as HostedDeviceSyncRuntimeConnectionUpdate,
   HostedExecutionDeviceSyncRuntimeFailureDiagnostic as HostedDeviceSyncRuntimeFailureDiagnostic,
@@ -45,6 +60,7 @@ import type {
   HostedExecutionDeviceSyncStagedDirtyAck,
 } from "@murphai/device-syncd/hosted-runtime";
 import type {
+  HostedExecutionDeviceSyncWake,
   HostedRuntimeEvent,
 } from "@murphai/hosted-execution";
 import {
@@ -56,9 +72,17 @@ import type {
 import { requireHostedRuntimeDeviceSyncStore } from "./device-sync-service.ts";
 import {
   HOSTED_DEVICE_SYNC_DIRTY_PENDING_FETCH_LIMIT,
+  HOSTED_DEVICE_SYNC_PASS_JOB_LIMIT,
 } from "./hosted-device-sync-limits.ts";
+import { hostedSourceStateUnavailable } from "./hosted-device-sync-source-state.ts";
+import {
+  fetchCompleteHostedDeviceSyncRuntimeSnapshot,
+} from "./hosted-runtime/device-sync-snapshot-pagination.ts";
+
+export { fetchCompleteHostedDeviceSyncRuntimeSnapshot };
 
 export interface HostedDeviceSyncRuntimeSyncState {
+  dirtyWorkRemaining?: boolean;
   hostedToLocalAccountIds: Map<string, string>;
   localToHostedAccountIds: Map<string, string>;
   observedTokenVersions: Map<string, number | null>;
@@ -78,18 +102,41 @@ export interface HostedDeviceSyncRuntimeDirtyAck {
 
 export interface HostedDeviceSyncRuntimeDirtyPayloadJob {
   connectionId: string;
-  dirtyPayloadId: string;
+  dirtyPayloadId: string | null;
   jobId: string;
   processedRevision: string;
+  timing?: HostedDeviceSyncImportTiming;
+}
+
+export interface HostedDeviceSyncImportTiming {
+  eventToProviderSendBucket: HostedDeviceSyncEventToProviderSendBucket | null;
+  firstWebhookReceivedAt: string | null;
+  providerSendToWebhookMs: number | null;
+  sourceProvider: string | null;
+}
+
+export interface HostedDeviceSyncCompletedImportTiming extends HostedDeviceSyncImportTiming {
+  importCompletedAt: string;
+  importExecutionStartedAt: string | null;
+  jobCreatedAt: string;
+  jobKind: string;
+  provider: string;
 }
 
 interface HostedDirtyDeviceSyncJob {
   dirtyPayloadId: string | null;
   input: DeviceSyncJobInput;
+  resource: HostedExecutionDeviceSyncDirtyResource;
 }
 
 interface HostedDirtyDeviceSyncApplyResult {
   ack: HostedDeviceSyncRuntimeDirtyAck;
+  deferredJobCount: number;
+  pendingDirtyPayloadJobs: HostedDeviceSyncRuntimeDirtyPayloadJob[];
+}
+
+interface HostedDirtyDeviceSyncAdmissionResult {
+  admittedJobCount: number;
   pendingDirtyPayloadJobs: HostedDeviceSyncRuntimeDirtyPayloadJob[];
 }
 
@@ -104,6 +151,9 @@ type HostedDirtyDeviceSyncStateSkipReason =
   | "provider_not_registered"
   | "reauthorization_required";
 type HostedTerminalDeviceSyncStatus = "disconnected" | "reauthorization_required";
+
+const HOSTED_DEVICE_SYNC_COMPLETION_FENCE_HINT_REASON = "retained_completion_fence";
+const HOSTED_DEVICE_SYNC_COMPLETION_FENCE_DELAY_MS = 30_000;
 
 export async function syncHostedDeviceSyncControlPlaneState(input: {
   deviceSyncPort?: HostedRuntimeDeviceSyncPort | null;
@@ -123,12 +173,11 @@ export async function syncHostedDeviceSyncControlPlaneState(input: {
   }
 
   const snapshot = input.snapshot === undefined
-    ? (input.signal
-      ? await client.fetchSnapshot({
-          includeCredentialMaterial: true,
-          signal: input.signal,
-        })
-      : await client.fetchSnapshot({ includeCredentialMaterial: true }))
+    ? await fetchCompleteHostedDeviceSyncRuntimeSnapshot({
+        deviceSyncPort: client,
+        includeCredentialMaterial: true,
+        signal: input.signal ?? null,
+      })
     : input.snapshot;
   const state = createEmptyHostedDeviceSyncRuntimeSyncState(
     snapshot ? { ...snapshot, connections: [] } : null,
@@ -172,6 +221,10 @@ export async function syncHostedDeviceSyncControlPlaneState(input: {
         isJunctionCredentialIndependentInlineImportJob: classifyJunctionProviderJob,
       } = await import("@murphai/device-syncd/junction-inline-authority"));
     }
+    const hostedSources = dedupeHostedHydrationConnectionSources(
+      entry.connection.provider,
+      (entry.sources ?? []).filter((source) => source.sourceInstanceKey),
+    );
     const stored = store.hydrateHostedAccount(
       buildHostedAccountHydrationInput({
         classifyProviderJob: entry.connection.provider === "junction"
@@ -197,7 +250,7 @@ export async function syncHostedDeviceSyncControlPlaneState(input: {
         (source) => [source.sourceInstanceKey, source] as const,
       ),
     );
-    for (const source of entry.sources ?? []) {
+    for (const source of hostedSources) {
       if (!source.sourceInstanceKey) {
         continue;
       }
@@ -209,34 +262,83 @@ export async function syncHostedDeviceSyncControlPlaneState(input: {
         sourceInstanceKey: source.sourceInstanceKey,
       });
       const localSource = localSourcesByKey.get(sourceInstanceKey);
+      const establishedLocalSource = localSource ?? (
+        entry.connection.provider.trim().toLowerCase() === "junction"
+          ? selectHostedJunctionSource(localSources, source.sourceProviderSlug)
+          : undefined
+      );
+      const isJunctionSource = entry.connection.provider.trim().toLowerCase()
+        === "junction";
       if (
-        !terminalStatus
-        && localSource
-        && shouldPreserveLocalHydrationSource({
+        !isJunctionSource
+        && !terminalStatus
+        && establishedLocalSource
+        && shouldPreserveNonJunctionHydrationSource({
           hostedConnectionEpochChanged,
-          localSource,
+          localSource: establishedLocalSource,
           source,
         })
       ) {
         continue;
       }
+      const localLifecycleSource = establishedLocalSource
+        ? {
+            ...source,
+            displayName: establishedLocalSource.displayName,
+            lastDataAt: establishedLocalSource.lastDataAt,
+            lastErrorCode: establishedLocalSource.lastErrorCode,
+            lastErrorMessage: establishedLocalSource.lastErrorMessage,
+            lastSeenAt: establishedLocalSource.lastSeenAt,
+            resourceAvailabilitySummary:
+              establishedLocalSource.resourceAvailabilitySummary,
+            status: establishedLocalSource.status,
+          }
+        : null;
+      const consolidatedState = (
+        isJunctionSource
+        && localLifecycleSource
+        && !terminalStatus
+        && !hostedConnectionEpochChanged
+      )
+        ? resolveDeviceSyncSourceState(
+            [localLifecycleSource, source],
+            hostedSourceStateUnavailable,
+          )
+        : {
+            lastDataAt: mergeDeviceSyncSourceLastDataAt(
+              source.lastDataAt,
+              establishedLocalSource?.lastDataAt ?? null,
+              hostedSourceStateUnavailable,
+            ),
+            lifecycleSource: source,
+          };
+      if (
+        localLifecycleSource
+        && consolidatedState.lifecycleSource === localLifecycleSource
+        && consolidatedState.lastDataAt === establishedLocalSource?.lastDataAt
+      ) {
+        continue;
+      }
+      const lifecycleSource = consolidatedState.lifecycleSource;
 
       const hydratedSource = store.upsertConnectionSource({
         connectionId: stored.id,
         sourceInstanceKey,
-        sourceProviderSlug: source.sourceProviderSlug,
-        displayName: source.displayName,
-        status: source.status,
-        ...(source.resourceAvailabilitySummary === undefined
+        sourceProviderSlug:
+          establishedLocalSource?.sourceProviderSlug ?? source.sourceProviderSlug,
+        displayName: lifecycleSource.displayName,
+        status: lifecycleSource.status,
+        ...(lifecycleSource.resourceAvailabilitySummary === undefined
           ? {}
-          : { resourceAvailabilitySummary: source.resourceAvailabilitySummary }),
-        lastErrorCode: source.lastErrorCode,
-        lastErrorMessage: source.lastErrorMessage,
+          : {
+              resourceAvailabilitySummary:
+                lifecycleSource.resourceAvailabilitySummary,
+            }),
+        lastErrorCode: lifecycleSource.lastErrorCode,
+        lastErrorMessage: lifecycleSource.lastErrorMessage,
         firstSeenAt: source.firstSeenAt,
-        lastSeenAt: source.lastSeenAt,
-        // Merged monotonically below rather than taken verbatim: Web and the
-        // runner can each have seen an arrival the other has not.
-        lastDataAt: laterIsoTimestamp(source.lastDataAt ?? null, localSource?.lastDataAt ?? null),
+        lastSeenAt: lifecycleSource.lastSeenAt,
+        lastDataAt: consolidatedState.lastDataAt,
       });
       localSourcesByKey.set(sourceInstanceKey, hydratedSource);
     }
@@ -273,7 +375,10 @@ export async function syncHostedDeviceSyncControlPlaneState(input: {
       return state;
     }
   }
-  if (input.skipDirtyPendingFetch !== true) {
+  if (
+    input.skipDirtyPendingFetch !== true
+    && resolveHostedDeviceSyncWakeLocalAccountId({ state, wake: input.wake })
+  ) {
     const dirtyState = await applyHostedPendingDirtyDeviceSyncState({
       deviceSyncPort: client,
       hostedToLocalAccountIds: state.hostedToLocalAccountIds,
@@ -284,9 +389,34 @@ export async function syncHostedDeviceSyncControlPlaneState(input: {
     });
     state.pendingDirtyAcks = dirtyState.acks;
     state.pendingDirtyPayloadJobs = dirtyState.pendingDirtyPayloadJobs;
+    state.dirtyWorkRemaining = dirtyState.hasMoreForWake;
   }
 
   return state;
+}
+
+export async function applyHostedPendingDirtyDeviceSyncStateForWake(input: {
+  deviceSyncPort: HostedRuntimeDeviceSyncPort;
+  service: DeviceSyncService;
+  signal?: AbortSignal | null;
+  stagedDirtyAcks?: readonly HostedExecutionDeviceSyncStagedDirtyAck[] | null;
+  state: HostedDeviceSyncRuntimeSyncState;
+  wake: HostedRuntimeEvent;
+}): Promise<void> {
+  if (!resolveHostedDeviceSyncWakeLocalAccountId(input)) {
+    return;
+  }
+  const dirtyState = await applyHostedPendingDirtyDeviceSyncState({
+    deviceSyncPort: input.deviceSyncPort,
+    hostedToLocalAccountIds: input.state.hostedToLocalAccountIds,
+    signal: input.signal ?? null,
+    service: input.service,
+    stagedDirtyAcks: input.stagedDirtyAcks ?? null,
+    wake: input.wake,
+  });
+  input.state.pendingDirtyAcks = dirtyState.acks;
+  input.state.pendingDirtyPayloadJobs = dirtyState.pendingDirtyPayloadJobs;
+  input.state.dirtyWorkRemaining = dirtyState.hasMoreForWake;
 }
 
 function isTerminalHostedPrivacyScrub(
@@ -306,58 +436,71 @@ function resolveHostedHydrationSourceInstanceKey(input: {
     return input.sourceInstanceKey;
   }
 
-  const canonicalSourceInstanceKey = buildJunctionProviderSourceInstanceKey({
-    connectionId: input.entry.connection.id,
-    sourceProviderSlug: input.source.sourceProviderSlug,
-  });
-  const matchingSource = input.localSources.find((source) =>
-    source.sourceInstanceKey === canonicalSourceInstanceKey
+  const matchingSource = selectHostedJunctionSource(
+    input.localSources,
+    input.source.sourceProviderSlug,
   ) ?? input.localSources.find((source) =>
     source.sourceInstanceKey === input.sourceInstanceKey
-  ) ?? input.localSources.find((source) =>
-    source.sourceProviderSlug === input.source.sourceProviderSlug
   );
 
-  return matchingSource?.sourceInstanceKey
-    ?? canonicalSourceInstanceKey
-    ?? input.sourceInstanceKey;
+  return matchingSource?.sourceInstanceKey ?? input.sourceInstanceKey;
 }
 
-function shouldPreserveLocalHydrationSource(input: {
+function areHostedJunctionSourceSlugsEquivalent(left: string, right: string): boolean {
+  return areJunctionDeviceConnectProviderSlugsEquivalent(left, right);
+}
+
+function dedupeHostedHydrationConnectionSources(
+  provider: string,
+  sources: readonly HostedDeviceSyncRuntimeConnectionSourceSnapshot[],
+): HostedDeviceSyncRuntimeConnectionSourceSnapshot[] {
+  if (provider.trim().toLowerCase() !== "junction") {
+    return [...sources];
+  }
+  return dedupeDeviceSyncSourcesByIdentity(
+    sources,
+    (left, right) => areHostedJunctionSourceSlugsEquivalent(
+      left.sourceProviderSlug,
+      right.sourceProviderSlug,
+    ),
+    hostedSourceStateUnavailable,
+  );
+}
+
+function selectHostedJunctionSource(
+  sources: readonly StoredDeviceConnectionSource[],
+  sourceProviderSlug: string,
+): StoredDeviceConnectionSource | undefined {
+  return sources
+    .filter((source) => areHostedJunctionSourceSlugsEquivalent(
+      source.sourceProviderSlug,
+      sourceProviderSlug,
+    ))
+    .sort(compareDeviceSyncSourceIdentity)[0];
+}
+
+function shouldPreserveNonJunctionHydrationSource(input: {
   hostedConnectionEpochChanged: boolean;
   localSource: StoredDeviceConnectionSource;
-  source: NonNullable<HostedDeviceSyncRuntimeConnectionSnapshot["sources"]>[number];
+  source: HostedDeviceSyncRuntimeConnectionSourceSnapshot;
 }): boolean {
   if (input.hostedConnectionEpochChanged) {
     return false;
   }
-
-  // An arrival can advance with no other field moving, so a lastSeenAt-only
-  // shortcut would drop the one signal a stall is measured against.
   if (
-    laterIsoTimestamp(input.source.lastDataAt ?? null, input.localSource.lastDataAt)
-      !== input.localSource.lastDataAt
+    mergeDeviceSyncSourceLastDataAt(
+      input.source.lastDataAt,
+      input.localSource.lastDataAt,
+      hostedSourceStateUnavailable,
+    ) !== input.localSource.lastDataAt
   ) {
     return false;
   }
-
   return Date.parse(input.localSource.lastSeenAt) >= Date.parse(input.source.lastSeenAt);
 }
 
-/** Returns whichever ISO timestamp is later, treating null as "never". */
-function laterIsoTimestamp(left: string | null, right: string | null): string | null {
-  if (!left) {
-    return right;
-  }
-
-  if (!right) {
-    return left;
-  }
-
-  return Date.parse(left) >= Date.parse(right) ? left : right;
-}
-
 export async function reconcileHostedDeviceSyncControlPlaneState(input: {
+  deferNextReconcileAtForLocalAccountId?: string | null;
   deviceSyncPort?: HostedRuntimeDeviceSyncPort | null;
   secret: string;
   signal?: AbortSignal | null;
@@ -393,18 +536,15 @@ export async function reconcileHostedDeviceSyncControlPlaneState(input: {
       continue;
     }
 
+    const baseline = snapshotByConnectionId.get(hostedConnectionId) ?? null;
     const update = buildHostedDeviceSyncRuntimeConnectionUpdate({
       account,
-      baseline: snapshotByConnectionId.get(hostedConnectionId) ?? null,
+      baseline,
       codec,
+      deferNextReconcileAtToBaseline:
+        input.deferNextReconcileAtForLocalAccountId === localAccountId,
       failureDiagnostic: failureDiagnosticByLocalAccountId.get(localAccountId) ?? null,
       hostedConnectionId,
-      nextReconcileAt: account.status === "active"
-        ? earliestIsoTimestamp(
-            account.nextReconcileAt ?? null,
-            store.readNextJobWakeAtForAccount(account.id),
-          )
-        : account.nextReconcileAt ?? null,
       observedTokenVersion: input.state.observedTokenVersions.get(hostedConnectionId) ?? null,
       sourceApplyEnabled: input.state.snapshot?.capabilities?.connectionSourceApply === true,
       sources: store.listConnectionSources({
@@ -435,6 +575,7 @@ function createEmptyHostedDeviceSyncRuntimeSyncState(
   snapshot: HostedDeviceSyncRuntimeSnapshotResponse | null = null,
 ): HostedDeviceSyncRuntimeSyncState {
   return {
+    dirtyWorkRemaining: false,
     hostedToLocalAccountIds: new Map(),
     localToHostedAccountIds: new Map(),
     observedTokenVersions: new Map(),
@@ -561,8 +702,18 @@ async function applyHostedDeviceSyncWakeHint(input: {
 
   const jobHints = normalizeHostedDeviceSyncJobHints(wake.hint);
 
-  for (const hint of jobHints) {
-    const job = hostedJobHintToDeviceSyncJobInput(hint, input.wake.occurredAt);
+  for (const [index, hint] of jobHints.entries()) {
+    const job = hostedJobHintToDeviceSyncJobInput(
+      {
+        ...hint,
+        dedupeKey: resolveHostedDeviceSyncWakeJobDedupeKey({
+          hint,
+          index,
+          wake: input.wake,
+        }),
+      },
+      input.wake.occurredAt,
+    );
     store.enqueueJob({
       accountId: localAccountId,
       availableAt: job.availableAt,
@@ -583,6 +734,166 @@ async function applyHostedDeviceSyncWakeHint(input: {
   return false;
 }
 
+export function resolveHostedDeviceSyncWakeLocalAccountId(input: {
+  state: HostedDeviceSyncRuntimeSyncState;
+  wake: HostedRuntimeEvent;
+}): string | null {
+  if (input.wake.kind !== "device-sync.wake") {
+    return null;
+  }
+  const connectionId = resolveHostedDeviceSyncWakeContext(input.wake).connectionId;
+  return connectionId
+    ? input.state.hostedToLocalAccountIds.get(connectionId) ?? null
+    : null;
+}
+
+export function resolveHostedDeviceSyncSchedulerAccountId(input: {
+  state: HostedDeviceSyncRuntimeSyncState;
+  wake: HostedRuntimeEvent;
+}): string | null {
+  const localAccountId = resolveHostedDeviceSyncWakeLocalAccountId(input);
+  if (!localAccountId || input.wake.kind !== "device-sync.wake") {
+    return null;
+  }
+  const wakeContext = resolveHostedDeviceSyncWakeContext(input.wake);
+  if (
+    wakeContext.hint?.reason === HOSTED_DEVICE_SYNC_COMPLETION_FENCE_HINT_REASON
+    || normalizeHostedDeviceSyncJobHints(wakeContext.hint).length > 0
+  ) {
+    return null;
+  }
+  return localAccountId;
+}
+
+export function resolveHostedDeviceSyncWakeRecovery(input: {
+  service: DeviceSyncService;
+  state: HostedDeviceSyncRuntimeSyncState;
+  wake: HostedRuntimeEvent;
+}): {
+  retryAt: string;
+  wake: HostedExecutionDeviceSyncWake;
+} | null {
+  if (input.wake.kind !== "device-sync.wake") {
+    return null;
+  }
+  const wakeContext = resolveHostedDeviceSyncWakeContext(input.wake);
+  const localAccountId = resolveHostedDeviceSyncWakeLocalAccountId(input);
+  if (!localAccountId) {
+    return null;
+  }
+  const store = requireHostedRuntimeDeviceSyncStore(input.service);
+  const account = store.getAccountById(localAccountId);
+  if (!account) {
+    return null;
+  }
+
+  const pendingJobs = store.listPendingJobsForAccount(
+    localAccountId,
+    HOSTED_DEVICE_SYNC_PASS_JOB_LIMIT + 1,
+  );
+  if (pendingJobs.length > HOSTED_DEVICE_SYNC_PASS_JOB_LIMIT) {
+    throw new Error(
+      "Hosted device-sync retained work exceeds the per-pass durable job limit.",
+    );
+  }
+  if (pendingJobs.length > 0) {
+    let retryAt: string | null = null;
+    const retryHints: HostedExecutionDeviceSyncJobHint[] = [];
+    for (const job of pendingJobs) {
+      const dedupeKey = job.dedupeKey
+        ?? `hosted-device-sync-job:${createHash("sha256").update(job.id).digest("hex")}`;
+      const payload = shapeHostedDeviceSyncJobHintPayload(account.provider, job);
+      const jobRetryAt = job.status === "running"
+        ? job.leaseExpiresAt ?? job.availableAt
+        : job.availableAt;
+      const remainingAttempts = Math.max(1, job.maxAttempts - job.attempts);
+      retryAt = retryAt === null || Date.parse(jobRetryAt) < Date.parse(retryAt)
+        ? jobRetryAt
+        : retryAt;
+      retryHints.push({
+        availableAt: jobRetryAt,
+        dedupeKey,
+        kind: job.kind,
+        maxAttempts: remainingAttempts,
+        ...(Object.keys(payload).length > 0 ? { payload } : {}),
+        priority: job.priority,
+      });
+    }
+    if (!retryAt) {
+      return null;
+    }
+
+    return {
+      retryAt,
+      wake: {
+        ...input.wake,
+        hint: {
+          ...(input.wake.hint ?? {}),
+          jobs: retryHints,
+          nextReconcileAt: account.nextReconcileAt ?? null,
+        },
+      },
+    };
+  }
+
+  if (input.state.dirtyWorkRemaining) {
+    return {
+      retryAt: new Date(
+        Date.now() + HOSTED_DEVICE_SYNC_COMPLETION_FENCE_DELAY_MS,
+      ).toISOString(),
+      wake: {
+        ...input.wake,
+        hint: {
+          ...(input.wake.hint ?? {}),
+          jobs: [],
+          nextReconcileAt: account.nextReconcileAt ?? null,
+          reason: "retained_dirty_remainder",
+        },
+      },
+    };
+  }
+
+  if (wakeContext.hint?.reason === HOSTED_DEVICE_SYNC_COMPLETION_FENCE_HINT_REASON) {
+    return null;
+  }
+  const hostedConnectionId = input.state.localToHostedAccountIds.get(localAccountId) ?? null;
+  const baselineNextReconcileAt = hostedConnectionId
+    ? input.state.snapshot?.connections.find(
+        (entry) => entry.connection.id === hostedConnectionId,
+      )?.localState.nextReconcileAt ?? null
+    : null;
+  const nextReconcileAt = account.nextReconcileAt ?? null;
+  if (nextReconcileAt === baselineNextReconcileAt) {
+    return null;
+  }
+
+  return {
+    retryAt: new Date(
+      Date.now() + HOSTED_DEVICE_SYNC_COMPLETION_FENCE_DELAY_MS,
+    ).toISOString(),
+    wake: {
+      ...input.wake,
+      hint: {
+        ...(input.wake.hint ?? {}),
+        jobs: [],
+        nextReconcileAt,
+        reason: HOSTED_DEVICE_SYNC_COMPLETION_FENCE_HINT_REASON,
+      },
+    },
+  };
+}
+
+function resolveHostedDeviceSyncWakeJobDedupeKey(input: {
+  hint: HostedExecutionDeviceSyncJobHint;
+  index: number;
+  wake: HostedExecutionDeviceSyncWake;
+}): string {
+  return input.hint.dedupeKey
+    ?? `hosted-device-sync-wake:${createHash("sha256")
+      .update(JSON.stringify([input.wake.eventId, input.index]))
+      .digest("hex")}`;
+}
+
 async function applyHostedPendingDirtyDeviceSyncState(input: {
   deviceSyncPort: HostedRuntimeDeviceSyncPort;
   hostedToLocalAccountIds: Map<string, string>;
@@ -592,9 +903,17 @@ async function applyHostedPendingDirtyDeviceSyncState(input: {
   wake: HostedRuntimeEvent;
 }): Promise<{
   acks: HostedDeviceSyncRuntimeDirtyAck[];
+  hasMoreForWake: boolean;
   pendingDirtyPayloadJobs: HostedDeviceSyncRuntimeDirtyPayloadJob[];
 }> {
+  const wakeConnectionId = input.wake.kind === "device-sync.wake"
+    ? resolveHostedDeviceSyncWakeContext(input.wake).connectionId
+    : null;
+  if (!wakeConnectionId) {
+    return { acks: [], hasMoreForWake: false, pendingDirtyPayloadJobs: [] };
+  }
   const pending = await input.deviceSyncPort.fetchDirtyStates({
+    connectionId: wakeConnectionId,
     limit: HOSTED_DEVICE_SYNC_DIRTY_PENDING_FETCH_LIMIT,
     ...(input.signal ? { signal: input.signal } : {}),
     ...(input.stagedDirtyAcks && input.stagedDirtyAcks.length > 0
@@ -603,8 +922,12 @@ async function applyHostedPendingDirtyDeviceSyncState(input: {
   });
   const acks: HostedDeviceSyncRuntimeDirtyAck[] = [];
   const pendingDirtyPayloadJobs: HostedDeviceSyncRuntimeDirtyPayloadJob[] = [];
+  let hasMoreForWake = pending.hasMore;
 
   for (const dirtyState of pending.items) {
+    if (!wakeConnectionId || dirtyState.connectionId !== wakeConnectionId) {
+      continue;
+    }
     const applied = applyHostedDirtyDeviceSyncState({
       dirtyState,
       hostedToLocalAccountIds: input.hostedToLocalAccountIds,
@@ -616,10 +939,11 @@ async function applyHostedPendingDirtyDeviceSyncState(input: {
     if (applied) {
       acks.push(applied.ack);
       pendingDirtyPayloadJobs.push(...applied.pendingDirtyPayloadJobs);
+      hasMoreForWake = hasMoreForWake || applied.deferredJobCount > 0;
     }
   }
 
-  return { acks, pendingDirtyPayloadJobs };
+  return { acks, hasMoreForWake, pendingDirtyPayloadJobs };
 }
 
 function applyHostedDirtyDeviceSyncState(input: {
@@ -685,7 +1009,7 @@ function applyHostedDirtyDeviceSyncState(input: {
       });
       return null;
     }
-    const pendingDirtyPayloadJobs = enqueueHostedDirtyDeviceSyncJobs({
+    const admission = admitHostedDirtyDeviceSyncJobsForAccount({
       accountId: localAccountId,
       connectionId: input.dirtyState.connectionId,
       jobs: acceptedCompanionHrvJobs,
@@ -693,6 +1017,9 @@ function applyHostedDirtyDeviceSyncState(input: {
       provider: account.provider,
       store,
     });
+    const processedRevision = admission.admittedJobCount === acceptedCompanionHrvJobs.length
+      ? input.dirtyState.dirtyRevision
+      : input.dirtyState.processedRevision;
     markHostedTerminalDeviceSyncJobsDead({
       accountId: localAccountId,
       now: input.wake.occurredAt,
@@ -705,11 +1032,17 @@ function applyHostedDirtyDeviceSyncState(input: {
         nextWakeAt: input.nextWakeAt,
         ...withHostedDirtyPayloadAckIds(
           input.dirtyState,
-          pendingDirtyPayloadJobs.map((job) => job.dirtyPayloadId),
+          acceptedCompanionHrvJobs.flatMap((job) =>
+            job.dirtyPayloadId ? [job.dirtyPayloadId] : []
+          ),
         ),
-        processedRevision: input.dirtyState.dirtyRevision,
+        processedRevision,
       },
-      pendingDirtyPayloadJobs,
+      deferredJobCount: acceptedCompanionHrvJobs.length - admission.admittedJobCount,
+      pendingDirtyPayloadJobs: admission.pendingDirtyPayloadJobs.map((pending) => ({
+        ...pending,
+        processedRevision,
+      })),
     };
   }
 
@@ -723,7 +1056,7 @@ function applyHostedDirtyDeviceSyncState(input: {
     return null;
   }
 
-  const pendingDirtyPayloadJobs = enqueueHostedDirtyDeviceSyncJobs({
+  const admission = admitHostedDirtyDeviceSyncJobsForAccount({
     accountId: localAccountId,
     connectionId: input.dirtyState.connectionId,
     jobs: dirtyJobs,
@@ -731,6 +1064,9 @@ function applyHostedDirtyDeviceSyncState(input: {
     provider: account.provider,
     store,
   });
+  const processedRevision = admission.admittedJobCount === dirtyJobs.length
+    ? input.dirtyState.dirtyRevision
+    : input.dirtyState.processedRevision;
 
   return {
     ack: {
@@ -738,12 +1074,85 @@ function applyHostedDirtyDeviceSyncState(input: {
       nextWakeAt: input.nextWakeAt,
       ...withHostedDirtyPayloadAckIds(
         input.dirtyState,
-        pendingDirtyPayloadJobs.map((job) => job.dirtyPayloadId),
+        dirtyJobs.flatMap((job) =>
+          job.dirtyPayloadId ? [job.dirtyPayloadId] : []
+        ),
       ),
-      processedRevision: input.dirtyState.dirtyRevision,
+      processedRevision,
     },
-    pendingDirtyPayloadJobs,
+    deferredJobCount: dirtyJobs.length - admission.admittedJobCount,
+    pendingDirtyPayloadJobs: admission.pendingDirtyPayloadJobs.map((pending) => ({
+      ...pending,
+      processedRevision,
+    })),
   };
+}
+
+function admitHostedDirtyDeviceSyncJobsForAccount(input: {
+  accountId: string;
+  connectionId: string;
+  jobs: readonly HostedDirtyDeviceSyncJob[];
+  processedRevision: string;
+  provider: string;
+  store: HostedRuntimeDeviceSyncStore;
+}): HostedDirtyDeviceSyncAdmissionResult {
+  const pendingJobs = input.store.listPendingJobsForAccount(
+    input.accountId,
+    HOSTED_DEVICE_SYNC_PASS_JOB_LIMIT + 1,
+  );
+  let availableSlots = Math.max(
+    0,
+    HOSTED_DEVICE_SYNC_PASS_JOB_LIMIT - pendingJobs.length,
+  );
+  const jobIdsByDedupeKey = new Map<string, string>();
+  for (const job of pendingJobs) {
+    if (job.provider === input.provider && job.dedupeKey) {
+      jobIdsByDedupeKey.set(job.dedupeKey, job.id);
+    }
+  }
+  const pendingDirtyPayloadJobs: HostedDeviceSyncRuntimeDirtyPayloadJob[] = [];
+  let admittedJobCount = 0;
+
+  for (const job of input.jobs) {
+    const dedupeKey = job.input.dedupeKey;
+    let jobId = dedupeKey ? jobIdsByDedupeKey.get(dedupeKey) ?? null : null;
+    if (!jobId) {
+      if (availableSlots === 0) {
+        continue;
+      }
+      const enqueued = input.store.enqueueJob({
+        accountId: input.accountId,
+        availableAt: job.input.availableAt,
+        dedupeKey,
+        kind: job.input.kind,
+        maxAttempts: job.input.maxAttempts,
+        payload: job.input.payload ?? {},
+        priority: job.input.priority ?? 0,
+        provider: input.provider,
+      });
+      jobId = enqueued.id;
+      availableSlots -= 1;
+      if (dedupeKey) {
+        jobIdsByDedupeKey.set(dedupeKey, jobId);
+      }
+    }
+    admittedJobCount += 1;
+    const timing = buildHostedDeviceSyncImportTiming({
+      provider: input.provider,
+      resource: job.resource,
+    });
+    if (job.dirtyPayloadId || "timing" in timing) {
+      pendingDirtyPayloadJobs.push({
+        connectionId: input.connectionId,
+        dirtyPayloadId: job.dirtyPayloadId,
+        jobId,
+        processedRevision: input.processedRevision,
+        ...timing,
+      });
+    }
+  }
+
+  return { admittedJobCount, pendingDirtyPayloadJobs };
 }
 
 function withHostedDirtyPayloadAckIds(
@@ -805,37 +1214,33 @@ function buildHostedDirtyDeviceSyncJobs(
       ? resource.dirtyPayloadId
       : null,
     input: hostedDirtyResourceToDeviceSyncJobInput(resource, dirtyState, occurredAt),
+    resource,
   }));
 }
 
-function enqueueHostedDirtyDeviceSyncJobs(input: {
-  accountId: string;
-  connectionId: string;
-  jobs: readonly HostedDirtyDeviceSyncJob[];
-  processedRevision: string;
-  provider: string;
-  store: HostedRuntimeDeviceSyncStore;
-}): HostedDeviceSyncRuntimeDirtyPayloadJob[] {
-  return input.jobs.flatMap((job) => {
-    const enqueued = input.store.enqueueJob({
-      accountId: input.accountId,
-      availableAt: job.input.availableAt,
-      dedupeKey: job.input.dedupeKey,
-      kind: job.input.kind,
-      maxAttempts: job.input.maxAttempts,
-      payload: job.input.payload ?? {},
-      priority: job.input.priority ?? 0,
-      provider: input.provider,
-    });
-    return job.dirtyPayloadId
-      ? [{
-          connectionId: input.connectionId,
-          dirtyPayloadId: job.dirtyPayloadId,
-          jobId: enqueued.id,
-          processedRevision: input.processedRevision,
-        }]
-      : [];
-  });
+function buildHostedDeviceSyncImportTiming(
+  input: {
+    provider: string;
+    resource: HostedExecutionDeviceSyncDirtyResource;
+  },
+): { timing: HostedDeviceSyncImportTiming } | Record<string, never> {
+  const eventToProviderSendBucket = input.resource.eventToProviderSendBucket ?? null;
+  const firstWebhookReceivedAt = input.resource.firstWebhookReceivedAt ?? null;
+  const providerSendToWebhookMs = input.resource.providerSendToWebhookMs ?? null;
+  if (!eventToProviderSendBucket && !firstWebhookReceivedAt && providerSendToWebhookMs === null) {
+    return {};
+  }
+
+  return {
+    timing: {
+      eventToProviderSendBucket,
+      firstWebhookReceivedAt,
+      providerSendToWebhookMs,
+      sourceProvider: input.resource.timingSourceProviderSlug === undefined
+        ? input.resource.sourceProviderSlug ?? input.provider
+        : input.resource.timingSourceProviderSlug,
+    },
+  };
 }
 
 /**
@@ -849,12 +1254,16 @@ function enqueueHostedDirtyDeviceSyncJobs(input: {
 export function promoteHostedCompletedDirtyPayloadAcks(input: {
   service: DeviceSyncService;
   state: HostedDeviceSyncRuntimeSyncState;
-}): void {
+}): HostedDeviceSyncCompletedImportTiming[] {
   if (input.state.pendingDirtyPayloadJobs.length === 0) {
-    return;
+    return [];
   }
 
   const store = requireHostedRuntimeDeviceSyncStore(input.service);
+  const completedImportsByJobId = new Map<
+    string,
+    HostedDeviceSyncCompletedImportTiming
+  >();
   const completedByAck = new Map<string, Set<string>>();
   const remaining: HostedDeviceSyncRuntimeDirtyPayloadJob[] = [];
   for (const pending of input.state.pendingDirtyPayloadJobs) {
@@ -871,9 +1280,35 @@ export function promoteHostedCompletedDirtyPayloadAcks(input: {
       remaining.push(pending);
       continue;
     }
+    if (
+      job?.status === "succeeded"
+      && job.finishedAt
+      && pending.timing
+    ) {
+      const completedImport = {
+        ...pending.timing,
+        importCompletedAt: job.finishedAt,
+        importExecutionStartedAt: job.startedAt,
+        jobCreatedAt: job.createdAt,
+        jobKind: job.kind,
+        provider: job.provider,
+      };
+      const previous = completedImportsByJobId.get(job.id);
+      completedImportsByJobId.set(
+        job.id,
+        previous
+          ? {
+              ...completedImport,
+              ...mergeHostedDeviceSyncImportTiming(previous, completedImport),
+            }
+          : completedImport,
+      );
+    }
     const ackKey = buildHostedDirtyAckKey(pending.connectionId, pending.processedRevision);
     const ids = completedByAck.get(ackKey) ?? new Set<string>();
-    ids.add(pending.dirtyPayloadId);
+    if (pending.dirtyPayloadId) {
+      ids.add(pending.dirtyPayloadId);
+    }
     completedByAck.set(ackKey, ids);
   }
 
@@ -892,6 +1327,50 @@ export function promoteHostedCompletedDirtyPayloadAcks(input: {
     ];
   }
   input.state.pendingDirtyPayloadJobs = remaining;
+  return [...completedImportsByJobId.values()];
+}
+
+function mergeHostedDeviceSyncImportTiming(
+  left: HostedDeviceSyncImportTiming,
+  right: HostedDeviceSyncImportTiming,
+): HostedDeviceSyncImportTiming {
+  return {
+    eventToProviderSendBucket: mergeHostedDeviceSyncEventToProviderSendBuckets(
+      left.eventToProviderSendBucket,
+      right.eventToProviderSendBucket,
+    ),
+    firstWebhookReceivedAt: minOptionalIso(
+      left.firstWebhookReceivedAt,
+      right.firstWebhookReceivedAt,
+    ),
+    providerSendToWebhookMs: maxOptionalDurationMs(
+      left.providerSendToWebhookMs,
+      right.providerSendToWebhookMs,
+    ),
+    sourceProvider: left.sourceProvider === right.sourceProvider
+      ? left.sourceProvider
+      : null,
+  };
+}
+
+function minOptionalIso(left: string | null, right: string | null): string | null {
+  if (!left) {
+    return right;
+  }
+  if (!right) {
+    return left;
+  }
+  return Date.parse(left) <= Date.parse(right) ? left : right;
+}
+
+function maxOptionalDurationMs(left: number | null, right: number | null): number | null {
+  if (left === null) {
+    return right;
+  }
+  if (right === null) {
+    return left;
+  }
+  return Math.max(left, right);
 }
 
 function buildHostedDirtyAckKey(connectionId: string, processedRevision: string): string {
@@ -1008,9 +1487,9 @@ function buildHostedDeviceSyncRuntimeConnectionUpdate(input: {
   account: StoredDeviceSyncAccount;
   baseline: HostedDeviceSyncRuntimeConnectionSnapshot | null;
   codec: ReturnType<typeof createSecretCodec>;
+  deferNextReconcileAtToBaseline: boolean;
   failureDiagnostic: DeviceSyncJobFailureDiagnostic | null;
   hostedConnectionId: string;
-  nextReconcileAt: string | null;
   observedTokenVersion: number | null;
   sourceApplyEnabled: boolean;
   sources: readonly StoredDeviceConnectionSource[];
@@ -1077,12 +1556,11 @@ function buildHostedDeviceSyncRuntimeConnectionUpdate(input: {
     }
 
     assignErrorFieldUpdate(update, input.account, baselineLocalState);
-    assignNextReconcileAtUpdate(
-      update,
-      input.account.status,
-      input.nextReconcileAt,
-      baselineLocalState?.nextReconcileAt ?? null,
-    );
+    assignCanonicalNextReconcileAtUpdate(update, {
+      account: input.account,
+      baseline: baselineLocalState,
+      deferToBaseline: input.deferNextReconcileAtToBaseline,
+    });
     assignFailureDiagnosticUpdate(
       update,
       input.account.lastSyncErrorAt ?? null,
@@ -1135,12 +1613,11 @@ function buildHostedDeviceSyncRuntimeConnectionUpdate(input: {
     };
   }
 
-  assignNextReconcileAtUpdate(
-    update,
-    input.account.status,
-    input.nextReconcileAt,
-    baselineLocalState?.nextReconcileAt ?? null,
-  );
+  assignCanonicalNextReconcileAtUpdate(update, {
+    account: input.account,
+    baseline: baselineLocalState,
+    deferToBaseline: input.deferNextReconcileAtToBaseline,
+  });
 
   if (!equalHostedDeviceSyncRuntimeCredentials(credential, baselineCredential)) {
     if (credential.kind === "none" && baselineTokenBundle !== null) {
@@ -2145,15 +2622,23 @@ function resolveHostedWakeNextReconcileAt(
     : null;
 }
 
-function assignNextReconcileAtUpdate(
+function assignCanonicalNextReconcileAtUpdate(
   update: HostedDeviceSyncRuntimeConnectionUpdate,
-  status: StoredDeviceSyncAccount["status"],
-  localValue: string | null,
-  baselineValue: string | null,
+  input: {
+    account: Pick<StoredDeviceSyncAccount, "nextReconcileAt" | "status">;
+    baseline: HostedDeviceSyncRuntimeLocalStateSnapshot | null;
+    deferToBaseline: boolean;
+  },
 ): void {
+  const baselineValue = input.baseline?.nextReconcileAt ?? null;
+  const nextReconcileAt = input.deferToBaseline
+    ? baselineValue
+    : input.account.nextReconcileAt ?? null;
+
   if (
-    (status === "reauthorization_required" || status === "disconnected")
-    && localValue === null
+    (input.account.status === "reauthorization_required"
+      || input.account.status === "disconnected")
+    && nextReconcileAt === null
     && baselineValue !== null
   ) {
     update.localState = {
@@ -2163,17 +2648,17 @@ function assignNextReconcileAtUpdate(
     return;
   }
 
-  if (!localValue || localValue === baselineValue) {
+  if (!nextReconcileAt || nextReconcileAt === baselineValue) {
     return;
   }
 
-  // `nextReconcileAt` is owned by device-sync execution, not an append-only
-  // event timestamp. Empty-backfill retry floors may intentionally pull it
-  // earlier; stale hosted replays are still rejected by the web apply
-  // observedUpdatedAt/version fence before localState mutates hosted state.
+  // Canonical publication derives only from the provider-owned account. The
+  // completion fence may retain the already observed Web baseline until its
+  // exact work has been checkpointed; runner-local wake clocks never enter
+  // this boundary.
   update.localState = {
     ...(update.localState ?? {}),
-    nextReconcileAt: localValue,
+    nextReconcileAt,
   } satisfies HostedDeviceSyncRuntimeLocalStateUpdate;
 }
 

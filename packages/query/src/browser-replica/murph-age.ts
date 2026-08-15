@@ -31,7 +31,7 @@ import {
 import type {
   BrowserVaultMetricRow,
   BrowserVaultMetricSelectionRow,
-  BrowserVaultQueryClient,
+  BrowserVaultMetricsCapableQueryClient,
 } from "./shared.ts";
 
 export const BROWSER_VAULT_MURPH_AGE_READINESS_SCHEMA =
@@ -155,7 +155,7 @@ const BROWSER_VAULT_MURPH_AGE_RUNTIME_INPUTS = [
 ] satisfies readonly BrowserVaultMurphAgeRuntimeInputReadiness[];
 
 export function selectBrowserVaultMurphAgeReadiness(
-  client: BrowserVaultQueryClient,
+  client: BrowserVaultMetricsCapableQueryClient,
 ): BrowserVaultMurphAgeReadiness {
   const points = browserVaultMetricPointsForMurphAge(client);
   const primaryBundle = assessMurphAgeInputBundle({
@@ -192,7 +192,7 @@ export function selectBrowserVaultMurphAgeReadiness(
   };
 }
 
-function browserVaultMetricPointsForMurphAge(client: BrowserVaultQueryClient): MetricPoint[] {
+function browserVaultMetricPointsForMurphAge(client: BrowserVaultMetricsCapableQueryClient): MetricPoint[] {
   const metricRowsBySelectionId = new Map(
     client.replica.metricRows.map((row) => [row.id, row]),
   );

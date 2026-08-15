@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   buildHostedExecutionAssistantNotificationRequestedWake,
-  buildHostedExecutionGroupNewsletterEmailNeededWake,
+  buildHostedExecutionDailyMetricReportedWake,
   buildHostedExecutionLinqConversationMessageWake,
   buildHostedExecutionMemberActivatedWake,
   buildHostedExecutionMemberChannelsUpdatedWake,
@@ -3279,29 +3279,6 @@ describe("executeHostedMailboxEvent", () => {
     expect(mocks.sendAssistantNotification).not.toHaveBeenCalled();
   });
 
-  it("rejects direct group newsletter email-needed wakes so mailbox staging owns the private note", async () => {
-    const wake = buildHostedExecutionGroupNewsletterEmailNeededWake({
-      eventId: "group-newsletter.email-needed:member_123:hgrp_123",
-      groupDisplayName: "Tempo Crew",
-      groupId: "hgrp_123",
-      memberId: "member_123",
-      occurredAt: "2026-04-08T00:00:00.000Z",
-    });
-
-    await expect(
-      executeHostedMailboxEvent({
-        wake,
-        executionContext,
-        runtime: createRuntime(),
-        runtimeEnv: {},
-        vaultRoot: "/tmp/assistant-runtime-events",
-      }),
-    ).rejects.toThrow(
-      "Hosted group newsletter email-needed wakes are staged at mailbox import and must never reach system wake execution.",
-    );
-    expect(mocks.sendAssistantNotification).not.toHaveBeenCalled();
-  });
-
   it("treats explicit member channel sync events as no-op wake handlers", async () => {
     const wake = buildHostedExecutionMemberChannelsUpdatedWake({
       eventId: "evt_member_channels_updated",
@@ -3358,6 +3335,75 @@ describe("executeHostedMailboxEvent", () => {
       postCheckpointRecord: null,
       redactedLogEntries: [],
     });
+  });
+
+  it("keeps maintenance requests pending through a post-checkpoint vault-share projection", async () => {
+    const wake = buildHostedExecutionRuntimeControlWake({
+      eventId: "runtime-control:group-share-projection:synthetic",
+      kind: "runtime.maintenance-requested",
+      occurredAt: "2026-04-08T00:03:00.000Z",
+      userId: "member_123",
+    });
+
+    const result = await executeHostedMailboxEvent({
+      wake,
+      executionContext,
+      runtime: createRuntime(),
+      runtimeEnv: {},
+      vaultRoot: "/tmp/assistant-runtime-events",
+    });
+
+    expect(mocks.sendAssistantNotification).not.toHaveBeenCalled();
+    expect(result).toEqual(expect.objectContaining({
+      conversationMetrics: null,
+      mailboxLane: "runtime-control",
+      nextWakeAt: null,
+      postCheckpointRecord: { kind: "vault-share.projection" },
+      redactedLogEntries: [],
+    }));
+  });
+
+  it("refreshes granted shares after a reported daily metric checkpoints", async () => {
+    const result = await executeHostedMailboxEvent({
+      wake: buildHostedExecutionDailyMetricReportedWake({
+        date: "2026-08-13",
+        eventId: "daily_metric_report_synthetic",
+        memberId: "member_123",
+        metric: "steps",
+        occurredAt: "2026-08-13T20:00:00.000Z",
+        unit: "count",
+        value: 8_000,
+      }),
+      executionContext,
+      runtime: createRuntime(),
+      runtimeEnv: {},
+      vaultRoot: "/tmp/assistant-runtime-events",
+    });
+
+    expect(result).toEqual(expect.objectContaining({
+      conversationMetrics: null,
+      mailboxLane: "runtime-control",
+      nextWakeAt: null,
+      postCheckpointRecord: { kind: "vault-share.projection" },
+      redactedLogEntries: [],
+    }));
+  });
+
+  it("keeps unrelated maintenance requests as ordinary no-op control work", async () => {
+    const result = await executeHostedMailboxEvent({
+      wake: buildHostedExecutionRuntimeControlWake({
+        eventId: "runtime-control:maintenance:unrelated",
+        kind: "runtime.maintenance-requested",
+        occurredAt: "2026-04-08T00:03:00.000Z",
+        userId: "member_123",
+      }),
+      executionContext,
+      runtime: createRuntime(),
+      runtimeEnv: {},
+      vaultRoot: "/tmp/assistant-runtime-events",
+    });
+
+    expect(result.postCheckpointRecord).toBeNull();
   });
 
 });

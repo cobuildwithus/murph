@@ -3,7 +3,11 @@ import { EventEmitter } from 'node:events'
 
 import { afterEach, expect, test, vi } from 'vitest'
 
-import { buildLinqIMessageAppCardUrl } from '../src/assistant-response-cards.ts'
+import {
+  buildLinqIMessageAppCardUrl,
+  renderAssistantWorkoutResponseCardText,
+  type CompactTableWorkoutResponseCardV1,
+} from '../src/assistant-response-cards.ts'
 import {
   fetchJsonResponse,
   readJsonErrorResponse,
@@ -34,6 +38,7 @@ import {
   uploadLinqAttachment,
 } from '../src/linq-runtime.ts'
 import { VaultCliError } from '../src/vault-cli-errors.ts'
+import { renderMarkdownMessageText } from '../src/message-formatting.ts'
 
 const NUTRITION_CARD = {
   kind: 'daily_nutrition',
@@ -55,6 +60,31 @@ const NUTRITION_CARD = {
     fiberGrams: null,
   },
 } as const
+
+const OVERSIZED_WORKOUT_CARD: CompactTableWorkoutResponseCardV1 = {
+  kind: 'compact_table',
+  version: 1,
+  title: 'Full workout recovery',
+  subtitle: null,
+  footer: 'Reply with the exercise, set, and result to log or correct it.',
+  tracking: {
+    kind: 'workout',
+    entityId: 'evt_01K1ABCDEFGHJKMNPQRSTVWXYZ',
+    snapshotAt: '2026-08-09T19:45:00.000Z',
+  },
+  workout: {
+    version: 1,
+    state: 'active',
+    exercises: Array.from({ length: 16 }, (_, exerciseIndex) => ({
+      name: `Capacity exercise ${exerciseIndex + 1}`,
+      sets: Array.from({ length: 16 }, (_, setIndex) => ({
+        status: 'pending',
+        target: `Exercise ${exerciseIndex + 1} set ${setIndex + 1} target ${'x'.repeat(12)}`,
+        actual: null,
+      })),
+    })),
+  },
+}
 
 afterEach(() => {
   vi.restoreAllMocks()
@@ -456,7 +486,8 @@ test('linq runtime checks iMessage capability and sends the exact one-part app c
             name: 'Murph',
             team_id: 'G9DJH2XUMK',
           },
-          fallback_text: 'Ask Murph for this card in text',
+          fallback_text:
+            'Your daily nutrition. Ask Murph for this card in text',
           interactive: true,
           layout: {
             caption: 'Jul 28 · 4 meals',
@@ -860,6 +891,107 @@ test('linq runtime sends a terminal payment URL as a separate rich-link message'
   ])
 })
 
+test('linq runtime preserves accepted primary media ownership when the rich-link request fails', async () => {
+  const env = {
+    LINQ_API_BASE_URL: 'https://linq.example.test',
+    LINQ_API_TOKEN: 'linq-token',
+  } satisfies NodeJS.ProcessEnv
+  let requestCount = 0
+  const fetchImplementation = vi.fn(async () => {
+    requestCount += 1
+    if (requestCount === 1) {
+      return createJsonResponse({
+        chat_id: 'chat-123',
+        message: { id: 'message-generated-image' },
+      })
+    }
+    return createJsonResponse(
+      { error: 'rich-link request failed' },
+      { status: 401 },
+    )
+  })
+
+  await assert.rejects(
+    () => sendLinqChatMessage(
+      {
+        chatId: 'chat-123',
+        idempotencyKey: 'generated-image-123',
+        media: [{ url: 'https://cdn.example.test/generated-image.png' }],
+        message: 'Generated image\nhttps://example.test/source',
+      },
+      { env, fetchImplementation },
+    ),
+    (error) => {
+      const partial = error as {
+        code?: unknown
+        context?: { providerMessageEffects?: unknown }
+        providerMessageIds?: unknown
+      }
+      assert.deepEqual(partial.context?.providerMessageEffects, [{
+        carriesIntentMedia: true,
+        message: 'Generated image',
+        providerMessageId: 'message-generated-image',
+      }])
+      return partial.code === 'ASSISTANT_LINQ_RICH_LINK_PARTIAL_DELIVERY'
+        && JSON.stringify(partial.providerMessageIds)
+          === JSON.stringify(['message-generated-image'])
+    },
+  )
+  expect(fetchImplementation).toHaveBeenCalledTimes(2)
+})
+
+test('linq runtime preserves created-chat media ownership when the rich-link request fails', async () => {
+  const env = {
+    LINQ_API_BASE_URL: 'https://linq.example.test',
+    LINQ_API_TOKEN: 'linq-token',
+  } satisfies NodeJS.ProcessEnv
+  let requestCount = 0
+  const fetchImplementation = vi.fn(async () => {
+    requestCount += 1
+    if (requestCount === 1) {
+      return createJsonResponse({
+        chat: {
+          id: 'chat-created',
+          message: { id: 'message-generated-image' },
+        },
+      })
+    }
+    return createJsonResponse(
+      { error: 'rich-link request failed' },
+      { status: 401 },
+    )
+  })
+
+  await assert.rejects(
+    () => createLinqChat(
+      {
+        from: '+15550000000',
+        idempotencyKey: 'created-generated-image-123',
+        media: [{ url: 'https://cdn.example.test/generated-image.png' }],
+        message: 'Generated image\nhttps://example.test/source',
+        to: ['+15550000001'],
+      },
+      { env, fetchImplementation },
+    ),
+    (error) => {
+      const partial = error as {
+        code?: unknown
+        context?: { providerMessageEffects?: unknown }
+        providerMessageIds?: unknown
+      }
+      assert.deepEqual(partial.context?.providerMessageEffects, [{
+        carriesIntentMedia: true,
+        message: 'Generated image',
+        providerMessageId: 'message-generated-image',
+      }])
+      return partial.code === 'ASSISTANT_LINQ_RICH_LINK_PARTIAL_DELIVERY'
+        && JSON.stringify(partial.providerMessageIds)
+          === JSON.stringify(['message-generated-image'])
+    },
+  )
+  expect(fetchImplementation).toHaveBeenCalledTimes(2)
+})
+
 test.each(incompleteTwoPartMessageIdentityCases)(
   'linq runtime keeps an existing-chat rich-link delivery terminal with $label',
   async ({
@@ -1101,7 +1233,7 @@ test('linq runtime sanitizes but still promotes an uppercase terminal HTTPS URL'
   }])
 })
 
-test('linq runtime creates a chat with caller text before the rich-link follow-up', async () => {
+test('linq runtime keeps created-chat media on the primary message before the rich-link follow-up', async () => {
   const env = {
     LINQ_API_BASE_URL: 'https://linq.example.test',
     LINQ_API_TOKEN: 'linq-token',
@@ -1130,7 +1262,8 @@ test('linq runtime creates a chat with caller text before the rich-link follow-u
     {
       from: '+15550000000',
       idempotencyKey: 'create-123',
-      message: 'Your secure payment link:\nhttps://pay.example.test/checkout/session_123',
+      media: [{ url: 'https://cdn.example.test/generated-avatar.png' }],
+      message: 'Generated image\nhttps://example.test/source',
       to: ['+15550000001'],
     },
     { env, fetchImplementation },
@@ -1140,7 +1273,8 @@ test('linq runtime creates a chat with caller text before the rich-link follow-u
   assert.deepEqual(result.providerMessageIds, ['message-text', 'message-link'])
   assert.deepEqual(result.providerMessageEffects, [
     {
-      message: 'Your secure payment link:',
+      carriesIntentMedia: true,
+      message: 'Generated image',
       providerMessageId: 'message-text',
     },
     {
@@ -1156,7 +1290,10 @@ test('linq runtime creates a chat with caller text before the rich-link follow-u
           idempotency_key: 'create-123',
           parts: [{
             type: 'text',
-            value: 'Your secure payment link:',
+            value: 'Generated image',
+          }, {
+            type: 'media',
+            url: 'https://cdn.example.test/generated-avatar.png',
           }],
         },
         to: ['+15550000001'],
@@ -1169,7 +1306,7 @@ test('linq runtime creates a chat with caller text before the rich-link follow-u
           idempotency_key: 'create-123:link',
           parts: [{
             type: 'link',
-            value: 'https://pay.example.test/checkout/session_123',
+            value: 'https://example.test/source',
           }],
         },
       },
@@ -1543,6 +1680,90 @@ test('linq runtime converts supported text styles to iMessage text decorations',
       ],
     },
   })
+})
+
+test('linq runtime sends complete 16x16 workout recovery as bounded text parts', async () => {
+  const env = {
+    LINQ_API_BASE_URL: 'https://linq.example.test/custom',
+    LINQ_API_TOKEN: 'linq-token',
+  } satisfies NodeJS.ProcessEnv
+  const seenRequests: Array<{ body?: string | Blob }> = []
+  const fetchImplementation = vi.fn(async (_url: string, init) => {
+    seenRequests.push({ body: init.body })
+    return createJsonResponse({ message: { id: 'message-workout-recovery' } })
+  })
+  const visibleText = renderAssistantWorkoutResponseCardText(
+    OVERSIZED_WORKOUT_CARD,
+  )
+
+  const result = await sendLinqChatMessage({
+    chatId: 'chat-workout-recovery',
+    idempotencyKey: 'workout-recovery-once',
+    message: visibleText,
+  }, { env, fetchImplementation })
+
+  assert.equal(seenRequests.length, 1)
+  const body = parseJsonRequestBody(seenRequests[0]?.body) as {
+    message: {
+      idempotency_key: string
+      parts: Array<{ type: string; value: string }>
+    }
+  }
+  const textParts = body.message.parts.filter((part) => part.type === 'text')
+  assert.ok(textParts.length > 1)
+  assert.ok(textParts.every((part) => part.value.length <= 10_000))
+  assert.equal(body.message.idempotency_key, 'workout-recovery-once')
+  const deliveredText = textParts.map((part) => part.value).join('')
+  assert.equal(deliveredText, renderMarkdownMessageText(visibleText).text)
+  assert.match(deliveredText, /Capacity exercise 1:/u)
+  assert.match(deliveredText, /Capacity exercise 16:/u)
+  assert.match(
+    deliveredText,
+    new RegExp(`set 16: pending; target Exercise 16 set 16 target ${'x'.repeat(12)}`, 'u'),
+  )
+  assert.doesNotMatch(deliveredText, /evt_/u)
+  assert.deepEqual(result.providerMessageEffects, [{
+    message: deliveredText,
+    providerMessageId: 'message-workout-recovery',
+  }])
+})
+
+test('linq runtime preserves text decorations across bounded text parts', async () => {
+  const seenRequests: Array<{ body?: string | Blob }> = []
+  const fetchImplementation = vi.fn(async (_url: string, init) => {
+    seenRequests.push({ body: init.body })
+    return createJsonResponse({ message: { id: 'message-decorated-parts' } })
+  })
+
+  await sendLinqChatMessage({
+    chatId: 'chat-decorated-parts',
+    message: `**${'a'.repeat(9_999)}😀${'b'.repeat(50)}**`,
+  }, {
+    env: { LINQ_API_TOKEN: 'linq-token' },
+    fetchImplementation,
+  })
+
+  const body = parseJsonRequestBody(seenRequests[0]?.body) as {
+    message: {
+      parts: Array<{
+        text_decorations?: Array<{ range: [number, number]; style: string }>
+        type: string
+        value: string
+      }>
+    }
+  }
+  assert.deepEqual(body.message.parts, [
+    {
+      text_decorations: [{ range: [0, 9_999], style: 'bold' }],
+      type: 'text',
+      value: 'a'.repeat(9_999),
+    },
+    {
+      text_decorations: [{ range: [0, 52], style: 'bold' }],
+      type: 'text',
+      value: `😀${'b'.repeat(50)}`,
+    },
+  ])
 })
 
 test('linq runtime preserves exact underscore-delimited message text', async () => {
@@ -2846,6 +3067,10 @@ test('linq runtime records safe request and response diagnostics for provider ht
         {
           chatId: 'sample-chat-route-value',
           idempotencyKey: 'reply-key-safe-diagnostics',
+          media: [
+            { url: 'https://cdn.example.test/private-diagnostic-image.png' },
+            { attachmentId: 'attachment-safe-diagnostics' },
+          ],
           message: 'hello reminder',
           replyToMessageId: 'reply-sample-message-id',
         },
@@ -2857,11 +3082,13 @@ test('linq runtime records safe request and response diagnostics for provider ht
             createJsonResponse(
               {
                 'sample-chat-route-value': 'dynamic key should stay private',
-                errors: [
-                  {
-                    message: 'chat sample-chat-route-value rejected message',
-                  },
-                ],
+                error: {
+                  code: 1004,
+                  doc_url: 'https://docs.linqapp.com/error/codes/1xxx/1004/',
+                  message: 'chat sample-chat-route-value rejected message',
+                  status: 400,
+                },
+                success: false,
                 trace_id: 'trace-sample-response-value',
               },
               {
@@ -2884,20 +3111,100 @@ test('linq runtime records safe request and response diagnostics for provider ht
         error.context?.requestBodyShape ===
           'object:message|message:idempotency_key,parts' &&
         error.context?.requestMessageLength === 'hello reminder'.length &&
-        error.context?.requestMessagePartCount === 1 &&
+        error.context?.requestMessagePartCount === 3 &&
+        error.context?.requestTextPartCount === 1 &&
+        error.context?.requestMediaPartCount === 2 &&
+        error.context?.requestPublicUrlMediaPartCount === 1 &&
+        error.context?.requestAttachmentMediaPartCount === 1 &&
+        error.context?.providerErrorCode === '1004' &&
+        error.context?.providerRequestId === 'trace-sample-response-value' &&
         error.context?.responseBodyKind === 'json_object' &&
-        error.context?.responseBodyKeyCount === 3 &&
+        error.context?.responseBodyKeyCount === 4 &&
+        error.context?.responseBodyKeySummary === 'error,trace_id' &&
         JSON.stringify(error.context?.responseBodyKeys) ===
-          JSON.stringify(['errors', 'trace_id']) &&
+          JSON.stringify(['error', 'trace_id']) &&
         error.context?.responseBodyStringFieldCount === 2 &&
+        error.context?.responseBodyStringFieldSummary === 'trace_id' &&
         JSON.stringify(error.context?.responseBodyStringFields) ===
           JSON.stringify(['trace_id']) &&
+        typeof error.context?.responseBodySha256 === 'string' &&
+        /^[a-f0-9]{64}$/u.test(error.context.responseBodySha256) &&
         !contextJson.includes('hello reminder') &&
         !contextJson.includes('sample-chat-route-value') &&
-        !contextJson.includes('trace-sample-response-value')
+        !contextJson.includes('private-diagnostic-image.png') &&
+        !contextJson.includes('chat sample-chat-route-value rejected message')
       )
     },
   )
+})
+
+test('linq runtime retains hashed text diagnostics from bounded response streams', async () => {
+  const providerText = 'Plain Linq failure'
+
+  await assert.rejects(
+    () => sendLinqChatMessage(
+      {
+        chatId: 'private-chat-route',
+        message: 'private message body',
+      },
+      {
+        env: { LINQ_API_TOKEN: '<REDACTED_TOKEN>' },
+        fetchImplementation: async () => new Response(providerText, {
+          headers: { 'content-type': 'text/plain' },
+          status: 400,
+        }),
+      },
+    ),
+    (error) => {
+      if (!(error instanceof VaultCliError)) {
+        return false
+      }
+      const serialized = JSON.stringify({
+        context: error.context,
+        message: error.message,
+      })
+      return error.code === 'LINQ_API_REQUEST_FAILED'
+        && error.context?.responseBodyKind === 'text'
+        && error.context?.responseBodySha256 ===
+          'da7d00e0c46925b2155166ece27e101541b4a22b97ac223cd4749b880e59a0da'
+        && error.context?.responseBodyTextLength === providerText.length
+        && !serialized.includes(providerText)
+        && !serialized.includes('private-chat-route')
+        && !serialized.includes('private message body')
+    },
+  )
+})
+
+test('linq runtime sends 10,001 rendered characters as two bounded text parts', async () => {
+  const seenRequests: Array<{ body?: string | Blob }> = []
+  const fetchImplementation = vi.fn(async (_url: string, init) => {
+    seenRequests.push({ body: init.body })
+    return createJsonResponse({ message: { id: 'message-bounded-text' } })
+  })
+
+  await sendLinqChatMessage(
+    {
+      chatId: 'chat-bounded-text',
+      media: [{ url: 'https://cdn.example.test/frame.png' }],
+      message: 'x'.repeat(10_001),
+    },
+    {
+      env: { LINQ_API_TOKEN: '<REDACTED_TOKEN>' },
+      fetchImplementation,
+    },
+  )
+
+  expect(fetchImplementation).toHaveBeenCalledTimes(1)
+  const body = parseJsonRequestBody(seenRequests[0]?.body) as {
+    message: {
+      parts: Array<{ type: string; value?: string }>
+    }
+  }
+  assert.deepEqual(body.message.parts, [
+    { type: 'text', value: 'x'.repeat(10_000) },
+    { type: 'text', value: 'x' },
+    { type: 'media', url: 'https://cdn.example.test/frame.png' },
+  ])
 })
 
 test('linq runtime does not surface top-level provider error text or transport cause text', async () => {
@@ -2919,6 +3226,10 @@ test('linq runtime does not surface top-level provider error text or transport c
                   'chat sample-chat-route rejected sample reminder text',
               },
               {
+                headers: {
+                  'Content-Type': 'application/json',
+                  'X-Trace-ID': 'trace-header-only',
+                },
                 status: 400,
               },
             ),
@@ -2937,6 +3248,7 @@ test('linq runtime does not surface top-level provider error text or transport c
         error.code === 'LINQ_API_REQUEST_FAILED' &&
         error.message ===
           'Linq request POST /chats/[chat]/messages failed with HTTP 400.' &&
+        error.context?.providerRequestId === 'trace-header-only' &&
         error.context?.responseBodyKind === 'json_object' &&
         JSON.stringify(error.context?.responseBodyKeys) ===
           JSON.stringify(['message']) &&
@@ -3122,6 +3434,89 @@ test('stopLinqChatTypingIndicator does not inherit delete-message retries', asyn
   )
 
   assert.equal(transientAttempts, 1)
+})
+
+test('linq runtime leaves all control-plane retries to the Murph policy', async () => {
+  vi.useFakeTimers()
+  const requestUrls: string[] = []
+  const send = sendLinqChatMessage(
+    {
+      chatId: 'chat-sdk-retry-owner',
+      idempotencyKey: 'sdk-retry-owner-key',
+      message: 'hello',
+    },
+    {
+      env: {
+        LINQ_API_BASE_URL: 'https://linq.example.test/custom/partner/v3/',
+        LINQ_API_TOKEN: 'linq-token',
+      },
+      fetchImplementation: async (url) => {
+        requestUrls.push(url)
+        return createJsonResponse(
+          { error: { message: 'temporarily unavailable' } },
+          { status: 503 },
+        )
+      },
+    },
+  )
+  const rejection = assert.rejects(
+    send,
+    (error) =>
+      error instanceof VaultCliError &&
+      error.code === 'LINQ_API_REQUEST_FAILED' &&
+      error.context?.operation === 'send_message' &&
+      error.context?.retryable === true &&
+      error.context?.status === 503,
+  )
+
+  await vi.runAllTimersAsync()
+  await rejection
+
+  assert.equal(requestUrls.length, 3)
+  assert.deepEqual(requestUrls, Array(3).fill(
+    'https://linq.example.test/custom/partner/v3/chats/chat-sdk-retry-owner/messages',
+  ))
+})
+
+test.each([
+  {
+    buildResponse: () => new Response('{"phone_numbers":[]}', {
+      headers: { 'content-length': String(256 * 1024 + 1) },
+      status: 200,
+    }),
+    label: 'declared',
+  },
+  {
+    buildResponse: () => new Response(new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new Uint8Array(200 * 1024))
+        controller.enqueue(new Uint8Array(64 * 1024 + 1))
+      },
+    }), { status: 200 }),
+    label: 'chunked',
+  },
+])('linq runtime caps $label SDK responses before parsing', async ({
+  buildResponse,
+}) => {
+  let attempts = 0
+  await assert.rejects(
+    () => probeLinqApi({
+      env: { LINQ_API_TOKEN: 'linq-token' },
+      fetchImplementation: async () => {
+        attempts += 1
+        return buildResponse()
+      },
+    }),
+    (error) =>
+      error instanceof VaultCliError &&
+      error.code === 'LINQ_API_REQUEST_FAILED' &&
+      error.context?.failureStage === 'http' &&
+      error.context?.operation === 'list_phone_numbers' &&
+      error.context?.responseBodyKind === 'oversize' &&
+      error.context?.retryable === false &&
+      error.context?.status === 200,
+  )
+  assert.equal(attempts, 1)
 })
 
 test('linq runtime covers optional payload omissions, fallback http messages, and timeout transport errors', async () => {

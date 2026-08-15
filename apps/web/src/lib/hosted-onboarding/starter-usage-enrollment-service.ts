@@ -5,7 +5,12 @@ import {
 } from "@prisma/client";
 
 import {
+  HostedCryptoDomainRootCandidateRequiredError,
+  lockAndReadActiveHostedDomainRootKeyIdTx,
   prepareHostedCryptoDomainRootCandidates,
+  prewarmPreparedHostedCryptoDomainRootForWeb,
+  type PreparedHostedCryptoDomainRootCandidates,
+  unwrapHostedDomainRootForWeb,
 } from "../hosted-crypto/domain-root-store";
 import { runWithHostedDomainRootUnwrapCache } from "../hosted-crypto/domain-root-unwrap-cache";
 import {
@@ -19,12 +24,14 @@ import {
   hasHostedPaidBillingRefEvidence,
   isHostedMemberSuspended,
 } from "./entitlement";
-import { hostedOnboardingError } from "./errors";
+import { hostedOnboardingError, isHostedOnboardingError } from "./errors";
 import { requireHostedInviteForBillingCheckout } from "./invite-service";
 import {
   activateHostedMemberForPositiveSourceTx,
+  buildHostedMemberActivationEventId,
 } from "./member-activation";
 import {
+  type HostedMemberActivationRuntimeWakeBestEffortResult,
   signalHostedMemberActivationRuntimeWakeBestEffortResult,
 } from "./member-activation-runtime-wake";
 import { readActiveHostedFamilySponsorship } from "./member-access";
@@ -89,18 +96,22 @@ export interface HostedLinqInstantStartStarterUsageEnrollmentResult
 }
 
 type HostedStarterUsageEnrollmentPolicy = {
+  allowSignupWelcomeWithoutAssignableLinqLine: boolean;
   instantStartAdmission?: {
     eventId: string;
     inviteCode: string;
   };
+  requireActivationRuntimeWake: boolean;
   requireLaunchConsent: boolean;
   source: HostedStarterUsageSource;
+  suppressSignupWelcomeEmail: boolean;
   suppressSignupWelcome: boolean;
 };
 
 type HostedStarterUsagePostCommitEffects = {
   activatedMemberId: string | null;
   hostedExecutionEventId: string | null;
+  hostedExecutionMailboxItemId: string | null;
   welcomeEmailMemberId: string | null;
 };
 
@@ -109,13 +120,38 @@ type HostedStarterUsageEnrollmentWithPolicyResult = {
   result: HostedStarterUsageEnrollmentResult;
 };
 
+const HOSTED_STARTER_USAGE_ACTIVATION_CRYPTO_DOMAINS = [
+  "control",
+  "ingress",
+] as const;
+const HOSTED_STARTER_USAGE_CRYPTO_PREPARATION_REQUIRED_CODE =
+  "HOSTED_STARTER_USAGE_CRYPTO_PREPARATION_REQUIRED";
+const HOSTED_STARTER_USAGE_CRYPTO_PREPARATION_ATTEMPTS = 2;
+
+type HostedStarterUsageActivationCryptoDomain =
+  typeof HOSTED_STARTER_USAGE_ACTIVATION_CRYPTO_DOMAINS[number];
+
+type PreparedHostedStarterUsageActivationCrypto = {
+  preparedCryptoDomainRoots: PreparedHostedCryptoDomainRootCandidates;
+  prewarmedRootKeyIds: ReadonlyMap<
+    HostedStarterUsageActivationCryptoDomain,
+    string
+  >;
+};
+
 export async function ensureHostedStarterUsageEnrollment(
   input: HostedStarterUsageEnrollmentInput,
 ): Promise<HostedStarterUsageEnrollmentResult> {
+  const suppressSignupWelcome = input.suppressSignupWelcome ?? false;
+  const companionOnboarding = input.source === "companion_onboarding";
   const enrollment = await ensureHostedStarterUsageEnrollmentWithPolicy(input, {
+    allowSignupWelcomeWithoutAssignableLinqLine: companionOnboarding,
+    requireActivationRuntimeWake: companionOnboarding,
     requireLaunchConsent: true,
     source: input.source,
-    suppressSignupWelcome: input.suppressSignupWelcome ?? false,
+    suppressSignupWelcome,
+    suppressSignupWelcomeEmail:
+      suppressSignupWelcome || companionOnboarding,
   });
   return enrollment.result;
 }
@@ -138,12 +174,15 @@ export async function ensureHostedLinqInstantStartStarterUsageEnrollment(
     ...(input.now ? { now: input.now } : {}),
     ...(input.prisma ? { prisma: input.prisma } : {}),
   }, {
+    allowSignupWelcomeWithoutAssignableLinqLine: false,
     instantStartAdmission: {
       eventId: input.admissionEventId,
       inviteCode: input.inviteCode,
     },
+    requireActivationRuntimeWake: false,
     requireLaunchConsent: false,
     source: "linq_instant_start",
+    suppressSignupWelcomeEmail: true,
     suppressSignupWelcome: true,
   });
   return {
@@ -163,6 +202,43 @@ export async function runHostedLinqInstantStartDeferredActivationWakeBestEffort(
     memberId: input.continuation.memberId,
     ...(input.prisma ? { prisma: input.prisma } : {}),
     source: "starter-usage.activation",
+  });
+}
+
+export async function retryPendingHostedStarterUsageActivationRuntimeWake(
+  input: {
+    memberId: string;
+    prisma?: PrismaClient;
+  },
+): Promise<HostedMemberActivationRuntimeWakeBestEffortResult | null> {
+  const prisma = input.prisma ?? getPrisma();
+  const hostedExecutionEventId = buildHostedMemberActivationEventId({
+    memberId: input.memberId,
+    sourceEventId: buildHostedStarterUsageSemanticSourceKey(input.memberId),
+    sourceType: "hosted.starter_usage.enrolled",
+  });
+  const activation = await prisma.hostedMailboxItem.findUnique({
+    select: {
+      consumedAt: true,
+      id: true,
+    },
+    where: {
+      userId_dedupeKey: {
+        dedupeKey: hostedExecutionEventId,
+        userId: input.memberId,
+      },
+    },
+  });
+  if (!activation || activation.consumedAt) {
+    return null;
+  }
+
+  return signalHostedMemberActivationRuntimeWakeBestEffortResult({
+    hostedExecutionEventId,
+    mailboxItemId: activation.id,
+    memberId: input.memberId,
+    prisma,
+    source: "starter-usage.activation.retry",
   });
 }
 
@@ -213,17 +289,13 @@ async function ensureHostedStarterUsageEnrollmentWithPolicy(
     });
   }
 
-  const preparedCryptoDomainRoots =
-    await prepareHostedCryptoDomainRootCandidates({
-      prisma,
-      userId: invite.member.id,
-    });
   const semanticSourceKey = buildHostedStarterUsageSemanticSourceKey(
     invite.member.id,
   );
-
-  const outcome = await prisma.$transaction(
-    (tx: Prisma.TransactionClient) => runWithHostedDomainRootUnwrapCache(async () => {
+  const commitPreparedEnrollment = (
+    preparedActivationCrypto: PreparedHostedStarterUsageActivationCrypto,
+  ) => prisma.$transaction(
+    async (tx: Prisma.TransactionClient) => {
       const lockedBeneficiary = await lockHostedUsageCreditBeneficiaryTx({
         beneficiaryMemberId: invite.member.id,
         tx,
@@ -291,6 +363,11 @@ async function ensureHostedStarterUsageEnrollmentWithPolicy(
       const shouldEnsureStarterGrant =
         !hasPaidSubscription && !hasFamilySponsorship;
       if (shouldEnsureStarterGrant) {
+        await revalidateHostedStarterUsageActivationCryptoTx({
+          prepared: preparedActivationCrypto,
+          tx,
+          userId: invite.member.id,
+        });
         await ensureHostedStarterUsageGrantTx({
           effectiveAt: now,
           existingGrant,
@@ -303,6 +380,8 @@ async function ensureHostedStarterUsageEnrollmentWithPolicy(
 
       const activation = shouldEnsureStarterGrant
         ? await activateHostedMemberForPositiveSourceTx({
+            allowSignupWelcomeWithoutAssignableLinqLine:
+              policy.allowSignupWelcomeWithoutAssignableLinqLine,
             dispatchContext: {
               eventCreatedAt: existingGrant?.effectiveAt ?? now,
               occurredAt: (existingGrant?.effectiveAt ?? now).toISOString(),
@@ -310,7 +389,8 @@ async function ensureHostedStarterUsageEnrollmentWithPolicy(
               sourceType: "hosted.starter_usage.enrolled",
             },
             memberId: invite.member.id,
-            preparedCryptoDomainRoots,
+            preparedCryptoDomainRoots:
+              preparedActivationCrypto.preparedCryptoDomainRoots,
             prisma: tx,
             skipIfPreviouslyActivated: true,
             suppressSignupWelcome: policy.suppressSignupWelcome,
@@ -332,30 +412,78 @@ async function ensureHostedStarterUsageEnrollmentWithPolicy(
         : existingGrant
           ? "already_enrolled"
           : "enrolled";
+      const shouldWakeActivationRuntime = Boolean(
+        activation
+        && (
+          activation.activated
+          || (
+            policy.requireActivationRuntimeWake
+            && activation.hostedExecutionMailboxItemId
+          )
+        ),
+      );
       return {
         effects: {
-          activatedMemberId: activation?.activated
+          activatedMemberId: shouldWakeActivationRuntime
             ? invite.member.id
             : null,
-          hostedExecutionEventId:
-            activation?.activated
-              ? activation.hostedExecutionEventId
-              : null,
+          hostedExecutionEventId: shouldWakeActivationRuntime
+            ? activation?.hostedExecutionEventId ?? null
+            : null,
+          hostedExecutionMailboxItemId: shouldWakeActivationRuntime
+            ? activation?.hostedExecutionMailboxItemId ?? null
+            : null,
           welcomeEmailMemberId:
-            activation?.activated && !policy.suppressSignupWelcome
+            activation?.activated && !policy.suppressSignupWelcomeEmail
               ? invite.member.id
               : null,
         } satisfies HostedStarterUsagePostCommitEffects,
         result: buildHostedStarterUsageEnrollmentResult(status),
       };
-    }),
+    },
     HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
   );
+
+  const outcome = await (async () => {
+    for (
+      let attempt = 0;
+      attempt < HOSTED_STARTER_USAGE_CRYPTO_PREPARATION_ATTEMPTS;
+      attempt += 1
+    ) {
+      try {
+        return await runWithHostedDomainRootUnwrapCache(async () => {
+          const preparedActivationCrypto =
+            await prepareHostedStarterUsageActivationCrypto({
+              prisma,
+              userId: invite.member.id,
+            });
+          return commitPreparedEnrollment(preparedActivationCrypto);
+        });
+      } catch (error) {
+        const preparationError =
+          normalizeHostedStarterUsageCryptoPreparationError(error);
+        if (!preparationError) {
+          throw error;
+        }
+        if (
+          attempt + 1
+          < HOSTED_STARTER_USAGE_CRYPTO_PREPARATION_ATTEMPTS
+        ) {
+          continue;
+        }
+        throw preparationError;
+      }
+    }
+
+    throw new Error(
+      "Hosted Starter usage crypto preparation retry exhausted unexpectedly.",
+    );
+  })();
 
   const deferredActivationWake = policy.instantStartAdmission
     ? buildHostedLinqInstantStartDeferredActivationWake(outcome.effects)
     : null;
-  await runHostedStarterUsagePostCommitEffects({
+  const postCommit = await runHostedStarterUsagePostCommitEffects({
     ...outcome.effects,
     ...(deferredActivationWake
       ? {
@@ -365,11 +493,162 @@ async function ensureHostedStarterUsageEnrollmentWithPolicy(
       : {}),
     prisma,
   });
+  if (
+    policy.requireActivationRuntimeWake
+    && postCommit.activationRuntimeWake
+    && !postCommit.activationRuntimeWake.accepted
+  ) {
+    throw hostedOnboardingError({
+      code: "HOSTED_STARTER_USAGE_RUNTIME_WAKE_REQUIRED",
+      httpStatus: 503,
+      message: "Hosted Starter usage activation is waiting for runtime recovery.",
+      retryable: true,
+    });
+  }
 
   return {
     deferredActivationWake,
     result: outcome.result,
   };
+}
+
+async function prepareHostedStarterUsageActivationCrypto(input: {
+  prisma: PrismaClient;
+  userId: string;
+}): Promise<PreparedHostedStarterUsageActivationCrypto> {
+  const preparedCryptoDomainRoots =
+    await prepareHostedCryptoDomainRootCandidates({
+      prisma: input.prisma,
+      userId: input.userId,
+    });
+  let firstPrewarmError: unknown;
+  let hasPrewarmError = false;
+  const settled = await Promise.allSettled(
+    HOSTED_STARTER_USAGE_ACTIVATION_CRYPTO_DOMAINS.map(async (domain) => {
+      try {
+        const candidate = preparedCryptoDomainRoots.get(domain);
+        if (candidate) {
+          await prewarmPreparedHostedCryptoDomainRootForWeb({
+            domain,
+            prepared: preparedCryptoDomainRoots,
+            userId: input.userId,
+          });
+          return [domain, candidate.rootKeyId] as const;
+        }
+
+        const root = await unwrapHostedDomainRootForWeb({
+          domain,
+          prisma: input.prisma,
+          retainFailureInScopedCache: true,
+          userId: input.userId,
+        });
+        try {
+          return [domain, root.envelope.rootKeyId] as const;
+        } finally {
+          root.rootKey.fill(0);
+        }
+      } catch (error) {
+        if (!hasPrewarmError) {
+          firstPrewarmError = error;
+          hasPrewarmError = true;
+        }
+        throw error;
+      }
+    }),
+  );
+  if (hasPrewarmError) {
+    throw firstPrewarmError;
+  }
+  const prewarmedRootKeyIds = new Map<
+    HostedStarterUsageActivationCryptoDomain,
+    string
+  >();
+  for (const outcome of settled) {
+    // Rejections are handled above after every sibling has settled.
+    if (outcome.status === "rejected") {
+      continue;
+    }
+    const [domain, rootKeyId] = outcome.value;
+    prewarmedRootKeyIds.set(domain, rootKeyId);
+  }
+
+  return {
+    preparedCryptoDomainRoots,
+    prewarmedRootKeyIds,
+  };
+}
+
+/**
+ * These authority locks remain held through activation. An existing root must
+ * retain the exact identity prewarmed before BEGIN; a candidate root must stay
+ * absent so activation can insert that exact envelope without a provider path.
+ */
+async function revalidateHostedStarterUsageActivationCryptoTx(input: {
+  prepared: PreparedHostedStarterUsageActivationCrypto;
+  tx: Prisma.TransactionClient;
+  userId: string;
+}): Promise<void> {
+  for (const domain of HOSTED_STARTER_USAGE_ACTIVATION_CRYPTO_DOMAINS) {
+    const expectedRootKeyId = input.prepared.prewarmedRootKeyIds.get(domain);
+    if (!expectedRootKeyId) {
+      throw new TypeError(
+        `Hosted Starter usage activation is missing prepared ${domain} root identity.`,
+      );
+    }
+
+    const activeRootKeyId = await lockAndReadActiveHostedDomainRootKeyIdTx({
+      domain,
+      tx: input.tx,
+      userId: input.userId,
+    });
+    const expectedCandidate =
+      input.prepared.preparedCryptoDomainRoots.has(domain);
+    const matches = expectedCandidate
+      ? activeRootKeyId === null
+      : activeRootKeyId === expectedRootKeyId;
+    if (!matches) {
+      throw hostedStarterUsageCryptoPreparationRequired({
+        domain,
+        reason: expectedCandidate
+          ? "candidate-lost-race"
+          : "active-root-changed",
+      });
+    }
+  }
+}
+
+function normalizeHostedStarterUsageCryptoPreparationError(
+  error: unknown,
+): ReturnType<typeof hostedOnboardingError> | null {
+  if (
+    isHostedOnboardingError(error)
+    && error.code === HOSTED_STARTER_USAGE_CRYPTO_PREPARATION_REQUIRED_CODE
+  ) {
+    return error;
+  }
+  if (error instanceof HostedCryptoDomainRootCandidateRequiredError) {
+    return hostedStarterUsageCryptoPreparationRequired({
+      domain: error.domain,
+      reason: "candidate-required",
+    });
+  }
+  return null;
+}
+
+function hostedStarterUsageCryptoPreparationRequired(input: {
+  domain: string;
+  reason:
+    | "active-root-changed"
+    | "candidate-lost-race"
+    | "candidate-required";
+}) {
+  return hostedOnboardingError({
+    code: HOSTED_STARTER_USAGE_CRYPTO_PREPARATION_REQUIRED_CODE,
+    details: input,
+    httpStatus: 503,
+    message: "Hosted Starter usage crypto preparation is stale.",
+    retryable: true,
+  });
 }
 
 async function requireHostedLinqInstantStartAdmissionTx(input: {
@@ -426,14 +705,19 @@ async function clearHostedLinqInstantStartAdmissionTx(input: {
 
 async function runHostedStarterUsagePostCommitEffects(
   input: HostedStarterUsagePostCommitEffects & { prisma: PrismaClient },
-): Promise<void> {
+): Promise<{
+  activationRuntimeWake: HostedMemberActivationRuntimeWakeBestEffortResult | null;
+}> {
+  let activationRuntimeWake: HostedMemberActivationRuntimeWakeBestEffortResult | null = null;
   if (input.activatedMemberId && input.hostedExecutionEventId) {
-    await signalHostedMemberActivationRuntimeWakeBestEffortResult({
-      hostedExecutionEventId: input.hostedExecutionEventId,
-      memberId: input.activatedMemberId,
-      prisma: input.prisma,
-      source: "starter-usage.activation",
-    });
+    activationRuntimeWake =
+      await signalHostedMemberActivationRuntimeWakeBestEffortResult({
+        hostedExecutionEventId: input.hostedExecutionEventId,
+        mailboxItemId: input.hostedExecutionMailboxItemId,
+        memberId: input.activatedMemberId,
+        prisma: input.prisma,
+        source: "starter-usage.activation",
+      });
   }
   if (input.welcomeEmailMemberId) {
     await sendHostedSignupWelcomeEmailForMemberBestEffort({
@@ -441,6 +725,7 @@ async function runHostedStarterUsagePostCommitEffects(
       prisma: input.prisma,
     });
   }
+  return { activationRuntimeWake };
 }
 
 function buildHostedLinqInstantStartDeferredActivationWake(

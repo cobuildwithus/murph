@@ -55,128 +55,119 @@ const HOSTED_VAULT_SHARE_PROJECTION_DISPLAY: Record<HostedVaultShareSelectablePr
   },
   "group-email.v0": {
     label: "Email address",
-    description:
-      "Shares your email so the group's Murph can send the newsletter. Visible to the group.",
+    description: "Shares your email with the group and its Murph for group emails.",
   },
   "device-sync-status.v0": {
     label: "Health source connection status",
-    description:
-      "Shares which health sources are connected. No health values.",
+    description: "Shares which health sources are connected, not their health values.",
   },
   "activity-days.v0": {
     label: "Activity minutes",
-    description: "Shares your last 7 days of active minutes.",
+    description: "Shares 7 days of active minutes by source.",
   },
   "active-calories-days.v0": {
     label: "Active calories",
-    description: "Shares your last 7 days of active calories.",
+    description: "Shares 7 days of active calories by source.",
   },
   "activity-score-days.v0": {
     label: "Activity scores",
-    description: "Shares your last 7 days of activity scores.",
+    description: "Shares 7 days of activity scores by source.",
   },
   "day-strain-days.v0": {
     label: "Day strain",
-    description: "Shares your last 7 days of day strain.",
+    description: "Shares 7 days of day strain by source.",
   },
   "distance-days.v0": {
     label: "Distance",
-    description: "Shares your last 7 days of distance.",
+    description: "Shares 7 days of distance by source.",
   },
   "elevation-gain-days.v0": {
     label: "Elevation gain",
-    description: "Shares your last 7 days of elevation gain.",
+    description: "Shares 7 days of elevation gain by source.",
   },
   "floors-climbed-days.v0": {
     label: "Floors climbed",
-    description: "Shares your last 7 days of floors climbed.",
+    description: "Shares 7 days of floors climbed by source.",
   },
   "heart-rate-zones-days.v0": {
     label: "Heart-rate zones",
-    description: "Shares your last 7 days of heart-rate zone minutes.",
+    description: "Shares 7 days of heart-rate zone minutes by source.",
   },
   "hrv-days.v0": {
     label: "HRV",
-    description: "Shares your last 7 days of HRV.",
+    description: "Shares 7 days of HRV by source.",
   },
   "max-heart-rate-days.v0": {
     label: "Daily max heart rate",
-    description: "Shares your last 7 days of max heart rate.",
+    description: "Shares 7 days of max heart rate by source.",
   },
   "protein-days.v0": {
     label: "Daily protein",
-    description:
-      "Shares your last 7 days of daily protein totals from meals in Murph, including meals imported from connected apps.",
+    description: "Shares 7 days of meal protein totals, including imports, with Murph as the source.",
   },
   "calories-days.v0": {
     label: "Daily calories",
-    description:
-      "Shares your last 7 days of daily calorie totals from meals in Murph, including meals imported from connected apps.",
+    description: "Shares 7 days of meal calorie totals, including imports, with Murph as the source.",
   },
   "carbs-days.v0": {
     label: "Daily carbs",
-    description:
-      "Shares your last 7 days of daily carbohydrate totals from meals in Murph, including meals imported from connected apps.",
+    description: "Shares 7 days of meal carbohydrate totals, including imports, with Murph as the source.",
   },
   "fat-days.v0": {
     label: "Daily fat",
-    description:
-      "Shares your last 7 days of daily fat totals from meals in Murph, including meals imported from connected apps.",
+    description: "Shares 7 days of meal fat totals, including imports, with Murph as the source.",
   },
   "fiber-days.v0": {
     label: "Daily fiber",
-    description:
-      "Shares your last 7 days of daily fiber totals from meals in Murph, including meals imported from connected apps.",
+    description: "Shares 7 days of meal fiber totals, including imports, with Murph as the source.",
   },
   "resting-heart-rate-days.v0": {
     label: "Resting heart rate",
-    description: "Shares your last 7 days of resting heart rate.",
+    description: "Shares 7 days of resting heart rate by source.",
   },
   "sleep-times.v0": {
     label: "Sleep timing",
-    description: "Shares your last 7 days of sleep start and end times.",
+    description: "Shares 7 days of sleep start and end times by source.",
   },
   "sleep-duration-days.v0": {
     label: "Sleep duration",
-    description: "Shares your last 7 days of total sleep duration.",
+    description: "Shares 7 days of total sleep duration by source.",
   },
   "deep-sleep-days.v0": {
     label: "Deep sleep",
-    description: "Shares your last 7 days of deep sleep minutes.",
+    description: "Shares 7 days of deep sleep minutes and recorded times by source.",
   },
   "deep-sleep-sources-days.v1": {
     label: "Deep sleep",
-    description:
-      "Shares 7 days of each source’s name, deep sleep minutes, and recorded time.",
+    description: "Shares 7 days of deep sleep minutes and recorded times by source.",
   },
   "rem-sleep-days.v0": {
     label: "REM sleep",
-    description: "Shares your last 7 days of REM sleep minutes.",
+    description: "Shares 7 days of REM sleep minutes and recorded times by source.",
   },
   "rem-sleep-sources-days.v1": {
     label: "REM sleep",
-    description:
-      "Shares 7 days of each source’s name, REM sleep minutes, and recorded time.",
+    description: "Shares 7 days of REM sleep minutes and recorded times by source.",
   },
   "steps-days.v0": {
     label: "Steps",
-    description: "Shares your last 7 days of steps.",
+    description: "Shares 7 days of step counts by source.",
   },
   "vo2-max-days.v0": {
     label: "VO2 max",
-    description: "Shares your last 7 days of VO2 max.",
+    description: "Shares 7 days of VO2 max by source.",
   },
   "workout-days.v0": {
     label: "Workout summaries",
-    description: "Shares your last 7 days of workout counts and minutes.",
+    description: "Shares 7 days of workout counts and minutes by source.",
   },
   "workouts.v0": {
     label: "Workout details",
-    description: "Shares each workout from the last 7 days, including its local start time, duration, and type. Does not share absolute timestamps, routes, location, heart rate, or provider identity.",
+    description: "Shares 7 days of workout sources, local start times, durations, and types—not timestamps, routes, locations, or heart rate.",
   },
   "workout-strain-days.v0": {
     label: "Workout strain",
-    description: "Shares your last 7 days of workout strain.",
+    description: "Shares 7 days of workout strain by source.",
   },
 };
 
@@ -423,7 +414,7 @@ function hostedVaultShareProjectionScopeDisplay(
     );
     return {
       label: `${capitalizeHostedVaultShareLabel(label)} minutes`,
-      description: `Shares your last 7 days of ${label} minutes.`,
+      description: `Shares 7 days of ${label} minutes by source.`,
     };
   }
   if (projectionScope.projectionKind === HOSTED_VAULT_SHARE_ACTIVITY_DISTANCE_PROJECTION_KIND) {
@@ -432,7 +423,7 @@ function hostedVaultShareProjectionScopeDisplay(
     );
     return {
       label: `Recent ${label} distance and session count`,
-      description: `Shares daily ${label} distance and session count.`,
+      description: `Shares 7 days of ${label} distance and session counts by source.`,
     };
   }
   if (projectionScope.projectionKind === HOSTED_VAULT_SHARE_ACTIVITY_SESSION_COUNT_PROJECTION_KIND) {
@@ -441,7 +432,7 @@ function hostedVaultShareProjectionScopeDisplay(
     );
     return {
       label: `Recent ${label} session count`,
-      description: `Shares daily ${label} session count.`,
+      description: `Shares 7 days of ${label} session counts by source.`,
     };
   }
   if (!isHostedVaultShareSelectableProjectionKind(projectionScope.projectionKind)) {

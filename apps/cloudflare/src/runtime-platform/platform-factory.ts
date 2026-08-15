@@ -23,7 +23,6 @@ import { createHostedRuntimeFamilyPlanToolPort } from "./family-plan-tool-port.t
 import { createHostedRuntimeGroupToolPort } from "./group-tool-port.ts";
 import { createHostedRuntimeIMessageContactToolPort } from "./imessage-contact-tool-port.ts";
 import { createHostedRuntimeLabsToolPort } from "./labs-tool-port.ts";
-import { createHostedRuntimeNewsletterToolPort } from "./newsletter-tool-port.ts";
 import { createHostedRuntimePlanUsageToolPort } from "./plan-usage-tool-port.ts";
 import {
   createCloudflarePrivateImageUrlPublisher,
@@ -283,12 +282,6 @@ export function buildHostedExecutionRuntimePlatform(input: {
             transport,
           }),
           labsToolPort: createHostedRuntimeLabsToolPort({
-            boundUserId: input.boundUserId,
-            fetchImpl,
-            timeoutMs,
-            transport,
-          }),
-          newsletterToolPort: createHostedRuntimeNewsletterToolPort({
             boundUserId: input.boundUserId,
             fetchImpl,
             timeoutMs,

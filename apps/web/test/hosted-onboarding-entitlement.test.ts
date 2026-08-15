@@ -14,6 +14,7 @@ import {
   hasActiveHostedThreadContainerAccessWithParticipants,
   readActiveHostedFamilySponsorship,
   readActiveHostedMemberAccess,
+  readActiveHostedMemberAccessIds,
   readHostedRuntimeAiAccessDecision,
 } from "@/src/lib/hosted-onboarding/member-access";
 
@@ -313,6 +314,108 @@ describe("hosted member access (single resolver)", () => {
         removedAt: null,
       }),
     });
+  });
+
+  it("resolves owner and current-participant access for a member set without per-member reads", async () => {
+    const now = new Date("2026-07-26T12:00:00.000Z");
+    const findManyMembers = vi.fn(async () => [
+      {
+        ...person({ billingStatus: HostedBillingStatus.not_started }),
+        id: "container_owner_backed",
+        threadContainer: {
+          owner: person({ billingStatus: HostedBillingStatus.active }),
+        },
+      },
+      {
+        ...person({ billingStatus: HostedBillingStatus.not_started }),
+        id: "container_participant_backed",
+        threadContainer: {
+          owner: person({ billingStatus: HostedBillingStatus.paused }),
+        },
+      },
+      {
+        ...person({ billingStatus: HostedBillingStatus.not_started }),
+        id: "container_inactive",
+        threadContainer: {
+          owner: person({ billingStatus: HostedBillingStatus.paused }),
+        },
+      },
+      {
+        ...person({ billingStatus: HostedBillingStatus.active, suspendedAt: SUSPENDED_AT }),
+        id: "container_suspended",
+        threadContainer: {
+          owner: person({ billingStatus: HostedBillingStatus.active }),
+        },
+      },
+    ]);
+    const findManyParticipants = vi.fn(async () => [{
+      containerMemberId: "container_participant_backed",
+    }]);
+    const prisma = {
+      hostedMember: { findMany: findManyMembers },
+      hostedThreadContainerParticipant: { findMany: findManyParticipants },
+    };
+
+    await expect(readActiveHostedMemberAccessIds({
+      memberIds: [
+        "container_owner_backed",
+        "container_participant_backed",
+        "container_inactive",
+        "container_suspended",
+        "container_owner_backed",
+      ],
+      now,
+      prisma: prisma as never,
+    })).resolves.toEqual(new Set([
+      "container_owner_backed",
+      "container_participant_backed",
+    ]));
+    expect(findManyMembers).toHaveBeenCalledTimes(1);
+    expect(findManyParticipants).toHaveBeenCalledTimes(1);
+    expect(findManyParticipants).toHaveBeenCalledWith(expect.objectContaining({
+      select: { containerMemberId: true },
+      take: 97,
+      where: expect.objectContaining({
+        containerMemberId: {
+          in: [
+            "container_owner_backed",
+            "container_participant_backed",
+            "container_inactive",
+          ],
+        },
+        lastSeenAt: { gte: new Date("2026-07-19T12:00:00.000Z") },
+        removedAt: null,
+        participant: expect.objectContaining({
+          suspendedAt: null,
+        }),
+      }),
+    }));
+  });
+
+  it("fails closed when current participant rows exceed the admitted roster bound", async () => {
+    const prisma = {
+      hostedMember: {
+        findMany: vi.fn(async () => [{
+          ...person({ billingStatus: HostedBillingStatus.not_started }),
+          id: "container_overflow",
+          threadContainer: {
+            owner: person({ billingStatus: HostedBillingStatus.paused }),
+          },
+        }]),
+      },
+      hostedThreadContainerParticipant: {
+        findMany: vi.fn(async () => Array.from(
+          { length: 33 },
+          () => ({ containerMemberId: "container_overflow" }),
+        )),
+      },
+    };
+
+    await expect(readActiveHostedMemberAccessIds({
+      memberIds: ["container_overflow"],
+      now: new Date("2026-07-26T12:00:00.000Z"),
+      prisma: prisma as never,
+    })).rejects.toThrow("participant read exceeded its admitted bound");
   });
 
   it("reads active Family sponsorship without treating own billing as sponsorship", async () => {

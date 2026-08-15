@@ -238,6 +238,8 @@ export type ReadOnlyAssistantAskResult =
       outcome: 'cannot_answer'
     }
 
+export type ConsentedReadOnlyAssistantAskResult = ReadOnlyAssistantAskResult
+
 export interface ReadOnlyAssistantAskProviderUsageEvent {
   stage: 'answer' | 'review'
   usage: AssistantProviderUsageDraft
@@ -266,7 +268,7 @@ export async function executeReadOnlyAssistantAsk(
 
 export async function executeConsentedReadOnlyAssistantAsk(
   input: ConsentedReadOnlyAssistantAskInput,
-): Promise<ReadOnlyAssistantAskResult> {
+): Promise<ConsentedReadOnlyAssistantAskResult> {
   const {
     answerMode,
     permissionText: rawPermissionText,
@@ -285,24 +287,18 @@ export async function executeConsentedReadOnlyAssistantAsk(
   )
 
   if (candidate.outcome === 'cannot_answer') {
-    return {
-      outcome: 'cannot_answer',
-    }
+    return { outcome: 'cannot_answer' }
   }
 
   const decision = await reviewConsentedReadOnlyAssistantAskAnswer({
     ...readOnlyInput,
     permissionText,
-    proposedAnswer: candidate.answer,
+    proposedAnswer: candidate.outcome === 'answered' ? candidate.answer : null,
     question,
   })
-  if (decision === 'deny') {
-    return {
-      outcome: 'cannot_answer',
-    }
-  }
-
-  return candidate
+  return decision === 'allow' && candidate.outcome === 'answered'
+    ? candidate
+    : { outcome: 'cannot_answer' }
 }
 
 async function executeReadOnlyAssistantAskChild(
@@ -357,6 +353,10 @@ async function executeReadOnlyAssistantAskChild(
   return parseReadOnlyAssistantAskResult(finalMessage)
 }
 
+type ConsentedReadOnlyAssistantAskReviewDecision =
+  | 'allow'
+  | 'deny'
+
 async function reviewConsentedReadOnlyAssistantAskAnswer(
   input: Omit<
     ReadOnlyAssistantAskInput,
@@ -366,9 +366,9 @@ async function reviewConsentedReadOnlyAssistantAskAnswer(
     | 'requesterParticipantId'
   > & {
     permissionText: string
-    proposedAnswer: string
+    proposedAnswer: string | null
   },
-): Promise<'allow' | 'deny'> {
+): Promise<ConsentedReadOnlyAssistantAskReviewDecision> {
   const finalMessage = await executeConfinedReadOnlyAssistantAskTurn(
     input,
     {
@@ -727,7 +727,7 @@ function buildReadOnlyAssistantAskPrompt(input: {
 
 function buildConsentedReadOnlyAssistantAskReviewPrompt(input: {
   permissionText: string
-  proposedAnswer: string
+  proposedAnswer: string | null
   question: string
 }): string {
   return [
@@ -739,8 +739,10 @@ function buildConsentedReadOnlyAssistantAskReviewPrompt(input: {
     escapeReadOnlyAssistantAskData(input.question),
     '</incoming_question>',
     '',
-    '<proposed_answer>',
-    escapeReadOnlyAssistantAskData(input.proposedAnswer),
+    `<proposed_answer outcome="${input.proposedAnswer === null ? 'cannot_answer' : 'answered'}">`,
+    input.proposedAnswer === null
+      ? '[no answer proposed]'
+      : escapeReadOnlyAssistantAskData(input.proposedAnswer),
     '</proposed_answer>',
   ].join('\n')
 }
@@ -797,7 +799,7 @@ function parseReadOnlyAssistantAskResult(
 
 function parseConsentedReadOnlyAssistantAskReviewDecision(
   value: string,
-): 'allow' | 'deny' {
+): ConsentedReadOnlyAssistantAskReviewDecision {
   let parsed: unknown
   try {
     parsed = JSON.parse(value)
@@ -809,13 +811,13 @@ function parseConsentedReadOnlyAssistantAskReviewDecision(
   }
 
   const output = parsed as Record<string, unknown>
-  if (
-    Object.keys(output).length !== 1 ||
-    (output.decision !== 'allow' && output.decision !== 'deny')
-  ) {
+  if (Object.keys(output).length !== 1) {
     throw invalidConsentedReadOnlyAssistantAskReviewOutput()
   }
-  return output.decision
+  if (output.decision === 'allow' || output.decision === 'deny') {
+    return output.decision
+  }
+  throw invalidConsentedReadOnlyAssistantAskReviewOutput()
 }
 
 function truncateCodePoints(value: string, maximum: number): string {

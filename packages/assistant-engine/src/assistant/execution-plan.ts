@@ -12,8 +12,7 @@ import {
 } from './codex-thread-route.js'
 import {
   compactAssistantProviderConfigInput,
-  mergeAssistantProviderConfigsForProvider,
-  resolveAssistantProvider,
+  mergeAssistantProviderConfigs,
   type AssistantProviderConfig,
   type AssistantProviderConfigInput,
 } from '@murphai/operator-config/assistant/provider-config'
@@ -38,9 +37,6 @@ export function resolveAssistantExecutionPlan(input: {
   const baseProviderConfig = baseTarget
     ? assistantBackendTargetToProviderConfigInput(baseTarget)
     : null
-  if (input.override?.provider) {
-    resolveAssistantProvider(input.override.provider)
-  }
   const overrideConfig = compactAssistantProviderConfigInput(input.override)
 
   if (!baseProviderConfig && !overrideConfig) {
@@ -50,8 +46,7 @@ export function resolveAssistantExecutionPlan(input: {
     )
   }
 
-  const primaryProviderConfig = mergeAssistantProviderConfigsForProvider(
-    'codex-cli',
+  const primaryProviderConfig = mergeAssistantProviderConfigs(
     baseProviderConfig,
     overrideConfig,
   )
@@ -63,13 +58,6 @@ export function resolveAssistantExecutionPlan(input: {
       'Assistant execution requires an explicit target or a boundary default.',
     )
   }
-  if (primaryTarget.adapter !== 'codex-cli') {
-    throw new VaultCliError(
-      'ASSISTANT_PROVIDER_UNSUPPORTED',
-      'Assistant execution only supports Codex app-server targets.',
-    )
-  }
-
   const codexRoute = buildCodexThreadIdentity(primaryProviderConfig)
 
   return {

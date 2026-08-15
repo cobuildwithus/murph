@@ -8,6 +8,14 @@ import {
   compactTableResponseCardV1Schema,
   type CompactTableResponseCardV1,
 } from "./compact-table-card.ts";
+import {
+  exerciseRoutineResponseCardV1Schema,
+  type ExerciseRoutineResponseCardV1,
+} from "./exercise-routine-card.ts";
+import {
+  telegramRichContentResponseCardV1Schema,
+  type TelegramRichContentResponseCardV1,
+} from "./telegram-rich-content-card.ts";
 
 export const MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE = `Hey, I'm Murph.
 
@@ -103,6 +111,8 @@ export type DailyNutritionResponseCard =
 export type AssistantResponseCard =
   | DailyNutritionResponseCard
   | CompactTableResponseCardV1
+  | ExerciseRoutineResponseCardV1
+  | TelegramRichContentResponseCardV1
   | ChallengeStandingsResponseCardV1;
 
 const nutritionCardMealCountSchema = z
@@ -358,6 +368,8 @@ export const assistantResponseCardSchema: z.ZodType<AssistantResponseCard> =
   z.union([
     dailyNutritionResponseCardSchema,
     compactTableResponseCardV1Schema,
+    exerciseRoutineResponseCardV1Schema,
+    telegramRichContentResponseCardV1Schema,
     challengeStandingsResponseCardV1Schema,
   ]);
 

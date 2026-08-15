@@ -43,8 +43,115 @@ export const HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_DIRTY_ACK_PATH =
 export const HOSTED_EXECUTION_DEVICE_SYNC_RECONCILE_PATH =
   "/api/internal/device-sync/reconcile";
 export const HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_UPDATE_LIMIT = 100;
+export const HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_SOURCE_LIMIT = 64;
+export const HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_BODY_LIMIT_BYTES =
+  256 * 1024;
+/** Maximum database rows one hosted runtime snapshot page may collect. */
+export const HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PAGE_LIMIT = 32;
+/**
+ * Maximum source-authority rows one connection snapshot may collect. This is
+ * separate from the connection-page bound because one aggregator connection
+ * can legitimately contain every configured source.
+ */
+export const HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_CONNECTION_SOURCE_LIMIT = 64;
+/**
+ * Maximum connections one complete credential hydration may return. This is
+ * intentionally aligned with the apply ceiling so one hydrated authority set
+ * can always be returned through the existing bounded write contract.
+ */
+export const HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_HYDRATION_LIMIT =
+  HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_UPDATE_LIMIT;
 export const HOSTED_EXECUTION_DEVICE_SYNC_STAGED_DIRTY_ACK_RECORD_LIMIT = 200;
 export const HOSTED_EXECUTION_DEVICE_SYNC_STAGED_DIRTY_ACK_PAYLOAD_ID_LIMIT = 5_000;
+
+export const HOSTED_DEVICE_SYNC_EVENT_TO_PROVIDER_SEND_BUCKETS = [
+  "under_5_minutes",
+  "5_to_30_minutes",
+  "30_minutes_to_2_hours",
+  "2_to_24_hours",
+  "over_24_hours",
+] as const;
+
+export type HostedDeviceSyncEventToProviderSendBucket =
+  (typeof HOSTED_DEVICE_SYNC_EVENT_TO_PROVIDER_SEND_BUCKETS)[number];
+
+export function isHostedDeviceSyncEventToProviderSendBucket(
+  value: unknown,
+): value is HostedDeviceSyncEventToProviderSendBucket {
+  return HOSTED_DEVICE_SYNC_EVENT_TO_PROVIDER_SEND_BUCKETS.some(
+    (bucket) => bucket === value,
+  );
+}
+
+export function bucketHostedDeviceSyncEventToProviderSendDelay(input: {
+  eventOccurredAt?: string | null;
+  providerSentAt?: string | null;
+}): HostedDeviceSyncEventToProviderSendBucket | null {
+  const eventOccurredMs = input.eventOccurredAt
+    ? Date.parse(input.eventOccurredAt)
+    : Number.NaN;
+  const providerSentMs = input.providerSentAt
+    ? Date.parse(input.providerSentAt)
+    : Number.NaN;
+  if (
+    !Number.isFinite(eventOccurredMs)
+    || !Number.isFinite(providerSentMs)
+    || providerSentMs < eventOccurredMs
+  ) {
+    return null;
+  }
+
+  const delayMs = providerSentMs - eventOccurredMs;
+  if (delayMs < 5 * 60_000) {
+    return "under_5_minutes";
+  }
+  if (delayMs < 30 * 60_000) {
+    return "5_to_30_minutes";
+  }
+  if (delayMs < 2 * 60 * 60_000) {
+    return "30_minutes_to_2_hours";
+  }
+  if (delayMs < 24 * 60 * 60_000) {
+    return "2_to_24_hours";
+  }
+  return "over_24_hours";
+}
+
+export function measureHostedDeviceSyncProviderSendToWebhookMs(input: {
+  providerSentAt?: string | null;
+  webhookReceivedAt?: string | null;
+}): number | null {
+  const providerSentMs = input.providerSentAt
+    ? Date.parse(input.providerSentAt)
+    : Number.NaN;
+  const webhookReceivedMs = input.webhookReceivedAt
+    ? Date.parse(input.webhookReceivedAt)
+    : Number.NaN;
+  if (
+    !Number.isFinite(providerSentMs)
+    || !Number.isFinite(webhookReceivedMs)
+    || webhookReceivedMs < providerSentMs
+  ) {
+    return null;
+  }
+  return webhookReceivedMs - providerSentMs;
+}
+
+export function mergeHostedDeviceSyncEventToProviderSendBuckets(
+  left: HostedDeviceSyncEventToProviderSendBucket | null | undefined,
+  right: HostedDeviceSyncEventToProviderSendBucket | null | undefined,
+): HostedDeviceSyncEventToProviderSendBucket | null {
+  if (!left) {
+    return right ?? null;
+  }
+  if (!right) {
+    return left;
+  }
+  return HOSTED_DEVICE_SYNC_EVENT_TO_PROVIDER_SEND_BUCKETS.indexOf(left)
+    >= HOSTED_DEVICE_SYNC_EVENT_TO_PROVIDER_SEND_BUCKETS.indexOf(right)
+    ? left
+    : right;
+}
 
 const HOSTED_RUNTIME_ERROR_CODE_MAX_LENGTH = 128;
 const HOSTED_RUNTIME_ERROR_TEXT_MAX_LENGTH = 2048;
@@ -277,6 +384,11 @@ export interface HostedExecutionDeviceSyncRuntimeSnapshotCapabilities {
   connectionSourceApply?: boolean;
 }
 
+export interface HostedExecutionDeviceSyncRuntimeSnapshotCursor {
+  createdAt: string;
+  id: string;
+}
+
 export interface HostedExecutionDeviceSyncRuntimeConnectionSeed {
   connection: HostedExecutionDeviceSyncRuntimeConnectionStateSnapshot;
   credential: HostedExecutionDeviceSyncRuntimeWritableCredentialSnapshot;
@@ -285,6 +397,7 @@ export interface HostedExecutionDeviceSyncRuntimeConnectionSeed {
 
 export interface HostedExecutionDeviceSyncRuntimeSnapshotRequest {
   connectionId?: string | null;
+  cursor?: HostedExecutionDeviceSyncRuntimeSnapshotCursor | null;
   includeCredentialMaterial: boolean;
   limit?: number | null;
   provider?: string | null;
@@ -296,6 +409,8 @@ export interface HostedExecutionDeviceSyncRuntimeSnapshotResponse {
   capabilities?: HostedExecutionDeviceSyncRuntimeSnapshotCapabilities;
   connections: HostedExecutionDeviceSyncRuntimeConnectionSnapshot[];
   generatedAt: string;
+  /** Null only when the current bounded page exhausted matching authority. */
+  nextCursor?: HostedExecutionDeviceSyncRuntimeSnapshotCursor | null;
   /** Invocation-scoped client configuration for current app-bound connections. */
   providerConfigs?: SerializableConfiguredDeviceSyncProviderConfigs;
   userId: string;
@@ -426,11 +541,15 @@ export interface HostedExecutionDeviceSyncRuntimeApplyResponse {
 export interface HostedExecutionDeviceSyncDirtyResource {
   count: number;
   dirtyPayloadId?: string;
+  eventToProviderSendBucket?: HostedDeviceSyncEventToProviderSendBucket | null;
+  firstWebhookReceivedAt?: string | null;
+  providerSendToWebhookMs?: number | null;
   jobKind: string;
   payload?: Record<string, boolean | number | string>;
   resource: string | null;
   resourceCategory: string | null;
   sourceProviderSlug: string | null;
+  timingSourceProviderSlug?: string | null;
   windowEnd: string | null;
   windowStart: string | null;
 }
@@ -505,6 +624,7 @@ export function serializeHostedExecutionDeviceSyncDirtyPayloadIdentity(
 }
 
 export interface HostedExecutionDeviceSyncDirtyPendingRequest {
+  connectionId?: string | null;
   limit?: number | null;
   stagedDirtyAcks?: HostedExecutionDeviceSyncStagedDirtyAck[];
   userId: string;
@@ -611,6 +731,7 @@ const HOSTED_EXECUTION_DEVICE_SYNC_HINT_PAYLOAD_FIELD_KINDS: Readonly<
   emptyBackfillAttempts: "number",
   eventType: "string",
   historicalBackfill: "boolean",
+  historicalBackfillVersion: "number",
   historicalProviderRecordsSeen: "boolean",
   historicalRecordsSeen: "boolean",
   historicalUnresolvedProviderRecordIdentitiesJson: "string",
@@ -627,7 +748,10 @@ const HOSTED_EXECUTION_DEVICE_SYNC_HINT_PAYLOAD_FIELD_KINDS: Readonly<
   sourceEventType: "string",
   sourceProviderSlug: "string",
   timeseriesCursor: "isoTimestamp",
+  timeseriesResourceCursor: "string",
+  timeseriesWindowHours: "number",
   webhookDataJson: "string",
+  workoutStreamCursor: "string",
   windowEnd: "isoTimestamp",
   windowStart: "isoTimestamp",
 });
@@ -733,6 +857,16 @@ export function parseHostedExecutionDeviceSyncRuntimeSnapshotResponse(
       record.generatedAt,
       "Hosted device-sync runtime snapshot response generatedAt",
     ),
+    ...(record.nextCursor === undefined
+      ? {}
+      : {
+          nextCursor: record.nextCursor === null
+            ? null
+            : parseHostedExecutionDeviceSyncRuntimeSnapshotCursor(
+                record.nextCursor,
+                "Hosted device-sync runtime snapshot response nextCursor",
+              ),
+        }),
     ...(record.providerConfigs === undefined
       ? {}
       : {
@@ -772,6 +906,16 @@ export function parseHostedExecutionDeviceSyncRuntimeSnapshotRequest(
     ...(record.connectionId === undefined
       ? {}
       : { connectionId: readNullableStringValue(record.connectionId, "Hosted device-sync runtime snapshot request connectionId") }),
+    ...(record.cursor === undefined
+      ? {}
+      : {
+          cursor: record.cursor === null
+            ? null
+            : parseHostedExecutionDeviceSyncRuntimeSnapshotCursor(
+                record.cursor,
+                "Hosted device-sync runtime snapshot request cursor",
+              ),
+        }),
     includeCredentialMaterial:
       record.includeCredentialMaterial === undefined
         ? false
@@ -799,6 +943,17 @@ export function parseHostedExecutionDeviceSyncRuntimeSnapshotRequest(
           ),
         }),
     userId: resolveHostedDeviceSyncRuntimeRequestUserId(record.userId, trustedUserId),
+  };
+}
+
+function parseHostedExecutionDeviceSyncRuntimeSnapshotCursor(
+  value: unknown,
+  label: string,
+): HostedExecutionDeviceSyncRuntimeSnapshotCursor {
+  const record = requireObject(value, label);
+  return {
+    createdAt: requireIsoTimestamp(record.createdAt, `${label}.createdAt`),
+    id: requireString(record.id, `${label}.id`),
   };
 }
 
@@ -862,6 +1017,14 @@ export function parseHostedExecutionDeviceSyncDirtyPendingRequest(
     );
 
   return {
+    ...(record.connectionId === undefined
+      ? {}
+      : {
+          connectionId: readNullableStringValue(
+            record.connectionId,
+            "Hosted device-sync dirty pending request connectionId",
+          ),
+        }),
     ...(record.limit === undefined
       ? {}
       : {
@@ -1377,6 +1540,9 @@ function parseHostedExecutionDeviceSyncDirtyResource(
   label: string,
 ): HostedExecutionDeviceSyncDirtyResource {
   const record = requireObject(value, label);
+  const hasImportTiming = record.eventToProviderSendBucket !== undefined
+    || record.firstWebhookReceivedAt !== undefined
+    || record.providerSendToWebhookMs !== undefined;
 
   return {
     count: requirePositiveInteger(record.count, `${label}.count`),
@@ -1385,14 +1551,75 @@ function parseHostedExecutionDeviceSyncDirtyResource(
       : {
           dirtyPayloadId: requireString(record.dirtyPayloadId, `${label}.dirtyPayloadId`),
         }),
+    ...(hasImportTiming
+      ? {
+          eventToProviderSendBucket: record.eventToProviderSendBucket === undefined
+            ? null
+            : readNullableHostedDeviceSyncEventToProviderSendBucket(
+                record.eventToProviderSendBucket,
+                `${label}.eventToProviderSendBucket`,
+              ),
+          firstWebhookReceivedAt: record.firstWebhookReceivedAt === undefined
+            ? null
+            : readNullableIsoTimestamp(
+                record.firstWebhookReceivedAt,
+                `${label}.firstWebhookReceivedAt`,
+              ),
+          providerSendToWebhookMs: record.providerSendToWebhookMs === undefined
+            ? null
+            : readNullableHostedDeviceSyncDurationMs(
+                record.providerSendToWebhookMs,
+                `${label}.providerSendToWebhookMs`,
+              ),
+        }
+      : {}),
     jobKind: requireString(record.jobKind, `${label}.jobKind`),
     payload: readHostedExecutionDeviceSyncDirtyPayload(record.payload, `${label}.payload`),
     resource: readNullableStringValue(record.resource, `${label}.resource`),
     resourceCategory: readNullableStringValue(record.resourceCategory, `${label}.resourceCategory`),
     sourceProviderSlug: readNullableStringValue(record.sourceProviderSlug, `${label}.sourceProviderSlug`),
+    ...(record.timingSourceProviderSlug === undefined
+      ? {}
+      : {
+          timingSourceProviderSlug: readNullableStringValue(
+            record.timingSourceProviderSlug,
+            `${label}.timingSourceProviderSlug`,
+          ),
+        }),
     windowEnd: readNullableIsoTimestamp(record.windowEnd, `${label}.windowEnd`),
     windowStart: readNullableIsoTimestamp(record.windowStart, `${label}.windowStart`),
   };
+}
+
+function readNullableHostedDeviceSyncDurationMs(
+  value: unknown,
+  label: string,
+): number | null {
+  if (value === null) {
+    return null;
+  }
+  if (
+    typeof value === "number"
+    && Number.isSafeInteger(value)
+    && value >= 0
+  ) {
+    return value;
+  }
+  throw new TypeError(`${label} must be a nonnegative integer or null.`);
+}
+
+function readNullableHostedDeviceSyncEventToProviderSendBucket(
+  value: unknown,
+  label: string,
+): HostedDeviceSyncEventToProviderSendBucket | null {
+  const normalized = readNullableStringValue(value, label);
+  if (normalized === null) {
+    return null;
+  }
+  if (isHostedDeviceSyncEventToProviderSendBucket(normalized)) {
+    return normalized;
+  }
+  throw new TypeError(`${label} is invalid.`);
 }
 
 function readHostedExecutionDeviceSyncDirtyPayload(
@@ -1629,9 +1856,10 @@ function parseHostedExecutionDeviceSyncRuntimeConnectionUpdate(
       );
   const sources = record.sources === undefined
     ? undefined
-    : requireArray(
+    : requireBoundedArray(
         record.sources,
         `Hosted device-sync runtime apply request updates[${index}].sources`,
+        HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_SOURCE_LIMIT,
       ).map((entry, sourceIndex) =>
         parseHostedExecutionDeviceSyncRuntimeConnectionSourceUpdate(
           entry,

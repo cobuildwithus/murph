@@ -15,6 +15,7 @@ import {
   HOSTED_LOCAL_ASSISTANT_STUB_CLEARED_ENV_KEYS,
   isLocalTemporalTcpPortCandidateUsable,
   mergeRequiredEnvProfile,
+  readHostedLocalAssistantProviderToolOutputs,
   reserveLocalTemporalTcpPort,
   resolveHostedAssistantLocalDevEnv,
   scopeHostedLocalAssistantProviderResponse,
@@ -28,6 +29,36 @@ import {
 } from "@murphai/hosted-local-harness/e2e";
 
 const temporalDevUiPortOffset = 1_000;
+
+describe("readHostedLocalAssistantProviderToolOutputs", () => {
+  it("does not treat a marker in failed command arguments as successful output", () => {
+    const marker = "CANONICAL_AUTOMATION_STATE|expected";
+    const outputs = readHostedLocalAssistantProviderToolOutputs({
+      body: JSON.stringify({
+        input: [
+          {
+            arguments: JSON.stringify({ cmd: `echo ${marker}` }),
+            name: "exec_command",
+            type: "function_call",
+          },
+          {
+            output: "Process exited with code 1",
+            type: "function_call_output",
+          },
+          {
+            output: [{ text: "durable-success", type: "input_text" }],
+            type: "custom_tool_call_output",
+          },
+        ],
+      }),
+      method: "POST",
+      url: "/v1/responses",
+    });
+
+    expect(outputs).toEqual(["Process exited with code 1", "durable-success"]);
+    expect(outputs.join("\n")).not.toContain(marker);
+  });
+});
 
 describe("mergeRequiredEnvProfile", () => {
   it("preserves the default hosted runner profiles when adding a required channel profile", () => {
@@ -565,12 +596,13 @@ describe("expectAdvertisedMurphDynamicTools", () => {
       && name !== "murph.react_to_message"
       && name !== "murph.select_reply_target"
       && name !== "murph.create_phone_call"
-      && name !== "murph.newsletter"
       && name !== "murph.pending_vault_files"
       && name !== "murph.send_physical_note"
       && name !== "murph.send_vault_file"
       && name !== "murph.ask_grok"
       && name !== "murph.attach_response_card"
+      && name !== "murph.attach_exercise_routine_card"
+      && name !== "murph.attach_telegram_rich_content"
     );
     const baseToolNamesWithoutProgress = baseToolNames.filter((name) =>
       name !== "murph.send_progress_update"
@@ -586,6 +618,8 @@ describe("expectAdvertisedMurphDynamicTools", () => {
     expect(allToolNames).toContain("murph.send_progress_update");
     expect(allToolNames).toContain("murph.ask_grok");
     expect(allToolNames).toContain("murph.attach_response_card");
+    expect(allToolNames).toContain("murph.attach_exercise_routine_card");
+    expect(allToolNames).toContain("murph.attach_telegram_rich_content");
 
     expectAdvertisedMurphDynamicTools([
       buildResponsesRequest(baseToolNames),
@@ -627,15 +661,16 @@ describe("expectAdvertisedMurphDynamicTools", () => {
       {
         connectedAppsAvailable: true,
         computerToolsAvailable: true,
+        exerciseRoutineResponseCardAvailable: true,
         groupRoomModelAvailable: true,
         imessageContactAvailable: true,
         messageTargetingAvailable: true,
-        newsletterAvailable: true,
         pendingVaultFilesAvailable: true,
         physicalNotesAvailable: true,
         phoneCallsAvailable: true,
         progressUpdatesAvailable: true,
         responseCardAvailable: true,
+        telegramRichContentResponseCardAvailable: true,
         vaultFileSendAvailable: true,
         askGrokAvailable: true,
       },
@@ -752,6 +787,7 @@ describe("hosted local e2e scenario registration", () => {
     const directR2PresignedPut = listHostedLocalE2eScenarios().find((scenario) => scenario.name === "direct-r2-presigned-put");
     const linqLostActiveOperation = listHostedLocalE2eScenarios().find((scenario) => scenario.name === "linq-lost-active-operation");
     const linqGroupIosAppDownload = listHostedLocalE2eScenarios().find((scenario) => scenario.name === "linq-group-ios-app-download");
+    const personalizedNextTrials = listHostedLocalE2eScenarios().find((scenario) => scenario.name === "personalized-next-trials");
     const vaultPersistence = listHostedLocalE2eScenarios().find((scenario) => scenario.name === "vault-persistence");
 
     expect(containerContinuity).toMatchObject({
@@ -783,6 +819,13 @@ describe("hosted local e2e scenario registration", () => {
       manualOnly: true,
       name: "linq-group-ios-app-download",
     });
+    expect(personalizedNextTrials).toMatchObject({
+      dedicatedVitestProcess: true,
+      file: "apps/cloudflare/test/hosted-local-personalized-next-trials-e2e.test.ts",
+      manualOnly: true,
+      name: "personalized-next-trials",
+      testControls: true,
+    });
     expect(vaultPersistence).toMatchObject({
       file: "apps/cloudflare/test/hosted-local-vault-persistence-e2e.test.ts",
       manualOnly: true,
@@ -794,6 +837,7 @@ describe("hosted local e2e scenario registration", () => {
     expect(allScenarios.map((scenario) => scenario.name)).toContain("direct-r2-presigned-put");
     expect(allScenarios.map((scenario) => scenario.name)).not.toContain("linq-lost-active-operation");
     expect(allScenarios.map((scenario) => scenario.name)).not.toContain("linq-group-ios-app-download");
+    expect(allScenarios.map((scenario) => scenario.name)).not.toContain("personalized-next-trials");
     expect(allScenarios.map((scenario) => scenario.name)).not.toContain("vault-persistence");
     expect(resolveHostedLocalE2eScenarios("container-continuity")).toEqual([expect.objectContaining({
       file: "apps/cloudflare/test/hosted-local-container-continuity-e2e.test.ts",
@@ -823,6 +867,13 @@ describe("hosted local e2e scenario registration", () => {
       file: "apps/cloudflare/test/hosted-local-linq-group-ios-app-download-e2e.test.ts",
       manualOnly: true,
       name: "linq-group-ios-app-download",
+    })]);
+    expect(resolveHostedLocalE2eScenarios("personalized-next-trials")).toEqual([expect.objectContaining({
+      dedicatedVitestProcess: true,
+      file: "apps/cloudflare/test/hosted-local-personalized-next-trials-e2e.test.ts",
+      manualOnly: true,
+      name: "personalized-next-trials",
+      testControls: true,
     })]);
     expect(resolveHostedLocalE2eScenarios("vault-persistence")).toEqual([expect.objectContaining({
       file: "apps/cloudflare/test/hosted-local-vault-persistence-e2e.test.ts",

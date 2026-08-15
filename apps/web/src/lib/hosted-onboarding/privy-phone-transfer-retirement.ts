@@ -35,6 +35,7 @@ import { resolveHostedPrivyLinkedAccountState } from "./privy-shared";
 import {
   HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
   lockHostedMemberRow,
+  type HostedOnboardingReadClient,
 } from "./shared";
 import {
   HOSTED_BROWSER_VAULT_REFRESH_RUNTIME_CONTROL_EVENT_ID_PREFIX,
@@ -250,6 +251,7 @@ export async function prepareHostedPrivyPhoneTransferSourceRetirementTx(input: {
     await classifyHostedPrivyPhoneTransferSourceScaffoldTx({
       identity: sourceIdentity,
       memberId: sourceMember.id,
+      now: input.now,
       phoneNumber,
       prisma: input.prisma,
       sourcePrivyUserId: input.transfer.sourcePrivyUserId,
@@ -281,7 +283,7 @@ export async function assertHostedPrivyPhoneTransferSourceRetirementFenceTx(
   input: {
     identity: HostedPrivyIdentity;
     member: HostedMemberCoreState;
-    prisma: Prisma.TransactionClient;
+    prisma: HostedOnboardingReadClient;
     targetPhoneNumberBeforeTransfer: string | null;
     transfer: HostedPrivyPhoneTransferProof;
   },
@@ -337,6 +339,7 @@ export async function assertHostedPrivyPhoneTransferSourceRetirementFenceTx(
 async function classifyHostedPrivyPhoneTransferSourceScaffoldTx(input: {
   identity: NonNullable<Awaited<ReturnType<typeof readHostedMemberIdentity>>>;
   memberId: string;
+  now: Date;
   phoneNumber: string;
   prisma: Prisma.TransactionClient;
   sourcePrivyUserId: string;
@@ -415,6 +418,7 @@ async function classifyHostedPrivyPhoneTransferSourceScaffoldTx(input: {
 
   await assertNoHostedPrivyPhoneTransferExternalMaterialTx({
     memberId: input.memberId,
+    now: input.now,
     phoneNumber: input.phoneNumber,
     prisma: input.prisma,
   });
@@ -716,6 +720,7 @@ function isExactHostedPrivyPhoneTransferSourceIdentity(input: {
 
 async function assertNoHostedPrivyPhoneTransferExternalMaterialTx(input: {
   memberId: string;
+  now: Date;
   phoneNumber: string;
   prisma: Prisma.TransactionClient;
 }): Promise<void> {
@@ -732,7 +737,13 @@ async function assertNoHostedPrivyPhoneTransferExternalMaterialTx(input: {
     input.prisma.deviceSyncCompanionCaptureReceipt.findFirst({ where: { userId: input.memberId }, select: { id: true } }),
     input.prisma.deviceAgentSession.findFirst({ where: { userId: input.memberId }, select: { id: true } }),
     input.prisma.deviceBrowserAssertionNonce.findFirst({ where: { userId: input.memberId }, select: { nonceHash: true } }),
-    input.prisma.hostedWebInternalRequestNonce.findFirst({ where: { userId: input.memberId }, select: { nonceHash: true } }),
+    input.prisma.hostedWebInternalRequestNonce.findFirst({
+      where: {
+        expiresAt: { gte: input.now },
+        userId: input.memberId,
+      },
+      select: { nonceHash: true },
+    }),
     input.prisma.hostedIngressLatencyTrace.findFirst({ where: { userId: input.memberId }, select: { id: true } }),
     input.prisma.hostedLinqDelivery.findFirst({
       where: {

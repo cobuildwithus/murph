@@ -12,11 +12,12 @@ const mocks = vi.hoisted(() => ({
   cardData: null as ExperimentCardData | null,
   resolveBrowserVaultExperimentRun: vi.fn((): ExperimentRunProjection | null => null),
   useBrowserVault: vi.fn(),
+  useBrowserVaultExperimentMetricBucketDemand: vi.fn(() => true),
 }));
 
 vi.mock("@/src/components/experiments/experiment-detail/results-summary", () => ({
   ResultsSummary: () => createElement("div"),
-  ResultsSummarySkeleton: () => createElement("div"),
+  ResultsSummarySkeleton: () => createElement("div", { "data-summary-skeleton": true }),
 }));
 
 vi.mock("@/src/components/experiments/experiment-detail/share-results-card", () => ({
@@ -27,10 +28,18 @@ vi.mock("@/src/components/experiments/experiment-detail/share-results-card", () 
 }));
 
 vi.mock("@/src/lib/browser-vault/context", () => ({
+  isBrowserVaultMetricsCapable: () => true,
   useBrowserVault: mocks.useBrowserVault,
+  useBrowserVaultExperimentMetricBucketDemand:
+    mocks.useBrowserVaultExperimentMetricBucketDemand,
 }));
 
 vi.mock("@/src/lib/browser-vault/experiment-run", () => ({
+  buildBrowserVaultExperimentResultLookups: () => ({
+    experimentIds: [],
+    protocolKeys: [],
+    slugs: [],
+  }),
   resolveBrowserVaultExperimentRun: mocks.resolveBrowserVaultExperimentRun,
 }));
 
@@ -39,10 +48,29 @@ import { ActiveRunSummaryClient } from "../app/(dashboard)/experiments/[experime
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.cardData = null;
+  mocks.useBrowserVaultExperimentMetricBucketDemand.mockReturnValue(true);
   mocks.useBrowserVault.mockReturnValue({
     client: null,
     status: "ready",
   });
+});
+
+test("omits the optional active summary after required bucket failure", () => {
+  const protocol = resolveHealthCommonsExperimentResultsPublic("finnish-sauna");
+  assert.ok(protocol);
+  mocks.useBrowserVaultExperimentMetricBucketDemand.mockReturnValue(false);
+  mocks.useBrowserVault.mockReturnValue({
+    client: null,
+    error: "Browser vault failed",
+    status: "error",
+  });
+
+  const markup = renderToStaticMarkup(createElement(ActiveRunSummaryClient, {
+    protocol,
+    protocolFacts: [],
+  }));
+
+  assert.equal(markup, "");
 });
 
 test("uses the saved run duration in the private share artifact after catalog timing changes", () => {

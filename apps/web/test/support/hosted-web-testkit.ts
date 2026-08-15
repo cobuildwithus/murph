@@ -72,6 +72,10 @@ import {
 import type {
   HostedRuntimeLatencyPhaseBreakdown,
 } from "@murphai/hosted-execution/runtime-control";
+import type {
+  HostedVaultShareProjectionMode,
+  HostedVaultShareProjectionScope,
+} from "@murphai/hosted-execution/vault-share";
 import { Client } from "pg";
 
 import { hostedRuntimeLogSubjectKey } from "@/src/lib/hosted-runtime-log/subject-key";
@@ -113,6 +117,22 @@ const hostedUsageCreditModuleSpecifier = new URL(
   "../../src/lib/hosted-execution/usage-credits.ts",
   import.meta.url,
 ).href;
+const hostedGroupStoreModuleSpecifier = new URL(
+  "../../src/lib/hosted-groups/group-store.ts",
+  import.meta.url,
+).href;
+const hostedMemberStoreModuleSpecifier = new URL(
+  "../../src/lib/hosted-onboarding/hosted-member-store.ts",
+  import.meta.url,
+).href;
+const hostedVaultShareGrantStoreModuleSpecifier = new URL(
+  "../../src/lib/hosted-vault-share/share-grant-store.ts",
+  import.meta.url,
+).href;
+const hostedVaultShareProjectionStoreModuleSpecifier = new URL(
+  "../../src/lib/hosted-vault-share/projection-store.ts",
+  import.meta.url,
+).href;
 const hostedComputerUseServiceModuleSpecifier = new URL(
   "../../src/lib/computer-use/service.ts",
   import.meta.url,
@@ -143,7 +163,72 @@ type HostedTestPrismaClient =
   & HostedLinqWorkspaceIsolationForTestPrismaClient
   & HostedWorkspaceSeedForTestPrismaClient
   & HostedVaultShareForTestPrismaClient
+  & HostedGroupEmailSeedForTestPrismaClient
   & HostedUsageDiagnosticsForTestPrismaClient;
+
+interface HostedGroupEmailSeedForTestPrismaClient {
+  hostedGroupMember: {
+    upsert(args: unknown): Promise<unknown>;
+  };
+}
+
+interface HostedGroupStoreForTestModule {
+  ensureHostedGroupForThreadContainerTx(input: {
+    containerMemberId: string;
+    now: Date;
+    requestedVaultShareProjectionScopes: readonly HostedVaultShareProjectionScope[];
+    tx: unknown;
+  }): Promise<{ id: string }>;
+}
+
+interface HostedMemberStoreForTestModule {
+  syncHostedMemberVerifiedEmailAuthorization(input: {
+    address: string;
+    memberId: string;
+    prisma: HostedTestPrismaClient;
+    verifiedAt: Date;
+  }): Promise<unknown>;
+}
+
+interface HostedVaultShareGrantStoreForTestModule {
+  grantHostedVaultShareTx(input: {
+    destinationMemberId: string;
+    grantorMemberId: string;
+    now: Date;
+    projectionScope: HostedVaultShareProjectionScope;
+    tx: unknown;
+  }): Promise<void>;
+}
+
+interface HostedVaultShareProjectionStoreForTestModule {
+  findActiveHostedVaultShares(input: {
+    grantorMemberId: string;
+    prisma: HostedTestPrismaClient;
+    projectionMode?: HostedVaultShareProjectionMode;
+    projectionScope: HostedVaultShareProjectionScope;
+  }): Promise<Array<{
+    destinationMemberId: string;
+    grantorMemberId: string;
+    id: string;
+    projectionKind: string;
+    projectionScope: HostedVaultShareProjectionScope;
+    projectionScopeKey: string;
+  }>>;
+  replaceHostedVaultShareProjectionSnapshot(input: {
+    prisma: HostedTestPrismaClient;
+    projectionMode?: HostedVaultShareProjectionMode;
+    records: [];
+    share: {
+      destinationMemberId: string;
+      grantorMemberId: string;
+      id: string;
+      projectionKind: string;
+      projectionScope: HostedVaultShareProjectionScope;
+      projectionScopeKey: string;
+    };
+    sourceWorkspaceVersion: string;
+  }): Promise<"no-active-share" | "replaced">;
+}
 
 interface HostedVaultShareForTestPrismaClient {
   hostedVaultShare: {
@@ -164,7 +249,9 @@ interface HostedConsentForTestModule {
 
 interface HostedTestPrismaFactoryClient {
   $disconnect(): Promise<void>;
-  $transaction<T>(callback: (tx: unknown) => Promise<T>): Promise<T>;
+  $transaction<T>(
+    callback: (tx: HostedGroupEmailSeedForTestPrismaClient) => Promise<T>,
+  ): Promise<T>;
   hostedMailboxItem: {
     count(args: unknown): Promise<number>;
     findUniqueOrThrow(args: unknown): Promise<{
@@ -1252,6 +1339,119 @@ export async function seedHostedLaunchConsentForTest(input: {
         source: "hosted-local-e2e",
       });
     }
+  });
+}
+
+export async function seedHostedGroupEmailAuthorizationForTest(input: {
+  environment?: NodeJS.ProcessEnv;
+  participants: readonly {
+    memberId: string;
+    verifiedEmail?: string | null;
+  }[];
+  projectionScopes: readonly HostedVaultShareProjectionScope[];
+  runtimeMemberId: string;
+}): Promise<{ groupId: string }> {
+  return withHostedWebTestkitDeps(input.environment, async (deps) => {
+    const [
+      groupStore,
+      memberStore,
+      shareGrantStore,
+      projectionStore,
+    ] = await Promise.all([
+      import(hostedGroupStoreModuleSpecifier) as Promise<HostedGroupStoreForTestModule>,
+      import(hostedMemberStoreModuleSpecifier) as Promise<HostedMemberStoreForTestModule>,
+      import(hostedVaultShareGrantStoreModuleSpecifier) as Promise<
+        HostedVaultShareGrantStoreForTestModule
+      >,
+      import(hostedVaultShareProjectionStoreModuleSpecifier) as Promise<
+        HostedVaultShareProjectionStoreForTestModule
+      >,
+    ]);
+    const now = new Date();
+    const groupId = await deps.prisma.$transaction(async (tx) => {
+      const group = await groupStore.ensureHostedGroupForThreadContainerTx({
+        containerMemberId: input.runtimeMemberId,
+        now,
+        requestedVaultShareProjectionScopes: input.projectionScopes,
+        tx,
+      });
+      for (const participant of input.participants) {
+        await tx.hostedGroupMember.upsert({
+          create: {
+            groupId: group.id,
+            id: `hgm_hosted_local_${participant.memberId}`,
+            joinedAt: now,
+            memberId: participant.memberId,
+            role: "member",
+          },
+          update: { joinedAt: now },
+          where: {
+            groupId_memberId: {
+              groupId: group.id,
+              memberId: participant.memberId,
+            },
+          },
+        });
+        for (const projectionScope of [
+          { projectionKind: "group-email.v0" } as const,
+          ...input.projectionScopes,
+        ]) {
+          await shareGrantStore.grantHostedVaultShareTx({
+            destinationMemberId: input.runtimeMemberId,
+            grantorMemberId: participant.memberId,
+            now,
+            projectionScope,
+            tx,
+          });
+        }
+      }
+      return group.id;
+    });
+
+    for (const participant of input.participants) {
+      const sourceWorkspace = await deps.prisma.hostedWorkspace.findUnique({
+        select: { version: true },
+        where: { userId: participant.memberId },
+      });
+      if (!sourceWorkspace) {
+        throw new Error("Hosted-local group email participant workspace was not created.");
+      }
+      if (participant.verifiedEmail) {
+        await memberStore.syncHostedMemberVerifiedEmailAuthorization({
+          address: participant.verifiedEmail,
+          memberId: participant.memberId,
+          prisma: deps.prisma,
+          verifiedAt: now,
+        });
+      }
+      for (const projectionScope of input.projectionScopes) {
+        const share = (await projectionStore.findActiveHostedVaultShares({
+          grantorMemberId: participant.memberId,
+          prisma: deps.prisma,
+          projectionScope,
+        })).find((candidate) =>
+          candidate.destinationMemberId === input.runtimeMemberId
+        );
+        if (!share) {
+          throw new Error("Hosted-local group email share was not created.");
+        }
+        // Snapshot encryption reads the Web-owned crypto configuration from
+        // process.env, so restore this scenario's resolved environment after
+        // the asynchronous store imports above.
+        applyHostedWebTestkitEnvironment(deps.environment);
+        const replaced = await projectionStore.replaceHostedVaultShareProjectionSnapshot({
+          prisma: deps.prisma,
+          records: [],
+          share,
+          sourceWorkspaceVersion: sourceWorkspace.version.toString(),
+        });
+        if (replaced !== "replaced") {
+          throw new Error("Hosted-local group email projection snapshot was not replaced.");
+        }
+      }
+    }
+
+    return { groupId };
   });
 }
 

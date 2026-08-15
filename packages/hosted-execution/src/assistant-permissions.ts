@@ -5,6 +5,8 @@ export const MURPH_MEMBER_MEMORY_MAINTENANCE_PERMISSION_PROFILE =
   "murph-member-memory-maintenance" as const;
 export const MURPH_MEMBER_READ_PERMISSION_PROFILE =
   "murph-member-read" as const;
+export const MURPH_MEMBER_WORKSPACE_PERMISSION_PROFILE =
+  "murph-member-workspace" as const;
 
 export function buildMurphGroupReadPermissionProfileTomlLines(): readonly string[] {
   return [
@@ -84,6 +86,26 @@ export function buildMurphMemberReadPermissionProfileTomlLines(): readonly strin
     "",
     `[permissions.${MURPH_MEMBER_READ_PERMISSION_PROFILE}.network]`,
     "enabled = false",
+    "",
+  ];
+}
+
+export function buildMurphMemberWorkspacePermissionProfileTomlLines(): readonly string[] {
+  return [
+    "# Ordinary hosted member turns may mutate the vault except canonical automations.",
+    `[permissions.${MURPH_MEMBER_WORKSPACE_PERMISSION_PROFILE}.filesystem]`,
+    '":minimal" = "read"',
+    '"/app" = "read"',
+    '":tmpdir" = "write"',
+    '":slash_tmp" = "write"',
+    "glob_scan_max_depth = 64",
+    "",
+    `[permissions.${MURPH_MEMBER_WORKSPACE_PERMISSION_PROFILE}.filesystem.":workspace_roots"]`,
+    '"." = "write"',
+    '"bank/automations" = "read"',
+    "",
+    `[permissions.${MURPH_MEMBER_WORKSPACE_PERMISSION_PROFILE}.network]`,
+    "enabled = true",
     "",
   ];
 }

@@ -22,10 +22,14 @@ import {
   MURPH_GROUP_ROOM_MODEL_MAINTENANCE_PERMISSION_PROFILE,
   MURPH_MEMBER_MEMORY_MAINTENANCE_PERMISSION_PROFILE,
   MURPH_MEMBER_READ_PERMISSION_PROFILE,
+  MURPH_MEMBER_WORKSPACE_PERMISSION_PROFILE,
 } from "@murphai/hosted-execution/assistant-permissions";
 import {
   HostedAssistantConfigurationError,
 } from "@murphai/operator-config/hosted-assistant-config";
+import {
+  HOSTED_LOCAL_TEST_CODEX_MODEL_PROVIDER_ID,
+} from "@murphai/operator-config/assistant/target-runtime";
 import {
   HOSTED_RUNTIME_CODEX_APP_SERVER_COMMAND_ENV,
   HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV,
@@ -72,13 +76,15 @@ const HOSTED_CODEX_AUTOCOMPACTION_E2E_TOKEN_LIMIT = 12_000;
 const HOSTED_CODEX_AUTOCOMPACTION_SUMMARY_SENTINEL =
   "HOSTED_CODEX_AUTOCOMPACTION_SUMMARY_SENTINEL";
 const EXPECTED_MULTI_AGENT_USAGE_HINT = [
-  "Proactively spawn a hosted child for bounded background parsing or import work and optional enrichment or research whose result is not needed in the current reply, and reply without waiting.",
-  "Follow the active route or skill contract for child design and completion proof.",
+  "When the active route or skill contract permits delegation, proactively spawn a hosted child for genuinely bounded, self-contained background work whose result is not needed in the current reply, then reply without waiting.",
+  "Use the child to replace a later root pass, not duplicate work; skip tiny tasks whose assignment and readback cost exceeds doing them once in the root.",
+  "Follow the active route or skill contract for the exact leaf assignment and completion proof.",
 ].join(" ");
 const EXPECTED_MULTI_AGENT_MODE_HINT =
   "Murph bounded background delegation mode is active; reply-critical work stays in the root.";
 const EXPECTED_SUBAGENT_USAGE_HINT = [
   "This hosted child is a one-shot leaf.",
+  "Complete only the self-contained assignment and stop.",
   "Do not spawn or delegate to another child.",
 ].join(" ");
 
@@ -544,12 +550,12 @@ test("hosted Codex runtime config accepts a local test-only model provider base 
 
   assert.equal(
     result.runtimeEnv[HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV],
-    "hosted-openai",
+    "openai-local-test",
   );
 
   const config = await readFile(result.codexConfigPath, "utf8");
-  assert.match(config, /model_provider = "hosted-openai"/u);
-  assert.match(config, /\[model_providers\."hosted-openai"\]/u);
+  assert.match(config, /model_provider = "openai-local-test"/u);
+  assert.match(config, /\[model_providers\."openai-local-test"\]/u);
   assert.match(config, /base_url = "http:\/\/host\.docker\.internal:4567\/v1"/u);
   assert.match(config, /env_key = "OPENAI_API_KEY"/u);
   assert.match(config, /requires_openai_auth = false/u);
@@ -599,8 +605,12 @@ test("hosted Codex runtime config accepts a Linux Docker bridge model provider o
     },
   });
 
+  assert.equal(
+    result.runtimeEnv[HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV],
+    "openai-local-test",
+  );
   const config = await readFile(result.codexConfigPath, "utf8");
-  assert.match(config, /model_provider = "hosted-openai"/u);
+  assert.match(config, /model_provider = "openai-local-test"/u);
   assert.match(config, /base_url = "http:\/\/172\.17\.0\.1:4567\/v1"/u);
 });
 
@@ -974,8 +984,12 @@ testHostedCodexAuthE2e(
       });
       const config = await readFile(result.codexConfigPath, "utf8");
 
-      assert.match(config, /^model_provider = "hosted-openai"$/mu);
-      assert.match(config, /\[model_providers\."hosted-openai"\]/u);
+      assert.equal(
+        result.runtimeEnv[HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV],
+        HOSTED_LOCAL_TEST_CODEX_MODEL_PROVIDER_ID,
+      );
+      assert.match(config, /^model_provider = "openai-local-test"$/mu);
+      assert.match(config, /\[model_providers\."openai-local-test"\]/u);
       assert.match(config, /^env_key = "OPENAI_API_KEY"$/mu);
       assert.match(config, /^requires_openai_auth = false$/mu);
       assert.doesNotMatch(config, /^model_provider = "openai"$/mu);
@@ -1849,6 +1863,21 @@ test("hosted Codex config TOML omits credential values and runtime authority hea
       `[permissions.${MURPH_MEMBER_READ_PERMISSION_PROFILE}.network]`,
       "enabled = false",
       "",
+      "# Ordinary hosted member turns may mutate the vault except canonical automations.",
+      `[permissions.${MURPH_MEMBER_WORKSPACE_PERMISSION_PROFILE}.filesystem]`,
+      '":minimal" = "read"',
+      '"/app" = "read"',
+      '":tmpdir" = "write"',
+      '":slash_tmp" = "write"',
+      "glob_scan_max_depth = 64",
+      "",
+      `[permissions.${MURPH_MEMBER_WORKSPACE_PERMISSION_PROFILE}.filesystem.":workspace_roots"]`,
+      '"." = "write"',
+      '"bank/automations" = "read"',
+      "",
+      `[permissions.${MURPH_MEMBER_WORKSPACE_PERMISSION_PROFILE}.network]`,
+      "enabled = true",
+      "",
       "# Hosted runs should not perform Codex plugin marketplace or remote plugin",
       "# sync work on cold wake; Murph owns the hosted runtime tool surface.",
       "[features]",
@@ -1964,6 +1993,34 @@ test("hosted Codex config keeps skill instructions and native memory disabled", 
   assert.doesNotMatch(config, /\[skills\.bundled\]\nenabled = true/u);
   assert.doesNotMatch(config, /^plugins = true$/mu);
   assert.match(config, /break provider prefix caching/u);
+});
+
+test("hosted Codex config promotes permitted leaf delegation without cross-model routing", () => {
+  const config = buildHostedCodexConfigToml({
+    model: "gpt-5.6-terra",
+    provider: {
+      id: "openai",
+      name: "OpenAI",
+      baseUrl: "https://api.openai.com/v1",
+      envKey: "OPENAI_API_KEY",
+      wireApi: "responses",
+    },
+    reasoningEffort: "low",
+  });
+
+  assert.ok(config.includes(
+    "When the active route or skill contract permits delegation, proactively spawn a hosted child for genuinely bounded, self-contained background work whose result is not needed in the current reply, then reply without waiting.",
+  ));
+  assert.ok(config.includes(
+    "Use the child to replace a later root pass, not duplicate work; skip tiny tasks",
+  ));
+  assert.ok(config.includes(
+    "Complete only the self-contained assignment and stop.",
+  ));
+  assert.doesNotMatch(config, /^expose_spawn_agent_model_overrides/mu);
+  assert.doesNotMatch(config, /^default_subagent_model/mu);
+  assert.doesNotMatch(config, /^default_subagent_reasoning_effort/mu);
+  assert.doesNotMatch(config, /gpt-5\.6-luna/u);
 });
 
 test("hosted Codex runtime exposes a stable package-owned assistant skill root", async () => {

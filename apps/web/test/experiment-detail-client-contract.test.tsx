@@ -7,6 +7,16 @@ import { createRoot, type Root } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
+import {
+  BROWSER_VAULT_CORE_SHARD_SCHEMA,
+  BROWSER_VAULT_EXPERIMENT_RUN_CARD_SCHEMA,
+  BROWSER_VAULT_REPLICA_POLICY_ID,
+  BROWSER_VAULT_REPLICA_SCHEMA,
+  createBrowserVaultCoreQueryClient,
+  type BrowserVaultCoreShard,
+  type BrowserVaultExperimentRunCardStatus,
+} from "@murphai/query/browser-replica-client";
+
 import { CURRENT_EXPERIMENT_PROTOCOL_CONTRACT_VERSION } from "@/src/lib/experiments/experiment-detail";
 import type {
   ExperimentResultsPublicProjection,
@@ -39,6 +49,7 @@ const mocks = vi.hoisted(() => ({
     ref: null,
     refreshPending: false,
     refresh: vi.fn(async () => {}),
+    runtimeRefreshPending: false,
     status: "ready",
     workspaceVersion: null,
   })),
@@ -107,6 +118,7 @@ vi.mock("@/src/lib/browser-vault/context", () => ({
 }));
 
 vi.mock("@/src/lib/browser-vault/experiment-run", () => ({
+  buildBrowserVaultExperimentResultLookups: (protocol: { id: string }) => [protocol.id],
   resolveBrowserVaultExperimentRun: mocks.resolveBrowserVaultExperimentRun,
 }));
 
@@ -133,7 +145,6 @@ beforeEach(() => {
     },
     murphEmailAddress: null,
     murphPhoneNumber: null,
-    userEmailAddress: null,
   });
   mocks.useBrowserVault.mockReturnValue({
     client: null,
@@ -144,6 +155,7 @@ beforeEach(() => {
     ref: null,
     refreshPending: false,
     refresh: vi.fn(async () => {}),
+    runtimeRefreshPending: false,
     status: "ready",
     workspaceVersion: null,
   });
@@ -254,7 +266,6 @@ test("hosted experiment start context resolves the assigned member phone", async
     },
     murphEmailAddress: "murph+alias123@mail.withmurph.ai",
     murphPhoneNumber: "+15550100001",
-    userEmailAddress: "member@example.test",
   });
 
   const { readHostedExperimentStartContactContext } = await import(
@@ -306,24 +317,8 @@ test("experiment start fallback is not a live contact route", async () => {
 
 test("experiment start action becomes a quiet status chip for a running browser-vault run", async () => {
   const protocol = createResultsPublicProjection();
-  const activeRun: ExperimentRunProjection = {
-    id: "run_1",
-    outcomeStatus: "not_expected",
-    source: "browser-vault",
-    snapshotGeneratedAt: "2026-04-15T00:00:00.000Z",
-    slug: null,
-    status: "active",
-    statusLabel: "Active",
-    startedOn: "2026-04-01",
-    tags: [],
-    timingKnown: true,
-    title: "Finnish Dry Sauna",
-    signals: [],
-    trends: [],
-    timeline: [],
-  };
   mocks.useBrowserVault.mockReturnValue({
-    client: null,
+    client: createExperimentRunCardClient("active"),
     dataVersion: null,
     deviceSyncImportPending: false,
     error: null,
@@ -331,10 +326,10 @@ test("experiment start action becomes a quiet status chip for a running browser-
     ref: null,
     refreshPending: false,
     refresh: vi.fn(async () => {}),
+    runtimeRefreshPending: false,
     status: "ready",
     workspaceVersion: null,
   });
-  mocks.resolveBrowserVaultExperimentRun.mockReturnValue(activeRun);
 
   const { ExperimentStartOrRunStatus } = await import(
     "../app/(dashboard)/experiments/[experimentId]/experiment-start-or-run-status"
@@ -347,10 +342,6 @@ test("experiment start action becomes a quiet status chip for a running browser-
     }),
   );
 
-  expect(mocks.resolveBrowserVaultExperimentRun).toHaveBeenCalledWith({
-    client: null,
-    protocol,
-  });
   expect(view.container.textContent).toContain("Experiment in progress");
   expect(view.container.textContent).not.toContain("Start Experiment");
   expect(view.container.querySelector(".bg-primary")).not.toBeNull();
@@ -363,23 +354,19 @@ test("experiment start action becomes a quiet status chip for a running browser-
 
 test("paused browser-vault runs get the muted status chip, not the live dot", async () => {
   const protocol = createResultsPublicProjection();
-  const pausedRun: ExperimentRunProjection = {
-    id: "run_1",
-    outcomeStatus: "not_expected",
-    source: "browser-vault",
-    snapshotGeneratedAt: "2026-04-15T00:00:00.000Z",
-    slug: null,
-    status: "paused",
-    statusLabel: "Paused",
-    startedOn: "2026-04-01",
-    tags: [],
-    timingKnown: true,
-    title: "Finnish Dry Sauna",
-    signals: [],
-    trends: [],
-    timeline: [],
-  };
-  mocks.resolveBrowserVaultExperimentRun.mockReturnValue(pausedRun);
+  mocks.useBrowserVault.mockReturnValue({
+    client: createExperimentRunCardClient("paused"),
+    dataVersion: null,
+    deviceSyncImportPending: false,
+    error: null,
+    freshness: "fresh",
+    ref: null,
+    refreshPending: false,
+    refresh: vi.fn(async () => {}),
+    runtimeRefreshPending: false,
+    status: "ready",
+    workspaceVersion: null,
+  });
 
   const { ExperimentStartOrRunStatus } = await import(
     "../app/(dashboard)/experiments/[experimentId]/experiment-start-or-run-status"
@@ -399,6 +386,51 @@ test("paused browser-vault runs get the muted status chip, not the live dot", as
 
   await view.cleanup();
 });
+
+function createExperimentRunCardClient(status: BrowserVaultExperimentRunCardStatus) {
+  const core: BrowserVaultCoreShard = {
+    assistantSummary: { highlights: [], latestDate: null },
+    entities: [],
+    experimentRunCards: [{
+      id: "run_status",
+      lookupKeys: {
+        experimentIds: ["finnish-sauna"],
+        protocolKeys: ["finnish-sauna"],
+        slugs: ["finnish-sauna"],
+      },
+      requiredMetricBuckets: [],
+      runSummary: { metrics: [] },
+      schema: BROWSER_VAULT_EXPERIMENT_RUN_CARD_SCHEMA,
+      slug: "finnish-sauna",
+      startedOn: "2026-08-01",
+      status,
+      statusLabel: status === "paused" ? "Paused" : "Active",
+      summary: null,
+      summaryDetail: null,
+      tags: [],
+      title: "Finnish Dry Sauna",
+    }],
+    hasLabBiomarkers: false,
+    identity: {
+      dataVersion: "test-data-version",
+      generatedAt: "2026-08-13T12:00:00.000Z",
+      replicaSchema: BROWSER_VAULT_REPLICA_SCHEMA,
+      sourceBundleHash: "b".repeat(64),
+    },
+    personalPatterns: undefined,
+    policy: {
+      bodyPreviewChars: 280,
+      excludedFamilies: [],
+      id: BROWSER_VAULT_REPLICA_POLICY_ID,
+      includedFamilies: [],
+      metricLookbackDays: 365,
+    },
+    schema: BROWSER_VAULT_CORE_SHARD_SCHEMA,
+    timelineRows: [],
+    weeklySampleSummaries: [],
+  };
+  return createBrowserVaultCoreQueryClient(core);
+}
 
 test("server layout keeps contact reads inside the deferred start action slot", async () => {
   const { default: ExperimentDetailLayout } = await import(

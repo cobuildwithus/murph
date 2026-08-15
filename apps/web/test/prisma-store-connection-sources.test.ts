@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { PublicDeviceSyncAccount } from "@murphai/device-syncd/types";
+import { HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_CONNECTION_SOURCE_LIMIT } from "@murphai/device-syncd/hosted-runtime";
 
 import { readCompanionDeviceSyncStatus } from "@/src/lib/device-sync/companion";
 import { PrismaDeviceSyncControlPlaneStore } from "@/src/lib/device-sync/prisma-store";
@@ -106,23 +107,40 @@ function createSourceStore(seed: MutableConnectionSourceRecord[] = []) {
     take?: number;
     where: {
       connectionId: string;
-      sourceProviderSlug?: {
-        in: string[];
-      };
-      status?: {
-        not?: string;
-      };
+      sourceProviderSlug?: string | { in: string[] };
+      status?: string | { not?: string };
+      OR?: Array<{
+        lastErrorCode?: null;
+        NOT?: { lastErrorCode: { in: string[] } };
+      }>;
     };
   }) => {
     const sorted = [...records.values()]
       .filter((record) => record.connectionId === input.where.connectionId)
       .filter((record) =>
-        input.where.sourceProviderSlug?.in
-          ? input.where.sourceProviderSlug.in.includes(record.sourceProviderSlug)
-          : true
+        typeof input.where.sourceProviderSlug === "string"
+          ? record.sourceProviderSlug === input.where.sourceProviderSlug
+          : input.where.sourceProviderSlug?.in
+            ? input.where.sourceProviderSlug.in.includes(record.sourceProviderSlug)
+            : true
       )
       .filter((record) =>
-        input.where.status?.not ? record.status !== input.where.status.not : true
+        typeof input.where.status === "string"
+          ? record.status === input.where.status
+          : input.where.status?.not
+            ? record.status !== input.where.status.not
+            : true
+      )
+      .filter((record) =>
+        input.where.OR
+          ? input.where.OR.some((clause) =>
+              clause.lastErrorCode === null
+                ? record.lastErrorCode === null
+                : clause.NOT
+                  ? !clause.NOT.lastErrorCode.in.includes(record.lastErrorCode ?? "")
+                  : false
+            )
+          : true
       )
       .sort((left, right) =>
         right.lastSeenAt.getTime() - left.lastSeenAt.getTime()
@@ -402,59 +420,88 @@ describe("PrismaDeviceSyncControlPlaneStore connection source projection", () =>
     }));
   });
 
-  it("lists runtime snapshot connection sources with a bounded provider projection", async () => {
+  it("bounds source admission to one exact, minimally projected connected candidate", async () => {
     const { findMany, store } = createSourceStore([
       createSourceRecord({
-        id: "dcs_unrelated",
-        sourceInstanceKey: "src_garmin_a",
+        id: "dcs_other",
+        sourceInstanceKey: "src_other",
         sourceProviderSlug: "garmin",
-        status: "error",
-        lastSeenAt: new Date("2026-03-25T04:00:00.000Z"),
       }),
       createSourceRecord({
-        id: "dcs_disconnected",
-        sourceInstanceKey: "src_whoop_disconnected",
-        sourceProviderSlug: "whoop_v2",
-        status: "disconnected",
-        lastSeenAt: new Date("2026-03-25T03:00:00.000Z"),
-      }),
-      createSourceRecord({
-        id: "dcs_whoop_error",
-        sourceInstanceKey: "src_whoop_error",
-        sourceProviderSlug: "whoop_v2",
-        status: "error",
-        lastErrorCode: "TOKEN_REFRESH_FAILED",
-        lastSeenAt: new Date("2026-03-25T02:00:00.000Z"),
-      }),
-      createSourceRecord({
-        id: "dcs_whoop_connected",
-        sourceInstanceKey: "src_whoop_connected",
-        sourceProviderSlug: "whoop_v2",
-        status: "connected",
-        lastSeenAt: new Date("2026-03-25T01:00:00.000Z"),
+        id: "dcs_target",
+        sourceInstanceKey: "src_target",
+        sourceProviderSlug: "oura",
       }),
     ]);
 
-    await expect(store.listRuntimeSnapshotConnectionSources({
+    await expect(store.listConnectionSourceAdmissionCandidates({
       connectionId: "dsc_parent",
-      limit: 1,
-      sourceProviderSlugs: ["whoop", "whoop_v2", "whoop-v2"],
+      sourceProviderSlug: "oura",
     })).resolves.toEqual([
       expect.objectContaining({
-        id: "dcs_whoop_error",
-        sourceProviderSlug: "whoop_v2",
+        sourceProviderSlug: "oura",
+        status: "connected",
       }),
     ]);
+    expect(findMany).toHaveBeenCalledOnce();
     expect(findMany).toHaveBeenCalledWith(expect.objectContaining({
+      select: {
+        id: true,
+        lastErrorCode: true,
+        lastErrorMessage: true,
+        lastSeenAt: true,
+        sourceInstanceKey: true,
+        sourceProviderSlug: true,
+        status: true,
+      },
+      take: 1,
+      where: expect.objectContaining({
+        connectionId: "dsc_parent",
+        sourceProviderSlug: "oura",
+        status: "connected",
+      }),
+    }));
+  });
+
+  it("returns one exact blocked source when no admitted candidate exists", async () => {
+    const { findMany, store } = createSourceStore([
+      createSourceRecord({
+        id: "dcs_target",
+        lastErrorCode: "SOURCE_USER_DISCONNECTED",
+        sourceInstanceKey: "src_target",
+        sourceProviderSlug: "oura",
+      }),
+      createSourceRecord({
+        id: "dcs_unrelated",
+        sourceInstanceKey: "src_unrelated",
+        sourceProviderSlug: "garmin",
+      }),
+    ]);
+
+    await expect(store.listConnectionSourceAdmissionCandidates({
+      connectionId: "dsc_parent",
+      sourceProviderSlug: "oura",
+    })).resolves.toEqual([
+      expect.objectContaining({
+        lastErrorCode: "SOURCE_USER_DISCONNECTED",
+        sourceProviderSlug: "oura",
+      }),
+    ]);
+    expect(findMany).toHaveBeenCalledTimes(2);
+    expect(findMany).toHaveBeenLastCalledWith(expect.objectContaining({
+      select: {
+        id: true,
+        lastErrorCode: true,
+        lastErrorMessage: true,
+        lastSeenAt: true,
+        sourceInstanceKey: true,
+        sourceProviderSlug: true,
+        status: true,
+      },
       take: 1,
       where: {
         connectionId: "dsc_parent",
-        sourceProviderSlug: {
-          in: ["whoop", "whoop_v2", "whoop-v2"],
-        },
-        status: {
-          not: "disconnected",
-        },
+        sourceProviderSlug: "oura",
       },
     }));
   });
@@ -605,6 +652,69 @@ describe("PrismaDeviceSyncControlPlaneStore connection source projection", () =>
     expect(afterReconcile.get("garmin")?.lastDataAt).toBe("2026-07-05T00:00:00.000Z");
   });
 
+  it("uses one hard-bounded set source projection and fails closed on saturation", async () => {
+    const projectedRows = Array.from(
+      { length: HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_CONNECTION_SOURCE_LIMIT },
+      (_, index) => ({
+        ...createSourceRecord({
+          id: `dcs_${String(index).padStart(2, "0")}`,
+          sourceInstanceKey: `src_${String(index).padStart(2, "0")}`,
+          sourceProviderSlug: index % 2 === 0 ? "whoop" : "whoop_v2",
+        }),
+        projectionRowNumber: BigInt(index + 1),
+      }),
+    );
+    const queryRaw = vi.fn(async (query: unknown) => {
+      void query;
+      return projectedRows;
+    });
+    const store = new PrismaDeviceSyncControlPlaneStore({
+      prisma: {
+        $queryRaw: queryRaw,
+      } as never,
+    });
+
+    await expect(store.listBoundedConnectionSourcesForConnections({
+      connectionIds: ["dsc_parent", "dsc_parent"],
+      excludeDisconnected: true,
+      limitPerConnection: 1_000,
+      sourceProviderSlugs: ["whoop", "whoop_v2"],
+    })).resolves.toHaveLength(
+      HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_CONNECTION_SOURCE_LIMIT,
+    );
+
+    expect(queryRaw).toHaveBeenCalledOnce();
+    const query = queryRaw.mock.calls[0]?.[0] as {
+      strings?: readonly string[];
+      values?: readonly unknown[];
+    };
+    expect(query.strings?.join(" ")).toContain("ROW_NUMBER() OVER");
+    expect(query.strings?.join(" ")).toContain("status <> 'disconnected'");
+    expect(query.values).toContain(
+      HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_CONNECTION_SOURCE_LIMIT + 1,
+    );
+    expect(query.values).not.toContain(1_001);
+
+    queryRaw.mockResolvedValueOnce([{
+      ...createSourceRecord({
+        id: "dcs_saturated",
+        sourceInstanceKey: "src_saturated",
+        sourceProviderSlug: "whoop",
+      }),
+      projectionRowNumber: 33n,
+    }]);
+
+    await expect(store.listBoundedConnectionSourcesForConnections({
+      connectionIds: ["dsc_parent"],
+      limitPerConnection: 32,
+      sourceProviderSlugs: ["whoop"],
+    })).rejects.toMatchObject({
+      code: "CONNECTION_SOURCE_SNAPSHOT_SATURATED",
+      retryable: false,
+    });
+    expect(queryRaw).toHaveBeenCalledTimes(2);
+  });
+
   it("keeps the same-request receipt authoritative after source-arrival bookkeeping", async () => {
     const acceptedAt = "2026-07-25T19:00:00.000Z";
     const { store } = createSourceStore([
@@ -639,7 +749,10 @@ describe("PrismaDeviceSyncControlPlaneStore connection source projection", () =>
       status: "active",
       updatedAt: acceptedAt,
     };
-    vi.spyOn(store, "listConnectionsForUser").mockResolvedValue([connection]);
+    vi.spyOn(store, "listMemberConnectionStatuses").mockResolvedValue([{
+      id: connection.id,
+      status: "active",
+    }]);
 
     // This is the production ordering after durable webhook acceptance: write
     // the receipt at T, then best-effort stamp source data arrival at the same
@@ -669,6 +782,9 @@ describe("PrismaDeviceSyncControlPlaneStore connection source projection", () =>
       status: "disconnected",
       updatedAt: acceptedAt,
     });
+    vi.spyOn(store, "listBoundedConnectionSourcesForConnections").mockResolvedValue(
+      source ? [source] : [],
+    );
     await expect(readCompanionDeviceSyncStatus({
       memberId: "member_1",
       now: () => new Date("2026-07-25T20:00:00.000Z"),

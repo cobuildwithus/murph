@@ -16,6 +16,10 @@ import {
   createDefaultLocalAssistantModelTarget,
 } from '@murphai/operator-config/assistant-backend'
 import {
+  CAPTURE_LOOKUP_INDEX_PATH,
+  readStoredCaptureLookupIndex,
+} from '@murphai/core'
+import {
   type ResolvedAssistantSession,
   appendAssistantTranscriptEntries,
   appendAssistantTranscriptEntriesWithRefs,
@@ -30,6 +34,7 @@ import {
 } from './outbox.js'
 import {
   ASSISTANT_IMAGE_RESPONSE_TRANSCRIPT_MARKER,
+  resolveAssistantGeneratedImageDelivery,
 } from './response-media.js'
 import { recordAssistantDiagnosticEvent } from './diagnostics.js'
 import { refreshAssistantStatusSnapshotLocal } from './status.js'
@@ -81,7 +86,7 @@ import {
   finalizeAssistantTurnReceipt,
 } from './turns.js'
 import {
-  mergeAssistantProviderConfigsForProvider,
+  mergeAssistantProviderConfigs,
   serializeAssistantProviderSessionOptions,
 } from '@murphai/operator-config/assistant/provider-config'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
@@ -692,11 +697,34 @@ export async function sendAssistantMessageLocal(
           hostedOptionalProgressDeliveryAvailable
           ? createAssistantProgressDelivery({
               deliver: async (progressInput) => {
+                const deliveryContextOrdinal =
+                  progressInput.deliveryContextOrdinal ?? 0
+                const { targetInputId, ...untargetedProgressInput } = progressInput
+                if (targetInputId) {
+                  await beforeHostedToolExecution(deliveryContextOrdinal)
+                }
+                const resolvedProgressInput = targetInputId
+                  ? {
+                      ...untargetedProgressInput,
+                      input:
+                        await applyAssistantAcceptedMessageTargetToDeliveryInput({
+                          acceptedInputIds:
+                            resolveAcceptedInputIdsThroughDeliveryContextOrdinal(
+                              deliveryContextOrdinal,
+                            ),
+                          action: 'native-reply',
+                          input: progressInput.input,
+                          session: progressInput.session,
+                          sharedPlan,
+                          targetInputId,
+                        }),
+                    }
+                  : untargetedProgressInput
                 const hosted = hostedExecutionContext
                 if (hosted) {
                   const dependencies = hosted.progressDeliveryDependencies
                   const progressChannel =
-                    resolveAssistantProgressDeliveryChannel(progressInput)
+                    resolveAssistantProgressDeliveryChannel(resolvedProgressInput)
                   if (
                     !dependencies ||
                     !hasHostedTextDeliveryForChannel({
@@ -715,7 +743,7 @@ export async function sendAssistantMessageLocal(
                       : undefined
                   if (sendLinq) {
                     await beforeHostedToolExecution(
-                      progressInput.deliveryContextOrdinal ?? 0,
+                      deliveryContextOrdinal,
                     )
                   }
                   const progressDependencies = sendLinq
@@ -733,7 +761,7 @@ export async function sendAssistantMessageLocal(
                       }
                     : dependencies
                   const result = await deliverAssistantProgressUpdate({
-                    ...progressInput,
+                    ...resolvedProgressInput,
                     dependencies: progressDependencies,
                   })
                   refreshTypingIndicatorAfterProgress()
@@ -741,7 +769,7 @@ export async function sendAssistantMessageLocal(
                 }
 
                 const result = await deliverAssistantProgressUpdate({
-                  ...progressInput,
+                  ...resolvedProgressInput,
                 })
                 refreshTypingIndicatorAfterProgress()
                 return result
@@ -809,6 +837,46 @@ export async function sendAssistantMessageLocal(
                 ),
               messageInput: input,
               pendingVaultFilesAvailable,
+              verifyGeneratedImageDelivery: async (candidate) => {
+                try {
+                  const imageRef = candidate.imageRef
+                  const knownFromCurrentCompletion =
+                    currentInput.hostedImageCompletionEffectRestriction
+                      ?.exactMedia?.some((media) => media.ref === imageRef) === true
+                  const [intents, transcriptEntries, captureLookupIndex] =
+                    await Promise.all([
+                      runtimeState.outbox.listIntents(),
+                      runtimeState.transcripts.list(currentSession.sessionId),
+                      (async () => {
+                        await hostedExecutionContext
+                          ?.materializeWorkspaceArtifacts?.([
+                            CAPTURE_LOOKUP_INDEX_PATH,
+                          ])
+                        return await readStoredCaptureLookupIndex({
+                          vaultRoot: input.vault,
+                        })
+                      })(),
+                    ])
+                  return resolveAssistantGeneratedImageDelivery({
+                    currentMedia: {
+                      contentType: candidate.contentType,
+                      sha256: candidate.sha256,
+                      sizeBytes: candidate.sizeBytes,
+                    },
+                    generatedImageOriginKnown:
+                      knownFromCurrentCompletion ||
+                      Object.values(captureLookupIndex.entries).some(
+                        (entry) => entry.attachmentRef === imageRef,
+                      ),
+                    imageRef,
+                    intents,
+                    sessionId: currentSession.sessionId,
+                    transcriptEntries,
+                  })
+                } catch {
+                  return false
+                }
+              },
               route,
               ...(vaultFileSendAvailable && actionApprovalPort
                 ? {
@@ -1816,9 +1884,11 @@ export async function sendAssistantMessageLocal(
                 return segmentInput.input
               }
               return await applyAssistantAcceptedMessageTargetToDeliveryInput({
-                acceptedInputIdsByDeliveryContextOrdinal,
+                acceptedInputIds:
+                  acceptedInputIdsByDeliveryContextOrdinal[
+                    deliveryContextOrdinal
+                  ] ?? [],
                 action: 'native-reply',
-                deliveryContextOrdinal,
                 input: segmentInput.input,
                 session: segmentInput.session,
                 sharedPlan,
@@ -1906,10 +1976,11 @@ export async function sendAssistantMessageLocal(
           try {
             finalDeliveryInput =
               await applyAssistantAcceptedMessageTargetToDeliveryInput({
-                acceptedInputIdsByDeliveryContextOrdinal,
+                acceptedInputIds:
+                  acceptedInputIdsByDeliveryContextOrdinal[
+                    providerResult.responseDeliveryContextOrdinal
+                  ] ?? [],
                 action: 'native-reply',
-                deliveryContextOrdinal:
-                  providerResult.responseDeliveryContextOrdinal,
                 input: finalReplyInput,
                 session: deliverySession,
                 sharedPlan,
@@ -2226,8 +2297,7 @@ export async function updateAssistantSessionOptionsLocal(input: {
     createIfMissing: false,
   })
 
-  const providerConfig = mergeAssistantProviderConfigsForProvider(
-    input.providerOptions.provider,
+  const providerConfig = mergeAssistantProviderConfigs(
     // Persisted targets carry the full durable provider config. Session
     // providerOptions are a derived runtime projection and omit target-only
     // fields such as the Codex executable path.
@@ -2236,12 +2306,6 @@ export async function updateAssistantSessionOptionsLocal(input: {
   )
   const nextTarget =
     createAssistantModelTarget(providerConfig) ?? session.session.target
-  if (nextTarget.adapter !== 'codex-cli') {
-    throw new VaultCliError(
-      'ASSISTANT_PROVIDER_UNSUPPORTED',
-      'Assistant sessions only support Codex app-server targets.',
-    )
-  }
   const nextProviderOptions = serializeAssistantProviderSessionOptions(providerConfig)
   const continuityChanged =
     session.session.providerOptions.continuityFingerprint !==
@@ -2305,6 +2369,7 @@ function resolveInitialAcceptedTurnInputItems(input: {
 
   return [
     {
+      acceptedAt: input.userTurn.turnCreatedAt,
       id: resolveDefaultInitialAcceptedTurnInputId({
         input: input.input,
         userTurn: input.userTurn,
@@ -2679,10 +2744,11 @@ async function deliverAssistantProviderReactions(input: {
     let reactionInput: AssistantMessageInput
     try {
       reactionInput = await applyAssistantAcceptedMessageTargetToDeliveryInput({
-        acceptedInputIdsByDeliveryContextOrdinal:
-          input.acceptedInputIdsByDeliveryContextOrdinal,
+        acceptedInputIds:
+          input.acceptedInputIdsByDeliveryContextOrdinal[
+            reaction.deliveryContextOrdinal
+          ] ?? [],
         action: 'reaction',
-        deliveryContextOrdinal: reaction.deliveryContextOrdinal,
         input: baseReactionInput,
         session: deliverySession,
         sharedPlan: input.sharedPlan,
@@ -2717,18 +2783,15 @@ async function deliverAssistantProviderReactions(input: {
 }
 
 async function applyAssistantAcceptedMessageTargetToDeliveryInput(input: {
-  acceptedInputIdsByDeliveryContextOrdinal: readonly (readonly string[])[]
+  acceptedInputIds: readonly string[]
   action: 'native-reply' | 'reaction'
-  deliveryContextOrdinal: number
   input: AssistantMessageInput
   session: AssistantSession
   sharedPlan: AssistantTurnSharedPlan
   targetInputId: string
 }): Promise<AssistantMessageInput> {
-  const acceptedInputIds =
-    input.acceptedInputIdsByDeliveryContextOrdinal[input.deliveryContextOrdinal]
   const target = await resolveAssistantAcceptedMessageTarget({
-    acceptedInputIds: acceptedInputIds ?? [],
+    acceptedInputIds: input.acceptedInputIds,
     action: input.action,
     messageRef: input.targetInputId,
     route: resolveAssistantCurrentAudienceDeliveryFields({

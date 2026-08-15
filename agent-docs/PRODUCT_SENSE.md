@@ -1,6 +1,6 @@
 # Product Sense
 
-Last verified: 2026-08-05
+Last verified: 2026-08-11
 
 ## Current Posture
 
@@ -121,6 +121,12 @@ default destination for every goal or the definition of activation.
   purchased capacity as `usage`, present one-time contribution in a bottom
   drawer on phones and a centered dialog on larger screens, and leave payment
   confirmation to Stripe.
+- Starting a Family plan and joining someone else's Family are distinct choices.
+  Settings must say that starting creates a plan the member owns and pays for,
+  while joining uses the other owner's invite. A never-paid owner-only draft
+  must not strand a later invite: remove an inert draft as part of successful
+  acceptance, and give a member with a live Checkout one clear Settings action
+  to expire and abandon that exact unpaid setup before trying the invite again.
 - Wearable-provider authorization uses that exception narrowly. A provider
   callback completes automatically only for the browser that can prove it
   started the connection for the signed-in member; that proof-bound return is
@@ -172,6 +178,52 @@ default destination for every goal or the definition of activation.
   when neither source is safe. Convenience text never authorizes membership,
   consent, routing, matching, delivery, or participant actions.
 
+## Channel-Native Presentation
+
+- Telegram and iMessage are product UI surfaces, not plain-text transports.
+  When an owned workflow supports a card, table, image sequence, or other
+  structured presentation that can carry the complete answer, Murph must use
+  it instead of rebuilding the same answer as one or more long messages. A
+  complete routine, training plan, or schedule must not degrade to long plain
+  text while a suitable owned presentation is available. A request to repeat
+  or improve that answer keeps the same owned presentation when it still fits.
+- Telegram Rich Messages support headings, paragraphs, lists, quotations,
+  bordered or striped tables, expandable details, collages, slideshows, and
+  embedded media. Existing semantic cards remain the exclusive presentation
+  for nutrition, compact tables, tracked workouts, and catalog-backed exercise
+  routines. A private Telegram turn may author validated Rich HTML when a
+  complete structured answer does not fit one of those cards. Use it for real
+  guides, checklists, schedules, comparisons, or multi-section summaries, not
+  short replies or decorative formatting. Keep optional detail collapsed and
+  safety limits visible. Generic Rich HTML must not reproduce nutrition totals
+  or targets, tracked-workout state, compact tables that fit the semantic card,
+  or catalog-backed routines. If that owner cannot attach, use ordinary text.
+  The contract rejects explicit links and remote media, while Telegram's
+  automatic detection stays disabled for this generic card. It also rejects unsupported
+  tags or attributes, deep nesting, and content that cannot fit one text
+  fallback. See the official [Telegram Bot API Rich Messages documentation](https://core.telegram.org/bots/api#rich-messages).
+- iMessage presentation can use the Murph Messages extension's interactive
+  cards, provider-owned static card layouts, and ordered response media. The
+  current routine path uses response media rather than pretending Telegram's
+  table, details, or slideshow UI exists in Messages.
+- An active workout card may open a direct native editor. It submits a bounded,
+  typed action through the Messages-scoped credential and existing mailbox;
+  it does not ask the member to translate structured sets into chat text or
+  invoke a model for deterministic data entry.
+- Share the product meaning across channels: exercise steps, nutrition facts,
+  progress, summaries, tables, and safety context should stay consistent.
+  Adapt the visible UI to each platform's current capabilities. Telegram and
+  iMessage do not need identical layouts, controls, or fallback behavior.
+- A useful presentation added to one channel is a prompt to review the other.
+  The review asks whether that platform already has a suitable component or
+  needs its own native design. It does not require automatic feature parity.
+- Agent guidance and tool availability must make current channel capabilities
+  clear. The agent should choose the strongest owned presentation available
+  for that case and use concise text when no suitable component exists.
+- Keep delivery ownership, retries, receipts, and provider-specific recovery
+  inside each channel's existing implementation. Cross-channel consistency is
+  a product and authoring rule, not a reason to add a shared delivery layer.
+
 ## First-Class Product Objects
 
 - canonical private member context, including provenance, freshness, and
@@ -184,7 +236,10 @@ default destination for every goal or the definition of activation.
 - private-direct nutrition and compact-table cards, plus authorized group
   challenge standings, whose installed-iPhone presentation is native and whose
   macOS or app-absent presentation remains a legible static image with truthful
-  partial-state and goal-direction context plus a safe text recovery path
+  partial-state and goal-direction context plus a safe text recovery path; when
+  a shared card URL reaches the public homepage, a focused App Store handoff
+  explains how to return to the card without decoding or displaying its opaque
+  fragment
 - explicitly shared group contexts with scope and consent
 - public Health Commons protocols and sources, with aggregate outcomes as a
   future contribution-backed layer

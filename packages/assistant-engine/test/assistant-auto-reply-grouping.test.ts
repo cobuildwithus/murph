@@ -60,6 +60,7 @@ function createAuthenticatedGroupCandidate(input: {
   completion?: boolean
   inputId: string
   projectionStatus?: AssistantInputCandidate['projection']['status']
+  sessionId?: string
   threadId?: string
 }): AssistantInputCandidate {
   const threadId = input.threadId ?? 'room_1'
@@ -106,7 +107,10 @@ function createAuthenticatedGroupCandidate(input: {
         actorId: input.completion ? null : 'actor_1',
         actorIsSelf: false,
         ...(input.completion
-          ? { sessionId: 'asst_image_completion_group' }
+          ? {
+              sessionId:
+                input.sessionId ?? 'asst_image_completion_group',
+            }
           : {}),
         source: 'linq',
         threadId,
@@ -322,6 +326,35 @@ describe('shouldGroupAdjacentConversationInput', () => {
       shouldGroupAdjacentAssistantInputCandidates(completion, differentRoute),
     ).toBe(false)
     expect(shouldGroupAdjacentAssistantInputCandidates(fresh, completion)).toBe(false)
+  })
+
+  it('isolates adjacent trusted completions before folding later group input', () => {
+    const firstCompletion = createAuthenticatedGroupCandidate({
+      completion: true,
+      inputId: 'ain_image_completion_first',
+      projectionStatus: 'not_attempted',
+      sessionId: 'asst_image_completion_first',
+    })
+    const secondCompletion = createAuthenticatedGroupCandidate({
+      completion: true,
+      inputId: 'ain_image_completion_second',
+      projectionStatus: 'not_attempted',
+      sessionId: 'asst_image_completion_second',
+    })
+    const fresh = createAuthenticatedGroupCandidate({
+      inputId: 'ain_group_input_after_completions',
+      projectionStatus: 'pending',
+    })
+
+    expect(
+      shouldGroupAdjacentAssistantInputCandidates(
+        firstCompletion,
+        secondCompletion,
+      ),
+    ).toBe(false)
+    expect(
+      shouldGroupAdjacentAssistantInputCandidates(secondCompletion, fresh),
+    ).toBe(true)
   })
 
   it('caps one initial compound turn at 50 and leaves overflow for the next turn', async () => {

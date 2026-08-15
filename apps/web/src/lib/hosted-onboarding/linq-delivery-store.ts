@@ -1,4 +1,4 @@
-import type { Prisma, PrismaClient } from "@prisma/client";
+import { Prisma, type PrismaClient } from "@prisma/client";
 
 import {
   createHostedLinqChatLookupKey,
@@ -462,6 +462,92 @@ export type HostedLinqGroupLineRecoveryAuthority =
   | "in_flight"
   | "none";
 
+export interface HostedLinqGroupLineRecoveryAuthorityCandidate {
+  memberId: string;
+  originalRecipientPhone: string;
+  pendingGroupSetupId: string;
+  setupArmedAt: Date;
+}
+
+/**
+ * Classifies every bounded pending-setup candidate from one intent projection.
+ * Each candidate still owns the same five exact attempt ids and the same
+ * provider-correlation, time, target, template, source-ref, and line predicates
+ * as the scalar authority read.
+ */
+export async function readHostedLinqGroupLineRecoveryAuthoritiesTx(input: {
+  candidates: readonly HostedLinqGroupLineRecoveryAuthorityCandidate[];
+  occurredAt: Date;
+  prisma: HostedLinqDeliveryClient;
+  recoveredRecipientPhoneLookupKey: string;
+  threadId: string;
+}): Promise<Map<string, HostedLinqGroupLineRecoveryAuthority>> {
+  const descriptors = input.candidates.map((candidate) => {
+    const effectId = buildHostedLinqGroupLineRecoveryEffectId({
+      incomingRecipientPhone: candidate.originalRecipientPhone,
+      memberId: candidate.memberId,
+      pendingGroupSetupId: candidate.pendingGroupSetupId,
+      threadId: input.threadId,
+    });
+    const attemptEffectIds = Array.from(
+      { length: HOSTED_LINQ_GROUP_LINE_RECOVERY_MAX_ATTEMPTS },
+      (_, index) => buildHostedLinqGroupLineRecoveryAttemptEffectId({
+        attempt: index + 1,
+        effectId,
+      }),
+    );
+    return { attemptEffectIds, candidate, effectId };
+  });
+  const persistedIntents =
+    await readHostedLinqDeliveryProviderDispatchIntentsTx({
+      idempotencyKeys: descriptors.flatMap(
+        (descriptor) => descriptor.attemptEffectIds,
+      ),
+      prisma: input.prisma,
+    });
+  const intentsByLookupKey = new Map(
+    persistedIntents.map((intent) => [intent.idempotencyLookupKey, intent]),
+  );
+  const authorityBySetupId = new Map<
+    string,
+    HostedLinqGroupLineRecoveryAuthority
+  >();
+  for (const descriptor of descriptors) {
+    const matchingIntents = descriptor.attemptEffectIds
+      .map(createHostedLinqDeliveryIdempotencyLookupKey)
+      .flatMap((lookupKey) => {
+        if (!lookupKey) {
+          return [];
+        }
+        const intent = intentsByLookupKey.get(lookupKey);
+        return intent ? [intent] : [];
+      })
+      .filter((intent) =>
+        intent.attemptedAt >= descriptor.candidate.setupArmedAt
+        && intent.attemptedAt <= input.occurredAt
+        && intent.phoneNumberLookupKey
+          === input.recoveredRecipientPhoneLookupKey
+        && intent.status !== "failed"
+        && intent.status !== "skipped"
+        && intent.targetKind === "participant"
+        && intent.template === HOSTED_LINQ_GROUP_LINE_RECOVERY_TEMPLATE
+        && isHostedLinqGroupLineRecoverySourceRefForEffect({
+          candidate: intent.sourceRef,
+          effectId: descriptor.effectId,
+        })
+      );
+    authorityBySetupId.set(
+      descriptor.candidate.pendingGroupSetupId,
+      matchingIntents.some((intent) => intent.providerCorrelated)
+        ? "accepted"
+        : matchingIntents.length > 0
+          ? "in_flight"
+          : "none",
+    );
+  }
+  return authorityBySetupId;
+}
+
 /**
  * A completed private recovery delivery is the existing durable proof that a
  * member was told to move this exact group from one Murph line to another.
@@ -480,42 +566,19 @@ export async function readHostedLinqGroupLineRecoveryAuthorityTx(input: {
   setupArmedAt: Date;
   threadId: string;
 }): Promise<HostedLinqGroupLineRecoveryAuthority> {
-  const effectId = buildHostedLinqGroupLineRecoveryEffectId({
-    incomingRecipientPhone: input.originalRecipientPhone,
-    memberId: input.memberId,
-    pendingGroupSetupId: input.pendingGroupSetupId,
+  return (await readHostedLinqGroupLineRecoveryAuthoritiesTx({
+    candidates: [{
+      memberId: input.memberId,
+      originalRecipientPhone: input.originalRecipientPhone,
+      pendingGroupSetupId: input.pendingGroupSetupId,
+      setupArmedAt: input.setupArmedAt,
+    }],
+    occurredAt: input.occurredAt,
+    prisma: input.prisma,
+    recoveredRecipientPhoneLookupKey:
+      input.recoveredRecipientPhoneLookupKey,
     threadId: input.threadId,
-  });
-  const attemptEffectIds = Array.from(
-    { length: HOSTED_LINQ_GROUP_LINE_RECOVERY_MAX_ATTEMPTS },
-    (_, index) => buildHostedLinqGroupLineRecoveryAttemptEffectId({
-      attempt: index + 1,
-      effectId,
-    }),
-  );
-  const persistedIntents =
-    await readHostedLinqDeliveryProviderDispatchIntentsTx({
-      idempotencyKeys: attemptEffectIds,
-      prisma: input.prisma,
-    });
-  const matchingIntents = persistedIntents.filter((intent) =>
-    intent.attemptedAt >= input.setupArmedAt
-    && intent.attemptedAt <= input.occurredAt
-    && intent.phoneNumberLookupKey
-      === input.recoveredRecipientPhoneLookupKey
-    && intent.status !== "failed"
-    && intent.status !== "skipped"
-    && intent.targetKind === "participant"
-    && intent.template === HOSTED_LINQ_GROUP_LINE_RECOVERY_TEMPLATE
-    && isHostedLinqGroupLineRecoverySourceRefForEffect({
-      candidate: intent.sourceRef,
-      effectId,
-    })
-  );
-  if (matchingIntents.some((intent) => intent.providerCorrelated)) {
-    return "accepted";
-  }
-  return matchingIntents.length > 0 ? "in_flight" : "none";
+  })).get(input.pendingGroupSetupId) ?? "none";
 }
 
 export async function hasHostedLinqGroupLineRecoveryAuthorityTx(input: {
@@ -3018,22 +3081,20 @@ async function resolveHostedLinqFailedDeliveryReopenTx(input: {
   }
 
   // The daily marker is one projection of all generic and group-aware signup
-  // deliveries for the member/day. Recompute from that complete set after any
-  // failed identity. The caller holds the member row lock, so the result is
-  // independent of terminal receipt order, including concurrent failures.
-  const liveAttempts = await readHostedLinqInviteSignupLiveAttemptsTx({
+  // deliveries for the member/day. Recompute only the two bounded facts the
+  // caller needs after any failed identity. The caller holds the member row
+  // lock, so the result is independent of terminal receipt order, including
+  // concurrent failures.
+  const liveAttemptFacts = await readHostedLinqInviteSignupLiveAttemptsTx({
     dayUtc: failedAttempt.dayUtc,
     memberId: failedAttempt.memberId,
     prisma: input.prisma,
+    sourceEventDigest: failedAttempt.sourceEventDigest,
   });
-  const sameIdentityStillLive = liveAttempts.some(
-    (attempt) =>
-      attempt.sourceEventDigest === failedAttempt.sourceEventDigest,
-  );
-  if (sameIdentityStillLive) {
+  if (liveAttemptFacts.sameIdentityStillLive) {
     return null;
   }
-  if (liveAttempts.length > 0) {
+  if (liveAttemptFacts.anyIdentityLive) {
     return link.groupJoinReplyContext ? link : null;
   }
   return link.groupJoinReplyContext
@@ -3041,37 +3102,85 @@ async function resolveHostedLinqFailedDeliveryReopenTx(input: {
     : link;
 }
 
-async function readHostedLinqInviteSignupLiveAttemptsTx(input: {
+export async function readHostedLinqInviteSignupLiveAttemptsTx(input: {
   dayUtc: string;
   memberId: string;
   prisma: HostedLinqDeliveryClient;
-}): Promise<Array<NonNullable<
-  ReturnType<typeof parseHostedLinqInviteSignupEffectId>
->>> {
+  sourceEventDigest?: string | null;
+}): Promise<{
+  anyIdentityLive: boolean;
+  sameIdentityStillLive: boolean;
+}> {
   const sourceRefPrefix = buildHostedLinqInviteSignupEffectId({
     memberId: input.memberId,
     occurredAt: input.dayUtc,
   });
-  const liveDeliveries = await input.prisma.hostedLinqDelivery.findMany({
-    where: {
-      sourceRef: { startsWith: sourceRefPrefix },
-      status: {
-        in: ["attempted", "provider_dispatch_started", "accepted", "delivered"],
-      },
-      template: {
-        in: ["invite_signup", "invite_signup_fallback"],
-      },
-    },
-    select: { sourceRef: true },
-  });
-  return liveDeliveries.flatMap((delivery) => {
-    const attempt = parseHostedLinqInviteSignupEffectId(delivery.sourceRef);
-    return attempt
-      && attempt.memberId === input.memberId
-      && attempt.dayUtc === input.dayUtc
-      ? [attempt]
-      : [];
-  });
+  const sourceRefLikePattern = `${escapeHostedLinqSourceRefLikePrefix(
+    sourceRefPrefix,
+  )}%`;
+  const exactIdentitySourceRefs = input.sourceEventDigest === undefined
+    ? null
+    : Array.from(
+      { length: HOSTED_LINQ_INVITE_SIGNUP_MAX_ATTEMPTS_PER_IDENTITY },
+      (_, index) => buildHostedLinqInviteSignupEffectId({
+        attempt: index + 1,
+        memberId: input.memberId,
+        occurredAt: input.dayUtc,
+        sourceEventDigest: input.sourceEventDigest,
+      }),
+    );
+  const liveInviteSignupDeliveryPredicateSql = Prisma.sql`
+    "delivery"."source_ref" IS NOT NULL
+      AND "delivery"."template" IN (
+        'invite_signup',
+        'invite_signup_fallback'
+      )
+      AND "delivery"."status" IN (
+        'attempted',
+        'provider_dispatch_started',
+        'accepted',
+        'delivered'
+      )
+  `;
+  const sameIdentityStillLiveSql = exactIdentitySourceRefs
+    ? Prisma.sql`
+        EXISTS (
+          SELECT 1
+          FROM "hosted_linq_delivery" AS "delivery"
+          WHERE ${liveInviteSignupDeliveryPredicateSql}
+            AND "delivery"."source_ref" IN (
+              ${Prisma.join(exactIdentitySourceRefs)}
+            )
+          LIMIT 1
+        )
+      `
+    : Prisma.sql`FALSE`;
+  const rows = await input.prisma.$queryRaw<Array<{
+    anyIdentityLive: boolean;
+    sameIdentityStillLive: boolean;
+  }>>(Prisma.sql`
+    SELECT
+      ${sameIdentityStillLiveSql} AS "sameIdentityStillLive",
+      EXISTS (
+        SELECT 1
+        FROM "hosted_linq_delivery" AS "delivery"
+        WHERE ${liveInviteSignupDeliveryPredicateSql}
+          AND "delivery"."source_ref" LIKE ${sourceRefLikePattern}::text ESCAPE '!'
+          AND substring(
+            "delivery"."source_ref"
+            FROM char_length(${sourceRefPrefix}::text) + 1
+          ) ~ '^(?::a[2-5]|:e[0-9a-f]{32}(?::a[2-5])?)?$'
+        LIMIT 1
+      ) AS "anyIdentityLive"
+  `);
+  return {
+    anyIdentityLive: rows[0]?.anyIdentityLive === true,
+    sameIdentityStillLive: rows[0]?.sameIdentityStillLive === true,
+  };
+}
+
+function escapeHostedLinqSourceRefLikePrefix(value: string): string {
+  return value.replace(/[!%_]/gu, (character) => `!${character}`);
 }
 
 export async function hasHostedLinqInviteSignupLiveDeliveryTx(input: {
@@ -3079,8 +3188,8 @@ export async function hasHostedLinqInviteSignupLiveDeliveryTx(input: {
   memberId: string;
   prisma: HostedLinqDeliveryClient;
 }): Promise<boolean> {
-  const liveAttempts = await readHostedLinqInviteSignupLiveAttemptsTx(input);
-  return liveAttempts.length > 0;
+  const liveAttemptFacts = await readHostedLinqInviteSignupLiveAttemptsTx(input);
+  return liveAttemptFacts.anyIdentityLive;
 }
 
 function readHostedLinqAcceptedMilestoneStatus(

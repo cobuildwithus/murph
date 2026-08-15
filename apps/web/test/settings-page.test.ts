@@ -90,6 +90,15 @@ const mocks = vi.hoisted(() => ({
     currentBillingPhase?: unknown;
     currentBillingPlanCode?: unknown;
     familyBillingOwner?: boolean;
+    familyDraftRecovery?:
+      | {
+          checkoutAttemptId: string | null;
+          groupId: string;
+          state: "abandonable" | "checkout_starting";
+        }
+      | { state: "not_abandonable" | "recovery_required" }
+      | null;
+    familyInviteReturnPath?: string | null;
     familyState?: "none" | "owner" | "sponsored";
     groupPaymentMethodSaved?: boolean;
     payerMemberId?: string | null;
@@ -134,6 +143,7 @@ const mocks = vi.hoisted(() => ({
     React.createElement("div", null, input.children)),
   routerRefresh: vi.fn(),
   readHostedFamilyAccessForMember: vi.fn(),
+  readHostedFamilyDraftRecoveryStateForOwner: vi.fn(),
   readHostedFamilyOwnerSnapshotForMember: vi.fn(),
   prisma: {
     $transaction: vi.fn(),
@@ -290,6 +300,8 @@ vi.mock("@/src/lib/hosted-onboarding/family-plan", () => ({
       billingStatus,
     ),
   readHostedFamilyAccessForMember: mocks.readHostedFamilyAccessForMember,
+  readHostedFamilyDraftRecoveryStateForOwner:
+    mocks.readHostedFamilyDraftRecoveryStateForOwner,
   readHostedFamilyOwnerSnapshotForMember: mocks.readHostedFamilyOwnerSnapshotForMember,
 }));
 
@@ -344,6 +356,7 @@ beforeEach(() => {
   mocks.isHostedBillingPlanSelectionAvailable.mockResolvedValue(true);
   mockSettingsPageSnapshot();
   mocks.readHostedFamilyAccessForMember.mockResolvedValue(null);
+  mocks.readHostedFamilyDraftRecoveryStateForOwner.mockResolvedValue(null);
   mocks.readHostedFamilyOwnerSnapshotForMember.mockResolvedValue(null);
   mocks.readHostedConsentStatus.mockResolvedValue(
     GRANTED_HEALTH_DATA_CONSENT_STATUS,
@@ -567,26 +580,33 @@ test("SettingsPage suppresses a personal plan return for a sponsored member", as
   );
 });
 
-test("SettingsDataPrivacyPage redirects signed-in users to the settings privacy section", async () => {
-  mocks.getHostedPageAuthSnapshot.mockResolvedValue({
-    authenticated: true,
-    authenticatedMember: {
-      billingStatus: "active",
-      id: "member_123",
-      suspendedAt: null,
-    },
-    session: {
-      privyUserId: "did:privy:user_123",
-    },
-  });
+test.each(["active", "checkout"])(
+  "SettingsDataPrivacyPage exposes the existing deletion owner for a %s member",
+  async (stage) => {
+    mocks.getHostedPageAuthSnapshot.mockResolvedValue({
+      authenticated: true,
+      authenticatedMember: {
+        billingStatus: stage === "active" ? "active" : "not_started",
+        id: "member_123",
+        suspendedAt: null,
+      },
+      session: {
+        privyUserId: "did:privy:user_123",
+      },
+    });
 
-  const { default: SettingsDataPrivacyPage } =
-    await import("../app/(dashboard)/settings/data-privacy/page");
+    const { default: SettingsDataPrivacyPage } =
+      await import("../app/settings/data-privacy/page");
 
-  await expect(SettingsDataPrivacyPage()).rejects.toThrow(
-    "NEXT_REDIRECT:/settings#data-privacy",
-  );
-});
+    const markup = renderToStaticMarkup(await SettingsDataPrivacyPage());
+
+    assert.match(markup, /Data &amp; privacy/);
+    assert.match(markup, /Hosted data privacy settings true/);
+    assert.match(markup, /without an active subscription or health-data consent/);
+    expect(mocks.readHostedConsentStatus).not.toHaveBeenCalled();
+    expect(mocks.readHostedAccountSettingsPageSnapshot).not.toHaveBeenCalled();
+  },
+);
 
 test("SettingsDataPrivacyPage opens the auth-required data privacy handoff for signed-out users", async () => {
   mocks.getHostedPageAuthSnapshot.mockResolvedValue({
@@ -596,13 +616,20 @@ test("SettingsDataPrivacyPage opens the auth-required data privacy handoff for s
   });
 
   const { default: SettingsDataPrivacyPage } =
-    await import("../app/(dashboard)/settings/data-privacy/page");
+    await import("../app/settings/data-privacy/page");
 
   const markup = renderToStaticMarkup(await SettingsDataPrivacyPage());
 
   assert.match(markup, /Sign in to manage your data/);
-  assert.match(markup, /Data &amp; privacy section/);
-  assert.match(markup, /After sign-in, this link opens the deletion controls directly in settings\./);
+  assert.match(markup, /Choose Delete account, review the details, and confirm\./);
+  assert.match(markup, /Health content, memories, and assistant history/);
+  assert.match(markup, /active hosted/);
+  assert.match(markup, /systems within 30 days; backups within 90 days/);
+  assert.match(markup, /Account\/profile, wearable sync, webhook, and routing records/);
+  assert.match(markup, /Support: up to 3 years/);
+  assert.match(markup, /external carrier, Telegram, Linq, or email systems cannot be recalled/);
+  assert.match(markup, /mailto:legal@justco\.build/);
+  assert.match(markup, /href="\/legal\/privacy"/);
 });
 
 test("SettingsPage redirects signed-out visitors before reading member settings", async () => {
@@ -647,6 +674,47 @@ test("SettingsPage keeps a signed-out Core payment return recoverable", async ()
   assert.match(markup, /One more step/);
   assert.doesNotMatch(markup, /Payment method saved/);
   assert.doesNotMatch(markup, /Core has not started/);
+  expect(mocks.getPrisma).not.toHaveBeenCalled();
+});
+
+test("SettingsPage keeps an exact signed-out Family invite return recoverable", async () => {
+  mocks.getHostedPageAuthSnapshot.mockResolvedValue({
+    authenticated: false,
+    authenticatedMember: null,
+    session: null,
+  });
+
+  const { default: SettingsPage } = await import("../app/(dashboard)/settings/page");
+
+  const markup = renderToStaticMarkup(await SettingsPage({
+    searchParams: Promise.resolve({
+      familyInviteReturn: "/family/accept/current_username_invite",
+    }),
+  }));
+
+  assert.match(markup, /One more step/);
+  assert.match(markup, /Sign in to verify and finish your billing update\./);
+  expect(mocks.getPrisma).not.toHaveBeenCalled();
+  expect(mocks.readHostedAccountSettingsPageSnapshot).not.toHaveBeenCalled();
+  expect(mocks.readHostedFamilyOwnerSnapshotForMember).not.toHaveBeenCalled();
+});
+
+test.each([
+  ["external", "https://example.test/family/accept/invite_123"],
+  ["malformed", "/family/accept/invite 123"],
+  ["repeated", ["/family/accept/invite_123", "/family/accept/invite_456"]],
+])("SettingsPage rejects a signed-out %s Family invite return", async (_label, familyInviteReturn) => {
+  mocks.getHostedPageAuthSnapshot.mockResolvedValue({
+    authenticated: false,
+    authenticatedMember: null,
+    session: null,
+  });
+
+  const { default: SettingsPage } = await import("../app/(dashboard)/settings/page");
+
+  await expect(SettingsPage({
+    searchParams: Promise.resolve({ familyInviteReturn }),
+  })).rejects.toThrow("NEXT_REDIRECT:/");
   expect(mocks.getPrisma).not.toHaveBeenCalled();
 });
 
@@ -1657,7 +1725,9 @@ test("SettingsPage keeps a frozen active purchase visible when current offers ar
   );
 
   const { default: SettingsPage } = await import("../app/(dashboard)/settings/page");
-  renderToStaticMarkup(await SettingsPage({ searchParams: Promise.resolve({}) }));
+  renderToStaticMarkup(await SettingsPage({
+    searchParams: Promise.resolve({}),
+  }));
 
   expect(mocks.HostedBillingSettings).toHaveBeenCalledWith(
     expect.objectContaining({
@@ -2286,14 +2356,31 @@ test("SettingsPage does not mark an unpaid family owner group as the current pla
     },
     suspendedAt: null,
   });
+  mocks.readHostedFamilyDraftRecoveryStateForOwner.mockResolvedValue(
+    {
+      checkoutAttemptId: null,
+      groupId: "hbag_rendered_draft",
+      state: "abandonable",
+    },
+  );
 
   const { default: SettingsPage } = await import("../app/(dashboard)/settings/page");
 
-  renderToStaticMarkup(await SettingsPage({ searchParams: Promise.resolve({}) }));
+  renderToStaticMarkup(await SettingsPage({
+    searchParams: Promise.resolve({
+      familyInviteReturn: "/family/accept/invite_return_target",
+    }),
+  }));
 
   expect(mocks.HostedBillingSettings).toHaveBeenCalledWith(expect.objectContaining({
     canStartFamily: true,
     familyBillingOwner: false,
+    familyDraftRecovery: {
+      checkoutAttemptId: null,
+      groupId: "hbag_rendered_draft",
+      state: "abandonable",
+    },
+    familyInviteReturnPath: "/family/accept/invite_return_target",
     familyState: "none",
   }), undefined);
   expect(mocks.HostedFamilySettings).toHaveBeenCalledWith(

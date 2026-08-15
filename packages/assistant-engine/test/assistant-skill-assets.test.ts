@@ -263,6 +263,102 @@ describe('assistant skill assets', () => {
     expect(shared).toContain('current-local-day value as provisional: say "so far"')
   })
 
+  it('keeps longitudinal routing compact while the skill owns trial selection and onboarding owns activation', async () => {
+    const experimentSkill = ASSISTANT_SKILLS.find(
+      (skill) => skill.slug === 'self-management-experiments',
+    )
+    expect(experimentSkill).toBeTruthy()
+    if (!experimentSkill) return
+
+    expect(experimentSkill.triggerHint).toContain(
+      'Use to design, run, and interpret low-burden personalized experiments',
+    )
+    expect(experimentSkill.triggerHint).not.toContain('private direct')
+    expect(experimentSkill.triggerHint).not.toContain('proactively use it')
+
+    const raw = await readSkillFile(experimentSkill)
+    const compact = raw.replace(/\s+/gu, ' ')
+    expect(raw).toContain('## Personalized trial selection')
+    expect(raw).not.toContain('## Private longitudinal default')
+    expect(compact).toContain(
+      'Use longitudinal context as a decision input, not decoration',
+    )
+    expect(compact).toContain(
+      'let prior partial benefit refine technique, timing, dose, or comparison',
+    )
+    expect(compact).toContain(
+      'Lead the first useful response with a calibrated working assessment, the one or two longitudinal facts that changed the choice, and one selected trial.',
+    )
+    expect(compact).toContain(
+      'Do not answer an eligible request with a list of hydration, sleep, stress, diet, trigger avoidance, or other general wellness ideas.',
+    )
+    expect(compact).toContain(
+      'Do not withhold it because run creation, reminders, check-ins, or tracking still need authorization.',
+    )
+    expect(compact).toContain(
+      'mentions history without letting it change the lever, technique, timing, dose, comparison, or outcome',
+    )
+    expect(compact).toContain(
+      'ends with generic wellness advice when a safe bounded trial is the selected answer',
+    )
+
+    const onboarding = ASSISTANT_SKILLS.find(
+      (skill) => skill.slug === 'experiment-onboarding',
+    )
+    expect(onboarding).toBeTruthy()
+    if (!onboarding) return
+    const onboardingRaw = await readSkillFile(onboarding)
+    expect(onboardingRaw).toContain(
+      'This restriction is about persistence and activation, not about withholding a useful proposal.',
+    )
+    expect(onboardingRaw).toContain(
+      'create the run and support only after authorization.',
+    )
+
+    const repositoryRoot = path.resolve(resolveAssistantSkillsRoot(), '../../..')
+    const [productContract, changelog] = await Promise.all([
+      readFile(
+        path.join(repositoryRoot, 'agent-docs/product-specs/health-commons.md'),
+        'utf8',
+      ),
+      readFile(
+        path.join(
+          repositoryRoot,
+          'apps/web/changelog/entries/2026-08-14/personalized-next-trials.json',
+        ),
+        'utf8',
+      ),
+    ])
+    const compactProductContract = productContract.replace(/\s+/gu, ' ')
+    expect(compactProductContract).toContain(
+      'it may suggest one context-grounded bounded trial without experiment vocabulary',
+    )
+    expect(compactProductContract).toContain(
+      'factual questions, logging or record updates, requests to be heard',
+    )
+    expect(compactProductContract).toContain(
+      'acute or unstable situations, cases primarily owned by urgent or clinician-led evaluation',
+    )
+    expect(compactProductContract).toContain(
+      'the existing record already resolves',
+    )
+    expect(compactProductContract).toContain(
+      'one clearly indicated direct action makes comparison unnecessary',
+    )
+    expect(compactProductContract).toContain(
+      'A proposal never authorizes a run, reminder, check-in, or tracking plan',
+    )
+    expect(compactProductContract).not.toContain(
+      'does not create or suggest an experiment unless the member asks',
+    )
+    expect(changelog).toContain(
+      'When a private health problem keeps returning',
+    )
+    expect(changelog).toContain(
+      'starting a tracked experiment, reminder, or check-in still requires the member\'s authorization',
+    )
+  })
+
   it('routes bedtime transition, external disruption, and sleep-breathing concerns before skill loading', () => {
     const sleepSkill = ASSISTANT_SKILLS.find(
       (skill) => skill.slug === 'sleep-improvement',
@@ -470,31 +566,25 @@ describe('assistant skill assets', () => {
     expect(raw).toMatch(
       /`read_current` can return `status="none"`[\s\S]*not that\s+someone must link an external workspace[\s\S]*call `offer_access`[\s\S]*trusted host creates the\s+hosted group record/u,
     )
-    expect(raw).toContain('`murph.automation action="save_newsletter"`')
-    expect(raw).toMatch(
-      /`delivery` \(`current_chat` or `group_email`\)/u,
-    )
+    expect(raw).toContain('with its ordinary `murph.automation` flow')
+    expect(raw).toContain('strict JSON object with the chosen delivery')
     expect(raw).toMatch(/Chat delivery must not require or solicit email\s+sharing\./u)
     expect(raw).toContain('do not include `group-email.v0`')
+    expect(raw).toMatch(/The slug is a\s+lookup key, not authority/u)
+    expect(raw).toMatch(/Save only when no recipe exists;\s+patch every existing recipe/u)
     expect(raw).toMatch(
-      /Do not use generic\s+`save` or `patch` to author newsletter configuration/u,
+      /recipe, delivery, pause, resume, or route change[\s\S]*delegate the mutation to the exact patch rules in `group-newsletter`/u,
     )
     expect(raw).toMatch(
-      /keeps one stable newsletter automation,\s+binds it to this current group, and selects either ordinary group-chat delivery\s+or consented group email/u,
-    )
-    expect(raw).toMatch(
-      /To change configuration or delivery, call `save_newsletter` again with the\s+complete desired values from the destination group/u,
-    )
-    expect(raw).toContain('To stop or resume it, patch only its `status`')
-    expect(raw).toMatch(
-      /chosen schedule becomes the cron expression; `0 9 \* \* 0` is the Sunday 9am\s+default/u,
+      /chosen schedule becomes the ordinary cron schedule object with the cron\s+expression and exact validated IANA `timeZone`; `0 9 \* \* 0` is the Sunday 9am\s+default/u,
     )
     expect(raw).toMatch(
       /until\s+`murph\.automation` returns success[\s\S]*never\s+turn a failed action into a confirmation/u,
     )
     expect(raw).toContain('next natural cron occurrence')
     expect(raw).toContain('Never create an')
-    expect(raw).toContain('never call `murph.newsletter` `send` right after')
+    expect(raw).toMatch(/Never create an\s+immediate `at` automation/u)
+    expect(raw).toMatch(/never call `murph.group action="send_email"`\s+right after setup/u)
     expect(raw).toMatch(
       /For current-chat delivery, confirm the shared scopes and destination\s+without asking for email access/u,
     )
@@ -624,47 +714,43 @@ describe('assistant skill assets', () => {
       'every scheduled group-health-newsletter run',
     )
     const raw = await readSkillFile(newsletterSkill)
-    expect(raw).toContain('`murph.automation action="save_newsletter"`')
-    expect(raw).toContain('(`current_chat` or `group_email`)')
+    expect(raw).toContain('Use `action="save"` only when no')
+    expect(raw).toContain('- delivery: `current_chat` or `group_email`;')
     expect(raw).toContain('## Compose each edition')
-    expect(raw).toContain('Usually include 6–12 useful stats')
+    expect(raw).toContain('Usually use 6–12 useful numbers')
     expect(raw).toContain('Cross-person comparisons are welcome')
-    expect(raw).toContain('currently eligible email recipients')
-    expect(raw).toContain('Use only `members`')
+    expect(raw).toMatch(/currently eligible email\s+recipients/u)
+    expect(raw).toContain('Use only the returned eligible `members`')
     expect(raw).toContain('Never run another group')
     expect(raw).toContain('Never expose dashboard language')
-    expect(raw).toMatch(/never as a\s+daily or weekly exercise total/u)
-    expect(raw).toContain('seven local calendar days before today')
-    expect(raw).toMatch(/Exclude today and\s+anything older than that rolling window/u)
-    expect(raw).toMatch(/only when every compared\s+date set is identical/u)
+    expect(raw).toMatch(/never\s+as a daily or weekly exercise total/u)
+    expect(raw).toContain('seven local calendar days before the authoritative reference date')
+    expect(raw).toMatch(/Exclude\s+the open current day and older records/u)
+    expect(raw).toMatch(/only when every\s+compared date set is identical/u)
     expect(raw).toMatch(
-      /When coverage differs, report scoped values or an\s+unranked pattern\./u,
+      /When coverage differs, report scoped values or\s+an unranked pattern\./u,
     )
     expect(raw).toContain('`group-chat`\'s **Shared fact limits**')
     expect(raw).toMatch(/about 30 minutes of movement a\s+day/u)
-    expect(raw).toContain('Keep them separate')
+    expect(raw).toContain('Keep broad movement and workout duration separate')
     expect(raw).toContain('Do not use `workout-count` to claim a weekly workout total')
     expect(raw).toContain('Do not claim a prior-week change')
     expect(raw).toContain('{"kind":"skip","privateSummary":"..."}')
-    expect(raw).toContain('If `prepare`')
+    expect(raw).toContain('If the email preparation is unavailable')
     expect(raw).not.toContain('vault-cli group weekly')
     expect(raw).not.toContain('Join the two results by exact `memberId`')
-    expect(raw).toMatch(/do not compose or call\s+`send`/u)
-    expect(raw).toContain('For `current_chat`, do not call `murph.newsletter`')
+    expect(raw).toMatch(/do not compose or (?:send|call\s+`send_email`)/u)
+    expect(raw).toContain('For `current_chat`, do not use the `group_email` audience')
     expect(raw).toContain('`murph.group action="read_shared"` once')
-    expect(raw).toContain('After any email `send` result')
-    expect(raw).toContain('do not retry `send` in the same turn')
-    expect(raw).toContain('runtime owns delivery, retry, and')
-    expect(raw).toContain('never attribute the absence to sync or permissions')
-    expect(raw).toContain('authorized current permission or data-availability state')
-    expect(raw).toContain('do not present it as the historical cause')
-    expect(raw).toContain('The consented eight-record projection')
+    expect(raw).toMatch(/After any `send_email` result, do not retry in the same turn/u)
+    expect(raw).toContain('trusted host revalidates membership, consent, grants')
+    expect(raw).toMatch(/Do not invent sync, permission, or device explanations/u)
     expect(raw).not.toContain('direct tool evidence')
     expect(raw).toContain('https://www.withmurph.ai/settings?addEmail=true')
     expect(raw).not.toContain('`/settings?addEmail=true`')
-    expect(raw).toContain('### Example 1: close race')
-    expect(raw).toContain('### Example 2: opted-in roast')
-    expect(raw).not.toContain('### Example 3:')
+    expect(raw).toMatch(/#{3,4} Example 1: close race/u)
+    expect(raw).toMatch(/#{3,4} Example 2: opted-in roast/u)
+    expect(raw).not.toMatch(/#{3,4} Example 3:/u)
     expect(raw).toContain('<Exact Newsletter Name> — <specific hook>')
     expect(raw).not.toContain('286 active minutes')
     expect(raw).not.toContain('17 workouts')
@@ -1236,14 +1322,17 @@ describe('assistant skill assets', () => {
     expect(raw).toContain(
       'Default to private/minimal support when shared-channel permission is unclear.',
     )
-    expect(raw).toContain(
-      'A future notification turn may not read this skill, so include the compact support loop directly in the automation instructions.',
+    expect(compact).toContain(
+      'The scheduled runtime owns generic recurring reminder cadence',
     )
     expect(compact).toContain(
-      'A reminder is a cue. An accountability check-in is normally a separate, later action whose job is to learn the outcome, not repeat the cue.',
+      'A reminder is a cue. An accountability check-in is a separate, later action whose job is to learn the outcome, not repeat the cue.',
     )
     expect(compact).toContain(
-      'The accepted dense-loop policy above is the narrow exception',
+      'The runtime-owned keep/change/pause cadence question does not ask about the outcome and does not turn a reminder into a check-in.',
+    )
+    expect(compact).toContain(
+      'Medication, prescribed treatment, clinician-directed care, clinical monitoring, and safety-critical reminders continue the saved cue after silence',
     )
     expect(compact).toContain(
       'A direct request to check back later authorizes that exact check-in.',
@@ -1284,7 +1373,21 @@ describe('assistant skill assets', () => {
     expect(compact).toContain(
       'Silence after that check-in does not authorize another same-occurrence follow-up.',
     )
-    expect(compact).toContain('Prefer bounded support. Never create open-ended nag loops.')
+    expect(compact).toContain(
+      'never increase frequency or add messages after non-response',
+    )
+    expect(compact).toContain(
+      'Reuse a good concise cue when the context has not changed.',
+    )
+    expect(compact).toContain('do not manufacture novelty')
+    expect(compact).toContain(
+      'Never copy these generic repair or review requirements into an ordinary recurring reminder.',
+    )
+    expect(compact).toContain(
+      'The generic repair, skip, and miss rules below apply only to Murph-designed habit support or an explicitly consented `check_in` or `review`',
+    )
+    expect(compact).not.toContain('Do not repeat stale reminder copy.')
+    expect(raw).not.toContain('### Reminder density and reply loop')
     expect(raw).toContain('Count an ignored support attempt only when')
     expect(raw).toContain('When support is working, fade it instead of adding more.')
     expect(raw).toContain('Use `completed`, `partial`, `missed`, or `skipped` session status')
@@ -1467,17 +1570,44 @@ describe('assistant skill assets', () => {
       'A setup-only activation turn, plan or save confirmation, reminder or review scheduling, and the first-launch close are not movement-instruction turns merely because the saved plan contains named exercises.',
     )
     expect(compactCatalog).toContain(
+      '`murph.attach_exercise_routine_card`',
+    )
+    expect(compactCatalog).toContain(
+      'use one card when it alone fully answers the request',
+    )
+    expect(compactCatalog).toContain(
+      'Do not replace that card with one or more long plain-text messages.',
+    )
+    expect(compactCatalog).toContain(
+      'when the member asks to repeat, resend, or improve the layout of a routine already present in the conversation',
+    )
+    expect(compactCatalog).toContain(
+      'Styled Telegram text is not a Rich Message',
+    )
+    expect(compactCatalog).toContain(
+      'do not pad a short plan to sound more substantial.',
+    )
+    expect(compactCatalog).toContain(
+      'Use the strongest presentation supported by the current channel.',
+    )
+    expect(compactCatalog).toContain(
       'If any movement being taught is likely unfamiliar or uncommon, attach at least one useful returned catalog image and normally two in the same response.',
     )
     expect(compactCatalog).toContain(
-      'If the user clearly demonstrates relevant training fluency and every movement being taught is common or already familiar, omit exercise images unless the user asks for them.',
+      'Familiarity alone is not a reason to omit images. Omit exercise images only when the user explicitly asks for a response without them.',
     )
     expect(compactCatalog).toContain(
-      'Use returned `images[]` with catalog URL, alt text, and source `exercise_catalog:<id>:<step>`.',
+      'at least one useful returned catalog image for every exercise that has one by default.',
+    )
+    expect(compactCatalog).toContain(
+      'Construct source as `exercise_catalog:<returned-item-id>:<1-based-position-in-images[]>`.',
     )
     expect(compactCatalog).toContain('"no catalog image yet"')
     expect(catalog).toContain(
       'If acute pain or safety requires an immediate action, give the minimal plan\n   now',
+    )
+    expect(compactCatalog).not.toContain(
+      'include available catalog media in the same response',
     )
   })
 
@@ -1492,6 +1622,18 @@ describe('assistant skill assets', () => {
 
     const raw = await readSkillFile(supplementSkill)
 
+    expect(raw).toContain(
+      'For connected or saved-meal nutrient questions, also read `food-journal`',
+    )
+    expect(raw).toContain(
+      'missing or partial meal coverage is not zero intake',
+    )
+    expect(raw).toContain(
+      'source-app targets and percentages are not imported',
+    )
+    expect(raw).toContain(
+      'one day of food records cannot diagnose a deficiency',
+    )
     expect(raw).toContain('vault-cli supplement search-labels`')
     expect(raw).toContain('vault-cli\nsupplement search-labels-batch`')
     expect(raw).toContain('preserve the full active ingredient panel')

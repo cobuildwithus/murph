@@ -56,6 +56,7 @@ export interface AssistantProgressDeliverySendOptions {
   deliveryContextOrdinal?: number
   required?: boolean
   source?: AssistantProgressDeliverySource
+  targetInputId?: string
 }
 
 export type AssistantProgressDeliveryResult =
@@ -75,6 +76,7 @@ type AssistantProgressDeliveryContext = {
 type AssistantProgressDeliverInput =
   Parameters<DeliverAssistantProgressUpdate>[0] & {
     deliveryContextOrdinal?: number
+    targetInputId?: string
   }
 type AssistantProgressDeliver = (
   input: AssistantProgressDeliverInput
@@ -275,6 +277,9 @@ export function createAssistantProgressDelivery(input: {
             : {
                 deliveryContextOrdinal: options.deliveryContextOrdinal,
               }),
+          ...(options?.targetInputId === undefined
+            ? {}
+            : { targetInputId: options.targetInputId }),
           input: deliveryContext.messageInput,
           ordinal,
           session: deliveryContext.session,

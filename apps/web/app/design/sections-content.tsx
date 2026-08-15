@@ -61,11 +61,15 @@ import { HomeOnboardingStepsStudy } from "./home-onboarding-steps-study";
 import { HomepageAuthWarmRuntimeStudy } from "./homepage-auth-warm-runtime-study";
 import { JoinFamilyBillingRecoveryStudy } from "./join-family-billing-recovery-study";
 import { OpsUsageStudy } from "./ops-usage-study";
-import { PersonaOnboardingStudy } from "./persona-onboarding-study";
+import {
+  PersonaOnboardingStudy,
+  PersonaSettingsStudy,
+} from "./persona-onboarding-study";
 import { SettingsAuthRequiredStudy } from "./settings-auth-required-study";
 import { SettingsCustomInferenceStudy } from "./settings-custom-inference-study";
 import { SignupReferralFlowStudy } from "./signup-referral-study";
 import { StructuredReviewResultsStudy } from "./structured-review-results-study";
+import { TrainingDashboardStudy } from "./training-dashboard-study";
 import {
   GroupUsageFundingStudy,
   PersonalUsageCreditOwnerStudy,
@@ -74,6 +78,7 @@ import { ExperimentResultsShareStudy } from "./experiment-results-share-study";
 import { EnvironmentProgressStudy } from "./environment-progress-study";
 import { EnvironmentPrintStudy } from "./environment-print-study";
 import { PersonalPatternsStudy } from "./personal-patterns-study";
+import { BrowserVaultLoadingTransitionsStudy } from "./browser-vault-loading-transitions-study";
 
 function StudySection({
   children,
@@ -108,6 +113,7 @@ export function SectionsContent() {
         <div
           id="homepage-solo-first-hero"
           data-design-section="homepage-solo-first-hero"
+          data-design-state="light-topic-labels-mobile-narrow-phone"
           className="-mx-5 sm:-mx-8 lg:-mx-12"
           inert
         >
@@ -138,7 +144,7 @@ export function SectionsContent() {
 
       <Separator />
 
-      <StudySection title="Homepage authentication readiness and phone handoff">
+      <StudySection title="Homepage background readiness and phone handoff">
         <HomepageAuthWarmRuntimeStudy />
       </StudySection>
 
@@ -244,7 +250,7 @@ export function SectionsContent() {
 
       <Separator />
 
-      <StudySection title="Settings retained data export">
+      <StudySection title="Settings retained export while newer data is processing">
         <DataExportFlowStudy />
       </StudySection>
 
@@ -258,6 +264,18 @@ export function SectionsContent() {
 
       <StudySection title="Private Environment print report loading and ready states">
         <EnvironmentPrintStudy />
+      </StudySection>
+
+      <Separator />
+
+      <StudySection title="Private training dashboard">
+        <div
+          id="private-training-dashboard"
+          data-design-section="private-training-dashboard"
+          inert
+        >
+          <TrainingDashboardStudy />
+        </div>
       </StudySection>
 
       <Separator />
@@ -513,6 +531,7 @@ export function SectionsContent() {
           <SiteFooter
             id="design-site-footer-preview"
             referralsAvailable
+            vitalsMode="synthetic"
           />
         </div>
       </StudySection>
@@ -536,6 +555,8 @@ export function SectionsContent() {
       <StudySection title="Persona onboarding with stacked tone samples">
         <div data-design-section="persona-onboarding">
           <PersonaOnboardingStudy />
+          <Separator />
+          <PersonaSettingsStudy />
         </div>
       </StudySection>
 
@@ -553,7 +574,7 @@ export function SectionsContent() {
 
       <Separator />
 
-      <StudySection title="Connect source actions and disconnect lifecycle">
+      <StudySection title="Connect source capabilities, availability, actions, and disconnect lifecycle">
         <ConnectSourceCardStudy
           androidAppAvailable={isMurphAndroidAppEnabled(process.env)}
         />
@@ -592,18 +613,19 @@ export function SectionsContent() {
       <Separator />
 
       <StudySection title="Settings billing return, Portal failure, and Family sign-in handoffs">
+        {/* Includes the signed-out account-deletion handoff rendered by this study. */}
         <SettingsAuthRequiredStudy />
       </StudySection>
 
       <Separator />
 
-      <StudySection title="Subscription recovery, Family billing confirmation, Max plan comparison, sponsored billing, and exact usage status">
+      <StudySection title="Subscription recovery, Family billing confirmation, Max plan comparison, sponsored billing, and exact usage status, plus Family draft recovery">
         <GroupMemberPlanStudy />
       </StudySection>
 
       <Separator />
 
-      <StudySection title="Account deletion during migration maintenance">
+      <StudySection title="Account deletion maintenance and provider-access recovery">
         <AccountDeletionMaintenanceStudy />
       </StudySection>
 
@@ -615,13 +637,19 @@ export function SectionsContent() {
 
       <Separator />
 
+      <StudySection title="Browser Vault progressive loading and biomarker result detail transitions">
+        <BrowserVaultLoadingTransitionsStudy />
+      </StudySection>
+
+      <Separator />
+
       <StudySection title="Home onboarding steps">
         <HomeOnboardingStepsStudy />
       </StudySection>
 
       <Separator />
 
-      <StudySection title="Group join invites, current and legacy sharing, and setup recovery">
+      <StudySection title="Group join invites, source-aware sharing, and setup recovery">
         <GroupJoinStudy
           comprehensivePermissions={projectHostedVaultShareProjectionDisplays(
             resolveHostedGroupAccessOfferProjectionScopes(undefined),
@@ -655,7 +683,7 @@ export function SectionsContent() {
 
       <Separator />
 
-      <StudySection title="Ops usage dashboard">
+      <StudySection title="Ops usage dashboard pagination">
         <OpsUsageStudy />
       </StudySection>
 

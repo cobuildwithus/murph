@@ -13,6 +13,7 @@ import {
 import { buildMurphSmsHref, normalizeMurphTelegramUsername } from "../murph-contact-routing";
 import {
   appendHostedMailboxEnvelopeTx,
+  appendHostedMailboxEnvelopeWithPreparedCryptoTx,
   readHostedMailboxItemByDedupeKey,
 } from "../hosted-mailbox/store";
 import { materializePendingHostedGroupJoinConfirmationsBestEffort } from "../hosted-groups/group-join-confirmation";
@@ -43,6 +44,7 @@ import {
   normalizeHostedTelegramUsernameForLookup,
   readHostedPhoneHint,
 } from "./contact-privacy";
+import { getHostedCryptoDomainForLane } from "@murphai/runtime-state";
 import {
   isHostedMemberSuspended,
 } from "./entitlement";
@@ -99,26 +101,52 @@ import {
   HOSTED_MEMBER_ACTIVATION_RUNTIME_WAKE_TIMEOUT_MS,
   signalHostedMemberActivationRuntimeWakeBestEffortResult,
 } from "./member-activation-runtime-wake";
-import { createHostedMember } from "./hosted-member-store";
+import {
+  createHostedMember,
+  readHostedMemberCoreState,
+  type HostedMemberCoreState,
+} from "./hosted-member-store";
 import {
   readHostedMemberStripeBillingRef,
   withHostedMemberStripeMutationLock,
 } from "./hosted-member-billing-store";
 import {
+  hostedMemberIdentityRecordsEqual,
+  lockHostedMemberIdentityStateTx,
   lookupHostedMemberIdentityByPhoneNumber,
+  projectHostedMemberIdentityState,
+  readHostedMemberIdentityControlRootKeyIds,
   readHostedMemberIdentity,
+  readHostedMemberIdentityRecord,
+  type HostedMemberIdentityState,
+  type HostedMemberIdentityRecord,
 } from "./hosted-member-identity-store";
 import {
+  hostedMemberRoutingRecordsEqual,
+  lockHostedMemberRoutingStateTx,
+  projectHostedMemberRoutingState,
+  readHostedMemberRoutingRecord,
+  readHostedMemberRoutingControlRootKeyIds,
   readHostedMemberRoutingState,
   resolveHostedMemberRoutingByTelegramUserId,
+  type HostedMemberRoutingRecord,
+  type HostedMemberRoutingStateSnapshot,
   upsertHostedMemberTelegramRoutingBindingTx,
 } from "./hosted-member-routing-store";
 import {
+  HostedDomainRootPreparationMismatchError,
+  prepareHostedDomainRootForWeb,
   prepareHostedCryptoDomainRootCandidates,
   provisionActiveHostedDomainRootEnvelopeForUserOnly,
+  revalidatePreparedHostedDomainRootForWebTx,
+  unwrapHostedDomainRootsForWebByRootKeyIds,
   type PreparedHostedCryptoDomainRootCandidates,
+  type PreparedHostedDomainRootForWeb,
 } from "../hosted-crypto/domain-root-store";
-import { ensureHostedMemberForPhoneTx } from "./member-identity-service";
+import {
+  bindHostedMemberPhoneToPreparedMemberTx,
+  ensureHostedMemberForPhoneTx,
+} from "./member-identity-service";
 import {
   resolveHostedMemberAssistantNotificationRoute,
   resolveHostedMemberMessagingState,
@@ -140,8 +168,20 @@ import {
   logHostedStripeFailure,
   reportHostedStripeOperationFailure,
   withHostedStripeActionFailureAlert,
+  withHostedStripeFailureLog,
 } from "./stripe-error-log";
-import { closeUnboundHostedSubscriptionCheckout } from "./subscription-checkout-lifecycle";
+import {
+  closeUnboundHostedSubscriptionCheckout,
+  isStripeResourceMissingError,
+  retrieveAndExpireHostedSubscriptionCheckout,
+  retrieveAndExpireHostedSubscriptionCheckoutSession,
+} from "./subscription-checkout-lifecycle";
+import {
+  buildHostedFamilyInviteRecoveryUrl,
+  HOSTED_FAMILY_DRAFT_CHECKOUT_ACTIVE_ERROR_CODE,
+} from "./app-routes";
+
+export { HOSTED_FAMILY_DRAFT_CHECKOUT_ACTIVE_ERROR_CODE } from "./app-routes";
 
 export { HOSTED_FAMILY_MAX_SEATS, HOSTED_FAMILY_MIN_SEATS } from "./billing-plans";
 
@@ -191,13 +231,13 @@ const HOSTED_ACCOUNT_GROUP_INVITE_TARGET_TELEGRAM_USERNAME_FIELD =
   "hosted-account-group-invite.target-telegram-username";
 const HOSTED_ACCOUNT_GROUP_INVITE_TARGET_EMAIL_FIELD =
   "hosted-account-group-invite.target-email";
-const HOSTED_ACCOUNT_GROUP_BILLING_STRIPE_CUSTOMER_FIELD =
+export const HOSTED_ACCOUNT_GROUP_BILLING_STRIPE_CUSTOMER_FIELD =
   "hosted-account-group-billing-ref.stripe-customer-id";
-const HOSTED_ACCOUNT_GROUP_BILLING_STRIPE_SUBSCRIPTION_FIELD =
+export const HOSTED_ACCOUNT_GROUP_BILLING_STRIPE_SUBSCRIPTION_FIELD =
   "hosted-account-group-billing-ref.stripe-subscription-id";
 const HOSTED_ACCOUNT_GROUP_BILLING_STRIPE_SUBSCRIPTION_ITEM_FIELD =
   "hosted-account-group-billing-ref.stripe-subscription-item-id";
-const HOSTED_ACCOUNT_GROUP_BILLING_STRIPE_CHECKOUT_SESSION_FIELD =
+export const HOSTED_ACCOUNT_GROUP_BILLING_STRIPE_CHECKOUT_SESSION_FIELD =
   "hosted-account-group-billing-ref.stripe-checkout-session-id";
 
 const hostedAccountGroupAccessSelect =
@@ -273,6 +313,51 @@ const hostedAccountGroupBillingRefSelect =
     updatedAt: true,
   });
 
+const hostedFamilyOwnerDraftSelect =
+  Prisma.validator<Prisma.HostedAccountGroupSelect>()({
+    billingRef: {
+      select: {
+        billedSeatCount: true,
+        checkoutAttemptId: true,
+        checkoutCreatedAt: true,
+        checkoutSeatCount: true,
+        currentBillingPhase: true,
+        currentPeriodEnd: true,
+        currentPeriodStart: true,
+        lastStripeEventCreatedAt: true,
+        stripeCheckoutSessionIdEncrypted: true,
+        stripeCheckoutSessionLookupKey: true,
+        stripeCustomerIdEncrypted: true,
+        stripeCustomerLookupKey: true,
+        stripeSubscriptionIdEncrypted: true,
+        stripeSubscriptionItemIdEncrypted: true,
+        stripeSubscriptionItemLookupKey: true,
+        stripeSubscriptionLookupKey: true,
+      },
+    },
+    billingStatus: true,
+    id: true,
+    invites: {
+      select: { id: true },
+      take: 1,
+    },
+    memberships: {
+      orderBy: { id: "asc" },
+      select: {
+        memberId: true,
+        role: true,
+        status: true,
+      },
+      take: 2,
+    },
+    ownerMemberId: true,
+    planCapacities: {
+      select: { groupId: true },
+      take: 1,
+    },
+    suspendedAt: true,
+  });
+
 export type HostedAccountGroupAccessSnapshot =
   Prisma.HostedAccountGroupGetPayload<{
     select: typeof hostedAccountGroupAccessSelect;
@@ -292,6 +377,10 @@ export type HostedAccountGroupBillingRefRecord =
   Prisma.HostedAccountGroupBillingRefGetPayload<{
     select: typeof hostedAccountGroupBillingRefSelect;
   }>;
+
+type HostedFamilyOwnerDraftRecord = Prisma.HostedAccountGroupGetPayload<{
+  select: typeof hostedFamilyOwnerDraftSelect;
+}>;
 
 export interface HostedAccountGroupBillingRefSnapshot
   extends Omit<HostedAccountGroupBillingRefRecord,
@@ -323,6 +412,53 @@ export type HostedMemberFamilyBillingClaim =
       kind: "bound_subscription";
       ownerMemberId: string;
     };
+
+type HostedFamilyDraftAbandonmentCandidate = {
+  checkoutAttemptId: string | null;
+  checkoutCreatedAt: Date | null;
+  checkoutRetiredByProvider: boolean;
+  checkoutSeatCount: number | null;
+  groupId: string;
+  stripeCheckoutSessionId: string | null;
+  stripeCheckoutSessionLookupKey: string | null;
+};
+
+type HostedFamilyOwnerDraftState =
+  | "billing_authority"
+  | "checkout_bound"
+  | "checkout_inconsistent"
+  | "checkout_starting"
+  | "inert"
+  | "not_draft";
+
+export type HostedFamilyDraftRecoveryState =
+  | "abandonable"
+  | "checkout_starting"
+  | "not_abandonable"
+  | "recovery_required";
+
+export type HostedFamilyDraftRecoveryProjection =
+  | {
+      checkoutAttemptId: string | null;
+      groupId: string;
+      state: "abandonable";
+    }
+  | {
+      checkoutAttemptId: string;
+      groupId: string;
+      state: "checkout_starting";
+    }
+  | {
+      state: Exclude<
+        HostedFamilyDraftRecoveryState,
+        "abandonable" | "checkout_starting"
+      >;
+    };
+
+type HostedFamilyDraftClaimProof = {
+  checkoutAttemptId: string | null;
+  groupId: string;
+};
 
 export interface HostedAccountGroupBillingLookup {
   billingRef: HostedAccountGroupBillingRefSnapshot;
@@ -705,6 +841,14 @@ export async function readHostedFamilyAccessForMember(input: {
   });
 }
 
+function compareHostedFamilyOwnerSnapshotRows(
+  left: { createdAt: Date; id: string },
+  right: { createdAt: Date; id: string },
+): number {
+  return left.createdAt.getTime() - right.createdAt.getTime()
+    || (left.id < right.id ? -1 : left.id > right.id ? 1 : 0);
+}
+
 export async function readHostedFamilyOwnerSnapshotForMember(input: {
   memberId: string;
   now?: Date;
@@ -712,72 +856,130 @@ export async function readHostedFamilyOwnerSnapshotForMember(input: {
 }): Promise<HostedFamilyOwnerSnapshot | null> {
   const prisma = input.prisma ?? getPrisma();
   const now = input.now ?? new Date();
-  const group = await prisma.hostedAccountGroup.findUnique({
-    select: {
-      billingStatus: true,
-      displayName: true,
-      id: true,
-      ownerMemberId: true,
-      suspendedAt: true,
-    },
-    where: {
-      ownerMemberId: input.memberId,
-    },
-  });
+  const readDatabaseSnapshot = async (readPrisma: HostedOnboardingReadClient) => {
+    const group = await readPrisma.hostedAccountGroup.findUnique({
+      select: {
+        billingStatus: true,
+        displayName: true,
+        id: true,
+        ownerMemberId: true,
+        suspendedAt: true,
+      },
+      where: {
+        ownerMemberId: input.memberId,
+      },
+    });
 
-  if (!group) {
+    if (!group) {
+      return null;
+    }
+
+    const [memberships, invites, paidCapacities] = await Promise.all([
+      readPrisma.hostedAccountGroupMembership.findMany({
+        select: {
+          createdAt: true,
+          id: true,
+          joinedAt: true,
+          memberId: true,
+          pendingPlanCode: true,
+          planCode: true,
+          role: true,
+          status: true,
+        },
+        take: HOSTED_FAMILY_MAX_SEATS + 1,
+        where: {
+          groupId: group.id,
+          status: "active",
+        },
+      }),
+      readPrisma.hostedAccountGroupInvite.findMany({
+        orderBy: [
+          { expiresAt: "asc" },
+          { id: "asc" },
+        ],
+        select: hostedAccountGroupInviteSelect,
+        take: HOSTED_FAMILY_MAX_SEATS + 1,
+        where: {
+          expiresAt: {
+            gt: now,
+          },
+          groupId: group.id,
+          status: "pending",
+        },
+      }),
+      readHostedFamilyPlanCapacitiesTx({
+        groupId: group.id,
+        tx: readPrisma,
+      }),
+    ]);
+
+    if (
+      memberships.length > HOSTED_FAMILY_MAX_SEATS
+      || invites.length > HOSTED_FAMILY_MAX_SEATS
+      || memberships.length + invites.length > HOSTED_FAMILY_MAX_SEATS
+    ) {
+      throw hostedOnboardingError({
+        code: "HOSTED_FAMILY_SNAPSHOT_CAPACITY_INVALID",
+        httpStatus: 500,
+        message: "Family membership exceeds the supported seat capacity.",
+      });
+    }
+
+    // Keep pre-limit work on query-shaped indexes, then restore the prior
+    // presentation order only after cardinality is proven to be at most six.
+    memberships.sort(compareHostedFamilyOwnerSnapshotRows);
+    invites.sort(compareHostedFamilyOwnerSnapshotRows);
+
+    const acceptedInvites = await readFirstAcceptedHostedFamilyInvitesForMembers({
+      group,
+      memberIds: memberships
+        .map((membership) => membership.memberId)
+        .filter((memberId) => memberId !== group.ownerMemberId),
+      prisma: readPrisma,
+    });
+
+    return {
+      acceptedInvites,
+      group,
+      invites,
+      memberships,
+      paidCapacities,
+    };
+  };
+
+  // Invite acceptance atomically moves one row from pending invites to active
+  // memberships. Keep both cap reads and accepted-history authority on one
+  // MVCC snapshot so READ COMMITTED cannot combine opposite sides of that move.
+  const maybeTransaction = prisma as {
+    $transaction?: <T>(
+      run: (tx: Prisma.TransactionClient) => Promise<T>,
+      options?: {
+        isolationLevel?: Prisma.TransactionIsolationLevel;
+        maxWait?: number;
+      },
+    ) => Promise<T>;
+  };
+  const databaseSnapshot = typeof maybeTransaction.$transaction === "function"
+    ? await maybeTransaction.$transaction(
+        async (tx) => readDatabaseSnapshot(tx),
+        {
+          ...HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
+          isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead,
+        },
+      )
+    : await readDatabaseSnapshot(prisma);
+
+  if (!databaseSnapshot) {
     return null;
   }
 
-  const [memberships, invites, acceptedInvites, paidCapacities] = await Promise.all([
-    prisma.hostedAccountGroupMembership.findMany({
-      orderBy: {
-        createdAt: "asc",
-      },
-      select: {
-        joinedAt: true,
-        memberId: true,
-        pendingPlanCode: true,
-        planCode: true,
-        role: true,
-        status: true,
-      },
-      where: {
-        groupId: group.id,
-        status: "active",
-      },
-    }),
-    prisma.hostedAccountGroupInvite.findMany({
-      orderBy: {
-        createdAt: "asc",
-      },
-      select: hostedAccountGroupInviteSelect,
-      where: {
-        expiresAt: {
-          gt: now,
-        },
-        groupId: group.id,
-        status: "pending",
-      },
-    }),
-    prisma.hostedAccountGroupInvite.findMany({
-      orderBy: {
-        createdAt: "asc",
-      },
-      select: hostedAccountGroupInviteSelect,
-      where: {
-        acceptedByMemberId: {
-          not: null,
-        },
-        groupId: group.id,
-        status: "accepted",
-      },
-    }),
-    readHostedFamilyPlanCapacitiesTx({
-      groupId: group.id,
-      tx: prisma,
-    }),
-  ]);
+  const {
+    acceptedInvites,
+    group,
+    invites,
+    memberships,
+    paidCapacities,
+  } = databaseSnapshot;
 
   const firstAcceptedInviteByMember = new Map<string, (typeof acceptedInvites)[number]>();
   for (const invite of acceptedInvites) {
@@ -896,6 +1098,60 @@ export async function readHostedFamilyOwnerSnapshotForMember(input: {
   };
 }
 
+async function readFirstAcceptedHostedFamilyInvitesForMembers(input: {
+  group: HostedAccountGroupAccessSnapshot;
+  memberIds: string[];
+  prisma: HostedOnboardingReadClient;
+}): Promise<HostedAccountGroupInviteSnapshot[]> {
+  if (input.memberIds.length === 0) {
+    return [];
+  }
+
+  const invites = await input.prisma.$queryRaw<Array<
+    Omit<HostedAccountGroupInviteSnapshot, "group">
+  >>(Prisma.sql`
+    WITH current_member(member_id) AS (
+      SELECT unnest(ARRAY[${Prisma.join(input.memberIds)}]::text[])
+    )
+    SELECT
+      accepted_invite.accepted_at AS "acceptedAt",
+      accepted_invite.accepted_by_member_id AS "acceptedByMemberId",
+      accepted_invite.channel,
+      accepted_invite.created_at AS "createdAt",
+      accepted_invite.expires_at AS "expiresAt",
+      accepted_invite.group_id AS "groupId",
+      accepted_invite.id,
+      accepted_invite.invite_code AS "inviteCode",
+      accepted_invite.invited_by_member_id AS "invitedByMemberId",
+      accepted_invite.plan_code AS "planCode",
+      accepted_invite.status,
+      accepted_invite.target_email_encrypted AS "targetEmailEncrypted",
+      accepted_invite.target_email_lookup_key AS "targetEmailLookupKey",
+      accepted_invite.target_label AS "targetLabel",
+      accepted_invite.target_phone_lookup_key AS "targetPhoneLookupKey",
+      accepted_invite.target_phone_number_encrypted AS "targetPhoneNumberEncrypted",
+      accepted_invite.target_telegram_username_encrypted AS "targetTelegramUsernameEncrypted",
+      accepted_invite.target_telegram_username_lookup_key AS "targetTelegramUsernameLookupKey",
+      accepted_invite.updated_at AS "updatedAt"
+    FROM current_member
+    CROSS JOIN LATERAL (
+      SELECT invite.*
+      FROM hosted_account_group_invite AS invite
+      WHERE invite.group_id = ${input.group.id}
+        AND invite.accepted_by_member_id = current_member.member_id
+        AND invite.status = 'accepted'
+      ORDER BY invite.created_at ASC, invite.id ASC
+      LIMIT 1
+    ) AS accepted_invite
+    ORDER BY current_member.member_id ASC
+  `);
+
+  return invites.map((invite) => ({
+    ...invite,
+    group: input.group,
+  }));
+}
+
 /**
  * A Family group remains the source of truth for the owner's onboarding
  * recovery choice. Nonterminal inactive subscriptions stay manageable through
@@ -945,6 +1201,108 @@ export async function readHostedFamilyBillingRecoveryForOwner(input: {
     return "syncing";
   }
   return group.billingRef?.checkoutAttemptId ? "checkout" : "available";
+}
+
+/**
+ * Removes only a never-paid Family draft owned by the authenticated member.
+ * Provider and crypto work happens before BEGIN. The transaction then locks the
+ * owner and revalidates the exact group and Checkout claim, so a concurrent
+ * completion, subscription bind, replacement checkout, invite, or membership
+ * wins and the draft is preserved.
+ */
+export async function abandonHostedFamilyDraftForOwner(input: {
+  expectedDraftClaim: HostedFamilyDraftClaimProof;
+  now?: Date;
+  ownerMemberId: string;
+  prisma?: PrismaClient;
+}): Promise<{ abandoned: boolean }> {
+  const prisma = input.prisma ?? getPrisma();
+  const now = input.now ?? new Date();
+  const draft = await readHostedFamilyOwnerDraftRecord({
+    ownerMemberId: input.ownerMemberId,
+    prisma,
+  });
+  if (!draft) {
+    return { abandoned: false };
+  }
+  if (
+    draft.id !== input.expectedDraftClaim.groupId
+    || (draft.billingRef?.checkoutAttemptId ?? null)
+      !== input.expectedDraftClaim.checkoutAttemptId
+  ) {
+    throw buildHostedFamilyDraftChangedError();
+  }
+
+  const candidate = await prepareHostedFamilyDraftAbandonmentCandidate({
+    draft,
+    now,
+    ownerMemberId: input.ownerMemberId,
+    prisma,
+  });
+
+  const stripeCheckoutSessionId = candidate.stripeCheckoutSessionId;
+  if (stripeCheckoutSessionId) {
+    const checkoutAttemptId = candidate.checkoutAttemptId;
+    if (!checkoutAttemptId) {
+      throw buildHostedFamilyDraftRecoveryRequiredError();
+    }
+    const stripe = requireHostedStripeApi();
+    let session: Stripe.Checkout.Session | null;
+    try {
+      session = await withHostedStripeFailureLog(
+        "checkout.sessions.retrieve.family-draft-abandonment",
+        () => stripe.checkout.sessions.retrieve(stripeCheckoutSessionId),
+      );
+    } catch (error) {
+      if (!isStripeResourceMissingError(error)) {
+        throw error;
+      }
+      session = null;
+    }
+    if (session) {
+      if (!hostedFamilyDraftCheckoutSessionMatchesCandidate({
+        candidate,
+        ownerMemberId: input.ownerMemberId,
+        session,
+      })) {
+        throw buildHostedFamilyDraftChangedError();
+      }
+      if (session.status === "complete") {
+        throw buildHostedFamilyDraftBillingMayCompleteError();
+      }
+      if (coerceStripeSubscriptionId(session.subscription)) {
+        throw buildHostedFamilyDraftBillingMayCompleteError();
+      }
+      if (session.status === "open") {
+        const terminal = await retrieveAndExpireHostedSubscriptionCheckout({
+          sessionId: session.id,
+          stripe,
+        });
+        if (terminal.status === "complete" || terminal.subscriptionId) {
+          throw buildHostedFamilyDraftBillingMayCompleteError();
+        }
+      } else if (session.status !== "expired") {
+        throw buildHostedFamilyDraftRecoveryRequiredError();
+      }
+    }
+    candidate.checkoutRetiredByProvider = true;
+  }
+
+  const result = await prisma.$transaction(
+    (tx) => abandonHostedFamilyDraftCandidateTx({
+      candidate,
+      ownerMemberId: input.ownerMemberId,
+      tx,
+    }),
+    HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
+  );
+  if (result === "billing_authority") {
+    throw buildHostedFamilyDraftBillingMayCompleteError();
+  }
+  if (result === "changed") {
+    throw buildHostedFamilyDraftChangedError();
+  }
+  return { abandoned: result === "abandoned" };
 }
 
 export async function readHostedFamilyInviteAcceptanceView(input: {
@@ -2165,11 +2523,13 @@ async function readHostedFamilyRuntimeRecheckMemberIdsForEventTx(input: {
 }
 
 export async function createHostedFamilyBillingCheckout(input: {
+  allowDirectPaidUpgrade?: boolean;
   confirmedTrialConversion?: unknown;
   groupId: string;
   now?: Date;
   ownerMemberId: string;
   prisma?: PrismaClient;
+  requiredCheckoutAttemptId?: string;
   seatCount?: unknown;
 }): Promise<{ alreadyActive: boolean; url: string | null }> {
   let restartAllowed = true;
@@ -2192,11 +2552,13 @@ export async function createHostedFamilyBillingCheckout(input: {
 
 async function createOrResumeHostedFamilyBillingCheckout(
   input: {
+    allowDirectPaidUpgrade?: boolean;
     confirmedTrialConversion?: unknown;
     groupId: string;
     now?: Date;
     ownerMemberId: string;
     prisma?: PrismaClient;
+    requiredCheckoutAttemptId?: string;
     seatCount?: unknown;
   },
 ): Promise<
@@ -2205,7 +2567,10 @@ async function createOrResumeHostedFamilyBillingCheckout(
 > {
   const prisma = input.prisma ?? getPrisma();
   const now = input.now ?? new Date();
-  const seatCount = normalizeHostedFamilySeatCount(input.seatCount ?? HOSTED_FAMILY_MIN_SEATS);
+  const requiredCheckoutAttemptId = input.requiredCheckoutAttemptId ?? null;
+  const requestedSeatCount = requiredCheckoutAttemptId
+    ? null
+    : normalizeHostedFamilySeatCount(input.seatCount ?? HOSTED_FAMILY_MIN_SEATS);
   const checkoutInput: HostedFamilyBillingCheckoutInput = await prisma.$transaction(async (tx) => {
     const group = await tx.hostedAccountGroup.findUnique({
       select: hostedAccountGroupAccessSelect,
@@ -2214,6 +2579,9 @@ async function createOrResumeHostedFamilyBillingCheckout(
       },
     });
     if (!group || group.ownerMemberId !== input.ownerMemberId) {
+      if (requiredCheckoutAttemptId) {
+        throw buildHostedFamilyDraftChangedError();
+      }
       throw hostedOnboardingError({
         code: "HOSTED_FAMILY_OWNER_REQUIRED",
         httpStatus: 403,
@@ -2228,7 +2596,8 @@ async function createOrResumeHostedFamilyBillingCheckout(
       };
     }
     await assertHostedFamilyOwnerCanStartBillingTx({
-      allowDirectPaidOwner: true,
+      allowDirectPaidOwner: !requiredCheckoutAttemptId
+        && input.allowDirectPaidUpgrade !== false,
       groupId: group.id,
       ownerMemberId: group.ownerMemberId,
       tx,
@@ -2245,11 +2614,33 @@ async function createOrResumeHostedFamilyBillingCheckout(
         message: "Family billing is still syncing. Try again after payment is confirmed.",
       });
     }
-    const directPaidUpgrade = await readHostedFamilyDirectPaidUpgradeInputTx({
-      group,
-      seatCount,
-      tx,
-    });
+    const currentAttemptId = currentBillingRef?.checkoutAttemptId ?? null;
+    if (
+      requiredCheckoutAttemptId
+      && currentAttemptId !== requiredCheckoutAttemptId
+    ) {
+      throw buildHostedFamilyDraftChangedError();
+    }
+    if (
+      requiredCheckoutAttemptId
+      && currentBillingRef?.checkoutSeatCount == null
+    ) {
+      throw buildHostedFamilyDraftRecoveryRequiredError();
+    }
+    const seatCount = requiredCheckoutAttemptId
+      ? normalizeHostedFamilySeatCount(currentBillingRef?.checkoutSeatCount)
+      : requestedSeatCount;
+    if (seatCount === null) {
+      throw new TypeError("Family checkout seat count was not resolved.");
+    }
+    const directPaidUpgrade = requiredCheckoutAttemptId
+      || input.allowDirectPaidUpgrade === false
+      ? null
+      : await readHostedFamilyDirectPaidUpgradeInputTx({
+          group,
+          seatCount,
+          tx,
+        });
     if (directPaidUpgrade) {
       if (
         directPaidUpgrade.currentBillingPhase === "trial"
@@ -2265,7 +2656,6 @@ async function createOrResumeHostedFamilyBillingCheckout(
       return directPaidUpgrade;
     }
 
-    const currentAttemptId = currentBillingRef?.checkoutAttemptId ?? null;
     if (currentBillingRef?.stripeCheckoutSessionId && !currentAttemptId) {
       throw buildHostedFamilyCheckoutRecoveryRequiredError();
     }
@@ -2384,18 +2774,39 @@ async function createOrResumeHostedFamilyBillingCheckout(
       }),
     });
 
-    const checkoutOwned = await prisma.$transaction(
-      (tx) => bindHostedFamilyCheckoutSessionTx({
-        attemptId: checkoutInput.checkoutAttemptId,
-        group: checkoutInput.group,
-        sessionId: checkoutSession.id,
-        tx,
-      }),
-      HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
-    );
+    let checkoutOwned: boolean;
+    try {
+      checkoutOwned = await prisma.$transaction(
+        (tx) => bindHostedFamilyCheckoutSessionTx({
+          attemptId: checkoutInput.checkoutAttemptId,
+          group: checkoutInput.group,
+          sessionId: checkoutSession.id,
+          tx,
+        }),
+        HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
+      );
+    } catch (error) {
+      if (
+        isHostedOnboardingError(error)
+        && error.code === "HOSTED_FAMILY_CHECKOUT_ATTEMPT_STALE"
+      ) {
+        await reconcileOrCloseHostedFamilyCheckoutAfterLostBind({
+          attemptId: checkoutInput.checkoutAttemptId,
+          deleteSessionCustomer: checkoutInput.stripeCustomerId === null,
+          group: checkoutInput.group,
+          prisma,
+          sessionId: checkoutSession.id,
+          stripe,
+        });
+      }
+      throw error;
+    }
     if (!checkoutOwned) {
-      await closeUnboundHostedSubscriptionCheckout({
+      await reconcileOrCloseHostedFamilyCheckoutAfterLostBind({
+        attemptId: checkoutInput.checkoutAttemptId,
         deleteSessionCustomer: checkoutInput.stripeCustomerId === null,
+        group: checkoutInput.group,
+        prisma,
         sessionId: checkoutSession.id,
         stripe,
       });
@@ -3493,6 +3904,91 @@ async function bindHostedFamilyCheckoutSessionTx(input: {
   return true;
 }
 
+/**
+ * A failed late bind does not prove that its idempotent Session is orphaned:
+ * another request may have bound and completed the same Session already.
+ * Reach provider terminal state first, then serialize on the original owner
+ * and preserve or reconcile exact durable billing authority. Destructive
+ * cleanup remains allowed only when the original group no longer exists.
+ */
+async function reconcileOrCloseHostedFamilyCheckoutAfterLostBind(input: {
+  attemptId: string;
+  deleteSessionCustomer: boolean;
+  group: Pick<HostedAccountGroupAccessSnapshot, "id" | "ownerMemberId">;
+  prisma: PrismaClient;
+  sessionId: string;
+  stripe: ReturnType<typeof requireHostedStripeApi>;
+}): Promise<void> {
+  const session = await retrieveAndExpireHostedSubscriptionCheckoutSession({
+    sessionId: input.sessionId,
+    stripe: input.stripe,
+  });
+  if (!session || session.status === "expired") {
+    return;
+  }
+
+  const subscriptionId = coerceStripeSubscriptionId(session.subscription);
+  if (!subscriptionId) {
+    throw new TypeError(
+      "Completed Stripe Family Checkout is missing its subscription.",
+    );
+  }
+
+  const disposition = await input.prisma.$transaction(async (tx) => {
+    await lockHostedMemberRow(tx, input.group.ownerMemberId);
+    const group = await tx.hostedAccountGroup.findUnique({
+      select: {
+        id: true,
+        ownerMemberId: true,
+      },
+      where: { id: input.group.id },
+    });
+    if (!group) {
+      return "orphaned" as const;
+    }
+    if (group.ownerMemberId !== input.group.ownerMemberId) {
+      return "ambiguous" as const;
+    }
+
+    const billingRef = await readHostedAccountGroupStripeBillingRef({
+      groupId: group.id,
+      prisma: tx,
+    });
+    if (billingRef?.stripeSubscriptionId === subscriptionId) {
+      return "preserved" as const;
+    }
+    if (
+      billingRef?.checkoutAttemptId === input.attemptId
+      && (
+        !billingRef.stripeCheckoutSessionId
+        || billingRef.stripeCheckoutSessionId === session.id
+      )
+    ) {
+      await applyHostedFamilyStripeCheckoutCompletedTx({
+        dispatchContext: {},
+        session,
+        tx,
+      });
+      const reconciledBillingRef = await readHostedAccountGroupStripeBillingRef({
+        groupId: group.id,
+        prisma: tx,
+      });
+      if (reconciledBillingRef?.stripeSubscriptionId === subscriptionId) {
+        return "preserved" as const;
+      }
+    }
+    return "ambiguous" as const;
+  }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+
+  if (disposition === "orphaned") {
+    await closeUnboundHostedSubscriptionCheckout({
+      deleteSessionCustomer: input.deleteSessionCustomer,
+      sessionId: session.id,
+      stripe: input.stripe,
+    });
+  }
+}
+
 export function readHostedFamilyCheckoutSessionIdFromUrl(
   value: string | null | undefined,
 ): string | null {
@@ -3522,7 +4018,6 @@ export function buildHostedFamilyCheckoutRedirectUrl(input: {
   if (!sessionId) {
     return null;
   }
-
   const publicBaseUrl = normalizeNullableString(input.publicBaseUrl) ??
     requireHostedOnboardingPublicBaseUrl();
   const url = new URL(publicBaseUrl);
@@ -3545,7 +4040,6 @@ export async function resolveHostedFamilyCheckoutRedirectUrl(input: {
       message: "Family checkout session was not found.",
     });
   }
-
   const prisma = input.prisma ?? getPrisma();
   const { stripe, stripeLiveMode } = requireHostedStripeApiMode();
   let session: Stripe.Checkout.Session;
@@ -4049,6 +4543,152 @@ export async function appendHostedFamilyChatNotificationTx(input: {
   };
 }
 
+async function appendHostedFamilyChatNotificationWithPreparedCryptoTx(input: {
+  occurredAt: string;
+  memberId: string;
+  notification: HostedFamilyChatNotificationRequest;
+  prepared: PreparedHostedDomainRootForWeb;
+  route: HostedExecutionAssistantNotificationRoute | null;
+  sourceEventId: string;
+  tx: Prisma.TransactionClient;
+}): Promise<{ mailboxItemId: string | null }> {
+  if (!input.route) {
+    return { mailboxItemId: null };
+  }
+  const eventId = `assistant.notification.requested:family-chat:${input.memberId}:${input.sourceEventId}`;
+  const append = await appendHostedMailboxEnvelopeWithPreparedCryptoTx({
+    envelope: buildHostedExecutionAssistantNotificationRequestedWake({
+      eventId,
+      memberId: input.memberId,
+      notification: {
+        deliveryDedupeToken: eventId,
+        deliveryDispatchMode: "queue-only",
+        deliveryIdempotencyKey: eventId,
+        instructions: input.notification.instructions,
+        responsePolicy: input.notification.responsePolicy,
+        route: input.route,
+      },
+      occurredAt: input.occurredAt,
+    }),
+    prepared: input.prepared,
+    tx: input.tx,
+  });
+  return { mailboxItemId: append.item.id };
+}
+
+async function revalidatePreparedHostedFamilyOwnerNotificationTx(input: {
+  invite: HostedAccountGroupInviteSnapshot;
+  prepared: PreparedHostedFamilyOwnerNotification;
+  tx: Prisma.TransactionClient;
+}): Promise<HostedExecutionAssistantNotificationRoute | null> {
+  const ownerMemberId = input.invite.group.ownerMemberId;
+  assertPreparedHostedFamilyOwnerNotificationTarget(input);
+  await lockHostedMemberIdentityStateTx({
+    memberId: ownerMemberId,
+    prisma: input.tx,
+  });
+  await lockHostedMemberRoutingStateTx({
+    memberId: ownerMemberId,
+    prisma: input.tx,
+  });
+  const [ownerMember, ownerIdentity, ownerRouting] = await Promise.all([
+    readHostedMemberCoreState({ memberId: ownerMemberId, prisma: input.tx }),
+    readHostedMemberIdentityRecord({ memberId: ownerMemberId, prisma: input.tx }),
+    readHostedMemberRoutingRecord({ memberId: ownerMemberId, prisma: input.tx }),
+  ]);
+  if (
+    !ownerMember
+    || ownerMember.updatedAt.getTime() !== input.prepared.ownerMember.updatedAt.getTime()
+    || !hostedMemberIdentityRecordsEqual(ownerIdentity, input.prepared.ownerIdentity)
+    || !hostedMemberRoutingRecordsEqual(ownerRouting, input.prepared.ownerRouting)
+  ) {
+    throw new HostedDomainRootPreparationMismatchError();
+  }
+  return buildHostedFamilyChatNotificationRoute({
+    identity: input.prepared.ownerIdentityState,
+    memberId: ownerMemberId,
+    routing: input.prepared.ownerRoutingState,
+  });
+}
+
+async function revalidatePreparedHostedFamilyOwnerNotificationRootsTx(
+  input: {
+    prepared: PreparedHostedFamilyOwnerNotification;
+    tx: Prisma.TransactionClient;
+  },
+): Promise<void> {
+  await revalidatePreparedHostedDomainRootForWebTx({
+    prepared: input.prepared.preparedControlRoot,
+    tx: input.tx,
+  });
+  if (input.prepared.preparedIngressRoot) {
+    await revalidatePreparedHostedDomainRootForWebTx({
+      prepared: input.prepared.preparedIngressRoot,
+      tx: input.tx,
+    });
+  }
+}
+
+function assertPreparedHostedFamilyOwnerNotificationTarget(input: {
+  invite: HostedAccountGroupInviteSnapshot;
+  prepared: PreparedHostedFamilyOwnerNotification;
+}): void {
+  const ownerMemberId = input.invite.group.ownerMemberId;
+  if (
+    input.prepared.inviteCode !== input.invite.inviteCode
+    || input.prepared.ownerMember.id !== ownerMemberId
+    || input.prepared.preparedControlRoot.domain !== "control"
+    || input.prepared.preparedControlRoot.userId !== ownerMemberId
+    || (
+      input.prepared.preparedIngressRoot
+      && (
+        input.prepared.preparedIngressRoot.domain !== "ingress"
+        || input.prepared.preparedIngressRoot.userId !== ownerMemberId
+      )
+    )
+  ) {
+    throw new HostedDomainRootPreparationMismatchError();
+  }
+}
+
+function buildHostedFamilyChatNotificationRoute(input: {
+  fallbackTelegramThreadId?: string | null;
+  fallbackTelegramUserId?: string | null;
+  identity: HostedMemberIdentityState | null;
+  memberId: string;
+  routing: HostedMemberRoutingStateSnapshot | null;
+}): HostedExecutionAssistantNotificationRoute | null {
+  return resolveHostedMemberAssistantNotificationRoute({
+    linqChatId: input.routing?.linqChatId ?? input.routing?.pendingLinqChatId ?? null,
+    linqContactLookupKey:
+      input.routing?.pendingLinqParticipantContact?.lookupKey
+      ?? input.identity?.phoneLookupKey
+      ?? null,
+    linqRecipientPhone: input.routing?.linqRecipientPhone ?? null,
+    memberId: input.memberId,
+    memberPhoneNumber: input.identity?.phoneNumber ?? null,
+    messaging: resolveHostedMemberMessagingState({
+      identity: {
+        phoneLookupKey: input.identity?.phoneLookupKey ?? null,
+      },
+      routing: {
+        linqChatId: input.routing?.linqChatId ?? null,
+        pendingLinqChatId: input.routing?.pendingLinqChatId ?? null,
+        pendingLinqParticipantContact:
+          input.routing?.pendingLinqParticipantContact ?? null,
+        telegramThreadId:
+          input.routing?.telegramThreadId
+          ?? input.fallbackTelegramThreadId
+          ?? null,
+        telegramUserId:
+          input.routing?.telegramUserId
+          ?? input.fallbackTelegramUserId
+          ?? null,
+      },
+    }),
+  });
+}
+
 export async function resolveHostedFamilyChatNotificationRouteTx(input: {
   fallbackTelegramThreadId?: string | null;
   fallbackTelegramUserId?: string | null;
@@ -4065,33 +4705,12 @@ export async function resolveHostedFamilyChatNotificationRouteTx(input: {
       prisma: input.tx,
     }),
   ]);
-  return resolveHostedMemberAssistantNotificationRoute({
-    linqChatId: routing?.linqChatId ?? routing?.pendingLinqChatId ?? null,
-    linqContactLookupKey:
-      routing?.pendingLinqParticipantContact?.lookupKey
-      ?? identity?.phoneLookupKey
-      ?? null,
-    linqRecipientPhone: routing?.linqRecipientPhone ?? null,
+  return buildHostedFamilyChatNotificationRoute({
+    fallbackTelegramThreadId: input.fallbackTelegramThreadId,
+    fallbackTelegramUserId: input.fallbackTelegramUserId,
+    identity,
     memberId: input.memberId,
-    memberPhoneNumber: identity?.phoneNumber ?? null,
-    messaging: resolveHostedMemberMessagingState({
-      identity: {
-        phoneLookupKey: identity?.phoneLookupKey ?? null,
-      },
-      routing: {
-        linqChatId: routing?.linqChatId ?? null,
-        pendingLinqChatId: routing?.pendingLinqChatId ?? null,
-        pendingLinqParticipantContact: routing?.pendingLinqParticipantContact ?? null,
-        telegramThreadId:
-          routing?.telegramThreadId
-          ?? input.fallbackTelegramThreadId
-          ?? null,
-        telegramUserId:
-          routing?.telegramUserId
-          ?? input.fallbackTelegramUserId
-          ?? null,
-      },
-    }),
+    routing,
   });
 }
 
@@ -4225,6 +4844,217 @@ export async function resolveHostedFamilyInviteTokenForInbound(input: {
   return invite ? inviteCode : null;
 }
 
+export type HostedFamilyPhoneInvitePreparation = {
+  inviteCode: string;
+  kind: "accepted_replay" | "pending_acceptance";
+};
+
+type HostedFamilyPhoneInvitePreparationSnapshot = {
+  acceptedByMemberId: string | null;
+  expiresAt: Date;
+  status: string;
+  targetEmailLookupKey: string | null;
+  targetPhoneLookupKey: string | null;
+  targetTelegramUsernameLookupKey: string | null;
+};
+
+function classifyHostedFamilyPhoneInvitePreparation(input: {
+  acceptedMemberId: string | null;
+  invite: HostedFamilyPhoneInvitePreparationSnapshot;
+  inviteCode: string;
+  now: Date;
+  phoneNumber: string;
+}): HostedFamilyPhoneInvitePreparation | null {
+  const phoneAccepted = hostedFamilyInviteIsFullyUnbound(input.invite)
+    || Boolean(
+      input.invite.targetPhoneLookupKey
+      && hostedPhoneLookupKeyMatchesValue(
+        input.phoneNumber,
+        input.invite.targetPhoneLookupKey,
+      ),
+    );
+  if (!phoneAccepted) {
+    return null;
+  }
+  if (
+    input.invite.status === "accepted"
+    && input.invite.acceptedByMemberId === input.acceptedMemberId
+  ) {
+    return {
+      inviteCode: input.inviteCode,
+      kind: "accepted_replay",
+    };
+  }
+  if (
+    input.invite.status === "pending"
+    && input.invite.expiresAt > input.now
+  ) {
+    return {
+      inviteCode: input.inviteCode,
+      kind: "pending_acceptance",
+    };
+  }
+  return null;
+}
+
+/**
+ * Classifies only the Family paths that can consume activation or replay
+ * authority for this exact direct-phone member. Existing but expired,
+ * wrong-channel, wrong-phone, or differently accepted codes remain ordinary
+ * direct preparation and are classified transactionally without provider work.
+ */
+export async function resolveHostedFamilyPhoneInvitePreparation(input: {
+  acceptedMemberId: string;
+  now: Date;
+  phoneNumber: string;
+  prisma: HostedOnboardingReadClient;
+  text: string | null | undefined;
+}): Promise<HostedFamilyPhoneInvitePreparation | null> {
+  const inviteCode = parseHostedFamilyInviteStartToken(input.text);
+  if (!inviteCode) {
+    return null;
+  }
+  const invite = await input.prisma.hostedAccountGroupInvite.findUnique({
+    select: {
+      acceptedByMemberId: true,
+      expiresAt: true,
+      status: true,
+      targetEmailLookupKey: true,
+      targetPhoneLookupKey: true,
+      targetTelegramUsernameLookupKey: true,
+    },
+    where: {
+      inviteCode,
+    },
+  });
+  return invite
+    ? classifyHostedFamilyPhoneInvitePreparation({
+        acceptedMemberId: input.acceptedMemberId,
+        invite,
+        inviteCode,
+        now: input.now,
+        phoneNumber: input.phoneNumber,
+      })
+    : null;
+}
+
+export interface PreparedHostedFamilyOwnerNotification {
+  inviteCode: string;
+  ownerIdentity: HostedMemberIdentityRecord | null;
+  ownerIdentityState: HostedMemberIdentityState | null;
+  ownerMember: HostedMemberCoreState;
+  ownerRouting: HostedMemberRoutingRecord | null;
+  ownerRoutingState: HostedMemberRoutingStateSnapshot | null;
+  preparedControlRoot: PreparedHostedDomainRootForWeb;
+  preparedIngressRoot: PreparedHostedDomainRootForWeb | null;
+}
+
+/**
+ * Prepares the distinct Family owner's notification route and mailbox root so
+ * phone acceptance can remain atomic without provider work after BEGIN.
+ */
+export async function prepareHostedFamilyOwnerNotification(input: {
+  inviteCode: string;
+  prisma: HostedOnboardingReadClient;
+}): Promise<PreparedHostedFamilyOwnerNotification | null> {
+  const invite = await input.prisma.hostedAccountGroupInvite.findUnique({
+    select: {
+      group: {
+        select: {
+          ownerMemberId: true,
+        },
+      },
+      inviteCode: true,
+    },
+    where: {
+      inviteCode: input.inviteCode,
+    },
+  });
+  if (!invite) {
+    return null;
+  }
+
+  const ownerMemberId = invite.group.ownerMemberId;
+  const [ownerMember, ownerIdentity, ownerRouting] = await Promise.all([
+    readHostedMemberCoreState({
+      memberId: ownerMemberId,
+      prisma: input.prisma,
+    }),
+    readHostedMemberIdentityRecord({
+      memberId: ownerMemberId,
+      prisma: input.prisma,
+    }),
+    readHostedMemberRoutingRecord({
+      memberId: ownerMemberId,
+      prisma: input.prisma,
+    }),
+  ]);
+  if (!ownerMember) {
+    return null;
+  }
+
+  const controlRootKeyIds = [...new Set([
+    ...readHostedMemberIdentityControlRootKeyIds(ownerIdentity),
+    ...readHostedMemberRoutingControlRootKeyIds(ownerRouting),
+  ])];
+  // Keep every root owned by one sequential provider lane. The outer direct
+  // preparation has already drained the invitee's two-slot phase before this
+  // owner package starts, so the composed peak remains bounded at two.
+  const preparedControlRoot = await prepareHostedDomainRootForWeb({
+    domain: "control",
+    prisma: input.prisma,
+    reason: "hosted-family.invite-owner-notification",
+    userId: ownerMemberId,
+  });
+  for (const rootKeyId of controlRootKeyIds) {
+    const roots = await unwrapHostedDomainRootsForWebByRootKeyIds({
+      prisma: input.prisma,
+      references: [{
+        domain: getHostedCryptoDomainForLane("hosted-member-private-field"),
+        rootKeyId,
+        userId: ownerMemberId,
+      }],
+      retainFailureInScopedCache: true,
+      signal: undefined,
+    });
+    for (const root of roots) {
+      root.rootKey.fill(0);
+    }
+  }
+  const [ownerIdentityState, ownerRoutingState] = await Promise.all([
+    ownerIdentity
+      ? projectHostedMemberIdentityState(ownerIdentity, input.prisma)
+      : null,
+    ownerRouting
+      ? projectHostedMemberRoutingState(ownerRouting, input.prisma, true)
+      : null,
+  ]);
+  const route = buildHostedFamilyChatNotificationRoute({
+    identity: ownerIdentityState,
+    memberId: ownerMemberId,
+    routing: ownerRoutingState,
+  });
+  const preparedIngressRoot = route
+    ? await prepareHostedDomainRootForWeb({
+        domain: "ingress",
+        prisma: input.prisma,
+        reason: "hosted-family.invite-owner-notification",
+        userId: ownerMemberId,
+      })
+    : null;
+
+  return {
+    inviteCode: invite.inviteCode,
+    ownerIdentity,
+    ownerIdentityState,
+    ownerMember,
+    ownerRouting,
+    ownerRoutingState,
+    preparedControlRoot,
+    preparedIngressRoot,
+  };
+}
+
 export async function acceptHostedFamilyInviteFromTelegramTx(input: {
   now?: Date;
   onAcceptedMemberActivated?: (result: HostedMemberActivationResult) => Promise<void> | void;
@@ -4247,10 +5077,10 @@ export async function acceptHostedFamilyInviteFromTelegramTx(input: {
       tx: input.tx,
     });
     if (!activeInvite) {
-      inviteCode = await resolveHostedFamilyInviteCodeFromTelegramUsernameTx({
+      inviteCode = await resolveHostedFamilyInviteCodeFromTelegramUsername({
         now,
         telegramUsername: input.telegramUsername ?? null,
-        tx: input.tx,
+        prisma: input.tx,
       });
     } else if (
       activeInvite.targetTelegramUsernameLookupKey &&
@@ -4276,11 +5106,11 @@ export async function acceptHostedFamilyInviteFromTelegramTx(input: {
       }
     }
   } else {
-    inviteCode = await resolveHostedFamilyInviteCodeFromTelegramStartFallbackTx({
+    inviteCode = await resolveHostedFamilyInviteCodeFromTelegramStartFallback({
       now,
+      prisma: input.tx,
       telegramUsername: input.telegramUsername ?? null,
       text: input.text,
-      tx: input.tx,
     });
   }
   if (!inviteCode) {
@@ -4405,11 +5235,11 @@ async function readHostedFamilyInviteCodePendingActiveTx(input: {
     : null;
 }
 
-async function resolveHostedFamilyInviteCodeFromTelegramStartFallbackTx(input: {
+export async function resolveHostedFamilyInviteCodeFromTelegramStartFallback(input: {
   now: Date;
+  prisma: HostedOnboardingReadClient;
   telegramUsername: string | null;
   text: string | null | undefined;
-  tx: Prisma.TransactionClient;
 }): Promise<string | null> {
   const normalizedText = normalizeNullableString(input.text);
 
@@ -4417,17 +5247,17 @@ async function resolveHostedFamilyInviteCodeFromTelegramStartFallbackTx(input: {
     return null;
   }
 
-  return resolveHostedFamilyInviteCodeFromTelegramUsernameTx({
+  return resolveHostedFamilyInviteCodeFromTelegramUsername({
     now: input.now,
+    prisma: input.prisma,
     telegramUsername: input.telegramUsername,
-    tx: input.tx,
   });
 }
 
-async function resolveHostedFamilyInviteCodeFromTelegramUsernameTx(input: {
+async function resolveHostedFamilyInviteCodeFromTelegramUsername(input: {
   now: Date;
+  prisma: HostedOnboardingReadClient;
   telegramUsername: string | null;
-  tx: Prisma.TransactionClient;
 }): Promise<string | null> {
   const lookupKeys = createHostedTelegramUsernameLookupKeyReadCandidates(
     input.telegramUsername,
@@ -4436,7 +5266,7 @@ async function resolveHostedFamilyInviteCodeFromTelegramUsernameTx(input: {
     return null;
   }
 
-  const invites = await input.tx.hostedAccountGroupInvite.findMany({
+  const invites = await input.prisma.hostedAccountGroupInvite.findMany({
     orderBy: {
       createdAt: "asc",
     },
@@ -4459,6 +5289,11 @@ async function resolveHostedFamilyInviteCodeFromTelegramUsernameTx(input: {
 }
 
 export async function acceptHostedFamilyInviteFromPhoneTx(input: {
+  acceptedMember?: {
+    currentIdentity: HostedMemberIdentityState | null;
+    member: HostedMemberCoreState;
+    preparedControlRoot: PreparedHostedDomainRootForWeb;
+  };
   now?: Date;
   onAcceptedMemberLocked?: (input: {
     acceptedMemberId: string;
@@ -4470,6 +5305,9 @@ export async function acceptHostedFamilyInviteFromPhoneTx(input: {
   }) => Promise<void>;
   onAcceptedMemberActivated?: (result: HostedMemberActivationResult) => Promise<void> | void;
   phoneNumber: string;
+  preparedCryptoDomainRoots?: PreparedHostedCryptoDomainRootCandidates;
+  preparedInvite?: HostedFamilyPhoneInvitePreparation | null;
+  preparedOwnerNotification?: PreparedHostedFamilyOwnerNotification;
   text: string | null | undefined;
   tx: Prisma.TransactionClient;
 }): Promise<HostedAccountGroupMembershipAccessSnapshot | null> {
@@ -4480,6 +5318,7 @@ export async function acceptHostedFamilyInviteFromPhoneTx(input: {
   const now = input.now ?? new Date();
   const invite = await input.tx.hostedAccountGroupInvite.findUnique({
     select: {
+      acceptedByMemberId: true,
       expiresAt: true,
       status: true,
       targetEmailLookupKey: true,
@@ -4493,6 +5332,21 @@ export async function acceptHostedFamilyInviteFromPhoneTx(input: {
   if (!invite) {
     return null;
   }
+  if (Object.prototype.hasOwnProperty.call(input, "preparedInvite")) {
+    const currentPreparation = classifyHostedFamilyPhoneInvitePreparation({
+      acceptedMemberId: input.acceptedMember?.member.id ?? null,
+      invite,
+      inviteCode,
+      now,
+      phoneNumber: input.phoneNumber,
+    });
+    if (
+      currentPreparation?.inviteCode !== input.preparedInvite?.inviteCode
+      || currentPreparation?.kind !== input.preparedInvite?.kind
+    ) {
+      throw new HostedDomainRootPreparationMismatchError();
+    }
+  }
   const isFullyUnbound = hostedFamilyInviteIsFullyUnbound(invite);
   if (!invite.targetPhoneLookupKey && !isFullyUnbound) {
     return null;
@@ -4500,6 +5354,13 @@ export async function acceptHostedFamilyInviteFromPhoneTx(input: {
   if (
     invite.status !== "accepted" &&
     (invite.status !== "pending" || invite.expiresAt <= now)
+  ) {
+    return null;
+  }
+  if (
+    invite.status === "accepted"
+    && input.acceptedMember
+    && invite.acceptedByMemberId !== input.acceptedMember.member.id
   ) {
     return null;
   }
@@ -4514,11 +5375,20 @@ export async function acceptHostedFamilyInviteFromPhoneTx(input: {
     });
   }
 
-  const member = await ensureHostedMemberForPhoneTx({
-    phoneNumber: input.phoneNumber,
-    phoneNumberVerifiedAt: now,
-    prisma: input.tx,
-  });
+  const member = input.acceptedMember
+    ? await bindHostedMemberPhoneToPreparedMemberTx({
+        currentIdentity: input.acceptedMember.currentIdentity,
+        member: input.acceptedMember.member,
+        phoneNumber: input.phoneNumber,
+        phoneNumberVerifiedAt: now,
+        preparedControlRoot: input.acceptedMember.preparedControlRoot,
+        prisma: input.tx,
+      })
+    : await ensureHostedMemberForPhoneTx({
+        phoneNumber: input.phoneNumber,
+        phoneNumberVerifiedAt: now,
+        prisma: input.tx,
+      });
 
   return acceptHostedFamilyInviteTx({
     acceptedMemberId: member.id,
@@ -4528,6 +5398,12 @@ export async function acceptHostedFamilyInviteFromPhoneTx(input: {
     onAcceptedMemberValidated: input.onAcceptedMemberValidated,
     onAcceptedMemberActivated: input.onAcceptedMemberActivated,
     phoneNumber: input.phoneNumber,
+    ...(input.preparedCryptoDomainRoots
+      ? { preparedCryptoDomainRoots: input.preparedCryptoDomainRoots }
+      : {}),
+    ...(input.preparedOwnerNotification
+      ? { preparedOwnerNotification: input.preparedOwnerNotification }
+      : {}),
     requirePhoneBinding: !isFullyUnbound,
     tx: input.tx,
   });
@@ -4549,6 +5425,7 @@ export async function acceptHostedFamilyInviteTx(input: {
   onAcceptedMemberActivated?: (result: HostedMemberActivationResult) => Promise<void> | void;
   phoneNumber?: string | null;
   preparedCryptoDomainRoots?: PreparedHostedCryptoDomainRootCandidates;
+  preparedOwnerNotification?: PreparedHostedFamilyOwnerNotification;
   requirePhoneBinding?: boolean;
   requireWebBinding?: boolean;
   telegramUsername?: string | null;
@@ -4620,7 +5497,34 @@ export async function acceptHostedFamilyInviteTx(input: {
     });
   }
 
-  await lockHostedMemberRow(input.tx, invite.group.ownerMemberId);
+  let preparedOwnerNotificationRoute:
+    | HostedExecutionAssistantNotificationRoute
+    | null
+    | undefined;
+  if (input.preparedOwnerNotification) {
+    assertPreparedHostedFamilyOwnerNotificationTarget({
+      invite,
+      prepared: input.preparedOwnerNotification,
+    });
+    await revalidatePreparedHostedFamilyOwnerNotificationRootsTx({
+      prepared: input.preparedOwnerNotification,
+      tx: input.tx,
+    });
+    if (!(await tryLockHostedFamilyPreparedOwnerRowTx({
+        ownerMemberId: invite.group.ownerMemberId,
+        tx: input.tx,
+      }))) {
+      throw new HostedDomainRootPreparationMismatchError();
+    }
+    preparedOwnerNotificationRoute =
+      await revalidatePreparedHostedFamilyOwnerNotificationTx({
+        invite,
+        prepared: input.preparedOwnerNotification,
+        tx: input.tx,
+      });
+  } else {
+    await lockHostedMemberRow(input.tx, invite.group.ownerMemberId);
+  }
   await lockHostedMemberRow(input.tx, input.acceptedMemberId);
   const existingGroupMembership = await input.tx.hostedAccountGroupMembership.findFirst({
     select: { id: true },
@@ -4637,8 +5541,10 @@ export async function acceptHostedFamilyInviteTx(input: {
       message: "This member is already in this Family plan.",
     });
   }
-  await assertHostedFamilyMemberNotSponsoredElsewhereTx({
+  const ownerDraftToAbandon = await assertHostedFamilyMemberNotSponsoredElsewhereTx({
+    allowOwnerDraftAbandonment: true,
     groupId: invite.groupId,
+    inviteCode: input.inviteCode,
     memberId: input.acceptedMemberId,
     tx: input.tx,
   });
@@ -4715,6 +5621,14 @@ export async function acceptHostedFamilyInviteTx(input: {
     },
   });
 
+  if (ownerDraftToAbandon) {
+    await abandonHostedFamilyOwnerDraftAfterInviteClaimTx({
+      draftGroupId: ownerDraftToAbandon.id,
+      ownerMemberId: input.acceptedMemberId,
+      tx: input.tx,
+    });
+  }
+
   if (hasHostedAccountGroupAccess(invite.group)) {
     const activation = await activateHostedMemberForFamilySponsorshipTx({
       memberId: input.acceptedMemberId,
@@ -4732,10 +5646,32 @@ export async function acceptHostedFamilyInviteTx(input: {
     acceptedMemberId: input.acceptedMemberId,
     invite,
     now,
+    ...(input.preparedOwnerNotification
+      ? {
+          prepared: input.preparedOwnerNotification,
+          preparedRoute: preparedOwnerNotificationRoute,
+        }
+      : {}),
     tx: input.tx,
   });
 
   return membership;
+}
+
+async function tryLockHostedFamilyPreparedOwnerRowTx(input: {
+  ownerMemberId: string;
+  tx: Prisma.TransactionClient;
+}): Promise<boolean> {
+  // Direct Linq already owns the invitee member. Never wait here on the
+  // opposite Family owner -> invitee order used by Web acceptance; a fresh
+  // preparation attempt can retry after the current owner transaction ends.
+  const rows = await input.tx.$queryRaw<Array<{ id: string }>>`
+    SELECT "id"
+    FROM "hosted_member"
+    WHERE "id" = ${input.ownerMemberId}
+    FOR UPDATE SKIP LOCKED
+  `;
+  return rows.length === 1;
 }
 
 async function readHostedFamilyInviteActivationReplayResultTx(input: {
@@ -4766,13 +5702,24 @@ async function notifyHostedFamilyOwnerOfInviteClaimTx(input: {
   acceptedMemberId: string;
   invite: HostedAccountGroupInviteSnapshot;
   now: Date;
+  prepared?: PreparedHostedFamilyOwnerNotification;
+  preparedRoute?: HostedExecutionAssistantNotificationRoute | null;
   tx: Prisma.TransactionClient;
 }): Promise<void> {
-  const route = await resolveHostedFamilyChatNotificationRouteTx({
-    memberId: input.invite.group.ownerMemberId,
-    tx: input.tx,
-  });
-  await appendHostedFamilyChatNotificationTx({
+  const ownerMemberId = input.invite.group.ownerMemberId;
+  let route: HostedExecutionAssistantNotificationRoute | null;
+  if (input.prepared) {
+    if (input.preparedRoute === undefined) {
+      throw new HostedDomainRootPreparationMismatchError();
+    }
+    route = input.preparedRoute;
+  } else {
+    route = await resolveHostedFamilyChatNotificationRouteTx({
+      memberId: ownerMemberId,
+      tx: input.tx,
+    });
+  }
+  const appendInput = {
     memberId: input.invite.group.ownerMemberId,
     notification: buildHostedFamilyOwnerInviteAcceptedNotification({
       targetLabel: input.invite.targetLabel,
@@ -4781,7 +5728,21 @@ async function notifyHostedFamilyOwnerOfInviteClaimTx(input: {
     route,
     sourceEventId: `family-invite-claim:${input.invite.id}:${input.acceptedMemberId}`,
     tx: input.tx,
-  });
+  };
+  if (input.prepared) {
+    if (!route) {
+      return;
+    }
+    if (!input.prepared.preparedIngressRoot) {
+      throw new HostedDomainRootPreparationMismatchError();
+    }
+    await appendHostedFamilyChatNotificationWithPreparedCryptoTx({
+      ...appendInput,
+      prepared: input.prepared.preparedIngressRoot,
+    });
+  } else {
+    await appendHostedFamilyChatNotificationTx(appendInput);
+  }
 }
 
 function buildHostedFamilyOwnerInviteAcceptedNotification(input: {
@@ -5685,12 +6646,25 @@ function normalizeHostedFamilyPlanCode(value: unknown): HostedFamilyPlanCode {
 }
 
 async function assertHostedFamilyMemberNotSponsoredElsewhereTx(input: {
+  allowOwnerDraftAbandonment?: boolean;
   groupId: string;
+  inviteCode?: string;
   memberId: string;
   tx: Prisma.TransactionClient;
-}): Promise<void> {
+}): Promise<HostedFamilyOwnerDraftRecord | null> {
   const existingActiveMembership = await input.tx.hostedAccountGroupMembership.findFirst({
-    select: hostedAccountGroupMembershipAccessSelect,
+    orderBy: { groupId: "asc" },
+    select: {
+      group: {
+        select: {
+          billingStatus: true,
+          id: true,
+          ownerMemberId: true,
+          suspendedAt: true,
+        },
+      },
+      role: true,
+    },
     where: {
       groupId: {
         not: input.groupId,
@@ -5699,14 +6673,469 @@ async function assertHostedFamilyMemberNotSponsoredElsewhereTx(input: {
       status: "active",
     },
   });
+  if (!existingActiveMembership) {
+    return null;
+  }
 
-  if (existingActiveMembership) {
+  const { group } = existingActiveMembership;
+  if (
+    input.allowOwnerDraftAbandonment
+    && existingActiveMembership.role === "owner"
+    && group.ownerMemberId === input.memberId
+    && group.billingStatus === HostedBillingStatus.not_started
+    && !group.suspendedAt
+  ) {
+    const draft = await readHostedFamilyOwnerDraftRecord({
+      groupId: group.id,
+      ownerMemberId: input.memberId,
+      prisma: input.tx,
+    });
+    if (!draft) {
+      throw buildHostedFamilyDraftChangedError();
+    }
+    const state = classifyHostedFamilyOwnerDraft(draft, input.memberId);
+    if (state === "inert") {
+      const anotherActiveMembership =
+        await input.tx.hostedAccountGroupMembership.findFirst({
+          select: { id: true },
+          where: {
+            groupId: {
+              notIn: [input.groupId, draft.id],
+            },
+            memberId: input.memberId,
+            status: "active",
+          },
+        });
+      if (!anotherActiveMembership) {
+        return draft;
+      }
+    } else if (
+      state === "checkout_bound"
+      || state === "checkout_inconsistent"
+      || state === "checkout_starting"
+    ) {
+      if (!input.inviteCode) {
+        throw buildHostedFamilyDraftRecoveryRequiredError();
+      }
+      throw buildHostedFamilyDraftConflictError(input.inviteCode);
+    } else if (state === "billing_authority") {
+      throw buildHostedFamilyDraftBillingMayCompleteError();
+    }
+  }
+
+  throw hostedOnboardingError({
+    code: "HOSTED_FAMILY_MEMBER_ALREADY_SPONSORED",
+    httpStatus: 409,
+    message: "This member already belongs to another Family plan.",
+  });
+}
+
+async function abandonHostedFamilyOwnerDraftAfterInviteClaimTx(input: {
+  draftGroupId: string;
+  ownerMemberId: string;
+  tx: Prisma.TransactionClient;
+}): Promise<void> {
+  const draft = await readHostedFamilyOwnerDraftRecord({
+    groupId: input.draftGroupId,
+    ownerMemberId: input.ownerMemberId,
+    prisma: input.tx,
+  });
+  if (!draft) {
+    throw buildHostedFamilyDraftChangedError();
+  }
+  const state = classifyHostedFamilyOwnerDraft(draft, input.ownerMemberId);
+  if (state === "billing_authority") {
+    throw buildHostedFamilyDraftBillingMayCompleteError();
+  }
+  if (state !== "inert") {
+    throw buildHostedFamilyDraftChangedError();
+  }
+  if (!await deleteHostedFamilyOwnerDraftTx({
+    draft,
+    ownerMemberId: input.ownerMemberId,
+    tx: input.tx,
+  })) {
+    throw buildHostedFamilyDraftChangedError();
+  }
+}
+
+type HostedFamilyDraftAbandonmentTxResult =
+  | "abandoned"
+  | "billing_authority"
+  | "changed"
+  | "missing";
+
+async function readHostedFamilyOwnerDraftRecord(input: {
+  groupId?: string;
+  ownerMemberId: string;
+  prisma: HostedOnboardingReadClient;
+}): Promise<HostedFamilyOwnerDraftRecord | null> {
+  return input.prisma.hostedAccountGroup.findUnique({
+    select: hostedFamilyOwnerDraftSelect,
+    where: input.groupId
+      ? { id: input.groupId }
+      : { ownerMemberId: input.ownerMemberId },
+  });
+}
+
+function classifyHostedFamilyOwnerDraft(
+  draft: HostedFamilyOwnerDraftRecord,
+  ownerMemberId: string,
+): HostedFamilyOwnerDraftState {
+  const ownerMembership = draft.memberships[0];
+  if (
+    draft.ownerMemberId !== ownerMemberId
+    || draft.billingStatus !== HostedBillingStatus.not_started
+    || draft.suspendedAt
+    || draft.memberships.length !== 1
+    || ownerMembership?.memberId !== ownerMemberId
+    || ownerMembership.role !== "owner"
+    || ownerMembership.status !== "active"
+    || draft.invites.length !== 0
+    || draft.planCapacities.length !== 0
+  ) {
+    return "not_draft";
+  }
+
+  const billingRef = draft.billingRef;
+  if (!billingRef) {
+    return "inert";
+  }
+  if (
+    billingRef.stripeCustomerIdEncrypted
+    || billingRef.stripeCustomerLookupKey
+    || billingRef.stripeSubscriptionIdEncrypted
+    || billingRef.stripeSubscriptionLookupKey
+    || billingRef.stripeSubscriptionItemIdEncrypted
+    || billingRef.stripeSubscriptionItemLookupKey
+    || billingRef.billedSeatCount != null
+    || billingRef.currentBillingPhase
+    || billingRef.currentPeriodStart
+    || billingRef.currentPeriodEnd
+    || billingRef.lastStripeEventCreatedAt
+  ) {
+    return "billing_authority";
+  }
+
+  const hasAttempt = Boolean(billingRef.checkoutAttemptId);
+  const hasSession = Boolean(
+    billingRef.stripeCheckoutSessionIdEncrypted
+    || billingRef.stripeCheckoutSessionLookupKey,
+  );
+  const hasCompleteAttemptShape = Boolean(
+    billingRef.checkoutCreatedAt
+    && billingRef.checkoutSeatCount != null,
+  );
+  if (hasAttempt && hasSession && hasCompleteAttemptShape) {
+    return "checkout_bound";
+  }
+  if (hasAttempt && !hasSession && hasCompleteAttemptShape) {
+    return "checkout_starting";
+  }
+  if (
+    hasAttempt
+    || hasSession
+    || billingRef.checkoutCreatedAt
+    || billingRef.checkoutSeatCount != null
+  ) {
+    return "checkout_inconsistent";
+  }
+  return "inert";
+}
+
+export async function readHostedFamilyDraftRecoveryStateForOwner(input: {
+  now?: Date;
+  ownerMemberId: string;
+  prisma?: HostedOnboardingReadClient;
+}): Promise<HostedFamilyDraftRecoveryProjection | null> {
+  const prisma = input.prisma ?? getPrisma();
+  const draft = await readHostedFamilyOwnerDraftRecord({
+    ownerMemberId: input.ownerMemberId,
+    prisma,
+  });
+  if (!draft) {
+    return null;
+  }
+  const state = classifyHostedFamilyOwnerDraft(draft, input.ownerMemberId);
+  if (state === "checkout_inconsistent") {
+    return { state: "recovery_required" };
+  }
+  if (state === "billing_authority" || draft.suspendedAt) {
+    return { state: "recovery_required" };
+  }
+  if (await hasHostedFamilyMemberLiveDirectSubscription({
+    memberId: input.ownerMemberId,
+    prisma,
+  })) {
+    return { state: "not_abandonable" };
+  }
+  if (state === "inert" || state === "checkout_bound") {
+    return {
+      checkoutAttemptId: draft.billingRef?.checkoutAttemptId ?? null,
+      groupId: draft.id,
+      state: "abandonable",
+    };
+  }
+  if (state === "checkout_starting") {
+    if (!hostedFamilyCheckoutClaimIsWithinSafeReplayWindow({
+      checkoutCreatedAt: draft.billingRef?.checkoutCreatedAt ?? null,
+      now: input.now ?? new Date(),
+    })) {
+      return { state: "recovery_required" };
+    }
+    const checkoutAttemptId = draft.billingRef?.checkoutAttemptId;
+    if (!checkoutAttemptId) {
+      return { state: "recovery_required" };
+    }
+    return {
+      checkoutAttemptId,
+      groupId: draft.id,
+      state: "checkout_starting",
+    };
+  }
+  return { state: "not_abandonable" };
+}
+
+function hostedFamilyCheckoutClaimIsWithinSafeReplayWindow(input: {
+  checkoutCreatedAt: Date | null;
+  now: Date;
+}): boolean {
+  const attemptAgeMs = input.checkoutCreatedAt
+    ? input.now.getTime() - input.checkoutCreatedAt.getTime()
+    : Number.NaN;
+  return Number.isFinite(attemptAgeMs)
+    && attemptAgeMs >= 0
+    && attemptAgeMs < HOSTED_FAMILY_CHECKOUT_CLAIM_MAX_AGE_MS;
+}
+
+async function prepareHostedFamilyDraftAbandonmentCandidate(input: {
+  draft: HostedFamilyOwnerDraftRecord;
+  now: Date;
+  ownerMemberId: string;
+  prisma: HostedOnboardingReadClient;
+}): Promise<HostedFamilyDraftAbandonmentCandidate> {
+  const state = classifyHostedFamilyOwnerDraft(input.draft, input.ownerMemberId);
+  if (state === "not_draft") {
     throw hostedOnboardingError({
-      code: "HOSTED_FAMILY_MEMBER_ALREADY_SPONSORED",
+      code: "HOSTED_FAMILY_DRAFT_NOT_ABANDONABLE",
       httpStatus: 409,
-      message: "This member is already in another active family plan.",
+      message:
+        "This Family plan is not an unfinished owner-only setup. Manage Family billing or membership instead.",
     });
   }
+  if (state === "billing_authority") {
+    throw buildHostedFamilyDraftBillingMayCompleteError();
+  }
+  if (state === "checkout_inconsistent") {
+    throw buildHostedFamilyDraftRecoveryRequiredError();
+  }
+
+  const billingRef = input.draft.billingRef;
+  const checkoutAttemptId = billingRef?.checkoutAttemptId ?? null;
+  const checkoutCreatedAt = billingRef?.checkoutCreatedAt ?? null;
+  const checkoutSeatCount = billingRef?.checkoutSeatCount ?? null;
+  if (state === "checkout_starting") {
+    if (hostedFamilyCheckoutClaimIsWithinSafeReplayWindow({
+      checkoutCreatedAt,
+      now: input.now,
+    })) {
+      throw hostedOnboardingError({
+        code: "HOSTED_FAMILY_DRAFT_CHECKOUT_STARTING",
+        httpStatus: 409,
+        message:
+          "Family checkout is still starting. Try abandoning this setup again after checkout finishes or expires.",
+        retryable: true,
+      });
+    }
+    throw buildHostedFamilyDraftRecoveryRequiredError();
+  }
+
+  let stripeCheckoutSessionId: string | null = null;
+  let stripeCheckoutSessionLookupKey: string | null = null;
+  if (state === "checkout_bound") {
+    stripeCheckoutSessionId = await decryptHostedWebNullableString({
+      field: HOSTED_ACCOUNT_GROUP_BILLING_STRIPE_CHECKOUT_SESSION_FIELD,
+      memberId: input.ownerMemberId,
+      prisma: input.prisma,
+      value: billingRef?.stripeCheckoutSessionIdEncrypted ?? null,
+    });
+    stripeCheckoutSessionLookupKey = billingRef?.stripeCheckoutSessionLookupKey ?? null;
+    if (
+      !stripeCheckoutSessionId
+      || !stripeCheckoutSessionLookupKey
+      || createHostedStripeCheckoutSessionLookupKey(stripeCheckoutSessionId)
+        !== stripeCheckoutSessionLookupKey
+    ) {
+      throw buildHostedFamilyDraftRecoveryRequiredError();
+    }
+  }
+
+  return {
+    checkoutAttemptId,
+    checkoutCreatedAt,
+    checkoutRetiredByProvider: false,
+    checkoutSeatCount,
+    groupId: input.draft.id,
+    stripeCheckoutSessionId,
+    stripeCheckoutSessionLookupKey,
+  };
+}
+
+function hostedFamilyDraftCheckoutSessionMatchesCandidate(input: {
+  candidate: HostedFamilyDraftAbandonmentCandidate;
+  ownerMemberId: string;
+  session: Stripe.Checkout.Session;
+}): boolean {
+  return Boolean(
+    input.candidate.checkoutAttemptId
+    && input.candidate.stripeCheckoutSessionId
+    && isHostedFamilyCheckoutSession(input.session)
+    && input.session.id === input.candidate.stripeCheckoutSessionId
+    && input.session.metadata?.accountGroupId === input.candidate.groupId
+    && input.session.metadata?.ownerMemberId === input.ownerMemberId
+    && input.session.metadata?.checkoutAttemptId === input.candidate.checkoutAttemptId,
+  );
+}
+
+async function abandonHostedFamilyDraftCandidateTx(input: {
+  candidate: HostedFamilyDraftAbandonmentCandidate;
+  ownerMemberId: string;
+  tx: Prisma.TransactionClient;
+}): Promise<HostedFamilyDraftAbandonmentTxResult> {
+  await lockHostedMemberRow(input.tx, input.ownerMemberId);
+  await assertHostedFamilyMemberNotDirectPaidTx({
+    memberId: input.ownerMemberId,
+    tx: input.tx,
+  });
+  const draft = await readHostedFamilyOwnerDraftRecord({
+    ownerMemberId: input.ownerMemberId,
+    prisma: input.tx,
+  });
+  if (!draft) {
+    return "missing";
+  }
+  if (draft.id !== input.candidate.groupId) {
+    return "changed";
+  }
+
+  const state = classifyHostedFamilyOwnerDraft(draft, input.ownerMemberId);
+  if (state === "billing_authority") {
+    return "billing_authority";
+  }
+  if (state === "not_draft" || state === "checkout_inconsistent") {
+    return "changed";
+  }
+
+  if (!hostedFamilyDraftCheckoutClaimMatchesCandidate(draft, input.candidate)) {
+    return "changed";
+  }
+
+  return await deleteHostedFamilyOwnerDraftTx({
+    draft,
+    ownerMemberId: input.ownerMemberId,
+    tx: input.tx,
+  })
+    ? "abandoned"
+    : "changed";
+}
+
+function hostedFamilyDraftCheckoutClaimMatchesCandidate(
+  draft: HostedFamilyOwnerDraftRecord,
+  candidate: HostedFamilyDraftAbandonmentCandidate,
+): boolean {
+  const billingRef = draft.billingRef;
+  const exactClaimMatches = (
+    (billingRef?.checkoutAttemptId ?? null) === candidate.checkoutAttemptId
+    && (billingRef?.checkoutSeatCount ?? null) === candidate.checkoutSeatCount
+    && (billingRef?.stripeCheckoutSessionLookupKey ?? null)
+      === candidate.stripeCheckoutSessionLookupKey
+    && (
+      candidate.checkoutCreatedAt === null
+        ? billingRef?.checkoutCreatedAt == null
+        : billingRef?.checkoutCreatedAt?.getTime()
+          === candidate.checkoutCreatedAt.getTime()
+    )
+  );
+  if (exactClaimMatches) {
+    return true;
+  }
+
+  // An exact checkout.session.expired reconciliation may clear the claim after
+  // provider preparation but before this locked revalidation. Accept only the
+  // fully cleared shape, and only after Stripe proved the prepared Session was
+  // expired or absent. A replacement claim retains any one of these fields and
+  // therefore wins the race.
+  return candidate.checkoutRetiredByProvider && (
+    !billingRef?.checkoutAttemptId
+    && !billingRef?.checkoutCreatedAt
+    && billingRef?.checkoutSeatCount == null
+    && !billingRef?.stripeCheckoutSessionIdEncrypted
+    && !billingRef?.stripeCheckoutSessionLookupKey
+  );
+}
+
+async function deleteHostedFamilyOwnerDraftTx(input: {
+  draft: HostedFamilyOwnerDraftRecord;
+  ownerMemberId: string;
+  tx: Prisma.TransactionClient;
+}): Promise<boolean> {
+  const deleted = await input.tx.hostedAccountGroup.deleteMany({
+    where: {
+      billingStatus: HostedBillingStatus.not_started,
+      id: input.draft.id,
+      ownerMemberId: input.ownerMemberId,
+      suspendedAt: null,
+    },
+  });
+  return deleted.count === 1;
+}
+
+export function buildHostedFamilyDraftCheckoutConflictReplyText(input: {
+  inviteCode: string;
+}): string {
+  return [
+    "Your Family invite was not used.",
+    "You still have an unfinished Family checkout of your own.",
+    `Open Family settings to resolve it, then return to this invite: ${buildHostedFamilyInviteRecoveryUrl(input.inviteCode)}`,
+  ].join(" ");
+}
+
+function buildHostedFamilyDraftConflictError(inviteCode: string) {
+  return hostedOnboardingError({
+    code: HOSTED_FAMILY_DRAFT_CHECKOUT_ACTIVE_ERROR_CODE,
+    details: { inviteCode },
+    httpStatus: 409,
+    message: buildHostedFamilyDraftCheckoutConflictReplyText({ inviteCode }),
+  });
+}
+
+function buildHostedFamilyDraftBillingMayCompleteError() {
+  return hostedOnboardingError({
+    code: "HOSTED_FAMILY_DRAFT_BILLING_SYNCING",
+    httpStatus: 409,
+    message:
+      "This Family checkout completed or has billing attached and may still activate. Wait for billing to finish syncing before changing Family plans.",
+    retryable: true,
+  });
+}
+
+function buildHostedFamilyDraftChangedError() {
+  return hostedOnboardingError({
+    code: "HOSTED_FAMILY_DRAFT_CHANGED",
+    httpStatus: 409,
+    message:
+      "This Family setup changed before it could be abandoned. Refresh Settings and try again.",
+    retryable: true,
+  });
+}
+
+function buildHostedFamilyDraftRecoveryRequiredError() {
+  return hostedOnboardingError({
+    code: "HOSTED_FAMILY_DRAFT_RECOVERY_REQUIRED",
+    httpStatus: 409,
+    message:
+      "This unfinished Family checkout has incomplete billing state. Contact support before changing Family plans.",
+  });
 }
 
 async function assertHostedFamilyInviteTargetNotActiveMemberTx(input: {

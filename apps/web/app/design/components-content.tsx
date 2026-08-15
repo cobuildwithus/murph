@@ -156,6 +156,7 @@ import {
   DESIGN_GROUP_SPONSORSHIP_OFFERS,
   DESIGN_USAGE_OFFERS,
   DESIGN_USAGE_MISSION_CONTACT_OPTION,
+  GroupFundingSupportersStudy,
 } from "./group-usage-funding-study";
 import { HostedUsageTopUpDialog } from "@/src/components/settings/hosted-usage-top-up-dialog";
 import {
@@ -174,6 +175,7 @@ import { ExperimentResultsShareStudy } from "./experiment-results-share-study";
 import { ImessageChallengeStandingsCardStudy } from "./imessage-challenge-standings-card-study";
 import { ImessageNutritionCardStudy } from "./imessage-nutrition-card-study";
 import { ImessageCompactTableCardStudy } from "./imessage-compact-table-card-study";
+import { MurphCardHandoffStudy } from "./murph-card-handoff-study";
 import { DataExportControlStudy } from "./data-export-study";
 import { HealthDataConsentControlStudy } from "./health-data-consent-study";
 import { SignupReferralComponentStudy } from "./signup-referral-study";
@@ -995,16 +997,17 @@ export function ComponentsContent() {
           <Section title="Environment voice processing feedback">
             <p className="max-w-2xl text-sm leading-6 text-muted-foreground">
               The open report keeps ownership after upload: processing,
-              updated, no-clear-facts, and delayed recovery remain visible
-              without requiring a reload. Processing stays animated, and the
-              delayed action rechecks the existing accepted job.
+              private-report refresh, updated, no-clear-facts, and delayed
+              recovery remain visible without requiring a reload. Processing
+              stays animated, and the delayed action rechecks the owned phase.
             </p>
             <div className="grid gap-4">
               <EnvironmentVoiceRefreshNotice
-                state={{
-                  baselineValues: "{}",
-                  status: "processing",
-                }}
+                state={{ status: "processing" }}
+                onCheckAgain={() => {}}
+              />
+              <EnvironmentVoiceRefreshNotice
+                state={{ status: "refreshing" }}
                 onCheckAgain={() => {}}
               />
               <EnvironmentVoiceRefreshNotice
@@ -1132,7 +1135,16 @@ export function ComponentsContent() {
         <Section title="Input OTP">
           <div className="grid gap-2">
             <Label htmlFor="otp-ds">Verification code</Label>
-            <InputOTP id="otp-ds" maxLength={6} autoComplete="one-time-code">
+            <InputOTP
+              id="otp-ds"
+              maxLength={6}
+              autoComplete="one-time-code"
+              data-1p-ignore
+              data-bwignore="true"
+              data-form-type="other"
+              data-lpignore="true"
+              pushPasswordManagerStrategy="none"
+            >
               <InputOTPGroup>
                 <InputOTPSlot index={0} className="size-11 bg-card text-base" />
                 <InputOTPSlot index={1} className="size-11 bg-card text-base" />
@@ -1323,13 +1335,15 @@ export function ComponentsContent() {
 
         <Separator />
 
-        <Section title="Setup Loader">
+        <Section id="setup-loader" title="Setup Loader">
           <p className="text-sm text-muted-foreground">
             Full-page loader shown on <code className="font-mono text-xs">/join/[inviteCode]</code> while
-            Starter usage is activated. The Murph mark fires a sonar ripple from its two
-            largest core dots outward — each dot&apos;s delay is proportional to its distance
-            from center, so the wave radiates through the constellation rather than pulsing
-            uniformly. Honors <code className="font-mono text-xs">prefers-reduced-motion</code>.
+            Starter usage is activated. Successful activation replaces the document so Home
+            re-evaluates the new access grant instead of retaining this loading tree. The Murph
+            mark fires a sonar ripple from its two largest core dots outward — each dot&apos;s delay
+            is proportional to its distance from center, so the wave radiates through the
+            constellation rather than pulsing uniformly. Honors{" "}
+            <code className="font-mono text-xs">prefers-reduced-motion</code>.
           </p>
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="flex flex-col items-center justify-center gap-6 rounded-2xl bg-[#FAF8F4] px-8 py-16 ring-1 ring-[#1A1F16]/[0.06]">
@@ -1443,7 +1457,7 @@ export function ComponentsContent() {
 
         <Section
           id="imessage-nutrition-card"
-          title="iMessage nutrition card preview"
+          title="iMessage nutrition fallback parity"
         >
           <ImessageNutritionCardStudy />
         </Section>
@@ -1452,7 +1466,7 @@ export function ComponentsContent() {
 
         <Section
           id="imessage-compact-table-card"
-          title="iMessage workout and compact table fallback states"
+          title="iMessage workout and compact-table fallback parity"
         >
           <ImessageCompactTableCardStudy />
         </Section>
@@ -1461,9 +1475,18 @@ export function ComponentsContent() {
 
         <Section
           id="imessage-challenge-standings-card"
-          title="iMessage challenge standings card"
+          title="iMessage challenge-standings fallback parity"
         >
           <ImessageChallengeStandingsCardStudy />
+        </Section>
+
+        <Separator />
+
+        <Section
+          id="murph-card-handoff-dialog"
+          title="Shared card handoff dialog"
+        >
+          <MurphCardHandoffStudy />
         </Section>
 
         <Separator />
@@ -2144,6 +2167,17 @@ export function ComponentsContent() {
 
         <Separator />
 
+        <Section title="Group funding supporters">
+          <p className="text-sm text-muted-foreground">
+            The funding page recognizes the current monthly sponsor and recent
+            one-time supporters without exposing contribution amounts or the
+            sponsor&apos;s private monthly maximum.
+          </p>
+          <GroupFundingSupportersStudy />
+        </Section>
+
+        <Separator />
+
         <Section title="Signup referral link actions">
           <p className="text-sm text-muted-foreground">
             The real copy action keeps loading, clipboard, and recovery states
@@ -2284,14 +2318,14 @@ export function ComponentsContent() {
 
         <Separator />
 
-        <Section title="Personality Settings">
+        <Section title="Style Levels">
           <p className="text-sm text-muted-foreground">
             Private Humor, Push, and Detail controls. The mobile preview uses a
             full-height drawer with a safe-area footer; desktop uses a dialog.
           </p>
           <div className="flex flex-wrap gap-3 rounded-xl border border-border bg-card p-5">
             <Button onClick={() => setPersonalitySettingsOpen(true)}>
-              Preview personality settings
+              Preview style levels
             </Button>
           </div>
           <MurphPersonalitySettingsDialog
@@ -2533,7 +2567,7 @@ export function ComponentsContent() {
 
         <Separator />
 
-        <Section title="Health data consent actions">
+        <Section title="Health data consent settings row">
           <HealthDataConsentControlStudy />
         </Section>
 

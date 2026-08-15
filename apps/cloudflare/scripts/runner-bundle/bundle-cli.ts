@@ -68,13 +68,17 @@ const VAULT_CLI_IMPORT_SURFACE_HOOK_SOURCE = [
 // the whole command surface onto the hot path with nothing watching).
 // Baselines measured from the real assembled bundle on 2026-06-11:
 // total 7,052,933 B across all chunks, entry bin.js 15,569 B. The merged
-// Health Commons, recurring-timezone, workout-card, and group-challenge card
-// graph measured 9,062,535B in the exact combined local assembly on
-// 2026-08-10. External/import-surface guards remain clean, so ratchet from that
-// output with the established narrow cross-platform allowance. If a violation
-// fires, investigate the listed largest inputs first; only raise the budget
-// deliberately for growth that is understood and intended.
-const VAULT_CLI_BUNDLE_TOTAL_BYTES_BUDGET = 9_062_535 + 32_768;
+// Health Commons, recurring-timezone, workout-card, group-challenge-card, and
+// generated-image-continuity additions are intentional lazy CLI capabilities;
+// no new package enters the graph. The deterministic Messages workout action
+// reuses that existing graph and measured 9,111,172 B on macOS after merging
+// current main on 2026-08-14. The reviewed Junction temporal-fidelity and
+// source-authority graph measured 9,128,211 B on Linux CI and 9,175,594 B on
+// macOS after merging current main on 2026-08-14; no package entered the graph.
+// Keep the larger measured graph inside a narrow 32 KiB allowance. If a
+// violation fires, investigate the listed largest inputs first; only raise the
+// budget deliberately for understood, intended growth.
+const VAULT_CLI_BUNDLE_TOTAL_BYTES_BUDGET = 9_209_000;
 const VAULT_CLI_BUNDLE_ENTRY_BYTES_BUDGET = 20_000;
 
 // Known divergence the parity battery cannot reach (it would need a live

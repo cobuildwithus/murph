@@ -22,6 +22,10 @@ import {
   recordAssistantToolFailureRuntimeIssues,
   resolveAssistantDiagnosticsPolicy,
 } from '../src/assistant/issue-reporting.ts'
+import { normalizeCodexEvent } from '../src/assistant-codex-events.ts'
+import {
+  createCodexActionRuntimeIssueTracker,
+} from '../src/assistant-codex/action-diagnostics.ts'
 import {
   hasAssistantSeenFirstContact,
   markAssistantFirstContactSeen,
@@ -968,6 +972,102 @@ describe('assistant product small seams', () => {
         operation: 'cleanup',
       }),
     })
+  })
+
+  it('persists only bounded command failure attribution', async () => {
+    runtimeStateMocks.writePendingAssistantRuntimeIssueRecord.mockResolvedValue(
+      undefined,
+    )
+    const tracker = createCodexActionRuntimeIssueTracker()
+    const started = {
+      method: 'item/started',
+      params: {
+        item: {
+          command: 'rg private-query /tmp/private-record',
+          id: 'private-command-id',
+          type: 'commandExecution',
+        },
+        turnId: 'private-turn-id',
+      },
+    }
+    const failed = {
+      method: 'item/completed',
+      params: {
+        item: {
+          aggregatedOutput: 'private command output',
+          exitCode: 2,
+          id: 'private-command-id',
+          type: 'commandExecution',
+        },
+        turnId: 'private-turn-id',
+      },
+    }
+    const recovered = {
+      method: 'item/completed',
+      params: {
+        item: {
+          command: 'rg narrower-query /tmp/private-record',
+          exitCode: 0,
+          id: 'private-recovery-id',
+          type: 'commandExecution',
+        },
+        turnId: 'private-turn-id',
+      },
+    }
+
+    expect(tracker.recordEvent({
+      activeTurnId: 'private-turn-id',
+      normalizedEvent: normalizeCodexEvent(started),
+      rawEvent: started,
+    })).toBeNull()
+    const issue = tracker.recordEvent({
+      activeTurnId: 'private-turn-id',
+      normalizedEvent: normalizeCodexEvent(failed),
+      rawEvent: failed,
+    })
+    expect(issue).not.toBeNull()
+    expect(tracker.recordEvent({
+      activeTurnId: 'private-turn-id',
+      normalizedEvent: normalizeCodexEvent(recovered),
+      rawEvent: recovered,
+    })).toBeNull()
+
+    await recordAssistantRuntimeIssue({
+      issue: issue!,
+      policy: resolveAssistantDiagnosticsPolicy({
+        channel: 'telegram',
+        env: {},
+        executionContext: {
+          hosted: {
+            memberId: 'private-member-id',
+            userEnvKeys: [],
+          },
+        },
+      }),
+      vault: '/vaults/test',
+    })
+
+    const written =
+      runtimeStateMocks.writePendingAssistantRuntimeIssueRecord.mock.calls[0]?.[0]
+    expect(written?.record.details).toEqual({
+      actionKind: 'command.execution',
+      commandFamily: 'search',
+      commandOrdinal: 1,
+      durationMsBucket: 'unknown',
+      exitCode: 2,
+      outputBytesBucket: 'lt_1kb',
+      recoveredAfterFailure: true,
+    })
+    expect(written?.record.details).not.toHaveProperty('failureClass')
+    const encodedRecord = JSON.stringify(written?.record)
+    expect(encodedRecord).not.toContain('private-query')
+    expect(encodedRecord).not.toContain('narrower-query')
+    expect(encodedRecord).not.toContain('/tmp/private-record')
+    expect(encodedRecord).not.toContain('private command output')
+    expect(encodedRecord).not.toContain('private-command-id')
+    expect(encodedRecord).not.toContain('private-recovery-id')
+    expect(encodedRecord).not.toContain('private-turn-id')
+    expect(encodedRecord).not.toContain('private-member-id')
   })
 
   it('records runtime issue inputs best-effort without blocking or exceeding the cap', async () => {

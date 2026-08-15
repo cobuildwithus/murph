@@ -741,14 +741,31 @@ function readHostedRuntimeReconciliationTimestamp(value: string | null): number 
 function projectHostedRuntimeReconciliationWorkspace(
   workspace: HostedWorkspaceRecord | null,
 ): HostedRuntimeReconciliationFactsWorkspace | null {
+  const handledThroughSeq = workspace
+    ? readHostedRuntimeSystemHandledThroughSeq(workspace.redactedStatusJson)
+    : undefined;
   return workspace
     ? {
+        ...(handledThroughSeq === undefined
+          ? {}
+          : { hostedMailboxSystemHandledThroughSeq: handledThroughSeq }),
         inboxMediaRetentionWakeAt: workspace.inboxMediaRetentionWakeAt,
         nextWakeAt: workspace.nextWakeAt,
         nextWakeReason: workspace.nextWakeReason,
         version: workspace.version,
       }
     : null;
+}
+
+function readHostedRuntimeSystemHandledThroughSeq(
+  redactedStatusJson: HostedWorkspaceRecord["redactedStatusJson"],
+): string | undefined {
+  const value = readHostedMailboxRedactedStatusRecord(redactedStatusJson)?.[
+    "hostedMailboxSystemHandledThroughSeq"
+  ];
+  return typeof value === "string" && /^[0-9]+$/u.test(value)
+    ? value
+    : undefined;
 }
 
 function normalizeHostedRuntimeReconciliationDate(

@@ -80,7 +80,6 @@ beforeEach(() => {
     },
     murphEmailAddress: null,
     murphPhoneNumber: null,
-    userEmailAddress: null,
   });
 });
 
@@ -112,7 +111,6 @@ test("SidebarChatWithMurphAction opens a contact picker when multiple channels a
     },
     murphEmailAddress: "murph+alias123@mail.withmurph.ai",
     murphPhoneNumber: "+15550100001",
-    userEmailAddress: "member@example.test",
   });
 
   const { SidebarChatWithMurphAction } = await import(
@@ -149,7 +147,7 @@ test("SidebarChatWithMurphAction routes signed-in members without a chat channel
   assert.match(markup, /aria-label="Link a contact method to chat with Murph"/);
 });
 
-test("SidebarChatWithMurphAction does not treat a checkout email as a chat channel", async () => {
+test("SidebarChatWithMurphAction does not synthesize an email chat channel", async () => {
   mocks.getHostedPageAuthSnapshot.mockResolvedValue({
     authenticated: true,
     authenticatedMember: {
@@ -166,7 +164,6 @@ test("SidebarChatWithMurphAction does not treat a checkout email as a chat chann
     },
     murphEmailAddress: null,
     murphPhoneNumber: null,
-    userEmailAddress: "payer@example.test",
   });
 
   const { SidebarChatWithMurphAction } = await import(
@@ -176,7 +173,6 @@ test("SidebarChatWithMurphAction does not treat a checkout email as a chat chann
 
   assert.match(markup, /href="\/settings"/);
   assert.doesNotMatch(markup, /href="mailto:/);
-  assert.doesNotMatch(markup, /payer@example\.test/);
 });
 
 test("SidebarChatWithMurphAction skips verified email without a reply alias", async () => {
@@ -196,7 +192,6 @@ test("SidebarChatWithMurphAction skips verified email without a reply alias", as
     },
     murphEmailAddress: null,
     murphPhoneNumber: "+15550100001",
-    userEmailAddress: "member@example.test",
   });
 
   const { SidebarChatWithMurphAction } = await import(
@@ -232,7 +227,6 @@ test("SidebarChatWithMurphAction does not use assigned SMS without a connected p
     },
     murphEmailAddress: "murph+alias123@mail.withmurph.ai",
     murphPhoneNumber: "+15550100001",
-    userEmailAddress: "member@example.test",
   });
 
   const { SidebarChatWithMurphAction } = await import(
@@ -279,7 +273,6 @@ test("SidebarChatWithMurphAction discloses Telegram new-tab behavior", async () 
     },
     murphEmailAddress: null,
     murphPhoneNumber: null,
-    userEmailAddress: null,
   });
 
   const { SidebarChatWithMurphAction } = await import(

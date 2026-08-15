@@ -291,8 +291,7 @@ export async function ensureHostedAssistantOperatorDefaults(input: {
   if (input.allowMissing) {
     return {
       configured: false,
-      provider:
-        existingActiveProfile?.target.adapter === 'codex-cli' ? 'codex-cli' : null,
+      provider: existingActiveProfile ? 'codex-cli' : null,
       seeded: false,
       source: 'missing',
     }
@@ -325,11 +324,7 @@ export function resolveHostedAssistantOperatorDefaultsState(
 
     return {
       configured: readyProfile !== null,
-      provider:
-        readyProfile?.target.adapter === 'codex-cli' ||
-        activeProfile?.target.adapter === 'codex-cli'
-          ? 'codex-cli'
-          : null,
+      provider: readyProfile || activeProfile ? 'codex-cli' : null,
     }
   }
 
@@ -375,7 +370,6 @@ function resolveHostedAssistantEnvProfile(
     id: platformProfile?.id ?? HOSTED_ASSISTANT_PLATFORM_PROFILE_ID,
     label: resolveHostedAssistantProfileLabel({
       modelProvider: seedPlan.providerConfig.modelProvider,
-      provider: 'codex-cli',
     }),
     managedBy: 'platform',
     providerConfig: seedPlan.providerConfig,

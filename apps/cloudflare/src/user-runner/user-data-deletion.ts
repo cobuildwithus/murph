@@ -31,6 +31,7 @@ import { readActiveRuntimeRunnerContainerName } from "./runtime-container-wake.j
 import type { RunnerStateStore } from "./runner-state-store.js";
 import type { DurableObjectStateLike } from "./types.js";
 import {
+  readHostedBrowserVaultReplicaPostStopDrainUntil,
   readHostedWorkspaceSnapshotR2PutDrainUntil,
 } from "./workspace-snapshot-sessions.js";
 
@@ -94,6 +95,21 @@ export async function deleteHostedRunnerUserData(input: HostedRunnerUserDataDele
 }): Promise<HostedRunnerUserDataDeletionResult> {
   await input.stateStore.assertStateForUser(input.userId);
   const runnerCleanup = await stopRunnerBeforeUserDataDeletion(input);
+  const browserVaultDrainUntil = await readHostedBrowserVaultReplicaPostStopDrainUntil({
+    state: input.state,
+    userId: input.userId,
+  });
+  if (browserVaultDrainUntil !== null) {
+    return {
+      ok: false,
+      reason: "r2_upload_drain_pending",
+      retryAfterSeconds: Math.max(
+        1,
+        Math.ceil((Date.parse(browserVaultDrainUntil) - Date.now()) / 1000),
+      ),
+      userId: input.userId,
+    };
+  }
   const drainUntil = await readHostedWorkspaceSnapshotR2PutDrainUntil({
     state: input.state,
     userId: input.userId,

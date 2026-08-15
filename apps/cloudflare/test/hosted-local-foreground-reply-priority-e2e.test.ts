@@ -27,10 +27,12 @@ import {
   buildHostedExecutionAssistantAskRequestedWake,
   buildHostedExecutionAssistantNotificationRequestedWake,
   buildHostedExecutionCodexAuthRequestedWake,
+  buildHostedExecutionDailyMetricReportedWake,
   buildHostedExecutionDeviceSyncWake,
   buildHostedExecutionEnvironmentVoiceCapturedWake,
-  buildHostedExecutionGroupNewsletterEmailNeededWake,
   buildHostedExecutionMealPhotoCapturedWake,
+  buildHostedExecutionMemberActionCompletedWake,
+  buildHostedExecutionMemberActionRequestedWake,
   buildHostedExecutionMemberActivatedWake,
   buildHostedExecutionMemberChannelsUpdatedWake,
   buildHostedExecutionMemberPreferencesUpdatedWake,
@@ -253,7 +255,7 @@ describe.sequential("hosted local foreground reply priority e2e", () => {
     try {
       latencyMs = await sendInboundAndRequirePromptReply({
         afterAccepted: async () => {
-          await waitForForegroundReplacementWhileBarrierHeld(
+          await requireSystemOwnerPreservedWhileBarrierHeld(
             systemMailboxProbe.userId,
             systemFence.attemptId,
           );
@@ -1981,37 +1983,33 @@ async function waitForSystemWakeStormCheckpointBarrier(
   ]));
 }
 
-async function waitForForegroundReplacementWhileBarrierHeld(
+async function requireSystemOwnerPreservedWhileBarrierHeld(
   userId: string,
   systemAttemptId: string,
 ): Promise<void> {
-  const deadlineAt = Date.now() + 15_000;
-  let lastFence = await readActiveRuntimeFenceForTest(userId);
-
-  while (Date.now() < deadlineAt) {
+  for (let observation = 0; observation < 3; observation += 1) {
     const barrier =
       await requireScenario().harness.readShutdownCheckpointPublicationBarrierForTest(
         userId,
       );
     if (barrier.state !== "entered") {
-      throw new Error("Canonical checkpoint publication escaped before foreground replacement.");
+      throw new Error(
+        "Canonical checkpoint publication escaped before the foreground-safe handoff.",
+      );
     }
-    lastFence = await readActiveRuntimeFenceForTest(userId);
+    const activeFence = await readActiveRuntimeFenceForTest(userId);
     if (
-      lastFence
-      && lastFence.attemptId !== systemAttemptId
-      && lastFence.processingMode === "default"
+      activeFence?.attemptId !== systemAttemptId
+      || activeFence?.processingMode !== "system_mailbox"
     ) {
-      return;
+      throw new Error(await requireScenario().buildFailureMessage(userId, [
+        "Foreground admission replaced the system owner before its held checkpoint became durable.",
+        `system attempt id: ${systemAttemptId}`,
+        `active fence: ${JSON.stringify(activeFence)}`,
+      ]));
     }
     await sleep(100);
   }
-
-  throw new Error(await requireScenario().buildFailureMessage(userId, [
-    "Foreground admission did not replace the held system-mailbox owner.",
-    `system attempt id: ${systemAttemptId}`,
-    `last active fence: ${JSON.stringify(lastFence)}`,
-  ]));
 }
 
 async function readActiveRuntimeFenceForTest(userId: string): Promise<{
@@ -2207,6 +2205,8 @@ function buildEverySystemWake(
     Date.parse(requestedAt) + HOSTED_EXECUTION_ASSISTANT_ASK_REQUEST_TTL_MS,
   ).toISOString();
   const askRequestId = `haask_priority_${runId}`;
+  const requestedActionId = "2f1c1fdc-c7b0-4d90-b902-8e6295959243";
+  const completedActionId = "3f1c1fdc-c7b0-4d90-b902-8e6295959243";
   const runtimeControlKinds = [
     "runtime.manual-requested",
     "runtime.maintenance-requested",
@@ -2245,6 +2245,47 @@ function buildEverySystemWake(
           detail: 7,
         },
         tone: "casual",
+      },
+    }),
+    buildHostedExecutionMemberActionRequestedWake({
+      eventId: `member.action.requested:${requestedActionId}`,
+      memberId: identity.userId,
+      occurredAt: requestedAt,
+      request: {
+        action: {
+          expectedWorkout: {
+            actionBinding: "a".repeat(64),
+            exercises: [{ name: "Leg press", sets: [{ logged: true }] }],
+          },
+          kind: "workout.live.apply",
+          mutations: [{
+            exerciseName: "Leg press",
+            exercisePosition: 1,
+            expectedResult: {
+              kind: "reps",
+              reps: null,
+            },
+            kind: "set.put",
+            result: { kind: "reps", reps: 8 },
+            setPosition: 1,
+          }],
+          version: 1,
+        },
+        actionId: requestedActionId,
+        requestedAt,
+        schemaVersion: 1,
+      },
+    }),
+    buildHostedExecutionMemberActionCompletedWake({
+      eventId: `member.action.completed:${completedActionId}`,
+      memberId: identity.userId,
+      occurredAt: completedAt,
+      outcome: {
+        actionId: completedActionId,
+        completedAt,
+        reason: "no_active_workout",
+        schemaVersion: 1,
+        status: "rejected",
       },
     }),
     buildHostedExecutionAssistantNotificationRequestedWake({
@@ -2312,6 +2353,15 @@ function buildEverySystemWake(
       reason: "webhook_hint",
       userId: identity.userId,
     }),
+    buildHostedExecutionDailyMetricReportedWake({
+      date: requestedAt.slice(0, 10),
+      eventId: `health.daily-metric.reported:priority:${runId}`,
+      memberId: identity.userId,
+      metric: "steps",
+      occurredAt: requestedAt,
+      unit: "count",
+      value: 8_000,
+    }),
     buildHostedExecutionEnvironmentVoiceCapturedWake({
       audioKey: environmentVoice.audioKey,
       byteLength: environmentVoice.byteLength,
@@ -2323,13 +2373,6 @@ function buildEverySystemWake(
       memberId: identity.userId,
       occurredAt: requestedAt,
       sha256: environmentVoice.sha256,
-    }),
-    buildHostedExecutionGroupNewsletterEmailNeededWake({
-      eventId: `group-newsletter.email-needed:priority:${runId}`,
-      groupDisplayName: "Priority gate",
-      groupId: `group_priority_${runId}`,
-      memberId: identity.userId,
-      occurredAt: requestedAt,
     }),
     buildHostedExecutionMealPhotoCapturedWake({
       byteLength: mealPhoto.byteLength,

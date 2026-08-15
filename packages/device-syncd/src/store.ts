@@ -1,5 +1,8 @@
 import type { DatabaseSync } from "node:sqlite";
 
+import { isDeviceSyncConnectionSetupPending } from "./public-account.ts";
+import { toIsoTimestamp } from "./shared.ts";
+
 import {
   applySqliteRuntimeMigrations,
   openSqliteRuntimeDatabase,
@@ -43,16 +46,20 @@ import {
   failDeviceSyncJobIfOwned,
   getDeviceSyncJobById,
   listDueDeviceSyncJobBatchCandidates,
+  listPendingDeviceSyncJobsForAccount,
   markPendingDeviceSyncJobsDeadForAccount,
   markPendingDeviceSyncJobsDeadForAccountIfCurrent,
   readNextDeviceSyncJobWakeAt,
   readNextDeviceSyncJobWakeAtForAccount,
   releaseDeviceSyncJobIfOwned,
+  wakeRetainedDeviceSyncJobsForAccount,
 } from "./store/jobs.ts";
 import {
   consumeOAuthState,
   createOAuthState,
   deleteExpiredOAuthStates,
+  discardUnconsumedOAuthState,
+  resolveOAuthStateWithoutProviderAuthority,
 } from "./store/oauth-states.ts";
 import {
   DEVICE_SYNC_STORE_SQLITE_SCHEMA_VERSION,
@@ -65,6 +72,7 @@ import {
   upsertConnectionSourceInTransaction as upsertStoredConnectionSourceInTransaction,
 } from "./store/sources.ts";
 import {
+  clearOAuthCredentialAfterConfirmedRevoke as clearStoredOAuthCredentialAfterConfirmedRevoke,
   markSyncFailed as markStoredSyncFailed,
   markConnectionSetupFailed as markStoredConnectionSetupFailed,
   markSyncStarted as markStoredSyncStarted,
@@ -82,6 +90,7 @@ import {
 import type {
   ClaimDeviceSyncWebhookTraceInput,
   ConsumeOAuthStateResult,
+  DiscardUnconsumedOAuthStateResult,
   DeviceSyncWebhookTraceClaimResult,
   DeviceSyncAccountStatus,
   DeviceSyncJobInput,
@@ -90,6 +99,7 @@ import type {
   ListDeviceConnectionSourcesInput,
   ListDeviceSyncAccountsInput,
   OAuthStateRecord,
+  OAuthStateConsumeClaim,
   ProviderAuthTokens,
   StoredDeviceConnectionSource,
   StoredDeviceSyncAccount,
@@ -179,6 +189,25 @@ export class SqliteDeviceSyncStore {
     return consumeOAuthState(this.database, state, now, expectedProvider, expectedOwnerId);
   }
 
+  discardUnconsumedOAuthState(
+    state: string,
+    now: string,
+    expectedProvider?: string,
+    expectedOwnerId?: string,
+  ): DiscardUnconsumedOAuthStateResult {
+    return discardUnconsumedOAuthState(
+      this.database,
+      state,
+      now,
+      expectedProvider,
+      expectedOwnerId,
+    );
+  }
+
+  resolveOAuthStateWithoutProviderAuthority(claim: OAuthStateConsumeClaim): boolean {
+    return resolveOAuthStateWithoutProviderAuthority(this.database, claim);
+  }
+
   listAccounts(input: ListDeviceSyncAccountsInput | string = {}): StoredDeviceSyncAccount[] {
     return listStoredAccounts(
       this.database,
@@ -218,7 +247,14 @@ export class SqliteDeviceSyncStore {
   }
 
   upsertAccount(input: AccountUpsertInput): StoredDeviceSyncAccount {
-    return upsertStoredAccount(this.database, input);
+    const account = upsertStoredAccount(this.database, input);
+    if (account.status === "active" && !isDeviceSyncConnectionSetupPending(account)) {
+      wakeRetainedDeviceSyncJobsForAccount(this.database, {
+        accountId: account.id,
+        now: input.connectedAt,
+      });
+    }
+    return account;
   }
 
   patchAccount(accountId: string, patch: AccountPatchInput): StoredDeviceSyncAccount {
@@ -368,6 +404,7 @@ export class SqliteDeviceSyncStore {
       localConnectionRevision?: number | null;
       metadataPatch?: Record<string, unknown>;
       nextReconcileAt?: string | null;
+      preserveLastSyncCompletedAt?: boolean;
     } = {},
   ): boolean {
     return markStoredSyncSucceeded(this.database, accountId, now, disconnectGeneration, options);
@@ -394,7 +431,13 @@ export class SqliteDeviceSyncStore {
     now: string,
     code: string,
     message: string,
-  ): { account: StoredDeviceSyncAccount | null; applied: boolean } {
+    oauthClaim?: OAuthStateConsumeClaim,
+  ): {
+    account: StoredDeviceSyncAccount | null;
+    applied: boolean;
+    blockedByRefreshLease: boolean;
+    oauthTokenVersion: number | null;
+  } {
     return markStoredConnectionSetupFailed(
       this.database,
       accountId,
@@ -402,6 +445,22 @@ export class SqliteDeviceSyncStore {
       now,
       code,
       message,
+      oauthClaim,
+    );
+  }
+
+  clearOAuthCredentialAfterConfirmedRevoke(
+    accountId: string,
+    expectedConnectedAt: string,
+    expectedTokenVersion: number,
+    now: string,
+  ): boolean {
+    return clearStoredOAuthCredentialAfterConfirmedRevoke(
+      this.database,
+      accountId,
+      expectedConnectedAt,
+      expectedTokenVersion,
+      now,
     );
   }
 
@@ -421,6 +480,11 @@ export class SqliteDeviceSyncStore {
       if (input.source) {
         upsertStoredConnectionSourceInTransaction(this.database, input.source);
       }
+
+      wakeRetainedDeviceSyncJobsForAccount(this.database, {
+        accountId: input.accountId,
+        now: input.source?.lastSeenAt ?? toIsoTimestamp(new Date()),
+      });
 
       return input.jobs.map((job) =>
         enqueueDeviceSyncJobInTransaction(this.database, {
@@ -475,6 +539,14 @@ export class SqliteDeviceSyncStore {
     return getDeviceSyncJobById(this.database, jobId);
   }
 
+  listPendingJobsForAccount(accountId: string, limit: number): DeviceSyncJobRecord[] {
+    return listPendingDeviceSyncJobsForAccount({
+      accountId,
+      database: this.database,
+      limit,
+    });
+  }
+
   readNextActiveReconcileAt(): string | null {
     return readNextStoredActiveReconcileAt(this.database);
   }
@@ -487,8 +559,13 @@ export class SqliteDeviceSyncStore {
     return readNextDeviceSyncJobWakeAtForAccount(this.database, accountId);
   }
 
-  claimDueJob(workerId: string, now: string, leaseMs: number): DeviceSyncJobRecord | null {
-    return claimDueDeviceSyncJob(this.database, workerId, now, leaseMs);
+  claimDueJob(
+    workerId: string,
+    now: string,
+    leaseMs: number,
+    accountId?: string,
+  ): DeviceSyncJobRecord | null {
+    return claimDueDeviceSyncJob(this.database, workerId, now, leaseMs, accountId);
   }
 
   listDueJobBatchCandidates(input: {
@@ -541,6 +618,7 @@ export class SqliteDeviceSyncStore {
       localConnectionRevision?: number | null;
       metadataPatch?: Record<string, unknown>;
       nextReconcileAt?: string | null;
+      preserveLastSyncCompletedAt?: boolean;
     };
     workerId: string;
   }): boolean {
@@ -627,6 +705,7 @@ export class SqliteDeviceSyncStore {
     retryAt: string | null,
     retryable: boolean,
     retainUntilSuccess = false,
+    replacementPayload?: Record<string, unknown>,
   ): boolean {
     return failDeviceSyncJobIfOwned(this.database, {
       code,
@@ -635,6 +714,7 @@ export class SqliteDeviceSyncStore {
       now,
       retryAt,
       retryable,
+      ...(replacementPayload === undefined ? {} : { replacementPayload }),
       retainUntilSuccess,
       workerId,
     });

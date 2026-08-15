@@ -1,6 +1,6 @@
 ---
 name: food-journal
-description: Use for low-friction meal capture and bounded pattern finding between food and digestion, symptoms, energy, appetite, or performance, providing calorie and macro estimates by default except in eating-disorder-risk, intuitive-eating, or number-sensitive contexts.
+description: Use for low-friction meal capture, connected meal and nutrient questions, and bounded pattern finding between food and digestion, symptoms, energy, appetite, or performance, providing calorie and macro estimates by default except in eating-disorder-risk, intuitive-eating, or number-sensitive contexts.
 ---
 
 # Food journal
@@ -26,12 +26,48 @@ Infer the focus from the conversation:
 
 Ask at most one question, and only when the missing detail materially changes safety, the chosen focus, or whether the record will be useful.
 
+For a connected carbohydrate-record question, use one bounded day or
+short-range read:
+`vault-cli measurement entry list --metric carbohydrates --from <date> --to <date> --limit 50 --format json`.
+Returned grams are partial intake evidence. Do not infer food identity, a
+complete meal, total daily carbohydrate, or eaten calories from them. No
+returned entry means unavailable, not zero.
+
+For a connected or saved-meal vitamin, mineral, or water question, use one
+bounded day or short-range read:
+`vault-cli meal nutrients --from <date> --to <date> --format json`.
+The response lists every supported nutrient field. A `null` total with zero
+contributing meals means unavailable, not zero. A `contributingMealCount` below
+the enclosing `mealCount` means the total is partial across the selected stored
+meals; do not extrapolate the missing meals. Equal counts mean every selected
+stored meal record supplied that field, not that every meal eaten that day was
+logged. The aggregate may combine connected and manually saved meals. Do not
+attribute its totals or coverage to one provider or claim that provider was
+complete unless separate provider-specific evidence establishes that.
+
+Treat this as a bounded sum of stored meal fields, not a copy of the source
+app's daily dashboard. Source-app targets, daily percentages, and completeness
+claims are not imported. When asked what is "low," report the observed total and
+coverage first. Do not call an intake low, adequate, deficient, or excessive
+unless a trustworthy target applies to this member and the stored unit and
+nutrient form are compatible with it; name the target basis and remaining
+uncertainty. If the member asks for a reference comparison, use a current
+authoritative source rather than a remembered target and obtain the age, sex,
+and pregnancy or lactation context needed for that source. Do not directly
+compare provider fields for folic acid, vitamin A, vitamin E, or niacin to DFE,
+RAE, alpha-tocopherol, or niacin-equivalent targets unless the imported form and
+conversion basis are known. One day of food records does not diagnose a
+deficiency. Use
+`nutrition-strategy` for food-first suggestions and
+`micronutrients-supplements` for labs, supplement dosing, or deficiency-risk
+questions.
+
 ## Capture with low friction
 
 - A photo, voice note, or rough phrase can be a complete meal log.
 - Preserve useful real-life context when the user volunteers it, such as eating out, alcohol, a late meal, stress, travel, illness, or social context.
 - Use existing canonical surfaces. Save meal facts to meal records, symptoms to their typed surface, and durable unstructured context to the best-fit existing journal or memory surface. Do not duplicate the same fact across stores.
-- Keep the acknowledgement short and aligned with the user's focus. When enough recent context supports one useful observation, offer one brief non-causal association; otherwise acknowledge the log and stop. Do not turn every meal confirmation into analysis or a nutrition report.
+- After every verified private meal mutation, apply default attachment intent for its eligible daily nutrition card. For response-card attachment eligibility only, treat the accepted meal message as explicitly requesting that card; this is not an explicit numeric-card request and does not authorize target derivation, a paused proposal, or any Goal mutation. When the complete card safety, accepted active-goal authority, fresh same-date totals, route, and bounded-card checks pass and the card alone completely answers the turn, attach that card as the complete response with no companion prose. Without an already accepted complete bundle, or when any other prerequisite fails, keep the truthful fallback short and aligned with the user's focus. Never replace a failed card gate with improvised totals, goals, analysis, or a second response surface.
 
 ## Provide numbers by default, with safety exceptions
 
@@ -56,7 +92,9 @@ activating one. Also read and follow the
 target-authority and complete active-Goal discovery contract in
 `$MURPH_ASSISTANT_SKILLS_ROOT/nutrition-strategy/references/daily-nutrition-card-goals.md`
 before deciding that the five canonical daily goals are complete. Use its
-proposal workflow only if a target is genuinely missing after that read.
+proposal workflow only if a target is genuinely missing after that read and the
+member made an explicit numeric-card or target-setting request. Default meal-card
+intent never invokes it.
 The first setup response explains a paused canonical proposal in ordinary text;
 it does not attach a goal-less card. An unambiguous acceptance may complete the
 pending explicit card request in that next response after the complete safety

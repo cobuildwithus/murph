@@ -211,23 +211,16 @@ export async function runAssistantChatWithInk(
   const defaults = await resolveAssistantOperatorDefaults()
   const themeBaseline = captureAssistantInkThemeBaseline()
   const resolved = await openAssistantConversation(input)
-  const selectedProviderDefaults = resolveAssistantProviderDefaults(
-    defaults,
-    resolved.session.provider,
-  )
+  const selectedProviderDefaults = resolveAssistantProviderDefaults(defaults)
   const transcriptEntries = await listAssistantTranscriptEntries(
     input.vault,
     resolved.session.sessionId,
   )
   const redactedVault = redactAssistantDisplayPath(input.vault)
   const codexHomeForDisplay =
-    resolved.session.provider === 'codex-cli'
-      ? (
-          resolved.session.providerOptions.codexHome ??
-          selectedProviderDefaults?.codexHome ??
-          null
-        )
-      : null
+    resolved.session.providerOptions.codexHome ??
+    selectedProviderDefaults?.codexHome ??
+    null
   const codexDisplay = await resolveCodexDisplayOptions({
     configPath: codexHomeForDisplay
       ? path.join(codexHomeForDisplay, 'config.toml')

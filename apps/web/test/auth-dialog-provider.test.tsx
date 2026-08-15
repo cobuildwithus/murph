@@ -5,13 +5,17 @@ import { renderClientComponent } from "./render-client-component";
 
 const mocks = vi.hoisted(() => ({
   authDialogProps: null as {
+    description?: string;
     onCompleted?: (payload: {
       activationPending: boolean;
       inviteCode: string;
       joinUrl: string;
+      launchConsentGranted?: boolean;
       stage: string;
     }) => Promise<void> | void;
     open?: boolean;
+    requireLaunchConsentOnCompletion?: boolean;
+    title?: string;
   } | null,
   sessionInvalidationListener: null as null | ((
     source:
@@ -25,13 +29,17 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("@/src/components/hosted-onboarding/auth-dialog", () => ({
   AuthDialog(props: {
+    description?: string;
     onCompleted?: (payload: {
       activationPending: boolean;
       inviteCode: string;
       joinUrl: string;
+      launchConsentGranted?: boolean;
       stage: string;
     }) => Promise<void> | void;
     open?: boolean;
+    requireLaunchConsentOnCompletion?: boolean;
+    title?: string;
   }) {
     mocks.authDialogProps = props;
     return props.open
@@ -554,7 +562,7 @@ test("AuthProvider resumes a private computer handoff after sign-in completion",
   await rendered.cleanup();
 });
 
-test("AuthProvider resumes the data privacy settings handoff after sign-in completion", async () => {
+test("AuthProvider resumes privacy-only authentication without consent or stage gating", async () => {
   const { AuthProvider, useAuth } = await import(
     "@/src/components/hosted-onboarding/auth-dialog-provider"
   );
@@ -562,12 +570,12 @@ test("AuthProvider resumes the data privacy settings handoff after sign-in compl
   const reload = vi.fn();
 
   function OpenAuthButton() {
-    const { openAuthDialog } = useAuth();
+    const { openDataPrivacyAuthDialog } = useAuth();
     return createElement(
       "button",
       {
         type: "button",
-        onClick: openAuthDialog,
+        onClick: openDataPrivacyAuthDialog,
       },
       "Sign in",
     );
@@ -600,9 +608,21 @@ test("AuthProvider resumes the data privacy settings handoff after sign-in compl
     (button) => button.textContent === "Complete auth",
   );
   expect(completeButton).toBeTruthy();
+  expect(mocks.authDialogProps).toMatchObject({
+    description:
+      "Use the email address or phone number already linked to your Murph account.",
+    requireLaunchConsentOnCompletion: false,
+    title: "Log in to manage your data",
+  });
 
   await act(async () => {
-    completeButton?.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
+    await mocks.authDialogProps?.onCompleted?.({
+      activationPending: false,
+      inviteCode: "invite-code",
+      joinUrl: "/join/invite-code",
+      launchConsentGranted: false,
+      stage: "checkout",
+    });
   });
 
   expect(reload).toHaveBeenCalledTimes(1);
@@ -661,6 +681,89 @@ test("AuthProvider preserves a Group payment return through sign-in", async () =
   expect(rendered.window.location.href).toBe(href);
   expect(reload).toHaveBeenCalledTimes(1);
   expect(assign).not.toHaveBeenCalled();
+
+  await rendered.cleanup();
+});
+
+test.each([
+  {
+    label: "exact Family invite",
+    resumes: true,
+    search:
+      "?familyInviteReturn=%2Ffamily%2Faccept%2Fcurrent_username_invite",
+  },
+  {
+    label: "external Family invite",
+    resumes: false,
+    search:
+      "?familyInviteReturn=https%3A%2F%2Fexample.test%2Ffamily%2Faccept%2Finvite_123",
+  },
+  {
+    label: "malformed Family invite",
+    resumes: false,
+    search: "?familyInviteReturn=%2Ffamily%2Faccept%2Finvite%20123",
+  },
+  {
+    label: "repeated Family invite",
+    resumes: false,
+    search:
+      "?familyInviteReturn=%2Ffamily%2Faccept%2Finvite_123&familyInviteReturn=%2Ffamily%2Faccept%2Finvite_456",
+  },
+])("AuthProvider scopes Family invite return resume: $label", async ({ resumes, search }) => {
+  const { AuthProvider, useAuth } = await import(
+    "@/src/components/hosted-onboarding/auth-dialog-provider"
+  );
+  const assign = vi.fn();
+  const reload = vi.fn();
+
+  function OpenAuthButton() {
+    const { openAuthDialog } = useAuth();
+    return createElement(
+      "button",
+      { type: "button", onClick: openAuthDialog },
+      "Sign in",
+    );
+  }
+
+  const href = `https://join.example.test/settings${search}#subscription`;
+  const rendered = await renderClientComponent(
+    createElement(
+      AuthProvider,
+      { authenticated: false },
+      createElement(OpenAuthButton),
+    ),
+  );
+  Object.defineProperty(rendered.window, "location", {
+    configurable: true,
+    value: {
+      assign,
+      hash: "#subscription",
+      href,
+      origin: "https://join.example.test",
+      pathname: "/settings",
+      reload,
+      search,
+    },
+  });
+
+  await act(async () => {
+    rendered.button.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
+  });
+  const completeButton = Array.from(rendered.container.querySelectorAll("button")).find(
+    (button) => button.textContent === "Complete auth",
+  );
+  await act(async () => {
+    completeButton?.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
+  });
+
+  if (resumes) {
+    expect(rendered.window.location.href).toBe(href);
+    expect(reload).toHaveBeenCalledTimes(1);
+    expect(assign).not.toHaveBeenCalled();
+  } else {
+    expect(assign).toHaveBeenCalledWith("/home");
+    expect(reload).not.toHaveBeenCalled();
+  }
 
   await rendered.cleanup();
 });

@@ -24,9 +24,9 @@ export const HOSTED_WEB_SESSION_RETENTION_MS = 30 * DAY_MS;
 export const HOSTED_INGRESS_LATENCY_TRACE_RETENTION_MS = 7 * DAY_MS;
 export const HOSTED_DEVICE_WEBHOOK_TRACE_RETENTION_MS = 30 * DAY_MS;
 export const HOSTED_LINQ_PROVIDER_EVENT_DIAGNOSTIC_RETENTION_MS = 7 * DAY_MS;
-// Every diagnostic category is deleted in ordered batches with an explicit
-// per-run ceiling, so one hourly invocation can never open a long delete
-// transaction against the production pool.
+// Every batched retention category uses ordered work with an explicit per-run
+// ceiling, so one hourly invocation can never open a long transaction against
+// the production pool.
 export const HOSTED_RETENTION_BATCH_SIZE = 5_000;
 export const HOSTED_RETENTION_MAX_BATCHES = 4;
 export const HOSTED_INBOX_MEDIA_RETENTION_SIGNAL_BATCH_SIZE = 5;
@@ -41,9 +41,11 @@ export interface HostedRetentionCleanupResult {
   accountDeletionCleanup: HostedAccountDeletionCleanupBatchResult;
   compactedLinqProviderEventDiagnostics: number;
   expiredAssistantRuntimeIssuesDeleted: number;
+  expiredCallbackRequestNoncesDeleted: number;
   expiredComputerRunsCleanedUp: number;
   expiredConversationPolicyNonRepliesRecorded: number;
   expiredDeviceWebhookTracesDeleted: number;
+  expiredGroupCurrentSenderClarificationsDeleted: number;
   expiredIngressLatencyTracesDeleted: number;
   expiredMailboxContentRetired: number;
   expiredMailboxTombstonesDeleted: number;
@@ -70,6 +72,10 @@ export async function runHostedRetentionCleanup(input: {
   });
   // Serial by design: these are background deletes and must never fan out
   // across the same pool that serves user-facing control-plane work.
+  const expiredCallbackRequestNoncesDeleted =
+    await deleteExpiredHostedCallbackRequestNonces({ prisma });
+  const expiredGroupCurrentSenderClarificationsDeleted =
+    await deleteExpiredGroupCurrentSenderClarifications({ now, prisma });
   const expiredIngressLatencyTracesDeleted = await deleteExpiredIngressLatencyTraces({
     now,
     prisma,
@@ -104,10 +110,12 @@ export async function runHostedRetentionCleanup(input: {
     accountDeletionCleanup,
     compactedLinqProviderEventDiagnostics,
     expiredAssistantRuntimeIssuesDeleted,
+    expiredCallbackRequestNoncesDeleted,
     expiredComputerRunsCleanedUp,
     expiredConversationPolicyNonRepliesRecorded:
       expiredMailboxItems.policyNonReplies,
     expiredDeviceWebhookTracesDeleted,
+    expiredGroupCurrentSenderClarificationsDeleted,
     expiredIngressLatencyTracesDeleted,
     expiredMailboxContentRetired: expiredMailboxItems.retired,
     expiredMailboxTombstonesDeleted: expiredMailboxItems.tombstonesDeleted,
@@ -116,6 +124,27 @@ export async function runHostedRetentionCleanup(input: {
     oldRuntimeLogsDeleted: 0,
     staleWebSessionsDeleted,
   };
+}
+
+async function deleteExpiredGroupCurrentSenderClarifications(input: {
+  now: Date;
+  prisma: PrismaClient;
+}): Promise<number> {
+  return await runRetentionBatches(() => input.prisma.$executeRaw`
+    WITH doomed AS (
+      SELECT "group_runtime_member_id", "target_member_id"
+      FROM "hosted_group_current_sender_clarification"
+      WHERE "expires_at" <= ${input.now}
+      ORDER BY "expires_at" ASC, "group_runtime_member_id" ASC,
+        "target_member_id" ASC
+      LIMIT ${HOSTED_RETENTION_BATCH_SIZE}
+    )
+    DELETE FROM "hosted_group_current_sender_clarification" AS clarification
+    USING doomed
+    WHERE clarification."group_runtime_member_id" =
+        doomed."group_runtime_member_id"
+      AND clarification."target_member_id" = doomed."target_member_id"
+  `);
 }
 
 async function signalDueInboxMediaRetentionRuntimes(input: {
@@ -441,6 +470,35 @@ export async function retireExpiredMailboxContent(input: {
       tombstonesDeleted: Number(result?.tombstonesDeleted ?? 0n),
     };
   });
+}
+
+// Callback freshness accepts the exact expiry millisecond, so cleanup uses the
+// same truncated UTC database clock and a strict cutoff.
+export async function deleteExpiredHostedCallbackRequestNonces(input: {
+  prisma: Pick<PrismaClient, "$executeRaw">;
+}): Promise<number> {
+  return await runRetentionBatches(() => input.prisma.$executeRaw`
+    WITH database_clock AS MATERIALIZED (
+      SELECT date_trunc(
+        'milliseconds',
+        clock_timestamp() AT TIME ZONE 'UTC'
+      ) AS "now"
+    ),
+    doomed AS MATERIALIZED (
+      SELECT request_nonce."nonce_hash"
+      FROM "hosted_web_internal_request_nonce" AS request_nonce
+      CROSS JOIN database_clock
+      WHERE request_nonce."expires_at" < database_clock."now"
+      ORDER BY
+        request_nonce."expires_at" ASC,
+        request_nonce."nonce_hash" ASC
+      LIMIT ${HOSTED_RETENTION_BATCH_SIZE}
+      FOR UPDATE OF request_nonce SKIP LOCKED
+    )
+    DELETE FROM "hosted_web_internal_request_nonce" AS request_nonce
+    USING doomed
+    WHERE request_nonce."nonce_hash" = doomed."nonce_hash"
+  `);
 }
 
 export async function deleteExpiredIngressLatencyTraces(input: {

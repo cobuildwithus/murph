@@ -3,7 +3,10 @@
  */
 import { Prisma } from "@prisma/client";
 
-import { buildHostedMemberRoutingPrivateColumns } from "./member-private-codecs";
+import {
+  buildHostedMemberRoutingPrivateColumns,
+  readHostedMemberRoutingHomeLinqRecipientPhones,
+} from "./member-private-codecs";
 import {
   createHostedLinqChatLookupKeyReadCandidates,
   createHostedPhoneLookupKeyReadCandidates,
@@ -28,6 +31,7 @@ export {
   acquireHostedMemberHomeLinqRouteLockTx,
   countHostedMemberHomeLinqBindingsByRecipientPhone,
   demoteHostedMemberLinqGroupChatBindingsTx,
+  readHostedMemberHomeLinqRouteAuthorityTx,
   upsertHostedMemberHomeLinqBindingTx,
   upsertHostedMemberHomeLinqRecipientPhoneTx,
   upsertHostedMemberPendingLinqBindingTx,
@@ -39,9 +43,12 @@ export {
   upsertHostedMemberTelegramRoutingBindingTx,
 } from "./hosted-member-routing-telegram";
 export {
+  hostedMemberRoutingRecordsEqual,
   projectHostedMemberRoutingState,
+  readHostedMemberRoutingControlRootKeyIds,
   type HostedMemberRoutingLookupMatch,
   type HostedMemberRoutingLookupSnapshot,
+  type HostedMemberRoutingRecord,
   type HostedMemberRoutingStateSnapshot,
 } from "./hosted-member-routing-state";
 
@@ -323,13 +330,56 @@ export async function lookupHostedMemberCoreByPendingLinqParticipantContact(inpu
   return resolution.status === "found" ? resolution.core : null;
 }
 
-export async function lookupHostedMemberRoutingByHomeLinqChatId(input: {
+export interface HostedMemberHomeLinqCoreLookup {
+  core: HostedMemberRoutingLookup["core"];
+  matchedBy: "linqChatLookupKey";
+}
+
+type HostedMemberRoutingByHomeLinqChatIdInput = {
   linqChatId: string | null | undefined;
   prisma: HostedOnboardingReadClient;
-}): Promise<HostedMemberRoutingLookup | null> {
+};
+
+export async function lookupHostedMemberRoutingByHomeLinqChatId(
+  input: HostedMemberRoutingByHomeLinqChatIdInput & { projection: "core" },
+): Promise<HostedMemberHomeLinqCoreLookup | null>;
+export async function lookupHostedMemberRoutingByHomeLinqChatId(
+  input: HostedMemberRoutingByHomeLinqChatIdInput,
+): Promise<HostedMemberRoutingLookup | null>;
+export async function lookupHostedMemberRoutingByHomeLinqChatId(
+  input: HostedMemberRoutingByHomeLinqChatIdInput & { projection?: "core" },
+): Promise<HostedMemberHomeLinqCoreLookup | HostedMemberRoutingLookup | null> {
   const lookupKeys = createHostedLinqChatLookupKeyReadCandidates(input.linqChatId);
   if (lookupKeys.length === 0) {
     return null;
+  }
+
+  if (input.projection === "core") {
+    const resolution = resolveHostedMemberCoreLookup(
+      await input.prisma.hostedMemberRouting.findMany({
+        where: {
+          linqChatLookupKey: {
+            in: lookupKeys,
+          },
+        },
+        select: hostedMemberRoutingCoreLookupSelect,
+      }),
+    );
+    if (resolution.status === "ambiguous") {
+      throw hostedOnboardingError({
+        code: "LINQ_HOME_CHAT_ROUTING_LOOKUP_AMBIGUOUS",
+        details: {
+          matchCount: resolution.memberIds.length,
+          matchedBy: "linqChatLookupKey",
+        },
+        httpStatus: 500,
+        message: "Hosted member routing lookup matched multiple members.",
+        retryable: true,
+      });
+    }
+    return resolution.status === "found"
+      ? { core: resolution.core, matchedBy: "linqChatLookupKey" }
+      : null;
   }
 
   const routingRecords = await input.prisma.hostedMemberRouting.findMany({
@@ -521,6 +571,72 @@ async function resolveUniqueHostedMemberRoutingLookup(input: {
     input.prisma,
   );
 }
+
+export interface HostedMemberRoutingHomeLinqRecipientPhoneRecord {
+  linqRecipientPhoneEncrypted: string | null;
+  linqRecipientPhoneLookupKey: string | null;
+  memberId: string;
+}
+
+export interface HostedMemberRoutingHomeLinqRecipientPhoneSnapshot
+  extends HostedMemberRoutingHomeLinqRecipientPhoneRecord {
+  linqRecipientPhone: string | null;
+}
+
+export async function readHostedMemberRoutingHomeLinqRecipientPhoneRecords(
+  input: {
+    memberIds: readonly string[];
+    prisma: HostedOnboardingReadClient;
+  },
+): Promise<HostedMemberRoutingHomeLinqRecipientPhoneRecord[]> {
+  const memberIds = [...new Set(input.memberIds)];
+  if (memberIds.length === 0) {
+    return [];
+  }
+  return input.prisma.hostedMemberRouting.findMany({
+    orderBy: { memberId: "asc" },
+    select: {
+      linqRecipientPhoneEncrypted: true,
+      linqRecipientPhoneLookupKey: true,
+      memberId: true,
+    },
+    where: { memberId: { in: memberIds } },
+  });
+}
+
+export async function readHostedMemberRoutingHomeLinqRecipientPhoneSnapshots(
+  input: {
+    memberIds: readonly string[];
+    prisma: HostedOnboardingReadClient;
+    retainFailureInScopedCache?: boolean;
+  },
+): Promise<HostedMemberRoutingHomeLinqRecipientPhoneSnapshot[]> {
+  const records = await readHostedMemberRoutingHomeLinqRecipientPhoneRecords(input);
+  return openHostedMemberRoutingHomeLinqRecipientPhoneRecords({
+    prisma: input.prisma,
+    records,
+    retainFailureInScopedCache: input.retainFailureInScopedCache,
+  });
+}
+
+export async function openHostedMemberRoutingHomeLinqRecipientPhoneRecords(
+  input: {
+    prisma: HostedOnboardingReadClient;
+    records: readonly HostedMemberRoutingHomeLinqRecipientPhoneRecord[];
+    retainFailureInScopedCache?: boolean;
+  },
+): Promise<HostedMemberRoutingHomeLinqRecipientPhoneSnapshot[]> {
+  const phones = await readHostedMemberRoutingHomeLinqRecipientPhones(
+    input.records,
+    input.prisma,
+    input.retainFailureInScopedCache,
+  );
+  return input.records.map((record, index) => ({
+    ...record,
+    linqRecipientPhone: phones[index] ?? null,
+  }));
+}
+
 export async function readHostedMemberRoutingState(input: {
   memberId: string;
   prisma: HostedOnboardingReadClient;
@@ -540,6 +656,23 @@ export async function readHostedMemberRoutingState(input: {
         input.retainFailureInScopedCache,
       )
     : null;
+}
+
+/**
+ * Reads the exact persisted routing snapshot without decrypting it. Prepared
+ * webhook paths use this to bind an outside-transaction projection to the row
+ * re-read under their routing lock.
+ */
+export async function readHostedMemberRoutingRecord(input: {
+  memberId: string;
+  prisma: HostedOnboardingReadClient;
+}) {
+  return input.prisma.hostedMemberRouting.findUnique({
+    where: {
+      memberId: input.memberId,
+    },
+    select: hostedMemberRoutingStateSelect,
+  });
 }
 
 export async function lockHostedMemberRoutingStateTx(input: {

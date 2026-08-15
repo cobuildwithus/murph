@@ -2,9 +2,9 @@ import type { OverviewJournalEntry, OverviewMetric } from "../overview.ts";
 import {
   RECENT_JOURNAL_LIMIT,
   TIMELINE_LIMIT,
+  type BrowserVaultCoreCapableQueryClient,
   type BrowserVaultEntity,
   type BrowserVaultOverviewView,
-  type BrowserVaultQueryClient,
   type BrowserVaultTimelineRow,
 } from "./shared.ts";
 import {
@@ -13,7 +13,7 @@ import {
 } from "./tracked-experiments.ts";
 import { emptyPersonalPatternReport } from "../personal-patterns.ts";
 
-export function selectBrowserVaultOverview(client: BrowserVaultQueryClient): BrowserVaultOverviewView {
+export function selectBrowserVaultOverview(client: BrowserVaultCoreCapableQueryClient): BrowserVaultOverviewView {
   return {
     experimentSummary: selectBrowserVaultExperimentSummary(client),
     metrics: buildBrowserOverviewMetrics(client),
@@ -25,11 +25,11 @@ export function selectBrowserVaultOverview(client: BrowserVaultQueryClient): Bro
   };
 }
 
-export function selectBrowserVaultHistory(client: BrowserVaultQueryClient): { timeline: BrowserVaultTimelineRow[] } {
+export function selectBrowserVaultHistory(client: BrowserVaultCoreCapableQueryClient): { timeline: BrowserVaultTimelineRow[] } {
   return { timeline: client.timeline.list().slice(0, TIMELINE_LIMIT) };
 }
 
-function buildBrowserOverviewMetrics(client: BrowserVaultQueryClient): OverviewMetric[] {
+function buildBrowserOverviewMetrics(client: BrowserVaultCoreCapableQueryClient): OverviewMetric[] {
   const familyCounts = countEntityFamilies(client.replica.entities);
   const registryCount =
     readFamilyCount(familyCounts, "goal") +
@@ -74,7 +74,7 @@ function buildBrowserOverviewMetrics(client: BrowserVaultQueryClient): OverviewM
 }
 
 function summarizeRecentBrowserOverviewJournals(
-  client: BrowserVaultQueryClient,
+  client: BrowserVaultCoreCapableQueryClient,
   limit: number,
 ): OverviewJournalEntry[] {
   return client.replica.entities

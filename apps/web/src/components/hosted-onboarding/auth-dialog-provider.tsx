@@ -11,7 +11,11 @@ import {
 } from "react";
 
 import { AuthDialog } from "@/src/components/hosted-onboarding/auth-dialog";
-import { HOSTED_APP_HOME_PATH } from "@/src/lib/hosted-onboarding/app-routes";
+import {
+  HOSTED_APP_HOME_PATH,
+  HOSTED_FAMILY_INVITE_RETURN_PARAM,
+  parseHostedFamilyInviteReturnPath,
+} from "@/src/lib/hosted-onboarding/app-routes";
 import {
   HOSTED_START_PAID_GROUP_RETURN_PARAM,
   HOSTED_START_PAID_GROUP_RETURN_VALUE,
@@ -46,6 +50,7 @@ const HOSTED_USAGE_CREDIT_PURCHASE_ID_PATTERN = /^hucp_[A-Za-z0-9_-]{16}$/u;
 interface AuthContextValue {
   authenticated: boolean;
   openAuthDialog: () => void;
+  openDataPrivacyAuthDialog?: () => void;
   prepareAuth: () => void;
   shared: boolean;
 }
@@ -53,6 +58,7 @@ interface AuthContextValue {
 export const AuthContext = createContext<AuthContextValue>({
   authenticated: false,
   openAuthDialog: () => {},
+  openDataPrivacyAuthDialog: () => {},
   prepareAuth: () => {},
   shared: false,
 });
@@ -69,9 +75,25 @@ export function AuthProvider({
   children?: ReactNode;
 }) {
   const [open, setOpen] = useState(false);
+  const [authIntent, setAuthIntent] = useState<"default" | "data-privacy">(
+    "default",
+  );
 
   const openAuthDialog = useCallback(() => {
+    setAuthIntent("default");
     setOpen(true);
+  }, []);
+
+  const openDataPrivacyAuthDialog = useCallback(() => {
+    setAuthIntent("data-privacy");
+    setOpen(true);
+  }, []);
+
+  const handleOpenChange = useCallback((nextOpen: boolean) => {
+    setOpen(nextOpen);
+    if (!nextOpen) {
+      setAuthIntent("default");
+    }
   }, []);
 
   useLayoutEffect(() => subscribeBrowserVaultSessionInvalidation((source) => {
@@ -81,6 +103,11 @@ export function AuthProvider({
   }), []);
 
   const handleAuthCompleted = useCallback((payload: HostedPrivyCompletionPayload) => {
+    if (authIntent === "data-privacy") {
+      navigateHostedAuthRedirect(SETTINGS_DATA_PRIVACY_PATH);
+      return;
+    }
+
     if (authenticated) {
       navigateHostedAuthRedirect(readCurrentBrowserPath());
       return;
@@ -97,16 +124,17 @@ export function AuthProvider({
     }
 
     navigateHostedAuthRedirect(payload.joinUrl);
-  }, [authenticated]);
+  }, [authIntent, authenticated]);
 
   const value = useMemo(
     () => ({
       authenticated,
       openAuthDialog,
+      openDataPrivacyAuthDialog,
       prepareAuth: () => {},
       shared: false,
     }),
-    [authenticated, openAuthDialog],
+    [authenticated, openAuthDialog, openDataPrivacyAuthDialog],
   );
 
   return (
@@ -114,11 +142,21 @@ export function AuthProvider({
       {children}
       <AuthDialog
         open={open}
-        title={authenticated ? "Sign in again" : undefined}
-        description={authenticated ? "Verify this device to manage secure approvals." : undefined}
+        title={authIntent === "data-privacy"
+          ? "Log in to manage your data"
+          : authenticated
+            ? "Sign in again"
+            : undefined}
+        description={authIntent === "data-privacy"
+          ? "Use the email address or phone number already linked to your Murph account."
+          : authenticated
+            ? "Verify this device to manage secure approvals."
+            : undefined}
         onCompleted={handleAuthCompleted}
-        onOpenChange={setOpen}
-        requireLaunchConsentOnCompletion={!authenticated}
+        onOpenChange={handleOpenChange}
+        requireLaunchConsentOnCompletion={
+          !authenticated && authIntent !== "data-privacy"
+        }
       />
     </AuthContext.Provider>
   );
@@ -134,11 +172,30 @@ function shouldResumeCurrentAuthUrl(payload: HostedPrivyCompletionPayload): bool
     || shouldResumeCurrentClinicalRecordsConnectUrl(payload)
     || shouldResumeCurrentComputerHandoffUrl(payload)
     || shouldResumeCurrentIntegrationsConnectUrl(payload)
-    || shouldResumeCurrentSettingsDataPrivacyUrl(payload)
+    || shouldResumeCurrentSettingsDataPrivacyUrl()
+    || shouldResumeCurrentSettingsFamilyInviteReturnUrl(payload)
     || shouldResumeCurrentSettingsGroupPaymentUrl(payload)
     || shouldResumeCurrentSettingsPlanChangeUrl(payload)
     || shouldResumeCurrentSettingsUsageCreditReturnUrl(payload)
   );
+}
+
+function shouldResumeCurrentSettingsFamilyInviteReturnUrl(
+  payload: HostedPrivyCompletionPayload,
+): boolean {
+  if (!isHostedOnboardingAccessibleStage(payload.stage)) {
+    return false;
+  }
+
+  if (typeof window === "undefined" || window.location.pathname !== SETTINGS_PATH) {
+    return false;
+  }
+
+  const returnValues = new URLSearchParams(window.location.search).getAll(
+    HOSTED_FAMILY_INVITE_RETURN_PARAM,
+  );
+  return returnValues.length === 1
+    && parseHostedFamilyInviteReturnPath(returnValues[0]) !== null;
 }
 
 function shouldResumeCurrentSettingsUsageCreditReturnUrl(
@@ -308,13 +365,7 @@ function shouldResumeCurrentIntegrationsConnectUrl(
   return INTEGRATIONS_CONNECT_PATH_PATTERN.test(window.location.pathname);
 }
 
-function shouldResumeCurrentSettingsDataPrivacyUrl(
-  payload: HostedPrivyCompletionPayload,
-): boolean {
-  if (!isHostedOnboardingAccessibleStage(payload.stage)) {
-    return false;
-  }
-
+function shouldResumeCurrentSettingsDataPrivacyUrl(): boolean {
   if (typeof window === "undefined") {
     return false;
   }

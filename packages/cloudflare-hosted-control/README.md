@@ -17,3 +17,8 @@ Normal webhook and app paths append durable mailbox facts in web-owned storage a
 signal Temporal only. Temporal calls Cloudflare `ensure-processing`; Cloudflare
 returns `runtime_processing_accepted` or `retry_later` and owns runner start,
 wake, active-fence alarm cleanup, and execution cleanup.
+
+Device webhook Queue messages are encrypted, non-canonical burst transport.
+They contain no plaintext provider or member identity outside the secure box.
+Web/Postgres trace claims, dirty state, and connection lifecycle fences remain
+the sole canonical admission authority.

@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-12",
+  "order": 200,
+  "item": {
+    "id": "companion-signup-first-outreach",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Murph starts the companion conversation",
+    "summary": "After finishing account setup in the companion app with a verified phone, Murph can now start the conversation with the standard first iMessage.",
+    "details": "When a healthy line is available, Murph sends the usual welcome and may keep unfinished setup moving with a low-pressure check-in on the next few days. If a line cannot safely start the conversation, setup still completes, and texting an active Murph number starts it from your side.",
+    "relevanceTags": ["companion", "imessage", "onboarding", "reliability"],
+    "sourcePullRequests": [1761]
+  }
+}

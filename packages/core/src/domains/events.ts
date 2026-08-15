@@ -52,6 +52,7 @@ export type {
 export {
   deleteEvent,
   findEventByExternalRef,
+  findEventsByRawRefs,
   upsertEvent,
 } from "./events/ledger.ts";
 export {
@@ -67,11 +68,18 @@ export {
 } from "./events/generated-image-capture-retention.ts";
 export {
   CAPTURE_LOOKUP_INDEX_PATH,
+  readStoredCaptureLookupIndex,
+} from "./events/capture-lookup.ts";
+export type {
+  StoredCaptureLookup,
+  StoredCaptureLookupIndex,
 } from "./events/capture-lookup.ts";
 export type {
   DeleteEventInput,
   DeleteEventResult,
+  EventRawRefMatch,
   FindEventByExternalRefInput,
+  FindEventsByRawRefsInput,
   UpsertEventDraftInput,
   UpsertEventInput,
   UpsertEventPayloadInput,

@@ -1413,6 +1413,7 @@ describe("hosted web production migration guard", () => {
       "pnpm --dir ../.. exec tsx apps/web/scripts/prepare-prisma-client-for-build.ts",
     );
     assert.match(buildScript, /pnpm typecheck:prepared/u);
+    assert.match(buildScript, /pnpm changelog:generate/u);
     assert.match(buildScript, /bash scripts\/run-production-next-build\.sh/u);
     assert.doesNotMatch(buildScript, /&& next build &&/u);
     assert.equal(
@@ -1421,11 +1422,11 @@ describe("hosted web production migration guard", () => {
     );
     assert.equal(
       preparedTypecheckScript,
-      "pnpm --dir ../.. exec tsx scripts/ensure-next-route-type-stubs.ts apps/web && node ../../scripts/run-typescript.mjs web -p tsconfig.json --pretty false",
+      "pnpm changelog:generate && pnpm --dir ../.. exec tsx scripts/ensure-next-route-type-stubs.ts apps/web && node ../../scripts/run-typescript.mjs web -p tsconfig.json --pretty false",
     );
     assert.equal(
       watchTypecheckScript,
-      "pnpm health-commons:generate && pnpm prisma:generate && pnpm --dir ../.. exec tsx scripts/ensure-next-route-type-stubs.ts apps/web && node ../../scripts/run-typescript.mjs watch -p tsconfig.json --pretty false --watch --tsBuildInfoFile typecheck.watch.tsbuildinfo",
+      "pnpm changelog:generate && pnpm health-commons:generate && pnpm prisma:generate && pnpm --dir ../.. exec tsx scripts/ensure-next-route-type-stubs.ts apps/web && node ../../scripts/run-typescript.mjs watch -p tsconfig.json --pretty false --watch --tsBuildInfoFile typecheck.watch.tsbuildinfo",
     );
     assert.match(
       buildScript,
@@ -1438,6 +1439,12 @@ describe("hosted web production migration guard", () => {
     assert.match(productionNextBuildScript, /^#!\/usr\/bin\/env bash\nset -euo pipefail$/mu);
     assert.match(productionNextBuildScript, /parent_old_space_mb=1024/u);
     assert.match(productionNextBuildScript, /typecheck_worker_old_space_mb=3072/u);
+    assert.match(productionNextBuildScript, /build_cache_epoch=webpack-next-16\.3-v1/u);
+    assert.match(
+      productionNextBuildScript,
+      /node \.\.\/\.\.\/scripts\/rm-paths\.mjs \.next\/cache/u,
+    );
+    assert.match(productionNextBuildScript, /murph-production-build-epoch/u);
     assert.match(
       productionNextBuildScript,
       /sed -E 's\/\(\^\|\[\[:space:\]\]\)--max\[-_\]old\[-_\]space\[-_\]size/u,
@@ -1448,9 +1455,9 @@ describe("hosted web production migration guard", () => {
     );
     assert.match(
       productionNextBuildScript,
-      /exec node "--max-old-space-size=\$parent_old_space_mb" "\$next_bin" build/u,
+      /node "--max-old-space-size=\$parent_old_space_mb" "\$next_bin" build --webpack/u,
     );
-    assert.doesNotMatch(productionNextBuildScript, /--webpack/u);
+    assert.match(productionNextBuildScript, /compiler=webpack/u);
     assert.match(
       verifyFastScript,
       /local next_build_command=\(bash "\$script_dir\/run-production-next-build\.sh"\)/u,
@@ -1463,6 +1470,11 @@ describe("hosted web production migration guard", () => {
       buildScript.indexOf("pnpm prisma:generate:build") <
         buildScript.indexOf("run-production-next-build.sh"),
       "non-mutating build prep must finish before next build",
+    );
+    assert.ok(
+      buildScript.indexOf("pnpm changelog:generate") <
+        buildScript.indexOf("pnpm typecheck:prepared"),
+      "the changelog module must exist before the TypeScript source check",
     );
     assert.ok(
       buildScript.indexOf("pnpm typecheck:prepared") <
@@ -1749,7 +1761,7 @@ describe("hosted web production migration guard", () => {
     assert.ok(!cronPaths.includes("/api/internal/device-sync/dirty-sweeper/cron"));
   });
 
-  test("enables only production and the explicit Turbopack preview branch", async () => {
+  test("enables only production deployments", async () => {
     const vercelJson = JSON.parse(
       await readFile(path.join(appRoot, "vercel.json"), "utf8"),
     ) as {

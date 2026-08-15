@@ -75,6 +75,12 @@ import {
   normalizeMetricPointFilters,
 } from "./projection/metric-store.ts";
 import {
+  buildWearableMetricEvidenceFromBundle,
+} from "./metrics/projection.ts";
+import {
+  extractMetricPointsFromMetricRows,
+} from "./metrics/index.ts";
+import {
   rebuildQueryProjectionWithManifest,
 } from "./projection/rebuild.ts";
 import {
@@ -90,7 +96,7 @@ import {
 import { resolveWearableSleepPatternReadFilters } from "./wearables/sleep-pattern.ts";
 import { createVaultReadModel } from "./read-model.ts";
 import {
-  buildPersonalPatternReportFromWearableBundle,
+  buildPersonalPatternReportFromWearableBundleAndMetricPoints,
   type PersonalPatternReport,
 } from "./personal-patterns.ts";
 
@@ -185,6 +191,34 @@ export async function listMetricPointsBatchRuntime(
     location,
     filtersList.map(normalizeMetricPointFilters),
   );
+}
+
+export async function listMetricPointsByPublicSourceRuntime(
+  vaultRoot: string,
+  input: {
+    from?: string;
+    metricKeys: readonly string[];
+    providers: readonly string[];
+    to?: string;
+  },
+): Promise<Array<{ points: MetricPoint[]; provider: string }>> {
+  const location = await ensureFreshQueryProjection(vaultRoot);
+  const metricKeys = new Set(input.metricKeys);
+  return input.providers.map((provider) => {
+    const bundle = readStoredPublicWearableSummaryBundle(location, {
+      ...(input.from ? { from: input.from } : {}),
+      providers: [provider],
+      ...(input.to ? { to: input.to } : {}),
+    });
+    const points = extractMetricPointsFromMetricRows(
+      buildWearableMetricEvidenceFromBundle(bundle),
+    ).filter((point) =>
+      metricKeys.has(point.metricKey)
+      && (input.from === undefined || point.effectiveDate >= input.from)
+      && (input.to === undefined || point.effectiveDate <= input.to)
+    );
+    return { points, provider };
+  });
 }
 
 export async function summarizeWearableDayRuntime(
@@ -292,7 +326,16 @@ export async function buildPersonalPatternReportRuntime(
     vaultRoot,
   });
   const wearableBundle = readStoredPublicWearableSummaryBundle(location, {});
-  return buildPersonalPatternReportFromWearableBundle(vault, wearableBundle, options);
+  const metricPoints = listStoredMetricPoints(
+    location,
+    normalizeMetricPointFilters({ limit: null }),
+  );
+  return buildPersonalPatternReportFromWearableBundleAndMetricPoints(
+    vault,
+    wearableBundle,
+    metricPoints,
+    options,
+  );
 }
 
 export async function summarizeWearableActivityRuntime(

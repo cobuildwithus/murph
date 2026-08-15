@@ -12,12 +12,14 @@ import {
   buildHostedAiUsageGateNoticeIdempotencyKey,
   startHostedAiUsageLimitNoticeDispatchTx,
   claimHostedLinqDeliveryProviderDispatchTx,
+  hasHostedLinqInviteSignupLiveDeliveryTx,
   hasHostedLinqGroupLineRecoveryAuthorityTx,
   hasUnresolvedHostedLinqProviderDispatchForChatTx,
   markHostedAiUsageLimitNoticeDeliveryRetryableTx,
   markHostedLinqDeliveryAcceptedTx,
   markHostedLinqDeliverySendFailedTx,
   markHostedLinqDeliverySkippedTx,
+  readHostedLinqGroupLineRecoveryAuthoritiesTx,
   readHostedLinqGroupLineRecoveryAuthorityTx,
   readHostedLinqDeliveryProviderDispatchIntentsTx,
   recordHostedLinqDeliveryAttemptTx,
@@ -79,7 +81,7 @@ describe("hosted Linq observability stores", () => {
   it("keeps non-contact observability ids stable when the contact-privacy keyring rotates", () => {
     const restoreV1 = configureHostedContactPrivacyKeyringForTest({
       currentVersion: "v1",
-      entries: OBSERVABILITY_TEST_KEYRING_ENTRIES,
+      entries: { v1: OBSERVABILITY_TEST_KEYRING_ENTRIES.v1 },
     });
     let providerEventId = "";
     let deliveryIdempotencyKey: string | null = null;
@@ -445,12 +447,6 @@ describe("hosted Linq observability stores", () => {
     const fixture = createObservabilityPrismaFixture();
     const genericEffectId =
       "linq-invite-signup:member_123:2026-03-26T00:00:00.000Z";
-    const groupEffectId = buildHostedLinqInviteSignupEffectId({
-      memberId: "member_123",
-      occurredAt: "2026-03-26T12:05:00.000Z",
-      sourceEventDigest: "a".repeat(32),
-    });
-    const groupSourceRef = groupEffectId;
     fixture.hostedLinqDeliveryFindFirst.mockResolvedValueOnce({
       id: "hld_generic_failed",
       idempotencyKey:
@@ -459,8 +455,8 @@ describe("hosted Linq observability stores", () => {
       sourceRef: genericEffectId,
       template: "invite_signup",
     });
-    fixture.hostedLinqDeliveryFindMany.mockResolvedValueOnce([
-      { sourceRef: groupSourceRef },
+    fixture.queryRaw.mockResolvedValue([
+      { anyIdentityLive: true, sameIdentityStillLive: false },
     ]);
 
     await expect(ingestHostedLinqProviderEventTx({
@@ -482,23 +478,9 @@ describe("hosted Linq observability stores", () => {
 
     expect(fixture.hostedLinqDailyStateUpdateMany).not.toHaveBeenCalled();
     expect(fixture.hostedGroupJoinOutreachUpdateMany).not.toHaveBeenCalled();
-    expect(fixture.hostedLinqDeliveryFindMany).toHaveBeenCalledWith({
-      select: { sourceRef: true },
-      where: {
-        sourceRef: { startsWith: genericEffectId },
-        status: {
-          in: [
-            "attempted",
-            "provider_dispatch_started",
-            "accepted",
-            "delivered",
-          ],
-        },
-        template: {
-          in: ["invite_signup", "invite_signup_fallback"],
-        },
-      },
-    });
+    expect(fixture.queryRaw.mock.calls.some(([query]) =>
+      (query as { sql?: string }).sql?.includes('AS "anyIdentityLive"')
+    )).toBe(true);
   });
 
   it("restores onboarding after a delivered invite receipt and ignores non-onboarding terminal receipts", async () => {
@@ -1106,12 +1088,16 @@ describe("hosted Linq observability stores", () => {
   });
 
   it("preserves the stored line lookup key for provider status after key rotation", async () => {
-    const restore = configureHostedContactPrivacyKeyringForTest({
+    const restoreV1 = configureHostedContactPrivacyKeyringForTest({
       currentVersion: "v1",
-      entries: OBSERVABILITY_TEST_KEYRING_ENTRIES,
+      entries: { v1: OBSERVABILITY_TEST_KEYRING_ENTRIES.v1 },
     });
     const legacyLineLookupKey = createHostedPhoneLookupKey("+15550000000");
-    process.env.HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION = "v2";
+    restoreV1();
+    const restoreV2 = configureHostedContactPrivacyKeyringForTest({
+      currentVersion: "v2",
+      entries: OBSERVABILITY_TEST_KEYRING_ENTRIES,
+    });
 
     if (!legacyLineLookupKey) {
       throw new Error("Expected legacy line lookup key.");
@@ -1161,7 +1147,7 @@ describe("hosted Linq observability stores", () => {
         }),
       );
     } finally {
-      restore();
+      restoreV2();
     }
   });
 
@@ -2942,6 +2928,106 @@ describe("hosted Linq observability stores", () => {
     );
   });
 
+  it("classifies K=32 recovery candidates from one five-attempt set read", async () => {
+    const fixture = createObservabilityPrismaFixture();
+    const occurredAt = new Date("2026-03-26T12:01:00.000Z");
+    const setupArmedAt = new Date("2026-03-26T11:59:00.000Z");
+    const recoveredRecipientPhoneLookupKey =
+      createHostedPhoneLookupKey("+15550100042");
+    if (!recoveredRecipientPhoneLookupKey) {
+      throw new Error("Expected group-line recovery batch lookup key.");
+    }
+    const candidates = Array.from({ length: 32 }, (_, index) => ({
+      memberId: `member-recovery-batch-${index + 1}`,
+      originalRecipientPhone: `+1555020${String(index + 1).padStart(4, "0")}`,
+      pendingGroupSetupId: `hpgs-recovery-batch-${index + 1}`,
+      setupArmedAt,
+    }));
+    const acceptedCandidate = candidates[0]!;
+    const inFlightCandidate = candidates[1]!;
+    const acceptedEffectId = buildHostedLinqGroupLineRecoveryEffectId({
+      incomingRecipientPhone: acceptedCandidate.originalRecipientPhone,
+      memberId: acceptedCandidate.memberId,
+      pendingGroupSetupId: acceptedCandidate.pendingGroupSetupId,
+      threadId: "chat-group-recovery-batch",
+    });
+    const inFlightEffectId = buildHostedLinqGroupLineRecoveryEffectId({
+      incomingRecipientPhone: inFlightCandidate.originalRecipientPhone,
+      memberId: inFlightCandidate.memberId,
+      pendingGroupSetupId: inFlightCandidate.pendingGroupSetupId,
+      threadId: "chat-group-recovery-batch",
+    });
+    const acceptedIdempotencyKey =
+      createHostedLinqDeliveryIdempotencyLookupKey(acceptedEffectId);
+    const inFlightIdempotencyKey =
+      createHostedLinqDeliveryIdempotencyLookupKey(inFlightEffectId);
+    if (!acceptedIdempotencyKey || !inFlightIdempotencyKey) {
+      throw new Error("Expected group-line recovery batch intent keys.");
+    }
+    fixture.hostedLinqDeliveryFindMany.mockResolvedValue([
+      {
+        acceptedAt: new Date("2026-03-26T12:00:01.000Z"),
+        attemptedAt: new Date("2026-03-26T12:00:00.000Z"),
+        deliveredAt: null,
+        groupJoinOutreachId: null,
+        groupJoinReplyOccurredAt: null,
+        id: "hld_recovery_batch_accepted",
+        idempotencyKey: acceptedIdempotencyKey,
+        lastProviderEventId: null,
+        lastReceiptAt: null,
+        messageLookupKey: "hbid:linq-message:recovery-batch-accepted",
+        phoneNumberLookupKey: recoveredRecipientPhoneLookupKey,
+        sourceRef: buildHostedLinqGroupLineRecoverySourceRef({
+          effectId: acceptedEffectId,
+          sourceEventId: "event-recovery-batch-accepted",
+        }),
+        status: "accepted",
+        targetKind: "participant",
+        template: "group_line_recovery",
+      },
+      {
+        acceptedAt: null,
+        attemptedAt: new Date("2026-03-26T12:00:00.000Z"),
+        deliveredAt: null,
+        groupJoinOutreachId: null,
+        groupJoinReplyOccurredAt: null,
+        id: "hld_recovery_batch_in_flight",
+        idempotencyKey: inFlightIdempotencyKey,
+        lastProviderEventId: null,
+        lastReceiptAt: null,
+        messageLookupKey: null,
+        phoneNumberLookupKey: recoveredRecipientPhoneLookupKey,
+        sourceRef: buildHostedLinqGroupLineRecoverySourceRef({
+          effectId: inFlightEffectId,
+          sourceEventId: "event-recovery-batch-in-flight",
+        }),
+        status: "attempted",
+        targetKind: "participant",
+        template: "group_line_recovery",
+      },
+    ]);
+
+    await expect(readHostedLinqGroupLineRecoveryAuthoritiesTx({
+      candidates,
+      occurredAt,
+      prisma: fixture.prisma as never,
+      recoveredRecipientPhoneLookupKey,
+      threadId: "chat-group-recovery-batch",
+    })).resolves.toEqual(new Map([
+      [acceptedCandidate.pendingGroupSetupId, "accepted"],
+      [inFlightCandidate.pendingGroupSetupId, "in_flight"],
+      ...candidates.slice(2).map((candidate) => [
+        candidate.pendingGroupSetupId,
+        "none",
+      ] as const),
+    ]));
+    expect(fixture.hostedLinqDeliveryFindMany).toHaveBeenCalledOnce();
+    expect(
+      fixture.hostedLinqDeliveryFindMany.mock.calls[0]?.[0]?.where
+        ?.idempotencyKey?.in,
+    ).toHaveLength(32 * 5);
+  });
+
   it("accepts only the exact post-arm persisted group-line recovery authority", async () => {
     const fixture = createObservabilityPrismaFixture();
     const originalRecipientPhone = "+15550100000";
@@ -3091,21 +3177,25 @@ describe("hosted Linq observability stores", () => {
     })).resolves.toBe(false);
   });
 
-  it("records accepted Linq transcript fallback and consumes its answered mailbox rows", async () => {
+  it("consumes one maximum-size answered mailbox set in one idempotent transaction", async () => {
     const fixture = createObservabilityPrismaFixture();
     const attemptedAt = new Date("2026-03-26T12:00:00.000Z");
     const acceptedAt = new Date("2026-03-26T12:00:01.000Z");
+    const answeredMailboxItemIds = Array.from(
+      { length: 100 },
+      (_, index) => `mailbox_item_answered_${index}`,
+    );
     const deliveryIdempotencyLookupKey = createHostedLinqDeliveryIdempotencyLookupKey(
       "linq-voice-memo-transcript:assistant-outbox:intent_123",
     );
-    fixture.hostedLinqLineFindUnique.mockResolvedValueOnce({
+    fixture.hostedLinqLineFindUnique.mockResolvedValue({
       phoneNumberHint: "+0000",
       phoneNumberLookupKey: "hbidx:phone:runtime-line",
     });
 
-    await expect(recordHostedLinqRuntimeDeliveryOutcomeTx({
+    const accepted = await recordHostedLinqRuntimeDeliveryOutcomeTx({
       acceptedAt,
-      answeredMailboxItemIds: ["mailbox_item_answered_1", "mailbox_item_answered_2"],
+      answeredMailboxItemIds,
       attemptedAt,
       idempotencyKey: "linq-voice-memo-transcript:assistant-outbox:intent_123",
       linqChatId: "linq_chat_123",
@@ -3115,7 +3205,8 @@ describe("hosted Linq observability stores", () => {
       sourceRef: "intent_123",
       targetKind: "thread",
       userId: "member_123",
-    })).resolves.toEqual({
+    });
+    expect(accepted).toEqual({
       deliveryId: expect.stringMatching(/^hld_[a-f0-9]{32}$/u),
       recorded: true,
     });
@@ -3149,7 +3240,7 @@ describe("hosted Linq observability stores", () => {
       where: {
         consumedAt: null,
         id: {
-          in: ["mailbox_item_answered_1", "mailbox_item_answered_2"],
+          in: answeredMailboxItemIds,
         },
         kind: "conversation.message",
         lane: "conversation",
@@ -3174,6 +3265,38 @@ describe("hosted Linq observability stores", () => {
         }),
       }),
     );
+
+    fixture.hostedLinqDeliveryFindUnique.mockResolvedValueOnce({
+      acceptedAt,
+      deliveredAt: null,
+      failedAt: null,
+      id: accepted.deliveryId,
+      lastReceiptAt: null,
+      messageLookupKey: "hbidx:linq-message:provider",
+      phoneNumberLookupKey: "hbidx:phone:runtime-line",
+      skippedAt: null,
+      status: "accepted",
+    });
+    fixture.hostedLinqDeliveryUpdateMany.mockResolvedValueOnce({ count: 0 });
+    await expect(recordHostedLinqRuntimeDeliveryOutcomeTx({
+      acceptedAt,
+      answeredMailboxItemIds,
+      attemptedAt,
+      idempotencyKey: "linq-voice-memo-transcript:assistant-outbox:intent_123",
+      linqChatId: "linq_chat_123",
+      messageId: "provider_message_123",
+      phoneNumber: "+15550000000",
+      prisma: fixture.prisma as never,
+      sourceRef: "intent_123",
+      targetKind: "thread",
+      userId: "member_123",
+    })).resolves.toEqual(accepted);
+
+    expect(fixture.transaction).toHaveBeenCalledTimes(2);
+    expect(fixture.hostedLinqDeliveryCreate).toHaveBeenCalledTimes(1);
+    expect(fixture.hostedLinqDeliveryUpdateMany).toHaveBeenCalledTimes(1);
+    expect(fixture.hostedMailboxItemUpdateMany).toHaveBeenCalledTimes(1);
+    expect(fixture.hostedLinqProviderEventFindMany).toHaveBeenCalledTimes(1);
   });
 
   it("records group-thread runtime accepts as sent with no receipt expected", async () => {
@@ -4669,11 +4792,6 @@ describe("hosted Linq signup-link delivery attempts", () => {
 
   it("does not reopen the daily marker when a buffered generic failure replays after a distinct group success", async () => {
     const fixture = createObservabilityPrismaFixture();
-    const groupEffectId = buildHostedLinqInviteSignupEffectId({
-      memberId: "member_123",
-      occurredAt: "2026-03-26T12:05:00.000Z",
-      sourceEventDigest: "b".repeat(32),
-    });
     fixture.hostedLinqProviderEventFindMany.mockResolvedValueOnce([{
       deliveryStatus: "failed",
       eventId: "evt_generic_failed_buffered",
@@ -4687,9 +4805,9 @@ describe("hosted Linq signup-link delivery attempts", () => {
       sourceRef: BASE_EFFECT_ID,
       template: "invite_signup",
     });
-    fixture.hostedLinqDeliveryFindMany.mockResolvedValueOnce([{
-      sourceRef: groupEffectId,
-    }]);
+    fixture.queryRaw.mockResolvedValue([
+      { anyIdentityLive: true, sameIdentityStillLive: false },
+    ]);
 
     await expect(markHostedLinqDeliveryAcceptedTx({
       idempotencyKey: BASE_EFFECT_ID,
@@ -4821,23 +4939,29 @@ describe("hosted Linq signup-link delivery attempts", () => {
       });
   });
 
-  it("does not reopen daily or group context for a stale failed attempt", async () => {
+  it("checks only the five exact digest attempts before suppressing stale failure reopen", async () => {
     const fixture = createObservabilityPrismaFixture();
     const repliedAt = "2026-03-26T12:01:00.000Z";
+    const sourceEventDigest = "c".repeat(32);
+    const exactEffectId = buildHostedLinqInviteSignupEffectId({
+      memberId: "member_123",
+      occurredAt: repliedAt,
+      sourceEventDigest,
+    });
     fixture.hostedLinqDeliveryFindFirst.mockResolvedValueOnce({
       id: "hld_group_stale_failed",
       idempotencyKey: createHostedLinqDeliveryIdempotencyLookupKey(
-        BASE_EFFECT_ID,
+        exactEffectId,
       ),
       groupJoinOutreachId: "hgrpjoa_stale",
       groupJoinReplyOccurredAt: new Date(repliedAt),
       phoneNumberLookupKey: null,
-      sourceRef: BASE_EFFECT_ID,
+      sourceRef: exactEffectId,
       template: "invite_signup",
     });
-    fixture.hostedLinqDeliveryFindMany.mockResolvedValueOnce([{
-      sourceRef: `${BASE_EFFECT_ID}:a2`,
-    }]);
+    fixture.queryRaw.mockResolvedValue([
+      { anyIdentityLive: true, sameIdentityStillLive: true },
+    ]);
 
     await ingestHostedLinqProviderEventTx({
       event: requireParsedProviderEvent(buildProviderEvent({
@@ -4856,18 +4980,52 @@ describe("hosted Linq signup-link delivery attempts", () => {
 
     expect(fixture.hostedLinqDailyStateUpdateMany).not.toHaveBeenCalled();
     expect(fixture.hostedGroupJoinOutreachUpdateMany).not.toHaveBeenCalled();
-    expect(fixture.hostedLinqDeliveryFindMany).toHaveBeenCalledWith({
-      select: { sourceRef: true },
-      where: {
-        sourceRef: { startsWith: BASE_EFFECT_ID },
-        status: {
-          in: ["attempted", "provider_dispatch_started", "accepted", "delivered"],
-        },
-        template: {
-          in: ["invite_signup", "invite_signup_fallback"],
-        },
-      },
-    });
+    const liveAttemptQuery = fixture.queryRaw.mock.calls
+      .map(([query]) => query as { sql?: string; values?: unknown[] })
+      .find((query) => query.sql?.includes('AS "sameIdentityStillLive"'));
+    expect(liveAttemptQuery?.sql?.match(/EXISTS \(/gu)).toHaveLength(2);
+    expect(liveAttemptQuery?.sql?.match(/LIMIT 1/gu)).toHaveLength(2);
+    expect(liveAttemptQuery?.sql).toContain(
+      '"source_ref" LIKE ?::text ESCAPE \'!\'',
+    );
+    expect(liveAttemptQuery?.sql).toContain(
+      "'^(?::a[2-5]|:e[0-9a-f]{32}(?::a[2-5])?)?$'",
+    );
+    expect(liveAttemptQuery?.values).toEqual([
+      exactEffectId,
+      `${exactEffectId}:a2`,
+      `${exactEffectId}:a3`,
+      `${exactEffectId}:a4`,
+      `${exactEffectId}:a5`,
+      "linq-invite-signup:member!_123:2026-03-26T00:00:00.000Z%",
+      BASE_EFFECT_ID,
+    ]);
+  });
+
+  it("uses one escaped prefix existence probe when only member/day liveness is needed", async () => {
+    const queryRaw = vi.fn().mockResolvedValue([{
+      anyIdentityLive: true,
+      sameIdentityStillLive: false,
+    }]);
+
+    await expect(hasHostedLinqInviteSignupLiveDeliveryTx({
+      dayUtc: "2026-03-26T00:00:00.000Z",
+      memberId: "member!_123%",
+      prisma: { $queryRaw: queryRaw } as never,
+    })).resolves.toBe(true);
+
+    expect(queryRaw).toHaveBeenCalledTimes(1);
+    const query = queryRaw.mock.calls[0]?.[0] as {
+      sql: string;
+      values: unknown[];
+    };
+    expect(query.sql.match(/EXISTS \(/gu)).toHaveLength(1);
+    expect(query.sql).toContain('FALSE AS "sameIdentityStillLive"');
+    expect(query.sql).toContain('"source_ref" LIKE ?::text ESCAPE \'!\'');
+    expect(query.values).toEqual([
+      "linq-invite-signup:member!!!_123!%:2026-03-26T00:00:00.000Z%",
+      "linq-invite-signup:member!_123%:2026-03-26T00:00:00.000Z",
+    ]);
   });
   it.each(["invite_signup", "invite_signup_fallback"] as const)(
     "surfaces the delivered %s chat when the accepted milestone replays a buffered receipt",
@@ -5593,6 +5751,7 @@ function createObservabilityPrismaFixture() {
     hostedLinqProviderEventUpdateMany,
     hostedMailboxItemUpdateMany,
     prisma,
+    queryRaw,
     transaction,
   };
 }

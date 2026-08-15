@@ -7,6 +7,7 @@ import {
   resolveExperimentSessionMetricSpecForBiomarker,
 } from "./experiment-session-metrics.ts";
 import { LAB_METRICS, LAB_RESULT_METRICS } from "./definitions/labs.ts";
+import { PHYSIOLOGY_METRICS } from "./definitions/physiology.ts";
 import { PROXY_METRICS } from "./definitions/proxy.ts";
 import { RECOVERY_METRICS } from "./definitions/recovery.ts";
 import { SLEEP_METRICS } from "./definitions/sleep.ts";
@@ -25,6 +26,7 @@ const METRIC_DEFINITIONS: readonly MetricDefinition[] = [
   ...EXPERIMENT_SESSION_METRICS,
   ...BODY_METRICS,
   ...FUNCTION_METRICS,
+  ...PHYSIOLOGY_METRICS,
   ...PROXY_METRICS,
   ...LAB_METRICS,
 ];

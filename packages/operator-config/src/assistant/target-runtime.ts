@@ -63,6 +63,14 @@ export const HOSTED_LOCAL_TEST_VENICE_CODEX_MODEL_PROVIDER_ID =
   'venice-local-test'
 export const VENICE_CODEX_MODEL_PROVIDER_ID = 'venice'
 
+export function resolveAssistantCodexUsageProviderName(
+  modelProviderId: string | null,
+): string | null {
+  return modelProviderId === HOSTED_LOCAL_TEST_CODEX_MODEL_PROVIDER_ID
+    ? HOSTED_OPENAI_CODEX_MODEL_PROVIDER_ID
+    : modelProviderId
+}
+
 export const CODEX_RESERVED_MODEL_PROVIDER_IDS = [
   OPENAI_CODEX_MODEL_PROVIDER_ID,
   HOSTED_OPENAI_CODEX_MODEL_PROVIDER_ID,
@@ -196,114 +204,6 @@ export function createUnsupportedAssistantRuntimeTargetError(): UnsupportedAssis
   return new UnsupportedAssistantRuntimeTargetError()
 }
 
-export interface AssistantRuntimeResolutionInput {
-  approvalPolicy?: string | null
-  codexHome?: string | null
-  model?: string | null
-  modelProvider?: string | null
-  oss?: boolean | null
-  profile?: string | null
-  provider?: string | null
-  reasoningEffort?: string | null
-  sandbox?: string | null
-  target?:
-    | {
-        kind?: 'codex-cli'
-        model?: string | null
-        modelProvider?: string | null
-        codexHome?: string | null
-        oss?: boolean
-        profile?: string | null
-      }
-    | {
-        kind?: string | null
-        model?: string | null
-        modelProvider?: string | null
-        codexHome?: never
-        oss?: never
-        profile?: never
-      }
-  policy?: {
-    approvalPolicy?: string | null
-    reasoningEffort?: string | null
-    sandbox?: string | null
-  }
-}
-
-export type AssistantResolvedTargetKind = { kind: 'codex-cli' }
-
-export interface AssistantResolvedRuntimeTarget {
-  continuityFingerprint: string
-  executionDriver: AssistantExecutionDriver
-  modelProvider: string | null
-  resumeKind: AssistantResumeKind | null
-  supportsNativeResume: boolean
-  supportsReasoningEffort: boolean
-  target: AssistantResolvedTargetKind
-}
-
-export function normalizeAssistantExecutionDriver(
-  value: string | null | undefined,
-): AssistantExecutionDriver | null {
-  const normalized = normalizeNullableString(value)
-  return normalized !== null &&
-    assistantExecutionDriverValues.includes(normalized as AssistantExecutionDriver)
-    ? (normalized as AssistantExecutionDriver)
-    : null
-}
-
-export function normalizeAssistantResumeKind(
-  value: string | null | undefined,
-): AssistantResumeKind | null {
-  const normalized = normalizeNullableString(value)
-  return normalized !== null &&
-    assistantResumeKindValues.includes(normalized as AssistantResumeKind)
-    ? (normalized as AssistantResumeKind)
-    : null
-}
-
-export function resolveAssistantRuntimeTarget(
-  input: AssistantRuntimeResolutionInput | null | undefined,
-): AssistantResolvedRuntimeTarget {
-  const provider = resolveAssistantRuntimeResolutionProvider(input)
-
-  if (provider === 'codex-cli') {
-    const modelProvider = normalizeAssistantCodexModelProvider(
-      input?.target?.kind === 'codex-cli'
-        ? input.target.modelProvider
-        : input?.modelProvider,
-    )
-    const continuityFingerprint = buildAssistantContinuityFingerprint({
-      approvalPolicy: input?.policy?.approvalPolicy ?? input?.approvalPolicy,
-      codexHome:
-        input?.target?.kind === 'codex-cli'
-          ? input.target.codexHome
-          : input?.codexHome,
-      model: input?.target?.model ?? input?.model,
-      modelProvider,
-      oss: input?.target?.kind === 'codex-cli' ? input.target.oss : input?.oss,
-      profile:
-        input?.target?.kind === 'codex-cli' ? input.target.profile : input?.profile,
-      provider: 'codex-cli',
-      reasoningEffort: input?.policy?.reasoningEffort ?? input?.reasoningEffort,
-      sandbox: input?.policy?.sandbox ?? input?.sandbox,
-    })
-
-    return {
-      continuityFingerprint,
-      executionDriver: 'codex-app-server',
-      modelProvider,
-      resumeKind: 'codex-thread',
-      supportsNativeResume: true,
-      supportsReasoningEffort:
-        modelProvider !== HOSTED_CUSTOM_INFERENCE_CODEX_MODEL_PROVIDER_ID,
-      target: { kind: 'codex-cli' },
-    }
-  }
-
-  throw createUnsupportedAssistantRuntimeTargetError()
-}
-
 export function normalizeAssistantCodexModelProvider(
   value: string | null | undefined,
 ): string | null {
@@ -397,18 +297,24 @@ export function isCodexReservedModelProviderId(
   return normalized !== null && CODEX_RESERVED_MODEL_PROVIDER_ID_SET.has(normalized)
 }
 
-function buildAssistantContinuityFingerprint(
-  input: AssistantRuntimeResolutionInput & {
-    provider: 'codex-cli'
+export function buildCodexAssistantContinuityFingerprint(
+  input: {
+    approvalPolicy?: string | null
+    codexHome?: string | null
+    model?: string | null
+    modelProvider?: string | null
+    oss?: boolean | null
+    profile?: string | null
+    sandbox?: string | null
   },
 ): string {
   const identity = JSON.stringify({
-    provider: input.provider,
+    provider: 'codex-cli',
     executionDriver: 'codex-app-server',
     modelProvider: normalizeAssistantCodexModelProvider(input.modelProvider),
     model: assistantCodexModelProviderRequiresModelThreadCompatibility(
-        input.modelProvider,
-      )
+      input.modelProvider,
+    )
       ? normalizeNullableString(input.model)
       : null,
     sandbox: normalizeNullableString(input.sandbox),
@@ -418,20 +324,6 @@ function buildAssistantContinuityFingerprint(
     codexHome: normalizeNullableString(input.codexHome),
   })
   return `sha256:${createHash('sha256').update(identity).digest('hex')}`
-}
-
-function resolveAssistantRuntimeResolutionProvider(
-  input: AssistantRuntimeResolutionInput | null | undefined,
-): 'codex-cli' {
-  if (input?.target?.kind && input.target.kind !== 'codex-cli') {
-    throw createUnsupportedAssistantRuntimeTargetError()
-  }
-
-  if (input?.provider && input.provider !== 'codex-cli') {
-    throw createUnsupportedAssistantRuntimeTargetError()
-  }
-
-  return 'codex-cli'
 }
 
 function unsupportedAssistantRuntimeTargetMessage(): string {

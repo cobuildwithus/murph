@@ -13,8 +13,11 @@ import { scopeWebhookTraceId, sha256Text } from "../src/shared.ts";
 import type {
   ClaimDeviceSyncWebhookTraceInput,
   ConsumeOAuthStateResult,
+  DiscardUnconsumedOAuthStateResult,
+  DeviceAccountCredential,
   DeviceConnectionHandler,
   DeviceJobExecutor,
+  DeviceSyncAccount,
   DeviceSyncIngressWebhook,
   DeviceSyncWebhookTraceClaimResult,
   DeviceSyncProvider,
@@ -34,6 +37,7 @@ import type {
   ListDeviceConnectionSourcesInput,
 } from "../src/types.ts";
 import {
+  DEVICE_SYNC_OAUTH_CALLBACK_PROCESSING_LEASE_MS,
   DEVICE_SYNC_WEBHOOK_TRACE_COMPLETED,
   classifyDeviceSyncWebhookAcceptanceMode,
   getDeviceSyncAccountOAuthTokens,
@@ -41,9 +45,11 @@ import {
 
 class InMemoryPublicIngressStore implements DeviceSyncPublicIngressStore {
   private readonly oauthStates = new Map<string, OAuthStateRecord>();
-  private readonly consumedOAuthStates = new Set<string>();
+  private readonly consumedOAuthStates = new Map<string, string>();
   private readonly accounts = new Map<string, PublicDeviceSyncAccount>();
   private readonly accountOwners = new Map<string, string>();
+  private readonly accountCredentials = new Map<string, DeviceAccountCredential>();
+  private readonly accountTokenVersions = new Map<string, number>();
   private readonly accountsByProviderExternal = new Map<string, string>();
   private readonly connectionSources = new Map<string, PublicDeviceConnectionSource>();
   private readonly webhookTraces = new Map<
@@ -56,6 +62,7 @@ class InMemoryPublicIngressStore implements DeviceSyncPublicIngressStore {
     }
   >();
   lastRecordedWebhookTrace: DeviceSyncWebhookTraceRecord | null = null;
+  lastWebhookTraceClaim: ClaimDeviceSyncWebhookTraceInput | null = null;
   claimWebhookTraceCalls = 0;
   completedWebhookTraceCalls = 0;
   markConnectionSetupFailedError: Error | null = null;
@@ -67,7 +74,10 @@ class InMemoryPublicIngressStore implements DeviceSyncPublicIngressStore {
     let deleted = 0;
 
     for (const [state, record] of this.oauthStates.entries()) {
-      if (Date.parse(record.expiresAt) <= Date.parse(now)) {
+      if (
+        !this.consumedOAuthStates.has(state)
+        && Date.parse(record.expiresAt) <= Date.parse(now)
+      ) {
         this.oauthStates.delete(state);
         this.consumedOAuthStates.delete(state);
         deleted += 1;
@@ -91,7 +101,8 @@ class InMemoryPublicIngressStore implements DeviceSyncPublicIngressStore {
   ): ConsumeOAuthStateResult {
     const record = this.oauthStates.get(state) ?? null;
 
-    if (!record || Date.parse(record.expiresAt) <= Date.parse(now)) {
+    const consumedAt = this.consumedOAuthStates.get(state) ?? null;
+    if (!record || (consumedAt === null && Date.parse(record.expiresAt) <= Date.parse(now))) {
       this.oauthStates.delete(state);
       this.consumedOAuthStates.delete(state);
       return {
@@ -112,23 +123,83 @@ class InMemoryPublicIngressStore implements DeviceSyncPublicIngressStore {
       };
     }
 
-    if (this.consumedOAuthStates.has(state)) {
+    if (consumedAt !== null) {
+      const recoveryRequired = Date.parse(now) >= Math.max(
+        Date.parse(record.expiresAt),
+        Date.parse(consumedAt) + DEVICE_SYNC_OAUTH_CALLBACK_PROCESSING_LEASE_MS,
+      );
       return {
-        status: "replayed",
+        status: recoveryRequired
+          ? "recovery_required"
+          : "replayed",
+        consumedAt,
         record,
       };
     }
 
-    this.consumedOAuthStates.add(state);
+    this.consumedOAuthStates.set(state, now);
     return {
       status: "consumed",
+      consumedAt: now,
       record,
     };
+  }
+
+  discardUnconsumedOAuthState(
+    state: string,
+    now: string,
+    expectedProvider?: string,
+    expectedOwnerId?: string,
+  ): DiscardUnconsumedOAuthStateResult {
+    const record = this.oauthStates.get(state) ?? null;
+    const consumedAt = this.consumedOAuthStates.get(state) ?? null;
+    if (!record || (consumedAt === null && Date.parse(record.expiresAt) <= Date.parse(now))) {
+      this.oauthStates.delete(state);
+      this.consumedOAuthStates.delete(state);
+      return { status: "missing" };
+    }
+    if (expectedProvider && record.provider !== expectedProvider) {
+      return { status: "provider_mismatch", provider: record.provider };
+    }
+    if (expectedOwnerId && record.ownerId !== expectedOwnerId) {
+      return { status: "owner_mismatch" };
+    }
+    if (consumedAt !== null) {
+      const recoveryRequired = Date.parse(now) >= Math.max(
+        Date.parse(record.expiresAt),
+        Date.parse(consumedAt) + DEVICE_SYNC_OAUTH_CALLBACK_PROCESSING_LEASE_MS,
+      );
+      return {
+        status: recoveryRequired
+          ? "recovery_required"
+          : "replayed",
+        consumedAt,
+        record,
+      };
+    }
+    this.oauthStates.delete(state);
+    return { status: "discarded", record };
+  }
+
+  resolveOAuthStateWithoutProviderAuthority(input: {
+    state: string;
+    consumedAt: string;
+  }): boolean {
+    if (this.consumedOAuthStates.get(input.state) !== input.consumedAt) {
+      return false;
+    }
+    this.oauthStates.delete(input.state);
+    this.consumedOAuthStates.delete(input.state);
+    return true;
   }
 
   /** Whether the state is still consumable (present and not yet consumed). */
   hasOAuthState(state: string): boolean {
     return this.oauthStates.has(state) && !this.consumedOAuthStates.has(state);
+  }
+
+  hasOAuthClaim(state: string): boolean {
+    return this.oauthStates.has(state);
   }
 
   peekOAuthState(state: string): OAuthStateRecord | null {
@@ -160,6 +231,7 @@ class InMemoryPublicIngressStore implements DeviceSyncPublicIngressStore {
       && existing.status === "active"
       && existing.setupPhase === "source_confirmed"
     ) {
+      this.requireOAuthClaimResolution(input);
       return existing;
     }
 
@@ -204,10 +276,24 @@ class InMemoryPublicIngressStore implements DeviceSyncPublicIngressStore {
     };
 
     this.accounts.set(id, record);
+    this.accountCredentials.set(
+      id,
+      input.credential
+        ?? (input.tokens ? { kind: "oauth_tokens", tokens: input.tokens } : { kind: "none" }),
+    );
+    if (tokens) {
+      this.accountTokenVersions.set(
+        id,
+        (this.accountTokenVersions.get(id) ?? 0) + 1,
+      );
+    } else {
+      this.accountTokenVersions.delete(id);
+    }
     if (ownerId) {
       this.accountOwners.set(id, ownerId);
     }
     this.accountsByProviderExternal.set(key, id);
+    this.requireOAuthClaimResolution(input);
     return record;
   }
 
@@ -223,22 +309,37 @@ class InMemoryPublicIngressStore implements DeviceSyncPublicIngressStore {
     expectedConnectedAt: string | null;
     message: string;
     now: string;
-  }): { account: PublicDeviceSyncAccount | null; applied: boolean } {
+    oauthClaim?: { state: string; consumedAt: string };
+  }): {
+    account: PublicDeviceSyncAccount | null;
+    applied: boolean;
+    blockedByRefreshLease: boolean;
+    oauthTokenVersion: number | null;
+  } {
     if (this.markConnectionSetupFailedError) {
       throw this.markConnectionSetupFailedError;
     }
 
     const existing = this.accounts.get(input.accountId) ?? null;
     if (!existing) {
-      return { account: null, applied: false };
+      return {
+        account: null,
+        applied: false,
+        blockedByRefreshLease: false,
+        oauthTokenVersion: null,
+      };
     }
     if (input.expectedConnectedAt === null || existing.connectedAt !== input.expectedConnectedAt) {
-      return { account: existing, applied: false };
+      return {
+        account: existing,
+        applied: false,
+        blockedByRefreshLease: false,
+        oauthTokenVersion: this.accountTokenVersions.get(existing.id) ?? null,
+      };
     }
 
     const record: PublicDeviceSyncAccount = {
       ...existing,
-      accessTokenExpiresAt: null,
       lastErrorCode: input.code,
       lastErrorMessage: input.message,
       lastSyncErrorAt: input.now,
@@ -249,7 +350,81 @@ class InMemoryPublicIngressStore implements DeviceSyncPublicIngressStore {
       updatedAt: input.now,
     };
     this.accounts.set(input.accountId, record);
-    return { account: record, applied: true };
+    this.requireOAuthClaimResolution(input);
+    return {
+      account: record,
+      applied: true,
+      blockedByRefreshLease: false,
+      oauthTokenVersion: this.accountTokenVersions.get(record.id) ?? null,
+    };
+  }
+
+  getOAuthCleanupAccount(input: {
+    accountId: string;
+    expectedConnectedAt: string;
+    expectedTokenVersion: number;
+  }): DeviceSyncAccount | null {
+    const account = this.accounts.get(input.accountId) ?? null;
+    const credential = this.accountCredentials.get(input.accountId) ?? null;
+    if (
+      !account
+      || account.connectedAt !== input.expectedConnectedAt
+      || account.status !== "reauthorization_required"
+      || account.setupPhase !== "failed"
+      || credential?.kind !== "oauth_tokens"
+      || this.accountTokenVersions.get(input.accountId) !== input.expectedTokenVersion
+    ) {
+      return null;
+    }
+    return {
+      ...account,
+      credential: {
+        kind: "oauth_tokens",
+        tokens: { ...credential.tokens },
+      },
+      disconnectGeneration: 0,
+    };
+  }
+
+  clearOAuthCredentialAfterConfirmedRevoke(input: {
+    accountId: string;
+    expectedConnectedAt: string;
+    expectedTokenVersion: number;
+    now: string;
+  }): boolean {
+    const existing = this.accounts.get(input.accountId) ?? null;
+    if (
+      !existing
+      || existing.connectedAt !== input.expectedConnectedAt
+      || existing.status !== "reauthorization_required"
+      || existing.setupPhase !== "failed"
+      || this.accountTokenVersions.get(input.accountId) !== input.expectedTokenVersion
+    ) {
+      return false;
+    }
+    this.accounts.set(input.accountId, {
+      ...existing,
+      accessTokenExpiresAt: null,
+      updatedAt: input.now,
+    });
+    this.accountCredentials.set(input.accountId, { kind: "none" });
+    this.accountTokenVersions.delete(input.accountId);
+    return true;
+  }
+
+  getConnectionCredential(accountId: string): DeviceAccountCredential | null {
+    return this.accountCredentials.get(accountId) ?? null;
+  }
+
+  private requireOAuthClaimResolution(input: {
+    oauthClaim?: { state: string; consumedAt: string };
+  }): void {
+    if (
+      input.oauthClaim
+      && !this.resolveOAuthStateWithoutProviderAuthority(input.oauthClaim)
+    ) {
+      throw new Error("OAuth claim changed before the in-memory outcome committed.");
+    }
   }
 
   getConnectionByExternalAccount(provider: string, externalAccountId: string): PublicDeviceSyncAccount | null {
@@ -306,6 +481,7 @@ class InMemoryPublicIngressStore implements DeviceSyncPublicIngressStore {
 
   claimWebhookTrace(input: ClaimDeviceSyncWebhookTraceInput): DeviceSyncWebhookTraceClaimResult {
     this.claimWebhookTraceCalls += 1;
+    this.lastWebhookTraceClaim = input;
     const key = `${input.provider}:${input.traceId}`;
     const existing = this.webhookTraces.get(key);
 
@@ -329,7 +505,7 @@ class InMemoryPublicIngressStore implements DeviceSyncPublicIngressStore {
       return "processed";
     }
 
-    if (existing.expiresAt && Date.parse(existing.expiresAt) > Date.parse(input.receivedAt)) {
+    if (existing.expiresAt && Date.parse(existing.expiresAt) > Date.parse(input.claimedAt)) {
       return "processing";
     }
 
@@ -2637,6 +2813,9 @@ test("configured provider manifests own credential policy over provider instance
 });
 
 test("public ingress validates OAuth callback state ownership and required parameters", async () => {
+  const store = new InMemoryPublicIngressStore();
+  const demoProvider = createFakeProvider();
+  const completeConnection = vi.spyOn(demoProvider.connectionHandler!, "completeConnection");
   const alternateProvider = createFakeProvider({
     provider: "alt",
     descriptor: {
@@ -2663,10 +2842,10 @@ test("public ingress validates OAuth callback state ownership and required param
   const ingress = createDeviceSyncPublicIngress({
     publicBaseUrl: "https://sync.example.test/device-sync",
     registry: createDeviceSyncRegistry([
-      createFakeProvider(),
+      demoProvider,
       alternateProvider,
     ]),
-    store: new InMemoryPublicIngressStore(),
+    store,
   });
 
   await assert.rejects(
@@ -2721,9 +2900,146 @@ test("public ingress validates OAuth callback state ownership and required param
       && error.code === "OAUTH_CODE_MISSING"
       && error.httpStatus === 400,
   );
+  assert.equal(store.hasOAuthClaim(missingCodeState.state), false);
+  assert.equal(completeConnection.mock.calls.length, 0);
 });
 
-test("public ingress resolves a redelivered callback as a replay carrying return context", async () => {
+test("public ingress never reinterprets a consumed callback from mutable replay query fields", async () => {
+  const store = new InMemoryPublicIngressStore();
+  const provider = createFakeProvider({
+    async exchangeAuthorizationCode() {
+      throw new Error("provider exchange outcome unavailable");
+    },
+  });
+  const completeConnection = vi.spyOn(provider.connectionHandler!, "completeConnection");
+  const ingress = createDeviceSyncPublicIngress({
+    publicBaseUrl: "https://sync.example.test/device-sync",
+    registry: createDeviceSyncRegistry([provider]),
+    store,
+  });
+  const begin = await ingress.startConnection({
+    ownerId: "member_a",
+    provider: "demo",
+  });
+  await assert.rejects(
+    () => ingress.handleOAuthCallback({
+      code: "ambiguous",
+      expectedOwnerId: "member_a",
+      provider: "demo",
+      state: begin.state,
+    }),
+    /provider exchange outcome unavailable/,
+  );
+
+  for (const replay of [
+    { error: "access_denied" },
+    {},
+    { code: "different", error: "access_denied" },
+  ]) {
+    await assert.rejects(
+      () => ingress.handleOAuthCallback({
+        ...replay,
+        expectedOwnerId: "member_a",
+        provider: "demo",
+        state: begin.state,
+      }),
+      (error: unknown) =>
+        error instanceof DeviceSyncError && error.code === "OAUTH_STATE_REPLAYED",
+    );
+  }
+  assert.equal(completeConnection.mock.calls.length, 1);
+  assert.equal(store.hasOAuthClaim(begin.state), true);
+});
+
+test("public ingress retains an ambiguous provider-exchange claim", async () => {
+  const store = new InMemoryPublicIngressStore();
+  const ingress = createDeviceSyncPublicIngress({
+    publicBaseUrl: "https://sync.example.test/device-sync",
+    registry: createDeviceSyncRegistry([
+      createFakeProvider({
+        async exchangeAuthorizationCode() {
+          throw new Error("provider exchange outcome unavailable");
+        },
+      }),
+    ]),
+    store,
+  });
+  const begin = await ingress.startConnection({
+    ownerId: "member_a",
+    provider: "demo",
+  });
+
+  await assert.rejects(
+    () => ingress.handleOAuthCallback({
+      code: "ambiguous",
+      expectedOwnerId: "member_a",
+      provider: "demo",
+      state: begin.state,
+    }),
+    /provider exchange outcome unavailable/,
+  );
+  assert.equal(store.hasOAuthClaim(begin.state), true);
+});
+
+test("public ingress requires manual provider recovery after an ambiguous callback lease expires", async () => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date("2026-08-13T12:00:00.000Z"));
+  try {
+    const store = new InMemoryPublicIngressStore();
+    const provider = createFakeProvider({
+      async exchangeAuthorizationCode() {
+        throw new Error("provider exchange outcome unavailable");
+      },
+    });
+    const completeConnection = vi.spyOn(
+      provider.connectionHandler!,
+      "completeConnection",
+    );
+    const ingress = createDeviceSyncPublicIngress({
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      registry: createDeviceSyncRegistry([provider]),
+      sessionTtlMs: 60_000,
+      store,
+    });
+    const begin = await ingress.startConnection({
+      ownerId: "member_a",
+      provider: "demo",
+    });
+
+    await assert.rejects(
+      () => ingress.handleOAuthCallback({
+        code: "ambiguous",
+        expectedOwnerId: "member_a",
+        provider: "demo",
+        state: begin.state,
+      }),
+      /provider exchange outcome unavailable/,
+    );
+    vi.setSystemTime(new Date(
+      Date.parse("2026-08-13T12:00:00.000Z")
+        + DEVICE_SYNC_OAUTH_CALLBACK_PROCESSING_LEASE_MS,
+    ));
+
+    await assert.rejects(
+      () => ingress.handleOAuthCallback({
+        code: "ambiguous",
+        expectedOwnerId: "member_a",
+        provider: "demo",
+        state: begin.state,
+      }),
+      (error: unknown) =>
+        error instanceof DeviceSyncError
+        && error.code === "OAUTH_CALLBACK_RECOVERY_REQUIRED"
+        && error.httpStatus === 409,
+    );
+    assert.equal(completeConnection.mock.calls.length, 1);
+    assert.equal(store.hasOAuthClaim(begin.state), true);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+test("public ingress finalizes successful callback state before a redelivery", async () => {
   const store = new InMemoryPublicIngressStore();
   const provider = createFakeProvider();
   const connectionHandler = provider.connectionHandler;
@@ -2761,12 +3077,8 @@ test("public ingress resolves a redelivered callback as a replay carrying return
       }),
     (error: unknown) => {
       assert.ok(error instanceof DeviceSyncError);
-      assert.equal(error.code, "OAUTH_STATE_REPLAYED");
-      assert.equal(error.httpStatus, 409);
-      assert.equal(error.details?.provider, "demo");
-      assert.equal(error.details?.connectSourceId, "demo");
-      assert.equal(error.details?.connectTarget, "demo");
-      assert.equal(error.details?.returnTo, "https://sync.example.test/settings/devices");
+      assert.equal(error.code, "OAUTH_STATE_INVALID");
+      assert.equal(error.httpStatus, 400);
       return true;
     },
   );
@@ -2774,6 +3086,7 @@ test("public ingress resolves a redelivered callback as a replay carrying return
   // Redelivery must not redo the connection work.
   assert.equal(completeConnection.mock.calls.length, 1);
   assert.equal(store.upsertConnectionCalls, 1);
+  assert.equal(store.hasOAuthClaim(begin.state), false);
 });
 
 test("public ingress falls back to granted scopes when the provider omits scopes", async () => {
@@ -2845,6 +3158,193 @@ test("public ingress rejects webhook deliveries for providers without webhook ha
       && error.code === "WEBHOOKS_NOT_SUPPORTED"
       && error.httpStatus === 404,
   );
+});
+
+test("public ingress freezes a versioned prepared webhook at its verified receipt instant without touching the store", async () => {
+  const store = new InMemoryPublicIngressStore();
+  const receivedAt = new Date("2026-04-10T12:00:00.000Z");
+  const ingress = createDeviceSyncPublicIngress({
+    publicBaseUrl: "https://sync.example.test/device-sync",
+    registry: createDeviceSyncRegistry([
+      createFakeProvider({
+        async verifyAndParseWebhook({ now }) {
+          assert.equal(now, receivedAt.toISOString());
+          return {
+            externalAccountId: "opaque-account",
+            eventType: "demo.updated",
+            jobs: [],
+            traceId: "opaque-trace",
+          };
+        },
+      }),
+    ]),
+    store,
+  });
+
+  assert.deepEqual(await ingress.prepareWebhookForDurableEnqueue(
+    "demo",
+    new Headers(),
+    Buffer.from("{}"),
+    receivedAt,
+  ), {
+    acceptanceMode: "durable_webhook_work",
+    eventType: "demo.updated",
+    externalAccountId: "opaque-account",
+    jobs: [],
+    provider: "demo",
+    receivedAt: receivedAt.toISOString(),
+    schema: "murph.device-sync-prepared-webhook.v1",
+    traceId: scopeWebhookTraceId("demo", "opaque-account", "opaque-trace"),
+  });
+  assert.equal(store.claimWebhookTraceCalls, 0);
+  assert.equal(store.lastRecordedWebhookTrace, null);
+});
+
+test("public ingress admits a prepared webhook after verifier rotation without invoking the new verifier", async () => {
+  const receivedAt = new Date("2026-04-10T12:00:00.000Z");
+  let originalVerifierCalls = 0;
+  let rotatedVerifierCalls = 0;
+  const store = new InMemoryPublicIngressStore();
+  const original = createDeviceSyncPublicIngress({
+    publicBaseUrl: "https://sync.example.test/device-sync",
+    registry: createDeviceSyncRegistry([
+      createFakeProvider({
+        async verifyAndParseWebhook() {
+          originalVerifierCalls += 1;
+          return {
+            externalAccountId: "demo-abc",
+            eventType: "demo.updated",
+            jobs: [],
+            traceId: "secret-one-trace",
+          };
+        },
+      }),
+    ]),
+    store,
+  });
+  const begin = await original.startConnection({ provider: "demo" });
+  await original.handleOAuthCallback({ code: "abc", provider: "demo", state: begin.state });
+  const prepared = await original.prepareWebhookForDurableEnqueue(
+    "demo",
+    new Headers({ "x-demo-signature": "secret-one-proof" }),
+    Buffer.from("secret-one-body"),
+    receivedAt,
+  );
+
+  const rotated = createDeviceSyncPublicIngress({
+    publicBaseUrl: "https://sync.example.test/device-sync",
+    registry: createDeviceSyncRegistry([
+      createFakeProvider({
+        async verifyAndParseWebhook() {
+          rotatedVerifierCalls += 1;
+          throw deviceSyncError({
+            code: "WEBHOOK_SIGNATURE_INVALID",
+            httpStatus: 401,
+            message: "Only rotated proof is accepted.",
+            retryable: false,
+          });
+        },
+      }),
+    ]),
+    store,
+    hooks: {
+      onWebhookAccepted({ account, claimToken, traceId }) {
+        return completeWebhookAcceptDurably(store, account, traceId, claimToken);
+      },
+    },
+  });
+
+  const result = await rotated.handlePreparedWebhook(prepared);
+  assert.equal(result.accepted, true);
+  assert.equal(originalVerifierCalls, 1);
+  assert.equal(rotatedVerifierCalls, 0);
+  assert.equal(store.lastWebhookTraceClaim?.receivedAt, receivedAt.toISOString());
+});
+
+test("public ingress revalidates current provider and connection authority for prepared webhooks", async () => {
+  const store = new InMemoryPublicIngressStore();
+  const ingress = createDeviceSyncPublicIngress({
+    publicBaseUrl: "https://sync.example.test/device-sync",
+    registry: createDeviceSyncRegistry([createFakeProvider()]),
+    store,
+  });
+  const prepared = await ingress.prepareWebhookForDurableEnqueue(
+    "demo",
+    new Headers(),
+    Buffer.from("{}"),
+    new Date("2026-04-10T12:00:00.000Z"),
+  );
+
+  const providerRemoved = createDeviceSyncPublicIngress({
+    publicBaseUrl: "https://sync.example.test/device-sync",
+    registry: createDeviceSyncRegistry([]),
+    store,
+  });
+  const removed = await providerRemoved.handlePreparedWebhook(prepared);
+  assert.equal(removed.accepted, true);
+  assert.equal(removed.duplicate, false);
+
+  const currentStore = new InMemoryPublicIngressStore();
+  const currentIngress = createDeviceSyncPublicIngress({
+    publicBaseUrl: "https://sync.example.test/device-sync",
+    registry: createDeviceSyncRegistry([createFakeProvider()]),
+    store: currentStore,
+  });
+  await assert.rejects(
+    () => currentIngress.handlePreparedWebhook(prepared),
+    (error: unknown) =>
+      error instanceof DeviceSyncError
+      && error.code === "WEBHOOK_ACCOUNT_NOT_READY",
+  );
+});
+
+test("public ingress leases a delayed queued trace from dequeue time while preserving its receipt time", async () => {
+  const receivedAt = new Date("2026-04-10T12:00:00.000Z");
+  const claimedAt = new Date("2026-04-10T12:30:00.000Z");
+  vi.useFakeTimers();
+  vi.setSystemTime(claimedAt);
+  try {
+    const store = new InMemoryPublicIngressStore();
+    const ingress = createDeviceSyncPublicIngress({
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      registry: createDeviceSyncRegistry([
+        createFakeProvider({
+          async verifyAndParseWebhook({ now }) {
+            assert.equal(now, receivedAt.toISOString());
+            return {
+              externalAccountId: "demo-abc",
+              eventType: "demo.updated",
+              jobs: [],
+              traceId: "queued-trace",
+            };
+          },
+        }),
+      ]),
+      store,
+      hooks: {
+        onWebhookAccepted({ account, claimToken, traceId }) {
+          return completeWebhookAcceptDurably(store, account, traceId, claimToken);
+        },
+      },
+    });
+    const begin = await ingress.startConnection({ provider: "demo" });
+    await ingress.handleOAuthCallback({
+      code: "abc",
+      provider: "demo",
+      state: begin.state,
+    });
+
+    await ingress.handleWebhook("demo", new Headers(), Buffer.from("{}"), receivedAt);
+
+    assert.equal(store.lastWebhookTraceClaim?.receivedAt, receivedAt.toISOString());
+    assert.equal(store.lastWebhookTraceClaim?.claimedAt, claimedAt.toISOString());
+    assert.equal(
+      Date.parse(store.lastWebhookTraceClaim?.processingExpiresAt ?? ""),
+      claimedAt.getTime() + 5 * 60 * 1_000,
+    );
+  } finally {
+    vi.useRealTimers();
+  }
 });
 
 test("public ingress leaves retryable unknown-account webhook traces retryable without running orphan hooks", async () => {
@@ -3134,6 +3634,7 @@ test("public ingress passes only a stripped webhook summary into accepted hooks"
             eventType: "demo.updated",
             traceId: "trace-summary",
             occurredAt: "2026-04-11T12:59:00.000Z",
+            providerSentAt: "2026-04-11T12:59:30.000Z",
             resourceCategory: "  sleep  ",
             jobs: [
               {
@@ -3183,6 +3684,7 @@ test("public ingress passes only a stripped webhook summary into accepted hooks"
           },
         ],
         occurredAt: "2026-04-11T12:59:00.000Z",
+        providerSentAt: "2026-04-11T12:59:30.000Z",
         resourceCategory: "sleep",
       },
     },
@@ -3693,9 +4195,15 @@ test("public ingress marks disconnected-account webhook traces processed so dela
     state: begin.state,
     code: "abc",
   });
+  const prepared = await ingress.prepareWebhookForDurableEnqueue(
+    "demo",
+    new Headers(),
+    Buffer.from("{}"),
+    new Date("2026-04-10T12:00:00.000Z"),
+  );
   store.patchAccountStatus(connected.account.id, "disconnected");
 
-  const first = await ingress.handleWebhook("demo", new Headers(), Buffer.from("{}"));
+  const first = await ingress.handlePreparedWebhook(prepared);
   const expectedScopedTraceId = scopeWebhookTraceId("demo", "demo-abc", "trace-inactive");
   assert.equal(first.accepted, true);
   assert.equal(first.duplicate, false);
@@ -3703,7 +4211,7 @@ test("public ingress marks disconnected-account webhook traces processed so dela
   assert.deepEqual(acceptedWebhooks, []);
   assert.equal(store.lastRecordedWebhookTrace?.traceId, expectedScopedTraceId);
 
-  const duplicate = await ingress.handleWebhook("demo", new Headers(), Buffer.from("{}"));
+  const duplicate = await ingress.handlePreparedWebhook(prepared);
   assert.equal(duplicate.accepted, true);
   assert.equal(duplicate.duplicate, true);
   assert.equal(duplicate.traceId, expectedScopedTraceId);
@@ -4033,6 +4541,7 @@ test("public ingress omits provider-supplied OAuth error descriptions from warni
       error instanceof DeviceSyncError && error.code === "OAUTH_CALLBACK_REJECTED",
   );
 
+  assert.equal(store.hasOAuthClaim(begin.state), false);
   assert.equal(warn.mock.calls.length, 1);
   assert.deepEqual(warn.mock.calls[0]?.[1], {
     provider: "demo",
@@ -4303,7 +4812,7 @@ test("public ingress passes connect source context to connection-established hoo
   assert.equal(connected.sourceProviderSlug, "garmin");
 });
 
-test("public ingress best-effort revokes pending provider access when OAuth persistence fails", async () => {
+test("public ingress retains the claim when provider revoke and cleanup-owner persistence fail", async () => {
   const persistError = new Error("persist failed before connection storage");
   const revokeCalls: Array<{ accessToken: string; externalAccountId: string }> = [];
   const warnEvents: Array<{ context?: Record<string, unknown>; message: string }> = [];
@@ -4350,26 +4859,76 @@ test("public ingress best-effort revokes pending provider access when OAuth pers
         state: begin.state,
         code: "abc",
       }),
-    (error: unknown) => error === persistError,
+    (error: unknown) =>
+      error instanceof DeviceSyncError
+      && error.code === "OAUTH_SETUP_CLEANUP_FAILED"
+      && error.cause === persistError,
   );
 
-  assert.deepEqual(revokeCalls, [
-    {
-      accessToken: "<REDACTED_ACCESS_TOKEN>",
-      externalAccountId: "demo-abc",
-    },
-  ]);
+  assert.deepEqual(revokeCalls, []);
   assert.equal(warnEvents.length, 1);
-  assert.equal(warnEvents[0]?.message, "Failed to revoke provider access after OAuth callback setup failed.");
-  assert.equal(warnEvents[0]?.context?.failureCode, "DEVICE_SYNC_OAUTH_SETUP_FAILURE_REVOKE_FAILED");
+  assert.equal(warnEvents[0]?.message, "Failed to persist provider cleanup ownership after OAuth setup failure.");
+  assert.equal(warnEvents[0]?.context?.failureCode, "DEVICE_SYNC_OAUTH_CLEANUP_OWNER_PERSIST_FAILED");
   assert.deepEqual(warnEvents[0]?.context?.error, {
     category: "unexpected_error",
-    message: "cleanup revoke failed",
+    message: "persist failed before connection storage",
     name: "Error",
   });
   assert.equal(warnEvents[0]?.context?.provider, "demo");
   assert.equal(store.hasOAuthState(begin.state), false);
+  assert.equal(store.hasOAuthClaim(begin.state), true);
   assert.equal(store.getConnectionByExternalAccount("demo", "demo-abc"), null);
+});
+
+test("public ingress persists cleanup ownership when provider revoke fails after a transient write failure", async () => {
+  const persistError = new Error("transient persist failure");
+  class FailFirstUpsertStore extends InMemoryPublicIngressStore {
+    private shouldFail = true;
+
+    override upsertConnection(input: UpsertPublicDeviceSyncConnectionInput): PublicDeviceSyncAccount {
+      if (this.shouldFail) {
+        this.shouldFail = false;
+        throw persistError;
+      }
+      return super.upsertConnection(input);
+    }
+  }
+  const store = new FailFirstUpsertStore();
+  const ingress = createDeviceSyncPublicIngress({
+    publicBaseUrl: "https://sync.example.test/device-sync",
+    registry: createDeviceSyncRegistry([
+      createFakeProvider({
+        async revokeAccess() {
+          throw new Error("provider revoke unavailable");
+        },
+      }),
+    ]),
+    store,
+  });
+  const begin = await ingress.startConnection({
+    ownerId: "member_a",
+    provider: "demo",
+  });
+
+  await assert.rejects(
+    () => ingress.handleOAuthCallback({
+      expectedOwnerId: "member_a",
+      provider: "demo",
+      state: begin.state,
+      code: "cleanup-owner",
+    }),
+    (error: unknown) => error === persistError,
+  );
+
+  const cleanupOwner = store.getConnectionByExternalAccount(
+    "demo",
+    "demo-cleanup-owner",
+  );
+  assert.ok(cleanupOwner);
+  assert.equal(cleanupOwner.status, "reauthorization_required");
+  assert.equal(cleanupOwner.setupPhase, "failed");
+  assert.equal(store.getConnectionCredential(cleanupOwner.id)?.kind, "oauth_tokens");
+  assert.equal(store.hasOAuthClaim(begin.state), false);
 });
 
 test("public ingress revokes and marks setup failure after post-persistence OAuth hook failures", async () => {
@@ -4385,6 +4944,7 @@ test("public ingress revokes and marks setup failure after post-persistence OAut
         async revokeAccess(account) {
           const failed = store.getConnectionByExternalAccount("demo", account.externalAccountId);
           assert.equal(failed?.status, "reauthorization_required");
+          assert.equal(store.getConnectionCredential(failed!.id)?.kind, "oauth_tokens");
           revokeCalls.push(account.externalAccountId);
         },
       }),
@@ -4425,9 +4985,92 @@ test("public ingress revokes and marks setup failure after post-persistence OAut
   );
   assert.ok(storedAccount.lastSyncErrorAt);
   assert.equal(storedAccount.nextReconcileAt, null);
+  assert.equal(store.getConnectionCredential(storedAccount.id)?.kind, "none");
 });
 
-test("public ingress surfaces persisted OAuth cleanup failures before provider revocation", async () => {
+test("public ingress retains durable OAuth authority when post-persistence revoke is ambiguous", async () => {
+  const store = new InMemoryPublicIngressStore();
+  const hookError = new Error("post-persist hook failure");
+  const ingress = createDeviceSyncPublicIngress({
+    publicBaseUrl: "https://sync.example.test/device-sync",
+    registry: createDeviceSyncRegistry([
+      createFakeProvider({
+        async revokeAccess(account) {
+          const failed = store.getConnectionByExternalAccount("demo", account.externalAccountId);
+          assert.equal(failed?.status, "reauthorization_required");
+          assert.equal(store.getConnectionCredential(failed!.id)?.kind, "oauth_tokens");
+          throw new Error("provider revoke result unavailable");
+        },
+      }),
+    ]),
+    store,
+    hooks: {
+      onConnectionEstablished() {
+        throw hookError;
+      },
+    },
+  });
+
+  const begin = await ingress.startConnection({ provider: "demo" });
+  await assert.rejects(
+    () => ingress.handleOAuthCallback({
+      code: "persisted-ambiguous-revoke",
+      provider: "demo",
+      state: begin.state,
+    }),
+    (error: unknown) => error === hookError,
+  );
+
+  const failed = store.getConnectionByExternalAccount(
+    "demo",
+    "demo-persisted-ambiguous-revoke",
+  );
+  assert.equal(failed?.setupPhase, "failed");
+  assert.equal(failed?.status, "reauthorization_required");
+  assert.equal(store.getConnectionCredential(failed!.id)?.kind, "oauth_tokens");
+});
+
+test("public ingress does not revoke or clear while token refresh ownership is in flight", async () => {
+  class RefreshLeasedStore extends InMemoryPublicIngressStore {
+    override markConnectionSetupFailed(input: Parameters<InMemoryPublicIngressStore["markConnectionSetupFailed"]>[0]) {
+      const account = this.getConnectionById(input.accountId);
+      return {
+        account,
+        applied: false,
+        blockedByRefreshLease: true,
+        oauthTokenVersion: 1,
+      };
+    }
+  }
+  const store = new RefreshLeasedStore();
+  const revokeAccess = vi.fn();
+  const ingress = createDeviceSyncPublicIngress({
+    publicBaseUrl: "https://sync.example.test/device-sync",
+    registry: createDeviceSyncRegistry([
+      createFakeProvider({ revokeAccess }),
+    ]),
+    store,
+    hooks: {
+      onConnectionEstablished() {
+        throw new Error("post-persist hook failure");
+      },
+    },
+  });
+
+  const begin = await ingress.startConnection({ provider: "demo" });
+  await assert.rejects(() => ingress.handleOAuthCallback({
+    code: "refresh-leased",
+    provider: "demo",
+    state: begin.state,
+  }));
+
+  const account = store.getConnectionByExternalAccount("demo", "demo-refresh-leased");
+  assert.equal(account?.status, "active");
+  assert.equal(store.getConnectionCredential(account!.id)?.kind, "oauth_tokens");
+  assert.equal(revokeAccess.mock.calls.length, 0);
+});
+
+test("public ingress retains persisted cleanup ownership when failure marking is unavailable", async () => {
   const store = new InMemoryPublicIngressStore();
   const revokeCalls: string[] = [];
   const hookError = new Error("post-persist hook failure");
@@ -4458,25 +5101,16 @@ test("public ingress surfaces persisted OAuth cleanup failures before provider r
         state: begin.state,
         code: "persisted",
       }),
-    (error: unknown) => {
-      assert.ok(error instanceof DeviceSyncError);
-      assert.equal(error.code, "OAUTH_SETUP_CLEANUP_FAILED");
-      assert.equal(
-        error.message,
-        "OAuth connection setup failed after persistence, and stored-token cleanup did not complete.",
-      );
-      assert.deepEqual(error.details, {
-        accountId: "acct_01",
-        setupFailureCode: "OAUTH_SETUP_FAILED",
-        provider: "demo",
-        returnTo: null,
-      });
-      return true;
-    },
+    (error: unknown) => error === hookError,
   );
 
   assert.deepEqual(revokeCalls, []);
   assert.equal(store.hasOAuthState(begin.state), false);
+  assert.equal(store.hasOAuthClaim(begin.state), false);
+  assert.equal(
+    store.getConnectionByExternalAccount("demo", "demo-persisted")?.status,
+    "active",
+  );
 });
 
 test("public ingress skips provider revocation when post-persistence setup cleanup loses its epoch", async () => {
@@ -4947,7 +5581,10 @@ test("public ingress rejects built-in OAuth callback jobs that drift from the pr
     /not declared in the provider manifest/u,
   );
 
-  assert.equal(store.getConnectionByExternalAccount("strava", "strava-abc"), null);
+  assert.equal(
+    store.getConnectionByExternalAccount("strava", "strava-abc")?.status,
+    "reauthorization_required",
+  );
 });
 
 test("public ingress rejects built-in webhook jobs that drift from the provider manifest before durable trace claim", async () => {

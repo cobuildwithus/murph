@@ -10,6 +10,8 @@ import {
 import { deviceSyncError } from "@murphai/device-syncd/errors";
 import {
   isDeviceSyncCredentialIndependentImportJob,
+  isHostedDeviceSyncEventToProviderSendBucket,
+  mergeHostedDeviceSyncEventToProviderSendBuckets,
   serializeHostedExecutionDeviceSyncDirtyPayloadIdentity,
   type DeviceSyncCredentialIndependentImportJobClassifier,
   type HostedExecutionDeviceSyncStagedDirtyAck,
@@ -20,10 +22,15 @@ import {
   sha256Hex,
   toIsoTimestamp,
 } from "../shared";
+import { HostedDomainRootPreparationMismatchError } from "../../hosted-crypto/domain-root-store";
 import { toNullablePrismaJsonValue } from "./prisma-json";
 import {
   openHostedDeviceSyncDirtyPayloadJson,
+  prepareHostedDeviceSyncDirtyPayloadCrypto,
+  revalidatePreparedHostedDeviceSyncDirtyPayloadCryptoTx,
   sealHostedDeviceSyncDirtyPayloadJson,
+  sealHostedDeviceSyncDirtyPayloadJsonFromPreparedCrypto,
+  type PreparedHostedDeviceSyncDirtyPayloadCrypto,
 } from "./dirty-payloads";
 import type {
   HostedDeviceSyncDirtyConnectionAckRecord,
@@ -69,6 +76,54 @@ interface PreparedDirtyPayloadRows {
   dirtyRevision: bigint;
   resources: HostedDeviceSyncDirtyResource[];
   rows: PreparedDirtyPayloadRow[];
+}
+
+type DirtyConnectionPreparationSnapshot =
+  | { exists: false }
+  | {
+      dirtyRevision: bigint;
+      exists: true;
+      processedRevision: bigint;
+      provider: string;
+      updatedAt: string;
+      userId: string;
+    };
+
+interface PreparedHostedDeviceSyncDirtyConnectionUpsertDetails {
+  dirtyRevision: bigint;
+  input: Omit<UpsertHostedDeviceSyncDirtyConnectionInput, "tx">;
+  payloadCrypto?: PreparedHostedDeviceSyncDirtyPayloadCrypto;
+  payloadRows?: PreparedDirtyPayloadRows;
+  resourceBatch: DirtyResourceBatch;
+  snapshot: DirtyConnectionPreparationSnapshot;
+}
+
+const preparedHostedDeviceSyncDirtyConnectionUpserts = new WeakMap<
+  PreparedHostedDeviceSyncDirtyConnectionUpsert,
+  PreparedHostedDeviceSyncDirtyConnectionUpsertDetails
+>();
+
+export interface PreparedHostedDeviceSyncDirtyConnectionUpsert {
+  readonly connectionId: string;
+  readonly dirtyRevision: bigint;
+  readonly provider: string;
+  readonly shouldRequestWake: boolean;
+  readonly userId: string;
+}
+
+export function hasHostedDeviceSyncDirtyResourcePayload(
+  resource: HostedDeviceSyncDirtyResource,
+): boolean {
+  return hasDirtyResourceInputPayload(resource.payload);
+}
+
+export class HostedDeviceSyncDirtyPreparationMismatchError extends Error {
+  readonly code = "HOSTED_DEVICE_SYNC_DIRTY_PREPARATION_MISMATCH";
+
+  constructor() {
+    super("Hosted device-sync dirty preparation is stale.");
+    this.name = "HostedDeviceSyncDirtyPreparationMismatchError";
+  }
 }
 
 const DIRTY_COUNTER_KEY_MAX_LENGTH = 96;
@@ -381,6 +436,96 @@ export class PrismaHostedDirtyConnectionStore {
     });
   }
 
+  async prepareDirtyConnectionUpsert(
+    input: Omit<UpsertHostedDeviceSyncDirtyConnectionInput, "tx">,
+  ): Promise<PreparedHostedDeviceSyncDirtyConnectionUpsert> {
+    const resourceBatch = buildDirtyResourceBatch(input.resources ?? []);
+    const existing = await this.prisma.deviceSyncDirtyConnection.findUnique({
+      where: {
+        connectionId: input.connectionId,
+      },
+    });
+    if (existing && existing.userId !== input.userId) {
+      throw new TypeError("Dirty connection preparation owner did not match the dirty connection.");
+    }
+
+    const dirtyRevision = resolveDirtyPayloadRevision({
+      existing,
+      resourceBatch,
+    });
+    const payloadCrypto = resourceBatch.payloadResources.length === 0
+      ? undefined
+      : await prepareHostedDeviceSyncDirtyPayloadCrypto({
+          prisma: this.prisma,
+          userId: input.userId,
+        });
+    const payloadRows = payloadCrypto
+      ? await prepareDirtyPayloadRows({
+          connectionId: input.connectionId,
+          dirtyRevision,
+          preparedCrypto: payloadCrypto,
+          provider: input.provider,
+          resources: resourceBatch.payloadResources,
+          traceId: input.traceId,
+          userId: input.userId,
+        })
+      : undefined;
+    const preparedInput = Object.freeze({
+      connectionId: input.connectionId,
+      dirtyAt: input.dirtyAt,
+      eventType: input.eventType,
+      provider: input.provider,
+      resourceCategory: input.resourceCategory,
+      traceId: input.traceId,
+      userId: input.userId,
+    });
+    const prepared = Object.freeze({
+      connectionId: input.connectionId,
+      dirtyRevision,
+      provider: input.provider,
+      shouldRequestWake: !existing
+        || existing.processedRevision >= existing.dirtyRevision,
+      userId: input.userId,
+    });
+    preparedHostedDeviceSyncDirtyConnectionUpserts.set(prepared, {
+      dirtyRevision,
+      input: preparedInput,
+      payloadCrypto,
+      payloadRows,
+      resourceBatch,
+      snapshot: createDirtyConnectionPreparationSnapshot(existing),
+    });
+    return prepared;
+  }
+
+  async upsertDirtyConnectionWithPreparedPlanTx(input: {
+    prepared: PreparedHostedDeviceSyncDirtyConnectionUpsert;
+    tx: HostedPrismaTransactionClient;
+  }): Promise<UpsertHostedDeviceSyncDirtyConnectionResult> {
+    const details = requirePreparedDirtyConnectionUpsert(input.prepared);
+    if (
+      input.prepared.connectionId !== details.input.connectionId
+      || input.prepared.dirtyRevision !== details.dirtyRevision
+      || input.prepared.provider !== details.input.provider
+      || input.prepared.shouldRequestWake !== (
+        !details.snapshot.exists
+        || details.snapshot.processedRevision >= details.snapshot.dirtyRevision
+      )
+      || input.prepared.userId !== details.input.userId
+    ) {
+      throw new TypeError("Dirty connection prepared identity does not match its request.");
+    }
+
+    return this.upsertDirtyConnectionOnce({
+      ...details.input,
+      expectedPreparationSnapshot: details.snapshot,
+      preparedPayloadCrypto: details.payloadCrypto,
+      precomputedPayloadRows: details.payloadRows,
+      resourceBatch: details.resourceBatch,
+      tx: input.tx,
+    });
+  }
+
   async upsertDirtyConnection(
     input: UpsertHostedDeviceSyncDirtyConnectionInput,
   ): Promise<UpsertHostedDeviceSyncDirtyConnectionResult> {
@@ -422,6 +567,8 @@ export class PrismaHostedDirtyConnectionStore {
 
   private async upsertDirtyConnectionOnce(
     input: UpsertHostedDeviceSyncDirtyConnectionInput & {
+      expectedPreparationSnapshot?: DirtyConnectionPreparationSnapshot;
+      preparedPayloadCrypto?: PreparedHostedDeviceSyncDirtyPayloadCrypto;
       precomputedPayloadRows?: PreparedDirtyPayloadRows;
       resourceBatch: DirtyResourceBatch;
       tx: HostedPrismaTransactionClient;
@@ -435,6 +582,42 @@ export class PrismaHostedDirtyConnectionStore {
         connectionId: input.connectionId,
       },
     });
+    if (input.preparedPayloadCrypto) {
+      try {
+        await revalidatePreparedHostedDeviceSyncDirtyPayloadCryptoTx({
+          prepared: input.preparedPayloadCrypto,
+          tx: prisma,
+        });
+      } catch (error) {
+        if (error instanceof HostedDomainRootPreparationMismatchError) {
+          throw new HostedDeviceSyncDirtyPreparationMismatchError();
+        }
+        throw error;
+      }
+    }
+    if (input.expectedPreparationSnapshot?.exists === true) {
+      const locked = await lockDirtyConnectionForCompanionReceipt({
+        connectionId: input.connectionId,
+        tx: prisma,
+      });
+      if (!locked) {
+        throw new HostedDeviceSyncDirtyPreparationMismatchError();
+      }
+      existing = await prisma.deviceSyncDirtyConnection.findUnique({
+        where: {
+          connectionId: input.connectionId,
+        },
+      });
+    }
+    if (
+      input.expectedPreparationSnapshot
+      && !dirtyConnectionMatchesPreparationSnapshot(
+        existing,
+        input.expectedPreparationSnapshot,
+      )
+    ) {
+      throw new HostedDeviceSyncDirtyPreparationMismatchError();
+    }
     const hasCompanionNightResource = input.resourceBatch.payloadResources.some(
       (resource) => readCompanionHrvDirtyResourceNightDate(resource) !== null,
     );
@@ -456,7 +639,11 @@ export class PrismaHostedDirtyConnectionStore {
         prisma,
       });
     }
-    if (hasCompanionNightResource && existing) {
+    if (
+      hasCompanionNightResource
+      && existing
+      && input.expectedPreparationSnapshot?.exists !== true
+    ) {
       // Companion replay receipts reference the parent connection. Lock the
       // dirty marker first so account deletion and ingress retain one lock
       // order without holding that lock during payload encryption.
@@ -736,6 +923,28 @@ export class PrismaHostedDirtyConnectionStore {
     return rows.some((row) => row.pending === true);
   }
 
+  async shouldRequestWakeForDirtyConnectionUpsert(input: {
+    connectionId: string;
+    tx: HostedPrismaTransactionClient;
+    userId: string;
+  }): Promise<boolean> {
+    const existing = await input.tx.deviceSyncDirtyConnection.findUnique({
+      select: {
+        dirtyRevision: true,
+        processedRevision: true,
+        userId: true,
+      },
+      where: {
+        connectionId: input.connectionId,
+      },
+    });
+    if (existing && existing.userId !== input.userId) {
+      throw new TypeError("Dirty connection wake inspection owner did not match the connection.");
+    }
+
+    return !existing || existing.processedRevision >= existing.dirtyRevision;
+  }
+
   async hasPendingDirtyConnectionForUser(
     userId: string,
     tx?: HostedPrismaTransactionClient,
@@ -762,6 +971,7 @@ export class PrismaHostedDirtyConnectionStore {
   }
 
   async listPendingDirtyConnectionsForUser(input: {
+    connectionId?: string;
     limit: number;
     stagedDirtyAcks?: readonly HostedExecutionDeviceSyncStagedDirtyAck[];
     userId: string;
@@ -781,6 +991,9 @@ export class PrismaHostedDirtyConnectionStore {
       select "connection_id"
       from "device_sync_dirty_connection"
       where "user_id" = ${input.userId}
+        ${input.connectionId
+          ? Prisma.sql`and "connection_id" = ${input.connectionId}`
+          : Prisma.empty}
         and (
           "dirty_revision" > "processed_revision"
           or exists(
@@ -1053,12 +1266,18 @@ async function createDirtyPayloadRows(input: {
 async function prepareDirtyPayloadRows(input: {
   connectionId: string;
   dirtyRevision: bigint;
-  prisma: HostedPrismaTransactionClient | PrismaClient;
+  preparedCrypto?: PreparedHostedDeviceSyncDirtyPayloadCrypto;
+  prisma?: HostedPrismaTransactionClient | PrismaClient;
   provider: string;
   resources: readonly HostedDeviceSyncDirtyResource[];
   traceId?: string | null;
   userId: string;
 }): Promise<PreparedDirtyPayloadRows> {
+  if (Boolean(input.preparedCrypto) === Boolean(input.prisma)) {
+    throw new TypeError(
+      "Dirty payload preparation requires exactly one crypto preparation owner.",
+    );
+  }
   const classifyResource = createDirtyPayloadCredentialClassifier();
   const prepared = await mapLimit(input.resources, DIRTY_PAYLOAD_PRESEAL_CONCURRENCY, async (resource, index) => {
     const payloadId = createDirtyPayloadId({
@@ -1084,15 +1303,25 @@ async function prepareDirtyPayloadRows(input: {
         dirtyRevision: input.dirtyRevision,
         id: payloadId,
         provider: input.provider,
-        resourceEncrypted: await sealHostedDeviceSyncDirtyPayloadJson({
-          connectionId: input.connectionId,
-          dirtyRevision: input.dirtyRevision,
-          payloadId,
-          prisma: input.prisma,
-          provider: input.provider,
-          userId: input.userId,
-          value: resourceWithPayloadId,
-        }),
+        resourceEncrypted: input.preparedCrypto
+          ? await sealHostedDeviceSyncDirtyPayloadJsonFromPreparedCrypto({
+              connectionId: input.connectionId,
+              dirtyRevision: input.dirtyRevision,
+              payloadId,
+              prepared: input.preparedCrypto,
+              provider: input.provider,
+              userId: input.userId,
+              value: resourceWithPayloadId,
+            })
+          : await sealHostedDeviceSyncDirtyPayloadJson({
+              connectionId: input.connectionId,
+              dirtyRevision: input.dirtyRevision,
+              payloadId,
+              prisma: input.prisma,
+              provider: input.provider,
+              userId: input.userId,
+              value: resourceWithPayloadId,
+            }),
         userId: input.userId,
       },
     };
@@ -1186,6 +1415,52 @@ function resolveDirtyPayloadRevision(input: {
   }
 
   return input.existing.dirtyRevision + 1n;
+}
+
+function createDirtyConnectionPreparationSnapshot(
+  existing: DeviceSyncDirtyConnectionPrismaRecord | null,
+): DirtyConnectionPreparationSnapshot {
+  if (!existing) {
+    return { exists: false };
+  }
+  return {
+    dirtyRevision: existing.dirtyRevision,
+    exists: true,
+    processedRevision: existing.processedRevision,
+    provider: existing.provider,
+    updatedAt: existing.updatedAt.toISOString(),
+    userId: existing.userId,
+  };
+}
+
+function dirtyConnectionMatchesPreparationSnapshot(
+  existing: DeviceSyncDirtyConnectionPrismaRecord | null,
+  snapshot: DirtyConnectionPreparationSnapshot,
+): boolean {
+  if (!snapshot.exists) {
+    return existing === null;
+  }
+  return existing !== null
+    && existing.dirtyRevision === snapshot.dirtyRevision
+    && existing.processedRevision === snapshot.processedRevision
+    && existing.provider === snapshot.provider
+    && existing.updatedAt.toISOString() === snapshot.updatedAt
+    && existing.userId === snapshot.userId;
+}
+
+function requirePreparedDirtyConnectionUpsert(
+  prepared: PreparedHostedDeviceSyncDirtyConnectionUpsert,
+): PreparedHostedDeviceSyncDirtyConnectionUpsertDetails {
+  if (!prepared || typeof prepared !== "object") {
+    throw new TypeError("Dirty connection update requires prepared state.");
+  }
+  const details = preparedHostedDeviceSyncDirtyConnectionUpserts.get(prepared);
+  if (!details) {
+    throw new TypeError(
+      "Dirty connection prepared state is not the exact request-local capability.",
+    );
+  }
+  return details;
 }
 
 function isPayloadOnlyDirtyAppend(resourceBatch: DirtyResourceBatch): boolean {
@@ -1786,7 +2061,7 @@ function buildDirtyResourceBatch(
     const normalized = withDirtyResourceWindowPayload(normalizeDirtyResource(resource));
     mergeDirtyResourceInto(allResources, normalized);
 
-    if (hasDirtyResourceInputPayload(resource.payload)) {
+    if (hasHostedDeviceSyncDirtyResourcePayload(resource)) {
       payloadResources.push(normalized);
     } else {
       mergeDirtyResourceInto(compactResources, normalized);
@@ -1831,9 +2106,10 @@ function mergeDirtyResourceInto(
   const key = buildDirtyResourceKey(normalized);
   const previous = merged[key] ?? null;
   merged[key] = withDirtyResourceWindowPayload(previous
-    ? {
+      ? {
         ...normalized,
         count: previous.count + normalized.count,
+        ...mergeDirtyResourceTiming(previous, normalized),
         windowStart: minIso(previous.windowStart, normalized.windowStart),
         windowEnd: maxIso(previous.windowEnd, normalized.windowEnd),
       }
@@ -1843,19 +2119,86 @@ function mergeDirtyResourceInto(
 function normalizeDirtyResource(
   resource: HostedDeviceSyncDirtyResource,
 ): HostedDeviceSyncDirtyResource {
+  const eventToProviderSendBucket = resource.eventToProviderSendBucket ?? null;
+  const firstWebhookReceivedAt = normalizeIso(resource.firstWebhookReceivedAt);
+  const providerSendToWebhookMs = normalizeDurationMs(resource.providerSendToWebhookMs);
   return {
     count: Math.max(1, Math.min(1_000_000, Math.trunc(resource.count))),
     ...(resource.dirtyPayloadId
       ? { dirtyPayloadId: truncateDirtyKey(normalizeNullableString(resource.dirtyPayloadId)) ?? resource.dirtyPayloadId }
+      : {}),
+    ...(eventToProviderSendBucket || firstWebhookReceivedAt || providerSendToWebhookMs !== null
+      ? {
+          eventToProviderSendBucket,
+          firstWebhookReceivedAt,
+          providerSendToWebhookMs,
+        }
       : {}),
     jobKind: truncateDirtyKey(normalizeNullableString(resource.jobKind) ?? "reconcile") ?? "reconcile",
     payload: readDirtyResourcePayload(resource.payload),
     resource: truncateDirtyKey(normalizeNullableString(resource.resource)),
     resourceCategory: truncateDirtyKey(normalizeNullableString(resource.resourceCategory)),
     sourceProviderSlug: truncateDirtyKey(normalizeNullableString(resource.sourceProviderSlug)),
+    ...(resource.timingSourceProviderSlug === undefined
+      ? {}
+      : {
+          timingSourceProviderSlug: truncateDirtyKey(
+            normalizeNullableString(resource.timingSourceProviderSlug),
+          ),
+        }),
     windowEnd: normalizeIso(resource.windowEnd),
     windowStart: normalizeIso(resource.windowStart),
   };
+}
+
+function mergeDirtyResourceTiming(
+  previous: HostedDeviceSyncDirtyResource,
+  next: HostedDeviceSyncDirtyResource,
+): Pick<
+  HostedDeviceSyncDirtyResource,
+  | "eventToProviderSendBucket"
+  | "firstWebhookReceivedAt"
+  | "providerSendToWebhookMs"
+  | "timingSourceProviderSlug"
+> | Record<string, never> {
+  const eventToProviderSendBucket = mergeHostedDeviceSyncEventToProviderSendBuckets(
+    previous.eventToProviderSendBucket,
+    next.eventToProviderSendBucket,
+  );
+  const firstWebhookReceivedAt = minIso(
+    previous.firstWebhookReceivedAt,
+    next.firstWebhookReceivedAt,
+  );
+  const providerSendToWebhookMs = maxDurationMs(
+    previous.providerSendToWebhookMs,
+    next.providerSendToWebhookMs,
+  );
+  const timingSourceProviderSlug = mergeDirtyTimingSourceProviderSlug(
+    previous.timingSourceProviderSlug,
+    next.timingSourceProviderSlug,
+  );
+  const hasTiming = eventToProviderSendBucket
+    || firstWebhookReceivedAt
+    || providerSendToWebhookMs !== null
+    || timingSourceProviderSlug !== undefined;
+  return hasTiming
+    ? {
+        eventToProviderSendBucket,
+        firstWebhookReceivedAt,
+        providerSendToWebhookMs,
+        ...(timingSourceProviderSlug === undefined ? {} : { timingSourceProviderSlug }),
+      }
+    : {};
+}
+
+function mergeDirtyTimingSourceProviderSlug(
+  previous: string | null | undefined,
+  next: string | null | undefined,
+): string | null | undefined {
+  if (previous === undefined && next === undefined) {
+    return undefined;
+  }
+  return previous === next ? previous : null;
 }
 
 function buildDirtyResourceKey(resource: HostedDeviceSyncDirtyResource): string {
@@ -1929,11 +2272,27 @@ function readDirtyResourcesJson(value: Prisma.JsonValue): Record<string, HostedD
     mergeDirtyResourceInto(next, {
       count: typeof record.count === "number" ? record.count : 1,
       ...(typeof record.dirtyPayloadId === "string" ? { dirtyPayloadId: record.dirtyPayloadId } : {}),
+      eventToProviderSendBucket: isHostedDeviceSyncEventToProviderSendBucket(
+        record.eventToProviderSendBucket,
+      )
+        ? record.eventToProviderSendBucket
+        : null,
+      firstWebhookReceivedAt: typeof record.firstWebhookReceivedAt === "string"
+        ? record.firstWebhookReceivedAt
+        : null,
+      providerSendToWebhookMs: normalizeDurationMs(record.providerSendToWebhookMs),
       jobKind: typeof record.jobKind === "string" ? record.jobKind : "reconcile",
       payload: readDirtyResourcePayload(record.payload),
       resource: typeof record.resource === "string" ? record.resource : null,
       resourceCategory: typeof record.resourceCategory === "string" ? record.resourceCategory : null,
       sourceProviderSlug: typeof record.sourceProviderSlug === "string" ? record.sourceProviderSlug : null,
+      ...(record.timingSourceProviderSlug === undefined
+        ? {}
+        : {
+            timingSourceProviderSlug: typeof record.timingSourceProviderSlug === "string"
+              ? record.timingSourceProviderSlug
+              : null,
+          }),
       windowEnd: typeof record.windowEnd === "string" ? record.windowEnd : null,
       windowStart: typeof record.windowStart === "string" ? record.windowStart : null,
     });
@@ -1965,11 +2324,27 @@ async function readDirtyPayloadResourceJson(input: {
   mergeDirtyResourceInto(merged, {
     count: typeof record.count === "number" ? record.count : 1,
     dirtyPayloadId: input.row.id,
+    eventToProviderSendBucket: isHostedDeviceSyncEventToProviderSendBucket(
+      record.eventToProviderSendBucket,
+    )
+      ? record.eventToProviderSendBucket
+      : null,
+    firstWebhookReceivedAt: typeof record.firstWebhookReceivedAt === "string"
+      ? record.firstWebhookReceivedAt
+      : null,
+    providerSendToWebhookMs: normalizeDurationMs(record.providerSendToWebhookMs),
     jobKind: typeof record.jobKind === "string" ? record.jobKind : "reconcile",
     payload: readDirtyResourcePayload(record.payload),
     resource: typeof record.resource === "string" ? record.resource : null,
     resourceCategory: typeof record.resourceCategory === "string" ? record.resourceCategory : null,
     sourceProviderSlug: typeof record.sourceProviderSlug === "string" ? record.sourceProviderSlug : null,
+    ...(record.timingSourceProviderSlug === undefined
+      ? {}
+      : {
+          timingSourceProviderSlug: typeof record.timingSourceProviderSlug === "string"
+            ? record.timingSourceProviderSlug
+            : null,
+        }),
     windowEnd: typeof record.windowEnd === "string" ? record.windowEnd : null,
     windowStart: typeof record.windowStart === "string" ? record.windowStart : null,
   });
@@ -2068,6 +2443,14 @@ function normalizeIso(value: string | null | undefined): string | null {
   }
 }
 
+function normalizeDurationMs(value: unknown): number | null {
+  return typeof value === "number"
+    && Number.isSafeInteger(value)
+    && value >= 0
+    ? value
+    : null;
+}
+
 function resolveDirtyWindowStart(resources: Record<string, HostedDeviceSyncDirtyResource>): Date | null {
   const value = Object.values(resources).reduce<string | null>(
     (earliest, resource) => minIso(earliest, resource.windowStart),
@@ -2104,9 +2487,12 @@ function maxDate(left: Date | null, right: Date | null): Date | null {
   return left.getTime() >= right.getTime() ? left : right;
 }
 
-function minIso(left: string | null, right: string | null): string | null {
+function minIso(
+  left: string | null | undefined,
+  right: string | null | undefined,
+): string | null {
   if (!left) {
-    return right;
+    return right ?? null;
   }
   if (!right) {
     return left;
@@ -2122,6 +2508,21 @@ function maxIso(left: string | null, right: string | null): string | null {
     return left;
   }
   return Date.parse(left) >= Date.parse(right) ? left : right;
+}
+
+function maxDurationMs(
+  left: number | null | undefined,
+  right: number | null | undefined,
+): number | null {
+  const normalizedLeft = normalizeDurationMs(left);
+  const normalizedRight = normalizeDurationMs(right);
+  if (normalizedLeft === null) {
+    return normalizedRight;
+  }
+  if (normalizedRight === null) {
+    return normalizedLeft;
+  }
+  return Math.max(normalizedLeft, normalizedRight);
 }
 
 function truncateDirtyKey(value: string | null): string | null {
