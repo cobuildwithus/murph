@@ -46,6 +46,51 @@ function actionLocator(click: () => void) {
   };
 }
 
+function roleLocator(
+  controls: Array<{
+    accessibleName?: string;
+    checked?: boolean;
+    enabled?: boolean;
+    text: string;
+    visible?: boolean;
+  }>,
+) {
+  return {
+    count: vi.fn(async () => controls.length),
+    nth: vi.fn((index: number) => ({
+      getAttribute: vi.fn(async () => null),
+      innerText: vi.fn(async () => controls[index]?.text ?? ""),
+      isChecked: vi.fn(async () => controls[index]?.checked ?? false),
+      isEnabled: vi.fn(async () => controls[index]?.enabled ?? true),
+      isVisible: vi.fn(async () => controls[index]?.visible ?? true),
+    })),
+  };
+}
+
+function authorizationFrame(input: {
+  buttons?: Parameters<typeof roleLocator>[0];
+  checkboxes?: Parameters<typeof roleLocator>[0];
+  links?: Parameters<typeof roleLocator>[0];
+}) {
+  return {
+    getByRole: vi.fn((role: string, options?: { name?: RegExp }) => {
+      const controls = role === "button"
+        ? input.buttons ?? []
+        : role === "link"
+        ? input.links ?? []
+        : role === "checkbox"
+        ? input.checkboxes ?? []
+        : [];
+      return roleLocator(options?.name
+        ? controls.filter((control) => options.name?.test(
+          control.accessibleName ?? control.text,
+        ))
+        : controls);
+    }),
+    url: () => "https://id.whoop.com/sign-in",
+  };
+}
+
 describe("hosted-local Junction wearable browser authorization", () => {
   it("fails a continuous external challenge after the bounded grace period", async () => {
     let now = 0;
@@ -145,10 +190,12 @@ describe("hosted-local Junction wearable browser authorization", () => {
     async (ci) => {
     let now = 0;
     const config = createConfig({ CI: ci });
+    const mainFrame = authorizationFrame({});
     const page = {
-      frames: () => [{ url: () => "https://id.whoop.com/sign-in" }],
-      getByRole: vi.fn(() => emptyLocator()),
+      frames: () => [mainFrame],
+      getByRole: mainFrame.getByRole,
       locator: vi.fn(() => emptyLocator()),
+      mainFrame: () => mainFrame,
       title: vi.fn(async () => "Sign in"),
       url: () => "https://id.whoop.com/sign-in",
       waitForTimeout: vi.fn(async (duration: number) => {
@@ -162,11 +209,54 @@ describe("hosted-local Junction wearable browser authorization", () => {
       config,
       () => now,
     )).rejects.toThrow(
-      "WHOOP did not expose an automated authorization action.",
+      [
+        "WHOOP did not expose an automated authorization action.",
+        "Authorization surface: childFrames=0 mainActions=0",
+        "mainEnabledActions=0 mainOtherActions=0 childActions=0",
+        "childEnabledActions=0 childOtherActions=0",
+        "mainUncheckedCheckboxes=0 childUncheckedCheckboxes=0.",
+      ].join(" "),
     );
     expect(now).toBe(15_000);
     },
   );
+
+  it("uses Playwright action state and attributes child-frame controls", async () => {
+    let now = 0;
+    const mainFrame = authorizationFrame({
+      buttons: [
+        { accessibleName: "Continue", enabled: false, text: "" },
+        { text: "Proceed" },
+      ],
+      links: [{ text: "Privacy policy" }],
+    });
+    const childFrame = authorizationFrame({
+      buttons: [{ text: "Authorize" }, { text: "Proceed" }],
+      checkboxes: [{ checked: false, text: "Required consent" }],
+    });
+    const page = {
+      frames: () => [mainFrame, childFrame],
+      getByRole: mainFrame.getByRole,
+      locator: vi.fn(() => emptyLocator()),
+      mainFrame: () => mainFrame,
+      title: vi.fn(async () => "Sign in"),
+      url: () => "https://id.whoop.com/sign-in",
+      waitForTimeout: vi.fn(async (duration: number) => {
+        now += duration;
+      }),
+    };
+
+    await expect(completeExternalJunctionAuthorizationForTest(
+      page as never,
+      createConfig(),
+      () => now,
+    )).rejects.toThrow([
+      "Authorization surface: childFrames=1 mainActions=1",
+      "mainEnabledActions=0 mainOtherActions=2 childActions=1",
+      "childEnabledActions=1 childOtherActions=1",
+      "mainUncheckedCheckboxes=0 childUncheckedCheckboxes=1.",
+    ].join(" "));
+  });
 
   it("always disables manual completion in headless mode", () => {
     expect(createConfig({
