@@ -224,6 +224,7 @@ const JUNCTION_DEVICE_SYNC_JOB_DEFINITIONS = {
       historicalProviderRecordsSeen: booleanJobField({ includeInHostedHint: true }),
       historicalRecordsSeen: booleanJobField({ includeInHostedHint: true }),
       sourceLifecycleEpoch: numberJobField({ includeInHostedHint: true }),
+      sourceLifecycleEpochs: stringJobField({ includeInHostedHint: true }),
       historicalUnresolvedProviderRecordIdentitiesJson: stringJobField({ includeInHostedHint: true }),
       historicalUnresolvedProviderRecordCount: numberJobField({ includeInHostedHint: true }),
       historicalWindowStart: stringJobField({ includeInHostedHint: true }),

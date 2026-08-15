@@ -1,6 +1,6 @@
 # Reliability
 
-Last verified: 2026-08-12
+Last verified: 2026-08-15
 
 ## Current Guardrails
 
@@ -823,6 +823,14 @@ Last verified: 2026-08-12
   runtime connected projection is discarded so the existing hosted
   connection-established owner remains the only path that clears that source's
   schedule-time coverage and advances its lifecycle epoch atomically.
+- Junction exact-workout webhook work captures that same source lifecycle epoch
+  under the existing local enqueue transaction or hosted admission lock. A
+  source-less event carries a compact admitted-source epoch map in its encrypted
+  dirty payload; execution selects the fetched source's captured epoch and
+  rechecks it after the bounded stream fetch. Missing proof, an old epoch, a
+  stale provider instance, or a reconnect racing the fetch exits without import.
+  The epoch also participates in local and hosted durable job identity, so a
+  replacement lifecycle cannot coalesce with superseded workout work.
 - The hosted lifecycle-epoch column is an expand-only nullable/defaulted
   Postgres addition. The source mapper treats legacy missing, null, and zero
   values as epoch 1, but every explicit write still requires a positive safe

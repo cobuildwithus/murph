@@ -7,6 +7,7 @@ import {
 } from "@murphai/runtime-state/node";
 
 import { clearJunctionScheduleTimeExtendedHistoryCoverageForProvider } from "./junction-historical-backfill-progress.ts";
+import { bindJunctionWorkoutJobsToSourceLifecycles } from "./junction-workout-lifecycle.ts";
 import { stringifyJson } from "./shared.ts";
 import {
   decodeDeviceSyncSummaryRow,
@@ -497,7 +498,15 @@ export class SqliteDeviceSyncStore {
     jobs: readonly DeviceSyncJobInput[];
   }): DeviceSyncJobRecord[] {
     return withImmediateTransaction(this.database, () => {
-      const queuedJobs = input.jobs.map((job) =>
+      const jobs = input.provider === "junction"
+        ? bindJunctionWorkoutJobsToSourceLifecycles(
+            input.jobs,
+            listStoredConnectionSources(this.database, {
+              connectionId: input.accountId,
+            }),
+          )
+        : [...input.jobs];
+      const queuedJobs = jobs.map((job) =>
         enqueueDeviceSyncJobInTransaction(this.database, {
           provider: input.provider,
           accountId: input.accountId,

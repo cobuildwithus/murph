@@ -7647,6 +7647,135 @@ test("device sync service imports a workout stream that recovers on the third du
   }
 });
 
+test("device sync service keeps delayed workout jobs on their admitted source epoch", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-workout-source-epoch");
+  let providerListRequests = 0;
+  let streamRequests = 0;
+  const importSnapshot = vi.fn(async () => ({ imported: true }));
+  const { service, store, close } = createServiceFixture({
+    secret: "secret-for-tests",
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+    },
+    importer: { importDeviceProviderSnapshot: importSnapshot },
+    providers: [
+      createJunctionDeviceSyncProvider({
+        apiKey: "sk_us_test_123",
+        clientUserIdSecret: "junction-client-user-id-secret",
+        environment: "sandbox",
+        region: "us",
+        summaryResources: [],
+        timeseriesResources: [],
+        webhookSecret: "whsec_d2ViaG9vay10ZXN0LXNlY3JldA==",
+        fetchImpl: async (input) => {
+          const url = readUrl(input);
+          if (url.endsWith("/v2/user/providers/junction-workout-source-epoch")) {
+            providerListRequests += 1;
+            return createJsonResponse({ providers: [{
+              id: "provider-garmin-current-epoch",
+              slug: "garmin",
+              status: "connected",
+              resource_availability: { workouts: true },
+            }] });
+          }
+          if (url.includes("/v2/timeseries/workouts/") && url.endsWith("/stream")) {
+            streamRequests += 1;
+            return createJsonResponse({
+              distance: [0, 1_000],
+              source: { provider: "garmin", type: "watch" },
+              time: [1_775_174_400, 1_775_174_460],
+            });
+          }
+          throw new Error(`Unexpected Junction request during workout source-epoch test: ${url}`);
+        },
+      }),
+    ],
+  });
+
+  try {
+    const acceptedAt = new Date().toISOString();
+    const account = store.upsertAccount({
+      provider: "junction",
+      externalAccountId: "junction-workout-source-epoch",
+      displayName: "Junction",
+      scopes: [],
+      status: "active",
+      credential: {
+        kind: "provider_config",
+        providerConfigKey: "junction",
+        credentialMetadata: {},
+      },
+      connectedAt: acceptedAt,
+      nextReconcileAt: null,
+    });
+    store.upsertConnectionSource({
+      connectionId: account.id,
+      sourceInstanceKey: "garmin",
+      sourceProviderSlug: "garmin",
+      lifecycleEpoch: 1,
+      status: "connected",
+      lastSeenAt: acceptedAt,
+    });
+    const firstWebhook = createJunctionSvixWebhook({
+      body: {
+        event_type: "daily.data.workout_stream.created",
+        user_id: account.externalAccountId,
+        data: {
+          workout_id: "workout-old-source-epoch",
+          source: { provider: "garmin", type: "watch" },
+        },
+      },
+      messageId: "msg_workout_old_source_epoch",
+    });
+
+    await service.handleWebhook("junction", firstWebhook.headers, firstWebhook.rawBody);
+    const oldJob = readJobsForAccountForTesting(store, account.id)
+      .map((job) => store.getJobById(job.id))
+      .find((job) => job?.payload.objectId === "workout-old-source-epoch");
+    assert.equal(oldJob?.payload.sourceLifecycleEpoch, 1);
+
+    store.upsertConnectionSource({
+      connectionId: account.id,
+      sourceInstanceKey: "garmin",
+      sourceProviderSlug: "garmin",
+      lifecycleEpoch: 2,
+      status: "connected",
+      lastSeenAt: new Date(Date.parse(acceptedAt) + 1_000).toISOString(),
+    });
+    assert.equal((await service.runWorkerOnce())?.id, oldJob?.id);
+    assert.equal(providerListRequests, 0);
+    assert.equal(streamRequests, 0);
+    assert.equal(importSnapshot.mock.calls.length, 0);
+
+    const currentWebhook = createJunctionSvixWebhook({
+      body: {
+        event_type: "daily.data.workout_stream.updated",
+        user_id: account.externalAccountId,
+        data: {
+          workout_id: "workout-current-source-epoch",
+          source: { provider: "garmin", type: "watch" },
+        },
+      },
+      messageId: "msg_workout_current_source_epoch",
+    });
+    await service.handleWebhook("junction", currentWebhook.headers, currentWebhook.rawBody);
+    const currentJob = readJobsForAccountForTesting(store, account.id)
+      .map((job) => store.getJobById(job.id))
+      .find((job) => job?.payload.objectId === "workout-current-source-epoch");
+    assert.equal(currentJob?.payload.sourceLifecycleEpoch, 2);
+    assert.notEqual(currentJob?.dedupeKey, oldJob?.dedupeKey);
+
+    assert.equal((await service.runWorkerOnce())?.id, currentJob?.id);
+    assert.equal(providerListRequests, 2);
+    assert.equal(streamRequests, 1);
+    assert.equal(importSnapshot.mock.calls.length, 1);
+  } finally {
+    close();
+  }
+});
+
 test("manual reconcile boosts Junction reconcile priority without promoting historical backfill", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-syncd-manual-junction-backfill-priority");
   const { service, store, close } = createServiceFixture({

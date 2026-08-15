@@ -1465,6 +1465,68 @@ describe("hosted device-sync wakes", () => {
     }));
   });
 
+  it("binds hosted workout dirty work to the source lifecycle under the admission lock", async () => {
+    const connection = buildHostedConnection({ provider: "junction" });
+    mocks.prismaTx.deviceConnection.findUnique.mockResolvedValueOnce(
+      buildWebhookAdmissionRecord({ provider: "junction" }),
+    );
+    mocks.listConnectionSources.mockResolvedValueOnce([{
+      connectionId: connection.id,
+      lastErrorCode: null,
+      lifecycleEpoch: 4,
+      sourceProviderSlug: "garmin",
+      status: "connected",
+    }]);
+
+    await handleHostedDeviceSyncWebhookAccepted({
+      account: {
+        connectedAt: connection.connectedAt,
+        id: connection.id,
+        provider: connection.provider,
+      },
+      claimToken: "claim-token",
+      now: "2026-03-26T12:00:00.000Z",
+      ownerId: "user-123",
+      store: new PrismaDeviceSyncControlPlaneStore({
+        prisma: getPrisma(),
+      }),
+      traceId: "trace_workout_epoch",
+      webhook: {
+        acceptanceMode: "durable_webhook_work",
+        eventType: "daily.data.workout_stream.created",
+        jobs: [{
+          kind: "resource",
+          maxAttempts: 3,
+          payload: {
+            objectId: "workout-hosted-epoch",
+            resource: "workout_stream",
+            resourceCategory: "timeseries",
+            sourceProviderSlug: "garmin",
+          },
+        }],
+        occurredAt: "2026-03-26T11:59:00.000Z",
+        resourceCategory: "timeseries",
+        sourceProviderSlug: "garmin",
+      },
+    });
+
+    expect(mocks.listConnectionSources).toHaveBeenCalledWith({
+      connectionId: connection.id,
+    }, mocks.prismaTx);
+    expect(mocks.upsertDirtyConnection).toHaveBeenCalledWith(expect.objectContaining({
+      resources: [expect.objectContaining({
+        maxAttempts: 3,
+        payload: expect.objectContaining({
+          objectId: "workout-hosted-epoch",
+          sourceLifecycleEpoch: 4,
+          sourceProviderSlug: "garmin",
+        }),
+        resource: "workout_stream",
+      })],
+      tx: mocks.prismaTx,
+    }));
+  });
+
   it("omits source attribution for a data-less historical completion", async () => {
     const connection = buildHostedConnection({ provider: "junction" });
     mocks.prismaTx.deviceConnection.findUnique.mockResolvedValueOnce(
@@ -4637,7 +4699,6 @@ describe("hosted device-sync wakes", () => {
 
     expect(mocks.listConnectionSources).toHaveBeenCalledWith({
       connectionId: "dsc_123",
-      sourceProviderSlug: "fitbit",
     }, mocks.prismaTx);
     expect(mocks.completeWebhookTrace).not.toHaveBeenCalled();
     expect(mocks.upsertDirtyConnection).not.toHaveBeenCalled();

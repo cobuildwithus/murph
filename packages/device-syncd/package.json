@@ -50,6 +50,10 @@
       "types": "./dist/junction-resources.d.ts",
       "default": "./dist/junction-resources.js"
     },
+    "./junction-workout-lifecycle": {
+      "types": "./dist/junction-workout-lifecycle.d.ts",
+      "default": "./dist/junction-workout-lifecycle.js"
+    },
     "./junction-inline-authority": {
       "types": "./dist/junction-inline-authority.d.ts",
       "default": "./dist/junction-inline-authority.js"

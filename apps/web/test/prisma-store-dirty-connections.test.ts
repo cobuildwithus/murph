@@ -1405,6 +1405,7 @@ describe("PrismaHostedDirtyConnectionStore dirty pending state", () => {
           payload: {
             objectId: "workout-encrypted-retry-budget",
             ordinary: "y".repeat(1_000),
+            sourceLifecycleEpoch: 4,
             webhookDataJson,
           },
           resource: "workout_stream",
@@ -1427,6 +1428,7 @@ describe("PrismaHostedDirtyConnectionStore dirty pending state", () => {
 
     expect(dirtyResource?.payload?.webhookDataJson).toBe(webhookDataJson);
     expect(dirtyResource?.payload?.objectId).toBe("workout-encrypted-retry-budget");
+    expect(dirtyResource?.payload?.sourceLifecycleEpoch).toBe(4);
     expect(dirtyResource?.dirtyPayloadId).toBe(createdPayloadData?.[0]?.id);
     expect(dirtyResource?.maxAttempts).toBe(3);
     expect(dirtyResource?.payload?.ordinary).toHaveLength(512);

@@ -7,6 +7,9 @@ import {
   JUNCTION_COMPANION_HRV_SOURCE_PROVIDER,
   JUNCTION_COMPANION_HEALTH_METADATA_EVENT_TYPE,
 } from "@murphai/device-syncd/junction-resources";
+import {
+  bindJunctionWorkoutJobsToSourceLifecycles,
+} from "@murphai/device-syncd/junction-workout-lifecycle";
 import type {
   DeviceConnectionHandler,
   DeviceSyncIngressWebhook,
@@ -1731,8 +1734,8 @@ export async function handleHostedDeviceSyncWebhookAccepted(input: {
     dataSourceProviderSlug: normalizeJunctionProviderSlug(
       input.webhook.dataSourceProviderSlug,
     ),
-    expectedConnectedAt: input.account.connectedAt,
     dirtyResources,
+    expectedConnectedAt: input.account.connectedAt,
     eventType: input.webhook.eventType,
     occurredAt: input.webhook.occurredAt ?? input.now,
     provider: input.account.provider,
@@ -2312,12 +2315,13 @@ async function persistHostedDeviceSyncWebhookAccepted(input: {
         });
       }
       const sourceProviderSlug = normalizeJunctionProviderSlug(input.sourceProviderSlug);
+      const connectionSources = input.provider === "junction"
+        ? await input.store.listConnectionSources({
+            connectionId: input.connectionId,
+          }, tx)
+        : [];
       if (sourceProviderSlug) {
-        const matchingSources = await input.store.listConnectionSources({
-          connectionId: input.connectionId,
-          sourceProviderSlug,
-        }, tx);
-        if (!isHostedConnectionSourceAdmitted(matchingSources, sourceProviderSlug)) {
+        if (!isHostedConnectionSourceAdmitted(connectionSources, sourceProviderSlug)) {
           throw deviceSyncError({
             code: "WEBHOOK_SOURCE_NOT_READY",
             message: "Device source setup changed before webhook work could be committed.",
@@ -2326,6 +2330,18 @@ async function persistHostedDeviceSyncWebhookAccepted(input: {
           });
         }
       }
+      const dirtyResources = input.provider === "junction"
+        ? input.dirtyResources.map((resource) => {
+            const [bound] = bindJunctionWorkoutJobsToSourceLifecycles([{
+              kind: resource.jobKind,
+              payload: resource.payload,
+            }], connectionSources);
+            return {
+              ...resource,
+              payload: readHostedDirtyResourcePayload(bound?.payload ?? {}),
+            };
+          })
+        : input.dirtyResources;
 
       // Every accepted hint merges into dirty state so coalesced timing remains
       // representative. Only the clean-to-dirty transition appends a wake.
@@ -2335,7 +2351,7 @@ async function persistHostedDeviceSyncWebhookAccepted(input: {
         eventType: input.eventType,
         provider: input.provider,
         resourceCategory: input.resourceCategory ?? null,
-        resources: input.dirtyResources,
+        resources: dirtyResources,
         traceId: input.traceId,
         tx,
         userId: input.userId,

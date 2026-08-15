@@ -57,12 +57,20 @@ Current providers:
   `workout_distance` and `workout_swimming_stroke` row feeds remain excluded.
   Shallow `workout_stream` webhooks schedule an exact durable
   `/v2/timeseries/workouts/{workout_id}/stream` job with a three-execution
-  budget. Each durable execution makes exactly one provider GET, so timeout,
-  503, and body-read failures return to the durable job owner. The fetched
-  stream's source identity is revalidated against local and remote connection
-  authority before import without projecting or mutating the full source
-  catalog. The raw response is then discarded after reduction to a capped
-  feature envelope and at most 64 fixed-distance splits. A newer exact
+  budget. Each durable execution makes exactly one non-retrying stream-endpoint
+  GET, so timeout, 503, and body-read failures return to the durable job owner;
+  the surrounding provider-list authority reads retain their ordinary bounded
+  retry policy. Local enqueue and hosted admission bind the job to the current
+  source lifecycle epoch under their existing transaction or admission lock.
+  Source-less events carry one compact, bounded map of the currently admitted
+  source epochs so the fetched source can be selected without acquiring a
+  replacement lifecycle. Missing, superseded, or stale-instance proof exits
+  without a stream request or import where the source is known before fetch,
+  and the epoch is rechecked after fetch to fence a racing reconnect. The
+  fetched stream's source identity is also revalidated against remote
+  connection authority without projecting or mutating the full source catalog.
+  The raw response is then discarded after reduction to a capped feature
+  envelope and at most 64 fixed-distance splits. A newer exact
   correction authoritatively replaces those feature and split facets, so
   omitted stale splits are withdrawn. The response is capped at 8 MiB/50,000
   points and raw arrays, route coordinates, inferred zones, and snapshot
@@ -78,11 +86,11 @@ Current providers:
   two legacy coverage metadata slots. Its encoding prefix versions the durable
   coordinate policy. Successful coverage and terminal unsupported outcomes are
   separate compact planes: terminal completion can stop future scheduler passes
-  without claiming that data was imported. Adding support for a previously
-  noncanonical shape must advance the matching resource semantic version so
-  terminal coordinates are reconsidered. Legacy blood-pressure and note lists
-  remain read-only migration inputs and are removed once represented in the
-  matrix.
+  without claiming that data was imported. Terminal bits are source-lifecycle
+  scoped rather than semantic-versioned; reconnect clears both planes for that
+  source, while an in-place resource policy version advance reopens successful
+  coverage only. Legacy blood-pressure and note lists remain read-only migration
+  inputs and are removed once represented in the matrix.
 - Long-history anchoring is resource policy, not scheduler inference.
   Rollout-added resources end their first scan at scheduling time so existing
   connections receive recent history; resources whose history predates source

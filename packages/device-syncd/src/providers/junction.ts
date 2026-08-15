@@ -46,6 +46,10 @@ import {
   resolveDeviceSyncJunctionInlineSourceProviderSlug,
 } from "../junction-inline-authority.ts";
 import {
+  hasJunctionWorkoutSourceLifecycleAuthority,
+  readJunctionWorkoutSourceLifecycleEpoch,
+} from "../junction-workout-lifecycle.ts";
+import {
   addJunctionExtendedTimeseriesHistoryBackfillCoverage,
   addJunctionExtendedTimeseriesHistoryBackfillTerminal,
   addJunctionHistoricalBackfillEvidence,
@@ -1947,9 +1951,22 @@ export function createJunctionDeviceSyncProvider(
           retryable: false,
         });
       }
+      if (!hasJunctionWorkoutSourceLifecycleAuthority(job.payload)) {
+        return {};
+      }
+      const expectedSourceLifecycleEpoch = sourceProviderSlug
+        ? readJunctionWorkoutSourceLifecycleEpoch(job.payload, sourceProviderSlug)
+        : null;
       if (
         sourceProviderSlug
-        && await resolveJunctionCurrentSourceAdmission(context, sourceProviderSlug) !== "admitted"
+        && (
+          expectedSourceLifecycleEpoch === null
+          || await resolveJunctionCurrentSourceAdmission(
+            context,
+            sourceProviderSlug,
+            expectedSourceLifecycleEpoch,
+          ) !== "admitted"
+        )
       ) {
         return {};
       }
@@ -1971,10 +1988,36 @@ export function createJunctionDeviceSyncProvider(
             .filter((value): value is string => Boolean(value)),
         ),
       ];
+      const projectedProviderConnectionIds = new Set(
+        matchingProviders
+          .map((provider) => normalizeString(provider.id))
+          .filter((value): value is string => Boolean(value)),
+      );
       const webhookSourceInstanceId = normalizeString(job.payload.sourceInstanceId);
+      const webhookSourceProvider = webhookSourceInstanceId
+        ? matchingProviders.find((provider) =>
+            normalizeString(provider.origin.sourceInstanceId) === webhookSourceInstanceId
+            || resolveJunctionOrigin({
+              ...(provider.id ? { source_id: provider.id } : {}),
+              source: provider.source
+                ? {
+                    ...(provider.source.appId ? { app_id: provider.source.appId } : {}),
+                    ...(provider.source.deviceId ? { device_id: provider.source.deviceId } : {}),
+                  }
+                : undefined,
+              sourceProviderSlug: provider.origin.sourceProviderSlug ?? provider.slug,
+            }).sourceInstanceId === webhookSourceInstanceId
+          )
+        : undefined;
+      if (
+        webhookSourceInstanceId
+        && !webhookSourceProvider
+      ) {
+        return {};
+      }
       const sourceInstanceId =
-        webhookSourceInstanceId && projectedSourceInstanceIds.includes(webhookSourceInstanceId)
-          ? webhookSourceInstanceId
+        webhookSourceProvider
+          ? normalizeString(webhookSourceProvider.origin.sourceInstanceId) ?? undefined
           : projectedSourceInstanceIds.length === 1
             ? projectedSourceInstanceIds[0]
             : undefined;
@@ -2031,6 +2074,9 @@ export function createJunctionDeviceSyncProvider(
         signal: context.signal ?? null,
       });
       const fetchedSourceProviderSlug = normalizeProviderSlug(workoutFeatures.sourceProviderSlug);
+      const fetchedSourceLifecycleEpoch = fetchedSourceProviderSlug
+        ? readJunctionWorkoutSourceLifecycleEpoch(job.payload, fetchedSourceProviderSlug)
+        : null;
       const connectedFetchedSourceProviders = postFetchProviders.filter((provider) =>
         normalizeProviderSlug(provider.origin.sourceProviderSlug ?? provider.slug)
           === fetchedSourceProviderSlug
@@ -2040,8 +2086,32 @@ export function createJunctionDeviceSyncProvider(
         return {};
       }
       if (
+        projectedProviderConnectionIds.size > 0
+        && !connectedFetchedSourceProviders.some((provider) => {
+          const providerConnectionId = normalizeString(provider.id);
+          return providerConnectionId !== undefined
+            && projectedProviderConnectionIds.has(providerConnectionId);
+        })
+      ) {
+        return {};
+      }
+      const fetchedSourceInstanceId = normalizeString(workoutFeatures.sourceInstanceId);
+      if (
+        fetchedSourceInstanceId
+        && !connectedFetchedSourceProviders.some((provider) =>
+          normalizeString(provider.origin.sourceInstanceId) === fetchedSourceInstanceId
+        )
+      ) {
+        return {};
+      }
+      if (
         !fetchedSourceProviderSlug
-        || await resolveJunctionCurrentSourceAdmission(context, fetchedSourceProviderSlug) !== "admitted"
+        || fetchedSourceLifecycleEpoch === null
+        || await resolveJunctionCurrentSourceAdmission(
+          context,
+          fetchedSourceProviderSlug,
+          fetchedSourceLifecycleEpoch,
+        ) !== "admitted"
       ) {
         return {};
       }

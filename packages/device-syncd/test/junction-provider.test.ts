@@ -14318,8 +14318,8 @@ test("Junction shallow workout stream webhook imports only a bounded feature env
       data: {
         message: "Workout stream is ready.",
         workout_id: "workout-stream-1",
-        source_id: "source-synthetic-1",
-        source: { provider: "garmin", type: "watch" },
+        source_id: "provider-garmin-synthetic",
+        source: { device_id: "device-synthetic-1", provider: "garmin", type: "watch" },
         sport: { slug: "running" },
       },
     },
@@ -14333,6 +14333,7 @@ test("Junction shallow workout stream webhook imports only a bounded feature env
   });
   const job = requireValue(parsed.jobs[0], "Workout stream webhook should enqueue one resource job.");
   const jobPayload = job.payload ?? {};
+  jobPayload.sourceLifecycleEpoch = 1;
   const account = createAccount({
     sources: [{
       displayName: "Garmin",
@@ -14372,7 +14373,7 @@ test("Junction shallow workout stream webhook imports only a bounded feature env
   assert.equal(jobPayload.resource, "workout_stream");
   assert.equal(jobPayload.resourceCategory, "timeseries");
   assert.equal(job.maxAttempts, 3);
-  assert.equal(jobPayload.sourceInstanceId, "source-774aa2ab0133069118cf5c1e");
+  assert.match(String(jobPayload.sourceInstanceId), /^source-[a-f0-9]{24}$/u);
   assert.equal(jobPayload.sourceType, "watch");
   assert.equal(jobPayload.sport, "running");
   assert.equal(Object.hasOwn(jobPayload, "webhookDataJson"), false);
@@ -14465,6 +14466,7 @@ test("Junction workout stream rejects shallow-source mismatch before import", as
         objectId: "workout-source-mismatch",
         resource: "workout_stream",
         resourceCategory: "timeseries",
+        sourceLifecycleEpoch: 1,
         sourceProviderSlug: "garmin",
         windowStart: "2026-04-02T00:00:00.000Z",
         windowEnd: "2026-04-03T00:00:00.000Z",
@@ -14539,6 +14541,7 @@ test("Junction workout stream fences an import when its source disconnects after
       objectId: "workout-post-fetch-revoked",
       resource: "workout_stream",
       resourceCategory: "timeseries",
+      sourceLifecycleEpoch: 1,
       sourceProviderSlug: "garmin",
       windowStart: "2026-04-02T00:00:00.000Z",
       windowEnd: "2026-04-03T00:00:00.000Z",
@@ -14615,6 +14618,7 @@ test("Junction source-less workout stream uses fetched identity for final local 
       objectId: "workout-locally-revoked",
       resource: "workout_stream",
       resourceCategory: "timeseries",
+      sourceLifecycleEpochs: "fitbit:2,garmin:1",
       windowStart: "2026-04-02T00:00:00.000Z",
       windowEnd: "2026-04-03T00:00:00.000Z",
     }),
@@ -14627,6 +14631,248 @@ test("Junction source-less workout stream uses fetched identity for final local 
     "/v2/user/providers/junction-user-1",
   ]);
   assert.equal(importedSnapshots.length, 0);
+});
+
+test("Junction workout stream fences a superseded source epoch before provider work", async () => {
+  const requests: string[] = [];
+  const importedSnapshots: unknown[] = [];
+  const provider = createJunctionProvider(async (input) => {
+    const url = readUrl(input);
+    requests.push(url);
+    throw new Error(`Unexpected request for a superseded workout lifecycle: ${url}`);
+  });
+  const account = createAccount({ sources: [{
+    displayName: "Garmin",
+    firstSeenAt: "2026-04-01T00:00:00.000Z",
+    lastDataAt: null,
+    lastErrorCode: null,
+    lastErrorMessage: null,
+    lastSeenAt: "2026-04-03T00:00:00.000Z",
+    lifecycleEpoch: 2,
+    resourceCount: 1,
+    resourceAvailabilitySummary: { workouts: true },
+    sourceProviderSlug: "garmin",
+    status: "connected" as const,
+  }] });
+
+  const result = await executeJunctionJob(
+    provider,
+    createJunctionJobContext({
+      account,
+      importSnapshot: async (snapshot) => {
+        importedSnapshots.push(snapshot);
+        return { imported: true };
+      },
+    }),
+    createJob("resource", {
+      objectId: "workout-old-epoch",
+      resource: "workout_stream",
+      resourceCategory: "timeseries",
+      sourceLifecycleEpoch: 1,
+      sourceProviderSlug: "garmin",
+      windowStart: "2026-04-02T00:00:00.000Z",
+      windowEnd: "2026-04-03T00:00:00.000Z",
+    }),
+  );
+
+  assert.deepEqual(result, {});
+  assert.deepEqual(requests, []);
+  assert.equal(importedSnapshots.length, 0);
+});
+
+test("Junction workout stream fences a reconnect that races its stream fetch", async () => {
+  const requests: string[] = [];
+  const importedSnapshots: unknown[] = [];
+  let localAuthorityChecks = 0;
+  const provider = createJunctionProvider(async (input) => {
+    const url = readUrl(input);
+    requests.push(new URL(url).pathname);
+    if (url.endsWith("/v2/user/providers/junction-user-1")) {
+      return createJsonResponse({ providers: [{
+        id: "provider-garmin-racing-reconnect",
+        slug: "garmin",
+        status: "connected",
+        resource_availability: { workouts: true },
+      }] });
+    }
+    if (url.endsWith("/v2/timeseries/workouts/workout-racing-reconnect/stream")) {
+      return createJsonResponse({
+        distance: [0, 1_000],
+        time: [1_776_859_200, 1_776_859_260],
+      });
+    }
+    throw new Error(`Unexpected request: ${url}`);
+  });
+  const account = createAccount();
+
+  const result = await executeJunctionJob(
+    provider,
+    createJunctionJobContext({
+      account,
+      listConnectionSources: async () => {
+        localAuthorityChecks += 1;
+        return [createConnectionSource({
+          lifecycleEpoch: localAuthorityChecks === 1 ? 1 : 2,
+          resourceAvailabilitySummary: { workouts: true },
+        })];
+      },
+      importSnapshot: async (snapshot) => {
+        importedSnapshots.push(snapshot);
+        return { imported: true };
+      },
+    }),
+    createJob("resource", {
+      objectId: "workout-racing-reconnect",
+      resource: "workout_stream",
+      resourceCategory: "timeseries",
+      sourceLifecycleEpoch: 1,
+      sourceProviderSlug: "garmin",
+      windowStart: "2026-04-02T00:00:00.000Z",
+      windowEnd: "2026-04-03T00:00:00.000Z",
+    }),
+  );
+
+  assert.deepEqual(result, {});
+  assert.equal(localAuthorityChecks, 2);
+  assert.deepEqual(requests, [
+    "/v2/user/providers/junction-user-1",
+    "/v2/timeseries/workouts/workout-racing-reconnect/stream",
+    "/v2/user/providers/junction-user-1",
+  ]);
+  assert.equal(importedSnapshots.length, 0);
+});
+
+test("Junction workout stream fences a remote provider instance replaced during fetch", async () => {
+  const requests: string[] = [];
+  const importedSnapshots: unknown[] = [];
+  let providerListCount = 0;
+  const provider = createJunctionProvider(async (input) => {
+    const url = readUrl(input);
+    requests.push(new URL(url).pathname);
+    if (url.endsWith("/v2/user/providers/junction-user-1")) {
+      providerListCount += 1;
+      return createJsonResponse({ providers: [{
+        id: providerListCount === 1
+          ? "provider-garmin-before-stream"
+          : "provider-garmin-after-stream",
+        slug: "garmin",
+        status: "connected",
+        resource_availability: { workouts: true },
+      }] });
+    }
+    if (url.endsWith("/v2/timeseries/workouts/workout-remote-reconnect/stream")) {
+      return createJsonResponse({
+        distance: [0, 1_000],
+        time: [1_776_859_200, 1_776_859_260],
+      });
+    }
+    throw new Error(`Unexpected request: ${url}`);
+  });
+  const account = createAccount({ sources: [{
+    displayName: "Garmin",
+    firstSeenAt: "2026-04-01T00:00:00.000Z",
+    lastDataAt: null,
+    lastErrorCode: null,
+    lastErrorMessage: null,
+    lastSeenAt: "2026-04-03T00:00:00.000Z",
+    lifecycleEpoch: 1,
+    resourceCount: 1,
+    resourceAvailabilitySummary: { workouts: true },
+    sourceProviderSlug: "garmin",
+    status: "connected" as const,
+  }] });
+
+  const result = await executeJunctionJob(
+    provider,
+    createJunctionJobContext({
+      account,
+      importSnapshot: async (snapshot) => {
+        importedSnapshots.push(snapshot);
+        return { imported: true };
+      },
+    }),
+    createJob("resource", {
+      objectId: "workout-remote-reconnect",
+      resource: "workout_stream",
+      resourceCategory: "timeseries",
+      sourceLifecycleEpoch: 1,
+      sourceProviderSlug: "garmin",
+      windowStart: "2026-04-02T00:00:00.000Z",
+      windowEnd: "2026-04-03T00:00:00.000Z",
+    }),
+  );
+
+  assert.deepEqual(result, {});
+  assert.deepEqual(requests, [
+    "/v2/user/providers/junction-user-1",
+    "/v2/timeseries/workouts/workout-remote-reconnect/stream",
+    "/v2/user/providers/junction-user-1",
+  ]);
+  assert.equal(importedSnapshots.length, 0);
+});
+
+test("Junction workout stream rejects a stale webhook source instance before its stream fetch", async () => {
+  const requests: string[] = [];
+  const provider = createJunctionProvider(async (input) => {
+    const url = readUrl(input);
+    requests.push(new URL(url).pathname);
+    if (url.endsWith("/v2/user/providers/junction-user-1")) {
+      return createJsonResponse({ providers: [{
+        id: "provider-garmin-current",
+        slug: "garmin",
+        status: "connected",
+        resource_availability: { workouts: true },
+      }] });
+    }
+    throw new Error(`Unexpected request for a stale workout instance: ${url}`);
+  }, {
+    webhookSecret: "whsec_d2ViaG9vay10ZXN0LXNlY3JldA==",
+  });
+  const webhook = createJunctionSvixWebhook({
+    body: {
+      event_type: "daily.data.workout_stream.created",
+      user_id: "junction-user-1",
+      data: {
+        workout_id: "workout-stale-instance",
+        source_id: "provider-garmin-superseded",
+        source: { provider: "garmin", type: "watch" },
+      },
+    },
+    messageId: "msg_workout_stale_instance",
+    timestamp: "1775174400",
+  });
+  const parsed = await requireJunctionWebhookHandler(provider).verifyAndParseWebhook({
+    headers: webhook.headers,
+    rawBody: webhook.rawBody,
+    now: "2026-04-03T00:00:00.000Z",
+  });
+  const parsedJob = requireValue(parsed.jobs[0], "Stale workout webhook should build one job.");
+
+  const result = await executeJunctionJob(
+    provider,
+    createJunctionJobContext({
+      account: createAccount({ sources: [{
+        displayName: "Garmin",
+        firstSeenAt: "2026-04-01T00:00:00.000Z",
+        lastDataAt: null,
+        lastErrorCode: null,
+        lastErrorMessage: null,
+        lastSeenAt: "2026-04-03T00:00:00.000Z",
+        lifecycleEpoch: 2,
+        resourceCount: 1,
+        resourceAvailabilitySummary: { workouts: true },
+        sourceProviderSlug: "garmin",
+        status: "connected" as const,
+      }] }),
+    }),
+    createJob(parsedJob.kind, {
+      ...(parsedJob.payload ?? {}),
+      sourceLifecycleEpoch: 2,
+    }),
+  );
+
+  assert.deepEqual(result, {});
+  assert.deepEqual(requests, ["/v2/user/providers/junction-user-1"]);
 });
 
 test("Junction rejects a shallow workout stream webhook without workout_id before any fetch", async () => {
