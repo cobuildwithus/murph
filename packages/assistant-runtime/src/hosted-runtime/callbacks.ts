@@ -5,6 +5,7 @@ import type {
   HostedExecutionLinqExternalThreadRouteAuthority,
   HostedExecutionResolvedLinqDeliveryRoute,
   HostedExecutionStructuredLogDetails,
+  HostedExecutionTelegramExternalThreadRouteAuthority,
   HostedRuntimeEvent,
 } from "@murphai/hosted-execution";
 import {
@@ -3334,6 +3335,10 @@ async function deliverHostedPreparedAssistantDelivery(input: {
         },
         sendTelegram: async (request) => {
           await assertHostedDeliveryCanEnterProvider(input);
+          const trackedPhoneCallResult =
+            readHostedPhoneCallResultDeliveryFromEffect(
+              input.assistantDeliveryEffect,
+            );
           const privateCompletion = mirrorState.intent
             && isHostedPrivateAssistantAskCompletionIntent(mirrorState.intent)
             ? mirrorState.intent
@@ -3358,52 +3363,72 @@ async function deliverHostedPreparedAssistantDelivery(input: {
               vaultRoot: input.vaultRoot,
             });
           }
-          const authorityBoundTarget =
-            await assertHostedTelegramThreadRouteAuthorityAtProviderEntry({
-              assistantDeliveryEffect: input.assistantDeliveryEffect,
-              delivery: {
-                media: [],
-                message: request.message,
-              },
-              effectsPort: input.effectsPort,
-              intent: mirrorState.intent,
-              signal: input.signal,
-              target: request.target,
-              userId: input.userId,
-              vaultRoot: input.vaultRoot,
-            });
-          await recordHostedPhoneCallResultDeliverySendingRequired({
-            effect: input.assistantDeliveryEffect,
-            effectsPort: input.effectsPort,
-            signal: input.signal,
-          });
-          const providerFetch = privateCompletion
+          const trackedPhoneCallResultRouteAuthority = trackedPhoneCallResult
+            ? requireHostedPhoneCallResultTelegramRouteAuthority({
+                intent: mirrorState.intent,
+                target: request.target,
+                userId: input.userId,
+              })
+            : null;
+          const authorityBoundTarget = trackedPhoneCallResultRouteAuthority
+            ? trackedPhoneCallResultRouteAuthority.threadId
+            : await assertHostedTelegramThreadRouteAuthorityAtProviderEntry({
+                assistantDeliveryEffect: input.assistantDeliveryEffect,
+                delivery: {
+                  media: [],
+                  message: request.message,
+                },
+                effectsPort: input.effectsPort,
+                intent: mirrorState.intent,
+                signal: input.signal,
+                target: request.target,
+                userId: input.userId,
+                vaultRoot: input.vaultRoot,
+              });
+          const rawProviderFetch = trackedPhoneCallResult
+            ? requireHostedProviderFetch(
+                input.providerFetch,
+                "Hosted phone-call result Telegram delivery",
+              )
+            : input.providerFetch;
+          const providerFetch = privateCompletion || trackedPhoneCallResult
               ? createHostedProviderFetchBoundary({
                 assertProviderEntryLive: async () => {
                   try {
                     await assertHostedDeliveryCanEnterProvider(input);
-                    await assertHostedPrivateAssistantAskCompletionAtProviderEntry({
-                      actualRoute: {
-                        actorId: input.assistantDeliveryEffect.payload.actorId,
-                        channel: "telegram",
-                        delivery: {
-                          kind: "thread",
-                          target: request.target,
+                    if (privateCompletion) {
+                      await assertHostedPrivateAssistantAskCompletionAtProviderEntry({
+                        actualRoute: {
+                          actorId: input.assistantDeliveryEffect.payload.actorId,
+                          channel: "telegram",
+                          delivery: {
+                            kind: "thread",
+                            target: request.target,
+                          },
+                          identityId:
+                            input.assistantDeliveryEffect.payload.identityId,
+                          threadId: input.assistantDeliveryEffect.payload.threadId,
+                          threadIsDirect:
+                            input.assistantDeliveryEffect.payload.threadIsDirect,
                         },
-                        identityId:
-                          input.assistantDeliveryEffect.payload.identityId,
-                        threadId: input.assistantDeliveryEffect.payload.threadId,
-                        threadIsDirect:
-                          input.assistantDeliveryEffect.payload.threadIsDirect,
-                      },
-                      effectsPort: input.effectsPort,
-                      intentId: privateCompletion.intentId,
-                      media: [],
-                      message: request.message,
-                      now: new Date(),
-                      signal: input.signal,
-                      vaultRoot: input.vaultRoot,
-                    });
+                        effectsPort: input.effectsPort,
+                        intentId: privateCompletion.intentId,
+                        media: [],
+                        message: request.message,
+                        now: new Date(),
+                        signal: input.signal,
+                        vaultRoot: input.vaultRoot,
+                      });
+                    }
+                    if (trackedPhoneCallResultRouteAuthority) {
+                      await recordHostedPhoneCallResultDeliverySendingRequired({
+                        effect: input.assistantDeliveryEffect,
+                        effectsPort: input.effectsPort,
+                        routeAuthority:
+                          trackedPhoneCallResultRouteAuthority,
+                        signal: input.signal,
+                      });
+                    }
                   } catch (error) {
                     throw markHostedDeliveryPreProvider(error);
                   }
@@ -3411,17 +3436,19 @@ async function deliverHostedPreparedAssistantDelivery(input: {
                 onProviderDispatchEntered: () => {
                   providerDispatchEntered = true;
                 },
-                operation: "Hosted private Assistant Ask Telegram delivery",
-                providerFetch: input.providerFetch,
+                operation: trackedPhoneCallResult
+                  ? "Hosted phone-call result Telegram delivery"
+                  : "Hosted private Assistant Ask Telegram delivery",
+                providerFetch: rawProviderFetch,
               })
-            : input.providerFetch;
+            : rawProviderFetch;
           const dependencies = requireHostedProviderFetchDependencies({
             ...(authorityBoundTarget ? { authorityBoundTarget } : {}),
             env: input.telegramEnv,
             fetchImplementation: providerFetch,
             ...(input.signal ? { signal: input.signal } : {}),
           }, "Hosted assistant Telegram delivery");
-          if (!privateCompletion) {
+          if (!privateCompletion && !trackedPhoneCallResult) {
             providerDispatchEntered = true;
           }
           const result = await sendTelegramMessage(request, dependencies);
@@ -3949,6 +3976,7 @@ async function deliverHostedPreparedAssistantDelivery(input: {
 async function recordHostedPhoneCallResultDeliverySendingRequired(input: {
   effect: HostedAssistantDeliveryEffect;
   effectsPort: HostedRuntimeEffectsPort;
+  routeAuthority: HostedExecutionTelegramExternalThreadRouteAuthority;
   signal: AbortSignal | null;
 }): Promise<void> {
   const delivery = readHostedPhoneCallResultDeliveryFromEffect(input.effect);
@@ -3959,10 +3987,34 @@ async function recordHostedPhoneCallResultDeliverySendingRequired(input: {
     effectsPort: input.effectsPort,
     request: {
       ...delivery,
+      routeAuthority: input.routeAuthority,
       status: "sending",
     },
     signal: input.signal,
   });
+}
+
+function requireHostedPhoneCallResultTelegramRouteAuthority(input: {
+  intent: AssistantOutboxIntent | null;
+  target: string;
+  userId: string;
+}): HostedExecutionTelegramExternalThreadRouteAuthority {
+  const authority = input.intent?.externalThreadRouteAuthority ?? null;
+  if (
+    authority?.channel !== "telegram"
+    || authority.containerMemberId !== input.userId
+    || authority.threadId !== input.target.trim()
+  ) {
+    throw new VaultCliError(
+      "ASSISTANT_EXTERNAL_THREAD_ROUTE_AUTHORITY_STALE",
+      "Hosted phone-call result route authority no longer matches its provider target.",
+      { retryable: false },
+    );
+  }
+  return {
+    ...authority,
+    channel: "telegram",
+  };
 }
 
 async function recordHostedPhoneCallResultPreProviderRouteFailureRequired(
@@ -4028,7 +4080,7 @@ function readHostedPhoneCallResultDeliveryFromEffect(
 
 function mapHostedPhoneCallResultDeliveryOutcomeStatus(
   status: HostedAssistantDeliveryOutcome["deliveryStatus"],
-): HostedPhoneCallResultDeliveryOutcomeRequest["status"] | null {
+): "failed" | "failed_ambiguous" | "sent" | null {
   switch (status) {
     case "sent":
       return "sent";

@@ -27,7 +27,6 @@ vi.mock("@/src/lib/phone-calls/reconciliation", async () => {
 
 import {
   rearmHostedPhoneCallResultNotificationRecovery,
-  rearmHostedPhoneCallResultNotificationRecoveryBestEffort,
   startHostedPhoneCallReconciliationWorkflow,
 } from "@/src/lib/phone-calls/reconciliation-workflow-start";
 import { reconcileHostedPhoneCallStep } from "@/src/lib/phone-calls/reconciliation-workflow-steps";
@@ -104,25 +103,21 @@ describe("hosted phone-call reconciliation Workflow", () => {
     });
   });
 
-  it("keeps a committed Telegram route bind successful when Workflow rearm is unavailable", async () => {
+  it("requires route restoration to re-arm result recovery", async () => {
     const prisma = {
       hostedPhoneCall: {
         findFirst: vi.fn().mockResolvedValue({ id: "hpc_result_pending" }),
       },
     };
     const workflowStarter = vi.fn().mockRejectedValue(new Error("workflow unavailable"));
-    const warning = vi.spyOn(console, "warn").mockImplementation(() => {});
     mocks.getPrisma.mockReturnValue(prisma);
 
-    await expect(rearmHostedPhoneCallResultNotificationRecoveryBestEffort({
+    await expect(rearmHostedPhoneCallResultNotificationRecovery({
       memberId: "member_123",
       workflowStarter,
-    })).resolves.toBeUndefined();
+    })).rejects.toThrow("workflow unavailable");
 
     expect(workflowStarter).toHaveBeenCalledOnce();
-    expect(warning).toHaveBeenCalledWith(
-      "Hosted phone-call result recovery rearm failed.",
-    );
   });
 
   it("bounds a stalled Workflow start and observes late settlement", async () => {

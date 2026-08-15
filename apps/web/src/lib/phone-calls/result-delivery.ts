@@ -10,6 +10,9 @@ import {
 } from "@murphai/hosted-execution/phone-calls";
 
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
+import {
+  assertHostedAssistantNotificationRouteAuthority,
+} from "../hosted-routing/assistant-notification-destination";
 import { getPrisma } from "../prisma";
 import {
   rearmHostedPhoneCallResultNotificationRecovery,
@@ -33,6 +36,7 @@ export async function recordHostedPhoneCallResultDeliveryOutcome(input: {
   prisma?: PrismaClient;
   request: HostedPhoneCallResultDeliveryOutcomeRequest;
   rearmRecovery?: typeof rearmHostedPhoneCallResultNotificationRecovery;
+  signal?: AbortSignal;
 }): Promise<HostedPhoneCallResultDeliveryOutcomeResult> {
   const prisma = input.prisma ?? getPrisma();
   const rearmRecovery = input.rearmRecovery
@@ -75,6 +79,16 @@ export async function recordHostedPhoneCallResultDeliveryOutcome(input: {
         code: "HOSTED_PHONE_CALL_RESULT_DELIVERY_GENERATION_INVALID",
         httpStatus: 409,
         message: "Hosted phone call result delivery generation is invalid.",
+      });
+    }
+    if (input.request.status === "sending") {
+      if (input.request.routeAuthority.containerMemberId !== input.memberId) {
+        throwHostedPhoneCallResultDeliveryRouteUnauthorized();
+      }
+      await assertHostedAssistantNotificationRouteAuthority({
+        authority: input.request.routeAuthority,
+        prisma,
+        signal: input.signal,
       });
     }
 
@@ -225,6 +239,14 @@ function resolveHostedPhoneCallResultDeliveryTransition(input: {
         : "failed",
     terminal: true,
   };
+}
+
+function throwHostedPhoneCallResultDeliveryRouteUnauthorized(): never {
+  throw hostedOnboardingError({
+    code: "HOSTED_THREAD_ROUTE_EGRESS_UNAUTHORIZED",
+    httpStatus: 403,
+    message: "Hosted notification route is no longer authorized.",
+  });
 }
 
 function throwHostedPhoneCallResultDeliveryTransitionInvalid(): never {

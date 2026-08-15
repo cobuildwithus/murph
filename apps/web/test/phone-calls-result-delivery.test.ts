@@ -4,6 +4,7 @@ import type {
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
+  assertRouteAuthority: vi.fn(async () => undefined),
   getPrisma: vi.fn(),
   rearmRecovery: vi.fn(async () => true),
 }));
@@ -14,6 +15,11 @@ vi.mock("@/src/lib/prisma", () => ({
 
 vi.mock("@/src/lib/phone-calls/reconciliation-workflow-start", () => ({
   rearmHostedPhoneCallResultNotificationRecovery: mocks.rearmRecovery,
+}));
+
+vi.mock("@/src/lib/hosted-routing/assistant-notification-destination", () => ({
+  assertHostedAssistantNotificationRouteAuthority:
+    mocks.assertRouteAuthority,
 }));
 
 import {
@@ -39,7 +45,47 @@ describe("hosted phone-call result delivery ownership", () => {
 
     expect(store.readStatus()).toBe("sending");
     expect(store.readTerminalAt()).toBeNull();
+    expect(mocks.assertRouteAuthority).toHaveBeenCalledWith({
+      authority: {
+        channel: "telegram",
+        containerMemberId: MEMBER_ID,
+        threadId: "telegram_result_delivery",
+      },
+      prisma: store.prisma,
+      signal: undefined,
+    });
     expect(mocks.rearmRecovery).not.toHaveBeenCalled();
+  });
+
+  it("rejects revoked route authority before provider entry is recorded", async () => {
+    const store = createDeliveryStore("queued");
+    mocks.getPrisma.mockReturnValue(store.prisma);
+    mocks.assertRouteAuthority.mockRejectedValueOnce(Object.assign(
+      new Error("route revoked"),
+      { code: "HOSTED_THREAD_ROUTE_EGRESS_UNAUTHORIZED" },
+    ));
+
+    await expect(recordHostedPhoneCallResultDeliveryOutcome({
+      memberId: MEMBER_ID,
+      request: deliveryRequest("sending"),
+    })).rejects.toMatchObject({
+      code: "HOSTED_THREAD_ROUTE_EGRESS_UNAUTHORIZED",
+    });
+
+    expect(store.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("revalidates authority when a committed provider-entry callback is retried", async () => {
+    const store = createDeliveryStore("sending");
+    mocks.getPrisma.mockReturnValue(store.prisma);
+
+    await expect(recordHostedPhoneCallResultDeliveryOutcome({
+      memberId: MEMBER_ID,
+      request: deliveryRequest("sending"),
+    })).resolves.toEqual({ recorded: false, status: "sending" });
+
+    expect(mocks.assertRouteAuthority).toHaveBeenCalledOnce();
+    expect(store.updateMany).not.toHaveBeenCalled();
   });
 
   it("marks provider success terminal and re-arms the next obligation", async () => {
@@ -189,14 +235,42 @@ describe("hosted phone-call result delivery ownership", () => {
   });
 });
 
+function deliveryRequest(status: "sending"): {
+  generation: number;
+  phoneCallId: string;
+  routeAuthority: {
+    channel: "telegram";
+    containerMemberId: string;
+    threadId: string;
+  };
+  status: "sending";
+};
+function deliveryRequest(
+  status: "failed" | "failed_ambiguous" | "sent",
+): {
+  generation: number;
+  phoneCallId: string;
+  status: "failed" | "failed_ambiguous" | "sent";
+};
 function deliveryRequest(
   status: "failed" | "failed_ambiguous" | "sending" | "sent",
 ) {
-  return {
-    generation: 1,
-    phoneCallId: CALL_ID,
-    status,
-  } as const;
+  return status === "sending"
+    ? {
+        generation: 1,
+        phoneCallId: CALL_ID,
+        routeAuthority: {
+          channel: "telegram" as const,
+          containerMemberId: MEMBER_ID,
+          threadId: "telegram_result_delivery",
+        },
+        status,
+      }
+    : {
+        generation: 1,
+        phoneCallId: CALL_ID,
+        status,
+      };
 }
 
 function createDeliveryStore(

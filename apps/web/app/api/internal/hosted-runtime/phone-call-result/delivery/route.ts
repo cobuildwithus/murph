@@ -37,6 +37,7 @@ export const POST = withJsonError(async (request: Request) => {
     ...await recordHostedPhoneCallResultDeliveryOutcome({
       memberId,
       request: body,
+      signal: request.signal,
     }),
   });
 });

@@ -41,16 +41,18 @@ describe("assistant hosted phone-call result routing", () => {
   );
 
   it.each([
-    ["linq", "direct", undefined],
-    ["telegram", "direct", "telegram"],
-    ["telegram", "group", undefined],
+    ["linq", "direct", true, undefined],
+    ["telegram", "direct", true, "telegram"],
+    ["telegram", "direct", false, undefined],
+    ["telegram", "group", true, undefined],
   ] as const)(
-    "injects only the bounded result channel for a %s %s call",
-    async (channel, conversationScope, expectedChannel) => {
+    "injects only the bounded result channel for a %s %s scheduled=%s call",
+    async (channel, conversationScope, scheduled, expectedChannel) => {
       const start = vi.fn(async () => ({
         phoneCallId: "hpc_test",
         status: "calling" as const,
       }));
+      const occurrenceAt = "2026-08-06T18:00:00.000Z";
       const context = createAssistantHostedToolContext({
         executionContext: {
           memberId: "member_phone_call",
@@ -60,6 +62,16 @@ describe("assistant hosted phone-call result routing", () => {
         getConversationScope: () => conversationScope,
         messageInput: {
           channel,
+          ...(scheduled
+            ? {
+                scheduledInvocationAuthority: {
+                  automationId: "automation_phone_call",
+                  occurrenceAt,
+                },
+                scheduledOccurrenceAt: occurrenceAt,
+                turnTrigger: "automation-cron",
+              }
+            : {}),
         } as never,
         session: {
           binding: { channel },

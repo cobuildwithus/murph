@@ -62,7 +62,20 @@ describe("hosted phone-call result delivery route", () => {
         phoneCallId: "hpc_123",
         status: "sent",
       },
+      signal: request.signal,
     });
+  });
+
+  it("rejects provider entry without exact route authority", async () => {
+    const response = await route.POST(buildRequest({
+      generation: 1,
+      phoneCallId: "hpc_123",
+      status: "sending",
+    }));
+
+    expect(response.status).toBe(400);
+    expect(mocks.requireCallback).toHaveBeenCalledOnce();
+    expect(mocks.recordOutcome).not.toHaveBeenCalled();
   });
 
   it("rejects malformed outcome state before the durable owner is called", async () => {

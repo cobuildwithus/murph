@@ -573,41 +573,42 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
       },
     });
 
-    const response = await handleHostedOnboardingTelegramWebhook({
-      prisma,
-      rawBody: JSON.stringify({
-        message: {
+    const rawBody = JSON.stringify({
+      message: {
+        chat: {
+          id: 123,
+          type: "private",
+        },
+        date: 1_774_522_600,
+        from: {
+          first_name: "Alice",
+          id: 456,
+        },
+        message_id: 1,
+        quote: {
+          text: "quoted",
+        },
+        reply_to_message: {
           chat: {
             id: 123,
             type: "private",
           },
-          date: 1_774_522_600,
+          date: 1_774_522_599,
           from: {
-            first_name: "Alice",
-            id: 456,
+            first_name: "Casey",
+            id: 457,
+            username: "casey",
           },
-          message_id: 1,
-          quote: {
-            text: "quoted",
-          },
-          reply_to_message: {
-            chat: {
-              id: 123,
-              type: "private",
-            },
-            date: 1_774_522_599,
-            from: {
-              first_name: "Casey",
-              id: 457,
-              username: "casey",
-            },
-            message_id: 0,
-            text: "Earlier message",
-          },
-          text: "hello",
+          message_id: 0,
+          text: "Earlier message",
         },
-        update_id: 321,
-      }),
+        text: "hello",
+      },
+      update_id: 321,
+    });
+    const response = await handleHostedOnboardingTelegramWebhook({
+      prisma,
+      rawBody,
       secretToken: "telegram-secret",
     });
 
@@ -663,6 +664,38 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
       mocks.materializePendingHostedGroupJoinConfirmationsBestEffort.mock.invocationCallOrder[0],
     );
     expect(readHostedWebhookSideEffectUpsertCalls(prisma)).toEqual([]);
+
+    const rearmError = Object.assign(
+      new Error("phone-call result recovery unavailable"),
+      { retryable: true },
+    );
+    mocks.rearmHostedPhoneCallResultNotificationRecovery.mockRejectedValueOnce(
+      rearmError,
+    );
+    await expect(handleHostedOnboardingTelegramWebhook({
+      prisma,
+      rawBody,
+      secretToken: "telegram-secret",
+    })).rejects.toBe(rearmError);
+    expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledTimes(2);
+    expect(
+      mocks.signalHostedMailboxAppendRuntime.mock.invocationCallOrder[1],
+    ).toBeLessThan(
+      mocks.rearmHostedPhoneCallResultNotificationRecovery.mock.invocationCallOrder[1]
+      ?? Number.POSITIVE_INFINITY,
+    );
+
+    await expect(handleHostedOnboardingTelegramWebhook({
+      prisma,
+      rawBody,
+      secretToken: "telegram-secret",
+    })).resolves.toMatchObject({
+      ok: true,
+      reason: "wake-appended-active-member",
+    });
+    expect(
+      mocks.rearmHostedPhoneCallResultNotificationRecovery,
+    ).toHaveBeenCalledTimes(3);
   });
 
   it("opens zero transactions when direct Telegram root preparation fails", async () => {

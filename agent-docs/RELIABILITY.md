@@ -1807,7 +1807,12 @@ Last verified: 2026-08-15
   proves result delivery. Web atomically advances `pending` to a new queued
   generation with its mailbox append. The write-fenced runtime reports provider
   entry and the terminal outbox outcome through the signed Web control plane
-  before checkpointing that outcome. Provider acceptance completes delivery;
+  before checkpointing that outcome. At the first provider fetch, the runtime
+  gives Web the exact queued Telegram authority; Web revalidates that authority
+  and compare-and-sets the same generation from `queued` to `sending` in the
+  callback operation. A lost callback response sends nothing on that attempt,
+  and retry revalidates the route before continuing the same generation.
+  Provider acceptance completes delivery;
   definitive failure records non-delivery; a may-have-succeeded failure records
   ambiguity and is never resent. Exact pre-provider Telegram route loss returns
   a queued call to `pending`; if that generation already reported provider
@@ -1815,12 +1820,17 @@ Last verified: 2026-08-15
   exact-route bind and each terminal callback re-arms at most one oldest member-local
   nonterminal call, so there is no second queue or fanout scheduler. Tracked
   direct results are required-send and bind the exact live Telegram route into
-  each generation. Request-key replay still requires exact stored-channel
+  each generation. Route-restoration requests do not acknowledge success until
+  they have synchronously re-armed the oldest obligation; Telegram webhook
+  handling first hands off its foreground wake, then returns a retryable error
+  when re-arm fails so an idempotent retry repeats the lookup and start.
+  Request-key replay still requires exact stored-channel
   equality, including legacy null, before provider work. Group calls keep null
   and their existing thread-container delivery behavior. Deploy the additive
-  schema and Web callback before the runner producer, roll the runner out
-  immediately, and roll it back first. Retain Web until every non-null-channel
-  call is terminal.
+  schema and Web callback before the runner producer, then roll the runner out
+  immediately. A rollback must first stop new tracked scheduled-call admission
+  and keep a callback-capable runner until every nonterminal tracked call
+  drains; only then may the runner roll below callback support, with Web last.
 - A legacy joined-group `cannot_answer` queues the fixed
   unavailable-evidence response exactly. It must not start a private provider
   continuation that can invent an expiry, provider failure, or execution

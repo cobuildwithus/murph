@@ -378,12 +378,14 @@ export function createAssistantHostedToolContext(input: {
     ? {
         start: (request, options) => {
           const deliveryContext = readDeliveryContext()
-          const resultNotificationChannel =
-            resolveAssistantHostedPhoneCallResultNotificationChannel({
-              channel: deliveryContext.messageInput.channel,
-              conversationScope:
-                input.getConversationScope?.() ?? 'unverified-external',
-            })
+          const scheduledPhoneCallScope = readCurrentScheduledPhoneCallScope()
+          const resultNotificationChannel = scheduledPhoneCallScope
+            ? resolveAssistantHostedPhoneCallResultNotificationChannel({
+                channel: deliveryContext.messageInput.channel,
+                conversationScope:
+                  input.getConversationScope?.() ?? 'unverified-external',
+              })
+            : null
           return phoneCallPort.start({
             ...request,
             ...(resultNotificationChannel

@@ -12,7 +12,7 @@ const mocks = vi.hoisted(() => ({
   },
   requireFreshPrivyMemberAuthForHostedAppSession: vi.fn(),
   requirePrivyMemberAuth: vi.fn(),
-  rearmHostedPhoneCallResultNotificationRecoveryBestEffort: vi.fn(),
+  rearmHostedPhoneCallResultNotificationRecovery: vi.fn(),
   signalHostedMailboxAppendRuntime: vi.fn(),
   upsertHostedMemberTelegramRoutingBindingTx: vi.fn(),
 }));
@@ -44,8 +44,8 @@ vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
 }));
 
 vi.mock("@/src/lib/phone-calls/reconciliation-workflow-start", () => ({
-  rearmHostedPhoneCallResultNotificationRecoveryBestEffort:
-    mocks.rearmHostedPhoneCallResultNotificationRecoveryBestEffort,
+  rearmHostedPhoneCallResultNotificationRecovery:
+    mocks.rearmHostedPhoneCallResultNotificationRecovery,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
@@ -80,7 +80,7 @@ describe("settings telegram sync route", () => {
       signalAccepted: true,
       workflowId: "hosted-user-runtime:member_123",
     });
-    mocks.rearmHostedPhoneCallResultNotificationRecoveryBestEffort.mockResolvedValue(undefined);
+    mocks.rearmHostedPhoneCallResultNotificationRecovery.mockResolvedValue(false);
     mocks.requireFreshPrivyMemberAuthForHostedAppSession.mockImplementation(async (...args: unknown[]) => {
       const freshPrivy = await mocks.requirePrivyMemberAuth(...args);
       return {
@@ -147,10 +147,11 @@ describe("settings telegram sync route", () => {
       sourceType: "settings.telegram.sync",
     });
     expect(
-      mocks.rearmHostedPhoneCallResultNotificationRecoveryBestEffort,
+      mocks.rearmHostedPhoneCallResultNotificationRecovery,
     ).toHaveBeenCalledWith({
       memberId: "member_123",
       prisma: mocks.prismaClient,
+      signal: expect.any(AbortSignal),
     });
     expect(
       mocks.upsertHostedMemberTelegramRoutingBindingTx.mock.invocationCallOrder[0],
@@ -169,6 +170,38 @@ describe("settings telegram sync route", () => {
       runTriggered: true,
       telegramUserId: "456",
       telegramUsername: "alice",
+    });
+  });
+
+  it("returns a retryable error when committed route restoration cannot re-arm recovery", async () => {
+    mocks.rearmHostedPhoneCallResultNotificationRecovery.mockRejectedValueOnce(
+      hostedOnboardingError({
+        code: "HOSTED_PHONE_CALL_RECONCILIATION_WORKFLOW_START_RETRY_REQUIRED",
+        httpStatus: 503,
+        message: "Phone call recovery is temporarily unavailable.",
+        retryable: true,
+      }),
+    );
+
+    const response = await settingsTelegramSyncRoute.POST(
+      new Request("https://join.example.test/api/settings/telegram/sync", {
+        body: JSON.stringify({ expectedTelegramUserId: "456" }),
+        headers: {
+          "content-type": "application/json",
+          origin: SAME_ORIGIN_HEADERS.origin,
+        },
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(503);
+    expect(mocks.upsertHostedMemberTelegramRoutingBindingTx).toHaveBeenCalledOnce();
+    expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
+    await expect(response.json()).resolves.toMatchObject({
+      error: {
+        code: "HOSTED_PHONE_CALL_RECONCILIATION_WORKFLOW_START_RETRY_REQUIRED",
+        retryable: true,
+      },
     });
   });
 

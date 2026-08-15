@@ -5,6 +5,7 @@ import {
   hostedPhoneCallStartRequestSchema,
   isHostedPhoneCallResultPreProviderRouteFailureCode,
   parseHostedPhoneCallResultDeliveryKey,
+  parseHostedPhoneCallResultDeliveryOutcomeRequest,
   parseHostedPhoneCallResultNotificationChannel,
 } from "../src/phone-calls.js";
 
@@ -63,6 +64,49 @@ describe("hosted phone-call result notification channels", () => {
     expect(parseHostedPhoneCallResultDeliveryKey(
       "phone-call-result:hpc_result_delivery:generation:0",
     )).toBeNull();
+  });
+
+  it("requires exact Telegram route authority at provider entry", () => {
+    expect(parseHostedPhoneCallResultDeliveryOutcomeRequest({
+      generation: 3,
+      phoneCallId: "hpc_result_delivery",
+      routeAuthority: {
+        channel: "telegram",
+        containerMemberId: "member_result_delivery",
+        threadId: "telegram_result_delivery",
+      },
+      status: "sending",
+    })).toMatchObject({
+      routeAuthority: {
+        channel: "telegram",
+        containerMemberId: "member_result_delivery",
+        threadId: "telegram_result_delivery",
+      },
+      status: "sending",
+    });
+    expect(() => parseHostedPhoneCallResultDeliveryOutcomeRequest({
+      generation: 3,
+      phoneCallId: "hpc_result_delivery",
+      status: "sending",
+    })).toThrow();
+  });
+
+  it("keeps terminal delivery outcomes independent of route authority", () => {
+    expect(parseHostedPhoneCallResultDeliveryOutcomeRequest({
+      generation: 3,
+      phoneCallId: "hpc_result_delivery",
+      status: "sent",
+    }).status).toBe("sent");
+    expect(() => parseHostedPhoneCallResultDeliveryOutcomeRequest({
+      generation: 3,
+      phoneCallId: "hpc_result_delivery",
+      routeAuthority: {
+        channel: "telegram",
+        containerMemberId: "member_result_delivery",
+        threadId: "telegram_result_delivery",
+      },
+      status: "sent",
+    })).toThrow();
   });
 
   it("classifies only exact pre-provider route-loss codes", () => {

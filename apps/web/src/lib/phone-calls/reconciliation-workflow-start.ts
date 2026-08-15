@@ -55,15 +55,3 @@ export async function rearmHostedPhoneCallResultNotificationRecovery(input: {
   );
   return true;
 }
-
-export async function rearmHostedPhoneCallResultNotificationRecoveryBestEffort(
-  input: Parameters<typeof rearmHostedPhoneCallResultNotificationRecovery>[0],
-): Promise<void> {
-  try {
-    await rearmHostedPhoneCallResultNotificationRecovery(input);
-  } catch {
-    // A Telegram route bind remains valid even when Workflow is temporarily
-    // unavailable. The next bind, inbound, or delivery callback retries rearm.
-    console.warn("Hosted phone-call result recovery rearm failed.");
-  }
-}

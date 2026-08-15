@@ -2010,46 +2010,25 @@ export async function handleHostedOnboardingTelegramWebhook(input: {
       referralIds: plan.postCommitUsageReferralIds ?? [],
       scheduleAfterResponse: input.scheduleAfterResponse,
     });
-    await rearmHostedPhoneCallResultRecoveriesAfterCommitBestEffort({
+    await rearmHostedPhoneCallResultRecoveriesAfterCommitRequired({
       memberIds: plan.postCommitPhoneCallResultRecoveryMemberIds ?? [],
       prisma,
-      scheduleAfterResponse: input.scheduleAfterResponse,
     });
   }
   return plan.response;
 }
 
-async function rearmHostedPhoneCallResultRecoveriesAfterCommitBestEffort(input: {
+async function rearmHostedPhoneCallResultRecoveriesAfterCommitRequired(input: {
   prisma: PrismaClient;
   memberIds: readonly string[];
-  scheduleAfterResponse?: HostedWebhookPostResponseScheduler;
 }): Promise<void> {
   const memberIds = [...new Set(input.memberIds)];
-  if (memberIds.length === 0) {
-    return;
+  for (const memberId of memberIds) {
+    await rearmHostedPhoneCallResultNotificationRecovery({
+      memberId,
+      prisma: input.prisma,
+    });
   }
-  const rearm = async () => {
-    for (const memberId of memberIds) {
-      try {
-        await rearmHostedPhoneCallResultNotificationRecovery({
-          memberId,
-          prisma: input.prisma,
-        });
-      } catch (error) {
-        logHostedOnboardingDiagnostic(
-          "hosted-onboarding.phone-call-result-recovery-rearm-failed",
-          {
-            errorName: deriveHostedOnboardingTimingErrorName(error),
-          },
-        );
-      }
-    }
-  };
-  if (input.scheduleAfterResponse) {
-    input.scheduleAfterResponse(rearm);
-    return;
-  }
-  await rearm();
 }
 
 async function reconcileHostedUsageReferralRewardsAfterCommitBestEffort(input: {

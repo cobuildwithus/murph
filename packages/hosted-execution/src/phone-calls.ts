@@ -1,6 +1,7 @@
 import * as z from "@murphai/contracts/zod-runtime";
 import type {
   HostedExecutionAcceptedGroupMessageParticipant,
+  HostedExecutionTelegramExternalThreadRouteAuthority,
 } from "./contracts.ts";
 
 // Starting a call can perform one bounded control-root unwrap before the
@@ -58,14 +59,34 @@ export const hostedPhoneCallResultDeliveryOutcomeStatusSchema = z.enum(
   HOSTED_PHONE_CALL_RESULT_DELIVERY_OUTCOME_STATUSES,
 );
 
-export const hostedPhoneCallResultDeliveryOutcomeRequestSchema = z
+const hostedPhoneCallResultDeliveryKeySchema = z
   .object({
-    deliveryErrorCode: z.string().trim().min(1).max(200).nullable().optional(),
     generation: z.number().int().positive(),
     phoneCallId: z.string().trim().min(1).max(200),
-    status: hostedPhoneCallResultDeliveryOutcomeStatusSchema,
   })
   .strict();
+
+const hostedPhoneCallResultDeliveryRouteAuthoritySchema: z.ZodType<
+  HostedExecutionTelegramExternalThreadRouteAuthority
+> = z
+  .object({
+    accountLookupKey: z.string().trim().min(1).nullable().optional(),
+    channel: z.literal("telegram"),
+    containerMemberId: z.string().trim().min(1).max(200),
+    threadId: z.string().trim().min(1).max(512),
+  })
+  .strict();
+
+export const hostedPhoneCallResultDeliveryOutcomeRequestSchema = z.union([
+  hostedPhoneCallResultDeliveryKeySchema.extend({
+    routeAuthority: hostedPhoneCallResultDeliveryRouteAuthoritySchema,
+    status: z.literal("sending"),
+  }).strict(),
+  hostedPhoneCallResultDeliveryKeySchema.extend({
+    deliveryErrorCode: z.string().trim().min(1).max(200).nullable().optional(),
+    status: z.enum(["sent", "failed", "failed_ambiguous"]),
+  }).strict(),
+]);
 
 export const hostedPhoneCallBriefSchema = z
   .object({
@@ -203,10 +224,9 @@ export function parseHostedPhoneCallResultDeliveryKey(
   if (!/^\d+$/u.test(generationText)) {
     return null;
   }
-  const parsed = hostedPhoneCallResultDeliveryOutcomeRequestSchema.safeParse({
+  const parsed = hostedPhoneCallResultDeliveryKeySchema.safeParse({
     generation: Number(generationText),
     phoneCallId,
-    status: "sending",
   });
   return parsed.success
     ? {
