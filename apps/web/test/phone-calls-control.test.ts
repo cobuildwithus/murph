@@ -3,8 +3,8 @@ import { describe, expect, it, vi } from "vitest";
 import { stopHostedPhoneCall } from "@/src/lib/phone-calls/control";
 
 describe("hosted phone-call control", () => {
-  it("stops only an exact member-bound provider call and persists the end", async () => {
-    const call = {
+  it("durably fences an exact member-bound call and delegates provider control", async () => {
+    const findFirst = vi.fn(async () => ({
       analyzedAt: null,
       endedAt: null,
       id: "hpc_stop_exact",
@@ -12,12 +12,13 @@ describe("hosted phone-call control", () => {
       providerCallId: "provider_stop_exact",
       status: "calling" as const,
       stopRequestedAt: null,
-    };
-    const findFirst = vi.fn(async () => call);
+    }));
     const updateMany = vi.fn(async () => ({ count: 1 }));
-    const stopIfActive = vi.fn(async () => "stopped" as const);
+    const reconciliationWorkflowStarter = vi.fn(async () => ({
+      runId: "run_stop",
+    }));
 
-    const result = await stopHostedPhoneCall({
+    await expect(stopHostedPhoneCall({
       memberId: "member_stop_owner",
       phoneCallId: "hpc_stop_exact",
       prisma: {
@@ -26,9 +27,12 @@ describe("hosted phone-call control", () => {
           updateMany,
         },
       },
-      reconciliationWorkflowStarter: vi.fn(async () => ({ runId: "run_stop" })),
-      runtime: { stopIfActive },
+      reconciliationWorkflowStarter,
       signal: new AbortController().signal,
+    })).resolves.toEqual({
+      phoneCallId: "hpc_stop_exact",
+      state: "start_pending",
+      status: "calling",
     });
 
     expect(findFirst).toHaveBeenCalledWith(expect.objectContaining({
@@ -37,41 +41,73 @@ describe("hosted phone-call control", () => {
         memberId: "member_stop_owner",
       },
     }));
-    expect(stopIfActive).toHaveBeenCalledWith("provider_stop_exact", {
-      signal: expect.any(AbortSignal),
-    });
-    expect(updateMany).toHaveBeenCalledWith(expect.objectContaining({
-      data: {
-        endedAt: expect.any(Date),
-        status: "ended",
-      },
-      where: expect.objectContaining({
+    expect(updateMany).toHaveBeenCalledWith({
+      data: { stopRequestedAt: expect.any(Date) },
+      where: {
+        analyzedAt: null,
+        endedAt: null,
         id: "hpc_stop_exact",
         memberId: "member_stop_owner",
-        providerCallId: "provider_stop_exact",
-      }),
-    }));
-    expect(result).toEqual({
-      phoneCallId: "hpc_stop_exact",
-      state: "stopped",
-      status: "ended",
+        status: {
+          in: ["starting", "calling", "ended", "failed"],
+        },
+        stopRequestedAt: null,
+      },
     });
+    expect(reconciliationWorkflowStarter).toHaveBeenCalledWith(
+      { phoneCallId: "hpc_stop_exact" },
+      { signal: expect.any(AbortSignal) },
+    );
   });
 
-  it("does not claim termination before provider authority is known", async () => {
-    const stopIfActive = vi.fn(async () => "stopped" as const);
-    const updateMany = vi.fn(async () => ({ count: 1 }));
-    const reconciliationWorkflowStarter = vi.fn(async () => ({ runId: "run_stop" }));
+  it("re-arms workflow recovery without another write for a repeated durable stop", async () => {
+    const updateMany = vi.fn();
+    const reconciliationWorkflowStarter = vi.fn();
 
-    const result = await stopHostedPhoneCall({
+    await expect(stopHostedPhoneCall({
       memberId: "member_stop_owner",
-      phoneCallId: "hpc_stop_starting",
+      phoneCallId: "hpc_stop_repeat",
       prisma: {
         hostedPhoneCall: {
           findFirst: vi.fn(async () => ({
             analyzedAt: null,
             endedAt: null,
-            id: "hpc_stop_starting",
+            id: "hpc_stop_repeat",
+            memberId: "member_stop_owner",
+            providerCallId: "provider_stop_repeat",
+            status: "calling" as const,
+            stopRequestedAt: new Date("2026-09-01T15:00:00.000Z"),
+          })),
+          updateMany,
+        },
+      },
+      reconciliationWorkflowStarter,
+      signal: new AbortController().signal,
+    })).resolves.toEqual({
+      phoneCallId: "hpc_stop_repeat",
+      state: "start_pending",
+      status: "calling",
+    });
+
+    expect(updateMany).not.toHaveBeenCalled();
+    expect(reconciliationWorkflowStarter).toHaveBeenCalledWith(
+      { phoneCallId: "hpc_stop_repeat" },
+      { signal: expect.any(AbortSignal) },
+    );
+  });
+
+  it("keeps the durable fence when the best-effort workflow wake fails", async () => {
+    const updateMany = vi.fn(async () => ({ count: 1 }));
+
+    await expect(stopHostedPhoneCall({
+      memberId: "member_stop_owner",
+      phoneCallId: "hpc_stop_wake_retry",
+      prisma: {
+        hostedPhoneCall: {
+          findFirst: vi.fn(async () => ({
+            analyzedAt: null,
+            endedAt: null,
+            id: "hpc_stop_wake_retry",
             memberId: "member_stop_owner",
             providerCallId: null,
             status: "starting" as const,
@@ -80,31 +116,23 @@ describe("hosted phone-call control", () => {
           updateMany,
         },
       },
-      reconciliationWorkflowStarter,
-      runtime: { stopIfActive },
+      reconciliationWorkflowStarter: vi.fn(async () => {
+        throw new Error("workflow unavailable");
+      }),
       signal: new AbortController().signal,
-    });
-
-    expect(stopIfActive).not.toHaveBeenCalled();
-    expect(updateMany).toHaveBeenCalledWith(expect.objectContaining({
-      data: { stopRequestedAt: expect.any(Date) },
-    }));
-    expect(reconciliationWorkflowStarter).toHaveBeenCalledWith(
-      { phoneCallId: "hpc_stop_starting" },
-      { signal: expect.any(AbortSignal) },
-    );
-    expect(result).toEqual({
-      phoneCallId: "hpc_stop_starting",
+    })).resolves.toEqual({
+      phoneCallId: "hpc_stop_wake_retry",
       state: "start_pending",
       status: "starting",
     });
+
+    expect(updateMany).toHaveBeenCalledOnce();
   });
 
   it("treats an already-terminal call as an idempotent no-op", async () => {
-    const stopIfActive = vi.fn(async () => "stopped" as const);
     const updateMany = vi.fn();
 
-    const result = await stopHostedPhoneCall({
+    await expect(stopHostedPhoneCall({
       memberId: "member_stop_owner",
       phoneCallId: "hpc_stop_terminal",
       prisma: {
@@ -121,58 +149,18 @@ describe("hosted phone-call control", () => {
           updateMany,
         },
       },
-      runtime: { stopIfActive },
       signal: new AbortController().signal,
-    });
-
-    expect(stopIfActive).not.toHaveBeenCalled();
-    expect(updateMany).not.toHaveBeenCalled();
-    expect(result).toEqual({
+    })).resolves.toEqual({
       phoneCallId: "hpc_stop_terminal",
       state: "already_terminal",
       status: "completed",
     });
-  });
 
-  it("returns a retryable error when provider termination is unconfirmed", async () => {
-    const updateMany = vi.fn(async () => ({ count: 1 }));
-    await expect(stopHostedPhoneCall({
-      memberId: "member_stop_owner",
-      phoneCallId: "hpc_stop_retry",
-      prisma: {
-        hostedPhoneCall: {
-          findFirst: vi.fn(async () => ({
-            analyzedAt: null,
-            endedAt: null,
-            id: "hpc_stop_retry",
-            memberId: "member_stop_owner",
-            providerCallId: "provider_stop_retry",
-            status: "calling" as const,
-            stopRequestedAt: null,
-          })),
-          updateMany,
-        },
-      },
-      reconciliationWorkflowStarter: vi.fn(async () => ({ runId: "run_stop" })),
-      runtime: {
-        stopIfActive: vi.fn(async () => {
-          throw new Error("synthetic provider failure");
-        }),
-      },
-      signal: new AbortController().signal,
-    })).rejects.toMatchObject({
-      code: "HOSTED_PHONE_CALL_STOP_RETRY_REQUIRED",
-      httpStatus: 503,
-      retryable: true,
-    });
-    expect(updateMany).toHaveBeenCalledOnce();
-    expect(updateMany).toHaveBeenCalledWith(expect.objectContaining({
-      data: { stopRequestedAt: expect.any(Date) },
-    }));
+    expect(updateMany).not.toHaveBeenCalled();
   });
 
   it("does not reveal whether another member owns a requested call id", async () => {
-    const result = await stopHostedPhoneCall({
+    await expect(stopHostedPhoneCall({
       memberId: "member_stop_requester",
       phoneCallId: "hpc_stop_foreign",
       prisma: {
@@ -181,52 +169,15 @@ describe("hosted phone-call control", () => {
           updateMany: vi.fn(),
         },
       },
-      runtime: { stopIfActive: vi.fn() },
       signal: new AbortController().signal,
-    });
-
-    expect(result).toEqual({
+    })).resolves.toEqual({
       phoneCallId: "hpc_stop_foreign",
       state: "not_found",
       status: null,
     });
   });
 
-  it("reports an already-terminal provider disposition without claiming this request stopped it", async () => {
-    const stopIfActive = vi.fn(async () => "already_terminal" as const);
-    const updateMany = vi.fn(async () => ({ count: 1 }));
-
-    const result = await stopHostedPhoneCall({
-      memberId: "member_stop_owner",
-      phoneCallId: "hpc_stop_provider_terminal",
-      prisma: {
-        hostedPhoneCall: {
-          findFirst: vi.fn(async () => ({
-            analyzedAt: null,
-            endedAt: null,
-            id: "hpc_stop_provider_terminal",
-            memberId: "member_stop_owner",
-            providerCallId: "provider_stop_terminal",
-            status: "calling" as const,
-            stopRequestedAt: null,
-          })),
-          updateMany,
-        },
-      },
-      reconciliationWorkflowStarter: vi.fn(async () => ({ runId: "run_stop" })),
-      runtime: { stopIfActive },
-      signal: new AbortController().signal,
-    });
-
-    expect(stopIfActive).toHaveBeenCalledOnce();
-    expect(result).toEqual({
-      phoneCallId: "hpc_stop_provider_terminal",
-      state: "already_terminal",
-      status: "ended",
-    });
-  });
-
-  it("does not call the provider when the stop fence loses a terminal-state race", async () => {
+  it("returns terminal truth when the fence loses a completion race", async () => {
     const terminal = {
       analyzedAt: new Date("2026-09-01T15:01:10.000Z"),
       endedAt: new Date("2026-09-01T15:01:00.000Z"),
@@ -244,7 +195,6 @@ describe("hosted phone-call control", () => {
         status: "calling" as const,
       })
       .mockResolvedValueOnce(terminal);
-    const stopIfActive = vi.fn(async () => "stopped" as const);
 
     await expect(stopHostedPhoneCall({
       memberId: "member_stop_owner",
@@ -255,13 +205,11 @@ describe("hosted phone-call control", () => {
           updateMany: vi.fn(async () => ({ count: 0 })),
         },
       },
-      runtime: { stopIfActive },
       signal: new AbortController().signal,
     })).resolves.toEqual({
       phoneCallId: terminal.id,
       state: "already_terminal",
       status: "completed",
     });
-    expect(stopIfActive).not.toHaveBeenCalled();
   });
 });

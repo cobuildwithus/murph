@@ -25,6 +25,7 @@ const HOSTED_PHONE_CALL_FIELD_CLASSIFICATION = {
   endedAt: operational("Provider-call lifecycle timestamp; contains no call content."),
   id: operational("Opaque Murph row identity used for authority and AAD."),
   memberId: operational("Opaque member ownership key used for authority and AAD."),
+  originDirectChannel: operational("Bounded authenticated direct-channel routing discriminator."),
   originSessionId: operational("Opaque initiating resident-session identity used for exact result binding."),
   provider: operational("Bounded provider discriminator."),
   providerCallId: operational("Opaque provider correlation identity."),
@@ -77,6 +78,22 @@ describe("HostedPhoneCall private-storage classification", () => {
     expect(migration).toContain("ALTER COLUMN \"brief_json\" DROP NOT NULL");
     expect(migration).not.toMatch(/DROP COLUMN/iu);
     expect(migration).not.toMatch(/SET NOT NULL/iu);
+  });
+
+  it("adds origin routing as nullable metadata for mixed-version rollout", () => {
+    const migration = readFileSync(
+      new URL(
+        "../prisma/migrations/20260815020000_hosted_phone_call_origin_direct_channel/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
+
+    expect(migration).toContain(
+      "ADD COLUMN \"origin_direct_channel\" TEXT",
+    );
+    expect(migration).not.toMatch(/NOT NULL/iu);
+    expect(migration).not.toMatch(/DROP /iu);
   });
 });
 

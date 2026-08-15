@@ -8,6 +8,7 @@ import {
   isHostedPhoneCallReadyForProviderReconciliation,
 } from "./authority";
 import {
+  finalizeHostedPhoneCallStopSettlement,
   finalizePreparedRetellCallResult,
 } from "./result";
 import { createRetellPhoneCallRuntime } from "./retell-runtime";
@@ -61,6 +62,7 @@ export interface HostedPhoneCallReconciliationStore {
 
 export async function processHostedPhoneCallRecoveryById(input: {
   finalizeResult?: typeof finalizePreparedRetellCallResult;
+  finalizeStopSettlement?: typeof finalizeHostedPhoneCallStopSettlement;
   phoneCallId: string;
   prisma?: HostedPhoneCallReconciliationStore;
   runtime?: PhoneCallRuntime;
@@ -69,6 +71,8 @@ export async function processHostedPhoneCallRecoveryById(input: {
   const store = input.prisma ?? resolveHostedPhoneCallReconciliationStore();
   const runtime = input.runtime ?? createRetellPhoneCallRuntime();
   const finalizeResult = input.finalizeResult ?? finalizePreparedRetellCallResult;
+  const finalizeStopSettlement = input.finalizeStopSettlement
+    ?? finalizeHostedPhoneCallStopSettlement;
   let call = await waitForAbortableOperation(input.signal, () =>
     store.hostedPhoneCall.findUnique({
       where: { id: input.phoneCallId },
@@ -168,6 +172,22 @@ export async function processHostedPhoneCallRecoveryById(input: {
     }
   }
 
+  if (isHostedPhoneCallStopSettled(call)) {
+    try {
+      await waitForAbortableOperation(input.signal, () =>
+        finalizeStopSettlement(call, {
+          abortSignal: input.signal,
+        }));
+    } catch {
+      input.signal.throwIfAborted();
+      const current = await waitForAbortableOperation(input.signal, () =>
+        store.hostedPhoneCall.findUnique({
+          where: { id: input.phoneCallId },
+        }));
+      return current ? "pending" : "missing";
+    }
+  }
+
   const providerCallId = call.providerCallId;
   const resolveTerminalUsage = runtime.resolveTerminalUsage;
   const recordTerminalUsage = store.recordTerminalUsage;
@@ -248,13 +268,13 @@ export async function stopHostedPhoneCallRequestedAuthority(input: {
     input.signal.throwIfAborted();
     return null;
   }
-  await waitForAbortableOperation(input.signal, () =>
+  const updated = await waitForAbortableOperation(input.signal, () =>
     input.store.markRequestedStopEnded({
       id: input.call.id,
       providerCallId: input.call.providerCallId!,
       status: input.call.status === "failed" ? "failed" : "ended",
     }));
-  return disposition;
+  return updated.count > 0 ? disposition : null;
 }
 
 export async function stopHostedPhoneCallCleanupAuthority(input: {
@@ -360,6 +380,14 @@ export function hasPhoneCallAdvancedBeyondStart(call: HostedPhoneCall): boolean 
     || call.providerCallId !== null
     || call.endedAt !== null
     || call.analyzedAt !== null;
+}
+
+export function isHostedPhoneCallStopSettled(call: HostedPhoneCall): boolean {
+  return call.stopRequestedAt !== null
+    && (
+      call.endedAt !== null
+      || (call.status === "failed" && call.providerCallId === null)
+    );
 }
 
 function toHostedPhoneCallStartResponseStatus(

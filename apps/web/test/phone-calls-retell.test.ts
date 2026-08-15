@@ -26,6 +26,7 @@ import {
 import {
   buildPhoneCallResultNotificationInstructions,
   buildPhoneCallResultNotificationWake,
+  buildPhoneCallStopSettlementNotificationWake,
   finalizePreparedRetellCallResult,
   handleRetellCallAnalyzed,
   handleRetellCallEnded,
@@ -903,6 +904,45 @@ describe("Retell phone-call result handling", () => {
     );
     expect(wake.notification.instructions).not.toContain(
       "you may skip sending a message",
+    );
+  });
+
+  it("requires an idempotent confirmation after an asynchronous stop settles", () => {
+    const wake = buildPhoneCallStopSettlementNotificationWake({
+      callId: "hpc_stop_settled",
+      destination: {
+        conversationShape: "direct-member",
+        externalThreadRouteAuthority: null,
+        route: {
+          actorId: null,
+          channel: "telegram",
+          delivery: {
+            kind: "thread",
+            target: "telegram-direct-chat",
+          },
+          identityId: null,
+          threadId: "telegram-direct-thread",
+          threadIsDirect: true,
+        },
+      },
+      memberId: "member_123",
+      providerCallExisted: true,
+    });
+
+    expect(wake.notification.responsePolicy).toEqual({ kind: "require_send" });
+    expect(wake.notification.deliveryDedupeToken).toBe(
+      "phone-call-result:hpc_stop_settled:stop-settled",
+    );
+    expect(wake.notification.deliveryIdempotencyKey).toBe(
+      "phone-call-result:hpc_stop_settled:stop-settled",
+    );
+    expect(wake.notification.route.channel).toBe("telegram");
+    expect(wake.notification.instructions).toContain("no longer active");
+    expect(wake.notification.instructions).toContain(
+      "do not claim what the callee heard or whether the call goal completed",
+    );
+    expect(wake.notification.instructions).toContain(
+      "direct channel that requested the call",
     );
   });
 
@@ -2036,6 +2076,7 @@ function buildHostedPhoneCall(overrides: Partial<HostedPhoneCall> = {}): HostedP
     endedAt: null,
     id: "hpc_test",
     memberId: "member_123",
+    originDirectChannel: null,
     originSessionId: null,
     provider: "retell",
     providerCallId: "retell_call_123",

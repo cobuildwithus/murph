@@ -8,7 +8,11 @@ import {
   type HostedPhoneCallReconciliationWorkflowInput,
 } from "./reconciliation-workflow-types";
 
-const HOSTED_PHONE_CALL_RECONCILIATION_STEP_TIMEOUT_MS = 25_000;
+// stopIfActive may perform two serial Retell requests at 15 seconds each, and
+// terminal usage can require one final 15-second retrieve. Leave 30 seconds for
+// bounded database work, notification routing/encryption, and response
+// settlement owned by this same workflow.
+export const HOSTED_PHONE_CALL_RECONCILIATION_STEP_TIMEOUT_MS = 75_000;
 
 export async function reconcileHostedPhoneCallStep(
   input: HostedPhoneCallReconciliationWorkflowInput,

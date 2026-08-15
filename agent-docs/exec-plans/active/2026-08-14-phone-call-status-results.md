@@ -34,10 +34,10 @@ Updated: 2026-08-14
 
 ## Scope
 
-- In scope: phone-call read and stop contracts, one nullable stop-intent field on
-  the existing call owner, member-bound Web control routes, runtime port/tool
-  exposure, terminal-result notification policy and ordering, focused tests,
-  and current owner documentation.
+- In scope: phone-call read and stop contracts, nullable stop-intent and
+  authenticated direct-origin fields on the existing call owner, member-bound
+  Web control routes, runtime port/tool exposure, terminal-result notification
+  policy and ordering, focused tests, and current owner documentation.
 - Out of scope: a new scheduler or queue, a new database model, raw provider
   transcript access, account-level support UI, and automatic repeat calls.
 
@@ -66,7 +66,9 @@ Updated: 2026-08-14
    existing foreground and checkpoint fences.
 4. Risk: deploy skew makes a new runtime operation fail unexpectedly.
    Mitigation: deploy the additive database migration, then Web, then
-   Cloudflare/runner capability exposure, and document that rollout order.
+   Cloudflare/runner capability exposure. Once a stop fence is written, keep
+   compatible Web as the rollback floor until capability and warm producers are
+   drained and all unsettled fences are consumed.
 
 ## Tasks
 
@@ -99,6 +101,18 @@ Updated: 2026-08-14
   most three distinct KMS unwraps with peak concurrency three.
 - Use the existing system-mailbox notification and deterministic delivery key
   as the result owner rather than inventing a second result channel.
+- Derive direct Linq/Telegram origin only from authenticated runtime turn
+  context, persist the bounded discriminator, and resolve that same channel for
+  normal results and stop settlements. Keep legacy null fallback and fail a
+  revoked present route retryably rather than switching channels.
+- Make reconciliation the only Retell stop owner. Foreground control writes the
+  compare-and-set stop fence, best-effort wakes reconciliation, and returns
+  `start_pending`. The 75-second workflow step budget covers Retell's two serial
+  15-second stop requests, one terminal-usage retrieve, and durable terminal and
+  notification settlement.
+- Publish a required stop-settlement notification under a stable call-id key
+  after provider termination is confirmed or provider absence is durable.
+  Mailbox/wake failures keep recovery pending, and replay reuses the same item.
 
 ## Verification
 
@@ -125,9 +139,24 @@ Updated: 2026-08-14
   `followUp` field spelling. The parent accepted and corrected all four. Its
   returned test-only bridge patch was inspected, applied, and extended with
   fail-closed cases; no ReviewGPT artifact is tracked.
-- Remaining gates: commit and push the corrected head, exact-head CI, final
-  ReviewGPT `ROUND_OUTCOME: PASS`, corrected-head product-experience
-  revalidation, clean merge-tree proof, and plan closure.
+- Final ReviewGPT round 2 found four actionable issues. The parent accepted all
+  four: the stop owner could exceed its 25-second step budget and competed with
+  foreground Retell work; rollback guidance treated persisted stop fences as
+  harmless; direct results could select the member's default channel instead of
+  the initiating channel; and a provider-less or delayed stop settlement did
+  not notify the requester. The remediation makes workflow reconciliation the
+  sole provider-stop owner with a 75-second budget, documents the hard rollback
+  floor and drain, persists authenticated direct origin, and emits required
+  deduped stop-settlement notifications.
+- Remediation proof currently passes 161 focused Web tests, 34 assistant-engine
+  tests, 15 hosted-execution tests, 6 Cloudflare bridge tests, and affected
+  package/Web/Cloudflare typechecks. The Web suite includes a fake-timer
+  production Retell adapter proof with three serial 14-second requests, a
+  durable terminal write, required settlement finalization, and terminal usage
+  recording before the 75-second step deadline.
+- Remaining gates: lint/privacy inspection, commit and push the remediation
+  head, exact-head CI, final ReviewGPT `ROUND_OUTCOME: PASS`, corrected-head
+  product-experience revalidation, clean merge-tree proof, and plan closure.
 - Direct proof: a synthetic call result arrives while one hosted invocation is
   active and newer conversation input is waiting; Murph receives the result in
   the next turn and a later status query returns the same terminal truth.

@@ -58,6 +58,7 @@ vi.mock("@/src/lib/hosted-crypto/domain-root-store", () => ({
 }));
 
 import {
+  finalizeHostedPhoneCallStopSettlement,
   handleRetellCallAnalyzed,
 } from "@/src/lib/phone-calls/result";
 
@@ -216,6 +217,122 @@ describe("default phone-call result notification store", () => {
       retainFailureInScopedCache: true,
       userId: MEMBER_ID,
     });
+    expect(mocks.requireHostedAssistantNotificationDestination).toHaveBeenCalledWith({
+      directChannel: "telegram",
+      memberId: MEMBER_ID,
+      prisma,
+    });
+  });
+
+  it("routes a stored Linq-origin result back through Linq", async () => {
+    const prisma = buildPrisma({ originDirectChannel: "linq" });
+    mocks.getPrisma.mockReturnValue(prisma);
+    mocks.readHostedMailboxItemByDedupeKey.mockResolvedValue(null);
+    mocks.readHostedPhoneCallResult.mockResolvedValue(RESULT);
+    mocks.readHostedPhoneCallBrief.mockResolvedValue(BRIEF);
+    mocks.requireHostedAssistantNotificationDestination.mockResolvedValue(
+      DESTINATION,
+    );
+    mocks.unwrapHostedDomainRootForWeb.mockResolvedValue({
+      envelope: { rootKeyId: "root_linq_result" },
+      rootKey: new Uint8Array([1, 2, 3, 4]),
+    });
+    mocks.appendHostedMailboxEnvelopeTx.mockResolvedValue({
+      item: { id: "mailbox_linq_result", userId: MEMBER_ID },
+    });
+
+    await expect(handleRetellCallAnalyzed({
+      call: buildAnalyzedRetellCallPayload(),
+    })).resolves.toEqual({
+      notificationMailboxItemId: "mailbox_linq_result",
+      notificationUserId: MEMBER_ID,
+    });
+
+    expect(mocks.requireHostedAssistantNotificationDestination).toHaveBeenCalledWith({
+      directChannel: "linq",
+      memberId: MEMBER_ID,
+      prisma,
+    });
+  });
+
+  it("keeps a revoked originating route retryable instead of switching channels", async () => {
+    const prisma = buildPrisma({ originDirectChannel: "telegram" });
+    const routeError = Object.assign(new Error("origin route revoked"), {
+      retryable: true,
+    });
+    mocks.getPrisma.mockReturnValue(prisma);
+    mocks.readHostedMailboxItemByDedupeKey.mockResolvedValue(null);
+    mocks.readHostedPhoneCallResult.mockResolvedValue(RESULT);
+    mocks.readHostedPhoneCallBrief.mockResolvedValue(BRIEF);
+    mocks.requireHostedAssistantNotificationDestination.mockRejectedValue(
+      routeError,
+    );
+
+    await expect(handleRetellCallAnalyzed({
+      call: buildAnalyzedRetellCallPayload(),
+    })).rejects.toBe(routeError);
+
+    expect(mocks.requireHostedAssistantNotificationDestination).toHaveBeenCalledWith({
+      directChannel: "telegram",
+      memberId: MEMBER_ID,
+      prisma,
+    });
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+    expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+    expect(prisma.hostedPhoneCall.findUnique).toHaveBeenCalled();
+  });
+
+  it("dedupes the required stop-settlement mailbox item across workflow replay", async () => {
+    const stoppedAt = new Date("2026-08-09T00:02:00.000Z");
+    const call: HostedPhoneCall = {
+      ...buildStoredAnalyzedCall(),
+      analyzedAt: null,
+      endedAt: stoppedAt,
+      resultEncrypted: null,
+      status: "ended",
+      stopRequestedAt: new Date("2026-08-09T00:01:00.000Z"),
+      updatedAt: stoppedAt,
+    };
+    const prisma = buildPrisma({ originDirectChannel: "telegram" });
+    const signalRuntime = vi.fn(async () => ({
+      signalAccepted: true as const,
+      workflowId: `hosted-user-runtime:${MEMBER_ID}`,
+    }));
+    mocks.getPrisma.mockReturnValue(prisma);
+    mocks.readHostedMailboxItemByDedupeKey
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({
+        id: "mailbox_stop_settled",
+        userId: MEMBER_ID,
+      });
+    mocks.requireHostedAssistantNotificationDestination.mockResolvedValue(
+      DESTINATION,
+    );
+    mocks.unwrapHostedDomainRootForWeb.mockResolvedValue({
+      envelope: { rootKeyId: "root_stop_settled" },
+      rootKey: new Uint8Array([1, 2, 3, 4]),
+    });
+    mocks.appendHostedMailboxEnvelopeTx.mockResolvedValue({
+      item: { id: "mailbox_stop_settled", userId: MEMBER_ID },
+    });
+
+    await finalizeHostedPhoneCallStopSettlement(call, { signalRuntime });
+    await finalizeHostedPhoneCallStopSettlement(call, { signalRuntime });
+
+    const stopDedupeKey =
+      `assistant.notification.requested:phone-call-result:${CALL_ID}:stop-settled`;
+    expect(mocks.readHostedMailboxItemByDedupeKey).toHaveBeenNthCalledWith(1, {
+      dedupeKey: stopDedupeKey,
+      prisma,
+      userId: MEMBER_ID,
+    });
+    expect(mocks.readHostedMailboxItemByDedupeKey).toHaveBeenNthCalledWith(2, {
+      dedupeKey: stopDedupeKey,
+      prisma,
+      userId: MEMBER_ID,
+    });
+    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledOnce();
+    expect(signalRuntime).toHaveBeenCalledTimes(2);
   });
 
   it("returns the canonical mailbox item without opening a transaction", async () => {
@@ -249,8 +366,9 @@ describe("default phone-call result notification store", () => {
 
 function buildPrisma(input: {
   onTransaction?: (callback: (tx: unknown) => Promise<unknown>) => Promise<unknown>;
+  originDirectChannel?: "linq" | "telegram" | null;
 } = {}) {
-  const call = buildStoredAnalyzedCall();
+  const call = buildStoredAnalyzedCall(input.originDirectChannel ?? "telegram");
   return {
     $transaction: vi.fn(async (callback: (tx: unknown) => Promise<unknown>) => {
       if (input.onTransaction) {
@@ -267,7 +385,9 @@ function buildPrisma(input: {
   };
 }
 
-function buildStoredAnalyzedCall(): HostedPhoneCall {
+function buildStoredAnalyzedCall(
+  originDirectChannel: "linq" | "telegram" | null = "telegram",
+): HostedPhoneCall {
   const now = new Date("2026-08-09T00:00:00.000Z");
   return {
     analyzedAt: now,
@@ -277,6 +397,7 @@ function buildStoredAnalyzedCall(): HostedPhoneCall {
     endedAt: now,
     id: CALL_ID,
     memberId: MEMBER_ID,
+    originDirectChannel,
     originSessionId: "session_result_notification_store",
     provider: "retell",
     providerCallId: PROVIDER_CALL_ID,

@@ -340,6 +340,7 @@ function buildHostedPhoneCall(overrides: Partial<HostedPhoneCall> = {}): HostedP
     endedAt: null,
     id: "hpc_private_test",
     memberId: "member_private_test",
+    originDirectChannel: null,
     originSessionId: "session_phone_call",
     provider: "retell",
     providerCallId: null,

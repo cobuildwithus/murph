@@ -19,6 +19,7 @@ import {
 } from "../src/assistant-codex/dynamic-tools.js";
 import {
   resolveAssistantHostedScheduledInvocationScope,
+  resolveAssistantHostedPhoneCallOriginDirectChannel,
   resolveAssistantHostedScheduledPhoneCallScope,
   type AssistantHostedToolContext,
   type AssistantHostedScheduledPhoneCallScope,
@@ -182,6 +183,7 @@ describe("assistant phone calls", () => {
       expect(scope).toEqual({
         automationId: "automation-scheduled-call",
         occurrenceAt: "2026-08-05T18:00:00.000Z",
+        originDirectChannel: "linq",
         originSessionId: "session-scheduled-call",
       });
     }
@@ -218,6 +220,23 @@ describe("assistant phone calls", () => {
       originSessionId: "session-scheduled-tools",
     });
     expect(emailPhone).toBeNull();
+  });
+
+  it.each([
+    ["linq", "direct", "linq"],
+    ["telegram", "direct", "telegram"],
+    ["email", "direct", null],
+    ["linq", "group", null],
+    ["telegram", "unverified-external", null],
+  ] as const)("derives bounded phone-call result routing for %s %s input", (
+    channel,
+    conversationScope,
+    expected,
+  ) => {
+    expect(resolveAssistantHostedPhoneCallOriginDirectChannel({
+      channel,
+      conversationScope,
+    })).toBe(expected);
   });
 
   it("keys calls by accepted input and the exact bounded brief", () => {
@@ -383,6 +402,7 @@ describe("assistant phone calls", () => {
     const start = vi.fn(async (input) => {
       expect(input).toEqual({
         brief: BASE_BRIEF,
+        originDirectChannel: "linq",
         originSessionId: "session_phone_call",
         requestKey: expectedRequestKey,
       });
@@ -406,6 +426,7 @@ describe("assistant phone calls", () => {
         currentUserActionScope: () => ({
           ...phoneCallScope,
           conversationScope: "direct",
+          originDirectChannel: "linq",
           originSessionId: "session_phone_call",
         }),
         phoneCalls: { start },
@@ -422,6 +443,40 @@ describe("assistant phone calls", () => {
     expect(result.rpcResult.contentItems[0]?.text).toContain("phone call accepted or placed: hpc_123");
     expect(result.rpcResult.contentItems[0]?.text).toContain(
       "When the call finishes, Murph reports the result back in this conversation; you may tell them you will follow up once you hear back.",
+    );
+  });
+
+  it("fails a direct start before transport when no supported origin channel is authenticated", async () => {
+    const start = vi.fn();
+    const request = readMurphDynamicToolRequest(dynamicToolCall({
+      argumentsValue: BASE_BRIEF,
+      tool: MURPH_CREATE_PHONE_CALL_TOOL.name,
+    }));
+    if (!request || request.kind !== "create-phone-call") {
+      throw new Error("Expected create phone call request.");
+    }
+
+    const result = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext: createHostedToolContext({
+        currentUserActionScope: () => ({
+          ...BASE_SCOPE,
+          conversationScope: "direct",
+          originDirectChannel: null,
+          originSessionId: "session_unsupported_direct_channel",
+        }),
+        phoneCalls: { start },
+      }),
+      nextUsageOrdinal: () => 1,
+      progressDelivery: null,
+      request,
+    });
+
+    expect(start).not.toHaveBeenCalled();
+    expect(result.rpcResult.success).toBe(false);
+    expect(result.rpcResult.contentItems[0]?.text).toContain(
+      "authenticated Linq or Telegram direct conversation",
     );
   });
 
@@ -556,7 +611,7 @@ describe("assistant phone calls", () => {
 
     expect(result.rpcResult.success).toBe(false);
     expect(result.rpcResult.contentItems[0]?.text).toContain(
-      "termination is unconfirmed",
+      "termination request is durable but not yet confirmed",
     );
   });
 
@@ -564,6 +619,7 @@ describe("assistant phone calls", () => {
     const scheduledScope: AssistantHostedScheduledPhoneCallScope = {
       automationId: "automation-scheduled-call",
       occurrenceAt: "2026-08-05T18:00:00.000Z",
+      originDirectChannel: "linq",
       originSessionId: "session-scheduled-call",
     };
     const expectedRequestKey = createScheduledPhoneCallRequestKey({
@@ -596,6 +652,7 @@ describe("assistant phone calls", () => {
 
     expect(start).toHaveBeenCalledWith({
       brief: BASE_BRIEF,
+      originDirectChannel: "linq",
       originSessionId: "session-scheduled-call",
       requestKey: expectedRequestKey,
     }, {
@@ -608,6 +665,7 @@ describe("assistant phone calls", () => {
     const scheduledScope: AssistantHostedScheduledPhoneCallScope = {
       automationId: "automation-scheduled-call",
       occurrenceAt: "2026-08-05T18:00:00.000Z",
+      originDirectChannel: "linq",
       originSessionId: "session-scheduled-call-retry",
     };
     const request = readMurphDynamicToolRequest(dynamicToolCall({
@@ -657,6 +715,7 @@ describe("assistant phone calls", () => {
     const scheduledScope: AssistantHostedScheduledPhoneCallScope = {
       automationId: "automation-scheduled-call",
       occurrenceAt: "2026-08-05T18:00:00.000Z",
+      originDirectChannel: "linq",
       originSessionId: "session-scheduled-call-reconciliation-failure",
     };
     const request = readMurphDynamicToolRequest(dynamicToolCall({
@@ -720,6 +779,7 @@ describe("assistant phone calls", () => {
           ...BASE_SCOPE,
           acceptedInputIds: ["manual_phone_call_input"],
           conversationScope: "direct",
+          originDirectChannel: "linq",
           originSessionId: "session_phone_call",
         }),
         phoneCalls: {
@@ -1000,6 +1060,7 @@ describe("assistant phone calls", () => {
           ...BASE_SCOPE,
           acceptedInputIds: ["manual_phone_call_input"],
           conversationScope: "direct",
+          originDirectChannel: "linq",
           originSessionId: "session_phone_call",
         }),
         phoneCalls: {

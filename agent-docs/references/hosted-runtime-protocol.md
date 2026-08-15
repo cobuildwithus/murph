@@ -1986,22 +1986,50 @@ resume state. The authenticated deterministic current-sender private exact
 completion above is the sole conversation-bound exception. A completed phone
 call is delivered as an ordinary `assistant.notification.requested` system-mailbox
 event: Murph composes the result in its own voice and proactively messages the
-member's resolved messaging route, and may skip a non-meaningful call
-(allow-send-or-skip). The result JSON is framed as untrusted provider/callee
-text. At call start Web stores the trusted initiating resident-session id on the
-call row for request-key idempotency only; delivery resolves its target route
-from member state at completion time, so a lost or missing origin session does
-not orphan the result and no pre-provider workspace checkpoint is required.
-Delivery is idempotent on `phone-call-result:${callId}` via the notification
-`deliveryIdempotencyKey`.
+originating direct Linq or Telegram channel, or the existing group thread. Every
+terminal analysis uses `require_send`; failure and not-completed outcomes may
+not be omitted. The result JSON is framed as untrusted provider/callee text. At
+call start the authenticated runtime supplies a bounded direct-channel
+discriminator that Web validates through the current route resolver and stores
+on the call row. Group calls store no direct discriminator and retain their
+thread-container authority. Legacy null rows use the previous member-route
+fallback, while a present but revoked route fails retryably instead of switching
+channels. The initiating resident-session id remains request-key idempotency
+metadata only. Delivery is idempotent on `phone-call-result:${callId}` via the
+notification `deliveryIdempotencyKey`.
+
+`murph.get_phone_call_status` reads at most the three most recent member-owned
+rows with bounded encrypted-result decryption, and `murph.stop_phone_call`
+accepts only one exact member-owned id under current user authority. Foreground
+stop control writes the nullable `stopRequestedAt` fence and wakes recovery but
+does not call Retell. The reconciliation workflow is the provider-stop owner;
+its step budget covers Retell's serial retrieve and stop deadlines plus durable
+settlement work. Once the stop is confirmed, or recovery proves that no provider
+call exists, Web appends a required notification under
+`phone-call-result:${callId}:stop-settled`. Mailbox append or wake failure keeps
+reconciliation retryable, and replay reuses the deterministic mailbox and
+delivery identities.
 
 Because completion reuses the existing notification wake path, phone-call
-results add no new mailbox kind, runtime consumer, or checkpoint boundary, and
-there is no result-path consumer-first rollout. Apply the additive nullable
-`origin_session_id` migration; it feeds only request idempotency, so legacy rows
-without it still deliver. The `create_phone_call` start schema requires
-`originSessionId`, so a runner-first window fails those starts closed at the old
-Web endpoint — deploy Web and the runner together, or keep the window short.
+results add no new mailbox kind, runtime consumer, or checkpoint boundary.
+Apply the additive nullable `origin_direct_channel` and `stop_requested_at`
+migrations first, then deploy the Web reader/reconciliation/notification owner,
+then expose the updated runner tools with an immediate runner rollout. A new
+runner sends `originDirectChannel`, which an old strict Web endpoint rejects, so
+runner-first is fail-closed but unavailable.
+
+The first compatible Web deployment becomes a hard rollback floor when any
+non-null stop fence is written: older Web cannot consume that durable intent or
+publish its settlement. To roll below that floor, first disable phone-call
+start, status, and stop capability exposure, recycle or drain warm runners, and
+keep compatible Web plus reconciliation running until the database proves zero
+unsettled rows with `stop_requested_at IS NOT NULL` and neither an end timestamp
+nor a provider-less failed state. Every settled fence must also have its stable
+stop-settlement mailbox item before the compatible workflow is drained. For a
+non-null origin channel, drain active calls and prove the deterministic result
+mailbox item exists for every analyzed call so old Web cannot reroute a later
+result. Only then may Web roll back; leave both nullable columns in place.
+Prefer a forward fix after either floor is crossed.
 
 Approval decisions always append the generation-scoped reconciliation wake in
 the same transaction as the decision. Browser returns use a bare conversation

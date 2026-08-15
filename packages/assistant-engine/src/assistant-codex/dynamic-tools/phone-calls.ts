@@ -78,7 +78,7 @@ export const MURPH_STOP_PHONE_CALL_TOOL = {
   description: [
     'Stop one exact phone call only when the user explicitly asks to terminate it.',
     'Pass the exact phone_call_id returned by create_phone_call or get_phone_call_status. The server binds the call to the authenticated member and treats an already-terminal call idempotently.',
-    'A start_pending result means provider authority is not known yet, so do not claim the call stopped.',
+    'A start_pending result means the termination request is durable but not yet confirmed. Do not claim the call stopped; Murph will receive the resolution asynchronously and can inspect status meanwhile.',
   ].join(' '),
   inputSchema: z.toJSONSchema(phoneCallStopArgumentsSchema, { io: 'input' }),
 } as const

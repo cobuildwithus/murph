@@ -1,4 +1,5 @@
 import {
+  HOSTED_PHONE_CALLS_PATH,
   HOSTED_PHONE_CALL_START_TRANSPORT_TIMEOUT_MS,
   HOSTED_PHONE_CALL_STATUS_PATH,
   HOSTED_PHONE_CALL_STOP_PATH,
@@ -57,6 +58,51 @@ describe("hosted Web phone-call port", () => {
       sensitiveResponseBody: { maxBytes: 32 * 1024 },
       signal,
       timeoutMs: 5_000,
+      transport: { mode: "proxy" },
+    });
+  });
+
+  it("forwards the authenticated direct-channel discriminator on start", async () => {
+    const signal = new AbortController().signal;
+    const request = {
+      brief: {
+        allowTransferToUser: false,
+        goal: "Confirm office hours.",
+        instructions: [],
+        shareableFacts: {},
+        successCriteria: "The office states today's hours.",
+        timeZone: "America/New_York",
+        to: {
+          label: "the office",
+          phoneNumber: "+15550102020",
+        },
+      },
+      originDirectChannel: "telegram" as const,
+      originSessionId: "session_phone_call_route",
+      requestKey: "request_phone_call_route",
+    };
+    const response = {
+      phoneCallId: "hpc_start_route",
+      status: "calling" as const,
+    };
+    mocks.fetchHostedWebControlPlaneJson.mockResolvedValueOnce(response);
+    const port = createHostedWebPhoneCallPort({
+      boundUserId: "member_phone_calls",
+      fetchImpl: fetch,
+      timeoutMs: 5_000,
+      transport: { mode: "proxy" },
+    });
+
+    await expect(port.start?.(request, { signal })).resolves.toEqual(response);
+    expect(mocks.fetchHostedWebControlPlaneJson).toHaveBeenCalledWith({
+      body: request,
+      boundUserId: "member_phone_calls",
+      description: "Hosted phone call",
+      fetchImpl: fetch,
+      method: "POST",
+      path: HOSTED_PHONE_CALLS_PATH,
+      signal,
+      timeoutMs: HOSTED_PHONE_CALL_START_TRANSPORT_TIMEOUT_MS,
       transport: { mode: "proxy" },
     });
   });

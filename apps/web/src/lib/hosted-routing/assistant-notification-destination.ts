@@ -111,6 +111,7 @@ export async function resolveHostedAssistantNotificationDestination(input: {
 }
 
 export async function requireHostedAssistantNotificationDestination(input: {
+  directChannel?: "linq" | "telegram";
   memberId: string;
   prisma?: HostedOnboardingReadClient;
   signal?: AbortSignal;

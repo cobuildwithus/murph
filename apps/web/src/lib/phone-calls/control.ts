@@ -7,11 +7,8 @@ import type {
 } from "@murphai/hosted-execution/phone-calls";
 
 import { waitForAbortableOperation } from "../hosted-onboarding/abortable-settlement";
-import { hostedOnboardingError } from "../hosted-onboarding/errors";
 import { getPrisma } from "../prisma";
 import { startHostedPhoneCallReconciliationWorkflow } from "./reconciliation-workflow-start";
-import { createRetellPhoneCallRuntime } from "./retell-runtime";
-import type { PhoneCallRuntime } from "./types";
 
 type HostedPhoneCallControlRecord = Pick<
   HostedPhoneCall,
@@ -35,8 +32,6 @@ interface HostedPhoneCallControlStore {
     }): Promise<HostedPhoneCallControlRecord | null>;
     updateMany(input: {
       data: {
-        endedAt?: Date;
-        status?: HostedPhoneCallStatus;
         stopRequestedAt?: Date;
       };
       where: {
@@ -44,10 +39,8 @@ interface HostedPhoneCallControlStore {
         endedAt?: null;
         id: string;
         memberId: string;
-        provider?: "retell";
-        providerCallId?: string;
         status?: { in: HostedPhoneCallStatus[] };
-        stopRequestedAt?: { not: null };
+        stopRequestedAt?: null;
       };
     }): Promise<{ count: number }>;
   };
@@ -73,11 +66,9 @@ export async function stopHostedPhoneCall(input: {
   phoneCallId: string;
   prisma?: HostedPhoneCallControlStore;
   reconciliationWorkflowStarter?: HostedPhoneCallReconciliationWorkflowStarter;
-  runtime?: Pick<PhoneCallRuntime, "stopIfActive">;
   signal: AbortSignal;
 }): Promise<HostedPhoneCallStopResponse> {
   const store = input.prisma ?? resolveHostedPhoneCallControlStore();
-  const runtime = input.runtime ?? createRetellPhoneCallRuntime();
   const call = await readOwnedPhoneCall({
     memberId: input.memberId,
     phoneCallId: input.phoneCallId,
@@ -94,10 +85,18 @@ export async function stopHostedPhoneCall(input: {
   if (isHostedPhoneCallTerminalForStop(call)) {
     return toAlreadyTerminalResponse(call);
   }
+  if (call.stopRequestedAt) {
+    await wakeHostedPhoneCallStopReconciliation({
+      phoneCallId: call.id,
+      reconciliationWorkflowStarter: input.reconciliationWorkflowStarter,
+      signal: input.signal,
+    });
+    return toStopPendingResponse(call);
+  }
   const fenced = await waitForAbortableOperation(input.signal, () =>
     store.hostedPhoneCall.updateMany({
       data: {
-        stopRequestedAt: call.stopRequestedAt ?? new Date(),
+        stopRequestedAt: new Date(),
       },
       where: {
         analyzedAt: null,
@@ -107,6 +106,7 @@ export async function stopHostedPhoneCall(input: {
         status: {
           in: ["starting", "calling", "ended", "failed"],
         },
+        stopRequestedAt: null,
       },
     })
   );
@@ -126,97 +126,35 @@ export async function stopHostedPhoneCall(input: {
     }
     return isHostedPhoneCallTerminalForStop(current)
       ? toAlreadyTerminalResponse(current)
-      : {
-          phoneCallId: current.id,
-          state: "start_pending",
-          status: current.status,
-        };
+      : toStopPendingResponse(current);
   }
+  await wakeHostedPhoneCallStopReconciliation({
+    phoneCallId: call.id,
+    reconciliationWorkflowStarter: input.reconciliationWorkflowStarter,
+    signal: input.signal,
+  });
+  // The existing durable reconciliation workflow is the sole provider-stop
+  // owner. Foreground control records the member's intent and returns without
+  // spending a second, competing Retell deadline.
+  return toStopPendingResponse(call);
+}
+
+async function wakeHostedPhoneCallStopReconciliation(input: {
+  phoneCallId: string;
+  reconciliationWorkflowStarter?: HostedPhoneCallReconciliationWorkflowStarter;
+  signal: AbortSignal;
+}): Promise<void> {
   try {
     await (input.reconciliationWorkflowStarter
       ?? startHostedPhoneCallReconciliationWorkflow)(
-        { phoneCallId: call.id },
+        { phoneCallId: input.phoneCallId },
         { signal: input.signal },
       );
   } catch {
     input.signal.throwIfAborted();
-    // The durable stop fence remains for the already-armed start workflow or
-    // an exact retry even when this best-effort wake cannot be confirmed.
+    // The durable stop fence remains available to an exact retry even when
+    // this best-effort workflow wake cannot be confirmed.
   }
-  if (!call.providerCallId) {
-    return {
-      phoneCallId: call.id,
-      state: "start_pending",
-      status: call.status,
-    };
-  }
-
-  let disposition: Awaited<ReturnType<PhoneCallRuntime["stopIfActive"]>>;
-  try {
-    disposition = await waitForAbortableOperation(input.signal, () =>
-      runtime.stopIfActive(call.providerCallId!, {
-        signal: input.signal,
-      })
-    );
-  } catch {
-    input.signal.throwIfAborted();
-    throw hostedOnboardingError({
-      code: "HOSTED_PHONE_CALL_STOP_RETRY_REQUIRED",
-      httpStatus: 503,
-      message: "Phone-call termination could not be confirmed.",
-      retryable: true,
-    });
-  }
-
-  const stoppedStatus = call.status === "failed" ? "failed" : "ended";
-  const updated = await waitForAbortableOperation(input.signal, () =>
-    store.hostedPhoneCall.updateMany({
-      data: {
-        endedAt: new Date(),
-        status: stoppedStatus,
-      },
-      where: {
-        analyzedAt: null,
-        endedAt: null,
-        id: call.id,
-        memberId: input.memberId,
-        provider: "retell",
-        providerCallId: call.providerCallId!,
-        status: {
-          in: ["starting", "calling", "ended", "failed"],
-        },
-        stopRequestedAt: { not: null },
-      },
-    })
-  );
-  if (updated.count > 0) {
-    return {
-      phoneCallId: call.id,
-      state: disposition,
-      status: stoppedStatus,
-    };
-  }
-
-  const current = await readOwnedPhoneCall({
-    memberId: input.memberId,
-    phoneCallId: input.phoneCallId,
-    signal: input.signal,
-    store,
-  });
-  if (!current) {
-    return {
-      phoneCallId: input.phoneCallId,
-      state: "not_found",
-      status: null,
-    };
-  }
-  return isHostedPhoneCallTerminalForStop(current)
-    ? toAlreadyTerminalResponse(current)
-    : {
-        phoneCallId: current.id,
-        state: "start_pending",
-        status: current.status,
-      };
 }
 
 async function readOwnedPhoneCall(input: {
@@ -252,6 +190,16 @@ function toAlreadyTerminalResponse(
   return {
     phoneCallId: call.id,
     state: "already_terminal",
+    status: call.status,
+  };
+}
+
+function toStopPendingResponse(
+  call: HostedPhoneCallControlRecord,
+): HostedPhoneCallStopResponse {
+  return {
+    phoneCallId: call.id,
+    state: "start_pending",
     status: call.status,
   };
 }

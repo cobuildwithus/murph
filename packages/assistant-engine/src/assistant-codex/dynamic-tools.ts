@@ -49,6 +49,7 @@ import {
 } from '@murphai/hosted-execution/assistant-model'
 import type {
   HostedPhoneCallBrief,
+  HostedPhoneCallOriginDirectChannel,
 } from '@murphai/hosted-execution/phone-calls'
 import {
   HOSTED_GROUP_MEMBER_PLAN_DISPLAY_NAME,
@@ -2636,6 +2637,7 @@ export async function executeMurphDynamicToolRequest(input: {
         : hostedToolContext.currentScheduledPhoneCallScope?.() ?? null
       const phoneCallAuthority = userActionScope
         ? {
+            originDirectChannel: userActionScope.originDirectChannel ?? null,
             originSessionId: userActionScope.originSessionId,
             requestKey: (brief: HostedPhoneCallBrief) =>
               createPhoneCallRequestKey({
@@ -2645,6 +2647,7 @@ export async function executeMurphDynamicToolRequest(input: {
           }
         : scheduledScope
           ? {
+              originDirectChannel: scheduledScope.originDirectChannel ?? null,
               originSessionId: scheduledScope.originSessionId,
               requestKey: (_brief: HostedPhoneCallBrief) =>
                 createScheduledPhoneCallRequestKey({
@@ -2662,6 +2665,15 @@ export async function executeMurphDynamicToolRequest(input: {
       try {
         const conversationScope =
           userActionScope?.conversationScope ?? 'direct'
+        if (
+          conversationScope === 'direct'
+          && phoneCallAuthority.originDirectChannel === null
+        ) {
+          return toolTextResult(
+            false,
+            'phone calling requires an authenticated Linq or Telegram direct conversation so the result can return to the requester',
+          )
+        }
         const brief = normalizePhoneCallBriefForConversationScope({
           brief: input.request.brief,
           conversationScope,
@@ -2697,6 +2709,12 @@ export async function executeMurphDynamicToolRequest(input: {
         const result = await phoneCalls.start({
           brief,
           ...(groupRequester ? { groupRequester } : {}),
+          ...(phoneCallAuthority.originDirectChannel
+            ? {
+                originDirectChannel:
+                  phoneCallAuthority.originDirectChannel satisfies HostedPhoneCallOriginDirectChannel,
+              }
+            : {}),
           originSessionId: phoneCallAuthority.originSessionId,
           requestKey: phoneCallAuthority.requestKey(brief),
         }, {
@@ -2796,7 +2814,7 @@ export async function executeMurphDynamicToolRequest(input: {
               : result.state === 'already_terminal'
                 ? 'The call was already terminal; do not claim this request stopped an active call.'
                 : result.state === 'start_pending'
-                  ? 'Provider call authority is not known yet, so termination is unconfirmed. Do not claim the call stopped.'
+                  ? 'The termination request is durable but not yet confirmed. Do not claim the call stopped; an asynchronous resolution will follow and status remains inspectable.'
                   : 'No call with that id was found for the authenticated member.',
           }),
         )

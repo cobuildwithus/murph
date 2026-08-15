@@ -8,6 +8,7 @@ import {
   buildHostedExecutionAssistantNotificationRequestedWake,
   hostedPhoneCallResultSchema,
   type HostedPhoneCallBrief,
+  type HostedPhoneCallOriginDirectChannel,
   type HostedPhoneCallResult,
 } from "@murphai/hosted-execution";
 import { getHostedCryptoDomainForLane } from "@murphai/runtime-state";
@@ -295,6 +296,26 @@ export async function finalizePreparedRetellCallResult(
   });
 }
 
+export async function finalizeHostedPhoneCallStopSettlement(
+  call: HostedPhoneCall,
+  options: {
+    abortSignal?: AbortSignal;
+    prisma?: PrismaClient;
+    signalRuntime?: typeof signalHostedMailboxAppendRuntime;
+  } = {},
+): Promise<void> {
+  const prisma = options.prisma ?? getPrisma();
+  const result = await appendPhoneCallStopSettlementNotification({
+    call,
+    prisma,
+  });
+  await (options.signalRuntime ?? signalHostedMailboxAppendRuntime)({
+    abortSignal: options.abortSignal,
+    expectedUserId: result.notificationUserId,
+    mailboxItemId: result.notificationMailboxItemId,
+  });
+}
+
 async function appendRetellCallAnalyzedNotification(input: {
   call: HostedPhoneCall;
   prisma: HostedPhoneCallWebhookStore;
@@ -376,6 +397,7 @@ async function appendPhoneCallResultNotification(input: {
   }
 
   const destination = await requireHostedAssistantNotificationDestination({
+    ...readHostedPhoneCallDirectChannelInput(call),
     memberId: call.memberId,
     prisma: input.prisma,
   });
@@ -393,6 +415,71 @@ async function appendPhoneCallResultNotification(input: {
   // payload cannot be fully sealed beforehand. Warm the ingress root first;
   // the transaction then performs only database work plus local authenticated
   // encryption against the request-scoped cached key.
+  const mailboxRoot = await unwrapHostedDomainRootForWeb({
+    domain: getHostedCryptoDomainForLane("mailbox-payload"),
+    prisma: input.prisma,
+    retainFailureInScopedCache: true,
+    userId: call.memberId,
+  });
+  mailboxRoot.rootKey.fill(0);
+
+  const appended = await input.prisma.$transaction((tx) =>
+    appendHostedMailboxEnvelopeTx({
+      envelope,
+      tx,
+    })
+  );
+  return {
+    notificationMailboxItemId: appended.item.id,
+    notificationUserId: appended.item.userId,
+  };
+}
+
+async function appendPhoneCallStopSettlementNotification(input: {
+  call: HostedPhoneCall;
+  prisma: PrismaClient;
+}): Promise<HostedPhoneCallResultNotificationAppend> {
+  const call = input.call;
+  if (
+    !call.stopRequestedAt
+    || (
+      call.endedAt === null
+      && !(call.status === "failed" && call.providerCallId === null)
+    )
+  ) {
+    throw hostedPhoneCallResultNotificationError(
+      "HOSTED_PHONE_CALL_STOP_SETTLEMENT_REQUIRED",
+      "Hosted phone-call stop notification requires a settled stop intent.",
+    );
+  }
+
+  const notificationEventId = buildPhoneCallStopSettlementNotificationEventId(
+    call.id,
+  );
+  const existing = await readHostedMailboxItemByDedupeKey({
+    dedupeKey: notificationEventId,
+    prisma: input.prisma,
+    userId: call.memberId,
+  });
+  if (existing) {
+    return {
+      notificationMailboxItemId: existing.id,
+      notificationUserId: existing.userId,
+    };
+  }
+
+  const destination = await requireHostedAssistantNotificationDestination({
+    ...readHostedPhoneCallDirectChannelInput(call),
+    memberId: call.memberId,
+    prisma: input.prisma,
+  });
+  const envelope = buildPhoneCallStopSettlementNotificationWake({
+    callId: call.id,
+    destination,
+    memberId: call.memberId,
+    providerCallExisted: call.providerCallId !== null,
+  });
+
   const mailboxRoot = await unwrapHostedDomainRootForWeb({
     domain: getHostedCryptoDomainForLane("mailbox-payload"),
     prisma: input.prisma,
@@ -452,12 +539,80 @@ export function buildPhoneCallResultNotificationWake(input: {
   });
 }
 
+export function buildPhoneCallStopSettlementNotificationWake(input: {
+  callId: string;
+  destination: HostedAssistantNotificationDestination;
+  memberId: string;
+  providerCallExisted: boolean;
+}) {
+  const notificationKey = buildPhoneCallStopSettlementNotificationKey(
+    input.callId,
+  );
+  const isGroup = isHostedThreadContainerNotificationDestination(
+    input.destination,
+  );
+  return buildHostedExecutionAssistantNotificationRequestedWake({
+    eventId: buildPhoneCallStopSettlementNotificationEventId(input.callId),
+    memberId: input.memberId,
+    notification: {
+      deliveryDedupeToken: notificationKey,
+      deliveryDispatchMode: "queue-only",
+      deliveryIdempotencyKey: notificationKey,
+      ...(input.destination.externalThreadRouteAuthority
+        ? {
+            externalThreadRouteAuthority:
+              input.destination.externalThreadRouteAuthority,
+          }
+        : {}),
+      instructions: [
+        "A previously unconfirmed Murph phone-call termination request has now resolved.",
+        input.providerCallExisted
+          ? "The call is no longer active. Always send one concise confirmation; do not claim what the callee heard or whether the call goal completed."
+          : "No provider call was found and the attempt is no longer active. Always send one concise confirmation; do not claim a call connected.",
+        isGroup
+          ? "Send this resolution to the requesting group chat."
+          : "Send this resolution to the user in the direct channel that requested the call.",
+        "Do not make another call, perform follow-up outreach, invoke tools, or stay silent. A separate final call result may arrive later if provider analysis exists.",
+      ].join("\n\n"),
+      responsePolicy: { kind: "require_send" },
+      route: input.destination.route,
+    },
+    occurredAt: new Date().toISOString(),
+  });
+}
+
 function buildPhoneCallResultNotificationKey(callId: string): string {
   return `phone-call-result:${callId}`;
 }
 
 function buildPhoneCallResultNotificationEventId(callId: string): string {
   return `assistant.notification.requested:${buildPhoneCallResultNotificationKey(callId)}`;
+}
+
+function buildPhoneCallStopSettlementNotificationKey(callId: string): string {
+  return `phone-call-result:${callId}:stop-settled`;
+}
+
+function buildPhoneCallStopSettlementNotificationEventId(
+  callId: string,
+): string {
+  return `assistant.notification.requested:${buildPhoneCallStopSettlementNotificationKey(callId)}`;
+}
+
+function readHostedPhoneCallDirectChannelInput(
+  call: HostedPhoneCall,
+): { directChannel?: HostedPhoneCallOriginDirectChannel } {
+  const channel = call.originDirectChannel;
+  if (channel === null) {
+    return {};
+  }
+  if (channel === "linq" || channel === "telegram") {
+    return { directChannel: channel };
+  }
+  throw hostedPhoneCallResultNotificationError(
+    "HOSTED_PHONE_CALL_ORIGIN_CHANNEL_INVALID",
+    "Hosted phone-call origin channel is invalid.",
+  );
 }
 
 function hasStoredHostedPhoneCallResult(call: HostedPhoneCall): boolean {

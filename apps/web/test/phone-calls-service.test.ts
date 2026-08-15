@@ -22,6 +22,10 @@ import {
   reconcileHostedPhoneCallProviderAuthority,
 } from "@/src/lib/phone-calls/reconciliation";
 import {
+  HOSTED_PHONE_CALL_RECONCILIATION_STEP_TIMEOUT_MS,
+} from "@/src/lib/phone-calls/reconciliation-workflow-steps";
+import { createRetellPhoneCallRuntime } from "@/src/lib/phone-calls/retell-runtime";
+import {
   markPhoneCallRuntimeNoActiveEffect,
   type PhoneCallRuntime,
 } from "@/src/lib/phone-calls/types";
@@ -69,6 +73,22 @@ const DIRECT_NOTIFICATION_DESTINATION: HostedAssistantNotificationDestination = 
     },
     identityId: "direct-identity",
     threadId: "direct-thread",
+    threadIsDirect: true,
+  },
+};
+
+const TELEGRAM_NOTIFICATION_DESTINATION: HostedAssistantNotificationDestination = {
+  conversationShape: "direct-member",
+  externalThreadRouteAuthority: null,
+  route: {
+    actorId: null,
+    channel: "telegram",
+    delivery: {
+      kind: "thread",
+      target: "telegram-direct-chat",
+    },
+    identityId: null,
+    threadId: "telegram-direct-thread",
     threadIsDirect: true,
   },
 };
@@ -136,6 +156,7 @@ describe("createHostedPhoneCall", () => {
     expect(store.createCalls[0]!.data).toMatchObject({
       briefEncrypted: expect.stringMatching(/^hsb-test:/u),
       memberId: "member_1",
+      originDirectChannel: null,
       originSessionId: "session_phone_call",
       provider: "retell",
       requestKey: "phone_call_request_1",
@@ -163,6 +184,73 @@ describe("createHostedPhoneCall", () => {
         status: "starting",
       },
     }]);
+  });
+
+  it.each([
+    ["linq", DIRECT_NOTIFICATION_DESTINATION],
+    ["telegram", TELEGRAM_NOTIFICATION_DESTINATION],
+  ] as const)("persists the authenticated %s direct channel for asynchronous results", async (
+    originDirectChannel,
+    destination,
+  ) => {
+    const store = createPhoneCallStore({ created: buildHostedPhoneCall() });
+    const runtime = createPhoneCallRuntime({
+      providerCallId: `retell_${originDirectChannel}`,
+    });
+    const notificationDestinationResolver = vi.fn(async () => destination);
+
+    await createHostedPhoneCallImpl({
+      brief: VALID_BRIEF,
+      memberId: "member_1",
+      notificationDestinationResolver,
+      originDirectChannel,
+      originSessionId: `session_${originDirectChannel}`,
+      prisma: store.prisma,
+      reconciliationWorkflowStarter: async () => ({ runId: "run_route" }),
+      requestKey: `phone_call_${originDirectChannel}`,
+      runtime: runtime.runtime,
+      transferNumberResolver: createTransferNumberResolver(null),
+    });
+
+    expect(notificationDestinationResolver).toHaveBeenCalledWith({
+      directChannel: originDirectChannel,
+      memberId: "member_1",
+      signal: expect.any(AbortSignal),
+    });
+    expect(store.createCalls[0]?.data.originDirectChannel).toBe(
+      originDirectChannel,
+    );
+  });
+
+  it("rejects replay under a different direct channel instead of silently rerouting", async () => {
+    const existing = buildHostedPhoneCall({
+      briefJson: null,
+      id: "hpc_direct_route_collision",
+      originDirectChannel: "telegram",
+      providerCallId: "retell_direct_route_collision",
+      status: "calling",
+    });
+    existing.briefEncrypted = await encryptHostedPhoneCallBrief({
+      callId: existing.id,
+      memberId: existing.memberId,
+      value: VALID_BRIEF,
+    });
+    const store = createPhoneCallStore({ existing });
+    const runtime = createPhoneCallRuntime({ providerCallId: "retell_unused" });
+
+    await expect(createHostedPhoneCallImpl({
+      brief: VALID_BRIEF,
+      memberId: existing.memberId,
+      notificationDestinationResolver: async () => DIRECT_NOTIFICATION_DESTINATION,
+      originDirectChannel: "linq",
+      originSessionId: existing.originSessionId!,
+      prisma: store.prisma,
+      requestKey: existing.requestKey,
+      runtime: runtime.runtime,
+    })).rejects.toThrow("Hosted phone call request key collision.");
+
+    expect(runtime.startCalls).toEqual([]);
+    expect(store.createCalls).toEqual([]);
   });
 
   it.each([
@@ -421,8 +509,10 @@ describe("createHostedPhoneCall", () => {
         state: "found",
       },
     });
+    const finalizeStopSettlement = vi.fn(async () => undefined);
 
     await expect(processHostedPhoneCallRecoveryById({
+      finalizeStopSettlement,
       phoneCallId: existing.id,
       prisma: store.prisma,
       runtime: runtime.runtime,
@@ -437,14 +527,77 @@ describe("createHostedPhoneCall", () => {
       status: "ended",
       stopRequestedAt: existing.stopRequestedAt,
     });
+    expect(finalizeStopSettlement).toHaveBeenCalledOnce();
+    expect(finalizeStopSettlement).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: existing.id,
+        providerCallId: "retell_stop_reconcile",
+        status: "ended",
+      }),
+      { abortSignal: expect.any(AbortSignal) },
+    );
 
     await expect(processHostedPhoneCallRecoveryById({
+      finalizeStopSettlement,
       phoneCallId: existing.id,
       prisma: store.prisma,
       runtime: runtime.runtime,
       signal: new AbortController().signal,
     })).resolves.toBe("complete");
     expect(runtime.stopCalls).toEqual(["retell_stop_reconcile"]);
+    expect(finalizeStopSettlement).toHaveBeenCalledTimes(2);
+  });
+
+  it("retries a no-provider stop settlement until its required notification is durable", async () => {
+    const existing = buildHostedPhoneCall({
+      id: "hpc_stop_no_provider",
+      providerCallId: null,
+      status: "starting",
+      stopRequestedAt: new Date("2026-06-25T00:01:00.000Z"),
+      updatedAt: new Date(0),
+    });
+    const store = createPhoneCallStore({ existing });
+    const runtime = createPhoneCallRuntime({
+      providerCallId: "retell_unused",
+      reconciliationResult: { state: "not_found" },
+    });
+    const finalizeStopSettlement = vi.fn()
+      .mockRejectedValueOnce(new Error("mailbox append unavailable"))
+      .mockResolvedValueOnce(undefined);
+
+    await expect(processHostedPhoneCallRecoveryById({
+      finalizeStopSettlement,
+      phoneCallId: existing.id,
+      prisma: store.prisma,
+      runtime: runtime.runtime,
+      signal: new AbortController().signal,
+    })).resolves.toBe("pending");
+    expect(store.currentCall()).toMatchObject({
+      endedAt: null,
+      providerCallId: null,
+      status: "failed",
+      stopRequestedAt: existing.stopRequestedAt,
+    });
+
+    await expect(processHostedPhoneCallRecoveryById({
+      finalizeStopSettlement,
+      phoneCallId: existing.id,
+      prisma: store.prisma,
+      runtime: runtime.runtime,
+      signal: new AbortController().signal,
+    })).resolves.toBe("complete");
+
+    expect(runtime.resolveCalls).toEqual([existing.id]);
+    expect(runtime.stopCalls).toEqual([]);
+    expect(finalizeStopSettlement).toHaveBeenCalledTimes(2);
+    expect(finalizeStopSettlement).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        id: existing.id,
+        providerCallId: null,
+        status: "failed",
+      }),
+      { abortSignal: expect.any(AbortSignal) },
+    );
   });
 
   it("consumes a stop intent after a successful start whose provider-id write failed", async () => {
@@ -466,6 +619,7 @@ describe("createHostedPhoneCall", () => {
         state: "found",
       },
     });
+    const finalizeStopSettlement = vi.fn(async () => undefined);
 
     await expect(createHostedPhoneCall({
       brief: VALID_BRIEF,
@@ -481,6 +635,7 @@ describe("createHostedPhoneCall", () => {
       updatedAt: new Date(0),
     });
     await expect(processHostedPhoneCallRecoveryById({
+      finalizeStopSettlement,
       phoneCallId: store.currentCall().id,
       prisma: store.prisma,
       runtime: runtime.runtime,
@@ -493,6 +648,7 @@ describe("createHostedPhoneCall", () => {
       providerCallId: "retell_stop_after_write_failure",
       status: "ended",
     });
+    expect(finalizeStopSettlement).toHaveBeenCalledOnce();
   });
 
   it("keeps a requested stop durable until provider termination can be confirmed", async () => {
@@ -512,17 +668,21 @@ describe("createHostedPhoneCall", () => {
       },
       providerCallId: "retell_unused",
     });
+    const finalizeStopSettlement = vi.fn(async () => undefined);
 
     await expect(processHostedPhoneCallRecoveryById({
+      finalizeStopSettlement,
       phoneCallId: existing.id,
       prisma: store.prisma,
       runtime: runtime.runtime,
       signal: new AbortController().signal,
     })).resolves.toBe("pending");
     expect(store.currentCall().endedAt).toBeNull();
+    expect(finalizeStopSettlement).not.toHaveBeenCalled();
 
     stopUnavailable = false;
     await expect(processHostedPhoneCallRecoveryById({
+      finalizeStopSettlement,
       phoneCallId: existing.id,
       prisma: store.prisma,
       runtime: runtime.runtime,
@@ -533,6 +693,93 @@ describe("createHostedPhoneCall", () => {
       endedAt: expect.any(Date),
       status: "ended",
     });
+    expect(finalizeStopSettlement).toHaveBeenCalledOnce();
+  });
+
+  it("lets the sole workflow owner complete near-timeout Retell stop, terminal write, and usage", async () => {
+    vi.useFakeTimers();
+    vi.stubEnv("RETELL_API_KEY", "retell-api-key");
+    const controller = new AbortController();
+    const deadline = setTimeout(
+      () => controller.abort(new Error("workflow step deadline")),
+      HOSTED_PHONE_CALL_RECONCILIATION_STEP_TIMEOUT_MS,
+    );
+    try {
+      const existing = buildHostedPhoneCall({
+        id: "hpc_stop_composed_deadline",
+        providerCallId: "retell_stop_composed_deadline",
+        status: "calling",
+        stopRequestedAt: new Date("2026-06-25T00:01:00.000Z"),
+      });
+      const store = createPhoneCallStore({ existing });
+      let requestCount = 0;
+      const fetchImpl = vi.fn<typeof fetch>(async () => {
+        requestCount += 1;
+        await new Promise<void>((resolve) => setTimeout(resolve, 14_000));
+        if (requestCount === 1) {
+          return new Response(JSON.stringify({
+            call_id: existing.providerCallId,
+            call_status: "ongoing",
+          }), {
+            headers: { "content-type": "application/json" },
+            status: 200,
+          });
+        }
+        if (requestCount === 2) {
+          return new Response(null, { status: 204 });
+        }
+        return new Response(JSON.stringify({
+          call_cost: {
+            combined_cost: 1.5,
+            product_costs: [],
+            total_duration_seconds: 30,
+            total_duration_unit_price: 0.05,
+          },
+          call_id: existing.providerCallId,
+          call_status: "ended",
+          data_storage_setting: "basic_attributes_only",
+          disconnection_reason: "user_hangup",
+          duration_ms: 30_000,
+          end_timestamp: 1_782_386_400_000,
+          start_timestamp: 1_782_386_370_000,
+        }), {
+          headers: { "content-type": "application/json" },
+          status: 200,
+        });
+      });
+      const runtime = createRetellPhoneCallRuntime({ fetchImpl });
+      const finalizeStopSettlement = vi.fn(async () => undefined);
+      const recordTerminalUsage = vi.fn(async () => undefined);
+
+      const recovery = processHostedPhoneCallRecoveryById({
+        finalizeStopSettlement,
+        phoneCallId: existing.id,
+        prisma: {
+          ...store.prisma,
+          recordTerminalUsage,
+        },
+        runtime,
+        signal: controller.signal,
+      });
+      await vi.advanceTimersByTimeAsync(42_000);
+
+      await expect(recovery).resolves.toBe("complete");
+      expect(HOSTED_PHONE_CALL_RECONCILIATION_STEP_TIMEOUT_MS).toBeGreaterThan(
+        45_000,
+      );
+      expect(controller.signal.aborted).toBe(false);
+      expect(fetchImpl).toHaveBeenCalledTimes(3);
+      expect(store.currentCall()).toMatchObject({
+        endedAt: expect.any(Date),
+        status: "ended",
+      });
+      expect(finalizeStopSettlement).toHaveBeenCalledOnce();
+      expect(recordTerminalUsage).toHaveBeenCalledOnce();
+    } finally {
+      clearTimeout(deadline);
+      vi.useRealTimers();
+      vi.unstubAllEnvs();
+    }
   });
 
   it("keeps recovery pending until terminal Retell usage is durably recorded", async () => {
@@ -2053,6 +2300,7 @@ describe("createHostedPhoneCall", () => {
       memberId: "member_1",
       signal: expect.any(AbortSignal),
     });
+    expect(store.createCalls[0]?.data.originDirectChannel).toBeNull();
     expect(groupRequesterActivationAsserter).toHaveBeenCalledTimes(2);
     expect(groupRequesterActivationAsserter).toHaveBeenNthCalledWith(1, {
       groupRequester: GROUP_REQUESTER,
@@ -2503,6 +2751,7 @@ function buildHostedPhoneCall(overrides: Partial<HostedPhoneCall> = {}): HostedP
     endedAt: null,
     id: "hpc_test",
     memberId: "member_1",
+    originDirectChannel: null,
     originSessionId: "session_phone_call",
     provider: "retell",
     providerCallId: null,

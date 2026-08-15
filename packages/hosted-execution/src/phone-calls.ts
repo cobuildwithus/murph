@@ -36,6 +36,11 @@ const hostedPhoneCallBriefFactKeySchema = z
   .max(80)
   .regex(/^[A-Za-z0-9][A-Za-z0-9_.-]*$/u);
 
+export const hostedPhoneCallOriginDirectChannelSchema = z.enum([
+  "linq",
+  "telegram",
+]);
+
 export const hostedPhoneCallBriefSchema = z
   .object({
     allowTransferToUser: z.boolean().default(false),
@@ -78,6 +83,11 @@ export const hostedPhoneCallStartRequestSchema = z
       .min(1)
       .max(HOSTED_PHONE_CALL_INBOUND_MAILBOX_ITEM_IDS_MAX)
       .optional(),
+    // The hosted runtime derives this from authenticated turn context. It is
+    // never model-controlled and lets asynchronous results retain the direct
+    // channel that originated the call. Group destinations keep using their
+    // existing durable thread-container authority instead.
+    originDirectChannel: hostedPhoneCallOriginDirectChannelSchema.optional(),
     originSessionId: z.string().trim().min(1).max(200),
     requestKey: z.string().trim().min(1).max(200),
   })
@@ -174,6 +184,9 @@ export const HOSTED_PHONE_CALL_STOP_PATH =
 export type HostedPhoneCallBrief = z.infer<typeof hostedPhoneCallBriefSchema>;
 export type HostedPhoneCallGroupRequester =
   HostedExecutionAcceptedGroupMessageParticipant;
+export type HostedPhoneCallOriginDirectChannel = z.infer<
+  typeof hostedPhoneCallOriginDirectChannelSchema
+>;
 export type HostedPhoneCallStartRequest = z.infer<
   typeof hostedPhoneCallStartRequestSchema
 >;

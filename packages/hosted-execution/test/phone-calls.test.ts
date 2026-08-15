@@ -84,9 +84,18 @@ describe("hosted phone call contracts", () => {
     });
     expect(hostedPhoneCallStartRequestSchema.parse({
       brief: VALID_BRIEF,
+      originDirectChannel: "telegram",
       originSessionId: "session_direct_phone_call",
       requestKey: "turn-124:tool-1",
-    })).not.toHaveProperty("groupRequester");
+    })).toMatchObject({
+      originDirectChannel: "telegram",
+    });
+    expect(() => hostedPhoneCallStartRequestSchema.parse({
+      brief: VALID_BRIEF,
+      originDirectChannel: "email",
+      originSessionId: "session_direct_phone_call",
+      requestKey: "turn-124:tool-2",
+    })).toThrow();
   });
 
   it("rejects malformed exact group requester evidence", () => {

@@ -16,6 +16,9 @@ import type {
   HostedExecutionAssistantAskOrigin,
 } from '@murphai/hosted-execution/contracts'
 import type {
+  HostedPhoneCallOriginDirectChannel,
+} from '@murphai/hosted-execution/phone-calls'
+import type {
   AssistantSession,
   AssistantVaultImageResponseMedia,
 } from '@murphai/operator-config/assistant-cli-contracts'
@@ -74,11 +77,13 @@ export interface AssistantHostedToolRequestKeyScope {
 export interface AssistantHostedUserActionScope
   extends AssistantHostedToolRequestKeyScope {
   conversationScope: AssistantConversationScope
+  originDirectChannel?: HostedPhoneCallOriginDirectChannel | null
   originSessionId: string
 }
 
 export interface AssistantHostedScheduledPhoneCallScope
   extends HostedRuntimeScheduledAutomationAuthority {
+  originDirectChannel?: HostedPhoneCallOriginDirectChannel
   originSessionId: string
 }
 
@@ -323,10 +328,15 @@ export function createAssistantHostedToolContext(input: {
       return null
     }
     const deliveryContext = readDeliveryContext()
+    const conversationScope =
+      input.getConversationScope?.() ?? 'unverified-external'
     return {
       ...buildRequestKeyScope(acceptedInputIds),
-      conversationScope:
-        input.getConversationScope?.() ?? 'unverified-external',
+      conversationScope,
+      originDirectChannel: resolveAssistantHostedPhoneCallOriginDirectChannel({
+        channel: deliveryContext.messageInput.channel,
+        conversationScope,
+      }),
       originSessionId: deliveryContext.session.sessionId,
     }
   }
@@ -628,8 +638,22 @@ export function resolveAssistantHostedScheduledPhoneCallScope(input: {
   return {
     automationId: scope.origin.automationId,
     occurrenceAt: scope.origin.occurrenceAt,
+    originDirectChannel: 'linq',
     originSessionId: scope.originSessionId ?? input.originSessionId,
   }
+}
+
+export function resolveAssistantHostedPhoneCallOriginDirectChannel(input: {
+  channel: AssistantMessageInput['channel']
+  conversationScope: AssistantConversationScope
+}): HostedPhoneCallOriginDirectChannel | null {
+  if (input.conversationScope !== 'direct') {
+    return null
+  }
+  const channel = input.channel?.trim().toLowerCase()
+  return channel === 'linq' || channel === 'telegram'
+    ? channel
+    : null
 }
 
 function scopeHostedDeliveryContextPart(input: {
