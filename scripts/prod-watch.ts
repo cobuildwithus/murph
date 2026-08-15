@@ -181,8 +181,8 @@ const CODEX_DISABLED_FEATURES = [
 const CODEX_PACKAGE_VERSION = "0.144.4";
 const CODEX_REQUIRED_VERSION = `codex-cli ${CODEX_PACKAGE_VERSION}`;
 const USAGE = `Usage:
-  pnpm --silent prod-watch collect [--lookback-minutes 15] [--fixture healthy|suspicious] [--provider-evidence <file>|--provider-child|--provider-shadow] [--output -|<file>]
-  pnpm --silent prod-watch run [--scheduled] [--dry-run] [--provider-evidence <file>|--provider-child|--provider-shadow]
+  pnpm --silent prod-watch collect [--lookback-minutes 15] [--fixture healthy|suspicious] [--provider-child|--provider-shadow] [--output -|<file>]
+  pnpm --silent prod-watch run [--scheduled] [--dry-run] [--provider-child|--provider-shadow]
   pnpm --silent prod-watch drill-down <database-incident-id-or-fingerprint> --session-id <id> [--lookback-minutes 60]
   pnpm --silent prod-watch incident list
   pnpm --silent prod-watch incident claim <incident-id-or-fingerprint> --session-id <id>
@@ -202,7 +202,6 @@ interface CommonCollectOptions {
   runTimeoutMs: number;
   providerChildTimeoutMs: number;
   fixture?: "healthy" | "suspicious";
-  providerEvidencePath?: string;
   providerCollection: "none" | "child" | "shadow";
   configuredSources: WatchSource[];
   dryRun: boolean;
@@ -366,9 +365,6 @@ async function runDrillDownCommand(argv: string[]): Promise<void> {
   if (parsed.lookbackMinutes > 120) {
     throw new Error("drill_down_lookback_too_large");
   }
-  if (parsed.providerEvidencePath !== undefined) {
-    throw new Error("drill_down_provider_evidence_forbidden_phase_1");
-  }
   const incident = await withStateLock(randomUUID(), async () => {
     const state = await readState(statePath, parsed.configuredSources, new Date());
     const record = findIncident(state, target);
@@ -516,30 +512,7 @@ async function collectSnapshot(
   }
   throwIfAborted(runtime.signal);
 
-  if (options.providerEvidencePath !== undefined) {
-    try {
-      const providerEvidence = await readProviderEvidence(
-        options.providerEvidencePath,
-        options.fixture !== undefined,
-      );
-      evidences.push(...providerEvidence.sources
-        .filter((evidence) => options.configuredSources.includes(evidence.source))
-        .map((evidence) => options.fixture === undefined ? evidence : rebaseFixture(evidence, startedAt)));
-      failures.push(...providerEvidence.failures.filter((failure) =>
-        options.configuredSources.includes(failure.source)
-      ));
-    } catch {
-      throwIfAborted(runtime.signal);
-      for (const source of options.configuredSources.filter((candidate) => candidate !== "database")) {
-        failures.push({
-          source,
-          class: "schema",
-          code: "provider_evidence_invalid",
-          retryable: false,
-        });
-      }
-    }
-  } else if (options.providerCollection !== "none") {
+  if (options.providerCollection !== "none") {
     try {
       const providerEvidence = await collectProviderEvidenceWithCodex({
         databaseEvidence: evidences.find((evidence) => evidence.source === "database"),
@@ -1747,10 +1720,9 @@ function parseCommonOptions(
     5_000,
     210_000,
   );
-  const providerEvidencePath = readOptionalFlag(argv, "--provider-evidence");
   const providerChild = argv.includes("--provider-child");
   const providerShadow = argv.includes("--provider-shadow");
-  if ([providerEvidencePath !== undefined, providerChild, providerShadow].filter(Boolean).length > 1) {
+  if (providerChild && providerShadow) {
     throw new Error("provider_collection_mode_conflict");
   }
   const scheduled = defaults.scheduled || argv.includes("--scheduled");
@@ -1763,7 +1735,6 @@ function parseCommonOptions(
     "--output",
     "--provider-child",
     "--provider-child-timeout-ms",
-    "--provider-evidence",
     "--provider-shadow",
     "--run-timeout-ms",
     "--scheduled",
@@ -1776,7 +1747,6 @@ function parseCommonOptions(
     runTimeoutMs,
     providerChildTimeoutMs,
     ...(fixture === undefined ? {} : { fixture }),
-    ...(providerEvidencePath === undefined ? {} : { providerEvidencePath }),
     providerCollection: providerChild ? "child" : providerShadow ? "shadow" : "none",
     configuredSources: [...WATCH_SOURCES],
     dryRun,
