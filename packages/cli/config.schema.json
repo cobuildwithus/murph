@@ -393,17 +393,17 @@
                           "minLength": 1
                         },
                         "channel": {
-                          "description": "Optional channel label such as telegram or email.",
+                          "description": "Optional local channel label: telegram.",
                           "type": "string",
                           "minLength": 1
                         },
                         "identity": {
-                          "description": "Optional local assistant identity id for multi-user routing. Email routes should use the configured AgentMail inbox id.",
+                          "description": "Optional local assistant identity id for multi-user routing.",
                           "type": "string",
                           "minLength": 1
                         },
                         "participant": {
-                          "description": "Optional remote participant identifier when the transport addresses a person directly. Use the transport-native participant value, such as an email correspondent; thread-addressed transports may rely on --thread instead.",
+                          "description": "Optional remote participant identifier when the transport addresses a person directly; thread-addressed transports may rely on --thread instead.",
                           "type": "string",
                           "minLength": 1
                         },
@@ -466,7 +466,7 @@
                           "type": "boolean"
                         },
                         "deliveryTarget": {
-                          "description": "Optional one-send outbound destination in the transport-native send format. For Telegram use a chat id or `<chatId>:topic:<messageThreadId>`; for email use a recipient address. Reply-in-place sessions can often omit this and reuse the saved thread.",
+                          "description": "Optional one-send Telegram destination as a chat id or `<chatId>:topic:<messageThreadId>`. Reply-in-place sessions can often omit this and reuse the saved thread.",
                           "type": "string",
                           "minLength": 1
                         }
@@ -499,17 +499,17 @@
                           "minLength": 1
                         },
                         "channel": {
-                          "description": "Optional channel label such as telegram or email.",
+                          "description": "Optional local channel label: telegram.",
                           "type": "string",
                           "minLength": 1
                         },
                         "identity": {
-                          "description": "Optional local assistant identity id for multi-user routing. Email routes should use the configured AgentMail inbox id.",
+                          "description": "Optional local assistant identity id for multi-user routing.",
                           "type": "string",
                           "minLength": 1
                         },
                         "participant": {
-                          "description": "Optional remote participant identifier when the transport addresses a person directly. Use the transport-native participant value, such as an email correspondent; thread-addressed transports may rely on --thread instead.",
+                          "description": "Optional remote participant identifier when the transport addresses a person directly; thread-addressed transports may rely on --thread instead.",
                           "type": "string",
                           "minLength": 1
                         },
@@ -596,17 +596,17 @@
                           "minLength": 1
                         },
                         "channel": {
-                          "description": "Optional channel label such as telegram or email.",
+                          "description": "Optional local channel label: telegram.",
                           "type": "string",
                           "minLength": 1
                         },
                         "identity": {
-                          "description": "Optional local assistant identity id for multi-user routing. Email routes should use the configured AgentMail inbox id.",
+                          "description": "Optional local assistant identity id for multi-user routing.",
                           "type": "string",
                           "minLength": 1
                         },
                         "participant": {
-                          "description": "Optional remote participant identifier when the transport addresses a person directly. Use the transport-native participant value, such as an email correspondent; thread-addressed transports may rely on --thread instead.",
+                          "description": "Optional remote participant identifier when the transport addresses a person directly; thread-addressed transports may rely on --thread instead.",
                           "type": "string",
                           "minLength": 1
                         },
@@ -616,7 +616,7 @@
                           "minLength": 1
                         },
                         "deliveryTarget": {
-                          "description": "Optional one-send outbound destination in the transport-native send format. For Telegram use a chat id or `<chatId>:topic:<messageThreadId>`; for email use a recipient address. Reply-in-place sessions can often omit this and reuse the saved thread.",
+                          "description": "Optional one-send Telegram destination as a chat id or `<chatId>:topic:<messageThreadId>`. Reply-in-place sessions can often omit this and reuse the saved thread.",
                           "type": "string",
                           "minLength": 1
                         }
@@ -722,12 +722,12 @@
                                   "maxLength": 128
                                 },
                                 "identity": {
-                                  "description": "Optional local assistant identity id to reuse for this saved channel target. Email targets require the configured AgentMail inbox id here.",
+                                  "description": "Optional local assistant identity id to reuse for this saved channel target.",
                                   "type": "string",
                                   "minLength": 1
                                 },
                                 "participant": {
-                                  "description": "Optional remote participant identifier when the transport addresses a person directly. Use the transport-native participant value, such as an email correspondent; thread-addressed transports may rely on --thread instead.",
+                                  "description": "Optional remote participant identifier when the transport addresses a person directly; thread-addressed transports may rely on --thread instead.",
                                   "type": "string",
                                   "minLength": 1
                                 },
@@ -737,7 +737,7 @@
                                   "minLength": 1
                                 },
                                 "deliveryTarget": {
-                                  "description": "Optional saved outbound destination in the transport-native send format. For Telegram use a chat id or `<chatId>:topic:<messageThreadId>`; for email use a recipient address.",
+                                  "description": "Optional saved Telegram destination as a chat id or `<chatId>:topic:<messageThreadId>`.",
                                   "type": "string",
                                   "minLength": 1
                                 }
@@ -1022,17 +1022,17 @@
                   "minLength": 1
                 },
                 "channel": {
-                  "description": "Optional channel label such as telegram or email.",
+                  "description": "Optional local channel label: telegram.",
                   "type": "string",
                   "minLength": 1
                 },
                 "identity": {
-                  "description": "Optional local assistant identity id for multi-user routing. Email routes should use the configured AgentMail inbox id.",
+                  "description": "Optional local assistant identity id for multi-user routing.",
                   "type": "string",
                   "minLength": 1
                 },
                 "participant": {
-                  "description": "Optional remote participant identifier when the transport addresses a person directly. Use the transport-native participant value, such as an email correspondent; thread-addressed transports may rely on --thread instead.",
+                  "description": "Optional remote participant identifier when the transport addresses a person directly; thread-addressed transports may rely on --thread instead.",
                   "type": "string",
                   "minLength": 1
                 },
@@ -5073,7 +5073,7 @@
                         },
                         "input": {
                           "type": "string",
-                          "description": "Structured meal payload in @file.json form or - for stdin. Structured payload object keys: `photo` or `photoPath` for an optional meal photo path; `audio` or `audioPath` for an optional audio note path; `note`, `occurredAt`, and `source` for the saved event fields; `ingredients` as a string array; `nutrition` as `{ totals?: { calories?, proteinGrams?, carbsGrams?, fatGrams?, fiberGrams? }, provenance?: { source, confidence?, sourceDetail? } }`."
+                          "description": "Structured meal payload in @file.json form or - for stdin. Structured payload object keys: `photo` or `photoPath` for an optional meal photo path; `audio` or `audioPath` for an optional audio note path; `note`, `occurredAt`, and `source` for the saved event fields; `ingredients` as a string array; `nutrition` as `{ totals?: { calories?, proteinGrams?, carbsGrams?, fatGrams?, fiberGrams?, waterGrams? }, micros?: { <supported bounded nutrient keys> }, provenance?: { source, confidence?, sourceDetail? } }`."
                         },
                         "photo": {
                           "description": "Optional meal photo path.",
@@ -5182,6 +5182,34 @@
                   }
                 },
                 "totals": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "options": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "requestId": {
+                          "description": "Optional caller-supplied request id for audit correlation.",
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128
+                        },
+                        "from": {
+                          "description": "Optional inclusive lower date bound in YYYY-MM-DD form.",
+                          "type": "string",
+                          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+                        },
+                        "to": {
+                          "description": "Optional inclusive upper date bound in YYYY-MM-DD form.",
+                          "type": "string",
+                          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+                        }
+                      }
+                    }
+                  }
+                },
+                "nutrients": {
                   "type": "object",
                   "additionalProperties": false,
                   "properties": {

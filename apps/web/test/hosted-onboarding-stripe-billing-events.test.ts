@@ -605,6 +605,7 @@ describe("hosted onboarding stripe billing events", () => {
     ).resolves.toEqual({
       activatedMemberId: "member_123",
       hostedExecutionEventId: "wake_123",
+      hostedExecutionMailboxItemId: null,
       runtimeRecheckMemberIds: [],
       welcomeEmailMemberId: "member_123",
     });
@@ -624,6 +625,7 @@ describe("hosted onboarding stripe billing events", () => {
     ).resolves.toEqual({
       activatedMemberId: "member_123",
       hostedExecutionEventId: "wake_123",
+      hostedExecutionMailboxItemId: null,
       runtimeRecheckMemberIds: [],
       welcomeEmailMemberId: "member_123",
     });
@@ -859,6 +861,7 @@ describe("hosted onboarding stripe billing events", () => {
     ).resolves.toEqual({
       activatedMemberId: "member_123",
       hostedExecutionEventId: "wake_123",
+      hostedExecutionMailboxItemId: null,
       runtimeRecheckMemberIds: [],
       welcomeEmailMemberId: "member_123",
     });
@@ -906,6 +909,7 @@ describe("hosted onboarding stripe billing events", () => {
     ).resolves.toEqual({
       activatedMemberId: null,
       hostedExecutionEventId: null,
+      hostedExecutionMailboxItemId: null,
       runtimeRecheckMemberIds: [],
       welcomeEmailMemberId: null,
     });
@@ -961,6 +965,7 @@ describe("hosted onboarding stripe billing events", () => {
     ).resolves.toEqual({
       activatedMemberId: null,
       hostedExecutionEventId: null,
+      hostedExecutionMailboxItemId: null,
       runtimeRecheckMemberIds: [],
       welcomeEmailMemberId: null,
     });
@@ -979,7 +984,7 @@ describe("hosted onboarding stripe billing events", () => {
     });
   });
 
-  it("keeps a welcome candidate when invoice activation already has a durable wake", async () => {
+  it("returns the exact direct activation target when invoice replay finds a durable wake", async () => {
     const updatedMember = makeMemberSnapshot({
       billingStatus: HostedBillingStatus.active,
     });
@@ -987,6 +992,7 @@ describe("hosted onboarding stripe billing events", () => {
     mocks.activateHostedMemberForPositiveSourceTx.mockResolvedValueOnce({
       activated: false,
       hostedExecutionEventId: "wake_existing",
+      hostedExecutionMailboxItemId: "mailbox_wake_existing",
       memberId: updatedMember.core.id,
     });
 
@@ -1006,8 +1012,9 @@ describe("hosted onboarding stripe billing events", () => {
         HostedBillingStatus.active,
       ),
     ).resolves.toEqual({
-      activatedMemberId: null,
+      activatedMemberId: "member_123",
       hostedExecutionEventId: "wake_existing",
+      hostedExecutionMailboxItemId: "mailbox_wake_existing",
       runtimeRecheckMemberIds: [],
       welcomeEmailMemberId: "member_123",
     });
@@ -1033,6 +1040,7 @@ describe("hosted onboarding stripe billing events", () => {
     ).resolves.toEqual({
       activatedMemberId: "member_123",
       hostedExecutionEventId: "wake_123",
+      hostedExecutionMailboxItemId: null,
       runtimeRecheckMemberIds: [],
       welcomeEmailMemberId: "member_123",
     });
@@ -1144,6 +1152,46 @@ describe("hosted onboarding stripe billing events", () => {
     expect(mocks.findMemberForStripeSubscription).not.toHaveBeenCalled();
     expect(mocks.writeHostedMemberStripeBillingTx).not.toHaveBeenCalled();
     expect(mocks.activateHostedMemberForPositiveSourceTx).not.toHaveBeenCalled();
+  });
+
+  it("returns exact Family activation targets when subscription replay finds durable wakes", async () => {
+    mocks.applyHostedFamilyStripeSubscriptionUpdatedTx.mockResolvedValueOnce({
+      activations: [{
+        activated: false,
+        hostedExecutionEventId: "wake_family_existing",
+        hostedExecutionMailboxItemId: "mailbox_family_existing",
+        memberId: "member_owner",
+      }],
+      groupId: "hbag_family",
+      runtimeRecheckMemberIds: [],
+    });
+
+    await expect(applyStripeSubscriptionUpdated(
+      makeStripeSubscription({
+        metadata: {
+          accountGroupId: "hbag_family",
+          kind: "hosted_family_plan",
+        },
+      }),
+      {
+        eventCreatedAt: new Date("2026-04-23T00:00:00.000Z"),
+        occurredAt: "2026-04-23T00:00:00.000Z",
+        sourceEventId: "evt_family_sub_replay",
+        sourceType: "stripe.customer.subscription.updated",
+      },
+      {} as never,
+    )).resolves.toEqual({
+      activatedMemberId: "member_owner",
+      activatedMembers: [{
+        activatedMemberId: "member_owner",
+        hostedExecutionEventId: "wake_family_existing",
+        hostedExecutionMailboxItemId: "mailbox_family_existing",
+      }],
+      hostedExecutionEventId: "wake_family_existing",
+      runtimeRecheckMemberIds: [],
+      subscriptionCancellationEmail: null,
+      welcomeEmailMemberId: null,
+    });
   });
 
   it("reconciles a direct-to-Family usage handoff from invoice.paid", async () => {
@@ -1499,8 +1547,9 @@ describe("hosted onboarding stripe billing events", () => {
     );
     mocks.activateHostedMemberForPositiveSourceTx.mockResolvedValueOnce({
       activated: false,
-      hostedExecutionEventId: null,
-      priorBillingStatus: HostedBillingStatus.active,
+      hostedExecutionEventId: "wake_trial_conversion_existing",
+      hostedExecutionMailboxItemId: "mailbox_trial_conversion_existing",
+      memberId: "member_123",
     });
 
     await expect(applyStripeSubscriptionUpdated(
@@ -1513,8 +1562,10 @@ describe("hosted onboarding stripe billing events", () => {
       },
       {} as never,
     )).resolves.toMatchObject({
-      activatedMemberId: null,
+      activatedMemberId: "member_123",
       cleanupPulseTrialStripeSubscriptionId: "sub_123",
+      hostedExecutionEventId: "wake_trial_conversion_existing",
+      hostedExecutionMailboxItemId: "mailbox_trial_conversion_existing",
       runtimeRecheckMemberIds: ["member_123"],
       subscriptionCancellationEmail: null,
     });

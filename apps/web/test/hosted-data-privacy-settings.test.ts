@@ -31,7 +31,7 @@ const mocks = vi.hoisted(() => ({
   publishBrowserVaultSessionInvalidation: vi.fn(),
   reloadCurrentHostedAuthDocument: vi.fn(),
   requestHostedOnboardingJson: vi.fn(),
-  loadBrowserVaultReplica: vi.fn(),
+  loadBrowserVaultExport: vi.fn(),
   useStateValues: [] as unknown[],
 }));
 
@@ -76,9 +76,9 @@ vi.mock("@/src/components/sensitive-actions/use-sensitive-action-authorization",
   useSensitiveActionAuthorization: () => ({ authorize: mocks.authorize }),
 }));
 
-vi.mock("@/src/lib/browser-vault/loader", () => ({
-  loadBrowserVaultReplica: mocks.loadBrowserVaultReplica,
-  normalizeBrowserVaultError: (error: unknown) =>
+vi.mock("@/src/lib/browser-vault/export", () => ({
+  loadBrowserVaultExport: mocks.loadBrowserVaultExport,
+  normalizeBrowserVaultExportError: (error: unknown) =>
     error instanceof Error ? error.message : "Your dashboard data is not available right now.",
 }));
 
@@ -142,17 +142,13 @@ beforeEach(() => {
     signature: `0x${"11".repeat(65)}`,
     token: "sac_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef",
   });
-  mocks.loadBrowserVaultReplica.mockResolvedValue({
-    client: {
-      replica: createBrowserVaultReplicaForTest(),
-    },
+  mocks.loadBrowserVaultExport.mockResolvedValue({
+    blob: createBrowserVaultExportBlobForTest(),
     deviceSyncImportPending: false,
     freshness: "fresh",
+    generatedAt: "2026-04-29T01:02:03.000Z",
     refreshPending: false,
-    replicaRef: {
-      dataVersion: "d".repeat(64),
-    },
-    state: "ready",
+    workspaceVersion: null,
   });
   mocks.requestHostedOnboardingJson.mockResolvedValue({
     ok: true,
@@ -280,7 +276,7 @@ describe("HostedDataPrivacySettings", () => {
     });
 
     expect(mocks.authorize).not.toHaveBeenCalled();
-    expect(mocks.loadBrowserVaultReplica).not.toHaveBeenCalled();
+    expect(mocks.loadBrowserVaultExport).not.toHaveBeenCalled();
     expect(createObjectURL).not.toHaveBeenCalled();
     expect(revokeObjectURL).not.toHaveBeenCalled();
   });
@@ -327,14 +323,11 @@ describe("HostedDataPrivacySettings", () => {
     await clickButton(container, "Download my data", window);
 
     expect(mocks.authorize).toHaveBeenCalledWith("vault.export");
-    expect(mocks.loadBrowserVaultReplica).toHaveBeenCalledWith({
+    expect(mocks.loadBrowserVaultExport).toHaveBeenCalledWith({
       authorization: {
         signature: `0x${"11".repeat(65)}`,
         token: "sac_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef",
       },
-      emptyOnUnauthorized: false,
-      endpoint: "/api/settings/vault-export/session",
-      knownReplicaRef: null,
     });
     expect(createObjectURL).toHaveBeenCalledTimes(1);
     expect(revokeObjectURL).toHaveBeenCalledWith("blob:vault-export");
@@ -357,17 +350,13 @@ describe("HostedDataPrivacySettings", () => {
 
   test("accepts the route-authorized latest retained replica without a page consent projection", async () => {
     mockHostedVaultExportFlowState();
-    mocks.loadBrowserVaultReplica.mockResolvedValueOnce({
-      client: {
-        replica: createBrowserVaultReplicaForTest(),
-      },
+    mocks.loadBrowserVaultExport.mockResolvedValueOnce({
+      blob: createBrowserVaultExportBlobForTest(),
       deviceSyncImportPending: true,
       freshness: "stale",
+      generatedAt: "2026-04-29T01:02:03.000Z",
       refreshPending: true,
-      replicaRef: {
-        dataVersion: "d".repeat(64),
-      },
-      state: "ready",
+      workspaceVersion: null,
     });
 
     const { document, window } = loadLinkedom().parseHTML(
@@ -404,7 +393,7 @@ describe("HostedDataPrivacySettings", () => {
 
     await clickButton(container, "Download my data", window);
 
-    expect(mocks.loadBrowserVaultReplica).toHaveBeenCalledTimes(1);
+    expect(mocks.loadBrowserVaultExport).toHaveBeenCalledTimes(1);
     expect(createObjectURL).toHaveBeenCalledTimes(1);
     expect(clickDownloadLink).toHaveBeenCalledTimes(1);
     expect(formatVaultExportSuccess({
@@ -524,6 +513,68 @@ describe("HostedDataPrivacySettings", () => {
     const payload = mocks.requestHostedOnboardingJson.mock.calls[0]?.[0]?.payload;
     expect(payload).not.toHaveProperty("exitReason");
     expect(payload).not.toHaveProperty("exitNote");
+  });
+
+  test("requires provider-access confirmation after an ambiguous OAuth callback", async () => {
+    mockHostedDataPrivacyDeleteFlowState({
+      dialogError: "Remove Murph access in the Oura provider account, then confirm below.",
+      providerAccessRemovalRequired: true,
+    });
+
+    const { document, window } = loadLinkedom().parseHTML(
+      "<html><body><div id='root'></div></body></html>",
+    );
+    installGlobals(window, document);
+    const container = document.getElementById("root");
+    assert.ok(container);
+
+    const root: Root = createRoot(container);
+    cleanupRender = async () => {
+      await act(async () => {
+        root.unmount();
+      });
+    };
+
+    await act(async () => {
+      root.render(createElement(HostedDataPrivacySettings, { authenticated: true }));
+    });
+
+    expect(container.textContent).toContain(
+      "I removed Murph access from every provider above.",
+    );
+    assert.equal(findButton(container, "Delete account").disabled, true);
+    expect(mocks.requestHostedOnboardingJson).not.toHaveBeenCalled();
+  });
+
+  test("submits explicit provider-access confirmation on the recovery retry", async () => {
+    mockHostedDataPrivacyDeleteFlowState({
+      providerAccessRemovalConfirmed: true,
+      providerAccessRemovalConfirmationToken: "a".repeat(64),
+      providerAccessRemovalRequired: true,
+    });
+
+    const { document, window } = loadLinkedom().parseHTML(
+      "<html><body><div id='root'></div></body></html>",
+    );
+    installGlobals(window, document);
+    const container = document.getElementById("root");
+    assert.ok(container);
+
+    const root: Root = createRoot(container);
+    cleanupRender = async () => {
+      await act(async () => {
+        root.unmount();
+      });
+    };
+
+    await act(async () => {
+      root.render(createElement(HostedDataPrivacySettings, { authenticated: true }));
+    });
+
+    await clickButton(container, "Delete account", window);
+
+    expect(mocks.requestHostedOnboardingJson.mock.calls[0]?.[0]?.payload)
+      .toMatchObject({ providerAccessRemovalConfirmationToken: "a".repeat(64) });
   });
 
   test("allows account deletion to succeed after the vault receiver lease window", async () => {
@@ -687,6 +738,79 @@ describe("HostedDataPrivacySettings", () => {
     expect(mocks.publishBrowserVaultSessionEnding).toHaveBeenCalledTimes(1);
     expect(mocks.publishBrowserVaultSessionInvalidation).toHaveBeenCalledTimes(1);
     expect(mocks.reloadCurrentHostedAuthDocument).toHaveBeenCalledTimes(1);
+  });
+
+  test("keeps reconnect-required deletion guidance in the open dialog without reloading", async () => {
+    mockHostedDataPrivacyDeleteFlowState();
+    const { HostedOnboardingApiError } = await import(
+      "@/src/components/hosted-onboarding/client-api"
+    );
+    mocks.requestHostedOnboardingJson.mockRejectedValueOnce(
+      new HostedOnboardingApiError({
+        code: "ACCOUNT_DELETION_DEVICE_TOKEN_REFRESH_RECOVERY_REQUIRED",
+        details: {
+          connectionId: "dsc_123",
+          providerLabel: "Oura",
+        },
+        message: "The Oura credential refresh did not finish safely. Reconnect that source, then retry account deletion.",
+      }),
+    );
+
+    const { document, window } = loadLinkedom().parseHTML(
+      "<html><body><div id='root'></div></body></html>",
+    );
+    installGlobals(window, document);
+    const container = document.getElementById("root");
+    assert.ok(container);
+
+    const root: Root = createRoot(container);
+    cleanupRender = async () => {
+      await act(async () => {
+        root.unmount();
+      });
+    };
+
+    await act(async () => {
+      root.render(createElement(HostedDataPrivacySettings, { authenticated: true }));
+    });
+
+    await clickButton(container, "Delete account", window);
+
+    expect(mocks.publishBrowserVaultSessionEnding).toHaveBeenCalledTimes(1);
+    expect(mocks.publishBrowserVaultSessionInvalidation).toHaveBeenCalledTimes(1);
+    expect(mocks.reloadCurrentHostedAuthDocument).not.toHaveBeenCalled();
+  });
+
+  test("links reconnect-required deletion guidance to the wearables recovery surface", async () => {
+    const recoveryMessage = "The Oura credential refresh did not finish safely. Reconnect that source, then retry account deletion.";
+    mockHostedDataPrivacyDeleteFlowState({
+      deviceReconnectRequired: true,
+      dialogError: recoveryMessage,
+    });
+
+    const { document, window } = loadLinkedom().parseHTML(
+      "<html><body><div id='root'></div></body></html>",
+    );
+    installGlobals(window, document);
+    const container = document.getElementById("root");
+    assert.ok(container);
+
+    const root: Root = createRoot(container);
+    cleanupRender = async () => {
+      await act(async () => {
+        root.unmount();
+      });
+    };
+
+    await act(async () => {
+      root.render(createElement(HostedDataPrivacySettings, { authenticated: true }));
+    });
+
+    expect(container.textContent).toContain(recoveryMessage);
+    const recoveryLink = [...container.querySelectorAll("a")]
+      .find((link) => link.textContent?.trim() === "Manage wearables");
+    assert.ok(recoveryLink);
+    expect(recoveryLink.getAttribute("href")).toBe("/connect");
   });
 
   test("declines deletion at initiation, before approval or vault teardown", async () => {
@@ -886,7 +1010,9 @@ describe("HostedDataPrivacySettings", () => {
 // Values follow the component's useState declaration order:
 // exportPending, exportDialogOpen, acknowledgedSensitiveDownload, exportDialogError,
 // exportSuccess, deletePending, dialogOpen, dialogStep, exitReason, exitNote,
-// confirmationPhrase, dialogError, deleted, cleanupPending, privyLogoutDone.
+// confirmationPhrase, dialogError, deviceReconnectRequired, providerAccessRemovalRequired,
+// providerAccessRemovalConfirmed, providerAccessRemovalConfirmationToken,
+// deleted, cleanupPending, privyLogoutDone.
 function mockHostedVaultExportFlowState(input: {
   acknowledgedSensitiveDownload?: boolean;
 } = {}) {
@@ -906,14 +1032,22 @@ function mockHostedVaultExportFlowState(input: {
     false,
     false,
     false,
+    null,
+    false,
+    false,
+    false,
   ];
 }
 
 function mockHostedDataPrivacyDeleteFlowState(input: {
   confirmationPhrase?: string;
+  deviceReconnectRequired?: boolean;
   dialogError?: string | null;
   exitNote?: string;
   exitReason?: string | null;
+  providerAccessRemovalConfirmed?: boolean;
+  providerAccessRemovalConfirmationToken?: string | null;
+  providerAccessRemovalRequired?: boolean;
 } = {}) {
   mocks.useStateValues = [
     false,
@@ -930,6 +1064,10 @@ function mockHostedDataPrivacyDeleteFlowState(input: {
     input.exitNote ?? "",
     input.confirmationPhrase ?? "DELETE MY ACCOUNT",
     input.dialogError ?? null,
+    input.deviceReconnectRequired ?? false,
+    input.providerAccessRemovalRequired ?? false,
+    input.providerAccessRemovalConfirmed ?? false,
+    input.providerAccessRemovalConfirmationToken ?? null,
     false,
     false,
     false,
@@ -951,6 +1089,10 @@ function mockHostedDataPrivacyDeletedState(input: {
     null,
     "",
     "",
+    null,
+    false,
+    false,
+    false,
     null,
     true,
     input.cleanupPending ?? false,
@@ -1030,6 +1172,13 @@ function createBrowserVaultReplicaForTest() {
     timelineRows: [],
     weeklySampleSummaries: [],
   };
+}
+
+function createBrowserVaultExportBlobForTest(): Blob {
+  return new Blob(
+    [JSON.stringify(createBrowserVaultReplicaForTest(), null, 2)],
+    { type: "application/json; charset=utf-8" },
+  );
 }
 
 function createPassthrough(tagName: string) {

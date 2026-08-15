@@ -12,6 +12,12 @@ export {
   isCompletedOverviewExperimentStatus,
 } from "./overview-status.ts";
 export type {
+  BrowserVaultCoreCapableQueryClient,
+  BrowserVaultExperimentRunCard,
+  BrowserVaultExperimentRunCardDailyCadence,
+  BrowserVaultExperimentRunCardLookup,
+  BrowserVaultExperimentRunCardMetric,
+  BrowserVaultExperimentRunCardSummary,
   BrowserVaultOverviewView,
   BrowserVaultQueryClient,
   BrowserVaultTimelineRow,

@@ -32,8 +32,20 @@ export interface HostedLocalJunctionStub {
 }
 
 const HOSTED_LOCAL_JUNCTION_STUB_USER_ID = "junction_user_local_stub_1";
+const HOSTED_LOCAL_JUNCTION_STUB_TEAM_ID = "junction_team_local_stub_1";
+const HOSTED_LOCAL_JUNCTION_LINK_TOKEN = "hosted-local-junction-stub";
 const HOSTED_LOCAL_JUNCTION_LINK_WEB_URL =
   "https://link.tryvital.io/?token=hosted-local-junction-stub";
+
+function buildJunctionUserResponse(clientUserId: string): Record<string, unknown> {
+  return {
+    client_user_id: clientUserId,
+    connected_sources: [],
+    created_on: "2026-01-01T00:00:00.000Z",
+    team_id: HOSTED_LOCAL_JUNCTION_STUB_TEAM_ID,
+    user_id: HOSTED_LOCAL_JUNCTION_STUB_USER_ID,
+  };
+}
 
 /**
  * Fakes the small slice of the Junction API the hosted web Junction Link
@@ -58,16 +70,17 @@ export async function startHostedLocalJunctionStub(): Promise<HostedLocalJunctio
     });
 
     if (method === "GET" && url.startsWith("/v2/user/resolve/")) {
-      writeJsonResponse(response, 200, {
-        user_id: HOSTED_LOCAL_JUNCTION_STUB_USER_ID,
-      });
+      const clientUserId = decodeURIComponent(url.slice("/v2/user/resolve/".length));
+      writeJsonResponse(response, 200, buildJunctionUserResponse(clientUserId));
       return;
     }
 
     if (method === "POST" && (url === "/v2/user/" || url === "/v2/user")) {
-      writeJsonResponse(response, 200, {
-        user_id: HOSTED_LOCAL_JUNCTION_STUB_USER_ID,
-      });
+      const parsedBody = JSON.parse(body) as { client_user_id?: unknown };
+      const clientUserId = typeof parsedBody.client_user_id === "string"
+        ? parsedBody.client_user_id
+        : "junction_client_user_local_stub_1";
+      writeJsonResponse(response, 200, buildJunctionUserResponse(clientUserId));
       return;
     }
 
@@ -97,6 +110,7 @@ export async function startHostedLocalJunctionStub(): Promise<HostedLocalJunctio
         userId,
       });
       writeJsonResponse(response, 200, {
+        link_token: HOSTED_LOCAL_JUNCTION_LINK_TOKEN,
         link_web_url: HOSTED_LOCAL_JUNCTION_LINK_WEB_URL,
       });
       return;

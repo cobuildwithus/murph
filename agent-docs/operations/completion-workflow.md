@@ -1,6 +1,6 @@
 # Completion Workflow
 
-Last verified: 2026-08-11
+Last verified: 2026-08-13
 
 This workflow applies to repo code/docs/test/config changes after implementation is materially complete.
 Use `agent-docs/operations/agent-workflow-routing.md` to classify the task, choose the commit path, and decide whether plan mechanics apply.
@@ -256,14 +256,31 @@ Required:
   sufficient. Do not use a bare `None`, `N/A`, or placeholder. The pull-request
   body workflow checks the rendered section on every PR.
 - **Changelog.** Add one `## Changelog` section with exactly one disposition:
-  `Changelog: updated` or `Changelog: not applicable`. For `updated`, change
-  one or more isolated entry fragments and/or edition metadata files in the
-  same PR and add one `Items:` bullet naming the edition date and affected
-  stable item IDs. A metadata-only edit names the existing items in that
-  edition. An intentional historical correction may instead edit the frozen
-  legacy registry and must name its affected existing items; normal new items
-  never use that path. For `not applicable`, add one concrete `Reason:` bullet
-  explaining why no member-visible behavior changed.
+  use the literal list markers in one of these canonical forms.
+
+  For `updated`, change one or more isolated entry fragments and/or edition
+  metadata files in the same PR. A metadata-only edit names the existing items
+  in that edition. An intentional historical correction may instead edit the
+  frozen legacy registry and must name its affected existing items; normal new
+  items never use that path.
+
+  ```markdown
+  ## Changelog
+
+  - Changelog: updated
+  - Items: 2026-08-09 · stable-item-id
+  ```
+
+  For `not applicable`, give a concrete reason why no member-visible behavior
+  changed.
+
+  ```markdown
+  ## Changelog
+
+  - Changelog: not applicable
+  - Reason: Internal tooling only; no member-visible behavior changed.
+  ```
+
   Use `$write-changelog` to inventory source PRs, group related outcomes, add
   useful visuals, protect private or sensitive details, and update the focused
   archive proof. The pull-request body workflow validates this declaration on
@@ -365,7 +382,10 @@ Required:
   `pnpm design-proof:upload -- <desktop-image> <mobile-image>`; the command
   preserves exported environment values and otherwise reads only those two
   settings from the invoking checkout and then the Git-discovered primary
-  checkout, without copying or printing the credential. Embed each returned
+  checkout, without copying or printing the credential. The first `--` forwards
+  package arguments. If a filename begins with `-` or is literally `--` or
+  `--help`, add the uploader's positional-only delimiter after it, for example
+  `pnpm design-proof:upload -- -- -proof.png -- --help`. Embed each returned
   public `https://imagedelivery.net/.../designproof` variant URL in the PR body.
   The command creates or validates that dedicated 2400-by-2400 `scale-down`
   variant, rejects undersized or uncropped input, and performs a bounded HTTP

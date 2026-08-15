@@ -2,7 +2,10 @@ import assert from "node:assert/strict";
 
 import { test } from "vitest";
 
-import { buildExperimentRunCardSummary } from "@/src/lib/experiments/run-card-summary";
+import {
+  buildExperimentRunCardSummary,
+  projectBrowserVaultExperimentRunCardSummary,
+} from "@/src/lib/experiments/run-card-summary";
 import type { ExperimentRunProjection } from "@/src/types/experiments";
 
 test("buildExperimentRunCardSummary projects a compact primary result", () => {
@@ -148,6 +151,36 @@ test("buildExperimentRunCardSummary stays honest when no comparable metric exist
     metric: undefined,
     metrics: [],
   });
+});
+
+test("projectBrowserVaultExperimentRunCardSummary restores v1 metric sentiment", () => {
+  const summary = projectBrowserVaultExperimentRunCardSummary({
+    metric: {
+      baseline: "70 min",
+      biomarkerKey: "biomarker:deep-sleep-minutes",
+      current: "83 min",
+      delta: "+13 min",
+      direction: "up",
+      label: "Deep sleep",
+    },
+    metrics: [{
+      baseline: "70 min",
+      biomarkerKey: "biomarker:deep-sleep-minutes",
+      current: "83 min",
+      delta: "+13 min",
+      direction: "up",
+      label: "Deep sleep",
+    }],
+  });
+
+  assert.deepEqual(summary.metric, {
+    baseline: "70 min",
+    current: "83 min",
+    delta: "+13 min",
+    label: "Deep sleep",
+    sentiment: "positive",
+  });
+  assert.deepEqual(summary.metrics, [summary.metric]);
 });
 
 function createRun(

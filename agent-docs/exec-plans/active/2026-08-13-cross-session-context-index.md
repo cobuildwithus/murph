@@ -214,6 +214,17 @@ Updated: 2026-08-15
   request membership are durable. The commit removes the queue head and starts
   its successor through the existing steering path. No second queue, durable
   flag, scheduler, timeout, repair path, or lifecycle owner is introduced.
+- Final ReviewGPT round 12 passed the full snapshot and verified that the
+  retained queue head blocks both already-queued and newly arriving successors
+  through the exact local admission commit. It identified no qualifying
+  correctness, experience, purpose, or complexity finding and explicitly
+  rejected the need for compensating state or another production owner.
+- The current-base integration had one conflict: main added a post-foreground
+  member-action callback at the same hosted result-composition site where this
+  change attaches post-delivery route maintenance. The resolution preserves
+  main's callback inside the existing result and keeps route maintenance as the
+  outer post-delivery/checkpoint wrapper. No state, queue, callback owner, or
+  lifecycle is duplicated.
 
 ## Verification
 
@@ -289,3 +300,9 @@ Updated: 2026-08-15
   102-test local-service suite, 81-test reply-event suite, 32-test exact
   route-state suite, assistant-engine typecheck, assistant-engine build, and
   diff validation pass.
+- ReviewGPT round 12 and current-base integration: round 12 returned `PASS` on
+  the pre-integration exact head. After composing the one hosted-result
+  conflict, assistant-runtime typecheck, the 289-test hosted assistant-phase
+  suite, the 427-test runner/entrypoint/diagnostics set, the 23-test controller
+  suite, 103-test local-service suite, 81-test reply-event suite, 32-test route
+  suite, both package typechecks, and both package builds pass.

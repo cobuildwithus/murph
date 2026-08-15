@@ -233,8 +233,17 @@ locators per item. Unsourced overview text and all editorial evidence-appraisal
 rows are not part of the assistant projection. Claims and extracted typed findings are
 the only member-facing evidence shapes. The CLI returns the resolved topic or
 ambiguity candidates, not query internals, `focus`, or catalog-hash merge work.
-The assistant does one lookup and does not create or suggest an experiment
-unless the member asks to try, test, track, or set up one.
+The assistant does one lookup. It does not create an experiment unless the
+member authorizes setup. In a private direct conversation, it may suggest one
+context-grounded bounded trial without experiment vocabulary when a persistent
+or recurring problem remains unresolved, the member is seeking help, and one
+safe reversible uncertainty could change the next decision. That exception does
+not apply to factual questions, logging or record updates, requests to be heard
+without problem-solving, acute or unstable situations, cases primarily owned by
+urgent or clinician-led evaluation, decisions the existing record already
+resolves, or cases where one clearly indicated direct action makes comparison
+unnecessary. A proposal never authorizes a run, reminder, check-in, or tracking
+plan; each requires its own applicable authorization.
 An authored knowledge page can support this lookup without a protocol or UI.
 Hosted runner packaging must include that compact direction projection and the
 knowledge index without shipping the web artifact tree. A missing direction

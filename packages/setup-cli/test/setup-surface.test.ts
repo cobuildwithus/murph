@@ -24,9 +24,6 @@ import {
 } from '../src/setup-cli.ts'
 import type { SetupCliOptions } from '../src/setup-cli.js'
 import {
-  createSetupAgentmailSelectionResolver,
-} from '../src/setup-agentmail.js'
-import {
   detectSetupProgramName,
   isSetupInvocation,
 } from '../src/setup-services.js'
@@ -113,10 +110,6 @@ test('package surface re-exports the setup entrypoints', () => {
   assert.ok(createSetupCli())
   assert.equal(packageSurface.createSetupCli, createSetupCli)
   assert.equal(
-    packageSurface.createSetupAgentmailSelectionResolver,
-    createSetupAgentmailSelectionResolver,
-  )
-  assert.equal(
     packageSurface.detectSetupProgramName,
     detectSetupProgramName,
   )
@@ -181,21 +174,12 @@ test('onboard CLI builds setup CTAs from configured channels, updates, wearables
             channels: [
               {
                 autoReply: true,
-                channel: 'email',
-                configured: true,
-                connectorId: 'email:agentmail',
-                detail: 'Configured email.',
-                enabled: true,
-                missingEnv: ['AGENTMAIL_API_KEY'],
-              },
-              {
-                autoReply: false,
                 channel: 'telegram',
-                configured: false,
-                connectorId: null,
-                detail: 'Not configured.',
-                enabled: false,
-                missingEnv: ['TELEGRAM_BOT_TOKEN'],
+                configured: true,
+                connectorId: 'telegram:bot',
+                detail: 'Configured Telegram.',
+                enabled: true,
+                missingEnv: [],
               },
             ],
             scheduledUpdates: [
@@ -228,21 +212,12 @@ test('onboard CLI builds setup CTAs from configured channels, updates, wearables
             channels: [
               {
                 autoReply: true,
-                channel: 'email',
-                configured: true,
-                connectorId: 'email:agentmail',
-                detail: 'Configured email.',
-                enabled: true,
-                missingEnv: ['AGENTMAIL_API_KEY'],
-              },
-              {
-                autoReply: false,
                 channel: 'telegram',
-                configured: false,
-                connectorId: null,
-                detail: 'Not configured.',
-                enabled: false,
-                missingEnv: ['TELEGRAM_BOT_TOKEN'],
+                configured: true,
+                connectorId: 'telegram:bot',
+                detail: 'Configured Telegram.',
+                enabled: true,
+                missingEnv: [],
               },
             ],
             scheduledUpdates: [
@@ -282,9 +257,7 @@ test('onboard CLI builds setup CTAs from configured channels, updates, wearables
       'murph automation list',
       'murph assistant chat',
       'murph device connect oura --open',
-      'murph export AGENTMAIL_API_KEY=...',
       'murph export OURA_CLIENT_ID=...',
-      'murph export TELEGRAM_BOT_TOKEN=...',
       'murph automation scaffold',
     ],
   )
@@ -328,7 +301,6 @@ test('interactive onboard uses wizard defaults, runtime env hints, and setupHost
         services: {
           async setupHost(input) {
             setupHostCalls.push({
-              allowChannelPrompts: input.allowChannelPrompts,
               assistant: input.assistant,
               channels: input.channels == null ? null : [...input.channels],
               envOverrides: input.envOverrides,
@@ -406,7 +378,6 @@ test('interactive onboard uses wizard defaults, runtime env hints, and setupHost
     ])
     assert.deepEqual(setupHostCalls, [
       {
-        allowChannelPrompts: true,
         assistant: {
           account: null,
           approvalPolicy: null,

@@ -1,6 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
+import {
+  createHostedLinqParticipantContactLookupKey,
+} from "@/src/lib/hosted-onboarding/linq-participant-contact";
 
 const deadlineAnchors = vi.hoisted(() => [] as number[]);
 
@@ -21,12 +24,12 @@ const mocks = vi.hoisted(() => ({
   hasHostedMemberActivationProof: vi.fn(),
   hasHostedRuntimeActiveAccess: vi.fn(),
   hostedMemberFindUnique: vi.fn(),
-  hostedThreadContainerParticipantUpdateMany: vi.fn(),
-  hostedThreadContainerParticipantUpsert: vi.fn(),
+  hostedThreadContainerParticipantExecuteRaw: vi.fn(),
   hostedThreadContainerFindUnique: vi.fn(),
   isHostedMemberSuspended: vi.fn(),
   issueHostedSignupReferralLink: vi.fn(),
   leaveHostedGroupMemberTx: vi.fn(),
+  lookupHostedGroupParticipantMemberIdsByHandles: vi.fn(),
   lookupHostedMemberByVerifiedEmailAddress: vi.fn(),
   lookupHostedMemberIdentityByPhoneNumber: vi.fn(),
   armHostedPendingGroupSetupTx: vi.fn(),
@@ -34,11 +37,12 @@ const mocks = vi.hoisted(() => ({
   lookupHostedMemberRoutingByTelegramUserId: vi.fn(),
   prepareHostedGroupJoinOfferPostTx: vi.fn(),
   readActiveHostedMemberAccess: vi.fn(),
+  readHostedMemberActivationProofMemberIds: vi.fn(),
   readActiveHostedGroupDisclosureGrantsForGroup: vi.fn(),
   readActiveHostedGroupDisclosureGrantsForMember: vi.fn(),
   requestHostedGroupAssistantAsk: vi.fn(),
   requestHostedGroupCurrentSenderAssistantAsk: vi.fn(),
-  requestHostedGroupCurrentSenderPrivateAssistantAsk: vi.fn(),
+  recordHostedGroupCurrentSenderDailyMetric: vi.fn(),
   requestHostedGroupMemberAssistantAsk: vi.fn(),
   readHostedGroupByRuntimeMemberId: vi.fn(),
   readHostedGroupIdByRuntimeMemberId: vi.fn(),
@@ -100,6 +104,8 @@ vi.mock("@/src/lib/hosted-onboarding/member-access", () => ({
 
 vi.mock("@/src/lib/hosted-onboarding/member-activation", () => ({
   hasHostedMemberActivationProof: mocks.hasHostedMemberActivationProof,
+  readHostedMemberActivationProofMemberIds:
+    mocks.readHostedMemberActivationProofMemberIds,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-identity-store", () => ({
@@ -114,6 +120,18 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-routing-store", () => ({
   lookupHostedMemberRoutingByTelegramUserId:
     mocks.lookupHostedMemberRoutingByTelegramUserId,
 }));
+
+vi.mock("@/src/lib/hosted-groups/participant-member", async () => {
+  const actual = await vi.importActual<
+    typeof import("@/src/lib/hosted-groups/participant-member")
+  >("@/src/lib/hosted-groups/participant-member");
+
+  return {
+    ...actual,
+    lookupHostedGroupParticipantMemberIdsByHandles:
+      mocks.lookupHostedGroupParticipantMemberIdsByHandles,
+  };
+});
 
 vi.mock("@/src/lib/hosted-onboarding/linq-client", () => ({
   getHostedLinqChatHandles: mocks.getHostedLinqChatHandles,
@@ -226,8 +244,11 @@ vi.mock("@/src/lib/hosted-groups/group-assistant-ask", () => ({
 vi.mock("@/src/lib/hosted-groups/group-current-sender-assistant-ask", () => ({
   requestHostedGroupCurrentSenderAssistantAsk:
     mocks.requestHostedGroupCurrentSenderAssistantAsk,
-  requestHostedGroupCurrentSenderPrivateAssistantAsk:
-    mocks.requestHostedGroupCurrentSenderPrivateAssistantAsk,
+}));
+
+vi.mock("@/src/lib/hosted-groups/group-current-sender-daily-metric", () => ({
+  recordHostedGroupCurrentSenderDailyMetric:
+    mocks.recordHostedGroupCurrentSenderDailyMetric,
 }));
 
 vi.mock("@/src/lib/hosted-groups/group-disclosure-store", () => ({
@@ -279,10 +300,7 @@ const fakeTx = {
 };
 const fakePrisma = {
   ...fakeTx,
-  hostedThreadContainerParticipant: {
-    updateMany: mocks.hostedThreadContainerParticipantUpdateMany,
-    upsert: mocks.hostedThreadContainerParticipantUpsert,
-  },
+  $executeRaw: mocks.hostedThreadContainerParticipantExecuteRaw,
 };
 
 vi.mock("@/src/lib/prisma", () => ({
@@ -393,6 +411,25 @@ function addressBookLookupResult(
     names,
     outcome,
     requestedHandleCount: 2,
+  };
+}
+
+function readParticipantReconcileQuery(): {
+  sql: string;
+  values: readonly unknown[];
+} {
+  const query = mocks.hostedThreadContainerParticipantExecuteRaw.mock.calls.at(-1)?.[0] as
+    | { sql?: unknown; values?: unknown }
+    | undefined;
+  if (
+    typeof query?.sql !== "string"
+    || !Array.isArray(query.values)
+  ) {
+    throw new TypeError("Expected one parameterized participant reconcile statement.");
+  }
+  return {
+    sql: query.sql,
+    values: query.values,
   };
 }
 
@@ -554,8 +591,7 @@ describe("handleHostedRuntimeGroupTool", () => {
       ownerMemberId: "member_owner",
     });
     mocks.hostedMemberFindUnique.mockResolvedValue({ suspendedAt: null });
-    mocks.hostedThreadContainerParticipantUpdateMany.mockResolvedValue({ count: 0 });
-    mocks.hostedThreadContainerParticipantUpsert.mockResolvedValue({});
+    mocks.hostedThreadContainerParticipantExecuteRaw.mockResolvedValue(0);
     mocks.createHostedGroupJoinLinkForOwnedThreadContainerTx.mockResolvedValue({
       group: GROUP_SUMMARY,
       joinCode: "abc123",
@@ -591,7 +627,7 @@ describe("handleHostedRuntimeGroupTool", () => {
       mailboxWake: null,
       result: { status: "unavailable", unavailableReason: "not_configured" },
     });
-    mocks.requestHostedGroupCurrentSenderPrivateAssistantAsk.mockResolvedValue({
+    mocks.recordHostedGroupCurrentSenderDailyMetric.mockResolvedValue({
       mailboxWake: null,
       result: { status: "unavailable", unavailableReason: "not_configured" },
     });
@@ -605,7 +641,7 @@ describe("handleHostedRuntimeGroupTool", () => {
     expect(HOSTED_RUNTIME_GROUP_TOOL_ACCESS_CLASSIFICATION).toEqual({
       ask: "personal_active",
       ask_current_sender: "participant_aware",
-      message_current_sender: "participant_aware",
+      record_current_sender_daily_metric: "participant_aware",
       ask_member: "participant_aware",
       arm_usage_referral: "participant_aware",
       cancel_usage_referral: "participant_aware",
@@ -877,7 +913,7 @@ describe("handleHostedRuntimeGroupTool", () => {
     })).rejects.toBe(signalError);
   });
 
-  it("dispatches an exact current-sender ask and schedules only its personal wake", async () => {
+  it("dispatches one current-sender ask and schedules only its personal wake", async () => {
     const scheduleMailboxWake = vi.fn();
     const origin = {
       assistantInputId: `ain_${"c".repeat(32)}`,
@@ -894,7 +930,12 @@ describe("handleHostedRuntimeGroupTool", () => {
 
     await expect(handleHostedRuntimeGroupTool({
       memberId: "member_group_runtime",
-      request: { action: "ask_current_sender", origin },
+      request: {
+        action: "ask_current_sender",
+        audience: "group",
+        mode: "new",
+        origin,
+      },
       scheduleMailboxWake,
     })).resolves.toEqual({
       action: "ask_current_sender",
@@ -904,13 +945,146 @@ describe("handleHostedRuntimeGroupTool", () => {
     expect(
       mocks.requestHostedGroupCurrentSenderAssistantAsk,
     ).toHaveBeenCalledWith({
+      audience: "group",
       groupRuntimeMemberId: "member_group_runtime",
+      mode: "new",
       origin,
     });
     expect(scheduleMailboxWake).toHaveBeenCalledWith({
       expectedUserId: "member_sender",
       mailboxItemId: "aask_req_current_sender",
     });
+  });
+
+  it("dispatches an exact current-sender daily metric report and schedules its personal wake", async () => {
+    const scheduleMailboxWake = vi.fn();
+    const origin = {
+      assistantInputId: `ain_${"e".repeat(32)}`,
+      kind: "accepted_input" as const,
+      sessionId: "session_group",
+    };
+    const dailyMetric = {
+      date: "2026-08-13",
+      metric: "steps",
+      unit: "count",
+      value: 8_000,
+    };
+    mocks.recordHostedGroupCurrentSenderDailyMetric.mockResolvedValue({
+      mailboxWake: {
+        expectedUserId: "member_sender",
+        mailboxItemId: "daily_metric_report_one",
+      },
+      result: { status: "accepted" },
+    });
+
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_group_runtime",
+      request: {
+        action: "record_current_sender_daily_metric",
+        dailyMetric,
+        origin,
+      },
+      scheduleMailboxWake,
+    })).resolves.toEqual({
+      action: "record_current_sender_daily_metric",
+      result: { status: "accepted" },
+    });
+    expect(mocks.recordHostedGroupCurrentSenderDailyMetric).toHaveBeenCalledWith({
+      dailyMetric,
+      groupRuntimeMemberId: "member_group_runtime",
+      origin,
+    });
+    expect(scheduleMailboxWake).toHaveBeenCalledWith({
+      expectedUserId: "member_sender",
+      mailboxItemId: "daily_metric_report_one",
+    });
+  });
+
+  it("does not acknowledge or schedule a daily metric after consent revocation", async () => {
+    const scheduleMailboxWake = vi.fn();
+    mocks.recordHostedGroupCurrentSenderDailyMetric.mockResolvedValue({
+      mailboxWake: null,
+      result: {
+        status: "unavailable",
+        unavailableReason: "health_data_consent_revoked",
+      },
+    });
+
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_group_runtime",
+      request: {
+        action: "record_current_sender_daily_metric",
+        dailyMetric: {
+          date: "2026-08-13",
+          metric: "steps",
+          unit: "count",
+          value: 8_000,
+        },
+        origin: {
+          assistantInputId: `ain_${"d".repeat(32)}`,
+          kind: "accepted_input",
+          sessionId: "session_group",
+        },
+      },
+      scheduleMailboxWake,
+    })).resolves.toEqual({
+      action: "record_current_sender_daily_metric",
+      result: {
+        status: "unavailable",
+        unavailableReason: "health_data_consent_revoked",
+      },
+    });
+    expect(scheduleMailboxWake).not.toHaveBeenCalled();
+  });
+
+  it("acknowledges an already-committed daily metric when its first handoff fails", async () => {
+    const logger = { warn: vi.fn() };
+    const scheduleMailboxWake = vi.fn().mockRejectedValue(
+      new Error("Temporal unavailable"),
+    );
+    const origin = {
+      assistantInputId: `ain_${"f".repeat(32)}`,
+      kind: "accepted_input" as const,
+      sessionId: "session_group",
+    };
+    mocks.recordHostedGroupCurrentSenderDailyMetric.mockResolvedValue({
+      mailboxWake: {
+        expectedUserId: "member_sender",
+        mailboxItemId: "daily_metric_report_committed",
+      },
+      result: { status: "accepted" },
+    });
+
+    await expect(handleHostedRuntimeGroupTool({
+      logger,
+      memberId: "member_group_runtime",
+      request: {
+        action: "record_current_sender_daily_metric",
+        dailyMetric: {
+          date: "2026-08-13",
+          metric: "steps",
+          unit: "count",
+          value: 8_000,
+        },
+        origin,
+      },
+      scheduleMailboxWake,
+    })).resolves.toEqual({
+      action: "record_current_sender_daily_metric",
+      result: { status: "accepted" },
+    });
+    expect(scheduleMailboxWake).toHaveBeenCalledWith({
+      expectedUserId: "member_sender",
+      mailboxItemId: "daily_metric_report_committed",
+    });
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.stringContaining("recovery sweep will retry"),
+      expect.objectContaining({ outcome: "post_commit_handoff_failed" }),
+    );
+    expect(JSON.stringify(logger.warn.mock.calls)).not.toContain("member_sender");
+    expect(JSON.stringify(logger.warn.mock.calls)).not.toContain(
+      "daily_metric_report_committed",
+    );
   });
 
   it("does not acknowledge a current-sender ask when its durable mailbox handoff rejects", async () => {
@@ -931,49 +1105,18 @@ describe("handleHostedRuntimeGroupTool", () => {
 
     await expect(handleHostedRuntimeGroupTool({
       memberId: "member_group_runtime",
-      request: { action: "ask_current_sender", origin },
+      request: {
+        action: "ask_current_sender",
+        audience: "group",
+        mode: "new",
+        origin,
+      },
       scheduleMailboxWake,
     })).rejects.toBe(signalError);
 
     expect(scheduleMailboxWake).toHaveBeenCalledWith({
       expectedUserId: "member_sender",
       mailboxItemId: "aask_req_current_sender",
-    });
-  });
-
-  it("dispatches a current-sender private continuation and schedules its personal wake", async () => {
-    const scheduleMailboxWake = vi.fn();
-    const origin = {
-      assistantInputId: `ain_${"d".repeat(32)}`,
-      kind: "accepted_input" as const,
-      sessionId: "session_group",
-    };
-    mocks.requestHostedGroupCurrentSenderPrivateAssistantAsk.mockResolvedValue({
-      mailboxWake: {
-        expectedUserId: "member_sender",
-        mailboxItemId: "aask_req_private_sender",
-      },
-      result: { status: "accepted" },
-    });
-
-    await expect(handleHostedRuntimeGroupTool({
-      memberId: "member_group_runtime",
-      request: { action: "message_current_sender", origin },
-      scheduleMailboxWake,
-    })).resolves.toEqual({
-      action: "message_current_sender",
-      result: { status: "accepted" },
-    });
-
-    expect(
-      mocks.requestHostedGroupCurrentSenderPrivateAssistantAsk,
-    ).toHaveBeenCalledWith({
-      groupRuntimeMemberId: "member_group_runtime",
-      origin,
-    });
-    expect(scheduleMailboxWake).toHaveBeenCalledWith({
-      expectedUserId: "member_sender",
-      mailboxItemId: "aask_req_private_sender",
     });
   });
 
@@ -3044,6 +3187,26 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     });
     mocks.isHostedMemberSuspended.mockReturnValue(false);
     mocks.hasHostedMemberActivationProof.mockResolvedValue(true);
+    mocks.lookupHostedGroupParticipantMemberIdsByHandles.mockImplementation(
+      async ({ handles }: { handles: readonly string[] }) => new Map(
+        handles.map((handle) => {
+          const participantMemberId = handle === "+15550000001"
+              || /^\+15550(?:01|11)\d{4}$/u.test(handle)
+            ? `member_${handle.slice(-4)}`
+            : null;
+          return [
+            handle,
+            handle === "+15550000001"
+              ? "member_participant"
+              : participantMemberId,
+          ];
+        }),
+      ),
+    );
+    mocks.readHostedMemberActivationProofMemberIds.mockImplementation(
+      async ({ memberIds }: { memberIds: readonly string[] }) => new Set(memberIds),
+    );
+    mocks.hostedThreadContainerParticipantExecuteRaw.mockResolvedValue(0);
     mocks.lookupHostedMemberIdentityByPhoneNumber.mockResolvedValue({
       core: { id: "member_participant", suspendedAt: null },
     });
@@ -4486,6 +4649,9 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     });
 
     expect(mocks.getHostedLinqChatHandles).not.toHaveBeenCalled();
+    expect(mocks.lookupHostedGroupParticipantMemberIdsByHandles).not.toHaveBeenCalled();
+    expect(mocks.readHostedMemberActivationProofMemberIds).not.toHaveBeenCalled();
+    expect(mocks.hostedThreadContainerParticipantExecuteRaw).not.toHaveBeenCalled();
   });
 
   it("keeps read_chat_participants participant-aware when the generic runtime gate is inactive", async () => {
@@ -4548,44 +4714,59 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     expect(mocks.assertHostedLinqRouteEgressAuthority).toHaveBeenCalledWith(
       expect.objectContaining({ authority: LINQ_THREAD.authority }),
     );
-    expect(mocks.lookupHostedMemberIdentityByPhoneNumber).toHaveBeenCalledTimes(1);
-    expect(mocks.lookupHostedMemberByVerifiedEmailAddress).toHaveBeenCalledWith(
-      expect.objectContaining({ address: "person@example.com" }),
+    expect(
+      mocks.assertHostedLinqRouteEgressAuthority.mock.invocationCallOrder[0],
+    ).toBeLessThan(mocks.getHostedLinqChatHandles.mock.invocationCallOrder[0]!);
+    expect(
+      mocks.getHostedLinqChatHandles.mock.invocationCallOrder[0],
+    ).toBeLessThan(
+      mocks.lookupHostedGroupParticipantMemberIdsByHandles.mock
+        .invocationCallOrder[0]!,
     );
-    expect(mocks.hasHostedMemberActivationProof).toHaveBeenCalledWith({
-      memberId: "member_participant",
-      prisma: expect.anything(),
-    });
-    expect(mocks.hostedThreadContainerParticipantUpsert).toHaveBeenCalledWith(
-      expect.objectContaining({
-        create: expect.objectContaining({
-          containerMemberId: "member_container",
-          handleLookupKey: expect.stringMatching(/^hbidx:phone:/),
-          participantMemberId: "member_participant",
-          removedAt: null,
-        }),
-        update: expect.objectContaining({
-          handleLookupKey: expect.stringMatching(/^hbidx:phone:/),
-          removedAt: null,
-        }),
-        where: {
-          containerMemberId_participantMemberId: {
-            containerMemberId: "member_container",
-            participantMemberId: "member_participant",
-          },
-        },
-      }),
+    expect(mocks.lookupHostedGroupParticipantMemberIdsByHandles)
+      .toHaveBeenCalledExactlyOnceWith({
+        handles: ["+15550000001", "person@example.com"],
+        prisma: expect.anything(),
+      });
+    expect(
+      mocks.lookupHostedGroupParticipantMemberIdsByHandles.mock
+        .invocationCallOrder[0],
+    ).toBeLessThan(
+      mocks.readHostedMemberActivationProofMemberIds.mock
+        .invocationCallOrder[0]!,
     );
-    expect(mocks.hostedThreadContainerParticipantUpdateMany).toHaveBeenCalledWith({
-      data: {
-        removedAt: expect.any(Date),
-      },
-      where: {
-        containerMemberId: "member_container",
-        participantMemberId: { notIn: ["member_participant"] },
-        removedAt: null,
-      },
-    });
+    expect(mocks.lookupHostedMemberIdentityByPhoneNumber).not.toHaveBeenCalled();
+    expect(mocks.lookupHostedMemberByVerifiedEmailAddress).not.toHaveBeenCalled();
+    expect(mocks.readHostedMemberActivationProofMemberIds)
+      .toHaveBeenCalledExactlyOnceWith({
+        memberIds: ["member_participant"],
+        prisma: expect.anything(),
+      });
+    expect(mocks.hasHostedMemberActivationProof).not.toHaveBeenCalled();
+    expect(mocks.hostedThreadContainerParticipantExecuteRaw).toHaveBeenCalledTimes(1);
+    expect(
+      mocks.readHostedMemberActivationProofMemberIds.mock.invocationCallOrder[0],
+    ).toBeLessThan(
+      mocks.hostedThreadContainerParticipantExecuteRaw.mock.invocationCallOrder[0]!,
+    );
+    const reconcileQuery = readParticipantReconcileQuery();
+    expect(reconcileQuery.sql).toContain(
+      "WITH input_participant(participant_member_id, handle_lookup_key)",
+    );
+    expect(reconcileQuery.sql).toContain(
+      "ON CONFLICT (container_member_id, participant_member_id)",
+    );
+    expect(reconcileQuery.sql).toContain(
+      "UPDATE hosted_thread_container_participant AS participant",
+    );
+    expect(reconcileQuery.values).toEqual(expect.arrayContaining([
+      "member_container",
+      "member_participant",
+      true,
+    ]));
+    expect(reconcileQuery.values.some((value) =>
+      typeof value === "string" && /^hbidx:phone:/u.test(value)
+    )).toBe(true);
 
     await expect(handleHostedRuntimeGroupTool({
       memberId: "member_container",
@@ -4786,10 +4967,6 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
       { handle: "+15557770000", isMe: true, status: "active" },
       ...activeHandles,
     ]);
-    mocks.lookupHostedMemberIdentityByPhoneNumber.mockImplementation(async ({ phoneNumber }) => ({
-      core: { id: `member_${phoneNumber.slice(-4)}`, suspendedAt: null },
-    }));
-
     const response = await handleHostedRuntimeGroupTool({
       memberId: "member_container",
       request: { action: "read_chat_participants", linqThread: LINQ_THREAD },
@@ -4805,17 +4982,28 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     expect(response.result.participants).toHaveLength(
       HOSTED_THREAD_CONTAINER_PARTICIPANT_RECONCILE_MAX,
     );
-    expect(mocks.lookupHostedMemberIdentityByPhoneNumber).toHaveBeenCalledTimes(
-      HOSTED_THREAD_CONTAINER_PARTICIPANT_RECONCILE_MAX,
-    );
-    expect(mocks.hasHostedMemberActivationProof).toHaveBeenCalledTimes(
-      HOSTED_THREAD_CONTAINER_PARTICIPANT_RECONCILE_MAX,
-    );
+    expect(mocks.lookupHostedGroupParticipantMemberIdsByHandles)
+      .toHaveBeenCalledExactlyOnceWith({
+        handles: activeHandles.slice(
+          0,
+          HOSTED_THREAD_CONTAINER_PARTICIPANT_RECONCILE_MAX,
+        ).map((handle) => handle.handle),
+        prisma: expect.anything(),
+      });
+    expect(mocks.lookupHostedMemberIdentityByPhoneNumber).not.toHaveBeenCalled();
+    expect(mocks.lookupHostedMemberByVerifiedEmailAddress).not.toHaveBeenCalled();
+    expect(mocks.readHostedMemberActivationProofMemberIds)
+      .toHaveBeenCalledExactlyOnceWith({
+        memberIds: Array.from(
+          { length: HOSTED_THREAD_CONTAINER_PARTICIPANT_RECONCILE_MAX },
+          (_, index) => `member_${index.toString().padStart(4, "0")}`,
+        ),
+        prisma: expect.anything(),
+      });
+    expect(mocks.hasHostedMemberActivationProof).not.toHaveBeenCalled();
     expect(mocks.readActiveHostedMemberAccess).not.toHaveBeenCalled();
-    expect(mocks.hostedThreadContainerParticipantUpsert).toHaveBeenCalledTimes(
-      HOSTED_THREAD_CONTAINER_PARTICIPANT_RECONCILE_MAX,
-    );
-    expect(mocks.hostedThreadContainerParticipantUpdateMany).not.toHaveBeenCalled();
+    expect(mocks.hostedThreadContainerParticipantExecuteRaw).toHaveBeenCalledTimes(1);
+    expect(readParticipantReconcileQuery().values).toContain(false);
     expect(warn).toHaveBeenCalledWith(
       "Hosted thread-container participant reconcile capped.",
       expect.objectContaining({
@@ -4835,7 +5023,9 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
 
   it("does not confuse durable Murph activation with current access", async () => {
     mocks.readActiveHostedMemberAccess.mockResolvedValue(false);
-    mocks.hasHostedMemberActivationProof.mockResolvedValue(true);
+    mocks.readHostedMemberActivationProofMemberIds.mockResolvedValue(
+      new Set(["member_participant"]),
+    );
 
     await expect(handleHostedRuntimeGroupTool({
       memberId: "member_container",
@@ -4855,7 +5045,7 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     expect(mocks.readHostedGroupByRuntimeMemberId).not.toHaveBeenCalled();
   });
 
-  it("bounds at-creation reconcile lookups and upserts to the roster cap", async () => {
+  it("bounds at-creation reconcile resolution and writes to the roster cap", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const activeHandles = Array.from(
       { length: HOSTED_THREAD_CONTAINER_PARTICIPANT_RECONCILE_MAX + 1 },
@@ -4869,10 +5059,6 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
       { handle: "+15557770000", isMe: true, status: "active" },
       ...activeHandles,
     ]);
-    mocks.lookupHostedMemberIdentityByPhoneNumber.mockImplementation(async ({ phoneNumber }) => ({
-      core: { id: `member_${phoneNumber.slice(-4)}`, suspendedAt: null },
-    }));
-
     await reconcileHostedThreadContainerParticipants({
       chatId: "chat_group_1",
       containerMemberId: "member_container",
@@ -4882,13 +5068,19 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     expect(mocks.getHostedLinqChatHandles).toHaveBeenCalledWith({
       chatId: "chat_group_1",
     });
-    expect(mocks.lookupHostedMemberIdentityByPhoneNumber).toHaveBeenCalledTimes(
-      HOSTED_THREAD_CONTAINER_PARTICIPANT_RECONCILE_MAX,
-    );
-    expect(mocks.hostedThreadContainerParticipantUpsert).toHaveBeenCalledTimes(
-      HOSTED_THREAD_CONTAINER_PARTICIPANT_RECONCILE_MAX,
-    );
-    expect(mocks.hostedThreadContainerParticipantUpdateMany).not.toHaveBeenCalled();
+    expect(mocks.lookupHostedGroupParticipantMemberIdsByHandles)
+      .toHaveBeenCalledExactlyOnceWith({
+        handles: activeHandles.slice(
+          0,
+          HOSTED_THREAD_CONTAINER_PARTICIPANT_RECONCILE_MAX,
+        ).map((handle) => handle.handle),
+        prisma: fakePrisma,
+      });
+    expect(mocks.lookupHostedMemberIdentityByPhoneNumber).not.toHaveBeenCalled();
+    expect(mocks.lookupHostedMemberByVerifiedEmailAddress).not.toHaveBeenCalled();
+    expect(mocks.readHostedMemberActivationProofMemberIds).not.toHaveBeenCalled();
+    expect(mocks.hostedThreadContainerParticipantExecuteRaw).toHaveBeenCalledTimes(1);
+    expect(readParticipantReconcileQuery().values).toContain(false);
     expect(warn).toHaveBeenCalledWith(
       "Hosted thread-container participant reconcile capped.",
       expect.objectContaining({
@@ -4920,6 +5112,10 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
         unavailableReason: "provider_unavailable",
       },
     });
+
+    expect(mocks.lookupHostedGroupParticipantMemberIdsByHandles).not.toHaveBeenCalled();
+    expect(mocks.readHostedMemberActivationProofMemberIds).not.toHaveBeenCalled();
+    expect(mocks.hostedThreadContainerParticipantExecuteRaw).not.toHaveBeenCalled();
   });
 
   it("reports provider trouble as unavailable instead of throwing", async () => {
@@ -4936,6 +5132,47 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
         unavailableReason: "provider_unavailable",
       },
     });
+
+    expect(mocks.lookupHostedGroupParticipantMemberIdsByHandles).not.toHaveBeenCalled();
+    expect(mocks.readHostedMemberActivationProofMemberIds).not.toHaveBeenCalled();
+    expect(mocks.hostedThreadContainerParticipantExecuteRaw).not.toHaveBeenCalled();
+  });
+
+  it("dedupes same-member handles by first provider order in one statement", async () => {
+    const firstHandle = "+15550000001";
+    const laterHandle = "+15550000002";
+    const firstLookupKey = createHostedLinqParticipantContactLookupKey({
+      kind: "phone",
+      value: firstHandle,
+    });
+    const laterLookupKey = createHostedLinqParticipantContactLookupKey({
+      kind: "phone",
+      value: laterHandle,
+    });
+    if (!firstLookupKey || !laterLookupKey) {
+      throw new Error("Expected valid participant lookup keys.");
+    }
+
+    await reconcileHostedThreadContainerParticipants({
+      chatId: "chat_group_1",
+      containerMemberId: "member_container",
+      handles: [
+        { handle: firstHandle, isMe: false, status: "active" },
+        { handle: laterHandle, isMe: false, status: "active" },
+      ],
+      prisma: fakePrisma as never,
+      resolvedParticipants: [
+        { handle: firstHandle, participantMemberId: "member_participant" },
+        { handle: laterHandle, participantMemberId: "member_participant" },
+      ],
+    });
+
+    expect(mocks.hostedThreadContainerParticipantExecuteRaw).toHaveBeenCalledTimes(1);
+    const reconcileQuery = readParticipantReconcileQuery();
+    expect(reconcileQuery.values).toContain(firstLookupKey);
+    expect(reconcileQuery.values).not.toContain(laterLookupKey);
+    expect(reconcileQuery.values.filter((value) => value === "member_participant"))
+      .toHaveLength(1);
   });
 
   it("soft-removes prior roster members when a successful roster pass sees none", async () => {
@@ -4949,16 +5186,14 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
       resolvedParticipants: [],
     });
 
-    expect(mocks.hostedThreadContainerParticipantUpsert).not.toHaveBeenCalled();
-    expect(mocks.hostedThreadContainerParticipantUpdateMany).toHaveBeenCalledWith({
-      data: {
-        removedAt: expect.any(Date),
-      },
-      where: {
-        containerMemberId: "member_container",
-        removedAt: null,
-      },
-    });
+    expect(mocks.hostedThreadContainerParticipantExecuteRaw).toHaveBeenCalledTimes(1);
+    const reconcileQuery = readParticipantReconcileQuery();
+    expect(reconcileQuery.sql).toContain("SELECT NULL::text, NULL::text");
+    expect(reconcileQuery.sql).toContain("WHERE FALSE");
+    expect(reconcileQuery.values).toEqual(expect.arrayContaining([
+      "member_container",
+      true,
+    ]));
   });
 
   it("keeps the existing roster projection when the provider fetch fails", async () => {
@@ -4971,11 +5206,44 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
       prisma: fakePrisma as never,
     });
 
-    expect(mocks.hostedThreadContainerParticipantUpsert).not.toHaveBeenCalled();
-    expect(mocks.hostedThreadContainerParticipantUpdateMany).not.toHaveBeenCalled();
+    expect(mocks.lookupHostedGroupParticipantMemberIdsByHandles).not.toHaveBeenCalled();
+    expect(mocks.hostedThreadContainerParticipantExecuteRaw).not.toHaveBeenCalled();
     expect(warn).toHaveBeenCalledWith(
       "Hosted thread-container participant reconcile skipped.",
       expect.objectContaining({
+        reason: "reconcile_failed",
+      }),
+    );
+    warn.mockRestore();
+  });
+
+  it("keeps set reconciliation fail-soft when PostgreSQL rejects the statement", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    mocks.hostedThreadContainerParticipantExecuteRaw.mockRejectedValueOnce(
+      new Error("postgres unavailable"),
+    );
+
+    await expect(reconcileHostedThreadContainerParticipants({
+      chatId: "chat_group_1",
+      containerMemberId: "member_container",
+      handles: [
+        { handle: "+15550000001", isMe: false, status: "active" },
+      ],
+      prisma: fakePrisma as never,
+      resolvedParticipants: [
+        {
+          handle: "+15550000001",
+          participantMemberId: "member_participant",
+        },
+      ],
+    })).resolves.toBeUndefined();
+
+    expect(mocks.lookupHostedGroupParticipantMemberIdsByHandles).not.toHaveBeenCalled();
+    expect(mocks.hostedThreadContainerParticipantExecuteRaw).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalledWith(
+      "Hosted thread-container participant reconcile skipped.",
+      expect.objectContaining({
+        errorName: "Error",
         reason: "reconcile_failed",
       }),
     );
@@ -5304,7 +5572,9 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
   });
 
   it("reports membership lookup trouble as structured unavailability", async () => {
-    mocks.lookupHostedMemberIdentityByPhoneNumber.mockRejectedValue(new Error("identity store down"));
+    mocks.lookupHostedGroupParticipantMemberIdsByHandles.mockRejectedValueOnce(
+      new Error("identity store down"),
+    );
 
     await expect(handleHostedRuntimeGroupTool({
       memberId: "member_container",
@@ -5317,6 +5587,10 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
         unavailableReason: "membership_lookup_unavailable",
       },
     });
+
+    expect(mocks.lookupHostedGroupParticipantMemberIdsByHandles).toHaveBeenCalledTimes(1);
+    expect(mocks.readHostedMemberActivationProofMemberIds).not.toHaveBeenCalled();
+    expect(mocks.hostedThreadContainerParticipantExecuteRaw).not.toHaveBeenCalled();
   });
 
   it("maps a provider_unavailable skip to structured unavailability", async () => {

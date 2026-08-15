@@ -302,7 +302,8 @@ const CONNECT_SOURCE_UI = {
     name: "Kardia",
   },
   cronometer: {
-    description: "Calories, macros, micronutrients, and meal timing.",
+    description:
+      "Meal logs with calories, macros, timing, and supported nutrient fields. Daily targets and dashboard percentages stay in Cronometer.",
     logo: logoAsset("cronometer.png"),
     name: "Cronometer",
   },

@@ -13,16 +13,29 @@ import {
   createHostedPrivyUserLookupKey,
 } from "@/src/lib/hosted-onboarding/contact-privacy";
 import {
+  commitPreparedHostedMemberIdentityWriteTx,
   lookupHostedMemberIdentityByPhoneNumber,
+  prepareHostedMemberIdentityWrite,
+  readHostedMemberIdentity,
 } from "@/src/lib/hosted-onboarding/hosted-member-identity-store";
-import { readHostedMemberCoreState } from "@/src/lib/hosted-onboarding/hosted-member-store";
+import {
+  readHostedMemberCoreState,
+  readHostedMemberSnapshot,
+} from "@/src/lib/hosted-onboarding/hosted-member-store";
+import { buildHostedPersistedPhoneIdentityFields } from "@/src/lib/hosted-onboarding/member-identity-fields";
 import {
   ensureHostedMemberForPhoneResolutionTx,
   reconcileHostedPrivyIdentityOnMemberTx,
 } from "@/src/lib/hosted-onboarding/member-identity-service";
 import {
   acquireHostedPrivyPhoneTransferPhoneLocksTx,
+  assertHostedPrivyPhoneTransferSourceRetirementFenceTx,
 } from "@/src/lib/hosted-onboarding/privy-phone-transfer-retirement";
+import {
+  commitPreparedHostedMemberChannelsUpdatedTx,
+  enqueueHostedMemberChannelsUpdatedTx,
+  prepareHostedMemberChannelsUpdatedForSnapshot,
+} from "@/src/lib/hosted-onboarding/member-channel-sync";
 import { lockHostedMemberRow } from "@/src/lib/hosted-onboarding/shared";
 import { createPrismaClient } from "@/src/lib/prisma";
 
@@ -301,6 +314,259 @@ describe.skipIf(!runPostgresConcurrencyProof)(
         }
       },
     );
+
+    it("prepares encrypted target identity fields before the terminal source-delete transaction", async () => {
+      const observer = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const fixture = await createFixture(observer);
+      const transferLookupKey = createHostedPhoneLookupKey(transferPhoneNumber);
+      let terminalTransactionActive = false;
+      let encryptionCalls = 0;
+      let encryptionCallsDuringTerminalTransaction = 0;
+      let forcePreparedEncryptionFailure = false;
+      let rootPreparationCallsDuringTerminalTransaction = 0;
+      const terminalPrivateCodecError =
+        "private identity codec invoked inside terminal transaction";
+      domainRootMocks.provisionActiveHostedDomainRootEnvelopeForUserOnly
+        .mockReset()
+        .mockImplementation(async () => {
+          if (terminalTransactionActive) {
+            rootPreparationCallsDuringTerminalTransaction += 1;
+          }
+          return undefined;
+        });
+      setHostedSecureBoxStringTestCodecForTests({
+        decrypt(input) {
+          if (terminalTransactionActive) {
+            throw new Error(terminalPrivateCodecError);
+          }
+          return input.value;
+        },
+        encrypt(input) {
+          encryptionCalls += 1;
+          if (forcePreparedEncryptionFailure) {
+            throw new Error("forced prepared channel encryption failure");
+          }
+          if (terminalTransactionActive) {
+            encryptionCallsDuringTerminalTransaction += 1;
+            throw new Error(terminalPrivateCodecError);
+          }
+          return input.value;
+        },
+      });
+
+      try {
+        if (!transferLookupKey) {
+          throw new Error("Expected a transfer phone lookup key.");
+        }
+        await observer.hostedMember.update({
+          data: { suspendedAt: transferAt },
+          where: { id: fixture.sourceMemberId },
+        });
+        const [currentIdentity, currentSnapshot, targetMember] = await Promise.all([
+          readHostedMemberIdentity({
+            memberId: fixture.targetMemberId,
+            prisma: observer,
+          }),
+          readHostedMemberSnapshot({
+            memberId: fixture.targetMemberId,
+            prisma: observer,
+          }),
+          readHostedMemberCoreState({
+            memberId: fixture.targetMemberId,
+            prisma: observer,
+          }),
+        ]);
+        if (!currentIdentity || !currentSnapshot || !targetMember) {
+          throw new Error("Expected the phone-transfer target snapshot.");
+        }
+        const transferredPrivyIdentity = {
+          phone: {
+            number: transferPhoneNumber,
+            verifiedAt: transferAt.getTime(),
+          },
+          telegram: null,
+          userId: fixture.targetPrivyUserId,
+        };
+        await assertHostedPrivyPhoneTransferSourceRetirementFenceTx({
+          identity: transferredPrivyIdentity,
+          member: targetMember,
+          prisma: observer,
+          targetPhoneNumberBeforeTransfer,
+          transfer: {
+            phoneNumber: transferPhoneNumber,
+            sourceMemberId: fixture.sourceMemberId,
+            sourcePrivyUserId: fixture.sourcePrivyUserId,
+          },
+        });
+        const nextPhoneIdentity = buildHostedPersistedPhoneIdentityFields({
+          currentIdentity,
+          now: transferAt,
+          phone: transferredPrivyIdentity.phone,
+        });
+        const prepared = await prepareHostedMemberIdentityWrite({
+          ...nextPhoneIdentity,
+          memberId: fixture.targetMemberId,
+          prisma: observer,
+          privyUserId: fixture.targetPrivyUserId,
+          signupPhoneCodeSendAttemptId: null,
+          signupPhoneCodeSendAttemptStartedAt: null,
+          signupPhoneCodeSentAt: null,
+          signupPhoneNumber: null,
+        });
+        forcePreparedEncryptionFailure = true;
+        await expect(prepareHostedMemberChannelsUpdatedForSnapshot({
+          emailLinked: false,
+          member: currentSnapshot,
+          memberId: fixture.targetMemberId,
+          occurredAt: new Date(transferAt.getTime() - 2_000).toISOString(),
+          prisma: observer,
+          sourceType: "settings.phone.failed-preparation",
+        })).rejects.toThrow("forced prepared channel encryption failure");
+        forcePreparedEncryptionFailure = false;
+        await expect(observer.hostedMailboxLaneCounter.count({
+          where: { userId: fixture.targetMemberId },
+        })).resolves.toBe(0);
+        const preparedChannelAppend =
+          await prepareHostedMemberChannelsUpdatedForSnapshot({
+            emailLinked: false,
+            member: {
+              ...currentSnapshot,
+              identity: {
+                ...currentIdentity,
+                ...nextPhoneIdentity,
+                privyUserId: fixture.targetPrivyUserId,
+                signupPhoneCodeSendAttemptId: null,
+                signupPhoneCodeSendAttemptStartedAt: null,
+                signupPhoneCodeSentAt: null,
+                signupPhoneNumber: null,
+              },
+            },
+            memberId: fixture.targetMemberId,
+            occurredAt: transferAt.toISOString(),
+            prisma: observer,
+            sourceType: "settings.phone.sync",
+          });
+        expect(encryptionCalls).toBeGreaterThan(0);
+        await expect(observer.hostedMailboxLaneCounter.count({
+          where: { userId: fixture.targetMemberId },
+        })).resolves.toBe(0);
+
+        await expect(observer.$transaction(async (tx) => {
+          terminalTransactionActive = true;
+          await commitPreparedHostedMemberChannelsUpdatedTx({
+            prepared: preparedChannelAppend,
+            prisma: tx,
+          });
+          terminalTransactionActive = false;
+          throw new Error("forced terminal fingerprint rejection");
+        }, transactionOptions)).rejects.toThrow(
+          "forced terminal fingerprint rejection",
+        );
+        terminalTransactionActive = false;
+        await expect(observer.hostedMailboxLaneCounter.count({
+          where: { userId: fixture.targetMemberId },
+        })).resolves.toBe(0);
+        await expect(observer.hostedMailboxItem.count({
+          where: { userId: fixture.targetMemberId },
+        })).resolves.toBe(0);
+
+        await observer.$transaction((tx) =>
+          enqueueHostedMemberChannelsUpdatedTx({
+            emailLinked: false,
+            memberId: fixture.targetMemberId,
+            occurredAt: new Date(transferAt.getTime() - 1_000).toISOString(),
+            prisma: tx,
+            sourceType: "settings.phone.concurrent-update",
+          })
+        );
+
+        await observer.$transaction(async (tx) => {
+          await acquireHostedPrivyPhoneTransferPhoneLocksTx({
+            prisma: tx,
+            targetPhoneNumberBeforeTransfer,
+            transferPhoneNumber,
+          });
+          for (const memberId of [
+            fixture.sourceMemberId,
+            fixture.targetMemberId,
+          ].sort()) {
+            await lockHostedMemberRow(tx, memberId);
+          }
+          terminalTransactionActive = true;
+          await tx.hostedMember.delete({
+            where: { id: fixture.sourceMemberId },
+          });
+          await commitPreparedHostedMemberIdentityWriteTx({
+            memberId: fixture.targetMemberId,
+            prepared,
+            prisma: tx,
+          });
+          await commitPreparedHostedMemberChannelsUpdatedTx({
+            prepared: preparedChannelAppend,
+            prisma: tx,
+          });
+          terminalTransactionActive = false;
+        }, transactionOptions);
+
+        expect(encryptionCallsDuringTerminalTransaction).toBe(0);
+        expect(rootPreparationCallsDuringTerminalTransaction).toBe(0);
+        await expectPhoneOwnership({
+          expectedTargetPhoneNumber: transferPhoneNumber,
+          fixture,
+          observer,
+        });
+        await expect(observer.hostedMailboxItem.count({
+          where: {
+            kind: "member.channels.updated",
+            userId: fixture.targetMemberId,
+          },
+        })).resolves.toBe(2);
+        await expect(observer.hostedMailboxItem.findMany({
+          orderBy: { laneSeq: "asc" },
+          select: { causalSeq: true, laneSeq: true },
+          where: {
+            kind: "member.channels.updated",
+            userId: fixture.targetMemberId,
+          },
+        })).resolves.toEqual([
+          { causalSeq: 1n, laneSeq: 1n },
+          { causalSeq: 2n, laneSeq: 2n },
+        ]);
+        await expect(observer.hostedMailboxLaneCounter.findMany({
+          orderBy: { lane: "asc" },
+          select: { lane: true, nextSeq: true },
+          where: { userId: fixture.targetMemberId },
+        })).resolves.toEqual([
+          { lane: "causal", nextSeq: 3n },
+          { lane: "system", nextSeq: 3n },
+        ]);
+
+        await observer.$transaction(async (tx) => {
+          terminalTransactionActive = true;
+          await expect(prepareHostedMemberIdentityWrite({
+            maskedPhoneNumberHint: "•••0002",
+            memberId: fixture.targetMemberId,
+            phoneLookupKey: transferLookupKey,
+            phoneNumber: transferPhoneNumber,
+            phoneNumberVerifiedAt: transferAt,
+            prisma: tx as never,
+            privyUserId: fixture.targetPrivyUserId,
+            signupPhoneCodeSendAttemptId: null,
+            signupPhoneCodeSendAttemptStartedAt: null,
+            signupPhoneCodeSentAt: null,
+            signupPhoneNumber: null,
+          })).rejects.toThrow(terminalPrivateCodecError);
+          terminalTransactionActive = false;
+        });
+        expect(rootPreparationCallsDuringTerminalTransaction).toBe(1);
+      } finally {
+        terminalTransactionActive = false;
+        forcePreparedEncryptionFailure = false;
+        resetTestSeams();
+        await deleteFixtureMembers({ fixture, observer });
+        await observer.$disconnect();
+      }
+    });
   },
 );
 

@@ -23,9 +23,11 @@ import type {
   StoredDeviceSyncAccountCredential,
   StoredDeviceSyncAccount,
   ListDeviceSyncAccountsInput,
+  OAuthStateConsumeClaim,
   UpsertPublicDeviceSyncExistingAccountGuard,
   UpsertPublicDeviceSyncExistingAccountPolicy,
 } from "../types.ts";
+import { resolveOAuthStateWithoutProviderAuthority } from "./oauth-states.ts";
 
 type SqliteRow = Record<string, unknown>;
 
@@ -53,6 +55,7 @@ export interface AccountUpsertInput {
   existingAccountPolicy?: UpsertPublicDeviceSyncExistingAccountPolicy;
   connectedAt: string;
   nextReconcileAt?: string | null;
+  oauthClaim?: OAuthStateConsumeClaim;
 }
 
 export interface AccountPatchInput {
@@ -901,6 +904,7 @@ export function upsertAccount(
           input.existingAccountPolicy ?? "replace",
         )
       ) {
+        requireExactOAuthClaimResolution(database, input.oauthClaim);
         return existing;
       }
       const credential = resolveAccountCredentialInput(input);
@@ -974,7 +978,9 @@ export function upsertAccount(
         existing.id,
       );
 
-      return getAccountById(database, existing.id)!;
+      const updated = getAccountById(database, existing.id)!;
+      requireExactOAuthClaimResolution(database, input.oauthClaim);
+      return updated;
     }
 
     assertAccountUpsertExistingGuard(null, input.existingAccountGuard ?? null);
@@ -1062,8 +1068,27 @@ export function upsertAccount(
       now,
     );
 
-    return getAccountById(database, id)!;
+    const created = getAccountById(database, id)!;
+    requireExactOAuthClaimResolution(database, input.oauthClaim);
+    return created;
   });
+}
+
+function requireExactOAuthClaimResolution(
+  database: DatabaseSync,
+  claim: OAuthStateConsumeClaim | undefined,
+): void {
+  if (!claim) {
+    return;
+  }
+  if (!resolveOAuthStateWithoutProviderAuthority(database, claim)) {
+    throw deviceSyncError({
+      code: "OAUTH_STATE_CHANGED",
+      message: "OAuth callback ownership changed before its durable connection outcome committed.",
+      retryable: true,
+      httpStatus: 409,
+    });
+  }
 }
 
 function assertAccountUpsertExistingGuard(

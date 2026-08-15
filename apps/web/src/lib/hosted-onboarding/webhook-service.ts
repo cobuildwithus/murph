@@ -36,12 +36,16 @@ import {
   summarizeHostedTelegramWebhook,
 } from "./telegram";
 import {
+  HOSTED_LINQ_MESSAGE_EDIT_MAX_SOURCE_ROWS,
   planHostedLinqMessageEditedWebhook,
   planHostedOnboardingLinqWebhook,
+  prepareHostedLinqThreadContainerAdmission,
+  prewarmHostedLinqMessageEditPreparation,
+  readHostedLinqMessageEditPreparation,
   resolveHostedLinqDirectPreparationMemberId,
-  resolveHostedLinqThreadContainerCryptoPreparationTarget,
   resolveHostedLinqMailboxPayloadRootPrewarmMemberId,
   resolveHostedLinqTypingPrewarmMemberId,
+  type HostedLinqMessageEditPreparation,
   type HostedOnboardingLinqWebhookResponse,
 } from "./webhook-provider-linq";
 import {
@@ -73,6 +77,7 @@ import {
   runWithHostedDomainRootProviderCallsDisabled,
 } from "../hosted-crypto/domain-root-unwrap-cache";
 import {
+  isHostedDomainRootPreparationRequiredError,
   HostedDomainRootPreparationMismatchError,
   prepareHostedDomainRootForWeb,
   prepareHostedCryptoDomainRootCandidates,
@@ -82,6 +87,9 @@ import {
   type PreparedHostedDomainRootForWeb,
 } from "../hosted-crypto/domain-root-store";
 import { getHostedCryptoDomainForLane } from "@murphai/runtime-state";
+import {
+  isHostedMailboxSourceConversationPreparationMismatchError,
+} from "../hosted-mailbox/store";
 import {
   runWithPrismaOperationTimings,
   type PrismaOperationTiming,
@@ -134,12 +142,6 @@ import {
   type PreparedHostedThreadContainerDeliveryRoute,
 } from "../hosted-routing/thread-container-service";
 import {
-  HOSTED_PENDING_GROUP_SETUP_MAX_PARTICIPANT_MEMBERS,
-  prepareHostedPendingGroupSetupClaimForParticipants,
-  readHostedPendingGroupSetupPreparationFailure,
-  type PreparedHostedPendingGroupSetupClaim,
-} from "../hosted-groups/pending-group-setup";
-import {
   HOSTED_TELEGRAM_THREAD_ACCOUNT_LOOKUP_KEY,
 } from "../hosted-routing/thread-delivery-route";
 import {
@@ -186,8 +188,12 @@ import {
   reconcileHostedThreadContainerParticipants,
 } from "../hosted-groups/group-tool";
 import {
-  lookupHostedGroupParticipantMemberIdByHandle,
+  lookupHostedGroupParticipantMemberIdsByHandles,
 } from "../hosted-groups/participant-member";
+import {
+  HOSTED_PENDING_GROUP_SETUP_MAX_PARTICIPANT_MEMBERS,
+  type HostedPreparedPendingGroupSetupPackage,
+} from "../hosted-groups/pending-group-setup";
 import {
   reconcileHostedUsageReferralRewardAfterCommit,
 } from "../hosted-growth/usage-referral";
@@ -480,14 +486,10 @@ export async function handleHostedOnboardingLinqWebhook(input: {
       );
       let editPlan: Awaited<ReturnType<typeof planHostedLinqMessageEditedWebhook>>;
       try {
-        editPlan = await runHostedOnboardingWebhookTransaction(
+        editPlan = await runHostedLinqMessageEditPreparedTransaction({
+          event: editedEvent,
           prisma,
-          (transaction) =>
-            planHostedLinqMessageEditedWebhook({
-              event: editedEvent,
-              prisma: transaction,
-            }),
-        );
+        });
       } catch (error) {
         finishHostedOnboardingTiming(planTiming, "failed", {
           errorName: deriveHostedOnboardingTimingErrorName(error),
@@ -573,13 +575,23 @@ export async function handleHostedOnboardingLinqWebhook(input: {
               prisma,
             })
           : null;
-      const runPlan = (instantStartAllowed = true) => {
+      let requiredPendingGroupSetupCandidateId: string | null = null;
+      const runPlan = async (instantStartAllowed = true) => {
         let reusableDirectCryptoDomainRoots: {
           memberId: string;
           preparedCryptoDomainRoots: PreparedHostedCryptoDomainRootCandidates;
         } | null = null;
-        return runHostedThreadRoutingPreparedTransaction({
+        const planned = await runHostedThreadRoutingPreparedTransaction({
           plan: async ({ preparation, transaction }) => {
+            const preparedSelection =
+              preparation.preparedPendingGroupSetup?.selected;
+            if (
+              requiredPendingGroupSetupCandidateId === null
+              && preparedSelection?.admissionKind === "replacement_line"
+            ) {
+              requiredPendingGroupSetupCandidateId =
+                preparedSelection.candidateId;
+            }
             const planPreparedWebhook = () =>
               planHostedOnboardingLinqWebhook({
                 affirmativeReaction,
@@ -590,12 +602,6 @@ export async function handleHostedOnboardingLinqWebhook(input: {
                   planningResolution.pendingGroupParticipantMemberIds ?? null,
                 pendingGroupRosterUnavailable:
                   planningResolution.pendingGroupRosterUnavailable ?? false,
-                ...(preparation.failedPendingGroupSetupPreparationClaim
-                  ? {
-                      failedPendingGroupSetupPreparationClaim:
-                        preparation.failedPendingGroupSetupPreparationClaim,
-                    }
-                  : {}),
                 ...("directMailboxPreparationFailure" in preparation
                   ? {
                       directMailboxPreparationFailure:
@@ -608,11 +614,14 @@ export async function handleHostedOnboardingLinqWebhook(input: {
                         preparation.preparedDirectMailboxPayloadRoot ?? null,
                     }
                   : {}),
-                ...(preparation.preparedPendingGroupSetupClaim
+                ...(preparation.preparedPendingGroupSetup
                   ? {
-                      preparedPendingGroupSetupClaim:
-                        preparation.preparedPendingGroupSetupClaim,
+                      preparedPendingGroupSetup:
+                        preparation.preparedPendingGroupSetup,
                     }
+                  : {}),
+                ...(requiredPendingGroupSetupCandidateId
+                  ? { requiredPendingGroupSetupCandidateId }
                   : {}),
                 ...(preparation.preparedThreadContainerCreation
                   ? {
@@ -684,6 +693,13 @@ export async function handleHostedOnboardingLinqWebhook(input: {
           },
           prisma,
         });
+        if (
+          planned.nextRequiredPendingGroupSetupCandidateId !== undefined
+        ) {
+          requiredPendingGroupSetupCandidateId =
+            planned.nextRequiredPendingGroupSetupCandidateId;
+        }
+        return planned;
       };
       const planAfterBlockedAdmission = (reason?: string) =>
         requireFirstContactAdmission
@@ -1370,15 +1386,14 @@ async function resolveHostedLinqPendingGroupParticipantMemberIds(input: {
         unavailable: false,
       };
     }
-    const resolved = await Promise.all(participantHandles.map(async (handle) =>
-      await lookupHostedGroupParticipantMemberIdByHandle({
-        handle,
-        prisma: input.prisma,
-      })
-    ));
-    const memberIds = [...new Set(resolved.flatMap((memberId) =>
-      memberId ? [memberId] : []
-    ))];
+    const memberIdsByHandle = await lookupHostedGroupParticipantMemberIdsByHandles({
+      handles: participantHandles,
+      prisma: input.prisma,
+    });
+    const memberIds = [...new Set(participantHandles.flatMap((handle) => {
+      const memberId = memberIdsByHandle.get(handle) ?? null;
+      return memberId ? [memberId] : [];
+    }))];
     logHostedLinqPendingGroupRoster("resolved");
     return {
       handles,
@@ -2012,7 +2027,6 @@ async function reconcileHostedUsageReferralRewardsAfterCommitBestEffort(input: {
 
 interface HostedThreadRoutingCryptoPreparation {
   directMailboxPreparationFailure?: unknown;
-  failedPendingGroupSetupPreparationClaim?: PreparedHostedPendingGroupSetupClaim;
   pendingGroupSetupPreparationFailure?: unknown;
   preparedDirectMailboxPayloadRoot?: {
     memberId: string;
@@ -2026,11 +2040,11 @@ interface HostedThreadRoutingCryptoPreparation {
     routingRecord: HostedMemberRoutingRecord | null;
     routingState: HostedMemberRoutingStateSnapshot | null;
   } | null;
-  threadContainerPreparationFailure?: unknown;
-  preparedPendingGroupSetupClaim?: PreparedHostedPendingGroupSetupClaim;
+  preparedPendingGroupSetup?: HostedPreparedPendingGroupSetupPackage;
   preparedSenderMemberId?: string;
   preparedThreadContainerCreation?: PreparedHostedThreadContainerCreation;
   preparedThreadDeliveryRoute?: PreparedHostedThreadContainerDeliveryRoute;
+  threadContainerPreparationFailure?: unknown;
 }
 
 async function prepareHostedThreadDeliveryRouteAndWarmMailbox(input: {
@@ -2120,65 +2134,48 @@ async function prepareHostedLinqThreadRoutingCrypto(input: {
   }
 
   if (context.messageEvent.data.chat?.is_group === true) {
-    const preparationTarget =
-      await resolveHostedLinqThreadContainerCryptoPreparationTarget({
-        event: input.event,
-        participantMemberIds: input.participantMemberIds,
-        pendingGroupRosterUnavailable: input.pendingGroupRosterUnavailable,
-        prisma: input.prisma,
-      });
-    if (!preparationTarget) {
-      return {};
-    }
-    if (!accountLookupKey) {
-      return {};
-    }
-    const [pendingSetupResult, containerResult] = await Promise.allSettled([
-      prepareHostedPendingGroupSetupClaimForParticipants({
-        occurredAt: preparationTarget.occurredAt,
-        participantMemberIds: preparationTarget.participantMemberIds,
-        prisma: input.prisma,
-        recipientPhoneLookupKeys:
-          preparationTarget.recipientPhoneLookupKeys,
-        requiredCandidateId:
-          preparationTarget.requiredPendingSetupCandidateId,
-        senderMemberId: preparationTarget.senderMemberId,
-      }),
-      prepareHostedThreadContainerCreation({
-        accountLookupKey,
-        channel: "linq",
-        prisma: input.prisma,
-        threadId: context.summary.chatId,
-      }),
-    ]);
-    const pendingGroupSetupPreparationFailure =
-      pendingSetupResult.status === "rejected"
-        ? readHostedPendingGroupSetupPreparationFailure(
-            pendingSetupResult.reason,
-          )
-        : null;
-    return {
-      ...(pendingGroupSetupPreparationFailure
+    const admission = await prepareHostedLinqThreadContainerAdmission({
+      event: input.event,
+      participantMemberIds: input.participantMemberIds,
+      pendingGroupRosterUnavailable: input.pendingGroupRosterUnavailable,
+      prisma: input.prisma,
+    });
+    const pendingGroupPreparation: HostedThreadRoutingCryptoPreparation =
+      admission.preparedPendingGroupSetup
         ? {
-            failedPendingGroupSetupPreparationClaim:
-              pendingGroupSetupPreparationFailure.preparedClaim,
+            ...(admission.preparedPendingGroupSetup.selectedPayload?.kind
+                === "failed"
+              ? {
+                  pendingGroupSetupPreparationFailure:
+                    admission.preparedPendingGroupSetup.selectedPayload.error,
+                }
+              : {}),
+            preparedPendingGroupSetup: admission.preparedPendingGroupSetup,
           }
-        : {}),
-      ...(pendingSetupResult.status === "fulfilled"
-        && pendingSetupResult.value
-        ? { preparedPendingGroupSetupClaim: pendingSetupResult.value }
-        : {}),
-      ...(pendingSetupResult.status === "rejected"
-        ? {
-            pendingGroupSetupPreparationFailure:
-              pendingGroupSetupPreparationFailure?.error
-              ?? pendingSetupResult.reason,
-          }
-        : {}),
-      ...(containerResult.status === "fulfilled"
-        ? { preparedThreadContainerCreation: containerResult.value }
-        : { threadContainerPreparationFailure: containerResult.reason }),
-    };
+        : {};
+    if (!admission.shouldPrepareThreadContainer || !accountLookupKey) {
+      return pendingGroupPreparation;
+    }
+    try {
+      return {
+        ...pendingGroupPreparation,
+        preparedThreadContainerCreation:
+          await prepareHostedThreadContainerCreation({
+            accountLookupKey,
+            channel: "linq",
+            prisma: input.prisma,
+            threadId: context.summary.chatId,
+          }),
+      };
+    } catch (error) {
+      if (admission.preparedPendingGroupSetup) {
+        return {
+          ...pendingGroupPreparation,
+          threadContainerPreparationFailure: error,
+        };
+      }
+      throw error;
+    }
   }
 
   // Direct preparation resolves the member from participant and saved-home
@@ -2295,6 +2292,69 @@ const HOSTED_THREAD_ROUTING_PREPARATION_RETRY_CODES = new Set([
   "HOSTED_THREAD_ROUTE_WRITE_CONFLICT",
 ]);
 
+export async function runHostedLinqMessageEditPreparedTransaction(input: {
+  event: Parameters<typeof readHostedLinqMessageEditPreparation>[0]["event"];
+  prisma: PrismaClient;
+}): Promise<Awaited<ReturnType<typeof planHostedLinqMessageEditedWebhook>>> {
+  // Every mismatch means another accepted correction changed the bounded
+  // lineage. Reuse that lineage cap as the single finite retry budget.
+  for (
+    let attempt = 0;
+    attempt < HOSTED_LINQ_MESSAGE_EDIT_MAX_SOURCE_ROWS;
+    attempt += 1
+  ) {
+    const preparation: HostedLinqMessageEditPreparation =
+      await readHostedLinqMessageEditPreparation({
+        event: input.event,
+        prisma: input.prisma,
+      });
+    const preparationFailures: unknown[] = [];
+    try {
+      return await runHostedOnboardingWebhookTransaction(
+        input.prisma,
+        (transaction) =>
+          planHostedLinqMessageEditedWebhook({
+            event: input.event,
+            preparation,
+            prisma: transaction,
+          }),
+        async () => {
+          try {
+            await prewarmHostedLinqMessageEditPreparation({
+              preparation,
+              prisma: input.prisma,
+            });
+          } catch (error) {
+            preparationFailures.push(error);
+            throw error;
+          }
+        },
+      );
+    } catch (error) {
+      if (
+        preparationFailures.length > 0
+        && isHostedDomainRootPreparationRequiredError(error)
+      ) {
+        throw preparationFailures[0];
+      }
+      if (
+        attempt + 1 < HOSTED_LINQ_MESSAGE_EDIT_MAX_SOURCE_ROWS
+        && isHostedMailboxSourceConversationPreparationMismatchError(error)
+      ) {
+        logHostedOnboardingDiagnostic(
+          "hosted-onboarding.webhook.linq-message-edit-preparation-retry",
+          {},
+        );
+        continue;
+      }
+      throw error;
+    }
+  }
+  throw new Error(
+    "Hosted Linq message edit preparation retry exhausted unexpectedly.",
+  );
+}
+
 async function runHostedThreadRoutingPreparedTransaction<TResult>(input: {
   plan: (input: {
     preparation: HostedThreadRoutingCryptoPreparation;
@@ -2309,6 +2369,7 @@ async function runHostedThreadRoutingPreparedTransaction<TResult>(input: {
     let preparation: HostedThreadRoutingCryptoPreparation = {};
     const preparationFailures: unknown[] = [];
     let pendingGroupSetupPreparationFailure: unknown;
+    let threadContainerPreparationFailure: unknown;
     try {
       return await runHostedOnboardingWebhookTransaction(
         input.prisma,
@@ -2321,9 +2382,8 @@ async function runHostedThreadRoutingPreparedTransaction<TResult>(input: {
                 preparation.pendingGroupSetupPreparationFailure;
             }
             if (preparation.threadContainerPreparationFailure !== undefined) {
-              preparationFailures.push(
-                preparation.threadContainerPreparationFailure,
-              );
+              threadContainerPreparationFailure =
+                preparation.threadContainerPreparationFailure;
             }
           } catch (error) {
             preparationFailures.push(error);
@@ -2349,6 +2409,14 @@ async function runHostedThreadRoutingPreparedTransaction<TResult>(input: {
           message: "Hosted pending group setup payload preparation failed.",
           retryable: true,
         });
+      }
+      if (
+        threadContainerPreparationFailure !== undefined
+        && isHostedOnboardingError(error)
+        && error.code === "HOSTED_THREAD_CONTAINER_PREPARATION_REQUIRED"
+        && error.details?.preparationTarget !== "pending_group_setup_payload"
+      ) {
+        throw threadContainerPreparationFailure;
       }
       if (
         preparationFailures.length > 0

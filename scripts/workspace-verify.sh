@@ -955,7 +955,7 @@ run_workspace_package_coverage() {
   if [[ "$package_dir" == "packages/cli" ]]; then
     run_timed_step \
       "$label" \
-      env MURPH_PREPARED_CLI_RUNTIME_ARTIFACTS=1 MURPH_VITEST_MAX_WORKERS="$package_coverage_cli_vitest_max_workers" pnpm exec vitest run --config "packages/cli/vitest.workspace.ts" --coverage
+      env MURPH_PREPARED_CLI_RUNTIME_ARTIFACTS=1 MURPH_CLI_RELEASE_TARBALL_TEST=1 MURPH_VITEST_MAX_WORKERS="$package_coverage_cli_vitest_max_workers" pnpm exec vitest run --config "packages/cli/vitest.workspace.ts" --coverage
     return $?
   fi
 
@@ -1366,8 +1366,10 @@ run_diff_contracts_build_with_workspace_artifact_lock() {
 run_test_diff_package_tests() {
   local package_dirs=("$@")
   local filter_args=()
+  local package_test_env=(env)
   local package_dir
   local assistant_engine_selected=0
+  local cli_selected=0
   local contracts_selected=0
 
   for package_dir in "${package_dirs[@]}"; do
@@ -1380,8 +1382,23 @@ run_test_diff_package_tests() {
       assistant_engine_selected=1
       continue
     fi
+    if [[ "$package_dir" == "packages/cli" ]]; then
+      cli_selected=1
+    fi
     filter_args+=("--filter" "./${package_dir}")
   done
+
+  # Diff selection can reach CLI command tests through a changed source
+  # dependency without selecting the dedicated verify:cli lane. Prepare the
+  # shared runtime once under test:diff's workspace artifact lock so individual
+  # Vitest workers never contend on the fallback repair lock.
+  if [[ "$cli_selected" == "1" ]]; then
+    run_timed_step \
+      "Prepared CLI runtime artifacts for affected package tests" \
+      prepare_repo_vitest_runtime_artifacts || return $?
+    package_test_env+=(MURPH_PREPARED_CLI_RUNTIME_ARTIFACTS=1)
+  fi
+  package_test_env+=(MURPH_VITEST_MAX_WORKERS="$test_diff_vitest_max_workers")
 
   # Contracts verification rebuilds shared dist artifacts. Complete it under
   # the artifact lock before source-first dependents start importing them.
@@ -1403,7 +1420,7 @@ run_test_diff_package_tests() {
   if [[ "${#filter_args[@]}" -gt 0 ]]; then
     run_command_with_retry \
       "Affected package tests" \
-      env MURPH_VITEST_MAX_WORKERS="$test_diff_vitest_max_workers" \
+      "${package_test_env[@]}" \
         pnpm -r --no-sort --workspace-concurrency="$test_diff_workspace_concurrency" "${filter_args[@]}" test || return $?
   fi
 
@@ -1786,7 +1803,7 @@ run_verify_cli() {
   run_timed_step "Prepared runtime artifacts" prepare_repo_vitest_runtime_artifacts || return $?
   run_timed_step \
     "CLI workspace Vitest" \
-    env MURPH_PREPARED_CLI_RUNTIME_ARTIFACTS=1 pnpm exec vitest run --config "packages/cli/vitest.workspace.ts" "${cli_verify_test_files[@]}" --no-coverage
+    env MURPH_PREPARED_CLI_RUNTIME_ARTIFACTS=1 MURPH_CLI_RELEASE_TARBALL_TEST=1 pnpm exec vitest run --config "packages/cli/vitest.workspace.ts" "${cli_verify_test_files[@]}" --no-coverage
 }
 
 run_verify_cli_with_workspace_artifact_lock() {
