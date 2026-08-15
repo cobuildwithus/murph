@@ -1,6 +1,10 @@
 import { randomBytes } from "node:crypto";
 
 import type { Prisma, PrismaClient } from "@prisma/client";
+import {
+  type MemberActionRequestV1,
+  memberActionRequestV1Schema,
+} from "@murphai/contracts";
 import { deviceSyncError } from "@murphai/device-syncd/errors";
 
 import type {
@@ -17,24 +21,14 @@ import { assertHostedLaunchRequiredConsentGranted } from "../legal/consent";
 import { sha256Hex, toIsoTimestamp } from "../primitives";
 
 export const IMESSAGE_MINI_APP_BEARER_TOKEN_PREFIX = "hbds_imessage_";
-export const IMESSAGE_MINI_APP_CARD_ID = "privy-proof-v1";
 export const IMESSAGE_MINI_APP_CREDENTIAL_TTL_MS = 24 * 60 * 60_000;
 
 const IMESSAGE_MINI_APP_BEARER_TOKEN_PATTERN = /^hbds_imessage_[A-Za-z0-9_-]{43}$/u;
 const IMESSAGE_MINI_APP_SESSION_ID_PREFIX = "dsa_imessage_";
 const IMESSAGE_MINI_APP_SESSION_ID_SCOPE = "murph:imessage-mini-app:session:v1";
 const IMESSAGE_MINI_APP_TOKEN_HASH_SCOPE = "murph:imessage-mini-app:v1";
-const IMESSAGE_MINI_APP_PROOF_CHOICES = ["morning", "afternoon", "evening"] as const;
-const IMESSAGE_MINI_APP_PROOF_ACTION_KEYS = new Set([
-  "schemaVersion",
-  "cardId",
-  "choice",
-  "idempotencyKey",
-]);
 const IMESSAGE_MINI_APP_ENROLLMENT_KEYS = new Set(["schemaVersion"]);
-const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
-
-export type IMessageMiniAppProofChoice = typeof IMESSAGE_MINI_APP_PROOF_CHOICES[number];
+const IMESSAGE_MINI_APP_ACTION_CLOCK_SKEW_MS = 5 * 60_000;
 
 export interface IMessageMiniAppSessionStore {
   authenticateAgentSessionByTokenHash(
@@ -56,13 +50,6 @@ export interface IMessageMiniAppCredentialResponse {
     token: string;
     expiresAt: string;
   };
-}
-
-export interface IMessageMiniAppProofAction {
-  schemaVersion: 1;
-  cardId: typeof IMESSAGE_MINI_APP_CARD_ID;
-  choice: IMessageMiniAppProofChoice;
-  idempotencyKey: string;
 }
 
 export async function issueIMessageMiniAppEnrollment(input: {
@@ -239,39 +226,24 @@ export function validateIMessageMiniAppEnrollmentBody(
   }
 }
 
-export function validateIMessageMiniAppProofAction(
+export function validateIMessageMiniAppMemberAction(
   body: Record<string, unknown>,
-): IMessageMiniAppProofAction {
-  rejectUnknownFields(body, IMESSAGE_MINI_APP_PROOF_ACTION_KEYS);
+  now = new Date(),
+): MemberActionRequestV1 {
+  const parsed = memberActionRequestV1Schema.safeParse(body);
+  if (!parsed.success) {
+    throw miniAppRequestInvalid("Member action request is invalid.");
+  }
 
-  if (body.schemaVersion !== 1) {
-    throw miniAppRequestInvalid("schemaVersion must be 1.");
-  }
-  if (body.cardId !== IMESSAGE_MINI_APP_CARD_ID) {
-    throw miniAppRequestInvalid("cardId is not supported.");
-  }
+  const requestedAt = Date.parse(parsed.data.requestedAt);
   if (
-    !isIMessageMiniAppProofChoice(body.choice)
+    requestedAt < now.getTime() - IMESSAGE_MINI_APP_CREDENTIAL_TTL_MS
+    || requestedAt > now.getTime() + IMESSAGE_MINI_APP_ACTION_CLOCK_SKEW_MS
   ) {
-    throw miniAppRequestInvalid("choice is not supported.");
-  }
-  if (typeof body.idempotencyKey !== "string" || !UUID_PATTERN.test(body.idempotencyKey)) {
-    throw miniAppRequestInvalid("idempotencyKey must be a UUID.");
+    throw miniAppRequestInvalid("Member action request timestamp is outside the accepted window.");
   }
 
-  return {
-    schemaVersion: 1,
-    cardId: IMESSAGE_MINI_APP_CARD_ID,
-    choice: body.choice,
-    idempotencyKey: body.idempotencyKey,
-  };
-}
-
-function isIMessageMiniAppProofChoice(
-  value: unknown,
-): value is IMessageMiniAppProofChoice {
-  return typeof value === "string"
-    && IMESSAGE_MINI_APP_PROOF_CHOICES.some((choice) => choice === value);
+  return parsed.data;
 }
 
 function rejectUnknownFields(
