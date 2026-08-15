@@ -61,6 +61,7 @@ export interface CanonicalAutomationAssistantCronJobRecord {
   status: 'active' | 'paused'
   summary: string | null
   supportKind: AutomationSupportKind | null
+  plannedOccurrenceOffsetMs: number | null
   tags: string[]
   timeZone: string | null
   title: string
@@ -594,6 +595,7 @@ function normalizeCanonicalAssistantCronRecord(
     status: record.status,
     summary: record.summary,
     supportKind: record.supportKind ?? null,
+    plannedOccurrenceOffsetMs: record.plannedOccurrenceOffsetMs ?? null,
     tags: [...record.tags],
     timeZone:
       record.schedule.kind === 'cron' || record.schedule.kind === 'dailyLocal'

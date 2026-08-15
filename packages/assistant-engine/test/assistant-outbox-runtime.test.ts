@@ -209,12 +209,18 @@ describe('assistant outbox runtime', () => {
       'assistant-outbox-scheduled-occurrence-',
     )
     const scheduledOccurrenceAt = '2026-04-08T00:03:00.000Z'
+    const plannedOccurrenceAt = '2026-04-08T00:18:00.000Z'
 
-    const intent = await createIntent(vaultRoot, { scheduledOccurrenceAt })
+    const intent = await createIntent(vaultRoot, {
+      plannedOccurrenceAt,
+      scheduledOccurrenceAt,
+    })
     const persisted = await readRawOutboxIntent(vaultRoot, intent.intentId)
 
     expect(intent.scheduledOccurrenceAt).toBe(scheduledOccurrenceAt)
     expect(persisted.scheduledOccurrenceAt).toBe(scheduledOccurrenceAt)
+    expect(intent.plannedOccurrenceAt).toBe(plannedOccurrenceAt)
+    expect(persisted.plannedOccurrenceAt).toBe(plannedOccurrenceAt)
   })
 
   it('retires claimed export packs only after confirmed delivery', async () => {
@@ -7204,6 +7210,7 @@ async function createIntent(
     privateCompletionContinuitySessionId: string | null
     reviewedAssistantAskCompletionExpiresAt: string | null
     scheduledOccurrenceAt: string | null
+    plannedOccurrenceAt: string | null
     sessionId: string
     threadId: string | null
     threadIsDirect: boolean | null
@@ -7239,6 +7246,7 @@ async function createIntent(
     reviewedAssistantAskCompletionExpiresAt:
       overrides.reviewedAssistantAskCompletionExpiresAt,
     scheduledOccurrenceAt: overrides.scheduledOccurrenceAt,
+    plannedOccurrenceAt: overrides.plannedOccurrenceAt,
     ...(overrides.nativeReplyRequested === undefined
       ? {}
       : { nativeReplyRequested: overrides.nativeReplyRequested }),

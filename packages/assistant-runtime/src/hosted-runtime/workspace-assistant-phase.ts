@@ -1538,6 +1538,9 @@ function createHostedAssistantAutomationTool(input: {
           instructions: stripHostedAssistantAvailabilityConflictBlock(
             request.instructions,
           ),
+          ...(request.plannedOccurrenceOffsetMs === undefined
+            ? {}
+            : { plannedOccurrenceOffsetMs: request.plannedOccurrenceOffsetMs }),
           route: currentRoute,
           schedule: request.schedule,
           ...(request.slug ? { slug: request.slug } : {}),
@@ -1613,6 +1616,9 @@ function createHostedAssistantAutomationTool(input: {
                 request.instructions,
               ),
             }),
+        ...(request.plannedOccurrenceOffsetMs === undefined
+          ? {}
+          : { plannedOccurrenceOffsetMs: request.plannedOccurrenceOffsetMs }),
         lookup: request.lookup,
         ...(request.retargetToCurrentConversation === true
           ? { route: currentRoute }

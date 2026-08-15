@@ -537,5 +537,6 @@ function createAutomationSource(
     updatedAt: '2026-04-08T07:00:00.000Z',
     ...overrides,
     supportKind: overrides.supportKind ?? null,
+    plannedOccurrenceOffsetMs: overrides.plannedOccurrenceOffsetMs ?? null,
   }
 }

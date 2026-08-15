@@ -5075,6 +5075,7 @@ function resolveAssistantAutoReplyOutboxCausalUpperBoundMs(input: {
 interface AssistantAutoReplyMatchingOutboxDelivery {
   automationId: string | null
   exactRouteDigest: string | null
+  plannedOccurrenceAt: string | null
   supportSeriesId: string | null
   scheduledOccurrenceAt: string | null
   intentId: string
@@ -5097,6 +5098,7 @@ interface AssistantAutoReplyPriorDeliveryContext {
   intentId: string
   message: string
   providerAcceptedAt: string
+  plannedOccurrenceAt: string | null
   scheduledOccurrenceAt: string | null
   supportSeriesId: string | null
 }
@@ -5179,6 +5181,8 @@ async function listAssistantAutoReplyMatchingOutboxDeliveries(input: {
       supportSeriesId:
         normalizeNullableString(intent.automationAuthority?.supportSeriesId) ??
           null,
+      plannedOccurrenceAt:
+        normalizeNullableString(intent.plannedOccurrenceAt) ?? null,
       scheduledOccurrenceAt:
         normalizeNullableString(intent.scheduledOccurrenceAt) ?? null,
       intentId: intent.intentId,
@@ -5278,6 +5282,7 @@ function buildAssistantAutoReplyPriorDeliveryContexts(input: {
       intentId: delivery.intentId,
       message,
       providerAcceptedAt: new Date(delivery.sentAtMs).toISOString(),
+      plannedOccurrenceAt: delivery.plannedOccurrenceAt,
       scheduledOccurrenceAt: delivery.scheduledOccurrenceAt,
       supportSeriesId: delivery.supportSeriesId,
     })
@@ -5471,6 +5476,9 @@ function buildAssistantAutoReplyCrossSessionTurnContext(
       ...(delivery.scheduledOccurrenceAt === null
         ? []
         : [`- scheduledOccurrenceAt: ${delivery.scheduledOccurrenceAt}`]),
+      ...(delivery.plannedOccurrenceAt === null
+        ? []
+        : [`- plannedOccurrenceAt: ${delivery.plannedOccurrenceAt}`]),
       'Text:',
       delivery.message,
       '',

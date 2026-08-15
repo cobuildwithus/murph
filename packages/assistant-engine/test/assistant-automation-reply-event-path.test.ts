@@ -3242,6 +3242,7 @@ describe('assistant auto-reply event-first path', () => {
         },
         intentId: 'intent-experiment-reminder',
         message: 'Set two: reply when complete.',
+        plannedOccurrenceAt: '2026-04-08T00:18:00.000Z',
         scheduledOccurrenceAt: '2026-04-08T00:03:00.000Z',
         sentAt: '2026-04-08T00:05:00.000Z',
         sessionId: 'session-automation',
@@ -3275,6 +3276,9 @@ describe('assistant auto-reply event-first path', () => {
       '- scheduledOccurrenceAt: 2026-04-08T00:03:00.000Z',
     )
     expect(turnContext).toContain(
+      '- plannedOccurrenceAt: 2026-04-08T00:18:00.000Z',
+    )
+    expect(turnContext).toContain(
       '- providerAcceptedAt: 2026-04-08T00:05:00.000Z',
     )
     expect(turnContext).not.toContain('Canonical experiment reminder context:')
@@ -3290,6 +3294,7 @@ describe('assistant auto-reply event-first path', () => {
         },
         intentId: 'intent-edited-experiment-reminder',
         message: 'Edited-later historical reminder.',
+        plannedOccurrenceAt: '2026-04-08T00:18:00.000Z',
         scheduledOccurrenceAt: '2026-04-08T00:03:00.000Z',
         sentAt: '2026-04-08T00:05:00.000Z',
         sessionId: 'session-automation',
@@ -5410,6 +5415,7 @@ function createOutboxMessage(input: {
   providerMessageId?: string | null
   providerMessageIds?: string[]
   providerThreadId?: string | null
+  plannedOccurrenceAt?: string | null
   scheduledOccurrenceAt?: string | null
   sentAt: string
   sessionId: string
@@ -5432,6 +5438,9 @@ function createOutboxMessage(input: {
     ...(input.scheduledOccurrenceAt === undefined
       ? {}
       : { scheduledOccurrenceAt: input.scheduledOccurrenceAt }),
+    ...(input.plannedOccurrenceAt === undefined
+      ? {}
+      : { plannedOccurrenceAt: input.plannedOccurrenceAt }),
     channel,
     delivery:
       status === 'sent'

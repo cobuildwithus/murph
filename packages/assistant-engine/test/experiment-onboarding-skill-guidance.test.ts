@@ -384,6 +384,8 @@ describe('experiment onboarding skill guidance', () => {
 
     expect(raw).toContain('supportSeriesId: "experiment:<experimentId>"')
     expect(raw).toContain('supportKind: "reminder"')
+    expect(raw).toContain('plannedOccurrenceOffsetMs: 900000')
+    expect(raw).toContain('plannedOccurrenceOffsetMs: 0')
     expect(raw).toContain(
       'A bounded review uses `review`, never `weekly_digest`',
     )

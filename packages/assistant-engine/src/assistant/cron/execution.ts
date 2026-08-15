@@ -1036,6 +1036,11 @@ export async function executeClaimedAssistantCronJob(
             },
             outboxAutomationAuthority:
               resolveAssistantCronOutboxAutomationAuthority(input.job),
+            outboxPlannedOccurrenceAt:
+              resolveAssistantCronOutboxPlannedOccurrenceAt({
+                job: input.job,
+                occurrenceAt,
+              }),
             outboxExternalThreadRouteAuthority:
               authorizedDelivery.externalThreadRouteAuthority,
             participantId: claimedJob.target.participantId,
@@ -1727,6 +1732,27 @@ function resolveAssistantCronOutboxAutomationAuthority(
     expectedUpdatedAt: job.source.updatedAt,
     ...(supportSeriesId === null ? {} : { supportSeriesId }),
   }
+}
+
+function resolveAssistantCronOutboxPlannedOccurrenceAt(input: {
+  job: ResolvedAssistantCronJob
+  occurrenceAt: string
+}): string | null {
+  if (
+    input.job.kind !== 'canonical'
+    || input.job.source.kind !== 'automation'
+    || input.job.source.plannedOccurrenceOffsetMs === null
+  ) {
+    return null
+  }
+
+  const plannedOccurrenceAt = new Date(
+    Date.parse(input.occurrenceAt) + input.job.source.plannedOccurrenceOffsetMs,
+  )
+  if (Number.isNaN(plannedOccurrenceAt.getTime())) {
+    throw new TypeError('Automation planned occurrence is outside the supported date range.')
+  }
+  return plannedOccurrenceAt.toISOString()
 }
 
 function resolveAssistantCronOutboxSupportSeriesId(

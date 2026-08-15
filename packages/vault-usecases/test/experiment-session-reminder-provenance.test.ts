@@ -14,6 +14,12 @@ const occurrenceDate = new Date()
 occurrenceDate.setUTCDate(occurrenceDate.getUTCDate() - 1)
 occurrenceDate.setUTCHours(15, 0, 0, 0)
 const occurrenceAt = occurrenceDate.toISOString()
+const crossingReminderDate = new Date(occurrenceDate)
+crossingReminderDate.setUTCHours(23, 55, 0, 0)
+const crossingReminderAt = crossingReminderDate.toISOString()
+const plannedOccurrenceAt = new Date(
+  crossingReminderDate.getTime() + 15 * 60 * 1000,
+).toISOString()
 const experimentStartedOn = formatLocalDate(addUtcDays(occurrenceDate, -7))
 const experimentInterventionEnd = formatLocalDate(addUtcDays(occurrenceDate, 60))
 const firstIntentId = 'outbox_experiment_reminder_01'
@@ -74,6 +80,8 @@ async function withExperiment(
 async function writeReminderIntent(input: {
   experimentId: string
   intentId: string
+  plannedOccurrenceAt?: string | null
+  scheduledOccurrenceAt?: string
   status?: 'pending' | 'sent'
   supportSeriesId?: string
   threadIsDirect?: boolean
@@ -81,16 +89,17 @@ async function writeReminderIntent(input: {
 }): Promise<void> {
   const message = 'Sauna session time. Reply when you finish.'
   const status = input.status ?? 'sent'
+  const scheduledOccurrenceAt = input.scheduledOccurrenceAt ?? occurrenceAt
   const intent = assistantOutboxIntentSchema.parse({
     schema: 'murph.assistant-outbox-intent.v1',
     intentId: input.intentId,
     sessionId: `session_${input.intentId}`,
     turnId: `turn_${input.intentId}`,
-    createdAt: occurrenceAt,
-    updatedAt: occurrenceAt,
-    lastAttemptAt: occurrenceAt,
+    createdAt: scheduledOccurrenceAt,
+    updatedAt: scheduledOccurrenceAt,
+    lastAttemptAt: scheduledOccurrenceAt,
     nextAttemptAt: null,
-    sentAt: status === 'sent' ? occurrenceAt : null,
+    sentAt: status === 'sent' ? scheduledOccurrenceAt : null,
     attemptCount: status === 'sent' ? 1 : 0,
     status,
     message,
@@ -110,9 +119,13 @@ async function writeReminderIntent(input: {
       automationId,
       supportSeriesId:
         input.supportSeriesId ?? `experiment:${input.experimentId}`,
-      expectedUpdatedAt: occurrenceAt,
+      expectedUpdatedAt: scheduledOccurrenceAt,
     },
-    scheduledOccurrenceAt: occurrenceAt,
+    scheduledOccurrenceAt,
+    plannedOccurrenceAt:
+      input.plannedOccurrenceAt === undefined
+        ? scheduledOccurrenceAt
+        : input.plannedOccurrenceAt,
     explicitTarget: null,
     delivery:
       status === 'sent'
@@ -122,7 +135,7 @@ async function writeReminderIntent(input: {
             idempotencyKey: null,
             target: 'thread-1',
             targetKind: 'thread',
-            sentAt: occurrenceAt,
+            sentAt: scheduledOccurrenceAt,
             messageLength: message.length,
             providerMessageId: `linq-message:${input.intentId}`,
             providerThreadId: 'thread-1',
@@ -188,6 +201,31 @@ test('delivered reminder provenance owns one deterministic experiment occurrence
   })
 })
 
+test('reminder-backed logging records a planned session after midnight instead of the earlier reminder date', async () => {
+  await withExperiment(async ({ experimentId, vaultRoot }) => {
+    await writeReminderIntent({
+      experimentId,
+      intentId: firstIntentId,
+      plannedOccurrenceAt,
+      scheduledOccurrenceAt: crossingReminderAt,
+      vaultRoot,
+    })
+
+    const result = await logExperimentSessionRecord({
+      vault: vaultRoot,
+      lookup: experimentId,
+      reminderIntentId: firstIntentId,
+    })
+    const records = await readJsonlRecords({
+      vaultRoot,
+      relativePath: result.ledgerFile,
+    })
+    const event = records.find((record) => record.id === result.eventId)
+
+    assert.equal(event?.occurredAt, plannedOccurrenceAt)
+  })
+})
+
 test('reminder-backed session logging rejects transport, owner, and occurrence substitutions', async () => {
   await withExperiment(async ({ experimentId, vaultRoot }) => {
     await writeReminderIntent({
@@ -236,6 +274,22 @@ test('reminder-backed session logging rejects transport, owner, and occurrence s
           reminderIntentId: firstIntentId,
         }),
       /not a provider-accepted private reminder message/u,
+    )
+
+    await writeReminderIntent({
+      experimentId,
+      intentId: firstIntentId,
+      plannedOccurrenceAt: null,
+      vaultRoot,
+    })
+    await assert.rejects(
+      () =>
+        logExperimentSessionRecord({
+          vault: vaultRoot,
+          lookup: experimentId,
+          reminderIntentId: firstIntentId,
+        }),
+      /has no planned occurrence provenance/u,
     )
 
     await writeReminderIntent({

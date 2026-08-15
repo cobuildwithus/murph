@@ -48,6 +48,7 @@ type MockAutomationRecord = {
   createdAt: string
   scheduleAnchorAt?: string
   instructions: string
+  plannedOccurrenceOffsetMs?: number | null
   route: AutomationRoute
   schedule: AutomationSchedule
   relativePath?: string
@@ -11300,6 +11301,7 @@ describe('assistant cron runtime orchestration', () => {
       continuityPolicy: 'preserve',
       createdAt: '2026-05-03T22:17:55.000Z',
       instructions: 'Remind me to stand up.',
+      plannedOccurrenceOffsetMs: 900_000,
       route: {
         channel: 'linq',
         deliverySource: {
@@ -11375,6 +11377,7 @@ describe('assistant cron runtime orchestration', () => {
           automationId: 'automation-linq-pinned-mixed-route',
           expectedUpdatedAt: '2026-05-03T22:17:55.000Z',
         },
+        outboxPlannedOccurrenceAt: '2026-05-04T16:15:00.000Z',
         participantId: 'participant-1',
         threadId: 'thread-1',
         turnTrigger: 'automation-cron',

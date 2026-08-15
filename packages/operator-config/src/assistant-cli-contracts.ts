@@ -1023,6 +1023,8 @@ export const assistantOutboxIntentSchema = z
       .nullable()
       .optional(),
     scheduledOccurrenceAt: isoTimestampSchema.nullable().optional(),
+    // Exact event time derived from the durable automation lead at fire time.
+    plannedOccurrenceAt: isoTimestampSchema.nullable().optional(),
     externalThreadRouteAuthority: assistantExternalThreadRouteAuthoritySchema
       .nullable()
       .optional(),

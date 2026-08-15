@@ -1619,6 +1619,7 @@ type ExperimentSessionRecordInput = {
 
 type ExperimentReminderOccurrenceProof = {
   automationId: string
+  plannedOccurrenceAt: string
   scheduledOccurrenceAt: string
 }
 
@@ -1693,7 +1694,7 @@ export async function logExperimentSessionRecord(input: ExperimentSessionRecordI
     fields: normalizeExperimentSessionFields(input.fields),
     frontmatter,
   })
-  const occurredAt = reminderProof?.scheduledOccurrenceAt
+  const occurredAt = reminderProof?.plannedOccurrenceAt
     ?? input.occurredAt
     ?? new Date().toISOString()
   const reminderEventId = reminderProof === null
@@ -1853,9 +1854,16 @@ async function resolveExperimentReminderOccurrenceProof(input: {
       `Outbox intent "${intent.intentId}" has no scheduled occurrence provenance.`,
     )
   }
+  if (intent.plannedOccurrenceAt === undefined || intent.plannedOccurrenceAt === null) {
+    throw new VaultCliError(
+      'invalid_payload',
+      `Outbox intent "${intent.intentId}" has no planned occurrence provenance.`,
+    )
+  }
 
   return {
     automationId: authority.automationId,
+    plannedOccurrenceAt: intent.plannedOccurrenceAt,
     scheduledOccurrenceAt: intent.scheduledOccurrenceAt,
   }
 }
@@ -1881,7 +1889,7 @@ async function writeExperimentReminderSessionEvent(input: {
         existing.id !== input.eventId
         || existing.kind !== 'intervention_session'
         || existing.experimentId !== input.experimentId
-        || existing.occurredAt !== input.proof.scheduledOccurrenceAt
+        || existing.occurredAt !== input.proof.plannedOccurrenceAt
       ) {
         throw new VaultCliError(
           'contract_invalid',
