@@ -544,27 +544,6 @@ async function importHostedInitialMailboxForWorkspaceRunner(input: {
         runnerInput: input.runnerInput,
         signal: input.mailboxFetchSignal ?? null,
       });
-  let includeInitialMemberActivation = false;
-  if (
-    prefetch !== null
-    && input.lanes.includes("conversation")
-    && !input.lanes.includes("system")
-  ) {
-    try {
-      includeInitialMemberActivation =
-        (await inspectHostedPreCheckpointSystemMailboxPrefetch(prefetch))
-          .containsOnlyInitialMemberActivation;
-    } catch (error) {
-      if (prefetch.signal?.aborted) {
-        throw error;
-      }
-      // The mailbox importer owns the existing one-shot refetch for a failed
-      // prefetch. Keep the requested lanes unchanged on that fallback path.
-    }
-  }
-  const initialMailboxImportLanes = includeInitialMemberActivation
-      ? [...input.lanes, "system"] as const
-      : input.lanes;
   const runnerResult = await runHostedWorkspaceUntilIdleOrBudget({
     ...input.runnerInput,
     deferInitialMailboxPostCheckpointEffects: true,
@@ -575,7 +554,7 @@ async function importHostedInitialMailboxForWorkspaceRunner(input: {
         }
       : null,
     initialMailboxImportContext: input.importItemContext ?? null,
-    initialMailboxImportLanes,
+    initialMailboxImportLanes: input.lanes,
     initialMailboxFetchSignal: input.mailboxFetchSignal ?? null,
     initialMailboxPrefetch: prefetch,
     requestId: input.requestId,
