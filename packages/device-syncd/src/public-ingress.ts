@@ -1644,6 +1644,26 @@ export class DeviceSyncPublicIngress {
 
     if (
       account.status === "active"
+      && Date.parse(account.connectedAt) > Date.parse(now)
+    ) {
+      this.logger.warn?.("Ignoring webhook side effects for superseded device sync connection epoch.", {
+        provider: provider.provider,
+        accountId: account.id,
+        eventType: webhook.eventType,
+        traceId,
+      });
+      await completeClaimedWebhookTrace(this.store, provider.provider, traceId, claimToken);
+      return {
+        accepted: true,
+        duplicate: false,
+        provider: provider.provider,
+        eventType: webhook.eventType,
+        traceId,
+      };
+    }
+
+    if (
+      account.status === "active"
       && isDeviceSyncConnectionSetupPending(account)
     ) {
       if (isDeviceSyncConnectionSetupExpiredAt(account, now)) {
