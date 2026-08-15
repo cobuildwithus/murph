@@ -240,6 +240,18 @@ Updated: 2026-08-14
   finding is remediated and verified below, but no round 8 is started without an
   explicit continuation decision. The review gate therefore remains open even
   after this remediation is pushed.
+- The user explicitly authorized continuation beyond the round-7 hard cap.
+  Continue the indivisible Web/runner reconnect invariant in this PR because
+  the producer version fence and consumer hydration cleanup reuse existing
+  owners; splitting them would separate the two halves of one stale-work guard.
+- Generic source upsert owns one canonical point write, not collection-wide
+  legacy reconciliation. Transactional `listConnectionSources` remains the sole
+  owner of the full physical alias collapse and passes its one loaded snapshot
+  into reconciliation. Bounded webhook admission may collapse its exact alias
+  group semantically and write the explicit next canonical epoch; a later owning
+  list removes the legacy physical row without changing epoch authority. This
+  deletes the repeated collection scan from every canonical transactional
+  upsert and adds no parameter, flag, cache, or second reconciliation owner.
 
 ## ReviewGPT evidence and finding ledger
 
@@ -349,6 +361,27 @@ Updated: 2026-08-14
   target-source coverage on fenced/newer hosted hydration before durable hosted
   metadata is overlaid. The fix adds one exact parent timestamp write and one
   shared bounded cleanup helper; it adds no new state or asynchronous machinery.
+- Valid final ReviewGPT round 8 reviewed exact head
+  `2f6d78c233a8e9a78c32cbc9283affda58e281ad` in the existing review thread
+  after the explicit hard-cap continuation decision. It returned
+  `ROUND_OUTCOME: FINDINGS` plus `REVIEW_COMPLETE` after about 50 minutes. The
+  response reported `MODEL_CONFIRMATION: UNKNOWN`, but the package-owned
+  sidecar bound the exact response hash to the requested compatible
+  `gpt-5-6-pro` slug, so the long-turn UNKNOWN fallback is valid. One preceding
+  metadata preflight failed before send because a full snapshot required the
+  current head as its context anchor; Eragon then failed before send because
+  its attachment control was not ready. The valid retry sent once on Phlebas.
+- Accepted: generic transactional canonical upsert repeated the full physical
+  alias-reconciliation read even after the same transaction's owning source
+  list had loaded and reconciled the complete collection. A maximum real
+  Junction apply therefore performed 33 redundant full source-set scans while
+  holding the connection mutation lock and pooled transaction. The correction
+  deletes that seven-line branch and leaves canonical point normalization in
+  place. Existing transactional callers already perform the owning full or
+  exact-group read before writing. No finding was rejected in this round.
+  Production complexity decreases by one owner path and seven lines; focused
+  proof replaces the mocked statement-count assumption with the real store and
+  migrated Postgres operation counters.
 
 ## Verification
 
@@ -480,3 +513,14 @@ Updated: 2026-08-14
     budget ratchet: vault total 9,042,569/9,100,000 bytes and entry 791/20,000
     bytes; runner entry 1,701,375 bytes, static closure
     8,059,499/8,088,470 bytes, and total 10,222,270/10,251,013 bytes.
+  - Round-8 complexity proof first reproduced 33 redundant full source-set
+    reads after one owning transactional list across the catalog maximum. After
+    deleting generic write-time reconciliation, the store/source regression
+    passes 20 tests and records zero per-source collection reads. The composed
+    real-Postgres apply records exactly one `DeviceConnectionSource.findMany`
+    and 33 intended point upserts. A bounded legacy Apple alias admission
+    advances epoch 7 to 8 without generic reconciliation; the next owning list
+    preserves that authority and removes the loser once. The Web source,
+    runtime-authority, and wake files pass 254 tests; the complete isolated
+    migrated Postgres resilience/webhook files pass 9 tests; prepared Web
+    typecheck and `git diff --check` pass.

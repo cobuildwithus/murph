@@ -159,13 +159,6 @@ export class PrismaHostedConnectionSourceStore {
     const sourceProviderSlug = canonicalIdentity?.sourceProviderSlug
       ?? normalizedInputSourceProviderSlug;
 
-    if (input.tx && canonicalIdentity) {
-      await reconcileStoredCanonicalJunctionSourceIdentity({
-        identity: canonicalIdentity,
-        prisma,
-      });
-    }
-
     const now = resolveSourceTimestamp(input.now, new Date());
     const lastSeenAt = resolveSourceTimestamp(input.lastSeenAt, now);
     const firstSeenAt = resolveSourceTimestamp(input.firstSeenAt, lastSeenAt);
