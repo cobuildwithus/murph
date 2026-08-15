@@ -48,6 +48,8 @@ import {
   hostedComputerOsControlRequestSchema,
 } from '@murphai/hosted-execution/computer-use'
 import {
+  HOSTED_PROVIDER_SETUP_APPLICATION_NAME_FIRST_WORDS,
+  HOSTED_PROVIDER_SETUP_APPLICATION_NAME_SECOND_WORDS,
   hostedRuntimeProviderSetupToolRequestSchema,
 } from '@murphai/hosted-execution/provider-setup'
 import { assistantVaultImageMaxBytes } from '@murphai/operator-config/assistant-cli-contracts'
@@ -1255,7 +1257,7 @@ export const MURPH_PROVIDER_SETUP_TOOL = {
   namespace: 'murph',
   name: 'provider_setup',
   description:
-    'Drive an authorized private provider-app setup through the trusted browser boundary. Begin or resume the exact setup, then use computer_open/computer_act on its runId. When begin returns no name, invent one short random friendly name with no member details; pass it to capture but never fill or submit it yourself. Final submit/capture and owned deletion must use this tool so client credentials never enter model context. Selectors are identified from the live page at call time; never embed provider UI programs or credentials.',
+    `Drive an authorized private provider-app setup through the trusted browser boundary. Begin or resume the exact setup, then use computer_open/computer_act on its runId. When begin returns no name, choose a safe random FirstWord SecondWord: first word from ${HOSTED_PROVIDER_SETUP_APPLICATION_NAME_FIRST_WORDS.join(', ')}, second from ${HOSTED_PROVIDER_SETUP_APPLICATION_NAME_SECOND_WORDS.join(', ')}. Pass those words to capture but never fill or submit them yourself; Web appends six cryptographically random digits and freezes the full friendly name. Final submit/capture and owned deletion must use this tool so client credentials never enter model context. For delete, pass the live client-ID selector but never read its value. Selectors are identified from the live page at call time; never embed provider UI programs or credentials.`,
   inputSchema: z.toJSONSchema(hostedRuntimeProviderSetupToolRequestSchema, {
     io: 'input',
   }) as Record<string, unknown>,

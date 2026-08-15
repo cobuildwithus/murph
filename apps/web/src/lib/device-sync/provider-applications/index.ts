@@ -18,6 +18,7 @@ export {
   isMemberOwnedDeviceProviderApplicationProvider,
   parseDeviceProviderApplicationSecret,
   requireDeviceProviderApplicationRevision,
+  requireResolvedDeviceProviderApplicationClientId,
   requireMemberOwnedDeviceProviderApplicationProvider,
   type DeviceProviderApplicationBinding,
   type DeviceProviderApplicationSecret,

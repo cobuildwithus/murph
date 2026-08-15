@@ -545,7 +545,7 @@ type ProviderSetupStore = NonNullable<ProviderSetupServiceInput["store"]>;
 function createReauthorizationRequiredSetupFixture() {
   let setup: MemberOwnedProviderSetupRecord = {
     active: true,
-    applicationName: "Cobalt Trail 4827",
+    applicationName: "Cobalt Trail 482731",
     browserRunId: null,
     completedAt: REAUTHORIZATION_NOW,
     connectSourceId: "strava",
@@ -623,7 +623,6 @@ function createReauthorizationRequiredSetupFixture() {
       startConnectionWithProviderApplication: startConnection,
     }),
     now: () => REAUTHORIZATION_NOW,
-    readApplicationView: async () => null,
     resolveApplication: async () => REAUTHORIZATION_APPLICATION,
     store,
   });

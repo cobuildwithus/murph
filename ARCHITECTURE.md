@@ -946,8 +946,9 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   issue sink with retention metadata and no member relation, anonymous-by-default
   hosted product-feedback rows, encrypted hosted mailbox rows, signed hosted user
   crypto root-envelope rows/audit events, hosted workspace checkpoint
-  metadata, hosted computer runs/handoffs with one member-scoped Kernel profile
-  name, and redacted hosted runtime logs/status. It is the canonical owner of
+  metadata, hosted computer runs/handoffs with separate deterministic generic
+  and private-provider-setup Kernel profile names per member, and redacted hosted
+  runtime logs/status. It is the canonical owner of
   hosted product and control facts, including legal consent, product-feedback
   intake, device-sync authority, referral
   attribution/qualification/reward authority, and hosted computer-use browser
@@ -1001,27 +1002,33 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   submission, destructive actions, and value-probing selectors fail closed.
   Model-visible observations omit page titles and expose only the origin plus
   bounded sanitized control metadata. The existing hosted computer owner still
-  owns the persistent browser profile and human handoff, and every model action
+  owns the persistent setup-only browser profile and human handoff. Ordinary
+  model-controlled browsing uses a different deterministic profile and cannot
+  inherit provider-dashboard auth; every model action
   revalidates that the run is bound to the exact active setup. Sign-in, MFA,
   CAPTCHA, and provider prerequisites pause that same run for secure member
   takeover; `provider_setup begin` resumes the persisted run after the member
   returns to `/connect`.
 
   Final submission and credential capture remain trusted Web operations. The
-  model proposes one short friendly application name and supplies only restricted
-  control selectors identified from the live page. Web freezes that exact name on
+  model proposes two friendly words from the tool's neutral sets and supplies only
+  restricted control selectors identified from the live page. Web appends six
+  cryptographically random digits and freezes that exact full name on
   the setup before trusted code writes or submits it within the one
   provider-declared creation form. Trusted code then reloads the provider page and
-  derives the one exact-name application container before it proves credential,
-  delete, and confirmation controls belong to that object. Before submission,
+  derives the one exact-name application container before it proves credential
+  controls belong to that object. Before submission,
   trusted code also rejects a name already present on the page; the safe
   pre-submit rollback releases that choice so the model can propose another.
   Generic model-driven actions cannot fill the name or submit the form. Trusted
   capture reads the client id and secret inside the browser boundary,
   seals them directly into `DeviceProviderApplication`, navigates away, scrubs
-  transient values, and returns no credential-bearing result. Owned deletion
-  uses the same persisted-name boundary; ambiguous absence retains the local
-  binding. `capturing` is the irreversible submission fence, so it cannot be
+  transient values, and returns no credential-bearing result. After sealing,
+  owned deletion hashes the encrypted binding's client ID in Web and compares
+  only that digest inside provider-declared application containers; a mutable or
+  reused display name cannot redirect deletion. Empty inventory converges only
+  when the exact creation form proves the provider page loaded. `capturing` is
+  the irreversible submission fence, so it cannot be
   canceled after an ambiguous failure and recovery of the exact run never
   submits again. If that run expires, the computer owner's existing exact-owner
   recovery may CAS-bind only its same-setup successor while preserving

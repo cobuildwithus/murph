@@ -76,7 +76,7 @@ const STRAVA_REGISTRATION = Object.freeze({
     applicationWebsite: "https://withmurph.ai",
     developerPortalUrl: "https://www.strava.com/settings/api",
     guidance: Object.freeze([
-      "Use the provider developer page to prepare one private application with the supplied website, category, callback URL, and read-only scopes. Invent a short, distinctive, friendly application name unrelated to the member unless the contract already supplies one; pass it only to provider_setup capture.",
+      "Use the provider developer page to prepare one private application with the supplied website, category, callback URL, and read-only scopes. Invent a tool-valid random friendly application name unless the contract already supplies one; pass it only to provider_setup capture.",
       "Navigate and identify controls from the live page. Never rely on checked-in provider selectors or a provider-specific browser program.",
       "Fill the reversible metadata fields with computer tools, but do not fill the application name or submit with computer_act. Call provider_setup capture so the trusted browser boundary freezes, writes, and submits the chosen name before credential sealing.",
       "For sign-in, MFA, CAPTCHA, or developer-access prerequisites, pause the same run for the member. Ask them to complete only that interruption, not to create the application or copy credentials.",

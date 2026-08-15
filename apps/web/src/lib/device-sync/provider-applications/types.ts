@@ -22,6 +22,7 @@ interface MemberOwnedOAuthClientApplicationDefinition {
   buildRuntimeConfigs(
     credentials: Pick<DeviceProviderApplicationSecret, "clientId" | "clientSecret">,
   ): SerializableConfiguredDeviceSyncProviderConfigs;
+  readClientId(configs: SerializableConfiguredDeviceSyncProviderConfigs): string;
   secretSchema: string;
 }
 
@@ -34,6 +35,13 @@ const MEMBER_OWNED_OAUTH_CLIENT_APPLICATION_DEFINITIONS = {
         scopes: ["activity:read"],
       },
     }),
+    readClientId: (configs) => {
+      const clientId = configs.strava?.clientId;
+      if (typeof clientId !== "string" || clientId.length === 0) {
+        throw new TypeError("Resolved device provider application client ID is missing.");
+      }
+      return clientId;
+    },
     secretSchema: STRAVA_DEVICE_PROVIDER_APPLICATION_SECRET_SCHEMA,
   },
 } as const satisfies Record<
@@ -60,6 +68,14 @@ export interface ResolvedDeviceProviderApplication<
   TProvider extends string = MemberOwnedDeviceProviderApplicationProvider,
 > extends DeviceProviderApplicationBinding<TProvider> {
   providerConfigs: SerializableConfiguredDeviceSyncProviderConfigs;
+}
+
+export function requireResolvedDeviceProviderApplicationClientId(
+  application: ResolvedDeviceProviderApplication,
+): string {
+  return MEMBER_OWNED_OAUTH_CLIENT_APPLICATION_DEFINITIONS[
+    application.provider
+  ].readClientId(application.providerConfigs);
 }
 
 export function isMemberOwnedDeviceProviderApplicationProvider(

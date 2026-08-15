@@ -81,12 +81,14 @@ Last verified: 2026-08-14
   foreign, and stale setup runs remain rejected. Prerequisite cancellation terminates
   only that exact run and is rejected unless durable state proves there is no
   provider submission, application binding, or connection. The provider-neutral
-  trusted boundary may inspect, create, repair, or delete only the exact friendly
-  application name frozen on the setup before trusted submission. Authority is
-  derived only after a fresh trusted provider-page load within the registered
-  container coordinates; trusted submission rejects a pre-existing exact name,
-  and zero or multiple post-submit matches fail closed around unrelated
-  applications. A setup may
+  trusted boundary may inspect or create only the safe-format friendly application
+  name frozen on the setup before trusted submission. Trusted submission rejects a
+  pre-existing exact name. After credential sealing, deletion uses a
+  Web-derived hash of the encrypted binding's client ID inside the registered
+  container coordinates, never mutable display text; blank or partial inventory
+  remains retryable unless the registered creation form positively proves an empty
+  loaded inventory. Setup-owned browsers use a separate deterministic persistent
+  Kernel profile from generic model-controlled browsing. A setup may
   navigate only a browser run durably bound to that exact setup owner key; a
   generic active member run is never reusable for provider setup, and generic
   computer actions reject setup-owned runs. Account deletion checks external

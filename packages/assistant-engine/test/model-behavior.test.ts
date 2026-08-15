@@ -1628,7 +1628,7 @@ describe('assistant local PDF evidence guidance', () => {
       'For Strava (`strava`) and Trailbox (`trailbox`), /connect Continue authorizes',
     )
     expect(directGuidance).toContain(
-      'invent a random friendly name, no member details; pass only to capture',
+      'invent a tool-valid random friendly name; pass only to capture',
     )
     expect(directGuidance).toContain('reuse it')
     expect(directGuidance).toContain(

@@ -515,6 +515,7 @@ export class ComputerUseService {
     const kernel = this.requireKernel();
     const kernelProfileName = this.resolveKernelProfileName({
       memberId: input.memberId,
+      ownerPurpose: owner?.ownerPurpose ?? null,
     });
 
     await this.expireStaleActiveRunsForMember({
@@ -2606,11 +2607,11 @@ export class ComputerUseService {
     });
     const browserIds = buildKernelBrowserIdsForAccountDeletion({ now, runs });
     const profileNames = uniqueStrings([
-      buildKernelProfileNameForAccountDeletion({
+      ...buildKernelProfileNamesForAccountDeletion({
         env: this.env,
         memberId: input.memberId,
       }),
-      ...buildKernelProfileNamesForAccountDeletion(runs),
+      ...readStoredKernelProfileNamesForAccountDeletion(runs),
     ]);
 
     if (browserIds.length === 0 && profileNames.length === 0) {
@@ -3910,11 +3911,13 @@ export class ComputerUseService {
 
   private resolveKernelProfileName(input: {
     memberId: string;
+    ownerPurpose: MemberOwnedProviderSetupComputerRunPurpose | null;
   }): string {
     const namespace = requireKernelProfileNamespace(this.env);
     return buildKernelProfileName({
       memberId: input.memberId,
       namespace,
+      ownerPurpose: input.ownerPurpose,
     });
   }
 
@@ -5722,30 +5725,46 @@ function requireHostedPublicBaseUrl(env: EnvSource): string {
 function buildKernelProfileName(input: {
   memberId: string;
   namespace: string;
+  ownerPurpose: MemberOwnedProviderSetupComputerRunPurpose | null;
 }): string {
   const namespaceSegment = normalizeKernelNameSegment(input.namespace);
-  const hash = shortHash(`${input.namespace}:${input.memberId}`);
-  return `murph-${namespaceSegment}-${hash}`.slice(0, 255);
+  const lane = input.ownerPurpose === MEMBER_OWNED_PROVIDER_SETUP_COMPUTER_RUN_PURPOSE
+    ? "provider-setup"
+    : null;
+  const hash = shortHash(
+    lane
+      ? `${input.namespace}:${lane}:${input.memberId}`
+      : `${input.namespace}:${input.memberId}`,
+  );
+  return `murph-${namespaceSegment}-${lane ? `${lane}-` : ""}${hash}`.slice(0, 255);
 }
 
-function buildKernelProfileNamesForAccountDeletion(
+function readStoredKernelProfileNamesForAccountDeletion(
   runs: readonly ComputerRunRecord[],
 ): string[] {
   return uniqueStrings(runs.map((run) => run.kernelProfileName));
 }
 
-function buildKernelProfileNameForAccountDeletion(input: {
+function buildKernelProfileNamesForAccountDeletion(input: {
   env: EnvSource;
   memberId: string;
-}): string | null {
+}): string[] {
   const namespace = input.env.HOSTED_COMPUTER_PROFILE_NAMESPACE?.trim()
     ?? process.env.HOSTED_COMPUTER_PROFILE_NAMESPACE?.trim();
   return namespace
-    ? buildKernelProfileName({
-        memberId: input.memberId,
-        namespace,
-      })
-    : null;
+    ? [
+        buildKernelProfileName({
+          memberId: input.memberId,
+          namespace,
+          ownerPurpose: null,
+        }),
+        buildKernelProfileName({
+          memberId: input.memberId,
+          namespace,
+          ownerPurpose: MEMBER_OWNED_PROVIDER_SETUP_COMPUTER_RUN_PURPOSE,
+        }),
+      ]
+    : [];
 }
 
 function requireKernelProfileNamespace(env: EnvSource): string {

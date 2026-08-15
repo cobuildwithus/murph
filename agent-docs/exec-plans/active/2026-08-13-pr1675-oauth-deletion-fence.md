@@ -106,6 +106,14 @@ provider-specific automation layer.
 20. [x] Replace the visible member-derived ownership marker with one friendly
     model-proposed application name frozen on the existing setup before trusted
     submission, then prove exact-name recovery and deletion remain fail closed.
+21. [x] Isolate provider-dashboard authentication in a deterministic setup-only
+    Kernel profile lane and delete both current lanes during account cleanup.
+22. [x] Keep the model-selected friendly words but restrict them to neutral
+    tool-owned sets and append six Web-generated random digits; after sealing,
+    authorize deletion by a digest of the stable client ID rather than mutable
+    display text.
+23. [x] Delete reconcile-time application adoption so the capture transaction is
+    the only setup-binding writer.
 
 ## Decisions
 
@@ -168,13 +176,16 @@ provider-specific automation layer.
   `cleanup_pending`, the caller receives the existing typed provisioning
   outcome even if immediate best-effort delete-by-name fails. That outcome is
   retry ownership, not proof of cleanup or permission for another browser.
-- The model may propose a short friendly application name, but it does not own
+- The model may propose a safe-format friendly application name, but it does not own
   the mutation. `DeviceProviderSetup` freezes that exact name before the trusted
   boundary writes or submits it. The boundary rejects an exact pre-existing name
   before submit and releases that safe pre-submit choice so the model can choose
-  another. Capture, recovery, and deletion derive authority only after a fresh
-  provider-page load produces one exact-name container; the model cannot change
-  the name after provider mutation may have started.
+  another. Pre-binding capture recovery derives authority only after a fresh
+  provider-page load produces one exact-name container. After sealing, deletion
+  instead compares a digest of the encrypted binding's stable client ID inside
+  registered containers, so a rename or same-name substitution cannot redirect
+  the effect. The model cannot change the name after provider mutation may have
+  started.
 
 ## Verification
 
@@ -260,3 +271,19 @@ provider-specific automation layer.
 - Friendly-name collision hardening: 41 direct service and trusted-browser tests
   pass, including exact pre-existing-name rejection before submit and release of
   that safe choice for a later retry. Hosted Web typecheck and docs drift pass.
+- ReviewGPT round 16 found three issues. The shared persistent Kernel profile and
+  reconcile-time application adoption findings were accepted directly: setup auth
+  now has its own deterministic profile lane, and capture is the sole binding
+  writer. The mutable-name authority finding was accepted for privacy, collision,
+  partial-page, and deletion safety, but its server-authored entire-name proposal
+  was rejected because the user explicitly requires model-chosen friendly naming.
+  The smaller correction restricts the model to neutral word sets, appends a
+  Web-CSPRNG suffix, uses the name only before binding, and authorizes later
+  deletion by a digest of the sealed client ID with positive loaded-inventory
+  proof. This adds bounded selector/digest logic but no state owner, service,
+  queue, scheduler, adapter, or lifecycle; removing reconcile adoption offsets one
+  production concept.
+- Round-16 remediation proof: 240 direct setup/trusted-browser/computer tests,
+  another 130 focused application/account/route/migration/changelog tests with 10
+  opt-in PostgreSQL cases skipped, 109 assistant prompt/tool tests, and 9 hosted
+  execution contract tests pass.

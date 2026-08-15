@@ -914,7 +914,7 @@ describe("hosted execution coverage gaps", () => {
     })).toThrow(/Hosted computer act request is invalid/u);
     expect(() => parseHostedRuntimeProviderSetupToolRequest({
       action: "capture",
-      applicationName: "Cobalt Trail 4827",
+      applicationName: "Cobalt Trail 482731",
       applicationNameSelector: 'input[name="name"]',
       clientIdSelector: 'input[value^="secret-prefix"]',
       clientSecretSelector: 'input[name="client_secret"]',
@@ -924,6 +924,30 @@ describe("hosted execution coverage gaps", () => {
       setupId: "dps_setup",
       submitSelector: 'button[type="submit"]',
     })).toThrow();
+    expect(() => parseHostedRuntimeProviderSetupToolRequest({
+      action: "capture",
+      applicationName: "A Member Name 123456",
+      applicationNameSelector: 'input[name="name"]',
+      clientIdSelector: '[data-client-id]',
+      clientSecretSelector: 'input[name="client_secret"]',
+      provider: "strava",
+      revealSecretSelector: null,
+      runId: "hcr_setup",
+      setupId: "dps_setup",
+      submitSelector: 'button[type="submit"]',
+    })).toThrow();
+    expect(parseHostedRuntimeProviderSetupToolRequest({
+      action: "delete",
+      clientIdSelector: "[data-client-id]",
+      confirmSelector: null,
+      deleteSelector: "button.delete",
+      provider: "strava",
+      runId: "hcr_setup",
+      setupId: "dps_setup",
+    })).toMatchObject({
+      action: "delete",
+      clientIdSelector: "[data-client-id]",
+    });
     expect(parseHostedRuntimeProviderSetupContinuationValidateRequest({
       provider: "strava",
       setupId: "dps_setup",

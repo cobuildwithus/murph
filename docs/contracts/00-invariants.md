@@ -300,7 +300,11 @@ it has been explicitly elevated to a cross-cutting invariant.
   reservation is not navigation authority: a new or successor candidate
   must CAS-bind to an acquisition-eligible exact setup before Kernel provisioning
   and attach under that binding before navigation. A losing admission retires the
-  candidate synchronously; a winning admission makes cancellation own it. If
+  candidate synchronously; a winning admission makes cancellation own it. The
+  setup run and every exact successor use a deterministic persistent profile lane
+  that generic computer work cannot open. After credential sealing, deletion
+  authority is the stable client ID compared only as a Web-derived digest inside
+  registered application containers, not the provider's mutable display name. If
   remote browser creation may already be in flight, cancellation persists the
   existing cleanup claim and remains `canceling`: an early delete-by-name
   `NotFound` is not quiescence. The returning creator deletes its exact browser,

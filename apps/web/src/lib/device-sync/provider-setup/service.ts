@@ -1,10 +1,13 @@
 import "server-only";
 
+import { randomInt } from "node:crypto";
 import { deviceSyncError, isDeviceSyncError } from "@murphai/device-syncd/errors";
-import type {
-  HostedRuntimeProviderSetupToolRequest,
+import {
+  normalizeHostedProviderSetupApplicationNameProposal,
+  type HostedRuntimeProviderSetupToolRequest,
 } from "@murphai/hosted-execution/provider-setup";
 
+import { sha256Hex } from "../../computer-use/ids";
 import { ComputerUseService } from "../../computer-use/service";
 import {
   MEMBER_OWNED_PROVIDER_SETUP_COMPUTER_RUN_PURPOSE,
@@ -15,11 +18,10 @@ import { createHostedDeviceSyncPublicIngressService } from "../public-ingress-se
 import {
   deleteDeviceProviderApplicationForSetup,
   isRepairableDeviceProviderApplicationStateError,
-  readDeviceProviderApplicationView,
+  requireResolvedDeviceProviderApplicationClientId,
   resolveDeviceProviderApplication,
   saveDeviceProviderApplication,
   type DeviceProviderApplicationBinding,
-  type DeviceProviderApplicationView,
   type MemberOwnedDeviceProviderApplicationProvider,
   type ResolvedDeviceProviderApplication,
 } from "../provider-applications";
@@ -155,10 +157,6 @@ interface ProviderSetupComputer {
   }): Promise<"bound" | "cleanup_pending" | "settled">;
 }
 
-type ReadApplicationView = (input: {
-  memberId: string;
-  provider: MemberOwnedDeviceProviderApplicationProvider;
-}) => Promise<DeviceProviderApplicationView | null>;
 type ResolveApplication = (input: {
   applicationId: string;
   expectedRevision: number;
@@ -195,9 +193,9 @@ export interface MemberOwnedProviderSetupBrowserResult {
 export class MemberOwnedProviderSetupService {
   private readonly computer: ProviderSetupComputer;
   private readonly createIngress: CreateIngress;
+  private readonly createApplicationNameSuffix: () => string;
   private readonly deleteApplication: DeleteApplication;
   private readonly now: () => Date;
-  private readonly readApplicationView: ReadApplicationView;
   private readonly registration: MemberOwnedProviderSetupRegistration;
   private readonly resolveApplication: ResolveApplication;
   private readonly saveApplication: SaveApplication;
@@ -210,10 +208,10 @@ export class MemberOwnedProviderSetupService {
     provider: MemberOwnedDeviceProviderApplicationProvider,
     input: {
       computer?: ProviderSetupComputer;
+      createApplicationNameSuffix?: () => string;
       createIngress?: CreateIngress;
       deleteApplication?: DeleteApplication;
       now?: () => Date;
-      readApplicationView?: ReadApplicationView;
       registration?: MemberOwnedProviderSetupRegistration;
       assertContinuationAllowed?: typeof assertMemberOwnedProviderSetupContinuationAllowed;
       requestContinuation?: typeof requestMemberOwnedProviderSetupContinuation;
@@ -228,13 +226,13 @@ export class MemberOwnedProviderSetupService {
       throw new TypeError("Member-owned provider setup metadata does not match its provider.");
     }
     this.computer = input.computer ?? new ComputerUseService();
+    this.createApplicationNameSuffix = input.createApplicationNameSuffix
+      ?? (() => randomInt(0, 1_000_000).toString().padStart(6, "0"));
     this.createIngress = input.createIngress
       ?? createHostedDeviceSyncPublicIngressService;
     this.deleteApplication = input.deleteApplication
       ?? deleteDeviceProviderApplicationForSetup;
     this.now = input.now ?? (() => new Date());
-    this.readApplicationView = input.readApplicationView
-      ?? readDeviceProviderApplicationView;
     this.resolveApplication = input.resolveApplication
       ?? resolveDeviceProviderApplication;
     this.assertContinuationAllowed = input.assertContinuationAllowed
@@ -501,7 +499,7 @@ export class MemberOwnedProviderSetupService {
     if (
       setup.applicationName !== null
       && requestedApplicationName !== null
-      && requestedApplicationName !== setup.applicationName
+      && requestedApplicationName !== readProviderApplicationNameBase(setup.applicationName)
     ) {
       throw deviceSyncError({
         code: "DEVICE_PROVIDER_SETUP_APPLICATION_NAME_CONFLICT",
@@ -510,8 +508,10 @@ export class MemberOwnedProviderSetupService {
         retryable: false,
       });
     }
-    const applicationName = setup.applicationName ?? requestedApplicationName;
-    if (applicationName === null) {
+    const applicationNameBase = setup.applicationName === null
+      ? requestedApplicationName
+      : readProviderApplicationNameBase(setup.applicationName);
+    if (applicationNameBase === null) {
       throw deviceSyncError({
         code: "DEVICE_PROVIDER_SETUP_APPLICATION_NAME_REQUIRED",
         httpStatus: 400,
@@ -519,6 +519,10 @@ export class MemberOwnedProviderSetupService {
         retryable: false,
       });
     }
+    const applicationName = setup.applicationName
+      ?? `${applicationNameBase} ${requireApplicationNameSuffix(
+        this.createApplicationNameSuffix(),
+      )}`;
     if (!recovery) {
       setup = await this.transition(setup, {
         applicationName,
@@ -642,6 +646,7 @@ export class MemberOwnedProviderSetupService {
     request: DeleteRequest,
   ): Promise<MemberOwnedProviderSetupView> {
     assertDistinctRuntimeSelectors([
+      request.clientIdSelector,
       request.confirmSelector,
       request.deleteSelector,
     ]);
@@ -651,14 +656,29 @@ export class MemberOwnedProviderSetupService {
       await this.transition(setup, { status: "disconnect_first" });
       throw disconnectFirstError(this.registration.presentation.providerName);
     }
+    const binding = readMemberOwnedProviderSetupBinding(setup);
+    if (!binding) {
+      throw new TypeError("Private provider setup application binding is missing.");
+    }
+    const application = await this.resolveApplication({
+      applicationId: binding.applicationId,
+      expectedRevision: binding.revision,
+      memberId,
+      provider: binding.provider,
+    });
     const contract = this.browserContract(setup);
     const result = await this.computer.actOwnedRun({
       code: buildBlindOwnedApplicationDeleteCode({
         applicationContainerSelector:
           this.registration.browser.trustedAuthority.applicationContainerSelector,
+        applicationIdHash: sha256Hex(
+          requireResolvedDeviceProviderApplicationClientId(application),
+        ),
+        applicationIdSelector: request.clientIdSelector,
         confirmSelector: request.confirmSelector,
+        creationFormSelector:
+          this.registration.browser.trustedAuthority.creationFormSelector,
         deleteSelector: request.deleteSelector,
-        applicationName: requireProviderApplicationName(setup),
         safeLandingUrl: contract.safeLandingUrl,
       }),
       memberId,
@@ -966,7 +986,7 @@ export class MemberOwnedProviderSetupService {
     input: MemberOwnedProviderSetupRecord,
     persist: boolean,
   ): Promise<MemberOwnedProviderSetupRecord> {
-    let setup = await this.recoverApplicationBinding(input, persist);
+    let setup = input;
     if (
       persist
       && (
@@ -1022,36 +1042,6 @@ export class MemberOwnedProviderSetupService {
       return this.persistDerivedStatus(setup, "pending", persist);
     }
     return setup;
-  }
-
-  private async recoverApplicationBinding(
-    setup: MemberOwnedProviderSetupRecord,
-    persist: boolean,
-  ): Promise<MemberOwnedProviderSetupRecord> {
-    if (readMemberOwnedProviderSetupBinding(setup) || setup.status === "deleted") {
-      return setup;
-    }
-    const application = await this.readApplicationView({
-      memberId: setup.memberId,
-      provider: setup.provider,
-    });
-    if (!application) {
-      return setup;
-    }
-    const recovered = {
-      ...setup,
-      providerApplicationId: application.applicationId,
-      providerApplicationRevision: application.revision,
-      status: "oauth_ready" as const,
-      updatedAt: this.now(),
-    };
-    return persist
-      ? this.transition(setup, {
-          providerApplicationId: application.applicationId,
-          providerApplicationRevision: application.revision,
-          status: "oauth_ready",
-        })
-      : recovered;
   }
 
   private persistDerivedStatus(
@@ -1161,17 +1151,18 @@ export function createMemberOwnedProviderSetupService(
 }
 
 function normalizeProviderApplicationName(value: string): string | null {
-  const normalized = value.trim().replace(/\s+/gu, " ");
-  return normalized.length >= 3 && normalized.length <= 80 ? normalized : null;
+  return normalizeHostedProviderSetupApplicationNameProposal(value);
 }
 
-function requireProviderApplicationName(
-  setup: MemberOwnedProviderSetupRecord,
-): string {
-  if (setup.applicationName === null) {
-    throw new TypeError("Private provider setup application name is missing.");
+function readProviderApplicationNameBase(value: string): string {
+  return value.split(" ").slice(0, 2).join(" ");
+}
+
+function requireApplicationNameSuffix(value: string): string {
+  if (!/^[0-9]{6}$/u.test(value)) {
+    throw new TypeError("Private provider application name suffix is invalid.");
   }
-  return setup.applicationName;
+  return value;
 }
 
 export function buildBlindProviderCredentialCaptureCode(input: {
@@ -1311,14 +1302,71 @@ return { clientId, clientSecret };
 
 export function buildBlindOwnedApplicationDeleteCode(input: {
   applicationContainerSelector: string;
+  applicationIdHash: string;
+  applicationIdSelector: string;
   confirmSelector: string | null;
+  creationFormSelector: string;
   deleteSelector: string;
-  applicationName: string;
   safeLandingUrl: string;
 }): string {
   return `
 const authorityAttribute = "data-murph-provider-delete-authority";
 const existingDialogAttribute = "data-murph-provider-existing-dialog";
+const deriveAuthority = async () => {
+  const authority = await page.evaluate(async ({ authorityAttribute, containerSelector, expectedIdHash, idSelector }) => {
+    const sha256 = async (value) => {
+      const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
+      return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+    };
+    const readExact = (element) => element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement
+      ? element.value.trim()
+      : (element.textContent || "").trim();
+    document.querySelectorAll('[' + authorityAttribute + ']').forEach((element) => element.removeAttribute(authorityAttribute));
+    const containers = Array.from(document.querySelectorAll(containerSelector));
+    if (containers.length === 0) return { kind: "empty_candidate" };
+    const matches = [];
+    for (const container of containers) {
+      const identifiers = Array.from(container.querySelectorAll(idSelector));
+      for (const identifier of identifiers) {
+        const value = readExact(identifier);
+        if (value && await sha256(value) === expectedIdHash) {
+          matches.push(container);
+          break;
+        }
+      }
+    }
+    const roots = Array.from(new Set(matches));
+    if (roots.length === 0) return { kind: "identifier_absent" };
+    if (roots.length !== 1) return { kind: "identifier_ambiguous" };
+    const root = roots[0];
+    if (!root || root === document.body || root === document.documentElement) {
+      return { kind: "container_ambiguous" };
+    }
+    root.setAttribute(authorityAttribute, "owned");
+    return { kind: "ok" };
+  }, {
+    authorityAttribute,
+    containerSelector: ${JSON.stringify(input.applicationContainerSelector)},
+    expectedIdHash: ${JSON.stringify(input.applicationIdHash)},
+    idSelector: ${JSON.stringify(input.applicationIdSelector)},
+  });
+  if (authority.kind === "empty_candidate" || authority.kind === "identifier_absent") {
+    const creationForm = page.locator(${JSON.stringify(input.creationFormSelector)});
+    await creationForm.first().waitFor({ state: "visible", timeout: 15000 }).catch(() => undefined);
+    if (await creationForm.count() === 1 && await creationForm.isVisible().catch(() => false)) {
+      return { kind: "absent" };
+    }
+    throw new Error("provider application inventory is unavailable");
+  }
+  if (authority.kind !== "ok") {
+    throw new Error("provider application stable authority mismatch: " + authority.kind);
+  }
+  const root = page.locator('[' + authorityAttribute + '="owned"]');
+  if (await root.count() !== 1 || !await root.isVisible().catch(() => false)) {
+    throw new Error("provider application authority is unavailable");
+  }
+  return { kind: "present", root };
+};
 await page.goto(${JSON.stringify(input.safeLandingUrl)}, { waitUntil: "load" });
 await page.waitForLoadState("networkidle", { timeout: 15000 });
 const loadedUrl = new URL(await page.evaluate(() => window.location.href));
@@ -1326,39 +1374,11 @@ const safeLandingUrl = new URL(${JSON.stringify(input.safeLandingUrl)});
 if (loadedUrl.origin !== safeLandingUrl.origin || loadedUrl.pathname !== safeLandingUrl.pathname) {
   throw new Error("provider application safe landing is unavailable");
 }
-const authority = await page.evaluate(({ authorityAttribute, containerSelector, expectedMarker }) => {
-  const readExact = (element) => element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement
-    ? element.value.trim()
-    : (element.textContent || "").trim();
-  const candidates = Array.from(document.querySelectorAll(
-    'input, textarea, [data-application-name], [data-app-name], h1, h2, h3, h4, dt, dd, p, span, a'
-  ));
-  const markers = candidates.filter((element) => readExact(element) === expectedMarker);
-  document.querySelectorAll('[' + authorityAttribute + ']').forEach((element) => element.removeAttribute(authorityAttribute));
-  const roots = Array.from(new Set(markers.map((marker) => marker.closest(containerSelector))));
-  if (markers.length === 0) return { kind: "absent" };
-  if (roots.length !== 1) return { kind: "marker_ambiguous" };
-  const root = roots[0];
-  if (!root || root === document.body || root === document.documentElement) {
-    return { kind: "container_ambiguous" };
-  }
-  root.setAttribute(authorityAttribute, "owned");
-  return { kind: "ok" };
-}, {
-  authorityAttribute,
-  containerSelector: ${JSON.stringify(input.applicationContainerSelector)},
-  expectedMarker: ${JSON.stringify(input.applicationName)},
-});
-if (authority.kind === "absent") {
+const initialAuthority = await deriveAuthority();
+if (initialAuthority.kind === "absent") {
   return { kind: "already_deleted" };
 }
-if (authority.kind !== "ok") {
-  throw new Error("provider application ownership marker mismatch: " + authority.kind);
-}
-const root = page.locator('[' + authorityAttribute + '="owned"]');
-if (await root.count() !== 1 || !await root.isVisible().catch(() => false)) {
-  throw new Error("provider application authority is unavailable");
-}
+const root = initialAuthority.root;
 const exactVisibleInRoot = async (selector, label) => {
   const locator = root.locator(selector);
   await locator.first().waitFor({ state: "visible", timeout: 15000 }).catch(() => undefined);
@@ -1383,19 +1403,12 @@ if (await confirmation.count() !== 1 || !await confirmation.isVisible().catch(()
 }
 await confirmation.click();` : ""}
 await page.waitForLoadState("domcontentloaded").catch(() => undefined);
-await page.waitForFunction(({ expectedMarker, expectedUrl }) => {
-  const current = new URL(window.location.href);
-  const safe = new URL(expectedUrl);
-  if (current.origin !== safe.origin || current.pathname !== safe.pathname) return false;
-  const readExact = (element) => element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement
-    ? element.value.trim()
-    : (element.textContent || "").trim();
-  const candidates = Array.from(document.querySelectorAll(
-    'input, textarea, [data-application-name], [data-app-name], h1, h2, h3, h4, dt, dd, p, span, a'
-  ));
-  return !candidates.some((element) => readExact(element) === expectedMarker);
-}, { expectedMarker: ${JSON.stringify(input.applicationName)}, expectedUrl: ${JSON.stringify(input.safeLandingUrl)} }, { timeout: 15000 });
-await page.goto(${JSON.stringify(input.safeLandingUrl)}, { waitUntil: "domcontentloaded" });
+await page.goto(${JSON.stringify(input.safeLandingUrl)}, { waitUntil: "load" });
+await page.waitForLoadState("networkidle", { timeout: 15000 });
+const finalAuthority = await deriveAuthority();
+if (finalAuthority.kind !== "absent") {
+  throw new Error("provider application deletion was not confirmed");
+}
 return { kind: "deleted" };
 `;
 }

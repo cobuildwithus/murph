@@ -9,6 +9,7 @@ import {
   buildMemberOwnedProviderSetupBrowserContract,
   listMemberOwnedProviderSetupRegistrations,
 } from "@/src/lib/device-sync/provider-setup/registry";
+import { sha256Hex } from "@/src/lib/computer-use/ids";
 import {
   buildBlindOwnedApplicationDeleteCode,
   buildBlindProviderCredentialCaptureCode,
@@ -19,6 +20,7 @@ import {
 } from "@/src/lib/device-sync/provider-setup/types";
 
 const MEMBER_ID = "member_synthetic";
+const RIGHT_ID_HASH = sha256Hex("right-id");
 
 const SETUP: MemberOwnedProviderSetupRecord = {
   active: true,
@@ -80,20 +82,20 @@ describe("member-owned provider setup contract", () => {
 
   it("returns the friendly application name frozen on the setup", () => {
     const named = buildMemberOwnedProviderSetupBrowserContract({
-      applicationName: "Cobalt Trail 4827",
+      applicationName: "Cobalt Trail 482731",
       env: { HOSTED_WEB_BASE_URL: "https://web.example.test" },
       memberId: MEMBER_ID,
       provider: "strava",
     });
 
-    expect(named.application.name).toBe("Cobalt Trail 4827");
+    expect(named.application.name).toBe("Cobalt Trail 482731");
     expect(named.application.name).not.toContain(MEMBER_ID);
   });
 
   it("accepts only the runtime selector handoff and rejects credential-shaped tool input", () => {
     const parsed = parseHostedRuntimeProviderSetupToolRequest({
       action: "capture",
-      applicationName: "Cobalt Trail 4827",
+      applicationName: "Cobalt Trail 482731",
       applicationNameSelector: "[data-application-name]",
       clientIdSelector: "[data-client-id]",
       clientSecretSelector: "[data-client-secret]",
@@ -122,16 +124,18 @@ describe("member-owned provider setup contract", () => {
       clientIdSelector: "#runtime-client-id",
       clientSecretSelector: "#runtime-client-secret",
       creationFormSelector: "form[data-owned-application]",
-      applicationName: "Cobalt Trail 4827",
+      applicationName: "Cobalt Trail 482731",
       revealSecretSelector: "#runtime-reveal",
       safeLandingUrl: "https://provider.example.test/apps",
       submitSelector: "#runtime-submit",
     });
     const deletion = buildBlindOwnedApplicationDeleteCode({
       applicationContainerSelector: "section[data-owned-application]",
+      applicationIdHash: RIGHT_ID_HASH,
+      applicationIdSelector: "#runtime-client-id",
       confirmSelector: "#runtime-confirm",
+      creationFormSelector: "form[data-owned-application]",
       deleteSelector: "#runtime-delete",
-      applicationName: "Cobalt Trail 4827",
       safeLandingUrl: "https://provider.example.test/apps",
     });
 
@@ -139,7 +143,7 @@ describe("member-owned provider setup contract", () => {
     expect(capture).toContain("provider application ownership marker mismatch");
     expect(capture).toContain("https://provider.example.test/apps");
     expect(capture).not.toMatch(/strava/iu);
-    expect(deletion).toContain("provider application ownership marker mismatch");
+    expect(deletion).toContain("provider application stable authority mismatch");
     expect(deletion).toContain('return { kind: "deleted" }');
     expect(deletion).not.toMatch(/strava/iu);
   });
@@ -163,7 +167,7 @@ describe("member-owned provider setup contract", () => {
     });
     page.setNavigationContent(`
       <section data-owned-application>
-        <h3>Cobalt Trail 4827</h3>
+        <h3>Cobalt Trail 482731</h3>
         <output class="client-id">right-id</output>
         <output class="client-secret">right-secret</output>
       </section>
@@ -174,7 +178,7 @@ describe("member-owned provider setup contract", () => {
       clientIdSelector: ".client-id",
       clientSecretSelector: ".client-secret",
       creationFormSelector: "form[data-owned-creation]",
-      applicationName: "Cobalt Trail 4827",
+      applicationName: "Cobalt Trail 482731",
       revealSecretSelector: null,
       safeLandingUrl: "about:blank",
       submitSelector: ".create",
@@ -187,7 +191,7 @@ describe("member-owned provider setup contract", () => {
       clientId: "right-id",
       clientSecret: "right-secret",
     });
-    expect(submittedNames).toEqual(["Cobalt Trail 4827"]);
+    expect(submittedNames).toEqual(["Cobalt Trail 482731"]);
   });
 
   it("reports proven pre-submit failure but fences an unknown submit outcome", async () => {
@@ -202,7 +206,7 @@ describe("member-owned provider setup contract", () => {
       clientIdSelector: ".client-id",
       clientSecretSelector: ".client-secret",
       creationFormSelector: "form[data-owned-creation]",
-      applicationName: "Cobalt Trail 4827",
+      applicationName: "Cobalt Trail 482731",
       revealSecretSelector: null,
       safeLandingUrl: "about:blank",
       submitSelector: ".create",
@@ -228,7 +232,7 @@ describe("member-owned provider setup contract", () => {
   it("rejects an exact friendly-name collision before trusted submission", async () => {
     const page = createFixturePage(`
       <section data-owned-application>
-        <h3>Cobalt Trail 4827</h3>
+        <h3>Cobalt Trail 482731</h3>
       </section>
       <form data-owned-creation>
         <input class="application-name" value="" />
@@ -241,7 +245,7 @@ describe("member-owned provider setup contract", () => {
       clientIdSelector: ".client-id",
       clientSecretSelector: ".client-secret",
       creationFormSelector: "form[data-owned-creation]",
-      applicationName: "Cobalt Trail 4827",
+      applicationName: "Cobalt Trail 482731",
       revealSecretSelector: null,
       safeLandingUrl: "about:blank",
       submitSelector: ".create",
@@ -262,7 +266,7 @@ describe("member-owned provider setup contract", () => {
       clientIdSelector: ".client-id",
       clientSecretSelector: ".client-secret",
       creationFormSelector: "form[data-owned-creation]",
-      applicationName: "Cobalt Trail 4827",
+      applicationName: "Cobalt Trail 482731",
       revealSecretSelector: null,
       safeLandingUrl: "about:blank",
       submitSelector: null,
@@ -284,7 +288,7 @@ describe("member-owned provider setup contract", () => {
       clientIdSelector: ".client-id",
       clientSecretSelector: ".client-secret",
       creationFormSelector: "form[data-owned-creation]",
-      applicationName: "Cobalt Trail 4827",
+      applicationName: "Cobalt Trail 482731",
       revealSecretSelector: null,
       safeLandingUrl: "about:blank",
       submitSelector: null,
@@ -306,7 +310,7 @@ describe("member-owned provider setup contract", () => {
           <output class="cross-secret">wrong-secret</output>
         </form>
         <form data-owned-application>
-          <input name="name" value="Cobalt Trail 4827" />
+          <input name="name" value="Cobalt Trail 482731" />
           <button class="owned-submit" type="button">Create</button>
           <output class="owned-id">right-id</output>
           <output class="owned-secret">right-secret</output>
@@ -319,7 +323,7 @@ describe("member-owned provider setup contract", () => {
         clientIdSelector: ".owned-id",
         clientSecretSelector: ".owned-secret",
         creationFormSelector: "form[data-owned-application]",
-        applicationName: "Cobalt Trail 4827",
+        applicationName: "Cobalt Trail 482731",
         revealSecretSelector: null,
         safeLandingUrl: "about:blank",
         submitSelector: null,
@@ -335,7 +339,7 @@ describe("member-owned provider setup contract", () => {
 
       await page.setContent(`
         <form data-owned-application>
-          <input name="name" value="Cobalt Trail 4827" />
+          <input name="name" value="Cobalt Trail 482731" />
           <button class="owned-submit" type="button">Create</button>
         </form>
         <output class="cross-id">wrong-id</output>
@@ -347,7 +351,7 @@ describe("member-owned provider setup contract", () => {
         clientIdSelector: ".cross-id",
         clientSecretSelector: ".cross-secret",
         creationFormSelector: "form[data-owned-application]",
-        applicationName: "Cobalt Trail 4827",
+        applicationName: "Cobalt Trail 482731",
         revealSecretSelector: null,
         safeLandingUrl: "about:blank",
         submitSelector: null,
@@ -364,13 +368,13 @@ describe("member-owned provider setup contract", () => {
   it("rejects duplicate persisted markers before any irreversible control", async () => {
     const page = createFixturePage(`
         <form data-owned-application>
-          <input name="name" value="Cobalt Trail 4827" />
+          <input name="name" value="Cobalt Trail 482731" />
           <button class="owned-submit" type="button">Create</button>
           <output class="owned-id">right-id</output>
           <output class="owned-secret">right-secret</output>
         </form>
         <section data-owned-application>
-          <h3>Cobalt Trail 4827</h3>
+          <h3>Cobalt Trail 482731</h3>
         </section>
       `);
       const code = buildBlindProviderCredentialCaptureCode({
@@ -379,7 +383,7 @@ describe("member-owned provider setup contract", () => {
         clientIdSelector: ".owned-id",
         clientSecretSelector: ".owned-secret",
         creationFormSelector: "form[data-owned-application]",
-        applicationName: "Cobalt Trail 4827",
+        applicationName: "Cobalt Trail 482731",
         revealSecretSelector: null,
         safeLandingUrl: "about:blank",
         submitSelector: null,
@@ -394,11 +398,12 @@ describe("member-owned provider setup contract", () => {
   it("ignores a transient forged marker and trusts the reloaded landing absence", async () => {
     const forged = `
       <section data-owned-application>
-        <input class="forged-name" value="Cobalt Trail 4827" />
+        <input class="forged-name" value="Cobalt Trail 482731" />
         <output class="owned-id">wrong-id</output>
         <output class="owned-secret">wrong-secret</output>
         <button class="owned-delete" type="button">Delete</button>
       </section>
+      <form data-owned-application></form>
     `;
     const page = createFixturePage(forged);
     page.setNavigationContent(`
@@ -408,6 +413,7 @@ describe("member-owned provider setup contract", () => {
         <output class="owned-secret">wrong-secret</output>
         <button class="owned-delete" type="button">Delete</button>
       </section>
+      <form data-owned-application></form>
     `);
 
     const capture = buildBlindProviderCredentialCaptureCode({
@@ -416,7 +422,7 @@ describe("member-owned provider setup contract", () => {
       clientIdSelector: ".owned-id",
       clientSecretSelector: ".owned-secret",
       creationFormSelector: "form[data-owned-application]",
-      applicationName: "Cobalt Trail 4827",
+      applicationName: "Cobalt Trail 482731",
       revealSecretSelector: null,
       safeLandingUrl: "about:blank",
       submitSelector: null,
@@ -430,9 +436,11 @@ describe("member-owned provider setup contract", () => {
     await page.setContent(forged);
     const deletion = buildBlindOwnedApplicationDeleteCode({
       applicationContainerSelector: "section[data-owned-application]",
+      applicationIdHash: RIGHT_ID_HASH,
+      applicationIdSelector: ".owned-id",
       confirmSelector: null,
+      creationFormSelector: "form[data-owned-application]",
       deleteSelector: ".owned-delete",
-      applicationName: "Cobalt Trail 4827",
       safeLandingUrl: "about:blank",
     });
     const runDelete = new Function(
@@ -445,8 +453,8 @@ describe("member-owned provider setup contract", () => {
   it("derives one application authority when its marker is rendered in multiple fields", async () => {
     const page = createFixturePage(`
         <section data-owned-application>
-          <h3>Cobalt Trail 4827</h3>
-          <input name="name" value="Cobalt Trail 4827" />
+          <h3>Cobalt Trail 482731</h3>
+          <input name="name" value="Cobalt Trail 482731" />
           <output class="owned-id">right-id</output>
           <output class="owned-secret">right-secret</output>
         </section>
@@ -457,7 +465,7 @@ describe("member-owned provider setup contract", () => {
         clientIdSelector: ".owned-id",
         clientSecretSelector: ".owned-secret",
         creationFormSelector: "form[data-owned-application]",
-        applicationName: "Cobalt Trail 4827",
+        applicationName: "Cobalt Trail 482731",
         revealSecretSelector: null,
         safeLandingUrl: "about:blank",
         submitSelector: null,
@@ -478,6 +486,7 @@ describe("member-owned provider setup contract", () => {
         <h3>Unrelated application</h3>
         <button class="owned-delete" type="button">Delete</button>
       </section>
+      <form data-owned-application></form>
     `);
     const clicks: string[] = [];
     await page.exposeFunction("recordAbsentDeleteClick", () => clicks.push("delete"));
@@ -488,9 +497,11 @@ describe("member-owned provider setup contract", () => {
     });
     const code = buildBlindOwnedApplicationDeleteCode({
       applicationContainerSelector: "section[data-owned-application]",
+      applicationIdHash: RIGHT_ID_HASH,
+      applicationIdSelector: ".owned-id",
       confirmSelector: null,
+      creationFormSelector: "form[data-owned-application]",
       deleteSelector: ".owned-delete",
-      applicationName: "Cobalt Trail 4827",
       safeLandingUrl: "about:blank",
     });
     const run = new Function("page", `return (async () => {${code}})();`) as (
@@ -504,16 +515,18 @@ describe("member-owned provider setup contract", () => {
   it("keeps deletion fenced when the authoritative landing is unavailable", async () => {
     const page = createFixturePage(`
       <section data-owned-application>
-        <h3>Cobalt Trail 4827</h3>
+        <h3>Cobalt Trail 482731</h3>
         <button class="owned-delete" type="button">Delete</button>
       </section>
     `);
     page.setNavigationErrorOnce(new Error("safe landing unavailable"));
     const code = buildBlindOwnedApplicationDeleteCode({
       applicationContainerSelector: "section[data-owned-application]",
+      applicationIdHash: RIGHT_ID_HASH,
+      applicationIdSelector: ".owned-id",
       confirmSelector: null,
+      creationFormSelector: "form[data-owned-application]",
       deleteSelector: ".owned-delete",
-      applicationName: "Cobalt Trail 4827",
       safeLandingUrl: "about:blank",
     });
     const run = new Function("page", `return (async () => {${code}})();`) as (
@@ -524,36 +537,60 @@ describe("member-owned provider setup contract", () => {
     expect(page.clickSelectors).toEqual([]);
   });
 
-  it("keeps deletion fenced when multiple exact ownership markers exist", async () => {
-    const page = createFixturePage(`
-      <section data-owned-application><h3>Cobalt Trail 4827</h3></section>
-      <section data-owned-application><h3>Cobalt Trail 4827</h3></section>
-    `);
+  it("keeps deletion retryable when the safe path renders no loaded inventory", async () => {
+    const page = createFixturePage("<main>Temporary provider error</main>");
     const code = buildBlindOwnedApplicationDeleteCode({
       applicationContainerSelector: "section[data-owned-application]",
+      applicationIdHash: RIGHT_ID_HASH,
+      applicationIdSelector: ".owned-id",
       confirmSelector: null,
+      creationFormSelector: "form[data-owned-application]",
       deleteSelector: ".owned-delete",
-      applicationName: "Cobalt Trail 4827",
       safeLandingUrl: "about:blank",
     });
     const run = new Function("page", `return (async () => {${code}})();`) as (
       page: FixturePage,
     ) => Promise<unknown>;
 
-    await expect(run(page)).rejects.toThrow(/marker_ambiguous/u);
+    await expect(run(page)).rejects.toThrow("inventory is unavailable");
+    expect(page.clickSelectors).toEqual([]);
   });
 
-  it("confines deletion to the marked application and the dialog it opens", async () => {
+  it("keeps deletion fenced when multiple exact stable client IDs exist", async () => {
+    const page = createFixturePage(`
+      <section data-owned-application><output class="owned-id">right-id</output></section>
+      <section data-owned-application><output class="owned-id">right-id</output></section>
+    `);
+    const code = buildBlindOwnedApplicationDeleteCode({
+      applicationContainerSelector: "section[data-owned-application]",
+      applicationIdHash: RIGHT_ID_HASH,
+      applicationIdSelector: ".owned-id",
+      confirmSelector: null,
+      creationFormSelector: "form[data-owned-application]",
+      deleteSelector: ".owned-delete",
+      safeLandingUrl: "about:blank",
+    });
+    const run = new Function("page", `return (async () => {${code}})();`) as (
+      page: FixturePage,
+    ) => Promise<unknown>;
+
+    await expect(run(page)).rejects.toThrow(/identifier_ambiguous/u);
+  });
+
+  it("confines deletion to the stable-ID application and the dialog it opens", async () => {
     const page = createFixturePage(`
         <section data-owned-application id="unrelated-app">
-          <h3>Unrelated application</h3>
+          <h3>Cobalt Trail 482731</h3>
+          <output class="owned-id">wrong-id</output>
           <button class="other-delete" type="button">Delete</button>
         </section>
         <section data-owned-application id="owned-app">
-          <h3>Cobalt Trail 4827</h3>
+          <h3>Renamed by member</h3>
+          <output class="owned-id">right-id</output>
           <button class="owned-delete" type="button">Delete</button>
         </section>
         <button class="confirm" id="global-confirm" type="button">Global confirm</button>
+        <form data-owned-application></form>
       `);
       const clicks: string[] = [];
       await page.exposeFunction("recordProviderFixtureClick", (label: string) => {
@@ -575,9 +612,11 @@ describe("member-owned provider setup contract", () => {
       });
       const code = buildBlindOwnedApplicationDeleteCode({
         applicationContainerSelector: "section[data-owned-application]",
+        applicationIdHash: RIGHT_ID_HASH,
+        applicationIdSelector: ".owned-id",
         confirmSelector: ".confirm",
+        creationFormSelector: "form[data-owned-application]",
         deleteSelector: ".owned-delete",
-        applicationName: "Cobalt Trail 4827",
         safeLandingUrl: "about:blank",
       });
       const run = new Function("page", `return (async () => {${code}})();`) as (
@@ -589,15 +628,19 @@ describe("member-owned provider setup contract", () => {
 
       await page.setContent(`
         <section data-owned-application>
-          <h3>Cobalt Trail 4827</h3>
+          <h3>Cobalt Trail 482731</h3>
+          <output class="owned-id">right-id</output>
         </section>
         <button class="other-delete" type="button">Delete another app</button>
+        <form data-owned-application></form>
       `);
       const crossObject = buildBlindOwnedApplicationDeleteCode({
         applicationContainerSelector: "section[data-owned-application]",
+        applicationIdHash: RIGHT_ID_HASH,
+        applicationIdSelector: ".owned-id",
         confirmSelector: null,
+        creationFormSelector: "form[data-owned-application]",
         deleteSelector: ".other-delete",
-        applicationName: "Cobalt Trail 4827",
         safeLandingUrl: "about:blank",
       });
       const runCrossObject = new Function(

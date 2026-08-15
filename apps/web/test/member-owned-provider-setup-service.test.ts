@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { sha256Hex } from "@/src/lib/computer-use/ids";
 import {
   DeviceProviderApplicationError,
   saveDeviceProviderApplication,
@@ -385,7 +386,7 @@ describe("member-owned provider setup service", () => {
     expect(first.contract).toMatchObject({
       application: {
         category: "Fixture category",
-        name: "Cobalt Trail 4827",
+        name: "Cobalt Trail 482731",
         website: "https://fixture.example.test",
       },
       developerPortalUrl: CUSTOM_REGISTRATION.browser.developerPortalUrl,
@@ -703,7 +704,7 @@ describe("member-owned provider setup service", () => {
     expect(JSON.stringify(result)).not.toContain(CAPTURED_CREDENTIALS.clientId);
     expect(JSON.stringify(result)).not.toContain(CAPTURED_CREDENTIALS.clientSecret);
     expect(store.setup).toMatchObject({
-      applicationName: "Cobalt Trail 4827",
+      applicationName: "Cobalt Trail 482731",
       browserRunId: null,
       providerApplicationId: APPLICATION_ID,
       providerApplicationRevision: 3,
@@ -738,17 +739,17 @@ describe("member-owned provider setup service", () => {
     expect(capture).not.toHaveBeenCalled();
 
     store.setup = buildSetup({
-      applicationName: "Cobalt Trail 4827",
+      applicationName: "Cobalt Trail 482731",
       browserRunId: RUN_ID,
       status: "browser_setup",
     });
     await expect(service.captureAndSeal(MEMBER_ID, {
       ...captureRequest(),
-      applicationName: "Amber Summit 9135",
+      applicationName: "Amber Summit 913579",
     })).rejects.toMatchObject({
       code: "DEVICE_PROVIDER_SETUP_APPLICATION_NAME_CONFLICT",
     });
-    expect(store.setup.applicationName).toBe("Cobalt Trail 4827");
+    expect(store.setup.applicationName).toBe("Cobalt Trail 482731");
     expect(capture).not.toHaveBeenCalled();
   });
 
@@ -912,7 +913,7 @@ describe("member-owned provider setup service", () => {
     });
   });
 
-  it("uses the frozen friendly name as trusted browser authority before exact deletion", async () => {
+  it("uses the sealed client ID as trusted browser authority before exact deletion", async () => {
     const store = new MemorySetupStore();
     store.setup = buildSetup({
       providerApplicationId: APPLICATION_ID,
@@ -928,6 +929,7 @@ describe("member-owned provider setup service", () => {
     const prepared = await service.prepareDeletion(MEMBER_ID);
     const result = await service.deleteOwnedApplication(MEMBER_ID, {
       action: "delete",
+      clientIdSelector: "[data-client-id]",
       confirmSelector: "button.confirm-delete",
       deleteSelector: "button.delete-application",
       provider: "strava",
@@ -936,8 +938,10 @@ describe("member-owned provider setup service", () => {
     });
 
     const trustedCode = computer.actOwnedRun.mock.calls[0]?.[0].code ?? "";
-    expect(trustedCode).toContain("Cobalt Trail 4827");
-    expect(trustedCode).toContain("provider application ownership marker mismatch");
+    expect(trustedCode).toContain(sha256Hex(CAPTURED_CREDENTIALS.clientId));
+    expect(trustedCode).not.toContain(CAPTURED_CREDENTIALS.clientId);
+    expect(trustedCode).toContain("provider application stable authority mismatch");
+    expect(trustedCode).toContain("[data-client-id]");
     expect(trustedCode).toContain("button.delete-application");
     expect(deleteApplication).toHaveBeenCalledWith(expect.objectContaining({
       applicationId: APPLICATION_ID,
@@ -983,6 +987,7 @@ describe("member-owned provider setup service", () => {
 
     await expect(service.deleteOwnedApplication(MEMBER_ID, {
       action: "delete",
+      clientIdSelector: "[data-client-id]",
       confirmSelector: "button.confirm-delete",
       deleteSelector: "button.delete-application",
       provider: "strava",
@@ -1026,6 +1031,7 @@ describe("member-owned provider setup service", () => {
     const prepared = await service.prepareDeletion(MEMBER_ID);
     const request = {
       action: "delete" as const,
+      clientIdSelector: "[data-client-id]",
       confirmSelector: "button.confirm-delete",
       deleteSelector: "button.delete-application",
       provider: "strava" as const,
@@ -1063,6 +1069,7 @@ describe("member-owned provider setup service", () => {
 
     await expect(service.deleteOwnedApplication(MEMBER_ID, {
       action: "delete",
+      clientIdSelector: "[data-client-id]",
       confirmSelector: "button.confirm-delete",
       deleteSelector: "button.delete-application",
       provider: "strava",
@@ -1168,10 +1175,10 @@ function createService(input: {
     assertContinuationAllowed: input.assertContinuationAllowed
       ?? (async () => undefined),
     computer: input.computer,
+    createApplicationNameSuffix: () => "482731",
     createIngress: input.createIngress,
     deleteApplication: input.deleteApplication,
     now: () => NOW,
-    readApplicationView: async () => null,
     registration: CUSTOM_REGISTRATION,
     requestContinuation: input.requestContinuation,
     resolveApplication: input.resolveApplication ?? (async () => RESOLVED_APPLICATION),
@@ -1184,7 +1191,7 @@ function createService(input: {
 function captureRequest() {
   return {
     action: "capture" as const,
-    applicationName: "Cobalt Trail 4827",
+    applicationName: "Cobalt Trail",
     applicationNameSelector: "[data-application-name]",
     clientIdSelector: "[data-client-id]",
     clientSecretSelector: "[data-client-secret]",
@@ -1201,7 +1208,7 @@ function buildSetup(
 ): MemberOwnedProviderSetupRecord {
   return {
     active: true,
-    applicationName: "Cobalt Trail 4827",
+    applicationName: "Cobalt Trail 482731",
     browserRunId: null,
     completedAt: null,
     connectSourceId: "strava",

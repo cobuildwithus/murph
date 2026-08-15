@@ -989,7 +989,7 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           sourceProviderSlug: null,
         });
         const capturing = await store.transition({
-          applicationName: "Cobalt Trail 4827",
+          applicationName: "Cobalt Trail 482731",
           expectedVersion: setup.version,
           memberId,
           provider: "strava",
@@ -998,7 +998,7 @@ describe.skipIf(!runPostgresConcurrencyProof)(
         });
 
         expect(capturing).toMatchObject({
-          applicationName: "Cobalt Trail 4827",
+          applicationName: "Cobalt Trail 482731",
           status: "capturing",
           version: setup.version + 1,
         });
@@ -1006,7 +1006,7 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           select: { applicationName: true, status: true },
           where: { id: setup.id },
         })).resolves.toEqual({
-          applicationName: "Cobalt Trail 4827",
+          applicationName: "Cobalt Trail 482731",
           status: "capturing",
         });
       } finally {

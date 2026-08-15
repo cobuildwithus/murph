@@ -163,9 +163,12 @@ credential-redacted observation. Do not use `computer_os_control` or
 Never submit the developer-app form with `computer_act`. Once the exact form is
 ready, call `provider_setup` with `action: "capture"` and runtime selectors for
 the application name, final submit, client ID, and client secret fields. Do not
-fill the application name yourself. The trusted operation derives and fills the
-ownership marker, submits the exact provider-declared creation form, reloads the
-trusted provider page, and derives the one marked application container before it
+fill the application name yourself. When `begin` returns no assigned name, choose
+one random two-word name using the exact neutral word sets in the tool
+description; never use member details. Web adds six cryptographically random
+digits, then the trusted operation freezes and fills that full name, submits the
+exact provider-declared creation form, reloads the trusted
+provider page, and derives the one exact-name application container before it
 reads and seals credentials. Model-selected selectors never grant ownership or
 credential-read authority. The operation navigates away and returns no credential
 value. Never ask for, read, copy, quote, log, screenshot, or preserve client IDs,
@@ -175,9 +178,11 @@ For sign-in, MFA, CAPTCHA, or a provider prerequisite, pause the same run with a
 secure handoff. The member completes only the interruption and returns to
 `/connect`; call `provider_setup begin` again to resume the exact persisted run.
 For deletion, disconnect the provider first, call `prepare_delete`, navigate to
-the application, then use `delete`; the trusted operation derives the exact
-marked application and a confirmation dialog opened by that application before
-local credentials are removed. Ambiguous absence retains the local binding.
+the application, then use `delete` with the live client-ID selector without
+reading its value. The trusted operation matches the stable sealed client ID by
+digest inside one registered application container and confines confirmation to
+the dialog opened by that application before local credentials are removed.
+Blank, partial, or ambiguous inventory retains the local binding.
 
 ## Act primitive
 

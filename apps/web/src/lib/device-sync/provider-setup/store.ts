@@ -2,6 +2,9 @@ import "server-only";
 
 import type { Prisma, PrismaClient } from "@prisma/client";
 import { DeviceSyncError } from "@murphai/device-syncd/errors";
+import {
+  normalizeHostedProviderSetupApplicationName,
+} from "@murphai/hosted-execution/provider-setup";
 
 import {
   HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
@@ -421,7 +424,7 @@ function mapSetup(row: DeviceProviderSetupRow): MemberOwnedProviderSetupRecord {
   }
   if (
     row.applicationName !== null
-    && normalizeProviderApplicationName(row.applicationName) !== row.applicationName
+    && normalizeHostedProviderSetupApplicationName(row.applicationName) !== row.applicationName
   ) {
     throw new TypeError("Stored private provider application name is invalid.");
   }
@@ -467,7 +470,8 @@ function assertApplicationPair(input: DeviceProviderSetupTransitionInput): void 
   if (
     input.applicationName !== undefined
     && input.applicationName !== null
-    && normalizeProviderApplicationName(input.applicationName) !== input.applicationName
+    && normalizeHostedProviderSetupApplicationName(input.applicationName)
+      !== input.applicationName
   ) {
     throw new TypeError("Private provider application name is invalid.");
   }
@@ -493,11 +497,6 @@ function assertApplicationPair(input: DeviceProviderSetupTransitionInput): void 
   ) {
     throw new TypeError("Private provider setup application binding is invalid.");
   }
-}
-
-function normalizeProviderApplicationName(value: string): string | null {
-  const normalized = value.trim().replace(/\s+/gu, " ");
-  return normalized.length >= 3 && normalized.length <= 80 ? normalized : null;
 }
 
 async function requirePersonalMember(input: {

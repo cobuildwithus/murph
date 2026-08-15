@@ -6570,11 +6570,12 @@ describe("ComputerUseService", () => {
       memberId: "member_123",
     })).resolves.toEqual({
       browserSessionsDeleted: 1,
-      profilesDeleted: 2,
+      profilesDeleted: 3,
     });
     expect(kernel.deletedSessionIds).toEqual(["kernel-session-1"]);
     expect(kernel.deletedProfileNames).toEqual([
       deterministicProfileNameMatcher(),
+      deterministicProviderSetupProfileNameMatcher(),
       "kernel-profile-member",
     ]);
   });
@@ -6621,11 +6622,12 @@ describe("ComputerUseService", () => {
       memberId: "member_123",
     })).resolves.toEqual({
       browserSessionsDeleted: 0,
-      profilesDeleted: 3,
+      profilesDeleted: 4,
     });
     expect(kernel.deletedSessionIds).toEqual([]);
     expect(kernel.deletedProfileNames).toEqual([
       deterministicProfileNameMatcher(),
+      deterministicProviderSetupProfileNameMatcher(),
       "kernel-profile-shared",
       "kernel-profile-distinct",
     ]);
@@ -6683,13 +6685,14 @@ describe("ComputerUseService", () => {
       memberId: "member_123",
     })).resolves.toEqual({
       browserSessionsDeleted: 1,
-      profilesDeleted: 2,
+      profilesDeleted: 3,
     });
     expect(kernel.deletedSessionIds).toEqual([
       expect.stringMatching(/^murph-browser-hcr_run123-/u),
     ]);
     expect(kernel.deletedProfileNames).toEqual([
       deterministicProfileNameMatcher(),
+      deterministicProviderSetupProfileNameMatcher(),
       "kernel-profile-member",
     ]);
     expect(store.run).toMatchObject({
@@ -6741,7 +6744,7 @@ describe("ComputerUseService", () => {
       memberId: "member_123",
     })).resolves.toEqual({
       browserSessionsDeleted: 1,
-      profilesDeleted: 2,
+      profilesDeleted: 3,
     });
     expect(kernel.deletedSessionIds).toEqual([
       expect.stringMatching(/^murph-browser-hcr_run123-/u),
@@ -6749,6 +6752,7 @@ describe("ComputerUseService", () => {
     ]);
     expect(kernel.deletedProfileNames).toEqual([
       deterministicProfileNameMatcher(),
+      deterministicProviderSetupProfileNameMatcher(),
       "kernel-profile-member",
     ]);
   });
@@ -6775,13 +6779,14 @@ describe("ComputerUseService", () => {
       memberId: "member_123",
     })).resolves.toEqual({
       browserSessionsDeleted: 1,
-      profilesDeleted: 2,
+      profilesDeleted: 3,
     });
     expect(kernel.deletedSessionIds).toEqual([
       expect.stringMatching(/^murph-browser-hcr_run123-/u),
     ]);
     expect(kernel.deletedProfileNames).toEqual([
       deterministicProfileNameMatcher(),
+      deterministicProviderSetupProfileNameMatcher(),
       "kernel-profile-member",
     ]);
     expect(store.run).toMatchObject({
@@ -6813,11 +6818,12 @@ describe("ComputerUseService", () => {
       memberId: "member_123",
     })).resolves.toEqual({
       browserSessionsDeleted: 0,
-      profilesDeleted: 2,
+      profilesDeleted: 3,
     });
     expect(kernel.deletedSessionIds).toEqual([]);
     expect(kernel.deletedProfileNames).toEqual([
       deterministicProfileNameMatcher(),
+      deterministicProviderSetupProfileNameMatcher(),
       "kernel-profile-member",
     ]);
   });
@@ -6851,13 +6857,14 @@ describe("ComputerUseService", () => {
       memberId: "member_123",
     })).resolves.toEqual({
       browserSessionsDeleted: 1,
-      profilesDeleted: 2,
+      profilesDeleted: 3,
     });
     expect(kernel.deletedSessionIds).toEqual([
       expect.stringMatching(/^murph-browser-hcr_run123-/u),
     ]);
     expect(kernel.deletedProfileNames).toEqual([
       deterministicProfileNameMatcher(),
+      deterministicProviderSetupProfileNameMatcher(),
       "kernel-profile-member",
     ]);
     expect(store.run).toMatchObject({
@@ -7395,6 +7402,12 @@ describe("ComputerUseService", () => {
       ownerKey: "dps_second_provider",
       ownerPurpose: "member_owned_provider_setup",
     });
+    const [genericBrowser, setupBrowser] = kernel.createdBrowserInputs;
+    expect(genericBrowser?.profileName).toEqual(deterministicProfileNameMatcher());
+    expect(setupBrowser?.profileName).toEqual(
+      deterministicProviderSetupProfileNameMatcher(),
+    );
+    expect(setupBrowser?.profileName).not.toBe(genericBrowser?.profileName);
   });
 
   it("deletes stored Kernel sessions and profiles even when namespace cleanup is not configured", async () => {
@@ -7444,11 +7457,13 @@ describe("ComputerUseService", () => {
       memberId: "member_without_runs",
     })).resolves.toEqual({
       browserSessionsDeleted: 0,
-      profilesDeleted: 1,
+      profilesDeleted: 2,
     });
     expect(kernel.deletedSessionIds).toEqual([]);
-    expect(kernel.deletedProfileNames).toHaveLength(1);
-    expect(kernel.deletedProfileNames[0]).toMatch(/^murph-test-/u);
+    expect(kernel.deletedProfileNames).toEqual([
+      deterministicProfileNameMatcher(),
+      deterministicProviderSetupProfileNameMatcher(),
+    ]);
   });
 });
 
@@ -10743,6 +10758,10 @@ function deterministicRunBrowserNameMatcher() {
 
 function deterministicProfileNameMatcher() {
   return expect.stringMatching(/^murph-test-[0-9a-f]{24}$/u);
+}
+
+function deterministicProviderSetupProfileNameMatcher() {
+  return expect.stringMatching(/^murph-test-provider-setup-[0-9a-f]{24}$/u);
 }
 
 function staleRunStateError(): Error {
