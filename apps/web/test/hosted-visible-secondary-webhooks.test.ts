@@ -372,6 +372,64 @@ describe("visible secondary webhook outcomes", () => {
     }));
   });
 
+  it("gives a relink race repair guidance without a signup URL", async () => {
+    const update = parseHostedTelegramWebhookUpdate(JSON.stringify({
+      message: {
+        chat: {
+          first_name: "Ada",
+          id: 42,
+          type: "private",
+        },
+        date: 1_785_000_000,
+        from: {
+          first_name: "Ada",
+          id: 42,
+          is_bot: false,
+        },
+        message_id: 8,
+        text: "hello",
+      },
+      update_id: 124,
+    }));
+    const sendHostedTelegramTextMessage = vi.fn(async () => {});
+    const requireHostedOnboardingPublicBaseUrl = vi.fn(() =>
+      "https://withmurph.ai"
+    );
+    const handler: HostedOnboardingTelegramWebhookHandler = vi.fn(async () => ({
+      ignored: true,
+      ok: true as const,
+      reason: "telegram-binding-changed",
+    }));
+
+    const response = await withHostedVisibleSecondaryTelegramOutcomes(
+      handler,
+      {
+        parseHostedTelegramWebhookUpdate: vi.fn(() => update),
+        requireHostedOnboardingPublicBaseUrl,
+        sendHostedTelegramTextMessage,
+        summarizeHostedTelegramWebhook,
+      },
+    )({
+      rawBody: JSON.stringify(update),
+      secretToken: "secret",
+    });
+
+    expect(response).toMatchObject({
+      ignored: false,
+      reason: "visible-secondary-reply:telegram-binding-changed",
+    });
+    expect(requireHostedOnboardingPublicBaseUrl).not.toHaveBeenCalled();
+    expect(sendHostedTelegramTextMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: expect.stringContaining("isn't linked cleanly"),
+      }),
+    );
+    const telegramCalls = sendHostedTelegramTextMessage.mock.calls as unknown as
+      Array<[{ message: string }]>;
+    const sentMessage = telegramCalls[0]?.[0];
+    expect(sentMessage?.message).not.toContain("https://");
+  });
+
   it("replies to a Family draft conflict in the initiating Telegram thread", async () => {
     const update = parseHostedTelegramWebhookUpdate(JSON.stringify({
       message: {

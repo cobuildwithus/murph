@@ -15,6 +15,7 @@ import {
   executeHostedConnectedAppsRequest,
   startHostedConnectedAppConnection,
 } from "@/src/lib/connected-apps/service";
+import { HOSTED_CONNECTED_APP_STARTED_INTENT_OWNER_GRACE_MS } from "@/src/lib/connected-apps/connect-intent-ownership";
 import { isHostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 
 interface MemberRow {
@@ -244,12 +245,16 @@ describe("connected-app service", () => {
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     vi.unstubAllEnvs();
   });
 
   it("binds connect intents to the member and keeps provider-link attempts visible", async () => {
     const harness = installPrismaHarness();
     const claim = await createConnectClaim("hbm_member");
+    expect(
+      harness.prisma.hostedConnectedAppConnectIntent.deleteMany,
+    ).not.toHaveBeenCalled();
     const wrongMemberFetch = vi.fn(async (): Promise<Response> =>
       jsonResponse({ unexpected: true })
     );
@@ -486,6 +491,77 @@ describe("connected-app service", () => {
       httpStatus: 410,
     });
     expect(verifiedAccountFetch).toHaveBeenCalledTimes(verifiedFetchCallsAfterCompletion);
+  });
+
+  it.each([
+    1_000,
+    29 * 60 * 1_000,
+    HOSTED_CONNECTED_APP_STARTED_INTENT_OWNER_GRACE_MS - 1_000,
+  ])("completes a started provider callback %i ms after public expiry", async (afterExpiryMs) => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-12T12:00:00.000Z"));
+    const harness = installPrismaHarness();
+    const claim = await createConnectClaim("hbm_member");
+    const startFetch = createStartFetch({
+      claim,
+      connectedAccountId: "ca_work",
+      remoteSessionId: "trs_member",
+    });
+    await startHostedConnectedAppConnection({
+      claim,
+      fetchImpl: startFetch,
+      memberId: "hbm_member",
+    });
+    const intent = harness.intentForClaim(claim);
+    if (!intent) throw new Error("Expected the started connected-app intent.");
+    vi.setSystemTime(new Date(intent.expiresAt.getTime() + afterExpiryMs));
+    const callbackFetch = createVerificationFetch();
+
+    await expect(completeHostedConnectedAppConnection({
+      claim,
+      connectedAccountId: "ca_work",
+      fetchImpl: callbackFetch,
+    })).resolves.toMatchObject({
+      intent: { completedAt: expect.any(Date) },
+    });
+
+    expect(callbackFetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects a started provider callback at the owner-grace cutoff", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-12T12:00:00.000Z"));
+    const harness = installPrismaHarness();
+    const claim = await createConnectClaim("hbm_member");
+    const startFetch = createStartFetch({
+      claim,
+      connectedAccountId: "ca_work",
+      remoteSessionId: "trs_member",
+    });
+    await startHostedConnectedAppConnection({
+      claim,
+      fetchImpl: startFetch,
+      memberId: "hbm_member",
+    });
+    const intent = harness.intentForClaim(claim);
+    if (!intent) throw new Error("Expected the started connected-app intent.");
+    vi.setSystemTime(new Date(
+      intent.expiresAt.getTime()
+      + HOSTED_CONNECTED_APP_STARTED_INTENT_OWNER_GRACE_MS,
+    ));
+    const callbackFetch = createVerificationFetch();
+
+    await expect(completeHostedConnectedAppConnection({
+      claim,
+      connectedAccountId: "ca_work",
+      fetchImpl: callbackFetch,
+    })).rejects.toMatchObject({
+      code: "CONNECTED_APPS_CALLBACK_INVALID",
+      httpStatus: 410,
+    });
+
+    expect(callbackFetch).not.toHaveBeenCalled();
+    expect(harness.intentForClaim(claim)?.completedAt).toBeNull();
   });
 
   it("rejects suspended-member callbacks and cleans up the exact provider account", async () => {
@@ -1657,6 +1733,29 @@ function expectVerificationQuery(url: string | URL | Request): void {
   expect(parsed.searchParams.getAll("statuses")).toEqual(["ACTIVE"]);
   expect(parsed.searchParams.getAll("toolkit_slugs")).toEqual(["gmail"]);
   expect(parsed.searchParams.getAll("user_ids")).toEqual(["hbm_member"]);
+}
+
+function createVerificationFetch(): ReturnType<typeof vi.fn<(
+  url: string | URL | Request,
+  init?: RequestInit,
+) => Promise<Response>>> {
+  return vi.fn(async (
+    url: string | URL | Request,
+    init?: RequestInit,
+  ): Promise<Response> => {
+    expect(init?.method).toBe("GET");
+    expectVerificationQuery(url);
+    return jsonResponse({
+      items: [{
+        alias: "work",
+        id: "ca_work",
+        is_disabled: false,
+        status: "ACTIVE",
+        toolkit: { name: "Gmail", slug: "gmail" },
+        word_id: "bright-river",
+      }],
+    });
+  });
 }
 
 function matchesIntentWhere(row: IntentRow, where?: IntentWhere): boolean {

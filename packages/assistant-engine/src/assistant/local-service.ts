@@ -612,6 +612,11 @@ export async function sendAssistantMessageLocal(
           return completed.result
         }
 
+        const runtimeState = createAssistantRuntimeStateService(input.vault)
+        const preProviderSteerAcceptedInputJournals = new Map<
+          string,
+          AssistantAcceptedTurnInputJournal
+        >()
         const turnInputController = createAssistantActiveTurnInputController({
           acceptedInputValidator: async ({ acceptedInputs }) => {
             await assertAssistantAcceptedTurnInputItemInputsAssistantInputEventsExist({
@@ -622,7 +627,26 @@ export async function sendAssistantMessageLocal(
           admissionHook: input.activeTurnInput,
           beforeProviderSteer: input.beforeProviderAcceptedInputs
             ? async (event) => {
-                await input.beforeProviderAcceptedInputs?.(event)
+                const acceptedInputJournal =
+                  await runtimeState.turns.acceptedInputs.append({
+                    inputs: event.acceptedInputs,
+                    sessionId: resolved.session.sessionId,
+                    turnId: receipt.turnId,
+                  })
+                await assertAssistantAcceptedTurnInputAssistantInputEventsExist({
+                  journal: acceptedInputJournal,
+                  vault: input.vault,
+                })
+                const releaseProviderAcceptedInputs =
+                  await input.beforeProviderAcceptedInputs?.({
+                    ...event,
+                    turnId: receipt.turnId,
+                  })
+                preProviderSteerAcceptedInputJournals.set(
+                  JSON.stringify(event.acceptedInputs.map((item) => item.id)),
+                  acceptedInputJournal,
+                )
+                return releaseProviderAcceptedInputs
               }
             : undefined,
           conversationKeys: [
@@ -636,7 +660,6 @@ export async function sendAssistantMessageLocal(
         activeTurnInputController = turnInputController
         userTurn = await persistUserTurn(input, resolved, sharedPlan, receipt.turnId)
         let currentUserTurn = userTurn
-        const runtimeState = createAssistantRuntimeStateService(input.vault)
         const initialAcceptedTurnInputItems = resolveInitialAcceptedTurnInputItems({
           input,
           resolved,
@@ -1018,16 +1041,29 @@ export async function sendAssistantMessageLocal(
             acceptedInput: acceptanceInput.activeTurnInput,
             input: currentInput,
           })
-          assertAcceptedActiveTurnInputItemsAreNew({
-            acceptedInputIds: acceptanceInput.providerRequestAcceptedInputIds,
-            inputs: acceptedInputItems,
-          })
+          const preProviderSteerJournalKey = JSON.stringify(
+            acceptedInputItems.map((item) => item.id),
+          )
+          const preProviderSteerJournal =
+            preProviderSteerAcceptedInputJournals.get(
+              preProviderSteerJournalKey,
+            )
+          if (!preProviderSteerJournal) {
+            assertAcceptedActiveTurnInputItemsAreNew({
+              acceptedInputIds: acceptanceInput.providerRequestAcceptedInputIds,
+              inputs: acceptedInputItems,
+            })
+          }
           let acceptedInputJournal =
+            preProviderSteerJournal ??
             await runtimeState.turns.acceptedInputs.append({
               inputs: acceptedInputItems,
               sessionId: resolved.session.sessionId,
               turnId: currentUserTurn.turnId,
             })
+          preProviderSteerAcceptedInputJournals.delete(
+            preProviderSteerJournalKey,
+          )
           await assertAssistantAcceptedTurnInputAssistantInputEventsExist({
             journal: acceptedInputJournal,
             vault: currentInput.vault,
@@ -1271,6 +1307,7 @@ export async function sendAssistantMessageLocal(
                 providerRequestAcceptedInputIds
               acceptedInputItemsForProviderRequest =
                 providerRequestAcceptedInputItems
+              turnInputController.commitLiveSteeredLocalAdmission(activeTurnInput)
             }
           })
           liveSteeredActiveTurnInputDrainTail = drain.catch(() => undefined)
@@ -1335,6 +1372,7 @@ export async function sendAssistantMessageLocal(
             acceptedInputItemsForProviderRequest = providerRequestAcceptedInputItems
             return await input.beforeProviderAcceptedInputs?.({
               acceptedInputs: providerRequestAcceptedInputItems,
+              turnId: currentUserTurn.turnId,
             })
           },
           onProviderRequestStarted: (event) => {

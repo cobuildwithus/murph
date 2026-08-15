@@ -1417,6 +1417,11 @@ export async function seedHostedGroupEmailAuthorizationForTest(input: {
         throw new Error("Hosted-local group email participant workspace was not created.");
       }
       if (participant.verifiedEmail) {
+        // Verified-email authorization and projection snapshots both encrypt
+        // with Web-owned crypto. Restore this scenario's resolved environment
+        // immediately before each crypto boundary because asynchronous store
+        // imports may have changed process.env.
+        applyHostedWebTestkitEnvironment(deps.environment);
         await memberStore.syncHostedMemberVerifiedEmailAuthorization({
           address: participant.verifiedEmail,
           memberId: participant.memberId,
@@ -1425,19 +1430,19 @@ export async function seedHostedGroupEmailAuthorizationForTest(input: {
         });
       }
       for (const projectionScope of input.projectionScopes) {
-        const share = (await projectionStore.findActiveHostedVaultShares({
+        const shares = await projectionStore.findActiveHostedVaultShares({
           grantorMemberId: participant.memberId,
           prisma: deps.prisma,
           projectionScope,
-        })).find((candidate) =>
+        });
+        const share = shares.find((candidate) =>
           candidate.destinationMemberId === input.runtimeMemberId
         );
         if (!share) {
           throw new Error("Hosted-local group email share was not created.");
         }
-        // Snapshot encryption reads the Web-owned crypto configuration from
-        // process.env, so restore this scenario's resolved environment after
-        // the asynchronous store imports above.
+        // Snapshot encryption also reads the Web-owned crypto configuration
+        // from process.env.
         applyHostedWebTestkitEnvironment(deps.environment);
         const replaced = await projectionStore.replaceHostedVaultShareProjectionSnapshot({
           prisma: deps.prisma,

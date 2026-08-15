@@ -216,9 +216,19 @@ function HostedDataPrivacySettingsAuthorized(props: {
         requestError instanceof HostedOnboardingApiError
         && requestError.code
           === "ACCOUNT_DELETION_DEVICE_TOKEN_REFRESH_RECOVERY_REQUIRED";
+      const connectedAppCompletionRecoveryRequired =
+        requestError instanceof HostedOnboardingApiError
+        && (
+          requestError.code === "ACCOUNT_DELETION_CONNECTED_APP_CLEANUP_BACKLOG"
+          || requestError.code === "ACCOUNT_DELETION_CONNECTED_APP_SETUP_IN_PROGRESS"
+        );
       if (sessionEndingDispatched && !receivedReplacementHeaders) {
         publishBrowserVaultSessionInvalidation();
-        if (!providerRecoveryRequired && !deviceTokenRefreshRecoveryRequired) {
+        if (
+          !providerRecoveryRequired
+          && !deviceTokenRefreshRecoveryRequired
+          && !connectedAppCompletionRecoveryRequired
+        ) {
           reloadCurrentHostedAuthDocument();
         }
       }

@@ -270,6 +270,7 @@ interface ScriptedResponseRoute {
   delayMs?: number
   requestExcludes?: readonly string[]
   requestIncludes?: readonly string[]
+  usageInputTokens?: number
 }
 
 type ScriptedResponse = ScriptedResponseRoute & (
@@ -6664,6 +6665,115 @@ if (!tool) {
     }
   })
 
+  it('repairs an invalid private response-card call and attaches it in the same App Server turn', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const scenario = await prepareScriptedTurnScenario()
+    const correctedCard = {
+      kind: 'daily_nutrition',
+      version: 2,
+      localDate: '2026-08-14',
+      mealCount: 2,
+      totals: {
+        calories: { total: 1_500, mealCount: 2 },
+        proteinGrams: { total: null, mealCount: 0 },
+        carbsGrams: { total: 170, mealCount: 2 },
+        fatGrams: { total: 50, mealCount: 2 },
+        fiberGrams: { total: 25, mealCount: 2 },
+      },
+      goals: {
+        calories: { target: 2_000, status: 'under_target' },
+        proteinGrams: { target: 100, status: 'unavailable' },
+        carbsGrams: { target: 200, status: 'under_target' },
+        fatGrams: { target: 60, status: 'under_target' },
+        fiberGrams: { target: 30, status: 'under_target' },
+      },
+    } as const
+    const malformedCard = {
+      ...correctedCard,
+      totals: {
+        ...correctedCard.totals,
+        proteinGrams: { total: null, mealCount: 1 },
+      },
+    } as const
+    scenario.stub.queue(
+      {
+        functionCall: {
+          arguments: { card: malformedCard },
+          name: 'attach_response_card',
+          namespace: 'murph',
+        },
+      },
+      {
+        functionCall: {
+          arguments: { card: correctedCard },
+          name: 'attach_response_card',
+          namespace: 'murph',
+        },
+      },
+      { text: 'CARD_REPAIRED' },
+    )
+
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      dynamicTools: [MURPH_ATTACH_RESPONSE_CARD_TOOL],
+      groupConversation: false,
+      prompt: 'Attach the requested synthetic response card.',
+    })
+
+    const summaries = scenario.stub.requestSummariesSinceBaseline()
+    const invalidOutput = summaries[1]?.functionCallOutputs?.join('\n') ?? ''
+    expect(invalidOutput).toContain('invalid_response_card_arguments')
+    expect(invalidOutput).toContain(
+      '"field":"card.totals.proteinGrams.mealCount"',
+    )
+    expect(invalidOutput).toContain(
+      '"expected":"zero_iff_total_null"',
+    )
+    expect(invalidOutput).not.toContain('challengeSlug')
+    expect(summaries[2]?.functionCallOutputs?.join('\n')).toContain(
+      'response card attached',
+    )
+    expect(result.responseCard).toEqual(correctedCard)
+    expect(result.finalMessage).toContain('about 1,500 calories')
+    expect(result.finalMessage).toContain('100g protein (status unavailable)')
+    expect(result.finalMessage).not.toBe('CARD_REPAIRED')
+    expect(scenario.stub.requestCountSinceBaseline()).toBe(3)
+  })
+
+  it('keeps malformed group-card repair feedback on the group contract', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const scenario = await prepareScriptedTurnScenario()
+    scenario.stub.queue(
+      {
+        functionCall: {
+          arguments: {},
+          name: 'attach_response_card',
+          namespace: 'murph',
+        },
+      },
+      { text: 'GROUP_CARD_REJECTED' },
+    )
+
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      dynamicTools: GROUP_CHALLENGE_DYNAMIC_TOOLS,
+      groupConversation: true,
+      prompt: 'Try the requested synthetic group challenge card.',
+    })
+
+    const invalidOutput = scenario.stub.requestSummariesSinceBaseline()[1]
+      ?.functionCallOutputs?.join('\n') ?? ''
+    expect(invalidOutput).toContain('invalid_response_card_arguments')
+    expect(invalidOutput).toContain('"field":"challengeSlug"')
+    expect(invalidOutput).toContain('"field":"pageRevisionDigest"')
+    expect(invalidOutput).not.toContain('"field":"card"')
+    expect(result.responseCard).toBeNull()
+    expect(result.finalMessage).toBe('GROUP_CARD_REJECTED')
+    expect(scenario.stub.requestCountSinceBaseline()).toBe(2)
+  })
+
   it('proves complete Goal and safety discovery before nutrition targets and cards', {
     timeout: 720_000,
   }, async () => {
@@ -9456,10 +9566,25 @@ text(JSON.stringify(result));
     ])
   })
 
-  it('compacts the warm thread off-turn and keeps it resumable', {
+  it('compacts a 95k personal warm thread off-turn and keeps its task resumable', {
     timeout: TURN_TIMEOUT_MS,
   }, async () => {
     const scenario = await prepareScriptedTurnScenario()
+    const goalSentinel = 'IDLE_COMPACTION_GOAL'
+    const constraintSentinel = 'IDLE_COMPACTION_CONSTRAINT'
+    const toolResultSentinel = 'IDLE_COMPACTION_TOOL_RESULT'
+    const compactedSummary = [
+      'SCRIPTED_COMPACT_SUMMARY',
+      goalSentinel,
+      constraintSentinel,
+      toolResultSentinel,
+    ].join(' ')
+    const resumedReply = [
+      'POST_COMPACT_OK',
+      goalSentinel,
+      constraintSentinel,
+      toolResultSentinel,
+    ].join(' ')
     scenario.stub.queue({ text: 'COMPACT_SEED_OK' })
     const seeded = await executeCodexAppServerTurn({
       ...scenario.turnInput,
@@ -9468,10 +9593,19 @@ text(JSON.stringify(result));
     })
     expect(seeded.finalMessage).toBe('COMPACT_SEED_OK')
 
-    scenario.stub.queue({ text: 'COMPACT_STANDARD_OK' })
+    scenario.stub.queue({
+      text: 'COMPACT_STANDARD_OK',
+      usageInputTokens: 95_000,
+    })
     const standard = await executeCodexAppServerTurn({
       ...scenario.turnInput,
-      prompt: 'Reply exactly COMPACT_STANDARD_OK.',
+      prompt: [
+        'Preserve this task across the next idle checkpoint.',
+        `Goal: ${goalSentinel}`,
+        `Constraint: ${constraintSentinel}`,
+        `Completed tool result: ${toolResultSentinel}`,
+        'Reply exactly COMPACT_STANDARD_OK.',
+      ].join('\n'),
       resumeSessionId: seeded.sessionId,
     })
     expect(standard.finalMessage).toBe('COMPACT_STANDARD_OK')
@@ -9482,7 +9616,7 @@ text(JSON.stringify(result));
     // turn's tokenUsage events, not a placeholder.
     scenario.stub.markRequestBaseline()
     const skipped = await compactWarmCodexThread({
-      minThreadTokens: 50_000,
+      minThreadTokens: 100_000,
       timeoutMs: 30_000,
     })
     expect(skipped).toMatchObject({
@@ -9491,15 +9625,15 @@ text(JSON.stringify(result));
     })
     expect(
       skipped.kind === 'skipped' && typeof skipped.threadContextTokensBefore === 'number'
-        && skipped.threadContextTokensBefore > 0,
+        && skipped.threadContextTokensBefore === 95_000,
     ).toBe(true)
     expect(scenario.stub.requestCountSinceBaseline()).toBe(0)
 
     // Above threshold: the local-provider compaction summarization request is
     // served by the stub and the thread reports compacted.
-    scenario.stub.queue({ text: 'SCRIPTED_COMPACT_SUMMARY' })
+    scenario.stub.queue({ text: compactedSummary })
     const compacted = await compactWarmCodexThread({
-      minThreadTokens: 1,
+      minThreadTokens: 90_000,
       timeoutMs: 60_000,
     })
     expect(compacted).toMatchObject({
@@ -9546,13 +9680,16 @@ text(JSON.stringify(result));
     // disk — the actual production payoff path (compact -> snapshot ->
     // container dies -> next wake resumes small).
     await stopWarmCodexAppServer('post-compact-cold-resume')
-    scenario.stub.queue({ text: 'POST_COMPACT_OK' })
+    scenario.stub.queue({
+      requestIncludes: [goalSentinel, constraintSentinel, toolResultSentinel],
+      text: resumedReply,
+    })
     const resumed = await executeCodexAppServerTurn({
       ...scenario.turnInput,
-      prompt: 'Reply exactly POST_COMPACT_OK.',
+      prompt: 'Finish the preserved task after the idle checkpoint.',
       resumeSessionId: seeded.sessionId,
     })
-    expect(resumed.finalMessage).toBe('POST_COMPACT_OK')
+    expect(resumed.finalMessage).toBe(resumedReply)
     expect(resumed.threadId).toBe(seeded.threadId)
   })
 
@@ -10840,6 +10977,7 @@ async function startScriptedResponsesStub(): Promise<ScriptedStub> {
       outputItems,
       response,
       responseId,
+      usageInputTokens: scripted.usageInputTokens,
     })
     if (scripted.completionLabel) {
       completedResponseLabels.push(scripted.completionLabel)
@@ -11022,13 +11160,15 @@ function writeScriptedSseResponse(input: {
   outputItems: readonly Record<string, unknown>[]
   response: ServerResponse
   responseId: string
+  usageInputTokens?: number
 }): void {
+  const inputTokens = input.usageInputTokens ?? 12
   const usage = {
-    input_tokens: 12,
+    input_tokens: inputTokens,
     input_tokens_details: { cached_tokens: 0 },
     output_tokens: 7,
     output_tokens_details: { reasoning_tokens: 0 },
-    total_tokens: 19,
+    total_tokens: inputTokens + 7,
   }
   const completedResponse = {
     created_at: Math.floor(Date.now() / 1000),

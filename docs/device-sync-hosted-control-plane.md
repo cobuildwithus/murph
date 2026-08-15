@@ -147,6 +147,18 @@ acceptance. A failed or ambiguous enqueue never falls through to synchronous
 admission; provider redelivery converges through the existing provider-scoped
 trace identity. Neither path invokes the provider verifier twice.
 
+The OIDC control boundary projects Queue-ingress failures through a closed,
+value-free stage code. The code distinguishes malformed or unsafe visible
+metadata, hosted-crypto environment mismatch, unavailable recipient keys,
+root-key unwrap failure, authenticated-payload open failure, persistence-key
+selection, resealing, Queue availability, and `Queue.send` rejection. It must
+never serialize the caught exception, envelope, key id or material, provider
+payload, account, event, or trace identity. Web retains the stage only as the
+allowlisted log `type`; the public provider response keeps the generic retryable
+Queue-enqueue code. Provider rollout remains disabled
+until the exact deployed Web and Worker pair completes this transport contract;
+a failed canary is rolled back to the synchronous path before investigation.
+
 The Queue consumer is configured for 100 messages, five-second collection,
 one consumer, ten retries, and an encrypted DLQ. It decrypts outside Postgres
 and partitions each delivery into signed Web callbacks of at most 25 messages.
