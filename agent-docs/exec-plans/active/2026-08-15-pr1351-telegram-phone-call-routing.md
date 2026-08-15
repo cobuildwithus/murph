@@ -127,3 +127,18 @@ the member's current authorized Telegram route.
   narrow scheduler correction recognizes only that persisted phone-call result
   receipt as a callback retry path; ordinary non-idempotent ambiguity remains
   parked. The hosted test proves both wake and candidate selection.
+- Exact-head CI passed at
+  `41f5c43953a9ebe03467aecd7d7ca863752396e2`. ReviewGPT round 7 found that the
+  Web-owned generation could still prove pre-provider `queued` while the
+  generic runtime outbox was stale `sending`; treating the latter as terminal
+  ambiguity abandoned a result that Web proved had never entered Telegram. Web
+  now derives the disposition from its stronger generation state: queued
+  ambiguity returns to `pending` and re-arms recovery idempotently, while
+  `sending` ambiguity remains terminal. Terminal success or failure from queued
+  now fails closed because no deployable runner emits a generation-scoped
+  terminal callback without first committing the provider-entry callback.
+- `pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage
+  apps/web/test/phone-calls-result-delivery.test.ts
+  apps/web/test/phone-calls-result-notification-store.test.ts
+  apps/web/test/phone-calls-reconciliation-workflows.test.ts` passed: 3 files,
+  29 tests. `pnpm --dir apps/web typecheck` passed.

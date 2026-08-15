@@ -102,17 +102,93 @@ describe("hosted phone-call result delivery ownership", () => {
     expect(mocks.rearmRecovery).toHaveBeenCalledOnce();
   });
 
-  it("accepts an old runner's terminal outcome from queued during rollout", async () => {
+  it("rejects provider success while the generation still proves pre-provider queued", async () => {
     const store = createDeliveryStore("queued");
     mocks.getPrisma.mockReturnValue(store.prisma);
 
     await expect(recordHostedPhoneCallResultDeliveryOutcome({
       memberId: MEMBER_ID,
       request: deliveryRequest("sent"),
-    })).resolves.toEqual({ recorded: true, status: "delivered" });
+    })).rejects.toMatchObject({
+      code: "HOSTED_PHONE_CALL_RESULT_DELIVERY_TRANSITION_INVALID",
+      retryable: false,
+    });
 
-    expect(store.readStatus()).toBe("delivered");
+    expect(store.readStatus()).toBe("queued");
+    expect(store.updateMany).not.toHaveBeenCalled();
+    expect(mocks.rearmRecovery).not.toHaveBeenCalled();
+  });
+
+  it("returns a stale no-receipt attempt to pending while Web proves pre-provider queued", async () => {
+    const store = createDeliveryStore("queued");
+    mocks.getPrisma.mockReturnValue(store.prisma);
+
+    await expect(recordHostedPhoneCallResultDeliveryOutcome({
+      memberId: MEMBER_ID,
+      request: deliveryRequest("failed_ambiguous"),
+    })).resolves.toEqual({ recorded: true, status: "pending" });
+
+    expect(store.readStatus()).toBe("pending");
+    expect(store.readTerminalAt()).toBeNull();
     expect(mocks.rearmRecovery).toHaveBeenCalledOnce();
+  });
+
+  it("lets queued recovery win a race against provider entry before its CAS", async () => {
+    const store = createDeliveryStore("queued");
+    mocks.getPrisma.mockReturnValue(store.prisma);
+    let releaseProviderEntry!: () => void;
+    let markProviderEntryStarted!: () => void;
+    const providerEntryStarted = new Promise<void>((resolve) => {
+      markProviderEntryStarted = resolve;
+    });
+    const providerEntryGate = new Promise<void>((resolve) => {
+      releaseProviderEntry = resolve;
+    });
+    mocks.assertRouteAuthority.mockImplementationOnce(async () => {
+      markProviderEntryStarted();
+      await providerEntryGate;
+    });
+
+    const sending = recordHostedPhoneCallResultDeliveryOutcome({
+      memberId: MEMBER_ID,
+      request: deliveryRequest("sending"),
+    });
+    await providerEntryStarted;
+
+    await expect(recordHostedPhoneCallResultDeliveryOutcome({
+      memberId: MEMBER_ID,
+      request: deliveryRequest("failed_ambiguous"),
+    })).resolves.toEqual({ recorded: true, status: "pending" });
+    releaseProviderEntry();
+
+    await expect(sending).rejects.toMatchObject({
+      code: "HOSTED_PHONE_CALL_RESULT_DELIVERY_TRANSITION_INVALID",
+      retryable: false,
+    });
+    expect(store.readStatus()).toBe("pending");
+    expect(store.readTerminalAt()).toBeNull();
+  });
+
+  it("replays stale pre-provider recovery after Web commits pending but re-arm fails", async () => {
+    const store = createDeliveryStore("queued");
+    mocks.getPrisma.mockReturnValue(store.prisma);
+    mocks.rearmRecovery
+      .mockRejectedValueOnce(new Error("re-arm response lost"))
+      .mockResolvedValueOnce(true);
+
+    await expect(recordHostedPhoneCallResultDeliveryOutcome({
+      memberId: MEMBER_ID,
+      request: deliveryRequest("failed_ambiguous"),
+    })).rejects.toThrow("re-arm response lost");
+    expect(store.readStatus()).toBe("pending");
+
+    await expect(recordHostedPhoneCallResultDeliveryOutcome({
+      memberId: MEMBER_ID,
+      request: deliveryRequest("failed_ambiguous"),
+    })).resolves.toEqual({ recorded: false, status: "pending" });
+
+    expect(store.updateMany).toHaveBeenCalledOnce();
+    expect(mocks.rearmRecovery).toHaveBeenCalledTimes(2);
   });
 
   it("returns pre-provider route loss to pending for a new generation", async () => {

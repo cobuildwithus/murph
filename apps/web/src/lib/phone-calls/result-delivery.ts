@@ -158,6 +158,12 @@ function shouldRearmHostedPhoneCallResultDeliveryReplay(input: {
   )) {
     return input.request.status !== "sending";
   }
+  if (
+    input.currentStatus === "pending"
+    && input.request.status === "failed_ambiguous"
+  ) {
+    return true;
+  }
   return input.currentStatus === "pending"
     && input.request.status === "failed"
     && isHostedPhoneCallResultPreProviderRouteFailureCode(
@@ -196,6 +202,19 @@ function resolveHostedPhoneCallResultDeliveryTransition(input: {
     };
   }
 
+  if (input.request.status === "failed_ambiguous") {
+    if (input.currentStatus === "pending") {
+      return null;
+    }
+    if (input.currentStatus === "queued") {
+      return {
+        rearm: true,
+        status: "pending",
+        terminal: false,
+      };
+    }
+  }
+
   if (
     input.request.status === "failed"
     && isHostedPhoneCallResultPreProviderRouteFailureCode(
@@ -222,14 +241,10 @@ function resolveHostedPhoneCallResultDeliveryTransition(input: {
     };
   }
 
-  if (input.currentStatus === "pending") {
+  if (input.currentStatus !== "sending") {
     throwHostedPhoneCallResultDeliveryTransitionInvalid();
   }
 
-  // Accept a terminal outcome from queued during the Web-first rolling window:
-  // an older runner may have completed provider delivery before it knew how to
-  // record the provider-entry boundary. The signed terminal callback still
-  // prevents a second send by making the call row terminal.
   return {
     rearm: true,
     status: input.request.status === "sent"

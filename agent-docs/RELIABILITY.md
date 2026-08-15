@@ -1816,7 +1816,10 @@ Last verified: 2026-08-15
   while the non-idempotent Telegram intent is still `sending`, stale recovery
   makes the same no-resend decision, persists an ambiguous callback outcome on
   the existing intent, and waits for Web acknowledgement before terminalizing
-  the outbox. At the first provider fetch, the runtime
+  the outbox. The call row supplies the stronger provider-entry fact: a queued
+  generation returns to `pending` and re-arms recovery, while a generation
+  already in `sending` becomes terminally ambiguous. At the first provider
+  fetch, the runtime
   gives Web the exact queued Telegram authority; Web revalidates that authority
   and compare-and-sets the same generation from `queued` to `sending` in the
   callback operation. A lost callback response sends nothing on that attempt,
