@@ -44,8 +44,8 @@ Updated: 2026-08-14
    authoritative schema and cap issue/path/hint counts and lengths.
 2. Risk: a hand-maintained JSON schema can drift from refinements that JSON
    Schema cannot express.
-   Mitigation: add representative provider-valid parity coverage for every
-   discriminated card kind, keep inline-representable rejections aligned, and
+   Mitigation: add representative provider-valid compatibility coverage for
+   every discriminated card kind, keep inline-representable rejections aligned, and
    prove the deliberate provider-permissive/runtime-rejected cardinality case
    returns an authoritative repair hint.
 
