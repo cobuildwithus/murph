@@ -1989,18 +1989,6 @@ export function createJunctionDeviceSyncProvider(
             .filter((value): value is string => Boolean(value)),
         ),
       ];
-      const preFetchProviderConnectionIds = new Set(
-        preFetchProviders
-          .filter((provider) =>
-            provider.status.trim().toLowerCase() === "connected"
-            && (
-              sourceProviderSlug === null
-              || normalizeProviderSlug(provider.origin.sourceProviderSlug ?? provider.slug) === sourceProviderSlug
-            )
-          )
-          .map((provider) => normalizeString(provider.id))
-          .filter((value): value is string => Boolean(value)),
-      );
       const webhookSourceInstanceId = normalizeString(job.payload.sourceInstanceId);
       const webhookSourceProvider = webhookSourceInstanceId
         ? matchingProviders.find((provider) =>
@@ -2026,7 +2014,7 @@ export function createJunctionDeviceSyncProvider(
       const sourceInstanceId =
         webhookSourceProvider
           ? normalizeString(webhookSourceProvider.origin.sourceInstanceId) ?? undefined
-          : projectedSourceInstanceIds.length === 1
+          : matchingProviders.length === 1
             ? projectedSourceInstanceIds[0]
             : undefined;
       const streamPayload = await client.getWorkoutStream(workoutId, {
@@ -2093,16 +2081,36 @@ export function createJunctionDeviceSyncProvider(
       if (connectedFetchedSourceProviders.length === 0) {
         return {};
       }
+      const preFetchFetchedSourceProviders = preFetchProviders.filter((provider) =>
+        normalizeProviderSlug(provider.origin.sourceProviderSlug ?? provider.slug)
+          === fetchedSourceProviderSlug
+        && provider.status.trim().toLowerCase() === "connected"
+      );
+      const fetchedSourceInstanceId = normalizeString(workoutFeatures.sourceInstanceId);
+      // Preserve one exact remote authority across the fetch. Another
+      // connection with the same provider slug cannot substitute for the
+      // webhook-selected, stream-selected, or sole unambiguous connection.
+      const preFetchFetchedSourceProvider = webhookSourceProvider
+        ?? (
+          fetchedSourceInstanceId
+            ? preFetchFetchedSourceProviders.find((provider) =>
+                normalizeString(provider.origin.sourceInstanceId) === fetchedSourceInstanceId
+              )
+            : preFetchFetchedSourceProviders.length === 1
+              ? preFetchFetchedSourceProviders[0]
+              : undefined
+        );
+      const preFetchFetchedSourceProviderConnectionId = normalizeString(
+        preFetchFetchedSourceProvider?.id,
+      );
       if (
-        !connectedFetchedSourceProviders.some((provider) => {
-          const providerConnectionId = normalizeString(provider.id);
-          return providerConnectionId !== undefined
-            && preFetchProviderConnectionIds.has(providerConnectionId);
-        })
+        !preFetchFetchedSourceProviderConnectionId
+        || !connectedFetchedSourceProviders.some((provider) =>
+          normalizeString(provider.id) === preFetchFetchedSourceProviderConnectionId
+        )
       ) {
         return {};
       }
-      const fetchedSourceInstanceId = normalizeString(workoutFeatures.sourceInstanceId);
       if (
         fetchedSourceInstanceId
         && !connectedFetchedSourceProviders.some((provider) =>

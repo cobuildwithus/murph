@@ -72,9 +72,11 @@ Current providers:
   without a stream request or import where the source is known before fetch,
   and the epoch is rechecked after fetch to fence a racing reconnect. The
   fetched stream's source identity is also revalidated against remote
-  connection authority. The fetched slug must retain at least one identical
-  connected provider id across the pre/post fetch listings, without projecting
-  or mutating the full source catalog.
+  connection authority. The webhook-selected, stream-selected, or sole
+  unambiguous remote provider id must remain connected across the pre/post
+  fetch listings; an ambiguous multi-connection same-slug source fails closed
+  instead of accepting another connection as substitute. This does not project
+  or mutate the full source catalog.
   The raw response is then discarded after reduction to a capped feature
   envelope and at most 64 fixed-distance splits. A newer exact
   correction authoritatively replaces those feature and split facets, so

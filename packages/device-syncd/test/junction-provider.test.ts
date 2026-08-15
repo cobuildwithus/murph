@@ -5,6 +5,7 @@ import {
   JUNCTION_DEFAULT_SUMMARY_RESOURCES,
   JUNCTION_DEFAULT_TIMESERIES_RESOURCES,
 } from "@murphai/importers/device-providers/junction-resources";
+import { resolveJunctionOrigin } from "@murphai/importers/device-providers/junction-origin";
 import {
   COMPANION_HRV_RMSSD_METHOD_VERSION,
   COMPANION_HRV_RMSSD_RESOURCE,
@@ -14646,6 +14647,17 @@ test.each([
     expectedImportCount: 0,
   },
   {
+    label: "rejects substitution by another preexisting same-slug connection",
+    preFetchProviders: [
+      { id: "provider-garmin-fetched", slug: "garmin", status: "connected" },
+      { id: "provider-garmin-other", slug: "garmin", status: "connected" },
+    ],
+    postFetchProviders: [
+      { id: "provider-garmin-other", slug: "garmin", status: "connected" },
+    ],
+    expectedImportCount: 0,
+  },
+  {
     label: "imports through an unchanged remote connection",
     preFetchProviders: [
       { id: "provider-garmin-stable", slug: "garmin", status: "connected" },
@@ -14849,7 +14861,40 @@ test("Junction workout stream fences a reconnect that races its stream fetch", a
   assert.equal(importedSnapshots.length, 0);
 });
 
-test("Junction workout stream fences a remote provider instance replaced during fetch", async () => {
+test.each([
+  {
+    label: "a lone remote provider replaced during fetch",
+    preFetchProviders: [{
+      id: "provider-garmin-before-stream",
+      slug: "garmin",
+      status: "connected",
+    }],
+    postFetchProviders: [{
+      id: "provider-garmin-after-stream",
+      slug: "garmin",
+      status: "connected",
+    }],
+    sourceInstanceId: undefined,
+  },
+  {
+    label: "the attributed remote provider when another same-slug connection survives",
+    preFetchProviders: [
+      { id: "provider-garmin-fetched", slug: "garmin", status: "connected" },
+      { id: "provider-garmin-other", slug: "garmin", status: "connected" },
+    ],
+    postFetchProviders: [
+      { id: "provider-garmin-other", slug: "garmin", status: "connected" },
+    ],
+    sourceInstanceId: resolveJunctionOrigin({
+      source_id: "provider-garmin-fetched",
+      sourceProviderSlug: "garmin",
+    }).sourceInstanceId,
+  },
+])("Junction workout stream fences $label", async ({
+  postFetchProviders,
+  preFetchProviders,
+  sourceInstanceId,
+}) => {
   const requests: string[] = [];
   const importedSnapshots: unknown[] = [];
   let providerListCount = 0;
@@ -14858,14 +14903,9 @@ test("Junction workout stream fences a remote provider instance replaced during 
     requests.push(new URL(url).pathname);
     if (url.endsWith("/v2/user/providers/junction-user-1")) {
       providerListCount += 1;
-      return createJsonResponse({ providers: [{
-        id: providerListCount === 1
-          ? "provider-garmin-before-stream"
-          : "provider-garmin-after-stream",
-        slug: "garmin",
-        status: "connected",
-        resource_availability: { workouts: true },
-      }] });
+      return createJsonResponse({
+        providers: providerListCount === 1 ? preFetchProviders : postFetchProviders,
+      });
     }
     if (url.endsWith("/v2/timeseries/workouts/workout-remote-reconnect/stream")) {
       return createJsonResponse({
@@ -14904,6 +14944,7 @@ test("Junction workout stream fences a remote provider instance replaced during 
       resourceCategory: "timeseries",
       sourceLifecycleEpoch: 1,
       sourceProviderSlug: "garmin",
+      ...(sourceInstanceId ? { sourceInstanceId } : {}),
       windowStart: "2026-04-02T00:00:00.000Z",
       windowEnd: "2026-04-03T00:00:00.000Z",
     }),

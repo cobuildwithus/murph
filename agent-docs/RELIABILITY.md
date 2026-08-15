@@ -828,10 +828,12 @@ Last verified: 2026-08-15
   source-less event carries a compact admitted-source epoch map in its encrypted
   dirty payload; execution selects the fetched source's captured epoch and
   rechecks it after the bounded stream fetch. It also retains the bounded
-  pre-fetch connected-provider ids and requires the fetched slug to preserve at
-  least one of them in the post-fetch listing. Missing proof, an old epoch, a
-  stale or replaced provider instance, or a reconnect racing the fetch exits
-  without import.
+  pre-fetch connected providers and selects one exact remote id from the
+  webhook source, fetched stream instance, or sole unambiguous same-slug
+  connection. That exact id must remain connected in the post-fetch listing;
+  another connection with the same slug cannot substitute for it. Missing or
+  ambiguous proof, an old epoch, a stale or replaced provider instance, or a
+  reconnect racing the fetch exits without import.
   The epoch also participates in local and hosted durable job identity, so a
   replacement lifecycle cannot coalesce with superseded workout work.
 - Junction exact-linked `workout_duration` history treats the bounded sanitized
