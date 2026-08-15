@@ -1509,6 +1509,8 @@ export class DeviceSyncPublicIngress {
     const now = prepared.receivedAt;
     const traceId = prepared.traceId;
     const claimToken = generateStateCode();
+    // One delivery-attempt instant owns trace leasing and pending-setup lifetime
+    // checks. The frozen receipt below remains provider event semantics.
     const claimedAt = toIsoTimestamp(new Date());
     const webhook = toIngressWebhook({
       ...prepared,
@@ -1644,29 +1646,9 @@ export class DeviceSyncPublicIngress {
 
     if (
       account.status === "active"
-      && Date.parse(account.connectedAt) > Date.parse(now)
-    ) {
-      this.logger.warn?.("Ignoring webhook side effects for superseded device sync connection epoch.", {
-        provider: provider.provider,
-        accountId: account.id,
-        eventType: webhook.eventType,
-        traceId,
-      });
-      await completeClaimedWebhookTrace(this.store, provider.provider, traceId, claimToken);
-      return {
-        accepted: true,
-        duplicate: false,
-        provider: provider.provider,
-        eventType: webhook.eventType,
-        traceId,
-      };
-    }
-
-    if (
-      account.status === "active"
       && isDeviceSyncConnectionSetupPending(account)
     ) {
-      if (isDeviceSyncConnectionSetupExpiredAt(account, now)) {
+      if (isDeviceSyncConnectionSetupExpiredAt(account, claimedAt)) {
         this.logger.warn?.("Ignoring webhook side effects for expired incomplete device sync setup.", {
           provider: provider.provider,
           accountId: account.id,
@@ -1825,6 +1807,7 @@ export class DeviceSyncPublicIngress {
       const acceptedResult = await onWebhookAccepted?.({
         account,
         claimToken,
+        processingAttemptedAt: claimedAt,
         traceId,
         webhook,
         provider,

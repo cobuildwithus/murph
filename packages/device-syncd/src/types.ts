@@ -720,6 +720,8 @@ export interface DeviceSyncPublicIngressConnectionSourceObservedInput {
 export interface DeviceSyncPublicIngressWebhookAcceptedInput {
   account: PublicDeviceSyncAccount;
   claimToken: string;
+  /** Delivery-attempt instant; do not use as provider event or receipt time. */
+  processingAttemptedAt: string;
   traceId: string;
   webhook: DeviceSyncIngressWebhook;
   provider: DeviceSyncProvider;

@@ -2497,22 +2497,24 @@ cookie or cross-host handoff.
 Junction's existing setup phase is the account data-admission boundary. A new
 account in `pending_link` or `link_returned` cannot accept webhook side effects,
 persist dirty work, wake or schedule the runtime, execute queued provider jobs,
-or promote itself through sync success. Webhook retryability for that incomplete
-setup is bounded by the event's original prepared receipt instant and the
-current connection epoch. A receipt before the account's current `connectedAt`
-belongs to a superseded setup and completes only its trace. Within the same
-epoch, receipts before `setupExpiresAt` release the trace claim and remain
-retryable even when delivery occurs later, while receipts at or after
-`setupExpiresAt` complete only the existing trace and terminate transport
-handling without source admission, freshness, dirty, signal, mailbox, wake,
-job, canonical-health, or setup-state effects. Dequeue time owns the
-trace-processing lease, not lifecycle meaning.
-The proof-verified callback remains the only setup-completion owner. After an
-account reaches `source_confirmed`, adding or retrying another Junction-backed
-source preserves that account and its established siblings. The target `DeviceConnectionSource`
-stays `disconnected` and its webhook and pull work remain inert until callback
-completion reaches the runtime connection-established hook. Shared ingress
-chooses one closed account write policy for every persistence request:
+or promote itself through sync success. Webhook retryability for that
+incomplete setup is bounded by the current persisted setup lifecycle at each
+delivery attempt. The authenticated prepared receipt remains frozen for
+provider event semantics, freshness, dirty state, signals, and receipt
+timestamps; it is neither setup-epoch identity nor retry-lifetime authority.
+The trace claim's one processing-attempt instant is used at shared ingress and
+both hosted database-lock rechecks. A live `pending_link` or `link_returned`
+setup releases the trace and remains retryable, while an expired setup
+completes only the existing trace and terminates transport handling without
+source admission, freshness, dirty, signal, mailbox,
+wake, job, canonical-health, or setup-state effects. The proof-verified
+callback remains the only setup-completion owner. After an account reaches
+`source_confirmed`, adding or retrying another Junction-backed source
+preserves that account and its established siblings. The target
+`DeviceConnectionSource` stays `disconnected`, and its webhook and pull work
+remain inert until callback completion reaches the runtime
+connection-established hook. Shared ingress chooses one closed account write
+policy for every persistence request:
 `replace` for an account reconnect or `preserve_established` for a
 source-scoped addition. Hosted Prisma and local SQLite apply the same shared
 established-account predicate inside their persistence transactions; neither

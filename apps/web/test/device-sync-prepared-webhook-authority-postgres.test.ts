@@ -51,6 +51,14 @@ type Fixture = {
   traceIds: string[];
 };
 
+function createVoidDeferred(): { promise: Promise<void>; resolve: () => void } {
+  let resolve = () => {};
+  const promise = new Promise<void>((nextResolve) => {
+    resolve = nextResolve;
+  });
+  return { promise, resolve };
+}
+
 async function createFixture(input: {
   sourceLastErrorCode: string | null;
 }): Promise<Fixture> {
@@ -223,12 +231,14 @@ function signJunctionSourceRegistration(input: {
 
 async function prepareRegistration(input: {
   fixture: Fixture;
+  receivedAt?: Date;
   registry: DeviceSyncRegistry;
 }): Promise<PreparedDeviceSyncWebhookV1> {
+  const receivedAt = input.receivedAt ?? input.fixture.receivedAt;
   const signed = signJunctionSourceRegistration({
     externalAccountId: input.fixture.externalAccountId,
     messageId: `msg_prepared_authority_${randomUUID().replaceAll("-", "")}`,
-    receivedAt: input.fixture.receivedAt,
+    receivedAt,
   });
   const service = createIngressService({
     fixture: input.fixture,
@@ -238,7 +248,7 @@ async function prepareRegistration(input: {
   const prepared = await service.prepareWebhookForDurableEnqueue(
     "junction",
     signed.rawBody,
-    input.fixture.receivedAt,
+    receivedAt,
   );
   input.fixture.traceIds.push(prepared.traceId);
   return prepared;
@@ -315,6 +325,9 @@ async function cleanupFixture(fixture: Fixture): Promise<void> {
       traceId: { in: fixture.traceIds },
     },
   });
+  await fixture.prisma.deviceOauthSession.deleteMany({
+    where: { userId: fixture.memberId },
+  });
   await fixture.prisma.hostedMember.deleteMany({
     where: { id: fixture.memberId },
   });
@@ -383,47 +396,119 @@ describe.skipIf(!runPostgresProof)(
       }
     });
 
-    it("terminally settles a delayed signed Junction registration superseded by a replacement setup", async () => {
-      const fixture = await createFixture({ sourceLastErrorCode: null });
-      const providerFetch = vi.fn(async () => {
-        throw new Error("Superseded prepared work must not call Junction.");
-      });
-      const registry = createJunctionRegistry(providerFetch);
-      const replacementConnectedAt = new Date(fixture.receivedAt.getTime() + 60_000);
-      const replacementSetupExpiresAt = new Date(
-        replacementConnectedAt.getTime() + 15 * 60_000,
-      );
+    it("bounds a delayed signed setup-A registration by the real replacement setup lifecycle", async () => {
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(new Date("2026-03-26T12:00:00.000Z"));
+      let fixture: Fixture | null = null;
+      const providerReadStarted = createVoidDeferred();
+      const releaseProviderRead = createVoidDeferred();
+      let startPromise: Promise<unknown> | null = null;
 
       try {
-        const prepared = await prepareRegistration({ fixture, registry });
-        await fixture.store.upsertConnection({
-          connectedAt: replacementConnectedAt.toISOString(),
+        fixture = await createFixture({ sourceLastErrorCode: null });
+        const activeFixture = fixture;
+        const providerRequests: string[] = [];
+        const startAt = new Date(activeFixture.receivedAt.getTime() + 60_000);
+        const receivedAt = new Date(startAt.getTime() + 60_000);
+        const setupExpiresAt = new Date(startAt.getTime() + 30 * 60_000);
+        const providerFetch = vi.fn(async (input: string | URL | Request) => {
+          const url = typeof input === "string"
+            ? input
+            : input instanceof URL
+              ? input.toString()
+              : input.url;
+          providerRequests.push(url);
+          if (url.startsWith("https://api.sandbox.us.junction.com/v2/user/resolve/")) {
+            providerReadStarted.resolve();
+            await releaseProviderRead.promise;
+            return new Response(JSON.stringify({ id: activeFixture.externalAccountId }), {
+              headers: { "content-type": "application/json" },
+              status: 200,
+            });
+          }
+          if (url === "https://api.sandbox.us.junction.com/v2/link/token") {
+            return new Response(JSON.stringify({
+              link_web_url: "https://link.junction.com/session/prepared-authority",
+            }), {
+              headers: { "content-type": "application/json" },
+              status: 200,
+            });
+          }
+          throw new Error(`Unexpected Junction request: ${url}`);
+        });
+        const registry = createJunctionRegistry(providerFetch);
+
+        await activeFixture.store.upsertConnection({
+          connectedAt: new Date(activeFixture.receivedAt.getTime() - 120_000).toISOString(),
           credential: {
             kind: "provider_config",
             providerConfigKey: "junction",
           },
           displayName: "Junction",
           existingAccountPolicy: "replace",
-          externalAccountId: fixture.externalAccountId,
+          externalAccountId: activeFixture.externalAccountId,
           metadata: {},
           nextReconcileAt: null,
-          ownerId: fixture.memberId,
+          ownerId: activeFixture.memberId,
           provider: "junction",
           scopes: [],
-          setupExpiresAt: replacementSetupExpiresAt.toISOString(),
+          setupExpiresAt: new Date(startAt.getTime() - 1).toISOString(),
           setupPhase: "pending_link",
           status: "active",
         });
-        const connectionBefore = await fixture.prisma.deviceConnection.findUniqueOrThrow({
+        const original = await activeFixture.prisma.deviceConnection.findUniqueOrThrow({
+          select: { connectedAt: true },
+          where: { id: activeFixture.connectionId },
+        });
+
+        vi.setSystemTime(startAt);
+        const startService = createIngressService({
+          fixture: activeFixture,
+          headers: new Headers(),
+          registry,
+        });
+        startPromise = startService.startConnection(
+          activeFixture.memberId,
+          "junction",
+          null,
+        );
+        await providerReadStarted.promise;
+        await expect(activeFixture.prisma.deviceConnection.findUniqueOrThrow({
+          select: { connectedAt: true },
+          where: { id: activeFixture.connectionId },
+        })).resolves.toEqual(original);
+
+        vi.setSystemTime(receivedAt);
+        const prepared = await prepareRegistration({
+          fixture: activeFixture,
+          receivedAt,
+          registry,
+        });
+        await expect(activeFixture.prisma.deviceConnection.findUniqueOrThrow({
+          select: { connectedAt: true },
+          where: { id: activeFixture.connectionId },
+        })).resolves.toEqual(original);
+
+        releaseProviderRead.resolve();
+        await startPromise;
+        const replacement = await activeFixture.prisma.deviceConnection.findUniqueOrThrow({
           select: {
             connectedAt: true,
+            lastWebhookAt: true,
             setupExpiresAt: true,
             setupPhase: true,
             updatedAt: true,
           },
-          where: { id: fixture.connectionId },
+          where: { id: activeFixture.connectionId },
         });
-        const sourceBefore = await fixture.prisma.deviceConnectionSource.findUniqueOrThrow({
+        expect(replacement).toMatchObject({
+          connectedAt: startAt,
+          lastWebhookAt: null,
+          setupExpiresAt,
+          setupPhase: "pending_link",
+        });
+        expect(replacement.connectedAt.getTime()).toBeLessThan(receivedAt.getTime());
+        const sourceBefore = await activeFixture.prisma.deviceConnectionSource.findUniqueOrThrow({
           select: {
             lastDataAt: true,
             lastErrorCode: true,
@@ -432,35 +517,49 @@ describe.skipIf(!runPostgresProof)(
             status: true,
             updatedAt: true,
           },
-          where: { id: fixture.sourceId },
+          where: { id: activeFixture.sourceId },
         });
         const consumeService = createIngressService({
-          fixture,
+          fixture: activeFixture,
           headers: new Headers(),
           registry,
         });
 
+        vi.setSystemTime(new Date(setupExpiresAt.getTime() - 1));
+        await expect(consumeService.handlePreparedWebhook(prepared)).rejects.toMatchObject({
+          code: "WEBHOOK_ACCOUNT_NOT_READY",
+          httpStatus: 503,
+          retryable: true,
+        });
+        await expect(activeFixture.prisma.deviceWebhookTrace.count({
+          where: {
+            provider: "junction",
+            traceId: prepared.traceId,
+          },
+        })).resolves.toBe(0);
+
+        vi.setSystemTime(setupExpiresAt);
         await expect(consumeService.handlePreparedWebhook(prepared)).resolves.toMatchObject({
           accepted: true,
           duplicate: false,
         });
 
-        expect(providerFetch).not.toHaveBeenCalled();
-        await expectNoWebhookEffects(fixture, {
-          connectionUpdatedAt: connectionBefore.updatedAt,
+        expect(providerRequests).toHaveLength(2);
+        await expectNoWebhookEffects(activeFixture, {
+          connectionUpdatedAt: replacement.updatedAt,
           expectedSource: sourceBefore,
           traceId: prepared.traceId,
         });
-        await expect(fixture.prisma.deviceConnection.findUniqueOrThrow({
+        await expect(activeFixture.prisma.deviceConnection.findUniqueOrThrow({
           select: {
             connectedAt: true,
             setupExpiresAt: true,
             setupPhase: true,
           },
-          where: { id: fixture.connectionId },
+          where: { id: activeFixture.connectionId },
         })).resolves.toEqual({
-          connectedAt: replacementConnectedAt,
-          setupExpiresAt: replacementSetupExpiresAt,
+          connectedAt: startAt,
+          setupExpiresAt,
           setupPhase: "pending_link",
         });
         await expect(consumeService.handlePreparedWebhook(prepared)).resolves.toMatchObject({
@@ -468,7 +567,12 @@ describe.skipIf(!runPostgresProof)(
           duplicate: true,
         });
       } finally {
-        await cleanupFixture(fixture);
+        releaseProviderRead.resolve();
+        await startPromise?.catch(() => undefined);
+        vi.useRealTimers();
+        if (fixture) {
+          await cleanupFixture(fixture);
+        }
       }
     });
 

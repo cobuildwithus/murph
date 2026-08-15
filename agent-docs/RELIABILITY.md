@@ -1209,26 +1209,27 @@ Last verified: 2026-08-14
   both Queue observations are healthy. The monitor persists no
   webhook ciphertext, provider identity, member identity, or Queue message id.
 - Junction Link setup remains retryable but inert before proof-verified callback
-  completion. A webhook whose original prepared receipt predates the account's
-  current `connectedAt` belongs to a superseded setup epoch and completes only
-  its trace. Within the same epoch, a receipt before the active `pending_link`
-  or `link_returned` account's `setupExpiresAt` releases its trace claim and
-  returns a retryable not-ready response; queue delay or redrive does not change
-  that event's lifecycle meaning. At or after `setupExpiresAt`, the incomplete
-  setup is terminal for that webhook: admission completes only the existing
-  webhook trace and acknowledges the event without dirty state, source
-  admission, last-webhook freshness, signal, mailbox, wake, job,
-  canonical-health, or setup-state mutation. The dequeue clock owns only the
-  trace-processing lease. Manual reconcile, due scheduling, ordinary queued
-  jobs, and sync-success promotion apply the same account phase gate. After a
-  shared account is `source_confirmed`, a new target source does
-  not move the account back into a pending phase. Its `DeviceConnectionSource`
-  remains `disconnected`, and source-attributed webhooks, dirty-state commit
-  races, and provider pulls fail or exit without admitting target data until
-  callback completion reaches the sole runtime connection-established admission
-  boundary. Shared ingress marks every account persistence request with the
-  closed `replace` or `preserve_established` policy; hosted Prisma and local
-  SQLite apply the same shared predicate inside their persistence transactions,
+  completion. The authenticated prepared receipt remains frozen for provider
+  event interpretation, freshness, dirty state, signals, and receipt timestamps;
+  it is not setup-epoch identity or retry-lifetime authority. Each delivery uses
+  the trace claim's single processing-attempt instant to recheck the current
+  persisted `pending_link` or `link_returned` setup. While that setup is live,
+  admission releases the trace claim and returns a retryable not-ready response.
+  Once the same persisted setup is expired, a later delivery of the same envelope
+  completes only the existing webhook trace and acknowledges the event without
+  dirty state, source admission, last-webhook freshness, signal, mailbox, wake,
+  job, canonical-health, or setup-state mutation. The proof-verified callback
+  remains the sole setup-completion authority. Manual reconcile, due
+  scheduling, ordinary queued jobs, and sync-success promotion apply the same
+  account phase gate. After a shared account is `source_confirmed`, a new target
+  source does not move the account back into a pending phase. Its
+  `DeviceConnectionSource` remains `disconnected`, and source-attributed
+  webhooks, dirty-state commit races, and provider pulls fail or exit without
+  admitting target data until callback completion reaches the sole runtime
+  connection-established admission boundary. Shared ingress marks every
+  account persistence request with the closed `replace` or
+  `preserve_established` policy; hosted Prisma and local SQLite apply the same
+  shared predicate inside their persistence transactions,
   so neither adapter may reinterpret a source addition as an account reconnect.
   Hosted admission commits the source, signal, and mailbox work in one
   transaction; local admission commits the source and initial jobs in one SQLite

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHmac } from "node:crypto";
 import { test, vi } from "vitest";
 
 import { DeviceSyncError, deviceSyncError } from "../src/errors.ts";
@@ -604,6 +605,43 @@ function createVoidDeferred(): { promise: Promise<void>; resolve: () => void } {
     resolve = nextResolve;
   });
   return { promise, resolve };
+}
+
+const JUNCTION_WEBHOOK_SECRET = "whsec_d2ViaG9vay10ZXN0LXNlY3JldA==";
+
+function createJunctionSourceRegistrationWebhook(input: {
+  externalAccountId: string;
+  messageId: string;
+  receivedAt: Date;
+}): { headers: Headers; rawBody: Buffer } {
+  const timestamp = Math.floor(input.receivedAt.getTime() / 1_000).toString();
+  const rawBody = Buffer.from(JSON.stringify({
+    data: {
+      provider: "apple_health_kit",
+      updated_at: input.receivedAt.toISOString(),
+    },
+    event_type: "provider.connection.updated",
+    user_id: input.externalAccountId,
+  }));
+  const key = Buffer.from(
+    JUNCTION_WEBHOOK_SECRET.slice("whsec_".length),
+    "base64",
+  );
+  const signature = createHmac("sha256", key)
+    .update(Buffer.concat([
+      Buffer.from(`${input.messageId}.${timestamp}.`),
+      rawBody,
+    ]))
+    .digest("base64");
+
+  return {
+    headers: new Headers({
+      "svix-id": input.messageId,
+      "svix-signature": `v1,${signature}`,
+      "svix-timestamp": timestamp,
+    }),
+    rawBody,
+  };
 }
 
 function readOAuthCredentialTokens(input: UpsertPublicDeviceSyncConnectionInput): ProviderAuthTokens | null {
@@ -1989,7 +2027,9 @@ test("public ingress keeps pending external-link accounts inert until callback c
   assert.equal(store.completedWebhookTraceCalls, 1);
 });
 
-test("public ingress terminally consumes webhooks received after incomplete setup expiry", async () => {
+test("public ingress terminally consumes a pre-expiry webhook delivered after setup expiry", async () => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(new Date("2026-03-26T12:16:00.000Z"));
   const store = new InMemoryPublicIngressStore();
   let acceptedCalls = 0;
   let dirtySatisfiedCalls = 0;
@@ -2051,7 +2091,7 @@ test("public ingress terminally consumes webhooks received after incomplete setu
     "demo",
     new Headers(),
     Buffer.from("{}"),
-    new Date("2026-03-26T12:15:00.000Z"),
+    new Date("2026-03-26T12:14:00.000Z"),
   );
 
   const first = await ingress.handlePreparedWebhook(prepared);
@@ -2077,25 +2117,53 @@ test("public ingress terminally consumes webhooks received after incomplete setu
   assert.equal(dirtySatisfiedCalls, 0);
   assert.equal(sourceObservedCalls, 0);
   assert.equal(store.completedWebhookTraceCalls, 1);
+  vi.useRealTimers();
 });
 
-test("public ingress terminally consumes stale webhooks superseded by a replacement setup epoch", async () => {
+test("public ingress bounds a delayed setup-A webhook by the replacement setup lifecycle", async () => {
+  vi.useFakeTimers({ toFake: ["Date"] });
   const store = new InMemoryPublicIngressStore();
+  const providerReadStarted = createVoidDeferred();
+  const releaseProviderRead = createVoidDeferred();
+  const startAt = new Date("2026-03-26T12:00:00.000Z");
+  const receivedAt = new Date("2026-03-26T12:01:00.000Z");
+  const setupExpiresAt = new Date("2026-03-26T12:30:00.000Z");
+  const externalAccountId = "junction-replacement-ordering";
   let acceptedCalls = 0;
   let dirtySatisfiedCalls = 0;
   let sourceObservedCalls = 0;
-  let parsedWebhook = {
-    acceptanceMode: "level_dirty_hint" as const,
-    eventType: "provider.connection.updated",
-    externalAccountId: "demo-restarted-setup",
-    jobs: [],
-    sourceProviderSlug: "fitbit",
-    traceId: "expired-original-setup-trace",
-  };
-  const provider = createFakeProvider({
-    async verifyAndParseWebhook() {
-      return parsedWebhook;
+  let startPromise: Promise<unknown> | null = null;
+
+  const provider = createJunctionDeviceSyncProvider({
+    apiKey: "sk_us_test_123",
+    clientUserIdSecret: "junction-client-user-id-secret",
+    environment: "sandbox",
+    fetchImpl: async (input) => {
+      const url = typeof input === "string"
+        ? input
+        : input instanceof URL
+          ? input.toString()
+          : input.url;
+      if (url.startsWith("https://api.sandbox.us.junction.com/v2/user/resolve/")) {
+        providerReadStarted.resolve();
+        await releaseProviderRead.promise;
+        return new Response(JSON.stringify({ id: externalAccountId }), {
+          headers: { "content-type": "application/json" },
+          status: 200,
+        });
+      }
+      if (url === "https://api.sandbox.us.junction.com/v2/link/token") {
+        return new Response(JSON.stringify({
+          link_web_url: "https://link.junction.com/session/replacement-ordering",
+        }), {
+          headers: { "content-type": "application/json" },
+          status: 200,
+        });
+      }
+      throw new Error(`Unexpected Junction request: ${url}`);
     },
+    region: "us",
+    webhookSecret: JUNCTION_WEBHOOK_SECRET,
   });
   const ingress = createDeviceSyncPublicIngress({
     publicBaseUrl: "https://sync.example.test/device-sync",
@@ -2116,139 +2184,105 @@ test("public ingress terminally consumes stale webhooks superseded by a replacem
       },
     },
   });
-  store.upsertConnection({
-    connectedAt: "2026-03-26T12:00:00.000Z",
-    credential: { kind: "none" },
-    externalAccountId: "demo-restarted-setup",
-    existingAccountPolicy: "replace",
-    metadata: {},
-    nextReconcileAt: null,
-    ownerId: "owner-123",
-    provider: "demo",
-    scopes: [],
-    setupExpiresAt: "2026-03-26T12:15:00.000Z",
-    setupPhase: "pending_link",
-    status: "active",
-  });
-  const stalePrepared = await ingress.prepareWebhookForDurableEnqueue(
-    "demo",
-    new Headers(),
-    Buffer.from("{}"),
-    new Date("2026-03-26T12:16:00.000Z"),
-  );
-  const replacement = store.upsertConnection({
-    connectedAt: "2026-03-26T12:20:00.000Z",
-    credential: { kind: "none" },
-    externalAccountId: "demo-restarted-setup",
-    existingAccountPolicy: "replace",
-    metadata: {},
-    nextReconcileAt: null,
-    ownerId: "owner-123",
-    provider: "demo",
-    scopes: [],
-    setupExpiresAt: "2026-03-26T12:35:00.000Z",
-    setupPhase: "pending_link",
-    status: "active",
-  });
 
-  const first = await ingress.handlePreparedWebhook(stalePrepared);
-  assert.equal(first.accepted, true);
-  assert.equal(first.duplicate, false);
-  assert.equal(acceptedCalls, 0);
-  assert.equal(dirtySatisfiedCalls, 0);
-  assert.equal(sourceObservedCalls, 0);
-  assert.equal(store.claimWebhookTraceCalls, 1);
-  assert.equal(store.completedWebhookTraceCalls, 1);
-  assert.equal(store.recordedSourceDataArrivals.length, 0);
-  assert.equal(store.getConnectionById(replacement.id)?.lastWebhookAt, null);
-  assert.equal(store.getConnectionById(replacement.id)?.connectedAt, "2026-03-26T12:20:00.000Z");
-  assert.equal(store.getConnectionById(replacement.id)?.setupPhase, "pending_link");
-  assert.equal(
-    store.getConnectionById(replacement.id)?.setupExpiresAt,
-    "2026-03-26T12:35:00.000Z",
-  );
+  try {
+    vi.setSystemTime(startAt);
+    const original = store.upsertConnection({
+      connectedAt: "2026-03-26T11:00:00.000Z",
+      credential: {
+        kind: "provider_config",
+        providerConfigKey: "junction",
+      },
+      externalAccountId,
+      existingAccountPolicy: "replace",
+      metadata: {},
+      nextReconcileAt: null,
+      ownerId: "owner-123",
+      provider: "junction",
+      scopes: [],
+      setupExpiresAt: "2026-03-26T11:30:00.000Z",
+      setupPhase: "pending_link",
+      status: "active",
+    });
 
-  const duplicate = await ingress.handlePreparedWebhook(stalePrepared);
-  assert.equal(duplicate.accepted, true);
-  assert.equal(duplicate.duplicate, true);
-  assert.equal(store.claimWebhookTraceCalls, 2);
-  assert.equal(store.completedWebhookTraceCalls, 1);
+    startPromise = ingress.startConnection({
+      ownerId: "owner-123",
+      provider: "junction",
+    });
+    await providerReadStarted.promise;
+    assert.equal(
+      store.getConnectionByExternalAccount("junction", externalAccountId)?.connectedAt,
+      original.connectedAt,
+    );
 
-  parsedWebhook = {
-    ...parsedWebhook,
-    traceId: "replacement-setup-live-trace",
-  };
-  const replacementPrepared = await ingress.prepareWebhookForDurableEnqueue(
-    "demo",
-    new Headers(),
-    Buffer.from("{}"),
-    new Date("2026-03-26T12:25:00.000Z"),
-  );
-  await assert.rejects(
-    () => ingress.handlePreparedWebhook(replacementPrepared),
-    (error: unknown) =>
-      error instanceof DeviceSyncError
-      && error.code === "WEBHOOK_ACCOUNT_NOT_READY"
-      && error.httpStatus === 503
-      && error.retryable === true,
-  );
-  assert.equal(acceptedCalls, 0);
-  assert.equal(dirtySatisfiedCalls, 0);
-  assert.equal(sourceObservedCalls, 0);
-  assert.equal(store.claimWebhookTraceCalls, 3);
-  assert.equal(store.completedWebhookTraceCalls, 1);
-});
+    vi.setSystemTime(receivedAt);
+    const signed = createJunctionSourceRegistrationWebhook({
+      externalAccountId,
+      messageId: "msg_replacement_ordering",
+      receivedAt,
+    });
+    const prepared = await ingress.prepareWebhookForDurableEnqueue(
+      "junction",
+      signed.headers,
+      signed.rawBody,
+      receivedAt,
+    );
+    assert.equal(
+      store.getConnectionByExternalAccount("junction", externalAccountId)?.connectedAt,
+      original.connectedAt,
+    );
 
-test("public ingress keeps a pre-expiry prepared webhook retryable after delayed delivery", async () => {
-  const store = new InMemoryPublicIngressStore();
-  const ingress = createDeviceSyncPublicIngress({
-    publicBaseUrl: "https://sync.example.test/device-sync",
-    registry: createDeviceSyncRegistry([
-      createFakeProvider({
-        async verifyAndParseWebhook() {
-          return {
-            eventType: "demo.updated",
-            externalAccountId: "demo-live-setup",
-            jobs: [],
-            traceId: "live-setup-delayed-trace",
-          };
-        },
-      }),
-    ]),
-    store,
-  });
-  store.upsertConnection({
-    connectedAt: "2026-03-26T12:00:00.000Z",
-    credential: { kind: "none" },
-    externalAccountId: "demo-live-setup",
-    existingAccountPolicy: "replace",
-    metadata: {},
-    nextReconcileAt: null,
-    ownerId: "owner-123",
-    provider: "demo",
-    scopes: [],
-    setupExpiresAt: "2026-03-26T12:15:00.000Z",
-    setupPhase: "pending_link",
-    status: "active",
-  });
-  const prepared = await ingress.prepareWebhookForDurableEnqueue(
-    "demo",
-    new Headers(),
-    Buffer.from("{}"),
-    new Date("2026-03-26T12:14:59.999Z"),
-  );
+    releaseProviderRead.resolve();
+    await startPromise;
+    const replacement = store.getConnectionByExternalAccount("junction", externalAccountId);
+    assert.ok(replacement);
+    assert.equal(replacement.id, original.id);
+    assert.equal(replacement.connectedAt, startAt.toISOString());
+    assert.equal(replacement.setupExpiresAt, setupExpiresAt.toISOString());
+    assert.equal(replacement.setupPhase, "pending_link");
+    assert.ok(Date.parse(replacement.connectedAt) < Date.parse(prepared.receivedAt));
 
-  await assert.rejects(
-    () => ingress.handlePreparedWebhook(prepared),
-    (error: unknown) =>
-      error instanceof DeviceSyncError
-      && error.code === "WEBHOOK_ACCOUNT_NOT_READY"
-      && error.httpStatus === 503
-      && error.retryable === true,
-  );
-  assert.equal(store.claimWebhookTraceCalls, 1);
-  assert.equal(store.completedWebhookTraceCalls, 0);
-  assert.equal(readRecordedWebhookTrace(store), null);
+    vi.setSystemTime(new Date(setupExpiresAt.getTime() - 1));
+    await assert.rejects(
+      () => ingress.handlePreparedWebhook(prepared),
+      (error: unknown) =>
+        error instanceof DeviceSyncError
+        && error.code === "WEBHOOK_ACCOUNT_NOT_READY"
+        && error.httpStatus === 503
+        && error.retryable === true,
+    );
+    assert.equal(store.claimWebhookTraceCalls, 1);
+    assert.equal(store.completedWebhookTraceCalls, 0);
+    assert.equal(readRecordedWebhookTrace(store), null);
+
+    vi.setSystemTime(setupExpiresAt);
+    const terminal = await ingress.handlePreparedWebhook(prepared);
+    assert.equal(terminal.accepted, true);
+    assert.equal(terminal.duplicate, false);
+    assert.equal(store.claimWebhookTraceCalls, 2);
+    assert.equal(store.completedWebhookTraceCalls, 1);
+    assert.equal(readRecordedWebhookTrace(store)?.receivedAt, receivedAt.toISOString());
+    assert.deepEqual(store.recordedSourceDataArrivals, []);
+    assert.equal(acceptedCalls, 0);
+    assert.equal(dirtySatisfiedCalls, 0);
+    assert.equal(sourceObservedCalls, 0);
+
+    const unchanged = store.getConnectionByExternalAccount("junction", externalAccountId);
+    assert.equal(unchanged?.connectedAt, startAt.toISOString());
+    assert.equal(unchanged?.lastWebhookAt, null);
+    assert.equal(unchanged?.setupExpiresAt, setupExpiresAt.toISOString());
+    assert.equal(unchanged?.setupPhase, "pending_link");
+
+    const duplicate = await ingress.handlePreparedWebhook(prepared);
+    assert.equal(duplicate.accepted, true);
+    assert.equal(duplicate.duplicate, true);
+    assert.equal(store.claimWebhookTraceCalls, 3);
+    assert.equal(store.completedWebhookTraceCalls, 1);
+  } finally {
+    releaseProviderRead.resolve();
+    await startPromise?.catch(() => undefined);
+    vi.useRealTimers();
+  }
 });
 
 test("public ingress rejects external-link callbacks that do not match the seeded account", async () => {

@@ -1872,6 +1872,7 @@ export async function handleHostedDeviceSyncWebhookAccepted(input: {
   claimToken: string;
   now: string;
   ownerId: string | null;
+  processingAttemptedAt: string;
   registry?: DeviceSyncRegistry;
   store: PrismaDeviceSyncControlPlaneStore;
   traceId?: string | null;
@@ -1930,6 +1931,7 @@ export async function handleHostedDeviceSyncWebhookAccepted(input: {
     dirtyResources,
     eventType: input.webhook.eventType,
     occurredAt: input.webhook.occurredAt ?? input.now,
+    processingAttemptedAt: input.processingAttemptedAt,
     provider: input.account.provider,
     resourceCategory,
     sourceProviderSlug: input.webhook.sourceProviderSlug ?? null,
@@ -1956,6 +1958,7 @@ async function prepareHostedWebhookSourceObservation(input: {
   claimToken: string;
   now: string;
   ownerId: string;
+  processingAttemptedAt: string;
   provider: string;
   registry?: DeviceSyncRegistry;
   store: PrismaDeviceSyncControlPlaneStore;
@@ -1992,7 +1995,6 @@ async function prepareHostedWebhookSourceObservation(input: {
           || current.provider !== input.provider
           || normalizeHostedDeviceSyncLifecycleStatus(current.status) !== "active"
           || current.connectedAt.toISOString() !== input.account.connectedAt
-          || current.connectedAt.getTime() > Date.parse(input.now)
           || current.providerApplicationId !== null
           || current.providerApplicationRevision !== null
         ) {
@@ -2004,7 +2006,7 @@ async function prepareHostedWebhookSourceObservation(input: {
           setupPhase: normalizeHostedDeviceSyncSetupPhase(current.setupPhase),
         };
         if (isDeviceSyncConnectionSetupPending(setup)) {
-          if (isDeviceSyncConnectionSetupExpiredAt(setup, input.now)) {
+          if (isDeviceSyncConnectionSetupExpiredAt(setup, input.processingAttemptedAt)) {
             await completeHostedWebhookTraceTx(input, tx);
             return { kind: "terminal" };
           }
@@ -2688,6 +2690,7 @@ interface HostedDeviceSyncWebhookAdmissionInput {
   eventType: string;
   expectedConnectedAt: string;
   occurredAt: string;
+  processingAttemptedAt: string;
   provider: string;
   resourceCategory?: string | null;
   sourceProviderSlug: string | null;
@@ -2928,7 +2931,6 @@ async function inspectHostedDeviceSyncWebhookAdmissionTx(
     || current.provider !== input.provider
     || normalizeHostedDeviceSyncLifecycleStatus(current.status) !== "active"
     || current.connectedAt.toISOString() !== input.expectedConnectedAt
-    || current.connectedAt.getTime() > Date.parse(input.acceptedAt)
   ) {
     await completeHostedWebhookTraceTx(input, tx);
     return "completed";
@@ -2951,7 +2953,7 @@ async function inspectHostedDeviceSyncWebhookAdmissionTx(
     setupPhase: normalizeHostedDeviceSyncSetupPhase(current.setupPhase),
   };
   if (isDeviceSyncConnectionSetupPending(setup)) {
-    if (isDeviceSyncConnectionSetupExpiredAt(setup, input.acceptedAt)) {
+    if (isDeviceSyncConnectionSetupExpiredAt(setup, input.processingAttemptedAt)) {
       await completeHostedWebhookTraceTx(input, tx);
       return "completed";
     }
