@@ -336,6 +336,7 @@ const HOSTED_ASSISTANT_CODEX_ACTION_DIAGNOSTIC_NUMBER_ARRAY_KEYS = [
 ] as const;
 const HOSTED_ASSISTANT_PROVIDER_PROMPT_SIZE_BOOLEAN_KEYS = [
   "conversationContextPresent",
+  "conversationHistoryPresent",
   "developerInstructionsPresent",
   "messageTargetDynamicToolsAvailable",
   "messageReactionsAvailable",
@@ -345,6 +346,8 @@ const HOSTED_ASSISTANT_PROVIDER_PROMPT_SIZE_BOOLEAN_KEYS = [
 const HOSTED_ASSISTANT_PROVIDER_PROMPT_SIZE_NUMBER_KEYS = [
   "baseInstructionsBytes",
   "conversationContextBytes",
+  "conversationHistoryBytes",
+  "conversationHistoryCount",
   "developerInstructionsBytes",
   "dynamicToolCount",
   "providerPromptBytes",

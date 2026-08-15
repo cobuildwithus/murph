@@ -306,6 +306,28 @@ function parseDiagnosticRuntimeLog(redactedJson: Record<string, unknown>): void 
   });
 }
 
+function readDiagnosticInputMetric(
+  diagnostic: Record<string, unknown>,
+  kind: string,
+): { bytes: number; count: number } | null {
+  const kinds = diagnostic.inputNestedMetricKinds;
+  const counts = diagnostic.inputNestedMetricCounts;
+  const bytes = diagnostic.inputNestedMetricBytes;
+  if (!Array.isArray(kinds) || !Array.isArray(counts) || !Array.isArray(bytes)) {
+    throw new TypeError("Expected aligned input diagnostic metric arrays.");
+  }
+  const index = kinds.indexOf(kind);
+  if (index < 0) {
+    return null;
+  }
+  const count = counts[index];
+  const byteCount = bytes[index];
+  if (typeof count !== "number" || typeof byteCount !== "number") {
+    throw new TypeError("Expected numeric input diagnostic metrics.");
+  }
+  return { bytes: byteCount, count };
+}
+
 afterEach(() => {
   vi.useRealTimers();
   vi.clearAllMocks();
@@ -2737,7 +2759,7 @@ describe("hostedRunnerIntercept", () => {
       codexTurnFingerprintPresent: true,
       codexTurnMetadataStatus: "valid",
       codexWindowFingerprintPresent: true,
-      diagnosticVersion: 2,
+      diagnosticVersion: 3,
       endpointKind: "responses",
       modelKind: "gpt-5.6-terra",
       providerKind: "venice",
@@ -2784,6 +2806,132 @@ describe("hostedRunnerIntercept", () => {
     expect(serializedLogs).not.toContain("private-provider-router-header");
     expect(serializedLogs).not.toContain("diagnostic-fingerprint-secret");
     expect(serializedLogs).not.toContain("venice-worker-secret");
+  });
+
+  it("keeps the maximal provider diagnostic ingestible with key-count headroom", async () => {
+    const waitUntilPromises: Promise<unknown>[] = [];
+    const fetchMock = vi.fn<typeof fetch>(async (target) => {
+      const url = new URL(readFetchTargetUrl(target));
+      if (url.hostname === "web.example.test") {
+        return Response.json({ loggedCount: 1 });
+      }
+      return new Response("synthetic provider response", {
+        headers: {
+          "cf-ray": "230b030023ae2822-SJC",
+          "content-type": "text/event-stream; charset=utf-8",
+          "x-retry-count": "2",
+          "x-venice-model-id": "openai-gpt-56-terra",
+        },
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const credential = await createTestProviderEgressCredential({
+      providerKind: "venice",
+    });
+
+    const deepContent: Record<string, unknown> = {};
+    let deepCursor = deepContent;
+    for (let depth = 0; depth < 140; depth += 1) {
+      const child: Record<string, unknown> = {};
+      deepCursor.content = child;
+      deepCursor = child;
+    }
+    deepCursor.text = "synthetic large diagnostic content ".repeat(10_000);
+
+    const sharedOutput = { state: "shared" };
+    const requestBody = {
+      generate: false,
+      include: ["reasoning.encrypted_content"],
+      input: [
+        { call_id: "call_a", name: "exec_command", type: "function_call" },
+        { call_id: "call_a", output: sharedOutput, type: "function_call_output" },
+        { call_id: "call_b", name: "wait", type: "function_call" },
+        { call_id: "call_b", output: "different", type: "function_call_output" },
+        { call_id: "call_b", output: sharedOutput, type: "function_call_output" },
+        { content: deepContent, role: "user", type: "message" },
+      ],
+      instructions: "synthetic bounded instructions",
+      model: "gpt-5.6-terra",
+      previous_response_id: "response-synthetic-max-shape",
+      prompt_cache_key: "cache-synthetic-max-shape",
+      prompt_cache_retention: "24h",
+      store: true,
+      stream: true,
+      tools: [{ type: "web_search_preview" }],
+    };
+    const encodedRequestBody = TEST_TEXT_ENCODER.encode(JSON.stringify(requestBody));
+    expect(encodedRequestBody.byteLength).toBeGreaterThan(256 * 1024);
+    expect(encodedRequestBody.byteLength).toBeLessThan(6 * 1024 * 1024);
+
+    const response = await hostedRunnerIntercept(
+      new Request("https://api.venice.ai/api/v1/responses", {
+        body: encodedRequestBody,
+        headers: {
+          authorization: `Bearer ${credential}`,
+          "content-type": "application/json",
+          "x-codex-turn-metadata": JSON.stringify({
+            compaction: {
+              implementation: "responses_compaction_v2",
+              phase: "mid_turn",
+              reason: "context_limit",
+              trigger: "auto",
+            },
+            request_kind: "memory",
+            session_id: "session-synthetic-max-shape",
+            thread_id: "thread-synthetic-max-shape",
+            turn_id: "turn-synthetic-max-shape",
+            window_id: "window-synthetic-max-shape",
+          }),
+        },
+        method: "POST",
+      }),
+      createInterceptEnv({
+        HOSTED_LOG_FINGERPRINT_SECRET: "diagnostic-fingerprint-secret",
+        VENICE_API_KEY: "venice-worker-secret",
+        validateRuntimeProviderEgressCredential: async (input) =>
+          createProviderEgressCredentialValidationResult(input),
+        validateRuntimeWriteFence: async () => true,
+      }),
+      {
+        containerId: "opaque-container-id",
+        waitUntil: (promise) => {
+          waitUntilPromises.push(Promise.resolve(promise));
+        },
+      },
+    );
+
+    expect(response.status).toBe(200);
+    await Promise.all(waitUntilPromises);
+
+    const runtimeLogCall = findFetchCall(fetchMock, "web.example.test");
+    expect(runtimeLogCall).toBeDefined();
+    const runtimeLogBody = JSON.parse(String(runtimeLogCall?.[1]?.body ?? "{}")) as {
+      entries?: Array<{ redactedJson?: Record<string, unknown> }>;
+    };
+    const diagnostic = runtimeLogBody.entries?.[0]?.redactedJson;
+    expect(diagnostic).toEqual(expect.objectContaining({
+      codexCompactionImplementationKind: "responses_compaction_v2",
+      inputShapeTraversalTruncated: true,
+      inputTailItemShapeTraversalTruncated: true,
+      providerResponseOutcomeKind: "accepted",
+      requestFullFingerprintSkipped: true,
+    }));
+    expect(readDiagnosticInputMetric(
+      diagnostic ?? {},
+      "function_output.repeated",
+    )).toEqual({ bytes: testJsonByteLength(sharedOutput), count: 1 });
+    expect(readDiagnosticInputMetric(
+      diagnostic ?? {},
+      "function_output.equivalent",
+    )).toEqual({ bytes: testJsonByteLength(sharedOutput), count: 1 });
+    expect(Object.keys(diagnostic ?? {})).toHaveLength(95);
+    expect(Object.keys(diagnostic ?? {}).length).toBeLessThan(96);
+    expect(parseHostedRuntimeLogRequest(runtimeLogBody).entries).toHaveLength(1);
+
+    const serializedDiagnostic = JSON.stringify(diagnostic);
+    expect(serializedDiagnostic).not.toContain("session-synthetic-max-shape");
+    expect(serializedDiagnostic).not.toContain("synthetic large diagnostic content");
+    expect(serializedDiagnostic).not.toContain('"state":"shared"');
   });
 
   it("returns rejected Venice memory responses unchanged and persists bounded warning metadata", async () => {
@@ -5155,9 +5303,31 @@ describe("hostedRunnerIntercept", () => {
         "none",
       ],
     }));
+    expect(readDiagnosticInputMetric(
+      diagnostic,
+      "function_output.action.command.execution",
+    )).toEqual({ bytes: testJsonByteLength(matchedOutput.output), count: 1 });
+    expect(readDiagnosticInputMetric(
+      diagnostic,
+      "function_output.action.dynamic.tool.call",
+    )).toBeNull();
+    expect(readDiagnosticInputMetric(
+      diagnostic,
+      "function_output.action.mcp.tool.call",
+    )).toEqual({ bytes: testJsonByteLength(exactNameOutput.output), count: 1 });
+    expect(readDiagnosticInputMetric(
+      diagnostic,
+      "function_output.action.other",
+    )).toEqual({
+      bytes: testJsonByteLength(unsafeNameOutput.output)
+        + testJsonByteLength(unmatchedOutput.output),
+      count: 2,
+    });
     parseDiagnosticRuntimeLog(diagnostic);
 
     const diagnosticJson = JSON.stringify(diagnostic);
+    expect(readDiagnosticInputMetric(diagnostic, "function_output.repeated")).toBeNull();
+    expect(readDiagnosticInputMetric(diagnostic, "function_output.equivalent")).toBeNull();
     expect(diagnosticJson).not.toContain("call_private");
     expect(diagnosticJson).not.toContain("synthetic-sensitive-tool-output");
     expect(diagnosticJson).not.toContain("synthetic-sensitive-function-arguments");
@@ -5165,6 +5335,150 @@ describe("hostedRunnerIntercept", () => {
     expect(diagnosticJson).not.toContain("synthetic-exact-function-arguments");
     expect(diagnosticJson).not.toContain("synthetic-private-message");
     expect(diagnosticJson).not.toContain("private/tool-name");
+  });
+
+  it("counts repeated action identities and exactly equivalent serialized outputs independently", async () => {
+    const repeatedFirst = {
+      call_id: "call_repeat",
+      output: "first repeated-call output",
+      type: "function_call_output",
+    };
+    const repeatedSecond = {
+      call_id: "call_repeat",
+      output: "second repeated-call output",
+      type: "function_call_output",
+    };
+    const equivalentOutput = {
+      status: "waiting",
+      waitMs: 1_000,
+    };
+    const equivalentFirst = {
+      call_id: "call_equivalent_1",
+      output: equivalentOutput,
+      type: "function_call_output",
+    };
+    const equivalentSecond = {
+      call_id: "call_equivalent_2",
+      output: equivalentOutput,
+      type: "function_call_output",
+    };
+    const reorderedOutput = {
+      waitMs: 1_000,
+      status: "waiting",
+    };
+    const reordered = {
+      call_id: "call_reordered",
+      output: reorderedOutput,
+      type: "function_call_output",
+    };
+    const commandOutput = {
+      call_id: "call_command",
+      output: "command output",
+      type: "function_call_output",
+    };
+    const mcpOutput = {
+      call_id: "call_mcp",
+      output: "mcp output",
+      type: "function_call_output",
+    };
+    const overlappingOutput = {
+      state: "shared",
+    };
+    const overlapFirst = {
+      call_id: "call_overlap_a",
+      output: overlappingOutput,
+      type: "function_call_output",
+    };
+    const overlapOther = {
+      call_id: "call_overlap_b",
+      output: "different output for the repeated identity",
+      type: "function_call_output",
+    };
+    const overlapRepeatedEquivalent = {
+      call_id: "call_overlap_b",
+      output: overlappingOutput,
+      type: "function_call_output",
+    };
+    const input = [
+      { call_id: "call_repeat", name: "wait", type: "function_call" },
+      repeatedFirst,
+      repeatedSecond,
+      { call_id: "call_equivalent_1", name: "wait", type: "function_call" },
+      equivalentFirst,
+      { call_id: "call_equivalent_2", name: "wait", type: "function_call" },
+      equivalentSecond,
+      { call_id: "call_reordered", name: "wait", type: "function_call" },
+      reordered,
+      { call_id: "call_command", name: "exec_command", type: "function_call" },
+      commandOutput,
+      { call_id: "call_mcp", name: "mcp__calendar__read", type: "function_call" },
+      mcpOutput,
+      { call_id: "call_overlap_a", name: "wait", type: "function_call" },
+      overlapFirst,
+      { call_id: "call_overlap_b", name: "wait", type: "function_call" },
+      overlapOther,
+      overlapRepeatedEquivalent,
+    ] as const;
+
+    const diagnostic = await buildHostedOpenAiCacheDiagnostic({
+      endpointKind: "responses",
+      method: "POST",
+      requestBytes: TEST_TEXT_ENCODER.encode(JSON.stringify({
+        input,
+        model: "gpt-5.6-terra",
+      })),
+    });
+
+    expect(diagnostic).toEqual(expect.objectContaining({
+      diagnosticVersion: 3,
+    }));
+    expect(readDiagnosticInputMetric(
+      diagnostic,
+      "function_output.action.command.execution",
+    )).toEqual({ bytes: testJsonByteLength(commandOutput.output), count: 1 });
+    expect(readDiagnosticInputMetric(
+      diagnostic,
+      "function_output.action.dynamic.tool.call",
+    )).toEqual({
+      bytes: testJsonByteLength(repeatedFirst.output)
+        + testJsonByteLength(repeatedSecond.output)
+        + testJsonByteLength(equivalentFirst.output)
+        + testJsonByteLength(equivalentSecond.output)
+        + testJsonByteLength(reordered.output)
+        + testJsonByteLength(overlapFirst.output)
+        + testJsonByteLength(overlapOther.output)
+        + testJsonByteLength(overlapRepeatedEquivalent.output),
+      count: 8,
+    });
+    expect(readDiagnosticInputMetric(
+      diagnostic,
+      "function_output.action.mcp.tool.call",
+    )).toEqual({ bytes: testJsonByteLength(mcpOutput.output), count: 1 });
+    expect(readDiagnosticInputMetric(
+      diagnostic,
+      "function_output.repeated",
+    )).toEqual({
+      bytes: testJsonByteLength(repeatedSecond.output)
+        + testJsonByteLength(overlapRepeatedEquivalent.output),
+      count: 2,
+    });
+    expect(readDiagnosticInputMetric(
+      diagnostic,
+      "function_output.equivalent",
+    )).toEqual({
+      bytes: testJsonByteLength(equivalentSecond.output)
+        + testJsonByteLength(overlapRepeatedEquivalent.output),
+      count: 2,
+    });
+    parseDiagnosticRuntimeLog(diagnostic);
+
+    const diagnosticJson = JSON.stringify(diagnostic);
+    expect(diagnosticJson).not.toContain("call_repeat");
+    expect(diagnosticJson).not.toContain("first repeated-call output");
+    expect(diagnosticJson).not.toContain("second repeated-call output");
+    expect(diagnosticJson).not.toContain("command output");
+    expect(diagnosticJson).not.toContain("mcp output");
+    expect(diagnosticJson).not.toContain('"status":"waiting"');
   });
 
   it("uses safe deterministic function-call categories for unusual call IDs", async () => {
