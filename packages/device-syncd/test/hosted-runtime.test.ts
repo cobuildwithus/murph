@@ -240,10 +240,8 @@ describe("hosted device-sync reconcile contract", () => {
   it("accepts only the bounded request and queued response shapes", () => {
     expect(parseHostedExecutionDeviceSyncReconcileRequest({
       connectionId: "dsc_123",
-      memberEditConflictResolution: "keep_member",
     })).toEqual({
       connectionId: "dsc_123",
-      memberEditConflictResolution: "keep_member",
     });
     expect(parseHostedExecutionDeviceSyncReconcileResponse({
       connectionId: "dsc_123",
@@ -260,8 +258,8 @@ describe("hosted device-sync reconcile contract", () => {
     })).toThrow(/action is not supported/u);
     expect(() => parseHostedExecutionDeviceSyncReconcileRequest({
       connectionId: "dsc_123",
-      memberEditConflictResolution: "overwrite_everything",
-    })).toThrow(/must be keep_member or use_provider/u);
+      unexpected: "value",
+    })).toThrow(/unexpected is not supported/u);
     expect(() => parseHostedExecutionDeviceSyncReconcileResponse({
       connectionId: "dsc_123",
       occurredAt: "2026-07-15T12:00:00.000Z",
@@ -3014,7 +3012,6 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
       ],
       nextReconcileAt: null,
       occurredAt: "2026-04-09T00:01:00Z",
-      memberEditConflictResolution: "use_provider",
       reason: "webhook_hint",
       resourceCategory: "sleep",
       revokeWarning: {
@@ -3046,7 +3043,6 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
       ],
       nextReconcileAt: null,
       occurredAt: "2026-04-09T00:01:00.000Z",
-      memberEditConflictResolution: "use_provider",
       reason: "webhook_hint",
       resourceCategory: "sleep",
       revokeWarning: {

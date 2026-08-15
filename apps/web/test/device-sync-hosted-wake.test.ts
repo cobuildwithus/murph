@@ -1534,7 +1534,6 @@ describe("hosted device-sync wakes", () => {
         {
           body: JSON.stringify({
             connectionId: "dsc_123",
-            memberEditConflictResolution: "keep_member",
           }),
           method: "POST",
         },
@@ -1554,7 +1553,6 @@ describe("hosted device-sync wakes", () => {
           envelope: expect.objectContaining({
             connectionId: "dsc_123",
             hint: expect.objectContaining({
-              memberEditConflictResolution: "keep_member",
               reason: "manual_reconcile",
             }),
             reason: "reconcile_due",

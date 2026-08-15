@@ -8209,7 +8209,6 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     await expect(deviceTool.request({
       accountId: "conn_synthetic_whoop",
       action: "reconcile",
-      resolution: "keep_member",
     }, { signal: abortController.signal })).resolves.toEqual({
       accountId: "conn_synthetic_whoop",
       action: "reconcile",
@@ -8218,7 +8217,6 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     });
     expect(reconcileRequests).toEqual([{
       connectionId: "conn_synthetic_whoop",
-      memberEditConflictResolution: "keep_member",
       signal: abortController.signal,
     }]);
     await expect(deviceTool.request({

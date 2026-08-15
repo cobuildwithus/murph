@@ -5909,9 +5909,8 @@ test("Junction normalizer maps profile summaries to height and demographics", ()
     updatedAt: "2026-04-20T09:00:00.000Z",
   });
 
-  // An "unknown" sex enum value carries no biological-sex information, while
-  // Junction gender remains a separate queryable categorical fact even when
-  // the provider's enum is explicitly unknown.
+  // Unknown enum values carry no canonical sex or gender information, but
+  // remain bounded in the sanitized source evidence.
   const unknownSexPayload = normalizeJunctionSnapshot({
     importedAt: "2026-04-22T12:00:00.000Z",
     summaries: {
@@ -5924,17 +5923,15 @@ test("Junction normalizer maps profile summaries to height and demographics", ()
       },
     },
   });
-  const unknownGenderEvent = unknownSexPayload.events?.[0];
-  const unknownGenderMeasurement = (
-    unknownGenderEvent?.fields?.measurements as Array<Record<string, unknown>> | undefined
-  )?.[0];
-  assert.equal(unknownSexPayload.events?.length ?? 0, 1);
-  assert.equal(unknownGenderEvent?.title, "Junction gender");
-  assert.deepEqual(unknownGenderMeasurement?.qualifiers, { gender: "unknown" });
+  const unknownProfileArtifact = unknownSexPayload.evidenceParts?.find(
+    (artifact) => artifact.role === "junction-summary-profile",
+  );
+  assert.equal(unknownSexPayload.events?.length ?? 0, 0);
+  assert.equal((unknownProfileArtifact?.content as { gender?: unknown })?.gender, "unknown");
   assertEventRawArtifactRolesExist(unknownSexPayload);
 });
 
-test("Junction profile gender is bounded and never substituted for biological sex", () => {
+test("Junction future profile gender values stay bounded and evidence-only", () => {
   const oversizedGender = `gender-${"x".repeat(120)}`;
   const snapshot = {
     importedAt: "2026-04-22T12:00:00.000Z",
@@ -5948,25 +5945,7 @@ test("Junction profile gender is bounded and never substituted for biological se
     },
   };
   const payload = normalizeJunctionSnapshot(snapshot);
-  const genderEvent = payload.events?.[0];
-  const genderMeasurement = (
-    genderEvent?.fields?.measurements as Array<Record<string, unknown>> | undefined
-  )?.[0];
-  const qualifiers = genderMeasurement?.qualifiers as Record<string, unknown> | undefined;
-
-  assert.equal(payload.events?.length, 1);
-  assert.equal(genderEvent?.kind, "measurement");
-  assert.equal(genderEvent?.externalRef?.facet, "gender");
-  assert.equal(qualifiers?.gender, oversizedGender.slice(0, 80));
-  assert.equal(typeof genderEvent?.note, "undefined");
-  assert.equal(genderEvent?.dataOrigin?.sourceProviderSlug, "oura");
-  assert.match(genderEvent?.dataOrigin?.sourceInstanceId ?? "", /^source-[a-f0-9]{24}$/u);
-  assert.equal(genderEvent?.dataOrigin?.observedAtRaw, "2026-04-20T09:00:00.000Z");
-  assert.equal(genderEvent?.legacyExternalRefs?.length, 1);
-  assert.notEqual(
-    genderEvent?.legacyExternalRefs?.[0]?.resourceId,
-    genderEvent?.externalRef?.resourceId,
-  );
+  assert.equal(payload.events?.length ?? 0, 0);
   assertEventRawArtifactRolesExist(payload);
   const genderArtifact = payload.evidenceParts?.find(
     (artifact) => artifact.role === "junction-summary-profile",
@@ -5974,9 +5953,13 @@ test("Junction profile gender is bounded and never substituted for biological se
   assert.deepEqual(genderArtifact?.content, {
     gender: oversizedGender.slice(0, 80),
     sourceProviderSlug: "oura",
-    sourceInstanceId: genderEvent?.dataOrigin?.sourceInstanceId,
+    sourceInstanceId: genderArtifact?.content
+      ? (genderArtifact.content as { sourceInstanceId?: string }).sourceInstanceId
+      : undefined,
     sourceType: "ring",
-    stableResourceId: genderEvent?.externalRef?.resourceId,
+    stableResourceId: genderArtifact?.content
+      ? (genderArtifact.content as { stableResourceId?: string }).stableResourceId
+      : undefined,
     updatedAt: "2026-04-20T09:00:00.000Z",
   });
 
@@ -5984,10 +5967,7 @@ test("Junction profile gender is bounded and never substituted for biological se
     summaries: { profile: genderArtifact?.content },
     importedAt: "2026-05-22T12:00:00.000Z",
   });
-  assert.deepEqual(replayPayload.events?.[0]?.externalRef, genderEvent?.externalRef);
-  assert.equal(replayPayload.events?.[0]?.occurredAt, genderEvent?.occurredAt);
-  assert.deepEqual(replayPayload.events?.[0]?.dataOrigin, genderEvent?.dataOrigin);
-  assert.equal(replayPayload.events?.[0]?.legacyExternalRefs, undefined);
+  assert.equal(replayPayload.events?.length ?? 0, 0);
   const replayArtifact = replayPayload.evidenceParts?.find(
     (artifact) => artifact.role === "junction-summary-profile",
   );
@@ -5996,9 +5976,7 @@ test("Junction profile gender is bounded and never substituted for biological se
     importedAt: "2026-06-22T12:00:00.000Z",
   });
   assert.deepEqual(replayArtifact?.content, genderArtifact?.content);
-  assert.deepEqual(secondReplayPayload.events?.[0]?.externalRef, genderEvent?.externalRef);
-  assert.equal(secondReplayPayload.events?.[0]?.occurredAt, genderEvent?.occurredAt);
-  assert.deepEqual(secondReplayPayload.events?.[0]?.dataOrigin, genderEvent?.dataOrigin);
+  assert.equal(secondReplayPayload.events?.length ?? 0, 0);
 });
 
 test("Junction profile identity canonicalizes timestamp spellings without changing explicit ids", () => {
@@ -6062,6 +6040,111 @@ test("Junction no-id profile facets claim the pre-normalized timestamp identity"
     event.legacyExternalRefs?.[0]?.resourceId !== event.externalRef?.resourceId
     && event.legacyExternalRefs?.[0]?.facet === event.externalRef?.facet
   ), true);
+});
+
+test("Junction no-id profile migration claims updated-at identities and retains member edits", async () => {
+  const vaultRoot = await makeTempDirectory("murph-junction-profile-no-id-migration");
+  const profile = (input: { height: number; includeCreatedAt: boolean }) => ({
+    importedAt: "2026-05-21T12:00:00.000Z",
+    summaries: {
+      profile: {
+        ...(input.includeCreatedAt ? { created_at: "2026-05-01T09:00:00Z" } : {}),
+        updated_at: "2026-05-20T09:00:00Z",
+        height: input.height,
+        gender: "other",
+        source_device_id: "stable-profile-source",
+        source: { provider: "oura", type: "ring" },
+      },
+    },
+  });
+
+  try {
+    await coreRuntime.initializeVault({
+      vaultRoot,
+      createdAt: "2026-05-01T00:00:00.000Z",
+      timezone: "UTC",
+    });
+    const legacyPayload = normalizeJunctionSnapshot(profile({
+      height: 180,
+      includeCreatedAt: false,
+    }));
+    const first = await importDeviceProviderSnapshot<
+      Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>
+    >(
+      {
+        provider: "junction",
+        vaultRoot,
+        snapshot: profile({ height: 180, includeCreatedAt: false }),
+      },
+      { corePort: coreRuntime },
+    );
+    const legacyHeight = first.events.find((event) =>
+      event.kind === "observation" && event.metric === "height"
+    );
+    assert.ok(legacyHeight);
+    await coreRuntime.upsertEvent({
+      vaultRoot,
+      payload: {
+        ...legacyHeight,
+        note: "member-corrected height",
+        source: "manual",
+        value: 179,
+      },
+    });
+
+    const currentSnapshot = profile({ height: 181, includeCreatedAt: true });
+    const currentPayload = normalizeJunctionSnapshot(currentSnapshot);
+    assert.ok(currentPayload.events?.every((event) =>
+      event.legacyExternalRefs?.some((legacyRef) =>
+        legacyRef.resourceId === legacyPayload.events?.find((legacyEvent) =>
+          legacyEvent.externalRef?.facet === event.externalRef?.facet
+        )?.externalRef?.resourceId
+      )
+    ));
+    const update = await importDeviceProviderSnapshot<
+      Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>
+    >(
+      { provider: "junction", vaultRoot, snapshot: currentSnapshot },
+      { corePort: coreRuntime },
+    );
+    const replay = await importDeviceProviderSnapshot<
+      Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>
+    >(
+      { provider: "junction", vaultRoot, snapshot: currentSnapshot },
+      { corePort: coreRuntime },
+    );
+    const convergedReplay = await importDeviceProviderSnapshot<
+      Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>
+    >(
+      { provider: "junction", vaultRoot, snapshot: currentSnapshot },
+      { corePort: coreRuntime },
+    );
+    const records = (
+      await Promise.all(
+        [...new Set([...first.eventShardPaths, ...update.eventShardPaths])].map((relativePath) =>
+          coreRuntime.readJsonlRecords({ vaultRoot, relativePath })
+        ),
+      )
+    ).flat();
+    const live = latestLiveRecords(records);
+    const liveHeight = live.find((event) => event.id === legacyHeight.id);
+
+    assert.equal(live.length, 3);
+    assert.equal(liveHeight?.source, "manual");
+    assert.equal(storedObservationValue(liveHeight), 179);
+    assert.ok(records.some((event) =>
+      event.id === legacyHeight.id
+      && event.source === "device"
+      && storedObservationValue(event) === 181
+      && storedExternalRefResourceId(event) !== storedExternalRefResourceId(legacyHeight)
+    ));
+    assert.ok(replay.events.every((event) =>
+      storedExternalRefResourceId(event) !== storedExternalRefResourceId(legacyHeight)
+    ));
+    assert.equal(convergedReplay.applied, false);
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
 });
 
 test("Junction future menstrual enum values stay bounded and evidence-only", () => {
@@ -6284,6 +6367,194 @@ test("Junction corrected profile and cycle snapshots retract omitted sensitive f
   }
 });
 
+test("Junction menstrual corrections retire legacy home-progesterone facets", async () => {
+  const vaultRoot = await makeTempDirectory("murph-junction-legacy-progesterone-facets");
+  const cycle = (input: { result?: string; updatedAt: string }) => ({
+    importedAt: input.updatedAt,
+    summaries: {
+      menstrual_cycle: [{
+        id: "stable-cycle-legacy-progesterone",
+        updated_at: input.updatedAt,
+        period_start: "2026-05-01",
+        home_progesterone_test: input.result
+          ? [{ date: "2026-05-14", test_result: input.result }]
+          : [],
+        source: { provider: "apple_health", type: "phone" },
+      }],
+    },
+  });
+
+  try {
+    await coreRuntime.initializeVault({
+      vaultRoot,
+      createdAt: "2026-05-01T00:00:00.000Z",
+      timezone: "UTC",
+    });
+    const legacyPayload = normalizeJunctionSnapshot(cycle({
+      result: "positive",
+      updatedAt: "2026-05-20T09:00:00.000Z",
+    }));
+    const positive = legacyPayload.events?.find((event) =>
+      event.title === "Junction progesterone test"
+    );
+    assert.ok(positive?.externalRef?.facet);
+    const legacyPositive = {
+      ...positive,
+      externalRef: {
+        ...positive.externalRef,
+        facet: positive.externalRef.facet.replace(/^progesterone-test/u, "home-progesterone-test"),
+      },
+    };
+    const legacyUnknown = {
+      ...legacyPositive,
+      occurredAt: "2026-05-15T00:00:00.000Z",
+      dayKey: "2026-05-15",
+      externalRef: {
+        ...legacyPositive.externalRef,
+        facet: "home-progesterone-test-unknown-2026-05-15",
+      },
+      fields: {
+        ...legacyPositive.fields,
+        measurements: [{
+          metric: "home-progesterone-test",
+          value: 0,
+          unit: "result",
+          qualifiers: { result: "unknown" },
+        }],
+      },
+    };
+    const { evidenceRoles: _positiveEvidenceRoles, ...legacyPositiveWithoutEvidence } = legacyPositive;
+    const { evidenceRoles: _unknownEvidenceRoles, ...legacyUnknownWithoutEvidence } = legacyUnknown;
+    const first = await coreRuntime.importDeviceBatch({
+      vaultRoot,
+      provider: "junction",
+      importedAt: "2026-05-20T10:00:00.000Z",
+      events: [legacyPositiveWithoutEvidence, legacyUnknownWithoutEvidence],
+    });
+    const correctedSnapshot = cycle({
+      result: "negative",
+      updatedAt: "2026-05-21T09:00:00.000Z",
+    });
+    const correction = await importDeviceProviderSnapshot<
+      Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>
+    >(
+      { provider: "junction", vaultRoot, snapshot: correctedSnapshot },
+      { corePort: coreRuntime },
+    );
+    const replay = await importDeviceProviderSnapshot<
+      Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>
+    >(
+      { provider: "junction", vaultRoot, snapshot: correctedSnapshot },
+      { corePort: coreRuntime },
+    );
+    const records = (
+      await Promise.all(
+        [...new Set([...first.eventShardPaths, ...correction.eventShardPaths])].map((relativePath) =>
+          coreRuntime.readJsonlRecords({ vaultRoot, relativePath })
+        ),
+      )
+    ).flat();
+    const live = latestLiveRecords(records);
+
+    assert.equal(live.some((event) =>
+      storedExternalRefField(event, "facet")?.startsWith("home-progesterone-test")
+    ), false);
+    assert.deepEqual(
+      live.flatMap(storedMeasurements)
+        .filter((measurement) => measurement.metric === "progesterone-test")
+        .map((measurement) => measurement.qualifiers?.result),
+      ["negative"],
+    );
+    assert.equal(replay.applied, false);
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
+test("Junction legacy progesterone omissions retain member-authored revisions", async () => {
+  const vaultRoot = await makeTempDirectory("murph-junction-edited-legacy-progesterone");
+  const snapshot = (updatedAt: string) => ({
+    importedAt: updatedAt,
+    summaries: {
+      menstrual_cycle: [{
+        id: "stable-cycle-edited-legacy-progesterone",
+        updated_at: updatedAt,
+        period_start: "2026-05-01",
+        home_progesterone_test: [{ date: "2026-05-14", test_result: "positive" }],
+        source: { provider: "apple_health", type: "phone" },
+      }],
+    },
+  });
+
+  try {
+    await coreRuntime.initializeVault({
+      vaultRoot,
+      createdAt: "2026-05-01T00:00:00.000Z",
+      timezone: "UTC",
+    });
+    const normalized = normalizeJunctionSnapshot(snapshot("2026-05-20T09:00:00.000Z"));
+    const current = normalized.events?.find((event) =>
+      event.title === "Junction progesterone test"
+    );
+    assert.ok(current?.externalRef?.facet);
+    const legacy = {
+      ...current,
+      externalRef: {
+        ...current.externalRef,
+        facet: current.externalRef.facet.replace(/^progesterone-test/u, "home-progesterone-test"),
+      },
+    };
+    const { evidenceRoles: _legacyEvidenceRoles, ...legacyWithoutEvidence } = legacy;
+    const first = await coreRuntime.importDeviceBatch({
+      vaultRoot,
+      provider: "junction",
+      importedAt: "2026-05-20T10:00:00.000Z",
+      events: [legacyWithoutEvidence],
+    });
+    const importedLegacy = first.events[0];
+    assert.ok(importedLegacy);
+    await coreRuntime.upsertEvent({
+      vaultRoot,
+      payload: { ...importedLegacy, note: "member context", source: "manual" },
+    });
+
+    const omission = {
+      importedAt: "2026-05-21T09:00:00.000Z",
+      summaries: {
+        menstrual_cycle: [{
+          id: "stable-cycle-edited-legacy-progesterone",
+          updated_at: "2026-05-21T09:00:00.000Z",
+          period_start: "2026-05-01",
+          home_progesterone_test: [],
+          source: { provider: "apple_health", type: "phone" },
+        }],
+      },
+    };
+    const update = await importDeviceProviderSnapshot<
+      Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>
+    >(
+      { provider: "junction", vaultRoot, snapshot: omission },
+      { corePort: coreRuntime },
+    );
+    const records = (
+      await Promise.all(
+        [...new Set([...first.eventShardPaths, ...update.eventShardPaths])].map((relativePath) =>
+          coreRuntime.readJsonlRecords({ vaultRoot, relativePath })
+        ),
+      )
+    ).flat();
+    const liveEdited = latestLiveRecords(records).find((event) => event.id === importedLegacy.id);
+
+    assert.equal(liveEdited?.note, "member context");
+    assert.equal(liveEdited?.source, "manual");
+    assert.ok(records.some((event) =>
+      event.id === importedLegacy.id && isDeletedEventLifecycle(event.lifecycle)
+    ));
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
 test("Junction profile revisions preserve an unchanged member-edited gender while updating height", async () => {
   const vaultRoot = await makeTempDirectory("murph-junction-profile-member-edit");
   const snapshot = (input: { gender: string; height: number; updatedAt: string }) => ({
@@ -6355,30 +6626,40 @@ test("Junction profile revisions preserve an unchanged member-edited gender whil
       && storedExternalRefField(event, "version") === "2026-05-21T09:00:00.000Z"
     ), "the provider ordering baseline advances behind the retained member revision");
 
-    await assert.rejects(
-      importSnapshot({
-        gender: "other",
-        height: 182,
-        updatedAt: "2026-05-22T09:00:00.000Z",
-      }),
-      (error) => (error as { code?: unknown }).code === "EVENT_EXTERNAL_REF_ALIAS_CONFLICT",
-    );
-    const afterConflict = (
+    const nextUpdate = await importSnapshot({
+      gender: "other",
+      height: 182,
+      updatedAt: "2026-05-22T09:00:00.000Z",
+    });
+    const replay = await importSnapshot({
+      gender: "other",
+      height: 182,
+      updatedAt: "2026-05-22T09:00:00.000Z",
+    });
+    const afterUpdate = (
       await Promise.all(
-        [...new Set([...first.eventShardPaths, ...update.eventShardPaths])].map((relativePath) =>
+        [...new Set([
+          ...first.eventShardPaths,
+          ...update.eventShardPaths,
+          ...nextUpdate.eventShardPaths,
+        ])].map((relativePath) =>
           coreRuntime.readJsonlRecords({ vaultRoot, relativePath })
         ),
       )
     ).flat();
     assert.equal(
       storedObservationValue(
-        latestLiveRecords(afterConflict).find((event) =>
+        latestLiveRecords(afterUpdate).find((event) =>
           event.kind === "observation" && event.metric === "height"
         ),
       ),
-      181,
-      "the unrelated height update must remain atomic with the rejected gender conflict",
+      182,
     );
+    assert.equal(
+      latestLiveRecords(afterUpdate).find((event) => event.id === demographics.id)?.reportedGender,
+      "female",
+    );
+    assert.equal(replay.applied, false);
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
   }
@@ -6409,15 +6690,12 @@ test("Junction menstrual fact fingerprints survive insertion and reordering whil
       createdAt: "2026-05-01T00:00:00.000Z",
       timezone: "UTC",
     });
-    const importSnapshot = (
-      input: { qualities: string[]; updatedAt: string },
-      memberEditConflictResolution?: "keep_member" | "use_provider",
-    ) => importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
+    const importSnapshot = (input: { qualities: string[]; updatedAt: string }) =>
+      importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
       {
         provider: "junction",
         vaultRoot,
         snapshot: snapshot(input),
-        memberEditConflictResolution,
       },
       { corePort: coreRuntime },
     );
@@ -6469,13 +6747,25 @@ test("Junction menstrual fact fingerprints survive insertion and reordering whil
       !/(egg|white|watery)/u.test(storedExternalRefField(event, "facet") ?? "")
     ));
 
-    await assert.rejects(
-      importSnapshot({
-        qualities: ["watery"],
-        updatedAt: "2026-05-22T09:00:00.000Z",
-      }),
-      (error) => (error as { code?: unknown }).code === "EVENT_EXTERNAL_REF_ALIAS_CONFLICT",
+    const omitted = await importSnapshot({
+      qualities: ["watery"],
+      updatedAt: "2026-05-22T09:00:00.000Z",
+    });
+    const afterOmission = (
+      await Promise.all(
+        [...new Set([...first.eventShardPaths, ...omitted.eventShardPaths])].map((relativePath) =>
+          coreRuntime.readJsonlRecords({ vaultRoot, relativePath })
+        ),
+      )
+    ).flat();
+    const retainedEditedFact = latestLiveRecords(afterOmission).find((event) =>
+      event.id === editedFact.id
     );
+    assert.equal(retainedEditedFact?.note, "member context");
+    assert.equal(retainedEditedFact?.source, "manual");
+    assert.ok(afterOmission.some((event) =>
+      event.id === editedFact.id && isDeletedEventLifecycle(event.lifecycle)
+    ));
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
   }
