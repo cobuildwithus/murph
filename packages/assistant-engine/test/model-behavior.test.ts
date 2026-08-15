@@ -2363,7 +2363,7 @@ describe('assistant system prompt cache stability', () => {
       'Setup: murph-onboarding, hosted-low-usage, signup-link (explicit requests), experiment-onboarding, behavior-followthrough.',
     )
     expect(openStablePrefix).toContain(
-      'Proactive recommendation is expected, not merely permitted.',
+      'When the private longitudinal default in turn priority applies, read self-management-experiments.',
     )
     expect(openStablePrefix).not.toContain(
       'behavior-followthrough, self-management-experiments.',
@@ -2456,10 +2456,8 @@ describe('assistant experiment onboarding guidance', () => {
     expect(prompt).toContain('Preserve symptoms, medicines, timing, dose, pregnancy/fertility, and recent adverse events.')
     expect(prompt).toContain('If unavailable or empty, continue honestly.')
     expect(prompt).toContain('Skip jokes, thanks, logs, logistics, and non-health turns.')
-    expect(prompt).toContain(
-      'the lookup must not suppress a bounded trial called for by the private longitudinal policy',
-    )
-    expect(prompt).toContain(
+    expect(prompt).not.toContain('private longitudinal policy')
+    expect(prompt).not.toContain(
       'Knowledge retrieval never authorizes or creates an experiment run.',
     )
     expect(prompt).not.toContain(
@@ -2501,8 +2499,11 @@ describe('assistant experiment onboarding guidance', () => {
     expect(prompt).not.toContain('For a 30-day supply, that means about 28 days')
   })
 
-  it('keeps recurring behavior support as a small setup plus skill bridge', () => {
+  it('keeps one complete direct-only longitudinal rule plus a compact skill bridge', () => {
     const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
+    const groupPrompt = buildAssistantSystemPrompt(
+      createCommonCodexPromptInput({ conversationScope: 'group' }),
+    )
 
     expect(prompt).toContain('Follow-through and authorization:')
     expect(prompt).toContain(
@@ -2515,34 +2516,41 @@ describe('assistant experiment onboarding guidance', () => {
       'For a chosen health intervention, use its domain owner.',
     )
     expect(prompt).toContain(
-      'Add self-management-experiments when the private longitudinal policy identifies a safe reversible uncertainty',
+      'Private longitudinal default: when a persistent or recurring problem remains unresolved',
     )
     expect(prompt).toContain(
-      'the member does not need to name a candidate intervention or ask for an experiment',
+      'the member is seeking problem-solving help, and one safe reversible uncertainty could change the next decision',
+    )
+    expect(prompt).toContain(
+      'Do not apply this default to factual questions, logging or record updates, requests to be heard without problem-solving, acute or unstable situations',
+    )
+    expect(prompt).toContain(
+      'cases primarily owned by urgent or clinician-led evaluation, decisions the existing record already resolves, or cases where one clearly indicated direct action makes comparison unnecessary',
+    )
+    expect(prompt).toContain(
+      'give a working assessment plus one context-grounded bounded trial without waiting for experiment vocabulary or an explicit action verb',
+    )
+    expect(prompt).toContain(
+      'Use only the one or two prior facts or attempts that materially change the lever, technique, timing, dose, comparison, or outcome',
+    )
+    expect(prompt).toContain(
+      'Ask at most one question first, only when its answer changes safety or which lever wins; otherwise give the selected trial instead of a generic wellness menu.',
+    )
+    expect(prompt).toContain(
+      'When the private longitudinal default in turn priority applies, read self-management-experiments.',
     )
     expect(prompt).toContain(
       'For any multi-day or repeated comparison, also read experiment-onboarding',
     )
-    expect(prompt).toContain(
-      'Recommendation is not activation: do not create a run, reminder, check-in, or tracking plan without authorization.',
-    )
-    expect(prompt).toContain(
-      'default the useful answer to a working assessment plus one context-grounded bounded trial',
-    )
-    expect(prompt).toContain(
-      'Use the one or two prior facts or attempts that materially change the lever, technique, timing, dose, comparison, or outcome',
-    )
-    expect(prompt).toContain(
-      'when the member is seeking help beyond facts, logging, or being heard',
-    )
-    expect(prompt).toContain(
-      'Do not wait for experiment vocabulary or an explicit action verb',
-    )
-    expect(prompt).toContain(
-      'Ask at most one question first only when its answer changes safety or which lever wins.',
-    )
-    expect(prompt).toContain(
-      'the bounded trial is the answer, not an optional offer after a generic advice list',
+    expect(prompt.match(/Private longitudinal default:/gu) ?? []).toHaveLength(1)
+    expect(
+      prompt.match(/A reminder, calendar event, check-in, recurring workflow, or tracking plan is a separate action\./gu) ?? [],
+    ).toHaveLength(1)
+    expect(groupPrompt).not.toContain('Private longitudinal default')
+    expect(groupPrompt).not.toContain('private longitudinal')
+    expect(groupPrompt).not.toContain('context-grounded bounded trial')
+    expect(groupPrompt).not.toContain(
+      'without waiting for experiment vocabulary or an explicit action verb',
     )
     expect(prompt).toContain(
       'Sleep safety outranks fatigue/clock routing:',

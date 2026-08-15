@@ -227,7 +227,7 @@ export const ASSISTANT_SKILLS = [
     slug: 'self-management-experiments',
     name: 'self-management-experiments',
     triggerHint:
-      'Use to design, run, and interpret low-burden personalized experiments involving habits, routines, pacing, activity timing, environment, sleep, coping, communication, or other reversible self-management changes. In a private direct conversation, proactively use it when a persistent or recurring problem, repeated generic advice, a partial response, or a prior failed attempt leaves one safe reversible uncertainty that could change what the member does. The member need not say experiment, ask what to change, or nominate an intervention.',
+      'Use to design, run, and interpret low-burden personalized experiments involving habits, routines, pacing, activity timing, environment, sleep, coping, communication, or other reversible self-management changes.',
   },
   {
     slug: 'physical-therapy',

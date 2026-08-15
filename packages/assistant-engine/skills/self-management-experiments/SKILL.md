@@ -15,11 +15,9 @@ This skill is for behavioral, environmental, routine, communication, and other r
 
 Any multi-day or repeated comparison intended as an experiment must also use `experiment-onboarding` for safety review and method completeness. A useful proposal may be given before activation. Only after current authorization does `experiment-onboarding` own canonical run creation, session semantics, progress, and outcome closeout. This skill designs the question and low-burden method; it does not replace the canonical experiment workflow with chat history, a habit regimen, or reminder instructions. A one-time immediate micro-test may stay outside an experiment run when it creates no repeated plan or longitudinal claim.
 
-Use it with `chronic-illness-support` or `chronic-pain-support` when the user wants to try something, change a habit, understand a pattern, compare two routines, or make a repeated decision more intelligently. Also use it proactively in a private direct conversation when a persistent or recurring problem, repeated generic advice, a partial response, or a prior failed attempt leaves one safe reversible uncertainty whose answer could change what the member does. Do not wait for the member to say experiment, ask exactly what to change, or nominate a candidate intervention.
+Use it with `chronic-illness-support` or `chronic-pain-support` when the user wants to try something, change a habit, understand a pattern, compare two routines, or make a repeated decision more intelligently, or when the direct turn-priority policy routes a private longitudinal decision here.
 
-## Private longitudinal default
-
-A returning unresolved pattern is enough intent to recommend the next bounded trial when the member is seeking help. Apply this default unless the current turn is only a factual question, a log or record update, a request to be heard without problem-solving, an acute or unstable situation, or a case where urgent or clinician-led evaluation is the primary next step. Do not force a trial when the existing record already answers the decision or one clearly indicated direct action makes comparison unnecessary; recommend that action, or adopt, modify, stop, or escalate instead.
+## Personalized trial selection
 
 Use longitudinal context as a decision input, not decoration:
 
@@ -31,7 +29,7 @@ Use longitudinal context as a decision input, not decoration:
 
 ## Operating stance
 
-- Recommend an experiment when action is safe and the answer could change what the user does. In private longitudinal self-management, this is a default obligation when the route above applies, not merely permission.
+- Recommend an experiment when action is safe and the answer could change what the user does.
 - Lead the first useful response with a calibrated working assessment, the one or two longitudinal facts that changed the choice, and one selected trial. Make the exact action and technique, timing or dose, duration or comparable occasions, comparison, one meaningful primary outcome, burden or adverse signal, stop rule, and review decision visible. Ask at most one question first, and only when it changes safety or which lever wins.
 - Do not answer an eligible request with a list of hydration, sleep, stress, diet, trigger avoidance, or other general wellness ideas. Keep secondary advice only when needed for safety or to execute the selected trial. The structure matters more than the label; a compact “try this for…” is often better than announcing a formal experiment.
 - Give the useful proposal now. Do not withhold it because run creation, reminders, check-ins, or tracking still need authorization.
@@ -433,9 +431,8 @@ An experiment fails if it:
 - continues indefinitely without a review and off-ramp;
 - measures compliance instead of benefit;
 - offers a menu but never recommends the best first test;
-- waits for experiment vocabulary, an explicit action verb, or a user-nominated intervention despite an eligible returning pattern;
 - ignores prior attempts or mentions history without letting it change the lever, technique, timing, dose, comparison, or outcome;
-- ends with generic wellness advice when one safe bounded trial could answer the member's decision;
+- ends with generic wellness advice when a safe bounded trial is the selected answer;
 - withholds the useful proposal until the member authorizes persistence, reminders, check-ins, or tracking.
 
 An experiment is ready when it is specific, low burden, risk-calibrated, decision-linked, measurable enough to learn from, and easy to stop.
