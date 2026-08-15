@@ -199,10 +199,19 @@ the corresponding bounds are about 56 minutes when evenly loaded and 2.4 hours
 at the observed skew instead of 3.7 hours. The set-based claim removes one
 repeated transaction from every eight same-account events, but its production
 latency contribution must be measured after rollout rather than subtracted as
-if all remaining work were constant. A one-account storm remains serial after
-each eight-trace claim batch, because parallel writes to the same
-member/connection lock would amplify contention and cannot safely reorder exact
-resource work.
+if all remaining work were constant. A migrated-local-PostgreSQL maximum-
+callback proof composes the real Web scheduler, shared ingress owner, and hosted
+Prisma trace owner for 100 fresh events with 65% in one account. It reduced the
+trace-claim/trace-completion slice from 200 to 116 transactions and from 200 to
+131 statements, bounded live database operations at four, and completed in 109
+ms versus 341 ms for the scalar control in that run. This is evidence for the
+changed admission slice, not a claim that production crypto, connection reads,
+dirty persistence, or signals are three times faster. Repeating the same
+transaction model across the three-account 26,750-event storm yields 30,096
+transactions and 33,442 statements instead of 53,500 scalar operations. A one-
+account storm remains serial after each eight-trace claim batch, because
+parallel writes to the same member/connection lock would amplify contention and
+cannot safely reorder exact resource work.
 
 Queue-visible state contains random transport identifiers, ciphertext, and key
 wrap metadata only. Provider, account, event, trace, and prepared job meaning

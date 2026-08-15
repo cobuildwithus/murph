@@ -25,6 +25,7 @@ import {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
 });
 
 describe("hosted device webhook Queue consumer", () => {
@@ -194,6 +195,7 @@ describe("hosted device webhook Queue consumer", () => {
   });
 
   it("delivers a maximum 100-message Queue batch as one signed callback and settles once", async () => {
+    const info = vi.spyOn(console, "info").mockImplementation(() => {});
     const envelopes = await Promise.all(
       Array.from({ length: 100 }, (_, index) => createEnvelope(index)),
     );
@@ -260,6 +262,70 @@ describe("hosted device webhook Queue consumer", () => {
     expect(maxActiveCallbacks).toBe(1);
     expect(messages.every((message) => message.ack.mock.calls.length === 1)).toBe(true);
     expect(messages.every((message) => message.retry.mock.calls.length === 0)).toBe(true);
+    const completionLog = info.mock.calls
+      .map(([value]) => typeof value === "string" ? JSON.parse(value) : null)
+      .find((record) =>
+        record?.details?.reason === "device-webhook-admission-callback-completed");
+    expect(completionLog).toMatchObject({
+      details: {
+        acceptedCount: 100,
+        batchSize: 100,
+        duplicateCount: 0,
+        durationMs: expect.any(Number),
+        reason: "device-webhook-admission-callback-completed",
+        retryCount: 0,
+      },
+      level: "info",
+    });
+    const visibleLog = JSON.stringify(completionLog);
+    for (const privateMarker of [
+      envelopes[0]!.transportId,
+      envelopes[0]!.encryptedPayload.ciphertext,
+      "opaque-account-0",
+      "0".padStart(64, "0"),
+    ]) {
+      expect(visibleLog).not.toContain(privateMarker);
+    }
+  });
+
+  it("retains a failed callback without logging payload or exception values", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const envelope = await createEnvelope(0, "private-payload-marker");
+    vi.stubGlobal("fetch", vi.fn(async () => {
+      throw new Error("private-exception-marker");
+    }));
+    const message = createQueueMessage(envelope);
+
+    await handleHostedDeviceWebhookQueueBatch(
+      createQueueBatch([message]),
+      createWorkerEnv(),
+    );
+
+    expect(message.retry).toHaveBeenCalledOnce();
+    expect(message.ack).not.toHaveBeenCalled();
+    const failureLog = warn.mock.calls
+      .map(([value]) => typeof value === "string" ? JSON.parse(value) : null)
+      .find((record) =>
+        record?.details?.reason === "device-webhook-admission-request-failed");
+    expect(failureLog).toMatchObject({
+      details: {
+        batchSize: 1,
+        durationMs: expect.any(Number),
+        reason: "device-webhook-admission-request-failed",
+      },
+      level: "warn",
+    });
+    const visibleLog = JSON.stringify(failureLog);
+    for (const privateMarker of [
+      "private-payload-marker",
+      "private-exception-marker",
+      "opaque-account-0",
+      envelope.transportId,
+      envelope.encryptedPayload.ciphertext,
+      "0".padStart(64, "0"),
+    ]) {
+      expect(visibleLog).not.toContain(privateMarker);
+    }
   });
 
   it("splits a large valid Queue batch below the signed Web body ceiling", async () => {

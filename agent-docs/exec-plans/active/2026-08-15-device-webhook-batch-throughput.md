@@ -46,8 +46,8 @@ Updated: 2026-08-15
   Web currently splits those into groups of 25 and serially calls the shared
   ingress handler once per event. Transport batching therefore does not batch
   the dominant database work.
-- At one serial event every 200 ms, the 10x burst takes roughly 84 minutes to
-  drain; at 500 ms it takes roughly 3.6 hours.
+- At one serial event every 200 ms, the 10x burst takes roughly 89 minutes to
+  drain; at 500 ms it takes roughly 3.7 hours.
 
 ## Constraints
 
@@ -102,6 +102,11 @@ Updated: 2026-08-15
   65% in one account), so the conservative 10x lower-bound model is roughly 58
   minutes at 200 ms/event or 2.4 hours at 500 ms/event before measured trace-
   claim savings; evenly loaded four-lane bounds are about 22 and 56 minutes.
+- Accepted the preliminary ReviewGPT coverage findings. The focused suites now
+  prove value-free Web and Worker log shapes with private-marker exclusions,
+  and the opt-in PostgreSQL suite composes the scheduler, shared ingress, and
+  hosted store at the 100-entry maximum instead of proving those owners only in
+  isolation.
 
 ## Verification
 
@@ -114,9 +119,17 @@ Updated: 2026-08-15
 - Hosted Prisma trace store: 7 focused tests passed, including one transaction
   and two set queries for eight new claims plus duplicate/processed/active/stale
   classification.
-- Real PostgreSQL batch proof: 1 passed against the local migrated database.
-- Cloudflare Worker: 10 focused tests passed, including one ordinary 100-entry
-  callback, exact 2 MiB body partitioning, and independent dispositions.
+- Real PostgreSQL batch proof: 2 passed against a temporary local migrated
+  database. The 100-entry 65%-hot-account case reduced the changed slice from
+  200 to 116 transactions and from 200 to 131 statements, bounded active
+  database operations at four, and measured 109 ms versus 341 ms for the
+  scalar control. Its three-account 10x model is 30,096 transactions and 33,442
+  statements instead of 53,500 scalar operations.
+- Cloudflare Worker: 11 focused tests passed, including one ordinary 100-entry
+  callback, exact 2 MiB body partitioning, independent dispositions, and
+  explicit success/failure telemetry privacy assertions.
 - Hosted transport package: 7 focused tests passed.
 - Web, device-syncd, Cloudflare Worker, and hosted-control typechecks passed.
-- Exact-head preliminary/final ReviewGPT gates and required CI remain pending.
+- Preliminary ReviewGPT returned two coverage findings; both are resolved in
+  the composed PostgreSQL load proof and direct telemetry privacy assertions.
+  The final ReviewGPT gate and corrected exact-head CI remain pending.

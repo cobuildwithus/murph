@@ -139,7 +139,7 @@ describe("hosted device webhook batch admission", () => {
   });
 
   it("isolates duplicate and accepted results while retaining every failed admission", async () => {
-    vi.spyOn(console, "info").mockImplementation(() => {});
+    const info = vi.spyOn(console, "info").mockImplementation(() => {});
     const entries = Array.from(
       { length: 4 },
       (_, index) => createPayload(index, "shared-account"),
@@ -184,6 +184,33 @@ describe("hosted device webhook batch admission", () => {
       "retry",
       "accepted",
     ]);
+    expect(info).toHaveBeenCalledOnce();
+    expect(info.mock.calls[0]?.[1]).toEqual({
+      acceptedCount: 1,
+      accountLaneCount: 1,
+      activeLaneCount: 1,
+      batchSize: 4,
+      chunkSize: 8,
+      durationMs: expect.any(Number),
+      duplicateCount: 1,
+      failureCounts: {
+        PROVIDER_NOT_REGISTERED: 1,
+        WEBHOOK_ACCOUNT_NOT_READY: 1,
+      },
+      maxAccountLanes: 4,
+      retryCount: 2,
+    });
+    const visibleLog = JSON.stringify(info.mock.calls);
+    for (const privateMarker of [
+      "shared-account",
+      "Retry later.",
+      "Provider is unavailable.",
+      ...entries.map((entry) => entry.transportId),
+      "trace-duplicate",
+      "trace-accepted",
+    ]) {
+      expect(visibleLog).not.toContain(privateMarker);
+    }
   });
 
   it("stops starting admissions at its deadline and retains remaining entries", async () => {
