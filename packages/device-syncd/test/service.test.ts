@@ -7763,6 +7763,155 @@ test("device sync service preserves Junction yielded backfill timeseries cursor 
   }
 });
 
+test("Junction reconcile atomically replaces a yielded temporal continuation with durable jobs", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-junction-temporal-yield");
+  const databasePath = path.join(vaultRoot, ".runtime", "device-syncd.sqlite");
+  const now = new Date("2026-08-12T12:00:00.000Z");
+  let yieldRequested = false;
+  await initializeVault({ vaultRoot });
+  const canonicalImporter = createImporters();
+  const provider = createJunctionDeviceSyncProvider({
+    apiKey: "sk_us_fake_test_placeholder",
+    clientUserIdSecret: "test-only-hmac-secret",
+    environment: "sandbox",
+    region: "us",
+    reconcileDays: 2,
+    reconcileIntervalMs: 60_000,
+    summaryResources: ["activity"],
+    timeseriesResources: ["blood_oxygen", "stress_level", "hrv"],
+    fetchImpl: async (input) => {
+      const url = new URL(readUrl(input));
+      if (url.pathname === "/v2/user/providers/junction-temporal-yield") {
+        return createJsonResponse({
+          providers: [{
+            id: "provider-garmin-temporal-yield",
+            slug: "garmin",
+            name: "Garmin",
+            status: "connected",
+            resource_availability: {
+              blood_oxygen: true,
+              hrv: true,
+              stress_level: true,
+            },
+          }],
+        });
+      }
+      if (url.pathname === "/v2/summary/activity/junction-temporal-yield") {
+        return createJsonResponse({ data: [] });
+      }
+      if (
+        /^\/v2\/timeseries\/junction-temporal-yield\/(blood_oxygen|stress_level|hrv)\/grouped$/u
+          .test(url.pathname)
+      ) {
+        return createJsonResponse({ groups: {} });
+      }
+      throw new Error(`Unexpected Junction temporal-yield request: ${url.pathname}`);
+    },
+  });
+  const fixture = createServiceFixture({
+    secret: "secret-for-tests",
+    clock: { now: () => now },
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: databasePath,
+      shouldYieldJobExecution: () => yieldRequested,
+    },
+    importer: {
+      async importDeviceProviderSnapshot(input) {
+        const result = await canonicalImporter.importDeviceProviderSnapshot(input);
+        const timeseries = (input.snapshot as { timeseries?: Record<string, unknown[]> })
+          .timeseries;
+        if (timeseries && Object.hasOwn(timeseries, "blood_oxygen")) {
+          yieldRequested = true;
+        }
+        return result;
+      },
+      resolveDeviceProviderSnapshotDefaultTimeZone(input) {
+        return canonicalImporter.resolveDeviceProviderSnapshotDefaultTimeZone(input);
+      },
+    },
+    providers: [provider],
+  });
+  let fixtureClosed = false;
+
+  try {
+    const account = fixture.store.upsertAccount({
+      provider: "junction",
+      externalAccountId: "junction-temporal-yield",
+      displayName: "Junction",
+      scopes: [],
+      status: "active",
+      credential: {
+        kind: "provider_config",
+        providerConfigKey: "junction",
+        credentialMetadata: {},
+      },
+      connectedAt: now.toISOString(),
+      nextReconcileAt: null,
+    });
+    const parent = fixture.store.enqueueJob({
+      accountId: account.id,
+      provider: "junction",
+      kind: "reconcile",
+      payload: {
+        windowStart: "2026-08-10T00:00:00.000Z",
+        windowEnd: "2026-08-12T00:00:00.000Z",
+      },
+      availableAt: now.toISOString(),
+      priority: 20,
+      dedupeKey: "junction-temporal-yield-fixed-window",
+    });
+
+    assert.equal((await fixture.service.runWorkerOnce())?.id, parent.id);
+    const jobs = readJobsForAccountForTesting(fixture.store, account.id);
+    const queuedRows = jobs.filter((job) => job.status === "queued");
+    const queuedJobs = queuedRows.map((job) => fixture.store.getJobById(job.id));
+    const temporalJobs = queuedJobs.filter((job) =>
+      job?.kind === "resource" && job.payload.temporalAuthorityDayKey
+    );
+    const reconcileFollowUp = queuedJobs.find((job) => job?.kind === "reconcile");
+
+    assert.equal(fixture.store.getJobById(parent.id)?.status, "succeeded");
+    assert.equal(fixture.store.getJobById(parent.id)?.lastErrorCode, null);
+    assert.equal(temporalJobs.length, 3);
+    assert.deepEqual(
+      new Set(temporalJobs.map((job) =>
+        `${String(job?.payload.temporalAuthorityDayKey)}:${String(job?.payload.resource)}`
+      )),
+      new Set([
+        "2026-08-10:stress_level",
+        "2026-08-09:blood_oxygen",
+        "2026-08-09:stress_level",
+      ]),
+    );
+    assert.ok(reconcileFollowUp);
+    assert.equal(reconcileFollowUp.dedupeKey, parent.dedupeKey);
+    assert.deepEqual(reconcileFollowUp.payload, {
+      timeseriesCursor: "2026-08-10T00:00:00.000Z",
+      timeseriesResourceIndex: 2,
+      windowEnd: "2026-08-12T00:00:00.000Z",
+      windowStart: "2026-08-10T00:00:00.000Z",
+    });
+    assert.equal(fixture.store.getAccountById(account.id)?.lastSyncCompletedAt, null);
+
+    fixture.close();
+    fixtureClosed = true;
+    const reopenedStore = new SqliteDeviceSyncStore(databasePath);
+    try {
+      const restartedJobs = readJobsForAccountForTesting(reopenedStore, account.id);
+      assert.equal(restartedJobs.filter((job) => job.status === "queued").length, 4);
+      assert.equal(restartedJobs.find((job) => job.id === parent.id)?.status, "succeeded");
+    } finally {
+      reopenedStore.close();
+    }
+  } finally {
+    if (!fixtureClosed) {
+      fixture.close();
+    }
+  }
+});
+
 test("Junction reconcile checkpoints each completed day-resource before an in-flight cutoff", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-syncd-junction-reconcile-cursor");
   let now = new Date("2026-08-12T12:00:00.000Z");

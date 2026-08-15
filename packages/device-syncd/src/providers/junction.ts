@@ -1288,6 +1288,7 @@ export function createJunctionDeviceSyncProvider(
     const deferredNewestTemporalResources = new Set<string>();
     let yieldedTimeseriesAt: string | null = null;
     let reconcileTimeseriesContinuation: JunctionDailyTimeseriesCursor | null = null;
+    let reconcileIncludesOrdinaryTimeseries = false;
     if (jobTimeseriesResources.length > 0 && job.kind === "backfill") {
       yieldedTimeseriesAt = (await importTimeseriesDailySnapshots(
         context,
@@ -1303,11 +1304,10 @@ export function createJunctionDeviceSyncProvider(
         context.now,
         context.vaultTimeZone,
       );
+      reconcileIncludesOrdinaryTimeseries = importNonTemporalResources;
       const ordinaryDailyWindows = buildClosedDailyWindows(
         timeseriesWindowStart,
         window.windowEnd,
-        context.vaultTimeZone ?? "UTC",
-        context.now,
       );
       const firstOrdinaryWindow = ordinaryDailyWindows[0] ?? null;
       const startingResourceIndex = reconcileTimeseriesCursor?.resourceIndex ?? 0;
@@ -1403,6 +1403,16 @@ export function createJunctionDeviceSyncProvider(
         ]
       : temporalCatchUpJobs;
     if (yieldedTimeseriesAt) {
+      const queuedReconcileCursor = job.kind === "reconcile"
+        && reconcileTimeseriesContinuation
+        && temporalContinuationJobs.length > 0
+        && reconcileIncludesOrdinaryTimeseries
+        ? resolveQueuedOrdinaryReconcileCursor(
+            reconcileTimeseriesContinuation,
+            jobTimeseriesResources,
+            buildClosedDailyWindows(timeseriesWindowStart, window.windowEnd)[0] ?? null,
+          )
+        : null;
       const yieldedResult = buildYieldedJunctionJobResult({
         context,
         job,
@@ -1420,10 +1430,21 @@ export function createJunctionDeviceSyncProvider(
         withJunctionMetadataPatch(
           temporalContinuationJobs.length > 0
             ? {
-                ...yieldedResult,
+                ...(queuedReconcileCursor
+                  ? {
+                      updatesLastSyncCompletedAt: false,
+                    }
+                  : {}),
                 scheduledJobs: [
                   ...temporalContinuationJobs,
-                  ...(yieldedResult.scheduledJobs ?? []),
+                  ...(queuedReconcileCursor
+                    ? [buildQueuedReconcileTimeseriesFollowUp({
+                        context,
+                        cursor: queuedReconcileCursor,
+                        job,
+                        window,
+                      })]
+                    : []),
                 ],
               }
             : yieldedResult,
@@ -3878,8 +3899,6 @@ export function createJunctionDeviceSyncProvider(
     const dailyWindows = buildClosedDailyWindows(
       windowStart,
       windowEnd,
-      context.vaultTimeZone ?? "UTC",
-      context.now,
     );
     const executionDayCount = Math.max(1, Math.min(options.historyChunkDays ?? 1, 30));
     let acceptedProviderRecordCount = 0;
@@ -4097,13 +4116,23 @@ export function createJunctionDeviceSyncProvider(
     options: JunctionDailyTimeseriesImportOptions = {},
   ): Promise<JunctionDailyTimeseriesImportResult> {
     const authorityTimeZone = context.vaultTimeZone;
-    const dailyWindows = options.dailyWindows ?? buildClosedDailyWindows(
+    const admittedResources = resources ?? timeseriesResources;
+    const ordinaryDailyWindows = buildClosedDailyWindows(
+      windowStart,
+      windowEnd,
+    );
+    const temporalDailyWindows = options.dailyWindows ?? buildClosedVaultLocalDailyWindows(
       windowStart,
       windowEnd,
       authorityTimeZone ?? "UTC",
       context.now,
     );
-    const admittedResources = resources ?? timeseriesResources;
+    const dailyWindows = options.dailyWindows
+      ?? (admittedResources.some((resource) =>
+        !JUNCTION_TEMPORAL_AUTHORITY_RESOURCES.has(resource)
+      )
+        ? ordinaryDailyWindows
+        : temporalDailyWindows);
     const resourceIndexOffset = options.resourceIndexOffset ?? 0;
     const cursorWindowIndex = options.cursor
       ? dailyWindows.findIndex((window) => window.windowStart === options.cursor?.windowStart)
@@ -4128,6 +4157,13 @@ export function createJunctionDeviceSyncProvider(
         resourceIndex += 1
       ) {
         const resource = admittedResources[resourceIndex]!;
+        const temporalResource = JUNCTION_TEMPORAL_AUTHORITY_RESOURCES.has(resource);
+        const resourceWindow = temporalResource
+          ? temporalDailyWindows[windowIndex]
+          : window;
+        if (!resourceWindow) {
+          continue;
+        }
         const continuation = resolveNextJunctionDailyTimeseriesCursor(
           dailyWindows,
           admittedResources,
@@ -4146,20 +4182,19 @@ export function createJunctionDeviceSyncProvider(
           };
         }
         const skippedResourceCountBeforeFetch = skippedOptionalResources.length;
-        const temporalResource = JUNCTION_TEMPORAL_AUTHORITY_RESOURCES.has(resource);
         const timeseries = await fetchTimeseriesSnapshots(
           context,
-          window.windowStart,
-          window.windowEnd,
+          resourceWindow.windowStart,
+          resourceWindow.windowEnd,
           skippedOptionalResources,
           [resource],
           sourceProviderSlug,
           temporalResource
             ? {
-                ...(authorityTimeZone && window.authoritative
+                ...(authorityTimeZone && resourceWindow.authoritative
                   ? {
                       authorizedLocalDay: {
-                        dayKey: window.dayKey,
+                        dayKey: resourceWindow.dayKey,
                         timeZone: authorityTimeZone,
                       },
                     }
@@ -4176,12 +4211,12 @@ export function createJunctionDeviceSyncProvider(
 
         const completeSourceDay = (
           authorityTimeZone
-          && window.authoritative
+          && resourceWindow.authoritative
           && temporalResource
         )
           ? {
               connectionId: context.account.id,
-              dayKey: window.dayKey,
+              dayKey: resourceWindow.dayKey,
               resources: [resource],
               revisionAt: context.now,
               timeZone: authorityTimeZone,
@@ -4204,9 +4239,9 @@ export function createJunctionDeviceSyncProvider(
             provider: "junction",
             accountId: buildJunctionImportAccountId(context.account.externalAccountId),
             connectionId: context.account.id,
-            importedAt: window.windowEnd,
-            windowStart: window.windowStart,
-            windowEnd: window.windowEnd,
+            importedAt: resourceWindow.windowEnd,
+            windowStart: resourceWindow.windowStart,
+            windowEnd: resourceWindow.windowEnd,
             connections: preparedImport.connections,
             summaries: {},
             timeseries: preparedImport.snapshots,
@@ -4406,6 +4441,55 @@ export function createJunctionDeviceSyncProvider(
       nextReconcileAt: input.job.kind === "resource"
         ? clampWebhookJobNextReconcileAt(input.context)
         : addMilliseconds(input.context.now, reconcileIntervalMs),
+    };
+  }
+
+  function resolveQueuedOrdinaryReconcileCursor(
+    cursor: JunctionDailyTimeseriesCursor,
+    resources: readonly string[],
+    firstOrdinaryWindow: JunctionDailyTimeseriesWindow | null,
+  ): JunctionDailyTimeseriesCursor | null {
+    const currentResource = resources[cursor.resourceIndex];
+    if (currentResource && !JUNCTION_TEMPORAL_AUTHORITY_RESOURCES.has(currentResource)) {
+      return cursor;
+    }
+    if (!firstOrdinaryWindow) {
+      return null;
+    }
+
+    const resourceIndex = resources.findIndex((resource, index) =>
+      index > cursor.resourceIndex
+      && !JUNCTION_TEMPORAL_AUTHORITY_RESOURCES.has(resource)
+    );
+    return resourceIndex < 0
+      ? null
+      : {
+          resourceIndex,
+          windowStart: firstOrdinaryWindow.windowStart,
+        };
+  }
+
+  function buildQueuedReconcileTimeseriesFollowUp(input: {
+    context: ProviderJobContext;
+    cursor: JunctionDailyTimeseriesCursor;
+    job: DeviceSyncJobRecord;
+    window: { windowEnd: string; windowStart: string };
+  }): DeviceSyncJobInput {
+    const followUp = buildExactWindowJob({
+      availableAt: input.context.now,
+      kind: "reconcile",
+      priority: input.job.priority,
+      windowEnd: input.window.windowEnd,
+      windowStart: input.window.windowStart,
+    });
+    return {
+      ...followUp,
+      ...(input.job.dedupeKey ? { dedupeKey: input.job.dedupeKey } : {}),
+      payload: buildReconcileTimeseriesContinuationPayload(
+        input.job,
+        input.window,
+        input.cursor,
+      ),
     };
   }
 
@@ -6642,6 +6726,17 @@ function readReconcileTimeseriesCursor(
 ): JunctionDailyTimeseriesCursor | null {
   const windowStart = toIsoTimestampIfValid(job.payload.timeseriesCursor);
   const resourceIndex = job.payload.timeseriesResourceIndex;
+  const resource = typeof resourceIndex === "number"
+    ? resources[resourceIndex]
+    : undefined;
+  const eligibleWindows = resource && JUNCTION_TEMPORAL_AUTHORITY_RESOURCES.has(resource)
+    ? buildClosedVaultLocalDailyWindows(
+        ownerWindow.windowStart,
+        ownerWindow.windowEnd,
+        timeZone,
+        now,
+      )
+    : buildClosedDailyWindows(ownerWindow.windowStart, ownerWindow.windowEnd);
   if (
     !windowStart
     || !Number.isSafeInteger(resourceIndex)
@@ -6649,8 +6744,7 @@ function readReconcileTimeseriesCursor(
     || resourceIndex < 0
     || resourceIndex >= resources.length
     || !isTimestampInHalfOpenWindow(windowStart, ownerWindow)
-    || !buildClosedDailyWindows(ownerWindow.windowStart, ownerWindow.windowEnd, timeZone, now)
-      .some((window) => window.windowStart === windowStart)
+    || !eligibleWindows.some((window) => window.windowStart === windowStart)
   ) {
     return null;
   }
@@ -6893,9 +6987,51 @@ function doesJunctionScheduleTimeHistoryWindowReachDailyCoverage(input: {
 function buildClosedDailyWindows(
   windowStart: string,
   windowEnd: string,
+): JunctionDailyTimeseriesWindow[] {
+  const startMs = Date.parse(windowStart);
+  const endMs = Date.parse(windowEnd);
+  if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || startMs >= endMs) {
+    return [];
+  }
+
+  const closedEndMs = Date.parse(floorUtcDayTimestamp(windowEnd));
+  const flooredStartMs = Date.parse(floorUtcDayTimestamp(windowStart));
+  if (flooredStartMs >= closedEndMs) {
+    return [];
+  }
+
+  const windows: JunctionDailyTimeseriesWindow[] = [];
+  let chunkStartMs = flooredStartMs;
+  while (chunkStartMs < closedEndMs) {
+    const nextDayMs = Date.parse(
+      addMilliseconds(
+        floorUtcDayTimestamp(new Date(chunkStartMs).toISOString()),
+        TIMESERIES_CHUNK_MS,
+      ),
+    );
+    const chunkEndMs = Math.min(nextDayMs, closedEndMs);
+    if (chunkEndMs <= chunkStartMs) {
+      break;
+    }
+    const dailyWindowStart = new Date(chunkStartMs).toISOString();
+    windows.push({
+      authoritative: false,
+      dayKey: dailyWindowStart.slice(0, 10),
+      windowStart: dailyWindowStart,
+      windowEnd: new Date(chunkEndMs).toISOString(),
+    });
+    chunkStartMs = chunkEndMs;
+  }
+
+  return windows;
+}
+
+function buildClosedVaultLocalDailyWindows(
+  windowStart: string,
+  windowEnd: string,
   timeZone: string,
   now: string,
-): Array<{ authoritative: boolean; dayKey: string; windowStart: string; windowEnd: string }> {
+): JunctionDailyTimeseriesWindow[] {
   const startMs = Date.parse(windowStart);
   const endMs = Date.parse(windowEnd);
   const nowMs = Date.parse(now);
@@ -6908,12 +7044,7 @@ function buildClosedDailyWindows(
     return [];
   }
 
-  const windows: Array<{
-    authoritative: boolean;
-    dayKey: string;
-    windowStart: string;
-    windowEnd: string;
-  }> = [];
+  const windows: JunctionDailyTimeseriesWindow[] = [];
   let dayKey = toLocalDayKey(
     new Date(startMs - TIMESERIES_CHUNK_MS).toISOString(),
     timeZone,

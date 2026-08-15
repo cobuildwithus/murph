@@ -7608,12 +7608,88 @@ test("Junction reconcile durably schedules yielded temporal work and the older b
       ["2026-04-02", "stress_level"],
     ],
   );
-  assert.deepEqual(result.jobContinuation?.payload, {
-    timeseriesCursor: "2026-04-04T00:00:00.000Z",
-    timeseriesResourceIndex: 1,
-    windowEnd: "2026-04-06T00:00:00.000Z",
-    windowStart: "2026-04-03T00:00:00.000Z",
-  });
+  assert.equal(result.jobContinuation, undefined);
+});
+
+test("Junction reconcile keeps provider-date and vault-local daily windows separate", async () => {
+  const dayMs = 24 * 60 * 60_000;
+  const windowEnd = "2026-04-20T00:00:00.000Z";
+  const temporalWindowByTimeZone = {
+    "America/Los_Angeles": [
+      "2026-04-18T07:00:00.000Z",
+      "2026-04-19T07:00:00.000Z",
+    ],
+    "Asia/Tokyo": [
+      "2026-04-17T15:00:00.000Z",
+      "2026-04-18T15:00:00.000Z",
+    ],
+    UTC: [
+      "2026-04-18T00:00:00.000Z",
+      "2026-04-19T00:00:00.000Z",
+    ],
+  } as const;
+
+  for (const [timeZone, expectedTemporalWindow] of Object.entries(
+    temporalWindowByTimeZone,
+  )) {
+    for (const horizonDays of [1, 7, 14]) {
+      const requestedWindows: Array<{
+        end: string | null;
+        resource: string;
+        start: string | null;
+      }> = [];
+      const provider = createJunctionProvider(async (input) => {
+        const url = new URL(readUrl(input));
+        if (url.pathname === "/v2/user/providers/junction-user-1") {
+          return createJsonResponse({ providers: [] });
+        }
+        if (url.pathname === "/v2/summary/activity/junction-user-1") {
+          return createJsonResponse({ data: [] });
+        }
+        const resource = url.pathname.match(
+          /^\/v2\/timeseries\/junction-user-1\/(hrv|stress_level)\/grouped$/u,
+        )?.[1];
+        if (resource) {
+          requestedWindows.push({
+            end: url.searchParams.get("end_date"),
+            resource,
+            start: url.searchParams.get("start_date"),
+          });
+          return createJsonResponse({ groups: {} });
+        }
+        throw new Error(`Unexpected request: ${url.toString()}`);
+      }, {
+        reconcileDays: horizonDays,
+        timeseriesResources: ["hrv", "stress_level"],
+      });
+      const windowStart = new Date(Date.parse(windowEnd) - horizonDays * dayMs).toISOString();
+
+      await executeJunctionJob(
+        provider,
+        createJunctionJobContext({
+          now: "2026-04-20T12:00:00.000Z",
+          vaultTimeZone: timeZone,
+        }),
+        createJob("reconcile", { windowEnd, windowStart }),
+      );
+
+      const expectedProviderDates = Array.from({ length: horizonDays }, (_, index) =>
+        new Date(Date.parse(windowStart) + index * dayMs).toISOString().slice(0, 10)
+      );
+      assert.deepEqual(
+        requestedWindows
+          .filter(({ resource }) => resource === "hrv")
+          .map(({ end, start }) => [start, end]),
+        expectedProviderDates.map((date) => [date, date]),
+      );
+      assert.deepEqual(
+        requestedWindows
+          .filter(({ resource }) => resource === "stress_level")
+          .map(({ end, start }) => [start, end]),
+        [expectedTemporalWindow],
+      );
+    }
+  }
 });
 
 test("Junction temporal recovery clamps its composed horizon to fourteen days", async () => {
@@ -15198,6 +15274,7 @@ test("Junction sparse-history continuation fetches one bounded 30-day window", a
     createJunctionJobContext({
       account: createAccount({ sources: [source] }),
       now: "2026-08-11T12:00:00.000Z",
+      vaultTimeZone: "America/Los_Angeles",
     }),
     {
       ...createJob("resource", job.payload ?? {}),
@@ -15206,6 +15283,9 @@ test("Junction sparse-history continuation fetches one bounded 30-day window", a
   );
 
   assert.equal(timeseriesRequests.length, 30);
+  assert.equal(timeseriesRequests.every((request) =>
+    request.searchParams.get("start_date") === request.searchParams.get("end_date")
+  ), true);
   const firstRequest = requireValue(timeseriesRequests[0]);
   const lastRequest = requireValue(timeseriesRequests.at(-1));
   const requestStart = requireValue(firstRequest.searchParams.get("start_date"));
