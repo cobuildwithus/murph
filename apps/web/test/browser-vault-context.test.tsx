@@ -116,6 +116,7 @@ import { AuthProvider } from "@/src/components/hosted-onboarding/auth-dialog-pro
 import { requestHostedPrivyCompletionWithRetry } from "@/src/components/hosted-onboarding/hosted-privy-auth-support";
 import { logoutHostedAppSession } from "@/src/components/hosted-onboarding/hosted-app-session-client";
 import EnvironmentPageClient from "../app/(dashboard)/environment/environment-page-client";
+import { LabBiomarkerDetailClient } from "../app/(dashboard)/biomarkers/results/[metricKey]/lab-biomarker-detail-client";
 
 beforeEach(() => {
   // The warm path lives in module memory; reset it so ready snapshots and
@@ -1479,7 +1480,7 @@ test("an authenticated dashboard reloads when current browser-vault authority re
   await rendered.cleanup();
 });
 
-test("browser-vault provider does not poll stale empty sessions without pending refresh", async () => {
+test("a stale empty biomarker detail exposes provider-owned refresh without background polling", async () => {
   vi.useFakeTimers();
   const fetchMock = vi.fn().mockResolvedValue(jsonResponse({
     encryptedReplica: null,
@@ -1497,11 +1498,17 @@ test("browser-vault provider does not poll stale empty sessions without pending 
   vi.stubGlobal("fetch", fetchMock);
 
   const rendered = await renderClientComponent(
-    createAuthenticatedBrowserVaultElement(createElement(BrowserVaultStatusProbe)),
+    createAuthenticatedBrowserVaultElement(
+      createElement(LabBiomarkerDetailClient, {
+        authenticated: true,
+        metricKey: "hba1c",
+      }),
+    ),
     { requireButton: false },
   );
 
-  await waitForText(rendered.container, "empty:none");
+  await waitForText(rendered.container, "No results found");
+  assert.equal(rendered.container.textContent?.includes("This history may be out of date"), true);
   assert.equal(rendered.container.textContent?.includes("Preparing dashboard..."), false);
 
   await act(async () => {
@@ -1509,6 +1516,15 @@ test("browser-vault provider does not poll stale empty sessions without pending 
   });
 
   assert.equal(fetchMock.mock.calls.length, 1);
+
+  const refreshButton = [...rendered.container.querySelectorAll("button")].find(
+    (button) => button.textContent === "Refresh",
+  );
+  assert.ok(refreshButton);
+  await act(async () => {
+    refreshButton.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
+  });
+  await waitForCondition(() => fetchMock.mock.calls.length === 2, "manual stale refresh");
 
   await rendered.cleanup();
 });

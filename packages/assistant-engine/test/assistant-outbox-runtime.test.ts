@@ -177,41 +177,10 @@ const WORKOUT_RESPONSE_CARD: AssistantResponseCard = {
   workout: {
     version: 1,
     state: 'active',
-    exercises: [{
-      name: 'Bench press',
-      sets: [
-        {
-          status: 'completed',
-          target: '185 lb × 8',
-          actual: '185 lb × 8',
-        },
-        {
-          status: 'pending',
-          target: '185 lb × 6–8',
-          actual: null,
-        },
-      ],
-    }],
-  },
-  editor: {
-    actionBinding: 'a'.repeat(64),
-    version: 1,
-    setRemovalBinding: 'b'.repeat(64),
-    exercises: [{
-      unitOverride: 'lb',
-      sets: [
-        {
-          logged: true,
-          result: {
-            kind: 'weight_reps',
-            reps: 8,
-            weight: 185,
-            weightUnit: null,
-          },
-        },
-        { logged: false, result: null },
-      ],
-    }],
+    exercises: Array.from({ length: 11 }, (_, index) => ({
+      name: `Exercise ${index + 1}`,
+      sets: [{ status: 'pending', target: '8 reps', actual: null }],
+    })),
   },
 }
 
@@ -1444,6 +1413,13 @@ describe('assistant outbox runtime', () => {
         status: 'retryable',
       }),
     ])
+    expect(retryable.card).toMatchObject({
+      workout: {
+        exercises: expect.arrayContaining([
+          expect.objectContaining({ name: 'Exercise 11' }),
+        ]),
+      },
+    })
   })
 
   it('persists one text-only fallback identity before acceptance and reuses it after restart', async () => {
