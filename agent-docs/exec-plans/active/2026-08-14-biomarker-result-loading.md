@@ -103,7 +103,7 @@ Updated: 2026-08-14
   - Changelog generation and 53 focused fragment, archive, and page tests
     passed.
   - Hosted Web typecheck passed.
-  - Hosted Web lint passed with no errors; its 43 warnings pre-existed this
+  - Hosted Web lint passed with no errors; its 42 warnings pre-existed this
     change and none came from the touched files.
   - Focused ESLint and `git diff --check` passed.
   - The production skeleton rendered in the sections catalog at desktop and
@@ -121,7 +121,7 @@ Updated: 2026-08-14
     proves the stale empty action starts a provider load after the non-polling
     interval.
   - Hosted Web typecheck, focused ESLint, and full lint passed after the
-    correction; full lint retained the same 43 pre-existing warnings and no
+    correction; full lint retained the same 42 pre-existing warnings and no
     touched-file diagnostics.
   - Updated synthetic desktop/mobile renders confirm the recovery alert is
     responsive, the refresh-pending state remains unchanged, and the real chart
