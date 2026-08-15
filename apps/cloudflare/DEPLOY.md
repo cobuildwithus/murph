@@ -477,11 +477,14 @@ safe because Web does not require the runner to consume the header.
 A completed phone call delivers its result as a proactive
 `assistant.notification.requested` message: Murph composes the result in its own
 voice and must send every terminal success, failure, needs-user, and
-not-completed outcome. A provider-less start or safety-rejected provider cleanup
-that becomes durably failed during reconciliation publishes the same required
-not-completed result rather than ending silently. Cleanup recovery stops the
-provider, appends and signals the deterministic result, and only then records
-terminal cleanup; notification failure leaves the cleanup row retryable. The
+not-completed outcome. A provider-less start without a stop fence publishes a
+required not-completed result; when a stop fence already owns that provider-less
+settlement, its independently deduped stop-settlement result is sufficient. A
+safety-rejected provider call instead publishes a required `needs_user` result:
+the call is no longer active, but its real-world outcome could not be safely
+verified, so the member should confirm before repeating the request. Foreground
+or workflow cleanup appends and signals that deterministic ordinary result
+before terminal cleanup; notification failure leaves the row retryable. The
 authenticated direct Linq or Telegram origin is
 stored on the call row and resolved again at delivery; group calls continue to
 use their existing thread-container route. A missing or revoked persisted route

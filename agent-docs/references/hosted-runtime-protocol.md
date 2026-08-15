@@ -1988,12 +1988,15 @@ call is delivered as an ordinary `assistant.notification.requested` system-mailb
 event: Murph composes the result in its own voice and proactively messages the
 originating direct Linq or Telegram channel, or the existing group thread. Every
 terminal analysis uses `require_send`; failure and not-completed outcomes may
-not be omitted. A durable provider-less start failure or safety-rejected
-provider cleanup publishes the same required result notification with a bounded
-not-completed outcome, so a call that originally returned `starting` cannot
-become silently failed during reconciliation. Cleanup recovery keeps its
-existing pending row until provider stop, result append, and runtime signal all
-succeed; only then may it persist terminal cleanup. The result JSON is framed as
+not be omitted. A durable provider-less start failure without a stop fence
+publishes a bounded not-completed result; when a stop fence already owns the
+provider-less settlement, its independently deduped stop-settlement result is
+the terminal notification. A safety-rejected provider call instead publishes a
+bounded `needs_user` result saying the call is no longer active but its
+real-world outcome could not be safely verified, and tells the member to
+confirm before repeating the request. Foreground and workflow cleanup keep the
+existing pending row until provider stop, ordinary-result append, and runtime
+signal all succeed; only then may either persist terminal cleanup. The result JSON is framed as
 untrusted provider/callee text. At
 call start the authenticated runtime supplies a bounded direct-channel
 discriminator that Web validates through the current route resolver and stores

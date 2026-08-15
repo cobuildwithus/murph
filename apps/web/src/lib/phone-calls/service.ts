@@ -51,6 +51,7 @@ import {
   toHostedPhoneCallStartResponse,
   type HostedPhoneCallReconciliationStore,
 } from "./reconciliation";
+import { finalizeHostedPhoneCallStartFailure } from "./result";
 import {
   startHostedPhoneCallReconciliationWorkflow,
 } from "./reconciliation-workflow-start";
@@ -125,6 +126,7 @@ type HostedGroupPhoneCallRequesterActivationAsserter = (input: {
 export async function createHostedPhoneCall(input: {
   brief: HostedPhoneCallBrief;
   crypto?: HostedPhoneCallCrypto;
+  finalizeStartFailure?: typeof finalizeHostedPhoneCallStartFailure;
   groupRequester?: HostedPhoneCallGroupRequester;
   groupRequesterActivationAsserter?: HostedGroupPhoneCallRequesterActivationAsserter;
   inboundMailboxItemIds?: readonly string[];
@@ -159,6 +161,8 @@ async function createHostedPhoneCallWithinDeadline(input: Parameters<
   const store = resolveHostedPhoneCallStore(input.prisma);
   const crypto = input.crypto ?? hostedPhoneCallCrypto;
   const runtime = input.runtime ?? createRetellPhoneCallRuntime();
+  const finalizeStartFailure = input.finalizeStartFailure
+    ?? finalizeHostedPhoneCallStartFailure;
   const startReconciliationWorkflow = input.reconciliationWorkflowStarter
     ?? startHostedPhoneCallReconciliationWorkflow;
   const resolveTransferNumber =
@@ -414,9 +418,8 @@ async function createHostedPhoneCallWithinDeadline(input: Parameters<
   }
 
   if (started.cleanupRequired === true) {
-    let updated: { count: number };
     try {
-      updated = await waitForAbortableOperation(input.signal, () =>
+      await waitForAbortableOperation(input.signal, () =>
         store.hostedPhoneCall.updateMany({
           data: {
             providerCallId: started.providerCallId,
@@ -436,46 +439,31 @@ async function createHostedPhoneCallWithinDeadline(input: Parameters<
         status: "starting",
       };
     }
-    let cleanupAuthority: { id: string; providerCallId: string } | null = updated.count > 0
-      ? {
-          id: call.id,
-          providerCallId: started.providerCallId,
-        }
-      : null;
-    if (updated.count === 0) {
-      let current: HostedPhoneCall;
-      try {
-        current = await waitForAbortableOperation(input.signal, () =>
-          store.hostedPhoneCall.findUniqueOrThrow({
-            where: { id: call.id },
-          }));
-      } catch {
-        return {
-          phoneCallId: call.id,
-          status: "starting",
-        };
-      }
-      if (
-        isHostedPhoneCallProviderCleanupPending(current)
-        && current.providerCallId
-      ) {
-        cleanupAuthority = {
-          id: current.id,
-          providerCallId: current.providerCallId,
-        };
-      } else if (hasPhoneCallAdvancedBeyondStart(current)) {
-        return toHostedPhoneCallStartResponse(current);
-      } else {
-        return {
-          phoneCallId: call.id,
-          status: "starting",
-        };
-      }
+    let cleanupCall: HostedPhoneCall;
+    try {
+      cleanupCall = await waitForAbortableOperation(input.signal, () =>
+        store.hostedPhoneCall.findUniqueOrThrow({
+          where: { id: call.id },
+        }));
+    } catch {
+      return {
+        phoneCallId: call.id,
+        status: "starting",
+      };
     }
-    if (cleanupAuthority) {
+    if (
+      isHostedPhoneCallProviderCleanupPending(cleanupCall)
+      && cleanupCall.providerCallId
+    ) {
       try {
         await stopHostedPhoneCallCleanupAuthority({
-          call: cleanupAuthority,
+          call: {
+            id: cleanupCall.id,
+            providerCallId: cleanupCall.providerCallId,
+          },
+          finalizeBeforeEnd: () => finalizeStartFailure(cleanupCall, {
+            abortSignal: input.signal,
+          }),
           runtime,
           signal: input.signal,
           store,
@@ -483,6 +471,13 @@ async function createHostedPhoneCallWithinDeadline(input: Parameters<
       } catch {
         // Failed cleanup stays durable for Workflow or replay recovery.
       }
+    } else if (hasPhoneCallAdvancedBeyondStart(cleanupCall)) {
+      return toHostedPhoneCallStartResponse(cleanupCall);
+    } else {
+      return {
+        phoneCallId: call.id,
+        status: "starting",
+      };
     }
     return {
       phoneCallId: call.id,

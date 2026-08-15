@@ -2227,57 +2227,73 @@ describe("createHostedPhoneCall", () => {
     expect(runtime.startCalls).toHaveLength(1);
   });
 
-  it("persists provider authority before unsafe storage cleanup", async () => {
-    const created = buildHostedPhoneCall();
-    const store = createPhoneCallStore({ created });
-    const cleanupError = new Error("unsafe provider storage");
-    const runtime = createPhoneCallRuntime({
-      cleanupRequiredError: cleanupError,
-      onStop: () => {
-        expect(store.currentCall()).toMatchObject({
+  it.each(["stopped", "already_terminal"] as const)(
+    "publishes foreground cleanup uncertainty before terminalizing when provider is %s",
+    async (stopDisposition) => {
+      const created = buildHostedPhoneCall();
+      const store = createPhoneCallStore({ created });
+      const cleanupError = new Error("unsafe provider storage");
+      const finalizeStartFailure = vi.fn(async (call: HostedPhoneCall) => {
+        expect(call).toMatchObject({
+          endedAt: null,
           providerCallId: "retell_cleanup_pending",
           status: "failed",
         });
-      },
-      providerCallId: "retell_cleanup_pending",
-    });
-    const reconciliationWorkflowStarter = vi.fn().mockResolvedValue({ runId: "run_123" });
+        expect(store.currentCall().endedAt).toBeNull();
+      });
+      const runtime = createPhoneCallRuntime({
+        cleanupRequiredError: cleanupError,
+        onStop: () => {
+          expect(store.currentCall()).toMatchObject({
+            providerCallId: "retell_cleanup_pending",
+            status: "failed",
+          });
+        },
+        providerCallId: "retell_cleanup_pending",
+        stopDisposition,
+      });
+      const reconciliationWorkflowStarter = vi.fn().mockResolvedValue({
+        runId: "run_123",
+      });
 
-    await expect(createHostedPhoneCall({
-      brief: VALID_BRIEF,
-      memberId: created.memberId,
-      prisma: store.prisma,
-      reconciliationWorkflowStarter,
-      requestKey: created.requestKey,
-      runtime: runtime.runtime,
-    })).resolves.toEqual({
-      phoneCallId: expect.stringMatching(/^hpc_/u),
-      status: "failed",
-    });
+      await expect(createHostedPhoneCall({
+        brief: VALID_BRIEF,
+        finalizeStartFailure,
+        memberId: created.memberId,
+        prisma: store.prisma,
+        reconciliationWorkflowStarter,
+        requestKey: created.requestKey,
+        runtime: runtime.runtime,
+      })).resolves.toEqual({
+        phoneCallId: expect.stringMatching(/^hpc_/u),
+        status: "failed",
+      });
 
-    expect(store.updateManyCalls).toEqual([{
-      data: {
+      expect(store.updateManyCalls).toEqual([{
+        data: {
+          providerCallId: "retell_cleanup_pending",
+          status: "failed",
+        },
+        where: {
+          analyzedAt: null,
+          id: store.createCalls[0]!.data.id,
+          provider: "retell",
+          providerCallId: null,
+          status: "starting",
+        },
+      }]);
+      expect(reconciliationWorkflowStarter).toHaveBeenCalledWith({
+        phoneCallId: store.createCalls[0]!.data.id,
+      }, { signal: expect.any(AbortSignal) });
+      expect(runtime.stopCalls).toEqual(["retell_cleanup_pending"]);
+      expect(finalizeStartFailure).toHaveBeenCalledOnce();
+      expect(store.currentCall()).toMatchObject({
+        endedAt: expect.any(Date),
         providerCallId: "retell_cleanup_pending",
         status: "failed",
-      },
-      where: {
-        analyzedAt: null,
-        id: store.createCalls[0]!.data.id,
-        provider: "retell",
-        providerCallId: null,
-        status: "starting",
-      },
-    }]);
-    expect(reconciliationWorkflowStarter).toHaveBeenCalledWith({
-      phoneCallId: store.createCalls[0]!.data.id,
-    }, { signal: expect.any(AbortSignal) });
-    expect(runtime.stopCalls).toEqual(["retell_cleanup_pending"]);
-    expect(store.currentCall()).toMatchObject({
-      endedAt: expect.any(Date),
-      providerCallId: "retell_cleanup_pending",
-      status: "failed",
-    });
-  });
+      });
+    },
+  );
 
   it("leaves unsafe cleanup authority pending for the durable retry owner", async () => {
     const created = buildHostedPhoneCall();
@@ -2306,6 +2322,59 @@ describe("createHostedPhoneCall", () => {
     expect(runtime.stopCalls).toEqual(["retell_cleanup_pending"]);
     expect(store.currentCall()).toMatchObject({
       endedAt: null,
+      providerCallId: "retell_cleanup_pending",
+      status: "failed",
+    });
+  });
+
+  it("retries foreground cleanup result delivery before terminalizing", async () => {
+    const created = buildHostedPhoneCall();
+    const store = createPhoneCallStore({ created });
+    const finalizeStartFailure = vi.fn()
+      .mockRejectedValueOnce(new Error("runtime wake unavailable"))
+      .mockResolvedValueOnce(undefined);
+    const runtime = createPhoneCallRuntime({
+      cleanupRequiredError: new Error("unsafe provider storage"),
+      providerCallId: "retell_cleanup_pending",
+    });
+    const reconciliationWorkflowStarter = vi.fn().mockResolvedValue({ runId: "run_123" });
+
+    await expect(createHostedPhoneCall({
+      brief: VALID_BRIEF,
+      finalizeStartFailure,
+      memberId: created.memberId,
+      prisma: store.prisma,
+      reconciliationWorkflowStarter,
+      requestKey: created.requestKey,
+      runtime: runtime.runtime,
+    })).resolves.toEqual({
+      phoneCallId: expect.stringMatching(/^hpc_/u),
+      status: "failed",
+    });
+
+    expect(runtime.stopCalls).toEqual(["retell_cleanup_pending"]);
+    expect(finalizeStartFailure).toHaveBeenCalledOnce();
+    expect(store.currentCall()).toMatchObject({
+      endedAt: null,
+      providerCallId: "retell_cleanup_pending",
+      status: "failed",
+    });
+
+    await expect(processHostedPhoneCallRecoveryById({
+      finalizeStartFailure,
+      phoneCallId: store.currentCall().id,
+      prisma: store.prisma,
+      runtime: runtime.runtime,
+      signal: new AbortController().signal,
+    })).resolves.toBe("complete");
+
+    expect(runtime.stopCalls).toEqual([
+      "retell_cleanup_pending",
+      "retell_cleanup_pending",
+    ]);
+    expect(finalizeStartFailure).toHaveBeenCalledTimes(2);
+    expect(store.currentCall()).toMatchObject({
+      endedAt: expect.any(Date),
       providerCallId: "retell_cleanup_pending",
       status: "failed",
     });
