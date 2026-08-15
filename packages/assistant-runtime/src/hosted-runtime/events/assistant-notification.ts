@@ -478,7 +478,7 @@ function buildOnboardingFollowupAutomationRoute(
   return {
     channel: route.channel,
     deliverySource: delivery.source ?? null,
-    deliveryTarget: delivery.kind === "explicit" ? delivery.target : null,
+    deliveryTarget: delivery.kind === "participant" ? null : delivery.target,
     identityId: route.identityId,
     participantId: delivery.kind === "participant" ? delivery.target : null,
     threadId:

@@ -155,9 +155,17 @@ describe("hosted local Telegram auto-reply e2e", () => {
     if (!firstInboundProviderRequest) {
       throw new Error("Expected the first inbound Telegram provider request.");
     }
-    expect(readAssistantProviderRequestText(firstInboundProviderRequest)).toContain(
-      MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE,
+    const transcript = readAssistantProviderTranscript(firstInboundProviderRequest);
+    const signupWelcomeIndex = transcript.findIndex((message) =>
+      message.role === "assistant"
+      && message.text === MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE
     );
+    const firstInboundIndex = transcript.findIndex((message) =>
+      message.role === "user"
+      && message.text.includes(defaultTelegramInboundText)
+    );
+    expect(signupWelcomeIndex).toBeGreaterThanOrEqual(0);
+    expect(firstInboundIndex).toBeGreaterThan(signupWelcomeIndex);
     await requireTelegramStub().waitForRequestsToSettle({
       scenario: requireScenario(),
       userId,
@@ -458,10 +466,7 @@ function buildSignupWelcomeActivationWake(userId: string) {
           kind: "thread",
           target: threadId,
         },
-        identityId: hashHostedAssistantConversationIdentifier(
-          identifierBlind,
-          "telegram:bot",
-        ),
+        identityId: null,
         threadId: hashHostedAssistantConversationIdentifier(
           identifierBlind,
           threadId,
@@ -511,6 +516,38 @@ function readAssistantProviderRequestText(request: { body: string }): string {
   return collectJsonStrings(body).join("\n\n");
 }
 
+function readAssistantProviderTranscript(request: { body: string }): Array<{
+  role: "assistant" | "user";
+  text: string;
+}> {
+  const body: unknown = JSON.parse(request.body);
+  if (!isRecord(body) || !Array.isArray(body.input)) {
+    return [];
+  }
+
+  return body.input.flatMap((item) => {
+    if (
+      !isRecord(item)
+      || item.type !== "message"
+      || (item.role !== "assistant" && item.role !== "user")
+      || !Array.isArray(item.content)
+    ) {
+      return [];
+    }
+    const text = item.content.flatMap((part) => {
+      if (
+        !isRecord(part)
+        || (part.type !== "input_text" && part.type !== "output_text")
+        || typeof part.text !== "string"
+      ) {
+        return [];
+      }
+      return [part.text];
+    }).join("");
+    return [{ role: item.role, text }];
+  });
+}
+
 function collectJsonStrings(value: unknown): string[] {
   if (typeof value === "string") {
     return [value];
@@ -525,6 +562,10 @@ function collectJsonStrings(value: unknown): string[] {
   }
 
   return [];
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
 function requireScenario(): HostedLocalFullStackScenario {
