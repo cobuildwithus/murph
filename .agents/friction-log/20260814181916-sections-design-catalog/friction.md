@@ -1,6 +1,7 @@
 ---
 title: 'Sections design catalog cold compile blocks frontend proof for several minutes'
 severity: 'minor'
+issue: 'cobuildwithus/murph#1859'
 ---
 
 ## Expected Behavior

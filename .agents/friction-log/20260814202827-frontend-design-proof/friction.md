@@ -1,6 +1,7 @@
 ---
 title: 'Frontend design proof checker requires an undocumented list-item label'
 severity: 'minor'
+issue: 'cobuildwithus/murph#1857'
 ---
 
 ## Expected Behavior

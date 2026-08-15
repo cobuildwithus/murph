@@ -1,6 +1,7 @@
 ---
 title: 'ReviewGPT specialist pass cannot attest fast completed reviews'
 severity: 'minor'
+issue: 'cobuildwithus/murph#1824'
 ---
 
 ## Expected Behavior

@@ -1,6 +1,7 @@
 ---
 title: 'Worktree Spotlight exclusion is installed after checkout population'
 severity: 'minor'
+issue: 'cobuildwithus/murph#1823'
 ---
 
 ## Expected Behavior
