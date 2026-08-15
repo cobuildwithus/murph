@@ -122,7 +122,72 @@ describe("hosted device webhook Queue consumer", () => {
       }, {});
 
       expect(response.status).toBe(400);
-      await expect(response.json()).resolves.toMatchObject({ code });
+      const body = await response.json();
+      expect(body).toEqual({
+        code,
+        error: "Unauthenticated device webhook envelope.",
+      });
+      const visibleResponse = JSON.stringify(body);
+      expect(visibleResponse).not.toContain("plaintext");
+      expect(visibleResponse).not.toContain(envelope.transportId);
+      expect(visibleResponse).not.toContain(envelope.encryptedPayload.ciphertext);
+      expect(send).not.toHaveBeenCalled();
+    }
+  });
+
+  it("classifies invalid transport keyring configuration without exposing it", async () => {
+    const envelope = await createEnvelope(0);
+    const invalidEnvironments: Array<Partial<WorkerEnvironmentSource>> = [
+      {
+        HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK:
+          "{private-jwk-marker",
+      },
+      {
+        HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK:
+          JSON.stringify({ kty: "private-jwk-marker" }),
+      },
+      {
+        HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_KEYRING_JSON:
+          "{private-keyring-marker",
+      },
+    ];
+
+    for (const invalidEnvironment of invalidEnvironments) {
+      const send = vi.fn(async () => createQueueSendResponse());
+      const env = {
+        ...createWorkerEnv(),
+        ...invalidEnvironment,
+      };
+      const response = await deviceWebhookEnqueueRoutes[0]!.handle({
+        env: {
+          ...env,
+          DEVICE_WEBHOOK_QUEUE: createQueueBinding(send),
+        },
+        environment: readHostedExecutionEnvironment(
+          asWorkerStringEnvironment(env),
+        ),
+        request: new Request(
+          "https://runner.example.test/internal/device-webhooks/enqueue",
+          {
+            body: JSON.stringify(envelope),
+            method: "POST",
+          },
+        ),
+        url: new URL(
+          "https://runner.example.test/internal/device-webhooks/enqueue",
+        ),
+      }, {});
+
+      expect(response.status).toBe(400);
+      const body = await response.json();
+      expect(body).toEqual({
+        code: "persistence_key_unavailable",
+        error: "Unauthenticated device webhook envelope.",
+      });
+      const visibleResponse = JSON.stringify(body);
+      expect(visibleResponse).not.toContain("private-jwk-marker");
+      expect(visibleResponse).not.toContain("private-keyring-marker");
+      expect(visibleResponse).not.toContain(envelope.transportId);
       expect(send).not.toHaveBeenCalled();
     }
   });

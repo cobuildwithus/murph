@@ -1,28 +1,14 @@
+import { createCloudflareHostedControlClient } from "@murphai/cloudflare-hosted-control/client";
 import { DEVICE_SYNC_PREPARED_WEBHOOK_SCHEMA } from "@murphai/device-syncd/prepared-webhook";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
-  canQueuePreparedDeviceWebhook: vi.fn(() => true),
-  enqueueDeviceWebhook: vi.fn(),
-  readCloudflareHostedControlHttpError: vi.fn(),
+  getHostedWebCryptoConfig: vi.fn(),
   readHostedExecutionControlClientIfConfigured: vi.fn(),
-  sealDeviceWebhookQueueEnvelope: vi.fn(),
 }));
 
-vi.mock("@murphai/cloudflare-hosted-control/client", () => ({
-  readCloudflareHostedControlHttpError:
-    mocks.readCloudflareHostedControlHttpError,
-}));
-vi.mock("@murphai/cloudflare-hosted-control/device-webhook-queue", () => ({
-  canQueuePreparedDeviceWebhook: mocks.canQueuePreparedDeviceWebhook,
-  sealDeviceWebhookQueueEnvelope: mocks.sealDeviceWebhookQueueEnvelope,
-}));
 vi.mock("../src/lib/hosted-crypto/env", () => ({
-  getHostedWebCryptoConfig: vi.fn(() => ({
-    cloudflareAutomationPublicJwk: {},
-    cloudflareAutomationRecipientKeyId: "automation:test",
-    env: "test",
-  })),
+  getHostedWebCryptoConfig: mocks.getHostedWebCryptoConfig,
 }));
 vi.mock("../src/lib/hosted-execution/control", () => ({
   readHostedExecutionControlClientIfConfigured:
@@ -31,8 +17,22 @@ vi.mock("../src/lib/hosted-execution/control", () => ({
 
 import { enqueueHostedDeviceWebhook } from "../src/lib/device-sync/webhook-queue";
 
-afterEach(() => {
-  vi.clearAllMocks();
+beforeAll(async () => {
+  const keyPair = await crypto.subtle.generateKey(
+    { name: "ECDH", namedCurve: "P-256" },
+    true,
+    ["deriveBits"],
+  );
+  mocks.getHostedWebCryptoConfig.mockReturnValue({
+    cloudflareAutomationPublicJwk:
+      await crypto.subtle.exportKey("jwk", keyPair.publicKey),
+    cloudflareAutomationRecipientKeyId: "automation:test",
+    env: "test",
+  });
+});
+
+afterAll(() => {
+  vi.restoreAllMocks();
 });
 
 describe("hosted device webhook Queue enqueue", () => {
@@ -77,21 +77,20 @@ describe("hosted device webhook Queue enqueue", () => {
     controlCode,
     expectedCode,
   ) => {
-    const cause = new Error("Synthetic control failure.");
-    mocks.sealDeviceWebhookQueueEnvelope.mockResolvedValue({
-      encryptedPayload: {},
-      rootKeyWrap: {},
-      schema: "murph.device-webhook-queue-envelope.v1",
-      transportId: "00000000-0000-4000-8000-000000000001",
-    });
-    mocks.enqueueDeviceWebhook.mockRejectedValue(cause);
-    mocks.readHostedExecutionControlClientIfConfigured.mockReturnValue({
-      enqueueDeviceWebhook: mocks.enqueueDeviceWebhook,
-    });
-    mocks.readCloudflareHostedControlHttpError.mockReturnValue({
-      code: controlCode,
-      status: 400,
-    });
+    const fetchImpl = vi.fn(async () => Response.json(
+      {
+        code: controlCode,
+        error: "Unauthenticated device webhook envelope.",
+      },
+      { status: 400 },
+    ));
+    mocks.readHostedExecutionControlClientIfConfigured.mockReturnValue(
+      createCloudflareHostedControlClient({
+        baseUrl: "https://runner.example.test",
+        fetchImpl,
+        getBearerToken: async () => "synthetic-oidc-token",
+      }),
+    );
 
     await expect(enqueueHostedDeviceWebhook({
       preparedWebhook: {
@@ -105,10 +104,10 @@ describe("hosted device webhook Queue enqueue", () => {
         traceId: "1".repeat(64),
       },
     })).rejects.toMatchObject({
-      cause,
       code: expectedCode,
       httpStatus: 503,
       retryable: true,
     });
+    expect(fetchImpl).toHaveBeenCalledOnce();
   });
 });

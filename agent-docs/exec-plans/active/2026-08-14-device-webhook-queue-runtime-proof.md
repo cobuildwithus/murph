@@ -64,6 +64,13 @@ Updated: 2026-08-14
   runtime flows make either unsafe without proving the exact failed stage.
 - Rejected raw exception logging: the static failure stage is sufficient and
   does not expose provider, key, or envelope values.
+- Accepted the preliminary specialist finding that keyring construction sat
+  outside the typed stage owner; the existing persistence-key stage now owns
+  malformed active and retained key material too.
+- Accepted the preliminary coverage finding: rotation proof now re-encrypts to
+  and reopens with the active key, unusable reseal is classified, Worker tests
+  require an exact value-free body, and Web projection uses the real control
+  HTTP parser instead of a mocked reader.
 
 ## Verification
 
@@ -73,3 +80,6 @@ Updated: 2026-08-14
 - Expected outcomes: local/remote checks green; one provider produces HTTP 2xx
   acceptance, nonzero main-Queue ingestion followed by successful batch
   admission, and no unexplained DLQ growth or rejected-query alert.
+- Current focused proof: hosted-control 75 tests, Worker Queue 8 tests, and Web
+  Queue/route 32 tests pass; hosted-control, Cloudflare, and prepared Web
+  typechecks pass. Exact-head CI and corrected production canary remain pending.

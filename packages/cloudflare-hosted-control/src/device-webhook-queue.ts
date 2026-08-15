@@ -277,21 +277,22 @@ export function createDeviceWebhookTransportPrivateKeyringFromJson(input: {
   activeRecipientKeyId: string;
   keyringJson?: string | null;
 }): HostedRecipientPrivateKeyring {
-  let activePrivateJwk: unknown;
   try {
-    activePrivateJwk = JSON.parse(input.activePrivateJwkJson);
-  } catch {
-    throw new TypeError("Device webhook transport private JWK must be valid JSON.");
+    return createHostedRecipientPrivateKeyring({
+      activePrivateJwk: parseHostedUserRecipientPrivateKeyJwk(
+        JSON.parse(input.activePrivateJwkJson),
+        "Device webhook transport private JWK",
+      ),
+      activeRecipient: "cloudflare-automation-secret",
+      activeRecipientKeyId: input.activeRecipientKeyId,
+      keyringJson: input.keyringJson,
+    });
+  } catch (cause) {
+    throw new DeviceWebhookQueuePersistenceError(
+      "persistence_key_unavailable",
+      cause,
+    );
   }
-  return createHostedRecipientPrivateKeyring({
-    activePrivateJwk: parseHostedUserRecipientPrivateKeyJwk(
-      activePrivateJwk,
-      "Device webhook transport private JWK",
-    ),
-    activeRecipient: "cloudflare-automation-secret",
-    activeRecipientKeyId: input.activeRecipientKeyId,
-    keyringJson: input.keyringJson,
-  });
 }
 
 export function parseDeviceWebhookQueueEnvelope(
