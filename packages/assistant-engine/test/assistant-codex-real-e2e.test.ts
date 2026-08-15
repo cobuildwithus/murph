@@ -52,6 +52,8 @@ import {
 } from '../src/assistant-codex/dynamic-tools.ts'
 import {
   MURPH_ATTACH_EXERCISE_ROUTINE_CARD_TOOL,
+  MURPH_ATTACH_RESPONSE_CARD_TOOL,
+  MURPH_ATTACH_TELEGRAM_RICH_CONTENT_TOOL,
 } from '../src/assistant-codex/dynamic-tool-catalog.ts'
 import {
   MURPH_SEND_PHYSICAL_NOTE_TOOL,
@@ -92,6 +94,7 @@ import {
 } from '../src/assistant/managed-automations.ts'
 import {
   ASSISTANT_CRON_INDEPENDENT_AUTOMATION_AUTHORITY_INSTRUCTIONS,
+  ASSISTANT_CRON_RECURRING_REMINDER_CONVERSATION_INSTRUCTIONS,
 } from '../src/assistant/cron/execution.ts'
 import {
   prepareAssistantAutoReplyInput,
@@ -100,6 +103,9 @@ import {
 import {
   parseAssistantNotificationDecision,
 } from '../src/assistant/notification-turn.ts'
+import {
+  ASSISTANT_BOUNDED_CONVERSATION_HISTORY_INCOMPLETE_TEXT,
+} from '../src/assistant/shared.ts'
 import {
   resolveAssistantPromptTimeContext,
 } from '../src/assistant/prompt-time.ts'
@@ -541,7 +547,7 @@ describe('onboarding policy read detection', () => {
 
 describeRealCodex('real Codex live workout prescription e2e', () => {
   it(
-    'reuses one exact active-workout prescription for later terse set completions',
+    'reuses exact repetitions without carrying forward a planned load',
     async () => {
       const config = await resolveRealCodexE2eConfig()
       const workingDirectory = await mkdtemp(
@@ -577,7 +583,7 @@ describeRealCodex('real Codex live workout prescription e2e', () => {
               'vault-cli workout active --format json',
               'vault-cli workout start [name] [--routine <format>]',
               'vault-cli workout exercise add <name> --order <n>',
-              'vault-cli workout set log <exercise> --workout-id <id> --set-order <n> [--reps <n>]',
+              'vault-cli workout set log <exercise> --workout-id <id> --set-order <n> [--reps <n>] [--weight <n>] [--weight-unit <lb|kg>]',
             ].join('\n'),
             assistantContextSnapshotPrompt: null,
             assistantHostedDeviceConnectAvailable: false,
@@ -614,7 +620,8 @@ describeRealCodex('real Codex live workout prescription e2e', () => {
           ...commonInput,
           prompt: [
             'Start a live workout for seated cable curl with four sets.',
-            'Every set is exactly 9 reps; use that fixed value throughout this active workout.',
+            'Use 30 lb as the planned load for every set.',
+            'Every set is exactly 9 reps; use that fixed repetition count throughout this active workout.',
           ].join(' '),
         })
         const firstCompletion = await executeRealCodexAppServerTurn({
@@ -638,9 +645,17 @@ describeRealCodex('real Codex live workout prescription e2e', () => {
         expect(secondCompletion.finalMessage).toMatch(/actual 9 reps/iu)
         expect(firstCompletion.finalMessage).not.toMatch(/how many|\?/iu)
         expect(secondCompletion.finalMessage).not.toMatch(/how many|\?/iu)
+        expect(firstCompletion.finalMessage).not.toMatch(/30\s*lb/iu)
+        expect(secondCompletion.finalMessage).not.toMatch(/30\s*lb/iu)
         expect(
           workout?.exercises[0]?.sets.map((set) => set.reps ?? null),
         ).toEqual([9, 9, null, null])
+        expect(
+          workout?.exercises[0]?.sets.map((set) => set.weight ?? null),
+        ).toEqual([null, null, null, null])
+        expect(
+          workout?.exercises[0]?.sets.map((set) => set.weightUnit ?? null),
+        ).toEqual([null, null, null, null])
       } finally {
         await removeRealCodexTemporaryPaths([
           workingDirectory,
@@ -1242,7 +1257,10 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
               exerciseGuidance,
             ].join('\n\n'),
             dynamicTools: scenario.expected === 'card'
-              ? [MURPH_ATTACH_EXERCISE_ROUTINE_CARD_TOOL]
+              ? [
+                  MURPH_ATTACH_EXERCISE_ROUTINE_CARD_TOOL,
+                  MURPH_ATTACH_TELEGRAM_RICH_CONTENT_TOOL,
+                ]
               : [MURPH_ATTACH_RESPONSE_MEDIA_TOOL],
             env: {
               ...config.env,
@@ -1337,7 +1355,10 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
 
         const repairedRoutine = await executeRealCodexAppServerTurn({
           ...repairInput,
-          dynamicTools: [MURPH_ATTACH_EXERCISE_ROUTINE_CARD_TOOL],
+          dynamicTools: [
+            MURPH_ATTACH_EXERCISE_ROUTINE_CARD_TOOL,
+            MURPH_ATTACH_TELEGRAM_RICH_CONTENT_TOOL,
+          ],
           prompt: [
             'Recent conversation history for context only; do not answer these prior messages:',
             'User:',
@@ -1383,6 +1404,94 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
         })
         expect(repairedRoutine.responseMedia).toEqual([])
         expect(repairedRoutine.finalMessage.trim()).toBe('')
+      } finally {
+        await removeRealCodexTemporaryPaths([
+          workingDirectory,
+          ...config.temporaryPaths,
+        ])
+      }
+    },
+    360_000,
+  )
+
+  it(
+    'uses model-authored Telegram rich content only when structure improves the answer',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-telegram-rich-content-e2e-'),
+      )
+
+      try {
+        const common = {
+          approvalPolicy: 'never' as const,
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions:
+            buildTelegramRichContentDeveloperInstructions(),
+          dynamicTools: [
+            MURPH_ATTACH_RESPONSE_CARD_TOOL,
+            MURPH_ATTACH_EXERCISE_ROUTINE_CARD_TOOL,
+            MURPH_ATTACH_TELEGRAM_RICH_CONTENT_TOOL,
+          ],
+          env: config.env,
+          model: config.model,
+          modelProvider: config.modelProvider,
+          reasoningEffort: 'low' as const,
+          sandbox: 'workspace-write' as const,
+          workingDirectory,
+        }
+        const voiceRoutine = await executeRealCodexAppServerTurn({
+          ...common,
+          prompt: 'Give me a brief vocal warm-up before a presentation. Organize preparation, sound, and recovery as ordered steps. Keep any limits visible. Make it easy to scan on Telegram.',
+        })
+        const voiceActions = readCapabilityRoutingActions(
+          voiceRoutine.jsonEvents,
+        )
+        expect(
+          voiceActions.filter((action) =>
+            action.kind === 'dynamic'
+            && action.tool === MURPH_ATTACH_TELEGRAM_RICH_CONTENT_TOOL.name
+          ),
+        ).toHaveLength(1)
+        expect(voiceRoutine.responseCard).toMatchObject({
+          kind: 'telegram_rich_content',
+          version: 1,
+          html: expect.stringMatching(/<h2>[\s\S]*<ol>[\s\S]*<blockquote>/iu),
+        })
+        expect(voiceRoutine.finalMessage.trim()).toBe('')
+        expect(voiceRoutine.responseMedia).toEqual([])
+
+        const compactSchedule = await executeRealCodexAppServerTurn({
+          ...common,
+          prompt: 'Make a compact two-column Telegram table for Monday and Wednesday focus sessions. Use 20 minutes on both days. The table alone is the complete answer.',
+        })
+        const compactActions = readCapabilityRoutingActions(
+          compactSchedule.jsonEvents,
+        )
+        expect(compactActions.some((action) =>
+          action.kind === 'dynamic'
+          && action.tool === MURPH_ATTACH_TELEGRAM_RICH_CONTENT_TOOL.name
+        )).toBe(false)
+        expect(compactSchedule.responseCard).toMatchObject({
+          kind: 'compact_table',
+        })
+        expect(compactSchedule.finalMessage.trim()).toBe('')
+
+        const shortReply = await executeRealCodexAppServerTurn({
+          ...common,
+          prompt: 'Reply with one short sentence confirming that 3:00 PM works.',
+        })
+        const shortActions = readCapabilityRoutingActions(shortReply.jsonEvents)
+        expect(shortActions.some((action) =>
+          action.kind === 'dynamic'
+          && action.tool === MURPH_ATTACH_TELEGRAM_RICH_CONTENT_TOOL.name
+        )).toBe(false)
+        expect(shortReply.responseCard).toBeNull()
+        expect(shortReply.finalMessage.trim()).not.toBe('')
       } finally {
         await removeRealCodexTemporaryPaths([
           workingDirectory,
@@ -3491,6 +3600,221 @@ describeRealCodex('real Codex independent scheduled reminder authority e2e', () 
         result.finalMessage,
       )
       expect(decision.kind).toBe(expectedKind)
+    } finally {
+      await removeRealCodexTemporaryPaths([
+        workingDirectory,
+        ...config.temporaryPaths,
+      ])
+    }
+  }, 360_000)
+})
+
+describeRealCodex('real Codex recurring reminder conversation e2e', () => {
+  it.each([
+    {
+      context: 'No reminder from this automation has been dispatched yet.',
+      expectedKind: 'send_message',
+      expectedText: /room reset/iu,
+      savedInstructions: 'Remind the room to do its short reset.',
+      scenario: 'sends the first ordinary cue',
+      scope: 'group' as const,
+    },
+    {
+      context: [
+        'The immediately prior cue, "Quick room reset.", was provider-accepted and sent.',
+        'No human message followed it.',
+      ].join('\n'),
+      expectedKind: 'send_message',
+      expectedText: /keep|change|pause/iu,
+      savedInstructions: 'Remind the room to do its short reset.',
+      scenario: 'asks one cadence question after an unanswered cue',
+      scope: 'group' as const,
+    },
+    {
+      context: [
+        'The immediately prior reminder, "Quick room reset. Should I keep these, change them, or pause?", was provider-accepted and sent.',
+        'No human message followed it.',
+      ].join('\n'),
+      expectedKind: 'skip',
+      expectedText: null,
+      savedInstructions: 'Remind the room to do its short reset.',
+      scenario: 'skips after the unanswered cadence question',
+      scope: 'group' as const,
+    },
+    {
+      context: [
+        'The prior cadence question was provider-accepted and sent.',
+        'A human then replied about this reminder: "Keep it, but make the next cue say quick stretch instead."',
+      ].join('\n'),
+      expectedKind: 'send_message',
+      expectedText: /quick stretch/iu,
+      savedInstructions: 'Remind the room to do its short reset.',
+      scenario: 'uses a relevant reply when resuming the cue',
+      scope: 'group' as const,
+    },
+    {
+      context: [
+        'The prior cadence question was provider-accepted and sent.',
+        'The only later human message was unrelated room chatter about tonight\'s dinner.',
+        'No one replied about the reminder or asked Murph to resume or change it.',
+      ].join('\n'),
+      expectedKind: 'skip',
+      expectedText: null,
+      savedInstructions: 'Remind the room to do its short reset.',
+      scenario: 'does not treat unrelated group chatter as re-engagement',
+      scope: 'group' as const,
+    },
+    {
+      context: [
+        'The immediately prior prescribed-medication cue was provider-accepted and sent.',
+        'No human message followed it.',
+      ].join('\n'),
+      expectedKind: 'send_message',
+      expectedText: /prescribed medication/iu,
+      savedInstructions:
+        'Remind the member to take their prescribed medication.',
+      scenario: 'keeps a prescribed-treatment reminder sending after silence',
+      scope: 'direct' as const,
+    },
+  ])('$scenario', async ({
+    context,
+    expectedKind,
+    expectedText,
+    savedInstructions,
+    scope,
+  }) => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(
+      path.join(tmpdir(), 'murph-recurring-reminder-conversation-e2e-'),
+    )
+
+    try {
+      const result = await executeRealCodexAppServerTurn({
+        approvalPolicy: 'never',
+        baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand:
+          normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+          ?? undefined,
+        codexHome: config.codexHome,
+        developerInstructions:
+          buildIndependentReminderDeveloperInstructions(scope),
+        dynamicTools: [],
+        env: config.env,
+        excludeResumeTurns: true,
+        groupConversation: scope === 'group',
+        model: config.model,
+        modelProvider: config.modelProvider,
+        prompt: [
+          savedInstructions,
+          ASSISTANT_CRON_RECURRING_REMINDER_CONVERSATION_INSTRUCTIONS,
+          'Current trusted delivery and conversation evidence:',
+          context,
+        ].join('\n\n'),
+        reasoningEffort: 'medium',
+        sandbox: 'read-only',
+        workingDirectory,
+      })
+
+      const decision = parseAssistantNotificationDecision(result.finalMessage)
+      expect(decision.kind).toBe(expectedKind)
+      if (expectedText) {
+        expect(decision.kind).toBe('send_message')
+        if (decision.kind === 'send_message') {
+          expect(decision.text).toMatch(expectedText)
+          expect(decision.text).not.toMatch(/did you|complete|failed|ignored/iu)
+        }
+      }
+    } finally {
+      await removeRealCodexTemporaryPaths([
+        workingDirectory,
+        ...config.temporaryPaths,
+      ])
+    }
+  }, 360_000)
+
+  it('expires a cold-history marker before later native-resume decisions', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(
+      path.join(tmpdir(), 'murph-recurring-reminder-resume-e2e-'),
+    )
+    const commonInput = {
+      approvalPolicy: 'never' as const,
+      baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+      codexCommand:
+        normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+        ?? undefined,
+      codexHome: config.codexHome,
+      developerInstructions:
+        buildIndependentReminderDeveloperInstructions('group'),
+      dynamicTools: [],
+      env: config.env,
+      excludeResumeTurns: true,
+      groupConversation: true,
+      model: config.model,
+      modelProvider: config.modelProvider,
+      reasoningEffort: 'medium' as const,
+      sandbox: 'read-only' as const,
+      workingDirectory,
+    }
+    const savedInstructions = 'Remind the room to do its short reset.'
+
+    try {
+      const cold = await executeRealCodexAppServerTurn({
+        ...commonInput,
+        prompt: [
+          'Recent conversation history for context only; do not answer these prior messages:',
+          `Assistant:\n${ASSISTANT_BOUNDED_CONVERSATION_HISTORY_INCOMPLETE_TEXT}`,
+          'User message:',
+          savedInstructions,
+          ASSISTANT_CRON_RECURRING_REMINDER_CONVERSATION_INSTRUCTIONS,
+          'Current trusted delivery and conversation evidence:',
+          'The immediately prior reminder, "Quick room reset. Should I keep these, change them, or pause?", was provider-accepted and sent.',
+          'The bounded current conversation excerpt cannot establish whether a relevant human reply followed it.',
+        ].join('\n\n'),
+      })
+      const coldDecision = parseAssistantNotificationDecision(
+        cold.finalMessage,
+      )
+      expect(coldDecision.kind).toBe('send_message')
+      if (coldDecision.kind === 'send_message') {
+        expect(coldDecision.text).toMatch(/room reset/iu)
+        expect(coldDecision.text).not.toMatch(/keep|change|pause/iu)
+      }
+
+      const warmQuestion = await executeRealCodexAppServerTurn({
+        ...commonInput,
+        prompt: [
+          savedInstructions,
+          ASSISTANT_CRON_RECURRING_REMINDER_CONVERSATION_INSTRUCTIONS,
+          'Current trusted delivery and conversation evidence:',
+          `The immediately prior reminder, ${JSON.stringify(coldDecision.kind === 'send_message' ? coldDecision.text : 'Quick room reset.')}, was provider-accepted and sent.`,
+          'No human message followed it.',
+        ].join('\n\n'),
+        resumeSessionId: cold.sessionId,
+      })
+      const questionDecision = parseAssistantNotificationDecision(
+        warmQuestion.finalMessage,
+      )
+      expect(questionDecision.kind).toBe('send_message')
+      if (questionDecision.kind !== 'send_message') {
+        throw new Error('Expected the resumed occurrence to ask about cadence.')
+      }
+      expect(questionDecision.text).toMatch(/keep|change|pause/iu)
+
+      const warmSkip = await executeRealCodexAppServerTurn({
+        ...commonInput,
+        prompt: [
+          savedInstructions,
+          ASSISTANT_CRON_RECURRING_REMINDER_CONVERSATION_INSTRUCTIONS,
+          'Current trusted delivery and conversation evidence:',
+          `The immediately prior reminder, ${JSON.stringify(questionDecision.text)}, was provider-accepted and sent.`,
+          'No human message followed it.',
+        ].join('\n\n'),
+        resumeSessionId: warmQuestion.sessionId,
+      })
+      expect(
+        parseAssistantNotificationDecision(warmSkip.finalMessage).kind,
+      ).toBe('skip')
     } finally {
       await removeRealCodexTemporaryPaths([
         workingDirectory,
@@ -6548,173 +6872,6 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
   )
 
   it(
-    'saves one finite dense reminder conversation and stays quiet after its sent grace',
-    async () => {
-      const config = await resolveRealCodexE2eConfig()
-      const workingDirectory = await mkdtemp(
-        path.join(tmpdir(), 'murph-dense-reminder-conversation-e2e-'),
-      )
-      const automationRequests: AssistantHostedAutomationToolRequest[] = []
-
-      try {
-        const skillsRoot = path.join(workingDirectory, 'skills')
-        await materializeAssistantSkill({
-          skillsRoot,
-          slug: 'behavior-followthrough',
-        })
-        const commonInput = {
-          approvalPolicy: 'never',
-          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
-          codexCommand:
-            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
-            ?? undefined,
-          codexHome: config.codexHome,
-          developerInstructions:
-            buildMidnightLinqReminderDeveloperInstructions(),
-          dynamicTools: [MURPH_AUTOMATION_TOOL],
-          env: {
-            ...config.env,
-            [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
-          },
-          excludeResumeTurns: true,
-          hostedToolContext: {
-            automationTool: {
-              request: async (
-                request: AssistantHostedAutomationToolRequest,
-              ) => {
-                if (request.action !== 'save') {
-                  throw new Error('Expected an automation save request.')
-                }
-                automationRequests.push(request)
-                return {
-                  action: 'save',
-                  automationId: 'automation-dense-desk-reset',
-                  created: true,
-                  effectiveTimeZone: 'America/New_York',
-                  lookupId: 'dense-desk-reset-check-in',
-                  nextOccurrenceAt: '2026-07-29T13:00:00.000Z',
-                  routeBinding: 'current_conversation',
-                  schedule: request.schedule,
-                  status: 'active',
-                  timingVerified: true,
-                  updatedAt: '2026-07-29T12:00:00.000Z',
-                } as const
-              },
-            },
-            computerToolsAvailable: false,
-            currentHostedDeliveryContext: () => null,
-            currentHostedMailboxItemIds: () => [],
-            sendVaultFile: async () => {
-              throw new Error('Vault file sends are unavailable in this test.')
-            },
-            vaultFileSendAvailable: false,
-          },
-          model: config.model,
-          modelProvider: config.modelProvider,
-          reasoningEffort: 'low',
-          sandbox: 'workspace-write' as const,
-          workingDirectory,
-        }
-        const offer = await executeRealCodexAppServerTurn({
-          ...commonInput,
-          prompt: [
-            'Help me stay consistent with a five-minute desk reset at 9 a.m., 1 p.m., and 5 p.m. each day for the next three days.',
-            'I want conversational accountability, but do not save anything yet.',
-            'Offer the smallest finite plan first and let me answer naturally.',
-          ].join(' '),
-        })
-        const offerActions = readCapabilityRoutingActions(offer.jsonEvents)
-
-        expect(
-          offerActions.filter((action) =>
-            action.kind === 'dynamic'
-            && action.tool === MURPH_AUTOMATION_TOOL.name
-          ),
-        ).toHaveLength(0)
-        expect(
-          offerActions.find((action) =>
-            action.kind === 'command'
-            && action.command.includes('behavior-followthrough/SKILL.md')
-            && action.output.includes('# Behavior & Follow-Through')
-          ),
-          'behavior-followthrough skill read',
-        ).toBeDefined()
-        expect(offer.finalMessage).toMatch(/\?/u)
-        expect(offer.finalMessage).not.toMatch(
-          /reply\s+(?:yes|done|skip|later|stop)/iu,
-        )
-
-        const accepted = await executeRealCodexAppServerTurn({
-          ...commonInput,
-          prompt: [
-            'Yes, save that exact finite conversational plan now.',
-            'Keep the three requested times, ask naturally about only the immediately preceding reset when the next one arrives, and go quiet after one unanswered combined grace message.',
-          ].join(' '),
-          resumeSessionId: offer.sessionId,
-        })
-        const acceptedActions = readCapabilityRoutingActions(
-          accepted.jsonEvents,
-        )
-        const saveCalls = acceptedActions.filter((action) =>
-          action.kind === 'dynamic'
-          && action.tool === MURPH_AUTOMATION_TOOL.name
-        )
-
-        expect(saveCalls).toHaveLength(1)
-        expect(automationRequests).toHaveLength(1)
-        expect(automationRequests[0]).toMatchObject({
-          action: 'save',
-          activeUntil: expect.any(String),
-          continuityPolicy: 'preserve',
-          supportKind: 'check_in',
-        })
-        const savedAutomation = automationRequests[0]
-        if (!savedAutomation || savedAutomation.action !== 'save') {
-          throw new Error('Expected one dense reminder automation save.')
-        }
-        const storedInstructions = savedAutomation.instructions
-        expect(storedInstructions).toMatch(
-          /immediately preceding|previous reset/iu,
-        )
-        expect(storedInstructions).toMatch(/natural|ordinary|normal language/iu)
-        expect(storedInstructions).toMatch(/skip|stay quiet|send nothing/iu)
-
-        const exhaustedGrace = await executeRealCodexAppServerTurn({
-          ...commonInput,
-          allowFinishWithoutReply: true,
-          developerInstructions:
-            buildDenseReminderScheduledDeveloperInstructions(),
-          dynamicTools: [MURPH_FINISH_WITHOUT_REPLY_TOOL],
-          prompt: [
-            'Run the current dense desk-reset check-in occurrence.',
-            'The preceding occurrence already combined one unresolved immediately prior reset with the then-current cue in one ordinary question.',
-            'That grace message was accepted and sent by the provider, no related reply followed, and there is no confirmed delivery failure.',
-            'This is the next later occurrence. Apply the saved quiet-stop rule without sending a repair or pause message.',
-          ].join(' '),
-          resumeSessionId: accepted.sessionId,
-        })
-        const exhaustedGraceActions = readCapabilityRoutingActions(
-          exhaustedGrace.jsonEvents,
-        )
-
-        expect(
-          exhaustedGraceActions.filter((action) =>
-            action.kind === 'dynamic'
-            && action.tool === MURPH_FINISH_WITHOUT_REPLY_TOOL.name
-          ),
-        ).toHaveLength(1)
-        expect(exhaustedGrace.finalMessage).toBe('')
-      } finally {
-        await removeRealCodexTemporaryPaths([
-          workingDirectory,
-          ...config.temporaryPaths,
-        ])
-      }
-    },
-    720_000,
-  )
-
-  it(
     'returns the resumed turn id in the real turn/start result contract',
     async () => {
       const config = await resolveRealCodexE2eConfig()
@@ -8799,7 +8956,9 @@ function buildExperimentOnboardingDeveloperInstructions(): string {
   })
 }
 
-function buildIndependentReminderDeveloperInstructions(): string {
+function buildIndependentReminderDeveloperInstructions(
+  conversationScope: 'direct' | 'group' = 'direct',
+): string {
   return buildAssistantSystemPrompt({
     assistantCliContract: null,
     assistantContextSnapshotPrompt: null,
@@ -8811,7 +8970,7 @@ function buildIndependentReminderDeveloperInstructions(): string {
       rawCommand: 'vault-cli',
       setupCommand: 'murph',
     },
-    conversationScope: 'direct',
+    conversationScope,
     currentLocalDate: '2026-08-05',
     currentTimeZone: 'America/New_York',
     hostedRuntime: true,
@@ -9279,29 +9438,6 @@ function buildMidnightLinqReminderDeveloperInstructions(): string {
   })
 }
 
-function buildDenseReminderScheduledDeveloperInstructions(): string {
-  return buildAssistantSystemPrompt({
-    assistantCliContract: null,
-    assistantContextSnapshotPrompt: null,
-    assistantHostedAutomationAvailable: true,
-    assistantHostedDeviceConnectAvailable: false,
-    assistantHostedDeviceConnectProviders: [],
-    assistantKnowledgeToolsAvailable: false,
-    channel: 'linq',
-    cliAccess: {
-      rawCommand: 'vault-cli',
-      setupCommand: 'murph',
-    },
-    conversationScope: 'direct',
-    currentLocalDate: '2026-07-29',
-    currentTimeZone: 'America/New_York',
-    hostedRuntime: true,
-    modelBehaviorProfile: 'gpt5-agentic',
-    onboardingGuidance: false,
-    turnTrigger: 'automation-cron',
-  })
-}
-
 function buildWeatherAlertDeveloperInstructions(scheduled: boolean): string {
   return buildAssistantSystemPrompt({
     assistantCliContract: null,
@@ -9393,6 +9529,29 @@ function buildRoutinePresentationDeveloperInstructions(input: {
     turnTrigger: input.scheduledOccurrenceAt
       ? 'automation-cron'
       : 'automation-auto-reply',
+  })
+}
+
+function buildTelegramRichContentDeveloperInstructions(): string {
+  return buildAssistantSystemPrompt({
+    assistantCliContract: null,
+    assistantContextSnapshotPrompt: null,
+    assistantHostedDeviceConnectAvailable: false,
+    assistantHostedDeviceConnectProviders: [],
+    assistantKnowledgeToolsAvailable: false,
+    channel: 'telegram',
+    cliAccess: {
+      rawCommand: 'vault-cli',
+      setupCommand: 'murph',
+    },
+    conversationScope: 'direct',
+    currentLocalDate: '2026-08-12',
+    currentTimeZone: 'Europe/Warsaw',
+    hostedRuntime: true,
+    modelBehaviorProfile: 'gpt5-agentic',
+    onboardingGuidance: false,
+    ordinaryInboundTurn: true,
+    turnTrigger: 'automation-auto-reply',
   })
 }
 

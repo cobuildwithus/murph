@@ -7,6 +7,7 @@ import { COMPANION_HRV_RMSSD_RESOURCE } from "@murphai/contracts";
 import { openSqliteRuntimeDatabase } from "@murphai/runtime-state/node";
 
 import { buildJunctionProviderSourceInstanceKey } from "../src/connect-config.ts";
+import { DeviceSyncError } from "../src/errors.ts";
 import { SqliteDeviceSyncStore } from "../src/store.ts";
 import {
   addJunctionExtendedTimeseriesHistoryBackfillCoverage,
@@ -363,6 +364,134 @@ test("device sync store rolls back webhook jobs when the trace claim was lost", 
   }
 });
 
+test("device sync store preserves failed calendar work across a later correction", async () => {
+  const tempDir = await makeTempDirectory("murph-device-syncd-calendar-obligations");
+  const store = new SqliteDeviceSyncStore(path.join(tempDir, "state.sqlite"));
+
+  try {
+    const account = store.upsertAccount({
+      provider: "junction",
+      externalAccountId: "junction-calendar-obligations",
+      displayName: "Junction",
+      scopes: [],
+      credential: {
+        credentialMetadata: {},
+        kind: "provider_config",
+        providerConfigKey: "junction",
+      },
+      connectedAt: "2026-04-01T00:00:00.000Z",
+    });
+    const workerId = "calendar-obligation-worker";
+    const v2 = store.enqueueJob({
+      accountId: account.id,
+      availableAt: "2026-04-04T00:00:00.000Z",
+      kind: "resource",
+      payload: { resource: "water", revision: "v2" },
+      priority: 100,
+      provider: "junction",
+    });
+    assert.equal(
+      store.claimDueJob(workerId, "2026-04-04T00:01:00.000Z", 60_000)?.id,
+      v2.id,
+    );
+    assert.equal(store.completeJobsMarkSyncSucceededAndEnqueueJobs({
+      accountId: account.id,
+      completedAt: "2026-04-04T00:01:10.000Z",
+      disconnectGeneration: account.disconnectGeneration,
+      jobIds: [v2.id],
+      jobs: [{
+        availableAt: "2026-04-04T00:01:10.000Z",
+        dedupeKey: "calendar-water-2026-04-01",
+        kind: "resource",
+        payload: { calendarRefreshDay: "2026-04-01", resource: "water" },
+        priority: 61,
+      }, {
+        availableAt: "2026-04-04T00:01:10.000Z",
+        dedupeKey: "calendar-water-2026-04-02",
+        kind: "resource",
+        payload: { calendarRefreshDay: "2026-04-02", resource: "water" },
+        priority: 60,
+      }],
+      provider: "junction",
+      syncSucceededAt: "2026-04-04T00:01:00.000Z",
+      syncSuccessOptions: { localConnectionRevision: account.localConnectionRevision },
+      workerId,
+    }), true);
+
+    const failedDayOne = store.claimDueJob(
+      workerId,
+      "2026-04-04T00:02:00.000Z",
+      60_000,
+    );
+    assert.equal(failedDayOne?.payload.calendarRefreshDay, "2026-04-01");
+    assert.equal(store.failJobIfOwned(
+      failedDayOne!.id,
+      workerId,
+      "2026-04-04T00:02:10.000Z",
+      "JUNCTION_RETRYABLE",
+      "Calendar fetch failed.",
+      "2026-04-05T00:00:00.000Z",
+      true,
+    ), true);
+    const afterV2 = store.getAccountById(account.id);
+    assert.ok(afterV2);
+
+    const v3 = store.enqueueJob({
+      accountId: account.id,
+      availableAt: "2026-04-04T00:03:00.000Z",
+      kind: "resource",
+      payload: { resource: "water", revision: "v3" },
+      priority: 100,
+      provider: "junction",
+    });
+    assert.equal(
+      store.claimDueJob(workerId, "2026-04-04T00:04:00.000Z", 60_000)?.id,
+      v3.id,
+    );
+    assert.equal(store.completeJobsMarkSyncSucceededAndEnqueueJobs({
+      accountId: account.id,
+      completedAt: "2026-04-04T00:04:10.000Z",
+      disconnectGeneration: afterV2.disconnectGeneration,
+      jobIds: [v3.id],
+      jobs: [{
+        availableAt: "2026-04-04T00:04:10.000Z",
+        dedupeKey: "calendar-water-2026-04-02",
+        kind: "resource",
+        payload: { calendarRefreshDay: "2026-04-02", resource: "water" },
+        priority: 60,
+      }, {
+        availableAt: "2026-04-04T00:04:10.000Z",
+        dedupeKey: "calendar-water-2026-04-03",
+        kind: "resource",
+        payload: { calendarRefreshDay: "2026-04-03", resource: "water" },
+        priority: 60,
+      }],
+      provider: "junction",
+      syncSucceededAt: "2026-04-04T00:04:00.000Z",
+      syncSuccessOptions: { localConnectionRevision: afterV2.localConnectionRevision },
+      workerId,
+    }), true);
+
+    const dayTwo = store.claimDueJob(workerId, "2026-04-04T00:05:00.000Z", 60_000);
+    assert.equal(dayTwo?.payload.calendarRefreshDay, "2026-04-02");
+    assert.equal(store.completeJobIfOwned(dayTwo!.id, workerId, "2026-04-04T00:05:10.000Z"), true);
+    const dayThree = store.claimDueJob(workerId, "2026-04-04T00:06:00.000Z", 60_000);
+    assert.equal(dayThree?.payload.calendarRefreshDay, "2026-04-03");
+    assert.equal(store.completeJobIfOwned(dayThree!.id, workerId, "2026-04-04T00:06:10.000Z"), true);
+    assert.equal(store.claimDueJob(workerId, "2026-04-04T23:59:59.000Z", 60_000), null);
+    const retriedDayOne = store.claimDueJob(
+      workerId,
+      "2026-04-05T00:00:00.000Z",
+      60_000,
+    );
+    assert.equal(retriedDayOne?.id, failedDayOne?.id);
+    assert.equal(retriedDayOne?.payload.calendarRefreshDay, "2026-04-01");
+  } finally {
+    store.close();
+    await rm(tempDir, { force: true, recursive: true });
+  }
+});
+
 test("device sync store commits source admission with initial jobs atomically", async () => {
   const tempDir = await makeTempDirectory("murph-device-syncd-connection-admission");
   const store = new SqliteDeviceSyncStore(path.join(tempDir, "state.sqlite"));
@@ -516,7 +645,7 @@ test("device sync store commits source admission with initial jobs atomically", 
   }
 });
 
-test("device sync store canonicalizes legacy Junction aliases and reconnects one merged lifecycle", async () => {
+test("device sync store preserves legacy Junction identity and reconnects one merged lifecycle", async () => {
   const tempDir = await makeTempDirectory("murph-device-syncd-junction-canonical-source");
   const store = new SqliteDeviceSyncStore(path.join(tempDir, "state.sqlite"));
 
@@ -563,9 +692,10 @@ test("device sync store canonicalizes legacy Junction aliases and reconnects one
       connectionId: account.id,
       sourceProviderSlug: "apple_health_kit",
     })[0];
+    assert.ok(legacyAuthority);
     assert.equal(legacyAuthority?.id, "dcs_legacy_apple_health");
-    assert.equal(legacyAuthority?.sourceInstanceKey, canonicalSourceInstanceKey);
-    assert.equal(legacyAuthority?.sourceProviderSlug, "apple_health_kit");
+    assert.equal(legacyAuthority?.sourceInstanceKey, "legacy-apple-health-key");
+    assert.equal(legacyAuthority?.sourceProviderSlug, "apple_health");
     assert.equal(legacyAuthority?.lifecycleEpoch, 2);
     assert.equal(
       store.markConnectionSourceDataReceived({
@@ -581,14 +711,14 @@ test("device sync store canonicalizes legacy Junction aliases and reconnects one
     })[0]?.lastDataAt, "2026-07-28T10:00:30.000Z");
     const aliasOnly = store.upsertConnectionSource({
       connectionId: account.id,
-      sourceInstanceKey: "ignored-alias-key",
-      sourceProviderSlug: "apple_healthkit",
+      sourceInstanceKey: legacyAuthority.sourceInstanceKey,
+      sourceProviderSlug: legacyAuthority.sourceProviderSlug,
       status: "connected",
       lastSeenAt: "2026-07-28T10:01:00.000Z",
     });
     assert.equal(aliasOnly.id, "dcs_legacy_apple_health");
-    assert.equal(aliasOnly.sourceInstanceKey, canonicalSourceInstanceKey);
-    assert.equal(aliasOnly.sourceProviderSlug, "apple_health_kit");
+    assert.equal(aliasOnly.sourceInstanceKey, "legacy-apple-health-key");
+    assert.equal(aliasOnly.sourceProviderSlug, "apple_health");
     assert.equal(aliasOnly.lifecycleEpoch, 2);
 
     store.upsertConnectionSource({
@@ -646,7 +776,7 @@ test("device sync store canonicalizes legacy Junction aliases and reconnects one
         now: "2026-07-28T10:05:30.000Z",
         sourceProviderSlug: "apple_health",
       }),
-      3,
+      4,
     );
     const authorityAfterArrival = store.listConnectionSources({
       connectionId: account.id,
@@ -663,9 +793,9 @@ test("device sync store canonicalizes legacy Junction aliases and reconnects one
       lastSeenAt: "2026-07-28T10:06:00.000Z",
     }, { preserveDisconnected: true });
 
-    assert.equal(collapsed.id, "dcs_legacy_apple_health");
-    assert.equal(collapsed.sourceInstanceKey, canonicalSourceInstanceKey);
-    assert.equal(collapsed.sourceProviderSlug, "apple_health_kit");
+    assert.equal(collapsed.id, "dcs_lower_epoch_apple_health");
+    assert.equal(collapsed.sourceInstanceKey, "lower-epoch-apple-health-key");
+    assert.equal(collapsed.sourceProviderSlug, "apple_health");
     assert.equal(collapsed.lifecycleEpoch, 3);
     assert.equal(collapsed.status, "disconnected");
     assert.equal(collapsed.firstSeenAt, "2026-07-26T08:00:00.000Z");
@@ -677,7 +807,7 @@ test("device sync store canonicalizes legacy Junction aliases and reconnects one
       workouts: true,
       sleep: true,
     });
-    assert.equal(store.listConnectionSources({ connectionId: account.id }).length, 2);
+    assert.equal(store.listConnectionSources({ connectionId: account.id }).length, 5);
 
     store.upsertConnectionSource({
       connectionId: account.id,
@@ -827,7 +957,7 @@ test("device sync store preserves current Junction disconnect fences independent
       }, { preserveDisconnected: true });
       assert.equal(collapsed.lastErrorCode, DEVICE_SYNC_SOURCE_USER_DISCONNECTED_ERROR_CODE);
       assert.equal(collapsed.lastErrorMessage, "Reconnect required.");
-      assert.equal(store.listConnectionSources({ connectionId: account.id }).length, 1);
+      assert.equal(store.listConnectionSources({ connectionId: account.id }).length, 2);
     }
   } finally {
     store.close();
@@ -3595,6 +3725,183 @@ test("device sync store reclaims an expired retained companion lease on the same
   }
 });
 
+test("device sync store reclaims an expired retained calendar lease on the same row past its attempt fence", async () => {
+  const tempDir = await makeTempDirectory("murph-device-syncd-store-expired-calendar-lease");
+  const store = new SqliteDeviceSyncStore(path.join(tempDir, "state.sqlite"));
+
+  try {
+    const account = store.upsertAccount({
+      provider: "junction",
+      externalAccountId: "junction-expired-calendar-lease",
+      displayName: "Junction",
+      scopes: [],
+      credential: {
+        credentialMetadata: {},
+        kind: "provider_config",
+        providerConfigKey: "junction",
+      },
+      connectedAt: "2026-04-07T00:00:00.000Z",
+    });
+    const input = {
+      accountId: account.id,
+      availableAt: "2026-04-07T00:00:00.000Z",
+      dedupeKey: "calendar-expired-final-attempt",
+      kind: "resource",
+      maxAttempts: 1,
+      payload: {
+        calendarRefreshDay: "2026-04-02",
+        resource: "water",
+        sourceProviderSlug: "garmin",
+      },
+      provider: "junction",
+    } as const;
+    const job = store.enqueueJob(input);
+
+    const firstClaim = store.claimDueJob("worker-a", "2026-04-07T00:00:00.000Z", 60_000);
+    assert.equal(firstClaim?.id, job.id);
+    assert.equal(firstClaim?.attempts, 1);
+    assert.equal(firstClaim?.maxAttempts, 1);
+
+    const refetched = store.enqueueJob({
+      ...input,
+      availableAt: "2026-04-07T00:01:01.000Z",
+    });
+    assert.equal(refetched.id, job.id);
+
+    const reclaimed = store.claimDueJob("worker-b", "2026-04-07T00:01:01.000Z", 60_000);
+    assert.equal(reclaimed?.id, job.id);
+    assert.equal(reclaimed?.status, "running");
+    assert.equal(reclaimed?.leaseOwner, "worker-b");
+    assert.equal(reclaimed?.attempts, 2);
+    assert.equal(reclaimed?.maxAttempts, 2);
+    assert.equal(store.completeJobIfOwned(job.id, "worker-b", "2026-04-07T00:01:02.000Z"), true);
+    assert.equal(store.getJobById(job.id)?.status, "succeeded");
+  } finally {
+    store.close();
+    await rm(tempDir, {
+      force: true,
+      recursive: true,
+    });
+  }
+});
+
+test("device sync store preserves retained calendar work across account cleanup and wakes it on reconnect", async () => {
+  const tempDir = await makeTempDirectory("murph-device-syncd-store-retained-calendar-lifecycle");
+  const store = new SqliteDeviceSyncStore(path.join(tempDir, "state.sqlite"));
+  try {
+    const account = store.upsertAccount({
+      provider: "junction",
+      externalAccountId: "junction-retained-calendar-lifecycle",
+      displayName: "Junction",
+      status: "active",
+      scopes: [],
+      credential: { kind: "provider_config", providerConfigKey: "junction" },
+      connectedAt: "2026-04-07T00:00:00.000Z",
+    });
+    const retained = store.enqueueJob({
+      accountId: account.id,
+      availableAt: "2026-04-09T00:00:00.000Z",
+      kind: "resource",
+      payload: {
+        calendarRefreshDay: "2026-04-02",
+        resource: "water",
+        sourceProviderSlug: "garmin",
+      },
+      priority: 1,
+      provider: "junction",
+    });
+    const ordinary = store.enqueueJob({
+      accountId: account.id,
+      availableAt: "2026-04-07T00:00:00.000Z",
+      kind: "reconcile",
+      payload: {},
+      provider: "junction",
+    });
+    const unrelatedFailure = store.enqueueJob({
+      accountId: account.id,
+      availableAt: "2026-04-09T00:00:00.000Z",
+      kind: "resource",
+      payload: {
+        calendarRefreshDay: "2026-04-03",
+        resource: "water",
+        sourceProviderSlug: "garmin",
+      },
+      provider: "junction",
+    });
+
+    store.markPendingJobsDeadForAccount(
+      account.id,
+      "2026-04-07T01:00:00.000Z",
+      "ACCOUNT_DISCONNECTED",
+      "Disconnected.",
+    );
+    assert.equal(store.getJobById(retained.id)?.status, "queued");
+    assert.equal(store.getJobById(ordinary.id)?.status, "dead");
+
+    const claimedRetained = store.claimDueJob(
+      "worker-disconnected",
+      "2026-04-09T00:00:00.000Z",
+      60_000,
+    );
+    assert.equal(claimedRetained?.id, retained.id);
+    assert.equal(store.failJobIfOwned(
+      retained.id,
+      "worker-disconnected",
+      "2026-04-09T00:00:01.000Z",
+      "ACCOUNT_DISCONNECTED",
+      "Reconnect required.",
+      "2026-04-10T00:00:00.000Z",
+      true,
+      true,
+    ), true);
+    assert.equal(
+      store.claimDueJob("worker-unrelated-failure", "2026-04-09T00:00:01.000Z", 60_000)?.id,
+      unrelatedFailure.id,
+    );
+    assert.equal(store.failJobIfOwned(
+      unrelatedFailure.id,
+      "worker-unrelated-failure",
+      "2026-04-09T00:00:02.000Z",
+      "JUNCTION_CALENDAR_REFRESH_INCOMPLETE_NORMALIZATION",
+      "Provider data incomplete.",
+      "2026-04-10T00:00:00.000Z",
+      true,
+      true,
+    ), true);
+
+    const database = openSqliteRuntimeDatabase(store.databasePath);
+    try {
+      assert.equal(markCredentialScopedPendingDeviceSyncJobsDeadForAccount(database, {
+        accountId: account.id,
+        code: "HOSTED_CONNECTION_EPOCH_REPLACED",
+        message: "Connection epoch changed.",
+        now: "2026-04-07T02:00:00.000Z",
+      }), 0);
+    } finally {
+      database.close();
+    }
+    assert.equal(store.getJobById(retained.id)?.status, "queued");
+
+    store.upsertAccount({
+      provider: "junction",
+      externalAccountId: "junction-retained-calendar-lifecycle",
+      displayName: "Junction",
+      status: "active",
+      scopes: [],
+      credential: { kind: "provider_config", providerConfigKey: "junction" },
+      connectedAt: "2026-04-09T01:00:00.000Z",
+    });
+    assert.equal(
+      store.claimDueJob("worker-reconnected", "2026-04-09T01:00:00.000Z", 60_000)?.id,
+      retained.id,
+    );
+    assert.equal(store.getJobById(unrelatedFailure.id)?.availableAt, "2026-04-10T00:00:00.000Z");
+  } finally {
+    store.close();
+    await rm(tempDir, { force: true, recursive: true });
+  }
+});
+
 test("device sync store ignores expired exhausted running rows for dedupe and reaps them before lower-priority follow-up claims", async () => {
   const tempDir = await makeTempDirectory("murph-device-syncd-store-expired-final-attempt-dedupe");
   const store = new SqliteDeviceSyncStore(path.join(tempDir, "state.sqlite"));
@@ -3761,6 +4068,7 @@ test("device sync store bootstraps current tables even when stale legacy tables 
     });
     assert.deepEqual(store.consumeOAuthState("defaulted-state", "2026-04-07T00:01:00.000Z"), {
       status: "consumed",
+      consumedAt: "2026-04-07T00:01:00.000Z",
       record: {
         state: "defaulted-state",
         provider: "demo",
@@ -4267,6 +4575,7 @@ test("device sync store filters listed accounts by provider and returns unexpire
     );
     assert.deepEqual(store.consumeOAuthState("active-state", "2026-04-07T00:05:00.000Z"), {
       status: "consumed",
+      consumedAt: "2026-04-07T00:05:00.000Z",
       record: {
         state: "active-state",
         provider: "demo",
@@ -4280,6 +4589,7 @@ test("device sync store filters listed accounts by provider and returns unexpire
     });
     assert.deepEqual(store.consumeOAuthState("active-state", "2026-04-07T00:05:01.000Z"), {
       status: "replayed",
+      consumedAt: "2026-04-07T00:05:00.000Z",
       record: {
         state: "active-state",
         provider: "demo",
@@ -4291,7 +4601,32 @@ test("device sync store filters listed accounts by provider and returns unexpire
         expiresAt: "2026-04-07T00:10:00.000Z",
       },
     });
-    assert.deepEqual(store.consumeOAuthState("active-state", "2026-04-07T00:10:00.000Z"), {
+    assert.equal(
+      store.deleteExpiredOAuthStates("2026-04-07T00:10:00.000Z"),
+      0,
+    );
+    assert.deepEqual(store.consumeOAuthState("active-state", "2026-04-07T00:20:00.000Z"), {
+      status: "recovery_required",
+      consumedAt: "2026-04-07T00:05:00.000Z",
+      record: {
+        state: "active-state",
+        provider: "demo",
+        returnTo: "/devices",
+        metadata: {
+          intent: "connect",
+        },
+        createdAt: "2026-04-07T00:00:00.000Z",
+        expiresAt: "2026-04-07T00:10:00.000Z",
+      },
+    });
+    assert.equal(
+      store.resolveOAuthStateWithoutProviderAuthority({
+        state: "active-state",
+        consumedAt: "2026-04-07T00:05:00.000Z",
+      }),
+      true,
+    );
+    assert.deepEqual(store.consumeOAuthState("active-state", "2026-04-07T00:10:01.000Z"), {
       status: "missing",
     });
   } finally {
@@ -4300,6 +4635,82 @@ test("device sync store filters listed accounts by provider and returns unexpire
       force: true,
       recursive: true,
     });
+  }
+});
+
+test("device sync store commits a connection and exact OAuth claim resolution atomically", async () => {
+  const tempDir = await makeTempDirectory("murph-device-syncd-store-oauth-connection-atomic");
+  const store = new SqliteDeviceSyncStore(path.join(tempDir, "state.sqlite"));
+
+  try {
+    const record = {
+      state: "atomic-state",
+      provider: "demo",
+      returnTo: "/devices",
+      metadata: {},
+      createdAt: "2026-04-07T00:00:00.000Z",
+      expiresAt: "2026-04-07T00:10:00.000Z",
+    };
+    store.createOAuthState(record);
+    const consumed = store.consumeOAuthState(
+      record.state,
+      "2026-04-07T00:05:00.000Z",
+      record.provider,
+    );
+    assert.equal(consumed.status, "consumed");
+    if (consumed.status !== "consumed") {
+      throw new Error("Expected an exact consumed OAuth claim.");
+    }
+
+    assert.throws(
+      () => store.upsertAccount({
+        provider: "demo",
+        externalAccountId: "rolled-back-account",
+        scopes: [],
+        tokens: {
+          accessToken: "rolled-back-access",
+          accessTokenEncrypted: "enc:rolled-back-access",
+        },
+        connectedAt: "2026-04-07T00:06:00.000Z",
+        oauthClaim: {
+          state: record.state,
+          consumedAt: "2026-04-07T00:05:01.000Z",
+        },
+      }),
+      (error: unknown) => error instanceof DeviceSyncError && error.code === "OAUTH_STATE_CHANGED",
+    );
+    assert.equal(store.getAccountByExternalAccount("demo", "rolled-back-account"), null);
+    assert.equal(
+      store.consumeOAuthState(
+        record.state,
+        "2026-04-07T00:07:00.000Z",
+        record.provider,
+      ).status,
+      "replayed",
+    );
+
+    const account = store.upsertAccount({
+      provider: "demo",
+      externalAccountId: "committed-account",
+      scopes: [],
+      tokens: {
+        accessToken: "committed-access",
+        accessTokenEncrypted: "enc:committed-access",
+      },
+      connectedAt: "2026-04-07T00:08:00.000Z",
+      oauthClaim: {
+        state: record.state,
+        consumedAt: consumed.consumedAt,
+      },
+    });
+    assert.equal(account.externalAccountId, "committed-account");
+    assert.deepEqual(
+      store.consumeOAuthState(record.state, "2026-04-07T00:09:00.000Z"),
+      { status: "missing" },
+    );
+  } finally {
+    store.close();
+    await rm(tempDir, { force: true, recursive: true });
   }
 });
 
@@ -4336,6 +4747,7 @@ test("device sync store preserves unexpired OAuth state on provider mismatch", a
       ),
       {
         status: "consumed",
+        consumedAt: "2026-04-07T00:05:01.000Z",
         record: {
           state: "provider-mismatch-state",
           provider: "demo",
@@ -4392,6 +4804,7 @@ test("device sync store preserves OAuth state on owner mismatch and returns owne
       ),
       {
         status: "consumed",
+        consumedAt: "2026-04-07T00:05:01.000Z",
         record: {
           state: "owner-bound-state",
           provider: "demo",
@@ -4414,6 +4827,7 @@ test("device sync store preserves OAuth state on owner mismatch and returns owne
       ),
       {
         status: "replayed",
+        consumedAt: "2026-04-07T00:05:01.000Z",
         record: {
           state: "owner-bound-state",
           provider: "demo",
@@ -4487,6 +4901,7 @@ test("device sync store migrates existing OAuth state tables to preserve owner b
     );
     assert.deepEqual(store.consumeOAuthState("legacy-state", "2026-04-07T00:05:01.000Z", "demo"), {
       status: "consumed",
+      consumedAt: "2026-04-07T00:05:01.000Z",
       record: {
         state: "legacy-state",
         provider: "demo",
@@ -4656,7 +5071,7 @@ test("device sync store hydrates new hosted accounts, guards token updates, and 
   }
 });
 
-test("device sync store clears tokens and requires reauthorization after connection setup failures", async () => {
+test("device sync store retains failed setup tokens until confirmed provider revocation", async () => {
   const tempDir = await makeTempDirectory("murph-device-syncd-store-setup-failed");
   const store = new SqliteDeviceSyncStore(path.join(tempDir, "state.sqlite"));
 
@@ -4669,7 +5084,12 @@ test("device sync store clears tokens and requires reauthorization after connect
         "OAUTH_DENIED",
         "operator denied access",
       ),
-      { account: null, applied: false },
+      {
+        account: null,
+        applied: false,
+        blockedByRefreshLease: false,
+        oauthTokenVersion: null,
+      },
     );
 
     const account = store.upsertAccount({
@@ -4700,26 +5120,26 @@ test("device sync store clears tokens and requires reauthorization after connect
     assert.equal(failed.applied, true);
     assert.equal(failed.account?.id, account.id);
     assert.equal(failed.account?.status, "reauthorization_required");
-    assertStoredCredentialKind(failed.account, "none");
-    assert.equal(failed.account?.accessTokenExpiresAt, null);
+    assertStoredCredentialKind(failed.account, "oauth_tokens");
+    assert.equal(failed.account?.accessTokenExpiresAt, "2026-04-07T02:00:00.000Z");
     assert.equal(failed.account?.lastSyncErrorAt, "2026-04-07T00:30:00.000Z");
     assert.equal(failed.account?.lastErrorCode, "OAUTH_DENIED");
     assert.equal(failed.account?.lastErrorMessage, "operator denied access");
     assert.equal(failed.account?.nextReconcileAt, null);
     assert.equal(failed.account?.localConnectionRevision, account.localConnectionRevision + 1);
-    assert.equal(failed.account?.localTokenRevision, account.localTokenRevision + 1);
+    assert.equal(failed.account?.localTokenRevision, account.localTokenRevision);
 
-    const credentialState = readCredentialStateForTesting(store, account.id);
+    let credentialState = readCredentialStateForTesting(store, account.id);
     assert.ok(credentialState);
     assert.deepEqual({ ...credentialState }, {
-      access_token_encrypted: null,
-      access_token_expires_at: null,
-      credential_kind: "none",
+      access_token_encrypted: "enc:setup-access",
+      access_token_expires_at: "2026-04-07T02:00:00.000Z",
+      credential_kind: "oauth_tokens",
       credential_metadata_json: "{}",
       provider_config_key: null,
-      refresh_token_encrypted: null,
+      refresh_token_encrypted: "enc:setup-refresh",
     });
-    const observationState = readObservationStateForTesting(store, account.id);
+    let observationState = readObservationStateForTesting(store, account.id);
     assert.ok(observationState);
     assert.deepEqual({ ...observationState }, {
       hosted_observed_connection_revision: 0,
@@ -4729,9 +5149,45 @@ test("device sync store clears tokens and requires reauthorization after connect
       last_error_code: "OAUTH_DENIED",
       last_webhook_at: "2026-04-07T00:20:00.000Z",
       local_connection_revision: account.localConnectionRevision + 1,
-      local_token_revision: account.localTokenRevision + 1,
+      local_token_revision: account.localTokenRevision,
       next_reconcile_at: null,
     });
+
+    assert.equal(
+      store.clearOAuthCredentialAfterConfirmedRevoke(
+        account.id,
+        account.connectedAt,
+        account.localTokenRevision,
+        "2026-04-07T00:31:00.000Z",
+      ),
+      true,
+    );
+    const cleared = store.getAccountById(account.id);
+    assertStoredCredentialKind(cleared, "none");
+    assert.equal(cleared?.accessTokenExpiresAt, null);
+    assert.equal(cleared?.localConnectionRevision, account.localConnectionRevision + 2);
+    assert.equal(cleared?.localTokenRevision, account.localTokenRevision + 1);
+
+    credentialState = readCredentialStateForTesting(store, account.id);
+    assert.ok(credentialState);
+    assert.deepEqual({ ...credentialState }, {
+      access_token_encrypted: null,
+      access_token_expires_at: null,
+      credential_kind: "none",
+      credential_metadata_json: "{}",
+      provider_config_key: null,
+      refresh_token_encrypted: null,
+    });
+    observationState = readObservationStateForTesting(store, account.id);
+    assert.ok(observationState);
+    assert.equal(
+      observationState.local_connection_revision,
+      account.localConnectionRevision + 2,
+    );
+    assert.equal(
+      observationState.local_token_revision,
+      account.localTokenRevision + 1,
+    );
 
     const raceAccount = store.upsertAccount({
       provider: "demo",
@@ -4838,6 +5294,19 @@ test("device sync store clears tokens and requires reauthorization after connect
     assert.equal(staleFailure.account?.updatedAt, epochTwo.updatedAt);
     assertStoredCredentialKind(staleFailure.account, "oauth_tokens");
     assert.equal(staleFailure.account?.lastErrorCode, null);
+    assert.equal(
+      store.clearOAuthCredentialAfterConfirmedRevoke(
+        epochTwo.id,
+        epochOne.connectedAt,
+        epochOne.localTokenRevision,
+        "2026-04-07T00:51:00.000Z",
+      ),
+      false,
+    );
+    assert.equal(
+      requireStoredOAuthCredential(store.getAccountById(epochTwo.id)).accessTokenEncrypted,
+      "enc:epoch-two-access",
+    );
   } finally {
     store.close();
     await rm(tempDir, {

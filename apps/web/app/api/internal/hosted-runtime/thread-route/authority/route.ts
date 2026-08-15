@@ -23,6 +23,7 @@ import {
   assertHostedAssistantNotificationRouteAuthority,
 } from "@/src/lib/hosted-routing/assistant-notification-destination";
 import { readOptionalJsonObject } from "@/src/lib/http";
+import { handoffHostedMailboxWake } from "@/src/lib/hosted-orchestration/mailbox-wake";
 import { getPrisma } from "@/src/lib/prisma";
 
 const HOSTED_THREAD_ROUTE_AUTHORITY_BODY_LIMIT_BYTES = 8 * 1024;
@@ -52,13 +53,24 @@ export const POST = withJsonError(async (request: Request) => {
     ) {
       throwInvalidAssistantAskCompletionAuthority();
     }
-    await getPrisma().$transaction(async (tx) => {
-      await assertHostedGroupCurrentSenderPrivateCompletionDeliveryAuthorityTx({
+    const assertion = await getPrisma().$transaction(async (tx) => {
+      return await assertHostedGroupCurrentSenderPrivateCompletionDeliveryAuthorityTx({
         ...privateAssistantAskCompletion,
         boundRuntimeMemberId: memberId,
         tx,
       });
     });
+    if (assertion?.assistantAskFallbackRequired) {
+      await handoffHostedMailboxWake({
+        ...assertion.mailboxWake,
+        directWakeSource: "assistant-ask-completion",
+        signal: request.signal,
+      });
+      return jsonOk({
+        assistantAskFallbackRequired: true,
+        authorized: false,
+      });
+    }
     return jsonOk({ authorized: true });
   }
   const authority = parseHostedExecutionExternalThreadRouteAuthority(

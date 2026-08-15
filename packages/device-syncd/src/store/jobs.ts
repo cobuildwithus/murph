@@ -18,6 +18,7 @@ import {
   isDeviceSyncCredentialIndependentImportJob,
   type DeviceSyncCredentialIndependentImportJobClassifier,
 } from "../hosted-runtime.ts";
+import { isJunctionRetainedAcceptedWorkJob } from "../junction-resources.ts";
 import type { DeviceSyncJobInput, DeviceSyncJobRecord } from "../types.ts";
 
 export interface DeviceSyncEnqueueJobInput extends DeviceSyncJobInput {
@@ -135,7 +136,10 @@ function deadLetterExpiredExhaustedDeviceSyncJobs(database: DatabaseSync, now: s
       and not (
         provider = 'junction'
         and kind = 'resource'
-        and coalesce(json_extract(payload_json, '$.resource'), '') = ?
+        and (
+          coalesce(json_extract(payload_json, '$.resource'), '') = ?
+          or json_type(payload_json, '$.calendarRefreshDay') = 'text'
+        )
       )
   `).run(
     EXPIRED_JOB_LEASE_ERROR_CODE,
@@ -319,7 +323,10 @@ export function claimDueDeviceSyncJob(
             or (
               candidate.provider = 'junction'
               and candidate.kind = 'resource'
-              and coalesce(json_extract(candidate.payload_json, '$.resource'), '') = ?
+              and (
+                coalesce(json_extract(candidate.payload_json, '$.resource'), '') = ?
+                or json_type(candidate.payload_json, '$.calendarRefreshDay') = 'text'
+              )
             )
           )
         )
@@ -343,10 +350,12 @@ export function claimDueDeviceSyncJob(
     }
 
     const leaseExpiresAt = new Date(Date.parse(now) + leaseMs).toISOString();
-    const isExpiredRetainedCompanionHrv = row.status === "running"
-      && row.provider === "junction"
-      && row.kind === "resource"
-      && maybeParseJsonObject(row.payload_json)?.resource === COMPANION_HRV_RMSSD_RESOURCE;
+    const isExpiredRetainedAcceptedWork = row.status === "running"
+      && isJunctionRetainedAcceptedWorkJob({
+        kind: row.kind,
+        payload: maybeParseJsonObject(row.payload_json),
+        provider: row.provider,
+      });
     database.prepare(`
       update device_job
       set status = 'running',
@@ -357,7 +366,7 @@ export function claimDueDeviceSyncJob(
           started_at = coalesce(started_at, ?),
           updated_at = ?
       where id = ?
-    `).run(workerId, leaseExpiresAt, isExpiredRetainedCompanionHrv ? 1 : 0, now, now, row.id);
+    `).run(workerId, leaseExpiresAt, isExpiredRetainedAcceptedWork ? 1 : 0, now, now, row.id);
 
     return getDeviceSyncJobById(database, row.id);
   });
@@ -654,6 +663,37 @@ export function releaseDeviceSyncJobIfOwned(
   return (result.changes ?? 0) > 0;
 }
 
+export function wakeRetainedDeviceSyncJobsForAccount(
+  database: DatabaseSync,
+  input: { accountId: string; now: string },
+): number {
+  const result = database.prepare(`
+    update device_job
+    set available_at = min(available_at, ?),
+        updated_at = ?
+    where account_id = ?
+      and status = 'queued'
+      and last_error_code in (
+        'CONNECTION_SETUP_PENDING',
+        'ACCOUNT_DISCONNECTED',
+        'ACCOUNT_REAUTHORIZATION_REQUIRED',
+        'JUNCTION_CALENDAR_REFRESH_SOURCE_AUTHORITY_UNAVAILABLE'
+      )
+      and provider = 'junction'
+      and kind = 'resource'
+      and (
+        json_extract(payload_json, '$.resource') = ?
+        or json_type(payload_json, '$.calendarRefreshDay') = 'text'
+      )
+  `).run(
+    input.now,
+    input.now,
+    input.accountId,
+    COMPANION_HRV_RMSSD_RESOURCE,
+  ) as { changes: number };
+  return result.changes ?? 0;
+}
+
 export function failDeviceSyncJob(
   database: DatabaseSync,
   input: {
@@ -807,7 +847,10 @@ export function markPendingDeviceSyncJobsDeadForAccount(
       and not (
         provider = 'junction'
         and kind = 'resource'
-        and json_extract(payload_json, '$.resource') = ?
+        and (
+          json_extract(payload_json, '$.resource') = ?
+          or json_type(payload_json, '$.calendarRefreshDay') = 'text'
+        )
       )
   `).run(
     input.code,
@@ -858,11 +901,15 @@ export function markCredentialScopedPendingDeviceSyncJobsDeadForAccount(
   let marked = 0;
 
   for (const job of pending) {
-    if (isDeviceSyncCredentialIndependentImportJob({
+    const parsedJob = {
       kind: job.kind,
       payload: maybeParseJsonObject(job.payload_json),
       provider: job.provider,
-    }, input.classifyProviderJob)) {
+    };
+    if (
+      isJunctionRetainedAcceptedWorkJob(parsedJob)
+      || isDeviceSyncCredentialIndependentImportJob(parsedJob, input.classifyProviderJob)
+    ) {
       continue;
     }
 
@@ -905,7 +952,10 @@ export function markPendingDeviceSyncJobsDeadForAccountIfCurrent(
       and not (
         provider = 'junction'
         and kind = 'resource'
-        and json_extract(payload_json, '$.resource') = ?
+        and (
+          json_extract(payload_json, '$.resource') = ?
+          or json_type(payload_json, '$.calendarRefreshDay') = 'text'
+        )
       )
       and exists (
         select 1
@@ -952,7 +1002,10 @@ export function enqueueDeviceSyncJobInTransaction(
           and not (
             provider = 'junction'
             and kind = 'resource'
-            and coalesce(json_extract(payload_json, '$.resource'), '') = ?
+            and (
+              coalesce(json_extract(payload_json, '$.resource'), '') = ?
+              or json_type(payload_json, '$.calendarRefreshDay') = 'text'
+            )
           )
         )
       order by created_at desc, id desc
@@ -966,7 +1019,22 @@ export function enqueueDeviceSyncJobInTransaction(
     ) as StoredJobRow | undefined;
 
     if (existing) {
-      return mapJobRow(existing)!;
+      const existingJob = mapJobRow(existing)!;
+      if (isJunctionRetainedAcceptedWorkJob(input)) {
+        database.prepare(`
+          update device_job
+          set available_at = case
+                when status = 'queued' then min(available_at, ?)
+                else available_at
+              end,
+              max_attempts = max(max_attempts, attempts + 1),
+              updated_at = ?
+          where id = ?
+            and status in ('queued', 'running')
+        `).run(input.availableAt ?? now, now, existing.id);
+        return getDeviceSyncJobById(database, existing.id) ?? existingJob;
+      }
+      return existingJob;
     }
   }
 

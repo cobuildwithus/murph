@@ -418,6 +418,22 @@ export function resolveDeviceConnectSourceIdForJunctionProviderSlug(providerSlug
   return resolveJunctionDeviceConnectRouteByProviderSlug(providerSlug)?.source.connectSourceId ?? null;
 }
 
+export function areJunctionDeviceConnectProviderSlugsEquivalent(
+  left: string,
+  right: string,
+): boolean {
+  const normalizedLeft = normalizeJunctionProviderSlug(left);
+  const normalizedRight = normalizeJunctionProviderSlug(right);
+  if (!normalizedLeft || !normalizedRight) {
+    return false;
+  }
+  const leftSourceId = resolveDeviceConnectSourceIdForJunctionProviderSlug(normalizedLeft);
+  const rightSourceId = resolveDeviceConnectSourceIdForJunctionProviderSlug(normalizedRight);
+  return leftSourceId !== null && rightSourceId !== null
+    ? leftSourceId === rightSourceId
+    : normalizedLeft === normalizedRight;
+}
+
 export function resolveJunctionLinkDeviceConnectRouteByProviderSlug(
   providerSlug: string,
 ): DeviceConnectRouteEntry<DeviceConnectJunctionLinkRoute> | null {

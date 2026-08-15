@@ -95,7 +95,42 @@ if [[ -n "$current_worktree_path" ]]; then
   current_worktree_path="$(cd "$current_worktree_path" && pwd -P)"
 fi
 
+historical_installer_compatibility=0
+if (( original_arg_count == 0 )) \
+  && [[ -n "$current_worktree_path" && "$current_worktree_path" != "$repo_root" ]]; then
+  historical_installer_compatibility=1
+fi
+
 if [[ "${MURPH_WORKTREE_GUARD_LOCK_HELD:-0}" != 1 ]]; then
+  if (( historical_installer_compatibility == 1 )); then
+    # The pre-lock installer reaches this current-primary guard only after its
+    # config writes. This bounded wait protects the final check during rollout;
+    # it does not retroactively serialize those earlier writes.
+    compatibility_wait_seconds=180
+    printf 'worktree storage guard: historical installer final check waiting up to %s seconds for the storage guard lock\n' \
+      "$compatibility_wait_seconds" >&2
+    set +e
+    if command -v flock >/dev/null 2>&1; then
+      flock -w "$compatibility_wait_seconds" "$lock_file" \
+        env MURPH_WORKTREE_GUARD_LOCK_HELD=1 "$0"
+      lock_status=$?
+    elif command -v lockf >/dev/null 2>&1; then
+      lockf -t "$compatibility_wait_seconds" "$lock_file" \
+        env MURPH_WORKTREE_GUARD_LOCK_HELD=1 "$0"
+      lock_status=$?
+    else
+      set -e
+      printf 'worktree storage guard: flock or lockf is required for serialization\n' >&2
+      exit 1
+    fi
+    set -e
+    if (( lock_status != 0 )); then
+      printf 'worktree storage guard: historical installer final check failed within %s seconds\n' \
+        "$compatibility_wait_seconds" >&2
+    fi
+    exit "$lock_status"
+  fi
+
   if command -v flock >/dev/null 2>&1; then
     if (( original_arg_count > 0 )); then
       exec flock -w 5 "$lock_file" env MURPH_WORKTREE_GUARD_LOCK_HELD=1 "$0" \
@@ -403,18 +438,22 @@ if [[ -f "$unmanaged_state_file" ]]; then
   fi
 fi
 if (( new_unmanaged > 0 )); then
-  printf 'worktree storage guard: %d new unmanaged temporary checkout(s) bypassed scripts/create-worktree\n' \
+  if [[ -z "$current_worktree_path" ]]; then
+    printf 'worktree storage guard: %d new unmanaged temporary checkout(s) bypassed scripts/create-worktree\n' \
+      "$new_unmanaged" >&2
+    exit 1
+  fi
+  printf 'worktree storage guard: warning: %d new unmanaged temporary checkout(s) remain outside scripts/create-worktree; global audit remains blocked\n' \
     "$new_unmanaged" >&2
-  exit 1
-fi
-
-tmp_unmanaged_state="$unmanaged_state_file.tmp.$$"
-if (( ${#unmanaged_fingerprints[@]} > 0 )); then
-  printf '%s\n' "${unmanaged_fingerprints[@]}" | LC_ALL=C sort -u >"$tmp_unmanaged_state"
 else
-  : >"$tmp_unmanaged_state"
+  tmp_unmanaged_state="$unmanaged_state_file.tmp.$$"
+  if (( ${#unmanaged_fingerprints[@]} > 0 )); then
+    printf '%s\n' "${unmanaged_fingerprints[@]}" | LC_ALL=C sort -u >"$tmp_unmanaged_state"
+  else
+    : >"$tmp_unmanaged_state"
+  fi
+  mv "$tmp_unmanaged_state" "$unmanaged_state_file"
 fi
-mv "$tmp_unmanaged_state" "$unmanaged_state_file"
 
 if [[ -n "$target_path" ]]; then
   if [[ "$target_path" != /* ]]; then

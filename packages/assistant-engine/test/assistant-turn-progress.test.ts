@@ -272,6 +272,34 @@ describe('assistant turn progress', () => {
     expect(delivered[0]?.input.deliveryReplyToMessageId).toBe('current-message')
   })
 
+  it('carries an exact accepted-message target to progress delivery', async () => {
+    const delivered: Array<DeliverProgressInput & { targetInputId?: string }> = []
+    const deliver = vi.fn(async (
+      input: DeliverProgressInput & { targetInputId?: string },
+    ): Promise<AssistantSession> => {
+      delivered.push(input)
+      return input.session
+    })
+    const progress = createAssistantProgressDelivery({
+      deliver,
+      messageInput: createMessageInput(),
+      session: createSession(),
+      sharedPlan: createSharedPlan(),
+      turnId: 'turn-progress',
+    })
+
+    await progress.send('Sharing after a private read.', {
+      deliveryContextOrdinal: 0,
+      required: true,
+      source: 'system',
+      targetInputId: 'ain_11111111111111111111111111111111',
+    })
+
+    expect(delivered[0]?.targetInputId).toBe(
+      'ain_11111111111111111111111111111111',
+    )
+  })
+
   it('skips progress when the current delivery context becomes queue-only', async () => {
     const delivered: DeliverProgressInput[] = []
     let currentInput = createMessageInput({

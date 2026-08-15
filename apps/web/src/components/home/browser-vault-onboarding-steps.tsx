@@ -3,8 +3,10 @@
 import { useMemo } from "react";
 import {
   selectBrowserVaultTrackedExperiments,
-  type BrowserVaultQueryClient,
 } from "@murphai/query/browser-overview";
+import type {
+  BrowserVaultCoreCapableQueryClient,
+} from "@murphai/query/browser-replica-client";
 
 import { BrowserVaultUnavailableAlert } from "./browser-vault-unavailable-alert";
 import { HomeExperiments } from "./home-experiments";
@@ -15,7 +17,7 @@ import {
 
 import { useBrowserVault } from "@/src/lib/browser-vault/context";
 import {
-  buildExperimentLibraryCards,
+  buildHomeExperimentLibraryCards,
   splitHomeExperimentCards,
   type ExperimentLibraryCard,
 } from "@/src/lib/experiments/library-cards";
@@ -37,8 +39,13 @@ export function BrowserVaultOnboardingStepsContent({
   const vaultUnavailable = status === "error" && client === null;
   const hideLabsStep =
     props.hideLabsStep ||
-    (status === "ready" && client ? hasBrowserVaultLabBiomarkers(client) : false);
-  const { history, inProgress } = useHomeExperimentCards({ client, protocols });
+    (status === "ready" && client
+      ? hasBrowserVaultLabBiomarkers(client)
+      : false);
+  const { history, inProgress } = useHomeExperimentCards({
+    client,
+    protocols,
+  });
   const hasAnyExperimentRun = inProgress.length > 0 || history.length > 0;
   // While the vault is still decrypting we cannot know whether a run is in
   // progress; keep the experiment step hidden until then so returning members
@@ -77,7 +84,7 @@ function useHomeExperimentCards({
   client,
   protocols,
 }: {
-  client: BrowserVaultQueryClient | null;
+  client: BrowserVaultCoreCapableQueryClient | null;
   protocols?: ExperimentProtocol[];
 }): { history: ExperimentLibraryCard[]; inProgress: ExperimentLibraryCard[] } {
   return useMemo(() => {
@@ -85,7 +92,7 @@ function useHomeExperimentCards({
       return { history: [], inProgress: [] };
     }
 
-    return splitHomeExperimentCards(buildExperimentLibraryCards({
+    return splitHomeExperimentCards(buildHomeExperimentLibraryCards({
       client,
       protocols,
       trackedExperiments: selectBrowserVaultTrackedExperiments(client),
@@ -94,11 +101,7 @@ function useHomeExperimentCards({
 }
 
 export function hasBrowserVaultLabBiomarkers(
-  client: Pick<BrowserVaultQueryClient, "replica">,
+  client: BrowserVaultCoreCapableQueryClient,
 ): boolean {
-  return client.replica.metricRows.some((row) =>
-    row.sourceKind === "test-result" &&
-    row.biomarkerKey !== null &&
-    row.value !== null
-  );
+  return client.replica.hasLabBiomarkers;
 }

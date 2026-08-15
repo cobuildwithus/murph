@@ -2,14 +2,14 @@ import {
   resolveExperimentAdherenceRollupTarget,
   selectBrowserVaultExperimentResults,
   type BrowserVaultExperimentResultsView,
-  type BrowserVaultQueryClient,
+  type BrowserVaultMetricsCapableQueryClient,
 } from "@murphai/query/browser-experiments";
 
 import type { ExperimentRunCardDailyCadence } from "@/src/lib/experiments/run-card-summary";
 
 interface ResolveExperimentRunCardDailyCadenceInput {
   cadence?: string;
-  client: BrowserVaultQueryClient | null;
+  client: BrowserVaultMetricsCapableQueryClient | null;
   experimentId: string;
 }
 

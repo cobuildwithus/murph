@@ -21,10 +21,12 @@ import {
   JUNCTION_ECG_VOLTAGE_FEATURE_SCHEMA,
   JUNCTION_WORKOUT_STREAM_FEATURE_SCHEMA,
   buildJunctionBoundedFeatureIdentity,
+  buildJunctionDailyTimeseriesAggregateResourceId,
   canNormalizeJunctionSleepCycleRecordToCompactStages,
   classifyJunctionSummaryNormalizationEvidence,
   countAcceptedJunctionDailyTimeseriesProviderRecords,
   identifyJunctionBloodPressureProviderRecords,
+  JUNCTION_DENSE_FIDELITY_RESOURCES,
   reduceJunctionElectrocardiogramVoltageRecords,
   reduceJunctionWorkoutStreamPayload,
   resolveJunctionBoundedFeatureRecords,
@@ -32,7 +34,10 @@ import {
   selectJunctionWorkoutStreamCandidates,
   type JunctionSummaryNormalizationEvidence,
 } from "@murphai/importers/device-providers/junction";
-import { resolveJunctionOrigin } from "@murphai/importers/device-providers/junction-origin";
+import {
+  normalizeJunctionSourceProviderSlug,
+  resolveJunctionOrigin,
+} from "@murphai/importers/device-providers/junction-origin";
 import {
   isJunctionRawDirectIdentityContainerKey,
   isJunctionRawDirectIdentityKey,
@@ -71,9 +76,12 @@ import { DEVICE_SYNC_METADATA_MAX_STRING_LENGTH } from "../metadata.ts";
 import {
   DEVICE_SYNC_HISTORICAL_DATA_RECONNECT_REQUIRED_ERROR_CODE,
   DEVICE_SYNC_SOURCE_USER_DISCONNECTED_ERROR_CODE,
+  isDeviceSyncSourceAdmitted,
   isDeviceSyncSourceDisconnectFenced,
   isJunctionHistoricalResetProviderSlug,
+  resolveDeviceSyncSourceState,
   requiresHistoricalResetDeviceSyncSource,
+  type ResolvedDeviceSyncSourceState,
 } from "../public-account.ts";
 import {
   assertValidJunctionClientUserIdSecret,
@@ -94,6 +102,8 @@ import {
   JUNCTION_COMPANION_HEALTH_METADATA_RESOURCE,
   JUNCTION_COMPANION_HEALTH_METADATA_SOURCE_PROVIDER,
   JUNCTION_COMPANION_HEALTH_METADATA_SOURCE_TYPE,
+  JUNCTION_CALENDAR_REFRESH_EMPTY_IDENTITY_INVALID_CODE,
+  JUNCTION_CALENDAR_REFRESH_JOB_INVALID_CODE,
   JunctionCompanionHealthMetadataParseError,
   parseJunctionCompanionHealthMetadataBatch,
   type JunctionCompanionHealthMetadataRecord,
@@ -109,6 +119,7 @@ import {
   type JunctionWindowInput,
 } from "./junction-client.ts";
 import {
+  areJunctionDeviceConnectProviderSlugsEquivalent,
   canonicalizeJunctionProviderSlug,
   resolveJunctionDeviceConnectRouteByProviderSlug,
 } from "../config/connect-routes.ts";
@@ -123,6 +134,7 @@ import type {
 } from "../config/provider-types.ts";
 
 import type {
+  DeviceConnectionSourceResourceAvailabilitySummary,
   DeviceConnectionSourceStatus,
   DeviceSyncAccount,
   DeviceSyncWebhookExternalAccountDiagnostic,
@@ -140,6 +152,7 @@ import type {
   ProviderJobResult,
   ProviderScheduleContext,
   ProviderScheduleResult,
+  ProviderSparseCalendarTarget,
   ProviderWebhookContext,
   ProviderWebhookResult,
   StoredDeviceSyncAccount,
@@ -175,6 +188,7 @@ export {
 };
 
 interface JunctionTimeseriesImportResult {
+  appliedDailyAggregateResourceIds?: readonly string[];
   yieldedAt: string | null;
 }
 
@@ -201,6 +215,8 @@ const JUNCTION_ALLOWED_TIMESERIES_RESOURCE_SET = new Set<string>(
 );
 
 interface JunctionPreciseTimeseriesImportResult extends JunctionTimeseriesImportResult {
+  canonicalEventDayKeys: readonly string[];
+  canonicalSparseCalendarTargets: readonly ProviderSparseCalendarTarget[];
   acceptedProviderRecordCount: number;
   canonicalProviderRecordIdentities: readonly string[];
   canonicalEventCount: number;
@@ -218,6 +234,7 @@ interface JunctionPreciseTimeseriesImportOptions {
   historicalProviderRecordsSeen?: boolean;
   preservePartialRetryableFailure?: boolean;
   sourceLifecycleEpoch?: number;
+  sourceIdentityAuthority?: readonly JunctionImportAdmissionSource[];
   sourceStatusRequirement?: JunctionImportSourceStatusRequirement;
 }
 
@@ -228,7 +245,14 @@ interface JunctionDirectSummaryImportResult {
 
 interface JunctionImportAdmissionSource {
   lifecycleEpoch?: number;
+  displayName?: string | null;
+  firstSeenAt?: string;
+  lastDataAt?: string | null;
   lastErrorCode?: string | null;
+  lastErrorMessage?: string | null;
+  lastSeenAt?: string | null;
+  resourceAvailabilitySummary?: DeviceConnectionSourceResourceAvailabilitySummary;
+  sourceInstanceKey?: string;
   sourceProviderSlug: string;
   status: DeviceConnectionSourceStatus;
 }
@@ -291,6 +315,7 @@ const JUNCTION_SDK_ISO_8601_DATE_PATTERN = /^([+-]?\d{4}(?!\d{2}\b))((-?)((0[1-9
 interface JunctionWindowFetchOptions {
   collectionWorkLimit?: JunctionCollectionWorkLimit;
   dateQueryFormat?: JunctionDateQueryFormat;
+  requireStructurallyCompleteCollection?: boolean;
 }
 
 const JUNCTION_PROFILE_SUMMARY_RESOURCE = "profile";
@@ -477,11 +502,31 @@ function resolveJunctionExtendedTimeseriesBackfillPolicy(
   return policy.history === "extended" ? policy : null;
 }
 
+const JUNCTION_DENSE_FIDELITY_RESOURCE_SET = new Set<string>(
+  JUNCTION_DENSE_FIDELITY_RESOURCES,
+);
+const JUNCTION_CALENDAR_DAY_AGGREGATE_RESOURCE_SET = new Set<string>([
+  ...JUNCTION_DENSE_FIDELITY_RESOURCES,
+  "caffeine",
+  "water",
+  "mindfulness_minutes",
+]);
+
 const DEFAULT_RECONCILE_DAYS = JUNCTION_DEVICE_PROVIDER_DESCRIPTOR.sync.windows.reconcileDays;
 const DEFAULT_REQUEST_TIMEOUT_MS = 15_000;
 const DEFAULT_SETUP_TTL_MS = 30 * 60_000;
 const DEFAULT_WEBHOOK_TIMESTAMP_TOLERANCE_MS = 5 * 60_000;
 const TIMESERIES_CHUNK_MS = 24 * 60 * 60_000;
+// A date-only provider query can contain source-local records from UTC-12.
+// Delay calendar-day ownership until that date has closed in every admitted
+// civil offset instead of treating UTC midnight as globally complete.
+const JUNCTION_PROVIDER_CALENDAR_DAY_CLOSE_LAG_MS = 12 * 60 * 60_000;
+const JUNCTION_MAX_SPARSE_CALENDAR_REFRESH_DAYS = 64;
+const JUNCTION_SPARSE_CALENDAR_AGGREGATE_RESOURCE_SET = new Set<string>([
+  "caffeine",
+  "water",
+  "mindfulness_minutes",
+]);
 const TIMESERIES_HOUR_MS = 60 * 60_000;
 // Three single-attempt pages allow ordinary pagination while capping provider
 // wait at 24 seconds, below the hosted job's 45-second outer budget.
@@ -853,10 +898,6 @@ export function createJunctionDeviceSyncProvider(
     now: string,
     context?: ProviderScheduleContext,
   ): DeviceSyncJobInput[] {
-    const currentSourcesByProviderSlug = buildJunctionCurrentLifecycleSourceMap(
-      account.sources ?? [],
-    );
-
     const candidates = extendedBackfillTimeseriesResources.flatMap((resource) => {
       const policy = resolveJunctionExtendedTimeseriesBackfillPolicy(resource);
       if (!policy) {
@@ -875,16 +916,22 @@ export function createJunctionDeviceSyncProvider(
         lifecycleEpoch: number;
         sourceProviderSlug: string;
       }> = [];
-      for (const [sourceProviderSlug, sources] of currentSourcesByProviderSlug) {
-        const availableSources = sources.filter((source) =>
-          isJunctionResourceAvailableInSummary(
-            source.resourceAvailabilitySummary,
-            resource,
-          )
+      for (const sourceState of resolveJunctionAccountSourceStates(account.sources ?? [])) {
+        const identitySource = sourceState.identitySource;
+        const lifecycleSource = sourceState.lifecycleSource;
+        const sourceProviderSlug = canonicalizeJunctionProviderSlug(
+          identitySource.sourceProviderSlug,
         );
         if (
-          !isJunctionLifecycleSourceGroupAdmitted(sources, "connected")
-          || availableSources.length === 0
+          !sourceProviderSlug
+          || !isDeviceSyncSourceAdmitted(
+            [lifecycleSource],
+            lifecycleSource.sourceProviderSlug,
+          )
+          || !isJunctionResourceAvailableInSummary(
+            lifecycleSource.resourceAvailabilitySummary,
+            resource,
+          )
           || hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
             account.metadata,
             sourceProviderSlug,
@@ -900,15 +947,13 @@ export function createJunctionDeviceSyncProvider(
         ) {
           continue;
         }
-        const firstSeenAt = availableSources.reduce(
-          (earliest, source) => Date.parse(source.firstSeenAt) < Date.parse(earliest)
-            ? source.firstSeenAt
-            : earliest,
-          availableSources[0]!.firstSeenAt,
-        );
+        const firstSeenAt = identitySource.firstSeenAt;
+        if (!firstSeenAt) {
+          throw junctionSourceStateUnavailableError();
+        }
         scheduledSources.push({
           firstSeenAt,
-          lifecycleEpoch: readJunctionSourceLifecycleEpoch(sources[0]!),
+          lifecycleEpoch: readJunctionSourceLifecycleEpoch(lifecycleSource),
           sourceProviderSlug,
         });
       }
@@ -1383,6 +1428,50 @@ export function createJunctionDeviceSyncProvider(
         : null,
       window,
     );
+    const shouldImportBroadClosedTimeseries = job.kind === "backfill"
+      || shouldImportClosedTimeseriesForReconcile(
+        context.account.lastSyncCompletedAt,
+        window.windowEnd,
+      );
+    const hourlyFidelityWindow = shouldImportBroadClosedTimeseries
+      ? null
+      : resolveLatestGloballyClosedProviderDayWindow(
+        baseTimeseriesWindowStart,
+        window.windowEnd,
+        context.now,
+      );
+    const dailyTimeseriesResources = timeseriesResources.filter(
+      (resource) => JUNCTION_CALENDAR_DAY_AGGREGATE_RESOURCE_SET.has(resource),
+    );
+    if (
+      dailyTimeseriesResources.length > 0
+      && hourlyFidelityWindow
+    ) {
+      const timeseriesImport = await importTimeseriesDailyAggregateSnapshots(
+        context,
+        sourceProviders,
+        hourlyFidelityWindow.windowStart,
+        hourlyFidelityWindow.windowEnd,
+        skippedOptionalResources,
+        dailyTimeseriesResources,
+      );
+      if (timeseriesImport.yieldedAt) {
+        return withJunctionSkippedResourceMetadata(
+          context,
+          withJunctionMetadataPatch(
+            buildYieldedJunctionJobResult({
+              context,
+              job,
+              windowEnd: window.windowEnd,
+              windowStart: timeseriesImport.yieldedAt,
+            }),
+            profileMetadataPatch,
+          ),
+          skippedOptionalResources,
+        );
+      }
+    }
+
     const backfillFollowUp = job.kind === "backfill"
       ? isConnectHistoricalBackfill
         ? buildHistoricalBackfillFollowUp({
@@ -2025,11 +2114,13 @@ export function createJunctionDeviceSyncProvider(
       };
     }
 
+    const calendarRefreshDay = readJunctionSparseCalendarRefreshDay(job);
     const resource = normalizeJunctionResourceName(job.payload.resource);
     const resourceCategory = normalizeString(job.payload.resourceCategory);
     const sourceProviderSlug = canonicalizeJunctionProviderSlug(job.payload.sourceProviderSlug);
     if (
-      sourceProviderSlug
+      !calendarRefreshDay
+      && sourceProviderSlug
       && !isJunctionSourceAdmittedForImport(
         context.account.sources ?? [],
         sourceProviderSlug,
@@ -2067,6 +2158,97 @@ export function createJunctionDeviceSyncProvider(
       projectedSourceProviders = sourceProviders;
       return sourceProviders;
     };
+
+    if (calendarRefreshDay) {
+      if (
+        !resource
+        || !JUNCTION_SPARSE_CALENDAR_AGGREGATE_RESOURCE_SET.has(resource)
+        || !isConfiguredJunctionResource("timeseries", resource)
+      ) {
+        throw deviceSyncError({
+          code: JUNCTION_CALENDAR_REFRESH_JOB_INVALID_CODE,
+          message: "Junction calendar refresh job did not name an admitted sparse resource.",
+          retryable: false,
+        });
+      }
+      const queuedCalendarSourceIdentity = readJunctionSparseCalendarSourceIdentity(job);
+      const currentSources = context.listConnectionSources
+        ? await context.listConnectionSources()
+        : context.account.sources ?? [];
+      const accountSourceIdentity = resolveJunctionAccountSourceIdentity(
+        currentSources,
+        queuedCalendarSourceIdentity.sourceProviderSlug,
+        context.connectionSourceAdmissionMode !== "listed_only",
+      );
+      if (
+        !accountSourceIdentity
+        || !isJunctionSourceAdmittedForImport(
+          currentSources,
+          sourceProviderSlug,
+          context.connectionSourceAdmissionMode !== "listed_only",
+          "connected",
+        )
+      ) {
+        throw deviceSyncError({
+          code: "JUNCTION_CALENDAR_REFRESH_SOURCE_AUTHORITY_UNAVAILABLE",
+          message: "Junction calendar source authority is temporarily unavailable.",
+          retryable: true,
+        });
+      }
+      const sourceProviders = await loadAndProjectSourceProviders();
+      const calendarSourceIdentity = {
+        ...queuedCalendarSourceIdentity,
+        sourceProviderSlug: accountSourceIdentity.sourceProviderSlug,
+        ...(accountSourceIdentity.sourceInstanceId
+          ? { sourceInstanceId: accountSourceIdentity.sourceInstanceId }
+          : {}),
+      };
+      const calendarFetchSourceProviderSlug = resolveJunctionProviderRouteSlug(
+        queuedCalendarSourceIdentity.sourceProviderSlug,
+      );
+      const windowStart = `${calendarRefreshDay}T00:00:00.000Z`;
+      const dailyImport = await importTimeseriesDailyAggregateSnapshots(
+        context,
+        sourceProviders,
+        windowStart,
+        addMilliseconds(windowStart, TIMESERIES_CHUNK_MS),
+        skippedOptionalResources,
+        [resource],
+        calendarFetchSourceProviderSlug,
+        calendarSourceIdentity,
+      );
+      const expectedDailyAggregateResourceId = buildJunctionDailyTimeseriesAggregateResourceId({
+        dayKey: calendarRefreshDay,
+        resource,
+        ...calendarSourceIdentity,
+      });
+      if (
+        !dailyImport.yieldedAt
+        && !dailyImport.appliedDailyAggregateResourceIds?.includes(expectedDailyAggregateResourceId)
+      ) {
+        throw deviceSyncError({
+          code: "JUNCTION_CALENDAR_REFRESH_DAILY_STATE_NOT_APPLIED",
+          message: "Junction calendar refresh did not apply its owned daily state.",
+          retryable: true,
+        });
+      }
+      const followUp = dailyImport.yieldedAt
+        ? buildJunctionSparseCalendarRefreshJob({
+            dayKey: calendarRefreshDay,
+            priority: job.priority,
+            resource,
+            ...calendarSourceIdentity,
+          })
+        : null;
+      return withJunctionSkippedResourceMetadata(
+        context,
+        {
+          ...(followUp ? { scheduledJobs: [followUp] } : {}),
+          nextReconcileAt: clampWebhookJobNextReconcileAt(context),
+        },
+        skippedOptionalResources,
+      );
+    }
 
     const summaries: Record<string, unknown[]> = {};
 
@@ -2223,6 +2405,7 @@ export function createJunctionDeviceSyncProvider(
           ?? window.windowStart;
         const dailyAggregateRetryAttempts = readHistoricalBackfillJobEmptyAttempts(job);
         let sourceProviders: readonly JunctionProviderConnection[];
+        let sourceIdentityAuthority: readonly JunctionImportAdmissionSource[] | undefined;
         let currentSourceAdmission: JunctionCurrentSourceAdmission = "admitted";
         try {
           if (
@@ -2241,9 +2424,13 @@ export function createJunctionDeviceSyncProvider(
           }
           sourceProviders = await loadAndProjectSourceProviders();
           if (extendedHistoricalBackfill && sourceProviderSlug) {
-            currentSourceAdmission = await resolveJunctionCurrentSourceAdmission(
-              context,
+            sourceIdentityAuthority = context.listConnectionSources
+              ? await context.listConnectionSources()
+              : context.account.sources ?? [];
+            currentSourceAdmission = resolveJunctionCurrentSourceAdmissionFromSources(
+              sourceIdentityAuthority,
               sourceProviderSlug,
+              context.connectionSourceAdmissionMode !== "listed_only",
               sourceLifecycleEpoch ?? undefined,
             );
           }
@@ -2262,6 +2449,8 @@ export function createJunctionDeviceSyncProvider(
                 acceptedProviderRecordCount: 0,
                 canonicalProviderRecordIdentities: [],
                 canonicalEventCount: 0,
+                canonicalEventDayKeys: [],
+                canonicalSparseCalendarTargets: [],
                 fetchComplete: false,
                 providerRecordsExamined: false,
                 providerRecordCount: 0,
@@ -2310,6 +2499,8 @@ export function createJunctionDeviceSyncProvider(
               acceptedProviderRecordCount: 0,
               canonicalProviderRecordIdentities: [],
               canonicalEventCount: 0,
+              canonicalEventDayKeys: [],
+              canonicalSparseCalendarTargets: [],
               fetchComplete: false,
               providerRecordsExamined: false,
               providerRecordCount: 0,
@@ -2341,6 +2532,8 @@ export function createJunctionDeviceSyncProvider(
                 acceptedProviderRecordCount: 0,
                 canonicalProviderRecordIdentities: [],
                 canonicalEventCount: 0,
+                canonicalEventDayKeys: [],
+                canonicalSparseCalendarTargets: [],
                 fetchComplete: true,
                 providerRecordsExamined: false,
                 providerRecordCount: 0,
@@ -2371,6 +2564,40 @@ export function createJunctionDeviceSyncProvider(
           }
         }
         const timeseriesPolicy = resolveJunctionTimeseriesResourcePolicy(effectiveResource);
+        if (JUNCTION_DENSE_FIDELITY_RESOURCE_SET.has(effectiveResource)) {
+          const dailyImport = await importTimeseriesDailyAggregateSnapshots(
+            context,
+            sourceProviders,
+            window.windowStart,
+            window.windowEnd,
+            skippedOptionalResources,
+            [effectiveResource],
+            sourceProviderSlug,
+          );
+          if (dailyImport.yieldedAt) {
+            return withJunctionSkippedResourceMetadata(
+              context,
+              buildYieldedJunctionJobResult({
+                context,
+                job,
+                windowEnd: window.windowEnd,
+                windowStart: dailyImport.yieldedAt,
+              }),
+              skippedOptionalResources,
+            );
+          }
+
+          return withJunctionHistoricalCoverageVerification(
+            context,
+            job,
+            window,
+            withJunctionSkippedResourceMetadata(
+              context,
+              { nextReconcileAt: clampWebhookJobNextReconcileAt(context) },
+              skippedOptionalResources,
+            ),
+          );
+        }
         if (
           timeseriesPolicy?.historyWindow === "dense_timeseries"
           && (
@@ -2388,7 +2615,7 @@ export function createJunctionDeviceSyncProvider(
             sourceProviderSlug,
             completedWorkoutStreamIdentities,
           );
-          return withJunctionSkippedResourceMetadata(
+          const result = withJunctionSkippedResourceMetadata(
             context,
             dailyImport.yieldedAt
               ? buildYieldedJunctionJobResult({
@@ -2403,6 +2630,7 @@ export function createJunctionDeviceSyncProvider(
               : { nextReconcileAt: clampWebhookJobNextReconcileAt(context) },
             skippedOptionalResources,
           );
+          return result;
         }
         const timeseriesImport = await importTimeseriesPreciseSnapshots(
           context,
@@ -2419,6 +2647,7 @@ export function createJunctionDeviceSyncProvider(
             historicalProviderRecordsSeen:
               job.payload.historicalProviderRecordsSeen === true,
             preservePartialRetryableFailure: extendedHistoricalBackfill,
+            ...(sourceIdentityAuthority ? { sourceIdentityAuthority } : {}),
             sourceLifecycleEpoch: extendedHistoricalBackfill
               ? sourceLifecycleEpoch ?? undefined
               : undefined,
@@ -2427,11 +2656,32 @@ export function createJunctionDeviceSyncProvider(
               : undefined,
           },
         );
+        const calendarRefreshJobs =
+          JUNCTION_SPARSE_CALENDAR_AGGREGATE_RESOURCE_SET.has(effectiveResource)
+            ? buildJunctionSparseCalendarRefreshJobs({
+                asOf: context.now,
+                priority: job.priority,
+                resource: effectiveResource,
+                targets: timeseriesImport.canonicalSparseCalendarTargets,
+              })
+            : [];
+        const finalizePreciseImportResult = (
+          result: ProviderJobResult,
+        ): ProviderJobResult =>
+          calendarRefreshJobs.length === 0
+            ? result
+            : {
+                ...result,
+                scheduledJobs: [
+                  ...(result.scheduledJobs ?? []),
+                  ...calendarRefreshJobs,
+                ],
+              };
         if (
           extendedHistoricalBackfill
           && timeseriesImport.postFetchSourceAdmission === "fenced"
         ) {
-          return {};
+          return finalizePreciseImportResult({});
         }
         if (
           extendedHistoricalBackfill
@@ -2440,12 +2690,14 @@ export function createJunctionDeviceSyncProvider(
           && job.payload.historicalRecordsSeen !== true
           && timeseriesImport.providerRecordCount === 0
         ) {
-          return withJunctionSkippedResourceMetadata(
-            context,
-            {
-              nextReconcileAt: clampWebhookJobNextReconcileAt(context),
-            },
-            skippedOptionalResources,
+          return finalizePreciseImportResult(
+            withJunctionSkippedResourceMetadata(
+              context,
+              {
+                nextReconcileAt: clampWebhookJobNextReconcileAt(context),
+              },
+              skippedOptionalResources,
+            ),
           );
         }
         const historicalRecordsSeen = extendedHistoricalBackfill
@@ -2464,21 +2716,23 @@ export function createJunctionDeviceSyncProvider(
         if (dailyAggregateNeedsRetry) {
           const retryAttempts = dailyAggregateRetryAttempts + 1;
           const retryDelayMs = EMPTY_HISTORICAL_BACKFILL_RETRY_DELAYS_MS[retryAttempts - 1] ?? 0;
-          return withJunctionSkippedResourceMetadata(
-            context,
-            {
-              nextReconcileAt: clampWebhookJobNextReconcileAt(context),
-              scheduledJobs: [buildExtendedTimeseriesBackfillFollowUp(job, {
-                availableAt: addMilliseconds(context.now, retryDelayMs),
-                payload: {
-                  emptyBackfillAttempts: retryAttempts,
-                  historicalRecordsSeen,
-                },
-                windowEnd: window.windowEnd,
-                windowStart: window.windowStart,
-              })],
-            },
-            skippedOptionalResources,
+          return finalizePreciseImportResult(
+            withJunctionSkippedResourceMetadata(
+              context,
+              {
+                nextReconcileAt: clampWebhookJobNextReconcileAt(context),
+                scheduledJobs: [buildExtendedTimeseriesBackfillFollowUp(job, {
+                  availableAt: addMilliseconds(context.now, retryDelayMs),
+                  payload: {
+                    emptyBackfillAttempts: retryAttempts,
+                    historicalRecordsSeen,
+                  },
+                  windowEnd: window.windowEnd,
+                  windowStart: window.windowStart,
+                })],
+              },
+              skippedOptionalResources,
+            ),
           );
         }
         const historicalUnresolvedProviderRecords = extendedHistoricalBackfill
@@ -2505,23 +2759,26 @@ export function createJunctionDeviceSyncProvider(
             ? undefined
             : historicalUnresolvedProviderRecordCount > 0;
         if (timeseriesImport.yieldedAt) {
-          return withJunctionSkippedResourceMetadata(
+          const yieldedResult = buildYieldedJunctionJobResult({
             context,
-            buildYieldedJunctionJobResult({
+            emptyBackfillAttempts:
+              extendedHistoricalPolicy?.completion === "daily_aggregate"
+                ? 0
+                : undefined,
+            historicalProviderRecordsSeen,
+            historicalRecordsSeen,
+            historicalUnresolvedProviderRecordIdentitiesJson,
+            historicalUnresolvedProviderRecordCount,
+            job,
+            windowEnd: window.windowEnd,
+            windowStart: timeseriesImport.yieldedAt,
+          });
+          return finalizePreciseImportResult(
+            withJunctionSkippedResourceMetadata(
               context,
-              emptyBackfillAttempts:
-                extendedHistoricalPolicy?.completion === "daily_aggregate"
-                  ? 0
-                  : undefined,
-              historicalProviderRecordsSeen,
-              historicalRecordsSeen,
-              historicalUnresolvedProviderRecordIdentitiesJson,
-              historicalUnresolvedProviderRecordCount,
-              job,
-              windowEnd: window.windowEnd,
-              windowStart: timeseriesImport.yieldedAt,
-            }),
-            skippedOptionalResources,
+              yieldedResult,
+              skippedOptionalResources,
+            ),
           );
         }
 
@@ -2554,19 +2811,21 @@ export function createJunctionDeviceSyncProvider(
         ) {
           return {};
         }
-        return withJunctionHistoricalCoverageVerification(
-          context,
-          job,
-          window,
-          withJunctionExtendedTimeseriesBackfillFollowUp({
+        return finalizePreciseImportResult(
+          withJunctionHistoricalCoverageVerification(
             context,
-            historicalPullReadiness,
-            importResult: timeseriesImport,
             job,
-            resource: effectiveResource,
-            result,
             window,
-          }),
+            withJunctionExtendedTimeseriesBackfillFollowUp({
+              context,
+              historicalPullReadiness,
+              importResult: timeseriesImport,
+              job,
+              resource: effectiveResource,
+              result,
+              window,
+            }),
+          ),
         );
       }
 
@@ -3148,6 +3407,32 @@ export function createJunctionDeviceSyncProvider(
     return { checked: true, records };
   }
 
+  async function fetchTimeseriesSnapshots(
+    context: ProviderJobContext,
+    windowStart: string,
+    windowEnd: string,
+    skippedOptionalResources: JunctionSkippedOptionalResource[],
+    resources: readonly string[] = timeseriesResources,
+    sourceProviderSlug?: string | null,
+    options: JunctionWindowFetchOptions = {},
+  ): Promise<Record<string, unknown[]>> {
+    const snapshots: Record<string, unknown[]> = {};
+
+    for (const resource of resources) {
+      snapshots[resource] = await fetchTimeseriesResourceInChunks(
+        context,
+        resource,
+        windowStart,
+        windowEnd,
+        skippedOptionalResources,
+        sourceProviderSlug,
+        options,
+      );
+    }
+
+    return snapshots;
+  }
+
   async function fetchTimeseriesResourceInChunks(
     context: ProviderJobContext,
     resource: string,
@@ -3179,6 +3464,9 @@ export function createJunctionDeviceSyncProvider(
         };
         if (options.dateQueryFormat) {
           request.dateQueryFormat = options.dateQueryFormat;
+        }
+        if (options.requireStructurallyCompleteCollection) {
+          request.requireStructurallyCompleteCollection = true;
         }
         const chunkRecords = await fetchJunctionTimeseriesWindow(client, request);
         records.push(
@@ -3237,6 +3525,8 @@ export function createJunctionDeviceSyncProvider(
     let executionWindowStart: string | null = null;
     let fetchComplete = true;
     let yieldedAt: string | null = null;
+    let canonicalEventDayKeys: readonly string[] = [];
+    let canonicalSparseCalendarTargets: readonly ProviderSparseCalendarTarget[] = [];
     let canonicalProviderRecordIdentities: readonly string[] = [];
     let canonicalEventCount = 0;
     let providerRecordsExamined = false;
@@ -3319,54 +3609,66 @@ export function createJunctionDeviceSyncProvider(
     let unresolvedProviderRecordCount = providerRecordCount;
     let unresolvedProviderRecordsWithoutStableIdentity = providerRecordCount > 0;
     const requiresBloodPressureRecordResolution = resources.includes("blood_pressure");
-    const fetchedProviderRecordIdentityEvidence =
-      requiresBloodPressureRecordResolution
-        && executionWindowStart
-        && executionWindowEnd
-        && providerRecordCount > 0
-        ? identifyJunctionBloodPressureProviderRecords({
-          connections: sanitizeJunctionImportConnections(sourceProviders),
-          importedAt: executionWindowEnd,
-          timeseries: sanitizeJunctionImportSnapshots(
-            dedupedTimeseries,
-            sourceProviders,
-          ),
-          windowStart: executionWindowStart,
-          windowEnd: executionWindowEnd,
-        })
-        : null;
     const successfulImportTerminatesWeightRows =
       resources.length === 1 && resources[0] === "weight";
-    if (fetchedProviderRecordIdentityEvidence) {
-      unresolvedProviderRecordIdentities = uniqueJunctionProviderRecordIdentities(
-        fetchedProviderRecordIdentityEvidence.repairStableExternalRefResourceIds,
-      );
-      unresolvedProviderRecordsWithoutStableIdentity =
-        fetchedProviderRecordIdentityEvidence.providerRecordCount !== providerRecordCount
-        || fetchedProviderRecordIdentityEvidence.repairStableExternalRefResourceIds.some(
-          (identity) => identity === null,
-        );
-      unresolvedProviderRecordCount =
-        unresolvedProviderRecordIdentities.length
-        + (unresolvedProviderRecordsWithoutStableIdentity ? 1 : 0);
-    }
 
     if (executionWindowStart && executionWindowEnd) {
-      try {
-        const preparedImport = await prepareJunctionImportSnapshot(
-          context,
-          dedupedTimeseries,
-          sourceProviders,
-          {},
-          options.sourceStatusRequirement,
+      const identifyFetchedProviderRecords = (
+        sourceIdentities: readonly JunctionAccountSourceIdentity[],
+      ) =>
+        requiresBloodPressureRecordResolution && providerRecordCount > 0
+          ? identifyJunctionBloodPressureProviderRecords({
+              connections: sanitizeJunctionImportConnections(
+                sourceProviders,
+                sourceIdentities,
+              ),
+              importedAt: executionWindowEnd,
+              timeseries: sanitizeJunctionImportSnapshots(
+                dedupedTimeseries,
+                sourceProviders,
+                { sourceIdentities },
+              ),
+              windowStart: executionWindowStart,
+              windowEnd: executionWindowEnd,
+            })
+          : null;
+      const applyFetchedProviderRecordEvidence = (
+        evidence: ReturnType<typeof identifyJunctionBloodPressureProviderRecords> | null,
+      ): void => {
+        if (!evidence) {
+          return;
+        }
+        unresolvedProviderRecordIdentities = uniqueJunctionProviderRecordIdentities(
+          evidence.repairStableExternalRefResourceIds,
         );
+        unresolvedProviderRecordsWithoutStableIdentity =
+          evidence.providerRecordCount !== providerRecordCount
+          || evidence.repairStableExternalRefResourceIds.some(
+            (identity) => identity === null,
+          );
+        unresolvedProviderRecordCount =
+          unresolvedProviderRecordIdentities.length
+          + (unresolvedProviderRecordsWithoutStableIdentity ? 1 : 0);
+      };
+      let fetchedProviderRecordIdentityEvidence = identifyFetchedProviderRecords(
+        resolveJunctionAccountSourceIdentities(options.sourceIdentityAuthority ?? []),
+      );
+      applyFetchedProviderRecordEvidence(fetchedProviderRecordIdentityEvidence);
+
+      try {
+        const currentSources: readonly JunctionImportAdmissionSource[] =
+          context.listConnectionSources
+            ? await context.listConnectionSources()
+            : context.account.sources ?? [];
+        const importSourceIdentities = resolveJunctionAccountSourceIdentities(currentSources);
         if (
           sourceProviderSlug
           && options.sourceStatusRequirement === "connected"
         ) {
-          postFetchSourceAdmission = await resolveJunctionCurrentSourceAdmission(
-            context,
+          postFetchSourceAdmission = resolveJunctionCurrentSourceAdmissionFromSources(
+            currentSources,
             sourceProviderSlug,
+            context.connectionSourceAdmissionMode !== "listed_only",
             options.sourceLifecycleEpoch,
           );
           if (postFetchSourceAdmission !== "admitted") {
@@ -3374,6 +3676,8 @@ export function createJunctionDeviceSyncProvider(
               acceptedProviderRecordCount: 0,
               canonicalProviderRecordIdentities: [],
               canonicalEventCount: 0,
+              canonicalEventDayKeys: [],
+              canonicalSparseCalendarTargets: [],
               fetchComplete: false,
               postFetchSourceAdmission,
               providerRecordsExamined: false,
@@ -3385,6 +3689,22 @@ export function createJunctionDeviceSyncProvider(
             };
           }
         }
+        fetchedProviderRecordIdentityEvidence = identifyFetchedProviderRecords(
+          importSourceIdentities,
+        );
+        applyFetchedProviderRecordEvidence(fetchedProviderRecordIdentityEvidence);
+        const preparedImport = prepareJunctionImportSnapshotForSources(
+          dedupedTimeseries,
+          sourceProviders,
+          currentSources,
+          {
+            sourceIdentities: importSourceIdentities,
+          },
+          {
+            allowUnlistedSources: context.connectionSourceAdmissionMode !== "listed_only",
+            sourceStatusRequirement: options.sourceStatusRequirement,
+          },
+        );
         acceptedProviderRecordCount = countAcceptedJunctionDailyTimeseriesProviderRecords({
           connections: preparedImport.connections,
           importedAt: executionWindowEnd,
@@ -3400,12 +3720,15 @@ export function createJunctionDeviceSyncProvider(
             importedAt: executionWindowEnd,
             windowStart: executionWindowStart,
             windowEnd: executionWindowEnd,
+            timeseriesWindowKind: "precise",
             connections: preparedImport.connections,
             summaries: {},
             timeseries: preparedImport.snapshots,
           });
           providerRecordsExamined = true;
           canonicalEventCount = readProviderSnapshotCanonicalEventCount(receipt);
+          canonicalEventDayKeys = readProviderSnapshotCanonicalEventDayKeys(receipt);
+          canonicalSparseCalendarTargets = readProviderSnapshotCanonicalSparseCalendarTargets(receipt);
           if (fetchedProviderRecordIdentityEvidence) {
             const resolutionEvidence =
               resolveJunctionBloodPressureProviderRecordResolutionEvidence({
@@ -3463,6 +3786,8 @@ export function createJunctionDeviceSyncProvider(
             acceptedProviderRecordCount: 0,
             canonicalProviderRecordIdentities: [],
             canonicalEventCount: 0,
+            canonicalEventDayKeys: [],
+            canonicalSparseCalendarTargets: [],
             fetchComplete: false,
             providerRecordsExamined: false,
             providerRecordCount,
@@ -3478,6 +3803,8 @@ export function createJunctionDeviceSyncProvider(
 
     return {
       acceptedProviderRecordCount,
+      canonicalEventDayKeys,
+      canonicalSparseCalendarTargets,
       canonicalProviderRecordIdentities,
       canonicalEventCount,
       fetchComplete,
@@ -3490,6 +3817,140 @@ export function createJunctionDeviceSyncProvider(
       unresolvedProviderRecordCount,
       unresolvedProviderRecordsWithoutStableIdentity,
       yieldedAt,
+    };
+  }
+
+  async function importTimeseriesDailyAggregateSnapshots(
+    context: ProviderJobContext,
+    sourceProviders: readonly JunctionProviderConnection[],
+    windowStart: string,
+    windowEnd: string,
+    skippedOptionalResources: JunctionSkippedOptionalResource[],
+    resources?: readonly string[],
+    sourceProviderSlug?: string | null,
+    emptySparseCalendarSource?: Omit<ProviderSparseCalendarTarget, "dayKey">,
+  ): Promise<JunctionTimeseriesImportResult> {
+    const requestedResources = resources ?? timeseriesResources;
+    const globallyClosedEndMs = resolveGloballyClosedProviderDayEnd(windowEnd, context.now);
+    const appliedDailyAggregateResourceIds = new Set<string>();
+    for (const window of buildClosedDailyWindows(windowStart, windowEnd)) {
+      if (context.shouldYield?.()) {
+        return {
+          appliedDailyAggregateResourceIds: [...appliedDailyAggregateResourceIds],
+          yieldedAt: window.windowStart,
+        };
+      }
+      const windowResources = Date.parse(window.windowEnd) <= globallyClosedEndMs
+        ? requestedResources
+        : requestedResources.filter(
+            (resource) => !JUNCTION_CALENDAR_DAY_AGGREGATE_RESOURCE_SET.has(resource),
+          );
+      if (windowResources.length === 0) {
+        continue;
+      }
+      const skippedResourceCountBeforeFetch = skippedOptionalResources.length;
+      const timeseries = await fetchTimeseriesSnapshots(
+        context,
+        window.windowStart,
+        window.windowEnd,
+        skippedOptionalResources,
+        windowResources,
+        sourceProviderSlug,
+        {
+          dateQueryFormat: "date",
+          requireStructurallyCompleteCollection: Boolean(emptySparseCalendarSource),
+        },
+      );
+      if (
+        emptySparseCalendarSource
+        && skippedOptionalResources.length > skippedResourceCountBeforeFetch
+      ) {
+        throw deviceSyncError({
+          code: "JUNCTION_CALENDAR_REFRESH_UNAVAILABLE",
+          message: "Junction calendar refresh is temporarily unavailable.",
+          retryable: true,
+        });
+      }
+      if (emptySparseCalendarSource) {
+        for (const resource of windowResources) {
+          timeseries[resource] = filterJunctionSparseCalendarRecordsToSource(
+            timeseries[resource] ?? [],
+            {
+              sourceProviderSlug: emptySparseCalendarSource.sourceProviderSlug,
+              ...(emptySparseCalendarSource.sourceType
+                ? { sourceType: emptySparseCalendarSource.sourceType }
+                : {}),
+            },
+          );
+        }
+      }
+      if (!hasJunctionSnapshotRecords(timeseries) && emptySparseCalendarSource) {
+        const [resource] = windowResources;
+        if (!resource || !JUNCTION_SPARSE_CALENDAR_AGGREGATE_RESOURCE_SET.has(resource)) {
+          throw deviceSyncError({
+            code: JUNCTION_CALENDAR_REFRESH_EMPTY_IDENTITY_INVALID_CODE,
+            message: "Junction empty calendar refresh lacked an admitted sparse identity.",
+            retryable: false,
+          });
+        }
+        timeseries[resource] = [buildJunctionEmptySparseCalendarAggregate({
+          dayKey: window.windowStart.slice(0, 10),
+          resource,
+          ...emptySparseCalendarSource,
+        })];
+      } else if (!hasJunctionSnapshotRecords(timeseries)) {
+        continue;
+      }
+
+      const preparedImport = await prepareJunctionImportSnapshot(
+        context,
+        timeseries,
+        sourceProviders,
+        {
+          projectAccountSourceIdentities: true,
+          sourceIdentities: emptySparseCalendarSource
+            ? [{
+                ...(emptySparseCalendarSource.sourceInstanceId
+                  ? { sourceInstanceId: emptySparseCalendarSource.sourceInstanceId }
+                  : {}),
+                sourceProviderSlug: emptySparseCalendarSource.sourceProviderSlug,
+              }]
+            : [],
+        },
+      );
+      if (hasJunctionSnapshotRecords(preparedImport.snapshots)) {
+        const receipt = await context.importSnapshot({
+          provider: "junction",
+          accountId: buildJunctionImportAccountId(context.account.externalAccountId),
+          connectionId: context.account.id,
+          importedAt: window.windowEnd,
+          windowStart: window.windowStart,
+          windowEnd: window.windowEnd,
+          timeseriesWindowKind: "calendar_day",
+          ...(emptySparseCalendarSource
+            ? {
+                strictSparseCalendarRepair: {
+                  dayKey: window.windowStart.slice(0, 10),
+                  resource: windowResources[0],
+                  ...emptySparseCalendarSource,
+                  sourceProviderSlug: normalizeJunctionSourceProviderSlug(
+                    emptySparseCalendarSource.sourceProviderSlug,
+                  ) ?? emptySparseCalendarSource.sourceProviderSlug,
+                },
+              }
+            : {}),
+          connections: preparedImport.connections,
+          summaries: {},
+          timeseries: preparedImport.snapshots,
+        });
+        for (const resourceId of readProviderSnapshotCanonicalEventExternalRefResourceIds(receipt) ?? []) {
+          appliedDailyAggregateResourceIds.add(resourceId);
+        }
+      }
+    }
+    return {
+      appliedDailyAggregateResourceIds: [...appliedDailyAggregateResourceIds],
+      yieldedAt: null,
     };
   }
 
@@ -3678,16 +4139,29 @@ export function createJunctionDeviceSyncProvider(
       }
     } else {
       try {
-        await importJunctionTimeseriesResourceSnapshot({
-          collectionWorkLimit: JUNCTION_FULL_JOB_TIMESERIES_COLLECTION_WORK_LIMIT,
-          context,
-          dateQueryFormat: timeseriesWindowHours === 1 ? "datetime" : "date",
-          resource,
-          skippedOptionalResources,
-          sourceProviders: [],
-          windowEnd: executionWindowEnd,
-          windowStart: timeseriesCursor,
-        });
+        const calendarDayAggregate =
+          JUNCTION_CALENDAR_DAY_AGGREGATE_RESOURCE_SET.has(resource);
+        const importWindow = calendarDayAggregate
+          ? {
+              windowEnd: floorUtcDayTimestamp(executionWindowEnd),
+              windowStart: floorUtcDayTimestamp(timeseriesCursor),
+            }
+          : {
+              windowEnd: executionWindowEnd,
+              windowStart: timeseriesCursor,
+            };
+        if (Date.parse(importWindow.windowStart) < Date.parse(importWindow.windowEnd)) {
+          await importJunctionTimeseriesResourceSnapshot({
+            collectionWorkLimit: JUNCTION_FULL_JOB_TIMESERIES_COLLECTION_WORK_LIMIT,
+            context,
+            dateQueryFormat: timeseriesWindowHours === 1 ? "datetime" : "date",
+            resource,
+            skippedOptionalResources,
+            sourceProviders: [],
+            windowEnd: importWindow.windowEnd,
+            windowStart: importWindow.windowStart,
+          });
+        }
       } catch (error) {
         if (
           isJunctionTimeseriesWindowTooLarge(error)
@@ -3738,6 +4212,23 @@ export function createJunctionDeviceSyncProvider(
     windowEnd: string;
     windowStart: string;
   }): Promise<void> {
+    const calendarDayAggregate = JUNCTION_CALENDAR_DAY_AGGREGATE_RESOURCE_SET.has(
+      input.resource,
+    );
+    if (calendarDayAggregate) {
+      const windowEndMs = Date.parse(input.windowEnd);
+      const globallyClosedProviderDayEnd = resolveGloballyClosedProviderDayEnd(
+        input.windowEnd,
+        input.context.now,
+      );
+      if (
+        !Number.isFinite(windowEndMs)
+        || !Number.isFinite(globallyClosedProviderDayEnd)
+        || windowEndMs > globallyClosedProviderDayEnd
+      ) {
+        return;
+      }
+    }
     const records = await fetchTimeseriesResourceInChunks(
       input.context,
       input.resource,
@@ -3758,6 +4249,7 @@ export function createJunctionDeviceSyncProvider(
       input.context,
       { [input.resource]: records },
       input.sourceProviders,
+      { projectAccountSourceIdentities: calendarDayAggregate },
     );
     if (!hasJunctionSnapshotRecords(preparedImport.snapshots)) {
       return;
@@ -3769,6 +4261,7 @@ export function createJunctionDeviceSyncProvider(
       importedAt: input.windowEnd,
       windowStart: input.windowStart,
       windowEnd: input.windowEnd,
+      ...(calendarDayAggregate ? { timeseriesWindowKind: "calendar_day" as const } : {}),
       connections: preparedImport.connections,
       summaries: {},
       timeseries: preparedImport.snapshots,
@@ -5871,6 +6364,165 @@ function normalizeProviderSlug(value: unknown): string | null {
   return normalized || null;
 }
 
+function resolveJunctionProviderRouteSlug(value: unknown): string | null {
+  const normalized = normalizeProviderSlug(value);
+  if (!normalized) {
+    return null;
+  }
+  return resolveJunctionDeviceConnectRouteByProviderSlug(normalized)?.route.sourceProviderSlug
+    ?? normalized;
+}
+
+function areJunctionProviderSlugsRouteEquivalent(left: unknown, right: unknown): boolean {
+  const normalizedLeft = normalizeProviderSlug(left);
+  const normalizedRight = normalizeProviderSlug(right);
+  return normalizedLeft !== null
+    && normalizedRight !== null
+    && areJunctionDeviceConnectProviderSlugsEquivalent(normalizedLeft, normalizedRight);
+}
+
+interface JunctionAccountSourceIdentity {
+  sourceInstanceId?: string;
+  sourceInstanceKey?: string;
+  sourceProviderSlug: string;
+}
+
+function resolveJunctionAccountSourceIdentities(
+  sources: readonly JunctionImportAdmissionSource[],
+): JunctionAccountSourceIdentity[] {
+  const identities: JunctionAccountSourceIdentity[] = [];
+  for (const source of sources) {
+    const identity = resolveJunctionAccountSourceIdentity(
+      sources,
+      source.sourceProviderSlug,
+    );
+    if (
+      identity
+      && !identities.some((candidate) =>
+        candidate.sourceProviderSlug === identity.sourceProviderSlug
+      )
+    ) {
+      identities.push(identity);
+    }
+  }
+  return identities;
+}
+
+function resolveJunctionAccountSourceStates(
+  sources: readonly JunctionImportAdmissionSource[],
+): Array<ResolvedDeviceSyncSourceState<JunctionImportAdmissionSource>> {
+  const states: Array<ResolvedDeviceSyncSourceState<JunctionImportAdmissionSource>> = [];
+  for (const source of sources) {
+    if (states.some((state) => areJunctionProviderSlugsRouteEquivalent(
+      state.identitySource.sourceProviderSlug,
+      source.sourceProviderSlug,
+    ))) {
+      continue;
+    }
+    const state = resolveJunctionAccountSourceState(
+      sources,
+      source.sourceProviderSlug,
+    );
+    if (state) {
+      states.push(state);
+    }
+  }
+  return states;
+}
+
+function mergeJunctionAccountSourceIdentities(
+  accountSourceIdentities: readonly JunctionAccountSourceIdentity[],
+  requestedSourceIdentities: readonly JunctionAccountSourceIdentity[],
+): JunctionAccountSourceIdentity[] {
+  return [
+    ...accountSourceIdentities,
+    ...requestedSourceIdentities.filter((requestedIdentity) =>
+      !accountSourceIdentities.some((accountIdentity) =>
+        areJunctionProviderSlugsRouteEquivalent(
+          requestedIdentity.sourceProviderSlug,
+          accountIdentity.sourceProviderSlug,
+        )
+      )
+    ),
+  ];
+}
+
+function resolveJunctionAccountSourceIdentity(
+  sources: readonly JunctionImportAdmissionSource[],
+  sourceProviderSlug: string | null | undefined,
+  allowUnlistedSource = false,
+): JunctionAccountSourceIdentity | null {
+  const normalizedSourceProviderSlug = normalizeProviderSlug(sourceProviderSlug);
+  if (!normalizedSourceProviderSlug) {
+    return null;
+  }
+  const matchingSource = findJunctionAccountSource(
+    sources,
+    normalizedSourceProviderSlug,
+  );
+  if (!matchingSource) {
+    return allowUnlistedSource
+      ? { sourceProviderSlug: normalizedSourceProviderSlug }
+      : null;
+  }
+  const establishedSourceProviderSlug = normalizeProviderSlug(
+    matchingSource.sourceProviderSlug,
+  );
+  if (!establishedSourceProviderSlug) {
+    return null;
+  }
+  const sourceInstanceId = matchingSource.sourceInstanceKey
+    ? resolveJunctionOrigin({
+        sourceInstanceId: matchingSource.sourceInstanceKey,
+        sourceProviderSlug: establishedSourceProviderSlug,
+      }).sourceInstanceId
+    : undefined;
+  return {
+    ...(matchingSource.sourceInstanceKey
+      ? {
+          ...(sourceInstanceId ? { sourceInstanceId } : {}),
+          sourceInstanceKey: matchingSource.sourceInstanceKey,
+        }
+      : {}),
+    sourceProviderSlug: establishedSourceProviderSlug,
+  };
+}
+
+function findJunctionAccountSource(
+  sources: readonly JunctionImportAdmissionSource[],
+  sourceProviderSlug: string,
+): JunctionImportAdmissionSource | undefined {
+  return resolveJunctionAccountSourceState(sources, sourceProviderSlug)
+    ?.identitySource;
+}
+
+function findJunctionAccountSources(
+  sources: readonly JunctionImportAdmissionSource[],
+  sourceProviderSlug: string,
+): JunctionImportAdmissionSource[] {
+  return sources.filter((source) => areJunctionProviderSlugsRouteEquivalent(
+    source.sourceProviderSlug,
+    sourceProviderSlug,
+  ));
+}
+
+function resolveJunctionAccountSourceState(
+  sources: readonly JunctionImportAdmissionSource[],
+  sourceProviderSlug: string,
+) {
+  const [first, ...rest] = findJunctionAccountSources(
+    sources,
+    sourceProviderSlug,
+  );
+  if (!first) {
+    return null;
+  }
+  return resolveDeviceSyncSourceState(
+    [first, ...rest],
+    junctionSourceStateUnavailableError,
+  );
+}
+
 function stripUndefined(value: Record<string, unknown>): Record<string, unknown> {
   return Object.fromEntries(
     Object.entries(value).filter(([, entry]) => entry !== undefined),
@@ -5879,11 +6531,23 @@ function stripUndefined(value: Record<string, unknown>): Record<string, unknown>
 
 function sanitizeJunctionImportConnections(
   providers: readonly JunctionProviderConnection[],
+  sourceIdentities: readonly JunctionAccountSourceIdentity[] = [],
 ): Array<Record<string, unknown>> {
-  return providers.map((provider) => stripUndefined({
-    sourceProviderSlug: provider.origin.sourceProviderSlug ?? provider.slug,
-    sourceInstanceId: provider.origin.sourceInstanceId,
-  }));
+  return providers.map((provider) => {
+    const sourceProviderSlug = provider.origin.sourceProviderSlug ?? provider.slug;
+    const projectedSourceIdentity = sourceIdentities.find(
+      (identity) => areJunctionProviderSlugsRouteEquivalent(
+        sourceProviderSlug,
+        identity.sourceProviderSlug,
+      ),
+    );
+    return stripUndefined({
+      sourceProviderSlug:
+        projectedSourceIdentity?.sourceProviderSlug ?? sourceProviderSlug,
+      sourceInstanceId:
+        projectedSourceIdentity?.sourceInstanceId ?? provider.origin.sourceInstanceId,
+    });
+  });
 }
 
 async function prepareJunctionImportSnapshot(
@@ -5897,12 +6561,18 @@ async function prepareJunctionImportSnapshot(
     context.listConnectionSources
       ? await context.listConnectionSources()
       : context.account.sources ?? [];
+  const sourceIdentities = options.projectAccountSourceIdentities
+    ? mergeJunctionAccountSourceIdentities(
+        resolveJunctionAccountSourceIdentities(currentSources),
+        options.sourceIdentities ?? [],
+      )
+    : options.sourceIdentities;
 
   return prepareJunctionImportSnapshotForSources(
     snapshots,
     providers,
     currentSources,
-    options,
+    { ...options, sourceIdentities },
     {
       allowUnlistedSources: context.connectionSourceAdmissionMode !== "listed_only",
       sourceStatusRequirement,
@@ -5933,7 +6603,10 @@ function prepareJunctionImportSnapshotForSources(
   );
 
   return {
-    connections: sanitizeJunctionImportConnections(sourceProviders),
+    connections: sanitizeJunctionImportConnections(
+      sourceProviders,
+      options.sourceIdentities,
+    ),
     sourceProviders,
     snapshots: sanitizeJunctionImportSnapshots(
       filterJunctionImportSnapshots(
@@ -5957,18 +6630,15 @@ function filterJunctionImportSnapshots(
   sourceStatusRequirement: JunctionImportSourceStatusRequirement = "not_disconnected",
 ): Record<string, unknown[]> {
   const sourceReferences = buildJunctionSourceReferenceMap(providers);
-  const sourceProviderSlugs = new Set(
-    sources
-      .map((source) => canonicalizeJunctionProviderSlug(source.sourceProviderSlug))
-      .filter((sourceProviderSlug): sourceProviderSlug is string => sourceProviderSlug !== null),
-  );
-  const hasPendingSourceAdmission = [...sourceProviderSlugs].some((sourceProviderSlug) =>
-    !isJunctionSourceAdmittedForImport(
-      sources,
-      sourceProviderSlug,
-      false,
-      sourceStatusRequirement,
-    )
+  const hasPendingSourceAdmission = resolveJunctionAccountSourceStates(sources).some(
+    ({ lifecycleSource }) =>
+    sourceStatusRequirement === "connected"
+      ? !isDeviceSyncSourceAdmitted(
+          [lifecycleSource],
+          lifecycleSource.sourceProviderSlug,
+        )
+      : lifecycleSource.status === "disconnected"
+        || isDeviceSyncSourceDisconnectFenced(lifecycleSource)
   );
 
   return Object.fromEntries(
@@ -6061,6 +6731,8 @@ function buildJunctionSourceReferenceMap(
 interface JunctionImportSnapshotSanitizeOptions {
   blockedStringValues?: readonly string[];
   preserveSourceReferenceKeys?: boolean;
+  projectAccountSourceIdentities?: boolean;
+  sourceIdentities?: readonly JunctionAccountSourceIdentity[];
 }
 
 function sanitizeJunctionImportSnapshotValue(
@@ -6095,12 +6767,24 @@ function sanitizeJunctionImportSnapshotValue(
     hasJunctionSourceReferenceIdentity(record);
   const sourceInstanceId = fallbackSourceInstanceId ??
     (unresolvedPreservedSourceReference ? undefined : origin.sourceInstanceId);
+  const sourceProviderSlug = normalizeProviderSlug(origin.sourceProviderSlug);
+  const projectedSourceIdentity = options.sourceIdentities
+    ?.find((identity) => areJunctionProviderSlugsRouteEquivalent(
+      sourceProviderSlug,
+      identity.sourceProviderSlug,
+    ));
 
   return stripUndefined({
     ...sanitized,
-    sourceProviderSlug: normalizeProviderSlug(origin.sourceProviderSlug) ?? sanitized.sourceProviderSlug,
+    sourceProviderSlug:
+      projectedSourceIdentity?.sourceProviderSlug
+      ?? sourceProviderSlug
+      ?? sanitized.sourceProviderSlug,
     sourceType: origin.sourceType ?? sanitized.sourceType,
-    sourceInstanceId: sourceInstanceId ?? sanitized.sourceInstanceId,
+    sourceInstanceId:
+      projectedSourceIdentity?.sourceInstanceId
+      ?? sourceInstanceId
+      ?? sanitized.sourceInstanceId,
   });
 }
 
@@ -6322,17 +7006,20 @@ function filterJunctionTimeseriesRecordsToWindow(
     if (
       dateQueryFormat === "date"
       && policy?.normalizationMode === "daily_aggregate"
-      && (
-        isJunctionFloatingCalendarTimestamp(rawTimestamp)
+    ) {
+      if (
+        JUNCTION_CALENDAR_DAY_AGGREGATE_RESOURCE_SET.has(resource)
         || resolveJunctionExtendedTimeseriesBackfillPolicy(resource)?.completion
           === "daily_aggregate"
-      )
-    ) {
-      // Junction's date-mode response owns the provider calendar day. Keep
-      // every interval for extended daily aggregates together even when an
-      // explicit offset crosses UTC midnight. Bounded activity totals retain
-      // their established instant ownership for offset-bearing intervals.
-      return rawTimestamp.slice(0, 10) === windowStart.slice(0, 10);
+      ) {
+        // Junction's date-mode response owns the provider calendar day. Keep
+        // every interval together even when an explicit offset crosses UTC
+        // midnight; the importer owns provider-local day resolution.
+        return true;
+      }
+      if (isJunctionFloatingCalendarTimestamp(rawTimestamp)) {
+        return rawTimestamp.slice(0, 10) === windowStart.slice(0, 10);
+      }
     }
 
     const timestamp = toIsoTimestampIfValid(rawTimestamp) ?? rawTimestamp;
@@ -6388,6 +7075,13 @@ function buildJunctionTimeseriesProviderRowKey(
   resource: string,
   record: unknown,
 ): string | null {
+  // The bounded fidelity importer owns same-row revision arbitration for these
+  // resources. Keep each distinct semantic body in transport so it can select
+  // an explicit newer revision or reject an ambiguous provider conflict.
+  if (JUNCTION_CALENDAR_DAY_AGGREGATE_RESOURCE_SET.has(resource)) {
+    return null;
+  }
+
   const entry = readPlainObject(record);
   if (!entry) {
     return null;
@@ -6447,6 +7141,7 @@ function junctionTimeseriesRecordNeedsSemanticIdentity(resource: string): boolea
   const policy = resolveJunctionTimeseriesResourcePolicy(resource);
   return resource === "blood_pressure"
     || resource === "note"
+    || JUNCTION_CALENDAR_DAY_AGGREGATE_RESOURCE_SET.has(resource)
     || policy?.normalizationMode === "sparse_alert"
     || policy?.normalizationMode === "sparse_intervention"
     || policy?.normalizationMode === "sparse_observation"
@@ -6461,7 +7156,7 @@ function readJunctionTimeseriesProviderRowId(
     return null;
   }
 
-  for (const key of [
+  const providerRowIdKeys = [
     "id",
     "resourceId",
     "resource_id",
@@ -6469,7 +7164,11 @@ function readJunctionTimeseriesProviderRowId(
     "external_id",
     "providerId",
     "provider_id",
-  ]) {
+    ...(JUNCTION_CALENDAR_DAY_AGGREGATE_RESOURCE_SET.has(resource)
+      ? ["recordId", "record_id", "sampleId", "sample_id"]
+      : []),
+  ];
+  for (const key of providerRowIdKeys) {
     const rowId = normalizeString(entry[key]);
     if (rowId) {
       return rowId;
@@ -6510,6 +7209,111 @@ function junctionTimeseriesRecordValueIdentity(
           return normalized ? [normalized] : [];
         })
         .sort(),
+    ];
+  }
+
+  const fidelityPointResource = resource === "glucose"
+    || resource === "blood_oxygen"
+    || resource === "stress_level";
+  const fidelityIntervalResource = resource === "caffeine"
+    || resource === "water"
+    || resource === "mindfulness_minutes";
+  const rowId = includeProviderRowId ? providerRowId : "";
+  const fidelitySourceRevision = String(
+    entry.recordedAt
+      ?? entry.recorded_at
+      ?? entry.updatedAt
+      ?? entry.updated_at
+      ?? "",
+  );
+  const timeZoneIdentity = [
+    String(entry.timeZone ?? entry.timezone ?? entry.time_zone ?? ""),
+    String(
+      entry.timeZoneOffsetMinutes
+        ?? entry.time_zone_offset_minutes
+        ?? entry.timezoneOffsetMinutes
+        ?? entry.timezone_offset_minutes
+        ?? entry.utcOffsetMinutes
+        ?? entry.utc_offset_minutes
+        ?? "",
+    ),
+    String(
+      entry.timezone_offset
+        ?? entry.timezoneOffset
+        ?? entry.timeZoneOffset
+        ?? entry.time_zone_offset
+        ?? entry.timezoneOffsetSeconds
+        ?? entry.timezone_offset_seconds
+        ?? entry.timeZoneOffsetSeconds
+        ?? entry.time_zone_offset_seconds
+        ?? entry.utcOffsetSeconds
+        ?? entry.utc_offset_seconds
+        ?? "",
+    ),
+  ];
+  const providerDayIdentity = [
+    String(
+      entry.calendarDate
+        ?? entry.calendar_date
+        ?? entry.localDate
+        ?? entry.local_date
+        ?? "",
+    ),
+    String(entry.timestampSemantics ?? entry.timestamp_semantics ?? ""),
+  ];
+
+  if (fidelityIntervalResource) {
+    const intervalValue = resource === "mindfulness_minutes"
+      ? entry.value ?? entry.mindfulnessMinutes ?? entry.mindfulness_minutes
+      : resource === "caffeine"
+        ? entry.value ?? entry.caffeine
+        : entry.value ?? entry.water;
+    return [
+      rowId,
+      String(entry.start ?? entry.startAt ?? entry.start_at ?? entry.timeStart ?? entry.time_start ?? ""),
+      String(entry.end ?? entry.endAt ?? entry.end_at ?? entry.timeEnd ?? entry.time_end ?? ""),
+      String(entry.unit ?? entry.valueUnit ?? entry.value_unit ?? ""),
+      String(intervalValue ?? ""),
+      ...providerDayIdentity,
+      ...timeZoneIdentity,
+      fidelitySourceRevision,
+    ];
+  }
+
+  if (fidelityPointResource) {
+    return [
+      rowId,
+      String(
+        entry.observedAt
+          ?? entry.observed_at
+          ?? entry.observed_at_utc
+          ?? entry.timestamp
+          ?? entry.time
+          ?? entry.date
+          ?? entry.day
+          ?? "",
+      ),
+      String(entry.value ?? (resource === "glucose"
+        ? entry.glucose ?? entry.bloodGlucose ?? entry.blood_glucose
+        : resource === "blood_oxygen"
+          ? entry.spo2
+            ?? entry.spO2
+            ?? entry.bloodOxygen
+            ?? entry.blood_oxygen
+            ?? entry.oxygenSaturation
+            ?? entry.oxygen_saturation
+          : entry.stressLevel
+            ?? entry.stress_level
+            ?? entry.averageStressLevel
+            ?? entry.average_stress_level
+            ?? readPlainObject(entry.stress)?.average
+            ?? entry.stressLevelValue
+            ?? entry.stress_level_value
+            ?? entry.score) ?? ""),
+      String(entry.unit ?? entry.valueUnit ?? entry.value_unit ?? ""),
+      ...providerDayIdentity,
+      ...timeZoneIdentity,
+      fidelitySourceRevision,
     ];
   }
 
@@ -6874,6 +7678,26 @@ function shouldImportClosedTimeseriesForReconcile(
     || lastCompletedClosedDayMs < windowEndMs;
 }
 
+function resolveLatestGloballyClosedProviderDayWindow(
+  windowStart: string,
+  windowEnd: string,
+  asOf: string,
+): { windowStart: string; windowEnd: string } | null {
+  const flooredWindowStartMs = Date.parse(floorUtcDayTimestamp(windowStart));
+  const globallyClosedEndMs = resolveGloballyClosedProviderDayEnd(windowEnd, asOf);
+  if (
+    !Number.isFinite(flooredWindowStartMs)
+    || !Number.isFinite(globallyClosedEndMs)
+    || flooredWindowStartMs >= globallyClosedEndMs
+  ) {
+    return null;
+  }
+  return {
+    windowStart: new Date(globallyClosedEndMs - TIMESERIES_CHUNK_MS).toISOString(),
+    windowEnd: new Date(globallyClosedEndMs).toISOString(),
+  };
+}
+
 function buildClosedDailyWindows(
   windowStart: string,
   windowEnd: string,
@@ -6911,6 +7735,21 @@ function buildClosedDailyWindows(
   }
 
   return windows;
+}
+
+function resolveGloballyClosedProviderDayEnd(windowEnd: string, asOf: string): number {
+  const requestedClosedEndMs = Date.parse(floorUtcDayTimestamp(windowEnd));
+  const asOfMs = Date.parse(asOf);
+  if (!Number.isFinite(requestedClosedEndMs) || !Number.isFinite(asOfMs)) {
+    return Number.NaN;
+  }
+
+  const globallyClosedEndMs = Date.parse(
+    floorUtcDayTimestamp(
+      new Date(asOfMs - JUNCTION_PROVIDER_CALENDAR_DAY_CLOSE_LAG_MS).toISOString(),
+    ),
+  );
+  return Math.min(requestedClosedEndMs, globallyClosedEndMs);
 }
 
 function buildPreciseTimeseriesWindows(
@@ -7784,6 +8623,201 @@ function buildExactWindowJob<Kind extends "backfill" | "reconcile">(input: {
     ...(input.availableAt ? { availableAt: input.availableAt } : {}),
     dedupeKey: sha256Text(JSON.stringify(dedupeIdentity)),
   };
+}
+
+function buildJunctionSparseCalendarRefreshJobs(input: {
+  asOf: string;
+  priority: number;
+  resource: string;
+  targets: readonly ProviderSparseCalendarTarget[];
+}): DeviceSyncJobInput[] {
+  const targets = [...new Map(input.targets.map((target) => [
+    JSON.stringify([
+      target.dayKey,
+      target.sourceProviderSlug,
+      target.sourceType ?? null,
+      target.sourceInstanceId ?? null,
+    ]),
+    target,
+  ])).values()];
+  const dayKeys = [...new Set(targets.map((target) => target.dayKey))].sort();
+  if (
+    dayKeys.length > JUNCTION_MAX_SPARSE_CALENDAR_REFRESH_DAYS
+    || targets.length > JUNCTION_MAX_SPARSE_CALENDAR_REFRESH_DAYS
+  ) {
+    throw deviceSyncError({
+      code: "JUNCTION_CALENDAR_REFRESH_DAY_LIMIT_EXCEEDED",
+      message: "Junction sparse import exceeded the calendar refresh day limit.",
+      retryable: false,
+      details: {
+        affectedDayCount: dayKeys.length,
+        affectedTargetCount: targets.length,
+        maxAllowed: JUNCTION_MAX_SPARSE_CALENDAR_REFRESH_DAYS,
+      },
+    });
+  }
+
+  return targets
+    .filter((target) => isGloballyClosedJunctionProviderDay(target.dayKey, input.asOf))
+    .map((target) => buildJunctionSparseCalendarRefreshJob({
+      dayKey: target.dayKey,
+      priority: input.priority,
+      resource: input.resource,
+      sourceInstanceId: target.sourceInstanceId,
+      sourceProviderSlug: target.sourceProviderSlug,
+      sourceType: target.sourceType,
+    }));
+}
+
+function buildJunctionSparseCalendarRefreshJob(input: {
+  dayKey: string;
+  priority: number;
+  resource: string;
+  sourceInstanceId?: string | null;
+  sourceProviderSlug?: string | null;
+  sourceType?: string | null;
+}): DeviceSyncJobInput {
+  const windowStart = `${input.dayKey}T00:00:00.000Z`;
+  const windowEnd = addMilliseconds(windowStart, TIMESERIES_CHUNK_MS);
+  const sourceProviderSlug = normalizeProviderSlug(input.sourceProviderSlug);
+  const sourceInstanceId = normalizeString(input.sourceInstanceId);
+  const sourceType = normalizeString(input.sourceType);
+  return {
+    kind: "resource",
+    payload: {
+      calendarRefreshDay: input.dayKey,
+      resource: input.resource,
+      resourceCategory: "timeseries",
+      ...(sourceInstanceId ? { sourceInstanceId } : {}),
+      ...(sourceProviderSlug ? { sourceProviderSlug } : {}),
+      ...(sourceType ? { sourceType } : {}),
+      windowEnd,
+      windowStart,
+    } satisfies JunctionDeviceSyncJobPayloads["resource"],
+    priority: input.priority,
+    dedupeKey: sha256Text(JSON.stringify([
+      "junction",
+      "sparse-calendar-refresh",
+      sourceProviderSlug,
+      sourceType,
+      sourceInstanceId,
+      input.resource,
+      input.dayKey,
+    ])),
+  };
+}
+
+function readJunctionSparseCalendarRefreshDay(job: DeviceSyncJobRecord): string | null {
+  if (!("calendarRefreshDay" in job.payload)) {
+    return null;
+  }
+  const dayKey = job.payload.calendarRefreshDay;
+  if (!isCanonicalEventDayKey(dayKey)) {
+    throw deviceSyncError({
+      code: JUNCTION_CALENDAR_REFRESH_JOB_INVALID_CODE,
+      message: "Junction calendar refresh job had an invalid provider day.",
+      retryable: false,
+    });
+  }
+  return dayKey;
+}
+
+function readJunctionSparseCalendarSourceIdentity(
+  job: DeviceSyncJobRecord,
+): Omit<ProviderSparseCalendarTarget, "dayKey"> {
+  const sourceProviderSlug = normalizeProviderSlug(job.payload.sourceProviderSlug);
+  if (!sourceProviderSlug) {
+    throw deviceSyncError({
+      code: JUNCTION_CALENDAR_REFRESH_JOB_INVALID_CODE,
+      message: "Junction calendar refresh job lacked its source provider identity.",
+      retryable: false,
+    });
+  }
+  const sourceInstanceId = normalizeString(job.payload.sourceInstanceId);
+  const sourceType = normalizeString(job.payload.sourceType);
+  return {
+    ...(sourceInstanceId ? { sourceInstanceId } : {}),
+    sourceProviderSlug,
+    ...(sourceType ? { sourceType } : {}),
+  };
+}
+
+function filterJunctionSparseCalendarRecordsToSource(
+  records: readonly unknown[],
+  source: Omit<ProviderSparseCalendarTarget, "dayKey">,
+): unknown[] {
+  const sourceProviderSlug = normalizeProviderSlug(source.sourceProviderSlug);
+  const sourceInstanceId = normalizeString(source.sourceInstanceId);
+  const sourceType = normalizeString(source.sourceType);
+  return records.flatMap((record) => {
+    const entry = readPlainObject(record);
+    if (!entry) {
+      throw incompleteJunctionSparseCalendarCollectionError();
+    }
+    const origin = resolveJunctionOrigin(entry);
+    const recordSourceProviderSlug = normalizeProviderSlug(origin.sourceProviderSlug);
+    if (!recordSourceProviderSlug) {
+      throw incompleteJunctionSparseCalendarCollectionError();
+    }
+    if (!areJunctionProviderSlugsRouteEquivalent(recordSourceProviderSlug, sourceProviderSlug)) {
+      return [];
+    }
+    const recordSourceType = normalizeString(origin.sourceType);
+    if (sourceType && !recordSourceType) {
+      throw incompleteJunctionSparseCalendarCollectionError();
+    }
+    if (sourceType && recordSourceType !== sourceType) {
+      return [];
+    }
+    const recordSourceInstanceId = normalizeString(origin.sourceInstanceId);
+    if (sourceInstanceId && !recordSourceInstanceId) {
+      throw incompleteJunctionSparseCalendarCollectionError();
+    }
+    if (sourceInstanceId && recordSourceInstanceId !== sourceInstanceId) {
+      return [];
+    }
+    return [{
+      ...entry,
+      sourceProviderSlug,
+      ...(sourceType ? { sourceType } : {}),
+      ...(sourceInstanceId ? { sourceInstanceId } : {}),
+    }];
+  });
+}
+
+function incompleteJunctionSparseCalendarCollectionError(): DeviceSyncError {
+  return deviceSyncError({
+    code: "JUNCTION_CALENDAR_REFRESH_INCOMPLETE_NORMALIZATION",
+    message: "Junction calendar refresh response was not structurally complete.",
+    retryable: true,
+    httpStatus: 502,
+  });
+}
+
+function buildJunctionEmptySparseCalendarAggregate(input: {
+  dayKey: string;
+  resource: string;
+  sourceInstanceId?: string | null;
+  sourceProviderSlug: string;
+  sourceType?: string;
+}): Record<string, unknown> {
+  return stripUndefined({
+    authoritativeEmptyCalendarSet: true,
+    calendarDate: input.dayKey,
+    date: input.dayKey,
+    sourceInstanceId: input.sourceInstanceId,
+    sourceProviderSlug: input.sourceProviderSlug,
+    sourceType: input.sourceType,
+    value: 0,
+  });
+}
+
+function isGloballyClosedJunctionProviderDay(dayKey: string, asOf: string): boolean {
+  if (!isCanonicalEventDayKey(dayKey)) {
+    return false;
+  }
+  const windowEnd = addMilliseconds(`${dayKey}T00:00:00.000Z`, TIMESERIES_CHUNK_MS);
+  return Date.parse(windowEnd) <= resolveGloballyClosedProviderDayEnd(windowEnd, asOf);
 }
 
 function buildJunctionExtendedTimeseriesBackfillDedupeKey(
@@ -9043,12 +10077,6 @@ async function projectJunctionSources(
     context.listConnectionSources
       ? existingSources
       : context.account.sources ?? [];
-  const existingByInstanceKey = new Map(
-    existingSources.map((existingSource) => [
-      existingSource.sourceInstanceKey,
-      existingSource,
-    ] as const),
-  );
   for (const source of projectJunctionSourcesByProviderSlug(
     context.account.id,
     providers,
@@ -9069,9 +10097,14 @@ async function projectJunctionSources(
     ) {
       continue;
     }
-    const existing = existingByInstanceKey.get(source.sourceInstanceKey) ?? existingSources.find(
-      (candidate) =>
-        canonicalizeJunctionProviderSlug(candidate.sourceProviderSlug) === source.sourceProviderSlug,
+    const accountSourceIdentity = resolveJunctionAccountSourceIdentity(
+      existingSources,
+      source.sourceProviderSlug,
+      true,
+    );
+    const existing = findJunctionAccountSource(
+      existingSources,
+      source.sourceProviderSlug,
     );
     const keepHistoricalReconnect =
       preserveHistoricalReconnect
@@ -9089,8 +10122,10 @@ async function projectJunctionSources(
       );
     const historicalReconnectError = keepHistoricalReconnect ? existing : null;
     await context.upsertConnectionSource({
-      sourceInstanceKey: existing?.sourceInstanceKey ?? source.sourceInstanceKey,
-      sourceProviderSlug: source.sourceProviderSlug,
+      sourceInstanceKey:
+        accountSourceIdentity?.sourceInstanceKey ?? source.sourceInstanceKey,
+      sourceProviderSlug:
+        accountSourceIdentity?.sourceProviderSlug ?? source.sourceProviderSlug,
       displayName: existing?.displayName ?? null,
       ...(existing?.firstSeenAt ? { firstSeenAt: existing.firstSeenAt } : {}),
       status: keepHistoricalReconnect
@@ -9120,55 +10155,6 @@ function readJunctionSourceLifecycleEpoch(source: { lifecycleEpoch?: number }): 
     : 1;
 }
 
-function buildJunctionCurrentLifecycleSourceMap<TSource extends JunctionImportAdmissionSource>(
-  sources: readonly TSource[],
-): Map<string, TSource[]> {
-  const currentByProviderSlug = new Map<string, TSource[]>();
-  for (const source of sources) {
-    const sourceProviderSlug = canonicalizeJunctionProviderSlug(source.sourceProviderSlug);
-    if (!sourceProviderSlug) {
-      continue;
-    }
-    const lifecycleEpoch = readJunctionSourceLifecycleEpoch(source);
-    const current = currentByProviderSlug.get(sourceProviderSlug);
-    const currentLifecycleEpoch = current?.[0]
-      ? readJunctionSourceLifecycleEpoch(current[0])
-      : 0;
-    if (!current || lifecycleEpoch > currentLifecycleEpoch) {
-      currentByProviderSlug.set(sourceProviderSlug, [source]);
-    } else if (lifecycleEpoch === currentLifecycleEpoch) {
-      current.push(source);
-    }
-  }
-  return currentByProviderSlug;
-}
-
-function selectCurrentJunctionLifecycleSources(
-  sources: readonly JunctionImportAdmissionSource[],
-  sourceProviderSlug: string,
-): JunctionImportAdmissionSource[] {
-  const canonicalSourceProviderSlug = canonicalizeJunctionProviderSlug(sourceProviderSlug);
-  if (!canonicalSourceProviderSlug) {
-    return [];
-  }
-  return buildJunctionCurrentLifecycleSourceMap(sources).get(canonicalSourceProviderSlug) ?? [];
-}
-
-function isJunctionLifecycleSourceGroupAdmitted(
-  sources: readonly JunctionImportAdmissionSource[],
-  sourceStatusRequirement: JunctionImportSourceStatusRequirement,
-): boolean {
-  if (sources.length === 0 || sources.some(isDeviceSyncSourceDisconnectFenced)) {
-    return false;
-  }
-  const status = sources
-    .map((source) => source.status)
-    .reduce(mergeJunctionSourceStatus);
-  return sourceStatusRequirement === "connected"
-    ? status === "connected"
-    : status !== "disconnected";
-}
-
 function isJunctionSourceAdmittedForImport(
   sources: readonly JunctionImportAdmissionSource[],
   sourceProviderSlug: string | null | undefined,
@@ -9180,13 +10166,26 @@ function isJunctionSourceAdmittedForImport(
     return true;
   }
 
-  const matchingSources = selectCurrentJunctionLifecycleSources(
+  const accountSourceIdentity = resolveJunctionAccountSourceIdentity(
     sources,
     normalizedSourceProviderSlug,
+    allowUnlistedSources,
   );
-  return matchingSources.length === 0
-    ? allowUnlistedSources
-    : isJunctionLifecycleSourceGroupAdmitted(matchingSources, sourceStatusRequirement);
+  if (!accountSourceIdentity) {
+    return false;
+  }
+  const sourceState = resolveJunctionAccountSourceState(
+    sources,
+    accountSourceIdentity.sourceProviderSlug,
+  );
+  if (!sourceState) {
+    return allowUnlistedSources;
+  }
+  const lifecycleSource = sourceState.lifecycleSource;
+  return sourceStatusRequirement === "connected"
+    ? isDeviceSyncSourceAdmitted([lifecycleSource], lifecycleSource.sourceProviderSlug)
+    : lifecycleSource.status !== "disconnected"
+      && !isDeviceSyncSourceDisconnectFenced(lifecycleSource);
 }
 
 function isJunctionSourceProjectionFenced(
@@ -9198,8 +10197,19 @@ function isJunctionSourceProjectionFenced(
     return false;
   }
 
-  return selectCurrentJunctionLifecycleSources(sources, normalizedSourceProviderSlug)
-    .some(isDeviceSyncSourceDisconnectFenced);
+  const accountSourceIdentity = resolveJunctionAccountSourceIdentity(
+    sources,
+    normalizedSourceProviderSlug,
+  );
+  if (!accountSourceIdentity) {
+    return false;
+  }
+  const sourceState = resolveJunctionAccountSourceState(
+    sources,
+    accountSourceIdentity.sourceProviderSlug,
+  );
+  return sourceState !== null
+    && isDeviceSyncSourceDisconnectFenced(sourceState.lifecycleSource);
 }
 
 function hasJunctionSourceListing(
@@ -9212,7 +10222,10 @@ function hasJunctionSourceListing(
   }
 
   return sources.some((source) =>
-    canonicalizeJunctionProviderSlug(source.sourceProviderSlug) === normalizedSourceProviderSlug
+    areJunctionProviderSlugsRouteEquivalent(
+      source.sourceProviderSlug,
+      normalizedSourceProviderSlug,
+    )
   );
 }
 
@@ -9224,30 +10237,42 @@ async function resolveJunctionCurrentSourceAdmission(
   const sources = context.listConnectionSources
     ? await context.listConnectionSources({ sourceProviderSlug })
     : context.account.sources ?? [];
-  const normalizedSourceProviderSlug = canonicalizeJunctionProviderSlug(sourceProviderSlug);
-  if (!normalizedSourceProviderSlug) {
-    return "fenced";
-  }
-  const matchingSources = selectCurrentJunctionLifecycleSources(
+  return resolveJunctionCurrentSourceAdmissionFromSources(
     sources,
-    normalizedSourceProviderSlug,
+    sourceProviderSlug,
+    context.connectionSourceAdmissionMode !== "listed_only",
+    expectedLifecycleEpoch,
   );
-  if (matchingSources.some(isDeviceSyncSourceDisconnectFenced)) {
+}
+
+function resolveJunctionCurrentSourceAdmissionFromSources(
+  sources: readonly JunctionImportAdmissionSource[],
+  sourceProviderSlug: string,
+  allowUnlistedSources: boolean,
+  expectedLifecycleEpoch?: number,
+): JunctionCurrentSourceAdmission {
+  if (isJunctionSourceProjectionFenced(sources, sourceProviderSlug)) {
     return "fenced";
   }
+  const sourceState = resolveJunctionAccountSourceState(
+    sources,
+    sourceProviderSlug,
+  );
   if (
     expectedLifecycleEpoch !== undefined
-    && (matchingSources.length > 0 || context.connectionSourceAdmissionMode === "listed_only")
-    && !matchingSources.some((source) =>
-      (source.lifecycleEpoch ?? 1) === expectedLifecycleEpoch
+    && (
+      sourceState === null
+        ? !allowUnlistedSources
+        : readJunctionSourceLifecycleEpoch(sourceState.lifecycleSource)
+          !== expectedLifecycleEpoch
     )
   ) {
     return "fenced";
   }
   return isJunctionSourceAdmittedForImport(
-    matchingSources,
-    normalizedSourceProviderSlug,
-    context.connectionSourceAdmissionMode !== "listed_only",
+    sources,
+    sourceProviderSlug,
+    allowUnlistedSources,
     "connected",
   )
     ? "admitted"
@@ -9297,6 +10322,16 @@ async function isJunctionCompanionSourceCurrentlyAdmitted(
     message: "Current companion source authorization is not ready. Retry shortly.",
     retryable: true,
     httpStatus: 503,
+  });
+}
+
+function junctionSourceStateUnavailableError(cause?: unknown): DeviceSyncError {
+  return deviceSyncError({
+    code: "JUNCTION_SOURCE_STATE_UNAVAILABLE",
+    message: "Current Junction source state is unavailable. Retry shortly.",
+    retryable: true,
+    httpStatus: 503,
+    ...(cause === undefined ? {} : { cause }),
   });
 }
 
@@ -9594,6 +10629,52 @@ function readProviderSnapshotCanonicalEventCount(value: unknown): number {
       && canonicalEventCount >= 0
     ? canonicalEventCount
     : 0;
+}
+
+function readProviderSnapshotCanonicalEventDayKeys(value: unknown): readonly string[] {
+  const dayKeys = readPlainObject(value)?.canonicalEventDayKeys;
+  if (!Array.isArray(dayKeys)) {
+    return [];
+  }
+  return [...new Set(dayKeys.filter((dayKey): dayKey is string =>
+    isCanonicalEventDayKey(dayKey)
+  ))].sort();
+}
+
+function readProviderSnapshotCanonicalSparseCalendarTargets(
+  value: unknown,
+): ProviderSparseCalendarTarget[] {
+  const rawTargets = readPlainObject(value)?.canonicalSparseCalendarTargets;
+  if (!Array.isArray(rawTargets)) {
+    return [];
+  }
+  return rawTargets.flatMap((rawTarget) => {
+    const target = readPlainObject(rawTarget);
+    if (!target) {
+      return [];
+    }
+    const sourceProviderSlug = normalizeProviderSlug(target.sourceProviderSlug);
+    if (!isCanonicalEventDayKey(target.dayKey) || !sourceProviderSlug) {
+      return [];
+    }
+    const sourceType = normalizeString(target.sourceType);
+    return [{
+      dayKey: target.dayKey,
+      ...(typeof target.sourceInstanceId === "string" || target.sourceInstanceId === null
+        ? { sourceInstanceId: target.sourceInstanceId }
+        : {}),
+      sourceProviderSlug,
+      ...(sourceType ? { sourceType } : {}),
+    }];
+  });
+}
+
+function isCanonicalEventDayKey(value: unknown): value is string {
+  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/u.test(value)) {
+    return false;
+  }
+  const parsed = new Date(`${value}T00:00:00.000Z`);
+  return Number.isFinite(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
 }
 
 function readProviderSnapshotCanonicalEventExternalRefResourceIds(

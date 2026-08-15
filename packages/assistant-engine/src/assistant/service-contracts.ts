@@ -116,6 +116,7 @@ export type AssistantProviderAcceptedInputsRelease = () => Promise<void> | void
 
 export type AssistantBeforeProviderAcceptedInputsHook = (event: {
   acceptedInputs: readonly AssistantAcceptedTurnInputItemInput[]
+  turnId: string
 }) =>
   | AssistantProviderAcceptedInputsRelease
   | Promise<AssistantProviderAcceptedInputsRelease | void>

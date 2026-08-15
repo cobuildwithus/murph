@@ -539,10 +539,6 @@ function readJunctionSourceIdentityCandidates(
 
 function mergeJunctionSourceIdentity(
   candidates: readonly StoredDeviceConnectionSource[],
-  input: {
-    sourceInstanceKey: string;
-    sourceProviderSlug: string;
-  },
 ): StoredDeviceConnectionSource | null {
   if (candidates.length === 0) {
     return null;
@@ -553,9 +549,12 @@ function mergeJunctionSourceIdentity(
     || Date.parse(right.lastSeenAt) - Date.parse(left.lastSeenAt)
     || left.id.localeCompare(right.id)
   );
-  const canonicalRow = ordered.find((source) =>
-    source.sourceInstanceKey === input.sourceInstanceKey
-  ) ?? ordered[0]!;
+  const identityRow = [...candidates].sort((left, right) =>
+    Date.parse(left.firstSeenAt) - Date.parse(right.firstSeenAt)
+    || left.sourceInstanceKey.localeCompare(right.sourceInstanceKey)
+    || left.sourceProviderSlug.localeCompare(right.sourceProviderSlug)
+    || left.id.localeCompare(right.id)
+  )[0]!;
   const lifecycleEpoch = ordered[0]!.lifecycleEpoch;
   const currentLifecycle = ordered.filter((source) => source.lifecycleEpoch === lifecycleEpoch);
   const lifecycleState = currentLifecycle
@@ -571,10 +570,10 @@ function mergeJunctionSourceIdentity(
       || Date.parse(right.lastSeenAt) - Date.parse(left.lastSeenAt)
       || left.id.localeCompare(right.id)
     )[0] ?? null;
-  let firstSeenAt = canonicalRow.firstSeenAt;
-  let lastSeenAt = canonicalRow.lastSeenAt;
-  let lastDataAt = canonicalRow.lastDataAt;
-  let updatedAt = canonicalRow.updatedAt;
+  let firstSeenAt = identityRow.firstSeenAt;
+  let lastSeenAt = identityRow.lastSeenAt;
+  let lastDataAt = identityRow.lastDataAt;
+  let updatedAt = identityRow.updatedAt;
   let availabilityCount = 0;
   const availability: DeviceConnectionSourceResourceAvailabilitySummary = {};
 
@@ -596,7 +595,7 @@ function mergeJunctionSourceIdentity(
   }
 
   return {
-    ...canonicalRow,
+    ...identityRow,
     displayName: lifecycleState.displayName,
     firstSeenAt,
     lastDataAt,
@@ -605,78 +604,9 @@ function mergeJunctionSourceIdentity(
     lastSeenAt,
     lifecycleEpoch,
     resourceAvailabilitySummary: availability,
-    sourceInstanceKey: input.sourceInstanceKey,
-    sourceProviderSlug: input.sourceProviderSlug,
     status: lifecycleState.status,
     updatedAt,
   };
-}
-
-/**
- * Makes the existing row set for one Junction source identity canonical while
- * the caller owns an immediate transaction. This is intentionally attached to
- * ordinary source writes instead of becoming a startup repair loop.
- */
-function collapseJunctionSourceIdentityInTransaction(
-  database: DatabaseSync,
-  input: {
-    connectionId: string;
-    sourceInstanceKey: string;
-    sourceProviderSlug: string;
-  },
-): StoredDeviceConnectionSource | null {
-  const candidates = readJunctionSourceIdentityCandidates(database, input);
-  const merged = mergeJunctionSourceIdentity(candidates, input);
-  if (!merged) {
-    return null;
-  }
-
-  database.prepare(`
-    update device_connection_source
-    set source_instance_key = ?,
-        source_provider_slug = ?,
-        display_name = ?,
-        status = ?,
-        resource_availability_summary_json = ?,
-        last_error_code = ?,
-        last_error_message = ?,
-        lifecycle_epoch = ?,
-        first_seen_at = ?,
-        last_seen_at = ?,
-        last_data_at = ?,
-        updated_at = ?
-    where id = ?
-  `).run(
-    merged.sourceInstanceKey,
-    merged.sourceProviderSlug,
-    merged.displayName,
-    merged.status,
-    stringifyJson(merged.resourceAvailabilitySummary),
-    merged.lastErrorCode,
-    merged.lastErrorMessage,
-    merged.lifecycleEpoch,
-    merged.firstSeenAt,
-    merged.lastSeenAt,
-    merged.lastDataAt,
-    merged.updatedAt,
-    merged.id,
-  );
-
-  const deleteLosingRow = database.prepare(`
-    delete from device_connection_source
-    where id = ?
-  `);
-  for (const candidate of candidates) {
-    if (candidate.id !== merged.id) {
-      deleteLosingRow.run(candidate.id);
-    }
-  }
-
-  return getConnectionSourceByInstanceKey(
-    database,
-    input.connectionId,
-    input.sourceInstanceKey,
-  );
 }
 
 export function prepareConnectionSourceWriteInTransaction(
@@ -698,23 +628,33 @@ export function prepareConnectionSourceWriteInTransaction(
         sourceProviderSlug: canonicalProviderSlug,
       })
     : null;
-  const canonicalInput = canonicalProviderSlug && canonicalSourceInstanceKey
-    ? {
-        ...input,
-        sourceInstanceKey: canonicalSourceInstanceKey,
-        sourceProviderSlug: canonicalProviderSlug,
-      }
-    : input;
-  const normalized = normalizeSourceInput(canonicalInput);
-  const existing = connectionProvider === "junction" && canonicalProviderSlug
-    ? collapseJunctionSourceIdentityInTransaction(database, normalized)
-    : getConnectionSourceByInstanceKey(
-        database,
-        normalized.connectionId,
-        normalized.sourceInstanceKey,
-      );
-
-  return { existing, input: canonicalInput, normalized };
+  const requested = normalizeSourceInput(input);
+  const exactExisting = getConnectionSourceByInstanceKey(
+    database,
+    requested.connectionId,
+    requested.sourceInstanceKey,
+  );
+  const ownsCanonicalNewIdentity = !exactExisting
+    && canonicalProviderSlug !== null
+    && canonicalSourceInstanceKey !== null
+    && (
+      hasOwnInputProperty(input, "lifecycleEpoch")
+      || requested.sourceProviderSlug === canonicalProviderSlug
+    );
+  const ownedInput = ownsCanonicalNewIdentity
+      ? {
+          ...input,
+          sourceInstanceKey: canonicalSourceInstanceKey,
+          sourceProviderSlug: canonicalProviderSlug,
+        }
+      : input;
+  const normalized = normalizeSourceInput(ownedInput);
+  const existing = getConnectionSourceByInstanceKey(
+    database,
+    normalized.connectionId,
+    normalized.sourceInstanceKey,
+  );
+  return { existing, input: ownedInput, normalized };
 }
 
 export function upsertConnectionSource(
@@ -726,6 +666,24 @@ export function upsertConnectionSource(
   } = {},
 ): StoredDeviceConnectionSource {
   return withImmediateTransaction(database, () => {
+    if (
+      options.preserveDisconnected
+      && readConnectionProvider(database, input.connectionId) === "junction"
+    ) {
+      const requested = normalizeSourceInput(input);
+      const established = mergeJunctionSourceIdentity(
+        readJunctionSourceIdentityCandidates(database, requested),
+      );
+      if (
+        established
+        && (
+          established.status === "disconnected"
+          || isDeviceSyncSourceDisconnectFenced(established)
+        )
+      ) {
+        return established;
+      }
+    }
     const prepared = prepareConnectionSourceWriteInTransaction(database, input);
     if (
       options.preserveDisconnected
@@ -908,23 +866,14 @@ export function markConnectionSourceDataReceived(
   const canonicalProviderSlug = isJunctionConnection
     ? canonicalizeJunctionProviderSlug(requestedSourceProviderSlug) ?? requestedSourceProviderSlug
     : requestedSourceProviderSlug;
-  const canonicalSourceInstanceKey = isJunctionConnection
-    ? buildJunctionProviderSourceInstanceKey({
-        connectionId,
-        sourceProviderSlug: canonicalProviderSlug,
-      })
-    : null;
-  const junctionSlugs = canonicalSourceInstanceKey
+  const junctionSlugs = isJunctionConnection
     ? listJunctionSourceIdentitySlugs(canonicalProviderSlug)
     : null;
   const sourcePredicate = junctionSlugs
-    ? `(
-        source_provider_slug in (${junctionSlugs.map(() => "?").join(", ")})
-        or source_instance_key = ?
-      )`
+    ? `source_provider_slug in (${junctionSlugs.map(() => "?").join(", ")})`
     : "source_provider_slug = ?";
   const sourceParams = junctionSlugs
-    ? [...junctionSlugs, canonicalSourceInstanceKey]
+    ? junctionSlugs
     : [canonicalProviderSlug];
   const now = toIsoTimestamp(input.now);
 
@@ -966,21 +915,14 @@ export function listConnectionSources(
   ) {
     const sourceProviderSlug = canonicalizeJunctionProviderSlug(requestedSourceProviderSlug)
       ?? requestedSourceProviderSlug;
-    const sourceInstanceKey = buildJunctionProviderSourceInstanceKey({
-      connectionId,
-      sourceProviderSlug,
-    });
-    if (sourceInstanceKey) {
-      const merged = mergeJunctionSourceIdentity(
-        readJunctionSourceIdentityCandidates(database, {
-          connectionId,
-          sourceInstanceKey,
-          sourceProviderSlug,
-        }),
-        { sourceInstanceKey, sourceProviderSlug },
-      );
-      return merged && (status === null || merged.status === status) ? [merged] : [];
-    }
+    const merged = mergeJunctionSourceIdentity(
+      readJunctionSourceIdentityCandidates(database, {
+        connectionId,
+        sourceInstanceKey: "",
+        sourceProviderSlug,
+      }),
+    );
+    return merged && (status === null || merged.status === status) ? [merged] : [];
   }
 
   const conditions = ["connection_id = ?"];

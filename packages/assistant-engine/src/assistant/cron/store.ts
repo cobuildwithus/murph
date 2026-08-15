@@ -153,6 +153,38 @@ export async function appendAssistantCronRun(
   await appendTextFile(runsPath, `${JSON.stringify(run)}\n`)
 }
 
+export async function finalizeAssistantCronPendingRunDelivery(input: {
+  error: string | null
+  jobId: string
+  outcome: 'delivered' | 'failed'
+  paths: AssistantStatePaths
+  reason: string
+  terminalAt: string
+}): Promise<boolean> {
+  const runs = await readAssistantCronRuns(input.paths, input.jobId)
+  const pendingIndex = runs.findIndex(
+    (run) => run.outcome === 'delivery_pending',
+  )
+  const pending = runs[pendingIndex]
+  if (!pending) {
+    return false
+  }
+
+  runs[pendingIndex] = assistantCronRunRecordSchema.parse({
+    ...pending,
+    error: input.error,
+    finishedAt: input.terminalAt,
+    outcome: input.outcome,
+    reason: input.reason,
+    status: input.outcome === 'delivered' ? 'succeeded' : 'failed',
+  })
+  await writeTextFileAtomic(
+    resolveAssistantCronRunsPath(input.paths, input.jobId),
+    `${runs.map((run) => JSON.stringify(run)).join('\n')}\n`,
+  )
+  return true
+}
+
 export async function pruneAssistantCronRunHistory(input: {
   now: Date
   paths: AssistantStatePaths

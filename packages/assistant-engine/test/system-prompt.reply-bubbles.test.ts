@@ -36,6 +36,22 @@ describe('assistant reply bubble prompt guidance', () => {
         expect(layers.threadContextPrompt).toContain(
           'Text styling is not a Rich Message.',
         )
+        expect(layers.threadContextPrompt).toContain(
+          'use it only for a complete structured guide, checklist, detailed comparison, or multi-section summary',
+        )
+        expect(layers.threadContextPrompt).toContain(
+          'Keep short or simple replies as text.',
+        )
+        expect(layers.threadContextPrompt).toContain(
+          'Nutrition, compact-table, tracked-workout, and catalog exercise content must use its owning card',
+        )
+        expect(layers.threadContextPrompt).toContain(
+          'If the owning card cannot attach, use ordinary text, never generic rich content',
+        )
+      } else {
+        expect(layers.threadContextPrompt).not.toContain(
+          'Telegram rich-content tool',
+        )
       }
       expect(layers.threadContextPrompt).toContain(
         'Response media accompanies concise semantic text; do not recreate its visual content as long prose.',
@@ -67,6 +83,9 @@ describe('assistant reply bubble prompt guidance', () => {
 
     expect(layers.threadContextPrompt).not.toContain(
       'keeps its exercise-routine card',
+    )
+    expect(layers.threadContextPrompt).not.toContain(
+      'Telegram rich-content tool',
     )
     expect(layers.threadContextPrompt).toContain(
       'If no owned presentation fits, send concise text.',

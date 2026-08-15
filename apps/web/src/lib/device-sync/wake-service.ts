@@ -26,6 +26,7 @@ import {
 } from "@murphai/device-syncd/hosted-hints";
 import {
   DEVICE_SYNC_DISCONNECT_IN_PROGRESS_ERROR_CODE,
+  DEVICE_SYNC_DISCONNECT_RECOVERY_REQUIRED_ERROR_CODE,
   DEVICE_SYNC_HISTORICAL_RESET_REVOKE_FAILED_ERROR_CODE,
   isEstablishedDeviceSyncConnection,
   isDeviceSyncConnectionSetupPending,
@@ -99,6 +100,11 @@ import {
 import type { HostedDeviceConnectionSource } from "./prisma-store";
 import type { HostedDeviceSyncDirtyResource } from "./prisma-store";
 import {
+  buildHostedTokenRefreshStateUnknownError,
+  classifyHostedTokenRefreshLease,
+  failClosedStaleHostedTokenRefreshLease,
+} from "./agent-session-token-refresh";
+import {
   normalizeNullableString,
   sha256Hex,
   toIsoTimestamp,
@@ -110,6 +116,10 @@ const COMPANION_HEALTH_MAX_PENDING_PAYLOADS = 16;
 const HISTORICAL_RESET_REVOKE_WARNING_MESSAGE =
   "Provider revoke did not complete while a historical data reset is pending. "
   + "Remove the connection in the provider account before reconnecting.";
+const PROVIDER_REVOKE_NOT_CONFIGURED_WARNING = {
+  code: "PROVIDER_REVOKE_NOT_CONFIGURED",
+  message: "Provider access could not be revoked because provider cleanup is not configured.",
+} as const;
 
 export async function disconnectHostedDeviceSyncConnectionSource(input: {
   connectionId: string;
@@ -909,14 +919,75 @@ export async function disconnectHostedDeviceSyncConnection(input: {
       });
     }
 
-    const storedAccount = await input.store.getStoredConnectionAccountForUser(
+    const connectionRecord = await input.store.getConnectionRecordForUser(
       input.userId,
       input.connectionId,
       tx,
     );
 
-    if (connection.status === "disconnected" && !storedAccount) {
-      return { alreadyDisconnected: true, connection, storedAccount };
+    if (!connectionRecord) {
+      connectionChangedDuringDisconnectError();
+    }
+
+    if (
+      connection.status === "reauthorization_required"
+      && connection.lastErrorCode === "TOKEN_REFRESH_STATE_UNKNOWN"
+    ) {
+      throw buildHostedTokenRefreshStateUnknownError();
+    }
+
+    const refreshLeaseStatus = classifyHostedTokenRefreshLease({
+      now: disconnectStartedAt,
+      record: connectionRecord,
+    });
+    if (refreshLeaseStatus.status === "in_progress") {
+      throw deviceSyncError({
+        code: "TOKEN_REFRESH_IN_PROGRESS",
+        message: "A hosted device-sync token refresh is already in progress for this connection.",
+        retryable: true,
+        httpStatus: 409,
+      });
+    }
+    if (refreshLeaseStatus.status === "stale") {
+      return {
+        refreshLeaseRecoveryError:
+          await failClosedStaleHostedTokenRefreshLease({
+            account: connection,
+            now: disconnectStartedAt,
+            store: input.store,
+            tx,
+            userId: input.userId,
+          }),
+      };
+    }
+
+    // The raw durable credential kind is the cleanup authority. In particular,
+    // Prisma may hydrate a credentialKind=none row into a local account object;
+    // that object must never cause provider cleanup to run again.
+    const storedAccount = connectionRecord.credentialKind === "none"
+      ? null
+      : await input.store.getStoredConnectionAccountForUser(
+          input.userId,
+          input.connectionId,
+          tx,
+        );
+
+    if (!storedAccount && connectionRecord.credentialKind !== "none") {
+      throw deviceSyncError({
+        code: "CONNECTION_SECRET_MISSING",
+        message: "Hosted device-sync connection no longer has its stored cleanup credential.",
+        retryable: false,
+        httpStatus: 409,
+      });
+    }
+
+    if (connection.status === "disconnected" && connectionRecord.credentialKind === "none") {
+      return {
+        alreadyDisconnected: true,
+        connection,
+        credentialKind: connectionRecord.credentialKind,
+        storedAccount,
+      };
     }
 
     if (!isDeviceSyncDisconnectInProgress(connection)) {
@@ -932,8 +1003,16 @@ export async function disconnectHostedDeviceSyncConnection(input: {
       }, tx);
     }
 
-    return { alreadyDisconnected: false, connection, storedAccount };
+    return {
+      alreadyDisconnected: false,
+      connection,
+      credentialKind: connectionRecord.credentialKind,
+      storedAccount,
+    };
   });
+  if ("refreshLeaseRecoveryError" in target) {
+    throw target.refreshLeaseRecoveryError;
+  }
   const existing = target.connection;
   const storedAccount = target.storedAccount;
 
@@ -951,12 +1030,10 @@ export async function disconnectHostedDeviceSyncConnection(input: {
       ? input.registry.get(existing.provider)?.connectionHandler?.revokeAccess
       : input.revokeAccess ?? undefined;
 
-    const shouldRevoke = revokeAccess && (
-      existing.status !== "disconnected"
-      || storedAccount.credential.kind === "provider_config"
-    );
-
-    if (shouldRevoke) {
+    // Any retained credential is cleanup authority, even on a legacy row that
+    // was prematurely marked disconnected. Retry provider revocation before
+    // releasing that exact durable generation.
+    if (revokeAccess) {
       try {
         await revokeAccess(storedAccount);
         providerConfigRevokeSucceeded = storedAccount.credential.kind === "provider_config";
@@ -970,8 +1047,9 @@ export async function disconnectHostedDeviceSyncConnection(input: {
 
         revokeFailure = { code, message };
       }
-    } else if (input.revokeUnavailableWarning) {
-      revokeFailure = input.revokeUnavailableWarning;
+    } else {
+      revokeFailure = input.revokeUnavailableWarning
+        ?? PROVIDER_REVOKE_NOT_CONFIGURED_WARNING;
     }
   }
 
@@ -988,14 +1066,25 @@ export async function disconnectHostedDeviceSyncConnection(input: {
       });
     }
 
-    const freshStoredAccount = await input.store.getStoredConnectionAccountForUser(
+    const freshConnectionRecord = await input.store.getConnectionRecordForUser(
       input.userId,
       input.connectionId,
       tx,
     );
+    if (!freshConnectionRecord) {
+      connectionChangedDuringDisconnectError();
+    }
+    const freshStoredAccount = freshConnectionRecord.credentialKind === "none"
+      ? null
+      : await input.store.getStoredConnectionAccountForUser(
+          input.userId,
+          input.connectionId,
+          tx,
+        );
 
     if (
       !isDeviceSyncDisconnectInProgress(freshExisting)
+      || target.credentialKind !== freshConnectionRecord.credentialKind
       || !publicAccountMatchesDisconnectTarget(existing, freshExisting)
       || !storedAccountMatchesDisconnectTarget(storedAccount, freshStoredAccount)
     ) {
@@ -1015,6 +1104,60 @@ export async function disconnectHostedDeviceSyncConnection(input: {
           }
         : revokeFailure
       : undefined;
+    if (warning && freshStoredAccount != null) {
+      const pendingConnection: PublicDeviceSyncAccount = {
+        ...freshExisting,
+        // Keep the member's disconnect intent durable even when a provider
+        // returns an arbitrary error code. The exact warning remains on the
+        // signal and response for diagnostics and retry guidance.
+        lastErrorCode:
+          warning.code === DEVICE_SYNC_HISTORICAL_RESET_REVOKE_FAILED_ERROR_CODE
+            ? DEVICE_SYNC_HISTORICAL_RESET_REVOKE_FAILED_ERROR_CODE
+            : DEVICE_SYNC_DISCONNECT_RECOVERY_REQUIRED_ERROR_CODE,
+        lastErrorMessage: warning.message,
+        nextReconcileAt: null,
+        setupExpiresAt: null,
+        setupPhase: null,
+        status: "reauthorization_required",
+        updatedAt: now,
+      };
+      const hint = {
+        reason: "user_disconnect",
+        revokeWarning: warning,
+      } satisfies HostedExecutionDeviceSyncWakeEvent["hint"];
+      const wake = buildHostedDeviceSyncWake({
+        connectionId: input.connectionId,
+        expectedConnectedAt: freshExisting.connectedAt,
+        hint,
+        occurredAt: now,
+        provider: freshExisting.provider,
+        source: "reauthorization-required",
+        userId: input.userId,
+      });
+
+      await input.store.syncDurableConnectionState(pendingConnection, tx);
+      await input.store.createSignal({
+        userId: input.userId,
+        connectionId: input.connectionId,
+        provider: freshExisting.provider,
+        kind: "reauthorization_required",
+        occurredAt: now,
+        reason: normalizeNullableString(hint.reason),
+        revokeWarning: warning,
+        createdAt: now,
+        tx,
+      });
+      const mailboxAppend = await appendHostedMailboxEnvelopeTx({
+        envelope: wake,
+        tx,
+      });
+
+      return {
+        connection: pendingConnection,
+        mailboxItemId: mailboxAppend.item.id,
+        warning,
+      };
+    }
 
     if (
       existing.status === "disconnected"
@@ -1032,6 +1175,11 @@ export async function disconnectHostedDeviceSyncConnection(input: {
       if (!credentialCleared) {
         throw connectionChangedDuringDisconnectError();
       }
+      await input.store.markConnectionSourcesDisconnected({
+        connectionId: input.connectionId,
+        now,
+        tx,
+      });
 
       const clearedConnection: PublicDeviceSyncAccount = {
         ...freshExisting,
@@ -1113,6 +1261,7 @@ export async function disconnectHostedDeviceSyncConnection(input: {
       }
     } else {
       await input.store.persistStoredConnectionTokenBundle({
+        clearCredential: freshStoredAccount?.credential.kind === "oauth_tokens",
         connectionId: input.connectionId,
         clearRefreshLease: true,
         externalAccountId: freshStoredAccount?.externalAccountId ?? null,
