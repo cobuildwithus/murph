@@ -42,6 +42,7 @@ Updated: 2026-08-15
 3. Run focused verification and a synthetic end-to-end local import proof.
 4. Commit, push, open the PR, and run preliminary plus final ReviewGPT gates with CI.
 5. Resolve accepted findings, close the plan, and hand off the reviewed PR.
+6. Adopt the user-requested latest published ReviewGPT before the final rerun, preserving the existing Murph review configuration and auditing the dependency change.
 
 ## Decisions
 
@@ -147,3 +148,11 @@ Updated: 2026-08-15
 - Explicit corruption boundary: deleting every canonical source and completion audit receipt destroys the recreation owner itself. Raw files, manifests, and events are verified projections, not alternate authorities, and do not reconstruct a deleted owner. Supporting owner deletion would require a separate registry or a second discovery owner and is outside this import contract.
 - Complexity collapse: remove vault-wide manifest discovery plus the separate completion-audit scan and raw-reference event scan. One audit pass selects source/completion owners; one event pass resolves only those owners and indexes activity provenance; the existing manifest resolver and artifact hasher verify the selected projection. No registry, compatibility reader, repair state, queue, or new ledger is introduced.
 - Proof matrix: focused core and real CLI regressions cover absent source; valid live source; tombstoned source; live exact aliases; completion with edits/deletion; partial activity history; missing/malformed/mismatched manifest; missing/drifted raw bytes; missing/contract-invalid selected source event; and surviving workout plus completion evidence after the source event, manifest, and source-owner audit are removed. Replacement-workspace App Server cases prove each damaged class stops before Python or event import.
+
+## User-directed ReviewGPT update
+
+- Before round 14 completed, the user requested the latest ReviewGPT. The npm `latest` tag, registry metadata, provenance attestation, signature, and matching GitHub release identify `@cobuild/review-gpt` 0.5.131.
+- Update the root dependency range, minimum-release-age exception, installed package, and committed lockfile together. Keep the existing Murph presets, browser lanes, packaging, and review process unchanged.
+- Run the dependency guards/audit, ignored-build inspection, installed-version proof, focused review-control coverage, and exact-head CI before rerunning round 14 with 0.5.131.
+- Local proof: frozen install, dependency-policy tests, the package-backed runner contract, ReviewGPT preflight/concurrency tests, CLI typecheck, and `pnpm deps:guard` pass; the installed binary reports 0.5.131. The lockfile changes only the direct ReviewGPT package from 0.5.127 to 0.5.131 and leaves its transitive graph unchanged.
+- Audit boundary: `pnpm deps:audit` still reports the repository's existing advisory set, including transitive paths through the unchanged `repomix@1.16.0` graph. This direct-version update introduces no new transitive versions; resolving that broader pre-existing advisory inventory is outside this PR.
