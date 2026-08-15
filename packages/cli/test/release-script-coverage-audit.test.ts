@@ -23,6 +23,7 @@ import {
   detectWorkspacePackageCycles,
   formatWorkspacePackageCycles,
 } from '../../../scripts/check-workspace-package-cycles.mjs'
+import { buildHostedWebVitestArgs } from '../../../apps/web/scripts/run-hosted-web-vitest.mjs'
 import { withoutNodeV8Coverage } from './cli-test-helpers.js'
 
 const packageDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
@@ -1111,7 +1112,6 @@ describe('monorepo release flow coverage audit', () => {
         .map((line) => line.trim()),
     ).toEqual(
       [
-        "'@cobuild/repo-tools@0.1.15': patches/@cobuild__repo-tools@0.1.15.patch",
         'incur@0.4.5: patches/incur@0.4.5.patch',
         'ink@6.8.0: patches/ink@6.8.0.patch',
       ],
@@ -1485,6 +1485,13 @@ describe('monorepo release flow coverage audit', () => {
     expect(reviewGptConfig).toContain('MURPH_REVIEW_GPT_PROFILE_SLUG:-auto')
     expect(reviewGptConfig).toContain('REVIEW_GPT_BROWSER_LANE_COUNT')
     expect(reviewGptConfig).toContain('REVIEW_GPT_THREAD_URL')
+    expect(reviewGptConfig).toContain('review_gpt_reuses_existing_thread=1')
+    expect(reviewGptConfig).toContain(
+      'readonly review_gpt_direct_browser_lane="${REVIEW_GPT_BROWSER_LANE-}"',
+    )
+    expect(reviewGptConfig).toContain(
+      'require REVIEW_GPT_BROWSER_LANE=<first-round-lane>',
+    )
     expect(reviewGptConfig).toContain('REVIEW_GPT_FULL_REVIEW_REASON')
     expect(reviewGptConfig).toContain('pr-followup-review.md')
     expect(reviewGptConfig).not.toContain('review_gpt_load_pr_shape')
@@ -1734,8 +1741,8 @@ describe('monorepo release flow coverage audit', () => {
       'utf8',
     )
     expect(prReviewGptLoop).toContain('PR ReviewGPT Completion Loops')
-    expect(prReviewGptLoop).toContain('pnpm review:gpt completion-specialists')
-    expect(prReviewGptLoop).toContain('pnpm review:gpt pr-review')
+    expect(prReviewGptLoop).toContain('pnpm --silent review:gpt completion-specialists')
+    expect(prReviewGptLoop).toContain('pnpm --silent review:gpt pr-review')
     expect(prReviewGptLoop).toContain(
       'The `pr-review` prompt lives at',
     )
@@ -1750,6 +1757,13 @@ describe('monorepo release flow coverage audit', () => {
     )
     expect(prReviewGptLoop).toContain(
       '`REVIEW_GPT_BROWSER_LANE=eragon|phlebas|hercules|mountain`',
+    )
+    expect(prReviewGptLoop).toContain('6,500 UTF-8 bytes')
+    expect(prReviewGptLoop).toContain(
+      'REVIEW_GPT_CONTEXT_ANCHOR_HEAD="$(git rev-parse HEAD)"',
+    )
+    expect(prReviewGptLoop).toContain(
+      'A different-lane retry must use a fresh',
     )
     expect(prReviewGptLoop).toContain('zero accepted findings')
     expect(prReviewGptLoop).toContain('non-obvious affected surfaces')
@@ -1772,6 +1786,12 @@ describe('monorepo release flow coverage audit', () => {
     expect(prReviewGptLoop).toContain('REVIEW_GPT_ROUND_NUMBER')
     expect(prReviewGptLoop).toContain('REVIEW_GPT_FIRST_REVIEWED_HEAD')
     expect(prReviewGptLoop).toContain('REVIEW_GPT_PREVIOUS_REVIEWED_HEAD')
+    expect(prReviewGptLoop).toContain(
+      'review_gpt_context_anchor_head="$(git rev-parse HEAD)"',
+    )
+    expect(prReviewGptLoop).toContain(
+      'review_gpt_context_anchor_head=<most-recent-prior-full-snapshot-head>',
+    )
     expect(prReviewGptLoop).toContain('Round 1 is always a full-patch')
     expect(prReviewGptLoop).toContain('Sensitive or\nundeclared PRs')
     expect(prReviewGptLoop).toContain('500 changed lines or 10 changed files')
@@ -2289,6 +2309,66 @@ printf '%s|%s|%s|%s|%s\n' \
         'later ReviewGPT rounds require REVIEW_GPT_THREAD_URL',
       )
 
+      const missingLaneResult = spawnSync('bash', ['-c', configHarness], {
+        cwd: repoRoot,
+        encoding: 'utf8',
+        env: {
+          ...cleanBrowserPreferenceEnv(),
+          HOME: harnessRoot,
+          REPO_ROOT: repoRoot,
+          REVIEW_GPT_REVIEW_PHASE: 'final',
+          REVIEW_GPT_ROUND_NUMBER: '3',
+          REVIEW_GPT_THREAD_URL: 'https://chatgpt.com/c/fallback-thread',
+          XDG_CONFIG_HOME: localConfigRoot,
+        },
+      })
+      expect(missingLaneResult.status).not.toBe(0)
+      expect(missingLaneResult.stderr).toContain(
+        'require REVIEW_GPT_BROWSER_LANE=<first-round-lane>',
+      )
+
+      const compatibilityLaneResult = spawnSync('bash', ['-c', configHarness], {
+        cwd: repoRoot,
+        encoding: 'utf8',
+        env: {
+          ...cleanBrowserPreferenceEnv(),
+          HOME: harnessRoot,
+          MURPH_REVIEW_GPT_BROWSER_LANE: 'phlebas',
+          REPO_ROOT: repoRoot,
+          REVIEW_GPT_REVIEW_PHASE: 'final',
+          REVIEW_GPT_ROUND_NUMBER: '3',
+          REVIEW_GPT_THREAD_URL: 'https://chatgpt.com/c/fallback-thread',
+          XDG_CONFIG_HOME: localConfigRoot,
+        },
+      })
+      expect(compatibilityLaneResult.status).not.toBe(0)
+      expect(compatibilityLaneResult.stderr).toContain(
+        'local-config defaults cannot select a same-thread workspace',
+      )
+
+      writeHarnessFile(
+        localConfigRoot,
+        'murph/review-gpt.conf',
+        'REVIEW_GPT_BROWSER_LANE=mountain\n',
+      )
+      const localLaneResult = spawnSync('bash', ['-c', configHarness], {
+        cwd: repoRoot,
+        encoding: 'utf8',
+        env: {
+          ...cleanBrowserPreferenceEnv(),
+          HOME: harnessRoot,
+          REPO_ROOT: repoRoot,
+          REVIEW_GPT_REVIEW_PHASE: 'final',
+          REVIEW_GPT_ROUND_NUMBER: '3',
+          REVIEW_GPT_THREAD_URL: 'https://chatgpt.com/c/fallback-thread',
+          XDG_CONFIG_HOME: localConfigRoot,
+        },
+      })
+      expect(localLaneResult.status).not.toBe(0)
+      expect(localLaneResult.stderr).toContain(
+        'local-config defaults cannot select a same-thread workspace',
+      )
+
       const existingThreadResult = spawnSync(
         'bash',
         [
@@ -2299,9 +2379,10 @@ printf '%s|%s|%s|%s|%s\n' \
           cwd: repoRoot,
           encoding: 'utf8',
           env: {
-            ...withoutNodeV8Coverage(),
+            ...cleanBrowserPreferenceEnv(),
             HOME: harnessRoot,
             REPO_ROOT: repoRoot,
+            REVIEW_GPT_BROWSER_LANE: 'phlebas',
             REVIEW_GPT_REVIEW_PHASE: 'final',
             REVIEW_GPT_ROUND_NUMBER: '3',
             REVIEW_GPT_THREAD_URL: 'https://chatgpt.com/c/fallback-thread',
@@ -2310,6 +2391,9 @@ printf '%s|%s|%s|%s|%s\n' \
         },
       )
       expect(existingThreadResult.status, existingThreadResult.stderr).toBe(0)
+      expect(existingThreadResult.stdout.trim().split('\n').at(-2)).toMatch(
+        /^phlebas\|/u,
+      )
       expect(existingThreadResult.stdout.trim().split('\n').at(-1)).toBe(
         'https://chatgpt.com/c/fallback-thread',
       )
@@ -2319,9 +2403,10 @@ printf '%s|%s|%s|%s|%s\n' \
         cwd: repoRoot,
         encoding: 'utf8',
         env: {
-          ...withoutNodeV8Coverage(),
+          ...cleanBrowserPreferenceEnv(),
           HOME: harnessRoot,
           REPO_ROOT: repoRoot,
+          REVIEW_GPT_BROWSER_LANE: 'eragon',
           REVIEW_GPT_REVIEW_PHASE: 'final',
           REVIEW_GPT_ROUND_NUMBER: '2',
           REVIEW_GPT_THREAD_URL: 'https://chatgpt.com/c/review-thread',
@@ -2338,7 +2423,7 @@ printf '%s|%s|%s|%s|%s\n' \
         cwd: repoRoot,
         encoding: 'utf8',
         env: {
-          ...withoutNodeV8Coverage(),
+          ...cleanBrowserPreferenceEnv(),
           HOME: harnessRoot,
           REPO_ROOT: repoRoot,
           REVIEW_GPT_FULL_REVIEW_REASON: 'The current thread is unavailable.',
@@ -2355,6 +2440,101 @@ printf '%s|%s|%s|%s|%s\n' \
     } finally {
       rmSync(harnessRoot, { force: true, recursive: true })
     }
+  })
+
+  it('enforces the assembled completion-specialists prompt budget for canonical and Frog callers', () => {
+    const preflightHarness = `
+source "$REPO_ROOT/scripts/review-gpt-pr-head-preflight.sh"
+review_gpt_require_completion_specialists_prompt_budget "$@"
+`
+    const workflow = readFileSync(
+      path.join(repoRoot, 'agent-docs', 'operations', 'pr-reviewgpt-loop.md'),
+      'utf8',
+    )
+    const canonicalPrompt = workflow.match(
+      /pnpm --silent review:gpt completion-specialists[\s\S]*?--prompt "([^"]+)"/u,
+    )?.[1]
+    const frogAutofix = readFileSync(
+      path.join(repoRoot, 'scripts', 'frog-autofix.ts'),
+      'utf8',
+    )
+    const frogPromptTemplate = frogAutofix.match(
+      /prompt: `([^`]*SPECIALIST_REVIEW_COMPLETE[^`]*)`/u,
+    )?.[1]
+    expect(canonicalPrompt).toBeTruthy()
+    expect(frogPromptTemplate).toBeTruthy()
+
+    const renderedCanonicalPrompt = canonicalPrompt!.replace(
+      /\$\([^)]*\)/gu,
+      'a'.repeat(40),
+    )
+    const renderedFrogPrompt = frogPromptTemplate!
+      .replace(/\$\{pullRequest\}/gu, '9'.repeat(10))
+      .replace(/\$\{options\.issueNumber\}/gu, '9'.repeat(10))
+      .replace(/\$\{head\.slice\(0, 7\)\}/gu, 'a'.repeat(7))
+      .replace(/\$\{head\.slice\(0, 12\)\}/gu, 'a'.repeat(12))
+      .replace(/\$\{head\}/gu, 'a'.repeat(40))
+    expect(renderedFrogPrompt).toContain(
+      'place one SPECIALIST_OUTCOME line immediately before final SPECIALIST_REVIEW_COMPLETE',
+    )
+
+    const runBudget = (prompt: string) =>
+      spawnSync(
+        'bash',
+        [
+          '-c',
+          preflightHarness,
+          'review-gpt-prompt-budget',
+          'completion-specialists',
+          '--prompt',
+          prompt,
+        ],
+        {
+          cwd: repoRoot,
+          encoding: 'utf8',
+          env: {
+            ...withoutNodeV8Coverage(),
+            REPO_ROOT: repoRoot,
+          },
+        },
+      )
+
+    for (const prompt of [renderedCanonicalPrompt, renderedFrogPrompt]) {
+      const result = runBudget(prompt)
+      expect(result.status, result.stderr).toBe(0)
+    }
+
+    const oversizedResult = runBudget('x'.repeat(1_000))
+    expect(oversizedResult.status).not.toBe(0)
+    expect(oversizedResult.stderr).toContain(
+      'assembled completion-specialists prompt is',
+    )
+    expect(oversizedResult.stderr).toContain(
+      'canonical/Frog budget is 6500',
+    )
+    const mixedPresetResult = spawnSync(
+      'bash',
+      [
+        '-c',
+        'source "$REPO_ROOT/scripts/review-gpt-pr-head-preflight.sh"; review_gpt_detect_pr_phase "$@"',
+        'review-gpt-prompt-budget',
+        'completion-specialists',
+        '--preset',
+        'security',
+      ],
+      {
+        cwd: repoRoot,
+        encoding: 'utf8',
+        env: {
+          ...withoutNodeV8Coverage(),
+          REPO_ROOT: repoRoot,
+        },
+      },
+    )
+    expect(mixedPresetResult.status).not.toBe(0)
+    expect(mixedPresetResult.stderr).toContain(
+      'completion-specialists must run as the only preset',
+    )
   })
 
   it('keeps product-experience decisions distinct inside the unified specialist review', () => {
@@ -2402,12 +2582,13 @@ printf '%s|%s|%s|%s|%s\n' \
       'Make every word, click, field, choice,',
     )
     expect(completionSpecialists).toContain(
-      "repository's meaning-preserving tiny static-copy fast path",
+      'rendered interactions, or design-system UI outside the tiny-copy fast path',
     )
     expect(completionSpecialists).toContain(
-      'rendered fidelity to the declared',
+      'Missing readable, redacted desktop',
     )
-    expect(completionSpecialists).toContain('# Product-experience lens')
+    expect(completionSpecialists).toContain('# Lens contract')
+    expect(completionSpecialists).toContain('- Product experience:')
     expect(completionSpecialists).toContain(
       '`agent-docs/prompts/product-experience-review.md`',
     )
@@ -3583,6 +3764,8 @@ Updated: 2026-04-24
     expect(fullPackageScript).toContain('REVIEW_GPT_REVIEW_PHASE')
     expect(fullPackageScript).toContain('REVIEW_GPT_RENDERED_EVIDENCE_PATHS')
     expect(fullPackageScript).toContain('REVIEW_GPT_SUPPLEMENTAL_EVIDENCE_PATHS')
+    expect(fullPackageScript).toContain('REVIEW_GPT_EXPECTED_PR_BODY_PATH')
+    expect(fullPackageScript).toContain('REVIEW_GPT_EXPECTED_PR_BODY_SHA256')
     expect(fullPackageScript).toContain('review-phase.json')
     expect(fullPackageScript).toContain('rendered-evidence.txt')
     expect(fullPackageScript).toContain('review-round.json')
@@ -3710,6 +3893,9 @@ done <<< "\${COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS:-}"
   cd "$COBUILD_REPO_ROOT"
   zip -q "$out_dir/$name.zip" "\${entries[@]}"
 )
+printf 'ZIP: %s (%s bytes)\n' \
+  "$out_dir/$name.zip" \
+  "$(wc -c < "$out_dir/$name.zip" | tr -d ' ')"
 `,
         true,
       )
@@ -3796,6 +3982,20 @@ done <<< "\${COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS:-}"
         cwd: harnessRoot,
         encoding: 'utf8',
       }).trim()
+      const expectedParentBody = [
+        `ReviewGPT first-reviewed head: ${firstHead}`,
+        'ReviewGPT context sensitivity: routine',
+        'Frog autofix issue: #123',
+        '',
+      ].join('\n')
+      writeHarnessFile(
+        harnessRoot,
+        'audit-packages/frog-autofix-pr-body.md',
+        expectedParentBody,
+      )
+      const expectedParentBodySha256 = createHash('sha256')
+        .update(expectedParentBody)
+        .digest('hex')
 
       writeHarnessFile(
         harnessRoot,
@@ -4236,6 +4436,46 @@ done <<< "\${COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS:-}"
       ).toBe('review-gpt-pr-context/rendered-evidence/01-desktop.png\n')
       expect(existsSync(path.join(harnessRoot, 'review-gpt-pr-context'))).toBe(false)
 
+      writeHarnessFile(
+        harnessRoot,
+        'audit-packages/frog-autofix-pr-body.md',
+        expectedParentBody,
+      )
+      const roundOneParentBody = invokePackager('round-one-parent-body', firstHead, {
+        REVIEW_GPT_EXPECTED_PR_BODY_PATH:
+          'audit-packages/frog-autofix-pr-body.md',
+        REVIEW_GPT_EXPECTED_PR_BODY_SHA256: expectedParentBodySha256,
+        REVIEW_GPT_FIRST_REVIEWED_HEAD: '',
+        REVIEW_GPT_PREVIOUS_REVIEWED_HEAD: '',
+        REVIEW_GPT_ROUND_NUMBER: '1',
+      })
+      expect(
+        roundOneParentBody.result.status,
+        roundOneParentBody.result.stderr,
+      ).toBe(0)
+      expect(execFileSync(
+        'unzip',
+        ['-p', roundOneParentBody.zipPath, 'review-gpt-pr-context/pr-body.md'],
+        { encoding: 'utf8' },
+      )).toBe(expectedParentBody)
+      expect(listZipEntries(roundOneParentBody.zipPath)).not.toContain(
+        'audit-packages/frog-autofix-pr-body.md',
+      )
+
+      const changedParentBody = invokePackager('changed-parent-body', firstHead, {
+        REVIEW_GPT_EXPECTED_PR_BODY_PATH:
+          'audit-packages/frog-autofix-pr-body.md',
+        REVIEW_GPT_EXPECTED_PR_BODY_SHA256: 'f'.repeat(64),
+        REVIEW_GPT_FIRST_REVIEWED_HEAD: '',
+        REVIEW_GPT_PREVIOUS_REVIEWED_HEAD: '',
+        REVIEW_GPT_ROUND_NUMBER: '1',
+      })
+      expect(changedParentBody.result.status).not.toBe(0)
+      expect(changedParentBody.result.stderr).toContain(
+        'expected ReviewGPT PR body evidence changed before packaging',
+      )
+      expect(existsSync(path.join(harnessRoot, 'review-gpt-pr-context'))).toBe(false)
+
       const roundTwo = invokePackager('round-two', currentHead, {
         REVIEW_GPT_FIRST_REVIEWED_HEAD: firstHead,
         REVIEW_GPT_PREVIOUS_REVIEWED_HEAD: firstHead,
@@ -4523,6 +4763,7 @@ done <<< "\${COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS:-}"
       })
 
       const roundTwoFull = invokePackager('round-two-full', currentHead, {
+        REVIEW_GPT_CONTEXT_ANCHOR_HEAD: currentHead,
         REVIEW_GPT_FIRST_REVIEWED_HEAD: firstHead,
         REVIEW_GPT_FULL_REVIEW_REASON: 'The prior ChatGPT conversation is unavailable.',
         REVIEW_GPT_PREVIOUS_REVIEWED_HEAD: firstHead,
@@ -4552,6 +4793,23 @@ done <<< "\${COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS:-}"
           'review-gpt-pr-context/full-review-reason.txt',
           'review-gpt-pr-context/since-first-reviewed-head.diff',
         ]),
+      )
+
+      const roundTwoFullWithStaleAnchor = invokePackager(
+        'round-two-full-stale-anchor',
+        currentHead,
+        {
+          REVIEW_GPT_CONTEXT_ANCHOR_HEAD: firstHead,
+          REVIEW_GPT_FIRST_REVIEWED_HEAD: firstHead,
+          REVIEW_GPT_FULL_REVIEW_REASON:
+            'The prior ChatGPT conversation is unavailable.',
+          REVIEW_GPT_PREVIOUS_REVIEWED_HEAD: firstHead,
+          REVIEW_GPT_ROUND_NUMBER: '2',
+        },
+      )
+      expect(roundTwoFullWithStaleAnchor.result.status).not.toBe(0)
+      expect(roundTwoFullWithStaleAnchor.result.stderr).toContain(
+        'a full-snapshot context anchor must equal the current PR head',
       )
 
       writeHarnessFile(harnessRoot, 'apps/demo/source.ts', 'export const value = 3\n')
@@ -4763,8 +5021,14 @@ done <<< "\${COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS:-}"
       'pnpm health-commons:generate && pnpm test:prepared',
     )
     expect(hostedWebPackageJson.scripts?.['test:prepared']).toContain(
-      'vitest run --config apps/web/vitest.workspace.ts --no-coverage',
+      'tsx apps/web/scripts/run-hosted-web-vitest.mts',
     )
+    expect(buildHostedWebVitestArgs([])).toEqual([
+      'run',
+      '--config',
+      'apps/web/vitest.workspace.ts',
+      '--no-coverage',
+    ])
     expect(webVerify).toContain('MURPH_HOSTED_WEB_SMOKE_PREPARED_LOCAL_ENV=1 pnpm dev:smoke')
     expect(webVerify).toContain('pnpm test:prepared')
     expect(webVerify).toContain('MURPH_HOSTED_WEB_PRISMA_GENERATED_PREPARED')
@@ -4887,7 +5151,7 @@ done <<< "\${COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS:-}"
     expect(cliCoverageBranch).toBeTruthy()
     expect(packageCoverageDirs).toBeTruthy()
     expect(cliCoverageBranch).toContain(
-      'env MURPH_PREPARED_CLI_RUNTIME_ARTIFACTS=1 MURPH_VITEST_MAX_WORKERS="$package_coverage_cli_vitest_max_workers" pnpm exec vitest run --config "packages/cli/vitest.workspace.ts" --coverage',
+      'env MURPH_PREPARED_CLI_RUNTIME_ARTIFACTS=1 MURPH_CLI_RELEASE_TARBALL_TEST=1 MURPH_VITEST_MAX_WORKERS="$package_coverage_cli_vitest_max_workers" pnpm exec vitest run --config "packages/cli/vitest.workspace.ts" --coverage',
     )
     expect(cliCoverageBranch).toContain(
       'pnpm --dir packages/contracts test:coverage:prepared',
@@ -5262,7 +5526,9 @@ exit 1
     expect(existsSync(path.join(packageDir, 'scripts', 'verify-release-target.ts'))).toBe(false)
   })
 
-  it.skipIf(process.env.MURPH_PREPARED_CLI_RUNTIME_ARTIFACTS !== '1')(
+  // Prepared artifacts are also trusted by reverse-dependent test:diff fanout.
+  // Keep real release packaging exclusive to explicit CLI acceptance/coverage.
+  it.skipIf(process.env.MURPH_CLI_RELEASE_TARBALL_TEST !== '1')(
     'regenerates and verifies the assistant CLI surface contract in the real release tarball',
     () => {
       const openClawBuild = spawnSync(

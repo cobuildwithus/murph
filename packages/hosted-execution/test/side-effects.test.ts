@@ -145,21 +145,10 @@ const WORKOUT_CARD: HostedAssistantResponseCard = {
   workout: {
     version: 1,
     state: "active",
-    exercises: [{
-      name: "Bench press",
-      sets: [
-        {
-          status: "completed",
-          target: "185 lb × 8",
-          actual: "185 lb × 8",
-        },
-        {
-          status: "pending",
-          target: "185 lb × 6–8",
-          actual: null,
-        },
-      ],
-    }],
+    exercises: Array.from({ length: 11 }, (_, index) => ({
+      name: `Exercise ${index + 1}`,
+      sets: [{ status: "pending", target: "8 reps", actual: null }],
+    })),
   },
 };
 
@@ -306,7 +295,15 @@ describe("hosted assistant delivery contracts", () => {
     });
     const persisted = JSON.parse(JSON.stringify(effect)) as unknown;
 
-    expect(parseHostedAssistantDeliverySideEffect(persisted)).toEqual(effect);
+    const parsed = parseHostedAssistantDeliverySideEffect(persisted);
+    expect(parsed).toEqual(effect);
+    expect(parsed.payload.card).toMatchObject({
+      workout: {
+        exercises: expect.arrayContaining([
+          expect.objectContaining({ name: "Exercise 11" }),
+        ]),
+      },
+    });
   });
 
   it("rejects malformed hosted response cards and card-media coexistence", () => {

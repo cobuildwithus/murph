@@ -76,7 +76,7 @@ import type {
 
 const RUNTIME_SHELL_PREWARM_TIMEOUT_MS = 20_000;
 const RUNTIME_PROCESSING_STARTUP_GRACE_MS = 30_000;
-const RUNTIME_PROCESSING_STARTUP_CONFIRM_TIMEOUT_MS = 8_000;
+const RUNTIME_PROCESSING_STARTUP_CONFIRM_TIMEOUT_MS = 20_000;
 
 export type RuntimeProcessingInput = HostedRuntimeEnsureProcessingRequest & {
   commandTimeoutMs?: number;

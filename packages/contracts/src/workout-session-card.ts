@@ -8,8 +8,8 @@ export const workoutSessionCardV1Bounds = {
   exerciseName: 60,
   setValue: 40,
   footer: 120,
-  exercises: 8,
-  setsPerExercise: 8,
+  exercises: 16,
+  setsPerExercise: 16,
 } as const;
 
 const singleLineTextPattern =
@@ -53,6 +53,7 @@ export const workoutSessionSetV1Schema = z
       context.addIssue({
         code: "custom",
         message: "A completed set requires an actual value.",
+        params: { murphExpectedShape: "non_null_when_status_completed" },
         path: ["actual"],
       });
     }
@@ -61,6 +62,7 @@ export const workoutSessionSetV1Schema = z
       context.addIssue({
         code: "custom",
         message: "Only a completed set may carry an actual value.",
+        params: { murphExpectedShape: "null_unless_status_completed" },
         path: ["actual"],
       });
     }
@@ -117,6 +119,7 @@ export const workoutSessionDetailV1Schema = z
       context.addIssue({
         code: "custom",
         message: "An active workout cannot contain skipped sets.",
+        params: { murphExpectedShape: "no_skipped_sets_when_workout_active" },
         path: ["state"],
       });
     }
@@ -125,6 +128,7 @@ export const workoutSessionDetailV1Schema = z
       context.addIssue({
         code: "custom",
         message: "A completed workout cannot contain pending sets.",
+        params: { murphExpectedShape: "no_pending_sets_when_workout_completed" },
         path: ["state"],
       });
     }

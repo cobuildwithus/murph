@@ -893,7 +893,7 @@ describe("hosted runner container image contract", () => {
     expect(hostedRunnerSmokeChild).toContain("cwdRebound: process.cwd() === expectedVaultRoot");
     expect(hostedRunnerSmokeChild).toContain('model = "gpt-5.6-terra"');
     expect(hostedRunnerSmokeChild).toContain('model_reasoning_effort = "low"');
-    expect(hostedRunnerSmokeChild).toContain("model_auto_compact_token_limit = 164000");
+    expect(hostedRunnerSmokeChild).toContain("model_auto_compact_token_limit = 132000");
     expect(hostedRunnerSmokeChild).toContain("runCodexVaultCliProof");
     expect(hostedRunnerSmokeChild).toContain('"vault-show-default"');
     expect(hostedRunnerSmokeChild).toContain('"vault-show-explicit"');

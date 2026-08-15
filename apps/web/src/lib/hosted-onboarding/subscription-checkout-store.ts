@@ -9,7 +9,7 @@ import {
 } from "../hosted-web/encryption";
 import { createHostedStripeCheckoutSessionLookupKey } from "./contact-privacy";
 
-const HOSTED_MEMBER_SUBSCRIPTION_CHECKOUT_SESSION_FIELD =
+export const HOSTED_MEMBER_SUBSCRIPTION_CHECKOUT_SESSION_FIELD =
   "hosted-member-subscription-checkout.stripe-session-id";
 
 type HostedSubscriptionCheckoutPrisma =

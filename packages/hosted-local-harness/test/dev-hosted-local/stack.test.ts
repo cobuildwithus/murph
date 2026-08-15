@@ -272,25 +272,6 @@ const maybeStartHostedLocalMinio = vi.fn<
   } | null>
 >(async () => null);
 const cleanupHostedLocalMinioContainerBestEffort = vi.fn(async () => {});
-const buildHostedLocalTemporalRuntimeEnv = vi.fn((input: {
-  config: HostedLocalDevConfig;
-  env: NodeJS.ProcessEnv;
-}) => {
-  if (input.config.temporal.mode === "disabled") {
-    return {};
-  }
-
-  const address = `${input.config.temporal.host}:${input.config.temporal.port}`;
-  return {
-    HOSTED_TEMPORAL_ADDRESS: address,
-    HOSTED_TEMPORAL_NAMESPACE: input.config.temporal.namespace,
-    HOSTED_TEMPORAL_TASK_QUEUE: input.config.temporal.taskQueue,
-    TEMPORAL_ADDRESS: address,
-    TEMPORAL_NAMESPACE: input.config.temporal.namespace,
-    TEMPORAL_TASK_QUEUE: input.config.temporal.taskQueue,
-    TEMPORAL_TLS_ENABLED: "false",
-  };
-});
 const startHostedLocalTemporalRuntime = vi.fn<
   (input: unknown) => Promise<HostedLocalTemporalRuntime | null>
 >(async () => null);
@@ -432,6 +413,11 @@ vi.mock("../../src/dev-hosted-local/environment.ts", () => ({
   readSimpleEnvFile: vi.fn(async () => ({})),
   requireEnvValue: vi.fn(),
   resolveCloudflareLocalEnv: vi.fn(async (input: { overrides?: Record<string, string | undefined> }) => ({
+    ...Object.fromEntries(
+      Object.entries(input.overrides ?? {}).filter(([name]) =>
+        /^(?:HOSTED_)?TEMPORAL_/u.test(name)
+      ),
+    ),
     HOSTED_ASSISTANT_MODEL: input.overrides?.HOSTED_ASSISTANT_MODEL ?? "gpt-5.6-terra",
     HOSTED_ASSISTANT_PROVIDER:
       input.overrides?.HOSTED_ASSISTANT_PROVIDER ?? "openai",
@@ -485,8 +471,8 @@ vi.mock("../../src/dev-hosted-local/minio.ts", () => ({
   maybeStartHostedLocalMinio,
 }));
 
-vi.mock("../../src/dev-hosted-local/temporal.ts", () => ({
-  buildHostedLocalTemporalRuntimeEnv,
+vi.mock("../../src/dev-hosted-local/temporal.ts", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../src/dev-hosted-local/temporal.ts")>()),
   requireHostedLocalTemporalWorkerPackageDir,
   startHostedLocalTemporalRuntime,
 }));
@@ -985,6 +971,105 @@ describe("hosted local dev stack", () => {
     );
   });
 
+  it("clears remote Temporal env from every disabled-mode child boundary", async () => {
+    const temporalEnvNames = [
+      "HOSTED_TEMPORAL_ADDRESS",
+      "HOSTED_TEMPORAL_API_KEY",
+      "HOSTED_TEMPORAL_CLIENT_CERT_BASE64",
+      "HOSTED_TEMPORAL_CLIENT_CERT_PEM",
+      "HOSTED_TEMPORAL_CLIENT_KEY_BASE64",
+      "HOSTED_TEMPORAL_CLIENT_KEY_PEM",
+      "HOSTED_TEMPORAL_NAMESPACE",
+      "HOSTED_TEMPORAL_SERVER_ROOT_CA_CERT_BASE64",
+      "HOSTED_TEMPORAL_SERVER_ROOT_CA_CERT_PEM",
+      "HOSTED_TEMPORAL_TASK_QUEUE",
+      "HOSTED_TEMPORAL_TLS_ENABLED",
+      "HOSTED_TEMPORAL_TLS_SERVER_NAME_OVERRIDE",
+      "TEMPORAL_ADDRESS",
+      "TEMPORAL_API_KEY",
+      "TEMPORAL_CLIENT_CERT_BASE64",
+      "TEMPORAL_CLIENT_CERT_PEM",
+      "TEMPORAL_CLIENT_KEY_BASE64",
+      "TEMPORAL_CLIENT_KEY_PEM",
+      "TEMPORAL_NAMESPACE",
+      "TEMPORAL_SERVER_ROOT_CA_CERT_BASE64",
+      "TEMPORAL_SERVER_ROOT_CA_CERT_PEM",
+      "TEMPORAL_TASK_QUEUE",
+      "TEMPORAL_TLS_ENABLED",
+      "TEMPORAL_TLS_SERVER_NAME_OVERRIDE",
+    ] as const;
+    const remoteValuesFor = (
+      source: string,
+      names: readonly (typeof temporalEnvNames)[number][],
+    ): NodeJS.ProcessEnv => Object.fromEntries(
+      names.map((name) => [name, `${source}-${name.toLowerCase()}`]),
+    );
+    const shellEnv = remoteValuesFor(
+      "shell",
+      temporalEnvNames.filter((_, index) => index % 4 === 0),
+    );
+    const pulledEnv = remoteValuesFor(
+      "pulled",
+      temporalEnvNames.filter((_, index) => index % 4 === 1),
+    );
+    const webEnv = remoteValuesFor(
+      "env",
+      temporalEnvNames.filter((_, index) => index % 4 === 2),
+    );
+    const webLocalEnv = remoteValuesFor(
+      "env-local",
+      temporalEnvNames.filter((_, index) => index % 4 === 3),
+    );
+    const environmentModule = await import("../../src/dev-hosted-local/environment.ts");
+    vi.mocked(environmentModule.readOptionalSimpleEnvFile)
+      .mockResolvedValueOnce({
+        HOSTED_ASSISTANT_PROVIDER: "openai",
+        OPENAI_API_KEY: "local-openai-key",
+      })
+      .mockResolvedValueOnce(webEnv)
+      .mockResolvedValueOnce(webLocalEnv);
+    vi.mocked(environmentModule.readSimpleEnvFile).mockResolvedValueOnce(pulledEnv);
+    spawnChildProcess
+      .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "cloudflare", pid: 211 }))
+      .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "web", pid: 212 }));
+
+    const { startHostedLocalDevStack } = await import("../../src/dev-hosted-local/stack.ts");
+    const stack = await startHostedLocalDevStack({
+      env: {
+        ...process.env,
+        ...shellEnv,
+        MURPH_DEV_TEMPORAL: "disabled",
+      },
+      // The final child overlay must also beat callers that customize Web-only
+      // values; dev-local then sees defined empty values before loading .env files.
+      webProcessEnvOverrides: remoteValuesFor("web-override", temporalEnvNames),
+    });
+    await stack.ready;
+    await stack.stop();
+
+    const cloudflareCall = spawnChildProcess.mock.calls.find(([name]) => name === "cloudflare");
+    const webCall = spawnChildProcess.mock.calls.find(([name]) => name === "web");
+    const effectiveEnvironments = [
+      stack.runtimeEnv,
+      stack.workerRuntimeEnv,
+      cloudflareCall?.[3],
+      webCall?.[3],
+      vi.mocked(environmentModule.resolveCloudflareLocalEnv).mock.calls.at(-1)?.[0]
+        .overrides,
+      vi.mocked(environmentModule.buildWranglerEnvFileText).mock.calls.at(-1)?.[0],
+    ];
+    for (const environment of effectiveEnvironments) {
+      expect(environment).toBeDefined();
+      for (const name of temporalEnvNames) {
+        expect(environment?.[name], `${name} should be empty`).toBe("");
+      }
+    }
+    expect(stack.processes.temporalServer).toBeNull();
+    expect(stack.processes.temporalWorker).toBeNull();
+    expect(spawnChildProcess.mock.calls.map(([name]) => name)).not.toContain("temporal-server");
+    expect(spawnChildProcess.mock.calls.map(([name]) => name)).not.toContain("temporal-worker");
+  });
+
   it("starts managed Temporal as part of the hosted-local process model", async () => {
     vi.stubEnv("OPENAI_API_KEY", "local-openai-key");
     const configModule = await import("../../src/dev-hosted-local/config.ts");
@@ -1235,6 +1320,7 @@ describe("hosted local dev stack", () => {
         ...process.env,
         MURPH_HOSTED_LOCAL_E2E_ISOLATION_REQUIRED: "1",
         MURPH_HOSTED_LOCAL_PROFILE: "e2e:stub",
+        MURPH_HOSTED_LOCAL_TEST_ROUTES: "1",
         MURPH_HOSTED_LOCAL_E2E_STRIPE_LISTENER: "1",
         MURPH_DEV_CF_PERSIST_DIR: ".tmp/e2e/wrangler",
         MURPH_DEV_SKIP_LINQ_WEBHOOK_REGISTER: "1",
@@ -1244,6 +1330,7 @@ describe("hosted local dev stack", () => {
         NEXT_DIST_DIR_MODE: "smoke",
         NEXT_DIST_DIR_SUFFIX: "e2e-fixture",
       },
+      webTemporalMailboxSignalFaultUserId: "member_production_start_target",
     });
     await stack.ready;
     await stack.stop();
@@ -1270,6 +1357,50 @@ describe("hosted local dev stack", () => {
       "31001",
     ]);
     expect(webCall?.[3]).not.toHaveProperty("MURPH_HOSTED_WEB_DEV_OWNER_PID");
+    expect(webCall?.[3]).toEqual(expect.objectContaining({
+      MURPH_HOSTED_LOCAL_TEMPORAL_MAILBOX_SIGNAL_FAULT_USER_ID:
+        "member_production_start_target",
+    }));
+    expect(webCall?.[3]).not.toHaveProperty(
+      "MURPH_HOSTED_LOCAL_TEMPORAL_MAILBOX_SIGNAL_FAULT_PRELOAD",
+    );
+    expect(webCall?.[3].NODE_OPTIONS).toMatch(
+      /--require=".*[/\\]apps[/\\]web[/\\]\.test-dist[/\\]hosted-local-preloads[/\\][0-9a-f-]+[/\\]hosted-local-temporal-mailbox-signal-fault-preload\.js"/u,
+    );
+    const preloadCompileCall = runCommand.mock.calls.find(([, args]) =>
+      args.includes("test/support/hosted-local-temporal-mailbox-signal-fault-preload.ts")
+    );
+    expect(preloadCompileCall).toEqual([
+      "pnpm",
+      [
+        "--dir",
+        "apps/web",
+        "exec",
+        "tsc",
+        "test/support/hosted-local-temporal-mailbox-signal-fault-preload.ts",
+        "--target",
+        "ES2022",
+        "--module",
+        "CommonJS",
+        "--moduleResolution",
+        "Node",
+        "--skipLibCheck",
+        "--noEmitOnError",
+        "--outDir",
+        expect.stringMatching(
+          /^\.test-dist[/\\]hosted-local-preloads[/\\][0-9a-f-]+$/u,
+        ),
+        "--rootDir",
+        "test/support",
+      ],
+      expect.objectContaining({
+        env: expect.not.objectContaining({
+          MURPH_HOSTED_LOCAL_TEMPORAL_MAILBOX_SIGNAL_FAULT_USER_ID:
+            expect.anything(),
+        }),
+        name: "setup",
+      }),
+    ]);
     expect(spawnChildProcess).toHaveBeenCalledWith(
       "cloudflare",
       expect.any(String),
@@ -1346,6 +1477,7 @@ describe("hosted local dev stack", () => {
         ...process.env,
         MURPH_HOSTED_LOCAL_E2E_ISOLATION_REQUIRED: "1",
         MURPH_HOSTED_LOCAL_PROFILE: "e2e:stub",
+        MURPH_HOSTED_LOCAL_TEST_ROUTES: "1",
         MURPH_DEV_CF_PERSIST_DIR: ".tmp/e2e/wrangler",
         MURPH_DEV_SKIP_LINQ_WEBHOOK_REGISTER: "1",
         MURPH_DEV_SKIP_STRIPE_LISTEN: "1",
@@ -1354,6 +1486,7 @@ describe("hosted local dev stack", () => {
         NEXT_DIST_DIR_MODE: "smoke",
         NEXT_DIST_DIR_SUFFIX: "e2e-fixture",
       },
+      webTemporalMailboxSignalFaultUserId: "member_source_dev_target",
     });
     await stack.ready;
     await stack.stop();
@@ -1373,7 +1506,15 @@ describe("hosted local dev stack", () => {
     ]);
     expect(webCall?.[3]).toEqual(expect.objectContaining({
       MURPH_HOSTED_WEB_DEV_OWNER_PID: String(process.pid),
+      MURPH_HOSTED_LOCAL_TEMPORAL_MAILBOX_SIGNAL_FAULT_USER_ID:
+        "member_source_dev_target",
     }));
+    expect(webCall?.[3]).not.toHaveProperty(
+      "MURPH_HOSTED_LOCAL_TEMPORAL_MAILBOX_SIGNAL_FAULT_PRELOAD",
+    );
+    expect(webCall?.[3].NODE_OPTIONS).toMatch(
+      /--require=".*[/\\]apps[/\\]web[/\\]\.test-dist[/\\]hosted-local-preloads[/\\][0-9a-f-]+[/\\]hosted-local-temporal-mailbox-signal-fault-preload\.js"/u,
+    );
   });
 
   it("keeps production web start selection on harness env instead of merged app env files", async () => {

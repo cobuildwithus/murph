@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-15",
+  "order": 100,
+  "item": {
+    "id": "clearer-account-deletion-retries",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Clearer account deletion retries",
+    "summary": "Account deletion now keeps its confirmation open when connected-app setup is still finishing, so members can see when to retry.",
+    "details": "The guidance waits for setup to finish or time out, and every retry still requires fresh authorization.",
+    "relevanceTags": ["privacy", "settings", "connected-apps", "reliability"],
+    "sourcePullRequests": [1746]
+  }
+}

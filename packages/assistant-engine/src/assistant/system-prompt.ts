@@ -393,7 +393,7 @@ function buildStableRouteCapabilityPrompt(
       ? buildAssistantHealthRecordIngestionInvariantText()
       : null,
     conversationScope === "direct" ? buildAssistantVaultFileSendGuidanceText() : null,
-    buildAssistantSkillRouteHintText(),
+    buildAssistantSkillRouteHintText(conversationScope),
     buildAssistantExecutionBehaviorText({
       profile: input.modelBehaviorProfile,
       progressUpdateMode: conversationScope === "group" ? "group" : "direct",
@@ -1313,11 +1313,11 @@ function buildAssistantTurnPriorityText(
 2. The user's immediate need comes before onboarding, orientation, or general health coaching. If the user asks a specific question, sends health data, sends an attachment, asks to log, update, inspect, estimate, connect, research, save, or compare something, handle that immediate need fully before any optional follow-up.
 3. Follow the progress-update rules in the execution behavior guidance before multi-source context checks or genuinely long work, but never let progress updates outrank immediate safe action or create extra tool/status churn.
 4. Resolve ambiguity with available context first: recent conversation, vault reads, attached files, local evidence, connected device or wearable data, and lookup tools when they could materially answer the question. Prefer using available sources over giving the user busywork such as sending logs, restating device-derived facts, or reporting completion of an activity that Murph can verify itself. Ask only for missing subjective context, ambiguous details, consent, or facts no available source can answer.
-5. Ask only questions that can materially improve safety, the write target, the current answer, Murph's longitudinal understanding, or likely follow-through. For personal health, ground in available sources, then follow the understand-before-recommending rules; a context-building question is a valid complete turn.
+5. Ask only questions that can materially improve safety, the write target, the current answer, Murph's longitudinal understanding, or likely follow-through. For personal health, ground in available sources, then follow the understand-before-recommending rules. Private longitudinal default: when a persistent or recurring problem remains unresolved, the member is seeking problem-solving help, and one safe reversible uncertainty could change the next decision, give a working assessment plus one context-grounded bounded trial without waiting for experiment vocabulary or an explicit action verb. Do not apply this default to factual questions, logging or record updates, requests to be heard without problem-solving, acute or unstable situations, cases primarily owned by urgent or clinician-led evaluation, decisions the existing record already resolves, or cases where one clearly indicated direct action makes comparison unnecessary. Use only the one or two prior facts or attempts that materially change the lever, technique, timing, dose, comparison, or outcome; if none exist, say so briefly. Ask at most one question first, only when its answer changes safety or which lever wins; otherwise give the selected trial instead of a generic wellness menu. A context-building question is a valid complete turn only when it clears that decision.
 6. Use the canonical surface. Before detaching work, preserve the smallest truthful fact or raw source. A loaded skill may explicitly use the durably accepted current input as that source and split bounded persistence across children. Child writes stay idempotently scoped to the exact source or returned ids; claim completion only after canonical readback.
 7. Relevant personal records are core evidence. Read them before answering from general knowledge. Do not repeat reads or add work that cannot change the outcome.
 8. Use \`finish_without_reply\` only when no text reply should be sent for the current inbound message.
-9. Lead the final reply with the result. Preserve the facts, evidence, uncertainty, blockers, and next action needed to make the answer complete; trim introductions, repetition, reassurance, and optional background first. Claim an action only when a real runtime result proves it happened, and offer at most one useful next step.`;
+9. Lead the final reply with the result. Preserve the facts, evidence, uncertainty, blockers, and next action needed to make the answer complete; trim introductions, repetition, reassurance, optional background, and unrelated wellness advice first. Claim an action only when a real runtime result proves it happened, and offer at most one useful next step.`;
 }
 
 function buildAssistantNonBlockingDelegationText(): string {
@@ -1363,7 +1363,7 @@ ${replyTargetGuidance}
 
 function buildAssistantHealthCommonsGuidanceText(): string {
   return `Health Commons tools:
-- Before health Q&A or advice, run one \`vault-cli commons knowledge search "<full health question in concise English>" --format json\`. Preserve symptoms, medicines, timing, dose, pregnancy/fertility, and recent adverse events. Use evidence, caveats, safety, and sources. If unavailable or empty, continue honestly. Clarify only when candidates differ materially. Skip jokes, thanks, logs, logistics, and non-health turns. Suggest experiments only when asked to try, test, track, or set one up.
+- Before health Q&A or advice, run one \`vault-cli commons knowledge search "<full health question in concise English>" --format json\`. Preserve symptoms, medicines, timing, dose, pregnancy/fertility, and recent adverse events. Use evidence, caveats, safety, and sources. If unavailable or empty, continue honestly. Clarify only when candidates differ materially. Skip jokes, thanks, logs, logistics, and non-health turns.
 - For protocol discovery/setup, search first. ${buildHealthCommonsDiscoverySurfaceText()}`;
 }
 
@@ -1439,11 +1439,13 @@ function buildAssistantVaultFileSendGuidanceText(): string {
   ].join("\n");
 }
 
-function buildAssistantSkillRouteHintText(): string {
-  return [
+function buildAssistantSkillRouteHintText(
+  conversationScope: AssistantConversationScope,
+): string {
+  const routeLines = [
     "Murph skill router:",
     "- Specialized skills live at `$MURPH_ASSISTANT_SKILLS_ROOT/<slug>/SKILL.md`. Route by the user's visible outcome and read the primary owner. If routing is ambiguous, inspect at most two candidates; this cap is discovery-only. Then follow explicit handoffs and load every distinct safety or execution owner. Do not preload skills or call a discovery CLI just to route.",
-    "- Setup: murph-onboarding, hosted-low-usage, signup-link (explicit requests), experiment-onboarding, behavior-followthrough, self-management-experiments.",
+    "- Setup: murph-onboarding, hosted-low-usage, signup-link (explicit requests), experiment-onboarding, behavior-followthrough.",
     "- Automatic meal capture: automatic-meal-capture for the iPhone app, Photos permission, background timing, Meals review, import verification, and photo-only meal enrichment.",
     "- Sleep/readiness: sleep-improvement, circadian-rhythm, sleep-recovery-readiness, hrv-resting-heart-rate, energy-fatigue.",
     "- Sleep safety outranks fatigue/clock routing: snoring/gasping, unrefreshing sleep with enough opportunity, unexplained awakenings, morning headache, sleep attacks, or dangerous daytime sleepiness -> sleep-improvement. If driving/work safety is affected, give immediate safety guidance before coaching.",
@@ -1458,10 +1460,18 @@ function buildAssistantSkillRouteHintText(): string {
     "- Food-journal owns capture and retrospective patterns; nutrition-strategy owns forward meal execution and named-diet evaluation; body-composition owns weight/waist/recomposition; gut-digestion owns digestive symptoms and elimination/reintroduction; micronutrients-supplements owns supplement evidence, labels, dose, and safety.",
     "- Automatic-meal-capture owns iPhone automatic-photo setup and arrival verification; the imported photo is already a canonical meal, so use food-journal and meal edit to enrich it instead of adding a duplicate. Always load automatic-meal-capture alongside food-journal on eligible interactive meal turns and check recent unresolved device meals; import itself does not start a model turn.",
     "- Physical-therapy owns active pain, injury, rehabilitation, return-to-activity, and pain-driven workout modification. Read it before recommending exercises, rest, activity restriction, or load changes for pain. In group email, where filesystem reads are forbidden, do not attempt the read; apply the resident group Understand before recommending rules instead. Mobility-posture owns non-pain movement and competition-training owns a named event or benchmark. Before presenting any named movement, let the domain owner choose it, then always read `$MURPH_ASSISTANT_SKILLS_ROOT/shared/exercise-catalog-runtime.md`; that reference owns catalog lookup, likely-familiarity inference, and exercise-media presentation.",
-    "- Stress-regulation owns the immediate downshift when acute stress or overload blocks action; chronic-illness-support and chronic-pain-support own ongoing illness or pain; self-management-experiments owns low-burden chronic trials; behavior-followthrough owns recurring support, reminder repair, and current plan or target questions.",
-    "- For a chosen health intervention, use its domain owner. Add experiment-onboarding only when the user wants to test or compare the intervention, and add behavior-followthrough only when recurring support matters. In any multi-human conversation read group-chat; add group-challenge for challenge lifecycle, groupchat-comedy for banter, dispatch voice, or a group photo drop, and group-newsletter for newsletter setup or a scheduled edition.",
+    "- Stress-regulation owns the immediate downshift when acute stress or overload blocks action; chronic-illness-support and chronic-pain-support own ongoing illness or pain; behavior-followthrough owns recurring support, reminder repair, and current plan or target questions.",
+  ];
+  if (conversationScope === "direct") {
+    routeLines.push(
+      "- When the private longitudinal default in turn priority applies, read self-management-experiments. For any multi-day or repeated comparison, also read experiment-onboarding; add behavior-followthrough only when recurring support matters.",
+    );
+  }
+  routeLines.push(
+    "- For a chosen health intervention, use its domain owner. In any multi-human conversation read group-chat; add group-challenge for challenge lifecycle, groupchat-comedy for banter, dispatch voice, or a group photo drop, and group-newsletter for newsletter setup or a scheduled edition.",
     "- Computer-use, pdf, and music-generation are execution/output owners and may be secondary to a health-domain skill. Read music-generation before generating any song.",
-  ].join("\n");
+  );
+  return routeLines.join("\n");
 }
 
 function buildAssistantHostedDeviceConnectGuidanceText(input: {

@@ -15,6 +15,9 @@ import { serializeAssistantProviderSessionOptions } from '@murphai/operator-conf
 import {
   renderAssistantResponseCardText,
   type AssistantResponseCard,
+  renderAssistantWorkoutResponseCardText,
+  renderAssistantWorkoutResponseCardTranscriptText,
+  type CompactTableWorkoutResponseCardV1,
 } from '@murphai/operator-config/assistant-response-cards'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
@@ -102,6 +105,31 @@ const DAILY_NUTRITION_CARD: AssistantResponseCard = {
     proteinGrams: { total: 94.5, mealCount: 3 },
     carbsGrams: { total: null, mealCount: 0 },
     fatGrams: { total: 34.75, mealCount: 2 },
+  },
+}
+
+const OVERSIZED_WORKOUT_CARD: CompactTableWorkoutResponseCardV1 = {
+  kind: 'compact_table',
+  version: 1,
+  title: 'Full workout recovery',
+  subtitle: null,
+  footer: 'Reply with the exercise, set, and result to log or correct it.',
+  tracking: {
+    kind: 'workout',
+    entityId: 'evt_01K1ABCDEFGHJKMNPQRSTVWXYZ',
+    snapshotAt: '2026-08-09T19:45:00.000Z',
+  },
+  workout: {
+    version: 1,
+    state: 'active',
+    exercises: Array.from({ length: 16 }, (_, exerciseIndex) => ({
+      name: `Capacity exercise ${exerciseIndex + 1}`,
+      sets: Array.from({ length: 16 }, (_, setIndex) => ({
+        status: 'pending',
+        target: `Exercise ${exerciseIndex + 1} set ${setIndex + 1} target ${'x'.repeat(12)}`,
+        actual: null,
+      })),
+    })),
   },
 }
 
@@ -3332,59 +3360,253 @@ test('sendAssistantNotificationLocal releases typing after accepted delivery', a
   )
 })
 
-test('sendAssistantNotificationLocal preserves a card decision and delivers deterministic card text', async () => {
-  const providerAuthoredResponse = JSON.stringify({
-    kind: 'send_message',
-    privateSummary: 'Attached the daily nutrition response card.',
-    text: 'Nutrition card attached.',
-  })
-  const renderedText = renderAssistantResponseCardText(DAILY_NUTRITION_CARD)
-  const providerResult = createProviderResult({
-    providerAuthoredResponse,
-    response: renderedText,
-    responseCard: DAILY_NUTRITION_CARD,
-  })
-  const { deliverMessage, mocks, sendAssistantNotificationLocal } =
-    await loadNotificationTurnHarness({
-      providerResult,
-      turnId: 'turn-daily-nutrition-card',
-    })
-
-  const result = await sendAssistantNotificationLocal({
-    channel: 'linq',
-    deferCommitUntilDeliveryAccepted: true,
-    deliveryTarget: 'direct-nutrition-card',
-    instructions: 'Complete the automatic meal closeout.',
-    scheduledInvocationAuthority: {
-      automationId: MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION_ID,
-      occurrenceAt: '2026-07-28T21:00:00.000-04:00',
-    },
-    threadIsDirect: true,
-    vault: '/vaults/daily-nutrition-card',
-  })
-
-  expect(result).toMatchObject({
-    decision: {
+test.each(['linq', 'telegram', 'email'] as const)(
+  'sendAssistantNotificationLocal preserves a $channel fitting-card decision',
+  async (channel) => {
+    const providerAuthoredResponse = JSON.stringify({
       kind: 'send_message',
       privateSummary: 'Attached the daily nutrition response card.',
-      text: renderedText,
-    },
-    response: renderedText,
-  })
-  expect(deliverMessage).toHaveBeenCalledWith(expect.objectContaining({
-    card: DAILY_NUTRITION_CARD,
-    media: [],
-    message: renderedText,
-  }))
-  expect(mocks.persistAssistantTurnAndSession).toHaveBeenCalledWith(
-    expect.objectContaining({
-      assistantTranscriptText: renderedText,
-    }),
-  )
-  expect(JSON.stringify(deliverMessage.mock.calls)).not.toContain(
-    'Nutrition card attached.',
-  )
-})
+      text: 'Nutrition card attached.',
+    })
+    const renderedText = renderAssistantResponseCardText(DAILY_NUTRITION_CARD)
+    const providerResult = createProviderResult({
+      providerAuthoredResponse,
+      response: renderedText,
+      responseCard: DAILY_NUTRITION_CARD,
+    })
+    const { deliverMessage, mocks, sendAssistantNotificationLocal } =
+      await loadNotificationTurnHarness({
+        providerResult,
+        turnId: 'turn-daily-nutrition-card',
+      })
+
+    const result = await sendAssistantNotificationLocal({
+      channel,
+      deferCommitUntilDeliveryAccepted: true,
+      deliveryTarget: 'direct-nutrition-card',
+      instructions: 'Complete the automatic meal closeout.',
+      scheduledInvocationAuthority: {
+        automationId: MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION_ID,
+        occurrenceAt: '2026-07-28T21:00:00.000-04:00',
+      },
+      threadIsDirect: true,
+      vault: '/vaults/daily-nutrition-card',
+    })
+
+    expect(result).toMatchObject({
+      decision: {
+        kind: 'send_message',
+        privateSummary: 'Attached the daily nutrition response card.',
+        text: renderedText,
+      },
+      response: renderedText,
+    })
+    expect(deliverMessage).toHaveBeenCalledWith(expect.objectContaining({
+      card: DAILY_NUTRITION_CARD,
+      channel,
+      media: [],
+      message: renderedText,
+    }))
+    expect(mocks.persistAssistantTurnAndSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        assistantTranscriptText: renderedText,
+      }),
+    )
+    expect(JSON.stringify(deliverMessage.mock.calls)).not.toContain(
+      'Nutrition card attached.',
+    )
+  },
+)
+
+test.each(
+  (['linq', 'telegram', 'email'] as const).flatMap((channel) => [
+    { channel, responsePolicy: undefined },
+    { channel, responsePolicy: { kind: 'require_send' } as const },
+  ]),
+)(
+  'sendAssistantNotificationLocal delivers a $channel cardless workout overflow with $responsePolicy',
+  async ({ channel, responsePolicy }) => {
+    const providerAuthoredResponse = JSON.stringify({
+      kind: 'send_message',
+      privateSummary: 'Completed the scheduled workout update.',
+      text: 'Workout card attached.',
+    })
+    const renderedText = renderAssistantWorkoutResponseCardText(
+      OVERSIZED_WORKOUT_CARD,
+    )
+    const transcriptText = renderAssistantWorkoutResponseCardTranscriptText(
+      OVERSIZED_WORKOUT_CARD,
+    )
+    const providerResult = createProviderResult({
+      providerAuthoredResponse,
+      response: renderedText,
+      transcriptResponse: transcriptText,
+    })
+    const { deliverMessage, mocks, sendAssistantNotificationLocal } =
+      await loadNotificationTurnHarness({
+        providerResult,
+        turnId: 'turn-scheduled-workout-overflow',
+      })
+
+    const result = await sendAssistantNotificationLocal({
+      channel,
+      deferCommitUntilDeliveryAccepted: true,
+      deliveryTarget: `direct-${channel}-workout-overflow`,
+      instructions: 'Send the complete current tracked workout.',
+      ...(responsePolicy === undefined ? {} : { responsePolicy }),
+      scheduledInvocationAuthority: {
+        automationId: 'scheduled-workout-summary',
+        occurrenceAt: '2026-08-09T19:45:00.000-04:00',
+      },
+      threadIsDirect: true,
+      vault: '/vaults/scheduled-workout-overflow',
+    })
+
+    expect(result).toMatchObject({
+      decision: {
+        kind: 'send_message',
+        privateSummary: 'Completed the scheduled workout update.',
+        text: renderedText,
+      },
+      response: renderedText,
+    })
+    expect(result.response).toContain('Capacity exercise 1:')
+    expect(result.response).toContain('Capacity exercise 16:')
+    expect(result.response).toContain(
+      `set 16: pending; target Exercise 16 set 16 target ${'x'.repeat(12)}`,
+    )
+    expect(result.response).not.toContain('evt_')
+    expect(deliverMessage).toHaveBeenCalledWith(expect.objectContaining({
+      card: null,
+      channel,
+      message: renderedText,
+    }))
+    expect(mocks.persistAssistantTurnAndSession).toHaveBeenCalledWith(
+      expect.objectContaining({ assistantTranscriptText: transcriptText }),
+    )
+    expect(JSON.stringify(deliverMessage.mock.calls)).not.toContain(
+      'Workout card attached.',
+    )
+  },
+)
+
+test.each([
+  {
+    channel: 'linq' as const,
+    clarification:
+      'For reminder "Gap reminder", the trusted date is 2026-03-08. What other local time on 2026-03-08 should I use?',
+    code: 'local_at_gap',
+  },
+  {
+    channel: 'linq' as const,
+    clarification:
+      'For reminder "Fold reminder", the trusted date is 2026-11-01. Should I use the earlier or later occurrence on 2026-11-01?',
+    code: 'local_at_fold',
+  },
+  {
+    channel: 'telegram' as const,
+    clarification:
+      'For reminder "Gap reminder", the trusted date is 2026-03-08. What other local time on 2026-03-08 should I use?',
+    code: 'local_at_gap',
+  },
+  {
+    channel: 'telegram' as const,
+    clarification:
+      'For reminder "Fold reminder", the trusted date is 2026-11-01. Should I use the earlier or later occurrence on 2026-11-01?',
+    code: 'local_at_fold',
+  },
+])(
+  'sendAssistantNotificationLocal composes $channel $code clarification with parsed scheduled text',
+  async ({ channel, clarification }) => {
+    const providerAuthoredResponse = JSON.stringify({
+      kind: 'send_message',
+      privateSummary: 'Need a replacement local time.',
+      text: 'That time does not exist.',
+    })
+    const runtimeResponse = `${providerAuthoredResponse}\n\n${clarification}`
+    const providerResult = createProviderResult({
+      providerAuthoredResponse,
+      response: runtimeResponse,
+      transcriptResponse: runtimeResponse,
+    })
+    const { deliverMessage, mocks, sendAssistantNotificationLocal } =
+      await loadNotificationTurnHarness({
+        providerResult,
+        turnId: `turn-${channel}-scheduled-local-time-clarification`,
+      })
+
+    const result = await sendAssistantNotificationLocal({
+      channel,
+      deferCommitUntilDeliveryAccepted: true,
+      deliveryTarget: `direct-${channel}-scheduled-local-time-clarification`,
+      instructions: 'Create the requested local-time reminder or ask for correction.',
+      scheduledInvocationAuthority: {
+        automationId: 'scheduled-local-time-clarification',
+        occurrenceAt: '2026-03-01T14:00:00.000-05:00',
+      },
+      threadIsDirect: true,
+      vault: `/vaults/${channel}-scheduled-local-time-clarification`,
+    })
+
+    const expectedText = `That time does not exist.\n\n${clarification}`
+    expect(result).toMatchObject({
+      decision: {
+        kind: 'send_message',
+        privateSummary: 'Need a replacement local time.',
+        text: expectedText,
+      },
+      response: expectedText,
+    })
+    expect(deliverMessage).toHaveBeenCalledWith(expect.objectContaining({
+      channel,
+      message: expectedText,
+    }))
+    expect(mocks.persistAssistantTurnAndSession).toHaveBeenCalledWith(
+      expect.objectContaining({ assistantTranscriptText: expectedText }),
+    )
+    expect(JSON.stringify(deliverMessage.mock.calls)).not.toContain(
+      'privateSummary',
+    )
+    expect(JSON.stringify(deliverMessage.mock.calls)).not.toContain(
+      'send_message',
+    )
+  },
+)
+
+test.each(['linq', 'telegram', 'email'] as const)(
+  'sendAssistantNotificationLocal rejects a $channel skip after cardless recovery',
+  async (channel) => {
+    const providerResult = createProviderResult({
+      providerAuthoredResponse: JSON.stringify({
+        kind: 'skip',
+        privateSummary: 'Nothing to send.',
+      }),
+      response: 'Full workout recovery\n\nFirst exercise\nLast exercise',
+      transcriptResponse:
+        'Full workout recovery\n\nFirst exercise\nLast exercise\n\n' +
+        '[Murph tracked workout source: evt_test; snapshot: 2026-08-09T19:45:00.000Z]',
+    })
+    const { deliverMessage, sendAssistantNotificationLocal } =
+      await loadNotificationTurnHarness({
+        providerResult,
+        turnId: 'turn-scheduled-workout-overflow-skip',
+      })
+
+    await expect(sendAssistantNotificationLocal({
+      channel,
+      instructions: 'Send the complete current tracked workout.',
+      scheduledInvocationAuthority: {
+        automationId: 'scheduled-workout-summary',
+        occurrenceAt: '2026-08-09T19:45:00.000-04:00',
+      },
+      threadIsDirect: true,
+      vault: '/vaults/scheduled-workout-overflow-skip',
+    })).rejects.toMatchObject({
+      code: 'ASSISTANT_NOTIFICATION_INVALID_RESPONSE',
+    })
+    expect(deliverMessage).not.toHaveBeenCalled()
+  },
+)
 
 test.each([
   {
@@ -3573,7 +3795,8 @@ test('sendAssistantNotificationLocal keeps creative response-media failures on t
     }),
   })
   expect(deliverMessage).not.toHaveBeenCalled()
-})
+  },
+)
 
 test('sendAssistantNotificationLocal does not checkpoint a new output-only direct session', async () => {
   const session = createAssistantSession({
@@ -3617,6 +3840,7 @@ test('sendAssistantNotificationLocal does not checkpoint a new output-only direc
 
   expect(beforeProviderAcceptedInputs).toHaveBeenCalledExactlyOnceWith({
     acceptedInputs: [],
+    turnId: 'turn-new-output-only-notification',
   })
 })
 
@@ -5480,6 +5704,7 @@ function createProviderResult(input?: {
   responseCard?: ExecutedAssistantProviderTurnResult['responseCard']
   responseMedia?: ExecutedAssistantProviderTurnResult['responseMedia']
   response?: string
+  transcriptResponse?: string | null
   route?: CodexThreadIdentity
   session?: AssistantSession
   usage?: AssistantProviderUsage | null
@@ -5523,7 +5748,10 @@ function createProviderResult(input?: {
     session,
     stderr: '',
     stdout: '',
-    transcriptResponse: input?.response ?? 'provider response',
+    transcriptResponse:
+      input?.transcriptResponse === undefined
+        ? input?.response ?? 'provider response'
+        : input.transcriptResponse,
     usage:
       input?.usage === undefined
         ? defaultUsage

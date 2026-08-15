@@ -121,6 +121,7 @@ function addEncodedLengthIssues(
     context.addIssue({
       code: "custom",
       message: `The ${subject} exceeds the inline Messages card limit.`,
+      params: { murphExpectedShape: "within_response_card_payload_limit" },
       path: [],
     });
   }
@@ -131,6 +132,7 @@ function addEncodedLengthIssues(
     context.addIssue({
       code: "custom",
       message: `The ${subject} exceeds the static image payload limit.`,
+      params: { murphExpectedShape: "within_response_card_payload_limit" },
       path: [],
     });
   }
@@ -143,7 +145,7 @@ const compactTableResponseCardHeaderV1Shape = {
   subtitle: singleLineText(compactTableCardV1Bounds.subtitle).nullable(),
 } as const;
 
-const compactTableGenericResponseCardV1Schema = z
+export const compactTableGenericResponseCardV1Schema = z
   .object({
     ...compactTableResponseCardHeaderV1Shape,
     rowHeader: singleLineText(compactTableCardV1Bounds.rowHeader),
@@ -166,6 +168,7 @@ const compactTableGenericResponseCardV1Schema = z
         context.addIssue({
           code: "custom",
           message: "Each table row must contain one value for every column.",
+          params: { murphExpectedShape: "same_count_as_card.columns" },
           path: ["rows", index, "values"],
         });
       }
@@ -180,15 +183,17 @@ const compactTableGenericResponseCardV1Schema = z
     addEncodedLengthIssues(envelope, context, "compact table");
   });
 
-const compactTableWorkoutResponseCardAuthoringV1Schema = z
+export const compactTableWorkoutSemanticResponseCardV1Schema = z
   .object({
     ...compactTableResponseCardHeaderV1Shape,
     footer: singleLineText(compactTableCardV1Bounds.footer).nullable(),
     tracking: compactTableTrackingSourceV1Schema,
     workout: workoutSessionDetailV1Schema,
   })
-  .strict()
-  .superRefine((card, context) => {
+  .strict();
+
+export const compactTableWorkoutResponseCardAuthoringV1Schema =
+  compactTableWorkoutSemanticResponseCardV1Schema.superRefine((card, context) => {
     const envelope = buildWorkoutSessionAppCardEnvelopeV4({
       title: card.title,
       subtitle: card.subtitle,

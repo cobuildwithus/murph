@@ -1396,9 +1396,12 @@ describe("executeHostedMailboxEvent", () => {
           turnContextPromptBytes: 2048,
           developerInstructionsBytes: 1024,
           conversationContextBytes: 256,
+          conversationHistoryBytes: 1536,
+          conversationHistoryCount: 4,
           systemPromptBytes: 512,
           developerInstructionsPresent: true,
           conversationContextPresent: true,
+          conversationHistoryPresent: true,
           resumeCodexThreadIdPresent: true,
           prompt: "private prompt text should not be logged",
           userPrompt: "hello",
@@ -1419,6 +1422,9 @@ describe("executeHostedMailboxEvent", () => {
         baseInstructionsBytes: 768,
         conversationContextBytes: 256,
         conversationContextPresent: true,
+        conversationHistoryBytes: 1536,
+        conversationHistoryCount: 4,
+        conversationHistoryPresent: true,
         developerInstructionsBytes: 1024,
         developerInstructionsPresent: true,
         providerPromptBytes: 4096,
@@ -2352,6 +2358,55 @@ describe("executeHostedMailboxEvent", () => {
     });
   });
 
+  it("terminally suppresses embedded Telegram signup welcomes", async () => {
+    const wake = buildHostedExecutionMemberActivatedWake({
+      eventId: "member.activated:stripe:member_123:evt_telegram_welcome",
+      memberChannels: {
+        email: false,
+        linq: false,
+        telegram: true,
+      },
+      memberId: "member_123",
+      occurredAt: "2026-04-08T00:00:00.000Z",
+      signupWelcome: {
+        route: {
+          actorId: null,
+          channel: "telegram",
+          delivery: {
+            kind: "thread",
+            target: "telegram_thread_123",
+          },
+          identityId: null,
+          threadId: "hid_telegram_thread_123",
+          threadIsDirect: true,
+        },
+        text: "Welcome to Murph.",
+      },
+    });
+
+    const result = await executeHostedMailboxEvent({
+      wake,
+      executionContext,
+      runtime: createRuntime(),
+      runtimeEnv: {},
+      vaultRoot: "/tmp/assistant-runtime-events",
+    });
+
+    expect(mocks.sendAssistantNotification).not.toHaveBeenCalled();
+    expect(mocks.upsertAssistantCronAutomation).not.toHaveBeenCalled();
+    expect(result).toMatchObject({
+      mailboxLane: "member-activated",
+      redactedLogEntries: expect.arrayContaining([
+        expect.objectContaining({
+          redacted: expect.objectContaining({
+            eventCode: "assistant.signup_welcome.telegram_suppressed",
+            terminalDisposition: "proactive_telegram_disabled",
+          }),
+        }),
+      ]),
+    });
+  });
+
   it("still seeds onboarding follow-up when the embedded member activation welcome is superseded by prior first contact", async () => {
     const seededNextWakeAt = "2026-04-09T17:30:00.000Z";
     mocks.sendAssistantNotification.mockResolvedValueOnce({
@@ -2524,7 +2579,7 @@ describe("executeHostedMailboxEvent", () => {
     expect(mocks.upsertAssistantCronAutomation).not.toHaveBeenCalled();
   });
 
-  it("seeds onboarding follow-up for Telegram signup welcome routes", async () => {
+  it("terminally suppresses legacy Telegram signup welcome notifications", async () => {
     const wake = buildHostedExecutionAssistantNotificationRequestedWake({
       eventId: "evt_notification_telegram_welcome",
       memberId: "member_123",
@@ -2554,7 +2609,7 @@ describe("executeHostedMailboxEvent", () => {
       occurredAt: "2026-04-08T00:00:00.000Z",
     });
 
-    await executeHostedMailboxEvent({
+    const result = await executeHostedMailboxEvent({
       wake,
       executionContext,
       runtime: createRuntime(),
@@ -2562,20 +2617,19 @@ describe("executeHostedMailboxEvent", () => {
       vaultRoot: "/tmp/assistant-runtime-events",
     });
 
-    expect(mocks.upsertAssistantCronAutomation).toHaveBeenCalledWith(
-      expect.objectContaining({
-        route: {
-          channel: "telegram",
-          deliverySource: null,
-          deliveryTarget: null,
-          identityId: null,
-          participantId: null,
-          threadId: "telegram_thread_123",
-          threadIsDirect: true,
-        },
-        slug: "finish-onboarding-followup",
-      }),
-    );
+    expect(mocks.sendAssistantNotification).not.toHaveBeenCalled();
+    expect(mocks.upsertAssistantCronAutomation).not.toHaveBeenCalled();
+    expect(result).toMatchObject({
+      mailboxLane: "assistant-notification",
+      redactedLogEntries: expect.arrayContaining([
+        expect.objectContaining({
+          redacted: expect.objectContaining({
+            eventCode: "assistant.signup_welcome.telegram_suppressed",
+            terminalDisposition: "proactive_telegram_disabled",
+          }),
+        }),
+      ]),
+    });
   });
 
   it("keeps queue-only dispatch for non-canonical exact first-contact notifications", async () => {
@@ -2630,7 +2684,7 @@ describe("executeHostedMailboxEvent", () => {
     );
   });
 
-  it("does not seed onboarding follow-up for non-canonical signup welcome tokens", async () => {
+  it("terminally suppresses Telegram signup welcomes with partial legacy tokens", async () => {
     const wake = buildHostedExecutionAssistantNotificationRequestedWake({
       eventId: "evt_notification_welcome_prefix_only",
       memberId: "member_123",
@@ -2667,11 +2721,11 @@ describe("executeHostedMailboxEvent", () => {
       vaultRoot: "/tmp/assistant-runtime-events",
     });
 
-    expect(mocks.sendAssistantNotification).toHaveBeenCalledOnce();
+    expect(mocks.sendAssistantNotification).not.toHaveBeenCalled();
     expect(mocks.upsertAssistantCronAutomation).not.toHaveBeenCalled();
   });
 
-  it("still seeds onboarding follow-up when the signup welcome notification is superseded by prior first contact", async () => {
+  it("still seeds Linq onboarding follow-up when the signup welcome is superseded by prior first contact", async () => {
     const wake = buildHostedExecutionAssistantNotificationRequestedWake({
       eventId: "evt_notification_welcome_skip_result",
       memberId: "member_123",
@@ -2687,14 +2741,14 @@ describe("executeHostedMailboxEvent", () => {
           text: "Welcome to Murph.",
         },
         route: {
-          actorId: "hid_telegram_actor_123",
-          channel: "telegram",
+          actorId: "hid_linq_actor_123",
+          channel: "linq",
           delivery: {
             kind: "thread",
-            target: "telegram_thread_123",
+            target: "thread_123",
           },
-          identityId: null,
-          threadId: null,
+          identityId: "hid_linq_identity_123",
+          threadId: "hid_linq_thread_123",
           threadIsDirect: true,
         },
       },

@@ -9,7 +9,10 @@ import type {
   AssistantResponseMedia,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import { ELEVENLABS_TTS_MAX_TEXT_LENGTH } from '@murphai/operator-config/elevenlabs-runtime'
-import type { SafeToolCallValidationDigest } from '../../assistant/tool-validation-digest.js'
+import {
+  collectSafeJsonSchemaValidationPaths,
+  type SafeToolCallValidationDigest,
+} from '../../assistant/tool-validation-digest.js'
 import {
   executeGenerateVoiceMemoTool,
   type GenerateVoiceMemoToolArgs,
@@ -56,6 +59,9 @@ export const MURPH_GENERATE_VOICE_MEMO_TOOL = {
   },
 } as const
 
+const GENERATE_VOICE_MEMO_VALIDATION_PATHS =
+  collectSafeJsonSchemaValidationPaths(MURPH_GENERATE_VOICE_MEMO_TOOL.inputSchema)
+
 const generateVoiceMemoArgumentsSchema = z
   .object({
     text: z.string().trim().min(1).max(ELEVENLABS_TTS_MAX_TEXT_LENGTH),
@@ -70,6 +76,7 @@ export function parseGenerateVoiceMemoArguments(
   | { ok: false; validationDigest: SafeToolCallValidationDigest } {
   const parsed = parseDynamicToolArguments({
     schema: generateVoiceMemoArgumentsSchema,
+    schemaPaths: GENERATE_VOICE_MEMO_VALIDATION_PATHS,
     toolName: 'murph.generate_voice_memo',
     value,
   })

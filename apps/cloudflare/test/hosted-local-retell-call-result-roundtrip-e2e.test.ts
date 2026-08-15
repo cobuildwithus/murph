@@ -42,10 +42,6 @@ const transferPreHandoffSummary = "The office had a Tuesday morning appointment 
 const transferReply = "I connected you to the office and then left the conversation, so I don’t know what happened afterward. Did you complete the appointment booking?";
 const setupQuestion = "Can you keep this conversation open while I wait for a pharmacy update?";
 const setupReply = "Yes, I’ll be here when you have an update.";
-const temporalMailboxSignalFaultPreloadUrl = new URL(
-  "../../web/test/support/hosted-local-temporal-mailbox-signal-fault-preload.ts",
-  import.meta.url,
-).href;
 
 const streamDevLogs = process.env.MURPH_E2E_STREAM_DEV_LOGS === "1";
 const workerPersistDirOverride = process.env.MURPH_E2E_CF_PERSIST_DIR?.trim() || null;
@@ -89,13 +85,7 @@ describe("hosted local Retell result roundtrip e2e", () => {
       scenarioLabel: "Local hosted Retell result roundtrip e2e",
       streamLogs: streamDevLogs,
       testControls: true,
-      webProcessEnvOverrides: {
-        MURPH_HOSTED_LOCAL_TEMPORAL_MAILBOX_SIGNAL_FAULT_USER_ID: userId,
-        NODE_OPTIONS: appendNodeImportOption(
-          process.env.NODE_OPTIONS,
-          temporalMailboxSignalFaultPreloadUrl,
-        ),
-      },
+      webTemporalMailboxSignalFaultUserId: userId,
     });
   }, 300_000);
 
@@ -550,16 +540,6 @@ async function waitForHostedMailboxItem(input: {
     "Timed out waiting for the committed Retell notification mailbox item.",
     { cause: lastError },
   );
-}
-
-function appendNodeImportOption(
-  existingNodeOptions: string | undefined,
-  importUrl: string,
-): string {
-  const existing = existingNodeOptions?.trim();
-  return existing
-    ? `${existing} --import=${importUrl}`
-    : `--import=${importUrl}`;
 }
 
 function countAssistantProviderRequests(): number {

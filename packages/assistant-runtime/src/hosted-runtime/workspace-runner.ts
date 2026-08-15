@@ -954,6 +954,7 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
     });
   }
   const runnerStartedAtEpochMs = Date.now();
+  let foregroundConversationImportsInFlight = 0;
   let foregroundConversationWorkObserved = false;
   let foregroundRuntimeWakeObservedAfterStop = false;
   const backgroundMaintenanceAbortController = new AbortController();
@@ -984,14 +985,14 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
       async () => startHostedForegroundConversationMailboxImportLoop({
         checkpointRequestBuilder: checkpointRequestSession,
         input,
+        onForegroundConversationImportFinished: () => {
+          foregroundConversationImportsInFlight -= 1;
+        },
+        onForegroundConversationImportStarted: () => {
+          foregroundConversationImportsInFlight += 1;
+        },
         onForegroundConversationWorkObserved: () => {
           foregroundConversationWorkObserved = true;
-          abortBackgroundMaintenance(
-            new DOMException(
-              "Foreground conversation input preempted background maintenance.",
-              "AbortError",
-            ),
-          );
         },
         checkpointCanonicalMailboxImportProgress,
       }),
@@ -1004,15 +1005,17 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
     if (!activeLoop) {
       return;
     }
-    await activeLoop.stop({
-      shouldAbortInFlightImport: () => foregroundConversationWorkObserved,
-    });
+    await activeLoop.stop();
     if (foregroundMailboxImportLoop === activeLoop) {
       foregroundMailboxImportLoop = null;
     }
   };
   const shouldYieldBackgroundMaintenance = (): boolean => {
-    if (foregroundConversationWorkObserved || foregroundRuntimeWakeObservedAfterStop) {
+    if (
+      foregroundConversationImportsInFlight > 0
+      || foregroundConversationWorkObserved
+      || foregroundRuntimeWakeObservedAfterStop
+    ) {
       return true;
     }
 
@@ -1372,13 +1375,13 @@ function startHostedForegroundConversationMailboxImportLoop(input: {
   checkpointRequestBuilder: HostedWorkspaceCheckpointRequestSession;
   checkpointCanonicalMailboxImportProgress: HostedCanonicalMailboxImportProgressCheckpoint;
   input: HostedWorkspaceRunnerInput;
+  onForegroundConversationImportFinished?: (() => void) | null;
+  onForegroundConversationImportStarted?: (() => void) | null;
   onForegroundConversationWorkObserved?: (() => void) | null;
 }): {
   completion: Promise<void>;
   drainPendingWake(): Promise<void>;
-  stop(options?: {
-    shouldAbortInFlightImport?: (() => boolean) | null;
-  }): Promise<void>;
+  stop(): Promise<void>;
 } {
   const runtimeWakeSignal = input.input.runtimeWakeSignal ?? null;
   if (!runtimeWakeSignal) {
@@ -1402,13 +1405,13 @@ function startHostedForegroundConversationMailboxImportLoop(input: {
   let wakeOrdinal = 0;
   let stopRequested = false;
   let activeWakeCompletion: Promise<void> | null = null;
-  let shouldAbortInFlightImportOnStop: (() => boolean) | null = null;
+  let activeConversationImportItemStaged = false;
   const inFlightImportController = new AbortController();
-  const abortInFlightImportAfterObservedWork = (): void => {
+  const abortInFlightImportAfterCurrentItemStaged = (): void => {
     if (
       !stopRequested
       || inFlightImportController.signal.aborted
-      || shouldAbortInFlightImportOnStop?.() !== true
+      || !activeConversationImportItemStaged
     ) {
       return;
     }
@@ -1421,7 +1424,11 @@ function startHostedForegroundConversationMailboxImportLoop(input: {
   };
   const observeForegroundConversationWork = (): void => {
     input.onForegroundConversationWorkObserved?.();
-    abortInFlightImportAfterObservedWork();
+  };
+  const observeForegroundConversationInputStaged = (): void => {
+    activeConversationImportItemStaged = true;
+    observeForegroundConversationWork();
+    abortInFlightImportAfterCurrentItemStaged();
   };
 
   const loop = (async () => {
@@ -1457,8 +1464,21 @@ function startHostedForegroundConversationMailboxImportLoop(input: {
         runtimePassDiagnostics: input.input.runtimePassDiagnostics ?? null,
         runtimeWakeNotifiedAtEpochMs: notification.notifiedAtEpochMs,
       });
-      const foregroundConversationImportItem =
+      const baseForegroundConversationImportItem =
         input.input.foregroundImportItem ?? input.input.importItem;
+      const foregroundConversationImportItem: typeof baseForegroundConversationImportItem =
+        async (...importArgs) => {
+          // Preempt lock-owning background maintenance before conversation
+          // staging waits for that same lock.
+          activeConversationImportItemStaged = false;
+          input.onForegroundConversationImportStarted?.();
+          try {
+            return await baseForegroundConversationImportItem(...importArgs);
+          } finally {
+            activeConversationImportItemStaged = false;
+            input.onForegroundConversationImportFinished?.();
+          }
+        };
       try {
         const handleForegroundImportResult = async (
           result: HostedMailboxImportCheckpointResult,
@@ -1499,7 +1519,7 @@ function startHostedForegroundConversationMailboxImportLoop(input: {
               importItem: foregroundConversationImportItem,
               importItemContext: {
                 latencyMilestones,
-                onConversationInputStaged: observeForegroundConversationWork,
+                onConversationInputStaged: observeForegroundConversationInputStaged,
                 runtimeAttemptId: input.input.runtimeLogContext?.attemptId ?? null,
               },
               input: input.input,
@@ -1585,11 +1605,10 @@ function startHostedForegroundConversationMailboxImportLoop(input: {
   return {
     completion,
     drainPendingWake,
-    async stop(options) {
+    async stop() {
       stopRequested = true;
-      shouldAbortInFlightImportOnStop = options?.shouldAbortInFlightImport ?? null;
       outerSignal?.removeEventListener("abort", abort);
-      abortInFlightImportAfterObservedWork();
+      abortInFlightImportAfterCurrentItemStaged();
       await drainPendingWake();
       if (!waitController.signal.aborted) {
         waitController.abort(new DOMException("Foreground mailbox import loop stopped.", "AbortError"));
@@ -1763,7 +1782,10 @@ async function importHostedPreAssistantSystemMailboxForWorkspaceRunner(input: {
       importItemContext: input.importItemContext,
       input: input.input,
       lanes: ["system"],
-      prefetch: importPage === 1 ? input.input.initialMailboxPrefetch ?? null : null,
+      // The shared foreground prefetch can predate a system wake that arrived
+      // while its conversation item was being imported. Establish a fresh
+      // system-lane boundary before starting the assistant.
+      prefetch: null,
       requestId: `${input.requestId}:pre-assistant-system:${importPage}`,
       signal: input.signal,
       suppressNoopRuntimeLog: true,
