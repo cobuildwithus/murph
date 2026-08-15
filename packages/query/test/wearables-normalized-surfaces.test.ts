@@ -1157,9 +1157,11 @@ test("Junction expanded summaries project into wearable activity, sleep, and bod
   assert.equal(latest?.activity?.lowActivityMinutes.selection.value, 60);
   assert.equal(latest?.activity?.mediumActivityMinutes.selection.value, 13);
   assert.equal(latest?.activity?.highActivityMinutes.selection.value, 5);
-  assert.equal(latest?.activity?.averageHeartRate.selection.value, 76);
+  assert.equal(latest?.activity?.activityAverageHeartRate.selection.value, 76);
   assert.equal(latest?.activity?.walkingAverageHeartRate.selection.value, 101);
-  assert.equal(latest?.activity?.lowestHeartRate.selection.value, 44);
+  assert.equal(latest?.activity?.minimumHeartRate.selection.value, 44);
+  assert.equal(latest?.activity?.averageHeartRate.selection.value, null);
+  assert.equal(latest?.activity?.lowestHeartRate.selection.value, null);
   assert.equal(latest?.activity?.floorsClimbed.selection.value, 18);
   assert.equal(latest?.activity?.estimatedVo2Max.selection.value, 48.5);
   assert.equal(latest?.activity?.totalElevationGainMeters.selection.value, 320);
@@ -1183,11 +1185,11 @@ test("Junction expanded summaries project into wearable activity, sleep, and bod
   assert.equal(activityMinutes?.value, 78);
   assert.equal(lowActivityMinutes?.summaryKind, "activity");
   assert.equal(lowActivityMinutes?.value, 60);
-  assert.equal(activityAverageHeartRate?.metric, "averageHeartRate");
+  assert.equal(activityAverageHeartRate?.metric, "activityAverageHeartRate");
   assert.equal(activityAverageHeartRate?.resolvedAlias, "activity-average-heart-rate");
   assert.equal(activityAverageHeartRate?.summaryKind, "activity");
   assert.equal(activityAverageHeartRate?.value, 76);
-  assert.equal(activityLowestHeartRate?.metric, "lowestHeartRate");
+  assert.equal(activityLowestHeartRate?.metric, "minimumHeartRate");
   assert.equal(activityLowestHeartRate?.resolvedAlias, "activity-lowest-heart-rate");
   assert.equal(activityLowestHeartRate?.summaryKind, "activity");
   assert.equal(activityLowestHeartRate?.value, 44);
@@ -1211,9 +1213,9 @@ test("Junction expanded summaries project into wearable activity, sleep, and bod
   assert.equal(projectedActivitySummaryValue("low-activity-minutes"), 60);
   assert.equal(projectedActivitySummaryValue("medium-activity-minutes"), 13);
   assert.equal(projectedActivitySummaryValue("high-activity-minutes"), 5);
-  assert.equal(projectedActivitySummaryValue("average-heart-rate"), 76);
+  assert.equal(projectedActivitySummaryValue("activity-average-heart-rate"), 76);
   assert.equal(projectedActivitySummaryValue("walking-average-heart-rate"), 101);
-  assert.equal(projectedActivitySummaryValue("lowest-heart-rate"), 44);
+  assert.equal(projectedActivitySummaryValue("minimum-heart-rate"), 44);
 });
 
 test("Junction body composition facts remain distinct across wearable and canonical metric queries", () => {

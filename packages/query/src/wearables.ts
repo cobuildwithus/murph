@@ -289,21 +289,6 @@ function listWearableActivityDaysFromDataset(dataset: WearableDataset): Wearable
       ),
       "Used the legacy activity minimum heart rate because no dedicated activity minimum was available.",
     );
-    const lowActivityMinutes = resolveMetric(
-      "lowActivityMinutes",
-      selectMetricCandidates(explicitDateCandidates, "lowActivityMinutes"),
-      { metricFamily: "activity" },
-    );
-    const mediumActivityMinutes = resolveMetric(
-      "mediumActivityMinutes",
-      selectMetricCandidates(explicitDateCandidates, "mediumActivityMinutes"),
-      { metricFamily: "activity" },
-    );
-    const highActivityMinutes = resolveMetric(
-      "highActivityMinutes",
-      selectMetricCandidates(explicitDateCandidates, "highActivityMinutes"),
-      { metricFamily: "activity" },
-    );
     const dayStrain = resolveMetric("dayStrain", selectMetricCandidates(explicitDateCandidates, "dayStrain"), {
       metricFamily: "activity",
     });
@@ -318,11 +303,6 @@ function listWearableActivityDaysFromDataset(dataset: WearableDataset): Wearable
     const averageHeartRate = resolveMetric(
       "averageHeartRate",
       selectMetricCandidates(explicitDateCandidates, "averageHeartRate"),
-      { metricFamily: "activity" },
-    );
-    const walkingAverageHeartRate = resolveMetric(
-      "walkingAverageHeartRate",
-      selectMetricCandidates(explicitDateCandidates, "walkingAverageHeartRate"),
       { metricFamily: "activity" },
     );
     const lowestHeartRate = resolveMetric(
@@ -368,14 +348,10 @@ function listWearableActivityDaysFromDataset(dataset: WearableDataset): Wearable
       ["activityAverageHeartRate", activityAverageHeartRate],
       ["walkingAverageHeartRate", walkingAverageHeartRate],
       ["minimumHeartRate", minimumHeartRate],
-      ["lowActivityMinutes", lowActivityMinutes],
-      ["mediumActivityMinutes", mediumActivityMinutes],
-      ["highActivityMinutes", highActivityMinutes],
       ["dayStrain", dayStrain],
       ["workoutStrain", workoutStrain],
       ["maxHeartRate", maxHeartRate],
       ["averageHeartRate", averageHeartRate],
-      ["walkingAverageHeartRate", walkingAverageHeartRate],
       ["lowestHeartRate", lowestHeartRate],
       ["percentRecorded", percentRecorded],
       ["sessionMinutes", sessionMinutes],
@@ -409,6 +385,7 @@ function listWearableActivityDaysFromDataset(dataset: WearableDataset): Wearable
       lowestHeartRate,
       maxHeartRate,
       mediumActivityMinutes,
+      minimumHeartRate,
       notes,
       percentRecorded,
       sessionCount,
@@ -419,7 +396,6 @@ function listWearableActivityDaysFromDataset(dataset: WearableDataset): Wearable
       totalElevationGainMeters,
       walkingAverageHeartRate,
       workoutStrain,
-      walkingAverageHeartRate,
     };
   });
 }
@@ -1388,8 +1364,8 @@ const DEFAULT_WEARABLE_DRIFT_SIGNALS: ReadonlyArray<{
   { metric: "waistCircumference", summaryKind: "bodyState" },
 ];
 const WEARABLE_METRIC_ALIAS_FALLBACKS: Readonly<Record<string, WearableMetricKey>> = {
-  "activity-average-heart-rate": "averageHeartRate",
-  "activity-lowest-heart-rate": "lowestHeartRate",
+  "activity-average-heart-rate": "activityAverageHeartRate",
+  "activity-lowest-heart-rate": "minimumHeartRate",
   "skin-temp": "temperatureDeviation",
   "skin-temperature": "temperatureDeviation",
   "session-count": "sessionCount",

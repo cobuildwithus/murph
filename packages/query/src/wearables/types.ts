@@ -103,6 +103,7 @@ export interface WearableActivityDay {
   lowestHeartRate: WearableResolvedMetric;
   maxHeartRate: WearableResolvedMetric;
   mediumActivityMinutes: WearableResolvedMetric;
+  minimumHeartRate: WearableResolvedMetric;
   notes: string[];
   percentRecorded: WearableResolvedMetric;
   sessionCount: WearableResolvedMetric;
@@ -113,7 +114,6 @@ export interface WearableActivityDay {
   totalElevationGainMeters: WearableResolvedMetric;
   walkingAverageHeartRate: WearableResolvedMetric;
   workoutStrain: WearableResolvedMetric;
-  walkingAverageHeartRate: WearableResolvedMetric;
 }
 
 /**
@@ -737,6 +737,7 @@ export const BODY_METRIC_KEYS = new Set<WearableMetricKey>([
 
 export const ACTIVITY_METRIC_KEYS = new Set<WearableMetricKey>([
   "activeCalories",
+  "activityAverageHeartRate",
   "activityMinutes",
   "activityScore",
   "altitudeChangeMeters",
@@ -750,6 +751,7 @@ export const ACTIVITY_METRIC_KEYS = new Set<WearableMetricKey>([
   "lowestHeartRate",
   "maxHeartRate",
   "mediumActivityMinutes",
+  "minimumHeartRate",
   "percentRecorded",
   "sessionCount",
   "sessionMinutes",
@@ -758,7 +760,6 @@ export const ACTIVITY_METRIC_KEYS = new Set<WearableMetricKey>([
   "totalElevationGainMeters",
   "walkingAverageHeartRate",
   "workoutStrain",
-  "walkingAverageHeartRate",
 ]);
 
 const ACTIVITY_SLEEP_SHARED_METRIC_KEYS: ReadonlySet<WearableMetricKey> = new Set([

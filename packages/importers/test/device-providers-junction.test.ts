@@ -2259,6 +2259,7 @@ test("Junction tier-2 summary events pass the canonical device import contract",
       "measurement",
       "measurement",
       "measurement",
+      "measurement",
       "note",
       "observation",
       "observation",
@@ -2375,6 +2376,7 @@ test("Junction summary completeness facts roundtrip and replay without samples",
       [
         "cervical-mucus",
         "contraceptive-use",
+        "gender",
         "intermenstrual-bleeding",
         "progesterone-test",
         "sexual-activity",
@@ -5582,24 +5584,16 @@ test("Junction normalizer maps menstrual cycle summaries to cycle and daily face
     /^menstrual-cycle-deviation-2026-04-30-[a-f0-9]{16}$/u,
   );
 
-  const sexualActivityEvent = measurementEvents.find((event) => event.title === "Junction sexual activity");
-  assert.deepEqual(readMeasurement(sexualActivityEvent), {
-    metric: "sexual-activity",
-    value: 1,
-    unit: "recording",
-    qualifiers: { "protection-used": true },
-  });
-  assert.equal(
-    sexualActivityEvent?.externalRef?.facet,
-    "sexual-activity-protected-2026-04-13",
-  );
-
   // Predicted cycles are forecasts and must not become normalized facts.
   assert.equal(
     events.some((event) => event.occurredAt?.startsWith("2026-05-05")),
     false,
   );
-  assert.equal(events.length, 9);
+  // Basal body temperature remains canonical only on its dedicated
+  // timeseries. Unknown/unspecified categorical values and indeterminate
+  // tests remain evidence-only.
+  assert.equal(events.length, 15);
+  assert.equal(payload.samples?.length ?? 0, 0);
 
   const cycleEvidence = readJunctionMenstrualCycleEvidence(payload);
   const evidenceText = JSON.stringify(cycleEvidence);
@@ -5674,68 +5668,56 @@ test("Junction normalizer preserves dated menstrual categorical facts without in
     readMeasurement(event)?.metric === metric
   );
 
-  const cervicalMucusEvents = eventsForMetric("cervical-mucus-quality");
-  assert.equal(cervicalMucusEvents.length, 2);
+  const cervicalMucusEvents = eventsForMetric("cervical-mucus");
+  assert.equal(cervicalMucusEvents.length, 1);
   assert.deepEqual(readMeasurement(cervicalMucusEvents[0]), {
-    metric: "cervical-mucus-quality",
+    metric: "cervical-mucus",
     value: 1,
-    unit: "recording",
+    unit: "observation",
     qualifiers: { quality: "egg_white" },
   });
-  assert.deepEqual(readMeasurement(cervicalMucusEvents[1])?.qualifiers, { quality: "unknown" });
 
   const intermenstrualBleedingEvent = eventsForMetric("intermenstrual-bleeding")[0];
   assert.deepEqual(readMeasurement(intermenstrualBleedingEvent), {
     metric: "intermenstrual-bleeding",
     value: 1,
-    unit: "flag",
+    unit: "event",
+    qualifiers: { bleeding: "intermenstrual" },
   });
-  assert.equal(
-    intermenstrualBleedingEvent?.externalRef?.facet,
-    "intermenstrual-bleeding-2026-04-18",
-  );
 
-  const contraceptiveEvents = eventsForMetric("contraceptive-type");
-  assert.equal(contraceptiveEvents.length, 2);
-  const boundedContraceptiveType = oversizedContraceptiveType.slice(0, 80);
-  assert.deepEqual(readMeasurement(contraceptiveEvents[0])?.qualifiers, {
-    type: boundedContraceptiveType,
-  });
-  assert.equal(
-    contraceptiveEvents[0]?.externalRef?.facet,
-    `contraceptive-type-${boundedContraceptiveType}-2026-04-08`,
-  );
-  assert.deepEqual(readMeasurement(contraceptiveEvents[1])?.qualifiers, { type: "unknown" });
+  assert.equal(eventsForMetric("contraceptive-use").length, 0);
 
-  const progesteroneEvents = eventsForMetric("home-progesterone-test");
-  assert.equal(progesteroneEvents.length, 2);
+  const progesteroneEvents = eventsForMetric("progesterone-test");
+  assert.equal(progesteroneEvents.length, 1);
   assert.deepEqual(readMeasurement(progesteroneEvents[0]), {
-    metric: "home-progesterone-test",
+    metric: "progesterone-test",
     value: 1,
-    unit: "recording",
+    unit: "result",
     qualifiers: { result: "positive" },
-  });
-  assert.deepEqual(readMeasurement(progesteroneEvents[1])?.qualifiers, {
-    result: "indeterminate",
   });
 
   const sexualActivityEvents = eventsForMetric("sexual-activity");
-  assert.equal(sexualActivityEvents.length, 3);
-  assert.deepEqual(readMeasurement(sexualActivityEvents[0])?.qualifiers, {
-    "protection-used": false,
+  assert.equal(sexualActivityEvents.length, 2);
+  const explicitlyUnprotected = sexualActivityEvents.find((event) =>
+    (readMeasurement(event)?.qualifiers as Record<string, unknown> | undefined)?.["protection-used"] === false
+  );
+  const protectionUnspecified = sexualActivityEvents.find((event) =>
+    Object.keys((readMeasurement(event)?.qualifiers as Record<string, unknown> | undefined) ?? {}).length === 0
+  );
+  assert.deepEqual(readMeasurement(explicitlyUnprotected), {
+    metric: "sexual-activity",
+    value: 1,
+    unit: "event",
+    qualifiers: { "protection-used": false },
   });
-  assert.equal(
-    sexualActivityEvents[0]?.externalRef?.facet,
-    "sexual-activity-unprotected-2026-04-13",
-  );
-  assert.equal(readMeasurement(sexualActivityEvents[1])?.qualifiers, undefined);
-  assert.equal(
-    sexualActivityEvents[1]?.externalRef?.facet,
-    "sexual-activity-protection-unspecified-2026-04-13",
-  );
-  assert.equal(readMeasurement(sexualActivityEvents[2])?.qualifiers, undefined);
+  assert.deepEqual(readMeasurement(protectionUnspecified), {
+    metric: "sexual-activity",
+    value: 1,
+    unit: "event",
+    qualifiers: {},
+  });
 
-  assert.equal(events.length, 10);
+  assert.equal(events.length, 5);
   assert.ok(events.every((event) => event.dataOrigin?.sourceProviderSlug === "apple-health"));
   assert.equal(events.some((event) => event.dayKey?.startsWith("2026-05")), false);
   assertEventRawArtifactRolesExist(payload);
@@ -5832,7 +5814,6 @@ test("Junction normalizer maps profile summaries to height and demographics", ()
         id: "profile-1",
         height: 183,
         birth_date: "1990-05-14",
-        gender: "male",
         sex: "female",
         gender: "other",
         wheelchair_use: true,
@@ -5870,7 +5851,7 @@ test("Junction normalizer maps profile summaries to height and demographics", ()
   assert.equal(gender?.dataOrigin?.sourceProviderSlug, "apple-health-kit");
   assert.equal(
     demographics?.note,
-    "Birth date: 1990-05-14. Reported gender: male. Biological sex: female. Wheelchair use: yes.",
+    "Birth date: 1990-05-14. Reported gender: other. Biological sex: female. Wheelchair use: yes.",
   );
   assert.equal(demographics?.note?.includes("Gender"), false);
   assert.equal(demographics?.title, "Junction profile");
@@ -6354,7 +6335,7 @@ test("Junction profile revisions preserve an unchanged member-edited gender whil
     assert.equal(liveDemographics?.reportedGender, "female");
     assert.equal(liveDemographics?.source, "manual");
     assert.equal(storedExternalRefField(liveDemographics, "version"), "2026-05-20T09:00:00.000Z");
-    assert.equal(storedDataOriginObservedAtRaw(liveDemographics), "2026-05-01T09:00:00Z");
+    assert.equal(storedDataOriginObservedAtRaw(liveDemographics), "2026-05-01T09:00:00.000Z");
     assert.ok(records.some((event) =>
       event.id === demographics.id
       && event.source === "device"
@@ -10553,8 +10534,8 @@ test("Junction normalizer maps documented activity and body summary scalar field
         day_strain: 10.4,
         workout_strain: 8.8,
         heart_rate: {
-          avg_bpm: 76,
-          avg_walking_bpm: 101,
+          avg_bpm: 72,
+          avg_walking_bpm: 83,
           max_bpm: 148,
           min_bpm: 44,
           resting_bpm: 52,
@@ -10596,9 +10577,9 @@ test("Junction normalizer maps documented activity and body summary scalar field
   assert.equal(activityMinutes?.fields?.value, 128);
   assert.equal(activityMinutes?.fields?.unit, "minutes");
   assert.equal(activityMinutes?.externalRef?.facet, "activity-minutes");
-  assert.equal(metricValue("low-activity-minutes"), 60);
-  assert.equal(metricValue("medium-activity-minutes"), 13);
-  assert.equal(metricValue("high-activity-minutes"), 5);
+  assert.equal(metricValue("low-activity-minutes"), 84);
+  assert.equal(metricValue("medium-activity-minutes"), 15);
+  assert.equal(metricValue("high-activity-minutes"), 29);
   assert.equal(metricValue("daily-steps"), 9400);
   assert.equal(metricValue("active-calories"), 640);
   assert.equal(metricValue("total-calories"), 2400);
@@ -10610,9 +10591,6 @@ test("Junction normalizer maps documented activity and body summary scalar field
   assert.equal(metricValue("percent-recorded"), 95);
   assert.equal(metricValue("day-strain"), 10.4);
   assert.equal(metricValue("workout-strain"), 8.8);
-  assert.equal(metricValue("average-heart-rate"), 76);
-  assert.equal(metricValue("walking-average-heart-rate"), 101);
-  assert.equal(metricValue("lowest-heart-rate"), 44);
   assert.equal(metricValue("max-heart-rate"), 148);
   assert.equal(metricValue("activity-average-heart-rate"), 72);
   assert.equal(metricValue("walking-average-heart-rate"), 83);
@@ -10624,9 +10602,9 @@ test("Junction normalizer maps documented activity and body summary scalar field
     "low-activity-minutes",
     "medium-activity-minutes",
     "high-activity-minutes",
-    "average-heart-rate",
+    "activity-average-heart-rate",
     "walking-average-heart-rate",
-    "lowest-heart-rate",
+    "minimum-heart-rate",
   ];
   const activityFidelityObservations = activityFidelityMetrics.map((metric) =>
     observations.find((event) => event.fields?.metric === metric)

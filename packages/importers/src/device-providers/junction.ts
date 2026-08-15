@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import {
   extractIsoDatePrefix,
   ID_PREFIXES,
+  isStrictIsoDate,
   JUNCTION_WEARABLE_TAG_EXTERNAL_REF_FACET,
   JUNCTION_WEARABLE_TAG_NOTE_TYPE,
   MEAL_MICRONUTRIENT_KEYS,
@@ -54,8 +55,6 @@ import {
   JUNCTION_SLEEP_LATENCY_SECOND_PATHS,
   JUNCTION_SLEEP_LIGHT_MINUTE_PATHS,
   JUNCTION_SLEEP_LIGHT_SECOND_PATHS,
-  JUNCTION_SLEEP_LATENCY_MINUTE_PATHS,
-  JUNCTION_SLEEP_LATENCY_SECOND_PATHS,
   JUNCTION_SLEEP_LOWEST_HEART_RATE_PATHS,
   JUNCTION_SLEEP_PERFORMANCE_PATHS,
   JUNCTION_SLEEP_REM_MINUTE_PATHS,
@@ -315,11 +314,11 @@ const ACTIVITY_METRICS: readonly MetricDescriptor[] = [
   { metric: "percent-recorded", unit: "%", title: "Junction activity recording coverage", paths: [], percentRatioPaths: ["percentRecorded", "percent_recorded", "recordingCoverage", "recording_coverage", "recordedRatio", "recorded_ratio", "percentRecordedRatio", "percent_recorded_ratio"] },
   { metric: "workout-strain", unit: "score", title: "Junction workout strain", paths: ["workoutStrain", "workout_strain"] },
   { metric: "day-strain", unit: "score", title: "Junction day strain", paths: ["dayStrain", "day_strain", "strain"] },
-  { metric: "average-heart-rate", unit: "bpm", title: "Junction activity average heart rate", paths: ["heart_rate.avg_bpm"] },
-  { metric: "walking-average-heart-rate", unit: "bpm", title: "Junction activity walking average heart rate", paths: ["heart_rate.avg_walking_bpm"] },
-  { metric: "lowest-heart-rate", unit: "bpm", title: "Junction activity lowest heart rate", paths: ["heart_rate.min_bpm"] },
-  { metric: "max-heart-rate", unit: "bpm", title: "Junction activity max heart rate", paths: ["maxHeartRate", "max_heart_rate", "max_hr", "heart_rate.max_bpm"] },
-  { metric: "resting-heart-rate", unit: "bpm", title: "Junction activity resting heart rate", paths: ["restingHeartRate", "resting_heart_rate", "resting_hr", "rhr", "heart_rate.resting_bpm"] },
+  { metric: "activity-average-heart-rate", unit: "bpm", title: "Junction activity average heart rate", paths: ["averageHeartRate", "average_heart_rate", "average_hr", "avg_hr", "heart_rate.avg_bpm"], nonnegative: true },
+  { metric: "walking-average-heart-rate", unit: "bpm", title: "Junction activity walking average heart rate", paths: ["walkingAverageHeartRate", "walking_average_heart_rate", "walking_average_hr", "heart_rate.avg_walking_bpm"], nonnegative: true },
+  { metric: "max-heart-rate", unit: "bpm", title: "Junction activity max heart rate", paths: ["maxHeartRate", "max_heart_rate", "max_hr", "heart_rate.max_bpm"], nonnegative: true },
+  { metric: "minimum-heart-rate", unit: "bpm", title: "Junction activity minimum heart rate", paths: ["minimumHeartRate", "minimum_heart_rate", "minimum_hr", "min_hr", "heart_rate.min_bpm"], nonnegative: true },
+  { metric: "resting-heart-rate", unit: "bpm", title: "Junction activity resting heart rate", paths: ["restingHeartRate", "resting_heart_rate", "resting_hr", "rhr", "heart_rate.resting_bpm"], nonnegative: true },
 ];
 
 const BODY_METRICS: readonly MetricDescriptor[] = [
@@ -373,7 +372,6 @@ const SLEEP_METRICS: readonly MetricDescriptor[] = [
   { metric: "sleep-light-minutes", unit: "minutes", title: "Junction light sleep", paths: JUNCTION_SLEEP_LIGHT_MINUTE_PATHS, secondsPaths: JUNCTION_SLEEP_LIGHT_SECOND_PATHS },
   { metric: "sleep-awake-minutes", unit: "minutes", title: "Junction awake time", paths: JUNCTION_SLEEP_AWAKE_MINUTE_PATHS, secondsPaths: JUNCTION_SLEEP_AWAKE_SECOND_PATHS },
   { metric: "time-in-bed-minutes", unit: "minutes", title: "Junction time in bed", paths: JUNCTION_SLEEP_TIME_IN_BED_MINUTE_PATHS, secondsPaths: JUNCTION_SLEEP_TIME_IN_BED_SECOND_PATHS },
-  { metric: "sleep-latency-minutes", unit: "minutes", title: "Junction sleep latency", paths: JUNCTION_SLEEP_LATENCY_MINUTE_PATHS, secondsPaths: JUNCTION_SLEEP_LATENCY_SECOND_PATHS, nonnegative: true },
   { metric: "sleep-efficiency", unit: "%", title: "Junction sleep efficiency", paths: [], percentRatioPaths: JUNCTION_SLEEP_EFFICIENCY_RATIO_PATHS },
   {
     metric: "sleep-latency-minutes",
@@ -381,6 +379,7 @@ const SLEEP_METRICS: readonly MetricDescriptor[] = [
     title: "Junction sleep latency",
     paths: [],
     value: resolveJunctionSleepLatencyMinutes,
+    nonnegative: true,
   },
   { metric: "sleep-consistency", unit: "%", title: "Junction sleep consistency", paths: JUNCTION_SLEEP_CONSISTENCY_PATHS },
   { metric: "sleep-performance", unit: "%", title: "Junction sleep performance", paths: JUNCTION_SLEEP_PERFORMANCE_PATHS },
@@ -1258,6 +1257,7 @@ export function countAcceptedJunctionDailyTimeseriesProviderRecords(
     evidenceParts: [],
     events: [],
     samples: [],
+    authoritativeEventSets: [],
   };
 
   let acceptedProviderRecordCount = 0;
@@ -5483,7 +5483,70 @@ const JUNCTION_PROFILE_SEX_PATHS = [
   "biologicalSex",
   "biological_sex",
 ] as const;
-const JUNCTION_PROFILE_GENDER_PATHS = ["gender"] as const;
+const JUNCTION_PROFILE_AUTHORITATIVE_FACET_PREFIXES = [
+  "height",
+  "gender",
+  "profile-demographics",
+] as const;
+const JUNCTION_MENSTRUAL_AUTHORITATIVE_FACET_PREFIXES = [
+  "period-length-days",
+  "cycle-length-days",
+  "menstrual-flow",
+  "ovulation-test",
+  "pregnancy-test",
+  "cervical-mucus",
+  "intermenstrual-bleeding",
+  "progesterone-test",
+  "contraceptive",
+  "sexual-activity",
+  "menstrual-cycle-deviation",
+] as const;
+
+function pushJunctionAuthoritativeSummaryEventSet(
+  entry: PlainObject,
+  resourceContext: ResourceContext,
+  context: NormalizationContext,
+  emittedEvents: readonly DeviceEventPayload[],
+): void {
+  const facetPrefixes = resourceContext.resource === "profile"
+    ? JUNCTION_PROFILE_AUTHORITATIVE_FACET_PREFIXES
+    : resourceContext.resource === "menstrual_cycle"
+      && firstValueFromPaths(entry, ["isPredicted", "is_predicted"]) !== true
+      ? JUNCTION_MENSTRUAL_AUTHORITATIVE_FACET_PREFIXES
+      : undefined;
+  const explicitId = firstStringFromPaths(entry, JUNCTION_GENERIC_SUMMARY_ID_PATHS);
+  const version = junctionAuthoritativeSummaryVersion(resourceContext, entry);
+  if (!facetPrefixes || !explicitId || !version) {
+    return;
+  }
+
+  const timestamp = resolveRecordTimestamp(entry, context, resourceContext.sourceProviderSlug);
+  const identity = makeJunctionExternalRef(
+    resourceContext,
+    entry,
+    timestamp,
+    facetPrefixes[0],
+  );
+  const currentFacets = emittedEvents.flatMap((event) => {
+    const externalRef = event.externalRef;
+    return externalRef?.system === identity.system
+      && externalRef.resourceType === identity.resourceType
+      && externalRef.resourceId === identity.resourceId
+      && externalRef.version === version
+      && externalRef.facet
+      ? [externalRef.facet]
+      : [];
+  });
+
+  context.authoritativeEventSets.push({
+    system: identity.system,
+    resourceType: identity.resourceType,
+    resourceId: identity.resourceId,
+    version,
+    facetPrefixes: [...facetPrefixes],
+    currentFacets: [...new Set(currentFacets)].sort(),
+  });
+}
 
 // Junction profile is a single current-state snapshot per source. Height
 // follows the body-summary observation pattern; gender is a distinct
@@ -6079,173 +6142,96 @@ function pushMenstrualCycleSummary(
       continue;
     }
 
-    // Deterministic ordinal slots let one corrected fact revise in place while
-    // preserving multiple values that are simultaneously present that day.
-    pushJunctionCycleDailyMeasurement(entry, resourceContext, context, baseTimestamp, {
-      date: sub.date,
-      facet: nextDailyFacet("menstrual-flow", sub.date),
-      measurement: {
-        metric: "menstrual-flow",
-        value,
-        unit: "score",
-        qualifiers: { flow },
-      },
-      title: "Junction menstrual flow",
-    });
-  }
-
-  for (const sub of junctionDatedSubEntries(entry, ["cervicalMucus", "cervical_mucus"])) {
-    const quality = firstStringFromPaths(sub.entry, ["quality"]);
-    if (!quality) {
-      continue;
-    }
-
-    const boundedQuality = trimToLength(quality, 80);
-    pushJunctionCycleDailyMeasurement(entry, resourceContext, context, baseTimestamp, {
-      date: sub.date,
-      facet: `cervical-mucus-quality-${trimSlugToLength(slugify(boundedQuality, "quality"), 80)}-${sub.date}`,
-      measurement: {
-        metric: "cervical-mucus-quality",
-        value: 1,
-        unit: "recording",
-        qualifiers: { quality: boundedQuality },
-      },
-      title: "Junction cervical mucus quality",
-    });
-  }
-
-  for (const sub of junctionDatedSubEntries(entry, ["intermenstrualBleeding", "intermenstrual_bleeding"])) {
-    pushJunctionCycleDailyMeasurement(entry, resourceContext, context, baseTimestamp, {
-      date: sub.date,
-      facet: `intermenstrual-bleeding-${sub.date}`,
-      measurement: {
-        metric: "intermenstrual-bleeding",
-        value: 1,
-        unit: "flag",
-      },
-      title: "Junction intermenstrual bleeding",
-    });
-  }
-
-  for (const sub of junctionDatedSubEntries(entry, ["contraceptive"])) {
-    const contraceptiveType = firstStringFromPaths(sub.entry, ["type"]);
-    if (!contraceptiveType) {
-      continue;
-    }
-
-    const boundedType = trimToLength(contraceptiveType, 80);
-    pushJunctionCycleDailyMeasurement(entry, resourceContext, context, baseTimestamp, {
-      date: sub.date,
-      facet: `contraceptive-type-${trimSlugToLength(slugify(boundedType, "type"), 80)}-${sub.date}`,
-      measurement: {
-        metric: "contraceptive-type",
-        value: 1,
-        unit: "recording",
-        qualifiers: { type: boundedType },
-      },
-      title: "Junction contraceptive type",
-    });
-  }
-
-  for (const test of [
-    {
-      metric: "ovulation-test",
-      paths: ["ovulationTest", "ovulation_test"],
-      resultValues: JUNCTION_OVULATION_TEST_RESULT_VALUES,
-      title: "Junction ovulation test",
-    },
-    {
-      metric: "pregnancy-test",
-      paths: ["homePregnancyTest", "home_pregnancy_test"],
-      resultValues: JUNCTION_PREGNANCY_TEST_RESULT_VALUES,
-      title: "Junction pregnancy test",
-    },
-  ]) {
-    for (const sub of junctionDatedSubEntries(entry, test.paths)) {
-      const result = normalizeJunctionMenstrualEvidenceLabel(
-        firstStringFromPaths(sub.entry, ["testResult", "test_result"]),
-      );
-      const value = result ? test.resultValues[result] : undefined;
-      if (!result || value === undefined) {
-        continue;
+    const value = typeof fact.value === "string" ? fact.value : undefined;
+    let input: Parameters<typeof pushJunctionCycleDailyMeasurement>[4] | undefined;
+    switch (fact.kind) {
+      case "menstrual_flow": {
+        const ordinal = value ? JUNCTION_MENSTRUAL_FLOW_ORDINALS[value] : undefined;
+        if (value && ordinal !== undefined) {
+          input = {
+            date: fact.date,
+            facet: dailyFactFacet("menstrual-flow", fact),
+            measurement: { metric: "menstrual-flow", value: ordinal, unit: "score", qualifiers: { flow: value } },
+            title: "Junction menstrual flow",
+          };
+        }
+        break;
       }
-
-      pushJunctionCycleDailyMeasurement(entry, resourceContext, context, baseTimestamp, {
-        date: sub.date,
-        facet: nextDailyFacet(test.metric, sub.date),
-        measurement: {
-          metric: test.metric,
-          value,
-          unit: "result",
-          qualifiers: { result },
-        },
-        title: test.title,
-      });
+      case "ovulation_test":
+      case "home_pregnancy_test":
+      case "home_progesterone_test": {
+        const definition = fact.kind === "ovulation_test"
+          ? { metric: "ovulation-test", title: "Junction ovulation test", values: JUNCTION_OVULATION_TEST_RESULT_VALUES }
+          : fact.kind === "home_pregnancy_test"
+            ? { metric: "pregnancy-test", title: "Junction pregnancy test", values: JUNCTION_PREGNANCY_TEST_RESULT_VALUES }
+            : { metric: "progesterone-test", title: "Junction progesterone test", values: JUNCTION_PROGESTERONE_TEST_RESULT_VALUES };
+        const ordinal = value ? definition.values[value] : undefined;
+        if (value && ordinal !== undefined) {
+          input = {
+            date: fact.date,
+            facet: dailyFactFacet(definition.metric, fact),
+            measurement: { metric: definition.metric, value: ordinal, unit: "result", qualifiers: { result: value } },
+            title: definition.title,
+          };
+        }
+        break;
+      }
+      case "cervical_mucus":
+        if (value) {
+          input = {
+            date: fact.date,
+            facet: dailyFactFacet("cervical-mucus", fact),
+            measurement: { metric: "cervical-mucus", value: 1, unit: "observation", qualifiers: { quality: value } },
+            title: "Junction cervical mucus",
+          };
+        }
+        break;
+      case "intermenstrual_bleeding":
+        input = {
+          date: fact.date,
+          facet: dailyFactFacet("intermenstrual-bleeding", fact),
+          measurement: { metric: "intermenstrual-bleeding", value: 1, unit: "event", qualifiers: { bleeding: "intermenstrual" } },
+          title: "Junction intermenstrual bleeding",
+        };
+        break;
+      case "contraceptive":
+        if (value) {
+          input = {
+            date: fact.date,
+            facet: dailyFactFacet("contraceptive", fact),
+            measurement: { metric: "contraceptive-use", value: 1, unit: "event", qualifiers: { type: value } },
+            title: "Junction contraceptive use",
+          };
+        }
+        break;
+      case "sexual_activity":
+        input = {
+          date: fact.date,
+          facet: dailyFactFacet("sexual-activity", fact),
+          measurement: {
+            metric: "sexual-activity",
+            value: 1,
+            unit: "event",
+            qualifiers: typeof fact.value === "boolean" ? { "protection-used": fact.value } : {},
+          },
+          title: "Junction sexual activity",
+        };
+        break;
+      case "detected_deviation":
+        if (value) {
+          input = {
+            date: fact.date,
+            facet: dailyFactFacet("menstrual-cycle-deviation", fact),
+            measurement: { metric: "menstrual-cycle-deviation", value: 1, unit: "flag", qualifiers: { deviation: value } },
+            title: "Junction cycle deviation",
+          };
+        }
+        break;
     }
-  }
 
-  for (const sub of junctionDatedSubEntries(entry, ["homeProgesteroneTest", "home_progesterone_test"])) {
-    const result = firstStringFromPaths(sub.entry, ["testResult", "test_result"]);
-    if (!result) {
-      continue;
+    if (input) {
+      pushJunctionCycleDailyMeasurement(entry, resourceContext, context, baseTimestamp, input);
     }
-
-    const boundedResult = trimToLength(result, 80);
-    // This records the provider's categorical result rather than coercing it
-    // into a positive/negative scalar, so indeterminate and unknown remain
-    // truthful queryable values instead of being dropped or guessed.
-    pushJunctionCycleDailyMeasurement(entry, resourceContext, context, baseTimestamp, {
-      date: sub.date,
-      facet: `home-progesterone-test-${trimSlugToLength(slugify(boundedResult, "result"), 80)}-${sub.date}`,
-      measurement: {
-        metric: "home-progesterone-test",
-        value: 1,
-        unit: "recording",
-        qualifiers: { result: boundedResult },
-      },
-      title: "Junction home progesterone test",
-    });
-  }
-
-  for (const sub of junctionDatedSubEntries(entry, ["sexualActivity", "sexual_activity"])) {
-    const protectionUsedRaw = firstValueFromPaths(sub.entry, ["protectionUsed", "protection_used"]);
-    const protectionUsed = typeof protectionUsedRaw === "boolean" ? protectionUsedRaw : undefined;
-    const protectionFacet = protectionUsed === true
-      ? "protected"
-      : protectionUsed === false
-        ? "unprotected"
-        : "protection-unspecified";
-
-    pushJunctionCycleDailyMeasurement(entry, resourceContext, context, baseTimestamp, {
-      date: sub.date,
-      facet: nextDailyFacet("sexual-activity", sub.date),
-      measurement: {
-        metric: "sexual-activity",
-        value: 1,
-        unit: "recording",
-        qualifiers: protectionUsed === undefined ? undefined : { "protection-used": protectionUsed },
-      },
-      title: "Junction sexual activity",
-    });
-  }
-
-  for (const sub of junctionDatedSubEntries(entry, ["detectedDeviations", "detected_deviations"])) {
-    const deviation = normalizeJunctionMenstrualEvidenceLabel(firstStringFromPaths(sub.entry, ["deviation"]));
-    if (!deviation || !JUNCTION_MENSTRUAL_DEVIATIONS.has(deviation)) {
-      continue;
-    }
-
-    pushJunctionCycleDailyMeasurement(entry, resourceContext, context, baseTimestamp, {
-      date: sub.date,
-      facet: nextDailyFacet("menstrual-cycle-deviation", sub.date),
-      measurement: {
-        metric: "menstrual-cycle-deviation",
-        value: 1,
-        unit: "flag",
-        qualifiers: { deviation },
-      },
-      title: "Junction cycle deviation",
-    });
   }
 }
 
@@ -7111,9 +7097,9 @@ function resolveJunctionSleepLatencyMinutes(entry: PlainObject): number | undefi
 function resolveJunctionDailyActivityMinutes(entry: PlainObject): number | undefined {
   // Junction activity summary intensity buckets are already minutes. Keeping
   // the shared resolver here also applies the same per-bucket and daily caps.
-  const lowActivityMinutes = resolveJunctionActivityBucketMinutes(entry, "low");
-  const mediumActivityMinutes = resolveJunctionActivityBucketMinutes(entry, "medium");
-  const highActivityMinutes = resolveJunctionActivityBucketMinutes(entry, "high");
+  const lowActivityMinutes = resolveJunctionActivityIntensityMinutes(entry, "low");
+  const mediumActivityMinutes = resolveJunctionActivityIntensityMinutes(entry, "medium");
+  const highActivityMinutes = resolveJunctionActivityIntensityMinutes(entry, "high");
 
   if (
     lowActivityMinutes === undefined
