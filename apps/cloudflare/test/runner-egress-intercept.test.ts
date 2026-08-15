@@ -5481,6 +5481,40 @@ describe("hostedRunnerIntercept", () => {
     expect(diagnosticJson).not.toContain('"status":"waiting"');
   });
 
+  it("counts equivalent output reuse when serialization returns to the first call identity", async () => {
+    const sharedOutput = { state: "shared" };
+    const sharedOutputBytes = testJsonByteLength(sharedOutput);
+    const diagnostic = await buildHostedOpenAiCacheDiagnostic({
+      endpointKind: "responses",
+      method: "POST",
+      requestBytes: TEST_TEXT_ENCODER.encode(JSON.stringify({
+        input: [
+          { call_id: "call_a", name: "wait", type: "function_call" },
+          { call_id: "call_a", output: sharedOutput, type: "function_call_output" },
+          { call_id: "call_b", name: "wait", type: "function_call" },
+          { call_id: "call_b", output: sharedOutput, type: "function_call_output" },
+          { call_id: "call_a", output: sharedOutput, type: "function_call_output" },
+        ],
+        model: "gpt-5.6-terra",
+      })),
+    });
+
+    expect(readDiagnosticInputMetric(
+      diagnostic,
+      "function_output.repeated",
+    )).toEqual({ bytes: sharedOutputBytes, count: 1 });
+    expect(readDiagnosticInputMetric(
+      diagnostic,
+      "function_output.equivalent",
+    )).toEqual({ bytes: sharedOutputBytes * 2, count: 2 });
+    parseDiagnosticRuntimeLog(diagnostic);
+
+    const diagnosticJson = JSON.stringify(diagnostic);
+    expect(diagnosticJson).not.toContain("call_a");
+    expect(diagnosticJson).not.toContain("call_b");
+    expect(diagnosticJson).not.toContain('"state":"shared"');
+  });
+
   it("uses safe deterministic function-call categories for unusual call IDs", async () => {
     const sensitiveLookingName = ["sk", "live", "SYNTHETIC123"].join("_");
     const earlyOutput = {

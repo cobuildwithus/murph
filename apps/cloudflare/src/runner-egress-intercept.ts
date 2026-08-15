@@ -3038,7 +3038,10 @@ async function appendOpenAiInputShapeDiagnostics(input: {
   const functionOutputActionCounts = new Map<string, number>();
   const functionOutputActionBytes = new Map<string, number>();
   const seenFunctionOutputCallIds = new Set<string>();
-  const firstFunctionOutputCallIdBySerializedValue = new Map<string, string>();
+  const functionOutputEquivalenceBySerializedValue = new Map<
+    string,
+    { differentCallIdSeen: boolean; firstCallId: string }
+  >();
   let repeatedFunctionOutputCount = 0;
   let repeatedFunctionOutputBytes = 0;
   let equivalentFunctionOutputCount = 0;
@@ -3091,12 +3094,23 @@ async function appendOpenAiInputShapeDiagnostics(input: {
         repeatedFunctionOutputBytes += outputBytes;
       }
       if (callId !== null && output !== null) {
-        const firstCallId = firstFunctionOutputCallIdBySerializedValue.get(output.serialized);
-        if (firstCallId === undefined) {
-          firstFunctionOutputCallIdBySerializedValue.set(output.serialized, callId);
-        } else if (firstCallId !== callId) {
-          equivalentFunctionOutputCount += 1;
-          equivalentFunctionOutputBytes += outputBytes;
+        const equivalenceState = functionOutputEquivalenceBySerializedValue.get(
+          output.serialized,
+        );
+        if (equivalenceState === undefined) {
+          functionOutputEquivalenceBySerializedValue.set(output.serialized, {
+            differentCallIdSeen: false,
+            firstCallId: callId,
+          });
+        } else {
+          const differsFromFirst = equivalenceState.firstCallId !== callId;
+          if (differsFromFirst || equivalenceState.differentCallIdSeen) {
+            equivalentFunctionOutputCount += 1;
+            equivalentFunctionOutputBytes += outputBytes;
+          }
+          if (differsFromFirst) {
+            equivalenceState.differentCallIdSeen = true;
+          }
         }
       }
       if (outputBytes > largestFunctionOutputBytes) {
@@ -3190,7 +3204,7 @@ async function appendOpenAiInputShapeDiagnostics(input: {
 
   // Equality comparison is request-local only. Release its serialized-value
   // keys before the asynchronous tail-fingerprint work and never persist them.
-  firstFunctionOutputCallIdBySerializedValue.clear();
+  functionOutputEquivalenceBySerializedValue.clear();
   seenFunctionOutputCallIds.clear();
 
   await appendOpenAiInputTailItemDiagnostics({
