@@ -669,15 +669,16 @@ async function inspectHostedPreCheckpointSystemMailboxPrefetch(
   const initialSystemSeq = parseHostedMailboxSeqOrNull(
     prefetch.importedSeqByLane.system,
   );
+  const systemItems = response.items.filter((item) => item.lane === "system");
   // Enrollment can start the first owner from conversation before the
-  // activation continuation signals it. Admit only that complete first
-  // system prefix so bootstrap does not wait for the dirty idle checkpoint.
+  // activation continuation signals it. The shared prefetch can still hold
+  // that conversation prefix after it has been imported, so classify only
+  // the complete system lane here.
   const containsOnlyInitialMemberActivation = reachesEveryLaneHighWater
     && initialSystemSeq === 0n
-    && response.items.length === 1
-    && response.items[0]?.lane === "system"
-    && response.items[0].kind === "member.activated"
-    && parseHostedMailboxSeqOrNull(response.items[0].laneSeq) === 1n;
+    && systemItems.length === 1
+    && systemItems[0]?.kind === "member.activated"
+    && parseHostedMailboxSeqOrNull(systemItems[0].laneSeq) === 1n;
   return {
     containsOnlyBrowserVaultRefreshWakes: response.items.length > 0
       && response.items.every((item) =>

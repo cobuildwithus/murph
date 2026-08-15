@@ -7568,6 +7568,7 @@ describe("hosted workspace runtime entrypoint", () => {
       kind: "member.activated",
       label: "member activation",
       preCheckpointSafe: true,
+      withConversationPrefix: true,
     },
     {
       dedupeKey:
@@ -7617,6 +7618,25 @@ describe("hosted workspace runtime entrypoint", () => {
 
       try {
         await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+        const withConversationPrefix = "withConversationPrefix" in completion
+          && completion.withConversationPrefix;
+        if (withConversationPrefix) {
+          mailboxItems.push(
+            createMailboxItem({
+              id: "mailbox_item_entrypoint_external_completion_conversation",
+              kind: "conversation.message",
+              lane: "conversation",
+              laneSeq: "1",
+            }),
+            createMailboxItem({
+              dedupeKey: completion.dedupeKey,
+              id: "mailbox_item_entrypoint_external_completion",
+              kind: completion.kind,
+              lane: "system",
+              laneSeq: "1",
+            }),
+          );
+        }
         const resultPromise = runHostedWorkspaceRuntimeJobInProcess(
           createWorkspaceRuntimeJobInput({
             request: {
@@ -7660,7 +7680,7 @@ describe("hosted workspace runtime entrypoint", () => {
             runtimeWakeSignal,
             async runAssistantPhase() {
               assistantPhaseCalls += 1;
-              if (assistantPhaseCalls === 1) {
+              if (assistantPhaseCalls === 1 && !withConversationPrefix) {
                 setTimeout(() => {
                   mailboxItems.push(createMailboxItem({
                     dedupeKey: completion.dedupeKey,
@@ -7701,7 +7721,10 @@ describe("hosted workspace runtime entrypoint", () => {
         } else {
           assert.ok(idleCheckpointIndex < importIndex, events.join(","));
         }
-        assert.equal(result.status, "idle");
+        assert.equal(
+          result.status,
+          withConversationPrefix ? "scheduled" : "idle",
+        );
       } finally {
         await removeTempRoot(vaultRoot);
       }
