@@ -73,6 +73,8 @@ Updated: 2026-08-15
 - Treat an authenticated source-attributed event plus `isSourceAccessActive`
   as stronger completion proof than a missing browser callback for the same
   source epoch.
+- Accept only explicit active Junction statuses as source proof. Ambiguous,
+  missing, error, failed, inactive, revoked, and disconnected statuses retry.
 - The user approved the trust-boundary change on 2026-08-15 and asked for the
   pull request to merge without another confirmation after all gates pass.
 
@@ -90,8 +92,12 @@ Updated: 2026-08-15
 - Completed local proof:
   - `packages/device-syncd/test/public-ingress.test.ts`: 80 passed.
   - `apps/web/test/device-sync-hosted-wake.test.ts`: 161 passed.
+  - `packages/device-syncd/test/junction-provider.test.ts`: 278 passed.
   - `apps/web/test/device-sync-prepared-webhook-authority-postgres.test.ts`:
-    3 passed against an isolated migrated PostgreSQL database.
+    4 passed against an isolated migrated PostgreSQL database.
   - `packages/device-syncd` typecheck: passed.
   - `apps/web` typecheck: passed.
   - `pnpm docs:drift`: passed.
+  - Preliminary ReviewGPT finding accepted: ambiguous Junction source status
+    was not positive proof. The provider predicate and real PostgreSQL retry
+    proof now fail closed.

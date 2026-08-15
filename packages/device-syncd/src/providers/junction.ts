@@ -812,7 +812,7 @@ export function createJunctionDeviceSyncProvider(
     }
 
     return (await client.listUserProviders(userId)).some((provider) =>
-      mapJunctionSourceStatus(provider.status) !== "disconnected"
+      mapJunctionSourceStatus(provider.status) === "connected"
       && (
         normalizeProviderSlug(provider.origin.sourceProviderSlug)
         ?? normalizeProviderSlug(provider.slug)

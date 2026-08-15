@@ -112,7 +112,8 @@ Hosted Junction setup recovery treats a signed source-attributed webhook as a
 trigger, not as connection proof. Web reads the live provider source list, then
 atomically confirms the matching pending setup, source receipt, dirty work, and
 webhook trace under the existing health-data admission lock. The trust and
-failure contracts are jointly specified by `ARCHITECTURE.md`,
+failure contracts require an explicit active provider status; ambiguous or
+error states stay pending and retry. They are jointly specified by `ARCHITECTURE.md`,
 `agent-docs/SECURITY.md`, `agent-docs/RELIABILITY.md`, and
 `agent-docs/references/testing-ci-map.md`.
 
