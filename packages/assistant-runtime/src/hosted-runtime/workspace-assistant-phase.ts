@@ -5627,7 +5627,8 @@ async function runSystemMailboxMaintenancePhase(input: {
     })
       ? await collectHostedAssistantDeliverySideEffects({
         actionApprovalPort: phaseInput.runtime.platform.actionApprovalPort ?? null,
-        includeBackgroundDueIntents: phaseInput.foregroundCausalOnly !== true,
+        includeBackgroundDueIntents:
+          phaseInput.foregroundCausalOnly !== true && !hasExclusiveSelection,
         preferredEffectIds: resolveHostedSystemMailboxPreferredEffectIds(
           systemMailboxPreparation,
         ),

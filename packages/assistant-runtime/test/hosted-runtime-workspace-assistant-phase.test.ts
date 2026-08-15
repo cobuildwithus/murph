@@ -15868,18 +15868,21 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
 
   it.each([
     {
+      deliveryIntentIds: ["intent_activation_welcome"],
       item: createMemberActivationSignupWelcomeSystemMailboxItem(),
       label: "member activation",
       mailboxLane: "member-activated" as const,
       routeAction: "apply-member-activation" as const,
     },
     {
+      deliveryIntentIds: [],
       item: createMemberActionSystemMailboxItem(),
       label: "requested member action",
       mailboxLane: "member-action" as const,
       routeAction: "apply-member-action" as const,
     },
   ])("runs one $label after the current foreground reply", async ({
+    deliveryIntentIds,
     item,
     label,
     mailboxLane,
@@ -15901,6 +15904,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
             metrics: {
               bootstrapResult: null,
               conversationMetrics: null,
+              deliveryIntentIds,
               mailboxLane,
               postCheckpointRecord: item.postCheckpointRecord,
               redactedLogEntries: [],
@@ -15960,6 +15964,23 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       afterDurableCheckpoint: expect.any(Function),
       checkpointReason: "system_mailbox_receipt",
     }));
+    expect(mocks.collectHostedAssistantDeliverySideEffects).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        includeBackgroundDueIntents: true,
+      }),
+    );
+    if (deliveryIntentIds.length > 0) {
+      expect(
+        mocks.collectHostedAssistantDeliverySideEffects.mock.calls.at(-1)?.[0],
+      ).toEqual({
+        actionApprovalPort: null,
+        includeBackgroundDueIntents: false,
+        preferredEffectIds: [],
+        preferredIntentIds: deliveryIntentIds,
+        vaultRoot: "/tmp/murph-vault",
+      });
+    }
+    expect(mocks.runHostedDeviceSyncWakeLane).not.toHaveBeenCalled();
     expect(mocks.recordHostedSystemMailboxItemAfterCheckpoint).not.toHaveBeenCalled();
 
     await runHostedWorkspaceDurableCheckpointEffects(

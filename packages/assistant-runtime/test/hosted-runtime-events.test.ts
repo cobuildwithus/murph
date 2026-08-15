@@ -2346,6 +2346,7 @@ describe("executeHostedMailboxEvent", () => {
       }),
     );
     expect(result).toMatchObject({
+      deliveryIntentIds: ["intent_notification"],
       mailboxLane: "member-activated",
       nextWakeAt: seededNextWakeAt,
       nextWakeReason: "assistant",
@@ -2411,6 +2412,7 @@ describe("executeHostedMailboxEvent", () => {
       }),
     );
     expect(result).toMatchObject({
+      deliveryIntentIds: [],
       mailboxLane: "member-activated",
       nextWakeAt: seededNextWakeAt,
       nextWakeReason: "assistant",
