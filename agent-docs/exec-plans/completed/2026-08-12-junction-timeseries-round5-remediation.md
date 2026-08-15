@@ -1,6 +1,6 @@
 # Reconcile Junction compact timeseries collections
 
-Status: active
+Status: completed
 Created: 2026-08-12
 Updated: 2026-08-14
 
@@ -70,8 +70,9 @@ Updated: 2026-08-14
 20. [x] Resolve round eighteen's account-owned source identity finding.
 21. [x] Resolve round nineteen's split persisted-source authority finding.
 22. [x] Resolve round twenty's hosted exact-key precedence finding.
-23. [ ] Obtain exact-head green CI and a ReviewGPT PASS, then merge and retire
-    the task worktree.
+23. [x] Obtain exact-head green CI and a ReviewGPT PASS; preserve merge and
+    worktree retirement as the protected operational follow-through after this
+    plan's final documentation-only commit.
 24. [x] Stop the review loop at the user-authorized round-twenty-two cap and
     resolve its final reconnect-authority finding without starting round
     twenty-three.
@@ -85,7 +86,7 @@ Updated: 2026-08-14
     through one shared finalization boundary, prove the accepted day and
     malformed-row retry leave the executor together.
 28. [x] Resolve round twenty-five's date-mode UTC-prefix data-loss finding.
-29. [ ] Resolve round twenty-six's hosted cold-start source-identity finding,
+29. [x] Resolve round twenty-six's hosted cold-start source-identity finding,
     then obtain exact-head green CI and ReviewGPT PASS.
 
 ## Decisions
@@ -323,6 +324,21 @@ Updated: 2026-08-14
   deleted. No migration, source table, manager, worker, queue, scheduler,
   compatibility state, retry family, or other durable production concept was
   added.
+- Round twenty-eight's only finding is accepted as disclosure-only Purpose
+  Drift: the PR body did not name the necessary cross-runtime source-lifecycle
+  permission boundary introduced by round twenty-seven. `Non-obvious affected
+  surfaces` now identifies the public-account-owned hosted and local paths,
+  explains the stale-alias read and authoritative-empty risk, and cites the
+  existing both-order, cold/warm, reconnect, independent-last-data, and
+  equal-time-conflict regressions. The same-round verification retry returned
+  `ROUND_OUTCOME: PASS`; no production or test code and no complexity were
+  added.
+- Round twenty-nine's fresh full audit of the final behavior/configuration head
+  returned `ROUND_OUTCOME: PASS` with no findings. It independently matched the
+  base-relative source, test, docs, and configuration counts; verified every
+  prior correction and the round-twenty-eight disclosure; and confirmed the
+  final runner-budget delta records the existing measured graph without adding
+  a runtime edge, owner, tolerance family, or product surface.
 
 ## Verification
 
@@ -534,9 +550,9 @@ Updated: 2026-08-14
   sparse day could still lack immediate calendar ownership. Its asserted
   disconnect-loss path was disproved because the ordinary precise retry remains
   queued; the accepted correction instead makes the actual executor result
-  return that retry and its calendar repair together. Pending: finish focused
-  proof, integrate current `main`, obtain exact-head green CI and ReviewGPT
-  PASS, then merge and retire the worktree.
+  return that retry and its calendar repair together. The focused proof,
+  current-main integration, exact-head CI, and subsequent ReviewGPT rounds
+  completed at the later boundaries recorded below.
 - The round-twenty-four mixed-validity regression passes alone and the full 80
   test Junction extended-history file passes. The device-sync package
   typecheck and `git diff --check` pass. A direct service/store reproduction
@@ -597,8 +613,17 @@ Updated: 2026-08-14
   9,128,211B for the Linux vault CLI, versus 9,065,538B on current main. Exact
   macOS production assembly measured 9,175,594B, and the runner's static boot
   closure measured 8,163,368B without any forbidden startup input. The vault
-  ceiling now retains a narrow 32 KiB allowance above the larger cross-platform
-  result, while the static baseline records the exact measurement with its
-  existing fixed 96 KiB platform tolerance. Entry and total runner policies are
-  unchanged. Both bundle policy files pass 50/50 tests and the full production
-  assembly plus parity and boot probes pass.
+  ceiling now retains a narrow 33,406-byte allowance above the larger
+  cross-platform result, while the static baseline records the exact
+  measurement with its existing fixed 96,000-byte platform tolerance. Entry
+  and total runner policies are unchanged. Both bundle policy files pass 50/50
+  tests and the full production assembly plus parity and boot probes pass.
+- Exact-head GitHub checks are green at
+  `471093d0ff6ff40d694261bd8222fb95c2fc78f4`, including the runner permission
+  sandbox, cross-platform host support, platform and assistant coverage,
+  billing boundary, frontend design proof, viewport, hygiene, and Vercel.
+- The final non-mutating current-base merge-tree proof is clean against
+  `d4e4a60a4736106e79e5c91c1ff0a91976d6e53d`. The base advanced after the
+  reviewed head, but the PR-authored patch remains unchanged and requires no
+  refresh or review rerun under the repository's current-base merge rule.
+Completed: 2026-08-14
