@@ -632,6 +632,7 @@ async function inspectHostedPreCheckpointSystemMailboxPrefetch(
 ): Promise<{
   containsOnlyBrowserVaultRefreshWakes: boolean;
   containsOnlyDeviceSyncWakes: boolean;
+  containsOnlyInitialMemberActivation: boolean;
   containsOnlySafeSystemWakes: boolean;
   hasSystemWork: boolean;
 }> {
@@ -694,6 +695,7 @@ async function inspectHostedPreCheckpointSystemMailboxPrefetch(
         item.lane === "system"
         && item.kind === "device-sync.wake"
       ),
+    containsOnlyInitialMemberActivation,
     containsOnlySafeSystemWakes: containsOnlyInitialMemberActivation
       || (
         response.items.length > 0
@@ -1618,7 +1620,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         const checkpointWorkspacePort = canonicalRuntimeCommit
           ? workspacePort
           : foregroundWorkspacePort;
-        const redactedStatus = await withHostedSystemMailboxHandledThroughStatus({
+        const redactedStatus = await withHostedMailboxProgressStatus({
           redactedStatus: checkpointInput.redactedStatus,
           vaultRoot: restored.vaultRoot,
         });
@@ -1953,7 +1955,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
                   : null,
               },
             ]);
-            const redactedStatus = await withHostedSystemMailboxHandledThroughStatus({
+            const redactedStatus = await withHostedMailboxProgressStatus({
               redactedStatus: activeWorkspace?.redactedStatus ?? null,
               vaultRoot: restored.vaultRoot,
             });
@@ -6932,7 +6934,7 @@ async function checkpointHostedRuntimeDirtyWorkspace(input: {
       vaultRoot: input.vaultRoot,
     });
   input.assertRuntimeNotAborted();
-  const redactedStatus = await withHostedSystemMailboxHandledThroughStatus({
+  const redactedStatus = await withHostedMailboxProgressStatus({
     redactedStatus: input.retainCanonicalWriteReceiptLogStatus
       ? input.redactedStatus
       : omitHostedCanonicalWriteReceiptLogStatusFields(input.redactedStatus),
@@ -6993,7 +6995,7 @@ function readHostedConversationConsumedSeqFromStatus(
     : null;
 }
 
-async function withHostedSystemMailboxHandledThroughStatus(input: {
+async function withHostedMailboxProgressStatus(input: {
   redactedStatus: HostedWorkspaceInvocationResult["redactedStatus"] | null;
   vaultRoot: string;
 }): Promise<HostedRuntimeRedactedJson> {
@@ -7002,6 +7004,17 @@ async function withHostedSystemMailboxHandledThroughStatus(input: {
   });
   return {
     ...(input.redactedStatus ?? {}),
+    ...(mailboxState.watermarks.conversation !== "0"
+      || Object.hasOwn(
+        input.redactedStatus ?? {},
+        "hostedMailboxConversationImportedSeq",
+      )
+      ? {
+          hostedMailboxConversationImportedSeq:
+            mailboxState.watermarks.conversation,
+        }
+      : {}),
+    hostedMailboxSystemImportedSeq: mailboxState.watermarks.system,
     hostedMailboxSystemHandledThroughSeq:
       await readHostedSystemMailboxHandledThroughSeq({
         importedSeq: mailboxState.watermarks.system,
