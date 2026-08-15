@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 
 import {
   buildSafeToolCallValidationDigest,
+  collectSafeJsonSchemaValidationPaths,
   isSafeSchemaLikeKey,
 } from '../src/assistant/tool-validation-digest.ts'
 
@@ -165,6 +166,78 @@ describe('buildSafeToolCallValidationDigest', () => {
     expect(firstDigest.validationFingerprint).toBe(secondDigest.validationFingerprint)
     expect(JSON.stringify(firstDigest)).not.toContain('clientAcmeCancerReport')
     expect(JSON.stringify(secondDigest)).not.toContain('privateProjectPhoenix')
+  })
+
+  it('preserves only nested paths owned by the supplied JSON schema', () => {
+    const jsonSchema = {
+      type: 'object',
+      properties: {
+        card: {
+          type: 'object',
+          properties: {
+            rows: {
+              type: 'array',
+              items: {
+                type: 'object',
+                properties: {
+                  values: { type: 'array', minItems: 2 },
+                },
+              },
+            },
+          },
+        },
+      },
+    }
+    const schemaPaths = collectSafeJsonSchemaValidationPaths(jsonSchema)
+    const schema = z.object({
+      card: z.object({
+        rows: z.array(z.object({
+          values: z.array(z.string()).min(2),
+        }).strict()),
+      }).strict(),
+    }).strict().superRefine((_value, context) => {
+      context.addIssue({
+        code: 'custom',
+        message: 'Synthetic rejected path.',
+        path: ['card', 'privateNote'],
+      })
+    })
+    const rawInput = {
+      card: {
+        privateNote: 'neutral synthetic value',
+        rows: [{ values: [] }],
+      },
+    }
+    const parsed = schema.safeParse(rawInput)
+    expect(parsed.success).toBe(false)
+    if (parsed.success) {
+      throw new Error('expected schema validation to fail')
+    }
+
+    expect(schemaPaths).toEqual([
+      'card',
+      'card.rows',
+      'card.rows.[]',
+      'card.rows.[].values',
+    ])
+    const digest = buildSafeToolCallValidationDigest({
+      error: parsed.error,
+      rawInput,
+      schemaPaths,
+      schemaRootKeys: ['card'],
+      toolName: 'murph.attach_response_card',
+    })
+
+    expect(digest.pathIssues).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        path: 'card.rows.[].values',
+        code: 'too_small',
+        expected: 'array.min_2',
+      }),
+    ]))
+    const serialized = JSON.stringify(digest)
+    expect(serialized).not.toContain('privateNote')
+    expect(serialized).not.toContain('neutral synthetic value')
   })
 })
 

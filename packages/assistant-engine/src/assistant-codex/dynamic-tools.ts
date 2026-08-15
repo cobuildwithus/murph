@@ -1,5 +1,9 @@
 import * as z from '@murphai/contracts/zod-runtime'
-import { isStrictIsoDate } from '@murphai/contracts'
+import {
+  compactTableResponseCardAuthoringV1Schema,
+  dailyNutritionResponseCardV2AuthoringSchema,
+  isStrictIsoDate,
+} from '@murphai/contracts'
 import {
   hostedRuntimeAssistantPersonalizationModelToolRequestSchema,
   type HostedRuntimeAssistantPersonalizationModelToolRequest,
@@ -141,6 +145,7 @@ import {
 } from '../assistant/response-media.js'
 import {
   buildSafeToolCallValidationDigest,
+  collectSafeJsonSchemaValidationPaths,
   type SafeToolCallValidationDigest,
 } from '../assistant/tool-validation-digest.js'
 import type {
@@ -245,6 +250,9 @@ import {
   type PhysicalNoteDynamicToolRequest,
 } from './dynamic-tools/physical-notes.js'
 import {
+  buildResponseCardValidationFeedback,
+} from './response-card-validation-feedback.js'
+import {
   executeGenerateSongDynamicTool,
   MURPH_GENERATE_SONG_TOOL,
   parseGenerateSongArguments,
@@ -293,24 +301,45 @@ import {
 } from './dynamic-tool-catalog.js'
 const CODEX_DYNAMIC_TOOL_CALL_METHOD = 'item/tool/call'
 
+function addAttachResponseCardArgumentIssues(
+  value: { card: AssistantResponseCard },
+  context: z.RefinementCtx,
+): void {
+  if (
+    value.card.kind === 'compact_table' &&
+    'workout' in value.card &&
+    value.card.subtitle !== null
+  ) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'Structured workout card subtitles must be null.',
+      path: ['card', 'subtitle'],
+    })
+  }
+}
+
 const attachResponseCardArgumentsSchema = z
   .object({
     card: assistantResponseCardAuthoringSchema,
   })
   .strict()
-  .superRefine((value, context) => {
-    if (
-      value.card.kind === 'compact_table' &&
-      'workout' in value.card &&
-      value.card.subtitle !== null
-    ) {
-      context.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: 'Structured workout card subtitles must be null.',
-        path: ['card', 'subtitle'],
-      })
-    }
+  .superRefine(addAttachResponseCardArgumentIssues)
+
+const attachDailyNutritionResponseCardArgumentsSchema = z
+  .object({
+    card: dailyNutritionResponseCardV2AuthoringSchema,
   })
+  .strict()
+
+const attachCompactTableResponseCardArgumentsSchema = z
+  .object({
+    card: compactTableResponseCardAuthoringV1Schema,
+  })
+  .strict()
+  .superRefine(addAttachResponseCardArgumentIssues)
+
+const attachResponseCardValidationPaths =
+  collectSafeJsonSchemaValidationPaths(MURPH_ATTACH_RESPONSE_CARD_TOOL.inputSchema)
 
 const attachGroupChallengeResponseCardArgumentsSchema =
   groupChallengeResponseCardToolInputSchema
@@ -2082,7 +2111,10 @@ export async function executeMurphDynamicToolRequest(input: {
     case 'invalid-finish-without-reply-arguments':
       return toolTextResult(false, 'invalid no-reply arguments')
     case 'invalid-response-card-arguments':
-      return toolTextResult(false, 'invalid response card arguments')
+      return toolTextResult(
+        false,
+        buildResponseCardValidationFeedback(input.request.validationDigest),
+      )
     case 'invalid-response-media-arguments':
       return toolTextResult(false, 'invalid response media arguments')
     case 'invalid-send-vault-file-arguments':
@@ -7074,12 +7106,17 @@ function parseAttachResponseCardArguments(
     }
   }
   if (Object.hasOwn(asRecord(value) ?? {}, 'card')) {
+    const diagnosticError = readAttachResponseCardDiagnosticError(
+      value,
+      parsed.error,
+    )
     return {
       ok: false,
       validationDigest: buildDynamicToolValidationDigest({
-        error: parsed.error,
+        error: diagnosticError,
         rawInput: value,
         schemaName,
+        schemaPaths: attachResponseCardValidationPaths,
         schemaRootKeys: ['card'],
         toolName,
       }),
@@ -7107,6 +7144,22 @@ function parseAttachResponseCardArguments(
     input: groupChallengeParsed.data,
     ok: true,
   }
+}
+
+function readAttachResponseCardDiagnosticError(
+  value: unknown,
+  fallbackError: z.ZodError,
+): z.ZodError {
+  const card = asRecord(asRecord(value)?.card)
+  if (card?.kind === 'daily_nutrition') {
+    const parsed = attachDailyNutritionResponseCardArgumentsSchema.safeParse(value)
+    return parsed.success ? fallbackError : parsed.error
+  }
+  if (card?.kind === 'compact_table') {
+    const parsed = attachCompactTableResponseCardArgumentsSchema.safeParse(value)
+    return parsed.success ? fallbackError : parsed.error
+  }
+  return fallbackError
 }
 
 function parseAttachExerciseRoutineCardArguments(
@@ -7221,6 +7274,7 @@ function buildDynamicToolValidationDigest(input: {
   error: unknown
   rawInput: unknown
   schemaName: string
+  schemaPaths?: readonly string[]
   schemaRootKeys: readonly string[]
   toolName: string
 }): SafeToolCallValidationDigest {
@@ -7229,6 +7283,7 @@ function buildDynamicToolValidationDigest(input: {
     rawInput: input.rawInput,
     requestedToolName: input.toolName,
     schemaName: input.schemaName,
+    schemaPaths: input.schemaPaths,
     schemaRootKeys: input.schemaRootKeys,
     toolName: input.toolName,
   })
