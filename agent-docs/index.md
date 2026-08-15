@@ -115,8 +115,8 @@ fetch-adapter and handwritten wire-contract detection, literal dynamic-import
 transports and their exact namespace aliases, closed-member bound transport
 composition, set-valued alias-root member mutation closure, destructured/defaulted
 effective-value provenance, owner-specific digest-pinned transfer URL
-normalizers, digest-pinned adapter authority closure, and exact current
-failure inventory, is
+normalizers, digest-pinned adapter authority closure, fail-closed opaque
+parameter/call/`this` mutation roots, and exact current failure inventory, is
 specified by `agent-docs/SECURITY.md`,
 `agent-docs/references/testing-ci-map.md`, and
 `agent-docs/exec-plans/active/2026-08-12-provider-request-guard.md`.
