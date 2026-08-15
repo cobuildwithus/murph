@@ -171,3 +171,7 @@ the member's current authorized Telegram route.
 - ReviewGPT tooling is updated from `0.5.127` to the registry-latest `0.5.131`
   with the matching narrow minimum-release-age exception and lockfile integrity.
   A frozen-lockfile install and the installed CLI version check pass.
+- Exact-head CI exposed stale release-audit assertions for the prior ReviewGPT
+  version and its fixed five-minute implementation shape. The audit now pins
+  `0.5.131` and verifies the equivalent configurable threshold plus extracted
+  fail-closed helper. Its exact package-backed ReviewGPT test passes.
