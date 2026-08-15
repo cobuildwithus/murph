@@ -25,7 +25,10 @@ import {
   getHostedConnectionIdForAccountId,
   listUnboundAccountsByConnectionEpoch,
 } from "./accounts.ts";
-import { markCredentialScopedPendingDeviceSyncJobsDeadForAccount } from "./jobs.ts";
+import {
+  markCredentialScopedPendingDeviceSyncJobsDeadForAccount,
+  wakeRetainedDeviceSyncJobsForAccount,
+} from "./jobs.ts";
 
 type EncryptedProviderAuthTokens = ProviderAuthTokens & {
   accessTokenEncrypted: string;
@@ -877,6 +880,12 @@ export function hydrateHostedAccount(
           classifyProviderJob: input.classifyProviderJob,
           code: "HOSTED_CONNECTION_EPOCH_REPLACED",
           message: "Device-sync work belonged to a replaced hosted connection epoch.",
+          now: rowUpdatedAt,
+        });
+      }
+      if (status === "active" && setupPhase === "source_confirmed") {
+        wakeRetainedDeviceSyncJobsForAccount(database, {
+          accountId: existing.id,
           now: rowUpdatedAt,
         });
       }
