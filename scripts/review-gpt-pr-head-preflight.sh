@@ -4,8 +4,6 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 review_gpt_completion_specialists_prompt_max_bytes=6500
-# shellcheck source=review-gpt-duration-contract.sh
-source "$ROOT_DIR/scripts/review-gpt-duration-contract.sh"
 
 usage() {
   cat >&2 <<'EOF'
@@ -115,33 +113,20 @@ review_gpt_option_requires_value() {
   return 1
 }
 
-review_gpt_require_pr_minimum_marked_response_options() {
+review_gpt_reject_pr_minimum_marked_response_override() {
   local argument
-  local pending_option=""
-  local raw_value
 
   for argument in "$@"; do
-    if [[ -n "$pending_option" ]]; then
-      review_gpt_require_pr_minimum_marked_response_time "$pending_option" "$argument" || return
-      pending_option=""
-      continue
-    fi
-
     case "$argument" in
-      --minimum-marked-response-time | --minimumMarkedResponseTime)
-        pending_option="$argument"
-        ;;
-      --minimum-marked-response-time=* | --minimumMarkedResponseTime=*)
-        raw_value="${argument#*=}"
-        review_gpt_require_pr_minimum_marked_response_time "${argument%%=*}" "$raw_value" || return
+      --minimum-marked-response-time \
+        | --minimumMarkedResponseTime \
+        | --minimum-marked-response-time=* \
+        | --minimumMarkedResponseTime=*)
+        echo "Error: PR ReviewGPT response thresholds are fixed by review phase; omit $argument." >&2
+        return 64
         ;;
     esac
   done
-
-  if [[ -n "$pending_option" ]]; then
-    echo "Error: $pending_option requires a value." >&2
-    return 64
-  fi
 }
 
 review_gpt_detect_pr_phase() {
@@ -315,7 +300,6 @@ review_gpt_run() {
       echo "Error: REVIEW_GPT_REVIEW_PHASE=$explicit_phase conflicts with the selected $detected_phase PR review preset." >&2
       exit 64
     fi
-    review_gpt_require_pr_minimum_marked_response_options "$@"
     if [[ "$detected_phase" == "preliminary" ]]; then
       review_gpt_require_completion_specialists_prompt_budget "$@"
     fi
@@ -333,6 +317,7 @@ review_gpt_run() {
     review_gpt_require_pr_head "$pr_ref"
     export REVIEW_GPT_PR_URL="$pr_ref"
     export REVIEW_GPT_REVIEW_PHASE="$detected_phase"
+    review_gpt_reject_pr_minimum_marked_response_override "$@"
   fi
 
   exec pnpm exec cobuild-review-gpt --config scripts/review-gpt.config.sh "$@"
