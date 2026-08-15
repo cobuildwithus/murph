@@ -53,6 +53,11 @@ interface ProdWatchTestOverrides {
   mcpRemoteBin?: string;
   codexArgsCapture?: string;
   codexPromptCapture?: string;
+  providerTrackerPath?: string;
+  providerActiveRoot?: string;
+  providerTimeline?: string;
+  providerGateCount?: string;
+  providerFailLabel?: string;
   extraMcp?: boolean;
 }
 
@@ -75,6 +80,11 @@ function readProdWatchTestOverrides(): ProdWatchTestOverrides | undefined {
     "mcpRemoteBin",
     "codexArgsCapture",
     "codexPromptCapture",
+    "providerTrackerPath",
+    "providerActiveRoot",
+    "providerTimeline",
+    "providerGateCount",
+    "providerFailLabel",
   ] as const) {
     if (object[key] !== undefined && typeof object[key] !== "string") {
       throw new Error("test_overrides_invalid");
@@ -555,9 +565,11 @@ async function collectSnapshot(
       }
     } catch (error) {
       throwIfAborted(runtime.signal);
-      const failure = classifyProviderChildFailure(error);
-      for (const source of options.configuredSources.filter((candidate) => candidate !== "database")) {
-        failures.push({ ...failure, source });
+      if (options.providerCollection === "child") {
+        const failure = classifyProviderChildFailure(error);
+        for (const source of options.configuredSources.filter((candidate) => candidate !== "database")) {
+          failures.push({ ...failure, source });
+        }
       }
     }
   }
@@ -1007,6 +1019,11 @@ function buildIsolatedCodexChildEnv(
     env.TEST_MCP_REMOTE_BIN = testOverrides.mcpRemoteBin;
     env.TEST_CODEX_ARGS_CAPTURE = testOverrides.codexArgsCapture;
     env.TEST_CODEX_PROMPT_CAPTURE = testOverrides.codexPromptCapture;
+    env.TEST_PROVIDER_TRACKER_PATH = testOverrides.providerTrackerPath;
+    env.TEST_PROVIDER_ACTIVE_ROOT = testOverrides.providerActiveRoot;
+    env.TEST_PROVIDER_TIMELINE = testOverrides.providerTimeline;
+    env.TEST_PROVIDER_GATE_COUNT = testOverrides.providerGateCount;
+    env.TEST_PROVIDER_FAIL_LABEL = testOverrides.providerFailLabel;
   }
   return env;
 }

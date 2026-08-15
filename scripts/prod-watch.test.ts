@@ -2354,13 +2354,16 @@ describe("production-watch locking and dry-run behavior", () => {
     expect(snapshot.anomalyCandidates).toEqual([]);
   });
 
-  it("executes the operator-advertised state-owning provider pass through all adapters", () => {
+  it("maps non-empty all-adapter payloads and bounds composed maximum fanout", () => {
     const runtimeRoot = makeTempRoot();
     const databaseInvocations = path.join(runtimeRoot, "database-invocations.log");
     const vercelInvocations = path.join(runtimeRoot, "vercel-invocations.log");
     const stripeInvocations = path.join(runtimeRoot, "stripe-invocations.log");
     const codexPrompt = path.join(runtimeRoot, "codex-prompt.txt");
+    const providerActiveRoot = path.join(runtimeRoot, "provider-active");
+    const providerTimeline = path.join(runtimeRoot, "provider-timeline.log");
     const homeRoot = path.join(runtimeRoot, "home");
+    const referenceMs = Date.now();
     const vercelToken = installVercelApiFixture(homeRoot);
     const databaseEnv = installDatabaseFixtureHelper(runtimeRoot, "healthy");
     const codexEnv = installSchemaFaithfulFakeCodex(runtimeRoot);
@@ -2385,6 +2388,12 @@ describe("production-watch locking and dry-run behavior", () => {
       TEST_STRIPE_INVOCATION_LOG: stripeInvocations,
       TEST_VERCEL_FETCH_LOG: vercelInvocations,
       TEST_VERCEL_TOKEN: vercelToken,
+      TEST_PROVIDER_ACTIVE_ROOT: providerActiveRoot,
+      TEST_PROVIDER_TIMELINE: providerTimeline,
+      TEST_PROVIDER_GATE_COUNT: "10",
+      TEST_PROVIDER_REFERENCE_MS: String(referenceMs),
+      TEST_VERCEL_NONEMPTY: "1",
+      TEST_STRIPE_NONEMPTY: "1",
     });
 
     expect(result.status, result.stderr).toBe(0);
@@ -2414,8 +2423,162 @@ describe("production-watch locking and dry-run behavior", () => {
     const stripeCalls = readFileSync(stripeInvocations, "utf8").trim().split("\n");
     expect(stripeCalls).toHaveLength(2);
     expect(stripeCalls.some((call) => call.includes("--delivery-success=false"))).toBe(true);
+    const providerCounters = (source: "vercel" | "cloudflare" | "stripe") => Object.fromEntries(
+      snapshot.counters
+        .filter((counter) => counter.dimensions.source === source)
+        .map((counter) => [counter.metric, { current: counter.current, previous: counter.previous }]),
+    );
+    expect(providerCounters("vercel")).toEqual({
+      provider_request_count: { current: 180, previous: 180 },
+      provider_error_count: { current: 1, previous: 1 },
+      provider_timeout_count: { current: 1, previous: 0 },
+    });
+    expect(providerCounters("cloudflare")).toEqual({});
+    expect(providerCounters("stripe")).toEqual({
+      provider_request_count: { current: 3, previous: 3 },
+      provider_error_count: { current: 2, previous: 2 },
+      provider_timeout_count: { current: 1, previous: 1 },
+    });
+    expect(snapshot.latency.filter((latency) =>
+      ["vercel", "cloudflare", "stripe"].includes(latency.dimensions.source ?? "")
+    )).toEqual([]);
+    expect(snapshot.fingerprints
+      .filter((fingerprint) => fingerprint.source === "vercel")
+      .map(({ component, phase, count, previousCount }) => ({ component, phase, count, previousCount })))
+      .toEqual([
+        { component: "production", phase: "request", count: 1, previousCount: 1 },
+        { component: "production", phase: "runtime", count: 1, previousCount: 1 },
+      ]);
+    expect(snapshot.fingerprints
+      .filter((fingerprint) => fingerprint.source === "stripe")
+      .map(({ component, phase, count, previousCount }) => ({ component, phase, count, previousCount })))
+      .toEqual([
+        { component: "webhooks", phase: "delivery", count: 2, previousCount: 2 },
+        { component: "payments", phase: "event", count: 1, previousCount: 1 },
+      ]);
+    expect(snapshot.collectorFailures.filter((failure) => failure.source !== "database"))
+      .toEqual([]);
+    const timeline = readFileSync(providerTimeline, "utf8").trim().split("\n");
+    const starts = timeline.filter((entry) => entry.startsWith("start\t"));
+    const ends = timeline.filter((entry) => entry.startsWith("end\t"));
+    const startLabels = starts.map((entry) => entry.split("\t")[1]!);
+    const endLabels = ends.map((entry) => entry.split("\t")[1]!);
+    expect(startLabels.filter((label) => label.startsWith("vercel:"))).toHaveLength(34);
+    expect(startLabels.filter((label) => label.startsWith("stripe:"))).toHaveLength(2);
+    expect(startLabels.filter((label) => label.startsWith("codex:"))).toEqual([
+      "codex:mcp",
+      "codex:exec",
+    ]);
+    expect(Math.max(...starts.map((entry) => Number(entry.split("\t")[2])))).toBe(10);
+    expect(timeline.indexOf("end\tdatabase")).toBeLessThan(
+      timeline.findIndex((entry) => entry.startsWith("start\t") && !entry.startsWith("start\tdatabase\t")),
+    );
+    expect([...startLabels].sort()).toEqual([...endLabels].sort());
+    expect(readdirSync(providerActiveRoot)).toEqual([]);
     expect(existsSync(path.join(runtimeRoot, "operations", "prod-watch", "state.v1.json")))
       .toBe(true);
+  });
+
+  it("drains all started provider work after one adapter fails", () => {
+    const runtimeRoot = makeTempRoot();
+    const providerActiveRoot = path.join(runtimeRoot, "provider-active");
+    const providerTimeline = path.join(runtimeRoot, "provider-timeline.log");
+    const homeRoot = path.join(runtimeRoot, "home");
+    const vercelToken = installVercelApiFixture(homeRoot);
+    const result = runProdWatch([
+      "run",
+      "--provider-child",
+      "--lookback-minutes",
+      "15",
+      "--settling-delay-seconds",
+      "0",
+    ], runtimeRoot, {
+      ...installDatabaseFixtureHelper(runtimeRoot, "healthy"),
+      ...installSchemaFaithfulFakeCodex(runtimeRoot),
+      HOME: homeRoot,
+      PATH: [
+        path.join(runtimeRoot, "test-bin"),
+        path.join(runtimeRoot, "schema-faithful-codex-bin"),
+        process.env.PATH ?? "",
+      ].join(":"),
+      TEST_VERCEL_FETCH_LOG: path.join(runtimeRoot, "vercel-invocations.log"),
+      TEST_VERCEL_TOKEN: vercelToken,
+      TEST_PROVIDER_ACTIVE_ROOT: providerActiveRoot,
+      TEST_PROVIDER_TIMELINE: providerTimeline,
+      TEST_PROVIDER_GATE_COUNT: "10",
+      TEST_PROVIDER_FAIL_LABEL: "vercel:request:1",
+      TEST_PROVIDER_REFERENCE_MS: String(Date.now()),
+      TEST_VERCEL_NONEMPTY: "1",
+      TEST_STRIPE_NONEMPTY: "1",
+    });
+
+    expect(result.status, result.stderr).toBe(0);
+    const snapshot = JSON.parse(readFileSync(
+      path.join(runtimeRoot, "projections", "prod-watch", "latest.snapshot.v1.json"),
+      "utf8",
+    )) as ProductionWatchSnapshot;
+    expect(snapshot.collectorFailures).toContainEqual(expect.objectContaining({ source: "vercel" }));
+    const timeline = readFileSync(providerTimeline, "utf8").trim().split("\n");
+    const starts = timeline.filter((entry) => entry.startsWith("start\t"));
+    const startLabels = starts.map((entry) => entry.split("\t")[1]!);
+    const endLabels = timeline
+      .filter((entry) => entry.startsWith("end\t"))
+      .map((entry) => entry.split("\t")[1]!);
+    expect(startLabels.filter((label) =>
+      label.startsWith("vercel:request:") || label.startsWith("stripe:") || label === "codex:exec"
+    )).toHaveLength(10);
+    expect(Math.max(...starts.map((entry) => Number(entry.split("\t")[2])))).toBe(10);
+    expect([...startLabels].sort()).toEqual([...endLabels].sort());
+    expect(readdirSync(providerActiveRoot)).toEqual([]);
+  });
+
+  it("keeps provider shadow setup failures out of persisted provider state", () => {
+    const runtimeRoot = makeTempRoot();
+    const databaseEnv = installDatabaseFixtureHelper(runtimeRoot, "healthy");
+    const codexEnv = installFakeCodex(runtimeRoot);
+    const sharedEnv = { ...databaseEnv, ...codexEnv };
+    const seeded = runProdWatch(
+      ["run", "--provider-child", "--settling-delay-seconds", "0"],
+      runtimeRoot,
+      sharedEnv,
+    );
+    expect(seeded.status, seeded.stderr).toBe(0);
+    const validShadow = runProdWatch(
+      ["run", "--provider-shadow", "--settling-delay-seconds", "0"],
+      runtimeRoot,
+      sharedEnv,
+    );
+    expect(validShadow.status, validShadow.stderr).toBe(0);
+    const statePath = path.join(runtimeRoot, "operations", "prod-watch", "state.v1.json");
+    const stateAfterValidShadow = JSON.parse(readFileSync(statePath, "utf8")) as ProductionWatchState;
+
+    const failedShadow = runProdWatch(
+      ["run", "--provider-shadow", "--settling-delay-seconds", "0"],
+      runtimeRoot,
+      {
+        ...sharedEnv,
+        MURPH_PROD_WATCH_CODEX_BIN: path.join(runtimeRoot, "missing-codex"),
+      },
+    );
+    expect(failedShadow.status, failedShadow.stderr).toBe(0);
+    const stateAfterFailedShadow = JSON.parse(readFileSync(statePath, "utf8")) as ProductionWatchState;
+    const providerState = (state: ProductionWatchState) => ({
+      sourceFailureStreaks: Object.fromEntries(Object.entries(state.monitor.sourceFailureStreaks)
+        .filter(([source]) => source !== "database")),
+      sourceObservations: Object.fromEntries(Object.entries(state.monitor.sourceObservations)
+        .filter(([source]) => source !== "database")),
+      sourceHealth: state.monitor.lastSourceHealth.filter((source) => source.source !== "database"),
+      anomalyStreaks: Object.fromEntries(Object.entries(state.anomalyStreaks)
+        .filter(([, streak]) => streak.source !== "database")),
+      incidents: state.incidents.filter((incident) => incident.source !== "database"),
+    });
+    expect(providerState(stateAfterFailedShadow)).toEqual(providerState(stateAfterValidShadow));
+    const failedSnapshot = JSON.parse(readFileSync(
+      path.join(runtimeRoot, "projections", "prod-watch", "latest.snapshot.v1.json"),
+      "utf8",
+    )) as ProductionWatchSnapshot;
+    expect(failedSnapshot.collectorFailures.filter((failure) => failure.source !== "database"))
+      .toEqual([]);
   });
 
   it("settles a started provider sibling before propagating the first branch rejection", () => {
@@ -3979,15 +4142,19 @@ function installDatabaseFixtureHelper(
 ): Record<string, string> {
   const binRoot = path.join(runtimeRoot, "test-bin");
   mkdirSync(binRoot, { recursive: true });
+  const providerTrackerPath = writeProviderConcurrencyTracker(runtimeRoot);
   const helperScriptPath = path.join(binRoot, "database-fixture.cjs");
   writeFileSync(helperScriptPath, [
     "const { readFileSync } = require('node:fs');",
-    "const evidence = JSON.parse(readFileSync(process.env.TEST_DATABASE_FIXTURE, 'utf8'));",
-    "const flags = Object.fromEntries(process.argv.slice(2).filter((value) => value.startsWith('--set=')).map((value) => { const split = value.slice(6).indexOf('='); return [value.slice(6, 6 + split), value.slice(7 + split)]; }));",
-    "evidence.collectedAt = flags.window_end;",
-    "evidence.freshnessSeconds = 0;",
-    "evidence.fingerprints = evidence.fingerprints.map((entry) => ({ ...entry, firstSeenAt: flags.previous_start, lastSeenAt: flags.window_end }));",
-    "process.stdout.write(`${JSON.stringify(evidence)}\\n`);",
+    "const tracker = process.env.TEST_PROVIDER_TRACKER_PATH === undefined ? { withTrackedProviderWork: async (_label, _gated, operation) => await operation() } : require(process.env.TEST_PROVIDER_TRACKER_PATH);",
+    "void tracker.withTrackedProviderWork('database', false, async () => {",
+    "  const evidence = JSON.parse(readFileSync(process.env.TEST_DATABASE_FIXTURE, 'utf8'));",
+    "  const flags = Object.fromEntries(process.argv.slice(2).filter((value) => value.startsWith('--set=')).map((value) => { const split = value.slice(6).indexOf('='); return [value.slice(6, 6 + split), value.slice(7 + split)]; }));",
+    "  evidence.collectedAt = flags.window_end;",
+    "  evidence.freshnessSeconds = 0;",
+    "  evidence.fingerprints = evidence.fingerprints.map((entry) => ({ ...entry, firstSeenAt: flags.previous_start, lastSeenAt: flags.window_end }));",
+    "  process.stdout.write(`${JSON.stringify(evidence)}\\n`);",
+    "}).catch((error) => { console.error(error instanceof Error ? error.message : 'database_fixture_failed'); process.exitCode = 1; });",
     "",
   ].join("\n"), { mode: 0o600 });
   const helperPath = path.join(binRoot, "murph-prod-psql-ro");
@@ -4004,6 +4171,7 @@ function installDatabaseFixtureHelper(
     TEST_DATABASE_FIXTURE: path.join(fixtureRoot, `${fixture}.database.json`),
     TEST_DATABASE_HELPER_SCRIPT: helperScriptPath,
     TEST_NODE_EXECUTABLE: process.execPath,
+    TEST_PROVIDER_TRACKER_PATH: providerTrackerPath,
   };
 }
 
@@ -4020,6 +4188,7 @@ function installVercelApiFixture(homeRoot: string): string {
 function installSchemaFaithfulFakeCodex(runtimeRoot: string): Record<string, string> {
   const binRoot = path.join(runtimeRoot, "schema-faithful-codex-bin");
   mkdirSync(binRoot, { recursive: true });
+  const providerTrackerPath = writeProviderConcurrencyTracker(runtimeRoot);
   const providerPath = path.join(runtimeRoot, "codex.providers.current.json");
   writeFileSync(providerPath, JSON.stringify(buildCodexProviderEnvelope(new Date())), { mode: 0o600 });
   chmodSync(providerPath, 0o600);
@@ -4030,6 +4199,7 @@ function installSchemaFaithfulFakeCodex(runtimeRoot: string): Record<string, str
     CODEX_HOME: path.join(runtimeRoot, "codex-home"),
     MURPH_PROD_WATCH_CODEX_BIN: path.join(binRoot, "codex"),
     TEST_MCP_REMOTE_BIN: path.join(binRoot, "codex"),
+    TEST_PROVIDER_TRACKER_PATH: providerTrackerPath,
   };
 }
 
@@ -4095,6 +4265,7 @@ function buildCodexProviderEnvelope(observedAt: Date): unknown {
 function installFakeCodex(runtimeRoot: string): Record<string, string> {
   const binRoot = path.join(runtimeRoot, "codex-bin");
   mkdirSync(binRoot, { recursive: true });
+  const providerTrackerPath = writeProviderConcurrencyTracker(runtimeRoot);
   writeFakeCodexExecutable(path.join(binRoot, "codex"));
   writeFakeProviderCliExecutables(binRoot);
   const providerPath = path.join(runtimeRoot, "healthy.providers.current.json");
@@ -4105,6 +4276,7 @@ function installFakeCodex(runtimeRoot: string): Record<string, string> {
     MURPH_PROD_WATCH_CODEX_BIN: path.join(binRoot, "codex"),
     TEST_MCP_REMOTE_BIN: path.join(binRoot, "codex"),
     TEST_PROVIDER_FIXTURE: providerPath,
+    TEST_PROVIDER_TRACKER_PATH: providerTrackerPath,
   };
 }
 
@@ -4114,34 +4286,45 @@ function writeFakeCodexExecutable(
   providerFixturePath?: string,
 ): void {
   const providerFixture = providerFixturePath === undefined
-    ? '"$TEST_PROVIDER_FIXTURE"'
+    ? "process.env.TEST_PROVIDER_FIXTURE"
     : JSON.stringify(providerFixturePath);
   writeFileSync(targetPath, [
-    "#!/bin/sh",
+    "#!/usr/bin/env node",
+    "const { chmodSync, copyFileSync, writeFileSync } = require('node:fs');",
+    "const path = require('node:path');",
+    "const tracker = process.env.TEST_PROVIDER_TRACKER_PATH === undefined ? { withTrackedProviderWork: async (_label, _gated, operation) => await operation() } : require(process.env.TEST_PROVIDER_TRACKER_PATH);",
+    "const args = process.argv.slice(2);",
     ...(requiredRuntime === undefined ? [] : [
-      `if [ "\${CODEX_HOME##*/}" != "${requiredRuntime.codexHomeBasename}" ]; then exit 42; fi`,
+      `if (path.basename(process.env.CODEX_HOME ?? '') !== ${JSON.stringify(requiredRuntime.codexHomeBasename)}) process.exit(42);`,
     ]),
-    "if [ \"$1\" = \"--version\" ]; then printf '%s\\n' 'codex-cli 0.144.4'; exit 0; fi",
-    "if [ \"$1\" = \"exec\" ] && [ \"$2\" = \"--help\" ]; then exit 0; fi",
-    "case \" $* \" in",
-    "  *\" mcp list --json \"*)",
-    "    if [ \"${TEST_CODEX_EXTRA_MCP:-0}\" = \"1\" ]; then",
-    "      printf '%s\\n' '[{\"name\":\"cloudflare_observability_oauth\",\"enabled\":true},{\"name\":\"synthetic_extra\",\"enabled\":true}]'",
-    "    else",
-    "      printf '%s\\n' '[{\"name\":\"cloudflare_observability_oauth\",\"enabled\":true}]'",
-    "    fi",
-    "    exit 0",
-    "    ;;",
-    "esac",
-    "if [ -n \"${TEST_CODEX_ARGS_CAPTURE:-}\" ]; then printf '%s\\n' \"$@\" > \"$TEST_CODEX_ARGS_CAPTURE\"; fi",
-    "output=''",
-    "while [ \"$#\" -gt 0 ]; do",
-    "  if [ \"$1\" = \"--output-last-message\" ]; then output=\"$2\"; shift 2; else shift; fi",
-    "done",
-    "if [ -n \"${TEST_CODEX_PROMPT_CAPTURE:-}\" ]; then cat > \"$TEST_CODEX_PROMPT_CAPTURE\"; else cat >/dev/null; fi",
-    `if [ -n "$output" ]; then cp ${providerFixture} "$output"; fi`,
-    "printf '%s\\n' '{\"type\":\"session\",\"session_id\":\"codex-test-session\"}'",
-    "printf '%s\\n' '{\"type\":\"turn.completed\",\"status\":\"completed\"}'",
+    "if (args[0] === '--version') { process.stdout.write('codex-cli 0.144.4\\n'); process.exit(0); }",
+    "if (args[0] === 'exec' && args[1] === '--help') process.exit(0);",
+    "const isMcpList = args.includes('mcp') && args.includes('list') && args.includes('--json');",
+    "const readStdin = async () => { let value = ''; for await (const chunk of process.stdin) value += chunk; return value; };",
+    "const main = async () => {",
+    "  if (isMcpList) {",
+    "    await tracker.withTrackedProviderWork('codex:mcp', false, async () => {",
+    "      const servers = process.env.TEST_CODEX_EXTRA_MCP === '1'",
+    "        ? [{ name: 'cloudflare_observability_oauth', enabled: true }, { name: 'synthetic_extra', enabled: true }]",
+    "        : [{ name: 'cloudflare_observability_oauth', enabled: true }];",
+    "      process.stdout.write(`${JSON.stringify(servers)}\\n`);",
+    "    });",
+    "    return;",
+    "  }",
+    "  await tracker.withTrackedProviderWork('codex:exec', true, async () => {",
+    "    if (process.env.TEST_PROVIDER_FAIL_LABEL === 'codex:exec') throw new Error('synthetic_provider_failure');",
+    "    if (process.env.TEST_CODEX_ARGS_CAPTURE) writeFileSync(process.env.TEST_CODEX_ARGS_CAPTURE, `${args.join('\\n')}\\n`);",
+    "    const outputIndex = args.indexOf('--output-last-message');",
+    "    const output = outputIndex === -1 ? undefined : args[outputIndex + 1];",
+    "    const prompt = await readStdin();",
+    "    if (process.env.TEST_CODEX_PROMPT_CAPTURE) writeFileSync(process.env.TEST_CODEX_PROMPT_CAPTURE, prompt);",
+    `    const providerFixture = ${providerFixture};`,
+    "    if (output !== undefined && providerFixture !== undefined) { copyFileSync(providerFixture, output); chmodSync(output, 0o600); }",
+    "    process.stdout.write('{\"type\":\"session\",\"session_id\":\"codex-test-session\"}\\n');",
+    "    process.stdout.write('{\"type\":\"turn.completed\",\"status\":\"completed\"}\\n');",
+    "  });",
+    "};",
+    "void main().catch((error) => { console.error(error instanceof Error ? error.message : 'codex_fixture_failed'); process.exitCode = 1; });",
     "",
   ].join("\n"), { mode: 0o755 });
   chmodSync(targetPath, 0o755);
@@ -4187,11 +4370,78 @@ function writeFakeProviderCliExecutables(binRoot: string): void {
   const stripePath = path.join(binRoot, "stripe");
   writeFileSync(stripePath, [
     "#!/usr/bin/env node",
-    "if (process.env.TEST_STRIPE_INVOCATION_LOG) require('node:fs').appendFileSync(process.env.TEST_STRIPE_INVOCATION_LOG, `${process.argv.slice(2).join(' ')}\\n`);",
-    "process.stdout.write(`${JSON.stringify({ object: 'list', data: [], has_more: false })}\\n`);",
+    "const { appendFileSync } = require('node:fs');",
+    "const tracker = process.env.TEST_PROVIDER_TRACKER_PATH === undefined ? { withTrackedProviderWork: async (_label, _gated, operation) => await operation() } : require(process.env.TEST_PROVIDER_TRACKER_PATH);",
+    "const args = process.argv.slice(2);",
+    "const failedDeliveries = args.includes('--delivery-success=false');",
+    "const label = failedDeliveries ? 'stripe:failed-deliveries' : 'stripe:events';",
+    "const event = (id, minutesAgo, type, referenceMs) => ({ id, created: Math.floor((referenceMs - minutesAgo * 60_000) / 1_000), type });",
+    "void tracker.withTrackedProviderWork(label, true, async () => {",
+    "  if (process.env.TEST_STRIPE_INVOCATION_LOG) appendFileSync(process.env.TEST_STRIPE_INVOCATION_LOG, `${args.join(' ')}\\n`);",
+    "  if (process.env.TEST_PROVIDER_FAIL_LABEL === label) throw new Error('synthetic_provider_failure');",
+    "  const referenceMs = Number(process.env.TEST_PROVIDER_REFERENCE_MS ?? Date.now());",
+    "  const data = process.env.TEST_STRIPE_NONEMPTY !== '1' ? [] : failedDeliveries ? [",
+    "    event('current-failure-overlap', 2, 'invoice.payment_failed', referenceMs),",
+    "    event('current-delivery-only', 4, 'charge.succeeded', referenceMs),",
+    "    event('previous-failure-overlap', 17, 'payment_intent.payment_failed', referenceMs),",
+    "    event('previous-delivery-only', 19, 'charge.succeeded', referenceMs),",
+    "    event('outside-delivery', 31, 'invoice.payment_failed', referenceMs),",
+    "    event('future-delivery', -1, 'invoice.payment_failed', referenceMs),",
+    "  ] : [",
+    "    event('current-success', 1, 'charge.succeeded', referenceMs),",
+    "    event('current-failure-overlap', 2, 'invoice.payment_failed', referenceMs),",
+    "    event('current-timeout', 3, 'event.timeout', referenceMs),",
+    "    event('previous-success', 16, 'charge.succeeded', referenceMs),",
+    "    event('previous-failure-overlap', 17, 'payment_intent.payment_failed', referenceMs),",
+    "    event('previous-timeout', 18, 'event.timeout', referenceMs),",
+    "    event('outside-event', 31, 'invoice.payment_failed', referenceMs),",
+    "    event('future-event', -1, 'invoice.payment_failed', referenceMs),",
+    "  ];",
+    "  process.stdout.write(`${JSON.stringify({ object: 'list', data, has_more: false })}\\n`);",
+    "}).catch((error) => { console.error(error instanceof Error ? error.message : 'stripe_fixture_failed'); process.exitCode = 1; });",
     "",
   ].join("\n"), { mode: 0o755 });
   chmodSync(stripePath, 0o755);
+}
+
+function writeProviderConcurrencyTracker(runtimeRoot: string): string {
+  const trackerPath = path.join(runtimeRoot, "provider-work-tracker.cjs");
+  writeFileSync(trackerPath, [
+    "const { appendFileSync, existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } = require('node:fs');",
+    "const path = require('node:path');",
+    "let sequence = 0;",
+    "const pause = async () => await new Promise((resolve) => setTimeout(resolve, 5));",
+    "async function withTrackedProviderWork(label, gated, operation) {",
+    "  const activeRoot = process.env.TEST_PROVIDER_ACTIVE_ROOT;",
+    "  const timeline = process.env.TEST_PROVIDER_TIMELINE;",
+    "  if (activeRoot === undefined || timeline === undefined) return await operation();",
+    "  mkdirSync(activeRoot, { recursive: true });",
+    "  const safeLabel = label.replace(/[^a-z0-9_-]/giu, '_');",
+    "  const marker = path.join(activeRoot, `${gated ? 'gated' : 'passive'}-${process.pid}-${++sequence}-${safeLabel}`);",
+    "  writeFileSync(marker, '', { flag: 'wx', mode: 0o600 });",
+    "  appendFileSync(timeline, `start\\t${label}\\t${readdirSync(activeRoot).length}\\n`);",
+    "  try {",
+    "    if (gated) {",
+    "      const gateCount = Number(process.env.TEST_PROVIDER_GATE_COUNT ?? '0');",
+    "      const gatePath = `${activeRoot}.gate-open`;",
+    "      const deadline = Date.now() + 5_000;",
+    "      if (readdirSync(activeRoot).filter((entry) => entry.startsWith('gated-')).length >= gateCount) writeFileSync(gatePath, '', { flag: 'a', mode: 0o600 });",
+    "      while (!existsSync(gatePath)) {",
+    "        if (Date.now() >= deadline) throw new Error('provider_gate_timeout');",
+    "        await pause();",
+    "      }",
+    "    }",
+    "    return await operation();",
+    "  } finally {",
+    "    rmSync(marker, { force: true });",
+    "    appendFileSync(timeline, `end\\t${label}\\n`);",
+    "  }",
+    "}",
+    "module.exports = { withTrackedProviderWork };",
+    "",
+  ].join("\n"), { mode: 0o600 });
+  chmodSync(trackerPath, 0o600);
+  return trackerPath;
 }
 
 function writeCurrentProviderFixture(
