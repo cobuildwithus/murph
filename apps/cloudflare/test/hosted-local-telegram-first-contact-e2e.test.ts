@@ -144,7 +144,7 @@ describe("hosted local Telegram auto-reply e2e", () => {
       && requireTelegramStub().parseObservedJson(request.body)?.text ===
         MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE
     );
-    expect(signupWelcomeRequests).toHaveLength(1);
+    expect(signupWelcomeRequests).toHaveLength(0);
 
     const firstInboundProviderRequest = requireScenario().assistantProviderRequests
       .slice(assistantProviderRequestCountBeforeInbound)
@@ -155,7 +155,7 @@ describe("hosted local Telegram auto-reply e2e", () => {
     if (!firstInboundProviderRequest) {
       throw new Error("Expected the first inbound Telegram provider request.");
     }
-    expect(readAssistantProviderRequestText(firstInboundProviderRequest)).toContain(
+    expect(readAssistantProviderRequestText(firstInboundProviderRequest)).not.toContain(
       MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE,
     );
     await requireTelegramStub().waitForRequestsToSettle({

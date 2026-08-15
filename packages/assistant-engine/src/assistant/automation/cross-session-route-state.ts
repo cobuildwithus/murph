@@ -137,12 +137,9 @@ export function resolveAssistantAutoReplyInputExactRoute(input: {
       : null
   }
 
-  const actorScope = resolveAssistantAutoReplyActorScope({
-    actorId: input.conversation.actorId,
-    threadIsDirect: input.conversation.threadIsDirect,
-  })
+  const actorId = normalizeNullableString(input.conversation.actorId)
   const threadId = normalizeNullableString(input.conversation.threadId)
-  if (!actorScope || !threadId) {
+  if (!actorId || !threadId) {
     return null
   }
 
@@ -152,7 +149,7 @@ export function resolveAssistantAutoReplyInputExactRoute(input: {
       ? buildAssistantAutoReplyExactRoute([
           'email',
           identityId,
-          actorScope,
+          actorId,
           threadId,
         ])
       : null
@@ -165,7 +162,7 @@ export function resolveAssistantAutoReplyInputExactRoute(input: {
     ? buildAssistantAutoReplyExactRoute([
         'channel',
         channel,
-        actorScope,
+        actorId,
         threadId,
         deliveryTarget,
       ])
@@ -198,12 +195,9 @@ export function resolveAssistantAutoReplyOutboxExactRoute(
       : null
   }
 
-  const actorScope = resolveAssistantAutoReplyActorScope({
-    actorId: intent.actorId,
-    threadIsDirect: intent.threadIsDirect,
-  })
+  const actorId = normalizeNullableString(intent.actorId)
   const threadId = normalizeNullableString(intent.threadId)
-  if (!actorScope || !threadId) {
+  if (!actorId || !threadId) {
     return null
   }
 
@@ -213,7 +207,7 @@ export function resolveAssistantAutoReplyOutboxExactRoute(
       ? buildAssistantAutoReplyExactRoute([
           'email',
           identityId,
-          actorScope,
+          actorId,
           threadId,
         ])
       : null
@@ -224,7 +218,7 @@ export function resolveAssistantAutoReplyOutboxExactRoute(
     ? buildAssistantAutoReplyExactRoute([
         'channel',
         channel,
-        actorScope,
+        actorId,
         threadId,
         deliveryTarget,
       ])
@@ -1150,14 +1144,6 @@ function resolveExactLinqProviderThreadTarget(
   return delivery.targetKind === 'thread'
     ? readAssistantTargetProviderScalar(delivery.target)
     : null
-}
-
-function resolveAssistantAutoReplyActorScope(input: {
-  actorId: string | null | undefined
-  threadIsDirect: boolean | null | undefined
-}): string | null {
-  return normalizeNullableString(input.actorId)
-    ?? (input.threadIsDirect === true ? '@direct' : null)
 }
 
 function normalizeRouteChannel(value: string | null | undefined): string | null {

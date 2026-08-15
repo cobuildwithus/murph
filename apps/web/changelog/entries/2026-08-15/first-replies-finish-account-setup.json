@@ -7,7 +7,7 @@
     "priority": 3,
     "title": "First replies now finish account setup cleanly",
     "summary": "When someone messages Murph immediately after joining, Murph can answer without leaving the new conversation's setup work behind.",
-    "details": "Welcome messages stay on their durable delivery path and remain available as context for the member's first direct reply, while shared-room setup keeps its existing isolated path.",
+    "details": "This improves the first-conversation handoff while keeping welcome messages and shared-room setup on their existing durable delivery path.",
     "relevanceTags": ["assistant", "messaging", "onboarding", "reliability"],
     "sourcePullRequests": [1864]
   }
