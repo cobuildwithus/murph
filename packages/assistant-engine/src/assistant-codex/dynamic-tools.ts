@@ -86,6 +86,7 @@ import {
   type HostedComputerPauseForUserRequest,
 } from '@murphai/hosted-execution/computer-use'
 import {
+  assistantAuthoredResponseMediaSchema,
   assistantMessageReactionSchema,
   type AssistantMessageReaction,
   type AssistantResponseMedia,
@@ -143,6 +144,7 @@ import type {
 } from '../assistant/providers/types.js'
 import {
   ASSISTANT_AUTHORED_RESPONSE_MEDIA_MAX_ITEMS,
+  dedupeAssistantResponseMediaList,
   matchesExactAssistantVaultImageResponseMedia,
   normalizeAssistantResponseMediaList,
 } from '../assistant/response-media.js'
@@ -384,7 +386,9 @@ const attachTelegramRichContentArgumentsSchema = z
 
 const attachResponseMediaArgumentsSchema = z
   .object({
-    media: z.array(z.unknown()).max(ASSISTANT_AUTHORED_RESPONSE_MEDIA_MAX_ITEMS),
+    media: z
+      .array(assistantAuthoredResponseMediaSchema)
+      .max(ASSISTANT_AUTHORED_RESPONSE_MEDIA_MAX_ITEMS),
   })
   .strict()
 
@@ -7369,41 +7373,12 @@ function parseAttachResponseMediaArguments(
   | { ok: false; validationDigest: SafeToolCallValidationDigest } {
   const schemaName = 'murph.attach_response_media.input'
   const toolName = 'murph.attach_response_media'
-  try {
-    const parsed = attachResponseMediaArgumentsSchema.safeParse(value)
-    if (!parsed.success) {
-      return {
-        ok: false,
-        validationDigest: buildDynamicToolValidationDigest({
-          error: parsed.error,
-          rawInput: value,
-          schemaName,
-          schemaPaths: attachResponseMediaValidationPaths,
-          schemaRootKeys: readZodObjectRootKeys(attachResponseMediaArgumentsSchema),
-          toolName,
-        }),
-      }
-    }
-
-    const media = normalizeAssistantResponseMediaList(parsed.data.media)
-    const unsupportedMedia = media.find(
-      (item) => item.kind !== 'image' && item.kind !== 'vault_image',
-    )
-    if (unsupportedMedia) {
-      throw new Error(
-        `murph.attach_response_media only supports image or vault_image media, received ${unsupportedMedia.kind}.`,
-      )
-    }
-
-    return {
-      ok: true,
-      media,
-    }
-  } catch (error) {
+  const parsed = attachResponseMediaArgumentsSchema.safeParse(value)
+  if (!parsed.success) {
     return {
       ok: false,
       validationDigest: buildDynamicToolValidationDigest({
-        error,
+        error: parsed.error,
         rawInput: value,
         schemaName,
         schemaPaths: attachResponseMediaValidationPaths,
@@ -7411,6 +7386,11 @@ function parseAttachResponseMediaArguments(
         toolName,
       }),
     }
+  }
+
+  return {
+    ok: true,
+    media: dedupeAssistantResponseMediaList(parsed.data.media),
   }
 }
 

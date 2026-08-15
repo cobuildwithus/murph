@@ -260,17 +260,24 @@ export function normalizeAssistantResponseMediaList(
     return []
   }
 
+  return dedupeAssistantResponseMediaList(
+    values.map((value) => assistantResponseMediaSchema.parse(value)),
+  )
+}
+
+export function dedupeAssistantResponseMediaList(
+  values: readonly AssistantResponseMedia[],
+): AssistantResponseMedia[] {
   const media: AssistantResponseMedia[] = []
   const seen = new Set<string>()
 
   for (const value of values) {
-    const parsed = assistantResponseMediaSchema.parse(value)
-    const dedupeKey = assistantResponseMediaDedupeKey(parsed)
+    const dedupeKey = assistantResponseMediaDedupeKey(value)
     if (seen.has(dedupeKey)) {
       continue
     }
     seen.add(dedupeKey)
-    media.push(parsed)
+    media.push(value)
   }
 
   if (media.length > MAX_ASSISTANT_RESPONSE_MEDIA) {

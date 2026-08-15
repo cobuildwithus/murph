@@ -1286,9 +1286,7 @@ describe('assistant codex runtime', () => {
                 arguments: {
                   media: [
                     {
-                      url: 'https://cdn.example.test/assistant/cat.png',
-                      alt: 'A cat image',
-                      source: 'cat-catalog-item',
+                      url: 'http://cdn.example.test/assistant/not-https.png',
                     },
                   ],
                 },
@@ -1300,11 +1298,11 @@ describe('assistant codex runtime', () => {
           expect(messages[4]).toEqual({
             id: 17,
             result: {
-              success: true,
+              success: false,
               contentItems: [
                 {
                   type: 'inputText',
-                  text: '1 response image attached',
+                  text: '{"error":"invalid_response_media_arguments","hints":[{"field":"media[].url","code":"custom","expected":"public_https_image_url"}]}',
                 },
               ],
             },
@@ -1319,7 +1317,9 @@ describe('assistant codex runtime', () => {
                 arguments: {
                   media: [
                     {
-                      url: 'http://cdn.example.test/assistant/not-https.png',
+                      url: 'https://cdn.example.test/assistant/cat.png',
+                      alt: 'A cat image',
+                      source: 'cat-catalog-item',
                     },
                   ],
                 },
@@ -1331,11 +1331,11 @@ describe('assistant codex runtime', () => {
           expect(messages[5]).toEqual({
             id: 18,
             result: {
-              success: false,
+              success: true,
               contentItems: [
                 {
                   type: 'inputText',
-                  text: '{"error":"invalid_response_media_arguments"}',
+                  text: '1 response image attached',
                 },
               ],
             },
