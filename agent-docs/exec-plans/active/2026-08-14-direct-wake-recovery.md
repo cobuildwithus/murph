@@ -106,9 +106,20 @@ retry; Temporal remains the only durable retry and reconciliation owner.
   Ordinary container stops again receive a separately bounded status read and
   fresh destroy-settlement window; a four-second read plus two-second settle
   regression covers the restored contract.
-- [ ] Complete the hosted-local journey in a capable environment, resolve the
-  exact-head final Review GPT gate and CI, archive this plan, and push the final
-  reviewed head.
+- [x] Complete the hosted-local journey in a capable arm64/Rosetta environment.
+  The same fresh versioned fence returned `retry_later` on attempt one, was
+  aged only while attempt two was held at the Web-process barrier, and then
+  returned `runtime_processing_accepted`; the run persisted direct timing and
+  produced exactly one provider request and one accepted Linq reply.
+- [x] Preserve the accepted direct outcome through later set-based latency
+  writes by teaching the SQL sanitizer the existing bounded opaque-identifier
+  rule. The real journey exposed the gap only after its wake behavior passed;
+  focused store coverage now retains the full accepted outcome.
+- [x] Upgrade the workspace ReviewGPT dependency from `0.5.127` to the latest
+  published `0.5.131`; the dedicated ReviewGPT/Frog guard suite and frozen
+  lockfile check pass.
+- [ ] Resolve the exact-head final Review GPT gate and CI, archive this plan,
+  and push the final reviewed head.
 
 ## Surprises and discoveries
 
@@ -152,10 +163,12 @@ retry; Temporal remains the only durable retry and reconciliation owner.
   deletion, idle cleanup, and every other ordinary stop. The final design
   passes that deadline only from the readiness wrapper; the shared primitive's
   default keeps its prior two bounded phases.
-- Local execution of that hosted-local proof reached the external Temporal
-  configuration but timed out during the harness's MinIO image fallback before
-  any test ran. Unit/typecheck proof is green; the capable hosted-local CI lane
-  remains the executable end-to-end gate.
+- The capable local journey first proved the functional recovery but found its
+  persisted latency trace invalid after a later set-based write. The direct
+  timing write itself succeeded; the SQL sanitizer omitted the already-defined
+  `opaque_identifier` rule and therefore dropped the accepted runtime attempt
+  id. Adding that bounded rule preserved the complete outcome, and the rerun
+  passed end to end.
 
 ## Decision log
 
