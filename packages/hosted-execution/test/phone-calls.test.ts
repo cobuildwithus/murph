@@ -133,6 +133,7 @@ describe("hosted phone call contracts", () => {
         phoneCallId: "hpc_123",
         result: null,
         status: "ended",
+        stopRequestedAt: null,
         updatedAt: "2026-09-01T15:01:00.000Z",
       }],
     }).calls[0]).toMatchObject({
@@ -155,6 +156,7 @@ describe("hosted phone call contracts", () => {
           summary: "The requested task was not completed.",
         },
         status: "failed",
+        stopRequestedAt: null,
         updatedAt: "2026-09-01T15:01:10.000Z",
       }],
     }).calls[0]?.result?.outcome).toBe("not_completed");

@@ -17,6 +17,7 @@ import {
 import type {
   HostedPhoneCallProviderUsage,
   PhoneCallRuntime,
+  PhoneCallRuntimeStopDisposition,
 } from "./types";
 import { recordRetellPhoneCallProviderUsage } from "./usage";
 
@@ -24,6 +25,11 @@ export interface HostedPhoneCallReconciliationStore {
   markCleanupEnded(input: {
     id: string;
     providerCallId: string;
+  }): Promise<{ count: number }>;
+  markRequestedStopEnded(input: {
+    id: string;
+    providerCallId: string;
+    status: HostedPhoneCall["status"];
   }): Promise<{ count: number }>;
   hostedPhoneCall: {
     findUnique(input: {
@@ -70,6 +76,25 @@ export async function processHostedPhoneCallRecoveryById(input: {
   if (!call) {
     return "missing";
   }
+  if (call.stopRequestedAt && call.providerCallId && !call.endedAt) {
+    const disposition = await stopHostedPhoneCallRequestedAuthority({
+      call,
+      runtime,
+      signal: input.signal,
+      store,
+    });
+    if (!disposition) {
+      return "pending";
+    }
+    const current = await waitForAbortableOperation(input.signal, () =>
+      store.hostedPhoneCall.findUnique({
+        where: { id: input.phoneCallId },
+      }));
+    if (!current) {
+      return "missing";
+    }
+    call = current;
+  }
   if (isHostedPhoneCallProviderCleanupPending(call) && call.providerCallId) {
     const stopped = await stopHostedPhoneCallCleanupAuthority({
       call: {
@@ -104,15 +129,34 @@ export async function processHostedPhoneCallRecoveryById(input: {
       return "missing";
     }
     call = current;
+    if (call.stopRequestedAt && call.providerCallId && !call.endedAt) {
+      const disposition = await stopHostedPhoneCallRequestedAuthority({
+        call,
+        runtime,
+        signal: input.signal,
+        store,
+      });
+      if (!disposition) {
+        return "pending";
+      }
+      const stopped = await waitForAbortableOperation(input.signal, () =>
+        store.hostedPhoneCall.findUnique({
+          where: { id: input.phoneCallId },
+        }));
+      if (!stopped) {
+        return "missing";
+      }
+      call = stopped;
+    }
     if (
       result.status === "failed"
-      && isHostedPhoneCallProviderCleanupPending(current)
-      && current.providerCallId
+      && isHostedPhoneCallProviderCleanupPending(call)
+      && call.providerCallId
     ) {
       const stopped = await stopHostedPhoneCallCleanupAuthority({
         call: {
-          id: current.id,
-          providerCallId: current.providerCallId,
+          id: call.id,
+          providerCallId: call.providerCallId,
         },
         runtime,
         signal: input.signal,
@@ -176,6 +220,41 @@ export async function processHostedPhoneCallRecoveryById(input: {
   }
 
   return hasPhoneCallAdvancedBeyondStart(call) ? "complete" : "pending";
+}
+
+export async function stopHostedPhoneCallRequestedAuthority(input: {
+  call: Pick<
+    HostedPhoneCall,
+    "endedAt" | "id" | "providerCallId" | "status" | "stopRequestedAt"
+  >;
+  runtime: Pick<PhoneCallRuntime, "stopIfActive">;
+  signal: AbortSignal;
+  store: Pick<HostedPhoneCallReconciliationStore, "markRequestedStopEnded">;
+}): Promise<PhoneCallRuntimeStopDisposition | null> {
+  if (
+    !input.call.stopRequestedAt
+    || !input.call.providerCallId
+    || input.call.endedAt
+  ) {
+    return null;
+  }
+  let disposition: PhoneCallRuntimeStopDisposition;
+  try {
+    disposition = await waitForAbortableOperation(input.signal, () =>
+      input.runtime.stopIfActive(input.call.providerCallId!, {
+        signal: input.signal,
+      }));
+  } catch {
+    input.signal.throwIfAborted();
+    return null;
+  }
+  await waitForAbortableOperation(input.signal, () =>
+    input.store.markRequestedStopEnded({
+      id: input.call.id,
+      providerCallId: input.call.providerCallId!,
+      status: input.call.status === "failed" ? "failed" : "ended",
+    }));
+  return disposition;
 }
 
 export async function stopHostedPhoneCallCleanupAuthority(input: {
@@ -318,6 +397,20 @@ function resolveHostedPhoneCallReconciliationStore(): HostedPhoneCallReconciliat
         provider: "retell",
         providerCallId: input.providerCallId,
         status: "failed",
+      },
+    }),
+    markRequestedStopEnded: async (input) => prisma.hostedPhoneCall.updateMany({
+      data: {
+        endedAt: new Date(),
+        status: input.status,
+      },
+      where: {
+        analyzedAt: null,
+        endedAt: null,
+        id: input.id,
+        provider: "retell",
+        providerCallId: input.providerCallId,
+        stopRequestedAt: { not: null },
       },
     }),
     hostedPhoneCall: {

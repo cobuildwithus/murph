@@ -119,6 +119,7 @@ export const hostedPhoneCallStatusItemSchema = z
       "needs_user",
       "failed",
     ]),
+    stopRequestedAt: z.iso.datetime().nullable(),
     updatedAt: z.iso.datetime(),
   })
   .strict();

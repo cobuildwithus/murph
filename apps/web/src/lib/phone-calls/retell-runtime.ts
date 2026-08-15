@@ -13,6 +13,7 @@ import type {
   PhoneCallRuntime,
   PhoneCallRuntimeReconciliationResult,
   PhoneCallRuntimeStartResult,
+  PhoneCallRuntimeStopDisposition,
 } from "./types";
 import { readRetellTerminalProviderUsage } from "./usage";
 import { markPhoneCallRuntimeNoActiveEffect } from "./types";
@@ -249,7 +250,7 @@ class RetellPhoneCallRuntime implements PhoneCallRuntime, RetellPhoneCallAccount
   async stopIfActive(
     providerCallId: string,
     options: { signal?: AbortSignal } = {},
-  ): Promise<void> {
+  ): Promise<PhoneCallRuntimeStopDisposition> {
     const client = this.buildClient();
     let call: Awaited<ReturnType<typeof client.call.retrieve>>;
     try {
@@ -258,7 +259,7 @@ class RetellPhoneCallRuntime implements PhoneCallRuntime, RetellPhoneCallAccount
       });
     } catch (error) {
       if (isRetellMissingCallError(error)) {
-        return;
+        return "already_terminal";
       }
       throw error;
     }
@@ -267,12 +268,15 @@ class RetellPhoneCallRuntime implements PhoneCallRuntime, RetellPhoneCallAccount
         await client.call.stop(providerCallId, {
           signal: options.signal,
         });
+        return "stopped";
       } catch (error) {
-        if (!isRetellMissingCallError(error)) {
-          throw error;
+        if (isRetellMissingCallError(error)) {
+          return "already_terminal";
         }
+        throw error;
       }
     }
+    return "already_terminal";
   }
 
   private buildClient(): Retell {

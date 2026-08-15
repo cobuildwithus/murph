@@ -284,6 +284,7 @@ function buildStoredAnalyzedCall(): HostedPhoneCall {
     resultEncrypted: "encrypted-result",
     resultJson: null,
     status: "completed",
+    stopRequestedAt: null,
     updatedAt: now,
   };
 }

@@ -405,6 +405,136 @@ describe("createHostedPhoneCall", () => {
     });
   });
 
+  it("consumes a stop intent after reconciliation discovers an uncertain provider call", async () => {
+    const existing = buildHostedPhoneCall({
+      id: "hpc_stop_reconcile",
+      providerCallId: null,
+      status: "starting",
+      stopRequestedAt: new Date("2026-06-25T00:01:00.000Z"),
+      updatedAt: new Date(0),
+    });
+    const store = createPhoneCallStore({ existing });
+    const runtime = createPhoneCallRuntime({
+      providerCallId: "retell_stop_reconcile",
+      reconciliationResult: {
+        providerCallId: "retell_stop_reconcile",
+        state: "found",
+      },
+    });
+
+    await expect(processHostedPhoneCallRecoveryById({
+      phoneCallId: existing.id,
+      prisma: store.prisma,
+      runtime: runtime.runtime,
+      signal: new AbortController().signal,
+    })).resolves.toBe("complete");
+
+    expect(runtime.resolveCalls).toEqual([existing.id]);
+    expect(runtime.stopCalls).toEqual(["retell_stop_reconcile"]);
+    expect(store.currentCall()).toMatchObject({
+      endedAt: expect.any(Date),
+      providerCallId: "retell_stop_reconcile",
+      status: "ended",
+      stopRequestedAt: existing.stopRequestedAt,
+    });
+
+    await expect(processHostedPhoneCallRecoveryById({
+      phoneCallId: existing.id,
+      prisma: store.prisma,
+      runtime: runtime.runtime,
+      signal: new AbortController().signal,
+    })).resolves.toBe("complete");
+    expect(runtime.stopCalls).toEqual(["retell_stop_reconcile"]);
+  });
+
+  it("consumes a stop intent after a successful start whose provider-id write failed", async () => {
+    const created = buildHostedPhoneCall({ id: "hpc_stop_after_write_failure" });
+    let rejectBinding = true;
+    const store = createPhoneCallStore({
+      created,
+      onUpdateMany: (update) => {
+        if (update.data.providerCallId && rejectBinding) {
+          rejectBinding = false;
+          throw new Error("database unavailable");
+        }
+      },
+    });
+    const runtime = createPhoneCallRuntime({
+      providerCallId: "retell_stop_after_write_failure",
+      reconciliationResult: {
+        providerCallId: "retell_stop_after_write_failure",
+        state: "found",
+      },
+    });
+
+    await expect(createHostedPhoneCall({
+      brief: VALID_BRIEF,
+      memberId: created.memberId,
+      prisma: store.prisma,
+      requestKey: created.requestKey,
+      runtime: runtime.runtime,
+    })).resolves.toMatchObject({ status: "starting" });
+    expect(runtime.startCalls).toHaveLength(1);
+
+    store.advanceCurrentCall({
+      stopRequestedAt: new Date("2026-06-25T00:01:00.000Z"),
+      updatedAt: new Date(0),
+    });
+    await expect(processHostedPhoneCallRecoveryById({
+      phoneCallId: store.currentCall().id,
+      prisma: store.prisma,
+      runtime: runtime.runtime,
+      signal: new AbortController().signal,
+    })).resolves.toBe("complete");
+
+    expect(runtime.stopCalls).toEqual(["retell_stop_after_write_failure"]);
+    expect(store.currentCall()).toMatchObject({
+      endedAt: expect.any(Date),
+      providerCallId: "retell_stop_after_write_failure",
+      status: "ended",
+    });
+  });
+
+  it("keeps a requested stop durable until provider termination can be confirmed", async () => {
+    const existing = buildHostedPhoneCall({
+      id: "hpc_stop_retry",
+      providerCallId: "retell_stop_retry",
+      status: "calling",
+      stopRequestedAt: new Date("2026-06-25T00:01:00.000Z"),
+    });
+    const store = createPhoneCallStore({ existing });
+    let stopUnavailable = true;
+    const runtime = createPhoneCallRuntime({
+      onStop: () => {
+        if (stopUnavailable) {
+          throw new Error("provider unavailable");
+        }
+      },
+      providerCallId: "retell_unused",
+    });
+
+    await expect(processHostedPhoneCallRecoveryById({
+      phoneCallId: existing.id,
+      prisma: store.prisma,
+      runtime: runtime.runtime,
+      signal: new AbortController().signal,
+    })).resolves.toBe("pending");
+    expect(store.currentCall().endedAt).toBeNull();
+
+    stopUnavailable = false;
+    await expect(processHostedPhoneCallRecoveryById({
+      phoneCallId: existing.id,
+      prisma: store.prisma,
+      runtime: runtime.runtime,
+      signal: new AbortController().signal,
+    })).resolves.toBe("complete");
+    expect(runtime.stopCalls).toEqual(["retell_stop_retry", "retell_stop_retry"]);
+    expect(store.currentCall()).toMatchObject({
+      endedAt: expect.any(Date),
+      status: "ended",
+    });
+  });
+
   it("keeps recovery pending until terminal Retell usage is durably recorded", async () => {
     const existing = buildHostedPhoneCall({
       id: "hpc_existing",
@@ -1253,7 +1383,7 @@ describe("createHostedPhoneCall", () => {
       start: vi.fn(async () => {
         throw new Error("Reconciliation must not dispatch a provider call.");
       }),
-      stopIfActive: vi.fn(async () => {}),
+      stopIfActive: vi.fn(async () => "stopped" as const),
     };
     const signal = new AbortController().signal;
 
@@ -2172,6 +2302,22 @@ function createPhoneCallStore(input: {
       };
       return { count: 1 };
     },
+    markRequestedStopEnded: async (args) => {
+      if (
+        current.id !== args.id
+        || current.providerCallId !== args.providerCallId
+        || current.stopRequestedAt === null
+        || current.endedAt !== null
+      ) {
+        return { count: 0 };
+      }
+      current = {
+        ...current,
+        endedAt: new Date(),
+        status: args.status,
+      };
+      return { count: 1 };
+    },
     refreshDispatchAuthority: async (args) => {
       if (
         current.id !== args.id
@@ -2316,6 +2462,7 @@ function createPhoneCallRuntime(input: {
       if (input.stopError) {
         throw input.stopError;
       }
+      return "stopped";
     },
   };
 
@@ -2363,6 +2510,7 @@ function buildHostedPhoneCall(overrides: Partial<HostedPhoneCall> = {}): HostedP
     resultEncrypted: null,
     resultJson: null,
     status: "starting",
+    stopRequestedAt: null,
     updatedAt: now,
     ...overrides,
   };

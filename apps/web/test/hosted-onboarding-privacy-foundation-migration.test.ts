@@ -1110,6 +1110,7 @@ describe("hosted Prisma baseline migration", () => {
       "20260812070000_hosted_linq_live_invite_source_ref",
       "20260812120000_hosted_runtime_latency_candidate_indexes",
       "20260813120000_group_current_sender_clarification",
+      "20260815010000_hosted_phone_call_stop_intent",
       "migration_lock.toml",
     ]);
     expect(migrationEntries).toEqual(

@@ -761,6 +761,20 @@ function resolveHostedPhoneCallStore(
         status: "failed",
       },
     }),
+    markRequestedStopEnded: async (input) => prisma.hostedPhoneCall.updateMany({
+      data: {
+        endedAt: new Date(),
+        status: input.status,
+      },
+      where: {
+        analyzedAt: null,
+        endedAt: null,
+        id: input.id,
+        provider: "retell",
+        providerCallId: input.providerCallId,
+        stopRequestedAt: { not: null },
+      },
+    }),
     refreshDispatchAuthority: async (input) => prisma.hostedPhoneCall.updateMany({
       data: {
         updatedAt: input.updatedAt,

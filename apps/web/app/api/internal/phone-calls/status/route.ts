@@ -19,6 +19,7 @@ export const POST = withJsonError(async (request: Request) => {
   const response = await readHostedPhoneCallStatus({
     memberId,
     ...(parsed.phoneCallId ? { phoneCallId: parsed.phoneCallId } : {}),
+    signal: request.signal,
   });
 
   return jsonOk(response);

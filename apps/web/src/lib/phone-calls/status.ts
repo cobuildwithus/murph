@@ -9,7 +9,7 @@ import { runWithHostedDomainRootUnwrapCache } from "../hosted-crypto/domain-root
 import { getPrisma } from "../prisma";
 import {
   hostedPhoneCallCrypto,
-  readHostedPhoneCallResult,
+  readHostedPhoneCallResults,
   type HostedPhoneCallCrypto,
 } from "./crypto";
 
@@ -23,6 +23,7 @@ type HostedPhoneCallStatusRecord = Pick<
   | "resultEncrypted"
   | "resultJson"
   | "status"
+  | "stopRequestedAt"
   | "updatedAt"
 >;
 
@@ -42,6 +43,7 @@ interface HostedPhoneCallStatusStore {
         resultEncrypted: true;
         resultJson: true;
         status: true;
+        stopRequestedAt: true;
         updatedAt: true;
       };
       take: number;
@@ -62,6 +64,7 @@ const HOSTED_PHONE_CALL_STATUS_SELECT = {
   resultEncrypted: true,
   resultJson: true,
   status: true,
+  stopRequestedAt: true,
   updatedAt: true,
 } as const;
 
@@ -70,6 +73,7 @@ export async function readHostedPhoneCallStatus(input: {
   memberId: string;
   phoneCallId?: string;
   prisma?: HostedPhoneCallStatusStore;
+  signal?: AbortSignal;
 }): Promise<HostedPhoneCallStatusResponse> {
   const store = input.prisma ?? resolveHostedPhoneCallStatusStore();
   const crypto = input.crypto ?? hostedPhoneCallCrypto;
@@ -85,19 +89,22 @@ export async function readHostedPhoneCallStatus(input: {
       },
     });
 
+    const results = await readHostedPhoneCallResults({
+      calls,
+      ...(input.crypto ? { crypto } : {}),
+      signal: input.signal,
+    });
     return hostedPhoneCallStatusResponseSchema.parse({
-      calls: await Promise.all(calls.map(async (call) => ({
+      calls: calls.map((call, index) => ({
         analyzedAt: call.analyzedAt?.toISOString() ?? null,
         createdAt: call.createdAt.toISOString(),
         endedAt: call.endedAt?.toISOString() ?? null,
         phoneCallId: call.id,
-        result: await readHostedPhoneCallResult({
-          call,
-          crypto,
-        }),
+        result: results[index] ?? null,
         status: call.status,
+        stopRequestedAt: call.stopRequestedAt?.toISOString() ?? null,
         updatedAt: call.updatedAt.toISOString(),
-      }))),
+      })),
     });
   });
 }

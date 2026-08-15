@@ -34,9 +34,10 @@ Updated: 2026-08-14
 
 ## Scope
 
-- In scope: phone-call read and stop contracts, member-bound Web control routes,
-  runtime port/tool exposure, terminal-result notification policy and ordering,
-  focused tests, and current owner documentation.
+- In scope: phone-call read and stop contracts, one nullable stop-intent field on
+  the existing call owner, member-bound Web control routes, runtime port/tool
+  exposure, terminal-result notification policy and ordering, focused tests,
+  and current owner documentation.
 - Out of scope: a new scheduler or queue, a new database model, raw provider
   transcript access, account-level support UI, and automatic repeat calls.
 
@@ -64,8 +65,8 @@ Updated: 2026-08-14
    Mitigation: prioritize only exact phone-call result completions and preserve
    existing foreground and checkpoint fences.
 4. Risk: deploy skew makes a new runtime operation fail unexpectedly.
-   Mitigation: keep the Web consumer backward-compatible, deploy Web before
-   Cloudflare/runner capability exposure, and document the rollout order.
+   Mitigation: deploy the additive database migration, then Web, then
+   Cloudflare/runner capability exposure, and document that rollout order.
 
 ## Tasks
 
@@ -83,20 +84,29 @@ Updated: 2026-08-14
 
 ## Decisions
 
-- Query existing `HostedPhoneCall` rows; add no persisted status projection.
+- Query existing `HostedPhoneCall` rows; add no model or duplicated status
+  projection. Persist only `stopRequestedAt` on that existing owner so a stop
+  requested before provider authority is known survives reconciliation.
 - Return the most recent bounded calls because a later turn may not retain an
   opaque call id reliably.
 - Reuse the existing exact provider `stopIfActive` authority. Return
   `start_pending` instead of claiming termination when a provider call id is
-  not yet known, and treat already-terminal calls idempotently.
+  not yet known, have reconciliation consume the durable stop intent, and use a
+  typed provider disposition so already-terminal calls remain truthful and
+  idempotent.
+- Open the bounded three-call encrypted result window through the existing
+  secure-box batch owner: one status query, one set-based envelope query, and at
+  most three distinct KMS unwraps with peak concurrency three.
 - Use the existing system-mailbox notification and deterministic delivery key
   as the result owner rather than inventing a second result channel.
 
 ## Verification
 
 - Focused contract, Web, Cloudflare, assistant-engine, and assistant-runtime
-  suites pass, including exact status ownership, idempotent stop, retryable stop
-  failure, mandatory result delivery, and pending-input result priority.
+  suites pass, including exact status ownership, durable stop reconciliation,
+  idempotent replay, typed provider dispositions, retryable stop failure,
+  malformed bridge input/output, maximum-cardinality encrypted result batching,
+  mandatory result delivery, and pending-input result priority.
 - Affected package and Web typechecks pass; targeted Web lint and
   `git diff --check` pass.
 - Changelog fragment and archive validation pass all 45 focused cases.
@@ -104,11 +114,20 @@ Updated: 2026-08-14
   the complete normalized first request fields (`include`, `input`,
   `parallel_tool_calls`, `text`, and `tool_choice`) with `gpt-tokenizer` 3.4.0
   `o200k_harmony`. Direct input changed from 26,682 tokens / 122,276 bytes to
-  27,026 / 123,809 (+344 tokens, +1.2893%, +1,533 bytes); group input remained
-  identical at 23,357 tokens / 107,744 bytes. Temporary capture code, request
-  bodies, and the detached base worktree were removed.
-- Remaining gates: exact pushed-head CI, preliminary
-  `completion-specialists` ReviewGPT, and final ReviewGPT.
+  27,001 / 123,698 (+319 tokens, +1.1956%, +1,422 bytes); group input remained
+  identical at 23,357 tokens / 107,744 bytes. The corrected-head total was
+  recomputed from the immutable complete capture by exact replacement of the
+  only two review-remediation fragments; a repository-native temporary test
+  measured -25 tokens / -111 bytes and was removed.
+- The one substantive preliminary `completion-specialists` ReviewGPT pass found
+  four actionable findings: durable stop ownership with truthful provider stop
+  disposition, encrypted-result fanout proof, signed bridge proof, and the
+  `followUp` field spelling. The parent accepted and corrected all four. Its
+  returned test-only bridge patch was inspected, applied, and extended with
+  fail-closed cases; no ReviewGPT artifact is tracked.
+- Remaining gates: commit and push the corrected head, exact-head CI, final
+  ReviewGPT `ROUND_OUTCOME: PASS`, corrected-head product-experience
+  revalidation, clean merge-tree proof, and plan closure.
 - Direct proof: a synthetic call result arrives while one hosted invocation is
   active and newer conversation input is waiting; Murph receives the result in
   the next turn and a later status query returns the same terminal truth.
