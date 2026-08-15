@@ -231,13 +231,28 @@ describe('executeGenerateVoiceMemoTool', () => {
   })
 
   it('builds the Telegram delivery descriptor without provider I/O', async () => {
+    const recordPhaseTiming = vi.fn()
     const result = await executeGenerateVoiceMemoTool({
       args: {
         text: 'Send a short reminder.',
       },
+      recordPhaseTiming,
       runtime: createTelegramRuntime(),
     })
 
+    expect(recordPhaseTiming).toHaveBeenCalledOnce()
+    expect(recordPhaseTiming).toHaveBeenCalledWith({
+      deliveryMode: 'deferred',
+      mediaKind: 'voice_memo',
+      outcome: 'deferred',
+      terminalPhase: 'delivery',
+    })
+    expect(recordPhaseTiming.mock.calls[0]?.[0]).not.toHaveProperty(
+      'generationDurationMs',
+    )
+    expect(recordPhaseTiming.mock.calls[0]?.[0]).not.toHaveProperty(
+      'uploadDurationMs',
+    )
     expect(result).toMatchObject({
       responseMedia: [
         {
@@ -261,22 +276,42 @@ describe('executeGenerateVoiceMemoTool', () => {
   })
 
   it('delegates Linq generation and upload through the bounded runtime adapter', async () => {
+    const recordPhaseTiming = vi.fn()
     const generateAndUpload = vi.fn<
       LinqVoiceMemoRuntime['generateAndUpload']
-    >(async () => ({
-      attachmentId: 'attachment_voice_1',
-      filename: 'voice-memo-1.mp3',
-      ok: true,
-    }))
+    >(async (request) => {
+      request.recordPhaseTiming?.({
+        deliveryMode: 'synchronous',
+        generationDurationMs: 12,
+        mediaKind: 'voice_memo',
+        outcome: 'succeeded',
+        terminalPhase: 'upload',
+        uploadDurationMs: 8,
+      })
+      return {
+        attachmentId: 'attachment_voice_1',
+        filename: 'voice-memo-1.mp3',
+        ok: true,
+      }
+    })
     const runtime = createLinqRuntime(generateAndUpload)
 
     const result = await executeGenerateVoiceMemoTool({
       args: {
         text: 'Send a short reminder.',
       },
+      recordPhaseTiming,
       runtime,
     })
 
+    expect(recordPhaseTiming).toHaveBeenCalledWith({
+      deliveryMode: 'synchronous',
+      generationDurationMs: 12,
+      mediaKind: 'voice_memo',
+      outcome: 'succeeded',
+      terminalPhase: 'upload',
+      uploadDurationMs: 8,
+    })
     expect(generateAndUpload).toHaveBeenCalledTimes(1)
     expect(generateAndUpload.mock.calls[0]?.[0]).toMatchObject({
       filenameBase: expect.stringMatching(/^voice-memo-/u),
@@ -297,6 +332,47 @@ describe('executeGenerateVoiceMemoTool', () => {
           transcript: 'Send a short reminder.',
           transport: {
             attachmentId: 'attachment_voice_1',
+            kind: 'linq_attachment',
+          },
+        },
+      ],
+      rpcSuccess: true,
+    })
+  })
+
+  it('keeps phase timing callback failures diagnostic-only', async () => {
+    const generateAndUpload = vi.fn<
+      LinqVoiceMemoRuntime['generateAndUpload']
+    >(async (request) => {
+      request.recordPhaseTiming?.({
+        deliveryMode: 'synchronous',
+        generationDurationMs: 12,
+        mediaKind: 'voice_memo',
+        outcome: 'succeeded',
+        terminalPhase: 'upload',
+        uploadDurationMs: 8,
+      })
+      return {
+        attachmentId: 'attachment_voice_2',
+        filename: 'voice-memo-2.mp3',
+        ok: true,
+      }
+    })
+
+    await expect(
+      executeGenerateVoiceMemoTool({
+        args: { text: 'Send a short reminder.' },
+        recordPhaseTiming: () => {
+          throw new Error('diagnostic sink unavailable')
+        },
+        runtime: createLinqRuntime(generateAndUpload),
+      }),
+    ).resolves.toMatchObject({
+      responseMedia: [
+        {
+          filename: 'voice-memo-2.mp3',
+          transport: {
+            attachmentId: 'attachment_voice_2',
             kind: 'linq_attachment',
           },
         },
@@ -466,13 +542,24 @@ describe('executeGenerateVoiceMemoTool', () => {
 
 describe('executeGenerateSongTool', () => {
   it('keeps the public song envelope while delegating provider work', async () => {
+    const recordPhaseTiming = vi.fn()
     const generateAndUpload = vi.fn<
       LinqVoiceMemoRuntime['generateAndUpload']
-    >(async () => ({
-      attachmentId: 'attachment_song_1',
-      filename: 'song-1.mp3',
-      ok: true,
-    }))
+    >(async (request) => {
+      request.recordPhaseTiming?.({
+        deliveryMode: 'synchronous',
+        generationDurationMs: 120,
+        mediaKind: 'song',
+        outcome: 'succeeded',
+        terminalPhase: 'upload',
+        uploadDurationMs: 15,
+      })
+      return {
+        attachmentId: 'attachment_song_1',
+        filename: 'song-1.mp3',
+        ok: true,
+      }
+    })
     const runtime = createLinqRuntime(generateAndUpload, {
       modelId: null,
       voiceId: null,
@@ -484,9 +571,18 @@ describe('executeGenerateSongTool', () => {
         instrumental: false,
         prompt: 'A bright, original group theme.',
       },
+      recordPhaseTiming,
       runtime,
     })
 
+    expect(recordPhaseTiming).toHaveBeenCalledWith({
+      deliveryMode: 'synchronous',
+      generationDurationMs: 120,
+      mediaKind: 'song',
+      outcome: 'succeeded',
+      terminalPhase: 'upload',
+      uploadDurationMs: 15,
+    })
     expect(generateAndUpload).toHaveBeenCalledTimes(1)
     expect(generateAndUpload.mock.calls[0]?.[0]).toMatchObject({
       filenameBase: expect.stringMatching(/^song-/u),

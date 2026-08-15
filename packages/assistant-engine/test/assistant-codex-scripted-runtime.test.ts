@@ -5430,6 +5430,115 @@ if (!tool) {
     }
   })
 
+  it('repairs an invalid private response-card call and attaches it in the same App Server turn', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const scenario = await prepareScriptedTurnScenario()
+    const correctedCard = {
+      kind: 'daily_nutrition',
+      version: 2,
+      localDate: '2026-08-14',
+      mealCount: 2,
+      totals: {
+        calories: { total: 1_500, mealCount: 2 },
+        proteinGrams: { total: null, mealCount: 0 },
+        carbsGrams: { total: 170, mealCount: 2 },
+        fatGrams: { total: 50, mealCount: 2 },
+        fiberGrams: { total: 25, mealCount: 2 },
+      },
+      goals: {
+        calories: { target: 2_000, status: 'under_target' },
+        proteinGrams: { target: 100, status: 'unavailable' },
+        carbsGrams: { target: 200, status: 'under_target' },
+        fatGrams: { target: 60, status: 'under_target' },
+        fiberGrams: { target: 30, status: 'under_target' },
+      },
+    } as const
+    const malformedCard = {
+      ...correctedCard,
+      totals: {
+        ...correctedCard.totals,
+        proteinGrams: { total: null, mealCount: 1 },
+      },
+    } as const
+    scenario.stub.queue(
+      {
+        functionCall: {
+          arguments: { card: malformedCard },
+          name: 'attach_response_card',
+          namespace: 'murph',
+        },
+      },
+      {
+        functionCall: {
+          arguments: { card: correctedCard },
+          name: 'attach_response_card',
+          namespace: 'murph',
+        },
+      },
+      { text: 'CARD_REPAIRED' },
+    )
+
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      dynamicTools: [MURPH_ATTACH_RESPONSE_CARD_TOOL],
+      groupConversation: false,
+      prompt: 'Attach the requested synthetic response card.',
+    })
+
+    const summaries = scenario.stub.requestSummariesSinceBaseline()
+    const invalidOutput = summaries[1]?.functionCallOutputs?.join('\n') ?? ''
+    expect(invalidOutput).toContain('invalid_response_card_arguments')
+    expect(invalidOutput).toContain(
+      '"field":"card.totals.proteinGrams.mealCount"',
+    )
+    expect(invalidOutput).toContain(
+      '"expected":"zero_iff_total_null"',
+    )
+    expect(invalidOutput).not.toContain('challengeSlug')
+    expect(summaries[2]?.functionCallOutputs?.join('\n')).toContain(
+      'response card attached',
+    )
+    expect(result.responseCard).toEqual(correctedCard)
+    expect(result.finalMessage).toContain('about 1,500 calories')
+    expect(result.finalMessage).toContain('100g protein (status unavailable)')
+    expect(result.finalMessage).not.toBe('CARD_REPAIRED')
+    expect(scenario.stub.requestCountSinceBaseline()).toBe(3)
+  })
+
+  it('keeps malformed group-card repair feedback on the group contract', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const scenario = await prepareScriptedTurnScenario()
+    scenario.stub.queue(
+      {
+        functionCall: {
+          arguments: {},
+          name: 'attach_response_card',
+          namespace: 'murph',
+        },
+      },
+      { text: 'GROUP_CARD_REJECTED' },
+    )
+
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      dynamicTools: GROUP_CHALLENGE_DYNAMIC_TOOLS,
+      groupConversation: true,
+      prompt: 'Try the requested synthetic group challenge card.',
+    })
+
+    const invalidOutput = scenario.stub.requestSummariesSinceBaseline()[1]
+      ?.functionCallOutputs?.join('\n') ?? ''
+    expect(invalidOutput).toContain('invalid_response_card_arguments')
+    expect(invalidOutput).toContain('"field":"challengeSlug"')
+    expect(invalidOutput).toContain('"field":"pageRevisionDigest"')
+    expect(invalidOutput).not.toContain('"field":"card"')
+    expect(result.responseCard).toBeNull()
+    expect(result.finalMessage).toBe('GROUP_CARD_REJECTED')
+    expect(scenario.stub.requestCountSinceBaseline()).toBe(2)
+  })
+
   it('proves complete Goal and safety discovery before nutrition targets and cards', {
     timeout: 720_000,
   }, async () => {
