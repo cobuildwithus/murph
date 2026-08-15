@@ -1,6 +1,6 @@
 # Completion Workflow
 
-Last verified: 2026-08-13
+Last verified: 2026-08-15
 
 This workflow applies to repo code/docs/test/config changes after implementation is materially complete.
 Use `agent-docs/operations/agent-workflow-routing.md` to classify the task, choose the commit path, and decide whether plan mechanics apply.
@@ -200,7 +200,7 @@ product-decision owners.
    verification doc. Record the exact commands and outcomes. For PR-bound work,
    broad coverage remains pending until exact-head CI completes; for a direct
    shared-default push, run `pnpm verify:acceptance`.
-6. For user-visible, persisted-state, operational, or trust-boundary changes, capture at least one direct scenario check in addition to scripted tests. Every user-facing frontend UI change must render its real production component on `/design?tab=components`, or its composed page section or flow on `/design?tab=sections`, and capture desktop and mobile screenshots from that catalog surface for the PR. Prefer an attached in-app Browser when it is available; if no tab is attached or the connection is unusable, use the repository-installed Playwright runtime against the local design page. A missing in-app Browser attachment is not a completion blocker when Playwright can reach the catalog. Do not stop, ask the user to attach a browser, or report a screenshot blocker until the Playwright fallback has been attempted; if Playwright also fails, record its command and concrete failure. For user-facing `apps/web` work, capture redacted desktop/mobile rendered evidence and complete the separate Claude Code UI double-check while credits are available; explicit credit exhaustion is recorded without adding a local frontend-review substitute.
+6. For user-visible, persisted-state, operational, or trust-boundary changes, capture at least one direct scenario check in addition to scripted tests. Every user-facing frontend UI change must render its real production component on `/design?tab=components`, or its composed page section or flow on `/design?tab=sections`, and capture desktop and mobile screenshots from that catalog surface for the PR. When the change's user-visible claim is a state transition, also record the short motion-proof clip defined in § PR Description. Prefer an attached in-app Browser when it is available; if no tab is attached or the connection is unusable, use the repository-installed Playwright runtime against the local design page. A missing in-app Browser attachment is not a completion blocker when Playwright can reach the catalog. Do not stop, ask the user to attach a browser, or report a screenshot blocker until the Playwright fallback has been attempted; if Playwright also fails, record its command and concrete failure. For user-facing `apps/web` work, capture redacted desktop/mobile rendered evidence and complete the separate Claude Code UI double-check while credits are available; explicit credit exhaustion is recorded without adding a local frontend-review substitute.
 7. Commit and push a review candidate from the task worktree, open or update the PR, and keep any active plan open. For plan-bearing work this is an intermediate scoped commit, not the final task commit; `scripts/finish-task` still owns plan closure later. Ensure the PR body contains the intent, applicable lens declarations, verification evidence, rendered-evidence manifest, and change-shape contract below.
 8. Prepare exactly one preliminary `completion-specialists` ReviewGPT pass against that pushed head using `agent-docs/operations/pr-reviewgpt-loop.md` § Preliminary Specialist Pass. This pass applies every relevant product-experience, prompt, frontend, and coverage lens together and does not establish or advance the final ReviewGPT round baseline. A tooling/evidence `INVALID` result is corrected and retried as the same pass; a substantive result is one specialist pass, not four audits.
 9. When the final ReviewGPT gate is selected, establish its immutable round-one baseline on the same exact pushed candidate head and launch the preliminary pass and final round 1 concurrently. When the final gate does not apply, launch the preliminary pass by itself. The candidate must already have focused local proof and a parent candidate review, but preliminary findings, plan closure, and the parent's final review do not need to finish before both ReviewGPT jobs start. Run both jobs concurrently with CI and keep their outputs and state separate.
@@ -398,6 +398,38 @@ Required:
   external reviewer. If the local Cloudflare credential is unavailable, use a
   GitHub attachment instead. Proof screenshots must not contain private member
   data. PRs without a user-facing frontend UI diff may write `Not applicable`.
+- **Motion proof for UI state transitions.** When the PR's user-visible claim
+  is temporal — an animation, transition, loading/streaming/typing state,
+  redirect or auto-navigation, scroll or drag behavior, multi-step flow, or
+  perceived-latency change — screenshots cannot carry the claim; attach a short
+  screen recording (roughly five to thirty seconds) of the changed behavior.
+  For a defect fix, record a before clip on the base and an after clip on the
+  head so the pair proves the difference. Capture at the viewport where the
+  transition materially differs; one desktop clip suffices when the behavior is
+  viewport-independent. Default recorder: a Playwright `recordVideo` browser
+  context against the `/design` catalog or the hosted-local surface, following
+  the env-gated capture-spec pattern of
+  `apps/web/e2e/pr-1498-design-proof.spec.ts`; keep the driving script's waits
+  on asserted UI states, not sleeps, leave animations enabled, and trim any
+  dev-server first-compile wait from the front of the clip. Recordings must
+  show only synthetic catalog or fixture data, never private member data.
+  Transcode WebM output to H.264 MP4
+  (`ffmpeg -i clip.webm -c:v libx264 -pix_fmt yuv420p -movflags +faststart clip.mp4`),
+  then host it as a GitHub attachment: paste it into the PR editor, or upload
+  with
+  `gh api --method POST "https://uploads.github.com/user-attachments/assets?name=<file>.mp4&content_type=video/mp4&repository_id=<repo-id>" --input <file>.mp4`
+  (`gh api repos/{owner}/{repo} --jq .id` prints the repository id). `gh`
+  supplies its own authentication; never materialize a token into the command
+  line, an environment assignment, or this document, and never write a
+  credential-shaped header literal here — the Frog autofix diff guard rejects
+  any nearby future edit whose diff context contains one. Embed
+  the returned `url` on its own bare Markdown line, not inside an `![]()`
+  image link. Video attachments can 404 briefly while GitHub finishes
+  processing; confirm the clip plays in the rendered PR body before completion.
+  Keep video binaries out of the repository, capture only into an ignored local
+  path, and delete the local capture once review packaging is complete. If
+  capture is infeasible, state the exact blocker instead. PRs with no temporal
+  user-visible claim write `Not applicable` with a one-line reason.
 
 Optional when relevant: the rollout plan or follow-up PR that flips the gate, and any deliberately deferred work.
 
