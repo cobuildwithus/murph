@@ -817,6 +817,19 @@ const reviewGptModelPickerModule = createRequire(import.meta.url)(
   ) => boolean
 }
 
+const reviewGptDraftHelpersModule = createRequire(import.meta.url)(
+  path.join(
+    repoRoot,
+    'node_modules',
+    '@cobuild',
+    'review-gpt',
+    'src',
+    'prepare-chatgpt-draft-helpers.js',
+  ),
+) as {
+  buildAttachmentNameMatcher: (expectedName: string) => RegExp | null
+}
+
 const reviewGptDomSnapshotModule = createRequire(import.meta.url)(
   path.join(
     repoRoot,
@@ -1166,6 +1179,20 @@ describe('monorepo release flow coverage audit', () => {
     expect(reviewGptDriver).toContain('`Nested CDP socket command timed out: ${method}`')
     expect(reviewGptDriver).toContain(
       'const minimumMarkedResponseMs = Number(process.env.ORACLE_DRAFT_MINIMUM_MARKED_RESPONSE_MS || 5 * 60 * 1000);',
+    )
+    const attachmentNameMatcher = reviewGptDraftHelpersModule.buildAttachmentNameMatcher(
+      'codebase.zip',
+    )
+    expect(attachmentNameMatcher?.test('codebase 20260815 213012 zip')).toBe(true)
+    expect(attachmentNameMatcher?.test('different 20260815 213012 zip')).toBe(false)
+    expect(reviewGptDriver).toContain('const waitForConversationStateAfterSend = async (')
+    expect(reviewGptDriver).not.toContain(
+      [
+        'const waitForConversationStateAfterSend = async (committedState, maxWaitMs) => {',
+        '    if (isDeepResearchMode) {',
+        '      return {',
+        "        status: 'skipped',",
+      ].join('\n'),
     )
     const solTarget: ReviewGptModelPickerTarget = {
       desiredVersion: '5-6',
