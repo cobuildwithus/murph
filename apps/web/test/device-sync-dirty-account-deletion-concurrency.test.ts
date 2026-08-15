@@ -18,7 +18,10 @@ import { buildHostedProviderAccountBlindIndex } from "@/src/lib/device-sync/rout
 import { disconnectHostedDeviceSyncConnection } from "@/src/lib/device-sync/wake-service";
 import { HostedDeviceSyncWebhookAdminService } from "@/src/lib/device-sync/webhook-admin-service";
 import { setHostedSecureBoxStringTestCodecForTests } from "@/src/lib/hosted-crypto/secure-box";
-import { lockDeviceConnectionAuthorityRowsForAccountDeletionTx } from "@/src/lib/hosted-privacy/account-data-service";
+import {
+  assertNoDeviceRefreshLeasesBeforeAccountSuspensionTx,
+  lockDeviceConnectionAuthorityRowsForAccountDeletionTx,
+} from "@/src/lib/hosted-privacy/account-data-service";
 import { createPrismaClient } from "@/src/lib/prisma";
 import {
   createDeviceSyncPublicIngress,
@@ -1633,6 +1636,187 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           callbackClient.$disconnect(),
           deletionClient.$disconnect(),
           observer.$disconnect(),
+        ]);
+      }
+    });
+
+    it("serializes refresh-lease admission with account suspension in both lock orders", async () => {
+      if (!databaseUrl) {
+        throw new Error("DATABASE_URL is required for the PostgreSQL concurrency proof.");
+      }
+      const fixtureId = randomUUID();
+      const userId = `member_refresh_delete_${fixtureId}`;
+      const connectionId = `dsc_refresh_delete_${fixtureId}`;
+      const observer = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const deletionClient = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const refreshClient = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const refreshClaimed = createDeferred();
+      const allowRefreshCommit = createDeferred();
+      const deletionLocked = createDeferred();
+      const allowSuspensionCommit = createDeferred();
+
+      try {
+        await observer.hostedMember.create({ data: { id: userId } });
+        await observer.deviceConnection.create({
+          data: {
+            connectedAt: new Date("2026-08-11T12:00:00.000Z"),
+            id: connectionId,
+            provider: "oura",
+            providerAccountBlindIndex: `blind_${fixtureId}`,
+            status: "active",
+            tokenVersion: 1,
+            userId,
+          },
+        });
+        const store = new PrismaDeviceSyncControlPlaneStore({
+          prisma: refreshClient,
+        });
+
+        // Refresh owns the member lifetime first: suspension waits, then sees
+        // the committed lease and exits without suspending the member.
+        const refreshFirst = store.withHealthDataAdmissionLock(
+          userId,
+          connectionId,
+          async (tx) => {
+            const result = await store.claimConnectionRefreshLease({
+              connectionId,
+              leaseExpiresAt: "2026-08-11T12:10:00.000Z",
+              leaseOwner: "agent-refresh:refresh-first",
+              now: "2026-08-11T12:05:00.000Z",
+              tokenVersion: 1,
+              tx,
+              userId,
+            });
+            refreshClaimed.resolve();
+            await allowRefreshCommit.promise;
+            return result;
+          },
+          { requireActiveMember: true },
+        );
+        await refreshClaimed.promise;
+
+        const refreshFirstDeletionPid = createDeferred<number>();
+        const refreshFirstSuspension = deletionClient.$transaction(async (tx) => {
+          refreshFirstDeletionPid.resolve(await readBackendPid(tx));
+          await tx.$queryRaw`SELECT 1 FROM hosted_member WHERE id = ${userId} FOR UPDATE`;
+          await assertNoDeviceRefreshLeasesBeforeAccountSuspensionTx({
+            memberIds: [userId],
+            prisma: tx,
+          });
+          await tx.hostedMember.update({
+            data: { suspendedAt: new Date("2026-08-11T12:06:00.000Z") },
+            where: { id: userId },
+          });
+        }, { timeout: 15_000 });
+        await waitForBlockedBackend({
+          observer,
+          pid: await refreshFirstDeletionPid.promise,
+        });
+        allowRefreshCommit.resolve();
+
+        await expect(refreshFirst).resolves.toEqual({ status: "claimed" });
+        await expect(refreshFirstSuspension).rejects.toMatchObject({
+          code: "ACCOUNT_DELETION_DEVICE_AUTHORIZATION_IN_FLIGHT",
+        });
+        await expect(observer.hostedMember.findUnique({
+          select: { suspendedAt: true },
+          where: { id: userId },
+        })).resolves.toEqual({ suspendedAt: null });
+        await observer.deviceConnection.update({
+          data: {
+            refreshLeaseExpiresAt: null,
+            refreshLeaseOwner: null,
+            refreshLeaseTokenVersion: null,
+          },
+          where: { id: connectionId },
+        });
+
+        // Suspension owns the member lifetime first: refresh waits, observes
+        // suspendedAt, and rejects before its connection callback can claim a
+        // lease or begin provider work.
+        const suspensionFirst = deletionClient.$transaction(async (tx) => {
+          await tx.$queryRaw`SELECT 1 FROM hosted_member WHERE id = ${userId} FOR UPDATE`;
+          await assertNoDeviceRefreshLeasesBeforeAccountSuspensionTx({
+            memberIds: [userId],
+            prisma: tx,
+          });
+          deletionLocked.resolve();
+          await allowSuspensionCommit.promise;
+          await tx.hostedMember.update({
+            data: { suspendedAt: new Date("2026-08-11T12:07:00.000Z") },
+            where: { id: userId },
+          });
+        }, { timeout: 15_000 });
+        await deletionLocked.promise;
+
+        const refreshPid = createDeferred<number>();
+        const instrumentedRefreshClient = new Proxy(refreshClient, {
+          get(target, property) {
+            if (property === "$transaction") {
+              return async <TResult>(
+                transaction: (tx: Prisma.TransactionClient) => Promise<TResult>,
+              ) => target.$transaction(async (tx) => {
+                refreshPid.resolve(await readBackendPid(tx));
+                return transaction(tx);
+              });
+            }
+            const value = Reflect.get(target, property, target);
+            return typeof value === "function" ? value.bind(target) : value;
+          },
+        });
+        const suspensionFirstStore = new PrismaDeviceSyncControlPlaneStore({
+          prisma: instrumentedRefreshClient,
+        });
+        let refreshConnectionCallbackReached = false;
+        const suspendedRefresh = suspensionFirstStore.withHealthDataAdmissionLock(
+          userId,
+          connectionId,
+          async (tx) => {
+            refreshConnectionCallbackReached = true;
+            return suspensionFirstStore.claimConnectionRefreshLease({
+              connectionId,
+              leaseExpiresAt: "2026-08-11T12:12:00.000Z",
+              leaseOwner: "agent-refresh:suspension-first",
+              now: "2026-08-11T12:07:30.000Z",
+              tokenVersion: 1,
+              tx,
+              userId,
+            });
+          },
+          { requireActiveMember: true },
+        );
+        await waitForBlockedBackend({
+          observer,
+          pid: await refreshPid.promise,
+        });
+        allowSuspensionCommit.resolve();
+        await suspensionFirst;
+
+        await expect(suspendedRefresh).rejects.toMatchObject({
+          code: "CONNECTION_OWNER_SUSPENDED",
+        });
+        expect(refreshConnectionCallbackReached).toBe(false);
+        await expect(observer.deviceConnection.findUnique({
+          select: {
+            refreshLeaseExpiresAt: true,
+            refreshLeaseOwner: true,
+            refreshLeaseTokenVersion: true,
+          },
+          where: { id: connectionId },
+        })).resolves.toEqual({
+          refreshLeaseExpiresAt: null,
+          refreshLeaseOwner: null,
+          refreshLeaseTokenVersion: null,
+        });
+      } finally {
+        allowRefreshCommit.resolve();
+        allowSuspensionCommit.resolve();
+        await observer.deviceConnection.deleteMany({ where: { id: connectionId } });
+        await observer.hostedMember.deleteMany({ where: { id: userId } });
+        await Promise.all([
+          deletionClient.$disconnect(),
+          observer.$disconnect(),
+          refreshClient.$disconnect(),
         ]);
       }
     });

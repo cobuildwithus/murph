@@ -132,6 +132,7 @@ describe("PrismaDeviceSyncControlPlaneStore oauth state ingress", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     readHostedHealthDataConsentStateMock.mockResolvedValue("missing");
+    readHostedMemberSuspensionAfterLockTxMock.mockResolvedValue("active");
     supersedeDirtyStateMock.mockResolvedValue(undefined);
   });
 
@@ -262,6 +263,48 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
     expect(lockHostedMemberRowMock.mock.invocationCallOrder[0]!)
       .toBeLessThan(executeRaw.mock.invocationCallOrder[0]!);
   });
+
+  it.each([
+    ["missing", "CONNECTION_OWNER_REQUIRED", 404],
+    ["suspended", "CONNECTION_OWNER_SUSPENDED", 409],
+  ] as const)(
+    "rejects active-member admission for a %s owner before taking the connection lock",
+    async (ownerStatus, code, httpStatus) => {
+      const executeRaw = vi.fn();
+      const tx = { $executeRaw: executeRaw };
+      const callback = vi.fn();
+      const store = new PrismaDeviceSyncControlPlaneStore({
+        prisma: {
+          $transaction: async <TResult>(
+            transactionCallback: (transaction: typeof tx) => Promise<TResult>,
+          ) => transactionCallback(tx),
+        } as never,
+      });
+      readHostedMemberSuspensionAfterLockTxMock.mockResolvedValueOnce(
+        ownerStatus,
+      );
+
+      await expect(store.withHealthDataAdmissionLock(
+        "user-123",
+        "dsc_123",
+        callback,
+        { requireActiveMember: true },
+      )).rejects.toMatchObject({ code, httpStatus });
+
+      expect(lockHostedMemberRowMock).toHaveBeenCalledWith(
+        tx,
+        "user-123",
+        {},
+      );
+      expect(readHostedMemberSuspensionAfterLockTxMock).toHaveBeenCalledWith(
+        tx,
+        "user-123",
+      );
+      expect(readHostedHealthDataConsentStateMock).not.toHaveBeenCalled();
+      expect(executeRaw).not.toHaveBeenCalled();
+      expect(callback).not.toHaveBeenCalled();
+    },
+  );
 
   it("propagates bounded lock-wait faults without taking the advisory lock", async () => {
     const executeRaw = vi.fn(async () => 0);

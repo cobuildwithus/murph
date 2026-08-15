@@ -20,7 +20,10 @@ import type {
   UpsertPublicDeviceSyncConnectionInput,
   UpsertPublicDeviceSyncConnectionResult,
 } from "@murphai/device-syncd/types";
-import { lockHostedMemberRow } from "../hosted-onboarding/shared";
+import {
+  lockHostedMemberRow,
+  readHostedMemberSuspensionAfterLockTx,
+} from "../hosted-onboarding/shared";
 import { readHostedHealthDataConsentState } from "../legal/consent";
 import type { AuthenticatedHostedUser, HostedBrowserAssertionNonceStore } from "./auth";
 import type { HostedLocalHeartbeatPatch } from "./local-heartbeat";
@@ -740,6 +743,12 @@ export class PrismaDeviceSyncControlPlaneStore
        * ingestion, scheduled wakes) keep the full transaction budget.
        */
       memberRowLockTimeoutMs?: number;
+      /**
+       * Require the locked member lifetime to remain active before taking the
+       * connection advisory lock. Refresh-lease admission uses this to
+       * serialize with account-deletion suspension before provider work.
+       */
+      requireActiveMember?: boolean;
     } = {},
   ): Promise<TResult> {
     return this.prisma.$transaction(async (tx) => {
@@ -752,6 +761,28 @@ export class PrismaDeviceSyncControlPlaneStore
           ? { timeoutMs: options.memberRowLockTimeoutMs }
           : {},
       );
+      if (options.requireActiveMember) {
+        const ownerStatus = await readHostedMemberSuspensionAfterLockTx(
+          tx,
+          userId,
+        );
+        if (ownerStatus === "missing") {
+          throw deviceSyncError({
+            code: "CONNECTION_OWNER_REQUIRED",
+            message: "Hosted device-sync connection owner no longer exists.",
+            retryable: false,
+            httpStatus: 404,
+          });
+        }
+        if (ownerStatus === "suspended") {
+          throw deviceSyncError({
+            code: "CONNECTION_OWNER_SUSPENDED",
+            message: "Device connections cannot refresh while account deletion is active.",
+            retryable: false,
+            httpStatus: 409,
+          });
+        }
+      }
       if (await readHostedHealthDataConsentState({
         memberId: userId,
         prisma: tx,

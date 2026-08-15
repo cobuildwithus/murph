@@ -1844,6 +1844,10 @@ async function markHostedMembersSuspendedForAccountDeletion(input: {
       prisma: tx,
       requiredMemberIds: memberIds.slice(1),
     });
+    await assertNoDeviceRefreshLeasesBeforeAccountSuspensionTx({
+      memberIds,
+      prisma: tx,
+    });
     const consumedOauthSessions = await tx.deviceOauthSession.findMany({
       select: {
         consumedAt: true,
@@ -1930,6 +1934,32 @@ async function markHostedMembersSuspendedForAccountDeletion(input: {
     await acquireHostedGroupJoinOutreachDrainLockTx(tx);
     return memberIds;
   }, HOSTED_ACCOUNT_DELETION_SUSPENSION_FENCE_TRANSACTION_OPTIONS);
+}
+
+export async function assertNoDeviceRefreshLeasesBeforeAccountSuspensionTx(
+  input: {
+    memberIds: readonly string[];
+    prisma: Prisma.TransactionClient;
+  },
+): Promise<void> {
+  const inFlightRefreshLeaseCount = await input.prisma.deviceConnection.count({
+    where: {
+      userId: buildStringInFilter(input.memberIds),
+      OR: [
+        { refreshLeaseExpiresAt: { not: null } },
+        { refreshLeaseOwner: { not: null } },
+        { refreshLeaseTokenVersion: { not: null } },
+      ],
+    },
+  });
+  if (inFlightRefreshLeaseCount > 0) {
+    throw hostedOnboardingError({
+      code: "ACCOUNT_DELETION_DEVICE_AUTHORIZATION_IN_FLIGHT",
+      httpStatus: 503,
+      message: "A connected-health credential refresh is still finishing. Retry account deletion.",
+      retryable: true,
+    });
+  }
 }
 
 async function resolveHostedAccountDeletionRefreshLeases(input: {

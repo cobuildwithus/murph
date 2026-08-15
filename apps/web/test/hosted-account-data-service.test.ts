@@ -3814,8 +3814,9 @@ describe("deleteHostedAccountData", () => {
     expect(hostedMemberUpdateCalls).toEqual([]);
   });
 
-  it("keeps the terminal fence for a token refresh that starts after suspension", async () => {
+  it("blocks suspension when a token refresh starts after the deletion preflight", async () => {
     const deviceAuthorityLockQueries: string[] = [];
+    const hostedMemberUpdateCalls: unknown[] = [];
     const rawDeletionQueries: HostedAccountDeletionRawQuery[] = [];
     const connection = {
       connectedAt: new Date("2026-04-27T00:07:00.000Z"),
@@ -3829,6 +3830,7 @@ describe("deleteHostedAccountData", () => {
     const prisma = createHostedAccountDeletionPrismaForTest({
       deviceAuthorityLockQueries,
       deviceConnections: [connection],
+      hostedMemberUpdateCalls,
       onTransaction: () => undefined,
       rawDeletionQueries,
       transactionDeviceConnections: [{
@@ -3848,9 +3850,8 @@ describe("deleteHostedAccountData", () => {
       retryable: true,
     });
 
-    expect(deviceAuthorityLockQueries).toHaveLength(2);
-    expect(deviceAuthorityLockQueries[0]).toContain("FOR UPDATE OF connection");
-    expect(deviceAuthorityLockQueries[1]).toContain("FOR UPDATE OF source");
+    expect(hostedMemberUpdateCalls).toEqual([]);
+    expect(deviceAuthorityLockQueries).toEqual([]);
     expect(rawDeletionQueries).toEqual([]);
   });
 
@@ -5588,6 +5589,25 @@ function createHostedAccountDeletionPrismaForTest(input: {
     },
     deviceConnection: {
       ...makeDeleteDelegate("deviceConnection"),
+      count: async (args: { where: unknown }) => {
+        recordTerminalStatement("count:deviceConnection");
+        input.operationOrder?.push("count:deviceConnection");
+        const where = args.where && typeof args.where === "object"
+          ? args.where as { OR?: unknown[] }
+          : null;
+        if (Array.isArray(where?.OR)) {
+          return normalizeHostedAccountDeletionDeviceConnectionsForTest(
+            input.transactionDeviceConnections
+              ?? input.deviceConnections
+              ?? [],
+          ).filter((connection) =>
+            connection.refreshLeaseExpiresAt !== null
+            || connection.refreshLeaseOwner !== null
+            || connection.refreshLeaseTokenVersion !== null
+          ).length;
+        }
+        return input.countResults?.deviceConnection ?? 1;
+      },
       findMany: async () => {
         input.operationOrder?.push("find:deviceConnection");
         return normalizeHostedAccountDeletionDeviceConnectionsForTest(

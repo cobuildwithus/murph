@@ -178,6 +178,18 @@ describe("HostedDeviceSyncAgentSessionService.refreshTokenBundle", () => {
             lockDepth--;
           }
         },
+        async withHealthDataAdmissionLock<TResult>(
+          _userId: string,
+          _connectionId: string,
+          callback: (tx: HostedPrismaTransactionClient) => Promise<TResult>,
+        ): Promise<TResult> {
+          lockDepth++;
+          try {
+            return await callback(transactionClient);
+          } finally {
+            lockDepth--;
+          }
+        },
         touchAgentSession,
       },
     );
@@ -351,6 +363,60 @@ describe("HostedDeviceSyncAgentSessionService.refreshTokenBundle", () => {
         userId: "user-1",
       });
       expect(claimConnectionRefreshLease).not.toHaveBeenCalled();
+      expect(harness.getRefreshLease()).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("rejects a suspended owner before claiming a refresh lease or calling the provider", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-04-01T00:10:00.000Z"));
+      const bearerToken = "hbds_agent_suspended_owner";
+      const harness = createRetrySafeStoreHarness(bearerToken);
+      const refreshTokens = vi.fn(async () => ({
+        accessToken: "unexpected-access-token",
+      }));
+      const admissionError = deviceSyncError({
+        code: "CONNECTION_OWNER_SUSPENDED",
+        httpStatus: 409,
+        message: "Device connections cannot refresh while account deletion is active.",
+        retryable: false,
+      });
+      const admission = vi.spyOn(
+        harness.store,
+        "withHealthDataAdmissionLock",
+      ).mockRejectedValue(admissionError);
+      const claim = vi.spyOn(
+        harness.store,
+        "claimConnectionRefreshLease",
+      );
+      const service = new HostedDeviceSyncAgentSessionService({
+        request: createAgentRequest(
+          "https://murph.example/api/device-sync/agent/connections/conn-1/refresh-token-bundle",
+          bearerToken,
+        ),
+        store: harness.store,
+        registry: createDeviceSyncRegistry([
+          createWhoopProvider({ refreshTokens }),
+        ]),
+      });
+
+      await expect(service.refreshTokenBundle(
+        SESSION,
+        "conn-1",
+        { force: true },
+      )).rejects.toBe(admissionError);
+
+      expect(admission).toHaveBeenCalledWith(
+        "user-1",
+        "conn-1",
+        expect.any(Function),
+        { requireActiveMember: true },
+      );
+      expect(claim).not.toHaveBeenCalled();
+      expect(refreshTokens).not.toHaveBeenCalled();
       expect(harness.getRefreshLease()).toBeNull();
     } finally {
       vi.useRealTimers();
@@ -1667,6 +1733,30 @@ function createRetrySafeStoreHarness(bearerToken: string): {
         };
       },
       async withConnectionMutationLock<TResult>(
+        _connectionId: string,
+        callback: (tx: HostedPrismaTransactionClient) => Promise<TResult>,
+      ): Promise<TResult> {
+        const transactionClient: HostedPrismaTransactionClient = Object.assign(
+          Object.create(null),
+          {
+            deviceConnection: {
+              findFirst: async ({ where }: { where: { id: string; userId: string } }) =>
+                where.id === connection.id && where.userId === SESSION.userId
+                  ? {
+                      id: connection.id,
+                      refreshLeaseExpiresAt: refreshLease ? new Date(refreshLease.leaseExpiresAt) : null,
+                      refreshLeaseOwner: refreshLease?.leaseOwner ?? null,
+                      refreshLeaseTokenVersion: refreshLease?.tokenVersion ?? null,
+                    }
+                  : null,
+            },
+          },
+        );
+
+        return callback(transactionClient);
+      },
+      async withHealthDataAdmissionLock<TResult>(
+        _userId: string,
         _connectionId: string,
         callback: (tx: HostedPrismaTransactionClient) => Promise<TResult>,
       ): Promise<TResult> {

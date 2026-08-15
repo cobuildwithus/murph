@@ -707,8 +707,10 @@ export class HostedDeviceSyncAgentSessionService {
   }): Promise<HostedTokenRefreshLeaseResult> {
     const nowMs = Date.parse(input.now);
     const leaseExpiresAt = new Date(nowMs + HOSTED_DEVICE_TOKEN_REFRESH_LEASE_TTL_MS).toISOString();
-    const claim = await this.store.withConnectionMutationLock(input.connectionId, async (tx) =>
-      this.store.claimConnectionRefreshLease({
+    const claim = await this.store.withHealthDataAdmissionLock(
+      input.session.userId,
+      input.connectionId,
+      async (tx) => this.store.claimConnectionRefreshLease({
         connectionId: input.connectionId,
         leaseExpiresAt,
         leaseOwner: input.leaseOwner,
@@ -716,7 +718,8 @@ export class HostedDeviceSyncAgentSessionService {
         tokenVersion: input.baseTokenBundle.tokenVersion,
         tx,
         userId: input.session.userId,
-      })
+      }),
+      { requireActiveMember: true },
     );
 
     switch (claim.status) {
