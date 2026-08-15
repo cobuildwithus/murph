@@ -1,5 +1,10 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 
 import {
   NATIVE_IOS_HOSTED_E2E_CONTRACT_VERSION,
@@ -10,9 +15,12 @@ import {
   buildDedicatedDatabasePoolOptions,
   buildJunctionClientUserId,
   inspectDedicatedJunctionUsers,
+  inspectDedicatedMemberIdentity,
   inspectE2eDatabaseUrls,
   inspectFreshPrivyPrincipal,
   inspectJunctionAppleHealthConnection,
+  inspectLaneExclusiveJunctionUser,
+  inspectResolvedJunctionUser,
 } from "./native-ios-hosted-e2e-identity.mjs";
 import {
   buildDispatchInputs,
@@ -20,7 +28,10 @@ import {
   inspectPrivateDispatchTag,
   inspectPrivateRun,
 } from "./native-ios-hosted-e2e-native.mjs";
-import { inspectBoundedCommandResult } from "./native-ios-hosted-e2e-support.mjs";
+import {
+  inspectBoundedCommandResult,
+  runBoundedCommand,
+} from "./native-ios-hosted-e2e-support.mjs";
 import {
   inspectPublicCandidateResponse,
   inspectRetirableE2eDeployment,
@@ -29,6 +40,23 @@ import {
 } from "./native-ios-hosted-e2e-vercel.mjs";
 
 const SHA = "a".repeat(40);
+const TEST_PHONE = ["+1", "202", "555", "0100"].join("");
+const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const WEB_ROOT = path.join(REPO_ROOT, "apps", "web");
+const VERCEL_BUILD_SCRIPT = path.join(WEB_ROOT, "scripts", "vercel-build.sh");
+const COMMAND_TREE_FIXTURE = path.join(
+  REPO_ROOT,
+  "scripts",
+  "fixtures",
+  "native-ios-hosted-e2e-command-tree.mjs",
+);
+const CONTROLLER_OWNERS = [
+  "scripts/native-ios-hosted-e2e-identity.mjs",
+  "scripts/native-ios-hosted-e2e-native.mjs",
+  "scripts/native-ios-hosted-e2e-support.mjs",
+  "scripts/native-ios-hosted-e2e-vercel.mjs",
+  "scripts/native-ios-hosted-e2e.mjs",
+];
 
 test("cross-repo contract is minimal, versioned, and names lifecycle ownership truthfully", () => {
   assert.equal(NATIVE_IOS_HOSTED_E2E_CONTRACT_VERSION, "3");
@@ -51,6 +79,29 @@ test("cross-repo contract is minimal, versioned, and names lifecycle ownership t
     webBaseUrl: "https://murph.ai",
     webSha: SHA,
   }).identity_lifecycle, "non_destructive_existing_identity");
+});
+
+test("PR selector owns all five production controllers and previous-filename renames", async () => {
+  const workflow = await readFile(
+    path.join(REPO_ROOT, ".github", "workflows", "native-ios-hosted-e2e.yml"),
+    "utf8",
+  );
+  assert.ok(
+    workflow.includes("--jq '.[] | .filename, (.previous_filename // empty)'"),
+    "renamed controller paths must be evaluated through previous_filename",
+  );
+  assert.equal(CONTROLLER_OWNERS.length, 5);
+  for (const controller of CONTROLLER_OWNERS) {
+    assert.equal(runWorkflowSelector(workflow, controller), "selected", controller);
+  }
+  assert.equal(
+    runWorkflowSelector(workflow, "scripts/native-ios-hosted-e2e.test.mjs"),
+    "neutral",
+  );
+  assert.equal(
+    runWorkflowSelector(workflow, "agent-docs/product-specs/companion-app.md"),
+    "neutral",
+  );
 });
 
 test("Vercel custom environment proof binds the dedicated id and slug", () => {
@@ -113,6 +164,44 @@ test("Vercel proof binds project, custom environment, ref, and exact PR SHA", ()
   }
 });
 
+test("Vercel native E2E migration failure stops ordinary migration and build", async () => {
+  const config = JSON.parse(await readFile(path.join(WEB_ROOT, "vercel.json"), "utf8"));
+  assert.equal(config.buildCommand, "sh scripts/vercel-build.sh");
+  assert.ok(config.buildCommand.length <= 256);
+
+  const result = await runVercelBuild({
+    FAIL_PNPM_COMMAND: "prisma:migrate:deploy",
+    VERCEL_ENV: "preview",
+    VERCEL_TARGET_ENV: "native-ios-e2e",
+  });
+  assert.equal(result.status, 42, result.stderr);
+  assert.deepEqual(result.calls, [
+    "prisma:migrate:deploy|direct=1|generated=",
+  ]);
+});
+
+test("Vercel native E2E migration success preserves custom, ordinary, build order", async () => {
+  const result = await runVercelBuild({
+    VERCEL_ENV: "preview",
+    VERCEL_TARGET_ENV: "native-ios-e2e",
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.deepEqual(result.calls, [
+    "prisma:migrate:deploy|direct=1|generated=",
+    "release:production:migrate|direct=|generated=",
+    "build|direct=|generated=1",
+  ]);
+});
+
+test("Vercel native E2E target rejects production before any command", async () => {
+  const result = await runVercelBuild({
+    VERCEL_ENV: "production",
+    VERCEL_TARGET_ENV: "native-ios-e2e",
+  });
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /native-ios-e2e must not use Vercel production/u);
+  assert.deepEqual(result.calls, []);
+});
 
 test("public PR candidate must be anonymously reachable without redirects or protection", () => {
   assert.equal(inspectPublicCandidateResponse({
@@ -223,7 +312,6 @@ test("destructive database reset is limited to an explicitly E2E-named database"
   }
 });
 
-
 test("Junction cleanup enumerates one dedicated team and recovers an orphan user", () => {
   const expectedTeamId = "11111111-1111-4111-8111-111111111111";
   const expectedClientUserId = "murph_expected_client";
@@ -276,6 +364,75 @@ test("Junction cleanup enumerates one dedicated team and recovers an orphan user
   }, { expectedClientUserId: null, expectedTeamId }), /more than one user/u);
 });
 
+test("cleanup ownership accepts the sole exact-team user independent of candidate identity", async () => {
+  const expectedTeamId = "11111111-1111-4111-8111-111111111111";
+  const badCandidateUser = {
+    client_user_id: "candidate-created-wrong-client-id",
+    team_id: expectedTeamId,
+    user_id: "22222222-2222-4222-8222-222222222222",
+  };
+  assert.deepEqual(inspectLaneExclusiveJunctionUser({
+    limit: 2,
+    offset: 0,
+    total: 1,
+    users: [badCandidateUser],
+  }, { expectedTeamId }), {
+    userId: badCandidateUser.user_id,
+  });
+  assert.deepEqual(inspectLaneExclusiveJunctionUser({
+    limit: 2,
+    offset: 0,
+    total: 1,
+    users: [{ ...badCandidateUser, client_user_id: null }],
+  }, { expectedTeamId }), {
+    userId: badCandidateUser.user_id,
+  });
+  assert.throws(() => inspectLaneExclusiveJunctionUser({
+    limit: 2,
+    offset: 0,
+    total: 1,
+    users: [{
+      ...badCandidateUser,
+      team_id: "33333333-3333-4333-8333-333333333333",
+    }],
+  }, { expectedTeamId }), /unexpected team/u);
+  assert.throws(() => inspectLaneExclusiveJunctionUser({
+    limit: 2,
+    offset: 0,
+    total: 2,
+    users: [
+      badCandidateUser,
+      { ...badCandidateUser, user_id: "44444444-4444-4444-8444-444444444444" },
+    ],
+  }, { expectedTeamId }), /more than one user/u);
+
+  const identitySource = await readFile(
+    path.join(REPO_ROOT, "scripts", "native-ios-hosted-e2e-identity.mjs"),
+    "utf8",
+  );
+  const cleanupStart = identitySource.indexOf("export async function cleanupE2e()");
+  const cleanupConfigStart = identitySource.indexOf("function e2eCleanupConfig()", cleanupStart);
+  const identityConfigStart = identitySource.indexOf("function e2eIdentityConfig()", cleanupConfigStart);
+  const cleanupSource = identitySource.slice(cleanupStart, cleanupConfigStart);
+  const cleanupConfigSource = identitySource.slice(cleanupConfigStart, identityConfigStart);
+  assert.ok(cleanupStart >= 0 && cleanupConfigStart > cleanupStart && identityConfigStart > cleanupConfigStart);
+  assert.equal(
+    cleanupSource.match(/listLaneExclusiveJunctionUser/gu)?.length,
+    2,
+    "cleanup must enumerate the exact lane before and after deletion",
+  );
+  assert.doesNotMatch(cleanupSource, /buildJunctionClientUserId|e2eIdentityConfig/u);
+  const resetIndex = cleanupSource.indexOf("resetDedicatedDatabase");
+  const postResetReadIndex = cleanupSource.indexOf("readDedicatedMemberRecord");
+  assert.ok(
+    resetIndex >= 0 && postResetReadIndex > resetIndex,
+    "database contents may be read only after the isolated reset",
+  );
+  assert.doesNotMatch(
+    cleanupConfigSource,
+    /NATIVE_IOS_E2E_JUNCTION_CLIENT_USER_ID_SECRET|NATIVE_IOS_E2E_PRIVY_TEST_PHONE/u,
+  );
+});
 
 test("database and child-command timeout contracts are explicit and fail closed", () => {
   assert.deepEqual(buildDedicatedDatabasePoolOptions("postgresql://owner@db.example.test/native_ios_e2e"), {
@@ -309,6 +466,67 @@ test("database and child-command timeout contracts are explicit and fail closed"
     label: "test command",
     timedOut: false,
   }), /failed/u);
+});
+
+test("bounded command timeout reaps its wrapper and grandchild", {
+  skip: process.platform === "win32",
+}, async () => {
+  const tempDir = await mkdtemp(path.join(tmpdir(), "native-ios-command-timeout-"));
+  const pidFile = path.join(tempDir, "pids.json");
+  try {
+    await assert.rejects(() => runBoundedCommand({
+      argv: [COMMAND_TREE_FIXTURE, "wrapper", "timeout", pidFile],
+      command: process.execPath,
+      env: process.env,
+      label: "wrapper timeout",
+      timeoutMs: 1_500,
+    }), /timed out/u);
+    await assertOwnedProcessesGone(pidFile);
+  } finally {
+    await rm(tempDir, { force: true, recursive: true });
+  }
+});
+
+test("bounded command output overflow reaps its wrapper and grandchild", {
+  skip: process.platform === "win32",
+}, async () => {
+  const tempDir = await mkdtemp(path.join(tmpdir(), "native-ios-command-overflow-"));
+  const pidFile = path.join(tempDir, "pids.json");
+  try {
+    await assert.rejects(() => runBoundedCommand({
+      argv: [COMMAND_TREE_FIXTURE, "wrapper", "overflow", pidFile],
+      captureStdout: true,
+      command: process.execPath,
+      env: process.env,
+      label: "wrapper overflow",
+      maxOutputChars: 128,
+      timeoutMs: 5_000,
+    }), /more output than expected/u);
+    await assertOwnedProcessesGone(pidFile);
+  } finally {
+    await rm(tempDir, { force: true, recursive: true });
+  }
+});
+
+test("bounded command success waits for its wrapper and grandchild", {
+  skip: process.platform === "win32",
+}, async () => {
+  const tempDir = await mkdtemp(path.join(tmpdir(), "native-ios-command-success-"));
+  const pidFile = path.join(tempDir, "pids.json");
+  try {
+    assert.equal(await runBoundedCommand({
+      argv: [COMMAND_TREE_FIXTURE, "wrapper", "success", pidFile],
+      captureStdout: true,
+      command: process.execPath,
+      env: process.env,
+      label: "wrapper success",
+      maxOutputChars: 200,
+      timeoutMs: 5_000,
+    }), "grandchild:success\nwrapper:success\n");
+    await assertOwnedProcessesGone(pidFile);
+  } finally {
+    await rm(tempDir, { force: true, recursive: true });
+  }
 });
 
 test("Privy postcondition requires the fixed principal to have been freshly created", () => {
@@ -345,13 +563,121 @@ test("Junction postcondition requires a connected real Apple Health provider", (
   }
 });
 
-test("Junction cleanup uses the production client-user identity derivation", () => {
-  assert.equal(
-    buildJunctionClientUserId("junction-client-user-id-secret", "owner-internal-id-123"),
-    "murph_jnqpm4zu2il556kgyffrxngz26",
+test("candidate postconditions bind phone derivation, Junction client id, and Apple Health", () => {
+  const expectedTeamId = "11111111-1111-4111-8111-111111111111";
+  const member = inspectDedicatedMemberIdentity({
+    maskedPhoneNumberHint: "*** 0100",
+    memberId: "owner-internal-id-123",
+  }, { testPhone: TEST_PHONE });
+  const expectedClientUserId = buildJunctionClientUserId(
+    "junction-client-user-id-secret",
+    member.memberId,
   );
+  assert.equal(expectedClientUserId, "murph_jnqpm4zu2il556kgyffrxngz26");
+  assert.deepEqual(inspectResolvedJunctionUser({
+    client_user_id: expectedClientUserId,
+    team_id: expectedTeamId,
+    user_id: "22222222-2222-4222-8222-222222222222",
+  }, { expectedClientUserId, expectedTeamId }), {
+    userId: "22222222-2222-4222-8222-222222222222",
+  });
+  assert.equal(inspectJunctionAppleHealthConnection({
+    providers: [{ slug: "apple_health_kit", status: "connected" }],
+  }), true);
+  assert.throws(() => inspectDedicatedMemberIdentity({
+    maskedPhoneNumberHint: "*** 9999",
+    memberId: member.memberId,
+  }, { testPhone: TEST_PHONE }), /fixed test phone hint/u);
+  assert.throws(() => inspectResolvedJunctionUser({
+    client_user_id: "candidate-created-wrong-client-id",
+    team_id: expectedTeamId,
+    user_id: "22222222-2222-4222-8222-222222222222",
+  }, { expectedClientUserId, expectedTeamId }), /dedicated team identity/u);
 });
 
+test("bad candidate identity stays red, final cleanup succeeds, and the next lifecycle deploys", async () => {
+  const expectedTeamId = "11111111-1111-4111-8111-111111111111";
+  const secret = "junction-client-user-id-secret";
+  const emptyJunctionTeam = () => ({ limit: 2, offset: 0, total: 0, users: [] });
+  let databaseMember = null;
+  let deployments = 0;
+  let junctionTeam = emptyJunctionTeam();
+
+  const cleanup = async () => {
+    const owned = inspectLaneExclusiveJunctionUser(junctionTeam, { expectedTeamId });
+    if (owned) junctionTeam = emptyJunctionTeam();
+    databaseMember = null;
+  };
+  const deploy = async () => {
+    deployments += 1;
+    assert.equal(databaseMember, null, "deployment must start after database cleanup");
+    assert.equal(
+      inspectLaneExclusiveJunctionUser(junctionTeam, { expectedTeamId }),
+      null,
+      "deployment must start after Junction cleanup",
+    );
+    databaseMember = {
+      maskedPhoneNumberHint: deployments === 1 ? "*** 9999" : "*** 0100",
+      memberId: `member-${deployments}`,
+    };
+    const expectedClientUserId = buildJunctionClientUserId(secret, databaseMember.memberId);
+    junctionTeam = {
+      limit: 2,
+      offset: 0,
+      total: 1,
+      users: [{
+        client_user_id: deployments === 1
+          ? "candidate-created-wrong-client-id"
+          : expectedClientUserId,
+        team_id: expectedTeamId,
+        user_id: "22222222-2222-4222-8222-222222222222",
+      }],
+    };
+    return `https://candidate-${deployments}.example`;
+  };
+  const postconditions = async () => {
+    const expectedClientUserId = buildJunctionClientUserId(secret, databaseMember.memberId);
+    const listed = junctionTeam.users[0];
+    if (deployments === 1) {
+      assert.throws(() => inspectDedicatedMemberIdentity(
+        databaseMember,
+        { testPhone: TEST_PHONE },
+      ), /fixed test phone hint/u);
+      assert.throws(() => inspectResolvedJunctionUser(listed, {
+        expectedClientUserId,
+        expectedTeamId,
+      }), /dedicated team identity/u);
+      throw new Error("candidate identity postconditions failed");
+    }
+    const member = inspectDedicatedMemberIdentity(
+      databaseMember,
+      { testPhone: TEST_PHONE },
+    );
+    assert.equal(member.memberId, "member-2");
+    assert.deepEqual(inspectResolvedJunctionUser(listed, {
+      expectedClientUserId,
+      expectedTeamId,
+    }), { userId: listed.user_id });
+    assert.equal(inspectJunctionAppleHealthConnection({
+      providers: [{ slug: "apple_health_kit", status: "connected" }],
+    }), true);
+  };
+  const lifecycle = () => runPrLifecycle({
+    cleanup,
+    deploy,
+    dispatch: async () => undefined,
+    now: () => 123,
+    postconditions,
+    retire: async () => undefined,
+  });
+
+  await assert.rejects(lifecycle, /candidate identity postconditions failed/u);
+  assert.equal(databaseMember, null);
+  assert.equal(inspectLaneExclusiveJunctionUser(junctionTeam, { expectedTeamId }), null);
+
+  await lifecycle();
+  assert.equal(deployments, 2);
+});
 
 test("PR lifecycle proves backend state before retirement and cleans in fail-closed order", async () => {
   const calls = [];
@@ -389,3 +715,89 @@ test("PR lifecycle stays red when final cleanup fails", async () => {
     retire: async () => undefined,
   }), /final cleanup did not complete/u);
 });
+
+function runWorkflowSelector(workflow, file) {
+  const match = /case "\$\{file\}" in\n(?<patterns>[\s\S]*?)\)\n\s+selected=true\n\s+break/u.exec(workflow);
+  assert.ok(match?.groups?.patterns, "workflow selector case was not found");
+  const script = [
+    "set -euo pipefail",
+    'file="$1"',
+    'case "${file}" in',
+    `${match.groups.patterns})`,
+    '  printf "selected\\n"',
+    "  ;;",
+    "*)",
+    '  printf "neutral\\n"',
+    "  ;;",
+    "esac",
+  ].join("\n");
+  const result = spawnSync("bash", ["-c", script, "selector", file], {
+    encoding: "utf8",
+  });
+  assert.equal(result.error, undefined);
+  assert.equal(result.status, 0, result.stderr);
+  return result.stdout.trim();
+}
+
+async function runVercelBuild(environment) {
+  const tempDir = await mkdtemp(path.join(tmpdir(), "native-ios-vercel-build-"));
+  const binDir = path.join(tempDir, "bin");
+  const logFile = path.join(tempDir, "pnpm.log");
+  const fakePnpm = path.join(binDir, "pnpm");
+  try {
+    await mkdir(binDir, { recursive: true });
+    await writeFile(fakePnpm, [
+      "#!/bin/sh",
+      "set -eu",
+      "printf '%s|direct=%s|generated=%s\\n' \"$*\" \"${MURPH_REQUIRE_DIRECT_DATABASE_URL_FOR_MIGRATIONS:-}\" \"${MURPH_HOSTED_WEB_PRISMA_GENERATED_BY_MIGRATIONS:-}\" >> \"${PNPM_LOG}\"",
+      "if [ -n \"${FAIL_PNPM_COMMAND:-}\" ] && [ \"$*\" = \"${FAIL_PNPM_COMMAND}\" ]; then",
+      "  exit 42",
+      "fi",
+    ].join("\n") + "\n", { mode: 0o755 });
+    const result = spawnSync("sh", [VERCEL_BUILD_SCRIPT], {
+      cwd: WEB_ROOT,
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        FAIL_PNPM_COMMAND: "",
+        PATH: `${binDir}:${process.env.PATH ?? ""}`,
+        PNPM_LOG: logFile,
+        VERCEL_ENV: "",
+        VERCEL_TARGET_ENV: "",
+        ...environment,
+      },
+    });
+    let calls = [];
+    try {
+      calls = (await readFile(logFile, "utf8")).split("\n").filter(Boolean);
+    } catch (error) {
+      if (error?.code !== "ENOENT") throw error;
+    }
+    return {
+      calls,
+      status: result.status,
+      stderr: result.stderr,
+      stdout: result.stdout,
+    };
+  } finally {
+    await rm(tempDir, { force: true, recursive: true });
+  }
+}
+
+async function assertOwnedProcessesGone(pidFile) {
+  const pids = JSON.parse(await readFile(pidFile, "utf8"));
+  for (const [label, pid] of Object.entries(pids)) {
+    assert.equal(Number.isSafeInteger(pid) && pid > 0, true, `${label} pid was invalid`);
+    assert.equal(processExists(pid), false, `${label} process ${pid} was still running`);
+  }
+}
+
+function processExists(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    if (error?.code === "ESRCH") return false;
+    throw error;
+  }
+}

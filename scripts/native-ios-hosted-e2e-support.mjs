@@ -9,6 +9,8 @@ export const HTTP_TIMEOUT_MS = 15_000;
 export const POLL_MS = 5_000;
 export const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
+const PROCESS_GROUP_POLL_MS = 25;
+
 export function requiredEnv(name) {
   const value = process.env[name]?.trim();
   if (!value) throw new Error(`${name} is required.`);
@@ -78,45 +80,74 @@ export function inspectBoundedCommandResult({ code, label, maxOutputChars = 0, o
 export async function runBoundedCommand({ argv, captureStdout = false, command, env, label, maxOutputChars = 0, timeoutMs }) {
   if (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0) throw new Error(`${label} timeout is invalid.`);
   return new Promise((resolve, reject) => {
+    const useProcessGroup = process.platform !== "win32";
     const child = spawn(command, argv, {
       cwd: REPO_ROOT,
+      detached: useProcessGroup,
       env,
       stdio: captureStdout ? ["ignore", "pipe", "ignore"] : "ignore",
     });
+    const processGroupId = useProcessGroup && typeof child.pid === "number" && child.pid > 0
+      ? child.pid
+      : null;
+    let childClosed = false;
+    let code = null;
+    let leaderExited = false;
     let output = "";
     let outputOverflow = false;
-    let timedOut = false;
     let settled = false;
+    let spawnFailed = false;
+    let supervisionError = null;
+    let terminationStarted = false;
+    let timedOut = false;
 
-    const finish = (fn) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      fn();
+    const cleanup = () => {
+      clearInterval(pollTimer);
+      clearTimeout(deadlineTimer);
     };
-    const terminateExactChild = () => {
-      // Never signal a process group or discover siblings: only this spawned handle.
-      if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
-    };
-    const timer = setTimeout(() => {
-      timedOut = true;
-      terminateExactChild();
-    }, timeoutMs);
-
-    if (captureStdout) {
-      child.stdout.setEncoding("utf8");
-      child.stdout.on("data", (chunk) => {
-        if (outputOverflow) return;
-        output += chunk;
-        if (maxOutputChars > 0 && output.length > maxOutputChars) {
-          output = output.slice(0, maxOutputChars + 1);
-          outputOverflow = true;
-          terminateExactChild();
+    const terminateOwnedTree = () => {
+      if (terminationStarted) return;
+      terminationStarted = true;
+      try {
+        if (processGroupId !== null && processGroupExists(processGroupId)) {
+          signalProcessGroup(processGroupId, "SIGKILL");
+          return;
         }
-      });
-    }
-    child.once("error", () => finish(() => reject(new Error(`${label} could not start.`))));
-    child.once("close", (code) => finish(() => {
+        if (!hasChildExited(child)) {
+          try {
+            child.kill("SIGKILL");
+          } catch {
+            // The retained exact child may have exited between the state check and signal.
+          }
+        }
+      } catch (error) {
+        supervisionError = error;
+      }
+    };
+    const finishIfReaped = () => {
+      if (settled || !leaderExited) return;
+      let groupExists = false;
+      try {
+        groupExists = processGroupId !== null && processGroupExists(processGroupId);
+      } catch (error) {
+        supervisionError = error;
+      }
+      if (groupExists) {
+        if (!terminationStarted) terminateOwnedTree();
+        return;
+      }
+      if (!childClosed) return;
+
+      settled = true;
+      cleanup();
+      if (spawnFailed) {
+        reject(new Error(`${label} could not start.`));
+        return;
+      }
+      if (supervisionError) {
+        reject(new Error(`${label} process supervision failed.`, { cause: supervisionError }));
+        return;
+      }
       try {
         inspectBoundedCommandResult({
           code,
@@ -129,8 +160,70 @@ export async function runBoundedCommand({ argv, captureStdout = false, command, 
       } catch (error) {
         reject(error);
       }
-    }));
+    };
+    const deadlineTimer = setTimeout(() => {
+      if (outputOverflow || timedOut) return;
+      timedOut = true;
+      terminateOwnedTree();
+      finishIfReaped();
+    }, timeoutMs);
+    const pollTimer = setInterval(finishIfReaped, PROCESS_GROUP_POLL_MS);
+
+    if (captureStdout) {
+      child.stdout.setEncoding("utf8");
+      child.stdout.on("data", (chunk) => {
+        if (outputOverflow) return;
+        output += chunk;
+        if (maxOutputChars > 0 && output.length > maxOutputChars) {
+          output = output.slice(0, maxOutputChars + 1);
+          outputOverflow = true;
+          terminateOwnedTree();
+          finishIfReaped();
+        }
+      });
+    }
+    child.once("error", () => {
+      spawnFailed = true;
+      leaderExited = true;
+      childClosed = true;
+      finishIfReaped();
+    });
+    child.once("exit", (exitCode) => {
+      code = exitCode;
+      leaderExited = true;
+      finishIfReaped();
+    });
+    child.once("close", () => {
+      childClosed = true;
+      finishIfReaped();
+    });
   });
+}
+
+function processGroupExists(processGroupId) {
+  try {
+    process.kill(-processGroupId, 0);
+    return true;
+  } catch (error) {
+    if (error?.code === "ESRCH") return false;
+    // The bounded command owners grant no uid-transition authority. EPERM
+    // therefore means this numeric group id was reused by a foreign
+    // process after the owned group disappeared. Never signal it.
+    if (error?.code === "EPERM") return false;
+    throw error;
+  }
+}
+
+function signalProcessGroup(processGroupId, signal) {
+  try {
+    process.kill(-processGroupId, signal);
+  } catch (error) {
+    if (error?.code !== "ESRCH" && error?.code !== "EPERM") throw error;
+  }
+}
+
+function hasChildExited(child) {
+  return child.exitCode !== null || child.signalCode !== null;
 }
 
 export function sleep(ms) {

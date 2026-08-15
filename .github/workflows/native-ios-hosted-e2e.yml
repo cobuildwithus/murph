@@ -74,6 +74,8 @@ jobs:
                 packages/device-syncd/*|packages/gateway-core/*|packages/health-commons/*|packages/health-metrics/*|\
                 packages/hosted-execution/*|packages/importers/*|packages/inboxd/*|packages/messaging-ingress/*|packages/parsers/*|packages/query/*|packages/runtime-state/*|\
                 .github/workflows/native-ios-hosted-e2e.yml|.github/workflows/repo-hygiene.yml|\
+                scripts/native-ios-hosted-e2e-identity.mjs|scripts/native-ios-hosted-e2e-native.mjs|scripts/native-ios-hosted-e2e-support.mjs|\
+                scripts/native-ios-hosted-e2e-vercel.mjs|scripts/native-ios-hosted-e2e.mjs|\
                 config/workspace-source-resolution.ts|package.json|pnpm-lock.yaml|pnpm-workspace.yaml|tsconfig.base.json)
                   selected=true
                   break

@@ -65,7 +65,7 @@ export function buildJunctionClientUserId(secret, memberId) {
   return `murph_${base32(digest)}`.slice(0, 32);
 }
 
-export function inspectDedicatedJunctionUsers(raw, { expectedClientUserId = null, expectedTeamId }) {
+export function inspectLaneExclusiveJunctionUser(raw, { expectedTeamId }) {
   assertUuid(expectedTeamId, "dedicated Junction team id");
   assertRecord(raw, "dedicated Junction team user list");
   if (!Array.isArray(raw.users)
@@ -90,12 +90,47 @@ export function inspectDedicatedJunctionUsers(raw, { expectedClientUserId = null
   if (userTeamId.toLowerCase() !== expectedTeamId.toLowerCase()) {
     throw new Error("Junction E2E API key returned a user from an unexpected team.");
   }
-  const userId = requiredString(user.user_id, "Junction E2E user id");
-  const clientUserId = requiredString(user.client_user_id, "Junction E2E client user id");
+  return { userId: requiredString(user.user_id, "Junction E2E user id") };
+}
+
+export function inspectDedicatedJunctionUsers(raw, { expectedClientUserId = null, expectedTeamId }) {
+  const owned = inspectLaneExclusiveJunctionUser(raw, { expectedTeamId });
+  if (!owned) return null;
+  const clientUserId = requiredString(
+    raw.users[0].client_user_id,
+    "Junction E2E client user id",
+  );
   if (expectedClientUserId !== null && clientUserId !== expectedClientUserId) {
     throw new Error("Dedicated Junction E2E team contains an unexpected client user.");
   }
-  return { clientUserId, userId };
+  return { clientUserId, userId: owned.userId };
+}
+
+export function inspectDedicatedMemberIdentity(raw, { testPhone }) {
+  assertRecord(raw, "dedicated E2E member identity");
+  const memberId = requiredString(raw.memberId, "dedicated E2E member id");
+  const phone = requireE164(testPhone);
+  const maskedPhoneNumberHint = requiredString(
+    raw.maskedPhoneNumberHint,
+    "dedicated E2E member phone hint",
+  );
+  const digits = phone.replace(/\D/gu, "");
+  if (maskedPhoneNumberHint !== `*** ${digits.slice(-4)}`) {
+    throw new Error("Dedicated E2E database member does not match the fixed test phone hint.");
+  }
+  return { memberId };
+}
+
+export function inspectResolvedJunctionUser(raw, { expectedClientUserId, expectedTeamId }) {
+  assertUuid(expectedTeamId, "dedicated Junction team id");
+  assertRecord(raw, "Junction E2E user lookup");
+  const teamId = requiredString(raw.team_id, "Junction E2E user team id");
+  assertUuid(teamId, "Junction E2E user team id");
+  if (teamId.toLowerCase() !== expectedTeamId.toLowerCase()
+      || requiredString(raw.client_user_id, "Junction E2E client user id") !== expectedClientUserId) {
+    throw new Error("Resolved Junction E2E user does not match the dedicated team identity.");
+  }
+  return { userId: requiredString(raw.user_id, "Junction E2E user id") };
 }
 
 export function inspectFreshPrivyPrincipal(raw, { observedAtMs, startedAtMs }) {
@@ -129,8 +164,9 @@ export async function proveRunPostconditions(startedAtMs) {
   console.log("::notice::native-ios-e2e stage=privy_postcondition result=success");
 
   const config = e2eIdentityConfig();
-  const member = await readDedicatedMember(config);
-  if (!member) throw new Error("Native E2E journey did not create the dedicated hosted member.");
+  const rawMember = await readDedicatedMemberRecord(config);
+  if (!rawMember) throw new Error("Native E2E journey did not create the dedicated hosted member.");
+  const member = inspectDedicatedMemberIdentity(rawMember, { testPhone: config.testPhone });
   const junction = await resolveJunctionUser(member.memberId, config);
   if (!junction) throw new Error("Native E2E journey did not create the dedicated Junction user.");
   inspectJunctionAppleHealthConnection(await readJunctionProviders(junction.userId, config.junctionApiKey));
@@ -138,21 +174,17 @@ export async function proveRunPostconditions(startedAtMs) {
 }
 
 export async function cleanupE2e() {
-  const config = e2eIdentityConfig();
-  const member = await readDedicatedMember(config);
-  const expectedClientUserId = member
-    ? buildJunctionClientUserId(config.junctionClientUserIdSecret, member.memberId)
-    : null;
-  const junction = await listDedicatedJunctionUser(config, expectedClientUserId);
+  const config = e2eCleanupConfig();
+  const junction = await listLaneExclusiveJunctionUser(config);
   if (junction) await deleteJunctionUser(junction.userId, config.junctionApiKey);
-  if (await listDedicatedJunctionUser(config, null)) {
+  if (await listLaneExclusiveJunctionUser(config)) {
     throw new Error("Dedicated Junction E2E team is not empty after cleanup.");
   }
   console.log(`::notice::native-ios-e2e stage=junction_cleanup result=${junction ? "success" : "absent"}`);
 
   await resetDedicatedDatabase(config.directDatabaseUrl);
-  if (await readDedicatedMember(config)) {
-    throw new Error("Dedicated E2E database still contains the test member after reset.");
+  if (await readDedicatedMemberRecord(config)) {
+    throw new Error("Dedicated E2E database still contains a member after reset.");
   }
   console.log("::notice::native-ios-e2e stage=database_cleanup result=success");
 
@@ -162,11 +194,10 @@ export async function cleanupE2e() {
   console.log(`::notice::native-ios-e2e stage=privy_cleanup result=${privy ? "success" : "absent"}`);
 }
 
-function e2eIdentityConfig() {
+function e2eCleanupConfig() {
   const directDatabaseUrl = requiredEnv("NATIVE_IOS_E2E_DIRECT_DATABASE_URL");
   const junctionTeamId = requiredEnv("NATIVE_IOS_E2E_JUNCTION_TEAM_ID").toLowerCase();
   assertUuid(junctionTeamId, "NATIVE_IOS_E2E_JUNCTION_TEAM_ID");
-  const testPhone = requireE164(requiredEnv("NATIVE_IOS_E2E_PRIVY_TEST_PHONE"));
   return {
     databaseName: inspectE2eDatabaseUrls({
       databaseUrl: requiredEnv("NATIVE_IOS_E2E_DATABASE_URL"),
@@ -174,13 +205,19 @@ function e2eIdentityConfig() {
     }),
     directDatabaseUrl,
     junctionApiKey: requiredEnv("NATIVE_IOS_E2E_JUNCTION_API_KEY"),
-    junctionClientUserIdSecret: requiredEnv("NATIVE_IOS_E2E_JUNCTION_CLIENT_USER_ID_SECRET"),
     junctionTeamId,
-    testPhone,
   };
 }
 
-async function readDedicatedMember({ databaseName, directDatabaseUrl, testPhone }) {
+function e2eIdentityConfig() {
+  return {
+    ...e2eCleanupConfig(),
+    junctionClientUserIdSecret: requiredEnv("NATIVE_IOS_E2E_JUNCTION_CLIENT_USER_ID_SECRET"),
+    testPhone: requireE164(requiredEnv("NATIVE_IOS_E2E_PRIVY_TEST_PHONE")),
+  };
+}
+
+async function readDedicatedMemberRecord({ databaseName, directDatabaseUrl }) {
   const pg = await import("pg");
   const Pool = pg.default?.Pool ?? pg.Pool;
   const pool = new Pool(buildDedicatedDatabasePoolOptions(directDatabaseUrl));
@@ -204,25 +241,24 @@ async function readDedicatedMember({ databaseName, directDatabaseUrl, testPhone 
     if (result.rows.length > 1) throw new Error("Dedicated E2E database contains more than one member identity.");
     const row = result.rows[0];
     if (!row) return null;
-    const digits = testPhone.replace(/\D/gu, "");
-    if (row.masked_phone_number_hint !== `*** ${digits.slice(-4)}`) {
-      throw new Error("Dedicated E2E database member does not match the fixed test phone hint.");
-    }
-    return { memberId: String(row.member_id) };
+    return {
+      maskedPhoneNumberHint: row.masked_phone_number_hint,
+      memberId: String(row.member_id ?? ""),
+    };
   } finally {
     await pool.end().catch(() => undefined);
   }
 }
 
-async function listDedicatedJunctionUser(config, expectedClientUserId) {
+async function listLaneExclusiveJunctionUser(config) {
   const url = new URL(`${junctionBaseUrl(config.junctionApiKey)}/v2/user/`);
   url.searchParams.set("offset", "0");
   url.searchParams.set("limit", "2");
-  return inspectDedicatedJunctionUsers(await fetchJson(
+  return inspectLaneExclusiveJunctionUser(await fetchJson(
     url,
     { headers: junctionHeaders(config.junctionApiKey) },
     "dedicated Junction E2E team user enumeration",
-  ), { expectedClientUserId, expectedTeamId: config.junctionTeamId });
+  ), { expectedTeamId: config.junctionTeamId });
 }
 
 async function resolveJunctionUser(memberId, config) {
@@ -245,11 +281,10 @@ async function resolveJunctionUser(memberId, config) {
   } catch {
     throw new Error("Junction E2E user lookup returned invalid JSON.");
   }
-  assertRecord(body, "Junction E2E user lookup");
-  if (body.team_id !== config.junctionTeamId || body.client_user_id !== clientUserId) {
-    throw new Error("Resolved Junction E2E user does not match the dedicated team identity.");
-  }
-  return { userId: requiredString(body.user_id, "Junction E2E user id") };
+  return inspectResolvedJunctionUser(body, {
+    expectedClientUserId: clientUserId,
+    expectedTeamId: config.junctionTeamId,
+  });
 }
 
 async function readJunctionProviders(userId, apiKey) {
