@@ -666,6 +666,19 @@ async function inspectHostedPreCheckpointSystemMailboxPrefetch(
       ? maxSeq <= importedSeq
       : visibleMaxSeq === maxSeq;
   });
+  const initialSystemSeq = parseHostedMailboxSeqOrNull(
+    prefetch.importedSeqByLane.system,
+  );
+  const systemItems = response.items.filter((item) => item.lane === "system");
+  // Enrollment can start the first owner from conversation before the
+  // activation continuation signals it. The shared prefetch can still hold
+  // that conversation prefix after it has been imported, so classify only
+  // the complete system lane here.
+  const containsOnlyInitialMemberActivation = reachesEveryLaneHighWater
+    && initialSystemSeq === 0n
+    && systemItems.length === 1
+    && systemItems[0]?.kind === "member.activated"
+    && parseHostedMailboxSeqOrNull(systemItems[0].laneSeq) === 1n;
   return {
     containsOnlyBrowserVaultRefreshWakes: response.items.length > 0
       && response.items.every((item) =>
@@ -678,17 +691,20 @@ async function inspectHostedPreCheckpointSystemMailboxPrefetch(
         item.lane === "system"
         && item.kind === "device-sync.wake"
       ),
-    containsOnlySafeSystemWakes: response.items.length > 0
-      && response.items.every((item) =>
-        item.lane === "system"
-        && (
-          item.kind === "runtime.pending-effects-reconcile-requested"
-          || item.kind === "assistant.ask.requested"
-          || item.kind === "assistant.ask.completed"
-          || (
-            item.kind === "assistant.notification.requested"
-            && isHostedPreCheckpointExternalCompletionDedupeKey(
-              item.dedupeKey,
+    containsOnlySafeSystemWakes: containsOnlyInitialMemberActivation
+      || (
+        response.items.length > 0
+        && response.items.every((item) =>
+          item.lane === "system"
+          && (
+            item.kind === "runtime.pending-effects-reconcile-requested"
+            || item.kind === "assistant.ask.requested"
+            || item.kind === "assistant.ask.completed"
+            || (
+              item.kind === "assistant.notification.requested"
+              && isHostedPreCheckpointExternalCompletionDedupeKey(
+                item.dedupeKey,
+              )
             )
           )
         )

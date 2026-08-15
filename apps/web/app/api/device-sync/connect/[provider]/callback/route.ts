@@ -52,11 +52,12 @@ export async function GET(
         state,
       })
     ) {
-      // A callback delivered without its initiating-browser proof stays
-      // non-mutating: burn the presented OAuth state so the transferable
-      // provider URL cannot be relayed later, then land on the Connect
-      // callback-error notice so the member sees a truthful outcome.
-      await publicIngress.discardConnectionCallback(providerName);
+      // Discard only this active member's still-unconsumed admission. A
+      // foreign-owner URL stays non-mutating, while a consumed claim remains
+      // owned by the callback that may already have completed provider work.
+      await publicIngress.discardConnectionCallback(providerName, {
+        expectedOwnerId: session.member.id,
+      });
       // A discarded callback writes no connection error, so without this the
       // member is stuck at a wall that leaves no trace anywhere.
       await reportHostedDeviceConnectFailure({

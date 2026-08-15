@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-13",
+  "order": 100,
+  "item": {
+    "id": "reliable-wearable-daily-corrections",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Wearable corrections finish reliably",
+    "summary": "When a connected source corrects caffeine, water, or mindfulness across days, Murph now keeps retrying each affected daily total until the correction imports successfully.",
+    "details": "Each source and day refresh stays bounded and isolated. A successful empty day clears a displaced total, while an unavailable provider endpoint stays pending instead of erasing data.",
+    "relevanceTags": ["wearables", "data-reliability"],
+    "sourcePullRequests": [1707]
+  }
+}

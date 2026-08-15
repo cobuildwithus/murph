@@ -440,7 +440,7 @@ test("WHOOP provider rejects refresh responses that omit the rotated refresh tok
     ),
     (error) =>
       error instanceof DeviceSyncError &&
-      error.code === "WHOOP_REFRESH_TOKEN_MISSING" &&
+      error.code === "TOKEN_REFRESH_STATE_UNKNOWN" &&
       error.accountStatus === "reauthorization_required",
   );
   assert.equal(new URLSearchParams(requestBody ?? "").get("grant_type"), "refresh_token");
