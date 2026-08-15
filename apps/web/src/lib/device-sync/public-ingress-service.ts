@@ -620,14 +620,6 @@ export class HostedDeviceSyncPublicIngressService {
     );
   }
 
-  async handlePreparedWebhookBatch(
-    prepared: readonly PreparedDeviceSyncWebhookV1[],
-  ): Promise<PromiseSettledResult<HandleWebhookResult>[]> {
-    return runWithHostedDomainRootUnwrapCache(() =>
-      this.ingress.handlePreparedWebhookBatch(prepared),
-    );
-  }
-
   async handleWebhook(
     provider: string,
     rawBody?: Buffer,

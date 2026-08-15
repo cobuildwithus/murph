@@ -1,5 +1,4 @@
 import {
-  DEVICE_WEBHOOK_ADMISSION_ACCOUNT_CHUNK_SIZE,
   DEVICE_WEBHOOK_ADMISSION_ACCOUNT_LANES,
   DEVICE_WEBHOOK_ADMISSION_RESULT_SCHEMA,
   type DeviceWebhookAdmissionResultV1,
@@ -10,9 +9,7 @@ import type { HandleWebhookResult } from "@murphai/device-syncd/types";
 
 export async function admitHostedDeviceWebhookBatch(input: {
   entries: readonly DeviceWebhookQueuePayloadV1[];
-  handleBatch: (
-    entries: readonly DeviceWebhookQueuePayloadV1[],
-  ) => Promise<readonly PromiseSettledResult<HandleWebhookResult>[]>;
+  handle: (entry: DeviceWebhookQueuePayloadV1) => Promise<HandleWebhookResult>;
   shouldContinue?: () => boolean;
 }): Promise<DeviceWebhookAdmissionResultV1> {
   const startedAt = Date.now();
@@ -58,45 +55,21 @@ export async function admitHostedDeviceWebhookBatch(input: {
       laneCursor += 1;
       if (!lane) return;
 
-      for (
-        let offset = 0;
-        offset < lane.length;
-        offset += DEVICE_WEBHOOK_ADMISSION_ACCOUNT_CHUNK_SIZE
-      ) {
-        const chunk = lane.slice(
-          offset,
-          offset + DEVICE_WEBHOOK_ADMISSION_ACCOUNT_CHUNK_SIZE,
-        );
+      for (const [offset, item] of lane.entries()) {
         if (input.shouldContinue?.() === false) {
           for (const item of lane.slice(offset)) retainForRetry(item);
           break;
         }
 
-        let settled: readonly PromiseSettledResult<HandleWebhookResult>[];
         try {
-          settled = await input.handleBatch(chunk.map(({ entry }) => entry));
-        } catch (error) {
-          recordFailure(error);
-          for (const item of chunk) retainForRetry(item);
-          continue;
-        }
-        if (settled.length !== chunk.length) {
-          recordFailureCode("DEVICE_WEBHOOK_ADMISSION_BATCH_RESULT_INVALID");
-          for (const item of chunk) retainForRetry(item);
-          continue;
-        }
-
-        for (const [index, item] of chunk.entries()) {
-          const outcome = settled[index];
-          if (!outcome || outcome.status === "rejected") {
-            recordFailure(outcome?.status === "rejected" ? outcome.reason : null);
-            retainForRetry(item);
-            continue;
-          }
+          const outcome = await input.handle(item.entry);
           resultSlots[item.index] = {
-            disposition: outcome.value.duplicate ? "duplicate" : "accepted",
+            disposition: outcome.duplicate ? "duplicate" : "accepted",
             transportId: item.entry.transportId,
           };
+        } catch (error) {
+          recordFailure(error);
+          retainForRetry(item);
         }
       }
     }
@@ -119,7 +92,6 @@ export async function admitHostedDeviceWebhookBatch(input: {
     accountLaneCount: lanes.length,
     activeLaneCount,
     batchSize,
-    chunkSize: DEVICE_WEBHOOK_ADMISSION_ACCOUNT_CHUNK_SIZE,
     durationMs: Date.now() - startedAt,
     duplicateCount,
     failureCounts: Object.fromEntries([...failureCounts].sort(([left], [right]) =>

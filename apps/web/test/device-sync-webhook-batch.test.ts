@@ -37,7 +37,7 @@ describe("hosted device webhook batch admission", () => {
     })).toEqual({ enabled: false });
   });
 
-  it("admits 100 same-account deliveries in order through bounded trace-claim chunks", async () => {
+  it("admits 100 same-account deliveries in order with one active event lease", async () => {
     vi.spyOn(console, "info").mockImplementation(() => {});
     const entries = Array.from(
       { length: 100 },
@@ -45,33 +45,27 @@ describe("hosted device webhook batch admission", () => {
     );
     let active = 0;
     let maxActive = 0;
-    const chunkSizes: number[] = [];
     const order: string[] = [];
 
     const result = await admitHostedDeviceWebhookBatch({
       entries,
-      async handleBatch(chunk) {
+      async handle(entry) {
         active += 1;
         maxActive = Math.max(maxActive, active);
-        chunkSizes.push(chunk.length);
-        order.push(...chunk.map((entry) => entry.transportId));
+        order.push(entry.transportId);
         await Promise.resolve();
         active -= 1;
-        return chunk.map((entry) => ({
-          status: "fulfilled" as const,
-          value: {
-            accepted: true,
-            duplicate: false,
-            eventType: "demo.updated",
-            provider: "demo",
-            traceId: `trace-${entry.transportId}`,
-          },
-        }));
+        return {
+          accepted: true,
+          duplicate: false,
+          eventType: "demo.updated",
+          provider: "demo",
+          traceId: `trace-${entry.transportId}`,
+        };
       },
     });
 
     expect(maxActive).toBe(1);
-    expect(chunkSizes).toEqual([...Array.from({ length: 12 }, () => 8), 4]);
     expect(order).toEqual(entries.map((entry) => entry.transportId));
     expect(result.entries).toHaveLength(100);
     expect(result.entries.every((entry) => entry.disposition === "accepted")).toBe(true);
@@ -85,21 +79,18 @@ describe("hosted device webhook batch admission", () => {
 
     const result = await admitHostedDeviceWebhookBatch({
       entries,
-      async handleBatch(chunk) {
+      async handle(entry) {
         active += 1;
         maxActive = Math.max(maxActive, active);
         await Promise.resolve();
         active -= 1;
-        return chunk.map((entry) => ({
-          status: "fulfilled" as const,
-          value: {
-            accepted: true,
-            duplicate: false,
-            eventType: "demo.updated",
-            provider: "demo",
-            traceId: `trace-${entry.transportId}`,
-          },
-        }));
+        return {
+          accepted: true,
+          duplicate: false,
+          eventType: "demo.updated",
+          provider: "demo",
+          traceId: `trace-${entry.transportId}`,
+        };
       },
     });
 
@@ -109,7 +100,7 @@ describe("hosted device webhook batch admission", () => {
     );
   });
 
-  it("isolates one account batch rollback from an independent account lane", async () => {
+  it("isolates one account failure from an independent account lane", async () => {
     vi.spyOn(console, "info").mockImplementation(() => {});
     const entries = [
       createPayload(1, "failing-account"),
@@ -118,17 +109,17 @@ describe("hosted device webhook batch admission", () => {
 
     const result = await admitHostedDeviceWebhookBatch({
       entries,
-      async handleBatch(chunk) {
-        if (chunk[0]?.preparedWebhook.externalAccountId === "failing-account") {
+      async handle(entry) {
+        if (entry.preparedWebhook.externalAccountId === "failing-account") {
           throw new Error("synthetic transaction rollback");
         }
-        return chunk.map(() => ({ status: "fulfilled" as const, value: {
+        return {
           accepted: true,
           duplicate: false,
           eventType: "demo.updated",
           provider: "demo",
           traceId: "trace-accepted",
-        } }));
+        };
       },
     });
 
@@ -146,35 +137,39 @@ describe("hosted device webhook batch admission", () => {
     );
     const result = await admitHostedDeviceWebhookBatch({
       entries,
-      async handleBatch() {
-        return [
-          { status: "fulfilled", value: {
+      async handle(entry) {
+        if (entry === entries[1]) {
+          throw deviceSyncError({
+            code: "WEBHOOK_ACCOUNT_NOT_READY",
+            httpStatus: 503,
+            message: "Retry later.",
+            retryable: true,
+          });
+        }
+        if (entry === entries[2]) {
+          throw deviceSyncError({
+            code: "PROVIDER_NOT_REGISTERED",
+            httpStatus: 404,
+            message: "Provider is unavailable.",
+            retryable: false,
+          });
+        }
+        if (entry === entries[0]) {
+          return {
             accepted: true,
             duplicate: true,
             eventType: "demo.updated",
             provider: "demo",
             traceId: "trace-duplicate",
-          } },
-          { status: "rejected", reason: deviceSyncError({
-            code: "WEBHOOK_ACCOUNT_NOT_READY",
-            httpStatus: 503,
-            message: "Retry later.",
-            retryable: true,
-          }) },
-          { status: "rejected", reason: deviceSyncError({
-            code: "PROVIDER_NOT_REGISTERED",
-            httpStatus: 404,
-            message: "Provider is unavailable.",
-            retryable: false,
-          }) },
-          { status: "fulfilled", value: {
+          };
+        }
+        return {
           accepted: true,
           duplicate: false,
           eventType: "demo.updated",
           provider: "demo",
           traceId: "trace-accepted",
-          } },
-        ];
+        };
       },
     });
 
@@ -190,7 +185,6 @@ describe("hosted device webhook batch admission", () => {
       accountLaneCount: 1,
       activeLaneCount: 1,
       batchSize: 4,
-      chunkSize: 8,
       durationMs: expect.any(Number),
       duplicateCount: 1,
       failureCounts: {
@@ -222,23 +216,24 @@ describe("hosted device webhook batch admission", () => {
     let admitted = 0;
     const result = await admitHostedDeviceWebhookBatch({
       entries,
-      async handleBatch(chunk) {
-        admitted += chunk.length;
-        return chunk.map(() => ({ status: "fulfilled" as const, value: {
+      async handle() {
+        admitted += 1;
+        return {
           accepted: true,
           duplicate: false,
           eventType: "demo.updated",
           provider: "demo",
           traceId: "trace-accepted",
-        } }));
+        };
       },
       shouldContinue: () => admitted < 1,
     });
 
     expect(result.entries.map((entry) => entry.disposition)).toEqual([
-      ...Array.from({ length: 8 }, () => "accepted"),
-      "retry", "retry",
+      "accepted",
+      ...Array.from({ length: 9 }, () => "retry"),
     ]);
+    expect(admitted).toBe(1);
   });
 });
 
