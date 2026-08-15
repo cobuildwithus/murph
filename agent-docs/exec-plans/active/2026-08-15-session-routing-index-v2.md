@@ -15,8 +15,9 @@ Updated: 2026-08-15
 
 - Exact alias and conversation-key updates mutate only their own keyed rows in
   one transaction and do not rewrite unrelated routes.
-- Existing aggregate indexes migrate from durable session files without losing
-  valid routing or bounded recent-session behavior.
+- Existing valid aggregate indexes migrate directly without losing their exact
+  route winners or bounded recent-session behavior; missing or malformed state
+  recovers from durable session files.
 - Stale routes fail closed against the durable session, while a corrupt or
   unsupported projection is quarantined and rebuilt; removed bindings no longer
   resolve.
@@ -85,6 +86,19 @@ Updated: 2026-08-15
   quarantined was inaccurate. The implementation intentionally fails that route
   closed when the canonical session is loaded; only corrupt or unsupported
   projection files are quarantined and rebuilt.
+- ReviewGPT round 2 accepted one original-patch migration finding: a valid v1
+  aggregate is the deployed runtime's exact winner when duplicate durable
+  sessions still claim one route, so migration must convert that mapping
+  directly instead of synthesizing a different winner from timestamps.
+- Round-3 retrospective: continue with the same single-projection design. The
+  first-reviewed source shape was 409 additions / 157 deletions and the
+  round-2 head was 453 / 189. Review remediation removed the unbounded file
+  family rather than adding an owner. Direct v1 conversion now deletes the
+  valid-migration scan from the foreground path, reuses the deployed aggregate
+  schema and existing transaction, and leaves the full scan only for actual
+  recovery. The parent audit's `0600` correction similarly reuses the existing
+  secure assistant-file adoption primitive. Neither correction adds an owner,
+  state machine, dependency, compatibility marker, or reconciliation pass.
 
 ## Verification
 
@@ -103,9 +117,17 @@ Updated: 2026-08-15
   coverage gap or finding.
 - ReviewGPT substantive round 1: one accepted complexity-collapse finding for
   the per-route portable file family; no other finding.
+- ReviewGPT substantive round 2: the round-1 mechanism is resolved; one accepted
+  original-patch finding for loss of the effective route winner during valid v1
+  migration. The response exceeded the trust floor and carried the configured
+  Pro model evidence and completion marker.
 - Corrected implementation: one 4.1 MB SQLite projection after a measured cold
   rebuild from 10,000 durable sessions in 48.9 seconds; the requested route
   resolved and the state directory contained exactly one file.
-- Corrected-head local verification: assistant persistence 24/24, runtime-state
+- Round-2 migration correction: direct conversion of 10,000 exact legacy alias
+  and conversation routes completed in 681 milliseconds, preserved the selected
+  route, removed the aggregate, produced one 4.1 MB `0600` database, and left
+  exactly one routing-state file.
+- Corrected-head local verification: assistant persistence 25/25, runtime-state
   coverage 212/212, runtime-state and assistant-engine typechecks, scenario
   integrity for 206 scenarios, and `git diff --check` all pass.

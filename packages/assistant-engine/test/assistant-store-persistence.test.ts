@@ -1,4 +1,12 @@
-import { access, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises'
+import {
+  access,
+  mkdir,
+  readFile,
+  readdir,
+  rm,
+  stat,
+  writeFile,
+} from 'node:fs/promises'
 import path from 'node:path'
 
 import {
@@ -511,9 +519,9 @@ describe('assistant store persistence seams', () => {
     await expect(access(paths.indexesPath)).rejects.toMatchObject({
       code: 'ENOENT',
     })
-    await expect(access(
-      resolveAssistantSessionRoutingDatabasePath(paths),
-    )).resolves.toBeUndefined()
+    const databasePath = resolveAssistantSessionRoutingDatabasePath(paths)
+    await expect(access(databasePath)).resolves.toBeUndefined()
+    expect((await stat(databasePath)).mode & 0o777).toBe(0o600)
 
     const previous = createSession({
       alias: 'alpha',
@@ -897,24 +905,84 @@ describe('assistant store persistence seams', () => {
     await expect(listAssistantQuarantineEntriesAtPaths(paths)).resolves.toEqual([])
   })
 
-  it('migrates legacy aggregate indexes before bounded listing', async () => {
+  it('preserves valid legacy route winners when duplicate sessions claim the same keys', async () => {
+    const paths = await createAssistantPaths(
+      'assistant-store-persistence-legacy-route-winner-',
+    )
+    await ensureAssistantState(paths)
+    const selected = createSession({
+      alias: 'work',
+      conversationKey: 'telegram:user-1:thread-shared',
+      lastTurnAt: '2026-04-08T00:01:00.000Z',
+      sessionId: 'session-selected',
+      threadId: 'thread-shared',
+      updatedAt: '2026-04-08T00:05:00.000Z',
+    })
+    const timestampWinner = createSession({
+      alias: 'work',
+      conversationKey: 'telegram:user-1:thread-shared',
+      lastTurnAt: '2026-04-08T00:04:00.000Z',
+      sessionId: 'session-timestamp-winner',
+      threadId: 'thread-shared',
+      updatedAt: '2026-04-08T00:04:00.000Z',
+    })
+    await writeAssistantSession(paths, selected)
+    await writeAssistantSession(paths, timestampWinner)
+    await writeFile(paths.indexesPath, JSON.stringify({
+      version: 1,
+      aliases: {
+        work: selected.sessionId,
+      },
+      conversationKeys: {
+        'telegram:user-1:thread-shared': selected.sessionId,
+      },
+    }), 'utf8')
+
+    const routing = await readAssistantSessionRouting(paths, {
+      alias: 'work',
+      conversationKeys: ['telegram:user-1:thread-shared'],
+    })
+    expect(routing.aliasSessionId).toBe(selected.sessionId)
+    expect(routing.conversationKeySessionIds.get(
+      'telegram:user-1:thread-shared',
+    )).toBe(selected.sessionId)
+    await expect(access(paths.indexesPath)).rejects.toMatchObject({
+      code: 'ENOENT',
+    })
+  })
+
+  it('directly migrates high-cardinality legacy indexes before bounded listing', async () => {
     const context = await createTempVaultContext('assistant-store-persistence-recent-legacy-many-')
     tempRoots.push(context.parentRoot)
     const paths = resolveAssistantStatePaths(context.vaultRoot)
     await ensureAssistantState(paths)
 
+    const aliases: Record<string, string> = {}
+    const conversationKeys: Record<string, string> = {}
+    const recentSessions: Record<string, string> = {}
     for (let index = 0; index < 60; index += 1) {
+      const sessionId = `session-legacy-${String(index).padStart(2, '0')}`
+      const updatedAt = `2026-04-08T00:${String(index).padStart(2, '0')}:00.000Z`
       await writeAssistantSession(paths, createSession({
         alias: `legacy-${index}`,
         conversationKey: `local:legacy:${index}`,
-        sessionId: `session-legacy-${String(index).padStart(2, '0')}`,
-        updatedAt: `2026-04-08T00:${String(index).padStart(2, '0')}:00.000Z`,
+        sessionId,
+        updatedAt,
       }))
+      aliases[`legacy-${index}`] = sessionId
+      conversationKeys[`local:legacy:${index}`] = sessionId
+      recentSessions[sessionId] = updatedAt
     }
+    await writeFile(
+      resolveAssistantSessionPath(paths, 'session-unrelated-corrupt'),
+      '{bad-json',
+      'utf8',
+    )
     await writeFile(paths.indexesPath, JSON.stringify({
       version: 1,
-      aliases: {},
-      conversationKeys: {},
+      aliases,
+      conversationKeys,
+      recentSessions,
     }), 'utf8')
 
     await expect(listAssistantSessions(context.vaultRoot, {
@@ -941,6 +1009,7 @@ describe('assistant store persistence seams', () => {
     expect(await readdir(paths.stateDirectory)).toEqual([
       path.basename(resolveAssistantSessionRoutingDatabasePath(paths)),
     ])
+    await expect(listAssistantQuarantineEntriesAtPaths(paths)).resolves.toEqual([])
   })
 
   it('treats corrupted session files as missing and ignores corrupted legacy sidecars for Codex sessions', async () => {

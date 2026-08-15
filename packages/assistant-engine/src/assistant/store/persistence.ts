@@ -11,10 +11,12 @@ import {
 import path from 'node:path'
 import * as z from '@murphai/contracts/zod-runtime'
 import {
+  assistantAliasStoreSchema,
   assistantAutomationStateSchema,
   assistantPersistedSessionSchema,
   assistantSessionIdSchema,
   assistantTranscriptEntrySchema,
+  type AssistantAliasStore,
   type AssistantAutomationState,
   type AssistantSession,
   type AssistantTranscriptEntry,
@@ -22,6 +24,7 @@ import {
 } from '@murphai/operator-config/assistant-cli-contracts'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
+  adoptAssistantStateFile,
   openSqliteRuntimeDatabase,
   readSqliteRuntimeUserVersion,
   withImmediateTransaction,
@@ -893,6 +896,30 @@ async function collectAssistantSessionsForRoutingRebuild(
   return sessions
 }
 
+function buildAssistantSessionRoutingProjection(
+  sessions: readonly AssistantSession[],
+): AssistantAliasStore {
+  const aliases: Record<string, string> = {}
+  const conversationKeys: Record<string, string> = {}
+  const recentSessions: Record<string, string> = {}
+  for (const session of sortSessionsForIndexRebuild(sessions)) {
+    if (session.alias) {
+      aliases[session.alias] = session.sessionId
+    }
+    if (session.binding.conversationKey) {
+      conversationKeys[session.binding.conversationKey] = session.sessionId
+    }
+    recentSessions[session.sessionId] =
+      resolveAssistantIndexRebuildTimestamp(session)
+  }
+  return assistantAliasStoreSchema.parse({
+    version: 1,
+    aliases,
+    conversationKeys,
+    recentSessions: pruneAssistantRecentSessions(recentSessions),
+  })
+}
+
 async function withAssistantSessionRoutingDatabase<T>(
   paths: AssistantStatePaths,
   operation: (database: AssistantSessionRoutingDatabase) => T,
@@ -917,18 +944,41 @@ async function withAssistantSessionRoutingDatabase<T>(
 async function openOrRebuildAssistantSessionRoutingDatabase(
   paths: AssistantStatePaths,
 ): Promise<AssistantSessionRoutingDatabase> {
-  if (
-    await pathExists(paths.indexesPath) ||
-    !await pathExists(resolveAssistantSessionRoutingDatabasePath(paths))
-  ) {
-    return await rebuildAssistantSessionRoutingDatabase(paths)
+  if (await pathExists(paths.indexesPath)) {
+    return await rebuildAssistantSessionRoutingDatabase(
+      paths,
+      await readAssistantLegacyIndex(paths),
+    )
   }
 
+  const databasePath = resolveAssistantSessionRoutingDatabasePath(paths)
+  if (!await pathExists(databasePath)) {
+    return await rebuildAssistantSessionRoutingDatabase(paths)
+  }
   try {
     return openAssistantSessionRoutingDatabase(paths)
   } catch (error) {
     await quarantineAssistantSessionRoutingDatabase(paths, error)
     return await rebuildAssistantSessionRoutingDatabase(paths)
+  }
+}
+
+async function readAssistantLegacyIndex(
+  paths: AssistantStatePaths,
+): Promise<AssistantAliasStore | null> {
+  let raw: string
+  try {
+    raw = await readFile(paths.indexesPath, 'utf8')
+  } catch (error) {
+    if (isMissingFileError(error)) {
+      return null
+    }
+    throw error
+  }
+  try {
+    return assistantAliasStoreSchema.parse(JSON.parse(raw))
+  } catch {
+    return null
   }
 }
 
@@ -954,7 +1004,7 @@ function openAssistantSessionRoutingDatabase(
 
 function initializeAssistantSessionRoutingDatabase(
   database: AssistantSessionRoutingDatabase,
-  sessions: readonly AssistantSession[],
+  projection: AssistantAliasStore,
 ): void {
   withImmediateTransaction(database, () => {
     database.exec(`
@@ -979,30 +1029,27 @@ function initializeAssistantSessionRoutingDatabase(
       INSERT INTO assistant_recent_sessions (session_id, last_active_at_ms)
       VALUES (?, ?)
     `)
-    const recentSessions: Record<string, string> = {}
-    for (const session of sortSessionsForIndexRebuild(sessions)) {
-      if (session.alias) {
-        upsertRoute.run(
-          'alias',
-          resolveAssistantSessionRoutingKeyDigest('alias', session.alias),
-          session.sessionId,
-        )
-      }
-      if (session.binding.conversationKey) {
-        upsertRoute.run(
+    for (const [alias, sessionId] of Object.entries(projection.aliases)) {
+      upsertRoute.run(
+        'alias',
+        resolveAssistantSessionRoutingKeyDigest('alias', alias),
+        sessionId,
+      )
+    }
+    for (const [conversationKey, sessionId] of Object.entries(
+      projection.conversationKeys,
+    )) {
+      upsertRoute.run(
+        'conversation-key',
+        resolveAssistantSessionRoutingKeyDigest(
           'conversation-key',
-          resolveAssistantSessionRoutingKeyDigest(
-            'conversation-key',
-            session.binding.conversationKey,
-          ),
-          session.sessionId,
-        )
-      }
-      recentSessions[session.sessionId] =
-        resolveAssistantIndexRebuildTimestamp(session)
+          conversationKey,
+        ),
+        sessionId,
+      )
     }
     for (const [sessionId, lastActiveAt] of Object.entries(
-      pruneAssistantRecentSessions(recentSessions),
+      pruneAssistantRecentSessions(projection.recentSessions ?? {}),
     )) {
       upsertRecent.run(sessionId, Date.parse(lastActiveAt))
     }
@@ -1015,8 +1062,12 @@ function initializeAssistantSessionRoutingDatabase(
 
 async function rebuildAssistantSessionRoutingDatabase(
   paths: AssistantStatePaths,
+  legacyIndex: AssistantAliasStore | null = null,
 ): Promise<AssistantSessionRoutingDatabase> {
-  const sessions = await collectAssistantSessionsForRoutingRebuild(paths)
+  const projection = await resolveAssistantSessionRoutingProjection(
+    paths,
+    legacyIndex,
+  )
   const databasePath = resolveAssistantSessionRoutingDatabasePath(paths)
   const rebuildPath = `${databasePath}.${randomUUID()}.rebuild`
   await removeAssistantSessionRoutingDatabaseSidecars(rebuildPath)
@@ -1028,7 +1079,8 @@ async function rebuildAssistantSessionRoutingDatabase(
       journalMode: 'DELETE',
       synchronous: 'FULL',
     })
-    initializeAssistantSessionRoutingDatabase(rebuilt, sessions)
+    await adoptAssistantStateFile(rebuildPath)
+    initializeAssistantSessionRoutingDatabase(rebuilt, projection)
     rebuilt.close()
     rebuilt = null
 
@@ -1050,9 +1102,28 @@ async function rebuildAssistantSessionRoutingDatabase(
     entityType: 'indexes',
     kind: 'indexes.rebuilt',
     level: 'warn',
-    message: 'Assistant session indexes were rebuilt from durable session files.',
+    message: 'Assistant session indexes were rebuilt from available routing state.',
   }).catch(() => undefined)
   return openAssistantSessionRoutingDatabase(paths)
+}
+
+async function resolveAssistantSessionRoutingProjection(
+  paths: AssistantStatePaths,
+  legacyIndex: AssistantAliasStore | null,
+): Promise<AssistantAliasStore> {
+  if (legacyIndex?.recentSessions !== undefined) {
+    return legacyIndex
+  }
+  const rebuilt = buildAssistantSessionRoutingProjection(
+    await collectAssistantSessionsForRoutingRebuild(paths),
+  )
+  return legacyIndex
+    ? assistantAliasStoreSchema.parse({
+        ...rebuilt,
+        aliases: legacyIndex.aliases,
+        conversationKeys: legacyIndex.conversationKeys,
+      })
+    : rebuilt
 }
 
 function synchronizeAssistantSessionRoutingDatabase(
