@@ -139,19 +139,40 @@ function buildHostedAssistantProgressAttemptResponses(input: {
 }
 
 afterAll(async () => {
-  directWakeRetryBarrier?.release();
-  await scenario?.stop();
-  scenario = null;
-  await directWakeRetryBarrier?.stop();
+  const cleanupErrors: unknown[] = [];
+  const captureCleanup = async (cleanup: () => Promise<void>): Promise<void> => {
+    try {
+      await cleanup();
+    } catch (error) {
+      cleanupErrors.push(error);
+    }
+  };
+  const barrierToStop = directWakeRetryBarrier;
   directWakeRetryBarrier = null;
-  await linqStub?.stop();
+  const scenarioToStop = scenario;
+  scenario = null;
+  const linqStubToStop = linqStub;
   linqStub = null;
-  await Promise.all(cleanupPaths.splice(0).map((target) =>
-    rm(target, {
-      force: true,
-      recursive: true,
-    })
-  ));
+  await captureCleanup(async () => {
+    await barrierToStop?.stop();
+  });
+  await captureCleanup(async () => {
+    await scenarioToStop?.stop();
+  });
+  await captureCleanup(async () => {
+    await linqStubToStop?.stop();
+  });
+  await captureCleanup(async () => {
+    await Promise.all(cleanupPaths.splice(0).map((target) =>
+      rm(target, {
+        force: true,
+        recursive: true,
+      })
+    ));
+  });
+  if (cleanupErrors.length > 0) {
+    throw new AggregateError(cleanupErrors, "Hosted-local Linq cleanup failed.");
+  }
 }, 120_000);
 
 it("derives stable numeric suffixes from the full Linq user id", () => {
@@ -183,12 +204,16 @@ it("extracts only the first retry_later direct-wake correlation", () => {
 
 it("releases a blocked direct-wake retry during barrier teardown", async () => {
   const barrier = await startHostedLocalDirectWakeRetryBarrier();
-  const blockedRequest = fetch(barrier.url, { method: "POST" });
-  await barrier.waitForBlockedRetry();
+  try {
+    const blockedRequest = fetch(barrier.url, { method: "POST" });
+    await barrier.waitForBlockedRetry();
 
-  await barrier.stop();
+    await barrier.stop();
 
-  await expect(blockedRequest).resolves.toMatchObject({ status: 204 });
+    await expect(blockedRequest).resolves.toMatchObject({ status: 204 });
+  } finally {
+    await barrier.stop();
+  }
 });
 
 productionDescribe("hosted local Linq first-contact e2e", () => {
@@ -1694,6 +1719,7 @@ async function startHostedLocalDirectWakeRetryBarrier(): Promise<
 > {
   const token = randomUUID();
   let released = false;
+  let stopPromise: Promise<void> | null = null;
   let arrivalResolved = false;
   let resolveArrival!: () => void;
   const arrival = new Promise<void>((resolve) => {
@@ -1751,7 +1777,8 @@ async function startHostedLocalDirectWakeRetryBarrier(): Promise<
     release,
     async stop(): Promise<void> {
       release();
-      await closeHttpServer(server);
+      stopPromise ??= closeHttpServer(server);
+      await stopPromise;
     },
     url: `http://127.0.0.1:${address.port}/direct-wake-retry/${token}`,
     async waitForBlockedRetry(): Promise<void> {

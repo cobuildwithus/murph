@@ -98,7 +98,9 @@ retry; Temporal remains the only durable retry and reconciliation owner.
   `retry_later`, holds the second outbound direct fetch at a test-only loopback
   barrier until that aging completes, requires second-call acceptance,
   acknowledges Temporal's converged accepted activity, and holds provider plus
-  total Linq sends to one.
+  total Linq sends to one. Barrier stop is idempotent; file teardown closes it
+  before the Web scenario and still attempts every remaining cleanup if one
+  step rejects.
 - [ ] Complete the hosted-local journey in a capable environment, resolve the
   exact-head final Review GPT gate and CI, archive this plan, and push the final
   reviewed head.
