@@ -23,13 +23,13 @@ describe("hosted Stripe effect compatibility fence", () => {
   });
 
   it("blocks an owner-group claim for the exact direct subscription until terminal removal", async () => {
-    const memberFindFirst = vi.fn().mockResolvedValue(null);
+    const memberFindUnique = vi.fn().mockResolvedValue(null);
     const familyFindFirst = vi.fn()
       .mockResolvedValueOnce({ stripeEffectClaimId: "opaque-family-conversion" })
       .mockResolvedValueOnce(null);
     const tx = {
       hostedAccountGroupBillingRef: { findFirst: familyFindFirst },
-      hostedMemberBillingRef: { findFirst: memberFindFirst },
+      hostedMemberBillingRef: { findUnique: memberFindUnique },
     };
 
     await expect(assertNoHostedDirectSubscriptionStripeEffectTx({
@@ -46,6 +46,11 @@ describe("hosted Stripe effect compatibility fence", () => {
       stripeSubscriptionId: "sub_direct_123",
       tx: tx as never,
     })).resolves.toBeUndefined();
+    expect(memberFindUnique).toHaveBeenCalledTimes(2);
+    expect(memberFindUnique).toHaveBeenCalledWith({
+      select: { stripeEffectClaimId: true },
+      where: { memberId: "member_123" },
+    });
     expect(familyFindFirst).toHaveBeenCalledWith({
       select: { stripeEffectClaimId: true },
       where: {
