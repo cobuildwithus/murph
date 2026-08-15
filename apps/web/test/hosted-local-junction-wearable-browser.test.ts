@@ -175,6 +175,14 @@ describe("hosted-local Junction wearable browser authorization", () => {
     }).manualAuthorizationAllowed).toBe(false);
   });
 
+  it("uses stable Chrome only for automated headed CI authorization", () => {
+    expect(createConfig().browserChannel).toBe("chrome");
+    expect(createConfig({ CI: undefined }).browserChannel).toBeUndefined();
+    expect(createConfig({
+      MURPH_E2E_PROVIDER_HEADLESS: "1",
+    }).browserChannel).toBeUndefined();
+  });
+
   it("permits manual waiting only for a headed non-CI run", async () => {
     let atMurph = false;
     let waits = 0;

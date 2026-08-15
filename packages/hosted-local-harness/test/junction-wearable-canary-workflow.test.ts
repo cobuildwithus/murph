@@ -90,6 +90,9 @@ describe("live Junction wearable canary workflow", () => {
     expect(workflow).toContain('MURPH_E2E_JUNCTION_WEARABLE_LIVE: "1"');
     expect(workflow).toContain("MURPH_E2E_JUNCTION_WEARABLE_SOURCES: whoop");
     expect(workflow).toContain('MURPH_E2E_WEARABLE_HEADLESS: "0"');
+    expect(workflow).toContain("      - name: Verify stable Chrome\n");
+    expect(workflow).toContain("run: google-chrome --version");
+    expect(workflow).not.toContain("playwright install");
     expect(workflow).toContain(
       "run: xvfb-run --auto-servernum pnpm hosted-local e2e device-connect",
     );
@@ -128,6 +131,10 @@ describe("live Junction wearable canary workflow", () => {
     expect(browserRunner).toContain(
       "if (source === \"oura\" && !manualAuthorizationAllowed && !otp)",
     );
+    expect(browserRunner).toContain(
+      'browserChannel: !headless && !manualAuthorizationAllowed ? "chrome" : undefined,',
+    );
+    expect(browserRunner).toContain("channel: config.browserChannel,");
 
     const clickedBranchOffset = browserRunner.indexOf("if (clicked) {");
     const blockedWindowResetOffset = browserRunner.indexOf(
