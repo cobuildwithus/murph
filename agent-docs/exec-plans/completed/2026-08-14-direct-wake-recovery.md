@@ -1,6 +1,6 @@
 # Direct wake cold-start recovery
 
-Status: active
+Status: completed
 Updated: 2026-08-15
 
 ## Goal
@@ -116,15 +116,18 @@ retry; Temporal remains the only durable retry and reconciliation owner.
   rule. The real journey exposed the gap only after its wake behavior passed;
   focused store coverage now retains the full accepted outcome.
 - [x] Upgrade the workspace ReviewGPT dependency from `0.5.127` to the latest
-  published `0.5.131`; the dedicated ReviewGPT/Frog guard suite and frozen
-  lockfile check pass.
-- [x] Reconcile the branch once with current `main`. The only conflicts were
-  the workspace manifest and lockfile; the resolution keeps `main`'s newer
-  repo tooling together with ReviewGPT `0.5.131`. Post-merge Web, Cloudflare,
-  hosted-local harness, workflow-guard, typecheck, and frozen-lockfile checks
-  pass.
-- [ ] Resolve the exact-head final Review GPT gate and CI, archive this plan,
-  and push the final reviewed head.
+  published `0.5.132`; the dedicated ReviewGPT/Frog guard suite and frozen
+  lockfile check pass. Version `0.5.132` also restores timestamped submitted
+  attachment-name acceptance required by this repository's review workflow.
+- [x] Reconcile the branch with current `main`. The resolutions keep `main`'s
+  newer repo tooling together with ReviewGPT `0.5.132`. Post-merge Web,
+  Cloudflare, hosted-local harness, workflow-guard, typecheck, and
+  frozen-lockfile checks pass.
+- [x] Resolve the exact-head final Review GPT gate and CI. The trusted
+  round-three review found only unrelated lock-graph drift from the package
+  refresh; narrowing the lockfile to ReviewGPT's importer, package, and
+  snapshot records fixed it. Trusted round four passed with no findings, and
+  all required exact-head checks passed.
 
 ## Surprises and discoveries
 
@@ -178,6 +181,14 @@ retry; Temporal remains the only durable retry and reconciliation owner.
   retain its repository ZIP. It is preserved only as an unusable recovery
   artifact and does not count as a review round. The required current-base
   reconciliation then made a new exact-head full audit necessary.
+- ReviewGPT `0.5.131` rejected the workflow's timestamped attachment name in
+  every browser lane. The newly published `0.5.132` accepted that attachment
+  form, allowing a trusted full audit to complete.
+- The trusted round-three audit found no runtime defect, but it did identify
+  purpose drift in unrelated lockfile records introduced by the package
+  refresh. Rebuilding the lock delta from current `main` and changing only the
+  ReviewGPT importer, package, and snapshot records preserved the rest of the
+  lock graph byte-for-byte; the trusted round-four audit passed.
 - Current `main` moved the data-privacy route while a generated `.next` type
   stub still named its old location. Removing only that generated tree made
   Web typecheck pass on the merged source without another code change.
@@ -202,3 +213,4 @@ retry; Temporal remains the only durable retry and reconciliation owner.
 - Give short commands the smaller of 15 seconds and their remaining budget
   minus the one-second guard. Do not pre-subtract cleanup time: an unresolved
   cleanup instead preserves the fence when the outer command guard wins.
+Completed: 2026-08-15
