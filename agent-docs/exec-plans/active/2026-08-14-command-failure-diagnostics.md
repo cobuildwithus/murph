@@ -49,9 +49,11 @@ Updated: 2026-08-14
    direct-search no-match exemption, and same-family recovery marker.
 3. [x] Add focused unit, provider-turn propagation, durable persistence, and
    privacy-negative coverage.
-4. [ ] Run focused tests and relevant typechecks, then complete review gates.
-5. [ ] Close the plan, commit with the repository helper, push, and open an
-   unmerged PR.
+4. [x] Run focused tests and relevant typechecks, then reconcile the
+   preliminary specialist review.
+5. [x] Commit with the repository helper, push, and open an unmerged PR.
+6. [ ] Reconcile the original Review GPT response, complete the final review
+   gate, and close the plan.
 
 ## Verification log
 
@@ -76,3 +78,10 @@ Updated: 2026-08-14
   focused hosted Web persistence test passes (3 tests), and assistant-engine
   plus Web typechecks pass. Prisma generation was the only required fresh-
   worktree bootstrap for the Web test.
+- The preliminary coverage specialist found that a blanket shell-control scan
+  rejected ordinary quoted regex syntax. The corrected scan is transient and
+  bounded, accepts quoted or escaped argument data, and still rejects
+  executable shell control, command substitution, malformed quoting, newlines,
+  and oversized labels conservatively.
+- Both full assistant-engine files pass after that correction (284 tests), as
+  does the assistant-engine typecheck.

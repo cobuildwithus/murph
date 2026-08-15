@@ -11145,6 +11145,125 @@ describe('assistant codex runtime', () => {
     expect(encodedIssues).not.toContain('search-error')
   })
 
+  it('recognizes quoted and escaped direct search arguments conservatively', () => {
+    const issueTracker = createCodexActionRuntimeIssueTracker()
+    let commandSequence = 0
+    const recordCommand = (input: {
+      command: string
+      exitCode: number
+      output?: string
+    }) => {
+      const id = `item-sensitive-${++commandSequence}`
+      const startedEvent = {
+        method: 'item/started',
+        params: {
+          item: {
+            command: input.command,
+            id,
+            type: 'commandExecution',
+          },
+        },
+      }
+      const completedEvent = {
+        method: 'item/completed',
+        params: {
+          item: {
+            aggregatedOutput: input.output ?? 'private search output',
+            exitCode: input.exitCode,
+            id,
+            type: 'commandExecution',
+          },
+        },
+      }
+      expect(issueTracker.recordEvent({
+        activeTurnId: 'turn-current',
+        normalizedEvent: normalizeCodexEvent(startedEvent),
+        rawEvent: startedEvent,
+      })).toBeNull()
+      return issueTracker.recordEvent({
+        activeTurnId: 'turn-current',
+        normalizedEvent: normalizeCodexEvent(completedEvent),
+        rawEvent: completedEvent,
+      })
+    }
+
+    const expectedNoMatches = [
+      "rg -n 'private(foo|bar)$' /tmp/private-record",
+      'grep -E "private(foo|bar){2}$" /tmp/private-record',
+      'rg private\\(foo\\|bar\\)\\{2\\}\\$ /tmp/private-record',
+      "rg 'private$(literal)`text`' /tmp/private-record",
+    ]
+    for (const command of expectedNoMatches) {
+      expect(recordCommand({ command, exitCode: 1 })).toBeNull()
+    }
+
+    const searchIssue = recordCommand({
+      command: "rg 'private(foo|bar){2}$' /tmp/private-record",
+      exitCode: 2,
+      output: 'private regex error',
+    })
+    expect(searchIssue).toMatchObject({
+      details: {
+        commandFamily: 'search',
+        commandOrdinal: 5,
+        exitCode: 2,
+        failureClass: 'search_error',
+        recoveredAfterFailure: false,
+      },
+    })
+    expect(recordCommand({
+      command: 'grep -E "private(foo|bar){2}$" /tmp/private-record',
+      exitCode: 0,
+    })).toBeNull()
+    expect(searchIssue).toMatchObject({
+      details: {
+        recoveredAfterFailure: true,
+      },
+    })
+
+    const commandsWithExecutableShellSyntax = [
+      'rg private-query /tmp/private-record | head',
+      'rg private-query /tmp/private-record; head /tmp/private-record',
+      'rg private-query /tmp/private-record && head /tmp/private-record',
+      'rg private-query /tmp/private-record || head /tmp/private-record',
+      'rg private-query > /tmp/private-record',
+      'rg (private-query) /tmp/private-record',
+      'rg "$(private-command)" /tmp/private-record',
+      'rg "`private-command`" /tmp/private-record',
+      "rg 'private-query /tmp/private-record",
+      'rg "private-query /tmp/private-record',
+      'rg private-query\n/tmp/private-record',
+      `rg ${'x'.repeat(4096)}`,
+    ]
+    const executableShellIssues = commandsWithExecutableShellSyntax.map(
+      (command, index) => {
+        const issue = recordCommand({ command, exitCode: 1 })
+        expect(issue).toMatchObject({
+          details: {
+            commandFamily: 'unknown',
+            commandOrdinal: index + 7,
+            exitCode: 1,
+            failureClass: 'nonzero_exit',
+          },
+        })
+        return issue
+      },
+    )
+
+    const encodedIssues = JSON.stringify([
+      searchIssue,
+      ...executableShellIssues,
+    ])
+    expect(encodedIssues).not.toContain('private(foo|bar)')
+    expect(encodedIssues).not.toContain('private-query')
+    expect(encodedIssues).not.toContain('private-command')
+    expect(encodedIssues).not.toContain('/tmp/private-record')
+    expect(encodedIssues).not.toContain('private search output')
+    expect(encodedIssues).not.toContain('private regex error')
+    expect(encodedIssues).not.toContain('item-sensitive')
+    expect(encodedIssues).not.toContain('turn-current')
+  })
+
   it('propagates a recovered command failure through a successful provider turn', async () => {
     const workingDirectory = await createTempDir(
       'assistant-codex-command-failure-recovery-',

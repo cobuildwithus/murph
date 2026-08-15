@@ -18,9 +18,10 @@ const TRACKED_ACTION_LIMIT = 256
 const TOOL_DIAGNOSTIC_LIMIT = 16
 const COMMAND_RUNTIME_ISSUE_TRACK_LIMIT = 256
 const COMMAND_RUNTIME_ISSUE_RECOVERY_LIMIT = 8
+const COMMAND_CLASSIFICATION_SCAN_LIMIT = 4096
 const TOOL_IDENTIFIER_PART_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/u
 const DIRECT_SEARCH_COMMAND_PATTERN = /^(?:grep|rg)(?:\s|$)/u
-const SHELL_CONTROL_PATTERN = /[\r\n;&|<>`$(){}]/u
+const UNQUOTED_SHELL_CONTROL_PATTERN = /[\r\n;&|<>`$(){}]/u
 
 type CodexActionKind =
   | 'command.execution'
@@ -603,9 +604,70 @@ function resolveDirectSearchCommandFamily(
 
   const command = normalizedEvent.commandLabel.trim()
   return DIRECT_SEARCH_COMMAND_PATTERN.test(command)
-    && !SHELL_CONTROL_PATTERN.test(command)
+    && !hasExecutableShellControl(command)
     ? 'search'
     : 'unknown'
+}
+
+/**
+ * Codex serializes command argv with shell quoting for display. Keep this scan
+ * transient and bounded: quoted or escaped regex syntax is argument data, while
+ * unquoted control syntax means the displayed command is not provably a direct
+ * `rg` or `grep` invocation. No token or argument content leaves this helper.
+ */
+function hasExecutableShellControl(command: string): boolean {
+  if (command.length > COMMAND_CLASSIFICATION_SCAN_LIMIT) {
+    return true
+  }
+
+  let quote: 'double' | 'single' | null = null
+  let escaped = false
+  for (let index = 0; index < command.length; index += 1) {
+    const character = command[index] ?? ''
+    if (character === '\r' || character === '\n') {
+      return true
+    }
+    if (escaped) {
+      escaped = false
+      continue
+    }
+    if (character === '\\' && quote !== 'single') {
+      escaped = true
+      continue
+    }
+    if (quote === 'single') {
+      if (character === "'") {
+        quote = null
+      }
+      continue
+    }
+    if (quote === 'double') {
+      if (character === '"') {
+        quote = null
+        continue
+      }
+      if (
+        character === '`'
+        || (character === '$' && command[index + 1] === '(')
+      ) {
+        return true
+      }
+      continue
+    }
+    if (character === "'") {
+      quote = 'single'
+      continue
+    }
+    if (character === '"') {
+      quote = 'double'
+      continue
+    }
+    if (UNQUOTED_SHELL_CONTROL_PATTERN.test(character)) {
+      return true
+    }
+  }
+
+  return escaped || quote !== null
 }
 
 function classifyCommandFailure(input: {
