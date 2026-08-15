@@ -4,6 +4,9 @@ review_gpt_config_dir="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pw
 review_gpt_repo_root="$(CDPATH= cd -- "$review_gpt_config_dir/.." && pwd -P)"
 review_gpt_local_config="${XDG_CONFIG_HOME:-$HOME/.config}/murph/review-gpt.conf"
 readonly review_gpt_direct_browser_lane="${REVIEW_GPT_BROWSER_LANE-}"
+readonly review_gpt_direct_pr_url="${REVIEW_GPT_PR_URL-}"
+readonly review_gpt_direct_pr_ref="${REVIEW_GPT_PR_REF-}"
+readonly review_gpt_direct_review_phase="${REVIEW_GPT_REVIEW_PHASE-}"
 
 if [[ -r "$review_gpt_local_config" ]]; then
   # This optional user-owned file contains local workflow preferences only.
@@ -83,8 +86,8 @@ review_gpt_browser_lane_is_usable() {
   [[ ! -e "$review_gpt_lane_lock" && ! -L "$review_gpt_lane_lock" ]]
 }
 
-review_gpt_review_phase="${REVIEW_GPT_REVIEW_PHASE:-final}"
-review_gpt_pr_ref="${REVIEW_GPT_PR_URL:-${REVIEW_GPT_PR_REF:-}}"
+review_gpt_review_phase="${review_gpt_direct_review_phase:-final}"
+review_gpt_pr_ref="${review_gpt_direct_pr_url:-$review_gpt_direct_pr_ref}"
 if [[ -n "$review_gpt_pr_ref" ]]; then
   case "$review_gpt_review_phase" in
     preliminary) minimum_marked_response_ms="5m" ;;

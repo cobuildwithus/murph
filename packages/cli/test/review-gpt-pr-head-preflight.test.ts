@@ -208,9 +208,32 @@ describe('ReviewGPT PR context guard', () => {
     },
   )
 
+  it('recognizes supported value options before rejecting a PR threshold override', () => {
+    const harness = createHarness()
+    const result = runHarness(harness, [
+      '--idle-draft-timeout',
+      '2s',
+      '--minimum-marked-response-time',
+      '1s',
+      'pr-review',
+      '--dry-run',
+    ])
+
+    expect(result.status).toBe(64)
+    expect(result.stdout).toContain(
+      `ReviewGPT PR attachment preflight passed for 42 at ${harness.head}.`,
+    )
+    expect(result.stderr).toContain(
+      'PR ReviewGPT response thresholds are fixed by review phase',
+    )
+    expect(() => readFileSync(harness.capturePath, 'utf8')).toThrow()
+  })
+
   it('preserves package-owned threshold overrides for non-PR presets', () => {
     const harness = createHarness()
     const result = runHarness(harness, [
+      '--idleDraftTimeout',
+      '2s',
       '--minimum-marked-response-time',
       '1s',
       'simplify',
@@ -219,7 +242,7 @@ describe('ReviewGPT PR context guard', () => {
 
     expect(result.status, result.stderr).toBe(0)
     expect(readFileSync(harness.capturePath, 'utf8')).toBe(
-      'pr=\nphase=\nargs=exec cobuild-review-gpt --config scripts/review-gpt.config.sh --minimum-marked-response-time 1s simplify --dry-run\n',
+      'pr=\nphase=\nargs=exec cobuild-review-gpt --config scripts/review-gpt.config.sh --idleDraftTimeout 2s --minimum-marked-response-time 1s simplify --dry-run\n',
     )
   })
 
@@ -233,7 +256,13 @@ describe('ReviewGPT PR context guard', () => {
     mkdirSync(localConfigDir, { recursive: true })
     writeFileSync(
       path.join(localConfigDir, 'review-gpt.conf'),
-      'minimum_marked_response_ms="4m59s"\n',
+      [
+        'REVIEW_GPT_PR_URL=',
+        'REVIEW_GPT_PR_REF=',
+        `REVIEW_GPT_REVIEW_PHASE="${phase === 'final' ? 'preliminary' : 'final'}"`,
+        'minimum_marked_response_ms="4m59s"',
+        '',
+      ].join('\n'),
       'utf8',
     )
 
@@ -265,6 +294,45 @@ describe('ReviewGPT PR context guard', () => {
 
     expect(result.status, result.stderr).toBe(0)
     expect(result.stdout.trim()).toBe(threshold)
+  })
+
+  it('preserves a local threshold for generic non-PR runs', () => {
+    const harness = createHarness()
+    const configRoot = path.join(harness.harnessRoot, 'config')
+    const localConfigDir = path.join(configRoot, 'murph')
+    mkdirSync(localConfigDir, { recursive: true })
+    writeFileSync(
+      path.join(localConfigDir, 'review-gpt.conf'),
+      'minimum_marked_response_ms="4m59s"\n',
+      'utf8',
+    )
+
+    const result = spawnSync(
+      'bash',
+      [
+        '-c',
+        [
+          'review_gpt_register_dir_preset() { :; }',
+          'review_gpt_register_preset_group() { :; }',
+          'source "$1"',
+          'printf "%s\\n" "$minimum_marked_response_ms"',
+        ].join('\n'),
+        'review-gpt-config-test',
+        path.join(repoRoot, 'scripts', 'review-gpt.config.sh'),
+      ],
+      {
+        cwd: harness.harnessRoot,
+        encoding: 'utf8',
+        env: {
+          ...harness.env,
+          REVIEW_GPT_BROWSER_LANE: 'phlebas',
+          XDG_CONFIG_HOME: configRoot,
+        },
+      },
+    )
+
+    expect(result.status, result.stderr).toBe(0)
+    expect(result.stdout.trim()).toBe('4m59s')
   })
 
   it('counts the accepted camelCase promptFile spelling in the specialist budget', () => {

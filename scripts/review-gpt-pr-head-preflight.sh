@@ -92,6 +92,8 @@ review_gpt_option_requires_value() {
       | --wait-timeout \
       | --waitTimeout \
       | --timeout \
+      | --idle-draft-timeout \
+      | --idleDraftTimeout \
       | --response-file \
       | --responseFile \
       | --response-marker \
