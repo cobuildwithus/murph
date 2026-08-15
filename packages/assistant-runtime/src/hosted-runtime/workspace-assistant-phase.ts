@@ -84,6 +84,9 @@ import {
   findAssistantAutoReplyDeliveryIntentIds,
 } from "@murphai/assistant-engine/assistant-automation";
 import {
+  maintainAssistantAutoReplyRouteState,
+} from "@murphai/assistant-engine/assistant-runtime-residue";
+import {
   resolveDeliveryCandidates,
 } from "@murphai/assistant-engine/assistant-channel-adapters";
 import {
@@ -2705,11 +2708,14 @@ export async function runHostedWorkspaceAssistantPhase(
           result: timedForegroundAssistantResult,
         }),
       );
-      const result = withPostForegroundMemberMaintenanceAfterCheckpoint({
-        executionContext,
+      const result = await withHostedAutoReplyRouteMaintenanceAfterDelivery({
         input,
-        result: foregroundResult,
-        wake,
+        result: withPostForegroundMemberMaintenanceAfterCheckpoint({
+          executionContext,
+          input,
+          result: foregroundResult,
+          wake,
+        }),
       });
       if (providerCleanupPlan.stateQueued && !result.progressed) {
         return {
@@ -2824,23 +2830,29 @@ export async function runHostedWorkspaceAssistantPhase(
         ...(postDelivery.redactedStatus ?? {}),
       };
       if (!phaseProgressed) {
-        return mergeContinuingSystemMailboxResult({
-          ...(nextWakeAt ? { nextWakeAt } : {}),
+        return await withHostedAutoReplyRouteMaintenanceAfterDelivery({
+          input,
+          result: mergeContinuingSystemMailboxResult({
+            ...(nextWakeAt ? { nextWakeAt } : {}),
+            ...(shouldExposeHostedAssistantPhaseNextWakeReason(postDelivery.nextWakeReason)
+              ? { nextWakeReason: postDelivery.nextWakeReason }
+              : {}),
+            progressed: false,
+            redactedStatus,
+          }),
+        });
+      }
+      return await withHostedAutoReplyRouteMaintenanceAfterDelivery({
+        input,
+        result: mergeContinuingSystemMailboxResult({
+          checkpointReason: postDelivery.checkpointReason,
+          nextWakeAt,
           ...(shouldExposeHostedAssistantPhaseNextWakeReason(postDelivery.nextWakeReason)
             ? { nextWakeReason: postDelivery.nextWakeReason }
             : {}),
-          progressed: false,
+          progressed: true,
           redactedStatus,
-        });
-      }
-      return mergeContinuingSystemMailboxResult({
-        checkpointReason: postDelivery.checkpointReason,
-        nextWakeAt,
-        ...(shouldExposeHostedAssistantPhaseNextWakeReason(postDelivery.nextWakeReason)
-          ? { nextWakeReason: postDelivery.nextWakeReason }
-          : {}),
-        progressed: true,
-        redactedStatus,
+        }),
       });
     }
 
@@ -2902,13 +2914,16 @@ export async function runHostedWorkspaceAssistantPhase(
       systemMailboxRetryableFailed: 0,
     });
     if (!phaseProgressed) {
-      return mergeContinuingSystemMailboxResult({
-        ...(nextWakeAt ? { nextWakeAt } : {}),
-        ...(shouldExposeHostedAssistantPhaseNextWakeReason(nextWake.reason)
-          ? { nextWakeReason: nextWake.reason }
-          : {}),
-        progressed: false,
-        redactedStatus,
+      return await withHostedAutoReplyRouteMaintenanceAfterDelivery({
+        input,
+        result: mergeContinuingSystemMailboxResult({
+          ...(nextWakeAt ? { nextWakeAt } : {}),
+          ...(shouldExposeHostedAssistantPhaseNextWakeReason(nextWake.reason)
+            ? { nextWakeReason: nextWake.reason }
+            : {}),
+          progressed: false,
+          redactedStatus,
+        }),
       });
     }
 
@@ -2983,7 +2998,10 @@ export async function runHostedWorkspaceAssistantPhase(
       progressed: true,
       redactedStatus,
     });
-    return result;
+    return await withHostedAutoReplyRouteMaintenanceAfterDelivery({
+      input,
+      result,
+    });
   } finally {
     releaseChannelAbortRelay();
     channelAbortController.abort();
@@ -3490,6 +3508,87 @@ function withFreshHostedManagedAutomationsAfterCheckpoint(input: {
       ],
     }),
   };
+}
+
+async function withHostedAutoReplyRouteMaintenanceAfterDelivery(input: {
+  input: HostedWorkspaceRuntimeAssistantPhaseInput;
+  result: HostedWorkspaceRunnerAssistantPhaseResult;
+}): Promise<HostedWorkspaceRunnerAssistantPhaseResult> {
+  if (!input.result.afterCheckpoint) {
+    const changed = await maintainHostedAutoReplyRouteState(input.input);
+    if (!changed || input.result.progressed === true) {
+      return input.result;
+    }
+    return {
+      ...input.result,
+      checkpointReason: "assistant_runtime_commit",
+      progressed: true,
+    };
+  }
+
+  const afterDeliveryCheckpoint = input.result.afterCheckpoint;
+  return {
+    ...input.result,
+    afterCheckpoint: async () => {
+      const postDelivery = await afterDeliveryCheckpoint();
+      const changed = await maintainHostedAutoReplyRouteState(input.input);
+      return postDelivery ?? (changed
+        ? { checkpointReason: "assistant_runtime_commit" }
+        : null);
+    },
+    afterCheckpointKeepsForegroundImportLoop: true,
+  };
+}
+
+async function maintainHostedAutoReplyRouteState(
+  input: HostedWorkspaceRuntimeAssistantPhaseInput,
+): Promise<boolean> {
+  if (input.shouldYieldBackgroundMaintenance?.() === true) {
+    return false;
+  }
+  const maintenanceSignal = input.backgroundMaintenanceSignal
+    ?? input.signal
+    ?? null;
+  try {
+    const result = await maintainAssistantAutoReplyRouteState({
+      shouldYield: input.shouldYieldBackgroundMaintenance ?? null,
+      signal: maintenanceSignal,
+      vault: input.restored.vaultRoot,
+    });
+    return result.changed;
+  } catch (error) {
+    input.signal?.throwIfAborted();
+    if (
+      maintenanceSignal?.aborted
+      && input.shouldYieldBackgroundMaintenance?.() === true
+    ) {
+      return false;
+    }
+    const failure = buildHostedRuntimeFailureDiagnostics(
+      error,
+      "Hosted auto-reply route maintenance failed.",
+    );
+    await writeHostedRuntimeLogBestEffort({
+      entry: {
+        ...buildHostedRuntimeLogContextFields({
+          attemptId: input.request.attemptId,
+          leaseGeneration: input.request.leaseGeneration,
+          workspaceVersion: input.request.workspaceVersion,
+        }),
+        component: "runtime",
+        errorCode: failure.errorCode,
+        eventCode: "runner.error",
+        level: "warn",
+        phase: "error",
+        redactedJson: {
+          ...failure.redactedJson,
+          autoReplyRouteMaintenanceFailed: true,
+        },
+      },
+      platform: input.runtime.platform,
+    });
+  }
+  return false;
 }
 
 async function applyFreshHostedManagedAutomationsAfterCheckpoint(input: {
