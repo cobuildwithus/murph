@@ -32,6 +32,7 @@ const HOSTED_PHONE_CALL_FIELD_CLASSIFICATION = {
   resultEncrypted: encrypted("Member-private bounded final call analysis."),
   resultJson: legacyDebt(),
   status: operational("Bounded call lifecycle enum."),
+  stopRequestedAt: operational("Member stop-intent lifecycle timestamp; contains no call content."),
   updatedAt: operational("Row concurrency timestamp; contains no call content."),
 } satisfies Record<string, PrivateStorageClassification>;
 
