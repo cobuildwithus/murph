@@ -14,6 +14,7 @@ import {
 import {
   deriveWorkoutActionBinding,
   deriveWorkoutSetRemovalBinding,
+  hasAmbiguousWorkoutActionExerciseCoordinates,
 } from '@murphai/operator-config/workout-action-binding'
 
 import { deriveDurationMinutesFromTimestamps } from './workout-model.js'
@@ -131,6 +132,9 @@ export function buildLiveWorkoutCardEditor(input: {
   workout: WorkoutSessionDetailV1
 } | null {
   if (!isActiveLiveWorkout(input.workout) || input.presentation.state !== 'active') {
+    return null
+  }
+  if (hasAmbiguousWorkoutActionExerciseCoordinates(input.workout)) {
     return null
   }
   const exercises = input.workout.exercises

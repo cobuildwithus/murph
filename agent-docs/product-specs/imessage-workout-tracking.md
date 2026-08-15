@@ -168,7 +168,11 @@ ordered exercise source/group/name/mode/unit/note identity, ordered set-slot
 order/type identity, and last applied member-action generation. A prior direct
 action or generic structural reorder therefore invalidates every older
 positional card even when repeated visible values make its intended result
-appear unchanged. Admission rejects a destructive batch when original edits,
+appear unchanged. When two exercise blocks have the same projected identity
+after exercise order is excluded, mutable set results cannot distinguish their
+coordinates safely. Those workouts remain truthful read-only V4 cards, and the
+canonical owner rejects a previously issued V6 action if the current workout is
+ambiguous. Admission rejects a destructive batch when original edits,
 descending removals, and contiguous appends would recreate the same visible set
 sequence because it would have no observable structural effect. The canonical
 workout write records the request action id atomically with the final exercises.

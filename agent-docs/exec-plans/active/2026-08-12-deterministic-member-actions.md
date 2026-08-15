@@ -87,6 +87,11 @@ Messages extension as the first action family.
   and annotations remain outside the identity binding and under their existing
   result-family compare-and-merge path. Exact action-id replay is resolved first
   because its own successful write necessarily changed that generation.
+- If repeated exercise blocks have the same projected coordinate identity after
+  exercise order is excluded, the binding cannot prove which block moved
+  without claiming mutable result ownership. The card author keeps that workout
+  on read-only V4, and the canonical owner rejects already-issued V6 actions
+  while the current workout remains ambiguous.
 - A successful foreground reply checkpoint services at most one due requested
   member action through the existing system-mailbox owner before another model
   pass. Completion receipts and unrelated system work retain ordinary ordering.

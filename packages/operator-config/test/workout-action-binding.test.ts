@@ -4,6 +4,7 @@ import type { WorkoutExercise, WorkoutSet } from '@murphai/contracts'
 import {
   deriveWorkoutActionBinding,
   deriveWorkoutSetRemovalBinding,
+  hasAmbiguousWorkoutActionExerciseCoordinates,
 } from '../src/workout-action-binding.js'
 
 const BASE_EXERCISES = [{
@@ -40,6 +41,33 @@ describe('workout action binding', () => {
     expect(deriveWorkoutActionBinding('evt_workout', { exercises })).not.toBe(
       deriveWorkoutActionBinding('evt_workout', { exercises: reordered }),
     )
+  })
+
+  it('detects duplicate exercise coordinates that mutable results cannot distinguish', () => {
+    const exercises = [
+      {
+        mode: 'bodyweight' as const,
+        name: 'Single-arm row',
+        order: 1,
+        sets: [{ order: 1, reps: 8 }, { order: 2, reps: 10 }],
+      },
+      {
+        mode: 'bodyweight' as const,
+        name: 'Single-arm row',
+        order: 2,
+        sets: [{ order: 1, reps: 12 }, { order: 2, reps: 8 }],
+      },
+    ] satisfies WorkoutExercise[]
+
+    expect(
+      hasAmbiguousWorkoutActionExerciseCoordinates({ exercises }),
+    ).toBe(true)
+    expect(hasAmbiguousWorkoutActionExerciseCoordinates({
+      exercises: exercises.map((exercise, index) => ({
+        ...exercise,
+        groupId: index === 0 ? 'left' : 'right',
+      })),
+    })).toBe(false)
   })
 
   it('changes when direct-action generation or positional structure changes', () => {

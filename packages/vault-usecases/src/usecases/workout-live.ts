@@ -16,6 +16,7 @@ import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
   deriveWorkoutActionBinding,
   deriveWorkoutSetRemovalBinding,
+  hasAmbiguousWorkoutActionExerciseCoordinates,
 } from '@murphai/operator-config/workout-action-binding'
 
 import { showWorkoutFormat } from './workout-format.js'
@@ -120,6 +121,9 @@ async function applyLiveWorkoutMemberActionWithLockHeld(
     workout = parseShownWorkout(shown)
     assertTargetableLiveWorkout(workout, `Workout ${shown.entity.id}`)
   } catch {
+    return { reason: 'workout_changed', status: 'rejected' }
+  }
+  if (hasAmbiguousWorkoutActionExerciseCoordinates(workout)) {
     return { reason: 'workout_changed', status: 'rejected' }
   }
   if (

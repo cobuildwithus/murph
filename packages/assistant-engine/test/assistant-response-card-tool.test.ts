@@ -288,6 +288,7 @@ async function createChallengeVault(input: {
 }
 
 async function createLiveWorkoutCardVault(input: {
+  ambiguousDuplicate?: boolean
   hiddenNote?: string
   unsupportedSet?: {
     actual: string
@@ -321,7 +322,14 @@ async function createLiveWorkoutCardVault(input: {
       workout: {
         sourceApp: 'murph-live',
         startedAt: '2026-08-12T14:00:00.000Z',
-        exercises: input.unsupportedSet !== undefined
+        exercises: input.ambiguousDuplicate === true
+          ? [8, 12].map((reps, index) => ({
+              mode: 'bodyweight' as const,
+              name: 'Single-arm row',
+              order: index + 1,
+              sets: [{ order: 1, reps }],
+            }))
+          : input.unsupportedSet !== undefined
           ? [{
               ...(input.unsupportedSet.mode === undefined
                 ? {}
@@ -366,7 +374,16 @@ async function createLiveWorkoutCardVault(input: {
       workout: {
         version: 1,
         state: 'active',
-        exercises: input.unsupportedSet !== undefined
+        exercises: input.ambiguousDuplicate === true
+          ? [8, 12].map((reps) => ({
+              name: 'Single-arm row',
+              sets: [{
+                status: 'completed' as const,
+                target: null,
+                actual: `${reps} reps`,
+              }],
+            }))
+          : input.unsupportedSet !== undefined
           ? [{
               name: 'Exercise',
               sets: [{
@@ -1284,6 +1301,31 @@ describe('murph.attach_response_card', () => {
         }],
       },
     })
+  })
+
+  it('keeps ambiguous duplicate exercise coordinates on the V4 card', async () => {
+    const fixture = await createLiveWorkoutCardVault({
+      ambiguousDuplicate: true,
+    })
+    const attached = await executeCardTool({
+      request: {
+        card: fixture.card,
+        kind: 'attach-response-card',
+      },
+      vaultRoot: fixture.root,
+    })
+    const card = attached.responseCardPatch?.card
+    if (!card || card.kind !== 'compact_table' || !('workout' in card)) {
+      throw new TypeError('Expected the attached workout card.')
+    }
+
+    expect(card).not.toHaveProperty('editor')
+    const delivery = await persistWorkoutCardThroughLinq({
+      card,
+      idSuffix: 'ambiguous-duplicate',
+      vaultRoot: fixture.root,
+    })
+    expect(delivery.envelope.schemaVersion).toBe(4)
   })
 
   it('keeps a hidden canonical note out of the persisted card and Linq request', async () => {

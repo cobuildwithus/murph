@@ -1,6 +1,6 @@
 # Security
 
-Last verified: 2026-08-13
+Last verified: 2026-08-14
 
 ## Non-Negotiable Rules
 
@@ -703,8 +703,13 @@ Last verified: 2026-08-13
   derived from the canonical workout id, its ordered hidden exercise/set-slot
   identity, and its last applied member-action generation. Ordered identity
   includes source/group identity and set type but excludes mutable set results
-  and annotations, so every canonical structural writer invalidates shifted
-  coordinates without claiming ownership of unrelated fields. It also
+  and annotations, so a structural writer invalidates shifted coordinates
+  without claiming ownership of unrelated fields when each exercise coordinate
+  is distinguishable. If two exercise blocks have the same projected identity
+  after exercise order is excluded, the projection cannot prove which block a
+  later reorder moved: authoring keeps that workout on truthful read-only V4,
+  and the canonical owner rejects any previously issued V6 action while the
+  current workout remains ambiguous. It also
   carries a separate opaque 64-character removal binding derived from the hidden
   canonical workout id and complete ordered canonical exercise/set state. That
   binding reveals no raw hidden field and is checked only as a destructive
@@ -720,15 +725,17 @@ Last verified: 2026-08-13
   must match the current revision before positional mutation, so a card that
   predates either another direct action or a generic structural reorder fails
   closed even when repeated visible values would make the wrong target appear
-  unchanged. The same bounded canonical workout
-  read resolves that marker after the target completes and before considering a
-  newer active workout, so replay cannot retarget. This adds no client-visible
-  set id or second receipt store. Canonical persistence keeps the generic no-deletion guard and exposes
-  set removal only to the live-workout member-action owner after the exact
-  binding and snapshot checks succeed. An editable note is admitted only when its exact
-  canonical value fits the visible 40-character result field; a longer hidden
-  note forces the authority-free V4 presentation instead of entering either
-  persisted card state or the Linq request.
+  unchanged; indistinguishable duplicate coordinates fail closed before this
+  comparison rather than being treated as equal authority. The same bounded
+  canonical workout read resolves that marker after the target completes and
+  before considering a newer active workout, so replay cannot retarget. This
+  adds no client-visible set id or second receipt store. Canonical persistence
+  keeps the generic no-deletion guard and exposes set removal only to the
+  live-workout member-action owner after the exact binding and snapshot checks
+  succeed. An editable note is admitted only when its exact canonical value
+  fits the visible 40-character result field; a longer hidden note forces the
+  authority-free V4 presentation instead of entering either persisted card
+  state or the Linq request.
   The same fail-closed eligibility applies to any duration, distance, RPE,
   bodyweight, assistance, added-load, or mixed result that the typed V6 families
   cannot fully represent; runtime preserves the original V4 actual rather than

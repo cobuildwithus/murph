@@ -122,6 +122,53 @@ async function createSameNameWorkout(rightReps: number): Promise<{
   };
 }
 
+async function createAmbiguousSameNameWorkout(
+  leftReps: readonly number[],
+  rightReps: readonly number[],
+): Promise<{
+  vault: string;
+  workout: WorkoutSession;
+  workoutId: string;
+}> {
+  const vault = await mkdtemp(
+    path.join(os.tmpdir(), "murph-member-action-ambiguous-"),
+  );
+  await initializeVault({
+    vaultRoot: vault,
+    createdAt: "2026-08-13T13:00:00.000Z",
+    timezone: "UTC",
+  });
+  await startLiveWorkout({
+    vault,
+    name: "Workout",
+    startedAt: STARTED_AT,
+  });
+  for (const [exerciseIndex, reps] of [leftReps, rightReps].entries()) {
+    await addLiveWorkoutExercise({
+      mode: "bodyweight",
+      name: "Single-arm row",
+      order: exerciseIndex + 1,
+      setCount: reps.length,
+      vault,
+    });
+    for (const [setIndex, value] of reps.entries()) {
+      await logLiveWorkoutSet({
+        vault,
+        exerciseOrder: exerciseIndex + 1,
+        reps: value,
+        requireExistingSet: true,
+        setOrder: setIndex + 1,
+      });
+    }
+  }
+  const shown = await showActiveLiveWorkout({ vault });
+  return {
+    vault,
+    workout: parseShownWorkout(shown),
+    workoutId: shown.entity.id,
+  };
+}
+
 function removeSetsAction(input: {
   appendedReps?: readonly number[];
   removePositions: readonly number[];
@@ -201,13 +248,17 @@ function putSameNameExerciseAction(input: {
   actionBinding: string;
   exercisePosition: number;
   reps: number;
+  setCount?: number;
 }): WorkoutLiveApplyMemberActionV1 {
   return {
     expectedWorkout: {
       actionBinding: input.actionBinding,
       exercises: [1, 2].map(() => ({
         name: "Single-arm row",
-        sets: [{ logged: true }],
+        sets: Array.from(
+          { length: input.setCount ?? 1 },
+          () => ({ logged: true }),
+        ),
       })),
     },
     kind: "workout.live.apply",
@@ -437,6 +488,71 @@ test.each([
       { groupId: "right", reps: rightReps },
       { groupId: "left", reps: 8 },
     ]);
+    expect(stored.lastMemberActionId).toBeUndefined();
+  } finally {
+    await rm(fixture.vault, { force: true, recursive: true });
+  }
+});
+
+test.each([
+  {
+    label: "write a colliding set on the wrong exercise",
+    leftReps: [8, 10],
+    rightReps: [8, 12],
+  },
+  {
+    label: "report false unchanged success for a colliding exercise",
+    leftReps: [8, 10],
+    rightReps: [12, 8],
+  },
+])("an ambiguous duplicate-exercise card cannot $label", async ({
+  leftReps,
+  rightReps,
+}) => {
+  const fixture = await createAmbiguousSameNameWorkout(leftReps, rightReps);
+  try {
+    const originalBinding = deriveWorkoutActionBinding(
+      fixture.workoutId,
+      fixture.workout,
+    );
+    const [left, right] = fixture.workout.exercises;
+    await editWorkoutRecord({
+      lookup: fixture.workoutId,
+      set: [`workout.exercises=${JSON.stringify([
+        { ...right, order: 1 },
+        { ...left, order: 2 },
+      ])}`],
+      vault: fixture.vault,
+    });
+    const reordered = parseShownWorkout(
+      await showActiveLiveWorkout({ vault: fixture.vault }),
+    );
+    expect(deriveWorkoutActionBinding(
+      fixture.workoutId,
+      reordered,
+    )).toBe(originalBinding);
+
+    await expect(applyLiveWorkoutMemberAction({
+      acceptedAt: ACCEPTED_AT,
+      action: putSameNameExerciseAction({
+        actionBinding: originalBinding,
+        exercisePosition: 1,
+        reps: 12,
+        setCount: 2,
+      }),
+      actionId: SECOND_ACTION_ID,
+      vault: fixture.vault,
+    })).resolves.toEqual({
+      reason: "workout_changed",
+      status: "rejected",
+    });
+
+    const stored = parseShownWorkout(
+      await showActiveLiveWorkout({ vault: fixture.vault }),
+    );
+    expect(stored.exercises.map((exercise) =>
+      exercise.sets.map((set) => set.reps),
+    )).toEqual([rightReps, leftReps]);
     expect(stored.lastMemberActionId).toBeUndefined();
   } finally {
     await rm(fixture.vault, { force: true, recursive: true });

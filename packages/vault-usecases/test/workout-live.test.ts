@@ -217,6 +217,46 @@ describe('live workout model', () => {
     )
   })
 
+  test('keeps coordinate-indistinguishable duplicate exercises on the read-only card', () => {
+    const presentation = {
+      version: 1 as const,
+      state: 'active' as const,
+      exercises: [8, 12].map((reps) => ({
+        name: 'Single-arm row',
+        sets: [{
+          status: 'completed' as const,
+          target: null,
+          actual: `${reps} reps`,
+        }],
+      })),
+    }
+    const workout = workoutSessionSchema.parse({
+      sourceApp: LIVE_WORKOUT_SOURCE_APP,
+      startedAt: '2026-08-09T18:00:00.000Z',
+      exercises: [8, 12].map((reps, index) => ({
+        mode: 'bodyweight' as const,
+        name: 'Single-arm row',
+        order: index + 1,
+        sets: [{ order: 1, reps }],
+      })),
+    })
+
+    assert.equal(buildLiveWorkoutCardEditor({
+      presentation,
+      workout,
+      workoutId: 'evt_test_workout',
+    }), null)
+
+    const disambiguated = structuredClone(workout)
+    disambiguated.exercises[0]!.groupId = 'left'
+    disambiguated.exercises[1]!.groupId = 'right'
+    assert.notEqual(buildLiveWorkoutCardEditor({
+      presentation,
+      workout: disambiguated,
+      workoutId: 'evt_test_workout',
+    }), null)
+  })
+
   test.each([
     { label: 'duration', set: { durationSeconds: 60 } },
     {
