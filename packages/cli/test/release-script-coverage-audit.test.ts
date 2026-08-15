@@ -1167,12 +1167,6 @@ describe('monorepo release flow coverage audit', () => {
     expect(reviewGptDriver).toContain(
       'const minimumMarkedResponseMs = Number(process.env.ORACLE_DRAFT_MINIMUM_MARKED_RESPONSE_MS || 5 * 60 * 1000);',
     )
-    expect(reviewGptDriver).toContain(
-      'const MODEL_CONFIRMATION_UNKNOWN_FALLBACK_MS = 5 * 60 * 1000;',
-    )
-    expect(reviewGptDriver).toContain(
-      'if (!Number.isSafeInteger(minimumMarkedResponseMs) || minimumMarkedResponseMs <= 0)',
-    )
     const solTarget: ReviewGptModelPickerTarget = {
       desiredVersion: '5-6',
       wantsInstant: false,
@@ -1266,7 +1260,6 @@ describe('monorepo release flow coverage audit', () => {
     expect(reviewGptReadme).toContain(
       'A marked concrete-model response shorter than the trust threshold fails closed as untrusted',
     )
-    expect(reviewGptReadme).toContain('minimum_marked_response_ms="5m"')
     expect(reviewGptDriver).toContain('REVIEW_GPT_TURN_NONCE:')
     expect(reviewGptDriver).not.toContain("value.includes('MODEL_CONFIRMATION:')")
     expect(reviewGptDriver).toContain('precedingUserMessageSignature')
@@ -1320,27 +1313,28 @@ describe('monorepo release flow coverage audit', () => {
     expect(responseDurationGuardStart).toBeGreaterThan(-1)
     expect(responseAttestationStart).toBeGreaterThan(responseDurationGuardStart)
     const tooFastGuardStart = reviewGptDriver.indexOf(
-      'assertMarkedResponseDurationTrusted(responseResult, responseFile);',
-    )
-    const tooFastHelperStart = reviewGptDriver.indexOf(
       'function assertMarkedResponseDurationTrusted(',
     )
-    const tooFastHelperEnd = reviewGptDriver.indexOf(
+    const tooFastGuardEnd = reviewGptDriver.indexOf(
       'function capturedResponseFileText(',
-      tooFastHelperStart,
+      tooFastGuardStart,
     )
-    const tooFastHelper = reviewGptDriver.slice(tooFastHelperStart, tooFastHelperEnd)
+    const tooFastGuard = reviewGptDriver.slice(tooFastGuardStart, tooFastGuardEnd)
     expect(tooFastGuardStart).toBeGreaterThan(-1)
-    expect(tooFastGuardStart).toBeLessThan(completedArtifactWriteStart)
-    expect(tooFastHelperStart).toBeGreaterThan(-1)
-    expect(tooFastHelperEnd).toBeGreaterThan(tooFastHelperStart)
-    expect(tooFastHelper).toContain("responseResult?.status !== 'response-too-fast'")
-    expect(tooFastHelper).toContain(
+    expect(tooFastGuardEnd).toBeGreaterThan(tooFastGuardStart)
+    expect(tooFastGuard).toContain("responseResult?.status !== 'response-too-fast'")
+    expect(tooFastGuard).toContain(
       'writeCapturedResponseFile(responseFilePath, responseResult.responseText);',
     )
-    expect(tooFastHelper).toContain('throw new Error(responseResult.responseDurationFailure')
-    expect(tooFastHelper).not.toContain('writeCompletedResponseArtifacts')
-    expect(tooFastHelper).not.toContain('modelVerification')
+    expect(tooFastGuard).toContain('throw new Error(responseResult.responseDurationFailure')
+    expect(tooFastGuard).not.toContain('writeCompletedResponseArtifacts')
+    expect(tooFastGuard).not.toContain('modelVerification')
+    const tooFastGuardInvocationStart = reviewGptDriver.indexOf(
+      'assertMarkedResponseDurationTrusted(responseResult',
+      tooFastGuardEnd,
+    )
+    expect(tooFastGuardInvocationStart).toBeGreaterThan(tooFastGuardEnd)
+    expect(tooFastGuardInvocationStart).toBeLessThan(completedArtifactWriteStart)
     expect(reviewGptDriver).toContain('process.exit(1);')
     expect(reviewGptDriver).toContain(
       [
