@@ -421,10 +421,11 @@ export async function beginHostedDeviceSyncConnectionSourceReconnect(input: {
       return;
     }
 
-    const sourceInstanceKey = buildJunctionProviderSourceInstanceKey({
-      connectionId: expectedConnection.id,
-      sourceProviderSlug,
-    });
+    const sourceInstanceKey = source?.sourceInstanceKey
+      ?? buildJunctionProviderSourceInstanceKey({
+        connectionId: expectedConnection.id,
+        sourceProviderSlug,
+      });
     if (!sourceInstanceKey) {
       throw connectionSourceNotFoundError();
     }
@@ -435,8 +436,9 @@ export async function beginHostedDeviceSyncConnectionSourceReconnect(input: {
     await input.store.upsertConnectionSource({
       connectionId: expectedConnection.id,
       sourceInstanceKey,
-      sourceProviderSlug,
+      sourceProviderSlug: source?.sourceProviderSlug ?? sourceProviderSlug,
       status: "disconnected",
+      ...(source ? { lifecycleEpoch: source.lifecycleEpoch } : {}),
       firstSeenAt: sourceStartedAt,
       lastErrorCode: null,
       lastErrorMessage: null,
@@ -614,6 +616,7 @@ export async function prepareHostedDeviceSyncConnectionSourceStart(input: {
             sourceInstanceKey: source.sourceInstanceKey,
             sourceProviderSlug,
             status: "disconnected",
+            lifecycleEpoch: source.lifecycleEpoch,
             lastErrorCode: null,
             lastErrorMessage: null,
             lastSeenAt: sourceStartedAt,
@@ -1475,7 +1478,9 @@ export async function handleHostedDeviceSyncConnectionEstablished(input: {
           status: "connected",
           ...(advancedLifecycleEpoch !== undefined
             ? { lifecycleEpoch: advancedLifecycleEpoch }
-            : {}),
+            : currentSource
+              ? { lifecycleEpoch: currentSource.lifecycleEpoch }
+              : {}),
           firstSeenAt: input.now,
           lastSeenAt: input.now,
           tx,
@@ -1604,6 +1609,7 @@ async function writeHostedConnectionSourceLifecycle(input: {
     sourceInstanceKey: input.source.sourceInstanceKey,
     sourceProviderSlug: input.source.sourceProviderSlug,
     status: input.status,
+    lifecycleEpoch: input.source.lifecycleEpoch,
     lastErrorCode: input.errorCode,
     lastErrorMessage: input.errorMessage,
     lastSeenAt: input.now,

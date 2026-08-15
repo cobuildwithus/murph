@@ -1181,6 +1181,83 @@ describe("hosted device-sync wakes", () => {
     expect(mocks.syncDurableConnectionState).not.toHaveBeenCalled();
   });
 
+  it("opens native reconnect on the established identity at semantic max epoch", async () => {
+    const connection = buildHostedConnection({
+      id: "dsc_junction_123",
+      provider: "junction",
+      setupPhase: "source_confirmed",
+    });
+    const canonicalSource = buildHostedConnectionSource(
+      connection.id,
+      "apple_health_kit",
+      {
+        lifecycleEpoch: 2,
+        lastSeenAt: "2026-03-26T12:01:00.000Z",
+        status: "disconnected",
+      },
+    );
+    let sources = [
+      {
+        ...buildHostedConnectionSource(connection.id, "apple_health_kit", {
+          lastSeenAt: "2026-03-26T12:00:00.000Z",
+          status: "disconnected",
+        }),
+        firstSeenAt: "2026-03-25T12:00:00.000Z",
+        sourceInstanceKey: "opaque-established-apple-health-source",
+      },
+      canonicalSource,
+    ];
+    const canonicalSnapshot = { ...canonicalSource };
+    mocks.listConnectionsForUser.mockResolvedValue([connection]);
+    mocks.getConnectionForUser.mockResolvedValue(connection);
+    mocks.listConnectionSources.mockImplementation(async () => sources);
+    mocks.upsertConnectionSource.mockImplementation(async (input) => {
+      const existing = sources.find(
+        (source) => source.sourceInstanceKey === input.sourceInstanceKey,
+      );
+      if (!existing) {
+        throw new Error("Native reconnect created an unexpected source identity.");
+      }
+      const updated = {
+        ...existing,
+        firstSeenAt: input.firstSeenAt ?? existing.firstSeenAt,
+        lastErrorCode: input.lastErrorCode ?? null,
+        lastErrorMessage: input.lastErrorMessage ?? null,
+        lastSeenAt: input.lastSeenAt ?? existing.lastSeenAt,
+        lifecycleEpoch: input.lifecycleEpoch ?? existing.lifecycleEpoch,
+        status: input.status ?? existing.status,
+      };
+      sources = sources.map((source) =>
+        source.sourceInstanceKey === updated.sourceInstanceKey ? updated : source
+      );
+      return updated;
+    });
+    const ingress = createHostedDeviceSyncPublicIngressService(
+      new Request("https://control.example.test/api/device-sync/companion/sign-in-token"),
+    );
+
+    await expect(
+      ingress.createSdkSignInSession("user-123", "junction", "connect"),
+    ).resolves.toMatchObject({ signInToken: "junction-sign-in-token" });
+
+    expect(mocks.upsertConnectionSource).toHaveBeenCalledWith(expect.objectContaining({
+      connectionId: connection.id,
+      lifecycleEpoch: 2,
+      sourceInstanceKey: "opaque-established-apple-health-source",
+      sourceProviderSlug: "apple_health_kit",
+      status: "disconnected",
+    }));
+    expect(sources).toHaveLength(2);
+    expect(sources[0]).toEqual(expect.objectContaining({
+      lastErrorCode: null,
+      lifecycleEpoch: 2,
+      sourceInstanceKey: "opaque-established-apple-health-source",
+      status: "disconnected",
+    }));
+    expect(sources[1]).toEqual(canonicalSnapshot);
+    expect(mocks.advanceConnectionSourceStartBoundary).toHaveBeenCalledOnce();
+  });
+
   it("defers only Apple registration lifecycle events to hosted canonical admission", () => {
     createHostedDeviceSyncPublicIngressService(
       new Request("https://control.example.test/api/device-sync/webhooks/junction", {
@@ -2989,6 +3066,90 @@ describe("hosted device-sync wakes", () => {
     expect(mocks.upsertConnectionSource).toHaveBeenCalledTimes(3);
     expect(mocks.createSignal).toHaveBeenCalledTimes(2);
     expect(mocks.appendHostedMailboxEnvelope).toHaveBeenCalledTimes(1);
+  });
+
+  it("disconnects established identity at the semantic max lifecycle epoch", async () => {
+    const connection = buildHostedConnection({
+      displayName: "Junction",
+      externalAccountId: "junction-user-established",
+      id: "dsc_junction_semantic_source",
+      provider: "junction",
+      scopes: [],
+      setupPhase: "source_confirmed",
+    });
+    const storedConnection = buildProviderConfigStoredConnection(connection);
+    const canonicalSource = buildHostedConnectionSource(connection.id, "oura", {
+      lifecycleEpoch: 2,
+      lastSeenAt: "2026-03-26T12:01:00.000Z",
+    });
+    let sources = [
+      {
+        ...buildHostedConnectionSource(connection.id, "oura", {
+          lastSeenAt: "2026-03-26T12:00:00.000Z",
+        }),
+        firstSeenAt: "2026-03-25T12:00:00.000Z",
+        sourceInstanceKey: "opaque-established-oura-source",
+      },
+      canonicalSource,
+      buildHostedConnectionSource(connection.id, "withings"),
+    ];
+    const canonicalSnapshot = { ...canonicalSource };
+    const siblingSnapshot = { ...sources[2]! };
+    mocks.listConnectionsForUser.mockResolvedValue([connection]);
+    mockConnectionForAdmission(connection);
+    mocks.getStoredConnectionAccountForUser.mockResolvedValue(storedConnection);
+    mocks.listConnectionSources.mockImplementation(async () => sources);
+    mocks.registryGet.mockReturnValue({
+      connectionHandler: { revokeSourceAccess: vi.fn(async () => undefined) },
+    });
+    mocks.upsertConnectionSource.mockImplementation(async (input) => {
+      const existing = sources.find(
+        (source) => source.sourceInstanceKey === input.sourceInstanceKey,
+      );
+      if (!existing) {
+        throw new Error("Source disconnect created an unexpected identity.");
+      }
+      const updated = {
+        ...existing,
+        lastErrorCode: input.lastErrorCode ?? null,
+        lastErrorMessage: input.lastErrorMessage ?? null,
+        lastSeenAt: input.lastSeenAt ?? existing.lastSeenAt,
+        lifecycleEpoch: input.lifecycleEpoch ?? existing.lifecycleEpoch,
+        status: input.status ?? existing.status,
+      };
+      sources = sources.map((source) =>
+        source.sourceInstanceKey === updated.sourceInstanceKey ? updated : source
+      );
+      return updated;
+    });
+    const controlPlane = createHostedDeviceSyncPublicIngressService(
+      new Request("https://control.example.test/api/settings/device-sync/connections/source/disconnect"),
+    );
+
+    await expect(controlPlane.disconnectConnectionSource(
+      "user-123",
+      buildPublicConnectionId(connection.id),
+      "oura",
+    )).resolves.toEqual({
+      sourceProviderSlug: "oura",
+      status: "disconnected",
+    });
+
+    expect(sources[0]).toEqual(expect.objectContaining({
+      lastErrorCode: "SOURCE_USER_DISCONNECTED",
+      lifecycleEpoch: 2,
+      sourceInstanceKey: "opaque-established-oura-source",
+      status: "disconnected",
+    }));
+    expect(sources[1]).toEqual(canonicalSnapshot);
+    expect(sources[2]).toEqual(siblingSnapshot);
+    expect(mocks.upsertConnectionSource).toHaveBeenCalledTimes(2);
+    for (const [write] of mocks.upsertConnectionSource.mock.calls) {
+      expect(write).toEqual(expect.objectContaining({
+        lifecycleEpoch: 2,
+        sourceInstanceKey: "opaque-established-oura-source",
+      }));
+    }
   });
 
   it("restores the selected Junction source when provider revoke fails", async () => {

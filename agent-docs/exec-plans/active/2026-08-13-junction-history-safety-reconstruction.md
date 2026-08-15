@@ -494,6 +494,36 @@ Updated: 2026-08-14
   retry owner, manager, repair loop, reconciliation process, or provider call;
   its only structural cost is the small stateless resolver shared by the three
   existing Web owners.
+- Final ReviewGPT round 14 reviewed exact remediated head
+  `3d3f53514ac1187a6f60987059d780b15f9bdd8e` in the existing thread and
+  returned `ROUND_OUTCOME: RETROSPECTIVE_REQUIRED` plus `REVIEW_COMPLETE`.
+  It found that native companion reconnect still rebuilt the deterministic
+  source key after admission had resolved an established opaque Apple Health
+  identity. A later disconnect could therefore write an older opaque row while
+  a webhook had advanced the deterministic row, letting provider revoke succeed
+  without making the durable semantic source disconnected.
+- Accepted the round-14 finding and repeated-owner retrospective. Round 13
+  inventoried route-equivalent reads and the browser/runtime point writers but
+  did not explicitly follow the native companion reconnect through webhook and
+  disconnect as one cross-row lifecycle. The durable stance is now explicit:
+  a bounded legacy duplicate set is supported, but it represents one semantic
+  source; admission resolves one established physical identity at the maximum
+  lifecycle epoch, and every existing-source point write carries that epoch
+  onto that identity. Deterministic identity is used only when no semantic
+  source exists. The owners covered are native capture/start, browser start and
+  callback, registration webhook, disconnect/cleanup, companion admission, and
+  hosted runtime apply.
+- No round-14 finding was rejected. The correction adds one bounded admission
+  sentinel and reuses the existing pure semantic resolver and point-write
+  owners. It adds no persisted field, duplicate repair, deletion pass, queue,
+  retry policy, lifecycle manager, or provider call. The production delta is
+  deliberately smaller than the regression proof required to cover the full
+  native-connect, webhook, disconnect, reconnect sequence in real Postgres.
+- The user explicitly requested the latest ReviewGPT before the next round.
+  The repo now pins `@cobuild/review-gpt` `^0.5.131` with the matching exact
+  minimum-release-age exception and minimal lockfile resolution update. The
+  installed CLI and registry latest both resolve to `0.5.131`; frozen install,
+  dependency policy, and ignored-build inspection pass.
 
 ## Verification
 
@@ -693,3 +723,11 @@ Updated: 2026-08-14
     assistant hosted runtime passes 107 tests, and hosted wake/runtime authority
     passes 248 tests. Device-sync, assistant-runtime, and prepared Web typechecks
     pass; `git diff --check` and the added-line privacy/identifier scan pass.
+  - Round-14 remediation proof passes 271 focused hosted source-store, wake,
+    and runtime-authority tests. The isolated migrated-Postgres authority file
+    passes all 4 tests, including the established opaque Apple Health sequence
+    across native reconnect, webhook epoch advance, provider disconnect, a
+    lower-epoch deterministic duplicate, a second reconnect, and a final
+    webhook. Prepared Web typecheck, touched-file lint, `git diff --check`,
+    dependency policy, ignored-build inspection, and frozen dependency install
+    pass. ReviewGPT CLI and registry latest both report `0.5.131`.

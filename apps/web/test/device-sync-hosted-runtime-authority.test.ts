@@ -2150,19 +2150,34 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
       throw new Error("Expected a canonical Apple Health source key.");
     }
     const harness = createAuthorityHarness({
-      connectionSources: [{
-        connectionId,
-        displayName: null,
-        firstSeenAt: "2026-04-06T09:00:00.000Z",
-        lastErrorCode: null,
-        lastErrorMessage: null,
-        lastSeenAt: "2026-04-06T10:00:00.000Z",
-        lifecycleEpoch: 1,
-        resourceAvailabilitySummary: { activity: true },
-        sourceInstanceKey: "opaque-established-apple-health-source",
-        sourceProviderSlug: "apple_health_kit",
-        status: "connected",
-      }],
+      connectionSources: [
+        {
+          connectionId,
+          displayName: null,
+          firstSeenAt: "2026-04-06T08:00:00.000Z",
+          lastErrorCode: null,
+          lastErrorMessage: null,
+          lastSeenAt: "2026-04-06T09:55:00.000Z",
+          lifecycleEpoch: 1,
+          resourceAvailabilitySummary: { activity: true },
+          sourceInstanceKey: "opaque-established-apple-health-source",
+          sourceProviderSlug: "apple_health_kit",
+          status: "connected",
+        },
+        {
+          connectionId,
+          displayName: null,
+          firstSeenAt: "2026-04-06T09:00:00.000Z",
+          lastErrorCode: null,
+          lastErrorMessage: null,
+          lastSeenAt: "2026-04-06T10:00:00.000Z",
+          lifecycleEpoch: 2,
+          resourceAvailabilitySummary: { activity: true },
+          sourceInstanceKey: canonicalSourceInstanceKey,
+          sourceProviderSlug: "apple_health_kit",
+          status: "connected",
+        },
+      ],
       record: buildHostedRecord({
         id: connectionId,
         provider: "junction",
@@ -2186,7 +2201,7 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
               lastErrorCode: null,
               lastErrorMessage: null,
               lastSeenAt: "2026-04-06T10:05:00.000Z",
-              observedLifecycleEpoch: 1,
+              observedLifecycleEpoch: 2,
               observedLastSeenAt: "2026-04-06T10:00:00.000Z",
               resourceAvailabilitySummary: { activity: true, workouts: true },
               sourceInstanceKey: canonicalSourceInstanceKey,
@@ -2204,6 +2219,7 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
     expect(response.updates[0]?.writeUpdate).toBe("applied");
     expect(harness.upsertConnectionSource).toHaveBeenCalledWith(
       expect.objectContaining({
+        lifecycleEpoch: 2,
         sourceInstanceKey: "opaque-established-apple-health-source",
         sourceProviderSlug: "apple_health_kit",
       }),
