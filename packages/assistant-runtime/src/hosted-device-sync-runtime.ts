@@ -6,13 +6,21 @@ import {
   parseSerializedCompanionHrvRmssdObservation,
   serializeCompanionHrvRmssdObservation,
 } from "@murphai/contracts";
-import { buildJunctionProviderSourceInstanceKey } from "@murphai/device-syncd/connect-config";
+import {
+  areJunctionDeviceConnectProviderSlugsEquivalent,
+} from "@murphai/device-syncd/connect-config";
 import { shapeHostedDeviceSyncJobHintPayload } from "@murphai/device-syncd/hosted-hints";
 import {
   isJunctionCompanionHrvRmssdJob,
   JUNCTION_COMPANION_HRV_OBSERVATION_INVALID_CODE,
 } from "@murphai/device-syncd/junction-resources";
 import { buildDeviceSyncTokenCipherOptions, createSecretCodec } from "@murphai/device-syncd/local-secret-codec";
+import {
+  compareDeviceSyncSourceIdentity,
+  dedupeDeviceSyncSourcesByIdentity,
+  mergeDeviceSyncSourceLastDataAt,
+  resolveDeviceSyncSourceState,
+} from "@murphai/device-syncd/public-account";
 import type { DeviceSyncService } from "@murphai/device-syncd/service";
 import type {
   DeviceSyncJobInput,
@@ -40,6 +48,7 @@ import type {
   HostedDeviceSyncEventToProviderSendBucket,
   HostedExecutionDeviceSyncJobHint,
   HostedExecutionDeviceSyncRuntimeConnectionSnapshot as HostedDeviceSyncRuntimeConnectionSnapshot,
+  HostedExecutionDeviceSyncRuntimeConnectionSourceSnapshot as HostedDeviceSyncRuntimeConnectionSourceSnapshot,
   HostedExecutionDeviceSyncRuntimeConnectionSourceUpdate as HostedDeviceSyncRuntimeConnectionSourceUpdate,
   HostedExecutionDeviceSyncRuntimeConnectionUpdate as HostedDeviceSyncRuntimeConnectionUpdate,
   HostedExecutionDeviceSyncRuntimeFailureDiagnostic as HostedDeviceSyncRuntimeFailureDiagnostic,
@@ -65,6 +74,7 @@ import {
   HOSTED_DEVICE_SYNC_DIRTY_PENDING_FETCH_LIMIT,
   HOSTED_DEVICE_SYNC_PASS_JOB_LIMIT,
 } from "./hosted-device-sync-limits.ts";
+import { hostedSourceStateUnavailable } from "./hosted-device-sync-source-state.ts";
 import {
   fetchCompleteHostedDeviceSyncRuntimeSnapshot,
 } from "./hosted-runtime/device-sync-snapshot-pagination.ts";
@@ -211,6 +221,10 @@ export async function syncHostedDeviceSyncControlPlaneState(input: {
         isJunctionCredentialIndependentInlineImportJob: classifyJunctionProviderJob,
       } = await import("@murphai/device-syncd/junction-inline-authority"));
     }
+    const hostedSources = dedupeHostedHydrationConnectionSources(
+      entry.connection.provider,
+      (entry.sources ?? []).filter((source) => source.sourceInstanceKey),
+    );
     const stored = store.hydrateHostedAccount(
       buildHostedAccountHydrationInput({
         classifyProviderJob: entry.connection.provider === "junction"
@@ -236,7 +250,7 @@ export async function syncHostedDeviceSyncControlPlaneState(input: {
         (source) => [source.sourceInstanceKey, source] as const,
       ),
     );
-    for (const source of entry.sources ?? []) {
+    for (const source of hostedSources) {
       if (!source.sourceInstanceKey) {
         continue;
       }
@@ -248,34 +262,83 @@ export async function syncHostedDeviceSyncControlPlaneState(input: {
         sourceInstanceKey: source.sourceInstanceKey,
       });
       const localSource = localSourcesByKey.get(sourceInstanceKey);
+      const establishedLocalSource = localSource ?? (
+        entry.connection.provider.trim().toLowerCase() === "junction"
+          ? selectHostedJunctionSource(localSources, source.sourceProviderSlug)
+          : undefined
+      );
+      const isJunctionSource = entry.connection.provider.trim().toLowerCase()
+        === "junction";
       if (
-        !terminalStatus
-        && localSource
-        && shouldPreserveLocalHydrationSource({
+        !isJunctionSource
+        && !terminalStatus
+        && establishedLocalSource
+        && shouldPreserveNonJunctionHydrationSource({
           hostedConnectionEpochChanged,
-          localSource,
+          localSource: establishedLocalSource,
           source,
         })
       ) {
         continue;
       }
+      const localLifecycleSource = establishedLocalSource
+        ? {
+            ...source,
+            displayName: establishedLocalSource.displayName,
+            lastDataAt: establishedLocalSource.lastDataAt,
+            lastErrorCode: establishedLocalSource.lastErrorCode,
+            lastErrorMessage: establishedLocalSource.lastErrorMessage,
+            lastSeenAt: establishedLocalSource.lastSeenAt,
+            resourceAvailabilitySummary:
+              establishedLocalSource.resourceAvailabilitySummary,
+            status: establishedLocalSource.status,
+          }
+        : null;
+      const consolidatedState = (
+        isJunctionSource
+        && localLifecycleSource
+        && !terminalStatus
+        && !hostedConnectionEpochChanged
+      )
+        ? resolveDeviceSyncSourceState(
+            [localLifecycleSource, source],
+            hostedSourceStateUnavailable,
+          )
+        : {
+            lastDataAt: mergeDeviceSyncSourceLastDataAt(
+              source.lastDataAt,
+              establishedLocalSource?.lastDataAt ?? null,
+              hostedSourceStateUnavailable,
+            ),
+            lifecycleSource: source,
+          };
+      if (
+        localLifecycleSource
+        && consolidatedState.lifecycleSource === localLifecycleSource
+        && consolidatedState.lastDataAt === establishedLocalSource?.lastDataAt
+      ) {
+        continue;
+      }
+      const lifecycleSource = consolidatedState.lifecycleSource;
 
       const hydratedSource = store.upsertConnectionSource({
         connectionId: stored.id,
         sourceInstanceKey,
-        sourceProviderSlug: source.sourceProviderSlug,
-        displayName: source.displayName,
-        status: source.status,
-        ...(source.resourceAvailabilitySummary === undefined
+        sourceProviderSlug:
+          establishedLocalSource?.sourceProviderSlug ?? source.sourceProviderSlug,
+        displayName: lifecycleSource.displayName,
+        status: lifecycleSource.status,
+        ...(lifecycleSource.resourceAvailabilitySummary === undefined
           ? {}
-          : { resourceAvailabilitySummary: source.resourceAvailabilitySummary }),
-        lastErrorCode: source.lastErrorCode,
-        lastErrorMessage: source.lastErrorMessage,
+          : {
+              resourceAvailabilitySummary:
+                lifecycleSource.resourceAvailabilitySummary,
+            }),
+        lastErrorCode: lifecycleSource.lastErrorCode,
+        lastErrorMessage: lifecycleSource.lastErrorMessage,
         firstSeenAt: source.firstSeenAt,
-        lastSeenAt: source.lastSeenAt,
-        // Merged monotonically below rather than taken verbatim: Web and the
-        // runner can each have seen an arrival the other has not.
-        lastDataAt: laterIsoTimestamp(source.lastDataAt ?? null, localSource?.lastDataAt ?? null),
+        lastSeenAt: lifecycleSource.lastSeenAt,
+        lastDataAt: consolidatedState.lastDataAt,
       });
       localSourcesByKey.set(sourceInstanceKey, hydratedSource);
     }
@@ -373,55 +436,67 @@ function resolveHostedHydrationSourceInstanceKey(input: {
     return input.sourceInstanceKey;
   }
 
-  const canonicalSourceInstanceKey = buildJunctionProviderSourceInstanceKey({
-    connectionId: input.entry.connection.id,
-    sourceProviderSlug: input.source.sourceProviderSlug,
-  });
-  const matchingSource = input.localSources.find((source) =>
-    source.sourceInstanceKey === canonicalSourceInstanceKey
+  const matchingSource = selectHostedJunctionSource(
+    input.localSources,
+    input.source.sourceProviderSlug,
   ) ?? input.localSources.find((source) =>
     source.sourceInstanceKey === input.sourceInstanceKey
-  ) ?? input.localSources.find((source) =>
-    source.sourceProviderSlug === input.source.sourceProviderSlug
   );
 
-  return matchingSource?.sourceInstanceKey
-    ?? canonicalSourceInstanceKey
-    ?? input.sourceInstanceKey;
+  return matchingSource?.sourceInstanceKey ?? input.sourceInstanceKey;
 }
 
-function shouldPreserveLocalHydrationSource(input: {
+function areHostedJunctionSourceSlugsEquivalent(left: string, right: string): boolean {
+  return areJunctionDeviceConnectProviderSlugsEquivalent(left, right);
+}
+
+function dedupeHostedHydrationConnectionSources(
+  provider: string,
+  sources: readonly HostedDeviceSyncRuntimeConnectionSourceSnapshot[],
+): HostedDeviceSyncRuntimeConnectionSourceSnapshot[] {
+  if (provider.trim().toLowerCase() !== "junction") {
+    return [...sources];
+  }
+  return dedupeDeviceSyncSourcesByIdentity(
+    sources,
+    (left, right) => areHostedJunctionSourceSlugsEquivalent(
+      left.sourceProviderSlug,
+      right.sourceProviderSlug,
+    ),
+    hostedSourceStateUnavailable,
+  );
+}
+
+function selectHostedJunctionSource(
+  sources: readonly StoredDeviceConnectionSource[],
+  sourceProviderSlug: string,
+): StoredDeviceConnectionSource | undefined {
+  return sources
+    .filter((source) => areHostedJunctionSourceSlugsEquivalent(
+      source.sourceProviderSlug,
+      sourceProviderSlug,
+    ))
+    .sort(compareDeviceSyncSourceIdentity)[0];
+}
+
+function shouldPreserveNonJunctionHydrationSource(input: {
   hostedConnectionEpochChanged: boolean;
   localSource: StoredDeviceConnectionSource;
-  source: NonNullable<HostedDeviceSyncRuntimeConnectionSnapshot["sources"]>[number];
+  source: HostedDeviceSyncRuntimeConnectionSourceSnapshot;
 }): boolean {
   if (input.hostedConnectionEpochChanged) {
     return false;
   }
-
-  // An arrival can advance with no other field moving, so a lastSeenAt-only
-  // shortcut would drop the one signal a stall is measured against.
   if (
-    laterIsoTimestamp(input.source.lastDataAt ?? null, input.localSource.lastDataAt)
-      !== input.localSource.lastDataAt
+    mergeDeviceSyncSourceLastDataAt(
+      input.source.lastDataAt,
+      input.localSource.lastDataAt,
+      hostedSourceStateUnavailable,
+    ) !== input.localSource.lastDataAt
   ) {
     return false;
   }
-
   return Date.parse(input.localSource.lastSeenAt) >= Date.parse(input.source.lastSeenAt);
-}
-
-/** Returns whichever ISO timestamp is later, treating null as "never". */
-function laterIsoTimestamp(left: string | null, right: string | null): string | null {
-  if (!left) {
-    return right;
-  }
-
-  if (!right) {
-    return left;
-  }
-
-  return Date.parse(left) >= Date.parse(right) ? left : right;
 }
 
 export async function reconcileHostedDeviceSyncControlPlaneState(input: {

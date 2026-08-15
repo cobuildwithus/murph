@@ -2301,8 +2301,12 @@ state or mutating restored assistant recovery while Web and Temporal remain the
 usage-policy and durable-reconciliation owners.
 Cloudflare treats that value as an operational hint only: the foreground
 pre-accept budget is clamped by Cloudflare's configured web-control timeout, and
-workspace read/readiness steps are capped by the remaining budget. Accepted
-background invocations begin their pending I/O before acceptance; Durable Object
+workspace read/readiness steps are capped by the remaining budget. Fresh starts
+give authoritative container readiness at most 20 seconds within that remaining
+command budget before the existing fence cleanup and `retry_later` path runs.
+This matches the runner readiness ceiling without weakening invalidated-shell
+or destroy-settlement checks. Accepted background invocations begin their
+pending I/O before acceptance; Durable Object
 `waitUntil()` is not a lifecycle mechanism and is not used.
 Container readiness receives at most 15 wall-clock seconds, including time
 queued for the container lifecycle lock. Once lifecycle work starts, the RPC
