@@ -57,9 +57,6 @@ const MAX_INPUT_SHAPE = 16
 const MAX_SCHEMA_PATHS = 256
 const MAX_SCHEMA_PATH_DEPTH = 16
 const MAX_SCHEMA_NODES = 1_024
-const MAX_FLATTENED_ISSUES = 64
-const MAX_ISSUE_NESTING_DEPTH = 8
-const MAX_UNION_BRANCHES = 8
 
 export function buildSafeToolCallValidationDigest(
   input: BuildSafeToolCallValidationDigestInput,
@@ -225,10 +222,7 @@ function readValidationFacts(
   const issueCodes: string[] = []
   const pathIssues: NonNullable<SafeToolCallValidationDigest['pathIssues']> = []
 
-  const issues = schemaPathSet
-    ? flattenZodValidationIssues(error.issues)
-    : error.issues
-  for (const issue of issues) {
+  for (const issue of error.issues) {
     const issueRecord = asRecord(issue)
     const path = normalizeIssuePath(
       issueRecord?.path,
@@ -431,58 +425,6 @@ function normalizeSchemaPathSet(
     .filter((path): path is string => path !== null)
     .slice(0, MAX_SCHEMA_PATHS)
   return normalized.length > 0 ? new Set(normalized) : null
-}
-
-function flattenZodValidationIssues(
-  issues: readonly unknown[],
-  parentPath: readonly unknown[] = [],
-  depth = 0,
-  output: unknown[] = [],
-): unknown[] {
-  for (const issue of issues) {
-    if (output.length >= MAX_FLATTENED_ISSUES) {
-      break
-    }
-    const issueRecord = asRecord(issue)
-    if (!issueRecord) {
-      output.push(issue)
-      continue
-    }
-    const issuePath = Array.isArray(issueRecord.path) ? issueRecord.path : []
-    const path = pathStartsWith(issuePath, parentPath)
-      ? issuePath
-      : [...parentPath, ...issuePath]
-    const unionErrors = issueRecord.errors
-    if (
-      issueRecord.code === 'invalid_union' &&
-      Array.isArray(unionErrors) &&
-      depth < MAX_ISSUE_NESTING_DEPTH
-    ) {
-      const nestedIssueStart = output.length
-      for (const branchIssues of unionErrors.slice(0, MAX_UNION_BRANCHES)) {
-        if (Array.isArray(branchIssues)) {
-          flattenZodValidationIssues(
-            branchIssues,
-            path,
-            depth + 1,
-            output,
-          )
-        }
-      }
-      if (output.length > nestedIssueStart) {
-        continue
-      }
-    }
-    output.push({ ...issueRecord, path })
-  }
-  return output
-}
-
-function pathStartsWith(
-  path: readonly unknown[],
-  prefix: readonly unknown[],
-): boolean {
-  return prefix.every((segment, index) => path[index] === segment)
 }
 
 function normalizeSchemaPath(path: string): string | null {

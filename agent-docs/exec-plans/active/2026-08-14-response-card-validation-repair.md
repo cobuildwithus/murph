@@ -59,9 +59,13 @@ Updated: 2026-08-15
    regression tests.
 5. Completed: merge current main normally, preserving its accepted workout-card
    capacity behavior and this patch's bounded diagnostic behavior.
-6. In progress: finish round-two remediation, run focused tests, typecheck,
-   diff/privacy review, ReviewGPT gates, commit, push, and update the PR without
-   merging.
+6. Completed: remediate final-review rounds two through four while preserving
+   authoritative refinement ownership, exact accepted values, and provider
+   schema compatibility.
+7. In progress: remove alternative-union flattening from diagnostics, add one
+   truthful family-choice hint for absent or invalid card kinds, run focused and
+   proportional verification, and complete the remaining ReviewGPT/CI gates
+   without merging.
 
 ## Decisions
 
@@ -88,6 +92,11 @@ Updated: 2026-08-15
 - Preserve main's semantic-workout oversized-envelope text fallback. Only the
   diagnostic selection and repair description change; acceptance and execution
   authority do not.
+- Never turn mutually exclusive union alternatives into simultaneous repair
+  requirements. Exact discriminators select an existing diagnostic schema;
+  an absent or invalid response-card family discriminator gets one bounded
+  `card.kind` choice hint, while the acceptance union remains authoritative and
+  unchanged.
 
 ## Verification
 
@@ -198,3 +207,18 @@ Updated: 2026-08-15
   the supported and unavailable valid shapes still pass. Compatibility tests,
   raw-value-free feedback assertions, the existing same-turn App Server repair
   journey, focused operator tests, and all four affected package typechecks pass.
+
+## Final review round 5 disposition
+
+- Completed the renewed retrospective after the top-level response-card family
+  union exposed the same alternative-flattening mechanism found in rounds one
+  and four. Mutually exclusive alternatives are now a single architectural
+  class: they must never be emitted as concurrent repair requirements.
+- Removed the recursive invalid-union flattener and its bounds/helpers. Exact
+  response-card kinds continue to select one authoritative family/shape schema;
+  absent or invalid kinds on object cards receive exactly one diagnostics-only,
+  allowlisted `card.kind` family-choice hint. Acceptance and execution schemas
+  are unchanged.
+- Added generic union non-flattening coverage plus missing-kind, malformed-kind,
+  privacy, exact-feedback, and corrected-retry response-card proofs. Existing
+  selected-family nested repair coverage remains the regression owner.

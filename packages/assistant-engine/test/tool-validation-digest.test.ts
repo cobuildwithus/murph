@@ -8,6 +8,68 @@ import {
 } from '../src/assistant/tool-validation-digest.ts'
 
 describe('buildSafeToolCallValidationDigest', () => {
+  it('keeps mutually exclusive union failures coarse', () => {
+    const schema = z.object({
+      card: z.union([
+        z.object({ kind: z.literal('first'), firstField: z.string() }).strict(),
+        z.object({ kind: z.literal('second'), secondField: z.string() }).strict(),
+      ]),
+    }).strict()
+    const rawInput = {
+      card: {
+        kind: 'synthetic-private-family',
+        privateField: 'synthetic-private-value',
+      },
+    }
+    const parsed = schema.safeParse(rawInput)
+    expect(parsed.success).toBe(false)
+    if (parsed.success) {
+      throw new Error('expected union validation to fail')
+    }
+
+    const digest = buildSafeToolCallValidationDigest({
+      error: parsed.error,
+      rawInput,
+      schemaPaths: collectSafeJsonSchemaValidationPaths({
+        type: 'object',
+        properties: {
+          card: {
+            anyOf: [
+              {
+                type: 'object',
+                properties: {
+                  kind: { const: 'first' },
+                  firstField: { type: 'string' },
+                },
+              },
+              {
+                type: 'object',
+                properties: {
+                  kind: { const: 'second' },
+                  secondField: { type: 'string' },
+                },
+              },
+            ],
+          },
+        },
+      }),
+      schemaRootKeys: ['card'],
+      toolName: 'murph.synthetic',
+    })
+
+    expect(digest.pathIssues).toEqual([{
+      path: 'card',
+      code: 'invalid_union',
+      received: 'object.count_1_10',
+    }])
+    const serialized = JSON.stringify(digest)
+    expect(serialized).not.toContain('firstField')
+    expect(serialized).not.toContain('secondField')
+    expect(serialized).not.toContain('synthetic-private-family')
+    expect(serialized).not.toContain('synthetic-private-value')
+    expect(serialized).not.toContain('privateField')
+  })
+
   it('forwards only bounded safe custom expected-shape tokens', () => {
     const schema = z.object({ card: z.string() }).superRefine((_value, context) => {
       context.addIssue({

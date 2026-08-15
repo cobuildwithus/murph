@@ -7262,6 +7262,16 @@ function readAttachResponseCardDiagnosticError(
     const parsed = diagnosticSchema.safeParse(value)
     return parsed.success ? fallbackError : parsed.error
   }
+  if (card) {
+    return new z.ZodError([{
+      code: z.ZodIssueCode.custom,
+      message: 'Choose a supported response-card family.',
+      params: {
+        murphExpectedShape: 'daily_nutrition_or_compact_table',
+      },
+      path: ['card', 'kind'],
+    }])
+  }
   return fallbackError
 }
 

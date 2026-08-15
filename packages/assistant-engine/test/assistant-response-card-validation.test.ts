@@ -121,6 +121,51 @@ function readCardToolRequest(card: unknown) {
 }
 
 describe('response-card validation feedback', () => {
+  it('returns one family-choice hint when card kind is absent or invalid', () => {
+    const cardWithoutKind: Record<string, unknown> = {
+      ...VALID_NUTRITION_CARD,
+    }
+    delete cardWithoutKind.kind
+    for (const card of [
+      cardWithoutKind,
+      { ...VALID_NUTRITION_CARD, kind: 'synthetic-private-family' },
+    ]) {
+      const request = readCardToolRequest(card)
+      expect(request).toMatchObject({
+        kind: 'invalid-response-card-arguments',
+        validationDigest: {
+          pathIssues: [{
+            path: 'card.kind',
+            code: 'custom',
+            expected: 'daily_nutrition_or_compact_table',
+          }],
+        },
+      })
+      if (!request || request.kind !== 'invalid-response-card-arguments') {
+        throw new Error('expected response-card family choice feedback')
+      }
+      expect(buildResponseCardValidationFeedback(
+        request.validationDigest,
+      )).toBe(JSON.stringify({
+        error: 'invalid_response_card_arguments',
+        hints: [{
+          field: 'card.kind',
+          code: 'custom',
+          expected: 'daily_nutrition_or_compact_table',
+        }],
+      }))
+      const serialized = JSON.stringify(request)
+      expect(serialized).not.toContain('synthetic-private-family')
+      expect(serialized).not.toContain('card.columns')
+      expect(serialized).not.toContain('card.rows')
+      expect(serialized).not.toContain('card.workout')
+    }
+
+    expect(readCardToolRequest(VALID_NUTRITION_CARD)).toMatchObject({
+      kind: 'attach-response-card',
+    })
+  })
+
   it('keeps missing-root diagnostics scoped to the offered audience', () => {
     const privateRequest = readCardToolArguments({
       typo: { marker: 'synthetic-private-marker' },
