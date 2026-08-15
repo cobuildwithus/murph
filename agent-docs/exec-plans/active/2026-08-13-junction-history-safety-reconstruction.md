@@ -524,6 +524,27 @@ Updated: 2026-08-14
   minimum-release-age exception and minimal lockfile resolution update. The
   installed CLI and registry latest both resolve to `0.5.131`; frozen install,
   dependency policy, and ignored-build inspection pass.
+- Final ReviewGPT round 15 reviewed exact head
+  `0eb0e97ade06b6bf863d8c93cef85e727e65f9f5` in the existing thread and
+  returned `ROUND_OUTCOME: FINDINGS` plus `REVIEW_COMPLETE`. The initial waited
+  capture failed closed after send because ChatGPT did not retain provable ZIP
+  attachment metadata; the committed-turn recovery watched the active review
+  to completion, and a read-only final-assistant export recovered the one marked
+  substantive result without resending the round.
+- Accepted the round-15 explicit companion-connect finding. The native start
+  owner still returned early for a connected, unfenced semantic source, so an
+  explicit `connectionIntent: connect` could mint a usable SDK token without
+  writing the pending source boundary or advancing the parent connection
+  version. Its later signed provider-registration webhook then classified the
+  unchanged source as already admitted and retained old schedule-time coverage.
+- No round-15 finding was rejected. Delete that early return so every explicit
+  companion connect reuses the existing source-start transaction, while the
+  separate passive `resume` path remains non-mutating. Established identity,
+  current lifecycle epoch, retained source-start coverage, parent-version fence,
+  webhook epoch advance, exact 12-coordinate clearing, and replacement
+  scheduling all remain owned by their existing paths. The correction removes
+  a branch and adds no state, status, provider read, field, queue, retry owner,
+  manager, cleanup process, or reconciliation loop.
 
 ## Verification
 
@@ -731,3 +752,15 @@ Updated: 2026-08-14
     webhook. Prepared Web typecheck, touched-file lint, `git diff --check`,
     dependency policy, ignored-build inspection, and frozen dependency install
     pass. ReviewGPT CLI and registry latest both report `0.5.131`.
+  - Round-15 remediation proof passes all 165 hosted-wake tests. The isolated
+    migrated-Postgres authority file passes all 4 cases with its established
+    opaque Apple Health source seeded connected before explicit native connect,
+    then proves pending source start, webhook epoch advance, provider disconnect,
+    bounded lower-epoch duplicate handling, reconnect, and final webhook. The
+    ReviewGPT 0.5.131 package-contract test passes after aligning its version,
+    configurable marked-response threshold, independent model-fallback constant,
+    extracted fail-closed helper, and current README contract assertions.
+  - Exact-head CI's assistant package shard also reported one timing-sensitive
+    outbox assertion outside the latest diff. Its exact named test passes alone
+    with 104 adjacent tests skipped, so no assistant production or test change
+    is made for that unrelated flake.

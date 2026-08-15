@@ -414,13 +414,6 @@ export async function beginHostedDeviceSyncConnectionSourceReconnect(input: {
     ) {
       connectionChangedDuringDisconnectError();
     }
-    if (
-      source?.status === "connected"
-      && !isHostedSourceDisconnectFenced(source)
-    ) {
-      return;
-    }
-
     const sourceInstanceKey = source?.sourceInstanceKey
       ?? buildJunctionProviderSourceInstanceKey({
         connectionId: expectedConnection.id,

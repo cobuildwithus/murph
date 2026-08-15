@@ -464,6 +464,7 @@ describe.skipIf(!runPostgresProof)(
           data: {
             firstSeenAt: new Date(fixture.receivedAt.getTime() - 120_000),
             sourceInstanceKey: opaqueSourceInstanceKey,
+            status: "connected",
           },
           where: { id: fixture.sourceId },
         });

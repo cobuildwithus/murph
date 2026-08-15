@@ -1153,7 +1153,7 @@ describe("hosted device-sync wakes", () => {
     expect(mocks.syncDurableConnectionState).not.toHaveBeenCalled();
   });
 
-  it("does not reset companion weight coverage when explicit connect finds the source already connected", async () => {
+  it("opens a pending lifecycle without clearing coverage when explicit connect finds the source already connected", async () => {
     const connection = buildHostedConnection({
       id: "dsc_junction_123",
       metadata: addJunctionHistoryCoverage(
@@ -1164,11 +1164,10 @@ describe("hosted device-sync wakes", () => {
       provider: "junction",
       setupPhase: "source_confirmed",
     });
+    const source = buildHostedConnectionSource(connection.id, "apple_health_kit");
     mocks.getConnectionForUser.mockResolvedValue(connection);
     mocks.listConnectionsForUser.mockResolvedValue([connection]);
-    mocks.listConnectionSources.mockResolvedValue([
-      buildHostedConnectionSource(connection.id, "apple_health_kit"),
-    ]);
+    mocks.listConnectionSources.mockResolvedValue([source]);
     const ingress = createHostedDeviceSyncPublicIngressService(
       new Request("https://control.example.test/api/device-sync/companion/sign-in-token"),
     );
@@ -1177,7 +1176,24 @@ describe("hosted device-sync wakes", () => {
       ingress.createSdkSignInSession("user-123", "junction", "connect"),
     ).resolves.toMatchObject({ signInToken: "junction-sign-in-token" });
 
-    expect(mocks.upsertConnectionSource).not.toHaveBeenCalled();
+    expect(mocks.upsertConnectionSource).toHaveBeenCalledWith(expect.objectContaining({
+      connectionId: connection.id,
+      lifecycleEpoch: source.lifecycleEpoch,
+      sourceInstanceKey: source.sourceInstanceKey,
+      sourceProviderSlug: source.sourceProviderSlug,
+      status: "disconnected",
+      tx: mocks.prismaTx,
+    }));
+    expect(mocks.advanceConnectionSourceStartBoundary).toHaveBeenCalledWith({
+      connectionId: connection.id,
+      updatedAt: expect.any(String),
+      tx: mocks.prismaTx,
+    });
+    expect(connection.metadata).toEqual(addJunctionHistoryCoverage(
+      addJunctionHistoryCoverage({}, "apple_health_kit", "weight"),
+      "withings",
+      "weight",
+    ));
     expect(mocks.syncDurableConnectionState).not.toHaveBeenCalled();
   });
 
