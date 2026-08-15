@@ -84,7 +84,8 @@ Updated: 2026-08-15
   tests, two real headed-browser smoke scenarios, Web typecheck, targeted ESLint,
   docs drift, diff check, and the privacy scan.
 - Passed locally after the bounded-locator remediation: the same 13 focused
-  tests, all three real headed-browser scenarios, Web typecheck, and targeted
-  ESLint. Docs and diff/privacy guards are rerun before the next commit.
+  tests, all three real headed-browser scenarios, seven workflow-contract tests,
+  Web, hosted-local harness, and Cloudflare typechecks, targeted ESLint, docs
+  drift, diff checks, and the privacy scan.
 - Expected outcome: diagnostics first prove the current consent structure, then
   the corrected driver completes the full provider and persisted-state journey.

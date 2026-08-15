@@ -455,21 +455,23 @@ async function summarizeAuthorizationActions(
         includeHidden: true,
         name: SAFE_AUTH_ACTION_PATTERN,
       });
-      const visiblePositiveControls = root.getByRole(role, {
-        name: SAFE_AUTH_ACTION_PATTERN,
-      });
-      const [positiveCount, visibleCount] = await Promise.all([
-        allPositiveControls.count().catch(() => 0),
-        visiblePositiveControls.count().catch(() => 0),
-      ]);
-      let visibleEnabledCount = 0;
-      for (let index = 0; index < visibleCount; index += 1) {
-        if (
-          await visiblePositiveControls.nth(index).isEnabled().catch(() => false)
-        ) {
-          visibleEnabledCount += 1;
-        }
-      }
+      const positiveCount = await allPositiveControls.count().catch(() => 0);
+      const visibleCount = Math.min(
+        positiveCount,
+        await allPositiveControls.filter({ visible: true }).count().catch(() => 0),
+      );
+      const visibleEnabledCount = Math.min(
+        visibleCount,
+        await root
+          .getByRole(role, {
+            disabled: false,
+            includeHidden: true,
+            name: SAFE_AUTH_ACTION_PATTERN,
+          })
+          .filter({ visible: true })
+          .count()
+          .catch(() => 0),
+      );
 
       summary.positive += positiveCount;
       summary.positiveHidden += Math.max(0, positiveCount - visibleCount);

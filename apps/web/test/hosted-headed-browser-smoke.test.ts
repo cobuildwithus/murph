@@ -54,6 +54,10 @@ describe("hosted headed browser boundary", () => {
           <iframe srcdoc='<button>Grant</button>'></iframe>
         `);
         await expect.poll(() => page.frames().length).toBe(2);
+        await expect.poll(async () =>
+          page.frames()[1]?.getByRole("button", { name: "Grant" }).isEnabled()
+            .catch(() => false) ?? false
+        ).toBe(true);
 
         let now = 0;
         const diagnosticPage = new Proxy(page, {
@@ -119,12 +123,12 @@ describe("hosted headed browser boundary", () => {
       try {
         const page = await browser.newPage();
         await page.setContent(
-          `<main>${"<button disabled>Grant</button>".repeat(8)}</main>`,
+          `<main>${"<button disabled>Grant</button>".repeat(3)}</main>`,
         );
         page.setDefaultTimeout(25);
 
         let now = 0;
-        let replacementScheduled = false;
+        let controlsReplaced = false;
         const diagnosticPage = new Proxy(page, {
           get(target, property, receiver) {
             if (property === "url") {
@@ -135,18 +139,51 @@ describe("hosted headed browser boundary", () => {
                 now += Math.max(duration, 15_000);
               };
             }
-            if (property === "evaluate") {
-              return async (callback: () => unknown) => {
-                const result = await target.evaluate(callback);
-                if (!replacementScheduled) {
-                  replacementScheduled = true;
-                  await target.evaluate(() => {
-                    window.setTimeout(() => {
-                      document.querySelector("main")?.replaceChildren();
-                    }, 5);
-                  });
+            if (property === "getByRole") {
+              return (
+                role: Parameters<typeof target.getByRole>[0],
+                options?: Parameters<typeof target.getByRole>[1],
+              ) => {
+                const controls = target.getByRole(role, options);
+                const diagnosticName = options?.name;
+                const isPositiveDiagnosticLocator = options?.includeHidden === true
+                  && (role === "button" || role === "link")
+                  && (
+                    diagnosticName === undefined
+                    || (
+                      diagnosticName instanceof RegExp
+                      && diagnosticName.test("Grant")
+                      && !diagnosticName.test("Don't allow")
+                    )
+                  );
+                if (!isPositiveDiagnosticLocator) {
+                  return controls;
                 }
-                return result;
+
+                return new Proxy(controls, {
+                  get(locatorTarget, locatorProperty, locatorReceiver) {
+                    if (locatorProperty === "count") {
+                      return async () => {
+                        const count = await locatorTarget.count();
+                        if (!controlsReplaced) {
+                          await target.locator("main").evaluate((element) => {
+                            element.replaceChildren();
+                          });
+                          controlsReplaced = true;
+                        }
+                        return count;
+                      };
+                    }
+                    const value = Reflect.get(
+                      locatorTarget,
+                      locatorProperty,
+                      locatorReceiver,
+                    );
+                    return typeof value === "function"
+                      ? value.bind(locatorTarget)
+                      : value;
+                  },
+                });
               };
             }
             const value = Reflect.get(target, property, receiver);
@@ -168,6 +205,7 @@ describe("hosted headed browser boundary", () => {
 
         expect(failure).toMatch(/Authorization surface: \{.*\}\.$/u);
         expect(performance.now() - startedAt).toBeLessThan(750);
+        expect(controlsReplaced).toBe(true);
         await expect.poll(() => page.getByRole("button").count()).toBe(0);
       } finally {
         await browser.close();
