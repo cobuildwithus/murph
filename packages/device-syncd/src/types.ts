@@ -384,6 +384,7 @@ export interface DeviceSyncPublicIngressStore {
   ): PublicDeviceSyncAccount | null | Promise<PublicDeviceSyncAccount | null>;
   upsertConnectionSource(
     input: UpsertDeviceConnectionSourceInput,
+    options?: { fenceActiveWorkOnReconnect?: boolean },
   ): Pick<PublicDeviceConnectionSource, "connectionId" | "sourceProviderSlug" | "status">
     | Promise<Pick<PublicDeviceConnectionSource, "connectionId" | "sourceProviderSlug" | "status">>;
   listConnectionSources(

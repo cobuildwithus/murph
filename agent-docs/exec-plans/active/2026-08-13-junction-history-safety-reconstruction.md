@@ -215,6 +215,14 @@ Updated: 2026-08-14
   sizes through the 396-coordinate bound, shared factors with four, stable dead
   coordinates, active-key suppression, successful-coordinate removal, and
   ordinary on-time scheduler passes.
+- An established local Junction source-start is the earliest reconnect owner
+  that can fence already-running work. Atomically advance the existing account's
+  `local_connection_revision` when that owner changes a connected source to
+  disconnected; the worker's existing success transaction then rejects the old
+  result. Do not clear source-first blood-pressure coverage, add a second
+  lifecycle, reread the provider, or add queue/process state. New sources and
+  repeated starts against an already-disconnected source do not advance the
+  revision; callback admission remains the sole lifecycle-epoch increment.
 
 ## ReviewGPT evidence and finding ledger
 
@@ -289,6 +297,25 @@ Updated: 2026-08-14
   implementation. An earlier accepted round-5 transport attempt completed
   reasoning but stored no final assistant response; it is an invalid empty
   capture and carries no verdict.
+- The first final round-6 attempt on exact head
+  `11d9c13d44465929ea62c7f9e010cac3811c94dc` was invalid: although it included
+  the exact patch and rounds 2-5, it omitted the round-1 finding ledger required
+  by the final-gate continuation contract. It returned `ROUND_OUTCOME: INVALID`
+  and carried no code verdict.
+- The corrected final round-6 retry reviewed the same exact head with the full
+  rounds 1-5 ledger in
+  [its review thread](https://chatgpt.com/c/6a7f9de7-2310-83ea-a7ff-17aed754e7c6).
+  It returned `ROUND_OUTCOME: FINDINGS` plus `REVIEW_COMPLETE` and identified
+  one accepted race: an old-lifecycle blood-pressure worker can finish import
+  after local reconnect starts but before callback admission, then certify
+  source-first coverage because source-start had not advanced the account
+  revision and the final provider guard applies only to current-day resources.
+  The accepted correction advances the existing revision inside the ordinary
+  source-disconnect write transaction and relies on the existing atomic worker
+  success fence. Production complexity is one optional owner flag and one
+  bounded update in the existing transaction; the larger change is regression
+  proof for the real SQLite interleaving, callback epoch, replacement schedule,
+  and preservation of already-complete blood-pressure coverage.
 
 ## Verification
 
@@ -399,4 +426,11 @@ Updated: 2026-08-14
     including factors shared with four; and the actual 33-source by 12-resource
     candidate set proves the 396-key bound plus active-key and completed-coverage
     suppression. The complete Junction history file passes 100 tests,
+    device-sync typecheck passes, and `git diff --check` passes.
+  - Round-6 remediation first reproduced the established-source race against
+    the uncorrected implementation: reconnect-start left
+    `local_connection_revision` at zero while the paused blood-pressure worker
+    completed. After the atomic source-start fence, the focused race and two
+    adjacent revision/source-start tests pass (3 tests), the complete service
+    file passes 116 tests, the full device-sync package passes 1,101 tests, the
     device-sync typecheck passes, and `git diff --check` passes.

@@ -346,7 +346,8 @@ class DeviceSyncServiceController {
           const account = this.store.getAccountByExternalAccount(provider, externalAccountId);
           return account ? this.toPublicAccount(account) : null;
         },
-        upsertConnectionSource: (input) => this.store.upsertConnectionSource(input),
+        upsertConnectionSource: (input, options) =>
+          this.store.upsertConnectionSource(input, options),
         listConnectionSources: (input) => this.store.listConnectionSources(input),
         claimWebhookTrace: (record) => this.store.claimWebhookTrace(record),
         completeWebhookTrace: (provider, traceId, claimToken) =>

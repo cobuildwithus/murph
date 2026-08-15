@@ -720,7 +720,10 @@ export function prepareConnectionSourceWriteInTransaction(
 export function upsertConnectionSource(
   database: DatabaseSync,
   input: UpsertDeviceConnectionSourceInput,
-  options: { preserveDisconnected?: boolean } = {},
+  options: {
+    fenceActiveWorkOnReconnect?: boolean;
+    preserveDisconnected?: boolean;
+  } = {},
 ): StoredDeviceConnectionSource {
   return withImmediateTransaction(database, () => {
     const prepared = prepareConnectionSourceWriteInTransaction(database, input);
@@ -734,7 +737,20 @@ export function upsertConnectionSource(
     ) {
       return prepared.existing;
     }
-    return upsertPreparedConnectionSourceInTransaction(database, prepared);
+    const reconnectStarted = options.fenceActiveWorkOnReconnect === true
+      && prepared.existing !== null
+      && prepared.existing.status !== "disconnected"
+      && prepared.normalized.status === "disconnected";
+    const source = upsertPreparedConnectionSourceInTransaction(database, prepared);
+    if (reconnectStarted) {
+      database.prepare(`
+        update device_observation_state
+        set local_connection_revision = local_connection_revision + 1,
+            updated_at = ?
+        where account_id = ?
+      `).run(source.lastSeenAt, source.connectionId);
+    }
+    return source;
   });
 }
 

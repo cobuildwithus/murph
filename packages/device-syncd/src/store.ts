@@ -240,7 +240,10 @@ export class SqliteDeviceSyncStore {
 
   upsertConnectionSource(
     input: UpsertDeviceConnectionSourceInput,
-    options?: { preserveDisconnected?: boolean },
+    options?: {
+      fenceActiveWorkOnReconnect?: boolean;
+      preserveDisconnected?: boolean;
+    },
   ): StoredDeviceConnectionSource {
     return upsertStoredConnectionSource(this.database, input, options);
   }

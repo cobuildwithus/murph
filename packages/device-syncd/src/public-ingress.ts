@@ -646,14 +646,17 @@ export class DeviceSyncPublicIngress {
         && sourceProviderSlug
         && !(reusedEstablishedJunctionAccount && input.sourceLifecycleProof)
       ) {
-        await this.store.upsertConnectionSource({
-          connectionId: seededAccount.id,
-          sourceInstanceKey,
-          sourceProviderSlug,
-          status: "disconnected",
-          firstSeenAt: now,
-          lastSeenAt: now,
-        });
+        await this.store.upsertConnectionSource(
+          {
+            connectionId: seededAccount.id,
+            sourceInstanceKey,
+            sourceProviderSlug,
+            status: "disconnected",
+            firstSeenAt: now,
+            lastSeenAt: now,
+          },
+          { fenceActiveWorkOnReconnect: reusedEstablishedJunctionAccount },
+        );
       }
     }
 

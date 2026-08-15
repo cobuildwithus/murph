@@ -16,7 +16,10 @@ import { createWhoopDeviceSyncProvider } from "../src/providers/whoop.ts";
 import { DEVICE_SYNC_SOURCE_USER_DISCONNECTED_ERROR_CODE } from "../src/public-account.ts";
 import { buildDeviceSyncTokenCipherOptions, createSecretCodec } from "../src/local-secret-codec.ts";
 import { DeviceSyncError, deviceSyncError } from "../src/errors.ts";
-import { hasJunctionExtendedTimeseriesHistoryBackfillCoverage } from "../src/junction-historical-backfill-progress.ts";
+import {
+  addJunctionExtendedTimeseriesHistoryBackfillCoverage,
+  hasJunctionExtendedTimeseriesHistoryBackfillCoverage,
+} from "../src/junction-historical-backfill-progress.ts";
 import {
   createDeviceSyncService,
   resolveDeviceSyncStoreNextJobWakeAt,
@@ -1020,6 +1023,253 @@ test("local shared-Junction target starts preserve established siblings through 
     assert.equal(afterCurrentCallback?.lifecycleEpoch, 3);
     assert.ok(countJobsForAccountForTesting(store, baseline.id) > jobsBeforeCallbacks);
   } finally {
+    close();
+    vi.useRealTimers();
+  }
+});
+
+test("local Junction reconnect fences in-flight blood-pressure completion before callback admission", async () => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date("2026-09-01T10:00:00.000Z"));
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-junction-reconnect-fence");
+  let importStartedResolve: (() => void) | null = null;
+  let releaseImportResolve: (() => void) | null = null;
+  const importStarted = new Promise<void>((resolve) => {
+    importStartedResolve = resolve;
+  });
+  const releaseImport = new Promise<void>((resolve) => {
+    releaseImportResolve = resolve;
+  });
+  const executionProvider = createJunctionDeviceSyncProvider({
+    apiKey: "sk_us_test_123",
+    clientUserIdSecret: "junction-client-user-id-secret",
+    environment: "sandbox",
+    region: "us",
+    summaryResources: ["activity"],
+    timeseriesResources: ["blood_pressure"],
+    fetchImpl: async (input) => {
+      const url = new URL(readUrl(input));
+      if (url.pathname === "/v2/user/providers/junction-user-reconnect") {
+        return createJsonResponse({
+          providers: [{
+            id: "provider-omron-reconnect",
+            slug: "omron",
+            name: "Omron",
+            status: "connected",
+            resource_availability: { blood_pressure: true },
+          }],
+        });
+      }
+      if (
+        url.pathname
+          === "/v2/timeseries/junction-user-reconnect/blood_pressure/grouped"
+      ) {
+        return createJsonResponse({
+          groups: {
+            omron: [{
+              data: [{
+                id: "bp-before-reconnect",
+                timestamp: "2026-05-12T08:30:00.000Z",
+                systolic: 121,
+                diastolic: 79,
+              }],
+            }],
+          },
+        });
+      }
+      throw new Error(`Unexpected Junction request during reconnect fence test: ${url.toString()}`);
+    },
+  });
+  const provider: DeviceSyncProvider = {
+    ...executionProvider,
+    connectionHandler: {
+      async beginConnection(input) {
+        return {
+          authorizationUrl: `https://junction.example.test/link?state=${input.state}`,
+          connectionSeed: {
+            externalAccountId: "junction-user-reconnect",
+            displayName: "Junction",
+            status: "active",
+            setupPhase: "pending_link",
+            setupExpiresAt: "2026-09-01T10:30:00.000Z",
+            scopes: [],
+            credential: {
+              kind: "provider_config",
+              providerConfigKey: "junction",
+            },
+            nextReconcileAt: null,
+          },
+        };
+      },
+      async completeConnection() {
+        return {
+          externalAccountId: "junction-user-reconnect",
+          displayName: "Junction",
+          scopes: [],
+          credential: {
+            kind: "provider_config",
+            providerConfigKey: "junction",
+          },
+          setupPhase: "link_returned",
+          initialJobs: [],
+          nextReconcileAt: null,
+        };
+      },
+      async revokeAccess() {},
+    },
+  };
+  const { service, store, close } = createServiceFixture({
+    secret: "secret-for-tests",
+    clock: { now: () => new Date() },
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+    },
+    importer: {
+      async importDeviceProviderSnapshot(input) {
+        importStartedResolve?.();
+        await releaseImport;
+        const result = await prepareDeviceProviderSnapshotImport(input);
+        return { events: result.events ?? [] };
+      },
+    },
+    providers: [provider],
+  });
+
+  try {
+    const account = store.upsertAccount({
+      provider: "junction",
+      externalAccountId: "junction-user-reconnect",
+      displayName: "Junction",
+      scopes: [],
+      status: "active",
+      setupPhase: "source_confirmed",
+      credential: {
+        kind: "provider_config",
+        providerConfigKey: "junction",
+        credentialMetadata: {},
+      },
+      connectedAt: "2026-05-14T00:00:00.000Z",
+      nextReconcileAt: null,
+    });
+    const source = store.upsertConnectionSource({
+      connectionId: account.id,
+      sourceInstanceKey: "omron",
+      sourceProviderSlug: "omron",
+      status: "connected",
+      resourceAvailabilitySummary: { blood_pressure: true },
+      firstSeenAt: "2026-05-12T00:00:00.000Z",
+      lastSeenAt: "2026-09-01T09:59:00.000Z",
+    });
+    const staleJob = store.enqueueJob({
+      accountId: account.id,
+      provider: "junction",
+      kind: "resource",
+      payload: {
+        historicalBackfill: true,
+        historicalRecordsSeen: true,
+        historicalWindowStart: "2026-05-12T00:00:00.000Z",
+        resource: "blood_pressure",
+        resourceCategory: "timeseries",
+        sourceLifecycleEpoch: source.lifecycleEpoch,
+        sourceProviderSlug: "omron",
+        windowStart: "2026-05-12T00:00:00.000Z",
+        windowEnd: "2026-05-14T00:00:00.000Z",
+      },
+      availableAt: "2026-09-01T10:00:00.000Z",
+      dedupeKey: `hosted-device-sync:${"b".repeat(64)}`,
+    });
+
+    const worker = service.runWorkerOnce();
+    await importStarted;
+    const revisionBeforeReconnect = store.getAccountById(account.id)?.localConnectionRevision;
+    assert.ok(revisionBeforeReconnect !== undefined);
+
+    vi.setSystemTime(new Date("2026-09-01T10:01:00.000Z"));
+    const reconnect = await service.startConnection({
+      ownerId: "<REDACTED_OWNER_ID>",
+      provider: "junction",
+      sourceProviderSlug: "omron",
+    });
+    const revisionAfterReconnectStart =
+      store.getAccountById(account.id)?.localConnectionRevision;
+    requireCallback(releaseImportResolve, "import release callback was not initialized")();
+    await worker;
+
+    assert.equal(revisionAfterReconnectStart, revisionBeforeReconnect + 1);
+    assert.equal(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
+      store.getAccountById(account.id)?.metadata ?? {},
+      "omron",
+      "blood_pressure",
+      1,
+    ), false);
+    assert.equal(
+      readJobsForAccountForTesting(store, account.id)
+        .find((job) => job.id === staleJob.id)?.status,
+      "queued",
+    );
+
+    vi.setSystemTime(new Date("2026-09-01T10:02:00.000Z"));
+    await service.handleConnectionCallback({
+      expectedOwnerId: "<REDACTED_OWNER_ID>",
+      provider: "junction",
+      query: new URLSearchParams({
+        murph_state: reconnect.state,
+        result: "success",
+      }),
+    });
+    const reconnectedAccount = store.getAccountById(account.id);
+    assert.ok(reconnectedAccount);
+    const reconnectedSource = reconnectedAccount.sources?.find(
+      (candidate) => candidate.sourceProviderSlug === "omron",
+    );
+    assert.equal(reconnectedSource?.lifecycleEpoch, source.lifecycleEpoch + 1);
+    const replacementSchedule = executionProvider.jobExecutor?.createScheduledJobs?.(
+      reconnectedAccount,
+      "2026-09-01T10:02:00.000Z",
+    );
+    assert.ok(replacementSchedule?.jobs.some((job) =>
+      job.kind === "resource"
+      && job.payload?.resource === "blood_pressure"
+      && job.payload.sourceProviderSlug === "omron"
+      && job.payload.sourceLifecycleEpoch === reconnectedSource?.lifecycleEpoch
+    ));
+
+    const coverage = addJunctionExtendedTimeseriesHistoryBackfillCoverage({
+      metadata: reconnectedAccount.metadata,
+      providerSlug: "omron",
+      resource: "blood_pressure",
+      version: 1,
+    });
+    assert.ok(coverage);
+    store.patchAccount(account.id, {
+      metadata: { [coverage.metadataKey]: coverage.value },
+    });
+
+    vi.setSystemTime(new Date("2026-09-01T10:03:00.000Z"));
+    const ordinaryReconnect = await service.startConnection({
+      ownerId: "<REDACTED_OWNER_ID>",
+      provider: "junction",
+      sourceProviderSlug: "omron",
+    });
+    vi.setSystemTime(new Date("2026-09-01T10:04:00.000Z"));
+    await service.handleConnectionCallback({
+      expectedOwnerId: "<REDACTED_OWNER_ID>",
+      provider: "junction",
+      query: new URLSearchParams({
+        murph_state: ordinaryReconnect.state,
+        result: "success",
+      }),
+    });
+    assert.equal(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
+      store.getAccountById(account.id)?.metadata ?? {},
+      "omron",
+      "blood_pressure",
+      1,
+    ), true);
+  } finally {
+    requireCallback(releaseImportResolve, "import release callback was not initialized")();
     close();
     vi.useRealTimers();
   }
