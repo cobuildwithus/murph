@@ -794,6 +794,10 @@ describe("HostedDataPrivacySettings", () => {
 
   test.each([
     {
+      code: "HOSTED_STRIPE_EFFECT_PENDING",
+      message: "Billing is already changing. Try again shortly.",
+    },
+    {
       code: "ACCOUNT_DELETION_CONNECTED_APP_SETUP_IN_PROGRESS",
       message: "Connected-app setup is still finishing. Try account deletion again after it finishes or times out.",
     },

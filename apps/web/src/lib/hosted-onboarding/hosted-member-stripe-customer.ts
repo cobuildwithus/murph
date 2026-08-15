@@ -6,6 +6,7 @@ import type Stripe from "stripe";
 import { getPrisma } from "../prisma";
 import { hostedOnboardingError } from "./errors";
 import {
+  assertNoHostedMemberStripeEffectTx,
   bindHostedMemberStripeCustomerIdIfMissingTx,
   readHostedMemberStripeBillingRef,
 } from "./hosted-member-billing-store";
@@ -47,6 +48,10 @@ export async function ensureHostedMemberStripeCustomer(input: {
     if (!member || member.suspendedAt || member.threadContainer) {
       throw buildHostedUsageCreditPayerNotEligibleError();
     }
+    await assertNoHostedMemberStripeEffectTx({
+      memberId: input.memberId,
+      tx,
+    });
 
     const current = await readHostedMemberStripeBillingRef({
       memberId: input.memberId,

@@ -174,6 +174,15 @@ Stripe client and harness-owned `stripe listen` child, not the browser,
 Cloudflare, Temporal, setup, or runner children. Do not pass it as a CLI
 argument or write it to a repository file.
 
+The Stripe effect compatibility cutover has an additional credential-free
+database proof. After applying all Web migrations to an isolated loopback
+PostgreSQL database, run the `hosted-onboarding-member-lock-postgres.test.ts`
+command documented in
+`agent-docs/operations/stripe-effect-compatibility-cutover.md`. Its controlled
+barriers prove waiting current-revision direct, Family, relationship-authority,
+and owner/beneficiary deletion writers observe a committed future claim before
+provider or authority mutation.
+
 Use stable pre-provisioned test prices and an active default Portal
 configuration with plan updates enabled and immediate invoicing. The browser
 journey, rather than a cached configuration projection, proves that Stripe
