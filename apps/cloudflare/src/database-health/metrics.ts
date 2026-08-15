@@ -1,5 +1,8 @@
+export const DATABASE_CONNECTION_ERROR_METRIC_NAME =
+  "planetscale_edge_postgres_connection_errors_total";
+
 export const DATABASE_HEALTH_REQUIRED_METRIC_NAMES = [
-  "planetscale_edge_postgres_connection_errors_total",
+  DATABASE_CONNECTION_ERROR_METRIC_NAME,
   "planetscale_pgbouncer_current_connections",
   "planetscale_pgbouncer_pools_client",
   "planetscale_pgbouncer_pools_client_maxwait_seconds",
@@ -27,6 +30,11 @@ export const DATABASE_CONNECTION_ERROR_PORTS = ["5432", "6432"] as const;
 
 export type DatabaseConnectionErrorPort =
   typeof DATABASE_CONNECTION_ERROR_PORTS[number];
+
+export interface DatabaseConnectionErrorCollectionEvidence {
+  missingPortAttempts: Readonly<Record<DatabaseConnectionErrorPort, number>>;
+  parsedAttempts: number;
+}
 
 export type DatabaseConnectionErrorDeltas = Readonly<
   Record<DatabaseConnectionErrorPort, number | null>
@@ -110,6 +118,7 @@ export type DatabaseHealthCondition =
       failures: number;
       incompleteChecks?: number;
       kind: "monitoring_unavailable";
+      connectionErrorEvidence?: DatabaseConnectionErrorCollectionEvidence;
       missingMetrics: readonly DatabaseHealthRequiredMetricName[];
       unavailableChecks?: number;
     };
@@ -217,19 +226,13 @@ export function parsePlanetScaleDatabaseMetricObservation(
       point.name === "planetscale_edge_postgres_connection_errors_total"
       && isDatabaseConnectionErrorPort(point.labels[PORT_LABEL]),
   );
-  const observedConnectionErrorPorts = new Set(
-    connectionErrorPoints.map((point) => point.labels[PORT_LABEL]),
-  );
+  const connectionErrorCounters = connectionErrorPoints.length === 0
+    ? null
+    : sumConnectionErrorsByPortAndRegion(connectionErrorPoints);
 
   const missingMetricSet = new Set<DatabaseHealthRequiredMetricName>();
-  if (
-    DATABASE_CONNECTION_ERROR_PORTS.some(
-      (port) => !observedConnectionErrorPorts.has(port),
-    )
-  ) {
-    missingMetricSet.add(
-      "planetscale_edge_postgres_connection_errors_total",
-    );
+  if (readMissingConnectionErrorPorts(connectionErrorCounters).length > 0) {
+    missingMetricSet.add(DATABASE_CONNECTION_ERROR_METRIC_NAME);
   }
   if (currentConnectionPoints.length === 0) {
     missingMetricSet.add("planetscale_pgbouncer_current_connections");
@@ -329,9 +332,7 @@ export function parsePlanetScaleDatabaseMetricObservation(
         ? null
         : maximumMetricValue(clientWaitPoints),
       clientWaitingConnections,
-      connectionErrorCounters: connectionErrorPoints.length === 0
-        ? null
-        : sumConnectionErrorsByPortAndRegion(connectionErrorPoints),
+      connectionErrorCounters,
       postgresConnections: postgresConnectionStates
         ? sumMapValues(new Map(Object.entries(postgresConnectionStates)))
         : null,
@@ -401,14 +402,14 @@ export function advanceConnectionErrorCounterBaseline(
   return nextBaseline;
 }
 
-export function hasExpectedConnectionErrorPorts(
-  counters: Readonly<Record<string, number>>,
-): boolean {
+export function readMissingConnectionErrorPorts(
+  counters: Readonly<Record<string, number>> | null,
+): DatabaseConnectionErrorPort[] {
   const observedPorts = new Set(
-    Object.keys(counters).map(readConnectionErrorSeriesPort),
+    Object.keys(counters ?? {}).map(readConnectionErrorSeriesPort),
   );
-  return DATABASE_CONNECTION_ERROR_PORTS.every(
-    (port) => observedPorts.has(port),
+  return DATABASE_CONNECTION_ERROR_PORTS.filter(
+    (port) => !observedPorts.has(port),
   );
 }
 

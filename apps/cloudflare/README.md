@@ -234,20 +234,34 @@ remains single-pass so available unsafe evidence pages without delay. The
 connection-error family expects both ports, keyed by port and region so their
 series cannot collide. Missing either port keeps that family unknown. When a
 safe observation is otherwise complete, the monitor makes one confirmation
-scrape after the same one-second delay, evaluates every available confirmation
-signal, and composes complementary observed ports with the original complete
-gauge evidence. Each observed port advances only its own usable baseline; an
-omitted port retains its prior baseline, and new or reset region series are
-suppressed independently. A failed or still-incomplete confirmation retains
-the original incomplete observation, so absence never becomes zero, an old
+scrape after one second. PlanetScale's [documented example Prometheus scrape
+configuration](https://planetscale.com/docs/postgres/monitoring/prometheus-postgres)
+uses 30 seconds, but that is not a provider freshness guarantee and does not
+justify another provider call. The monitor evaluates every available
+confirmation signal
+and composes complementary observed ports with the original complete
+gauge evidence. A safe still-incomplete confirmation contributes its observed
+counters to the original complete gauge evidence, so a port first seen there
+advances its baseline. Each observed port advances only its own usable baseline;
+an omitted port retains its prior baseline, and new or reset region series are
+suppressed independently. A failed confirmation retains the original
+incomplete observation, so absence never becomes zero, an old
 counter delta is never replayed, and two persistently incomplete checks still
-open the fallback monitoring incident. An acknowledged telemetry-only page is
+open the fallback monitoring incident. This keeps the existing maximum of two
+observations and four provider requests; even two sequential ten-second fetch
+timeouts per observation plus the one-second wait remain below the two-minute
+run lease.
+Structured failure warnings retain the parsed-observation count and exact
+per-port omission counts without raw scrape content. An acknowledged
+telemetry-only page is
 one-shot for one unresolved operator-notification window.
 Crossing the two-failure threshold records one bounded alert obligation in the
 existing incident row. The first two-check window counts incomplete versus
-unavailable observations, unions only canonical missing families observed on
-partial checks, and identifies the threshold time as the window end. A bounded
-per-sample evidence value preserves that provenance across restart. An older
+unavailable observations, unions only canonical missing families, and sums
+parsed observations plus exact 5432/6432 omission counts from partial checks.
+It identifies the threshold time as the window end. A bounded per-sample evidence value preserves
+that provenance across restart, while legacy evidence remains readable without
+inventing port detail. An older
 pending page or connection-error priority cannot lose the obligation; recovery
 and another gap before acknowledgment coalesce into that same notification
 while the first threshold window remains authoritative. The obligation does

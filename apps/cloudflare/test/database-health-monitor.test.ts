@@ -1025,6 +1025,11 @@ describe("database health monitor", () => {
     expect(warning).toHaveBeenCalledWith(
       "Database health metrics collection failed.",
       {
+        attempts: 1,
+        connectionErrorEvidence: {
+          missingPortAttempts: { "5432": 0, "6432": 0 },
+          parsedAttempts: 1,
+        },
         failureCode: "required_metrics_missing",
         failures: 1,
         missingMetrics: [
@@ -1041,6 +1046,10 @@ describe("database health monitor", () => {
         failures: 2,
         incompleteChecks: 2,
         kind: "monitoring_unavailable",
+        connectionErrorEvidence: {
+          missingPortAttempts: { "5432": 0, "6432": 0 },
+          parsedAttempts: 2,
+        },
         missingMetrics: [
           "planetscale_postgres_settings_max_connections",
         ],
@@ -1417,6 +1426,115 @@ describe("database health monitor", () => {
     expect(harness.primaryLinqRequests).toEqual([]);
   });
 
+  it("advances a safe port baseline first observed by an incomplete confirmation", async () => {
+    const missingConnectionErrorsBody = buildMetricsBody({
+      branchId: BRANCH_ID,
+    }).replace(
+      /^planetscale_edge_postgres_connection_errors_total.*$/gmu,
+      "",
+    );
+    const directOnlyBody = buildMetricsBody({
+      branchId: BRANCH_ID,
+      directErrors: 5,
+    }).replace(
+      /^planetscale_edge_postgres_connection_errors_total\{[^\n]*planetscale_port="6432".*$/mu,
+      "",
+    );
+    const completeIncrementBody = buildMetricsBody({
+      branchId: BRANCH_ID,
+      directErrors: 6,
+    });
+    let scrapeAttempt = 0;
+    const harness = createMonitorHarness({
+      readMetricsBody() {
+        scrapeAttempt += 1;
+        if (scrapeAttempt === 1) {
+          return missingConnectionErrorsBody;
+        }
+        return scrapeAttempt === 2
+          ? directOnlyBody
+          : completeIncrementBody;
+      },
+    });
+
+    await expect(harness.runScheduledCheck(FIVE_MINUTES_MS)).resolves
+      .toMatchObject({ outcome: "healthy", sampleStatus: "failed" });
+    await expect(
+      harness.runScheduledCheck(FIVE_MINUTES_MS * 2),
+    ).resolves.toMatchObject({
+      conditions: [
+        { count: 1, kind: "direct_migration_admission_failures" },
+      ],
+      outcome: "alert_sent",
+      sampleStatus: "ok",
+    });
+
+    expect(harness.planetScaleRequests).toHaveLength(6);
+    expect(harness.retryWaits).toEqual([1_000]);
+    expect(harness.monitor.readRecentSamples()[0]).toMatchObject({
+      connectionErrorDelta: 1,
+      scrapeStatus: "ok",
+    });
+  });
+
+  it("advances a reset port baseline observed only by an incomplete confirmation", async () => {
+    const baselineBody = buildMetricsBody({
+      branchId: BRANCH_ID,
+      directErrors: 10,
+      pooledErrors: 20,
+    });
+    const missingConnectionErrorsBody = baselineBody.replace(
+      /^planetscale_edge_postgres_connection_errors_total.*$/gmu,
+      "",
+    );
+    const resetDirectOnlyBody = buildMetricsBody({
+      branchId: BRANCH_ID,
+      directErrors: 1,
+      pooledErrors: 20,
+    }).replace(
+      /^planetscale_edge_postgres_connection_errors_total\{[^\n]*planetscale_port="6432".*$/mu,
+      "",
+    );
+    const incrementedBody = buildMetricsBody({
+      branchId: BRANCH_ID,
+      directErrors: 2,
+      pooledErrors: 20,
+    });
+    let scrapeAttempt = 0;
+    const harness = createMonitorHarness({
+      readMetricsBody() {
+        scrapeAttempt += 1;
+        if (scrapeAttempt === 1) {
+          return baselineBody;
+        }
+        if (scrapeAttempt === 2) {
+          return missingConnectionErrorsBody;
+        }
+        return scrapeAttempt === 3
+          ? resetDirectOnlyBody
+          : incrementedBody;
+      },
+    });
+
+    await expect(harness.runScheduledCheck(FIVE_MINUTES_MS)).resolves
+      .toMatchObject({ outcome: "healthy", sampleStatus: "ok" });
+    await expect(
+      harness.runScheduledCheck(FIVE_MINUTES_MS * 2),
+    ).resolves.toMatchObject({ outcome: "healthy", sampleStatus: "failed" });
+    await expect(
+      harness.runScheduledCheck(FIVE_MINUTES_MS * 3),
+    ).resolves.toMatchObject({
+      conditions: [
+        { count: 1, kind: "direct_migration_admission_failures" },
+      ],
+      outcome: "alert_sent",
+      sampleStatus: "ok",
+    });
+
+    expect(harness.planetScaleRequests).toHaveLength(8);
+    expect(harness.retryWaits).toEqual([1_000]);
+  });
+
   it("pages an available unsafe signal without retrying a missing connection-error family", async () => {
     const partialMetricsBody = buildMetricsBody({
       branchId: BRANCH_ID,
@@ -1560,10 +1678,11 @@ describe("database health monitor", () => {
   });
 
   it("retains the two-check telemetry page when connection-error retries stay incomplete", async () => {
+    const warning = vi.spyOn(console, "warn").mockImplementation(() => {});
     const partialMetricsBody = buildMetricsBody({
       branchId: BRANCH_ID,
     }).replace(
-      /^planetscale_edge_postgres_connection_errors_total.*$/gmu,
+      /^planetscale_edge_postgres_connection_errors_total\{[^\n]*planetscale_port="6432".*$/mu,
       "",
     );
     const harness = createMonitorHarness({ metricsBody: partialMetricsBody });
@@ -1580,6 +1699,10 @@ describe("database health monitor", () => {
         {
           failures: 2,
           kind: "monitoring_unavailable",
+          connectionErrorEvidence: {
+            missingPortAttempts: { "5432": 0, "6432": 4 },
+            parsedAttempts: 4,
+          },
           missingMetrics: [
             "planetscale_edge_postgres_connection_errors_total",
           ],
@@ -1594,8 +1717,73 @@ describe("database health monitor", () => {
     const alert = await readLinqRequestBody(harness.primaryLinqRequests[0]);
     expect(alert.message.parts[0]?.value).toBe(
       "Database monitor telemetry was incomplete for 2 checks "
-      + "(missing PlanetScale metric observed: connection errors on ports "
-      + "5432 and 6432). "
+      + "(missing PlanetScale metric observed: connection errors "
+      + "(missing-port counts across parsed observations: 6432 in 4/4)). "
+      + "Window ended 00:10 UTC.",
+    );
+    expect(warning).toHaveBeenNthCalledWith(
+      1,
+      "Database health metrics collection failed.",
+      {
+        attempts: 2,
+        connectionErrorEvidence: {
+          missingPortAttempts: { "5432": 0, "6432": 2 },
+          parsedAttempts: 2,
+        },
+        failureCode: "required_metrics_missing",
+        failures: 1,
+        missingMetrics: [
+          "planetscale_edge_postgres_connection_errors_total",
+        ],
+      },
+    );
+  });
+
+  it("reports every missing connection-error port observed across the alert window", async () => {
+    const completeMetricsBody = buildMetricsBody({ branchId: BRANCH_ID });
+    const missingDirectMetricsBody = completeMetricsBody.replace(
+      /^planetscale_edge_postgres_connection_errors_total\{[^\n]*planetscale_port="5432".*$/mu,
+      "",
+    );
+    const missingPooledMetricsBody = completeMetricsBody.replace(
+      /^planetscale_edge_postgres_connection_errors_total\{[^\n]*planetscale_port="6432".*$/mu,
+      "",
+    );
+    let scrapeAttempt = 0;
+    const harness = createMonitorHarness({
+      readMetricsBody() {
+        scrapeAttempt += 1;
+        return scrapeAttempt <= 2
+          ? missingDirectMetricsBody
+          : missingPooledMetricsBody;
+      },
+    });
+
+    await expect(harness.runScheduledCheck(FIVE_MINUTES_MS)).resolves
+      .toMatchObject({ outcome: "healthy", sampleStatus: "failed" });
+    await expect(
+      harness.runScheduledCheck(FIVE_MINUTES_MS * 2),
+    ).resolves.toMatchObject({
+      conditions: [{
+        failures: 2,
+        kind: "monitoring_unavailable",
+        connectionErrorEvidence: {
+          missingPortAttempts: { "5432": 2, "6432": 2 },
+          parsedAttempts: 4,
+        },
+      }],
+      outcome: "alert_sent",
+      sampleStatus: "failed",
+    });
+
+    expect(harness.planetScaleRequests).toHaveLength(8);
+    expect(harness.retryWaits).toEqual([1_000, 1_000]);
+    const alert = await readLinqRequestBody(harness.primaryLinqRequests[0]);
+    expect(alert.message.parts[0]?.value).toBe(
+      "Database monitor telemetry was incomplete for 2 checks "
+      + "(missing PlanetScale metric observed: connection errors "
+      + "(missing-port counts across parsed observations: 5432 in 2/4; "
+      + "6432 in 2/4)). "
       + "Window ended 00:10 UTC.",
     );
   });

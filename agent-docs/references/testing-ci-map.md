@@ -628,7 +628,10 @@ supported provider credential.
   and independent reset/new-series suppression across complete and partial
   samples. They also prove per-port baseline advancement with omitted-port
   retention, one bounded confirmation for a safe connection-error-family
-  omission, multi-family confirmation rejection, cross-scrape port composition,
+  omission, confirmation-only port baseline advancement, exact single-port
+  warning and persisted alert evidence, alternating-port window aggregation,
+  legacy evidence parsing,
+  multi-family confirmation rejection, cross-scrape port composition,
   immediate unsafe-signal paging before that confirmation, unsafe confirmation
   paging without losing the complementary baseline, failed-confirmation
   retention, positive recovered-counter deltas, persistent-gap telemetry

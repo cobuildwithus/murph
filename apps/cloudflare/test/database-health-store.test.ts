@@ -91,6 +91,10 @@ describe("database health store", () => {
       failureCode: "required_metrics_missing",
       monitoringEvidence: {
         availability: "incomplete",
+        connectionErrorEvidence: {
+          missingPortAttempts: { "5432": 0, "6432": 1 },
+          parsedAttempts: 1,
+        },
         missingMetrics: [
           "planetscale_edge_postgres_connection_errors_total",
         ],
@@ -115,6 +119,16 @@ describe("database health store", () => {
     expect(store.readLatestConnectionErrorCounterBaseline()).toEqual(
       connectionErrorCounterBaseline,
     );
+    expect(store.readLatestMonitoringEvidence()).toEqual({
+      availability: "incomplete",
+      connectionErrorEvidence: {
+        missingPortAttempts: { "5432": 0, "6432": 1 },
+        parsedAttempts: 1,
+      },
+      missingMetrics: [
+        "planetscale_edge_postgres_connection_errors_total",
+      ],
+    });
     expect(store.readRecentSamples()).toEqual([
       expect.objectContaining({
         connectionErrorDelta: 2,
@@ -170,6 +184,10 @@ describe("database health store", () => {
 
     expect(store.readLatestMonitoringEvidence()).toEqual({
       availability: "incomplete",
+      connectionErrorEvidence: {
+        missingPortAttempts: { "5432": 0, "6432": 0 },
+        parsedAttempts: 0,
+      },
       missingMetrics: [],
     });
     expect(sql.exec<{ name: string }>(
@@ -189,6 +207,10 @@ describe("database health store", () => {
     store.openIncident();
     store.recordMonitoringAlertObligation({
       checkedAtMs: 600_000,
+      connectionErrorEvidence: {
+        missingPortAttempts: { "5432": 0, "6432": 0 },
+        parsedAttempts: 2,
+      },
       failures: 2,
       incompleteChecks: 2,
       missingMetrics: [
@@ -216,5 +238,124 @@ describe("database health store", () => {
       pendingAlertIdempotencyKey: null,
       pendingAlertMessage: null,
     });
+  });
+
+  it("reads legacy monitoring obligations without port evidence", () => {
+    const sql = createTestSqlStorage();
+    const store = new DatabaseHealthStore(sql);
+    sql.exec(
+      `UPDATE database_health_meta
+       SET monitoring_alert_owed_json = ?
+       WHERE singleton = 1`,
+      JSON.stringify({
+        checkedAtMs: 600_000,
+        failures: 2,
+        incompleteChecks: 2,
+        missingMetrics: [
+          "planetscale_edge_postgres_connection_errors_total",
+        ],
+        unavailableChecks: 0,
+      }),
+    );
+
+    expect(store.readAlertState().monitoringAlertObligation).toEqual({
+      checkedAtMs: 600_000,
+      connectionErrorEvidence: {
+        missingPortAttempts: { "5432": 0, "6432": 0 },
+        parsedAttempts: 0,
+      },
+      failures: 2,
+      incompleteChecks: 2,
+      missingMetrics: [
+        "planetscale_edge_postgres_connection_errors_total",
+      ],
+      unavailableChecks: 0,
+    });
+  });
+
+  it.each([
+    {
+      name: "unknown port",
+      value: {
+        availability: "incomplete",
+        connectionErrorEvidence: {
+          missingPortAttempts: { "5432": 0, "6432": 1, "9999": 1 },
+          parsedAttempts: 1,
+        },
+        missingMetrics: [
+          "planetscale_edge_postgres_connection_errors_total",
+        ],
+      },
+    },
+    {
+      name: "excess parsed attempts",
+      value: {
+        availability: "incomplete",
+        connectionErrorEvidence: {
+          missingPortAttempts: { "5432": 0, "6432": 3 },
+          parsedAttempts: 3,
+        },
+        missingMetrics: [
+          "planetscale_edge_postgres_connection_errors_total",
+        ],
+      },
+    },
+    {
+      name: "port evidence on an unavailable collection",
+      value: {
+        availability: "unavailable",
+        connectionErrorEvidence: {
+          missingPortAttempts: { "5432": 0, "6432": 1 },
+          parsedAttempts: 1,
+        },
+        missingMetrics: [],
+      },
+    },
+    {
+      name: "port evidence without the connection-error family",
+      value: {
+        availability: "incomplete",
+        connectionErrorEvidence: {
+          missingPortAttempts: { "5432": 0, "6432": 1 },
+          parsedAttempts: 1,
+        },
+        missingMetrics: [
+          "planetscale_postgres_settings_max_connections",
+        ],
+      },
+    },
+    {
+      name: "connection-error family without a missing-port count",
+      value: {
+        availability: "incomplete",
+        connectionErrorEvidence: {
+          missingPortAttempts: { "5432": 0, "6432": 0 },
+          parsedAttempts: 1,
+        },
+        missingMetrics: [
+          "planetscale_edge_postgres_connection_errors_total",
+        ],
+      },
+    },
+  ])("rejects invalid monitoring evidence: $name", ({ value }) => {
+    const sql = createTestSqlStorage();
+    const store = new DatabaseHealthStore(sql);
+    sql.exec(
+      `INSERT INTO database_health_samples (
+         observed_at_ms,
+         scrape_status,
+         failure_code,
+         server_pool_states_json,
+         postgres_connection_states_json,
+         direct_connection_error_counters_json,
+         monitoring_evidence_json,
+         conditions_json
+       ) VALUES (300000, 'failed', 'required_metrics_missing', '{}', '{}', '{}', ?, '[]')`,
+      JSON.stringify(value),
+    );
+
+    expect(() => store.readLatestMonitoringEvidence()).toThrow(
+      /database monitoring/u,
+    );
   });
 });
