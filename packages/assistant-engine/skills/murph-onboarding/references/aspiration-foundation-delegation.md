@@ -28,41 +28,6 @@ self-contained task with the exact relevant source words, its canonical owner
 or skill, an idempotent dedupe rule, and explicit exclusions for the other two
 families.
 
-### Foundation persistence child contract
-
-Cross-model routing is fail-closed. Unless the current V2 `spawn_agent` schema
-visibly exposes both `model` and `reasoning_effort` **and** its host-owned usage
-hint contains the exact sentence “Authoritative child usage evidence is active
-for Murph onboarding foundation persistence.”, omit `model`,
-`reasoning_effort`, and `service_tier`; every child inherits the root routing.
-Never infer enablement from a model catalog, the root model, the provider, a
-user request, or knowledge of hidden tool arguments. The host must withhold the
-marker for local ChatGPT subscription auth, Venice, custom inference, and any
-unknown provider or credential class; those paths always inherit the root.
-
-Only when both gate conditions are present, route the movement/current-protocol,
-supplements, and medical/safety persistence children to
-`model: "gpt-5.6-luna"` with `reasoning_effort: "high"`. This applies whether
-one, two, or all three named families are present. Never apply that override to
-the root, aspiration capture, lab extraction, other onboarding work, another
-skill, or an unrelated child, and never override `service_tier`.
-
-For each family, carry one stable assignment key in the child task: the family
-plus the accepted message ref shown in the prompt. Feed that same key to the
-canonical owner's existing idempotency or dedupe surface when available. If no
-message ref is visible, use the exact accepted source words as the dedupe source
-and do not invent a random identity or a new persistence layer.
-
-Each child follows one recovery-safe sequence: read the canonical state for its
-family; decide whether a create, update, or no-op is still needed; perform one
-bounded idempotent mutation pass through the existing canonical owner; read the
-canonical result back; and return the canonical identifiers plus whether the
-result was newly written or already present. If a mutation or dispatched child
-has an unknown outcome, do not repeat the mutation, start a replacement child,
-or let the parent duplicate the write. A later recovery first reads canonical
-state using the same assignment key; only a proven no-write may be retried as a
-separately identified provider attempt.
-
 Every onboarding child is a one-shot leaf worker. Do not message, follow up
 with, resume, reuse, close, or interrupt it; do not ask it to spawn a nested
 child; and do not permit an unawaited/background terminal. If a bounded task
@@ -304,12 +269,9 @@ Immediately split a supplied memo into these independent child tasks:
    or supplement records.
 
 When all three families are present, start all three before the visible reply.
-Do not wait for schema inspection, label research, or canonical readback. A
-spawn rejected before dispatch is unavailable; an accepted spawn or a spawn
-with an unknown outcome is not. Only when spawning is known to be unavailable
-does the parent fall back to one compact bounded save for the supplied facts
-before replying and leave optional label details unknown. Never pair that
-fallback with an accepted or uncertain child attempt.
+Do not wait for schema inspection, label research, or canonical readback. If
+spawning is unavailable, the parent falls back to one compact bounded save for
+the supplied facts before replying and leaves optional label details unknown.
 
 1. **Data sources and wearables.** Check visible context and the resume
    snapshot first. When connection state is unclear, use `murph.device` with

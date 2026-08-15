@@ -6,20 +6,20 @@ Updated: 2026-08-15
 
 ## Goal
 
-- Make hosted onboarding delegate bounded health-history persistence to
-  `gpt-5.6-luna` workers at high reasoning, while preserving exact model and
-  token accounting for every provider request.
+- Prepare hosted onboarding to delegate bounded health-history persistence to
+  `gpt-5.6-luna` workers at high reasoning without activating the route before
+  exact model and token accounting is authoritative for every child request.
 
 ## Success criteria
 
 - The existing onboarding foundation persistence assignments select Luna/high
   only when authoritative child-request model, tier, and attempt evidence is
   available; otherwise the production switch fails closed.
-- The onboarding foundation-memo contract explicitly and promptly delegates
-  each supplied independent save family to those one-shot workers.
-- Assistant-engine remains the sole usage-ledger writer and consumes
-  authoritative child-request evidence without synthesizing Luna usage from
-  the parent model or creating duplicate legacy child records.
+- The existing onboarding foundation-memo contract continues to delegate each
+  supplied independent save family to one-shot workers without speculative
+  routing or recovery promises.
+- Assistant-engine remains the sole usage-ledger writer and does not synthesize
+  Luna usage from the parent model or non-authoritative V2 metadata.
 - Non-OpenAI and local/development paths retain working accounting and routing.
 - Murph's ReviewGPT dependency resolves the latest published package and its
   package-backed runner contract remains covered.
@@ -28,10 +28,9 @@ Updated: 2026-08-15
 
 ## Scope
 
-- In scope: hosted OpenAI Codex config, onboarding delegation instructions,
-  authoritative child-request accounting evidence where Murph owns it,
-  duplicate-accounting cutoff, the requested ReviewGPT dependency bump, and
-  focused regression coverage.
+- In scope: hosted OpenAI Codex config, authoritative child-request accounting
+  boundaries where Murph owns them, the requested ReviewGPT dependency bump,
+  and focused regression coverage.
 - Out of scope: arbitrary per-spawn model selection, nested delegation,
   changing the root model, and broad migration of other providers' accounting.
 
@@ -55,22 +54,24 @@ Updated: 2026-08-15
    Mitigation: keep the Worker out of ledger writes and extend the execution
    evidence at the owner that already has those logical coordinates.
 3. Risk: Luna defaults leak into unsupported providers.
-   Mitigation: gate the child default to the OpenAI-backed hosted config and
-   retain current behavior elsewhere.
-4. Risk: prompt changes over-delegate or duplicate canonical writes.
-   Mitigation: keep current family boundaries, exact-source handoffs, dedupe,
-   and parent non-duplication rules; strengthen only timing and worker policy.
+   Mitigation: expose no child-routing controls until the runtime and ledger
+   evidence path are upgraded together; every current provider inherits root
+   routing.
+4. Risk: a preparatory prompt invents idempotency, fallback, or recovery
+   capabilities that canonical health owners do not provide.
+   Mitigation: leave the active onboarding contract unchanged and keep future
+   routing policy in typed runtime ownership rather than model-readable prose.
 
 ## Tasks
 
 1. [x] Give ReviewGPT the implementation packet and obtain its proposed patch.
 2. [x] Inspect and integrate the smallest safe implementation against current
    runtime-config, engine-accounting, and onboarding owners.
-3. [x] Add focused routing, authoritative-evidence, no-duplicate, fail-closed, and
-   prompt-contract regressions.
+3. [x] Add focused fail-closed runtime and non-authoritative-evidence
+   regressions without changing the active onboarding persistence contract.
 4. [x] Run focused tests and affected package typechecks, then inspect the diff for
    privacy and scope.
-5. [ ] Finish the plan-bearing candidate, push it, open a draft PR, and start the
+5. [x] Finish the initial candidate, push it, open a draft PR, and start the
    preliminary specialist and final ReviewGPT passes concurrently with CI.
 6. [ ] Resolve accepted findings on a new exact head and complete the gates.
 
@@ -81,15 +82,20 @@ Updated: 2026-08-15
   child-assignment identity, so it must not become a second ledger authority.
 - Keep assistant-engine as the sole ledger writer. Do not infer a Luna child's
   model or tier from the parent when authoritative V2 evidence is missing.
-- Keep arbitrary per-spawn overrides hidden and scope Luna/high to the existing
-  onboarding foundation persistence assignments after the evidence gate is
-  satisfied.
+- Keep arbitrary per-spawn overrides hidden. A future Luna/high rollout must be
+  selected by a typed runtime capability after its authoritative evidence path
+  and representative evaluations land; the active skill must not authorize
+  billing-critical routing through a natural-language marker.
 - Do not enable the Luna/high production route on Codex 0.147.0. Its canonical
   V2 activity item proves child lifecycle and thread identity but not the
   effective child model, reasoning effort, service tier, provider attempt, or
   terminal usage. The generated hosted config now hides per-spawn routing
-  metadata explicitly and the prompt requires both a visible schema and a
-  host-owned authoritative-evidence marker before opting in.
+  metadata explicitly and tells every current hosted child to inherit the root
+  route.
+- Accept the preliminary specialist findings that the first ReviewGPT patch
+  invented a family-level recovery key, contradicted mixed-dispatch fallback,
+  and put routing authority in prompt prose. Remove that entire active-skill
+  addition rather than adding new health-record or transport machinery.
 - Upgrade the repository-backed ReviewGPT runner from 0.5.127 to the registry's
   current 0.5.131 release and update its release-contract assertions.
 
@@ -113,5 +119,11 @@ Updated: 2026-08-15
   `pnpm exec cobuild-review-gpt --version` both reported 0.5.131.
 - `git diff --check` passed after applying the separately authored ReviewGPT
   patch; the candidate diff and patch were scanned for direct identifiers.
-- Exact-head CI and the preliminary and final PR ReviewGPT gates remain
-  pending until the candidate is committed, pushed, and attached to a draft PR.
+- After specialist remediation removed the speculative active-skill contract,
+  the focused onboarding skill-assets suite again passed with 25 tests and 6
+  skips, assistant-engine typecheck passed, and `git diff --check` stayed clean.
+- Exact-head CI passed on the first-reviewed commit. The preliminary specialist
+  pass returned substantive findings after 34 minutes; its accepted prompt
+  findings are being removed on a remediation head. The required final pass
+  remains pending after two pre-send browser failures and one rejected
+  nine-second response; no Eragon lane was used.

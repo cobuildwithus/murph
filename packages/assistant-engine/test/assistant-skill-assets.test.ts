@@ -1922,37 +1922,6 @@ describe('assistant skill assets', () => {
     expect(compact).toContain(
       'Give each fresh child `fork_turns: "none"`, a self-contained task with the exact relevant source words, its canonical owner or skill, an idempotent dedupe rule, and explicit exclusions for the other two families.',
     )
-    expect(compact).toContain('Cross-model routing is fail-closed.')
-    expect(compact).toContain(
-      'Unless the current V2 `spawn_agent` schema visibly exposes both `model` and `reasoning_effort`',
-    )
-    expect(compact).toContain(
-      'Authoritative child usage evidence is active for Murph onboarding foundation persistence.',
-    )
-    expect(compact).toContain(
-      'omit `model`, `reasoning_effort`, and `service_tier`; every child inherits the root routing.',
-    )
-    expect(compact).toContain(
-      'The host must withhold the marker for local ChatGPT subscription auth, Venice, custom inference, and any unknown provider or credential class; those paths always inherit the root.',
-    )
-    expect(compact).toContain(
-      '`model: "gpt-5.6-luna"` with `reasoning_effort: "high"`',
-    )
-    expect(compact).toContain(
-      'This applies whether one, two, or all three named families are present.',
-    )
-    expect(compact).toContain(
-      'Never apply that override to the root, aspiration capture, lab extraction, other onboarding work, another skill, or an unrelated child',
-    )
-    expect(compact).toContain(
-      'carry one stable assignment key in the child task: the family plus the accepted message ref shown in the prompt.',
-    )
-    expect(compact).toContain(
-      'read the canonical state for its family; decide whether a create, update, or no-op is still needed; perform one bounded idempotent mutation pass',
-    )
-    expect(compact).toContain(
-      'If a mutation or dispatched child has an unknown outcome, do not repeat the mutation, start a replacement child, or let the parent duplicate the write.',
-    )
     expect(compact).toContain(
       "I've got my best people on it—they're sorting, saving, and checking what you just shared.",
     )
@@ -2171,12 +2140,6 @@ How old are you and what's your gender?
     )
     expect(compact).toContain(
       'When all three families are present, start all three before the visible reply.',
-    )
-    expect(compact).toContain(
-      'A spawn rejected before dispatch is unavailable; an accepted spawn or a spawn with an unknown outcome is not.',
-    )
-    expect(compact).toContain(
-      'Never pair that fallback with an accepted or uncertain child attempt.',
     )
     expect(compact).toContain(
       'murph.generate_voice_memo',
