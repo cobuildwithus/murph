@@ -382,6 +382,31 @@ Updated: 2026-08-14
   Production complexity decreases by one owner path and seven lines; focused
   proof replaces the mocked statement-count assumption with the real store and
   migrated Postgres operation counters.
+- Valid final ReviewGPT round 9 reviewed exact head
+  `f205e8a52bd42ca1d73abe8241a30704f5db6efd` in the existing thread and
+  returned `ROUND_OUTCOME: FINDINGS` plus `REVIEW_COMPLETE`. The response
+  reported `MODEL_CONFIRMATION: UNKNOWN`, while the package-owned sidecar bound
+  the exact response hash to the requested compatible `gpt-5-6-pro` slug; the
+  long-turn UNKNOWN fallback is valid. Mountain failed before send because its
+  attachment control was not ready; the valid Phlebas retry sent once.
+- Accepted the overlapping-Link lifecycle finding. Independently consumable
+  OAuth states can complete out of start order, and once one callback has
+  connected the exact source the disconnected-only branch previously let a
+  second completed provider registration reuse its epoch and retained coverage.
+  Every successful existing-source Link completion now reuses the same callback
+  transaction to advance the epoch and reopen exact schedule-time coverage.
+  The older callback still fails with no mutation while the newer source start
+  remains pending. No provider-generation state, queue, read, or cleanup owner
+  was added.
+- Accepted the complexity-collapse finding. The deferred webhook admission path
+  had removed the last production caller of a complete 134-line exported source-
+  registration reconciliation workflow, leaving only a direct test invocation.
+  Delete that export, its dedicated error helper, import, and unreachable test
+  fragment. Production behavior needs no replacement: deferred native webhook
+  admission and browser Link callback admission remain the two live owners.
+  No round-9 finding was rejected; the remediation deletes 136 net production
+  lines while adding focused callback-lifecycle proof and narrowing the durable
+  callback contract.
 
 ## Verification
 
@@ -524,3 +549,18 @@ Updated: 2026-08-14
     runtime-authority, and wake files pass 254 tests; the complete isolated
     migrated Postgres resilience/webhook files pass 9 tests; prepared Web
     typecheck and `git diff --check` pass.
+  - Round-9 callback proof first reproduced the defect against the uncorrected
+    handler: callback B advanced the exact source to epoch 2, but independently
+    completed callback A left it at epoch 2 and retained B-lifecycle target
+    coverage. After collapsing the connected/disconnected completion split,
+    B advances to epoch 2, A advances to epoch 3, all twelve schedule-time
+    coordinates clear exactly, source-first blood-pressure and sibling coverage
+    remain, and each completion owns one signal and mailbox wake. A complementary
+    pending-newer-start regression proves the older callback changes no source,
+    coverage, signal, or mailbox state. The hosted wake, callback-proof, and
+    callback-route files pass 166 tests, including two independent browser
+    sessions bound to separate callback states. Prepared Web typecheck and
+    touched-file lint pass. Static closure confirms the obsolete reconciliation
+    export and dedicated error helper have no remaining source or test
+    references; the stale-runtime guard, privacy scan, and `git diff --check`
+    also pass.

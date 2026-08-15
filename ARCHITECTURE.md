@@ -2175,11 +2175,15 @@ live source rows, skips projection mutation for a disconnected source, and
 removes that source's records from the import. While any source admission is
 pending, a record whose source reference cannot be resolved fails closed;
 absence of a row for an explicit source remains the legacy admission rule.
-Explicit disconnect or a newer connection epoch wins the locked recheck,
-fails the stale callback, and leaves the target disconnected. Retry cleanup
-deregisters only the target source; whole-account revoke remains the explicit
-connection-wide disconnect path. Ambiguous target cleanup blocks the new link
-and remains retryable. The hosted Connect surface uses that same split for
+An explicit disconnect fence or a newer still-pending source start wins the
+locked recheck, fails the older callback, and leaves the target disconnected.
+If independently valid Link states both complete, every completion after source
+admission advances the existing lifecycle epoch and reopens only that source's
+schedule-time history coverage; Junction exposes no durable registration
+generation that could safely restore an earlier external completion. Retry
+cleanup deregisters only the target source; whole-account revoke remains the
+explicit connection-wide disconnect path. Ambiguous target cleanup blocks the
+new link and remains retryable. The hosted Connect surface uses that same split for
 removal: an ordinary Junction source card targets the child source route and
 calls provider-specific revoke without changing the parent connection,
 credentials, or sibling rows. The existing connection-source row carries a

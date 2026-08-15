@@ -904,7 +904,12 @@ Last verified: 2026-08-13
   transaction; local admission commits the source and initial jobs in one SQLite
   transaction. Shared ingress never performs a second source write. A missing,
   disconnected, or newer account makes the callback fail and leaves the source
-  disconnected. Established siblings continue normally.
+  disconnected. An older callback also fails while a newer source start remains
+  pending. Once another independently valid Link state completes, however, a
+  later completion represents another provider registration lifecycle: hosted
+  admission advances the source epoch and reopens only its schedule-time history
+  coverage because Junction exposes no durable registration generation.
+  Established siblings continue normally.
   Starting or retrying the source first attempts target-only provider cleanup;
   a cleanup warning blocks the new link instead of adopting an ambiguous
   linkage or revoking sibling sources.
