@@ -323,6 +323,19 @@ runner bundle update with `container_rollout=immediate`. Before allowing card
 traffic, require managed-container smoke to report the exact new runner-bundle
 fingerprint and prove the updated assistant CLI surface.
 
+Treat backward compatibility as a permanent traffic gate for every iMessage
+app card. Linq capability is not decoder-version negotiation, so a new schema,
+discriminator, required field, stricter bound, or changed meaning must not emit
+while any previously released extension that can claim the card would reject
+it. App Store availability of a new reader does not retire older installed
+readers. Before enabling traffic, prove either that unknown clients receive the
+last readable envelope, that an explicit capability selects a compatible
+envelope, or that every earlier claiming extension already provides a complete
+non-interactive recovery for the unknown shape. Otherwise keep the producer on
+the prior schema or deterministic ordinary text. TestFlight, App Review,
+provider acceptance, delivery receipts, and proof on only the new build do not
+satisfy this gate.
+
 An expansion of an existing strict card version has a reader floor even when
 its discriminator is unchanged. For the V4 workout expansion above eight
 exercises or eight sets per exercise, release the native reader first, deploy
