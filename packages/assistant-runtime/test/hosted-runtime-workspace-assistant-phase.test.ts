@@ -12607,10 +12607,11 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       importedCount: 0,
     }));
 
-    expect(result.afterCheckpoint).toBeUndefined();
+    expect(result.afterCheckpoint).toEqual(expect.any(Function));
     expect(result.checkpointReason).toBe("outbox_receipt");
     expect(mocks.drainHostedPreparedAssistantDeliveries)
       .toHaveBeenCalledTimes(1);
+    await result.afterCheckpoint?.();
   });
 
   it("writes a warning outbox delivery summary when a committed delivery fails", async () => {
@@ -15865,6 +15866,97 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     });
   });
 
+  it("runs one requested member action after the current foreground reply", async () => {
+    const sequence: string[] = [];
+    let newerForegroundInputArrived = false;
+    const deliveryEffect = createDeliveryEffect();
+    const memberActionItem = createMemberActionSystemMailboxItem();
+    mocks.prepareHostedSystemMailboxItemForCheckpoint.mockImplementation(
+      async (preparationInput) => {
+        if (
+          preparationInput.allowedRouteActions?.length === 1
+          && preparationInput.allowedRouteActions[0] === "apply-member-action"
+        ) {
+          sequence.push("member-action");
+          return {
+            item: memberActionItem,
+            itemId: memberActionItem.itemId,
+            metrics: {
+              bootstrapResult: null,
+              conversationMetrics: null,
+              mailboxLane: "member-action" as const,
+              postCheckpointRecord: memberActionItem.postCheckpointRecord,
+              redactedLogEntries: [],
+            },
+            status: "processed" as const,
+          };
+        }
+        return null;
+      },
+    );
+    mocks.runHostedAssistantAutomationLane.mockImplementationOnce(async () => {
+      sequence.push("provider");
+      return {
+        assistantAutomationCurrentTurnDeliveryIntentIds: [deliveryEffect.effectId],
+        assistantAutomationProgressed: true,
+        deviceSyncProcessed: 0,
+        deviceSyncSkipped: true,
+        nextWakeAt: null,
+        parserProcessed: 0,
+        postCheckpointRecord: null,
+        progressed: true,
+        redactedLogEntries: [],
+      };
+    });
+    mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValueOnce([
+      deliveryEffect,
+    ]);
+    mocks.drainHostedPreparedAssistantDeliveries.mockImplementationOnce(async () => {
+      sequence.push("foreground-delivery");
+      newerForegroundInputArrived = true;
+      return [createSentDeliveryOutcome()];
+    });
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      importedCount: 1,
+      shouldYieldBackgroundMaintenance: () => newerForegroundInputArrived,
+    }));
+
+    expect(sequence).toEqual(["provider", "foreground-delivery"]);
+    expect(mocks.runHostedAssistantAutomationLane).toHaveBeenCalledTimes(1);
+
+    const postCheckpoint = await result.afterCheckpoint?.();
+
+    expect(sequence).toEqual([
+      "provider",
+      "foreground-delivery",
+      "member-action",
+    ]);
+    expect(
+      mocks.prepareHostedSystemMailboxItemForCheckpoint.mock.calls.at(-1)?.[0],
+    ).toEqual(expect.objectContaining({
+      allowedRouteActions: ["apply-member-action"],
+      allowedWakeKinds: ["member.action.requested"],
+      shouldYieldBackgroundMaintenance: null,
+    }));
+    expect(postCheckpoint).toEqual(expect.objectContaining({
+      afterDurableCheckpoint: expect.any(Function),
+      checkpointReason: "system_mailbox_receipt",
+    }));
+    expect(mocks.recordHostedSystemMailboxItemAfterCheckpoint).not.toHaveBeenCalled();
+
+    await runHostedWorkspaceDurableCheckpointEffects(
+      postCheckpoint?.afterDurableCheckpoint,
+    );
+
+    expect(mocks.recordHostedSystemMailboxItemAfterCheckpoint).toHaveBeenCalledWith({
+      item: memberActionItem,
+      operatorHomeRoot: "/tmp/murph-operator-home",
+      runtime: expect.any(Object),
+      vaultRoot: "/tmp/murph-vault",
+    });
+  });
+
   it("does not scan terminal Linq cleanup during fresh conversation input", async () => {
     const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
       importedCount: 1,
@@ -18980,6 +19072,55 @@ function createMemberPreferencesSystemMailboxItem() {
       occurredAt: "2026-04-27T00:00:00.000Z",
       preferences: {
         tone: "formal" as const,
+      },
+      userId: "member_synthetic_phase",
+    },
+  };
+}
+
+function createMemberActionSystemMailboxItem() {
+  const outcome = {
+    actionId: "2f1c1fdc-c7b0-4d90-b902-8e6295959243",
+    completedAt: "2026-04-27T00:00:01.000Z",
+    reason: null,
+    schemaVersion: 1 as const,
+    status: "applied" as const,
+  };
+  return {
+    ...createSystemMailboxItem(),
+    itemId: "system_mailbox_item_member_action",
+    mailboxDedupeKey:
+      "member.action.requested:2f1c1fdc-c7b0-4d90-b902-8e6295959243",
+    postCheckpointRecord: {
+      kind: "member-action.outcome-recorded" as const,
+      outcome,
+    },
+    requestId: "request_system_mailbox_item_member_action",
+    routeAction: "apply-member-action" as const,
+    wake: {
+      eventId: "member.action.requested:2f1c1fdc-c7b0-4d90-b902-8e6295959243",
+      kind: "member.action.requested" as const,
+      occurredAt: "2026-04-27T00:00:00.000Z",
+      request: {
+        action: {
+          expectedWorkout: {
+            actionBinding: "a".repeat(64),
+            exercises: [{ name: "Leg press", sets: [{ logged: false }] }],
+          },
+          kind: "workout.live.apply" as const,
+          mutations: [{
+            exerciseName: "Leg press",
+            exercisePosition: 1,
+            expectedResult: null,
+            kind: "set.put" as const,
+            result: { kind: "reps" as const, reps: 8 },
+            setPosition: 1,
+          }],
+          version: 1 as const,
+        },
+        actionId: outcome.actionId,
+        requestedAt: "2026-04-27T00:00:00.000Z",
+        schemaVersion: 1 as const,
       },
       userId: "member_synthetic_phase",
     },

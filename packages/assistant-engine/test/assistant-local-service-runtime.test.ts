@@ -1888,15 +1888,25 @@ test('sendAssistantMessageLocal resolves required progress to one exact accepted
         targetInputId: 'ain_ffffffffffffffffffffffffffffffff',
       },
     ))?.kind ?? null
+    await providerInput.onFinishWithoutReplyAccepted?.({
+      deliveryContextOrdinal: 0,
+      messageReactionPending: false,
+    })
+    await providerInput.onFinishWithoutReplyRecorded?.({
+      deliveryContextOrdinal: 0,
+    })
     return {
       kind: 'succeeded',
       providerTurn: {
-        onboardingGuidanceInjected: true,
+        acceptedNoReplyDeliveryContextOrdinals: [0],
+        onboardingGuidanceInjected: false,
         codexContinuation: { kind: 'explicit-structured-history' },
-        response: 'Reviewed the selected source.',
+        finalAction: { kind: 'none' },
+        rawEvents: [],
+        response: '',
         responseDeliveryContextOrdinal: 0,
         session,
-        transcriptResponse: 'Reviewed the selected source.',
+        transcriptResponse: null,
       },
     }
   })
@@ -4242,7 +4252,8 @@ test('sendAssistantMessageLocal attributes required progress after real live ste
   const resultPromise = sendAssistantMessageLocal({
     acceptedTurnInput: {
       initialInputs: [
-        assistantInputCandidateFromStoredEvent(earlierHostedInput).acceptedInput,
+        assistantInputCandidateFromStoredEvent(earlierHostedInput)
+          .acceptedInput,
       ],
     },
     activeTurnInput,

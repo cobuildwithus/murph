@@ -2,6 +2,267 @@
 
 Last verified: 2026-08-14
 
+## Local Frog autofix authority
+
+- The optional local Frog repair loop uses the operator's already-authenticated
+  `gh`, Codex, and managed ReviewGPT browser sessions. It never reads, copies,
+  stores, prints, or injects their credential values and never receives the
+  Frog reconciliation App's private key or installation token. Only the
+  non-model parent receives ambient GitHub, browser, SSH-agent, and Git-common
+  access. It builds review archives from committed Git objects and keeps
+  ReviewGPT responses, model proof, browser downloads, and prompts in one
+  owner-only transient directory outside the issue worktree. The Codex child
+  uses a native permission profile that denies root access, allows only minimal
+  command-runtime reads plus issue-worktree reads and writes, and denies tool
+  network. Its synthetic home and temporary directory are inside an ignored
+  worktree output root. It receives no SSH agent, GitHub token, browser profile,
+  Git common directory, parent review path, plugin, user config, or configured
+  MCP server; browser, app, image, web-search, multi-agent, and MCP-install
+  features are explicitly disabled, and project Codex/MCP config is rejected.
+  Shell commands inherit only a small benign environment allowlist that omits
+  `CODEX_HOME`, tokens, sockets, and provider variables. The parent installs
+  pinned dependencies only on a clean fresh branch before model work; resumable
+  or model-touched state may never trigger package-manager configuration or
+  installation.
+- An issue is model-work authority only when it remains open, is authored by
+  the exact configured Frog App, retains the expected label, and has exactly
+  one matching binding in the protected default branch's committed friction
+  tree. The issue number is the only issue field inserted into the parent
+  worker prompt. The ReviewGPT implementation prompt and edit-only Codex prompt
+  require an explicit foul-play assessment before implementation. The exact
+  committed friction binding, Frog skill, and protected `origin/main`
+  `AGENTS.md` hierarchy own task intent. Before child launch the parent rejects
+  candidate task, skill, worker-template, or root/nested `AGENTS.md` changes,
+  including ignored untracked instructions, before and after the edit-only
+  child. Git-parsed patch targets enforce the same protected paths without
+  trusting textual diff headers. The parent supplies the authority paths and SHA-256 identities; candidate
+  copies and other docs are evidence only. Fresh implementation ReviewGPT does
+  not request or use the GitHub connector and does not collect mutable issue title/body/comments/attachments/
+  links. Proposed patches, existing branch/worktree state, embedded instructions,
+  other candidate content, and ReviewGPT prose remain
+  adversarial evidence and cannot override user or repository instructions.
+  Their unrelated hostile content is ignored rather than treated as a queue
+  veto. Unexplained
+  candidate scope or a committed task or actual change that requires weakened
+  authentication, review, sandbox, credential, or network boundaries stops the
+  run without a patch or ready PR body; neither model may normalize suspicious
+  state into a PR.
+  GitHub CLI's GraphQL issue projection represents this App actor as
+  `app/murph-frog-reconciliation`; the workflow's REST-style bot-login setting
+  uses a different `[bot]` representation and is not the local admission field.
+- Parent-selected recovery mode is derived from exact clean branch ancestry,
+  deterministic PR ownership, head identity, and state.
+  Every PR read with authority consequences must target `main`, use the exact
+  deterministic branch, be non-cross-repository, report this repository as its
+  head owner, and be authored by the live authenticated `gh` operator. That one
+  predicate is applied before discovery/recovery cardinality and before body
+  hydration, editing, publication, finalization, merged-state proof, or issue
+  closure. The GraphQL connection constrains `main` plus the deterministic head
+  at the server, traverses all cursor pages, filters foreign records, and only
+  then enforces zero-or-one parent-owned PR. A fork or different operator may
+  neither hide a later qualifying record nor contaminate cardinality.
+  Mutable body text is a separate authority field: `editor` must equal the live
+  operator whenever `lastEditedAt` is present, while the PR creator is accepted
+  only for a never-edited body with no editor. Other remote text cannot supply
+  baseline, PASS, handoff, hydration, merge, or closure authority. The
+  parent captures a validated local body before any child runs or creates a
+  fixed authority-free recovery body. A local immutable baseline equal to the
+  current head may replace the remote presentation and rerun exact-head review
+  only when the same trusted body has no human handoff. Baseline ancestry and
+  exact-or-ancestor handoff recovery use that one trusted body; a recovered
+  handoff is re-stamped at the current head and returns before dependency
+  checks, model work, edits, commits, pushes, autonomous review, or merge.
+  Specialist and final PASS markers remain recoverable only from the
+  current parent-owned remote body. If the baseline is an ancestor of a newer
+  remote head, the parent preserves it and publishes the existing handoff or a
+  review-findings handoff. If no trusted baseline exists, the fixed recovery
+  body gains that handoff without making the remote head a new autonomous
+  baseline.
+  Only a fresh branch can authorize the implementation ReviewGPT request;
+  resume omits that command entirely. A clean local-only committed deterministic
+  branch ahead of `origin/main` may resume before its first push. When remote-
+  tracking evidence exists but no PR does, resume additionally requires the
+  retained validated parent-local PR body to bind its immutable first-reviewed
+  head to the exact local head and carry the originally admitted task path and
+  digest. That exact provenance preserves a legitimate
+  push-before-PR interruption without trusting a deterministic branch seeded by
+  another repository writer. An interrupted dirty diff can resume only
+  when the one open parent-owned PR, remote branch, and local committed head
+  match exactly; mutable body text is not needed to preserve the worktree. It
+  returns to an edit-only child and every parent gate reruns.
+  Before worktree synchronization, an existing validated parent-local exact or
+  ancestor handoff may be restored onto the unchanged exact PR projection even
+  when another actor edited its presentation; that repair revalidates issue and
+  PR authority but does not require the presentation being repaired to already
+  be parent-owned. A merged PR with a deliberately reopened issue, ambiguous
+  state, or multiply-owned state grants no worker mode or automatic closure.
+  One exact closed-unmerged parent PR receives only the fixed recovery body and
+  parent-authored review-findings handoff; it is never reopened, reviewed, or
+  merged by that path.
+- In fresh `implement` mode, the parent ReviewGPT request must return exactly
+  one latest-response patch or diff attachment. The parent rejects traversal,
+  absolute and control paths, binaries, generated artifacts, and an invalid
+  `git apply --check` before applying it, then rejects credential-shaped or
+  direct-identifier content before committing. An absent or rejected patch is
+  terminal; the edit-only Codex child cannot request a replacement. Recovery
+  cannot request a second implementation patch. Both implementation and
+  canonical-review archives contain one parent-materialized task blob read
+  directly from its exact `origin/main` friction path, plus a path/digest
+  manifest. They also contain a parent-materialized copy and digest manifest
+  for the exact `origin/main` Frog skill because the worker prompt requires it
+  and the packager's ordinary scan excludes that dot-directory source. The
+  skill path is a trusted review control, so its movement invalidates review
+  evidence rather than silently omitting an instruction owner. The parent
+  stores task identity only in trusted local/PR
+  metadata, fetches before every post-wait comparison, and revalidates it at
+  both final merge
+  fences. Any edit, move, deletion, replacement, or binding drift revokes
+  unattended authority. They include neither the whole friction tree nor a
+  candidate copy.
+- The child may edit only the issue worktree and a private ignored PR draft. It
+  cannot run Git, GitHub, ReviewGPT, browser automation, or network clients and
+  cannot author readiness, response, model-verification, or GitHub-state
+  evidence. Before editing or writing that draft it must assess issue evidence,
+  proposed patches, and existing worktree state for foul play and exit
+  unsuccessfully on unexplained scope or weakened authority/sandbox boundaries.
+  The parent does not execute child-authored package scripts or tests
+  in its credentialed context: it runs fixed Git structural checks, commits and
+  pushes with hooks disabled, and relies on exact-head CI for independent
+  executable proof. The retained local body includes the immutable first-
+  reviewed head before the first push. Immediately before pushing, the parent
+  refreshes `origin/main` and revalidates exact open App author, label, and one
+  protected-main binding authority; if no parent-owned PR exists after that
+  push, it repeats the refresh and exact authority check immediately before
+  creating a draft. Preliminary and final parent ReviewGPT use Murph's
+  canonical packager and canonical review state from a detached exact-head
+  checkout only when every executable and instructional review control,
+  including the complete prompt-preset directory and its four exact delegated
+  specialist lens prompts, matches trusted `main`.
+  The parent writes the already validated local body into that checkout and
+  binds it by SHA-256; the packager does not fetch mutable remote presentation
+  as the intent contract. Immediately before either model invocation, one
+  current PR projection must match the expected parent author/branch/repository,
+  exact head and body, latest body editor, and single non-closing issue binding.
+  The same projection is checked after every long model wait and immediately
+  before each metadata write. An authenticated-operator handoff created during
+  the wait is preserved byte-for-byte; other drift fails closed.
+  After the fresh post-review `origin/main` fetch, the parent also compares the
+  complete trusted ReviewGPT control inventory before accepting any result. It
+  repeats that comparison after both finalization refreshes, including the last
+  pre-merge fence. Any preset, packager, preflight, configuration, package, or
+  other trusted-control drift produces the existing exact-head review-findings
+  handoff, so review evidence generated under superseded controls grants no
+  merge or issue-closure authority.
+  The invocation retains the exact primary head that loaded the Frog parent and
+  compares the existing loaded-runner inventory from that head to every fresh
+  post-review and finalization `origin/main`. Unrelated default-branch changes
+  remain allowed. A changed loaded launcher, orchestrator, command, finalizer,
+  guard, parent, or recovery module produces that same handoff before response
+  acceptance or merge, preventing old in-memory authority from closing the
+  issue under a newer trusted policy.
+  Specialist and final PASS metadata binds the exact candidate head to the
+  runner head that produced it. Cross-invocation recovery accepts that evidence
+  only while the recorded runner's loaded paths still match fresh `main`;
+  missing, malformed, legacy, or drifted evidence produces the same handoff.
+  Review findings, a final `RETROSPECTIVE_REQUIRED` result, and changed review
+  controls produce the same exact-head human handoff; review prose is never
+  delegated to another autonomous editing turn.
+- Mutating entry (`install` and `run`) performs a frozen, scriptless primary
+  dependency reconciliation before loading the TypeScript parent. A dependency-
+  free bootstrap gives pnpm one exact detached process group and a fixed
+  30-minute deadline; timeout or leader-first exit signals only that proven
+  group and confirms it is gone before the native gate can release. A zero-
+  signal `EPERM` after that same-user, scriptless tree exits is treated as
+  foreign numeric group-id reuse, never as authority to signal the replacement.
+  Dependency-
+  control movement, including `pnpm-lock.yaml`, triggers the existing one-run
+  restart. The bootstrap is in loaded-runner authority and the lockfile is in
+  the trusted ReviewGPT control inventory. Canonical review and parent helpers
+  therefore cannot retain an older installed runtime after trusted source
+  advances or strand the queue behind an unbounded pre-parent install. The
+  generated launcher supplies one non-secret handoff marker so its `RunAtLoad`
+  invocation may wait at most 30 seconds for the install holder to release the
+  retained native-gate inode. The wrapper clears that marker before loading
+  TypeScript; it grants no durable authority, bypass, or second queue, and all
+  other native-gate contention remains immediate.
+- Missing or rejected implementation output/patches and edit-only child
+  timeout, nonzero exit, or invalid output are graceful terminal pre-PR
+  dispositions, not authorization for another implementation. The parent
+  deletes candidate bytes, resets to `origin/main`, creates a neutral
+  parent-only empty commit with the same tree, and publishes only the fixed
+  draft body, admitted task identity when available, bounded failure class, and
+  exact-head review-findings handoff. The private body receives the terminal
+  marker before authenticated-operator lookup, PR traversal, fetch, issue
+  verification, remote lookup, push, or PR creation, and recovery consumes it
+  before branch synchronization or model work. Its immutable first-reviewed
+  head preserves the exact pre-normalization candidate through the neutral
+  commit and every parent body restamp. After restart, force-with-lease accepts
+  only that exact candidate or the exact current neutral handoff already pushed
+  by the parent; every different remote move fails closed. A new branch uses an
+  empty expected-SHA lease so a concurrent creator wins. If fresh `main`
+  requires another neutral commit, the body keeps its prior neutral binding
+  until the exact leased push succeeds and only then atomically restamps the
+  new head. Model prose never enters that PR.
+  ReviewGPT/browser/command/GitHub infrastructure unavailability remains
+  retryable and does not manufacture a terminal classification. In particular,
+  the post-worker task refresh happens after the parent commit and outside the
+  worker-output classifier. If that refresh proves task drift while one
+  unchanged exact parent-owned PR remains at an ancestor head, the private
+  terminal marker is bound to that PR head before remote calls; the parent then
+  revalidates the exact projection and ancestry, discards the unpushed local
+  descendant, and edits only the PR body. It never pushes those candidate bytes,
+  and projection drift, missing ancestry, or foreign ownership fails closed.
+- Automatic merge authority is narrower than change authority. The parent
+  requires valid preliminary/final ReviewGPT evidence, the exact open PR,
+  nonempty green required checks, and a clean current-base merge. It then
+  re-fetches and revalidates App author, open state, label, the exact admitted
+  committed task path/content digest and sole binding, PR head, exact body
+  digest/editor/non-closing issue binding, checks,
+  and the exact-head scope classifier immediately before an ordinary merge.
+  The final scope classifier consumes that fetched ref without fetching again,
+  and the final task comparison follows it before a
+  `--match-head-commit` squash merge. Only the enumerated Frog autofix
+  implementation/launcher/worker/test files, the exact Frog package script,
+  the isolated Local Frog Autofix architecture section, and one canonical
+  parent-rendered completed plan whose exact path and content bind the current
+  issue and repair phase may auto-merge. `AGENTS.md`, `.agents/skills/**`,
+  `.agents/friction-log/**`, every other `agent-docs/**` path, the shared
+  ReviewGPT controls, and `scripts/frog-pr-context.ts` force a human handoff;
+  the latter remains excluded because GitHub Actions executes it. Any other path, changed product
+  architecture outside that section, GitHub workflow/action, hook, or possible
+  runtime surface remains open for a human merge decision and does not close its
+  issue. The PR body contains only one non-closing issue binding. After proving
+  the exact merge independently of mutable presentation, the parent explicitly
+  closes only that issue. If merge succeeded but closure did not, a later run
+  revalidates the exact merged PR/head and bounded close/reopen history, then
+  retries closure only when no post-merge reopen exists. A deliberate
+  post-merge reopen is human-owned. Neither owner uses admin
+  merge, self-approval, ruleset bypass, branch-protection mutation, or
+  skipped/missing gate reinterpretation. Merge-authority inventories include
+  both source and destination paths for detected renames and copies. Exact-head
+  review-finding and product-runtime handoff markers are parent-owned queue
+  completion state: later scans skip those still-open or exact
+  closed-unmerged issues only while current body provenance remains
+  parent-owned. A descendant human
+  amendment preserves only the existing handoff kind and immutable first
+  review baseline, re-stamped at the descendant head; it cannot create review
+  evidence. Definitive failed/cancelled required checks and current-base
+  conflicts use the review-findings handoff. Pending, missing, skipped, or
+  malformed check state grants no handoff or merge authority and remains
+  retryable/fail-closed.
+- Durable local files use owner-only permissions and contain only home-relative
+  locators, process identity, issue numbers, timestamps, event names, and exit
+  status. Parent prompts, responses, command output, and downloaded patches stay
+  in one owner-only transient directory and are removed at invocation end,
+  after every exact owned process group disappears. Every external command gets
+  its own exact supervised group and is bounded by the same absolute invocation
+  deadline. The shell entrypoint serializes `install`, `uninstall`, and `run`
+  through one stable owner-only macOS `lockf` inode before the JSON parent/worker
+  owner is read or reclaimed. The TypeScript parent verifies both its `lockf`
+  parent and a failed same-inode contender, so an ambient environment marker
+  alone cannot bypass the gate. The gate inode intentionally survives
+  uninstall; the JSON record remains the auditable process identity and
+  orphan-worker proof inside that native critical section.
 ## Non-Negotiable Rules
 
 - Treat `.env` and `.env.*` files as secret inputs. Murph's CLI may load local `.env.local` and `.env` files at runtime for operator credentials, but agents and runtime logs must never print, fixture, package, or commit their contents.
@@ -748,7 +1009,7 @@ Last verified: 2026-08-14
   setup failure to `COMPANION_ADMISSION_SUPPORT_REQUIRED`. Do not expose
   internal hosted lifecycle codes through this route or let a client retry the
   terminal support outcome in a loop.
-- Native iOS and Android device-sync routes under `/api/device-sync/companion/**` normally authenticate with a Privy identity token in `Authorization: Bearer` (no cookie fallback, so no browser ambient authority or CSRF surface). The sign-in contract accepts only `platform: "ios" | "android"` when supplied. The Messages enrollment route follows the bearer rule, then mints a 24-hour Messages-only bearer; the revoke and proof-action routes are the only companion exceptions that accept that derived scope. The one pre-login exception, `POST /api/device-sync/companion/auth-diagnostics`, accepts only an allowlisted, size-bounded failure envelope containing app-owned categories, an optional closed platform value that defaults to iOS for legacy clients, and an optional Murph-recognized Privy auth machine code; unsupported provider codes become `null`. It writes one structured hosted warning, has no database or object-storage sink, and must never retain or log raw provider prose, email, phone, OTP, tokens, authorization headers, member/user ids, or health data. Treat its telemetry as spoofable rather than audit evidence; a bundled mobile secret is not an attestation boundary because it can be extracted and replayed. Production keeps this route hidden unless `MURPH_COMPANION_AUTH_DIAGNOSTICS_ENABLED=1`, and the production build must use explicit Vercel API credentials to prove the enabled WAF rule is the first active custom rule, matches only this exact path, and caps requests at 30 per minute per IP with a fixed window. The Junction SDK sign-in token authenticated routes mint is short-lived, returned exactly once, and must never be logged or persisted. Only a visible Android Connect Health Connect action or explicit hosted reconnect may send `connect` and run the account-ensure step, which must reuse the shared device-sync `upsertConnection` external-account identity discipline so SDK and Junction Link flows always share one `device_connection`; passive `resume`, omitted-intent reconciliation, foreground return, and data ingress may not ensure or reactivate a row. Source-scoped status accepts only a normalized Junction provider slug and filters both connected-source availability and durable webhook receipts. A receipt may store `sourceProviderSlug` only when the provider-owned webhook parser identifies an actual data-bearing source; data-less historical completions, lifecycle events, and legacy rows keep it null and cannot satisfy a source-scoped read. The junction client's API-key-prefix/environment validation is the sandbox/production separation authority, and the response surfaces the active environment.
+- Native iOS and Android device-sync routes under `/api/device-sync/companion/**` normally authenticate with a Privy identity token in `Authorization: Bearer` (no cookie fallback, so no browser ambient authority or CSRF surface). The sign-in contract accepts only `platform: "ios" | "android"` when supplied. The Messages enrollment route follows the bearer rule, then mints a 24-hour Messages-only bearer; only its revoke and closed member-action routes accept that derived scope. The one pre-login exception, `POST /api/device-sync/companion/auth-diagnostics`, accepts only an allowlisted, size-bounded failure envelope containing app-owned categories, an optional closed platform value that defaults to iOS for legacy clients, and an optional Murph-recognized Privy auth machine code; unsupported provider codes become `null`. It writes one structured hosted warning, has no database or object-storage sink, and must never retain or log raw provider prose, email, phone, OTP, tokens, authorization headers, member/user ids, or health data. Treat its telemetry as spoofable rather than audit evidence; a bundled mobile secret is not an attestation boundary because it can be extracted and replayed. Production keeps this route hidden unless `MURPH_COMPANION_AUTH_DIAGNOSTICS_ENABLED=1`, and the production build must use explicit Vercel API credentials to prove the enabled WAF rule is the first active custom rule, matches only this exact path, and caps requests at 30 per minute per IP with a fixed window. The Junction SDK sign-in token authenticated routes mint is short-lived, returned exactly once, and must never be logged or persisted. Only a visible Android Connect Health Connect action or explicit hosted reconnect may send `connect` and run the account-ensure step, which must reuse the shared device-sync `upsertConnection` external-account identity discipline so SDK and Junction Link flows always share one `device_connection`; passive `resume`, omitted-intent reconciliation, foreground return, and data ingress may not ensure or reactivate a row. Source-scoped status accepts only a normalized Junction provider slug and filters both connected-source availability and durable webhook receipts. A receipt may store `sourceProviderSlug` only when the provider-owned webhook parser identifies an actual data-bearing source; data-less historical completions, lifecycle events, and legacy rows keep it null and cannot satisfy a source-scoped read. The junction client's API-key-prefix/environment validation is the sandbox/production separation authority, and the response surfaces the active environment.
 - Initial onboarding follows the same bearer-only native boundary and accepts no
   member id from the client. The browser completion route instead requires the
   normal hosted app session plus same-origin/CSRF enforcement. Both routes
@@ -761,11 +1022,55 @@ Last verified: 2026-08-14
 - The companion address-book route accepts only a 192 KiB closed projection of 1-1,000 canonical international phones with either one safe first-name token plus an optional last initial or two to four distinct safe labels joined by the explicit ` / ` alternative separator; sentence-shaped labels, more than four alternatives, and empty enabled projections fail closed. The iOS producer case-folds and sorts eligible labels, then keeps the first four and omits later labels from the advisory prefix. The alternative form preserves disagreement without inventing one full name or choosing a winner; its bounded prefix may be non-exhaustive. An empty contact list is valid only as an exact replay probe for an already-committed replacement and can never create or replace a projection. Replacement requires active access and current launch consent; authenticated status and self-deletion remain available without active billing so cleanup is not trapped. Web must immediately replace each phone with a member-scoped HMAC token derived through the dedicated non-exportable KMS MAC keyring, and Postgres must store only token/version plus a member-bound encrypted label. Do not reuse the web wrap key, app-session HMAC, existing global contact blind index, or any content-encryption key for these tokens. A database or ordinary-content-key compromise must not be enough to test phone candidates. This is not zero knowledge: live Web MAC authority and live group processing remain sensitive boundaries. Only an authorized live group route may consult the human group owner's enabled projection, through either `read_chat_participants` for a canonical current phone participant or an exact provider-authenticated Linq participant add/remove event for that routed group. The event consumer must first prove that the matching hosted identity lacks active Murph activation evidence, may retain the label only in the existing bounded encrypted one-shot route context, and must present it as weak context rather than participant-authored text. Participant label staging and projection replacement/deletion must share the owner-member lock; every non-replay replacement or deletion clears pending encrypted group-event buffers for that owner's routes before commit, so an unconsumed revoked label cannot reach the model without adding an ordinary-message lookup. The participant event transaction must also reject any changed-handle lookup key that belongs to the routed Linq account, even when the provider omits `is_me`. Before KMS or token lookup, each advisory read must confirm that the owner still exists, is unsuspended, and holds current launch consent. The read must not reapply personal or sponsored billing access to an already-enabled projection; the authorized live group route is its access boundary. The participant's durable activation result remains independent; a label for a registered participant must never replace or modify their Murph identity. Labels must never grant identity, membership, consent, route, delivery, invite, signup, or profile authority, and optional lookup failure must leave the truthful roster and ordinary message path unchanged. Provider-event ledger rows must retain no participant handle or label. Replacement/deletion must remain CAS/replay safe; the projection remains active until explicit stop, account deletion, or the companion's next foreground reconciliation after Contacts permission loss removes it, and account deletion must remove both owner tables. No-expiry projections may pin the prior readable MAC version indefinitely; routine retirement must wait for the indexed row count to reach zero. Emergency retirement must deploy both gates Off, retire and drain every old Web writer for at least the route's explicit maximum duration, disable the affected key, reset each complete affected projection through the locked delete-shaped lifecycle so status is truthfully Off and revision/CAS history remains, prove zero affected rows, deploy the new keyring before reopening replacement, require explicit re-sharing, and reopen advisory reads last.
 - The automatic authenticated Linq speaker-label read is a third presentation-only consumer of that same route-authorized address-book projection. Web must first resolve exact current room membership: one unsuspended member's authorized `profile-name.v0` snapshot wins; ambiguous or suspended matches stay unnamed; and only a canonical phone with zero matches or one unsuspended match without a profile name may reach the existing set-based owner-contact reader. The response may contain only the sender handle, bounded display name, explicit profile or unverified-contact provenance, and exact handles proven to have no name after every applicable authorized source was checked—never a member id or participant id. The runner keeps only an operation memo plus the bounded private 14-day-positive/six-hour-proven-negative file cache under `.runtime/cache/**`; cache keys are opaque and route-scoped, the cache is excluded from snapshots, and corrupt, stale, unauthorized, or unreadable state is a miss. Neither the response nor either cache supplies identity, membership, consent, routing, matching, persistence, delivery, or effect authority. Only an exact accepted message reference plus trusted server derivation may authorize a participant-scoped effect.
 - A speaker-label result is cacheable only after its source is complete at the existing authority boundary. An active `profile-name.v0` grant with a null pending snapshot is unavailable, never evidence of profile absence or permission to fall through to an owner contact. The address-book reader checks at most 16 exact phones; only those submitted handles may receive contact labels or negative evidence, and batch overflow remains operation-local. This uses the existing next-operation recovery path and adds no invalidation or readiness state.
-- Messages mini-app credentials are random, member-scoped, and persisted only as Messages-domain-separated lookup hashes in one deterministic Messages-owned row per member in the existing short-lived session table; never persist the raw-token hash that the historical unscoped device-agent reader used. Before enrollment reads identity or authority, it must finish validating the bounded request body. Credential issuance must then lock the hosted member and active sponsorship rows, re-check active access and current launch consent, and atomically rotate that one feature-owned row in the same transaction so repeated enrollment stays bounded and account deletion serializes without post-deletion recreation. Every rotation mints a fresh bearer, replaces the lookup hash and expiry, clears revocation/replacement state, and leaves ordinary device-agent rows untouched. Explicit revocation and expired-session cleanup must compare-and-set on the exact authenticated lookup hash as well as the stable row id, so a stale credential generation cannot revoke its replacement. Device-agent routes must also require their distinct `hbds_agent_` prefix before hashing so an `hbds_imessage_` credential can never export wearable credentials across current operation or reader rollback. Re-check active hosted access and historical launch consent on every proof action (proof taps happen inside the extension with no consent UI, so stale document versions must not break them while members with no launch grant stay fail-closed), while keeping authenticated self-revocation available after access or consent is lost so cleanup cannot be blocked. Keep the message URL capability-less: the only private-state exception is a bounded V3 compact-table fragment containing immutable values already visible in that private-direct message. The fragment may contain health-related presentation values, but never a member identity, canonical record reference, credential, token, or other authority; it is decoded locally and never requested from the Web origin. Never log the full compact-table URL. Never link Privy into the extension, and never copy, persist, log, or share a raw Privy access, refresh, or identity token. The containing app must explicitly address the shared Keychain group for the derived credential while keeping each target's private group first so Privy's default Keychain storage remains private.
-- The same narrow capability-less presentation exception includes V4 workout
-  envelopes and V5 challenge-standings envelopes: neither V3, V4, nor V5
-  carries tracking, identity, canonical references, credentials, tokens, or
-  write authority. V1-V5 presentation envelopes may also reach the bounded
+- Messages mini-app credentials are random, member-scoped, and persisted only as Messages-domain-separated lookup hashes in one deterministic Messages-owned row per member in the existing short-lived session table; never persist the raw-token hash that the historical unscoped device-agent reader used. Before enrollment reads identity or authority, it must finish validating the bounded request body. Credential issuance must then lock the hosted member and active sponsorship rows, re-check active access and current launch consent, and atomically rotate that one feature-owned row in the same transaction so repeated enrollment stays bounded and account deletion serializes without post-deletion recreation. Every rotation mints a fresh bearer, replaces the lookup hash and expiry, clears revocation/replacement state, and leaves ordinary device-agent rows untouched. Explicit revocation and expired-session cleanup must compare-and-set on the exact authenticated lookup hash as well as the stable row id, so a stale credential generation cannot revoke its replacement. Device-agent routes must also require their distinct `hbds_agent_` prefix before hashing so an `hbds_imessage_` credential can never export wearable credentials across current operation or reader rollback. Re-check active hosted access and historical launch consent on every member action (the extension has no consent UI, so stale document versions must not break it while members with no launch grant stay fail-closed), while keeping authenticated self-revocation available after access or consent is lost so cleanup cannot be blocked. The member-action body must be a strict, bounded, versioned closed union; never admit client-selected member ids, canonical record ids from the card, arbitrary paths, generic patches, database operations, tool calls, or model fallback. Keep the message URL capability-less: the private-state exceptions are bounded presentation fragments containing immutable values already visible in that private-direct message. A fragment may contain health-related presentation values, but never a member identity, canonical record reference, credential, token, or other authority; it is decoded locally and never requested from the Web origin. Never log the full compact-table URL. Never link Privy into the extension, and never copy, persist, log, or share a raw Privy access, refresh, or identity token. The containing app must explicitly address the shared Keychain group for the derived credential while keeping each target's private group first so Privy's default Keychain storage remains private.
+- The same narrow capability-less presentation exception includes V4/V6 workout
+  envelopes and V5 challenge-standings envelopes. V3, V4, and V5 carry no
+  tracking, identity, canonical references, credentials, tokens, or write
+  authority. V6 adds a 64-character lowercase SHA-256 workout-revision binding
+  derived from the canonical workout id, its ordered hidden exercise/set-slot
+  identity, and its last applied member-action generation. Ordered identity
+  includes source/group identity and set type but excludes mutable set results
+  and annotations, so a structural writer invalidates shifted coordinates
+  without claiming ownership of unrelated fields when each exercise coordinate
+  is distinguishable. If two exercise blocks have the same projected identity
+  after exercise order is excluded, the projection cannot prove which block a
+  later reorder moved: authoring keeps that workout on truthful read-only V4,
+  and the canonical owner rejects any previously issued V6 action while the
+  current workout remains ambiguous. It also
+  carries a separate opaque 64-character removal binding derived from the hidden
+  canonical workout id and complete ordered canonical exercise/set state. That
+  binding reveals no raw hidden field and is checked only as a destructive
+  stale-state precondition under the existing canonical workout lock; it never
+  grants identity or write authority. Neither binding reveals a canonical id or
+  member. A destructive batch is invalid when its typed final visible set
+  sequence equals its submitted prestate, because the projection cannot prove
+  whether that batch changes the visible structure; reject it before mailbox
+  append rather than accepting a meaningless destructive command. Canonical
+  persistence atomically records the bounded action id with the workout change,
+  and only that exact marker—not visible-state coincidence—proves replay before
+  revision, active-only, and destructive preconditions. Every different action
+  must match the current revision before positional mutation, so a card that
+  predates either another direct action or a generic structural reorder fails
+  closed even when repeated visible values would make the wrong target appear
+  unchanged; indistinguishable duplicate coordinates fail closed before this
+  comparison rather than being treated as equal authority. The same bounded
+  canonical workout read resolves that marker after the target completes and
+  before considering a newer active workout, so replay cannot retarget. This
+  adds no client-visible set id or second receipt store. Canonical persistence
+  keeps the generic no-deletion guard and exposes set removal only to the
+  live-workout member-action owner after the exact binding and snapshot checks
+  succeed. An editable note is admitted only when its exact canonical value
+  fits the visible 40-character result field; a longer hidden note forces the
+  authority-free V4 presentation instead of entering either persisted card
+  state or the Linq request.
+  The same fail-closed eligibility applies to any duration, distance, RPE,
+  bodyweight, assistance, added-load, or mixed result that the typed V6 families
+  cannot fully represent; runtime preserves the original V4 actual rather than
+  persisting a reduced editable projection.
+  Neither binding is ever accepted as authentication and can authorize nothing
+  without the separately enrolled scoped bearer; the workout owner uses it
+  only as an exact stale-card precondition under the canonical mutation lock.
+  V1-V5 presentation envelopes may also reach the bounded
   queryless
   `/imessage/card/v1/:payload.png` route for Linq's static fallback and the
   Telegram daily-nutrition Rich Message visual. That path is

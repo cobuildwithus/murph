@@ -284,6 +284,14 @@ Updated: 2026-08-14
   unambiguous transport-evidence provider, while provider-neutral fetch
   callable aliases and ambiguous files remain clean. No exception, suppression,
   baseline, or handwritten production request was added.
+- Final mergeability required one bounded integration of current `main` through
+  `c9e26b3398d42790f6ee4941efb8d94a17f36bef`. The guard implementation and
+  focused tests merged without conflict. The testing map retains the expanded
+  provider-guard contract alongside upstream's Frog verification row, and the
+  assistant-runtime fixture keeps canonical event-backed accepted inputs while
+  adopting upstream's valid recorded no-reply provider-turn shape. ReviewGPT
+  `0.5.127` arrived from that base; the live registry, manifest, lockfile, and
+  installed executable all identify `0.5.127` as latest.
 
 ## Verification
 
@@ -301,6 +309,9 @@ Current evidence:
   imports, callables, ambiguous provider evidence, and domain models.
 - Full repository-tool suite: 36 files and 650 tests passed.
 - Repo-tools TypeScript compilation passes with `tsconfig.tools.json`.
+- The combined guard and Node-bootstrap suite passes 110 tests after the final
+  base merge. The conflicted assistant local-service runtime file passes all
+  103 tests with the CI-owned heap ceiling.
 - `pnpm provider-requests:guard`: passes on the current merged base containing
   the sibling SDK migrations and exact registered SDK hooks.
 - `bash scripts/doc-gardening.sh --fail-on-issues`: passes with zero issues.
