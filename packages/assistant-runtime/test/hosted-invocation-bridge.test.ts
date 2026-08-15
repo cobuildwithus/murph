@@ -1302,6 +1302,52 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     )).toBe(false);
   });
 
+  it("keeps snapshot elapsed time scoped after legacy planning", async () => {
+    const vaultRoot = await createVaultRoot();
+    const { calls, platform } = createRuntimePlatform();
+    const realDateNow = Date.now.bind(Date);
+    let clockOffsetMs = 0;
+    vi.spyOn(Date, "now").mockImplementation(() => realDateNow() + clockOffsetMs);
+    platform.workspacePort = {
+      checkpoint: async () => {
+        throw new Error("Unexpected workspace checkpoint call.");
+      },
+      read: async () => {
+        clockOffsetMs += 60_000;
+        return {
+          fetchedAt: "2026-05-01T00:00:00.000Z",
+          workspace: null,
+        };
+      },
+    };
+    let postPlanTimeAdvanced = false;
+    const options = createBridgeOptions({
+      platform,
+      readCurrentLease: () => {
+        if (!postPlanTimeAdvanced) {
+          clockOffsetMs += 5_000;
+          postPlanTimeAdvanced = true;
+        }
+        return createLease();
+      },
+      vaultRoot,
+    });
+
+    await options.createCheckpointSnapshot(createCheckpointInput("idle_shutdown"));
+
+    const lifecycleEntries = calls.logWrite.mock.calls
+      .flatMap(([request]) => request.entries)
+      .filter((entry) => entry.eventCode.startsWith("checkpoint.snapshot_"));
+    expect(lifecycleEntries).toHaveLength(1);
+    expect(lifecycleEntries[0]).toMatchObject({
+      eventCode: "checkpoint.snapshot_finished",
+    });
+    const snapshotElapsedMs = lifecycleEntries[0]?.redactedJson?.snapshotElapsedMs;
+    expect(snapshotElapsedMs).toEqual(expect.any(Number));
+    expect(snapshotElapsedMs).toBeGreaterThanOrEqual(5_000);
+    expect(snapshotElapsedMs).toBeLessThan(60_000);
+  });
+
   it("uses the current checkpoint expected workspace version for bridge snapshots", async () => {
     const vaultRoot = await createVaultRoot();
     const { calls, platform } = createRuntimePlatform();
