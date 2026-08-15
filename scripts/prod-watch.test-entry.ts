@@ -1,9 +1,48 @@
 #!/usr/bin/env node
 
+import { appendFileSync } from "node:fs";
 import process from "node:process";
 
 const TEST_OVERRIDES_KEY = "__MURPH_PROD_WATCH_TEST_OVERRIDES__";
 const runtimeRoot = process.env.MURPH_PROD_WATCH_TEST_RUNTIME_ROOT;
+const vercelFetchLog = process.env.TEST_VERCEL_FETCH_LOG;
+const vercelToken = process.env.TEST_VERCEL_TOKEN;
+
+if (vercelFetchLog !== undefined && vercelToken !== undefined) {
+  const mockedVercelFetch: typeof fetch = async (input, init) => {
+    const url = new URL(String(input));
+    appendFileSync(vercelFetchLog, `${url.hostname}${url.pathname}\n`);
+    const authorization = new Headers(init?.headers).get("authorization");
+    if (authorization !== `Bearer ${vercelToken}`) {
+      return new Response(JSON.stringify({ error: "unauthorized" }), {
+        status: 401,
+        headers: { "content-type": "application/json" },
+      });
+    }
+    if (url.hostname === "api.vercel.com" && url.pathname === "/v2/teams") {
+      return new Response(JSON.stringify({
+        teams: [{ id: "team-test", slug: "cobuildwithus" }],
+      }), { status: 200, headers: { "content-type": "application/json" } });
+    }
+    if (url.hostname === "api.vercel.com" && url.pathname === "/v9/projects/murph") {
+      return new Response(JSON.stringify({ id: "project-test" }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }
+    if (url.hostname === "vercel.com" && url.pathname === "/api/logs/request-logs") {
+      return new Response(JSON.stringify({ rows: [], hasMoreRows: false }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }
+    return new Response(JSON.stringify({ error: "unexpected_test_url" }), {
+      status: 404,
+      headers: { "content-type": "application/json" },
+    });
+  };
+  globalThis.fetch = mockedVercelFetch;
+}
 
 if (runtimeRoot === undefined) {
   console.error("prod-watch-test: test_runtime_root_required");

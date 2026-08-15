@@ -2356,8 +2356,14 @@ describe("production-watch locking and dry-run behavior", () => {
 
   it("executes the operator-advertised state-owning provider pass through all adapters", () => {
     const runtimeRoot = makeTempRoot();
+    const databaseInvocations = path.join(runtimeRoot, "database-invocations.log");
+    const vercelInvocations = path.join(runtimeRoot, "vercel-invocations.log");
+    const stripeInvocations = path.join(runtimeRoot, "stripe-invocations.log");
+    const codexPrompt = path.join(runtimeRoot, "codex-prompt.txt");
+    const homeRoot = path.join(runtimeRoot, "home");
+    const vercelToken = installVercelApiFixture(homeRoot);
     const databaseEnv = installDatabaseFixtureHelper(runtimeRoot, "healthy");
-    const codexEnv = installFakeCodex(runtimeRoot);
+    const codexEnv = installSchemaFaithfulFakeCodex(runtimeRoot);
     const result = runProdWatch([
       "run",
       "--provider-child",
@@ -2368,22 +2374,46 @@ describe("production-watch locking and dry-run behavior", () => {
     ], runtimeRoot, {
       ...databaseEnv,
       ...codexEnv,
-      PATH: `${codexEnv.PATH}:${databaseEnv.PATH}`,
+      HOME: homeRoot,
+      PATH: [
+        path.join(runtimeRoot, "test-bin"),
+        path.join(runtimeRoot, "schema-faithful-codex-bin"),
+        process.env.PATH ?? "",
+      ].join(":"),
+      TEST_CODEX_PROMPT_CAPTURE: codexPrompt,
+      TEST_DATABASE_INVOCATION_LOG: databaseInvocations,
+      TEST_STRIPE_INVOCATION_LOG: stripeInvocations,
+      TEST_VERCEL_FETCH_LOG: vercelInvocations,
+      TEST_VERCEL_TOKEN: vercelToken,
     });
 
     expect(result.status, result.stderr).toBe(0);
-    expect(JSON.parse(result.stdout)).toMatchObject({ status: "partial", evidenceComplete: false });
     const snapshot = JSON.parse(readFileSync(
       path.join(runtimeRoot, "projections", "prod-watch", "latest.snapshot.v1.json"),
       "utf8",
     )) as ProductionWatchSnapshot;
-    expect(snapshot.monitor).toMatchObject({ status: "partial", evidenceComplete: false });
+    expect(JSON.parse(result.stdout), JSON.stringify(snapshot.sourceHealth))
+      .toMatchObject({ status: "partial", evidenceComplete: false });
+    expect(snapshot.monitor, JSON.stringify(snapshot.sourceHealth))
+      .toMatchObject({ status: "partial", evidenceComplete: false });
     expect(snapshot.sourceHealth
       .filter((source) => source.source !== "database")
       .every((source) => source.status === "ok" && source.auth === "ok"))
       .toBe(true);
     expect(snapshot.sourceHealth.find((source) => source.source === "cloudflare")?.coverage)
       .toBe("on_demand");
+    expect(readFileSync(databaseInvocations, "utf8")).toBe("session\n");
+    expect(readFileSync(codexPrompt, "utf8")).toContain(
+      "Use only the Cloudflare Observability MCP and only the production Worker named murph-hosted.",
+    );
+    const vercelCalls = readFileSync(vercelInvocations, "utf8").trim().split("\n");
+    expect(vercelCalls.filter((call) => call === "api.vercel.com/v2/teams")).toHaveLength(1);
+    expect(vercelCalls.filter((call) => call === "api.vercel.com/v9/projects/murph")).toHaveLength(1);
+    expect(vercelCalls.filter((call) => call === "vercel.com/api/logs/request-logs"))
+      .toHaveLength(32);
+    const stripeCalls = readFileSync(stripeInvocations, "utf8").trim().split("\n");
+    expect(stripeCalls).toHaveLength(2);
+    expect(stripeCalls.some((call) => call.includes("--delivery-success=false"))).toBe(true);
     expect(existsSync(path.join(runtimeRoot, "operations", "prod-watch", "state.v1.json")))
       .toBe(true);
   });
@@ -3794,7 +3824,10 @@ describe("production-watch static safety contracts", () => {
     addFormats(ajv);
     const validateSnapshot = ajv.compile(snapshotSchema);
     const validateProvider = ajv.compile(providerSchema);
-    expect(providerCodexSchema).toMatchObject({ type: "object" });
+    const validateProviderCodex = ajv.compile(providerCodexSchema);
+    const providerCodexEnvelope = buildCodexProviderEnvelope(
+      new Date("2026-08-09T20:00:00.000Z"),
+    );
 
     expect(validateSnapshot(buildFixtureSnapshot("healthy", new Date("2026-08-09T20:00:00.000Z"))))
       .toBe(true);
@@ -3803,6 +3836,9 @@ describe("production-watch static safety contracts", () => {
       readFileSync(path.join(fixtureRoot, "healthy.providers.json"), "utf8"),
     ))).toBe(true);
     expect(validateProvider.errors).toBeNull();
+    expect(validateProviderCodex(providerCodexEnvelope)).toBe(true);
+    expect(validateProviderCodex.errors).toBeNull();
+    expect(() => parseProviderEvidence(providerCodexEnvelope)).not.toThrow();
   });
 });
 
@@ -3971,6 +4007,91 @@ function installDatabaseFixtureHelper(
   };
 }
 
+function installVercelApiFixture(homeRoot: string): string {
+  const authRoot = path.join(homeRoot, ".local", "share", "com.vercel.cli");
+  mkdirSync(authRoot, { recursive: true, mode: 0o700 });
+  const token = "test-vercel-token-1234567890";
+  const authPath = path.join(authRoot, "auth.json");
+  writeFileSync(authPath, JSON.stringify({ token }), { mode: 0o600 });
+  chmodSync(authPath, 0o600);
+  return token;
+}
+
+function installSchemaFaithfulFakeCodex(runtimeRoot: string): Record<string, string> {
+  const binRoot = path.join(runtimeRoot, "schema-faithful-codex-bin");
+  mkdirSync(binRoot, { recursive: true });
+  const providerPath = path.join(runtimeRoot, "codex.providers.current.json");
+  writeFileSync(providerPath, JSON.stringify(buildCodexProviderEnvelope(new Date())), { mode: 0o600 });
+  chmodSync(providerPath, 0o600);
+  writeFakeCodexExecutable(path.join(binRoot, "codex"), undefined, providerPath);
+  writeFakeProviderCliExecutables(binRoot);
+  return {
+    PATH: `${binRoot}:${process.env.PATH ?? ""}`,
+    CODEX_HOME: path.join(runtimeRoot, "codex-home"),
+    MURPH_PROD_WATCH_CODEX_BIN: path.join(binRoot, "codex"),
+    TEST_MCP_REMOTE_BIN: path.join(binRoot, "codex"),
+  };
+}
+
+function buildCodexProviderEnvelope(observedAt: Date): unknown {
+  const timestamp = observedAt.toISOString();
+  const unavailableSource = (source: "vercel" | "stripe") => ({
+    schemaVersion: "prod-watch.adapter-evidence.v1",
+    source,
+    collectedAt: timestamp,
+    status: "unavailable",
+    auth: "unknown",
+    freshnessSeconds: 0,
+    releaseContext: [],
+    counters: [],
+    latency: [],
+    fingerprints: [],
+  });
+  return {
+    schemaVersion: "prod-watch.provider-evidence.v1",
+    generatedAt: timestamp,
+    sources: [
+      unavailableSource("vercel"),
+      {
+        schemaVersion: "prod-watch.adapter-evidence.v1",
+        source: "cloudflare",
+        collectedAt: timestamp,
+        status: "ok",
+        auth: "ok",
+        freshnessSeconds: 0,
+        releaseContext: [],
+        counters: [
+          {
+            metric: "provider_request_count",
+            dimensions: { source: "cloudflare" },
+            unit: "count",
+            current: 10,
+            previous: 10,
+          },
+          {
+            metric: "provider_error_count",
+            dimensions: { source: "cloudflare" },
+            unit: "count",
+            current: 0,
+            previous: 0,
+          },
+          {
+            metric: "provider_timeout_count",
+            dimensions: { source: "cloudflare" },
+            unit: "count",
+            current: 0,
+            previous: 0,
+          },
+        ],
+        latency: [],
+        fingerprints: [],
+      },
+      unavailableSource("stripe"),
+    ],
+    failures: [],
+  };
+}
+
 function installFakeCodex(runtimeRoot: string): Record<string, string> {
   const binRoot = path.join(runtimeRoot, "codex-bin");
   mkdirSync(binRoot, { recursive: true });
@@ -3990,7 +4111,11 @@ function installFakeCodex(runtimeRoot: string): Record<string, string> {
 function writeFakeCodexExecutable(
   targetPath: string,
   requiredRuntime?: { codexHomeBasename: string },
+  providerFixturePath?: string,
 ): void {
+  const providerFixture = providerFixturePath === undefined
+    ? '"$TEST_PROVIDER_FIXTURE"'
+    : JSON.stringify(providerFixturePath);
   writeFileSync(targetPath, [
     "#!/bin/sh",
     ...(requiredRuntime === undefined ? [] : [
@@ -4014,7 +4139,7 @@ function writeFakeCodexExecutable(
     "  if [ \"$1\" = \"--output-last-message\" ]; then output=\"$2\"; shift 2; else shift; fi",
     "done",
     "if [ -n \"${TEST_CODEX_PROMPT_CAPTURE:-}\" ]; then cat > \"$TEST_CODEX_PROMPT_CAPTURE\"; else cat >/dev/null; fi",
-    "if [ -n \"$output\" ]; then cp \"$TEST_PROVIDER_FIXTURE\" \"$output\"; fi",
+    `if [ -n "$output" ]; then cp ${providerFixture} "$output"; fi`,
     "printf '%s\\n' '{\"type\":\"session\",\"session_id\":\"codex-test-session\"}'",
     "printf '%s\\n' '{\"type\":\"turn.completed\",\"status\":\"completed\"}'",
     "",
@@ -4062,6 +4187,7 @@ function writeFakeProviderCliExecutables(binRoot: string): void {
   const stripePath = path.join(binRoot, "stripe");
   writeFileSync(stripePath, [
     "#!/usr/bin/env node",
+    "if (process.env.TEST_STRIPE_INVOCATION_LOG) require('node:fs').appendFileSync(process.env.TEST_STRIPE_INVOCATION_LOG, `${process.argv.slice(2).join(' ')}\\n`);",
     "process.stdout.write(`${JSON.stringify({ object: 'list', data: [], has_more: false })}\\n`);",
     "",
   ].join("\n"), { mode: 0o755 });
