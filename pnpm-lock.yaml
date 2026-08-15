@@ -75,8 +75,8 @@ importers:
         specifier: ^0.1.17
         version: 0.1.17
       '@cobuild/review-gpt':
-        specifier: ^0.5.131
-        version: 0.5.131(@cfworker/json-schema@4.1.1)(typescript@7.0.2)
+        specifier: ^0.5.132
+        version: 0.5.132(@cfworker/json-schema@4.1.1)(typescript@7.0.2)
       '@elevenlabs/elevenlabs-js':
         specifier: 2.62.0
         version: 2.62.0(bufferutil@4.1.0)(utf-8-validate@6.0.6)
@@ -1472,8 +1472,8 @@ packages:
     resolution: {integrity: sha512-cq+LzXoKNOn+KXLBm9+N9QMTEwbIXzki5AZXP/cHnAex3+3LnyhJ7zMxB5InZVgQgqI9hEs0dsXoJX/tNxlW3Q==}
     hasBin: true
 
-  '@cobuild/review-gpt@0.5.131':
-    resolution: {integrity: sha512-pISZlwkytD8ObJFB3eRFKwfxkPOiC/dbOUfychwE7Yjmi57kzCiLD4yiUxgB7rCV/6Wr2uWt9sstB/El8XmnBg==}
+  '@cobuild/review-gpt@0.5.132':
+    resolution: {integrity: sha512-UJrMVW2LUXnGOorFZKmOs7KaC4lRqUodQacBsb3Vbi9dzLSoslZKdmr/HXyuSLlIsShBoYvZK3JD1hstGsOz4w==}
     hasBin: true
 
   '@coinbase/cdp-sdk@1.48.3':
@@ -4269,9 +4269,6 @@ packages:
   '@toon-format/toon@2.2.0':
     resolution: {integrity: sha512-FMYqrlZnMN72YIT9KVt7Kxc41gat+RgMIzDmvRRPHw0J7pqW/FeBGDY/4BIWjT71Y+EdI9fCJip90uXuGuYhjw==}
 
-  '@toon-format/toon@2.3.1':
-    resolution: {integrity: sha512-sWqEMeAJGMda9qRrfPKrX3C4c33CO9SJuvJzzrcBEn5sbDB+k6pSLkDsfN0rVnLQwR97MV3sDgVbcxQNsq8xVw==}
-
   '@ts-morph/common@0.27.0':
     resolution: {integrity: sha512-Wf29UqxWDpc+i61k3oIOzcUfQt79PIT9y/MWfAGlrkjg6lBC1hwDECLXPVJAhWjiGbfBCxZd65F/LIZF3+jeJQ==}
 
@@ -7006,11 +7003,6 @@ packages:
     engines: {node: '>=22'}
     hasBin: true
 
-  incur@0.4.26:
-    resolution: {integrity: sha512-63lwOc8+o1VeFkIW3sWWMrDSP5Dd1NsvucUWyxLUk+DoNRiNl7cj481nlLdlboXkq+tqYPBSlV/7XbylS2S4BA==}
-    engines: {node: '>=22'}
-    hasBin: true
-
   incur@0.4.5:
     resolution: {integrity: sha512-4WFlqm5e+IKNoX+lDIjjpebO8ResPx3vPUBChxNfnNo3oGp0ooo6piiiTspOMub2dq2mcG/AmlUq0ejuGfKobg==}
     engines: {node: '>=22'}
@@ -9490,9 +9482,6 @@ packages:
   tokenx@1.3.0:
     resolution: {integrity: sha512-NLdXTEZkKiO0gZuLtMoZKjCXTREXeZZt8nnnNeyoXtNZAfG/GKGSbQtLU5STspc0rMSwcA+UJfWZkbNU01iKmQ==}
 
-  tokenx@1.6.0:
-    resolution: {integrity: sha512-CKTjk345ajvBAUp5xUI9a5KKN0zU0lBueVHQbCskH1Hp6WkUKsPW2qGCYNs0pxNyfzxfo+IIjdt2W4sMbw/qBw==}
-
   tough-cookie@6.0.1:
     resolution: {integrity: sha512-LktZQb3IeoUWB9lqR5EWTHgW/VTITCXg4D21M+lvybRVdylLrRMnqaIONLVb5mav8vM19m44HIcGq4qASeu2Qw==}
     engines: {node: '>=16'}
@@ -10905,10 +10894,10 @@ snapshots:
 
   '@cobuild/repo-tools@0.1.17': {}
 
-  '@cobuild/review-gpt@0.5.131(@cfworker/json-schema@4.1.1)(typescript@7.0.2)':
+  '@cobuild/review-gpt@0.5.132(@cfworker/json-schema@4.1.1)(typescript@7.0.2)':
     dependencies:
       '@cobuild/repo-tools': 0.1.17
-      incur: 0.4.26
+      incur: 0.4.5(patch_hash=d02ac1808a7524a97aaea12822966726a31acaf4c5b5064d56ca03730c790b5e)
       repomix: 1.16.0(@cfworker/json-schema@4.1.1)(typescript@7.0.2)
     transitivePeerDependencies:
       - '@cfworker/json-schema'
@@ -14333,8 +14322,6 @@ snapshots:
 
   '@toon-format/toon@2.2.0': {}
 
-  '@toon-format/toon@2.3.1': {}
-
   '@ts-morph/common@0.27.0':
     dependencies:
       fast-glob: 3.3.3
@@ -16494,7 +16481,7 @@ snapshots:
       http-errors: 2.0.1
       iconv-lite: 0.7.3
       on-finished: 2.4.1
-      qs: 6.15.2
+      qs: 6.15.3
       raw-body: 3.0.2
       type-is: 2.1.0
     transitivePeerDependencies:
@@ -17747,7 +17734,7 @@ snapshots:
 
   extension-port-stream@3.0.0:
     dependencies:
-      readable-stream: 3.6.2
+      readable-stream: 4.7.0
       webextension-polyfill: 0.10.0
 
   fast-check@3.23.2:
@@ -18339,16 +18326,6 @@ snapshots:
       '@scalar/openapi-types': 0.8.0
       '@toon-format/toon': 2.2.0
       tokenx: 1.3.0
-      yaml: 2.9.0
-      zod: 4.4.3
-
-  incur@0.4.26:
-    dependencies:
-      '@cfworker/json-schema': 4.1.1
-      '@modelcontextprotocol/server': 2.0.0-alpha.4
-      '@scalar/openapi-types': 0.8.0
-      '@toon-format/toon': 2.3.1
-      tokenx: 1.6.0
       yaml: 2.9.0
       zod: 4.4.3
 
@@ -21059,8 +21036,6 @@ snapshots:
       ieee754: 1.2.1
 
   tokenx@1.3.0: {}
-
-  tokenx@1.6.0: {}
 
   tough-cookie@6.0.1:
     dependencies:
