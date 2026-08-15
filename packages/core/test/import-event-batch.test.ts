@@ -343,6 +343,106 @@ test("source-guarded workout batches land once and retain completion through edi
   );
 });
 
+test("damaged document evidence cannot become a fresh workout source", async () => {
+  const cases = [
+    {
+      exactReuseCode: "RAW_MANIFEST_INVALID",
+      guardedCode: "RAW_MANIFEST_INVALID",
+      name: "missing-manifest",
+      damage: async (vaultRoot: string, source: Awaited<ReturnType<typeof importWorkoutSourceDocument>>) => {
+        await fs.rm(path.join(vaultRoot, source.manifestPath));
+      },
+    },
+    {
+      exactReuseCode: "RAW_MANIFEST_INVALID",
+      guardedCode: "RAW_MANIFEST_INVALID",
+      name: "malformed-manifest",
+      damage: async (vaultRoot: string, source: Awaited<ReturnType<typeof importWorkoutSourceDocument>>) => {
+        await fs.writeFile(path.join(vaultRoot, source.manifestPath), "not-json\n", "utf8");
+      },
+    },
+    {
+      exactReuseCode: "RAW_REFERENCE_MISSING",
+      guardedCode: "EVENT_BATCH_SOURCE_RAW_REF_MISSING",
+      name: "missing-artifact",
+      damage: async (vaultRoot: string, source: Awaited<ReturnType<typeof importWorkoutSourceDocument>>) => {
+        await fs.rm(path.join(vaultRoot, source.raw.relativePath));
+      },
+    },
+    {
+      exactReuseCode: "RAW_MANIFEST_INVALID",
+      guardedCode: "EVENT_BATCH_SOURCE_DOCUMENT_NOT_LIVE",
+      name: "artifact-digest-drift",
+      damage: async (vaultRoot: string, source: Awaited<ReturnType<typeof importWorkoutSourceDocument>>) => {
+        await fs.writeFile(path.join(vaultRoot, source.raw.relativePath), "changed source\n", "utf8");
+      },
+    },
+  ] as const;
+
+  for (const testCase of cases) {
+    const vaultRoot = await makeVault(`murph-event-batch-damaged-source-${testCase.name}`);
+    const source = await importWorkoutSourceDocument(
+      vaultRoot,
+      `murph-event-batch-damaged-source-${testCase.name}`,
+    );
+    const rawRef = source.raw.relativePath;
+    const payloads = [buildActivitySessionPayload(rawRef)];
+    const applied = await importEventBatch({
+      vaultRoot,
+      payloads,
+      rejectIfSourceRawRefAlreadyImported: rawRef,
+      apply: true,
+    });
+    assert.equal(applied.createdCount, 1);
+    await testCase.damage(vaultRoot, source);
+    const completionAuditsBefore = (await readAllAuditRecords(vaultRoot)).filter(
+      (record) => record.commandName === "core.importEventBatch.sourceRawRefOnce",
+    ).length;
+
+    await assert.rejects(
+      importDocument({ vaultRoot, sourcePath: source.sourcePath, reuseExact: true }),
+      (error: unknown) => {
+        assert.equal(error instanceof VaultError, true);
+        assert.equal((error as VaultError).code, testCase.exactReuseCode);
+        return true;
+      },
+    );
+    await assert.rejects(
+      resolveWorkoutSourceImportStatus({ vaultRoot, rawRef }),
+      (error: unknown) => {
+        assert.equal(error instanceof VaultError, true);
+        assert.equal((error as VaultError).code, testCase.guardedCode);
+        return true;
+      },
+    );
+    await assert.rejects(
+      importEventBatch({
+        vaultRoot,
+        payloads,
+        rejectIfSourceRawRefAlreadyImported: rawRef,
+        apply: true,
+      }),
+      (error: unknown) => {
+        assert.equal(error instanceof VaultError, true);
+        assert.equal((error as VaultError).code, testCase.guardedCode);
+        return true;
+      },
+    );
+
+    const [sourceMatches] = await findEventsByRawRefs({ vaultRoot, rawRefs: [rawRef] });
+    assert.equal(
+      sourceMatches?.filter((match) => match.latest.kind === "activity_session").length,
+      1,
+    );
+    assert.equal(
+      (await readAllAuditRecords(vaultRoot)).filter(
+        (record) => record.commandName === "core.importEventBatch.sourceRawRefOnce",
+      ).length,
+      completionAuditsBefore,
+    );
+  }
+});
+
 test("source-guarded workout batches reject partial history without a completion receipt", async () => {
   const vaultRoot = await makeVault("murph-event-batch-source-partial");
   const source = await importWorkoutSourceDocument(vaultRoot, "murph-event-batch-source-partial");

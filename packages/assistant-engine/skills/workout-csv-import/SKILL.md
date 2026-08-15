@@ -32,6 +32,9 @@ batch write. Keep raw rows out of model context and user-facing replies.
    before Python and event import. Explain that Murph will not silently create a
    replacement source identity; do not bypass the conflict with ordinary
    document import in this workout workflow.
+   If exact reuse instead reports incomplete or damaged preserved source
+   evidence, also stop before Python and event import. Explain that the existing
+   evidence needs explicit recovery; never replace or bypass that identity.
 2. Immediately run `vault-cli document workout-import-status <raw-file-ref>
    --format json`. If `status` is `completed`, the atomic workout import for
    this exact source completed in an earlier attempt. Stop before Python or

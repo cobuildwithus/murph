@@ -1507,6 +1507,119 @@ text(result.output);
     )
   })
 
+  it('stops before transformation when preserved exact-source evidence is damaged', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const scenario = await prepareScriptedTurnScenario()
+    const workdir = scenario.turnInput.workingDirectory
+    const skillsRoot = path.join(workdir, 'skills')
+    await mkdir(skillsRoot, { recursive: true })
+    await cp(
+      path.join(resolveAssistantSkillsRoot(), 'workout-csv-import'),
+      path.join(skillsRoot, 'workout-csv-import'),
+      { recursive: true },
+    )
+    await writeFile(
+      path.join(workdir, 'workout-history.csv'),
+      'session,exercise,reps\na,Squat,5\n',
+      'utf8',
+    )
+    await writeFile(
+      path.join(workdir, 'source-evidence-state.json'),
+      '{"canonicalDocumentExists":true,"requiredManifestPresent":false}\n',
+      'utf8',
+    )
+    await writeFile(
+      path.join(workdir, 'vault-cli'),
+      `#!/bin/sh
+set -eu
+printf '%s\\n' "$*" >> commands.log
+if [ "$1 $2 $3" = "workout import inspect" ]; then
+  printf '%s\\n' '{"detectedSource":null,"importable":false,"rowCount":1}'
+  exit 0
+fi
+if [ "$1 $2" = "document import" ]; then
+  grep -q '"canonicalDocumentExists":true' source-evidence-state.json
+  grep -q '"requiredManifestPresent":false' source-evidence-state.json
+  printf '%s\\n' '{"ok":false,"error":{"code":"conflict","message":"Preserved exact source evidence is incomplete or damaged. Exact reuse will not create a replacement identity."}}' >&2
+  exit 2
+fi
+printf '%s\\n' '{"error":"damaged-source recovery must stop before Python or event import"}' >&2
+exit 4
+`,
+      { encoding: 'utf8', mode: 0o755 },
+    )
+    await writeFile(
+      path.join(workdir, 'run-damaged-source-recovery'),
+      `#!/bin/sh
+set -eu
+./vault-cli workout import inspect workout-history.csv --format json > inspect.json
+set +e
+./vault-cli document import workout-history.csv --source import --title 'Workout CSV source' --reuse-exact --format json > document.json 2> document-error.json
+import_status=$?
+set -e
+test "$import_status" -ne 0
+grep -q '"code":"conflict"' document-error.json
+grep -q 'source evidence is incomplete or damaged' document-error.json
+printf '%s\\n' '{"status":"damaged_exact_source","transformed":false,"writeAttempted":false}'
+`,
+      { encoding: 'utf8', mode: 0o755 },
+    )
+    scenario.stub.queue(
+      {
+        customToolCall: {
+          input: `
+const result = await tools.exec_command({
+  cmd: "sed -n '1,260p' skills/workout-csv-import/SKILL.md",
+});
+text(result.output);
+`,
+          name: 'exec',
+        },
+      },
+      {
+        customToolCall: {
+          input: `
+const result = await tools.exec_command({
+  cmd: "./run-damaged-source-recovery",
+  yield_time_ms: 30000,
+});
+text(result.output);
+`,
+          name: 'exec',
+        },
+      },
+      {
+        text: 'I found that this exact workout source was preserved before, but its required source evidence is incomplete or damaged. I stopped before rebuilding or importing anything so I would not duplicate your workout history; the preserved evidence needs explicit recovery first.',
+      },
+    )
+
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      baseInstructions: buildScriptedHostedSystemPrompt('direct'),
+      env: {
+        ...scenario.turnInput.env,
+        [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
+      },
+      prompt: 'Import workout-history.csv again from a replacement workspace.',
+      sandbox: 'danger-full-access',
+    })
+
+    expect(result.finalMessage).toContain('source evidence is incomplete or damaged')
+    expect(result.finalMessage).toContain('stopped before rebuilding or importing')
+    expect(result.finalMessage).toContain('needs explicit recovery')
+    expect((await readFile(path.join(workdir, 'commands.log'), 'utf8')).trim().split('\n'))
+      .toEqual([
+        'workout import inspect workout-history.csv --format json',
+        'document import workout-history.csv --source import --title Workout CSV source --reuse-exact --format json',
+      ])
+    expect(scenario.stub.requestSummariesSinceBaseline()
+      .flatMap((summary) => summary.customToolCallOutputs ?? [])
+      .join('\n')).toContain(
+      '{"status":"damaged_exact_source","transformed":false,"writeAttempted":false}',
+    )
+  })
+
   it('carries expanded connected-health questions through the production prompt, skill, command, evidence, and answer boundary', {
     timeout: 360_000,
   }, async () => {

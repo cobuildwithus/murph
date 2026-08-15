@@ -914,6 +914,8 @@ function createIntegratedImporterServices(): ImporterServices {
       } catch (error) {
         throw toVaultCliError(error, {
           DOCUMENT_EXACT_SOURCE_DELETED: { code: 'conflict' },
+          RAW_MANIFEST_INVALID: { code: 'conflict' },
+          RAW_REFERENCE_MISSING: { code: 'conflict' },
         })
       }
 

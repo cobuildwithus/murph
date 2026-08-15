@@ -191,6 +191,79 @@ test("exact document reuse fails closed after its source document is deleted", a
   assert.deepEqual((await fs.readdir(vaultRoot, { recursive: true })).sort(), treeBeforeAliasReplay);
 });
 
+test("exact document reuse distinguishes damaged owned evidence from source absence", async () => {
+  const cases = [
+    {
+      expectedCode: "RAW_MANIFEST_INVALID",
+      name: "missing-manifest",
+      damage: async (vaultRoot: string, imported: Awaited<ReturnType<typeof importDocument>>) => {
+        await fs.rm(path.join(vaultRoot, imported.manifestPath));
+      },
+    },
+    {
+      expectedCode: "RAW_MANIFEST_INVALID",
+      name: "malformed-manifest",
+      damage: async (vaultRoot: string, imported: Awaited<ReturnType<typeof importDocument>>) => {
+        await fs.writeFile(path.join(vaultRoot, imported.manifestPath), "not-json\n", "utf8");
+      },
+    },
+    {
+      expectedCode: "RAW_MANIFEST_INVALID",
+      name: "owner-mismatched-manifest",
+      damage: async (vaultRoot: string, imported: Awaited<ReturnType<typeof importDocument>>) => {
+        const manifestPath = path.join(vaultRoot, imported.manifestPath);
+        const manifest = parseRawImportManifest(JSON.parse(await fs.readFile(manifestPath, "utf8")));
+        await fs.writeFile(
+          manifestPath,
+          `${JSON.stringify({
+            ...manifest,
+            owner: {
+              kind: "document",
+              id: "doc_01ARZ3NDEKTSV4RRFFQ69G5FAV",
+            },
+          })}\n`,
+          "utf8",
+        );
+      },
+    },
+    {
+      expectedCode: "RAW_REFERENCE_MISSING",
+      name: "missing-artifact",
+      damage: async (vaultRoot: string, imported: Awaited<ReturnType<typeof importDocument>>) => {
+        await fs.rm(path.join(vaultRoot, imported.raw.relativePath));
+      },
+    },
+    {
+      expectedCode: "RAW_MANIFEST_INVALID",
+      name: "artifact-digest-drift",
+      damage: async (vaultRoot: string, imported: Awaited<ReturnType<typeof importDocument>>) => {
+        await fs.writeFile(path.join(vaultRoot, imported.raw.relativePath), "changed source\n", "utf8");
+      },
+    },
+  ] as const;
+
+  for (const testCase of cases) {
+    const vaultRoot = await makeTempDirectory(`murph-core-document-exact-reuse-${testCase.name}`);
+    const sourceRoot = await makeTempDirectory(`murph-core-document-exact-reuse-${testCase.name}-source`);
+    await initializeVault({ vaultRoot });
+    const sourcePath = path.join(sourceRoot, "workout-history.csv");
+    await fs.writeFile(sourcePath, "session,exercise,reps\na,Squat,5\n", "utf8");
+    const imported = await importDocument({ vaultRoot, sourcePath, reuseExact: true });
+    await testCase.damage(vaultRoot, imported);
+    const treeBeforeReplay = (await fs.readdir(vaultRoot, { recursive: true })).sort();
+
+    await assert.rejects(
+      importDocument({ vaultRoot, sourcePath, reuseExact: true }),
+      (error: unknown) => {
+        assert.equal(error instanceof VaultError, true);
+        assert.equal((error as VaultError).code, testCase.expectedCode);
+        return true;
+      },
+    );
+    assert.deepEqual((await fs.readdir(vaultRoot, { recursive: true })).sort(), treeBeforeReplay);
+  }
+});
+
 test("validateVault reports missing raw manifests by raw directory for immutable manifest files", async () => {
   const vaultRoot = await makeTempDirectory("murph-core-raw-manifest-missing");
   const sourceRoot = await makeTempDirectory("murph-core-raw-manifest-missing-source");

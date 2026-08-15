@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdtemp, readFile, readdir, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
@@ -225,6 +225,66 @@ test('independent exact-source attempts stop from durable workout-source history
   const manifestFiles = await readdir(path.dirname(path.join(vaultRoot, first.manifestFile)))
   assert.equal(documentDirectories.length, 1)
   assert.equal(manifestFiles.filter((name) => name.startsWith('manifest.')).length, 1)
+}, 180_000)
+
+test('damaged exact-source evidence stops before replacement identity or workout replay', async () => {
+  const workDir = await mkdtemp(path.join(tmpdir(), 'murph-cli-import-jsonl-damaged-source-'))
+  const vaultRoot = path.join(workDir, 'vault')
+  const sourcePath = path.join(workDir, 'workout-history.csv')
+  await writeFile(sourcePath, 'session,exercise,reps\nsession-a,Squat,5\n', 'utf8')
+  await runCli(['init', '--vault', vaultRoot])
+
+  const sourceImport = await runCli<DocumentImportResult>([
+    'document', 'import', sourcePath, '--reuse-exact', '--vault', vaultRoot,
+  ])
+  assert.equal(sourceImport.ok, true)
+  const source = requireData(sourceImport)
+  const inputPath = path.join(workDir, 'events.jsonl')
+  await writeFile(inputPath, toJsonl([withRawRef(source.rawFile)]), 'utf8')
+  const applied = await runCli<EventImportJsonlResult>([
+    'event', 'import-jsonl',
+    '--input', `@${inputPath}`,
+    '--source-raw-ref-once', source.rawFile,
+    '--apply',
+    '--vault', vaultRoot,
+  ])
+  assert.equal(applied.ok, true)
+  assert.equal(requireData(applied).createdCount, 1)
+
+  await rm(path.join(vaultRoot, source.manifestFile))
+  const pathsBeforeReplay = (await readdir(vaultRoot, { recursive: true })).sort()
+  const rejectedReplay = await runCli<DocumentImportResult>([
+    'document', 'import', sourcePath, '--reuse-exact', '--vault', vaultRoot,
+  ])
+  assert.equal(rejectedReplay.ok, false)
+  if (rejectedReplay.ok) throw new Error('expected damaged exact-source reuse to fail')
+  assert.equal(rejectedReplay.error.code, 'conflict')
+  assert.match(rejectedReplay.error.message ?? '', /source evidence is incomplete or damaged/iu)
+  assert.deepEqual((await readdir(vaultRoot, { recursive: true })).sort(), pathsBeforeReplay)
+
+  const rejectedStatus = await runCli<{ status: string }>([
+    'document', 'workout-import-status', source.rawFile, '--vault', vaultRoot,
+  ])
+  assert.equal(rejectedStatus.ok, false)
+  if (rejectedStatus.ok) throw new Error('expected damaged source status to fail')
+  assert.match(rejectedStatus.error.message ?? '', /source evidence is incomplete or damaged/iu)
+
+  const rejectedApply = await runCli<EventImportJsonlResult>([
+    'event', 'import-jsonl',
+    '--input', `@${inputPath}`,
+    '--source-raw-ref-once', source.rawFile,
+    '--apply',
+    '--vault', vaultRoot,
+  ])
+  assert.equal(rejectedApply.ok, false)
+  if (rejectedApply.ok) throw new Error('expected damaged source apply to fail')
+  assert.equal(rejectedApply.error.code, 'conflict')
+
+  const workouts = await runCli<EventListResult>([
+    'event', 'list', '--kind', 'activity_session', '--vault', vaultRoot,
+  ])
+  assert.equal(workouts.ok, true)
+  assert.equal(requireData(workouts).count, 1)
 }, 180_000)
 
 test('workout import status exposes partial history without a completion receipt', async () => {

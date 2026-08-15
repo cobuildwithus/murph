@@ -95,8 +95,8 @@ import {
   normalizeMealNutrition,
 } from "./nutrition.ts";
 import {
-  isRawManifestFileName,
   parseRawImportManifest,
+  resolveRawManifestPath,
   stageRawImportManifest,
 } from "./operations/raw-manifests.ts";
 import {
@@ -3814,67 +3814,22 @@ interface ExactDocumentSourceSet {
   liveSources: ExactDocumentSource[];
 }
 
+function rejectDamagedExactDocumentEvidence(input: {
+  documentId: string;
+  manifestPath: string;
+  reason: string;
+}): never {
+  throw new VaultError(
+    "RAW_MANIFEST_INVALID",
+    "Preserved exact source evidence is incomplete or damaged. Exact reuse will not create a replacement identity.",
+    input,
+  );
+}
+
 async function inspectExactDocumentSourceSet(input: {
   vaultRoot: string;
   sourceReceipt: CommittedPayloadReceipt;
 }): Promise<ExactDocumentSourceSet> {
-  const manifestPaths = await walkVaultFiles(input.vaultRoot, VAULT_LAYOUT.rawDocumentsDirectory, {
-    extension: ".json",
-  });
-  const matchingManifests = new Map<string, {
-    manifestPath: string;
-    rawRef: string;
-    originalFileName: string;
-    mediaType: string;
-  }>();
-
-  for (const manifestPath of manifestPaths) {
-    const manifestFileName = manifestPath.slice(manifestPath.lastIndexOf("/") + 1);
-    if (!isRawManifestFileName(manifestFileName)) {
-      continue;
-    }
-    const candidateText = await readUtf8File(input.vaultRoot, manifestPath);
-    let manifest: ReturnType<typeof parseRawImportManifest>;
-    try {
-      manifest = parseRawImportManifest(JSON.parse(candidateText));
-    } catch {
-      // Documents may legitimately be named manifest.json or
-      // manifest.*.json. A matching basename is only a metadata candidate;
-      // member-owned JSON must not poison exact-source lookup vault-wide.
-      continue;
-    }
-    if (
-      manifest.importKind !== "document"
-      || manifest.owner.kind !== "document"
-      || manifest.owner.id !== manifest.importId
-    ) {
-      continue;
-    }
-    const artifact = manifest.artifacts.find((candidate) =>
-      candidate.role === "source_document"
-      && candidate.byteSize === input.sourceReceipt.byteLength
-      && candidate.sha256 === input.sourceReceipt.sha256
-    );
-    if (!artifact) {
-      continue;
-    }
-    const integrity = await statAndHashVaultFile(input.vaultRoot, artifact.relativePath);
-    if (
-      integrity?.byteSize === input.sourceReceipt.byteLength
-      && integrity.sha256 === input.sourceReceipt.sha256
-    ) {
-      matchingManifests.set(manifest.importId, {
-        manifestPath,
-        rawRef: artifact.relativePath,
-        originalFileName: artifact.originalFileName,
-        mediaType: artifact.mediaType,
-      });
-    }
-  }
-  if (matchingManifests.size === 0) {
-    return { deletedExactSourceExists: false, liveSources: [] };
-  }
-
   const shardPaths = await walkVaultFiles(input.vaultRoot, VAULT_LAYOUT.eventLedgerDirectory, {
     extension: ".jsonl",
   });
@@ -3899,46 +3854,180 @@ async function inspectExactDocumentSourceSet(input: {
       latestDocuments.set(entry.record.id, entry);
     }
   }
-  const documents = [...latestDocuments.values()]
-    .sort((left, right) => left.record.id.localeCompare(right.record.id));
-
-  // A deleted identity must fence the whole exact-byte equivalence set. An
-  // ordinary import may have created a live alias later, but returning that
-  // alias would reset raw-reference-scoped workout completion.
-  const deletedExactSourceExists = documents.some((entry) =>
-    isDeletedEventSpineRecord(entry.record)
-    && matchingManifests.has(entry.record.documentId)
-  );
-
-  const liveSources: ExactDocumentSource[] = [];
-  for (const entry of documents) {
-    if (isDeletedEventSpineRecord(entry.record)) {
-      continue;
-    }
-    const stored = matchingManifests.get(entry.record.documentId);
-    if (!stored) {
-      continue;
-    }
-    if (!entry.record.rawRefs?.includes(stored.rawRef)) {
-      continue;
-    }
+  // Canonical document history owns exact-source identity. Select the first
+  // immutable source attachment for each stable event id that claims the
+  // incoming digest, then verify only its derived sidecar and raw artifact.
+  // This distinguishes true absence from damaged owned evidence and keeps
+  // member documents named manifest.json out of metadata discovery.
+  const claims = new Map<string, {
+    entry: EventSpineEntry<DocumentEventRecord>;
+    raw: EventAttachment;
+  }>();
+  for (const entry of entries) {
     const raw = entry.record.attachments?.find((attachment) =>
       attachment.role === "source_document"
-      && attachment.relativePath === stored.rawRef
       && attachment.sha256 === input.sourceReceipt.sha256
     );
     if (!raw) {
       continue;
     }
+    const current = claims.get(entry.record.id);
+    if (!current || compareEventSpineEntries(entry, current.entry) < 0) {
+      claims.set(entry.record.id, { entry, raw });
+    }
+  }
+  if (claims.size === 0) {
+    return { deletedExactSourceExists: false, liveSources: [] };
+  }
+
+  const verified = new Map<string, {
+    latest: EventSpineEntry<DocumentEventRecord>;
+    manifestPath: string;
+    raw: EventAttachment;
+  }>();
+  for (const claim of [...claims.values()]
+    .sort((left, right) => left.entry.record.id.localeCompare(right.entry.record.id))) {
+    const documentId = claim.entry.record.documentId;
+    const manifestPath = resolveRawManifestPath({
+      artifacts: [claim.raw],
+      importId: documentId,
+      importedAt: claim.entry.record.recordedAt,
+    });
+    const latest = latestDocuments.get(claim.entry.record.id);
+    if (
+      !latest
+      || latest.record.documentId !== documentId
+      || !claim.entry.record.rawRefs?.includes(claim.raw.relativePath)
+    ) {
+      rejectDamagedExactDocumentEvidence({
+        documentId,
+        manifestPath,
+        reason: "canonical document history does not retain one stable source owner",
+      });
+    }
+
+    let manifestText: string;
+    try {
+      manifestText = await readUtf8File(input.vaultRoot, manifestPath);
+    } catch (error) {
+      if (error instanceof VaultError && error.code === "VAULT_FILE_MISSING") {
+        rejectDamagedExactDocumentEvidence({
+          documentId,
+          manifestPath,
+          reason: "required raw manifest is missing",
+        });
+      }
+      throw error;
+    }
+
+    let manifest: ReturnType<typeof parseRawImportManifest>;
+    try {
+      manifest = parseRawImportManifest(JSON.parse(manifestText));
+    } catch {
+      rejectDamagedExactDocumentEvidence({
+        documentId,
+        manifestPath,
+        reason: "required raw manifest is malformed",
+      });
+    }
+
+    const sourceArtifacts = manifest.artifacts.filter((artifact) =>
+      artifact.role === "source_document"
+    );
+    const artifact = sourceArtifacts[0];
+    let resolvedManifestPath: string | null = null;
+    try {
+      resolvedManifestPath = resolveRawManifestPath({
+        artifacts: manifest.artifacts,
+        rawDirectory: manifest.rawDirectory,
+        importId: manifest.importId,
+        importedAt: manifest.importedAt,
+      });
+    } catch {
+      // The shared resolver supplies the semantic owner/directory check below.
+    }
+    if (
+      manifest.importKind !== "document"
+      || manifest.importId !== documentId
+      || manifest.importedAt !== claim.entry.record.recordedAt
+      || manifest.owner.kind !== "document"
+      || manifest.owner.id !== documentId
+      || resolvedManifestPath !== manifestPath
+      || sourceArtifacts.length !== 1
+      || !artifact
+      || artifact.relativePath !== claim.raw.relativePath
+      || artifact.originalFileName !== claim.raw.originalFileName
+      || artifact.mediaType !== claim.raw.mediaType
+      || artifact.byteSize !== input.sourceReceipt.byteLength
+      || artifact.sha256 !== input.sourceReceipt.sha256
+    ) {
+      rejectDamagedExactDocumentEvidence({
+        documentId,
+        manifestPath,
+        reason: "raw manifest does not match its canonical document owner",
+      });
+    }
+
+    const integrity = await statAndHashVaultFile(input.vaultRoot, artifact.relativePath);
+    if (!integrity) {
+      throw new VaultError(
+        "RAW_REFERENCE_MISSING",
+        "Preserved exact source evidence is missing its immutable raw artifact. Exact reuse will not create a replacement identity.",
+        { documentId, manifestPath, relativePath: artifact.relativePath },
+      );
+    }
+    if (
+      integrity.byteSize !== artifact.byteSize
+      || integrity.sha256 !== artifact.sha256
+    ) {
+      rejectDamagedExactDocumentEvidence({
+        documentId,
+        manifestPath,
+        reason: "raw artifact bytes do not match the immutable manifest",
+      });
+    }
+
+    const latestRaw = latest.record.attachments?.find((attachment) =>
+      attachment.role === "source_document"
+      && attachment.relativePath === artifact.relativePath
+      && attachment.sha256 === artifact.sha256
+    );
+    if (!latest.record.rawRefs?.includes(artifact.relativePath) || !latestRaw) {
+      rejectDamagedExactDocumentEvidence({
+        documentId,
+        manifestPath,
+        reason: "latest document lifecycle no longer retains its source attachment",
+      });
+    }
+    verified.set(claim.entry.record.id, {
+      latest,
+      manifestPath,
+      raw: claim.raw,
+    });
+  }
+
+  // A deleted identity must fence the whole exact-byte equivalence set. An
+  // ordinary import may have created a live alias later, but returning that
+  // alias would reset raw-reference-scoped workout completion.
+  const deletedExactSourceExists = [...verified.values()].some(({ latest }) =>
+    isDeletedEventSpineRecord(latest.record)
+  );
+
+  const liveSources: ExactDocumentSource[] = [];
+  for (const stored of verified.values()) {
+    const entry = stored.latest;
+    if (isDeletedEventSpineRecord(entry.record)) {
+      continue;
+    }
     liveSources.push({
-      rawRef: stored.rawRef,
+      rawRef: stored.raw.relativePath,
       result: {
         created: false,
         documentId: entry.record.documentId,
         raw: {
-          relativePath: stored.rawRef,
-          originalFileName: stored.originalFileName,
-          mediaType: stored.mediaType,
+          relativePath: stored.raw.relativePath,
+          originalFileName: stored.raw.originalFileName,
+          mediaType: stored.raw.mediaType,
         },
         event: entry.record,
         eventPath: entry.relativePath,
