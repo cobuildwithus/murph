@@ -1,6 +1,6 @@
 # Harden PlanetScale database metric observability
 
-Status: active
+Status: completed
 Created: 2026-08-15
 Updated: 2026-08-15
 
@@ -125,12 +125,13 @@ Updated: 2026-08-15
   contributing check predates detailed evidence, the entire two-check window
   reports unavailable port detail instead of presenting a partial ratio as
   exact.
-- Upgrade `@cobuild/review-gpt` from `0.5.127` to `0.5.132`, including the
-  lockfile, release-age exception, and repository version assertion. Releases
-  `0.5.128` through `0.5.132` harden canonical thread/turn capture, submitted
-  attachment verification, and marked-response handling. In particular,
-  `0.5.132` accepts timestamped submitted attachment names, directly addressing
-  the attachment-proof failure encountered on the remediated head.
+- Verify the repository on the latest `@cobuild/review-gpt` `0.5.132`. This task
+  initially advanced the aligned dependency surfaces from `0.5.127`; while it
+  was active, PR #1900 landed the same version plus stronger runner assertions
+  on `main`, so the bounded base-only merge takes that owner byte-for-byte and
+  leaves no duplicate dependency delta in this PR. In particular, `0.5.132`
+  accepts timestamped submitted attachment names, directly addressing the
+  attachment-proof failure encountered on the remediated head.
 - A parsed all-required-families-missing observation remains authoritative when
   its retry fails before parsing. Return that first observation through the
   canonical collection builder; do not let the zero-evidence unavailable catch
@@ -154,14 +155,17 @@ Updated: 2026-08-15
   tests, the real Workers/SQLite file passes 5 tests, and the Cloudflare
   typecheck passes. Exact-head GitHub Actions were fully green on the first
   candidate head.
-- Commands still to run: final ReviewGPT remediation review and exact-head
-  GitHub Actions for the dependency-updated remediated head.
+- Formal ReviewGPT round 2 passes on reviewed behavior head `74d0ddb3c7ef` after
+  about 30 minutes with exact committed-turn/attachment proof, explicit
+  `MODEL_CONFIRMATION: pro`, and response model `gpt-5-6-pro`. The only later
+  change is a base-only merge whose sole conflict takes the current `main` CLI
+  test byte-for-byte; it changes no reviewed production behavior.
 - ReviewGPT `0.5.132` is installed and reports the expected version;
   `pnpm deps:guard`, `pnpm deps:ignored-builds`, and `pnpm install
   --frozen-lockfile` pass. `pnpm deps:audit` remains non-green on the repository's
-  existing advisory backlog; the reported ReviewGPT path resolves the same
-  `repomix@1.16.0` and `tar@7.5.16` on the parent head, and this bump changes no
-  transitive lockfile resolution.
+  existing advisory backlog. Current `main` owns the ReviewGPT dependency and
+  transitive path; no PR-authored dependency delta remains after the base-only
+  merge.
 - The focused repository contract for the installed ReviewGPT runner passes.
   A whole-file CLI audit passes 42 tests with 1 skipped, while three unrelated
   shell-harness cases exceed their existing 45/60-second limits under concurrent
@@ -175,7 +179,13 @@ Updated: 2026-08-15
   production-faithful regression proves exact 5432 1/3 and 6432 3/3 evidence,
   restart-safe immutable Linq delivery, the seven-request composed two-check
   bound, both one-second waits, and a safe next-sample counter baseline.
+- After the base-only merge, the same 115 node tests and 5 real Workers/SQLite
+  tests pass again, along with the Cloudflare typecheck, docs drift check, and
+  focused ReviewGPT runner contract. Required GitHub checks pass on
+  conflict-free code head `f7d4c2386410`, including both CLI host matrices and
+  the hosted Stripe boundary.
 - Expected outcomes: omitted ports are explicit across restart and alerts,
   complementary port observations compose safely, unsafe evidence is not
   delayed, retry/request bounds are fixed, legacy persisted rows remain
   readable, and all routed checks pass.
+Completed: 2026-08-15
