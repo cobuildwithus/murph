@@ -2183,6 +2183,10 @@ describe('applyMurphManagedAutomations core integration', () => {
 
     expect(migrated).toMatchObject({
       automationId: MURPH_MONTHLY_IMPROVEMENT_COACH_AUTOMATION_ID,
+      assistantTargetOverride: {
+        model: 'gpt-5.6-sol',
+        reasoningEffort: 'high',
+      },
       route: existingRoute,
       schedule: {
         kind: 'cron',
