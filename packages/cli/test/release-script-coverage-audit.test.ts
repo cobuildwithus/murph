@@ -1455,8 +1455,10 @@ describe('monorepo release flow coverage audit', () => {
     expect(reviewGptConfig).toContain('thinking="current"')
     expect(reviewGptConfig).toContain('hercules) printf \'%s\\n\' "Hercules" ;;')
     expect(reviewGptConfig).toContain('hercules) printf \'%s\\n\' "9444" ;;')
+    expect(reviewGptConfig).toContain('vonneumann) printf \'%s\\n\' "Vonneumann" ;;')
+    expect(reviewGptConfig).toContain('vonneumann) printf \'%s\\n\' "9446" ;;')
     expect(reviewGptConfig).toContain(
-      'review_gpt_all_browser_lanes=(eragon phlebas hercules mountain)',
+      'review_gpt_all_browser_lanes=(eragon phlebas hercules vonneumann mountain)',
     )
     expect(reviewGptConfig).toContain('MURPH_REVIEW_GPT_PROFILE_SLUG:-auto')
     expect(reviewGptConfig).toContain('REVIEW_GPT_BROWSER_LANE_COUNT')
@@ -1723,16 +1725,17 @@ describe('monorepo release flow coverage audit', () => {
       'The `pr-review` prompt lives at',
     )
     expect(prReviewGptLoop).toContain(
-      'Both stages use the managed Eragon, Phlebas, Hercules, and Mountain browser',
+      'Both stages use the managed Eragon, Phlebas, Hercules, Vonneumann, and Mountain browser',
     )
     expect(prReviewGptLoop).toContain('default randomized usable managed')
     expect(prReviewGptLoop).toContain('Hercules on `9444`')
+    expect(prReviewGptLoop).toContain('Vonneumann on `9446`')
     expect(prReviewGptLoop).toContain('current installed Brave binary')
     expect(prReviewGptLoop).toContain(
       "passes none of Chromium's background-timer, occluded-window, or renderer",
     )
     expect(prReviewGptLoop).toContain(
-      '`REVIEW_GPT_BROWSER_LANE=eragon|phlebas|hercules|mountain`',
+      '`REVIEW_GPT_BROWSER_LANE=eragon|phlebas|hercules|vonneumann|mountain`',
     )
     expect(prReviewGptLoop).toContain('6,500 UTF-8 bytes')
     expect(prReviewGptLoop).toContain(
@@ -2219,7 +2222,7 @@ printf '%s|%s|%s|%s|%s\n' \
       )
 
       rmSync(path.join(localConfigRoot, 'murph', 'review-gpt.conf'))
-      for (const lane of ['Eragon', 'Phlebas', 'Hercules']) {
+      for (const lane of ['Eragon', 'Phlebas', 'Hercules', 'Vonneumann']) {
         writeHarnessFile(
           harnessRoot,
           `Library/Application Support/MurphReviewGPT/${lane}/SingletonLock`,
@@ -2245,7 +2248,7 @@ printf '%s|%s|%s|%s|%s\n' \
         defaultDisplayMode,
       ] = defaultResult.stdout.trim().split('|')
       expect(defaultLane).toBe('mountain')
-      expect(defaultLaneCount).toBe('4')
+      expect(defaultLaneCount).toBe('5')
       expect(defaultBrowser).toBe(
         '/Applications/Brave Browser.app/Contents/MacOS/Brave Browser',
       )
@@ -2265,8 +2268,41 @@ printf '%s|%s|%s|%s|%s\n' \
       })
       expect(mainResult.status, mainResult.stderr).toBe(0)
       expect(mainResult.stdout.trim()).toBe(
-        'main|4|/Applications/Brave Browser.app/Contents/MacOS/Brave Browser|balanced|headful',
+        'main|5|/Applications/Brave Browser.app/Contents/MacOS/Brave Browser|balanced|headful',
       )
+
+      const vonneumannResult = spawnSync(
+        'bash',
+        [
+          '-c',
+          `${configHarness}\nprintf '%s|%s\\n' "$managed_browser_port" "$managed_browser_user_data_dir"`,
+        ],
+        {
+          cwd: repoRoot,
+          encoding: 'utf8',
+          env: {
+            ...cleanBrowserPreferenceEnv(),
+            HOME: harnessRoot,
+            REPO_ROOT: repoRoot,
+            REVIEW_GPT_BROWSER_LANE: 'vonneumann',
+            XDG_CONFIG_HOME: localConfigRoot,
+          },
+        },
+      )
+      expect(vonneumannResult.status, vonneumannResult.stderr).toBe(0)
+      expect(vonneumannResult.stdout.trim().split('\n')).toEqual([
+        'vonneumann|5|/Applications/Brave Browser.app/Contents/MacOS/Brave Browser|balanced|headful',
+        [
+          '9446',
+          path.join(
+            harnessRoot,
+            'Library',
+            'Application Support',
+            'MurphReviewGPT',
+            'Vonneumann',
+          ),
+        ].join('|'),
+      ])
 
       const missingThreadResult = spawnSync('bash', ['-c', configHarness], {
         cwd: repoRoot,

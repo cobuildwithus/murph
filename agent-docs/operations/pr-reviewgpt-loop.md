@@ -12,7 +12,7 @@ completion:
 2. The separate `pr-review` loop is the final cross-cutting gate for eligible work
    and replaces local `deep-review`.
 
-Both stages use the managed Eragon, Phlebas, Hercules, and Mountain browser
+Both stages use the managed Eragon, Phlebas, Hercules, Vonneumann, and Mountain browser
 lanes. They
 never share round state: the preliminary pass does not create or advance the
 final gate's immutable first-reviewed-head baseline. After focused local proof
@@ -400,7 +400,7 @@ the current user explicitly asks for it.
 
    The repo wrapper runs the current installed Brave binary with one usable
    ReviewGPT browser lane per run: Eragon on CDP port `9448`, Phlebas on `9442`,
-   Hercules on `9444`, or Mountain on `9450`, always with profile `Default` and
+   Hercules on `9444`, Vonneumann on `9446`, or Mountain on `9450`, always with profile `Default` and
    `app_connector=current` so review context comes from the guarded ZIP and
    not a ChatGPT connector. ReviewGPT attaches that snapshot as
    `codebase.zip`; Repomix is disabled by default and is not part of this flow.
@@ -409,7 +409,7 @@ the current user explicitly asks for it.
    authority.
 
    `REVIEW_GPT_BROWSER_LANE_COUNT` limits the automatic pool to the first one
-   through four lanes and defaults to four. A local
+   through five lanes and defaults to five. A local
    `$XDG_CONFIG_HOME/murph/review-gpt.conf` may set this without committing
    machine-specific preferences or account details.
 
@@ -426,7 +426,7 @@ the current user explicitly asks for it.
    downgrading the model.
 
    To pin a specific lane, preserve a conversation's workspace, or debug one
-   profile, set `REVIEW_GPT_BROWSER_LANE=eragon|phlebas|hercules|mountain` on
+   profile, set `REVIEW_GPT_BROWSER_LANE=eragon|phlebas|hercules|vonneumann|mountain` on
    that command.
    `aragon` is accepted as an alias for `eragon`. A first round may leave it
    unset to select a usable lane automatically, but its handoff must record the
