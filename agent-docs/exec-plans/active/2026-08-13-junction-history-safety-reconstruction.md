@@ -765,3 +765,11 @@ Updated: 2026-08-14
     outbox assertion outside the latest diff. Its exact named test passes alone
     with 104 adjacent tests skipped, so no assistant production or test change
     is made for that unrelated flake.
+  - ReviewGPT is updated to registry latest `0.5.132`; the frozen install,
+    dependency policy, ignored-build inspection, and exact CLI package-contract
+    test pass. Two round-16 preflights stopped before packaging or send because
+    the optional local preference overwrote an explicit supported four-lane
+    command value with the unsupported value five. The required Frog entry
+    records the precedence defect and the bounded workaround: isolate optional
+    local preferences for this invocation while retaining the repository's
+    browser defaults and an explicit supported lane count.
