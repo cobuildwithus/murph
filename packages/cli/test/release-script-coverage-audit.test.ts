@@ -1717,8 +1717,8 @@ describe('monorepo release flow coverage audit', () => {
       'utf8',
     )
     expect(prReviewGptLoop).toContain('PR ReviewGPT Completion Loops')
-    expect(prReviewGptLoop).toContain('pnpm review:gpt completion-specialists')
-    expect(prReviewGptLoop).toContain('pnpm review:gpt pr-review')
+    expect(prReviewGptLoop).toContain('pnpm --silent review:gpt completion-specialists')
+    expect(prReviewGptLoop).toContain('pnpm --silent review:gpt pr-review')
     expect(prReviewGptLoop).toContain(
       'The `pr-review` prompt lives at',
     )
@@ -1762,6 +1762,12 @@ describe('monorepo release flow coverage audit', () => {
     expect(prReviewGptLoop).toContain('REVIEW_GPT_ROUND_NUMBER')
     expect(prReviewGptLoop).toContain('REVIEW_GPT_FIRST_REVIEWED_HEAD')
     expect(prReviewGptLoop).toContain('REVIEW_GPT_PREVIOUS_REVIEWED_HEAD')
+    expect(prReviewGptLoop).toContain(
+      'review_gpt_context_anchor_head="$(git rev-parse HEAD)"',
+    )
+    expect(prReviewGptLoop).toContain(
+      'review_gpt_context_anchor_head=<most-recent-prior-full-snapshot-head>',
+    )
     expect(prReviewGptLoop).toContain('Round 1 is always a full-patch')
     expect(prReviewGptLoop).toContain('Sensitive or\nundeclared PRs')
     expect(prReviewGptLoop).toContain('500 changed lines or 10 changed files')
@@ -2422,7 +2428,7 @@ review_gpt_require_completion_specialists_prompt_budget "$@"
       'utf8',
     )
     const canonicalPrompt = workflow.match(
-      /pnpm review:gpt completion-specialists[\s\S]*?--prompt "([^"]+)"/u,
+      /pnpm --silent review:gpt completion-specialists[\s\S]*?--prompt "([^"]+)"/u,
     )?.[1]
     const frogAutofix = readFileSync(
       path.join(repoRoot, 'scripts', 'frog-autofix.ts'),
@@ -2438,14 +2444,14 @@ review_gpt_require_completion_specialists_prompt_budget "$@"
       /\$\([^)]*\)/gu,
       'a'.repeat(40),
     )
-    // Conservatively render every Frog interpolation at a full-SHA width. The
-    // real PR/issue identifiers and abbreviated head are shorter.
-    const renderedFrogPrompt = frogPromptTemplate!.replace(
-      /\$\{[^}]+\}/gu,
-      'a'.repeat(40),
-    )
+    const renderedFrogPrompt = frogPromptTemplate!
+      .replace(/\$\{pullRequest\}/gu, '9'.repeat(10))
+      .replace(/\$\{options\.issueNumber\}/gu, '9'.repeat(10))
+      .replace(/\$\{head\.slice\(0, 7\)\}/gu, 'a'.repeat(7))
+      .replace(/\$\{head\.slice\(0, 12\)\}/gu, 'a'.repeat(12))
+      .replace(/\$\{head\}/gu, 'a'.repeat(40))
     expect(renderedFrogPrompt).toContain(
-      'end with SPECIALIST_REVIEW_COMPLETE and exactly one SPECIALIST_OUTCOME marker',
+      'place one SPECIALIST_OUTCOME line immediately before final SPECIALIST_REVIEW_COMPLETE',
     )
 
     const runBudget = (prompt: string) =>
@@ -3863,6 +3869,9 @@ done <<< "\${COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS:-}"
   cd "$COBUILD_REPO_ROOT"
   zip -q "$out_dir/$name.zip" "\${entries[@]}"
 )
+printf 'ZIP: %s (%s bytes)\n' \
+  "$out_dir/$name.zip" \
+  "$(wc -c < "$out_dir/$name.zip" | tr -d ' ')"
 `,
         true,
       )

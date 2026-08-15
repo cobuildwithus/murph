@@ -92,8 +92,9 @@ Run one preliminary specialist pass when any of these lenses apply:
   configuration, or direct-proof scaffolding that establishes its proof.
 
 The task must use a clean worktree/PR lane. Commit and push the review candidate
-and open or update the PR. The canonical `pnpm review:gpt` command recognizes
-the PR-only preset, resolves the current branch PR, checks the clean local head
+and open or update the PR. The canonical `pnpm --silent review:gpt` command
+suppresses pnpm's pre-wrapper working-directory banner, recognizes the PR-only
+preset, resolves the current branch PR, checks the clean local head
 against its pushed head, and exports the required PR ref and phase before the
 package can create an attachment. The PR body must
 declare each lens `applicable` or `not applicable`, name the product outcome and
@@ -114,7 +115,7 @@ inherit that timeout; use `--wait-timeout` only for an intentional per-run overr
 
 ```bash
 REVIEW_GPT_RENDERED_EVIDENCE_PATHS=$'audit-packages/<desktop>.png\naudit-packages/<mobile>.png' \
-  pnpm review:gpt completion-specialists \
+  pnpm --silent review:gpt completion-specialists \
     --wait \
     --response-marker SPECIALIST_REVIEW_COMPLETE \
     --response-file audit-packages/pr-<number>-specialists.md \
@@ -303,12 +304,15 @@ the current user explicitly asks for it.
    Round 1 defaults `REVIEW_GPT_FIRST_REVIEWED_HEAD` to the current PR head and
    leaves the remediation delta empty. For round 2 or later, preserve the
    original first-reviewed head and provide both it and the immediately previous
-   reviewed head:
+   reviewed head. Set the context anchor to the current PR head when the next
+   package is expected to be a full snapshot; set it to the most recent prior
+   full-snapshot head only when the next package is expected to be a same-thread
+   delta:
 
    ```bash
    REVIEW_GPT_BROWSER_LANE=<round-1-lane> \
    REVIEW_GPT_ROUND_NUMBER=1 \
-     pnpm review:gpt pr-review \
+     pnpm --silent review:gpt pr-review \
        --wait \
        --response-marker REVIEW_COMPLETE \
        --response-file audit-packages/pr-<number>-round-<k>.md \
@@ -316,13 +320,18 @@ the current user explicitly asks for it.
    ```
 
    ```bash
+   # Expected sensitive, undeclared, large, or explicitly requested full snapshot:
+   review_gpt_context_anchor_head="$(git rev-parse HEAD)"
+   # For an expected routine, small same-thread delta, use this instead:
+   # review_gpt_context_anchor_head=<most-recent-prior-full-snapshot-head>
+
    REVIEW_GPT_ROUND_NUMBER=<k> \
    REVIEW_GPT_FIRST_REVIEWED_HEAD=<round-1-full-sha> \
    REVIEW_GPT_PREVIOUS_REVIEWED_HEAD=<round-k-minus-1-full-sha> \
-   REVIEW_GPT_CONTEXT_ANCHOR_HEAD=<most-recent-full-snapshot-head> \
+   REVIEW_GPT_CONTEXT_ANCHOR_HEAD="$review_gpt_context_anchor_head" \
    REVIEW_GPT_THREAD_URL=<current-context-chatgpt-url> \
    REVIEW_GPT_BROWSER_LANE=<round-1-lane> \
-     pnpm review:gpt pr-review \
+     pnpm --silent review:gpt pr-review \
        --wait \
        --response-marker REVIEW_COMPLETE \
        --response-file audit-packages/pr-<number>-round-<k>.md \
@@ -341,7 +350,7 @@ the current user explicitly asks for it.
    REVIEW_GPT_CONTEXT_ANCHOR_HEAD="$(git rev-parse HEAD)" \
    REVIEW_GPT_FULL_REVIEW_REASON="The prior conversation or lane is unavailable." \
    REVIEW_GPT_BROWSER_LANE=<fresh-lane> \
-     pnpm review:gpt pr-review \
+     pnpm --silent review:gpt pr-review \
        --wait \
        --response-marker REVIEW_COMPLETE \
        --response-file audit-packages/pr-<number>-round-<k>.md \
