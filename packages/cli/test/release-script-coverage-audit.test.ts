@@ -1097,13 +1097,13 @@ describe('monorepo release flow coverage audit', () => {
     expect(existsSync(path.join(repoRoot, 'scripts', 'chatgpt-managed-browser.test.mjs'))).toBe(false)
     expect(existsSync(path.join(repoRoot, 'scripts', 'review-gpt.sh'))).toBe(false)
     expect(existsSync(path.join(repoRoot, 'scripts', 'review-gpt-cli.sh'))).toBe(false)
-    expect(rootPackageJson.devDependencies?.['@cobuild/review-gpt']).toBe('^0.5.132')
+    expect(rootPackageJson.devDependencies?.['@cobuild/review-gpt']).toBe('^0.5.127')
     expect(
       pnpmWorkspace
         .match(/^minimumReleaseAgeExclude:\n((?:  - .+\n)+)/mu)?.[1]
         ?.split('\n')
         .filter((line) => line.includes('@cobuild/review-gpt')),
-    ).toEqual(["  - '@cobuild/review-gpt@0.5.132'"])
+    ).toEqual(["  - '@cobuild/review-gpt@0.5.127'"])
     expect(
       pnpmWorkspace
         .match(/^patchedDependencies:\n((?:  .+\n)+)/mu)?.[1]
@@ -1165,7 +1165,7 @@ describe('monorepo release flow coverage audit', () => {
     expect(reviewGptDriver).toContain('`CDP socket command timed out: ${method}`')
     expect(reviewGptDriver).toContain('`Nested CDP socket command timed out: ${method}`')
     expect(reviewGptDriver).toContain(
-      'const minimumMarkedResponseMs = Number(process.env.ORACLE_DRAFT_MINIMUM_MARKED_RESPONSE_MS || 5 * 60 * 1000);',
+      'const MIN_MARKED_CONCRETE_MODEL_RESPONSE_MS = 5 * 60 * 1000;',
     )
     const solTarget: ReviewGptModelPickerTarget = {
       desiredVersion: '5-6',
@@ -1246,7 +1246,7 @@ describe('monorepo release flow coverage audit', () => {
       ),
     ).toBe(false)
     expect(reviewGptDriver).toContain(
-      'const MODEL_CONFIRMATION_UNKNOWN_FALLBACK_MS = 5 * 60 * 1000;',
+      'const MODEL_CONFIRMATION_UNKNOWN_FALLBACK_MS = MIN_MARKED_CONCRETE_MODEL_RESPONSE_MS;',
     )
     expect(reviewGptDriver).toContain("status: 'response-too-fast'")
     expect(reviewGptDriver).toContain('markedResponseDurationFailure({')
@@ -1258,7 +1258,7 @@ describe('monorepo release flow coverage audit', () => {
     expect(reviewGptReadme).toContain('An ephemeral per-run nonce')
     expect(reviewGptReadme).toContain('after at least 5 minutes of observed generation')
     expect(reviewGptReadme).toContain(
-      'A marked concrete-model response shorter than the trust threshold fails closed as untrusted',
+      'A marked concrete-model response that completes in under 5 minutes fails closed as untrusted',
     )
     expect(reviewGptDriver).toContain('REVIEW_GPT_TURN_NONCE:')
     expect(reviewGptDriver).not.toContain("value.includes('MODEL_CONFIRMATION:')")
@@ -1312,26 +1312,19 @@ describe('monorepo release flow coverage audit', () => {
     )
     expect(responseDurationGuardStart).toBeGreaterThan(-1)
     expect(responseAttestationStart).toBeGreaterThan(responseDurationGuardStart)
-    const tooFastGuardStart = reviewGptDriver.indexOf(
-      "function assertMarkedResponseDurationTrusted(responseResult, responseFilePath = '') {",
+    const tooFastBranchStart = reviewGptDriver.indexOf(
+      "} else if (responseResult?.status === 'response-too-fast') {",
     )
-    const tooFastGuardEnd = reviewGptDriver.indexOf(
-      'function capturedResponseFileText(',
-      tooFastGuardStart,
+    const tooFastBranchEnd = reviewGptDriver.indexOf('} else {', tooFastBranchStart)
+    const tooFastBranch = reviewGptDriver.slice(tooFastBranchStart, tooFastBranchEnd)
+    expect(tooFastBranchStart).toBeGreaterThan(-1)
+    expect(tooFastBranchEnd).toBeGreaterThan(tooFastBranchStart)
+    expect(tooFastBranch).toContain(
+      'writeCapturedResponseFile(responseFile, responseResult.responseText);',
     )
-    const tooFastGuard = reviewGptDriver.slice(tooFastGuardStart, tooFastGuardEnd)
-    expect(tooFastGuardStart).toBeGreaterThan(-1)
-    expect(tooFastGuardEnd).toBeGreaterThan(tooFastGuardStart)
-    expect(tooFastGuard).toContain("responseResult?.status !== 'response-too-fast'")
-    expect(tooFastGuard).toContain(
-      'writeCapturedResponseFile(responseFilePath, responseResult.responseText);',
-    )
-    expect(tooFastGuard).toContain('throw new Error(responseResult.responseDurationFailure')
-    expect(tooFastGuard).not.toContain('writeCompletedResponseArtifacts')
-    expect(tooFastGuard).not.toContain('modelVerification')
-    expect(reviewGptDriver).toContain(
-      'assertMarkedResponseDurationTrusted(responseResult, responseFile);',
-    )
+    expect(tooFastBranch).toContain('throw new Error(responseResult.responseDurationFailure')
+    expect(tooFastBranch).not.toContain('writeCompletedResponseArtifacts')
+    expect(tooFastBranch).not.toContain('modelVerification')
     expect(reviewGptDriver).toContain('process.exit(1);')
     expect(reviewGptDriver).toContain(
       [
