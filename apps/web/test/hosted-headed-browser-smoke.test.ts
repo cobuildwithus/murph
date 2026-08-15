@@ -117,6 +117,69 @@ describe("hosted headed browser boundary", () => {
   );
 
   it.runIf(smokeEnabled)(
+    "preserves action precedence across competing roles and excludes denial labels",
+    async () => {
+      const browser = await chromium.launch({ headless: false });
+      try {
+        const page = await browser.newPage();
+        await page.setContent(`
+          <button
+            data-action="connect"
+            onclick="this.dataset.clicked = 'true'; document.body.dataset.selected = 'connect'"
+          >Connect</button>
+          <button
+            data-action="denial"
+            onclick="this.dataset.clicked = 'true'; document.body.dataset.selected = 'denial'"
+          >Don't accept</button>
+          <a
+            data-action="accept"
+            href="#"
+            onclick="this.dataset.clicked = 'true'; document.body.dataset.selected = 'accept'"
+          >Accept</a>
+        `);
+
+        let atMurph = false;
+        let now = 0;
+        const authorizationPage = new Proxy(page, {
+          get(target, property, receiver) {
+            if (property === "url") {
+              return () => atMurph
+                ? "https://app.example.test/home"
+                : "https://id.whoop.com/consent";
+            }
+            if (property === "waitForTimeout") {
+              return async (duration: number) => {
+                now += duration;
+                atMurph = await target.locator("body").getAttribute("data-selected")
+                  === "accept";
+              };
+            }
+            const value = Reflect.get(target, property, receiver);
+            return typeof value === "function" ? value.bind(target) : value;
+          },
+        });
+
+        await expect(completeExternalJunctionAuthorizationForTest(
+          authorizationPage,
+          createWhoopConfig(),
+          () => now,
+        )).resolves.toBeUndefined();
+        await expect(
+          page.locator('[data-action="accept"]').getAttribute("data-clicked"),
+        ).resolves.toBe("true");
+        await expect(
+          page.locator('[data-action="connect"]').getAttribute("data-clicked"),
+        ).resolves.toBeNull();
+        await expect(
+          page.locator('[data-action="denial"]').getAttribute("data-clicked"),
+        ).resolves.toBeNull();
+      } finally {
+        await browser.close();
+      }
+    },
+  );
+
+  it.runIf(smokeEnabled)(
     "bounds the terminal probe while provider controls are replaced",
     async () => {
       const browser = await chromium.launch({ headless: false });

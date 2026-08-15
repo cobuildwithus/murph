@@ -71,10 +71,35 @@ interface AuthorizationSurfaceSummary {
 type AuthorizationRoot = Frame | Page;
 
 const RUNNER_NAME = "Hosted-local Junction wearable browser runner";
+const AUTH_ACTION_PATTERNS = [
+  /\baccept\b/iu,
+  /\bagree\b/iu,
+  /\bcontinue\b/iu,
+  /\bnext\b/iu,
+  /\blog ?in\b/iu,
+  /\bsign in\b/iu,
+  /\bsubmit\b/iu,
+  /\bverify\b/iu,
+  /\bauthorize\b/iu,
+  /\ballow\b/iu,
+  /\bapprove\b/iu,
+  /\bgrant\b/iu,
+  /\bconfirm\b/iu,
+  /\bconnect\b/iu,
+] as const;
 const POSITIVE_AUTH_ACTION_PATTERN =
-  /\b(?:accept|agree|continue|next|log ?in|sign in|submit|verify|authorize|allow|approve|grant|confirm|connect)\b/iu;
+  new RegExp(
+    `(?:${AUTH_ACTION_PATTERNS.map((pattern) => pattern.source).join("|")})`,
+    "iu",
+  );
 const NEGATIVE_AUTH_ACTION_PATTERN =
   /\b(?:cancel|decline|deny|disallow|do not|don(?:\u0027|\u2019)t|not now|reject|skip)\b/iu;
+const SAFE_ORDERED_AUTH_ACTION_PATTERNS = AUTH_ACTION_PATTERNS.map(
+  (pattern) => new RegExp(
+    `^(?![\\s\\S]*${NEGATIVE_AUTH_ACTION_PATTERN.source})[\\s\\S]*${pattern.source}`,
+    "iu",
+  ),
+);
 const SAFE_AUTH_ACTION_PATTERN = new RegExp(
   `^(?![\\s\\S]*${NEGATIVE_AUTH_ACTION_PATTERN.source})[\\s\\S]*${
     POSITIVE_AUTH_ACTION_PATTERN.source
@@ -383,18 +408,20 @@ async function checkRequiredConsentCheckboxes(page: Page): Promise<void> {
 async function clickFirstVisibleAction(
   page: Page,
 ): Promise<boolean> {
-  for (const role of ["button", "link"] as const) {
-    const controls = page.getByRole(role, { name: SAFE_AUTH_ACTION_PATTERN });
-    for (let index = 0; index < await controls.count(); index += 1) {
-      const control = controls.nth(index);
-      if (
-        !await control.isVisible().catch(() => false)
-        || !await control.isEnabled().catch(() => false)
-      ) {
-        continue;
+  for (const name of SAFE_ORDERED_AUTH_ACTION_PATTERNS) {
+    for (const role of ["button", "link"] as const) {
+      const controls = page.getByRole(role, { name });
+      for (let index = 0; index < await controls.count(); index += 1) {
+        const control = controls.nth(index);
+        if (
+          !await control.isVisible().catch(() => false)
+          || !await control.isEnabled().catch(() => false)
+        ) {
+          continue;
+        }
+        await control.click();
+        return true;
       }
-      await control.click();
-      return true;
     }
   }
   return false;

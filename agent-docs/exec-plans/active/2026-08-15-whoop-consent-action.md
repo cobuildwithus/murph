@@ -78,6 +78,10 @@ Updated: 2026-08-15
   enabled queries could combine observations from different DOM states. Each
   role/frame now derives the positive partition synchronously from one matched
   element set; the dynamic-DOM proof asserts the complete pre-replacement state.
+- Accepted final round 4's behavior-preservation finding: the diagnostic union
+  had also replaced the existing action-first click precedence with role/DOM
+  order. The click owner again evaluates the ordered vocabulary first, while
+  the read-only terminal aggregate alone uses the union locator.
 
 ## Verification
 
@@ -94,5 +98,8 @@ Updated: 2026-08-15
 - Passed the same full focused verification set after the coherent-snapshot
   remediation; the dynamic-DOM scenario now asserts the complete emitted action
   partition as well as its elapsed bound and eventual control replacement.
+- Passed 13 focused browser-driver tests and all four real headed-browser
+  scenarios after restoring action precedence; competing button/link order and
+  a positive-plus-negative label now prove the higher-priority safe action wins.
 - Expected outcome: diagnostics first prove the current consent structure, then
   the corrected driver completes the full provider and persisted-state journey.
