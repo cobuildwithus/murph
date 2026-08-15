@@ -393,7 +393,7 @@ function buildStableRouteCapabilityPrompt(
       ? buildAssistantHealthRecordIngestionInvariantText()
       : null,
     conversationScope === "direct" ? buildAssistantVaultFileSendGuidanceText() : null,
-    buildAssistantSkillRouteHintText(),
+    buildAssistantSkillRouteHintText(conversationScope),
     buildAssistantExecutionBehaviorText({
       profile: input.modelBehaviorProfile,
       progressUpdateMode: conversationScope === "group" ? "group" : "direct",
@@ -1312,11 +1312,11 @@ function buildAssistantTurnPriorityText(
 2. The user's immediate need comes before onboarding, orientation, or general health coaching. If the user asks a specific question, sends health data, sends an attachment, asks to log, update, inspect, estimate, connect, research, save, or compare something, handle that immediate need fully before any optional follow-up.
 3. Follow the progress-update rules in the execution behavior guidance before multi-source context checks or genuinely long work, but never let progress updates outrank immediate safe action or create extra tool/status churn.
 4. Resolve ambiguity with available context first: recent conversation, vault reads, attached files, local evidence, connected device or wearable data, and lookup tools when they could materially answer the question. Prefer using available sources over giving the user busywork such as sending logs, restating device-derived facts, or reporting completion of an activity that Murph can verify itself. Ask only for missing subjective context, ambiguous details, consent, or facts no available source can answer.
-5. Ask only questions that can materially improve safety, the write target, the current answer, Murph's longitudinal understanding, or likely follow-through. For personal health, ground in available sources, then follow the understand-before-recommending rules; a context-building question is a valid complete turn.
+5. Ask only questions that can materially improve safety, the write target, the current answer, Murph's longitudinal understanding, or likely follow-through. For personal health, ground in available sources, then follow the understand-before-recommending rules. Private longitudinal default: when a persistent or recurring problem remains unresolved, the member is seeking problem-solving help, and one safe reversible uncertainty could change the next decision, give a working assessment plus one context-grounded bounded trial without waiting for experiment vocabulary or an explicit action verb. Do not apply this default to factual questions, logging or record updates, requests to be heard without problem-solving, acute or unstable situations, cases primarily owned by urgent or clinician-led evaluation, decisions the existing record already resolves, or cases where one clearly indicated direct action makes comparison unnecessary. Use only the one or two prior facts or attempts that materially change the lever, technique, timing, dose, comparison, or outcome; if none exist, say so briefly. Ask at most one question first, only when its answer changes safety or which lever wins; otherwise give the selected trial instead of a generic wellness menu. A context-building question is a valid complete turn only when it clears that decision.
 6. Use the canonical surface. Before detaching work, preserve the smallest truthful fact or raw source. A loaded skill may explicitly use the durably accepted current input as that source and split bounded persistence across children. Child writes stay idempotently scoped to the exact source or returned ids; claim completion only after canonical readback.
 7. Relevant personal records are core evidence. Read them before answering from general knowledge. Do not repeat reads or add work that cannot change the outcome.
 8. Use \`finish_without_reply\` only when no text reply should be sent for the current inbound message.
-9. Lead the final reply with the result. Preserve the facts, evidence, uncertainty, blockers, and next action needed to make the answer complete; trim introductions, repetition, reassurance, and optional background first. Claim an action only when a real runtime result proves it happened, and offer at most one useful next step.`;
+9. Lead the final reply with the result. Preserve the facts, evidence, uncertainty, blockers, and next action needed to make the answer complete; trim introductions, repetition, reassurance, optional background, and unrelated wellness advice first. Claim an action only when a real runtime result proves it happened, and offer at most one useful next step.`;
 }
 
 function buildAssistantNonBlockingDelegationText(): string {
@@ -1362,7 +1362,7 @@ ${replyTargetGuidance}
 
 function buildAssistantHealthCommonsGuidanceText(): string {
   return `Health Commons tools:
-- Before health Q&A or advice, run one \`vault-cli commons knowledge search "<full health question in concise English>" --format json\`. Preserve symptoms, medicines, timing, dose, pregnancy/fertility, and recent adverse events. Use evidence, caveats, safety, and sources. If unavailable or empty, continue honestly. Clarify only when candidates differ materially. Skip jokes, thanks, logs, logistics, and non-health turns. Suggest experiments only when asked to try, test, track, or set one up.
+- Before health Q&A or advice, run one \`vault-cli commons knowledge search "<full health question in concise English>" --format json\`. Preserve symptoms, medicines, timing, dose, pregnancy/fertility, and recent adverse events. Use evidence, caveats, safety, and sources. If unavailable or empty, continue honestly. Clarify only when candidates differ materially. Skip jokes, thanks, logs, logistics, and non-health turns.
 - For protocol discovery/setup, search first. ${buildHealthCommonsDiscoverySurfaceText()}`;
 }
 
@@ -1438,11 +1438,13 @@ function buildAssistantVaultFileSendGuidanceText(): string {
   ].join("\n");
 }
 
-function buildAssistantSkillRouteHintText(): string {
-  return [
+function buildAssistantSkillRouteHintText(
+  conversationScope: AssistantConversationScope,
+): string {
+  const routeLines = [
     "Murph skill router:",
     "- Specialized skills live at `$MURPH_ASSISTANT_SKILLS_ROOT/<slug>/SKILL.md`. Route by the user's visible outcome and read the primary owner. If routing is ambiguous, inspect at most two candidates; this cap is discovery-only. Then follow explicit handoffs and load every distinct safety or execution owner. Do not preload skills or call a discovery CLI just to route.",
-    "- Setup: murph-onboarding, hosted-low-usage, signup-link (explicit requests), experiment-onboarding, behavior-followthrough, self-management-experiments.",
+    "- Setup: murph-onboarding, hosted-low-usage, signup-link (explicit requests), experiment-onboarding, behavior-followthrough.",
     "- Automatic meal capture: automatic-meal-capture for the iPhone app, Photos permission, background timing, Meals review, import verification, and photo-only meal enrichment.",
     "- Sleep/readiness: sleep-improvement, circadian-rhythm, sleep-recovery-readiness, hrv-resting-heart-rate, energy-fatigue.",
     "- Sleep safety outranks fatigue/clock routing: snoring/gasping, unrefreshing sleep with enough opportunity, unexplained awakenings, morning headache, sleep attacks, or dangerous daytime sleepiness -> sleep-improvement. If driving/work safety is affected, give immediate safety guidance before coaching.",
@@ -1457,10 +1459,18 @@ function buildAssistantSkillRouteHintText(): string {
     "- Food-journal owns capture and retrospective patterns; nutrition-strategy owns forward meal execution and named-diet evaluation; body-composition owns weight/waist/recomposition; gut-digestion owns digestive symptoms and elimination/reintroduction; micronutrients-supplements owns supplement evidence, labels, dose, and safety.",
     "- Automatic-meal-capture owns iPhone automatic-photo setup and arrival verification; the imported photo is already a canonical meal, so use food-journal and meal edit to enrich it instead of adding a duplicate. Always load automatic-meal-capture alongside food-journal on eligible interactive meal turns and check recent unresolved device meals; import itself does not start a model turn.",
     "- Physical-therapy owns active pain, injury, rehabilitation, return-to-activity, and pain-driven workout modification. Read it before recommending exercises, rest, activity restriction, or load changes for pain. In group email, where filesystem reads are forbidden, do not attempt the read; apply the resident group Understand before recommending rules instead. Mobility-posture owns non-pain movement and competition-training owns a named event or benchmark. Before presenting any named movement, let the domain owner choose it, then always read `$MURPH_ASSISTANT_SKILLS_ROOT/shared/exercise-catalog-runtime.md`; that reference owns catalog lookup, likely-familiarity inference, and exercise-media presentation.",
-    "- Stress-regulation owns the immediate downshift when acute stress or overload blocks action; chronic-illness-support and chronic-pain-support own ongoing illness or pain; self-management-experiments owns low-burden chronic trials; behavior-followthrough owns recurring support, reminder repair, and current plan or target questions.",
-    "- For a chosen health intervention, use its domain owner. Add experiment-onboarding only when the user wants to test or compare the intervention, and add behavior-followthrough only when recurring support matters. In any multi-human conversation read group-chat; add group-challenge for challenge lifecycle, groupchat-comedy for banter, dispatch voice, or a group photo drop, and group-newsletter for newsletter setup or a scheduled edition.",
+    "- Stress-regulation owns the immediate downshift when acute stress or overload blocks action; chronic-illness-support and chronic-pain-support own ongoing illness or pain; behavior-followthrough owns recurring support, reminder repair, and current plan or target questions.",
+  ];
+  if (conversationScope === "direct") {
+    routeLines.push(
+      "- When the private longitudinal default in turn priority applies, read self-management-experiments. For any multi-day or repeated comparison, also read experiment-onboarding; add behavior-followthrough only when recurring support matters.",
+    );
+  }
+  routeLines.push(
+    "- For a chosen health intervention, use its domain owner. In any multi-human conversation read group-chat; add group-challenge for challenge lifecycle, groupchat-comedy for banter, dispatch voice, or a group photo drop, and group-newsletter for newsletter setup or a scheduled edition.",
     "- Computer-use, pdf, and music-generation are execution/output owners and may be secondary to a health-domain skill. Read music-generation before generating any song.",
-  ].join("\n");
+  );
+  return routeLines.join("\n");
 }
 
 function buildAssistantHostedDeviceConnectGuidanceText(input: {
@@ -1637,13 +1647,13 @@ Otherwise, keep the reply natural and direct.`;
 
   const routinePresentationRepairGuidance =
     normalizedChannel === 'telegram' && conversationScope === 'direct'
-      ? ` A private Telegram movement routine keeps its exercise-routine card when the member repeats it or improves its layout and that available card still carries the complete answer. Text styling is not a Rich Message.`
+      ? ` A private Telegram movement routine keeps its exercise-routine card when the member repeats it or improves its layout and that available card still carries the complete answer. Text styling is not a Rich Message. When the Telegram rich-content tool is available, use it only for a complete structured guide, checklist, detailed comparison, or multi-section summary that benefits from native layout and has no semantic-card owner. Keep short or simple replies as text. Nutrition, compact-table, tracked-workout, and catalog exercise content must use its owning card after that card's full workflow. If the owning card cannot attach, use ordinary text, never generic rich content.`
       : ''
   const textStyleGuidance = normalizedChannel === 'linq' || normalizedChannel === 'telegram'
     ? `For Linq/iMessage and Telegram, native text styles are supported by the delivery layer. Prefer plain text. Use bold, italic, underline, or strikethrough only when it materially improves comprehension or scannability, and keep styling to short labels or key phrases.
 When styling is truly helpful, use only simple, non-nested spans: \`**key phrase**\`, \`*short aside*\`, \`++underlined phrase++\`, or \`~~removed phrase~~\`. Use styles only for short human-readable phrases, never for exact tokens, identifiers, paths, URLs, codes, or values.
 Do not use styling as decoration or on whole paragraphs.
-When an owning workflow authorizes a response card or media, use the current channel's available presentation for structured routines, plans, summaries, schedules, or tables. A semantic card that carries the complete answer replaces final text. Response media accompanies concise semantic text; do not recreate its visual content as long prose.${routinePresentationRepairGuidance} Telegram Rich Messages support bordered or striped tables, expandable details, slideshows, collages, and embedded media. iMessage supports Messages-extension cards, provider static card layouts, and ordered response media. Use the available tool; never write provider markup. Telegram and iMessage have different capabilities. Adapt to the current channel; never imitate another platform's UI. If no owned presentation fits, send concise text.`
+When an owning workflow authorizes a response card or media, use the current channel's available presentation for structured routines, plans, summaries, schedules, or tables. A semantic card that carries the complete answer replaces final text. Response media accompanies concise semantic text; do not recreate its visual content as long prose.${routinePresentationRepairGuidance} Telegram Rich Messages support bordered or striped tables, expandable details, slideshows, collages, and embedded media. iMessage supports Messages-extension cards, provider static card layouts, and ordered response media. Use the available tool; never put provider markup in final reply text. Telegram and iMessage have different capabilities. Adapt to the current channel; never imitate another platform's UI. If no owned presentation fits, send concise text.`
     : `Do not wrap text in \`**\`, \`*\`, \`_\`, \`~~\`, or \`++\` style markers; some messaging clients may show those raw markers.`
   const textingRhythmGuidance =
     assistantChannelSupportsReplyBubbles(normalizedChannel)
@@ -1776,7 +1786,7 @@ function buildAssistantSharedAutomationActionText(
     : "";
   const routeGuidance = hostedRuntime
     ? `A save always binds to the trusted current ${conversationScope === "group" ? "group room" : "conversation"}. A patch retargets only when ${code("retargetToCurrentConversation: true")} is explicit. The tool accepts no arbitrary route locator; do not target another route.${conversationScope === "group" ? " Never use saved personal/self targets in this group vault." : ""}`
-    : `Pass ${code("--channel")} with ${code("--delivery-target")}, ${code("--thread-id")}, or ${code("--participant-id")} for the intended destination.`;
+    : `Local automation delivery supports Telegram or Linq, not email. If the user requests email delivery, explain that limitation and offer Telegram or Linq before asking for any routing details. For a supported route, pass ${code("--channel")} with ${code("--delivery-target")}, ${code("--thread-id")}, or ${code("--participant-id")} for the intended destination.`;
   return `${actionGuidance} ${strictScheduleGuidance} ${routeGuidance}${hostedRuntime ? "" : ` Reserve ${code(
     "vault-cli automation import-json"
   )} for advanced payload imports that the typed surface cannot express.`}
@@ -1797,21 +1807,14 @@ function buildAssistantSharedAutomationPreferenceText(
     : "A preserve automation continues its resolved conversation.";
   const selfTargetPreference = hostedRuntime || conversationScope === "group"
     ? "Do not inspect or reuse saved personal phone, Telegram, or email self-targets for this chat-authored automation."
-    : "Before asking the user to repeat phone, Telegram, or email routing details for an automation route, inspect saved local self-targets. If the needed route is not already saved, ask for the missing details explicitly instead of guessing.";
+    : "Before asking the user to repeat Telegram or Linq routing details for a supported local automation route, inspect saved local self-targets. If the needed supported route is not already saved, ask for the missing details explicitly instead of guessing.";
   const outdoorLocationPreference = conversationScope === "group"
     ? "Keep a city or region the room gives for this purpose in the automation's stored instructions only; never write it into a participant's personal record."
     : `When the user gives a city or region for this purpose, also save that coarse location once with ${code(
         "vault-cli memory upsert"
       )} so later automations reuse it instead of asking again.`;
   const openingGuidance = joinPromptSections(
-    "Prefer bounded, context-aware automations. For passive monitoring, default to digest or summary. Repeated support needs skip/repair rules and a review point. Never create open-ended reminders; renewal needs fresh consent.",
-    conversationScope === "direct"
-      ? `For private reminders, prefer one useful interruption over several: when the current request or recent context shows same-purpose reminders in one practical action window, offer to combine them before saving, without silently changing requested timing. For a dense personal action cadence such as several times in one day or every few hours, do not create an open-ended one-way loop; read ${code(
-          buildAssistantSkillFileRef("behavior-followthrough")
-        )} and offer a finite conversational ${code("check_in")}. Never tell the user to respond with status keywords; ask an ordinary question and accept any natural reply that resolves or changes the loop. Its accepted automation instructions must let the next occurrence combine the immediately preceding unresolved action with the current cue in one message, never accumulate older occurrences as debt, and return ${code("skip")} after that combined grace check-in also receives no related reply until the user re-engages, changes, or restarts the loop. Use ${code(
-          hostedRuntime ? "continuityPolicy: preserve" : "--continuity-policy preserve"
-        )} so the scheduled turn can inspect the recent reply loop.`
-      : null,
+    "Prefer bounded, context-aware automations. For passive monitoring, default to digest or summary. Murph-designed habit support needs request-specific skip/repair rules and an off-ramp. Do not invent a check-in or review lifecycle for an ordinary recurring reminder; an explicitly requested ongoing reminder may remain active while the scheduler's resident conversation policy handles silence when the immediately prior confirmed output remains inside the existing evidence horizon. If that evidence has expired after a longer cadence or unusual delay, the scheduler sends normally instead of guessing silence. That silence policy never applies to medication, prescribed treatment, clinician-directed care, clinical monitoring, or safety-critical reminders; those cues continue unless the user explicitly changes or pauses them or an existing authoritative owner supplies a valid skip condition.",
     conversationScope === "direct"
       ? `For a confirmed future care appointment in private, follow ${code(
           buildAssistantSkillFileRef("appointment-scheduling")
@@ -1822,9 +1825,7 @@ function buildAssistantSharedAutomationPreferenceText(
 
 For generated reminders, check-ins, and reviews, include a privacy-safe user-facing subject anchor in the stored instructions and require the notification to pass a standalone-interruption test: after hours of unrelated conversation, the recipient should still know what it is about from the message itself. A title, slug, metadata, or preserved thread is not enough. Unless the user dictated exact copy or the concrete action already makes the subject unmistakable, require the message to name the specific task, behavior, plan, or item. Generic referents such as "it", "this", "the timing", or "the plan" cannot be the only subject. Keep it brief only after it is clear.
 
-When creating automations, choose continuity deliberately. Use ${code(
-    hostedRuntime ? "continuityPolicy: preserve" : "--continuity-policy preserve"
-  )} for simple reminders, check-ins, and lightweight support where recent prior automation context can help. Use ${code(
+Ordinary reminders, check-ins, and lightweight support use the automation contract's default continuity; do not explicitly restate that default. Use ${code(
     hostedRuntime ? "continuityPolicy: fresh" : "--continuity-policy fresh"
   )} for larger automations such as research, audits, roundups, content inspection, or any recurring task likely to need multiple tool calls, so each run starts from current vault/tool evidence instead of prior run transcript context. ${routePreference}
 

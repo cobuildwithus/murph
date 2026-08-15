@@ -62,10 +62,26 @@ export class HostedCryptoDomainRootCandidateRequiredError extends Error {
   }
 }
 
+export class HostedDomainRootPreparationRequiredError extends Error {
+  readonly reference: HostedDomainRootReference;
+
+  constructor(input: { reference: HostedDomainRootReference }) {
+    super("Prepared hosted domain root is required before the transaction begins.");
+    this.name = "HostedDomainRootPreparationRequiredError";
+    this.reference = input.reference;
+  }
+}
+
 export function isHostedDomainRootEnvelopeUnavailableError(
   error: unknown,
 ): error is HostedDomainRootEnvelopeUnavailableError {
   return error instanceof HostedDomainRootEnvelopeUnavailableError;
+}
+
+export function isHostedDomainRootPreparationRequiredError(
+  error: unknown,
+): error is HostedDomainRootPreparationRequiredError {
+  return error instanceof HostedDomainRootPreparationRequiredError;
 }
 
 interface HostedUserCryptoEnvelopeRow {
@@ -522,14 +538,19 @@ export async function provisionHostedCryptoDomainRootsForUserTx(input: {
   });
 }
 
-export async function hasActiveHostedCryptoDomainRootsForUserTx(input: {
+export async function readUserIdsWithActiveHostedCryptoDomainRootsTx(input: {
   tx: HostedCryptoClient;
-  userId: string;
-}): Promise<boolean> {
-  const rows = await input.tx.$queryRaw<Array<{ domainCount: number }>>`
-    SELECT COUNT(DISTINCT domain)::int AS "domainCount"
+  userIds: readonly string[];
+}): Promise<ReadonlySet<string>> {
+  const userIds = [...new Set(input.userIds)];
+  if (userIds.length === 0) {
+    return new Set();
+  }
+
+  const rows = await input.tx.$queryRaw<Array<{ userId: string }>>(Prisma.sql`
+    SELECT user_id AS "userId"
     FROM hosted_user_crypto_envelope
-    WHERE user_id = ${input.userId}
+    WHERE user_id IN (${Prisma.join(userIds)})
       AND status = 'active'::hosted_crypto_envelope_status
       AND domain IN (
         'control'::hosted_crypto_domain,
@@ -537,9 +558,22 @@ export async function hasActiveHostedCryptoDomainRootsForUserTx(input: {
         'ingress'::hosted_crypto_domain,
         'runtime'::hosted_crypto_domain
       )
-  `;
+    GROUP BY user_id
+    HAVING COUNT(DISTINCT domain) = ${ALL_DOMAINS.length}
+  `);
 
-  return (rows[0]?.domainCount ?? 0) >= ALL_DOMAINS.length;
+  return new Set(rows.map((row) => row.userId));
+}
+
+export async function hasActiveHostedCryptoDomainRootsForUserTx(input: {
+  tx: HostedCryptoClient;
+  userId: string;
+}): Promise<boolean> {
+  const userIds = await readUserIdsWithActiveHostedCryptoDomainRootsTx({
+    tx: input.tx,
+    userIds: [input.userId],
+  });
+  return userIds.has(input.userId);
 }
 
 /**
@@ -605,7 +639,15 @@ export async function unwrapHostedDomainRootForWeb(input: {
         prisma: input.prisma,
         userId: input.userId,
       });
-      const rootKey = await unwrapEnvelopeForWeb({ envelope, signal: input.signal });
+      const concreteCacheKey = createHostedDomainRootReferenceKey({
+        domain: input.domain,
+        rootKeyId: envelope.rootKeyId,
+        userId: input.userId,
+      });
+      const concrete = getHostedDomainRootUnwrapCache()?.get(concreteCacheKey);
+      const rootKey = concrete
+        ? Uint8Array.from((await concrete).rootKey)
+        : await unwrapEnvelopeForWeb({ envelope, signal: input.signal });
       return { envelope, rootKey };
     },
     input.retainFailureInScopedCache,
@@ -786,6 +828,68 @@ export async function unwrapHostedDomainRootsForWebByRootKeyIds(input: {
     }
     throw error;
   }
+}
+
+/**
+ * Copies only roots that were prepared in the active request scope. This is
+ * the transaction-safe counterpart to the metadata/KMS batch above: it does
+ * no database or provider work, drains every cached promise it observes, and
+ * returns caller-owned copies that must be wiped after use.
+ */
+export async function readPreparedHostedDomainRootsForWebByRootKeyIds(input: {
+  references: readonly HostedDomainRootReference[];
+}): Promise<UnwrappedHostedDomainRootReference[]> {
+  const referencesByKey = new Map<string, HostedDomainRootReference>();
+  for (const reference of input.references) {
+    if (!WEB_UNWRAP_DOMAINS.has(reference.domain)) {
+      throw new Error(`Web is not allowed to unwrap hosted ${reference.domain} domain roots.`);
+    }
+    referencesByKey.set(createHostedDomainRootReferenceKey(reference), reference);
+  }
+  const references = [...referencesByKey.values()];
+  if (references.length === 0) {
+    return [];
+  }
+
+  const cache = getHostedDomainRootUnwrapCache();
+  const settled = await Promise.allSettled(references.map(async (reference) => {
+    const pending = cache?.get(createHostedDomainRootReferenceKey(reference));
+    if (!pending) {
+      throw new HostedDomainRootPreparationRequiredError({ reference });
+    }
+    const unwrapped = await pending;
+    if (
+      unwrapped.envelope.domain !== reference.domain
+      || unwrapped.envelope.rootKeyId !== reference.rootKeyId
+      || unwrapped.envelope.userId !== reference.userId
+    ) {
+      throw new Error("Prepared hosted domain root does not match its requested reference.");
+    }
+    return {
+      ...reference,
+      envelope: unwrapped.envelope,
+      rootKey: Uint8Array.from(unwrapped.rootKey),
+    };
+  }));
+
+  const roots: UnwrappedHostedDomainRootReference[] = [];
+  let firstError: unknown;
+  let hasError = false;
+  for (const result of settled) {
+    if (result.status === "fulfilled") {
+      roots.push(result.value);
+    } else if (!hasError) {
+      firstError = result.reason;
+      hasError = true;
+    }
+  }
+  if (hasError) {
+    for (const root of roots) {
+      root.rootKey.fill(0);
+    }
+    throw firstError;
+  }
+  return roots;
 }
 
 function retainHostedDomainRootReferenceFailure(input: {
@@ -1072,11 +1176,15 @@ async function unwrapEnvelopeForWeb(input: {
   await verifyEnvelopeAuthoritySignature(input.envelope);
   const recipient = kmsRecipientForDomain(input.envelope.domain);
   if (!recipient) {
-    throw new Error(`Web has no KMS recipient for hosted ${input.envelope.domain} roots.`);
+    throw new Error(
+      `Web has no KMS recipient for hosted ${input.envelope.domain} roots.`,
+    );
   }
   const wrap = findHostedDomainRootWrap({ envelope: input.envelope, recipient });
   if (!wrap || wrap.kind !== "gcp-kms") {
-    throw new Error(`Hosted ${input.envelope.domain} root envelope is missing ${recipient} wrap.`);
+    throw new Error(
+      `Hosted ${input.envelope.domain} root envelope is missing ${recipient} wrap.`,
+    );
   }
   assertExpectedGcpKmsWrap({ envelope: input.envelope, recipient, wrap });
   const decrypted = await config.gcpKms.decrypt({
@@ -1087,7 +1195,9 @@ async function unwrapEnvelopeForWeb(input: {
   });
   if (decrypted.plaintext.byteLength !== 32) {
     decrypted.plaintext.fill(0);
-    throw new Error(`Hosted ${input.envelope.domain} root GCP KMS decrypt returned invalid root length.`);
+    throw new Error(
+      `Hosted ${input.envelope.domain} root GCP KMS decrypt returned invalid root length.`,
+    );
   }
   return decrypted.plaintext;
 }
@@ -1103,7 +1213,9 @@ async function verifyEnvelopeAuthoritySignature(envelope: HostedDomainRootKeyEnv
     publicKeyPem,
   });
   if (!valid) {
-    throw new Error("Hosted domain root envelope authority signature verification failed.");
+    throw new Error(
+      "Hosted domain root envelope authority signature verification failed.",
+    );
   }
 }
 
@@ -1114,7 +1226,9 @@ function assertExpectedGcpKmsWrap(input: {
 }): void {
   const config = getHostedWebCryptoConfig();
   if (input.wrap.kmsKeyName !== config.webWrapKmsKeyName) {
-    throw new Error(`Hosted ${input.envelope.domain} root envelope uses an unexpected GCP KMS key.`);
+    throw new Error(
+      `Hosted ${input.envelope.domain} root envelope uses an unexpected GCP KMS key.`,
+    );
   }
   const expectedContext = buildHostedDomainRootWrapContext({
     domain: input.envelope.domain,
@@ -1125,13 +1239,17 @@ function assertExpectedGcpKmsWrap(input: {
   });
   const expectedAad = serializeAdditionalAuthenticatedData(expectedContext);
   if (input.wrap.additionalAuthenticatedData !== expectedAad) {
-    throw new Error("Hosted domain root KMS AAD mismatch.");
+    throw new Error(
+      "Hosted domain root KMS AAD mismatch.",
+    );
   }
   if (
     serializeAdditionalAuthenticatedData(input.wrap.encryptionContext)
     !== serializeAdditionalAuthenticatedData(expectedContext)
   ) {
-    throw new Error("Hosted domain root KMS encryption context mismatch.");
+    throw new Error(
+      "Hosted domain root KMS encryption context mismatch.",
+    );
   }
 }
 
@@ -1317,15 +1435,25 @@ async function parseAssertAndVerifyEnvelope(
   row: HostedUserCryptoEnvelopeRow,
   expected: { domain: HostedCryptoDomain; rootKeyId?: string | null; userId: string },
 ): Promise<HostedDomainRootKeyEnvelopeV1> {
-  const envelope = parseHostedDomainRootKeyEnvelope(row.signedEnvelopeJson);
-  if (envelope.userId !== expected.userId || envelope.domain !== expected.domain) {
-    throw new Error("Hosted domain root envelope row does not match requested user/domain.");
-  }
-  if (expected.rootKeyId && envelope.rootKeyId !== expected.rootKeyId) {
-    throw new Error("Hosted domain root envelope row does not match requested rootKeyId.");
-  }
-  if (envelope.rootKeyId !== row.rootKeyId) {
-    throw new Error("Hosted domain root envelope row rootKeyId mismatch.");
+  let envelope: HostedDomainRootKeyEnvelopeV1;
+  try {
+    envelope = parseHostedDomainRootKeyEnvelope(row.signedEnvelopeJson);
+    if (envelope.userId !== expected.userId || envelope.domain !== expected.domain) {
+      throw new Error("Hosted domain root envelope row does not match requested user/domain.");
+    }
+    if (expected.rootKeyId && envelope.rootKeyId !== expected.rootKeyId) {
+      throw new Error("Hosted domain root envelope row does not match requested rootKeyId.");
+    }
+    if (envelope.rootKeyId !== row.rootKeyId) {
+      throw new Error("Hosted domain root envelope row rootKeyId mismatch.");
+    }
+  } catch (error) {
+    throw new Error(
+      error instanceof Error
+        ? error.message
+        : "Hosted domain root envelope is structurally invalid.",
+      { cause: error },
+    );
   }
   await verifyEnvelopeAuthoritySignature(envelope);
   return envelope;

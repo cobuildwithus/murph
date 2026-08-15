@@ -1029,6 +1029,10 @@ export const vaultCliCommandDescriptors = [
         description: 'Show calorie and macro totals from meal nutrition over an optional date range.',
       },
       {
+        path: ['meal', 'nutrients'],
+        description: 'Show water, vitamin, and mineral totals with per-nutrient meal coverage over an optional date range.',
+      },
+      {
         path: ['meal', 'manifest'],
         description: 'Show the immutable raw-import manifest for one recorded meal.',
       },

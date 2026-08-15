@@ -123,6 +123,12 @@ test("design page routes the biomarker studies through the dedicated sections ta
   expect(sectionsMarkup).toContain("Biomarker preparing state");
   expect(sectionsMarkup).toContain("Biomarker index");
   expect(sectionsMarkup).toContain(
+    "Browser Vault progressive loading and biomarker result detail transitions",
+  );
+  expect(sectionsMarkup).toContain(
+    'data-design-section="browser-vault-loading-transitions"',
+  );
+  expect(sectionsMarkup).toContain(
     "Group sponsorship purchase, signed-out management, cancellation, and completion",
   );
   expect(sectionsMarkup).toContain(
@@ -306,6 +312,12 @@ test("design sections keep the route footer as the sole canonical footer target"
   expect(routeMarkup).toContain('id="design-site-footer-preview"');
   expect(routeMarkup).toContain('data-design-section="homepage-footer"');
   expect(routeMarkup).toContain("inert=");
+
+  const sectionsSource = readFileSync(
+    new URL("../app/design/sections-content.tsx", import.meta.url),
+    "utf8",
+  );
+  expect(sectionsSource.match(/vitalsMode="synthetic"/g)).toHaveLength(1);
 });
 
 test("biomarker preparing study reassures members and previews the index structure", () => {

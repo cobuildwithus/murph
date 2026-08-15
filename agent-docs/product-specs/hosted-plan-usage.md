@@ -1,6 +1,6 @@
 # Hosted Plan Usage And Subscription Actions
 
-Last verified: 2026-08-10
+Last verified: 2026-08-12
 Status: Implemented current-state contract
 
 ## Goal
@@ -319,12 +319,18 @@ receives a fresh delivery identity.
 
 `/ops/usage` is the supported operator surface for inspecting and resetting
 hosted allowance state. It lists personal members and synthetic group
-containers from the existing hosted-member owner. Per-entity message totals
-come from retained canonical `conversation.message` mailbox rows, so the
-surface labels the 30-day retention boundary instead of presenting those rows
-as lifetime history. The trailing seven-day total and daily average use the
-same mailbox source. All-time priced AI usage is derived from immutable counted
-`HostedAiUsage` rows.
+containers from the existing hosted-member owner in deterministic primary-key
+cursor pages of 25, using a cap-plus-one read for next-page evidence. Operators
+can move forward and backward through the ordinary page controls; there is no
+cache, snapshot table, or duplicate read model. Per-entity message totals come
+from retained canonical `conversation.message` mailbox rows filtered to the
+current page member IDs, so the surface labels the 30-day retention boundary
+instead of presenting those rows as lifetime history. The trailing seven-day
+total and daily average use the same page-scoped mailbox source. Per-row
+all-time priced AI usage is derived from immutable counted `HostedAiUsage` rows
+for those same IDs. Whole-population member/container counts, seven-day active
+entity count, and all-time counted usage sum remain scalar set-based aggregates;
+they never materialize one aggregate result per lifetime member.
 
 Token allowance pricing is provider-aware at ingestion time. OpenAI rows use
 the OpenAI GPT-5.6 rate table, while rows with recorded provider `venice` use
@@ -345,21 +351,24 @@ claim by clearing that delivery row's unique lookup key. The delivery row
 remains as history. A recent pre-provider dispatch makes the operation
 retryable instead of permitting a concurrent duplicate send.
 
-The table reads decision and concurrency-version facts from one repeatable
-database snapshot. Its blocked/available label comes from the canonical gate
-decision, never from the persisted `blocked_at` marker, because a plan change
-can make that storage marker stale until the mutating gate reconciles it. A
-historical notice claim is shown independently and never suppresses canonical
-availability. After reset commit, the route signals the existing hosted runtime
-recheck so accepted mailbox work is reconsidered immediately. That signal uses the
-existing bounded handoff deadline and forwards its abort signal. A rejection or
-timeout reports the reset as committed and exposes a wake-only retry instead of
-replaying the reset or claiming complete recovery. Reusing the logical notice
-key still permits only one active claim, while each explicitly re-released
-notice gets a fresh durable attempt ID and Linq provider idempotency key. Generic
-runtime and webhook delivery fences retain their deterministic durable IDs.
-This prevents a retained history row or provider deduplication from suppressing
-the next real limit crossing without changing unrelated delivery correlation.
+For each displayed row, the table reads the canonical gate decision and exact
+persisted-period concurrency timestamp inside one short repeatable-read
+transaction. Those transactions run sequentially and the page cap bounds them
+at 25; no transaction spans multiple members or the whole dashboard render.
+Its blocked/available label comes from the canonical gate decision, never from
+the persisted `blocked_at` marker, because a plan change can make that storage
+marker stale until the mutating gate reconciles it. A historical notice claim
+is shown independently and never suppresses canonical availability. After reset
+commit, the route signals the existing hosted runtime recheck so accepted
+mailbox work is reconsidered immediately. That signal uses the existing bounded
+handoff deadline and forwards its abort signal. A rejection or timeout reports
+the reset as committed and exposes a wake-only retry instead of replaying the
+reset or claiming complete recovery. Reusing the logical notice key still
+permits only one active claim, while each explicitly re-released notice gets a
+fresh durable attempt ID and Linq provider idempotency key. Generic runtime and
+webhook delivery fences retain their deterministic durable IDs. This prevents a
+retained history row or provider deduplication from suppressing the next real
+limit crossing without changing unrelated delivery correlation.
 
 Reset never deletes or rewrites immutable usage rows, usage-credit entries, the
 usage-credit balance or version, billing state, mailbox rows, or delivery

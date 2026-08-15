@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-14",
+  "order": 100,
+  "item": {
+    "id": "first-time-apple-health-connection-recovery",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "First-time Apple Health connections can continue",
+    "summary": "Connecting Apple Health for the first time no longer stops when Murph still needs to create the connected-health account.",
+    "details": "The expected first-time account check now proceeds into setup while preserving cancellation and timeout safeguards.",
+    "relevanceTags": ["apple-health", "wearables", "connections", "reliability"],
+    "sourcePullRequests": [1813]
+  }
+}

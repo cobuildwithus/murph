@@ -43,6 +43,15 @@ vi.mock("@/src/lib/browser-vault/context", () => ({
   useBrowserVaultSelector<T>(selector: (client: BrowserVaultQueryClient) => T) {
     return browserVaultMock.value.client ? selector(browserVaultMock.value.client) : null;
   },
+  useBrowserVaultLabsSelector<T>(selector: (client: BrowserVaultQueryClient) => T) {
+    return browserVaultMock.value.client ? selector(browserVaultMock.value.client) : null;
+  },
+  useBrowserVaultMetricKeyDemand() {
+    return true;
+  },
+  useBrowserVaultMetricsSelector<T>(selector: (client: BrowserVaultQueryClient) => T) {
+    return browserVaultMock.value.client ? selector(browserVaultMock.value.client) : null;
+  },
 }));
 
 vi.mock("@/src/components/ui/auth-button", () => ({
@@ -926,7 +935,7 @@ test("a pending refresh keeps ready empty replicas in the preparing state", asyn
   }
 });
 
-test("stale empty list stays quiet while detail states retain a refresh action", async () => {
+test("a stale detail without an active provider refresh keeps explicit recovery", async () => {
   browserVaultMock.value.client = clientWithRows([]);
   browserVaultMock.value.freshness = "stale";
   browserVaultMock.value.status = "ready";
@@ -954,11 +963,17 @@ test("stale empty list stays quiet while detail states retain a refresh action",
     { requireButton: false },
   );
   try {
+    expect(detail.container.textContent).toContain("No results found");
     expect(detail.container.textContent).toContain("This history may be out of date");
-    expect(detail.container.textContent).toContain(
-      "This saved view may not include newer lab data. Refresh to check again.",
+    const refreshButton = [...detail.container.querySelectorAll("button")].find(
+      (button) => button.textContent === "Refresh",
     );
-    await clickButton(detail.container, detail.window, "Refresh");
+    expect(refreshButton).not.toBeUndefined();
+    expect(detail.container.querySelector('[aria-live="polite"]')).toBeNull();
+    await act(async () => {
+      refreshButton?.dispatchEvent(new detail.window.Event("click", { bubbles: true }));
+      await Promise.resolve();
+    });
     expect(refresh).toHaveBeenCalledTimes(1);
   } finally {
     await detail.cleanup();
@@ -974,8 +989,13 @@ test("detail covers loading, stale, error, and signed-out states", async () => {
   try {
     expect(loading.container.textContent).toContain("Loading this biomarker's saved results");
     const skeleton = loading.container.querySelector('[aria-label="Loading biomarker history"]');
-    expect(skeleton?.querySelectorAll("section")).toHaveLength(2);
-    expect(skeleton?.querySelector(".h-72.sm\\:h-80")).not.toBeNull();
+    expect(
+      [...(skeleton?.children ?? [])].filter((child) => child.tagName === "SECTION"),
+    ).toHaveLength(2);
+    expect(skeleton?.querySelector('[data-biomarker-skeleton="chart"]')).not.toBeNull();
+    expect(skeleton?.querySelector(".animate-pulse.h-72")).toBeNull();
+    expect(skeleton?.querySelectorAll("svg circle")).toHaveLength(5);
+    expect(skeleton?.querySelectorAll("[data-slot=\"skeleton\"]").length).toBeGreaterThan(12);
     expect(skeleton?.innerHTML).not.toContain("sm:grid-cols-3");
     expectPageIdentity(loading.container);
   } finally {
@@ -986,21 +1006,49 @@ test("detail covers loading, stale, error, and signed-out states", async () => {
   browserVaultMock.value.freshness = "stale";
   browserVaultMock.value.status = "ready";
   const refresh = browserVaultMock.value.refresh;
+  refresh.mockClear();
   const stale = await renderClientComponent(
     <LabBiomarkerDetailClient authenticated metricKey="hba1c" />,
     { requireButton: false },
   );
   try {
+    expect(stale.container.textContent).toContain("HbA1c");
     expect(stale.container.textContent).toContain("This history may be out of date");
-    expect(stale.container.textContent).toContain("may not include newer lab data");
+    expect(stale.container.textContent).not.toContain("Refreshing this history");
     expect(stale.container.textContent).not.toContain("while Murph checks");
-    await clickButton(stale.container, stale.window, "Refresh");
+    const refreshButton = [...stale.container.querySelectorAll("button")].find(
+      (button) => button.textContent === "Refresh",
+    );
+    expect(refreshButton).not.toBeUndefined();
+    expect(stale.container.querySelector('[aria-live="polite"]')).toBeNull();
+    await act(async () => {
+      refreshButton?.dispatchEvent(new stale.window.Event("click", { bubbles: true }));
+      await Promise.resolve();
+    });
     expect(refresh).toHaveBeenCalledTimes(1);
   } finally {
     await stale.cleanup();
   }
 
+  refresh.mockClear();
+  browserVaultMock.value.refreshPending = true;
+  const refreshing = await renderClientComponent(
+    <LabBiomarkerDetailClient authenticated metricKey="hba1c" />,
+    { requireButton: false },
+  );
+  try {
+    expect(refreshing.container.textContent).toContain("HbA1c");
+    expect(refreshing.container.textContent).not.toContain("Refreshing this history");
+    expect(refreshing.container.textContent).not.toContain("last saved results remain visible");
+    expect(refreshing.container.textContent).not.toContain("Refresh");
+    expect(refreshing.container.querySelector('[aria-live="polite"]')).toBeNull();
+    expect(refresh).not.toHaveBeenCalled();
+  } finally {
+    await refreshing.cleanup();
+  }
+
   browserVaultMock.value.client = null;
+  browserVaultMock.value.refreshPending = false;
   browserVaultMock.value.error = "secret-safe internal diagnostic";
   browserVaultMock.value.status = "error";
   const error = await renderClientComponent(
@@ -1009,6 +1057,15 @@ test("detail covers loading, stale, error, and signed-out states", async () => {
   try {
     expect(error.container.textContent).toContain("Could not load this biomarker");
     expect(error.container.textContent).not.toContain("internal diagnostic");
+    const retryButton = [...error.container.querySelectorAll("button")].find(
+      (button) => button.textContent === "Retry",
+    );
+    expect(retryButton).not.toBeUndefined();
+    await act(async () => {
+      retryButton?.dispatchEvent(new error.window.Event("click", { bubbles: true }));
+      await Promise.resolve();
+    });
+    expect(refresh).toHaveBeenCalledTimes(1);
     expectPageIdentity(error.container);
   } finally {
     await error.cleanup();
@@ -1649,19 +1706,4 @@ function importedTotalProteinTest(specimenType: "serum" | "urine" | null): Brows
 function expectPageIdentity(container: HTMLElement): void {
   const heading = container.querySelector("h1");
   expect(heading?.textContent?.trim()).toBeTruthy();
-}
-
-async function clickButton(
-  container: HTMLElement,
-  window: Window & typeof globalThis,
-  label: string,
-): Promise<void> {
-  const button = [...container.querySelectorAll("button")]
-    .find((candidate) => candidate.textContent?.trim() === label);
-  expect(button).toBeDefined();
-
-  await act(async () => {
-    button?.dispatchEvent(new window.Event("click", { bubbles: true }));
-    await Promise.resolve();
-  });
 }

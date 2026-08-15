@@ -13,9 +13,13 @@ import {
   toCommandShowEntity,
 } from '../commands/query-record-command-helpers.js'
 import { loadWorkoutCoreRuntime } from './workout-core.js'
-import { editWorkoutRecord } from './workout.js'
+import {
+  editWorkoutRecord,
+  editWorkoutRecordAfterValidatedSetRemoval,
+} from './workout.js'
 import { showWorkoutRecord, workoutLookupSchema } from './workout-read.js'
 import {
+  LIVE_WORKOUT_SOURCE_APP,
   type LiveWorkoutExerciseLookup,
   type LiveWorkoutLookupInput,
   type LogLiveWorkoutSetInput,
@@ -93,23 +97,60 @@ export async function resolveLiveWorkout(
 }
 
 export async function findActiveLiveWorkouts(vault: string): Promise<WorkoutShowResult[]> {
+  const records = await findStructuredWorkoutRecords(vault)
+
+  return records
+    .filter(({ workout }) => isActiveLiveWorkout(workout))
+    .map(({ record }) => ({
+      vault,
+      entity: toCommandShowEntity(record),
+    }))
+}
+
+export async function findLiveWorkoutsForMemberAction(
+  vault: string,
+  actionId: string,
+): Promise<{
+  active: WorkoutShowResult[]
+  exactReplays: WorkoutShowResult[]
+}> {
+  const records = await findStructuredWorkoutRecords(vault)
+  const active: WorkoutShowResult[] = []
+  const exactReplays: WorkoutShowResult[] = []
+
+  for (const { record, workout } of records) {
+    const shown = {
+      vault,
+      entity: toCommandShowEntity(record),
+    }
+    if (isActiveLiveWorkout(workout)) {
+      active.push(shown)
+    }
+    if (
+      workout.sourceApp === LIVE_WORKOUT_SOURCE_APP
+      && typeof workout.startedAt === 'string'
+      && workout.lastMemberActionId === actionId
+    ) {
+      exactReplays.push(shown)
+    }
+  }
+
+  return { active, exactReplays }
+}
+
+async function findStructuredWorkoutRecords(vault: string) {
   const query = await loadQueryRuntime('live workout query reads')
   const readModel = await query.readVault(vault)
-  const records = query
+  return query
     .listEntities(readModel, {
       families: ['event'],
       kinds: ['activity_session'],
     })
-    .filter((record) => {
+    .flatMap((record) => {
       const parsed = workoutSessionSchema.safeParse(record.attributes.workout)
-      return parsed.success && isActiveLiveWorkout(parsed.data)
+      return parsed.success ? [{ record, workout: parsed.data }] : []
     })
-    .sort(compareByLatest)
-
-  return records.map((record) => ({
-    vault,
-    entity: toCommandShowEntity(record),
-  }))
+    .sort((left, right) => compareByLatest(left.record, right.record))
 }
 
 export function parseShownWorkout(shown: WorkoutShowResult): WorkoutSession {
@@ -128,6 +169,46 @@ export async function updateLiveWorkoutExercises(
   shown: WorkoutShowResult,
   workout: WorkoutSession,
   exercises: WorkoutExercise[],
+  lastMemberActionId?: string,
+) {
+  const update = validateLiveWorkoutExerciseUpdate(shown, workout, exercises)
+  const set = [
+    `${EXERCISES_PATCH_PREFIX}${JSON.stringify(update.exercises)}`,
+  ]
+  if (update.durationMinutes !== undefined) {
+    set.push(`durationMinutes=${update.durationMinutes}`)
+  }
+  if (lastMemberActionId !== undefined) {
+    set.push(`workout.lastMemberActionId=${lastMemberActionId}`)
+  }
+
+  return editWorkoutRecord({
+    vault: shown.vault,
+    lookup: shown.entity.id,
+    set,
+  })
+}
+
+export async function updateLiveWorkoutExercisesAfterValidatedSetRemoval(
+  shown: WorkoutShowResult,
+  workout: WorkoutSession,
+  exercises: WorkoutExercise[],
+  lastMemberActionId: string,
+) {
+  const update = validateLiveWorkoutExerciseUpdate(shown, workout, exercises)
+  return editWorkoutRecordAfterValidatedSetRemoval({
+    durationMinutes: update.durationMinutes,
+    exercises: update.exercises,
+    lastMemberActionId,
+    lookup: shown.entity.id,
+    vault: shown.vault,
+  })
+}
+
+function validateLiveWorkoutExerciseUpdate(
+  shown: WorkoutShowResult,
+  workout: WorkoutSession,
+  exercises: WorkoutExercise[],
 ) {
   const parsed = workoutSessionSchema.safeParse({ ...workout, exercises })
   if (!parsed.success) {
@@ -139,23 +220,12 @@ export async function updateLiveWorkoutExercises(
   }
   assertTargetableLiveWorkout(parsed.data, `Workout ${shown.entity.id}`)
 
-  const set = [
-    `${EXERCISES_PATCH_PREFIX}${JSON.stringify(parsed.data.exercises)}`,
-  ]
-  if (workout.startedAt) {
-    set.push(
-      `durationMinutes=${elapsedDurationMinutes(
-        workout.startedAt,
-        new Date().toISOString(),
-      )}`,
-    )
+  return {
+    durationMinutes: workout.startedAt
+      ? elapsedDurationMinutes(workout.startedAt, new Date().toISOString())
+      : undefined,
+    exercises: parsed.data.exercises,
   }
-
-  return editWorkoutRecord({
-    vault: shown.vault,
-    lookup: shown.entity.id,
-    set,
-  })
 }
 
 export function resolveExerciseIndex(

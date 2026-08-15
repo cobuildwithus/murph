@@ -78,6 +78,7 @@ import { ExperimentResultsShareStudy } from "./experiment-results-share-study";
 import { EnvironmentProgressStudy } from "./environment-progress-study";
 import { EnvironmentPrintStudy } from "./environment-print-study";
 import { PersonalPatternsStudy } from "./personal-patterns-study";
+import { BrowserVaultLoadingTransitionsStudy } from "./browser-vault-loading-transitions-study";
 
 function StudySection({
   children,
@@ -530,6 +531,7 @@ export function SectionsContent() {
           <SiteFooter
             id="design-site-footer-preview"
             referralsAvailable
+            vitalsMode="synthetic"
           />
         </div>
       </StudySection>
@@ -572,7 +574,7 @@ export function SectionsContent() {
 
       <Separator />
 
-      <StudySection title="Connect source availability, actions, and disconnect lifecycle">
+      <StudySection title="Connect source capabilities, availability, actions, and disconnect lifecycle">
         <ConnectSourceCardStudy
           androidAppAvailable={isMurphAndroidAppEnabled(process.env)}
         />
@@ -611,6 +613,7 @@ export function SectionsContent() {
       <Separator />
 
       <StudySection title="Settings billing return, Portal failure, and Family sign-in handoffs">
+        {/* Includes the signed-out account-deletion handoff rendered by this study. */}
         <SettingsAuthRequiredStudy />
       </StudySection>
 
@@ -622,7 +625,7 @@ export function SectionsContent() {
 
       <Separator />
 
-      <StudySection title="Account deletion during migration maintenance">
+      <StudySection title="Account deletion maintenance and provider-access recovery">
         <AccountDeletionMaintenanceStudy />
       </StudySection>
 
@@ -630,6 +633,12 @@ export function SectionsContent() {
 
       <StudySection title="Home partial-load and vault-unavailable recovery">
         <HomeLoadStateStudy />
+      </StudySection>
+
+      <Separator />
+
+      <StudySection title="Browser Vault progressive loading and biomarker result detail transitions">
+        <BrowserVaultLoadingTransitionsStudy />
       </StudySection>
 
       <Separator />
@@ -674,7 +683,7 @@ export function SectionsContent() {
 
       <Separator />
 
-      <StudySection title="Ops usage dashboard">
+      <StudySection title="Ops usage dashboard pagination">
         <OpsUsageStudy />
       </StudySection>
 

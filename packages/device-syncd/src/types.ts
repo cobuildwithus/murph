@@ -274,6 +274,15 @@ export type UpsertPublicDeviceSyncExistingAccountPolicy =
   | "replace"
   | "preserve_established";
 
+export interface OAuthStateConsumeClaim {
+  state: string;
+  consumedAt: string;
+}
+
+// A callback admitted at the end of its OAuth-session window still needs a
+// full bounded interval to finish provider work and persist cleanup authority.
+export const DEVICE_SYNC_OAUTH_CALLBACK_PROCESSING_LEASE_MS = 15 * 60_000;
+
 export interface UpsertPublicDeviceSyncConnectionInput {
   ownerId?: string | null;
   provider: string;
@@ -290,6 +299,8 @@ export interface UpsertPublicDeviceSyncConnectionInput {
   existingAccountPolicy: UpsertPublicDeviceSyncExistingAccountPolicy;
   connectedAt: string;
   nextReconcileAt?: string | null;
+  cleanupOwnership?: "oauth_provider_revoke";
+  oauthClaim?: OAuthStateConsumeClaim;
 }
 
 export interface MarkPublicDeviceSyncConnectionSetupFailedInput {
@@ -298,11 +309,27 @@ export interface MarkPublicDeviceSyncConnectionSetupFailedInput {
   now: string;
   code: string;
   message: string;
+  oauthClaim?: OAuthStateConsumeClaim;
 }
 
 export interface MarkPublicDeviceSyncConnectionSetupFailedResult {
   account: PublicDeviceSyncAccount | null;
   applied: boolean;
+  blockedByRefreshLease: boolean;
+  oauthTokenVersion: number | null;
+}
+
+export interface ClearPublicDeviceSyncOAuthCredentialInput {
+  accountId: string;
+  expectedConnectedAt: string;
+  expectedTokenVersion: number;
+  now: string;
+}
+
+export interface GetPublicDeviceSyncOAuthCleanupAccountInput {
+  accountId: string;
+  expectedConnectedAt: string;
+  expectedTokenVersion: number;
 }
 
 export interface UpsertPublicDeviceSyncConnectionResult {
@@ -319,6 +346,7 @@ export interface DeviceSyncWebhookTraceRecord {
 }
 
 export interface ClaimDeviceSyncWebhookTraceInput extends DeviceSyncWebhookTraceRecord {
+  claimedAt: string;
   claimToken: string;
   processingExpiresAt: string;
 }
@@ -331,6 +359,7 @@ export type DeviceSyncWebhookTraceClaimResult =
 export type ConsumeOAuthStateResult =
   | {
       status: "consumed";
+      consumedAt: string;
       record: OAuthStateRecord;
     }
   | {
@@ -341,6 +370,18 @@ export type ConsumeOAuthStateResult =
        * distinguishable from an unknown one.
        */
       status: "replayed";
+      consumedAt: string;
+      record: OAuthStateRecord;
+    }
+  | {
+      /**
+       * Provider work may have completed, but the callback owner did not
+       * durably finalize before its bounded session expired. Retrying the
+       * authorization code is unsafe; hosted account deletion must instead
+       * require explicit confirmation that provider access was removed.
+       */
+      status: "recovery_required";
+      consumedAt: string;
       record: OAuthStateRecord;
     }
   | {
@@ -354,6 +395,15 @@ export type ConsumeOAuthStateResult =
       status: "owner_mismatch";
     };
 
+export type DiscardUnconsumedOAuthStateResult =
+  | {
+      status: "discarded";
+      record: OAuthStateRecord;
+    }
+  | Extract<ConsumeOAuthStateResult, {
+      status: "replayed" | "recovery_required" | "missing" | "provider_mismatch" | "owner_mismatch";
+    }>;
+
 export interface DeviceSyncPublicIngressStore {
   deleteExpiredOAuthStates(now: string): number | Promise<number>;
   createOAuthState(input: OAuthStateRecord): OAuthStateRecord | Promise<OAuthStateRecord>;
@@ -363,6 +413,15 @@ export interface DeviceSyncPublicIngressStore {
     expectedProvider?: string,
     expectedOwnerId?: string,
   ): ConsumeOAuthStateResult | Promise<ConsumeOAuthStateResult>;
+  discardUnconsumedOAuthState(
+    state: string,
+    now: string,
+    expectedProvider?: string,
+    expectedOwnerId?: string,
+  ): DiscardUnconsumedOAuthStateResult | Promise<DiscardUnconsumedOAuthStateResult>;
+  resolveOAuthStateWithoutProviderAuthority(
+    claim: OAuthStateConsumeClaim,
+  ): boolean | Promise<boolean>;
   upsertConnection(input: UpsertPublicDeviceSyncConnectionInput): PublicDeviceSyncAccount | Promise<PublicDeviceSyncAccount>;
   upsertConnectionWithPrevious?(
     input: UpsertPublicDeviceSyncConnectionInput,
@@ -371,6 +430,12 @@ export interface DeviceSyncPublicIngressStore {
     input: MarkPublicDeviceSyncConnectionSetupFailedInput,
   ): MarkPublicDeviceSyncConnectionSetupFailedResult
     | Promise<MarkPublicDeviceSyncConnectionSetupFailedResult>;
+  clearOAuthCredentialAfterConfirmedRevoke(
+    input: ClearPublicDeviceSyncOAuthCredentialInput,
+  ): boolean | Promise<boolean>;
+  getOAuthCleanupAccount(
+    input: GetPublicDeviceSyncOAuthCleanupAccountInput,
+  ): DeviceSyncAccount | null | Promise<DeviceSyncAccount | null>;
   getConnectionById(
     accountId: string,
   ): PublicDeviceSyncAccount | null | Promise<PublicDeviceSyncAccount | null>;
@@ -632,7 +697,8 @@ export interface DeviceSyncPublicIngressConnectionEstablishedResult {
 
 export type DeviceSyncPublicIngressConnectionSourceObservedResult =
   | { sourceAdmissionCommitted: true }
-  | { sourceRegistrationRemoved: true };
+  | { sourceRegistrationRemoved: true }
+  | { sourceAdmissionDeferred: true };
 
 export interface DeviceSyncPublicIngressConnectionSourceAdmissionRejectedInput {
   account: PublicDeviceSyncAccount;
@@ -662,6 +728,8 @@ export interface DeviceSyncPublicIngressWebhookAcceptedInput {
 
 export interface DeviceSyncPublicIngressWebhookAcceptedResult {
   webhookTraceCompleted: true;
+  /** The runtime owned receipt/source disposition inside its authority boundary. */
+  receiptStateOwned?: true;
 }
 
 export interface DeviceSyncPublicIngressWebhookAlreadySatisfiedInput {
@@ -737,15 +805,26 @@ export interface ProviderScheduleResult {
 
 export interface ProviderSnapshotImportReceipt {
   canonicalEventCount: number;
+  canonicalEventDayKeys?: readonly string[];
   canonicalEventExternalRefResourceIds?: readonly string[];
+  canonicalSparseCalendarTargets?: readonly ProviderSparseCalendarTarget[];
   durableDeliveryAccepted: boolean;
+}
+
+export interface ProviderSparseCalendarTarget {
+  dayKey: string;
+  sourceInstanceId?: string | null;
+  sourceProviderSlug: string;
+  sourceType?: string;
 }
 
 export interface ProviderJobConnectionSource {
   displayName: string | null;
   firstSeenAt?: string;
+  lastDataAt: string | null;
   lastErrorCode: string | null;
   lastErrorMessage: string | null;
+  lastSeenAt: string;
   resourceAvailabilitySummary?: DeviceConnectionSourceResourceAvailabilitySummary;
   sourceInstanceKey?: string;
   sourceProviderSlug: string;

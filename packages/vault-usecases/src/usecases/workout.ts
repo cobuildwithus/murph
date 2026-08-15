@@ -654,7 +654,7 @@ async function assertWorkoutExerciseReplacementPreservesExistingStructure(input:
   vault: string
   lookup: string
   set?: string[]
-}): Promise<void> {
+}, preserveSavedSets: boolean): Promise<void> {
   const replacement = parseWorkoutExerciseReplacement(input.set)
   if (replacement === null) {
     return
@@ -697,6 +697,10 @@ async function assertWorkoutExerciseReplacementPreservesExistingStructure(input:
       )
     }
 
+    if (!preserveSavedSets) {
+      continue
+    }
+
     for (const existingSet of existingExercise.sets ?? []) {
       if (!replacementExercise.sets.some(
         (candidate) => candidate.order === existingSet.order,
@@ -710,15 +714,23 @@ async function assertWorkoutExerciseReplacementPreservesExistingStructure(input:
   }
 }
 
-export async function editWorkoutRecord(input: {
+interface EditWorkoutRecordInput {
   vault: string
   lookup: string
   inputFile?: string
   set?: string[]
   clear?: string[]
   dayKeyPolicy?: 'keep' | 'recompute'
-}) {
-  await assertWorkoutExerciseReplacementPreservesExistingStructure(input)
+}
+
+async function editWorkoutRecordWithStructurePolicy(
+  input: EditWorkoutRecordInput,
+  preserveSavedSets: boolean,
+) {
+  await assertWorkoutExerciseReplacementPreservesExistingStructure(
+    input,
+    preserveSavedSets,
+  )
   const result = await editEventRecord({
     vault: input.vault,
     lookup: input.lookup,
@@ -731,6 +743,39 @@ export async function editWorkoutRecord(input: {
   })
 
   return showWorkoutRecord(input.vault, result.lookupId)
+}
+
+export function editWorkoutRecord(input: EditWorkoutRecordInput) {
+  return editWorkoutRecordWithStructurePolicy(input, true)
+}
+
+/**
+ * Persists a live-workout replacement after the member-action owner has
+ * validated the exact canonical set snapshot and retained every exercise.
+ * Other workout writes must use editWorkoutRecord so accidental set loss
+ * remains fail-closed.
+ */
+export function editWorkoutRecordAfterValidatedSetRemoval(
+  input: {
+    durationMinutes?: number
+    exercises: WorkoutExercise[]
+    lastMemberActionId: string
+    lookup: string
+    vault: string
+  },
+) {
+  const set = [
+    `${WORKOUT_EXERCISES_PATCH_PREFIX}${JSON.stringify(input.exercises)}`,
+  ]
+  if (input.durationMinutes !== undefined) {
+    set.push(`durationMinutes=${input.durationMinutes}`)
+  }
+  set.push(`workout.lastMemberActionId=${input.lastMemberActionId}`)
+  return editWorkoutRecordWithStructurePolicy({
+    lookup: input.lookup,
+    set,
+    vault: input.vault,
+  }, false)
 }
 
 export async function deleteWorkoutRecord(input: {

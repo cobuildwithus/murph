@@ -1417,6 +1417,34 @@ text(result.output);
         skillSlug: 'food-journal',
       },
       {
+        answer: 'For July 12, the selected stored meals show iron at 4 mg from 1 of 2 meals (partial), zinc at a recorded 0 mg from 2 of 2, vitamin C at 50 mg from 2 of 2, and potassium as unavailable. This aggregate may combine connected and manually saved meals, so it cannot prove what Cronometer recorded. Source targets and dashboard percentages are not imported, and one day does not diagnose a deficiency.',
+        command: 'meal nutrients --from 2026-07-12 --to 2026-07-12 --format json',
+        evidence: {
+          days: [{
+            date: '2026-07-12',
+            mealCount: 2,
+            nutrients: [
+              { category: 'mineral', contributingMealCount: 1, key: 'ironMg', label: 'Iron', total: 4, unit: 'mg' },
+              { category: 'mineral', contributingMealCount: 2, key: 'zincMg', label: 'Zinc', total: 0, unit: 'mg' },
+              { category: 'mineral', contributingMealCount: 0, key: 'potassiumGrams', label: 'Potassium', total: null, unit: 'g' },
+              { category: 'vitamin', contributingMealCount: 2, key: 'vitaminCMg', label: 'Vitamin C', total: 50, unit: 'mg' },
+            ],
+          }],
+          filters: { from: '2026-07-12', to: '2026-07-12' },
+          mealCount: 2,
+          nutrients: [
+            { category: 'mineral', contributingMealCount: 1, key: 'ironMg', label: 'Iron', total: 4, unit: 'mg' },
+            { category: 'mineral', contributingMealCount: 2, key: 'zincMg', label: 'Zinc', total: 0, unit: 'mg' },
+            { category: 'mineral', contributingMealCount: 0, key: 'potassiumGrams', label: 'Potassium', total: null, unit: 'g' },
+            { category: 'vitamin', contributingMealCount: 2, key: 'vitaminCMg', label: 'Vitamin C', total: 50, unit: 'mg' },
+          ],
+          vault: 'synthetic-vault',
+        },
+        prompt: 'Which nutrients are low on July 12, and did Cronometer record all my iron?',
+        skillHeading: '# Food journal',
+        skillSlug: 'food-journal',
+      },
+      {
         answer: 'Your connected-device body-fat estimate moved from 19.2% to 18.5%; keep the same source and conditions before treating that as a trend.',
         command: 'measurement entry list --metric fat --from 2026-07-01 --to 2026-07-12 --limit 50 --format json',
         evidence: {

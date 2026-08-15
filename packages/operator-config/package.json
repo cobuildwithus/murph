@@ -49,11 +49,6 @@
       "import": "./dist/assistant/target-runtime.js",
       "default": "./dist/assistant/target-runtime.js"
     },
-    "./agentmail-runtime": {
-      "types": "./dist/agentmail-runtime.d.ts",
-      "import": "./dist/agentmail-runtime.js",
-      "default": "./dist/agentmail-runtime.js"
-    },
     "./command-helpers": {
       "types": "./dist/command-helpers.d.ts",
       "import": "./dist/command-helpers.js",
@@ -168,6 +163,11 @@
       "types": "./dist/assistant-response-cards.d.ts",
       "import": "./dist/assistant-response-cards.js",
       "default": "./dist/assistant-response-cards.js"
+    },
+    "./workout-action-binding": {
+      "types": "./dist/workout-action-binding.d.ts",
+      "import": "./dist/workout-action-binding.js",
+      "default": "./dist/workout-action-binding.js"
     }
   },
   "files": [

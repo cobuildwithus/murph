@@ -52,6 +52,13 @@ CREATE INDEX IF NOT EXISTS foods_name_trgm_idx
   ON foods
   USING GIN (name gin_trgm_ops);
 
+CREATE INDEX IF NOT EXISTS foods_name_rank_idx
+  ON foods
+  USING GIST (name gist_trgm_ops);
+
+CREATE INDEX IF NOT EXISTS foods_name_exact_rank_idx
+  ON foods (lower(name), data_origin_priority, id);
+
 CREATE INDEX IF NOT EXISTS foods_brand_idx
   ON foods (brand)
   WHERE brand IS NOT NULL;
@@ -60,5 +67,5 @@ CREATE INDEX IF NOT EXISTS foods_upc_idx
   ON foods (upc)
   WHERE upc IS NOT NULL;
 
-CREATE INDEX IF NOT EXISTS foods_canonical_key_idx
-  ON foods (canonical_key);
+CREATE INDEX IF NOT EXISTS foods_canonical_rank_idx
+  ON foods (canonical_key, data_origin_priority, id);

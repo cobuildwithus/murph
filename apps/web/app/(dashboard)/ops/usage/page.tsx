@@ -18,9 +18,29 @@ export const metadata: Metadata = {
   title: "Usage - Murph",
 };
 
-export default async function HostedOpsUsagePage() {
+export default async function HostedOpsUsagePage({
+  searchParams,
+}: {
+  searchParams: Promise<{
+    after?: string | string[];
+    before?: string | string[];
+  }>;
+}) {
   await getHostedDashboardPageAuthSnapshot();
   await requireHostedOpsPageAccess();
+  const resolvedSearchParams = await searchParams;
+  const after = readFirstSearchParam(resolvedSearchParams.after);
+  const before = readFirstSearchParam(resolvedSearchParams.before);
 
-  return <MemberUsageClient dashboard={await readHostedOpsMemberUsage()} />;
+  return (
+    <MemberUsageClient
+      dashboard={await readHostedOpsMemberUsage({ after, before })}
+    />
+  );
+}
+
+function readFirstSearchParam(
+  value: string | string[] | undefined,
+): string | null {
+  return Array.isArray(value) ? value[0] ?? null : value ?? null;
 }

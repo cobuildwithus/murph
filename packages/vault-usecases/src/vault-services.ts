@@ -112,6 +112,7 @@ const queryServiceMethodNames = [
   "showFood",
   "listFoods",
   "showMealNutritionTotals",
+  "showMealNutrientTotals",
   "showEvent",
   "listEvents",
   "showExperiment",

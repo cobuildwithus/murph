@@ -1092,6 +1092,27 @@ function createIntegratedQueryServices(): QueryServices {
         days: result.days,
       }
     },
+    async showMealNutrientTotals(input: CommandContext & {
+      from?: string
+      to?: string
+    }) {
+      const query = await loadQueryRuntime()
+      const result = await query.readMealNutrientTotals(input.vault, {
+        from: input.from,
+        to: input.to,
+      })
+
+      return {
+        vault: input.vault,
+        filters: {
+          from: result.from,
+          to: result.to,
+        },
+        mealCount: result.mealCount,
+        nutrients: result.nutrients,
+        days: result.days,
+      }
+    },
     async showEvent(input: CommandContext & {
       eventId: string
     }) {
