@@ -2,6 +2,7 @@ import {
   canQueuePreparedDeviceWebhook,
   sealDeviceWebhookQueueEnvelope,
 } from "@murphai/cloudflare-hosted-control/device-webhook-queue";
+import { readCloudflareHostedControlHttpError } from "@murphai/cloudflare-hosted-control/client";
 import { deviceSyncError } from "@murphai/device-syncd/errors";
 import type { PreparedDeviceSyncWebhookV1 } from "@murphai/device-syncd/prepared-webhook";
 
@@ -79,9 +80,11 @@ export async function enqueueHostedDeviceWebhook(input: {
   try {
     return await controlClient.enqueueDeviceWebhook(envelope);
   } catch (cause) {
+    const controlFailure = readCloudflareHostedControlHttpError(cause);
     throw deviceSyncError({
       cause,
       code: "DEVICE_WEBHOOK_QUEUE_ENQUEUE_FAILED",
+      details: { type: controlFailure?.code ?? "enqueue_failed" },
       httpStatus: 503,
       message: "Device webhook durable transport did not confirm acceptance.",
       retryable: true,

@@ -80,27 +80,30 @@ describe("hosted device webhook Queue consumer", () => {
 
   it("authenticates ciphertext before persistence and rejects unsafe visible metadata", async () => {
     const original = await createEnvelope(0);
-    const mutations: Array<(envelope: DeviceWebhookQueueEnvelopeV1) => void> = [
-      (envelope) => {
+    const mutations: Array<{
+      code: string;
+      mutate: (envelope: DeviceWebhookQueueEnvelopeV1) => void;
+    }> = [
+      { code: "transport_context_mismatch", mutate(envelope) {
         envelope.rootKeyWrap.encryptionContext.userId = "plaintext-member-marker";
-      },
-      (envelope) => {
+      } },
+      { code: "transport_metadata_invalid", mutate(envelope) {
         envelope.encryptedPayload.rootKeyId = "plaintext-root-marker";
-      },
-      (envelope) => {
+      } },
+      { code: "transport_recipient_key_unavailable", mutate(envelope) {
         envelope.rootKeyWrap.recipientKeyId = "plaintext-key-marker";
-      },
-      (envelope) => {
+      } },
+      { code: "transport_metadata_invalid", mutate(envelope) {
         envelope.rootKeyWrap.iv = btoa("plaintext-marker");
-      },
-      (envelope) => {
+      } },
+      { code: "transport_payload_open_failed", mutate(envelope) {
         envelope.encryptedPayload.ciphertext = replaceFirstBase64Character(
           envelope.encryptedPayload.ciphertext,
         );
-      },
+      } },
     ];
 
-    for (const mutate of mutations) {
+    for (const { code, mutate } of mutations) {
       const envelope = structuredClone(original);
       mutate(envelope);
       const send = vi.fn(async () => createQueueSendResponse());
@@ -119,6 +122,72 @@ describe("hosted device webhook Queue consumer", () => {
       }, {});
 
       expect(response.status).toBe(400);
+      const body = await response.json();
+      expect(body).toEqual({
+        code,
+        error: "Unauthenticated device webhook envelope.",
+      });
+      const visibleResponse = JSON.stringify(body);
+      expect(visibleResponse).not.toContain("plaintext");
+      expect(visibleResponse).not.toContain(envelope.transportId);
+      expect(visibleResponse).not.toContain(envelope.encryptedPayload.ciphertext);
+      expect(send).not.toHaveBeenCalled();
+    }
+  });
+
+  it("classifies invalid transport keyring configuration without exposing it", async () => {
+    const envelope = await createEnvelope(0);
+    const invalidEnvironments: Array<Partial<WorkerEnvironmentSource>> = [
+      {
+        HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK:
+          "{private-jwk-marker",
+      },
+      {
+        HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK:
+          JSON.stringify({ kty: "private-jwk-marker" }),
+      },
+      {
+        HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_KEYRING_JSON:
+          "{private-keyring-marker",
+      },
+    ];
+
+    for (const invalidEnvironment of invalidEnvironments) {
+      const send = vi.fn(async () => createQueueSendResponse());
+      const env = {
+        ...createWorkerEnv(),
+        ...invalidEnvironment,
+      };
+      const response = await deviceWebhookEnqueueRoutes[0]!.handle({
+        env: {
+          ...env,
+          DEVICE_WEBHOOK_QUEUE: createQueueBinding(send),
+        },
+        environment: readHostedExecutionEnvironment(
+          asWorkerStringEnvironment(env),
+        ),
+        request: new Request(
+          "https://runner.example.test/internal/device-webhooks/enqueue",
+          {
+            body: JSON.stringify(envelope),
+            method: "POST",
+          },
+        ),
+        url: new URL(
+          "https://runner.example.test/internal/device-webhooks/enqueue",
+        ),
+      }, {});
+
+      expect(response.status).toBe(400);
+      const body = await response.json();
+      expect(body).toEqual({
+        code: "persistence_key_unavailable",
+        error: "Unauthenticated device webhook envelope.",
+      });
+      const visibleResponse = JSON.stringify(body);
+      expect(visibleResponse).not.toContain("private-jwk-marker");
+      expect(visibleResponse).not.toContain("private-keyring-marker");
+      expect(visibleResponse).not.toContain(envelope.transportId);
       expect(send).not.toHaveBeenCalled();
     }
   });
