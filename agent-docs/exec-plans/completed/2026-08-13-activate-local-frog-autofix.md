@@ -203,20 +203,17 @@ Current candidate proof:
   production-watch failures; four exact failures reproduced on clean
   `cobuild-agents` main. GitHub-hosted checks could not start because the
   repository account's Actions budget was exhausted.
-- Current-base proof: the first later `main` advance required one index-only
-  conflict resolution, which retained current-main entries plus the exact Frog
-  additions. The next advance, including ReviewGPT 0.5.127, merged without a
-  conflict. Its package-private WebSocket-owner and capture-metadata contracts
-  required only a release-audit harness alignment; no Frog runtime file changed.
-  Current `origin/main` and the immutable first-reviewed head are ancestors, and
-  `git merge-tree --write-tree origin/main HEAD` completes without conflict.
+- Current-base proof: a later `main` advance required one index-only conflict
+  resolution. The resolution retained current-main entries plus the exact Frog
+  additions; both current `origin/main` and the immutable first-reviewed head
+  are ancestors, and `git merge-tree --write-tree origin/main HEAD` produced
+  `1f3f4806037b20bb2d1a0a6d9e3bfaf023078544` without conflict.
 - Frog suite: 56 tests, including fresh protected-main instruction drift,
   two-process pre/post-neutral-restamp lease recovery, foreign remote rejection,
   and fixed content-free foreground phase output.
 - Full repository-tools suite: 595 passed.
-- ReviewGPT release-audit suite: all 43 runnable tests passed across the full
-  run and the isolated longer-bound rerun of its existing slow browser fixture;
-  1 environment-dependent test remained skipped.
+- ReviewGPT packager regression suite: 43 passed, 1 existing
+  environment-dependent skip.
 - Native worker permission profile: passed.
 - Shell and dependency-bootstrap syntax: passed.
 - Live read-only queue scan: 36 eligible issues, oldest issue 1635.
