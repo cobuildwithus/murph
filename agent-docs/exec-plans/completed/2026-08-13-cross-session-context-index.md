@@ -1,6 +1,6 @@
 # Replace cross-session receipt scans with a bounded index
 
-Status: active
+Status: completed
 Created: 2026-08-13
 Updated: 2026-08-15
 
@@ -225,6 +225,15 @@ Updated: 2026-08-15
   main's callback inside the existing result and keeps route maintenance as the
   outer post-delivery/checkpoint wrapper. No state, queue, callback owner, or
   lifecycle is duplicated.
+- Final ReviewGPT round 13 passed the integrated full snapshot. It verified the
+  retained admission barrier, exact-anchor evidence bounds, route migration and
+  cleanup ownership, crash-recovery checkpoints, and current-main callback
+  composition, then reported no qualifying correctness, experience, purpose,
+  or complexity finding.
+- Exact-head CI exposed one stale assertion that still expected a possibly sent
+  delivery to become `retryable`. The existing no-replay recovery owner
+  intentionally retains its persisted completion checkpoint in `sending`; the
+  correction updates only that test expectation and adds no production logic.
 
 ## Verification
 
@@ -306,3 +315,7 @@ Updated: 2026-08-15
   suite, the 427-test runner/entrypoint/diagnostics set, the 23-test controller
   suite, 103-test local-service suite, 81-test reply-event suite, 32-test route
   suite, both package typechecks, and both package builds pass.
+- ReviewGPT round 13 returned `PASS` on the integrated exact head. The focused
+  20-test outbox-threshold suite passes after aligning its one stale recovery
+  expectation with the already-reviewed persisted-completion behavior.
+Completed: 2026-08-15

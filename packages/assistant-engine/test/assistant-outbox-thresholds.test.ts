@@ -806,7 +806,7 @@ describe('assistant outbox thresholds', () => {
       },
       intent: {
         intentId: seeded.intentId,
-        status: 'retryable',
+        status: 'sending',
       },
     })
   })
