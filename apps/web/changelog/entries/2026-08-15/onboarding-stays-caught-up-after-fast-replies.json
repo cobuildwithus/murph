@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-15",
+  "order": 200,
+  "item": {
+    "id": "onboarding-stays-caught-up-after-fast-replies",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Onboarding stays caught up after fast replies",
+    "summary": "Murph now finishes account activation immediately after prioritizing an incoming message, so onboarding setup does not wait for another message.",
+    "details": "The current reply still completes first. Activation then reuses the existing bounded onboarding path after that reply is durably recorded.",
+    "relevanceTags": ["assistant", "messaging", "onboarding", "reliability"],
+    "sourcePullRequests": [1872]
+  }
+}
