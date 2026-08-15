@@ -12,6 +12,7 @@ import {
   ageHostedRuntimeLatencyAlertForTest,
   ageHostedRuntimeProgressAlertForTest,
   appendHostedExecutionWakeForTest,
+  listHostedRuntimeLogsForTest,
   normalizeHostedLinqLatencyTracesForTest,
   queryHostedRuntimeWorkflowForTest,
   readHostedMailboxItemForTest,
@@ -580,38 +581,60 @@ describe.sequential("hosted local foreground reply priority e2e", () => {
     // Observe convergence without stopping the live owner. A graceful stop can
     // legitimately release an immediate recheck, which starts a later owner
     // and turns this ownership proof into a lifecycle-timing assertion.
-    await expect.poll(async () => {
-      const status = await requireScenario().harness.readUserStatus(
-        identity.userId,
-      );
-      const consumedConversation = await readHostedMailboxItemForTest({
-        dedupeKey: inboundEventId,
-        environment: requireScenario().runtimeEnv,
-        userId: identity.userId,
+    try {
+      await expect.poll(async () => {
+        const status = await requireScenario().harness.readUserStatus(
+          identity.userId,
+        );
+        const consumedConversation = await readHostedMailboxItemForTest({
+          dedupeKey: inboundEventId,
+          environment: requireScenario().runtimeEnv,
+          userId: identity.userId,
+        });
+        return {
+          activeFence: await readActiveRuntimeFenceForTest(identity.userId),
+          conversationConsumed: consumedConversation.consumedAt !== null,
+          lastErrorCode: status.lastErrorCode ?? null,
+          mailboxCaughtUp: status.mailboxLag.every((lane) => lane.lag === "0"),
+          systemHandledThroughSeq:
+            status.workspace?.redactedStatus?.hostedMailboxSystemHandledThroughSeq
+              ?? null,
+          systemImportedSeq:
+            status.workspace?.redactedStatus?.hostedMailboxSystemImportedSeq
+              ?? null,
+        };
+      }, {
+        interval: 250,
+        timeout: 60_000,
+      }).toEqual({
+        activeFence: conversationFence,
+        conversationConsumed: true,
+        lastErrorCode: null,
+        mailboxCaughtUp: true,
+        systemHandledThroughSeq: activationAppend.wake.seq,
+        systemImportedSeq: activationAppend.wake.seq,
       });
-      return {
-        activeFence: await readActiveRuntimeFenceForTest(identity.userId),
-        conversationConsumed: consumedConversation.consumedAt !== null,
-        lastErrorCode: status.lastErrorCode ?? null,
-        mailboxCaughtUp: status.mailboxLag.every((lane) => lane.lag === "0"),
-        systemHandledThroughSeq:
-          status.workspace?.redactedStatus?.hostedMailboxSystemHandledThroughSeq
-            ?? null,
-        systemImportedSeq:
-          status.workspace?.redactedStatus?.hostedMailboxSystemImportedSeq
-            ?? null,
-      };
-    }, {
-      interval: 250,
-      timeout: 60_000,
-    }).toEqual({
-      activeFence: conversationFence,
-      conversationConsumed: true,
-      lastErrorCode: null,
-      mailboxCaughtUp: true,
-      systemHandledThroughSeq: activationAppend.wake.seq,
-      systemImportedSeq: activationAppend.wake.seq,
-    });
+    } catch (error) {
+      const mailboxEvidence = (await listHostedRuntimeLogsForTest({
+        environment: requireScenario().runtimeEnv,
+        limit: 100,
+        userId: identity.userId,
+      }))
+        .filter((entry) =>
+          entry.eventCode === "mailbox.imported"
+          || entry.eventCode === "mailbox.system_processed"
+        )
+        .map((entry) => ({
+          at: entry.at,
+          eventCode: entry.eventCode,
+          phase: entry.phase,
+          redactedJson: entry.redactedJson,
+        }));
+      throw new Error(
+        `Post-enrollment mailbox convergence failed: ${JSON.stringify(mailboxEvidence)}`,
+        { cause: error },
+      );
+    }
     await assertExactlyOneAcceptedReplyAfterBoundary({
       identity,
       label: "post-enrollment default owner",
