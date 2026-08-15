@@ -593,3 +593,12 @@ Updated: 2026-08-14
   one intentional skip plus the CLI typecheck. The combined candidate passes
   all 277 Junction provider tests, all 103 hosted device-sync runtime tests,
   and both owning package typechecks.
+- Exact-head CI measured the combined current-main plus Junction graph at
+  9,128,211B for the Linux vault CLI, versus 9,065,538B on current main. Exact
+  macOS production assembly measured 9,175,594B, and the runner's static boot
+  closure measured 8,163,368B without any forbidden startup input. The vault
+  ceiling now retains a narrow 32 KiB allowance above the larger cross-platform
+  result, while the static baseline records the exact measurement with its
+  existing fixed 96 KiB platform tolerance. Entry and total runner policies are
+  unchanged. Both bundle policy files pass 50/50 tests and the full production
+  assembly plus parity and boot probes pass.
