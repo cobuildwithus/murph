@@ -2281,7 +2281,7 @@ function pushJunctionSparseTimeseriesRecords(
       dayKey,
       entry,
       identityHash: buildJunctionSparseTimeseriesIdentityHash({
-        record,
+        record: parsedRecord,
         resource,
         resourceContext,
         resourceSlug,

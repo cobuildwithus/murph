@@ -481,6 +481,13 @@ function resolveJunctionExtendedTimeseriesBackfillPolicy(
   return policy.history === "extended" ? policy : null;
 }
 
+function requiresJunctionHistoricalPullReadiness(
+  policy: JunctionExtendedTimeseriesBackfillPolicy | null,
+): boolean {
+  return policy?.anchor === "current_day"
+    && (policy.completion === "daily_aggregate" || policy.completion === "exact_records");
+}
+
 function doesJunctionImportReceiptResolveDeliveredRows(resource: string): boolean {
   return isJunctionBodyTimeseriesResource(resource)
     || resource === "carbohydrates"
@@ -2335,7 +2342,7 @@ export function createJunctionDeviceSyncProvider(
           });
         }
         if (
-          extendedHistoricalPolicy?.completion === "daily_aggregate"
+          requiresJunctionHistoricalPullReadiness(extendedHistoricalPolicy)
           && window.windowStart === historicalWindowStart
         ) {
           const historicalPullReadiness = resolveJunctionHistoricalPullReadiness({
@@ -2585,7 +2592,7 @@ export function createJunctionDeviceSyncProvider(
           skippedOptionalResources,
         );
         const historicalPullReadiness =
-          extendedHistoricalPolicy?.completion === "daily_aggregate"
+          requiresJunctionHistoricalPullReadiness(extendedHistoricalPolicy)
           && timeseriesImport.fetchComplete
             ? resolveJunctionHistoricalPullReadiness({
                 resource: effectiveResource,
@@ -2767,14 +2774,18 @@ export function createJunctionDeviceSyncProvider(
       encodeJunctionHistoricalUnresolvedProviderRecords(unresolvedProviderRecords);
     const unresolvedProviderRecordsSeen = unresolvedProviderRecordCount > 0;
 
-    if (policy.completion === "daily_aggregate" && input.importResult.fetchComplete) {
+    if (requiresJunctionHistoricalPullReadiness(policy) && input.importResult.fetchComplete) {
       const historicalPullReadiness = input.historicalPullReadiness ?? "unavailable";
       const currentReconcileWindowStart = floorUtcDayTimestamp(
         subtractDays(floorUtcDayTimestamp(input.context.now), reconcileDays),
       );
       if (
         historicalPullReadiness === "pending"
-        || (historicalPullReadiness === "unavailable" && !recordsSeen)
+        || (
+          policy.completion === "daily_aggregate"
+          && historicalPullReadiness === "unavailable"
+          && !recordsSeen
+        )
       ) {
         const retryDelayMs = EMPTY_HISTORICAL_BACKFILL_RETRY_DELAYS_MS.at(-1) ?? 0;
         return {
@@ -2809,15 +2820,20 @@ export function createJunctionDeviceSyncProvider(
       if (historicalPullReadiness === "terminal_failure") {
         return input.result;
       }
-      return withJunctionMetadataPatch(
-        input.result,
-        buildJunctionExtendedTimeseriesBackfillCompletionMetadataPatch(
-          input.context,
-          input.job,
-          input.resource,
-          sourceProviderSlug,
-        ),
-      );
+      if (
+        policy.completion === "daily_aggregate"
+        || historicalPullReadiness !== "unavailable"
+      ) {
+        return withJunctionMetadataPatch(
+          input.result,
+          buildJunctionExtendedTimeseriesBackfillCompletionMetadataPatch(
+            input.context,
+            input.job,
+            input.resource,
+            sourceProviderSlug,
+          ),
+        );
+      }
     }
 
     // A complete note scan can close its one-time source coverage even when

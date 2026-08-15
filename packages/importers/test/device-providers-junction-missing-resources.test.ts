@@ -351,6 +351,68 @@ test("Junction metabolic intervals admit one exact source-local instant and pres
   assert.equal((payload.events ?? []).length, 4);
 });
 
+test("Junction id-less Libre metabolic identity ignores mutable vault timezone", () => {
+  const normalize = (defaultTimeZone: string) => normalizeJunctionSnapshot({
+    importedAt: "2026-02-02T00:00:00.000Z",
+    timeseries: {
+      carbohydrates: grouped("freestyle_libre", "cgm", "libre-1", [
+        {
+          end: "2026-01-15T08:05:00+00:00",
+          start: "2026-01-15T08:00:00+00:00",
+          unit: "g",
+          value: 30,
+        },
+        {
+          end: "2026-01-15T08:15:00+00:00",
+          start: "2026-01-15T08:10:00+00:00",
+          unit: "g",
+          value: 30,
+        },
+        {
+          end: "2026-01-15T08:25:00-05:00",
+          start: "2026-01-15T08:20:00-05:00",
+          unit: "g",
+          value: 30,
+        },
+      ]),
+      insulin_injection: grouped("freestyle_libre", "cgm", "libre-1", [{
+        end: "2026-01-15T09:05:00+00:00",
+        start: "2026-01-15T09:00:00+00:00",
+        type: "rapid_acting",
+        unit: "unit",
+        value: 4,
+      }]),
+    },
+  }, { defaultTimeZone });
+  const summarize = (payload: DeviceBatchImportPayload) => (payload.events ?? [])
+    .map((event) => ({
+      id: event.externalRef?.resourceId,
+      occurredAt: event.occurredAt,
+    }))
+    .sort((left, right) => String(left.id).localeCompare(String(right.id)));
+
+  const eastern = summarize(normalize("America/New_York"));
+  const central = summarize(normalize("America/Chicago"));
+
+  assert.deepEqual(
+    eastern.map((event) => event.id),
+    central.map((event) => event.id),
+  );
+  assert.equal(new Set(eastern.map((event) => event.id)).size, 4);
+  assert.notDeepEqual(
+    eastern.map((event) => event.occurredAt),
+    central.map((event) => event.occurredAt),
+  );
+  assert.equal(
+    eastern.some((event) => event.occurredAt === "2026-01-15T13:20:00.000Z"),
+    true,
+  );
+  assert.equal(
+    central.some((event) => event.occurredAt === "2026-01-15T13:20:00.000Z"),
+    true,
+  );
+});
+
 test("Junction glucose summaries expose bounded population variability", () => {
   const payload = normalizeJunctionSnapshot({
     importedAt: "2026-02-02T00:00:00.000Z",

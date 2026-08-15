@@ -15557,6 +15557,127 @@ test("Junction metabolic resources reuse exact-record extended history", () => {
   }
 });
 
+test("Junction metabolic history waits for authoritative pull readiness at both boundaries", async () => {
+  const source = createConnectionSource({
+    lifecycleEpoch: 1,
+    resourceAvailabilitySummary: { carbohydrates: true },
+  });
+  const job = createJob("resource", {
+    historicalBackfill: true,
+    historicalWindowStart: "2026-04-01T00:00:00.000Z",
+    resource: "carbohydrates",
+    resourceCategory: "timeseries",
+    sourceLifecycleEpoch: 1,
+    sourceProviderSlug: "garmin",
+    windowEnd: "2026-04-02T00:00:00.000Z",
+    windowStart: "2026-04-01T00:00:00.000Z",
+  });
+  const execute = async (statuses: readonly string[]) => {
+    let groupedRequestCount = 0;
+    let historicalPullRequestCount = 0;
+    let importCount = 0;
+    const provider = createJunctionProvider(async (input) => {
+      const url = new URL(readUrl(input));
+      if (url.pathname === "/v2/user/providers/junction-user-1") {
+        return createJsonResponse({
+          providers: [{
+            id: "provider-garmin-1",
+            slug: "garmin",
+            status: "connected",
+            resource_availability: { carbohydrates: true },
+          }],
+        });
+      }
+      if (url.pathname === "/v2/timeseries/junction-user-1/carbohydrates/grouped") {
+        groupedRequestCount += 1;
+        return createJsonResponse({
+          groups: {
+            garmin: [{
+              data: [{
+                end: "2026-04-01T12:05:00.000Z",
+                id: "carbohydrate-1",
+                start: "2026-04-01T12:00:00.000Z",
+                unit: "g",
+                value: 30,
+              }],
+              source: { provider: "garmin", type: "nutrition" },
+            }],
+          },
+        });
+      }
+      throw new Error(`Unexpected request: ${url.toString()}`);
+    }, {
+      summaryResources: [],
+      timeseriesResources: ["carbohydrates"],
+    }, async () => {
+      const status = statuses[
+        Math.min(historicalPullRequestCount, statuses.length - 1)
+      ];
+      historicalPullRequestCount += 1;
+      return createJsonResponse({
+        data: [{
+          provider: {
+            garmin: {
+              not_pulled: [],
+              pulled: {
+                carbohydrates: { days_with_data: 1, status },
+              },
+            },
+          },
+          user_id: "junction-user-1",
+        }],
+      });
+    });
+    const result = await executeJunctionJob(
+      provider,
+      createJunctionJobContext({
+        importSnapshot: async () => {
+          importCount += 1;
+          return { canonicalEventCount: 1, durableDeliveryAccepted: true };
+        },
+        listConnectionSources: () => [source],
+        now: "2026-04-03T00:00:00.000Z",
+      }),
+      job,
+    );
+    return {
+      groupedRequestCount,
+      historicalPullRequestCount,
+      importCount,
+      result,
+    };
+  };
+
+  const pendingBeforeFetch = await execute(["in_progress"]);
+  assert.equal(pendingBeforeFetch.groupedRequestCount, 0);
+  assert.equal(pendingBeforeFetch.importCount, 0);
+  assert.equal(pendingBeforeFetch.historicalPullRequestCount, 1);
+  assert.equal(pendingBeforeFetch.result.metadataPatch, undefined);
+  assert.equal(pendingBeforeFetch.result.scheduledJobs?.length, 1);
+
+  const becamePendingDuringFetch = await execute(["success", "in_progress"]);
+  assert.equal(becamePendingDuringFetch.groupedRequestCount, 1);
+  assert.equal(becamePendingDuringFetch.importCount, 1);
+  assert.equal(becamePendingDuringFetch.historicalPullRequestCount, 2);
+  assert.equal(becamePendingDuringFetch.result.metadataPatch, undefined);
+  assert.equal(becamePendingDuringFetch.result.scheduledJobs?.length, 1);
+
+  const ready = await execute(["success"]);
+  assert.equal(ready.groupedRequestCount, 1);
+  assert.equal(ready.importCount, 1);
+  assert.equal(ready.historicalPullRequestCount, 2);
+  assert.equal(ready.result.scheduledJobs, undefined);
+  assert.equal(
+    hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
+      ready.result.metadataPatch ?? {},
+      "garmin",
+      "carbohydrates",
+      1,
+    ),
+    true,
+  );
+});
+
 test("Junction metabolic history clears stale count-only ambiguity after a complete fetch", async () => {
   const source = createConnectionSource({
     lifecycleEpoch: 1,
