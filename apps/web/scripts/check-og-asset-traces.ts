@@ -34,6 +34,7 @@ const requiredOgAssetSuffixes = [
 // `opengraph-image-[[...__metadata_id__]]` route suffix Next generates for
 // metadata image routes stays matched if its exact shape changes.
 const requiredOgRouteTraceMarkers = [
+  "server/app/approve/[approvalId]/opengraph-image",
   "server/app/join/[inviteCode]/opengraph-image",
   "server/app/family/accept/[inviteCode]/opengraph-image",
   "server/app/groups/join/[joinCode]/opengraph-image",

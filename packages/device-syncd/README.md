@@ -87,6 +87,10 @@ Current providers:
   rewritten as a scalar successor. Pagination remains in memory, and no provider
   row, vendor page cursor, waveform sample, or workout point enters job state. This
   adds no control-database collection path, pooled transaction, or vault persistence.
+  Each present workout metric array must align with the timestamp array. A workout
+  whose present metric arrays do not align is skipped so one malformed stream cannot
+  block other workouts or replace a previously complete canonical measurement; the
+  skip emits a metadata-only cardinality warning for provider follow-up.
 - Successful Junction resource/webhook jobs preserve the full-sync completion
   watermark. They still complete and clear their own failures, while only a
   terminal reconcile or backfill whose window ends at the current closed-day

@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-15",
+  "order": 60,
+  "item": {
+    "id": "approval-link-share-preview",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Clear previews for approval links",
+    "summary": "Approval links Murph sends now unfurl with a dedicated card saying Murph is waiting on your OK, instead of the generic homepage preview.",
+    "details": "The preview stays generic on purpose: link previews are fetched without your login, so the card never shows what you are approving. The approval screen itself is unchanged.",
+    "relevanceTags": ["messaging", "security"],
+    "sourcePullRequests": [1893]
+  }
+}

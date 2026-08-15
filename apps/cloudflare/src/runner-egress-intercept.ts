@@ -250,7 +250,7 @@ const VENICE_CACHE_DIAGNOSTIC_MODEL_KINDS: ReadonlySet<string> = new Set(
 );
 export const HOSTED_OPENAI_CACHE_DIAGNOSTIC_EVENT_CODE =
   "runner.provider_egress_diagnostic";
-const HOSTED_OPENAI_CACHE_DIAGNOSTIC_VERSION = 2;
+const HOSTED_OPENAI_CACHE_DIAGNOSTIC_VERSION = 3;
 const OPENAI_CACHE_DIAGNOSTIC_CODEX_TURN_METADATA_HEADER = "x-codex-turn-metadata";
 const OPENAI_CACHE_DIAGNOSTIC_MAX_JSON_BYTES = 6 * 1024 * 1024;
 const OPENAI_CACHE_DIAGNOSTIC_MAX_FULL_FINGERPRINT_BYTES = 256 * 1024;
@@ -267,6 +267,30 @@ const OPENAI_CACHE_DIAGNOSTIC_MAX_COUNT_BUCKETS = 16;
 const OPENAI_CACHE_DIAGNOSTIC_INPUT_TAIL_ITEM_COUNT = 8;
 const OPENAI_CACHE_DIAGNOSTIC_FUNCTION_NAME_MAX_CHARS = 96;
 const OPENAI_CACHE_DIAGNOSTIC_DUPLICATE_FUNCTION_NAME_KIND = "duplicate";
+const OPENAI_CACHE_DIAGNOSTIC_FUNCTION_OUTPUT_ACTION_KINDS = [
+  "command.execution",
+  "dynamic.tool.call",
+  "mcp.tool.call",
+  "other",
+] as const;
+type HostedOpenAiFunctionOutputActionKind =
+  (typeof OPENAI_CACHE_DIAGNOSTIC_FUNCTION_OUTPUT_ACTION_KINDS)[number];
+const OPENAI_CACHE_DIAGNOSTIC_FUNCTION_OUTPUT_ACTION_METRIC_KINDS: Readonly<
+  Record<HostedOpenAiFunctionOutputActionKind, string>
+> = {
+  "command.execution": "function_output.action.command.execution",
+  "dynamic.tool.call": "function_output.action.dynamic.tool.call",
+  "mcp.tool.call": "function_output.action.mcp.tool.call",
+  other: "function_output.action.other",
+};
+const OPENAI_CACHE_DIAGNOSTIC_FUNCTION_OUTPUT_REPEATED_METRIC_KIND =
+  "function_output.repeated";
+const OPENAI_CACHE_DIAGNOSTIC_FUNCTION_OUTPUT_EQUIVALENT_METRIC_KIND =
+  "function_output.equivalent";
+const OPENAI_CACHE_DIAGNOSTIC_COMMAND_FUNCTION_NAME_KINDS = new Set([
+  "exec_command",
+  "local_shell",
+]);
 const OPENAI_CACHE_DIAGNOSTIC_SAFE_FUNCTION_NAME_PATTERN =
   /^[A-Za-z][A-Za-z0-9_.:-]{0,95}$/u;
 const OPENAI_CACHE_DIAGNOSTIC_UNSAFE_FUNCTION_NAME_PATTERN =
@@ -2969,13 +2993,23 @@ function appendAllowedStringDiagnosticKind(input: {
 }
 
 function encodeOpenAiDiagnosticJsonValue(value: unknown): Uint8Array | null {
+  return serializeOpenAiDiagnosticJsonValue(value)?.bytes ?? null;
+}
+
+function serializeOpenAiDiagnosticJsonValue(value: unknown): {
+  bytes: Uint8Array;
+  serialized: string;
+} | null {
   if (value === undefined) {
     return null;
   }
   try {
     const serialized = JSON.stringify(value);
     return typeof serialized === "string"
-      ? OPENAI_CACHE_DIAGNOSTIC_TEXT_ENCODER.encode(serialized)
+      ? {
+          bytes: OPENAI_CACHE_DIAGNOSTIC_TEXT_ENCODER.encode(serialized),
+          serialized,
+        }
       : null;
   } catch {
     return null;
@@ -3001,6 +3035,17 @@ async function appendOpenAiInputShapeDiagnostics(input: {
   const functionCallBytes = new Map<string, number>();
   const functionOutputNameCounts = new Map<string, number>();
   const functionOutputBytes = new Map<string, number>();
+  const functionOutputActionCounts = new Map<string, number>();
+  const functionOutputActionBytes = new Map<string, number>();
+  const seenFunctionOutputCallIds = new Set<string>();
+  const functionOutputEquivalenceBySerializedValue = new Map<
+    string,
+    { differentCallIdSeen: boolean; firstCallId: string }
+  >();
+  let repeatedFunctionOutputCount = 0;
+  let repeatedFunctionOutputBytes = 0;
+  let equivalentFunctionOutputCount = 0;
+  let equivalentFunctionOutputBytes = 0;
   let largestItemBytes = 0;
   let largestItemIndex = -1;
   let largestItemKinds = ["type:missing", "role:missing"];
@@ -3031,9 +3076,43 @@ async function appendOpenAiInputShapeDiagnostics(input: {
         item,
         functionCallNamesById,
       );
-      const outputBytes = readOpenAiInputFunctionOutputBytes(item);
+      const actionKind = readOpenAiInputFunctionOutputActionKind(functionNameKind);
+      const output = readOpenAiInputFunctionOutputDiagnosticValue(item);
+      const outputBytes = output?.bytes.byteLength ?? 0;
       incrementDiagnosticCount(functionOutputNameCounts, functionNameKind);
       addDiagnosticBytes(functionOutputBytes, functionNameKind, outputBytes);
+      incrementDiagnosticCount(functionOutputActionCounts, actionKind);
+      addDiagnosticBytes(functionOutputActionBytes, actionKind, outputBytes);
+
+      const callId = readOpenAiInputFunctionOutputLookupId(item);
+      const repeatedCallId = callId !== null && seenFunctionOutputCallIds.has(callId);
+      if (callId !== null) {
+        seenFunctionOutputCallIds.add(callId);
+      }
+      if (repeatedCallId) {
+        repeatedFunctionOutputCount += 1;
+        repeatedFunctionOutputBytes += outputBytes;
+      }
+      if (callId !== null && output !== null) {
+        const equivalenceState = functionOutputEquivalenceBySerializedValue.get(
+          output.serialized,
+        );
+        if (equivalenceState === undefined) {
+          functionOutputEquivalenceBySerializedValue.set(output.serialized, {
+            differentCallIdSeen: false,
+            firstCallId: callId,
+          });
+        } else {
+          const differsFromFirst = equivalenceState.firstCallId !== callId;
+          if (differsFromFirst || equivalenceState.differentCallIdSeen) {
+            equivalentFunctionOutputCount += 1;
+            equivalentFunctionOutputBytes += outputBytes;
+          }
+          if (differsFromFirst) {
+            equivalenceState.differentCallIdSeen = true;
+          }
+        }
+      }
       if (outputBytes > largestFunctionOutputBytes) {
         largestFunctionOutputBytes = outputBytes;
         largestFunctionOutputIndex = index;
@@ -3043,6 +3122,19 @@ async function appendOpenAiInputShapeDiagnostics(input: {
   }
 
   const nestedShape = summarizeOpenAiInputNestedShape(inputValue);
+  const inputMetricKinds: string[] = [
+    ...OPENAI_CACHE_DIAGNOSTIC_INPUT_NESTED_METRIC_KINDS,
+  ];
+  const inputMetricCounts = [
+    nestedShape.contentCount,
+    nestedShape.outputCount,
+    nestedShape.stringCount,
+  ];
+  const inputMetricBytes = [
+    nestedShape.contentBytes,
+    nestedShape.outputBytes,
+    nestedShape.stringBytes,
+  ];
   const typeSummary = summarizeOpenAiDiagnosticCountsAndBytes(typeCounts, typeBytes);
   const roleSummary = summarizeOpenAiDiagnosticCounts(roleCounts);
   const functionCallNameSummary = summarizeOpenAiDiagnosticCountsAndBytes(
@@ -3053,7 +3145,6 @@ async function appendOpenAiInputShapeDiagnostics(input: {
     functionOutputNameCounts,
     functionOutputBytes,
   );
-
   diagnostic.inputItemTypeKinds = typeSummary.kinds;
   diagnostic.inputItemTypeCounts = typeSummary.counts;
   diagnostic.inputItemTypeBytes = typeSummary.bytes;
@@ -3064,17 +3155,9 @@ async function appendOpenAiInputShapeDiagnostics(input: {
   diagnostic.inputLargestItemReverseIndex =
     largestItemIndex >= 0 ? inputValue.length - 1 - largestItemIndex : -1;
   diagnostic.inputLargestItemKinds = largestItemKinds;
-  diagnostic.inputNestedMetricKinds = [...OPENAI_CACHE_DIAGNOSTIC_INPUT_NESTED_METRIC_KINDS];
-  diagnostic.inputNestedMetricCounts = [
-    nestedShape.contentCount,
-    nestedShape.outputCount,
-    nestedShape.stringCount,
-  ];
-  diagnostic.inputNestedMetricBytes = [
-    nestedShape.contentBytes,
-    nestedShape.outputBytes,
-    nestedShape.stringBytes,
-  ];
+  diagnostic.inputNestedMetricKinds = inputMetricKinds;
+  diagnostic.inputNestedMetricCounts = inputMetricCounts;
+  diagnostic.inputNestedMetricBytes = inputMetricBytes;
   if (nestedShape.truncated) {
     diagnostic.inputShapeTraversalTruncated = true;
   }
@@ -3092,7 +3175,37 @@ async function appendOpenAiInputShapeDiagnostics(input: {
     diagnostic.inputLargestFunctionOutputReverseIndex =
       largestFunctionOutputIndex >= 0 ? inputValue.length - 1 - largestFunctionOutputIndex : -1;
     diagnostic.inputLargestFunctionOutputNameKind = largestFunctionOutputNameKind;
+    for (const actionKind of OPENAI_CACHE_DIAGNOSTIC_FUNCTION_OUTPUT_ACTION_KINDS) {
+      const actionCount = functionOutputActionCounts.get(actionKind) ?? 0;
+      if (actionCount === 0) {
+        continue;
+      }
+      inputMetricKinds.push(
+        OPENAI_CACHE_DIAGNOSTIC_FUNCTION_OUTPUT_ACTION_METRIC_KINDS[actionKind],
+      );
+      inputMetricCounts.push(actionCount);
+      inputMetricBytes.push(functionOutputActionBytes.get(actionKind) ?? 0);
+    }
+    if (repeatedFunctionOutputCount > 0) {
+      inputMetricKinds.push(
+        OPENAI_CACHE_DIAGNOSTIC_FUNCTION_OUTPUT_REPEATED_METRIC_KIND,
+      );
+      inputMetricCounts.push(repeatedFunctionOutputCount);
+      inputMetricBytes.push(repeatedFunctionOutputBytes);
+    }
+    if (equivalentFunctionOutputCount > 0) {
+      inputMetricKinds.push(
+        OPENAI_CACHE_DIAGNOSTIC_FUNCTION_OUTPUT_EQUIVALENT_METRIC_KIND,
+      );
+      inputMetricCounts.push(equivalentFunctionOutputCount);
+      inputMetricBytes.push(equivalentFunctionOutputBytes);
+    }
   }
+
+  // Equality comparison is request-local only. Release its serialized-value
+  // keys before the asynchronous tail-fingerprint work and never persist them.
+  functionOutputEquivalenceBySerializedValue.clear();
+  seenFunctionOutputCallIds.clear();
 
   await appendOpenAiInputTailItemDiagnostics({
     diagnostic,
@@ -3305,11 +3418,33 @@ function readOpenAiInputFunctionOutputLookupId(value: unknown): string | null {
   return readStringRecordProperty(value, "call_id");
 }
 
-function readOpenAiInputFunctionOutputBytes(value: unknown): number {
-  if (!isHostedOpenAiDiagnosticRecord(value)) {
-    return 0;
+function readOpenAiInputFunctionOutputActionKind(
+  functionNameKind: string,
+): HostedOpenAiFunctionOutputActionKind {
+  if (OPENAI_CACHE_DIAGNOSTIC_COMMAND_FUNCTION_NAME_KINDS.has(functionNameKind)) {
+    return "command.execution";
   }
-  return encodeOpenAiDiagnosticJsonValue(value.output)?.byteLength ?? 0;
+  if (functionNameKind.startsWith("mcp__")) {
+    return "mcp.tool.call";
+  }
+  if (
+    functionNameKind === "duplicate"
+    || functionNameKind === "other"
+    || functionNameKind === "unknown"
+  ) {
+    return "other";
+  }
+  return "dynamic.tool.call";
+}
+
+function readOpenAiInputFunctionOutputDiagnosticValue(value: unknown): {
+  bytes: Uint8Array;
+  serialized: string;
+} | null {
+  if (!isHostedOpenAiDiagnosticRecord(value)) {
+    return null;
+  }
+  return serializeOpenAiDiagnosticJsonValue(value.output);
 }
 
 function summarizeOpenAiInputNestedShape(value: unknown): {
