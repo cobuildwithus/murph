@@ -238,9 +238,37 @@ export const RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME = "dist-bundled";
 // assembly measured 9,920,711B total on 2026-08-12 with no forbidden subsystem
 // entering the boot graph. Ratchet the total to the higher cross-platform
 // measurement only and retain the 32KB allowance.
-const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 9_920_711 + 32_768;
-const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 1_619_381;
-const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 7_815_801;
+//
+// Exact conversation mailbox consumption and its accepted-reaction recovery
+// extend the existing hosted callback output without adding a forbidden boot
+// input. Exact current-main assembly measured 9,846,997B total on 2026-08-11,
+// so ratchet the total only and retain the 32KB allowance.
+//
+// Frequency-aware Junction sparse-history recovery extends the existing
+// provider and importer outputs without adding a forbidden boot input. Exact
+// current-base Linux CI assembly measured 9,883,360B total on 2026-08-12;
+// retain the startup baselines and established 32KB allowance.
+//
+// The reviewed group-share readiness runtime combined with that current base
+// extends existing hosted-runtime chunks without adding a forbidden boot input.
+// Linux CI measured a 7,934,975B static closure on 2026-08-12; the matching
+// macOS production assembly measured 9,960,217B total. Ratchet both measurements
+// and retain the established cross-platform tolerances.
+//
+// Group-projection delivery ownership and its end-to-end deadline extend the
+// same hosted callback graph without adding a forbidden boot input or changing
+// runner permissions. Combined macOS assembly with group-share first
+// materialization measured a 1,689,721B entry, 7,992,470B static closure, and
+// 9,975,121B total. Ratchet each baseline to that integrated measurement and
+// retain the established cross-platform tolerances.
+//
+// Frequency-aware Junction history on that integrated base extends the
+// existing provider and importer outputs without adding a forbidden boot
+// input. Exact merged macOS assembly measured 10,058,388B total on 2026-08-12;
+// ratchet the total to that measurement and retain the established allowance.
+const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 10_058_388 + 32_768;
+const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 1_689_721;
+const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 7_992_470;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_TOLERANCE_BYTES = 48_000;
 const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_TOLERANCE_BYTES = 96_000;
 // The @murphai package markers are path suffixes, not node_modules-anchored:

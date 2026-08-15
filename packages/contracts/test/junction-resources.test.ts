@@ -94,6 +94,8 @@ describe("Junction wearable resource policy", () => {
       "body_temperature",
       "basal_body_temperature",
       "caffeine",
+      "water",
+      "mindfulness_minutes",
       "heart_rate_recovery_one_minute",
       "sleep_breathing_disturbance",
       "afib_burden",
@@ -108,7 +110,7 @@ describe("Junction wearable resource policy", () => {
       expect(policy.initialHistoryDays).toBe(180);
       expect(policy.retention).not.toBe("feature_envelope");
     }
-    for (const resource of JUNCTION_EXTENDED_TIMESERIES_BACKFILL_RESOURCES.slice(0, 8)) {
+    for (const resource of JUNCTION_EXTENDED_TIMESERIES_BACKFILL_RESOURCES.slice(0, 10)) {
       expect(JUNCTION_RESOURCE_POLICIES[resource].historyChunkDays).toBe(
         JUNCTION_SPARSE_HISTORY_CHUNK_DAYS,
       );

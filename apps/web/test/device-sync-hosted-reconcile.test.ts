@@ -77,7 +77,10 @@ describe("hosted device-sync reconcile", () => {
 
     const result = await requestHostedDeviceSyncReconcile({
       request: new Request("https://control.example.test/api/internal/device-sync/reconcile", {
-        body: JSON.stringify({ connectionId: "dsc_123" }),
+        body: JSON.stringify({
+          connectionId: "dsc_123",
+          memberEditConflictResolution: "use_provider",
+        }),
         method: "POST",
       }),
       trustedUserId: "member_123",
@@ -90,6 +93,7 @@ describe("hosted device-sync reconcile", () => {
     expect(mocks.getConnectionForUser).toHaveBeenCalledWith("member_123", "dsc_123");
     expect(mocks.appendWake).toHaveBeenCalledWith(expect.objectContaining({
       connectionId: "dsc_123",
+      memberEditConflictResolution: "use_provider",
       provider: "oura",
       userId: "member_123",
     }));

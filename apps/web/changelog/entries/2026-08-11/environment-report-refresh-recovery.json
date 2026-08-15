@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-11",
+  "order": 300,
+  "item": {
+    "id": "environment-report-refresh-recovery",
+    "kind": "improvement",
+    "priority": 4,
+    "title": "Environment reports wait for fresh details",
+    "summary": "After Murph processes an environment recording, the Environment page now requests a fresh private report and keeps showing progress until that newer report arrives.",
+    "details": "If processing or the private report takes longer, the page offers Check again without asking for another recording.",
+    "relevanceTags": ["environment", "voice", "privacy", "reliability"],
+    "sourcePullRequests": [1676]
+  }
+}

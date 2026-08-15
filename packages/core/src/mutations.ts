@@ -327,9 +327,12 @@ interface ImportDeviceBatchInput {
   samples?: readonly DeviceSampleInput[];
   evidenceParts?: readonly DeviceEvidencePartInput[];
   authoritativeEventSets?: readonly DeviceAuthoritativeEventSetInput[];
+  memberEditConflictResolution?: DeviceMemberEditConflictResolution;
   ingestReceipt?: Record<string, unknown>;
   provenance?: Record<string, unknown>;
 }
+
+type DeviceMemberEditConflictResolution = "keep_member" | "use_provider";
 
 interface ImportDeviceBatchResultBase {
   applied: boolean;
@@ -402,6 +405,7 @@ interface NormalizedDeviceBatchInputs {
   samples: NormalizedDeviceSample[];
   evidenceParts: NormalizedDeviceEvidencePart[];
   authoritativeEventSets: NormalizedDeviceAuthoritativeEventSet[];
+  memberEditConflictResolution?: DeviceMemberEditConflictResolution;
 }
 
 interface NormalizedDeviceAuthoritativeEventSet {
@@ -445,6 +449,7 @@ interface DeviceBatchPlan {
   preparedSamples: PreparedJsonlEntry<SampleRecord>[];
   preparedEvidenceParts: IntegrationEvidencePart[];
   authoritativeEventSets: readonly NormalizedDeviceAuthoritativeEventSet[];
+  memberEditConflictResolution?: DeviceMemberEditConflictResolution;
 }
 
 const MAX_DEVICE_PROVIDER_SAMPLE_ROWS_DEFAULT = 1_000;
@@ -1615,6 +1620,7 @@ function normalizeDeviceBatchInputs({
   samples = [],
   evidenceParts = [],
   authoritativeEventSets = [],
+  memberEditConflictResolution,
   ingestReceipt,
   provenance,
 }: Omit<ImportDeviceBatchInput, "vaultRoot"> & {
@@ -1636,6 +1642,16 @@ function normalizeDeviceBatchInputs({
     "Device ingest receipt must be a plain object.",
   );
   const normalizedIngestReceipt = compactIntegrationIngestReceipt(legacyIngestReceipt);
+  if (
+    memberEditConflictResolution !== undefined
+    && memberEditConflictResolution !== "keep_member"
+    && memberEditConflictResolution !== "use_provider"
+  ) {
+    throw new VaultError(
+      "VAULT_INVALID_DEVICE_MEMBER_EDIT_CONFLICT_RESOLUTION",
+      "Device member-edit conflict resolution must be keep_member or use_provider.",
+    );
+  }
   const eventInputs = normalizeDeviceBatchObjectArray<DeviceEventInput>({
     value: events,
     code: "VAULT_INVALID_DEVICE_EVENTS",
@@ -1706,6 +1722,7 @@ function normalizeDeviceBatchInputs({
       authoritativeEventSetInputs,
       normalizedEvents,
     ),
+    memberEditConflictResolution,
   };
 }
 
@@ -1845,7 +1862,40 @@ function eventContentKey(
 }
 
 function deviceEventContentKey(record: EventRecord): string {
-  return eventContentKey(record, { includeProviderAttribution: true });
+  const {
+    id: _id,
+    rawRefs: _rawRefs,
+    lifecycle: _lifecycle,
+    recordedAt: _recordedAt,
+    externalRef,
+    dataOrigin,
+    ...semanticContent
+  } = record;
+  return stableStringify({
+    ...semanticContent,
+    // Identity and source ordering are enforced independently. Keeping them
+    // out of semantic equality prevents a newer provider capture/version from
+    // masquerading as a health-data change over a member-authored revision.
+    externalRef: externalRef
+      ? {
+          system: externalRef.system,
+          resourceType: externalRef.resourceType,
+          resourceId: externalRef.resourceId,
+          facet: externalRef.facet ?? null,
+        }
+      : null,
+    dataOrigin: dataOrigin
+      ? {
+          // This is the fixed data-origin schema discriminator, not the
+          // provider resource version used for ordering.
+          version: dataOrigin.version,
+          aggregatorProvider: dataOrigin.aggregatorProvider ?? null,
+          sourceProviderSlug: dataOrigin.sourceProviderSlug ?? null,
+          sourceType: dataOrigin.sourceType ?? null,
+          sourceInstanceId: dataOrigin.sourceInstanceId ?? null,
+        }
+      : null,
+  });
 }
 
 function deviceEventContentFingerprint(record: EventRecord): string {
@@ -2831,6 +2881,8 @@ function mapCurrentDeviceEventOwners(
     const incomingHasEqualOrNewerComparableVersion = sourceVersionComparisons.some(
       (comparison) => comparison >= 0,
     );
+    const incomingHasOnlyOlderComparableVersions = sourceVersionComparisons.length > 0
+      && !incomingHasEqualOrNewerComparableVersion;
     if (sourceVersionComparisons.some((comparison) => comparison > 0)) {
       incomingNewerPreparedIds.add(entry.record.id);
     }
@@ -2843,6 +2895,7 @@ function mapCurrentDeviceEventOwners(
     }
     if (
       resolved.associationSafe
+      && !incomingHasOnlyOlderComparableVersions
       && !isDeletedEventSpineRecord(current)
       && deviceEventContentKey(current) === deviceEventContentKey(entry.record)
     ) {
@@ -2874,6 +2927,7 @@ async function reconcileDeviceEventEntriesByExternalRef(
   existingContext?: DeviceEventIdentityContext,
   preferredCanonicalIdByPreparedId: ReadonlyMap<string, string> = new Map(),
   authoritativeEventSets: readonly NormalizedDeviceAuthoritativeEventSet[] = [],
+  memberEditConflictResolution?: DeviceMemberEditConflictResolution,
 ): Promise<EventExternalRefReconciliation> {
   assertCanonicalWriteLockScope(vaultRoot);
   const context = existingContext ?? await buildDeviceEventIdentityContext(vaultRoot, entries);
@@ -2937,6 +2991,12 @@ async function reconcileDeviceEventEntriesByExternalRef(
     const matchesIndexedProviderContent = indexedProviderMatch !== undefined
       && deviceEventContentKey(indexedProviderMatch.indexedRecord)
         === deviceEventContentKey(entry.record);
+    const indexedSourceVersionComparison = indexedProviderMatch
+      ? compareIncomingExternalRefVersion(
+          indexedProviderMatch.indexedExternalRef,
+          externalRef,
+        )
+      : null;
 
     const authoritativeSet = authoritativeEventSets.find((set) =>
       externalRef.system === set.system
@@ -2987,7 +3047,10 @@ async function reconcileDeviceEventEntriesByExternalRef(
       );
     }
 
-    if (deviceEventContentKey(latest) === deviceEventContentKey(entry.record)) {
+    if (
+      deviceEventContentKey(latest) === deviceEventContentKey(entry.record)
+      && (indexedSourceVersionComparison === null || indexedSourceVersionComparison === 0)
+    ) {
       skippedDuplicateCount += 1;
       retainedPreparedIds.add(entry.record.id);
       records.push(latest);
@@ -2995,10 +3058,63 @@ async function reconcileDeviceEventEntriesByExternalRef(
     }
 
     if (matchesIndexedProviderContent) {
-      skippedDuplicateCount += 1;
-      retainedPreparedIds.add(entry.record.id);
-      records.push(latest);
-      continue;
+      const historicalUserEditMatch = matchedEntries.find((match) =>
+        hasHistoricalExternalRefUserAuthoredChanges(match.indexedMatch)
+      );
+      if (
+        historicalUserEditMatch
+        && indexedSourceVersionComparison !== null
+        && indexedSourceVersionComparison > 0
+      ) {
+        const providerRevision = Math.max(
+          eventSpineRevision(latest),
+          index.maxRevisionById.get(latest.id) ?? 0,
+        ) + 1;
+        const providerBaseline: EventRecord = {
+          ...entry.record,
+          id: latest.id,
+          lifecycle: buildEventSpineLifecycle(providerRevision),
+        };
+        const retainedMemberRevision: EventRecord = {
+          ...latest,
+          lifecycle: buildEventSpineLifecycle(providerRevision + 1),
+        };
+        const retainedMemberPath = historicalUserEditMatch.indexedMatch.relativePath
+          || toEventLedgerFile(latest.occurredAt);
+        forceAppendIds.add(latest.id);
+        index.latestByRefKey.set(refKey, {
+          indexedExternalRef: externalRef,
+          indexedRecord: providerBaseline,
+          relativePath: retainedMemberPath,
+          record: retainedMemberRevision,
+        });
+        for (const { refKey: matchedRefKey, indexedMatch } of matchedEntries) {
+          const currentMatch = index.latestByRefKey.get(matchedRefKey);
+          if (
+            matchedRefKey !== refKey
+            && indexedMatch.record.id === latest.id
+            && currentMatch?.record.id === latest.id
+          ) {
+            index.latestByRefKey.delete(matchedRefKey);
+          }
+        }
+        index.maxRevisionById.set(latest.id, providerRevision + 1);
+        appendEntries.push({ relativePath: entry.relativePath, record: providerBaseline });
+        appendEntries.push({
+          relativePath: retainedMemberPath,
+          record: retainedMemberRevision,
+        });
+        appendRecordIdByPreparedRecordId.set(entry.record.id, providerBaseline.id);
+        records.push(retainedMemberRevision);
+        supersededCount += 1;
+        continue;
+      }
+      if (indexedSourceVersionComparison === null || indexedSourceVersionComparison === 0) {
+        skippedDuplicateCount += 1;
+        retainedPreparedIds.add(entry.record.id);
+        records.push(latest);
+        continue;
+      }
     }
 
     if (entry.externalRefUpdatePolicy === "immutable") {
@@ -3095,13 +3211,19 @@ async function reconcileDeviceEventEntriesByExternalRef(
       hasHistoricalExternalRefUserAuthoredChanges(match.indexedMatch)
     );
     const preservesEditedLegacyIdentity = historicalUserEditMatch !== undefined
+      && memberEditConflictResolution !== "use_provider"
       && isAttributionOnlyLegacyIdentityCorrection(entry, historicalUserEditMatch.indexedMatch);
-    if (historicalUserEditMatch && !preservesEditedLegacyIdentity) {
+    if (
+      historicalUserEditMatch
+      && !preservesEditedLegacyIdentity
+      && !memberEditConflictResolution
+    ) {
       throw new VaultError(
         "EVENT_EXTERNAL_REF_ALIAS_CONFLICT",
         `Event externalRef "${externalRef.system}/${externalRef.resourceType}/${externalRef.resourceId}` +
           `${externalRef.facet ? `#${externalRef.facet}` : ""}" matched a historical provider identity ` +
           "whose latest event revision contains user-authored changes; merge must be repaired explicitly.",
+        { reason: "member_edit_conflict" },
       );
     }
 
@@ -3114,23 +3236,34 @@ async function reconcileDeviceEventEntriesByExternalRef(
       id: latest.id,
       lifecycle: buildEventSpineLifecycle(revision),
     };
-    const superseding: EventRecord = {
-      ...(preservesEditedLegacyIdentity
-        ? {
+    const retainedMemberRevision = historicalUserEditMatch
+      && (preservesEditedLegacyIdentity || memberEditConflictResolution === "keep_member")
+      ? {
           ...latest,
-          dataOrigin: entry.record.dataOrigin,
-          externalRef: entry.record.externalRef,
-          rawRefs: entry.record.rawRefs,
+          ...(preservesEditedLegacyIdentity
+            ? {
+                dataOrigin: entry.record.dataOrigin,
+                externalRef: entry.record.externalRef,
+                rawRefs: entry.record.rawRefs,
+              }
+            : {}),
+          lifecycle: buildEventSpineLifecycle(revision + 1),
         }
-        : providerSuperseding),
-      id: latest.id,
-      lifecycle: buildEventSpineLifecycle(
-        preservesEditedLegacyIdentity ? revision + 1 : revision,
-      ),
-    };
+      : null;
+    const retainedMemberPath = preservesEditedLegacyIdentity
+      ? entry.relativePath
+      : historicalUserEditMatch?.indexedMatch.relativePath
+      || toEventLedgerFile(latest.occurredAt);
 
     forceAppendIds.add(latest.id);
-    index.latestByRefKey.set(refKey, toIndexedExternalRefMatch(superseding, externalRef));
+    index.latestByRefKey.set(refKey, retainedMemberRevision
+      ? {
+          indexedExternalRef: externalRef,
+          indexedRecord: providerSuperseding,
+          relativePath: retainedMemberPath,
+          record: retainedMemberRevision,
+        }
+      : toIndexedExternalRefMatch(providerSuperseding, externalRef));
     for (const { refKey: matchedRefKey, indexedMatch } of matchedEntries) {
       const currentMatch = index.latestByRefKey.get(matchedRefKey);
       if (
@@ -3141,16 +3274,13 @@ async function reconcileDeviceEventEntriesByExternalRef(
         index.latestByRefKey.delete(matchedRefKey);
       }
     }
-    index.maxRevisionById.set(latest.id, eventSpineRevision(superseding));
-    if (preservesEditedLegacyIdentity) {
-      // Keep the canonical provider baseline as its own spine revision so an
-      // exact replay can prove delivery while the following member revision
-      // carries every user-owned field across the identity correction.
-      appendEntries.push({ relativePath: entry.relativePath, record: providerSuperseding });
+    index.maxRevisionById.set(latest.id, retainedMemberRevision ? revision + 1 : revision);
+    appendEntries.push({ relativePath: entry.relativePath, record: providerSuperseding });
+    if (retainedMemberRevision) {
+      appendEntries.push({ relativePath: retainedMemberPath, record: retainedMemberRevision });
     }
-    appendEntries.push({ relativePath: entry.relativePath, record: superseding });
-    appendRecordIdByPreparedRecordId.set(entry.record.id, superseding.id);
-    records.push(superseding);
+    appendRecordIdByPreparedRecordId.set(entry.record.id, providerSuperseding.id);
+    records.push(retainedMemberRevision ?? providerSuperseding);
     supersededCount += 1;
   }
 
@@ -3183,6 +3313,12 @@ async function reconcileDeviceEventEntriesByExternalRef(
       if (sourceVersionComparison !== null && sourceVersionComparison < 0) {
         continue;
       }
+      if (
+        sourceVersionComparison === 0
+        && isDeletedEventSpineRecord(latestMatch.indexedRecord)
+      ) {
+        continue;
+      }
       if (sourceVersionComparison === 0) {
         throw new VaultError(
           "EVENT_SOURCE_REVISION_CONFLICT",
@@ -3191,11 +3327,13 @@ async function reconcileDeviceEventEntriesByExternalRef(
             `"${set.version}"; nothing was imported.`,
         );
       }
-      if (hasHistoricalExternalRefUserAuthoredChanges(latestMatch)) {
+      const hasMemberEdit = hasHistoricalExternalRefUserAuthoredChanges(latestMatch);
+      if (hasMemberEdit && !memberEditConflictResolution) {
         throw new VaultError(
           "EVENT_EXTERNAL_REF_ALIAS_CONFLICT",
           `Authoritative device event externalRef "${set.system}/${set.resourceType}/` +
             `${set.resourceId}#${latestRef.facet}" has user-authored revisions and cannot be retracted automatically.`,
+          { reason: "member_edit_conflict" },
         );
       }
 
@@ -3204,20 +3342,38 @@ async function reconcileDeviceEventEntriesByExternalRef(
         index.maxRevisionById.get(latest.id) ?? 0,
       ) + 1;
       const tombstone: EventRecord = {
-        ...latest,
+        ...latestMatch.indexedRecord,
+        source: "device",
         recordedAt: set.version,
         externalRef: incomingRef,
         lifecycle: buildEventSpineLifecycle(revision, "deleted"),
       };
+      const retainedMemberRevision = hasMemberEdit
+        && memberEditConflictResolution === "keep_member"
+        ? {
+            ...latest,
+            lifecycle: buildEventSpineLifecycle(revision + 1),
+          }
+        : null;
       const latestPath = latestMatch.relativePath || toEventLedgerFile(latest.occurredAt);
 
       forceAppendIds.add(latest.id);
       index.latestByRefKey.set(
         refKey,
-        toIndexedExternalRefMatch(tombstone, incomingRef, latestPath),
+        retainedMemberRevision
+          ? {
+              indexedExternalRef: incomingRef,
+              indexedRecord: tombstone,
+              relativePath: latestPath,
+              record: retainedMemberRevision,
+            }
+          : toIndexedExternalRefMatch(tombstone, incomingRef, latestPath),
       );
-      index.maxRevisionById.set(latest.id, revision);
+      index.maxRevisionById.set(latest.id, retainedMemberRevision ? revision + 1 : revision);
       appendEntries.push({ relativePath: latestPath, record: tombstone });
+      if (retainedMemberRevision) {
+        appendEntries.push({ relativePath: latestPath, record: retainedMemberRevision });
+      }
       retractedCount += 1;
     }
   }
@@ -3785,6 +3941,7 @@ function prepareDeviceBatchPlan({
   samples = [],
   evidenceParts = [],
   authoritativeEventSets = [],
+  memberEditConflictResolution,
   ingestReceipt,
   provenance,
 }: Omit<ImportDeviceBatchInput, "vaultRoot"> & {
@@ -3800,6 +3957,7 @@ function prepareDeviceBatchPlan({
     samples,
     evidenceParts,
     authoritativeEventSets,
+    memberEditConflictResolution,
     ingestReceipt,
     provenance,
   });
@@ -3878,6 +4036,7 @@ function prepareDeviceBatchPlan({
     preparedSamples,
     preparedEvidenceParts,
     authoritativeEventSets: normalizedInputs.authoritativeEventSets,
+    memberEditConflictResolution: normalizedInputs.memberEditConflictResolution,
   };
 }
 
@@ -4832,6 +4991,7 @@ export async function importDeviceBatch({
   samples = [],
   evidenceParts = [],
   authoritativeEventSets = [],
+  memberEditConflictResolution,
   ingestReceipt,
   provenance,
 }: ImportDeviceBatchInput): Promise<ImportDeviceBatchResult> {
@@ -4847,6 +5007,7 @@ export async function importDeviceBatch({
     samples,
     evidenceParts,
     authoritativeEventSets,
+    memberEditConflictResolution,
     ingestReceipt,
     provenance,
   });
@@ -4911,6 +5072,7 @@ export async function importDeviceBatch({
     cloneDeviceEventIdentityContext(eventIdentityContext),
     new Map(),
     deviceBatchPlan.authoritativeEventSets,
+    deviceBatchPlan.memberEditConflictResolution,
   );
   const replayRetainedPreparedIds = new Set([
     ...protectedPreparedEventIds,
@@ -5362,6 +5524,7 @@ export async function importDeviceBatch({
           cloneDeviceEventIdentityContext(eventIdentityContext),
           new Map(),
           deviceBatchPlan.authoritativeEventSets,
+          deviceBatchPlan.memberEditConflictResolution,
         )
       : currentEventReconciliation;
     const reconciledRecordByPreparedId = new Map(

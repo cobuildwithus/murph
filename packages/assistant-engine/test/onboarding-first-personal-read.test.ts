@@ -200,6 +200,7 @@ describe('onboarding first personal read', () => {
           schedule: request.schedule,
           status: 'active',
           timingVerified: true,
+          updatedAt: '2026-08-06T21:00:00.000Z',
         }
       },
     }
@@ -254,11 +255,13 @@ describe('onboarding first personal read', () => {
     const invalidRequests = [
       {
         action: 'patch',
+        expectedUpdatedAt: '2026-08-06T21:00:00.000Z',
         instructions: 'Replace the fixed policy.',
         lookup: MURPH_ONBOARDING_FIRST_PERSONAL_READ_AUTOMATION_ID,
       },
       {
         action: 'patch',
+        expectedUpdatedAt: '2026-08-06T21:00:00.000Z',
         lookup: MURPH_ONBOARDING_FIRST_PERSONAL_READ_AUTOMATION_SLUG,
         status: 'paused',
       },
@@ -276,6 +279,7 @@ describe('onboarding first personal read', () => {
     const cancellation = readAutomationDynamicToolRequest({
       arguments: {
         action: 'patch',
+        expectedUpdatedAt: '2026-08-06T21:00:00.000Z',
         lookup: MURPH_ONBOARDING_FIRST_PERSONAL_READ_AUTOMATION_SLUG,
         status: 'archived',
       },
@@ -285,6 +289,7 @@ describe('onboarding first personal read', () => {
       kind: 'automation',
       request: {
         action: 'patch',
+        expectedUpdatedAt: '2026-08-06T21:00:00.000Z',
         lookup: MURPH_ONBOARDING_FIRST_PERSONAL_READ_AUTOMATION_SLUG,
         status: 'archived',
       },

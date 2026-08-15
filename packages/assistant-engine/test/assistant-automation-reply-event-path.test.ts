@@ -20,6 +20,9 @@ import {
   processAssistantAutoReplyGroup,
 } from '../src/assistant/automation/reply.ts'
 import {
+  readAssistantAutoReplyTerminalEvidenceByEvidenceId,
+} from '../src/assistant/automation/evidence.ts'
+import {
   renderAssistantHostedImageCompletionSystemText,
 } from '../src/assistant/hosted-image-completion.ts'
 import {
@@ -3405,6 +3408,61 @@ describe('assistant auto-reply event-first path', () => {
     })
 
     expect(result.terminalLinqCleanup).toEqual(['linq-user-message-1'])
+  })
+
+  it('leaves every input in an uncovered reaction replay without terminal evidence', async () => {
+    const vault = await createTempVault()
+    const accepted = createLinqGroupCandidate({
+      inputId: 'ain_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1',
+      messageId: 'linq-msg-accepted-reaction-input',
+      occurredAt: '2026-04-08T00:10:00.000Z',
+      text: 'first input owned by the accepted reaction',
+      threadIsDirect: true,
+    })
+    const uncovered = createLinqGroupCandidate({
+      inputId: 'ain_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb2',
+      messageId: 'linq-msg-uncovered-reaction-input',
+      occurredAt: '2026-04-08T00:10:01.000Z',
+      text: 'later input outside the frozen reaction intent',
+      threadIsDirect: true,
+    })
+    replyEventPathMocks.sendAssistantMessage.mockResolvedValue({
+      delivery: null,
+      deliveryDeferred: false,
+      deliveryError: {
+        code: 'ASSISTANT_OUTBOX_ANSWERED_ITEMS_UNCOVERED',
+        diagnosticContext: { retryable: true },
+        message:
+          'The existing outbound delivery does not cover every requested input; retry after the current dispatch settles.',
+      },
+      deliveryIntentId: 'intent-frozen-reaction',
+      response: '',
+      responseDisposition: 'none',
+      session: { sessionId: 'session-frozen-reaction' },
+    })
+
+    const result = await processAssistantAutoReplyGroup({
+      allowSelfAuthored: false,
+      context: createReplyContextFromCandidates([accepted, uncovered]),
+      enabledChannels: ['linq'],
+      inboxServices: createInboxServices(),
+      requestId: null,
+      sessionMaxAgeMs: null,
+      vault,
+    })
+
+    expect(result).toMatchObject({
+      advanceCursor: false,
+      failed: 1,
+      replied: 0,
+      stopScanning: true,
+    })
+    for (const candidate of [accepted, uncovered]) {
+      await expect(readAssistantAutoReplyTerminalEvidenceByEvidenceId(
+        vault,
+        candidate.event.inputId,
+      )).resolves.toBeNull()
+    }
   })
 
   it('does not report pending terminal Linq cleanup for reply evidence without Linq message ids', async () => {

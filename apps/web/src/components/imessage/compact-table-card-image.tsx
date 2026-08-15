@@ -3,21 +3,38 @@ import type {
   WorkoutSessionExerciseV1,
 } from "@murphai/contracts";
 
-import { IMESSAGE_CARD_COLOR } from "./card-image-chrome";
+import {
+  IMessageCardHeader,
+  IMESSAGE_CARD_COLOR,
+  IMESSAGE_CARD_HEADER_BESIDE_BADGE_INSET,
+  IMESSAGE_CARD_HEADER_SUBTITLE_FONT_SIZE,
+  IMESSAGE_CARD_HEADER_TEXT_GAP,
+  IMESSAGE_CARD_HEADER_TITLE_ROW_HEIGHT,
+  IMESSAGE_CARD_HEADER_TITLE_FONT_SIZE,
+} from "./card-image-chrome";
 import {
   measureDmSans400Text,
   segmentDmSans400Text,
 } from "./dm-sans-400-card-metrics";
+import {
+  measureDmSans600Text,
+  segmentDmSans600Text,
+} from "./dm-sans-600-card-metrics";
 
 export const IMESSAGE_COMPACT_TABLE_CARD_IMAGE_WIDTH = 1_200;
 
 const CARD_HORIZONTAL_PADDING = 45;
 const CARD_CONTENT_WIDTH =
   IMESSAGE_COMPACT_TABLE_CARD_IMAGE_WIDTH - CARD_HORIZONTAL_PADDING * 2;
-const PROVIDER_ICON_CLEARANCE = 155;
-const HEADER_TEXT_WIDTH = CARD_CONTENT_WIDTH - PROVIDER_ICON_CLEARANCE;
+const HEADER_TEXT_WIDTH =
+  CARD_CONTENT_WIDTH - IMESSAGE_CARD_HEADER_BESIDE_BADGE_INSET;
+const FOOTER_FONT_SIZE = 49;
+const CAPTION_2_FONT_SIZE = 41;
+const CAPTION_FONT_SIZE = 45;
+const SUBHEADLINE_FONT_SIZE = 56;
 const GENERIC_ROW_LABEL_WIDTH = CARD_CONTENT_WIDTH * 0.38;
 const GENERIC_VALUES_WIDTH = CARD_CONTENT_WIDTH * 0.62;
+const INTRINSIC_TRACK_SAFETY_PADDING = 4;
 
 type WrappedCardText = {
   lineCount: number;
@@ -42,10 +59,14 @@ type CompactTableCardImageLayout = {
   height: number;
   subtitle: WrappedCardText | null;
   title: WrappedCardText;
+  genericMode?: "grid" | "stacked";
   tableHeader?: {
+    columnWidths: number[];
     columns: WrappedCardText[];
     height: number;
     rowHeader: WrappedCardText;
+    rowHeaderWidth: number;
+    stackedColumns: WrappedCardText[];
   };
   tableRows?: GenericRowLayout[];
   workoutRows?: WorkoutExerciseLayout[];
@@ -63,13 +84,14 @@ export function getCompactTableCardImageSize(
 
 /**
  * Mirrors the shipping SwiftUI compact-table snapshot at a wider raster size.
- * The provider owns the app icon and outer corner mask, so the bitmap stays
- * rectangular and badge-free while keeping that icon footprint clear.
+ * Messages owns the outer corner mask; the bitmap owns Murph's canonical mark.
  */
 export function CompactTableCardImage({
   card,
+  logoSrc = "/icons/murph-mark.svg",
 }: {
   card: CompactTablePresentationCardV1;
+  logoSrc?: string;
 }) {
   const layout = getCompactTableCardImageLayout(card);
   return (
@@ -87,45 +109,12 @@ export function CompactTableCardImage({
         fontFamily: "DM Sans",
       }}
     >
-      <div
-        data-provider-icon-clearance={PROVIDER_ICON_CLEARANCE}
-        style={{
-          display: "flex",
-          height: layout.headerHeight,
-          flexDirection: "column",
-          justifyContent: "center",
-          marginLeft: PROVIDER_ICON_CLEARANCE,
-          gap: 8,
-        }}
-      >
-        <div
-          style={{
-            display: "flex",
-            fontSize: 48,
-            fontWeight: 600,
-            lineHeight: 1.05,
-            letterSpacing: "-0.025em",
-            whiteSpace: "pre-wrap",
-          }}
-          data-card-text-lines={layout.title.lineCount}
-        >
-          {layout.title.text}
-        </div>
-        {"workout" in card || card.subtitle === null ? null : (
-          <div
-            style={{
-              display: "flex",
-              color: IMESSAGE_CARD_COLOR.secondary,
-              fontSize: 28,
-              lineHeight: 1.2,
-              whiteSpace: "pre-wrap",
-            }}
-            data-card-text-lines={layout.subtitle?.lineCount}
-          >
-            {layout.subtitle?.text}
-          </div>
-        )}
-      </div>
+      <IMessageCardHeader
+        height={layout.headerHeight}
+        logoSrc={logoSrc}
+        subtitle={"workout" in card ? null : layout.subtitle}
+        title={layout.title}
+      />
 
       {"workout" in card
         ? <WorkoutSnapshot card={card} rows={layout.workoutRows ?? []} />
@@ -133,6 +122,7 @@ export function CompactTableCardImage({
             <GenericTableSnapshot
               card={card}
               header={layout.tableHeader}
+              mode={layout.genericMode ?? "grid"}
               rows={layout.tableRows ?? []}
             />
           )}
@@ -141,9 +131,9 @@ export function CompactTableCardImage({
         <div
           style={{
             display: "flex",
-            marginTop: 22,
+            marginTop: 45,
             color: IMESSAGE_CARD_COLOR.secondary,
-            fontSize: 24,
+            fontSize: FOOTER_FONT_SIZE,
             lineHeight: 1.25,
             whiteSpace: "pre-wrap",
           }}
@@ -175,7 +165,7 @@ function WorkoutSnapshot({
   const progressFraction = progress.completed / progress.total;
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", marginTop: 26 }}>
+    <div style={{ display: "flex", flexDirection: "column", marginTop: 45 }}>
       <div
         style={{
           display: "flex",
@@ -187,7 +177,7 @@ function WorkoutSnapshot({
           style={{
             display: "flex",
             color: IMESSAGE_CARD_COLOR.secondary,
-            fontSize: 24,
+            fontSize: CAPTION_2_FONT_SIZE,
             fontWeight: 600,
             letterSpacing: "0.08em",
           }}
@@ -199,7 +189,7 @@ function WorkoutSnapshot({
         <div
           style={{
             display: "flex",
-            fontSize: 30,
+            fontSize: SUBHEADLINE_FONT_SIZE,
             fontWeight: 600,
             fontVariantNumeric: "tabular-nums",
           }}
@@ -214,7 +204,7 @@ function WorkoutSnapshot({
           width: "100%",
           height: 14,
           overflow: "hidden",
-          marginTop: 15,
+          marginTop: 26,
           borderRadius: 999,
           backgroundColor: IMESSAGE_CARD_COLOR.progressTrack,
         }}
@@ -226,7 +216,7 @@ function WorkoutSnapshot({
             width: `${progressFraction * 100}%`,
             height: "100%",
             borderRadius: 999,
-            backgroundColor: IMESSAGE_CARD_COLOR.primary,
+            backgroundColor: IMESSAGE_CARD_COLOR.systemAccent,
           }}
         />
       </div>
@@ -234,14 +224,14 @@ function WorkoutSnapshot({
         style={{
           display: "flex",
           flexDirection: "column",
-          marginTop: 18,
-          borderTop: `2px solid ${IMESSAGE_CARD_COLOR.divider}`,
+          marginTop: 45,
         }}
       >
         {card.workout.exercises.map((exercise, index) => (
           <WorkoutExerciseRow
             key={index}
             exercise={exercise}
+            isLast={index === card.workout.exercises.length - 1}
             layout={rows[index] ?? getWorkoutExerciseLayout(exercise)}
           />
         ))}
@@ -252,9 +242,11 @@ function WorkoutSnapshot({
 
 function WorkoutExerciseRow({
   exercise,
+  isLast,
   layout,
 }: {
   exercise: WorkoutSessionExerciseV1;
+  isLast: boolean;
   layout: WorkoutExerciseLayout;
 }) {
   const completed = exercise.sets.filter(
@@ -263,6 +255,7 @@ function WorkoutExerciseRow({
   const resolved = exercise.sets.every(
     (set) => set.status === "completed" || set.status === "skipped",
   );
+  const allCompleted = completed === exercise.sets.length;
 
   return (
     <div
@@ -270,8 +263,10 @@ function WorkoutExerciseRow({
         display: "flex",
         height: layout.height,
         alignItems: "center",
-        borderBottom: `2px solid ${IMESSAGE_CARD_COLOR.divider}`,
-        gap: 18,
+        borderBottom: isLast
+          ? "none"
+          : `2px solid ${IMESSAGE_CARD_COLOR.divider}`,
+        gap: 38,
       }}
     >
       <div
@@ -282,8 +277,8 @@ function WorkoutExerciseRow({
         style={{
           position: "relative",
           display: "flex",
-          width: 28,
-          height: 28,
+          width: 64,
+          height: 64,
           overflow: "hidden",
           alignItems: "center",
           justifyContent: "center",
@@ -291,9 +286,11 @@ function WorkoutExerciseRow({
             ? "none"
             : `3px solid ${IMESSAGE_CARD_COLOR.secondary}`,
           borderRadius: 999,
-          backgroundColor: resolved ? "#337338" : "transparent",
+          backgroundColor: resolved
+            ? allCompleted ? "#34C759" : IMESSAGE_CARD_COLOR.secondary
+            : "transparent",
           color: "#FFF5E6",
-          fontSize: 20,
+          fontSize: 45,
           fontWeight: 600,
         }}
       >
@@ -314,15 +311,15 @@ function WorkoutExerciseRow({
           <svg
             aria-hidden="true"
             data-exercise-checkmark="true"
-            width={18}
-            height={18}
+            width={42}
+            height={42}
             viewBox="0 0 18 18"
           >
             <path
               d="M3.5 9.5 7.25 13 14.5 5"
               fill="none"
               stroke="currentColor"
-              strokeWidth={3}
+              strokeWidth={3.5}
               strokeLinecap="round"
               strokeLinejoin="round"
             />
@@ -342,7 +339,7 @@ function WorkoutExerciseRow({
           data-card-text-lines={layout.name.lineCount}
           style={{
             display: "flex",
-            fontSize: 31,
+            fontSize: SUBHEADLINE_FONT_SIZE,
             fontWeight: 600,
             lineHeight: 1.05,
             whiteSpace: "pre-wrap",
@@ -354,7 +351,7 @@ function WorkoutExerciseRow({
           style={{
             display: "flex",
             color: IMESSAGE_CARD_COLOR.secondary,
-            fontSize: 23,
+            fontSize: CAPTION_FONT_SIZE,
             lineHeight: 1.2,
             whiteSpace: "pre-wrap",
           }}
@@ -367,7 +364,7 @@ function WorkoutExerciseRow({
         style={{
           display: "flex",
           color: IMESSAGE_CARD_COLOR.secondary,
-          fontSize: 30,
+          fontSize: SUBHEADLINE_FONT_SIZE,
           fontWeight: 600,
           fontVariantNumeric: "tabular-nums",
           whiteSpace: "nowrap",
@@ -382,22 +379,27 @@ function WorkoutExerciseRow({
 function GenericTableSnapshot({
   card,
   header,
+  mode,
   rows,
 }: {
   card: Exclude<CompactTablePresentationCardV1, { workout: unknown }>;
   header: CompactTableCardImageLayout["tableHeader"];
+  mode: "grid" | "stacked";
   rows: GenericRowLayout[];
 }) {
-  const valueWidth = `${62 / card.columns.length}%`;
-  const valueFontSize = card.columns.length >= 3 ? 23 : 28;
+  if (mode === "stacked") {
+    return <GenericStackedRows card={card} header={header} rows={rows} />;
+  }
+
+  const valueFontSize = SUBHEADLINE_FONT_SIZE;
 
   return (
     <div
+      data-compact-table-layout="grid"
       style={{
         display: "flex",
         flexDirection: "column",
-        marginTop: 30,
-        borderTop: `2px solid ${IMESSAGE_CARD_COLOR.divider}`,
+        marginTop: 45,
       }}
     >
       <div
@@ -405,8 +407,9 @@ function GenericTableSnapshot({
           display: "flex",
           height: header?.height ?? 66,
           alignItems: "center",
+          gap: 38,
           color: IMESSAGE_CARD_COLOR.secondary,
-          fontSize: 22,
+          fontSize: CAPTION_2_FONT_SIZE,
           fontWeight: 600,
           letterSpacing: "0.07em",
         }}
@@ -415,7 +418,8 @@ function GenericTableSnapshot({
           data-card-text-lines={header?.rowHeader.lineCount}
           style={{
             display: "flex",
-            width: "38%",
+            width: header?.rowHeaderWidth ?? GENERIC_ROW_LABEL_WIDTH,
+            flexShrink: 0,
             lineHeight: 1.2,
             whiteSpace: "pre-wrap",
           }}
@@ -427,7 +431,9 @@ function GenericTableSnapshot({
             key={index}
             style={{
               display: "flex",
-              width: valueWidth,
+              width: header?.columnWidths[index] ?? GENERIC_VALUES_WIDTH
+                / card.columns.length,
+              flexShrink: 0,
               justifyContent: "flex-end",
               lineHeight: 1.2,
               textAlign: "right",
@@ -444,17 +450,18 @@ function GenericTableSnapshot({
           key={rowIndex}
           style={{
             display: "flex",
-            height: rows[rowIndex]?.height ?? 84,
+            height: rows[rowIndex]?.height ?? 93,
             alignItems: "center",
+            gap: 38,
             borderTop: `2px solid ${IMESSAGE_CARD_COLOR.divider}`,
           }}
         >
           <div
             style={{
               display: "flex",
-              width: "38%",
-              paddingRight: 20,
-              fontSize: 29,
+              width: header?.rowHeaderWidth ?? GENERIC_ROW_LABEL_WIDTH,
+              flexShrink: 0,
+              fontSize: SUBHEADLINE_FONT_SIZE,
               fontWeight: 600,
               lineHeight: 1.15,
               whiteSpace: "pre-wrap",
@@ -468,9 +475,10 @@ function GenericTableSnapshot({
               key={index}
               style={{
                 display: "flex",
-                width: valueWidth,
+                width: header?.columnWidths[index] ?? GENERIC_VALUES_WIDTH
+                  / card.columns.length,
+                flexShrink: 0,
                 justifyContent: "flex-end",
-                paddingLeft: 12,
                 fontSize: valueFontSize,
                 fontVariantNumeric: "tabular-nums",
                 lineHeight: 1.15,
@@ -488,97 +496,245 @@ function GenericTableSnapshot({
   );
 }
 
+function GenericStackedRows({
+  card,
+  header,
+  rows,
+}: {
+  card: Exclude<CompactTablePresentationCardV1, { workout: unknown }>;
+  header: CompactTableCardImageLayout["tableHeader"];
+  rows: GenericRowLayout[];
+}) {
+  return (
+    <div
+      data-compact-table-layout="stacked"
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        marginTop: 45,
+      }}
+    >
+      {card.rows.map((row, rowIndex) => (
+        <div
+          key={rowIndex}
+          style={{
+            display: "flex",
+            minHeight: rows[rowIndex]?.height,
+            flexDirection: "column",
+            padding: "34px 0",
+            borderBottom: rowIndex === card.rows.length - 1
+              ? "none"
+              : `2px solid ${IMESSAGE_CARD_COLOR.divider}`,
+          }}
+        >
+          <div
+            data-card-text-lines={rows[rowIndex]?.label.lineCount}
+            style={{
+              display: "flex",
+              fontSize: SUBHEADLINE_FONT_SIZE,
+              fontWeight: 600,
+              lineHeight: 1.15,
+              whiteSpace: "pre-wrap",
+            }}
+          >
+            {rows[rowIndex]?.label.text ?? row.label}
+          </div>
+          {row.values.map((value, valueIndex) => (
+            <div
+              key={valueIndex}
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                marginTop: 23,
+                gap: 8,
+              }}
+            >
+              <div
+                data-card-text-lines={
+                  header?.stackedColumns[valueIndex]?.lineCount
+                }
+                style={{
+                  display: "flex",
+                  color: IMESSAGE_CARD_COLOR.secondary,
+                  fontSize: CAPTION_FONT_SIZE,
+                  fontWeight: 600,
+                  lineHeight: 1.2,
+                  whiteSpace: "pre-wrap",
+                }}
+              >
+                {header?.stackedColumns[valueIndex]?.text
+                  ?? card.columns[valueIndex]}
+              </div>
+              <div
+                data-card-text-lines={rows[rowIndex]?.values[valueIndex]?.lineCount}
+                style={{
+                  display: "flex",
+                  width: "100%",
+                  justifyContent: "flex-end",
+                  fontSize: SUBHEADLINE_FONT_SIZE,
+                  fontVariantNumeric: "tabular-nums",
+                  lineHeight: 1.2,
+                  textAlign: "right",
+                  whiteSpace: "pre-wrap",
+                }}
+              >
+                {rows[rowIndex]?.values[valueIndex]?.text ?? value}
+              </div>
+            </div>
+          ))}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function getCompactTableCardImageLayout(
   card: CompactTablePresentationCardV1,
 ): CompactTableCardImageLayout {
-  const title = wrapCardText(card.title, HEADER_TEXT_WIDTH, 48);
+  const title = wrapCardText(
+    card.title,
+    HEADER_TEXT_WIDTH,
+    IMESSAGE_CARD_HEADER_TITLE_FONT_SIZE,
+    600,
+  );
   const subtitle = "workout" in card || card.subtitle === null
     ? null
-    : wrapCardText(card.subtitle, HEADER_TEXT_WIDTH, 28);
+    : wrapCardText(
+      card.subtitle,
+      CARD_CONTENT_WIDTH,
+      IMESSAGE_CARD_HEADER_SUBTITLE_FONT_SIZE,
+    );
   const footer = card.footer === null
     ? null
-    : wrapCardText(card.footer, CARD_CONTENT_WIDTH, 24);
-  const headerHeight = Math.max(
-    105,
+    : wrapCardText(card.footer, CARD_CONTENT_WIDTH, FOOTER_FONT_SIZE);
+  const titleRowHeight = Math.max(
+    IMESSAGE_CARD_HEADER_TITLE_ROW_HEIGHT,
     Math.ceil(
-      title.lineCount * 48 * 1.05
-      + (subtitle === null ? 0 : 8 + subtitle.lineCount * 28 * 1.2),
+      title.lineCount * IMESSAGE_CARD_HEADER_TITLE_FONT_SIZE * 1.1,
     ),
   );
+  const subtitleHeight = subtitle === null
+    ? 0
+    : IMESSAGE_CARD_HEADER_TEXT_GAP
+      + subtitle.lineCount * IMESSAGE_CARD_HEADER_SUBTITLE_FONT_SIZE * 1.2;
+  const headerHeight = Math.ceil(titleRowHeight + subtitleHeight);
   const footerHeight = footer === null
     ? 0
-    : 22 + Math.ceil(footer.lineCount * 24 * 1.25);
-  const rowCount = "workout" in card
-    ? card.workout.exercises.length
-    : card.rows.length;
-  const legacyHeight = 330 + rowCount * 90 + (footer === null ? 0 : 70);
+    : 45 + Math.ceil(footer.lineCount * FOOTER_FONT_SIZE * 1.2);
 
   if ("workout" in card) {
     const workoutRows = card.workout.exercises.map(getWorkoutExerciseLayout);
+    const dividerHeight = Math.max(0, workoutRows.length - 1) * 2;
     const measuredHeight =
-      38 + headerHeight + 26 + 36 + 15 + 14 + 18
+      38 + headerHeight + 45
+      + Math.ceil(SUBHEADLINE_FONT_SIZE * 1.2) + 26 + 15 + 45
       + workoutRows.reduce((total, row) => total + row.height, 0)
+      + dividerHeight
       + footerHeight + 42;
     return {
       footer,
       headerHeight,
-      height: Math.max(568, legacyHeight, measuredHeight),
+      height: measuredHeight,
       subtitle,
       title,
       workoutRows,
     };
   }
 
+  const gridWidths = getCompactTableGridWidths(card);
+  const genericMode = gridWidths.totalWidth <= CARD_CONTENT_WIDTH
+    ? "grid"
+    : "stacked";
   const valueWidth = GENERIC_VALUES_WIDTH / card.columns.length;
-  const valueFontSize = card.columns.length >= 3 ? 23 : 28;
   const rowHeader = wrapCardText(
     card.rowHeader.toUpperCase(),
-    GENERIC_ROW_LABEL_WIDTH,
-    22,
+    gridWidths.rowHeaderWidth,
+    CAPTION_2_FONT_SIZE,
+    600,
     0.07,
   );
-  const columns = card.columns.map((column) =>
-    wrapCardText(column.toUpperCase(), valueWidth, 22, 0.07)
+  const columns = card.columns.map((column, index) =>
+    wrapCardText(
+      column.toUpperCase(),
+      gridWidths.columnWidths[index] ?? valueWidth,
+      CAPTION_2_FONT_SIZE,
+      600,
+      0.07,
+    )
+  );
+  const stackedColumns = card.columns.map((column) =>
+    wrapCardText(column, CARD_CONTENT_WIDTH, CAPTION_FONT_SIZE, 600)
   );
   const tableHeaderHeight = Math.max(
-    66,
-    20 + Math.ceil(
+    75,
+    26 + Math.ceil(
       Math.max(rowHeader.lineCount, ...columns.map((column) => column.lineCount))
-      * 22 * 1.2,
+      * CAPTION_2_FONT_SIZE * 1.2,
     ),
   );
   const tableRows = card.rows.map((row) => {
     const label = wrapCardText(
       row.label,
-      GENERIC_ROW_LABEL_WIDTH - 20,
-      29,
+      genericMode === "grid"
+        ? gridWidths.rowHeaderWidth
+        : CARD_CONTENT_WIDTH,
+      SUBHEADLINE_FONT_SIZE,
+      600,
     );
-    const values = row.values.map((value) =>
-      wrapCardText(value, valueWidth - 12, valueFontSize)
+    const values = row.values.map((value, index) =>
+      wrapCardText(
+        value,
+        genericMode === "grid"
+          ? gridWidths.columnWidths[index] ?? valueWidth
+          : CARD_CONTENT_WIDTH,
+        SUBHEADLINE_FONT_SIZE,
+      )
     );
-    const textHeight = Math.max(
-      label.lineCount * 29 * 1.15,
-      ...values.map((value) => value.lineCount * valueFontSize * 1.15),
-    );
+    const textHeight = genericMode === "grid"
+      ? Math.max(
+        label.lineCount * SUBHEADLINE_FONT_SIZE * 1.15,
+        ...values.map((value) =>
+          value.lineCount * SUBHEADLINE_FONT_SIZE * 1.15
+        ),
+      )
+      : label.lineCount * SUBHEADLINE_FONT_SIZE * 1.15
+        + values.reduce(
+          (height, value, index) =>
+            height + 23
+            + (stackedColumns[index]?.lineCount ?? 1) * CAPTION_FONT_SIZE * 1.2
+            + 8
+            + value.lineCount * SUBHEADLINE_FONT_SIZE * 1.2,
+          0,
+        );
     return {
-      height: Math.max(84, 20 + Math.ceil(textHeight)),
+      height: genericMode === "grid"
+        ? Math.max(93, 26 + Math.ceil(textHeight))
+        : 68 + Math.ceil(textHeight),
       label,
       values,
     };
   });
+  const tableHeight = genericMode === "grid"
+    ? tableHeaderHeight
+      + tableRows.reduce((total, row) => total + row.height, 0)
+    : tableRows.reduce((total, row) => total + row.height, 0)
+      + Math.max(0, tableRows.length - 1) * 2;
   const measuredHeight =
-    38 + headerHeight + 30 + tableHeaderHeight
-    + tableRows.reduce((total, row) => total + row.height, 0)
+    38 + headerHeight + 45 + tableHeight
     + footerHeight + 42;
   return {
     footer,
+    genericMode,
     headerHeight,
-    height: Math.max(568, legacyHeight, measuredHeight),
+    height: measuredHeight,
     subtitle,
     tableHeader: {
+      columnWidths: gridWidths.columnWidths,
       columns,
       height: tableHeaderHeight,
       rowHeader,
+      rowHeaderWidth: gridWidths.rowHeaderWidth,
+      stackedColumns,
     },
     tableRows,
     title,
@@ -597,16 +753,25 @@ function getWorkoutExerciseLayout(
       : exercise.sets.some((set) => set.status === "skipped")
         ? `${exercise.sets.filter((set) => set.status === "skipped").length} skipped`
         : "Complete";
-  const textWidth = CARD_CONTENT_WIDTH - 125;
-  const name = wrapCardText(exercise.name, textWidth, 31);
-  const supportingText = wrapCardText(supportingValue, textWidth, 23);
+  const textWidth = CARD_CONTENT_WIDTH - 215;
+  const name = wrapCardText(
+    exercise.name,
+    textWidth,
+    SUBHEADLINE_FONT_SIZE,
+    600,
+  );
+  const supportingText = wrapCardText(
+    supportingValue,
+    textWidth,
+    CAPTION_FONT_SIZE,
+  );
   return {
     height: Math.max(
-      86,
-      22 + Math.ceil(
-        name.lineCount * 31 * 1.05
-        + 3
-        + supportingText.lineCount * 23 * 1.2,
+      124,
+      60 + Math.ceil(
+        name.lineCount * SUBHEADLINE_FONT_SIZE * 1.15
+        + 11
+        + supportingText.lineCount * CAPTION_FONT_SIZE * 1.2,
       ),
     ),
     name,
@@ -614,10 +779,53 @@ function getWorkoutExerciseLayout(
   };
 }
 
+function getCompactTableGridWidths(
+  card: Exclude<CompactTablePresentationCardV1, { workout: unknown }>,
+): { columnWidths: number[]; rowHeaderWidth: number; totalWidth: number } {
+  const rowHeaderWidth = Math.ceil(
+    Math.max(
+      measureDmSans600Text(
+        card.rowHeader.toUpperCase(),
+        CAPTION_2_FONT_SIZE,
+        0.07,
+      ),
+      ...card.rows.map((row) =>
+        measureDmSans600Text(row.label, SUBHEADLINE_FONT_SIZE)
+      ),
+    ),
+  ) + INTRINSIC_TRACK_SAFETY_PADDING;
+  const columnWidths = card.columns.map((column, index) =>
+    Math.ceil(
+      Math.max(
+        measureDmSans600Text(
+          column.toUpperCase(),
+          CAPTION_2_FONT_SIZE,
+          0.07,
+        ),
+        ...card.rows.map((row) =>
+          measureDmSans400Text(
+            row.values[index] ?? "",
+            SUBHEADLINE_FONT_SIZE,
+          )
+        ),
+      ),
+    ) + INTRINSIC_TRACK_SAFETY_PADDING
+  );
+  const horizontalSpacing = card.columns.length * 38;
+  return {
+    columnWidths,
+    rowHeaderWidth,
+    totalWidth: rowHeaderWidth
+      + columnWidths.reduce((total, width) => total + width, 0)
+      + horizontalSpacing,
+  };
+}
+
 function wrapCardText(
   value: string,
   width: number,
   fontSize: number,
+  fontWeight: 400 | 600 = 400,
   letterSpacingEm = 0,
 ): WrappedCardText {
   const words = value.trim().split(/\s+/u).filter(Boolean);
@@ -626,7 +834,7 @@ function wrapCardText(
 
   for (const word of words) {
     const candidate = currentLine === "" ? word : `${currentLine} ${word}`;
-    if (measureDmSans400Text(candidate, fontSize, letterSpacingEm) <= width) {
+    if (measureCardText(candidate, fontSize, fontWeight, letterSpacingEm) <= width) {
       currentLine = candidate;
       continue;
     }
@@ -638,6 +846,7 @@ function wrapCardText(
       word,
       width,
       fontSize,
+      fontWeight,
       letterSpacingEm,
     );
     lines.push(...fragments.slice(0, -1));
@@ -658,16 +867,20 @@ function breakOverwideCardToken(
   token: string,
   width: number,
   fontSize: number,
+  fontWeight: 400 | 600,
   letterSpacingEm: number,
 ): string[] {
   const fragments: string[] = [];
   let currentFragment = "";
 
-  for (const grapheme of segmentDmSans400Text(token)) {
+  const graphemes = fontWeight === 600
+    ? segmentDmSans600Text(token)
+    : segmentDmSans400Text(token);
+  for (const grapheme of graphemes) {
     const candidate = `${currentFragment}${grapheme}`;
     if (
       currentFragment !== ""
-      && measureDmSans400Text(candidate, fontSize, letterSpacingEm) > width
+      && measureCardText(candidate, fontSize, fontWeight, letterSpacingEm) > width
     ) {
       fragments.push(currentFragment);
       currentFragment = grapheme;
@@ -680,4 +893,15 @@ function breakOverwideCardToken(
     fragments.push(currentFragment);
   }
   return fragments;
+}
+
+function measureCardText(
+  value: string,
+  fontSize: number,
+  fontWeight: 400 | 600,
+  letterSpacingEm: number,
+): number {
+  return fontWeight === 600
+    ? measureDmSans600Text(value, fontSize, letterSpacingEm)
+    : measureDmSans400Text(value, fontSize, letterSpacingEm);
 }

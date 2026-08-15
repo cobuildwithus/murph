@@ -118,6 +118,26 @@ describe("deviceSyncProviderManifests", () => {
     expect(() => createConfiguredDeviceSyncProvidersFromConfigs(configs)).not.toThrow();
   });
 
+  it.each([
+    [undefined, 3_600_000],
+    [0, 60_000],
+    [1, 60_000],
+    [59_999, 60_000],
+    [60_000, 60_000],
+    [123_000, 123_000],
+  ])("normalizes Junction reconcile interval %s to %i ms", (
+    reconcileIntervalMs,
+    expected,
+  ) => {
+    expect(normalizeJunctionDeviceSyncRuntimeConfig({
+      apiKey: "sk_us_test_manifest",
+      clientUserIdSecret: "<REDACTED_JUNCTION_CLIENT_USER_ID_SECRET>",
+      environment: "sandbox",
+      reconcileIntervalMs,
+      region: "us",
+    }).reconcileIntervalMs).toBe(expected);
+  });
+
   it("resolves Junction canonical base URLs from environment and region", () => {
     const profiles = [
       {
@@ -153,6 +173,8 @@ describe("deviceSyncProviderManifests", () => {
   it("declares provider-owned job definitions for every built-in provider job kind", () => {
     expect(getConfiguredDeviceSyncProviderJobDefinition("junction", "backfill")).toEqual({
       payload: {
+        memberEditConflictOccurrence: { kind: "string" },
+        memberEditConflictResolution: { kind: "string" },
         emptyBackfillAttempts: { kind: "number", includeInHostedHint: true },
         sourceProviderSlug: { kind: "string", includeInHostedHint: true },
         timeseriesCursor: { kind: "string", includeInHostedHint: true },
@@ -488,6 +510,12 @@ describe("deviceSyncProviderManifests", () => {
         kind: "resource",
         payload: {
           eventType: "daily.data.activity.created",
+          historicalBackfillVersion: 2,
+          historicalCoverageTarget: "2026-04-23T00:00:00.000Z",
+          historicalMalformedDateExhausted: true,
+          historicalMalformedDateRetryAttempts: 3,
+          historicalNoProgressAttempts: 2,
+          historicalNoProgressRescan: true,
           historicalProviderRecordsSeen: true,
           historicalUnresolvedProviderRecordIdentitiesJson:
             "{\"v\":1,\"i\":[\"blood-pressure-0123456789abcdef\",\"blood-pressure-fedcba9876543210\"]}",
@@ -504,6 +532,12 @@ describe("deviceSyncProviderManifests", () => {
       }),
     ).toEqual({
       eventType: "daily.data.activity.created",
+      historicalBackfillVersion: 2,
+      historicalCoverageTarget: "2026-04-23T00:00:00.000Z",
+      historicalMalformedDateExhausted: true,
+      historicalMalformedDateRetryAttempts: 3,
+      historicalNoProgressAttempts: 2,
+      historicalNoProgressRescan: true,
       historicalProviderRecordsSeen: true,
       historicalUnresolvedProviderRecordIdentitiesJson:
         "{\"v\":1,\"i\":[\"blood-pressure-0123456789abcdef\",\"blood-pressure-fedcba9876543210\"]}",

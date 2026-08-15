@@ -119,6 +119,7 @@ export type AssistantHostedDeviceToolRequest =
   | {
       accountId: string
       action: 'reconcile'
+      resolution?: 'keep_member' | 'use_provider'
     }
 
 export interface AssistantHostedDeviceAccountSummary {
@@ -164,6 +165,10 @@ export interface AssistantHostedLabsTool {
 
 export type AssistantHostedAutomationToolRequest =
   | {
+      action: 'inspect'
+      lookup: string
+    }
+  | {
       action: 'save'
       activeUntil?: string | null
       assistantTargetOverride?: AutomationAssistantTargetOverride | null
@@ -184,6 +189,7 @@ export type AssistantHostedAutomationToolRequest =
       activeUntil?: string | null
       assistantTargetOverride?: AutomationAssistantTargetOverride | null
       continuityPolicy?: AutomationContinuityPolicy
+      expectedUpdatedAt: string
       instructions?: string
       lookup: string
       retargetToCurrentConversation?: boolean
@@ -204,6 +210,18 @@ export type AssistantHostedAutomationToolRequest =
 
 export type AssistantHostedAutomationToolResponse =
   | {
+      action: 'inspect'
+      automationId: string
+      effectiveTimeZone: string | null
+      lookupId: string
+      nextOccurrenceAt: string | null
+      routeBinding: 'preserved'
+      schedule: AutomationSchedule
+      status: AutomationStatus
+      timingVerified: boolean
+      updatedAt: string
+    }
+  | {
       action: 'patch' | 'save'
       automationId: string
       created: boolean
@@ -214,6 +232,7 @@ export type AssistantHostedAutomationToolResponse =
       schedule: AutomationSchedule
       status: AutomationStatus
       timingVerified: boolean
+      updatedAt: string
     }
   | {
       action: 'reconcile'

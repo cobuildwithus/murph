@@ -5,10 +5,44 @@ import {
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
+  assertHostedPrivyAccountDeletionNotPending: vi.fn(),
   ensureHostedMemberForPrivyIdentityResolutionTx: vi.fn(),
   issueHostedInvite: vi.fn(),
+  lookupHostedMemberForPrivyAuthAttempt: vi.fn(),
+  lookupHostedMemberForPrivyPrincipal: vi.fn(),
   readHostedMemberMessagingSetupState: vi.fn(),
 }));
+
+vi.mock("@/src/lib/hosted-crypto/domain-root-store", async (importOriginal) => {
+  const actual = await importOriginal<
+    typeof import("@/src/lib/hosted-crypto/domain-root-store")
+  >();
+  return {
+    ...actual,
+    prepareHostedDomainRootForWeb: vi.fn().mockResolvedValue({
+      domain: "control",
+      rootKeyId: "root-timezone-handoff",
+      userId: "member_timezone_handoff",
+    }),
+  };
+});
+
+vi.mock("@/src/lib/hosted-onboarding/privy", async (importOriginal) => {
+  const actual = await importOriginal<
+    typeof import("@/src/lib/hosted-onboarding/privy")
+  >();
+  return {
+    ...actual,
+    readHostedPrivyUserById: vi.fn().mockResolvedValue({
+      id: "did:privy:timezone-handoff",
+      linked_accounts: [{
+        phone_number: "+48123456789",
+        type: "phone",
+        verified_at: 1782043200,
+      }],
+    }),
+  };
+});
 
 vi.mock("@/src/lib/hosted-onboarding/logging", () => ({
   deriveHostedOnboardingTimingErrorName: () => "test_error",
@@ -28,8 +62,14 @@ vi.mock("@/src/lib/hosted-onboarding/member-identity-service", async (importOrig
 
   return {
     ...actual,
+    assertHostedPrivyAccountDeletionNotPending:
+      mocks.assertHostedPrivyAccountDeletionNotPending,
     ensureHostedMemberForPrivyIdentityResolutionTx:
       mocks.ensureHostedMemberForPrivyIdentityResolutionTx,
+    lookupHostedMemberForPrivyAuthAttempt:
+      mocks.lookupHostedMemberForPrivyAuthAttempt,
+    lookupHostedMemberForPrivyPrincipal:
+      mocks.lookupHostedMemberForPrivyPrincipal,
   };
 });
 
@@ -80,6 +120,7 @@ const IDENTITY = {
 describe("hosted signup timezone handoff", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.assertHostedPrivyAccountDeletionNotPending.mockResolvedValue(undefined);
     mocks.ensureHostedMemberForPrivyIdentityResolutionTx.mockResolvedValue({
       created: true,
       identity: IDENTITY,
@@ -89,6 +130,8 @@ describe("hosted signup timezone handoff", () => {
       inviteCode: "invite_timezone_handoff",
     });
     mocks.readHostedMemberMessagingSetupState.mockResolvedValue(null);
+    mocks.lookupHostedMemberForPrivyAuthAttempt.mockResolvedValue(null);
+    mocks.lookupHostedMemberForPrivyPrincipal.mockResolvedValue(null);
   });
 
   it("persists the signup timezone before activation can claim the member row", async () => {

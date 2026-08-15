@@ -201,6 +201,20 @@ export function setJobAttemptsForTesting(
   });
 }
 
+export function setJobContinuationForTesting(
+  store: SqliteDeviceSyncStore,
+  jobId: string,
+  payload: Record<string, unknown>,
+): void {
+  withStoreDatabase(store, (database) => {
+    database.prepare(`
+      update device_job
+      set payload_json = ?
+      where id = ?
+    `).run(JSON.stringify(payload), jobId);
+  });
+}
+
 export function setConnectionUpdatedAtForTesting(
   store: SqliteDeviceSyncStore,
   accountId: string,

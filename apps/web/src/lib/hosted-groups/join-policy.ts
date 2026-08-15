@@ -432,7 +432,7 @@ function hostedVaultShareProjectionScopeDisplay(
     );
     return {
       label: `Recent ${label} distance and session count`,
-      description: `Shares daily ${label} distance and session count.`,
+      description: `Shares your last 7 days of daily ${label} distance and session count.`,
     };
   }
   if (projectionScope.projectionKind === HOSTED_VAULT_SHARE_ACTIVITY_SESSION_COUNT_PROJECTION_KIND) {
@@ -441,7 +441,7 @@ function hostedVaultShareProjectionScopeDisplay(
     );
     return {
       label: `Recent ${label} session count`,
-      description: `Shares daily ${label} session count.`,
+      description: `Shares your last 7 days of daily ${label} session count.`,
     };
   }
   if (!isHostedVaultShareSelectableProjectionKind(projectionScope.projectionKind)) {

@@ -29,50 +29,83 @@ What it does:
 - treats `DEVICE_SYNC_WORKER_BATCH_SIZE` as a durable job-row budget per tick; one provider batch may complete multiple rows, and each row counts against that budget
 - imports provider snapshots through `@murphai/importers`
 
+Canonical imports fail atomically when a newer connected-source fact conflicts
+with a live member correction. `device-syncd` exposes that condition only as
+the provider-neutral `DEVICE_DATA_MEMBER_EDIT_CONFLICT`; raw fact identities,
+values, and provider error text do not cross the job/status boundary. The
+existing manual-reconcile job accepts one explicit resolution:
+`keep_member` advances the provider baseline in the event spine and reasserts
+the member revision as live, while `use_provider` makes the current connected
+source revision live. Both choices are one-shot job payloads, not a second
+queue or persisted policy, and an exact retry is a no-op after the atomic vault
+commit succeeds.
+
 Current providers:
 - Direct runtime providers: Oura, Strava, and WHOOP.
 - Junction-backed sources come from `DEVICE_CONNECT_SOURCES`. `JUNCTION_PROVIDER_FILTER`
   selects Link targets such as Garmin and Fitbit; recognized Junction SDK sources such
   as Apple Health participate independently of that Link-only filter.
-- Junction fetches the sparse `note` timeseries by default. Oura note tags become
-  completed intervention events for Personal Patterns. Free-text note values are
-  dropped before raw snapshot and compact evidence retention.
+- Junction fetches the sparse `note` timeseries by default. Normalized tags from
+  every admitted Junction source persist as neutral canonical notes. Personal
+  Patterns currently derives an action factor only from the exact Oura `sauna`
+  tag; other-source, symptom, context, outcome, and custom tags remain neutral.
+  Free-text note values are dropped before raw snapshot and compact evidence
+  retention. Coverage policy version 2 reopens note history completed under the
+  legacy intervention normalizer while preserving unrelated resource coverage.
 - Junction fetches sparse `workout_duration` facts with stable interval
   identity; duration is never linked by time overlap. The high-frequency
   `workout_distance` and `workout_swimming_stroke` row feeds remain excluded.
   Shallow `workout_stream` webhooks schedule an exact durable
   `/v2/timeseries/workouts/{workout_id}/stream` job with a three-execution
   budget. Each durable execution makes exactly one provider GET, so timeout,
-  503, and body-read failures return to the durable job owner. The
-  fetched stream's source identity is revalidated against local and remote
-  connection authority before import without projecting or mutating the full
-  source catalog. The raw response is then discarded after reduction to a
-  capped feature envelope and at most 64 fixed-distance splits. A newer exact
+  503, and body-read failures return to the durable job owner. The fetched
+  stream's source identity is revalidated against local and remote connection
+  authority before import without projecting or mutating the full source
+  catalog. The raw response is then discarded after reduction to a capped
+  feature envelope and at most 64 fixed-distance splits. A newer exact
   correction authoritatively replaces those feature and split facets, so
   omitted stale splits are withdrawn. The response is capped at 8 MiB/50,000
   points and raw arrays, route coordinates, inferred zones, and snapshot
   fallback never enter the importer.
-- Junction resource admission derives from the static 57-resource policy in
-  `@murphai/contracts`. Sparse supported VO2 max, temperature, caffeine,
-  one-minute heart-rate recovery, sleep-breathing-disturbance, AFib-burden, and
-  workout-duration resources use the existing per-source history owner for a
-  180-day initial scan. That scan advances in one bounded 30-day provider
-  window per resource job, schedules at most eight resource/source pairs per
-  reconcile pass, and retains only compact daily or per-interval facts. It
-  never persists full provider timeseries arrays or emits canonical sample rows.
-- Extended source/resource completion has one writable owner:
-  `junctionExtendedHistoryCoverage`. Its `mN` prefix is the normalization
-  coverage-policy version. The scalar has separate compact planes for proven
-  coverage and terminal unsupported coordinates, so a bounded failed scan can
-  stop future scheduler passes without claiming that data was imported.
-  Adding support for a previously noncanonical shape must increment the policy
-  version so terminal coordinates are reconsidered. The older blood-pressure
-  and note lists are read-only migration inputs and are removed by the metadata
-  merge once their bits are represented in the matrix.
+- Junction resource admission derives from the static resource policy in
+  `@murphai/contracts`. Supported sparse resources use the existing per-source
+  history owner for their policy-bounded initial scan. That scan advances in
+  one bounded provider window per resource job, schedules at most eight
+  resource/source pairs per reconcile pass, and retains only compact daily or
+  per-interval facts. It never persists full provider timeseries arrays or emits
+  canonical sample rows.
+- Extended source/resource completion has one writable matrix owner across the
+  two legacy coverage metadata slots. Its encoding prefix versions the durable
+  coordinate policy. Successful coverage and terminal unsupported outcomes are
+  separate compact planes: terminal completion can stop future scheduler passes
+  without claiming that data was imported. Adding support for a previously
+  noncanonical shape must advance the matching resource semantic version so
+  terminal coordinates are reconsidered. Legacy blood-pressure and note lists
+  remain read-only migration inputs and are removed once represented in the
+  matrix.
 - Long-history anchoring is resource policy, not scheduler inference.
   Rollout-added resources end their first scan at scheduling time so existing
   connections receive recent history; resources whose history predates source
   admission may explicitly use the source-first-seen anchor.
+- Schedule-time history jobs bind the existing exact source row's lifecycle
+  epoch. Hosted Web advances that epoch when the source moves from disconnected
+  to connected and clears only that source's schedule-time coverage in the same
+  admission lock. A same-epoch runtime projection cannot move a disconnected
+  Junction source to connected, so provider polling cannot preempt that owner.
+  Hosted Postgres adds this field as a nullable, defaulted expansion: reads map
+  legacy missing, null, or zero state to epoch 1, while explicit writes still
+  require a positive integer. Local SQLite owns a direct non-null migration.
+  Hosted hydration accepts the newer epoch before merging coverage, and the
+  runner rereads it before import and again before publishing progress. A queued
+  or in-flight job from an older epoch therefore cannot block the replacement
+  job or certify current coverage; pre-epoch jobs exit without importing.
+  Source-first-seen history is unchanged.
+- Schedule-time retry chains retain one stable logical identity and their
+  original fixed window. Before terminal coverage is published, that window
+  must still touch the ordinary rolling daily reconcile interval. A stale row
+  finishes without a matrix bit, allowing the existing scheduler to enqueue
+  one current-anchored replacement under the same identity; only that
+  replacement can close the obligation.
 
 Use `packages/device-syncd/src/config/connect-routes.ts` as the source of truth
 for the current connect target catalog, and use
@@ -134,6 +167,31 @@ such as workouts or body measurements do not become failed-export signals.
 that performs canonical import emits bounded source/resource normalization
 evidence for fallback coverage checks. `device-syncd` does not maintain a
 second raw-payload metric parser.
+
+Junction timeseries use one exhaustive static history policy. Dense daily
+aggregates keep the bounded 14-day initial window. Advertised AFib burden, VO2
+max, heart-rate recovery, body and basal temperatures, sleep-breathing
+disturbance, caffeine, water, and mindfulness use the summary-history window,
+180 days by default. The existing source-scoped sparse-history jobs fetch one
+day at a time, serialize per account, and record terminal coverage in compact
+connection metadata; they do not add another queue or lifecycle. Blood pressure
+keeps exact per-reading completion, and note history keeps complete-fetch
+semantics. All extended timeseries completion shares one fixed-width,
+source-by-resource matrix in an existing blood-pressure or note metadata slot;
+legacy values still read, and unsupported route identities fail before history
+egress rather than advancing an unretainable checkpoint. Every date-mode
+timeseries fetch preserves one complete provider
+calendar date during both migration and normal reconcile; a provider-bearing
+date with any row rejected by the canonical aggregate parser retries only that
+date on the existing bounded ladder. Historical-pull status is re-read before
+coverage, with supported connect-route aliases canonicalized on both sides:
+matching pulled state takes precedence, success permits terminal empty history,
+nonterminal state waits, and explicit failure remains uncovered. Explicit
+`not_pulled` is no obligation only without a pulled entry, while unavailable
+status requires canonical history evidence. Delayed work derives
+the live reconcile boundary after every completed segment and continues until
+no middle gap remains. An explicit timeseries backfill override still governs
+every timeseries resource.
 
 Junction's historical-pull status is authoritative when available. A `success`
 completes its source/resource obligation even when the provider reports zero

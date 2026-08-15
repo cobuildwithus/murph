@@ -3,7 +3,11 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
-import { CURRENT_VAULT_FORMAT_VERSION } from "@murphai/contracts";
+import {
+  CURRENT_VAULT_FORMAT_VERSION,
+  JUNCTION_WEARABLE_TAG_EXTERNAL_REF_FACET,
+  JUNCTION_WEARABLE_TAG_NOTE_TYPE,
+} from "@murphai/contracts";
 import { test } from "vitest";
 
 import type { CanonicalEntity } from "../src/canonical-entities.ts";
@@ -116,6 +120,59 @@ test("Personal Patterns reuses the canonical provider activity-kind resolver", (
 
   assert.equal(report.factors[0]?.id, "running");
   assert.equal(report.cells.find((cell) => cell.outcomeId === "hrv")?.stage, "seen_again");
+});
+
+test("Personal Patterns admits only the product-owned Oura sauna tag from neutral notes", () => {
+  const start = "2026-01-05";
+  const ouraDates = Array.from({ length: 8 }, (_, index) => addDays(start, index * 14));
+  const garminDates = ouraDates.map((date) => addDays(date, 7));
+  const legacyDates = ouraDates.map((date) => addDays(date, 3));
+  const report = buildPersonalPatternReport(createVaultReadModel({
+    entities: [
+      ...ouraDates.map((date, index) => junctionWearableTagNote(
+        `oura_tags_${index}`,
+        date,
+        "oura",
+        ["sauna", "headache", "late-meal", "recovery", "custom-tag"],
+      )),
+      ...garminDates.map((date, index) => junctionWearableTagNote(
+        `garmin_tags_${index}`,
+        date,
+        "garmin",
+        ["sauna"],
+      )),
+      ...legacyDates.map((date, index) => legacyJunctionNoteTagIntervention(
+        `legacy_oura_tag_${index}`,
+        date,
+        "sauna",
+      )),
+      ...Array.from({ length: 112 }, (_, index) => {
+        const date = addDays(start, index);
+        return observation(
+          `oura_tag_hrv_${index}`,
+          date,
+          "hrv",
+          ouraDates.includes(addDays(date, -1)) ? 70 : 50,
+          "ms",
+        );
+      }),
+    ],
+    vaultRoot: "test://personal-pattern-oura-tags",
+  }), {
+    asOf: "2026-04-27T12:00:00.000Z",
+  });
+
+  assert.deepEqual(report.factors, [{
+    id: "sauna",
+    kind: "intervention",
+    label: "Sauna",
+    observedDays: 8,
+  }]);
+  assert.equal(report.cells.find((cell) => cell.factorId === "sauna" && cell.outcomeId === "hrv")?.stage, "seen_again");
+  assert.equal(report.factors.some((factor) => factor.id === "headache"), false);
+  assert.equal(report.factors.some((factor) => factor.id === "late-meal"), false);
+  assert.equal(report.factors.some((factor) => factor.id === "recovery"), false);
+  assert.equal(report.factors.some((factor) => factor.id === "custom-tag"), false);
 });
 
 test("Browser Vault Personal Patterns falls back to its selected metric rows", async () => {
@@ -706,6 +763,51 @@ function event(
     date,
     kind,
     occurredAt: `${date}T12:00:00.000Z`,
+  });
+}
+
+function junctionWearableTagNote(
+  id: string,
+  date: string,
+  sourceProviderSlug: string,
+  tags: string[],
+): CanonicalEntity {
+  return entity("event", id, {
+    attributes: {
+      dataOrigin: { sourceProviderSlug },
+      externalRef: {
+        facet: JUNCTION_WEARABLE_TAG_EXTERNAL_REF_FACET,
+        resourceId: id,
+        resourceType: `junction-${sourceProviderSlug}-note`,
+        system: "junction",
+      },
+      note: "Wearable tags",
+      noteType: JUNCTION_WEARABLE_TAG_NOTE_TYPE,
+      source: "device",
+    },
+    date,
+    kind: "note",
+    occurredAt: `${date}T12:00:00.000Z`,
+    tags,
+  });
+}
+
+function legacyJunctionNoteTagIntervention(
+  id: string,
+  date: string,
+  tag: string,
+): CanonicalEntity {
+  return event(id, date, "intervention_session", {
+    dataOrigin: { sourceProviderSlug: "oura" },
+    externalRef: {
+      facet: `tag-${tag}`,
+      resourceId: id,
+      resourceType: "junction-oura-note",
+      system: "junction",
+    },
+    interventionType: tag,
+    sessionStatus: "completed",
+    source: "device",
   });
 }
 
