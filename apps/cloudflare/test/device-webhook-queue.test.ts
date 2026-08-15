@@ -80,27 +80,30 @@ describe("hosted device webhook Queue consumer", () => {
 
   it("authenticates ciphertext before persistence and rejects unsafe visible metadata", async () => {
     const original = await createEnvelope(0);
-    const mutations: Array<(envelope: DeviceWebhookQueueEnvelopeV1) => void> = [
-      (envelope) => {
+    const mutations: Array<{
+      code: string;
+      mutate: (envelope: DeviceWebhookQueueEnvelopeV1) => void;
+    }> = [
+      { code: "transport_context_mismatch", mutate(envelope) {
         envelope.rootKeyWrap.encryptionContext.userId = "plaintext-member-marker";
-      },
-      (envelope) => {
+      } },
+      { code: "transport_metadata_invalid", mutate(envelope) {
         envelope.encryptedPayload.rootKeyId = "plaintext-root-marker";
-      },
-      (envelope) => {
+      } },
+      { code: "transport_recipient_key_unavailable", mutate(envelope) {
         envelope.rootKeyWrap.recipientKeyId = "plaintext-key-marker";
-      },
-      (envelope) => {
+      } },
+      { code: "transport_metadata_invalid", mutate(envelope) {
         envelope.rootKeyWrap.iv = btoa("plaintext-marker");
-      },
-      (envelope) => {
+      } },
+      { code: "transport_payload_open_failed", mutate(envelope) {
         envelope.encryptedPayload.ciphertext = replaceFirstBase64Character(
           envelope.encryptedPayload.ciphertext,
         );
-      },
+      } },
     ];
 
-    for (const mutate of mutations) {
+    for (const { code, mutate } of mutations) {
       const envelope = structuredClone(original);
       mutate(envelope);
       const send = vi.fn(async () => createQueueSendResponse());
@@ -119,6 +122,7 @@ describe("hosted device webhook Queue consumer", () => {
       }, {});
 
       expect(response.status).toBe(400);
+      await expect(response.json()).resolves.toMatchObject({ code });
       expect(send).not.toHaveBeenCalled();
     }
   });

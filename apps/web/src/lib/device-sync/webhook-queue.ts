@@ -2,6 +2,7 @@ import {
   canQueuePreparedDeviceWebhook,
   sealDeviceWebhookQueueEnvelope,
 } from "@murphai/cloudflare-hosted-control/device-webhook-queue";
+import { readCloudflareHostedControlHttpError } from "@murphai/cloudflare-hosted-control/client";
 import { deviceSyncError } from "@murphai/device-syncd/errors";
 import type { PreparedDeviceSyncWebhookV1 } from "@murphai/device-syncd/prepared-webhook";
 
@@ -79,12 +80,42 @@ export async function enqueueHostedDeviceWebhook(input: {
   try {
     return await controlClient.enqueueDeviceWebhook(envelope);
   } catch (cause) {
+    const controlFailure = readCloudflareHostedControlHttpError(cause);
     throw deviceSyncError({
       cause,
-      code: "DEVICE_WEBHOOK_QUEUE_ENQUEUE_FAILED",
+      code: mapDeviceWebhookQueueControlFailureCode(controlFailure?.code),
       httpStatus: 503,
       message: "Device webhook durable transport did not confirm acceptance.",
       retryable: true,
     });
+  }
+}
+
+function mapDeviceWebhookQueueControlFailureCode(code: string | undefined): string {
+  switch (code) {
+    case "enqueue_failed":
+      return "DEVICE_WEBHOOK_QUEUE_ENQUEUE_FAILED";
+    case "invalid_request":
+      return "DEVICE_WEBHOOK_QUEUE_INVALID_REQUEST";
+    case "persistence_failure_unclassified":
+      return "DEVICE_WEBHOOK_QUEUE_PERSISTENCE_FAILURE_UNCLASSIFIED";
+    case "persistence_key_unavailable":
+      return "DEVICE_WEBHOOK_QUEUE_PERSISTENCE_KEY_UNAVAILABLE";
+    case "persistence_reseal_failed":
+      return "DEVICE_WEBHOOK_QUEUE_PERSISTENCE_RESEAL_FAILED";
+    case "queue_unavailable":
+      return "DEVICE_WEBHOOK_QUEUE_UNAVAILABLE";
+    case "transport_context_mismatch":
+      return "DEVICE_WEBHOOK_QUEUE_TRANSPORT_CONTEXT_MISMATCH";
+    case "transport_metadata_invalid":
+      return "DEVICE_WEBHOOK_QUEUE_TRANSPORT_METADATA_INVALID";
+    case "transport_payload_open_failed":
+      return "DEVICE_WEBHOOK_QUEUE_TRANSPORT_PAYLOAD_OPEN_FAILED";
+    case "transport_recipient_key_unavailable":
+      return "DEVICE_WEBHOOK_QUEUE_TRANSPORT_RECIPIENT_KEY_UNAVAILABLE";
+    case "transport_root_key_unwrap_failed":
+      return "DEVICE_WEBHOOK_QUEUE_TRANSPORT_ROOT_KEY_UNWRAP_FAILED";
+    default:
+      return "DEVICE_WEBHOOK_QUEUE_ENQUEUE_FAILED";
   }
 }

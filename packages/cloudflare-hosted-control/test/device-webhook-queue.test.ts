@@ -7,6 +7,7 @@ import {
   DEVICE_WEBHOOK_ADMISSION_TIMEOUT_MS,
   openDeviceWebhookQueueEnvelope,
   parseDeviceWebhookQueueEnvelope,
+  readDeviceWebhookQueuePersistenceFailureCode,
   sealDeviceWebhookQueueEnvelope,
 } from "../src/device-webhook-queue.ts";
 import {
@@ -62,21 +63,61 @@ describe("device webhook queue transport", () => {
       recipientPublicJwk: keys.publicJwk,
     });
 
-    await expect(openDeviceWebhookQueueEnvelope({
-      env: "production",
-      envelope,
-      privateKeyring,
-    })).rejects.toThrow("context mismatch");
+    await expectPersistenceFailureCode(
+      openDeviceWebhookQueueEnvelope({
+        env: "production",
+        envelope,
+        privateKeyring,
+      }),
+      "transport_context_mismatch",
+    );
 
     const tampered = structuredClone(envelope);
     tampered.encryptedPayload.ciphertext = replaceFirstBase64Character(
       tampered.encryptedPayload.ciphertext,
     );
-    await expect(openDeviceWebhookQueueEnvelope({
+    await expectPersistenceFailureCode(
+      openDeviceWebhookQueueEnvelope({
+        env: "test",
+        envelope: tampered,
+        privateKeyring,
+      }),
+      "transport_payload_open_failed",
+    );
+  });
+
+  it("distinguishes unavailable recipients from a mismatched private key", async () => {
+    const sealingKeys = await createRecipientKeys();
+    const workerKeys = await createRecipientKeys();
+    const envelope = await sealDeviceWebhookQueueEnvelope({
       env: "test",
-      envelope: tampered,
-      privateKeyring,
-    })).rejects.toThrow();
+      preparedWebhook: createPreparedWebhook(),
+      recipientKeyId: "automation:sealing",
+      recipientPublicJwk: sealingKeys.publicJwk,
+    });
+
+    await expectPersistenceFailureCode(
+      openDeviceWebhookQueueEnvelope({
+        env: "test",
+        envelope,
+        privateKeyring: createDeviceWebhookTransportPrivateKeyring({
+          activePrivateJwk: workerKeys.privateJwk,
+          activeRecipientKeyId: "automation:worker",
+        }),
+      }),
+      "transport_recipient_key_unavailable",
+    );
+    await expectPersistenceFailureCode(
+      openDeviceWebhookQueueEnvelope({
+        env: "test",
+        envelope,
+        privateKeyring: createDeviceWebhookTransportPrivateKeyring({
+          activePrivateJwk: workerKeys.privateJwk,
+          activeRecipientKeyId: "automation:sealing",
+        }),
+      }),
+      "transport_root_key_unwrap_failed",
+    );
   });
 
   it("rejects malformed prepared meaning at the Queue contract boundary", () => {
@@ -143,6 +184,18 @@ async function createRecipientKeys(): Promise<{
     privateJwk: await crypto.subtle.exportKey("jwk", keys.privateKey),
     publicJwk: await crypto.subtle.exportKey("jwk", keys.publicKey),
   };
+}
+
+async function expectPersistenceFailureCode(
+  promise: Promise<unknown>,
+  expectedCode: ReturnType<typeof readDeviceWebhookQueuePersistenceFailureCode>,
+): Promise<void> {
+  try {
+    await promise;
+    throw new Error("Expected device webhook Queue persistence to fail.");
+  } catch (error) {
+    expect(readDeviceWebhookQueuePersistenceFailureCode(error)).toBe(expectedCode);
+  }
 }
 
 function replaceFirstBase64Character(value: string): string {
