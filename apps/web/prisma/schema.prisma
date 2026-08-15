@@ -535,8 +535,16 @@ enum HostedComputerHandoffStatus {
 }
 
 enum HostedPhoneCallResultNotificationChannel {
-  linq
   telegram
+}
+
+enum HostedPhoneCallResultDeliveryStatus {
+  pending
+  queued
+  sending
+  delivered
+  failed
+  ambiguous
 }
 
 enum HostedPhoneCallStatus {
@@ -905,6 +913,9 @@ model HostedPhoneCall {
   resultJson     Json?                 @map("result_json")
   resultEncrypted String?              @map("result_encrypted")
   resultNotificationChannel HostedPhoneCallResultNotificationChannel? @map("result_notification_channel")
+  resultDeliveryStatus HostedPhoneCallResultDeliveryStatus? @map("result_delivery_status")
+  resultDeliveryGeneration Int         @default(0) @map("result_delivery_generation")
+  resultDeliveryTerminalAt DateTime?   @map("result_delivery_terminal_at")
   endedAt        DateTime?             @map("ended_at")
   analyzedAt     DateTime?             @map("analyzed_at")
   createdAt      DateTime              @default(now()) @map("created_at")
@@ -913,6 +924,7 @@ model HostedPhoneCall {
 
   @@unique([memberId, requestKey])
   @@index([memberId, createdAt])
+  @@index([memberId, resultNotificationChannel, resultDeliveryStatus, createdAt], map: "hosted_phone_call_result_delivery_idx")
   @@index([status, updatedAt])
   @@map("hosted_phone_call")
 }

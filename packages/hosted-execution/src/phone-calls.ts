@@ -13,8 +13,19 @@ export const HOSTED_PHONE_CALL_INBOUND_MAILBOX_ITEM_IDS_MAX = 32;
 export const HOSTED_SCHEDULED_PHONE_CALL_REQUEST_KEY_PREFIX =
   "phone_call_scheduled_";
 export const HOSTED_PHONE_CALL_RESULT_NOTIFICATION_CHANNELS = [
-  "linq",
   "telegram",
+] as const;
+export const HOSTED_PHONE_CALL_RESULT_DELIVERY_KEY_PREFIX =
+  "phone-call-result:";
+export const HOSTED_PHONE_CALL_RESULT_DELIVERY_OUTCOME_STATUSES = [
+  "sending",
+  "sent",
+  "failed",
+  "failed_ambiguous",
+] as const;
+export const HOSTED_PHONE_CALL_RESULT_PRE_PROVIDER_ROUTE_FAILURE_CODES = [
+  "ASSISTANT_EXTERNAL_THREAD_ROUTE_AUTHORITY_STALE",
+  "HOSTED_THREAD_ROUTE_EGRESS_UNAUTHORIZED",
 ] as const;
 
 // Murph must never dial emergency or crisis dispatch: it is an unattended
@@ -42,6 +53,19 @@ const hostedPhoneCallBriefFactKeySchema = z
 export const hostedPhoneCallResultNotificationChannelSchema = z.enum(
   HOSTED_PHONE_CALL_RESULT_NOTIFICATION_CHANNELS,
 );
+
+export const hostedPhoneCallResultDeliveryOutcomeStatusSchema = z.enum(
+  HOSTED_PHONE_CALL_RESULT_DELIVERY_OUTCOME_STATUSES,
+);
+
+export const hostedPhoneCallResultDeliveryOutcomeRequestSchema = z
+  .object({
+    deliveryErrorCode: z.string().trim().min(1).max(200).nullable().optional(),
+    generation: z.number().int().positive(),
+    phoneCallId: z.string().trim().min(1).max(200),
+    status: hostedPhoneCallResultDeliveryOutcomeStatusSchema,
+  })
+  .strict();
 
 export const hostedPhoneCallBriefSchema = z
   .object({
@@ -126,6 +150,9 @@ export type HostedPhoneCallGroupRequester =
 export type HostedPhoneCallResultNotificationChannel = z.infer<
   typeof hostedPhoneCallResultNotificationChannelSchema
 >;
+export type HostedPhoneCallResultDeliveryOutcomeRequest = z.infer<
+  typeof hostedPhoneCallResultDeliveryOutcomeRequestSchema
+>;
 export type HostedPhoneCallStartRequest = z.infer<
   typeof hostedPhoneCallStartRequestSchema
 >;
@@ -145,6 +172,63 @@ export function parseHostedPhoneCallResultNotificationChannel(
   return value === null || value === undefined
     ? null
     : hostedPhoneCallResultNotificationChannelSchema.parse(value);
+}
+
+export function buildHostedPhoneCallResultDeliveryKey(input: {
+  generation: number;
+  phoneCallId: string;
+}): string {
+  const generation = z.number().int().positive().parse(input.generation);
+  const phoneCallId = z.string().trim().min(1).max(200).parse(input.phoneCallId);
+  return `${HOSTED_PHONE_CALL_RESULT_DELIVERY_KEY_PREFIX}${phoneCallId}:generation:${generation}`;
+}
+
+export function parseHostedPhoneCallResultDeliveryKey(
+  value: string | null | undefined,
+): { generation: number; phoneCallId: string } | null {
+  const normalized = value?.trim() ?? "";
+  if (!normalized.startsWith(HOSTED_PHONE_CALL_RESULT_DELIVERY_KEY_PREFIX)) {
+    return null;
+  }
+  const suffix = normalized.slice(
+    HOSTED_PHONE_CALL_RESULT_DELIVERY_KEY_PREFIX.length,
+  );
+  const marker = ":generation:";
+  const markerIndex = suffix.lastIndexOf(marker);
+  if (markerIndex <= 0) {
+    return null;
+  }
+  const phoneCallId = suffix.slice(0, markerIndex);
+  const generationText = suffix.slice(markerIndex + marker.length);
+  if (!/^\d+$/u.test(generationText)) {
+    return null;
+  }
+  const parsed = hostedPhoneCallResultDeliveryOutcomeRequestSchema.safeParse({
+    generation: Number(generationText),
+    phoneCallId,
+    status: "sending",
+  });
+  return parsed.success
+    ? {
+        generation: parsed.data.generation,
+        phoneCallId: parsed.data.phoneCallId,
+      }
+    : null;
+}
+
+export function parseHostedPhoneCallResultDeliveryOutcomeRequest(
+  value: unknown,
+): HostedPhoneCallResultDeliveryOutcomeRequest {
+  return hostedPhoneCallResultDeliveryOutcomeRequestSchema.parse(value);
+}
+
+export function isHostedPhoneCallResultPreProviderRouteFailureCode(
+  value: string | null | undefined,
+): boolean {
+  return typeof value === "string"
+    && HOSTED_PHONE_CALL_RESULT_PRE_PROVIDER_ROUTE_FAILURE_CODES.some(
+      (code) => code === value,
+    );
 }
 
 export function parseHostedPhoneCallStartRequest(

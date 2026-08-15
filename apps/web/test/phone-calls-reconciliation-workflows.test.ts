@@ -27,6 +27,7 @@ vi.mock("@/src/lib/phone-calls/reconciliation", async () => {
 
 import {
   rearmHostedPhoneCallResultNotificationRecovery,
+  rearmHostedPhoneCallResultNotificationRecoveryBestEffort,
   startHostedPhoneCallReconciliationWorkflow,
 } from "@/src/lib/phone-calls/reconciliation-workflow-start";
 import { reconcileHostedPhoneCallStep } from "@/src/lib/phone-calls/reconciliation-workflow-steps";
@@ -64,54 +65,64 @@ describe("hosted phone-call reconciliation Workflow", () => {
     });
   });
 
-  it("re-arms the newest analyzed Telegram result only while its mailbox item is absent", async () => {
-    const findFirst = vi.fn(async () => ({ id: "hpc_result_pending" }));
+  it("re-arms the oldest nonterminal Telegram result without consulting transport retention", async () => {
+    const findFirst = vi.fn()
+      .mockResolvedValueOnce({ id: "hpc_result_pending" })
+      .mockResolvedValueOnce(null);
     const prisma = {
       hostedPhoneCall: { findFirst },
     };
     mocks.getPrisma.mockReturnValue(prisma);
-    const readMailboxItem = vi.fn()
-      .mockResolvedValueOnce(null)
-      .mockResolvedValueOnce({
-        id: "mailbox_phone_call_result",
-        userId: "member_123",
-      });
     const workflowStarter = vi.fn(async () => ({ runId: "run_result_recovery" }));
 
     await expect(rearmHostedPhoneCallResultNotificationRecovery({
       memberId: "member_123",
-      readMailboxItem,
-      resultNotificationChannel: "telegram",
       workflowStarter,
     })).resolves.toBe(true);
     await expect(rearmHostedPhoneCallResultNotificationRecovery({
       memberId: "member_123",
-      readMailboxItem,
-      resultNotificationChannel: "telegram",
       workflowStarter,
     })).resolves.toBe(false);
 
     expect(findFirst).toHaveBeenCalledWith(expect.objectContaining({
-      orderBy: { createdAt: "desc" },
+      orderBy: { createdAt: "asc" },
       select: { id: true },
       where: expect.objectContaining({
         analyzedAt: { not: null },
         memberId: "member_123",
+        resultDeliveryStatus: {
+          in: ["pending", "queued", "sending"],
+        },
         resultNotificationChannel: "telegram",
       }),
     }));
-    expect(readMailboxItem).toHaveBeenNthCalledWith(1, {
-      dedupeKey:
-        "assistant.notification.requested:phone-call-result:hpc_result_pending",
-      prisma,
-      userId: "member_123",
-    });
     expect(workflowStarter).toHaveBeenCalledOnce();
     expect(workflowStarter).toHaveBeenCalledWith({
       phoneCallId: "hpc_result_pending",
     }, {
       signal: expect.any(AbortSignal),
     });
+  });
+
+  it("keeps a committed Telegram route bind successful when Workflow rearm is unavailable", async () => {
+    const prisma = {
+      hostedPhoneCall: {
+        findFirst: vi.fn().mockResolvedValue({ id: "hpc_result_pending" }),
+      },
+    };
+    const workflowStarter = vi.fn().mockRejectedValue(new Error("workflow unavailable"));
+    const warning = vi.spyOn(console, "warn").mockImplementation(() => {});
+    mocks.getPrisma.mockReturnValue(prisma);
+
+    await expect(rearmHostedPhoneCallResultNotificationRecoveryBestEffort({
+      memberId: "member_123",
+      workflowStarter,
+    })).resolves.toBeUndefined();
+
+    expect(workflowStarter).toHaveBeenCalledOnce();
+    expect(warning).toHaveBeenCalledWith(
+      "Hosted phone-call result recovery rearm failed.",
+    );
   });
 
   it("bounds a stalled Workflow start and observes late settlement", async () => {

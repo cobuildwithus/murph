@@ -91,6 +91,7 @@ const mocks = vi.hoisted(() => {
       qualificationCandidateReferralIds: [],
     })),
     reconcileHostedUsageReferralRewardAfterCommit: vi.fn(async () => null),
+    rearmHostedPhoneCallResultNotificationRecovery: vi.fn(async () => true),
     readHostedThreadRouteByThreadIdentity: vi.fn(async (): Promise<{
       channel: "telegram";
       containerMemberId: string;
@@ -237,6 +238,11 @@ vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
   signalHostedMailboxAppendRuntime: mocks.signalHostedMailboxAppendRuntime,
 }));
 
+vi.mock("@/src/lib/phone-calls/reconciliation-workflow-start", () => ({
+  rearmHostedPhoneCallResultNotificationRecovery:
+    mocks.rearmHostedPhoneCallResultNotificationRecovery,
+}));
+
 vi.mock("@/src/lib/hosted-crypto/domain-root-store", async () => {
   const actual = await vi.importActual<typeof import("@/src/lib/hosted-crypto/domain-root-store")>(
     "@/src/lib/hosted-crypto/domain-root-store",
@@ -306,6 +312,7 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
       qualificationCandidateReferralIds: [],
     });
     mocks.reconcileHostedUsageReferralRewardAfterCommit.mockResolvedValue(null);
+    mocks.rearmHostedPhoneCallResultNotificationRecovery.mockResolvedValue(true);
     mocks.readHostedThreadRouteByThreadIdentity.mockResolvedValue(null);
     mocks.drainHostedExecutionOutboxBestEffort.mockResolvedValue(undefined);
     mocks.enqueueHostedExecutionOutbox.mockResolvedValue(undefined);
@@ -431,6 +438,12 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
       memberId: "member_telegram_123",
       prisma,
       timeoutMs: expect.any(Number),
+    });
+    expect(
+      mocks.rearmHostedPhoneCallResultNotificationRecovery,
+    ).toHaveBeenCalledWith({
+      memberId: "member_telegram_123",
+      prisma,
     });
     expect(hostedMemberRoutingUpsert.mock.invocationCallOrder[0]).toBeLessThan(
       mocks.appendHostedMailboxEnvelopeTx.mock.invocationCallOrder[0],
@@ -1737,6 +1750,12 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
       expectedUserId: acceptedMemberId,
       mailboxItemId: "mailbox_assistant.notification.requested:family-chat:member_telegram_family:telegram:update:333",
     });
+    expect(
+      mocks.rearmHostedPhoneCallResultNotificationRecovery,
+    ).toHaveBeenCalledWith({
+      memberId: acceptedMemberId,
+      prisma,
+    });
   });
 
   it("preserves a username-bound invite selected after a stale Telegram token hits a draft conflict", async () => {
@@ -1934,6 +1953,12 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
     expect(hostedAccountGroupDeleteMany).not.toHaveBeenCalled();
     expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
     expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
+    expect(
+      mocks.rearmHostedPhoneCallResultNotificationRecovery,
+    ).toHaveBeenCalledWith({
+      memberId: acceptedMemberId,
+      prisma,
+    });
   });
 
   it("routes unknown token-shaped Telegram text to the assistant", async () => {
@@ -2946,6 +2971,12 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
     });
     expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
     expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
+    expect(
+      mocks.rearmHostedPhoneCallResultNotificationRecovery,
+    ).toHaveBeenCalledWith({
+      memberId: "member_telegram_123",
+      prisma,
+    });
   });
 
   it("does not mutate direct routing after explicit health-data withdrawal", async () => {

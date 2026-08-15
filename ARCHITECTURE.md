@@ -859,6 +859,21 @@ advances; authority-owner unavailability keeps the ordinary same-item retry.
 There is no payload rewrite, replacement append, cursor rewind, migration, or
 second reconciliation owner.
 
+Tracked direct phone-call results use the Web-owned `HostedPhoneCall` row as
+their only durable delivery owner and are intentionally Telegram-only. The row
+stores one generation-scoped delivery disposition; a transaction advances a
+pending result to a queued generation with the matching mailbox append. The
+runtime then reports provider entry and terminal outcome through its existing
+signed, write-fenced Web control plane before checkpointing. Mailbox, outbox,
+journal, and Temporal state are transport and wake machinery, never delivery
+truth. Safe pre-provider route loss returns the row to pending for a new
+generation; provider success, definitive failure, and may-have-succeeded
+failure become terminal delivered, failed, or ambiguous dispositions. One
+route loss observed after that generation already crossed provider entry is
+also ambiguous, never permission to resend onto a new route. One
+terminal callback re-arms one oldest member-local obligation, so retention
+expiry cannot fabricate completion and recovery adds no queue or scheduler.
+
 Scheduled non-direct Telegram execution follows the same hint-only rule without Linq fallback: the signed Web route owner must assert the exact channel, synthetic container member, and thread before group tools or model work. That exact authority is persisted on the ordinary conversation outbox and reasserted against the same Web owner immediately before each Telegram provider effect. Missing ownership is retryable; changed or mismatched ownership fails closed without a repair queue or second route store.
 
 ### Canonical Automation Support Lifecycles

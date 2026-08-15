@@ -1,11 +1,6 @@
-import {
-  Prisma,
-  type PrismaClient,
-} from "@prisma/client";
+import { Prisma } from "@prisma/client";
 import { parseTelegramThreadTarget } from "@murphai/messaging-ingress/telegram-webhook";
 
-import { getPrisma } from "../prisma";
-import { runWithHostedDomainRootUnwrapCache } from "../hosted-crypto/domain-root-unwrap-cache";
 import {
   createHostedTelegramUserLookupKey,
   createHostedTelegramUserLookupKeyReadCandidates,
@@ -16,7 +11,6 @@ import {
   readHostedMemberRoutingTelegramPrivateState,
 } from "./member-private-codecs";
 import {
-  HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
   lockHostedMemberRow,
 } from "./shared";
 
@@ -96,27 +90,6 @@ export async function upsertHostedMemberTelegramRoutingBindingTx(input: {
 
     throw error;
   }
-}
-
-export async function syncHostedMemberTelegramRoutingBinding(input: {
-  memberId: string;
-  prisma?: PrismaClient;
-  telegramThreadId?: string | null;
-  telegramUserId: string;
-}): Promise<void> {
-  const prisma = input.prisma ?? getPrisma();
-
-  await prisma.$transaction(
-    (tx) => runWithHostedDomainRootUnwrapCache(() =>
-      upsertHostedMemberTelegramRoutingBindingTx({
-        memberId: input.memberId,
-        prisma: tx,
-        telegramThreadId: input.telegramThreadId,
-        telegramUserId: input.telegramUserId,
-      })
-    ),
-    HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
-  );
 }
 
 function isPrismaUniqueConstraintError(

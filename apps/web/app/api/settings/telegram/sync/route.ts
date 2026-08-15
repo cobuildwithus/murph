@@ -16,6 +16,9 @@ import {
   HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
 } from "@/src/lib/hosted-onboarding/shared";
 import { buildHostedTelegramBotLink } from "@/src/lib/hosted-onboarding/telegram";
+import {
+  rearmHostedPhoneCallResultNotificationRecoveryBestEffort,
+} from "@/src/lib/phone-calls/reconciliation-workflow-start";
 
 export const POST = withJsonError(async (request: Request) => {
   assertHostedOnboardingMutationOrigin(request);
@@ -73,6 +76,11 @@ export const POST = withJsonError(async (request: Request) => {
       sourceType: "settings.telegram.sync",
     });
   }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+
+  await rearmHostedPhoneCallResultNotificationRecoveryBestEffort({
+    memberId: auth.member.id,
+    prisma,
+  });
 
   if (channelSyncDispatch) {
     await signalHostedMailboxAppendBestEffort({

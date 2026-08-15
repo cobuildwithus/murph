@@ -1799,18 +1799,28 @@ Last verified: 2026-08-15
   success, terminally records a definitive stale route without sending, and
   leaves unavailable or retryable authority-owner failures on the ordinary
   same-item retry path. This recovery never falls back, appends, or rewinds.
-- Direct phone-call result delivery freezes only the bounded initiating channel
-  (`linq` or `telegram`). Web proves the exact current direct-member route on
-  that channel before provider dispatch and repeats the same resolution at
-  completion; a lost route is retryable and never falls back to another
-  surface. Request-key replay requires exact stored-channel equality, including
-  legacy null, before any provider effect. Group calls keep null and retain the
-  existing thread-container authority and rechecks. Deploy the additive schema
-  and Web consumer before the runner producer. Old runners remain compatible
-  because omission preserves legacy behavior; a new runner against old strict
-  Web fails before provider dispatch. Use immediate runner rollout. Roll back
-  the runner first, and do not roll Web back while a non-null-channel call can
-  still complete unless every such call has drained.
+- Direct phone-call result recovery is intentionally Telegram-only. The
+  `HostedPhoneCall` row is the sole durable delivery owner: it records a
+  generation-scoped `pending`, `queued`, `sending`, `delivered`, `failed`, or
+  `ambiguous` disposition. Mailbox, outbox, journal, and Temporal rows remain
+  transport and wake machinery; their existence or retention expiry never
+  proves result delivery. Web atomically advances `pending` to a new queued
+  generation with its mailbox append. The write-fenced runtime reports provider
+  entry and the terminal outbox outcome through the signed Web control plane
+  before checkpointing that outcome. Provider acceptance completes delivery;
+  definitive failure records non-delivery; a may-have-succeeded failure records
+  ambiguity and is never resent. Exact pre-provider Telegram route loss returns
+  a queued call to `pending`; if that generation already reported provider
+  entry, later route loss is terminally ambiguous instead. Every committed
+  exact-route bind and each terminal callback re-arms at most one oldest member-local
+  nonterminal call, so there is no second queue or fanout scheduler. Tracked
+  direct results are required-send and bind the exact live Telegram route into
+  each generation. Request-key replay still requires exact stored-channel
+  equality, including legacy null, before provider work. Group calls keep null
+  and their existing thread-container delivery behavior. Deploy the additive
+  schema and Web callback before the runner producer, roll the runner out
+  immediately, and roll it back first. Retain Web until every non-null-channel
+  call is terminal.
 - A legacy joined-group `cannot_answer` queues the fixed
   unavailable-evidence response exactly. It must not start a private provider
   continuation that can invent an expiry, provider failure, or execution

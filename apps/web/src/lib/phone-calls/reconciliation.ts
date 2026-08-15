@@ -178,10 +178,13 @@ export async function processHostedPhoneCallRecoveryById(input: {
     }
     if (!resolution.terminalTransfer && hasStoredHostedPhoneCallResult(call)) {
       try {
-        await waitForAbortableOperation(input.signal, () =>
+        const storedResult = await waitForAbortableOperation(input.signal, () =>
           finalizeStoredResult(call, {
             abortSignal: input.signal,
           }));
+        if (storedResult === "pending") {
+          return "pending";
+        }
       } catch {
         input.signal.throwIfAborted();
         return "pending";
@@ -192,10 +195,13 @@ export async function processHostedPhoneCallRecoveryById(input: {
 
   if (hasStoredHostedPhoneCallResult(call)) {
     try {
-      await waitForAbortableOperation(input.signal, () =>
+      const storedResult = await waitForAbortableOperation(input.signal, () =>
         finalizeStoredResult(call, {
           abortSignal: input.signal,
         }));
+      if (storedResult === "pending") {
+        return "pending";
+      }
     } catch {
       input.signal.throwIfAborted();
       return "pending";

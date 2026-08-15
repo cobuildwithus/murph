@@ -255,7 +255,6 @@ describe("createHostedPhoneCall", () => {
 
   it.each([
     { existingChannel: null, requestedChannel: "telegram" as const },
-    { existingChannel: "telegram" as const, requestedChannel: "linq" as const },
   ])("rejects a $existingChannel/$requestedChannel replay collision before route admission", async ({
     existingChannel,
     requestedChannel,
@@ -1215,28 +1214,6 @@ describe("createHostedPhoneCall", () => {
       prisma: store.prisma,
       requestKey: existing.requestKey,
       resultNotificationChannel: "telegram",
-      runtime: runtime.runtime,
-    })).rejects.toThrow("request key collision");
-
-    expect(store.createCalls).toEqual([]);
-    expect(runtime.startCalls).toEqual([]);
-  });
-
-  it("fails closed when a replay changes the exact result notification channel", async () => {
-    const existing = buildHostedPhoneCall({
-      providerCallId: "retell_existing",
-      resultNotificationChannel: "telegram",
-      status: "calling",
-    });
-    const store = createPhoneCallStore({ existing });
-    const runtime = createPhoneCallRuntime({ providerCallId: "retell_unused" });
-
-    await expect(createHostedPhoneCall({
-      brief: VALID_BRIEF,
-      memberId: existing.memberId,
-      prisma: store.prisma,
-      requestKey: existing.requestKey,
-      resultNotificationChannel: "linq",
       runtime: runtime.runtime,
     })).rejects.toThrow("request key collision");
 
@@ -2652,6 +2629,9 @@ function buildHostedPhoneCall(overrides: Partial<HostedPhoneCall> = {}): HostedP
     provider: "retell",
     providerCallId: null,
     requestKey: "phone_call_request_1",
+    resultDeliveryGeneration: 0,
+    resultDeliveryStatus: null,
+    resultDeliveryTerminalAt: null,
     resultEncrypted: null,
     resultJson: null,
     resultNotificationChannel: null,

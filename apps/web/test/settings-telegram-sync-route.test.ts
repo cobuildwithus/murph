@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
   },
   requireFreshPrivyMemberAuthForHostedAppSession: vi.fn(),
   requirePrivyMemberAuth: vi.fn(),
+  rearmHostedPhoneCallResultNotificationRecoveryBestEffort: vi.fn(),
   signalHostedMailboxAppendRuntime: vi.fn(),
   upsertHostedMemberTelegramRoutingBindingTx: vi.fn(),
 }));
@@ -40,6 +41,11 @@ vi.mock("@/src/lib/hosted-onboarding/member-channel-sync", () => ({
 
 vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
   signalHostedMailboxAppendRuntime: mocks.signalHostedMailboxAppendRuntime,
+}));
+
+vi.mock("@/src/lib/phone-calls/reconciliation-workflow-start", () => ({
+  rearmHostedPhoneCallResultNotificationRecoveryBestEffort:
+    mocks.rearmHostedPhoneCallResultNotificationRecoveryBestEffort,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
@@ -74,6 +80,7 @@ describe("settings telegram sync route", () => {
       signalAccepted: true,
       workflowId: "hosted-user-runtime:member_123",
     });
+    mocks.rearmHostedPhoneCallResultNotificationRecoveryBestEffort.mockResolvedValue(undefined);
     mocks.requireFreshPrivyMemberAuthForHostedAppSession.mockImplementation(async (...args: unknown[]) => {
       const freshPrivy = await mocks.requirePrivyMemberAuth(...args);
       return {
@@ -138,6 +145,12 @@ describe("settings telegram sync route", () => {
       occurredAt: expect.any(String),
       prisma: mocks.prismaClient,
       sourceType: "settings.telegram.sync",
+    });
+    expect(
+      mocks.rearmHostedPhoneCallResultNotificationRecoveryBestEffort,
+    ).toHaveBeenCalledWith({
+      memberId: "member_123",
+      prisma: mocks.prismaClient,
     });
     expect(
       mocks.upsertHostedMemberTelegramRoutingBindingTx.mock.invocationCallOrder[0],

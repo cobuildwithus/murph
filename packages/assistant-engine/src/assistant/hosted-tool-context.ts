@@ -641,8 +641,9 @@ export function resolveAssistantHostedScheduledPhoneCallScope(input: {
   originSessionId: string
 }): AssistantHostedScheduledPhoneCallScope | null {
   const scope = resolveAssistantHostedScheduledInvocationScope(input)
+  const channel = input.channel?.trim().toLowerCase()
   if (
-    resolveAssistantHostedPhoneCallResultNotificationChannel(input) === null
+    (channel !== 'linq' && channel !== 'telegram')
     || scope?.conversationScope !== 'direct'
   ) {
     return null
@@ -663,9 +664,7 @@ export function resolveAssistantHostedPhoneCallResultNotificationChannel(input: 
     return null
   }
   const channel = input.channel?.trim().toLowerCase()
-  return channel === 'linq' || channel === 'telegram'
-    ? channel
-    : null
+  return channel === 'telegram' ? channel : null
 }
 
 function scopeHostedDeliveryContextPart(input: {

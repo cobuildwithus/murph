@@ -1,12 +1,7 @@
-import { Prisma, type PrismaClient } from "@prisma/client";
-import type {
-  HostedPhoneCallResultNotificationChannel,
-} from "@murphai/hosted-execution/phone-calls";
+import type { PrismaClient } from "@prisma/client";
 
-import { readHostedMailboxItemByDedupeKey } from "../hosted-mailbox/store";
 import { startHostedPointerWorkflow } from "../hosted-onboarding/workflow-start";
 import { getPrisma } from "../prisma";
-import { buildPhoneCallResultNotificationEventId } from "./result";
 import type {
   HostedPhoneCallReconciliationWorkflowInput,
   HostedPhoneCallReconciliationWorkflowStartResult,
@@ -31,41 +26,26 @@ export async function startHostedPhoneCallReconciliationWorkflow(
 export async function rearmHostedPhoneCallResultNotificationRecovery(input: {
   memberId: string;
   prisma?: PrismaClient;
-  readMailboxItem?: typeof readHostedMailboxItemByDedupeKey;
-  resultNotificationChannel: HostedPhoneCallResultNotificationChannel;
   signal?: AbortSignal;
   workflowStarter?: typeof startHostedPhoneCallReconciliationWorkflow;
 }): Promise<boolean> {
   const prisma = input.prisma ?? getPrisma();
-  // A new direct call requires this live route, and one member may have only
-  // one provider start in flight. Route loss can therefore strand only the
-  // newest analyzed call on that channel; keep restoration work to one indexed
-  // member-local candidate plus one mailbox dedupe read.
+  // Start one existing pointer workflow. A terminal outcome callback re-arms
+  // the next member-local obligation, so restoration never fans out work or
+  // treats transport-retention artifacts as delivery truth.
   const call = await prisma.hostedPhoneCall.findFirst({
-    orderBy: { createdAt: "desc" },
+    orderBy: { createdAt: "asc" },
     select: { id: true },
     where: {
-      OR: [
-        { resultEncrypted: { not: null } },
-        { resultJson: { not: Prisma.AnyNull } },
-      ],
       analyzedAt: { not: null },
       memberId: input.memberId,
-      resultNotificationChannel: input.resultNotificationChannel,
+      resultDeliveryStatus: {
+        in: ["pending", "queued", "sending"],
+      },
+      resultNotificationChannel: "telegram",
     },
   });
   if (!call) {
-    return false;
-  }
-
-  const readMailboxItem = input.readMailboxItem
-    ?? readHostedMailboxItemByDedupeKey;
-  const existing = await readMailboxItem({
-    dedupeKey: buildPhoneCallResultNotificationEventId(call.id),
-    prisma,
-    userId: input.memberId,
-  });
-  if (existing) {
     return false;
   }
 
@@ -74,4 +54,16 @@ export async function rearmHostedPhoneCallResultNotificationRecovery(input: {
     { signal: input.signal ?? new AbortController().signal },
   );
   return true;
+}
+
+export async function rearmHostedPhoneCallResultNotificationRecoveryBestEffort(
+  input: Parameters<typeof rearmHostedPhoneCallResultNotificationRecovery>[0],
+): Promise<void> {
+  try {
+    await rearmHostedPhoneCallResultNotificationRecovery(input);
+  } catch {
+    // A Telegram route bind remains valid even when Workflow is temporarily
+    // unavailable. The next bind, inbound, or delivery callback retries rearm.
+    console.warn("Hosted phone-call result recovery rearm failed.");
+  }
 }

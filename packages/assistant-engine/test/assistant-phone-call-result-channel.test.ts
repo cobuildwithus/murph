@@ -26,7 +26,7 @@ const START_REQUEST: HostedPhoneCallStartRequest = {
 
 describe("assistant hosted phone-call result routing", () => {
   it.each([
-    ["linq", "direct", "linq"],
+    ["linq", "direct", null],
     ["telegram", "direct", "telegram"],
     ["email", "direct", null],
     ["telegram", "group", null],
@@ -41,7 +41,7 @@ describe("assistant hosted phone-call result routing", () => {
   );
 
   it.each([
-    ["linq", "direct", "linq"],
+    ["linq", "direct", undefined],
     ["telegram", "direct", "telegram"],
     ["telegram", "group", undefined],
   ] as const)(

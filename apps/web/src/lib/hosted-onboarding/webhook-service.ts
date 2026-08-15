@@ -1976,8 +1976,8 @@ export async function handleHostedOnboardingTelegramWebhook(input: {
       scheduleAfterResponse: input.scheduleAfterResponse,
     });
     await rearmHostedPhoneCallResultRecoveriesAfterCommitBestEffort({
+      memberIds: plan.postCommitPhoneCallResultRecoveryMemberIds ?? [],
       prisma,
-      recoveries: plan.postCommitPhoneCallResultRecoveries ?? [],
       scheduleAfterResponse: input.scheduleAfterResponse,
     });
   }
@@ -1986,24 +1986,18 @@ export async function handleHostedOnboardingTelegramWebhook(input: {
 
 async function rearmHostedPhoneCallResultRecoveriesAfterCommitBestEffort(input: {
   prisma: PrismaClient;
-  recoveries: readonly {
-    memberId: string;
-    resultNotificationChannel: "linq" | "telegram";
-  }[];
+  memberIds: readonly string[];
   scheduleAfterResponse?: HostedWebhookPostResponseScheduler;
 }): Promise<void> {
-  const recoveries = [...new Map(input.recoveries.map((recovery) => [
-    `${recovery.memberId}:${recovery.resultNotificationChannel}`,
-    recovery,
-  ])).values()];
-  if (recoveries.length === 0) {
+  const memberIds = [...new Set(input.memberIds)];
+  if (memberIds.length === 0) {
     return;
   }
   const rearm = async () => {
-    for (const recovery of recoveries) {
+    for (const memberId of memberIds) {
       try {
         await rearmHostedPhoneCallResultNotificationRecovery({
-          ...recovery,
+          memberId,
           prisma: input.prisma,
         });
       } catch (error) {

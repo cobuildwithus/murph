@@ -864,6 +864,7 @@ describe("Retell phone-call result handling", () => {
         },
       },
       memberId: "member_123",
+      resultDeliveryGeneration: 1,
       result: {
         outcome: "completed",
         summary: "The office confirmed the appointment.",
@@ -884,8 +885,9 @@ describe("Retell phone-call result handling", () => {
       threadIsDirect: true,
     });
     expect(wake.notification.deliveryDedupeToken).toBe(
-      "phone-call-result:hpc_telegram_direct",
+      "phone-call-result:hpc_telegram_direct:generation:1",
     );
+    expect(wake.notification.responsePolicy).toEqual({ kind: "require_send" });
   });
 
   it("signals the runtime only after a prepared result appends its mailbox item", async () => {
@@ -2022,6 +2024,9 @@ function buildHostedPhoneCall(overrides: Partial<HostedPhoneCall> = {}): HostedP
     provider: "retell",
     providerCallId: "retell_call_123",
     requestKey: "phone_call_request_1",
+    resultDeliveryGeneration: 0,
+    resultDeliveryStatus: null,
+    resultDeliveryTerminalAt: null,
     resultEncrypted: null,
     resultJson: null,
     resultNotificationChannel: null,
@@ -2091,7 +2096,7 @@ function createWebhookStore(input: {
           resultJson: "resultJson" in args.data
             ? args.data.resultJson === Prisma.DbNull ? null : currentCall.resultJson
             : currentCall.resultJson,
-          status: args.data.status,
+          status: args.data.status ?? currentCall.status,
         };
         return { count: 1 };
       },

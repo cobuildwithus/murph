@@ -106,6 +106,7 @@ export async function planHostedOnboardingTelegramWebhook(input: {
     let familyDraftCheckoutConflictInviteCode: string | null = null;
     let familyAcceptance: Awaited<ReturnType<typeof acceptHostedFamilyInviteFromTelegramTx>> = null;
     let familyActivationWake: HostedWebhookWakeHandoff | null = null;
+    let familyTelegramBindingMemberId: string | null = null;
     try {
       familyAcceptance = await acceptHostedFamilyInviteFromTelegramTx({
         now: new Date(summary.occurredAt),
@@ -118,6 +119,9 @@ export async function planHostedOnboardingTelegramWebhook(input: {
               userId: activation.memberId,
             };
           }
+        },
+        onTelegramBindingWritten: (memberId) => {
+          familyTelegramBindingMemberId = memberId;
         },
         telegramThreadId: telegramMessage.threadId,
         telegramUsername: summary.senderTelegramUsername,
@@ -168,6 +172,7 @@ export async function planHostedOnboardingTelegramWebhook(input: {
       return {
         desiredSideEffects: [],
         postCommitGroupJoinConfirmationMemberIds: [familyAcceptance.memberId],
+        postCommitPhoneCallResultRecoveryMemberIds: [familyAcceptance.memberId],
         response: {
           ok: true,
           reason: "family-invite-accepted",
@@ -185,6 +190,13 @@ export async function planHostedOnboardingTelegramWebhook(input: {
     if (familyDraftCheckoutConflictInviteCode) {
       return {
         desiredSideEffects: [],
+        ...(familyTelegramBindingMemberId
+          ? {
+              postCommitPhoneCallResultRecoveryMemberIds: [
+                familyTelegramBindingMemberId,
+              ],
+            }
+          : {}),
         response: {
           familyInviteCode: familyDraftCheckoutConflictInviteCode,
           ignored: true,
@@ -195,7 +207,16 @@ export async function planHostedOnboardingTelegramWebhook(input: {
     }
 
     if (familyInviteTokenPresent || familyInviteNotAccepted) {
-      return buildIgnoredTelegramWebhookPlan("family-invite-not-accepted");
+      return {
+        ...buildIgnoredTelegramWebhookPlan("family-invite-not-accepted"),
+        ...(familyTelegramBindingMemberId
+          ? {
+              postCommitPhoneCallResultRecoveryMemberIds: [
+                familyTelegramBindingMemberId,
+              ],
+            }
+          : {}),
+      };
     }
   }
 
@@ -300,7 +321,14 @@ export async function planHostedOnboardingTelegramWebhook(input: {
   }
 
   if (!accessDecision.allowed) {
-    return buildIgnoredTelegramWebhookPlan("inactive-member");
+    return {
+      ...buildIgnoredTelegramWebhookPlan("inactive-member"),
+      ...(summary.isDirect
+        ? {
+            postCommitPhoneCallResultRecoveryMemberIds: [existingMember.id],
+          }
+        : {}),
+    };
   }
 
   let runtimeMemberId = existingMember.id;
@@ -497,10 +525,7 @@ export async function planHostedOnboardingTelegramWebhook(input: {
     postCommitGroupJoinConfirmationMemberIds: [existingMember.id],
     ...(summary.isDirect
       ? {
-          postCommitPhoneCallResultRecoveries: [{
-            memberId: existingMember.id,
-            resultNotificationChannel: "telegram",
-          }],
+          postCommitPhoneCallResultRecoveryMemberIds: [existingMember.id],
         }
       : {}),
     response: {

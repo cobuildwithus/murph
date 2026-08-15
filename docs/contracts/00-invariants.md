@@ -221,7 +221,8 @@ it has been explicitly elevated to a cross-cutting invariant.
   directly by the current foreground assistant phase may run as foreground
   work inside that window without publishing a snapshot. The only other
   exception is a server-identified, fixed-destination exact completion: a
-  transport-idempotent phone-call-result or usage-referral-reward notification,
+  generation-scoped phone-call-result or transport-idempotent
+  usage-referral-reward notification,
   or a private Assistant Ask completion whose `aask_done_*` identity binds its
   exact text, personal member, current direct route, and expiry. After fresh
   conversation work has priority, the runtime may select only those durable

@@ -27,6 +27,15 @@ const privyManagementMocks = vi.hoisted(() => ({
   setCustomMetadata: vi.fn(),
 }));
 
+const phoneCallResultRecoveryMocks = vi.hoisted(() => ({
+  rearmBestEffort: vi.fn(),
+}));
+
+vi.mock("@/src/lib/phone-calls/reconciliation-workflow-start", () => ({
+  rearmHostedPhoneCallResultNotificationRecoveryBestEffort:
+    phoneCallResultRecoveryMocks.rearmBestEffort,
+}));
+
 vi.mock("@privy-io/node", () => ({
   APIError: class APIError extends Error {},
   NotFoundError: class NotFoundError extends Error {},
@@ -310,6 +319,7 @@ describe("completeHostedPrivyVerification", () => {
     privyManagementMocks.getUser.mockImplementation(async (userId: string) =>
       livePrivyUsersById.get(userId) ?? { id: userId }
     );
+    phoneCallResultRecoveryMocks.rearmBestEffort.mockResolvedValue(undefined);
     vi.spyOn(console, "info").mockImplementation(() => {});
   });
 
@@ -1802,6 +1812,10 @@ describe("completeHostedPrivyVerification", () => {
       }),
     }));
     expect(prisma.hostedMemberRouting.upsert).toHaveBeenCalled();
+    expect(phoneCallResultRecoveryMocks.rearmBestEffort).toHaveBeenCalledWith({
+      memberId: existingMember.id,
+      prisma,
+    });
   });
 
   it("fails closed when Telegram auth resolves to multiple members across blind-index read candidates", async () => {

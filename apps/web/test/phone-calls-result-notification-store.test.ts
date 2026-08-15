@@ -64,8 +64,10 @@ import {
 const MEMBER_ID = "member_result_notification_store";
 const CALL_ID = "hpc_result_notification_store";
 const PROVIDER_CALL_ID = "retell_result_notification_store";
-const NOTIFICATION_DEDUPE_KEY =
+const LEGACY_NOTIFICATION_DEDUPE_KEY =
   `assistant.notification.requested:phone-call-result:${CALL_ID}`;
+const TRACKED_NOTIFICATION_DEDUPE_KEY =
+  `${LEGACY_NOTIFICATION_DEDUPE_KEY}:generation:1`;
 
 const RESULT: HostedPhoneCallResult = {
   outcome: "completed",
@@ -121,9 +123,15 @@ describe("default phone-call result notification store", () => {
       rootKey,
     }, phases);
     let transactionOpen = false;
-    const transactionClient = { kind: "mailbox-transaction" };
+    const transactionClient = {
+      hostedPhoneCall: {
+        updateMany: vi.fn(async () => ({ count: 1 })),
+      },
+      kind: "mailbox-transaction",
+    };
     const prisma = buildPrisma({
       call: buildStoredAnalyzedCall({
+        resultDeliveryStatus: "pending",
         resultNotificationChannel: "telegram",
       }),
       onTransaction: async (callback) => {
@@ -166,7 +174,7 @@ describe("default phone-call result notification store", () => {
     }) => {
       expect(transactionOpen).toBe(true);
       expect(input.tx).toBe(transactionClient);
-      expect(input.envelope.eventId).toBe(NOTIFICATION_DEDUPE_KEY);
+      expect(input.envelope.eventId).toBe(TRACKED_NOTIFICATION_DEDUPE_KEY);
       phases.push("mailbox-append");
       return {
         item: {
@@ -248,7 +256,7 @@ describe("default phone-call result notification store", () => {
     });
 
     expect(mocks.readHostedMailboxItemByDedupeKey).toHaveBeenCalledWith({
-      dedupeKey: NOTIFICATION_DEDUPE_KEY,
+      dedupeKey: LEGACY_NOTIFICATION_DEDUPE_KEY,
       prisma,
       userId: MEMBER_ID,
     });
@@ -263,6 +271,7 @@ describe("default phone-call result notification store", () => {
   it("converges concurrent webhook and reconciliation appends on one mailbox item", async () => {
     const prisma = buildPrisma({
       call: buildStoredAnalyzedCall({
+        resultDeliveryStatus: "pending",
         resultNotificationChannel: "telegram",
       }),
     });
@@ -324,13 +333,40 @@ function buildPrisma(input: {
   call?: HostedPhoneCall;
   onTransaction?: (callback: (tx: unknown) => Promise<unknown>) => Promise<unknown>;
 } = {}) {
-  const call = input.call ?? buildStoredAnalyzedCall();
+  let call = input.call ?? buildStoredAnalyzedCall();
+  const transactionClient = {
+    hostedPhoneCall: {
+      updateMany: vi.fn(async (args: {
+        data: {
+          resultDeliveryGeneration: number;
+          resultDeliveryStatus: HostedPhoneCall["resultDeliveryStatus"];
+          resultDeliveryTerminalAt: Date | null;
+        };
+        where: {
+          resultDeliveryGeneration: number;
+          resultDeliveryStatus: HostedPhoneCall["resultDeliveryStatus"];
+        };
+      }) => {
+        if (
+          call.resultDeliveryGeneration !== args.where.resultDeliveryGeneration
+          || call.resultDeliveryStatus !== args.where.resultDeliveryStatus
+        ) {
+          return { count: 0 };
+        }
+        call = {
+          ...call,
+          ...args.data,
+        };
+        return { count: 1 };
+      }),
+    },
+  };
   return {
     $transaction: vi.fn(async (callback: (tx: unknown) => Promise<unknown>) => {
       if (input.onTransaction) {
         return await input.onTransaction(callback);
       }
-      return await callback({ kind: "mailbox-transaction" });
+      return await callback(transactionClient);
     }),
     hostedPhoneCall: {
       findUnique: vi.fn(async () => call),
@@ -357,6 +393,9 @@ function buildStoredAnalyzedCall(
     provider: "retell",
     providerCallId: PROVIDER_CALL_ID,
     requestKey: "request_result_notification_store",
+    resultDeliveryGeneration: 0,
+    resultDeliveryStatus: null,
+    resultDeliveryTerminalAt: null,
     resultEncrypted: "encrypted-result",
     resultJson: null,
     resultNotificationChannel: null,
