@@ -221,8 +221,13 @@ export function hasAssistantOutboxDeliveryEvidence(
   if (intent.status === 'sent') {
     return true
   }
+  if (!allowAcceptedNonSentMedia) {
+    return false
+  }
+  if (carriesAssistantOutboxPersistedDeliveryCompletionCheckpoint(intent)) {
+    return true
+  }
   if (
-    !allowAcceptedNonSentMedia ||
     (
       intent.status !== 'retryable' &&
       intent.status !== 'sending' &&
@@ -240,6 +245,24 @@ export function hasAssistantOutboxDeliveryEvidence(
       delivery.providerMessageIds?.includes(effect.providerMessageId) === true
     )
   ).length === 1
+}
+
+export function carriesAssistantOutboxPersistedDeliveryCompletionCheckpoint(
+  intent: Pick<
+    AssistantOutboxIntent,
+    | 'delivery'
+    | 'deliveryConfirmationPending'
+    | 'deliveryTransportIdempotent'
+    | 'status'
+  >,
+): boolean {
+  return intent.status === 'sending' &&
+    intent.delivery !== null &&
+    intent.delivery.kind !== 'message-reaction' &&
+    (
+      intent.deliveryConfirmationPending ||
+      !intent.deliveryTransportIdempotent
+    )
 }
 
 export function renderAssistantGeneratedImageDeliveryHistoryText(

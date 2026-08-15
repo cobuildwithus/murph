@@ -3840,6 +3840,7 @@ test('sendAssistantNotificationLocal does not checkpoint a new output-only direc
 
   expect(beforeProviderAcceptedInputs).toHaveBeenCalledExactlyOnceWith({
     acceptedInputs: [],
+    turnId: 'turn-new-output-only-notification',
   })
 })
 

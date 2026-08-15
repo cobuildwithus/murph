@@ -166,6 +166,10 @@ const mocks = vi.hoisted(() => ({
   executeReadOnlyAssistantAsk: vi.fn(),
   hasCompleteAssistantAutoReplyDeliveryTerminalEvidence:
     vi.fn<HasCompleteAssistantAutoReplyDeliveryTerminalEvidence>(),
+  maintainAssistantAutoReplyRouteState: vi.fn(async () => ({
+    changed: false,
+    trusted: true,
+  })),
   prepareHostedCodexAssistantProcess: vi.fn<
     (
       input: HostedCodexAssistantProcessPreparationInput,
@@ -227,6 +231,17 @@ vi.mock("@murphai/assistant-engine/assistant-automation", async (importOriginal)
       mocks.hasCompleteAssistantAutoReplyDeliveryTerminalEvidence.mockImplementation(
         actual.hasCompleteAssistantAutoReplyDeliveryTerminalEvidence,
       ),
+  };
+});
+
+vi.mock("@murphai/assistant-engine/assistant-runtime-residue", async (importOriginal) => {
+  const actual = await importOriginal<
+    typeof import("@murphai/assistant-engine/assistant-runtime-residue")
+  >();
+  return {
+    ...actual,
+    maintainAssistantAutoReplyRouteState:
+      mocks.maintainAssistantAutoReplyRouteState,
   };
 });
 
@@ -22424,6 +22439,7 @@ describe("hosted workspace runtime entrypoint", () => {
             const selectedInputIds = assistantPhaseInputIds.at(-1) ?? [];
             const releaseProviderInputs =
               await phaseInput.beforeProviderAcceptedInputs?.({
+                turnId: "turn_hosted_runtime_test",
                 acceptedInputs: selectedInputIds.map((id) => ({
                   id,
                   source: "assistant-input" as const,
@@ -23413,6 +23429,7 @@ describe("hosted workspace runtime entrypoint", () => {
           );
           const releaseProviderInputs =
             await input.beforeProviderAcceptedInputs?.({
+              turnId: "turn_hosted_runtime_test",
               acceptedInputs: assistantInputIds.map((id) => ({
                 id,
                 source: "assistant-input" as const,
@@ -23724,6 +23741,7 @@ describe("hosted workspace runtime entrypoint", () => {
               const assistantInputId = assistantInputIds[0]!;
               const releaseProviderInputs =
                 await phaseInput.beforeProviderAcceptedInputs?.({
+                  turnId: "turn_hosted_runtime_test",
                   acceptedInputs: [{
                     id: assistantInputId,
                     source: "assistant-input",
@@ -23854,6 +23872,7 @@ describe("hosted workspace runtime entrypoint", () => {
                 assert.ok(originInputId);
                 const releaseSteeringInputs =
                   await phaseInput.beforeProviderAcceptedInputs?.({
+                    turnId: "turn_hosted_runtime_test",
                     acceptedInputs: [{
                       id: originInputId,
                       source: "assistant-input",
@@ -31995,6 +32014,7 @@ describe("hosted workspace runtime entrypoint", () => {
               );
               const release =
                 await phaseInput.beforeProviderAcceptedInputs?.({
+                  turnId: "turn_hosted_runtime_test",
                   acceptedInputs: [{
                     id: assistantInputId,
                     source: "assistant-input",
@@ -32042,6 +32062,7 @@ describe("hosted workspace runtime entrypoint", () => {
               );
               const release =
                 await phaseInput.beforeProviderAcceptedInputs?.({
+                  turnId: "turn_hosted_runtime_test",
                   acceptedInputs: [{
                     id: assistantInputId,
                     source: "assistant-input",
@@ -34651,6 +34672,7 @@ describe("hosted workspace runtime entrypoint", () => {
             vaultRoot,
           });
           const invalidRelease = await input.beforeProviderAcceptedInputs?.({
+            turnId: "turn_hosted_runtime_test",
             acceptedInputs: [
               { id: firstInputId, source: "assistant-input" },
               {
@@ -34663,6 +34685,7 @@ describe("hosted workspace runtime entrypoint", () => {
           assert.deepEqual(conversationActivity, ["uncertain"]);
           await invalidRelease?.();
           const release = await input.beforeProviderAcceptedInputs?.({
+            turnId: "turn_hosted_runtime_test",
             acceptedInputs: [
               { id: secondInputId, source: "assistant-input" },
               { id: firstInputId, source: "assistant-input" },
@@ -34689,12 +34712,14 @@ describe("hosted workspace runtime entrypoint", () => {
             vaultRoot,
           });
           const systemRelease = await input.beforeProviderAcceptedInputs?.({
+            turnId: "turn_hosted_runtime_test",
             acceptedInputs: [
               { id: systemInputId, source: "assistant-input" },
             ],
           });
           await systemRelease?.();
           const genericRelease = await input.beforeProviderAcceptedInputs?.({
+            turnId: "turn_hosted_runtime_test",
             acceptedInputs: [
               { id: "system_runtime_input", source: "system" },
             ],
@@ -34800,6 +34825,7 @@ describe("hosted workspace runtime entrypoint", () => {
             }
             try {
               await input.beforeProviderAcceptedInputs?.({
+                turnId: "turn_hosted_runtime_test",
                 acceptedInputs: [{ id: "system_provider_handoff", source: "system" }],
               });
             } catch (error) {
@@ -34871,6 +34897,7 @@ describe("hosted workspace runtime entrypoint", () => {
           async runAssistantPhase(input) {
             try {
               await input.beforeProviderAcceptedInputs?.({
+                turnId: "turn_hosted_runtime_test",
                 acceptedInputs: [{ id: "system_provider_authority", source: "system" }],
               });
             } catch (error) {
@@ -38419,6 +38446,7 @@ describe("hosted runtime shutdown signal", () => {
             assert.ok(originInputId);
             const releaseProviderInputs =
               await input.beforeProviderAcceptedInputs?.({
+                turnId: "turn_hosted_runtime_test",
                 acceptedInputs: [{
                   id: originInputId,
                   source: "assistant-input",
@@ -38593,6 +38621,7 @@ describe("hosted runtime shutdown signal", () => {
             const originInputId = assistantInputIds[0]!;
             const releaseProviderInputs =
               await phaseInput.beforeProviderAcceptedInputs?.({
+                turnId: "turn_hosted_runtime_test",
                 acceptedInputs: [{
                   id: originInputId,
                   source: "assistant-input",
