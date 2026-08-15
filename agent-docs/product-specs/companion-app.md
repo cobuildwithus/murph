@@ -350,14 +350,22 @@ privacy, signed-device, and paired-ECG gates pass.
 ### Automated native acceptance
 
 Auth/control/device-sync changes use the protected cross-repository acceptance
-contract in `agent-docs/references/native-ios-hosted-e2e.md`. The required PR
-proof is the normally compiled iOS app on a physical iPhone against the exact
-PR SHA deployed as a real hosted/minified Web build, with real Privy OTP, real
-companion admission/legal-consent/sign-in-token persistence, real Junction/Vital
-SDK calls, and the real HealthKit permission UI. Mocked, fixture, hosted-local,
-or hermetic client coverage cannot replace that gate. Repeatability uses only
-the existing user-owned account deletion boundary; production canary mode is
-fail-closed and non-destructive.
+lane documented in `agent-docs/references/testing-ci-map.md`. The required PR
+proof runs the normally compiled iOS app on an Apple simulator against the exact
+PR SHA deployed as a real hosted/minified Web build, with the dedicated real
+non-production Privy test account/OTP, real companion admission/legal consent and
+sign-in-token persistence, real Junction sandbox SDK calls, and the real iOS
+HealthKit permission UI. Mocked, fixture, hosted-local, or hermetic coverage
+cannot replace that gate. Native completion alone is insufficient: before
+cleanup, trusted orchestration proves the fixed Privy principal was created in
+this run and the corresponding real Junction sandbox user reports a connected
+`apple_health_kit` provider. Before native dispatch it also proves the exact
+candidate origin succeeds anonymously without deployment-protection credentials.
+The protected runner owns `orchestrator_owned_reset`: retire only lane-owned E2E
+deployments, enumerate the lane-exclusive Junction sandbox team, delete its sole
+production-derived or orphaned lane user and prove the team empty, reset only the
+isolated E2E database, then delete only the fixed Privy user. Production canary
+mode uses an existing identity and is non-destructive.
 
 ### App Store review requirements (verified June 2026)
 

@@ -21,7 +21,6 @@
     "hosted-billing:live:preflight": "pnpm exec tsx --tsconfig apps/web/tsconfig.json apps/web/scripts/preflight-hosted-stripe-billing-live.ts",
     "hosted-billing:live:cleanup": "pnpm exec tsx --tsconfig apps/web/tsconfig.json apps/web/scripts/cleanup-hosted-stripe-billing-live.ts",
     "hosted-billing:ci-guard": "pnpm exec tsx --tsconfig tsconfig.base.json scripts/check-hosted-stripe-billing-ci.ts",
-    "native-ios-e2e:ci-guard": "node scripts/check-native-ios-hosted-e2e-ci.mjs",
     "temporal:dev": "bash scripts/temporal-dev-server.sh",
     "wearable:capture": "pnpm exec tsx --tsconfig tsconfig.base.json scripts/wearable-fixture-capture.ts",
     "test:e2e:hosted-local": "pnpm hosted-local e2e",

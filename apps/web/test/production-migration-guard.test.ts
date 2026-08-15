@@ -46,11 +46,6 @@ import {
   resolveHostedWebMigrationDatabaseUrl,
   type HostedWebMigrationEnvironment,
 } from "../scripts/run-prisma-migrate-deploy";
-import {
-  findNativeIosHostedE2eDivergentAppliedMigrations,
-  nativeIosHostedE2eVercelTargetEnvironment,
-  runNativeIosHostedE2eMigrationsIfNeeded,
-} from "../scripts/run-native-ios-hosted-e2e-migrations";
 
 const appTestDir = path.dirname(fileURLToPath(import.meta.url));
 const appRoot = path.resolve(appTestDir, "..");
@@ -99,130 +94,6 @@ describe("hosted web production migration guard", () => {
       assert.equal(result, "skipped");
       assert.equal(commandRan, false);
     }
-  });
-
-  test("rejects applied E2E migration history absent from or changed in the exact source", () => {
-    const local = new Map([
-      ["20260814000000_baseline", "baseline-checksum"],
-      ["20260815000000_current", "current-checksum"],
-    ]);
-
-    assert.deepEqual(
-      findNativeIosHostedE2eDivergentAppliedMigrations(local, [
-        {
-          checksum: "baseline-checksum",
-          migrationName: "20260814000000_baseline",
-        },
-        {
-          checksum: "current-checksum",
-          migrationName: "20260815000000_current",
-        },
-      ]),
-      [],
-    );
-    assert.deepEqual(
-      findNativeIosHostedE2eDivergentAppliedMigrations(local, [
-        {
-          checksum: "baseline-checksum",
-          migrationName: "20260814000000_baseline",
-        },
-        {
-          checksum: "abandoned-checksum",
-          migrationName: "20260814999999_abandoned_pr",
-        },
-        {
-          checksum: "edited-checksum",
-          migrationName: "20260815000000_current",
-        },
-      ]),
-      ["20260814999999_abandoned_pr", "20260815000000_current"],
-    );
-  });
-
-  test("runs real Prisma migrations only for the native iOS Vercel custom environment", async () => {
-    const calls: HostedWebMigrationEnvironment[] = [];
-    const historyChecks: HostedWebMigrationEnvironment[] = [];
-    const result = await runNativeIosHostedE2eMigrationsIfNeeded(
-      {
-        DATABASE_URL: "postgresql://runtime.example.test/murph",
-        DIRECT_DATABASE_URL: "postgresql://direct.example.test/murph",
-        VERCEL: "1",
-        VERCEL_ENV: "preview",
-        VERCEL_GIT_COMMIT_SHA: "a".repeat(40),
-        VERCEL_TARGET_ENV: nativeIosHostedE2eVercelTargetEnvironment,
-      },
-      async (environment) => {
-        calls.push(environment);
-      },
-      async (environment) => {
-        historyChecks.push(environment);
-      },
-    );
-
-    assert.equal(result, "ran");
-    assert.equal(historyChecks.length, 1);
-    assert.equal(calls.length, 1);
-    assert.equal(
-      historyChecks[0]?.MURPH_REQUIRE_DIRECT_DATABASE_URL_FOR_MIGRATIONS,
-      "1",
-    );
-    assert.equal(calls[0]?.MURPH_REQUIRE_DIRECT_DATABASE_URL_FOR_MIGRATIONS, "1");
-    assert.equal(
-      calls[0]?.DIRECT_DATABASE_URL,
-      "postgresql://direct.example.test/murph",
-    );
-  });
-
-  test("keeps native iOS E2E migrations fail-closed and out of ordinary builds", async () => {
-    let calls = 0;
-    const run = async () => {
-      calls += 1;
-    };
-
-    assert.equal(
-      await runNativeIosHostedE2eMigrationsIfNeeded(
-        { VERCEL: "1", VERCEL_ENV: "preview", VERCEL_TARGET_ENV: "preview" },
-        run,
-      ),
-      "skipped",
-    );
-    assert.equal(calls, 0);
-
-    await assert.rejects(
-      () => runNativeIosHostedE2eMigrationsIfNeeded(
-        {
-          VERCEL_ENV: "preview",
-          VERCEL_GIT_COMMIT_SHA: "b".repeat(40),
-          VERCEL_TARGET_ENV: nativeIosHostedE2eVercelTargetEnvironment,
-        },
-        run,
-      ),
-      /valid only inside Vercel/u,
-    );
-    await assert.rejects(
-      () => runNativeIosHostedE2eMigrationsIfNeeded(
-        {
-          VERCEL: "1",
-          VERCEL_ENV: "production",
-          VERCEL_GIT_COMMIT_SHA: "b".repeat(40),
-          VERCEL_TARGET_ENV: nativeIosHostedE2eVercelTargetEnvironment,
-        },
-        run,
-      ),
-      /must never be canonical production/u,
-    );
-    await assert.rejects(
-      () => runNativeIosHostedE2eMigrationsIfNeeded(
-        {
-          VERCEL: "1",
-          VERCEL_ENV: "preview",
-          VERCEL_TARGET_ENV: nativeIosHostedE2eVercelTargetEnvironment,
-        },
-        run,
-      ),
-      /requires an exact Vercel Git SHA/u,
-    );
-    assert.equal(calls, 0);
   });
 
   test("preflights the session key and runs production commands without operator Vercel credentials", async () => {
@@ -1671,12 +1542,8 @@ describe("hosted web production migration guard", () => {
       "pnpm --dir ../.. exec tsx apps/web/scripts/verify-vercel-production-deployment-protection.ts",
     );
     assert.equal(
-      scripts["release:native-ios-hosted-e2e:migrate"],
-      "pnpm --dir ../.. exec tsx apps/web/scripts/run-native-ios-hosted-e2e-migrations.ts",
-    );
-    assert.equal(
       vercelJson.buildCommand,
-      "pnpm release:native-ios-hosted-e2e:migrate && pnpm release:production:migrate && MURPH_HOSTED_WEB_PRISMA_GENERATED_BY_MIGRATIONS=1 pnpm build",
+      'if [ "${VERCEL_TARGET_ENV:-}" = "native-ios-e2e" ]; then if [ "${VERCEL_ENV:-}" = "production" ]; then echo "native-ios-e2e must not use Vercel production" >&2; exit 1; fi; MURPH_REQUIRE_DIRECT_DATABASE_URL_FOR_MIGRATIONS=1 pnpm prisma:migrate:deploy; fi; pnpm release:production:migrate && MURPH_HOSTED_WEB_PRISMA_GENERATED_BY_MIGRATIONS=1 pnpm build',
     );
     assert.equal(scripts["migrate:production:prebuild"], undefined);
     assert.equal(
