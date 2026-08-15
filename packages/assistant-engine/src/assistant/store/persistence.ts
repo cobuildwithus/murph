@@ -1,23 +1,27 @@
+import { createHash } from 'node:crypto'
 import {
   access,
   open,
   readdir,
   readFile,
+  rm,
+  stat,
   type FileHandle,
 } from 'node:fs/promises'
 import path from 'node:path'
-import type * as z from '@murphai/contracts/zod-runtime'
+import * as z from '@murphai/contracts/zod-runtime'
 import {
   assistantAliasStoreSchema,
   assistantAutomationStateSchema,
   assistantPersistedSessionSchema,
+  assistantSessionIdSchema,
   assistantTranscriptEntrySchema,
-  type AssistantAliasStore,
   type AssistantAutomationState,
   type AssistantSession,
   type AssistantTranscriptEntry,
   parseAssistantSessionRecord,
 } from '@murphai/operator-config/assistant-cli-contracts'
+import { isoTimestampSchema } from '@murphai/operator-config/vault-cli-contracts'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
   assistantWithinConversationDriftFields,
@@ -55,7 +59,6 @@ import { resolveAssistantOpaqueStateFilePath } from '../state-ids.js'
 import type { AssistantStatePaths } from './paths.js'
 import type { ResolvedAssistantSession } from './types.js'
 
-export const ASSISTANT_INDEX_STORE_VERSION = 1
 export const ASSISTANT_AUTOMATION_STATE_VERSION = 1
 export const ASSISTANT_TRANSCRIPT_AUDIT_RETENTION_LIMIT = 100
 /**
@@ -69,6 +72,29 @@ export const ASSISTANT_TRANSCRIPT_AUDIT_RETENTION_LIMIT = 100
  */
 export const ASSISTANT_TRANSCRIPT_CONTENT_RETENTION_MS = 14 * 24 * 60 * 60 * 1000
 const ASSISTANT_RECENT_SESSIONS_INDEX_LIMIT = 50
+const ASSISTANT_SESSION_INDEX_VERSION = 2
+const ASSISTANT_SESSION_ROUTING_RECORD_VERSION = 1
+const ASSISTANT_SESSION_ROUTING_DIRECTORY_NAME = 'session-routing'
+type AssistantSessionRoutingKind = 'alias' | 'conversation-key'
+
+const assistantSessionIndexSchema = z
+  .object({
+    version: z.literal(ASSISTANT_SESSION_INDEX_VERSION),
+    recentSessions: z.record(assistantSessionIdSchema, isoTimestampSchema),
+  })
+  .strict()
+
+const assistantSessionRoutingRecordSchema = z
+  .object({
+    version: z.literal(ASSISTANT_SESSION_ROUTING_RECORD_VERSION),
+    sessionId: assistantSessionIdSchema,
+  })
+  .strict()
+
+type AssistantSessionIndex = z.infer<typeof assistantSessionIndexSchema>
+type AssistantSessionRoutingRecord = z.infer<
+  typeof assistantSessionRoutingRecordSchema
+>
 
 const assistantAutomationStateCache = createAssistantBoundedRuntimeCache<string, AssistantAutomationState>({
   name: 'assistant.automation-state',
@@ -265,6 +291,31 @@ export function resolveAssistantSessionPath(
     kind: 'session',
     value: sessionId,
   })
+}
+
+function resolveAssistantSessionRoutingDirectory(
+  paths: AssistantStatePaths,
+): string {
+  return path.join(
+    paths.stateDirectory,
+    ASSISTANT_SESSION_ROUTING_DIRECTORY_NAME,
+  )
+}
+
+export function resolveAssistantSessionRoutingRecordPath(
+  paths: AssistantStatePaths,
+  kind: AssistantSessionRoutingKind,
+  key: string,
+): string {
+  const digest = createHash('sha256')
+    .update(kind)
+    .update('\0')
+    .update(key)
+    .digest('hex')
+  return path.join(
+    resolveAssistantSessionRoutingDirectory(paths),
+    `${digest}.json`,
+  )
 }
 
 export async function inspectAssistantSessionStorage(input: {
@@ -640,7 +691,9 @@ export async function loadAndPersistResolvedSession(input: {
     bindingPatch: AssistantBindingPatch
     lookupSource: 'alias' | 'conversation-key' | 'session-id'
   }
+  expectedAlias?: string
   expectedContinuityFingerprint?: string | null
+  expectedConversationKey?: string
   skipIfExpired?: boolean
   maxSessionAgeMs?: number | null
   now?: Date
@@ -650,6 +703,14 @@ export async function loadAndPersistResolvedSession(input: {
     sessionId: input.sessionId,
   })
   if (!existing) {
+    return null
+  }
+  if (
+    (input.expectedAlias !== undefined &&
+      existing.alias !== input.expectedAlias) ||
+    (input.expectedConversationKey !== undefined &&
+      existing.binding.conversationKey !== input.expectedConversationKey)
+  ) {
     return null
   }
   if (
@@ -729,50 +790,40 @@ export function isAssistantSessionExpired(
   return nowTime - referenceTime >= normalizedMaxAgeMs
 }
 
-export async function readAssistantIndexStore(
+export async function readAssistantSessionRouting(
   paths: AssistantStatePaths,
-): Promise<AssistantAliasStore> {
-  let raw: string
-  try {
-    raw = await readFile(paths.indexesPath, 'utf8')
-  } catch (error) {
-    if (!isMissingFileError(error)) {
-      throw error
+  input: {
+    alias: string | null
+    conversationKeys: readonly string[]
+  },
+): Promise<{
+  aliasSessionId: string | null
+  conversationKeySessionIds: ReadonlyMap<string, string>
+}> {
+  await readAssistantSessionIndex(paths)
+
+  const aliasSessionId = input.alias
+    ? (await readAssistantSessionRoutingRecord(
+        paths,
+        'alias',
+        input.alias,
+      ))?.sessionId ?? null
+    : null
+  const conversationKeySessionIds = new Map<string, string>()
+  for (const conversationKey of new Set(input.conversationKeys)) {
+    const record = await readAssistantSessionRoutingRecord(
+      paths,
+      'conversation-key',
+      conversationKey,
+    )
+    if (record) {
+      conversationKeySessionIds.set(conversationKey, record.sessionId)
     }
-    if (await hasDurableAssistantSessions(paths)) {
-      return rebuildAssistantIndexStore(paths)
-    }
-    const initial = createInitialAssistantIndexStore()
-    await writeJsonFileAtomic(paths.indexesPath, initial)
-    return initial
   }
 
-  try {
-    const parsed = assistantAliasStoreSchema.parse(JSON.parse(raw))
-    if (parsed.recentSessions === undefined) {
-      if (await hasDurableAssistantSessions(paths)) {
-        return rebuildAssistantIndexStore(paths)
-      }
-      const upgraded = assistantAliasStoreSchema.parse({
-        ...parsed,
-        recentSessions: {},
-      })
-      await writeJsonFileAtomic(paths.indexesPath, upgraded)
-      return upgraded
-    }
-    return parsed
-  } catch (error) {
-    const quarantine = await quarantineAssistantStateFile({
-      artifactKind: 'indexes',
-      error,
-      expectedContent: raw,
-      filePath: paths.indexesPath,
-      paths,
-    })
-    if (!quarantine) {
-      return await readAssistantIndexStore(paths)
-    }
-    return await rebuildAssistantIndexStore(paths)
+  return {
+    aliasSessionId,
+    conversationKeySessionIds,
   }
 }
 
@@ -781,37 +832,49 @@ export async function synchronizeAssistantIndexes(
   session: AssistantSession,
   previous: AssistantSession | null,
 ): Promise<void> {
-  const store = await readAssistantIndexStore(paths)
-  const aliases = {
-    ...store.aliases,
+  const index = await readAssistantSessionIndex(paths)
+
+  if (session.alias) {
+    await writeAssistantSessionRoutingRecord(
+      paths,
+      'alias',
+      session.alias,
+      session.sessionId,
+    )
   }
-  const conversationKeys = {
-    ...store.conversationKeys,
+  if (session.binding.conversationKey) {
+    await writeAssistantSessionRoutingRecord(
+      paths,
+      'conversation-key',
+      session.binding.conversationKey,
+      session.sessionId,
+    )
   }
 
   if (previous?.alias && previous.alias !== session.alias) {
-    delete aliases[previous.alias]
+    await removeAssistantSessionRoutingRecordIfOwned(
+      paths,
+      'alias',
+      previous.alias,
+      session.sessionId,
+    )
   }
   if (
     previous?.binding.conversationKey &&
     previous.binding.conversationKey !== session.binding.conversationKey
   ) {
-    delete conversationKeys[previous.binding.conversationKey]
+    await removeAssistantSessionRoutingRecordIfOwned(
+      paths,
+      'conversation-key',
+      previous.binding.conversationKey,
+      session.sessionId,
+    )
   }
 
-  if (session.alias) {
-    aliases[session.alias] = session.sessionId
-  }
-  if (session.binding.conversationKey) {
-    conversationKeys[session.binding.conversationKey] = session.sessionId
-  }
-
-  const updated = assistantAliasStoreSchema.parse({
-    version: ASSISTANT_INDEX_STORE_VERSION,
-    aliases,
-    conversationKeys,
+  const updated = assistantSessionIndexSchema.parse({
+    version: ASSISTANT_SESSION_INDEX_VERSION,
     recentSessions: pruneAssistantRecentSessions({
-      ...(store.recentSessions ?? {}),
+      ...index.recentSessions,
       [session.sessionId]: session.lastTurnAt ?? session.updatedAt,
     }),
   })
@@ -829,8 +892,251 @@ export async function readAssistantRecentSessionIds(
     return []
   }
 
-  const store = await readAssistantIndexStore(paths)
-  return sortRecentSessionIds(store.recentSessions ?? {}).slice(0, limit)
+  const index = await readAssistantSessionIndex(paths)
+  return sortRecentSessionIds(index.recentSessions).slice(0, limit)
+}
+
+async function readAssistantSessionIndex(
+  paths: AssistantStatePaths,
+): Promise<AssistantSessionIndex> {
+  let raw: string
+  try {
+    raw = await readFile(paths.indexesPath, 'utf8')
+  } catch (error) {
+    if (!isMissingFileError(error)) {
+      throw error
+    }
+    return await recoverAssistantSessionIndex(paths)
+  }
+
+  let value: unknown
+  try {
+    value = JSON.parse(raw)
+  } catch (error) {
+    return await quarantineAndRecoverAssistantSessionIndex({
+      error,
+      paths,
+      raw,
+    })
+  }
+
+  const current = assistantSessionIndexSchema.safeParse(value)
+  if (current.success) {
+    if (await hasAssistantSessionRoutingDirectory(paths)) {
+      return current.data
+    }
+    return await recoverAssistantSessionIndex(paths)
+  }
+
+  if (assistantAliasStoreSchema.safeParse(value).success) {
+    return await recoverAssistantSessionIndex(paths)
+  }
+
+  return await quarantineAndRecoverAssistantSessionIndex({
+    error: current.error,
+    paths,
+    raw,
+  })
+}
+
+async function quarantineAndRecoverAssistantSessionIndex(input: {
+  error: unknown
+  paths: AssistantStatePaths
+  raw: string
+}): Promise<AssistantSessionIndex> {
+  const quarantine = await quarantineAssistantStateFile({
+    artifactKind: 'indexes',
+    error: input.error,
+    expectedContent: input.raw,
+    filePath: input.paths.indexesPath,
+    paths: input.paths,
+  })
+  if (!quarantine) {
+    return await readAssistantSessionIndex(input.paths)
+  }
+  return await recoverAssistantSessionIndex(input.paths)
+}
+
+async function recoverAssistantSessionIndex(
+  paths: AssistantStatePaths,
+): Promise<AssistantSessionIndex> {
+  if (await hasDurableAssistantSessions(paths)) {
+    return await rebuildAssistantSessionIndex(paths)
+  }
+  return await initializeAssistantSessionIndex(paths)
+}
+
+async function initializeAssistantSessionIndex(
+  paths: AssistantStatePaths,
+): Promise<AssistantSessionIndex> {
+  await rm(paths.indexesPath, { force: true })
+  await resetAssistantSessionRoutingDirectory(paths)
+  const initial = assistantSessionIndexSchema.parse({
+    version: ASSISTANT_SESSION_INDEX_VERSION,
+    recentSessions: {},
+  })
+  await writeJsonFileAtomic(paths.indexesPath, initial)
+  return initial
+}
+
+async function rebuildAssistantSessionIndex(
+  paths: AssistantStatePaths,
+): Promise<AssistantSessionIndex> {
+  const entries = await readdir(paths.sessionsDirectory, {
+    withFileTypes: true,
+  })
+  const sessions: AssistantSession[] = []
+
+  for (const entry of entries) {
+    if (!entry.isFile() || !entry.name.endsWith('.json')) {
+      continue
+    }
+
+    try {
+      const session = await readAssistantSession({
+        paths,
+        sessionId: entry.name.replace(/\.json$/u, ''),
+        treatCorruptedAsMissing: true,
+      })
+      if (!session) {
+        continue
+      }
+      sessions.push(session)
+    } catch {
+      // Quarantine already happened in readAssistantSession; keep rebuild best-effort.
+    }
+  }
+
+  // The compact metadata file is the format marker. Remove it before replacing
+  // exact routing records and write it last so an interrupted migration simply
+  // rebuilds again from canonical session files on the next access.
+  await rm(paths.indexesPath, { force: true })
+  await resetAssistantSessionRoutingDirectory(paths)
+
+  const recentSessions: Record<string, string> = {}
+  for (const session of sortSessionsForIndexRebuild(sessions)) {
+    if (session.alias) {
+      await writeAssistantSessionRoutingRecord(
+        paths,
+        'alias',
+        session.alias,
+        session.sessionId,
+      )
+    }
+    if (session.binding.conversationKey) {
+      await writeAssistantSessionRoutingRecord(
+        paths,
+        'conversation-key',
+        session.binding.conversationKey,
+        session.sessionId,
+      )
+    }
+    recentSessions[session.sessionId] = resolveAssistantIndexRebuildTimestamp(session)
+  }
+
+  const rebuilt = assistantSessionIndexSchema.parse({
+    version: ASSISTANT_SESSION_INDEX_VERSION,
+    recentSessions: pruneAssistantRecentSessions(recentSessions),
+  })
+  await writeJsonFileAtomic(paths.indexesPath, rebuilt)
+  await appendAssistantRuntimeEventAtPaths(paths, {
+    component: 'state',
+    entityId: 'indexes',
+    entityType: 'indexes',
+    kind: 'indexes.rebuilt',
+    level: 'warn',
+    message: 'Assistant session indexes were rebuilt from durable session files.',
+  }).catch(() => undefined)
+  return rebuilt
+}
+
+async function readAssistantSessionRoutingRecord(
+  paths: AssistantStatePaths,
+  kind: AssistantSessionRoutingKind,
+  key: string,
+): Promise<AssistantSessionRoutingRecord | null> {
+  const filePath = resolveAssistantSessionRoutingRecordPath(paths, kind, key)
+  let raw: string
+  try {
+    raw = await readFile(filePath, 'utf8')
+  } catch (error) {
+    if (isMissingFileError(error)) {
+      return null
+    }
+    throw error
+  }
+
+  try {
+    return assistantSessionRoutingRecordSchema.parse(JSON.parse(raw))
+  } catch (error) {
+    const quarantine = await quarantineAssistantStateFile({
+      artifactKind: 'indexes',
+      error,
+      expectedContent: raw,
+      filePath,
+      paths,
+    })
+    if (!quarantine) {
+      return await readAssistantSessionRoutingRecord(paths, kind, key)
+    }
+    await recoverAssistantSessionIndex(paths)
+    return await readAssistantSessionRoutingRecord(paths, kind, key)
+  }
+}
+
+async function writeAssistantSessionRoutingRecord(
+  paths: AssistantStatePaths,
+  kind: AssistantSessionRoutingKind,
+  key: string,
+  sessionId: string,
+): Promise<void> {
+  const record = assistantSessionRoutingRecordSchema.parse({
+    version: ASSISTANT_SESSION_ROUTING_RECORD_VERSION,
+    sessionId,
+  })
+  await writeJsonFileAtomic(
+    resolveAssistantSessionRoutingRecordPath(paths, kind, key),
+    record,
+  )
+}
+
+async function removeAssistantSessionRoutingRecordIfOwned(
+  paths: AssistantStatePaths,
+  kind: AssistantSessionRoutingKind,
+  key: string,
+  sessionId: string,
+): Promise<void> {
+  const record = await readAssistantSessionRoutingRecord(paths, kind, key)
+  if (record?.sessionId !== sessionId) {
+    return
+  }
+  await rm(resolveAssistantSessionRoutingRecordPath(paths, kind, key), {
+    force: true,
+  })
+}
+
+async function resetAssistantSessionRoutingDirectory(
+  paths: AssistantStatePaths,
+): Promise<void> {
+  const directory = resolveAssistantSessionRoutingDirectory(paths)
+  await rm(directory, {
+    force: true,
+    recursive: true,
+  })
+  await ensureAssistantStateDirectory(directory)
+}
+
+async function hasAssistantSessionRoutingDirectory(
+  paths: AssistantStatePaths,
+): Promise<boolean> {
+  try {
+    return (await stat(resolveAssistantSessionRoutingDirectory(paths))).isDirectory()
+  } catch (error) {
+    if (isMissingFileError(error)) {
+      return false
+    }
+    throw error
+  }
 }
 
 function sortRecentSessionIds(
@@ -920,74 +1226,6 @@ export async function readAutomationState(
     }).catch(() => undefined)
     return initial
   }
-}
-
-function createInitialAssistantIndexStore(): AssistantAliasStore {
-  return assistantAliasStoreSchema.parse({
-    version: ASSISTANT_INDEX_STORE_VERSION,
-    aliases: {},
-    conversationKeys: {},
-    recentSessions: {},
-  })
-}
-
-async function rebuildAssistantIndexStore(
-  paths: AssistantStatePaths,
-): Promise<AssistantAliasStore> {
-  const entries = await readdir(paths.sessionsDirectory, {
-    withFileTypes: true,
-  })
-  const sessions: AssistantSession[] = []
-
-  for (const entry of entries) {
-    if (!entry.isFile() || !entry.name.endsWith('.json')) {
-      continue
-    }
-
-    try {
-      const session = await readAssistantSession({
-        paths,
-        sessionId: entry.name.replace(/\.json$/u, ''),
-        treatCorruptedAsMissing: true,
-      })
-      if (!session) {
-        continue
-      }
-      sessions.push(session)
-    } catch {
-      // Quarantine already happened in readAssistantSession; keep rebuild best-effort.
-    }
-  }
-
-  const aliases: Record<string, string> = {}
-  const conversationKeys: Record<string, string> = {}
-  const recentSessions: Record<string, string> = {}
-  for (const session of sortSessionsForIndexRebuild(sessions)) {
-    if (session.alias) {
-      aliases[session.alias] = session.sessionId
-    }
-    if (session.binding.conversationKey) {
-      conversationKeys[session.binding.conversationKey] = session.sessionId
-    }
-    recentSessions[session.sessionId] = resolveAssistantIndexRebuildTimestamp(session)
-  }
-
-  const rebuilt = assistantAliasStoreSchema.parse({
-    version: ASSISTANT_INDEX_STORE_VERSION,
-    aliases,
-    conversationKeys,
-    recentSessions: pruneAssistantRecentSessions(recentSessions),
-  })
-  await writeJsonFileAtomic(paths.indexesPath, rebuilt)
-  await appendAssistantRuntimeEventAtPaths(paths, {
-    component: 'state',
-    entityId: 'indexes',
-    entityType: 'indexes',
-    kind: 'indexes.rebuilt',
-    level: 'warn',
-    message: 'Assistant session indexes were rebuilt from durable session files.',
-  }).catch(() => undefined)
-  return rebuilt
 }
 
 async function hasDurableAssistantSessions(

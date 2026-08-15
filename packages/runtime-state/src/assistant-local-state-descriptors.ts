@@ -141,6 +141,10 @@ export const assistantLocalStateDescriptors: readonly VaultLocalStatePathDescrip
     ".runtime/operations/assistant/state",
     "Assistant state container used for portable onboarding continuity descendants.",
   ),
+  definePortableAssistantSubtree(
+    ".runtime/operations/assistant/state/session-routing",
+    "Assistant exact alias and conversation-key routing records that must move with hosted session continuity.",
+  ),
   definePortableAssistantDirectory(
     ".runtime/operations/assistant/state/onboarding",
     "Assistant onboarding state container used for portable conversation lifecycle and first-contact continuity descendants.",
@@ -179,7 +183,7 @@ export const assistantLocalStateDescriptors: readonly VaultLocalStatePathDescrip
   ),
   definePortableAssistantFile(
     ".runtime/operations/assistant/indexes.json",
-    "Assistant session alias and conversation indexes that keep hosted resume on the latest bound thread without a rebuild pass.",
+    "Assistant bounded recent-session index and routing format marker that keep hosted resume available without rebuilding session files.",
   ),
   definePortableAssistantSubtree(
     ".runtime/operations/assistant/journals",
