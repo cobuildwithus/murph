@@ -154,6 +154,24 @@ Never ship a broken half-feature for that person.
 If the available data cannot support the promise, reduce the promise or scope
 before code.
 
+### Calibration Examples
+
+These examples show how to select journeys. They are not fixed personas or an
+exhaustive checklist.
+
+- A member has a long connected-data history, but one useful evidence type is
+  missing or unsupported. Do not treat an empty result as proof that no useful
+  result exists. Distinguish absent evidence, incomplete import, weak coverage,
+  and a genuine lack of signal. Prove the minimum useful result for both rich
+  and partial histories.
+- A group change can affect a person with no groups, one relevant group, or
+  several possible groups. Add separate journeys only when membership, role,
+  channel, selection, consent, cost, disclosure, presentation, or delivery
+  changes the experience.
+- A rich message can look correct in a preview and still fail in ordinary use.
+  Walk the normal request through content selection, routing, delivery, and the
+  final client on each affected channel.
+
 ### Proof Path
 
 For each selected person, name the ordinary entry and the last observable
