@@ -20,14 +20,12 @@ import { getPrisma } from "../prisma";
 import { readActiveHostedMemberAccessIds } from "../hosted-onboarding/member-access";
 import {
   isHostedRuntimeInactiveAccessError,
-  requireHostedRuntimeActiveAccess,
   requireHostedRuntimeMembersActiveAccessForUpdateTx,
 } from "../hosted-mailbox/runtime-access";
-import { hostedOnboardingError } from "../hosted-onboarding/errors";
 import {
-  HOSTED_GROUP_VAULT_SHARE_GRANT_LIMIT_PER_GRANTOR_PROJECTION,
-  HOSTED_VAULT_SHARE_DELIVER_INVARIANT_READ_LIMIT,
-} from "./delivery-limits";
+  hostedOnboardingError,
+  isHostedOnboardingError,
+} from "../hosted-onboarding/errors";
 import { encryptHostedVaultShareProjectionSnapshot } from "./projection-snapshot";
 import { parseHostedVaultShareRowProjectionScope } from "./row-projection-scope";
 
@@ -360,23 +358,6 @@ async function lockCurrentHostedVaultShareSourceWorkspaceTx(input: {
     && rows[0]?.version === BigInt(input.sourceWorkspaceVersion);
 }
 
-async function hasHostedVaultShareRuntimeActiveAccessBeforePreparation(
-  memberIds: readonly string[],
-  prisma: PrismaClient,
-): Promise<boolean> {
-  try {
-    for (const memberId of memberIds) {
-      await requireHostedRuntimeActiveAccess(memberId, { prisma });
-    }
-    return true;
-  } catch (error) {
-    if (isHostedRuntimeInactiveAccessError(error)) {
-      return false;
-    }
-    throw error;
-  }
-}
-
 async function hasHostedVaultShareRuntimeActiveAccessForUpdateTx(
   memberIds: readonly string[],
   tx: Prisma.TransactionClient,
@@ -387,7 +368,13 @@ async function hasHostedVaultShareRuntimeActiveAccessForUpdateTx(
     });
     return true;
   } catch (error) {
-    if (isHostedRuntimeInactiveAccessError(error)) {
+    if (
+      isHostedRuntimeInactiveAccessError(error)
+      || (
+        isHostedOnboardingError(error)
+        && error.code === "HOSTED_RUNTIME_ACCESS_AUTHORITY_CHANGED"
+      )
+    ) {
       return false;
     }
     throw error;

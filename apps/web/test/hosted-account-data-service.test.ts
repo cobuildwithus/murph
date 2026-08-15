@@ -1992,7 +1992,7 @@ describe("deleteHostedAccountData", () => {
       .toBeLessThan(operationOrder.indexOf("delete:hostedGroup"));
   });
 
-  it("locks an affected participant before the drain and reprojects its daily signup marker", async () => {
+  it("reprojects an affected participant without taking an unrelated member lock", async () => {
     const participantMemberId = "member_group_participant";
     const occurredAt = new Date("2026-07-27T14:00:00.000Z");
     const outreachId = "hgrpjoa_owned_projection";
@@ -2021,10 +2021,7 @@ describe("deleteHostedAccountData", () => {
       request: new Request("https://join.example.test/settings"),
     });
 
-    expect(operationOrder.indexOf(`queryRaw:${participantMemberId}`))
-      .toBeGreaterThanOrEqual(0);
-    expect(operationOrder.indexOf(`queryRaw:${participantMemberId}`))
-      .toBeLessThan(operationOrder.lastIndexOf("executeRaw"));
+    expect(operationOrder).not.toContain(`queryRaw:${participantMemberId}`);
     expect(dailyStateUpdates).toContainEqual({
       data: { onboardingLinkSentAt: null },
       where: {

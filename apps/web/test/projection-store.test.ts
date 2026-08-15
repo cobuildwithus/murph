@@ -34,6 +34,7 @@ vi.mock("@/src/lib/hosted-mailbox/runtime-access", () => ({
 import {
   setHostedSecureBoxStringTestCodecForTests,
 } from "@/src/lib/hosted-crypto/secure-box";
+import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import {
   HostedDomainRootEnvelopeUnavailableError,
 } from "@/src/lib/hosted-crypto/domain-root-store";
@@ -393,6 +394,28 @@ describe("replaceHostedVaultShareProjectionSnapshot", () => {
       .mockRejectedValueOnce(inactiveError);
     mocks.isHostedRuntimeInactiveAccessError.mockImplementation(
       (error: unknown) => error === inactiveError,
+    );
+
+    await expect(replaceHostedVaultShareProjectionSnapshot({
+      prisma,
+      records: [RECORD],
+      share: SHARE,
+      sourceWorkspaceVersion: SOURCE_WORKSPACE_VERSION,
+    })).resolves.toBe("no-active-share");
+
+    expect(updateMany).not.toHaveBeenCalled();
+  });
+
+  it("returns no-active-share when deletion removes runtime ownership during locking", async () => {
+    createSnapshotTestCodec();
+    const { prisma, updateMany } = createPrisma();
+    mocks.requireHostedRuntimeMembersActiveAccessForUpdateTx.mockRejectedValueOnce(
+      hostedOnboardingError({
+        code: "HOSTED_RUNTIME_ACCESS_AUTHORITY_CHANGED",
+        httpStatus: 409,
+        message: "Hosted runtime access changed while validating authority. Retry the request.",
+        retryable: true,
+      }),
     );
 
     await expect(replaceHostedVaultShareProjectionSnapshot({
