@@ -15746,7 +15746,21 @@ test("Junction timeseries continuations retry the same resource after a source r
     summaryResources: [],
     timeseriesResources: ["heart_rate_alert"],
   });
-  const context = createJunctionJobContext({
+  const currentSourceSummary = () => ({
+    displayName: liveSource.displayName,
+    firstSeenAt: liveSource.firstSeenAt,
+    lastDataAt: liveSource.lastDataAt,
+    lastErrorCode: liveSource.lastErrorCode,
+    lastErrorMessage: liveSource.lastErrorMessage,
+    lastSeenAt: liveSource.lastSeenAt,
+    lifecycleEpoch: liveSource.lifecycleEpoch,
+    resourceAvailabilitySummary: liveSource.resourceAvailabilitySummary,
+    resourceCount: Object.keys(liveSource.resourceAvailabilitySummary).length,
+    sourceProviderSlug: liveSource.sourceProviderSlug,
+    status: liveSource.status,
+  });
+  const createContext = () => createJunctionJobContext({
+    account: createAccount({ sources: [currentSourceSummary()] }),
     importSnapshot: async (snapshot) => {
       importedSnapshots.push(snapshot);
       return { canonicalEventCount: 1, durableDeliveryAccepted: true };
@@ -15760,7 +15774,7 @@ test("Junction timeseries continuations retry the same resource after a source r
     windowStart: "2026-04-02T00:00:00.000Z",
   });
 
-  const first = await executeJunctionJob(provider, context, job);
+  const first = await executeJunctionJob(provider, createContext(), job);
   const retry = requireValue(
     first.scheduledJobs?.[0],
     "A superseded timeseries fetch should retain its exact continuation.",
@@ -15769,7 +15783,7 @@ test("Junction timeseries continuations retry the same resource after a source r
   assert.equal(retry.payload?.timeseriesCursor, job.payload.timeseriesCursor);
   assert.equal(retry.payload?.timeseriesResourceCursor, "heart_rate_alert");
 
-  await executeJunctionJob(provider, context, createJobFromInput(retry));
+  await executeJunctionJob(provider, createContext(), createJobFromInput(retry));
 
   assert.equal(requestCount, 2);
   assert.equal(importedSnapshots.length, 1);

@@ -3767,7 +3767,11 @@ export function createJunctionDeviceSyncProvider(
     windowEnd: string;
     windowStart: string;
   }): Promise<boolean> {
-    const sourceLifecycleFence = await captureJunctionSourceLifecycleFence(input.context);
+    const sourceLifecycleFence = resolveJunctionTimeseriesResourcePolicy(input.resource)
+      ?.maxCanonicalRecordsPerWindow !== undefined
+      && input.context.listConnectionSources
+      ? captureJunctionSourceLifecycleFence(input.context.account.sources ?? [])
+      : null;
     const records = await fetchTimeseriesResourceInChunks(
       input.context,
       input.resource,
@@ -9213,14 +9217,11 @@ function readJunctionSourceLifecycleEpoch(source: { lifecycleEpoch?: number }): 
     : 1;
 }
 
-async function captureJunctionSourceLifecycleFence(
-  context: ProviderJobContext,
-): Promise<JunctionSourceLifecycleFence | null> {
-  if (!context.listConnectionSources) {
-    return null;
-  }
+function captureJunctionSourceLifecycleFence(
+  sources: readonly JunctionImportAdmissionSource[],
+): JunctionSourceLifecycleFence {
   return new Map(
-    [...buildJunctionCurrentLifecycleSourceMap(await context.listConnectionSources())]
+    [...buildJunctionCurrentLifecycleSourceMap(sources)]
       .map(([sourceProviderSlug, sources]) => [
         sourceProviderSlug,
         readJunctionSourceLifecycleEpoch(sources[0]!),
@@ -9235,9 +9236,11 @@ async function isJunctionSourceLifecycleFenceCurrent(
   if (!expected) {
     return true;
   }
-  const current = await captureJunctionSourceLifecycleFence(context);
-  return current !== null
-    && current.size === expected.size
+  if (!context.listConnectionSources) {
+    return false;
+  }
+  const current = captureJunctionSourceLifecycleFence(await context.listConnectionSources());
+  return current.size === expected.size
     && [...expected].every(([sourceProviderSlug, lifecycleEpoch]) =>
       current.get(sourceProviderSlug) === lifecycleEpoch
     );
