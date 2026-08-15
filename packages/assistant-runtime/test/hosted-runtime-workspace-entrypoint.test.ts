@@ -32388,6 +32388,9 @@ describe("hosted workspace runtime entrypoint", () => {
           { importedSeq: "3", lane: "conversation" },
           { importedSeq: "0", lane: "system" },
         ],
+        [
+          { importedSeq: "0", lane: "system" },
+        ],
       ]);
       assert.equal(readConversationImportedSeqs(fetchRequests).length, 1);
       assert.deepEqual(fetchRequests[0]?.lanes, [
@@ -32400,6 +32403,7 @@ describe("hosted workspace runtime entrypoint", () => {
         "workspace.read",
         "mailbox.fetch",
         "mailbox.import",
+        "mailbox.fetch",
         "snapshot:4",
         "workspace.checkpoint",
       ]);
