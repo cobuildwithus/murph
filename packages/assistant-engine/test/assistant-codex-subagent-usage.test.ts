@@ -5,6 +5,9 @@ import {
   createAssistantUsageId,
   parseAssistantUsageRecord,
 } from '@murphai/hosted-execution/assistant-usage'
+import {
+  HOSTED_LOCAL_TEST_CODEX_MODEL_PROVIDER_ID,
+} from '@murphai/operator-config/assistant/target-runtime'
 
 import {
   type CodexSubagentTurnTokenUsageSample,
@@ -99,6 +102,43 @@ describe('extractCodexSubagentUsageDrafts', () => {
         subagentTokenUsageByTurn: new Map(),
       }),
     ).toEqual([])
+  })
+
+  it('attributes local OpenAI subagent usage to the hosted OpenAI ledger identity', () => {
+    const events = [
+      tokenUsageEvent({
+        threadId: 'thread-local-openai-child',
+        turnId: 'turn-local-openai-child',
+        total: {
+          totalTokens: 100,
+          inputTokens: 80,
+          outputTokens: 20,
+        },
+        last: {
+          totalTokens: 100,
+          inputTokens: 80,
+          outputTokens: 20,
+        },
+      }),
+    ]
+    const drafts = extractCodexSubagentUsageDrafts({
+      modelProvider: HOSTED_LOCAL_TEST_CODEX_MODEL_PROVIDER_ID,
+      ordinalStart: 1,
+      parentRawEvents: [spawnEndEvent({
+        model: 'gpt-5.6-terra',
+        receiverThreadIds: ['thread-local-openai-child'],
+      })],
+      serviceTier: 'flex',
+      subagentTokenUsageByTurn: new Map([
+        ['thread-local-openai-child', sampleFromEvents(events)],
+      ]),
+    })
+
+    expect(drafts).toHaveLength(1)
+    expect(drafts[0]?.usage).toMatchObject({
+      providerName: 'hosted-openai',
+      tokenPricingBasis: 'openai-flex',
+    })
   })
 
   it('builds per-turn total deltas with spawn-attributed models', () => {
