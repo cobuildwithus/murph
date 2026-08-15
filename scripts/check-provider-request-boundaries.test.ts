@@ -2251,6 +2251,71 @@ describe("check-provider-request-boundaries", () => {
     expect(matches.map((match) => match.line)).toEqual([6, 7, 8]);
   });
 
+  it("infers provider endpoints returned by same-file URL helpers", () => {
+    const source = [
+      "function makeTarget() {",
+      "  return 'https://api.openai.com/v1/responses';",
+      "}",
+      "function chooseTarget(flag) {",
+      "  return flag ? '/internal' : 'https://api.openai.com/v1/images';",
+      "}",
+      "await fetch(makeTarget(), { method: 'POST' });",
+      "await fetch(chooseTarget(Date.now() > 0), { method: 'POST' });",
+    ].join("\n");
+
+    for (const relativePath of [
+      "scripts/local-provider-url-helpers.mjs",
+      "scripts/local-provider-url-helpers.mts",
+    ]) {
+      const matches = rawHttpViolations(source, relativePath);
+      expect(matches.map((match) => match.line)).toEqual([7, 8]);
+    }
+  });
+
+  it("keeps internal, shadowed, nested, and recursive URL helpers clean", () => {
+    const matches = violationsOfKind(
+      "raw-provider-http",
+      [
+        "function makeTarget() {",
+        "  return '/internal';",
+        "}",
+        "await fetch(makeTarget(), { method: 'POST' });",
+        "function recursiveTarget() {",
+        "  return recursiveTarget();",
+        "}",
+        "await fetch(recursiveTarget(), { method: 'POST' });",
+        "function outerTarget() {",
+        "  function nestedTarget() {",
+        "    return 'https://api.openai.com/v1/responses';",
+        "  }",
+        "  return '/internal';",
+        "}",
+        "await fetch(outerTarget(), { method: 'POST' });",
+        "function shadowedTarget() {",
+        "  return 'https://api.openai.com/v1/responses';",
+        "}",
+        "async function invoke(shadowedTarget) {",
+        "  await fetch(shadowedTarget(), { method: 'POST' });",
+        "}",
+        "await invoke(() => '/internal');",
+        "{",
+        "  const shadowedTarget = () => '/internal';",
+        "  await fetch(shadowedTarget(), { method: 'POST' });",
+        "}",
+        "async function copyRequest(request: Request) {",
+        "  return new Request(request.url);",
+        "}",
+        "async function forward(handler: typeof fetch, request: Request) {",
+        "  const copied = await copyRequest(request);",
+        "  await handler(copied);",
+        "}",
+      ].join("\n"),
+      "scripts/local-url-helper-negatives.mts",
+    );
+
+    expect(matches).toEqual([]);
+  });
+
   it("fails closed for provider-bearing fetch argument spreads", () => {
     const matches = violationsOfKind(
       "raw-provider-http",
@@ -2413,6 +2478,57 @@ describe("check-provider-request-boundaries", () => {
 
     expect(matches.map((match) => match.line)).toEqual([5, 8, 10, 13, 15, 17]);
     expect(shadowed).toEqual([]);
+  });
+
+  it("preserves transport namespace alternatives through expression aliases", () => {
+    const source = [
+      "import * as https from 'node:https';",
+      "import * as undici from 'undici';",
+      "const inert = { get(_url) {}, request(_url) {}, fetch(_url) {} };",
+      "const conditional = Date.now() > 0 ? https : inert;",
+      "conditional.get('https://api.openai.com/v1/models');",
+      "const logical = Date.now() > 0 && undici;",
+      "await logical.fetch('https://api.openai.com/v1/responses');",
+      "const mixed = Date.now() > 0 ? https : undici;",
+      "mixed.get('https://api.openai.com/v1/models');",
+      "await mixed.fetch('https://api.openai.com/v1/responses');",
+      "const sequenced = (inert, https);",
+      "sequenced.request({ hostname: 'api.openai.com', path: '/v1/responses' });",
+      "const chosen = mixed;",
+      "chosen.request('https://api.openai.com/v1/responses');",
+    ].join("\n");
+    const clean = violationsOfKind(
+      "raw-provider-http",
+      [
+        "import * as https from 'node:https';",
+        "import * as undici from 'undici';",
+        "const inert = { get(_url: string) {}, request(_url: string) {}, fetch(_url: string) {} };",
+        "let selected = Date.now() > 0 ? https : undici;",
+        "{",
+        "  const selected = inert;",
+        "  selected.get('https://api.openai.com/v1/models');",
+        "}",
+        "selected = inert;",
+        "selected.get('https://api.openai.com/v1/models');",
+      ].join("\n"),
+      "scripts/definitely-reassigned-transport-namespace.mts",
+    );
+
+    for (const relativePath of [
+      "scripts/expression-transport-namespaces.mjs",
+      "scripts/expression-transport-namespaces.mts",
+    ]) {
+      const matches = rawHttpViolations(source, relativePath);
+      expect(matches.map((match) => match.line)).toEqual([
+        5,
+        7,
+        9,
+        10,
+        12,
+        14,
+      ]);
+    }
+    expect(clean).toEqual([]);
   });
 
   it("composes pre-bound transports stored in closed local members", () => {

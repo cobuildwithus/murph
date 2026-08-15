@@ -6,7 +6,9 @@ Last verified: 2026-08-14
 
 Provider-request guard closure is fail-closed beyond the summary row below:
 literal dynamic imports of Node HTTP/HTTPS and Undici are transports in every
-scanned module extension, including through exact namespace aliases;
+scanned module extension, including through set-valued conditional, logical,
+sequence, and copied namespace aliases; uniquely resolved local URL helpers
+contribute direct-return provider facts without inheriting module fallback hints;
 presigned transfer owners and header factories are implementation-digest
 pinned, while a URL normalizer is usable only by its exact digest-pinned owner;
 and an approved SDK bridge must

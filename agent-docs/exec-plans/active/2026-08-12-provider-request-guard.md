@@ -475,6 +475,23 @@ Updated: 2026-08-15
   alternatives, provider-neutral values, lexical shadows, and definitive
   reassignment. The focused guard suite passes 126 tests and the production
   provider scan passes on the retrospective implementation.
+- Exact full-snapshot round 19 at
+  `487606c116884773b5501234d4023050847afbb5` ran for 37 minutes with confirmed
+  `gpt-5.6-sol` metadata and found two High gaps. Conditional, logical, or
+  sequence aliases could retain an imported HTTP namespace without copying its
+  transport provenance, and an exact `fetch` URL could come from a uniquely
+  resolved same-file helper whose direct return was never inspected.
+- The correction stays inside the existing owners. Namespace propagation now
+  records every possible transport kind at one binding point and all consumers
+  read that set, preserving lexical shadows and definitive reassignment. The
+  shared provider-expression facts reader now follows direct returns from one
+  unshadowed local function declaration, skips nested functions and recursive
+  cycles, and disables only file-level fallback hints inside the callee so a
+  generic returned `Request` cannot inherit unrelated provider evidence.
+  `.mjs`/`.mts`, mixed-namespace, copied-alias, internal-only, shadow,
+  definitive-reassignment, nested-function, recursive, and generic-Request
+  controls are executable. No scanner, registry, exception, compatibility
+  path, second provenance owner, or provider request was added.
 
 ## Verification
 
@@ -487,6 +504,15 @@ Updated: 2026-08-15
 
 Current evidence:
 
+- Round-19 correction focused provider-guard suite: 129 tests passed.
+- Full repository-tool suite after the round-19 correction: 39 files and 760
+  tests passed.
+- Repo-tools TypeScript compilation and the production provider scan pass on
+  the round-19 correction.
+- The full workspace command completed every package/app typecheck on the
+  round-19 correction. Its independent workspace-boundary phase still reports
+  the unchanged CLI-test relative import into `apps/web`; this PR does not
+  touch that file or boundary.
 - Round-18 focused provider-guard suite: 126 tests passed.
 - Full repository-tool suite after the round-18 redesign: 39 files and 757
   tests passed.

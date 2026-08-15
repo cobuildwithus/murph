@@ -1083,9 +1083,14 @@ function collectHttpTransportBindings(
         const directTransport = staticModule
           ? classifyHttpTransportModule(staticModule.moduleName)
           : null;
-        const namespaceTransport = directTransport ??
-          readTransportNamespaceKind(init, bindings, node.start ?? 0);
-        if (!namespaceTransport) {
+        const namespaceTransports = directTransport
+          ? [directTransport]
+          : readTransportNamespaceKinds(
+            init,
+            bindings,
+            node.start ?? 0,
+          );
+        if (namespaceTransports.length === 0) {
           return;
         }
         for (const property of destructuringTarget.pattern.properties) {
@@ -1093,12 +1098,14 @@ function collectHttpTransportBindings(
             property.type === "RestElement" &&
             isIdentifier(property.argument)
           ) {
-            changed = addBinding(
-              property.argument.name,
-              "namespace",
-              node,
-              namespaceTransport,
-            ) || changed;
+            for (const transport of namespaceTransports) {
+              changed = addBinding(
+                property.argument.name,
+                "namespace",
+                node,
+                transport,
+              ) || changed;
+            }
             continue;
           }
           if (
@@ -1117,15 +1124,18 @@ function collectHttpTransportBindings(
             continue;
           }
           const importedName = readPropertyName(property.key);
-          if (
-            importedName &&
-            isHttpTransportMethod(namespaceTransport, importedName)
-          ) {
+          if (!importedName) {
+            continue;
+          }
+          for (const transport of namespaceTransports) {
+            if (!isHttpTransportMethod(transport, importedName)) {
+              continue;
+            }
             changed = addBinding(
               localIdentifier.name,
               "call",
               node,
-              namespaceTransport,
+              transport,
             ) || changed;
           }
         }
@@ -1162,31 +1172,33 @@ function collectHttpTransportBindings(
         ) || changed;
         return;
       }
-      const namespaceTransport = readTransportNamespaceKind(
+      const namespaceTransports = readTransportNamespaceKinds(
         init,
         bindings,
         node.start ?? 0,
       );
-      if (namespaceTransport) {
-        changed = addBinding(
-          target.name,
-          "namespace",
-          node,
-          namespaceTransport,
-        ) || changed;
+      if (namespaceTransports.length > 0) {
+        for (const transport of namespaceTransports) {
+          changed = addBinding(
+            target.name,
+            "namespace",
+            node,
+            transport,
+          ) || changed;
+        }
         return;
       }
-      const memberTransport = readTransportMemberBinding(
+      const memberTransports = readTransportMemberBindings(
         init,
         bindings,
         node.start ?? 0,
       );
-      if (memberTransport) {
+      for (const transport of memberTransports) {
         changed = addBinding(
           target.name,
           "call",
           node,
-          memberTransport,
+          transport,
         ) || changed;
       }
     });
@@ -1368,53 +1380,107 @@ function readImportEqualsModuleName(node: Node): string | null {
   return node.moduleReference.expression.value;
 }
 
-function readTransportNamespaceKind(
+function readTransportNamespaceKinds(
   node: Node,
   bindings: ReadonlyMap<string, readonly TransportBinding[]>,
   before: number,
-): HttpTransportModuleKind | null {
-  const expression = unwrapExpression(node);
-  if (!isIdentifier(expression)) {
-    return null;
-  }
-  const binding = resolveTransportBinding(bindings, expression.name, before);
-  if (
-    /^(?:globalThis|self|window)$/u.test(expression.name) &&
-    binding === null
-  ) {
-    return "web-global";
-  }
-  return binding?.kind === "namespace" ? binding.transport : null;
+): readonly HttpTransportModuleKind[] {
+  const transports = new Set<HttpTransportModuleKind>();
+  const visit = (candidate: Node): void => {
+    const expression = unwrapExpression(candidate);
+    const staticModule = readStaticTransportModule(expression);
+    if (staticModule) {
+      const transport = classifyHttpTransportModule(staticModule.moduleName);
+      if (
+        transport &&
+        !(transport === "fetch-package" && staticModule.source === "require")
+      ) {
+        transports.add(transport);
+      }
+      return;
+    }
+    if (isIdentifier(expression)) {
+      const resolved = resolvePossibleTransportBindings(
+        bindings,
+        expression.name,
+        before,
+      );
+      if (
+        /^(?:globalThis|self|window)$/u.test(expression.name) &&
+        resolved.length === 0
+      ) {
+        transports.add("web-global");
+      }
+      for (const binding of resolved) {
+        if (binding.kind === "namespace" && binding.transport) {
+          transports.add(binding.transport);
+        }
+      }
+      return;
+    }
+    if (expression.type === "ConditionalExpression") {
+      visit(expression.consequent);
+      visit(expression.alternate);
+      return;
+    }
+    if (expression.type === "LogicalExpression") {
+      visit(expression.left);
+      visit(expression.right);
+      return;
+    }
+    if (expression.type === "SequenceExpression") {
+      for (const child of expression.expressions) {
+        visit(child);
+      }
+    }
+  };
+  visit(node);
+  return [...transports];
 }
 
-function readTransportMemberBinding(
+function readTransportMemberBindings(
   node: Node,
   bindings: ReadonlyMap<string, readonly TransportBinding[]>,
   before: number,
-): HttpTransportModuleKind | null {
+): readonly HttpTransportModuleKind[] {
   if (!isMemberExpression(node) && !isOptionalMemberExpression(node)) {
-    return null;
+    return [];
   }
   const parts = readMemberPath(node);
   const root = parts?.[0];
   const method = readPropertyName(node.property);
   if (!method) {
-    return null;
+    return [];
   }
   const staticModule = readStaticTransportModule(node.object);
   const directTransport = staticModule
     ? classifyHttpTransportModule(staticModule.moduleName)
     : null;
-  const binding = directTransport
-    ? null
-    : root
-      ? resolveTransportBinding(bindings, root, before)
-      : null;
-  const transport = directTransport ?? binding?.transport ?? null;
-  if (!transport || (binding && binding.kind !== "namespace")) {
-    return null;
+  if (directTransport) {
+    return isHttpTransportMethod(directTransport, method)
+      ? [directTransport]
+      : [];
   }
-  return isHttpTransportMethod(transport, method) ? transport : null;
+  if (!root) {
+    return [];
+  }
+  const transports: HttpTransportModuleKind[] = [];
+  for (const binding of resolvePossibleTransportBindings(
+    bindings,
+    root,
+    before,
+  )) {
+    if (
+      binding.kind !== "namespace" ||
+      binding.transport === null ||
+      !isHttpTransportMethod(binding.transport, method) ||
+      transports.includes(binding.transport)
+    ) {
+      continue;
+    }
+    transports.push(binding.transport);
+  }
+  return transports;
 }
 
 function collectFunctionBindings(sourceFile: Node): Map<string, FunctionBinding[]> {
@@ -1439,6 +1505,25 @@ function collectFunctionBindings(sourceFile: Node): Map<string, FunctionBinding[
     bindings.set(name, current);
   });
   return bindings;
+}
+
+function readDirectFunctionReturnExpressions(node: Node): Expression[] {
+  if (!isFunction(node)) {
+    return [];
+  }
+  if (node.body.type !== "BlockStatement") {
+    return isExpression(node.body) ? [node.body] : [];
+  }
+  const returned: Expression[] = [];
+  traverseFast(node.body, (child) => {
+    if (isFunction(child)) {
+      return traverseFast.skip;
+    }
+    if (isReturnStatement(child) && isExpression(child.argument)) {
+      returned.push(child.argument);
+    }
+  });
+  return returned;
 }
 
 function collectFileProviderIds(
@@ -2404,6 +2489,7 @@ function inferProviderExpressionFacts(input: {
   readonly contents: string;
   readonly node: Node;
   readonly resolving: ReadonlySet<string>;
+  readonly suppressFileFallback?: boolean;
 }): ProviderExpressionFacts {
   const facts = emptyProviderExpressionFacts();
   const node = unwrapExpression(input.node);
@@ -2471,13 +2557,15 @@ function inferProviderExpressionFacts(input: {
         );
       }
     }
-    addSingleProviderFileHint(
-      facts.providerIds,
-      node.name,
-      isInsideSdkFetchAdapter(input.analysis.sourceFile, input.before)
-        ? input.analysis.fileProviderIds
-        : input.analysis.fileFallbackProviderIds,
-    );
+    if (!input.suppressFileFallback) {
+      addSingleProviderFileHint(
+        facts.providerIds,
+        node.name,
+        isInsideSdkFetchAdapter(input.analysis.sourceFile, input.before)
+          ? input.analysis.fileProviderIds
+          : input.analysis.fileFallbackProviderIds,
+      );
+    }
     return facts;
   }
   if (isMemberExpression(node) || isOptionalMemberExpression(node)) {
@@ -2533,13 +2621,15 @@ function inferProviderExpressionFacts(input: {
           );
         }
       }
-      addSingleProviderFileHint(
-        facts.providerIds,
-        key,
-        isInsideSdkFetchAdapter(input.analysis.sourceFile, input.before)
-          ? input.analysis.fileProviderIds
-          : input.analysis.fileFallbackProviderIds,
-      );
+      if (!input.suppressFileFallback) {
+        addSingleProviderFileHint(
+          facts.providerIds,
+          key,
+          isInsideSdkFetchAdapter(input.analysis.sourceFile, input.before)
+            ? input.analysis.fileProviderIds
+            : input.analysis.fileFallbackProviderIds,
+        );
+      }
     } else {
       mergeProviderExpressionFacts(
         facts,
@@ -2617,6 +2707,54 @@ function inferProviderExpressionFacts(input: {
         facts,
         inferProviderExpressionFacts({ ...input, node: node.callee.object }),
       );
+    }
+    const callee = unwrapExpression(node.callee);
+    if (
+      isIdentifier(callee) &&
+      !resolveParameterBinding(
+        input.analysis.parameterBindings,
+        callee.name,
+        input.before,
+      ) &&
+      !resolveBinding(input.bindings, callee.name, input.before)
+    ) {
+      const callable = resolveFunctionBinding(
+        input.analysis.functionBindings,
+        callee.name,
+        input.before,
+      );
+      const sameScopeBindings = callable
+        ? input.analysis.functionBindings.get(callee.name)?.filter(
+          (binding) =>
+            binding.scopeStart === callable.scopeStart &&
+            binding.scopeEnd === callable.scopeEnd,
+        ) ?? []
+        : [];
+      const bindingKey = callable
+        ? `provider-function:${callee.name}:${callable.start}`
+        : "";
+      if (
+        callable &&
+        sameScopeBindings.length === 1 &&
+        !input.resolving.has(bindingKey)
+      ) {
+        const resolving = new Set(input.resolving);
+        resolving.add(bindingKey);
+        for (const returned of readDirectFunctionReturnExpressions(
+          callable.node,
+        )) {
+          mergeProviderExpressionFacts(
+            facts,
+            inferProviderExpressionFacts({
+              ...input,
+              before: returned.start ?? callable.start,
+              node: returned,
+              resolving,
+              suppressFileFallback: true,
+            }),
+          );
+        }
+      }
     }
     for (const argument of node.arguments) {
       if (argument.type !== "ArgumentPlaceholder" && argument.type !== "SpreadElement") {
@@ -5541,29 +5679,43 @@ function resolveTransportBinding(
   name: string,
   position: number,
 ): TransportBinding | null {
+  return resolvePossibleTransportBindings(bindings, name, position)[0] ?? null;
+}
+
+function resolvePossibleTransportBindings(
+  bindings: ReadonlyMap<string, readonly TransportBinding[]>,
+  name: string,
+  position: number,
+): readonly TransportBinding[] {
   const candidates = bindings.get(name);
   if (!candidates) {
-    return null;
+    return [];
   }
-  let resolved: TransportBinding | null = null;
+  let scopeStart = -1;
+  let start = -1;
   for (const candidate of candidates) {
     if (
       candidate.start <= position &&
       candidate.scopeStart <= position &&
       position <= candidate.scopeEnd &&
       (
-        !resolved ||
-        candidate.scopeStart > resolved.scopeStart ||
+        candidate.scopeStart > scopeStart ||
         (
-          candidate.scopeStart === resolved.scopeStart &&
-          candidate.start > resolved.start
+          candidate.scopeStart === scopeStart &&
+          candidate.start > start
         )
       )
     ) {
-      resolved = candidate;
+      scopeStart = candidate.scopeStart;
+      start = candidate.start;
     }
   }
-  return resolved;
+  return candidates.filter((candidate) =>
+    candidate.start === start &&
+    candidate.scopeStart === scopeStart &&
+    candidate.scopeStart <= position &&
+    position <= candidate.scopeEnd
+  );
 }
 
 function readParameterIdentifier(node: Node): (Node & {
@@ -5813,7 +5965,7 @@ function isFetchLikeCallTarget(input: {
     ? input.analysis.exactFetchTypeNames
     : input.analysis.fetchTypeNames;
   if (isIdentifier(expression)) {
-    const latestTransport = resolveTransportBinding(
+    const latestTransports = resolvePossibleTransportBindings(
       input.analysis.transportBindings,
       expression.name,
       input.before,
@@ -5872,12 +6024,16 @@ function isFetchLikeCallTarget(input: {
     );
     if (variables.length > 0) {
       for (const variable of variables) {
-        const transport = resolveTransportBinding(
+        const transports = resolvePossibleTransportBindings(
           input.analysis.transportBindings,
           expression.name,
           variable.start,
         );
-        if (transport?.kind === "call" && transport.start === variable.start) {
+        if (
+          transports.some((transport) =>
+            transport.kind === "call" && transport.start === variable.start
+          )
+        ) {
           return true;
         }
         if (
@@ -5964,8 +6120,11 @@ function isFetchLikeCallTarget(input: {
       });
     }
 
-    if (latestTransport?.kind === "expression" && latestTransport.initializer) {
-      const key = `${input.exact ? "exact-" : ""}fetch-unbound-assignment:${expression.name}:${latestTransport.start}`;
+    const latestExpression = latestTransports.find(
+      (transport) => transport.kind === "expression" && transport.initializer,
+    );
+    if (latestExpression?.initializer) {
+      const key = `${input.exact ? "exact-" : ""}fetch-unbound-assignment:${expression.name}:${latestExpression.start}`;
       if (input.resolving.has(key)) {
         return false;
       }
@@ -5973,13 +6132,13 @@ function isFetchLikeCallTarget(input: {
       resolving.add(key);
       return isFetchLikeCallTarget({
         ...input,
-        before: latestTransport.start,
-        node: latestTransport.initializer,
+        before: latestExpression.start,
+        node: latestExpression.initializer,
         resolving,
       });
     }
-    return latestTransport
-      ? latestTransport.kind === "call"
+    return latestTransports.length > 0
+      ? latestTransports.some((transport) => transport.kind === "call")
       : expression.name === "fetch";
   }
 
@@ -6024,27 +6183,30 @@ function isFetchLikeCallTarget(input: {
     }
     const terminal = pathParts.at(-1) ?? "";
     const root = pathParts[0];
-    const transportBinding = root
-      ? resolveTransportBinding(
+    const transportBindings = root
+      ? resolvePossibleTransportBindings(
           input.analysis.transportBindings,
           root,
           input.before,
         )
+      : [];
+    const variableBinding = root
+      ? resolveBinding(input.bindings, root, input.before)
       : null;
     if (
       root &&
-      transportBinding?.kind === "namespace" &&
-      transportBinding.transport !== null &&
-      isHttpTransportMethod(transportBinding.transport, terminal) &&
+      transportBindings.some((transportBinding) =>
+        transportBinding.kind === "namespace" &&
+        transportBinding.transport !== null &&
+        isHttpTransportMethod(transportBinding.transport, terminal) &&
+        (
+          !variableBinding || variableBinding.start === transportBinding.start
+        )
+      ) &&
       !resolveParameterBinding(
         input.analysis.parameterBindings,
         root,
         input.before,
-      ) &&
-      (
-        !resolveBinding(input.bindings, root, input.before) ||
-        resolveBinding(input.bindings, root, input.before)?.start ===
-          transportBinding.start
       )
     ) {
       return true;

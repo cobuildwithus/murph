@@ -573,9 +573,10 @@ Last verified: 2026-08-14
   imported Node HTTP/HTTPS and Undici transports, explicit aliases, injected
   fetch-call signatures, CommonJS `require`, literal dynamic `import()`,
   TypeScript import-equals, direct invocation, and destructured transport
-  forms. Namespace identity follows exact aliases of web globals, dynamic
-  imports, Node HTTP/HTTPS, and Undici without crossing a lexical shadow or
-  later reassignment. Pre-bound transports stored in closed local object or
+  forms. Namespace identity follows bounded conditional, logical, sequence,
+  and copied aliases of web globals, dynamic imports, Node HTTP/HTTPS, and
+  Undici, retaining every possible namespace kind at one binding point without
+  crossing a lexical shadow or later definitive reassignment. Pre-bound transports stored in closed local object or
   array members retain their bound request arguments through direct, `.call`,
   and closed `.apply` invocation; spreads, conditional origins, member writes,
   and `Object.assign` remain possible values and fail closed when any branch
@@ -596,7 +597,11 @@ Last verified: 2026-08-14
   provider URL and transport facts do not disappear when a local configuration
   or namespace is unpacked or copied. The guard also follows strict fetch-shaped
   wrappers at their nearest lexical binding when they resolve to provider
-  literals or provider-configured URL data. Untyped fetch parameters retain
+  literals or provider-configured URL data. Provider URL facts follow direct
+  returns from one uniquely resolved, unshadowed same-file function declaration;
+  nested functions and recursive cycles are excluded, and file-level fallback
+  hints are disabled inside the callee so a generic returned `Request` cannot
+  inherit an unrelated provider marker elsewhere in the module. Untyped fetch parameters retain
   their exact default expressions, and identifier reads resolve the nearest
   chronological declaration or simple assignment in the variable's lexical
   owner. Assignments reached only through conditional branches, short-circuit
