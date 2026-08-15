@@ -658,9 +658,7 @@ async function inspectHostedPreCheckpointSystemMailboxPrefetch(
   hasSystemWork: boolean;
 }> {
   const response = await prefetch.response;
-  const reachesLaneHighWater = (
-    lane: HostedMailboxPrefixPrefetch["lanes"][number],
-  ): boolean => {
+  const reachesLaneHighWater = (lane: HostedMailboxLane): boolean => {
     const laneHighWaters = response.maxSeqByLane.filter((entry) => entry.lane === lane);
     if (laneHighWaters.length !== 1) {
       return false;

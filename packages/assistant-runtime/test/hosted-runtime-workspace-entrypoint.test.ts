@@ -7586,6 +7586,13 @@ describe("hosted workspace runtime entrypoint", () => {
       initialPrefetchFails: true,
     },
     {
+      conversationHighWaterAhead: true,
+      dedupeKey: "member.activated:consumed-conversation-prefix-synthetic",
+      kind: "member.activated",
+      label: "member activation after a consumed conversation prefix",
+      preCheckpointSafe: true,
+    },
+    {
       dedupeKey:
         "assistant.notification.requested:phone-call-result:phone_call_synthetic",
       kind: "assistant.notification.requested",
@@ -7642,6 +7649,9 @@ describe("hosted workspace runtime entrypoint", () => {
           ? completion.conversationPrefixCount ?? 0
           : 0;
         const withConversationPrefix = conversationPrefixCount > 0;
+        const conversationHighWaterAhead =
+          "conversationHighWaterAhead" in completion
+          && completion.conversationHighWaterAhead;
         if (withConversationPrefix) {
           mailboxItems.push(
             ...Array.from({ length: conversationPrefixCount }, (_, index) =>
@@ -7675,7 +7685,21 @@ describe("hosted workspace runtime entrypoint", () => {
               events.push("mailbox.fetch:initial-prefetch-failed");
               throw new Error("Synthetic initial mailbox prefetch failure.");
             }
-            return await baseMailboxPort.fetch(request);
+            const response = await baseMailboxPort.fetch(request);
+            if (
+              !conversationHighWaterAhead
+              || !mailboxItems.some((item) => item.lane === "system")
+            ) {
+              return response;
+            }
+            return {
+              ...response,
+              maxSeqByLane: response.maxSeqByLane.map((entry) =>
+                entry.lane === "conversation"
+                  ? { ...entry, maxSeq: "1" }
+                  : entry
+              ),
+            };
           },
         };
         const resultPromise = runHostedWorkspaceRuntimeJobInProcess(
@@ -7797,7 +7821,10 @@ describe("hosted workspace runtime entrypoint", () => {
         }
         assert.equal(
           result.status,
-          withConversationPrefix && !initialPrefetchFails ? "scheduled" : "idle",
+          conversationHighWaterAhead
+            || (withConversationPrefix && !initialPrefetchFails)
+            ? "scheduled"
+            : "idle",
         );
         assert.equal(
           initialPrefetchFailureCount,
