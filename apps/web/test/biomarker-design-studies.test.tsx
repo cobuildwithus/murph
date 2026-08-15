@@ -123,7 +123,7 @@ test("design page routes the biomarker studies through the dedicated sections ta
   expect(sectionsMarkup).toContain("Biomarker preparing state");
   expect(sectionsMarkup).toContain("Biomarker index");
   expect(sectionsMarkup).toContain(
-    "Browser Vault progressive loading transitions",
+    "Browser Vault progressive loading and biomarker result detail transitions",
   );
   expect(sectionsMarkup).toContain(
     'data-design-section="browser-vault-loading-transitions"',
