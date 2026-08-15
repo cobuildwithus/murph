@@ -71,44 +71,68 @@ export type DeviceSyncJunctionInlineSourceProviderClassification =
 export function classifyDeviceSyncJunctionInlineSourceProviderSlug(
   record: Record<string, unknown>,
 ): DeviceSyncJunctionInlineSourceProviderClassification {
-  const slugs = new Set<string>();
-  const addRecordSlug = (entry: Record<string, unknown>): void => {
-    const slug = normalizeHostedJunctionProviderSlug(
-      resolveJunctionOrigin(entry).sourceProviderSlug,
-    );
-    if (slug) {
-      slugs.add(slug);
-    }
-  };
+  return classifyJunctionInlineRecordSource(record, null);
+}
 
-  addRecordSlug(record);
-  for (const entry of readJunctionInlineNestedRecords(record)) {
-    addRecordSlug(entry);
+function classifyJunctionInlineRecordSource(
+  record: Record<string, unknown>,
+  fallbackSourceProviderSlug: string | null,
+): DeviceSyncJunctionInlineSourceProviderClassification {
+  const childClassifications: DeviceSyncJunctionInlineSourceProviderClassification[] = [];
+  for (const key of JUNCTION_INLINE_NESTED_RECORD_KEYS) {
+    const value = record[key];
+    const records = Array.isArray(value) ? value : [value];
+    for (const candidate of records) {
+      const child = readJunctionInlineRecord(candidate);
+      if (child) {
+        childClassifications.push(classifyJunctionInlineRecordSource(child, null));
+      }
+    }
   }
 
   const groups = readJunctionInlineRecord(record.groups);
   if (groups) {
     for (const [sourceSlug, rawGroups] of Object.entries(groups)) {
-      const normalizedGroupSlug = normalizeHostedJunctionProviderSlug(sourceSlug);
-      if (normalizedGroupSlug) {
-        slugs.add(normalizedGroupSlug);
-      }
-      for (const rawGroup of Array.isArray(rawGroups) ? rawGroups : []) {
+      const groupFallback = normalizeHostedJunctionProviderSlug(sourceSlug);
+      for (const rawGroup of Array.isArray(rawGroups) ? rawGroups : [rawGroups]) {
         const group = readJunctionInlineRecord(rawGroup);
-        if (!group) {
-          continue;
-        }
-        addRecordSlug(group);
-        for (const entry of readJunctionInlineNestedRecords(group)) {
-          addRecordSlug(entry);
+        if (group) {
+          childClassifications.push(
+            classifyJunctionInlineRecordSource(group, groupFallback),
+          );
         }
       }
     }
   }
 
-  if (slugs.size === 0) {
-    return { status: "missing" };
+  const childClassification = combineJunctionInlineSourceClassifications(
+    childClassifications,
+  );
+  if (childClassification.status !== "missing") {
+    return childClassification;
   }
+
+  const directSourceProviderSlug = normalizeHostedJunctionProviderSlug(
+    resolveJunctionOrigin(record).sourceProviderSlug,
+  ) ?? fallbackSourceProviderSlug;
+  return directSourceProviderSlug
+    ? { sourceProviderSlug: directSourceProviderSlug, status: "resolved" }
+    : { status: "missing" };
+}
+
+function combineJunctionInlineSourceClassifications(
+  classifications: readonly DeviceSyncJunctionInlineSourceProviderClassification[],
+): DeviceSyncJunctionInlineSourceProviderClassification {
+  if (classifications.some((classification) => classification.status === "ambiguous")) {
+    return { status: "ambiguous" };
+  }
+  const slugs = new Set(
+    classifications.flatMap((classification) =>
+      classification.status === "resolved"
+        ? [classification.sourceProviderSlug]
+        : []
+    ),
+  );
   if (slugs.size > 1) {
     return { status: "ambiguous" };
   }
@@ -116,21 +140,6 @@ export function classifyDeviceSyncJunctionInlineSourceProviderSlug(
   return sourceProviderSlug
     ? { sourceProviderSlug, status: "resolved" }
     : { status: "missing" };
-}
-
-function readJunctionInlineNestedRecords(
-  record: Record<string, unknown>,
-): Record<string, unknown>[] {
-  return JUNCTION_INLINE_NESTED_RECORD_KEYS.flatMap((key) => {
-    const direct = readJunctionInlineRecord(record[key]);
-    if (direct) {
-      return [direct];
-    }
-    return (Array.isArray(record[key]) ? record[key] : []).flatMap((entry) => {
-      const nested = readJunctionInlineRecord(entry);
-      return nested ? [nested] : [];
-    });
-  });
 }
 
 function readJunctionInlineRecord(value: unknown): Record<string, unknown> | null {

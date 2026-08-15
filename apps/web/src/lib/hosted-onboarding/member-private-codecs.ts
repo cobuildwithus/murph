@@ -12,11 +12,14 @@ import {
   decryptHostedWebNullableFields,
   decryptHostedWebNullableString,
   encryptHostedWebNullableString,
+  encryptHostedWebNullableStringFromPreparedRoot,
+  type PreparedHostedWebEncryptionRoot,
   type HostedWebEncryptionPrismaClient,
 } from "../hosted-web/encryption";
 import { normalizeNullableString } from "./shared";
 
-const HOSTED_MEMBER_IDENTITY_PRIVY_USER_FIELD = "hosted-member-identity.privy-user-id";
+export const HOSTED_MEMBER_IDENTITY_PRIVY_USER_FIELD =
+  "hosted-member-identity.privy-user-id";
 const HOSTED_MEMBER_IDENTITY_PHONE_NUMBER_FIELD = "hosted-member-identity.phone-number";
 const HOSTED_MEMBER_IDENTITY_WALLET_ADDRESS_FIELD = "hosted-member-identity.wallet-address";
 const HOSTED_MEMBER_IDENTITY_SIGNUP_PHONE_FIELD = "hosted-member-identity.signup-phone-number";
@@ -34,8 +37,9 @@ const HOSTED_MEMBER_ROUTING_TELEGRAM_PRIVATE_STATE_CURRENT_SCHEMA =
   "murph.hosted-member-routing.telegram.v2";
 const HOSTED_MEMBER_ROUTING_TELEGRAM_PRIVATE_STATE_LEGACY_SCHEMA =
   "murph.hosted-member-routing.telegram.v1";
-const HOSTED_MEMBER_BILLING_STRIPE_CUSTOMER_FIELD = "hosted-member-billing-ref.stripe-customer-id";
-const HOSTED_MEMBER_BILLING_STRIPE_SUBSCRIPTION_FIELD =
+export const HOSTED_MEMBER_BILLING_STRIPE_CUSTOMER_FIELD =
+  "hosted-member-billing-ref.stripe-customer-id";
+export const HOSTED_MEMBER_BILLING_STRIPE_SUBSCRIPTION_FIELD =
   "hosted-member-billing-ref.stripe-subscription-id";
 const HOSTED_MEMBER_BILLING_STRIPE_SUBSCRIPTION_SCHEDULE_FIELD =
   "hosted-member-billing-ref.stripe-subscription-schedule-id";
@@ -73,6 +77,7 @@ export interface HostedMemberBillingPrivateState {
 export async function buildHostedMemberIdentityPrivateColumns(input: {
   memberId: string;
   phoneNumber: string | null;
+  preparedRoot?: PreparedHostedWebEncryptionRoot;
   prisma?: HostedWebEncryptionPrismaClient;
   privyUserId: string | null;
   signupPhoneCodeSendAttemptId: string | null;
@@ -81,12 +86,19 @@ export async function buildHostedMemberIdentityPrivateColumns(input: {
   signupPhoneNumber: string | null;
 }) {
   const encryptPrivateField = (field: string, value: string | null | undefined) =>
-    encryptHostedWebNullableString({
-      field,
-      memberId: input.memberId,
-      prisma: input.prisma,
-      value,
-    });
+    input.preparedRoot
+      ? encryptHostedWebNullableStringFromPreparedRoot({
+          field,
+          memberId: input.memberId,
+          prepared: input.preparedRoot,
+          value,
+        })
+      : encryptHostedWebNullableString({
+          field,
+          memberId: input.memberId,
+          prisma: input.prisma,
+          value,
+        });
 
   const phoneNumberEncrypted = await encryptPrivateField(
     HOSTED_MEMBER_IDENTITY_PHONE_NUMBER_FIELD,
@@ -180,17 +192,25 @@ export async function buildHostedMemberRoutingPrivateColumns(input: {
   pendingLinqChatId: string | null;
   pendingLinqParticipantContact?: string | null;
   pendingLinqRecipientPhone: string | null;
+  preparedRoot?: PreparedHostedWebEncryptionRoot;
   prisma?: HostedWebEncryptionPrismaClient;
   telegramThreadId: string | null;
   telegramUserId: string | null;
 }) {
   const encryptPrivateField = (field: string, value: string | null | undefined) =>
-    encryptHostedWebNullableString({
-      field,
-      memberId: input.memberId,
-      prisma: input.prisma,
-      value,
-    });
+    input.preparedRoot
+      ? encryptHostedWebNullableStringFromPreparedRoot({
+          field,
+          memberId: input.memberId,
+          prepared: input.preparedRoot,
+          value,
+        })
+      : encryptHostedWebNullableString({
+          field,
+          memberId: input.memberId,
+          prisma: input.prisma,
+          value,
+        });
 
   const linqChatIdEncrypted = await encryptPrivateField(
     HOSTED_MEMBER_ROUTING_HOME_LINQ_CHAT_FIELD,
@@ -228,6 +248,26 @@ export async function buildHostedMemberRoutingPrivateColumns(input: {
     pendingLinqRecipientPhoneEncrypted,
     telegramUserIdEncrypted,
   } as const;
+}
+
+export async function readHostedMemberRoutingHomeLinqRecipientPhones(
+  routings: ReadonlyArray<
+    Pick<HostedMemberRouting, "linqRecipientPhoneEncrypted" | "memberId">
+  >,
+  prisma?: HostedWebEncryptionPrismaClient,
+  retainFailureInScopedCache?: boolean,
+): Promise<Array<string | null>> {
+  return decryptHostedWebNullableFields({
+    entries: routings.map((routing) => ({
+      field: HOSTED_MEMBER_ROUTING_HOME_LINQ_RECIPIENT_PHONE_FIELD,
+      memberId: routing.memberId,
+      value: routing.linqRecipientPhoneEncrypted,
+    })),
+    prisma,
+    ...(retainFailureInScopedCache === undefined
+      ? {}
+      : { retainFailureInScopedCache }),
+  });
 }
 
 export async function readHostedMemberRoutingPrivateState(

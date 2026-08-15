@@ -4,7 +4,7 @@ import { test, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
 
-import { buildReferralPageMetadata } from "../app/refer/page";
+import { buildReferralPageMetadata } from "../src/lib/hosted-growth/referral-page-metadata";
 import {
   HOSTED_PUBLIC_REFERRAL_REWARDS,
 } from "@/src/lib/hosted-growth/referral-program";

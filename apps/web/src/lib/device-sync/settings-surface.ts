@@ -6,7 +6,10 @@ import {
 } from "@murphai/device-syncd/connect-config";
 
 import { formatDeviceSyncProviderLabel } from "@murphai/device-syncd/provider-label";
-import { isHistoricalResetIncompleteDeviceSyncAccount } from "@murphai/device-syncd/public-account";
+import {
+  isDeviceSyncDisconnectRecoveryRequired,
+  isHistoricalResetIncompleteDeviceSyncAccount,
+} from "@murphai/device-syncd/public-account";
 
 import type { HostedBrowserDeviceSyncConnectionSource } from "./browser-connection-source";
 import type { HostedBrowserDeviceSyncConnection } from "./public-connection";
@@ -330,22 +333,30 @@ function buildConnectedSource(input: {
   }
 
   if (connection.status === "reauthorization_required") {
+    const disconnectNotFinished =
+      isDeviceSyncDisconnectRecoveryRequired(connection);
     return {
       connectionId: connection.id,
       connectedAt: connection.connectedAt,
       connectSourceId: input.connectTarget?.connectSourceId ?? null,
       connectTarget: input.connectTarget?.connectTarget ?? null,
-      detail: "The provider asked Murph to renew access before it can keep syncing.",
+      detail: disconnectNotFinished
+        ? "The provider did not confirm that Murph access was removed."
+        : "The provider asked Murph to renew access before it can keep syncing.",
       displayName,
-      guidance: lastSuccessfulSyncAt
-        ? "Your earlier history is still here."
-        : "Murph cannot finish the first full sync until access is renewed.",
-      headline: "Access needs attention",
+      guidance: disconnectNotFinished
+        ? "Remove Murph access in the provider account, then retry Disconnect here. Your earlier history is still here."
+        : lastSuccessfulSyncAt
+          ? "Your earlier history is still here."
+          : "Murph cannot finish the first full sync until access is renewed.",
+      headline: disconnectNotFinished
+        ? "Disconnect not finished"
+        : "Access needs attention",
       lastActivityAt,
       lastSuccessfulSyncAt,
       lastWebhookAt: connection.lastWebhookAt,
       nextReconcileAt: connection.nextReconcileAt,
-      primaryAction: input.connectTarget
+      primaryAction: !disconnectNotFinished && input.connectTarget
         ? {
             kind: "reconnect",
             label: "Reconnect",
@@ -356,10 +367,10 @@ function buildConnectedSource(input: {
       providerLabel,
       secondaryAction: {
         kind: "disconnect",
-        label: "Disconnect",
+        label: disconnectNotFinished ? "Retry disconnect" : "Disconnect",
       },
       state: connection.status,
-      statusLabel: "Needs access",
+      statusLabel: disconnectNotFinished ? "Needs removal" : "Needs access",
       tone: "attention",
       updatedAt: connection.updatedAt,
       upstreamSources: input.upstreamSources,

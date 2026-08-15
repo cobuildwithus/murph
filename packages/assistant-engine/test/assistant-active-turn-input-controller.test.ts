@@ -114,9 +114,10 @@ test('active-turn controller only steers exact conversations while open', async 
     })
     assert.ok(steered)
     steered.catch(() => undefined)
-    assert.deepEqual(await controller.admitAvailable(), {
+    expect(await controller.admitAvailable()).toEqual({
       acceptedInputs: [
         {
+          acceptedAt: expect.any(String),
           id: 'manual-1',
           promptFallbackReason: 'manual-input',
           promptFallbackText: 'Same thread',
@@ -163,9 +164,10 @@ test('active-turn controller only steers exact conversations while open', async 
       })
       assert.ok(sessionSteered)
       sessionSteered.catch(() => undefined)
-      assert.deepEqual(await sessionOnlyController.admitAvailable(), {
+      expect(await sessionOnlyController.admitAvailable()).toEqual({
         acceptedInputs: [
           {
+            acceptedAt: expect.any(String),
             id: 'manual-1',
             promptFallbackReason: 'manual-input',
             promptFallbackText: 'Session fallback',
@@ -306,9 +308,11 @@ test('active-turn controller lets only an already-started deferred steer settle 
     const admission = controller.admitLiveSteered()
     releaseBeforeSteer.resolve()
 
-    await expect(admission).resolves.toEqual({
+    const acceptedAdmission = await admission
+    expect(acceptedAdmission).toEqual({
       acceptedInputs: [
         {
+          acceptedAt: expect.any(String),
           id: 'manual-1',
           promptFallbackReason: 'manual-input',
           promptFallbackText: 'Already started before the first response',
@@ -326,12 +330,89 @@ test('active-turn controller lets only an already-started deferred steer settle 
         },
       ],
     })
+    assert.equal(acceptedAdmission?.kind, 'accepted')
+    if (acceptedAdmission?.kind === 'accepted') {
+      controller.commitLiveSteeredLocalAdmission(acceptedAdmission)
+    }
     await expect(controller.admitLiveSteered()).resolves.toBeUndefined()
     expect(steer).toHaveBeenCalledTimes(1)
   } finally {
     releaseBeforeSteer.resolve()
     releaseLiveTurn()
     controller.fail(new Error('active-turn deferred steer closure test complete'))
+    controller.close()
+  }
+})
+
+test('active-turn controller keeps an acknowledged manual input queued until local commit', async () => {
+  const {
+    createAssistantActiveTurnInputController,
+    steerAssistantActiveTurnInput,
+  } = await import('../src/assistant/active-turn-input-controller.ts')
+  const steer = vi.fn(async () => undefined)
+  const controller = createAssistantActiveTurnInputController({
+    conversationKeys: ['channel:telegram|identity:identity-1|audience:indeterminate|thread:thread-1'],
+    sessionId: 'session-test',
+    turnId: 'turn-active',
+    vault: '/vaults/test',
+  })
+  const releaseLiveTurn = controller.registerLiveProviderTurn({
+    interrupt: async () => undefined,
+    codexThreadId: 'provider-session',
+    providerTurnId: 'provider-turn',
+    sessionId: 'session-test',
+    steer,
+    turnId: 'turn-active',
+  })
+
+  try {
+    const firstCompletion = steerAssistantActiveTurnInput({
+      conversation: {
+        channel: 'telegram',
+        identityId: 'identity-1',
+        threadId: 'thread-1',
+      },
+      expectedActiveTurnId: 'turn-active',
+      prompt: 'First live input',
+      vault: '/vaults/test',
+    })
+    assert.ok(firstCompletion)
+    firstCompletion.catch(() => undefined)
+    await vi.waitFor(() => {
+      expect(steer).toHaveBeenCalledTimes(1)
+    })
+    const firstAdmission = await controller.admitLiveSteered()
+    assert.equal(firstAdmission?.kind, 'accepted')
+
+    const secondCompletion = steerAssistantActiveTurnInput({
+      conversation: {
+        channel: 'telegram',
+        identityId: 'identity-1',
+        threadId: 'thread-1',
+      },
+      expectedActiveTurnId: 'turn-active',
+      prompt: 'Second live input',
+      vault: '/vaults/test',
+    })
+    assert.ok(secondCompletion)
+    secondCompletion.catch(() => undefined)
+    expect(steer).toHaveBeenCalledTimes(1)
+
+    if (firstAdmission?.kind === 'accepted') {
+      controller.commitLiveSteeredLocalAdmission(firstAdmission)
+    }
+    await vi.waitFor(() => {
+      expect(steer).toHaveBeenCalledTimes(2)
+    })
+    const secondAdmission = await controller.admitLiveSteered()
+    assert.equal(secondAdmission?.kind, 'accepted')
+    if (secondAdmission?.kind === 'accepted') {
+      assert.equal(secondAdmission.acceptedInputs[0]?.id, 'manual-2')
+      controller.commitLiveSteeredLocalAdmission(secondAdmission)
+    }
+  } finally {
+    releaseLiveTurn()
+    controller.fail(new Error('active-turn manual local-commit barrier test complete'))
     controller.close()
   }
 })
@@ -443,9 +524,10 @@ test('active-turn controller drains queued manual input before probed hook input
     assert.ok(steered)
     steered.catch(() => undefined)
 
-    assert.deepEqual(await controller.admitAvailable(), {
+    expect(await controller.admitAvailable()).toEqual({
       acceptedInputs: [
         {
+          acceptedAt: expect.any(String),
           id: 'manual-1',
           promptFallbackReason: 'manual-input',
           promptFallbackText: 'Manual input',
@@ -566,9 +648,11 @@ test('active-turn controller does not admit probed hook input after provider rel
     expect(providerSteerOrder).toEqual(['causal-seq', 'provider'])
     releaseLiveTurn()
 
-    assert.deepEqual(await controller.admitLiveSteered(), {
+    const acceptedAdmission = await controller.admitLiveSteered()
+    expect(acceptedAdmission).toEqual({
       acceptedInputs: [
         {
+          acceptedAt: expect.any(String),
           id: 'manual-1',
           promptFallbackReason: 'manual-input',
           promptFallbackText: 'Live-steered input',
@@ -586,6 +670,10 @@ test('active-turn controller does not admit probed hook input after provider rel
         },
       ],
     })
+    assert.equal(acceptedAdmission?.kind, 'accepted')
+    if (acceptedAdmission?.kind === 'accepted') {
+      controller.commitLiveSteeredLocalAdmission(acceptedAdmission)
+    }
     assert.equal(await controller.admitAvailable({ probeIfIdle: true }), undefined)
   } finally {
     releaseLiveTurn()
@@ -676,6 +764,7 @@ test('active-turn controller can notify every active turn in one vault', async (
     admissionHook: async () => ({
       acceptedInputs: [
         {
+          acceptedAt: '2031-02-15T09:59:59.900Z',
           id: 'hook-1',
           promptFallbackReason: 'missing-content-ref',
           promptFallbackText: 'Vault-level hook input',
@@ -728,6 +817,10 @@ test('active-turn controller can notify every active turn in one vault', async (
     ])
     expect(steer).toHaveBeenCalledWith({
       prompt: 'Vault-level hook input',
+      relativeDateReferenceWindow: {
+        earliestAt: '2031-02-15T09:59:59.900Z',
+        latestAt: '2031-02-15T09:59:59.900Z',
+      },
       userMessageContent: [
         {
           text: 'Vault-level hook input',
@@ -812,9 +905,11 @@ test('active-turn controller drains in-flight live steer input without post-rele
     const admission = controller.admitLiveSteered()
     steerRelease.resolve()
 
-    assert.deepEqual(await admission, {
+    const acceptedAdmission = await admission
+    expect(acceptedAdmission).toEqual({
       acceptedInputs: [
         {
+          acceptedAt: expect.any(String),
           id: 'manual-1',
           promptFallbackReason: 'manual-input',
           promptFallbackText: 'In-flight live steer input',
@@ -832,6 +927,10 @@ test('active-turn controller drains in-flight live steer input without post-rele
         },
       ],
     })
+    assert.equal(acceptedAdmission?.kind, 'accepted')
+    if (acceptedAdmission?.kind === 'accepted') {
+      controller.commitLiveSteeredLocalAdmission(acceptedAdmission)
+    }
     assert.equal(await controller.admitAvailable({ probeIfIdle: true }), undefined)
   } finally {
     steerRelease.resolve()
@@ -1038,6 +1137,7 @@ test('active-turn controller only probes input after explicit notification or pr
     assert.equal(admissionCount, 1)
     expect(steer).toHaveBeenCalledWith({
       prompt: 'Notification hook input',
+      relativeDateReferenceWindow: null,
       userMessageContent: [
         {
           text: 'Notification hook input',
@@ -1149,9 +1249,10 @@ test('active-turn controller re-steers pending input into a replacement live pro
           },
         ])
       })
-      assert.deepEqual(await controller.admitLiveSteered(), {
+      expect(await controller.admitLiveSteered()).toEqual({
         acceptedInputs: [
           {
+            acceptedAt: expect.any(String),
             id: 'manual-1',
             promptFallbackReason: 'manual-input',
             promptFallbackText: 'Re-steer me',
@@ -1331,6 +1432,7 @@ test('active-turn controller reruns input-available admission for in-flight noti
     expect(steer).toHaveBeenCalledTimes(1)
     expect(steer).toHaveBeenCalledWith({
       prompt: 'Rerun hook input',
+      relativeDateReferenceWindow: null,
       userMessageContent: [
         {
           text: 'Rerun hook input',
@@ -1470,13 +1572,20 @@ test('active-turn controller admits an exact notified batch one successor at a t
       inputIds: [firstInputId, secondInputId],
     })
     await vi.waitFor(() => {
-      expect(steer).toHaveBeenCalledTimes(2)
+      expect(steer).toHaveBeenCalledTimes(1)
     })
     assert.deepEqual(admittedInputIds, [
       [firstInputId, secondInputId],
       [secondInputId],
     ])
     const firstAdmission = await controller.admitLiveSteered()
+    expect(steer).toHaveBeenCalledTimes(1)
+    if (firstAdmission?.kind === 'accepted') {
+      controller.commitLiveSteeredLocalAdmission(firstAdmission)
+    }
+    await vi.waitFor(() => {
+      expect(steer).toHaveBeenCalledTimes(2)
+    })
     const secondAdmission = await controller.admitLiveSteered()
     assert.equal(firstAdmission?.kind, 'accepted')
     assert.equal(secondAdmission?.kind, 'accepted')
@@ -1577,8 +1686,9 @@ test('active-turn controller reruns input-available admission after an accepted 
     assert.deepEqual(knownInputSnapshots, [[], ['hook-1']])
     assert.equal(firstResult?.kind, 'accepted')
     assert.equal(secondResult?.kind, 'accepted')
-    expect(steer).toHaveBeenCalledTimes(2)
-    assert.deepEqual(await controller.admitLiveSteered(), {
+    expect(steer).toHaveBeenCalledTimes(1)
+    const firstAdmission = await controller.admitLiveSteered()
+    assert.deepEqual(firstAdmission, {
       acceptedInputs: [
         {
           id: 'hook-1',
@@ -1598,7 +1708,14 @@ test('active-turn controller reruns input-available admission after an accepted 
         },
       ],
     })
-    assert.deepEqual(await controller.admitLiveSteered(), {
+    if (firstAdmission?.kind === 'accepted') {
+      controller.commitLiveSteeredLocalAdmission(firstAdmission)
+    }
+    await vi.waitFor(() => {
+      expect(steer).toHaveBeenCalledTimes(2)
+    })
+    const secondAdmission = await controller.admitLiveSteered()
+    assert.deepEqual(secondAdmission, {
       acceptedInputs: [
         {
           id: 'hook-2',
@@ -1618,6 +1735,9 @@ test('active-turn controller reruns input-available admission after an accepted 
         },
       ],
     })
+    if (secondAdmission?.kind === 'accepted') {
+      controller.commitLiveSteeredLocalAdmission(secondAdmission)
+    }
     assert.equal(await controller.admitAvailable(), undefined)
   } finally {
     firstAdmissionRelease.resolve()

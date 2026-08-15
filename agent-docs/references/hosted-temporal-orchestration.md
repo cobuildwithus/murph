@@ -138,7 +138,11 @@ Allowed Temporal state is tiny and pointer-only:
   that calls the existing Cloudflare processing adapter when facts are idle. It
   carries no provider value or credential, is discarded while facts are
   blocked, and is cleared after accepted processing only when no newer wake
-  arrived.
+  arrived. Authenticated provider changes are the current Web producer of this
+  payload-free signal. Newly committed hosted-group projection grants instead
+  atomically admit the existing durable `runtime.maintenance-requested`
+  system-mailbox row with the grant transaction, then signal its pointer after
+  commit.
 - Global device-sync scheduled-wake Schedule id, interval, Workflow start options, and
   count-only due-reconcile sweep results. The reconciler may remember that a
   sweep ran and how many due-reconcile rows/wakes it touched; it must not
@@ -292,7 +296,11 @@ coalescing, and wake buckets. The scheduled-reconcile event revision is the
 compatibility boundary for its canonical mailbox envelope. Move that revision
 when envelope hashing or canonical payload semantics change so retries cannot
 collide with an older envelope under the same event id; never weaken the
-mailbox's exact duplicate comparison to bridge versions.
+mailbox's exact duplicate comparison to bridge versions. Revision `v3` is the
+one-time cutover for exact connection-scoped retained-work handling: it lets a
+due connection create one new canonical wake when its matching `v2` wake was
+already consumed under the older handling semantics, while retries within `v3`
+remain deterministic.
 
 The Vercel device-sync dirty-sweeper cron is not registered, and there is no
 Temporal dirty-row sweep replacement. Temporal is the single production owner of

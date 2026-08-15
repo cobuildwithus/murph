@@ -1,0 +1,73 @@
+%PDF-1.4
+1 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+endobj
+2 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>
+endobj
+3 0 obj
+<< /Length 3788 >>
+stream
+BT /F2 19 Tf 1 0 0 1 54.00 738.00 Tm (Murph Legal Documents) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 706.00 Tm (Effective Date: April 29, 2026) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 688.00 Tm (Last Updated: August 12, 2026) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 670.00 Tm (This page collects the current Murph legal documents for the hosted service. The latest PDFs are) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 656.00 Tm (available under /legal/, versioned PDFs are retained for auditability, and /legal/manifest.json lists the) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 642.00 Tm (current document versions without timestamp churn.) Tj ET
+BT /F2 14 Tf 1 0 0 1 54.00 614.00 Tm (Current documents) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 590.00 Tm (Document: Terms of Service; Current version: 2026-07-23; HTML: /legal/terms \(/legal/terms\); Latest) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 576.00 Tm (PDF: /legal/terms.pdf \(/legal/terms.pdf\)) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 558.00 Tm (Document: Privacy Policy; Current version: 2026-07-23; HTML: /legal/privacy \(/legal/privacy\); Latest) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 544.00 Tm (PDF: /legal/privacy.pdf \(/legal/privacy.pdf\)) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 526.00 Tm (Document: Consumer Health Data Notice; Current version: 2026-07-23; HTML:) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 512.00 Tm (/consumer-health-data-privacy-policy \(/consumer-health-data-privacy-policy\); Latest PDF:) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 498.00 Tm (/legal/consumer-health-data-notice.pdf \(/legal/consumer-health-data-notice.pdf\)) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 480.00 Tm (Document: Health AI Safety Disclosure; Current version: 2026-07-23; HTML:) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 466.00 Tm (/legal/health-ai-safety-disclosure \(/legal/health-ai-safety-disclosure\); Latest PDF:) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 452.00 Tm (/legal/health-ai-safety-disclosure.pdf \(/legal/health-ai-safety-disclosure.pdf\)) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 434.00 Tm (Document: Subprocessors, Model Providers, and Connected Services; Current version: 2026-08-12;) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 420.00 Tm (HTML: /subprocessors \(/subprocessors\); Latest PDF: /legal/subprocessors.pdf) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 406.00 Tm (\(/legal/subprocessors.pdf\)) Tj ET
+BT /F2 14 Tf 1 0 0 1 54.00 378.00 Tm (Consent records) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 354.00 Tm (Hosted Murph records required document acceptance against the current Terms of Service, Privacy) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 340.00 Tm (Policy, Consumer Health Data Notice, and Health AI Safety Disclosure. The append-only event is) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 326.00 Tm (historical proof of what the member accepted; it does not prevent the member from disconnecting) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 312.00 Tm (optional sources, withdrawing optional permissions for future processing where supported or required,) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 298.00 Tm (or exercising privacy rights.) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 280.00 Tm (Platform or provider permissions and optional feature consents, such as Health Commons contribution) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 266.00 Tm (consent, are recorded separately where supported so they can be granted or revoked without rewriting) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 252.00 Tm (launch acceptance history.) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 234.00 Tm (Consent events are append-only. Current grant rows are maintained as a read-optimized view of the) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 220.00 Tm (latest active or revoked state.) Tj ET
+BT /F2 14 Tf 1 0 0 1 54.00 192.00 Tm (Contact) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 168.00 Tm (Questions about legal documents, Consumer Health Data, privacy rights, or consent can be sent to) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 154.00 Tm (legal@justco.build.) Tj ET
+endstream
+endobj
+4 0 obj
+<< /Type /Page /Parent 5 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 1 0 R /F2 2 0 R >> >> /Contents 3 0 R >>
+endobj
+5 0 obj
+<< /Type /Pages /Count 1 /Kids [4 0 R] >>
+endobj
+6 0 obj
+<< /Title (Murph Legal Documents) /Producer (Murph legal PDF generator) /Creator (apps/web/scripts/generate-legal-pdfs.ts) >>
+endobj
+7 0 obj
+<< /Type /Catalog /Pages 5 0 R >>
+endobj
+xref
+0 8
+0000000000 65535 f 
+0000000009 00000 n 
+0000000079 00000 n 
+0000000154 00000 n 
+0000003994 00000 n 
+0000004130 00000 n 
+0000004187 00000 n 
+0000004328 00000 n 
+trailer
+<< /Size 8 /Root 7 0 R /Info 6 0 R >>
+startxref
+4377
+%%EOF

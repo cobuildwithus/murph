@@ -20,6 +20,7 @@ import {
   listConfiguredDeviceSyncConnectTargets,
   listConfiguredDeviceSyncProviderNames,
   listJunctionLinkDeviceConnectRouteEntries,
+  JUNCTION_PRODUCTION_TIMESERIES_RESOURCES,
   loadDeviceSyncEnvironment,
   resolveConfiguredDeviceSyncConnectTarget,
   parseConfiguredDeviceSyncRuntimeConfig,
@@ -447,7 +448,7 @@ test("readConfiguredDeviceSyncRuntimeConfig keeps only the shared hosted runtime
   );
 });
 
-test("Junction timeseries resources stay code-owned outside hosted runtime config", () => {
+test("Junction production timeseries activation stays code-owned outside hosted runtime config", () => {
   const env = {
     DEVICE_SYNC_PUBLIC_BASE_URL: "https://device-sync.example.test",
     DEVICE_SYNC_SECRET: "runtime-codec-secret",
@@ -459,10 +460,13 @@ test("Junction timeseries resources stay code-owned outside hosted runtime confi
   };
   const providerConfig = requireValue(readConfiguredDeviceSyncProviderConfigs(env).junction);
 
-  assert.equal(Object.hasOwn(providerConfig, "timeseriesResources"), false);
+  assert.deepEqual(
+    providerConfig.timeseriesResources,
+    [...JUNCTION_PRODUCTION_TIMESERIES_RESOURCES],
+  );
   assert.deepEqual(
     normalizeJunctionDeviceSyncRuntimeConfig(providerConfig).timeseriesResources,
-    [...JUNCTION_DEFAULT_TIMESERIES_RESOURCES],
+    [...JUNCTION_PRODUCTION_TIMESERIES_RESOURCES],
   );
 
   const runtimeConfig = requireValue(readConfiguredDeviceSyncRuntimeConfig(env));

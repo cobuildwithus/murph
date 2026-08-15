@@ -19,6 +19,7 @@ const MAX_RESPONSE_BYTES = 64 * 1024;
 const UPLOAD_TIMEOUT_MS = 30_000;
 const VERIFY_TIMEOUT_MS = 15_000;
 const DESIGN_PROOF_VARIANT_ID = "designproof";
+const DESIGN_PROOF_LIFECYCLE_EVENT = "design-proof:upload";
 const DESIGN_PROOF_VARIANT = {
   id: DESIGN_PROOF_VARIANT_ID,
   neverRequireSignedURLs: true,
@@ -32,6 +33,13 @@ const DESIGN_PROOF_VARIANT = {
 
 const HELP = `Usage:
   pnpm design-proof:upload -- <screenshot> [screenshot ...]
+
+Options:
+  -h, --help  Show this help text.
+
+The package command's first -- forwards arguments. To upload a filename that
+begins with - or is literally named -- or --help, add one positional-only --:
+  pnpm design-proof:upload -- -- -proof.png -- --help
 
 Uploads lossless PNG design-proof screenshots to Cloudflare Images. Screenshots
 must be at least ${MIN_IMAGE_WIDTH}px wide and no more than ${MAX_IMAGE_DIMENSION}px on either axis.
@@ -71,6 +79,12 @@ type CliArgs = {
   files: string[];
   help: boolean;
 };
+
+type PackageManagerEnvironment = Readonly<
+  Partial<
+    Record<"npm_config_user_agent" | "npm_lifecycle_event", string | undefined>
+  >
+>;
 
 function hasErrorCode(error: unknown, code: string): boolean {
   return typeof error === "object"
@@ -582,6 +596,18 @@ export async function uploadDesignProofImage({
   return publicUrl;
 }
 
+export function normalizePackageManagerArgs(
+  args: readonly string[],
+  env: PackageManagerEnvironment = process.env,
+): string[] {
+  const isPnpmPackageInvocation =
+    env.npm_lifecycle_event === DESIGN_PROOF_LIFECYCLE_EVENT
+    && env.npm_config_user_agent?.startsWith("pnpm/") === true;
+  return isPnpmPackageInvocation && args[0] === "--"
+    ? args.slice(1)
+    : [...args];
+}
+
 export function parseCliArgs(args: readonly string[]): CliArgs {
   const files: string[] = [];
   let positionalOnly = false;
@@ -605,7 +631,7 @@ export function parseCliArgs(args: readonly string[]): CliArgs {
 }
 
 export async function main(args = process.argv.slice(2)): Promise<void> {
-  const parsed = parseCliArgs(args);
+  const parsed = parseCliArgs(normalizePackageManagerArgs(args));
   if (parsed.help) {
     process.stdout.write(HELP);
     return;

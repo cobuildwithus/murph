@@ -32,7 +32,6 @@ import {
   listAssistantInputEvents,
   resolveAssistantConversationLookupKey,
   updateAssistantInputAttachmentEvidence,
-  updateAssistantInputProjection,
 } from "@murphai/assistant-engine";
 import {
   reconcileManagedAssistantAutoReplyChannelsLocal,
@@ -99,7 +98,7 @@ afterEach(async () => {
 });
 
 describe("hosted mailbox conversation import adapter", () => {
-  test("keeps link-only Linq input on the replay-compatible projection path", async () => {
+  test("keeps staged link-only Linq input imported when projection is interrupted", async () => {
     const parentRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-link-input-"));
     tempRoots.push(parentRoot);
     const vaultRoot = path.join(parentRoot, "vault");
@@ -141,18 +140,18 @@ describe("hosted mailbox conversation import adapter", () => {
     });
     const item = createResolvedConversationMailboxItem();
 
-    await assert.rejects(
-      importHostedConversationMailboxItem({
-        decodePayload: createDecodedPayloadDecoder(decodedWake),
-        importConversationWake,
-        prepareWakeContext,
-        item,
-        runtime: createRuntime(),
-        signal: signalController.signal,
-        vaultRoot,
-      }),
-      (error: unknown) => error === interruption,
-    );
+    const interrupted = await importHostedConversationMailboxItem({
+      decodePayload: createDecodedPayloadDecoder(decodedWake),
+      importConversationWake,
+      prepareWakeContext,
+      item,
+      runtime: createRuntime(),
+      signal: signalController.signal,
+      vaultRoot,
+    });
+
+    assert.equal(interrupted.status, "imported");
+    assert.equal(interrupted.reasonCode, "conversation-import.projection-failed");
 
     const listed = await listAssistantInputEvents({ vault: vaultRoot });
     assert.equal(listed.events.length, 1);
@@ -161,7 +160,7 @@ describe("hosted mailbox conversation import adapter", () => {
       "Received a Linq message.",
     );
     assert.equal(listed.events[0]?.content.attachmentDescriptors.length, 0);
-    assert.equal(listed.events[0]?.projection.status, "pending");
+    assert.equal(listed.events[0]?.projection.status, "failed");
     assert.equal(listed.events[0]?.projection.captureId, null);
 
     const replay = await importHostedConversationMailboxItem({
@@ -3271,7 +3270,7 @@ describe("hosted mailbox conversation import adapter", () => {
       eventId: "evt_synthetic_email_001",
       message: {
         channel: "email",
-        identityId: "agentmail_inbox_synthetic",
+        identityId: "hosted_email_identity_synthetic",
         messageId: "email_message_synthetic_001",
         rawMessageKey: "raw_email_thread_authority",
         selfAddress: "assistant@example.test",
@@ -3322,7 +3321,7 @@ describe("hosted mailbox conversation import adapter", () => {
     assert.equal(replyTarget.messageId, "email_message_synthetic_001");
     assert.ok(replyTarget.threadId?.startsWith("hostedmail:"));
     assert.equal(JSON.stringify(event).includes("raw_email_thread_authority"), false);
-    assert.equal(JSON.stringify(event).includes("agentmail_inbox_synthetic"), false);
+    assert.equal(JSON.stringify(event).includes("hosted_email_identity_synthetic"), false);
     assert.equal(JSON.stringify(event).includes("assistant@example.test"), false);
   });
 
@@ -3887,44 +3886,47 @@ describe("hosted mailbox conversation import adapter", () => {
     assert.equal(projectionUpdates.length, 0);
   });
 
-  test("rethrows mid-projection aborts after staging without recording projection failure", async () => {
+  test("keeps staged mailbox input imported when projection is aborted", async () => {
     const abortReason = new DOMException("Stopped", "AbortError");
     const controller = new AbortController();
     const projectionUpdates: unknown[] = [];
     const order: string[] = [];
 
-    await assert.rejects(
-      () =>
-        importHostedConversationMailboxItem({
-          decodePayload: createDecodedPayloadDecoder(createConversationWake()),
-          async importConversationWake(input) {
-            order.push("import");
-            assert.equal(input.signal, controller.signal);
-            controller.abort(abortReason);
-            throw abortReason;
-          },
-          async prepareWakeContext(input) {
-            order.push("prepare");
-            assert.equal(input.wake.eventId, "evt_synthetic_conversation_001");
-          },
-          item: createResolvedConversationMailboxItem(),
-          runtime: createRuntime(),
-          signal: controller.signal,
-          stageAssistantInputEvent: createAssistantInputEventStager({
-            order,
-            projectionUpdates,
-          }),
-          vaultRoot: "synthetic-vault-root",
-        }),
-      (error) => error === abortReason,
-    );
+    const outcome = await importHostedConversationMailboxItem({
+      decodePayload: createDecodedPayloadDecoder(createConversationWake()),
+      async importConversationWake(input) {
+        order.push("import");
+        assert.equal(input.signal, controller.signal);
+        controller.abort(abortReason);
+        throw abortReason;
+      },
+      async prepareWakeContext(input) {
+        order.push("prepare");
+        assert.equal(input.wake.eventId, "evt_synthetic_conversation_001");
+      },
+      item: createResolvedConversationMailboxItem(),
+      runtime: createRuntime(),
+      signal: controller.signal,
+      stageAssistantInputEvent: createAssistantInputEventStager({
+        order,
+        projectionUpdates,
+      }),
+      vaultRoot: "synthetic-vault-root",
+    });
 
     assert.deepEqual(order, [
       "stage:evt_synthetic_conversation_001",
       "prepare",
       "import",
+      "projection:failed",
     ]);
-    assert.deepEqual(projectionUpdates, []);
+    assert.equal(outcome.status, "imported");
+    assert.equal(outcome.reasonCode, "conversation-import.projection-failed");
+    assert.deepEqual(projectionUpdates, [{
+      captureId: null,
+      reasonCode: "conversation-import.projection-failed",
+      status: "failed",
+    }]);
   });
 
   test("keeps staged mailbox input imported when projection preparation fails", async () => {

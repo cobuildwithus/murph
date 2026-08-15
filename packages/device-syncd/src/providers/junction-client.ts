@@ -1,6 +1,35 @@
+import { ActivityClient, type GetActivityRequest } from "@junction-api/sdk/activity";
+import { BodyClient } from "@junction-api/sdk/body";
+import { ElectrocardiogramClient } from "@junction-api/sdk/electrocardiogram";
+import {
+  type GetUserHistoricalPullsIntrospectRequest,
+  type GetUserResourcesIntrospectRequest,
+  IntrospectClient,
+} from "@junction-api/sdk/introspect";
+import {
+  type BulkTriggerHistoricalPullBody,
+  LinkClient,
+  type LinkTokenExchange,
+} from "@junction-api/sdk/link";
+import { MealClient } from "@junction-api/sdk/meal";
+import { MenstrualCycleClient } from "@junction-api/sdk/menstrualCycle";
+import { ProfileClient, type GetProfileRequest } from "@junction-api/sdk/profile";
+import { SleepClient } from "@junction-api/sdk/sleep";
+import { SleepCycleClient } from "@junction-api/sdk/sleepCycle";
+import {
+  type DeregisterProviderUserRequest,
+  type RefreshUserRequest,
+  UserClient,
+} from "@junction-api/sdk/user";
+import { VitalsClient, type StepsGroupedVitalsRequest } from "@junction-api/sdk/vitals";
+import { WorkoutsClient } from "@junction-api/sdk/workouts";
+import { resolveJunctionTimeseriesResourcePolicy } from "@murphai/contracts";
 import { resolveJunctionOrigin } from "@murphai/importers/device-providers/junction-origin";
 
-import { normalizeJunctionProviderSlug } from "../config/connect-routes.ts";
+import {
+  normalizeJunctionProviderSlug,
+  resolveJunctionDeviceConnectRouteByProviderSlug,
+} from "../config/connect-routes.ts";
 import { deviceSyncError, isDeviceSyncError } from "../errors.ts";
 import { normalizeString } from "../shared.ts";
 import { buildProviderApiError as buildProviderApiErrorBase } from "./shared-oauth.ts";
@@ -12,15 +41,15 @@ import {
   throwIfProviderRequestAborted,
   waitForProviderRetryDelay,
 } from "./request-abort.ts";
-import {
-  buildProviderRequestDiagnostics,
-  extractProviderQueryParameterNames,
-} from "./provider-diagnostics.ts";
+import { buildProviderRequestDiagnostics } from "./provider-diagnostics.ts";
 import {
   assertValidJunctionClientConfig,
   resolveJunctionBaseUrl,
 } from "../config/junction-client-config.ts";
 import type { JunctionEnvironment, JunctionRegion } from "../config/provider-types.ts";
+
+type JunctionSdkClientOptions = VitalsClient.Options;
+type JunctionSdkRequestOptions = VitalsClient.RequestOptions;
 
 export {
   assertValidJunctionClientConfig,
@@ -80,8 +109,17 @@ export interface JunctionProviderConnection {
 
 export type JunctionDateQueryFormat = "date" | "datetime";
 
+export interface JunctionCollectionWorkLimit {
+  maxAttemptsPerPage: number;
+  maxPages: number;
+  requestTimeoutMs: number;
+}
+
 export interface JunctionWindowInput {
+  collectionWorkLimit?: JunctionCollectionWorkLimit;
   dateQueryFormat?: JunctionDateQueryFormat;
+  requireStructurallyCompleteCollection?: boolean;
+  maxRecords?: number;
   resource: string;
   signal?: AbortSignal | null;
   sourceProviderSlug?: string | null;
@@ -94,6 +132,12 @@ export interface JunctionProfileSummaryInput {
   signal?: AbortSignal | null;
   sourceProviderSlug?: string | null;
   userId: string;
+}
+
+export interface JunctionWorkoutStreamInput {
+  collectionWorkLimit?: JunctionCollectionWorkLimit;
+  signal?: AbortSignal | null;
+  workoutId: string;
 }
 
 export interface JunctionIntrospectionInput {
@@ -147,12 +191,46 @@ export interface JunctionRefreshUserDataInput {
   userId: string;
 }
 
+type JunctionSdkProvider = DeregisterProviderUserRequest["provider"];
+type JunctionSdkOAuthProvider = BulkTriggerHistoricalPullBody["provider"];
+
+interface JunctionSdkProviderSlugRewrite {
+  from: JunctionSdkProvider;
+  to: string;
+}
+
+interface JunctionSdkProviderTransport {
+  provider: JunctionSdkProvider;
+  providerSlugRewrite?: JunctionSdkProviderSlugRewrite;
+}
+
+interface JunctionSdkOAuthProviderTransport {
+  provider: JunctionSdkOAuthProvider;
+  providerSlugRewrite?: JunctionSdkProviderSlugRewrite;
+}
+
+const JUNCTION_SDK_PROVIDERS = Object.freeze([
+  "oura", "fitbit", "garmin", "whoop", "strava", "renpho", "peloton", "wahoo",
+  "zwift", "freestyle_libre", "abbott_libreview", "tandem_source", "freestyle_libre_ble",
+  "eight_sleep", "withings", "apple_health_kit", "manual", "ihealth", "google_fit",
+  "beurer_api", "beurer_ble", "omron", "omron_ble", "onetouch_ble", "accuchek_ble",
+  "contour_ble", "dexcom", "dexcom_v3", "hammerhead", "my_fitness_pal", "health_connect",
+  "samsung_health", "polar", "cronometer", "kardia", "whoop_v2", "ultrahuman",
+  "my_fitness_pal_v2", "map_my_fitness", "runkeeper",
+] as const satisfies readonly JunctionSdkProvider[]);
+const JUNCTION_SDK_OAUTH_PROVIDERS = Object.freeze([
+  "oura", "fitbit", "garmin", "strava", "wahoo", "ihealth", "withings", "google_fit",
+  "dexcom_v3", "polar", "cronometer", "omron", "whoop_v2", "my_fitness_pal_v2",
+  "ultrahuman", "runkeeper",
+] as const satisfies readonly JunctionSdkOAuthProvider[]);
+
 const DEFAULT_TIMEOUT_MS = 15_000;
 const MAX_GET_ATTEMPTS = 3;
 const DEFAULT_RETRY_DELAY_MS = 500;
 const MAX_RETRY_DELAY_MS = 5_000;
 const MAX_COLLECTION_PAGES = 100;
 const MAX_COLLECTION_RECORDS = 25_000;
+const MAX_SDK_COMPAT_RESPONSE_BYTES = 32 * 1_024 * 1_024;
 // These summary endpoints declare `start_date`/`end_date` as YYYY-MM-DD dates
 // (not datetimes) in the Junction API reference.
 const JUNCTION_DATE_ONLY_SUMMARY_RESOURCES = new Set(["electrocardiogram", "menstrual_cycle", "sleep_cycle"]);
@@ -182,13 +260,16 @@ export class JunctionClient {
     clientUserId: string,
     options: { signal?: AbortSignal | null } = {},
   ): Promise<JunctionUser | null> {
-    const payload = await this.requestJson<Record<string, unknown> | null>(
+    const payload = await this.requestSdkResource<Record<string, unknown> | null>(
       "GET",
-      `/v2/user/resolve/${encodeURIComponent(clientUserId)}`,
-      undefined,
-      { endpointKind: "junction_user_resolve", optional404: true, signal: options.signal ?? null },
+      {
+        endpointKind: "junction_user_resolve",
+        optional404: true,
+        signal: options.signal ?? null,
+      },
+      (clientOptions, requestOptions) => new UserClient(clientOptions)
+        .getByClientUserId({ clientUserId }, requestOptions),
     );
-
     return payload ? parseJunctionUser(payload, "Junction resolve user response") : null;
   }
 
@@ -196,13 +277,15 @@ export class JunctionClient {
     clientUserId: string,
     options: { signal?: AbortSignal | null } = {},
   ): Promise<JunctionUser> {
-    const payload = await this.requestJson<Record<string, unknown>>(
+    const payload = await this.requestSdkResource<Record<string, unknown>>(
       "POST",
-      "/v2/user/",
       {
-        client_user_id: clientUserId,
+        bodyFieldNames: ["client_user_id"],
+        endpointKind: "junction_user_create",
+        signal: options.signal ?? null,
       },
-      { endpointKind: "junction_user_create", signal: options.signal ?? null },
+      (clientOptions, requestOptions) => new UserClient(clientOptions)
+        .create({ clientUserId }, requestOptions),
     );
     return parseJunctionUser(payload, "Junction create user response");
   }
@@ -223,7 +306,6 @@ export class JunctionClient {
       if (retryResolved) {
         return retryResolved;
       }
-
       throw error;
     }
   }
@@ -235,23 +317,59 @@ export class JunctionClient {
     providerFilter?: readonly string[];
     signal?: AbortSignal | null;
   }): Promise<JunctionLinkToken> {
-    const body: Record<string, unknown> = {
-      user_id: input.userId,
-      redirect_url: input.callbackUrl,
-    };
-
     const provider = normalizeJunctionProviderSlug(input.provider);
-    if (provider) {
-      body.provider = provider;
-    } else if (input.providerFilter && input.providerFilter.length > 0) {
-      body.filter_on_providers = [...input.providerFilter];
+    const providerTransport = provider
+      ? requireJunctionSdkProviderTransport(provider)
+      : undefined;
+    const sdkProvider = providerTransport?.provider;
+    const providerFilterTransports = input.providerFilter?.map((candidate) =>
+      requireJunctionSdkProviderTransport(normalizeRequiredProviderSlug(candidate))
+    );
+    const providerFilterRewrite = providerFilterTransports
+      ?.find((candidate) => candidate.providerSlugRewrite)
+      ?.providerSlugRewrite;
+    if (
+      providerFilterRewrite
+      && providerFilterTransports?.some((candidate) =>
+        candidate.provider === providerFilterRewrite.from
+        && candidate.providerSlugRewrite === undefined
+      )
+    ) {
+      throw new TypeError(
+        "Junction provider filters cannot combine a compatibility provider with its legacy transport placeholder.",
+      );
+    }
+    const providerFilter = providerFilterTransports?.map((candidate) =>
+      candidate.provider
+    );
+    const bodyFieldNames = ["user_id", "redirect_url"];
+    if (sdkProvider) {
+      bodyFieldNames.push("provider");
+    } else if (providerFilter && providerFilter.length > 0) {
+      bodyFieldNames.push("filter_on_providers");
     }
 
-    const payload = await this.requestJson<Record<string, unknown>>(
+    const payload = await this.requestSdkResource<Record<string, unknown>>(
       "POST",
-      "/v2/link/token",
-      body,
-      { endpointKind: "junction_link_token_create", signal: input.signal ?? null },
+      {
+        bodyFieldNames,
+        endpointKind: "junction_link_token_create",
+        providerSlugRewrite:
+          providerTransport?.providerSlugRewrite ?? providerFilterRewrite,
+        signal: input.signal ?? null,
+      },
+      (clientOptions, requestOptions) => {
+        const request: LinkTokenExchange = {
+          userId: input.userId,
+          redirectUrl: input.callbackUrl,
+        };
+        if (sdkProvider) {
+          request.provider = sdkProvider;
+        } else if (providerFilter && providerFilter.length > 0) {
+          request.filterOnProviders = providerFilter;
+        }
+        return new LinkClient(clientOptions).token(request, requestOptions);
+      },
     );
     const linkWebUrl = normalizeString(payload.link_web_url) ?? normalizeString(payload.linkWebUrl);
 
@@ -282,15 +400,18 @@ export class JunctionClient {
       throw new TypeError("Junction sign-in token creation requires a Junction user id.");
     }
 
-    const payload = await this.requestJson<Record<string, unknown>>(
+    const payload = await this.requestSdkResource<Record<string, unknown>>(
       "POST",
-      `/v2/user/${encodeURIComponent(normalizedUserId)}/sign_in_token`,
-      undefined,
-      { endpointKind: "junction_user_sign_in_token", signal: options.signal ?? null },
+      {
+        endpointKind: "junction_user_sign_in_token",
+        signal: options.signal ?? null,
+      },
+      (clientOptions, requestOptions) => new UserClient(clientOptions).getUserSignInToken(
+        { userId: normalizedUserId },
+        requestOptions,
+      ),
     );
-    const signInToken =
-      normalizeString(payload?.sign_in_token) ?? normalizeString(payload?.signInToken);
-
+    const signInToken = normalizeString(payload.sign_in_token) ?? normalizeString(payload.signInToken);
     if (!signInToken) {
       throw deviceSyncError({
         code: "JUNCTION_SIGN_IN_TOKEN_INVALID",
@@ -299,7 +420,6 @@ export class JunctionClient {
         httpStatus: 502,
       });
     }
-
     return { signInToken };
   }
 
@@ -307,11 +427,11 @@ export class JunctionClient {
     userId: string,
     options: { signal?: AbortSignal | null } = {},
   ): Promise<JunctionProviderConnection[]> {
-    const payload = await this.requestJson<unknown>(
+    const payload = await this.requestSdkResource<unknown>(
       "GET",
-      `/v2/user/providers/${encodeURIComponent(userId)}`,
-      undefined,
       { endpointKind: "junction_user_providers", signal: options.signal ?? null },
+      (clientOptions, requestOptions) => new UserClient(clientOptions)
+        .getConnectedProviders({ userId }, requestOptions),
     );
     return parseJunctionProviders(payload);
   }
@@ -329,12 +449,19 @@ export class JunctionClient {
     if (!userId) {
       throw new TypeError("Junction provider deregistration requires a Junction user id.");
     }
+    const providerTransport = requireJunctionSdkProviderTransport(providerSlug);
 
-    await this.requestJson<unknown>(
+    await this.requestSdkResource<unknown>(
       "DELETE",
-      `/v2/user/${encodeURIComponent(userId)}/${encodeURIComponent(providerSlug)}`,
-      undefined,
-      { endpointKind: "junction_user_provider_deregister", signal: input.signal ?? null },
+      {
+        endpointKind: "junction_user_provider_deregister",
+        providerSlugRewrite: providerTransport.providerSlugRewrite,
+        signal: input.signal ?? null,
+      },
+      (clientOptions, requestOptions) => new UserClient(clientOptions).deregisterProvider({
+        provider: providerTransport.provider,
+        userId,
+      }, requestOptions),
     );
   }
 
@@ -342,11 +469,11 @@ export class JunctionClient {
     userId: string,
     options: { signal?: AbortSignal | null } = {},
   ): Promise<unknown[]> {
-    const payload = await this.requestJson<unknown>(
+    const payload = await this.requestSdkResource<unknown>(
       "GET",
-      `/v2/user/${encodeURIComponent(userId)}/device`,
-      undefined,
       { endpointKind: "junction_user_devices", signal: options.signal ?? null },
+      (clientOptions, requestOptions) => new UserClient(clientOptions)
+        .getDevices({ userId }, requestOptions),
     );
     return extractCollectionRecords(payload);
   }
@@ -355,62 +482,135 @@ export class JunctionClient {
     if (input.resource === "profile") {
       return this.listProfileSummary(input);
     }
-
     return this.fetchWindowedCollection(
-      `/v2/summary/${encodeURIComponent(input.resource)}/${encodeURIComponent(input.userId)}`,
-      {
-        ...input,
-        dateQueryFormat: resolveJunctionSummaryDateQueryFormat(input),
-      },
-      { endpointKind: "junction_summary_collection" },
+      { ...input, dateQueryFormat: resolveJunctionSummaryDateQueryFormat(input) },
+      extractCollectionRecords,
+      (cursor) => this.requestSummaryPage(input, cursor),
     );
   }
 
   async listProfileSummary(input: JunctionProfileSummaryInput): Promise<unknown[]> {
-    const search = new URLSearchParams();
-    const sourceProviderSlug = normalizeSourceSlug(input.sourceProviderSlug);
-    if (sourceProviderSlug) {
-      search.set("provider", sourceProviderSlug);
-    }
-    const suffix = search.size > 0 ? `?${search.toString()}` : "";
-    const payload = await this.requestJson<unknown>(
+    const providerTransport = optionalJunctionSdkProviderTransport(
+      input.sourceProviderSlug,
+    );
+    const provider = providerTransport?.provider;
+    const payload = await this.requestSdkResource<unknown>(
       "GET",
-      `/v2/summary/profile/${encodeURIComponent(input.userId)}${suffix}`,
-      undefined,
-      { endpointKind: "junction_summary_collection", signal: input.signal ?? null },
+      {
+        endpointKind: "junction_summary_collection",
+        providerSlugRewrite: providerTransport?.providerSlugRewrite,
+        queryParameterNames: provider ? ["provider"] : [],
+        signal: input.signal ?? null,
+      },
+      (clientOptions, requestOptions) => {
+        const request: GetProfileRequest = { userId: input.userId };
+        if (provider) {
+          request.provider = provider;
+        }
+        return new ProfileClient(clientOptions).get(request, requestOptions);
+      },
     );
     return extractCollectionRecords(payload, "profile");
   }
 
   async listTimeseries(input: JunctionWindowInput): Promise<unknown[]> {
-    const apiResource = resolveJunctionTimeseriesApiResource(input.resource);
+    const policy = resolveJunctionTimeseriesResourcePolicy(input.resource);
+    if (policy?.fetchMode === "workout_stream") {
+      throw new TypeError(
+        "Junction workout_stream uses the dedicated workout stream endpoint.",
+      );
+    }
     return this.fetchWindowedCollection(
-      `/v2/timeseries/${encodeURIComponent(input.userId)}/${encodeURIComponent(apiResource)}/grouped`,
-      input,
       {
-        endpointKind: "junction_timeseries_collection",
-        extractRecords: extractTimeseriesRecords,
+        ...input,
+        maxRecords: policy?.maxSamplesPerWindow === undefined
+          ? input.maxRecords
+          : Math.min(input.maxRecords ?? policy.maxSamplesPerWindow, policy.maxSamplesPerWindow),
       },
+      input.requireStructurallyCompleteCollection
+        ? (payload, resource) => extractStructurallyCompleteTimeseriesRecords(
+            payload,
+            resource,
+            normalizeSourceSlug(input.sourceProviderSlug),
+          )
+        : extractTimeseriesRecords,
+      (cursor) => this.requestTimeseriesPage(input, cursor),
+    );
+  }
+
+  async getWorkoutStream(input: JunctionWorkoutStreamInput): Promise<unknown> {
+    const workoutId = normalizeString(input.workoutId);
+    if (!workoutId) {
+      throw new TypeError("Junction workout stream requires a workout id.");
+    }
+    return this.requestSdkResource<unknown>(
+      "GET",
+      {
+        endpointKind: "junction_workout_stream",
+        signal: input.signal ?? null,
+        ...(input.collectionWorkLimit
+          ? {
+              maxAttempts: input.collectionWorkLimit.maxAttemptsPerPage,
+              timeoutMs: input.collectionWorkLimit.requestTimeoutMs,
+            }
+          : {}),
+      },
+      (clientOptions, requestOptions) => new WorkoutsClient(clientOptions)
+        .getByWorkoutId({ workoutId }, requestOptions),
     );
   }
 
   async introspectResources(input: JunctionIntrospectionInput): Promise<unknown> {
-    return this.requestJson<unknown>(
+    const providerTransport = optionalJunctionSdkProviderTransport(
+      input.sourceProviderSlug,
+    );
+    const provider = providerTransport?.provider;
+    return this.requestSdkResource<unknown>(
       "GET",
-      `/v2/introspect/resources?${buildJunctionIntrospectionSearch(input).toString()}`,
-      undefined,
-      { endpointKind: "junction_introspect_resources", signal: input.signal ?? null },
+      {
+        endpointKind: "junction_introspect_resources",
+        providerSlugRewrite: providerTransport?.providerSlugRewrite,
+        queryParameterNames: ["user_id", "user_limit", ...(provider ? ["provider"] : [])],
+        signal: input.signal ?? null,
+      },
+      (clientOptions, requestOptions) => {
+        const request: GetUserResourcesIntrospectRequest = {
+          userId: input.userId,
+          userLimit: input.userLimit ?? 1,
+        };
+        if (provider) {
+          request.provider = provider;
+        }
+        return new IntrospectClient(clientOptions).getUserResources(request, requestOptions);
+      },
     );
   }
 
   async introspectHistoricalPull(
     input: JunctionIntrospectionInput,
   ): Promise<JunctionHistoricalPullSnapshot> {
-    const payload = await this.requestJson<unknown>(
+    const providerTransport = optionalJunctionSdkProviderTransport(
+      input.sourceProviderSlug,
+    );
+    const provider = providerTransport?.provider;
+    const payload = await this.requestSdkResource<unknown>(
       "GET",
-      `/v2/introspect/historical_pull?${buildJunctionIntrospectionSearch(input).toString()}`,
-      undefined,
-      { endpointKind: "junction_introspect_historical_pull", signal: input.signal ?? null },
+      {
+        endpointKind: "junction_introspect_historical_pull",
+        providerSlugRewrite: providerTransport?.providerSlugRewrite,
+        queryParameterNames: ["user_id", "user_limit", ...(provider ? ["provider"] : [])],
+        signal: input.signal ?? null,
+      },
+      (clientOptions, requestOptions) => {
+        const request: GetUserHistoricalPullsIntrospectRequest = {
+          userId: input.userId,
+          userLimit: input.userLimit ?? 1,
+        };
+        if (provider) {
+          request.provider = provider;
+        }
+        return new IntrospectClient(clientOptions).getUserHistoricalPulls(request, requestOptions);
+      },
     );
     return parseJunctionHistoricalPullSnapshot(
       payload,
@@ -437,205 +637,424 @@ export class JunctionClient {
     if (!sourceProviderSlug) {
       throw new TypeError("Junction historical pull triggers require a provider slug.");
     }
-
-    const userIds = [
-      ...new Set(
-        input.userIds
-          .map((userId) => normalizeString(userId))
-          .filter((userId): userId is string => typeof userId === "string"),
-      ),
-    ];
+    const userIds = [...new Set(input.userIds
+      .map((userId) => normalizeString(userId))
+      .filter((userId): userId is string => typeof userId === "string"))];
     if (userIds.length === 0) {
       throw new TypeError("Junction historical pull triggers require at least one user id.");
     }
 
     try {
-      await this.requestJson<unknown>(
+      const providerTransport = requireJunctionSdkOAuthProviderTransport(
+        sourceProviderSlug,
+      );
+      await this.requestSdkResource<unknown>(
         "POST",
-        "/v2/link/bulk_trigger_historical_pull",
         {
-          provider: sourceProviderSlug,
-          user_ids: userIds,
-        },
-        {
+          bodyFieldNames: ["provider", "user_ids"],
           endpointKind: "junction_bulk_trigger_historical_pull",
+          providerSlugRewrite: providerTransport.providerSlugRewrite,
           signal: input.signal ?? null,
         },
+        (clientOptions, requestOptions) => new LinkClient(clientOptions).bulkTriggerHistoricalPull({
+          provider: providerTransport.provider,
+          userIds,
+        }, requestOptions),
       );
-
       return { accepted: true, endpointUnavailable: false };
     } catch (error) {
       if (isJunctionDisabledEndpointError(error)) {
         return { accepted: false, endpointUnavailable: true };
       }
-
       throw error;
     }
   }
 
   async refreshUserData(input: JunctionRefreshUserDataInput): Promise<unknown> {
-    const search = new URLSearchParams();
-    const timeoutSeconds = normalizeJunctionRefreshTimeoutSeconds(input.timeoutSeconds);
-    if (timeoutSeconds !== null) {
-      search.set("timeout", String(timeoutSeconds));
-    }
-    const suffix = search.size > 0 ? `?${search.toString()}` : "";
-
-    return this.requestJson<unknown>(
+    const timeout = normalizeJunctionRefreshTimeoutSeconds(input.timeoutSeconds);
+    return this.requestSdkResource<unknown>(
       "POST",
-      `/v2/user/refresh/${encodeURIComponent(input.userId)}${suffix}`,
-      undefined,
-      { endpointKind: "junction_user_refresh", signal: input.signal ?? null },
+      {
+        endpointKind: "junction_user_refresh",
+        queryParameterNames: timeout === null ? [] : ["timeout"],
+        signal: input.signal ?? null,
+      },
+      (clientOptions, requestOptions) => {
+        const request: RefreshUserRequest = { userId: input.userId };
+        if (timeout !== null) {
+          request.timeout = timeout;
+        }
+        return new UserClient(clientOptions).refresh(request, requestOptions);
+      },
     );
   }
 
   private async fetchWindowedCollection(
-    path: string,
     input: JunctionWindowInput,
-    options: {
-      endpointKind?: string;
-      extractRecords?: (payload: unknown, resource: string) => unknown[];
-    } = {},
+    extractRecords: (payload: unknown, resource: string) => unknown[],
+    requestPage: (cursor: string | null) => Promise<unknown>,
   ): Promise<unknown[]> {
     const records: unknown[] = [];
     let cursor: string | null = null;
     let pages = 0;
-    const extractRecords = options.extractRecords ?? extractCollectionRecords;
+    const pageLimit = input.collectionWorkLimit?.maxPages ?? MAX_COLLECTION_PAGES;
 
     do {
-      if (pages >= MAX_COLLECTION_PAGES) {
+      if (pages >= pageLimit) {
         throw deviceSyncError({
-          code: "JUNCTION_API_PAGINATION_LIMIT",
-          message: `Junction ${input.resource} response exceeded the configured page limit.`,
+          code: input.collectionWorkLimit
+            ? "JUNCTION_API_WINDOW_TOO_LARGE"
+            : "JUNCTION_API_PAGINATION_LIMIT",
+          message: `Junction ${input.resource} response exceeded the page budget for one complete window.`,
           retryable: true,
           httpStatus: 502,
         });
       }
-
-      const dateQueryFormat = input.dateQueryFormat ?? "datetime";
-      const search = new URLSearchParams({
-        start_date: toDateParameter(input.windowStart, dateQueryFormat, "start"),
-        end_date: toDateParameter(input.windowEnd, dateQueryFormat, "end"),
-      });
-      const sourceProviderSlug = normalizeSourceSlug(input.sourceProviderSlug);
-      if (sourceProviderSlug) {
-        search.set("provider", sourceProviderSlug);
+      const payload = await requestPage(cursor);
+      const maxRecords = input.maxRecords ?? MAX_COLLECTION_RECORDS;
+      if (!Number.isSafeInteger(maxRecords) || maxRecords < 1) {
+        throw new TypeError("Junction collection record limit must be a positive integer.");
       }
-
-      if (cursor) {
-        search.set("next_cursor", cursor);
+      for (const record of extractRecords(payload, input.resource)) {
+        if (records.length >= maxRecords) {
+          throw deviceSyncError({
+            code: "JUNCTION_API_RECORD_LIMIT",
+            message: `Junction ${input.resource} response exceeded the configured record limit.`,
+            retryable: true,
+            httpStatus: 502,
+          });
+        }
+        records.push(record);
       }
-
-      const payload = await this.requestJson<unknown>(
-        "GET",
-        `${path}?${search.toString()}`,
-        undefined,
-        { endpointKind: options.endpointKind, signal: input.signal ?? null },
-      );
-      records.push(...extractRecords(payload, input.resource));
       pages += 1;
-
-      if (records.length > MAX_COLLECTION_RECORDS) {
-        throw deviceSyncError({
-          code: "JUNCTION_API_RECORD_LIMIT",
-          message: `Junction ${input.resource} response exceeded the configured record limit.`,
-          retryable: true,
-          httpStatus: 502,
-        });
-      }
-
       cursor = extractNextCursor(payload);
     } while (cursor);
 
     return records;
   }
 
-  private async requestJson<T>(
+  private requestSummaryPage(input: JunctionWindowInput, cursor: string | null): Promise<unknown> {
+    const format = resolveJunctionSummaryDateQueryFormat(input);
+    const providerTransport = optionalJunctionSdkProviderTransport(
+      input.sourceProviderSlug,
+    );
+    const provider = providerTransport?.provider;
+    const request: GetActivityRequest = {
+      userId: input.userId,
+      startDate: toDateParameter(input.windowStart, format, "start"),
+      endDate: toDateParameter(input.windowEnd, format, "end"),
+    };
+    if (provider) {
+      request.provider = provider;
+    }
+    const queryParameterNames = [
+      "start_date",
+      "end_date",
+      ...(provider ? ["provider"] : []),
+      ...(cursor ? ["next_cursor"] : []),
+    ];
+    return this.requestSdkResource<unknown>(
+      "GET",
+      {
+        endpointKind: "junction_summary_collection",
+        providerSlugRewrite: providerTransport?.providerSlugRewrite,
+        queryParameterNames,
+        signal: input.signal ?? null,
+      },
+      (clientOptions, requestOptions) => {
+        if (cursor) {
+          requestOptions.queryParams = { next_cursor: cursor };
+        }
+        switch (input.resource) {
+          case "activity": return new ActivityClient(clientOptions).get(request, requestOptions);
+          case "sleep": return new SleepClient(clientOptions).get(request, requestOptions);
+          case "sleep_cycle": return new SleepCycleClient(clientOptions).get(request, requestOptions);
+          case "workouts": return new WorkoutsClient(clientOptions).get(request, requestOptions);
+          case "body": return new BodyClient(clientOptions).get(request, requestOptions);
+          case "meal": return new MealClient(clientOptions).get(request, requestOptions);
+          case "menstrual_cycle": return new MenstrualCycleClient(clientOptions).get(request, requestOptions);
+          case "electrocardiogram": return new ElectrocardiogramClient(clientOptions).get(request, requestOptions);
+          default: throw new TypeError(`Unsupported Junction summary resource: ${input.resource}`);
+        }
+      },
+    );
+  }
+
+  private requestTimeseriesPage(input: JunctionWindowInput, cursor: string | null): Promise<unknown> {
+    const providerTransport = optionalJunctionSdkProviderTransport(
+      input.sourceProviderSlug,
+    );
+    const provider = providerTransport?.provider;
+    const request: StepsGroupedVitalsRequest = {
+      userId: input.userId,
+      startDate: toDateParameter(input.windowStart, input.dateQueryFormat ?? "datetime", "start"),
+      endDate: toDateParameter(input.windowEnd, input.dateQueryFormat ?? "datetime", "end"),
+    };
+    if (cursor) {
+      request.nextCursor = cursor;
+    }
+    if (provider) {
+      request.provider = provider;
+    }
+    const queryParameterNames = [
+      "start_date",
+      "end_date",
+      ...(provider ? ["provider"] : []),
+      ...(cursor ? ["next_cursor"] : []),
+    ];
+    return this.requestSdkResource<unknown>(
+      "GET",
+      {
+        endpointKind: "junction_timeseries_collection",
+        providerSlugRewrite: providerTransport?.providerSlugRewrite,
+        queryParameterNames,
+        signal: input.signal ?? null,
+      },
+      (clientOptions, requestOptions) => {
+        const client = new VitalsClient(clientOptions);
+        switch (input.resource) {
+          case "steps": return client.stepsGrouped(request, requestOptions);
+          case "distance": return client.distanceGrouped(request, requestOptions);
+          case "calories_active": return client.caloriesActiveGrouped(request, requestOptions);
+          case "heartrate": return client.heartrateGrouped(request, requestOptions);
+          case "hrv": return client.hrvGrouped(request, requestOptions);
+          case "respiratory_rate": return client.respiratoryRateGrouped(request, requestOptions);
+          case "blood_oxygen": return client.bloodOxygenGrouped(request, requestOptions);
+          case "stress_level": return client.stressLevelGrouped(request, requestOptions);
+          case "vo2_max": return client.vo2MaxGrouped(request, requestOptions);
+          case "weight": return client.bodyWeightGrouped(request, requestOptions);
+          case "body_temperature_delta": return client.bodyTemperatureDeltaGrouped(request, requestOptions);
+          case "body_temperature": return client.bodyTemperatureGrouped(request, requestOptions);
+          case "basal_body_temperature": return client.basalBodyTemperatureGrouped(request, requestOptions);
+          case "caffeine": return client.caffeineGrouped(request, requestOptions);
+          case "water": return client.waterGrouped(request, requestOptions);
+          case "mindfulness_minutes": return client.mindfulnessMinutesGrouped(request, requestOptions);
+          case "heart_rate_recovery_one_minute": return client.heartRateRecoveryOneMinuteGrouped(request, requestOptions);
+          case "sleep_breathing_disturbance": return client.sleepBreathingDisturbanceGrouped(request, requestOptions);
+          case "afib_burden": return client.afibBurdenGrouped(request, requestOptions);
+          case "glucose": return client.glucoseGrouped(request, requestOptions);
+          case "blood_pressure": return client.bloodPressureGrouped(request, requestOptions);
+          case "note": return client.noteGrouped(request, requestOptions);
+          case "body_mass_index": return client.bodyMassIndexGrouped(request, requestOptions);
+          case "carbohydrates": return client.carbohydratesGrouped(request, requestOptions);
+          case "fat": return client.bodyFatGrouped(request, requestOptions);
+          case "forced_expiratory_volume_1": return client.forcedExpiratoryVolume1Grouped(request, requestOptions);
+          case "forced_vital_capacity": return client.forcedVitalCapacityGrouped(request, requestOptions);
+          case "heart_rate_alert": return client.heartRateAlertGrouped(request, requestOptions);
+          case "inhaler_usage": return client.inhalerUsageGrouped(request, requestOptions);
+          case "insulin_injection": return client.insulinInjectionGrouped(request, requestOptions);
+          case "lean_body_mass": return client.leanBodyMassGrouped(request, requestOptions);
+          case "peak_expiratory_flow_rate": return client.peakExpiratoryFlowRateGrouped(request, requestOptions);
+          case "sleep_apnea_alert": return client.sleepApneaAlertGrouped(request, requestOptions);
+          case "waist_circumference": return client.waistCircumferenceGrouped(request, requestOptions);
+          case "calories_basal": return client.caloriesBasalGrouped(request, requestOptions);
+          case "daylight_exposure": return client.daylightExposureGrouped(request, requestOptions);
+          case "fall": return client.fallGrouped(request, requestOptions);
+          case "floors_climbed": return client.floorsClimbedGrouped(request, requestOptions);
+          case "handwashing": return client.handwashingGrouped(request, requestOptions);
+          case "stand_duration": return client.standDurationGrouped(request, requestOptions);
+          case "stand_hour": return client.standHourGrouped(request, requestOptions);
+          case "uv_exposure": return client.uvExposureGrouped(request, requestOptions);
+          case "wheelchair_push": return client.wheelchairPushGrouped(request, requestOptions);
+          case "workout_distance": return client.workoutDistanceGrouped(request, requestOptions);
+          case "workout_duration": return client.workoutDurationGrouped(request, requestOptions);
+          case "workout_swimming_stroke": return client.workoutSwimmingStrokeGrouped(request, requestOptions);
+          case "electrocardiogram_voltage": return client.electrocardiogramVoltageGrouped(request, requestOptions);
+          default: throw new TypeError(`Unsupported Junction timeseries resource: ${input.resource}`);
+        }
+      },
+    );
+  }
+
+  private async requestSdkResource<T>(
     method: "DELETE" | "GET" | "POST",
-    path: string,
-    body?: Record<string, unknown>,
-    options: { endpointKind?: string; optional404?: boolean; signal?: AbortSignal | null } = {},
+    options: {
+      bodyFieldNames?: readonly string[];
+      endpointKind: string;
+      maxAttempts?: number;
+      optional404?: boolean;
+      providerSlugRewrite?: JunctionSdkProviderSlugRewrite;
+      queryParameterNames?: readonly string[];
+      signal?: AbortSignal | null;
+      timeoutMs?: number;
+    },
+    invoke: (
+      clientOptions: JunctionSdkClientOptions,
+      requestOptions: JunctionSdkRequestOptions,
+    ) => PromiseLike<unknown>,
   ): Promise<T> {
-    const attempts = method === "GET" ? MAX_GET_ATTEMPTS : 1;
+    const attempts = method === "GET"
+      ? options.maxAttempts ?? MAX_GET_ATTEMPTS
+      : 1;
     let lastError: unknown;
-    const endpointKind = options.endpointKind ?? resolveJunctionEndpointKind(path);
+    const hasJsonBody = (options.bodyFieldNames?.length ?? 0) > 0;
     const requestDiagnostics = buildProviderRequestDiagnostics({
       method,
-      endpointKind,
+      endpointKind: options.endpointKind,
       authKind: "provider_config_api_key_header",
       authPlacement: "headers",
       credentialPresent: Boolean(this.apiKey),
-      contentType: body ? "application_json" : "none",
-      bodyKind: body ? "json_object" : "none",
-      bodyFieldNames: body ? Object.keys(body) : [],
-      queryParameterNames: extractProviderQueryParameterNames(path),
+      contentType: hasJsonBody ? "application_json" : "none",
+      bodyKind: hasJsonBody ? "json_object" : "none",
+      bodyFieldNames: options.bodyFieldNames ?? [],
+      queryParameterNames: options.queryParameterNames ?? [],
     });
 
     for (let attempt = 1; attempt <= attempts; attempt += 1) {
       throwIfProviderRequestAborted(options.signal);
       const requestAbort = createProviderRequestAbortSignal({
         signal: options.signal ?? null,
-        timeoutMs: this.requestTimeoutMs,
+        timeoutMs: options.timeoutMs ?? this.requestTimeoutMs,
       });
-
-      try {
-        const response = await this.fetchImpl(new URL(path.replace(/^\/+/u, ""), this.baseUrl), {
-          method,
-          headers: {
-            "Content-Type": "application/json",
-            "x-vital-api-key": this.apiKey,
-          },
-          body: body ? JSON.stringify(body) : undefined,
+      let capturedResponse: JunctionSdkResponseCapture | null = null;
+      let observedOptionalNotFound = false;
+      const sdkFetch: typeof fetch = async (input, init) => {
+        const rewrittenRequest = rewriteJunctionSdkProviderRequest(
+          input,
+          init,
+          options.providerSlugRewrite,
+        );
+        const response = await this.fetchImpl(rewrittenRequest.input, {
+          ...rewrittenRequest.init,
           signal: requestAbort.signal,
         });
-        throwIfProviderRequestAborted(requestAbort.signal);
-
         if (options.optional404 && response.status === 404) {
+          observedOptionalNotFound = true;
           await response.body?.cancel().catch(() => undefined);
+          return new Response(null, {
+            headers: response.headers,
+            status: response.status,
+            statusText: response.statusText,
+          });
+        }
+        if (!response.body) {
+          return response;
+        }
+        if (junctionSdkResponseExceedsDeclaredLimit(response)) {
+          await response.body.cancel().catch(() => undefined);
+          throw junctionSdkResponseTooLargeError();
+        }
+
+        const capture = createJunctionSdkResponseCapture(response);
+        capturedResponse = capture;
+        return new Response(
+          createJunctionSdkBoundedBodyStream(response.body, capture),
+          {
+            headers: response.headers,
+            status: response.status,
+            statusText: response.statusText,
+          },
+        );
+      };
+      const timeoutInSeconds = (options.timeoutMs ?? this.requestTimeoutMs) / 1_000;
+      const clientOptions: JunctionSdkClientOptions = {
+        apiKey: this.apiKey,
+        baseUrl: this.baseUrl,
+        fetch: sdkFetch,
+        headers: { "Content-Type": "application/json" },
+        maxRetries: 0,
+        timeoutInSeconds,
+      };
+
+      try {
+        const payload = await invoke(clientOptions, {
+          abortSignal: requestAbort.signal,
+          maxRetries: 0,
+          timeoutInSeconds,
+        });
+        throwIfProviderRequestAborted(requestAbort.signal);
+        return payload as T;
+      } catch (error) {
+        const providerError = unwrapJunctionSdkErrorCause(error);
+        lastError = providerError;
+
+        if (isProviderParentAbortError(providerError, requestAbort.signal)) {
+          throw normalizeProviderAbortError(providerError, requestAbort.signal);
+        }
+        if (
+          !requestAbort.signal.aborted
+          && options.signal
+          && isProviderParentAbortError(providerError, options.signal)
+        ) {
+          throw normalizeProviderAbortError(providerError, options.signal);
+        }
+        if (
+          requestAbort.signal.aborted
+          && isProviderTimeoutError(providerError, requestAbort.signal)
+        ) {
+          break;
+        }
+
+        if (observedOptionalNotFound) {
           throwIfProviderRequestAborted(requestAbort.signal);
           return null as T;
         }
 
-        const text = await response.text();
-        if (!response.ok) {
-          const retryable = method === "GET" && (response.status === 429 || response.status >= 500);
+        const sdkFailure = readJunctionSdkHttpFailure(error)
+          ?? (error instanceof Error && error.name === "ParseError"
+            ? readCapturedJunctionSdkHttpFailure(capturedResponse)
+            : null);
+        if (options.optional404 && sdkFailure?.response.status === 404) {
+          throwIfProviderRequestAborted(requestAbort.signal);
+          return null as T;
+        }
+
+        if (sdkFailure && !sdkFailure.response.ok) {
+          const retryable = method === "GET"
+            && (sdkFailure.response.status === 429 || sdkFailure.response.status >= 500);
           if (retryable && attempt < attempts) {
-            await waitForProviderRetryDelay(resolveRetryDelayMs(response, attempt), options.signal);
+            await waitForProviderRetryDelay(
+              resolveRetryDelayMs(sdkFailure.response, attempt),
+              options.signal,
+            );
             continue;
           }
-
           throw buildProviderApiError({
             code: "JUNCTION_API_REQUEST_FAILED",
-            message: `Junction API request failed for ${endpointKind}.`,
-            response,
-            body: text,
+            message: `Junction API request failed for ${options.endpointKind}.`,
+            response: sdkFailure.response,
+            body: sdkFailure.body,
             retryable,
-            httpStatus: response.status >= 400 && response.status < 600 ? 502 : undefined,
+            httpStatus: 502,
             diagnostics: requestDiagnostics,
           });
         }
 
-        return parseJsonResponse<T>(text);
-      } catch (error) {
-        lastError = error;
+        if (sdkFailure?.response.ok) {
+          throw invalidJunctionSdkResponseError(sdkFailure.body);
+        }
 
-        if (isProviderParentAbortError(error, requestAbort.signal)) {
-          throw normalizeProviderAbortError(error, requestAbort.signal);
+        if (error instanceof Error && error.name === "ParseError") {
+          const legacyPayload = readCapturedJunctionSdkSuccess(capturedResponse);
+          if (legacyPayload.present) {
+            return legacyPayload.payload as T;
+          }
+          throw invalidJunctionSdkResponseError(legacyPayload.body);
         }
 
         if (
-          !requestAbort.signal.aborted
-          && options.signal
-          && isProviderParentAbortError(error, options.signal)
+          error instanceof TypeError
+          || (error instanceof Error && error.name === "JsonError")
         ) {
-          throw normalizeProviderAbortError(error, options.signal);
+          throw deviceSyncError({
+            code: "JUNCTION_SDK_REQUEST_INVALID",
+            message: `Junction SDK could not construct ${options.endpointKind}.`,
+            retryable: false,
+            httpStatus: 502,
+            details: requestDiagnostics,
+            cause: error,
+          });
         }
 
-        if (isDeviceSyncError(error)) {
-          if (!error.retryable || attempt >= attempts) {
-            throw error;
+        if (isDeviceSyncError(providerError)) {
+          if (!providerError.retryable || attempt >= attempts) {
+            throw providerError;
           }
-        } else if (attempt >= attempts || isProviderTimeoutError(error, requestAbort.signal)) {
+        } else if (
+          attempt >= attempts
+          || isJunctionSdkTimeoutError(error)
+          || isProviderTimeoutError(providerError, requestAbort.signal)
+        ) {
           break;
         }
 
@@ -647,7 +1066,7 @@ export class JunctionClient {
 
     throw deviceSyncError({
       code: "JUNCTION_API_REQUEST_FAILED",
-      message: `Junction API request failed for ${endpointKind}.`,
+      message: `Junction API request failed for ${options.endpointKind}.`,
       retryable: method === "GET",
       httpStatus: 502,
       details: requestDiagnostics,
@@ -678,58 +1097,235 @@ function buildProviderApiError(input: {
   );
 }
 
-function resolveJunctionEndpointKind(path: string): string {
-  const pathname = safeProviderPathname(path);
+function unwrapJunctionSdkErrorCause(error: unknown): unknown {
+  let current = error;
+  const visited = new Set<unknown>();
+  while (
+    isJunctionSdkErrorWithCause(current)
+    && !visited.has(current)
+  ) {
+    visited.add(current);
+    current = current.cause;
+  }
+  return current;
+}
 
-  if (pathname.startsWith("/v2/user/resolve/")) {
-    return "junction_user_resolve";
+interface JunctionSdkResponseCapture {
+  chunks: Uint8Array[];
+  complete: boolean;
+  exceededLimit: boolean;
+  rawResponse: Response;
+  totalBytes: number;
+}
+
+function createJunctionSdkResponseCapture(response: Response): JunctionSdkResponseCapture {
+  return {
+    chunks: [],
+    complete: false,
+    exceededLimit: false,
+    // Preserve the runtime's complete Response metadata. Cloudflare extends
+    // the standard Response surface (for example with `webSocket`), and the
+    // SDK's RawResponse mapped type follows the active runtime definition.
+    rawResponse: response,
+    totalBytes: 0,
+  };
+}
+
+function createJunctionSdkBoundedBodyStream(
+  body: ReadableStream<Uint8Array>,
+  capture: JunctionSdkResponseCapture,
+): ReadableStream<Uint8Array> {
+  const reader = body.getReader();
+  return new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      const { done, value } = await reader.read();
+      if (done) {
+        capture.complete = true;
+        controller.close();
+        reader.releaseLock();
+        return;
+      }
+
+      const chunk = value;
+      capture.totalBytes += chunk.byteLength;
+      if (capture.totalBytes > MAX_SDK_COMPAT_RESPONSE_BYTES) {
+        capture.exceededLimit = true;
+        capture.chunks = [];
+        const error = junctionSdkResponseTooLargeError();
+        await reader.cancel(error).catch(() => undefined);
+        controller.error(error);
+        reader.releaseLock();
+        return;
+      }
+      capture.chunks.push(Uint8Array.from(chunk));
+      controller.enqueue(chunk);
+    },
+    async cancel(reason) {
+      await reader.cancel(reason).catch(() => undefined);
+      reader.releaseLock();
+    },
+  });
+}
+
+function junctionSdkResponseExceedsDeclaredLimit(response: Response): boolean {
+  const contentLength = response.headers.get("content-length");
+  if (contentLength === null || !/^\d+$/u.test(contentLength.trim())) {
+    return false;
+  }
+  const parsedLength = Number(contentLength);
+  return Number.isSafeInteger(parsedLength) && parsedLength > MAX_SDK_COMPAT_RESPONSE_BYTES;
+}
+
+function junctionSdkResponseTooLargeError() {
+  return deviceSyncError({
+    code: "JUNCTION_API_RESPONSE_TOO_LARGE",
+    message: "Junction API response exceeded the configured size limit.",
+    retryable: false,
+    httpStatus: 502,
+  });
+}
+
+function readCapturedJunctionSdkSuccess(
+  capture: JunctionSdkResponseCapture | null,
+): { body: string; payload: unknown; present: boolean } {
+  if (!capture || capture.rawResponse.status < 200 || capture.rawResponse.status >= 300) {
+    return { body: "", payload: null, present: false };
+  }
+  return readCapturedJunctionSdkBody(capture);
+}
+
+function readCapturedJunctionSdkHttpFailure(
+  capture: JunctionSdkResponseCapture | null,
+): { body: string; response: Response } | null {
+  if (!capture || capture.rawResponse.status < 300) {
+    return null;
+  }
+  const body = readCapturedJunctionSdkText(capture);
+  if (body === null) {
+    return null;
+  }
+  return {
+    body,
+    response: new Response(null, {
+      headers: capture.rawResponse.headers,
+      status: capture.rawResponse.status,
+      statusText: capture.rawResponse.statusText,
+    }),
+  };
+}
+
+function readCapturedJunctionSdkBody(
+  capture: JunctionSdkResponseCapture,
+): { body: string; payload: unknown; present: boolean } {
+  const body = readCapturedJunctionSdkText(capture);
+  if (body === null) {
+    return { body: "", payload: null, present: false };
+  }
+  if (!body.trim()) {
+    return { body, payload: null, present: true };
+  }
+  try {
+    return { body, payload: JSON.parse(body), present: true };
+  } catch {
+    return { body, payload: null, present: false };
+  }
+}
+
+function readCapturedJunctionSdkText(capture: JunctionSdkResponseCapture): string | null {
+  if (!capture.complete || capture.exceededLimit) {
+    return null;
   }
 
-  if (pathname === "/v2/user/") {
-    return "junction_user_create";
+  const bodyBytes = new Uint8Array(capture.totalBytes);
+  let offset = 0;
+  for (const chunk of capture.chunks) {
+    bodyBytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return new TextDecoder().decode(bodyBytes);
+}
+
+function readJunctionSdkHttpFailure(
+  error: unknown,
+): { body: string; response: Response } | null {
+  const sdkError = readPlainObject(error);
+  if (!sdkError || !isJunctionSdkErrorName(error)) {
+    return null;
   }
 
-  if (pathname === "/v2/link/token") {
-    return "junction_link_token_create";
+  const rawResponse = readPlainObject(sdkError.rawResponse);
+  const status = sdkError.statusCode ?? rawResponse?.status;
+  if (typeof status !== "number" || !Number.isInteger(status) || status < 200 || status > 599) {
+    return null;
   }
 
-  if (pathname.startsWith("/v2/user/refresh/")) {
-    return "junction_user_refresh";
+  return {
+    body: serializeJunctionSdkErrorBody(sdkError.body),
+    response: new Response(null, {
+      headers: readHeaders(rawResponse?.headers),
+      status,
+      statusText: normalizeString(rawResponse?.statusText) ?? undefined,
+    }),
+  };
+}
+
+function isJunctionSdkErrorWithCause(error: unknown): error is Error & { cause: unknown } {
+  return (isJunctionSdkErrorName(error) || isJunctionSdkTimeoutError(error))
+    && error.cause !== undefined;
+}
+
+function isJunctionSdkErrorName(error: unknown): error is Error {
+  return error instanceof Error && (
+    error.name === "JunctionError"
+    || error.name === "BadRequestError"
+    || error.name === "NotFoundError"
+    || error.name === "UnprocessableEntityError"
+  );
+}
+
+function isJunctionSdkTimeoutError(error: unknown): error is Error {
+  return error instanceof Error && error.name === "JunctionTimeoutError";
+}
+
+function readHeaders(value: unknown): HeadersInit | undefined {
+  return value instanceof Headers ? value : undefined;
+}
+
+function serializeJunctionSdkErrorBody(body: unknown): string {
+  if (typeof body === "string") {
+    return body;
+  }
+  if (body === null || body === undefined) {
+    return "";
+  }
+  try {
+    return JSON.stringify(body);
+  } catch {
+    return "";
+  }
+}
+
+function invalidJunctionSdkResponseError(body: string) {
+  if (body.trim()) {
+    try {
+      JSON.parse(body);
+    } catch (error) {
+      return deviceSyncError({
+        code: "JUNCTION_API_INVALID_JSON",
+        message: "Junction API response was not valid JSON.",
+        retryable: false,
+        httpStatus: 502,
+        cause: error,
+      });
+    }
   }
 
-  if (pathname.startsWith("/v2/user/providers/")) {
-    return "junction_user_providers";
-  }
-
-  if (/^\/v2\/user\/[^/]+\/device$/u.test(pathname)) {
-    return "junction_user_devices";
-  }
-
-  if (/^\/v2\/user\/[^/]+\/[^/]+$/u.test(pathname)) {
-    return "junction_user_provider_deregister";
-  }
-
-  if (pathname.startsWith("/v2/summary/")) {
-    return "junction_summary_collection";
-  }
-
-  if (pathname.startsWith("/v2/timeseries/")) {
-    return "junction_timeseries_collection";
-  }
-
-  if (pathname === "/v2/introspect/resources") {
-    return "junction_introspect_resources";
-  }
-
-  if (pathname === "/v2/introspect/historical_pull") {
-    return "junction_introspect_historical_pull";
-  }
-
-  if (pathname === "/v2/link/bulk_trigger_historical_pull") {
-    return "junction_bulk_trigger_historical_pull";
-  }
-
-  return "junction_api";
+  return deviceSyncError({
+    code: "JUNCTION_API_RESPONSE_INVALID",
+    message: "Junction API response did not match the documented response shape.",
+    retryable: false,
+    httpStatus: 502,
+  });
 }
 
 /**
@@ -746,20 +1342,15 @@ function isJunctionDisabledEndpointError(error: unknown): boolean {
   return status === 403 || status === 404;
 }
 
-function buildJunctionIntrospectionSearch(input: JunctionIntrospectionInput): URLSearchParams {
-  const search = new URLSearchParams({
-    user_id: input.userId,
-    user_limit: String(input.userLimit ?? 1),
-  });
-  const sourceProviderSlug = normalizeSourceSlug(input.sourceProviderSlug);
-  if (sourceProviderSlug) {
-    search.set("provider", sourceProviderSlug);
+export function resolveJunctionTimeseriesApiResource(resource: string): string {
+  switch (resource) {
+    case "fat":
+      return "body_fat";
+    case "weight":
+      return "body_weight";
+    default:
+      return resource;
   }
-  return search;
-}
-
-function resolveJunctionTimeseriesApiResource(resource: string): string {
-  return resource === "weight" ? "body_weight" : resource;
 }
 
 function resolveJunctionSummaryDateQueryFormat(input: JunctionWindowInput): JunctionDateQueryFormat {
@@ -776,12 +1367,117 @@ function normalizeJunctionRefreshTimeoutSeconds(value: number | null | undefined
   return Math.max(5, Math.min(60, Math.trunc(value)));
 }
 
-function safeProviderPathname(path: string): string {
-  try {
-    return new URL(path, "https://provider.invalid").pathname;
-  } catch {
-    return path.split("?")[0] ?? "";
+function rewriteJunctionSdkProviderRequest(
+  input: RequestInfo | URL,
+  init: RequestInit | undefined,
+  rewrite: JunctionSdkProviderSlugRewrite | undefined,
+): { init: RequestInit | undefined; input: RequestInfo | URL } {
+  if (!rewrite) {
+    return { init, input };
   }
+
+  const url = new URL(input instanceof Request ? input.url : input.toString());
+  if (url.searchParams.get("provider") === rewrite.from) {
+    url.searchParams.set("provider", rewrite.to);
+  }
+  url.pathname = url.pathname
+    .split("/")
+    .map((segment) => segment === rewrite.from ? rewrite.to : segment)
+    .join("/");
+
+  let body = init?.body;
+  if (typeof body === "string") {
+    try {
+      const parsed = readPlainObject(JSON.parse(body));
+      if (parsed) {
+        const filterOnProviders = Array.isArray(parsed.filter_on_providers)
+          ? parsed.filter_on_providers.map((provider) =>
+              provider === rewrite.from ? rewrite.to : provider
+            )
+          : parsed.filter_on_providers;
+        if (
+          parsed.provider === rewrite.from
+          || filterOnProviders !== parsed.filter_on_providers
+        ) {
+          body = JSON.stringify({
+            ...parsed,
+            ...(parsed.provider === rewrite.from
+              ? { provider: rewrite.to }
+              : {}),
+            ...(filterOnProviders === undefined ? {} : { filter_on_providers: filterOnProviders }),
+          });
+        }
+      }
+    } catch {
+      // The generated SDK owns body validation; leave non-JSON bodies intact.
+    }
+  }
+
+  return {
+    init: body === init?.body ? init : { ...init, body },
+    input: input instanceof Request ? new Request(url, input) : url,
+  };
+}
+
+function normalizeRequiredProviderSlug(value: unknown): string {
+  const provider = normalizeJunctionProviderSlug(value);
+  if (!provider) {
+    throw new TypeError("Junction provider value is invalid.");
+  }
+  return provider;
+}
+
+function optionalJunctionSdkProviderTransport(
+  value: unknown,
+): JunctionSdkProviderTransport | undefined {
+  const normalized = normalizeJunctionProviderSlug(value);
+  return normalized ? requireJunctionSdkProviderTransport(normalized) : undefined;
+}
+
+function requireJunctionSdkProviderTransport(
+  value: string,
+): JunctionSdkProviderTransport {
+  if (value === "google_health") {
+    return {
+      provider: "fitbit",
+      providerSlugRewrite: { from: "fitbit", to: value },
+    };
+  }
+  return { provider: requireJunctionSdkProvider(value) };
+}
+
+function requireJunctionSdkOAuthProviderTransport(
+  value: string,
+): JunctionSdkOAuthProviderTransport {
+  if (value === "google_health") {
+    return {
+      provider: "fitbit",
+      providerSlugRewrite: { from: "fitbit", to: value },
+    };
+  }
+  return { provider: requireJunctionSdkOAuthProvider(value) };
+}
+
+function requireJunctionSdkProvider(value: string): JunctionSdkProvider {
+  const route = resolveJunctionDeviceConnectRouteByProviderSlug(value);
+  const canonicalValue = route?.route.sourceProviderSlug ?? value;
+
+  const provider = JUNCTION_SDK_PROVIDERS.find((candidate) => candidate === canonicalValue);
+  if (provider) {
+    return provider;
+  }
+  throw new TypeError(`Unsupported Junction provider slug: ${value}`);
+}
+
+function requireJunctionSdkOAuthProvider(value: string): JunctionSdkOAuthProvider {
+  const route = resolveJunctionDeviceConnectRouteByProviderSlug(value);
+  const canonicalValue = route?.route.sourceProviderSlug ?? value;
+
+  const provider = JUNCTION_SDK_OAUTH_PROVIDERS.find((candidate) => candidate === canonicalValue);
+  if (provider) {
+    return provider;
+  }
+  throw new TypeError(`Unsupported Junction OAuth provider slug: ${value}`);
 }
 
 export function isAllowedJunctionLinkHost(
@@ -922,8 +1618,9 @@ export function parseJunctionHistoricalPullSnapshot(
         continue;
       }
 
-      const notPulledResources = Array.isArray(details.not_pulled)
-        ? [...new Set(details.not_pulled.flatMap((resource) => {
+      const rawNotPulled = details.not_pulled ?? details.notPulled;
+      const notPulledResources = Array.isArray(rawNotPulled)
+        ? [...new Set(rawNotPulled.flatMap((resource) => {
             const normalized = normalizeJunctionProviderSlug(resource);
             return normalized ? [normalized] : [];
           }))].sort((left, right) => left.localeCompare(right))
@@ -951,12 +1648,12 @@ export function parseJunctionHistoricalPullSnapshot(
                 ?? normalizeString(statistics.errorDetails)
                 ?? null,
               rangeEnd:
-                normalizeString(statistics.range_end)
-                ?? normalizeString(statistics.rangeEnd)
+                normalizeJunctionDateString(statistics.range_end)
+                ?? normalizeJunctionDateString(statistics.rangeEnd)
                 ?? null,
               rangeStart:
-                normalizeString(statistics.range_start)
-                ?? normalizeString(statistics.rangeStart)
+                normalizeJunctionDateString(statistics.range_start)
+                ?? normalizeJunctionDateString(statistics.rangeStart)
                 ?? null,
               resource,
               status,
@@ -1028,12 +1725,19 @@ function readJunctionProviderConnectionErrorDetails(
 
   const errorType = normalizeString(details.error_type) ?? normalizeString(details.errorType) ?? null;
   const errorMessage = normalizeString(details.error_message) ?? normalizeString(details.errorMessage) ?? null;
-  const erroredAt = normalizeString(details.errored_at) ?? normalizeString(details.erroredAt) ?? null;
+  const erroredAt = normalizeJunctionDateString(details.errored_at ?? details.erroredAt);
   if (!errorType && !errorMessage && !erroredAt) {
     return null;
   }
 
   return { errorType, errorMessage, erroredAt };
+}
+
+function normalizeJunctionDateString(value: unknown): string | null {
+  if (value instanceof Date) {
+    return Number.isFinite(value.getTime()) ? value.toISOString() : null;
+  }
+  return normalizeString(value) ?? null;
 }
 
 function readJunctionProviderConnectionId(record: Record<string, unknown>): string | null {
@@ -1131,6 +1835,15 @@ function extractCollectionRecords(payload: unknown, resource?: string): unknown[
     }
   }
 
+  if (!resource) {
+    const providerCollections = Object.values(record).filter(
+      (candidate): candidate is unknown[] => Array.isArray(candidate),
+    );
+    if (providerCollections.length > 0) {
+      return providerCollections.flat();
+    }
+  }
+
   return resource ? [record] : [];
 }
 
@@ -1143,8 +1856,45 @@ function extractTimeseriesRecords(payload: unknown, resource: string): unknown[]
   return groupedRecords ?? extractCollectionRecords(payload, resource);
 }
 
-function flattenGroupedTimeseries(resource: string, payload: unknown): unknown[] | null {
+function extractStructurallyCompleteTimeseriesRecords(
+  payload: unknown,
+  resource: string,
+  requestedSourceProviderSlug: string | null,
+): unknown[] {
+  const groupedRecords = flattenGroupedTimeseries(resource, payload, {
+    strict: true,
+  });
+  const records = groupedRecords ?? extractCollectionRecords(payload, resource);
+  if (
+    groupedRecords === null
+    && (!payload || typeof payload !== "object")
+  ) {
+    throw incompleteJunctionCalendarCollectionError();
+  }
+
+  for (const record of records) {
+    const entry = readPlainObject(record);
+    const sourceProviderSlug = entry
+      ? normalizeSourceSlug(resolveJunctionOrigin(entry).sourceProviderSlug)
+      : null;
+    if (!entry || (requestedSourceProviderSlug && !sourceProviderSlug)) {
+      throw incompleteJunctionCalendarCollectionError();
+    }
+  }
+  return records;
+}
+
+function flattenGroupedTimeseries(
+  resource: string,
+  payload: unknown,
+  options: {
+    strict?: boolean;
+  } = {},
+): unknown[] | null {
   const envelope = readPlainObject(payload);
+  if (options.strict && envelope && "groups" in envelope && !readPlainObject(envelope.groups)) {
+    throw incompleteJunctionCalendarCollectionError();
+  }
   const groups = readPlainObject(envelope?.groups);
   if (!groups) {
     return null;
@@ -1153,25 +1903,74 @@ function flattenGroupedTimeseries(resource: string, payload: unknown): unknown[]
   const records: unknown[] = [];
 
   for (const [sourceSlug, rawGroups] of Object.entries(groups)) {
+    const normalizedGroupedSourceSlug = normalizeSourceSlug(sourceSlug);
+    if (options.strict && !normalizedGroupedSourceSlug) {
+      throw incompleteJunctionCalendarCollectionError();
+    }
+    if (options.strict && (rawGroups === undefined || rawGroups === null)) {
+      throw incompleteJunctionCalendarCollectionError();
+    }
     for (const rawGroup of asArray(rawGroups)) {
       const group = readPlainObject(rawGroup);
       if (!group) {
+        if (options.strict) {
+          throw incompleteJunctionCalendarCollectionError();
+        }
+        if (resource === "electrocardiogram_voltage") {
+          throw new TypeError("Junction ECG group must be an object.");
+        }
         continue;
+      }
+      if (
+        options.strict
+        && (!("data" in group) || group.data === undefined || group.data === null)
+      ) {
+        throw incompleteJunctionCalendarCollectionError();
+      }
+
+      const groupId = firstDefinedString(group, ["id", "recordingId", "recording_id"]);
+      if (resource === "electrocardiogram_voltage" && !groupId) {
+        throw new TypeError("Junction ECG group lacked a stable recording id.");
+      }
+      if (resource === "electrocardiogram_voltage" && !Array.isArray(group.data)) {
+        throw new TypeError("Junction ECG group data must be an array.");
       }
 
       for (const rawSample of asArray(group.data)) {
         const sample = readPlainObject(rawSample);
         if (!sample) {
+          if (options.strict) {
+            throw incompleteJunctionCalendarCollectionError();
+          }
+          if (resource === "electrocardiogram_voltage") {
+            throw new TypeError("Junction ECG sample must be an object.");
+          }
           continue;
+        }
+
+        const sampleId = firstDefinedString(sample, ["recordingId", "recording_id"]);
+        if (
+          resource === "electrocardiogram_voltage"
+          && sampleId
+          && sampleId !== groupId
+        ) {
+          throw new TypeError("Junction ECG sample conflicted with its group recording id.");
         }
 
         const origin = resolveJunctionOrigin(sample, {
           ...group,
-          groupedSourceSlug: sourceSlug,
+          groupedSourceSlug: normalizedGroupedSourceSlug ?? sourceSlug,
         });
+        const sourceProviderSlug = normalizeSourceSlug(origin.sourceProviderSlug);
+        if (options.strict && !sourceProviderSlug) {
+          throw incompleteJunctionCalendarCollectionError();
+        }
         records.push(stripUndefinedRecord({
           ...sample,
-          sourceProviderSlug: normalizeSourceSlug(origin.sourceProviderSlug) ?? undefined,
+          sourceProviderSlug: sourceProviderSlug ?? undefined,
+          junctionGroupId: resource === "electrocardiogram_voltage"
+            ? groupId
+            : undefined,
           sourceType: origin.sourceType,
           sourceInstanceId: origin.sourceInstanceId,
           junctionResource: resource,
@@ -1181,6 +1980,34 @@ function flattenGroupedTimeseries(resource: string, payload: unknown): unknown[]
   }
 
   return records;
+}
+
+function incompleteJunctionCalendarCollectionError() {
+  return deviceSyncError({
+    code: "JUNCTION_CALENDAR_REFRESH_INCOMPLETE_NORMALIZATION",
+    message: "Junction calendar refresh response was not structurally complete.",
+    retryable: true,
+    httpStatus: 502,
+  });
+}
+
+function firstDefinedValue(
+  record: Record<string, unknown>,
+  keys: readonly string[],
+): unknown {
+  for (const key of keys) {
+    if (record[key] !== undefined && record[key] !== null) {
+      return record[key];
+    }
+  }
+  return undefined;
+}
+
+function firstDefinedString(
+  record: Record<string, unknown>,
+  keys: readonly string[],
+): string | undefined {
+  return normalizeString(firstDefinedValue(record, keys));
 }
 
 function asArray(value: unknown): unknown[] {
@@ -1223,24 +2050,6 @@ function toDateParameter(
   }
   const isoTimestamp = date.toISOString();
   return format === "date" ? isoTimestamp.slice(0, 10) : isoTimestamp;
-}
-
-function parseJsonResponse<T>(text: string): T {
-  if (!text.trim()) {
-    return null as T;
-  }
-
-  try {
-    return JSON.parse(text) as T;
-  } catch (error) {
-    throw deviceSyncError({
-      code: "JUNCTION_API_INVALID_JSON",
-      message: "Junction API response was not valid JSON.",
-      retryable: false,
-      httpStatus: 502,
-      cause: error,
-    });
-  }
 }
 
 function resolveRetryDelayMs(response: Response | null, attempt: number): number {

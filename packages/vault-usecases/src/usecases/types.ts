@@ -50,6 +50,8 @@ import type {
   QueryCanonicalEntity,
   QueryExperimentFollowupDueDecision,
   QueryExperimentProgressSummary,
+  QueryMealNutrientDayTotal,
+  QueryMealNutrientTotal,
   QueryMealNutritionDayTotal,
   QueryMealNutritionMetricTotal,
   QueryMealNutritionTotals,
@@ -342,6 +344,20 @@ export interface MealNutritionTotalsResult {
   mealCount: number
   totals: MealNutritionTotals
   days: MealNutritionDayResult[]
+}
+
+export type MealNutrientResult = QueryMealNutrientTotal
+export type MealNutrientDayResult = QueryMealNutrientDayTotal
+
+export interface MealNutrientTotalsResult {
+  vault: string
+  filters: {
+    from: string | null
+    to: string | null
+  }
+  mealCount: number
+  nutrients: MealNutrientResult[]
+  days: MealNutrientDayResult[]
 }
 
 export interface SamplesAddResult {
@@ -1336,6 +1352,12 @@ export interface QueryServices extends HealthQueryServiceMethods {
       to?: string
     },
   ): Promise<MealNutritionTotalsResult>
+  showMealNutrientTotals(
+    input: CommandContext & {
+      from?: string
+      to?: string
+    },
+  ): Promise<MealNutrientTotalsResult>
   showEvent(
     input: CommandContext & {
       eventId: string

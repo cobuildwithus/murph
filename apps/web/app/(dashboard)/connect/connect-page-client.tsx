@@ -58,6 +58,7 @@ import type {
 
 interface HostedDeviceSyncDisconnectResponse {
   status?: "complete" | "pending";
+  connection?: { status: string };
   warning?: { historicalResetIncomplete?: boolean; message: string };
 }
 
@@ -594,6 +595,20 @@ export function ConnectSourcesGrid({
         });
         router.refresh();
         return;
+      }
+      if (
+        !sourceProviderSlug
+        && (
+          result.warning
+          || (
+            result.connection
+            && result.connection.status !== "disconnected"
+          )
+        )
+      ) {
+        throw new Error(result.warning?.historicalResetIncomplete === true
+           ? "Disconnect not finished. Remove the old connection in your wearable provider account, then retry Disconnect here."
+           : "Disconnect not finished. Remove Murph access in the provider account, then retry Disconnect here.");
       }
       setDisconnectSource(null);
       if (source.migrationState === "cutover_ready") {

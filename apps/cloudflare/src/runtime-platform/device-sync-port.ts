@@ -170,6 +170,7 @@ export function createHostedWebDeviceSyncPort(input: {
       return parseHostedExecutionDeviceSyncRuntimeSnapshotResponse(payload);
     },
     async fetchDirtyStates(runtimeInput?: {
+      connectionId?: string | null;
       limit?: number | null;
       stagedDirtyAcks?: Array<{
         connectionId: string;
@@ -180,6 +181,9 @@ export function createHostedWebDeviceSyncPort(input: {
     }) {
       const payload = await fetchHostedWebControlPlaneJson({
         body: {
+          ...(runtimeInput?.connectionId === undefined
+            ? {}
+            : { connectionId: runtimeInput.connectionId }),
           ...(runtimeInput?.limit === undefined ? {} : { limit: runtimeInput.limit }),
           ...(runtimeInput?.stagedDirtyAcks === undefined
             ? {}

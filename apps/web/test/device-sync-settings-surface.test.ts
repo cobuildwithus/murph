@@ -418,6 +418,34 @@ describe("buildHostedDeviceSyncSettingsSources", () => {
     });
   });
 
+  it("keeps failed user disconnects on the removal path instead of offering reconnect", () => {
+    const [source] = buildHostedDeviceSyncSettingsSources({
+      connectTargets: [{
+        connectSourceId: "oura",
+        connectTarget: "oura",
+        provider: "oura",
+        sourceProviderSlug: null,
+      }],
+      connections: [buildConnection({
+        lastErrorCode: "DISCONNECT_RECOVERY_REQUIRED",
+        lastErrorMessage: "Provider revoke request failed during disconnect.",
+        lastSyncCompletedAt: "2026-04-02T07:00:00.000Z",
+        status: "reauthorization_required",
+      })],
+      now: new Date("2026-04-03T12:00:00.000Z"),
+      providers: [OURA_PROVIDER],
+    });
+
+    expect(source).toMatchObject({
+      headline: "Disconnect not finished",
+      primaryAction: null,
+      secondaryAction: { kind: "disconnect", label: "Retry disconnect" },
+      state: "reauthorization_required",
+      statusLabel: "Needs removal",
+      tone: "attention",
+    });
+  });
+
   it("keeps disconnected configured sources quiet", () => {
     const [source] = buildHostedDeviceSyncSettingsSources({
       connectTargets: [{

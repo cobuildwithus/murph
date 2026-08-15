@@ -17,11 +17,14 @@ import {
   readDeviceSyncSourceCanonicalCoverageFinalizedAt,
 } from "../src/fitbit-migration.ts";
 import {
+  DEVICE_SYNC_DISCONNECT_IN_PROGRESS_ERROR_CODE,
+  DEVICE_SYNC_DISCONNECT_RECOVERY_REQUIRED_ERROR_CODE,
   DEVICE_SYNC_HISTORICAL_DATA_RECONNECT_REQUIRED_ERROR_CODE,
   DEVICE_SYNC_SOURCE_USER_DISCONNECTED_ERROR_CODE,
   isDeviceSyncConnectionSetupConfirmed,
   isDeviceSyncConnectionSetupPending,
   isEstablishedDeviceSyncConnection,
+  isDeviceSyncDisconnectRecoveryRequired,
   isJunctionHistoricalResetProviderSlug,
   redactPublicDeviceSyncMetadata,
   requiresHistoricalResetDeviceSyncSource,
@@ -345,4 +348,26 @@ test("available source resource counts exclude lifecycle metadata and unavailabl
     weight: 1,
   }), 2);
   assert.equal(countAvailableDeviceSyncSourceResources(null), 0);
+});
+
+test("disconnect recovery preserves pending intent across crashes and provider failures", () => {
+  for (const lastErrorCode of [
+    DEVICE_SYNC_DISCONNECT_IN_PROGRESS_ERROR_CODE,
+    DEVICE_SYNC_DISCONNECT_RECOVERY_REQUIRED_ERROR_CODE,
+    "PROVIDER_REVOKE_FAILED",
+  ]) {
+    assert.equal(isDeviceSyncDisconnectRecoveryRequired({
+      lastErrorCode,
+      status: "reauthorization_required",
+    }), true);
+  }
+
+  assert.equal(isDeviceSyncDisconnectRecoveryRequired({
+    lastErrorCode: DEVICE_SYNC_DISCONNECT_RECOVERY_REQUIRED_ERROR_CODE,
+    status: "active",
+  }), false);
+  assert.equal(isDeviceSyncDisconnectRecoveryRequired({
+    lastErrorCode: "TOKEN_REFRESH_FAILED",
+    status: "reauthorization_required",
+  }), false);
 });

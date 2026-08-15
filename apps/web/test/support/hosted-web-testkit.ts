@@ -73,6 +73,7 @@ import type {
   HostedRuntimeLatencyPhaseBreakdown,
 } from "@murphai/hosted-execution/runtime-control";
 import type {
+  HostedVaultShareProjectionMode,
   HostedVaultShareProjectionScope,
 } from "@murphai/hosted-execution/vault-share";
 import { Client } from "pg";
@@ -203,6 +204,7 @@ interface HostedVaultShareProjectionStoreForTestModule {
   findActiveHostedVaultShares(input: {
     grantorMemberId: string;
     prisma: HostedTestPrismaClient;
+    projectionMode?: HostedVaultShareProjectionMode;
     projectionScope: HostedVaultShareProjectionScope;
   }): Promise<Array<{
     destinationMemberId: string;
@@ -214,6 +216,7 @@ interface HostedVaultShareProjectionStoreForTestModule {
   }>>;
   replaceHostedVaultShareProjectionSnapshot(input: {
     prisma: HostedTestPrismaClient;
+    projectionMode?: HostedVaultShareProjectionMode;
     records: [];
     share: {
       destinationMemberId: string;
@@ -223,6 +226,7 @@ interface HostedVaultShareProjectionStoreForTestModule {
       projectionScope: HostedVaultShareProjectionScope;
       projectionScopeKey: string;
     };
+    sourceWorkspaceVersion: string;
   }): Promise<"no-active-share" | "replaced">;
 }
 
@@ -1405,7 +1409,19 @@ export async function seedHostedGroupEmailAuthorizationForTest(input: {
     });
 
     for (const participant of input.participants) {
+      const sourceWorkspace = await deps.prisma.hostedWorkspace.findUnique({
+        select: { version: true },
+        where: { userId: participant.memberId },
+      });
+      if (!sourceWorkspace) {
+        throw new Error("Hosted-local group email participant workspace was not created.");
+      }
       if (participant.verifiedEmail) {
+        // Verified-email authorization and projection snapshots both encrypt
+        // with Web-owned crypto. Restore this scenario's resolved environment
+        // immediately before each crypto boundary because asynchronous store
+        // imports may have changed process.env.
+        applyHostedWebTestkitEnvironment(deps.environment);
         await memberStore.syncHostedMemberVerifiedEmailAuthorization({
           address: participant.verifiedEmail,
           memberId: participant.memberId,
@@ -1414,20 +1430,25 @@ export async function seedHostedGroupEmailAuthorizationForTest(input: {
         });
       }
       for (const projectionScope of input.projectionScopes) {
-        const share = (await projectionStore.findActiveHostedVaultShares({
+        const shares = await projectionStore.findActiveHostedVaultShares({
           grantorMemberId: participant.memberId,
           prisma: deps.prisma,
           projectionScope,
-        })).find((candidate) =>
+        });
+        const share = shares.find((candidate) =>
           candidate.destinationMemberId === input.runtimeMemberId
         );
         if (!share) {
           throw new Error("Hosted-local group email share was not created.");
         }
+        // Snapshot encryption also reads the Web-owned crypto configuration
+        // from process.env.
+        applyHostedWebTestkitEnvironment(deps.environment);
         const replaced = await projectionStore.replaceHostedVaultShareProjectionSnapshot({
           prisma: deps.prisma,
           records: [],
           share,
+          sourceWorkspaceVersion: sourceWorkspace.version.toString(),
         });
         if (replaced !== "replaced") {
           throw new Error("Hosted-local group email projection snapshot was not replaced.");

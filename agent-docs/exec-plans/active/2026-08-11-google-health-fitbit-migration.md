@@ -172,6 +172,17 @@ Updated: 2026-08-15
     data attempt stamp freshness plus the existing deterministic reconcile wake
     while leaving provider trace and payload work retryable until Fitbit is
     terminal. Preserve lifecycle and data-less historical completion admission.
+22. Completed: final round 15 proved the inline classifier still treated the
+    root envelope as a peer to nested data, while timeseries bypassed the
+    classifier entirely, and Web treated retained terminal migration rows as a
+    reason to retry source-unknown redelivery forever. Use one data-bearing
+    hierarchy for direct, nested, and grouped summary/timeseries payloads;
+    inline data wins and envelope metadata is fallback only. Feed that same
+    source fact through admission, freshness, execution, acknowledgement, and
+    cutover. End the migration-only unknown-source rejection when Fitbit is
+    terminal, without adding state, queues, or another process. The user
+    explicitly authorized this requirement decision and one final base
+    reconciliation.
 
 ## Decisions
 
@@ -328,6 +339,17 @@ Updated: 2026-08-15
   trace acceptance while Fitbit is active, source lifecycle and data-less
   historical completion remain admissible, and provider redelivery enters the
   ordinary data path after Fitbit becomes terminal.
+- Final round-fifteen remediation establishes a single recursive inline-source
+  hierarchy before summary or timeseries job construction. Nested and grouped
+  records override routing envelopes, mixed authoritative leaves retry, and the
+  resolved source populates Web admission, dirty execution identity, freshness,
+  and migration gating. Web now consults only non-terminal Fitbit state for the
+  migration-only source-unknown retry, so retained terminal rows cannot trap a
+  valid post-cutover redelivery. After the authorized base reconciliation, all
+  416 focused Junction provider and service tests and all 183 hosted Web wake
+  tests pass. Device-sync and Web typechecks plus focused Web lint pass. The
+  regression proof keeps legitimate provider aliases equivalent while storing
+  Fitbit and Google Health as separate data-authority and lifecycle identities.
 - Final round-twelve finding was reproduced at both lossy authority boundaries
   and in hosted ordering. The correction carries canonical post-close
   provider-pull finalization through importer receipt, local source summary, and
@@ -340,8 +362,8 @@ Updated: 2026-08-15
 
 - Keep the pull request draft until the corrected candidate is pushed and the
   ReviewGPT/required-CI gates are started together.
-- Commit and push the round-fourteen remediation, then continue the user-authorized
+- Commit and push the round-fifteen remediation, then continue the user-authorized
   ReviewGPT loop against that exact head until it reaches a valid pass.
 - Recheck the current base with `git merge-tree`. The one permitted base update
-  is already consumed, so retain the draft PR and report a moving-base conflict
+  has now been consumed, so retain the draft PR and report a moving-base conflict
   if the reviewed patch no longer merges cleanly.

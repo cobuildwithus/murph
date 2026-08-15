@@ -1,5 +1,11 @@
 import * as z from '@murphai/contracts/zod-runtime'
 import {
+  compactTableGenericResponseCardV1Schema,
+  compactTableWorkoutResponseCardAuthoringV1Schema,
+  dailyNutritionResponseCardV2AuthoringSchema,
+  isStrictIsoDate,
+} from '@murphai/contracts'
+import {
   hostedRuntimeAssistantPersonalizationModelToolRequestSchema,
   type HostedRuntimeAssistantPersonalizationModelToolRequest,
   type HostedRuntimeAssistantPersonalizationToolAuthority,
@@ -7,7 +13,11 @@ import {
 import {
   HOSTED_EXECUTION_ASSISTANT_ASK_QUESTION_MAX_CODE_POINTS,
   HOSTED_EXECUTION_ASSISTANT_ASK_TARGET_LABEL_MAX_CODE_POINTS,
+  HOSTED_EXECUTION_DAILY_METRIC_MAX_UNIT_LENGTH,
 } from '@murphai/hosted-execution/contracts'
+import {
+  HOSTED_EXECUTION_MEMBER_REPORTED_DAILY_METRIC_KEYS,
+} from '@murphai/hosted-execution'
 import {
   hostedRuntimePendingGroupSetupInputSchema,
 } from '@murphai/hosted-execution/pending-group-setup'
@@ -76,6 +86,7 @@ import {
   type HostedComputerPauseForUserRequest,
 } from '@murphai/hosted-execution/computer-use'
 import {
+  assistantAuthoredResponseMediaSchema,
   assistantMessageReactionSchema,
   type AssistantMessageReaction,
   type AssistantResponseMedia,
@@ -83,9 +94,14 @@ import {
 import {
   exerciseRoutineResponseCardV1Schema,
   assistantResponseCardAuthoringSchema,
+  assistantWorkoutResponseCardSemanticSchema,
+  assistantResponseCardSchema,
+  telegramRichContentResponseCardV1Schema,
   type AssistantResponseCard,
+  type CompactTableWorkoutResponseCardV1,
 } from '@murphai/operator-config/assistant-response-cards'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
+import { readLiveWorkoutCardEditor } from '@murphai/vault-usecases/workouts'
 import { normalizeNullableString } from '@murphai/operator-config/text/shared'
 import {
   type AssistantHostedGroupSharedMember,
@@ -97,6 +113,9 @@ import {
 import type {
   AssistantConversationScope,
 } from '../assistant/conversation-policy.js'
+import type {
+  AssistantAcceptedTurnInputReferenceWindow,
+} from '../assistant/active-turn-input-journal.js'
 import {
   ASSISTANT_HOSTED_GROUP_SHARED_READ_MAX_PROJECTION_SCOPES,
   ASSISTANT_HOSTED_GROUP_SHARED_READ_MAX_RESULT_CODE_UNITS,
@@ -124,11 +143,17 @@ import type {
   AssistantProviderUsageDraft,
 } from '../assistant/providers/types.js'
 import {
+  ASSISTANT_AUTHORED_RESPONSE_MEDIA_MAX_ITEMS,
+  dedupeAssistantResponseMediaList,
   matchesExactAssistantVaultImageResponseMedia,
   normalizeAssistantResponseMediaList,
 } from '../assistant/response-media.js'
 import {
+  buildToolCallValidationFeedback,
+} from '../assistant/tool-validation-feedback.js'
+import {
   buildSafeToolCallValidationDigest,
+  collectSafeJsonSchemaValidationPaths,
   type SafeToolCallValidationDigest,
 } from '../assistant/tool-validation-digest.js'
 import type {
@@ -171,6 +196,7 @@ import {
 import {
   type GenerateSongToolArgs,
   type GenerateVoiceMemoToolArgs,
+  type VoiceMemoPhaseTimingRecorder,
   type VoiceMemoToolRuntime,
 } from './generate-voice-memo-tool.js'
 import {
@@ -226,11 +252,15 @@ import {
   type PhoneCallDynamicToolRequest,
 } from './dynamic-tools/phone-calls.js'
 import {
+  buildPhysicalNoteFailureInstruction,
   createPhysicalNoteRequestKey,
   readPhysicalNoteDynamicToolRequest,
   resolvePhysicalNoteExplicitOriginInputId,
   type PhysicalNoteDynamicToolRequest,
 } from './dynamic-tools/physical-notes.js'
+import {
+  buildResponseCardValidationFeedback,
+} from './response-card-validation-feedback.js'
 import {
   executeGenerateSongDynamicTool,
   MURPH_GENERATE_SONG_TOOL,
@@ -257,6 +287,7 @@ import {
   MURPH_ASSISTANT_CONFIGURATION_TOOL,
   MURPH_ATTACH_EXERCISE_ROUTINE_CARD_TOOL,
   MURPH_ATTACH_RESPONSE_CARD_TOOL,
+  MURPH_ATTACH_TELEGRAM_RICH_CONTENT_TOOL,
   MURPH_ATTACH_RESPONSE_MEDIA_TOOL,
   MURPH_COMPUTER_ACT_TOOL,
   MURPH_COMPUTER_FINISH_RUN_TOOL,
@@ -279,24 +310,65 @@ import {
 } from './dynamic-tool-catalog.js'
 const CODEX_DYNAMIC_TOOL_CALL_METHOD = 'item/tool/call'
 
+function addAttachResponseCardArgumentIssues(
+  value: { card: AssistantResponseCard },
+  context: z.RefinementCtx,
+): void {
+  if (
+    value.card.kind === 'compact_table' &&
+    'workout' in value.card &&
+    value.card.subtitle !== null
+  ) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'Structured workout card subtitles must be null.',
+      params: { murphExpectedShape: 'null_for_workout_card' },
+      path: ['card', 'subtitle'],
+    })
+  }
+}
+
 const attachResponseCardArgumentsSchema = z
   .object({
     card: assistantResponseCardAuthoringSchema,
   })
   .strict()
-  .superRefine((value, context) => {
-    if (
-      value.card.kind === 'compact_table' &&
-      'workout' in value.card &&
-      value.card.subtitle !== null
-    ) {
-      context.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: 'Structured workout card subtitles must be null.',
-        path: ['card', 'subtitle'],
-      })
-    }
+  .superRefine(addAttachResponseCardArgumentIssues)
+
+const attachDailyNutritionResponseCardArgumentsSchema = z
+  .object({
+    card: dailyNutritionResponseCardV2AuthoringSchema,
   })
+  .strict()
+
+const attachCompactTableGenericResponseCardArgumentsSchema = z
+  .object({
+    card: compactTableGenericResponseCardV1Schema,
+  })
+  .strict()
+
+const attachCompactTableWorkoutResponseCardArgumentsSchema = z
+  .object({
+    card: compactTableWorkoutResponseCardAuthoringV1Schema,
+  })
+  .strict()
+  .superRefine(addAttachResponseCardArgumentIssues)
+
+const attachResponseCardValidationPaths =
+  collectSafeJsonSchemaValidationPaths(MURPH_ATTACH_RESPONSE_CARD_TOOL.inputSchema)
+const attachExerciseRoutineCardValidationPaths =
+  collectSafeJsonSchemaValidationPaths(
+    MURPH_ATTACH_EXERCISE_ROUTINE_CARD_TOOL.inputSchema,
+  )
+const attachResponseMediaValidationPaths =
+  collectSafeJsonSchemaValidationPaths(MURPH_ATTACH_RESPONSE_MEDIA_TOOL.inputSchema)
+
+const attachSemanticWorkoutResponseCardArgumentsSchema = z
+  .object({
+    card: assistantWorkoutResponseCardSemanticSchema,
+  })
+  .strict()
+  .superRefine(addAttachResponseCardArgumentIssues)
 
 const attachGroupChallengeResponseCardArgumentsSchema =
   groupChallengeResponseCardToolInputSchema
@@ -307,9 +379,17 @@ const attachExerciseRoutineCardArgumentsSchema = z
   })
   .strict()
 
+const attachTelegramRichContentArgumentsSchema = z
+  .object({
+    card: telegramRichContentResponseCardV1Schema,
+  })
+  .strict()
+
 const attachResponseMediaArgumentsSchema = z
   .object({
-    media: z.array(z.unknown()).max(40),
+    media: z
+      .array(assistantAuthoredResponseMediaSchema)
+      .max(ASSISTANT_AUTHORED_RESPONSE_MEDIA_MAX_ITEMS),
   })
   .strict()
 
@@ -424,10 +504,35 @@ const groupArgumentsSchema = z.discriminatedUnion('action', [
     .strict(),
   z
     .object({
-      action: z.literal('message_current_sender'),
+      action: z.enum([
+        'clarify_current_sender',
+        'continue_current_sender_in_group',
+        'continue_current_sender_privately',
+        'message_current_sender',
+      ]),
       message_ref: z.string().regex(
         new RegExp(ASSISTANT_ACCEPTED_MESSAGE_REF_PATTERN, 'u'),
       ),
+    })
+    .strict(),
+  z
+    .object({
+      action: z.literal('record_current_sender_daily_metric'),
+      date: z.string().refine(isStrictIsoDate, {
+        message: 'date must be a valid YYYY-MM-DD calendar date',
+      }),
+      message_ref: z.string().regex(
+        new RegExp(ASSISTANT_ACCEPTED_MESSAGE_REF_PATTERN, 'u'),
+      ),
+      metric: z.enum(
+        HOSTED_EXECUTION_MEMBER_REPORTED_DAILY_METRIC_KEYS as [string, ...string[]],
+      ),
+      unit: z
+        .string()
+        .min(1)
+        .max(HOSTED_EXECUTION_DAILY_METRIC_MAX_UNIT_LENGTH)
+        .regex(/^[A-Za-z0-9._/%-]+$/u),
+      value: z.number(),
     })
     .strict(),
   z
@@ -921,7 +1026,7 @@ export type MurphDynamicToolResponseMediaPatch = {
 export type MurphDynamicToolFinalActionPatch =
   | {
       kind: 'none'
-      owner?: 'group-email' | 'vault-file'
+      owner?: 'current-sender-ask' | 'group-email' | 'vault-file'
     }
   | {
       kind: 'reply-required'
@@ -953,12 +1058,16 @@ type HostedComputerToolPayloadSanitizer =
   | 'open'
 
 export interface MurphDynamicToolExecutionResult {
+  externallyVisibleOutput?: boolean
   finalActionPatch?: MurphDynamicToolFinalActionPatch
   reactionPatch?: MurphDynamicToolReactionPatch
   replyTargetPatch?: MurphDynamicToolReplyTargetPatch
   requiredVaultFileApprovalUrl?: string
   responseMediaPatch?: MurphDynamicToolResponseMediaPatch
   responseCardPatch?: { card: AssistantResponseCard }
+  responseCardTextFallbackPatch?: {
+    card: CompactTableWorkoutResponseCardV1
+  }
   rpcResult: MurphDynamicToolRpcResult
   // Specific runtime issues a tool wants recorded off-path via the assistant
   // runtime's existing issue owner (e.g. a generated-media delivery failure).
@@ -966,7 +1075,23 @@ export interface MurphDynamicToolExecutionResult {
   usageDraft?: AssistantProviderUsageDraft | null
 }
 
+type CurrentSenderTurnDecision =
+  | 'clarification'
+  | 'group_continuation'
+  | 'group_new'
+  | 'private_continuation'
+  | 'private_new'
+
+interface CurrentSenderTurnDecisionClaim {
+  decision: CurrentSenderTurnDecision
+  groupNotice: Promise<boolean> | null
+}
+
 export interface MurphGroupSharedReadTurnState {
+  currentSenderDecisionByMessageRef?: Map<
+    string,
+    CurrentSenderTurnDecisionClaim
+  >
   invalid: boolean
   readProjectionScopeKeyBatches: string[][]
   roster: Array<{
@@ -989,7 +1114,7 @@ type MurphGroupToolRequest =
         action:
           | 'ask'
           | 'ask_current_sender'
-          | 'message_current_sender'
+          | 'record_current_sender_daily_metric'
           | 'ask_member'
           | 'create_join_link'
           | 'create_signup_referral_link'
@@ -1018,10 +1143,18 @@ type MurphGroupToolRequest =
     }
   | {
       action: 'ask_current_sender'
+      audience?: 'current_sender' | 'group'
       messageRef: string
+      mode: 'clarification' | 'continuation' | 'new'
     }
   | {
-      action: 'message_current_sender'
+      action: 'record_current_sender_daily_metric'
+      dailyMetric: {
+        date: string
+        metric: string
+        unit: string
+        value: number
+      }
       messageRef: string
     }
   | {
@@ -1172,6 +1305,10 @@ export type MurphDynamicToolRequest =
       validationDigest: SafeToolCallValidationDigest
     }
   | {
+      card: CompactTableWorkoutResponseCardV1
+      kind: 'response-card-envelope-too-large'
+    }
+  | {
       kind: 'invalid-response-media-arguments'
       validationDigest: SafeToolCallValidationDigest
     }
@@ -1274,12 +1411,66 @@ export type MurphDynamicToolRequest =
       tool: string | null
     }
 
+export type CurrentSenderTurnDecisionClaimResult =
+  | 'claimed'
+  | 'conflict'
+  | 'not_current_sender'
+  | 'replay'
+  | 'unavailable'
+
+function currentSenderTurnDecisionForGroupRequest(
+  request: Extract<MurphGroupToolRequest, { action: 'ask_current_sender' }>,
+): CurrentSenderTurnDecision {
+  return request.mode === 'clarification'
+    ? 'clarification'
+    : request.audience === 'group'
+      ? request.mode === 'continuation'
+        ? 'group_continuation'
+        : 'group_new'
+      : request.mode === 'continuation'
+        ? 'private_continuation'
+        : 'private_new'
+}
+
+export function claimCurrentSenderTurnDecision(input: {
+  request: MurphDynamicToolRequest
+  turnState: MurphGroupSharedReadTurnState | null
+}): CurrentSenderTurnDecisionClaimResult {
+  if (
+    input.request.kind !== 'group'
+    || input.request.request.action !== 'ask_current_sender'
+  ) {
+    return 'not_current_sender'
+  }
+  const decisionByMessageRef =
+    input.turnState?.currentSenderDecisionByMessageRef
+  if (!decisionByMessageRef) {
+    return 'unavailable'
+  }
+  const decision = currentSenderTurnDecisionForGroupRequest(
+    input.request.request,
+  )
+  const existing = decisionByMessageRef.get(input.request.request.messageRef)
+  if (existing) {
+    return existing.decision === decision ? 'replay' : 'conflict'
+  }
+  decisionByMessageRef.set(input.request.request.messageRef, {
+    decision,
+    groupNotice: null,
+  })
+  return 'claimed'
+}
+
 function isMurphDynamicToolNamespace(namespace: string | null): boolean {
   return namespace === MURPH_SEND_PROGRESS_UPDATE_TOOL.namespace
 }
 
 export function readMurphDynamicToolRequest(
   message: CodexRpcMessage,
+  input?: {
+    automationRelativeDateReferenceWindow?: AssistantAcceptedTurnInputReferenceWindow | null
+    responseCardAudience?: 'group' | 'private' | null
+  },
 ): MurphDynamicToolRequest | null {
   const request = parseDynamicToolCallRequest(message)
   if (!request) {
@@ -1296,6 +1487,8 @@ export function readMurphDynamicToolRequest(
 
   const automationRequest = readAutomationDynamicToolRequest({
     arguments: request.arguments,
+    relativeDateReferenceWindow:
+      input?.automationRelativeDateReferenceWindow ?? null,
     tool: request.tool,
   })
   if (automationRequest) {
@@ -1392,8 +1585,17 @@ export function readMurphDynamicToolRequest(
       }
     }
     case MURPH_ATTACH_RESPONSE_CARD_TOOL.name: {
-      const parsed = parseAttachResponseCardArguments(request.arguments)
+      const parsed = parseAttachResponseCardArguments(
+        request.arguments,
+        input?.responseCardAudience ?? null,
+      )
       if (!parsed.ok) {
+        if (parsed.reason === 'workout-envelope-too-large') {
+          return {
+            card: parsed.card,
+            kind: 'response-card-envelope-too-large',
+          }
+        }
         return {
           kind: 'invalid-response-card-arguments',
           validationDigest: parsed.validationDigest,
@@ -1414,6 +1616,20 @@ export function readMurphDynamicToolRequest(
     }
     case MURPH_ATTACH_EXERCISE_ROUTINE_CARD_TOOL.name: {
       const parsed = parseAttachExerciseRoutineCardArguments(request.arguments)
+      if (!parsed.ok) {
+        return {
+          kind: 'invalid-response-card-arguments',
+          validationDigest: parsed.validationDigest,
+        }
+      }
+
+      return {
+        kind: 'attach-response-card',
+        card: parsed.card,
+      }
+    }
+    case MURPH_ATTACH_TELEGRAM_RICH_CONTENT_TOOL.name: {
+      const parsed = parseAttachTelegramRichContentArguments(request.arguments)
       if (!parsed.ok) {
         return {
           kind: 'invalid-response-card-arguments',
@@ -1831,6 +2047,7 @@ export async function executeMurphDynamicToolRequest(input: {
   request: MurphDynamicToolRequest
   requireHostedPrivateImageDelivery?: boolean | null
   vaultRoot?: string | null
+  voiceMemoPhaseTimingRecorder?: VoiceMemoPhaseTimingRecorder | null
   voiceMemoRuntime?: VoiceMemoToolRuntime | null
   askGrokRuntime?: AskGrokToolRuntime | null
   askGrokTurnState?: AskGrokTurnState | null
@@ -1861,8 +2078,44 @@ export async function executeMurphDynamicToolRequest(input: {
   }
 
   switch (input.request.kind) {
-    case 'invalid-automation-arguments':
-      return toolTextResult(false, 'invalid automation arguments')
+    case 'invalid-automation-arguments': {
+      switch (input.request.safeFailureCode) {
+        case 'local_at_gap':
+          return toolTextResult(
+            false,
+            input.request.resolvedLocalDate && input.request.localAtTargetKey
+              ? `that local reminder time does not exist because of a daylight-saving change; the trusted host resolved the requested calendar date as ${input.request.resolvedLocalDate}; tell the user that exact date and ask for another local time; retry with schedule.localAt.date=${input.request.resolvedLocalDate} instead of relativeDay and localAtRecoveryKey=${input.request.localAtTargetKey}, or if the participant withdraws or replaces this request call action=dismiss_local_at_recovery with localAtRecoveryKey=${input.request.localAtTargetKey} and resolvedLocalDate=${input.request.resolvedLocalDate}`
+              : 'that local reminder time does not exist because of a daylight-saving change; ask for another local time',
+          )
+        case 'local_at_fold':
+          return toolTextResult(
+            false,
+            input.request.resolvedLocalDate && input.request.localAtTargetKey
+              ? `that local reminder time occurs twice because of a daylight-saving change; the trusted host resolved the requested calendar date as ${input.request.resolvedLocalDate}; tell the user that exact date and ask whether the earlier or later occurrence is intended; retry with schedule.localAt.date=${input.request.resolvedLocalDate}, schedule.localAt.fold, and localAtRecoveryKey=${input.request.localAtTargetKey} instead of relativeDay, or if the participant withdraws or replaces this request call action=dismiss_local_at_recovery with localAtRecoveryKey=${input.request.localAtTargetKey} and resolvedLocalDate=${input.request.resolvedLocalDate}`
+              : 'that local reminder time occurs twice because of a daylight-saving change; ask whether the earlier or later occurrence is intended, then retry with schedule.localAt.fold',
+          )
+        case 'local_at_invalid_timezone':
+          return toolTextResult(
+            false,
+            'the reminder timezone is invalid; ask for or infer a valid IANA timezone before retrying',
+          )
+        case 'local_at_reference_unavailable':
+          return toolTextResult(
+            false,
+            'the relative reminder date could not be safely anchored to the accepted message; ask the user for an explicit calendar date before retrying',
+          )
+        case 'local_at_reference_spans_dates':
+          return toolTextResult(
+            false,
+            'the accepted messages span different calendar dates in that timezone; ask the user for an explicit calendar date before retrying',
+          )
+        default:
+          return invalidDynamicToolArgumentsResult(
+            'invalid_automation_arguments',
+            input.request.validationDigest,
+          )
+      }
+    }
     case 'invalid-device-arguments':
       return toolTextResult(false, 'invalid device arguments')
     case 'invalid-labs-arguments':
@@ -1880,7 +2133,10 @@ export async function executeMurphDynamicToolRequest(input: {
     case 'invalid-computer-arguments':
       return toolTextResult(false, 'invalid computer tool arguments')
     case 'invalid-generate-voice-memo-arguments':
-      return toolTextResult(false, 'invalid voice memo generation arguments')
+      return invalidDynamicToolArgumentsResult(
+        'invalid_generate_voice_memo_arguments',
+        input.request.validationDigest,
+      )
     case 'invalid-generate-song-arguments':
       return toolTextResult(false, 'invalid song generation arguments')
     case 'invalid-ask-grok-arguments':
@@ -1910,9 +2166,38 @@ export async function executeMurphDynamicToolRequest(input: {
     case 'invalid-finish-without-reply-arguments':
       return toolTextResult(false, 'invalid no-reply arguments')
     case 'invalid-response-card-arguments':
-      return toolTextResult(false, 'invalid response card arguments')
+      return toolTextResult(
+        false,
+        buildResponseCardValidationFeedback(input.request.validationDigest),
+      )
+    case 'response-card-envelope-too-large':
+      if (input.privateDirectResponseCardAllowed !== true) {
+        return toolTextResult(
+          false,
+          'response cards require a private direct conversation',
+        )
+      }
+      if (input.currentResponseCard !== null && input.currentResponseCard !== undefined) {
+        return toolTextResult(false, 'a response card is already attached')
+      }
+      if ((input.currentResponseMedia ?? []).length > 0) {
+        return toolTextResult(
+          false,
+          'response cards cannot be combined with response media',
+        )
+      }
+      return {
+        ...toolTextResult(
+          true,
+          'workout card envelope too large; full text recovery selected',
+        ),
+        responseCardTextFallbackPatch: { card: input.request.card },
+      }
     case 'invalid-response-media-arguments':
-      return toolTextResult(false, 'invalid response media arguments')
+      return invalidDynamicToolArgumentsResult(
+        'invalid_response_media_arguments',
+        input.request.validationDigest,
+      )
     case 'invalid-send-vault-file-arguments':
       return toolTextResult(false, 'invalid vault file arguments')
     case 'invalid-phone-call-arguments':
@@ -1955,9 +2240,13 @@ export async function executeMurphDynamicToolRequest(input: {
           'response cards cannot be combined with response media',
         )
       }
+      const card = await attachTrustedWorkoutCardEditor({
+        card: input.request.card,
+        vaultRoot: input.vaultRoot ?? null,
+      })
       return {
         ...toolTextResult(true, 'response card attached'),
-        responseCardPatch: { card: input.request.card },
+        responseCardPatch: { card },
       }
     }
     case 'attach-response-media': {
@@ -2024,6 +2313,11 @@ export async function executeMurphDynamicToolRequest(input: {
         progressDelivery: input.progressDelivery,
         text: input.request.text,
       })
+    case 'automation-local-at-recovery-dismissal':
+      return toolTextResult(
+        false,
+        'local-time recovery dismissal is unavailable outside the active root turn',
+      )
     case 'automation': {
       const automationTool = input.hostedToolContext?.automationTool ?? null
       if (!automationTool) {
@@ -2353,6 +2647,18 @@ export async function executeMurphDynamicToolRequest(input: {
         })
         switch (result.status) {
           case 'accepted':
+            if (result.failureReason === 'prior_note_accepted') {
+              return toolTextResult(
+                true,
+                JSON.stringify({
+                  failureReason: result.failureReason,
+                  note:
+                    'Provider records show that this earlier physical-note submission was accepted for printing. This replay did not send another note. Historical billing evidence is unavailable, so do not describe it as paid or complimentary and do not state a cost. Say accepted for printing, not delivered.',
+                  physicalNoteId: result.physicalNoteId,
+                  status: result.status,
+                }),
+              )
+            }
             return toolTextResult(
               true,
               JSON.stringify({
@@ -2405,7 +2711,14 @@ export async function executeMurphDynamicToolRequest(input: {
           case 'failed':
             return toolTextResult(
               false,
-              'The physical note was not accepted for printing.',
+              JSON.stringify({
+                failureReason: result.failureReason ?? 'unknown',
+                note: buildPhysicalNoteFailureInstruction(
+                  result.failureReason,
+                ),
+                physicalNoteId: result.physicalNoteId,
+                status: result.status,
+              }),
             )
         }
       } catch {
@@ -2633,6 +2946,7 @@ export async function executeMurphDynamicToolRequest(input: {
         materializeWorkspaceArtifacts:
           input.materializeWorkspaceArtifacts ?? null,
         nextUsageOrdinal: input.nextUsageOrdinal,
+        progressDelivery: input.progressDelivery,
         request: input.request.request,
         toolCallId: input.request.toolCallId ?? null,
         vaultRoot: input.vaultRoot ?? null,
@@ -2730,13 +3044,24 @@ export async function executeMurphDynamicToolRequest(input: {
         acceptedInvocationSessionId ??
         userActionScope?.originSessionId ??
         null
+      const usesDetachedImageGeneration = Boolean(
+        imageGenerationLauncher && originAssistantInputId,
+      )
+      if (
+        !usesDetachedImageGeneration
+        && (input.currentResponseMedia?.length ?? 0)
+          >= ASSISTANT_AUTHORED_RESPONSE_MEDIA_MAX_ITEMS
+      ) {
+        return toolTextResult(false, 'response media limit reached')
+      }
       const providerRequestOrdinal = input.nextUsageOrdinal()
       const operationId =
         captureIdempotencyKey
         ?? `murph.dynamic-tool.generate-image:${originAssistantInputId}:${providerRequestOrdinal}`
       const generateImageArgs = input.request.args
       if (
-        imageGenerationLauncher
+        usesDetachedImageGeneration
+        && imageGenerationLauncher
         && originAssistantInputId
       ) {
         const launch = imageGenerationLauncher.launch({
@@ -2840,6 +3165,7 @@ export async function executeMurphDynamicToolRequest(input: {
         abortSignal: input.abortSignal ?? null,
         args: input.request.args,
         currentResponseMedia: input.currentResponseMedia ?? [],
+        recordPhaseTiming: input.voiceMemoPhaseTimingRecorder ?? null,
         voiceMemoRuntime: input.voiceMemoRuntime ?? null,
       })
     }
@@ -2851,6 +3177,7 @@ export async function executeMurphDynamicToolRequest(input: {
         abortSignal: input.abortSignal ?? null,
         args: input.request.args,
         currentResponseMedia: input.currentResponseMedia ?? [],
+        recordPhaseTiming: input.voiceMemoPhaseTimingRecorder ?? null,
         turnState: input.generateSongTurnState ?? null,
         voiceMemoRuntime: input.voiceMemoRuntime ?? null,
       })
@@ -2958,6 +3285,38 @@ export async function executeMurphDynamicToolRequest(input: {
         unknownOutcomeOnTransportError: true,
       })
     }
+  }
+}
+
+async function attachTrustedWorkoutCardEditor(input: {
+  card: AssistantResponseCard
+  vaultRoot: string | null
+}): Promise<AssistantResponseCard> {
+  if (
+    input.vaultRoot === null
+    || input.card.kind !== 'compact_table'
+    || !('workout' in input.card)
+    || input.card.workout.state !== 'active'
+  ) {
+    return input.card
+  }
+  try {
+    const trusted = await readLiveWorkoutCardEditor({
+      presentation: input.card.workout,
+      vault: input.vaultRoot,
+      workoutId: input.card.tracking.entityId,
+    })
+    if (trusted === null) {
+      return input.card
+    }
+    const candidate = assistantResponseCardSchema.safeParse({
+      ...input.card,
+      editor: trusted.editor,
+      workout: trusted.workout,
+    })
+    return candidate.success ? candidate.data : input.card
+  } catch {
+    return input.card
   }
 }
 
@@ -3468,24 +3827,22 @@ function groupSharedUnavailableToolResult(
 /**
  * One read returns every member crossed with every requested scope. At the model
  * boundary, every projection is keyed by its exact scope and its grant/data pair
- * is collapsed to one three-state status. Non-workout record arrays remain
+ * is collapsed to one four-state status. Non-workout record arrays remain
  * byte-identical. `workouts.v0` additionally compacts repeated day identity,
  * time semantics, completion watermark, and activity kinds because its
  * per-workout lists are the one record payload dense enough to need that extra
  * reduction. Encrypted stored records and the complete Web response retain
  * their validated shapes.
- */
-/**
- * `grantStatus` and `dataStatus` only ever encode three states between them, so
- * the model reads one field instead of decoding a pair.
+ * The model reads the four collapsed states from one field instead of decoding
+ * the grant/data pair.
  */
 function groupSharedProjectionStatus(
   projection: AssistantHostedGroupSharedProjection,
-): 'available' | 'missing' | 'not_granted' {
+): 'available' | 'missing' | 'not_granted' | 'pending' {
   if (projection.grantStatus === 'not_granted') {
     return 'not_granted'
   }
-  return projection.dataStatus === 'missing' ? 'missing' : 'available'
+  return projection.dataStatus
 }
 
 function groupSharedWorkoutsModelProjection(
@@ -3901,21 +4258,6 @@ function groupSummaryModelResult(group: HostedRuntimeGroupSummary) {
 
 function groupToolModelResult(response: HostedRuntimeGroupToolResponse) {
   if (
-    response.action === 'message_current_sender'
-    && response.result.status === 'unavailable'
-    && response.result.unavailableReason
-      === 'same_channel_direct_route_unavailable'
-  ) {
-    return {
-      ...response,
-      result: {
-        ...response.result,
-        recovery:
-          'Ask the sender to open a direct Murph chat on the same channel, then retry.',
-      },
-    }
-  }
-  if (
     response.action === 'read_chat_participants'
     && response.result.status === 'ok'
   ) {
@@ -4157,10 +4499,12 @@ async function executeGroupTool(input: {
   groupSharedReadTurnState: MurphGroupSharedReadTurnState | null
   materializeWorkspaceArtifacts: AssistantWorkspaceArtifactMaterializer | null
   nextUsageOrdinal: () => number
+  progressDelivery: AssistantProgressDelivery | null
   request: MurphGroupToolRequest
   toolCallId: string | null
   vaultRoot: string | null
 }): Promise<MurphDynamicToolExecutionResult> {
+  let currentSenderGroupPreviewSent = false
   if (input.request.action === 'read_shared') {
     if (
       'audience' in input.request
@@ -4372,10 +4716,7 @@ async function executeGroupTool(input: {
       originSessionId: userActionScope.originSessionId,
       question: input.request.question,
     }
-  } else if (
-    input.request.action === 'ask_current_sender'
-    || input.request.action === 'message_current_sender'
-  ) {
+  } else if (input.request.action === 'ask_current_sender') {
     const userActionScope =
       input.hostedToolContext?.currentUserActionScope?.() ?? null
     if (
@@ -4384,11 +4725,80 @@ async function executeGroupTool(input: {
     ) {
       return toolTextResult(
         false,
-        'current-sender actions require the selected accepted message in this group turn',
+        'current-sender request requires the selected accepted message in this group turn',
+      )
+    }
+    const decisionByMessageRef =
+      input.groupSharedReadTurnState?.currentSenderDecisionByMessageRef
+    if (!decisionByMessageRef) {
+      return toolTextResult(
+        false,
+        'current-sender decision authority is unavailable for this turn',
+      )
+    }
+    const decision = currentSenderTurnDecisionForGroupRequest(input.request)
+    const claim = decisionByMessageRef.get(input.request.messageRef)
+    if (!claim) {
+      return toolTextResult(
+        false,
+        'current-sender decision was not claimed at server request intake',
+      )
+    }
+    if (claim.decision !== decision) {
+      return toolTextResult(
+        false,
+        'current-sender request conflicts with an earlier decision for this Message',
+      )
+    }
+    if (
+      input.request.audience === 'group'
+      && claim.groupNotice === null
+    ) {
+      claim.groupNotice = sendCurrentSenderGroupNotice({
+        deliveryContextOrdinal: input.deliveryContextOrdinal,
+        messageRef: input.request.messageRef,
+        progressDelivery: input.progressDelivery,
+      })
+    }
+    if (input.request.audience === 'group') {
+      const previewSent = claim.groupNotice
+        ? await claim.groupNotice
+        : false
+      if (!previewSent) {
+        return toolTextResult(
+          false,
+          'group sharing is unavailable because the required advance notice could not be delivered',
+        )
+      }
+      currentSenderGroupPreviewSent = true
+    }
+    request = {
+      action: 'ask_current_sender',
+      ...(input.request.audience === undefined
+        ? {}
+        : { audience: input.request.audience }),
+      mode: input.request.mode,
+      origin: {
+        assistantInputId: input.request.messageRef,
+        kind: 'accepted_input',
+        sessionId: userActionScope.originSessionId,
+      },
+    }
+  } else if (input.request.action === 'record_current_sender_daily_metric') {
+    const userActionScope =
+      input.hostedToolContext?.currentUserActionScope?.() ?? null
+    if (
+      userActionScope?.conversationScope !== 'group'
+      || !userActionScope.acceptedInputIds.includes(input.request.messageRef)
+    ) {
+      return toolTextResult(
+        false,
+        'current-sender request requires the selected accepted message in this group turn',
       )
     }
     request = {
-      action: input.request.action,
+      action: 'record_current_sender_daily_metric',
+      dailyMetric: input.request.dailyMetric,
       origin: {
         assistantInputId: input.request.messageRef,
         kind: 'accepted_input',
@@ -4606,8 +5016,24 @@ async function executeGroupTool(input: {
     const payload = generatedAvatarCapture
       ? { ...modelResult, generatedImage: generatedAvatarCapture }
       : modelResult
+    const currentSenderAccepted =
+      input.request.action === 'ask_current_sender'
+      && result.action === 'ask_current_sender'
+      && result.result.status === 'accepted'
     return {
       ...toolTextResult(true, safeToolPayloadText(payload)),
+      ...(currentSenderAccepted
+        ? {
+            finalActionPatch: {
+              kind: 'none' as const,
+              owner: 'current-sender-ask' as const,
+            },
+          }
+        : {}),
+      ...(input.request.action === 'ask_current_sender'
+        && currentSenderGroupPreviewSent
+        ? { externallyVisibleOutput: true }
+        : {}),
       ...(usageDraft ? { usageDraft } : {}),
     }
   } catch (error) {
@@ -4623,10 +5049,33 @@ async function executeGroupTool(input: {
           ? buildGroupAskRequestFailureText(error)
           : 'group tool request failed',
       ),
+      ...(currentSenderGroupPreviewSent
+        ? { externallyVisibleOutput: true }
+        : {}),
       ...(runtimeIssueInput ? { runtimeIssueInputs: [runtimeIssueInput] } : {}),
       ...(usageDraft ? { usageDraft } : {}),
     }
   }
+}
+
+async function sendCurrentSenderGroupNotice(input: {
+  deliveryContextOrdinal: number | null
+  messageRef: string
+  progressDelivery: AssistantProgressDelivery | null
+}): Promise<boolean> {
+  if (!input.progressDelivery || input.deliveryContextOrdinal === null) {
+    return false
+  }
+  const preview = await input.progressDelivery.send(
+    'I’ll ask your Murph and share the answer here.',
+    {
+      deliveryContextOrdinal: input.deliveryContextOrdinal,
+      required: true,
+      source: 'system',
+      targetInputId: input.messageRef,
+    },
+  )
+  return preview.kind === 'sent'
 }
 
 type GroupToolFailureCategory =
@@ -5921,6 +6370,16 @@ function toolTextResult(
   }
 }
 
+function invalidDynamicToolArgumentsResult(
+  error: string,
+  validationDigest: SafeToolCallValidationDigest,
+): MurphDynamicToolExecutionResult {
+  return toolTextResult(
+    false,
+    buildToolCallValidationFeedback(validationDigest, { error }),
+  )
+}
+
 function parseDynamicToolCallRequest(
   message: CodexRpcMessage,
 ): ParsedDynamicToolCallRequest | null {
@@ -6298,12 +6757,32 @@ function parseGroupArguments(
   }
   if (
     parsed.data.action === 'ask_current_sender'
+    || parsed.data.action === 'clarify_current_sender'
+    || parsed.data.action === 'continue_current_sender_in_group'
+    || parsed.data.action === 'continue_current_sender_privately'
     || parsed.data.action === 'message_current_sender'
   ) {
+    const decision = readCurrentSenderToolDecision(parsed.data.action)
+    return {
+      ok: true,
+      request: {
+        action: 'ask_current_sender',
+        ...decision,
+        messageRef: parsed.data.message_ref,
+      },
+    }
+  }
+  if (parsed.data.action === 'record_current_sender_daily_metric') {
     return {
       ok: true,
       request: {
         action: parsed.data.action,
+        dailyMetric: {
+          date: parsed.data.date,
+          metric: parsed.data.metric,
+          unit: parsed.data.unit,
+          value: parsed.data.value,
+        },
         messageRef: parsed.data.message_ref,
       },
     }
@@ -6494,6 +6973,30 @@ function parseGroupArguments(
   return { ok: true, request: { action: 'read_current' } }
 }
 
+function readCurrentSenderToolDecision(action:
+  | 'ask_current_sender'
+  | 'clarify_current_sender'
+  | 'continue_current_sender_in_group'
+  | 'continue_current_sender_privately'
+  | 'message_current_sender'
+): {
+  audience?: 'current_sender' | 'group'
+  mode: 'clarification' | 'continuation' | 'new'
+} {
+  switch (action) {
+    case 'ask_current_sender':
+      return { audience: 'group', mode: 'new' }
+    case 'message_current_sender':
+      return { audience: 'current_sender', mode: 'new' }
+    case 'clarify_current_sender':
+      return { mode: 'clarification' }
+    case 'continue_current_sender_in_group':
+      return { audience: 'group', mode: 'continuation' }
+    case 'continue_current_sender_privately':
+      return { audience: 'current_sender', mode: 'continuation' }
+  }
+}
+
 function parseFinishWithoutReplyArguments(
   value: unknown,
 ):
@@ -6677,6 +7180,7 @@ function parseComputerArguments<TArgs>(input: {
 
 function parseAttachResponseCardArguments(
   value: unknown,
+  audience: 'group' | 'private' | null,
 ):
   | { ok: true; card: AssistantResponseCard; groupChallenge: false }
   | {
@@ -6684,27 +7188,56 @@ function parseAttachResponseCardArguments(
       groupChallenge: true
       input: GroupChallengeResponseCardToolInput
     }
-  | { ok: false; validationDigest: SafeToolCallValidationDigest } {
+  | {
+      ok: false
+      reason: 'invalid'
+      validationDigest: SafeToolCallValidationDigest
+    }
+  | {
+      card: CompactTableWorkoutResponseCardV1
+      ok: false
+      reason: 'workout-envelope-too-large'
+    } {
   const schemaName = 'murph.attach_response_card.input'
   const toolName = 'murph.attach_response_card'
-  const parsed = attachResponseCardArgumentsSchema.safeParse(value)
-  if (parsed.success) {
-    return {
-      card: parsed.data.card,
-      groupChallenge: false,
-      ok: true,
+  if (audience !== 'group') {
+    const parsed = attachResponseCardArgumentsSchema.safeParse(value)
+    if (parsed.success) {
+      return {
+        card: parsed.data.card,
+        groupChallenge: false,
+        ok: true,
+      }
     }
-  }
-  if (Object.hasOwn(asRecord(value) ?? {}, 'card')) {
-    return {
-      ok: false,
-      validationDigest: buildDynamicToolValidationDigest({
-        error: parsed.error,
-        rawInput: value,
-        schemaName,
-        schemaRootKeys: ['card'],
-        toolName,
-      }),
+    if (
+      audience === 'private'
+      || Object.hasOwn(asRecord(value) ?? {}, 'card')
+    ) {
+      const semanticWorkout =
+        attachSemanticWorkoutResponseCardArgumentsSchema.safeParse(value)
+      if (semanticWorkout.success) {
+        return {
+          card: semanticWorkout.data.card,
+          ok: false,
+          reason: 'workout-envelope-too-large',
+        }
+      }
+      const diagnosticError = readAttachResponseCardDiagnosticError(
+        value,
+        parsed.error,
+      )
+      return {
+        ok: false,
+        validationDigest: buildDynamicToolValidationDigest({
+          error: diagnosticError,
+          rawInput: value,
+          schemaName,
+          schemaPaths: attachResponseCardValidationPaths,
+          schemaRootKeys: ['card'],
+          toolName,
+        }),
+        reason: 'invalid',
+      }
     }
   }
   const groupChallengeParsed =
@@ -6712,6 +7245,7 @@ function parseAttachResponseCardArguments(
   if (!groupChallengeParsed.success) {
     return {
       ok: false,
+      reason: 'invalid',
       validationDigest: buildDynamicToolValidationDigest({
         error: groupChallengeParsed.error,
         rawInput: value,
@@ -6731,6 +7265,52 @@ function parseAttachResponseCardArguments(
   }
 }
 
+function readAttachResponseCardDiagnosticError(
+  value: unknown,
+  fallbackError: z.ZodError,
+): z.ZodError {
+  const card = asRecord(asRecord(value)?.card)
+  if (card?.kind === 'daily_nutrition') {
+    const parsed = attachDailyNutritionResponseCardArgumentsSchema.safeParse(value)
+    return parsed.success ? fallbackError : parsed.error
+  }
+  if (card?.kind === 'compact_table') {
+    const hasExplicitWorkoutShape = Object.hasOwn(card, 'workout')
+    const hasWorkoutTracking = asRecord(card.tracking)?.kind === 'workout'
+    const hasGenericShape = ['rowHeader', 'columns', 'rows']
+      .some((key) => Object.hasOwn(card, key))
+    if (
+      (hasExplicitWorkoutShape && hasGenericShape)
+      || (!hasGenericShape && !hasExplicitWorkoutShape && !hasWorkoutTracking)
+    ) {
+      return new z.ZodError([{
+        code: z.ZodIssueCode.custom,
+        message: 'Choose one compact-table card shape.',
+        params: {
+          murphExpectedShape: 'compact_table.generic_or_workout_shape',
+        },
+        path: ['card'],
+      }])
+    }
+    const diagnosticSchema = hasGenericShape
+      ? attachCompactTableGenericResponseCardArgumentsSchema
+      : attachCompactTableWorkoutResponseCardArgumentsSchema
+    const parsed = diagnosticSchema.safeParse(value)
+    return parsed.success ? fallbackError : parsed.error
+  }
+  if (card) {
+    return new z.ZodError([{
+      code: z.ZodIssueCode.custom,
+      message: 'Choose a supported response-card family.',
+      params: {
+        murphExpectedShape: 'daily_nutrition_or_compact_table',
+      },
+      path: ['card', 'kind'],
+    }])
+  }
+  return fallbackError
+}
+
 function parseAttachExerciseRoutineCardArguments(
   value: unknown,
 ):
@@ -6746,8 +7326,38 @@ function parseAttachExerciseRoutineCardArguments(
         error: parsed.error,
         rawInput: value,
         schemaName,
+        schemaPaths: attachExerciseRoutineCardValidationPaths,
         schemaRootKeys: readZodObjectRootKeys(
           attachExerciseRoutineCardArgumentsSchema,
+        ),
+        toolName,
+      }),
+    }
+  }
+
+  return {
+    card: parsed.data.card,
+    ok: true,
+  }
+}
+
+function parseAttachTelegramRichContentArguments(
+  value: unknown,
+):
+  | { ok: true; card: AssistantResponseCard }
+  | { ok: false; validationDigest: SafeToolCallValidationDigest } {
+  const schemaName = 'murph.attach_telegram_rich_content.input'
+  const toolName = 'murph.attach_telegram_rich_content'
+  const parsed = attachTelegramRichContentArgumentsSchema.safeParse(value)
+  if (!parsed.success) {
+    return {
+      ok: false,
+      validationDigest: buildDynamicToolValidationDigest({
+        error: parsed.error,
+        rawInput: value,
+        schemaName,
+        schemaRootKeys: readZodObjectRootKeys(
+          attachTelegramRichContentArgumentsSchema,
         ),
         toolName,
       }),
@@ -6767,46 +7377,24 @@ function parseAttachResponseMediaArguments(
   | { ok: false; validationDigest: SafeToolCallValidationDigest } {
   const schemaName = 'murph.attach_response_media.input'
   const toolName = 'murph.attach_response_media'
-  try {
-    const parsed = attachResponseMediaArgumentsSchema.safeParse(value)
-    if (!parsed.success) {
-      return {
-        ok: false,
-        validationDigest: buildDynamicToolValidationDigest({
-          error: parsed.error,
-          rawInput: value,
-          schemaName,
-          schemaRootKeys: readZodObjectRootKeys(attachResponseMediaArgumentsSchema),
-          toolName,
-        }),
-      }
-    }
-
-    const media = normalizeAssistantResponseMediaList(parsed.data.media)
-    const unsupportedMedia = media.find(
-      (item) => item.kind !== 'image' && item.kind !== 'vault_image',
-    )
-    if (unsupportedMedia) {
-      throw new Error(
-        `murph.attach_response_media only supports image or vault_image media, received ${unsupportedMedia.kind}.`,
-      )
-    }
-
-    return {
-      ok: true,
-      media,
-    }
-  } catch (error) {
+  const parsed = attachResponseMediaArgumentsSchema.safeParse(value)
+  if (!parsed.success) {
     return {
       ok: false,
       validationDigest: buildDynamicToolValidationDigest({
-        error,
+        error: parsed.error,
         rawInput: value,
         schemaName,
+        schemaPaths: attachResponseMediaValidationPaths,
         schemaRootKeys: readZodObjectRootKeys(attachResponseMediaArgumentsSchema),
         toolName,
       }),
     }
+  }
+
+  return {
+    ok: true,
+    media: dedupeAssistantResponseMediaList(parsed.data.media),
   }
 }
 
@@ -6814,6 +7402,7 @@ function buildDynamicToolValidationDigest(input: {
   error: unknown
   rawInput: unknown
   schemaName: string
+  schemaPaths?: readonly string[]
   schemaRootKeys: readonly string[]
   toolName: string
 }): SafeToolCallValidationDigest {
@@ -6822,6 +7411,7 @@ function buildDynamicToolValidationDigest(input: {
     rawInput: input.rawInput,
     requestedToolName: input.toolName,
     schemaName: input.schemaName,
+    schemaPaths: input.schemaPaths,
     schemaRootKeys: input.schemaRootKeys,
     toolName: input.toolName,
   })

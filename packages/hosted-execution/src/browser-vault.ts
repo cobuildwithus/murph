@@ -5,9 +5,18 @@ import {
 import { parseHostedDataKeyEnvelope } from "@murphai/runtime-state";
 import type {
   HostedBrowserVaultReplicaCursorRef,
+  HostedBrowserVaultReplicaMetricBucketSetRef,
   HostedBrowserVaultReplicaRef,
+  HostedBrowserVaultReplicaShardRef,
 } from "./contracts.ts";
-import { HOSTED_BROWSER_VAULT_REPLICA_REF_SCHEMA } from "./contracts.ts";
+import {
+  HOSTED_BROWSER_VAULT_REPLICA_METRIC_BUCKET_COUNT,
+  HOSTED_BROWSER_VAULT_REPLICA_METRIC_BUCKET_IDS,
+  HOSTED_BROWSER_VAULT_REPLICA_METRIC_BUCKET_SET_REF_SCHEMA,
+  HOSTED_BROWSER_VAULT_REPLICA_REF_SCHEMA,
+  HOSTED_BROWSER_VAULT_REPLICA_SHARD_KINDS,
+  HOSTED_BROWSER_VAULT_REPLICA_SHARD_SET_REF_SCHEMA,
+} from "./contracts.ts";
 import {
   requireNumber,
   requireObject,
@@ -16,10 +25,22 @@ import {
 
 export type {
   HostedBrowserVaultReplicaCursorRef,
+  HostedBrowserVaultReplicaContentEncoding,
+  HostedBrowserVaultReplicaMetricBucketId,
+  HostedBrowserVaultReplicaMetricBucketRef,
+  HostedBrowserVaultReplicaMetricBucketSetRef,
   HostedBrowserVaultReplicaRef,
+  HostedBrowserVaultReplicaShardKind,
+  HostedBrowserVaultReplicaShardRef,
+  HostedBrowserVaultReplicaShardSetRef,
 } from "./contracts.ts";
 export {
   getHostedBrowserVaultReplicaStorageKeyId,
+  HOSTED_BROWSER_VAULT_REPLICA_METRIC_BUCKET_COUNT,
+  HOSTED_BROWSER_VAULT_REPLICA_METRIC_BUCKET_IDS,
+  HOSTED_BROWSER_VAULT_REPLICA_METRIC_BUCKET_SET_REF_SCHEMA,
+  HOSTED_BROWSER_VAULT_REPLICA_SHARD_KINDS,
+  HOSTED_BROWSER_VAULT_REPLICA_SHARD_SET_REF_SCHEMA,
 } from "./contracts.ts";
 
 export function parseHostedBrowserVaultReplicaRef(
@@ -46,6 +67,31 @@ export function parseHostedBrowserVaultReplicaRef(
         record.dataKeyEnvelope,
         `${label}.dataKeyEnvelope`,
       );
+  const objectKey = requireString(record.objectKey, `${label}.objectKey`);
+  const shards = record.shards === undefined
+    ? undefined
+    : parseHostedBrowserVaultReplicaShardRefs(record.shards, `${label}.shards`);
+  const metricBuckets = record.metricBuckets === undefined
+    ? undefined
+    : parseHostedBrowserVaultReplicaMetricBucketRefs(
+        record.metricBuckets,
+        `${label}.metricBuckets`,
+      );
+  if ((shards === undefined) !== (metricBuckets === undefined)) {
+    throw new TypeError(`${label}.shards and ${label}.metricBuckets must be present together.`);
+  }
+  if (shards && metricBuckets) {
+    const objectKeys = [
+      objectKey,
+      ...HOSTED_BROWSER_VAULT_REPLICA_SHARD_KINDS.map((shard) => shards[shard].objectKey),
+      ...HOSTED_BROWSER_VAULT_REPLICA_METRIC_BUCKET_IDS.map(
+        (bucketId) => metricBuckets.buckets[bucketId].objectKey,
+      ),
+    ];
+    if (new Set(objectKeys).size !== objectKeys.length) {
+      throw new TypeError(`${label} object keys must be distinct.`);
+    }
+  }
 
   return {
     byteLength: requireNumber(record.byteLength, `${label}.byteLength`),
@@ -56,12 +102,120 @@ export function parseHostedBrowserVaultReplicaRef(
       ? {}
       : { generation: requirePositiveSafeInteger(record.generation, `${label}.generation`) }),
     keyId: requireString(record.keyId, `${label}.keyId`),
-    objectKey: requireString(record.objectKey, `${label}.objectKey`),
+    ...(metricBuckets === undefined ? {} : { metricBuckets }),
+    objectKey,
     replicaSchema,
     schema,
     runtimeRootKeyId: requireString(record.runtimeRootKeyId, `${label}.runtimeRootKeyId`),
+    ...(shards === undefined ? {} : { shards }),
     sourceBundleHash: requireString(record.sourceBundleHash, `${label}.sourceBundleHash`),
   } satisfies HostedBrowserVaultReplicaRef;
+}
+
+function parseHostedBrowserVaultReplicaShardRefs(
+  value: unknown,
+  label: string,
+): NonNullable<HostedBrowserVaultReplicaRef["shards"]> {
+  const record = requireObject(value, label);
+  const schema = requireString(record.schema, `${label}.schema`);
+  if (schema !== HOSTED_BROWSER_VAULT_REPLICA_SHARD_SET_REF_SCHEMA) {
+    throw new TypeError(
+      `${label}.schema must be ${HOSTED_BROWSER_VAULT_REPLICA_SHARD_SET_REF_SCHEMA}.`,
+    );
+  }
+  const allowedKinds = new Set<string>([
+    "schema",
+    ...HOSTED_BROWSER_VAULT_REPLICA_SHARD_KINDS,
+  ]);
+  if (Object.keys(record).some((kind) => !allowedKinds.has(kind))) {
+    throw new TypeError(`${label} contains an unsupported shard kind.`);
+  }
+
+  for (const shard of HOSTED_BROWSER_VAULT_REPLICA_SHARD_KINDS) {
+    if (record[shard] === undefined) {
+      throw new TypeError(`${label}.${shard} is required when shards are present.`);
+    }
+  }
+  return {
+    core: parseHostedBrowserVaultReplicaShardRef(record.core, `${label}.core`),
+    labs: parseHostedBrowserVaultReplicaShardRef(record.labs, `${label}.labs`),
+    metricsIndex: parseHostedBrowserVaultReplicaShardRef(
+      record.metricsIndex,
+      `${label}.metricsIndex`,
+    ),
+    schema,
+  };
+}
+
+function parseHostedBrowserVaultReplicaMetricBucketRefs(
+  value: unknown,
+  label: string,
+): HostedBrowserVaultReplicaMetricBucketSetRef {
+  const record = requireObject(value, label);
+  const schema = requireString(record.schema, `${label}.schema`);
+  if (schema !== HOSTED_BROWSER_VAULT_REPLICA_METRIC_BUCKET_SET_REF_SCHEMA) {
+    throw new TypeError(
+      `${label}.schema must be ${HOSTED_BROWSER_VAULT_REPLICA_METRIC_BUCKET_SET_REF_SCHEMA}.`,
+    );
+  }
+  const bucketCount = requirePositiveSafeInteger(record.bucketCount, `${label}.bucketCount`);
+  if (bucketCount !== HOSTED_BROWSER_VAULT_REPLICA_METRIC_BUCKET_COUNT) {
+    throw new TypeError(
+      `${label}.bucketCount must be ${HOSTED_BROWSER_VAULT_REPLICA_METRIC_BUCKET_COUNT}.`,
+    );
+  }
+  const bucketsRecord = requireObject(record.buckets, `${label}.buckets`);
+  const allowedBucketIds = new Set<string>(HOSTED_BROWSER_VAULT_REPLICA_METRIC_BUCKET_IDS);
+  if (Object.keys(bucketsRecord).some((bucketId) => !allowedBucketIds.has(bucketId))) {
+    throw new TypeError(`${label}.buckets contains an unsupported metric bucket id.`);
+  }
+  const buckets = Object.fromEntries(
+    HOSTED_BROWSER_VAULT_REPLICA_METRIC_BUCKET_IDS.map((bucketId) => {
+      if (bucketsRecord[bucketId] === undefined) {
+        throw new TypeError(`${label}.buckets.${bucketId} is required.`);
+      }
+      return [
+        bucketId,
+        parseHostedBrowserVaultReplicaShardRef(
+          bucketsRecord[bucketId],
+          `${label}.buckets.${bucketId}`,
+        ),
+      ];
+    }),
+  ) as HostedBrowserVaultReplicaMetricBucketSetRef["buckets"];
+  return { bucketCount, buckets, schema };
+}
+
+function parseHostedBrowserVaultReplicaShardRef(
+  value: unknown,
+  label: string,
+): HostedBrowserVaultReplicaShardRef {
+  const record = requireObject(value, label);
+  const contentEncoding = requireString(record.contentEncoding, `${label}.contentEncoding`);
+  if (contentEncoding !== "gzip" && contentEncoding !== "identity") {
+    throw new TypeError(`${label}.contentEncoding must be gzip or identity.`);
+  }
+  const byteLength = requirePositiveSafeInteger(record.byteLength, `${label}.byteLength`);
+  const encodedByteLength = requirePositiveSafeInteger(
+    record.encodedByteLength,
+    `${label}.encodedByteLength`,
+  );
+  if (contentEncoding === "gzip" && encodedByteLength >= byteLength) {
+    throw new TypeError(
+      `${label}.encodedByteLength must be smaller than ${label}.byteLength for gzip.`,
+    );
+  }
+  if (contentEncoding === "identity" && encodedByteLength !== byteLength) {
+    throw new TypeError(
+      `${label}.encodedByteLength must equal ${label}.byteLength for identity.`,
+    );
+  }
+  return {
+    byteLength,
+    contentEncoding,
+    encodedByteLength,
+    objectKey: requireString(record.objectKey, `${label}.objectKey`),
+  };
 }
 
 export type BrowserVaultReplicaFreshness = "fresh" | "stale";

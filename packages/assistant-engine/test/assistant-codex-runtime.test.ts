@@ -10,6 +10,7 @@ import {
 } from '@murphai/hosted-execution/env'
 import {
   MURPH_MEMBER_READ_PERMISSION_PROFILE,
+  MURPH_MEMBER_WORKSPACE_PERMISSION_PROFILE,
 } from '@murphai/hosted-execution/assistant-permissions'
 import {
   HOSTED_ASSISTANT_PRODUCT_MODELS,
@@ -26,7 +27,10 @@ import {
   type HostedCanonicalWritePort,
 } from '@murphai/core'
 import { normalizeAssistantProviderConfig } from '@murphai/operator-config/assistant/provider-config'
-import type { AssistantResponseCard } from '@murphai/operator-config/assistant-response-cards'
+import type {
+  AssistantResponseCard,
+  CompactTableWorkoutResponseCardV1,
+} from '@murphai/operator-config/assistant-response-cards'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -63,11 +67,14 @@ import type {
   CodexAppServerLiveTurn,
   CodexAppServerTurnInput,
 } from '../src/assistant-codex.ts'
+import type {
+  AssistantRuntimeIssueInput,
+} from '../src/assistant/issue-reporting.ts'
 import {
-  buildRuntimeIssueInputForFailedCodexAction,
   CODEX_ACTION_DIAGNOSTICS_TRACE_SCHEMA,
   CODEX_ACTION_DIAGNOSTICS_TRACE_TYPE,
   createCodexActionDiagnosticsReducer,
+  createCodexActionRuntimeIssueTracker,
 } from '../src/assistant-codex/action-diagnostics.ts'
 import {
   buildCodexThreadResumeParams,
@@ -172,6 +179,31 @@ const TRACKED_COMPACT_TABLE_RESPONSE_CARD: AssistantResponseCard = {
     snapshotAt: '2026-08-04T21:30:00.000Z',
   },
 }
+const OVERSIZED_TRACKED_WORKOUT_RESPONSE_CARD:
+  CompactTableWorkoutResponseCardV1 = {
+  kind: 'compact_table',
+  version: 1,
+  title: 'Full workout recovery',
+  subtitle: null,
+  footer: 'Reply with the exercise, set, and result to log or correct it.',
+  tracking: {
+    kind: 'workout',
+    entityId: 'evt_01K1ABCDEFGHJKMNPQRSTVWXYZ',
+    snapshotAt: '2026-08-09T19:45:00.000Z',
+  },
+  workout: {
+    version: 1,
+    state: 'active',
+    exercises: Array.from({ length: 16 }, (_, exerciseIndex) => ({
+      name: `Capacity exercise ${exerciseIndex + 1}`,
+      sets: Array.from({ length: 16 }, (_, setIndex) => ({
+        status: 'pending',
+        target: `Exercise ${exerciseIndex + 1} set ${setIndex + 1} target ${'x'.repeat(12)}`,
+        actual: null,
+      })),
+    })),
+  },
+}
 const CODEX_TRANSPORT_DIAGNOSTICS_TRACE_SCHEMA =
   'murph.assistant-codex-transport-diagnostics.v1'
 
@@ -231,6 +263,7 @@ function createHostedToolContext(input: {
   beforeToolExecution?: AssistantHostedToolContext['beforeToolExecution']
   computerToolsAvailable?: boolean
   groupTool?: AssistantHostedToolContext['groupTool']
+  imageGenerationLauncher?: AssistantHostedToolContext['imageGenerationLauncher']
   sendVaultFile?: AssistantHostedToolContext['sendVaultFile']
   vaultFileSendAvailable?: boolean
 } = {}): AssistantHostedToolContext {
@@ -242,6 +275,7 @@ function createHostedToolContext(input: {
     currentHostedDeliveryContext: () => null,
     currentHostedMailboxItemIds: () => [],
     groupTool: input.groupTool ?? null,
+    imageGenerationLauncher: input.imageGenerationLauncher ?? null,
     persistGeneratedImageCapture: async (write) => await write(),
     sendVaultFile: input.sendVaultFile ?? vi.fn(async () => {
       throw new Error('Vault-file sending is unavailable for this turn.')
@@ -922,6 +956,26 @@ describe('assistant codex runtime', () => {
       sandbox: 'workspace-write',
       threadId: 'thread-1',
     })
+    expect(
+      buildCodexThreadResumeParams({
+        input: {
+          ...baseInput,
+          permissions: MURPH_MEMBER_WORKSPACE_PERMISSION_PROFILE,
+          runtimeWorkspaceRoots: ['/workspace'],
+          sandbox: undefined,
+        },
+        codexThreadId: 'thread-member-workspace',
+      }),
+    ).toEqual({
+      approvalPolicy: 'never',
+      cwd: '/workspace',
+      excludeTurns: true,
+      model: 'gpt-5',
+      modelProvider: 'vercel-ai-gateway',
+      permissions: MURPH_MEMBER_WORKSPACE_PERMISSION_PROFILE,
+      runtimeWorkspaceRoots: ['/workspace'],
+      threadId: 'thread-member-workspace',
+    })
 
     const turnStart = buildCodexTurnStartParams({
       images: [],
@@ -1235,9 +1289,7 @@ describe('assistant codex runtime', () => {
                 arguments: {
                   media: [
                     {
-                      url: 'https://cdn.example.test/assistant/cat.png',
-                      alt: 'A cat image',
-                      source: 'cat-catalog-item',
+                      url: 'http://cdn.example.test/assistant/not-https.png',
                     },
                   ],
                 },
@@ -1249,11 +1301,11 @@ describe('assistant codex runtime', () => {
           expect(messages[4]).toEqual({
             id: 17,
             result: {
-              success: true,
+              success: false,
               contentItems: [
                 {
                   type: 'inputText',
-                  text: '1 response image attached',
+                  text: '{"error":"invalid_response_media_arguments","hints":[{"field":"media[].url","code":"custom","expected":"public_https_image_url"}]}',
                 },
               ],
             },
@@ -1268,7 +1320,9 @@ describe('assistant codex runtime', () => {
                 arguments: {
                   media: [
                     {
-                      url: 'http://cdn.example.test/assistant/not-https.png',
+                      url: 'https://cdn.example.test/assistant/cat.png',
+                      alt: 'A cat image',
+                      source: 'cat-catalog-item',
                     },
                   ],
                 },
@@ -1280,11 +1334,11 @@ describe('assistant codex runtime', () => {
           expect(messages[5]).toEqual({
             id: 18,
             result: {
-              success: false,
+              success: true,
               contentItems: [
                 {
                   type: 'inputText',
-                  text: 'invalid response media arguments',
+                  text: '1 response image attached',
                 },
               ],
             },
@@ -3508,6 +3562,452 @@ describe('assistant codex runtime', () => {
     expect(sendVaultFile).toHaveBeenCalledOnce()
   })
 
+  it('orders current-sender clarification and continuation without blocking an independent ref', async () => {
+    const workingDirectory = await createTempDir(
+      'assistant-codex-current-sender-order-work-',
+    )
+    const clarificationStarted = createDeferred<void>()
+    const releaseClarification = createDeferred<void>()
+    const earlierInputId = `ain_${'a'.repeat(32)}`
+    const laterInputId = `ain_${'b'.repeat(32)}`
+    const independentInputId = `ain_${'c'.repeat(32)}`
+    const groupRequest = vi.fn<
+      NonNullable<AssistantHostedToolContext['groupTool']>['request']
+    >(async (request) => {
+      if (
+        request.action === 'ask_current_sender' &&
+        request.mode === 'clarification'
+      ) {
+        clarificationStarted.resolve()
+        await releaseClarification.promise
+      }
+      return {
+        action: 'ask_current_sender' as const,
+        result: { status: 'clarification_required' as const },
+      }
+    })
+    const groupTool: NonNullable<AssistantHostedToolContext['groupTool']> = {
+      request: groupRequest,
+    }
+    const hostedToolContext: AssistantHostedToolContext = {
+      ...createHostedToolContext({ groupTool }),
+      currentUserActionScope: () => ({
+        acceptedInputIds: [
+          earlierInputId,
+          independentInputId,
+          laterInputId,
+        ],
+        conversationId: 'conversation_group',
+        conversationScope: 'group',
+        inboundMailboxItemIds: ['mailbox_group'],
+        originSessionId: 'session_group',
+        recipientKey: 'recipient_group',
+      }),
+    }
+    const progressDelivery = createProgressDeliveryMock(
+      sentProgressResult('system'),
+    )
+    let requestsBeforeClarificationReleased = 0
+    let noticesBeforeClarificationReleased = 0
+
+    codexMocks.spawn.mockImplementation(() => {
+      const child = new MockChildProcess()
+
+      queueMicrotask(() => {
+        void (async () => {
+          await waitForRpcMethod(child, 'initialize')
+          child.stdout.write(jsonLine({ id: 1, result: {} }))
+          await waitForRpcMethod(child, 'thread/start')
+          child.stdout.write(jsonLine({
+            id: 2,
+            result: { thread: { id: 'thread-current-sender-order' } },
+          }))
+          await waitForRpcMethod(child, 'turn/start')
+          child.stdout.write(jsonLine({
+            id: 3,
+            result: { turn: { id: 'turn-current-sender-order' } },
+          }))
+
+          child.stdout.write(jsonLine({
+            id: 91,
+            method: 'item/tool/call',
+            params: {
+              arguments: {
+                action: 'clarify_current_sender',
+                message_ref: earlierInputId,
+              },
+              namespace: 'murph',
+              tool: 'group',
+            },
+          }))
+          child.stdout.write(jsonLine({
+            id: 93,
+            method: 'item/tool/call',
+            params: {
+              arguments: {
+                action: 'ask_current_sender',
+                message_ref: independentInputId,
+              },
+              namespace: 'murph',
+              tool: 'group',
+            },
+          }))
+          child.stdout.write(jsonLine({
+            id: 92,
+            method: 'item/tool/call',
+            params: {
+              arguments: {
+                action: 'continue_current_sender_in_group',
+                message_ref: laterInputId,
+              },
+              namespace: 'murph',
+              tool: 'group',
+            },
+          }))
+
+          await clarificationStarted.promise
+          await new Promise((resolve) => setTimeout(resolve, 0))
+          requestsBeforeClarificationReleased = groupRequest.mock.calls.length
+          noticesBeforeClarificationReleased =
+            progressDelivery.send.mock.calls.length
+          releaseClarification.resolve()
+
+          await expect(waitForRpcResponse(child, 91)).resolves.toMatchObject({
+            id: 91,
+            result: { success: true },
+          })
+          await expect(waitForRpcResponse(child, 92)).resolves.toMatchObject({
+            id: 92,
+            result: { success: true },
+          })
+          await expect(waitForRpcResponse(child, 93)).resolves.toMatchObject({
+            id: 93,
+            result: { success: true },
+          })
+          expect(groupRequest).toHaveBeenCalledTimes(3)
+
+          child.stdout.write(jsonLine({
+            method: 'item/completed',
+            params: {
+              item: {
+                id: 'assistant-current-sender-order',
+                text: 'I still need a destination.',
+                type: 'agentMessage',
+              },
+            },
+          }))
+          child.stdout.write(jsonLine({
+            method: 'turn/completed',
+            params: {
+              turn: {
+                id: 'turn-current-sender-order',
+                status: 'completed',
+              },
+            },
+          }))
+        })()
+      })
+
+      return child
+    })
+
+    await expect(executeCodexAppServerTurn({
+      hostedToolContext,
+      progressDelivery,
+      prompt: 'clarify in causal order',
+      workingDirectory,
+    })).resolves.toMatchObject({
+      finalMessage: 'I still need a destination.',
+    })
+    expect(requestsBeforeClarificationReleased).toBe(2)
+    expect(noticesBeforeClarificationReleased).toBe(1)
+  })
+
+  it('claims one current-sender decision before concurrent same-ref tool effects', async () => {
+    const workingDirectory = await createTempDir(
+      'assistant-codex-current-sender-decision-work-',
+    )
+    const privateStarted = createDeferred<void>()
+    const releasePrivate = createDeferred<void>()
+    const inputId = `ain_${'d'.repeat(32)}`
+    const groupRequest = vi.fn<
+      NonNullable<AssistantHostedToolContext['groupTool']>['request']
+    >(async (request) => {
+      if (
+        request.action === 'ask_current_sender' &&
+        request.audience === 'current_sender'
+      ) {
+        privateStarted.resolve()
+        await releasePrivate.promise
+      }
+      return {
+        action: 'ask_current_sender' as const,
+        result: { status: 'accepted' as const },
+      }
+    })
+    const groupTool: NonNullable<AssistantHostedToolContext['groupTool']> = {
+      request: groupRequest,
+    }
+    const hostedToolContext: AssistantHostedToolContext = {
+      ...createHostedToolContext({ groupTool }),
+      currentUserActionScope: () => ({
+        acceptedInputIds: [inputId],
+        conversationId: 'conversation_group',
+        conversationScope: 'group',
+        inboundMailboxItemIds: ['mailbox_group'],
+        originSessionId: 'session_group',
+        recipientKey: 'recipient_group',
+      }),
+    }
+    const progressDelivery = createProgressDeliveryMock(
+      sentProgressResult('system'),
+    )
+
+    codexMocks.spawn.mockImplementation(() => {
+      const child = new MockChildProcess()
+
+      queueMicrotask(() => {
+        void (async () => {
+          await waitForRpcMethod(child, 'initialize')
+          child.stdout.write(jsonLine({ id: 1, result: {} }))
+          await waitForRpcMethod(child, 'thread/start')
+          child.stdout.write(jsonLine({
+            id: 2,
+            result: { thread: { id: 'thread-current-sender-decision' } },
+          }))
+          await waitForRpcMethod(child, 'turn/start')
+          child.stdout.write(jsonLine({
+            id: 3,
+            result: { turn: { id: 'turn-current-sender-decision' } },
+          }))
+
+          child.stdout.write(jsonLine({
+            id: 94,
+            method: 'item/tool/call',
+            params: {
+              arguments: {
+                action: 'message_current_sender',
+                message_ref: inputId,
+              },
+              namespace: 'murph',
+              tool: 'group',
+            },
+          }))
+          await privateStarted.promise
+          child.stdout.write(jsonLine({
+            id: 95,
+            method: 'item/tool/call',
+            params: {
+              arguments: {
+                action: 'ask_current_sender',
+                message_ref: inputId,
+              },
+              namespace: 'murph',
+              tool: 'group',
+            },
+          }))
+
+          await expect(waitForRpcResponse(child, 95)).resolves.toMatchObject({
+            id: 95,
+            result: { success: false },
+          })
+          expect(progressDelivery.send).not.toHaveBeenCalled()
+          expect(groupRequest).toHaveBeenCalledTimes(1)
+
+          releasePrivate.resolve()
+          const interrupt = await waitForRpcMethod(child, 'turn/interrupt')
+          child.stdout.write(jsonLine({ id: interrupt.id, result: {} }))
+          child.stdout.write(jsonLine({
+            method: 'turn/completed',
+            params: {
+              turn: {
+                id: 'turn-current-sender-decision',
+                status: 'interrupted',
+              },
+            },
+          }))
+        })()
+      })
+
+      return child
+    })
+
+    await expect(executeCodexAppServerTurn({
+      hostedToolContext,
+      progressDelivery,
+      prompt: 'answer privately',
+      workingDirectory,
+    })).resolves.toMatchObject({
+      finalMessage: '',
+    })
+  })
+
+  it.each([
+    {
+      earlierAction: 'clarify_current_sender' as const,
+      expectedMode: 'clarification' as const,
+      expectedNoticeCount: 0,
+      label: 'clarification',
+      laterAction: 'ask_current_sender' as const,
+    },
+    {
+      earlierAction: 'continue_current_sender_in_group' as const,
+      expectedMode: 'continuation' as const,
+      expectedNoticeCount: 1,
+      label: 'group continuation',
+      laterAction: 'message_current_sender' as const,
+    },
+  ])('claims an earlier current-sender $label before a contradictory new request', async ({
+    earlierAction,
+    expectedMode,
+    expectedNoticeCount,
+    laterAction,
+  }) => {
+    const workingDirectory = await createTempDir(
+      'assistant-codex-current-sender-arrival-order-work-',
+    )
+    const releaseSecondPreTool = createDeferred<void>()
+    const inputId = `ain_${'e'.repeat(32)}`
+    let preToolCallCount = 0
+    let earlierResponse: unknown = null
+    let laterResponse: unknown = null
+    const groupRequest = vi.fn<
+      NonNullable<AssistantHostedToolContext['groupTool']>['request']
+    >(async (request) => ({
+      action: 'ask_current_sender' as const,
+      result: request.action === 'ask_current_sender'
+          && request.mode === 'clarification'
+        ? { status: 'clarification_required' as const }
+        : {
+            status: 'unavailable' as const,
+            unavailableReason: 'synthetic unavailable result',
+          },
+    }))
+    const groupTool: NonNullable<AssistantHostedToolContext['groupTool']> = {
+      request: groupRequest,
+    }
+    const hostedToolContext: AssistantHostedToolContext = {
+      ...createHostedToolContext({ groupTool }),
+      beforeToolExecution: async () => {
+        preToolCallCount += 1
+        if (preToolCallCount === 2) {
+          await releaseSecondPreTool.promise
+        }
+      },
+      currentUserActionScope: () => ({
+        acceptedInputIds: [inputId],
+        conversationId: 'conversation_group',
+        conversationScope: 'group',
+        inboundMailboxItemIds: ['mailbox_group'],
+        originSessionId: 'session_group',
+        recipientKey: 'recipient_group',
+      }),
+    }
+    const progressDelivery = createProgressDeliveryMock(
+      sentProgressResult('system'),
+    )
+
+    codexMocks.spawn.mockImplementation(() => {
+      const child = new MockChildProcess()
+
+      queueMicrotask(() => {
+        void (async () => {
+          await waitForRpcMethod(child, 'initialize')
+          child.stdout.write(jsonLine({ id: 1, result: {} }))
+          await waitForRpcMethod(child, 'thread/start')
+          child.stdout.write(jsonLine({
+            id: 2,
+            result: { thread: { id: 'thread-current-sender-arrival-order' } },
+          }))
+          await waitForRpcMethod(child, 'turn/start')
+          child.stdout.write(jsonLine({
+            id: 3,
+            result: { turn: { id: 'turn-current-sender-arrival-order' } },
+          }))
+
+          child.stdout.write([
+            jsonLine({
+              id: 96,
+              method: 'item/tool/call',
+              params: {
+                arguments: {
+                  action: earlierAction,
+                  message_ref: inputId,
+                },
+                namespace: 'murph',
+                tool: 'group',
+              },
+            }),
+            jsonLine({
+              id: 97,
+              method: 'item/tool/call',
+              params: {
+                arguments: {
+                  action: laterAction,
+                  message_ref: inputId,
+                },
+                namespace: 'murph',
+                tool: 'group',
+              },
+            }),
+          ].join(''))
+
+          try {
+            laterResponse = await waitForRpcResponse(child, 97)
+          } finally {
+            releaseSecondPreTool.resolve()
+          }
+          earlierResponse = await waitForRpcResponse(child, 96)
+
+          child.stdout.write(jsonLine({
+            method: 'item/completed',
+            params: {
+              item: {
+                id: 'assistant-current-sender-arrival-order',
+                text: 'Should I share that here or send it privately?',
+                type: 'agentMessage',
+              },
+            },
+          }))
+          child.stdout.write(jsonLine({
+            method: 'turn/completed',
+            params: {
+              turn: {
+                id: 'turn-current-sender-arrival-order',
+                status: 'completed',
+              },
+            },
+          }))
+        })()
+      })
+
+      return child
+    })
+
+    await expect(executeCodexAppServerTurn({
+      hostedToolContext,
+      progressDelivery,
+      prompt: 'clarify before choosing a destination',
+      workingDirectory,
+    })).resolves.toMatchObject({
+      finalMessage: 'Should I share that here or send it privately?',
+    })
+    expect(laterResponse).toMatchObject({
+      id: 97,
+      result: { success: false },
+    })
+    expect(earlierResponse).toMatchObject({
+      id: 96,
+      result: { success: true },
+    })
+    expect(progressDelivery.send).toHaveBeenCalledTimes(expectedNoticeCount)
+    expect(preToolCallCount).toBe(1)
+    expect(groupRequest).toHaveBeenCalledTimes(1)
+    expect(groupRequest.mock.calls[0]?.[0]).toMatchObject({
+      mode: expectedMode,
+    })
+  })
+
   it('allows response media for a later steered message after an approved vault send', async () => {
     const workingDirectory = await createTempDir(
       'assistant-codex-vault-send-steer-work-',
@@ -3757,10 +4257,12 @@ describe('assistant codex runtime', () => {
       0x00, 0x00, 0x00, 0x00,
       0x57, 0x45, 0x42, 0x50,
     ])
+    const imageFetchStarted = createDeferred<void>()
     let fetchAborted = false
     const fetchImpl = vi.fn(
       (_url: string | URL | Request, init?: RequestInit) =>
         new Promise<Response>((resolve) => {
+          imageFetchStarted.resolve()
           // Settle only after the failing turn aborts in-flight dynamic tools,
           // proving the drain waits for completed image usage.
           const respond = () => {
@@ -3823,6 +4325,7 @@ describe('assistant codex runtime', () => {
               },
             }),
           )
+          await imageFetchStarted.promise
           child.stdout.write(
             jsonLine({
               method: 'turn/completed',
@@ -4018,7 +4521,7 @@ describe('assistant codex runtime', () => {
     )
   })
 
-  it('reports a structured failure when a generated image exceeds the media limit', async () => {
+  it('stops synchronous image generation before exceeding the media limit', async () => {
     const workingDirectory = await createTempDir('assistant-codex-image-limit-work-')
     const vaultRoot = await createTempDir('assistant-codex-image-limit-vault-')
     await initializeVault({ vaultRoot })
@@ -4035,7 +4538,7 @@ describe('assistant codex runtime', () => {
         headers: { 'content-type': 'application/json' },
         status: 200,
       }))
-    const attachedMedia = Array.from({ length: 40 }, (_, index) => ({
+    const attachedMedia = Array.from({ length: 7 }, (_, index) => ({
       kind: 'image' as const,
       url: `https://cdn.example.test/assistant/full-${index}.png`,
       alt: `Image ${index}`,
@@ -4097,14 +4600,31 @@ describe('assistant codex runtime', () => {
               },
             }),
           )
+          child.stdout.write(
+            jsonLine({
+              id: 93,
+              method: 'item/tool/call',
+              params: {
+                namespace: 'murph',
+                tool: 'generate_image',
+                arguments: {
+                  prompt: 'Render one image after the limit is full.',
+                },
+              },
+            }),
+          )
 
-          const messages = await waitForRpcMessages(child, 6)
+          const messages = await waitForRpcMessages(child, 7)
           expect(messages[4]).toMatchObject({
             id: 91,
             result: { success: true },
           })
-          expect(messages[5]).toEqual({
+          expect(messages[5]).toMatchObject({
             id: 92,
+            result: { success: true },
+          })
+          expect(messages[6]).toEqual({
+            id: 93,
             result: {
               success: false,
               contentItems: [
@@ -4158,8 +4678,8 @@ describe('assistant codex runtime', () => {
     })
 
     expect(result.finalMessage).toBe('Media limit handled')
-    expect(result.responseMedia).toHaveLength(40)
-    // The image was generated and paid for, so its usage is still recorded.
+    expect(result.responseMedia).toHaveLength(8)
+    expect(fetchImpl).toHaveBeenCalledTimes(1)
     expect(result.additionalUsages).toMatchObject([
       { provider: 'openai-images' },
     ])
@@ -5582,6 +6102,28 @@ describe('assistant codex runtime', () => {
     expect(readWrittenRpcMessages(spawnedChild).filter(
       (message) => message.method === 'turn/start',
     )).toHaveLength(1)
+  })
+
+  it('keeps restricted named permissions on fresh one-shot threads', async () => {
+    const workingDirectory = await createTempDir(
+      'assistant-codex-restricted-permission-shape-',
+    )
+
+    await expect(executeCodexAppServerTurn({
+      approvalPolicy: 'never',
+      permissions: MURPH_MEMBER_READ_PERMISSION_PROFILE,
+      prompt: 'must not resume with a restricted permission profile',
+      resumeSessionId: 'thread-restricted-resume',
+      runtimeWorkspaceRoots: [workingDirectory],
+      workingDirectory,
+    })).rejects.toMatchObject({
+      code: 'ASSISTANT_CODEX_APP_SERVER_REQUEST_INVALID',
+      context: {
+        invalidFields: ['resumeSessionId', 'ephemeral', 'processLifetime'],
+        retryable: false,
+      },
+    })
+    expect(codexMocks.spawn).not.toHaveBeenCalled()
   })
 
   it('runs one-shot permission turns beside the occupied warm process and proves exact child exit', async () => {
@@ -10328,6 +10870,7 @@ describe('assistant codex runtime', () => {
   })
 
   it('builds privacy-safe runtime issues for failed Codex action events', () => {
+    const issueTracker = createCodexActionRuntimeIssueTracker()
     const failedCommandEvent = {
       method: 'item/completed',
       params: {
@@ -10336,7 +10879,7 @@ describe('assistant codex runtime', () => {
           type: 'commandExecution',
           exitCode: 2,
           durationMs: 6_000,
-          commandLabel: 'cat /tmp/private-file',
+          command: 'cat /tmp/private-file',
           filePaths: ['/tmp/private-file'],
           stdout: 'private stdout',
           stderr: 'private stderr',
@@ -10346,12 +10889,12 @@ describe('assistant codex runtime', () => {
         turnId: 'turn-current',
       },
     }
-    expect(
-      buildRuntimeIssueInputForFailedCodexAction({
-        normalizedEvent: normalizeCodexEvent(failedCommandEvent),
-        rawEvent: failedCommandEvent,
-      }),
-    ).toEqual({
+    const failedCommandIssue = issueTracker.recordEvent({
+      activeTurnId: 'turn-current',
+      normalizedEvent: normalizeCodexEvent(failedCommandEvent),
+      rawEvent: failedCommandEvent,
+    })
+    expect(failedCommandIssue).toEqual({
       component: 'assistant.codex-action',
       operation: 'command.execution',
       phase: 'provider_turn',
@@ -10361,6 +10904,8 @@ describe('assistant codex runtime', () => {
       summary: 'Codex command execution failed during provider turn.',
       details: {
         actionKind: 'command.execution',
+        commandFamily: 'unknown',
+        commandOrdinal: 1,
         durationMsBucket: '5_30s',
         exitCode: 2,
         outputBytesBucket: 'lt_1kb',
@@ -10380,12 +10925,11 @@ describe('assistant codex runtime', () => {
         turnId: 'turn-current',
       },
     }
-    expect(
-      buildRuntimeIssueInputForFailedCodexAction({
-        normalizedEvent: normalizeCodexEvent(successfulCommandEvent),
-        rawEvent: successfulCommandEvent,
-      }),
-    ).toBeNull()
+    expect(issueTracker.recordEvent({
+      activeTurnId: 'turn-current',
+      normalizedEvent: normalizeCodexEvent(successfulCommandEvent),
+      rawEvent: successfulCommandEvent,
+    })).toBeNull()
 
     const failedMcpEvent = {
       method: 'item/completed',
@@ -10409,12 +10953,11 @@ describe('assistant codex runtime', () => {
         turnId: 'turn-current',
       },
     }
-    expect(
-      buildRuntimeIssueInputForFailedCodexAction({
-        normalizedEvent: normalizeCodexEvent(failedMcpEvent),
-        rawEvent: failedMcpEvent,
-      }),
-    ).toEqual({
+    expect(issueTracker.recordEvent({
+      activeTurnId: 'turn-current',
+      normalizedEvent: normalizeCodexEvent(failedMcpEvent),
+      rawEvent: failedMcpEvent,
+    })).toEqual({
       component: 'assistant.codex-action',
       operation: 'mcp.tool.call',
       phase: 'tool_call',
@@ -10448,7 +10991,8 @@ describe('assistant codex runtime', () => {
         turnId: 'turn-current',
       },
     }
-    const dynamicIssue = buildRuntimeIssueInputForFailedCodexAction({
+    const dynamicIssue = issueTracker.recordEvent({
+      activeTurnId: 'turn-current',
       normalizedEvent: normalizeCodexEvent(failedDynamicEvent),
       rawEvent: failedDynamicEvent,
     })
@@ -10471,10 +11015,7 @@ describe('assistant codex runtime', () => {
 
     const encodedIssues = JSON.stringify([
       dynamicIssue,
-      buildRuntimeIssueInputForFailedCodexAction({
-        normalizedEvent: normalizeCodexEvent(failedCommandEvent),
-        rawEvent: failedCommandEvent,
-      }),
+      failedCommandIssue,
     ])
     expect(encodedIssues).not.toContain('private stdout')
     expect(encodedIssues).not.toContain('private stderr')
@@ -10482,6 +11023,462 @@ describe('assistant codex runtime', () => {
     expect(encodedIssues).not.toContain('/tmp/private-file')
     expect(encodedIssues).not.toContain('private prompt')
     expect(encodedIssues).not.toContain('dynamic private output')
+  })
+
+  it('attributes command failures without retaining private command data', () => {
+    const issueTracker = createCodexActionRuntimeIssueTracker()
+    const commandEvent = (input: {
+      command?: string
+      event: 'completed' | 'started'
+      exitCode?: number
+      id: string
+      output?: string
+    }) => ({
+      method: `item/${input.event}`,
+      params: {
+        item: {
+          id: input.id,
+          type: 'commandExecution',
+          ...(input.command === undefined
+            ? {}
+            : { command: input.command }),
+          ...(input.exitCode === undefined
+            ? {}
+            : { exitCode: input.exitCode }),
+          ...(input.output === undefined
+            ? {}
+            : { aggregatedOutput: input.output }),
+        },
+      },
+    })
+    const record = (event: ReturnType<typeof commandEvent>) =>
+      issueTracker.recordEvent({
+        activeTurnId: 'turn-current',
+        normalizedEvent: normalizeCodexEvent(event),
+        rawEvent: event,
+      })
+
+    record(commandEvent({
+      command: 'rg private-query /tmp/private-record',
+      event: 'started',
+      id: 'search-no-match',
+    }))
+    expect(record(commandEvent({
+      event: 'completed',
+      exitCode: 1,
+      id: 'search-no-match',
+      output: 'private search output',
+    }))).toBeNull()
+    expect(record(commandEvent({
+      command: 'grep private-query /tmp/private-record',
+      event: 'completed',
+      exitCode: 1,
+      id: 'grep-no-match',
+    }))).toBeNull()
+
+    record(commandEvent({
+      command: 'rg private-query /tmp/private-record',
+      event: 'started',
+      id: 'search-error',
+    }))
+    const searchIssue = record(commandEvent({
+      event: 'completed',
+      exitCode: 2,
+      id: 'search-error',
+      output: 'private regex error',
+    }))
+    expect(searchIssue).toMatchObject({
+      details: {
+        actionKind: 'command.execution',
+        commandFamily: 'search',
+        commandOrdinal: 3,
+        exitCode: 2,
+        recoveredAfterFailure: false,
+      },
+    })
+    expect(searchIssue).not.toHaveProperty('details.failureClass')
+
+    expect(record(commandEvent({
+      command: 'rg narrower-query /tmp/private-record',
+      event: 'completed',
+      exitCode: 0,
+      id: 'search-recovery',
+    }))).toBeNull()
+    expect(searchIssue).toMatchObject({
+      details: {
+        recoveredAfterFailure: true,
+      },
+    })
+
+    const operationalFailures = [
+      {
+        command: 'cat /tmp/private-record',
+        exitCode: 126,
+      },
+      {
+        command: 'cat /tmp/private-record',
+        exitCode: 127,
+      },
+      {
+        command: 'cat /tmp/private-record',
+        exitCode: 124,
+      },
+      {
+        command: 'bash -lc "rg private-query /tmp/private-record"',
+        exitCode: 1,
+      },
+      {
+        command: 'rg private-query /tmp/private-record | head',
+        exitCode: 1,
+      },
+    ] as const
+    const operationalIssues: AssistantRuntimeIssueInput[] = []
+
+    for (const [index, example] of operationalFailures.entries()) {
+      const event = commandEvent({
+        command: example.command,
+        event: 'completed',
+        exitCode: example.exitCode,
+        id: `classified-${index}`,
+        output: 'private command output',
+      })
+      const issue = record(event)
+      expect(issue).toMatchObject({
+        details: {
+          commandFamily: 'unknown',
+          commandOrdinal: index + 5,
+          exitCode: example.exitCode,
+        },
+      })
+      expect(issue).not.toHaveProperty('details.failureClass')
+      if (issue) {
+        operationalIssues.push(issue)
+      }
+      expect(record(event)).toBeNull()
+    }
+
+    const encodedIssues = JSON.stringify([
+      searchIssue,
+      ...operationalIssues,
+    ])
+    expect(encodedIssues).not.toContain('private-query')
+    expect(encodedIssues).not.toContain('/tmp/private-record')
+    expect(encodedIssues).not.toContain('private search output')
+    expect(encodedIssues).not.toContain('private regex error')
+    expect(encodedIssues).not.toContain('private command output')
+    expect(encodedIssues).not.toContain('search-error')
+  })
+
+  it('recognizes quoted and escaped direct search arguments conservatively', () => {
+    const issueTracker = createCodexActionRuntimeIssueTracker()
+    let commandSequence = 0
+    const recordCommand = (input: {
+      command: string
+      exitCode: number
+      output?: string
+    }) => {
+      const id = `item-sensitive-${++commandSequence}`
+      const startedEvent = {
+        method: 'item/started',
+        params: {
+          item: {
+            command: input.command,
+            id,
+            type: 'commandExecution',
+          },
+        },
+      }
+      const completedEvent = {
+        method: 'item/completed',
+        params: {
+          item: {
+            aggregatedOutput: input.output ?? 'private search output',
+            exitCode: input.exitCode,
+            id,
+            type: 'commandExecution',
+          },
+        },
+      }
+      expect(issueTracker.recordEvent({
+        activeTurnId: 'turn-current',
+        normalizedEvent: normalizeCodexEvent(startedEvent),
+        rawEvent: startedEvent,
+      })).toBeNull()
+      return issueTracker.recordEvent({
+        activeTurnId: 'turn-current',
+        normalizedEvent: normalizeCodexEvent(completedEvent),
+        rawEvent: completedEvent,
+      })
+    }
+
+    const expectedNoMatches = [
+      "rg -n 'private(foo|bar)$' /tmp/private-record",
+      'grep -E "private(foo|bar){2}$" /tmp/private-record',
+      'rg private\\(foo\\|bar\\)\\{2\\}\\$ /tmp/private-record',
+      "rg 'private$(literal)`text`' /tmp/private-record",
+    ]
+    for (const command of expectedNoMatches) {
+      expect(recordCommand({ command, exitCode: 1 })).toBeNull()
+    }
+
+    const searchIssue = recordCommand({
+      command: "rg 'private(foo|bar){2}$' /tmp/private-record",
+      exitCode: 2,
+      output: 'private regex error',
+    })
+    expect(searchIssue).toMatchObject({
+      details: {
+        commandFamily: 'search',
+        commandOrdinal: 5,
+        exitCode: 2,
+        recoveredAfterFailure: false,
+      },
+    })
+    expect(recordCommand({
+      command: 'grep -E "private(foo|bar){2}$" /tmp/private-record',
+      exitCode: 0,
+    })).toBeNull()
+    expect(searchIssue).toMatchObject({
+      details: {
+        recoveredAfterFailure: true,
+      },
+    })
+
+    const commandsWithExecutableShellSyntax = [
+      'rg private-query /tmp/private-record | head',
+      'rg private-query /tmp/private-record; head /tmp/private-record',
+      'rg private-query /tmp/private-record && head /tmp/private-record',
+      'rg private-query /tmp/private-record || head /tmp/private-record',
+      'rg private-query > /tmp/private-record',
+      'rg (private-query) /tmp/private-record',
+      'rg "$(private-command)" /tmp/private-record',
+      'rg "`private-command`" /tmp/private-record',
+      "rg 'private-query /tmp/private-record",
+      'rg "private-query /tmp/private-record',
+      'rg private-query\n/tmp/private-record',
+      `rg ${'x'.repeat(4096)}`,
+    ]
+    const executableShellIssues = commandsWithExecutableShellSyntax.map(
+      (command, index) => {
+        const issue = recordCommand({ command, exitCode: 1 })
+        expect(issue).toMatchObject({
+          details: {
+            commandFamily: 'unknown',
+            commandOrdinal: index + 7,
+            exitCode: 1,
+          },
+        })
+        return issue
+      },
+    )
+
+    const encodedIssues = JSON.stringify([
+      searchIssue,
+      ...executableShellIssues,
+    ])
+    expect(encodedIssues).not.toContain('private(foo|bar)')
+    expect(encodedIssues).not.toContain('private-query')
+    expect(encodedIssues).not.toContain('private-command')
+    expect(encodedIssues).not.toContain('/tmp/private-record')
+    expect(encodedIssues).not.toContain('private search output')
+    expect(encodedIssues).not.toContain('private regex error')
+    expect(encodedIssues).not.toContain('item-sensitive')
+    expect(encodedIssues).not.toContain('turn-current')
+  })
+
+  it('saturates command ordinals without retaining boundary command data', () => {
+    const issueTracker = createCodexActionRuntimeIssueTracker()
+    const recordCompletedCommand = (input: {
+      command: string
+      exitCode: number
+      id: string
+      output?: string
+    }) => {
+      const event = {
+        method: 'item/completed',
+        params: {
+          item: {
+            aggregatedOutput: input.output ?? '',
+            command: input.command,
+            exitCode: input.exitCode,
+            id: input.id,
+            type: 'commandExecution',
+          },
+        },
+      }
+      return issueTracker.recordEvent({
+        activeTurnId: 'turn-current',
+        normalizedEvent: normalizeCodexEvent(event),
+        rawEvent: event,
+      })
+    }
+
+    for (let index = 0; index < 10_005; index += 1) {
+      expect(recordCompletedCommand({
+        command: 'true',
+        exitCode: 0,
+        id: `successful-command-${index}`,
+      })).toBeNull()
+    }
+
+    const boundaryIssue = recordCompletedCommand({
+      command: 'cat /tmp/private-ordinal-record',
+      exitCode: 127,
+      id: 'private-boundary-item',
+      output: 'private boundary output',
+    })
+    expect(boundaryIssue).toMatchObject({
+      details: {
+        commandFamily: 'unknown',
+        commandOrdinal: 10_000,
+        exitCode: 127,
+      },
+    })
+
+    const encodedIssue = JSON.stringify(boundaryIssue)
+    expect(encodedIssue).not.toContain('/tmp/private-ordinal-record')
+    expect(encodedIssue).not.toContain('private boundary output')
+    expect(encodedIssue).not.toContain('private-boundary-item')
+    expect(encodedIssue).not.toContain('turn-current')
+  })
+
+  it('propagates a recovered command failure through a successful provider turn', async () => {
+    const workingDirectory = await createTempDir(
+      'assistant-codex-command-failure-recovery-',
+    )
+
+    codexMocks.spawn.mockImplementation(() => {
+      const child = new MockChildProcess()
+
+      queueMicrotask(() => {
+        void (async () => {
+          await waitForRpcMethod(child, 'initialize')
+          child.stdout.write(jsonLine({ id: 1, result: {} }))
+          await waitForRpcMethod(child, 'thread/start')
+          child.stdout.write(jsonLine({
+            id: 2,
+            result: {
+              thread: { id: 'thread-command-failure-recovery' },
+            },
+          }))
+          await waitForRpcMethod(child, 'turn/start')
+          child.stdout.write(jsonLine({
+            id: 3,
+            result: {
+              turn: { id: 'turn-command-failure-recovery' },
+            },
+          }))
+
+          child.stdout.write(jsonLine({
+            method: 'item/started',
+            params: {
+              item: {
+                command: 'rg private-query /tmp/private-record',
+                id: 'command-private-failure',
+                type: 'commandExecution',
+              },
+              turnId: 'turn-command-failure-recovery',
+            },
+          }))
+          child.stdout.write(jsonLine({
+            method: 'item/completed',
+            params: {
+              item: {
+                aggregatedOutput: 'private command failure output',
+                exitCode: 2,
+                id: 'command-private-failure',
+                status: 'failed',
+                type: 'commandExecution',
+              },
+              turnId: 'turn-command-failure-recovery',
+            },
+          }))
+          child.stdout.write(jsonLine({
+            method: 'item/started',
+            params: {
+              item: {
+                command: 'rg narrower-query /tmp/private-record',
+                id: 'command-private-recovery',
+                type: 'commandExecution',
+              },
+              turnId: 'turn-command-failure-recovery',
+            },
+          }))
+          child.stdout.write(jsonLine({
+            method: 'item/completed',
+            params: {
+              item: {
+                aggregatedOutput: 'private command recovery output',
+                exitCode: 0,
+                id: 'command-private-recovery',
+                status: 'completed',
+                type: 'commandExecution',
+              },
+              turnId: 'turn-command-failure-recovery',
+            },
+          }))
+          child.stdout.write(jsonLine({
+            method: 'item/completed',
+            params: {
+              item: {
+                id: 'assistant-command-failure-recovery',
+                phase: 'final_answer',
+                text: 'Recovered safely.',
+                type: 'agentMessage',
+              },
+              turnId: 'turn-command-failure-recovery',
+            },
+          }))
+          child.stdout.write(jsonLine({
+            method: 'turn/completed',
+            params: {
+              turn: {
+                id: 'turn-command-failure-recovery',
+                status: 'completed',
+              },
+            },
+          }))
+        })()
+      })
+
+      return child
+    })
+
+    const result = await executeCodexAppServerTurn({
+      prompt: 'recover from a failed search',
+      workingDirectory,
+    })
+    expect(result.finalMessage).toBe('Recovered safely.')
+    expect(result.runtimeIssueInputs).toEqual([
+      {
+        component: 'assistant.codex-action',
+        operation: 'command.execution',
+        phase: 'provider_turn',
+        issueKind: 'tool_error',
+        severity: 'warning',
+        errorCode: 'CODEX_COMMAND_EXIT_NONZERO',
+        summary: 'Codex command execution failed during provider turn.',
+        details: {
+          actionKind: 'command.execution',
+          commandFamily: 'search',
+          commandOrdinal: 1,
+          durationMsBucket: 'unknown',
+          exitCode: 2,
+          outputBytesBucket: 'lt_1kb',
+          recoveredAfterFailure: true,
+        },
+      },
+    ])
+    const encodedIssues = JSON.stringify(result.runtimeIssueInputs)
+    expect(encodedIssues).not.toContain('private-query')
+    expect(encodedIssues).not.toContain('narrower-query')
+    expect(encodedIssues).not.toContain('/tmp/private-record')
+    expect(encodedIssues).not.toContain('private command failure output')
+    expect(encodedIssues).not.toContain('private command recovery output')
+    expect(encodedIssues).not.toContain('command-private-failure')
+    expect(encodedIssues).not.toContain('command-private-recovery')
+    expect(encodedIssues).not.toContain('thread-command-failure-recovery')
+    expect(encodedIssues).not.toContain('turn-command-failure-recovery')
   })
 
   it('emits Codex action diagnostics when a turn fails', async () => {
@@ -13563,6 +14560,146 @@ describe('assistant codex runtime', () => {
     }
   })
 
+  it('attests the member-workspace profile on resident thread resume', async () => {
+    const workingDirectory = await createTempDir(
+      'assistant-codex-member-workspace-resume-',
+    )
+    const spawnedChildren: MockChildProcess[] = []
+    mockProcessGroupSignalsForChildren(spawnedChildren)
+
+    codexMocks.spawn.mockImplementation(() => {
+      const child = new MockChildProcess()
+      child.pid = 35_050
+      spawnedChildren.push(child)
+
+      queueMicrotask(() => {
+        void (async () => {
+          const initialize = await waitForRpcMethod(child, 'initialize')
+          child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
+
+          const threadResume = await waitForRpcMethod(child, 'thread/resume')
+          child.stdout.write(jsonLine({
+            id: threadResume.id,
+            result: {
+              activePermissionProfile: {
+                id: MURPH_MEMBER_WORKSPACE_PERMISSION_PROFILE,
+              },
+              approvalPolicy: 'never',
+              cwd: path.resolve(workingDirectory),
+              runtimeWorkspaceRoots: [path.resolve(workingDirectory)],
+              thread: {
+                id: 'thread-member-workspace-resume',
+              },
+            },
+          }))
+
+          const turnStart = await waitForRpcMethod(child, 'turn/start')
+          child.stdout.write(jsonLine({
+            id: turnStart.id,
+            result: {
+              turn: {
+                id: 'turn-member-workspace-resume',
+              },
+            },
+          }))
+          child.stdout.write(jsonLine({
+            method: 'turn/completed',
+            params: {
+              turn: {
+                id: 'turn-member-workspace-resume',
+                status: 'completed',
+              },
+            },
+          }))
+        })()
+      })
+
+      return child
+    })
+
+    await expect(executeCodexAppServerTurn({
+      approvalPolicy: 'never',
+      permissions: MURPH_MEMBER_WORKSPACE_PERMISSION_PROFILE,
+      prompt: 'resume the ordinary hosted member turn',
+      resumeSessionId: 'thread-member-workspace-resume',
+      runtimeWorkspaceRoots: [workingDirectory],
+      workingDirectory,
+    })).resolves.toMatchObject({
+      sessionId: 'thread-member-workspace-resume',
+      turnId: 'turn-member-workspace-resume',
+    })
+
+    const child = requireMockChildProcess(spawnedChildren[0] ?? null)
+    expect(asRecord((await waitForRpcMethod(child, 'thread/resume')).params)).toEqual({
+      approvalPolicy: 'never',
+      cwd: workingDirectory,
+      excludeTurns: true,
+      permissions: MURPH_MEMBER_WORKSPACE_PERMISSION_PROFILE,
+      runtimeWorkspaceRoots: [workingDirectory],
+      threadId: 'thread-member-workspace-resume',
+    })
+  })
+
+  it('fails closed when a resumed member-workspace profile drifts', async () => {
+    const workingDirectory = await createTempDir(
+      'assistant-codex-member-workspace-drift-',
+    )
+    const spawnedChildren: MockChildProcess[] = []
+    mockProcessGroupSignalsForChildren(spawnedChildren)
+
+    codexMocks.spawn.mockImplementation(() => {
+      const child = new MockChildProcess()
+      child.pid = 35_075
+      spawnedChildren.push(child)
+
+      queueMicrotask(() => {
+        void (async () => {
+          const initialize = await waitForRpcMethod(child, 'initialize')
+          child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
+          const threadResume = await waitForRpcMethod(child, 'thread/resume')
+          child.stdout.write(jsonLine({
+            id: threadResume.id,
+            result: {
+              activePermissionProfile: {
+                id: MURPH_MEMBER_READ_PERMISSION_PROFILE,
+              },
+              approvalPolicy: 'never',
+              cwd: path.resolve(workingDirectory),
+              runtimeWorkspaceRoots: [path.resolve(workingDirectory)],
+              thread: {
+                id: 'thread-member-workspace-drift',
+              },
+            },
+          }))
+        })()
+      })
+
+      return child
+    })
+
+    await expect(executeCodexAppServerTurn({
+      approvalPolicy: 'never',
+      permissions: MURPH_MEMBER_WORKSPACE_PERMISSION_PROFILE,
+      prompt: 'must not start under a different profile',
+      resumeSessionId: 'thread-member-workspace-drift',
+      runtimeWorkspaceRoots: [workingDirectory],
+      workingDirectory,
+    })).rejects.toMatchObject({
+      code: 'ASSISTANT_CODEX_RESUME_STALE',
+      context: {
+        mismatchedFields: ['activePermissionProfile'],
+        resumeContextMismatch: true,
+        retryable: true,
+        staleResume: true,
+      },
+    })
+
+    const child = requireMockChildProcess(spawnedChildren[0] ?? null)
+    expect(readWrittenRpcMessages(child).some(
+      (message) => message.method === 'turn/start',
+    )).toBe(false)
+  })
+
   it('fails closed when thread/resume reports stale execution context', async () => {
     const workingDirectory = await createTempDir('assistant-codex-stale-resume-context-')
     const staleWorkingDirectory = await createTempDir('assistant-codex-old-resume-context-')
@@ -15155,7 +16292,21 @@ describe('assistant codex runtime', () => {
         },
         status: 'paused' as const,
         timingVerified: true,
+        updatedAt: '2026-08-10T00:00:00.000Z',
       })),
+    }
+    const invalidGapAutomationArguments = {
+      action: 'save',
+      instructions: 'Send the reminder tomorrow.',
+      schedule: {
+        kind: 'at',
+        localAt: {
+          relativeDay: 'tomorrow',
+          time: '02:30',
+          timeZone: 'America/New_York',
+        },
+      },
+      title: 'Gap reminder',
     }
 
     codexMocks.spawn.mockImplementation(() => {
@@ -15218,10 +16369,10 @@ describe('assistant codex runtime', () => {
             id: 1000,
             method: 'item/tool/call',
             params: {
-              arguments: { action: 'list' },
+              arguments: invalidGapAutomationArguments,
               namespace: 'murph',
               threadId: 'thread-root-tool-scope',
-              tool: 'pending_vault_files',
+              tool: 'automation',
               turnId: 'turn-stale-root-tool-scope',
             },
           }))
@@ -15297,11 +16448,7 @@ describe('assistant codex runtime', () => {
             id: 103,
             method: 'item/tool/call',
             params: {
-              arguments: {
-                action: 'patch',
-                lookup: 'hidden',
-                status: 'paused',
-              },
+              arguments: invalidGapAutomationArguments,
               namespace: 'murph',
               threadId: 'thread-root-tool-scope',
               tool: 'automation',
@@ -15453,6 +16600,18 @@ describe('assistant codex runtime', () => {
           })
 
           child.stdout.write(jsonLine({
+            method: 'item/completed',
+            params: {
+              item: {
+                id: 'assistant-root-tool-scope-final',
+                type: 'agentMessage',
+                phase: 'final_answer',
+                text: 'Root tool scope verified.',
+              },
+            },
+          }))
+
+          child.stdout.write(jsonLine({
             method: 'turn/completed',
             params: {
               turn: {
@@ -15468,6 +16627,10 @@ describe('assistant codex runtime', () => {
     })
 
     await expect(executeCodexAppServerTurn({
+      automationRelativeDateReferenceWindow: {
+        earliestAt: '2026-03-08T04:59:00.000Z',
+        latestAt: '2026-03-08T04:59:00.000Z',
+      },
       authorizeAcceptedMessageTarget,
       hostedToolContext: {
         ...createHostedToolContext(),
@@ -15482,6 +16645,7 @@ describe('assistant codex runtime', () => {
       prompt: 'inspect connected devices',
       workingDirectory,
     })).resolves.toMatchObject({
+      finalMessage: 'Root tool scope verified.',
       sessionId: 'thread-root-tool-scope',
       turnId: 'turn-root-tool-scope',
     })
@@ -15694,10 +16858,17 @@ describe('assistant codex runtime', () => {
         phase: 'tool_call',
         issueKind: 'schema_rejection',
         severity: 'warning',
+        summary: 'Tool input failed schema validation.',
         errorCode: 'TOOL_INPUT_SCHEMA_REJECTION',
         details: expect.objectContaining({
           detailsSchema: 'murph.tool-call-validation-digest.v1',
-          invalidPaths: ['intentIds.[]'],
+          invalidPaths: ['intentIds[]'],
+          pathIssues: [{
+            code: 'invalid_format',
+            expected: 'string',
+            path: 'intentIds[]',
+            received: 'string.len_1_32',
+          }],
           schemaName: 'murph.pending_vault_files.input',
           toolName: 'murph.pending_vault_files',
         }),
@@ -19797,6 +20968,20 @@ describe('steered final segments', () => {
         expectedSuccess?: boolean
         expectedText: string
         id: number
+        kind: 'generate-image'
+        prompt: string
+      }
+    | {
+        expectedSuccess?: boolean
+        expectedText: string
+        id: number
+        kind: 'generate-voice-memo'
+        text: string
+      }
+    | {
+        expectedSuccess?: boolean
+        expectedText: string
+        id: number
         kind: 'send-vault-file'
         ref: string
       }
@@ -19862,6 +21047,18 @@ describe('steered final segments', () => {
     return 'kind' in step && step.kind === 'send-vault-file'
   }
 
+  function isGenerateVoiceMemoStep(
+    step: Record<string, unknown> | ScriptedSteeredFinalStep,
+  ): step is Extract<ScriptedSteeredFinalStep, { kind: 'generate-voice-memo' }> {
+    return 'kind' in step && step.kind === 'generate-voice-memo'
+  }
+
+  function isGenerateImageStep(
+    step: Record<string, unknown> | ScriptedSteeredFinalStep,
+  ): step is Extract<ScriptedSteeredFinalStep, { kind: 'generate-image' }> {
+    return 'kind' in step && step.kind === 'generate-image'
+  }
+
   function isReactToMessageStep(
     step: Record<string, unknown> | ScriptedSteeredFinalStep,
   ): step is Extract<ScriptedSteeredFinalStep, { kind: 'react-to-message' }> {
@@ -19904,6 +21101,7 @@ describe('steered final segments', () => {
       progressDelivery?: CodexAppServerTurnInput['progressDelivery']
       responseCardsAvailable?: boolean
       turnStatus?: 'completed' | 'failed'
+      voiceMemoRuntime?: CodexAppServerTurnInput['voiceMemoRuntime']
     } = {},
   ) {
     const workingDirectory = await createTempDir('assistant-codex-steered-finals-work-')
@@ -20037,6 +21235,54 @@ describe('steered final segments', () => {
                   callId: `call-steered-vault-${step.id}`,
                   namespace: 'murph',
                   tool: 'send_vault_file',
+                  turnId: 'turn-steered-finals',
+                },
+              }))
+              await expect(waitForRpcResponse(child, step.id)).resolves.toEqual({
+                id: step.id,
+                result: {
+                  contentItems: [{
+                    text: step.expectedText,
+                    type: 'inputText',
+                  }],
+                  success: step.expectedSuccess ?? true,
+                },
+              })
+              continue
+            }
+
+            if (isGenerateVoiceMemoStep(step)) {
+              child.stdout.write(jsonLine({
+                id: step.id,
+                method: 'item/tool/call',
+                params: {
+                  arguments: { text: step.text },
+                  namespace: 'murph',
+                  tool: 'generate_voice_memo',
+                  turnId: 'turn-steered-finals',
+                },
+              }))
+              await expect(waitForRpcResponse(child, step.id)).resolves.toEqual({
+                id: step.id,
+                result: {
+                  contentItems: [{
+                    text: step.expectedText,
+                    type: 'inputText',
+                  }],
+                  success: step.expectedSuccess ?? true,
+                },
+              })
+              continue
+            }
+
+            if (isGenerateImageStep(step)) {
+              child.stdout.write(jsonLine({
+                id: step.id,
+                method: 'item/tool/call',
+                params: {
+                  arguments: { prompt: step.prompt },
+                  namespace: 'murph',
+                  tool: 'generate_image',
                   turnId: 'turn-steered-finals',
                 },
               }))
@@ -20187,12 +21433,18 @@ describe('steered final segments', () => {
         input.authorizeAcceptedMessageTarget ?? null,
       codexCommand: 'codex',
       codexHome,
-      ...(input.responseCardsAvailable === true
+      ...(input.responseCardsAvailable === true || input.voiceMemoRuntime != null ||
+          input.hostedToolContext?.vaultFileSendAvailable === true
         ? {
             dynamicTools: resolveMurphDynamicTools({
-              responseCardsAvailable: true,
+              responseCardsAvailable: input.responseCardsAvailable === true,
+              vaultFileSendAvailable:
+                input.hostedToolContext?.vaultFileSendAvailable === true,
+              voiceMemoGenerationAvailable: input.voiceMemoRuntime != null,
             }),
-            groupConversation: false,
+            ...(input.responseCardsAvailable === true
+              ? { groupConversation: false }
+              : {}),
           }
         : {}),
       hostedToolContext: input.hostedToolContext,
@@ -20201,6 +21453,7 @@ describe('steered final segments', () => {
       onProgress: input.onProgress,
       onTraceEvent: input.onTraceEvent,
       progressDelivery: input.progressDelivery,
+      voiceMemoRuntime: input.voiceMemoRuntime,
       prompt: 'First question',
       sandbox: 'workspace-write',
       workingDirectory,
@@ -20507,6 +21760,175 @@ describe('steered final segments', () => {
     expect(result.finalMessage).toBe(
       'Strength session\n\nBench press: Set 1: 185 lb × 8',
     )
+    expect(result.finalMessage).not.toContain('evt_')
+    expect(result.transcriptMessage).toContain(
+      '[Murph tracked workout source: evt_01K1ABCDEFGHJKMNPQRSTVWXYZ;',
+    )
+  })
+
+  it('renders every semantic workout set from trusted state when the card envelope is too large', async () => {
+    const result = await runScriptedSteeredFinalSegmentsTurn([
+      {
+        card: OVERSIZED_TRACKED_WORKOUT_RESPONSE_CARD,
+        expectedText:
+          'workout card envelope too large; full text recovery selected',
+        id: 871,
+        kind: 'attach-response-card',
+      },
+    ], { responseCardsAvailable: true })
+
+    expect(result.responseCard).toBeNull()
+    expect(result.responseMedia).toEqual([])
+    expect(result.providerAuthoredFinalMessage).toBe('')
+    expect(result.finalMessage).not.toMatch(/delete|merge|shorten|simplify/iu)
+    for (let exerciseIndex = 0; exerciseIndex < 16; exerciseIndex += 1) {
+      expect(result.finalMessage).toContain(
+        `Capacity exercise ${exerciseIndex + 1}:`,
+      )
+      for (let setIndex = 0; setIndex < 16; setIndex += 1) {
+        expect(result.finalMessage).toContain(
+          `set ${setIndex + 1}: pending; target Exercise ${exerciseIndex + 1} set ${setIndex + 1} target ${'x'.repeat(12)}`,
+        )
+      }
+    }
+    expect(result.finalMessage).not.toContain('evt_')
+    expect(result.transcriptMessage).toContain(
+      '[Murph tracked workout source: evt_01K1ABCDEFGHJKMNPQRSTVWXYZ;',
+    )
+  })
+
+  it('emits generated-audio timing from the Codex voice-memo tool boundary', async () => {
+    const onTraceEvent = vi.fn()
+    const result = await runScriptedSteeredFinalSegmentsTurn([
+      {
+        expectedText: 'generated voice memo attached to the final response',
+        id: 872,
+        kind: 'generate-voice-memo',
+        text: 'Read this aloud.',
+      },
+    ], {
+      onTraceEvent,
+      voiceMemoRuntime: {
+        elevenLabs: {
+          apiKeyAvailable: true,
+          modelId: 'eleven_multilingual_v2',
+          voiceId: 'voice_murph',
+        },
+        async generateAndUpload(request) {
+          request.recordPhaseTiming?.({
+            deliveryMode: 'synchronous',
+            generationDurationMs: 21,
+            mediaKind: 'voice_memo',
+            outcome: 'succeeded',
+            terminalPhase: 'upload',
+            uploadDurationMs: 13,
+          })
+          return {
+            attachmentId: 'attachment_timing_trace',
+            filename: 'timing-trace.mp3',
+            ok: true,
+          }
+        },
+        kind: 'linq',
+      },
+    })
+
+    const timingEvents = onTraceEvent.mock.calls
+      .map(([event]) => event)
+      .filter((event) => asRecord(event.rawEvent).schema ===
+        'murph.assistant-codex-generated-audio-phase-timing.v1')
+
+    expect(timingEvents).toEqual([
+      {
+        codexThreadId: 'thread-steered-finals',
+        rawEvent: {
+          schema: 'murph.assistant-codex-generated-audio-phase-timing.v1',
+          type: 'assistant.codex.generated_audio_phase_timing',
+          generatedAudioDeliveryMode: 'synchronous',
+          generatedAudioGenerationDurationMs: 21,
+          generatedAudioKind: 'voice_memo',
+          generatedAudioOutcome: 'succeeded',
+          generatedAudioTerminalPhase: 'upload',
+          generatedAudioUploadDurationMs: 13,
+        },
+        updates: [],
+      },
+    ])
+    expect(result.responseMedia).toEqual([
+      expect.objectContaining({
+        filename: 'timing-trace.mp3',
+        kind: 'voice_memo',
+      }),
+    ])
+  })
+
+  it('blocks response effects before work after workout card overflow owns presentation', async () => {
+    const generateAndUpload = vi.fn(async () => ({
+      attachmentId: 'attachment_should_not_exist',
+      filename: 'voice-should-not-exist.mp3',
+    }))
+    const sendVaultFile = vi.fn(async () => ({
+      filename: 'report.pdf',
+      status: 'approved' as const,
+    }))
+    const launchImageGeneration = vi.fn(() => 'started' as const)
+    const result = await runScriptedSteeredFinalSegmentsTurn([
+      {
+        card: OVERSIZED_TRACKED_WORKOUT_RESPONSE_CARD,
+        expectedText:
+          'workout card envelope too large; full text recovery selected',
+        id: 872,
+        kind: 'attach-response-card',
+      },
+      {
+        expectedSuccess: false,
+        expectedText:
+          'voice memo generation cannot be combined with a response card',
+        id: 873,
+        kind: 'generate-voice-memo',
+        text: 'Read the workout aloud.',
+      },
+      {
+        expectedSuccess: false,
+        expectedText: 'image generation cannot be combined with a response card',
+        id: 874,
+        kind: 'generate-image',
+        prompt: 'Render the workout.',
+      },
+      {
+        expectedSuccess: false,
+        expectedText: 'vault-file sending cannot be combined with a response card',
+        id: 875,
+        kind: 'send-vault-file',
+        ref: `${ASSISTANT_GENERATED_DELIVERY_DIRECTORY}/report.pdf`,
+      },
+    ], {
+      hostedToolContext: createHostedToolContext({
+        computerToolsAvailable: false,
+        imageGenerationLauncher: { launch: launchImageGeneration },
+        sendVaultFile,
+        vaultFileSendAvailable: true,
+      }),
+      responseCardsAvailable: true,
+      voiceMemoRuntime: {
+        elevenLabs: {
+          apiKeyAvailable: true,
+          modelId: 'eleven_multilingual_v2',
+          voiceId: 'voice_murph',
+        },
+        generateAndUpload,
+        kind: 'linq',
+      },
+    })
+
+    expect(generateAndUpload).not.toHaveBeenCalled()
+    expect(launchImageGeneration).not.toHaveBeenCalled()
+    expect(sendVaultFile).not.toHaveBeenCalled()
+    expect(result.finalAction).toBeNull()
+    expect(result.responseCard).toBeNull()
+    expect(result.responseMedia).toEqual([])
+    expect(result.finalMessage).toContain('Capacity exercise 1:')
+    expect(result.finalMessage).toContain('Capacity exercise 16:')
     expect(result.finalMessage).not.toContain('evt_')
     expect(result.transcriptMessage).toContain(
       '[Murph tracked workout source: evt_01K1ABCDEFGHJKMNPQRSTVWXYZ;',

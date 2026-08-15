@@ -10,17 +10,26 @@ import {
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
 import { generateHostedVaultShareId } from "../hosted-onboarding/shared";
 import { getPrisma } from "../prisma";
+import {
+  HOSTED_GROUP_VAULT_SHARE_GRANT_LIMIT_PER_GRANTOR_PROJECTION,
+} from "./delivery-limits";
 import { parseHostedVaultShareRowProjectionScope } from "./row-projection-scope";
 
 export type HostedVaultShareGrantClient = PrismaClient | Prisma.TransactionClient;
+
+export interface HostedVaultShareGrantResult {
+  id: string;
+  requiresProjection: boolean;
+}
 
 export async function grantHostedVaultShareTx(input: {
   tx: Prisma.TransactionClient;
   grantorMemberId: string;
   destinationMemberId: string;
   projectionScope: HostedVaultShareProjectionScope;
+  refreshMaterializedProjection?: boolean;
   now: Date;
-}): Promise<void> {
+}): Promise<HostedVaultShareGrantResult> {
   const projectionScope = assertSupportedProjectionScope(input.projectionScope);
   const projectionKind = projectionScope.projectionKind;
   const projectionScopeKey = buildHostedVaultShareProjectionScopeKey(projectionScope);
@@ -33,6 +42,20 @@ export async function grantHostedVaultShareTx(input: {
     });
   }
 
+  // This is the sole production create/regrant owner. Serialize the exact
+  // grantor/scope cohort before checking both the tuple and its active count,
+  // and retain the transaction-scoped lock through the eventual write.
+  const cohortLockKey = JSON.stringify([
+    input.grantorMemberId,
+    projectionScopeKey,
+  ]);
+  await input.tx.$executeRaw`
+    SELECT pg_advisory_xact_lock(
+      hashtext('hosted_vault_share_grant_limit'),
+      hashtext(${cohortLockKey})
+    )
+  `;
+
   let existing = await input.tx.hostedVaultShare.findUnique({
     where: {
       grantorMemberId_projectionScopeKey_destinationMemberId: {
@@ -41,12 +64,43 @@ export async function grantHostedVaultShareTx(input: {
         projectionScopeKey,
       },
     },
-    select: { id: true, status: true },
+    select: { id: true, projectionSnapshotCiphertext: true, status: true },
   });
+
+  if (existing?.status === "granted" && input.refreshMaterializedProjection !== true) {
+    return {
+      id: existing.id,
+      requiresProjection: existing.projectionSnapshotCiphertext === null,
+    };
+  }
+
+  // Enforce the maximum resulting cardinality. Refreshing an already-active
+  // tuple is cardinality-neutral, including when the cohort is exactly full.
+  if (existing?.status !== "granted") {
+    const activeGrantCount = await input.tx.hostedVaultShare.count({
+      where: {
+        grantorMemberId: input.grantorMemberId,
+        projectionScopeKey,
+        status: "granted",
+      },
+    });
+    if (
+      activeGrantCount
+      >= HOSTED_GROUP_VAULT_SHARE_GRANT_LIMIT_PER_GRANTOR_PROJECTION
+    ) {
+      throw hostedOnboardingError({
+        code: "HOSTED_GROUP_VAULT_SHARE_GRANT_LIMIT_REACHED",
+        httpStatus: 409,
+        message:
+          "You have reached the group health-sharing limit for this permission. Turn off this permission in another group before sharing it here.",
+        retryable: false,
+      });
+    }
+  }
 
   if (!existing) {
     try {
-      await input.tx.hostedVaultShare.create({
+      const created = await input.tx.hostedVaultShare.create({
         data: {
           id: generateHostedVaultShareId(),
           destinationMemberId: input.destinationMemberId,
@@ -59,8 +113,9 @@ export async function grantHostedVaultShareTx(input: {
           revokedAt: null,
           status: "granted",
         },
+        select: { id: true },
       });
-      return;
+      return { id: created.id, requiresProjection: true };
     } catch (error) {
       if (!isPrismaUniqueConstraintError(error)) {
         throw error;
@@ -73,7 +128,7 @@ export async function grantHostedVaultShareTx(input: {
             projectionScopeKey,
           },
         },
-        select: { id: true, status: true },
+        select: { id: true, projectionSnapshotCiphertext: true, status: true },
       });
       if (!existing) {
         throw error;
@@ -81,10 +136,17 @@ export async function grantHostedVaultShareTx(input: {
     }
   }
 
-  if (existing.status === "granted") {
-    return;
+  const refreshMaterializedProjection = existing.status === "granted"
+    && input.refreshMaterializedProjection === true
+    && existing.projectionSnapshotCiphertext !== null;
+  if (existing.status === "granted" && !refreshMaterializedProjection) {
+    return {
+      id: existing.id,
+      requiresProjection: existing.projectionSnapshotCiphertext === null,
+    };
   }
 
+  const nextGenerationId = generateHostedVaultShareId();
   await input.tx.hostedVaultShare.update({
     where: {
       grantorMemberId_projectionScopeKey_destinationMemberId: {
@@ -94,7 +156,7 @@ export async function grantHostedVaultShareTx(input: {
       },
     },
     data: {
-      id: generateHostedVaultShareId(),
+      id: nextGenerationId,
       grantedAt: input.now,
       projectionKind,
       projectionSnapshotCiphertext: null,
@@ -104,6 +166,7 @@ export async function grantHostedVaultShareTx(input: {
       status: "granted",
     },
   });
+  return { id: nextGenerationId, requiresProjection: true };
 }
 
 export async function revokeHostedVaultSharesTx(input: {

@@ -97,6 +97,23 @@ const DESIGN_CONNECT_SOURCE_CASES: ConnectSourceCardStudyCase[] = [
   {
     authenticated: true,
     errorMessage: null,
+    source: {
+      connectTarget: "cronometer",
+      description:
+        "Meal logs with calories, macros, timing, and supported nutrient fields. Daily targets and dashboard percentages stay in Cronometer.",
+      id: "cronometer",
+      logo: {
+        className: "size-11 object-contain",
+        height: 44,
+        src: "/brand-logos/connect/cronometer.png",
+        width: 44,
+      },
+      name: "Cronometer",
+    },
+  },
+  {
+    authenticated: true,
+    errorMessage: null,
     source: ZEPP_CONNECT_SOURCE,
   },
   {
@@ -387,11 +404,16 @@ export function ConnectSourceCardStudy({
   const studyState = searchParams?.get("connectDisconnectStudy") ?? null;
   const connectPageStudy = searchParams?.get("connectPageStudy") ?? null;
   const disconnectDialogSource = studyState === "source"
-    ? DESIGN_CONNECT_SOURCE_CASES[0]?.source ?? null
+    ? DESIGN_CONNECT_SOURCE_CASES.find(({ source }) => source.id === "zepp")
+      ?.source ?? null
     : studyState === "fitbit-migration-dialog" ||
         studyState === "fitbit-migration-pending" ||
         studyState === "fitbit-migration-error"
       ? FITBIT_MIGRATION_SOURCE
+      : studyState === "disconnect-retry"
+        ? DESIGN_SOURCE_DISCONNECT_JOURNEY_CASES.find(({ source }) =>
+            source.id === "garmin-disconnect-journey"
+          )?.source ?? null
       : studyState === "dexcom-disconnect"
         ? DESIGN_CONNECT_SOURCE_CASES.find(({ source }) =>
             source.id === "dexcom-recovery"
@@ -401,6 +423,9 @@ export function ConnectSourceCardStudy({
               source.id === "garmin-disconnect-journey"
             )?.source ?? null
           : null;
+  const disconnectErrorMessage = studyState === "disconnect-retry"
+    ? "Disconnect not finished. Remove the old connection in your wearable provider account, then retry Disconnect here."
+    : null;
   const disconnectUnavailableSourceNames = disconnectDialogSource
     ? [
         ...DESIGN_CONNECT_SOURCE_CASES,
@@ -492,11 +517,11 @@ export function ConnectSourceCardStudy({
         </div>
       </div>
 
-      <ConnectDisconnectDialog
-        affectedUnavailableSourceNames={disconnectUnavailableSourceNames}
-        errorMessage={studyState === "fitbit-migration-error"
-          ? "The legacy Fitbit connection could not be stopped."
-          : null}
+        <ConnectDisconnectDialog
+          affectedUnavailableSourceNames={disconnectUnavailableSourceNames}
+          errorMessage={studyState === "fitbit-migration-error"
+            ? "The legacy Fitbit connection could not be stopped."
+            : disconnectErrorMessage}
         inert
         pending={studyState === "fitbit-migration-pending"}
         source={disconnectDialogSource}

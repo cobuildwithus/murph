@@ -12,9 +12,14 @@ export {
   type BrowserVaultDeviceMetricSummary,
 } from "./browser-replica/device-metrics.ts";
 export type {
+  BrowserVaultLabsCapableQueryClient,
   BrowserVaultLabResultRow,
   BrowserVaultMetricRow,
   BrowserVaultMetricSelectionRow,
+  BrowserVaultMetricsCapableQueryClient,
+  BrowserVaultMetricSeriesCapableQueryClient,
+  BrowserVaultInteractiveMetricsQueryClient,
+  BrowserVaultInteractiveQueryClient,
   BrowserVaultQueryClient,
 } from "./browser-replica/shared.ts";
 export type {

@@ -10,7 +10,12 @@ vi.mock("@/src/lib/hosted-privacy/account-deletion-cleanup", () => ({
 }));
 
 import * as hostedRuntimeSignals from "@/src/lib/hosted-orchestration/signal-runtime";
+import { HOSTED_CONNECTED_APP_STARTED_INTENT_OWNER_GRACE_MS } from "@/src/lib/connected-apps/connect-intent-ownership";
 import {
+  CLINICAL_RECORD_STARTED_CONNECT_INTENT_RETENTION_GRACE_MS,
+  DEVICE_STARTED_CONNECT_INTENT_RETENTION_GRACE_MS,
+  HOSTED_CONTROL_ARTIFACT_RETENTION_BATCH_SIZE,
+  HOSTED_CONTROL_ARTIFACT_RETENTION_MAX_BATCHES,
   HOSTED_DEVICE_WEBHOOK_TRACE_RETENTION_MS,
   HOSTED_INBOX_MEDIA_RETENTION_SIGNAL_BATCH_SIZE,
   HOSTED_INBOX_MEDIA_RETENTION_SIGNAL_TIMEOUT_MS,
@@ -114,9 +119,16 @@ describe("hosted retention cleanup", () => {
   it("prunes every high-volume diagnostic table before signaling runtimes", async () => {
     const now = new Date("2026-04-25T12:00:00.000Z");
     const countsByStatement = new Map<string, number>([
+      ['DELETE FROM "hosted_connected_app_connect_intent"', 1],
+      ['DELETE FROM "hosted_sensitive_action_challenge"', 2],
+      ['DELETE FROM "device_connect_intent"', 3],
+      ['DELETE FROM "device_oauth_session"', 4],
+      ['DELETE FROM "clinical_record_connect_intent"', 5],
+      ['DELETE FROM "clinical_record_oauth_session"', 6],
       ['DELETE FROM "hosted_web_internal_request_nonce"', 6],
       ['DELETE FROM "hosted_ingress_latency_trace"', 1],
       ['DELETE FROM "hosted_assistant_runtime_issue"', 2],
+      ['DELETE FROM "hosted_group_current_sender_clarification"', 3],
       ['DELETE FROM "device_webhook_trace"', 4],
       ['UPDATE "hosted_linq_provider_event"', 5],
     ]);
@@ -160,12 +172,19 @@ describe("hosted retention cleanup", () => {
       compactedLinqProviderEventDiagnostics: 5,
       expiredAssistantRuntimeIssuesDeleted: 2,
       expiredCallbackRequestNoncesDeleted: 6,
+      expiredClinicalRecordConnectIntentsDeleted: 5,
+      expiredClinicalRecordOauthSessionsDeleted: 6,
       expiredComputerRunsCleanedUp: 0,
+      expiredConnectedAppConnectIntentsDeleted: 1,
       expiredConversationPolicyNonRepliesRecorded: 0,
+      expiredDeviceConnectIntentsDeleted: 3,
+      expiredDeviceOauthSessionsDeleted: 4,
       expiredDeviceWebhookTracesDeleted: 4,
+      expiredGroupCurrentSenderClarificationsDeleted: 3,
       expiredIngressLatencyTracesDeleted: 1,
       expiredMailboxContentRetired: 7,
       expiredMailboxTombstonesDeleted: 3,
+      expiredSensitiveActionChallengesDeleted: 2,
       inboxMediaRetentionRuntimeSignalFailures: 1,
       inboxMediaRetentionRuntimeSignalsSent: 1,
       oldRuntimeLogsDeleted: 0,
@@ -194,6 +213,7 @@ describe("hosted retention cleanup", () => {
     expect(mailboxDeleteSql).toContain('UPDATE "hosted_mailbox_lane_counter"');
     expect(mailboxDeleteSql).toContain('"consumed_seq" = GREATEST');
     expect(mailboxDeleteSql).toContain('MIN(blocker."lane_seq") - 1');
+    expect(mailboxDeleteSql.match(/FOR UPDATE SKIP LOCKED/g)).toHaveLength(2);
     expect(queryRaw.mock.calls[0]?.slice(1)).toEqual([
       now,
       new Date(now.getTime() - HOSTED_MAILBOX_RETENTION_MS),
@@ -207,7 +227,15 @@ describe("hosted retention cleanup", () => {
     ]);
 
     // One statement per category: every short batch stops that category's loop.
-    expect(executeRaw).toHaveBeenCalledTimes(7);
+    expect(executeRaw).toHaveBeenCalledTimes(14);
+
+    const deviceOauthCall = findRetentionCall(
+      executeRaw,
+      'DELETE FROM "device_oauth_session"',
+    );
+    expect(sqlOf(deviceOauthCall)).toContain(
+      'oauth_session."consumed_at" IS NULL',
+    );
 
     const callbackNonceCall = findRetentionCall(
       executeRaw,
@@ -278,6 +306,7 @@ describe("hosted retention cleanup", () => {
     expect(sqlOf(linqCall)).toContain('"extraction_json" = NULL');
     expect(sqlOf(linqCall)).toContain('"payload_sanitized_json" = NULL');
     expect(sqlOf(linqCall)).toContain('"payload_shape_json" = NULL');
+    expect(sqlOf(linqCall)).toContain("FOR UPDATE OF provider_event SKIP LOCKED");
     expect(linqCall.slice(1)).toEqual([
       new Date(now.getTime() - HOSTED_LINQ_PROVIDER_EVENT_DIAGNOSTIC_RETENTION_MS),
       HOSTED_RETENTION_BATCH_SIZE,
@@ -358,6 +387,56 @@ describe("hosted retention cleanup", () => {
         ],
       },
     });
+  });
+
+  it("keeps started connect intents through one bounded provider-continuation grace", async () => {
+    const now = new Date("2026-04-25T12:00:00.000Z");
+    const executeRaw = vi.fn().mockResolvedValue(0);
+    const prisma = createRetentionPrisma({ executeRaw });
+
+    await runHostedRetentionCleanup({
+      now,
+      prisma: prisma as never,
+      signalRuntimeRecheck: vi.fn(),
+    });
+
+    for (const fragment of [
+      'DELETE FROM "hosted_connected_app_connect_intent"',
+      'DELETE FROM "device_connect_intent"',
+      'DELETE FROM "clinical_record_connect_intent"',
+    ]) {
+      const graceMs = fragment === 'DELETE FROM "hosted_connected_app_connect_intent"'
+        ? HOSTED_CONNECTED_APP_STARTED_INTENT_OWNER_GRACE_MS
+        : fragment === 'DELETE FROM "device_connect_intent"'
+          ? DEVICE_STARTED_CONNECT_INTENT_RETENTION_GRACE_MS
+          : CLINICAL_RECORD_STARTED_CONNECT_INTENT_RETENTION_GRACE_MS;
+      const cutoff = new Date(now.getTime() - graceMs);
+      const call = findRetentionCall(executeRaw, fragment);
+      const sql = sqlOf(call);
+      expect(sql).toContain('intent."expires_at" <= ?');
+      if (fragment === 'DELETE FROM "hosted_connected_app_connect_intent"') {
+        expect(sql).toContain('intent."completed_at" IS NOT NULL');
+      }
+      expect(sql).toContain('intent."started_at" IS NULL');
+      expect(sql).toContain('OR intent."expires_at" <= ?');
+      expect(call.slice(1)).toEqual([
+        now,
+        cutoff,
+        HOSTED_CONTROL_ARTIFACT_RETENTION_BATCH_SIZE,
+      ]);
+    }
+
+    const clinicalOauthCall = findRetentionCall(
+      executeRaw,
+      'DELETE FROM "clinical_record_oauth_session"',
+    );
+    const clinicalOauthSql = sqlOf(clinicalOauthCall);
+    expect(clinicalOauthSql).toContain('oauth_session."consumed_at" IS NULL');
+    expect(clinicalOauthSql).toContain('OR NOT EXISTS');
+    expect(clinicalOauthSql).toContain(
+      'intent."claim_hash" = oauth_session."connect_intent_claim_hash"',
+    );
+    expect(clinicalOauthSql).toContain('intent."completed_at" IS NULL');
   });
 
   it("records an explicit policy non-reply instead of silently dropping accepted work", async () => {
@@ -454,6 +533,57 @@ describe("hosted retention cleanup", () => {
     expect(traceBatches).toBe(HOSTED_RETENTION_MAX_BATCHES);
   });
 
+  it("caps aggregate short-lived control-artifact work across all six owners", async () => {
+    const controlFragments = [
+      'DELETE FROM "hosted_connected_app_connect_intent"',
+      'DELETE FROM "hosted_sensitive_action_challenge"',
+      'DELETE FROM "device_connect_intent"',
+      'DELETE FROM "device_oauth_session"',
+      'DELETE FROM "clinical_record_connect_intent"',
+      'DELETE FROM "clinical_record_oauth_session"',
+    ] as const;
+    const executeRaw = vi.fn(async (strings: TemplateStringsArray) => {
+      const sql = strings.join("?");
+      return controlFragments.some((fragment) => sql.includes(fragment))
+        ? HOSTED_CONTROL_ARTIFACT_RETENTION_BATCH_SIZE
+        : 0;
+    });
+    const prisma = createRetentionPrisma({ executeRaw });
+
+    const result = await runHostedRetentionCleanup({
+      now: "2026-04-25T12:00:00.000Z",
+      prisma: prisma as never,
+    });
+    const perOwnerCeiling =
+      HOSTED_CONTROL_ARTIFACT_RETENTION_BATCH_SIZE
+      * HOSTED_CONTROL_ARTIFACT_RETENTION_MAX_BATCHES;
+    expect({
+      clinicalConnect: result.expiredClinicalRecordConnectIntentsDeleted,
+      clinicalOauth: result.expiredClinicalRecordOauthSessionsDeleted,
+      connectedApp: result.expiredConnectedAppConnectIntentsDeleted,
+      deviceConnect: result.expiredDeviceConnectIntentsDeleted,
+      deviceOauth: result.expiredDeviceOauthSessionsDeleted,
+      sensitiveAction: result.expiredSensitiveActionChallengesDeleted,
+    }).toEqual({
+      clinicalConnect: perOwnerCeiling,
+      clinicalOauth: perOwnerCeiling,
+      connectedApp: perOwnerCeiling,
+      deviceConnect: perOwnerCeiling,
+      deviceOauth: perOwnerCeiling,
+      sensitiveAction: perOwnerCeiling,
+    });
+    const controlCalls = executeRaw.mock.calls.filter((call) =>
+      controlFragments.some((fragment) => sqlOf(call).includes(fragment))
+    );
+    expect(controlCalls).toHaveLength(
+      controlFragments.length
+      * HOSTED_CONTROL_ARTIFACT_RETENTION_MAX_BATCHES,
+    );
+    expect(
+      controlCalls.length * HOSTED_CONTROL_ARTIFACT_RETENTION_BATCH_SIZE,
+    ).toBe(3_000);
+  });
+
   it("runs retention categories one at a time", async () => {
     // Serial database use is the protection this job owes the primary pool.
     // Immediately-resolving mocks would keep passing after a parallel fan-out
@@ -534,12 +664,19 @@ describe("hosted retention cleanup", () => {
         compactedLinqProviderEventDiagnostics: 1,
         expiredAssistantRuntimeIssuesDeleted: 1,
         expiredCallbackRequestNoncesDeleted: 1,
+        expiredClinicalRecordConnectIntentsDeleted: 1,
+        expiredClinicalRecordOauthSessionsDeleted: 1,
         expiredComputerRunsCleanedUp: 0,
+        expiredConnectedAppConnectIntentsDeleted: 1,
         expiredConversationPolicyNonRepliesRecorded: 0,
+        expiredDeviceConnectIntentsDeleted: 1,
+        expiredDeviceOauthSessionsDeleted: 1,
         expiredDeviceWebhookTracesDeleted: 1,
+        expiredGroupCurrentSenderClarificationsDeleted: 1,
         expiredIngressLatencyTracesDeleted: 1,
         expiredMailboxContentRetired: 1,
         expiredMailboxTombstonesDeleted: 0,
+        expiredSensitiveActionChallengesDeleted: 1,
         inboxMediaRetentionRuntimeSignalFailures: 1,
         inboxMediaRetentionRuntimeSignalsSent: 0,
         oldRuntimeLogsDeleted: 0,

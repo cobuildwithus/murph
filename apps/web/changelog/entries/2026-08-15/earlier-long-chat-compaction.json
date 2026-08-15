@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-15",
+  "order": 100,
+  "item": {
+    "id": "earlier-long-chat-compaction",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Earlier context housekeeping for long chats",
+    "summary": "Murph now compacts very long conversation context at 132k tokens instead of 164k, reducing repeated context processing while preserving the active task.",
+    "details": "Personal conversations may show the existing context progress update sooner. Group conversations continue to keep that maintenance update out of the room, and very long tool-heavy turns have less uninterrupted headroom than under the previous setting.",
+    "relevanceTags": ["assistant", "performance", "reliability", "messaging"],
+    "sourcePullRequests": [1844]
+  }
+}

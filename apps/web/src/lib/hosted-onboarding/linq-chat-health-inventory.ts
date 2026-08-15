@@ -1,10 +1,16 @@
 import type { Prisma, PrismaClient } from "@prisma/client";
+import type { Chat } from "@linqapp/sdk/resources/chats";
 
-import { fetchLinqApi, LinqApiTimeoutError } from "../linq/api";
-import { hostedOnboardingError } from "./errors";
-import { upsertHostedLinqLineForPhoneTx } from "./linq-line-store";
 import {
-  projectHostedLinqChatHealthTx,
+  LinqApiTimeoutError,
+  readLinqApiErrorStatus,
+  runLinqApiRequest,
+} from "../linq/api";
+import { hostedOnboardingError } from "./errors";
+import {
+  HOSTED_LINQ_CHAT_HEALTH_PROJECTION_CHUNK_SIZE,
+  prepareHostedLinqChatHealthInventoryProjection,
+  projectHostedLinqChatHealthInventoryChunk,
 } from "./linq-provider-health-store";
 import {
   parseHostedLinqChatHealthStatus,
@@ -13,8 +19,6 @@ import {
 import { normalizePhoneNumber } from "./phone";
 import { requireHostedOnboardingLinqConfig } from "./runtime";
 import { normalizeNullableString } from "./shared";
-
-type HostedLinqChatHealthClient = PrismaClient | Prisma.TransactionClient;
 
 const HOSTED_LINQ_CHAT_HEALTH_PAGE_SIZE = 100;
 export const HOSTED_LINQ_CHAT_HEALTH_SYNC_LIMIT = 5_000;
@@ -31,7 +35,7 @@ export type HostedLinqChatHealthInventoryRecord = {
 export async function syncHostedLinqChatHealthInventory(input: {
   maxChats?: number;
   observedAt?: Date;
-  prisma: HostedLinqChatHealthClient;
+  prisma: PrismaClient;
   signal?: AbortSignal;
 }): Promise<{
   skippedCount: number;
@@ -42,39 +46,22 @@ export async function syncHostedLinqChatHealthInventory(input: {
     signal: input.signal,
   });
   const observedAt = input.observedAt ?? new Date();
-  const lineLookupKeyByPhone = new Map<string, string>();
-  const linePhoneNumbers = [...new Set(
-    inventory.chats
-      .map((chat) => chat.linePhoneNumber)
-      .filter((phoneNumber): phoneNumber is string => phoneNumber !== null),
-  )];
-  for (const phoneNumber of linePhoneNumbers) {
-    const line = await upsertHostedLinqLineForPhoneTx({
-      observedAt,
-      phoneNumber,
-      prisma: input.prisma,
-      source: "provider",
-    });
-    lineLookupKeyByPhone.set(phoneNumber, line.phoneNumberLookupKey);
-  }
+  const chats = prepareHostedLinqChatHealthInventoryProjection(inventory.chats);
 
   let syncedCount = 0;
-  for (const chat of inventory.chats) {
-    const projected = await projectHostedLinqChatHealthTx({
-      chatId: chat.chatId,
+  for (
+    let offset = 0;
+    offset < chats.length;
+    offset += HOSTED_LINQ_CHAT_HEALTH_PROJECTION_CHUNK_SIZE
+  ) {
+    syncedCount += await projectHostedLinqChatHealthInventoryChunk({
+      chats: chats.slice(
+        offset,
+        offset + HOSTED_LINQ_CHAT_HEALTH_PROJECTION_CHUNK_SIZE,
+      ),
       observedAt,
-      phoneNumberLookupKey: chat.linePhoneNumber
-        ? lineLookupKeyByPhone.get(chat.linePhoneNumber) ?? null
-        : null,
       prisma: input.prisma,
-      providerStatus: chat.providerStatus,
-      providerUpdatedAt: chat.providerUpdatedAt,
-      isGroup: chat.isGroup,
-      service: chat.service,
     });
-    if (projected) {
-      syncedCount += 1;
-    }
   }
 
   return {
@@ -90,7 +77,10 @@ export async function listHostedLinqChatHealthInventory(input: {
   chats: HostedLinqChatHealthInventoryRecord[];
   skippedCount: number;
 }> {
-  const maxChats = normalizeHostedLinqChatHealthLimit(input.maxChats);
+  const maxChats = Math.min(
+    normalizeHostedLinqChatHealthLimit(input.maxChats),
+    HOSTED_LINQ_CHAT_HEALTH_SYNC_LIMIT,
+  );
   const chats: HostedLinqChatHealthInventoryRecord[] = [];
   const seenCursors = new Set<string>();
   let cursor: string | null = null;
@@ -142,52 +132,46 @@ async function fetchHostedLinqChatHealthPage(input: {
   signal?: AbortSignal;
 }): Promise<{
   nextCursor: string | null;
-  records: unknown[];
+  records: Chat[];
 }> {
   const { apiBaseUrl, apiToken } = requireHostedOnboardingLinqConfig();
-  const query = new URLSearchParams({
-    limit: String(HOSTED_LINQ_CHAT_HEALTH_PAGE_SIZE),
-  });
-  if (input.cursor) {
-    query.set("cursor", input.cursor);
-  }
-
-  let response: Response;
   try {
-    response = await fetchLinqApi({
+    const page = await runLinqApiRequest({
       apiBaseUrl,
       apiToken,
-      method: "GET",
-      path: `chats?${query.toString()}`,
+      request: (client) => client.chats.listChats({
+        ...(input.cursor ? { cursor: input.cursor } : {}),
+        limit: HOSTED_LINQ_CHAT_HEALTH_PAGE_SIZE,
+      }, { signal: input.signal }),
       signal: input.signal,
+      timeoutMessage: "Linq chat-health inventory sync timed out.",
     });
+    return {
+      nextCursor: normalizeNullableString(page.next_cursor),
+      records: page.chats,
+    };
   } catch (error) {
     if (error instanceof LinqApiTimeoutError) {
       throw hostedOnboardingError({
+        cause: error,
         code: "LINQ_CHAT_HEALTH_INVENTORY_FAILED",
         httpStatus: 502,
         message: "Linq chat-health inventory sync timed out.",
         retryable: true,
       });
     }
+    const status = readLinqApiErrorStatus(error);
+    if (status !== null) {
+      throw hostedOnboardingError({
+        cause: error,
+        code: "LINQ_CHAT_HEALTH_INVENTORY_FAILED",
+        httpStatus: 502,
+        message: `Linq chat-health inventory sync failed with HTTP ${status}.`,
+        retryable: status === 429 || status >= 500,
+      });
+    }
     throw error;
   }
-
-  if (!response.ok) {
-    throw hostedOnboardingError({
-      code: "LINQ_CHAT_HEALTH_INVENTORY_FAILED",
-      httpStatus: 502,
-      message: `Linq chat-health inventory sync failed with HTTP ${response.status}.`,
-      retryable: response.status === 429 || response.status >= 500,
-    });
-  }
-
-  const payload = await response.json();
-  const record = readRecord(payload);
-  return {
-    nextCursor: normalizeNullableString(readString(record?.next_cursor)),
-    records: Array.isArray(record?.chats) ? record.chats : [],
-  };
 }
 
 export function parseHostedLinqChatHealthInventoryRecord(

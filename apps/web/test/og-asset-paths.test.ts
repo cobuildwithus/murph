@@ -51,7 +51,8 @@ test("candidate resolution covers the apps/web and repo-root runtime layouts", (
     const fromAppDir = ogAssetCandidatePaths(relativePath, appRoot);
     const fromRepoRoot = ogAssetCandidatePaths(relativePath, repoRoot);
 
-    expect(fromRepoRoot).toContain(path.join(repoRoot, "apps/web", relativePath));
+    expect(fromRepoRoot[0]).toBe(path.join(repoRoot, "apps/web", relativePath));
+    expect(fromAppDir[1]).toBe(path.join(appRoot, relativePath));
     expect(
       fromAppDir.some((candidate) => existsSync(candidate)),
       `expected a real file among ${fromAppDir.join(", ")}`,

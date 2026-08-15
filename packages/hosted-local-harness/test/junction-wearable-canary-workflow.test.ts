@@ -14,6 +14,16 @@ const workflow = readFileSync(
   path.join(repoRoot, ".github", "workflows", "junction-wearable-canary.yml"),
   "utf8",
 );
+const browserRunner = readFileSync(
+  path.join(
+    repoRoot,
+    "apps",
+    "web",
+    "scripts",
+    "run-hosted-local-junction-wearable-browser.ts",
+  ),
+  "utf8",
+);
 
 describe("live Junction wearable canary workflow", () => {
   it("admits secrets only after protected main updates or manual retries", () => {
@@ -79,8 +89,13 @@ describe("live Junction wearable canary workflow", () => {
     expect(workflow).toContain("MURPH_DEV_TEMPORAL: disabled");
     expect(workflow).toContain('MURPH_E2E_JUNCTION_WEARABLE_LIVE: "1"');
     expect(workflow).toContain("MURPH_E2E_JUNCTION_WEARABLE_SOURCES: whoop");
-    expect(workflow).toContain('MURPH_E2E_WEARABLE_HEADLESS: "1"');
-    expect(workflow).toContain("run: pnpm hosted-local e2e device-connect");
+    expect(workflow).toContain('MURPH_E2E_WEARABLE_HEADLESS: "0"');
+    expect(workflow).toContain("      - name: Verify stable Chrome\n");
+    expect(workflow).toContain("run: google-chrome --version");
+    expect(workflow).not.toContain("playwright install");
+    expect(workflow).toContain(
+      "run: xvfb-run --auto-servernum pnpm hosted-local e2e device-connect",
+    );
     expect(workflow).toContain("image: public.ecr.aws/docker/library/postgres:17");
 
     const actionRefs = [...workflow.matchAll(/^\s*uses:\s*[^@\s]+@([^\s#]+)/gmu)];
@@ -88,5 +103,70 @@ describe("live Junction wearable canary workflow", () => {
     for (const actionRef of actionRefs) {
       expect(actionRef[1]).toMatch(/^[a-f0-9]{40}$/u);
     }
+  });
+
+  it("confirms the required Vital disclosure before waiting for provider authorization", () => {
+    const disclosureOffset = browserRunner.indexOf(
+      'stage = "murph_vital_disclosure";',
+    );
+    const connectOffset = browserRunner.indexOf('stage = "murph_connect_start";');
+
+    expect(disclosureOffset).toBeGreaterThan(0);
+    expect(connectOffset).toBeGreaterThan(disclosureOffset);
+    const disclosureStep = browserRunner.slice(disclosureOffset, connectOffset);
+    expect(disclosureStep).toContain('.getByRole("dialog")');
+    expect(disclosureStep).toContain(
+      'name: `Continue to ${config.disclosureSourceName}`',
+    );
+    expect(disclosureStep).toContain(".click({ timeout: config.timeoutMs })");
+    expect(browserRunner).toContain(
+      'disclosureSourceName: source === "oura" ? "Oura" : "Whoop"',
+    );
+  });
+
+  it("keeps headed CI authorization automated and fail-closed", () => {
+    expect(browserRunner).toContain(
+      'const manualAuthorizationAllowed = !headless && ci !== "1" && ci !== "true";',
+    );
+    expect(browserRunner).toContain(
+      "if (source === \"oura\" && !manualAuthorizationAllowed && !otp)",
+    );
+    expect(browserRunner).toContain(
+      'browserChannel: !headless && !manualAuthorizationAllowed ? "chrome" : undefined,',
+    );
+    expect(browserRunner).toContain("channel: config.browserChannel,");
+
+    const clickedBranchOffset = browserRunner.indexOf("if (clicked) {");
+    const blockedWindowResetOffset = browserRunner.indexOf(
+      "automationBlockedObservedAt = null;",
+      clickedBranchOffset,
+    );
+    const challengeClassificationResetOffset = browserRunner.indexOf(
+      "blockedWindowObservedChallenge = false;",
+      blockedWindowResetOffset,
+    );
+    const automatedProgressOffset = browserRunner.indexOf(
+      "await page.waitForTimeout(750);",
+      challengeClassificationResetOffset,
+    );
+    const manualRecoveryOffset = browserRunner.indexOf(
+      "if (config.manualAuthorizationAllowed) {",
+      automatedProgressOffset,
+    );
+    expect(clickedBranchOffset).toBeGreaterThan(0);
+    expect(blockedWindowResetOffset).toBeGreaterThan(clickedBranchOffset);
+    expect(challengeClassificationResetOffset).toBeGreaterThan(
+      blockedWindowResetOffset,
+    );
+    expect(automatedProgressOffset).toBeGreaterThan(
+      challengeClassificationResetOffset,
+    );
+    expect(manualRecoveryOffset).toBeGreaterThan(automatedProgressOffset);
+  });
+
+  it("keeps Playwright's closing quote out of redacted navigation URLs", () => {
+    expect(browserRunner).toContain(
+      'message.replace(/https?:\\/\\/[^\\s)"\']+/gu, (rawUrl) => {',
+    );
   });
 });

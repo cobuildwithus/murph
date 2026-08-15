@@ -104,17 +104,27 @@ export async function fetchHostedJson(input: {
   }
 
   if (!response.ok) {
-    const detail = (await readHostedResponseText({
-      description: input.description,
-      response,
-      signal: input.signal ?? null,
-      timeoutMs: input.timeoutMs,
-    })).trim();
+    let detail = "";
+    let responseBodyReadError: unknown;
+    try {
+      detail = (await readHostedResponseText({
+        description: input.description,
+        response,
+        signal: input.signal ?? null,
+        timeoutMs: input.timeoutMs,
+      })).trim();
+    } catch (error) {
+      // Response headers already established an application failure. Preserve
+      // that status as the classification boundary even if its optional
+      // diagnostic body is lost at transport.
+      responseBodyReadError = error;
+    }
     const exposeResponseBodyInError = input.exposeResponseBodyInError !== false;
     const error = new Error(
       exposeResponseBodyInError && detail.length > 0
         ? `${input.description} failed with HTTP ${response.status}. ${detail}`
         : `${input.description} failed with HTTP ${response.status}.`,
+      { cause: responseBodyReadError },
     ) as Error & {
       status: number;
       statusCode: number;
@@ -136,6 +146,7 @@ export async function fetchHostedJson(input: {
         method: input.method,
         path: input.redactedLogPath ?? input.url.pathname,
         responseBodyBytes: new TextEncoder().encode(detail).byteLength,
+        responseBodyReadFailed: responseBodyReadError !== undefined,
         responseBodyPresent: detail.length > 0,
         responseOrigin: input.url.origin,
         responseStatus: response.status,

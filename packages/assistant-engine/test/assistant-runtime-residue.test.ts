@@ -31,6 +31,14 @@ import {
   AUTO_REPLY_RECEIPT_INPUT_IDS_KEY,
 } from '../src/assistant/automation/auto-reply-retry.ts'
 import {
+  claimAssistantAutoReplyRouteContext,
+  maintainAssistantAutoReplyRouteStateAtPaths,
+  readAssistantAutoReplyRouteState,
+  resolveAssistantAutoReplyOutboxExactRoute,
+  resolveAssistantAutoReplyRouteMigrationPath,
+  resolveAssistantAutoReplyRouteStatePath,
+} from '../src/assistant/automation/cross-session-route-state.ts'
+import {
   writeAssistantAutoReplySuppressionEvidence,
 } from '../src/assistant/automation/evidence.ts'
 import {
@@ -43,7 +51,10 @@ import {
 import {
   ASSISTANT_GENERATED_DELIVERY_DIRECTORY,
 } from '../src/assistant/generated-delivery-files.ts'
-import { pruneAssistantRuntimeResidue } from '../src/assistant/runtime-residue.ts'
+import {
+  maintainAssistantAutoReplyRouteState,
+  pruneAssistantRuntimeResidue,
+} from '../src/assistant/runtime-residue.ts'
 import {
   resolveAssistantVaultFileResponseMedia,
 } from '../src/assistant/vault-file-send.ts'
@@ -1003,6 +1014,7 @@ describe('assistant runtime residue pruning', () => {
 
     await appendAssistantAcceptedTurnInputItems({
       inputs: [{
+        acceptedAt: OLD_RECORD_AT,
         id: 'manual-input',
         promptFallbackText: 'manual input',
         source: 'manual',
@@ -1031,6 +1043,7 @@ describe('assistant runtime residue pruning', () => {
     })
     await appendAssistantAcceptedTurnInputItems({
       inputs: [{
+        acceptedAt: OLD_RECORD_AT,
         id: 'manual-input-without-receipt',
         promptFallbackText: 'manual input',
         source: 'manual',
@@ -1094,7 +1107,356 @@ describe('assistant runtime residue pruning', () => {
     await expectPathExists(resolveAssistantTurnReceiptPath(paths, recentTurnId))
   })
 
-  it('retains terminal receipts whose cross-session context intent is still in the outbox', async () => {
+  it('cooperatively owns local migration without rescanning receipts after the marker', async () => {
+    const { paths, vaultRoot } = await createAssistantVault(
+      'assistant-runtime-residue-post-pass-migration-',
+    )
+    const source = await createAssistantOutboxIntent({
+      actorId: 'actor-post-pass',
+      channel: 'email',
+      createdAt: RECENT_RECORD_AT,
+      identityId: 'identity-post-pass',
+      message: 'post-pass cross-session reminder',
+      replyToMessageId: 'message-post-pass',
+      sessionId: createSessionId('4'),
+      threadId: 'thread-post-pass',
+      threadIsDirect: true,
+      turnId: createTurnId('4'),
+      turnTrigger: 'automation-auto-reply',
+      vault: vaultRoot,
+    })
+    const deliveredSource = await saveAssistantOutboxIntent(vaultRoot, {
+      ...source,
+      delivery: {
+        channel: 'email',
+        idempotencyKey: null,
+        messageLength: source.message.length,
+        providerMessageId: 'provider-post-pass',
+        providerThreadId: null,
+        sentAt: RECENT_RECORD_AT,
+        target: 'serialized-email-target',
+        targetKind: 'thread',
+      },
+      sentAt: RECENT_RECORD_AT,
+      status: 'sent',
+      updatedAt: RECENT_RECORD_AT,
+    })
+    await createAssistantTurnReceipt({
+      deliveryRequested: false,
+      metadata: {
+        [AUTO_REPLY_RECEIPT_CROSS_SESSION_CONTEXT_INTENT_ID_KEY]:
+          deliveredSource.intentId,
+      },
+      prompt: 'legacy local consuming turn',
+      provider: 'codex-cli',
+      providerModel: null,
+      sessionId: createSessionId('5'),
+      startedAt: RECENT_RECORD_AT,
+      turnId: createTurnId('5'),
+      vault: vaultRoot,
+    })
+
+    const route = resolveAssistantAutoReplyOutboxExactRoute(deliveredSource)
+    if (!route) {
+      throw new Error('expected exact post-pass route')
+    }
+    const routeStatePath = resolveAssistantAutoReplyRouteStatePath(
+      paths,
+      route.digest,
+    )
+    let observedPartialRouteState = false
+    await expect(
+      maintainAssistantAutoReplyRouteState({
+        shouldYield: () => {
+          observedPartialRouteState = existsSync(routeStatePath)
+          return observedPartialRouteState
+        },
+        vault: vaultRoot,
+      }),
+    ).resolves.toEqual({ changed: true, trusted: false })
+    expect(observedPartialRouteState).toBe(true)
+    await expectPathMissing(
+      resolveAssistantAutoReplyRouteMigrationPath(paths),
+    )
+
+    await expect(maintainAssistantAutoReplyRouteState({
+      vault: vaultRoot,
+    })).resolves.toEqual({ changed: true, trusted: true })
+
+    await expect(readAssistantAutoReplyRouteState({
+      routeDigest: route.digest,
+      vault: vaultRoot,
+    })).resolves.toEqual({
+      kind: 'ready',
+      settledThrough: {
+        intentId: deliveredSource.intentId,
+        sentAt: RECENT_RECORD_AT,
+      },
+    })
+
+    await writeFile(
+      resolveAssistantTurnReceiptPath(paths, createTurnId('6')),
+      '{invalid receipt json',
+      'utf8',
+    )
+    await expect(maintainAssistantAutoReplyRouteState({
+      vault: vaultRoot,
+    })).resolves.toEqual({ changed: false, trusted: true })
+  })
+
+  it('retires a quiescent route claim while generic journal retention remains authoritative', async () => {
+    const { paths, vaultRoot } = await createAssistantVault(
+      'assistant-runtime-residue-abandoned-route-claim-',
+    )
+    const sessionId = createSessionId('5')
+    const turnId = createTurnId('6')
+    const inputId = 'ain_abandoned_route_claim_012345678901234567890'
+    await maintainAssistantAutoReplyRouteStateAtPaths({
+      outboxIntents: [],
+      outboxTrusted: true,
+      paths,
+      receipts: [],
+      receiptsTrusted: true,
+    })
+    const sourceIntent = await createAssistantOutboxIntent({
+      actorId: 'actor-abandoned-route',
+      channel: 'email',
+      createdAt: OLD_RECORD_AT,
+      identityId: 'identity-abandoned-route',
+      message: 'old cross-session reminder',
+      replyToMessageId: 'message-abandoned-route',
+      sessionId: createSessionId('6'),
+      threadId: 'thread-abandoned-route',
+      threadIsDirect: true,
+      turnId: createTurnId('7'),
+      turnTrigger: 'automation-auto-reply',
+      vault: vaultRoot,
+    })
+    const deliveredSourceIntent = await saveAssistantOutboxIntent(vaultRoot, {
+      ...sourceIntent,
+      delivery: {
+        channel: 'email',
+        idempotencyKey: null,
+        messageLength: sourceIntent.message.length,
+        providerMessageId: 'provider-abandoned-route',
+        providerThreadId: null,
+        sentAt: OLD_RECORD_AT,
+        target: 'serialized-email-target',
+        targetKind: 'thread',
+      },
+      sentAt: OLD_RECORD_AT,
+      status: 'sent',
+      updatedAt: OLD_RECORD_AT,
+    })
+    await createAssistantTurnReceipt({
+      deliveryRequested: false,
+      metadata: {
+        [AUTO_REPLY_RECEIPT_CROSS_SESSION_CONTEXT_INTENT_ID_KEY]:
+          deliveredSourceIntent.intentId,
+        [AUTO_REPLY_RECEIPT_INPUT_ID_KEY]: inputId,
+        [AUTO_REPLY_RECEIPT_INPUT_IDS_KEY]: inputId,
+      },
+      prompt: 'abandoned consuming turn',
+      provider: 'codex-cli',
+      providerModel: null,
+      sessionId,
+      startedAt: OLD_RECORD_AT,
+      turnId,
+      vault: vaultRoot,
+    })
+    await appendAssistantAcceptedTurnInputItems({
+      inputs: [{
+        acceptedAt: OLD_RECORD_AT,
+        id: inputId,
+        promptFallbackText: 'abandoned input',
+        source: 'manual',
+      }],
+      now: new Date(OLD_RECORD_AT),
+      sessionId,
+      turnId,
+      vault: vaultRoot,
+    })
+    const route = resolveAssistantAutoReplyOutboxExactRoute(deliveredSourceIntent)
+    if (!route) {
+      throw new Error('expected exact abandoned route')
+    }
+    await claimAssistantAutoReplyRouteContext({
+      anchored: false,
+      order: {
+        intentId: deliveredSourceIntent.intentId,
+        sentAt: OLD_RECORD_AT,
+      },
+      routeDigest: route.digest,
+      turnId,
+      vault: vaultRoot,
+    })
+
+    const protectedResult = await pruneAssistantRuntimeResidue({
+      now: PRUNE_NOW,
+      pendingInputIds: [inputId],
+      vault: vaultRoot,
+    })
+    expect(protectedResult.receiptsPruned).toBe(0)
+    await expect(readAssistantAutoReplyRouteState({
+      routeDigest: route.digest,
+      vault: vaultRoot,
+    })).resolves.toEqual({
+      kind: 'ready',
+      settledThrough: {
+        intentId: deliveredSourceIntent.intentId,
+        sentAt: OLD_RECORD_AT,
+      },
+    })
+
+    const quiescentResult = await pruneAssistantRuntimeResidue({
+      now: PRUNE_NOW,
+      pendingInputIds: [],
+      vault: vaultRoot,
+    })
+    expect(quiescentResult.acceptedTurnInputJournalsPruned).toBe(0)
+    expect(quiescentResult.receiptsPruned).toBe(0)
+    await expectPathExists(resolveJournalPath(paths, turnId))
+    await expectPathExists(resolveAssistantTurnReceiptPath(paths, turnId))
+    await expect(readAssistantAutoReplyRouteState({
+      routeDigest: route.digest,
+      vault: vaultRoot,
+    })).resolves.toEqual({
+      kind: 'ready',
+      settledThrough: {
+        intentId: deliveredSourceIntent.intentId,
+        sentAt: OLD_RECORD_AT,
+      },
+    })
+  })
+
+  it('folds concurrent legacy consumers into the newest suppression watermark', async () => {
+    const { paths, vaultRoot } = await createAssistantVault(
+      'assistant-runtime-residue-legacy-running-conflict-',
+    )
+    const oldTurnId = createTurnId('7')
+    const recentTurnId = createTurnId('8')
+    const createDeliveredSource = async (input: {
+      sentAt: string
+      suffix: string
+      turnId: string
+    }) => {
+      const source = await createAssistantOutboxIntent({
+        actorId: 'actor-legacy-conflict',
+        channel: 'email',
+        createdAt: input.sentAt,
+        identityId: 'identity-legacy-conflict',
+        message: `cross-session reminder ${input.suffix}`,
+        replyToMessageId: `message-legacy-conflict-${input.suffix}`,
+        sessionId: createSessionId(input.suffix),
+        threadId: 'thread-legacy-conflict',
+        threadIsDirect: true,
+        turnId: input.turnId,
+        turnTrigger: 'automation-auto-reply',
+        vault: vaultRoot,
+      })
+      return await saveAssistantOutboxIntent(vaultRoot, {
+        ...source,
+        delivery: {
+          channel: 'email',
+          idempotencyKey: null,
+          messageLength: source.message.length,
+          providerMessageId: `provider-legacy-conflict-${input.suffix}`,
+          providerThreadId: null,
+          sentAt: input.sentAt,
+          target: 'serialized-email-target',
+          targetKind: 'thread',
+        },
+        sentAt: input.sentAt,
+        status: 'sent',
+        updatedAt: input.sentAt,
+      })
+    }
+    const oldSource = await createDeliveredSource({
+      sentAt: OLD_RECORD_AT,
+      suffix: '7',
+      turnId: createTurnId('9'),
+    })
+    const recentSource = await createDeliveredSource({
+      sentAt: RECENT_RECORD_AT,
+      suffix: '8',
+      turnId: createTurnId('0'),
+    })
+    const createRunningConsumer = async (input: {
+      intentId: string
+      startedAt: string
+      turnId: string
+    }) => await createAssistantTurnReceipt({
+      deliveryRequested: false,
+      metadata: {
+        [AUTO_REPLY_RECEIPT_CROSS_SESSION_CONTEXT_INTENT_ID_KEY]: input.intentId,
+      },
+      prompt: 'legacy running consumer',
+      provider: 'codex-cli',
+      providerModel: null,
+      sessionId: createSessionId('9'),
+      startedAt: input.startedAt,
+      turnId: input.turnId,
+      vault: vaultRoot,
+    })
+    await createRunningConsumer({
+      intentId: oldSource.intentId,
+      startedAt: OLD_RECORD_AT,
+      turnId: oldTurnId,
+    })
+    await createRunningConsumer({
+      intentId: recentSource.intentId,
+      startedAt: RECENT_RECORD_AT,
+      turnId: recentTurnId,
+    })
+
+    const firstPass = await pruneAssistantRuntimeResidue({
+      now: PRUNE_NOW,
+      pendingInputIds: [],
+      vault: vaultRoot,
+    })
+    expect(firstPass.receiptsPruned).toBe(1)
+    await expectPathMissing(resolveAssistantTurnReceiptPath(paths, oldTurnId))
+    await expectPathExists(resolveAssistantTurnReceiptPath(paths, recentTurnId))
+    const route = resolveAssistantAutoReplyOutboxExactRoute(recentSource)
+    if (!route) {
+      throw new Error('expected exact legacy-conflict route')
+    }
+    await expect(readAssistantAutoReplyRouteState({
+      routeDigest: route.digest,
+      vault: vaultRoot,
+    })).resolves.toEqual({
+      kind: 'ready',
+      settledThrough: {
+        intentId: recentSource.intentId,
+        sentAt: RECENT_RECORD_AT,
+      },
+    })
+
+    await finalizeAssistantTurnReceipt({
+      completedAt: RECENT_RECORD_AT,
+      response: 'done',
+      status: 'completed',
+      turnId: recentTurnId,
+      vault: vaultRoot,
+    })
+    await pruneAssistantRuntimeResidue({
+      now: PRUNE_NOW,
+      pendingInputIds: [],
+      vault: vaultRoot,
+    })
+    await expect(readAssistantAutoReplyRouteState({
+      routeDigest: route.digest,
+      vault: vaultRoot,
+    })).resolves.toEqual({
+      kind: 'ready',
+      settledThrough: {
+        intentId: recentSource.intentId,
+        sentAt: RECENT_RECORD_AT,
+      },
+    })
+  })
+
+  it('migrates terminal cross-session consumption before pruning its receipt', async () => {
     const { paths, vaultRoot } = await createAssistantVault(
       'assistant-runtime-residue-cross-session-context-',
     )
@@ -1102,6 +1464,7 @@ describe('assistant runtime residue pruning', () => {
     const consumingTurnId = createTurnId('8')
 
     const sourceIntent = await createAssistantOutboxIntent({
+      actorId: 'actor-cross-session',
       channel: 'email',
       createdAt: OLD_RECORD_AT,
       identityId: 'identity-cross-session',
@@ -1114,11 +1477,27 @@ describe('assistant runtime residue pruning', () => {
       turnTrigger: 'automation-auto-reply',
       vault: vaultRoot,
     })
+    const deliveredSourceIntent = await saveAssistantOutboxIntent(vaultRoot, {
+      ...sourceIntent,
+      delivery: {
+        channel: 'email',
+        idempotencyKey: null,
+        messageLength: sourceIntent.message.length,
+        providerMessageId: 'provider-cross-session',
+        providerThreadId: null,
+        sentAt: OLD_RECORD_AT,
+        target: 'serialized-email-target',
+        targetKind: 'thread',
+      },
+      sentAt: OLD_RECORD_AT,
+      status: 'sent',
+      updatedAt: OLD_RECORD_AT,
+    })
     await createAssistantTurnReceipt({
       deliveryRequested: false,
       metadata: {
         [AUTO_REPLY_RECEIPT_CROSS_SESSION_CONTEXT_INTENT_ID_KEY]:
-          sourceIntent.intentId,
+          deliveredSourceIntent.intentId,
       },
       prompt: 'consumes cross-session context',
       provider: 'codex-cli',
@@ -1142,8 +1521,22 @@ describe('assistant runtime residue pruning', () => {
       vault: vaultRoot,
     })
 
-    expect(result.receiptsPruned).toBe(0)
-    await expectPathExists(resolveAssistantTurnReceiptPath(paths, consumingTurnId))
+    expect(result.receiptsPruned).toBe(1)
+    await expectPathMissing(resolveAssistantTurnReceiptPath(paths, consumingTurnId))
+    const route = resolveAssistantAutoReplyOutboxExactRoute(deliveredSourceIntent)
+    if (!route) {
+      throw new Error('expected exact cross-session route')
+    }
+    await expect(readAssistantAutoReplyRouteState({
+      routeDigest: route.digest,
+      vault: vaultRoot,
+    })).resolves.toEqual({
+      kind: 'ready',
+      settledThrough: {
+        intentId: deliveredSourceIntent.intentId,
+        sentAt: OLD_RECORD_AT,
+      },
+    })
   })
 
   it('prunes intent provenance only after the outbox intent is gone', async () => {

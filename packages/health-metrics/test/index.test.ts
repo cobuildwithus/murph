@@ -1585,6 +1585,73 @@ test("selects metric points by policy and exposes provenance warnings", () => {
   assert.equal(blankMetricKey.point, null);
 });
 
+test("reduces report sequence before the legacy fallback without input-order cycles", () => {
+  const common = {
+    effectiveDate: "2026-08-13",
+    metricKey: "steps",
+    recordedAt: "2026-08-13T18:00:00.000Z",
+    sourceKind: "observation" as const,
+    unit: "count",
+  };
+  const older = metricPoint({
+    ...common,
+    context: { causalSeq: "41" },
+    id: "metric-point:opaque-a",
+    observedAt: "2026-08-13T19:00:00.000Z",
+    recordId: "evt_older_report",
+    value: 8_000,
+  });
+  const newer = metricPoint({
+    ...common,
+    context: { causalSeq: "42" },
+    id: "metric-point:opaque-z",
+    observedAt: "2026-08-13T16:00:00.000Z",
+    recordId: "evt_newer_report",
+    value: 9_000,
+  });
+  const legacy = metricPoint({
+    ...common,
+    context: {},
+    id: "metric-point:legacy-manual",
+    observedAt: "2026-08-13T17:00:00.000Z",
+    recordId: "evt_legacy_manual",
+    value: 8_500,
+  });
+
+  assert.equal(selectMetricValue({ metricKey: "steps", points: [older, newer] }).value, 9_000);
+  for (const points of [
+    [newer, legacy, older],
+    [newer, older, legacy],
+    [legacy, newer, older],
+    [legacy, older, newer],
+    [older, newer, legacy],
+    [older, legacy, newer],
+  ]) {
+    assert.equal(selectMetricValue({ metricKey: "steps", points }).value, 8_500);
+    assert.equal(selectMetricSeries({
+      duplicatePolicy: "selection-policy",
+      grain: "day",
+      metricKey: "steps",
+      points,
+      statistic: "value",
+    }).rows[0]?.value, 8_500);
+  }
+  assert.equal(selectMetricValue({
+    metricKey: "steps",
+    points: [
+      { ...older, context: {} },
+      { ...newer, context: {} },
+    ],
+  }).value, 8_000);
+  assert.equal(selectMetricValue({
+    metricKey: "steps",
+    points: [
+      { ...older, context: {}, observedAt: newer.observedAt },
+      { ...newer, context: {} },
+    ],
+  }).value, 8_000);
+});
+
 test("requires truthful unit evidence before catalog metrics become selections or series", () => {
   const unitlessLdl = {
     ...metricPoint({

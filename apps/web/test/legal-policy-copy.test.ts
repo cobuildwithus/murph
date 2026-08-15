@@ -196,7 +196,7 @@ test("Subprocessor register separates connected services and powers the public p
   );
 
   assert.match(register, /# Murph Subprocessors, Model Providers, and Connected Services/u);
-  assert.match(register, /\*\*Last Updated:\*\* August 11, 2026/u);
+  assert.match(register, /\*\*Last Updated:\*\* August 15, 2026/u);
   assert.match(
     register,
     /\| incident\.io \| Public status-page hosting and the browser-readable incident summary used by Murph's footer availability indicator\./u,

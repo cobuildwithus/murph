@@ -982,6 +982,7 @@ export async function readHostedDeviceSyncPendingDirtyState(input: {
   );
   const controlPlane = createHostedDeviceSyncControlPlane(input.request);
   const pending = await controlPlane.store.listPendingDirtyConnectionsForUser({
+    ...(parsed.connectionId ? { connectionId: parsed.connectionId } : {}),
     limit: parsed.limit ?? 10,
     ...(parsed.stagedDirtyAcks ? { stagedDirtyAcks: parsed.stagedDirtyAcks } : {}),
     userId: input.trustedUserId,

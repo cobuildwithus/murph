@@ -369,7 +369,19 @@ const assistantImageResponseMediaSchema = z
     url: z
       .string()
       .url()
-      .transform((value) => normalizeAssistantResponseMediaUrl(value)),
+      .transform((value, context) => {
+        try {
+          return normalizeAssistantResponseMediaUrl(value)
+        } catch {
+          context.addIssue({
+            code: 'custom',
+            message:
+              'Assistant response media URLs must be valid public HTTPS image URLs.',
+            params: { murphExpectedShape: 'public_https_image_url' },
+          })
+          return z.NEVER
+        }
+      }),
     alt: z.string().trim().min(1).max(500).nullable().default(null),
     source: z.string().trim().min(1).max(200).nullable().default(null),
   })
@@ -403,6 +415,20 @@ const assistantVaultImageResponseMediaSchema = z
     source: z.string().trim().min(1).max(200).nullable().default(null),
   })
   .strict()
+
+export const assistantAuthoredResponseMediaSchema = z.preprocess(
+  (value) =>
+    typeof value === 'object' &&
+    value !== null &&
+    !Array.isArray(value) &&
+    !Object.hasOwn(value, 'kind')
+      ? { ...value, kind: 'image' }
+      : value,
+  z.discriminatedUnion('kind', [
+    assistantImageResponseMediaSchema,
+    assistantVaultImageResponseMediaSchema,
+  ]),
+)
 
 export const assistantVoiceMemoGenerationSchema = z.discriminatedUnion('kind', [
   z
@@ -762,6 +788,9 @@ export const assistantTranscriptEntrySchema = z.object({
   kind: z.enum(assistantTranscriptEntryKindValues),
   text: z.string(),
   createdAt: isoTimestampSchema,
+  // Stable provenance for replay-safe imports that originate from a durable
+  // outbox delivery rather than a provider turn.
+  sourceOutboxIntentId: assistantOutboxIntentIdSchema.optional(),
   // The message receipt that owns the content-retention deadline. This may
   // precede createdAt when accepted work waits before entering a transcript.
   // New user entries always stamp it; legacy and non-message entries may omit
@@ -924,6 +953,30 @@ export const assistantTurnReceiptSummarySchema = z
   .strict()
 
 export const assistantOutboxIntentStatusValues = assistantOutboxStatusValues
+const assistantPrivateCompletionContinuitySchema = z.discriminatedUnion(
+  'status',
+  [
+    z
+      .object({
+        baseTurnCount: z.number().int().nonnegative(),
+        preparedAt: isoTimestampSchema,
+        sessionId: assistantSessionIdSchema,
+        status: z.literal('prepared'),
+        transcriptCreatedAt: isoTimestampSchema,
+      })
+      .strict(),
+    z
+      .object({
+        appliedAt: isoTimestampSchema,
+        baseTurnCount: z.number().int().nonnegative(),
+        preparedAt: isoTimestampSchema,
+        sessionId: assistantSessionIdSchema,
+        status: z.literal('applied'),
+        transcriptCreatedAt: isoTimestampSchema,
+      })
+      .strict(),
+  ],
+)
 export const assistantOutboxIntentSchema = z
   .object({
     schema: z.literal('murph.assistant-outbox-intent.v1'),
@@ -939,6 +992,10 @@ export const assistantOutboxIntentSchema = z
     status: z.enum(assistantOutboxIntentStatusValues),
     message: z.string(),
     reviewedAssistantAskCompletionExpiresAt: isoTimestampSchema.optional(),
+    privateCompletionContinuitySessionId:
+      assistantSessionIdSchema.nullable().optional(),
+    privateCompletionContinuity:
+      assistantPrivateCompletionContinuitySchema.nullable().optional(),
     emailHtml: z.string().max(500_000).nullable().optional(),
     media: z.array(assistantResponseMediaSchema).max(40).default([]),
     card: assistantResponseCardSchema.nullable().default(null),

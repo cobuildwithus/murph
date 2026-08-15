@@ -17,6 +17,9 @@ import {
   resolveHostedAiUsageTokenPricingBasis,
 } from "@murphai/hosted-execution/runtime-control";
 import {
+  resolveAssistantCodexUsageProviderName,
+} from "@murphai/operator-config/assistant/target-runtime";
+import {
   buildHostedExecutionSafeErrorDiagnostics,
   emitHostedExecutionStructuredLog,
   readHostedExecutionSafeErrorName,
@@ -303,13 +306,16 @@ export async function runHostedIdleCheckpointMaintenance(input: {
         retentionWake,
       );
     }
-    const providerName = input.providerName?.trim() || null;
-    if (!providerName) {
+    const routedProviderName = input.providerName?.trim() || null;
+    if (!routedProviderName) {
       return attachInboxMediaRetentionWake(
         { kind: "skipped", reason: "missing_provider", threadContextTokensBefore: null },
         retentionWake,
       );
     }
+    const usageProviderName = resolveAssistantCodexUsageProviderName(
+      routedProviderName,
+    );
     // Structurally fail-open: the runtime seam must not assume the engine
     // helper can never throw — an exception here aborts idle maintenance,
     // never the checkpoint.
@@ -373,7 +379,7 @@ export async function runHostedIdleCheckpointMaintenance(input: {
           : {};
         const tokenPricingBasis = resolveHostedAiUsageTokenPricingBasis({
           model,
-          providerName,
+          providerName: usageProviderName,
           serviceTier: outcome.serviceTier,
         });
         await recordUsage(
@@ -385,7 +391,7 @@ export async function runHostedIdleCheckpointMaintenance(input: {
             memberId: input.memberId,
             model,
             occurredAt: compactStartedAt,
-            providerName,
+            providerName: usageProviderName,
             tokenPricingBasis,
             triggerKind: "automation_idle_compact",
             usage,

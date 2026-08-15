@@ -52,9 +52,9 @@ test("legal manifest keeps the current PDF set versioned and deterministic", () 
   const expectedVersions = new Map([
     ["consumer-health-data-notice", "2026-07-23"],
     ["health-ai-safety-disclosure", "2026-07-23"],
-    ["legal-documents", "2026-08-11"],
+    ["legal-documents", "2026-08-15"],
     ["privacy-policy", "2026-07-23"],
-    ["subprocessors", "2026-08-11"],
+    ["subprocessors", "2026-08-15"],
     ["terms-of-service", "2026-07-23"],
   ]);
 

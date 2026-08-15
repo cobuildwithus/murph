@@ -85,6 +85,7 @@ import {
   assistantOutboxIntentMatchesDispatchOwner,
   persistAssistantOutboxIntentDeliveryPendingConfirmation,
   persistAssistantOutboxIntentLinqAppCardTextFallback,
+  preserveAssistantOutboxAcceptedMediaDeliveryOrder,
   resetAssistantOutboxPreparedDispatch,
   rescheduleAssistantOutboxConfirmationRetry,
   sameAssistantChannelDelivery,
@@ -275,6 +276,7 @@ export type AssistantOutboxCreateIntentInput = {
   nativeReplyRequested?: AssistantOutboxIntent['nativeReplyRequested']
   groupEmailAuthorizationProof?: string | null
   operation?: AssistantOutboxOperation | null
+  privateCompletionContinuitySessionId?: string | null
   replyToMessageId?: string | null
   sessionId: string
   subject?: string | null
@@ -485,6 +487,12 @@ export async function createAssistantOutboxIntent(
       answeredMailboxItemIds,
       reviewedAssistantAskCompletionExpiresAt:
         input.reviewedAssistantAskCompletionExpiresAt ?? undefined,
+      ...(input.privateCompletionContinuitySessionId === undefined
+        ? {}
+        : {
+            privateCompletionContinuitySessionId:
+              input.privateCompletionContinuitySessionId,
+          }),
       lastError: null,
     })
     const persistedIntent = assistantOutboxIntentSchema.parse(
@@ -709,6 +717,14 @@ async function dispatchAssistantOutboxIntentInternal(input: DispatchAssistantOut
       }
     }
 
+    if (resolvePersistedAssistantOutboxDelivery(intent)) {
+      return {
+        action: 'reconcile' as const,
+        intent,
+        intentPath,
+      }
+    }
+
     if (
       (
         intent.status === 'retryable' ||
@@ -815,6 +831,10 @@ async function dispatchAssistantOutboxIntentInternal(input: DispatchAssistantOut
       resolvePersistedAssistantOutboxDelivery(prepared.intent)
     if (recoveredDelivery) {
       const sentIntent = await markAssistantOutboxIntentSent({
+        completedAt: resolveRecoveredAssistantOutboxDeliveryCompletedAt({
+          delivery: recoveredDelivery,
+          intent: prepared.intent,
+        }),
         delivery: recoveredDelivery,
         intent: prepared.intent,
         intentPath: prepared.intentPath,
@@ -876,6 +896,10 @@ async function dispatchAssistantOutboxIntentInternal(input: DispatchAssistantOut
       resolvePersistedAssistantOutboxDelivery(prepared.intent)
     if (recoveredDelivery) {
       const sentIntent = await markAssistantOutboxIntentSent({
+        completedAt: resolveRecoveredAssistantOutboxDeliveryCompletedAt({
+          delivery: recoveredDelivery,
+          intent: prepared.intent,
+        }),
         delivery: recoveredDelivery,
         intent: prepared.intent,
         intentPath: prepared.intentPath,
@@ -926,6 +950,10 @@ async function dispatchAssistantOutboxIntentInternal(input: DispatchAssistantOut
       resolvePersistedAssistantOutboxDelivery(dispatchIntent)
     if (reconciledDelivery) {
       const sentIntent = await markAssistantOutboxIntentSent({
+        completedAt: resolveRecoveredAssistantOutboxDeliveryCompletedAt({
+          delivery: reconciledDelivery,
+          intent: dispatchIntent,
+        }),
         delivery: reconciledDelivery,
         intent: dispatchIntent,
         intentPath: dispatchIntentPath,
@@ -1021,11 +1049,16 @@ async function dispatchAssistantOutboxIntentInternal(input: DispatchAssistantOut
       ...dispatchIntent,
       vault: input.vault,
     })
-    const delivery = assistantChannelDeliverySchema.parse({
+    const completedDelivery = assistantChannelDeliverySchema.parse({
       ...delivered.delivery,
       idempotencyKey:
         delivered.delivery.idempotencyKey ??
         dispatchIntent.deliveryIdempotencyKey,
+    })
+    const completedAt = completedDelivery.sentAt
+    const delivery = preserveAssistantOutboxAcceptedMediaDeliveryOrder({
+      delivery: completedDelivery,
+      intent: effectiveDispatchIntent,
     })
     deliveryTransportIdempotent =
       dispatchIntent.deliveryTransportIdempotent ||
@@ -1049,6 +1082,7 @@ async function dispatchAssistantOutboxIntentInternal(input: DispatchAssistantOut
 
     const durableDeliveredIntent =
       await persistAssistantOutboxIntentDeliveryPendingConfirmation({
+        completedAt,
         delivery,
         deliveryTransportIdempotent,
         intent: deliveredIntent,
@@ -1082,6 +1116,7 @@ async function dispatchAssistantOutboxIntentInternal(input: DispatchAssistantOut
     })
     preparedDispatchReserved = false
     const sentIntent = await markAssistantOutboxIntentSent({
+      completedAt,
       delivery,
       intent: deliveredOwnerIntent,
       intentPath: dispatchIntentPath,
@@ -1094,7 +1129,6 @@ async function dispatchAssistantOutboxIntentInternal(input: DispatchAssistantOut
         session: null,
       }
     }
-
     return {
       intent: sentIntent,
       deliveryError: null,
@@ -1221,6 +1255,7 @@ export async function deliverAssistantOutboxMessage(input: {
   media?: readonly AssistantResponseMedia[] | null
   message: string
   nativeReplyRequested?: AssistantOutboxIntent['nativeReplyRequested']
+  privateCompletionContinuitySessionId?: string | null
   subject?: string | null
   replyToMessageId?: string | null
   signal?: AbortSignal
@@ -1254,6 +1289,12 @@ export async function deliverAssistantOutboxMessage(input: {
     identityId: input.identityId,
     media: input.media,
     message: input.message,
+    ...(input.privateCompletionContinuitySessionId === undefined
+      ? {}
+      : {
+          privateCompletionContinuitySessionId:
+            input.privateCompletionContinuitySessionId,
+        }),
     ...(input.nativeReplyRequested === undefined
       ? {}
       : { nativeReplyRequested: input.nativeReplyRequested }),
@@ -2248,6 +2289,15 @@ function resolvePersistedAssistantOutboxDelivery(
   }
 
   return intent.delivery
+}
+
+function resolveRecoveredAssistantOutboxDeliveryCompletedAt(input: {
+  delivery: AssistantChannelDelivery
+  intent: AssistantOutboxIntent
+}): string {
+  return resolvePersistedAssistantOutboxDelivery(input.intent)
+    ? input.intent.updatedAt
+    : input.delivery.sentAt
 }
 
 function shouldFailClosedAssistantOutboxStaleSendingIntent(

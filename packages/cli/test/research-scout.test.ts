@@ -352,12 +352,14 @@ describe('research scout', () => {
     const [target, init] = fetchImpl.mock.calls[0] ?? []
     expect(String(target)).toBe('https://api.exa.ai/search')
     expect(init?.method).toBe('POST')
+    expect(init?.redirect).toBe('error')
     const headers = new Headers(init?.headers)
     expect(headers.get('x-api-key')).toBe('exa-test-token')
     expect(headers.get('content-type')).toBe('application/json; charset=utf-8')
 
     const requestBody = JSON.parse(String(init?.body)) as {
       category?: unknown
+      contents?: unknown
       endPublishedDate?: unknown
       numResults?: unknown
       outputSchema?: {
@@ -377,6 +379,7 @@ describe('research scout', () => {
     }
     expect(requestBody.type).toBe('deep-reasoning')
     expect(requestBody.category).toBe('research paper')
+    expect(requestBody.contents).toBeUndefined()
     expect(requestBody.startPublishedDate).toBe(RESEARCH_SCOUT_INPUT.since)
     expect(requestBody.endPublishedDate).toBe(RESEARCH_SCOUT_INPUT.until)
     expect(requestBody.numResults).toBe(2)
@@ -407,6 +410,87 @@ describe('research scout', () => {
       tokenSource: 'env',
     })
     expect(result.response).toEqual(providerPayload)
+  })
+
+  it('cancels rejected Exa bodies without exposing provider text', async () => {
+    const cancel = vi.fn()
+    const fetchImpl = vi.fn<typeof fetch>(async () => new Response(
+      new ReadableStream({ cancel }),
+      { status: 503 },
+    ))
+
+    await expect(fetchExaResearchScoutCandidates(RESEARCH_SCOUT_INPUT, {
+      env: { EXA_API_KEY: 'exa-test-token' },
+      fetchImpl,
+    })).rejects.toMatchObject({
+      code: 'research_exa_request_failed',
+      context: expect.objectContaining({ status: 503 }),
+    })
+
+    expect(fetchImpl).toHaveBeenCalledTimes(1)
+    expect(fetchImpl.mock.calls[0]?.[1]?.redirect).toBe('error')
+    expect(cancel).toHaveBeenCalledOnce()
+  })
+
+  it('composes caller cancellation without retrying or exposing the abort reason', async () => {
+    const controller = new AbortController()
+    const fetchImpl = vi.fn<typeof fetch>(async (_target, init) => {
+      const signal = init?.signal
+      if (!signal) {
+        throw new Error('Expected the Exa request to carry an abort signal.')
+      }
+      return await new Promise<Response>((_resolve, reject) => {
+        const rejectOnAbort = () => reject(signal.reason)
+        if (signal.aborted) {
+          rejectOnAbort()
+          return
+        }
+        signal.addEventListener('abort', rejectOnAbort, { once: true })
+      })
+    })
+
+    const request = fetchExaResearchScoutCandidates(RESEARCH_SCOUT_INPUT, {
+      env: { EXA_API_KEY: 'exa-test-token' },
+      fetchImpl,
+      signal: controller.signal,
+    })
+    controller.abort(new Error('private caller abort reason'))
+
+    await expect(request).rejects.toMatchObject({
+      code: 'research_exa_request_failed',
+      context: {
+        abortedByCaller: true,
+        failureStage: 'request',
+        timedOut: false,
+      },
+      message: 'Exa research scout request was aborted.',
+      name: 'VaultCliError',
+    } satisfies Partial<VaultCliError>)
+    await expect(request).rejects.not.toThrow(/private caller abort reason/u)
+    expect(fetchImpl).toHaveBeenCalledTimes(1)
+  })
+
+  it('returns redacted structured HTTP failures without retries', async () => {
+    const fetchImpl = vi.fn<typeof fetch>(async () => jsonResponse({
+      message: 'echoed private query and exa-test-token',
+    }, 429))
+
+    const request = fetchExaResearchScoutCandidates(RESEARCH_SCOUT_INPUT, {
+      env: { EXA_API_KEY: 'exa-test-token' },
+      fetchImpl,
+    })
+
+    await expect(request).rejects.toMatchObject({
+      code: 'research_exa_request_failed',
+      context: {
+        failureStage: 'response',
+        status: 429,
+      },
+      message: 'Exa research scout request failed.',
+      name: 'VaultCliError',
+    } satisfies Partial<VaultCliError>)
+    await expect(request).rejects.not.toThrow(/echoed private query|exa-test-token/u)
+    expect(fetchImpl).toHaveBeenCalledTimes(1)
   })
 
   it('posts one bounded research-paper search for each batch lane', async () => {

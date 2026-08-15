@@ -32,6 +32,7 @@ export const HOSTED_CRYPTO_LANES = [
   "device-sync-provider-application",
   "device-sync-external-account-id",
   "device-sync-payload",
+  "device-webhook-transport",
   "mailbox-payload",
   "email-raw",
   "meal-photo",
@@ -59,6 +60,7 @@ export const HOSTED_CRYPTO_LANE_DOMAINS: Record<
   "device-sync-payload": "device",
   "device-sync-provider-application": "device",
   "device-sync-token": "device",
+  "device-webhook-transport": "ingress",
   "email-raw": "ingress",
   "hosted-member-private-field": "control",
   "hosted-inference-connection": "control",
@@ -660,7 +662,12 @@ export async function verifyHostedDomainRootEnvelopeSignatureWithPublicKey(input
   publicKeyPem: string;
 }): Promise<boolean> {
   const publicKey = await importP256PublicKeyFromPem(input.publicKeyPem);
-  const signature = normalizeP256EcdsaSignature(decodeBase64(input.envelope.authoritySignature.signature));
+  const signature = tryNormalizeHostedDomainRootEnvelopeAuthoritySignature(
+    input.envelope.authoritySignature.signature,
+  );
+  if (!signature) {
+    return false;
+  }
   return crypto.subtle.verify(
     { hash: "SHA-256", name: "ECDSA" },
     publicKey,
@@ -809,7 +816,7 @@ function parseHostedGcpKmsWrappedDomainRootKey(
   };
 }
 
-function parseHostedEcdhWrappedDomainRootKey(
+export function parseHostedEcdhWrappedDomainRootKey(
   value: unknown,
   label: string,
 ): HostedEcdhWrappedDomainRootKey {
@@ -1042,7 +1049,7 @@ function normalizeP256PublicJwk(jwk: JsonWebKey, label: string): JsonWebKey {
     || typeof jwk.y !== "string"
     || jwk.x.length === 0
     || jwk.y.length === 0
-    || "d" in jwk
+    || jwk.d !== undefined
   ) {
     throw new TypeError(`${label} must be a public P-256 EC JWK.`);
   }
@@ -1129,6 +1136,16 @@ function normalizeP256EcdsaSignature(signature: Uint8Array): Uint8Array {
     throw new TypeError("ECDSA DER signature contains trailing bytes.");
   }
   return concatBytes(leftPadTo32(r.value), leftPadTo32(s.value));
+}
+
+function tryNormalizeHostedDomainRootEnvelopeAuthoritySignature(
+  signature: string,
+): Uint8Array | null {
+  try {
+    return normalizeP256EcdsaSignature(decodeBase64(signature));
+  } catch {
+    return null;
+  }
 }
 
 function readDerLength(bytes: Uint8Array, offset: number): { length: number; nextOffset: number } {

@@ -14,7 +14,7 @@ import {
 const OUTBOX_RETRY_DELAYS_MS = [30_000, 120_000, 600_000, 1_800_000]
 export const ASSISTANT_OUTBOX_MAX_RETRY_ATTEMPTS = 48
 const STALE_SENDING_AFTER_MS = 10 * 60 * 1000
-const ASSISTANT_DELIVERY_ERROR_DIAGNOSTIC_MAX_KEYS = 24
+const ASSISTANT_DELIVERY_ERROR_DIAGNOSTIC_MAX_KEYS = 40
 const ASSISTANT_DELIVERY_ERROR_DIAGNOSTIC_STRING_MAX_LENGTH = 2048
 const NON_RETRYABLE_OUTBOX_ERROR_CODE_MARKERS = [
   'UNSUPPORTED',
@@ -61,12 +61,33 @@ export function shouldDispatchAssistantOutboxIntent(
       return !Number.isFinite(nextAttemptMs) || nextAttemptMs <= now.getTime()
     }
     case 'sending': {
-      const lastAttemptMs = intent.lastAttemptAt ? Date.parse(intent.lastAttemptAt) : Number.NaN
-      return !Number.isFinite(lastAttemptMs) || now.getTime() - lastAttemptMs >= STALE_SENDING_AFTER_MS
+      const recoveryAt = resolveAssistantOutboxSendingRecoveryAt(intent, now)
+      return recoveryAt !== null && Date.parse(recoveryAt) <= now.getTime()
     }
     default:
       return false
   }
+}
+
+export function resolveAssistantOutboxSendingRecoveryAt(
+  intent: AssistantOutboxIntent,
+  now: Date,
+): string | null {
+  if (intent.status !== 'sending') {
+    return null
+  }
+
+  const lastAttemptMs = intent.lastAttemptAt
+    ? Date.parse(intent.lastAttemptAt)
+    : Number.NaN
+  if (!Number.isFinite(lastAttemptMs)) {
+    return now.toISOString()
+  }
+
+  const recoveryAt = new Date(lastAttemptMs + STALE_SENDING_AFTER_MS)
+  return Number.isFinite(recoveryAt.getTime())
+    ? recoveryAt.toISOString()
+    : now.toISOString()
 }
 
 export function shouldBeginAssistantOutboxDispatch(
@@ -334,8 +355,7 @@ function assistantOutboxErrorCodeIsInternal(code: string): boolean {
   return code.startsWith('ASSISTANT_') ||
     code.startsWith('HOSTED_') ||
     code.startsWith('LINQ_') ||
-    code.startsWith('TELEGRAM_') ||
-    code.startsWith('AGENTMAIL_')
+    code.startsWith('TELEGRAM_')
 }
 
 function assistantOutboxErrorMessageLooksRetryable(message: string): boolean {

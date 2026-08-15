@@ -24,10 +24,10 @@ export default async function Page({
     ? requestedDesignFocus[0]
     : requestedDesignFocus;
 
-  return (
-    <>
+    return (
+      <>
       <DesignPage activeTab={activeTab} designFocus={designFocus} />
-      <SiteFooter />
-    </>
-  );
+      <SiteFooter vitalsMode="synthetic" />
+      </>
+    );
 }

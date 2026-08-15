@@ -11,7 +11,7 @@ stream
 BT /F2 19 Tf 1 0 0 1 54.00 738.00 Tm (Murph Subprocessors, Model Providers, and Connected) Tj ET
 BT /F2 19 Tf 1 0 0 1 54.00 714.00 Tm (Services) Tj ET
 BT /F1 10 Tf 1 0 0 1 54.00 682.00 Tm (Effective Date: April 29, 2026) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 664.00 Tm (Last Updated: August 11, 2026) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 664.00 Tm (Last Updated: August 15, 2026) Tj ET
 BT /F1 10 Tf 1 0 0 1 54.00 646.00 Tm (This document lists subprocessors, model providers, and independent Connected Services that may) Tj ET
 BT /F1 10 Tf 1 0 0 1 54.00 632.00 Tm (process personal information or health data when a hosted feature, integration, or user-directed) Tj ET
 BT /F1 10 Tf 1 0 0 1 54.00 618.00 Tm (workflow uses that provider. Some providers apply only when you enable the related feature.) Tj ET
@@ -95,7 +95,7 @@ BT /F1 10 Tf 1 0 0 1 54.00 186.00 Tm (subprocessor) Tj ET
 endstream
 endobj
 5 0 obj
-<< /Length 5715 >>
+<< /Length 6065 >>
 stream
 BT /F1 10 Tf 1 0 0 1 54.00 738.00 Tm (Provider: Retell AI; Service: Automated or AI-assisted outbound phone calls, voice processing, call) Tj ET
 BT /F1 10 Tf 1 0 0 1 54.00 724.00 Tm (routing, status, and usage reporting.; Data categories: Phone numbers, call instructions and briefs, call) Tj ET
@@ -128,92 +128,87 @@ BT /F1 10 Tf 1 0 0 1 54.00 344.00 Tm (webhook ingress.; Data categories: Telegra
 BT /F1 10 Tf 1 0 0 1 54.00 330.00 Tm (attachments, delivery status, and webhook metadata.; Country/region: Provider-specific;) Tj ET
 BT /F1 10 Tf 1 0 0 1 54.00 316.00 Tm (Murph-authorized model training or secondary use?: No; Retention: Per enabled messaging feature,) Tj ET
 BT /F1 10 Tf 1 0 0 1 54.00 302.00 Tm (provider policy, and Murph retention rules.; Role: Messaging provider / independent connected service) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 284.00 Tm (Provider: AgentMail; Service: Optional email inbox, email sync, attachment retrieval, and outbound email) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 270.00 Tm (delivery.; Data categories: Email address, message headers, message content, attachments, thread) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 256.00 Tm (metadata, and delivery status.; Country/region: Provider-specific; Murph-authorized model training or) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 242.00 Tm (secondary use?: No; Retention: Per enabled email feature, provider policy, and Murph retention rules.;) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 228.00 Tm (Role: Email provider) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 210.00 Tm (Provider: Resend; Service: Transactional and authorized operational email delivery.; Data categories:) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 196.00 Tm (Recipient email address, sender, subject, message content, template or operational metadata, and) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 182.00 Tm (delivery status.; Country/region: Provider-specific; Murph-authorized model training or secondary use?:) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 168.00 Tm (No model training or unrelated secondary use authorized by Murph.; Retention: Per enabled email flow,) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 154.00 Tm (provider policy, and Murph retention rules.; Role: Email provider / subprocessor) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 284.00 Tm (Provider: Resend; Service: Transactional and authorized operational email delivery.; Data categories:) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 270.00 Tm (Recipient email address, sender, subject, message content, template or operational metadata, and) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 256.00 Tm (delivery status.; Country/region: Provider-specific; Murph-authorized model training or secondary use?:) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 242.00 Tm (No model training or unrelated secondary use authorized by Murph.; Retention: Per enabled email flow,) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 228.00 Tm (provider policy, and Murph retention rules.; Role: Email provider / subprocessor) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 210.00 Tm (Provider: Oura; Service: Optional user-authorized wearable and wellness connection through Murph's) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 196.00 Tm (approved processing path.; Data categories: Connection metadata, provider account identifier, sleep,) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 182.00 Tm (readiness, activity, body-state, and physiological data authorized by the user.; Country/region:) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 168.00 Tm (Provider-specific; Murph-authorized model training or secondary use?: No model training or unrelated) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 154.00 Tm (secondary use authorized by Murph. Provider-specific restrictions continue to apply unless covered by) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 140.00 Tm (written authorization.; Retention: Only as necessary for the enabled feature and subject to Oura) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 126.00 Tm (consent, storage, opt-out, and deletion requirements.; Role: Independent Connected Service) Tj ET
 endstream
 endobj
 6 0 obj
-<< /Length 5798 >>
+<< /Length 5800 >>
 stream
-BT /F1 10 Tf 1 0 0 1 54.00 738.00 Tm (Provider: Oura; Service: Optional user-authorized wearable and wellness connection through Murph's) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 724.00 Tm (approved processing path.; Data categories: Connection metadata, provider account identifier, sleep,) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 710.00 Tm (readiness, activity, body-state, and physiological data authorized by the user.; Country/region:) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 696.00 Tm (Provider-specific; Murph-authorized model training or secondary use?: No model training or unrelated) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 682.00 Tm (secondary use authorized by Murph. Provider-specific restrictions continue to apply unless covered by) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 668.00 Tm (written authorization.; Retention: Only as necessary for the enabled feature and subject to Oura) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 654.00 Tm (consent, storage, opt-out, and deletion requirements.; Role: Independent Connected Service) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 636.00 Tm (Provider: WHOOP; Service: Optional user-authorized wearable, recovery, sleep, cycle, workout, profile,) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 622.00 Tm (and body-measurement connection.; Data categories: Connection metadata, provider account identifier,) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 608.00 Tm (profile, body measurement, sleep, recovery, cycle, workout, and related authorized data.;) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 594.00 Tm (Country/region: Provider-specific; Murph-authorized model training or secondary use?: No training or) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 580.00 Tm (unrelated secondary use authorized by Murph. Disclosure to model providers or other recipients requires) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 566.00 Tm (the applicable user permission and a use allowed by WHOOP's terms.; Retention: Only as permitted by) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 552.00 Tm (WHOOP, applicable cache controls, user authorization, and Murph deletion rules.; Role: Independent) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 538.00 Tm (Connected Service) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 520.00 Tm (Provider: Garmin; Service: Optional user-authorized health and activity connection, directly or through) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 506.00 Tm (an approved synchronization provider such as Junction.; Data categories: Connection metadata, provider) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 492.00 Tm (account identifier, activity, sleep, heart rate, stress, respiration, body, location-related, and other data) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 478.00 Tm (authorized by the user.; Country/region: Provider-specific; Murph-authorized model training or) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 464.00 Tm (secondary use?: No model training or unrelated secondary use authorized by Murph. Processing depends) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 450.00 Tm (on the applicable Garmin and synchronization-provider agreements and user consent.; Retention: Per the) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 436.00 Tm (applicable Garmin and synchronization-provider contract, source permissions, and Murph deletion rules.;) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 422.00 Tm (Role: Independent Connected Service / upstream source) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 404.00 Tm (Provider: Strava; Service: Existing user-authorized activity connection lifecycle support; new) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 390.00 Tm (connections and reconnect offers are currently disabled.; Data categories: Connection metadata, athlete) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 376.00 Tm (identifier, activities, workouts, routes or location-related data, and related authorized metadata.;) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 362.00 Tm (Country/region: Provider-specific; Murph-authorized model training or secondary use?: No model) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 348.00 Tm (training or unrelated secondary use authorized by Murph. Provider-specific restrictions continue to) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 334.00 Tm (apply unless covered by written authorization.; Retention: Subject to Strava's applicable cache, display,) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 320.00 Tm (revocation, and deletion requirements.; Role: Independent Connected Service) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 302.00 Tm (Provider: Configured clinical-record providers; Service: Optional user-authorized clinical-record) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 288.00 Tm (connection and retrieval.; Data categories: Patient-context and authorization metadata, clinical-record) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 274.00 Tm (data and files requested by the user, retrieval status, and operational metadata.; Country/region:) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 260.00 Tm (Provider-specific; Murph-authorized model training or secondary use?: No for Murph-directed) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 246.00 Tm (processing; Retention: Per active connection, provider policy and settings, and Murph retention and) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 232.00 Tm (deletion rules.; Role: Connected service / subprocessor or independent provider, depending on the) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 218.00 Tm (integration) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 200.00 Tm (Provider: Mapbox; Service: Optional routing, geocoding, directions, and map enrichment requested by the) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 186.00 Tm (user.; Data categories: Route inputs, approximate locations, directions requests, and operational) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 172.00 Tm (metadata.; Country/region: Provider-specific; Murph-authorized model training or secondary use?: No) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 158.00 Tm (for Murph health data; Retention: Temporary request processing under Murph feature limits and) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 144.00 Tm (provider policy.; Role: Feature provider / subprocessor) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 738.00 Tm (Provider: WHOOP; Service: Optional user-authorized wearable, recovery, sleep, cycle, workout, profile,) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 724.00 Tm (and body-measurement connection.; Data categories: Connection metadata, provider account identifier,) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 710.00 Tm (profile, body measurement, sleep, recovery, cycle, workout, and related authorized data.;) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 696.00 Tm (Country/region: Provider-specific; Murph-authorized model training or secondary use?: No training or) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 682.00 Tm (unrelated secondary use authorized by Murph. Disclosure to model providers or other recipients requires) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 668.00 Tm (the applicable user permission and a use allowed by WHOOP's terms.; Retention: Only as permitted by) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 654.00 Tm (WHOOP, applicable cache controls, user authorization, and Murph deletion rules.; Role: Independent) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 640.00 Tm (Connected Service) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 622.00 Tm (Provider: Garmin; Service: Optional user-authorized health and activity connection, directly or through) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 608.00 Tm (an approved synchronization provider such as Junction.; Data categories: Connection metadata, provider) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 594.00 Tm (account identifier, activity, sleep, heart rate, stress, respiration, body, location-related, and other data) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 580.00 Tm (authorized by the user.; Country/region: Provider-specific; Murph-authorized model training or) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 566.00 Tm (secondary use?: No model training or unrelated secondary use authorized by Murph. Processing depends) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 552.00 Tm (on the applicable Garmin and synchronization-provider agreements and user consent.; Retention: Per the) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 538.00 Tm (applicable Garmin and synchronization-provider contract, source permissions, and Murph deletion rules.;) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 524.00 Tm (Role: Independent Connected Service / upstream source) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 506.00 Tm (Provider: Strava; Service: Existing user-authorized activity connection lifecycle support; new) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 492.00 Tm (connections and reconnect offers are currently disabled.; Data categories: Connection metadata, athlete) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 478.00 Tm (identifier, activities, workouts, routes or location-related data, and related authorized metadata.;) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 464.00 Tm (Country/region: Provider-specific; Murph-authorized model training or secondary use?: No model) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 450.00 Tm (training or unrelated secondary use authorized by Murph. Provider-specific restrictions continue to) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 436.00 Tm (apply unless covered by written authorization.; Retention: Subject to Strava's applicable cache, display,) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 422.00 Tm (revocation, and deletion requirements.; Role: Independent Connected Service) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 404.00 Tm (Provider: Configured clinical-record providers; Service: Optional user-authorized clinical-record) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 390.00 Tm (connection and retrieval.; Data categories: Patient-context and authorization metadata, clinical-record) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 376.00 Tm (data and files requested by the user, retrieval status, and operational metadata.; Country/region:) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 362.00 Tm (Provider-specific; Murph-authorized model training or secondary use?: No for Murph-directed) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 348.00 Tm (processing; Retention: Per active connection, provider policy and settings, and Murph retention and) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 334.00 Tm (deletion rules.; Role: Connected service / subprocessor or independent provider, depending on the) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 320.00 Tm (integration) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 302.00 Tm (Provider: Mapbox; Service: Optional routing, geocoding, directions, and map enrichment requested by the) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 288.00 Tm (user.; Data categories: Route inputs, approximate locations, directions requests, and operational) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 274.00 Tm (metadata.; Country/region: Provider-specific; Murph-authorized model training or secondary use?: No) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 260.00 Tm (for Murph health data; Retention: Temporary request processing under Murph feature limits and) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 246.00 Tm (provider policy.; Role: Feature provider / subprocessor) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 228.00 Tm (Provider: Configured search providers; Service: Optional user-requested search, retrieval, or) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 214.00 Tm (source-discovery features.; Data categories: Feature-specific search queries, result snippets, source) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 200.00 Tm (URLs, health context needed for the requested feature, and operational metadata.; Country/region:) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 186.00 Tm (Provider-specific; Murph-authorized model training or secondary use?: Murph does not send health data) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 172.00 Tm (to search providers unless the feature requires it, the user requests it, and applicable) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 158.00 Tm (no-training/no-secondary-use controls are in place.; Retention: Limited to service delivery, security, and) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 144.00 Tm (troubleshooting under applicable provider controls.; Role: Deployment-configured feature provider) Tj ET
 endstream
 endobj
 7 0 obj
-<< /Length 3309 >>
+<< /Length 2304 >>
 stream
-BT /F1 10 Tf 1 0 0 1 54.00 738.00 Tm (Provider: Configured search providers; Service: Optional user-requested search, retrieval, or) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 724.00 Tm (source-discovery features.; Data categories: Feature-specific search queries, result snippets, source) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 710.00 Tm (URLs, health context needed for the requested feature, and operational metadata.; Country/region:) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 696.00 Tm (Provider-specific; Murph-authorized model training or secondary use?: Murph does not send health data) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 682.00 Tm (to search providers unless the feature requires it, the user requests it, and applicable) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 668.00 Tm (no-training/no-secondary-use controls are in place.; Retention: Limited to service delivery, security, and) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 654.00 Tm (troubleshooting under applicable provider controls.; Role: Deployment-configured feature provider) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 636.00 Tm (Provider: Deployment-configured transcription and parsing providers; Service: Optional transcription,) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 622.00 Tm (parsing, routing, or enrichment features requested by the user.; Data categories: Feature-specific) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 608.00 Tm (prompts, files, audio, extracted text, and operational metadata.; Country/region: Provider-specific;) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 594.00 Tm (Murph-authorized model training or secondary use?: No for Murph-managed health data when applicable) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 580.00 Tm (no-training controls are in place.; Retention: Limited to service delivery, security, and troubleshooting) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 566.00 Tm (under applicable provider controls.; Role: Deployment-configured feature provider) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 548.00 Tm (This register distinguishes Murph subprocessors from independent Connected Services. An independent) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 534.00 Tm (Connected Service may receive information from you or Murph under its own terms and privacy policy,) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 520.00 Tm (and its requirements may limit the features Murph can provide for that source.) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 502.00 Tm (User-selected healthcare, laboratory, wellness, retail, or portal services are not Murph subprocessors) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 488.00 Tm (merely because you ask Murph to contact them or upload a lawful export from them. Murph does not) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 474.00 Tm (represent that it is affiliated with or endorsed by those services. When a service prohibits automated) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 460.00 Tm (extraction, Murph requires a provider-approved integration or a user-controlled export rather than) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 446.00 Tm (scraping or robotic retrieval.) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 428.00 Tm (Connected services may also process data as independent providers under their own privacy policies) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 414.00 Tm (when you choose to connect or share data with them. The Murph Privacy Policy explains those) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 400.00 Tm (boundaries and how to exercise privacy rights.) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 738.00 Tm (Provider: Deployment-configured transcription and parsing providers; Service: Optional transcription,) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 724.00 Tm (parsing, routing, or enrichment features requested by the user.; Data categories: Feature-specific) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 710.00 Tm (prompts, files, audio, extracted text, and operational metadata.; Country/region: Provider-specific;) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 696.00 Tm (Murph-authorized model training or secondary use?: No for Murph-managed health data when applicable) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 682.00 Tm (no-training controls are in place.; Retention: Limited to service delivery, security, and troubleshooting) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 668.00 Tm (under applicable provider controls.; Role: Deployment-configured feature provider) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 650.00 Tm (This register distinguishes Murph subprocessors from independent Connected Services. An independent) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 636.00 Tm (Connected Service may receive information from you or Murph under its own terms and privacy policy,) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 622.00 Tm (and its requirements may limit the features Murph can provide for that source.) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 604.00 Tm (User-selected healthcare, laboratory, wellness, retail, or portal services are not Murph subprocessors) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 590.00 Tm (merely because you ask Murph to contact them or upload a lawful export from them. Murph does not) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 576.00 Tm (represent that it is affiliated with or endorsed by those services. When a service prohibits automated) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 562.00 Tm (extraction, Murph requires a provider-approved integration or a user-controlled export rather than) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 548.00 Tm (scraping or robotic retrieval.) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 530.00 Tm (Connected services may also process data as independent providers under their own privacy policies) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 516.00 Tm (when you choose to connect or share data with them. The Murph Privacy Policy explains those) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 502.00 Tm (boundaries and how to exercise privacy rights.) Tj ET
 endstream
 endobj
 8 0 obj
@@ -248,18 +243,18 @@ xref
 0000000154 00000 n 
 0000005505 00000 n 
 0000010913 00000 n 
-0000016680 00000 n 
-0000022530 00000 n 
-0000025891 00000 n 
-0000026028 00000 n 
-0000026165 00000 n 
-0000026303 00000 n 
-0000026441 00000 n 
-0000026579 00000 n 
-0000026664 00000 n 
-0000026845 00000 n 
+0000017030 00000 n 
+0000022882 00000 n 
+0000025238 00000 n 
+0000025375 00000 n 
+0000025512 00000 n 
+0000025650 00000 n 
+0000025788 00000 n 
+0000025926 00000 n 
+0000026011 00000 n 
+0000026192 00000 n 
 trailer
 << /Size 16 /Root 15 0 R /Info 14 0 R >>
 startxref
-26896
+26243
 %%EOF
