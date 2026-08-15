@@ -8,6 +8,22 @@ import {
 
 const smokeEnabled = process.env.MURPH_E2E_HEADED_BROWSER_SMOKE === "1";
 
+function createWhoopConfig() {
+  return readHostedLocalJunctionBrowserConfigForTest({
+    CI: "1",
+    NODE_ENV: "test",
+    MURPH_E2E_CONNECT_URL:
+      "https://app.example.test/connect#deviceConnectIntent=opaque&connectSource=whoop",
+    MURPH_E2E_HOSTED_SESSION_COOKIE: "opaque-session",
+    MURPH_E2E_PROVIDER_EMAIL: "browser-canary@example.invalid",
+    MURPH_E2E_PROVIDER_HEADLESS: "0",
+    MURPH_E2E_PROVIDER_PASSWORD: "opaque-password",
+    MURPH_E2E_PROVIDER_SOURCE: "whoop",
+    MURPH_E2E_PROVIDER_TIMEOUT_MS: "30000",
+    MURPH_E2E_WEB_BASE_URL: "https://app.example.test",
+  });
+}
+
 describe("hosted headed browser boundary", () => {
   it.runIf(smokeEnabled)("launches Chromium headed inside the CI virtual display", async () => {
     const browser = await chromium.launch({ headless: false });
@@ -48,19 +64,7 @@ describe("hosted headed browser boundary", () => {
         await expect(page.getByRole("button", { name: /continue/iu }).isEnabled())
           .resolves.toBe(false);
 
-        const config = readHostedLocalJunctionBrowserConfigForTest({
-          CI: "1",
-          NODE_ENV: "test",
-          MURPH_E2E_CONNECT_URL:
-            "https://app.example.test/connect#deviceConnectIntent=opaque&connectSource=whoop",
-          MURPH_E2E_HOSTED_SESSION_COOKIE: "opaque-session",
-          MURPH_E2E_PROVIDER_EMAIL: "browser-canary@example.invalid",
-          MURPH_E2E_PROVIDER_HEADLESS: "0",
-          MURPH_E2E_PROVIDER_PASSWORD: "opaque-password",
-          MURPH_E2E_PROVIDER_SOURCE: "whoop",
-          MURPH_E2E_PROVIDER_TIMEOUT_MS: "30000",
-          MURPH_E2E_WEB_BASE_URL: "https://app.example.test",
-        });
+        const config = createWhoopConfig();
         const readFailure = async (subjectPage: typeof page) => {
           let now = 0;
           const timedPage = new Proxy(subjectPage, {
@@ -124,6 +128,41 @@ describe("hosted headed browser boundary", () => {
           "mainOtherActions=1 childActions=0",
         );
         expect(unknown.failure?.message).not.toContain("synthetic-private-marker");
+      } finally {
+        await browser.close();
+      }
+    },
+    120_000,
+  );
+
+  it.runIf(smokeEnabled)(
+    "uses a denial-safe rendered GRANT label when aria-label masks it",
+    async () => {
+      const browser = await chromium.launch({ headless: false });
+      try {
+        const page = await browser.newPage();
+        await page.route("https://id.whoop.com/**", (route) => route.fulfill({
+          body: [
+            '<button aria-label="Cancel data access" ',
+            'onclick="location.href=\'https://app.example.test/negative\'">',
+            "GRANT</button>",
+            '<button aria-label="Review requested data access" ',
+            'onclick="location.href=\'https://app.example.test/home\'">',
+            "GRANT</button>",
+          ].join(""),
+          contentType: "text/html",
+        }));
+        await page.route("https://app.example.test/**", (route) => route.fulfill({
+          body: "",
+          contentType: "text/html",
+        }));
+        await page.goto("https://id.whoop.com/consent");
+
+        await expect(completeExternalJunctionAuthorizationForTest(
+          page,
+          createWhoopConfig(),
+        )).resolves.toBeUndefined();
+        expect(new URL(page.url()).pathname).toBe("/home");
       } finally {
         await browser.close();
       }

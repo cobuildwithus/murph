@@ -372,18 +372,86 @@ async function clickFirstVisibleAction(
       }
     }
   }
+
+  // WHOOP's documented consent action is rendered as "GRANT", but the live
+  // control can expose a different accessible name. Preserve the accessible-
+  // name path above, then fall back only to the same positive vocabulary on
+  // visible button/link text or value. The shared state reader still vetoes
+  // any control whose combined labeling contains denial wording.
+  const renderedCandidates: Array<Array<{
+    actionText: AuthorizationActionText;
+    control: Locator;
+  }>> = [];
+  for (const role of ["button", "link"] as const) {
+    const controls = page.getByRole(role);
+    const actionTexts = await controls.evaluateAll((elements) =>
+      elements.map((element) => {
+        const rendered = [
+          element instanceof HTMLElement
+            ? element.innerText
+            : element.textContent ?? "",
+          element.getAttribute("value"),
+        ].filter(Boolean).join(" ");
+        return {
+          combined: [element.getAttribute("aria-label"), rendered]
+            .filter(Boolean).join(" "),
+          rendered,
+        };
+      })
+    );
+    const roleCandidates = actionTexts.map((actionText, index) => ({
+      actionText,
+      control: controls.nth(index),
+    }));
+    renderedCandidates.push(roleCandidates);
+  }
+  for (const name of names) {
+    for (const roleCandidates of renderedCandidates) {
+      for (const candidate of roleCandidates) {
+        if (
+          !name.test(candidate.actionText.rendered)
+          || await readAuthorizationActionState(
+            candidate.control,
+            candidate.actionText,
+          ) !== "enabled"
+        ) {
+          continue;
+        }
+        await candidate.control.click();
+        return true;
+      }
+    }
+  }
   return false;
+}
+
+type AuthorizationActionText = {
+  combined: string;
+  rendered: string;
+};
+
+async function readAuthorizationActionText(
+  control: Locator,
+): Promise<AuthorizationActionText> {
+  const [ariaLabel, innerText, value] = await Promise.all([
+    control.getAttribute("aria-label").catch(() => null),
+    control.innerText().catch(() => ""),
+    control.getAttribute("value").catch(() => null),
+  ]);
+  const rendered = [innerText, value].filter(Boolean).join(" ");
+  return {
+    combined: [ariaLabel, rendered].filter(Boolean).join(" "),
+    rendered,
+  };
 }
 
 async function readAuthorizationActionState(
   control: Locator,
+  knownText?: AuthorizationActionText,
 ): Promise<"disabled" | "enabled" | null> {
-  const actionText = [
-    await control.getAttribute("aria-label").catch(() => null),
-    await control.innerText().catch(() => ""),
-  ].filter(Boolean).join(" ");
+  const actionText = knownText ?? await readAuthorizationActionText(control);
   if (
-    NEGATIVE_AUTH_ACTION_PATTERN.test(actionText)
+    NEGATIVE_AUTH_ACTION_PATTERN.test(actionText.combined)
     || !await control.isVisible().catch(() => false)
   ) {
     return null;

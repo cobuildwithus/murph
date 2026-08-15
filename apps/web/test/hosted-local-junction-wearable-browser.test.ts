@@ -26,6 +26,7 @@ function createConfig(environment: Record<string, string | undefined> = {}) {
 function emptyLocator() {
   return {
     count: vi.fn(async () => 0),
+    evaluateAll: vi.fn(async () => []),
     nth: vi.fn(),
   };
 }
@@ -42,6 +43,10 @@ function actionLocator(click: () => void) {
   };
   return {
     count: vi.fn(async () => 1),
+    evaluateAll: vi.fn(async () => [{
+      combined: "Continue",
+      rendered: "Continue",
+    }]),
     nth: vi.fn(() => action),
   };
 }
@@ -49,16 +54,31 @@ function actionLocator(click: () => void) {
 function roleLocator(
   controls: Array<{
     accessibleName?: string;
+    ariaLabel?: string;
     checked?: boolean;
     enabled?: boolean;
+    onClick?: () => void;
     text: string;
+    value?: string;
     visible?: boolean;
   }>,
 ) {
   return {
     count: vi.fn(async () => controls.length),
+    evaluateAll: vi.fn(async () => controls.map((control) => {
+      const rendered = [control.text, control.value].filter(Boolean).join(" ");
+      return {
+        combined: [control.ariaLabel, rendered].filter(Boolean).join(" "),
+        rendered,
+      };
+    })),
     nth: vi.fn((index: number) => ({
-      getAttribute: vi.fn(async () => null),
+      click: vi.fn(async () => controls[index]?.onClick?.()),
+      getAttribute: vi.fn(async (name: string) => {
+        if (name === "aria-label") return controls[index]?.ariaLabel ?? null;
+        if (name === "value") return controls[index]?.value ?? null;
+        return null;
+      }),
       innerText: vi.fn(async () => controls[index]?.text ?? ""),
       isChecked: vi.fn(async () => controls[index]?.checked ?? false),
       isEnabled: vi.fn(async () => controls[index]?.enabled ?? true),
@@ -183,6 +203,55 @@ describe("hosted-local Junction wearable browser authorization", () => {
     )).resolves.toBeUndefined();
     expect(actionClicked).toBe(true);
     expect(now).toBe(28_750);
+  });
+
+  it("uses denial-safe rendered text when the accessible name masks GRANT", async () => {
+    let atMurph = false;
+    let positiveClicked = false;
+    let negativeClicked = false;
+    let now = 0;
+    const mainFrame = authorizationFrame({
+      buttons: [
+        {
+          accessibleName: "Cancel data access",
+          ariaLabel: "Cancel data access",
+          onClick: () => {
+            negativeClicked = true;
+          },
+          text: "GRANT",
+        },
+        {
+          accessibleName: "Review requested data access",
+          ariaLabel: "Review requested data access",
+          onClick: () => {
+            positiveClicked = true;
+            atMurph = true;
+          },
+          text: "GRANT",
+        },
+      ],
+    });
+    const page = {
+      frames: () => [mainFrame],
+      getByRole: mainFrame.getByRole,
+      locator: vi.fn(() => emptyLocator()),
+      title: vi.fn(async () => "Authorize"),
+      url: () => atMurph
+        ? "https://app.example.test/home"
+        : "https://id.whoop.com/consent",
+      waitForTimeout: vi.fn(async (duration: number) => {
+        now += duration;
+      }),
+    };
+
+    await expect(completeExternalJunctionAuthorizationForTest(
+      page as never,
+      createConfig(),
+      () => now,
+    )).resolves.toBeUndefined();
+    expect(negativeClicked).toBe(false);
+    expect(positiveClicked).toBe(true);
+    expect(now).toBe(750);
   });
 
   it.each(["true", " TRUE ", "1"])(
