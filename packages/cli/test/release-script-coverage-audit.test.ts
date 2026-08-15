@@ -2255,6 +2255,36 @@ printf '%s|%s|%s|%s|%s\n' \
       expect(defaultBackgroundMode).toBe('balanced')
       expect(defaultDisplayMode).toBe('headful')
 
+      rmSync(
+        path.join(
+          harnessRoot,
+          'Library',
+          'Application Support',
+          'MurphReviewGPT',
+          'Vonneumann',
+          'SingletonLock',
+        ),
+      )
+      writeHarnessFile(
+        harnessRoot,
+        'Library/Application Support/MurphReviewGPT/Mountain/SingletonLock',
+        'locked\n',
+      )
+      const autoVonneumannResult = spawnSync('bash', ['-c', configHarness], {
+        cwd: repoRoot,
+        encoding: 'utf8',
+        env: {
+          ...cleanBrowserPreferenceEnv(),
+          HOME: harnessRoot,
+          REPO_ROOT: repoRoot,
+          XDG_CONFIG_HOME: localConfigRoot,
+        },
+      })
+      expect(autoVonneumannResult.status, autoVonneumannResult.stderr).toBe(0)
+      expect(autoVonneumannResult.stdout.trim()).toBe(
+        'vonneumann|5|/Applications/Brave Browser.app/Contents/MacOS/Brave Browser|balanced|headful',
+      )
+
       const mainResult = spawnSync('bash', ['-c', configHarness], {
         cwd: repoRoot,
         encoding: 'utf8',
