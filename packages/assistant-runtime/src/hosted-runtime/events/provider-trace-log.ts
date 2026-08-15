@@ -37,6 +37,10 @@ const ASSISTANT_CODEX_ACTION_DIAGNOSTICS_TRACE_SCHEMA =
   "murph.assistant-codex-action-diagnostics.v1";
 const ASSISTANT_CODEX_ACTION_DIAGNOSTICS_TRACE_TYPE =
   "assistant.codex.action_diagnostics";
+const ASSISTANT_CODEX_GENERATED_AUDIO_PHASE_TIMING_TRACE_SCHEMA =
+  "murph.assistant-codex-generated-audio-phase-timing.v1";
+const ASSISTANT_CODEX_GENERATED_AUDIO_PHASE_TIMING_TRACE_TYPE =
+  "assistant.codex.generated_audio_phase_timing";
 const HOSTED_ASSISTANT_CODEX_CONTINUATION_VALUES = new Set([
   "explicit-structured-history",
   "provider-state-optimization",
@@ -177,6 +181,27 @@ const HOSTED_ASSISTANT_CODEX_ACTION_KIND_VALUES = new Set([
   "file.change",
   "mcp.tool.call",
   "web.search",
+]);
+const HOSTED_ASSISTANT_GENERATED_AUDIO_DELIVERY_MODE_VALUES = new Set([
+  "deferred",
+  "synchronous",
+]);
+const HOSTED_ASSISTANT_GENERATED_AUDIO_KIND_VALUES = new Set([
+  "song",
+  "voice_memo",
+]);
+const HOSTED_ASSISTANT_GENERATED_AUDIO_OUTCOME_VALUES = new Set([
+  "aborted",
+  "deferred",
+  "generation_failed",
+  "invalid_audio",
+  "succeeded",
+  "upload_failed",
+]);
+const HOSTED_ASSISTANT_GENERATED_AUDIO_TERMINAL_PHASE_VALUES = new Set([
+  "delivery",
+  "generation",
+  "upload",
 ]);
 const HOSTED_ASSISTANT_CODEX_ACTION_TOOL_IDENTIFIER_PART_PATTERN =
   /^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/u;
@@ -458,6 +483,15 @@ function readHostedAssistantProviderDiagnosticTrace(
     return {
       details: actionDiagnostic,
       message: "Hosted assistant Codex action diagnostics captured.",
+    };
+  }
+
+  const generatedAudioTiming =
+    readHostedAssistantCodexGeneratedAudioPhaseTimingTrace(event);
+  if (generatedAudioTiming) {
+    return {
+      details: generatedAudioTiming,
+      message: "Hosted assistant generated-audio phase timing captured.",
     };
   }
 
@@ -1163,6 +1197,131 @@ function readHostedAssistantCodexActionDiagnosticTrace(
   return details;
 }
 
+function readHostedAssistantCodexGeneratedAudioPhaseTimingTrace(
+  event: unknown,
+): HostedExecutionStructuredLogDetails | null {
+  const record = readHostedAssistantProviderRawTraceRecord(event);
+  if (!record) {
+    return null;
+  }
+
+  if (
+    !Object.hasOwn(record, "schema")
+    || record.schema !== ASSISTANT_CODEX_GENERATED_AUDIO_PHASE_TIMING_TRACE_SCHEMA
+    || !Object.hasOwn(record, "type")
+    || record.type !== ASSISTANT_CODEX_GENERATED_AUDIO_PHASE_TIMING_TRACE_TYPE
+  ) {
+    return null;
+  }
+
+  const deliveryMode = readHostedAssistantProviderDiagnosticExactAllowedString(
+    record,
+    "generatedAudioDeliveryMode",
+    HOSTED_ASSISTANT_GENERATED_AUDIO_DELIVERY_MODE_VALUES,
+  );
+  const kind = readHostedAssistantProviderDiagnosticExactAllowedString(
+    record,
+    "generatedAudioKind",
+    HOSTED_ASSISTANT_GENERATED_AUDIO_KIND_VALUES,
+  );
+  const outcome = readHostedAssistantProviderDiagnosticExactAllowedString(
+    record,
+    "generatedAudioOutcome",
+    HOSTED_ASSISTANT_GENERATED_AUDIO_OUTCOME_VALUES,
+  );
+  const terminalPhase = readHostedAssistantProviderDiagnosticExactAllowedString(
+    record,
+    "generatedAudioTerminalPhase",
+    HOSTED_ASSISTANT_GENERATED_AUDIO_TERMINAL_PHASE_VALUES,
+  );
+  if (!deliveryMode || !kind || !outcome || !terminalPhase) {
+    return null;
+  }
+
+  const generationDurationPresent = Object.hasOwn(
+    record,
+    "generatedAudioGenerationDurationMs",
+  );
+  const uploadDurationPresent = Object.hasOwn(
+    record,
+    "generatedAudioUploadDurationMs",
+  );
+  const generationDurationMs = generationDurationPresent
+    ? readHostedAssistantProviderDiagnosticNonnegativeNumber(
+        record,
+        "generatedAudioGenerationDurationMs",
+      )
+    : undefined;
+  const uploadDurationMs = uploadDurationPresent
+    ? readHostedAssistantProviderDiagnosticNonnegativeNumber(
+        record,
+        "generatedAudioUploadDurationMs",
+      )
+    : undefined;
+  if (
+    (generationDurationPresent && typeof generationDurationMs !== "number")
+    || (uploadDurationPresent && typeof uploadDurationMs !== "number")
+  ) {
+    return null;
+  }
+
+  if (deliveryMode === "deferred") {
+    if (
+      outcome !== "deferred"
+      || terminalPhase !== "delivery"
+      || generationDurationMs !== undefined
+      || uploadDurationMs !== undefined
+    ) {
+      return null;
+    }
+  } else {
+    if (
+      outcome === "deferred"
+      || terminalPhase === "delivery"
+      || typeof generationDurationMs !== "number"
+    ) {
+      return null;
+    }
+    if (terminalPhase === "generation") {
+      if (
+        uploadDurationMs !== undefined
+        || (
+          outcome !== "aborted"
+          && outcome !== "generation_failed"
+          && outcome !== "invalid_audio"
+        )
+      ) {
+        return null;
+      }
+    } else if (
+      typeof uploadDurationMs !== "number"
+      || (
+        outcome !== "aborted"
+        && outcome !== "succeeded"
+        && outcome !== "upload_failed"
+      )
+    ) {
+      return null;
+    }
+  }
+
+  return {
+    generatedAudioDeliveryMode: deliveryMode,
+    ...(generationDurationMs === undefined
+      ? {}
+      : { generatedAudioGenerationDurationMs: generationDurationMs }),
+    generatedAudioKind: kind,
+    generatedAudioOutcome: outcome,
+    generatedAudioTerminalPhase: terminalPhase,
+    ...(uploadDurationMs === undefined
+      ? {}
+      : { generatedAudioUploadDurationMs: uploadDurationMs }),
+    generatedAudioTraceType: "phase-timing",
+    providerTraceKind: "codex.generated_audio_phase_timing",
+    schema: ASSISTANT_CODEX_GENERATED_AUDIO_PHASE_TIMING_TRACE_SCHEMA,
+  };
+}
+
 function readHostedAssistantProviderRawTraceRecord(
   event: unknown,
 ): Record<string, unknown> | null {
@@ -1272,6 +1431,21 @@ function readHostedAssistantProviderDiagnosticAllowedString(
 
   const stringValue = readHostedAssistantProviderPlanString(record, key);
   return stringValue && allowedValues.has(stringValue) ? stringValue : undefined;
+}
+
+function readHostedAssistantProviderDiagnosticExactAllowedString(
+  record: Record<string, unknown>,
+  key: string,
+  allowedValues: ReadonlySet<string>,
+): string | undefined {
+  if (!Object.hasOwn(record, key)) {
+    return undefined;
+  }
+
+  const value = record[key];
+  return typeof value === "string" && allowedValues.has(value)
+    ? value
+    : undefined;
 }
 
 function readHostedAssistantProviderDiagnosticText(
