@@ -14,6 +14,72 @@ export interface HostedDeviceSyncSourceLifecycleState {
   status: DeviceConnectionSourceStatus;
 }
 
+export interface HostedDeviceSyncSourceIdentity {
+  firstSeenAt?: string | null;
+  sourceInstanceKey?: string | null;
+  sourceProviderSlug: string;
+}
+
+export interface HostedDeviceSyncSourceIdentityState
+  extends HostedDeviceSyncSourceIdentity, HostedDeviceSyncSourceLifecycleState {}
+
+export function compareHostedDeviceSyncSourceIdentity(
+  left: HostedDeviceSyncSourceIdentity,
+  right: HostedDeviceSyncSourceIdentity,
+): number {
+  const leftFirstSeenRank = parseHostedDeviceSyncSourceIdentityTimestamp(
+    left.firstSeenAt,
+  );
+  const rightFirstSeenRank = parseHostedDeviceSyncSourceIdentityTimestamp(
+    right.firstSeenAt,
+  );
+  return leftFirstSeenRank !== rightFirstSeenRank
+    ? leftFirstSeenRank - rightFirstSeenRank
+    : (left.sourceInstanceKey ?? "").localeCompare(right.sourceInstanceKey ?? "")
+      || left.sourceProviderSlug.localeCompare(right.sourceProviderSlug);
+}
+
+export function dedupeHostedDeviceSyncSourcesByIdentity<
+  T extends HostedDeviceSyncSourceIdentityState,
+>(
+  sources: readonly T[],
+  areEquivalent: (left: T, right: T) => boolean,
+): T[] {
+  const deduped: T[] = [];
+  for (const source of sources) {
+    const existingIndex = deduped.findIndex((candidate) =>
+      areEquivalent(candidate, source)
+    );
+    if (existingIndex === -1) {
+      deduped.push(source);
+      continue;
+    }
+
+    const existing = deduped[existingIndex];
+    if (!existing) {
+      continue;
+    }
+    const identitySource = compareHostedDeviceSyncSourceIdentity(source, existing) < 0
+      ? source
+      : existing;
+    const { lastDataAt, lifecycleSource } = consolidateHostedDeviceSyncSourceState([
+      existing,
+      source,
+    ]);
+    const consolidated = { ...lifecycleSource };
+    consolidated.firstSeenAt = identitySource.firstSeenAt;
+    consolidated.lastDataAt = lastDataAt;
+    consolidated.sourceProviderSlug = identitySource.sourceProviderSlug;
+    if (identitySource.sourceInstanceKey) {
+      consolidated.sourceInstanceKey = identitySource.sourceInstanceKey;
+    } else {
+      delete consolidated.sourceInstanceKey;
+    }
+    deduped[existingIndex] = consolidated;
+  }
+  return deduped;
+}
+
 export function consolidateHostedDeviceSyncSourceState<
   T extends HostedDeviceSyncSourceLifecycleState,
 >(sources: readonly [T, ...T[]]): {
@@ -79,6 +145,16 @@ function parseHostedDeviceSyncSourceTimestamp(value: string): number {
     throw hostedSourceStateUnavailable();
   }
   return timestamp;
+}
+
+function parseHostedDeviceSyncSourceIdentityTimestamp(
+  value: string | null | undefined,
+): number {
+  if (value === null || value === undefined) {
+    return Number.POSITIVE_INFINITY;
+  }
+  const timestamp = Date.parse(value);
+  return Number.isFinite(timestamp) ? timestamp : Number.POSITIVE_INFINITY;
 }
 
 function haveEqualHostedDeviceSyncSourceLifecycleState(

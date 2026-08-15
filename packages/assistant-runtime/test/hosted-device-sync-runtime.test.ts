@@ -1476,6 +1476,160 @@ describe("hosted device-sync runtime", () => {
     }
   });
 
+  test.each([
+    { order: "newest-first", reverse: false },
+    { order: "oldest-first", reverse: true },
+  ])("sync cold-start preserves Junction identity apart from current alias state ($order)", async ({ reverse }) => {
+    const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace(
+      "hosted-device-sync-runtime-source-alias-cold-start-",
+    );
+    await mkdir(vaultRoot, { recursive: true });
+    let jobSources: Array<{
+      firstSeenAt: string | null;
+      lastErrorCode: string | null;
+      sourceInstanceKey?: string;
+      sourceProviderSlug: string;
+      status: "connected" | "disconnected" | "error" | "unavailable";
+    }> = [];
+    const baseProvider = createFakeProvider();
+    const junctionProvider: DeviceSyncProvider = {
+      ...baseProvider,
+      provider: "junction",
+      descriptor: {
+        ...baseProvider.descriptor,
+        displayName: "Junction",
+        provider: "junction",
+      },
+      jobExecutor: {
+        async executeJob(context) {
+          jobSources = (await context.listConnectionSources?.({
+            sourceProviderSlug: "apple_health_kit",
+          }) ?? []).map((source) => ({
+            firstSeenAt: source.firstSeenAt ?? null,
+            lastErrorCode: source.lastErrorCode,
+            ...(source.sourceInstanceKey
+              ? { sourceInstanceKey: source.sourceInstanceKey }
+              : {}),
+            sourceProviderSlug: source.sourceProviderSlug,
+            status: source.status,
+          }));
+          return {};
+        },
+      },
+    };
+    const hostedConnectionId = "hosted_conn_junction_source_alias_cold_start";
+    const establishedSourceInstanceKey = "jxn_src_established_apple_health";
+    const lifecycleSourceInstanceKey = "jxn_src_reconnected_apple_health";
+    const establishedSource = {
+      displayName: "Apple Health established",
+      firstSeenAt: "2026-04-01T09:00:00.000Z",
+      lastDataAt: "2026-04-06T09:29:00.000Z",
+      lastErrorCode: null,
+      lastErrorMessage: null,
+      lastSeenAt: "2026-04-06T09:25:00.000Z",
+      resourceCount: 1,
+      resourceAvailabilitySummary: { water: true },
+      sourceInstanceKey: establishedSourceInstanceKey,
+      sourceProviderSlug: "apple_health",
+      status: "connected" as const,
+    };
+    const lifecycleSource = {
+      displayName: "Apple Health disconnected alias",
+      firstSeenAt: "2026-04-03T09:00:00.000Z",
+      lastDataAt: null,
+      lastErrorCode: "SOURCE_USER_DISCONNECTED",
+      lastErrorMessage: "Disconnected",
+      lastSeenAt: "2026-04-06T09:30:00.000Z",
+      resourceCount: 1,
+      resourceAvailabilitySummary: { water: true },
+      sourceInstanceKey: lifecycleSourceInstanceKey,
+      sourceProviderSlug: "apple_health_kit",
+      status: "disconnected" as const,
+    };
+    const sources = reverse
+      ? [establishedSource, lifecycleSource]
+      : [lifecycleSource, establishedSource];
+    const hostedSnapshot = buildRuntimeSnapshot({
+      connectionId: hostedConnectionId,
+      credential: {
+        credentialMetadata: {},
+        kind: "provider_config",
+        providerConfigKey: "junction",
+      },
+      externalAccountId: "junction-source-alias-cold-start",
+      provider: "junction",
+      sources,
+    });
+    const deviceSyncPort = createSnapshotOnlyDeviceSyncPort(hostedSnapshot);
+    const service = createHostedRuntimeDeviceSyncService({
+      config: {
+        publicBaseUrl: "https://sync.example.test/device-sync",
+        stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+        vaultRoot,
+      },
+      deviceSyncPort,
+      providers: [junctionProvider],
+      secret: DEVICE_SYNC_SECRET,
+    });
+
+    try {
+      const state = await syncHostedDeviceSyncControlPlaneState({
+        deviceSyncPort,
+        wake: buildCronWake("2026-04-06T09:30:00.000Z"),
+        secret: DEVICE_SYNC_SECRET,
+        service,
+      });
+      const localAccountId = state.hostedToLocalAccountIds.get(hostedConnectionId);
+      assert.ok(localAccountId);
+      const localSources = getStore(service).listConnectionSources({
+        connectionId: localAccountId,
+      });
+      assert.equal(localSources.length, 1);
+      assert.deepEqual(
+        localSources.map((source) => ({
+          displayName: source.displayName,
+          firstSeenAt: source.firstSeenAt,
+          lastDataAt: source.lastDataAt,
+          lastErrorCode: source.lastErrorCode,
+          lastSeenAt: source.lastSeenAt,
+          sourceInstanceKey: source.sourceInstanceKey,
+          sourceProviderSlug: source.sourceProviderSlug,
+          status: source.status,
+        })),
+        [{
+          displayName: "Apple Health disconnected alias",
+          firstSeenAt: "2026-04-01T09:00:00.000Z",
+          lastDataAt: "2026-04-06T09:29:00.000Z",
+          lastErrorCode: "SOURCE_USER_DISCONNECTED",
+          lastSeenAt: "2026-04-06T09:30:00.000Z",
+          sourceInstanceKey: establishedSourceInstanceKey,
+          sourceProviderSlug: "apple_health",
+          status: "disconnected",
+        }],
+      );
+
+      const job = getStore(service).enqueueJob({
+        accountId: localAccountId,
+        availableAt: "2026-04-06T09:30:00.000Z",
+        kind: "reconcile",
+        payload: {},
+        provider: "junction",
+      });
+      await service.runWorkerOnce();
+      assert.equal(getStore(service).getJobById(job.id)?.status, "succeeded");
+      assert.deepEqual(jobSources, [{
+        firstSeenAt: "2026-04-01T09:00:00.000Z",
+        lastErrorCode: "SOURCE_USER_DISCONNECTED",
+        sourceInstanceKey: establishedSourceInstanceKey,
+        sourceProviderSlug: "apple_health",
+        status: "disconnected",
+      }]);
+    } finally {
+      closeHostedRuntimeDeviceSyncService(service);
+      await cleanup();
+    }
+  });
+
   test("sync preserves one semantic Junction source across provider aliases", async () => {
     const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace(
       "hosted-device-sync-runtime-source-alias-",

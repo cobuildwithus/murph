@@ -84,7 +84,8 @@ Updated: 2026-08-14
 27. [x] Resolve round twenty-four's post-import sparse-day ownership recurrence
     through one shared finalization boundary, prove the accepted day and
     malformed-row retry leave the executor together.
-28. [ ] Resolve round twenty-five's date-mode UTC-prefix data-loss finding,
+28. [x] Resolve round twenty-five's date-mode UTC-prefix data-loss finding.
+29. [ ] Resolve round twenty-six's hosted cold-start source-identity finding,
     then obtain exact-head green CI and ReviewGPT PASS.
 
 ## Decisions
@@ -293,6 +294,19 @@ Updated: 2026-08-14
   resolution with the importer. Floating activity aggregates keep their prior
   trim, so the fix does not broaden non-calendar ownership. This changes no
   state, queue, cursor, service, parser, or retry mechanism.
+- Round twenty-six's review-induced finding is accepted. Hosted hydration
+  consolidated route-equivalent aliases by lifecycle state alone before the
+  empty machine-local store could preserve an established source identity.
+  The first production-path regression failed in both hosted snapshot orders:
+  hydration selected the newer alias key, spelling, and first-seen time while
+  retaining only the older alias's monotonic last-data evidence. Hydration and
+  job-time listing now reuse one identity-plus-lifecycle consolidation helper:
+  earliest valid first-seen time and deterministic key/spelling own identity,
+  newest last-seen time owns lifecycle, and last-data time merges separately.
+  Empty-store hydration retains the selected hosted identity's exact key instead
+  of deriving a new alias key. This deletes the two divergent comparison and
+  dedupe implementations and adds no persisted state, migration, queue, worker,
+  retry family, lifecycle owner, or compatibility path.
 
 ## Verification
 
@@ -536,3 +550,9 @@ Updated: 2026-08-14
   feature envelope retains both crossing samples. Both full affected provider
   files pass 355/355, the device-sync typecheck passes, and `git diff --check`
   passes.
+- Round twenty-six's cold-start regression failed before remediation in both
+  newest-first and oldest-first hosted snapshot orders, selecting the newer
+  alias identity instead of the established key. Both cases now pass and prove
+  one local source uses the oldest identity, newest lifecycle/error state, and
+  maximum last-data time; job-time listing returns that same identity. All 103
+  hosted device-sync runtime tests and the assistant-runtime typecheck pass.

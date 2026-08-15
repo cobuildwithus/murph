@@ -26,7 +26,8 @@ import {
   type HostedRuntimeDeviceSyncPort,
 } from "./hosted-runtime/platform.ts";
 import {
-  consolidateHostedDeviceSyncSourceState,
+  compareHostedDeviceSyncSourceIdentity,
+  dedupeHostedDeviceSyncSourcesByIdentity,
   hostedSourceStateUnavailable,
 } from "./hosted-device-sync-source-state.ts";
 
@@ -199,25 +200,7 @@ function selectHostedJunctionSource(
       source.sourceProviderSlug,
       sourceProviderSlug,
     ))
-    .sort(compareHostedJobSourceIdentity)[0];
-}
-
-function compareHostedJobSourceIdentity(
-  left: ProviderJobConnectionSource,
-  right: ProviderJobConnectionSource,
-): number {
-  const leftFirstSeenAt = left.firstSeenAt ? Date.parse(left.firstSeenAt) : Number.NaN;
-  const rightFirstSeenAt = right.firstSeenAt ? Date.parse(right.firstSeenAt) : Number.NaN;
-  const leftFirstSeenRank = Number.isFinite(leftFirstSeenAt)
-    ? leftFirstSeenAt
-    : Number.POSITIVE_INFINITY;
-  const rightFirstSeenRank = Number.isFinite(rightFirstSeenAt)
-    ? rightFirstSeenAt
-    : Number.POSITIVE_INFINITY;
-  return leftFirstSeenRank !== rightFirstSeenRank
-    ? leftFirstSeenRank - rightFirstSeenRank
-    : (left.sourceInstanceKey ?? "").localeCompare(right.sourceInstanceKey ?? "")
-      || left.sourceProviderSlug.localeCompare(right.sourceProviderSlug);
+    .sort(compareHostedDeviceSyncSourceIdentity)[0];
 }
 
 interface HostedJobConnectionSource extends ProviderJobConnectionSource {
@@ -232,41 +215,14 @@ function dedupeHostedJobConnectionSources(
   if (provider !== "junction") {
     return [...sources];
   }
-  const deduped: HostedJobConnectionSource[] = [];
-  for (const source of sources) {
-    const existingIndex = deduped.findIndex((candidate) =>
-      areHostedJunctionSourcesEquivalent(
-        provider,
-        candidate.sourceProviderSlug,
-        source.sourceProviderSlug,
-      )
-    );
-    if (existingIndex === -1) {
-      deduped.push(source);
-      continue;
-    }
-    const existing = deduped[existingIndex];
-    if (!existing) {
-      continue;
-    }
-    const identitySource = compareHostedJobSourceIdentity(source, existing) < 0
-      ? source
-      : existing;
-    const { lastDataAt, lifecycleSource } = consolidateHostedDeviceSyncSourceState([
-      existing,
-      source,
-    ]);
-    deduped[existingIndex] = {
-      ...lifecycleSource,
-      firstSeenAt: identitySource.firstSeenAt,
-      lastDataAt,
-      ...(identitySource.sourceInstanceKey
-        ? { sourceInstanceKey: identitySource.sourceInstanceKey }
-        : {}),
-      sourceProviderSlug: identitySource.sourceProviderSlug,
-    };
-  }
-  return deduped;
+  return dedupeHostedDeviceSyncSourcesByIdentity(
+    sources,
+    (left, right) => areHostedJunctionSourcesEquivalent(
+      provider,
+      left.sourceProviderSlug,
+      right.sourceProviderSlug,
+    ),
+  );
 }
 
 export function requireHostedRuntimeDeviceSyncStore(service: DeviceSyncService): SqliteDeviceSyncStore {

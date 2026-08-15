@@ -8,7 +8,6 @@ import {
 } from "@murphai/contracts";
 import {
   areJunctionDeviceConnectProviderSlugsEquivalent,
-  buildJunctionProviderSourceInstanceKey,
 } from "@murphai/device-syncd/connect-config";
 import { shapeHostedDeviceSyncJobHintPayload } from "@murphai/device-syncd/hosted-hints";
 import {
@@ -70,7 +69,9 @@ import {
   HOSTED_DEVICE_SYNC_PASS_JOB_LIMIT,
 } from "./hosted-device-sync-limits.ts";
 import {
+  compareHostedDeviceSyncSourceIdentity,
   consolidateHostedDeviceSyncSourceState,
+  dedupeHostedDeviceSyncSourcesByIdentity,
   mergeHostedDeviceSyncSourceLastDataAt,
 } from "./hosted-device-sync-source-state.ts";
 import {
@@ -433,21 +434,14 @@ function resolveHostedHydrationSourceInstanceKey(input: {
     return input.sourceInstanceKey;
   }
 
-  const canonicalSourceInstanceKey = buildJunctionProviderSourceInstanceKey({
-    connectionId: input.entry.connection.id,
-    sourceProviderSlug: input.source.sourceProviderSlug,
-  });
   const matchingSource = selectHostedJunctionSource(
     input.localSources,
     input.source.sourceProviderSlug,
   ) ?? input.localSources.find((source) =>
-    source.sourceInstanceKey === canonicalSourceInstanceKey
-    || source.sourceInstanceKey === input.sourceInstanceKey
+    source.sourceInstanceKey === input.sourceInstanceKey
   );
 
-  return matchingSource?.sourceInstanceKey
-    ?? canonicalSourceInstanceKey
-    ?? input.sourceInstanceKey;
+  return matchingSource?.sourceInstanceKey ?? input.sourceInstanceKey;
 }
 
 function areHostedJunctionSourceSlugsEquivalent(left: string, right: string): boolean {
@@ -461,34 +455,13 @@ function dedupeHostedHydrationConnectionSources(
   if (provider.trim().toLowerCase() !== "junction") {
     return [...sources];
   }
-
-  const deduped: HostedDeviceSyncRuntimeConnectionSourceSnapshot[] = [];
-  for (const source of sources) {
-    const existingIndex = deduped.findIndex((candidate) =>
-      areHostedJunctionSourceSlugsEquivalent(
-        candidate.sourceProviderSlug,
-        source.sourceProviderSlug,
-      )
-    );
-    if (existingIndex === -1) {
-      deduped.push(source);
-      continue;
-    }
-
-    const existing = deduped[existingIndex];
-    if (!existing) {
-      continue;
-    }
-    const { lastDataAt, lifecycleSource } = consolidateHostedDeviceSyncSourceState([
-      existing,
-      source,
-    ]);
-    deduped[existingIndex] = {
-      ...lifecycleSource,
-      lastDataAt,
-    };
-  }
-  return deduped;
+  return dedupeHostedDeviceSyncSourcesByIdentity(
+    sources,
+    (left, right) => areHostedJunctionSourceSlugsEquivalent(
+      left.sourceProviderSlug,
+      right.sourceProviderSlug,
+    ),
+  );
 }
 
 function selectHostedJunctionSource(
@@ -500,25 +473,7 @@ function selectHostedJunctionSource(
       source.sourceProviderSlug,
       sourceProviderSlug,
     ))
-    .sort(compareHostedJunctionSources)[0];
-}
-
-function compareHostedJunctionSources(
-  left: StoredDeviceConnectionSource,
-  right: StoredDeviceConnectionSource,
-): number {
-  const leftFirstSeenAt = Date.parse(left.firstSeenAt);
-  const rightFirstSeenAt = Date.parse(right.firstSeenAt);
-  const leftFirstSeenRank = Number.isFinite(leftFirstSeenAt)
-    ? leftFirstSeenAt
-    : Number.POSITIVE_INFINITY;
-  const rightFirstSeenRank = Number.isFinite(rightFirstSeenAt)
-    ? rightFirstSeenAt
-    : Number.POSITIVE_INFINITY;
-  return leftFirstSeenRank !== rightFirstSeenRank
-    ? leftFirstSeenRank - rightFirstSeenRank
-    : left.sourceInstanceKey.localeCompare(right.sourceInstanceKey)
-      || left.sourceProviderSlug.localeCompare(right.sourceProviderSlug);
+    .sort(compareHostedDeviceSyncSourceIdentity)[0];
 }
 
 function shouldPreserveNonJunctionHydrationSource(input: {
