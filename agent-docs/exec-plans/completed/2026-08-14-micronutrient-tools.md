@@ -1,6 +1,6 @@
 # Expand connected micronutrient tools and guidance
 
-Status: active
+Status: completed
 Created: 2026-08-14
 Updated: 2026-08-14
 
@@ -121,3 +121,25 @@ Updated: 2026-08-14
 - Expected outcomes: correct totals and units, explicit sparse coverage,
   unchanged five-metric consumers, truthful assistant capability language, and
   no unresolved ReviewGPT findings.
+
+## Completion evidence
+
+- Focused owner proof passed for contracts, query, vault use cases, CLI,
+  importers, assistant skills/runtime, web connection copy, changelog, generated
+  package shape, and touched owner typechecks.
+- The preliminary specialist review found connected-zero loss, aggregate source
+  attribution ambiguity, and a missing runtime scenario. Each finding was
+  reproduced at its owner boundary and corrected without a new abstraction.
+- Final ReviewGPT round 1 additionally found range filtering before revision
+  collapse. The shared query selector now collapses first; focused proof covers
+  old-day, corrected-day, and combined macro and nutrient reads.
+- Final ReviewGPT round 2 returned `ROUND_OUTCOME: PASS` on the corrected merged
+  candidate with no qualifying findings and explicitly verified all four
+  corrections.
+- Desktop and mobile design-catalog captures were inspected locally, inspected
+  again after hosting, and reviewed by the preliminary frontend lens with no
+  frontend finding.
+- The complete first provider request adds five tokens and 13 UTF-8 bytes for
+  individual Murph and adds zero tokens/bytes for group Murph; lazy skill bodies
+  do not enter the initial request.
+Completed: 2026-08-14
