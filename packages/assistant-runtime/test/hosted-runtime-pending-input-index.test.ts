@@ -1697,6 +1697,9 @@ describe("hosted pending assistant input index", () => {
       inputId: valid.inputId,
       vaultRoot,
     });
+    await expect(
+      readHostedPendingAssistantImageCompletionRecoveryInputIds({ vaultRoot }),
+    ).resolves.toEqual([missingInputId, valid.inputId]);
     await expect(readHostedPendingAssistantInputIds({ vaultRoot })).resolves.toEqual([
       missingInputId,
       valid.inputId,
@@ -1709,6 +1712,9 @@ describe("hosted pending assistant input index", () => {
       missingInputId,
       valid.inputId,
     ]);
+    await expect(
+      readHostedPendingAssistantImageCompletionRecoveryInputIds({ vaultRoot }),
+    ).resolves.toEqual([missingInputId, valid.inputId]);
   });
 
   it("retains nonterminal indexed inputs whose source cannot currently use the reply channel", async () => {
