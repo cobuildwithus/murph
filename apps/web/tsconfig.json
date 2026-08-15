@@ -288,6 +288,9 @@
       "@murphai/device-syncd/junction-resources": [
         "../../packages/device-syncd/src/junction-resources.ts"
       ],
+      "@murphai/device-syncd/junction-workout-lifecycle": [
+        "../../packages/device-syncd/src/junction-workout-lifecycle.ts"
+      ],
       "@murphai/device-syncd/provider-label": [
         "../../packages/device-syncd/src/provider-label.ts"
       ],
