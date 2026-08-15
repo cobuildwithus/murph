@@ -1130,6 +1130,197 @@ describe("executeHostedMailboxEvent", () => {
     expect(JSON.stringify(entry?.redacted)).not.toContain("raw tool output");
   });
 
+  it("captures generated-audio phase timing without content or identifiers", () => {
+    const wake = buildHostedExecutionAssistantNotificationRequestedWake({
+      eventId: "evt_generated_audio_phase_timing",
+      memberId: "member_123",
+      notification: {
+        instructions: "Reply in chat.",
+        route: {
+          actorId: "actor_generated_audio",
+          channel: "linq",
+          delivery: {
+            kind: "thread",
+            target: "thread_123",
+          },
+          identityId: "hbidx:phone:v1:test",
+          threadId: "thread_123",
+          threadIsDirect: true,
+        },
+      },
+      occurredAt: "2026-04-08T00:00:00.000Z",
+    });
+
+    const entry = emitHostedAssistantProviderTraceLog({
+      details: { requestId: "req_123" },
+      event: {
+        codexThreadId: "provider-session-should-drop",
+        rawEvent: {
+          schema: "murph.assistant-codex-generated-audio-phase-timing.v1",
+          type: "assistant.codex.generated_audio_phase_timing",
+          generatedAudioDeliveryMode: "synchronous",
+          generatedAudioGenerationDurationMs: 1_250,
+          generatedAudioKind: "song",
+          generatedAudioOutcome: "succeeded",
+          generatedAudioTerminalPhase: "upload",
+          generatedAudioUploadDurationMs: 250,
+          attachmentId: "attachment-should-drop",
+          audio: "audio-content-should-drop",
+          prompt: "prompt-should-drop",
+          providerBody: { identifier: "provider-body-should-drop" },
+          recipient: "recipient-should-drop",
+          text: "text-should-drop",
+        },
+      },
+      wake,
+    });
+
+    expect(entry).toEqual({
+      component: "runtime.provider",
+      eventId: "evt_generated_audio_phase_timing",
+      level: "info",
+      message: "Hosted assistant generated-audio phase timing captured.",
+      phase: "wake.running",
+      redacted: {
+        generatedAudioDeliveryMode: "synchronous",
+        generatedAudioGenerationDurationMs: 1_250,
+        generatedAudioKind: "song",
+        generatedAudioOutcome: "succeeded",
+        generatedAudioTerminalPhase: "upload",
+        generatedAudioTraceType: "phase-timing",
+        generatedAudioUploadDurationMs: 250,
+        providerTraceKind: "codex.generated_audio_phase_timing",
+        requestId: "req_123",
+        schema: "murph.assistant-codex-generated-audio-phase-timing.v1",
+      },
+    });
+    const redacted = JSON.stringify(entry?.redacted);
+    for (const unsafeValue of [
+      "provider-session-should-drop",
+      "attachment-should-drop",
+      "audio-content-should-drop",
+      "prompt-should-drop",
+      "provider-body-should-drop",
+      "recipient-should-drop",
+      "text-should-drop",
+    ]) {
+      expect(redacted).not.toContain(unsafeValue);
+    }
+
+    const validDeferredEntry = emitHostedAssistantProviderTraceLog({
+      details: { requestId: "req_123" },
+      event: {
+        rawEvent: {
+          schema: "murph.assistant-codex-generated-audio-phase-timing.v1",
+          type: "assistant.codex.generated_audio_phase_timing",
+          generatedAudioDeliveryMode: "deferred",
+          generatedAudioKind: "voice_memo",
+          generatedAudioOutcome: "deferred",
+          generatedAudioTerminalPhase: "delivery",
+        },
+      },
+      wake,
+    });
+    expect(validDeferredEntry?.redacted).toEqual(expect.objectContaining({
+      generatedAudioDeliveryMode: "deferred",
+      generatedAudioKind: "voice_memo",
+      generatedAudioOutcome: "deferred",
+      generatedAudioTerminalPhase: "delivery",
+    }));
+    expect(validDeferredEntry?.redacted).not.toHaveProperty(
+      "generatedAudioGenerationDurationMs",
+    );
+    expect(validDeferredEntry?.redacted).not.toHaveProperty(
+      "generatedAudioUploadDurationMs",
+    );
+
+    const invalidDeferredEntry = emitHostedAssistantProviderTraceLog({
+      details: { requestId: "req_123" },
+      event: {
+        rawEvent: {
+          schema: "murph.assistant-codex-generated-audio-phase-timing.v1",
+          type: "assistant.codex.generated_audio_phase_timing",
+          generatedAudioDeliveryMode: "deferred",
+          generatedAudioGenerationDurationMs: 0,
+          generatedAudioKind: "voice_memo",
+          generatedAudioOutcome: "deferred",
+          generatedAudioTerminalPhase: "delivery",
+        },
+      },
+      wake,
+    });
+    expect(invalidDeferredEntry).toBeNull();
+  });
+
+  it("rejects non-exact generated-audio phase timing shapes", () => {
+    const wake = buildHostedExecutionAssistantNotificationRequestedWake({
+      eventId: "evt_generated_audio_phase_timing_invalid",
+      memberId: "member_123",
+      notification: {
+        instructions: "Reply in chat.",
+        route: {
+          actorId: "actor_generated_audio",
+          channel: "linq",
+          delivery: {
+            kind: "thread",
+            target: "thread_123",
+          },
+          identityId: "hbidx:phone:v1:test",
+          threadId: "thread_123",
+          threadIsDirect: true,
+        },
+      },
+      occurredAt: "2026-04-08T00:00:00.000Z",
+    });
+    const emit = (rawEvent: Record<string, unknown>) =>
+      emitHostedAssistantProviderTraceLog({
+        details: { requestId: "req_123" },
+        event: { rawEvent },
+        wake,
+      });
+    const synchronousUpload = {
+      schema: "murph.assistant-codex-generated-audio-phase-timing.v1",
+      type: "assistant.codex.generated_audio_phase_timing",
+      generatedAudioDeliveryMode: "synchronous",
+      generatedAudioGenerationDurationMs: 1_250,
+      generatedAudioKind: "song",
+      generatedAudioOutcome: "succeeded",
+      generatedAudioTerminalPhase: "upload",
+      generatedAudioUploadDurationMs: 250,
+    };
+
+    expect(
+      emit({ ...synchronousUpload, schema: ` ${synchronousUpload.schema}` }),
+    ).toBeNull();
+    expect(emit({
+      ...synchronousUpload,
+      generatedAudioOutcome: "succeeded ",
+    })).toBeNull();
+    expect(emit({
+      ...synchronousUpload,
+      generatedAudioOutcome: "generation_failed",
+    })).toBeNull();
+    expect(emit({
+      ...synchronousUpload,
+      generatedAudioTerminalPhase: "generation",
+    })).toBeNull();
+    expect(emit({
+      ...synchronousUpload,
+      generatedAudioGenerationDurationMs: -1,
+    })).toBeNull();
+    expect(emit({
+      ...synchronousUpload,
+      generatedAudioUploadDurationMs: Number.POSITIVE_INFINITY,
+    })).toBeNull();
+
+    const inheritedGenerationDuration = Object.assign(
+      Object.create({ generatedAudioGenerationDurationMs: 1_250 }),
+      synchronousUpload,
+    );
+    delete inheritedGenerationDuration.generatedAudioGenerationDurationMs;
+    expect(emit(inheritedGenerationDuration)).toBeNull();
+  });
+
   it("accepts legacy hosted provider plan diagnostic keys", () => {
     const wake = buildHostedExecutionAssistantNotificationRequestedWake({
       eventId: "evt_provider_plan_legacy_keys",
@@ -1396,9 +1587,12 @@ describe("executeHostedMailboxEvent", () => {
           turnContextPromptBytes: 2048,
           developerInstructionsBytes: 1024,
           conversationContextBytes: 256,
+          conversationHistoryBytes: 1536,
+          conversationHistoryCount: 4,
           systemPromptBytes: 512,
           developerInstructionsPresent: true,
           conversationContextPresent: true,
+          conversationHistoryPresent: true,
           resumeCodexThreadIdPresent: true,
           prompt: "private prompt text should not be logged",
           userPrompt: "hello",
@@ -1419,6 +1613,9 @@ describe("executeHostedMailboxEvent", () => {
         baseInstructionsBytes: 768,
         conversationContextBytes: 256,
         conversationContextPresent: true,
+        conversationHistoryBytes: 1536,
+        conversationHistoryCount: 4,
+        conversationHistoryPresent: true,
         developerInstructionsBytes: 1024,
         developerInstructionsPresent: true,
         providerPromptBytes: 4096,
