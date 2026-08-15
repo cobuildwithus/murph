@@ -156,7 +156,7 @@ describe("createHostedPhoneCall", () => {
     expect(store.createCalls[0]!.data).toMatchObject({
       briefEncrypted: expect.stringMatching(/^hsb-test:/u),
       memberId: "member_1",
-      originDirectChannel: null,
+      originDirectChannel: "linq",
       originSessionId: "session_phone_call",
       provider: "retell",
       requestKey: "phone_call_request_1",
@@ -220,6 +220,64 @@ describe("createHostedPhoneCall", () => {
     expect(store.createCalls[0]?.data.originDirectChannel).toBe(
       originDirectChannel,
     );
+  });
+
+  it("rejects a new direct start without authenticated origin before mutable storage or provider work", async () => {
+    const store = createPhoneCallStore({ created: buildHostedPhoneCall() });
+    const runtime = createPhoneCallRuntime({ providerCallId: "retell_unused" });
+
+    await expect(createHostedPhoneCallImpl({
+      brief: VALID_BRIEF,
+      memberId: "member_1",
+      notificationDestinationResolver: async () => DIRECT_NOTIFICATION_DESTINATION,
+      originSessionId: "session_old_runner",
+      prisma: store.prisma,
+      reconciliationWorkflowStarter: async () => ({ runId: "run_unused" }),
+      requestKey: "phone_call_old_runner_direct",
+      runtime: runtime.runtime,
+      transferNumberResolver: createTransferNumberResolver(null),
+    })).rejects.toMatchObject({
+      code: "HOSTED_PHONE_CALL_ORIGIN_CHANNEL_REQUIRED",
+      httpStatus: 409,
+      retryable: true,
+    });
+
+    expect(store.findCalls).toHaveLength(1);
+    expect(store.findFirstCalls).toEqual([]);
+    expect(store.createCalls).toEqual([]);
+    expect(runtime.startCalls).toEqual([]);
+  });
+
+  it("allows an origin-less old runner to replay an existing legacy direct call", async () => {
+    const existing = buildHostedPhoneCall({
+      briefJson: null,
+      id: "hpc_legacy_direct_replay",
+      providerCallId: "retell_legacy_direct_replay",
+      status: "calling",
+    });
+    existing.briefEncrypted = await encryptHostedPhoneCallBrief({
+      callId: existing.id,
+      memberId: existing.memberId,
+      value: VALID_BRIEF,
+    });
+    const store = createPhoneCallStore({ existing });
+    const runtime = createPhoneCallRuntime({ providerCallId: "retell_unused" });
+
+    await expect(createHostedPhoneCallImpl({
+      brief: VALID_BRIEF,
+      memberId: existing.memberId,
+      notificationDestinationResolver: async () => DIRECT_NOTIFICATION_DESTINATION,
+      originSessionId: existing.originSessionId!,
+      prisma: store.prisma,
+      requestKey: existing.requestKey,
+      runtime: runtime.runtime,
+    })).resolves.toEqual({
+      phoneCallId: existing.id,
+      status: "calling",
+    });
+
+    expect(store.createCalls).toEqual([]);
+    expect(runtime.startCalls).toEqual([]);
   });
 
   it("rejects replay under a different direct channel instead of silently rerouting", async () => {
@@ -600,6 +658,57 @@ describe("createHostedPhoneCall", () => {
     );
   });
 
+  it("retries a provider-less start failure until its required result notification is durable", async () => {
+    const existing = buildHostedPhoneCall({
+      id: "hpc_start_failed",
+      providerCallId: null,
+      status: "starting",
+      updatedAt: new Date(0),
+    });
+    const store = createPhoneCallStore({ existing });
+    const runtime = createPhoneCallRuntime({
+      providerCallId: "retell_unused",
+      reconciliationResult: { state: "not_found" },
+    });
+    const finalizeStartFailure = vi.fn()
+      .mockRejectedValueOnce(new Error("mailbox append unavailable"))
+      .mockResolvedValueOnce(undefined);
+
+    await expect(processHostedPhoneCallRecoveryById({
+      finalizeStartFailure,
+      phoneCallId: existing.id,
+      prisma: store.prisma,
+      runtime: runtime.runtime,
+      signal: new AbortController().signal,
+    })).resolves.toBe("pending");
+    expect(store.currentCall()).toMatchObject({
+      analyzedAt: null,
+      providerCallId: null,
+      status: "failed",
+      stopRequestedAt: null,
+    });
+
+    await expect(processHostedPhoneCallRecoveryById({
+      finalizeStartFailure,
+      phoneCallId: existing.id,
+      prisma: store.prisma,
+      runtime: runtime.runtime,
+      signal: new AbortController().signal,
+    })).resolves.toBe("complete");
+
+    expect(runtime.resolveCalls).toEqual([existing.id]);
+    expect(runtime.stopCalls).toEqual([]);
+    expect(finalizeStartFailure).toHaveBeenCalledTimes(2);
+    expect(finalizeStartFailure).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        id: existing.id,
+        providerCallId: null,
+        status: "failed",
+      }),
+      { abortSignal: expect.any(AbortSignal) },
+    );
+  });
+
   it("consumes a stop intent after a successful start whose provider-id write failed", async () => {
     const created = buildHostedPhoneCall({ id: "hpc_stop_after_write_failure" });
     let rejectBinding = true;
@@ -696,6 +805,53 @@ describe("createHostedPhoneCall", () => {
     expect(finalizeStopSettlement).toHaveBeenCalledOnce();
   });
 
+  it("settles a fenced analyzed call without another provider stop and records usage", async () => {
+    const endedAt = new Date("2026-06-25T01:00:00.000Z");
+    const existing = buildHostedPhoneCall({
+      analyzedAt: endedAt,
+      endedAt,
+      id: "hpc_stop_analyzed",
+      providerCallId: "retell_stop_analyzed",
+      status: "completed",
+      stopRequestedAt: new Date("2026-06-25T00:01:00.000Z"),
+    });
+    const store = createPhoneCallStore({ existing });
+    const runtimeHarness = createPhoneCallRuntime({ providerCallId: "retell_unused" });
+    const terminalUsage = {
+      combinedCostUsdMicros: 25_000,
+      occurredAt: endedAt,
+      providerCallId: existing.providerCallId!,
+    };
+    const runtime = {
+      ...runtimeHarness.runtime,
+      resolveTerminalUsage: vi.fn(async () => ({
+        state: "ready" as const,
+        usage: terminalUsage,
+      })),
+    };
+    const finalizeStopSettlement = vi.fn(async () => undefined);
+    const recordTerminalUsage = vi.fn(async () => undefined);
+
+    await expect(processHostedPhoneCallRecoveryById({
+      finalizeStopSettlement,
+      phoneCallId: existing.id,
+      prisma: {
+        ...store.prisma,
+        recordTerminalUsage,
+      },
+      runtime,
+      signal: new AbortController().signal,
+    })).resolves.toBe("complete");
+
+    expect(runtimeHarness.stopCalls).toEqual([]);
+    expect(finalizeStopSettlement).toHaveBeenCalledOnce();
+    expect(recordTerminalUsage).toHaveBeenCalledOnce();
+    expect(recordTerminalUsage).toHaveBeenCalledWith({
+      call: existing,
+      usage: terminalUsage,
+    });
+  });
+
   it("lets the sole workflow owner complete near-timeout Retell stop, terminal write, and usage", async () => {
     vi.useFakeTimers();
     vi.stubEnv("RETELL_API_KEY", "retell-api-key");
@@ -707,25 +863,40 @@ describe("createHostedPhoneCall", () => {
     try {
       const existing = buildHostedPhoneCall({
         id: "hpc_stop_composed_deadline",
-        providerCallId: "retell_stop_composed_deadline",
-        status: "calling",
+        providerCallId: null,
+        status: "starting",
         stopRequestedAt: new Date("2026-06-25T00:01:00.000Z"),
+        updatedAt: new Date(0),
       });
       const store = createPhoneCallStore({ existing });
+      const providerCallId = "retell_stop_composed_deadline";
       let requestCount = 0;
       const fetchImpl = vi.fn<typeof fetch>(async () => {
         requestCount += 1;
         await new Promise<void>((resolve) => setTimeout(resolve, 14_000));
         if (requestCount === 1) {
           return new Response(JSON.stringify({
-            call_id: existing.providerCallId,
-            call_status: "ongoing",
+            has_more: false,
+            items: [{
+              call_id: providerCallId,
+              data_storage_setting: "basic_attributes_only",
+              metadata: { murph_phone_call_id: existing.id },
+            }],
           }), {
             headers: { "content-type": "application/json" },
             status: 200,
           });
         }
         if (requestCount === 2) {
+          return new Response(JSON.stringify({
+            call_id: providerCallId,
+            call_status: "ongoing",
+          }), {
+            headers: { "content-type": "application/json" },
+            status: 200,
+          });
+        }
+        if (requestCount === 3) {
           return new Response(null, { status: 204 });
         }
         return new Response(JSON.stringify({
@@ -735,7 +906,7 @@ describe("createHostedPhoneCall", () => {
             total_duration_seconds: 30,
             total_duration_unit_price: 0.05,
           },
-          call_id: existing.providerCallId,
+          call_id: providerCallId,
           call_status: "ended",
           data_storage_setting: "basic_attributes_only",
           disconnection_reason: "user_hangup",
@@ -761,16 +932,17 @@ describe("createHostedPhoneCall", () => {
         runtime,
         signal: controller.signal,
       });
-      await vi.advanceTimersByTimeAsync(42_000);
+      await vi.advanceTimersByTimeAsync(56_000);
 
       await expect(recovery).resolves.toBe("complete");
       expect(HOSTED_PHONE_CALL_RECONCILIATION_STEP_TIMEOUT_MS).toBeGreaterThan(
-        45_000,
+        60_000,
       );
       expect(controller.signal.aborted).toBe(false);
-      expect(fetchImpl).toHaveBeenCalledTimes(3);
+      expect(fetchImpl).toHaveBeenCalledTimes(4);
       expect(store.currentCall()).toMatchObject({
         endedAt: expect.any(Date),
+        providerCallId,
         status: "ended",
       });
       expect(finalizeStopSettlement).toHaveBeenCalledOnce();
@@ -2504,9 +2676,15 @@ describe("createHostedPhoneCall", () => {
 });
 
 function createHostedPhoneCall(input: TestCreateHostedPhoneCallInput) {
-  return createHostedPhoneCallDirect({
+  const directOrigin = input.groupRequester || input.inboundMailboxItemIds
+    ? {}
+    : { originDirectChannel: "linq" as const };
+  return createHostedPhoneCallImpl({
+    notificationDestinationResolver: async () => DIRECT_NOTIFICATION_DESTINATION,
+    originSessionId: "session_phone_call",
     reconciliationWorkflowStarter: async () => ({ runId: "run_test" }),
     transferNumberResolver: createTransferNumberResolver(null),
+    ...directOrigin,
     ...input,
   });
 }
@@ -2514,6 +2692,7 @@ function createHostedPhoneCall(input: TestCreateHostedPhoneCallInput) {
 function createHostedPhoneCallDirect(input: TestCreateHostedPhoneCallInput) {
   return createHostedPhoneCallImpl({
     notificationDestinationResolver: async () => DIRECT_NOTIFICATION_DESTINATION,
+    originDirectChannel: "linq",
     originSessionId: "session_phone_call",
     ...input,
   });

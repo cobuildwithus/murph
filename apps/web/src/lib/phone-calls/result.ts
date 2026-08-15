@@ -212,11 +212,13 @@ export async function handleRetellCallAnalyzed(input: {
       }
       throw error;
     }
+    const analyzedAt = new Date();
     const updated = await prisma.hostedPhoneCall.updateMany({
       data: {
         ...target.providerCallIdData,
-        analyzedAt: new Date(),
-        endedAt: readRetellCallEndAt(input.call) ?? undefined,
+        analyzedAt,
+        endedAt:
+          readRetellCallEndAt(input.call) ?? target.call.endedAt ?? analyzedAt,
         resultEncrypted,
         resultJson: Prisma.DbNull,
         status: mapPhoneCallStatus(result.outcome),
@@ -308,6 +310,41 @@ export async function finalizeHostedPhoneCallStopSettlement(
   const result = await appendPhoneCallStopSettlementNotification({
     call,
     prisma,
+  });
+  await (options.signalRuntime ?? signalHostedMailboxAppendRuntime)({
+    abortSignal: options.abortSignal,
+    expectedUserId: result.notificationUserId,
+    mailboxItemId: result.notificationMailboxItemId,
+  });
+}
+
+export async function finalizeHostedPhoneCallStartFailure(
+  call: HostedPhoneCall,
+  options: {
+    abortSignal?: AbortSignal;
+    prisma?: PrismaClient;
+    signalRuntime?: typeof signalHostedMailboxAppendRuntime;
+  } = {},
+): Promise<void> {
+  if (
+    call.status !== "failed"
+    || call.providerCallId !== null
+    || call.analyzedAt !== null
+    || call.stopRequestedAt !== null
+  ) {
+    throw hostedPhoneCallResultNotificationError(
+      "HOSTED_PHONE_CALL_START_FAILURE_REQUIRED",
+      "Hosted phone-call start-failure notification requires a terminal provider-less start.",
+    );
+  }
+  const prisma = options.prisma ?? getPrisma();
+  const result = await appendPhoneCallResultNotification({
+    call,
+    prisma,
+    result: {
+      outcome: "not_completed",
+      summary: "Murph could not start the phone call.",
+    },
   });
   await (options.signalRuntime ?? signalHostedMailboxAppendRuntime)({
     abortSignal: options.abortSignal,
@@ -792,6 +829,7 @@ function readRetellCallAnalyzedAuthorityWhere(input: {
   }
 
   return {
+    endedAt: input.call.endedAt ? { not: null } : null,
     providerCallId: input.call.providerCallId ?? null,
     status: {
       in: RETELL_CALL_ANALYZED_LIVE_STATUSES,

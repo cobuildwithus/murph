@@ -58,6 +58,7 @@ vi.mock("@/src/lib/hosted-crypto/domain-root-store", () => ({
 }));
 
 import {
+  finalizeHostedPhoneCallStartFailure,
   finalizeHostedPhoneCallStopSettlement,
   handleRetellCallAnalyzed,
 } from "@/src/lib/phone-calls/result";
@@ -332,6 +333,58 @@ describe("default phone-call result notification store", () => {
       userId: MEMBER_ID,
     });
     expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledOnce();
+    expect(signalRuntime).toHaveBeenCalledTimes(2);
+  });
+
+  it("dedupes a provider-less start failure and requires Murph to send it", async () => {
+    const call: HostedPhoneCall = {
+      ...buildStoredAnalyzedCall("linq"),
+      analyzedAt: null,
+      endedAt: null,
+      providerCallId: null,
+      resultEncrypted: null,
+      status: "failed",
+    };
+    const prisma = buildPrisma({ originDirectChannel: "linq" });
+    const signalRuntime = vi.fn(async () => ({
+      signalAccepted: true as const,
+      workflowId: `hosted-user-runtime:${MEMBER_ID}`,
+    }));
+    mocks.getPrisma.mockReturnValue(prisma);
+    mocks.readHostedMailboxItemByDedupeKey
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({
+        id: "mailbox_start_failed",
+        userId: MEMBER_ID,
+      });
+    mocks.readHostedPhoneCallBrief.mockResolvedValue(BRIEF);
+    mocks.requireHostedAssistantNotificationDestination.mockResolvedValue(
+      DESTINATION,
+    );
+    mocks.unwrapHostedDomainRootForWeb.mockResolvedValue({
+      envelope: { rootKeyId: "root_start_failed" },
+      rootKey: new Uint8Array([1, 2, 3, 4]),
+    });
+    mocks.appendHostedMailboxEnvelopeTx.mockResolvedValue({
+      item: { id: "mailbox_start_failed", userId: MEMBER_ID },
+    });
+
+    await finalizeHostedPhoneCallStartFailure(call, { signalRuntime });
+    await finalizeHostedPhoneCallStartFailure(call, { signalRuntime });
+
+    expect(mocks.readHostedMailboxItemByDedupeKey).toHaveBeenNthCalledWith(1, {
+      dedupeKey: NOTIFICATION_DEDUPE_KEY,
+      prisma,
+      userId: MEMBER_ID,
+    });
+    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledOnce();
+    expect(mocks.readHostedPhoneCallResult).not.toHaveBeenCalled();
+    expect(JSON.stringify(
+      mocks.appendHostedMailboxEnvelopeTx.mock.calls[0]?.[0],
+    )).toContain("Murph could not start the phone call.");
+    expect(JSON.stringify(
+      mocks.appendHostedMailboxEnvelopeTx.mock.calls[0]?.[0],
+    )).toContain('"kind":"require_send"');
     expect(signalRuntime).toHaveBeenCalledTimes(2);
   });
 

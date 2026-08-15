@@ -8,6 +8,7 @@ import {
   isHostedPhoneCallReadyForProviderReconciliation,
 } from "./authority";
 import {
+  finalizeHostedPhoneCallStartFailure,
   finalizeHostedPhoneCallStopSettlement,
   finalizePreparedRetellCallResult,
 } from "./result";
@@ -62,6 +63,7 @@ export interface HostedPhoneCallReconciliationStore {
 
 export async function processHostedPhoneCallRecoveryById(input: {
   finalizeResult?: typeof finalizePreparedRetellCallResult;
+  finalizeStartFailure?: typeof finalizeHostedPhoneCallStartFailure;
   finalizeStopSettlement?: typeof finalizeHostedPhoneCallStopSettlement;
   phoneCallId: string;
   prisma?: HostedPhoneCallReconciliationStore;
@@ -71,6 +73,8 @@ export async function processHostedPhoneCallRecoveryById(input: {
   const store = input.prisma ?? resolveHostedPhoneCallReconciliationStore();
   const runtime = input.runtime ?? createRetellPhoneCallRuntime();
   const finalizeResult = input.finalizeResult ?? finalizePreparedRetellCallResult;
+  const finalizeStartFailure = input.finalizeStartFailure
+    ?? finalizeHostedPhoneCallStartFailure;
   const finalizeStopSettlement = input.finalizeStopSettlement
     ?? finalizeHostedPhoneCallStopSettlement;
   let call = await waitForAbortableOperation(input.signal, () =>
@@ -169,6 +173,27 @@ export async function processHostedPhoneCallRecoveryById(input: {
       if (!stopped) {
         return "pending";
       }
+    }
+  }
+
+  if (
+    call.status === "failed"
+    && call.providerCallId === null
+    && call.analyzedAt === null
+    && call.stopRequestedAt === null
+  ) {
+    try {
+      await waitForAbortableOperation(input.signal, () =>
+        finalizeStartFailure(call, {
+          abortSignal: input.signal,
+        }));
+    } catch {
+      input.signal.throwIfAborted();
+      const current = await waitForAbortableOperation(input.signal, () =>
+        store.hostedPhoneCall.findUnique({
+          where: { id: input.phoneCallId },
+        }));
+      return current ? "pending" : "missing";
     }
   }
 

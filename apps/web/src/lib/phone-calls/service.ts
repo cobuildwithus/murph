@@ -174,7 +174,10 @@ async function createHostedPhoneCallWithinDeadline(input: Parameters<
   });
   input.signal.throwIfAborted();
   let reassertGroupRequesterAuthority: (() => Promise<void>) | null = null;
-  if (isHostedThreadContainerNotificationDestination(notificationDestination)) {
+  const isThreadContainer = isHostedThreadContainerNotificationDestination(
+    notificationDestination,
+  );
+  if (isThreadContainer) {
     if (input.originDirectChannel) {
       throw new Error(
         "Hosted group phone calls cannot carry direct-channel authority.",
@@ -225,6 +228,14 @@ async function createHostedPhoneCallWithinDeadline(input: Parameters<
       signal: input.signal,
       startReconciliationWorkflow,
       store,
+    });
+  }
+  if (!isThreadContainer && !input.originDirectChannel) {
+    throw hostedOnboardingError({
+      code: "HOSTED_PHONE_CALL_ORIGIN_CHANNEL_REQUIRED",
+      httpStatus: 409,
+      message: "New direct phone calls require an authenticated origin channel.",
+      retryable: true,
     });
   }
 

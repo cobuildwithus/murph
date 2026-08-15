@@ -1147,9 +1147,13 @@ describe("Retell phone-call result handling", () => {
     }]);
   });
 
-  it("carries required transfer delivery through an idempotent notification append", async () => {
+  it("persists a terminal end for an analyzed fenced call and replays its notification idempotently", async () => {
     const store = createWebhookStore({
-      call: buildHostedPhoneCall({ id: "hpc_123" }),
+      call: buildHostedPhoneCall({
+        id: "hpc_123",
+        status: "calling",
+        stopRequestedAt: new Date("2026-06-25T00:01:00.000Z"),
+      }),
     });
     const call = {
       call_analysis: {
@@ -1184,6 +1188,8 @@ describe("Retell phone-call result handling", () => {
     expect(store.updateManyCalls).toHaveLength(1);
     expect(store.updateManyCalls[0]).toMatchObject({
       data: {
+        analyzedAt: expect.any(Date),
+        endedAt: expect.any(Date),
         resultEncrypted: expect.stringMatching(/^hsb-test:/u),
         resultJson: Prisma.DbNull,
         status: "completed",
@@ -1198,6 +1204,9 @@ describe("Retell phone-call result handling", () => {
         },
       },
     });
+    expect(store.updateManyCalls[0]!.data.endedAt).toBe(
+      store.updateManyCalls[0]!.data.analyzedAt,
+    );
     expect(store.appendResultNotificationCalls.map((callRecord) => callRecord.id)).toEqual([
       "hpc_123",
       "hpc_123",

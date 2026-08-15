@@ -1988,7 +1988,10 @@ call is delivered as an ordinary `assistant.notification.requested` system-mailb
 event: Murph composes the result in its own voice and proactively messages the
 originating direct Linq or Telegram channel, or the existing group thread. Every
 terminal analysis uses `require_send`; failure and not-completed outcomes may
-not be omitted. The result JSON is framed as untrusted provider/callee text. At
+not be omitted. A durable provider-less start failure publishes the same
+required result notification with a bounded not-completed outcome, so a call
+that originally returned `starting` cannot become silently failed during
+reconciliation. The result JSON is framed as untrusted provider/callee text. At
 call start the authenticated runtime supplies a bounded direct-channel
 discriminator that Web validates through the current route resolver and stores
 on the call row. Group calls store no direct discriminator and retain their
@@ -2003,9 +2006,10 @@ rows with bounded encrypted-result decryption, and `murph.stop_phone_call`
 accepts only one exact member-owned id under current user authority. Foreground
 stop control writes the nullable `stopRequestedAt` fence and wakes recovery but
 does not call Retell. The reconciliation workflow is the provider-stop owner;
-its step budget covers Retell's serial retrieve and stop deadlines plus durable
-settlement work. Once the stop is confirmed, or recovery proves that no provider
-call exists, Web appends a required notification under
+its 90-second step budget covers the possible serial provider list, stop-status
+retrieve, conditional stop, and terminal-usage retrieve plus durable settlement
+work. Once the stop is confirmed, or recovery proves that no provider call
+exists, Web appends a required notification under
 `phone-call-result:${callId}:stop-settled`. Mailbox append or wake failure keeps
 reconciliation retryable, and replay reuses the deterministic mailbox and
 delivery identities.
@@ -2014,9 +2018,15 @@ Because completion reuses the existing notification wake path, phone-call
 results add no new mailbox kind, runtime consumer, or checkpoint boundary.
 Apply the additive nullable `origin_direct_channel` and `stop_requested_at`
 migrations first, then deploy the Web reader/reconciliation/notification owner,
-then expose the updated runner tools with an immediate runner rollout. A new
-runner sends `originDirectChannel`, which an old strict Web endpoint rejects, so
-runner-first is fail-closed but unavailable.
+then expose the updated runner tools with an immediate runner rollout. New Web
+rejects a new direct call that omits authenticated origin, but still accepts
+group starts and idempotent replay of an existing legacy direct row. Therefore
+an old warm runner cannot create a newly ambiguous direct route during the
+Web-first window; direct starts fail retryably until that runner is replaced.
+A new runner sends `originDirectChannel`, which an old strict Web endpoint also
+rejects, so either misordered mixed-version direct-start window is fail-closed.
+Keep the Web/runner cutover contiguous and prove the new runner fingerprint
+before restoring direct-call availability.
 
 The first compatible Web deployment becomes a hard rollback floor when any
 non-null stop fence is written: older Web cannot consume that durable intent or

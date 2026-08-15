@@ -477,7 +477,9 @@ safe because Web does not require the runner to consume the header.
 A completed phone call delivers its result as a proactive
 `assistant.notification.requested` message: Murph composes the result in its own
 voice and must send every terminal success, failure, needs-user, and
-not-completed outcome. The authenticated direct Linq or Telegram origin is
+not-completed outcome. A provider-less start that becomes durably failed during
+reconciliation publishes the same required not-completed result rather than
+ending silently. The authenticated direct Linq or Telegram origin is
 stored on the call row and resolved again at delivery; group calls continue to
 use their existing thread-container route. A missing or revoked persisted route
 keeps delivery retryable instead of falling back to another channel. This reuses
@@ -488,15 +490,22 @@ Apply the additive nullable `HostedPhoneCall.origin_direct_channel` and
 `HostedPhoneCall.stop_requested_at` migrations first. Deploy Web next so it can
 accept, persist, resolve, reconcile, and notify both fields. Finally deploy the
 Cloudflare Worker and runner with `container_rollout=immediate` to expose status,
-exact-stop, and origin-bound starts. A runner-first window fails closed because
-old Web rejects the new strict start field.
+exact-stop, and origin-bound starts. New Web rejects origin-less new direct
+starts from an old warm runner, while group starts and idempotent replay of an
+existing legacy direct row remain compatible. Direct starts therefore fail
+retryably during the Web-first window; keep that window short, replace warm
+runners immediately, prove the new bundle fingerprint, and then run one Linq
+and one Telegram direct-call canary. A runner-first window also fails closed
+because old Web rejects the new strict start field.
 
 The stop endpoint only records durable intent and wakes the reconciliation
 workflow. That workflow alone owns Retell retrieve/stop and publishes a required
 idempotent `phone-call-result:${callId}:stop-settled` notification when the call
 is no longer active or no provider call exists. Its step timeout must remain
-larger than Retell's two serial 15-second request budgets plus database,
-notification, and wake settlement time.
+larger than Retell's four possible serial 15-second request budgets—provider
+list, stop-status retrieve, conditional stop, and terminal-usage retrieve—plus
+database, notification, and wake settlement time. The current budget is 90
+seconds.
 
 Once any non-null stop fence is written, compatible Web is a hard rollback
 floor. A safe rollback below it requires disabling phone-call start, status, and

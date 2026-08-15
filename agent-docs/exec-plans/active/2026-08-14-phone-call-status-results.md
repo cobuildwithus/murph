@@ -66,9 +66,12 @@ Updated: 2026-08-14
    existing foreground and checkpoint fences.
 4. Risk: deploy skew makes a new runtime operation fail unexpectedly.
    Mitigation: deploy the additive database migration, then Web, then
-   Cloudflare/runner capability exposure. Once a stop fence is written, keep
-   compatible Web as the rollback floor until capability and warm producers are
-   drained and all unsettled fences are consumed.
+   Cloudflare/runner capability exposure in one contiguous cutover. New Web
+   rejects origin-less new direct starts from old warm runners while preserving
+   groups and legacy idempotent replay; immediately replace warm runners and
+   prove their fingerprint. Once a stop fence is written, keep compatible Web
+   as the rollback floor until capability and warm producers are drained and
+   all unsettled fences are consumed.
 
 ## Tasks
 
@@ -104,15 +107,22 @@ Updated: 2026-08-14
 - Derive direct Linq/Telegram origin only from authenticated runtime turn
   context, persist the bounded discriminator, and resolve that same channel for
   normal results and stop settlements. Keep legacy null fallback and fail a
-  revoked present route retryably rather than switching channels.
+  revoked present route retryably rather than switching channels. New Web
+  rejects origin-less new direct rows but preserves legacy idempotent replay and
+  group starts during the immediate runner cutover.
 - Make reconciliation the only Retell stop owner. Foreground control writes the
   compare-and-set stop fence, best-effort wakes reconciliation, and returns
-  `start_pending`. The 75-second workflow step budget covers Retell's two serial
-  15-second stop requests, one terminal-usage retrieve, and durable terminal and
-  notification settlement.
+  `start_pending`. The 90-second workflow step budget covers four possible
+  serial 15-second provider requests—list, stop-status retrieve, conditional
+  stop, and terminal-usage retrieve—and durable terminal and notification
+  settlement.
 - Publish a required stop-settlement notification under a stable call-id key
   after provider termination is confirmed or provider absence is durable.
   Mailbox/wake failures keep recovery pending, and replay reuses the same item.
+- Treat every accepted `call_analyzed` event as terminal even when Retell omits
+  `end_timestamp`: preserve an existing provider end or persist the analysis
+  time as the fallback. Publish a required deduped not-completed result when
+  provider reconciliation durably proves that a pending start never existed.
 
 ## Verification
 
@@ -145,15 +155,29 @@ Updated: 2026-08-14
   harmless; direct results could select the member's default channel instead of
   the initiating channel; and a provider-less or delayed stop settlement did
   not notify the requester. The remediation makes workflow reconciliation the
-  sole provider-stop owner with a 75-second budget, documents the hard rollback
+  sole provider-stop owner with a 90-second budget, documents the hard rollback
   floor and drain, persists authenticated direct origin, and emits required
   deduped stop-settlement notifications.
-- Remediation proof currently passes 161 focused Web tests, 34 assistant-engine
-  tests, 15 hosted-execution tests, 6 Cloudflare bridge tests, and affected
-  package/Web/Cloudflare typechecks. The Web suite includes a fake-timer
-  production Retell adapter proof with three serial 14-second requests, a
-  durable terminal write, required settlement finalization, and terminal usage
-  recording before the 75-second step deadline.
+- Final ReviewGPT round 3 found that `call_analyzed` without `end_timestamp`
+  could leave an analyzed stop fence permanently unsettled. The parent accepted
+  and corrected it by making analysis terminal with an authoritative existing
+  or provider timestamp and an analysis-time fallback. The same review exposed
+  two body/code discrepancies: uncertain-start stop recovery can issue four,
+  not three, serial provider requests, and an old warm runner could omit direct
+  origin during the claimed Web-first compatibility window. The budget is now
+  90 seconds with a four-request fake-timer proof, and Web fails closed before
+  creating a new origin-less direct row while preserving groups and legacy
+  replay. Parent review additionally closed the provider-less asynchronous
+  start-failure delivery gap with a required deduped result notification.
+- Current focused remediation proof passes 129 tests across the exact service,
+  Retell webhook, and result-notification-store files. The Web suite includes a
+  fake-timer production Retell adapter proof with four serial 14-second
+  requests, durable terminal state, required settlement finalization, and
+  terminal usage recording before the 90-second step deadline. Earlier focused
+  assistant-engine, hosted-execution, Cloudflare bridge, and cross-owner proofs
+  remain green. All 14 phone-call Web test files pass 228 tests; Web typecheck,
+  targeted lint, docs drift, doc gardening, and `git diff --check` pass. Final
+  exact-head gates will be rerun after review remediation is committed.
 - Remaining gates: lint/privacy inspection, commit and push the remediation
   head, exact-head CI, final ReviewGPT `ROUND_OUTCOME: PASS`, corrected-head
   product-experience revalidation, clean merge-tree proof, and plan closure.
