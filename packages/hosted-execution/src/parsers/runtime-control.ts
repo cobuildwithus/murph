@@ -4,6 +4,9 @@ import {
   parseHostedExecutionDeviceSyncWakeHint,
 } from "@murphai/device-syncd/hosted-runtime";
 import {
+  parseHostedExecutionDailyMetricReportedPayload,
+} from "../daily-metric.ts";
+import {
   parseHostedExecutionDeviceSyncExpectedConnectedAt,
 } from "./device-sync.ts";
 import {
@@ -152,7 +155,6 @@ import {
   HOSTED_RUNTIME_GROUP_SHARED_READ_DISPLAY_NAME_MAX_CODE_POINTS,
   HOSTED_RUNTIME_GROUP_SHARED_READ_MAX_MEMBERS,
   HOSTED_RUNTIME_GROUP_SHARED_READ_MAX_PROJECTION_SCOPES,
-  HOSTED_RUNTIME_GROUP_SHARED_READ_MAX_RECORDS_PER_PROJECTION,
   HOSTED_RUNTIME_GROUP_SHARED_READ_MEMBER_ID_MAX_CODE_POINTS,
   HOSTED_RUNTIME_GROUP_SHARED_READ_PARTICIPANT_ID_MAX_CODE_POINTS,
   HOSTED_RUNTIME_GROUP_SHARED_READ_SCOPE_KEY_MAX_CODE_POINTS,
@@ -175,7 +177,8 @@ import {
   type HostedRuntimeGroupToolLinqThreadContext,
   type HostedRuntimeGroupMembershipSummary,
   type HostedRuntimeGroupParticipantDisplayNameSource,
-  type HostedRuntimeGroupCurrentSenderMessageResult,
+  type HostedRuntimeGroupCurrentSenderDirectResult,
+  type HostedRuntimeGroupDailyMetricReportResult,
   type HostedRuntimeGroupMemberAskResult,
   type HostedRuntimeGroupMemberSummary,
   type HostedRuntimeGroupSharedMember,
@@ -218,6 +221,7 @@ import {
   HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS,
   HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES,
   buildHostedVaultShareProjectionScopeKey,
+  getHostedVaultShareProjectionMaxRecords,
   hostedVaultShareProjectionKindToScope,
   parseHostedVaultShareDeliveryRecord,
   parseHostedVaultShareProjectionScope,
@@ -1075,6 +1079,14 @@ export function parseHostedRuntimeAssistantAskControlResponse(
     }
     return { action, status, terminalReason };
   }
+  if (action === "prepare" && status === "already_completed") {
+    assertAllowedObjectKeys(
+      record,
+      new Set(["action", "status"]),
+      "Hosted runtime assistant ask prepare completed control response",
+    );
+    return { action, status };
+  }
   if (
     action === "complete"
     && (status === "completed" || status === "already_completed")
@@ -1127,11 +1139,49 @@ export function parseHostedRuntimeGroupToolRequest(
       ...parseHostedRuntimeGroupAssistantAskFields(record, label),
     };
   }
-  if (
-    action === "ask_current_sender"
-    || action === "message_current_sender"
-  ) {
-    const label = `Hosted runtime group tool ${action} request`;
+  if (action === "ask_current_sender") {
+    const label = "Hosted runtime group tool ask_current_sender request";
+    assertAllowedObjectKeys(
+      record,
+      new Set(["action", "audience", "mode", "origin"]),
+      label,
+    );
+    const mode = parseAllowedString(
+      record.mode,
+      `${label} mode`,
+      ["clarification", "continuation", "new"] as const,
+    );
+    const audience = record.audience === undefined
+      ? undefined
+      : parseAllowedString(
+          record.audience,
+          `${label} audience`,
+          ["current_sender", "group"] as const,
+        );
+    if (
+      (mode === "clarification" && audience !== undefined)
+      || (mode !== "clarification" && audience === undefined)
+    ) {
+      throw new TypeError(
+        `${label} audience must be omitted only for clarification.`,
+      );
+    }
+    const origin = parseHostedExecutionAssistantAskOrigin(
+      record.origin,
+      `${label} origin`,
+    );
+    if (origin.kind !== "accepted_input") {
+      throw new TypeError(`${label} origin must be an accepted input.`);
+    }
+    return {
+      action,
+      ...(audience === undefined ? {} : { audience }),
+      mode,
+      origin,
+    };
+  }
+  if (action === "message_current_sender") {
+    const label = "Hosted runtime group tool legacy message_current_sender request";
     assertAllowedObjectKeys(record, new Set(["action", "origin"]), label);
     const origin = parseHostedExecutionAssistantAskOrigin(
       record.origin,
@@ -1140,7 +1190,34 @@ export function parseHostedRuntimeGroupToolRequest(
     if (origin.kind !== "accepted_input") {
       throw new TypeError(`${label} origin must be an accepted input.`);
     }
-    return { action, origin };
+    return {
+      action: "ask_current_sender",
+      audience: "current_sender",
+      mode: "new",
+      origin,
+    };
+  }
+  if (action === "record_current_sender_daily_metric") {
+    const label = "Hosted runtime group tool record_current_sender_daily_metric request";
+    assertAllowedObjectKeys(
+      record,
+      new Set(["action", "dailyMetric", "origin"]),
+      label,
+    );
+    const origin = parseHostedExecutionAssistantAskOrigin(
+      record.origin,
+      `${label} origin`,
+    );
+    if (origin.kind !== "accepted_input") {
+      throw new TypeError(`${label} origin must be an accepted input.`);
+    }
+    return {
+      action,
+      dailyMetric: parseHostedExecutionDailyMetricReportedPayload(
+        record.dailyMetric,
+      ),
+      origin,
+    };
   }
   if (action === "ask_member") {
     const label = "Hosted runtime group tool ask_member request";
@@ -2419,7 +2496,11 @@ function parseHostedRuntimeGroupSharedProjection(
     throw new TypeError(`${label}.grantStatus is invalid.`);
   }
   const dataStatus = requireString(projection.dataStatus, `${label}.dataStatus`);
-  if (dataStatus !== "available" && dataStatus !== "missing") {
+  if (
+    dataStatus !== "available"
+    && dataStatus !== "missing"
+    && dataStatus !== "pending"
+  ) {
     throw new TypeError(`${label}.dataStatus is invalid.`);
   }
   const grantedAt = projection.grantedAt === undefined
@@ -2442,12 +2523,10 @@ function parseHostedRuntimeGroupSharedProjection(
   }
 
   const rawRecords = requireArray(projection.records, `${label}.records`);
-  if (
-    rawRecords.length >
-      HOSTED_RUNTIME_GROUP_SHARED_READ_MAX_RECORDS_PER_PROJECTION
-  ) {
+  const maxRecords = getHostedVaultShareProjectionMaxRecords(projectionScope);
+  if (rawRecords.length > maxRecords) {
     throw new TypeError(
-      `${label}.records must contain at most ${HOSTED_RUNTIME_GROUP_SHARED_READ_MAX_RECORDS_PER_PROJECTION} entries.`,
+      `${label}.records must contain at most ${maxRecords} entries.`,
     );
   }
   if (grantStatus === "not_granted" && dataStatus !== "missing") {
@@ -2460,8 +2539,10 @@ function parseHostedRuntimeGroupSharedProjection(
       `${label} available projections must contain at least one record.`,
     );
   }
-  if (dataStatus === "missing" && rawRecords.length !== 0) {
-    throw new TypeError(`${label} missing projections must not contain records.`);
+  if (dataStatus !== "available" && rawRecords.length !== 0) {
+    throw new TypeError(
+      `${label} pending or missing projections must not contain records.`,
+    );
   }
 
   const seenRecordKeys = new Set<string>();
@@ -2471,7 +2552,7 @@ function parseHostedRuntimeGroupSharedProjection(
       const record = requireObject(rawRecord, recordLabel);
       assertAllowedObjectKeys(
         record,
-        new Set(["data", "occurredAt", "recordKey"]),
+        new Set(["data", "occurredAt", "recordKey", "source"]),
         recordLabel,
       );
       const parsed = parseHostedVaultShareDeliveryRecord(record, projectionScope);
@@ -2483,6 +2564,7 @@ function parseHostedRuntimeGroupSharedProjection(
         data: parsed.data,
         occurredAt: parsed.occurredAt,
         recordKey: parsed.recordKey,
+        ...(parsed.source ? { source: parsed.source } : {}),
       };
     },
   );
@@ -2509,11 +2591,42 @@ function parseHostedRuntimeGroupCanonicalTimestamp(
   return timestamp;
 }
 
-function parseHostedRuntimeGroupCurrentSenderMessageResult(
+function parseHostedRuntimeGroupCurrentSenderDirectResult(
   value: unknown,
-): HostedRuntimeGroupCurrentSenderMessageResult {
+): HostedRuntimeGroupCurrentSenderDirectResult {
   const label =
-    "Hosted runtime group tool message_current_sender response result";
+    "Hosted runtime group tool direct current-sender response result";
+  const result = requireObject(value, label);
+  const status = requireString(result.status, `${label} status`);
+  if (status === "accepted") {
+    assertAllowedObjectKeys(result, new Set(["status"]), label);
+    return { status };
+  }
+  if (status === "clarification_required") {
+    assertAllowedObjectKeys(result, new Set(["status"]), label);
+    return { status };
+  }
+  if (status === "unavailable") {
+    assertAllowedObjectKeys(
+      result,
+      new Set(["status", "unavailableReason"]),
+      label,
+    );
+    return {
+      status,
+      unavailableReason: parseHostedRuntimeGroupUnavailableReason(
+        result,
+        `${label} unavailableReason`,
+      ),
+    };
+  }
+  throw new TypeError(`${label} status is invalid.`);
+}
+
+function parseHostedRuntimeGroupDailyMetricReportResult(
+  value: unknown,
+): HostedRuntimeGroupDailyMetricReportResult {
+  const label = "Hosted runtime group tool daily metric response result";
   const result = requireObject(value, label);
   const status = requireString(result.status, `${label} status`);
   if (status === "accepted") {
@@ -2584,15 +2697,49 @@ export function parseHostedRuntimeGroupToolResponse(
 ): HostedRuntimeGroupToolResponse {
   const record = requireObject(value, "Hosted runtime group tool response");
   const action = requireString(record.action, "Hosted runtime group tool response action");
-  assertAllowedObjectKeys(record, new Set(["action", "result"]), "Hosted runtime group tool response");
 
-  if (action === "message_current_sender") {
+  if (action === "ask_current_sender") {
+    const label = "Hosted runtime group tool ask_current_sender response";
+    assertAllowedObjectKeys(
+      record,
+      new Set(["action", "result"]),
+      label,
+    );
     return {
       action,
-      result: parseHostedRuntimeGroupCurrentSenderMessageResult(record.result),
+      result: parseHostedRuntimeGroupCurrentSenderDirectResult(record.result),
     };
   }
-  if (action === "ask_current_sender" || action === "ask_member") {
+  if (action === "record_current_sender_daily_metric") {
+    const label = "Hosted runtime group tool daily metric response";
+    assertAllowedObjectKeys(
+      record,
+      new Set(["action", "result"]),
+      label,
+    );
+    return {
+      action,
+      result: parseHostedRuntimeGroupDailyMetricReportResult(record.result),
+    };
+  }
+  if (action === "message_current_sender") {
+    assertAllowedObjectKeys(
+      record,
+      new Set(["action", "result"]),
+      "Hosted runtime group tool legacy message_current_sender response",
+    );
+    return {
+      action: "ask_current_sender",
+      result: parseHostedRuntimeGroupCurrentSenderDirectResult(record.result),
+    };
+  }
+
+  assertAllowedObjectKeys(
+    record,
+    new Set(["action", "result"]),
+    "Hosted runtime group tool response",
+  );
+  if (action === "ask_member") {
     return {
       action,
       result: parseHostedRuntimeGroupMemberAskResult(record.result, action),

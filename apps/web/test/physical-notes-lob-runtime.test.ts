@@ -7,30 +7,44 @@ import {
 
 describe("Lob physical-note runtime", () => {
   it("submits one full-page image letter with provider idempotency", async () => {
-    const fetchImpl = vi.fn<typeof fetch>(async (_url, init) => {
-      const body = JSON.parse(String(init?.body));
-      expect(body).toMatchObject({
+    const fetchImpl = vi.fn<typeof fetch>(async (input, init) => {
+      const request = new Request(input, init);
+      expect(request.url).toBe(
+        "https://api.lob.com/v1/letters",
+      );
+      expect(request.method).toBe("POST");
+      expect(init?.redirect).toBe("error");
+      const body = await request.json();
+      expect(body).toEqual({
         address_placement: "insert_blank_page",
         color: true,
         double_sided: true,
+        file: expect.stringContaining(
+          'src="https://media.example.test/artwork?a=1&amp;b=2"',
+        ),
         from: "adr_from",
         mail_type: "usps_first_class",
-        use_type: "operational",
+        metadata: {
+          murph_physical_note_id: "hpn_1",
+        },
         size: "us_letter",
         to: {
           address_city: "Atlanta",
           address_country: "US",
           address_line1: "123 Main St",
+          address_line2: "Apt 4",
           address_state: "GA",
           address_zip: "30308",
           name: "Sam",
         },
+        use_type: "operational",
       });
-      expect(body.file).toContain(
-        'src="https://media.example.test/artwork?a=1&amp;b=2"',
+      expect(request.headers.get("authorization")).toBe(
+        "Basic dGVzdF9rZXk6",
       );
-      expect(new Headers(init?.headers).get("Idempotency-Key")).toBe("hpn_1");
-      expect(new Headers(init?.headers).get("Lob-Version")).toBe("2024-01-01");
+      expect(request.headers.get("content-type")).toBe("application/json");
+      expect(request.headers.get("Idempotency-Key")).toBe("hpn_1");
+      expect(request.headers.get("Lob-Version")).toBe("2024-01-01");
       return Response.json({ id: "ltr_123" });
     });
     const runtime = createLobPhysicalNoteRuntime({
@@ -45,6 +59,7 @@ describe("Lob physical-note runtime", () => {
       noteId: "hpn_1",
       recipient: {
         addressLine1: "123 Main St",
+        addressLine2: "Apt 4",
         city: "Atlanta",
         name: "Sam",
         postalCode: "30308",
@@ -54,6 +69,32 @@ describe("Lob physical-note runtime", () => {
       kind: "accepted",
       providerLetterId: "ltr_123",
     });
+    expect(fetchImpl).toHaveBeenCalledOnce();
+  });
+
+  it("keeps request-construction failures ambiguous before provider transport", async () => {
+    const fetchImpl = vi.fn<typeof fetch>();
+    const runtime = createLobPhysicalNoteRuntime({
+      apiKey: "test_key",
+      fetchImpl,
+      fromAddressId: "adr_from",
+    });
+
+    await expect(
+      runtime.create({
+        artworkUrl: "http://media.example.test/artwork",
+        idempotencyKey: "hpn_invalid_artwork",
+        noteId: "hpn_invalid_artwork",
+        recipient: {
+          addressLine1: "123 Main St",
+          city: "Atlanta",
+          name: "Sam",
+          postalCode: "30308",
+          state: "GA",
+        },
+      }),
+    ).resolves.toEqual({ kind: "ambiguous_failure" });
+    expect(fetchImpl).not.toHaveBeenCalled();
   });
 
   it("does not enter provider transport when the caller is already aborted", async () => {
@@ -82,18 +123,205 @@ describe("Lob physical-note runtime", () => {
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 
-  it("keeps network and server failures ambiguous", async () => {
+  it("keeps network, server, and malformed-success writes ambiguous without retrying", async () => {
+    const responses: Array<() => Promise<Response>> = [
+      async () => {
+        throw new Error("network unavailable");
+      },
+      async () => new Response(JSON.stringify({
+        error: { message: "provider internal detail" },
+      }), {
+        headers: { "content-type": "application/json" },
+        status: 503,
+      }),
+      async () => Response.json({ id: "not-a-letter-id" }),
+    ];
+
+    for (const response of responses) {
+      const fetchImpl = vi.fn<typeof fetch>(response);
+      const runtime = createLobPhysicalNoteRuntime({
+        apiKey: "test_key",
+        fetchImpl,
+        fromAddressId: "adr_from",
+      });
+      await expect(runtime.create({
+        artworkUrl: "https://media.example.test/artwork",
+        idempotencyKey: "hpn_ambiguous",
+        noteId: "hpn_ambiguous",
+        recipient: {
+          addressLine1: "123 Main St",
+          city: "Atlanta",
+          name: "Sam",
+          postalCode: "30308",
+          state: "GA",
+        },
+      })).resolves.toEqual({ kind: "ambiguous_failure" });
+      expect(fetchImpl).toHaveBeenCalledOnce();
+    }
+  });
+
+  it("normalizes bodyless provider rejections to a safe reason", async () => {
+    const cancel = vi.fn();
+    const fetchImpl = vi.fn<typeof fetch>(async () => new Response(
+      new ReadableStream({ cancel }),
+      {
+        status: 422,
+      },
+    ));
     const runtime = createLobPhysicalNoteRuntime({
       apiKey: "test_key",
-      fetchImpl: vi.fn<typeof fetch>(async () => new Response(null, {
-        status: 503,
-      })),
+      fetchImpl,
       fromAddressId: "adr_from",
     });
+
     await expect(runtime.create({
       artworkUrl: "https://media.example.test/artwork",
-      idempotencyKey: "hpn_1",
-      noteId: "hpn_1",
+      idempotencyKey: "hpn_rejected",
+      noteId: "hpn_rejected",
+      recipient: {
+        addressLine1: "123 Main St",
+        city: "Atlanta",
+        name: "Sam",
+        postalCode: "30308",
+        state: "GA",
+      },
+    })).resolves.toEqual({
+      kind: "definite_failure",
+      reason: "unknown",
+      status: 422,
+    });
+    expect(fetchImpl).toHaveBeenCalledOnce();
+    expect(cancel).toHaveBeenCalledOnce();
+  });
+
+  it("uses the write-only provider deadline", async () => {
+    const timeoutSpy = vi.spyOn(AbortSignal, "timeout");
+    const fetchImpl = vi.fn<typeof fetch>(async (_input, init) => {
+      expect(init?.signal).toBe(timeoutSpy.mock.results[0]?.value);
+      return Response.json({ id: "ltr_timeout" });
+    });
+    const runtime = createLobPhysicalNoteRuntime({
+      apiKey: "test_key",
+      fetchImpl,
+      fromAddressId: "adr_from",
+    });
+
+    try {
+      await expect(
+        runtime.create({
+          artworkUrl: "https://media.example.test/artwork",
+          idempotencyKey: "hpn_write_timeout",
+          noteId: "hpn_write_timeout",
+          recipient: {
+            addressLine1: "123 Main St",
+            city: "Atlanta",
+            name: "Sam",
+            postalCode: "30308",
+            state: "GA",
+          },
+        }),
+      ).resolves.toEqual({
+        kind: "accepted",
+        providerLetterId: "ltr_timeout",
+      });
+      expect(timeoutSpy).toHaveBeenCalledOnce();
+      expect(timeoutSpy).toHaveBeenCalledWith(30_000);
+    } finally {
+      timeoutSpy.mockRestore();
+    }
+  });
+
+  it.each([
+    ["address_length_exceeds_limit", "recipient_address"],
+    ["failed_deliverability_strictness", "recipient_address"],
+    ["file_size_exceeds_limit", "artwork"],
+    ["invalid_image_dpi", "artwork"],
+    ["billing_address_required", "service_unavailable"],
+    ["custom_envelope_inventory_depleted", "service_unavailable"],
+    ["email_required", "service_unavailable"],
+    ["feature_limit_reached", "service_unavailable"],
+    ["foreign_return_address", "service_unavailable"],
+    ["invalid_api_key", "service_unavailable"],
+    ["invalid_country_covid", "service_unavailable"],
+    ["invalid_file_download_time", "service_unavailable"],
+    ["invalid_file_url", "service_unavailable"],
+    ["not_found", "service_unavailable"],
+    ["payment_method_unverified", "service_unavailable"],
+    ["publishable_key_not_allowed", "service_unavailable"],
+    ["rate_limit_exceeded", "service_unavailable"],
+    ["unauthorized", "service_unavailable"],
+    ["unauthorized_token", "service_unavailable"],
+    ["bad_request", "request_invalid"],
+    ["conflict", "request_invalid"],
+    ["file_pages_below_min", "request_invalid"],
+    ["file_pages_exceed_max", "request_invalid"],
+    ["inconsistent_page_dimensions", "request_invalid"],
+    ["invalid", "request_invalid"],
+    ["invalid_file", "request_invalid"],
+    ["invalid_file_dimensions", "request_invalid"],
+    ["invalid_international_feature", "request_invalid"],
+    ["invalid_perforation_return_envelope", "request_invalid"],
+    ["invalid_template_html", "request_invalid"],
+    ["mail_use_type_can_not_be_null", "request_invalid"],
+    ["merge_variable_required", "request_invalid"],
+    ["merge_variable_whitespace", "request_invalid"],
+    ["pdf_encrypted", "request_invalid"],
+    ["special_characters_restricted", "request_invalid"],
+    ["unembedded_fonts", "request_invalid"],
+    ["unrecognized_endpoint", "request_invalid"],
+    ["unsupported_lob_version", "request_invalid"],
+    ["future_provider_code", "unknown"],
+  ] as const)(
+    "maps Lob rejection code %s to safe reason %s",
+    async (code, reason) => {
+      const runtime = createLobPhysicalNoteRuntime({
+        apiKey: "test_key",
+        fetchImpl: vi.fn<typeof fetch>(async () => Response.json({
+          error: {
+            code,
+            message: "private provider detail must not cross the boundary",
+            status_code: 422,
+          },
+        }, { status: 422 })),
+        fromAddressId: "adr_from",
+      });
+
+      await expect(runtime.create({
+        artworkUrl: "https://media.example.test/artwork",
+        idempotencyKey: "hpn_rejected",
+        noteId: "hpn_rejected",
+        recipient: {
+          addressLine1: "123 Main St",
+          city: "Atlanta",
+          name: "Sam",
+          postalCode: "30308",
+          state: "GA",
+        },
+      })).resolves.toEqual({
+        kind: "definite_failure",
+        reason,
+        status: 422,
+      });
+    },
+  );
+
+  it("keeps a timed-out HTTP outcome ambiguous", async () => {
+    const runtime = createLobPhysicalNoteRuntime({
+      apiKey: "test_key",
+      fetchImpl: vi.fn<typeof fetch>(async () => Response.json({
+        error: {
+          code: "request_timeout",
+          message: "request timed out",
+          status_code: 408,
+        },
+      }, { status: 408 })),
+      fromAddressId: "adr_from",
+    });
+
+    await expect(runtime.create({
+      artworkUrl: "https://media.example.test/artwork",
+      idempotencyKey: "hpn_timeout_response",
+      noteId: "hpn_timeout_response",
       recipient: {
         addressLine1: "123 Main St",
         city: "Atlanta",
@@ -102,6 +330,33 @@ describe("Lob physical-note runtime", () => {
         state: "GA",
       },
     })).resolves.toEqual({ kind: "ambiguous_failure" });
+  });
+
+  it("uses an unknown safe reason for malformed rejection payloads", async () => {
+    const runtime = createLobPhysicalNoteRuntime({
+      apiKey: "test_key",
+      fetchImpl: vi.fn<typeof fetch>(async () => new Response("not json", {
+        status: 422,
+      })),
+      fromAddressId: "adr_from",
+    });
+
+    await expect(runtime.create({
+      artworkUrl: "https://media.example.test/artwork",
+      idempotencyKey: "hpn_malformed_rejection",
+      noteId: "hpn_malformed_rejection",
+      recipient: {
+        addressLine1: "123 Main St",
+        city: "Atlanta",
+        name: "Sam",
+        postalCode: "30308",
+        state: "GA",
+      },
+    })).resolves.toEqual({
+      kind: "definite_failure",
+      reason: "unknown",
+      status: 422,
+    });
   });
 
   it("finds an accepted letter through Lob's exact metadata filter", async () => {
@@ -114,6 +369,7 @@ describe("Lob physical-note runtime", () => {
       expect(request.headers.get("authorization")).toMatch(/^Basic /u);
       expect(request.headers.get("Lob-Version")).toBe("2024-01-01");
       expect(init?.body).toBeUndefined();
+      expect(init?.redirect).toBe("error");
       return Response.json({
         data: [{ id: "ltr_lookup" }],
       });
@@ -130,6 +386,7 @@ describe("Lob physical-note runtime", () => {
       kind: "accepted",
       providerLetterId: "ltr_lookup",
     });
+    expect(fetchImpl).toHaveBeenCalledOnce();
   });
 
   it("treats a valid empty Lob metadata result as definitively absent", async () => {
@@ -186,19 +443,26 @@ describe("Lob physical-note runtime", () => {
       async () => {
         throw new Error("network unavailable");
       },
-      async () => new Response(null, { status: 503 }),
+      async () => new Response(JSON.stringify({
+        error: { message: "provider lookup detail" },
+      }), {
+        headers: { "content-type": "application/json" },
+        status: 503,
+      }),
       async () => Response.json({ data: [{ object: "letter" }] }),
     ];
 
     for (const response of responses) {
+      const fetchImpl = vi.fn<typeof fetch>(response);
       const runtime = createLobPhysicalNoteRuntime({
         apiKey: "test_key",
-        fetchImpl: vi.fn<typeof fetch>(response),
+        fetchImpl,
         fromAddressId: "adr_from",
       });
       await expect(runtime.findLetterByNoteId({
         noteId: "hpn_indeterminate",
       })).resolves.toEqual({ kind: "indeterminate" });
+      expect(fetchImpl).toHaveBeenCalledOnce();
     }
   });
 

@@ -26,10 +26,12 @@ test("@murphai/device-syncd package manifest exposes narrow public subpaths", as
     "./hosted-hints",
     "./hosted-runtime",
     "./http",
+    "./junction-historical-backfill-progress",
     "./junction-inline-authority",
     "./junction-push-source-recovery",
     "./junction-resources",
     "./local-secret-codec",
+    "./prepared-webhook",
     "./provider-configs",
     "./provider-credential-policy",
     "./provider-label",
@@ -61,9 +63,17 @@ test("@murphai/device-syncd package manifest exposes narrow public subpaths", as
     default: "./dist/local-secret-codec.js",
     types: "./dist/local-secret-codec.d.ts",
   });
+  assert.deepEqual(packageManifest.exports?.["./prepared-webhook"], {
+    default: "./dist/prepared-webhook.js",
+    types: "./dist/prepared-webhook.d.ts",
+  });
   assert.deepEqual(packageManifest.exports?.["./junction-inline-authority"], {
     default: "./dist/junction-inline-authority.js",
     types: "./dist/junction-inline-authority.d.ts",
+  });
+  assert.deepEqual(packageManifest.exports?.["./junction-historical-backfill-progress"], {
+    default: "./dist/junction-historical-backfill-progress.js",
+    types: "./dist/junction-historical-backfill-progress.d.ts",
   });
   assert.deepEqual(packageManifest.exports?.["./junction-resources"], {
     default: "./dist/junction-resources.js",
@@ -103,6 +113,23 @@ test("@murphai/device-syncd root barrel exposes the local secret codec API", () 
   assert.equal(rootExports.createSecretCodec, createSecretCodec);
   assert.equal("buildDeviceSyncSecretAad" in rootExports, false);
   assert.equal("buildDeviceSyncTokenCipherOptions" in rootExports, false);
+});
+
+test("Junction provider imports SDK resource subpaths without the aggregate root", async () => {
+  const source = await readFile(
+    new URL("../src/providers/junction-client.ts", import.meta.url),
+    "utf8",
+  );
+  const sdkSpecifiers = [
+    ...source.matchAll(
+      /\b(?:from\s+|import\s*(?:\(\s*)?)["'](@junction-api\/sdk(?:\/[^"']+)?)['"]/gu,
+    ),
+  ].map((match) => match[1]);
+
+  assert.ok(
+    sdkSpecifiers.some((specifier) => specifier?.startsWith("@junction-api/sdk/")),
+  );
+  assert.equal(sdkSpecifiers.includes("@junction-api/sdk"), false);
 });
 
 test("hosted web-safe device-sync graph stays out of provider runtime modules", async () => {

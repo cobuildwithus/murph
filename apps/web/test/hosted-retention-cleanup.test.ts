@@ -127,6 +127,7 @@ describe("hosted retention cleanup", () => {
       ['DELETE FROM "hosted_web_internal_request_nonce"', 6],
       ['DELETE FROM "hosted_ingress_latency_trace"', 1],
       ['DELETE FROM "hosted_assistant_runtime_issue"', 2],
+      ['DELETE FROM "hosted_group_current_sender_clarification"', 3],
       ['DELETE FROM "device_webhook_trace"', 4],
       ['UPDATE "hosted_linq_provider_event"', 5],
     ]);
@@ -178,6 +179,7 @@ describe("hosted retention cleanup", () => {
       expiredDeviceConnectIntentsDeleted: 3,
       expiredDeviceOauthSessionsDeleted: 4,
       expiredDeviceWebhookTracesDeleted: 4,
+      expiredGroupCurrentSenderClarificationsDeleted: 3,
       expiredIngressLatencyTracesDeleted: 1,
       expiredMailboxContentRetired: 7,
       expiredMailboxTombstonesDeleted: 3,
@@ -224,80 +226,7 @@ describe("hosted retention cleanup", () => {
     ]);
 
     // One statement per category: every short batch stops that category's loop.
-    expect(executeRaw).toHaveBeenCalledTimes(13);
-
-    const controlArtifactStatements = [
-      {
-        fragment: 'DELETE FROM "hosted_connected_app_connect_intent"',
-        lockAlias: "intent",
-        key: 'intent."claim_hash"',
-      },
-      {
-        fragment: 'DELETE FROM "hosted_sensitive_action_challenge"',
-        lockAlias: "challenge",
-        key: 'challenge."token_hash"',
-      },
-      {
-        fragment: 'DELETE FROM "device_connect_intent"',
-        lockAlias: "intent",
-        key: 'intent."claim_hash"',
-      },
-      {
-        fragment: 'DELETE FROM "device_oauth_session"',
-        lockAlias: "oauth_session",
-        key: 'oauth_session."state"',
-      },
-      {
-        fragment: 'DELETE FROM "clinical_record_connect_intent"',
-        lockAlias: "intent",
-        key: 'intent."claim_hash"',
-      },
-      {
-        fragment: 'DELETE FROM "clinical_record_oauth_session"',
-        lockAlias: "oauth_session",
-        key: 'oauth_session."state_hash"',
-      },
-    ] as const;
-    for (const statement of controlArtifactStatements) {
-      const call = findRetentionCall(executeRaw, statement.fragment);
-      const sql = sqlOf(call);
-      expect(sql).toContain("doomed AS MATERIALIZED");
-      expect(sql).toContain(`${statement.lockAlias}."expires_at" <= ?`);
-      expect(sql).toContain(
-        `ORDER BY ${statement.lockAlias}."expires_at" ASC, ${statement.key} ASC`,
-      );
-      expect(sql).toContain(
-        `FOR UPDATE OF ${statement.lockAlias} SKIP LOCKED`,
-      );
-      expect(sql).toContain(`${statement.key} = doomed.`);
-      const startedIntentOwner = statement.fragment
-        === 'DELETE FROM "hosted_connected_app_connect_intent"'
-        || statement.fragment === 'DELETE FROM "clinical_record_connect_intent"';
-      if (startedIntentOwner) {
-        expect(sql).toContain(`${statement.lockAlias}."started_at" IS NULL`);
-        expect(sql).toContain(`OR ${statement.lockAlias}."expires_at" <= ?`);
-        const graceMs = statement.fragment
-          === 'DELETE FROM "hosted_connected_app_connect_intent"'
-          ? HOSTED_CONNECTED_APP_STARTED_INTENT_OWNER_GRACE_MS
-          : CLINICAL_RECORD_STARTED_CONNECT_INTENT_RETENTION_GRACE_MS;
-        expect(call.slice(1)).toEqual([
-          now,
-          new Date(now.getTime() - graceMs),
-          HOSTED_CONTROL_ARTIFACT_RETENTION_BATCH_SIZE,
-        ]);
-      } else {
-        expect(call.slice(1)).toEqual([
-          now,
-          HOSTED_CONTROL_ARTIFACT_RETENTION_BATCH_SIZE,
-        ]);
-      }
-    }
-    expect(
-      sqlOf(findRetentionCall(
-        executeRaw,
-        'DELETE FROM "hosted_sensitive_action_challenge"',
-      )),
-    ).toContain('challenge."approval_key" IS NULL');
+    expect(executeRaw).toHaveBeenCalledTimes(8);
 
     const callbackNonceCall = findRetentionCall(
       executeRaw,
@@ -719,6 +648,7 @@ describe("hosted retention cleanup", () => {
         expiredDeviceConnectIntentsDeleted: 1,
         expiredDeviceOauthSessionsDeleted: 1,
         expiredDeviceWebhookTracesDeleted: 1,
+        expiredGroupCurrentSenderClarificationsDeleted: 1,
         expiredIngressLatencyTracesDeleted: 1,
         expiredMailboxContentRetired: 1,
         expiredMailboxTombstonesDeleted: 0,

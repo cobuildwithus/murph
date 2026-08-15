@@ -6,15 +6,15 @@ import {
 } from '@murphai/hosted-execution/assistant-usage'
 import {
   HOSTED_CUSTOM_INFERENCE_CODEX_MODEL_PROVIDER_ID,
+  HOSTED_LOCAL_TEST_CODEX_MODEL_PROVIDER_ID,
+  HOSTED_LOCAL_TEST_VENICE_CODEX_MODEL_PROVIDER_ID,
 } from '@murphai/operator-config/assistant/target-runtime'
 import {
   MURPH_GROUP_ROOM_MODEL_MAINTENANCE_PERMISSION_PROFILE,
   MURPH_MEMBER_MEMORY_MAINTENANCE_PERMISSION_PROFILE,
   MURPH_MEMBER_READ_PERMISSION_PROFILE,
+  MURPH_MEMBER_WORKSPACE_PERMISSION_PROFILE,
 } from '@murphai/hosted-execution/assistant-permissions'
-import {
-  resolveHostedAiUsageTokenPricingBasis,
-} from '@murphai/hosted-execution/runtime-control'
 import {
   hasHostedCodexModelCatalogFlexTier,
 } from '../assistant-codex/config.js'
@@ -35,6 +35,9 @@ import type {
   AssistantProviderUsage,
   AssistantProviderUsageDraft,
 } from './providers/types.js'
+import {
+  resolveCodexAssistantProviderTokenPricingBasis,
+} from './providers/helpers.js'
 import { errorMessage, normalizeNullableString } from './shared.js'
 import {
   recordAssistantRuntimeIssueInputsBestEffort,
@@ -85,9 +88,10 @@ import {
 import type {
   AssistantHostedToolContext,
 } from './hosted-tool-context.js'
-import type {
-  AssistantAcceptedTurnInputItemInput,
-  AssistantCodexContinuation,
+import {
+  resolveAssistantAcceptedTurnInputReferenceWindow,
+  type AssistantAcceptedTurnInputItemInput,
+  type AssistantCodexContinuation,
 } from './active-turn-input-journal.js'
 import type { AssistantUserMessageContentPart } from './content-types.js'
 import type { AssistantProviderTraceEvent } from './provider-traces.js'
@@ -560,6 +564,16 @@ async function executeAssistantCodexAttempt(input: {
     const groupEmailTurn =
       audience.threadIsDirect === false &&
       normalizeNullableString(audience.channel)?.toLowerCase() === 'email'
+    const ordinaryHostedWorkspaceTurn =
+      Boolean(executionPlan.executionContext?.hosted) &&
+      !restrictedOneShotTurn &&
+      !nativeCapabilitiesRestrictedTurn &&
+      !groupEmailTurn
+    const hostedLocalTestProviderTurn =
+      attemptPlan.route.providerOptions.modelProvider ===
+        HOSTED_LOCAL_TEST_CODEX_MODEL_PROVIDER_ID ||
+      attemptPlan.route.providerOptions.modelProvider ===
+        HOSTED_LOCAL_TEST_VENICE_CODEX_MODEL_PROVIDER_ID
     const attemptResult = await executeCodexAssistantTurnAttemptFromInput({
       providerConfig: {
         approvalPolicy:
@@ -595,6 +609,10 @@ async function executeAssistantCodexAttempt(input: {
           : executionPlan.activeTurnSteering,
         activeTurnSessionId: attemptPlan.session.sessionId,
         allowFinishWithoutReply: executionPlan.allowFinishWithoutReply,
+        automationRelativeDateReferenceWindow:
+          resolveAssistantAcceptedTurnInputReferenceWindow(
+            executionPlan.acceptedInputItems ?? [],
+          ),
         authorizeAcceptedMessageTarget:
           executionPlan.authorizeAcceptedMessageTarget ?? null,
         codexConfigOverrides: resolveAssistantCodexConfigOverrides({
@@ -686,7 +704,11 @@ async function executeAssistantCodexAttempt(input: {
               ? MURPH_MEMBER_MEMORY_MAINTENANCE_PERMISSION_PROFILE
               : readOnlyAutomationTurn && executionPlan.executionContext?.hosted
               ? MURPH_MEMBER_READ_PERMISSION_PROFILE
-              : null,
+              : ordinaryHostedWorkspaceTurn
+                ? hostedLocalTestProviderTurn
+                  ? null
+                  : MURPH_MEMBER_WORKSPACE_PERMISSION_PROFILE
+                : null,
         ...(restrictedOneShotTurn
           ? { processLifetime: 'one-shot' as const }
           : {}),
@@ -710,7 +732,8 @@ async function executeAssistantCodexAttempt(input: {
           !hostedRuntimeCapabilitiesRestrictedTurn &&
           !readOnlyAutomationTurn &&
           Boolean(executionPlan.executionContext?.hosted),
-        runtimeWorkspaceRoots: restrictedOneShotTurn
+        runtimeWorkspaceRoots:
+          restrictedOneShotTurn || ordinaryHostedWorkspaceTurn
           ? [attemptPlan.routePlan.workingDirectory]
           : null,
         resume: readOnlyAutomationTurn ? null : attemptPlan.routePlan.resume,
@@ -977,9 +1000,9 @@ function resolveCodexAttemptServiceTier(input: {
   if (!input.executionContext?.hosted) {
     return null
   }
-  if (resolveHostedAiUsageTokenPricingBasis({
+  if (resolveCodexAssistantProviderTokenPricingBasis({
     model: input.routeModel,
-    providerName: input.routeModelProvider,
+    modelProvider: input.routeModelProvider,
     serviceTier: input.requestedServiceTier,
   }) !== 'openai-flex') {
     return null

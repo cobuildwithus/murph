@@ -10,6 +10,7 @@ import {
   buildMurphGroupRoomModelMaintenancePermissionProfileTomlLines,
   buildMurphMemberMemoryMaintenancePermissionProfileTomlLines,
   buildMurphMemberReadPermissionProfileTomlLines,
+  buildMurphMemberWorkspacePermissionProfileTomlLines,
 } from "@murphai/hosted-execution/assistant-permissions";
 import {
   HOSTED_RUNTIME_CODEX_APP_SERVER_COMMAND_ENV,
@@ -34,6 +35,7 @@ import {
   HOSTED_CHATGPT_OPENAI_CODEX_MODEL_PROVIDER_ID,
   HOSTED_CUSTOM_INFERENCE_CODEX_MODEL_PROVIDER_CONFIG,
   HOSTED_CUSTOM_INFERENCE_CODEX_MODEL_PROVIDER_ID,
+  HOSTED_LOCAL_TEST_CODEX_MODEL_PROVIDER_ID,
   HOSTED_LOCAL_TEST_VENICE_CODEX_MODEL_PROVIDER_ID,
   OPENAI_CODEX_MODEL_PROVIDER_CONFIG,
   VENICE_CODEX_MODEL_PROVIDER_ID,
@@ -489,7 +491,9 @@ function resolveHostedCodexModelProviderConfig(input: {
     baseUrl: url.toString(),
     id: providerConfig.id === VENICE_CODEX_MODEL_PROVIDER_ID
       ? HOSTED_LOCAL_TEST_VENICE_CODEX_MODEL_PROVIDER_ID
-      : providerConfig.id,
+      : providerConfig.id === HOSTED_CODEX_OPENAI_MODEL_PROVIDER_ID
+        ? HOSTED_LOCAL_TEST_CODEX_MODEL_PROVIDER_ID
+        : providerConfig.id,
     supportsWebSockets: false,
   };
 }
@@ -628,6 +632,7 @@ export function buildHostedCodexConfigToml(input: {
     ...buildMurphGroupRoomModelMaintenancePermissionProfileTomlLines(),
     ...buildMurphMemberMemoryMaintenancePermissionProfileTomlLines(),
     ...buildMurphMemberReadPermissionProfileTomlLines(),
+    ...buildMurphMemberWorkspacePermissionProfileTomlLines(),
     "# Hosted runs should not perform Codex plugin marketplace or remote plugin",
     "# sync work on cold wake; Murph owns the hosted runtime tool surface.",
     "[features]",

@@ -223,7 +223,7 @@ describe("PrismaHostedOAuthSessionStore.consumeOAuthState", () => {
     expect(tx.deviceOauthSession.deleteMany).not.toHaveBeenCalled();
   });
 
-  it("reports an already-consumed unexpired state as a replay with its stored record", async () => {
+  it("reports an already-consumed expired state as requiring manual provider recovery", async () => {
     const record = buildOAuthSessionRow({
       consumedAt: new Date("2026-04-13T12:01:00.000Z"),
     });
@@ -231,9 +231,14 @@ describe("PrismaHostedOAuthSessionStore.consumeOAuthState", () => {
     const store = createStore(tx);
 
     await expect(
-      store.consumeOAuthState(record.state, record.createdAt.toISOString(), record.provider),
+      store.consumeOAuthState(
+        record.state,
+        "2026-04-13T12:30:00.000Z",
+        record.provider,
+      ),
     ).resolves.toMatchObject({
-      status: "replayed",
+      status: "recovery_required",
+      consumedAt: record.consumedAt?.toISOString(),
       record: {
         state: record.state,
         provider: record.provider,
@@ -244,10 +249,46 @@ describe("PrismaHostedOAuthSessionStore.consumeOAuthState", () => {
     expect(tx.deviceOauthSession.deleteMany).not.toHaveBeenCalled();
   });
 
+  it("does not disclose an expired consumed claim through a foreign provider", async () => {
+    const record = buildOAuthSessionRow({
+      consumedAt: new Date("2026-04-13T12:01:00.000Z"),
+    });
+    const tx = createTransaction({ record });
+    const store = createStore(tx);
+
+    await expect(store.consumeOAuthState(
+      record.state,
+      "2026-04-13T12:30:00.000Z",
+      "another-provider",
+    )).resolves.toEqual({
+      provider: record.provider,
+      status: "provider_mismatch",
+    });
+    expect(tx.deviceOauthSession.deleteMany).not.toHaveBeenCalled();
+  });
+
+  it("expires only unconsumed callback claims", async () => {
+    const deleteMany = vi.fn().mockResolvedValue({ count: 3 });
+    const store = new PrismaHostedOAuthSessionStore({
+      deviceOauthSession: { deleteMany },
+    } as never);
+    const now = "2026-04-13T12:30:00.000Z";
+
+    await expect(store.deleteExpiredOAuthStates(now)).resolves.toBe(3);
+    expect(deleteMany).toHaveBeenCalledWith({
+      where: {
+        consumedAt: null,
+        expiresAt: { lte: new Date(now) },
+      },
+    });
+  });
+
   it("resolves a lost consume race as a replay instead of doing the work twice", async () => {
     const record = buildOAuthSessionRow();
+    const replayConsumedAt = new Date("2026-04-13T12:00:30.000Z");
     const tx = createTransaction({
       record,
+      replayConsumedAt,
       updateManyCount: 0,
     });
     const store = createStore(tx);
@@ -255,6 +296,7 @@ describe("PrismaHostedOAuthSessionStore.consumeOAuthState", () => {
     await expect(
       store.consumeOAuthState(record.state, record.createdAt.toISOString(), record.provider),
     ).resolves.toMatchObject({
+      consumedAt: replayConsumedAt.toISOString(),
       status: "replayed",
     });
   });
@@ -321,6 +363,7 @@ describe("PrismaHostedOAuthSessionStore.consumeOAuthState", () => {
       store.consumeOAuthState(record.state, record.createdAt.toISOString(), record.provider),
     ).resolves.toEqual({
       status: "consumed",
+      consumedAt: record.createdAt.toISOString(),
       record: {
         state: record.state,
         provider: record.provider,
@@ -367,6 +410,104 @@ describe("PrismaHostedOAuthSessionStore.consumeOAuthState", () => {
     );
     expect(tx.deviceOauthSession.deleteMany).not.toHaveBeenCalled();
   });
+
+  it("deletes state instead of starting provider work for a suspended owner", async () => {
+    const record = buildOAuthSessionRow();
+    const tx = createTransaction({
+      owner: { suspendedAt: new Date("2026-04-13T12:00:00.000Z") },
+      record,
+    });
+    const store = createStore(tx);
+
+    await expect(
+      store.consumeOAuthState(
+        record.state,
+        record.createdAt.toISOString(),
+        record.provider,
+        record.userId ?? undefined,
+      ),
+    ).resolves.toEqual({ status: "missing" });
+    expect(tx.$queryRaw).toHaveBeenCalledTimes(2);
+    expect(tx.deviceOauthSession.updateMany).not.toHaveBeenCalled();
+    expect(tx.deviceOauthSession.deleteMany).toHaveBeenCalledWith({
+      where: {
+        consumedAt: null,
+        state: record.state,
+      },
+    });
+  });
+
+  it("returns a consumed claim as replayed before suspended-owner cleanup", async () => {
+    const consumedAt = new Date("2026-04-13T12:01:00.000Z");
+    const record = buildOAuthSessionRow({ consumedAt });
+    const tx = createTransaction({
+      owner: { suspendedAt: new Date("2026-04-13T12:02:00.000Z") },
+      record,
+    });
+    const store = createStore(tx);
+
+    await expect(store.consumeOAuthState(
+      record.state,
+      "2026-04-13T12:03:00.000Z",
+      record.provider,
+      record.userId ?? undefined,
+    )).resolves.toMatchObject({
+      consumedAt: consumedAt.toISOString(),
+      status: "replayed",
+    });
+    expect(tx.$queryRaw).not.toHaveBeenCalled();
+    expect(tx.deviceOauthSession.deleteMany).not.toHaveBeenCalled();
+  });
+
+  it("discards only an exact owner/provider unconsumed admission", async () => {
+    const record = buildOAuthSessionRow({
+      provider: "oura",
+      state: "state_exact",
+      userId: "member_exact",
+    });
+    const tx = createTransaction({ record });
+    const store = createStore(tx);
+
+    await expect(store.discardUnconsumedOAuthState(
+      "state_exact",
+      record.createdAt.toISOString(),
+      "oura",
+      "member_exact",
+    )).resolves.toMatchObject({ status: "discarded", record: { state: "state_exact" } });
+    expect(tx.deviceOauthSession.deleteMany).toHaveBeenCalledWith({
+      where: {
+        consumedAt: null,
+        state: "state_exact",
+      },
+    });
+  });
+
+  it("finalizes a consumed callback claim with one exact delete", async () => {
+    const tx = createTransaction({ record: null });
+    const store = createStore(tx);
+
+    await expect(store.resolveOAuthStateWithoutProviderAuthority({
+      state: "state_123",
+      consumedAt: "2026-04-13T12:01:00.000Z",
+    })).resolves.toBe(true);
+
+    expect(tx.deviceOauthSession.deleteMany).toHaveBeenCalledWith({
+      where: {
+        consumedAt: new Date("2026-04-13T12:01:00.000Z"),
+        state: "state_123",
+      },
+    });
+  });
+
+  it("retains a replacement callback claim when finalization has an old epoch", async () => {
+    const tx = createTransaction({ deleteManyCount: 0, record: null });
+    const store = createStore(tx);
+
+    await expect(store.resolveOAuthStateWithoutProviderAuthority({
+      state: "state_123",
+      consumedAt: "2026-04-13T12:01:00.000Z",
+    })).resolves.toBe(false);
+  });
 });
 
 function buildOAuthSessionRow(
@@ -389,15 +530,25 @@ function buildOAuthSessionRow(
 function createTransaction(input: {
   record?: MockDeviceOauthSessionRow | null;
   deleteManyCount?: number;
+  owner?: { suspendedAt: Date | null } | null;
+  replayConsumedAt?: Date;
   updateManyCount?: number;
 }) {
+  const findUnique = vi.fn().mockResolvedValue(input.record ?? null);
+  if (input.replayConsumedAt) {
+    findUnique
+      .mockResolvedValueOnce(input.record ?? null)
+      .mockResolvedValueOnce({ consumedAt: input.replayConsumedAt });
+  }
   return {
     $queryRaw: vi.fn().mockResolvedValue(
-      input.record ? [{ state: input.record.state }] : [],
+      input.owner === null
+        ? []
+        : [{ suspendedAt: input.owner?.suspendedAt ?? null }],
     ),
     deviceOauthSession: {
       deleteMany: vi.fn().mockResolvedValue({ count: input.deleteManyCount ?? 1 }),
-      findUnique: vi.fn().mockResolvedValue(input.record ?? null),
+      findUnique,
       updateMany: vi.fn().mockResolvedValue({ count: input.updateManyCount ?? 1 }),
     },
   };
@@ -405,6 +556,7 @@ function createTransaction(input: {
 
 function createStore(tx: ReturnType<typeof createTransaction>) {
   return new PrismaHostedOAuthSessionStore({
+    ...tx,
     $transaction: async <TResult>(
       callback: (transaction: typeof tx) => Promise<TResult>,
     ) => callback(tx),

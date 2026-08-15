@@ -1,6 +1,7 @@
 ---
 title: 'ReviewGPT full-snapshot anchor guidance conflicts with packager preflight'
 severity: 'minor'
+issue: 'cobuildwithus/murph#1745'
 ---
 
 ## Expected Behavior

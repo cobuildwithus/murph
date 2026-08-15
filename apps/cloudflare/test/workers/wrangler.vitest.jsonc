@@ -17,6 +17,10 @@
       {
         "name": "DATABASE_HEALTH_MONITOR",
         "class_name": "VitestDatabaseHealthDurableObject"
+      },
+      {
+        "name": "DEVICE_WEBHOOK_QUEUE_MONITOR",
+        "class_name": "DeviceWebhookQueueHealthDurableObject"
       }
     ]
   },
@@ -32,8 +36,24 @@
     {
       "tag": "v3",
       "new_sqlite_classes": ["VitestDatabaseHealthDurableObject"]
+    },
+    {
+      "tag": "v4",
+      "new_sqlite_classes": ["DeviceWebhookQueueHealthDurableObject"]
     }
   ],
+  "queues": {
+    "producers": [
+      {
+        "binding": "DEVICE_WEBHOOK_QUEUE",
+        "queue": "hosted-runner-vitest-device-webhooks"
+      },
+      {
+        "binding": "DEVICE_WEBHOOK_DLQ",
+        "queue": "hosted-runner-vitest-device-webhooks-dlq"
+      }
+    ]
+  },
   "r2_buckets": [
     {
       "binding": "BUNDLES",

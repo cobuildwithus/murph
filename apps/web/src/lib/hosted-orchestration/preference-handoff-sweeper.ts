@@ -5,6 +5,9 @@ import { HOSTED_MAILBOX_RETENTION_MS } from "../hosted-retention/cleanup";
 import {
   formatHostedExecutionSafeLogErrorDetails,
 } from "../hosted-execution/logging";
+import {
+  hostedThreadContainerParticipantAccessCutoff,
+} from "../hosted-groups/thread-container-participant-access";
 import { hasHostedRuntimeActiveAccess } from "../hosted-mailbox/runtime-access";
 import {
   createHostedPostCommitDeadline,
@@ -151,6 +154,8 @@ function createHostedPreferenceHandoffCandidateStore(
   return {
     async listCandidates(input) {
       const retainedAt = new Date(input.now.getTime() - HOSTED_MAILBOX_RETENTION_MS);
+      const participantAccessCutoff =
+        hostedThreadContainerParticipantAccessCutoff(input.now);
       // Preference writes can target a person member or a synthetic thread
       // container, while Clinical Records wakes only target person members.
       // One exact mailbox signal wakes the runtime to reconcile all durable
@@ -175,7 +180,7 @@ function createHostedPreferenceHandoffCandidateStore(
             AND "item"."created_at" >= ${retainedAt}
           ORDER BY "item"."user_id", "item"."lane_seq" ASC
         ),
-        "pending_browser_vault_refresh_users" AS (
+        "pending_runtime_control_users" AS (
           SELECT DISTINCT ON ("item"."user_id")
             "item"."id" AS "mailboxItemId",
             "item"."user_id" AS "userId",
@@ -185,7 +190,11 @@ function createHostedPreferenceHandoffCandidateStore(
           LEFT JOIN "hosted_mailbox_lane_counter" AS "lane_counter"
             ON "lane_counter"."user_id" = "item"."user_id"
             AND "lane_counter"."lane" = "item"."lane"
-          WHERE "item"."kind" = 'runtime.browser-vault-refresh-requested'
+          WHERE "item"."kind" IN (
+              'health.daily-metric.reported',
+              'runtime.browser-vault-refresh-requested',
+              'runtime.maintenance-requested'
+            )
             AND "item"."lane_seq" > COALESCE("lane_counter"."consumed_seq", 0)
             AND ("item"."expires_at" IS NULL OR "item"."expires_at" > ${input.now})
             AND "item"."created_at" >= ${retainedAt}
@@ -216,13 +225,14 @@ function createHostedPreferenceHandoffCandidateStore(
             AND "run"."completed_at" IS NULL
             AND "item"."lane_seq" > COALESCE("lane_counter"."consumed_seq", 0)
             AND ("item"."expires_at" IS NULL OR "item"."expires_at" > ${input.now})
+            AND "item"."created_at" > ${retainedAt}
         ),
         "pending_handoff_candidates" AS (
           SELECT "mailboxItemId", "userId", "createdAt", "laneSeq"
           FROM "pending_preference_users"
           UNION ALL
           SELECT "mailboxItemId", "userId", "createdAt", "laneSeq"
-          FROM "pending_browser_vault_refresh_users"
+          FROM "pending_runtime_control_users"
           UNION ALL
           SELECT "mailboxItemId", "userId", "createdAt", "laneSeq"
           FROM "pending_clinical_record_users"
@@ -283,6 +293,7 @@ function createHostedPreferenceHandoffCandidateStore(
                     ON "active_participant"."id" = "participant"."participant_member_id"
                   WHERE "participant"."container_member_id" = "member"."id"
                     AND "participant"."removed_at" IS NULL
+                    AND "participant"."last_seen_at" >= ${participantAccessCutoff}
                 )
               )
             )

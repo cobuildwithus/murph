@@ -35,6 +35,7 @@ import { resolveHostedPrivyLinkedAccountState } from "./privy-shared";
 import {
   HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
   lockHostedMemberRow,
+  type HostedOnboardingReadClient,
 } from "./shared";
 import {
   HOSTED_BROWSER_VAULT_REFRESH_RUNTIME_CONTROL_EVENT_ID_PREFIX,
@@ -282,7 +283,7 @@ export async function assertHostedPrivyPhoneTransferSourceRetirementFenceTx(
   input: {
     identity: HostedPrivyIdentity;
     member: HostedMemberCoreState;
-    prisma: Prisma.TransactionClient;
+    prisma: HostedOnboardingReadClient;
     targetPhoneNumberBeforeTransfer: string | null;
     transfer: HostedPrivyPhoneTransferProof;
   },

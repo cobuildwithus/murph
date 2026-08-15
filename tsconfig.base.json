@@ -156,6 +156,9 @@
       "@murphai/cloudflare-hosted-control/client": [
         "./packages/cloudflare-hosted-control/src/client.ts"
       ],
+      "@murphai/cloudflare-hosted-control/device-webhook-queue": [
+        "./packages/cloudflare-hosted-control/src/device-webhook-queue.ts"
+      ],
       "@murphai/cloudflare-hosted-control/inference-verification": [
         "./packages/cloudflare-hosted-control/src/inference-verification.ts"
       ],
@@ -479,6 +482,9 @@
       ],
       "@murphai/device-syncd/hosted-runtime": [
         "./packages/device-syncd/src/hosted-runtime.ts"
+      ],
+      "@murphai/device-syncd/prepared-webhook": [
+        "./packages/device-syncd/src/prepared-webhook.ts"
       ],
       "@murphai/device-syncd/runtime-config": [
         "./packages/device-syncd/src/runtime-config.ts"

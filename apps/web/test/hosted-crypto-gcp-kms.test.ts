@@ -1,647 +1,705 @@
 import { Buffer } from "node:buffer";
 
+import { getVercelOidcToken } from "@vercel/oidc";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { createHostedGcpKmsClientFromEnv } from "../src/lib/hosted-crypto/gcp-kms";
+import { TEST_HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION } from "../../cloudflare/test/hosted-execution-fixtures";
+import {
+  createHostedGcpKmsClientFromEnv,
+  HostedGcpKmsIntegrityError,
+  HostedGcpKmsProviderError,
+  HOSTED_GCP_KMS_OPERATION_TIMEOUT_MS,
+  type HostedGcpKmsClient,
+  type HostedGcpKmsClientDependencies,
+  type HostedGcpKmsSdkAsymmetricSignRequest,
+  type HostedGcpKmsSdkCallOptions,
+  type HostedGcpKmsSdkClientConfiguration,
+  type HostedGcpKmsSdkDecryptRequest,
+  type HostedGcpKmsSdkEncryptRequest,
+  type HostedGcpKmsSdkMacSignRequest,
+  type HostedGcpKmsSdkTransport,
+} from "../src/lib/hosted-crypto/gcp-kms";
 
 vi.mock("@vercel/oidc", () => ({
-  getVercelOidcToken: vi.fn(async () => "vercel-oidc-token"),
+  getVercelOidcToken: vi.fn(async () =>
+    "eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJob3N0ZWQtdGVzdCJ9.synthetic-signature"),
 }));
 
 const LOCAL_KMS_API_ROOT = "local://murph-hosted-kms";
-const LOCAL_KMS_KEY_NAME =
-  "projects/murph-local/locations/global/keyRings/hosted-local/cryptoKeys/web-wrap";
-const LOCAL_KMS_KEY_VERSION_NAME =
-  `${LOCAL_KMS_KEY_NAME}/cryptoKeyVersions/7`;
-const LOCAL_SIGN_KEY_VERSION =
-  "projects/murph-local/locations/global/keyRings/hosted-local/cryptoKeys/authority-sign/cryptoKeyVersions/1";
-const LOCAL_MAC_KEY_VERSION =
-  "projects/murph-local/locations/global/keyRings/hosted-local/cryptoKeys/address-book-mac/cryptoKeyVersions/1";
+const KMS_KEY_NAME =
+  "projects/murph-test/locations/global/keyRings/hosted-test/cryptoKeys/web-wrap";
+const KMS_KEY_VERSION_NAME = `${KMS_KEY_NAME}/cryptoKeyVersions/7`;
+const OTHER_KMS_KEY_VERSION_NAME =
+  "projects/murph-test/locations/global/keyRings/hosted-test/cryptoKeys/other/cryptoKeyVersions/1";
+const SIGN_KEY_VERSION_NAME =
+  "projects/murph-test/locations/global/keyRings/hosted-test/cryptoKeys/authority-sign/cryptoKeyVersions/3";
+const MAC_KEY_VERSION_NAME =
+  "projects/murph-test/locations/global/keyRings/hosted-test/cryptoKeys/address-book-mac/cryptoKeyVersions/5";
+const VALID_SUBJECT_TOKEN =
+  "eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJob3N0ZWQtdGVzdCJ9.synthetic-signature";
+const STATIC_ENV = {
+  HOSTED_CRYPTO_ALLOW_STATIC_GCP_ACCESS_TOKEN_FOR_DEV: "1",
+  HOSTED_CRYPTO_ENV: "dev",
+  HOSTED_CRYPTO_GCP_ACCESS_TOKEN: "ya29.synthetic-static-token",
+  NODE_ENV: "test",
+} satisfies NodeJS.ProcessEnv;
+const WORKLOAD_IDENTITY_ENV = {
+  HOSTED_CRYPTO_ENV: "production",
+  HOSTED_CRYPTO_GCP_PROJECT_NUMBER: "123456789012",
+  HOSTED_CRYPTO_GCP_SERVICE_ACCOUNT_EMAIL:
+    "hosted-crypto@murph-test.iam.gserviceaccount.com",
+  HOSTED_CRYPTO_GCP_WORKLOAD_IDENTITY_POOL_ID: "vercel-pool",
+  HOSTED_CRYPTO_GCP_WORKLOAD_IDENTITY_PROVIDER_ID: "vercel-provider",
+  NODE_ENV: "test",
+} satisfies NodeJS.ProcessEnv;
+
+const mockedGetVercelOidcToken = vi.mocked(getVercelOidcToken);
 
 afterEach(() => {
   vi.restoreAllMocks();
-  vi.unstubAllGlobals();
+  mockedGetVercelOidcToken.mockReset();
+  mockedGetVercelOidcToken.mockResolvedValue(VALID_SUBJECT_TOKEN);
 });
 
-describe("hosted crypto GCP KMS access-token guard", () => {
-  it("rejects static GCP access tokens in production", () => {
-    expect(() => createHostedGcpKmsClientFromEnv({
+describe("hosted crypto Google client configuration", () => {
+  it("keeps static access tokens behind the explicit non-production test boundary", () => {
+    expect(() => createClientHarness({
       HOSTED_CRYPTO_ENV: "prod",
-      HOSTED_CRYPTO_GCP_ACCESS_TOKEN: "ya29.static-token",
+      HOSTED_CRYPTO_GCP_ACCESS_TOKEN: "ya29.synthetic-static-token",
       NODE_ENV: "test",
-    })).toThrow(/HOSTED_CRYPTO_GCP_ACCESS_TOKEN.*not allowed in production/i);
-  });
+    })).toThrow(/GCP_ACCESS_TOKEN is not allowed in production/u);
 
-  it("requires an explicit local-dev override for static GCP access tokens", () => {
-    expect(() => createHostedGcpKmsClientFromEnv({
+    expect(() => createClientHarness({
       HOSTED_CRYPTO_ENV: "dev",
-      HOSTED_CRYPTO_GCP_ACCESS_TOKEN: "ya29.static-token",
+      HOSTED_CRYPTO_GCP_ACCESS_TOKEN: "ya29.synthetic-static-token",
       NODE_ENV: "test",
-    })).toThrow(/HOSTED_CRYPTO_ALLOW_STATIC_GCP_ACCESS_TOKEN_FOR_DEV=1/i);
+    })).toThrow(/ALLOW_STATIC_GCP_ACCESS_TOKEN_FOR_DEV=1/u);
+
+    expect(() => createClientHarness({
+      ...STATIC_ENV,
+      HOSTED_CRYPTO_GCP_ACCESS_TOKEN: " ya29.synthetic-static-token",
+    })).toThrow(/exact string without surrounding whitespace/u);
+
+    const harness = createClientHarness(STATIC_ENV);
+    expect(harness.config.credentials).toEqual({
+      accessToken: "ya29.synthetic-static-token",
+      kind: "static-access-token",
+    });
   });
 
-  it("allows static GCP access tokens only when explicitly marked as local dev", () => {
-    expect(() => createHostedGcpKmsClientFromEnv({
-      HOSTED_CRYPTO_ALLOW_STATIC_GCP_ACCESS_TOKEN_FOR_DEV: "1",
-      HOSTED_CRYPTO_ENV: "dev",
-      HOSTED_CRYPTO_GCP_ACCESS_TOKEN: "ya29.static-token",
-      NODE_ENV: "test",
-    })).not.toThrow();
+  it("binds Workload Identity Federation to the exact audience, token type, scope, and service account", async () => {
+    const harness = createClientHarness(WORKLOAD_IDENTITY_ENV);
+
+    expect(harness.config).toMatchObject({
+      apiEndpoint: "cloudkms.googleapis.com",
+      fallback: false,
+      port: 443,
+      scopes: ["https://www.googleapis.com/auth/cloudkms"],
+    });
+    expect(harness.config.credentials.kind).toBe("workload-identity");
+    if (harness.config.credentials.kind !== "workload-identity") {
+      throw new Error("Expected Workload Identity credentials.");
+    }
+    expect(harness.config.credentials).toMatchObject({
+      audience:
+        "//iam.googleapis.com/projects/123456789012/locations/global/"
+        + "workloadIdentityPools/vercel-pool/providers/vercel-provider",
+      scopes: ["https://www.googleapis.com/auth/cloudkms"],
+      serviceAccountImpersonationUrl:
+        "https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/"
+        + "hosted-crypto%40murph-test.iam.gserviceaccount.com:generateAccessToken",
+      subjectTokenType: "urn:ietf:params:oauth:token-type:jwt",
+      tokenUrl: "https://sts.googleapis.com/v1/token",
+    });
+    await expect(harness.config.credentials.getSubjectToken()).resolves.toBe(
+      VALID_SUBJECT_TOKEN,
+    );
+    expect(mockedGetVercelOidcToken).toHaveBeenCalledTimes(1);
   });
 
-  it("rejects custom GCP endpoint overrides in production", () => {
-    const productionBase = {
-      HOSTED_CRYPTO_ENV: "prod",
-      HOSTED_CRYPTO_GCP_PROJECT_NUMBER: "123456789",
-      HOSTED_CRYPTO_GCP_SERVICE_ACCOUNT_EMAIL: "hosted-crypto@example.test",
-      HOSTED_CRYPTO_GCP_WORKLOAD_IDENTITY_POOL_ID: "pool",
-      HOSTED_CRYPTO_GCP_WORKLOAD_IDENTITY_PROVIDER_ID: "provider",
-      NODE_ENV: "test",
-    } satisfies NodeJS.ProcessEnv;
-
+  it("rejects malformed Workload Identity identifiers before constructing a client", () => {
     for (const [key, value] of [
-      ["HOSTED_CRYPTO_GCP_IAM_CREDENTIALS_API_ROOT", "https://iamcredentials.example.test/v1"],
+      ["HOSTED_CRYPTO_GCP_PROJECT_NUMBER", "project-id"],
+      ["HOSTED_CRYPTO_GCP_WORKLOAD_IDENTITY_POOL_ID", "Pool_With_Underscore"],
+      ["HOSTED_CRYPTO_GCP_WORKLOAD_IDENTITY_POOL_ID", "gcp-reserved-pool"],
+      ["HOSTED_CRYPTO_GCP_WORKLOAD_IDENTITY_PROVIDER_ID", "provider/child"],
+      ["HOSTED_CRYPTO_GCP_WORKLOAD_IDENTITY_PROVIDER_ID", "gcp-reserved-provider"],
+      ["HOSTED_CRYPTO_GCP_SERVICE_ACCOUNT_EMAIL", "hosted-crypto@example.test"],
+      [
+        "HOSTED_CRYPTO_GCP_SERVICE_ACCOUNT_EMAIL",
+        " other@murph-test.iam.gserviceaccount.com",
+      ],
+    ] as const) {
+      expect(() => createClientHarness({
+        ...WORKLOAD_IDENTITY_ENV,
+        [key]: value,
+      })).toThrow(new RegExp(key, "u"));
+    }
+  });
+
+  it("uses REST fallback only for an exact non-production custom KMS endpoint", () => {
+    const harness = createClientHarness({
+      ...STATIC_ENV,
+      HOSTED_CRYPTO_GCP_KMS_API_ROOT: "https://kms.example.test:8443/v1",
+    });
+    expect(harness.config).toMatchObject({
+      apiEndpoint: "kms.example.test",
+      fallback: true,
+      port: 8443,
+    });
+
+    for (const value of [
+      "http://kms.example.test/v1",
+      "https://kms.example.test/v1/",
+      "https://kms.example.test/v1?target=other",
+      "https://user@kms.example.test/v1",
+    ]) {
+      expect(() => createClientHarness({
+        ...STATIC_ENV,
+        HOSTED_CRYPTO_GCP_KMS_API_ROOT: value,
+      })).toThrow(/exact HTTPS URL with path \/v1/u);
+    }
+  });
+
+  it("rejects every endpoint override in production", () => {
+    for (const [key, value] of [
+      ["HOSTED_CRYPTO_GCP_IAM_CREDENTIALS_API_ROOT", "https://iam.example.test/v1"],
       ["HOSTED_CRYPTO_GCP_KMS_API_ROOT", "https://kms.example.test/v1"],
       ["HOSTED_CRYPTO_GCP_STS_TOKEN_URI", "https://sts.example.test/v1/token"],
     ] as const) {
-      expect(() => createHostedGcpKmsClientFromEnv({
-        ...productionBase,
+      expect(() => createClientHarness({
+        ...WORKLOAD_IDENTITY_ENV,
         [key]: value,
       })).toThrow(new RegExp(`${key}.*not allowed in production`, "u"));
     }
   });
-});
 
-describe("hosted crypto GCP Workload Identity Federation", () => {
-  it("bounds a stalled cold-token exchange with the operation deadline and no retry", async () => {
-    const deadline = new AbortController();
-    vi.spyOn(AbortSignal, "timeout").mockReturnValue(deadline.signal);
-    const fetchMock = vi.fn<typeof fetch>((_input, init) => pendingUntilAbort(init?.signal));
-    vi.stubGlobal("fetch", fetchMock);
-
-    const client = createHostedGcpKmsClientFromEnv({
-      HOSTED_CRYPTO_ENV: "production",
-      HOSTED_CRYPTO_GCP_PROJECT_NUMBER: "123456789012",
-      HOSTED_CRYPTO_GCP_SERVICE_ACCOUNT_EMAIL: "hosted-crypto@example.test",
-      HOSTED_CRYPTO_GCP_WORKLOAD_IDENTITY_POOL_ID: "vercel",
-      HOSTED_CRYPTO_GCP_WORKLOAD_IDENTITY_PROVIDER_ID: "vercel",
-      NODE_ENV: "test",
-    });
-    const operation = client.decrypt({
-      additionalAuthenticatedData: "domain=control",
-      ciphertext: "encrypted-root-key",
-      keyName: LOCAL_KMS_KEY_NAME,
-    });
-
-    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
-    deadline.abort(new DOMException("operation timed out", "TimeoutError"));
-    await expect(operation).rejects.toMatchObject({ name: "TimeoutError" });
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+  it("refuses Google SDK request logging at the crypto boundary", () => {
+    expect(() => createClientHarness({
+      ...STATIC_ENV,
+      GOOGLE_SDK_NODE_LOGGING: "debug",
+    })).toThrow(/GOOGLE_SDK_NODE_LOGGING must be unset/u);
   });
 
-  it("honors an earlier caller abort during KMS without retrying", async () => {
-    const deadline = new AbortController();
-    vi.spyOn(AbortSignal, "timeout").mockReturnValue(deadline.signal);
-    const fetchMock = vi.fn<typeof fetch>((_input, init) => pendingUntilAbort(init?.signal));
-    vi.stubGlobal("fetch", fetchMock);
-    const caller = new AbortController();
-    const client = createHostedGcpKmsClientFromEnv({
-      HOSTED_CRYPTO_ALLOW_STATIC_GCP_ACCESS_TOKEN_FOR_DEV: "1",
-      HOSTED_CRYPTO_ENV: "dev",
-      HOSTED_CRYPTO_GCP_ACCESS_TOKEN: "ya29.static-token",
-      NODE_ENV: "test",
+  it("rejects malformed or oversized Vercel subject tokens", async () => {
+    const malformed = createClientHarness(WORKLOAD_IDENTITY_ENV);
+    if (malformed.config.credentials.kind !== "workload-identity") {
+      throw new Error("Expected Workload Identity credentials.");
+    }
+    mockedGetVercelOidcToken.mockResolvedValueOnce("not-a-jwt");
+    await expect(malformed.config.credentials.getSubjectToken()).rejects.toThrow(
+      /compact JWT/u,
+    );
+
+    mockedGetVercelOidcToken.mockResolvedValueOnce(
+      `a.${"b".repeat(16 * 1024)}.c`,
+    );
+    await expect(malformed.config.credentials.getSubjectToken()).rejects.toThrow(
+      /subject token is invalid/u,
+    );
+  });
+});
+
+describe("hosted crypto Google KMS integrity transport", () => {
+  it("sends exact Encrypt request CRCs and clears request and response buffers", async () => {
+    const plaintext = new Uint8Array([1, 2, 3]);
+    const responseCiphertext = new Uint8Array([9, 8, 7, 6]);
+    const captured: {
+      options?: HostedGcpKmsSdkCallOptions;
+      request?: HostedGcpKmsSdkEncryptRequest;
+    } = {};
+    let requestPlaintext = new Uint8Array();
+    let requestAad = new Uint8Array();
+    const transport = createTransport({
+      encrypt: async (request, options) => {
+        captured.request = request;
+        captured.options = options;
+        requestPlaintext = new Uint8Array(request.plaintext);
+        requestAad = new Uint8Array(request.additionalAuthenticatedData);
+        return {
+          ciphertext: responseCiphertext,
+          ciphertextCrc32c: crc32c(responseCiphertext),
+          name: KMS_KEY_VERSION_NAME,
+          verifiedAdditionalAuthenticatedDataCrc32c: true,
+          verifiedPlaintextCrc32c: true,
+        };
+      },
     });
-    const operation = client.decrypt({
+    const client = createClientHarness(STATIC_ENV, transport).client;
+
+    await expect(client.encrypt({
       additionalAuthenticatedData: "domain=control",
-      ciphertext: "encrypted-root-key",
-      keyName: LOCAL_KMS_KEY_NAME,
+      keyName: KMS_KEY_NAME,
+      plaintext,
+    })).resolves.toEqual({
+      ciphertext: Buffer.from(new Uint8Array([9, 8, 7, 6])).toString("base64"),
+      keyName: KMS_KEY_NAME,
+    });
+
+    const request = requireValue(captured.request, "Encrypt request");
+    const options = requireValue(captured.options, "Encrypt options");
+    expect(request.name).toBe(KMS_KEY_NAME);
+    expect(requestPlaintext).toEqual(new Uint8Array([1, 2, 3]));
+    expect(new TextDecoder().decode(requestAad)).toBe("domain=control");
+    expect(request.plaintextCrc32c).toBe(0xf130f21e);
+    expect(request.additionalAuthenticatedDataCrc32c).toBe(0x481d3603);
+    expect(options.retry).toBe(false);
+    expect(options.timeoutMs).toBeGreaterThan(0);
+    expect(options.timeoutMs).toBeLessThanOrEqual(HOSTED_GCP_KMS_OPERATION_TIMEOUT_MS);
+    expect(options.signal.aborted).toBe(false);
+    expect(plaintext).toEqual(new Uint8Array([1, 2, 3]));
+    expectAllZero(request.plaintext);
+    expectAllZero(request.additionalAuthenticatedData);
+    expectAllZero(responseCiphertext);
+  });
+
+  it("fails closed on every Encrypt integrity mismatch and still clears buffers", async () => {
+    for (const response of [
+      {
+        ciphertextCrc32c: crc32c(new Uint8Array([4, 5, 6])),
+        name: KMS_KEY_VERSION_NAME,
+        verifiedAdditionalAuthenticatedDataCrc32c: true,
+        verifiedPlaintextCrc32c: false,
+      },
+      {
+        ciphertextCrc32c: crc32c(new Uint8Array([4, 5, 6])),
+        name: OTHER_KMS_KEY_VERSION_NAME,
+        verifiedAdditionalAuthenticatedDataCrc32c: true,
+        verifiedPlaintextCrc32c: true,
+      },
+      {
+        ciphertextCrc32c: 0,
+        name: KMS_KEY_VERSION_NAME,
+        verifiedAdditionalAuthenticatedDataCrc32c: true,
+        verifiedPlaintextCrc32c: true,
+      },
+    ]) {
+      const responseCiphertext = new Uint8Array([4, 5, 6]);
+      const captured: { request?: HostedGcpKmsSdkEncryptRequest } = {};
+      const client = createClientHarness(STATIC_ENV, createTransport({
+        encrypt: async (request) => {
+          captured.request = request;
+          return {
+            ciphertext: responseCiphertext,
+            ciphertextCrc32c: response.ciphertextCrc32c,
+            name: response.name,
+            verifiedAdditionalAuthenticatedDataCrc32c:
+              response.verifiedAdditionalAuthenticatedDataCrc32c,
+            verifiedPlaintextCrc32c: response.verifiedPlaintextCrc32c,
+          };
+        },
+      })).client;
+
+      await expect(client.encrypt({
+        additionalAuthenticatedData: "domain=control",
+        keyName: KMS_KEY_NAME,
+        plaintext: new Uint8Array([1, 2, 3]),
+      })).rejects.toBeInstanceOf(HostedGcpKmsIntegrityError);
+      expectAllZero(requireValue(captured.request, "Encrypt request").plaintext);
+      expectAllZero(responseCiphertext);
+    }
+  });
+
+  it("normalizes a versioned Decrypt name to its exact CryptoKey and accepts old-version ciphertext", async () => {
+    const ciphertext = new TextEncoder().encode("encrypted-root-key");
+    const responsePlaintext = new Uint8Array([4, 5, 6]);
+    const captured: { request?: HostedGcpKmsSdkDecryptRequest } = {};
+    const client = createClientHarness(STATIC_ENV, createTransport({
+      decrypt: async (request) => {
+        captured.request = request;
+        return {
+          plaintext: responsePlaintext,
+          plaintextCrc32c: crc32c(responsePlaintext),
+          usedPrimary: false,
+        };
+      },
+    })).client;
+
+    const result = await client.decrypt({
+      additionalAuthenticatedData: "domain=control",
+      ciphertext: Buffer.from(ciphertext).toString("base64"),
+      keyName: KMS_KEY_VERSION_NAME,
+    });
+
+    const request = requireValue(captured.request, "Decrypt request");
+    expect(result.plaintext).toEqual(new Uint8Array([4, 5, 6]));
+    expect(request.name).toBe(KMS_KEY_NAME);
+    expect(request.ciphertextCrc32c).toBe(0x2d1c0717);
+    expect(request.additionalAuthenticatedDataCrc32c).toBe(0x481d3603);
+    expectAllZero(request.ciphertext);
+    expectAllZero(request.additionalAuthenticatedData);
+    expectAllZero(responsePlaintext);
+  });
+
+  it("returns an authenticated empty plaintext without treating it as missing", async () => {
+    const responsePlaintext = new Uint8Array();
+    const client = createClientHarness(STATIC_ENV, createTransport({
+      decrypt: async () => ({
+        plaintext: responsePlaintext,
+        plaintextCrc32c: crc32c(responsePlaintext),
+        usedPrimary: true,
+      }),
+    })).client;
+
+    await expect(client.decrypt({
+      additionalAuthenticatedData: "",
+      ciphertext: Buffer.from(new Uint8Array([1])).toString("base64"),
+      keyName: KMS_KEY_NAME,
+    })).resolves.toEqual({ plaintext: new Uint8Array() });
+    expect(responsePlaintext).toHaveLength(0);
+  });
+
+  it("hashes Sign messages locally, verifies CRCs and exact version binding, and clears buffers", async () => {
+    const message = new TextEncoder().encode("sign this envelope");
+    const expectedDigest = new Uint8Array(await crypto.subtle.digest("SHA-256", message));
+    const responseSignature = new Uint8Array([7, 8, 9, 10]);
+    const captured: { request?: HostedGcpKmsSdkAsymmetricSignRequest } = {};
+    let digestBeforeClear = new Uint8Array();
+    const client = createClientHarness(STATIC_ENV, createTransport({
+      asymmetricSign: async (request) => {
+        captured.request = request;
+        digestBeforeClear = new Uint8Array(request.digest);
+        return {
+          name: SIGN_KEY_VERSION_NAME,
+          signature: responseSignature,
+          signatureCrc32c: crc32c(responseSignature),
+          verifiedDigestCrc32c: true,
+        };
+      },
+    })).client;
+
+    await expect(client.asymmetricSign({
+      keyVersionName: SIGN_KEY_VERSION_NAME,
+      message,
+    })).resolves.toEqual({
+      keyVersionName: SIGN_KEY_VERSION_NAME,
+      signature: Buffer.from(new Uint8Array([7, 8, 9, 10])).toString("base64"),
+    });
+
+    const request = requireValue(captured.request, "Sign request");
+    expect(digestBeforeClear).toEqual(expectedDigest);
+    expect(request.digestCrc32c).toBe(crc32c(expectedDigest));
+    expect(message).toEqual(new TextEncoder().encode("sign this envelope"));
+    expectAllZero(request.digest);
+    expectAllZero(responseSignature);
+  });
+
+  it("requires an exact 32-byte MAC with matching data and response CRCs", async () => {
+    const responseMac = new Uint8Array(32).fill(7);
+    const captured: { request?: HostedGcpKmsSdkMacSignRequest } = {};
+    const client = createClientHarness(STATIC_ENV, createTransport({
+      macSign: async (request) => {
+        captured.request = request;
+        return {
+          mac: responseMac,
+          macCrc32c: crc32c(responseMac),
+          name: MAC_KEY_VERSION_NAME,
+          verifiedDataCrc32c: true,
+        };
+      },
+    })).client;
+
+    const result = await client.macSign({
+      data: new Uint8Array([1, 2, 3, 4]),
+      keyVersionName: MAC_KEY_VERSION_NAME,
+    });
+
+    const request = requireValue(captured.request, "MAC request");
+    expect(result).toEqual({
+      keyVersionName: MAC_KEY_VERSION_NAME,
+      mac: new Uint8Array(32).fill(7),
+    });
+    expect(request.dataCrc32c).toBe(crc32c(new Uint8Array([1, 2, 3, 4])));
+    expectAllZero(request.data);
+    expectAllZero(responseMac);
+  });
+
+  it("rejects malformed MAC responses and clears the returned bytes", async () => {
+    for (const response of [
+      {
+        mac: new Uint8Array(31).fill(7),
+        name: MAC_KEY_VERSION_NAME,
+        verified: true,
+      },
+      {
+        mac: new Uint8Array(32).fill(7),
+        name: OTHER_KMS_KEY_VERSION_NAME,
+        verified: true,
+      },
+      {
+        mac: new Uint8Array(32).fill(7),
+        name: MAC_KEY_VERSION_NAME,
+        verified: false,
+      },
+    ]) {
+      const client = createClientHarness(STATIC_ENV, createTransport({
+        macSign: async () => ({
+          mac: response.mac,
+          macCrc32c: crc32c(response.mac),
+          name: response.name,
+          verifiedDataCrc32c: response.verified,
+        }),
+      })).client;
+
+      await expect(client.macSign({
+        data: new Uint8Array([1]),
+        keyVersionName: MAC_KEY_VERSION_NAME,
+      })).rejects.toBeInstanceOf(HostedGcpKmsIntegrityError);
+      expectAllZero(response.mac);
+    }
+  });
+
+  it("rejects generic, wildcard, and wrong-resource KMS names before transport", async () => {
+    const transport = createTransport();
+    const harness = createClientHarness(STATIC_ENV, transport);
+
+    for (const keyName of [
+      "projects/test/locations/global/keyRings/ring/cryptoKeys/key",
+      "projects/murph-test/locations/*/keyRings/ring/cryptoKeys/key",
+      `${KMS_KEY_NAME}/cryptoKeyVersions/latest`,
+      `${KMS_KEY_VERSION_NAME}/extra`,
+      ` ${KMS_KEY_NAME}`,
+    ]) {
+      await expect(harness.client.decrypt({
+        additionalAuthenticatedData: "domain=control",
+        ciphertext: Buffer.from(new Uint8Array([1])).toString("base64"),
+        keyName,
+      })).rejects.toThrow(/exact (?:string without surrounding whitespace|CryptoKey or CryptoKeyVersion)/u);
+    }
+    await expect(harness.client.encrypt({
+      additionalAuthenticatedData: "domain=control",
+      keyName: KMS_KEY_VERSION_NAME,
+      plaintext: new Uint8Array([1]),
+    })).rejects.toThrow(/exact CryptoKey resource/u);
+    await expect(harness.client.asymmetricSign({
+      keyVersionName: KMS_KEY_NAME,
+      message: new Uint8Array([1]),
+    })).rejects.toThrow(/exact CryptoKeyVersion/u);
+  });
+
+  it("enforces request and response size bounds before provider work", async () => {
+    let calls = 0;
+    const transport = createTransport({
+      encrypt: async () => {
+        calls += 1;
+        throw new Error("Unexpected provider call.");
+      },
+      macSign: async () => {
+        calls += 1;
+        throw new Error("Unexpected provider call.");
+      },
+    });
+    const client = createClientHarness(STATIC_ENV, transport).client;
+
+    await expect(client.encrypt({
+      additionalAuthenticatedData: "",
+      keyName: KMS_KEY_NAME,
+      plaintext: new Uint8Array(64 * 1024 + 1),
+    })).rejects.toThrow(/exceeds 65536 bytes/u);
+    await expect(client.encrypt({
+      additionalAuthenticatedData: "x",
+      keyName: KMS_KEY_NAME,
+      plaintext: new Uint8Array(64 * 1024),
+    })).rejects.toThrow(/plaintext and additionalAuthenticatedData exceed/u);
+    await expect(client.macSign({
+      data: new Uint8Array(64 * 1024 + 1),
+      keyVersionName: MAC_KEY_VERSION_NAME,
+    })).rejects.toThrow(/exceeds 65536 bytes/u);
+    await expect(client.decrypt({
+      additionalAuthenticatedData: "",
+      ciphertext: Buffer.alloc(66 * 1024 + 1).toString("base64"),
+      keyName: KMS_KEY_NAME,
+    })).rejects.toThrow(/exceeds 67584 bytes/u);
+    expect(calls).toBe(0);
+  });
+});
+
+describe("hosted crypto Google KMS aborts and redacted errors", () => {
+  it("honors caller abort without retrying or exposing the caller reason", async () => {
+    const caller = new AbortController();
+    let calls = 0;
+    const captured: { request?: HostedGcpKmsSdkEncryptRequest } = {};
+    const client = createClientHarness(STATIC_ENV, createTransport({
+      encrypt: (currentRequest, options) => {
+        calls += 1;
+        captured.request = currentRequest;
+        return pendingUntilAbort(options.signal);
+      },
+    })).client;
+    const operation = client.encrypt({
+      additionalAuthenticatedData: "domain=control",
+      keyName: KMS_KEY_NAME,
+      plaintext: new Uint8Array([1, 2, 3]),
       signal: caller.signal,
     });
 
-    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
-    caller.abort(new DOMException("caller disconnected", "AbortError"));
-    await expect(operation).rejects.toMatchObject({ name: "AbortError" });
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    await vi.waitFor(() => expect(calls).toBe(1));
+    caller.abort(new Error(`secret caller reason for ${KMS_KEY_NAME}`));
+    await expect(operation).rejects.toMatchObject({
+      message: "Google Cloud KMS operation was aborted by the caller.",
+      name: "AbortError",
+    });
+    expect(calls).toBe(1);
+    expectAllZero(requireValue(captured.request, "aborted Encrypt request").plaintext);
   });
 
-  it("uses an IAMCredentials-capable federated token before minting a KMS-scoped service-account token", async () => {
-    const seenRequests: Array<{ body: string; headers: Headers; url: string }> = [];
-    const fetchMock: typeof fetch = async (input, init) => {
-      const url = String(input);
-      seenRequests.push({
-        body: typeof init?.body === "string" ? init.body : String(init?.body ?? ""),
-        headers: new Headers(init?.headers),
-        url,
-      });
-
-      if (url === "https://sts.googleapis.com/v1/token") {
-        return jsonResponse({
-          access_token: "federated-access-token",
-          expires_in: 3600,
-          token_type: "Bearer",
-        });
-      }
-
-      if (url === "https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/hosted-crypto%40example.test:generateAccessToken") {
-        return jsonResponse({
-          accessToken: "kms-service-account-token",
-          expireTime: "2099-01-01T00:00:00Z",
-        });
-      }
-
-      if (url === `${LOCAL_KMS_KEY_NAME}:encrypt`.replace(
-        "projects/",
-        "https://cloudkms.googleapis.com/v1/projects/",
-      )) {
-        return jsonResponse({
-          ciphertext: "encrypted-root-key",
-          name: LOCAL_KMS_KEY_VERSION_NAME,
-        });
-      }
-
-      return jsonResponse({ error: { message: `unexpected test URL ${url}` } }, { status: 404 });
-    };
-    vi.stubGlobal("fetch", fetchMock);
-
-    const client = createHostedGcpKmsClientFromEnv({
-      HOSTED_CRYPTO_ENV: "production",
-      HOSTED_CRYPTO_GCP_PROJECT_NUMBER: "123456789012",
-      HOSTED_CRYPTO_GCP_SERVICE_ACCOUNT_EMAIL: "hosted-crypto@example.test",
-      HOSTED_CRYPTO_GCP_WORKLOAD_IDENTITY_POOL_ID: "vercel",
-      HOSTED_CRYPTO_GCP_WORKLOAD_IDENTITY_PROVIDER_ID: "vercel",
-      NODE_ENV: "test",
-    });
-
-    await expect(client.encrypt({
+  it("owns one deadline across the operation and never retries", async () => {
+    const deadline = new AbortController();
+    vi.spyOn(AbortSignal, "timeout").mockReturnValue(deadline.signal);
+    let calls = 0;
+    const client = createClientHarness(STATIC_ENV, createTransport({
+      decrypt: (_request, options) => {
+        calls += 1;
+        return pendingUntilAbort(options.signal);
+      },
+    })).client;
+    const operation = client.decrypt({
       additionalAuthenticatedData: "domain=control",
-      keyName: LOCAL_KMS_KEY_NAME,
-      plaintext: new Uint8Array([1, 2, 3]),
-    })).resolves.toEqual({
-      ciphertext: "encrypted-root-key",
-      keyName: LOCAL_KMS_KEY_NAME,
+      ciphertext: Buffer.from(new Uint8Array([1, 2, 3])).toString("base64"),
+      keyName: KMS_KEY_NAME,
     });
 
-    const stsRequest = seenRequests.find((request) =>
-      request.url === "https://sts.googleapis.com/v1/token"
-    );
-    const iamRequest = seenRequests.find((request) =>
-      request.url.includes(":generateAccessToken")
-    );
-    const kmsRequest = seenRequests.find((request) =>
-      request.url.includes(":encrypt")
-    );
-
-    expect(stsRequest).toBeDefined();
-    expect(new URLSearchParams(stsRequest?.body).get("scope")).toBe(
-      "https://www.googleapis.com/auth/iam",
-    );
-    expect(readBearerToken(iamRequest?.headers)).toBe("federated-access-token");
-    expect(JSON.parse(iamRequest?.body ?? "{}")).toMatchObject({
-      scope: ["https://www.googleapis.com/auth/cloudkms"],
+    await vi.waitFor(() => expect(calls).toBe(1));
+    deadline.abort(new Error(`secret timeout reason for ${KMS_KEY_NAME}`));
+    await expect(operation).rejects.toMatchObject({
+      message: "Google Cloud KMS operation exceeded its deadline.",
+      name: "TimeoutError",
     });
-    expect(readBearerToken(kmsRequest?.headers)).toBe("kms-service-account-token");
+    expect(calls).toBe(1);
   });
 
-  it("uses only exact CryptoKey or CryptoKeyVersion resource names for decrypt", async () => {
-    const plaintext = new Uint8Array([4, 5, 6]);
-    const fetchMock = vi.fn<typeof fetch>(async () => jsonResponse({
-      plaintext: Buffer.from(plaintext).toString("base64"),
-    }));
-    vi.stubGlobal("fetch", fetchMock);
-    const client = createHostedGcpKmsClientFromEnv({
-      HOSTED_CRYPTO_ALLOW_STATIC_GCP_ACCESS_TOKEN_FOR_DEV: "1",
-      HOSTED_CRYPTO_ENV: "dev",
-      HOSTED_CRYPTO_GCP_ACCESS_TOKEN: "ya29.static-token",
-      HOSTED_CRYPTO_GCP_KMS_API_ROOT: "https://kms.example.test/v1",
-      NODE_ENV: "test",
-    });
-
-    await expect(client.decrypt({
-      additionalAuthenticatedData: "domain=control",
-      ciphertext: "encrypted-root-key",
-      keyName: LOCAL_KMS_KEY_VERSION_NAME,
-    })).resolves.toEqual({ plaintext });
-    expect(fetchMock).toHaveBeenCalledWith(
-      `https://kms.example.test/v1/${LOCAL_KMS_KEY_NAME}:decrypt`,
-      expect.objectContaining({ method: "POST" }),
-    );
-
-    for (const keyName of [
-      `${LOCAL_KMS_KEY_NAME}/cryptoKeyVersions/latest`,
-      `${LOCAL_KMS_KEY_NAME}:decrypt`,
-      `${LOCAL_KMS_KEY_VERSION_NAME}/extra`,
-    ]) {
-      await expect(client.decrypt({
-        additionalAuthenticatedData: "domain=control",
-        ciphertext: "encrypted-root-key",
-        keyName,
-      })).rejects.toThrow(/CryptoKey or CryptoKeyVersion resource name/u);
-    }
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-  });
-
-  it("rejects a CryptoKeyVersion as an encrypt parent before provider I/O", async () => {
-    const fetchMock = vi.fn<typeof fetch>(async () => jsonResponse({
-      ciphertext: "unexpected",
-      name: LOCAL_KMS_KEY_VERSION_NAME,
-    }));
-    vi.stubGlobal("fetch", fetchMock);
-    const client = createHostedGcpKmsClientFromEnv({
-      HOSTED_CRYPTO_ALLOW_STATIC_GCP_ACCESS_TOKEN_FOR_DEV: "1",
-      HOSTED_CRYPTO_ENV: "dev",
-      HOSTED_CRYPTO_GCP_ACCESS_TOKEN: "ya29.static-token",
-      HOSTED_CRYPTO_GCP_KMS_API_ROOT: "https://kms.example.test/v1",
-      NODE_ENV: "test",
-    });
-
-    await expect(client.encrypt({
-      additionalAuthenticatedData: "domain=control",
-      keyName: LOCAL_KMS_KEY_VERSION_NAME,
-      plaintext: new Uint8Array([1, 2, 3]),
-    })).rejects.toThrow(/must be a CryptoKey resource name/u);
-    expect(fetchMock).not.toHaveBeenCalled();
-  });
-
-  it("rejects malformed or mismatched EncryptResponse key version names", async () => {
-    const fetchMock = vi.fn<typeof fetch>()
-      .mockResolvedValueOnce(jsonResponse({
-        ciphertext: "encrypted-root-key",
-        name: `${LOCAL_KMS_KEY_NAME}/cryptoKeyVersions/latest`,
-      }))
-      .mockResolvedValueOnce(jsonResponse({
-        ciphertext: "encrypted-root-key",
-        name:
-          "projects/murph-local/locations/global/keyRings/hosted-local/cryptoKeys/other/cryptoKeyVersions/1",
-      }));
-    vi.stubGlobal("fetch", fetchMock);
-    const client = createHostedGcpKmsClientFromEnv({
-      HOSTED_CRYPTO_ALLOW_STATIC_GCP_ACCESS_TOKEN_FOR_DEV: "1",
-      HOSTED_CRYPTO_ENV: "dev",
-      HOSTED_CRYPTO_GCP_ACCESS_TOKEN: "ya29.static-token",
-      HOSTED_CRYPTO_GCP_KMS_API_ROOT: "https://kms.example.test/v1",
-      NODE_ENV: "test",
-    });
-    const input = {
-      additionalAuthenticatedData: "domain=control",
-      keyName: LOCAL_KMS_KEY_NAME,
-      plaintext: new Uint8Array([1, 2, 3]),
-    };
-
-    await expect(client.encrypt(input)).rejects.toThrow(
-      /must be a CryptoKeyVersion resource name/u,
-    );
-    await expect(client.encrypt(input)).rejects.toThrow(
-      /did not match the requested CryptoKey/u,
-    );
-    expect(fetchMock).toHaveBeenCalledTimes(2);
-  });
-
-  it("redacts raw Google provider messages from token exchange failures", async () => {
-    const fetchMock: typeof fetch = async (input) => {
-      const url = String(input);
-
-      if (url === "https://sts.googleapis.com/v1/token") {
-        return jsonResponse({
-          access_token: "federated-access-token",
-          expires_in: 3600,
-          token_type: "Bearer",
-        });
-      }
-
-      if (url.includes(":generateAccessToken")) {
-        return jsonResponse({
-          error: {
-            code: 403,
-            message:
-              "Request had insufficient authentication scopes for service-account@example.test at projects/example-project.",
-            status: "PERMISSION_DENIED",
+  it("returns a structured provider error without raw messages, payloads, resources, or causes", async () => {
+    const client = createClientHarness(STATIC_ENV, createTransport({
+      encrypt: async () => {
+        throw {
+          code: "PERMISSION_DENIED",
+          message: `KMS denied ${KMS_KEY_NAME} using secret-provider-token`,
+          response: {
+            data: { privatePayload: "secret-provider-payload" },
+            status: 403,
           },
-        }, { status: 403 });
-      }
-
-      return jsonResponse({ error: { status: "NOT_FOUND" } }, { status: 404 });
-    };
-    vi.stubGlobal("fetch", fetchMock);
-
-    const client = createHostedGcpKmsClientFromEnv({
-      HOSTED_CRYPTO_ENV: "production",
-      HOSTED_CRYPTO_GCP_PROJECT_NUMBER: "123456789012",
-      HOSTED_CRYPTO_GCP_SERVICE_ACCOUNT_EMAIL: "hosted-crypto@example.test",
-      HOSTED_CRYPTO_GCP_WORKLOAD_IDENTITY_POOL_ID: "vercel",
-      HOSTED_CRYPTO_GCP_WORKLOAD_IDENTITY_PROVIDER_ID: "vercel",
-      NODE_ENV: "test",
-    });
+        };
+      },
+    })).client;
 
     let thrown: unknown;
     try {
       await client.encrypt({
         additionalAuthenticatedData: "domain=control",
-        keyName: LOCAL_KMS_KEY_NAME,
+        keyName: KMS_KEY_NAME,
         plaintext: new Uint8Array([1, 2, 3]),
       });
     } catch (error) {
       thrown = error;
     }
 
+    expect(thrown).toBeInstanceOf(HostedGcpKmsProviderError);
     expect(thrown).toMatchObject({
-      code: "GOOGLE_CLOUD_API_ERROR",
-      googleCloudOperation: "iamcredentials/generateAccessToken",
-      googleCloudReason: "PERMISSION_DENIED",
-      message: "Google Cloud iamcredentials/generateAccessToken failed (403): PERMISSION_DENIED",
+      code: "HOSTED_GCP_KMS_PROVIDER_ERROR",
+      message: "Google Cloud KMS encrypt failed (PERMISSION_DENIED).",
+      operation: "encrypt",
+      providerReason: "PERMISSION_DENIED",
+      retryable: false,
       status: 403,
     });
-    expect(thrown).toBeInstanceOf(Error);
-    expect(thrown instanceof Error ? thrown.message : "").not.toMatch(
-      /service-account@example\.test|example-project|insufficient authentication scopes/u,
+    const serialized = JSON.stringify(thrown);
+    expect(serialized).not.toMatch(
+      /projects\/|keyRings|secret-provider|privatePayload|KMS denied/u,
     );
-  });
-
-  it("uses stable operation labels for KMS failures instead of resource names", async () => {
-    const fetchMock: typeof fetch = async (input) => {
-      const url = String(input);
-
-      if (url === "https://sts.googleapis.com/v1/token") {
-        return jsonResponse({
-          access_token: "federated-access-token",
-          expires_in: 3600,
-          token_type: "Bearer",
-        });
-      }
-
-      if (url.includes(":generateAccessToken")) {
-        return jsonResponse({
-          accessToken: "kms-service-account-token",
-          expireTime: "2099-01-01T00:00:00Z",
-        });
-      }
-
-      if (url.includes(":encrypt")) {
-        return jsonResponse({
-          error: {
-            code: 403,
-            message: `KMS denied ${LOCAL_KMS_KEY_NAME}`,
-            status: "projects/example-project/keyRings/hosted",
-          },
-        }, { status: 403, statusText: `Forbidden ${LOCAL_KMS_KEY_NAME}` });
-      }
-
-      return jsonResponse({ error: { status: "NOT_FOUND" } }, { status: 404 });
-    };
-    vi.stubGlobal("fetch", fetchMock);
-
-    const client = createHostedGcpKmsClientFromEnv({
-      HOSTED_CRYPTO_ENV: "production",
-      HOSTED_CRYPTO_GCP_PROJECT_NUMBER: "123456789012",
-      HOSTED_CRYPTO_GCP_SERVICE_ACCOUNT_EMAIL: "hosted-crypto@example.test",
-      HOSTED_CRYPTO_GCP_WORKLOAD_IDENTITY_POOL_ID: "vercel",
-      HOSTED_CRYPTO_GCP_WORKLOAD_IDENTITY_PROVIDER_ID: "vercel",
-      NODE_ENV: "test",
-    });
-
-    let thrown: unknown;
-    try {
-      await client.encrypt({
-        additionalAuthenticatedData: "domain=control",
-        keyName: LOCAL_KMS_KEY_NAME,
-        plaintext: new Uint8Array([1, 2, 3]),
-      });
-    } catch (error) {
-      thrown = error;
-    }
-
-    expect(thrown).toMatchObject({
-      code: "GOOGLE_CLOUD_API_ERROR",
-      googleCloudOperation: "cloudkms/encrypt",
-      googleCloudReason: "google_error_403",
-      message: "Google Cloud cloudkms/encrypt failed (403): google_error_403",
-      status: 403,
-    });
-    expect(JSON.stringify(thrown)).not.toMatch(/projects\/|keyRings|hosted-web-wrap/u);
-  });
-
-  it("keeps non-JSON Google error bodies out of KMS failure messages", async () => {
-    const fetchMock: typeof fetch = async (input) => {
-      const url = String(input);
-
-      if (url === "https://sts.googleapis.com/v1/token") {
-        return jsonResponse({
-          access_token: "federated-access-token",
-          expires_in: 3600,
-          token_type: "Bearer",
-        });
-      }
-
-      if (url.includes(":generateAccessToken")) {
-        return jsonResponse({
-          accessToken: "kms-service-account-token",
-          expireTime: "2099-01-01T00:00:00Z",
-        });
-      }
-
-      if (url.includes(":encrypt")) {
-        return new Response(`KMS denied ${LOCAL_KMS_KEY_NAME}`, {
-          headers: { "Content-Type": "text/plain" },
-          status: 403,
-          statusText: `Forbidden ${LOCAL_KMS_KEY_NAME}`,
-        });
-      }
-
-      return jsonResponse({ error: { status: "NOT_FOUND" } }, { status: 404 });
-    };
-    vi.stubGlobal("fetch", fetchMock);
-
-    const client = createHostedGcpKmsClientFromEnv({
-      HOSTED_CRYPTO_ENV: "production",
-      HOSTED_CRYPTO_GCP_PROJECT_NUMBER: "123456789012",
-      HOSTED_CRYPTO_GCP_SERVICE_ACCOUNT_EMAIL: "hosted-crypto@example.test",
-      HOSTED_CRYPTO_GCP_WORKLOAD_IDENTITY_POOL_ID: "vercel",
-      HOSTED_CRYPTO_GCP_WORKLOAD_IDENTITY_PROVIDER_ID: "vercel",
-      NODE_ENV: "test",
-    });
-
-    let thrown: unknown;
-    try {
-      await client.encrypt({
-        additionalAuthenticatedData: "domain=control",
-        keyName: LOCAL_KMS_KEY_NAME,
-        plaintext: new Uint8Array([1, 2, 3]),
-      });
-    } catch (error) {
-      thrown = error;
-    }
-
-    expect(thrown).toMatchObject({
-      code: "GOOGLE_CLOUD_API_ERROR",
-      googleCloudOperation: "cloudkms/encrypt",
-      googleCloudReason: "http_403",
-      message: "Google Cloud cloudkms/encrypt failed (403): http_403",
-      status: 403,
-    });
-    expect(JSON.stringify(thrown)).not.toMatch(/projects\/|keyRings|hosted-web-wrap|KMS denied/u);
-  });
-});
-
-describe("hosted crypto JSON KMS MAC signing", () => {
-  it("calls the exact MAC key version and rejects malformed KMS responses", async () => {
-    const expectedMac = Buffer.alloc(32, 7);
-    const fetchMock = vi.fn<typeof fetch>()
-      .mockResolvedValueOnce(jsonResponse({
-        mac: expectedMac.toString("base64"),
-        name: LOCAL_MAC_KEY_VERSION,
-      }))
-      .mockResolvedValueOnce(jsonResponse({
-        mac: expectedMac.toString("base64"),
-        name:
-          "projects/example/locations/global/keyRings/ring/cryptoKeys/other/cryptoKeyVersions/1",
-      }))
-      .mockResolvedValueOnce(jsonResponse({
-        mac: Buffer.alloc(31, 7).toString("base64"),
-        name: LOCAL_MAC_KEY_VERSION,
-      }));
-    vi.stubGlobal("fetch", fetchMock);
-    const client = createHostedGcpKmsClientFromEnv({
-      HOSTED_CRYPTO_ALLOW_STATIC_GCP_ACCESS_TOKEN_FOR_DEV: "1",
-      HOSTED_CRYPTO_ENV: "dev",
-      HOSTED_CRYPTO_GCP_ACCESS_TOKEN: "ya29.static-token",
-      HOSTED_CRYPTO_GCP_KMS_API_ROOT: "https://kms.example.test/v1",
-      NODE_ENV: "test",
-    });
-    const data = new Uint8Array([1, 2, 3, 4]);
-
-    await expect(client.macSign({
-      data,
-      keyVersionName: LOCAL_MAC_KEY_VERSION,
-    })).resolves.toEqual({
-      keyVersionName: LOCAL_MAC_KEY_VERSION,
-      mac: new Uint8Array(expectedMac),
-    });
-    expect(fetchMock).toHaveBeenNthCalledWith(
-      1,
-      `https://kms.example.test/v1/${LOCAL_MAC_KEY_VERSION}:macSign`,
-      expect.objectContaining({
-        body: JSON.stringify({ data: Buffer.from(data).toString("base64") }),
-        method: "POST",
-      }),
-    );
-    const firstHeaders = new Headers(fetchMock.mock.calls[0]?.[1]?.headers);
-    expect(firstHeaders.get("authorization")).toBe("Bearer ya29.static-token");
-    expect(firstHeaders.get("content-type")).toBe("application/json");
-
-    await expect(client.macSign({
-      data,
-      keyVersionName: LOCAL_MAC_KEY_VERSION,
-    })).rejects.toThrow(/response key version did not match/u);
-    await expect(client.macSign({
-      data,
-      keyVersionName: LOCAL_MAC_KEY_VERSION,
-    })).rejects.toThrow(/exactly 32 bytes/u);
+    expect(isObjectWithProperty(thrown, "cause")).toBe(false);
+    expect(isObjectWithProperty(thrown, "permanent")).toBe(false);
   });
 });
 
 describe("hosted crypto local KMS", () => {
-  it("encrypts, decrypts, and signs without GCP credentials", async () => {
+  it("accepts the shared hosted execution authority-signing fixture", async () => {
     const signingKey = await createLocalSigningKey();
-    const client = createHostedGcpKmsClientFromEnv({
-      HOSTED_CRYPTO_GCP_KMS_API_ROOT: LOCAL_KMS_API_ROOT,
-      HOSTED_CRYPTO_LOCAL_AUTHORITY_SIGN_PRIVATE_JWK: signingKey.privateJwkJson,
-      HOSTED_CRYPTO_LOCAL_KMS_WRAP_KEY: Buffer.alloc(32, 7).toString("base64"),
-      NODE_ENV: "test",
-    });
+    const client = createLocalClient(signingKey.privateJwkJson, 6);
 
+    await expect(client.asymmetricSign({
+      keyVersionName: TEST_HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION,
+      message: new TextEncoder().encode("shared hosted execution fixture"),
+    })).resolves.toMatchObject({
+      keyVersionName: TEST_HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION,
+    });
+  });
+
+  it("encrypts, decrypts, signs, and MACs without Google credentials", async () => {
+    const signingKey = await createLocalSigningKey();
+    const client = createLocalClient(signingKey.privateJwkJson, 7);
     const plaintext = new TextEncoder().encode("local hosted root");
+
     const encrypted = await client.encrypt({
       additionalAuthenticatedData: "domain=control",
-      keyName: LOCAL_KMS_KEY_NAME,
+      keyName: KMS_KEY_NAME,
       plaintext,
     });
     const decrypted = await client.decrypt({
       additionalAuthenticatedData: "domain=control",
       ciphertext: encrypted.ciphertext,
-      keyName: LOCAL_KMS_KEY_NAME,
+      keyName: KMS_KEY_VERSION_NAME,
     });
     const signed = await client.asymmetricSign({
-      keyVersionName: LOCAL_SIGN_KEY_VERSION,
+      keyVersionName: SIGN_KEY_VERSION_NAME,
       message: new TextEncoder().encode("sign me"),
+    });
+    const mac = await client.macSign({
+      data: new TextEncoder().encode("member seed"),
+      keyVersionName: MAC_KEY_VERSION_NAME,
     });
 
     expect(encrypted.ciphertext).toMatch(/^local-kms-v1:/u);
     expect(new TextDecoder().decode(decrypted.plaintext)).toBe("local hosted root");
-    expect(signed.keyVersionName).toBe(LOCAL_SIGN_KEY_VERSION);
-    await expect(
-      crypto.subtle.verify(
-        { hash: "SHA-256", name: "ECDSA" },
-        signingKey.publicKey,
-        Buffer.from(signed.signature, "base64"),
-        new TextEncoder().encode("sign me"),
-      ),
-    ).resolves.toBe(true);
+    expect(plaintext).toEqual(new TextEncoder().encode("local hosted root"));
+    expect(mac.mac).toHaveLength(32);
+    await expect(crypto.subtle.verify(
+      { hash: "SHA-256", name: "ECDSA" },
+      signingKey.publicKey,
+      Buffer.from(signed.signature, "base64"),
+      new TextEncoder().encode("sign me"),
+    )).resolves.toBe(true);
   });
 
-  it("binds local ciphertext to the supplied KMS AAD", async () => {
+  it("keeps local ciphertext and MACs bound to AAD, exact key versions, and data", async () => {
     const signingKey = await createLocalSigningKey();
-    const client = createHostedGcpKmsClientFromEnv({
-      HOSTED_CRYPTO_GCP_KMS_API_ROOT: LOCAL_KMS_API_ROOT,
-      HOSTED_CRYPTO_LOCAL_AUTHORITY_SIGN_PRIVATE_JWK: signingKey.privateJwkJson,
-      HOSTED_CRYPTO_LOCAL_KMS_WRAP_KEY: Buffer.alloc(32, 8).toString("base64"),
-      NODE_ENV: "test",
-    });
+    const client = createLocalClient(signingKey.privateJwkJson, 8);
     const encrypted = await client.encrypt({
       additionalAuthenticatedData: "expected-aad",
-      keyName: LOCAL_KMS_KEY_NAME,
+      keyName: KMS_KEY_NAME,
       plaintext: new Uint8Array([1, 2, 3]),
     });
 
     await expect(client.decrypt({
       additionalAuthenticatedData: "wrong-aad",
       ciphertext: encrypted.ciphertext,
-      keyName: LOCAL_KMS_KEY_NAME,
+      keyName: KMS_KEY_NAME,
     })).rejects.toThrow();
-  });
-
-  it("derives stable, key-version-bound 256-bit MACs without exposing the key", async () => {
-    const signingKey = await createLocalSigningKey();
-    const client = createHostedGcpKmsClientFromEnv({
-      HOSTED_CRYPTO_GCP_KMS_API_ROOT: LOCAL_KMS_API_ROOT,
-      HOSTED_CRYPTO_LOCAL_AUTHORITY_SIGN_PRIVATE_JWK: signingKey.privateJwkJson,
-      HOSTED_CRYPTO_LOCAL_KMS_WRAP_KEY: Buffer.alloc(32, 9).toString("base64"),
-      NODE_ENV: "test",
-    });
-    const data = new TextEncoder().encode("member-scoped seed");
 
     const first = await client.macSign({
-      data,
-      keyVersionName: LOCAL_MAC_KEY_VERSION,
+      data: new TextEncoder().encode("member seed"),
+      keyVersionName: MAC_KEY_VERSION_NAME,
     });
     const replay = await client.macSign({
-      data,
-      keyVersionName: LOCAL_MAC_KEY_VERSION,
+      data: new TextEncoder().encode("member seed"),
+      keyVersionName: MAC_KEY_VERSION_NAME,
     });
     const changed = await client.macSign({
       data: new TextEncoder().encode("different seed"),
-      keyVersionName: LOCAL_MAC_KEY_VERSION,
+      keyVersionName: MAC_KEY_VERSION_NAME,
     });
-
-    expect(first.keyVersionName).toBe(LOCAL_MAC_KEY_VERSION);
-    expect(first.mac).toHaveLength(32);
     expect(first.mac).toEqual(replay.mac);
     expect(first.mac).not.toEqual(changed.mac);
   });
 
-  it("rejects the local KMS shim in production", async () => {
+  it("rejects local KMS in every production environment", async () => {
     const signingKey = await createLocalSigningKey();
-    const baseEnv = {
-      HOSTED_CRYPTO_GCP_KMS_API_ROOT: LOCAL_KMS_API_ROOT,
-      HOSTED_CRYPTO_LOCAL_AUTHORITY_SIGN_PRIVATE_JWK: signingKey.privateJwkJson,
-      HOSTED_CRYPTO_LOCAL_KMS_WRAP_KEY: Buffer.alloc(32, 7).toString("base64"),
-      NODE_ENV: "test",
-    } satisfies NodeJS.ProcessEnv;
-    const productionEnvironments: readonly NodeJS.ProcessEnv[] = [
+    const baseEnv = localEnv(signingKey.privateJwkJson, 9);
+    const productionEnvironments: NodeJS.ProcessEnv[] = [
       { ...baseEnv, NODE_ENV: "production" },
-      { ...baseEnv, NODE_ENV: "test", VERCEL_ENV: "production" },
-      { ...baseEnv, HOSTED_CRYPTO_ENV: "prod", NODE_ENV: "test" },
-      { ...baseEnv, HOSTED_CRYPTO_ENV: "production", NODE_ENV: "test" },
+      { ...baseEnv, VERCEL_ENV: "production" },
+      { ...baseEnv, HOSTED_CRYPTO_ENV: "prod" },
+      { ...baseEnv, HOSTED_CRYPTO_ENV: "production" },
     ];
-
     for (const env of productionEnvironments) {
       expect(() => createHostedGcpKmsClientFromEnv(env)).toThrow(
         /local KMS is not allowed in production/u,
@@ -649,6 +707,91 @@ describe("hosted crypto local KMS", () => {
     }
   });
 });
+
+interface TransportOverrides {
+  asymmetricSign?: HostedGcpKmsSdkTransport["asymmetricSign"];
+  decrypt?: HostedGcpKmsSdkTransport["decrypt"];
+  encrypt?: HostedGcpKmsSdkTransport["encrypt"];
+  macSign?: HostedGcpKmsSdkTransport["macSign"];
+}
+
+function createTransport(overrides: TransportOverrides = {}): HostedGcpKmsSdkTransport {
+  return {
+    asymmetricSign: overrides.asymmetricSign ?? (async () => {
+      throw new Error("Unexpected asymmetricSign transport call.");
+    }),
+    decrypt: overrides.decrypt ?? (async () => {
+      throw new Error("Unexpected decrypt transport call.");
+    }),
+    encrypt: overrides.encrypt ?? (async () => {
+      throw new Error("Unexpected encrypt transport call.");
+    }),
+    macSign: overrides.macSign ?? (async () => {
+      throw new Error("Unexpected macSign transport call.");
+    }),
+  };
+}
+
+function createClientHarness(
+  env: NodeJS.ProcessEnv,
+  transport: HostedGcpKmsSdkTransport = createTransport(),
+): { client: HostedGcpKmsClient; config: HostedGcpKmsSdkClientConfiguration } {
+  const captured: { config?: HostedGcpKmsSdkClientConfiguration } = {};
+  const dependencies: HostedGcpKmsClientDependencies = {
+    createSdkTransport: (config) => {
+      captured.config = config;
+      return transport;
+    },
+  };
+  const client = createHostedGcpKmsClientFromEnv(env, dependencies);
+  return {
+    client,
+    config: requireValue(captured.config, "Google client configuration"),
+  };
+}
+
+function pendingUntilAbort<T>(signal: AbortSignal): Promise<T> {
+  return new Promise<T>((_resolve, reject) => {
+    if (signal.aborted) {
+      reject(signal.reason);
+      return;
+    }
+    signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+  });
+}
+
+function crc32c(value: Uint8Array): number {
+  const table = new Uint32Array(256);
+  for (let index = 0; index < table.length; index += 1) {
+    let entry = index;
+    for (let bit = 0; bit < 8; bit += 1) {
+      entry = (entry & 1) === 1
+        ? 0x82f63b78 ^ (entry >>> 1)
+        : entry >>> 1;
+    }
+    table[index] = entry >>> 0;
+  }
+  let crc = 0xffffffff;
+  for (const byte of value) {
+    crc = table[(crc ^ byte) & 0xff]! ^ (crc >>> 8);
+  }
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
+function expectAllZero(value: Uint8Array): void {
+  expect(value.every((byte) => byte === 0)).toBe(true);
+}
+
+function requireValue<T>(value: T | null | undefined, label: string): T {
+  if (value === null || value === undefined) {
+    throw new Error(`${label} was not captured.`);
+  }
+  return value;
+}
+
+function isObjectWithProperty(value: unknown, property: PropertyKey): boolean {
+  return typeof value === "object" && value !== null && property in value;
+}
 
 async function createLocalSigningKey(): Promise<{
   privateJwkJson: string;
@@ -665,32 +808,15 @@ async function createLocalSigningKey(): Promise<{
   };
 }
 
-function jsonResponse(body: unknown, init?: ResponseInit): Response {
-  return new Response(JSON.stringify(body), {
-    headers: { "Content-Type": "application/json" },
-    status: init?.status ?? 200,
-    statusText: init?.statusText,
-  });
+function createLocalClient(privateJwkJson: string, wrapByte: number): HostedGcpKmsClient {
+  return createHostedGcpKmsClientFromEnv(localEnv(privateJwkJson, wrapByte));
 }
 
-function pendingUntilAbort(signal: AbortSignal | null | undefined): Promise<Response> {
-  return new Promise((_resolve, reject) => {
-    if (!signal) {
-      reject(new Error("Expected a provider request abort signal."));
-      return;
-    }
-    if (signal.aborted) {
-      reject(signal.reason);
-      return;
-    }
-    signal.addEventListener("abort", () => reject(signal.reason), { once: true });
-  });
-}
-
-function readBearerToken(headers: Headers | undefined): string | null {
-  const authorization = headers?.get("authorization");
-  if (!authorization?.startsWith("Bearer ")) {
-    return null;
-  }
-  return authorization.slice("Bearer ".length);
+function localEnv(privateJwkJson: string, wrapByte: number): NodeJS.ProcessEnv {
+  return {
+    HOSTED_CRYPTO_GCP_KMS_API_ROOT: LOCAL_KMS_API_ROOT,
+    HOSTED_CRYPTO_LOCAL_AUTHORITY_SIGN_PRIVATE_JWK: privateJwkJson,
+    HOSTED_CRYPTO_LOCAL_KMS_WRAP_KEY: Buffer.alloc(32, wrapByte).toString("base64"),
+    NODE_ENV: "test",
+  };
 }

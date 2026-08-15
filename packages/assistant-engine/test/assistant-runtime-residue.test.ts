@@ -1003,6 +1003,7 @@ describe('assistant runtime residue pruning', () => {
 
     await appendAssistantAcceptedTurnInputItems({
       inputs: [{
+        acceptedAt: OLD_RECORD_AT,
         id: 'manual-input',
         promptFallbackText: 'manual input',
         source: 'manual',
@@ -1031,6 +1032,7 @@ describe('assistant runtime residue pruning', () => {
     })
     await appendAssistantAcceptedTurnInputItems({
       inputs: [{
+        acceptedAt: OLD_RECORD_AT,
         id: 'manual-input-without-receipt',
         promptFallbackText: 'manual input',
         source: 'manual',

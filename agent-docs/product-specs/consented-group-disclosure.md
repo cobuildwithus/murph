@@ -2,7 +2,7 @@
 
 Status: Implemented
 
-Last verified: 2026-07-29
+Last verified: 2026-08-13
 
 ## Decision
 
@@ -35,15 +35,65 @@ vault. Deterministic Web authorization establishes who may ask, which member
 may answer, and which immutable permission applies. The models only produce and
 review the candidate disclosure inside that boundary.
 
-A separate one-time first-party path uses an exact authenticated group message
-as its authority. The model selects only that accepted input's opaque Message
-ref. Web reopens the stored wake, derives the sender, route, exact question, and
-fixed self-only permission, then reuses the same isolated Assistant Ask and
-outgoing reviewer. It creates no group, membership, permission, or grant row and
-grants no future or scheduled access. Group ownership confers no additional
-disclosure authority. Linq and Telegram repeat the exact completion and
-one-time sender authority check at provider entry; stale authority durably
-replaces the reviewed answer with fixed non-disclosing text before delivery.
+A separate one-time first-party path uses one exact accepted input in the
+current group turn as its sole source authority. `ask_current_sender` accepts
+only that opaque `message_ref`; multiple independent requests in the same turn
+can each be submitted. Trusted runtime code verifies the ref belongs to the
+accepted turn, and Web reopens its stored wake, preserves native reply evidence,
+and resolves its author. The group model infers the requested answer audience
+from the conversation. A group answer requires a trusted advance notice bound
+to the same exact accepted input before personal-model work begins; a private
+answer requires a current same-channel direct route. When the audience is
+genuinely unclear, the model asks a natural clarification and Web retains only
+a short-lived group-and-sender pointer to the exact original source. The same
+speaker's later accepted input may resolve it, and a failed admission leaves the
+pointer claimable. Current-sender clarification and continuation transitions
+use the existing stateful dynamic-tool chain in provider request order, so a
+later continuation cannot overtake an earlier clarification; independent new
+exact-ref requests remain concurrent. No exact response format is required from
+the person.
+
+At accepted App Server request intake, strict parsing precedes one turn-local
+decision claim per exact accepted ref in App Server request arrival order. The
+claim happens before dynamic-tool lane selection or the pre-tool hook, so a
+later immediate `new` request cannot overtake an earlier serialized
+clarification or continuation. A different same-ref clarification, group,
+private, new, or continuation decision fails before a notice, Web admission,
+or clarification write. Exact repeated group decisions share one in-flight
+notice, and notice failure retains the group claim for the rest of that
+invocation instead of silently switching to private delivery. Different exact
+refs remain independently concurrent. This claim is not persisted; Web's
+canonical exact-source request identity remains the durable replay fence.
+
+Web derives the member, route, question, and replay identity from the exact
+stored source; the model never supplies those values. The requested wake
+persists one `current_sender_personal` read target and a separate fixed result
+destination: `origin_context` or same-channel `requester_direct`. Its permission
+digest remains the disclosure policy for that destination. Request identity
+uses the exact source rather than the destination, so replay cannot switch the
+stored choice or cause another personal read. The private candidate and fresh
+outgoing reviewer may only allow or deny the answer under the fixed permission.
+Group answers use the existing group completion. If a valid answered
+`origin_context` completion is persisted and the current sender then loses
+personal runtime access before provider dispatch, the provider-entry check
+returns the existing fixed-fallback signal so the group receives only the
+non-disclosing terminal. Malformed envelopes and destination mismatches remain
+authority failures. Private answers use the existing exact-text notification
+on the admitted channel. If a
+private route disappears after admission or at provider entry, or if the
+request expires before prepare, the private answer is discarded and the
+originating group receives only a fresh non-disclosing cannot-answer
+completion. Private delivery has a separate deterministic identity, so it
+cannot occupy the canonical group completion/fallback identity. This path
+creates no group, membership, permission, or grant row and grants no future or
+scheduled access.
+
+Current callers mark this protocol only after the runtime's required exact-room
+notice succeeds. During Web-first rollout, an unmarked request from an old
+runtime may still choose the private destination, but it cannot start a
+group-bound personal read because that runtime cannot prove the notice boundary.
+That optional group consultation fails closed until the runtime is recycled;
+already-persisted legacy work continues to drain under its stored authority.
 
 ## Product flow
 
@@ -120,6 +170,21 @@ group.
 - The scheduled initial-turn group port comes from the existing scheduled
   group-tool factory, not the base runtime context. Ordinary notifications and
   manual, direct, unknown-audience, or local cron runs must not receive it.
+- For the one-time current-sender path, the model supplies only one opaque
+  `message_ref`. Runtime code requires that ref in the current accepted group
+  turn, and Web owns exact-source admission, sender derivation, fixed result
+  destination, fixed permission, private-route admission, replay identity, and
+  completion route. Multiple valid refs in one turn remain independent.
+  An accepted origin can produce at most one request and one authorized terminal
+  experience. A committed group fallback remains sticky across lost responses
+  and direct-route recovery. A committed private effect remains the terminal
+  owner across expired detached-control replay until its provider-entry
+  authority either sends it or converts it once to that fallback. Legacy action
+  names, origins, and destination fields are drain
+  inputs only and never result-destination authority. Already-admitted
+  `group_sender` and `group_sender_private` targets retain their stored meaning
+  during the bounded drain; new requests write only the unified personal target
+  and separate destination.
 - The model never supplies invocation, delivery mode, member, membership,
   runtime, mailbox, session, callback, or return-route identity. It may use only
   a current server-issued `grantId` from the live group read.

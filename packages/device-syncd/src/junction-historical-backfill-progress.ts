@@ -79,6 +79,7 @@ const JUNCTION_EXTENDED_TIMESERIES_HISTORY_RESOURCE_SLOTS = Object.freeze([
   "blood_pressure",
   "note",
   ...JUNCTION_SPARSE_DAILY_TIMESERIES_HISTORY_BACKFILL_RESOURCES,
+  "weight",
 ] as const);
 const JUNCTION_EXTENDED_TIMESERIES_HISTORY_RESOURCE_VERSION_BY_NAME = new Map<string, number>([
   ["blood_pressure", 1],
@@ -86,6 +87,7 @@ const JUNCTION_EXTENDED_TIMESERIES_HISTORY_RESOURCE_VERSION_BY_NAME = new Map<st
   ...JUNCTION_SPARSE_DAILY_TIMESERIES_HISTORY_BACKFILL_RESOURCES.map(
     (resource) => [resource, 1] as const,
   ),
+  ["weight", 1],
 ]);
 const JUNCTION_SPARSE_DAILY_TIMESERIES_HISTORY_BACKFILL_RESOURCE_SET = new Set<string>(
   JUNCTION_SPARSE_DAILY_TIMESERIES_HISTORY_BACKFILL_RESOURCES,
@@ -476,6 +478,61 @@ export function addJunctionExtendedTimeseriesHistoryBackfillCoverage(input: {
     : null;
 }
 
+export function removeJunctionExtendedTimeseriesHistoryBackfillCoverage(input: {
+  metadata: Record<string, unknown>;
+  providerSlug: string;
+  resource: string;
+  version: number;
+}): Record<string, unknown> | null {
+  if (
+    !canCurrentRuntimeMutateJunctionExtendedTimeseriesHistoryBackfillCoverage(
+      input.metadata,
+      input.resource,
+      input.version,
+    )
+    || JUNCTION_LEGACY_EXTENDED_TIMESERIES_HISTORY_BACKFILL_COVERAGE_METADATA_KEYS.some(
+      (metadataKey) => !isJunctionExtendedTimeseriesHistoryCoverageSlotWritable(
+        input.metadata[metadataKey],
+        metadataKey,
+      ),
+    )
+  ) {
+    return null;
+  }
+
+  const bitIndex = resolveJunctionExtendedTimeseriesHistoryCoverageBitIndex(
+    input.providerSlug,
+    input.resource,
+  );
+  const metadataKey = selectJunctionExtendedTimeseriesHistoryCoverageMetadataKey([
+    input.metadata,
+  ]);
+  if (bitIndex === null || metadataKey === null) {
+    return null;
+  }
+
+  const coverage = readJunctionExtendedTimeseriesHistoryCoverageFacts(input.metadata);
+  if (!hasJunctionExtendedTimeseriesHistoryCoverageBit(coverage.bytes, bitIndex)) {
+    return null;
+  }
+  clearJunctionExtendedTimeseriesHistoryCoverageBit(coverage.bytes, bitIndex);
+
+  const metadata = { ...input.metadata };
+  for (const key of JUNCTION_LEGACY_EXTENDED_TIMESERIES_HISTORY_BACKFILL_COVERAGE_METADATA_KEYS) {
+    delete metadata[key];
+  }
+  const value = hasAnyJunctionExtendedTimeseriesHistoryCoverage(coverage.bytes)
+    ? encodeJunctionExtendedTimeseriesHistoryCoverageMatrix(coverage)
+    : null;
+  if (value === null) {
+    return hasAnyJunctionExtendedTimeseriesHistoryCoverage(coverage.bytes)
+      ? null
+      : metadata;
+  }
+  metadata[metadataKey] = value;
+  return metadata;
+}
+
 export function hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
   metadata: Record<string, unknown>,
   providerSlug: string,
@@ -734,6 +791,14 @@ function setJunctionExtendedTimeseriesHistoryCoverageBit(
 ): void {
   const byteIndex = Math.floor(bitIndex / 8);
   bytes[byteIndex] = (bytes[byteIndex] ?? 0) | (1 << (bitIndex % 8));
+}
+
+function clearJunctionExtendedTimeseriesHistoryCoverageBit(
+  bytes: Uint8Array,
+  bitIndex: number,
+): void {
+  const byteIndex = Math.floor(bitIndex / 8);
+  bytes[byteIndex] = (bytes[byteIndex] ?? 0) & ~(1 << (bitIndex % 8));
 }
 
 function hasJunctionExtendedTimeseriesHistoryCoverageBit(

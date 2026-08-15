@@ -4,6 +4,9 @@ import {
   HOSTED_RUNNER_SMOKE_CLI_SURFACE_HOT_PATH_PROOF_COUNT,
   HOSTED_RUNNER_SMOKE_CLI_VAULT_COMMAND_PROOF_COUNT,
   HOSTED_RUNNER_SMOKE_CLI_VAULT_WRITE_PROOF_COUNT,
+  HOSTED_RUNNER_SMOKE_MEMBER_WORKSPACE_AUTOMATION_MUTATION_DENIED_COUNT,
+  HOSTED_RUNNER_SMOKE_MEMBER_WORKSPACE_AUTOMATION_READ_PROOF_COUNT,
+  HOSTED_RUNNER_SMOKE_MEMBER_WORKSPACE_LOCAL_MUTATION_PROOF_COUNT,
   HOSTED_RUNNER_SMOKE_RESULT_SCHEMA,
   countAssistantCliSurfaceHotPathProofs,
   parseHostedRunnerSmokeInput,
@@ -25,6 +28,17 @@ const validHostedRunnerSmokeResult = {
   codexGroupReadRuntimeReadDenied: true,
   codexGroupReadSecretEnvironmentDenied: true,
   codexGroupReadSiblingRootReadDenied: true,
+  codexMemberWorkspaceAutomationMutationDeniedCount:
+    HOSTED_RUNNER_SMOKE_MEMBER_WORKSPACE_AUTOMATION_MUTATION_DENIED_COUNT,
+  codexMemberWorkspaceAutomationReadProofCount:
+    HOSTED_RUNNER_SMOKE_MEMBER_WORKSPACE_AUTOMATION_READ_PROOF_COUNT,
+  codexMemberWorkspaceAutomationTreeUnchanged: true,
+  codexMemberWorkspaceLocalMutationProofCount:
+    HOSTED_RUNNER_SMOKE_MEMBER_WORKSPACE_LOCAL_MUTATION_PROOF_COUNT,
+  codexMemberWorkspacePermissionProfileAttested: true,
+  codexMemberWorkspacePreloadBypassDenied: true,
+  codexMemberWorkspaceTempWriteAllowed: true,
+  codexMemberWorkspaceVaultWriteAllowed: true,
   codexHostedCliSurfaceContractBytes: 37282,
   codexHostedCliSurfaceHotPathProofCount: HOSTED_RUNNER_SMOKE_CLI_SURFACE_HOT_PATH_PROOF_COUNT,
   codexHostedConfigShellEnvironmentPolicyAllowlisted: true,
@@ -97,6 +111,17 @@ describe("parseHostedRunnerSmokeResult", () => {
       codexGroupReadRuntimeReadDenied: true,
       codexGroupReadSecretEnvironmentDenied: true,
       codexGroupReadSiblingRootReadDenied: true,
+      codexMemberWorkspaceAutomationMutationDeniedCount:
+        HOSTED_RUNNER_SMOKE_MEMBER_WORKSPACE_AUTOMATION_MUTATION_DENIED_COUNT,
+      codexMemberWorkspaceAutomationReadProofCount:
+        HOSTED_RUNNER_SMOKE_MEMBER_WORKSPACE_AUTOMATION_READ_PROOF_COUNT,
+      codexMemberWorkspaceAutomationTreeUnchanged: true,
+      codexMemberWorkspaceLocalMutationProofCount:
+        HOSTED_RUNNER_SMOKE_MEMBER_WORKSPACE_LOCAL_MUTATION_PROOF_COUNT,
+      codexMemberWorkspacePermissionProfileAttested: true,
+      codexMemberWorkspacePreloadBypassDenied: true,
+      codexMemberWorkspaceTempWriteAllowed: true,
+      codexMemberWorkspaceVaultWriteAllowed: true,
       codexHostedCliSurfaceContractBytes: 37282,
       codexHostedCliSurfaceHotPathProofCount: HOSTED_RUNNER_SMOKE_CLI_SURFACE_HOT_PATH_PROOF_COUNT,
       codexHostedConfigShellEnvironmentPolicyAllowlisted: true,
@@ -185,6 +210,27 @@ describe("parseHostedRunnerSmokeResult", () => {
       codexHostedCliVaultWriteProofCount: 0,
     })).toThrow(
       `Hosted runner smoke result.codexHostedCliVaultWriteProofCount must be at least ${HOSTED_RUNNER_SMOKE_CLI_VAULT_WRITE_PROOF_COUNT}.`,
+    );
+
+    expect(() => parseHostedRunnerSmokeResult({
+      ...validHostedRunnerSmokeResult,
+      codexMemberWorkspaceAutomationMutationDeniedCount: 4,
+    })).toThrow(
+      `Hosted runner smoke result.codexMemberWorkspaceAutomationMutationDeniedCount must be at least ${HOSTED_RUNNER_SMOKE_MEMBER_WORKSPACE_AUTOMATION_MUTATION_DENIED_COUNT}.`,
+    );
+
+    expect(() => parseHostedRunnerSmokeResult({
+      ...validHostedRunnerSmokeResult,
+      codexMemberWorkspaceAutomationReadProofCount: 1,
+    })).toThrow(
+      `Hosted runner smoke result.codexMemberWorkspaceAutomationReadProofCount must be at least ${HOSTED_RUNNER_SMOKE_MEMBER_WORKSPACE_AUTOMATION_READ_PROOF_COUNT}.`,
+    );
+
+    expect(() => parseHostedRunnerSmokeResult({
+      ...validHostedRunnerSmokeResult,
+      codexMemberWorkspaceLocalMutationProofCount: 4,
+    })).toThrow(
+      `Hosted runner smoke result.codexMemberWorkspaceLocalMutationProofCount must be at least ${HOSTED_RUNNER_SMOKE_MEMBER_WORKSPACE_LOCAL_MUTATION_PROOF_COUNT}.`,
     );
 
     expect(() => parseHostedRunnerSmokeResult({
@@ -299,6 +345,11 @@ describe("parseHostedRunnerSmokeResult", () => {
       "codexGroupReadRuntimeReadDenied",
       "codexGroupReadSecretEnvironmentDenied",
       "codexGroupReadSiblingRootReadDenied",
+      "codexMemberWorkspaceAutomationTreeUnchanged",
+      "codexMemberWorkspacePermissionProfileAttested",
+      "codexMemberWorkspacePreloadBypassDenied",
+      "codexMemberWorkspaceTempWriteAllowed",
+      "codexMemberWorkspaceVaultWriteAllowed",
       "codexHostedConfigShellEnvironmentPolicyAllowlisted",
       "codexHostedCliSchemaVaultOptionHidden",
       "murphCommandDiscovered",

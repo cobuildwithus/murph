@@ -1,11 +1,16 @@
 import type {
   ClaimDeviceSyncWebhookTraceInput,
+  ClearPublicDeviceSyncOAuthCredentialInput,
+  DeviceSyncAccount,
   ConsumeOAuthStateResult,
+  DiscardUnconsumedOAuthStateResult,
   DeviceSyncPublicIngressStore,
   DeviceSyncWebhookTraceClaimResult,
+  GetPublicDeviceSyncOAuthCleanupAccountInput,
   ListDeviceConnectionSourcesInput,
   MarkPublicDeviceSyncConnectionSetupFailedInput,
   MarkPublicDeviceSyncConnectionSetupFailedResult,
+  OAuthStateConsumeClaim,
   OAuthStateRecord,
   PublicDeviceConnectionSource,
   PublicDeviceSyncAccount,
@@ -53,6 +58,27 @@ export class DeviceProviderApplicationIngressStore
     );
   }
 
+  discardUnconsumedOAuthState(
+    state: string,
+    now: string,
+    expectedProvider?: string,
+    expectedOwnerId?: string,
+  ): Promise<DiscardUnconsumedOAuthStateResult> {
+    return this.store.discardUnconsumedOAuthStateWithProviderApplication(
+      state,
+      now,
+      this.binding,
+      expectedProvider,
+      expectedOwnerId,
+    );
+  }
+
+  resolveOAuthStateWithoutProviderAuthority(
+    claim: OAuthStateConsumeClaim,
+  ): Promise<boolean> {
+    return this.store.resolveOAuthStateWithoutProviderAuthority(claim);
+  }
+
   async upsertConnection(
     input: UpsertPublicDeviceSyncConnectionInput,
   ): Promise<PublicDeviceSyncAccount> {
@@ -77,6 +103,18 @@ export class DeviceProviderApplicationIngressStore
     input: MarkPublicDeviceSyncConnectionSetupFailedInput,
   ): Promise<MarkPublicDeviceSyncConnectionSetupFailedResult> {
     return this.store.markConnectionSetupFailed(input);
+  }
+
+  clearOAuthCredentialAfterConfirmedRevoke(
+    input: ClearPublicDeviceSyncOAuthCredentialInput,
+  ): Promise<boolean> {
+    return this.store.clearOAuthCredentialAfterConfirmedRevoke(input);
+  }
+
+  getOAuthCleanupAccount(
+    input: GetPublicDeviceSyncOAuthCleanupAccountInput,
+  ): Promise<DeviceSyncAccount | null> {
+    return this.store.getOAuthCleanupAccount(input);
   }
 
   getConnectionById(

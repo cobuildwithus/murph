@@ -81,6 +81,9 @@ import type {
 } from '@murphai/hosted-execution/subscription'
 import type { AssistantChannelDependencies } from './channel-adapters.js'
 import type { AssistantConnectedAppsPort } from './connected-apps-port.js'
+import type {
+  AssistantCronOccurrenceUnverifiedReason,
+} from './cron/timing-verification.js'
 import { normalizeNullableString } from './shared.js'
 
 export type AssistantChannelTypingDependencies = Pick<
@@ -164,6 +167,10 @@ export interface AssistantHostedLabsTool {
 
 export type AssistantHostedAutomationToolRequest =
   | {
+      action: 'inspect'
+      lookup: string
+    }
+  | {
       action: 'save'
       activeUntil?: string | null
       assistantTargetOverride?: AutomationAssistantTargetOverride | null
@@ -184,6 +191,7 @@ export type AssistantHostedAutomationToolRequest =
       activeUntil?: string | null
       assistantTargetOverride?: AutomationAssistantTargetOverride | null
       continuityPolicy?: AutomationContinuityPolicy
+      expectedUpdatedAt: string
       instructions?: string
       lookup: string
       retargetToCurrentConversation?: boolean
@@ -202,7 +210,26 @@ export type AssistantHostedAutomationToolRequest =
       supportSeriesId: string
     }
 
+export type AssistantAutomationTimingVerificationIssue =
+  | AssistantCronOccurrenceUnverifiedReason
+  | 'default_timezone_unverified'
+  | 'projection_unavailable'
+  | 'record_readback_mismatch'
+
 export type AssistantHostedAutomationToolResponse =
+  | {
+      action: 'inspect'
+      automationId: string
+      effectiveTimeZone: string | null
+      lookupId: string
+      nextOccurrenceAt: string | null
+      routeBinding: 'preserved'
+      schedule: AutomationSchedule
+      status: AutomationStatus
+      timingVerified: boolean
+      timingVerificationIssues?: readonly AssistantAutomationTimingVerificationIssue[]
+      updatedAt: string
+    }
   | {
       action: 'patch' | 'save'
       automationId: string
@@ -214,6 +241,8 @@ export type AssistantHostedAutomationToolResponse =
       schedule: AutomationSchedule
       status: AutomationStatus
       timingVerified: boolean
+      timingVerificationIssues?: readonly AssistantAutomationTimingVerificationIssue[]
+      updatedAt: string
     }
   | {
       action: 'reconcile'

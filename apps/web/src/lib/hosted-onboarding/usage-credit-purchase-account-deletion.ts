@@ -63,6 +63,13 @@ export async function closeHostedUsageCreditPurchasesForAccountDeletion(input: {
   });
 
   for (const listedPurchase of purchases) {
+    assertHostedUsageCreditPurchaseHasCurrentAccountDeletionOwnership({
+      memberIds,
+      purchase: listedPurchase,
+    });
+    if (isHostedUsageCreditPurchaseSafeForAccountDeletion(listedPurchase)) {
+      continue;
+    }
     const purchase = await prepareHostedUsageCreditPurchaseForAccountDeletion({
       memberIds,
       prisma,
@@ -175,6 +182,7 @@ export async function assertHostedUsageCreditPurchasesReadyForAccountDeletionTx(
     },
     where: buildHostedUsageCreditAccountDeletionScope(memberIds),
   });
+  let expectedDetachedCount = 0;
   for (const purchase of purchases) {
     assertHostedUsageCreditPurchaseHasCurrentAccountDeletionOwnership({
       memberIds,
@@ -188,36 +196,38 @@ export async function assertHostedUsageCreditPurchasesReadyForAccountDeletionTx(
       && memberIds.includes(purchase.payerMemberId)
       && !memberIds.includes(purchase.beneficiaryMemberId)
     ) {
-      const detached = await prisma.hostedUsageCreditPurchase.updateMany({
-        data: {
-          payerMemberId: null,
-          reconciliationVersion: {
-            increment: 1n,
-          },
-          stripeChargeIdEncrypted: null,
-          stripeCheckoutSessionIdEncrypted: null,
-          stripeCheckoutUrlEncrypted: null,
-          stripeCustomerIdEncrypted: null,
-          stripePaymentIntentIdEncrypted: null,
-          stripePriceIdEncrypted: null,
-          updatedAt: input.now ?? new Date(),
-        },
-        where: {
-          id: purchase.id,
-          payerMemberId: purchase.payerMemberId,
-          status: {
-            in: [
-              HostedUsageCreditPurchaseStatus.expired,
-              HostedUsageCreditPurchaseStatus.fulfilled,
-              HostedUsageCreditPurchaseStatus.payment_failed,
-            ],
-          },
-        },
-      });
-      if (detached.count !== 1) {
-        throw buildHostedUsageCreditAccountDeletionUnresolvedError();
-      }
+      expectedDetachedCount += 1;
     }
+  }
+
+  const detached = await prisma.hostedUsageCreditPurchase.updateMany({
+    data: {
+      payerMemberId: null,
+      reconciliationVersion: {
+        increment: 1n,
+      },
+      stripeChargeIdEncrypted: null,
+      stripeCheckoutSessionIdEncrypted: null,
+      stripeCheckoutUrlEncrypted: null,
+      stripeCustomerIdEncrypted: null,
+      stripePaymentIntentIdEncrypted: null,
+      stripePriceIdEncrypted: null,
+      updatedAt: input.now ?? new Date(),
+    },
+    where: {
+      beneficiaryMemberId: { notIn: memberIds },
+      payerMemberId: { in: memberIds },
+      status: {
+        in: [
+          HostedUsageCreditPurchaseStatus.expired,
+          HostedUsageCreditPurchaseStatus.fulfilled,
+          HostedUsageCreditPurchaseStatus.payment_failed,
+        ],
+      },
+    },
+  });
+  if (detached.count !== expectedDetachedCount) {
+    throw buildHostedUsageCreditAccountDeletionUnresolvedError();
   }
 }
 

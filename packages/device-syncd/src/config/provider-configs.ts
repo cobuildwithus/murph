@@ -52,7 +52,10 @@ import {
   WHOOP_SCOPES_ENV_KEYS,
   WHOOP_WEBHOOK_TIMESTAMP_TOLERANCE_MS_ENV_KEYS,
 } from "./provider-env.ts";
-import { readConfiguredJunctionDeviceSyncProviderConfig } from "./junction-config.ts";
+import {
+  JUNCTION_PRODUCTION_TIMESERIES_RESOURCES,
+  readConfiguredJunctionDeviceSyncProviderConfig,
+} from "./junction-config.ts";
 import type {
   OuraDeviceSyncProviderConfig,
   StravaDeviceSyncProviderConfig,
@@ -68,7 +71,10 @@ export type {
 } from "./provider-types.ts";
 
 export { configuredDeviceSyncProviderKeys };
-export { readConfiguredJunctionDeviceSyncProviderConfig };
+export {
+  JUNCTION_PRODUCTION_TIMESERIES_RESOURCES,
+  readConfiguredJunctionDeviceSyncProviderConfig,
+};
 
 export function readConfiguredDeviceSyncProviderConfigs(
   env: DeviceSyncEnvSource,

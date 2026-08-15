@@ -240,7 +240,10 @@ describe("hosted runtime control contracts", () => {
       "clinical-records.sync-requested",
       "device-sync.wake",
       "environment-voice.captured",
+      "health.daily-metric.reported",
       "meal-photo.captured",
+      "member.action.requested",
+      "member.action.completed",
       "vault-share.delivery",
       "vault-share.revoke",
       "group-newsletter.email-needed",
@@ -287,6 +290,7 @@ describe("hosted runtime control contracts", () => {
     expect(HOSTED_RUNTIME_LOG_EVENT_CODES).toContain("checkpoint.cas_conflict");
     expect(HOSTED_RUNTIME_LOG_EVENT_CODES).toContain("checkpoint.optional_sidecar_degraded");
     expect(HOSTED_RUNTIME_LOG_EVENT_CODES).toContain("checkpoint.idle_shutdown_snapshot_skipped");
+    expect(HOSTED_RUNTIME_LOG_EVENT_CODES).toContain("checkpoint.snapshot_preempted");
     expect(HOSTED_RUNTIME_LOG_EVENT_CODES).toContain("runner.accepted_attempt_failed");
     expect(HOSTED_RUNTIME_LOG_EVENT_CODES).toContain("runner.provider_egress_diagnostic");
     expect(HOSTED_RUNTIME_LOG_EVENT_CODES).toContain("workspace.codex_home_snapshot_failed");
@@ -2501,6 +2505,25 @@ describe("hosted runtime control contracts", () => {
     })).toEqual({
       entries: [entry],
     });
+    const expectedSnapshotPreemptionEntry = {
+      at: "2026-04-26T00:00:03.500Z",
+      attemptId: "attempt_1",
+      component: "workspace",
+      errorCode: "runtime_wake_during_checkpoint",
+      eventCode: "checkpoint.snapshot_preempted",
+      leaseGeneration: "9",
+      level: "info",
+      phase: "checkpoint",
+      redactedJson: {
+        errorCode: "runtime_wake_during_checkpoint",
+        snapshotOutcomeKind: "expected_preemption",
+        snapshotPreemptionKind: "runtime_wake",
+      },
+      workspaceVersion: "5",
+    };
+    expect(parseHostedRuntimeLogEntry(expectedSnapshotPreemptionEntry)).toEqual(
+      expectedSnapshotPreemptionEntry,
+    );
     const openAiDiagnosticEntry = {
       at: "2026-04-26T00:00:04.000Z",
       attemptId: "attempt_1",

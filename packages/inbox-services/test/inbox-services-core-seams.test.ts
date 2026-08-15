@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import os from 'node:os'
 import path from 'node:path'
-import { mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
+import { mkdtemp, rm, symlink, writeFile } from 'node:fs/promises'
 
 import {
   resolveRuntimePaths,
@@ -10,7 +10,7 @@ import {
 } from '@murphai/runtime-state/node'
 import * as z from '@murphai/contracts/zod-runtime'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
-import { expect, test, vi } from 'vitest'
+import { test } from 'vitest'
 
 import type {
   InboxRuntimeModule,
@@ -221,7 +221,7 @@ test('shared utility helpers normalize inbox metadata and paths', async () => {
   )
   assert.equal(normalizeConnectorAccountId('telegram', undefined), 'bot')
   assert.equal(normalizeConnectorAccountId('linq', undefined), 'default')
-  assert.equal(normalizeConnectorAccountId('email', ' inbox@example.com '), 'inbox@example.com')
+  assert.equal(normalizeConnectorAccountId('linq', ' account-main '), 'account-main')
   assert.throws(
     () => normalizeConnectorAccountId('unknown' as never, 'x'),
     (error: unknown) => error instanceof VaultCliError && error.code === 'INBOX_SOURCE_UNSUPPORTED',
@@ -367,7 +367,7 @@ test('inbox failure summaries preserve domain codes and redact message causes', 
   const domainError = Object.assign(
     new VaultCliError(
       'INBOX_DOMAIN_FAILED',
-      "domain failed for https://agentmail.example.test/inboxes/user@example.test "
+      "domain failed for https://provider.example.test/inboxes/user@example.test "
         + "at '/home/tester/vault/.runtime/state' and file:///private/tmp/inbox/log",
     ),
     {
@@ -394,10 +394,8 @@ test('inbox failure summaries preserve domain codes and redact message causes', 
   })
 })
 
-test('connector helpers instantiate every supported source and reject missing prerequisites', async () => {
-  const calls: string[] = []
+test('connector helpers instantiate Telegram and reject non-runtime sources', async () => {
   const telegramConnector = createPollConnector('telegram:bot')
-  const emailConnector = createPollConnector('email:primary')
   const telegramDriver = {
     downloadFile: async () => new Uint8Array(),
     getFile: async () => ({}),
@@ -405,26 +403,14 @@ test('connector helpers instantiate every supported source and reject missing pr
     getMessages: async () => [],
     startWatching: async () => undefined,
   }
-  const emailDriver = {
-    downloadAttachment: async () => null,
-    inboxId: 'inbox-1',
-    listUnreadMessages: async () => [],
-    markProcessed: async () => undefined,
-  }
   let telegramInput: unknown
-  let emailInput: unknown
   const inboxd = {
     createTelegramPollConnector(input: unknown) {
-      calls.push('telegram')
       telegramInput = input
       return telegramConnector
     },
-    createEmailPollConnector(input: unknown) {
-      calls.push('email')
-      emailInput = input
-      return emailConnector
-    },
   }
+
   const telegram = await instantiateConnector({
     connector: {
       id: 'telegram:bot',
@@ -450,58 +436,11 @@ test('connector helpers instantiate every supported source and reject missing pr
     transportMode: 'take-over-webhook',
   })
 
-  const email = await instantiateConnector({
-    connector: {
-      id: 'email:primary',
-      source: 'email',
-      enabled: true,
-      accountId: 'account-1',
-      options: {},
-    },
-    async loadInbox() {
-      return inboxd as never
-    },
-    async loadTelegramDriver() {
-      throw new Error('unexpected telegram driver load')
-    },
-    async loadEmailDriver() {
-      return emailDriver as never
-    },
-  })
-  assert.equal(email, emailConnector)
-  assert.deepEqual(emailInput, {
-    accountAddress: null,
-    accountId: 'account-1',
-    backfillLimit: 500,
-    driver: emailDriver,
-    id: 'email:primary',
-  })
-
   await assert.rejects(
     () =>
       instantiateConnector({
         connector: {
-          id: 'email:missing',
-          source: 'email',
-          enabled: true,
-          accountId: 'account-1',
-          options: {},
-        },
-        async loadInbox() {
-          return inboxd as never
-        },
-        async loadTelegramDriver() {
-          throw new Error('unexpected telegram driver load')
-        },
-      }),
-    /loadEmailDriver/,
-  )
-
-  await assert.rejects(
-    () =>
-      instantiateConnector({
-        connector: {
-          id: 'linq:missing-secret',
+          id: 'linq:primary',
           source: 'linq',
           enabled: true,
           accountId: null,
@@ -511,10 +450,10 @@ test('connector helpers instantiate every supported source and reject missing pr
           return inboxd as never
         },
         async loadTelegramDriver() {
-          throw new Error('unexpected telegram driver load')
+          throw new Error('unexpected Telegram driver load')
         },
       }),
-    /Unsupported inbox connector source: linq/,
+    /Unsupported inbox connector source: linq/u,
   )
 
   await assert.rejects(
@@ -534,7 +473,7 @@ test('connector helpers instantiate every supported source and reject missing pr
           return telegramDriver as never
         },
       }),
-    /Unsupported inbox connector source: unsupported/,
+    /Unsupported inbox connector source: unsupported/u,
   )
 })
 
@@ -900,21 +839,21 @@ test('state helpers initialize config, sort connectors, and guard namespace conf
           options: {},
         },
         {
-          id: 'email:primary',
-          source: 'email',
+          id: 'linq:primary',
+          source: 'linq',
           enabled: true,
-          accountId: 'inbox-1',
+          accountId: 'line-1',
           options: {},
         },
       ],
     }
     sortConnectors(updatedConfig)
     assert.deepEqual(updatedConfig.connectors.map((connector) => connector.id), [
-      'email:primary',
+      'linq:primary',
       'telegram:bot',
     ])
     await writeConfig(paths, updatedConfig)
-    assert.equal(findConnector(updatedConfig, 'email:primary')?.source, 'email')
+    assert.equal(findConnector(updatedConfig, 'linq:primary')?.source, 'linq')
     assert.equal(requireConnector(updatedConfig, 'telegram:bot').accountId, 'bot')
     assert.throws(
       () => requireConnector(updatedConfig, 'missing'),
@@ -930,10 +869,10 @@ test('state helpers initialize config, sort connectors, and guard namespace conf
     assert.throws(
       () =>
         ensureConnectorNamespaceAvailable(updatedConfig, {
-          id: 'email:dupe',
-          source: 'email',
+          id: 'linq:dupe',
+          source: 'linq',
           enabled: true,
-          accountId: 'inbox-1',
+          accountId: 'line-1',
           options: {},
         }),
       (error: unknown) => error instanceof VaultCliError && error.code === 'INBOX_SOURCE_NAMESPACE_EXISTS',
@@ -989,7 +928,7 @@ test('readConfig rejects unsupported connector sources in the stored config', as
         error.code === 'INBOX_CONFIG_INVALID' &&
         typeof error.context?.error === 'string' &&
         error.context.error.includes(
-          'Invalid option: expected one of \\"telegram\\"|\\"email\\"|\\"linq\\"',
+          'Invalid option: expected one of \\"telegram\\"|\\"linq\\"',
         ),
     )
   } finally {
@@ -1102,7 +1041,7 @@ test('daemon, process, and assistant vault-path helpers handle stale and invalid
       status: 'running',
       running: true,
       pid: 123,
-      connectorIds: ['email:primary'],
+      connectorIds: ['telegram:primary'],
     })
     await writeDaemonState(paths, staleState)
 

@@ -207,6 +207,7 @@ declare module 'incur' {
       'meal import-json': { args: {}; options: { requestId?: string; input: string; photo?: string; audio?: string; note?: string; occurredAt?: string | string; source?: "manual" | "import" | "device" | "derived"; ingredient?: string[]; nutritionCalories?: number; nutritionProteinGrams?: number; nutritionCarbsGrams?: number; nutritionFatGrams?: number; nutritionFiberGrams?: number; nutritionSource?: "user" | "label" | "database" | "inherited" | "estimated"; nutritionConfidence?: "low" | "medium" | "high"; nutritionSourceDetail?: string } }
       'meal list': { args: {}; options: { requestId?: string; from?: string; to?: string; limit: number } }
       'meal manifest': { args: { id: string }; options: { requestId?: string } }
+      'meal nutrients': { args: {}; options: { requestId?: string; from?: string; to?: string } }
       'meal remove-photo': { args: { id: string }; options: { requestId?: string } }
       'meal show': { args: { id: string }; options: { requestId?: string } }
       'meal totals': { args: {}; options: { requestId?: string; from?: string; to?: string } }
@@ -327,8 +328,8 @@ declare module 'incur' {
       'workout format log': { args: { name: string }; options: { requestId?: string; duration?: number; type?: string; distanceKm?: number; occurredAt?: string | string; source?: "manual" | "import" | "device" | "derived"; media?: string[] } }
       'workout format save': { args: { name?: string; text?: string }; options: { requestId?: string; workoutFormatId?: string; slug?: string; status?: "active" | "archived"; summary?: string; tag?: string[]; note?: string; templateText?: string; routineNote?: string; exercise?: string[]; setTemplate?: string[]; duration?: number; type?: string; distanceKm?: number } }
       'workout format show': { args: { name: string }; options: { requestId?: string } }
-      'workout import csv': { args: { file: string }; options: { requestId?: string; source?: string; delimiter?: string; storeRawOnly?: boolean } }
-      'workout import inspect': { args: { file: string }; options: { requestId?: string; source?: string; delimiter?: string } }
+      'workout import csv': { args: { file: string }; options: { requestId?: string; source?: "strong" | "hevy"; delimiter?: string; weightUnit?: "lb" | "kg"; distanceUnit?: "m" | "km" | "mi"; storeRawOnly?: boolean; correctUnits?: boolean } }
+      'workout import inspect': { args: { file: string }; options: { requestId?: string; source?: "strong" | "hevy"; delimiter?: string; weightUnit?: "lb" | "kg"; distanceUnit?: "m" | "km" | "mi" } }
       'workout import-json': { args: { text?: string }; options: { requestId?: string; input: string; note?: string; title?: string; duration?: number; type?: string; distanceKm?: number; occurredAt?: string | string; source?: "manual" | "import" | "device" | "derived"; media?: string[] } }
       'workout list': { args: {}; options: { requestId?: string; from?: string; to?: string; limit: number } }
       'workout manifest': { args: { id: string }; options: { requestId?: string } }

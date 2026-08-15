@@ -416,12 +416,6 @@ function createInboxModule(
     async createInboxPipeline() {
       throw new Error('not used in reads/runtime tests')
     },
-    createAgentmailApiPollDriver() {
-      throw new Error('not used in reads/runtime tests')
-    },
-    createEmailPollConnector() {
-      throw new Error('not used in reads/runtime tests')
-    },
     createTelegramBotApiPollDriver() {
       throw new Error('not used in reads/runtime tests')
     },
@@ -467,19 +461,13 @@ function createEnv(
 ): InboxAppEnvironment {
   return {
     clock: () => new Date('2026-04-08T12:00:00.000Z'),
-    createConfiguredAgentmailClient() {
-      throw new Error('not used in reads/runtime tests')
-    },
     enableAssistantAutoReplyChannel: async () => false,
     getEnvironment: () => ({ LINQ_WEBHOOK_SECRET: 'linq-secret' }),
-    getHomeDirectory: () => '/tmp/home',
+    getHomeDirectory: () => '/tmp/runtime-root',
     getPid: () => 321,
     getPlatform: () => 'linux',
     journalPromotionEnabled: false,
     killProcess() {},
-    loadConfiguredEmailDriver: async () => {
-      throw new Error('not used in reads/runtime tests')
-    },
     loadConfiguredTelegramDriver: async () => {
       throw new Error('not used in reads/runtime tests')
     },
@@ -498,18 +486,10 @@ function createEnv(
     loadQuery: async () => {
       throw new Error('not used in reads/runtime tests')
     },
-    provisionOrRecoverAgentmailInbox: async () => ({
-      accountId: 'mailbox-1',
-      emailAddress: 'mailbox@example.com',
-      provisionedMailbox: null,
-      reusedMailbox: null,
-    }),
     requireParsers: async () => {
       throw new Error('test did not provide requireParsers')
     },
     sleep: async () => {},
-    tryResolveAgentmailInboxAddress: async () => null,
-    usesInjectedEmailDriver: false,
     usesInjectedTelegramDriver: false,
     ...overrides,
   }
@@ -1485,7 +1465,7 @@ test('runtime run writes failed daemon state when the daemon surface throws', as
     openInboxRuntime: vi.fn(async () => createRuntimeStore({ captures: [] }).runtime),
     runInboxDaemonWithParsers: vi.fn(async () => {
       throw new Error(
-        "daemon failed for https://agentmail.example.test/inboxes/user@example.test at '/tmp/inbox/state' while notifying 415 555 0100",
+        "daemon failed for https://provider.example.test/resources/synthetic at '/tmp/inbox/state' while notifying 415 555 0100",
       )
     }),
   })

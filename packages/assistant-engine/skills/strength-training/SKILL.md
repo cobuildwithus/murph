@@ -84,7 +84,9 @@ Treat physique photos, body measurements, pain and symptom notes, training logs,
 
 ### Repeated-set logs and cumulative totals
 
-For several small sets spread across a day, read `$MURPH_ASSISTANT_SKILLS_ROOT/experiment-onboarding/SKILL.md` when an experiment owns the schedule or records. Treat each completion reply to one reminder as one occurrence, not as confirmation of an entire day.
+Repeated-set logging is private-only. In a group conversation, do not read or mutate a participant's private routine or experiment; acknowledge briefly and ask them to continue in their private Murph conversation. In a verified private conversation with several small sets spread across a day, read `$MURPH_ASSISTANT_SKILLS_ROOT/behavior-followthrough/SKILL.md` to resolve the current routine and read `$MURPH_ASSISTANT_SKILLS_ROOT/experiment-onboarding/SKILL.md` when an experiment owns the schedule or records. A terse completion that omits the exercise is not permission to infer it from conversational recency or the previous logged set. Read the full canonical plan records and resolve the unique exercise, owner, and per-set standard for the current member-local date before writing anything. If canonical state does not resolve all three, ask one narrow clarification and do not log a set.
+
+Treat each completion reply to one reminder as one occurrence, not as confirmation of an entire day. When one message explicitly confirms multiple sets, write one occurrence per confirmed set against the same resolved exercise and owner, attach the current per-set quantity to every occurrence, then re-read that owner's canonical progress before replying.
 
 An actual cumulative repetition total must come from explicit canonical per-session or per-set quantities. Never derive it from elapsed days, the planned rotation, assumed adherence, expected occurrences, or the current per-set standard. Keep the recorded total, theoretical full-compliance total, and any unknown historical quantity visibly separate. When old logs contain completed sets but not repetitions, give the exact known set count and an honest known subtotal or lower bound instead of fabricating precision.
 

@@ -92,7 +92,7 @@ async function stageFakeInstalledCli(cliSource: string): Promise<string> {
 }
 
 describe("runner bundle vault-cli esbuild step", () => {
-  it("inlines Health Commons while keeping exercise-library external", () => {
+  it("inlines Health Commons while keeping asset and generated SDK packages external", () => {
     expect(RUNNER_BUNDLE_SHARED_EXTERNALS).not.toContain("@murphai/health-commons");
     expect(RUNNER_BUNDLE_SHARED_EXTERNALS).not.toContain("@murphai/health-commons/*");
     expect(RUNNER_BUNDLE_SHARED_FORBIDDEN_INPUT_MARKERS).not.toContain(
@@ -102,6 +102,19 @@ describe("runner bundle vault-cli esbuild step", () => {
     expect(RUNNER_BUNDLE_SHARED_FORBIDDEN_INPUT_MARKERS).toContain(
       "/@murphai/exercise-library/",
     );
+    for (const packageName of [
+      "@elevenlabs/elevenlabs-js",
+      "@junction-api/sdk",
+      "@linqapp/sdk",
+      "exa-js",
+      "openai",
+    ]) {
+      expect(RUNNER_BUNDLE_SHARED_EXTERNALS).toContain(packageName);
+      expect(RUNNER_BUNDLE_SHARED_EXTERNALS).toContain(`${packageName}/*`);
+      expect(RUNNER_BUNDLE_SHARED_FORBIDDEN_INPUT_MARKERS).toContain(
+        `/${packageName}/`,
+      );
+    }
   });
 
   it("bundles the installed CLI, passes parity hermetically, and retargets both bin wrappers", async () => {

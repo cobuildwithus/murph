@@ -8,8 +8,9 @@ import {
   selectBrowserVaultMeasuredBiomarkers,
   type BrowserVaultBiomarkerMetricBinding,
   type BrowserVaultDeviceMetricSummary,
+  type BrowserVaultLabsCapableQueryClient,
+  type BrowserVaultMetricSeriesCapableQueryClient,
   type BrowserVaultMeasuredBiomarker,
-  type BrowserVaultQueryClient,
 } from "@murphai/query/browser-biomarkers";
 
 import { LabResultValue } from "@/src/components/biomarkers/lab-result-value";
@@ -34,7 +35,9 @@ import { Input } from "@/src/components/ui/input";
 import { Skeleton } from "@/src/components/ui/skeleton";
 import {
   useBrowserVault,
-  useBrowserVaultSelector,
+  useBrowserVaultLabsSelector,
+  useBrowserVaultMetricKeyDemand,
+  useBrowserVaultMetricsSelector,
 } from "@/src/lib/browser-vault/context";
 import {
   formatLabFlag,
@@ -53,7 +56,7 @@ export interface DeviceTrackedBiomarker {
   valuePrecision: number;
 }
 
-interface DeviceMetricListItem {
+export interface DeviceMetricListItem {
   entry: DeviceTrackedBiomarker;
   summary: BrowserVaultDeviceMetricSummary;
 }
@@ -64,7 +67,7 @@ interface BiomarkersPageClientProps {
   uploadLabsAction?: ReactNode;
 }
 
-interface MeasuredBiomarkerGroup {
+export interface MeasuredBiomarkerGroup {
   id: string;
   items: BrowserVaultMeasuredBiomarker[];
   label: string;
@@ -97,13 +100,23 @@ export function BiomarkersPageClient({
     refreshPending,
     status,
   } = useBrowserVault();
-  const biomarkers = useBrowserVaultSelector(selectBrowserVaultMeasuredBiomarkers) ?? [];
+  const demandedMetricKeys = deviceBiomarkers.flatMap((entry) => {
+    const binding = entry.privateMetricBindings.find(
+      (candidate) => candidate.role === "primary",
+    ) ?? entry.privateMetricBindings[0];
+    return binding ? [binding.metricKey] : [];
+  });
+  const deviceMetricBucketsLoaded = useBrowserVaultMetricKeyDemand(demandedMetricKeys);
+  const biomarkers = useBrowserVaultLabsSelector(selectBrowserVaultMeasuredBiomarkers) ?? [];
   const selectDeviceMetrics = useCallback(
-    (client: BrowserVaultQueryClient) => selectDeviceMetricItems(client, deviceBiomarkers),
-    [deviceBiomarkers],
+    (client: BrowserVaultMetricSeriesCapableQueryClient) =>
+      deviceMetricBucketsLoaded
+        ? selectDeviceMetricItems(client, deviceBiomarkers)
+        : [],
+    [deviceBiomarkers, deviceMetricBucketsLoaded],
   );
-  const deviceMetrics = useBrowserVaultSelector(selectDeviceMetrics) ?? [];
-  const savedLabResultCount = useBrowserVaultSelector(countSavedLabResults) ?? 0;
+  const deviceMetrics = useBrowserVaultMetricsSelector(selectDeviceMetrics) ?? [];
+  const savedLabResultCount = useBrowserVaultLabsSelector(countSavedLabResults) ?? 0;
   const normalizedQuery = query.trim().toLowerCase();
   const groups = groupMeasuredBiomarkers(
     biomarkers.filter((biomarker) => {
@@ -129,7 +142,20 @@ export function BiomarkersPageClient({
     || (status === "error" && isAuthRequiredBrowserVaultError(error));
   const preparing = authenticated && refreshPending;
   const totalCount = biomarkers.length + deviceMetrics.length;
-  const canShowResolvedEmptyState = status === "empty" || status === "ready";
+  const deviceMetricDemandSettled = demandedMetricKeys.length === 0
+    || deviceMetricBucketsLoaded;
+  const canShowResolvedEmptyState = status === "empty"
+    || (status === "ready" && deviceMetricDemandSettled);
+  const showListSkeleton = authenticated
+    && !authRequired
+    && (
+      status === "loading"
+      || (
+        status === "ready"
+        && !deviceMetricDemandSettled
+        && biomarkers.length === 0
+      )
+    );
   const showUnclassifiedLabNotice = authenticated
     && !authRequired
     && canShowResolvedEmptyState
@@ -141,15 +167,19 @@ export function BiomarkersPageClient({
     <div className="flex flex-col gap-8">
       <PageHeader title="Biomarkers" />
 
-      {authenticated && status === "loading" ? <BiomarkerListSkeleton /> : null}
+      {showListSkeleton ? <BiomarkerListSkeleton /> : null}
 
       {authenticated && status === "error" && !authRequired ? (
         <Alert variant="destructive">
           <AlertTitle>Could not load your biomarkers</AlertTitle>
           <AlertDescription>
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <span>Your saved lab results are not available right now.</span>
-              <Button size="sm" variant="outline" onClick={() => void refresh()}>
+              <span>Some private biomarker data is not available right now.</span>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => void refresh({ background: true })}
+              >
                 Retry
               </Button>
             </div>
@@ -237,7 +267,7 @@ function UnclassifiedLabsNotice() {
  * can never render, count, or decide staleness under this heading.
  */
 function selectDeviceMetricItems(
-  client: BrowserVaultQueryClient,
+  client: BrowserVaultMetricSeriesCapableQueryClient,
   deviceBiomarkers: readonly DeviceTrackedBiomarker[],
 ): DeviceMetricListItem[] {
   return deviceBiomarkers.flatMap((entry) => {
@@ -256,11 +286,11 @@ function selectDeviceMetricItems(
   });
 }
 
-function countSavedLabResults(client: BrowserVaultQueryClient): number {
+function countSavedLabResults(client: BrowserVaultLabsCapableQueryClient): number {
   return client.labResults.list().length;
 }
 
-function DeviceMetricsSection({ items }: { items: DeviceMetricListItem[] }) {
+export function DeviceMetricsSection({ items }: { items: DeviceMetricListItem[] }) {
   return (
     <section aria-labelledby="biomarker-devices-heading" className="border-y border-border/70">
       <div className="flex items-baseline justify-between gap-4 border-b border-border/70 py-4">
@@ -393,7 +423,7 @@ function MeasuredBiomarkerControls({
   );
 }
 
-function MeasuredBiomarkerSection({
+export function MeasuredBiomarkerSection({
   group,
 }: {
   group: MeasuredBiomarkerGroup;
@@ -533,7 +563,7 @@ function EmptyBiomarkersState({
   );
 }
 
-function BiomarkerListSkeleton() {
+export function BiomarkerListSkeleton() {
   return (
     <div aria-label="Loading biomarkers" className="flex flex-col gap-6" role="status">
       <div className="grid gap-3 lg:grid-cols-[minmax(16rem,1fr)_auto]">

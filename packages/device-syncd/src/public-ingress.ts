@@ -10,6 +10,11 @@ import { resolvePublicProviderDefaultScopes } from "./public-provider-descriptor
 import {
   normalizeConfiguredDeviceSyncJobInput,
 } from "./provider-job-definitions.ts";
+import {
+  DEVICE_SYNC_PREPARED_WEBHOOK_SCHEMA,
+  parsePreparedDeviceSyncWebhook,
+  type PreparedDeviceSyncWebhookV1,
+} from "./prepared-webhook.ts";
 import { resolveDeviceProviderConnectionDescriptor } from "@murphai/importers/device-providers/provider-descriptors";
 import { buildJunctionProviderSourceInstanceKey } from "./config/junction-connect-sources.ts";
 import {
@@ -47,7 +52,7 @@ import type {
   HandleOAuthCallbackInput,
   HandleWebhookResult,
   MarkPublicDeviceSyncConnectionSetupFailedResult,
-  ProviderAuthTokens,
+  OAuthStateConsumeClaim,
   ProviderConnectionResult,
   ProviderBeginConnectionResult,
   PublicDeviceSyncAccount,
@@ -66,6 +71,32 @@ export interface CreateDeviceSyncPublicIngressInput {
   sessionTtlMs?: number;
   hooks?: DeviceSyncPublicIngressHooks;
   log?: DeviceSyncLogger;
+}
+
+function resolveDefinitivePreProviderOAuthCallbackError(
+  provider: DeviceSyncProvider,
+  query: URLSearchParams,
+): ReturnType<typeof deviceSyncError> | null {
+  if (resolveDeviceProviderConnectionDescriptor(provider.descriptor).kind !== "oauth2") {
+    return null;
+  }
+  if (normalizeString(query.get("error")) !== undefined) {
+    return deviceSyncError({
+      code: "OAUTH_CALLBACK_REJECTED",
+      message: "OAuth authorization was denied or canceled.",
+      retryable: false,
+      httpStatus: 400,
+    });
+  }
+  if (normalizeString(query.get("code")) === undefined) {
+    return deviceSyncError({
+      code: "OAUTH_CODE_MISSING",
+      message: "OAuth callback is missing the authorization code.",
+      retryable: false,
+      httpStatus: 400,
+    });
+  }
+  return null;
 }
 
 const WEBHOOK_TRACE_PROCESSING_TTL_MS = 5 * 60_000;
@@ -229,21 +260,6 @@ function resolveAndValidateProviderConnectionCredential(
   const credential = resolveProviderConnectionCredential(connection);
   validateProviderConnectionCredential(provider, credential);
   return credential;
-}
-
-function requireConnectionOAuthTokens(connection: ProviderConnectionResult): ProviderAuthTokens {
-  const credential = resolveProviderConnectionCredential(connection);
-
-  if (credential.kind !== "oauth_tokens") {
-    throw deviceSyncError({
-      code: "OAUTH_TOKENS_REQUIRED",
-      message: "This connection cleanup path requires OAuth token credentials.",
-      retryable: false,
-      httpStatus: 500,
-    });
-  }
-
-  return credential.tokens;
 }
 
 function buildConnectionCallbackQuery(input: HandleConnectionCallbackInput): URLSearchParams {
@@ -712,6 +728,7 @@ export class DeviceSyncPublicIngress {
           seededAccount.id,
           seededAccount.connectedAt,
           null,
+          input.ownerId ?? null,
           now,
           error,
         );
@@ -1022,12 +1039,23 @@ export class DeviceSyncPublicIngress {
     const state = callback.state;
 
     const expectedOwnerId = normalizeString(input.expectedOwnerId);
-    const stateResult = await this.store.consumeOAuthState(
-      state,
-      now,
-      provider.provider,
-      expectedOwnerId ?? undefined,
+    const preProviderError = resolveDefinitivePreProviderOAuthCallbackError(
+      provider,
+      callbackQuery,
     );
+    const stateResult = preProviderError
+      ? await this.store.discardUnconsumedOAuthState(
+          state,
+          now,
+          provider.provider,
+          expectedOwnerId ?? undefined,
+        )
+      : await this.store.consumeOAuthState(
+          state,
+          now,
+          provider.provider,
+          expectedOwnerId ?? undefined,
+        );
 
     if (stateResult.status === "missing") {
       throw deviceSyncError({
@@ -1078,6 +1106,39 @@ export class DeviceSyncPublicIngress {
       );
     }
 
+    if (stateResult.status === "recovery_required") {
+      throw attachOAuthCallbackContext(
+        deviceSyncError({
+          code: "OAUTH_CALLBACK_RECOVERY_REQUIRED",
+          message: "This provider connection did not finish safely. Remove Murph access in the provider account before deleting your Murph account, or contact support.",
+          retryable: false,
+          httpStatus: 409,
+        }),
+        {
+          connectSourceId: readConnectSourceId(stateResult.record.metadata),
+          connectTarget: readConnectTarget(stateResult.record.metadata),
+          provider: provider.provider,
+          returnTo: this.sanitizeStoredReturnTo(stateResult.record.returnTo ?? null),
+        },
+      );
+    }
+
+    if (stateResult.status === "discarded") {
+      const callbackError = normalizeString(callbackQuery.get("error"));
+      if (callbackError) {
+        this.logger.warn?.("OAuth callback was rejected by the provider.", {
+          provider: provider.provider,
+          callbackError,
+        });
+      }
+      throw attachOAuthCallbackContext(preProviderError!, {
+        connectSourceId: readConnectSourceId(stateResult.record.metadata),
+        connectTarget: readConnectTarget(stateResult.record.metadata),
+        provider: provider.provider,
+        returnTo: this.sanitizeStoredReturnTo(stateResult.record.returnTo ?? null),
+      });
+    }
+
     const stateRecord = stateResult.record;
     const returnTo = this.sanitizeStoredReturnTo(stateRecord.returnTo ?? null);
     const seededAccountId = readSeededConnectionAccountId(stateRecord.metadata);
@@ -1098,9 +1159,12 @@ export class DeviceSyncPublicIngress {
     let connection: ProviderConnectionResult | null = null;
     let account: PublicDeviceSyncAccount | null = null;
     let connectionPersisted = false;
+    let providerWorkStarted = false;
     let reusedEstablishedJunctionAccount = false;
+    let seededAccount: PublicDeviceSyncAccount | null = null;
 
-    let seededAccount = seededAccountId ? await this.store.getConnectionById(seededAccountId) : null;
+    try {
+      seededAccount = seededAccountId ? await this.store.getConnectionById(seededAccountId) : null;
 
     if (seededAccount && seededAccount.provider !== provider.provider) {
       throw attachOAuthCallbackContext(
@@ -1176,7 +1240,6 @@ export class DeviceSyncPublicIngress {
       }
     }
 
-    try {
       if (!descriptor.callbackUrl && connectionFlowRequiresCallbackUrl(descriptor.connectionKind)) {
         throw deviceSyncError({
           code: "CONNECTION_CALLBACK_URL_REQUIRED",
@@ -1195,6 +1258,7 @@ export class DeviceSyncPublicIngress {
       }
 
       const grantedScopes = splitScopeList(input.scope ?? callbackQuery.get("scope"));
+      providerWorkStarted = true;
       connection = await completeProviderConnection(provider, {
         callbackUrl: descriptor.callbackUrl ?? "",
         state,
@@ -1259,6 +1323,10 @@ export class DeviceSyncPublicIngress {
           : null,
         connectedAt: now,
         nextReconcileAt: connection.nextReconcileAt ?? null,
+        oauthClaim: {
+          state,
+          consumedAt: stateResult.consumedAt,
+        },
       });
       connectionPersisted = true;
 
@@ -1324,20 +1392,44 @@ export class DeviceSyncPublicIngress {
       } else if (connection) {
         try {
           if (connectionPersisted && account) {
-            await this.cleanupPersistedOAuthConnection(provider, account, connection, now, error);
+            await this.cleanupPersistedOAuthConnection(
+              provider,
+              account,
+              connection,
+              now,
+              error,
+            );
           } else if (isSeededAccountDisconnectedGuardError(error)) {
-            await this.cleanupFailedOAuthConnection(provider, connection, now);
+            if (!await this.ensureFailedOAuthConnectionCleanupOwnership(
+              provider,
+              connection,
+              stateRecord.ownerId ?? null,
+              now,
+              { state, consumedAt: stateResult.consumedAt },
+            )) {
+              throw createOAuthSetupCleanupOwnershipError(error);
+            }
           } else if (seededAccountId) {
             await this.markSeededConnectionSetupFailed(
               provider,
               seededAccountId,
               seededConnectedAt,
               connection,
+              stateRecord.ownerId ?? null,
               now,
               error,
+              { state, consumedAt: stateResult.consumedAt },
             );
           } else {
-            await this.cleanupFailedOAuthConnection(provider, connection, now);
+            if (!await this.ensureFailedOAuthConnectionCleanupOwnership(
+              provider,
+              connection,
+              stateRecord.ownerId ?? null,
+              now,
+              { state, consumedAt: stateResult.consumedAt },
+            )) {
+              throw createOAuthSetupCleanupOwnershipError(error);
+            }
           }
         } catch (cleanupError) {
           throw attachOAuthCallbackContext(cleanupError, callbackContext);
@@ -1349,62 +1441,90 @@ export class DeviceSyncPublicIngress {
             seededAccountId,
             seededConnectedAt,
             null,
+            stateRecord.ownerId ?? null,
             now,
             error,
+            { state, consumedAt: stateResult.consumedAt },
           );
         } catch (cleanupError) {
           throw attachOAuthCallbackContext(cleanupError, callbackContext);
         }
       }
 
+      if (
+        !connection
+        && !seededAccountId
+        && (
+          !providerWorkStarted
+          || provider.provider === "junction"
+        )
+        && !await this.store.resolveOAuthStateWithoutProviderAuthority({
+          state,
+          consumedAt: stateResult.consumedAt,
+        })
+      ) {
+        throw attachOAuthCallbackContext(
+          createOAuthSetupCleanupOwnershipError(error),
+          callbackContext,
+        );
+      }
+
       throw attachOAuthCallbackContext(error, callbackContext);
     }
   }
 
-  async handleWebhook(providerName: string, headers: Headers, rawBody: Buffer): Promise<HandleWebhookResult> {
-    const provider = this.requireProvider(providerName);
-    const verifyAndParseWebhook = resolveProviderWebhookVerifier(provider);
-
-    if (!provider.descriptor.webhook?.path || !verifyAndParseWebhook) {
-      throw deviceSyncError({
-        code: "WEBHOOKS_NOT_SUPPORTED",
-        message: `Device sync provider ${provider.provider} does not accept webhooks.`,
-        retryable: false,
-        httpStatus: 404,
-      });
-    }
-
-    const now = toIsoTimestamp(new Date());
-    const parsed = await verifyAndParseWebhook({
+  async prepareWebhookForDurableEnqueue(
+    providerName: string,
+    headers: Headers,
+    rawBody: Buffer,
+    receivedAt: Date,
+  ): Promise<PreparedDeviceSyncWebhookV1> {
+    return this.prepareWebhook(
+      providerName,
       headers,
       rawBody,
-      now,
-    });
-    const jobs = parsed.jobs.map((job) =>
-      normalizeConfiguredDeviceSyncJobInput(provider.provider, job, "webhook")
+      receivedAt,
     );
-    const traceId = scopeWebhookTraceId(
-      provider.provider,
-      parsed.externalAccountId,
-      parsed.traceId,
+  }
+
+  async handleWebhook(
+    providerName: string,
+    headers: Headers,
+    rawBody: Buffer,
+    receivedAt: Date = new Date(),
+  ): Promise<HandleWebhookResult> {
+    return this.handlePreparedWebhook(
+      await this.prepareWebhook(providerName, headers, rawBody, receivedAt),
     );
+  }
+
+  async handlePreparedWebhook(
+    value: PreparedDeviceSyncWebhookV1,
+  ): Promise<HandleWebhookResult> {
+    const prepared = parsePreparedDeviceSyncWebhook(value);
+    // Provider registration remains live authority. The prepared event freezes
+    // only the authenticated envelope interpretation, never whether Murph
+    // still recognizes and permits this provider at dequeue.
+    const now = prepared.receivedAt;
+    const traceId = prepared.traceId;
     const claimToken = generateStateCode();
+    const claimedAt = toIsoTimestamp(new Date());
     const webhook = toIngressWebhook({
-      ...parsed,
-      jobs,
+      ...prepared,
+      jobs: prepared.jobs,
     });
 
     const claimWebhookTrace = () => this.store.claimWebhookTrace({
-      provider: provider.provider,
+      provider: prepared.provider,
       traceId,
+      claimedAt,
       claimToken,
-      externalAccountId: parsed.externalAccountId,
+      externalAccountId: prepared.externalAccountId,
       eventType: webhook.eventType,
       receivedAt: now,
-      processingExpiresAt: addMilliseconds(now, WEBHOOK_TRACE_PROCESSING_TTL_MS),
+      processingExpiresAt: addMilliseconds(claimedAt, WEBHOOK_TRACE_PROCESSING_TTL_MS),
     });
 
-    const account = await this.store.getConnectionByExternalAccount(provider.provider, parsed.externalAccountId);
     const webhookSourceProviderSlug = normalizeString(webhook.sourceProviderSlug);
 
     const traceClaim = await claimWebhookTrace();
@@ -1413,7 +1533,7 @@ export class DeviceSyncPublicIngress {
       return {
         accepted: true,
         duplicate: true,
-        provider: provider.provider,
+        provider: prepared.provider,
         eventType: webhook.eventType,
         traceId,
       };
@@ -1428,22 +1548,48 @@ export class DeviceSyncPublicIngress {
       });
     }
 
+    // Queue delay can outlive a provider registration. The prepared meaning is
+    // already authenticated, so a removed provider is a terminal authority
+    // loss rather than a reason to retain encrypted work forever.
+    const provider = this.registry.get(prepared.provider);
+    if (!provider) {
+      await completeClaimedWebhookTrace(this.store, prepared.provider, traceId, claimToken);
+      return {
+        accepted: true,
+        duplicate: false,
+        provider: prepared.provider,
+        eventType: webhook.eventType,
+        traceId,
+      };
+    }
+
+    let account;
+    try {
+      account = await this.store.getConnectionByExternalAccount(
+        provider.provider,
+        prepared.externalAccountId,
+      );
+    } catch (error) {
+      await this.store.releaseWebhookTrace(provider.provider, traceId, claimToken);
+      throw error;
+    }
+
     if (!account) {
       const unknownWebhookLogContext: Record<string, unknown> = {
         provider: provider.provider,
-        externalAccountIdHash: hashExternalAccountIdForLogs(parsed.externalAccountId),
+        externalAccountIdHash: hashExternalAccountIdForLogs(prepared.externalAccountId),
         eventType: webhook.eventType,
         traceId,
         acceptanceMode: webhook.acceptanceMode,
-        unknownAccountAction: parsed.unknownAccountAction ?? "retry",
+        unknownAccountAction: prepared.unknownAccountAction ?? "retry",
         unknownWebhookHookConfigured: Boolean(this.hooks.onUnknownWebhook),
       };
-      if (parsed.externalAccountDiagnostic) {
-        unknownWebhookLogContext.externalAccountDiagnostic = parsed.externalAccountDiagnostic;
+      if (prepared.externalAccountDiagnostic) {
+        unknownWebhookLogContext.externalAccountDiagnostic = prepared.externalAccountDiagnostic;
       }
 
       const shouldAcceptUnknownWebhook =
-        parsed.unknownAccountAction === "accept"
+        prepared.unknownAccountAction === "accept"
         && webhook.acceptanceMode === "level_dirty_hint";
 
       this.logger.warn?.(
@@ -1462,7 +1608,7 @@ export class DeviceSyncPublicIngress {
               ...webhook,
               jobs: [],
             },
-            externalAccountId: parsed.externalAccountId,
+            externalAccountId: prepared.externalAccountId,
             now,
           });
           await completeClaimedWebhookTrace(this.store, provider.provider, traceId, claimToken);
@@ -1535,6 +1681,11 @@ export class DeviceSyncPublicIngress {
               !sourceObservation
               || !("sourceAdmissionCommitted" in sourceObservation)
               || sourceObservation.sourceAdmissionCommitted !== true
+            )
+            && !(
+              sourceObservation
+              && "sourceAdmissionDeferred" in sourceObservation
+              && sourceObservation.sourceAdmissionDeferred === true
             )
           ) {
             throw deviceSyncError({
@@ -1632,6 +1783,7 @@ export class DeviceSyncPublicIngress {
     }
 
     const onWebhookAccepted = this.hooks.onWebhookAccepted;
+    let receiptStateOwned = false;
 
     try {
       const acceptedResult = await onWebhookAccepted?.({
@@ -1642,6 +1794,7 @@ export class DeviceSyncPublicIngress {
         provider,
         now,
       });
+      receiptStateOwned = acceptedResult?.receiptStateOwned === true;
 
       if (!onWebhookAccepted) {
         await completeClaimedWebhookTrace(this.store, provider.provider, traceId, claimToken);
@@ -1659,7 +1812,9 @@ export class DeviceSyncPublicIngress {
     }
 
     try {
-      await this.store.markWebhookReceived(account.id, now);
+      if (!receiptStateOwned) {
+        await this.store.markWebhookReceived(account.id, now);
+      }
     } catch (error) {
       this.logger.warn?.("Failed to record last webhook receipt time after durable acceptance.", {
         provider: provider.provider,
@@ -1676,7 +1831,7 @@ export class DeviceSyncPublicIngress {
     // arrival against the source the provider named. Like the receipt stamp,
     // this runs after durable acceptance and never fails the webhook.
     const dataSourceProviderSlug = webhook.dataSourceProviderSlug ?? null;
-    if (dataSourceProviderSlug) {
+    if (dataSourceProviderSlug && !receiptStateOwned) {
       try {
         await this.store.markConnectionSourceDataReceived({
           connectionId: account.id,
@@ -1702,6 +1857,49 @@ export class DeviceSyncPublicIngress {
       eventType: webhook.eventType,
       traceId,
     };
+  }
+
+  private async prepareWebhook(
+    providerName: string,
+    headers: Headers,
+    rawBody: Buffer,
+    receivedAt: Date,
+  ): Promise<PreparedDeviceSyncWebhookV1> {
+    const provider = this.requireProvider(providerName);
+    const verifyAndParseWebhook = resolveProviderWebhookVerifier(provider);
+
+    if (!provider.descriptor.webhook?.path || !verifyAndParseWebhook) {
+      throw deviceSyncError({
+        code: "WEBHOOKS_NOT_SUPPORTED",
+        message: `Device sync provider ${provider.provider} does not accept webhooks.`,
+        retryable: false,
+        httpStatus: 404,
+      });
+    }
+
+    const now = toIsoTimestamp(receivedAt);
+    const parsed = await verifyAndParseWebhook({
+      headers,
+      rawBody,
+      now,
+    });
+    const jobs = parsed.jobs.map((job) =>
+      normalizeConfiguredDeviceSyncJobInput(provider.provider, job, "webhook")
+    );
+    const traceId = scopeWebhookTraceId(
+      provider.provider,
+      parsed.externalAccountId,
+      parsed.traceId,
+    );
+
+    return parsePreparedDeviceSyncWebhook({
+      ...parsed,
+      jobs,
+      provider: provider.provider,
+      receivedAt: now,
+      schema: DEVICE_SYNC_PREPARED_WEBHOOK_SCHEMA,
+      traceId,
+    });
   }
 
   private requireProvider(providerName: string): DeviceSyncProvider {
@@ -1745,39 +1943,27 @@ export class DeviceSyncPublicIngress {
     return resolved;
   }
 
-  private async cleanupFailedOAuthConnection(
+  private async revokeStoredOAuthCleanupAccount(
     provider: DeviceSyncProvider,
-    connection: ProviderConnectionResult,
-    now: string,
-  ): Promise<void> {
-    let credential: DeviceAccountCredential | null;
-    try {
-      credential = readProviderConnectionCredential(connection);
-    } catch (error) {
-      this.logger.warn?.("Skipping provider access revocation after invalid callback credential material.", {
-        provider: provider.provider,
-        externalAccountIdHash: hashExternalAccountIdForLogs(connection.externalAccountId),
-        failureCode: "DEVICE_SYNC_INVALID_CALLBACK_CREDENTIAL_REVOKE_SKIPPED",
-        error: summarizePublicIngressError(error),
-      });
-      return;
-    }
-
+    account: DeviceSyncAccount,
+  ): Promise<boolean> {
     const revokeAccess = provider.connectionHandler?.revokeAccess;
 
-    if (!revokeAccess || credential?.kind !== "oauth_tokens") {
-      return;
+    if (!revokeAccess || account.credential.kind !== "oauth_tokens") {
+      return true;
     }
 
     try {
-      await revokeAccess(buildPendingOAuthCleanupAccount(provider.provider, connection, now));
+      await revokeAccess(account);
+      return true;
     } catch (error) {
       this.logger.warn?.("Failed to revoke provider access after OAuth callback setup failed.", {
         provider: provider.provider,
-        externalAccountIdHash: hashExternalAccountIdForLogs(connection.externalAccountId),
+        externalAccountIdHash: hashExternalAccountIdForLogs(account.externalAccountId),
         failureCode: "DEVICE_SYNC_OAUTH_SETUP_FAILURE_REVOKE_FAILED",
         error: summarizePublicIngressError(error),
       });
+      return false;
     }
   }
 
@@ -1806,10 +1992,15 @@ export class DeviceSyncPublicIngress {
         failureCode: "DEVICE_SYNC_OAUTH_SETUP_FAILURE_RECORD_FAILED",
         error: summarizePublicIngressError(markError),
       });
+      const durableAccount = await this.store.getConnectionById(account.id);
+      if (durableAccount) {
+        return;
+      }
       throw deviceSyncError({
         code: "OAUTH_SETUP_CLEANUP_FAILED",
-        message: "OAuth connection setup failed after persistence, and stored-token cleanup did not complete.",
-        httpStatus: 500,
+        message: "OAuth connection setup failed after persistence, and cleanup ownership could not be confirmed.",
+        httpStatus: 503,
+        retryable: true,
         details: {
           accountId: account.id,
           setupFailureCode: failure.code,
@@ -1830,8 +2021,27 @@ export class DeviceSyncPublicIngress {
       });
     }
 
-    if (markResult.applied) {
-      await this.cleanupFailedOAuthConnection(provider, connection, now);
+    if (markResult.blockedByRefreshLease) {
+      return;
+    }
+    if (!markResult.applied || markResult.oauthTokenVersion === null) {
+      return;
+    }
+    const cleanupAccount = await this.store.getOAuthCleanupAccount({
+      accountId: account.id,
+      expectedConnectedAt: account.connectedAt,
+      expectedTokenVersion: markResult.oauthTokenVersion,
+    });
+    if (
+      cleanupAccount
+      && await this.revokeStoredOAuthCleanupAccount(provider, cleanupAccount)
+    ) {
+      await this.store.clearOAuthCredentialAfterConfirmedRevoke({
+        accountId: account.id,
+        expectedConnectedAt: account.connectedAt,
+        expectedTokenVersion: markResult.oauthTokenVersion,
+        now,
+      });
     }
   }
 
@@ -1840,10 +2050,49 @@ export class DeviceSyncPublicIngress {
     accountId: string,
     expectedConnectedAt: string | null,
     connection: ProviderConnectionResult | null,
+    ownerId: string | null,
     now: string,
     error: unknown,
+    oauthClaim?: OAuthStateConsumeClaim,
   ): Promise<void> {
     const failure = summarizeOAuthSetupFailure(error);
+
+    if (
+      !connection
+      && oauthClaim
+      && isSeededAccountDisconnectedGuardError(error)
+    ) {
+      if (await this.store.resolveOAuthStateWithoutProviderAuthority(oauthClaim)) {
+        return;
+      }
+      throw createOAuthSetupCleanupOwnershipError(error);
+    }
+
+    if (
+      connection
+      && readProviderConnectionCredential(connection)?.kind === "oauth_tokens"
+    ) {
+      if (!await this.ensureFailedOAuthConnectionCleanupOwnership(
+        provider,
+        connection,
+        ownerId,
+        now,
+        oauthClaim,
+      )) {
+        throw deviceSyncError({
+          code: "CONNECTION_SETUP_CLEANUP_FAILED",
+          message: "Seeded device sync setup failed, and provider cleanup ownership could not be persisted.",
+          httpStatus: 503,
+          retryable: true,
+          details: {
+            accountId,
+            setupFailureCode: failure.code,
+          },
+        });
+      }
+      oauthClaim = undefined;
+    }
+
     let markResult: MarkPublicDeviceSyncConnectionSetupFailedResult;
     try {
       markResult = await this.store.markConnectionSetupFailed({
@@ -1852,6 +2101,7 @@ export class DeviceSyncPublicIngress {
         now,
         code: failure.code,
         message: failure.message,
+        oauthClaim,
       });
     } catch (markError) {
       this.logger.warn?.("Failed to mark seeded device sync connection setup failure.", {
@@ -1873,18 +2123,131 @@ export class DeviceSyncPublicIngress {
     }
 
     if (!markResult.account) {
+      if (
+        oauthClaim
+        && await this.store.resolveOAuthStateWithoutProviderAuthority(oauthClaim)
+      ) {
+        return;
+      }
       throw deviceSyncError({
         code: "CONNECTION_SETUP_CLEANUP_FAILED",
-        message: "Seeded device sync connection setup failed, and setup failure could not confirm the account.",
-        httpStatus: 500,
+        message: "Seeded device sync connection setup failed, and its exact callback claim could not be resolved.",
+        httpStatus: 503,
+        retryable: true,
         details: {
           accountId,
           setupFailureCode: failure.code,
         },
       });
     }
-    if (markResult.applied && connection) {
-      await this.cleanupFailedOAuthConnection(provider, connection, now);
+    if (!markResult.applied && oauthClaim) {
+      const resolved = await this.store.resolveOAuthStateWithoutProviderAuthority(oauthClaim);
+      if (!resolved) {
+        throw deviceSyncError({
+          code: "CONNECTION_SETUP_CLEANUP_FAILED",
+          message: "Seeded device sync callback claim changed before setup failure resolved.",
+          httpStatus: 503,
+          retryable: true,
+          details: {
+            accountId,
+            setupFailureCode: failure.code,
+          },
+        });
+      }
+    }
+  }
+
+  private async ensureFailedOAuthConnectionCleanupOwnership(
+    provider: DeviceSyncProvider,
+    connection: ProviderConnectionResult,
+    ownerId: string | null,
+    now: string,
+    oauthClaim?: OAuthStateConsumeClaim,
+  ): Promise<boolean> {
+    if (readProviderConnectionCredential(connection)?.kind !== "oauth_tokens") {
+      return oauthClaim
+        ? this.store.resolveOAuthStateWithoutProviderAuthority(oauthClaim)
+        : true;
+    }
+    const ownership = await this.persistFailedOAuthConnectionCleanupOwner(
+      provider,
+      connection,
+      ownerId,
+      now,
+      oauthClaim,
+    );
+    if (!ownership) {
+      return false;
+    }
+    const markResult = await this.store.markConnectionSetupFailed({
+      accountId: ownership.account.id,
+      code: "OAUTH_SETUP_FAILED",
+      expectedConnectedAt: ownership.account.connectedAt,
+      message: "OAuth callback setup failed before connection establishment completed.",
+      now,
+    });
+    if (markResult.blockedByRefreshLease) {
+      return true;
+    }
+    if (!markResult.applied || markResult.oauthTokenVersion === null) {
+      return true;
+    }
+    const cleanupAccount = await this.store.getOAuthCleanupAccount({
+      accountId: ownership.account.id,
+      expectedConnectedAt: ownership.account.connectedAt,
+      expectedTokenVersion: markResult.oauthTokenVersion,
+    });
+    if (
+      cleanupAccount
+      && await this.revokeStoredOAuthCleanupAccount(provider, cleanupAccount)
+    ) {
+      await this.store.clearOAuthCredentialAfterConfirmedRevoke({
+        accountId: ownership.account.id,
+        expectedConnectedAt: ownership.account.connectedAt,
+        expectedTokenVersion: markResult.oauthTokenVersion,
+        now,
+      });
+    }
+    return true;
+  }
+
+  private async persistFailedOAuthConnectionCleanupOwner(
+    provider: DeviceSyncProvider,
+    connection: ProviderConnectionResult,
+    ownerId: string | null,
+    now: string,
+    oauthClaim?: OAuthStateConsumeClaim,
+  ): Promise<{
+    account: PublicDeviceSyncAccount;
+  } | null> {
+    try {
+      const credential = resolveAndValidateProviderConnectionCredential(provider, connection);
+      const account = await this.store.upsertConnection({
+        cleanupOwnership: "oauth_provider_revoke",
+        connectedAt: now,
+        credential,
+        displayName: connection.displayName ?? null,
+        existingAccountPolicy: "replace",
+        externalAccountId: connection.externalAccountId,
+        metadata: connection.metadata ?? {},
+        nextReconcileAt: null,
+        ownerId,
+        provider: provider.provider,
+        scopes: [...(connection.scopes ?? [])],
+        setupExpiresAt: null,
+        setupPhase: "failed",
+        status: "reauthorization_required",
+        oauthClaim,
+      });
+      return { account };
+    } catch (error) {
+      this.logger.warn?.("Failed to persist provider cleanup ownership after OAuth setup failure.", {
+        provider: provider.provider,
+        externalAccountIdHash: hashExternalAccountIdForLogs(connection.externalAccountId),
+        failureCode: "DEVICE_SYNC_OAUTH_CLEANUP_OWNER_PERSIST_FAILED",
+        error: summarizePublicIngressError(error),
+      });
+      return null;
     }
   }
 }
@@ -1916,46 +2279,6 @@ export function createDeviceSyncPublicIngress(input: CreateDeviceSyncPublicIngre
 
 function hashExternalAccountIdForLogs(value: string): string {
   return sha256Text(value);
-}
-
-function buildPendingOAuthCleanupAccount(
-  provider: string,
-  connection: ProviderConnectionResult,
-  now: string,
-): DeviceSyncAccount {
-  const tokens = requireConnectionOAuthTokens(connection);
-
-  return {
-    id: `pending-oauth:${provider}:${connection.externalAccountId}`,
-    provider,
-    externalAccountId: connection.externalAccountId,
-    disconnectGeneration: 0,
-    displayName: connection.displayName ?? null,
-    status: "active",
-    setupPhase: null,
-    setupExpiresAt: null,
-    scopes: [...(connection.scopes ?? [])],
-    accessTokenExpiresAt: tokens.accessTokenExpiresAt ?? null,
-    metadata: { ...(connection.metadata ?? {}) },
-    connectedAt: now,
-    lastWebhookAt: null,
-    lastSyncStartedAt: null,
-    lastSyncCompletedAt: null,
-    lastSyncErrorAt: null,
-    lastErrorCode: null,
-    lastErrorMessage: null,
-    nextReconcileAt: connection.nextReconcileAt ?? null,
-    createdAt: now,
-    updatedAt: now,
-    credential: {
-      kind: "oauth_tokens",
-      tokens: {
-        accessToken: tokens.accessToken,
-        refreshToken: tokens.refreshToken ?? null,
-        accessTokenExpiresAt: tokens.accessTokenExpiresAt ?? null,
-      },
-    },
-  };
 }
 
 function summarizePublicIngressError(error: unknown): Record<string, unknown> {
@@ -1998,6 +2321,16 @@ function summarizeOAuthSetupFailure(error: unknown): { code: string; message: st
     code,
     message: sanitizeHostedRuntimeErrorText(rawMessage) ?? "OAuth connection setup failed.",
   };
+}
+
+function createOAuthSetupCleanupOwnershipError(cause: unknown) {
+  return deviceSyncError({
+    code: "OAUTH_SETUP_CLEANUP_FAILED",
+    message: "OAuth connection setup failed, and cleanup ownership could not be confirmed.",
+    httpStatus: 503,
+    retryable: true,
+    cause,
+  });
 }
 
 function attachOAuthCallbackContext(
