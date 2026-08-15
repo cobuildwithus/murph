@@ -192,25 +192,6 @@ export async function executeHostedMemberActivatedWake(input: {
     });
   }
 
-  if (signupWelcome.route.channel === "telegram") {
-    redactedLogEntries.push(
-      emitHostedMemberActivationSignupWelcomeLifecycleLog({
-        extraDetails: {
-          eventCode: "assistant.signup_welcome.telegram_suppressed",
-          terminalDisposition: "proactive_telegram_disabled",
-        },
-        message: "Hosted Telegram signup welcome ended without proactive delivery.",
-        phase: "wake.running",
-        wake: input.wake,
-      }),
-    );
-    return createNoopMailboxEffect({
-      conversationMetrics: null,
-      mailboxLane: "member-activated",
-      redactedLogEntries,
-    });
-  }
-
   redactedLogEntries.push(
     emitHostedMemberActivationSignupWelcomeLifecycleLog({
       message: "Hosted member activation signup welcome started.",
@@ -290,24 +271,6 @@ export async function executeHostedAssistantNotificationWake(input: {
       wake: input.wake,
     }),
   ];
-  if (isHostedTelegramSignupWelcomeNotification(input.wake)) {
-    redactedLogEntries.push(
-      emitHostedAssistantNotificationLifecycleLog({
-        extraDetails: {
-          eventCode: "assistant.signup_welcome.telegram_suppressed",
-          terminalDisposition: "proactive_telegram_disabled",
-        },
-        message: "Hosted Telegram signup welcome ended without proactive delivery.",
-        phase: "wake.running",
-        wake: input.wake,
-      }),
-    );
-    return createNoopMailboxEffect({
-      conversationMetrics: null,
-      mailboxLane: "assistant-notification",
-      redactedLogEntries,
-    });
-  }
   let seededOnboardingFollowupWakeAt: string | null = null;
   let notificationDecisionKind: string | null = null;
   let deliveryIntentIds: string[] = [];
@@ -1106,21 +1069,6 @@ function isHostedSignupWelcomeNotification(
     && wake.notification.firstContact?.markSeenOnDeliveryAccepted === true
     && wake.notification.deliveryDedupeToken === signupWelcomeToken
     && wake.notification.deliveryIdempotencyKey === signupWelcomeToken
-  );
-}
-
-function isHostedTelegramSignupWelcomeNotification(
-  wake: HostedExecutionAssistantNotificationRequestedWake,
-): boolean {
-  const signupWelcomeToken = `signup-welcome:${wake.userId}`;
-  return (
-    wake.notification.route.channel === "telegram"
-    && wake.notification.responsePolicy?.kind === "require_send_exact_text"
-    && wake.notification.firstContact?.markSeenOnDeliveryAccepted === true
-    && (
-      wake.notification.deliveryDedupeToken === signupWelcomeToken
-      || wake.notification.deliveryIdempotencyKey === signupWelcomeToken
-    )
   );
 }
 
