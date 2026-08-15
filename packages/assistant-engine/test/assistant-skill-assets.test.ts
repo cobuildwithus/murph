@@ -1226,14 +1226,17 @@ describe('assistant skill assets', () => {
     expect(raw).toContain(
       'Default to private/minimal support when shared-channel permission is unclear.',
     )
-    expect(raw).toContain(
-      'A future notification turn may not read this skill, so include the compact support loop directly in the automation instructions.',
+    expect(compact).toContain(
+      'The scheduled runtime owns generic recurring reminder cadence',
     )
     expect(compact).toContain(
-      'A reminder is a cue. An accountability check-in is normally a separate, later action whose job is to learn the outcome, not repeat the cue.',
+      'A reminder is a cue. An accountability check-in is a separate, later action whose job is to learn the outcome, not repeat the cue.',
     )
     expect(compact).toContain(
-      'The accepted dense-loop policy above is the narrow exception',
+      'The runtime-owned keep/change/pause cadence question does not ask about the outcome and does not turn a reminder into a check-in.',
+    )
+    expect(compact).toContain(
+      'Medication, prescribed treatment, clinician-directed care, clinical monitoring, and safety-critical reminders continue the saved cue after silence',
     )
     expect(compact).toContain(
       'A direct request to check back later authorizes that exact check-in.',
@@ -1274,7 +1277,21 @@ describe('assistant skill assets', () => {
     expect(compact).toContain(
       'Silence after that check-in does not authorize another same-occurrence follow-up.',
     )
-    expect(compact).toContain('Prefer bounded support. Never create open-ended nag loops.')
+    expect(compact).toContain(
+      'never increase frequency or add messages after non-response',
+    )
+    expect(compact).toContain(
+      'Reuse a good concise cue when the context has not changed.',
+    )
+    expect(compact).toContain('do not manufacture novelty')
+    expect(compact).toContain(
+      'Never copy these generic repair or review requirements into an ordinary recurring reminder.',
+    )
+    expect(compact).toContain(
+      'The generic repair, skip, and miss rules below apply only to Murph-designed habit support or an explicitly consented `check_in` or `review`',
+    )
+    expect(compact).not.toContain('Do not repeat stale reminder copy.')
+    expect(raw).not.toContain('### Reminder density and reply loop')
     expect(raw).toContain('Count an ignored support attempt only when')
     expect(raw).toContain('When support is working, fade it instead of adding more.')
     expect(raw).toContain('Use `completed`, `partial`, `missed`, or `skipped` session status')

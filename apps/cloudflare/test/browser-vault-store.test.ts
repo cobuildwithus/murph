@@ -1,23 +1,37 @@
 import { describe, expect, it } from "vitest";
 
 import { BROWSER_VAULT_REPLICA_CURRENT_GENERATION } from "@murphai/contracts";
+import {
+  HOSTED_BROWSER_VAULT_REPLICA_METRIC_BUCKET_IDS,
+} from "@murphai/hosted-execution/contracts";
 
 import {
+  BROWSER_VAULT_METRIC_BUCKET_IDS,
   createBrowserVaultReplica,
   createVaultReadModel,
   parseBrowserVaultReplica,
+  splitBrowserVaultReplica,
 } from "@murphai/query/browser";
 
 import {
   createBrowserVaultReplicaAadFields,
+  createBrowserVaultReplicaMetricBucketAadFields,
+  createBrowserVaultReplicaShardAadFields,
   createHostedBrowserVaultReplicaStore,
+  HOSTED_BROWSER_VAULT_REPLICA_WRITE_CONCURRENCY,
+  listHostedBrowserVaultReplicaObjectKeys,
 } from "../src/browser-vault-store.js";
 import { buildHostedStorageAad } from "../src/crypto-context.js";
 import { readEncryptedR2Payload } from "../src/crypto.js";
-import { expectOpaqueStrings, findStoredObjectKey } from "./object-key-assertions.js";
+import { expectOpaqueStrings } from "./object-key-assertions.js";
 import { MemoryEncryptedR2Bucket, createTestRootKey } from "./test-helpers.js";
 
 describe("hosted browser vault replica store", () => {
+  it("keeps hosted bucket ids exactly aligned with the query partition", () => {
+    expect(HOSTED_BROWSER_VAULT_REPLICA_METRIC_BUCKET_IDS)
+      .toEqual(BROWSER_VAULT_METRIC_BUCKET_IDS);
+  });
+
   it("round-trips browser vault replicas through the browser-vault-replica scope", async () => {
     const bucket = new MemoryEncryptedR2Bucket();
     const rootKey = createTestRootKey(29);
@@ -77,10 +91,7 @@ describe("hosted browser vault replica store", () => {
       userId: "user_123",
     });
 
-    const storedKey = findStoredObjectKey(
-      bucket,
-      (key) => key.includes("/browser-vault-replicas/"),
-    );
+    const storedKey = replicaRef.objectKey;
     expect(storedKey).toMatch(
       /^users\/hsn_[0-9a-f]{24}\/browser-vault-replicas\/[0-9a-f]{48}\.json$/u,
     );
@@ -109,6 +120,24 @@ describe("hosted browser vault replica store", () => {
       schema: "murph.hosted-data-key-envelope.v1",
     });
     expect(replicaRef.keyId).toBe(`browser-vault-replica:${replica.source.dataVersion.slice(0, 32)}`);
+    expect(replicaRef.shards).toEqual({
+      core: expect.objectContaining({
+        objectKey: storedKey.replace(/\.json$/u, ".core.json"),
+      }),
+      labs: expect.objectContaining({
+        objectKey: storedKey.replace(/\.json$/u, ".labs.json"),
+      }),
+      metricsIndex: expect.objectContaining({
+        objectKey: storedKey.replace(/\.json$/u, ".metrics-index.json"),
+      }),
+      schema: "murph.hosted-browser-vault-replica-shards.v1",
+    });
+    expect(replicaRef.metricBuckets).toMatchObject({
+      bucketCount: 32,
+      schema: "murph.hosted-browser-vault-replica-metric-buckets.v1",
+    });
+    expect(Object.keys(replicaRef.metricBuckets?.buckets ?? {}).sort())
+      .toEqual([...HOSTED_BROWSER_VAULT_REPLICA_METRIC_BUCKET_IDS].sort());
 
     await expect(store.readBrowserVaultReplicaEnvelope(replicaRef)).resolves.toMatchObject({
       algorithm: "AES-GCM",
@@ -120,6 +149,8 @@ describe("hosted browser vault replica store", () => {
       ref: replicaRef,
       userId: "user_123",
     });
+    expect(aadFields).not.toHaveProperty("generatedAt");
+    expect(aadFields).not.toHaveProperty("generation");
     const loadedBytes = await readEncryptedR2Payload({
       aad: buildHostedStorageAad({
         dataKeyId: aadFields.dataKeyId,
@@ -142,6 +173,122 @@ describe("hosted browser vault replica store", () => {
     const loaded: unknown = JSON.parse(new TextDecoder().decode(loadedBytes ?? undefined));
     expect(loaded).toEqual(replica);
     expect(parseBrowserVaultReplica(loaded)).toEqual(replica);
+    const expectedShards = await splitBrowserVaultReplica(replica);
+    for (const shard of ["core", "metricsIndex", "labs"] as const) {
+      const shardRef = replicaRef.shards?.[shard];
+      expect(shardRef).toBeDefined();
+      expectShardEncodingSizes(shardRef);
+      await expect(store.readBrowserVaultReplicaShardEnvelope(replicaRef, shard))
+        .resolves.toMatchObject({
+          algorithm: "AES-GCM",
+          keyId: replicaRef.dataKeyEnvelope?.dataKeyId,
+          scope: "browser-vault-replica",
+        });
+      const shardAad = createBrowserVaultReplicaShardAadFields({
+        ref: replicaRef,
+        shard,
+        userId: "user_123",
+      });
+      expect(shardAad).toMatchObject({
+        generatedAt: replica.generatedAt,
+        generation: BROWSER_VAULT_REPLICA_CURRENT_GENERATION,
+        shard,
+        shardSetRefSchema: "murph.hosted-browser-vault-replica-shards.v1",
+      });
+      const encryptedShardBytes = await readEncryptedR2Payload({
+        aad: buildHostedStorageAad({
+          byteLength: shardAad.byteLength,
+          contentEncoding: shardAad.contentEncoding,
+          dataKeyId: shardAad.dataKeyId,
+          dataKeyRootKeyId: shardAad.dataKeyRootKeyId,
+          dataVersion: shardAad.dataVersion,
+          encodedByteLength: shardAad.encodedByteLength,
+          generatedAt: shardAad.generatedAt,
+          generation: shardAad.generation,
+          objectKey: shardAad.objectKey,
+          purpose: shardAad.purpose,
+          runtimeRootKeyId: shardAad.runtimeRootKeyId,
+          schema: shardAad.schema,
+          shard: shardAad.shard,
+          shardSchema: shardAad.shardSchema,
+          shardSetRefSchema: shardAad.shardSetRefSchema,
+          sourceBundleHash: shardAad.sourceBundleHash,
+          userId: shardAad.userId,
+        }),
+        bucket,
+        cryptoKey: await store.deriveBrowserVaultReplicaKey(replicaRef),
+        expectedKeyId: replicaRef.dataKeyEnvelope?.dataKeyId,
+        key: shardAad.objectKey,
+        scope: "browser-vault-replica",
+      });
+      expect(encryptedShardBytes?.byteLength).toBe(shardRef?.encodedByteLength);
+      const decodedShardBytes = await decodeChildBytes(
+        encryptedShardBytes ?? new Uint8Array(),
+        shardRef?.contentEncoding ?? "identity",
+      );
+      expect(decodedShardBytes.byteLength).toBe(shardRef?.byteLength);
+      expect(JSON.parse(new TextDecoder().decode(decodedShardBytes))).toEqual(
+        shard === "metricsIndex" ? expectedShards.metrics : expectedShards[shard],
+      );
+    }
+    for (const bucketId of HOSTED_BROWSER_VAULT_REPLICA_METRIC_BUCKET_IDS) {
+      const bucketRef = replicaRef.metricBuckets?.buckets[bucketId];
+      expect(bucketRef).toBeDefined();
+      expectShardEncodingSizes(bucketRef);
+      await expect(store.readBrowserVaultReplicaMetricBucketEnvelope(replicaRef, bucketId))
+        .resolves.toMatchObject({
+          algorithm: "AES-GCM",
+          keyId: replicaRef.dataKeyEnvelope?.dataKeyId,
+          scope: "browser-vault-replica",
+        });
+      const bucketAad = createBrowserVaultReplicaMetricBucketAadFields({
+        bucketId,
+        ref: replicaRef,
+        userId: "user_123",
+      });
+      expect(bucketAad).toMatchObject({
+        generatedAt: replica.generatedAt,
+        generation: BROWSER_VAULT_REPLICA_CURRENT_GENERATION,
+        metricBucketCount: 32,
+        metricBucketId: bucketId,
+        metricBucketSetRefSchema:
+          "murph.hosted-browser-vault-replica-metric-buckets.v1",
+      });
+      const encryptedBucketBytes = await readEncryptedR2Payload({
+        aad: buildHostedStorageAad({
+          byteLength: bucketAad.byteLength,
+          contentEncoding: bucketAad.contentEncoding,
+          dataKeyId: bucketAad.dataKeyId,
+          dataKeyRootKeyId: bucketAad.dataKeyRootKeyId,
+          dataVersion: bucketAad.dataVersion,
+          encodedByteLength: bucketAad.encodedByteLength,
+          generatedAt: bucketAad.generatedAt,
+          generation: bucketAad.generation,
+          metricBucketCount: bucketAad.metricBucketCount,
+          metricBucketId: bucketAad.metricBucketId,
+          metricBucketSchema: bucketAad.metricBucketSchema,
+          metricBucketSetRefSchema: bucketAad.metricBucketSetRefSchema,
+          objectKey: bucketAad.objectKey,
+          purpose: bucketAad.purpose,
+          runtimeRootKeyId: bucketAad.runtimeRootKeyId,
+          schema: bucketAad.schema,
+          sourceBundleHash: bucketAad.sourceBundleHash,
+          userId: bucketAad.userId,
+        }),
+        bucket,
+        cryptoKey: await store.deriveBrowserVaultReplicaKey(replicaRef),
+        expectedKeyId: replicaRef.dataKeyEnvelope?.dataKeyId,
+        key: bucketAad.objectKey,
+        scope: "browser-vault-replica",
+      });
+      const decodedBucketBytes = await decodeChildBytes(
+        encryptedBucketBytes ?? new Uint8Array(),
+        bucketRef?.contentEncoding ?? "identity",
+      );
+      expect(decodedBucketBytes.byteLength).toBe(bucketRef?.byteLength);
+      expect(JSON.parse(new TextDecoder().decode(decodedBucketBytes)))
+        .toEqual(expectedShards.metricBuckets[bucketId]);
+    }
     expect(replica.entities[0]?.tags).toEqual(["browser"]);
     expect(replica.entities[0]?.title).toBe("Browser vault journal");
     expect(() =>
@@ -202,11 +349,11 @@ describe("hosted browser vault replica store", () => {
         vaultRoot: "browser://vault",
       }),
     });
-    let plannedObjectKey: string | null = null;
+    let plannedObjectKeys: string[] = [];
 
     await expect(store.writeBrowserVaultReplica({
       beforeWrite: async (replicaRef) => {
-        plannedObjectKey = replicaRef.objectKey;
+        plannedObjectKeys = listHostedBrowserVaultReplicaObjectKeys(replicaRef);
         expect(bucket.objects.size).toBe(0);
         throw new Error("orphan candidate recording failed");
       },
@@ -214,10 +361,76 @@ describe("hosted browser vault replica store", () => {
       userId: "user_123",
     })).rejects.toThrow("orphan candidate recording failed");
 
-    expect(plannedObjectKey).toMatch(
+    expect(plannedObjectKeys[0]).toMatch(
       /^users\/hsn_[0-9a-f]{24}\/browser-vault-replicas\/[0-9a-f]{48}\.json$/u,
     );
+    expect(plannedObjectKeys).toHaveLength(36);
+    expect(plannedObjectKeys.slice(1)).toEqual([
+      plannedObjectKeys[0]?.replace(/\.json$/u, ".core.json"),
+      plannedObjectKeys[0]?.replace(/\.json$/u, ".labs.json"),
+      plannedObjectKeys[0]?.replace(/\.json$/u, ".metrics-index.json"),
+      ...HOSTED_BROWSER_VAULT_REPLICA_METRIC_BUCKET_IDS.map((bucketId) =>
+        plannedObjectKeys[0]?.replace(
+          /\.json$/u,
+          `.metric-bucket-${bucketId}.json`,
+        )),
+    ]);
     expect(bucket.objects.size).toBe(0);
+  });
+
+  it("settles every planned write through a bounded R2 worker pool", async () => {
+    let releaseFirstBatch = (): void => {};
+    const firstBatchGate = new Promise<void>((resolve) => {
+      releaseFirstBatch = resolve;
+    });
+    class TrackingBucket extends MemoryEncryptedR2Bucket {
+      activePuts = 0;
+      peakActivePuts = 0;
+      readonly putKeys: string[] = [];
+
+      override async put(key: string, value: string): Promise<void> {
+        this.putKeys.push(key);
+        this.activePuts += 1;
+        this.peakActivePuts = Math.max(this.peakActivePuts, this.activePuts);
+        if (this.putKeys.length === HOSTED_BROWSER_VAULT_REPLICA_WRITE_CONCURRENCY) {
+          releaseFirstBatch();
+        }
+        try {
+          await firstBatchGate;
+          if (key.endsWith(".metric-bucket-00.json")) {
+            throw new Error("synthetic metric bucket write failure");
+          }
+          await super.put(key, value);
+        } finally {
+          this.activePuts -= 1;
+        }
+      }
+    }
+    const bucket = new TrackingBucket();
+    const store = createHostedBrowserVaultReplicaStore({
+      bucket,
+      rootKey: createTestRootKey(52),
+      rootKeyId: "runtime-root-current",
+      userId: "user_123",
+    });
+    const replica = await createBrowserVaultReplica({
+      metricPoints: [],
+      generatedAt: "2026-04-17T00:00:00.000Z",
+      sourceBundleHash: "a".repeat(64),
+      vault: createVaultReadModel({
+        entities: [],
+        metadata: null,
+        vaultRoot: "browser://vault",
+      }),
+    });
+
+    await expect(store.writeBrowserVaultReplica({ replica, userId: "user_123" }))
+      .rejects.toThrow("synthetic metric bucket write failure");
+
+    expect(bucket.putKeys).toHaveLength(36);
+    expect(new Set(bucket.putKeys).size).toBe(36);
+    expect(bucket.peakActivePuts).toBe(HOSTED_BROWSER_VAULT_REPLICA_WRITE_CONCURRENCY);
+    expect(bucket.activePuts).toBe(0);
   });
 
   it("keeps legacy generations readable and rejects invalid generation metadata", async () => {
@@ -344,8 +557,10 @@ describe("hosted browser vault replica store", () => {
 
     await store.deleteBrowserVaultReplica(firstRef);
 
-    expect(bucket.deleted).toEqual([firstRef.objectKey]);
-    expect(bucket.objects.has(firstRef.objectKey)).toBe(false);
+    expect(bucket.deleted).toEqual(listHostedBrowserVaultReplicaObjectKeys(firstRef));
+    expect(listHostedBrowserVaultReplicaObjectKeys(firstRef).every(
+      (objectKey) => !bucket.objects.has(objectKey),
+    )).toBe(true);
     expect(bucket.objects.has(secondRef.objectKey)).toBe(true);
   });
 
@@ -552,3 +767,34 @@ describe("hosted browser vault replica store", () => {
     expect(bucket.getCalls).toEqual([]);
   });
 });
+
+async function decompressGzip(bytes: Uint8Array): Promise<Uint8Array> {
+  const compressed = bytes.buffer.slice(
+    bytes.byteOffset,
+    bytes.byteOffset + bytes.byteLength,
+  ) as ArrayBuffer;
+  const stream = new Blob([compressed])
+    .stream()
+    .pipeThrough(new DecompressionStream("gzip"));
+  return new Uint8Array(await new Response(stream).arrayBuffer());
+}
+
+async function decodeChildBytes(
+  bytes: Uint8Array,
+  contentEncoding: "gzip" | "identity",
+): Promise<Uint8Array> {
+  return contentEncoding === "gzip" ? decompressGzip(bytes) : bytes;
+}
+
+function expectShardEncodingSizes(ref: {
+  byteLength: number;
+  contentEncoding: "gzip" | "identity";
+  encodedByteLength: number;
+} | undefined): void {
+  expect(ref).toBeDefined();
+  if (ref?.contentEncoding === "gzip") {
+    expect(ref.encodedByteLength).toBeLessThan(ref.byteLength);
+  } else {
+    expect(ref?.encodedByteLength).toBe(ref?.byteLength);
+  }
+}

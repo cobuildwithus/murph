@@ -23,9 +23,9 @@ import {
 import { Input } from "@/src/components/ui/input";
 import { Label } from "@/src/components/ui/label";
 import {
-  loadBrowserVaultReplica,
-  normalizeBrowserVaultError,
-} from "@/src/lib/browser-vault/loader";
+  loadBrowserVaultExport,
+  normalizeBrowserVaultExportError,
+} from "@/src/lib/browser-vault/export";
 import {
   publishBrowserVaultSessionEnding,
   publishBrowserVaultSessionInvalidation,
@@ -62,7 +62,6 @@ interface HostedAccountDeleteResponse {
 }
 
 const DEFAULT_VAULT_EXPORT_FILENAME = "murph-vault-export.json";
-const VAULT_EXPORT_MIME_TYPE = "application/json; charset=utf-8";
 const POST_DELETE_REDIRECT_DELAY_MS = 2_500;
 const POST_DELETE_REDIRECT_FALLBACK_MS = 8_000;
 
@@ -155,23 +154,12 @@ function HostedDataPrivacySettingsAuthorized(props: {
 
     try {
       const authorization = await authorize("vault.export");
-      const result = await loadBrowserVaultReplica({
+      const result = await loadBrowserVaultExport({
         authorization,
-        emptyOnUnauthorized: false,
-        endpoint: "/api/settings/vault-export/session",
-        knownReplicaRef: null,
-      });
-
-      if (result.state !== "ready") {
-        throw new Error("Your data isn't ready to export yet.");
-      }
-
-      const blob = new Blob([JSON.stringify(result.client.replica, null, 2)], {
-        type: VAULT_EXPORT_MIME_TYPE,
       });
       triggerJsonDownload(
-        blob,
-        buildVaultExportFilename(result.client.replica.generatedAt),
+        result.blob,
+        buildVaultExportFilename(result.generatedAt),
       );
 
       closeExportDialog();
@@ -387,11 +375,14 @@ function HostedDataPrivacySettingsAuthorized(props: {
             <DialogDescription className="text-sm leading-6 text-muted-foreground">
               {dialogStep === "reason"
                 ? "Could you let us know why you're leaving? This is optional and it won't hold up your deletion."
-                : "Permanently deletes your account and all your data, including your subscription and login. This cannot be undone."}
+                : "Deletes your account, data, subscription, and login permanently. This cannot be undone."}
             </DialogDescription>
           </DialogHeader>
           {dialogError ? (
-            <div role="alert" className="flex flex-col gap-2 rounded-lg border border-destructive/20 bg-destructive/5 p-3 text-sm text-destructive">
+            <div
+              role="alert"
+              className="flex flex-col gap-2 rounded-lg border border-destructive/20 bg-destructive/5 p-3 text-sm leading-5 text-destructive [overflow-wrap:anywhere]"
+            >
               <p>{dialogError}</p>
               {deviceReconnectRequired ? (
                 <Link
@@ -415,10 +406,19 @@ function HostedDataPrivacySettingsAuthorized(props: {
           ) : (
             <>
               <div className="flex flex-col gap-2">
-                <Label htmlFor="hosted-account-delete-phrase">Type <span className="font-mono">{HOSTED_ACCOUNT_DELETION_CONFIRMATION_PHRASE}</span> to confirm</Label>
+                <Label
+                  className="block leading-5"
+                  htmlFor="hosted-account-delete-phrase"
+                >
+                  Type{" "}
+                  <span className="font-mono text-xs tracking-wide">
+                    {HOSTED_ACCOUNT_DELETION_CONFIRMATION_PHRASE}
+                  </span>{" "}
+                  to confirm
+                </Label>
                 <Input
                   autoComplete="off"
-                  className="h-12 text-base"
+                  className="h-12 font-mono text-sm tracking-wide md:text-sm"
                   disabled={deletePending}
                   id="hosted-account-delete-phrase"
                   inputMode="text"
@@ -469,15 +469,16 @@ export function HostedAccountProviderAccessRemovalConfirmation({
   onCheckedChange: (checked: boolean) => void;
 }) {
   return (
-    <div className="flex items-start gap-3 rounded-lg border border-destructive/20 bg-destructive/5 p-3">
+    <div className="flex items-start gap-3 py-1">
       <Checkbox
         checked={checked}
+        className="mt-0.5 size-5 shrink-0"
         disabled={disabled}
         id={id}
         onCheckedChange={(value) => onCheckedChange(value === true)}
       />
-      <Label className="text-sm leading-5" htmlFor={id}>
-        I removed Murph access in each provider account named above.
+      <Label className="block text-sm/5 font-normal" htmlFor={id}>
+        I removed Murph access from every provider above.
       </Label>
     </div>
   );
@@ -690,7 +691,7 @@ function formatVaultExportError(error: unknown): string {
     return "You don't have permission to export this data right now.";
   }
 
-  const normalizedMessage = normalizeBrowserVaultError(error);
+  const normalizedMessage = normalizeBrowserVaultExportError(error);
   return normalizedMessage === "Your dashboard data is not available right now."
     ? "Murph could not retrieve your retained export right now. Try again later."
     : normalizedMessage;

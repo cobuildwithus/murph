@@ -31,7 +31,7 @@ const mocks = vi.hoisted(() => ({
   publishBrowserVaultSessionInvalidation: vi.fn(),
   reloadCurrentHostedAuthDocument: vi.fn(),
   requestHostedOnboardingJson: vi.fn(),
-  loadBrowserVaultReplica: vi.fn(),
+  loadBrowserVaultExport: vi.fn(),
   useStateValues: [] as unknown[],
 }));
 
@@ -76,9 +76,9 @@ vi.mock("@/src/components/sensitive-actions/use-sensitive-action-authorization",
   useSensitiveActionAuthorization: () => ({ authorize: mocks.authorize }),
 }));
 
-vi.mock("@/src/lib/browser-vault/loader", () => ({
-  loadBrowserVaultReplica: mocks.loadBrowserVaultReplica,
-  normalizeBrowserVaultError: (error: unknown) =>
+vi.mock("@/src/lib/browser-vault/export", () => ({
+  loadBrowserVaultExport: mocks.loadBrowserVaultExport,
+  normalizeBrowserVaultExportError: (error: unknown) =>
     error instanceof Error ? error.message : "Your dashboard data is not available right now.",
 }));
 
@@ -142,17 +142,13 @@ beforeEach(() => {
     signature: `0x${"11".repeat(65)}`,
     token: "sac_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef",
   });
-  mocks.loadBrowserVaultReplica.mockResolvedValue({
-    client: {
-      replica: createBrowserVaultReplicaForTest(),
-    },
+  mocks.loadBrowserVaultExport.mockResolvedValue({
+    blob: createBrowserVaultExportBlobForTest(),
     deviceSyncImportPending: false,
     freshness: "fresh",
+    generatedAt: "2026-04-29T01:02:03.000Z",
     refreshPending: false,
-    replicaRef: {
-      dataVersion: "d".repeat(64),
-    },
-    state: "ready",
+    workspaceVersion: null,
   });
   mocks.requestHostedOnboardingJson.mockResolvedValue({
     ok: true,
@@ -280,7 +276,7 @@ describe("HostedDataPrivacySettings", () => {
     });
 
     expect(mocks.authorize).not.toHaveBeenCalled();
-    expect(mocks.loadBrowserVaultReplica).not.toHaveBeenCalled();
+    expect(mocks.loadBrowserVaultExport).not.toHaveBeenCalled();
     expect(createObjectURL).not.toHaveBeenCalled();
     expect(revokeObjectURL).not.toHaveBeenCalled();
   });
@@ -327,14 +323,11 @@ describe("HostedDataPrivacySettings", () => {
     await clickButton(container, "Download my data", window);
 
     expect(mocks.authorize).toHaveBeenCalledWith("vault.export");
-    expect(mocks.loadBrowserVaultReplica).toHaveBeenCalledWith({
+    expect(mocks.loadBrowserVaultExport).toHaveBeenCalledWith({
       authorization: {
         signature: `0x${"11".repeat(65)}`,
         token: "sac_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef",
       },
-      emptyOnUnauthorized: false,
-      endpoint: "/api/settings/vault-export/session",
-      knownReplicaRef: null,
     });
     expect(createObjectURL).toHaveBeenCalledTimes(1);
     expect(revokeObjectURL).toHaveBeenCalledWith("blob:vault-export");
@@ -357,17 +350,13 @@ describe("HostedDataPrivacySettings", () => {
 
   test("accepts the route-authorized latest retained replica without a page consent projection", async () => {
     mockHostedVaultExportFlowState();
-    mocks.loadBrowserVaultReplica.mockResolvedValueOnce({
-      client: {
-        replica: createBrowserVaultReplicaForTest(),
-      },
+    mocks.loadBrowserVaultExport.mockResolvedValueOnce({
+      blob: createBrowserVaultExportBlobForTest(),
       deviceSyncImportPending: true,
       freshness: "stale",
+      generatedAt: "2026-04-29T01:02:03.000Z",
       refreshPending: true,
-      replicaRef: {
-        dataVersion: "d".repeat(64),
-      },
-      state: "ready",
+      workspaceVersion: null,
     });
 
     const { document, window } = loadLinkedom().parseHTML(
@@ -404,7 +393,7 @@ describe("HostedDataPrivacySettings", () => {
 
     await clickButton(container, "Download my data", window);
 
-    expect(mocks.loadBrowserVaultReplica).toHaveBeenCalledTimes(1);
+    expect(mocks.loadBrowserVaultExport).toHaveBeenCalledTimes(1);
     expect(createObjectURL).toHaveBeenCalledTimes(1);
     expect(clickDownloadLink).toHaveBeenCalledTimes(1);
     expect(formatVaultExportSuccess({
@@ -551,7 +540,7 @@ describe("HostedDataPrivacySettings", () => {
     });
 
     expect(container.textContent).toContain(
-      "I removed Murph access in each provider account named above.",
+      "I removed Murph access from every provider above.",
     );
     assert.equal(findButton(container, "Delete account").disabled, true);
     expect(mocks.requestHostedOnboardingJson).not.toHaveBeenCalled();
@@ -1183,6 +1172,13 @@ function createBrowserVaultReplicaForTest() {
     timelineRows: [],
     weeklySampleSummaries: [],
   };
+}
+
+function createBrowserVaultExportBlobForTest(): Blob {
+  return new Blob(
+    [JSON.stringify(createBrowserVaultReplicaForTest(), null, 2)],
+    { type: "application/json; charset=utf-8" },
+  );
 }
 
 function createPassthrough(tagName: string) {

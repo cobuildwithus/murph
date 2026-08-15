@@ -5,13 +5,17 @@ import path from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { VAULT_LAYOUT } from "@murphai/contracts";
+import {
+  HOSTED_MAILBOX_CAUSAL_SEQ_QUALIFIER,
+  VAULT_LAYOUT,
+} from "@murphai/contracts";
 import {
   ID_PREFIXES,
   deterministicContractId,
   findEventByExternalRef,
   initializeVault,
   showAutomation,
+  upsertEvent,
 } from "@murphai/core";
 import {
   MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION_ID,
@@ -109,6 +113,51 @@ describe("hosted meal photo mailbox import", () => {
       status: "succeeded",
     });
     expect(deleteMealPhoto).toHaveBeenCalledWith("meal_photo_opaque_key");
+  });
+
+  it("keeps existing canonical imports usable after a daily report becomes durable vault state", async () => {
+    const vaultRoot = await createTestVault();
+    await upsertEvent({
+      payload: {
+        dayKey: "2026-07-12",
+        externalRef: {
+          resourceId: "daily-metric:report:steps:durable",
+          resourceType: "daily-metric-report",
+          system: "manual",
+        },
+        id: deterministicContractId(
+          ID_PREFIXES.event,
+          "reported-daily-metric:durable-rollout-floor",
+        ),
+        kind: "observation",
+        metric: "steps",
+        observationGrain: "summary",
+        occurredAt: "2026-07-12T12:00:00.000Z",
+        qualifiers: { [HOSTED_MAILBOX_CAUSAL_SEQ_QUALIFIER]: "42" },
+        recordedAt: "2026-07-12T20:00:00.000Z",
+        source: "manual",
+        title: "Reported daily steps",
+        unit: "count",
+        value: 9_000,
+      },
+      vaultRoot,
+    });
+
+    await expect(importHostedMealPhotoCapturedMailboxItem({
+      effectsPort: createEffectsPort({
+        readMealPhoto: vi.fn(async () => JPEG_BYTES),
+      }),
+      item: createMealPhotoMailboxItem(),
+      vaultRoot,
+      wake: createMealPhotoWake(),
+    })).resolves.toMatchObject({ status: "imported" });
+
+    await expect(findEventByExternalRef({
+      resourceId: CAPTURE_ID,
+      resourceType: "photo",
+      system: "meal-photo-capture",
+      vaultRoot,
+    })).resolves.not.toBeNull();
   });
 
   it("rejects corrupt staged bytes without importing or deleting them", async () => {

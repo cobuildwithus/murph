@@ -300,6 +300,134 @@ test("device sync store rolls back webhook jobs when the trace claim was lost", 
   }
 });
 
+test("device sync store preserves failed calendar work across a later correction", async () => {
+  const tempDir = await makeTempDirectory("murph-device-syncd-calendar-obligations");
+  const store = new SqliteDeviceSyncStore(path.join(tempDir, "state.sqlite"));
+
+  try {
+    const account = store.upsertAccount({
+      provider: "junction",
+      externalAccountId: "junction-calendar-obligations",
+      displayName: "Junction",
+      scopes: [],
+      credential: {
+        credentialMetadata: {},
+        kind: "provider_config",
+        providerConfigKey: "junction",
+      },
+      connectedAt: "2026-04-01T00:00:00.000Z",
+    });
+    const workerId = "calendar-obligation-worker";
+    const v2 = store.enqueueJob({
+      accountId: account.id,
+      availableAt: "2026-04-04T00:00:00.000Z",
+      kind: "resource",
+      payload: { resource: "water", revision: "v2" },
+      priority: 100,
+      provider: "junction",
+    });
+    assert.equal(
+      store.claimDueJob(workerId, "2026-04-04T00:01:00.000Z", 60_000)?.id,
+      v2.id,
+    );
+    assert.equal(store.completeJobsMarkSyncSucceededAndEnqueueJobs({
+      accountId: account.id,
+      completedAt: "2026-04-04T00:01:10.000Z",
+      disconnectGeneration: account.disconnectGeneration,
+      jobIds: [v2.id],
+      jobs: [{
+        availableAt: "2026-04-04T00:01:10.000Z",
+        dedupeKey: "calendar-water-2026-04-01",
+        kind: "resource",
+        payload: { calendarRefreshDay: "2026-04-01", resource: "water" },
+        priority: 61,
+      }, {
+        availableAt: "2026-04-04T00:01:10.000Z",
+        dedupeKey: "calendar-water-2026-04-02",
+        kind: "resource",
+        payload: { calendarRefreshDay: "2026-04-02", resource: "water" },
+        priority: 60,
+      }],
+      provider: "junction",
+      syncSucceededAt: "2026-04-04T00:01:00.000Z",
+      syncSuccessOptions: { localConnectionRevision: account.localConnectionRevision },
+      workerId,
+    }), true);
+
+    const failedDayOne = store.claimDueJob(
+      workerId,
+      "2026-04-04T00:02:00.000Z",
+      60_000,
+    );
+    assert.equal(failedDayOne?.payload.calendarRefreshDay, "2026-04-01");
+    assert.equal(store.failJobIfOwned(
+      failedDayOne!.id,
+      workerId,
+      "2026-04-04T00:02:10.000Z",
+      "JUNCTION_RETRYABLE",
+      "Calendar fetch failed.",
+      "2026-04-05T00:00:00.000Z",
+      true,
+    ), true);
+    const afterV2 = store.getAccountById(account.id);
+    assert.ok(afterV2);
+
+    const v3 = store.enqueueJob({
+      accountId: account.id,
+      availableAt: "2026-04-04T00:03:00.000Z",
+      kind: "resource",
+      payload: { resource: "water", revision: "v3" },
+      priority: 100,
+      provider: "junction",
+    });
+    assert.equal(
+      store.claimDueJob(workerId, "2026-04-04T00:04:00.000Z", 60_000)?.id,
+      v3.id,
+    );
+    assert.equal(store.completeJobsMarkSyncSucceededAndEnqueueJobs({
+      accountId: account.id,
+      completedAt: "2026-04-04T00:04:10.000Z",
+      disconnectGeneration: afterV2.disconnectGeneration,
+      jobIds: [v3.id],
+      jobs: [{
+        availableAt: "2026-04-04T00:04:10.000Z",
+        dedupeKey: "calendar-water-2026-04-02",
+        kind: "resource",
+        payload: { calendarRefreshDay: "2026-04-02", resource: "water" },
+        priority: 60,
+      }, {
+        availableAt: "2026-04-04T00:04:10.000Z",
+        dedupeKey: "calendar-water-2026-04-03",
+        kind: "resource",
+        payload: { calendarRefreshDay: "2026-04-03", resource: "water" },
+        priority: 60,
+      }],
+      provider: "junction",
+      syncSucceededAt: "2026-04-04T00:04:00.000Z",
+      syncSuccessOptions: { localConnectionRevision: afterV2.localConnectionRevision },
+      workerId,
+    }), true);
+
+    const dayTwo = store.claimDueJob(workerId, "2026-04-04T00:05:00.000Z", 60_000);
+    assert.equal(dayTwo?.payload.calendarRefreshDay, "2026-04-02");
+    assert.equal(store.completeJobIfOwned(dayTwo!.id, workerId, "2026-04-04T00:05:10.000Z"), true);
+    const dayThree = store.claimDueJob(workerId, "2026-04-04T00:06:00.000Z", 60_000);
+    assert.equal(dayThree?.payload.calendarRefreshDay, "2026-04-03");
+    assert.equal(store.completeJobIfOwned(dayThree!.id, workerId, "2026-04-04T00:06:10.000Z"), true);
+    assert.equal(store.claimDueJob(workerId, "2026-04-04T23:59:59.000Z", 60_000), null);
+    const retriedDayOne = store.claimDueJob(
+      workerId,
+      "2026-04-05T00:00:00.000Z",
+      60_000,
+    );
+    assert.equal(retriedDayOne?.id, failedDayOne?.id);
+    assert.equal(retriedDayOne?.payload.calendarRefreshDay, "2026-04-01");
+  } finally {
+    store.close();
+    await rm(tempDir, { force: true, recursive: true });
+  }
+});
+
 test("device sync store commits source admission with initial jobs atomically", async () => {
   const tempDir = await makeTempDirectory("murph-device-syncd-connection-admission");
   const store = new SqliteDeviceSyncStore(path.join(tempDir, "state.sqlite"));
@@ -2966,6 +3094,183 @@ test("device sync store reclaims an expired retained companion lease on the same
       force: true,
       recursive: true,
     });
+  }
+});
+
+test("device sync store reclaims an expired retained calendar lease on the same row past its attempt fence", async () => {
+  const tempDir = await makeTempDirectory("murph-device-syncd-store-expired-calendar-lease");
+  const store = new SqliteDeviceSyncStore(path.join(tempDir, "state.sqlite"));
+
+  try {
+    const account = store.upsertAccount({
+      provider: "junction",
+      externalAccountId: "junction-expired-calendar-lease",
+      displayName: "Junction",
+      scopes: [],
+      credential: {
+        credentialMetadata: {},
+        kind: "provider_config",
+        providerConfigKey: "junction",
+      },
+      connectedAt: "2026-04-07T00:00:00.000Z",
+    });
+    const input = {
+      accountId: account.id,
+      availableAt: "2026-04-07T00:00:00.000Z",
+      dedupeKey: "calendar-expired-final-attempt",
+      kind: "resource",
+      maxAttempts: 1,
+      payload: {
+        calendarRefreshDay: "2026-04-02",
+        resource: "water",
+        sourceProviderSlug: "garmin",
+      },
+      provider: "junction",
+    } as const;
+    const job = store.enqueueJob(input);
+
+    const firstClaim = store.claimDueJob("worker-a", "2026-04-07T00:00:00.000Z", 60_000);
+    assert.equal(firstClaim?.id, job.id);
+    assert.equal(firstClaim?.attempts, 1);
+    assert.equal(firstClaim?.maxAttempts, 1);
+
+    const refetched = store.enqueueJob({
+      ...input,
+      availableAt: "2026-04-07T00:01:01.000Z",
+    });
+    assert.equal(refetched.id, job.id);
+
+    const reclaimed = store.claimDueJob("worker-b", "2026-04-07T00:01:01.000Z", 60_000);
+    assert.equal(reclaimed?.id, job.id);
+    assert.equal(reclaimed?.status, "running");
+    assert.equal(reclaimed?.leaseOwner, "worker-b");
+    assert.equal(reclaimed?.attempts, 2);
+    assert.equal(reclaimed?.maxAttempts, 2);
+    assert.equal(store.completeJobIfOwned(job.id, "worker-b", "2026-04-07T00:01:02.000Z"), true);
+    assert.equal(store.getJobById(job.id)?.status, "succeeded");
+  } finally {
+    store.close();
+    await rm(tempDir, {
+      force: true,
+      recursive: true,
+    });
+  }
+});
+
+test("device sync store preserves retained calendar work across account cleanup and wakes it on reconnect", async () => {
+  const tempDir = await makeTempDirectory("murph-device-syncd-store-retained-calendar-lifecycle");
+  const store = new SqliteDeviceSyncStore(path.join(tempDir, "state.sqlite"));
+  try {
+    const account = store.upsertAccount({
+      provider: "junction",
+      externalAccountId: "junction-retained-calendar-lifecycle",
+      displayName: "Junction",
+      status: "active",
+      scopes: [],
+      credential: { kind: "provider_config", providerConfigKey: "junction" },
+      connectedAt: "2026-04-07T00:00:00.000Z",
+    });
+    const retained = store.enqueueJob({
+      accountId: account.id,
+      availableAt: "2026-04-09T00:00:00.000Z",
+      kind: "resource",
+      payload: {
+        calendarRefreshDay: "2026-04-02",
+        resource: "water",
+        sourceProviderSlug: "garmin",
+      },
+      priority: 1,
+      provider: "junction",
+    });
+    const ordinary = store.enqueueJob({
+      accountId: account.id,
+      availableAt: "2026-04-07T00:00:00.000Z",
+      kind: "reconcile",
+      payload: {},
+      provider: "junction",
+    });
+    const unrelatedFailure = store.enqueueJob({
+      accountId: account.id,
+      availableAt: "2026-04-09T00:00:00.000Z",
+      kind: "resource",
+      payload: {
+        calendarRefreshDay: "2026-04-03",
+        resource: "water",
+        sourceProviderSlug: "garmin",
+      },
+      provider: "junction",
+    });
+
+    store.markPendingJobsDeadForAccount(
+      account.id,
+      "2026-04-07T01:00:00.000Z",
+      "ACCOUNT_DISCONNECTED",
+      "Disconnected.",
+    );
+    assert.equal(store.getJobById(retained.id)?.status, "queued");
+    assert.equal(store.getJobById(ordinary.id)?.status, "dead");
+
+    const claimedRetained = store.claimDueJob(
+      "worker-disconnected",
+      "2026-04-09T00:00:00.000Z",
+      60_000,
+    );
+    assert.equal(claimedRetained?.id, retained.id);
+    assert.equal(store.failJobIfOwned(
+      retained.id,
+      "worker-disconnected",
+      "2026-04-09T00:00:01.000Z",
+      "ACCOUNT_DISCONNECTED",
+      "Reconnect required.",
+      "2026-04-10T00:00:00.000Z",
+      true,
+      true,
+    ), true);
+    assert.equal(
+      store.claimDueJob("worker-unrelated-failure", "2026-04-09T00:00:01.000Z", 60_000)?.id,
+      unrelatedFailure.id,
+    );
+    assert.equal(store.failJobIfOwned(
+      unrelatedFailure.id,
+      "worker-unrelated-failure",
+      "2026-04-09T00:00:02.000Z",
+      "JUNCTION_CALENDAR_REFRESH_INCOMPLETE_NORMALIZATION",
+      "Provider data incomplete.",
+      "2026-04-10T00:00:00.000Z",
+      true,
+      true,
+    ), true);
+
+    const database = openSqliteRuntimeDatabase(store.databasePath);
+    try {
+      assert.equal(markCredentialScopedPendingDeviceSyncJobsDeadForAccount(database, {
+        accountId: account.id,
+        code: "HOSTED_CONNECTION_EPOCH_REPLACED",
+        message: "Connection epoch changed.",
+        now: "2026-04-07T02:00:00.000Z",
+      }), 0);
+    } finally {
+      database.close();
+    }
+    assert.equal(store.getJobById(retained.id)?.status, "queued");
+
+    store.upsertAccount({
+      provider: "junction",
+      externalAccountId: "junction-retained-calendar-lifecycle",
+      displayName: "Junction",
+      status: "active",
+      scopes: [],
+      credential: { kind: "provider_config", providerConfigKey: "junction" },
+      connectedAt: "2026-04-09T01:00:00.000Z",
+    });
+    assert.equal(
+      store.claimDueJob("worker-reconnected", "2026-04-09T01:00:00.000Z", 60_000)?.id,
+      retained.id,
+    );
+    assert.equal(store.getJobById(unrelatedFailure.id)?.availableAt, "2026-04-10T00:00:00.000Z");
+  } finally {
+    store.close();
+    await rm(tempDir, { force: true, recursive: true });
   }
 });
 

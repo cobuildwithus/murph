@@ -110,8 +110,8 @@ function MaintenanceDialogBody() {
           Delete account
         </h2>
         <p className="text-sm leading-6 text-muted-foreground">
-          Permanently deletes your account and all your data, including your
-          subscription and login. This cannot be undone.
+          Deletes your account, data, subscription, and login permanently. This
+          cannot be undone.
         </p>
       </div>
 
@@ -123,16 +123,19 @@ function MaintenanceDialogBody() {
       </p>
 
       <div className="flex flex-col gap-2">
-        <Label htmlFor="design-account-delete-phrase">
+        <Label
+          className="block leading-5"
+          htmlFor="design-account-delete-phrase"
+        >
           Type{" "}
-          <span className="font-mono">
+          <span className="font-mono text-xs tracking-wide">
             {HOSTED_ACCOUNT_DELETION_CONFIRMATION_PHRASE}
           </span>{" "}
           to confirm
         </Label>
         <Input
           autoComplete="off"
-          className="h-12 text-base"
+          className="h-12 font-mono text-sm tracking-wide md:text-sm"
           defaultValue={HOSTED_ACCOUNT_DELETION_CONFIRMATION_PHRASE}
           id="design-account-delete-phrase"
           inputMode="text"
@@ -161,30 +164,28 @@ function ProviderRecoveryDialogBody({ id }: { id: string }) {
           Delete account
         </h2>
         <p className="text-sm leading-6 text-muted-foreground">
-          Permanently deletes your account and all your data, including your
-          subscription and login. This cannot be undone.
+          Deletes your account, data, subscription, and login permanently. This
+          cannot be undone.
         </p>
       </div>
 
       <p
         role="alert"
-        className="rounded-lg border border-destructive/20 bg-destructive/5 p-3 text-sm text-destructive"
+        className="rounded-lg border border-destructive/20 bg-destructive/5 p-3 text-sm leading-5 text-destructive"
       >
-        A provider connection did not finish safely. Remove Murph access in
-        these provider accounts: Oura, Strava. Confirm that removal here, then
-        try account deletion again.
+        Remove Murph access from Oura and Strava, then confirm below.
       </p>
 
       <div className="flex flex-col gap-2">
-        <Label htmlFor={`${id}-phrase`}>
+        <Label className="block leading-5" htmlFor={`${id}-phrase`}>
           Type{" "}
-          <span className="font-mono">
+          <span className="font-mono text-xs tracking-wide">
             {HOSTED_ACCOUNT_DELETION_CONFIRMATION_PHRASE}
           </span>{" "}
           to confirm
         </Label>
         <Input
-          className="h-12 text-base"
+          className="h-12 font-mono text-sm tracking-wide md:text-sm"
           defaultValue={HOSTED_ACCOUNT_DELETION_CONFIRMATION_PHRASE}
           id={`${id}-phrase`}
           readOnly

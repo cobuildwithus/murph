@@ -278,6 +278,7 @@ const REQUIRED_STORE_SLUGS = [
   "prisma.hosted_group_member",
   "prisma.hosted_group_disclosure_permission",
   "prisma.hosted_group_disclosure_grant",
+  "prisma.hosted_group_current_sender_clarification",
   "prisma.hosted_mailbox_item",
   "prisma.hosted_mailbox_payload",
   "prisma.hosted_mailbox_lane_counter",
@@ -354,6 +355,7 @@ const HOSTED_ACCOUNT_DELETION_RAW_COUNT_KEYS = [
   "prisma.hosted_account_group_billing_ref",
   "prisma.hosted_account_group_plan_capacity",
   "prisma.hosted_group_disclosure_grant",
+  "prisma.hosted_group_current_sender_clarification",
   "prisma.hosted_thread_route",
   "prisma.clinical_record_retrieval_request",
   "prisma.device_webhook_trace",
@@ -2079,7 +2081,7 @@ describe("deleteHostedAccountData", () => {
       ]));
   });
 
-  it("deletes disclosure grants and owned policies before their membership and group owners", async () => {
+  it("deletes group grants, clarifications, and policies before their owners", async () => {
     const operationOrder: string[] = [];
     const rawDeletionQueries: HostedAccountDeletionRawQuery[] = [];
     const prisma = createHostedAccountDeletionPrismaForTest({
@@ -2111,18 +2113,30 @@ describe("deleteHostedAccountData", () => {
     expect(dependents.sql).toContain(
       "membership.group_id IN (SELECT id FROM target_groups)",
     );
+    expect(dependents.sql).toContain(
+      "DELETE FROM hosted_group_current_sender_clarification AS clarification",
+    );
+    expect(dependents.sql).toContain(
+      "clarification.group_runtime_member_id IN (SELECT id FROM target_members)",
+    );
+    expect(dependents.sql).toContain(
+      "clarification.target_member_id IN (SELECT id FROM target_members)",
+    );
     expect(intermediate.sql).toContain(
       "DELETE FROM hosted_group_disclosure_permission AS permission",
     );
     expect(operationOrder.indexOf("delete:hostedGroupDisclosureGrant")).toBeLessThan(
       operationOrder.indexOf("delete:hostedGroupDisclosurePermission"),
     );
+    expect(operationOrder.indexOf("delete:hostedGroupCurrentSenderClarification"))
+      .toBeLessThan(operationOrder.indexOf("delete:hostedMember"));
     for (const owner of ["hostedGroupMember", "hostedGroup"]) {
       expect(operationOrder.indexOf("delete:hostedGroupDisclosurePermission"))
         .toBeLessThan(operationOrder.indexOf(`delete:${owner}`));
     }
     expect(result.deletedCounts).toMatchObject({
       "prisma.hosted_group_disclosure_grant": 1,
+      "prisma.hosted_group_current_sender_clarification": 1,
       "prisma.hosted_group_disclosure_permission": 1,
     });
   });
@@ -3940,6 +3954,7 @@ describe("deleteHostedAccountData", () => {
         providerAccessRemovalConfirmationToken: expect.any(String),
         providerLabels: ["Oura"],
       },
+      message: "Remove Murph access from Oura, then confirm below.",
       retryable: false,
     });
     expect(deleteCalls).toEqual([]);

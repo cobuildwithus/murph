@@ -375,6 +375,57 @@ export async function prepareHostedMailboxItemAppendCrypto(input: {
   });
 }
 
+/**
+ * Owns the bounded preparation lifecycle for transaction-local mailbox
+ * appends. Provider-capable work finishes before `append` opens its owner
+ * transaction; exact root drift retries the whole preparation once with a
+ * fresh request cache.
+ */
+export async function runWithPreparedHostedMailboxItemAppendCrypto<TResult>(
+  input: {
+    append: (
+      prepared: PreparedHostedMailboxItemAppendCrypto,
+    ) => Promise<TResult>;
+    prisma: PrismaClient;
+    userId: string;
+  },
+): Promise<TResult> {
+  const userId = requireNonEmptyString(input.userId, "Hosted mailbox userId");
+  for (
+    let attempt = 0;
+    attempt < HOSTED_MAILBOX_APPEND_CRYPTO_PREPARATION_ATTEMPTS;
+    attempt += 1
+  ) {
+    const runAttempt = async () => {
+      const prepared = await prepareHostedMailboxItemAppendCrypto({
+        prisma: input.prisma,
+        userId,
+      });
+      return input.append(prepared);
+    };
+
+    try {
+      return await (attempt === 0
+        ? runWithHostedDomainRootUnwrapCache(runAttempt)
+        : runWithFreshHostedDomainRootUnwrapCache(runAttempt));
+    } catch (error) {
+      if (!(error instanceof HostedDomainRootPreparationMismatchError)) {
+        throw error;
+      }
+      if (
+        attempt + 1
+        >= HOSTED_MAILBOX_APPEND_CRYPTO_PREPARATION_ATTEMPTS
+      ) {
+        throw error;
+      }
+    }
+  }
+
+  throw new Error(
+    "Hosted mailbox append crypto preparation retry exhausted unexpectedly.",
+  );
+}
+
 async function revalidatePreparedHostedMailboxAppendCryptoTx(input: {
   prepared: PreparedHostedMailboxItemAppendCrypto;
   tx: HostedMailboxMutationTx;
@@ -432,18 +483,9 @@ export async function appendHostedMailboxItem(
   }
 
   try {
-    for (
-      let attempt = 0;
-      attempt < HOSTED_MAILBOX_APPEND_CRYPTO_PREPARATION_ATTEMPTS;
-      attempt += 1
-    ) {
-      try {
-        const runAttempt = async () => {
-          const prepared = await prepareHostedMailboxItemAppendCrypto({
-            prisma,
-            userId: normalized.userId,
-          });
-          return prisma.$transaction((tx) =>
+    return await runWithPreparedHostedMailboxItemAppendCrypto({
+      append: (prepared) =>
+        prisma.$transaction((tx) =>
             appendHostedMailboxItemWithPreparedCryptoTx({
               dedupeKey: normalized.dedupeKey,
               expiresAt: normalized.expiresAt,
@@ -456,27 +498,10 @@ export async function appendHostedMailboxItem(
               tx,
               userId: normalized.userId,
             })
-          );
-        };
-        return await (attempt === 0
-          ? runWithHostedDomainRootUnwrapCache(runAttempt)
-          : runWithFreshHostedDomainRootUnwrapCache(runAttempt));
-      } catch (error) {
-        if (!(error instanceof HostedDomainRootPreparationMismatchError)) {
-          throw error;
-        }
-        if (
-          attempt + 1
-          >= HOSTED_MAILBOX_APPEND_CRYPTO_PREPARATION_ATTEMPTS
-        ) {
-          throw error;
-        }
-      }
-    }
-
-    throw new Error(
-      "Hosted mailbox append crypto preparation retry exhausted unexpectedly.",
-    );
+        ),
+      prisma,
+      userId: normalized.userId,
+    });
   } catch (error) {
     if (isPrismaUniqueConstraintError(error)) {
       const existing = await findHostedMailboxItemByDedupeKeyTx({
@@ -1037,7 +1062,7 @@ export async function appendHostedMailboxEnvelopeWithSourceMessageTx(input: {
 
 export async function appendHostedMailboxEnvelopeWithIdentityTx(input: {
   envelope: HostedMailboxProducerEnvelope;
-  expiresAt: Date | string;
+  expiresAt: Date | string | null;
   itemId: string;
   tx: HostedMailboxMutationTx;
 }): Promise<AppendHostedMailboxItemResult> {

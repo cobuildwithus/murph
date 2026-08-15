@@ -1,8 +1,9 @@
 import { rm } from "node:fs/promises";
 import path from "node:path";
 
-import type {
-  HostedWorkspaceRuntimeJobOptions,
+import {
+  HostedRuntimeCheckpointInterruptedByWakeError,
+  type HostedWorkspaceRuntimeJobOptions,
 } from "../hosted-runtime.ts";
 import {
   pruneTerminalWriteOperationRecords,
@@ -361,6 +362,7 @@ async function createHostedWorkspaceV2Snapshot(
   let prunedRuntimeSymlinkCount = 0;
   let terminalWriteOperationPruneResult: PruneTerminalWriteOperationRecordsResult | null = null;
   let assistantRuntimeResiduePruneResult: AssistantRuntimeResiduePruneResult | null = null;
+  let snapshotFailureObserved = false;
   const snapshotTimings: HostedWorkspaceSnapshotTimingDetails = {};
   try {
     leaseCheckCount += 1;
@@ -672,14 +674,28 @@ async function createHostedWorkspaceV2Snapshot(
       });
     }
   } catch (error) {
-    const interruptedBeforeCommit = input.signal?.aborted === true && !checkpointAttempted;
-    const interruptionError = interruptedBeforeCommit
-      ? input.signal?.reason instanceof Error
+    snapshotFailureObserved = true;
+    const activeInterruptionError = input.signal?.aborted === true
+      ? input.signal.reason instanceof Error
         ? input.signal.reason
         : new Error("Hosted workspace snapshot construction was interrupted.")
       : null;
-    const classifiedError = interruptionError
-      ?? classifyHostedWorkspaceSnapshotFailure(error);
+    const interruptedBeforeCommit = activeInterruptionError !== null && !checkpointAttempted;
+    let controlInterruptionError = interruptedBeforeCommit
+      ? activeInterruptionError
+      : activeInterruptionError instanceof HostedRuntimeCheckpointInterruptedByWakeError
+        ? activeInterruptionError
+        : null;
+    const interruptionCausedFailure = interruptedBeforeCommit
+      && error === input.signal?.reason;
+    const reportedError = interruptionCausedFailure
+      ? activeInterruptionError
+      : classifyHostedWorkspaceSnapshotFailure(error);
+    // Preserve the abort reason for control flow, but classify only the exact
+    // caught runtime-wake abort as expected preemption. A real failure that
+    // merely races with a wake remains actionable.
+    const expectedRuntimeWakePreemption = interruptionCausedFailure
+      && activeInterruptionError instanceof HostedRuntimeCheckpointInterruptedByWakeError;
     const abortedSnapshotSession = snapshotSession;
     if (abortedSnapshotSession && !checkpointAttempted) {
       const abortSnapshotSession = async () => {
@@ -707,7 +723,11 @@ async function createHostedWorkspaceV2Snapshot(
         // durability fallback. Foreground work must not wait on this DELETE.
         void abortSnapshotSession();
       } else {
-        await abortSnapshotSession();
+        controlInterruptionError =
+          await awaitHostedWorkspaceSnapshotSideEffectOrRuntimeWake({
+            operation: abortSnapshotSession(),
+            signal: input.signal,
+          }) ?? controlInterruptionError;
       }
     }
     const snapshotFailureLog = writeHostedCheckpointSnapshotLifecycleLog({
@@ -739,22 +759,43 @@ async function createHostedWorkspaceV2Snapshot(
         ...(interruptedBeforeCommit
           ? { snapshotInterruptedBeforeCommit: true }
           : {}),
+        ...(expectedRuntimeWakePreemption
+          ? {
+              errorCode: "runtime_wake_during_checkpoint",
+              snapshotOutcomeKind: "expected_preemption",
+              snapshotPreemptionKind: "runtime_wake",
+            }
+          : {}),
         snapshotElapsedMs: Date.now() - startedAt,
         snapshotMode: HOSTED_WORKSPACE_V2_SNAPSHOT_MODE,
       },
-      error: classifiedError,
-      eventCode: "checkpoint.snapshot_failed",
-      level: interruptedBeforeCommit ? "warn" : "error",
+      ...(!expectedRuntimeWakePreemption ? { error: reportedError } : {}),
+      eventCode: expectedRuntimeWakePreemption
+        ? "checkpoint.snapshot_preempted"
+        : "checkpoint.snapshot_failed",
+      level: expectedRuntimeWakePreemption
+        ? "info"
+        : interruptedBeforeCommit
+          ? "warn"
+          : "error",
       platform: input.platform,
       request: input.request,
       signal: null,
     });
-    if (interruptedBeforeCommit) {
+    if (controlInterruptionError) {
+      // Failure telemetry remains best effort whenever an interruption owns
+      // runtime control. Foreground work must not wait on this remote write.
       void snapshotFailureLog;
     } else {
-      await snapshotFailureLog;
+      controlInterruptionError =
+        await awaitHostedWorkspaceSnapshotSideEffectOrRuntimeWake({
+          operation: snapshotFailureLog,
+          signal: input.signal,
+        });
     }
-    throw classifiedError;
+    controlInterruptionError ??=
+      readHostedWorkspaceSnapshotRuntimeWake(input.signal);
+    throw controlInterruptionError ?? reportedError;
   } finally {
     if (encryptedTemporaryDirectoryPath) {
       try {
@@ -774,6 +815,12 @@ async function createHostedWorkspaceV2Snapshot(
           phase: "checkpoint",
           userId: input.userId,
         });
+      }
+    }
+    if (snapshotFailureObserved) {
+      const lateRuntimeWake = readHostedWorkspaceSnapshotRuntimeWake(input.signal);
+      if (lateRuntimeWake) {
+        throw lateRuntimeWake;
       }
     }
   }
@@ -812,6 +859,54 @@ function assertHostedWorkspaceSnapshotConstructionLive(
   throw signal.reason instanceof Error
     ? signal.reason
     : new Error("Hosted workspace snapshot construction was interrupted.");
+}
+
+function readHostedWorkspaceSnapshotRuntimeWake(
+  signal: AbortSignal | null | undefined,
+): HostedRuntimeCheckpointInterruptedByWakeError | null {
+  return signal?.aborted === true
+      && signal.reason instanceof HostedRuntimeCheckpointInterruptedByWakeError
+    ? signal.reason
+    : null;
+}
+
+async function awaitHostedWorkspaceSnapshotSideEffectOrRuntimeWake(input: {
+  operation: Promise<void>;
+  signal: AbortSignal | null;
+}): Promise<HostedRuntimeCheckpointInterruptedByWakeError | null> {
+  const activeRuntimeWake = readHostedWorkspaceSnapshotRuntimeWake(input.signal);
+  if (activeRuntimeWake) {
+    return activeRuntimeWake;
+  }
+  if (!input.signal) {
+    await input.operation;
+    return null;
+  }
+
+  const signal = input.signal;
+  let removeAbortListener = () => {};
+  const runtimeWake = new Promise<HostedRuntimeCheckpointInterruptedByWakeError>(
+    (resolve) => {
+      const handleAbort = () => {
+        const interruption = readHostedWorkspaceSnapshotRuntimeWake(signal);
+        if (interruption) {
+          resolve(interruption);
+        }
+      };
+      signal.addEventListener("abort", handleAbort, { once: true });
+      removeAbortListener = () => signal.removeEventListener("abort", handleAbort);
+      handleAbort();
+    },
+  );
+
+  try {
+    return await Promise.race([
+      input.operation.then(() => null),
+      runtimeWake,
+    ]);
+  } finally {
+    removeAbortListener();
+  }
 }
 
 async function runHostedWorkspaceSnapshotMeasuredStep<T>(input: {

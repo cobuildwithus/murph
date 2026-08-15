@@ -805,15 +805,26 @@ export interface ProviderScheduleResult {
 
 export interface ProviderSnapshotImportReceipt {
   canonicalEventCount: number;
+  canonicalEventDayKeys?: readonly string[];
   canonicalEventExternalRefResourceIds?: readonly string[];
+  canonicalSparseCalendarTargets?: readonly ProviderSparseCalendarTarget[];
   durableDeliveryAccepted: boolean;
+}
+
+export interface ProviderSparseCalendarTarget {
+  dayKey: string;
+  sourceInstanceId?: string | null;
+  sourceProviderSlug: string;
+  sourceType?: string;
 }
 
 export interface ProviderJobConnectionSource {
   displayName: string | null;
   firstSeenAt?: string;
+  lastDataAt: string | null;
   lastErrorCode: string | null;
   lastErrorMessage: string | null;
+  lastSeenAt: string;
   resourceAvailabilitySummary?: DeviceConnectionSourceResourceAvailabilitySummary;
   sourceInstanceKey?: string;
   sourceProviderSlug: string;

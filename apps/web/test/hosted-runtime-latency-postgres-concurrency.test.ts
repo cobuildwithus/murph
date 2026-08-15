@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
 import {
   recordHostedIngressAssistantMilestone,
   recordHostedIngressProviderStarted,
+  recordHostedIngressRuntimeMilestone,
 } from "@/src/lib/hosted-runtime-latency/store";
 import { createPrismaClient } from "@/src/lib/prisma";
 
@@ -315,6 +316,176 @@ describe.skipIf(!runPostgresProof)(
             terminalNonReplyCommittedAtEpochMs: terminalAt.getTime(),
           });
         }
+
+        await observer.hostedIngressLatencyTrace.updateMany({
+          data: {
+            phaseBreakdownJson: {
+              assistant: {
+                checkpointPublicationExpectedByEpochMs: "wrong-type",
+                runtimeLeaseGeneration: "5",
+                terminalNonReplyCommittedAtEpochMs: terminalAt.getTime(),
+                unknownLeaf: "discard",
+              },
+              provider: { promptBuildMs: 9, unknownLeaf: "discard" },
+              schemaVersion: "wrong-type",
+              unknownPhase: { unknownLeaf: "discard" },
+            },
+          },
+          where: { assistantInputId: assistantInputIds[0] },
+        });
+
+        await expect(recordHostedIngressRuntimeMilestone({
+          at: new Date("2026-08-09T12:05:00.000Z"),
+          authenticatedUserId: memberId,
+          milestone: "checkpoint_publication_expected_by",
+          prisma: observer,
+          runtimeAttemptId,
+          runtimeLeaseGeneration: "4",
+          source: "linq",
+        })).resolves.toEqual({
+          matchedCount: 0,
+          recorded: false,
+          unmatchedCount: 0,
+        });
+
+        const checkpointRecoveryAttemptId = `runtime_latency_checkpoint_${suffix}`;
+        const checkpointExpectedBy = new Date("2026-08-09T12:06:00.000Z");
+        await expect(recordHostedIngressRuntimeMilestone({
+          at: checkpointExpectedBy,
+          authenticatedUserId: memberId,
+          milestone: "checkpoint_publication_expected_by",
+          prisma: observer,
+          runtimeAttemptId: checkpointRecoveryAttemptId,
+          runtimeLeaseGeneration: "6",
+          source: "linq",
+        })).resolves.toEqual({
+          matchedCount: 2,
+          recorded: true,
+          unmatchedCount: 0,
+        });
+
+        const checkpointNoOpMarker = new Date("2026-08-09T12:06:01.000Z");
+        await observer.hostedIngressLatencyTrace.updateMany({
+          data: { updatedAt: checkpointNoOpMarker },
+          where: { assistantInputId: { in: assistantInputIds } },
+        });
+        await expect(recordHostedIngressRuntimeMilestone({
+          at: new Date("2026-08-09T12:05:30.000Z"),
+          authenticatedUserId: memberId,
+          milestone: "checkpoint_publication_expected_by",
+          prisma: observer,
+          runtimeAttemptId: checkpointRecoveryAttemptId,
+          runtimeLeaseGeneration: "6",
+          source: "linq",
+        })).resolves.toEqual({
+          matchedCount: 2,
+          recorded: true,
+          unmatchedCount: 0,
+        });
+
+        const checkpointRows = await observer.hostedIngressLatencyTrace.findMany({
+          orderBy: { assistantInputId: "asc" },
+          select: {
+            phaseBreakdownJson: true,
+            runtimeAttemptId: true,
+            updatedAt: true,
+          },
+          where: { assistantInputId: { in: assistantInputIds } },
+        });
+        for (const row of checkpointRows) {
+          expect(row.runtimeAttemptId).toBe(checkpointRecoveryAttemptId);
+          expect(row.updatedAt).toEqual(checkpointNoOpMarker);
+          const assistant = requireJsonRecord(
+            requireJsonRecord(row.phaseBreakdownJson).assistant,
+          );
+          expect(assistant).toMatchObject({
+            checkpointPublicationExpectedByEpochMs:
+              checkpointExpectedBy.getTime(),
+            runtimeLeaseGeneration: "6",
+            terminalNonReplyCommittedAtEpochMs: terminalAt.getTime(),
+          });
+        }
+        expect(checkpointRows[0]?.phaseBreakdownJson).toEqual({
+          assistant: {
+            checkpointPublicationExpectedByEpochMs:
+              checkpointExpectedBy.getTime(),
+            runtimeLeaseGeneration: "6",
+            terminalNonReplyCommittedAtEpochMs: terminalAt.getTime(),
+          },
+          provider: { promptBuildMs: 9 },
+          schemaVersion: 1,
+        });
+
+        const concurrentOlderAttemptId = `runtime_latency_concurrent_older_${suffix}`;
+        const concurrentNewerAttemptId = `runtime_latency_concurrent_newer_${suffix}`;
+        const [olderLeaseResult, newerLeaseResult] = await Promise.all([
+          recordHostedIngressRuntimeMilestone({
+            at: new Date("2026-08-09T12:08:00.000Z"),
+            authenticatedUserId: memberId,
+            milestone: "checkpoint_publication_expected_by",
+            prisma: observer,
+            runtimeAttemptId: concurrentOlderAttemptId,
+            runtimeLeaseGeneration: "7",
+            source: "linq",
+          }),
+          recordHostedIngressRuntimeMilestone({
+            at: new Date("2026-08-09T12:07:00.000Z"),
+            authenticatedUserId: memberId,
+            milestone: "checkpoint_publication_expected_by",
+            prisma: challenger,
+            runtimeAttemptId: concurrentNewerAttemptId,
+            runtimeLeaseGeneration: "8",
+            source: "linq",
+          }),
+        ]);
+        expect([0, 2]).toContain(olderLeaseResult.matchedCount);
+        expect(newerLeaseResult).toEqual({
+          matchedCount: 2,
+          recorded: true,
+          unmatchedCount: 0,
+        });
+        const concurrentRows = await observer.hostedIngressLatencyTrace.findMany({
+          select: { phaseBreakdownJson: true, runtimeAttemptId: true },
+          where: { assistantInputId: { in: assistantInputIds } },
+        });
+        for (const row of concurrentRows) {
+          expect(row.runtimeAttemptId).toBe(concurrentNewerAttemptId);
+          const assistant = requireJsonRecord(
+            requireJsonRecord(row.phaseBreakdownJson).assistant,
+          );
+          expect(assistant.runtimeLeaseGeneration).toBe("8");
+          expect([
+            new Date("2026-08-09T12:07:00.000Z").getTime(),
+            new Date("2026-08-09T12:08:00.000Z").getTime(),
+          ]).toContain(assistant.checkpointPublicationExpectedByEpochMs);
+        }
+
+        await observer.hostedMailboxItem.update({
+          data: { consumedAt: new Date("2026-08-09T12:06:30.000Z") },
+          where: { id: `hmi_latency_set_0_${suffix}` },
+        });
+        const postConsumptionAttemptId = `runtime_latency_post_consumption_${suffix}`;
+        await expect(recordHostedIngressRuntimeMilestone({
+          at: new Date("2026-08-09T12:09:00.000Z"),
+          authenticatedUserId: memberId,
+          milestone: "checkpoint_publication_expected_by",
+          prisma: observer,
+          runtimeAttemptId: postConsumptionAttemptId,
+          runtimeLeaseGeneration: "9",
+          source: "linq",
+        })).resolves.toEqual({
+          matchedCount: 1,
+          recorded: true,
+          unmatchedCount: 0,
+        });
+        await expect(observer.hostedIngressLatencyTrace.findMany({
+          orderBy: { assistantInputId: "asc" },
+          select: { runtimeAttemptId: true },
+          where: { assistantInputId: { in: assistantInputIds } },
+        })).resolves.toEqual([
+          { runtimeAttemptId: concurrentNewerAttemptId },
+          { runtimeAttemptId: postConsumptionAttemptId },
+        ]);
       } finally {
         await observer.hostedMember.deleteMany({ where: { id: memberId } });
         await Promise.all([

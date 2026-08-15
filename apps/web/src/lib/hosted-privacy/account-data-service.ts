@@ -292,6 +292,12 @@ export const HOSTED_ACCOUNT_DATA_STORE_COVERAGE = [
     note: "Deletes the member's disclosure grants and every grant in generic groups they own or back. The Settings export remains vault-only; the private list_memberships response exposes the exact granted policy text without exposing other members' grants.",
   },
   {
+    slug: "prisma.hosted_group_current_sender_clarification",
+    label: "Pending group answer-audience clarifications",
+    deletion: "live-delete",
+    note: "Deletes short-lived exact-message pointers used to resume one ambiguous group request. The original question remains in the ordinary mailbox lifecycle and is not copied into this table.",
+  },
+  {
     slug: "prisma.hosted_account_deletion_cleanup",
     label: "Encrypted account-deletion cleanup receipt",
     deletion: "documented-retention",
@@ -1897,7 +1903,7 @@ async function markHostedMembersSuspendedForAccountDeletion(input: {
             providerLabels,
           },
           httpStatus: 409,
-          message: `A provider connection did not finish safely. Remove Murph access in these provider accounts: ${providerLabels.join(", ")}. Confirm that removal here, then try account deletion again.`,
+          message: `Remove Murph access from ${providerLabels.join(" and ")}, then confirm below.`,
           retryable: false,
         });
       }
@@ -2963,7 +2969,13 @@ async function deleteHostedAccountPrismaRows(input: {
             AND (
               membership.member_id IN (SELECT id FROM target_members)
               OR membership.group_id IN (SELECT id FROM target_groups)
-            )
+          )
+          RETURNING 1
+        ),
+        deleted_group_current_sender_clarifications AS (
+          DELETE FROM hosted_group_current_sender_clarification AS clarification
+          WHERE clarification.group_runtime_member_id IN (SELECT id FROM target_members)
+             OR clarification.target_member_id IN (SELECT id FROM target_members)
           RETURNING 1
         ),
         deleted_thread_routes AS (
@@ -3055,6 +3067,8 @@ async function deleteHostedAccountPrismaRows(input: {
             AS "prisma.hosted_account_group_plan_capacity",
           (SELECT count(*) FROM deleted_group_disclosure_grants)
             AS "prisma.hosted_group_disclosure_grant",
+          (SELECT count(*) FROM deleted_group_current_sender_clarifications)
+            AS "prisma.hosted_group_current_sender_clarification",
           (SELECT count(*) FROM deleted_thread_routes)
             AS "prisma.hosted_thread_route",
           (SELECT count(*) FROM deleted_clinical_retrieval_requests)

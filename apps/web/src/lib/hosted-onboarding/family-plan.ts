@@ -841,6 +841,14 @@ export async function readHostedFamilyAccessForMember(input: {
   });
 }
 
+function compareHostedFamilyOwnerSnapshotRows(
+  left: { createdAt: Date; id: string },
+  right: { createdAt: Date; id: string },
+): number {
+  return left.createdAt.getTime() - right.createdAt.getTime()
+    || (left.id < right.id ? -1 : left.id > right.id ? 1 : 0);
+}
+
 export async function readHostedFamilyOwnerSnapshotForMember(input: {
   memberId: string;
   now?: Date;
@@ -848,72 +856,130 @@ export async function readHostedFamilyOwnerSnapshotForMember(input: {
 }): Promise<HostedFamilyOwnerSnapshot | null> {
   const prisma = input.prisma ?? getPrisma();
   const now = input.now ?? new Date();
-  const group = await prisma.hostedAccountGroup.findUnique({
-    select: {
-      billingStatus: true,
-      displayName: true,
-      id: true,
-      ownerMemberId: true,
-      suspendedAt: true,
-    },
-    where: {
-      ownerMemberId: input.memberId,
-    },
-  });
+  const readDatabaseSnapshot = async (readPrisma: HostedOnboardingReadClient) => {
+    const group = await readPrisma.hostedAccountGroup.findUnique({
+      select: {
+        billingStatus: true,
+        displayName: true,
+        id: true,
+        ownerMemberId: true,
+        suspendedAt: true,
+      },
+      where: {
+        ownerMemberId: input.memberId,
+      },
+    });
 
-  if (!group) {
+    if (!group) {
+      return null;
+    }
+
+    const [memberships, invites, paidCapacities] = await Promise.all([
+      readPrisma.hostedAccountGroupMembership.findMany({
+        select: {
+          createdAt: true,
+          id: true,
+          joinedAt: true,
+          memberId: true,
+          pendingPlanCode: true,
+          planCode: true,
+          role: true,
+          status: true,
+        },
+        take: HOSTED_FAMILY_MAX_SEATS + 1,
+        where: {
+          groupId: group.id,
+          status: "active",
+        },
+      }),
+      readPrisma.hostedAccountGroupInvite.findMany({
+        orderBy: [
+          { expiresAt: "asc" },
+          { id: "asc" },
+        ],
+        select: hostedAccountGroupInviteSelect,
+        take: HOSTED_FAMILY_MAX_SEATS + 1,
+        where: {
+          expiresAt: {
+            gt: now,
+          },
+          groupId: group.id,
+          status: "pending",
+        },
+      }),
+      readHostedFamilyPlanCapacitiesTx({
+        groupId: group.id,
+        tx: readPrisma,
+      }),
+    ]);
+
+    if (
+      memberships.length > HOSTED_FAMILY_MAX_SEATS
+      || invites.length > HOSTED_FAMILY_MAX_SEATS
+      || memberships.length + invites.length > HOSTED_FAMILY_MAX_SEATS
+    ) {
+      throw hostedOnboardingError({
+        code: "HOSTED_FAMILY_SNAPSHOT_CAPACITY_INVALID",
+        httpStatus: 500,
+        message: "Family membership exceeds the supported seat capacity.",
+      });
+    }
+
+    // Keep pre-limit work on query-shaped indexes, then restore the prior
+    // presentation order only after cardinality is proven to be at most six.
+    memberships.sort(compareHostedFamilyOwnerSnapshotRows);
+    invites.sort(compareHostedFamilyOwnerSnapshotRows);
+
+    const acceptedInvites = await readFirstAcceptedHostedFamilyInvitesForMembers({
+      group,
+      memberIds: memberships
+        .map((membership) => membership.memberId)
+        .filter((memberId) => memberId !== group.ownerMemberId),
+      prisma: readPrisma,
+    });
+
+    return {
+      acceptedInvites,
+      group,
+      invites,
+      memberships,
+      paidCapacities,
+    };
+  };
+
+  // Invite acceptance atomically moves one row from pending invites to active
+  // memberships. Keep both cap reads and accepted-history authority on one
+  // MVCC snapshot so READ COMMITTED cannot combine opposite sides of that move.
+  const maybeTransaction = prisma as {
+    $transaction?: <T>(
+      run: (tx: Prisma.TransactionClient) => Promise<T>,
+      options?: {
+        isolationLevel?: Prisma.TransactionIsolationLevel;
+        maxWait?: number;
+      },
+    ) => Promise<T>;
+  };
+  const databaseSnapshot = typeof maybeTransaction.$transaction === "function"
+    ? await maybeTransaction.$transaction(
+        async (tx) => readDatabaseSnapshot(tx),
+        {
+          ...HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
+          isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead,
+        },
+      )
+    : await readDatabaseSnapshot(prisma);
+
+  if (!databaseSnapshot) {
     return null;
   }
 
-  const [memberships, invites, acceptedInvites, paidCapacities] = await Promise.all([
-    prisma.hostedAccountGroupMembership.findMany({
-      orderBy: {
-        createdAt: "asc",
-      },
-      select: {
-        joinedAt: true,
-        memberId: true,
-        pendingPlanCode: true,
-        planCode: true,
-        role: true,
-        status: true,
-      },
-      where: {
-        groupId: group.id,
-        status: "active",
-      },
-    }),
-    prisma.hostedAccountGroupInvite.findMany({
-      orderBy: {
-        createdAt: "asc",
-      },
-      select: hostedAccountGroupInviteSelect,
-      where: {
-        expiresAt: {
-          gt: now,
-        },
-        groupId: group.id,
-        status: "pending",
-      },
-    }),
-    prisma.hostedAccountGroupInvite.findMany({
-      orderBy: {
-        createdAt: "asc",
-      },
-      select: hostedAccountGroupInviteSelect,
-      where: {
-        acceptedByMemberId: {
-          not: null,
-        },
-        groupId: group.id,
-        status: "accepted",
-      },
-    }),
-    readHostedFamilyPlanCapacitiesTx({
-      groupId: group.id,
-      tx: prisma,
-    }),
-  ]);
+  const {
+    acceptedInvites,
+    group,
+    invites,
+    memberships,
+    paidCapacities,
+  } = databaseSnapshot;
 
   const firstAcceptedInviteByMember = new Map<string, (typeof acceptedInvites)[number]>();
   for (const invite of acceptedInvites) {
@@ -1030,6 +1096,60 @@ export async function readHostedFamilyOwnerSnapshotForMember(input: {
     },
     suspendedAt: group.suspendedAt,
   };
+}
+
+async function readFirstAcceptedHostedFamilyInvitesForMembers(input: {
+  group: HostedAccountGroupAccessSnapshot;
+  memberIds: string[];
+  prisma: HostedOnboardingReadClient;
+}): Promise<HostedAccountGroupInviteSnapshot[]> {
+  if (input.memberIds.length === 0) {
+    return [];
+  }
+
+  const invites = await input.prisma.$queryRaw<Array<
+    Omit<HostedAccountGroupInviteSnapshot, "group">
+  >>(Prisma.sql`
+    WITH current_member(member_id) AS (
+      SELECT unnest(ARRAY[${Prisma.join(input.memberIds)}]::text[])
+    )
+    SELECT
+      accepted_invite.accepted_at AS "acceptedAt",
+      accepted_invite.accepted_by_member_id AS "acceptedByMemberId",
+      accepted_invite.channel,
+      accepted_invite.created_at AS "createdAt",
+      accepted_invite.expires_at AS "expiresAt",
+      accepted_invite.group_id AS "groupId",
+      accepted_invite.id,
+      accepted_invite.invite_code AS "inviteCode",
+      accepted_invite.invited_by_member_id AS "invitedByMemberId",
+      accepted_invite.plan_code AS "planCode",
+      accepted_invite.status,
+      accepted_invite.target_email_encrypted AS "targetEmailEncrypted",
+      accepted_invite.target_email_lookup_key AS "targetEmailLookupKey",
+      accepted_invite.target_label AS "targetLabel",
+      accepted_invite.target_phone_lookup_key AS "targetPhoneLookupKey",
+      accepted_invite.target_phone_number_encrypted AS "targetPhoneNumberEncrypted",
+      accepted_invite.target_telegram_username_encrypted AS "targetTelegramUsernameEncrypted",
+      accepted_invite.target_telegram_username_lookup_key AS "targetTelegramUsernameLookupKey",
+      accepted_invite.updated_at AS "updatedAt"
+    FROM current_member
+    CROSS JOIN LATERAL (
+      SELECT invite.*
+      FROM hosted_account_group_invite AS invite
+      WHERE invite.group_id = ${input.group.id}
+        AND invite.accepted_by_member_id = current_member.member_id
+        AND invite.status = 'accepted'
+      ORDER BY invite.created_at ASC, invite.id ASC
+      LIMIT 1
+    ) AS accepted_invite
+    ORDER BY current_member.member_id ASC
+  `);
+
+  return invites.map((invite) => ({
+    ...invite,
+    group: input.group,
+  }));
 }
 
 /**
