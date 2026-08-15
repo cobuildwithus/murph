@@ -215,6 +215,43 @@ test("workout stream reduction is bounded by admitted samples and never preserve
   }), /1-1 timestamps/u);
 });
 
+test("workout stream reduction keeps complete metrics when another optional series has invalid cardinality", () => {
+  const feature = reduceJunctionWorkoutStreamPayload({
+    maxSamples: 3,
+    summary: {
+      id: "workout-1",
+      sourceProviderSlug: "garmin",
+      startAt: "2026-07-01T12:00:00.000Z",
+      endAt: "2026-07-01T12:00:02.000Z",
+    },
+    stream: {
+      time: [1_783_000_000, 1_783_000_001, 1_783_000_002],
+      heartrate: [100, 110, 120],
+      distance: [0, 10],
+    },
+  });
+
+  assert.equal(feature.averageHeartRate, 110);
+  assert.equal(feature.maxHeartRate, 120);
+  assert.equal(feature.distanceMeters, undefined);
+  assert.equal(feature.sampleCount, 3);
+
+  assert.throws(() => reduceJunctionWorkoutStreamPayload({
+    maxSamples: 3,
+    summary: {
+      id: "workout-1",
+      sourceProviderSlug: "garmin",
+      startAt: "2026-07-01T12:00:00.000Z",
+      endAt: "2026-07-01T12:00:02.000Z",
+    },
+    stream: {
+      time: [1_783_000_000, 1_783_000_001, 1_783_000_002],
+      heartrate: [100, 110],
+      distance: [0, 10],
+    },
+  }), /no supported metrics/u);
+});
+
 test("workout features use one independent compact measurement correction identity", () => {
   const first = normalizeJunctionSnapshot({
     importedAt: "2026-07-02T00:00:00.000Z",

@@ -378,8 +378,7 @@ function compareSamples(left: EcgSample, right: EcgSample): number {
 function parallelArray(value: unknown, length: number, label: string): unknown[] | undefined {
   if (value === undefined || value === null) return undefined;
   const values = array(value, label);
-  if (values.length !== length) invalid(`${label} cardinality was invalid`);
-  return values;
+  return values.length === length ? values : undefined;
 }
 
 function array(value: unknown, label: string): unknown[] {

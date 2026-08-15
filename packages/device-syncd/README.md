@@ -87,6 +87,9 @@ Current providers:
   rewritten as a scalar successor. Pagination remains in memory, and no provider
   row, vendor page cursor, waveform sample, or workout point enters job state. This
   adds no control-database collection path, pooled transaction, or vault persistence.
+  Each workout metric array is optional and must align with the timestamp array to
+  be reduced. An unaligned optional metric is omitted when another supported metric
+  is complete; a stream with no complete supported metric still fails closed.
 - Successful Junction resource/webhook jobs preserve the full-sync completion
   watermark. They still complete and clear their own failures, while only a
   terminal reconcile or backfill whose window ends at the current closed-day
