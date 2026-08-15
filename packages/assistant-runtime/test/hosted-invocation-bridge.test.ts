@@ -1404,6 +1404,43 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     });
   });
 
+  it("matches mailbox occurred-at identity by instant across ISO precision", async () => {
+    const equivalentVaultRoot = await createVaultRoot();
+    const { platform } = createRuntimePlatform();
+    const equivalentOptions = createBridgeOptions({
+      mailboxPayloadDecoder: createMailboxPayloadDecoder({
+        status: "decoded",
+        wake: createMemberChannelsWake({
+          occurredAt: "2026-05-01T00:00:00Z",
+        }),
+      }),
+      platform,
+      vaultRoot: equivalentVaultRoot,
+    });
+
+    await expect(equivalentOptions.importItem(
+      createSystemMailboxImportItem(),
+    )).resolves.toMatchObject({ status: "imported" });
+
+    const mismatchedOptions = createBridgeOptions({
+      mailboxPayloadDecoder: createMailboxPayloadDecoder({
+        status: "decoded",
+        wake: createMemberChannelsWake({
+          occurredAt: "2026-05-01T00:00:01Z",
+        }),
+      }),
+      platform,
+      vaultRoot: await createVaultRoot(),
+    });
+    await expect(mismatchedOptions.importItem(
+      createSystemMailboxImportItem(),
+    )).resolves.toEqual({
+      reasonCode: "payload.decode_mismatch",
+      retryable: false,
+      status: "blocked",
+    });
+  });
+
   it.each([
     ["vault-share.delivery", "import-vault-share-delivery"],
     ["vault-share.revoke", "import-vault-share-revoke"],
