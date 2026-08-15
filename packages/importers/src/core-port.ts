@@ -143,7 +143,6 @@ export interface DeviceBatchImportPayload {
   samples?: DeviceSamplePayload[];
   evidenceParts?: DeviceEvidencePartPayload[];
   authoritativeEventSets?: DeviceAuthoritativeEventSetPayload[];
-  memberEditConflictResolution?: "keep_member" | "use_provider";
   ingestReceipt?: Record<string, unknown>;
   provenance?: Record<string, unknown>;
 }

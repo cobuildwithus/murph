@@ -8117,8 +8117,8 @@ test("importDeviceBatch never reuses a revision number taken by a no-externalRef
   };
   await fs.appendFile(path.join(vaultRoot, shardPath), `${JSON.stringify(edited)}\n`);
 
-  // A changed provider re-delivery must take revision 3, not collide with the
-  // edit's revision 2.
+  // This row is not marked manual, so the changed provider delivery takes
+  // revision 3 without colliding with revision 2.
   const updated = await importDeviceBatch({
     vaultRoot,
     provider: "junction",
@@ -8143,7 +8143,7 @@ test("importDeviceBatch never reuses a revision number taken by a no-externalRef
   assert.deepEqual(revisions, [1, 2, 3]);
 });
 
-test("importDeviceBatch rejects primary provider refs after user-authored same-externalRef edits", async () => {
+test("importDeviceBatch advances provider refs behind user-authored same-externalRef edits", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-import-primary-ref-user-edit");
   await initializeVault({ vaultRoot, createdAt: "2026-06-01T12:00:00.000Z" });
 
@@ -8167,35 +8167,33 @@ test("importDeviceBatch rejects primary provider refs after user-authored same-e
   } satisfies EventRecord;
   await fs.appendFile(path.join(vaultRoot, shardPath), `${JSON.stringify(edited)}\n`);
 
-  await assert.rejects(
-    importDeviceBatch({
-      vaultRoot,
-      provider: "junction",
-      accountId: "jxn_acct_stable",
-      importedAt: "2026-06-04T21:00:00.000Z",
-      events: [
-        buildJunctionStyleWorkoutEvent({
-          recordedAt: "2026-06-04T07:00:00.000Z",
-          durationMinutes: 36,
-        }),
-      ],
-    }),
-    (error) => error instanceof VaultError && error.code === "EVENT_EXTERNAL_REF_ALIAS_CONFLICT",
-  );
+  await importDeviceBatch({
+    vaultRoot,
+    provider: "junction",
+    accountId: "jxn_acct_stable",
+    importedAt: "2026-06-04T21:00:00.000Z",
+    events: [
+      buildJunctionStyleWorkoutEvent({
+        recordedAt: "2026-06-04T07:00:00.000Z",
+        durationMinutes: 36,
+      }),
+    ],
+  });
 
   const records = (await readJsonlRecords({ vaultRoot, relativePath: shardPath })) as EventRecord[];
-  const latestUserEdited = records.find((record) => record.id === eventId && record.lifecycle?.revision === 2);
+  const latestUserEdited = collapseEventSpines(records).find((record) => record.id === eventId);
   assert.equal(latestUserEdited?.note, "user-added context");
   assert.deepEqual(latestUserEdited?.tags, ["context"]);
   assert.deepEqual(latestUserEdited?.links, [{ type: "related_to", targetId: eventId }]);
-  assert.equal(
-    records.filter((record) => record.id === eventId).length,
-    2,
-    "provider re-import must not append a superseding revision over user edits",
-  );
+  assert.equal(latestUserEdited?.source, "manual");
+  assert.ok(records.some((record) =>
+    record.id === eventId
+    && record.source === "device"
+    && record.recordedAt === "2026-06-04T07:00:00.000Z"
+  ));
 });
 
-test("importDeviceBatch resolves retained member-edit conflicts atomically and retry-safely", async () => {
+test("importDeviceBatch retains member edits while advancing provider siblings atomically", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-import-member-edit-resolution-retained");
   await initializeVault({ vaultRoot, createdAt: "2026-06-01T12:00:00.000Z" });
   const resourceType = "junction-apple-health-profile";
@@ -8203,7 +8201,6 @@ test("importDeviceBatch resolves retained member-edit conflicts atomically and r
   const buildInput = (input: {
     editedValue: number;
     importedAt: string;
-    memberEditConflictResolution?: "keep_member" | "use_provider";
     siblingValue: number;
     version: string;
   }) => ({
@@ -8211,7 +8208,6 @@ test("importDeviceBatch resolves retained member-edit conflicts atomically and r
     provider: "junction",
     accountId: "junction-account",
     importedAt: input.importedAt,
-    memberEditConflictResolution: input.memberEditConflictResolution,
     events: [
       {
         kind: "observation" as const,
@@ -8287,20 +8283,8 @@ test("importDeviceBatch resolves retained member-edit conflicts atomically and r
     siblingValue: 11,
     version: "2026-06-11T09:00:00.000Z",
   });
-  const beforeConflict = await snapshotVaultFiles(vaultRoot);
-  await assert.rejects(
-    importDeviceBatch(correction),
-    (error) => error instanceof VaultError
-      && error.code === "EVENT_EXTERNAL_REF_ALIAS_CONFLICT"
-      && error.details.reason === "member_edit_conflict",
-  );
-  assert.deepEqual(await snapshotVaultFiles(vaultRoot), beforeConflict);
-
-  const keep = await importDeviceBatch({
-    ...correction,
-    memberEditConflictResolution: "keep_member",
-  });
-  assert.ok(keep.applied);
+  const update = await importDeviceBatch(correction);
+  assert.ok(update.applied);
   const shardPath = first.eventShardPaths[0] as string;
   const keptRows = (await readJsonlRecords({ vaultRoot, relativePath: shardPath })) as EventRecord[];
   const keptLive = collapseEventSpines(keptRows);
@@ -8321,25 +8305,27 @@ test("importDeviceBatch resolves retained member-edit conflicts atomically and r
 
   const replay = await importDeviceBatch(correction);
   assert.equal(replay.applied, false);
-  const useProvider = await importDeviceBatch({
-    ...buildInput({
-      editedValue: 3,
-      importedAt: "2026-06-12T10:00:00.000Z",
-      siblingValue: 12,
-      version: "2026-06-12T09:00:00.000Z",
-    }),
-    memberEditConflictResolution: "use_provider",
-  });
-  assert.ok(useProvider.applied);
-  const finalLive = collapseEventSpines(
-    (await readJsonlRecords({ vaultRoot, relativePath: shardPath })) as EventRecord[],
-  );
+  const later = await importDeviceBatch(buildInput({
+    editedValue: 3,
+    importedAt: "2026-06-12T10:00:00.000Z",
+    siblingValue: 12,
+    version: "2026-06-12T09:00:00.000Z",
+  }));
+  assert.ok(later.applied);
+  const finalRows = (await readJsonlRecords({ vaultRoot, relativePath: shardPath })) as EventRecord[];
+  const finalLive = collapseEventSpines(finalRows);
   const finalEdited = finalLive.find((event) => event.id === edited.id);
-  assert.equal(finalEdited?.source, "device");
-  assert.equal(eventObservationValue(finalEdited), 3);
+  assert.equal(finalEdited?.source, "manual");
+  assert.equal(eventObservationValue(finalEdited), 7);
+  assert.ok(finalRows.some((event) =>
+    event.id === edited.id
+    && event.source === "device"
+    && event.externalRef?.version === "2026-06-12T09:00:00.000Z"
+    && eventObservationValue(event) === 3
+  ));
 });
 
-test("importDeviceBatch resolves omitted member-edit conflicts through the existing event spine", async () => {
+test("importDeviceBatch retains omitted member edits above provider tombstones", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-import-member-edit-resolution-omitted");
   await initializeVault({ vaultRoot, createdAt: "2026-06-01T12:00:00.000Z" });
   const resourceType = "junction-apple-health-menstrual-cycle";
@@ -8384,14 +8370,10 @@ test("importDeviceBatch resolves omitted member-edit conflicts through the exist
     vaultRoot,
     payload: { ...edited, note: "member context", source: "manual" },
   });
-  const omission = (input: {
-    memberEditConflictResolution?: "keep_member" | "use_provider";
-    version: string;
-  }) => ({
+  const omission = (input: { version: string }) => ({
     vaultRoot,
     provider: "junction",
     importedAt: input.version,
-    memberEditConflictResolution: input.memberEditConflictResolution,
     events: [{
       kind: "observation" as const,
       occurredAt: "2026-06-04T00:00:00.000Z",
@@ -8420,17 +8402,10 @@ test("importDeviceBatch resolves omitted member-edit conflicts through the exist
     }],
   });
   const secondVersion = "2026-06-11T09:00:00.000Z";
-  const beforeConflict = await snapshotVaultFiles(vaultRoot);
-  await assert.rejects(importDeviceBatch(omission({ version: secondVersion })));
-  assert.deepEqual(await snapshotVaultFiles(vaultRoot), beforeConflict);
-
-  const keep = await importDeviceBatch(omission({
-    memberEditConflictResolution: "keep_member",
-    version: secondVersion,
-  }));
-  assert.ok(keep.applied);
+  const update = await importDeviceBatch(omission({ version: secondVersion }));
+  assert.ok(update.applied);
   const rows = (
-    await Promise.all(keep.eventShardPaths.map((relativePath) =>
+    await Promise.all(update.eventShardPaths.map((relativePath) =>
       readJsonlRecords({ vaultRoot, relativePath })
     ))
   ).flat() as EventRecord[];
@@ -8444,22 +8419,9 @@ test("importDeviceBatch resolves omitted member-edit conflicts through the exist
     && event.externalRef?.version === secondVersion
   ));
   assert.equal(await importDeviceBatch(omission({ version: secondVersion })).then((result) => result.applied), false);
-
-  const thirdVersion = "2026-06-12T09:00:00.000Z";
-  await importDeviceBatch(omission({
-    memberEditConflictResolution: "use_provider",
-    version: thirdVersion,
-  }));
-  const finalRows = (
-    await Promise.all(keep.eventShardPaths.map((relativePath) =>
-      readJsonlRecords({ vaultRoot, relativePath })
-    ))
-  ).flat() as EventRecord[];
-  const finalEdited = collapseEventSpines(finalRows).find((event) => event.id === edited.id);
-  assert.equal(isDeletedEventLifecycle(finalEdited?.lifecycle), true);
 });
 
-test("importDeviceBatch rejects historical provider refs after user-authored no-externalRef edits", async () => {
+test("importDeviceBatch advances historical provider refs behind user-authored no-externalRef edits", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-import-legacy-ref-no-external-ref-edit");
   await initializeVault({ vaultRoot, createdAt: "2026-06-01T12:00:00.000Z" });
 
@@ -8516,8 +8478,7 @@ test("importDeviceBatch rejects historical provider refs after user-authored no-
   };
   await fs.appendFile(path.join(vaultRoot, shardPath), `${JSON.stringify(edited)}\n`);
 
-  await assert.rejects(
-    importDeviceBatch({
+  await importDeviceBatch({
       vaultRoot,
       provider: "junction",
       accountId: "jxn_acct_stable",
@@ -8541,15 +8502,17 @@ test("importDeviceBatch rejects historical provider refs after user-authored no-
           unit: "score",
         },
       }],
-    }),
-    (error) => error instanceof VaultError && error.code === "EVENT_EXTERNAL_REF_ALIAS_CONFLICT",
-  );
+    });
 
   const records = (await readJsonlRecords({ vaultRoot, relativePath: shardPath })) as EventRecord[];
-  const latestUserEdited = records.find((record) => record.id === eventId && record.lifecycle?.revision === 2);
+  const latestUserEdited = collapseEventSpines(records).find((record) => record.id === eventId);
   assert.equal(latestUserEdited?.note, "user-added context");
   assert.deepEqual(latestUserEdited?.tags, ["context"]);
   assert.deepEqual(latestUserEdited?.links, [{ type: "related_to", targetId: eventId }]);
+  assert.ok(records.some((record) =>
+    record.id === eventId
+    && record.externalRef?.resourceId === currentExternalRef.resourceId
+  ));
 });
 
 test("importDeviceBatch does not claim cross-day legacy refs when observation values differ", async () => {
@@ -8708,7 +8671,7 @@ test("importDeviceBatch does not claim unscoped WHOOP body legacy refs across ac
   assert.equal(liveWeightIds.size, 2);
 });
 
-test("importDeviceBatch rejects legacy-ref repair after a no-externalRef member edit moves shards", async () => {
+test("importDeviceBatch advances legacy-ref repair beneath a member edit that moves shards", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-import-legacy-ref-no-external-cross-shard");
   await initializeVault({ vaultRoot, createdAt: "2026-06-01T12:00:00.000Z" });
 
@@ -8793,18 +8756,13 @@ test("importDeviceBatch rejects legacy-ref repair after a no-externalRef member 
       },
     }],
   } as const;
-  const beforeConflict = await snapshotVaultFiles(vaultRoot);
-
-  await assert.rejects(
-    importDeviceBatch(providerCorrection),
-    (error) => error instanceof VaultError && error.code === "EVENT_EXTERNAL_REF_ALIAS_CONFLICT",
-  );
-  assert.deepEqual(await snapshotVaultFiles(vaultRoot), beforeConflict);
+  const correction = await importDeviceBatch(providerCorrection);
 
   const records = (
     await Promise.all(
       [...new Set([
         ...first.eventShardPaths,
+        ...correction.eventShardPaths,
         edited.ledgerFile,
       ])].map((relativePath) => readJsonlRecords({ vaultRoot, relativePath })),
     )
@@ -8816,12 +8774,13 @@ test("importDeviceBatch rejects legacy-ref repair after a no-externalRef member 
   );
 
   assert.deepEqual([...stressIds], [eventId]);
-  const memberRevision = records.find((record) =>
-    record.id === eventId && record.lifecycle?.revision === 2
-  );
+  const memberRevision = collapseEventSpines(records).find((record) => record.id === eventId);
   assert.equal(memberRevision?.source, "manual");
   assert.equal(memberRevision?.occurredAt, "2026-05-31T23:30:00.000Z");
   assert.equal(memberRevision?.dayKey, "2026-05-31");
+  assert.ok(records.some((record) =>
+    record.id === eventId && record.externalRef?.resourceId === currentExternalRef.resourceId
+  ));
 });
 
 test("findEventByExternalRef ignores historical refs after an event moves identity", async () => {

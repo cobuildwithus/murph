@@ -5496,6 +5496,7 @@ const JUNCTION_MENSTRUAL_AUTHORITATIVE_FACET_PREFIXES = [
   "pregnancy-test",
   "cervical-mucus",
   "intermenstrual-bleeding",
+  "home-progesterone-test",
   "progesterone-test",
   "contraceptive",
   "sexual-activity",
@@ -5603,8 +5604,8 @@ function pushProfileSummary(
     return;
   }
 
-  const gender = firstStringFromPaths(entry, JUNCTION_PROFILE_GENDER_PATHS);
-  if (gender) {
+  const reportedGender = readJunctionProfileGender(entry);
+  if (reportedGender) {
     context.events.push(stripUndefined({
       kind: "measurement",
       occurredAt: timestamp.occurredAt,
@@ -5621,14 +5622,13 @@ function pushProfileSummary(
           metric: "gender",
           value: 1,
           unit: "recording",
-          qualifiers: { gender: trimToLength(gender, 80) },
+          qualifiers: { gender: reportedGender },
         }],
       },
     }));
   }
 
   const birthDate = firstIsoDateFromPaths(entry, JUNCTION_PROFILE_BIRTH_DATE_PATHS);
-  const reportedGender = readJunctionProfileGender(entry);
   const sex = readJunctionProfileSex(entry);
   const wheelchairUse = firstValueFromPaths(entry, ["wheelchairUse", "wheelchair_use"]);
   const segments = [
@@ -7383,23 +7383,28 @@ function buildJunctionProfileLegacyExternalRefs(
     return undefined;
   }
 
-  const rawTimestamp = stringId(providerTimestampRaw);
-  if (!rawTimestamp) {
-    return undefined;
-  }
-
   const primary = makeJunctionExternalRef(resourceContext, entry, timestamp, facet);
-  const legacyResourceId = `profile-${shortHash([
-    "profile",
-    resourceContext.sourceProviderSlug,
-    resourceContext.origin.sourceType,
-    resourceContext.origin.sourceInstanceId,
-    rawTimestamp,
-  ])}`;
+  const updatedAtRaw = firstValueFromPaths(entry, ["updatedAt", "updated_at"]);
+  const legacyTimestamps = new Set([
+    stringId(providerTimestampRaw),
+    resolveSafeTimestamp(providerTimestampRaw, resourceContext.sourceProviderSlug),
+    stringId(updatedAtRaw),
+    resolveSafeTimestamp(updatedAtRaw, resourceContext.sourceProviderSlug),
+  ].filter((value): value is string => value !== undefined));
+  const legacyResourceIds = [...legacyTimestamps].map((legacyTimestamp) =>
+    `profile-${shortHash([
+      "profile",
+      resourceContext.sourceProviderSlug,
+      resourceContext.origin.sourceType,
+      resourceContext.origin.sourceInstanceId,
+      legacyTimestamp,
+    ])}`
+  ).filter((resourceId) => resourceId !== primary.resourceId);
 
-  return legacyResourceId === primary.resourceId
-    ? undefined
-    : [{ ...primary, resourceId: legacyResourceId }];
+  const uniqueLegacyResourceIds = [...new Set(legacyResourceIds)];
+  return uniqueLegacyResourceIds.length > 0
+    ? uniqueLegacyResourceIds.map((resourceId) => ({ ...primary, resourceId }))
+    : undefined;
 }
 
 function buildStableTimeseriesResourceId(

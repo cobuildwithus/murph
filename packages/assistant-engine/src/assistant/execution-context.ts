@@ -122,7 +122,6 @@ export type AssistantHostedDeviceToolRequest =
   | {
       accountId: string
       action: 'reconcile'
-      resolution?: 'keep_member' | 'use_provider'
     }
 
 export interface AssistantHostedDeviceAccountSummary {

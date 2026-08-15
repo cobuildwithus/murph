@@ -1126,19 +1126,17 @@ describe('hosted domain dynamic tools', () => {
     expect(readToolRequest('device', {
       accountId: 'device-account-1',
       action: 'reconcile',
-      resolution: 'keep_member',
     })).toEqual({
       kind: 'device',
       request: {
         accountId: 'device-account-1',
         action: 'reconcile',
-        resolution: 'keep_member',
       },
     })
     expect(readToolRequest('device', {
       accountId: 'device-account-1',
       action: 'reconcile',
-      resolution: 'replace_everything',
+      token: 'not-allowed',
     })).toMatchObject({ kind: 'invalid-device-arguments' })
     expect(readToolRequest('device', {
       action: 'connect',
