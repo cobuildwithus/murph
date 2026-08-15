@@ -1997,7 +1997,10 @@ describe('monorepo release flow coverage audit', () => {
       '.bin',
       'cobuild-review-gpt',
     )
-    const runDry = (extraArgs: string[] = []) =>
+    const runDry = (
+      extraArgs: string[] = [],
+      envOverrides: NodeJS.ProcessEnv = {},
+    ) =>
       spawnSync(
         reviewGptBin,
         [
@@ -2020,6 +2023,7 @@ describe('monorepo release flow coverage audit', () => {
             HOME: harnessRoot,
             REVIEW_GPT_BROWSER_LANE_COUNT: '1',
             XDG_CONFIG_HOME: localConfigRoot,
+            ...envOverrides,
           },
         },
       )
@@ -2053,10 +2057,28 @@ describe('monorepo release flow coverage audit', () => {
       expect(perRunResult.stdout).toContain(
         'Idle draft cleanup: close hidden, inactive unsent drafts after 2000ms',
       )
+
+      const preliminaryPrResult = runDry(['--response-marker', 'REVIEW_COMPLETE'], {
+        REVIEW_GPT_PR_URL: '42',
+        REVIEW_GPT_REVIEW_PHASE: 'preliminary',
+      })
+      expect(preliminaryPrResult.status, preliminaryPrResult.stderr).toBe(0)
+      expect(preliminaryPrResult.stdout).toContain(
+        'Minimum marked response time: 300000ms',
+      )
+
+      const finalPrResult = runDry(['--response-marker', 'REVIEW_COMPLETE'], {
+        REVIEW_GPT_PR_URL: '42',
+        REVIEW_GPT_REVIEW_PHASE: 'final',
+      })
+      expect(finalPrResult.status, finalPrResult.stderr).toBe(0)
+      expect(finalPrResult.stdout).toContain(
+        'Minimum marked response time: 450000ms',
+      )
     } finally {
       rmSync(harnessRoot, { force: true, recursive: true })
     }
-  })
+  }, 180_000)
 
   it('prefers the installed ReviewGPT browser while preserving lane isolation and copied fallback', () => {
     const harnessRoot = realpathSync(

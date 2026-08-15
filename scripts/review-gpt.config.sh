@@ -86,14 +86,8 @@ review_gpt_browser_lane_is_usable() {
   [[ ! -e "$review_gpt_lane_lock" && ! -L "$review_gpt_lane_lock" ]]
 }
 
-review_gpt_review_phase="${review_gpt_direct_review_phase:-final}"
-review_gpt_pr_ref="${review_gpt_direct_pr_url:-$review_gpt_direct_pr_ref}"
-if [[ -n "$review_gpt_pr_ref" ]]; then
-  case "$review_gpt_review_phase" in
-    preliminary) minimum_marked_response_ms="5m" ;;
-    final) minimum_marked_response_ms="7m30s" ;;
-  esac
-fi
+readonly review_gpt_review_phase="${review_gpt_direct_review_phase:-final}"
+readonly review_gpt_pr_ref="${review_gpt_direct_pr_url:-$review_gpt_direct_pr_ref}"
 review_gpt_round_number="${REVIEW_GPT_ROUND_NUMBER:-}"
 review_gpt_full_review_reason="${REVIEW_GPT_FULL_REVIEW_REASON:-}"
 review_gpt_pr_review_prompt_file="pr-deep-review.md"
@@ -335,3 +329,13 @@ review_gpt_register_preset_group "all" \
   "bug-hunt" \
   "legacy-removal" \
   "package-boundaries"
+
+# Local preferences are sourced before preset registration and may wrap those
+# callbacks. Apply the invocation-owned PR evidence floor at the final config
+# boundary so no local callback can restore a lower threshold afterward.
+if [[ -n "$review_gpt_pr_ref" ]]; then
+  case "$review_gpt_review_phase" in
+    preliminary) readonly minimum_marked_response_ms="5m" ;;
+    final) readonly minimum_marked_response_ms="7m30s" ;;
+  esac
+fi
