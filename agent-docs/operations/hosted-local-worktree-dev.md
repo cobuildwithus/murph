@@ -1,6 +1,6 @@
 # Hosted Local Worktree Dev
 
-Last verified: 2026-06-29
+Last verified: 2026-08-13
 
 ## Purpose
 
@@ -58,10 +58,11 @@ The helper:
   stable per-slug ranges; a duplicate slug must fail normal startup port checks
   instead of selecting alternate ports
 - creates or verifies the slug-specific local Postgres database
-- sets the worktree profile, local database URL, web/Worker ports, managed
-  Temporal port, Wrangler persist dir, MinIO data dir, generated
-  crypto-state path, Linq webhook registration cache path, Linq tunnel config,
-  `NEXT_DIST_DIR_MODE=smoke`, and `NEXT_DIST_DIR_SUFFIX=<slug>`
+- sets the worktree profile, local database URL, web/Worker ports, Temporal
+  port with managed Temporal by default, Wrangler persist dir, MinIO data dir,
+  generated crypto-state path, Linq webhook registration cache path, Linq
+  tunnel config, `NEXT_DIST_DIR_MODE=smoke`, and
+  `NEXT_DIST_DIR_SUFFIX=<slug>`
 - publishes the browser-facing hosted web origin as `localhost:<web-port>` by
   default, overwrites inherited remote public web origins locally, and allows
   both `localhost:<web-port>` and `127.0.0.1:<web-port>` for hosted-onboarding
@@ -89,6 +90,20 @@ pnpm hosted-local worktree env <slug>
 `doctor` applies the worktree env internally and checks the resolved non-secret
 config. `env` is inspection-only: it prints the resolved exports with the
 database URL redacted, so do not source it as a complete startup env.
+
+Set `MURPH_DEV_TEMPORAL=disabled` on the helper command when the task does not
+need local Temporal orchestration. The worktree profile otherwise stays on its
+isolated managed Temporal default.
+
+Disabled mode is a fail-closed child-process boundary, not merely a request to
+skip the local Temporal server and Worker. The harness replaces the complete
+hosted and legacy Temporal address, credential, TLS, namespace, and task-queue
+environment surface with explicit empty values for its Web child, Worker, and
+runtime sources. This clearance wins over shell values, the Vercel development
+pull, ignored `.env` / `.env.local` files, and Web-only process overrides. The
+explicit empty values are intentional: the Web dev wrapper loads its ignored
+env files after process start, and an inherited empty value prevents those
+files from restoring a remote Temporal connection.
 
 There is intentionally no out-of-band `worktree down` lifecycle command yet.
 Stop the foreground `pnpm hosted-local worktree up <slug>` process directly.
@@ -143,7 +158,10 @@ Rules for this manual profile:
 - Keep `MURPH_DEV_REUSE_EXISTING_WORKER` unset for a secondary full stack.
 
 For frontend-only work where the Worker/runner is not needed, prefer the
-app-local web command with the same port/dist isolation:
+app-local web command with the same port/dist isolation. Before running it,
+link the worktree to the Vercel project with `vercel link --repo`, or copy only
+the ignored Vercel link metadata from a trusted local checkout. The command
+uses `vercel env run`, so it cannot start without that project metadata.
 
 ```bash
 cd apps/web
@@ -171,8 +189,8 @@ origin is also configured in Privy.
 Worktree-local startup should get authority from the same existing sources as
 the main checkout:
 
-- Vercel project metadata: run `vercel link --repo` in the worktree, or copy only
-  ignored Vercel link metadata from a trusted local checkout. The Vercel CLI
+- Vercel project metadata: use the link established before frontend-only
+  startup, or establish it here before running the full helper. The Vercel CLI
   login and OIDC token generation remain CLI-owned.
 - Vercel development env: let the harness run `vercel env pull`. Use
   `MURPH_DEV_SKIP_VERCEL_PULL=1` only when the shell already has every required
