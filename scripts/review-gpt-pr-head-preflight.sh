@@ -96,6 +96,8 @@ review_gpt_option_requires_value() {
       | --responseFile \
       | --response-marker \
       | --responseMarker \
+      | --minimum-marked-response-time \
+      | --minimumMarkedResponseTime \
       | --browser-path \
       | --browserPath \
       | --filter-output \
@@ -109,6 +111,22 @@ review_gpt_option_requires_value() {
       ;;
   esac
   return 1
+}
+
+review_gpt_reject_minimum_marked_response_override() {
+  local argument
+
+  for argument in "$@"; do
+    case "$argument" in
+      --minimum-marked-response-time \
+        | --minimum-marked-response-time=* \
+        | --minimumMarkedResponseTime \
+        | --minimumMarkedResponseTime=*)
+        echo "Error: Murph's repository ReviewGPT trust floor cannot be overridden on the command line." >&2
+        return 64
+        ;;
+    esac
+  done
 }
 
 review_gpt_detect_pr_phase() {
@@ -276,6 +294,7 @@ review_gpt_run() {
   local explicit_phase="${REVIEW_GPT_REVIEW_PHASE:-}"
   local pr_ref="${REVIEW_GPT_PR_URL:-${REVIEW_GPT_PR_REF:-}}"
 
+  review_gpt_reject_minimum_marked_response_override "$@" || return
   detected_phase="$(review_gpt_detect_pr_phase "$@")"
   if [[ -n "$detected_phase" ]]; then
     if [[ -n "$explicit_phase" && "$explicit_phase" != "$detected_phase" ]]; then
@@ -301,9 +320,6 @@ review_gpt_run() {
     export REVIEW_GPT_REVIEW_PHASE="$detected_phase"
   fi
 
-  # Murph's review workflow owns a five-minute package trust floor even though
-  # the package also supports direct callers with a configurable threshold.
-  export ORACLE_DRAFT_MINIMUM_MARKED_RESPONSE_MS=300000
   exec pnpm exec cobuild-review-gpt --config scripts/review-gpt.config.sh "$@"
 }
 

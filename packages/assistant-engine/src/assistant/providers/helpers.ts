@@ -1094,12 +1094,11 @@ export interface CodexSubagentTurnTokenUsageSample {
 // sendInput, wait, resume — covering freshly spawned and reused children) or
 // by a subAgentActivity item's agentThreadId (multi-agent V2, which emits
 // activity items instead of collab tool calls) become drafts. The model is
-// attributed directly only from V1 spawn items. Canonical V2 activity has no
-// authoritative effective model or service tier, so activity-only children
-// may inherit parentModel only while hosted cross-model routing remains
-// disabled. Warm processes are reused across threads, so a foreign thread id
-// alone is not proof of a subagent — a stale flush from a previous thread must
-// never mint a usage row.
+// attributed directly from V1 spawn items or optional V2 activity evidence;
+// same-model children without explicit evidence inherit parentModel. Warm
+// processes are reused across threads, so a foreign thread id alone is not
+// proof of a subagent — a stale flush from a previous thread must never mint a
+// usage row.
 export function extractCodexSubagentUsageDrafts(input: {
   modelProvider: string | null
   ordinalStart: number

@@ -76,15 +76,10 @@ const HOSTED_CODEX_AUTOCOMPACTION_E2E_INPUT_TOKENS =
   HOSTED_CODEX_EXPECTED_AUTO_COMPACT_TOKEN_LIMIT + 1_000;
 const HOSTED_CODEX_AUTOCOMPACTION_SUMMARY_SENTINEL =
   "HOSTED_CODEX_AUTOCOMPACTION_SUMMARY_SENTINEL";
-const EXPECTED_CHILD_ROUTING_DISABLED_HINT = [
-  "Per-child model, reasoning-effort, and service-tier overrides are disabled because the current V2 activity protocol does not provide authoritative child usage evidence.",
-  "Every hosted child must inherit the root routing.",
-].join(" ");
 const EXPECTED_MULTI_AGENT_USAGE_HINT = [
   "When the active route or skill contract permits delegation, proactively spawn a hosted child for genuinely bounded, self-contained background work whose result is not needed in the current reply, then reply without waiting.",
   "Use the child to replace a later root pass, not duplicate work; skip tiny tasks whose assignment and readback cost exceeds doing them once in the root.",
   "Follow the active route or skill contract for the exact leaf assignment and completion proof.",
-  EXPECTED_CHILD_ROUTING_DISABLED_HINT,
 ].join(" ");
 const EXPECTED_MULTI_AGENT_MODE_HINT =
   "Murph bounded background delegation mode is active; reply-critical work stays in the root.";
@@ -187,9 +182,6 @@ test("hosted Codex runtime config writes Venice Responses config without secret 
   assert.doesNotMatch(config, /^supports_websockets = true$/mu);
   assert.doesNotMatch(config, /signed-venice-egress-credential/u);
   assert.match(config, /\[features\]\nplugins = false\nmemories = false/u);
-  assert.match(config, /^hide_spawn_agent_metadata = true$/mu);
-  assert.ok(config.includes(EXPECTED_CHILD_ROUTING_DISABLED_HINT));
-  assert.doesNotMatch(config, /gpt-5\.6-luna/u);
   assert.match(
     config,
     /\[memories\]\nuse_memories = false\ngenerate_memories = false/u,
@@ -230,9 +222,6 @@ test("hosted Codex runtime config preserves capabilities with custom inference",
   assert.doesNotMatch(config, /^model_reasoning_effort = /mu);
   assert.match(config, /\[features\]\nplugins = false\nmemories = false/u);
   assert.match(config, /\[features\.multi_agent_v2\]\nenabled = true/u);
-  assert.match(config, /^hide_spawn_agent_metadata = true$/mu);
-  assert.ok(config.includes(EXPECTED_CHILD_ROUTING_DISABLED_HINT));
-  assert.doesNotMatch(config, /gpt-5\.6-luna/u);
   assert.match(config, /^max_concurrent_threads_per_session = 4$/mu);
   assert.match(
     config,
@@ -334,12 +323,6 @@ test("hosted Codex runtime config writes OpenAI Responses config without secret 
   assert.ok(config.includes([
     "[features.multi_agent_v2]",
     "enabled = true",
-    "# Production rollout gate: the pinned V2 activity contract lacks",
-    "# authoritative effective child model, service tier, provider-attempt",
-    "# identity, and terminal usage. Do not price a routed child as its parent.",
-    "# Keep this hidden until the Codex binary and assistant-engine evidence path",
-    "# are upgraded together; no deployment flag may bypass that ownership change.",
-    "hide_spawn_agent_metadata = true",
     "# V2 counts the root in this limit: four means root plus three children.",
     "max_concurrent_threads_per_session = 4",
     `usage_hint_text = ${JSON.stringify(EXPECTED_MULTI_AGENT_USAGE_HINT)}`,
@@ -671,9 +654,6 @@ test("hosted Codex runtime config uses ChatGPT subscription auth in local dev", 
   assert.match(config, /^request_max_retries = 4$/mu);
   assert.match(config, /^stream_max_retries = 0$/mu);
   assert.doesNotMatch(config, /chatgpt-access-token/u);
-  assert.match(config, /^hide_spawn_agent_metadata = true$/mu);
-  assert.ok(config.includes(EXPECTED_CHILD_ROUTING_DISABLED_HINT));
-  assert.doesNotMatch(config, /gpt-5\.6-luna/u);
   assert.match(config, /model_reasoning_effort = "low"/u);
   assert.match(config, /\[features\]\nplugins = false\nmemories = false/u);
   assert.match(
@@ -1961,12 +1941,6 @@ test("hosted Codex config TOML omits credential values and runtime authority hea
       "# A CLI boolean override would replace the table and silently drop them.",
       "[features.multi_agent_v2]",
       "enabled = true",
-      "# Production rollout gate: the pinned V2 activity contract lacks",
-      "# authoritative effective child model, service tier, provider-attempt",
-      "# identity, and terminal usage. Do not price a routed child as its parent.",
-      "# Keep this hidden until the Codex binary and assistant-engine evidence path",
-      "# are upgraded together; no deployment flag may bypass that ownership change.",
-      "hide_spawn_agent_metadata = true",
       "# V2 counts the root in this limit: four means root plus three children.",
       "max_concurrent_threads_per_session = 4",
       `usage_hint_text = ${JSON.stringify(EXPECTED_MULTI_AGENT_USAGE_HINT)}`,
@@ -2054,12 +2028,6 @@ test("hosted Codex config keeps skill instructions and native memory disabled", 
     `subagent_usage_hint_text = ${JSON.stringify(EXPECTED_SUBAGENT_USAGE_HINT)}`,
   ));
   assert.doesNotMatch(config, /Non-blocking delegation:/u);
-  assert.match(config, /^hide_spawn_agent_metadata = true$/mu);
-  assert.ok(config.includes(EXPECTED_CHILD_ROUTING_DISABLED_HINT));
-  assert.doesNotMatch(
-    config,
-    /Authoritative child usage evidence is active for Murph onboarding foundation persistence/u,
-  );
   assert.match(config, /^max_concurrent_threads_per_session = 4$/mu);
   assert.match(config, /\[memories\]\nuse_memories = false/u);
   assert.match(config, /^generate_memories = false$/mu);
@@ -2074,7 +2042,7 @@ test("hosted Codex config keeps skill instructions and native memory disabled", 
   assert.match(config, /break provider prefix caching/u);
 });
 
-test("hosted Codex keeps onboarding Luna routing fail-closed without authoritative child usage evidence", () => {
+test("hosted Codex config promotes permitted leaf delegation without cross-model routing", () => {
   const config = buildHostedCodexConfigToml({
     model: "gpt-5.6-terra",
     provider: {
@@ -2096,16 +2064,10 @@ test("hosted Codex keeps onboarding Luna routing fail-closed without authoritati
   assert.ok(config.includes(
     "Complete only the self-contained assignment and stop.",
   ));
-  assert.match(config, /^hide_spawn_agent_metadata = true$/mu);
-  assert.ok(config.includes(EXPECTED_CHILD_ROUTING_DISABLED_HINT));
   assert.doesNotMatch(config, /^expose_spawn_agent_model_overrides/mu);
   assert.doesNotMatch(config, /^default_subagent_model/mu);
   assert.doesNotMatch(config, /^default_subagent_reasoning_effort/mu);
   assert.doesNotMatch(config, /gpt-5\.6-luna/u);
-  assert.doesNotMatch(
-    config,
-    /Authoritative child usage evidence is active for Murph onboarding foundation persistence/u,
-  );
 });
 
 test("hosted Codex runtime exposes a stable package-owned assistant skill root", async () => {

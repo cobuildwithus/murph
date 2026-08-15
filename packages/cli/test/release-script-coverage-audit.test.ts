@@ -1089,8 +1089,12 @@ describe('monorepo release flow coverage audit', () => {
     expect(rootPackageJson.scripts?.['review:gpt']).toBe(
       'bash scripts/review-gpt-pr-head-preflight.sh --run',
     )
+    expect(reviewGptConfig).toContain('minimum_marked_response_ms=300000')
     expect(reviewGptPrHeadPreflight).toContain(
-      'export ORACLE_DRAFT_MINIMUM_MARKED_RESPONSE_MS=300000',
+      'review_gpt_reject_minimum_marked_response_override "$@"',
+    )
+    expect(reviewGptPrHeadPreflight).not.toContain(
+      'export ORACLE_DRAFT_MINIMUM_MARKED_RESPONSE_MS=',
     )
     for (const scriptName of removedScripts) {
       expect(rootPackageJson.scripts?.[scriptName]).toBeUndefined()
@@ -2003,6 +2007,8 @@ describe('monorepo release flow coverage audit', () => {
           '--config',
           'scripts/review-gpt.config.sh',
           '--wait',
+          '--response-marker',
+          'REVIEW_COMPLETE',
           '--dry-run',
           '--no-zip',
           '--browser-path',
@@ -2017,6 +2023,7 @@ describe('monorepo release flow coverage audit', () => {
           env: {
             ...withoutNodeV8Coverage(),
             HOME: harnessRoot,
+            ORACLE_DRAFT_MINIMUM_MARKED_RESPONSE_MS: '1',
             REVIEW_GPT_BROWSER_LANE_COUNT: '1',
             XDG_CONFIG_HOME: localConfigRoot,
           },
@@ -2032,16 +2039,22 @@ describe('monorepo release flow coverage audit', () => {
       expect(defaultResult.stdout).toContain(
         'Idle draft cleanup: close hidden, inactive unsent drafts after 1800000ms',
       )
+      expect(defaultResult.stdout).toContain(
+        'Minimum marked response time: 300000ms',
+      )
 
       writeHarnessFile(
         localConfigRoot,
         'murph/review-gpt.conf',
-        'response_timeout_ms=7654321\n',
+        'minimum_marked_response_ms=1\nresponse_timeout_ms=7654321\n',
       )
       const localResult = runDry()
       expect(localResult.status, localResult.stderr).toBe(0)
       expect(localResult.stdout).toContain(
         'Response capture: enabled (7654321ms timeout)',
+      )
+      expect(localResult.stdout).toContain(
+        'Minimum marked response time: 300000ms',
       )
 
       const perRunResult = runDry(['--wait-timeout', '42m', '--idle-draft-timeout', '2s'])
@@ -2531,36 +2544,52 @@ review_gpt_require_completion_specialists_prompt_budget "$@"
     )
   })
 
-  it('pins the package ReviewGPT marked-response floor at the repository boundary', () => {
+  it('rejects package ReviewGPT marked-response threshold overrides at the repository boundary', () => {
     const harnessRoot = mkdtempSync(path.join(os.tmpdir(), 'review-gpt-floor-'))
     const binRoot = path.join(harnessRoot, 'bin')
     const fakePnpmPath = path.join(binRoot, 'pnpm')
+    const packageInvokedMarker = path.join(harnessRoot, 'package-invoked')
     try {
       mkdirSync(binRoot, { recursive: true })
       writeFileSync(
         fakePnpmPath,
-        '#!/usr/bin/env bash\nprintf \'%s\\n\' "$ORACLE_DRAFT_MINIMUM_MARKED_RESPONSE_MS"\n',
+        '#!/usr/bin/env bash\n: > "$PACKAGE_INVOKED_MARKER"\n',
         { mode: 0o755 },
       )
-      const result = spawnSync(
-        'bash',
-        [
-          '-c',
-          'source "$REPO_ROOT/scripts/review-gpt-pr-head-preflight.sh"; review_gpt_run --version',
-        ],
-        {
-          cwd: repoRoot,
-          encoding: 'utf8',
-          env: {
-            ...withoutNodeV8Coverage(),
-            ORACLE_DRAFT_MINIMUM_MARKED_RESPONSE_MS: '1',
-            PATH: `${binRoot}:${process.env.PATH ?? ''}`,
-            REPO_ROOT: repoRoot,
+      for (const overrideArgs of [
+        ['--minimum-marked-response-time', '1s'],
+        ['--minimum-marked-response-time=1s'],
+        ['--minimumMarkedResponseTime', '1s'],
+        ['--minimumMarkedResponseTime=1s'],
+      ]) {
+        rmSync(packageInvokedMarker, { force: true })
+        const result = spawnSync(
+          'bash',
+          [
+            '-c',
+            'source "$REPO_ROOT/scripts/review-gpt-pr-head-preflight.sh"; review_gpt_run "$@"',
+            'review-gpt-floor',
+            ...overrideArgs,
+            '--version',
+          ],
+          {
+            cwd: repoRoot,
+            encoding: 'utf8',
+            env: {
+              ...withoutNodeV8Coverage(),
+              ORACLE_DRAFT_MINIMUM_MARKED_RESPONSE_MS: '1',
+              PACKAGE_INVOKED_MARKER: packageInvokedMarker,
+              PATH: `${binRoot}:${process.env.PATH ?? ''}`,
+              REPO_ROOT: repoRoot,
+            },
           },
-        },
-      )
-      expect(result.status, result.stderr).toBe(0)
-      expect(result.stdout.trim()).toBe('300000')
+        )
+        expect(result.status).not.toBe(0)
+        expect(result.stderr).toContain(
+          "Murph's repository ReviewGPT trust floor cannot be overridden",
+        )
+        expect(existsSync(packageInvokedMarker)).toBe(false)
+      }
     } finally {
       rmSync(harnessRoot, { force: true, recursive: true })
     }
