@@ -16,8 +16,9 @@ export async function admitHostedDeviceWebhookBatch(input: {
   shouldContinue?: () => boolean;
 }): Promise<DeviceWebhookAdmissionResultV1> {
   const startedAt = Date.now();
+  const batchSize = input.entries.length;
   const resultSlots = new Array<DeviceWebhookAdmissionResultV1["entries"][number]>(
-    input.entries.length,
+    batchSize,
   );
   const failureCounts = new Map<string, number>();
   const accountLanes = new Map<string, Array<{
@@ -117,7 +118,7 @@ export async function admitHostedDeviceWebhookBatch(input: {
     acceptedCount,
     accountLaneCount: lanes.length,
     activeLaneCount,
-    batchSize: input.entries.length,
+    batchSize,
     chunkSize: DEVICE_WEBHOOK_ADMISSION_ACCOUNT_CHUNK_SIZE,
     durationMs: Date.now() - startedAt,
     duplicateCount,
