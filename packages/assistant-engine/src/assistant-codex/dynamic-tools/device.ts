@@ -31,7 +31,6 @@ const deviceArgumentsSchema = z.discriminatedUnion('action', [
   z.object({
     accountId: z.string().trim().min(1).max(191),
     action: z.literal('reconcile'),
-    resolution: z.enum(['keep_member', 'use_provider']).optional(),
   }).strict(),
 ])
 
@@ -39,7 +38,7 @@ export const MURPH_DEVICE_TOOL = {
   namespace: 'murph',
   name: 'device',
   description:
-    'Work with the current authenticated member’s wearable and health-device accounts. list_accounts returns matching accountId, provider, status, last sync, and safe error context. connect returns a short-lived connectUrl for a supported provider. reconcile queues a refresh for one returned accountId; queued does not mean completed. When lastErrorCode is DEVICE_DATA_MEMBER_EDIT_CONFLICT, reconcile may include resolution keep_member or use_provider only after the member explicitly chooses. Never ask for or pass provider credentials, tokens, delivery routes, or generic commands.',
+    'Work with the current authenticated member’s wearable and health-device accounts. list_accounts returns matching accountId, provider, status, last sync, and safe error context. connect returns a short-lived connectUrl for a supported provider. reconcile queues a refresh for one returned accountId; queued does not mean completed. Never ask for or pass provider credentials, tokens, delivery routes, or generic commands.',
   inputSchema: z.toJSONSchema(deviceArgumentsSchema, { io: 'input' }),
 } as const
 
@@ -63,7 +62,7 @@ export function readDeviceDynamicToolRequest(input: {
 
   const parsed = parseDynamicToolArguments({
     schema: deviceArgumentsSchema,
-    schemaRootKeys: ['accountId', 'action', 'provider', 'resolution', 'sourceProvider'],
+    schemaRootKeys: ['accountId', 'action', 'provider', 'sourceProvider'],
     toolName: 'murph.device',
     value: input.arguments,
   })

@@ -4917,7 +4917,6 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       expect(new URL(request.url).pathname).toBe("/api/internal/device-sync/reconcile");
       await expect(request.json()).resolves.toEqual({
         connectionId: "conn_123",
-        memberEditConflictResolution: "keep_member",
       });
       return new Response(JSON.stringify({
         connectionId: "conn_123",
@@ -4940,7 +4939,6 @@ describe("buildHostedExecutionRuntimePlatform", () => {
 
     await expect(platform.deviceSyncPort!.reconcileAccount!({
       connectionId: "conn_123",
-      memberEditConflictResolution: "keep_member",
     })).resolves.toEqual({
       connectionId: "conn_123",
       occurredAt: "2026-07-15T12:00:00.000Z",

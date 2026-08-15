@@ -277,7 +277,6 @@ function buildDeviceSyncWake(input: {
       priority?: number;
     }>;
     nextReconcileAt?: string | null;
-    memberEditConflictResolution?: "keep_member" | "use_provider";
     reason?: string | null;
   };
   occurredAt: string;
@@ -8207,9 +8206,6 @@ describe("hosted device-sync runtime", () => {
         },
         externalAccountId: account.externalAccountId,
         localState: {
-          lastErrorCode: "DEVICE_DATA_MEMBER_EDIT_CONFLICT",
-          lastErrorMessage: "A member-owned correction conflicts with connected data.",
-          lastSyncErrorAt: "2026-04-04T09:30:00.000Z",
           nextReconcileAt: "2026-04-04T12:00:00.000Z",
         },
         provider: "junction",
@@ -8221,7 +8217,6 @@ describe("hosted device-sync runtime", () => {
         wake: buildDeviceSyncWake({
           connectionId: "hosted_conn_manual_reconcile",
           hint: {
-            memberEditConflictResolution: "keep_member",
             reason: "manual_reconcile",
           },
           occurredAt: "2026-04-04T10:00:00.000Z",
@@ -8235,10 +8230,7 @@ describe("hosted device-sync runtime", () => {
       assert.equal(jobs.length, 1);
       assert.equal(jobs[0]?.kind, "reconcile");
       assert.equal(jobs[0]?.priority, 80);
-      assert.equal(
-        JSON.parse(jobs[0]?.payloadJson ?? "{}").memberEditConflictResolution,
-        "keep_member",
-      );
+      assert.deepEqual(JSON.parse(jobs[0]?.payloadJson ?? "{}"), {});
       assert.equal(jobs[0]?.status, "queued");
       assert.equal(
         getStore(service).getAccountById(account.id)?.nextReconcileAt,

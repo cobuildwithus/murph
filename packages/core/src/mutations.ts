@@ -329,12 +329,9 @@ interface ImportDeviceBatchInput {
   samples?: readonly DeviceSampleInput[];
   evidenceParts?: readonly DeviceEvidencePartInput[];
   authoritativeEventSets?: readonly DeviceAuthoritativeEventSetInput[];
-  memberEditConflictResolution?: DeviceMemberEditConflictResolution;
   ingestReceipt?: Record<string, unknown>;
   provenance?: Record<string, unknown>;
 }
-
-type DeviceMemberEditConflictResolution = "keep_member" | "use_provider";
 
 interface ImportDeviceBatchResultBase {
   applied: boolean;
@@ -407,7 +404,6 @@ interface NormalizedDeviceBatchInputs {
   samples: NormalizedDeviceSample[];
   evidenceParts: NormalizedDeviceEvidencePart[];
   authoritativeEventSets: NormalizedDeviceAuthoritativeEventSet[];
-  memberEditConflictResolution?: DeviceMemberEditConflictResolution;
 }
 
 interface NormalizedDeviceAuthoritativeEventSet {
@@ -451,7 +447,6 @@ interface DeviceBatchPlan {
   preparedSamples: PreparedJsonlEntry<SampleRecord>[];
   preparedEvidenceParts: IntegrationEvidencePart[];
   authoritativeEventSets: readonly NormalizedDeviceAuthoritativeEventSet[];
-  memberEditConflictResolution?: DeviceMemberEditConflictResolution;
 }
 
 const MAX_DEVICE_PROVIDER_SAMPLE_ROWS_DEFAULT = 1_000;
@@ -1622,7 +1617,6 @@ function normalizeDeviceBatchInputs({
   samples = [],
   evidenceParts = [],
   authoritativeEventSets = [],
-  memberEditConflictResolution,
   ingestReceipt,
   provenance,
 }: Omit<ImportDeviceBatchInput, "vaultRoot"> & {
@@ -1644,16 +1638,6 @@ function normalizeDeviceBatchInputs({
     "Device ingest receipt must be a plain object.",
   );
   const normalizedIngestReceipt = compactIntegrationIngestReceipt(legacyIngestReceipt);
-  if (
-    memberEditConflictResolution !== undefined
-    && memberEditConflictResolution !== "keep_member"
-    && memberEditConflictResolution !== "use_provider"
-  ) {
-    throw new VaultError(
-      "VAULT_INVALID_DEVICE_MEMBER_EDIT_CONFLICT_RESOLUTION",
-      "Device member-edit conflict resolution must be keep_member or use_provider.",
-    );
-  }
   const eventInputs = normalizeDeviceBatchObjectArray<DeviceEventInput>({
     value: events,
     code: "VAULT_INVALID_DEVICE_EVENTS",
@@ -1724,7 +1708,6 @@ function normalizeDeviceBatchInputs({
       authoritativeEventSetInputs,
       normalizedEvents,
     ),
-    memberEditConflictResolution,
   };
 }
 
@@ -2423,9 +2406,33 @@ function isCompatibleLegacyExternalRefMatch(
     return hasStableJunctionSleepStageSummaryLegacyProof(existing, incoming);
   }
 
+  if (isJunctionNoIdProfileLegacyRef(existing, incoming, legacyExternalRef)) {
+    return true;
+  }
+
   return existing.record.dayKey === incoming.dayKey ||
     (isSameObservationFacet(existing.record, incoming) &&
       hasStableLegacyOccurrenceProof(existing, incoming, legacyExternalRef));
+}
+
+function isJunctionNoIdProfileLegacyRef(
+  existing: IndexedEventExternalRefMatch,
+  incoming: EventRecord,
+  legacyExternalRef: ExternalRef,
+): boolean {
+  const primaryRef = incoming.externalRef;
+  const existingOrigin = existing.indexedRecord.dataOrigin ?? existing.record.dataOrigin;
+  return legacyExternalRef.system === "junction"
+    && legacyExternalRef.resourceType.endsWith("-profile")
+    && /^profile-[a-f0-9]{16}$/u.test(legacyExternalRef.resourceId)
+    && /^profile-[a-f0-9]{16}$/u.test(primaryRef?.resourceId ?? "")
+    && legacyExternalRef.resourceId !== primaryRef?.resourceId
+    && primaryRef?.version !== undefined
+    && existing.indexedRecord.occurredAt === primaryRef.version
+    && existingOrigin?.sourceProviderSlug !== undefined
+    && existingOrigin.sourceProviderSlug === incoming.dataOrigin?.sourceProviderSlug
+    && existingOrigin.sourceInstanceId === incoming.dataOrigin?.sourceInstanceId
+    && deviceDataOriginSourceMatches(existingOrigin, incoming.dataOrigin);
 }
 
 function selectLatestIndexedEventExternalRefMatch(
@@ -2913,7 +2920,6 @@ async function reconcileDeviceEventEntriesByExternalRef(
   existingContext?: DeviceEventIdentityContext,
   preferredCanonicalIdByPreparedId: ReadonlyMap<string, string> = new Map(),
   authoritativeEventSets: readonly NormalizedDeviceAuthoritativeEventSet[] = [],
-  memberEditConflictResolution?: DeviceMemberEditConflictResolution,
 ): Promise<EventExternalRefReconciliation> {
   assertCanonicalWriteLockScope(vaultRoot);
   const context = existingContext ?? await buildDeviceEventIdentityContext(vaultRoot, entries);
@@ -3196,15 +3202,6 @@ async function reconcileDeviceEventEntriesByExternalRef(
     const historicalUserEditMatch = matchedEntries.find((match) =>
       hasHistoricalExternalRefUserAuthoredChanges(match.indexedMatch)
     );
-    if (historicalUserEditMatch && !memberEditConflictResolution) {
-      throw new VaultError(
-        "EVENT_EXTERNAL_REF_ALIAS_CONFLICT",
-        `Event externalRef "${externalRef.system}/${externalRef.resourceType}/${externalRef.resourceId}` +
-          `${externalRef.facet ? `#${externalRef.facet}` : ""}" matched a historical provider identity ` +
-          "whose latest event revision contains user-authored changes; merge must be repaired explicitly.",
-        { reason: "member_edit_conflict" },
-      );
-    }
 
     const revision = Math.max(
       eventSpineRevision(latest),
@@ -3216,7 +3213,6 @@ async function reconcileDeviceEventEntriesByExternalRef(
       lifecycle: buildEventSpineLifecycle(revision),
     };
     const retainedMemberRevision = historicalUserEditMatch
-      && memberEditConflictResolution === "keep_member"
       ? {
           ...latest,
           lifecycle: buildEventSpineLifecycle(revision + 1),
@@ -3298,14 +3294,6 @@ async function reconcileDeviceEventEntriesByExternalRef(
         );
       }
       const hasMemberEdit = hasHistoricalExternalRefUserAuthoredChanges(latestMatch);
-      if (hasMemberEdit && !memberEditConflictResolution) {
-        throw new VaultError(
-          "EVENT_EXTERNAL_REF_ALIAS_CONFLICT",
-          `Authoritative device event externalRef "${set.system}/${set.resourceType}/` +
-            `${set.resourceId}#${latestRef.facet}" has user-authored revisions and cannot be retracted automatically.`,
-          { reason: "member_edit_conflict" },
-        );
-      }
 
       const revision = Math.max(
         eventSpineRevision(latest),
@@ -3319,7 +3307,6 @@ async function reconcileDeviceEventEntriesByExternalRef(
         lifecycle: buildEventSpineLifecycle(revision, "deleted"),
       };
       const retainedMemberRevision = hasMemberEdit
-        && memberEditConflictResolution === "keep_member"
         ? {
             ...latest,
             lifecycle: buildEventSpineLifecycle(revision + 1),
@@ -3934,7 +3921,6 @@ function prepareDeviceBatchPlan({
   samples = [],
   evidenceParts = [],
   authoritativeEventSets = [],
-  memberEditConflictResolution,
   ingestReceipt,
   provenance,
 }: Omit<ImportDeviceBatchInput, "vaultRoot"> & {
@@ -3950,7 +3936,6 @@ function prepareDeviceBatchPlan({
     samples,
     evidenceParts,
     authoritativeEventSets,
-    memberEditConflictResolution,
     ingestReceipt,
     provenance,
   });
@@ -4029,7 +4014,6 @@ function prepareDeviceBatchPlan({
     preparedSamples,
     preparedEvidenceParts,
     authoritativeEventSets: normalizedInputs.authoritativeEventSets,
-    memberEditConflictResolution: normalizedInputs.memberEditConflictResolution,
   };
 }
 
@@ -4984,7 +4968,6 @@ export async function importDeviceBatch({
   samples = [],
   evidenceParts = [],
   authoritativeEventSets = [],
-  memberEditConflictResolution,
   ingestReceipt,
   provenance,
 }: ImportDeviceBatchInput): Promise<ImportDeviceBatchResult> {
@@ -5000,7 +4983,6 @@ export async function importDeviceBatch({
     samples,
     evidenceParts,
     authoritativeEventSets,
-    memberEditConflictResolution,
     ingestReceipt,
     provenance,
   });
@@ -5065,7 +5047,6 @@ export async function importDeviceBatch({
     cloneDeviceEventIdentityContext(eventIdentityContext),
     new Map(),
     deviceBatchPlan.authoritativeEventSets,
-    deviceBatchPlan.memberEditConflictResolution,
   );
   const replayRetainedPreparedIds = new Set([
     ...protectedPreparedEventIds,
@@ -5517,7 +5498,6 @@ export async function importDeviceBatch({
           cloneDeviceEventIdentityContext(eventIdentityContext),
           new Map(),
           deviceBatchPlan.authoritativeEventSets,
-          deviceBatchPlan.memberEditConflictResolution,
         )
       : currentEventReconciliation;
     const reconciledRecordByPreparedId = new Map(
