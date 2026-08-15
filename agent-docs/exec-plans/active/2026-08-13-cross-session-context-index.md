@@ -196,6 +196,15 @@ Updated: 2026-08-14
   present and replaces both ad hoc provider-id searches with the existing
   fail-closed exact-delivery resolver. Unanchored selection remains sent-only;
   no state, owner, migration, repair, or lifecycle mechanism is added.
+- Final ReviewGPT round 10 found that eager successor steering could append a
+  later input to the shared pre-provider journal before the preceding
+  provider-acknowledged input crossed its durable local admission boundary.
+  The correction makes an acknowledged-but-not-locally-admitted queue item a
+  barrier, removes both eager successor transitions, and resumes the existing
+  queue only after the acceptance receipt, checkpoint, and provider-request
+  membership update complete. This adds one ephemeral controller operation and
+  no durable state, journal, queue, scheduler, lease, timeout, repair loop,
+  migration version, or lifecycle owner.
 
 ## Verification
 
@@ -256,3 +265,9 @@ Updated: 2026-08-14
   from a persisted message-delivery completion checkpoint instead of being
   terminally suppressed. The full 81-test reply-event suite, 32-test exact
   route-state suite, and assistant-engine typecheck pass.
+- ReviewGPT round 10 remediation: the production-shaped local-service test
+  fails on the prior eager ordering and passes when successor pre-provider
+  binding waits for the prior acceptance receipt, checkpoint, and provider
+  request update. The 22-test controller suite, 102-test local-service suite,
+  81-test reply-event suite, 32-test exact route-state suite, assistant-engine
+  typecheck, and assistant-engine build pass.

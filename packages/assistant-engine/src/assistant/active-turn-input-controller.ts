@@ -260,6 +260,10 @@ class AssistantActiveTurnInputController {
     return await this.admitPending({ requireProviderAcknowledged: true })
   }
 
+  resumeLiveSteersAfterLocalAdmission(): void {
+    this.tryStartLiveSteers()
+  }
+
   private async admitPending(input?: {
     requireProviderAcknowledged?: boolean
   }): Promise<AssistantActiveTurnInputAdmissionResult | undefined> {
@@ -523,7 +527,6 @@ class AssistantActiveTurnInputController {
         item.manualCompletion.accepted = true
       }
     }
-    this.tryStartLiveSteers()
     return accepted
   }
 
@@ -536,7 +539,8 @@ class AssistantActiveTurnInputController {
 
     for (const item of this.pending) {
       if (item.providerInputAcknowledgedTurnKey === liveProviderTurnKey) {
-        continue
+        // Provider acknowledgement alone is not durable local admission.
+        return
       }
       if (item.providerInputAck && item.providerInputAckTurnKey === liveProviderTurnKey) {
         return
@@ -569,7 +573,6 @@ class AssistantActiveTurnInputController {
           ) {
             item.providerInputAcknowledgedTurnKey = liveProviderTurnKey
           }
-          this.tryStartLiveSteers()
           return item.providerInputAcknowledgedTurnKey === liveProviderTurnKey
         })
         .catch(async (error: unknown) => {
@@ -672,6 +675,7 @@ export function createAssistantActiveTurnInputController(input: {
     signal?: AbortSignal
   }): Promise<AssistantActiveTurnInputAdmissionResult | undefined>
   registerLiveProviderTurn(input: AssistantActiveTurnLiveProviderTurn): () => void
+  resumeLiveSteersAfterLocalAdmission(): void
 } {
   const keys = resolveAssistantActiveTurnInputControllerKeys(input)
   const controller = new AssistantActiveTurnInputController({
@@ -720,6 +724,8 @@ export function createAssistantActiveTurnInputController(input: {
     notifyInputAvailable: (notificationInput) =>
       controller.notifyInputAvailable(notificationInput),
     registerLiveProviderTurn: (turn) => controller.registerLiveProviderTurn(turn),
+    resumeLiveSteersAfterLocalAdmission: () =>
+      controller.resumeLiveSteersAfterLocalAdmission(),
   }
 }
 

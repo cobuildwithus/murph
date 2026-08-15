@@ -1484,13 +1484,18 @@ test('active-turn controller admits an exact notified batch one successor at a t
       inputIds: [firstInputId, secondInputId],
     })
     await vi.waitFor(() => {
-      expect(steer).toHaveBeenCalledTimes(2)
+      expect(steer).toHaveBeenCalledTimes(1)
     })
     assert.deepEqual(admittedInputIds, [
       [firstInputId, secondInputId],
       [secondInputId],
     ])
     const firstAdmission = await controller.admitLiveSteered()
+    expect(steer).toHaveBeenCalledTimes(1)
+    controller.resumeLiveSteersAfterLocalAdmission()
+    await vi.waitFor(() => {
+      expect(steer).toHaveBeenCalledTimes(2)
+    })
     const secondAdmission = await controller.admitLiveSteered()
     assert.equal(firstAdmission?.kind, 'accepted')
     assert.equal(secondAdmission?.kind, 'accepted')
@@ -1591,7 +1596,7 @@ test('active-turn controller reruns input-available admission after an accepted 
     assert.deepEqual(knownInputSnapshots, [[], ['hook-1']])
     assert.equal(firstResult?.kind, 'accepted')
     assert.equal(secondResult?.kind, 'accepted')
-    expect(steer).toHaveBeenCalledTimes(2)
+    expect(steer).toHaveBeenCalledTimes(1)
     assert.deepEqual(await controller.admitLiveSteered(), {
       acceptedInputs: [
         {
@@ -1611,6 +1616,10 @@ test('active-turn controller reruns input-available admission after an accepted 
           type: 'text',
         },
       ],
+    })
+    controller.resumeLiveSteersAfterLocalAdmission()
+    await vi.waitFor(() => {
+      expect(steer).toHaveBeenCalledTimes(2)
     })
     assert.deepEqual(await controller.admitLiveSteered(), {
       acceptedInputs: [
