@@ -168,3 +168,6 @@ the member's current authorized Telegram route.
   owner.
 - The round 9 remediation passes 97 focused Web phone-call service, delivery,
   notification-store, and reconciliation tests. Web typecheck also passes.
+- ReviewGPT tooling is updated from `0.5.127` to the registry-latest `0.5.131`
+  with the matching narrow minimum-release-age exception and lockfile integrity.
+  A frozen-lockfile install and the installed CLI version check pass.
