@@ -7046,6 +7046,7 @@ async function withHostedSystemMailboxHandledThroughStatus(input: {
   });
   return {
     ...(input.redactedStatus ?? {}),
+    hostedMailboxSystemImportedSeq: mailboxState.watermarks.system,
     hostedMailboxSystemHandledThroughSeq:
       await readHostedSystemMailboxHandledThroughSeq({
         importedSeq: mailboxState.watermarks.system,

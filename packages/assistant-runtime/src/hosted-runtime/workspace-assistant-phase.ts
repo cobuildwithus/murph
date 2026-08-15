@@ -279,10 +279,12 @@ const HOSTED_MEMBER_CHANNEL_UPDATE_ROUTE_ACTIONS = ["apply-member-channels-updat
 const HOSTED_MEMBER_PREFERENCE_PRE_PLANNING_ROUTE_ACTIONS = [
   "apply-member-preferences",
 ] as const;
-const HOSTED_POST_FOREGROUND_MEMBER_ACTION_ROUTE_ACTIONS = [
+const HOSTED_POST_FOREGROUND_MEMBER_MAINTENANCE_ROUTE_ACTIONS = [
+  "apply-member-activation",
   "apply-member-action",
 ] as const;
-const HOSTED_POST_FOREGROUND_MEMBER_ACTION_WAKE_KINDS = [
+const HOSTED_POST_FOREGROUND_MEMBER_MAINTENANCE_WAKE_KINDS = [
+  "member.activated",
   "member.action.requested",
 ] as const;
 const HOSTED_GROUP_ROOM_MODEL_PRE_PLANNING_ROUTE_ACTIONS = [
@@ -2703,7 +2705,7 @@ export async function runHostedWorkspaceAssistantPhase(
           result: timedForegroundAssistantResult,
         }),
       );
-      const result = withPostForegroundMemberActionAfterCheckpoint({
+      const result = withPostForegroundMemberMaintenanceAfterCheckpoint({
         executionContext,
         input,
         result: foregroundResult,
@@ -4772,7 +4774,7 @@ async function runBackgroundMaintenanceAfterDeferredPendingAssistantInput(input:
   });
 }
 
-function withPostForegroundMemberActionAfterCheckpoint(input: {
+function withPostForegroundMemberMaintenanceAfterCheckpoint(input: {
   executionContext: AssistantExecutionContext;
   input: HostedWorkspaceRuntimeAssistantPhaseInput;
   result: HostedWorkspaceRunnerAssistantPhaseResult;
@@ -4794,9 +4796,9 @@ function withPostForegroundMemberActionAfterCheckpoint(input: {
         async () => {
           const maintenance = await runSystemMailboxMaintenancePhase({
             exclusiveRouteActions:
-              HOSTED_POST_FOREGROUND_MEMBER_ACTION_ROUTE_ACTIONS,
+              HOSTED_POST_FOREGROUND_MEMBER_MAINTENANCE_ROUTE_ACTIONS,
             exclusiveWakeKinds:
-              HOSTED_POST_FOREGROUND_MEMBER_ACTION_WAKE_KINDS,
+              HOSTED_POST_FOREGROUND_MEMBER_MAINTENANCE_WAKE_KINDS,
             executionContext: input.executionContext,
             hasFreshConversationInput: false,
             input: input.input,
@@ -4804,14 +4806,14 @@ function withPostForegroundMemberActionAfterCheckpoint(input: {
             pendingAssistantInputWakeAt: null,
             wake: input.wake,
           });
-          return deferPostForegroundMemberActionResult(maintenance.result);
+          return deferPostForegroundMemberMaintenanceResult(maintenance.result);
         },
       ],
     }),
   };
 }
 
-function deferPostForegroundMemberActionResult(
+function deferPostForegroundMemberMaintenanceResult(
   result: HostedWorkspaceRunnerAssistantPhaseResult | null,
 ): HostedWorkspaceRunnerAssistantPhasePostCheckpoint | null {
   if (!result || result.progressed !== true) {

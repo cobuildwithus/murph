@@ -15874,8 +15874,8 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     mocks.prepareHostedSystemMailboxItemForCheckpoint.mockImplementation(
       async (preparationInput) => {
         if (
-          preparationInput.allowedRouteActions?.length === 1
-          && preparationInput.allowedRouteActions[0] === "apply-member-action"
+          preparationInput.allowedRouteActions?.includes("apply-member-action")
+          && preparationInput.allowedWakeKinds?.includes("member.action.requested")
         ) {
           sequence.push("member-action");
           return {
@@ -15935,8 +15935,14 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(
       mocks.prepareHostedSystemMailboxItemForCheckpoint.mock.calls.at(-1)?.[0],
     ).toEqual(expect.objectContaining({
-      allowedRouteActions: ["apply-member-action"],
-      allowedWakeKinds: ["member.action.requested"],
+      allowedRouteActions: [
+        "apply-member-activation",
+        "apply-member-action",
+      ],
+      allowedWakeKinds: [
+        "member.activated",
+        "member.action.requested",
+      ],
       shouldYieldBackgroundMaintenance: null,
     }));
     expect(postCheckpoint).toEqual(expect.objectContaining({
@@ -15955,6 +15961,75 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       runtime: expect.any(Object),
       vaultRoot: "/tmp/murph-vault",
     });
+  });
+
+  it("finishes member activation after the first foreground reply", async () => {
+    const sequence: string[] = [];
+    const activationItem = createMemberActivationSignupWelcomeSystemMailboxItem();
+    mocks.prepareHostedSystemMailboxItemForCheckpoint.mockImplementation(
+      async (preparationInput) => {
+        if (
+          preparationInput.allowedRouteActions?.includes("apply-member-activation")
+          && preparationInput.allowedWakeKinds?.includes("member.activated")
+        ) {
+          sequence.push("member-activation");
+          return {
+            item: activationItem,
+            itemId: activationItem.itemId,
+            metrics: {
+              bootstrapResult: null,
+              conversationMetrics: null,
+              mailboxLane: "member-activated" as const,
+              nextWakeAt: null,
+              postCheckpointRecord: null,
+              redactedLogEntries: [],
+            },
+            status: "processed" as const,
+          };
+        }
+        return null;
+      },
+    );
+    mocks.runHostedAssistantAutomationLane.mockImplementationOnce(async () => {
+      sequence.push("provider");
+      return {
+        assistantAutomationCurrentTurnDeliveryIntentIds: [],
+        assistantAutomationProgressed: true,
+        deviceSyncProcessed: 0,
+        deviceSyncSkipped: true,
+        nextWakeAt: null,
+        parserProcessed: 0,
+        postCheckpointRecord: null,
+        progressed: true,
+        redactedLogEntries: [],
+      };
+    });
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      importedCount: 1,
+    }));
+
+    expect(sequence).toEqual(["provider"]);
+
+    const postCheckpoint = await result.afterCheckpoint?.();
+
+    expect(sequence).toEqual(["provider", "member-activation"]);
+    expect(
+      mocks.prepareHostedSystemMailboxItemForCheckpoint.mock.calls.at(-1)?.[0],
+    ).toEqual(expect.objectContaining({
+      allowedRouteActions: [
+        "apply-member-activation",
+        "apply-member-action",
+      ],
+      allowedWakeKinds: [
+        "member.activated",
+        "member.action.requested",
+      ],
+      shouldYieldBackgroundMaintenance: null,
+    }));
+    expect(postCheckpoint).toEqual(expect.objectContaining({
+      checkpointReason: "system_mailbox_receipt",
+    }));
   });
 
   it("does not scan terminal Linq cleanup during fresh conversation input", async () => {
