@@ -80,6 +80,29 @@ Updated: 2026-08-14
   raw code now crosses the existing HTTP error object unchanged and is checked
   once at the structured-log boundary; absent or unknown values collapse to
   `enqueue_failed`.
+- Final ReviewGPT round 3 opened no tactical finding and required the mandatory
+  round-3 retrospective. The original requirement remains a closed, value-free
+  diagnosis of the encrypted Web-to-Worker handoff while provider responses
+  stay generic and retryable and `Queue.send` remains the only success boundary.
+  From the immutable first-reviewed head to the round-3 head, authored source
+  moved from +173/-60 to +180/-60; the seven added lines are the remaining
+  typed owner-boundary propagation needed for the log-only stage, while round
+  2 deleted 32 net source lines of duplicate Web vocabulary and mapping.
+- Retrospective decision: explicitly continue the current reduced direction.
+  The fine-grained closed stages are required to distinguish the observed
+  production canary's crypto/configuration failure classes without values. The
+  hosted-control package owns persistence classification, the Worker owns the
+  wire vocabulary, the existing HTTP error transports it unchanged, and Web
+  has one allowlist solely at the structured-log boundary. The provider-facing
+  response remains generic. No mapper, second taxonomy, state owner, service,
+  queue, compatibility path, or diagnostic persistence remains or may be added
+  within this direction.
+- Retrospective invariant and stopping rule: signature/body parsing, provider
+  retry, Queue acceptance authority, key rotation, consumer retry, and DLQ
+  behavior remain unchanged and directly covered. Any further proposed change
+  to this diagnostic projection, vocabulary ownership, or stage cardinality
+  requires requirement-level reconsideration instead of another tactical
+  branch. The immutable first-reviewed baseline remains unchanged.
 
 ## Verification
 
@@ -90,5 +113,6 @@ Updated: 2026-08-14
   acceptance, nonzero main-Queue ingestion followed by successful batch
   admission, and no unexplained DLQ growth or rejected-query alert.
 - Current focused proof: hosted-control 75 tests, Worker Queue 8 tests, and Web
-  Queue/route 32 tests pass; hosted-control, Cloudflare, and prepared Web
-  typechecks pass. Exact-head CI and corrected production canary remain pending.
+  Queue/route/device-sync HTTP 46 tests pass; hosted-control, Cloudflare, and
+  prepared Web typechecks pass. Exact-head CI and corrected production canary
+  remain pending.
