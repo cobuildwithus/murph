@@ -67,8 +67,8 @@ import {
   resolveSupportedCodexAppServerApprovalPolicy,
 } from './assistant-codex/app-server-requests.js'
 import {
-  buildRuntimeIssueInputForFailedCodexAction,
   createCodexActionDiagnosticsReducer,
+  createCodexActionRuntimeIssueTracker,
 } from './assistant-codex/action-diagnostics.js'
 import type {
   MurphDynamicToolFinalActionPatch,
@@ -3213,6 +3213,7 @@ async function runCodexAppServerTurnOnProcess(
   const providerActionItemIds = new Set<string>()
   const jsonEvents: unknown[] = []
   const runtimeIssueInputs: AssistantRuntimeIssueInput[] = []
+  const actionRuntimeIssueTracker = createCodexActionRuntimeIssueTracker()
   let computerToolsLockedAfterUserPause = false
   const requiredVaultFileApprovalUrls: string[] = []
   const requiredAutomationLocalAtClarifications =
@@ -4952,7 +4953,8 @@ async function runCodexAppServerTurnOnProcess(
     lastEventErrorInfo = extractCodexErrorInfo(message) ?? lastEventErrorInfo
 
     const normalizedEvent = normalizeCodexEvent(message)
-    const runtimeIssueInput = buildRuntimeIssueInputForFailedCodexAction({
+    const runtimeIssueInput = actionRuntimeIssueTracker.recordEvent({
+      activeTurnId: turnId,
       normalizedEvent,
       rawEvent: message,
     })
