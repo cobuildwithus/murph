@@ -94,10 +94,21 @@ Updated: 2026-08-14
 
 ## Verification
 
-- Commands to run: focused package/app Vitest targets, affected package and app
-  typechecks, `git diff --check`, repository privacy/secret inspection, exact
-  pushed-head CI, preliminary `completion-specialists` ReviewGPT, and final
-  ReviewGPT.
+- Focused contract, Web, Cloudflare, assistant-engine, and assistant-runtime
+  suites pass, including exact status ownership, idempotent stop, retryable stop
+  failure, mandatory result delivery, and pending-input result priority.
+- Affected package and Web typechecks pass; targeted Web lint and
+  `git diff --check` pass.
+- Changelog fragment and archive validation pass all 45 focused cases.
+- A pinned Codex App Server capture against a synthetic local provider measured
+  the complete normalized first request fields (`include`, `input`,
+  `parallel_tool_calls`, `text`, and `tool_choice`) with `gpt-tokenizer` 3.4.0
+  `o200k_harmony`. Direct input changed from 26,682 tokens / 122,276 bytes to
+  27,026 / 123,809 (+344 tokens, +1.2893%, +1,533 bytes); group input remained
+  identical at 23,357 tokens / 107,744 bytes. Temporary capture code, request
+  bodies, and the detached base worktree were removed.
+- Remaining gates: exact pushed-head CI, preliminary
+  `completion-specialists` ReviewGPT, and final ReviewGPT.
 - Direct proof: a synthetic call result arrives while one hosted invocation is
   active and newer conversation input is waiting; Murph receives the result in
   the next turn and a later status query returns the same terminal truth.
