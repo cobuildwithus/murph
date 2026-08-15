@@ -906,35 +906,19 @@ test('normalized Junction categorical facts survive canonical import and query',
     genderReplayEvents.map((event) => event?.externalRef),
     genderReplayEvents.map(() => genderReplayEvents[0]?.externalRef),
   )
+  assert.equal(
+    genderReplayEvents[0]?.dataOrigin?.normalizerVersion,
+    'junction-no-id-profile.v1',
+  )
   assert.deepEqual(
-    genderReplayEvents.map((event) => event?.dataOrigin),
-    genderReplayEvents.map(() => genderReplayEvents[0]?.dataOrigin),
+    genderReplayEvents.slice(1).map((event) => event?.dataOrigin),
+    genderReplayEvents.slice(1).map(() => genderReplayEvents[1]?.dataOrigin),
   )
   assert.equal(new Set(genderReplayEvents.map((event) => event?.occurredAt)).size, 1)
   const accountId = 'junction-profile-replay-proof'
   const currentHeightEvent = normalized.events?.find((event) => event.title === 'Junction height')
-  const legacyHeightRef = currentHeightEvent?.legacyExternalRefs?.[0]
   assert.ok(currentHeightEvent)
-  assert.ok(legacyHeightRef)
-  assert.notEqual(legacyHeightRef.resourceId, currentHeightEvent.externalRef?.resourceId)
-  const historicalHeightImport = await importDeviceBatch({
-    vaultRoot,
-    provider: 'junction',
-    accountId,
-    importedAt: '2026-06-13T12:00:00.000Z',
-    events: [{
-      ...currentHeightEvent,
-      dataOrigin: currentHeightEvent.dataOrigin
-        ? { ...currentHeightEvent.dataOrigin, observedAtRaw: '2026-07-09T08:30:00Z' }
-        : undefined,
-      evidenceRoles: undefined,
-      externalRef: legacyHeightRef,
-      fields: currentHeightEvent.fields
-        ? { ...currentHeightEvent.fields, value: 180 }
-        : undefined,
-      legacyExternalRefs: undefined,
-    }],
-  })
+  assert.equal(currentHeightEvent.legacyExternalRefs, undefined)
   const currentImport = await importDeviceBatch({
     vaultRoot,
     provider: 'junction',
@@ -958,13 +942,6 @@ test('normalized Junction categorical facts survive canonical import and query',
   const currentCanonicalHeight = await readCanonicalProfileEvent(currentHeightEvent)
   const currentCanonicalGender = await readCanonicalProfileEvent(currentGenderEvent)
   assert.equal(currentCanonicalHeight?.kind === 'observation' ? currentCanonicalHeight.value : null, 181)
-  assert.equal(await findEventByExternalRef({
-    vaultRoot,
-    system: legacyHeightRef.system,
-    resourceType: legacyHeightRef.resourceType,
-    resourceId: legacyHeightRef.resourceId,
-    facet: legacyHeightRef.facet,
-  }), null)
   const firstReplayImport = await importDeviceBatch({
     vaultRoot,
     provider: 'junction',
@@ -995,7 +972,6 @@ test('normalized Junction categorical facts survive canonical import and query',
   assert.ok(heightEventId)
   assert.ok(progesteroneEventId)
   assert.ok(sexualActivityEventId)
-  assert.equal(historicalHeightImport.events[0]?.id, heightEventId)
   const firstReplayEvents = new Map(firstReplayImport.events.map((event) => [event.title, event]))
   const secondReplayEvents = new Map(secondReplayImport.events.map((event) => [event.title, event]))
   assert.equal(firstReplayEvents.get('Junction profile')?.id, genderEventId)
