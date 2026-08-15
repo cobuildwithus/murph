@@ -1651,6 +1651,7 @@ const JUNCTION_COMPACT_IDENTITY_FIXTURES: readonly JunctionCompactIdentityFixtur
       sourceProviderSlug: "garmin",
       sourceType: "watch",
       sourceInstanceId: "garmin-1",
+      version: timestamp,
       startAt: timestamp,
       endAt: new Date(Date.parse(timestamp) + 30 * 60_000).toISOString(),
       durationSeconds: 1_800,
@@ -1658,6 +1659,7 @@ const JUNCTION_COMPACT_IDENTITY_FIXTURES: readonly JunctionCompactIdentityFixtur
       averageHeartRate: 130,
       maxHeartRate: 170,
       sampleCount: 1_000,
+      splits: [],
     }),
   },
 ];

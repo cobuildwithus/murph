@@ -1,6 +1,6 @@
 # Murph Agent Docs Index
 
-Last verified: 2026-08-13
+Last verified: 2026-08-15
 
 ## Purpose
 
@@ -54,6 +54,11 @@ authority, credential-free stored-token cleanup without operator fallback, and
 permanent-versus-transient credential failure handling are jointly specified by
 `ARCHITECTURE.md`, `agent-docs/SECURITY.md`, and
 `agent-docs/RELIABILITY.md`.
+
+Bounded Junction workout-stream reduction, fixed-distance split correction,
+and raw-point nonretention are specified by `agent-docs/RELIABILITY.md`,
+`packages/device-syncd/README.md`, and
+`docs/device-provider-compatibility-matrix.md`.
 
 Hosted device-sync dirty admission prepares classification, compression,
 sealing, and any clean-to-dirty mailbox wake outside database ownership, then

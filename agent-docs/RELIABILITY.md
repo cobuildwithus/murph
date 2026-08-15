@@ -1,6 +1,6 @@
 # Reliability
 
-Last verified: 2026-08-13
+Last verified: 2026-08-15
 
 ## Current Guardrails
 
@@ -955,6 +955,15 @@ Last verified: 2026-08-13
   scalar resource; new successors never write the envelope or consult its
   completed-resource names. Every partial continuation preserves
   `lastSyncCompletedAt`; only terminal current full work may advance it.
+- Junction workout streams stay inside that existing resource/day continuation
+  owner. One admitted workout index yields serial exact-workout SDK reads; each
+  response has an 8 MiB cap and reduces before import to one compact overall
+  feature plus at most 64 fixed-distance splits. The stable workout/source
+  identity and source update version form one authoritative facet set, so a
+  newer correction withdraws omitted splits. Only reduced duration, distance,
+  heart-rate shape, cadence, power, speed, and split scalars cross the importer;
+  raw points, coordinates, provider arrays, and full curves never enter job
+  state, evidence, or canonical samples.
 - A member-owned device provider application's revision is its credential
   epoch. OAuth state and established connections retain the exact application
   id and revision; credential replacement is blocked while a bound connection

@@ -68,6 +68,7 @@ import {
 import {
   isAllowedJunctionLinkHost,
   JUNCTION_DEFAULT_ALLOWED_LINK_HOSTS,
+  JUNCTION_WORKOUT_STREAM_MAX_RESPONSE_BYTES,
   JunctionClient,
   parseJunctionHistoricalPullSnapshot,
 } from "../src/providers/junction-client.ts";
@@ -7310,6 +7311,39 @@ test("Junction client errors and cancels a chunked response that crosses the tra
 
   await assert.rejects(
     () => client.listUserProviders("junction-user-1"),
+    (error) => error instanceof DeviceSyncError
+      && error.code === "JUNCTION_API_RESPONSE_TOO_LARGE"
+      && !error.retryable,
+  );
+  assert.equal(requests, 1);
+  assert.equal(bodyCancelled, true);
+});
+
+test("Junction workout streams enforce their narrower response cap before SDK parsing", async () => {
+  let bodyCancelled = false;
+  let requests = 0;
+  const client = new JunctionClient({
+    apiKey: "sk_us_test_123",
+    environment: "sandbox",
+    region: "us",
+    fetchImpl: async () => {
+      requests += 1;
+      return new Response(new ReadableStream<Uint8Array>({
+        cancel() {
+          bodyCancelled = true;
+        },
+      }), {
+        status: 200,
+        headers: {
+          "content-length": String(JUNCTION_WORKOUT_STREAM_MAX_RESPONSE_BYTES + 1),
+          "content-type": "application/json",
+        },
+      });
+    },
+  });
+
+  await assert.rejects(
+    () => client.getWorkoutStream({ workoutId: "workout-over-limit" }),
     (error) => error instanceof DeviceSyncError
       && error.code === "JUNCTION_API_RESPONSE_TOO_LARGE"
       && !error.retryable,

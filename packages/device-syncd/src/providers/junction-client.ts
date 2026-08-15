@@ -215,6 +215,7 @@ const MAX_RETRY_DELAY_MS = 5_000;
 const MAX_COLLECTION_PAGES = 100;
 const MAX_COLLECTION_RECORDS = 25_000;
 const MAX_SDK_COMPAT_RESPONSE_BYTES = 32 * 1_024 * 1_024;
+export const JUNCTION_WORKOUT_STREAM_MAX_RESPONSE_BYTES = 8 * 1_024 * 1_024;
 // These summary endpoints declare `start_date`/`end_date` as YYYY-MM-DD dates
 // (not datetimes) in the Junction API reference.
 const JUNCTION_DATE_ONLY_SUMMARY_RESOURCES = new Set(["electrocardiogram", "menstrual_cycle", "sleep_cycle"]);
@@ -494,6 +495,7 @@ export class JunctionClient {
       "GET",
       {
         endpointKind: "junction_workout_stream",
+        maxResponseBytes: JUNCTION_WORKOUT_STREAM_MAX_RESPONSE_BYTES,
         signal: input.signal ?? null,
         ...(input.collectionWorkLimit
           ? {
@@ -799,6 +801,7 @@ export class JunctionClient {
       bodyFieldNames?: readonly string[];
       endpointKind: string;
       maxAttempts?: number;
+      maxResponseBytes?: number;
       optional404?: boolean;
       queryParameterNames?: readonly string[];
       signal?: AbortSignal | null;
@@ -849,7 +852,8 @@ export class JunctionClient {
         if (!response.body) {
           return response;
         }
-        if (junctionSdkResponseExceedsDeclaredLimit(response)) {
+        const maxResponseBytes = options.maxResponseBytes ?? MAX_SDK_COMPAT_RESPONSE_BYTES;
+        if (junctionSdkResponseExceedsDeclaredLimit(response, maxResponseBytes)) {
           await response.body.cancel().catch(() => undefined);
           throw junctionSdkResponseTooLargeError();
         }
@@ -857,7 +861,7 @@ export class JunctionClient {
         const capture = createJunctionSdkResponseCapture(response);
         capturedResponse = capture;
         return new Response(
-          createJunctionSdkBoundedBodyStream(response.body, capture),
+          createJunctionSdkBoundedBodyStream(response.body, capture, maxResponseBytes),
           {
             headers: response.headers,
             status: response.status,
@@ -1048,6 +1052,7 @@ function createJunctionSdkResponseCapture(response: Response): JunctionSdkRespon
 function createJunctionSdkBoundedBodyStream(
   body: ReadableStream<Uint8Array>,
   capture: JunctionSdkResponseCapture,
+  maxResponseBytes: number,
 ): ReadableStream<Uint8Array> {
   const reader = body.getReader();
   return new ReadableStream<Uint8Array>({
@@ -1062,7 +1067,7 @@ function createJunctionSdkBoundedBodyStream(
 
       const chunk = value;
       capture.totalBytes += chunk.byteLength;
-      if (capture.totalBytes > MAX_SDK_COMPAT_RESPONSE_BYTES) {
+      if (capture.totalBytes > maxResponseBytes) {
         capture.exceededLimit = true;
         capture.chunks = [];
         const error = junctionSdkResponseTooLargeError();
@@ -1081,13 +1086,16 @@ function createJunctionSdkBoundedBodyStream(
   });
 }
 
-function junctionSdkResponseExceedsDeclaredLimit(response: Response): boolean {
+function junctionSdkResponseExceedsDeclaredLimit(
+  response: Response,
+  maxResponseBytes: number,
+): boolean {
   const contentLength = response.headers.get("content-length");
   if (contentLength === null || !/^\d+$/u.test(contentLength.trim())) {
     return false;
   }
   const parsedLength = Number(contentLength);
-  return Number.isSafeInteger(parsedLength) && parsedLength > MAX_SDK_COMPAT_RESPONSE_BYTES;
+  return Number.isSafeInteger(parsedLength) && parsedLength > maxResponseBytes;
 }
 
 function junctionSdkResponseTooLargeError() {
