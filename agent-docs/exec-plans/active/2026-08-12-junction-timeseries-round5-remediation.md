@@ -587,3 +587,9 @@ Updated: 2026-08-14
   and input-order independence. All 277 Junction provider tests, all 103 hosted
   device-sync runtime tests, the complete 1,105-test device-sync package, and
   both owning package typechecks pass after the shared-state correction.
+- Integrated current `main` at `7e87b2d45f` after a clean non-mutating
+  merge-tree proof; the merge had no conflicts. The base-only ReviewGPT 0.5.127
+  CLI harness correction passes all 44 active release-script audit tests with
+  one intentional skip plus the CLI typecheck. The combined candidate passes
+  all 277 Junction provider tests, all 103 hosted device-sync runtime tests,
+  and both owning package typechecks.
