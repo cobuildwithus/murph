@@ -3674,6 +3674,162 @@ test("Junction route-equivalent persisted sources choose the earliest keyed auth
   );
 });
 
+test.each([
+  { label: "newest alias first", reverse: false },
+  { label: "oldest identity first", reverse: true },
+])("Junction retained calendar work obeys the newest alias lifecycle ($label)", async ({ reverse }) => {
+  const establishedSource = createConnectionSource({
+    firstSeenAt: "2026-04-01T00:00:00.000Z",
+    lastErrorCode: DEVICE_SYNC_SOURCE_USER_DISCONNECTED_ERROR_CODE,
+    lastErrorMessage: "Disconnected",
+    lastSeenAt: "2026-04-03T12:00:00.000Z",
+    sourceInstanceKey: "jxn_src_established_apple_health",
+    sourceProviderSlug: "apple_health",
+    status: "disconnected",
+  });
+  const staleAlias = createConnectionSource({
+    firstSeenAt: "2026-04-02T00:00:00.000Z",
+    id: "src-stale-apple-health-kit",
+    lastSeenAt: "2026-04-03T11:00:00.000Z",
+    sourceInstanceKey: "jxn_src_stale_apple_health_kit",
+    sourceProviderSlug: "apple_health_kit",
+    status: "connected",
+  });
+  const orderSources = (
+    identity: DeviceConnectionSourceRecord,
+    alias: DeviceConnectionSourceRecord,
+  ) => reverse ? [alias, identity] : [identity, alias];
+  let sources = orderSources(establishedSource, staleAlias);
+  let responseKind: "blocked" | "empty" | "nonempty" = "blocked";
+  let providerCalls = 0;
+  const importedSnapshots: unknown[] = [];
+  const projectedSources: DeviceConnectionSourceRecord[] = [];
+  const provider = createJunctionProvider(async (input) => {
+    providerCalls += 1;
+    if (responseKind === "blocked") {
+      throw new Error("Disconnected retained work must not call Junction.");
+    }
+    const url = readUrl(input);
+    if (url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
+      return createJsonResponse({
+        providers: [{
+          id: "provider-apple-health-1",
+          name: "Apple Health",
+          resource_availability: { water: true },
+          slug: "apple_health_kit",
+          status: "connected",
+        }],
+      });
+    }
+    if (url.startsWith("https://api.sandbox.us.junction.com/v2/timeseries/junction-user-1/water/grouped")) {
+      return createJsonResponse(responseKind === "empty"
+        ? { groups: {} }
+        : {
+            groups: {
+              apple_health_kit: [{
+                data: [{
+                  calendarDate: "2026-04-02",
+                  end: "2026-04-02T08:01:00.000Z",
+                  id: "water-after-reconnect",
+                  start: "2026-04-02T08:00:00.000Z",
+                  value: 250,
+                }],
+                source: { provider: "apple_health_kit", type: "phone" },
+              }],
+            },
+          });
+    }
+    throw new Error(`Unexpected request: ${url}`);
+  }, { timeseriesResources: ["water"] });
+  const establishedSourceInstanceId = resolveJunctionOrigin({
+    sourceInstanceId: establishedSource.sourceInstanceKey,
+    sourceProviderSlug: establishedSource.sourceProviderSlug,
+  }).sourceInstanceId;
+  const context = createJunctionJobContext({
+    connectionSourceAdmissionMode: "listed_only",
+    importSnapshot: async (snapshot) => {
+      importedSnapshots.push(snapshot);
+      return {
+        canonicalEventExternalRefResourceIds: [buildJunctionDailyTimeseriesAggregateResourceId({
+          dayKey: "2026-04-02",
+          resource: "water",
+          sourceInstanceId: establishedSourceInstanceId,
+          sourceProviderSlug: establishedSource.sourceProviderSlug,
+          sourceType: "phone",
+        })],
+        durableDeliveryAccepted: true,
+      };
+    },
+    listConnectionSources: () => sources,
+    now: "2026-04-03T14:00:00.000Z",
+    upsertConnectionSource: (input) => {
+      const projected = createConnectionSource(input);
+      projectedSources.push(projected);
+      return projected;
+    },
+  });
+  const job = createJob("resource", {
+    calendarRefreshDay: "2026-04-02",
+    resource: "water",
+    resourceCategory: "timeseries",
+    sourceInstanceId: establishedSourceInstanceId,
+    sourceProviderSlug: "apple_health_kit",
+    sourceType: "phone",
+    windowEnd: "2026-04-03T00:00:00.000Z",
+    windowStart: "2026-04-02T00:00:00.000Z",
+  });
+
+  await assert.rejects(
+    executeJunctionJob(
+      provider,
+      context,
+      job,
+    ),
+    (error: unknown) =>
+      error instanceof DeviceSyncError
+      && error.code === "JUNCTION_CALENDAR_REFRESH_SOURCE_AUTHORITY_UNAVAILABLE"
+      && error.retryable,
+  );
+  assert.equal(providerCalls, 0);
+  assert.equal(importedSnapshots.length, 0);
+
+  const reconnectedAlias = createConnectionSource({
+    ...staleAlias,
+    lastErrorCode: null,
+    lastErrorMessage: null,
+    lastSeenAt: "2026-04-03T13:00:00.000Z",
+    status: "connected",
+  });
+  sources = orderSources(establishedSource, reconnectedAlias);
+  responseKind = "empty";
+  await executeJunctionJob(provider, context, job);
+  responseKind = "nonempty";
+  await executeJunctionJob(provider, context, job);
+
+  assert.equal(providerCalls, 4);
+  assert.equal(importedSnapshots.length, 2);
+  assert.equal(projectedSources.length, 2);
+  assert.ok(projectedSources.every((source) =>
+    source.sourceInstanceKey === establishedSource.sourceInstanceKey
+    && source.sourceProviderSlug === establishedSource.sourceProviderSlug
+  ));
+  const normalizedImports = importedSnapshots.map((snapshot) =>
+    normalizeJunctionSnapshot(snapshot as Parameters<typeof normalizeJunctionSnapshot>[0])
+  );
+  assert.ok(normalizedImports.every((entry) =>
+    entry.events?.every((event) => {
+      const origin = event.dataOrigin;
+      return origin !== undefined
+        && origin.sourceInstanceId === establishedSourceInstanceId
+        && origin.sourceProviderSlug === "apple-health";
+    })
+  ));
+  assert.deepEqual(importedSnapshots.map((snapshot) =>
+    (snapshot as { timeseries?: { water?: Array<{ value?: number }> } })
+      .timeseries?.water?.map((record) => record.value)
+  ), [[0], [250]]);
+});
+
 test("Junction routine, precise, and retained calendar writers share persisted source identity", async () => {
   const persistedSource = createConnectionSource({
     connectionId: "local-reminted-account",
@@ -14528,8 +14684,10 @@ test("Junction companion jobs do not import through a disconnected exact source"
         }),
         listConnectionSources: async () => [{
           displayName: null,
+          lastDataAt: null,
           lastErrorCode: "SOURCE_USER_DISCONNECTED",
           lastErrorMessage: null,
+          lastSeenAt: "2026-04-03T00:00:00.000Z",
           sourceProviderSlug: testCase.authoritySourceProviderSlug,
           status: "disconnected",
         }],
@@ -14583,8 +14741,10 @@ test("Junction companion import rechecks current source authority at the import 
   let importedCount = 0;
   const connectedSource = {
     displayName: null,
+    lastDataAt: null,
     lastErrorCode: null,
     lastErrorMessage: null,
+    lastSeenAt: "2026-04-03T00:00:00.000Z",
     sourceProviderSlug: "whoop_v2",
     status: "connected" as const,
   };

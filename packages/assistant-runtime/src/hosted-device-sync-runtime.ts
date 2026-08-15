@@ -15,6 +15,12 @@ import {
   JUNCTION_COMPANION_HRV_OBSERVATION_INVALID_CODE,
 } from "@murphai/device-syncd/junction-resources";
 import { buildDeviceSyncTokenCipherOptions, createSecretCodec } from "@murphai/device-syncd/local-secret-codec";
+import {
+  compareDeviceSyncSourceIdentity,
+  dedupeDeviceSyncSourcesByIdentity,
+  mergeDeviceSyncSourceLastDataAt,
+  resolveDeviceSyncSourceState,
+} from "@murphai/device-syncd/public-account";
 import type { DeviceSyncService } from "@murphai/device-syncd/service";
 import type {
   DeviceSyncJobInput,
@@ -68,12 +74,7 @@ import {
   HOSTED_DEVICE_SYNC_DIRTY_PENDING_FETCH_LIMIT,
   HOSTED_DEVICE_SYNC_PASS_JOB_LIMIT,
 } from "./hosted-device-sync-limits.ts";
-import {
-  compareHostedDeviceSyncSourceIdentity,
-  consolidateHostedDeviceSyncSourceState,
-  dedupeHostedDeviceSyncSourcesByIdentity,
-  mergeHostedDeviceSyncSourceLastDataAt,
-} from "./hosted-device-sync-source-state.ts";
+import { hostedSourceStateUnavailable } from "./hosted-device-sync-source-state.ts";
 import {
   fetchCompleteHostedDeviceSyncRuntimeSnapshot,
 } from "./hosted-runtime/device-sync-snapshot-pagination.ts";
@@ -299,14 +300,15 @@ export async function syncHostedDeviceSyncControlPlaneState(input: {
         && !terminalStatus
         && !hostedConnectionEpochChanged
       )
-        ? consolidateHostedDeviceSyncSourceState([
-            localLifecycleSource,
-            source,
-          ])
+        ? resolveDeviceSyncSourceState(
+            [localLifecycleSource, source],
+            hostedSourceStateUnavailable,
+          )
         : {
-            lastDataAt: mergeHostedDeviceSyncSourceLastDataAt(
+            lastDataAt: mergeDeviceSyncSourceLastDataAt(
               source.lastDataAt,
               establishedLocalSource?.lastDataAt ?? null,
+              hostedSourceStateUnavailable,
             ),
             lifecycleSource: source,
           };
@@ -455,12 +457,13 @@ function dedupeHostedHydrationConnectionSources(
   if (provider.trim().toLowerCase() !== "junction") {
     return [...sources];
   }
-  return dedupeHostedDeviceSyncSourcesByIdentity(
+  return dedupeDeviceSyncSourcesByIdentity(
     sources,
     (left, right) => areHostedJunctionSourceSlugsEquivalent(
       left.sourceProviderSlug,
       right.sourceProviderSlug,
     ),
+    hostedSourceStateUnavailable,
   );
 }
 
@@ -473,7 +476,7 @@ function selectHostedJunctionSource(
       source.sourceProviderSlug,
       sourceProviderSlug,
     ))
-    .sort(compareHostedDeviceSyncSourceIdentity)[0];
+    .sort(compareDeviceSyncSourceIdentity)[0];
 }
 
 function shouldPreserveNonJunctionHydrationSource(input: {
@@ -485,9 +488,10 @@ function shouldPreserveNonJunctionHydrationSource(input: {
     return false;
   }
   if (
-    mergeHostedDeviceSyncSourceLastDataAt(
+    mergeDeviceSyncSourceLastDataAt(
       input.source.lastDataAt,
       input.localSource.lastDataAt,
+      hostedSourceStateUnavailable,
     ) !== input.localSource.lastDataAt
   ) {
     return false;

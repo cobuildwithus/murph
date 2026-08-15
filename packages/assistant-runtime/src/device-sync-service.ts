@@ -12,6 +12,10 @@ import {
   SqliteDeviceSyncStore,
 } from "@murphai/device-syncd/service";
 import { deviceSyncError } from "@murphai/device-syncd/errors";
+import {
+  compareDeviceSyncSourceIdentity,
+  dedupeDeviceSyncSourcesByIdentity,
+} from "@murphai/device-syncd/public-account";
 
 import type {
   CreateDeviceSyncServiceInput,
@@ -25,11 +29,7 @@ import {
   HostedRuntimeArtifactWriteError,
   type HostedRuntimeDeviceSyncPort,
 } from "./hosted-runtime/platform.ts";
-import {
-  compareHostedDeviceSyncSourceIdentity,
-  dedupeHostedDeviceSyncSourcesByIdentity,
-  hostedSourceStateUnavailable,
-} from "./hosted-device-sync-source-state.ts";
+import { hostedSourceStateUnavailable } from "./hosted-device-sync-source-state.ts";
 
 const storeByService = new WeakMap<DeviceSyncService, SqliteDeviceSyncStore>();
 
@@ -200,7 +200,7 @@ function selectHostedJunctionSource(
       source.sourceProviderSlug,
       sourceProviderSlug,
     ))
-    .sort(compareHostedDeviceSyncSourceIdentity)[0];
+    .sort(compareDeviceSyncSourceIdentity)[0];
 }
 
 interface HostedJobConnectionSource extends ProviderJobConnectionSource {
@@ -215,13 +215,14 @@ function dedupeHostedJobConnectionSources(
   if (provider !== "junction") {
     return [...sources];
   }
-  return dedupeHostedDeviceSyncSourcesByIdentity(
+  return dedupeDeviceSyncSourcesByIdentity(
     sources,
     (left, right) => areHostedJunctionSourcesEquivalent(
       provider,
       left.sourceProviderSlug,
       right.sourceProviderSlug,
     ),
+    hostedSourceStateUnavailable,
   );
 }
 

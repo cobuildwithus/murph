@@ -307,6 +307,22 @@ Updated: 2026-08-14
   of deriving a new alias key. This deletes the two divergent comparison and
   dedupe implementations and adds no persisted state, migration, queue, worker,
   retry family, lifecycle owner, or compatibility path.
+- Round twenty-seven's repeated source-state finding is accepted after the
+  required requirement-level reassessment. The local Junction provider still
+  selected the oldest route-equivalent row for identity while allowing any
+  connected alias to authorize reads and requiring every alias to carry a
+  disconnect fence. Its extended-history scheduler and unidentified-record
+  filter also read alias lifecycle independently. The shared contract now lives
+  at the existing device-sync public-account boundary: earliest valid
+  first-seen time plus deterministic key/spelling owns identity, newest
+  last-seen time owns lifecycle, equal-time conflicts fail retryably, and
+  last-data time remains monotonic arrival evidence. Hosted hydration, hosted
+  job listing, local projection, scheduling, pre-fetch admission, and
+  post-fetch import admission reuse that contract. The assistant-runtime
+  selectors and provider-local oldest-row/any-alias/every-fence rules are
+  deleted. No migration, source table, manager, worker, queue, scheduler,
+  compatibility state, retry family, or other durable production concept was
+  added.
 
 ## Verification
 
@@ -562,3 +578,12 @@ Updated: 2026-08-14
   Cloudflare typecheck, all 103 hosted device-sync runtime tests, and
   assistant-runtime typecheck pass. The two assistant-engine tests that failed
   on the prior integrated base now pass with `main`'s fixture correction.
+- Round twenty-seven's local-daemon regression failed before remediation in
+  both persisted alias orders: retained calendar work reached Junction through
+  the stale connected alias and returned a provider-request error instead of
+  stopping at the newer disconnect. It now proves zero provider and canonical
+  import calls while disconnected, an explicit disconnect fence, empty and
+  nonempty retained responses after reconnect, stable established identity,
+  and input-order independence. All 277 Junction provider tests, all 103 hosted
+  device-sync runtime tests, the complete 1,105-test device-sync package, and
+  both owning package typechecks pass after the shared-state correction.

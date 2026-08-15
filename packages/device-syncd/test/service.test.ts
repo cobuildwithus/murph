@@ -2397,8 +2397,10 @@ test("hosted listed-only recovery publishes connected before pressure egress res
   const importedSnapshots: unknown[] = [];
   let hostedSources: ProviderJobConnectionSource[] = [{
     displayName: "Omron",
+    lastDataAt: null,
     lastErrorCode: null,
     lastErrorMessage: null,
+    lastSeenAt: now.toISOString(),
     resourceAvailabilitySummary: { blood_pressure: true },
     sourceInstanceKey: "omron",
     sourceProviderSlug: "omron",
@@ -2521,8 +2523,10 @@ test("hosted listed-only recovery publishes connected before pressure egress res
       assert.ok(source);
       hostedSources = [{
         displayName: source.displayName,
+        lastDataAt: source.lastDataAt,
         lastErrorCode: source.lastErrorCode,
         lastErrorMessage: source.lastErrorMessage,
+        lastSeenAt: source.lastSeenAt,
         resourceAvailabilitySummary: source.resourceAvailabilitySummary,
         sourceInstanceKey: source.sourceInstanceKey,
         sourceProviderSlug: source.sourceProviderSlug,

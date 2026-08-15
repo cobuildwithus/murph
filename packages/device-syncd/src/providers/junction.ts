@@ -76,10 +76,12 @@ import { DEVICE_SYNC_METADATA_MAX_STRING_LENGTH } from "../metadata.ts";
 import {
   DEVICE_SYNC_HISTORICAL_DATA_RECONNECT_REQUIRED_ERROR_CODE,
   DEVICE_SYNC_SOURCE_USER_DISCONNECTED_ERROR_CODE,
+  resolveDeviceSyncSourceState,
   isDeviceSyncSourceAdmitted,
   isDeviceSyncSourceDisconnectFenced,
   isJunctionHistoricalResetProviderSlug,
   requiresHistoricalResetDeviceSyncSource,
+  type ResolvedDeviceSyncSourceState,
 } from "../public-account.ts";
 import {
   assertValidJunctionClientUserIdSecret,
@@ -131,6 +133,7 @@ import type {
 } from "../config/provider-types.ts";
 
 import type {
+  DeviceConnectionSourceResourceAvailabilitySummary,
   DeviceConnectionSourceStatus,
   DeviceSyncAccount,
   DeviceSyncWebhookExternalAccountDiagnostic,
@@ -240,8 +243,11 @@ interface JunctionDirectSummaryImportResult {
 interface JunctionImportAdmissionSource {
   displayName?: string | null;
   firstSeenAt?: string;
+  lastDataAt?: string | null;
   lastErrorCode?: string | null;
   lastErrorMessage?: string | null;
+  lastSeenAt?: string | null;
+  resourceAvailabilitySummary?: DeviceConnectionSourceResourceAvailabilitySummary;
   sourceInstanceKey?: string;
   sourceProviderSlug: string;
   status: DeviceConnectionSourceStatus;
@@ -861,13 +867,18 @@ export function createJunctionDeviceSyncProvider(
       }
 
       const scheduledSources = new Map<string, string>();
-      for (const source of account.sources ?? []) {
-        const sourceProviderSlug = normalizeProviderSlug(source.sourceProviderSlug);
+      for (const sourceState of resolveJunctionAccountSourceStates(account.sources ?? [])) {
+        const identitySource = sourceState.identitySource;
+        const lifecycleSource = sourceState.lifecycleSource;
+        const sourceProviderSlug = normalizeProviderSlug(identitySource.sourceProviderSlug);
         if (
           !sourceProviderSlug
-          || !isDeviceSyncSourceAdmitted(account.sources ?? [], sourceProviderSlug)
+          || !isDeviceSyncSourceAdmitted(
+            [lifecycleSource],
+            lifecycleSource.sourceProviderSlug,
+          )
           || !isJunctionResourceAvailableInSummary(
-            source.resourceAvailabilitySummary,
+            lifecycleSource.resourceAvailabilitySummary,
             resource,
           )
           || hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
@@ -885,9 +896,13 @@ export function createJunctionDeviceSyncProvider(
         ) {
           continue;
         }
+        const sourceFirstSeenAt = identitySource.firstSeenAt;
+        if (!sourceFirstSeenAt) {
+          throw junctionSourceStateUnavailableError();
+        }
         const existingFirstSeenAt = scheduledSources.get(sourceProviderSlug);
-        if (!existingFirstSeenAt || Date.parse(source.firstSeenAt) < Date.parse(existingFirstSeenAt)) {
-          scheduledSources.set(sourceProviderSlug, source.firstSeenAt);
+        if (!existingFirstSeenAt || Date.parse(sourceFirstSeenAt) < Date.parse(existingFirstSeenAt)) {
+          scheduledSources.set(sourceProviderSlug, sourceFirstSeenAt);
         }
       }
 
@@ -6269,6 +6284,28 @@ function resolveJunctionAccountSourceIdentities(
   return identities;
 }
 
+function resolveJunctionAccountSourceStates(
+  sources: readonly JunctionImportAdmissionSource[],
+): Array<ResolvedDeviceSyncSourceState<JunctionImportAdmissionSource>> {
+  const states: Array<ResolvedDeviceSyncSourceState<JunctionImportAdmissionSource>> = [];
+  for (const source of sources) {
+    if (states.some((state) => areJunctionProviderSlugsRouteEquivalent(
+      state.identitySource.sourceProviderSlug,
+      source.sourceProviderSlug,
+    ))) {
+      continue;
+    }
+    const state = resolveJunctionAccountSourceState(
+      sources,
+      source.sourceProviderSlug,
+    );
+    if (state) {
+      states.push(state);
+    }
+  }
+  return states;
+}
+
 function mergeJunctionAccountSourceIdentities(
   accountSourceIdentities: readonly JunctionAccountSourceIdentity[],
   requestedSourceIdentities: readonly JunctionAccountSourceIdentity[],
@@ -6331,8 +6368,8 @@ function findJunctionAccountSource(
   sources: readonly JunctionImportAdmissionSource[],
   sourceProviderSlug: string,
 ): JunctionImportAdmissionSource | undefined {
-  return findJunctionAccountSources(sources, sourceProviderSlug)
-    .sort(compareJunctionAccountSources)[0];
+  return resolveJunctionAccountSourceState(sources, sourceProviderSlug)
+    ?.identitySource;
 }
 
 function findJunctionAccountSources(
@@ -6345,31 +6382,21 @@ function findJunctionAccountSources(
   ));
 }
 
-function compareJunctionAccountSources(
-  left: JunctionImportAdmissionSource,
-  right: JunctionImportAdmissionSource,
-): number {
-  const keyRank = Number(!left.sourceInstanceKey) - Number(!right.sourceInstanceKey);
-  if (keyRank !== 0) {
-    return keyRank;
+function resolveJunctionAccountSourceState(
+  sources: readonly JunctionImportAdmissionSource[],
+  sourceProviderSlug: string,
+) {
+  const [first, ...rest] = findJunctionAccountSources(
+    sources,
+    sourceProviderSlug,
+  );
+  if (!first) {
+    return null;
   }
-  const parsedLeftFirstSeenAt = typeof left.firstSeenAt === "string"
-    ? Date.parse(left.firstSeenAt)
-    : Number.NaN;
-  const parsedRightFirstSeenAt = typeof right.firstSeenAt === "string"
-    ? Date.parse(right.firstSeenAt)
-    : Number.NaN;
-  const leftFirstSeenAt = Number.isFinite(parsedLeftFirstSeenAt)
-    ? parsedLeftFirstSeenAt
-    : Number.POSITIVE_INFINITY;
-  const rightFirstSeenAt = Number.isFinite(parsedRightFirstSeenAt)
-    ? parsedRightFirstSeenAt
-    : Number.POSITIVE_INFINITY;
-  if (leftFirstSeenAt !== rightFirstSeenAt) {
-    return leftFirstSeenAt - rightFirstSeenAt;
-  }
-  return (left.sourceInstanceKey ?? "").localeCompare(right.sourceInstanceKey ?? "")
-    || left.sourceProviderSlug.localeCompare(right.sourceProviderSlug);
+  return resolveDeviceSyncSourceState(
+    [first, ...rest],
+    junctionSourceStateUnavailableError,
+  );
 }
 
 function stripUndefined(value: Record<string, unknown>): Record<string, unknown> {
@@ -6479,10 +6506,15 @@ function filterJunctionImportSnapshots(
   sourceStatusRequirement: JunctionImportSourceStatusRequirement = "not_disconnected",
 ): Record<string, unknown[]> {
   const sourceReferences = buildJunctionSourceReferenceMap(providers);
-  const hasPendingSourceAdmission = sources.some((source) =>
+  const hasPendingSourceAdmission = resolveJunctionAccountSourceStates(sources).some(
+    ({ lifecycleSource }) =>
     sourceStatusRequirement === "connected"
-      ? !isDeviceSyncSourceAdmitted([source], source.sourceProviderSlug)
-      : source.status === "disconnected" || isDeviceSyncSourceDisconnectFenced(source)
+      ? !isDeviceSyncSourceAdmitted(
+          [lifecycleSource],
+          lifecycleSource.sourceProviderSlug,
+        )
+      : lifecycleSource.status === "disconnected"
+        || isDeviceSyncSourceDisconnectFenced(lifecycleSource)
   );
 
   return Object.fromEntries(
@@ -9963,19 +9995,18 @@ function isJunctionSourceAdmittedForImport(
   if (!accountSourceIdentity) {
     return false;
   }
-  const matchingSources = findJunctionAccountSources(
+  const sourceState = resolveJunctionAccountSourceState(
     sources,
     accountSourceIdentity.sourceProviderSlug,
   );
-  if (matchingSources.length === 0) {
+  if (!sourceState) {
     return allowUnlistedSources;
   }
-  return matchingSources.some((matchingSource) =>
-    sourceStatusRequirement === "connected"
-      ? isDeviceSyncSourceAdmitted([matchingSource], matchingSource.sourceProviderSlug)
-      : matchingSource.status !== "disconnected"
-        && !isDeviceSyncSourceDisconnectFenced(matchingSource)
-  );
+  const lifecycleSource = sourceState.lifecycleSource;
+  return sourceStatusRequirement === "connected"
+    ? isDeviceSyncSourceAdmitted([lifecycleSource], lifecycleSource.sourceProviderSlug)
+    : lifecycleSource.status !== "disconnected"
+      && !isDeviceSyncSourceDisconnectFenced(lifecycleSource);
 }
 
 function isJunctionSourceProjectionFenced(
@@ -9994,14 +10025,12 @@ function isJunctionSourceProjectionFenced(
   if (!accountSourceIdentity) {
     return false;
   }
-  const matchingSources = findJunctionAccountSources(
+  const sourceState = resolveJunctionAccountSourceState(
     sources,
     accountSourceIdentity.sourceProviderSlug,
   );
-  return matchingSources.length > 0
-    && matchingSources.every((matchingSource) =>
-      isDeviceSyncSourceDisconnectFenced(matchingSource)
-    );
+  return sourceState !== null
+    && isDeviceSyncSourceDisconnectFenced(sourceState.lifecycleSource);
 }
 
 function hasJunctionSourceListing(
@@ -10091,6 +10120,16 @@ async function isJunctionCompanionSourceCurrentlyAdmitted(
     message: "Current companion source authorization is not ready. Retry shortly.",
     retryable: true,
     httpStatus: 503,
+  });
+}
+
+function junctionSourceStateUnavailableError(cause?: unknown): DeviceSyncError {
+  return deviceSyncError({
+    code: "JUNCTION_SOURCE_STATE_UNAVAILABLE",
+    message: "Current Junction source state is unavailable. Retry shortly.",
+    retryable: true,
+    httpStatus: 503,
+    ...(cause === undefined ? {} : { cause }),
   });
 }
 

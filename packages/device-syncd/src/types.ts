@@ -757,8 +757,10 @@ export interface ProviderSparseCalendarTarget {
 export interface ProviderJobConnectionSource {
   displayName: string | null;
   firstSeenAt?: string;
+  lastDataAt: string | null;
   lastErrorCode: string | null;
   lastErrorMessage: string | null;
+  lastSeenAt: string;
   resourceAvailabilitySummary?: DeviceConnectionSourceResourceAvailabilitySummary;
   sourceInstanceKey?: string;
   sourceProviderSlug: string;
