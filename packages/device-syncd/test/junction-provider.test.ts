@@ -14694,20 +14694,22 @@ test.each([
     }
     throw new Error(`Unexpected request: ${url}`);
   });
-  const account = createAccount({ sources: [
-    createConnectionSource({
-      id: "src-fitbit",
-      lifecycleEpoch: 1,
-      resourceAvailabilitySummary: { workouts: true },
-      sourceProviderSlug: "fitbit",
-    }),
-    createConnectionSource({
-      id: "src-garmin",
-      lifecycleEpoch: 1,
-      resourceAvailabilitySummary: { workouts: true },
-      sourceProviderSlug: "garmin",
-    }),
-  ] });
+  const admittedSource = (sourceProviderSlug: string) => ({
+    displayName: null,
+    firstSeenAt: "2026-04-01T00:00:00.000Z",
+    lastDataAt: null,
+    lastErrorCode: null,
+    lastErrorMessage: null,
+    lastSeenAt: "2026-04-03T00:00:00.000Z",
+    lifecycleEpoch: 1,
+    resourceCount: 1,
+    resourceAvailabilitySummary: { workouts: true },
+    sourceProviderSlug,
+    status: "connected" as const,
+  });
+  const account = createAccount({
+    sources: [admittedSource("fitbit"), admittedSource("garmin")],
+  });
 
   await executeJunctionJob(
     provider,
