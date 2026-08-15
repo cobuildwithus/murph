@@ -736,12 +736,15 @@ Last verified: 2026-08-15
   visible-secondary reply owner; a failed reply keeps the webhook retryable.
   Account deletion keeps its confirmation dialog and typed phrase in place for
   the same exact rejection instead of reloading away the recovery action.
-  Direct Subscription admissions also reject an exact owner-group conversion
-  claim, claim-only Family drafts are billing authority rather than removable
+  Direct Checkout treats a claim-only owner group as Family billing authority,
+  and direct Subscription admissions reject an exact owner-group conversion
+  claim. Claim-only Family drafts are billing authority rather than removable
   setup, and account deletion locks every implicated Family owner before its
   beneficiary. Customer Portal admissions perform the same claim-aware owner
-  check before and after session creation. Before any later owner writes a
-  claim, its claim-disabled phase must stop issuing mutation-capable Portal
+  check before and after session creation; the Family check reads only the
+  owner group and its billing scalars while locked, then decrypts the one
+  required Customer id after the database transaction. Before any later owner
+  writes a claim, its claim-disabled phase must stop issuing mutation-capable Portal
   sessions, preserve cancellation through the replacement owner, and drain or
   provider-invalidate previously issued sessions. Once the first claim exists,
   the cutover is the rollback floor. The exact release and removal sequence

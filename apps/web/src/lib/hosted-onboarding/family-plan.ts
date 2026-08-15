@@ -414,6 +414,11 @@ export type HostedMemberFamilyBillingClaim =
       groupId: string;
       kind: "bound_subscription";
       ownerMemberId: string;
+    }
+  | {
+      groupId: string;
+      kind: "stripe_effect";
+      ownerMemberId: string;
     };
 
 type HostedFamilyDraftAbandonmentCandidate = {
@@ -1505,9 +1510,10 @@ export async function assertNoHostedFamilyStripeEffectTx(input: {
 }
 
 /**
- * A Family membership can own billing before it grants active access. Direct
- * Checkout must respect the persisted Family attempt or subscription as well
- * as an already-active sponsorship.
+ * A Family membership can own billing before it grants active access. This is
+ * the complete bounded Family authority reader for direct billing: it returns
+ * only active sponsorships or groups with a persisted Checkout, Subscription,
+ * or future effect claim, and a second result is already ambiguous authority.
  */
 export async function readHostedMemberFamilyBillingClaim(input: {
   memberId: string;
@@ -1521,6 +1527,7 @@ export async function readHostedMemberFamilyBillingClaim(input: {
           billingRef: {
             select: {
               checkoutAttemptId: true,
+              stripeEffectClaimId: true,
               stripeSubscriptionIdEncrypted: true,
             },
           },
@@ -1531,13 +1538,41 @@ export async function readHostedMemberFamilyBillingClaim(input: {
         },
       },
     },
+    take: 2,
     where: {
+      group: {
+        OR: [
+          {
+            billingStatus: HostedBillingStatus.active,
+            suspendedAt: null,
+          },
+          {
+            billingRef: {
+              is: {
+                OR: [
+                  { checkoutAttemptId: { not: null } },
+                  { stripeEffectClaimId: { not: null } },
+                  { stripeSubscriptionIdEncrypted: { not: null } },
+                ],
+              },
+            },
+          },
+        ],
+      },
       memberId: input.memberId,
       status: "active",
     },
   });
   const claims: HostedMemberFamilyBillingClaim[] = [];
   for (const { group } of memberships) {
+    if (group.billingRef?.stripeEffectClaimId != null) {
+      claims.push({
+        groupId: group.id,
+        kind: "stripe_effect",
+        ownerMemberId: group.ownerMemberId,
+      });
+      continue;
+    }
     if (
       !group.suspendedAt
       && group.billingStatus === HostedBillingStatus.active

@@ -60,9 +60,14 @@ DATABASE_URL="$LOCAL_POSTGRES_URL" MURPH_TEST_POSTGRES_CONCURRENCY=1 \
 The compatibility cases seed a future claim while holding the production
 claim-owner row, start an independent current-revision writer, prove PostgreSQL
 reports that writer waiting on the row lock, then commit the claim. Direct
-customer creation, exact direct Subscription upgrade and scheduling, Family
-capacity, owner relationship authority, and owner and beneficiary account
-deletion must all reject retryably without a provider request or partial
-suspension. Family claims serialize on the group owner before a distinct
-beneficiary; a removed member remains discoverable through the immutable claim
-beneficiary. Terminal claim removal restores direct admission.
+customer creation, direct Checkout against a claim-only owner group, exact
+direct Subscription upgrade and scheduling, Family capacity, owner relationship
+authority, and owner and beneficiary account deletion must all reject retryably
+without a provider request or partial suspension. Family claims serialize on
+the group owner before a distinct beneficiary; a removed member remains
+discoverable through the immutable claim beneficiary. Family Portal admission
+reads only the owner group and five billing authority scalars in each of its two
+short lock transactions; it performs no roster, invite, contact, capacity, or
+external-key work while locked, and decrypts only the Customer id between the
+first transaction and provider call. Terminal claim removal restores direct
+admission.

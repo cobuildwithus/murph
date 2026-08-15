@@ -21,6 +21,8 @@ import {
 } from "./entitlement";
 import {
   hostedOnboardingError,
+  HOSTED_STRIPE_EFFECT_PENDING_ERROR_CODE,
+  HOSTED_STRIPE_EFFECT_PENDING_MESSAGE,
   isHostedOnboardingError,
   type HostedOnboardingError,
 } from "./errors";
@@ -812,6 +814,14 @@ function buildHostedBillingCheckoutIntentHash(input: {
 function buildHostedFamilyBillingClaimCheckoutError(
   claim: HostedMemberFamilyBillingClaim,
 ) {
+  if (claim.kind === "stripe_effect") {
+    return hostedOnboardingError({
+      code: HOSTED_STRIPE_EFFECT_PENDING_ERROR_CODE,
+      httpStatus: 409,
+      message: HOSTED_STRIPE_EFFECT_PENDING_MESSAGE,
+      retryable: true,
+    });
+  }
   return hostedOnboardingError({
     code: claim.kind === "active_sponsorship"
       ? "HOSTED_FAMILY_MEMBER_ALREADY_SPONSORED"

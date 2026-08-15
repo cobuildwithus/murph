@@ -508,6 +508,28 @@ describe("createHostedBillingCheckout", () => {
     expect(mocks.stripe.checkout.sessions.create).not.toHaveBeenCalled();
   });
 
+  it("does not create Checkout while a claim-only owner group owns Family billing", async () => {
+    mocks.requireHostedInviteForBillingCheckout.mockResolvedValue(makeInvite());
+    mocks.readHostedMemberFamilyBillingClaim.mockResolvedValue({
+      groupId: "hbag_claim_only",
+      kind: "stripe_effect",
+      ownerMemberId: "member_123",
+    });
+    const prisma = makePrisma();
+
+    await expect(createHostedBillingCheckout({
+      inviteCode: "invite-code",
+      member: makeAuthenticatedMember(),
+      now: new Date("2026-03-27T12:00:00.000Z"),
+      prisma: prisma as never,
+    })).rejects.toMatchObject({
+      code: "HOSTED_STRIPE_EFFECT_PENDING",
+      retryable: true,
+    });
+
+    expect(mocks.stripe.checkout.sessions.create).not.toHaveBeenCalled();
+  });
+
   it.each([
     ["Pulse", "launch_monthly", "price_monthly_123"],
     ["Edge", "launch_edge_monthly", "price_edge_monthly_123"],

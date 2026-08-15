@@ -9,11 +9,10 @@ type BillingPortalSessionCreateArguments = Parameters<
 
 const mocks = vi.hoisted(() => ({
   assertNoHostedDirectSubscriptionStripeEffectTx: vi.fn(),
-  assertNoHostedFamilyStripeEffectTx: vi.fn(),
   assertHostedOnboardingMutationOrigin: vi.fn(),
+  decryptHostedWebNullableString: vi.fn(),
   getPrisma: vi.fn(),
-  readHostedAccountGroupStripeBillingRef: vi.fn(),
-  readHostedFamilyOwnerSnapshotForMember: vi.fn(),
+  hostedAccountGroupFindUnique: vi.fn(),
   readHostedMemberStripeBillingRef: vi.fn(),
   requireHostedAppSessionFromRequest: vi.fn(),
   requireHostedStripeApi: vi.fn(),
@@ -34,14 +33,27 @@ vi.mock("@/src/lib/prisma", () => ({
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-billing-store", () => ({
   assertNoHostedDirectSubscriptionStripeEffectTx:
     mocks.assertNoHostedDirectSubscriptionStripeEffectTx,
+  assertHostedStripeEffectClaimAbsent: (claimId: string | null | undefined) => {
+    if (claimId !== null && claimId !== undefined) {
+      throw hostedOnboardingError({
+        code: "HOSTED_STRIPE_EFFECT_PENDING",
+        httpStatus: 409,
+        message: "Billing is already changing.",
+        retryable: true,
+      });
+    }
+  },
   readHostedMemberStripeBillingRef: mocks.readHostedMemberStripeBillingRef,
   withHostedMemberStripeMutationLock: mocks.withHostedMemberStripeMutationLock,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/family-plan", () => ({
-  assertNoHostedFamilyStripeEffectTx: mocks.assertNoHostedFamilyStripeEffectTx,
-  readHostedAccountGroupStripeBillingRef: mocks.readHostedAccountGroupStripeBillingRef,
-  readHostedFamilyOwnerSnapshotForMember: mocks.readHostedFamilyOwnerSnapshotForMember,
+  HOSTED_ACCOUNT_GROUP_BILLING_STRIPE_CUSTOMER_FIELD:
+    "hosted-account-group-billing-ref.stripe-customer-id",
+}));
+
+vi.mock("@/src/lib/hosted-web/encryption", () => ({
+  decryptHostedWebNullableString: mocks.decryptHostedWebNullableString,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/app-session", () => ({
@@ -62,13 +74,28 @@ beforeEach(async () => {
   vi.clearAllMocks();
   delete process.env.HOSTED_ONBOARDING_STRIPE_FAMILY_PORTAL_CONFIGURATION_ID;
   mocks.assertHostedOnboardingMutationOrigin.mockImplementation(() => {});
-  const prisma = {};
+  const prisma = {
+    hostedAccountGroup: {
+      findUnique: mocks.hostedAccountGroupFindUnique,
+    },
+  };
   mocks.getPrisma.mockReturnValue(prisma as never);
   mocks.withHostedMemberStripeMutationLock.mockImplementation(
     async (input: { run: (tx: unknown) => Promise<unknown> }) => input.run(prisma),
   );
   mocks.assertNoHostedDirectSubscriptionStripeEffectTx.mockResolvedValue(undefined);
-  mocks.assertNoHostedFamilyStripeEffectTx.mockResolvedValue(undefined);
+  mocks.decryptHostedWebNullableString.mockResolvedValue("cus_family_123");
+  mocks.hostedAccountGroupFindUnique.mockResolvedValue({
+    billingRef: {
+      stripeCustomerIdEncrypted: "encrypted:cus_family_123",
+      stripeCustomerLookupKey: "lookup:cus_family_123",
+      stripeEffectClaimId: null,
+      stripeSubscriptionIdEncrypted: "encrypted:sub_family_123",
+      stripeSubscriptionLookupKey: "lookup:sub_family_123",
+    },
+    id: "hbag_123",
+    ownerMemberId: "member_123",
+  });
   mocks.requireHostedAppSessionFromRequest.mockResolvedValue({
     member: {
       id: "member_123",
@@ -79,14 +106,6 @@ beforeEach(async () => {
     memberId: "member_123",
     stripeCustomerId: "cus_123",
     stripeSubscriptionId: "sub_123",
-  });
-  mocks.readHostedFamilyOwnerSnapshotForMember.mockResolvedValue({
-    groupId: "hbag_123",
-  });
-  mocks.readHostedAccountGroupStripeBillingRef.mockResolvedValue({
-    groupId: "hbag_123",
-    stripeCustomerId: "cus_family_123",
-    stripeSubscriptionId: "sub_family_123",
   });
   mocks.requireHostedStripeApi.mockReturnValue({
     billingPortal: {
@@ -157,20 +176,35 @@ test("creates a Stripe billing portal session for a family owner group", async (
   await expect(response.json()).resolves.toEqual({
     url: "https://stripe.example.test/portal/session_123",
   });
-  expect(mocks.readHostedFamilyOwnerSnapshotForMember).toHaveBeenCalledWith({
+  expect(mocks.hostedAccountGroupFindUnique).toHaveBeenCalledTimes(2);
+  expect(mocks.hostedAccountGroupFindUnique).toHaveBeenCalledWith({
+    select: {
+      billingRef: {
+        select: {
+          stripeCustomerIdEncrypted: true,
+          stripeCustomerLookupKey: true,
+          stripeEffectClaimId: true,
+          stripeSubscriptionIdEncrypted: true,
+          stripeSubscriptionLookupKey: true,
+        },
+      },
+      id: true,
+      ownerMemberId: true,
+    },
+    where: { ownerMemberId: "member_123" },
+  });
+  expect(mocks.decryptHostedWebNullableString).toHaveBeenCalledOnce();
+  expect(mocks.decryptHostedWebNullableString).toHaveBeenCalledWith({
+    field: "hosted-account-group-billing-ref.stripe-customer-id",
     memberId: "member_123",
     prisma: expect.any(Object),
-  });
-  expect(mocks.readHostedAccountGroupStripeBillingRef).toHaveBeenCalledWith({
-    groupId: "hbag_123",
-    prisma: expect.any(Object),
+    value: "encrypted:cus_family_123",
   });
   expect(mocks.readHostedMemberStripeBillingRef).not.toHaveBeenCalled();
   expect(mocks.stripeBillingPortalSessionCreate).toHaveBeenCalledWith({
     customer: "cus_family_123",
     return_url: "https://join.example.test/settings",
   });
-  expect(mocks.assertNoHostedFamilyStripeEffectTx).toHaveBeenCalledTimes(2);
 });
 
 test.each([
@@ -187,7 +221,17 @@ test.each([
     retryable: true,
   });
   if (guard === "family") {
-    mocks.assertNoHostedFamilyStripeEffectTx.mockRejectedValueOnce(rejection);
+    mocks.hostedAccountGroupFindUnique.mockResolvedValueOnce({
+      billingRef: {
+        stripeCustomerIdEncrypted: "encrypted:cus_family_123",
+        stripeCustomerLookupKey: "lookup:cus_family_123",
+        stripeEffectClaimId: "future-family-effect",
+        stripeSubscriptionIdEncrypted: "encrypted:sub_family_123",
+        stripeSubscriptionLookupKey: "lookup:sub_family_123",
+      },
+      id: "hbag_123",
+      ownerMemberId: "member_123",
+    });
   } else {
     mocks.assertNoHostedDirectSubscriptionStripeEffectTx.mockRejectedValueOnce(rejection);
   }
@@ -239,6 +283,51 @@ test("does not return a newly created Portal URL when a claim wins the final own
   });
   expect(mocks.stripeBillingPortalSessionCreate).toHaveBeenCalledOnce();
   expect(mocks.assertNoHostedDirectSubscriptionStripeEffectTx).toHaveBeenCalledTimes(2);
+});
+
+test("does not return or re-decrypt a Family Portal URL when a claim wins the final check", async () => {
+  mocks.hostedAccountGroupFindUnique
+    .mockResolvedValueOnce({
+      billingRef: {
+        stripeCustomerIdEncrypted: "encrypted:cus_family_123",
+        stripeCustomerLookupKey: "lookup:cus_family_123",
+        stripeEffectClaimId: null,
+        stripeSubscriptionIdEncrypted: "encrypted:sub_family_123",
+        stripeSubscriptionLookupKey: "lookup:sub_family_123",
+      },
+      id: "hbag_123",
+      ownerMemberId: "member_123",
+    })
+    .mockResolvedValueOnce({
+      billingRef: {
+        stripeCustomerIdEncrypted: "encrypted:cus_family_123",
+        stripeCustomerLookupKey: "lookup:cus_family_123",
+        stripeEffectClaimId: "future-family-effect",
+        stripeSubscriptionIdEncrypted: "encrypted:sub_family_123",
+        stripeSubscriptionLookupKey: "lookup:sub_family_123",
+      },
+      id: "hbag_123",
+      ownerMemberId: "member_123",
+    });
+
+  const response = await billingPortalRoute.POST(
+    new Request("https://join.example.test/api/settings/billing/portal", {
+      body: JSON.stringify({ billingScope: "family" }),
+      headers: {
+        "content-type": "application/json",
+        origin: "https://join.example.test",
+      },
+      method: "POST",
+    }),
+  );
+
+  expect(response.status).toBe(409);
+  await expect(response.json()).resolves.toMatchObject({
+    error: { code: "HOSTED_STRIPE_EFFECT_PENDING" },
+  });
+  expect(mocks.stripeBillingPortalSessionCreate).toHaveBeenCalledOnce();
+  expect(mocks.hostedAccountGroupFindUnique).toHaveBeenCalledTimes(2);
+  expect(mocks.decryptHostedWebNullableString).toHaveBeenCalledOnce();
 });
 
 test("uses the dedicated Family portal configuration when configured", async () => {

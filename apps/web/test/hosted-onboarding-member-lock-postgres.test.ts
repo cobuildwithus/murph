@@ -20,6 +20,7 @@ import {
 } from "@/src/lib/hosted-onboarding/contact-privacy";
 import { upgradeHostedBillingPlan } from "@/src/lib/hosted-onboarding/billing-plan-change-service";
 import { scheduleHostedBillingPlanSwitch } from "@/src/lib/hosted-onboarding/billing-plan-switch-to-pulse-service";
+import { createHostedBillingCheckout } from "@/src/lib/hosted-onboarding/billing-service";
 import { completeHostedPrivyVerification } from "@/src/lib/hosted-onboarding/authentication-service";
 import { ensureHostedCompanionMemberId } from "@/src/lib/hosted-onboarding/companion-member-access";
 import {
@@ -121,6 +122,7 @@ const accountDeletionBoundaries = vi.hoisted(() => ({
 
 const stripeProvider = vi.hoisted(() => ({
   chargesRetrieve: vi.fn(),
+  checkoutSessionsCreate: vi.fn(),
   eventsRetrieve: vi.fn(),
   subscriptionsRetrieve: vi.fn(),
 }));
@@ -252,6 +254,11 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", async () => {
     charges: {
       retrieve: stripeProvider.chargesRetrieve,
     },
+    checkout: {
+      sessions: {
+        create: stripeProvider.checkoutSessionsCreate,
+      },
+    },
     events: {
       retrieve: stripeProvider.eventsRetrieve,
     },
@@ -271,6 +278,13 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", async () => {
       billingPlanCode: "launch_monthly",
       priceId: "price_restore_reconciliation",
       stripe,
+    }),
+    requireHostedOnboardingPublicBaseUrl: () => "https://join.example.test",
+    requireHostedStripeCheckoutConfig: () => ({
+      billingPlanCode: "launch_monthly",
+      priceId: "price_launch_monthly",
+      stripe,
+      stripeLiveMode: false,
     }),
   };
 });
@@ -431,6 +445,7 @@ describe.skipIf(!runPostgresConcurrencyProof)(
 
     it.each([
       { kind: "direct-customer" as const },
+      { kind: "direct-checkout" as const },
       { kind: "family-capacity" as const },
       { kind: "account-deletion" as const },
       { kind: "account-deletion-beneficiary" as const },
@@ -453,11 +468,14 @@ describe.skipIf(!runPostgresConcurrencyProof)(
       const claimPrepared = createDeferred();
       const releaseClaim = createDeferred();
       let writerPromise: Promise<unknown> | null = null;
+      stripeProvider.checkoutSessionsCreate.mockClear();
       stripeProvider.subscriptionsRetrieve.mockClear();
 
       await observer.hostedMember.create({
         data: {
-          billingStatus: HostedBillingStatus.active,
+          billingStatus: kind === "direct-checkout"
+            ? HostedBillingStatus.not_started
+            : HostedBillingStatus.active,
           id: memberId,
         },
       });
@@ -469,7 +487,9 @@ describe.skipIf(!runPostgresConcurrencyProof)(
       });
       await observer.hostedAccountGroup.create({
         data: {
-          billingStatus: HostedBillingStatus.active,
+          billingStatus: kind === "direct-checkout"
+            ? HostedBillingStatus.not_started
+            : HostedBillingStatus.active,
           id: groupId,
           ownerMemberId: memberId,
         },
@@ -481,9 +501,38 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           memberId: beneficiaryMemberId,
           planCode: "pulse",
           role: "member",
-          status: kind === "account-deletion-claim-beneficiary" ? "removed" : "active",
+          status: kind === "account-deletion-claim-beneficiary"
+              || kind === "direct-checkout"
+            ? "removed"
+            : "active",
         },
       });
+      if (kind === "direct-checkout") {
+        await observer.hostedAccountGroupMembership.create({
+          data: {
+            groupId,
+            id: `hbagm_compatibility_owner_${fixtureId}`,
+            memberId,
+            planCode: "pulse",
+            role: "owner",
+            status: "active",
+          },
+        });
+        await observer.hostedMemberIdentity.create({
+          data: {
+            memberId,
+            phoneLookupKey: `phone:${fixtureId}`,
+          },
+        });
+        await observer.hostedInvite.create({
+          data: {
+            expiresAt: new Date("2026-08-13T12:00:00.000Z"),
+            id: `hi_compatibility_${fixtureId}`,
+            inviteCode: `invite-compatibility-${fixtureId}`,
+            memberId,
+          },
+        });
+      }
       if (kind === "account-deletion-claim-beneficiary") {
         await observer.hostedAccountGroupBillingRef.create({
           data: {
@@ -543,6 +592,13 @@ describe.skipIf(!runPostgresConcurrencyProof)(
         await claimPrepared.promise;
         writerPromise = kind === "direct-customer"
           ? ensureHostedMemberStripeCustomer({ memberId, prisma: writer })
+          : kind === "direct-checkout"
+            ? createHostedBillingCheckout({
+                inviteCode: `invite-compatibility-${fixtureId}`,
+                member: { id: memberId, suspendedAt: null },
+                now: new Date("2026-08-12T12:01:00.000Z"),
+                prisma: writer,
+              })
           : kind === "family-capacity"
             ? updateHostedFamilyPlanCapacities({
                 groupId,
@@ -580,6 +636,7 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           where: { id: deletionMemberId },
         })).resolves.toEqual({ suspendedAt: null });
         expect(stripeProvider.subscriptionsRetrieve).not.toHaveBeenCalled();
+        expect(stripeProvider.checkoutSessionsCreate).not.toHaveBeenCalled();
       } finally {
         releaseClaim.resolve();
         await Promise.allSettled([

@@ -524,10 +524,53 @@ describe("hosted Family plan", () => {
 
     expect(tx.hostedAccountGroupMembership.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: {
+        take: 2,
+        where: expect.objectContaining({
           memberId: "member_mom",
           status: "active",
+        }),
+      }),
+    );
+  });
+
+  it("reports a claim-only owner group as the member's Family billing authority", async () => {
+    const tx = createTxMock();
+    tx.hostedAccountGroupMembership.findMany.mockResolvedValueOnce([{
+      group: {
+        billingRef: {
+          checkoutAttemptId: null,
+          stripeEffectClaimId: "opaque-future-family-effect",
+          stripeSubscriptionIdEncrypted: null,
         },
+        billingStatus: HostedBillingStatus.not_started,
+        id: "hbag_claim_only",
+        ownerMemberId: "member_mom",
+        suspendedAt: null,
+      },
+    }]);
+
+    await expect(readHostedMemberFamilyBillingClaim({
+      memberId: "member_mom",
+      prisma: tx,
+    })).resolves.toEqual({
+      groupId: "hbag_claim_only",
+      kind: "stripe_effect",
+      ownerMemberId: "member_mom",
+    });
+
+    expect(tx.hostedAccountGroupMembership.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        select: expect.objectContaining({
+          group: {
+            select: expect.objectContaining({
+              billingRef: {
+                select: expect.objectContaining({
+                  stripeEffectClaimId: true,
+                }),
+              },
+            }),
+          },
+        }),
       }),
     );
   });

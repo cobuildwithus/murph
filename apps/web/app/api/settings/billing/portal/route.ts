@@ -4,12 +4,11 @@ import type Stripe from "stripe";
 import { assertHostedOnboardingMutationOrigin } from "@/src/lib/hosted-onboarding/csrf";
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import {
-  assertNoHostedFamilyStripeEffectTx,
-  readHostedAccountGroupStripeBillingRef,
-  readHostedFamilyOwnerSnapshotForMember,
+  HOSTED_ACCOUNT_GROUP_BILLING_STRIPE_CUSTOMER_FIELD,
 } from "@/src/lib/hosted-onboarding/family-plan";
 import {
   assertNoHostedDirectSubscriptionStripeEffectTx,
+  assertHostedStripeEffectClaimAbsent,
   readHostedMemberStripeBillingRef,
   withHostedMemberStripeMutationLock,
 } from "@/src/lib/hosted-onboarding/hosted-member-billing-store";
@@ -17,6 +16,7 @@ import { jsonOk, readOptionalJsonObject, withJsonError } from "@/src/lib/hosted-
 import { requireHostedAppSessionFromRequest } from "@/src/lib/hosted-onboarding/app-session";
 import { requireHostedStripeApi } from "@/src/lib/hosted-onboarding/runtime";
 import { normalizeNullableString } from "@/src/lib/hosted-onboarding/shared";
+import { decryptHostedWebNullableString } from "@/src/lib/hosted-web/encryption";
 import { getPrisma } from "@/src/lib/prisma";
 
 export const POST = withJsonError(async (request: Request) => {
@@ -64,7 +64,7 @@ export const POST = withJsonError(async (request: Request) => {
   }
 
   await assertBillingPortalOwnerStillCurrent({
-    expected: owner,
+    expected: owner.authority,
     memberId: auth.member.id,
     prisma,
   });
@@ -74,11 +74,30 @@ export const POST = withJsonError(async (request: Request) => {
   });
 });
 
-type BillingPortalOwner = {
-  billingScope: "family" | "member";
-  groupId: string | null;
+type MemberBillingPortalAuthority = {
+  billingScope: "member";
+  groupId: null;
   stripeCustomerId: string | null;
   stripeSubscriptionId: string | null;
+};
+
+type FamilyBillingPortalAuthority = {
+  billingScope: "family";
+  groupId: string;
+  ownerMemberId: string;
+  stripeCustomerIdEncrypted: string | null;
+  stripeCustomerLookupKey: string | null;
+  stripeSubscriptionIdEncrypted: string | null;
+  stripeSubscriptionLookupKey: string | null;
+};
+
+type BillingPortalAuthority =
+  | FamilyBillingPortalAuthority
+  | MemberBillingPortalAuthority;
+
+type BillingPortalOwner = {
+  authority: BillingPortalAuthority;
+  stripeCustomerId: string | null;
 };
 
 async function readBillingPortalOwner(input: {
@@ -86,26 +105,49 @@ async function readBillingPortalOwner(input: {
   memberId: string;
   prisma: PrismaClient;
 }): Promise<BillingPortalOwner> {
-  return withHostedMemberStripeMutationLock({
+  const authority = await readBillingPortalAuthority(input);
+  if (authority.billingScope === "member") {
+    return {
+      authority,
+      stripeCustomerId: authority.stripeCustomerId,
+    };
+  }
+  return {
+    authority,
+    stripeCustomerId: await decryptHostedWebNullableString({
+      field: HOSTED_ACCOUNT_GROUP_BILLING_STRIPE_CUSTOMER_FIELD,
+      memberId: authority.ownerMemberId,
+      prisma: input.prisma,
+      value: authority.stripeCustomerIdEncrypted,
+    }),
+  };
+}
+
+async function readBillingPortalAuthority(input: {
+  billingScope: "family" | "member";
+  memberId: string;
+  prisma: PrismaClient;
+}): Promise<BillingPortalAuthority> {
+  return withHostedMemberStripeMutationLock<BillingPortalAuthority>({
     memberId: input.memberId,
     prisma: input.prisma,
     run: (tx) =>
       input.billingScope === "family"
-        ? readFamilyBillingPortalOwner({
+        ? readFamilyBillingPortalAuthority({
             memberId: input.memberId,
             tx,
           })
-        : readMemberBillingPortalOwner({
+        : readMemberBillingPortalAuthority({
             memberId: input.memberId,
             tx,
           }),
   });
 }
 
-async function readMemberBillingPortalOwner(input: {
+async function readMemberBillingPortalAuthority(input: {
   memberId: string;
   tx: Prisma.TransactionClient;
-}): Promise<BillingPortalOwner> {
+}): Promise<MemberBillingPortalAuthority> {
   const billingRef = await readHostedMemberStripeBillingRef({
     memberId: input.memberId,
     prisma: input.tx,
@@ -123,16 +165,28 @@ async function readMemberBillingPortalOwner(input: {
   };
 }
 
-async function readFamilyBillingPortalOwner(input: {
+async function readFamilyBillingPortalAuthority(input: {
   memberId: string;
   tx: Prisma.TransactionClient;
-}): Promise<BillingPortalOwner> {
-  const familyOwner = await readHostedFamilyOwnerSnapshotForMember({
-    memberId: input.memberId,
-    prisma: input.tx,
+}): Promise<FamilyBillingPortalAuthority> {
+  const group = await input.tx.hostedAccountGroup.findUnique({
+    select: {
+      billingRef: {
+        select: {
+          stripeCustomerIdEncrypted: true,
+          stripeCustomerLookupKey: true,
+          stripeEffectClaimId: true,
+          stripeSubscriptionIdEncrypted: true,
+          stripeSubscriptionLookupKey: true,
+        },
+      },
+      id: true,
+      ownerMemberId: true,
+    },
+    where: { ownerMemberId: input.memberId },
   });
 
-  if (!familyOwner) {
+  if (!group) {
     throw hostedOnboardingError({
       code: "HOSTED_FAMILY_OWNER_NOT_FOUND",
       httpStatus: 403,
@@ -140,38 +194,34 @@ async function readFamilyBillingPortalOwner(input: {
     });
   }
 
-  const billingRef = await readHostedAccountGroupStripeBillingRef({
-    groupId: familyOwner.groupId,
-    prisma: input.tx,
-  });
-  await assertNoHostedFamilyStripeEffectTx({
-    groupId: familyOwner.groupId,
-    tx: input.tx,
-  });
+  assertHostedStripeEffectClaimAbsent(group.billingRef?.stripeEffectClaimId);
 
   return {
     billingScope: "family",
-    groupId: familyOwner.groupId,
-    stripeCustomerId: billingRef?.stripeCustomerId ?? null,
-    stripeSubscriptionId: billingRef?.stripeSubscriptionId ?? null,
+    groupId: group.id,
+    ownerMemberId: group.ownerMemberId,
+    stripeCustomerIdEncrypted:
+      group.billingRef?.stripeCustomerIdEncrypted ?? null,
+    stripeCustomerLookupKey:
+      group.billingRef?.stripeCustomerLookupKey ?? null,
+    stripeSubscriptionIdEncrypted:
+      group.billingRef?.stripeSubscriptionIdEncrypted ?? null,
+    stripeSubscriptionLookupKey:
+      group.billingRef?.stripeSubscriptionLookupKey ?? null,
   };
 }
 
 async function assertBillingPortalOwnerStillCurrent(input: {
-  expected: BillingPortalOwner;
+  expected: BillingPortalAuthority;
   memberId: string;
   prisma: PrismaClient;
 }): Promise<void> {
-  const current = await readBillingPortalOwner({
+  const current = await readBillingPortalAuthority({
     billingScope: input.expected.billingScope,
     memberId: input.memberId,
     prisma: input.prisma,
   });
-  if (
-    current.groupId !== input.expected.groupId
-    || current.stripeCustomerId !== input.expected.stripeCustomerId
-    || current.stripeSubscriptionId !== input.expected.stripeSubscriptionId
-  ) {
+  if (!haveSameBillingPortalAuthority(current, input.expected)) {
     throw hostedOnboardingError({
       code: "HOSTED_BILLING_PORTAL_OWNER_CHANGED",
       httpStatus: 409,
@@ -179,4 +229,29 @@ async function assertBillingPortalOwnerStillCurrent(input: {
       retryable: true,
     });
   }
+}
+
+function haveSameBillingPortalAuthority(
+  current: BillingPortalAuthority,
+  expected: BillingPortalAuthority,
+): boolean {
+  if (current.billingScope !== expected.billingScope) {
+    return false;
+  }
+  if (current.billingScope === "member" && expected.billingScope === "member") {
+    return current.stripeCustomerId === expected.stripeCustomerId
+      && current.stripeSubscriptionId === expected.stripeSubscriptionId;
+  }
+  if (current.billingScope === "family" && expected.billingScope === "family") {
+    return current.groupId === expected.groupId
+      && current.ownerMemberId === expected.ownerMemberId
+      && current.stripeCustomerIdEncrypted
+        === expected.stripeCustomerIdEncrypted
+      && current.stripeCustomerLookupKey === expected.stripeCustomerLookupKey
+      && current.stripeSubscriptionIdEncrypted
+        === expected.stripeSubscriptionIdEncrypted
+      && current.stripeSubscriptionLookupKey
+        === expected.stripeSubscriptionLookupKey;
+  }
+  return false;
 }
