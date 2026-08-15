@@ -355,7 +355,10 @@ provider-owned card masking, a concise date-and-meal-count nutrition
 caption with conditional partial-state and assessed-goal-direction subcaptions,
 one trusted provider reply-thread binding, bounded offline V3 compact-table,
 read-only V4 workout-session, editable V6 workout-session with a
-runtime-hydrated typed optimistic projection, and V5 challenge-standings
+runtime-hydrated typed optimistic projection, V4 logical capacity of 16
+exercises and 16 sets per exercise with measured fragment/image length as the
+final gate, a compact four-exercise transcript summary plus remaining count,
+and V5 challenge-standings
 fragments, plus the shared
 strict queryless static-image route are specified by
 `ARCHITECTURE.md`,
