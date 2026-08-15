@@ -4990,6 +4990,7 @@ describe("deleteHostedAccountData", () => {
     })).rejects.toMatchObject({
       code: "ACCOUNT_DELETION_CONNECTED_APP_SETUP_IN_PROGRESS",
       httpStatus: 503,
+      message: "Connected-app setup is still finishing. Try account deletion again after it finishes or times out.",
       retryable: true,
     });
 
@@ -5013,6 +5014,43 @@ describe("deleteHostedAccountData", () => {
         startedAt: { not: null },
       },
     });
+    expect(order).toContain("update:hostedMember");
+    expect(order).not.toContain("delete:hostedMember");
+  });
+
+  it("uses plural retry guidance while multiple connected-app links are being created", async () => {
+    const order: string[] = [];
+    const prisma = createHostedAccountDeletionPrismaForTest({
+      connectedAppConnectIntentRows: [
+        {
+          alias: "work",
+          connectedAccountId: null,
+          toolkit: "gmail",
+        },
+        {
+          alias: "personal",
+          connectedAccountId: null,
+          toolkit: "calendar",
+        },
+      ],
+      connectedAppsSession: true,
+      onTransaction: () => order.push("transaction"),
+      operationOrder: order,
+    });
+
+    await expect(deleteHostedAccountData({
+      memberId: "member_123",
+      prisma,
+      request: new Request("https://join.example.test/settings"),
+    })).rejects.toMatchObject({
+      code: "ACCOUNT_DELETION_CONNECTED_APP_CLEANUP_BACKLOG",
+      httpStatus: 503,
+      message: "Multiple connected-app setups are still finishing. Try account deletion again after they finish or time out.",
+      retryable: true,
+    });
+
+    expect(serviceMocks.connectedAppsClient.listAccounts).not.toHaveBeenCalled();
+    expect(serviceMocks.connectedAppsClient.deleteAccount).not.toHaveBeenCalled();
     expect(order).toContain("update:hostedMember");
     expect(order).not.toContain("delete:hostedMember");
   });
@@ -5106,6 +5144,7 @@ describe("deleteHostedAccountData", () => {
       code: "ACCOUNT_DELETION_CONNECTED_APP_CLEANUP_BACKLOG",
       details: { limit: 20 },
       httpStatus: 503,
+      message: "Multiple connected-app setups are still finishing. Try account deletion again after they finish or time out.",
       retryable: true,
     });
 
@@ -5115,29 +5154,35 @@ describe("deleteHostedAccountData", () => {
     expect(order).not.toContain("delete:hostedMember");
   });
 
-  it("does not let an owner-dead connected-app row strand account deletion before retention", async () => {
+  it("excludes an owner-dead connected-app row before retention removes it", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-01-01T12:30:00.001Z"));
     const order: string[] = [];
     const prisma = createHostedAccountDeletionPrismaForTest({
       connectedAppConnectIntentRows: [{
         alias: "work",
         connectedAccountId: null,
-        expiresAt: new Date("2026-01-01T00:00:00.000Z"),
+        expiresAt: new Date("2026-01-01T12:00:00.000Z"),
         toolkit: "gmail",
       }],
       onTransaction: () => order.push("transaction"),
       operationOrder: order,
     });
 
-    await expect(deleteHostedAccountData({
-      memberId: "member_123",
-      prisma,
-      request: new Request("https://join.example.test/settings"),
-    })).resolves.toMatchObject({
-      providerRevocations: [],
-    });
+    try {
+      await expect(deleteHostedAccountData({
+        memberId: "member_123",
+        prisma,
+        request: new Request("https://join.example.test/settings"),
+      })).resolves.toMatchObject({
+        providerRevocations: [],
+      });
 
-    expect(serviceMocks.connectedAppsClient.listAccounts).not.toHaveBeenCalled();
-    expect(order).toContain("delete:hostedMember");
+      expect(serviceMocks.connectedAppsClient.listAccounts).not.toHaveBeenCalled();
+      expect(order).toContain("delete:hostedMember");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("re-fences before local deletion and aborts if a connected-app write starts after provider cleanup", async () => {

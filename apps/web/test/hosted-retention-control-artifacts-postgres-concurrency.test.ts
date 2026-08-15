@@ -390,6 +390,18 @@ describe.skipIf(!runPostgresProof)(
             toolkit: "gmail",
           },
         });
+        await expect(deleteExpiredConnectedAppConnectIntents({
+          now: new Date(
+            expiresAt.getTime()
+            + HOSTED_CONNECTED_APP_STARTED_INTENT_OWNER_GRACE_MS
+            - 1,
+          ),
+          prisma: cleanup,
+        })).resolves.toBe(0);
+        await expect(cleanup.hostedConnectedAppConnectIntent.findUnique({
+          select: { completedAt: true },
+          where: { claimHash },
+        })).resolves.toEqual({ completedAt: null });
         await consumer.$executeRawUnsafe(
           `SET murph.retention_connected_callback_gate = '${suffix}'`,
         );

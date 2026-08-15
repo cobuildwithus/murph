@@ -115,6 +115,8 @@ import {
 } from "../phone-calls/account-deletion";
 import {
   HOSTED_ACCOUNT_DATA_DELETION_SCHEMA,
+  HOSTED_ACCOUNT_DELETION_CONNECTED_APP_CLEANUP_BACKLOG_MESSAGE,
+  HOSTED_ACCOUNT_DELETION_CONNECTED_APP_SETUP_IN_PROGRESS_MESSAGE,
   HOSTED_ACCOUNT_DELETION_CONFIRMATION_PHRASE,
   HOSTED_ACCOUNT_EXIT_NOTE_MAX_LENGTH,
   type HostedAccountExitReasonCode,
@@ -3830,10 +3832,15 @@ async function revokeConnectedAppsBestEffort(input: {
   prisma: HostedAccountDataPrisma;
 }): Promise<HostedAccountProviderRevocationResult[]> {
   const inFlightIntents = await listInFlightConnectedAppIntentsForDeletion(input);
-  if (inFlightIntents.some((intent) => !intent.connectedAccountId)) {
+  const incompleteIntentCount = inFlightIntents.filter(
+    (intent) => !intent.connectedAccountId,
+  ).length;
+  if (incompleteIntentCount > 0) {
     return [{
       connectionId: "composio_connected_app_connection_in_progress",
-      errorCode: "CONNECTED_APP_CONNECTION_IN_PROGRESS",
+      errorCode: incompleteIntentCount === 1
+        ? "CONNECTED_APP_CONNECTION_IN_PROGRESS"
+        : "CONNECTED_APP_CONNECTIONS_IN_PROGRESS",
       providerLabel: "Connected apps",
       status: "failed",
       warningCode: null,
@@ -3979,7 +3986,7 @@ async function listInFlightConnectedAppIntentsForDeletion(input: {
         limit: HOSTED_ACCOUNT_DELETION_CONNECTED_APP_INTENT_LIMIT,
       },
       httpStatus: 503,
-      message: "Connected-app cleanup is still settling. Retry account deletion after the next cleanup pass.",
+      message: HOSTED_ACCOUNT_DELETION_CONNECTED_APP_CLEANUP_BACKLOG_MESSAGE,
       retryable: true,
     });
   }
@@ -4024,12 +4031,23 @@ function assertProviderRevocationsAllowDeletion(
   }
 
   if (failures.some((failure) =>
+    failure.errorCode === "CONNECTED_APP_CONNECTIONS_IN_PROGRESS"
+  )) {
+    throw hostedOnboardingError({
+      code: "ACCOUNT_DELETION_CONNECTED_APP_CLEANUP_BACKLOG",
+      httpStatus: 503,
+      message: HOSTED_ACCOUNT_DELETION_CONNECTED_APP_CLEANUP_BACKLOG_MESSAGE,
+      retryable: true,
+    });
+  }
+
+  if (failures.some((failure) =>
     failure.errorCode === "CONNECTED_APP_CONNECTION_IN_PROGRESS"
   )) {
     throw hostedOnboardingError({
       code: "ACCOUNT_DELETION_CONNECTED_APP_SETUP_IN_PROGRESS",
       httpStatus: 503,
-      message: "Connected-app setup is still settling. Retry account deletion after the next cleanup pass.",
+      message: HOSTED_ACCOUNT_DELETION_CONNECTED_APP_SETUP_IN_PROGRESS_MESSAGE,
       retryable: true,
     });
   }

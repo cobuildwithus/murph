@@ -135,6 +135,20 @@ Updated: 2026-08-12
   bounded-backlog states now return specific retryable copy while the ordinary
   revocation error remains unchanged. `NO FINDINGS`; no rendered surface
   changed, and focused service tests directly prove the error classification.
+- The next exact-head audit found that those two retryable states still used the
+  generic browser reload path, which discarded the open confirmation dialog,
+  and that their copy incorrectly tied recovery to the hourly cleanup pass.
+  The client now preserves the existing dialog and typed confirmation for only
+  those owner-live completion states, while every retry still requests fresh
+  sensitive-action authorization. Shared copy names the actual completion or
+  timeout boundary, component coverage proves both codes, and the existing
+  account-deletion design study renders both messages at desktop and mobile
+  widths. The required Fable UI check then found that two to twenty unfinished
+  setups still selected singular copy; the service now selects singular only
+  for one unfinished intent and plural for every larger admitted set. Its final
+  maintainability note was resolved by folding the temporary maintenance and
+  connected-app frames into one parameterized dialog replica. No new screen,
+  state owner, retry loop, or lifecycle was added.
 
 ## ReviewGPT Round-Two Retrospective
 
