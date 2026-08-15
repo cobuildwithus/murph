@@ -193,6 +193,7 @@ test("workout stream reduction is bounded by admitted samples and never preserve
     },
   });
 
+  assert.ok(feature);
   assert.equal(feature.schema, JUNCTION_WORKOUT_STREAM_FEATURE_SCHEMA);
   assert.equal(feature.sampleCount, sampleCount);
   assert.equal(feature.maxHeartRate, 180);
@@ -215,8 +216,26 @@ test("workout stream reduction is bounded by admitted samples and never preserve
   }), /1-1 timestamps/u);
 });
 
-test("workout stream reduction keeps complete metrics when another optional series has invalid cardinality", () => {
-  const feature = reduceJunctionWorkoutStreamPayload({
+test("workout stream reduction skips a record when any present metric has invalid cardinality", () => {
+  const completeHeartRateOnlyFeature = reduceJunctionWorkoutStreamPayload({
+    maxSamples: 3,
+    summary: {
+      id: "workout-1",
+      sourceProviderSlug: "garmin",
+      startAt: "2026-07-01T12:00:00.000Z",
+      endAt: "2026-07-01T12:00:02.000Z",
+    },
+    stream: {
+      time: [1_783_000_000, 1_783_000_001, 1_783_000_002],
+      heartrate: [100, 110, 120],
+    },
+  });
+  assert.ok(completeHeartRateOnlyFeature);
+  assert.equal(completeHeartRateOnlyFeature.averageHeartRate, 110);
+  assert.equal(completeHeartRateOnlyFeature.maxHeartRate, 120);
+  assert.equal(completeHeartRateOnlyFeature.distanceMeters, undefined);
+
+  const malformedDistanceFeature = reduceJunctionWorkoutStreamPayload({
     maxSamples: 3,
     summary: {
       id: "workout-1",
@@ -230,11 +249,23 @@ test("workout stream reduction keeps complete metrics when another optional seri
       distance: [0, 10],
     },
   });
+  assert.equal(malformedDistanceFeature, undefined);
 
-  assert.equal(feature.averageHeartRate, 110);
-  assert.equal(feature.maxHeartRate, 120);
-  assert.equal(feature.distanceMeters, undefined);
-  assert.equal(feature.sampleCount, 3);
+  const malformedHeartRateFeature = reduceJunctionWorkoutStreamPayload({
+    maxSamples: 3,
+    summary: {
+      id: "workout-1",
+      sourceProviderSlug: "garmin",
+      startAt: "2026-07-01T12:00:00.000Z",
+      endAt: "2026-07-01T12:00:02.000Z",
+    },
+    stream: {
+      time: [1_783_000_000, 1_783_000_001, 1_783_000_002],
+      heartrate: [100, 110],
+      distance: [0, 10, 20],
+    },
+  });
+  assert.equal(malformedHeartRateFeature, undefined);
 
   assert.throws(() => reduceJunctionWorkoutStreamPayload({
     maxSamples: 3,
@@ -246,8 +277,7 @@ test("workout stream reduction keeps complete metrics when another optional seri
     },
     stream: {
       time: [1_783_000_000, 1_783_000_001, 1_783_000_002],
-      heartrate: [100, 110],
-      distance: [0, 10],
+      cadence: [80, 82, 84],
     },
   }), /no supported metrics/u);
 });

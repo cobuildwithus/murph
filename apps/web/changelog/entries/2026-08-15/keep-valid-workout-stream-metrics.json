@@ -5,9 +5,9 @@
     "id": "keep-valid-workout-stream-metrics",
     "kind": "improvement",
     "priority": 3,
-    "title": "Keep valid workout metrics when one stream is incomplete",
-    "summary": "Connected wearables can now keep complete workout heart-rate metrics when a separate optional workout stream is incomplete.",
-    "details": "Murph still rejects metrics that cannot be matched safely to their timestamps, and a workout with no complete supported metric remains unavailable.",
+    "title": "Keep workout sync moving past incomplete streams",
+    "summary": "Connected wearables can now continue syncing other workouts when one workout contains an incomplete metric stream.",
+    "details": "Murph skips the affected workout instead of guessing timestamp matches or replacing previously complete workout metrics.",
     "relevanceTags": ["wearables", "workouts", "reliability", "sync"],
     "sourcePullRequests": [1895]
   }
