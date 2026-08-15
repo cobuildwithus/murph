@@ -1,6 +1,7 @@
 import { createCloudflareHostedControlClient } from "@murphai/cloudflare-hosted-control/client";
+import { isDeviceSyncError } from "@murphai/device-syncd/errors";
 import { DEVICE_SYNC_PREPARED_WEBHOOK_SCHEMA } from "@murphai/device-syncd/prepared-webhook";
-import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   getHostedWebCryptoConfig: vi.fn(),
@@ -16,6 +17,7 @@ vi.mock("../src/lib/hosted-execution/control", () => ({
 }));
 
 import { enqueueHostedDeviceWebhook } from "../src/lib/device-sync/webhook-queue";
+import { jsonError } from "../src/lib/device-sync/http";
 
 beforeAll(async () => {
   const keyPair = await crypto.subtle.generateKey(
@@ -31,7 +33,7 @@ beforeAll(async () => {
   });
 });
 
-afterAll(() => {
+afterEach(() => {
   vi.restoreAllMocks();
 });
 
@@ -77,6 +79,7 @@ describe("hosted device webhook Queue enqueue", () => {
     controlCode,
     expectedCode,
   ) => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const fetchImpl = vi.fn(async () => Response.json(
       {
         code: controlCode,
@@ -92,22 +95,49 @@ describe("hosted device webhook Queue enqueue", () => {
       }),
     );
 
-    await expect(enqueueHostedDeviceWebhook({
-      preparedWebhook: {
-        acceptanceMode: "level_dirty_hint",
-        eventType: "demo.updated",
-        externalAccountId: "opaque-account",
-        jobs: [],
-        provider: "junction",
-        receivedAt: "2026-08-14T00:00:00.000Z",
-        schema: DEVICE_SYNC_PREPARED_WEBHOOK_SCHEMA,
-        traceId: "1".repeat(64),
-      },
-    })).rejects.toMatchObject({
-      code: expectedCode,
-      httpStatus: 503,
-      retryable: true,
-    });
+    try {
+      await enqueueHostedDeviceWebhook({
+        preparedWebhook: {
+          acceptanceMode: "level_dirty_hint",
+          eventType: "demo.updated",
+          externalAccountId: "opaque-account",
+          jobs: [],
+          provider: "junction",
+          receivedAt: "2026-08-14T00:00:00.000Z",
+          schema: DEVICE_SYNC_PREPARED_WEBHOOK_SCHEMA,
+          traceId: "1".repeat(64),
+        },
+      });
+      throw new Error("Expected device webhook Queue enqueue to fail.");
+    } catch (error) {
+      expect(isDeviceSyncError(error)).toBe(true);
+      if (!isDeviceSyncError(error)) {
+        throw error;
+      }
+      expect(error).toMatchObject({
+        code: "DEVICE_WEBHOOK_QUEUE_ENQUEUE_FAILED",
+        details: { type: expectedCode },
+        httpStatus: 503,
+        retryable: true,
+      });
+      const response = jsonError(error);
+      expect(response.status).toBe(503);
+      await expect(response.json()).resolves.toEqual({
+        error: {
+          code: "DEVICE_WEBHOOK_QUEUE_ENQUEUE_FAILED",
+          message: "Device webhook durable transport did not confirm acceptance.",
+          retryable: true,
+        },
+      });
+      expect(warn).toHaveBeenCalledWith(
+        "Hosted device-sync route failed.",
+        expect.objectContaining({
+          deviceWebhookQueueFailureType: expectedCode,
+          errorResponseCode: "DEVICE_WEBHOOK_QUEUE_ENQUEUE_FAILED",
+          errorResponseStatus: 503,
+        }),
+      );
+    }
     expect(fetchImpl).toHaveBeenCalledOnce();
   });
 });

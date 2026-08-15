@@ -81,9 +81,13 @@ export async function enqueueHostedDeviceWebhook(input: {
     return await controlClient.enqueueDeviceWebhook(envelope);
   } catch (cause) {
     const controlFailure = readCloudflareHostedControlHttpError(cause);
+    const diagnosticType = mapDeviceWebhookQueueControlFailureCode(
+      controlFailure?.code,
+    );
     throw deviceSyncError({
       cause,
-      code: mapDeviceWebhookQueueControlFailureCode(controlFailure?.code),
+      code: "DEVICE_WEBHOOK_QUEUE_ENQUEUE_FAILED",
+      details: { type: diagnosticType },
       httpStatus: 503,
       message: "Device webhook durable transport did not confirm acceptance.",
       retryable: true,

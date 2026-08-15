@@ -153,7 +153,9 @@ metadata, hosted-crypto environment mismatch, unavailable recipient keys,
 root-key unwrap failure, authenticated-payload open failure, persistence-key
 selection, resealing, Queue availability, and `Queue.send` rejection. It must
 never serialize the caught exception, envelope, key id or material, provider
-payload, account, event, or trace identity. Provider rollout remains disabled
+payload, account, event, or trace identity. Web retains the stage only as the
+allowlisted log `type`; the public provider response keeps the generic retryable
+Queue-enqueue code. Provider rollout remains disabled
 until the exact deployed Web and Worker pair completes this transport contract;
 a failed canary is rolled back to the synchronous path before investigation.
 

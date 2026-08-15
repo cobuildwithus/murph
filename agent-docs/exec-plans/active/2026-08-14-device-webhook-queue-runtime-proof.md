@@ -71,6 +71,10 @@ Updated: 2026-08-14
   and reopens with the active key, unusable reseal is classified, Worker tests
   require an exact value-free body, and Web projection uses the real control
   HTTP parser instead of a mocked reader.
+- Final ReviewGPT round 1 passed with no qualifying finding and noted one PR-body
+  discrepancy: stage-specific codes would have reached the public provider JSON.
+  Preserved the existing generic provider code and moved the closed stage into
+  an allowlisted log-only detail, with composed response/log coverage.
 
 ## Verification
 

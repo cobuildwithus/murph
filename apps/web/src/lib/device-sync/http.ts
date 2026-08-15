@@ -19,6 +19,19 @@ import {
 const HOSTED_DEVICE_SYNC_DEFAULT_HEADERS = {
   "Cache-Control": "no-store",
 } as const;
+const DEVICE_WEBHOOK_QUEUE_DIAGNOSTIC_TYPES = new Set([
+  "DEVICE_WEBHOOK_QUEUE_ENQUEUE_FAILED",
+  "DEVICE_WEBHOOK_QUEUE_INVALID_REQUEST",
+  "DEVICE_WEBHOOK_QUEUE_PERSISTENCE_FAILURE_UNCLASSIFIED",
+  "DEVICE_WEBHOOK_QUEUE_PERSISTENCE_KEY_UNAVAILABLE",
+  "DEVICE_WEBHOOK_QUEUE_PERSISTENCE_RESEAL_FAILED",
+  "DEVICE_WEBHOOK_QUEUE_TRANSPORT_CONTEXT_MISMATCH",
+  "DEVICE_WEBHOOK_QUEUE_TRANSPORT_METADATA_INVALID",
+  "DEVICE_WEBHOOK_QUEUE_TRANSPORT_PAYLOAD_OPEN_FAILED",
+  "DEVICE_WEBHOOK_QUEUE_TRANSPORT_RECIPIENT_KEY_UNAVAILABLE",
+  "DEVICE_WEBHOOK_QUEUE_TRANSPORT_ROOT_KEY_UNWRAP_FAILED",
+  "DEVICE_WEBHOOK_QUEUE_UNAVAILABLE",
+]);
 
 export {
   InvalidRouteParamEncodingError,
@@ -95,11 +108,33 @@ function matchDeviceSyncError(error: unknown): JsonErrorMapping | null {
     return null;
   }
 
+  const queueDiagnosticType = readDeviceWebhookQueueDiagnosticType(error);
   return {
     error: buildPublicDeviceSyncErrorPayload(error).error,
-    ...(error.retryable ? { log: { level: "warn" } } : {}),
+    ...(error.retryable || queueDiagnosticType
+      ? {
+          log: {
+            ...(error.retryable ? { level: "warn" as const } : {}),
+            ...(queueDiagnosticType
+              ? { details: { deviceWebhookQueueFailureType: queueDiagnosticType } }
+              : {}),
+          },
+        }
+      : {}),
     status: error.httpStatus,
   };
+}
+
+function readDeviceWebhookQueueDiagnosticType(
+  error: DeviceSyncError,
+): string | null {
+  if (error.code !== "DEVICE_WEBHOOK_QUEUE_ENQUEUE_FAILED") {
+    return null;
+  }
+  const type = error.details?.type;
+  return typeof type === "string" && DEVICE_WEBHOOK_QUEUE_DIAGNOSTIC_TYPES.has(type)
+    ? type
+    : null;
 }
 
 // Prisma reports every transaction-API fault as P2028, covering both a
