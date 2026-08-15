@@ -1221,9 +1221,6 @@ function listWearableBodyStateDaysFromDataset(dataset: WearableDataset): Wearabl
     const waistCircumference = resolveMetric("waistCircumference", selectMetricCandidates(dateCandidates, "waistCircumference"), {
       metricFamily: "body",
     });
-    const visceralFatIndex = resolveMetric("visceralFatIndex", selectMetricCandidates(dateCandidates, "visceralFatIndex"), {
-      metricFamily: "body",
-    });
     const summaryConfidence = summarizeMetricsConfidence([
       ["weightKg", weightKg],
       ["bodyFatPercentage", bodyFatPercentage],

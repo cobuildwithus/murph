@@ -9,7 +9,6 @@ export const wearableCanonicalMetricKeys = [
   "basalBodyTemperature",
   "bmi",
   "bodyBattery",
-  "bodyWaterPercentage",
   "bodyFatPercentage",
   "bodyWaterPercentage",
   "boneMassPercentage",
@@ -107,10 +106,6 @@ export const wearableMetricCatalog = Object.freeze({
   basalBodyTemperature: defineMetric("basalBodyTemperature", "celsius", "daily_observation", 0.2, []),
   bmi: defineMetric("bmi", "kg/m^2", "daily_observation", 0.1, ["body_mass_index"]),
   bodyBattery: defineMetric("bodyBattery", "score", "daily_observation", 1, ["body_battery"]),
-  bodyWaterPercentage: defineMetric("bodyWaterPercentage", "%", "daily_observation", 1, [
-    "body_water_percentage",
-    "water_percentage",
-  ]),
   bodyFatPercentage: defineMetric("bodyFatPercentage", "%", "daily_observation", 1, [
     "body_fat",
     "body_fat_percentage",

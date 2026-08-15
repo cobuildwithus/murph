@@ -206,6 +206,7 @@ test('Junction body data composes from provider jobs through canonical vault rea
           },
           waist_circumference: {
             end: '2026-08-10T08:11:00.000Z',
+            id: 'withings-waist-reading',
             start: '2026-08-10T08:10:00.000Z',
             timestamp: '2026-08-09T08:10:00.000Z',
             unit: 'cm',
@@ -274,13 +275,13 @@ test('Junction body data composes from provider jobs through canonical vault rea
       }))
     }
 
-    const sparseImports = imports.filter((result) =>
-      result.events.some((event) => event.kind === 'observation' && event.observationGrain === 'sample')
-    )
+    const isSparseBodyEvent = (event: DeviceBatchImportResult['events'][number]) =>
+      event.kind === 'measurement'
+        ? event.measurements.some((measurement) => measurement.metric === 'weight')
+        : event.kind === 'observation' && event.observationGrain === 'sample'
+    const sparseImports = imports.filter((result) => result.events.some(isSparseBodyEvent))
     assert.equal(sparseImports.length, 5)
-    const sparseEvents = sparseImports.flatMap((result) => result.events).filter((event) =>
-      event.kind === 'observation' && event.observationGrain === 'sample'
-    )
+    const sparseEvents = sparseImports.flatMap((result) => result.events).filter(isSparseBodyEvent)
     assert.equal(
       sparseEvents.length,
       5,
@@ -352,7 +353,7 @@ test('Junction body data composes from provider jobs through canonical vault rea
       requestId: null,
       vault: vaultRoot,
     })
-    assert.equal(body.count, 1)
+    assert.equal(body.count, 1, JSON.stringify(body.items))
     const bodyItem = requireRecord(body.items[0])
     assert.equal(requireRecord(bodyItem.weightKg).value, 72.4)
     assert.equal(requireRecord(bodyItem.bodyFatPercentage).value, 18.4)

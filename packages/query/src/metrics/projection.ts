@@ -64,9 +64,11 @@ export function buildMetricProjection(
   });
   return {
     dailySampleSummaries,
-    metricPoints: applyWearableSummaryMetricPrecedence(
-      applyJunctionPreciseBodyObservationPrecedence(metricPoints),
-      wearableMetricEvidence.suppressionEvidence,
+    metricPoints: applyJunctionPreciseBodyObservationPrecedence(
+      applyWearableSummaryMetricPrecedence(
+        metricPoints,
+        wearableMetricEvidence.suppressionEvidence,
+      ),
     ),
     wearableMetricRows,
   };
@@ -418,6 +420,10 @@ function applyWearableSummaryMetricPrecedence(
 
   return points.filter((point) => {
     if (point.source.family !== "event" || point.source.kind !== "observation") {
+      return true;
+    }
+
+    if (resolveJunctionBodyObservationIdentity(point)?.kind === "precise") {
       return true;
     }
 

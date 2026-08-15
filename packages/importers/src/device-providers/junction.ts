@@ -321,34 +321,6 @@ const BODY_METRICS: readonly MetricDescriptor[] = [
   { metric: "weight", unit: "kg", title: "Junction body weight", paths: ["weightKg", "weight_kg", "weight"] },
   { metric: "bmi", unit: "kg/m^2", title: "Junction BMI", paths: ["bmi", "body_mass_index"] },
   { metric: "body-fat-percentage", unit: "%", title: "Junction body fat", paths: ["bodyFatPercentage", "body_fat_percentage", "body_fat_percent", "bodyFat", "body_fat", "fat"] },
-  {
-    metric: "bone-mass-percentage",
-    unit: "%",
-    title: "Junction bone mass percentage",
-    paths: [],
-    value: (entry) => firstNumberFromPaths(entry, ["boneMassPercentage", "bone_mass_percentage"]),
-  },
-  {
-    metric: "muscle-mass-percentage",
-    unit: "%",
-    title: "Junction muscle mass percentage",
-    paths: [],
-    value: (entry) => firstNumberFromPaths(entry, ["muscleMassPercentage", "muscle_mass_percentage"]),
-  },
-  {
-    metric: "visceral-fat-index",
-    unit: "index",
-    title: "Junction visceral fat index",
-    paths: [],
-    value: (entry) => firstNumberFromPaths(entry, ["visceralFatIndex", "visceral_fat_index"]),
-  },
-  {
-    metric: "body-water-percentage",
-    unit: "%",
-    title: "Junction body water percentage",
-    paths: [],
-    value: (entry) => firstNumberFromPaths(entry, ["waterPercentage", "water_percentage"]),
-  },
   { metric: "lean-body-mass", unit: "kg", title: "Junction lean body mass", paths: ["leanBodyMassKg", "lean_body_mass_kg", "leanBodyMassKilogram", "lean_body_mass_kilogram", "leanMassKg", "lean_mass_kg"] },
   { metric: "waist-circumference", unit: "cm", title: "Junction waist circumference", paths: ["waistCircumference", "waist_circumference", "waistCircumferenceCentimeter", "waist_circumference_centimeter", "waistCircumferenceCm", "waist_circumference_cm"] },
   {
@@ -1955,6 +1927,11 @@ const JUNCTION_FEATURE_TIMESERIES_DESCRIPTORS: ReadonlyMap<string, JunctionFeatu
 const JUNCTION_BLOOD_PRESSURE_RESOURCE = "blood_pressure";
 const JUNCTION_NOTE_RESOURCE = "note";
 const JUNCTION_WEIGHT_RESOURCE = "weight";
+const JUNCTION_INTERVAL_BODY_TIMESERIES_RESOURCES = new Set([
+  "body_mass_index",
+  "lean_body_mass",
+  "waist_circumference",
+]);
 
 type JunctionSparseTimeseriesKind = "alert" | "insulin" | "observation";
 
@@ -2442,7 +2419,9 @@ function parseJunctionSparseTimeseriesRecord(
   const timestampRaw = stringId(entry.timestamp);
   const startRaw = stringId(entry.start);
   const endRaw = stringId(entry.end);
-  const requiresTimestamp = resource !== "carbohydrates"
+  const intervalBodyResource = JUNCTION_INTERVAL_BODY_TIMESERIES_RESOURCES.has(resource);
+  const requiresTimestamp = !intervalBodyResource
+    && resource !== "carbohydrates"
     && resource !== "heart_rate_alert"
     && resource !== "insulin_injection";
   const requiresInterval = resource !== "fat";
@@ -2454,7 +2433,7 @@ function parseJunctionSparseTimeseriesRecord(
   const startAt = startRaw ? normalizeTimestamp(startRaw) : undefined;
   const endAt = endRaw ? normalizeTimestamp(endRaw) : undefined;
   if (
-    (timestampRaw && !timestamp)
+    (!intervalBodyResource && timestampRaw && !timestamp)
     || (startRaw && !startAt)
     || (endRaw && !endAt)
     || (requiresInterval && (!startAt || !endAt))
@@ -2463,7 +2442,7 @@ function parseJunctionSparseTimeseriesRecord(
     return null;
   }
 
-  const observedAtRaw = timestampRaw ?? startRaw;
+  const observedAtRaw = intervalBodyResource ? startRaw : timestampRaw ?? startRaw;
   if (!observedAtRaw) {
     return null;
   }
@@ -3590,15 +3569,30 @@ function pushJunctionWeightReadings(
 
     const { providerReadingId, weightKilograms } =
       resolveJunctionWeightProviderRecordIdentity(entry);
-    const rawOccurredAt = firstValueFromPaths(entry, JUNCTION_RECORD_TIMESTAMP_PATHS);
+    const rawOccurredAt = firstStringFromPaths(entry, ["timestamp"]);
+    const timestampSemantics = inferTimestampSemantics(rawOccurredAt);
     const occurredAt = resolveSafeTimestamp(rawOccurredAt, resourceContext.sourceProviderSlug);
-    if (weightKilograms === undefined || !occurredAt) {
+    if (
+      weightKilograms === undefined
+      || !occurredAt
+      || (timestampSemantics !== "utc" && timestampSemantics !== "offset")
+    ) {
       continue;
     }
 
     const timestamp = withTimestampOverride(
       resolveRecordTimestamp(entry, context, resourceContext.sourceProviderSlug),
-      { occurredAt },
+      {
+        occurredAt,
+        dayKey: resolveJunctionLocalDayKey(
+          entry,
+          rawOccurredAt,
+          occurredAt,
+          timestampSemantics,
+        ),
+        observedAtRaw: rawOccurredAt,
+        timestampSemantics,
+      },
     );
     const dayKey = resolveJunctionTimeseriesAggregateDayKey(
       entry,

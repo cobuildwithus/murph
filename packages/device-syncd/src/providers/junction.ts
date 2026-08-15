@@ -6311,10 +6311,9 @@ function filterJunctionTimeseriesRecordsToWindow(
     if (!entry) {
       return true;
     }
-    const rawTimestamp = resolveJunctionTimeseriesRecordRawTimestamp(
-      entry,
-      preferIntervalStart,
-    );
+    const rawTimestamp = isJunctionBodyTimeseriesResource(resource)
+      ? resolveJunctionTimeseriesRecordTimestampForResource(resource, entry)
+      : resolveJunctionTimeseriesRecordRawTimestamp(entry, preferIntervalStart);
     if (!rawTimestamp) {
       return true;
     }
@@ -6368,7 +6367,7 @@ function buildJunctionTimeseriesRecordKey(resource: string, record: unknown): st
 
   const origin = resolveJunctionOrigin(entry);
   const sourceProviderSlug = normalizeProviderSlug(origin.sourceProviderSlug);
-  const timestamp = resolveJunctionTimeseriesRecordTimestamp(resource, entry);
+  const timestamp = resolveJunctionTimeseriesRecordTimestampForResource(resource, entry);
   if (!sourceProviderSlug || !timestamp) {
     return null;
   }
@@ -6543,6 +6542,45 @@ function resolveJunctionTimeseriesRecordTimestamp(
   return rawTimestamp
     ? toIsoTimestampIfValid(rawTimestamp) ?? rawTimestamp
     : null;
+}
+
+const JUNCTION_INSTANT_BODY_TIMESERIES_RESOURCES = new Set([
+  "fat",
+  "weight",
+]);
+const JUNCTION_INTERVAL_BODY_TIMESERIES_RESOURCES = new Set([
+  "body_mass_index",
+  "lean_body_mass",
+  "waist_circumference",
+]);
+
+function isJunctionBodyTimeseriesResource(resource: string | null | undefined): boolean {
+  return resource !== null
+    && resource !== undefined
+    && (
+      JUNCTION_INSTANT_BODY_TIMESERIES_RESOURCES.has(resource)
+      || JUNCTION_INTERVAL_BODY_TIMESERIES_RESOURCES.has(resource)
+    );
+}
+
+function resolveJunctionTimeseriesRecordTimestampForResource(
+  resource: string,
+  record: Record<string, unknown>,
+): string | null {
+  if (JUNCTION_INSTANT_BODY_TIMESERIES_RESOURCES.has(resource)) {
+    return toIsoTimestampIfValid(record.timestamp);
+  }
+
+  if (JUNCTION_INTERVAL_BODY_TIMESERIES_RESOURCES.has(resource)) {
+    const start = toIsoTimestampIfValid(record.start);
+    const end = toIsoTimestampIfValid(record.end);
+    if (!start || !end || Date.parse(end) <= Date.parse(start)) {
+      return null;
+    }
+    return start;
+  }
+
+  return resolveJunctionTimeseriesRecordTimestamp(record);
 }
 
 function resolveJunctionTimeseriesRecordRawTimestamp(
@@ -8613,7 +8651,7 @@ function readJunctionWebhookDataTimestampRange(
     ? expandJunctionWebhookTimeseriesDataRecords(record)
         .slice(isJunctionBodyTimeseriesResource(resource) ? 0 : 1)
         .flatMap((entry) => {
-          const timestamp = resolveJunctionTimeseriesRecordTimestamp(resource ?? "", entry);
+          const timestamp = resolveJunctionTimeseriesRecordTimestampForResource(resource ?? "", entry);
           return timestamp ? [timestamp] : [];
         })
     : [];
