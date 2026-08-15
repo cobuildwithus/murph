@@ -258,7 +258,11 @@ describe.skipIf(!runPostgresProof)(
         await expect(deleteExpiredDeviceOauthSessions({
           now: retentionNow,
           prisma: cleanup,
-        })).resolves.toBe(1);
+        })).resolves.toBe(0);
+        await expect(cleanup.deviceOauthSession.findUnique({
+          select: { consumedAt: true },
+          where: { state },
+        })).resolves.toEqual({ consumedAt: callbackNow });
       } finally {
         releaseGate();
         await holder?.catch(() => undefined);
@@ -539,6 +543,68 @@ describe.skipIf(!runPostgresProof)(
           `DROP TRIGGER IF EXISTS "${triggerName}" ON "clinical_record_oauth_session"`,
         );
         await cleanup.$executeRawUnsafe(`DROP FUNCTION IF EXISTS "${functionName}"()`);
+        await cleanup.hostedMember.deleteMany({ where: { id: memberId } });
+      }
+    });
+
+    it("keeps a consumed Clinical session until its incomplete intent owner retires", async () => {
+      const cleanup = requirePrisma(cleanupClient);
+      const suffix = randomUUID().replaceAll("-", "");
+      const memberId = `retention-clinical-owner-${suffix}`;
+      const claimHash = createHash("sha256")
+        .update(`clinical-owner-${suffix}`)
+        .digest("hex");
+      const stateHash = createHash("sha256")
+        .update(`clinical-state-${suffix}`)
+        .digest("hex");
+      const expiresAt = new Date("2026-08-11T12:00:00.000Z");
+      const retentionNow = new Date("2026-08-11T12:31:00.000Z");
+
+      try {
+        await cleanup.hostedMember.create({ data: { id: memberId } });
+        await cleanup.clinicalRecordConnectIntent.create({
+          data: {
+            claimHash,
+            createdAt: new Date("2026-08-11T11:45:00.000Z"),
+            expiresAt,
+            memberId,
+            providerDirectoryEntryId: "retention-proof",
+            startedAt: new Date("2026-08-11T11:50:00.000Z"),
+          },
+        });
+        await cleanup.clinicalRecordOauthSession.create({
+          data: {
+            clientId: "retention-client",
+            codeVerifierEncrypted: "sealed-retention-verifier",
+            connectIntentClaimHash: claimHash,
+            consumedAt: new Date("2026-08-11T11:55:00.000Z"),
+            createdAt: new Date("2026-08-11T11:45:00.000Z"),
+            expiresAt,
+            fhirBaseHash: "retention-fhir-hash",
+            memberId,
+            providerDirectoryEntryId: "retention-proof",
+            redirectUri: "https://join.example.test/api/clinical-records/oauth/callback",
+            requestedScopesJson: [],
+            stateHash,
+            tokenEndpoint: "https://provider.example.test/token",
+            webSessionId: `retention-clinical-session-${suffix}`,
+          },
+        });
+
+        await expect(deleteExpiredClinicalRecordOauthSessions({
+          now: retentionNow,
+          prisma: cleanup,
+        })).resolves.toBe(0);
+        await expect(cleanup.clinicalRecordOauthSession.count({
+          where: { stateHash },
+        })).resolves.toBe(1);
+
+        await cleanup.clinicalRecordConnectIntent.delete({ where: { claimHash } });
+        await expect(deleteExpiredClinicalRecordOauthSessions({
+          now: retentionNow,
+          prisma: cleanup,
+        })).resolves.toBe(1);
+      } finally {
         await cleanup.hostedMember.deleteMany({ where: { id: memberId } });
       }
     });

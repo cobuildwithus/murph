@@ -136,6 +136,29 @@ Updated: 2026-08-12
   revocation error remains unchanged. `NO FINDINGS`; no rendered surface
   changed, and focused service tests directly prove the error classification.
 
+## ReviewGPT Round-Two Retrospective
+
+- Trigger: round two found the same public-expiry-versus-completion-owner
+  divergence in the device OAuth family after round one corrected connected
+  apps.
+- Decision: keep the one hourly retention owner, but let it delete only rows
+  whose existing durable state proves their work owner is dead. Do not add a
+  queue, lease table, scheduler, recovery loop, or compatibility state.
+- Device OAuth: unconsumed expired rows are retention-owned; consumed rows stay
+  with exact callback finalization, provider-cleanup transfer, and deletion
+  recovery.
+- Clinical OAuth: unconsumed expired rows are retention-owned; consumed rows
+  become eligible only when no incomplete linked connect intent remains.
+  Clinical OAuth cleanup therefore runs before completed-intent retirement in
+  the same serial pass.
+- Connect intents: connected-app, device-connect, and Clinical started rows
+  retain their existing bounded 30-minute provider-continuation grace.
+  Unbound sensitive-action expiry remains terminal, while approval-backed rows
+  remain outside transient cleanup.
+- Production-shaped proof now spans lock acquisition, consume commit, retention
+  after public expiry, and preservation of the consumed device claim for its
+  exact finalization owner.
+
 ## Verification
 
 - Commands to be selected from the final diff: focused Web Vitest slices,

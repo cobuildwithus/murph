@@ -13,6 +13,7 @@ import * as hostedRuntimeSignals from "@/src/lib/hosted-orchestration/signal-run
 import { HOSTED_CONNECTED_APP_STARTED_INTENT_OWNER_GRACE_MS } from "@/src/lib/connected-apps/connect-intent-ownership";
 import {
   CLINICAL_RECORD_STARTED_CONNECT_INTENT_RETENTION_GRACE_MS,
+  DEVICE_STARTED_CONNECT_INTENT_RETENTION_GRACE_MS,
   HOSTED_CONTROL_ARTIFACT_RETENTION_BATCH_SIZE,
   HOSTED_CONTROL_ARTIFACT_RETENTION_MAX_BATCHES,
   HOSTED_DEVICE_WEBHOOK_TRACE_RETENTION_MS,
@@ -228,6 +229,14 @@ describe("hosted retention cleanup", () => {
     // One statement per category: every short batch stops that category's loop.
     expect(executeRaw).toHaveBeenCalledTimes(14);
 
+    const deviceOauthCall = findRetentionCall(
+      executeRaw,
+      'DELETE FROM "device_oauth_session"',
+    );
+    expect(sqlOf(deviceOauthCall)).toContain(
+      'oauth_session."consumed_at" IS NULL',
+    );
+
     const callbackNonceCall = findRetentionCall(
       executeRaw,
       'DELETE FROM "hosted_web_internal_request_nonce"',
@@ -393,11 +402,14 @@ describe("hosted retention cleanup", () => {
 
     for (const fragment of [
       'DELETE FROM "hosted_connected_app_connect_intent"',
+      'DELETE FROM "device_connect_intent"',
       'DELETE FROM "clinical_record_connect_intent"',
     ]) {
       const graceMs = fragment === 'DELETE FROM "hosted_connected_app_connect_intent"'
         ? HOSTED_CONNECTED_APP_STARTED_INTENT_OWNER_GRACE_MS
-        : CLINICAL_RECORD_STARTED_CONNECT_INTENT_RETENTION_GRACE_MS;
+        : fragment === 'DELETE FROM "device_connect_intent"'
+          ? DEVICE_STARTED_CONNECT_INTENT_RETENTION_GRACE_MS
+          : CLINICAL_RECORD_STARTED_CONNECT_INTENT_RETENTION_GRACE_MS;
       const cutoff = new Date(now.getTime() - graceMs);
       const call = findRetentionCall(executeRaw, fragment);
       const sql = sqlOf(call);
@@ -413,6 +425,18 @@ describe("hosted retention cleanup", () => {
         HOSTED_CONTROL_ARTIFACT_RETENTION_BATCH_SIZE,
       ]);
     }
+
+    const clinicalOauthCall = findRetentionCall(
+      executeRaw,
+      'DELETE FROM "clinical_record_oauth_session"',
+    );
+    const clinicalOauthSql = sqlOf(clinicalOauthCall);
+    expect(clinicalOauthSql).toContain('oauth_session."consumed_at" IS NULL');
+    expect(clinicalOauthSql).toContain('OR NOT EXISTS');
+    expect(clinicalOauthSql).toContain(
+      'intent."claim_hash" = oauth_session."connect_intent_claim_hash"',
+    );
+    expect(clinicalOauthSql).toContain('intent."completed_at" IS NULL');
   });
 
   it("records an explicit policy non-reply instead of silently dropping accepted work", async () => {

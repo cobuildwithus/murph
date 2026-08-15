@@ -39,6 +39,8 @@ export const HOSTED_CONTROL_ARTIFACT_RETENTION_MAX_BATCHES = 2;
 // bearer link expires. Keep that owner through the bounded OAuth continuation.
 export const CLINICAL_RECORD_STARTED_CONNECT_INTENT_RETENTION_GRACE_MS =
   30 * 60 * 1_000;
+export const DEVICE_STARTED_CONNECT_INTENT_RETENTION_GRACE_MS =
+  30 * 60 * 1_000;
 export const HOSTED_INBOX_MEDIA_RETENTION_SIGNAL_BATCH_SIZE = 5;
 export const HOSTED_INBOX_MEDIA_RETENTION_SIGNAL_TIMEOUT_MS = 10_000;
 
@@ -93,10 +95,10 @@ export async function runHostedRetentionCleanup(input: {
     await deleteExpiredDeviceConnectIntents({ now, prisma });
   const expiredDeviceOauthSessionsDeleted =
     await deleteExpiredDeviceOauthSessions({ now, prisma });
-  const expiredClinicalRecordConnectIntentsDeleted =
-    await deleteExpiredClinicalRecordConnectIntents({ now, prisma });
   const expiredClinicalRecordOauthSessionsDeleted =
     await deleteExpiredClinicalRecordOauthSessions({ now, prisma });
+  const expiredClinicalRecordConnectIntentsDeleted =
+    await deleteExpiredClinicalRecordConnectIntents({ now, prisma });
   const expiredMailboxItems = await retireExpiredMailboxContent({
     now,
     prisma,
@@ -587,11 +589,18 @@ async function deleteExpiredDeviceConnectIntents(input: {
   now: Date;
   prisma: Pick<PrismaClient, "$executeRaw">;
 }): Promise<number> {
+  const startedIntentCutoff = new Date(
+    input.now.getTime() - DEVICE_STARTED_CONNECT_INTENT_RETENTION_GRACE_MS,
+  );
   return await runControlArtifactRetentionBatches(() => input.prisma.$executeRaw`
     WITH doomed AS MATERIALIZED (
       SELECT intent."claim_hash"
       FROM "device_connect_intent" AS intent
       WHERE intent."expires_at" <= ${input.now}
+        AND (
+          intent."started_at" IS NULL
+          OR intent."expires_at" <= ${startedIntentCutoff}
+        )
       ORDER BY intent."expires_at" ASC, intent."claim_hash" ASC
       LIMIT ${HOSTED_CONTROL_ARTIFACT_RETENTION_BATCH_SIZE}
       FOR UPDATE OF intent SKIP LOCKED
@@ -611,6 +620,7 @@ export async function deleteExpiredDeviceOauthSessions(input: {
       SELECT oauth_session."state"
       FROM "device_oauth_session" AS oauth_session
       WHERE oauth_session."expires_at" <= ${input.now}
+        AND oauth_session."consumed_at" IS NULL
       ORDER BY oauth_session."expires_at" ASC, oauth_session."state" ASC
       LIMIT ${HOSTED_CONTROL_ARTIFACT_RETENTION_BATCH_SIZE}
       FOR UPDATE OF oauth_session SKIP LOCKED
@@ -656,6 +666,15 @@ export async function deleteExpiredClinicalRecordOauthSessions(input: {
       SELECT oauth_session."state_hash"
       FROM "clinical_record_oauth_session" AS oauth_session
       WHERE oauth_session."expires_at" <= ${input.now}
+        AND (
+          oauth_session."consumed_at" IS NULL
+          OR NOT EXISTS (
+            SELECT 1
+            FROM "clinical_record_connect_intent" AS intent
+            WHERE intent."claim_hash" = oauth_session."connect_intent_claim_hash"
+              AND intent."completed_at" IS NULL
+          )
+        )
       ORDER BY oauth_session."expires_at" ASC, oauth_session."state_hash" ASC
       LIMIT ${HOSTED_CONTROL_ARTIFACT_RETENTION_BATCH_SIZE}
       FOR UPDATE OF oauth_session SKIP LOCKED
