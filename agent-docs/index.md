@@ -1,6 +1,6 @@
 # Murph Agent Docs Index
 
-Last verified: 2026-08-14
+Last verified: 2026-08-15
 
 ## Purpose
 

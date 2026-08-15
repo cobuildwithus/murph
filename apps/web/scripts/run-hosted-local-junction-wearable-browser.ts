@@ -2,6 +2,7 @@ import { pathToFileURL } from "node:url";
 
 import {
   chromium,
+  type Frame,
   type Locator,
   type Page,
   type Response,
@@ -33,14 +34,15 @@ interface BrowserConfig {
   webOrigin: string;
 }
 
-interface AuthorizationControlSummary {
+interface AuthorizationActionSummary {
   negative: number;
   positive: number;
+  positiveHidden: number;
+  positiveInChildFrames: number;
   positiveVisible: number;
+  positiveVisibleDisabled: number;
   positiveVisibleEnabled: number;
-  total: number;
-  visible: number;
-  visibleEnabled: number;
+  positiveVisibleEnabledInChildFrames: number;
 }
 
 interface AuthorizationCheckboxSummary {
@@ -51,15 +53,16 @@ interface AuthorizationCheckboxSummary {
 }
 
 interface AuthorizationSurfaceSummary {
-  buttons: AuthorizationControlSummary;
+  actions: AuthorizationActionSummary;
   challengeFrameCount: number;
   checkboxes: AuthorizationCheckboxSummary;
   crossOriginFrameCount: number;
   formCount: number;
   frameCount: number;
-  links: AuthorizationControlSummary;
   readyState: "complete" | "interactive" | "loading" | "unknown";
 }
+
+type AuthorizationRoot = Frame | Page;
 
 const RUNNER_NAME = "Hosted-local Junction wearable browser runner";
 const AUTH_ACTIONS = [
@@ -388,12 +391,13 @@ async function clickFirstVisibleAction(
       const controls = page.getByRole(role, { name });
       for (let index = 0; index < await controls.count(); index += 1) {
         const control = controls.nth(index);
-        const actionText = [
-          await control.getAttribute("aria-label").catch(() => null),
-          await control.innerText().catch(() => ""),
-        ].filter(Boolean).join(" ");
         if (
-          NEGATIVE_AUTH_ACTION_PATTERN.test(actionText)
+          await locatorMatchesAccessibleName(
+            page,
+            role,
+            control,
+            NEGATIVE_AUTH_ACTION_PATTERN,
+          )
           || !await control.isVisible().catch(() => false)
           || !await control.isEnabled().catch(() => false)
         ) {
@@ -411,22 +415,23 @@ async function summarizeAuthorizationSurface(
   page: Page,
 ): Promise<AuthorizationSurfaceSummary> {
   const pageOrigin = readOrigin(page.url());
-  const frameUrls = page.frames().map((frame) => frame.url());
+  const frames = page.frames();
+  const frameUrls = frames.map((frame) => frame.url());
+  const roots: AuthorizationRoot[] = [page, ...frames.slice(1)];
   const readyState = await page.evaluate(() => document.readyState).catch(() => "unknown");
 
   return {
-    buttons: await summarizeAuthorizationControls(page, "button"),
+    actions: await summarizeAuthorizationActions(roots),
     challengeFrameCount: frameUrls.filter((url) =>
       isHostedLocalProviderChallengeSurface({ frameUrls: [url], title: "" })
     ).length,
-    checkboxes: await summarizeAuthorizationCheckboxes(page),
+    checkboxes: await summarizeAuthorizationCheckboxes(roots),
     crossOriginFrameCount: frameUrls.filter((url) => {
       const origin = readOrigin(url);
       return origin !== null && pageOrigin !== null && origin !== pageOrigin;
     }).length,
-    formCount: await page.locator("form").count().catch(() => 0),
+    formCount: await sumLocatorCounts(roots, "form"),
     frameCount: frameUrls.length,
-    links: await summarizeAuthorizationControls(page, "link"),
     readyState: readyState === "complete"
         || readyState === "interactive"
         || readyState === "loading"
@@ -435,60 +440,112 @@ async function summarizeAuthorizationSurface(
   };
 }
 
-async function summarizeAuthorizationControls(
-  page: Page,
-  role: "button" | "link",
-): Promise<AuthorizationControlSummary> {
-  const summary: AuthorizationControlSummary = {
+async function summarizeAuthorizationActions(
+  roots: readonly AuthorizationRoot[],
+): Promise<AuthorizationActionSummary> {
+  const summary: AuthorizationActionSummary = {
     negative: 0,
     positive: 0,
+    positiveHidden: 0,
+    positiveInChildFrames: 0,
     positiveVisible: 0,
+    positiveVisibleDisabled: 0,
     positiveVisibleEnabled: 0,
-    total: 0,
-    visible: 0,
-    visibleEnabled: 0,
+    positiveVisibleEnabledInChildFrames: 0,
   };
-  const controls = page.getByRole(role);
-  summary.total = await controls.count();
 
-  for (let index = 0; index < summary.total; index += 1) {
-    const control = controls.nth(index);
-    const [ariaLabel, innerText, value, visible, enabled] = await Promise.all([
-      control.getAttribute("aria-label").catch(() => null),
-      control.innerText().catch(() => ""),
-      control.getAttribute("value").catch(() => null),
-      control.isVisible().catch(() => false),
-      control.isEnabled().catch(() => false),
-    ]);
-    const actionText = [ariaLabel, innerText, value].filter(Boolean).join(" ");
-    const positive = AUTH_ACTIONS.some((pattern) => pattern.test(actionText));
-    const negative = NEGATIVE_AUTH_ACTION_PATTERN.test(actionText);
+  for (let rootIndex = 0; rootIndex < roots.length; rootIndex += 1) {
+    const root = roots[rootIndex];
+    if (!root) {
+      continue;
+    }
+    const inChildFrame = rootIndex > 0;
+    for (const role of ["button", "link"] as const) {
+      const controls = root.getByRole(role, { includeHidden: true });
+      const count = await controls.count().catch(() => 0);
+      for (let index = 0; index < count; index += 1) {
+        const control = controls.nth(index);
+        const [positive, negative, visible, enabled] = await Promise.all([
+          locatorMatchesAnyAccessibleName(root, role, control, AUTH_ACTIONS),
+          locatorMatchesAccessibleName(
+            root,
+            role,
+            control,
+            NEGATIVE_AUTH_ACTION_PATTERN,
+          ),
+          control.isVisible().catch(() => false),
+          control.isEnabled().catch(() => false),
+        ]);
+        if (negative) {
+          summary.negative += 1;
+        }
+        if (!positive || negative) {
+          continue;
+        }
 
-    if (visible) {
-      summary.visible += 1;
-    }
-    if (visible && enabled) {
-      summary.visibleEnabled += 1;
-    }
-    if (positive) {
-      summary.positive += 1;
-    }
-    if (positive && visible) {
-      summary.positiveVisible += 1;
-    }
-    if (positive && visible && enabled) {
-      summary.positiveVisibleEnabled += 1;
-    }
-    if (negative) {
-      summary.negative += 1;
+        summary.positive += 1;
+        if (inChildFrame) {
+          summary.positiveInChildFrames += 1;
+        }
+        if (!visible) {
+          summary.positiveHidden += 1;
+          continue;
+        }
+        summary.positiveVisible += 1;
+        if (!enabled) {
+          summary.positiveVisibleDisabled += 1;
+          continue;
+        }
+        summary.positiveVisibleEnabled += 1;
+        if (inChildFrame) {
+          summary.positiveVisibleEnabledInChildFrames += 1;
+        }
+      }
     }
   }
 
   return summary;
 }
 
+async function locatorMatchesAnyAccessibleName(
+  root: AuthorizationRoot,
+  role: "button" | "link",
+  control: Locator,
+  patterns: readonly RegExp[],
+): Promise<boolean> {
+  for (const pattern of patterns) {
+    if (await locatorMatchesAccessibleName(root, role, control, pattern)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+async function locatorMatchesAccessibleName(
+  root: AuthorizationRoot,
+  role: "button" | "link",
+  control: Locator,
+  pattern: RegExp,
+): Promise<boolean> {
+  const controlHandle = await control.elementHandle().catch(() => null);
+  if (!controlHandle) {
+    return false;
+  }
+  try {
+    return await root
+      .getByRole(role, { includeHidden: true, name: pattern })
+      .evaluateAll(
+        (elements, target) => elements.includes(target),
+        controlHandle,
+      )
+      .catch(() => false);
+  } finally {
+    await controlHandle.dispose();
+  }
+}
+
 async function summarizeAuthorizationCheckboxes(
-  page: Page,
+  roots: readonly AuthorizationRoot[],
 ): Promise<AuthorizationCheckboxSummary> {
   const summary: AuthorizationCheckboxSummary = {
     total: 0,
@@ -496,23 +553,36 @@ async function summarizeAuthorizationCheckboxes(
     visibleChecked: 0,
     visibleUnchecked: 0,
   };
-  const checkboxes = page.getByRole("checkbox");
-  summary.total = await checkboxes.count();
-
-  for (let index = 0; index < summary.total; index += 1) {
-    const checkbox = checkboxes.nth(index);
-    if (!await checkbox.isVisible().catch(() => false)) {
-      continue;
-    }
-    summary.visible += 1;
-    if (await checkbox.isChecked().catch(() => false)) {
-      summary.visibleChecked += 1;
-    } else {
-      summary.visibleUnchecked += 1;
+  for (const root of roots) {
+    const checkboxes = root.getByRole("checkbox", { includeHidden: true });
+    const count = await checkboxes.count().catch(() => 0);
+    summary.total += count;
+    for (let index = 0; index < count; index += 1) {
+      const checkbox = checkboxes.nth(index);
+      if (!await checkbox.isVisible().catch(() => false)) {
+        continue;
+      }
+      summary.visible += 1;
+      if (await checkbox.isChecked().catch(() => false)) {
+        summary.visibleChecked += 1;
+      } else {
+        summary.visibleUnchecked += 1;
+      }
     }
   }
 
   return summary;
+}
+
+async function sumLocatorCounts(
+  roots: readonly AuthorizationRoot[],
+  selector: string,
+): Promise<number> {
+  let total = 0;
+  for (const root of roots) {
+    total += await root.locator(selector).count().catch(() => 0);
+  }
+  return total;
 }
 
 async function assertWearableConnectionState(

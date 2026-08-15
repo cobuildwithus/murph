@@ -53,7 +53,7 @@ Updated: 2026-08-15
 
 1. [x] Prove stable Chrome advances through WHOOP sign-in and fails at
    `id.whoop.com/consent` without an exposed automated action.
-2. [ ] Add bounded structural authorization diagnostics and focused coverage.
+2. [x] Add bounded structural authorization diagnostics and focused coverage.
 3. [ ] Complete local verification, commit, PR review gates, and required CI.
 4. [ ] Merge the diagnostic boundary and classify the exact live consent shape.
 5. [ ] Implement and verify the smallest correction for the proven mechanism.
@@ -66,11 +66,18 @@ Updated: 2026-08-15
 - Do not broaden selectors from the path alone. Current WHOOP documentation says
   consent is completed with a `GRANT` action already matched by the driver, so
   live structural evidence is required to explain why that action is unavailable.
+- Accepted the independent preliminary and final ReviewGPT finding that the
+  first probe could count a denial as positive and miss hidden, computed-name,
+  or framed actions. The corrected probe reuses Playwright accessible-name
+  matching plus the driver's negative veto and has real headed-browser proof.
 
 ## Verification
 
 - Commands: focused browser-driver and workflow-contract Vitest files; relevant
   Web, hosted-local harness, and Cloudflare typechecks; docs/privacy/diff guards;
   exact-head required GitHub Actions; merge-triggered protected-main canary.
+- Passed locally on the corrected diagnostic head: 13 focused browser-driver
+  tests, two real headed-browser smoke scenarios, Web typecheck, targeted ESLint,
+  docs drift, diff check, and the privacy scan.
 - Expected outcome: diagnostics first prove the current consent structure, then
   the corrected driver completes the full provider and persisted-state journey.

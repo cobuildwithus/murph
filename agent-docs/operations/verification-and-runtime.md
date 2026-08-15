@@ -215,9 +215,11 @@ Keep those setup steps free of Environment secrets; only the final
 browser-canary step may receive Junction sandbox authority and the dedicated
 WHOOP login. When provider authorization exposes no automated action, the
 browser child may report only a bounded structural summary: document readiness,
-frame/form counts, visible/enabled positive and negative control counts, and
-visible checked/unchecked checkbox counts. It must never log control text,
-attributes, HTML, screenshots, credentials, or member data. A real sign-in
+frame/form counts, positive and negative action counts classified through
+Playwright's computed accessible names, whether positive actions are hidden,
+disabled, or inside child frames, and visible checked/unchecked checkbox
+counts. It must never log control text, attributes, HTML, screenshots,
+credentials, or member data. A real sign-in
 proof remains available only after the exact
 workflow reaches protected `main`, where non-canceling concurrency serializes
 the dedicated provider account. Do not weaken the protected-branch gate or

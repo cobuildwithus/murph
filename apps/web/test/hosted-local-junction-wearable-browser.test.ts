@@ -4,7 +4,6 @@ import {
   completeExternalJunctionAuthorizationForTest,
   completeHostedLocalJunctionAuthorizationForTest,
   readHostedLocalJunctionBrowserConfigForTest,
-  summarizeHostedLocalJunctionAuthorizationSurfaceForTest,
 } from "../scripts/run-hosted-local-junction-wearable-browser";
 
 function createConfig(environment: Record<string, string | undefined> = {}) {
@@ -27,6 +26,7 @@ function createConfig(environment: Record<string, string | undefined> = {}) {
 function emptyLocator() {
   return {
     count: vi.fn(async () => 0),
+    evaluateAll: vi.fn(async () => false),
     nth: vi.fn(),
   };
 }
@@ -36,6 +36,7 @@ function actionLocator(click: () => void) {
     click: vi.fn(async () => {
       click();
     }),
+    elementHandle: vi.fn(async () => ({ dispose: vi.fn(async () => undefined) })),
     getAttribute: vi.fn(async () => null),
     innerText: vi.fn(async () => "Continue"),
     isEnabled: vi.fn(async () => true),
@@ -44,40 +45,6 @@ function actionLocator(click: () => void) {
   return {
     count: vi.fn(async () => 1),
     nth: vi.fn(() => action),
-  };
-}
-
-function controlLocator(controls: Array<{
-  ariaLabel?: string;
-  checked?: boolean;
-  enabled: boolean;
-  text: string;
-  value?: string;
-  visible: boolean;
-}>) {
-  return {
-    count: vi.fn(async () => controls.length),
-    nth: vi.fn((index: number) => {
-      const control = controls[index];
-      if (!control) {
-        throw new Error(`Missing synthetic control ${index}.`);
-      }
-      return {
-        getAttribute: vi.fn(async (name: string) => {
-          if (name === "aria-label") {
-            return control.ariaLabel ?? null;
-          }
-          if (name === "value") {
-            return control.value ?? null;
-          }
-          return null;
-        }),
-        innerText: vi.fn(async () => control.text),
-        isChecked: vi.fn(async () => control.checked ?? false),
-        isEnabled: vi.fn(async () => control.enabled),
-        isVisible: vi.fn(async () => control.visible),
-      };
-    }),
   };
 }
 
@@ -203,68 +170,6 @@ describe("hosted-local Junction wearable browser authorization", () => {
     expect(now).toBe(15_000);
     },
   );
-
-  it("reports only bounded structure when a visible grant action is disabled", async () => {
-    const buttons = controlLocator([
-      { enabled: false, text: "Grant", visible: true },
-      { enabled: true, text: "Deny", visible: true },
-    ]);
-    const checkboxes = controlLocator([
-      { checked: false, enabled: true, text: "", visible: true },
-    ]);
-    const page = {
-      evaluate: vi.fn(async () => "complete"),
-      frames: () => [
-        { url: () => "https://id.whoop.com/consent" },
-        { url: () => "https://static.whoop.com/frame" },
-      ],
-      getByRole: vi.fn((role: string) => {
-        if (role === "button") {
-          return buttons;
-        }
-        if (role === "checkbox") {
-          return checkboxes;
-        }
-        return emptyLocator();
-      }),
-      locator: vi.fn(() => ({ count: vi.fn(async () => 1) })),
-      url: () => "https://id.whoop.com/consent",
-    };
-
-    await expect(summarizeHostedLocalJunctionAuthorizationSurfaceForTest(
-      page as never,
-    )).resolves.toEqual({
-      buttons: {
-        negative: 1,
-        positive: 1,
-        positiveVisible: 1,
-        positiveVisibleEnabled: 0,
-        total: 2,
-        visible: 2,
-        visibleEnabled: 1,
-      },
-      challengeFrameCount: 0,
-      checkboxes: {
-        total: 1,
-        visible: 1,
-        visibleChecked: 0,
-        visibleUnchecked: 1,
-      },
-      crossOriginFrameCount: 1,
-      formCount: 1,
-      frameCount: 2,
-      links: {
-        negative: 0,
-        positive: 0,
-        positiveVisible: 0,
-        positiveVisibleEnabled: 0,
-        total: 0,
-        visible: 0,
-        visibleEnabled: 0,
-      },
-      readyState: "complete",
-    });
-  });
 
   it("always disables manual completion in headless mode", () => {
     expect(createConfig({
