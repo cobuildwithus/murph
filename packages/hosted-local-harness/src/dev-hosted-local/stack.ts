@@ -174,6 +174,15 @@ const HOSTED_WEB_PRISMA_GENERATED_PREPARED_ENV =
   "MURPH_HOSTED_WEB_PRISMA_GENERATED_PREPARED";
 const HEALTH_COMMONS_GENERATED_PREPARED_ENV = "MURPH_HEALTH_COMMONS_GENERATED_PREPARED";
 const HOSTED_LOCAL_MINIO_MONITOR_INTERVAL_MS = 2_000;
+const HOSTED_LOCAL_TEMPORAL_MAILBOX_SIGNAL_FAULT_USER_ID_ENV =
+  "MURPH_HOSTED_LOCAL_TEMPORAL_MAILBOX_SIGNAL_FAULT_USER_ID";
+const HOSTED_LOCAL_TEMPORAL_MAILBOX_SIGNAL_FAULT_PRELOAD_SOURCE = path.join(
+  "test",
+  "support",
+  "hosted-local-temporal-mailbox-signal-fault-preload.ts",
+);
+const HOSTED_LOCAL_TEMPORAL_MAILBOX_SIGNAL_FAULT_PRELOAD_OUTPUT =
+  "hosted-local-temporal-mailbox-signal-fault-preload.js";
 const MURPH_RUNNER_BUNDLE_TEST_PARSER_TOOLCHAIN_ENV =
   "MURPH_RUNNER_BUNDLE_TEST_PARSER_TOOLCHAIN";
 const HOSTED_LOCAL_CODEX_MODEL_CATALOG_FILE =
@@ -215,6 +224,7 @@ export async function startHostedLocalDevStack(input: {
   stderrTarget?: NodeJS.WritableStream;
   stdoutTarget?: NodeJS.WritableStream;
   webProcessEnvOverrides?: NodeJS.ProcessEnv;
+  webTemporalMailboxSignalFaultUserId?: string;
 }): Promise<HostedLocalDevStack> {
   throwIfAbortSignalAborted(input.abortSignal);
   const inheritedStripeCliApiKey = input.env.STRIPE_API_KEY?.trim() || null;
@@ -306,6 +316,7 @@ export async function startHostedLocalDevStack(input: {
   let temporalRuntime: HostedLocalTemporalRuntime | null = null;
   let workerRuntimeEnv: NodeJS.ProcessEnv | null = null;
   let workerProcessEnv: NodeJS.ProcessEnv | null = null;
+  let hostedWebTestPreloadOutputDir: string | null = null;
   let keepAliveTimer: ReturnType<typeof setInterval> | null = null;
   let minioMonitor: HostedLocalMinioMonitor | null = null;
 
@@ -869,16 +880,42 @@ export async function startHostedLocalDevStack(input: {
       ? false
       : await shouldUseHostedWebProductionStart({ env: initialEnv });
 
+    if (config.skipWeb && input.webTemporalMailboxSignalFaultUserId !== undefined) {
+      throw new Error(
+        "The Temporal mailbox signal fault preload requires the hosted Web process.",
+      );
+    }
+    const webProcessSourceEnv: NodeJS.ProcessEnv = {
+      ...runtimeEnv,
+      ...(input.webProcessEnvOverrides ?? {}),
+      HOSTED_APP_SESSION_HMAC_KEY: hostedAppSessionHmacKey,
+    };
+    if (input.webTemporalMailboxSignalFaultUserId !== undefined) {
+      hostedWebTestPreloadOutputDir = path.join(
+        webDir,
+        ".test-dist",
+        "hosted-local-preloads",
+        randomUUID().toLowerCase(),
+      );
+    }
+    const webProcessEnvironment = hostedWebTestPreloadOutputDir === null
+      ? webProcessSourceEnv
+      : await prepareHostedLocalTemporalMailboxSignalFaultPreload({
+        abortSignal: input.abortSignal,
+        env: webProcessSourceEnv,
+        expectedUserId: input.webTemporalMailboxSignalFaultUserId ?? "",
+        outputDir: hostedWebTestPreloadOutputDir,
+      });
+
     const webProcess = config.skipWeb
       ? null
       : spawnChildProcess("web", "pnpm", buildHostedWebProcessArgs({
         config,
         shouldUseProductionStart: shouldUseWebProductionStart,
-      }), buildHostedWebProcessEnv({
-        ...runtimeEnv,
-        ...(input.webProcessEnvOverrides ?? {}),
-        HOSTED_APP_SESSION_HMAC_KEY: hostedAppSessionHmacKey,
-      }, shouldUseWebProductionStart), {
+      }), buildHostedWebProcessEnv(
+        webProcessEnvironment,
+        shouldUseWebProductionStart,
+      ), {
         pipeOutput: input.pipeOutput,
         stderrTarget: input.stderrTarget,
         stdoutTarget: input.stdoutTarget,
@@ -950,6 +987,9 @@ export async function startHostedLocalDevStack(input: {
         }
       }
       await rm(workerConfigPath, { force: true });
+      if (hostedWebTestPreloadOutputDir !== null) {
+        await rm(hostedWebTestPreloadOutputDir, { force: true, recursive: true });
+      }
       if (!tempDirOverride) {
         await rm(tempDir, { force: true, recursive: true });
       }
@@ -1172,6 +1212,9 @@ export async function startHostedLocalDevStack(input: {
     }
     if (!stopped) {
       await rm(workerConfigPath, { force: true }).catch(() => {});
+      if (hostedWebTestPreloadOutputDir !== null) {
+        await rm(hostedWebTestPreloadOutputDir, { force: true, recursive: true }).catch(() => {});
+      }
       if (restoreCloudflareDevVars) {
         await rm(cloudflareDevVarsPath, { force: true }).catch(() => {});
         if (hadExistingCloudflareDevVars) {
@@ -1567,6 +1610,87 @@ function buildHostedWebProcessEnv(
     ...env,
     MURPH_HOSTED_WEB_DEV_OWNER_PID: String(process.pid),
   };
+}
+
+async function prepareHostedLocalTemporalMailboxSignalFaultPreload(input: {
+  abortSignal: AbortSignal | undefined;
+  env: NodeJS.ProcessEnv;
+  expectedUserId: string;
+  outputDir: string;
+}): Promise<NodeJS.ProcessEnv> {
+  const expectedUserId = input.expectedUserId.trim();
+  if (!expectedUserId) {
+    throw new Error(
+      `${HOSTED_LOCAL_TEMPORAL_MAILBOX_SIGNAL_FAULT_USER_ID_ENV} is required.`,
+    );
+  }
+
+  const profile = input.env.MURPH_HOSTED_LOCAL_PROFILE?.trim();
+  if (
+    (profile !== "e2e:stub" && profile !== "e2e:live")
+    || input.env.MURPH_HOSTED_LOCAL_TEST_ROUTES !== "1"
+  ) {
+    throw new Error(
+      "The Temporal mailbox signal fault preload requires the hosted-local E2E test-control profile.",
+    );
+  }
+
+  await rm(input.outputDir, { force: true, recursive: true });
+  await mkdir(input.outputDir, { recursive: true });
+  await runCommand("pnpm", [
+    "--dir",
+    "apps/web",
+    "exec",
+    "tsc",
+    HOSTED_LOCAL_TEMPORAL_MAILBOX_SIGNAL_FAULT_PRELOAD_SOURCE,
+    "--target",
+    "ES2022",
+    "--module",
+    "CommonJS",
+    "--moduleResolution",
+    "Node",
+    "--skipLibCheck",
+    "--noEmitOnError",
+    "--outDir",
+    path.relative(webDir, input.outputDir),
+    "--rootDir",
+    path.dirname(HOSTED_LOCAL_TEMPORAL_MAILBOX_SIGNAL_FAULT_PRELOAD_SOURCE),
+  ], {
+    cwd: repoRoot,
+    env: input.env,
+    name: "setup",
+    signal: input.abortSignal,
+  });
+
+  const preloadPath = path.join(
+    input.outputDir,
+    HOSTED_LOCAL_TEMPORAL_MAILBOX_SIGNAL_FAULT_PRELOAD_OUTPUT,
+  );
+  return {
+    ...input.env,
+    [HOSTED_LOCAL_TEMPORAL_MAILBOX_SIGNAL_FAULT_USER_ID_ENV]: expectedUserId,
+    NODE_OPTIONS: appendHostedLocalNodeRequireOption(
+      input.env.NODE_OPTIONS,
+      preloadPath,
+    ),
+  };
+}
+
+function appendHostedLocalNodeRequireOption(
+  existingNodeOptions: string | undefined,
+  preloadPath: string,
+): string {
+  const repoRelativePath = path.relative(repoRoot, preloadPath);
+  if (
+    path.isAbsolute(repoRelativePath)
+    || repoRelativePath === ".."
+    || repoRelativePath.startsWith(`..${path.sep}`)
+  ) {
+    throw new Error("Hosted-local Web preloads must stay inside the repository.");
+  }
+  const requireOption = `--require=${JSON.stringify(preloadPath)}`;
+  const existing = existingNodeOptions?.trim();
+  return existing ? `${existing} ${requireOption}` : requireOption;
 }
 
 function hasHostedLocalWorktreeScope(env: NodeJS.ProcessEnv): boolean {

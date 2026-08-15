@@ -1235,6 +1235,7 @@ describe("hosted local dev stack", () => {
         ...process.env,
         MURPH_HOSTED_LOCAL_E2E_ISOLATION_REQUIRED: "1",
         MURPH_HOSTED_LOCAL_PROFILE: "e2e:stub",
+        MURPH_HOSTED_LOCAL_TEST_ROUTES: "1",
         MURPH_HOSTED_LOCAL_E2E_STRIPE_LISTENER: "1",
         MURPH_DEV_CF_PERSIST_DIR: ".tmp/e2e/wrangler",
         MURPH_DEV_SKIP_LINQ_WEBHOOK_REGISTER: "1",
@@ -1244,6 +1245,7 @@ describe("hosted local dev stack", () => {
         NEXT_DIST_DIR_MODE: "smoke",
         NEXT_DIST_DIR_SUFFIX: "e2e-fixture",
       },
+      webTemporalMailboxSignalFaultUserId: "member_production_start_target",
     });
     await stack.ready;
     await stack.stop();
@@ -1270,6 +1272,50 @@ describe("hosted local dev stack", () => {
       "31001",
     ]);
     expect(webCall?.[3]).not.toHaveProperty("MURPH_HOSTED_WEB_DEV_OWNER_PID");
+    expect(webCall?.[3]).toEqual(expect.objectContaining({
+      MURPH_HOSTED_LOCAL_TEMPORAL_MAILBOX_SIGNAL_FAULT_USER_ID:
+        "member_production_start_target",
+    }));
+    expect(webCall?.[3]).not.toHaveProperty(
+      "MURPH_HOSTED_LOCAL_TEMPORAL_MAILBOX_SIGNAL_FAULT_PRELOAD",
+    );
+    expect(webCall?.[3].NODE_OPTIONS).toMatch(
+      /--require=".*[/\\]apps[/\\]web[/\\]\.test-dist[/\\]hosted-local-preloads[/\\][0-9a-f-]+[/\\]hosted-local-temporal-mailbox-signal-fault-preload\.js"/u,
+    );
+    const preloadCompileCall = runCommand.mock.calls.find(([, args]) =>
+      args.includes("test/support/hosted-local-temporal-mailbox-signal-fault-preload.ts")
+    );
+    expect(preloadCompileCall).toEqual([
+      "pnpm",
+      [
+        "--dir",
+        "apps/web",
+        "exec",
+        "tsc",
+        "test/support/hosted-local-temporal-mailbox-signal-fault-preload.ts",
+        "--target",
+        "ES2022",
+        "--module",
+        "CommonJS",
+        "--moduleResolution",
+        "Node",
+        "--skipLibCheck",
+        "--noEmitOnError",
+        "--outDir",
+        expect.stringMatching(
+          /^\.test-dist[/\\]hosted-local-preloads[/\\][0-9a-f-]+$/u,
+        ),
+        "--rootDir",
+        "test/support",
+      ],
+      expect.objectContaining({
+        env: expect.not.objectContaining({
+          MURPH_HOSTED_LOCAL_TEMPORAL_MAILBOX_SIGNAL_FAULT_USER_ID:
+            expect.anything(),
+        }),
+        name: "setup",
+      }),
+    ]);
     expect(spawnChildProcess).toHaveBeenCalledWith(
       "cloudflare",
       expect.any(String),
@@ -1346,6 +1392,7 @@ describe("hosted local dev stack", () => {
         ...process.env,
         MURPH_HOSTED_LOCAL_E2E_ISOLATION_REQUIRED: "1",
         MURPH_HOSTED_LOCAL_PROFILE: "e2e:stub",
+        MURPH_HOSTED_LOCAL_TEST_ROUTES: "1",
         MURPH_DEV_CF_PERSIST_DIR: ".tmp/e2e/wrangler",
         MURPH_DEV_SKIP_LINQ_WEBHOOK_REGISTER: "1",
         MURPH_DEV_SKIP_STRIPE_LISTEN: "1",
@@ -1354,6 +1401,7 @@ describe("hosted local dev stack", () => {
         NEXT_DIST_DIR_MODE: "smoke",
         NEXT_DIST_DIR_SUFFIX: "e2e-fixture",
       },
+      webTemporalMailboxSignalFaultUserId: "member_source_dev_target",
     });
     await stack.ready;
     await stack.stop();
@@ -1373,7 +1421,15 @@ describe("hosted local dev stack", () => {
     ]);
     expect(webCall?.[3]).toEqual(expect.objectContaining({
       MURPH_HOSTED_WEB_DEV_OWNER_PID: String(process.pid),
+      MURPH_HOSTED_LOCAL_TEMPORAL_MAILBOX_SIGNAL_FAULT_USER_ID:
+        "member_source_dev_target",
     }));
+    expect(webCall?.[3]).not.toHaveProperty(
+      "MURPH_HOSTED_LOCAL_TEMPORAL_MAILBOX_SIGNAL_FAULT_PRELOAD",
+    );
+    expect(webCall?.[3].NODE_OPTIONS).toMatch(
+      /--require=".*[/\\]apps[/\\]web[/\\]\.test-dist[/\\]hosted-local-preloads[/\\][0-9a-f-]+[/\\]hosted-local-temporal-mailbox-signal-fault-preload\.js"/u,
+    );
   });
 
   it("keeps production web start selection on harness env instead of merged app env files", async () => {
