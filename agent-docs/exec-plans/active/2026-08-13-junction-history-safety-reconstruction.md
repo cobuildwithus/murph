@@ -520,10 +520,11 @@ Updated: 2026-08-14
   deliberately smaller than the regression proof required to cover the full
   native-connect, webhook, disconnect, reconnect sequence in real Postgres.
 - The user explicitly requested the latest ReviewGPT before the next round.
-  The repo now pins `@cobuild/review-gpt` `^0.5.131` with the matching exact
-  minimum-release-age exception and minimal lockfile resolution update. The
-  installed CLI and registry latest both resolve to `0.5.131`; frozen install,
-  dependency policy, and ignored-build inspection pass.
+  The repo first advanced to `@cobuild/review-gpt` `^0.5.131` with the matching
+  exact minimum-release-age exception and minimal lockfile resolution update.
+  After round 15 completed, `0.5.132` became the registry latest, so the same
+  narrow consumer files advance again before round 16. No transitive resolution
+  changes are admitted beyond the ReviewGPT package entry.
 - Final ReviewGPT round 15 reviewed exact head
   `0eb0e97ade06b6bf863d8c93cef85e727e65f9f5` in the existing thread and
   returned `ROUND_OUTCOME: FINDINGS` plus `REVIEW_COMPLETE`. The initial waited
@@ -757,7 +758,7 @@ Updated: 2026-08-14
     opaque Apple Health source seeded connected before explicit native connect,
     then proves pending source start, webhook epoch advance, provider disconnect,
     bounded lower-epoch duplicate handling, reconnect, and final webhook. The
-    ReviewGPT 0.5.131 package-contract test passes after aligning its version,
+    ReviewGPT 0.5.132 package-contract test passes after aligning its version,
     configurable marked-response threshold, independent model-fallback constant,
     extracted fail-closed helper, and current README contract assertions.
   - Exact-head CI's assistant package shard also reported one timing-sensitive
