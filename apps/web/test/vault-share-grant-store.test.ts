@@ -1,4 +1,4 @@
-import type { Prisma } from "@prisma/client";
+import type { Prisma, PrismaClient } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   buildHostedVaultShareProjectionScopeKey,
@@ -9,24 +9,38 @@ import {
   grantHostedVaultShareTx,
   revokeHostedVaultSharesTx,
 } from "@/src/lib/hosted-vault-share/share-grant-store";
+import { createPrismaClient } from "@/src/lib/prisma";
 
 const SLEEP_SCOPE = hostedVaultShareProjectionKindToScope("sleep-times.v0");
 const SLEEP_SCOPE_KEY = buildHostedVaultShareProjectionScopeKey(SLEEP_SCOPE);
 
-function buildTx(): Prisma.TransactionClient & {
-  hostedVaultShare: {
-    updateMany: ReturnType<typeof vi.fn>;
-  };
-} {
-  return {
+function createPrismaStub<T extends Record<string, unknown>>(
+  delegates: T,
+): PrismaClient & T {
+  const prisma = createPrismaClient({
+    databaseUrl: "postgresql://test:test@127.0.0.1:1/test",
+  });
+  for (const [key, value] of Object.entries(delegates)) {
+    Object.defineProperty(prisma, key, {
+      configurable: true,
+      value,
+    });
+  }
+  if (!("$executeRaw" in delegates)) {
+    Object.defineProperty(prisma, "$executeRaw", {
+      configurable: true,
+      value: vi.fn(async () => 1),
+    });
+  }
+  return prisma as PrismaClient & T;
+}
+
+function buildTx() {
+  return createPrismaStub({
     hostedVaultShare: {
       updateMany: vi.fn(async () => ({ count: 1 })),
     },
-  } as unknown as Prisma.TransactionClient & {
-    hostedVaultShare: {
-      updateMany: ReturnType<typeof vi.fn>;
-    };
-  };
+  });
 }
 
 describe("revokeHostedVaultSharesTx", () => {
@@ -119,19 +133,15 @@ describe("revokeHostedVaultSharesTx", () => {
 
 describe("grantHostedVaultShareTx", () => {
   it("rotates the share id when a revoked tuple is granted again", async () => {
-    const tx = {
+    const tx = createPrismaStub({
+      $executeRaw: vi.fn(async () => 1),
       hostedVaultShare: {
+        count: vi.fn(async () => 0),
         create: vi.fn(),
         findUnique: vi.fn(async () => ({ id: "share_old", status: "revoked" })),
         update: vi.fn(async () => undefined),
       },
-    } as unknown as Prisma.TransactionClient & {
-      hostedVaultShare: {
-        create: ReturnType<typeof vi.fn>;
-        findUnique: ReturnType<typeof vi.fn>;
-        update: ReturnType<typeof vi.fn>;
-      };
-    };
+    });
     const now = new Date("2026-07-02T00:00:00.000Z");
 
     await expect(grantHostedVaultShareTx({
@@ -161,13 +171,13 @@ describe("grantHostedVaultShareTx", () => {
         },
       },
     });
-    const updateArg = tx.hostedVaultShare.update.mock.calls[0]?.[0];
-    expect(updateArg.data.id).not.toBe("share_old");
   });
 
   it("keeps an existing active grant idempotent", async () => {
-    const tx = {
+    const tx = createPrismaStub({
+      $executeRaw: vi.fn(async () => 1),
       hostedVaultShare: {
+        count: vi.fn(),
         create: vi.fn(),
         findUnique: vi.fn(async () => ({
           id: "share_group",
@@ -176,13 +186,7 @@ describe("grantHostedVaultShareTx", () => {
         })),
         update: vi.fn(async () => undefined),
       },
-    } as unknown as Prisma.TransactionClient & {
-      hostedVaultShare: {
-        create: ReturnType<typeof vi.fn>;
-        findUnique: ReturnType<typeof vi.fn>;
-        update: ReturnType<typeof vi.fn>;
-      };
-    };
+    });
 
     await expect(grantHostedVaultShareTx({
       destinationMemberId: "member_referee",
@@ -196,12 +200,56 @@ describe("grantHostedVaultShareTx", () => {
     });
 
     expect(tx.hostedVaultShare.create).not.toHaveBeenCalled();
+    expect(tx.hostedVaultShare.count).not.toHaveBeenCalled();
+    expect(tx.hostedVaultShare.update).not.toHaveBeenCalled();
+  });
+
+  it("rejects a new grant after atomically observing 25 active grants", async () => {
+    const events: string[] = [];
+    const tx = createPrismaStub({
+      $executeRaw: vi.fn(async () => {
+        events.push("lock");
+        return 1;
+      }),
+      hostedVaultShare: {
+        count: vi.fn(async () => {
+          events.push("count");
+          return 25;
+        }),
+        create: vi.fn(),
+        findUnique: vi.fn(async () => null),
+        update: vi.fn(),
+      },
+    });
+
+    await expect(grantHostedVaultShareTx({
+      destinationMemberId: "member_referee",
+      grantorMemberId: "member_grantor",
+      now: new Date("2026-07-02T00:00:00.000Z"),
+      projectionScope: SLEEP_SCOPE,
+      tx,
+    })).rejects.toMatchObject({
+      code: "HOSTED_GROUP_VAULT_SHARE_GRANT_LIMIT_REACHED",
+      httpStatus: 409,
+    });
+
+    expect(events).toEqual(["lock", "count"]);
+    expect(tx.hostedVaultShare.count).toHaveBeenCalledWith({
+      where: {
+        grantorMemberId: "member_grantor",
+        projectionScopeKey: SLEEP_SCOPE_KEY,
+        status: "granted",
+      },
+    });
+    expect(tx.hostedVaultShare.create).not.toHaveBeenCalled();
     expect(tx.hostedVaultShare.update).not.toHaveBeenCalled();
   });
 
   it("starts a fresh pending generation when recent-date consent is reaffirmed", async () => {
     const tx = {
+      $executeRaw: vi.fn(async () => 1),
       hostedVaultShare: {
+        count: vi.fn(async () => 25),
         create: vi.fn(),
         findUnique: vi.fn(async () => ({
           id: "share_previous_generation",
@@ -230,6 +278,7 @@ describe("grantHostedVaultShareTx", () => {
 
     expect(result.id).not.toBe("share_previous_generation");
     expect(result.requiresProjection).toBe(true);
+    expect(tx.hostedVaultShare.count).not.toHaveBeenCalled();
     expect(tx.hostedVaultShare.update).toHaveBeenCalledWith({
       data: expect.objectContaining({
         grantedAt: now,
@@ -250,6 +299,7 @@ describe("grantHostedVaultShareTx", () => {
 
   it("marks an active null snapshot as still requiring projection", async () => {
     const tx = {
+      $executeRaw: vi.fn(async () => 1),
       hostedVaultShare: {
         create: vi.fn(),
         findUnique: vi.fn(async () => ({

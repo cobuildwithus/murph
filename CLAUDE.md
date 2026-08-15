@@ -20,7 +20,12 @@ before calling it complete, then attach hosted desktop and mobile screenshots to
 the PR. This is the existing `/design` catalog rule in
 `agent-docs/operations/agent-workflow-routing.md`; it is repeated here because it
 is the step most often skipped. Green tests and a typecheck are not evidence that
-a screen renders correctly. Secondary worktrees must isolate ports, database, and
+a screen renders correctly, and stills are not evidence that a state transition
+behaves correctly: when the change's user-visible claim is temporal (an
+animation, loading state, redirect, scroll, or drag behavior), also attach the
+short motion-proof video defined in
+`agent-docs/operations/completion-workflow.md` § PR Description. Secondary
+worktrees must isolate ports, database, and
 Next dist dir first, per `agent-docs/operations/hosted-local-worktree-dev.md`.
 
 ## Write the whole PR body when you open the PR
