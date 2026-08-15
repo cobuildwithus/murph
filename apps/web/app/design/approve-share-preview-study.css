@@ -1,0 +1,21 @@
+/* The OG share frame (app/_og/murph-hero-og.tsx) declares literal
+   `font-family: "Fraunces" / "DM Sans"` inline styles because satori resolves
+   fonts by plain family name. next/font registers the site fonts under scoped
+   names, so without these faces the catalog study would fall back to system
+   fonts and misrepresent the shipped card. Register the exact TTFs the
+   opengraph-image routes load (app/font-files.ts) under their plain names. */
+@font-face {
+  font-family: "Fraunces";
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("../fonts/Fraunces-600.ttf") format("truetype");
+}
+
+@font-face {
+  font-family: "DM Sans";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("../fonts/DMSans-400.ttf") format("truetype");
+}

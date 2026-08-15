@@ -50,6 +50,10 @@ const AUTH_ACTIONS = [
   /\bconfirm\b/i,
   /\bconnect\b/i,
 ] as const;
+const AUTH_ACTION_PATTERN = new RegExp(
+  AUTH_ACTIONS.map((pattern) => pattern.source).join("|"),
+  "iu",
+);
 const NEGATIVE_AUTH_ACTION_PATTERN =
   /\b(?:cancel|decline|deny|disallow|do not|don't|not now|reject|skip)\b/iu;
 const TRUSTED_AUTHORIZATION_DOMAINS = [
@@ -260,8 +264,9 @@ async function completeExternalAuthorization(
           `${config.label} authorization was blocked by an external provider challenge.`,
         );
       }
+      const surface = await describeAuthorizationSurface(page);
       throw new Error(
-        `${config.label} did not expose an automated authorization action. Manual completion is available only in a headed non-CI run.`,
+        `${config.label} did not expose an automated authorization action. ${surface} Manual completion is available only in a headed non-CI run.`,
       );
     }
     await page.waitForTimeout(1_000);
@@ -359,15 +364,7 @@ async function clickFirstVisibleAction(
       const controls = page.getByRole(role, { name });
       for (let index = 0; index < await controls.count(); index += 1) {
         const control = controls.nth(index);
-        const actionText = [
-          await control.getAttribute("aria-label").catch(() => null),
-          await control.innerText().catch(() => ""),
-        ].filter(Boolean).join(" ");
-        if (
-          NEGATIVE_AUTH_ACTION_PATTERN.test(actionText)
-          || !await control.isVisible().catch(() => false)
-          || !await control.isEnabled().catch(() => false)
-        ) {
+        if (await readAuthorizationActionState(control) !== "enabled") {
           continue;
         }
         await control.click();
@@ -376,6 +373,96 @@ async function clickFirstVisibleAction(
     }
   }
   return false;
+}
+
+async function readAuthorizationActionState(
+  control: Locator,
+): Promise<"disabled" | "enabled" | null> {
+  const actionText = [
+    await control.getAttribute("aria-label").catch(() => null),
+    await control.innerText().catch(() => ""),
+  ].filter(Boolean).join(" ");
+  if (
+    NEGATIVE_AUTH_ACTION_PATTERN.test(actionText)
+    || !await control.isVisible().catch(() => false)
+  ) {
+    return null;
+  }
+  return await control.isEnabled().catch(() => false) ? "enabled" : "disabled";
+}
+
+async function describeAuthorizationSurface(page: Page): Promise<string> {
+  const countScope = async (scope: Pick<Page, "getByRole">) => {
+    const countActions = async (controls: Locator) => {
+      let actions = 0;
+      let enabledActions = 0;
+      for (let index = 0; index < await controls.count(); index += 1) {
+        const state = await readAuthorizationActionState(controls.nth(index));
+        if (state !== null) actions += 1;
+        if (state === "enabled") enabledActions += 1;
+      }
+      return { actions, enabledActions };
+    };
+    let actions = 0;
+    let allActions = 0;
+    let enabledActions = 0;
+    for (const role of ["button", "link"] as const) {
+      const all = await countActions(scope.getByRole(role));
+      const recognized = await countActions(
+        scope.getByRole(role, { name: AUTH_ACTION_PATTERN }),
+      );
+      allActions += all.actions;
+      actions += recognized.actions;
+      enabledActions += recognized.enabledActions;
+    }
+    const checkboxes = scope.getByRole("checkbox");
+    let uncheckedCheckboxes = 0;
+    for (let index = 0; index < await checkboxes.count(); index += 1) {
+      const checkbox = checkboxes.nth(index);
+      if (
+        await checkbox.isVisible().catch(() => false)
+        && !await checkbox.isChecked().catch(() => false)
+      ) {
+        uncheckedCheckboxes += 1;
+      }
+    }
+    return {
+      actions,
+      enabledActions,
+      otherActions: Math.max(0, allActions - actions),
+      uncheckedCheckboxes,
+    };
+  };
+  const mainFrame = page.mainFrame();
+  const childFrames = page.frames().filter((frame) => frame !== mainFrame);
+  const [main, ...children] = await Promise.all([
+    countScope(mainFrame),
+    ...childFrames.map(countScope),
+  ]);
+  const child = children.reduce((total, current) => ({
+    actions: total.actions + current.actions,
+    enabledActions: total.enabledActions + current.enabledActions,
+    otherActions: total.otherActions + current.otherActions,
+    uncheckedCheckboxes:
+      total.uncheckedCheckboxes + current.uncheckedCheckboxes,
+  }), {
+    actions: 0,
+    enabledActions: 0,
+    otherActions: 0,
+    uncheckedCheckboxes: 0,
+  });
+  return [
+    "Authorization surface:",
+    `childFrames=${childFrames.length}`,
+    `mainActions=${main.actions}`,
+    `mainEnabledActions=${main.enabledActions}`,
+    `mainOtherActions=${main.otherActions}`,
+    `childActions=${child.actions}`,
+    `childEnabledActions=${child.enabledActions}`,
+    `childOtherActions=${child.otherActions}`,
+    `mainUncheckedCheckboxes=${main.uncheckedCheckboxes}`,
+    `childUncheckedCheckboxes=${child.uncheckedCheckboxes}.`,
+  ].join(" ");
 }
 
 async function assertWearableConnectionState(
