@@ -159,6 +159,23 @@ Updated: 2026-08-12
   after public expiry, and preservation of the consumed device claim for its
   exact finalization owner.
 
+## Non-obvious affected surfaces
+
+- Privy phone-transfer source retirement treats the physical presence of these
+  six control-artifact families as a fail-closed source-disposal fence:
+  connected-app intents, device-connect intents, device OAuth sessions,
+  Clinical connect intents, Clinical OAuth sessions, and sensitive-action
+  challenges.
+- Centralized retention must therefore preserve every owner-live row even after
+  its public link expires. Existing exact finalization or recovery removes
+  consumed device OAuth rows; completed or removed intents release linked
+  Clinical OAuth rows; the existing bounded continuation grace releases
+  started connect intents; and terminal unbound sensitive-action expiry releases
+  transient challenges.
+- Phone transfer adds no cleanup or recovery owner. It remains a conservative
+  zero-material classifier and becomes eligible only after those existing
+  lifecycle owners have removed their rows.
+
 ## Verification
 
 - Commands to be selected from the final diff: focused Web Vitest slices,

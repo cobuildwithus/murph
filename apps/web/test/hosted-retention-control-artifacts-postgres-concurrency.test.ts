@@ -280,6 +280,47 @@ describe.skipIf(!runPostgresProof)(
       }
     });
 
+    it("preserves a consumed phone-transfer blocker until its exact owner removes it", async () => {
+      const cleanup = requirePrisma(cleanupClient);
+      const suffix = randomUUID();
+      const memberId = `retention-transfer-member-${suffix}`;
+      const state = `retention-transfer-state-${suffix}`;
+      const consumedAt = new Date("2026-08-11T11:59:59.000Z");
+      const retentionNow = new Date("2026-08-11T12:00:01.000Z");
+
+      try {
+        await cleanup.hostedMember.create({ data: { id: memberId } });
+        await cleanup.deviceOauthSession.create({
+          data: {
+            consumedAt,
+            createdAt: new Date("2026-08-11T11:45:00.000Z"),
+            expiresAt: new Date("2026-08-11T12:00:00.000Z"),
+            provider: "retention-proof",
+            state,
+            userId: memberId,
+          },
+        });
+
+        await expect(deleteExpiredDeviceOauthSessions({
+          now: retentionNow,
+          prisma: cleanup,
+        })).resolves.toBe(0);
+        await expect(cleanup.deviceOauthSession.findFirst({
+          select: { state: true },
+          where: { userId: memberId },
+        })).resolves.toEqual({ state });
+
+        await cleanup.deviceOauthSession.delete({ where: { state } });
+        await expect(cleanup.deviceOauthSession.findFirst({
+          select: { state: true },
+          where: { userId: memberId },
+        })).resolves.toBeNull();
+      } finally {
+        await cleanup.deviceOauthSession.deleteMany({ where: { state } });
+        await cleanup.hostedMember.deleteMany({ where: { id: memberId } });
+      }
+    });
+
     it("keeps a connected-app callback authoritative through its exact owner grace", async () => {
       const cleanup = requirePrisma(cleanupClient);
       const consumer = requirePrisma(consumeClient);
