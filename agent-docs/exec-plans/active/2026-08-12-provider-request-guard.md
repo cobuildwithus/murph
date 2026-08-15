@@ -434,6 +434,19 @@ Updated: 2026-08-15
   shapes plus shadowed, provider-neutral, and literal-computed controls. No
   scanner, registry, exception, compatibility path, second provenance owner,
   or provider request was added.
+- Exact full-snapshot round 17 at
+  `71ac237f0ad89a78ea8e50e3e60388dca9c62f0f` found one review-induced High:
+  the round-16 predicate still required a variable binding before failing
+  closed, so parameter-rooted, direct call-produced, and `this`-rooted opaque
+  targets could discard provider-bound mutation evidence.
+- The correction remains inside the same mutation owner. Call traversal marks
+  the recovered chain opaque, `this` uses the existing root representation,
+  and opacity is checked before any variable-binding proof. Only fully static
+  targets continue into variable/static-member resolution. Direct-write and
+  `Object.assign` regressions cover parameter, direct-call, and dynamic `this`
+  roots, with provider-neutral and literal-computed controls. No scanner,
+  registry, exception, compatibility path, second provenance owner, or
+  provider request was added.
 
 ## Verification
 
@@ -446,13 +459,13 @@ Updated: 2026-08-15
 
 Current evidence:
 
-- Focused guard suite: 123 tests passed on the current merged base, including
+- Focused guard suite: 124 tests passed on the current merged base, including
   direct ReviewGPT reproductions and negative controls for unrelated objects,
   imports, namespace aliases, closed member origins and mutations, callables,
   ambiguous provider evidence, and domain models.
 - Full repository-tool suite: 36 files and 650 tests passed.
 - Repo-tools TypeScript compilation passes with `tsconfig.tools.json`.
-- The combined guard and Node-bootstrap suite passes 124 tests after the final
+- The combined guard and Node-bootstrap suite passes 125 tests after the final
   base merge.
 - `pnpm provider-requests:guard`: passes on the current merged base containing
   the sibling SDK migrations and exact registered SDK hooks.

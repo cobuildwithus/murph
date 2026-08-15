@@ -1836,7 +1836,7 @@ function collectOpaqueProviderTransportMutationViolations(input: {
   ): {
     readonly hasOpaqueSegment: boolean;
     readonly memberDepth: number;
-    readonly root: string;
+    readonly root: string | null;
   } | null => {
     const expression = unwrapExpression(node);
     if (isIdentifier(expression)) {
@@ -1846,8 +1846,20 @@ function collectOpaqueProviderTransportMutationViolations(input: {
         root: expression.name,
       };
     }
+    if (expression.type === "ThisExpression") {
+      return {
+        hasOpaqueSegment: false,
+        memberDepth: 0,
+        root: "this",
+      };
+    }
     if (isCallExpression(expression) || isOptionalCallExpression(expression)) {
-      return readLocalMemberRoot(expression.callee);
+      const calleeRoot = readLocalMemberRoot(expression.callee);
+      return {
+        hasOpaqueSegment: true,
+        memberDepth: calleeRoot?.memberDepth ?? 0,
+        root: calleeRoot?.root ?? null,
+      };
     }
     if (
       !isMemberExpression(expression) &&
@@ -1878,14 +1890,19 @@ function collectOpaqueProviderTransportMutationViolations(input: {
     const localRoot = readLocalMemberRoot(node);
     if (
       !localRoot ||
-      (!allowRootOnly && localRoot.memberDepth < 1) ||
-      resolvePossibleBindings(input.bindings, localRoot.root, before).length ===
-        0
+      (!allowRootOnly && localRoot.memberDepth < 1)
     ) {
       return false;
     }
     if (localRoot.hasOpaqueSegment) {
       return true;
+    }
+    if (
+      !localRoot.root ||
+      resolvePossibleBindings(input.bindings, localRoot.root, before).length ===
+        0
+    ) {
+      return false;
     }
     const path = readMemberPath(node);
     return Boolean(
