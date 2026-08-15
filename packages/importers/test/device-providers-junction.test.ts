@@ -5251,15 +5251,15 @@ test("Junction normalizer defaults to the documented resource allowlist", () => 
     "calories_active",
     "heartrate",
     "weight",
+    "carbohydrates",
     "forced_expiratory_volume_1",
     "forced_vital_capacity",
     "heart_rate_alert",
     "inhaler_usage",
+    "insulin_injection",
     "peak_expiratory_flow_rate",
     "sleep_apnea_alert",
     "fall",
-    "carbohydrates",
-    "insulin_injection",
   ]);
   assert.deepEqual([...JUNCTION_OPT_IN_SUMMARY_RESOURCES], []);
   assert.deepEqual([...JUNCTION_OPT_IN_TIMESERIES_RESOURCES], [
