@@ -118,13 +118,39 @@ describe.skipIf(!runPostgresProof)(
             status: "granted",
           },
         })).toBe(HOSTED_GROUP_VAULT_SHARE_GRANT_LIMIT_PER_GRANTOR_PROJECTION);
-        await expect(findActiveHostedVaultShares({
-          grantorMemberId,
-          prisma: observer,
-          projectionScope: SLEEP_SCOPE,
-        })).resolves.toHaveLength(
-          HOSTED_GROUP_VAULT_SHARE_GRANT_LIMIT_PER_GRANTOR_PROJECTION,
-        );
+        const admittedDestinationMemberId = candidateDestinationMemberIds[
+          attempts.findIndex((attempt) => attempt.status === "fulfilled")
+        ];
+        if (!admittedDestinationMemberId) {
+          throw new Error("Expected an admitted vault-share destination.");
+        }
+        await observer.hostedVaultShare.update({
+          where: {
+            grantorMemberId_projectionScopeKey_destinationMemberId: {
+              destinationMemberId: admittedDestinationMemberId,
+              grantorMemberId,
+              projectionScopeKey: SLEEP_SCOPE_KEY,
+            },
+          },
+          data: { projectionSnapshotCiphertext: "ciphertext_ready" },
+        });
+        await expect(observer.$transaction((tx) =>
+          grantHostedVaultShareTx({
+            destinationMemberId: admittedDestinationMemberId,
+            grantorMemberId,
+            now: new Date("2026-08-12T12:00:01.500Z"),
+            projectionScope: SLEEP_SCOPE,
+            refreshMaterializedProjection: true,
+            tx,
+          })
+        )).resolves.toMatchObject({ requiresProjection: true });
+        expect(await observer.hostedVaultShare.count({
+          where: {
+            grantorMemberId,
+            projectionScopeKey: SLEEP_SCOPE_KEY,
+            status: "granted",
+          },
+        })).toBe(HOSTED_GROUP_VAULT_SHARE_GRANT_LIMIT_PER_GRANTOR_PROJECTION);
 
         const rejectedAttemptIndex = attempts.findIndex(
           (attempt) => attempt.status === "rejected",

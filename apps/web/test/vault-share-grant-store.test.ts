@@ -249,7 +249,7 @@ describe("grantHostedVaultShareTx", () => {
     const tx = {
       $executeRaw: vi.fn(async () => 1),
       hostedVaultShare: {
-        count: vi.fn(async () => 1),
+        count: vi.fn(async () => 25),
         create: vi.fn(),
         findUnique: vi.fn(async () => ({
           id: "share_previous_generation",
@@ -278,6 +278,7 @@ describe("grantHostedVaultShareTx", () => {
 
     expect(result.id).not.toBe("share_previous_generation");
     expect(result.requiresProjection).toBe(true);
+    expect(tx.hostedVaultShare.count).not.toHaveBeenCalled();
     expect(tx.hostedVaultShare.update).toHaveBeenCalledWith({
       data: expect.objectContaining({
         grantedAt: now,

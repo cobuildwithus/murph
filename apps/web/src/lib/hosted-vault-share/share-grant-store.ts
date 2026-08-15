@@ -74,24 +74,28 @@ export async function grantHostedVaultShareTx(input: {
     };
   }
 
-  const activeGrantCount = await input.tx.hostedVaultShare.count({
-    where: {
-      grantorMemberId: input.grantorMemberId,
-      projectionScopeKey,
-      status: "granted",
-    },
-  });
-  if (
-    activeGrantCount
-    >= HOSTED_GROUP_VAULT_SHARE_GRANT_LIMIT_PER_GRANTOR_PROJECTION
-  ) {
-    throw hostedOnboardingError({
-      code: "HOSTED_GROUP_VAULT_SHARE_GRANT_LIMIT_REACHED",
-      httpStatus: 409,
-      message:
-        "You have reached the group health-sharing limit for this permission. Turn off this permission in another group before sharing it here.",
-      retryable: false,
+  // Enforce the maximum resulting cardinality. Refreshing an already-active
+  // tuple is cardinality-neutral, including when the cohort is exactly full.
+  if (existing?.status !== "granted") {
+    const activeGrantCount = await input.tx.hostedVaultShare.count({
+      where: {
+        grantorMemberId: input.grantorMemberId,
+        projectionScopeKey,
+        status: "granted",
+      },
     });
+    if (
+      activeGrantCount
+      >= HOSTED_GROUP_VAULT_SHARE_GRANT_LIMIT_PER_GRANTOR_PROJECTION
+    ) {
+      throw hostedOnboardingError({
+        code: "HOSTED_GROUP_VAULT_SHARE_GRANT_LIMIT_REACHED",
+        httpStatus: 409,
+        message:
+          "You have reached the group health-sharing limit for this permission. Turn off this permission in another group before sharing it here.",
+        retryable: false,
+      });
+    }
   }
 
   if (!existing) {
