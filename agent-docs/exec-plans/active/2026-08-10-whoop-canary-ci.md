@@ -122,8 +122,15 @@ Updated: 2026-08-15
   OAuth guide still identifies the affirmative rendered control as `GRANT`,
   proving the remaining boundary is rendered labeling versus the computed
   accessible name rather than a missing or disabled consent control.
-- The rendered-label correction passed 15 focused unit tests, all three headed
+- The rendered-label correction passed 17 focused unit tests, all four headed
   Chromium boundary scenarios, the hosted-web prepared typecheck, targeted
   ESLint, and `git diff --check`. The headed regression proves that a negative
   control is rejected even when its rendered text says `GRANT`, while a neutral
   enabled control with that rendered text completes the authorization redirect.
+- Preliminary and final ReviewGPT independently found that direct attributes do
+  not cover computed names from `aria-labelledby`; the final gate also found
+  that raw Playwright click failures could contain provider DOM text. The
+  accepted correction now restricts the fallback to WHOOP's exact visible
+  `GRANT` button, binds checks and activation to one element handle, asks
+  Playwright for the current negative accessible-name set, ignores hidden
+  values and Oura, and collapses ambiguous click failures to a fixed category.

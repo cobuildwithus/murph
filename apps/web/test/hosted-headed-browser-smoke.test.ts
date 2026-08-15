@@ -136,16 +136,20 @@ describe("hosted headed browser boundary", () => {
   );
 
   it.runIf(smokeEnabled)(
-    "uses a denial-safe rendered GRANT label when aria-label masks it",
+    "keeps WHOOP rendered GRANT bound to one denial-safe live button",
     async () => {
       const browser = await chromium.launch({ headless: false });
       try {
         const page = await browser.newPage();
         await page.route("https://id.whoop.com/**", (route) => route.fulfill({
           body: [
-            '<button aria-label="Cancel data access" ',
+            '<span id="deny-label">Cancel data access</span>',
+            '<button aria-labelledby="deny-label" ',
             'onclick="location.href=\'https://app.example.test/negative\'">',
             "GRANT</button>",
+            '<button aria-label="Review hidden value" value="GRANT" ',
+            'onclick="location.href=\'https://app.example.test/hidden\'">',
+            "Review data access</button>",
             '<button aria-label="Review requested data access" ',
             'onclick="location.href=\'https://app.example.test/home\'">',
             "GRANT</button>",
@@ -167,5 +171,42 @@ describe("hosted headed browser boundary", () => {
         await browser.close();
       }
     },
+  );
+
+  it.runIf(smokeEnabled)(
+    "keeps a failed WHOOP consent click content-free",
+    async () => {
+      const browser = await chromium.launch({ headless: false });
+      try {
+        const page = await browser.newPage();
+        page.setDefaultTimeout(1_000);
+        await page.route("https://id.whoop.com/**", (route) => route.fulfill({
+          body: [
+            '<button aria-label="Review synthetic-private-marker access">',
+            "GRANT</button>",
+            '<div style="position:fixed;inset:0;z-index:1">',
+            "overlay-synthetic-private-marker</div>",
+          ].join(""),
+          contentType: "text/html",
+        }));
+        await page.goto("https://id.whoop.com/consent");
+
+        let failure: Error | undefined;
+        try {
+          await completeExternalJunctionAuthorizationForTest(
+            page,
+            createWhoopConfig(),
+          );
+        } catch (error) {
+          if (error instanceof Error) failure = error;
+        }
+        expect(failure?.message).toBe("Authorization action failed (timeout).");
+        expect(failure?.message).not.toContain("synthetic-private-marker");
+        expect(failure?.message).not.toContain("id.whoop.com");
+      } finally {
+        await browser.close();
+      }
+    },
+    120_000,
   );
 });

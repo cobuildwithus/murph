@@ -26,13 +26,18 @@ function createConfig(environment: Record<string, string | undefined> = {}) {
 function emptyLocator() {
   return {
     count: vi.fn(async () => 0),
-    evaluateAll: vi.fn(async () => []),
+    elementHandles: vi.fn(async () => []),
+    filter: vi.fn(() => emptyLocator()),
+    includesControl: vi.fn(() => false),
     nth: vi.fn(),
   };
 }
 
 function actionLocator(click: () => void) {
   const action = {
+    and: vi.fn((other: { includesControl?: (candidate: object) => boolean }) => ({
+      count: vi.fn(async () => other.includesControl?.(action) ? 1 : 0),
+    })),
     click: vi.fn(async () => {
       click();
     }),
@@ -43,10 +48,7 @@ function actionLocator(click: () => void) {
   };
   return {
     count: vi.fn(async () => 1),
-    evaluateAll: vi.fn(async () => [{
-      combined: "Continue",
-      rendered: "Continue",
-    }]),
+    includesControl: vi.fn((candidate: object) => candidate === action),
     nth: vi.fn(() => action),
   };
 }
@@ -56,6 +58,7 @@ function roleLocator(
     accessibleName?: string;
     ariaLabel?: string;
     checked?: boolean;
+    detachAfterFirstText?: boolean;
     enabled?: boolean;
     onClick?: () => void;
     text: string;
@@ -63,27 +66,62 @@ function roleLocator(
     visible?: boolean;
   }>,
 ) {
+  const elementHandle = (control: (typeof controls)[number]) => {
+    let detached = false;
+    return {
+      click: vi.fn(async () => {
+        if (detached) throw new Error("detached synthetic-private-marker");
+        control.onClick?.();
+      }),
+      dispose: vi.fn(async () => undefined),
+      evaluate: vi.fn(async (
+        _callback: unknown,
+        other: { testControl?: (typeof controls)[number] },
+      ) => {
+        if (detached) throw new Error("detached synthetic-private-marker");
+        return other.testControl === control;
+      }),
+      innerText: vi.fn(async () => {
+        if (detached) throw new Error("detached synthetic-private-marker");
+        if (control.detachAfterFirstText) detached = true;
+        return control.text;
+      }),
+      isEnabled: vi.fn(async () => !detached && (control.enabled ?? true)),
+      isVisible: vi.fn(async () => !detached && (control.visible ?? true)),
+      testControl: control,
+    };
+  };
   return {
     count: vi.fn(async () => controls.length),
-    evaluateAll: vi.fn(async () => controls.map((control) => {
-      const rendered = [control.text, control.value].filter(Boolean).join(" ");
+    elementHandles: vi.fn(async () => controls.map(elementHandle)),
+    filter: vi.fn(({ hasText }: { hasText: RegExp }) =>
+      roleLocator(controls.filter((control) => hasText.test(control.text)))
+    ),
+    includesControl: vi.fn((candidate: (typeof controls)[number]) =>
+      controls.includes(candidate)
+    ),
+    nth: vi.fn((index: number) => {
+      const control = controls[index];
       return {
-        combined: [control.ariaLabel, rendered].filter(Boolean).join(" "),
-        rendered,
+        and: vi.fn((other: {
+          includesControl?: (candidate: (typeof controls)[number]) => boolean;
+        }) => ({
+          count: vi.fn(async () =>
+            control !== undefined && other.includesControl?.(control) ? 1 : 0
+          ),
+        })),
+        click: vi.fn(async () => control?.onClick?.()),
+        getAttribute: vi.fn(async (name: string) => {
+          if (name === "aria-label") return control?.ariaLabel ?? null;
+          if (name === "value") return control?.value ?? null;
+          return null;
+        }),
+        innerText: vi.fn(async () => control?.text ?? ""),
+        isChecked: vi.fn(async () => control?.checked ?? false),
+        isEnabled: vi.fn(async () => control?.enabled ?? true),
+        isVisible: vi.fn(async () => control?.visible ?? true),
       };
-    })),
-    nth: vi.fn((index: number) => ({
-      click: vi.fn(async () => controls[index]?.onClick?.()),
-      getAttribute: vi.fn(async (name: string) => {
-        if (name === "aria-label") return controls[index]?.ariaLabel ?? null;
-        if (name === "value") return controls[index]?.value ?? null;
-        return null;
-      }),
-      innerText: vi.fn(async () => controls[index]?.text ?? ""),
-      isChecked: vi.fn(async () => controls[index]?.checked ?? false),
-      isEnabled: vi.fn(async () => controls[index]?.enabled ?? true),
-      isVisible: vi.fn(async () => controls[index]?.visible ?? true),
-    })),
+    }),
   };
 }
 
@@ -209,12 +247,20 @@ describe("hosted-local Junction wearable browser authorization", () => {
     let atMurph = false;
     let positiveClicked = false;
     let negativeClicked = false;
+    let replacedCandidateClicked = false;
     let now = 0;
     const mainFrame = authorizationFrame({
       buttons: [
         {
+          accessibleName: "Review changing data access",
+          detachAfterFirstText: true,
+          onClick: () => {
+            replacedCandidateClicked = true;
+          },
+          text: "GRANT",
+        },
+        {
           accessibleName: "Cancel data access",
-          ariaLabel: "Cancel data access",
           onClick: () => {
             negativeClicked = true;
           },
@@ -251,7 +297,65 @@ describe("hosted-local Junction wearable browser authorization", () => {
     )).resolves.toBeUndefined();
     expect(negativeClicked).toBe(false);
     expect(positiveClicked).toBe(true);
+    expect(replacedCandidateClicked).toBe(false);
     expect(now).toBe(750);
+  });
+
+  it.each([
+    {
+      environment: {},
+      providerUrl: "https://id.whoop.com/consent",
+      text: "Review requested data access",
+      value: "GRANT",
+    },
+    {
+      environment: {
+        MURPH_E2E_CONNECT_URL:
+          "https://app.example.test/connect#deviceConnectIntent=opaque&connectSource=oura",
+        MURPH_E2E_PROVIDER_OTP: "123456",
+        MURPH_E2E_PROVIDER_SOURCE: "oura",
+      },
+      providerUrl: "https://id.ouraring.com/consent",
+      text: "GRANT",
+      value: undefined,
+    },
+  ])("does not broaden rendered fallback outside the WHOOP GRANT button", async ({
+    environment,
+    providerUrl,
+    text,
+    value,
+  }) => {
+    let clicked = false;
+    let now = 0;
+    const mainFrame = authorizationFrame({
+      buttons: [{
+        accessibleName: "Review requested data access",
+        onClick: () => {
+          clicked = true;
+        },
+        text,
+        value,
+      }],
+    });
+    const page = {
+      frames: () => [mainFrame],
+      getByRole: mainFrame.getByRole,
+      locator: vi.fn(() => emptyLocator()),
+      mainFrame: () => mainFrame,
+      title: vi.fn(async () => "Authorize"),
+      url: () => providerUrl,
+      waitForTimeout: vi.fn(async (duration: number) => {
+        now += duration;
+      }),
+    };
+
+    await expect(completeExternalJunctionAuthorizationForTest(
+      page as never,
+      createConfig(environment),
+      () => now,
+    )).rejects.toThrow("did not expose an automated authorization action");
+    expect(clicked).toBe(false);
+    expect(now).toBe(15_000);
   });
 
   it.each(["true", " TRUE ", "1"])(
