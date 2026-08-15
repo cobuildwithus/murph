@@ -134,10 +134,13 @@ Updated: 2026-08-15
   makes proactive delivery and later status reads consume one canonical truth.
 - When the foreground-only mailbox pass has already selected one exact
   phone-call result, let that result keep its non-idempotent Telegram effect and
-  reuse the existing `outbox_sending` checkpoint plus post-checkpoint drain.
-  Continue filtering non-idempotent effects for every other foreground-only
-  preparation, and collect only the selected result's delivery intent so
-  unrelated pending outbox work remains deferred.
+  reuse the existing outbox owner. Pre-claim only that selected effect, commit
+  the resulting `sending` state in an actual workspace snapshot, run the fixed
+  destination provider call, and commit the terminal or retryable outcome in a
+  follow-up snapshot before admitting newer conversation input. Continue
+  filtering non-idempotent effects for every other foreground-only preparation,
+  and collect only the selected result's delivery intent so unrelated pending
+  outbox work remains deferred.
 - Treat every accepted `call_analyzed` event as terminal even when Retell omits
   `end_timestamp`: preserve an existing provider end or persist the analysis
   time as the fallback. Publish a required deduped not-completed result when
@@ -252,15 +255,25 @@ Updated: 2026-08-15
   files pass 596 tests. Assistant-runtime typecheck passes. Its package has no
   ESLint target or config; the changed runtime code is instead covered by its
   typecheck, tests, and repository formatting checks.
+- Final ReviewGPT round 10 found that the round-9 `outbox_sending` phase label
+  did not itself create a durable snapshot: the provider call could still run
+  while the selected Telegram intent existed only in the warm workspace. The
+  parent accepted the finding. The runtime now treats the selected delivery as
+  a checkpoint barrier, disables foreground wake and detached-ask preemption,
+  commits the claimed intent before provider I/O, and commits the provider
+  disposition before admitting newer input. The production-path regression
+  restores the exact claim snapshot and proves the selected non-idempotent
+  intent is not blindly resent; the unrelated intent is still pending in that
+  snapshot. The full assistant-runtime suite passes 2,317 tests with 4 skipped
+  across 88 files, and package typecheck plus `git diff --check` pass.
 - Corrected-head product-experience revalidation finds the implementation is
   again the smallest complete experience for the incident: status is durable,
   stop state is truthful, fallback outcomes are canonical, and an exact result
   reaches the member before Murph admits a newer message on both supported
   direct transports. The remaining evidence gap is live-provider timing, not a
   known product-flow gap.
-- Remaining gates: docs/privacy inspection, commit and push the remediation
-  head, exact-head CI, final ReviewGPT `ROUND_OUTCOME: PASS`, clean merge-tree
-  proof, and plan closure.
+- Remaining gates: commit and push the remediation head, exact-head CI, final
+  ReviewGPT `ROUND_OUTCOME: PASS`, clean merge-tree proof, and plan closure.
 - Direct proof: a synthetic call result arrives while one hosted invocation is
   active and newer conversation input is waiting; Murph receives the result in
   the next turn and a later status query returns the same terminal truth.

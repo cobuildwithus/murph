@@ -595,6 +595,34 @@ describe("hosted runtime callbacks", () => {
     expect(mocks.beginAssistantOutboxIntentMirrorPreparedDispatch).not.toHaveBeenCalled();
   });
 
+  it("pre-claims only an explicitly selected non-idempotent delivery effect", async () => {
+    const selectedEffect = createEffect({ transportIdempotent: false });
+    const unrelatedEffect = {
+      ...createEffect({ transportIdempotent: false }),
+      effectId: "intent_unrelated",
+    };
+
+    const preparation = await prepareHostedAssistantDeliveryEffectsForDispatch({
+      assistantDeliveryEffects: [selectedEffect, unrelatedEffect],
+      selectedNonIdempotentEffectIds: [selectedEffect.effectId],
+      now: () => "2026-04-08T00:00:05.000Z",
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+    });
+
+    expect(preparation.preparedDispatches).toEqual([
+      expect.objectContaining({
+        intentId: selectedEffect.effectId,
+        preparedDispatchToken: PREPARED_DISPATCH_TOKEN,
+      }),
+    ]);
+    expect(mocks.beginAssistantOutboxIntentMirrorPreparedDispatch).toHaveBeenCalledTimes(1);
+    expect(mocks.beginAssistantOutboxIntentMirrorPreparedDispatch).toHaveBeenCalledWith(
+      expect.objectContaining({
+        intentId: selectedEffect.effectId,
+      }),
+    );
+  });
+
   it("pre-claims non-idempotent Linq reaction effects before provider dispatch", async () => {
     const effect = createEffect({
       channel: "linq",

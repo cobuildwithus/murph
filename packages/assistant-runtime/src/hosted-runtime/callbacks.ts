@@ -1763,6 +1763,7 @@ function resolveHostedAssistantOutboxIntentWakeAt(
 
 export async function prepareHostedAssistantDeliveryEffectsForDispatch(input: {
   assistantDeliveryEffects: HostedAssistantDeliveryEffect[];
+  selectedNonIdempotentEffectIds?: readonly string[];
   linqDeliveryContext?: HostedAssistantLinqDeliveryContext | null;
   linqDeliveryContexts?: readonly HostedAssistantLinqDeliveryContext[] | null;
   now?: () => string;
@@ -1770,12 +1771,18 @@ export async function prepareHostedAssistantDeliveryEffectsForDispatch(input: {
 }): Promise<HostedAssistantDeliveryPreparation> {
   const startedAt = (input.now ?? (() => new Date().toISOString()))();
   const preparedDispatches: HostedAssistantDeliveryPreparedDispatch[] = [];
+  const selectedNonIdempotentEffectIds = new Set(
+    input.selectedNonIdempotentEffectIds ?? [],
+  );
   const linqDeliveryContexts = resolveHostedAssistantLinqDeliveryContexts({
     context: input.linqDeliveryContext ?? null,
     contexts: input.linqDeliveryContexts ?? null,
   });
   for (const effect of input.assistantDeliveryEffects) {
-    if (!shouldPrepareHostedAssistantDeliveryEffectForDispatch(effect)) {
+    if (!shouldPrepareHostedAssistantDeliveryEffectForDispatch(
+      effect,
+      selectedNonIdempotentEffectIds.has(effect.effectId),
+    )) {
       continue;
     }
     const linqDeliveryContext = resolveHostedAssistantLinqDeliveryContextForEffect({
@@ -1818,9 +1825,11 @@ export async function prepareHostedAssistantDeliveryEffectsForDispatch(input: {
 
 function shouldPrepareHostedAssistantDeliveryEffectForDispatch(
   effect: HostedAssistantDeliveryEffect,
+  explicitlyPrepareNonIdempotent: boolean,
 ): boolean {
   return !hasHostedAssistantVaultFileMedia(effect.payload)
-    && (effect.payload.transportIdempotent
+    && (explicitlyPrepareNonIdempotent
+      || effect.payload.transportIdempotent
       || isHostedAssistantReactionOnlyEffect(effect)
       || hasHostedAssistantVoiceMemoMedia(effect.payload)
       || isHostedSignupWelcomeDeliveryPayload(effect.payload));

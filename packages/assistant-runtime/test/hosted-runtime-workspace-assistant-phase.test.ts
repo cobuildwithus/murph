@@ -15125,6 +15125,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         mocks.prepareHostedAssistantDeliveryEffectsForDispatch,
       ).toHaveBeenCalledWith(expect.objectContaining({
         assistantDeliveryEffects: [deliveryEffect],
+        selectedNonIdempotentEffectIds: [deliveryEffect.effectId],
         vaultRoot: "/tmp/murph-vault",
       }));
       expect(result).toEqual(expect.objectContaining({
@@ -15153,6 +15154,15 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     const postCheckpoint = await result.afterCheckpoint?.();
 
     if (drainsBeforePendingInput) {
+      expect(mocks.drainHostedPreparedAssistantDeliveries).not.toHaveBeenCalled();
+      const durableEffects = typeof postCheckpoint?.afterDurableCheckpoint === "function"
+        ? [postCheckpoint.afterDurableCheckpoint]
+        : [...(postCheckpoint?.afterDurableCheckpoint ?? [])];
+      expect(durableEffects).toHaveLength(1);
+      expect(durableEffects[0]?.foregroundCausalDelivery).toBe(true);
+
+      const durableEffectResult = await durableEffects[0]?.();
+
       expect(mocks.drainHostedPreparedAssistantDeliveries).toHaveBeenCalledWith(
         expect.objectContaining({
           assistantDeliveryEffects: [deliveryEffect],
@@ -15160,6 +15170,9 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
           wake: completionItem.wake,
         }),
       );
+      expect(durableEffectResult).toEqual(expect.objectContaining({
+        requiresFollowUpCheckpoint: true,
+      }));
     } else {
       expect(mocks.drainHostedPreparedAssistantDeliveries).not.toHaveBeenCalled();
       expect(postCheckpoint).toEqual(expect.objectContaining({
