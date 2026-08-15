@@ -182,7 +182,7 @@ describe("requireHostedRuntimeActiveAccessForUpdateTx", () => {
     vi.clearAllMocks();
   });
 
-  it("locks the sorted unique member set before thread-container revalidation", async () => {
+  it("locks the owner before its runtime and thread-container revalidation", async () => {
     const { lockOrder, tx } = buildRuntimeAccessTx(["member_owner", "member_owner"]);
 
     await expect(requireHostedRuntimeActiveAccessForUpdateTx("member_group_runtime", {
@@ -191,8 +191,8 @@ describe("requireHostedRuntimeActiveAccessForUpdateTx", () => {
 
     expect(lockOrder).toEqual([
       "container-read",
-      "runtime-lock",
       "owner-lock",
+      "runtime-lock",
       "container-lock",
     ]);
     expect(tx.hostedMember.findUnique).toHaveBeenCalled();
@@ -233,7 +233,7 @@ describe("requireHostedRuntimeActiveAccessForUpdateTx", () => {
     expect(tx.hostedMember.findUnique).not.toHaveBeenCalled();
   });
 
-  it("completes reciprocal cross-owned runtime checks in one global member lock order", async () => {
+  it("completes reciprocal cross-owned runtime checks in owner-cluster order", async () => {
     const awaitPeerAtFirstMemberLock = createBarrier(2);
     const lockManager = createMemberLockManager();
     const first = buildReciprocalRuntimeAccessTx({
@@ -287,8 +287,8 @@ describe("requireHostedRuntimeActiveAccessForUpdateTx", () => {
     ]);
     expect(second.memberLockOrder).toEqual([
       "member_a",
-      "member_b",
       "member_group_a",
+      "member_b",
     ]);
   }, 1_000);
 });

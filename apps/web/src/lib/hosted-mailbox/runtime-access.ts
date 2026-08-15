@@ -50,10 +50,9 @@ export async function requireHostedRuntimeActiveAccessForUpdateTx(
 }
 
 /**
- * Locks every requested runtime and discovered owner in one global member-id order before
- * role-specific access revalidation. A role-partitioned owner-first order can invert when
- * reciprocal requests target group runtimes owned by one another's grantors. One total
- * order avoids that cycle before sorted container-row locking.
+ * Locks owner clusters in owner-id order, with each owner before its requested
+ * runtimes. This composes with account deletion's owner-before-runtime order,
+ * while reciprocal cross-owned requests still share one first owner cluster.
  */
 export async function requireHostedRuntimeMembersActiveAccessForUpdateTx(
   userIds: readonly string[],
@@ -74,17 +73,30 @@ export async function requireHostedRuntimeMembersActiveAccessForUpdateTx(
     );
   }
 
-  const sortedMemberIds = [...new Set([
-    ...sortedUserIds,
-    ...[...ownerMemberIdsByUserId.values()].filter(
-      (memberId): memberId is string => memberId !== null,
-    ),
-  ])].sort();
-  for (const memberId of sortedMemberIds) {
+  const requestedMemberIdsByOwner = new Map<string, Set<string>>();
+  for (const userId of sortedUserIds) {
+    const ownerMemberId = ownerMemberIdsByUserId.get(userId) ?? userId;
+    const requestedMemberIds = requestedMemberIdsByOwner.get(ownerMemberId)
+      ?? new Set<string>();
+    requestedMemberIds.add(userId);
+    requestedMemberIdsByOwner.set(ownerMemberId, requestedMemberIds);
+  }
+
+  for (const ownerMemberId of [...requestedMemberIdsByOwner.keys()].sort()) {
     await lockHostedRuntimeMemberForUpdateTx({
-      memberId,
+      memberId: ownerMemberId,
       prisma: options.prisma,
     });
+    const requestedRuntimeIds = [...(requestedMemberIdsByOwner.get(ownerMemberId)
+      ?? [])]
+      .filter((memberId) => memberId !== ownerMemberId)
+      .sort();
+    for (const memberId of requestedRuntimeIds) {
+      await lockHostedRuntimeMemberForUpdateTx({
+        memberId,
+        prisma: options.prisma,
+      });
+    }
   }
 
   for (const userId of sortedUserIds) {
