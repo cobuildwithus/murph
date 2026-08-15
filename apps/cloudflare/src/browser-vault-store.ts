@@ -8,9 +8,26 @@ import {
   type HostedCipherEnvelope,
 } from "@murphai/runtime-state";
 import {
+  HOSTED_BROWSER_VAULT_REPLICA_METRIC_BUCKET_COUNT,
+  HOSTED_BROWSER_VAULT_REPLICA_METRIC_BUCKET_IDS,
+  HOSTED_BROWSER_VAULT_REPLICA_METRIC_BUCKET_SET_REF_SCHEMA,
   HOSTED_BROWSER_VAULT_REPLICA_REF_SCHEMA,
+  HOSTED_BROWSER_VAULT_REPLICA_SHARD_KINDS,
+  HOSTED_BROWSER_VAULT_REPLICA_SHARD_SET_REF_SCHEMA,
+  type HostedBrowserVaultReplicaMetricBucketId,
+  type HostedBrowserVaultReplicaMetricBucketRef,
   type HostedBrowserVaultReplicaRef,
+  type HostedBrowserVaultReplicaShardKind,
+  type HostedBrowserVaultReplicaShardRef,
 } from "@murphai/hosted-execution/contracts";
+import {
+  BROWSER_VAULT_CORE_SHARD_SCHEMA,
+  BROWSER_VAULT_LABS_SHARD_SCHEMA,
+  BROWSER_VAULT_METRIC_BUCKET_SHARD_SCHEMA,
+  BROWSER_VAULT_METRICS_SHARD_SCHEMA,
+  parseBrowserVaultReplica,
+  splitBrowserVaultReplica,
+} from "@murphai/query/browser-replica";
 
 import { writeEncryptedR2Payload, type EncryptedR2BucketLike } from "./crypto.js";
 import {
@@ -19,6 +36,7 @@ import {
 } from "./storage-paths.js";
 import {
   encodeHostedBrowserVaultReplicaJson,
+  encodeHostedBrowserVaultReplicaShardJson,
 } from "./browser-vault-limits.ts";
 
 const utf8Decoder = new TextDecoder();
@@ -29,6 +47,7 @@ type HostedBrowserVaultReplicaBucketLike = EncryptedR2BucketLike & {
 
 export const HOSTED_BROWSER_VAULT_REPLICA_ORPHAN_CANDIDATE_SCHEMA =
   "murph.hosted-browser-vault-replica-orphan-candidate.v1";
+export const HOSTED_BROWSER_VAULT_REPLICA_WRITE_CONCURRENCY = 4;
 
 export interface HostedBrowserVaultReplicaOrphanCandidate {
   createdAt: string;
@@ -49,10 +68,46 @@ export interface BrowserVaultReplicaAadFields {
   userId: string;
 }
 
+export interface BrowserVaultReplicaShardAadFields extends BrowserVaultReplicaAadFields {
+  byteLength: number;
+  contentEncoding: HostedBrowserVaultReplicaShardRef["contentEncoding"];
+  encodedByteLength: number;
+  generatedAt: string;
+  generation?: number;
+  shard: HostedBrowserVaultReplicaShardKind;
+  shardSetRefSchema: typeof HOSTED_BROWSER_VAULT_REPLICA_SHARD_SET_REF_SCHEMA;
+  shardSchema:
+    | typeof BROWSER_VAULT_CORE_SHARD_SCHEMA
+    | typeof BROWSER_VAULT_METRICS_SHARD_SCHEMA
+    | typeof BROWSER_VAULT_LABS_SHARD_SCHEMA;
+}
+
+export interface BrowserVaultReplicaMetricBucketAadFields
+  extends BrowserVaultReplicaAadFields {
+  byteLength: number;
+  contentEncoding: HostedBrowserVaultReplicaMetricBucketRef["contentEncoding"];
+  encodedByteLength: number;
+  generatedAt: string;
+  generation?: number;
+  metricBucketCount: typeof HOSTED_BROWSER_VAULT_REPLICA_METRIC_BUCKET_COUNT;
+  metricBucketId: HostedBrowserVaultReplicaMetricBucketId;
+  metricBucketSchema: typeof BROWSER_VAULT_METRIC_BUCKET_SHARD_SCHEMA;
+  metricBucketSetRefSchema:
+    typeof HOSTED_BROWSER_VAULT_REPLICA_METRIC_BUCKET_SET_REF_SCHEMA;
+}
+
 export interface HostedBrowserVaultReplicaStore {
   deleteBrowserVaultReplica(ref: HostedBrowserVaultReplicaRef | null): Promise<void>;
   deriveBrowserVaultReplicaKey(ref: HostedBrowserVaultReplicaRef): Promise<Uint8Array>;
   readBrowserVaultReplicaEnvelope(ref: HostedBrowserVaultReplicaRef): Promise<HostedCipherEnvelope | null>;
+  readBrowserVaultReplicaShardEnvelope(
+    ref: HostedBrowserVaultReplicaRef,
+    shard: HostedBrowserVaultReplicaShardKind,
+  ): Promise<HostedCipherEnvelope | null>;
+  readBrowserVaultReplicaMetricBucketEnvelope(
+    ref: HostedBrowserVaultReplicaRef,
+    bucketId: HostedBrowserVaultReplicaMetricBucketId,
+  ): Promise<HostedCipherEnvelope | null>;
   writeBrowserVaultReplica(input: {
     beforeWrite?(ref: HostedBrowserVaultReplicaRef): Promise<void>;
     replica: unknown;
@@ -102,6 +157,92 @@ export function createBrowserVaultReplicaAadFields(input: {
   };
 }
 
+export function createBrowserVaultReplicaShardAadFields(input: {
+  ref: HostedBrowserVaultReplicaRef;
+  shard: HostedBrowserVaultReplicaShardKind;
+  userId: string;
+}): BrowserVaultReplicaShardAadFields {
+  const shardSet = input.ref.shards;
+  const shardRef = shardSet?.[input.shard];
+  if (!shardSet || !shardRef) {
+    throw new TypeError(`Hosted browser vault replica ref is missing shards.${input.shard}.`);
+  }
+  const base = createBrowserVaultReplicaAadFields({
+    ref: input.ref,
+    userId: input.userId,
+  });
+  return {
+    ...base,
+    byteLength: shardRef.byteLength,
+    contentEncoding: shardRef.contentEncoding,
+    encodedByteLength: shardRef.encodedByteLength,
+    generatedAt: input.ref.generatedAt,
+    ...(input.ref.generation === undefined ? {} : { generation: input.ref.generation }),
+    objectKey: shardRef.objectKey,
+    shard: input.shard,
+    shardSetRefSchema: shardSet.schema,
+    shardSchema: browserVaultReplicaShardSchema(input.shard),
+  };
+}
+
+export function createBrowserVaultReplicaMetricBucketAadFields(input: {
+  bucketId: HostedBrowserVaultReplicaMetricBucketId;
+  ref: HostedBrowserVaultReplicaRef;
+  userId: string;
+}): BrowserVaultReplicaMetricBucketAadFields {
+  const bucketSet = input.ref.metricBuckets;
+  const bucketRef = bucketSet?.buckets[input.bucketId];
+  if (!bucketSet || !bucketRef) {
+    throw new TypeError(
+      `Hosted browser vault replica ref is missing metricBuckets.buckets.${input.bucketId}.`,
+    );
+  }
+  const base = createBrowserVaultReplicaAadFields({
+    ref: input.ref,
+    userId: input.userId,
+  });
+  return {
+    ...base,
+    byteLength: bucketRef.byteLength,
+    contentEncoding: bucketRef.contentEncoding,
+    encodedByteLength: bucketRef.encodedByteLength,
+    generatedAt: input.ref.generatedAt,
+    ...(input.ref.generation === undefined ? {} : { generation: input.ref.generation }),
+    metricBucketCount: bucketSet.bucketCount,
+    metricBucketId: input.bucketId,
+    metricBucketSchema: BROWSER_VAULT_METRIC_BUCKET_SHARD_SCHEMA,
+    metricBucketSetRefSchema: bucketSet.schema,
+    objectKey: bucketRef.objectKey,
+  };
+}
+
+export function listHostedBrowserVaultReplicaObjectKeys(
+  ref: HostedBrowserVaultReplicaRef,
+): string[] {
+  return [...new Set([
+    ref.objectKey,
+    ...HOSTED_BROWSER_VAULT_REPLICA_SHARD_KINDS.flatMap((shard) => {
+      const objectKey = ref.shards?.[shard]?.objectKey;
+      return objectKey ? [objectKey] : [];
+    }),
+    ...HOSTED_BROWSER_VAULT_REPLICA_METRIC_BUCKET_IDS.flatMap((bucketId) => {
+      const objectKey = ref.metricBuckets?.buckets[bucketId]?.objectKey;
+      return objectKey ? [objectKey] : [];
+    }),
+  ])];
+}
+
+export function listHostedBrowserVaultReplicaSiblingObjectKeys(
+  objectKey: string,
+): string[] {
+  return [
+    ...HOSTED_BROWSER_VAULT_REPLICA_SHARD_KINDS.map((shard) =>
+      browserVaultReplicaShardObjectKey(objectKey, shard)),
+    ...HOSTED_BROWSER_VAULT_REPLICA_METRIC_BUCKET_IDS.map((bucketId) =>
+      browserVaultReplicaMetricBucketObjectKey(objectKey, bucketId)),
+  ];
+}
+
 export function createHostedBrowserVaultReplicaStore(input: {
   bucket: HostedBrowserVaultReplicaBucketLike;
   rootKey: Uint8Array;
@@ -118,7 +259,17 @@ export function createHostedBrowserVaultReplicaStore(input: {
 
       await assertHostedBrowserVaultReplicaOwnedByUser(input, ref);
 
-      await input.bucket.delete(ref.objectKey);
+      let firstError: unknown;
+      for (const objectKey of listHostedBrowserVaultReplicaObjectKeys(ref)) {
+        try {
+          await input.bucket.delete(objectKey);
+        } catch (error) {
+          firstError ??= error;
+        }
+      }
+      if (firstError !== undefined) {
+        throw firstError;
+      }
     },
 
     async deriveBrowserVaultReplicaKey(ref) {
@@ -141,25 +292,125 @@ export function createHostedBrowserVaultReplicaStore(input: {
       );
     },
 
+    async readBrowserVaultReplicaShardEnvelope(ref, shard) {
+      await assertHostedBrowserVaultReplicaOwnedByUser(input, ref);
+      const shardRef = ref.shards?.[shard];
+      if (!shardRef) {
+        return null;
+      }
+      const object = await input.bucket.get(shardRef.objectKey);
+      if (!object) {
+        return null;
+      }
+      const envelopeValue: unknown = JSON.parse(utf8Decoder.decode(await object.arrayBuffer()));
+      return parseHostedCipherEnvelope(
+        envelopeValue,
+        `Hosted browser vault ${shard} shard envelope`,
+      );
+    },
+
+    async readBrowserVaultReplicaMetricBucketEnvelope(ref, bucketId) {
+      await assertHostedBrowserVaultReplicaOwnedByUser(input, ref);
+      const bucketRef = ref.metricBuckets?.buckets[bucketId];
+      if (!bucketRef) {
+        return null;
+      }
+      const object = await input.bucket.get(bucketRef.objectKey);
+      if (!object) {
+        return null;
+      }
+      const envelopeValue: unknown = JSON.parse(utf8Decoder.decode(await object.arrayBuffer()));
+      return parseHostedCipherEnvelope(
+        envelopeValue,
+        `Hosted browser vault metric bucket ${bucketId} envelope`,
+      );
+    },
+
     async writeBrowserVaultReplica({ beforeWrite, replica, userId }) {
       const parsed = parseBrowserVaultReplicaStorageInput(replica);
 
       const encodedReplica = encodeHostedBrowserVaultReplicaJson({ replica });
+      const parsedReplica = parseBrowserVaultReplica(replica);
+      const shardSet = await splitBrowserVaultReplica(parsedReplica);
       const objectKey = await hostedBrowserVaultReplicaObjectKey({
         dataVersion: parsed.source.dataVersion,
         generatedAt: parsed.generatedAt,
         userId,
       });
+      const encodedShards = new Map<HostedBrowserVaultReplicaShardKind, {
+        bytes: Uint8Array;
+        ref: HostedBrowserVaultReplicaShardRef;
+      }>();
+      for (const shard of HOSTED_BROWSER_VAULT_REPLICA_SHARD_KINDS) {
+        const encoded = await encodeHostedBrowserVaultReplicaShardJson({
+          shard: shard === "core"
+            ? shardSet.core
+            : shard === "labs"
+            ? shardSet.labs
+            : shardSet.metrics,
+        });
+        encodedShards.set(shard, {
+          bytes: encoded.bytes,
+          ref: {
+            byteLength: encoded.byteLength,
+            contentEncoding: encoded.contentEncoding,
+            encodedByteLength: encoded.encodedByteLength,
+            objectKey: browserVaultReplicaShardObjectKey(objectKey, shard),
+          },
+        });
+      }
+      const encodedMetricBuckets = new Map<HostedBrowserVaultReplicaMetricBucketId, {
+        bytes: Uint8Array;
+        ref: HostedBrowserVaultReplicaMetricBucketRef;
+      }>();
+      for (const bucketId of HOSTED_BROWSER_VAULT_REPLICA_METRIC_BUCKET_IDS) {
+        const encoded = await encodeHostedBrowserVaultReplicaShardJson({
+          shard: shardSet.metricBuckets[bucketId],
+        });
+        encodedMetricBuckets.set(bucketId, {
+          bytes: encoded.bytes,
+          ref: {
+            byteLength: encoded.byteLength,
+            contentEncoding: encoded.contentEncoding,
+            encodedByteLength: encoded.encodedByteLength,
+            objectKey: browserVaultReplicaMetricBucketObjectKey(objectKey, bucketId),
+          },
+        });
+      }
+      const shards: NonNullable<HostedBrowserVaultReplicaRef["shards"]> = {
+        core: requireEncodedBrowserVaultReplicaShard(encodedShards, "core").ref,
+        labs: requireEncodedBrowserVaultReplicaShard(encodedShards, "labs").ref,
+        metricsIndex: requireEncodedBrowserVaultReplicaShard(
+          encodedShards,
+          "metricsIndex",
+        ).ref,
+        schema: HOSTED_BROWSER_VAULT_REPLICA_SHARD_SET_REF_SCHEMA,
+      };
+      const metricBuckets: NonNullable<HostedBrowserVaultReplicaRef["metricBuckets"]> = {
+        bucketCount: HOSTED_BROWSER_VAULT_REPLICA_METRIC_BUCKET_COUNT,
+        buckets: Object.fromEntries(
+          HOSTED_BROWSER_VAULT_REPLICA_METRIC_BUCKET_IDS.map((bucketId) => [
+            bucketId,
+            requireEncodedBrowserVaultReplicaMetricBucket(
+              encodedMetricBuckets,
+              bucketId,
+            ).ref,
+          ]),
+        ) as NonNullable<HostedBrowserVaultReplicaRef["metricBuckets"]>["buckets"],
+        schema: HOSTED_BROWSER_VAULT_REPLICA_METRIC_BUCKET_SET_REF_SCHEMA,
+      };
       const ref: HostedBrowserVaultReplicaRef = {
         byteLength: encodedReplica.byteLength,
         dataVersion: parsed.source.dataVersion,
         generatedAt: parsed.generatedAt,
         ...(parsed.generation === undefined ? {} : { generation: parsed.generation }),
         keyId: createBrowserVaultReplicaKeyId(parsed.source.dataVersion),
+        metricBuckets,
         objectKey,
         replicaSchema: BROWSER_VAULT_REPLICA_SCHEMA,
         runtimeRootKeyId: requireBrowserVaultReplicaRootKeyId(input.rootKeyId),
         schema: HOSTED_BROWSER_VAULT_REPLICA_REF_SCHEMA,
+        shards,
         sourceBundleHash: parsed.source.sourceBundleHash,
       };
       const { dataKey, envelope: dataKeyEnvelope } =
@@ -183,7 +434,11 @@ export function createHostedBrowserVaultReplicaStore(input: {
 
       await beforeWrite?.(persistedRef);
 
-      await writeEncryptedR2Payload({
+      const writes: Array<{
+        aad: Uint8Array;
+        key: string;
+        plaintext: Uint8Array;
+      }> = [{
         aad: buildRuntimeHostedStorageAad({
           dataKeyId: aadFields.dataKeyId,
           dataKeyRootKeyId: aadFields.dataKeyRootKeyId,
@@ -195,13 +450,112 @@ export function createHostedBrowserVaultReplicaStore(input: {
           sourceBundleHash: aadFields.sourceBundleHash,
           userId: aadFields.userId,
         }),
-        bucket: input.bucket,
-        cryptoKey: dataKey,
         key: objectKey,
-        keyId: dataKeyEnvelope.dataKeyId,
         plaintext: encodedReplica.bytes,
-        scope: "browser-vault-replica",
-      });
+      }];
+
+      for (const shard of HOSTED_BROWSER_VAULT_REPLICA_SHARD_KINDS) {
+        const encoded = encodedShards.get(shard);
+        if (!encoded || !persistedRef.shards?.[shard]) {
+          continue;
+        }
+        const shardAad = createBrowserVaultReplicaShardAadFields({
+          ref: persistedRef,
+          shard,
+          userId,
+        });
+        writes.push({
+          aad: buildRuntimeHostedStorageAad({
+            byteLength: shardAad.byteLength,
+            contentEncoding: shardAad.contentEncoding,
+            dataKeyId: shardAad.dataKeyId,
+            dataKeyRootKeyId: shardAad.dataKeyRootKeyId,
+            dataVersion: shardAad.dataVersion,
+            encodedByteLength: shardAad.encodedByteLength,
+            generatedAt: shardAad.generatedAt,
+            generation: shardAad.generation,
+            objectKey: shardAad.objectKey,
+            purpose: shardAad.purpose,
+            runtimeRootKeyId: shardAad.runtimeRootKeyId,
+            schema: shardAad.schema,
+            shard: shardAad.shard,
+            shardSchema: shardAad.shardSchema,
+            shardSetRefSchema: shardAad.shardSetRefSchema,
+            sourceBundleHash: shardAad.sourceBundleHash,
+            userId: shardAad.userId,
+          }),
+          key: encoded.ref.objectKey,
+          plaintext: encoded.bytes,
+        });
+      }
+
+      for (const bucketId of HOSTED_BROWSER_VAULT_REPLICA_METRIC_BUCKET_IDS) {
+        const encoded = requireEncodedBrowserVaultReplicaMetricBucket(
+          encodedMetricBuckets,
+          bucketId,
+        );
+        const bucketAad = createBrowserVaultReplicaMetricBucketAadFields({
+          bucketId,
+          ref: persistedRef,
+          userId,
+        });
+        writes.push({
+          aad: buildRuntimeHostedStorageAad({
+            byteLength: bucketAad.byteLength,
+            contentEncoding: bucketAad.contentEncoding,
+            dataKeyId: bucketAad.dataKeyId,
+            dataKeyRootKeyId: bucketAad.dataKeyRootKeyId,
+            dataVersion: bucketAad.dataVersion,
+            encodedByteLength: bucketAad.encodedByteLength,
+            generatedAt: bucketAad.generatedAt,
+            generation: bucketAad.generation,
+            metricBucketCount: bucketAad.metricBucketCount,
+            metricBucketId: bucketAad.metricBucketId,
+            metricBucketSchema: bucketAad.metricBucketSchema,
+            metricBucketSetRefSchema: bucketAad.metricBucketSetRefSchema,
+            objectKey: bucketAad.objectKey,
+            purpose: bucketAad.purpose,
+            runtimeRootKeyId: bucketAad.runtimeRootKeyId,
+            schema: bucketAad.schema,
+            sourceBundleHash: bucketAad.sourceBundleHash,
+            userId: bucketAad.userId,
+          }),
+          key: encoded.ref.objectKey,
+          plaintext: encoded.bytes,
+        });
+      }
+
+      let nextWriteIndex = 0;
+      let firstWriteError: unknown;
+      const workerCount = Math.min(
+        HOSTED_BROWSER_VAULT_REPLICA_WRITE_CONCURRENCY,
+        writes.length,
+      );
+      await Promise.all(Array.from({ length: workerCount }, async () => {
+        while (nextWriteIndex < writes.length) {
+          const write = writes[nextWriteIndex];
+          nextWriteIndex += 1;
+          if (!write) {
+            continue;
+          }
+          try {
+            await writeEncryptedR2Payload({
+              aad: write.aad,
+              bucket: input.bucket,
+              cryptoKey: dataKey,
+              key: write.key,
+              keyId: dataKeyEnvelope.dataKeyId,
+              plaintext: write.plaintext,
+              scope: "browser-vault-replica",
+            });
+          } catch (error) {
+            firstWriteError ??= error;
+          }
+        }
+      }));
+      if (firstWriteError !== undefined) {
+        throw firstWriteError;
+      }
 
       return persistedRef;
     },
@@ -239,9 +593,76 @@ async function assertHostedBrowserVaultReplicaOwnedByUser(
   const expectedPrefix = await hostedBrowserVaultReplicaUserPrefix({
     userId: input.userId,
   });
-  if (!ref.objectKey.startsWith(expectedPrefix)) {
+  if (listHostedBrowserVaultReplicaObjectKeys(ref).some(
+    (objectKey) => !objectKey.startsWith(expectedPrefix),
+  )) {
     throw new HostedBrowserVaultReplicaOwnershipError();
   }
+}
+
+function browserVaultReplicaShardObjectKey(
+  objectKey: string,
+  shard: HostedBrowserVaultReplicaShardKind,
+): string {
+  if (!objectKey.endsWith(".json")) {
+    throw new TypeError("Hosted browser vault replica object key must end in .json.");
+  }
+  const suffix = shard === "metricsIndex" ? "metrics-index" : shard;
+  return `${objectKey.slice(0, -".json".length)}.${suffix}.json`;
+}
+
+function browserVaultReplicaMetricBucketObjectKey(
+  objectKey: string,
+  bucketId: HostedBrowserVaultReplicaMetricBucketId,
+): string {
+  if (!objectKey.endsWith(".json")) {
+    throw new TypeError("Hosted browser vault replica object key must end in .json.");
+  }
+  return `${objectKey.slice(0, -".json".length)}.metric-bucket-${bucketId}.json`;
+}
+
+function browserVaultReplicaShardSchema(
+  shard: HostedBrowserVaultReplicaShardKind,
+): BrowserVaultReplicaShardAadFields["shardSchema"] {
+  if (shard === "core") return BROWSER_VAULT_CORE_SHARD_SCHEMA;
+  if (shard === "metricsIndex") return BROWSER_VAULT_METRICS_SHARD_SCHEMA;
+  return BROWSER_VAULT_LABS_SHARD_SCHEMA;
+}
+
+function requireEncodedBrowserVaultReplicaShard(
+  encodedShards: ReadonlyMap<HostedBrowserVaultReplicaShardKind, {
+    bytes: Uint8Array;
+    ref: HostedBrowserVaultReplicaShardRef;
+  }>,
+  shard: HostedBrowserVaultReplicaShardKind,
+): {
+  bytes: Uint8Array;
+  ref: HostedBrowserVaultReplicaShardRef;
+} {
+  const encoded = encodedShards.get(shard);
+  if (!encoded) {
+    throw new TypeError(`Hosted browser vault replica ${shard} shard encoding is missing.`);
+  }
+  return encoded;
+}
+
+function requireEncodedBrowserVaultReplicaMetricBucket(
+  encodedBuckets: ReadonlyMap<HostedBrowserVaultReplicaMetricBucketId, {
+    bytes: Uint8Array;
+    ref: HostedBrowserVaultReplicaMetricBucketRef;
+  }>,
+  bucketId: HostedBrowserVaultReplicaMetricBucketId,
+): {
+  bytes: Uint8Array;
+  ref: HostedBrowserVaultReplicaMetricBucketRef;
+} {
+  const encoded = encodedBuckets.get(bucketId);
+  if (!encoded) {
+    throw new TypeError(
+      `Hosted browser vault replica metric bucket ${bucketId} encoding is missing.`,
+    );
+  }
+  return encoded;
 }
 
 async function resolveBrowserVaultReplicaRootKey(

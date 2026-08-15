@@ -392,7 +392,7 @@ test("ConnectPage renders source search, source names, and logo marks", async ()
     {
       assetPath: "/brand-logos/connect/cronometer.png",
       description:
-        "Nutrition logs, calories, macros, micronutrients, and meal timing from Cronometer.",
+        "Cronometer meal logs with calories, macros, timing, and supported nutrient fields. Daily targets and dashboard percentages stay in Cronometer.",
       name: "Cronometer",
     },
     {
@@ -3476,7 +3476,7 @@ test("ConnectSourcesGrid redeems an initial device connect intent through the ap
   await rendered.cleanup();
 });
 
-test("ConnectSourcesGrid explains Vital before redeeming an initial device connect intent", async () => {
+test("ConnectSourcesGrid explains Vital before redeeming a WHOOP device connect intent", async () => {
   const claim = "dc_12345678901234567890123456789012";
   let resolveAuthorizationResponse:
     | ((response: Response) => void)
@@ -3499,23 +3499,23 @@ test("ConnectSourcesGrid explains Vital before redeeming an initial device conne
     createElement(ConnectSourcesGrid, {
       sources: [
         {
-          connectTarget: "fitbit",
-          description: "Sleep, activity, heart rate, and daily readiness.",
-          id: "fitbit",
+          connectTarget: "whoop_v2",
+          description: "Recovery, strain, sleep, and heart rate.",
+          id: "whoop",
           logo: {
             className: "size-11 object-contain",
             height: 44,
-            src: "/brand-logos/connect/fitbit.svg",
+            src: "/brand-logos/connect/whoop.svg",
             width: 44,
           },
-          name: "Fitbit",
+          name: "Whoop",
         },
       ],
     }),
     {
       location: {
-        hash: `#deviceConnectIntent=${claim}&connectSource=fitbit&connectProvider=junction`,
-        href: `https://join.example.test/connect#deviceConnectIntent=${claim}&connectSource=fitbit&connectProvider=junction`,
+        hash: `#deviceConnectIntent=${claim}&connectSource=whoop&connectProvider=junction`,
+        href: `https://join.example.test/connect#deviceConnectIntent=${claim}&connectSource=whoop&connectProvider=junction`,
       },
     },
   );
@@ -3523,7 +3523,7 @@ test("ConnectSourcesGrid explains Vital before redeeming an initial device conne
   await vi.waitFor(() => {
     assert.match(
       rendered.container.textContent ?? "",
-      /Connect Fitbit to Murph/u,
+      /Connect Whoop to Murph/u,
     );
   });
   assert.equal(fetch.mock.calls.length, 0);
@@ -3531,7 +3531,7 @@ test("ConnectSourcesGrid explains Vital before redeeming an initial device conne
 
   const continueButton = [
     ...rendered.container.querySelectorAll("button"),
-  ].find((button) => button.textContent === "Continue to Fitbit");
+  ].find((button) => button.textContent === "Continue to Whoop");
   assert.ok(continueButton instanceof rendered.window.HTMLButtonElement);
   await act(async () => {
     continueButton.dispatchEvent(
@@ -3541,7 +3541,7 @@ test("ConnectSourcesGrid explains Vital before redeeming an initial device conne
 
   await vi.waitFor(() => {
     assert.equal(fetch.mock.calls.length, 1);
-    assert.match(rendered.container.textContent ?? "", /Connecting Fitbit/u);
+    assert.match(rendered.container.textContent ?? "", /Connecting Whoop/u);
   });
   assert.equal(rendered.assign.mock.calls.length, 0);
   assert.equal(fetch.mock.calls[0]?.[0], `/device/connect/${claim}`);
@@ -3560,14 +3560,14 @@ test("ConnectSourcesGrid explains Vital before redeeming an initial device conne
   await act(async () => {
     resolveAuthorizationResponse?.(
       Response.json({
-        authorizationUrl: "https://junction.example.test/link/fitbit",
+        authorizationUrl: "https://junction.example.test/link/whoop",
       }),
     );
   });
   await vi.waitFor(() => {
     assert.equal(
       rendered.assign.mock.calls[0]?.[0],
-      "https://junction.example.test/link/fitbit",
+      "https://junction.example.test/link/whoop",
     );
   });
   assert.equal(fetch.mock.calls.length, 1);
@@ -4937,7 +4937,7 @@ test("ConnectSourcesGrid walks connection-reset sources through account disconne
   await rendered.cleanup();
 });
 
-test("ConnectSourcesGrid explains an unfinished historical reset when disconnect returns a warning", async () => {
+test("ConnectSourcesGrid keeps an unfinished historical-reset disconnect open for retry", async () => {
   const fetch = vi.fn(
     async (_input: RequestInfo | URL, _init?: RequestInit) => {
       void _input;
@@ -5005,7 +5005,7 @@ test("ConnectSourcesGrid explains an unfinished historical reset when disconnect
   await vi.waitFor(() => {
     assert.match(
       rendered.container.textContent ?? "",
-      /Disconnected this connection\. Your history is still saved\. The historical reset did not finish\. Remove the old connection in your wearable provider account before reconnecting here\./,
+      /Disconnect not finished\. Remove the old connection in your wearable provider account, then retry Disconnect here\./,
     );
   });
   assert.equal(
@@ -5017,16 +5017,16 @@ test("ConnectSourcesGrid explains an unfinished historical reset when disconnect
     /did not fully confirm/u,
   );
 
-  const connectButton = rendered.container.querySelector(
-    "button[aria-label='Connect Garmin']",
+  assert.match(rendered.container.textContent ?? "", /Disconnect account\?/);
+  assert.equal(
+    rendered.container.querySelector("button[aria-label='Connect Garmin']"),
+    null,
   );
-  assert.ok(connectButton instanceof rendered.window.HTMLButtonElement);
-  assert.equal(connectButton.textContent, "Connect");
 
   await rendered.cleanup();
 });
 
-test("ConnectSourcesGrid explains an unfinished historical reset when a healthy sibling card starts the disconnect", async () => {
+test("ConnectSourcesGrid keeps a shared historical-reset disconnect open for retry", async () => {
   const fetch = vi.fn(
     async (_input: RequestInfo | URL, _init?: RequestInit) => {
       void _input;
@@ -5115,7 +5115,7 @@ test("ConnectSourcesGrid explains an unfinished historical reset when a healthy 
   await vi.waitFor(() => {
     assert.match(
       rendered.container.textContent ?? "",
-      /Disconnected this connection\. Your history is still saved\. The historical reset did not finish\. Remove the old connection in your wearable provider account before reconnecting here\./,
+      /Disconnect not finished\. Remove the old connection in your wearable provider account, then retry Disconnect here\./,
     );
   });
   assert.equal(
@@ -5130,7 +5130,7 @@ test("ConnectSourcesGrid explains an unfinished historical reset when a healthy 
   await rendered.cleanup();
 });
 
-test("ConnectSourcesGrid keeps ordinary disconnect warnings generic", async () => {
+test("ConnectSourcesGrid keeps ordinary failed revokes on the disconnect path", async () => {
   const fetch = vi.fn(
     async (_input: RequestInfo | URL, _init?: RequestInit) => {
       void _input;
@@ -5194,7 +5194,7 @@ test("ConnectSourcesGrid keeps ordinary disconnect warnings generic", async () =
   await vi.waitFor(() => {
     assert.match(
       rendered.container.textContent ?? "",
-      /Disconnected Whoop\. Your history is still saved\. The provider did not fully confirm, so check that account if you want access removed there too\./,
+      /Disconnect not finished\. Remove Murph access in the provider account, then retry Disconnect here\./,
     );
   });
   assert.equal(
@@ -5204,6 +5204,11 @@ test("ConnectSourcesGrid keeps ordinary disconnect warnings generic", async () =
   assert.doesNotMatch(
     rendered.container.textContent ?? "",
     /historical reset/iu,
+  );
+  assert.match(rendered.container.textContent ?? "", /Disconnect Whoop\?/);
+  assert.equal(
+    rendered.container.querySelector("button[aria-label='Connect Whoop']"),
+    null,
   );
 
   await rendered.cleanup();

@@ -123,6 +123,10 @@ import {
   isHostedUsageCreditStripeRetryableError,
   reconcileHostedUsageCreditStripeEvent as reconcileHostedUsageCreditStripeEventImpl,
 } from "@/src/lib/hosted-onboarding/usage-credit-stripe-reconciliation";
+import {
+  isRetryableHostedUsageCreditDependencyError,
+  runHostedUsageCreditKmsOperation,
+} from "@/src/lib/hosted-onboarding/usage-credit-stripe-reconciliation-context";
 
 const BOUNDED_STRIPE_READ_OPTIONS = {
   maxNetworkRetries: 0,
@@ -239,6 +243,63 @@ describe("hosted usage-credit Stripe reconciliation", () => {
     );
     expect(HOSTED_USAGE_CREDIT_STRIPE_PREPARATION_BUDGET.timeoutMs)
       .toBe(5 * 60_000);
+  });
+
+  it("keeps transient official KMS provider failures retryable at reconciliation", async () => {
+    const kmsError = Object.assign(new Error("KMS unavailable"), {
+      code: "HOSTED_GCP_KMS_PROVIDER_ERROR",
+      providerReason: "UNAVAILABLE",
+      retryable: false,
+      status: null,
+    });
+
+    expect(isRetryableHostedUsageCreditDependencyError(kmsError)).toBe(true);
+    const error = await runHostedUsageCreditKmsOperation({
+      run: async () => {
+        throw kmsError;
+      },
+    }).catch((caught: unknown) => caught);
+    expect(isHostedUsageCreditStripeRetryableError(error)).toBe(true);
+    expect(error).toEqual(expect.objectContaining({
+      cause: kmsError,
+      code: "HOSTED_USAGE_CREDIT_STRIPE_RECONCILIATION_RETRYABLE",
+    }));
+  });
+
+  it("does not retry definitive official KMS provider failures", async () => {
+    const kmsError = Object.assign(new Error("KMS permission denied"), {
+      code: "HOSTED_GCP_KMS_PROVIDER_ERROR",
+      providerReason: "PERMISSION_DENIED",
+      retryable: false,
+      status: null,
+    });
+
+    expect(isRetryableHostedUsageCreditDependencyError(kmsError)).toBe(false);
+    const error = await runHostedUsageCreditKmsOperation({
+      run: async () => {
+        throw kmsError;
+      },
+    }).catch((caught: unknown) => caught);
+    expect(error).toBe(kmsError);
+  });
+
+  it("retains legacy and HTTP KMS retry classification compatibility", () => {
+    expect(isRetryableHostedUsageCreditDependencyError({
+      code: "GOOGLE_CLOUD_API_ERROR",
+      status: 503,
+    })).toBe(true);
+    expect(isRetryableHostedUsageCreditDependencyError({
+      code: "HOSTED_GCP_KMS_PROVIDER_ERROR",
+      providerReason: "PERMISSION_DENIED",
+      retryable: false,
+      status: 429,
+    })).toBe(true);
+    expect(isRetryableHostedUsageCreditDependencyError({
+      code: "HOSTED_GCP_KMS_PROVIDER_ERROR",
+      providerReason: "INVALID_ARGUMENT",
+      retryable: false,
+      status: 400,
+    })).toBe(false);
   });
 
   it("times out read-only preparation before entering the member transaction", async () => {

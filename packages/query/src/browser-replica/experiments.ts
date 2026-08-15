@@ -39,9 +39,10 @@ import {
   type MetricWindowSummary,
 } from "../metrics/index.ts";
 import type {
+  BrowserVaultCoreCapableQueryClient,
   BrowserVaultEntity,
   BrowserVaultMetricRow,
-  BrowserVaultQueryClient,
+  BrowserVaultMetricSeriesCapableQueryClient as BrowserVaultMetricsCapableQueryClient,
   BrowserVaultSummaryConfidence,
 } from "./shared.ts";
 import { browserMetricRowToSeriesPoint } from "./metric-points.ts";
@@ -369,7 +370,7 @@ const ACTIVE_EXPERIMENT_RUN_STATUSES = new Set([
 ]);
 
 export function selectBrowserVaultExperimentResults(
-  client: BrowserVaultQueryClient,
+  client: BrowserVaultMetricsCapableQueryClient,
   lookup: BrowserVaultExperimentResultsLookup,
   options: BrowserVaultExperimentResultsOptions = {},
 ): BrowserVaultExperimentResultsView | null {
@@ -420,8 +421,49 @@ export function selectBrowserVaultExperimentResults(
   };
 }
 
+/**
+ * Resolve the metric series needed by one exact experiment result. Undefined
+ * means the encrypted metrics index that owns saved outcomes is not loaded yet;
+ * null means no matching experiment exists.
+ */
+export function selectBrowserVaultExperimentMetricKeys(
+  client: BrowserVaultCoreCapableQueryClient,
+  lookup: BrowserVaultExperimentResultsLookup,
+): string[] | null | undefined {
+  const entity = findBrowserVaultExperimentRun(client, lookup);
+  if (!entity) return null;
+  if (!hasBrowserVaultExperimentOutcomes(client)) return undefined;
+
+  const referencedOutcome = findReferencedExperimentOutcome(client, entity);
+  const persistedOutcome = shouldUseReferencedExperimentOutcome(
+    entity,
+    referencedOutcome,
+  )
+    ? referencedOutcome
+    : null;
+  return persistedOutcome
+    ? resolveBrowserVaultPersistedOutcomeMetricKeys(persistedOutcome)
+    : resolveBrowserVaultExperimentEntityMetricKeys(entity);
+}
+
+function hasBrowserVaultExperimentOutcomes(
+  client: BrowserVaultCoreCapableQueryClient,
+): client is BrowserVaultMetricsCapableQueryClient {
+  return "experimentOutcomes" in client.replica;
+}
+
+export function resolveBrowserVaultExperimentEntityMetricKeys(
+  entity: BrowserVaultEntity,
+): string[] {
+  return uniqueStrings(collectBiomarkerKeys(entity.attributes).flatMap((biomarkerKey) => {
+    const outcome = resolveBrowserMetricOutcome(entity.attributes, biomarkerKey);
+    const sourceMetric = resolveBiomarkerMetricSource(biomarkerKey, outcome.metricKey);
+    return sourceMetric ? [sourceMetric.metricKey] : [];
+  })).sort();
+}
+
 function findBrowserVaultExperimentRun(
-  client: BrowserVaultQueryClient,
+  client: BrowserVaultCoreCapableQueryClient,
   lookup: BrowserVaultExperimentResultsLookup,
 ): BrowserVaultEntity | null {
   const candidates = client.replica.entities.filter((entity) => entity.family === "experiment");
@@ -484,7 +526,7 @@ function isActiveExperimentRunStatus(status: string | null | undefined): boolean
 }
 
 function buildRunContext(
-  client: BrowserVaultQueryClient,
+  client: BrowserVaultMetricsCapableQueryClient,
   entity: BrowserVaultEntity,
   asOf: string,
   referencedOutcome: ExperimentOutcome | null,
@@ -494,9 +536,14 @@ function buildRunContext(
   const sourceStatus = readString(attributes.status) ?? entity.status;
   const liveWindows = readRunWindows(attributes);
   const endedOn = readIsoDate(attributes.endedOn);
+  const persistedOutcome = shouldUseReferencedExperimentOutcome(
+    entity,
+    referencedOutcome,
+  )
+    ? referencedOutcome
+    : null;
   const plannedEnd = (referencedOutcome?.windows ?? liveWindows).interventionEnd;
   const endedEarly = endedOn !== null && plannedEnd !== null && endedOn < plannedEnd;
-  const persistedOutcome = endedEarly ? null : referencedOutcome;
   const windows = endedEarly
     ? clampRunWindowsToTerminalDate(liveWindows, endedOn)
     : persistedOutcome?.windows ?? liveWindows;
@@ -659,7 +706,7 @@ function clampRunWindowsToTerminalDate(
 }
 
 function findReferencedExperimentOutcome(
-  client: BrowserVaultQueryClient,
+  client: BrowserVaultMetricsCapableQueryClient,
   entity: BrowserVaultEntity,
 ): ExperimentOutcome | null {
   const parsedRef = experimentOutcomeRefSchema.safeParse(
@@ -679,6 +726,26 @@ function findReferencedExperimentOutcome(
     outcome.experiment.id === experimentId &&
     outcome.experiment.slug === experimentSlug
   ) ?? null;
+}
+
+function shouldUseReferencedExperimentOutcome(
+  entity: BrowserVaultEntity,
+  outcome: ExperimentOutcome | null,
+): outcome is ExperimentOutcome {
+  if (!outcome) return false;
+  const endedOn = readIsoDate(entity.attributes.endedOn);
+  const plannedEnd = outcome.windows.interventionEnd;
+  return endedOn === null || plannedEnd === null || endedOn >= plannedEnd;
+}
+
+function resolveBrowserVaultPersistedOutcomeMetricKeys(
+  outcome: ExperimentOutcome,
+): string[] {
+  return uniqueStrings(outcome.metricResults.flatMap((metric) => {
+    if (metric.points !== undefined) return [];
+    const sourceMetric = resolveBiomarkerMetricSource(metric.biomarkerKey);
+    return sourceMetric ? [sourceMetric.metricKey] : [];
+  })).sort();
 }
 
 function resolveSavedOutcomeStatus(
@@ -721,7 +788,7 @@ function buildPersistedOutcomeResult(
 }
 
 function buildPersistedOutcomeBiomarkers(
-  client: BrowserVaultQueryClient,
+  client: BrowserVaultMetricsCapableQueryClient,
   outcome: ExperimentOutcome,
 ): BrowserVaultExperimentBiomarkerResult[] {
   const metricWindow = buildMetricWindowContext(outcome.windows, outcome.asOf);
@@ -851,7 +918,7 @@ function isBrowserSupportedAdherenceTarget(target: ExperimentAdherenceTarget): b
 }
 
 function selectExperimentEvents(
-  client: BrowserVaultQueryClient,
+  client: BrowserVaultMetricsCapableQueryClient,
   experiment: BrowserVaultEntity,
   run: BrowserVaultExperimentResultRun,
   evidenceThrough: string,
@@ -890,7 +957,7 @@ function selectExperimentEvents(
 }
 
 function selectAdherenceEvidenceEvents(input: {
-  client: BrowserVaultQueryClient;
+  client: BrowserVaultMetricsCapableQueryClient;
   evidenceThrough: string;
   eventTimeZone: string | null;
   linkedEvents: readonly BrowserVaultEntity[];
@@ -967,7 +1034,7 @@ function buildMetricWindowContext(
 }
 
 function buildBiomarkerResults(
-  client: BrowserVaultQueryClient,
+  client: BrowserVaultMetricsCapableQueryClient,
   context: BrowserVaultExperimentRunContext,
   metricWindow: MetricWindowContext,
 ): BrowserVaultExperimentBiomarkerResult[] {
@@ -987,7 +1054,7 @@ function buildBiomarkerResults(
 }
 
 function buildBiomarkerResult(
-  client: BrowserVaultQueryClient,
+  client: BrowserVaultMetricsCapableQueryClient,
   context: BrowserVaultExperimentRunContext,
   metricWindow: MetricWindowContext,
   biomarkerKey: string,
@@ -1118,7 +1185,7 @@ interface BrowserMeasurementAnchor {
 
 function buildAnchoredBiomarkerResult(input: {
   biomarkerKey: string;
-  client: BrowserVaultQueryClient;
+  client: BrowserVaultMetricsCapableQueryClient;
   context: BrowserVaultExperimentRunContext;
   expectedEffect: BrowserVaultExperimentExpectedEffect;
   label: string;
@@ -1268,7 +1335,7 @@ function buildAnchoredBiomarkerResult(input: {
 }
 
 function collectMetricRows(
-  client: BrowserVaultQueryClient,
+  client: BrowserVaultMetricsCapableQueryClient,
   sourceMetric: BrowserVaultExperimentMetricSource,
   metricWindow: MetricWindowContext,
 ): BrowserVaultMetricRowWithValue[] {
@@ -1281,7 +1348,7 @@ function collectMetricRows(
 }
 
 function collectAnchoredMetricRows(
-  client: BrowserVaultQueryClient,
+  client: BrowserVaultMetricsCapableQueryClient,
   sourceMetric: BrowserVaultExperimentMetricSource,
   anchors: readonly BrowserMeasurementAnchor[],
   evidenceThrough: string,

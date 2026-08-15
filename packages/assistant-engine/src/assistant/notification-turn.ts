@@ -15,10 +15,7 @@ import type {
 import type { AutomationScheduleKind } from '@murphai/contracts'
 import { createDefaultLocalAssistantModelTarget } from '@murphai/operator-config/assistant-backend'
 import { resolveAssistantOperatorDefaults } from '@murphai/operator-config/operator-config'
-import {
-  renderAssistantResponseCardText,
-  type AssistantResponseCard,
-} from '@murphai/operator-config/assistant-response-cards'
+import type { AssistantResponseCard } from '@murphai/operator-config/assistant-response-cards'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
   shouldSkipAutomationOccurrenceForAvailability,
@@ -32,6 +29,7 @@ import { resolveAssistantSessionForMessage } from './session-resolution.js'
 import { resolveAssistantSessionTarget } from './session-resolution.js'
 import { resolveAssistantTurnSharedPlan } from './turn-plan.js'
 import { resolveAssistantConversationScope } from './conversation-policy.js'
+import { prepareAssistantCronNotificationInput } from './cron/output-history.js'
 import {
   executeCodexTurnWithRecovery,
   type AssistantCodexTurnThreadScopeProfile,
@@ -178,6 +176,16 @@ export type AssistantNotificationDecision = z.infer<
   typeof assistantNotificationDecisionSchema
 >
 
+type AssistantNotificationSendDecision = Extract<
+  AssistantNotificationDecision,
+  { kind: 'send_message' }
+>
+
+interface AssistantNotificationPresentation {
+  responseText: string
+  transcriptText: string
+}
+
 export type AssistantNotificationTurnPolicy =
   | {
       kind: 'maintenance-exact-skip'
@@ -302,7 +310,7 @@ export async function sendAssistantNotificationLocal(
     abortSignal: input.abortSignal,
     vault: input.vault,
     run: async () => {
-      const messageInput = buildAssistantNotificationMessageInput(
+      const resolutionMessageInput = buildAssistantNotificationMessageInput(
         input,
         maintenanceEvidence,
       )
@@ -315,13 +323,22 @@ export async function sendAssistantNotificationLocal(
           ? createAssistantMaintenanceNotificationResolvedSession({
               boundaryDefaultTarget,
               defaults,
-              message: messageInput,
+              message: resolutionMessageInput,
             })
           : await resolveAssistantSessionForMessage({
               boundaryDefaultTarget,
               defaults,
-              message: messageInput,
+              message: resolutionMessageInput,
             })
+      const preparedInput = await prepareAssistantCronNotificationInput(input, {
+        sessionId: resolved.session.sessionId,
+      })
+      const messageInput = preparedInput === input
+        ? resolutionMessageInput
+        : buildAssistantNotificationMessageInput(
+            preparedInput,
+            maintenanceEvidence,
+          )
       await emitHostedAssistantContextSessionResolvedTrace({
         message: messageInput,
         resolved,
@@ -599,6 +616,14 @@ export async function sendAssistantNotificationLocal(
           assistantNotificationProviderNonReplayableWork:
             nonReplayableProviderWork,
         }
+        const providerAuthoredResponse =
+          providerResult.providerAuthoredResponse ?? providerResult.response
+        const runtimeOwnsFinalPresentation =
+          providerResult.responseCard !== null &&
+            providerResult.responseCard !== undefined ||
+          providerResult.providerAuthoredResponse !== null &&
+            providerResult.providerAuthoredResponse !== undefined &&
+            providerResult.response !== providerResult.providerAuthoredResponse
         let decision: AssistantNotificationDecision
         try {
           decision = providerResult.finalAction?.kind === 'none' && groupEmailSendResult
@@ -607,12 +632,12 @@ export async function sendAssistantNotificationLocal(
                 privateSummary: 'Group email effect completed.',
               }
             : parseAssistantNotificationDecision(
-                providerResult.providerAuthoredResponse ?? providerResult.response,
+                providerAuthoredResponse,
               )
-          if (providerResult.responseCard && decision.kind !== 'send_message') {
+          if (runtimeOwnsFinalPresentation && decision.kind !== 'send_message') {
             throw new VaultCliError(
               'ASSISTANT_NOTIFICATION_INVALID_RESPONSE',
-              'A notification response card requires a send_message decision.',
+              'A runtime-owned notification presentation requires a send_message decision.',
             )
           }
         } catch (error) {
@@ -677,9 +702,13 @@ export async function sendAssistantNotificationLocal(
             providerValidationErrorDetails,
           )
         }
-        const responseText = providerResult.responseCard
-          ? renderAssistantResponseCardText(providerResult.responseCard)
-          : normalizeRequiredText(decision.text, 'notification response')
+        const { responseText, transcriptText } =
+          resolveAssistantNotificationPresentation({
+            decision,
+            providerAuthoredResponse,
+            providerResult,
+            runtimeOwnsFinalPresentation,
+          })
         throwIfAssistantNotificationAborted(messageInput.abortSignal)
         await runAssistantNotificationBeforeDelivery(input, {
           decision: {
@@ -708,7 +737,7 @@ export async function sendAssistantNotificationLocal(
         if (input.deferCommitUntilDeliveryAccepted !== true) {
           await createNotificationReceipt(providerResult.session)
           const savedSession = await persistAssistantTurnAndSession({
-            assistantTranscriptText: responseText,
+            assistantTranscriptText: transcriptText,
             input: messageInput,
             plan: sharedPlan,
             persistUserPromptToTranscript: false,
@@ -817,7 +846,7 @@ export async function sendAssistantNotificationLocal(
             }
             await createNotificationReceipt(deliveryOutcome.session)
             const savedSession = await persistAssistantTurnAndSession({
-              assistantTranscriptText: responseText,
+              assistantTranscriptText: transcriptText,
               input: messageInput,
               plan: sharedPlan,
               persistUserPromptToTranscript: false,
@@ -890,6 +919,62 @@ export async function sendAssistantNotificationLocal(
       }
     },
   })
+}
+
+function resolveAssistantNotificationPresentation(input: {
+  decision: AssistantNotificationSendDecision
+  providerAuthoredResponse: string
+  providerResult: {
+    response: string
+    responseCard?: AssistantResponseCard | null
+    transcriptResponse?: string | null
+  }
+  runtimeOwnsFinalPresentation: boolean
+}): AssistantNotificationPresentation {
+  if (!input.runtimeOwnsFinalPresentation) {
+    const responseText = normalizeRequiredText(
+      input.decision.text,
+      'notification response',
+    )
+    return { responseText, transcriptText: responseText }
+  }
+
+  const authoredResponse = input.providerAuthoredResponse
+  const runtimeResponse = input.providerResult.response
+  const hasAppendOnlyRuntimePresentation =
+    (input.providerResult.responseCard === null ||
+      input.providerResult.responseCard === undefined) &&
+    authoredResponse.length > 0 &&
+    runtimeResponse !== authoredResponse &&
+    runtimeResponse.startsWith(authoredResponse)
+  if (hasAppendOnlyRuntimePresentation) {
+    const responseText = normalizeRequiredText(
+      `${input.decision.text}${runtimeResponse.slice(authoredResponse.length)}`,
+      'runtime-extended notification response',
+    )
+    const runtimeTranscript = input.providerResult.transcriptResponse
+    const transcriptText =
+      typeof runtimeTranscript === 'string' &&
+        runtimeTranscript.startsWith(authoredResponse)
+        ? normalizeRequiredText(
+            `${input.decision.text}${runtimeTranscript.slice(authoredResponse.length)}`,
+            'runtime-extended notification transcript',
+          )
+        : responseText
+    return { responseText, transcriptText }
+  }
+
+  const responseText = normalizeRequiredText(
+    runtimeResponse,
+    'runtime-owned notification response',
+  )
+  return {
+    responseText,
+    transcriptText: normalizeRequiredText(
+      input.providerResult.transcriptResponse ?? responseText,
+      'runtime-owned notification transcript',
+    ),
+  }
 }
 
 async function sendAssistantExactTextNotificationLocal(input: {

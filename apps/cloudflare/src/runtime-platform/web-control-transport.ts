@@ -9,6 +9,7 @@ import {
   HOSTED_RUNTIME_ATTEMPT_ID_HEADER,
   HOSTED_RUNTIME_LEASE_GENERATION_HEADER,
   HOSTED_RUNTIME_WORKSPACE_VERSION_HEADER,
+  HOSTED_WEB_CONTROL_FORWARDED_RESPONSE_HEADER,
 } from "../runner-outbound/headers.ts";
 import { fetchHostedExecutionWebControlPlaneResponse } from "../web-control-plane.ts";
 import type { HostedWebCallbackSigningEnvironment } from "../web-callback-auth.ts";
@@ -60,6 +61,7 @@ interface HostedWebControlPlaneJsonRequest {
   headers?: Headers;
   method?: "GET" | "POST";
   path: string;
+  preserveInitialFailureOnReplayFailure?: boolean;
   replayOnceOnRetryableFailure?: boolean;
   sensitiveResponseBody?: {
     maxBytes: number;
@@ -84,6 +86,7 @@ export class HostedWebControlPlaneResponseError extends Error {
   readonly retryable: boolean | undefined;
   readonly status: number;
   readonly statusCode: number;
+  readonly forwardedFromWeb: boolean;
 
   constructor(input: {
     code?: string | undefined;
@@ -92,6 +95,7 @@ export class HostedWebControlPlaneResponseError extends Error {
     requestId?: string | undefined;
     retryable?: boolean | undefined;
     status: number;
+    forwardedFromWeb: boolean;
   }) {
     super(formatHostedWebControlPlaneResponseErrorMessage(input));
     this.name = "HostedWebControlPlaneResponseError";
@@ -101,6 +105,7 @@ export class HostedWebControlPlaneResponseError extends Error {
     this.retryable = input.retryable;
     this.status = input.status;
     this.statusCode = input.status;
+    this.forwardedFromWeb = input.forwardedFromWeb;
     this.context = {
       ...(input.requestId ? { requestId: input.requestId } : {}),
       ...(typeof input.retryable === "boolean" ? { retryable: input.retryable } : {}),
@@ -199,6 +204,7 @@ export async function fetchHostedWebControlPlaneJson(
   }
 
   const deadlineMs = Date.now() + input.timeoutMs;
+  let initialFailure: unknown;
   try {
     return await fetchHostedWebControlPlaneJsonAttempt({
       ...input,
@@ -212,12 +218,23 @@ export async function fetchHostedWebControlPlaneJson(
     ) {
       throw error;
     }
+    initialFailure = error;
   }
 
-  return await fetchHostedWebControlPlaneJsonAttempt({
-    ...input,
-    timeoutMs: Math.max(0, deadlineMs - Date.now()),
-  });
+  try {
+    return await fetchHostedWebControlPlaneJsonAttempt({
+      ...input,
+      timeoutMs: Math.max(0, deadlineMs - Date.now()),
+    });
+  } catch (error) {
+    if (input.signal?.aborted) {
+      throw input.signal.reason ?? error;
+    }
+    if (input.preserveInitialFailureOnReplayFailure === true) {
+      throw initialFailure;
+    }
+    throw error;
+  }
 }
 
 async function fetchHostedWebControlPlaneJsonAttempt(
@@ -377,6 +394,8 @@ async function fetchHostedWebControlPlaneJsonAttempt(
       description: input.description,
       detail: input.sensitiveResponseBody ? "" : text.trim(),
       diagnosticCode: readHostedAssistantAskDiagnosticCode(response.headers),
+      forwardedFromWeb:
+        response.headers.get(HOSTED_WEB_CONTROL_FORWARDED_RESPONSE_HEADER) === "1",
       requestId: readHostedAssistantAskRequestId(response.headers),
       status: response.status,
     });
@@ -511,6 +530,7 @@ function createHostedWebControlPlaneResponseError(input: {
   description: string;
   detail: string;
   diagnosticCode?: string | undefined;
+  forwardedFromWeb: boolean;
   requestId?: string | undefined;
   status: number;
 }): HostedWebControlPlaneResponseError {
@@ -519,6 +539,7 @@ function createHostedWebControlPlaneResponseError(input: {
     return new HostedWebControlPlaneResponseError({
       code: input.diagnosticCode ?? structured.code,
       description: input.description,
+      forwardedFromWeb: input.forwardedFromWeb,
       message: structured.message,
       requestId: input.requestId,
       retryable: structured.retryable,
@@ -529,6 +550,7 @@ function createHostedWebControlPlaneResponseError(input: {
   return new HostedWebControlPlaneResponseError({
     code: input.diagnosticCode,
     description: input.description,
+    forwardedFromWeb: input.forwardedFromWeb,
     message: input.detail,
     requestId: input.requestId,
     status: input.status,

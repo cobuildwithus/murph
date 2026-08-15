@@ -45,7 +45,11 @@ import {
   reconcileHostedStripeEventById,
   recordHostedStripeEvent,
 } from "@/src/lib/hosted-onboarding/stripe-event-reconciliation";
-import { runHostedAccountDeletionCleanup } from "@/src/lib/hosted-privacy/account-deletion-cleanup";
+import {
+  persistHostedAccountDeletionCleanupTx,
+  prepareHostedAccountDeletionCleanup,
+  runHostedAccountDeletionCleanup,
+} from "@/src/lib/hosted-privacy/account-deletion-cleanup";
 import { deleteHostedAccountData } from "@/src/lib/hosted-privacy/account-data-service";
 import { createPrismaClient } from "@/src/lib/prisma";
 
@@ -266,60 +270,45 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", async () => {
   };
 });
 
-vi.mock("@murphai/runtime-state", async () => {
-  const actual = await vi.importActual<typeof import("@murphai/runtime-state")>(
-    "@murphai/runtime-state",
-  );
+vi.mock("@/src/lib/hosted-crypto/env", async () => {
+  const { generateKeyPairSync } = await import("node:crypto");
+  const { createHostedAuthorityVerifyKeyring } = await vi.importActual<
+    typeof import("@murphai/runtime-state")
+  >("@murphai/runtime-state");
+  const { createHostedGcpKmsClientFromEnv } = await vi.importActual<
+    typeof import("@/src/lib/hosted-crypto/gcp-kms")
+  >("@/src/lib/hosted-crypto/gcp-kms");
+  const authoritySignKeyVersionName =
+    "projects/example/locations/global/keyRings/hosted/cryptoKeys/authority/cryptoKeyVersions/1";
+  const authorityKey = generateKeyPairSync("ec", {
+    namedCurve: "prime256v1",
+    privateKeyEncoding: { format: "jwk" },
+    publicKeyEncoding: { format: "pem", type: "spki" },
+  });
+  const gcpKms = createHostedGcpKmsClientFromEnv({
+    HOSTED_CRYPTO_ENV: "test",
+    HOSTED_CRYPTO_GCP_KMS_API_ROOT: "local://murph-hosted-kms",
+    HOSTED_CRYPTO_LOCAL_AUTHORITY_SIGN_PRIVATE_JWK:
+      JSON.stringify(authorityKey.privateKey),
+    HOSTED_CRYPTO_LOCAL_KMS_WRAP_KEY: Buffer.alloc(32, 7).toString("base64"),
+    NODE_ENV: "test",
+  });
+
   return {
-    ...actual,
-    verifyHostedDomainRootEnvelopeSignatureWithPublicKey: vi.fn(async () => true),
+    getHostedWebCryptoConfig: () => ({
+      authoritySignKeyVersionName,
+      authoritySignPublicKeyPem: authorityKey.publicKey,
+      authorityVerifyKeyring: createHostedAuthorityVerifyKeyring({
+        activeKeyVersionName: authoritySignKeyVersionName,
+        activePublicKeyPem: authorityKey.publicKey,
+      }),
+      env: "test",
+      gcpKms,
+      webWrapKmsKeyName:
+        "projects/example/locations/global/keyRings/hosted/cryptoKeys/delete-race",
+    }),
   };
 });
-
-vi.mock("@/src/lib/hosted-crypto/env", () => ({
-  getHostedWebCryptoConfig: () => ({
-    authoritySignKeyVersionName:
-      "projects/test/locations/global/keyRings/test/cryptoKeys/sign/cryptoKeyVersions/1",
-    authoritySignPublicKeyPem:
-      "test-authority-public-key",
-    authorityVerifyKeyring: {
-      "projects/test/locations/global/keyRings/test/cryptoKeys/sign/cryptoKeyVersions/1": {
-        keyVersionName:
-          "projects/test/locations/global/keyRings/test/cryptoKeys/sign/cryptoKeyVersions/1",
-        publicKeyPem:
-          "test-authority-public-key",
-        status: "active",
-      },
-    },
-    env: "test",
-    gcpKms: {
-      asymmetricSign: async ({
-        keyVersionName,
-      }: {
-        keyVersionName: string;
-        message: Uint8Array;
-      }) => ({
-        keyVersionName,
-        signature: Buffer.from("test-signature").toString("base64"),
-      }),
-      decrypt: async ({ ciphertext }: { ciphertext: string }) => ({
-        plaintext: new Uint8Array(Buffer.from(ciphertext, "base64")),
-      }),
-      encrypt: async ({
-        keyName,
-        plaintext,
-      }: {
-        keyName: string;
-        plaintext: Uint8Array;
-      }) => ({
-        ciphertext: Buffer.from(plaintext).toString("base64"),
-        keyName,
-      }),
-    },
-    webWrapKmsKeyName:
-      "projects/test/locations/global/keyRings/test/cryptoKeys/delete-race",
-  }),
-}));
 
 const databaseUrl = process.env.DATABASE_URL?.trim() ?? "";
 const runPostgresConcurrencyProof =
@@ -1389,7 +1378,6 @@ describe.skipIf(!runPostgresConcurrencyProof)(
       const authenticationClient = createPrismaClient({ databaseUrl, poolMax: 1 });
       const fixtureId = randomUUID();
       const oldMemberId = `hbm_privy_delete_${fixtureId}`;
-      const cleanupId = `hbadc_privy_delete_${fixtureId}`;
       const privyUserId = `did:privy:delete-race-${fixtureId}`;
       const privyUserLookupKey = createHostedPrivyUserLookupKey(privyUserId);
       const authenticationReachedReceiptRead = createDeferred();
@@ -1400,6 +1388,16 @@ describe.skipIf(!runPostgresConcurrencyProof)(
       if (!privyUserLookupKey) {
         throw new Error("Expected a Privy user lookup key for the concurrency fixture.");
       }
+
+      const preparedCleanup = await prepareHostedAccountDeletionCleanup({
+        now: cleanupStartedAt,
+        privyUserId,
+        runtimeMemberIds: [oldMemberId],
+        stripeCustomerIds: [],
+      });
+      preparedCleanup.cloudflareCompletedAt = cleanupStartedAt;
+      preparedCleanup.stripeCompletedAt = cleanupStartedAt;
+      const cleanupId = preparedCleanup.id;
 
       privyProvider.exists = true;
       privyProvider.deleteUser.mockClear();
@@ -1414,23 +1412,9 @@ describe.skipIf(!runPostgresConcurrencyProof)(
         },
       });
       await deletionClient.$transaction(async (tx) => {
-        await tx.hostedAccountDeletionCleanup.create({
-          data: {
-            cloudflareCompletedAt: cleanupStartedAt,
-            environment: "test",
-            id: cleanupId,
-            kmsKeyName:
-              "projects/test/locations/global/keyRings/test/cryptoKeys/delete-race",
-            nextAttemptAt: cleanupStartedAt,
-            payloadCiphertext: encodeCleanupPayload({
-              privyUserId,
-              runtimeMemberIds: [oldMemberId],
-              schema: "murph.hosted-account-deletion-cleanup.v1",
-              stripeCustomerIds: [],
-            }),
-            privyUserLookupKey,
-            stripeCompletedAt: cleanupStartedAt,
-          },
+        await persistHostedAccountDeletionCleanupTx({
+          cleanup: preparedCleanup,
+          prisma: tx,
         });
         await tx.hostedMember.delete({
           where: { id: oldMemberId },
@@ -2528,15 +2512,6 @@ async function applyOrdinaryBillingProgress(input: {
       member: input.member,
       tx,
     }), { timeout: transactionTimeoutMs });
-}
-
-function encodeCleanupPayload(value: {
-  privyUserId: string;
-  runtimeMemberIds: string[];
-  schema: "murph.hosted-account-deletion-cleanup.v1";
-  stripeCustomerIds: string[];
-}): string {
-  return Buffer.from(JSON.stringify(value), "utf8").toString("base64");
 }
 
 function makeActiveStripeSubscription(input: {

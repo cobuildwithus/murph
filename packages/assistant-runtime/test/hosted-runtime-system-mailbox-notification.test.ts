@@ -61,6 +61,7 @@ import {
   writeHostedMailboxImportState,
 } from "../src/hosted-runtime/mailbox-state.ts";
 import {
+  deferHostedSystemMailboxItemAfterVaultShareProjectionFailure,
   enqueueHostedSystemMailboxItem,
   prepareHostedSystemMailboxItemForCheckpoint,
   readHostedSystemMailboxCheckpointRollbackState,
@@ -2174,6 +2175,7 @@ describe("hosted system mailbox notification execution context", () => {
       const failed = await recordHostedSystemMailboxItemAfterCheckpoint({
         item: prepared.item,
         runtime,
+        vaultShareProjectionResult: { outcome: "error" },
         vaultRoot: workspace.vaultRoot,
       });
       expect(failed).toEqual(expect.objectContaining({
@@ -2203,13 +2205,14 @@ describe("hosted system mailbox notification execution context", () => {
       await expect(recordHostedSystemMailboxItemAfterCheckpoint({
         item: retry.item,
         runtime,
+        vaultShareProjectionResult: { outcome: "delivered" },
         vaultRoot: workspace.vaultRoot,
       })).resolves.toEqual({
         failed: 0,
         nextWakeAt: null,
         recorded: 1,
       });
-      expect(deliver).toHaveBeenCalledTimes(2);
+      expect(deliver).not.toHaveBeenCalled();
       expect(await readHostedSystemMailboxState(workspace.vaultRoot)).toEqual({ pending: [] });
       expect(resolveHostedSystemMailboxHandledThroughSeq({
         importedSeq: "1",
@@ -2295,6 +2298,7 @@ describe("hosted system mailbox notification execution context", () => {
       const failed = await recordHostedSystemMailboxItemAfterCheckpoint({
         item: projection.item,
         runtime,
+        vaultShareProjectionResult: { outcome: "deferred" },
         vaultRoot: workspace.vaultRoot,
       });
       expect(failed).toMatchObject({
@@ -2390,6 +2394,7 @@ describe("hosted system mailbox notification execution context", () => {
       const deferred = await recordHostedSystemMailboxItemAfterCheckpoint({
         item: prepared.item,
         runtime,
+        vaultShareProjectionResult: { outcome: "deferred" },
         vaultRoot: workspace.vaultRoot,
       });
       const deferredState = await readHostedSystemMailboxState(workspace.vaultRoot);
@@ -2413,13 +2418,14 @@ describe("hosted system mailbox notification execution context", () => {
       await expect(recordHostedSystemMailboxItemAfterCheckpoint({
         item: retry.item,
         runtime,
+        vaultShareProjectionResult: { outcome: "no-active-share" },
         vaultRoot: workspace.vaultRoot,
       })).resolves.toEqual({
         failed: 0,
         nextWakeAt: null,
         recorded: 0,
       });
-      expect(listActiveProjectionScopes).toHaveBeenCalledTimes(2);
+      expect(listActiveProjectionScopes).not.toHaveBeenCalled();
       expect(await readHostedSystemMailboxState(workspace.vaultRoot)).toEqual({ pending: [] });
       expect(resolveHostedSystemMailboxHandledThroughSeq({
         importedSeq: "1",
@@ -2488,6 +2494,7 @@ describe("hosted system mailbox notification execution context", () => {
       const continued = await recordHostedSystemMailboxItemAfterCheckpoint({
         item: prepared.item,
         runtime,
+        vaultShareProjectionResult: { outcome: "continued" },
         vaultRoot: workspace.vaultRoot,
       });
       expect(continued).toMatchObject({
@@ -2497,7 +2504,7 @@ describe("hosted system mailbox notification execution context", () => {
       });
       expect(Date.parse(continued.nextWakeAt ?? "") - recordedAfterMs)
         .toBeLessThanOrEqual(5_000);
-      expect(deliver).toHaveBeenCalledTimes(1);
+      expect(deliver).not.toHaveBeenCalled();
       expect((await readHostedSystemMailboxState(workspace.vaultRoot)).pending).toEqual([
         expect.objectContaining({
           itemId: "mailbox_item_vault_share_projection_bounded",
@@ -3047,6 +3054,306 @@ describe("hosted system mailbox notification execution context", () => {
         }),
       );
     } finally {
+      await workspace.cleanup();
+    }
+  });
+
+  it("retains the exact device-sync wake across its local retry checkpoint", async () => {
+    const workspace = await createHostedRuntimeWorkspace("murph-hosted-system-mailbox-");
+    const retryAt = "2026-04-27T00:00:15.000Z";
+    const wake = buildHostedExecutionDeviceSyncWake({
+      connectionId: "dsc_exact_retry",
+      eventId: "device-sync.wake:exact-retry",
+      expectedConnectedAt: FIXED_NOW,
+      hint: {
+        jobs: [{
+          dedupeKey: "initial-history",
+          kind: "resource",
+          maxAttempts: 5,
+          payload: {
+            windowEnd: FIXED_NOW,
+            windowStart: "2025-10-29T00:00:00.000Z",
+          },
+        }],
+      },
+      occurredAt: FIXED_NOW,
+      provider: "oura",
+      reason: "connected",
+      userId: "member_123",
+    });
+    const runtime = createRuntime({
+      deviceSyncPort: createDeviceSyncPortStub(),
+    });
+    const retainedWake = buildHostedExecutionDeviceSyncWake({
+      ...wake,
+      hint: {
+        jobs: [{
+          availableAt: retryAt,
+          dedupeKey: "initial-history",
+          kind: "resource",
+          maxAttempts: 4,
+          payload: {
+            windowEnd: FIXED_NOW,
+            windowStart: "2025-10-29T00:00:00.000Z",
+          },
+        }],
+      },
+    });
+    mocks.executeHostedMailboxEvent.mockResolvedValueOnce({
+      bootstrapResult: null,
+      conversationMetrics: null,
+      mailboxLane: "device-sync",
+      nextWakeAt: retryAt,
+      postCheckpointRecord: {
+        kind: "device-sync.dirty-processed-batch",
+        records: [],
+        retainMailboxItemUntil: retryAt,
+        retainedWake,
+      },
+      redactedLogEntries: [],
+    });
+
+    try {
+      await enqueueHostedSystemMailboxItem({
+        item: createResolvedDeviceSyncItem({
+          id: "mailbox_item_system_device_sync_exact_retry",
+        }),
+        vaultRoot: workspace.vaultRoot,
+        wake,
+      });
+
+      const prepared = await prepareHostedSystemMailboxItemForCheckpoint({
+        allowedRouteActions: ["run-device-sync-wake"],
+        executionContext: null,
+        now: () => FIXED_NOW,
+        retainProcessedItemUntilRecorded: true,
+        runtime,
+        runtimeEnv: {},
+        vaultRoot: workspace.vaultRoot,
+      });
+      assert.equal(prepared?.status, "processed");
+
+      await expect(recordHostedSystemMailboxItemAfterCheckpoint({
+        item: prepared.item,
+        runtime,
+        vaultRoot: workspace.vaultRoot,
+      })).resolves.toEqual({
+        failed: 0,
+        nextWakeAt: retryAt,
+        nextWakeReason: "device-sync.reconcile",
+        recorded: 0,
+      });
+
+      const retainedState = await readHostedSystemMailboxState(workspace.vaultRoot);
+      expect(retainedState.pending).toEqual([
+        expect.objectContaining({
+          attemptCount: 1,
+          itemId: "mailbox_item_system_device_sync_exact_retry",
+          nextAttemptAt: retryAt,
+          postCheckpointRecord: null,
+          status: "pending",
+          wake: retainedWake,
+        }),
+      ]);
+
+      const retryPrepared = await prepareHostedSystemMailboxItemForCheckpoint({
+        allowedRouteActions: ["run-device-sync-wake"],
+        executionContext: null,
+        now: () => retryAt,
+        retainProcessedItemUntilRecorded: true,
+        runtime,
+        runtimeEnv: {},
+        vaultRoot: workspace.vaultRoot,
+      });
+      assert.equal(retryPrepared?.status, "processed");
+      assert.equal(retryPrepared.item.attemptCount, 2);
+      assert.deepEqual(retryPrepared.item.wake, retainedWake);
+
+      await expect(recordHostedSystemMailboxItemAfterCheckpoint({
+        item: retryPrepared.item,
+        runtime,
+        vaultRoot: workspace.vaultRoot,
+      })).resolves.toEqual({
+        failed: 0,
+        nextWakeAt: null,
+        recorded: 0,
+      });
+      expect((await readHostedSystemMailboxState(workspace.vaultRoot)).pending).toEqual([]);
+    } finally {
+      await workspace.cleanup();
+    }
+  });
+
+  it("lets another connection run around a retained device-sync retry", async () => {
+    const workspace = await createHostedRuntimeWorkspace("murph-hosted-system-mailbox-");
+    const olderWake = buildHostedExecutionDeviceSyncWake({
+      connectionId: "dsc_retrying_connection",
+      eventId: "device-sync.wake:retrying-connection",
+      occurredAt: FIXED_NOW,
+      provider: "oura",
+      reason: "webhook_hint",
+      userId: "member_123",
+    });
+    const otherConnectionWake = buildHostedExecutionDeviceSyncWake({
+      connectionId: "dsc_due_connection",
+      eventId: "device-sync.wake:due-connection",
+      occurredAt: "2026-04-27T00:00:01.000Z",
+      provider: "whoop",
+      reason: "webhook_hint",
+      userId: "member_123",
+    });
+    const newerSameConnectionWake = buildHostedExecutionDeviceSyncWake({
+      connectionId: "dsc_retrying_connection",
+      eventId: "device-sync.wake:newer-same-connection",
+      occurredAt: "2026-04-27T00:00:02.000Z",
+      provider: "oura",
+      reason: "webhook_hint",
+      userId: "member_123",
+    });
+
+    try {
+      await enqueueHostedSystemMailboxItem({
+        item: createResolvedDeviceSyncItem({
+          id: "mailbox_item_system_device_sync_retrying",
+          laneSeq: "1",
+        }),
+        vaultRoot: workspace.vaultRoot,
+        wake: olderWake,
+      });
+      await enqueueHostedSystemMailboxItem({
+        item: createResolvedDeviceSyncItem({
+          id: "mailbox_item_system_device_sync_due",
+          laneSeq: "2",
+        }),
+        vaultRoot: workspace.vaultRoot,
+        wake: otherConnectionWake,
+      });
+      await enqueueHostedSystemMailboxItem({
+        item: createResolvedDeviceSyncItem({
+          id: "mailbox_item_system_device_sync_same_connection",
+          laneSeq: "3",
+        }),
+        vaultRoot: workspace.vaultRoot,
+        wake: newerSameConnectionWake,
+      });
+      mocks.executeHostedMailboxEvent.mockRejectedValueOnce(
+        Object.assign(new Error("transient device sync failure"), {
+          code: "HOSTED_DEVICE_SYNC_TRANSIENT",
+        }),
+      );
+
+      const failed = await prepareHostedSystemMailboxItemForCheckpoint({
+        allowedRouteActions: ["run-device-sync-wake"],
+        executionContext: null,
+        now: () => FIXED_NOW,
+        runtime: createRuntime({}),
+        runtimeEnv: {},
+        vaultRoot: workspace.vaultRoot,
+      });
+      assert.equal(failed?.status, "retryable_failed");
+      assert.equal(failed.itemId, "mailbox_item_system_device_sync_retrying");
+
+      const otherConnection = await prepareHostedSystemMailboxItemForCheckpoint({
+        allowedRouteActions: ["run-device-sync-wake"],
+        executionContext: null,
+        now: () => FIXED_NOW,
+        runtime: createRuntime({}),
+        runtimeEnv: {},
+        vaultRoot: workspace.vaultRoot,
+      });
+      assert.equal(otherConnection?.status, "processed");
+      assert.equal(otherConnection.itemId, "mailbox_item_system_device_sync_due");
+
+      const sameConnectionBlocked = await prepareHostedSystemMailboxItemForCheckpoint({
+        allowedRouteActions: ["run-device-sync-wake"],
+        executionContext: null,
+        now: () => FIXED_NOW,
+        runtime: createRuntime({}),
+        runtimeEnv: {},
+        vaultRoot: workspace.vaultRoot,
+      });
+      assert.equal(sameConnectionBlocked, null);
+
+      const retried = await prepareHostedSystemMailboxItemForCheckpoint({
+        allowedRouteActions: ["run-device-sync-wake"],
+        executionContext: null,
+        now: () => "2026-04-27T00:01:00.000Z",
+        runtime: createRuntime({}),
+        runtimeEnv: {},
+        vaultRoot: workspace.vaultRoot,
+      });
+      assert.equal(retried?.status, "processed");
+      assert.equal(retried.itemId, "mailbox_item_system_device_sync_retrying");
+
+      const sameConnection = await prepareHostedSystemMailboxItemForCheckpoint({
+        allowedRouteActions: ["run-device-sync-wake"],
+        executionContext: null,
+        now: () => "2026-04-27T00:01:00.000Z",
+        runtime: createRuntime({}),
+        runtimeEnv: {},
+        vaultRoot: workspace.vaultRoot,
+      });
+      assert.equal(sameConnection?.status, "processed");
+      assert.equal(sameConnection.itemId, "mailbox_item_system_device_sync_same_connection");
+      expect(mocks.executeHostedMailboxEvent.mock.calls.map((call) =>
+        call[0]?.wake?.eventId
+      )).toEqual([
+        "device-sync.wake:retrying-connection",
+        "device-sync.wake:due-connection",
+        "device-sync.wake:retrying-connection",
+        "device-sync.wake:newer-same-connection",
+      ]);
+    } finally {
+      await workspace.cleanup();
+    }
+  });
+
+  it("backs off a recording item when vault-share projection fails", async () => {
+    const workspace = await createHostedRuntimeWorkspace("murph-hosted-system-mailbox-");
+    const wake = buildHostedExecutionDeviceSyncWake({
+      eventId: "device-sync.wake:projection-failure",
+      occurredAt: FIXED_NOW,
+      reason: "webhook_hint",
+      userId: "member_123",
+    });
+    const dateNow = vi.spyOn(Date, "now").mockReturnValue(Date.parse(FIXED_NOW));
+
+    try {
+      await enqueueHostedSystemMailboxItem({
+        item: createResolvedDeviceSyncItem(),
+        vaultRoot: workspace.vaultRoot,
+        wake,
+      });
+      const pending = (await readHostedSystemMailboxState(workspace.vaultRoot)).pending[0];
+      assert.ok(pending);
+
+      await expect(
+        deferHostedSystemMailboxItemAfterVaultShareProjectionFailure({
+          item: {
+            ...pending,
+            postCheckpointRecord: {
+              connectionId: "device_sync_connection_projection_failure",
+              kind: "device-sync.dirty-processed",
+              processedRevision: "7",
+            },
+            status: "recording",
+          },
+          vaultRoot: workspace.vaultRoot,
+        }),
+      ).resolves.toEqual({
+        at: "2026-04-27T00:01:00.000Z",
+        reason: "device-sync.reconcile",
+      });
+
+      await expect(readHostedSystemMailboxState(workspace.vaultRoot)).resolves.toMatchObject({
+        pending: [{
+          lastErrorCode: "HOSTED_VAULT_SHARE_PROJECTION_FAILED",
+          nextAttemptAt: "2026-04-27T00:01:00.000Z",
+          status: "recording",
+        }],
+      });
+    } finally {
+      dateNow.mockRestore();
       await workspace.cleanup();
     }
   });
@@ -4161,6 +4468,31 @@ function createRuntime(
     platformEnv: {},
     resolvedConfig: createHostedRuntimeResolvedConfig(),
     userEnv: {},
+  };
+}
+
+function createDeviceSyncPortStub(): NonNullable<HostedRuntimePlatform["deviceSyncPort"]> {
+  return {
+    async ackDirtyStateProcessed() {
+      throw new Error("ackDirtyStateProcessed should not be called");
+    },
+    async applyUpdates() {
+      throw new Error("applyUpdates should not be called");
+    },
+    async createConnectLink() {
+      throw new Error("createConnectLink should not be called");
+    },
+    async fetchDirtyStates() {
+      return {
+        hasMore: false,
+        items: [],
+        nextWakeAt: null,
+        userId: "member_123",
+      };
+    },
+    async fetchSnapshot() {
+      throw new Error("fetchSnapshot should not be called");
+    },
   };
 }
 

@@ -10,6 +10,8 @@ describe('buildAssistantLinqDeliveryPosturePrompt', () => {
     expect(prompt).toContain('Private delivery context')
     expect(prompt).toContain('one concise, specific message')
     expect(prompt).toContain('Do not demand ritualized replies')
+    expect(prompt).not.toContain('unanswered reminder')
+    expect(prompt).not.toContain('fold')
     expect(prompt).not.toContain('AT_RISK')
   })
 

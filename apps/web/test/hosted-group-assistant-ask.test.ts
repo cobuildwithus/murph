@@ -4,6 +4,7 @@ const mocks = vi.hoisted(() => ({
   appendHostedMailboxEnvelopeWithIdentityTx: vi.fn(),
   readHostedMailboxConversationWakeByAssistantInputId: vi.fn(),
   readHostedMailboxItemById: vi.fn(),
+  readHostedMailboxWakeByDedupeKey: vi.fn(),
   readHostedMailboxWakeByItemId: vi.fn(),
   requireHostedRuntimeActiveAccess: vi.fn(),
   requireHostedRuntimeActiveAccessForUpdateTx: vi.fn(),
@@ -15,6 +16,7 @@ vi.mock("@/src/lib/hosted-mailbox/store", () => ({
   readHostedMailboxConversationWakeByAssistantInputId:
     mocks.readHostedMailboxConversationWakeByAssistantInputId,
   readHostedMailboxItemById: mocks.readHostedMailboxItemById,
+  readHostedMailboxWakeByDedupeKey: mocks.readHostedMailboxWakeByDedupeKey,
   readHostedMailboxWakeByItemId: mocks.readHostedMailboxWakeByItemId,
 }));
 
@@ -446,12 +448,13 @@ describe("Hosted Assistant Ask runtime control", () => {
     });
   });
 
-  it("treats an expired request as terminal before decrypting it", async () => {
+  it("treats an expired non-current-sender request as terminal without membership lookup", async () => {
     const wake = requestWake();
     mocks.readHostedMailboxItemById.mockResolvedValue({
       ...mailboxItemForWake(wake),
       expiresAt: NOW.toISOString(),
     });
+    mocks.readHostedMailboxWakeByDedupeKey.mockResolvedValue(wake);
     const { prisma, tx } = createPrisma();
 
     await expect(handleHostedRuntimeAssistantAskControl({
@@ -467,6 +470,7 @@ describe("Hosted Assistant Ask runtime control", () => {
         terminalReason: "expired",
       },
     });
+    expect(mocks.readHostedMailboxWakeByDedupeKey).toHaveBeenCalledOnce();
     expect(mocks.readHostedMailboxWakeByItemId).not.toHaveBeenCalled();
     expect(tx.hostedGroupMember.findUnique).not.toHaveBeenCalled();
   });

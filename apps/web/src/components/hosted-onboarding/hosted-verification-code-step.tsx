@@ -84,6 +84,8 @@ export function HostedVerificationCodeStep({
           autoFocus={autoFocus}
           autoComplete="one-time-code"
           data-1p-ignore
+          data-bwignore="true"
+          data-form-type="other"
           data-lpignore="true"
           maxLength={CODE_LENGTH}
           ref={codeInputRef}

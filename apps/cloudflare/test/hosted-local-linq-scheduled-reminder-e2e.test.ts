@@ -82,6 +82,9 @@ const scheduledReminderInstructions =
   "Send the user the hosted-local sleep reminder: go to sleep.";
 const scheduledImageReminderInstructions =
   "Send the user the hosted-local sleep reminder with a simple sleep illustration.";
+const scheduledImageReminderTitle = "Sleep image reminder";
+const overlapReminderTitle = "Overlapping sleep reminder";
+const scheduledNutritionCardTitle = "Daily nutrition card reminder";
 const scheduledReminderMinimumRunwayMs = 5_000;
 const scheduledReminderSendWaitMs = 60_000;
 const scheduledReminderCompletionWaitMs = 60_000;
@@ -155,6 +158,7 @@ describe("hosted local Linq scheduled reminder e2e", () => {
         dueAtIso: scheduledReminderTimes.dueAtIso,
         instructions: scheduledImageReminderInstructions,
         text: setupReplyText,
+        title: scheduledImageReminderTitle,
       }),
       { matchInputContains: scheduledImageSetupRequestText },
     );
@@ -300,6 +304,8 @@ describe("hosted local Linq scheduled reminder e2e", () => {
     });
 
     expect(sendRequest.method).toBe("POST");
+    expect(requireObservedRequestTimestamp(sendRequest))
+      .toBeGreaterThanOrEqual(Date.parse(scheduledReminderTimes.dueAtIso));
     expect(requireLinqStub().readObservedMessageText(sendRequest))
       .toBe(scheduledReminderDeliveredText);
     expect(readObservedLinqMessageParts(sendRequest)).toEqual([
@@ -338,6 +344,7 @@ describe("hosted local Linq scheduled reminder e2e", () => {
         dueAtIso: overlapSetupTimes.dueAtIso,
         instructions: scheduledReminderInstructions,
         text: setupReplyText,
+        title: overlapReminderTitle,
       }),
       { matchInputContains: setupRequestText },
     );
@@ -482,6 +489,7 @@ describe("hosted local Linq scheduled reminder e2e", () => {
         dueAtIso: scheduledCardSetupTimes.dueAtIso,
         instructions: scheduledNutritionCardInstructions,
         text: setupReplyText,
+        title: scheduledNutritionCardTitle,
       }),
       { matchInputContains: scheduledNutritionCardSetupRequestText },
     );
@@ -596,20 +604,78 @@ describe("hosted local Linq scheduled reminder timing helpers", () => {
     expect(fullTiming).toEqual({
       idleCheckpointDelayMs: 10_000,
       leadMs: 90_000,
-      setupLeadText: "about ninety seconds",
+      setupLeadText: "about two minutes",
     });
     expect(fastTiming).toEqual({
       idleCheckpointDelayMs: 1,
       leadMs: 90_000,
-      setupLeadText: "about ninety seconds",
+      setupLeadText: "about two minutes",
     });
     expect(resolveScheduledReminderTimes(now, fullTiming.leadMs)).toEqual({
-      dueAtIso: "2026-06-18T12:01:30.000Z",
+      dueAtIso: "2026-06-18T12:02:00.000Z",
     });
     expect(resolveScheduledReminderTimes(now, fastTiming.leadMs)).toEqual({
-      dueAtIso: "2026-06-18T12:01:30.000Z",
+      dueAtIso: "2026-06-18T12:02:00.000Z",
     });
+    const nearMinuteEndNow = new Date("2026-06-18T12:00:50.000Z");
+    const nearMinuteEndTimes = resolveScheduledReminderTimes(
+      nearMinuteEndNow,
+      fullTiming.leadMs,
+    );
+    expect(nearMinuteEndTimes).toEqual({
+      dueAtIso: "2026-06-18T12:03:00.000Z",
+    });
+    expect(Date.parse(nearMinuteEndTimes.dueAtIso) - nearMinuteEndNow.getTime())
+      .toBe(130_000);
+    expect(resolveScheduledReminderLocalAt("2026-06-18T12:02:00.000Z")).toEqual({
+      date: "2026-06-18",
+      time: "12:02",
+      timeZone: "UTC",
+    });
+    expect(() => resolveScheduledReminderLocalAt("2026-06-18T12:02:30.000Z"))
+      .toThrow("Expected a minute-aligned scheduled reminder timestamp");
     expect(scheduledReminderLeadMs).toBeGreaterThan(scheduledReminderMinimumRunwayMs);
+  });
+
+  it("uses distinct create-only automation identities across scenario phases", () => {
+    const dueAtIso = "2026-06-18T12:02:00.000Z";
+    const scriptedSaves = [
+      {
+        instructions: scheduledImageReminderInstructions,
+        title: scheduledImageReminderTitle,
+      },
+      {
+        instructions: scheduledReminderInstructions,
+        title: overlapReminderTitle,
+      },
+      {
+        instructions: scheduledNutritionCardInstructions,
+        title: scheduledNutritionCardTitle,
+      },
+    ].map(({ instructions, title }) => buildHostedAssistantAutomationSaveResponses({
+      dueAtIso,
+      instructions,
+      text: setupReplyText,
+      title,
+    })[0]);
+
+    expect(scriptedSaves).toEqual([
+      expect.objectContaining({
+        customToolCall: expect.objectContaining({
+          input: expect.stringContaining(`"title":"${scheduledImageReminderTitle}"`),
+        }),
+      }),
+      expect.objectContaining({
+        customToolCall: expect.objectContaining({
+          input: expect.stringContaining(`"title":"${overlapReminderTitle}"`),
+        }),
+      }),
+      expect.objectContaining({
+        customToolCall: expect.objectContaining({
+          input: expect.stringContaining(`"title":"${scheduledNutritionCardTitle}"`),
+        }),
+      }),
+    ]);
   });
 });
 
@@ -832,16 +898,20 @@ function buildHostedAssistantAutomationSaveResponses(input: {
   dueAtIso: string;
   instructions: string;
   text: string;
+  title: string;
 }): readonly HostedLocalAssistantProviderScriptedResponse[] {
   return [
     buildAssistantProviderMurphToolCall("automation", {
       action: "save",
       continuityPolicy: "preserve",
       instructions: input.instructions,
-      schedule: { at: input.dueAtIso, kind: "at" },
+      schedule: {
+        kind: "at",
+        localAt: resolveScheduledReminderLocalAt(input.dueAtIso),
+      },
       summary: "One-shot sleep reminder.",
       tags: ["assistant", "scheduled"],
-      title: "Sleep reminder",
+      title: input.title,
     }),
     input.text,
   ];
@@ -1132,9 +1202,32 @@ function resolveScheduledReminderTimes(
 ): {
   dueAtIso: string;
 } {
-  const dueAtMs = now.getTime() + leadMs;
+  const minimumDueAtMs = now.getTime() + leadMs;
+  const dueAtMs = Math.ceil(minimumDueAtMs / 60_000) * 60_000;
   return {
     dueAtIso: new Date(dueAtMs).toISOString(),
+  };
+}
+
+function resolveScheduledReminderLocalAt(dueAtIso: string): {
+  date: string;
+  time: string;
+  timeZone: "UTC";
+} {
+  const dueAt = new Date(dueAtIso);
+  if (
+    Number.isNaN(dueAt.getTime())
+    || dueAt.getUTCSeconds() !== 0
+    || dueAt.getUTCMilliseconds() !== 0
+  ) {
+    throw new Error(`Expected a minute-aligned scheduled reminder timestamp: ${dueAtIso}`);
+  }
+
+  const normalizedDueAtIso = dueAt.toISOString();
+  return {
+    date: normalizedDueAtIso.slice(0, 10),
+    time: normalizedDueAtIso.slice(11, 16),
+    timeZone: "UTC",
   };
 }
 
@@ -1149,7 +1242,7 @@ function resolveScheduledReminderTiming(
     idleCheckpointDelayMs:
       env.MURPH_HOSTED_LOCAL_E2E_FAST_GATE === "1" ? 1 : 10_000,
     leadMs: 90_000,
-    setupLeadText: "about ninety seconds",
+    setupLeadText: "about two minutes",
   };
 }
 

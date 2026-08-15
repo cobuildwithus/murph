@@ -14,4 +14,7 @@ export type {
   BrowserVaultMurphAgeWearableShadowIncrementReadiness,
   BrowserVaultMurphAgeWearableShadowReadiness,
 } from "./browser-replica/murph-age.ts";
-export type { BrowserVaultQueryClient } from "./browser-replica/shared.ts";
+export type {
+  BrowserVaultMetricsCapableQueryClient,
+  BrowserVaultQueryClient,
+} from "./browser-replica/shared.ts";

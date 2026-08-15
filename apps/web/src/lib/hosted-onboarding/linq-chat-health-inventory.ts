@@ -1,6 +1,11 @@
 import type { Prisma, PrismaClient } from "@prisma/client";
+import type { Chat } from "@linqapp/sdk/resources/chats";
 
-import { fetchLinqApi, LinqApiTimeoutError } from "../linq/api";
+import {
+  LinqApiTimeoutError,
+  readLinqApiErrorStatus,
+  runLinqApiRequest,
+} from "../linq/api";
 import { hostedOnboardingError } from "./errors";
 import { upsertHostedLinqLineForPhoneTx } from "./linq-line-store";
 import {
@@ -142,52 +147,46 @@ async function fetchHostedLinqChatHealthPage(input: {
   signal?: AbortSignal;
 }): Promise<{
   nextCursor: string | null;
-  records: unknown[];
+  records: Chat[];
 }> {
   const { apiBaseUrl, apiToken } = requireHostedOnboardingLinqConfig();
-  const query = new URLSearchParams({
-    limit: String(HOSTED_LINQ_CHAT_HEALTH_PAGE_SIZE),
-  });
-  if (input.cursor) {
-    query.set("cursor", input.cursor);
-  }
-
-  let response: Response;
   try {
-    response = await fetchLinqApi({
+    const page = await runLinqApiRequest({
       apiBaseUrl,
       apiToken,
-      method: "GET",
-      path: `chats?${query.toString()}`,
+      request: (client) => client.chats.listChats({
+        ...(input.cursor ? { cursor: input.cursor } : {}),
+        limit: HOSTED_LINQ_CHAT_HEALTH_PAGE_SIZE,
+      }, { signal: input.signal }),
       signal: input.signal,
+      timeoutMessage: "Linq chat-health inventory sync timed out.",
     });
+    return {
+      nextCursor: normalizeNullableString(page.next_cursor),
+      records: page.chats,
+    };
   } catch (error) {
     if (error instanceof LinqApiTimeoutError) {
       throw hostedOnboardingError({
+        cause: error,
         code: "LINQ_CHAT_HEALTH_INVENTORY_FAILED",
         httpStatus: 502,
         message: "Linq chat-health inventory sync timed out.",
         retryable: true,
       });
     }
+    const status = readLinqApiErrorStatus(error);
+    if (status !== null) {
+      throw hostedOnboardingError({
+        cause: error,
+        code: "LINQ_CHAT_HEALTH_INVENTORY_FAILED",
+        httpStatus: 502,
+        message: `Linq chat-health inventory sync failed with HTTP ${status}.`,
+        retryable: status === 429 || status >= 500,
+      });
+    }
     throw error;
   }
-
-  if (!response.ok) {
-    throw hostedOnboardingError({
-      code: "LINQ_CHAT_HEALTH_INVENTORY_FAILED",
-      httpStatus: 502,
-      message: `Linq chat-health inventory sync failed with HTTP ${response.status}.`,
-      retryable: response.status === 429 || response.status >= 500,
-    });
-  }
-
-  const payload = await response.json();
-  const record = readRecord(payload);
-  return {
-    nextCursor: normalizeNullableString(readString(record?.next_cursor)),
-    records: Array.isArray(record?.chats) ? record.chats : [],
-  };
 }
 
 export function parseHostedLinqChatHealthInventoryRecord(

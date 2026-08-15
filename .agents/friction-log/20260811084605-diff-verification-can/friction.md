@@ -1,6 +1,7 @@
 ---
 title: 'Diff verification can run CLI command tests against stale test-runtime builds'
 severity: 'minor'
+issue: 'cobuildwithus/murph#1739'
 ---
 
 ## Expected Behavior

@@ -27,9 +27,12 @@ import {
   buildHostedExecutionAssistantAskRequestedWake,
   buildHostedExecutionAssistantNotificationRequestedWake,
   buildHostedExecutionCodexAuthRequestedWake,
+  buildHostedExecutionDailyMetricReportedWake,
   buildHostedExecutionDeviceSyncWake,
   buildHostedExecutionEnvironmentVoiceCapturedWake,
   buildHostedExecutionMealPhotoCapturedWake,
+  buildHostedExecutionMemberActionCompletedWake,
+  buildHostedExecutionMemberActionRequestedWake,
   buildHostedExecutionMemberActivatedWake,
   buildHostedExecutionMemberChannelsUpdatedWake,
   buildHostedExecutionMemberPreferencesUpdatedWake,
@@ -2202,6 +2205,8 @@ function buildEverySystemWake(
     Date.parse(requestedAt) + HOSTED_EXECUTION_ASSISTANT_ASK_REQUEST_TTL_MS,
   ).toISOString();
   const askRequestId = `haask_priority_${runId}`;
+  const requestedActionId = "2f1c1fdc-c7b0-4d90-b902-8e6295959243";
+  const completedActionId = "3f1c1fdc-c7b0-4d90-b902-8e6295959243";
   const runtimeControlKinds = [
     "runtime.manual-requested",
     "runtime.maintenance-requested",
@@ -2240,6 +2245,47 @@ function buildEverySystemWake(
           detail: 7,
         },
         tone: "casual",
+      },
+    }),
+    buildHostedExecutionMemberActionRequestedWake({
+      eventId: `member.action.requested:${requestedActionId}`,
+      memberId: identity.userId,
+      occurredAt: requestedAt,
+      request: {
+        action: {
+          expectedWorkout: {
+            actionBinding: "a".repeat(64),
+            exercises: [{ name: "Leg press", sets: [{ logged: true }] }],
+          },
+          kind: "workout.live.apply",
+          mutations: [{
+            exerciseName: "Leg press",
+            exercisePosition: 1,
+            expectedResult: {
+              kind: "reps",
+              reps: null,
+            },
+            kind: "set.put",
+            result: { kind: "reps", reps: 8 },
+            setPosition: 1,
+          }],
+          version: 1,
+        },
+        actionId: requestedActionId,
+        requestedAt,
+        schemaVersion: 1,
+      },
+    }),
+    buildHostedExecutionMemberActionCompletedWake({
+      eventId: `member.action.completed:${completedActionId}`,
+      memberId: identity.userId,
+      occurredAt: completedAt,
+      outcome: {
+        actionId: completedActionId,
+        completedAt,
+        reason: "no_active_workout",
+        schemaVersion: 1,
+        status: "rejected",
       },
     }),
     buildHostedExecutionAssistantNotificationRequestedWake({
@@ -2306,6 +2352,15 @@ function buildEverySystemWake(
       occurredAt: requestedAt,
       reason: "webhook_hint",
       userId: identity.userId,
+    }),
+    buildHostedExecutionDailyMetricReportedWake({
+      date: requestedAt.slice(0, 10),
+      eventId: `health.daily-metric.reported:priority:${runId}`,
+      memberId: identity.userId,
+      metric: "steps",
+      occurredAt: requestedAt,
+      unit: "count",
+      value: 8_000,
     }),
     buildHostedExecutionEnvironmentVoiceCapturedWake({
       audioKey: environmentVoice.audioKey,

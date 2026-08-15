@@ -77,6 +77,9 @@ export {
   deviceActivityCoverageKeyIsAfterCursor,
   resolveNextDeviceActivityCoverageCursor,
 } from "./device-activity-coverage.ts";
+export {
+  resolveWearablePublicSourceProvider,
+} from "./wearables/origin.ts";
 export type {
   DeviceActivityCoverageCursor,
   DeviceActivityCoverageKey,
@@ -201,10 +204,18 @@ export type {
 export type { DailySampleSummary, SampleWindowSummaryFilter } from "./summaries.ts";
 export { summarizeDailySamples, summarizeSampleWindow } from "./summaries.ts";
 export {
+  readMealNutrientTotals,
   readMealNutritionTotals,
+  summarizeMealNutrientTotals,
   summarizeMealNutritionTotals,
 } from "./meal-nutrition.ts";
 export type {
+  MealNutrientCategory,
+  MealNutrientDayTotal,
+  MealNutrientKey,
+  MealNutrientTotal,
+  MealNutrientTotalsResult,
+  MealNutrientUnit,
   MealNutritionDayTotal,
   MealNutritionMetricTotal,
   MealNutritionTotals,
@@ -465,6 +476,22 @@ export async function listMetricPointsBatch(
 ): Promise<import("@murphai/health-metrics").MetricPoint[]> {
   const mod = await import("./query-projection.ts");
   return mod.listMetricPointsBatchRuntime(vaultRoot, filtersList);
+}
+
+export async function listMetricPointsByPublicSource(
+  vaultRoot: string,
+  input: {
+    from?: string;
+    metricKeys: readonly string[];
+    providers: readonly string[];
+    to?: string;
+  },
+): Promise<Array<{
+  points: import("@murphai/health-metrics").MetricPoint[];
+  provider: string;
+}>> {
+  const mod = await import("./query-projection.ts");
+  return mod.listMetricPointsByPublicSourceRuntime(vaultRoot, input);
 }
 
 export async function selectMetric(input: {

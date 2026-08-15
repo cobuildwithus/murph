@@ -14,17 +14,17 @@ import type {
 } from "../overview.ts";
 import {
   TRACKED_EXPERIMENT_LIMIT,
+  type BrowserVaultCoreCapableQueryClient,
   type BrowserVaultEntity,
-  type BrowserVaultQueryClient,
 } from "./shared.ts";
 
-export function selectBrowserVaultTrackedExperiments(client: BrowserVaultQueryClient): OverviewExperiment[] {
+export function selectBrowserVaultTrackedExperiments(client: BrowserVaultCoreCapableQueryClient): OverviewExperiment[] {
   return listPrioritizedBrowserVaultExperimentEntities(client)
     .slice(0, TRACKED_EXPERIMENT_LIMIT)
     .map(toOverviewExperiment);
 }
 
-export function selectBrowserVaultExperimentSummary(client: BrowserVaultQueryClient): OverviewExperimentSummary {
+export function selectBrowserVaultExperimentSummary(client: BrowserVaultCoreCapableQueryClient): OverviewExperimentSummary {
   const experiments = listPrioritizedBrowserVaultExperimentEntities(client);
   const activeExperiments = experiments
     .filter((entry) => isActiveOverviewExperimentStatus(entry.status))
@@ -41,7 +41,7 @@ export function selectBrowserVaultExperimentSummary(client: BrowserVaultQueryCli
   };
 }
 
-function listPrioritizedBrowserVaultExperimentEntities(client: BrowserVaultQueryClient): BrowserVaultEntity[] {
+function listPrioritizedBrowserVaultExperimentEntities(client: BrowserVaultCoreCapableQueryClient): BrowserVaultEntity[] {
   const sortedExperiments = client.replica.entities
     .filter((entry) => entry.family === "experiment")
     .sort((left, right) => compareLatestStrings(right.occurredAt ?? right.date, left.occurredAt ?? left.date));

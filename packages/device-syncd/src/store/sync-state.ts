@@ -2,12 +2,14 @@ import type { DatabaseSync } from "node:sqlite";
 
 import { withImmediateTransaction } from "@murphai/runtime-state/node";
 
+import { deviceSyncError } from "../errors.ts";
 import { mergeStoredDeviceSyncMetadataPatch, stringifyJson } from "../shared.ts";
-import type { DeviceSyncAccountStatus } from "../types.ts";
+import type { DeviceSyncAccountStatus, OAuthStateConsumeClaim } from "../types.ts";
 import {
   decodeNextReconcileRow,
   getAccountById,
 } from "./accounts.ts";
+import { resolveOAuthStateWithoutProviderAuthority } from "./oauth-states.ts";
 
 export function markWebhookReceived(database: DatabaseSync, accountId: string, now: string): void {
   database.prepare(`
@@ -34,6 +36,7 @@ export function markSyncSucceededInTransaction(
     localConnectionRevision?: number | null;
     metadataPatch?: Record<string, unknown>;
     nextReconcileAt?: string | null;
+    preserveLastSyncCompletedAt?: boolean;
   } = {},
 ): boolean {
   const existing = getAccountById(database, accountId);
@@ -54,6 +57,9 @@ export function markSyncSucceededInTransaction(
   const nextReconcileAt = Object.prototype.hasOwnProperty.call(options, "nextReconcileAt")
     ? options.nextReconcileAt ?? null
     : existing.nextReconcileAt;
+  const lastSyncCompletedAt = options.preserveLastSyncCompletedAt === true
+    ? existing.lastSyncCompletedAt
+    : now;
 
   const connectionResult = database.prepare(`
     update device_connection
@@ -86,7 +92,7 @@ export function markSyncSucceededInTransaction(
     where account_id = ?
   `).run(
     nextReconcileAt,
-    now,
+    lastSyncCompletedAt,
     existing.localConnectionRevision + 1,
     now,
     accountId,
@@ -104,6 +110,7 @@ export function markSyncSucceeded(
     localConnectionRevision?: number | null;
     metadataPatch?: Record<string, unknown>;
     nextReconcileAt?: string | null;
+    preserveLastSyncCompletedAt?: boolean;
   } = {},
 ): boolean {
   return withImmediateTransaction(database, () =>
@@ -194,14 +201,27 @@ export function markConnectionSetupFailed(
   now: string,
   code: string,
   message: string,
+  oauthClaim?: OAuthStateConsumeClaim,
 ) {
   return withImmediateTransaction(database, () => {
     const existing = getAccountById(database, accountId);
     if (!existing) {
-      return { account: null, applied: false };
+      return {
+        account: null,
+        applied: false,
+        blockedByRefreshLease: false,
+        oauthTokenVersion: null,
+      };
     }
     if (expectedConnectedAt === null || existing.connectedAt !== expectedConnectedAt) {
-      return { account: existing, applied: false };
+      return {
+        account: existing,
+        applied: false,
+        blockedByRefreshLease: false,
+        oauthTokenVersion: existing.credential.kind === "oauth_tokens"
+          ? existing.localTokenRevision
+          : null,
+      };
     }
 
     const connectionResult = database.prepare(`
@@ -215,25 +235,16 @@ export function markConnectionSetupFailed(
     `).run(now, accountId) as { changes: number };
 
     if ((connectionResult.changes ?? 0) === 0) {
-      return { account: getAccountById(database, accountId), applied: false };
+      const account = getAccountById(database, accountId);
+      return {
+        account,
+        applied: false,
+        blockedByRefreshLease: false,
+        oauthTokenVersion: account?.credential.kind === "oauth_tokens"
+          ? account.localTokenRevision
+          : null,
+      };
     }
-
-    database.prepare(`
-      update device_credential_state
-      set credential_kind = case
-            when credential_kind = 'oauth_tokens' then 'none'
-            else credential_kind
-          end,
-          provider_config_key = case
-            when credential_kind = 'oauth_tokens' then null
-            else provider_config_key
-          end,
-          access_token_encrypted = null,
-          refresh_token_encrypted = null,
-          access_token_expires_at = null,
-          updated_at = ?
-      where account_id = ?
-    `).run(now, accountId);
 
     database.prepare(`
       update device_observation_state
@@ -242,7 +253,6 @@ export function markConnectionSetupFailed(
           last_error_message = ?,
           next_reconcile_at = null,
           local_connection_revision = local_connection_revision + 1,
-          local_token_revision = local_token_revision + 1,
           updated_at = ?
       where account_id = ?
     `).run(
@@ -253,7 +263,71 @@ export function markConnectionSetupFailed(
       accountId,
     );
 
-    return { account: getAccountById(database, accountId), applied: true };
+    const account = getAccountById(database, accountId);
+    if (
+      oauthClaim
+      && !resolveOAuthStateWithoutProviderAuthority(database, oauthClaim)
+    ) {
+      throw deviceSyncError({
+        code: "OAUTH_STATE_CHANGED",
+        message: "OAuth callback ownership changed before its durable failure outcome committed.",
+        retryable: true,
+        httpStatus: 409,
+      });
+    }
+    return {
+      account,
+      applied: true,
+      blockedByRefreshLease: false,
+      oauthTokenVersion: account?.credential.kind === "oauth_tokens"
+        ? account.localTokenRevision
+        : null,
+    };
+  });
+}
+
+export function clearOAuthCredentialAfterConfirmedRevoke(
+  database: DatabaseSync,
+  accountId: string,
+  expectedConnectedAt: string,
+  expectedTokenVersion: number,
+  now: string,
+): boolean {
+  return withImmediateTransaction(database, () => {
+    const existing = getAccountById(database, accountId);
+    if (
+      !existing
+      || existing.connectedAt !== expectedConnectedAt
+      || existing.status !== "reauthorization_required"
+      || existing.setupPhase !== "failed"
+      || existing.credential.kind !== "oauth_tokens"
+      || existing.localTokenRevision !== expectedTokenVersion
+    ) {
+      return false;
+    }
+
+    database.prepare(`
+      update device_credential_state
+      set credential_kind = 'none',
+          credential_metadata_json = '{}',
+          provider_config_key = null,
+          access_token_encrypted = null,
+          refresh_token_encrypted = null,
+          access_token_expires_at = null,
+          updated_at = ?
+      where account_id = ?
+        and credential_kind = 'oauth_tokens'
+    `).run(now, accountId);
+
+    database.prepare(`
+      update device_observation_state
+      set local_connection_revision = local_connection_revision + 1,
+          local_token_revision = local_token_revision + 1,
+          updated_at = ?
+      where account_id = ?
+    `).run(now, accountId);
+
+    return true;
   });
 }
 

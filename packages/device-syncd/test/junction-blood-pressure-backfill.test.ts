@@ -79,9 +79,16 @@ function isMockRecordInRequestWindow(
   timestamp: string,
   windowStart: string | null,
   windowEnd: string | null,
+  timeZoneOffsetSeconds?: unknown,
 ): boolean {
   if (windowStart?.length === 10 && windowEnd?.length === 10) {
-    const providerDate = timestamp.slice(0, 10);
+    const timestampMs = Date.parse(timestamp);
+    const providerDate =
+      typeof timeZoneOffsetSeconds === "number"
+      && Number.isFinite(timeZoneOffsetSeconds)
+      && Number.isFinite(timestampMs)
+        ? new Date(timestampMs + timeZoneOffsetSeconds * 1_000).toISOString().slice(0, 10)
+        : timestamp.slice(0, 10);
     return providerDate >= windowStart && providerDate <= windowEnd;
   }
   return (windowStart === null || timestamp >= windowStart)
@@ -260,6 +267,27 @@ function createJobContext(input: {
       const canonicalEventExternalRefResourceIds = (normalized.events ?? []).flatMap(
         (event) => event.externalRef?.resourceId ? [event.externalRef.resourceId] : [],
       );
+      const canonicalSparseCalendarTargets = [...new Map(
+        (normalized.events ?? []).flatMap((event) =>
+          typeof event.dayKey === "string" && event.dataOrigin?.sourceProviderSlug
+            ? [[JSON.stringify([
+                event.dayKey,
+                event.dataOrigin.sourceProviderSlug,
+                event.dataOrigin.sourceType ?? null,
+                event.dataOrigin.sourceInstanceId ?? null,
+              ]), {
+                dayKey: event.dayKey,
+                sourceProviderSlug: event.dataOrigin.sourceProviderSlug,
+                ...(event.dataOrigin.sourceInstanceId === undefined
+                  ? {}
+                  : { sourceInstanceId: event.dataOrigin.sourceInstanceId }),
+                ...(event.dataOrigin.sourceType
+                  ? { sourceType: event.dataOrigin.sourceType }
+                  : {}),
+              }] as const]
+            : []
+        ),
+      ).values()];
       const canonicalEventCount = input.canonicalEventCount
         ?? normalized.events?.length
         ?? 0;
@@ -267,6 +295,7 @@ function createJobContext(input: {
         canonicalEventCount,
         canonicalEventExternalRefResourceIds:
           canonicalEventExternalRefResourceIds.slice(0, canonicalEventCount),
+        canonicalSparseCalendarTargets,
         durableDeliveryAccepted: true,
       };
     }),
@@ -479,7 +508,12 @@ function createProvider(input: {
               ? record.timestamp
               : null;
           return timestamp !== null
-            && isMockRecordInRequestWindow(timestamp, noteWindowStart, noteWindowEnd);
+            && isMockRecordInRequestWindow(
+              timestamp,
+              noteWindowStart,
+              noteWindowEnd,
+              record.timezone_offset,
+            );
         });
         const resourceGroups = resource === "note"
           ? { oura: noteRecords }
@@ -580,6 +614,7 @@ async function executeImmediateBloodPressureContinuations(input: {
 
 async function executeImmediateResourceContinuations(input: {
   context: ProviderJobContext;
+  drainCalendarJobs?: boolean;
   job: DeviceSyncJobRecord;
   provider: ReturnType<typeof createProvider>;
   resource: string;
@@ -594,22 +629,109 @@ async function executeImmediateResourceContinuations(input: {
   let executionCount = 0;
   let nextIndex = input.startingIndex ?? 10_000;
   const results: ProviderJobResult[] = [];
+  const pendingCalendarJobs = new Map<string, DeviceSyncJobInput>();
+
+  const retainCalendarJobs = (result: ProviderJobResult) => {
+    for (const scheduledJob of result.scheduledJobs ?? []) {
+      if (
+        scheduledJob.kind !== "resource"
+        || scheduledJob.payload?.resource !== input.resource
+        || typeof scheduledJob.payload.calendarRefreshDay !== "string"
+      ) {
+        continue;
+      }
+      const identity = scheduledJob.dedupeKey
+        ?? JSON.stringify(scheduledJob.payload);
+      pendingCalendarJobs.set(identity, scheduledJob);
+    }
+  };
 
   while (executionCount < 400) {
     const result = await executor.executeJob(input.context, currentJob);
     results.push(result);
     executionCount += 1;
+    retainCalendarJobs(result);
     const continuation = result.scheduledJobs?.find((job) =>
-      job.kind === "resource" && job.payload?.resource === input.resource
+      job.kind === "resource"
+      && job.payload?.resource === input.resource
+      && job.payload.calendarRefreshDay === undefined
     );
-    if (!continuation || continuation.availableAt) {
-      return { executionCount, result, results };
+    if (
+      !continuation
+      || (continuation.availableAt && continuation.availableAt !== input.context.now)
+    ) {
+      if (input.drainCalendarJobs !== false) {
+        for (const calendarJob of pendingCalendarJobs.values()) {
+          if (
+            calendarJob.availableAt
+            && calendarJob.availableAt !== input.context.now
+          ) {
+            continue;
+          }
+          const calendarResult = await executor.executeJob(
+            input.context,
+            toJobRecord(calendarJob, nextIndex),
+          );
+          results.push(calendarResult);
+          executionCount += 1;
+          nextIndex += 1;
+        }
+      }
+      const remainingScheduledJobs = input.drainCalendarJobs === false
+        ? result.scheduledJobs
+        : result.scheduledJobs?.filter((job) =>
+            typeof job.payload?.calendarRefreshDay !== "string"
+          );
+      return {
+        executionCount,
+        result: result.scheduledJobs
+          ? { ...result, scheduledJobs: remainingScheduledJobs }
+          : result,
+        results,
+      };
     }
     currentJob = toJobRecord(continuation, nextIndex);
     nextIndex += 1;
   }
 
   throw new Error(`${input.resource} history did not reach a delayed or terminal result.`);
+}
+
+async function executeImmediateFullTimeseriesContinuations(input: {
+  context: ProviderJobContext;
+  initialResult: ProviderJobResult;
+  provider: ReturnType<typeof createProvider>;
+  startingIndex?: number;
+}): Promise<{
+  executionCount: number;
+  result: ProviderJobResult;
+  results: ProviderJobResult[];
+}> {
+  const executor = requireValue(input.provider.jobExecutor);
+  let result = input.initialResult;
+  let executionCount = 0;
+  let nextIndex = input.startingIndex ?? 20_000;
+  const results: ProviderJobResult[] = [];
+
+  while (executionCount < 1_000) {
+    const continuation = result.scheduledJobs?.find((job) =>
+      (job.kind === "backfill" || job.kind === "reconcile")
+      && typeof job.payload?.timeseriesResourceCursor === "string"
+    );
+    if (!continuation) {
+      return { executionCount, result, results };
+    }
+    assert.equal(continuation.availableAt, input.context.now);
+    result = await executor.executeJob(
+      input.context,
+      toJobRecord(continuation, nextIndex),
+    );
+    results.push(result);
+    executionCount += 1;
+    nextIndex += 1;
+  }
+
+  throw new Error("Full Junction timeseries continuation did not terminate.");
 }
 
 test("the persisted-source scheduler gives sparse blood pressure its own full-history resumable job", async () => {
@@ -649,14 +771,15 @@ test("the persisted-source scheduler gives sparse blood pressure its own full-hi
     toJobRecord(backfill, 1),
   );
   const boundedRequests = [...requests];
-  assert.equal(boundedRequests.length, 28);
+  assert.equal(boundedRequests.length, 0);
+  assert.equal(boundedResult.scheduledJobs?.length, 1);
   assert.equal(
-    boundedRequests.filter((request) => request.resource === "stress_level").length,
-    14,
+    boundedResult.scheduledJobs?.[0]?.payload?.timeseriesResourceCursor,
+    "blood_pressure",
   );
   assert.equal(
-    boundedRequests.filter((request) => request.resource === "blood_pressure").length,
-    14,
+    boundedResult.scheduledJobs?.[0]?.payload?.timeseriesCursor,
+    "2026-05-28T00:00:00.000Z",
   );
   assert.equal(
     Object.hasOwn(
@@ -713,10 +836,16 @@ test("covered Link reconnects retain bounded blood-pressure catch-up", async () 
       sources: [createSourceSummary("omron", "2026-03-20T23:55:00.000Z")],
     });
 
+    const context = createJobContext({ account, importedSnapshots, now: callbackAt });
     const result = await requireValue(provider.jobExecutor).executeJob(
-      createJobContext({ account, importedSnapshots, now: callbackAt }),
+      context,
       toJobRecord(backfill, timeseriesBackfillDays),
     );
+    await executeImmediateFullTimeseriesContinuations({
+      context,
+      initialResult: result,
+      provider,
+    });
     const bloodPressureRequests = requests.filter(
       (request) => request.resource === "blood_pressure",
     );
@@ -998,12 +1127,18 @@ test("v1 Oura note coverage receives one v2 semantic reimport while dense timese
 
   requests.length = 0;
   const bounded = requireValue(scheduled.jobs.find((job) => job.kind === "reconcile"));
-  await requireValue(provider.jobExecutor).executeJob(
-    createJobContext({
+  const boundedContext = createJobContext({
       account: createAccount({ metadata: result.metadataPatch }),
-    }),
+    });
+  const boundedResult = await requireValue(provider.jobExecutor).executeJob(
+    boundedContext,
     toJobRecord(bounded, 2),
   );
+  await executeImmediateFullTimeseriesContinuations({
+    context: boundedContext,
+    initialResult: boundedResult,
+    provider,
+  });
   assert.equal(
     requests.filter((request) => request.resource === "stress_level").length,
     7,
@@ -1360,13 +1495,32 @@ test("a sparse daily aggregate retries a date with a malformed sibling", async (
   const caffeine = findResourceJob(scheduled.jobs, "caffeine");
   const firstPass = await executeImmediateResourceContinuations({
     context: createJobContext({ importedSnapshots }),
+    drainCalendarJobs: false,
     job: toJobRecord(caffeine, 1),
     provider,
     resource: "caffeine",
   });
   const delayedRetry = findResourceJob(firstPass.result.scheduledJobs ?? [], "caffeine");
+  const mixedImportResult = firstPass.results.find((result) =>
+    result.scheduledJobs?.some((job) =>
+      job.kind === "resource"
+      && job.payload?.resource === "caffeine"
+      && job.payload.calendarRefreshDay === undefined
+      && job.availableAt === "2026-06-11T12:15:00.000Z"
+    )
+  );
+  assert.ok(mixedImportResult);
+  const retainedCalendarRepair = mixedImportResult.scheduledJobs?.find((job) =>
+    job.kind === "resource"
+    && job.payload?.resource === "caffeine"
+    && job.payload.calendarRefreshDay === "2026-06-09"
+  );
 
   assertHistoryCoverage(firstPass.result.metadataPatch, "omron", "caffeine", false);
+  assert.ok(
+    retainedCalendarRepair,
+    "The mixed precise import must retain its proven day beside the malformed-row retry.",
+  );
   assert.equal(delayedRetry.availableAt, "2026-06-11T12:15:00.000Z");
   assert.equal(delayedRetry.payload?.windowStart, "2026-06-09T00:00:00.000Z");
   assert.equal(delayedRetry.payload?.historicalPullReady, undefined);
@@ -1407,7 +1561,7 @@ test("a sparse daily aggregate retries a date with a malformed sibling", async (
         ?.filter((event) => event.fields?.metric === "caffeine")
         .map((event) => event.fields?.value) ?? []
     ),
-    [80, 120],
+    [120],
   );
 });
 
@@ -1416,15 +1570,15 @@ test("date-mode history and reconcile keep provider days atomic across UTC midni
     [
       "negative offset",
       [
-        { end: "2026-06-09T10:05:00-07:00", start: "2026-06-09T10:00:00-07:00", unit: "g", value: 0.08 },
-        { end: "2026-06-09T20:05:00-07:00", start: "2026-06-09T20:00:00-07:00", unit: "g", value: 0.04 },
+        { end: "2026-06-09T17:05:00.000Z", start: "2026-06-09T17:00:00.000Z", timezone_offset: -25_200, unit: "g", value: 0.08 },
+        { end: "2026-06-10T03:05:00.000Z", start: "2026-06-10T03:00:00.000Z", timezone_offset: -25_200, unit: "g", value: 0.04 },
       ],
     ],
     [
       "positive offset",
       [
-        { end: "2026-06-09T00:35:00+07:00", start: "2026-06-09T00:30:00+07:00", unit: "g", value: 0.08 },
-        { end: "2026-06-09T20:05:00+07:00", start: "2026-06-09T20:00:00+07:00", unit: "g", value: 0.04 },
+        { end: "2026-06-08T17:35:00.000Z", start: "2026-06-08T17:30:00.000Z", timezone_offset: 25_200, unit: "g", value: 0.08 },
+        { end: "2026-06-09T13:05:00.000Z", start: "2026-06-09T13:00:00.000Z", timezone_offset: 25_200, unit: "g", value: 0.04 },
       ],
     ],
   ] as const;
@@ -1457,8 +1611,9 @@ test("date-mode history and reconcile keep provider days atomic across UTC midni
       resource: "caffeine",
     });
     const reconcileSnapshots: unknown[] = [];
-    await executor.executeJob(
-      createJobContext({ importedSnapshots: reconcileSnapshots }),
+    const reconcileContext = createJobContext({ importedSnapshots: reconcileSnapshots });
+    const reconcileSetup = await executor.executeJob(
+      reconcileContext,
       toJobRecord({
         dedupeKey: `reconcile-${label}`,
         kind: "reconcile",
@@ -1469,6 +1624,11 @@ test("date-mode history and reconcile keep provider days atomic across UTC midni
         priority: 40,
       }, 2),
     );
+    await executeImmediateFullTimeseriesContinuations({
+      context: reconcileContext,
+      initialResult: reconcileSetup,
+      provider,
+    });
 
     const externalRefs = [];
     for (const snapshots of [historicalSnapshots, reconcileSnapshots]) {
@@ -1549,7 +1709,7 @@ test("sparse history waits for upstream pull success beyond the empty retry ladd
   });
 
   assertHistoryCoverage(completed.result.metadataPatch, "omron", "caffeine");
-  assert.equal(requests.length, 2);
+  assert.equal(requests.length, 3);
 });
 
 test("sparse history completion resolves supported source aliases", async () => {
@@ -1586,7 +1746,7 @@ test("sparse history completion resolves supported source aliases", async () => 
     {
       expectedCoverage: true,
       expectedScheduledJobs: 0,
-      expectedTimeseriesRequests: 2,
+      expectedTimeseriesRequests: 3,
       historicalPullState: {
         notPulled: true,
         resource: "caffeine",
@@ -1855,7 +2015,9 @@ test("a persistently malformed sparse day exhausts only its bounded day retry", 
   for (let attempt = 0; attempt < 5; attempt += 1) {
     const result = await executor.executeJob(createJobContext({ now }), job);
     const retry = result.scheduledJobs?.find((candidate) =>
-      candidate.kind === "resource" && candidate.payload?.resource === "caffeine"
+      candidate.kind === "resource"
+      && candidate.payload?.resource === "caffeine"
+      && candidate.payload.calendarRefreshDay === undefined
     );
     if (!retry) {
       finalResult = result;

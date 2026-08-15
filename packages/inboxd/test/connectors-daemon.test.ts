@@ -13,45 +13,45 @@ import { createConnectorRegistry } from "../src/kernel/registry.ts";
 
 test("connector registry keeps distinct runtime ids under the same source family", () => {
   const left = createStubPollConnector({
-    id: "email:self",
-    source: "email",
+    id: "linq:self",
+    source: "linq",
     accountId: "self",
   });
   const right = createStubPollConnector({
-    id: "email:work",
-    source: "email",
+    id: "linq:work",
+    source: "linq",
     accountId: "work",
   });
   const registry = createConnectorRegistry([left, right]);
 
-  assert.equal(registry.get("email:self")?.id, "email:self");
-  assert.equal(registry.requirePoll("email:work").accountId, "work");
+  assert.equal(registry.get("linq:self")?.id, "linq:self");
+  assert.equal(registry.requirePoll("linq:work").accountId, "work");
   assert.deepEqual(
-    registry.listBySource("email").map((connector) => connector.id),
-    ["email:self", "email:work"],
+    registry.listBySource("linq").map((connector) => connector.id),
+    ["linq:self", "linq:work"],
   );
-  assert.equal(registry.get("email"), null);
+  assert.equal(registry.get("linq"), null);
   assert.throws(
-    () => registry.requirePoll("email"),
-    /Multiple connectors registered for source: email\. Use a connector id\./,
+    () => registry.requirePoll("linq"),
+    /Multiple connectors registered for source: linq\. Use a connector id\./,
   );
   assert.throws(
-    () => registry.requireWebhook("email:self"),
-    /Webhook connector not registered for id: email:self/,
+    () => registry.requireWebhook("linq:self"),
+    /Webhook connector not registered for id: linq:self/,
   );
   assert.throws(
     () =>
       createConnectorRegistry([
         createStubPollConnector({
           id: "   ",
-          source: "email",
+          source: "linq",
         }),
         createStubPollConnector({
           id: "   ",
-          source: "email",
+          source: "linq",
         }),
       ]),
-    /Connector id is required when multiple connectors share source: email/,
+    /Connector id is required when multiple connectors share source: linq/,
   );
 });
 
@@ -62,16 +62,16 @@ test("connector registry resolves unique source lookups and source-keyed connect
     accountId: "bot",
   });
   const unique = createStubPollConnector({
-    id: "email:agentmail",
-    source: "email",
-    accountId: "agentmail",
+    id: "linq:primary",
+    source: "linq",
+    accountId: "primary",
   });
   const registry = createConnectorRegistry([sourceKeyed, unique]);
 
   assert.equal(registry.get("telegram")?.source, "telegram");
   assert.equal(registry.requirePoll("telegram").accountId, "bot");
-  assert.equal(registry.get("email")?.id, "email:agentmail");
-  assert.equal(registry.requirePoll("email").accountId, "agentmail");
+  assert.equal(registry.get("linq")?.id, "linq:primary");
+  assert.equal(registry.requirePoll("linq").accountId, "primary");
 });
 
 test("runPollConnector keeps cursor writes scoped to the connector account id", async () => {
@@ -79,14 +79,14 @@ test("runPollConnector keeps cursor writes scoped to the connector account id", 
 
   await runPollConnector({
     connector: createStubPollConnector({
-      id: "email:self",
-      source: "email",
+      id: "linq:self",
+      source: "linq",
       accountId: "self",
       async backfill(cursor, emit) {
         assert.equal(cursor, null);
 
         await emit({
-          source: "email",
+          source: "linq",
           externalId: "email-account-scope",
           accountId: "other",
           thread: {
@@ -266,17 +266,17 @@ test("runPollConnectorBackfill preserves the latest emitted checkpoint when the 
 
   const result = await runPollConnectorBackfill({
     connector: createStubPollConnector({
-      id: "email:agentmail",
-      source: "email",
-      accountId: "agentmail",
+      id: "linq:primary",
+      source: "linq",
+      accountId: "primary",
       async backfill(cursor, emit) {
         assert.equal(cursor, null);
 
         await emit(
           {
-            source: "email",
-            externalId: "email:msg-1",
-            accountId: "agentmail",
+            source: "linq",
+            externalId: "linq:msg-1",
+            accountId: "primary",
             thread: {
               id: "thread-1",
             },
@@ -362,17 +362,17 @@ test("runPollConnector retries watch failures from the latest emitted cursor whe
 
   await runPollConnector({
     connector: createStubPollConnector({
-      id: "email:agentmail",
-      source: "email",
-      accountId: "agentmail",
+      id: "linq:primary",
+      source: "linq",
+      accountId: "primary",
       async backfill(cursor, emit) {
         assert.equal(cursor, null);
 
         await emit(
           {
-            source: "email",
-            externalId: "email:msg-1",
-            accountId: "agentmail",
+            source: "linq",
+            externalId: "linq:msg-1",
+            accountId: "primary",
             thread: {
               id: "thread-1",
             },
@@ -396,9 +396,9 @@ test("runPollConnector retries watch failures from the latest emitted cursor whe
         if (watchCalls === 1) {
           await emit(
             {
-              source: "email",
-              externalId: "email:msg-2",
-              accountId: "agentmail",
+              source: "linq",
+              externalId: "linq:msg-2",
+              accountId: "primary",
               thread: {
                 id: "thread-1",
               },
@@ -420,9 +420,9 @@ test("runPollConnector retries watch failures from the latest emitted cursor whe
 
         await emit(
           {
-            source: "email",
-            externalId: "email:msg-3",
-            accountId: "agentmail",
+            source: "linq",
+            externalId: "linq:msg-3",
+            accountId: "primary",
             thread: {
               id: "thread-1",
             },
@@ -511,8 +511,8 @@ test("runInboxDaemon aborts sibling connectors and waits for their cleanup when 
   let runningConnectorAborted = false;
   let runningConnectorClosed = 0;
   const runningConnector = createStubPollConnector({
-    id: "email:self",
-    source: "email",
+    id: "linq:self",
+    source: "linq",
     accountId: "self",
     async watch(_cursor, _emit, signal) {
       await new Promise<void>((resolve) => {
@@ -537,8 +537,8 @@ test("runInboxDaemon aborts sibling connectors and waits for their cleanup when 
     },
   });
   const failingConnector = createStubPollConnector({
-    id: "email:work",
-    source: "email",
+    id: "linq:work",
+    source: "linq",
     accountId: "work",
     async watch() {
       throw new Error("watch exploded");
@@ -602,7 +602,7 @@ test("runInboxDaemon aborts sibling connectors and waits for their cleanup when 
         connectors: [runningConnector, failingConnector],
         signal: new AbortController().signal,
       }),
-    /Connector "email:work" \(email\) failed: watch exploded/,
+    /Connector "linq:work" \(linq\) failed: watch exploded/,
   );
 
   assert.equal(runningConnectorAborted, true);
@@ -611,16 +611,16 @@ test("runInboxDaemon aborts sibling connectors and waits for their cleanup when 
 
 test("runInboxDaemon aggregates wrapped connector failures when multiple connectors throw", async () => {
   const left = createStubPollConnector({
-    id: "email:self",
-    source: "email",
+    id: "linq:self",
+    source: "linq",
     accountId: "self",
     async watch() {
       throw new Error("left exploded");
     },
   });
   const right = createStubPollConnector({
-    id: "email:work",
-    source: "email",
+    id: "linq:work",
+    source: "linq",
     accountId: "work",
     async watch() {
       throw new Error("right exploded");
@@ -691,8 +691,8 @@ test("runInboxDaemon aggregates wrapped connector failures when multiple connect
         entry instanceof Error ? entry.message : String(entry),
       );
       assert.deepEqual(messages.sort(), [
-        'Connector "email:self" (email) failed: left exploded',
-        'Connector "email:work" (email) failed: right exploded',
+        'Connector "linq:self" (linq) failed: left exploded',
+        'Connector "linq:work" (linq) failed: right exploded',
       ]);
       return true;
     },
@@ -710,9 +710,9 @@ test("runInboxDaemon can keep sibling connectors alive after a connector failure
   });
 
   const runningConnector = createStubPollConnector({
-    id: "email:agentmail",
-    source: "email",
-    accountId: "agentmail",
+    id: "linq:primary",
+    source: "linq",
+    accountId: "primary",
     async watch(_cursor, _emit, signal) {
       await new Promise<void>((resolve) => {
         if (signal.aborted) {
@@ -852,9 +852,9 @@ test("runInboxDaemon restarts failed connectors when restart policy is enabled",
     },
   });
   const flakyConnector = createStubPollConnector({
-    id: "email:agentmail",
-    source: "email",
-    accountId: "agentmail",
+    id: "linq:primary",
+    source: "linq",
+    accountId: "primary",
     async watch(_cursor, _emit, signal) {
       flakyConnectorAttempts += 1;
 
@@ -906,9 +906,9 @@ test("runInboxDaemon stops cleanly when aborted during connector restart backoff
   const controller = new AbortController();
   let attempts = 0;
   const connector = createStubPollConnector({
-    id: "email:agentmail",
-    source: "email",
-    accountId: "agentmail",
+    id: "linq:primary",
+    source: "linq",
+    accountId: "primary",
     async watch() {
       attempts += 1;
       throw new Error("watch exploded");
@@ -943,9 +943,9 @@ test("runInboxDaemon still rejects when every connector fails in isolation mode"
     },
   });
   const right = createStubPollConnector({
-    id: "email:agentmail",
-    source: "email",
-    accountId: "agentmail",
+    id: "linq:primary",
+    source: "linq",
+    accountId: "primary",
     async watch() {
       throw new Error("right exploded");
     },
@@ -1016,7 +1016,7 @@ test("runInboxDaemon still rejects when every connector fails in isolation mode"
         entry instanceof Error ? entry.message : String(entry),
       );
       assert.deepEqual(messages.sort(), [
-        'Connector "email:agentmail" (email) failed: right exploded',
+        'Connector "linq:primary" (linq) failed: right exploded',
         'Connector "telegram:bot" (telegram) failed: left exploded',
       ]);
       return true;

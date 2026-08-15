@@ -859,11 +859,97 @@ describe.runIf(Boolean(testDatabaseUrl))(
         )
         `,
       );
+      await client.query(`
+        INSERT INTO foods (
+          id,
+          canonical_key,
+          data_origin,
+          data_origin_id,
+          data_origin_priority,
+          name,
+          brand,
+          upc,
+          off_market,
+          search_text,
+          label
+        )
+        SELECT
+          CASE WHEN seed = 6000
+            THEN 'zz-food-boundary-fts-alias-priority'
+            ELSE 'food-boundary-fts-alias-' || seed::text
+          END,
+          'food-boundary-fts-alias',
+          'usda_branded',
+          'food-boundary-fts-alias-' || seed::text,
+          CASE WHEN seed = 6000 THEN 1 ELSE 100 END,
+          'Boundaryfts Alias',
+          NULL,
+          NULL,
+          false,
+          'Boundaryfts Alias',
+          '{"fixture":true}'::jsonb
+        FROM generate_series(1, 6000) AS aliases(seed)
+
+        UNION ALL
+
+        SELECT
+          'food-boundary-fts-distinct-' || seed::text,
+          'food-boundary-fts-distinct-' || seed::text,
+          'usda_branded',
+          'food-boundary-fts-distinct-' || seed::text,
+          50,
+          'Boundaryfts Distinct ' || seed::text,
+          NULL,
+          NULL,
+          false,
+          'Boundaryfts Distinct ' || seed::text,
+          '{"fixture":true}'::jsonb
+        FROM generate_series(1, 60) AS distinct_rows(seed)
+
+        UNION ALL
+
+        SELECT
+          'zz-food-boundary-fts-winner',
+          'zz-food-boundary-fts-winner',
+          'usda_branded',
+          'zz-food-boundary-fts-winner',
+          1,
+          'Boundaryfts',
+          NULL,
+          NULL,
+          false,
+          'Boundaryfts',
+          '{"fixture":true}'::jsonb
+
+        UNION ALL
+
+        SELECT
+          'food-literal-percent-whey',
+          'food-literal-percent-whey',
+          'usda_branded',
+          'food-literal-percent-whey',
+          1,
+          '100% Whey',
+          NULL,
+          NULL,
+          false,
+          '100% Whey protein',
+          '{"fixture":true}'::jsonb
+      `);
       await client.query(
         "CREATE INDEX foods_fixture_search_idx ON foods USING GIN (to_tsvector('simple', search_text))",
       );
       await client.query(
         "CREATE INDEX foods_fixture_name_trgm_idx ON foods USING GIN (name gin_trgm_ops)",
+      );
+      await client.query(
+        "CREATE INDEX foods_fixture_name_rank_idx ON foods USING GIST (name gist_trgm_ops)",
+      );
+      await client.query(
+        "CREATE INDEX foods_fixture_name_exact_rank_idx ON foods (lower(name), data_origin_priority, id)",
+      );
+      await client.query(
+        "CREATE INDEX foods_fixture_canonical_rank_idx ON foods (canonical_key, data_origin_priority, id)",
       );
       await client.query("ANALYZE foods");
     });
@@ -904,6 +990,53 @@ describe.runIf(Boolean(testDatabaseUrl))(
       },
       20_000,
     );
+
+    it("keeps food ranking and canonical diversity beyond the match cap", async () => {
+      const first = await foodQueries.searchFoods({
+        includeOffMarket: false,
+        limit: 50,
+        q: "boundaryfts",
+      });
+      const repeated = await foodQueries.searchFoods({
+        includeOffMarket: false,
+        limit: 50,
+        q: "boundaryfts",
+      });
+
+      expect(first).toHaveLength(50);
+      expect(first[0]?.id).toBe("zz-food-boundary-fts-winner");
+      expect(first.map((row) => row.id)).toContain(
+        "zz-food-boundary-fts-alias-priority",
+      );
+      expect(repeated.map((row) => row.id)).toEqual(
+        first.map((row) => row.id),
+      );
+    }, 20_000);
+
+    it.each(["% boundaryfts", "_ boundaryfts"])(
+      "treats SQL wildcard characters as ordinary food-search input for %s",
+      async (q) => {
+        const rows = await foodQueries.searchFoods({
+          includeOffMarket: false,
+          limit: 50,
+          q,
+        });
+
+        expect(rows).toHaveLength(50);
+        expect(rows[0]?.id).toBe("zz-food-boundary-fts-winner");
+      },
+      20_000,
+    );
+
+    it("keeps literal percent product names searchable", async () => {
+      const rows = await foodQueries.searchFoods({
+        includeOffMarket: false,
+        limit: 5,
+        q: "100% Whey",
+      });
+
+      expect(rows.map((row) => row.id)).toContain("food-literal-percent-whey");
+    }, 20_000);
 
     it("intercepts every contaminant lookup instead of requiring product-test tables", () => {
       expect(contaminantQueryCount).toBeGreaterThan(0);

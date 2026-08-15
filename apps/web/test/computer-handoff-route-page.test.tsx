@@ -465,9 +465,9 @@ describe("computer handoff route and page", () => {
       returnContactKind: null,
       suggestedReply: "finished_browser_step",
     });
-    mocks.getHostedMurphContactContext.mockResolvedValueOnce(createContactContext({
-      userEmailAddress: "member@gmail.com",
-    }));
+    mocks.getHostedMurphContactContext.mockResolvedValueOnce(
+      createContactContext(),
+    );
 
     const markup = renderToStaticMarkup(await computerHandoffPage.default({
       params: Promise.resolve({ token: "handoff-token" }),
@@ -592,7 +592,6 @@ function createContactContext(input: {
   };
   murphEmailAddress?: string | null;
   murphPhoneNumber?: string | null;
-  userEmailAddress?: string | null;
 } = {}) {
   return {
     initialContactChannels: input.initialContactChannels ?? {
@@ -602,6 +601,5 @@ function createContactContext(input: {
     },
     murphEmailAddress: input.murphEmailAddress ?? "murph+alias123@mail.withmurph.ai",
     murphPhoneNumber: input.murphPhoneNumber ?? "+15550100001",
-    userEmailAddress: input.userEmailAddress ?? "member@example.test",
   };
 }

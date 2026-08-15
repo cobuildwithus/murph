@@ -4,6 +4,7 @@ export * from "./assistant-usage.ts";
 export * from "./assistant-personalization.ts";
 export * from "./pending-group-setup.ts";
 export {
+  createHostedExecutionAssistantAskCompletionId,
   createHostedExecutionPrivateAssistantAskCompletionDeliveryKey,
   createHostedExecutionReviewedAssistantAskCompletionDeliveryKey,
   HOSTED_EXECUTION_ASSISTANT_ASK_CANNOT_ANSWER_RESPONSE,
@@ -47,6 +48,7 @@ export {
   type HostedWorkspaceSnapshotV2Ref,
 } from "./workspace-snapshot-v2.ts";
 export * from "./contracts.ts";
+export * from "./daily-metric.ts";
 export * from "./browser-vault.ts";
 export * from "./connected-apps.ts";
 export * from "./computer-use.ts";

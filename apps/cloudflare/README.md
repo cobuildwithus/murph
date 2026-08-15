@@ -122,6 +122,12 @@ Bindings:
 - `USER_RUNNER`
 - `DATABASE_HEALTH_MONITOR`, one environment-scoped SQLite Durable Object for
   production database metric history and alert admission
+- `DEVICE_WEBHOOK_QUEUE`, encrypted non-canonical burst transport with one
+  serial consumer and an encrypted dead-letter queue
+- `DEVICE_WEBHOOK_DLQ`, producer binding used only for encrypted dead-letter
+  Queue metrics
+- `DEVICE_WEBHOOK_QUEUE_MONITOR`, one environment-scoped SQLite Durable Object
+  for five-minute Queue-health observations and restart-safe operator paging
 - `RUNNER_CONTAINER`
 - `BUNDLES`
 - `CF_VERSION_METADATA` version metadata binding, used by deploy smoke to prove the requested Worker version actually handled the request
@@ -201,7 +207,8 @@ to retain 30 days of:
 - the most saturated primary pod's current PgBouncer-to-Postgres connections
   against `max_connections`, plus server-pool state counts;
 - primary Postgres connection states and total utilization; and
-- per-region direct-port 5432 connection-error counters and positive deltas.
+- per-region connection-error counters and positive deltas for direct port 5432
+  and pooled application port 6432.
 
 Discovery selects exactly one target by organization, database name, and branch
 name. The configured branch ID then filters the selected Prometheus payload's
@@ -209,10 +216,11 @@ metric series. Both selectors are required because one organization can have
 several production branches with the same branch name while discovery does not
 publish branch IDs.
 
-The direct-port signal is named a migration admission failure because production
-application traffic is required to use transaction-mode PgBouncer on 6432 and
-the direct endpoint is migration-only. Adding another direct production client
-requires splitting that signal first.
+Port 5432 retains the direct migration-admission interpretation because
+production application traffic is required to use transaction-mode PgBouncer
+on 6432 and the direct endpoint is migration-only. Port 6432 is reported as the
+broader pooled application connection-error condition. The provider metric has
+no reason label, so the page cannot identify a specific pooled rejection cause.
 
 Each metric family is normalized independently. When a documented family is
 absent, the sample keeps that family unknown instead of substituting zero, still
@@ -222,62 +230,69 @@ still open an incident immediately. A collection that fails before producing a
 usable observation, including a scrape with every required family absent,
 receives one bounded retry after one second; only an exhausted two-attempt
 collection counts as a failed check. A usable partial observation ordinarily
-remains single-pass so available unsafe evidence pages without delay. The sole
-exception is a safe observation missing only the direct-error counter family:
-the monitor makes one confirmation scrape after the same one-second delay,
-evaluates every available confirmation signal, and merges a recovered direct
-counter with the original complete gauge evidence. A failed or still-missing
-confirmation retains the original incomplete observation, so absence never
-becomes zero and two persistently incomplete checks still open the fallback
-monitoring incident. An acknowledged
-telemetry-only page is one-shot for one unresolved operator-notification window.
+remains single-pass so available unsafe evidence pages without delay. The
+connection-error family expects both ports, keyed by port and region so their
+series cannot collide. Missing either port keeps that family unknown. When a
+safe observation is otherwise complete, the monitor makes one confirmation
+scrape after the same one-second delay, evaluates every available confirmation
+signal, and composes complementary observed ports with the original complete
+gauge evidence. Each observed port advances only its own usable baseline; an
+omitted port retains its prior baseline, and new or reset region series are
+suppressed independently. A failed or still-incomplete confirmation retains
+the original incomplete observation, so absence never becomes zero, an old
+counter delta is never replayed, and two persistently incomplete checks still
+open the fallback monitoring incident. An acknowledged telemetry-only page is
+one-shot for one unresolved operator-notification window.
 Crossing the two-failure threshold records one bounded alert obligation in the
 existing incident row. The first two-check window counts incomplete versus
 unavailable observations, unions only canonical missing families observed on
 partial checks, and identifies the threshold time as the window end. A bounded
 per-sample evidence value preserves that provenance across restart. An older
-pending page or direct-error priority cannot lose the obligation; recovery and
-another gap before acknowledgment coalesce into that same notification while
-the first threshold window remains authoritative. The obligation does not occupy
-a closed provider fence.
+pending page or connection-error priority cannot lose the obligation; recovery
+and another gap before acknowledgment coalesce into that same notification
+while the first threshold window remains authoritative. The obligation does
+not occupy a closed provider fence.
 At the same time, until an incident admits its first page, concrete evidence
-that appears on the threshold or a later sample, including a direct-error delta,
-persists in one combined immutable body. The exact pressure and truthful
-telemetry facts therefore share
-the next eligible attempt and one acknowledgment cycle. For
-acknowledged-incident recurrence, the next eligible sample
-supplies any still-current unsafe evidence while historical telemetry keeps its
-own observation time. Only acknowledgment of a
+that appears on the threshold or a later sample, including either
+connection-error category, persists in one combined immutable body. The exact
+pressure and truthful telemetry facts therefore share the next eligible attempt
+and one acknowledgment cycle. For acknowledged-incident recurrence, the next
+eligible sample supplies any still-current unsafe evidence while historical
+telemetry keeps its own observation time. Only acknowledgment of a
 telemetry-bearing page clears the obligation; a later complete sample then
 closes and rearms the incident. After acknowledgment, incomplete samples remain
-queryable but cannot repeat telemetry copy inside concrete-pressure pages unless
-a later rearmed threshold creates a new obligation. When a direct-error delta
-takes admission priority after an earlier page, any currently owed telemetry
-travels in that same immutable body while replayable gauges remain excluded;
-pure deferred evidence keeps its stored check time, an aggregate containing a
-new current delta uses the latest included check, and telemetry keeps its own
-condition-local observation time. Concrete unsafe conditions retain an hourly
-recurrence. The object writes Linq provider-attempt admission before egress,
-never attempts more than once per hour across all incidents, and reuses the
+queryable but cannot repeat telemetry copy inside concrete-pressure pages
+unless a later rearmed threshold creates a new obligation. When a
+connection-error condition takes admission priority after an earlier page, any
+currently owed telemetry travels in that same immutable body while replayable
+gauges remain excluded; pure deferred evidence keeps the latest stored check
+time among its included categories, an aggregate containing a new current delta
+uses the current check, and telemetry keeps its own condition-local observation
+time. Concrete unsafe conditions retain an hourly recurrence. The object writes
+Linq provider-attempt admission before egress, never attempts more than once per
+hour across all incidents, and reuses the
 exact body plus idempotency key after an ambiguous send. Concrete-pressure
 bodies select deterministically by persisted incident and alert identity from
 one hundred reviewed, observation-scoped openings. Those openings say only
 that the recorded check met alert criteria; condition-specific and current-
 state claims come from evidence that proves them. Retries therefore keep a
 truthful body after recovery, while consecutive pages avoid broadcast-shaped
-repetition without padding or filler. Telemetry-
-only pages remain evidence-led and one-shot for each unresolved monitoring
+repetition without padding or filler. Telemetry-only pages remain evidence-led
+and one-shot for each unresolved monitoring
 window. The one-hundred-entry size is a bounded operator deliverability
 requirement, not a guarantee about carrier or platform filtering: at the hourly
 cap, one incident traverses one hundred reviewed leads before repeating one.
 The bank stays literal reviewed data rather than generated prose or another
-runtime dependency. The alert-state and sample-evidence columns are added idempotently without advancing the
-schema version, so the previously deployed Worker can ignore them during a
-rollback. If that Worker acknowledges a telemetry pending body, current code
-recognizes its cleared key/body plus retained marker and prevents duplicate
-re-admission after re-upgrade. The message reports actual collection time rather than the scheduled Cron
-slot and describes partial or unavailable telemetry without claiming database
-pressure.
+runtime dependency. The alert-state and sample-evidence columns are added
+idempotently without advancing the schema version, so the previously deployed
+Worker can ignore them during a rollback. The physical sample columns retain
+their legacy `direct_connection_error_*` names, while current code stores the
+generalized two-port baseline and aggregate delta in them. Category-specific
+pooled-defer state uses additive columns. If the prior Worker acknowledges a
+telemetry pending body, current code recognizes its cleared key/body plus
+retained marker and prevents duplicate re-admission after re-upgrade. The
+message reports actual collection time rather than the scheduled Cron slot and
+describes partial or unavailable telemetry without claiming database pressure.
 Before each message POST it requires the configured direct
 [Linq chat health](https://docs.linqapp.com/guides/chats/chat-health/) and its
 current [line reputation](https://docs.linqapp.com/guides/phone-numbers/phone-reputation/)

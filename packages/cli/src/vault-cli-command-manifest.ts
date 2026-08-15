@@ -1019,6 +1019,10 @@ export const vaultCliCommandDescriptors = [
         description: 'Show calorie and macro totals from meal nutrition over an optional date range.',
       },
       {
+        path: ['meal', 'nutrients'],
+        description: 'Show water, vitamin, and mineral totals with per-nutrient meal coverage over an optional date range.',
+      },
+      {
         path: ['meal', 'manifest'],
         description: 'Show the immutable raw-import manifest for one recorded meal.',
       },
@@ -1155,12 +1159,12 @@ export const vaultCliCommandDescriptors = [
       },
       {
         path: ['workout', 'import', 'inspect'],
-        description: 'Inspect one workout CSV file without writing anything.',
+        description: 'Inspect one workout CSV file without writing anything, including timezone and unit requirements.',
       },
       {
         path: ['workout', 'import', 'csv'],
         description:
-          'Copy one workout CSV export into raw/workouts/** and optionally map it into activity_session events.',
+          'Validate one complete workout CSV and bulk-commit replay-safe activity_session events with bounded output.',
       },
       {
         path: ['workout', 'format', 'save'],

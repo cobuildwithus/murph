@@ -63,6 +63,7 @@ import {
 import type {
   AssistantResponseCard,
 } from "@murphai/operator-config/assistant-response-cards";
+import type { MemberActionOutcomeV1 } from "@murphai/contracts";
 import type {
   HostedBrowserVaultReplicaRef,
   HostedExecutionExternalThreadRouteAuthority,
@@ -337,6 +338,10 @@ export interface HostedRuntimeAssistantAskCompletionAuthority {
 export type HostedRuntimeAssistantAskPrivateCompletionAuthority =
   HostedExecutionPrivateAssistantAskCompletionDeliveryAuthority;
 
+export interface HostedRuntimeAssistantAskPrivateCompletionAuthorityResult {
+  assistantAskFallbackRequired?: boolean | null;
+}
+
 export interface HostedRuntimeExternalThreadRouteAuthorityResult {
   assistantAskFallbackRequired?: boolean | null;
 }
@@ -409,7 +414,7 @@ type HostedRuntimeEffectsPortBase = {
   assertAssistantAskPrivateCompletionAuthority?(
     authority: HostedRuntimeAssistantAskPrivateCompletionAuthority,
     context?: { signal?: AbortSignal | null },
-  ): Promise<void>;
+  ): Promise<HostedRuntimeAssistantAskPrivateCompletionAuthorityResult | void>;
   resolveCurrentVerifiedEmailRecipient?(
     context?: { signal?: AbortSignal | null },
   ): Promise<string | null>;
@@ -578,6 +583,10 @@ export interface HostedRuntimeMailboxPort {
   fetchPayload(
     request: HostedMailboxPayloadFetchRequest,
   ): Promise<HostedMailboxPayloadFetchResponse>;
+  recordMemberActionOutcome?(
+    outcome: MemberActionOutcomeV1,
+    context?: { signal?: AbortSignal | null },
+  ): Promise<void>;
 }
 
 export interface HostedRuntimeWorkspacePort {
@@ -691,11 +700,19 @@ export interface HostedRuntimeActionApprovalPort {
 export interface HostedRuntimeVaultSharePort {
   listActiveProjectionScopes(input?: {
     projectionMode?: HostedVaultShareProjectionMode;
+    signal?: AbortSignal | null;
   }): Promise<HostedVaultShareActiveProjectionKindsResponse>;
   deliver(
     request: HostedVaultShareDeliverRequest,
-  ): Promise<HostedVaultShareDeliverResponse>;
+  ): Promise<HostedRuntimeVaultShareDeliverResult>;
 }
+
+export type HostedRuntimeVaultShareDeliverResult =
+  | HostedVaultShareDeliverResponse
+  | {
+    /** Web reached a terminal response, but this scope still needs retry. */
+    status: "scope-failed";
+  };
 
 export interface HostedRuntimePlatform {
   actionApprovalPort?: HostedRuntimeActionApprovalPort | null;

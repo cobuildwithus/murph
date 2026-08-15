@@ -48,6 +48,10 @@
         "class_name": "DatabaseHealthDurableObject"
       },
       {
+        "name": "DEVICE_WEBHOOK_QUEUE_MONITOR",
+        "class_name": "DeviceWebhookQueueHealthDurableObject"
+      },
+      {
         "name": "RUNNER_CONTAINER",
         "class_name": "RunnerContainer"
       },
@@ -76,10 +80,37 @@
     {
       "tag": "v4",
       "new_sqlite_classes": ["DatabaseHealthDurableObject"]
+    },
+    {
+      "tag": "v5",
+      "new_sqlite_classes": ["DeviceWebhookQueueHealthDurableObject"]
     }
   ],
   "triggers": {
     "crons": ["*/5 * * * *"]
+  },
+  "queues": {
+    "producers": [
+      {
+        "binding": "DEVICE_WEBHOOK_QUEUE",
+        "queue": "murph-hosted-device-webhooks"
+      },
+      {
+        "binding": "DEVICE_WEBHOOK_DLQ",
+        "queue": "murph-hosted-device-webhooks-dlq"
+      }
+    ],
+    "consumers": [
+      {
+        "queue": "murph-hosted-device-webhooks",
+        "max_batch_size": 100,
+        "max_batch_timeout": 5,
+        "max_concurrency": 1,
+        "max_retries": 10,
+        "retry_delay": 30,
+        "dead_letter_queue": "murph-hosted-device-webhooks-dlq"
+      }
+    ]
   },
   "r2_buckets": [
     {

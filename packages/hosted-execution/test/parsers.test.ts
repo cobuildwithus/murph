@@ -8,6 +8,7 @@ import {
   HOSTED_RUNTIME_GROUP_SENDER_HANDLE_MAX_CODE_POINTS,
   HOSTED_RUNTIME_GROUP_TOOL_REQUEST_MAX_BYTES,
 } from "../src/runtime-control.ts";
+import { HOSTED_VAULT_SHARE_DELIVER_MAX_RECORDS } from "../src/vault-share.ts";
 
 import {
   parseHostedExecutionDirectRoute,
@@ -2738,14 +2739,24 @@ describe("parseHostedRuntimeGroupTool", () => {
           ...result.members[0],
           projections: [{
             ...projection,
-            records: Array.from({ length: 9 }, (_, index) => ({
-              ...projection.records[0],
-              recordKey: `2026-07-0${index + 1}`,
-            })),
+            records: Array.from(
+              { length: HOSTED_VAULT_SHARE_DELIVER_MAX_RECORDS + 1 },
+              (_, index) => {
+                const date = new Date(Date.UTC(2026, 0, index + 1))
+                  .toISOString()
+                  .slice(0, 10);
+                return {
+                  ...projection.records[0],
+                  data: { ...projection.records[0].data, date },
+                  occurredAt: `${date}T00:00:00.000Z`,
+                  recordKey: date,
+                };
+              },
+            ),
           }],
         }],
       },
-    })).toThrow(/at most 8/u);
+    })).toThrow(new RegExp(`at most ${HOSTED_VAULT_SHARE_DELIVER_MAX_RECORDS}`, "u"));
     expect(() => parseHostedRuntimeGroupToolResponse({
       action: "read_shared",
       result: {

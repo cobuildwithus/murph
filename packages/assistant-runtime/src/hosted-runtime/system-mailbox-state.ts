@@ -6,6 +6,7 @@ import {
 import {
   parseHostedExecutionWake,
 } from "@murphai/hosted-execution/parsers";
+import { parseMemberActionOutcomeV1 } from "@murphai/contracts";
 import {
   parseHostedClinicalRecordsRecordOutcomeRequest,
 } from "@murphai/hosted-execution/clinical-records-boundary";
@@ -50,12 +51,14 @@ const HOSTED_VAULT_SHARE_PROJECTION_MAILBOX_DEDUPE_KEY_PREFIX =
 
 type HostedSystemMailboxSerializationKey =
   | HostedSystemMailboxRouteAction
-  | "apply-vault-share-projection";
+  | "apply-vault-share-projection"
+  | `run-device-sync-wake:${string}`;
 
 export type HostedSystemMailboxRouteAction =
   | "apply-member-activation"
   | "apply-member-channels-update"
   | "apply-member-preferences"
+  | "apply-member-action"
   | "initialize-group-room-model"
   | "dispatch-assistant-notification"
   | "run-assistant-ask"
@@ -63,6 +66,7 @@ export type HostedSystemMailboxRouteAction =
   | "run-clinical-records-sync"
   | "run-device-sync-wake"
   | "run-environment-voice"
+  | "import-reported-daily-metric"
   | "apply-runtime-control-request";
 
 export interface HostedSystemMailboxPendingItem {
@@ -493,6 +497,7 @@ function parseHostedSystemMailboxRouteAction(value: unknown): HostedSystemMailbo
     value === "apply-member-activation"
     || value === "apply-member-channels-update"
     || value === "apply-member-preferences"
+    || value === "apply-member-action"
     || value === "initialize-group-room-model"
     || value === "dispatch-assistant-notification"
     || value === "run-assistant-ask"
@@ -500,6 +505,7 @@ function parseHostedSystemMailboxRouteAction(value: unknown): HostedSystemMailbo
     || value === "run-clinical-records-sync"
     || value === "run-device-sync-wake"
     || value === "run-environment-voice"
+    || value === "import-reported-daily-metric"
     || value === "apply-runtime-control-request"
   ) {
     return value;
@@ -566,9 +572,13 @@ function parseHostedSystemMailboxRecordRequest(
         "hosted system mailbox postCheckpointRecord records must be an array.",
       );
     }
-    if (record.records.length === 0 && record.nextWakeAt == null) {
+    if (
+      record.records.length === 0
+      && record.nextWakeAt == null
+      && record.retainMailboxItemUntil == null
+    ) {
       throw new TypeError(
-        "hosted system mailbox postCheckpointRecord empty records must include nextWakeAt.",
+        "hosted system mailbox postCheckpointRecord empty records must include a wake.",
       );
     }
     if (record.records.length > HOSTED_DEVICE_SYNC_DIRTY_ACK_BATCH_MAX_RECORDS) {
@@ -585,6 +595,19 @@ function parseHostedSystemMailboxRecordRequest(
               record.nextWakeAt,
               "hosted system mailbox postCheckpointRecord nextWakeAt",
             ),
+          }),
+      ...(record.retainMailboxItemUntil === undefined
+        ? {}
+        : {
+            retainMailboxItemUntil: readNullableIsoTimestamp(
+              record.retainMailboxItemUntil,
+              "hosted system mailbox postCheckpointRecord retainMailboxItemUntil",
+            ),
+          }),
+      ...(record.retainedWake === undefined
+        ? {}
+        : {
+            retainedWake: parseHostedDeviceSyncRetainedWake(record.retainedWake),
           }),
       records: record.records.map((entry, index) =>
         parseHostedDeviceSyncDirtyProcessedPostCheckpointRecord(
@@ -637,7 +660,31 @@ function parseHostedSystemMailboxRecordRequest(
     };
   }
 
+  if (record.kind === "member-action.outcome-recorded") {
+    assertHostedSystemMailboxRecordKeys(
+      record,
+      ["kind", "outcome"],
+      "hosted system mailbox member-action postCheckpointRecord",
+    );
+    return {
+      kind: "member-action.outcome-recorded",
+      outcome: parseMemberActionOutcomeV1(record.outcome),
+    };
+  }
+
   throw new TypeError("hosted system mailbox postCheckpointRecord kind is invalid.");
+}
+
+function parseHostedDeviceSyncRetainedWake(
+  value: unknown,
+): Extract<HostedExecutionSystemWake, { kind: "device-sync.wake" }> {
+  const wake = parseHostedExecutionWake(value);
+  if (wake.kind !== "device-sync.wake") {
+    throw new TypeError(
+      "hosted system mailbox postCheckpointRecord retainedWake must be a device-sync wake.",
+    );
+  }
+  return wake;
 }
 
 function assertHostedSystemMailboxRecordKeys(
@@ -713,12 +760,22 @@ function systemMailboxItemRouteActionAllowed(
 function resolveHostedSystemMailboxSerializationKey(
   item: HostedSystemMailboxPendingItem,
 ): HostedSystemMailboxSerializationKey {
-  return item.postCheckpointRecord?.kind === "vault-share.projection"
+  if (
+    item.postCheckpointRecord?.kind === "vault-share.projection"
     || item.mailboxDedupeKey.startsWith(
       HOSTED_VAULT_SHARE_PROJECTION_MAILBOX_DEDUPE_KEY_PREFIX,
     )
-    ? "apply-vault-share-projection"
-    : item.routeAction;
+  ) {
+    return "apply-vault-share-projection";
+  }
+  if (
+    item.routeAction === "run-device-sync-wake"
+    && item.wake.kind === "device-sync.wake"
+    && item.wake.connectionId
+  ) {
+    return `${item.routeAction}:${item.wake.connectionId}`;
+  }
+  return item.routeAction;
 }
 
 function systemMailboxItemIsDue(
