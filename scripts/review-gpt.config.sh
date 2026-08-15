@@ -12,7 +12,7 @@ if [[ -r "$review_gpt_local_config" ]]; then
 fi
 
 review_gpt_invalid_browser_lane() {
-  echo "Error: unsupported ReviewGPT browser lane '$1'. Use main, random, eragon, phlebas, hercules, or mountain." >&2
+  echo "Error: unsupported ReviewGPT browser lane '$1'. Use main, random, eragon, phlebas, hercules, mountain, or vonneumann." >&2
 }
 
 review_gpt_browser_lane_display_name() {
@@ -22,6 +22,7 @@ review_gpt_browser_lane_display_name() {
     phlebas) printf '%s\n' "Phlebas" ;;
     hercules) printf '%s\n' "Hercules" ;;
     mountain) printf '%s\n' "Mountain" ;;
+    vonneumann) printf '%s\n' "Vonneumann" ;;
     *)
       review_gpt_invalid_browser_lane "$1"
       return 1
@@ -36,6 +37,7 @@ review_gpt_browser_lane_port() {
     phlebas) printf '%s\n' "9442" ;;
     hercules) printf '%s\n' "9444" ;;
     mountain) printf '%s\n' "9450" ;;
+    vonneumann) printf '%s\n' "9446" ;;
     *)
       review_gpt_invalid_browser_lane "$1"
       return 1
@@ -134,8 +136,8 @@ if [[ "$review_gpt_reuses_existing_thread" == "1" ]]; then
   esac
 fi
 
-if [[ ! "$review_gpt_browser_lane_count" =~ ^[1-4]$ ]]; then
-  echo "Error: REVIEW_GPT_BROWSER_LANE_COUNT must be an integer from 1 to 4." >&2
+if [[ ! "$review_gpt_browser_lane_count" =~ ^[1-5]$ ]]; then
+  echo "Error: REVIEW_GPT_BROWSER_LANE_COUNT must be an integer from 1 to 5." >&2
   return 1 2>/dev/null || exit 1
 fi
 
@@ -144,7 +146,7 @@ case "$review_gpt_requested_browser_lane" in
     review_gpt_selected_browser_lane="main"
     ;;
   "" | auto | random)
-    review_gpt_all_browser_lanes=(eragon phlebas hercules mountain)
+    review_gpt_all_browser_lanes=(eragon phlebas hercules mountain vonneumann)
     review_gpt_browser_lanes=("${review_gpt_all_browser_lanes[@]:0:review_gpt_browser_lane_count}")
     review_gpt_usable_browser_lanes=()
 
@@ -164,7 +166,7 @@ case "$review_gpt_requested_browser_lane" in
   aragon | eragon)
     review_gpt_selected_browser_lane="eragon"
     ;;
-  phlebas | hercules | mountain)
+  phlebas | hercules | mountain | vonneumann)
     review_gpt_selected_browser_lane="$review_gpt_requested_browser_lane"
     ;;
   *)
