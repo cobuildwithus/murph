@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import {
   executeMurphDynamicToolRequest,
+  MURPH_ATTACH_EXERCISE_ROUTINE_CARD_TOOL,
   MURPH_ATTACH_RESPONSE_CARD_TOOL,
 } from '../src/assistant-codex/dynamic-tools.ts'
 import {
@@ -289,6 +290,70 @@ describe('response-card validation feedback', () => {
       ...INVALID_TABLE,
       rows: [{ label: 'Monday', values: ['Strength', '3 sets'] }],
     })).toMatchObject({ kind: 'attach-response-card' })
+  })
+
+  it('returns value-free exercise-card hints without attaching a card', async () => {
+    const privateMarker = 'synthetic-private-exercise-marker'
+    const request = readTestMurphDynamicToolRequest({
+      id: 2,
+      method: 'item/tool/call',
+      params: {
+        arguments: {
+          card: {
+            exercises: [{
+              dose: '5 repetitions',
+              estimatedSeconds: { privateMarker },
+              images: [],
+              instructions: ['Move slowly.'],
+              name: 'Synthetic movement',
+            }],
+            footer: null,
+            intensity: 'Easy',
+            kind: 'exercise_routine',
+            labels: {
+              dose: 'Dose',
+              exercise: 'Exercise',
+              time: 'Time',
+              visualGuide: 'Visual guide',
+            },
+            safety: 'Stop if uncomfortable.',
+            subtitle: null,
+            title: 'Synthetic routine',
+            totalSeconds: 60,
+            transitionSeconds: 0,
+            version: 1,
+          },
+        },
+        namespace: 'murph',
+        tool: MURPH_ATTACH_EXERCISE_ROUTINE_CARD_TOOL.name,
+      },
+    })
+    expect(request).toMatchObject({ kind: 'invalid-response-card-arguments' })
+
+    const result = await executeMurphDynamicToolRequest({
+      currentResponseCard: null,
+      currentResponseMedia: [],
+      env: {},
+      fetchImpl: fetch,
+      groupChallengeResponseCardAllowed: false,
+      groupSharedReadTurnState: null,
+      knowledgePageReadTextFile: null,
+      nextUsageOrdinal: () => 0,
+      privateDirectResponseCardAllowed: true,
+      progressDelivery: null,
+      request: request!,
+      vaultRoot: null,
+    })
+    const feedback = result.rpcResult.contentItems[0]?.text ?? ''
+
+    expect(result.rpcResult.success).toBe(false)
+    expect(feedback).toContain(
+      '"field":"card.exercises[].estimatedSeconds","code":"invalid_type","expected":"number"',
+    )
+    expect(feedback).not.toContain(privateMarker)
+    expect(feedback).not.toContain('privateMarker')
+    expect(feedback).not.toContain('"received"')
+    expect(result.responseCardPatch).toBeUndefined()
   })
 
   it('keeps compact-table repair hints on exactly one card shape', () => {
