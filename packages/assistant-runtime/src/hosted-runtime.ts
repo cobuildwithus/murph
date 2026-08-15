@@ -5065,7 +5065,6 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           foregroundCausalDeliveryCheckpointBarrierIsPending();
         if (
           foregroundCausalDeliveryCheckpointBarrierPending
-          && imageGenerationController?.hasWork() !== true
         ) {
           setIdleCheckpointStartBy(Date.now());
         }
@@ -5164,13 +5163,15 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           continue;
         }
         if (
-          options.shutdownSignal?.aborted !== true
+          !foregroundCausalDeliveryCheckpointBarrierPending
+          && options.shutdownSignal?.aborted !== true
           && imageGenerationController?.hasCompleted()
         ) {
           continue;
         }
         if (
-          options.shutdownSignal?.aborted !== true
+          !foregroundCausalDeliveryCheckpointBarrierPending
+          && options.shutdownSignal?.aborted !== true
           && imageGenerationController?.hasWork()
         ) {
           markIdleCheckpointTimerAfterDirtyWork();

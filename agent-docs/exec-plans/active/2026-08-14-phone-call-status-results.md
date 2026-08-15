@@ -266,6 +266,20 @@ Updated: 2026-08-15
   intent is not blindly resent; the unrelated intent is still pending in that
   snapshot. The full assistant-runtime suite passes 2,317 tests with 4 skipped
   across 88 files, and package typecheck plus `git diff --check` pass.
+- Final ReviewGPT round 11 found that an unresolved hosted image-generation
+  provider task could keep resetting the dirty quiet window and starve both the
+  selected result's claim checkpoint and its required outcome checkpoint. The
+  parent accepted the finding. A foreground causal delivery barrier now ignores
+  unfinished image work while still flushing any completed image or canonical
+  write before each checkpoint. A focused outer-runtime regression holds the
+  image provider unresolved across both snapshots, proves newer conversation
+  input remains behind the outcome snapshot and can preempt afterward, then
+  releases the image and verifies its completion is admitted normally. The same
+  proof covers shutdown during delivery and confirms the outcome snapshot is
+  committed before the unresolved provider task is released. The full
+  assistant-runtime suite passes 2,318 tests with 4 skipped across 88 files;
+  package/workspace typecheck, docs drift, privacy scan, and `git diff --check`
+  pass.
 - Corrected-head product-experience revalidation finds the implementation is
   again the smallest complete experience for the incident: status is durable,
   stop state is truthful, fallback outcomes are canonical, and an exact result
