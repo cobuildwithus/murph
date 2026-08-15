@@ -50,6 +50,7 @@ import {
   HOSTED_RUNTIME_LOG_PATH,
   HOSTED_RUNTIME_MAILBOX_FETCH_PATH,
   HOSTED_RUNTIME_MAILBOX_PAYLOAD_FETCH_PATH,
+  HOSTED_RUNTIME_MEMBER_ACTION_OUTCOME_PATH,
   HOSTED_RUNTIME_PRODUCT_FEEDBACK_RECORD_PATH,
   HOSTED_RUNTIME_THREAD_ROUTE_AUTHORITY_PATH,
   HOSTED_RUNTIME_USAGE_RECORD_PATH,
@@ -103,6 +104,7 @@ export type HostedRunnerWebControlOperation =
   | "mailbox_fetch"
   | "mailbox_payload_decode"
   | "mailbox_payload_fetch"
+  | "member_action_outcome"
   | "linq_delivery_outcome"
   | "linq_egress_engagement"
   | "plan_usage_tool"
@@ -158,6 +160,7 @@ const HOSTED_RUNNER_WEB_CONTROL_POST_POLICY = new Map<string, HostedRunnerWebCon
   [HOSTED_RUNTIME_THREAD_ROUTE_AUTHORITY_PATH, "thread_route_authority"],
   [HOSTED_RUNTIME_MAILBOX_FETCH_PATH, "mailbox_fetch"],
   [HOSTED_RUNTIME_MAILBOX_PAYLOAD_FETCH_PATH, "mailbox_payload_fetch"],
+  [HOSTED_RUNTIME_MEMBER_ACTION_OUTCOME_PATH, "member_action_outcome"],
   [HOSTED_RUNTIME_LINQ_EGRESS_DELIVERY_PATH, "linq_delivery_outcome"],
   [HOSTED_RUNTIME_LINQ_EGRESS_ENGAGEMENT_PATH, "linq_egress_engagement"],
   [HOSTED_RUNTIME_WORKSPACE_CHECKPOINT_PATH, "workspace_checkpoint"],

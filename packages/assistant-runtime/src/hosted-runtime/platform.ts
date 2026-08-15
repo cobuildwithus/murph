@@ -63,6 +63,7 @@ import {
 import type {
   AssistantResponseCard,
 } from "@murphai/operator-config/assistant-response-cards";
+import type { MemberActionOutcomeV1 } from "@murphai/contracts";
 import type {
   HostedBrowserVaultReplicaRef,
   HostedExecutionExternalThreadRouteAuthority,
@@ -598,6 +599,10 @@ export interface HostedRuntimeMailboxPort {
   fetchPayload(
     request: HostedMailboxPayloadFetchRequest,
   ): Promise<HostedMailboxPayloadFetchResponse>;
+  recordMemberActionOutcome?(
+    outcome: MemberActionOutcomeV1,
+    context?: { signal?: AbortSignal | null },
+  ): Promise<void>;
 }
 
 export interface HostedRuntimeWorkspacePort {
