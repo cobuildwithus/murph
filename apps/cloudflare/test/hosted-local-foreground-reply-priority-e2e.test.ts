@@ -628,7 +628,7 @@ describe.sequential("hosted local foreground reply priority e2e", () => {
       mailboxCaughtUp: true,
       systemHandledThroughSeq: activationAppend.wake.seq,
       systemImportedSeq: activationAppend.wake.seq,
-      systemMailboxPreparedObserved: 1,
+      systemMailboxPreparedObserved: 0,
       systemMailboxRetryableFailedObserved: 0,
     });
     await assertExactlyOneAcceptedReplyAfterBoundary({

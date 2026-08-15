@@ -255,6 +255,7 @@ import type {
 } from "../src/hosted-runtime/mailbox-import.ts";
 import {
   readHostedSystemMailboxState,
+  updateHostedSystemMailboxState,
 } from "../src/hosted-runtime/system-mailbox-state.ts";
 import {
   isHostedDeviceSyncMaintenanceModuleLoadError,
@@ -16053,12 +16054,30 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         memberId: "member_synthetic_phase",
         occurredAt: now,
       });
-      const enqueueOutcome = await systemMailbox.enqueueHostedSystemMailboxItem({
-        item: createResolvedMemberActivationMailboxItem({ occurredAt: now }),
-        vaultRoot,
-        wake: activationWake,
+      const activationItem = createResolvedMemberActivationMailboxItem({
+        occurredAt: now,
       });
-      expect(enqueueOutcome.status).toBe("imported");
+      // Preserve recovery coverage for snapshots created before bootstrap-only
+      // activations stopped creating a second queue item.
+      await updateHostedSystemMailboxState(vaultRoot, () => ({
+        pending: [{
+          attemptCount: 0,
+          itemId: activationItem.item.id,
+          lastAttemptAt: null,
+          lastErrorCode: null,
+          lastErrorMessage: null,
+          mailboxDedupeKey: activationItem.item.dedupeKey,
+          mailboxLaneSeq: activationItem.item.laneSeq,
+          nextAttemptAt: null,
+          occurredAt: activationItem.item.occurredAt,
+          postCheckpointRecord: null,
+          preferenceCausalSeq: null,
+          requestId: null,
+          routeAction: "apply-member-activation",
+          status: "pending",
+          wake: activationWake,
+        }],
+      }));
       expect(await readHostedSystemMailboxState(vaultRoot)).toMatchObject({
         pending: [
           {
