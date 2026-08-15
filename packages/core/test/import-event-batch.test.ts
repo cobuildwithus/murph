@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
 import os from "node:os";
 import path from "node:path";
 import { promises as fs } from "node:fs";
@@ -21,6 +22,7 @@ import {
   updateVaultSummary,
   upsertEvent,
   VaultError,
+  withCanonicalWriteLockScope,
 } from "../src/index.ts";
 import { emitAuditRecord } from "../src/audit.ts";
 
@@ -58,6 +60,38 @@ async function readAllAuditRecords(vaultRoot: string): Promise<AuditRecord[]> {
       relativePath: path.posix.join("audit", relativePath),
     })));
   return records.flat() as AuditRecord[];
+}
+
+async function waitForNewStagedDocumentOperation(
+  vaultRoot: string,
+  existingEntries: ReadonlySet<string>,
+): Promise<void> {
+  const operationDirectory = path.join(vaultRoot, ".runtime", "operations");
+  for (let attempt = 0; attempt < 300; attempt += 1) {
+    const entries = await fs.readdir(operationDirectory).catch(() => [] as string[]);
+    for (const entry of entries) {
+      if (existingEntries.has(entry) || !entry.endsWith(".json")) {
+        continue;
+      }
+      const candidate = JSON.parse(
+        await fs.readFile(path.join(operationDirectory, entry), "utf8"),
+      ) as {
+        operationType?: unknown;
+        status?: unknown;
+        actions?: unknown[];
+      };
+      if (
+        candidate.operationType === "document_import"
+        && candidate.status === "staged"
+        && Array.isArray(candidate.actions)
+        && candidate.actions.length >= 4
+      ) {
+        return;
+      }
+    }
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error("Timed out waiting for the ordinary document import to finish staging.");
 }
 
 function buildSleepSessionPayload(dayOfMonth: number, overrides: Record<string, unknown> = {}) {
@@ -381,7 +415,7 @@ test("workout source status waits for an active canonical write", async () => {
   }
 });
 
-test("whole-source completion is shared by every live exact-byte document alias", async () => {
+test("an ordinary alias committed before guarded apply shares whole-source completion", async () => {
   const vaultRoot = await makeVault("murph-event-batch-source-alias");
   const first = await importWorkoutSourceDocument(vaultRoot, "murph-event-batch-source-alias");
   const alias = await importDocument({
@@ -415,6 +449,108 @@ test("whole-source completion is shared by every live exact-byte document alias"
       return true;
     },
   );
+});
+
+test("an ordinary alias staged before guarded apply shares completion after its later commit", async () => {
+  const vaultRoot = await makeVault("murph-event-batch-source-alias-interleaving");
+  const first = await importWorkoutSourceDocument(
+    vaultRoot,
+    "murph-event-batch-source-alias-interleaving",
+  );
+  const operationDirectory = path.join(vaultRoot, ".runtime", "operations");
+  const existingOperations = new Set(
+    await fs.readdir(operationDirectory).catch(() => [] as string[]),
+  );
+  const childScript = [
+    "const core = await import(process.env.MURPH_TEST_CORE_MODULE_URL);",
+    "const result = await core.importDocument({",
+    "  vaultRoot: process.env.MURPH_TEST_VAULT_ROOT,",
+    "  sourcePath: process.env.MURPH_TEST_SOURCE_PATH,",
+    "});",
+    "process.stdout.write(JSON.stringify({ rawRef: result.raw.relativePath }));",
+  ].join("\n");
+  const child = spawn(
+    process.execPath,
+    ["--import", "tsx", "--input-type=module", "--eval", childScript],
+    {
+      env: {
+        ...process.env,
+        MURPH_TEST_CORE_MODULE_URL: new URL("../src/index.ts", import.meta.url).href,
+        MURPH_TEST_SOURCE_PATH: first.sourcePath,
+        MURPH_TEST_VAULT_ROOT: vaultRoot,
+      },
+      stdio: ["ignore", "pipe", "ignore"],
+    },
+  );
+  let childOutput = "";
+  child.stdout.setEncoding("utf8");
+  child.stdout.on("data", (chunk: string) => {
+    childOutput += chunk;
+  });
+  const childExit = new Promise<number | null>((resolve) => {
+    child.once("exit", (code) => resolve(code));
+  });
+
+  await withCanonicalWriteLockScope(vaultRoot, async () => {
+    const lock = await acquireCanonicalWriteLock(vaultRoot);
+    try {
+      await waitForNewStagedDocumentOperation(vaultRoot, existingOperations);
+      const reused = await importDocument({
+        vaultRoot,
+        sourcePath: first.sourcePath,
+        reuseExact: true,
+      });
+      assert.equal(reused.documentId, first.documentId);
+
+      const applied = await importEventBatch({
+        vaultRoot,
+        payloads: [buildActivitySessionPayload(first.raw.relativePath)],
+        rejectIfSourceRawRefAlreadyImported: first.raw.relativePath,
+        apply: true,
+      });
+      assert.equal(applied.applied, true);
+    } finally {
+      await lock.release();
+    }
+  });
+
+  assert.equal(await childExit, 0);
+  const alias = JSON.parse(childOutput) as { rawRef?: unknown };
+  if (typeof alias.rawRef !== "string") {
+    throw new Error("Ordinary document child did not return a raw reference.");
+  }
+  const aliasRawRef = alias.rawRef;
+  assert.notEqual(aliasRawRef, first.raw.relativePath);
+  assert.equal(await resolveWorkoutSourceImportStatus({
+    vaultRoot,
+    rawRef: first.raw.relativePath,
+  }), "completed");
+  assert.equal(await resolveWorkoutSourceImportStatus({
+    vaultRoot,
+    rawRef: aliasRawRef,
+  }), "completed");
+  assert.equal(
+    (await readAllAuditRecords(vaultRoot)).filter(
+      (record) => record.commandName === "core.importEventBatch.sourceRawRefOnce",
+    ).length,
+    1,
+  );
+
+  for (const rawRef of [first.raw.relativePath, aliasRawRef]) {
+    await assert.rejects(
+      importEventBatch({
+        vaultRoot,
+        payloads: [buildActivitySessionPayload(rawRef, 60)],
+        rejectIfSourceRawRefAlreadyImported: rawRef,
+        apply: true,
+      }),
+      (error) => {
+        assert.equal(error instanceof VaultError, true);
+        assert.equal((error as VaultError).code, "EVENT_BATCH_SOURCE_ALREADY_IMPORTED");
+        return true;
+      },
+    );
+  }
 });
 
 test("source-guarded apply rejects a source document deleted after dry-run", async () => {

@@ -507,7 +507,9 @@ export async function stopExperiment(
 export async function importDocument(
   input: Parameters<typeof importDocumentInternal>[0],
 ): ReturnType<typeof importDocumentInternal> {
-  return withCanonicalInputWriteLock(input, importDocumentInternal);
+  return input.reuseExact === true
+    ? withCanonicalInputWriteLock(input, importDocumentInternal)
+    : importDocumentInternal(input);
 }
 
 export async function resolveWorkoutSourceImportStatus(

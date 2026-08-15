@@ -334,7 +334,7 @@ test("append-style mutation ports bypass the outer canonical write lock while ex
   assert.equal(scopeMock.mock.calls.length, 2);
 });
 
-test("document imports and workout completion reads share the outer canonical write lock", async () => {
+test("only exact document reuse and workout completion reads use the outer canonical write lock", async () => {
   const vaultRoot = await makeTempDirectory("murph-core-document-status-lock");
   const sourceRoot = await makeTempDirectory("murph-core-document-status-lock-source");
   const sourcePath = path.join(sourceRoot, "workouts.csv");
@@ -346,6 +346,10 @@ test("document imports and workout completion reads share the outer canonical wr
   scopeMock.mockClear();
 
   const source = await importDocument({ vaultRoot, sourcePath });
+  assert.equal(scopeMock.mock.calls.length, 0);
+  const reused = await importDocument({ vaultRoot, sourcePath, reuseExact: true });
+  assert.equal(reused.created, false);
+  assert.equal(scopeMock.mock.calls.length, 1);
   assert.equal(await resolveWorkoutSourceImportStatus({
     vaultRoot,
     rawRef: source.raw.relativePath,
