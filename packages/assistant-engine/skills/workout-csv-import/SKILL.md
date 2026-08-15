@@ -71,11 +71,19 @@ batch write. Keep raw rows out of model context and user-facing replies.
 - A refreshed export with different bytes is a new source. The generic path
   cannot safely infer provider corrections, edits, or deletions across exports;
   disclose that limitation. Strong and Hevy retain those richer semantics.
-- Apply at most once for the current request and never blindly retry an
-  ambiguous failure. A later attempt repeats the exact-source status check
-  before transforming: `completed` stops as already imported,
-  `partial_conflict` stops for explicit recovery, and only `not_imported` may
-  proceed.
+- Never blindly retry a failed apply. When the apply child definitely exits
+  without a trusted receipt and the current turn still has the raw ref and
+  temporary JSONL, first verify that the JSONL digest is unchanged and run the
+  exact-source status check again in the same turn. `completed` means the
+  original apply committed: perform a bounded canonical read and report that
+  result without another apply. `partial_conflict` stops for explicit recovery.
+  `not_imported` permits exactly one proof-backed recovery apply of the same
+  verified bytes; confirm its receipt and canonical readback. Never make more
+  than one recovery attempt or more than one successful canonical apply.
+- If the child may still be running, its termination is unknown, the digest
+  changed, status is unavailable, or the canonical lock cannot be trusted, do
+  not retry. Report the genuinely unresolved result. A later-turn status check
+  remains the recovery path only when the original turn or workspace was lost.
 
 ## Validate, apply, and verify
 
@@ -93,10 +101,14 @@ batch write. Keep raw rows out of model context and user-facing replies.
 
    `vault-cli event import-jsonl --input @<temporary.jsonl> --source-raw-ref-once <raw-file-ref> --apply --format json`
 
-4. Treat the apply receipt as the batch result. Confirm a bounded,
-   representative selection through canonical `event list` or `show` reads,
-   covering the imported date range when practical. Do not claim a full
-   readback count if the query limit sampled only part of a large import.
-5. Tell the member how many workouts were created, skipped, or updated, the
+4. Treat a successful apply receipt as the batch result. If the command instead
+   returns without a trusted receipt, follow the same-turn status resolution
+   above before replying. Do not leave an immediately provable commit
+   unresolved, and do not retry when the proof conditions are incomplete.
+5. Confirm a bounded, representative selection through canonical `event list`
+   or `show` reads, covering the imported date range when practical. Do not
+   claim a full readback count if the query limit sampled only part of a large
+   import.
+6. Tell the member how many workouts were created, skipped, or updated, the
    mapped date range, any deliberately ignored rows, and any replay limitation.
    Never expose internal ids, raw rows, temporary paths, or bookkeeping jargon.
