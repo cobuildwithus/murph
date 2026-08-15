@@ -22,6 +22,7 @@ import {
 
 const WINDOW_START = "2025-12-20T00:00:00.000Z";
 const WINDOW_END = "2026-03-20T00:00:00.000Z";
+const DEPLOYED_M1_CAFFEINE_AND_WEIGHT_COVERAGE = `m1|4010${"00".repeat(102)}`;
 
 describe("Junction extended-history coverage reset", () => {
   it("removes only the selected source and resource matrix bit", () => {
@@ -206,7 +207,7 @@ describe("Junction extended timeseries history coverage", () => {
     if (typeof encoded !== "string") {
       throw new TypeError("Expected encoded Junction extended-history coverage.");
     }
-    expect(encoded).toHaveLength(195);
+    expect(encoded).toHaveLength(211);
     expect(encoded.length).toBeLessThanOrEqual(DEVICE_SYNC_METADATA_MAX_STRING_LENGTH);
     expect(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
       coverage,
@@ -242,38 +243,53 @@ describe("Junction extended timeseries history coverage", () => {
     )).toBe(true);
   });
 
-  it("keeps deployed m1 coordinates until the first body coordinate requires m2", () => {
-    const deployed = addCoverage(
-      addCoverage({}, "omron", "caffeine"),
-      "withings",
-      "water",
-    );
-    const deployedValue = deployed.junctionBloodPressureHistoryBackfillCoverage;
-    expect(deployedValue).toMatch(/^m1\|/u);
-    expect(deployedValue).toHaveLength(195);
-
-    const migrated = addCoverage(deployed, "withings", "weight");
-    const migratedValue = migrated.junctionBloodPressureHistoryBackfillCoverage;
-    expect(migratedValue).toMatch(/^m2\|/u);
-    expect(migratedValue).toHaveLength(185);
+  it("preserves deployed m1 weight coverage while promoting each new body coordinate", () => {
+    const deployed = {
+      junctionBloodPressureHistoryBackfillCoverage:
+        DEPLOYED_M1_CAFFEINE_AND_WEIGHT_COVERAGE,
+    };
+    expect(DEPLOYED_M1_CAFFEINE_AND_WEIGHT_COVERAGE).toHaveLength(211);
     expect(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
-      migrated,
-      "omron",
+      deployed,
+      "whoop_v2",
       "caffeine",
       1,
     )).toBe(true);
     expect(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
-      migrated,
-      "withings",
-      "water",
-      1,
-    )).toBe(true);
-    expect(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
-      migrated,
-      "withings",
+      deployed,
+      "whoop_v2",
       "weight",
       1,
     )).toBe(true);
+
+    for (const resource of [
+      "fat",
+      "body_mass_index",
+      "lean_body_mass",
+      "waist_circumference",
+    ] as const) {
+      const migrated = addCoverage(deployed, "whoop_v2", resource);
+      expect(migrated.junctionBloodPressureHistoryBackfillCoverage).toMatch(/^m2\|/u);
+      expect(migrated.junctionBloodPressureHistoryBackfillCoverage).toHaveLength(185);
+      expect(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
+        migrated,
+        "whoop_v2",
+        "caffeine",
+        1,
+      )).toBe(true);
+      expect(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
+        migrated,
+        "whoop_v2",
+        "weight",
+        1,
+      )).toBe(true);
+      expect(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
+        migrated,
+        "whoop_v2",
+        resource,
+        1,
+      )).toBe(true);
+    }
   });
 
   it("unions unpublished local resource bits without losing hosted coverage", () => {
@@ -444,6 +460,33 @@ describe("Junction extended timeseries history coverage", () => {
       "caffeine",
       1,
     )).toBe(true);
+  });
+
+  it("upgrades deployed m1 through its existing slot in a full metadata envelope", () => {
+    const existing = {
+      ...Object.fromEntries(
+        Array.from({ length: 15 }, (_, index) => [`capacityFact${index}`, index]),
+      ),
+      junctionBloodPressureHistoryBackfillCoverage:
+        DEPLOYED_M1_CAFFEINE_AND_WEIGHT_COVERAGE,
+    };
+    const update = requireCoverageUpdate(existing, "whoop_v2", "fat");
+    const merged = mergeStoredDeviceSyncMetadataPatch(existing, {
+      [update.metadataKey]: update.value,
+    });
+
+    expect(update.metadataKey).toBe("junctionBloodPressureHistoryBackfillCoverage");
+    expect(Object.keys(existing)).toHaveLength(16);
+    expect(Object.keys(merged)).toHaveLength(16);
+    expect(Object.keys(existing).every((key) => Object.hasOwn(merged, key))).toBe(true);
+    for (const resource of ["caffeine", "weight", "fat"] as const) {
+      expect(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
+        merged,
+        "whoop_v2",
+        resource,
+        1,
+      )).toBe(true);
+    }
   });
 
   it("rejects a full metadata envelope without a reusable coverage slot", () => {

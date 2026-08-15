@@ -45,6 +45,7 @@ const SAME_DAY_LATER = "2026-06-11T18:00:00.000Z";
 const BACKFILL_WINDOW_END = "2026-06-11T00:00:00.000Z";
 const BP_HISTORY_COVERAGE_KEY = "junctionBloodPressureHistoryBackfillCoverage";
 const NOTE_HISTORY_COVERAGE_KEY = "junctionNoteHistoryBackfillCoverage";
+const DEPLOYED_M1_CAFFEINE_AND_WEIGHT_COVERAGE = `m1|4010${"00".repeat(102)}`;
 const SPARSE_DAILY_HISTORY_RESOURCES = [
   "afib_burden",
   "basal_body_temperature",
@@ -1186,6 +1187,54 @@ test("terminal matrix coverage suppresses every extended-history pair", () => {
     ),
     false,
   );
+});
+
+test("deployed m1 schedules only the four newly appended body coordinates", () => {
+  const resources = [
+    "weight",
+    "fat",
+    "body_mass_index",
+    "lean_body_mass",
+    "waist_circumference",
+  ] as const;
+  const availability = Object.fromEntries(resources.map((resource) => [resource, true]));
+  const provider = createProvider({
+    providerState: { resourceAvailability: availability, status: "connected" },
+    requests: [],
+    timeseriesResources: resources,
+  });
+  const createScheduledJobs = requireValue(
+    requireValue(provider.jobExecutor).createScheduledJobs,
+  );
+  const account = createStoredAccount({
+    metadata: {
+      [BP_HISTORY_COVERAGE_KEY]: DEPLOYED_M1_CAFFEINE_AND_WEIGHT_COVERAGE,
+    },
+    sources: [createSourceSummary(
+      "whoop_v2",
+      "2026-01-01T12:00:00.000Z",
+      "connected",
+      availability,
+    )],
+  });
+  const seenResources = new Set<string>();
+  for (let slot = 0; slot < 4; slot += 1) {
+    for (const job of createScheduledJobs(
+      account,
+      new Date(Date.parse(NOW) + slot * 60 * 60_000).toISOString(),
+    ).jobs) {
+      if (job.kind === "resource" && job.payload?.historicalBackfill === true) {
+        seenResources.add(String(job.payload.resource));
+      }
+    }
+  }
+
+  assert.deepEqual([...seenResources].sort(), [
+    "body_mass_index",
+    "fat",
+    "lean_body_mass",
+    "waist_circumference",
+  ]);
 });
 
 test("one reconnect clears exactly 16 schedule-time coordinates at maximum source cardinality", () => {
