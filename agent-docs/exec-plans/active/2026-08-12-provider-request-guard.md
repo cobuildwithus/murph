@@ -447,6 +447,34 @@ Updated: 2026-08-15
   roots, with provider-neutral and literal-computed controls. No scanner,
   registry, exception, compatibility path, second provenance owner, or
   provider request was added.
+- Exact full-snapshot round 18 at
+  `f456daebd2b2e521129fdc5550a40ad06a30d416` returned
+  `RETROSPECTIVE_REQUIRED`. The round-17 local root grammar did not recognize
+  awaited calls or conditional/logical/sequence target expressions, so the
+  same call-produced mutation mechanism could still discard a provider-bound
+  transport.
+- Requirement decision: mutable local member transport storage remains a
+  required bounded capability because closed object/array members, aliases,
+  destructuring, direct writes, and `Object.assign` are already explicit guard
+  contract. The repeated failure came from a second target-expression grammar,
+  not from that requirement. Delete the duplicate root reader and make one
+  resolver own target syntax, root binding, mutation matching, and the
+  fail-closed opacity result.
+- Implemented that decision with one target-expression resolver shared by the
+  opaque mutation boundary, mutation relevance checks, and effective member
+  initializer matching. Identifier/static-member and
+  conditional/logical/sequence alternatives are the bounded supported syntax;
+  computed segments remain conservative wildcard matches. Parameters, `this`,
+  immediate or awaited calls, and every other unsupported target are opaque.
+  Provider-bound transports fail at that mutation boundary, while
+  provider-neutral values remain clean. Scope shadows and later definitive
+  reassignment remain authoritative. No scanner, registry, exception,
+  compatibility path, second provenance owner, or provider request was added.
+- The direct-write and `Object.assign` regression matrix now covers immediate
+  and awaited calls, parameters, `this`, conditional/logical/sequence
+  alternatives, provider-neutral values, lexical shadows, and definitive
+  reassignment. The focused guard suite passes 126 tests and the production
+  provider scan passes on the retrospective implementation.
 
 ## Verification
 
@@ -459,6 +487,15 @@ Updated: 2026-08-15
 
 Current evidence:
 
+- Round-18 focused provider-guard suite: 126 tests passed.
+- Full repository-tool suite after the round-18 redesign: 39 files and 757
+  tests passed.
+- Repo-tools TypeScript compilation, production provider scan, doc gardening,
+  and `git diff --check` pass on the round-18 redesign. The full workspace
+  command also completed every package/app typecheck, but its independent
+  workspace-boundary phase reports an unchanged relative app import in
+  `packages/cli/test/release-script-coverage-audit.test.ts`; exact-head CI owns
+  that unrelated gate.
 - Focused guard suite: 124 tests passed on the current merged base, including
   direct ReviewGPT reproductions and negative controls for unrelated objects,
   imports, namespace aliases, closed member origins and mutations, callables,

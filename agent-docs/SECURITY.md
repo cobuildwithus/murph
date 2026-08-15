@@ -581,8 +581,13 @@ Last verified: 2026-08-14
   and `Object.assign` remain possible values and fail closed when any branch
   carries provider transport provenance, including every chronologically
   possible local alias root retained by a conditional assignment or expression.
-  An opaque alias-producing call cannot prove safety: storing a provider-bound
-  transport through that member fails at the mutation boundary. Destructured
+  One target-expression resolver owns direct-write and `Object.assign`
+  mutation matching plus the fail-closed opacity decision. It follows bounded
+  identifier/static-member and conditional/logical/sequence alternatives;
+  computed segments remain conservative wildcard matches. Parameters, `this`,
+  immediate or awaited calls, and every other unsupported target cannot prove
+  safety, so storing a provider-bound transport through one fails at the
+  mutation boundary. Destructured
   declaration/assignment values, nested property paths, and defaults enter the
   same binding census. Conditional benign transport substitution retains every
   earlier possible transport, while a later definitive benign reassignment

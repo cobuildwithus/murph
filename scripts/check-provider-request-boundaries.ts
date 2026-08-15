@@ -1831,92 +1831,6 @@ function collectOpaqueProviderTransportMutationViolations(input: {
   readonly sourceFile: Node;
   readonly violationsByKey: Map<string, ProviderRequestBoundaryViolation>;
 }): void {
-  const readLocalMemberRoot = (
-    node: Node,
-  ): {
-    readonly hasOpaqueSegment: boolean;
-    readonly memberDepth: number;
-    readonly root: string | null;
-  } | null => {
-    const expression = unwrapExpression(node);
-    if (isIdentifier(expression)) {
-      return {
-        hasOpaqueSegment: false,
-        memberDepth: 0,
-        root: expression.name,
-      };
-    }
-    if (expression.type === "ThisExpression") {
-      return {
-        hasOpaqueSegment: false,
-        memberDepth: 0,
-        root: "this",
-      };
-    }
-    if (isCallExpression(expression) || isOptionalCallExpression(expression)) {
-      const calleeRoot = readLocalMemberRoot(expression.callee);
-      return {
-        hasOpaqueSegment: true,
-        memberDepth: calleeRoot?.memberDepth ?? 0,
-        root: calleeRoot?.root ?? null,
-      };
-    }
-    if (
-      !isMemberExpression(expression) &&
-      !isOptionalMemberExpression(expression)
-    ) {
-      return null;
-    }
-    const objectRoot = readLocalMemberRoot(expression.object);
-    if (!objectRoot) {
-      return null;
-    }
-    const hasStaticProperty =
-      (!expression.computed && isIdentifier(expression.property)) ||
-      (expression.computed &&
-        (isStringLiteral(expression.property) ||
-          isNumericLiteral(expression.property)));
-    return {
-      hasOpaqueSegment: objectRoot.hasOpaqueSegment || !hasStaticProperty,
-      memberDepth: objectRoot.memberDepth + 1,
-      root: objectRoot.root,
-    };
-  };
-  const hasOpaqueLocalRoot = (
-    node: Node,
-    before: number,
-    allowRootOnly = false,
-  ): boolean => {
-    const localRoot = readLocalMemberRoot(node);
-    if (
-      !localRoot ||
-      (!allowRootOnly && localRoot.memberDepth < 1)
-    ) {
-      return false;
-    }
-    if (localRoot.hasOpaqueSegment) {
-      return true;
-    }
-    if (
-      !localRoot.root ||
-      resolvePossibleBindings(input.bindings, localRoot.root, before).length ===
-        0
-    ) {
-      return false;
-    }
-    const path = readMemberPath(node);
-    return Boolean(
-      path &&
-      resolvePossibleStaticMemberPaths(
-        path,
-        input.bindings,
-        before,
-        input.sourceFile,
-      ).some(
-        (resolution) => resolution.opaque,
-      ),
-    );
-  };
   const findBoundProviderFacts = (
     node: Node,
     before: number,
@@ -1991,7 +1905,13 @@ function collectOpaqueProviderTransportMutationViolations(input: {
     }
     if (
       !target ||
-      !hasOpaqueLocalRoot(target, before, targetMayBeRootOnly)
+      !resolvePossibleStaticMemberMutationTargets(
+        target,
+        input.bindings,
+        before,
+        input.sourceFile,
+        targetMayBeRootOnly,
+      ).opaque
     ) {
       continue;
     }
@@ -4728,6 +4648,136 @@ interface StaticMemberPathResolution {
   readonly rootBinding: VariableBinding;
 }
 
+interface StaticMemberMutationTargetResolution {
+  readonly path: readonly (string | null)[];
+  readonly rootBinding: VariableBinding;
+}
+
+interface StaticMemberMutationTargets {
+  readonly opaque: boolean;
+  readonly resolutions: readonly StaticMemberMutationTargetResolution[];
+}
+
+function resolvePossibleStaticMemberMutationTargets(
+  node: Node,
+  bindings: ReadonlyMap<string, readonly VariableBinding[]>,
+  before: number,
+  sourceFile: Node,
+  allowRootOnly: boolean,
+  includeMemberMutations = true,
+): StaticMemberMutationTargets {
+  const target = unwrapExpression(node);
+  if (
+    !allowRootOnly &&
+    !isMemberExpression(target) &&
+    !isOptionalMemberExpression(target)
+  ) {
+    return { opaque: false, resolutions: [] };
+  }
+
+  const syntaxPaths: Array<readonly (string | null)[]> = [];
+  let opaque = false;
+  const visit = (
+    candidate: Node,
+    suffix: readonly (string | null)[],
+  ): void => {
+    const value = unwrapExpression(candidate);
+    if (isIdentifier(value)) {
+      if (allowRootOnly || suffix.length > 0) {
+        syntaxPaths.push([value.name, ...suffix]);
+      }
+      return;
+    }
+    if (value.type === "ThisExpression") {
+      opaque = true;
+      return;
+    }
+    if (isMemberExpression(value) || isOptionalMemberExpression(value)) {
+      const propertyName = !value.computed && isIdentifier(value.property)
+        ? value.property.name
+        : value.computed && isStringLiteral(value.property)
+          ? value.property.value
+          : value.computed && isNumericLiteral(value.property)
+            ? String(value.property.value)
+            : null;
+      if (propertyName === null) {
+        opaque = true;
+      }
+      visit(value.object, [propertyName, ...suffix]);
+      return;
+    }
+    if (value.type === "ConditionalExpression") {
+      visit(value.consequent, suffix);
+      visit(value.alternate, suffix);
+      return;
+    }
+    if (value.type === "LogicalExpression") {
+      visit(value.left, suffix);
+      visit(value.right, suffix);
+      return;
+    }
+    if (value.type === "SequenceExpression") {
+      for (const expression of value.expressions) {
+        visit(expression, suffix);
+      }
+      return;
+    }
+    opaque = true;
+  };
+  visit(target, []);
+
+  const resolutions: StaticMemberMutationTargetResolution[] = [];
+  for (const syntaxPath of syntaxPaths) {
+    const wildcardIndex = syntaxPath.indexOf(null);
+    const staticPrefix = syntaxPath.slice(
+      0,
+      wildcardIndex < 0 ? syntaxPath.length : wildcardIndex,
+    );
+    const staticPath = staticPrefix.filter(
+      (part): part is string => part !== null,
+    );
+    if (staticPath.length === 0 || staticPath.length !== staticPrefix.length) {
+      opaque = true;
+      continue;
+    }
+    const staticResolutions = resolvePossibleStaticMemberPaths(
+      staticPath,
+      bindings,
+      before,
+      sourceFile,
+      includeMemberMutations,
+    );
+    if (staticResolutions.length === 0) {
+      opaque = true;
+      continue;
+    }
+    for (const resolution of staticResolutions) {
+      opaque ||= resolution.opaque;
+      resolutions.push({
+        path: wildcardIndex < 0
+          ? resolution.path
+          : [...resolution.path, ...syntaxPath.slice(wildcardIndex)],
+        rootBinding: resolution.rootBinding,
+      });
+    }
+  }
+
+  return {
+    opaque,
+    resolutions: resolutions.filter((resolution, index) =>
+      resolutions.findIndex((candidate) =>
+        candidate.path.length === resolution.path.length &&
+        candidate.path.every(
+          (part, partIndex) => part === resolution.path[partIndex],
+        ) &&
+        candidate.rootBinding.start === resolution.rootBinding.start &&
+        candidate.rootBinding.scopeStart === resolution.rootBinding.scopeStart &&
+        candidate.rootBinding.scopeEnd === resolution.rootBinding.scopeEnd
+      ) === index
+    ),
+  };
+}
+
 function readPossibleReferencePaths(node: Node): readonly string[][] {
   const value = unwrapExpression(node);
   const direct = isIdentifier(value) ||
@@ -4787,8 +4837,8 @@ function hasPossibleStaticMemberMutationForPath(input: {
     if (position >= input.before) {
       continue;
     }
-    let targetPath: readonly string[] | null = null;
-    let hasUnknownComputedMember = false;
+    let target: Node | null = null;
+    let allowRootOnly = false;
     if (isAssignmentExpression(candidate)) {
       if (
         !isMemberExpression(candidate.left) &&
@@ -4796,50 +4846,46 @@ function hasPossibleStaticMemberMutationForPath(input: {
       ) {
         continue;
       }
-      targetPath = readMemberPath(candidate.left);
-      if (!targetPath && candidate.left.computed) {
-        targetPath = readMemberPath(candidate.left.object);
-        hasUnknownComputedMember = true;
-      }
+      target = candidate.left;
     } else if (
       (isCallExpression(candidate) || isOptionalCallExpression(candidate)) &&
       readMemberPath(candidate.callee)?.join(".") === "Object.assign"
     ) {
-      const target = candidate.arguments[0];
+      const assigned = candidate.arguments[0];
       if (
-        target &&
-        target.type !== "ArgumentPlaceholder" &&
-        target.type !== "SpreadElement"
+        assigned &&
+        assigned.type !== "ArgumentPlaceholder" &&
+        assigned.type !== "SpreadElement"
       ) {
-        targetPath = readMemberPath(target);
+        target = assigned;
+        allowRootOnly = true;
       }
     }
-    const targetRoot = targetPath?.[0];
-    if (!targetPath || !targetRoot) {
+    if (!target) {
       continue;
     }
-    const targetsSameRoot = resolvePossibleStaticMemberPaths(
-      [targetRoot],
+    const mutationTargets = resolvePossibleStaticMemberMutationTargets(
+      target,
       input.bindings,
       position,
       input.sourceFile,
+      allowRootOnly,
       false,
-    ).some((resolution) => hasSameRootBinding(resolution.rootBinding));
-    if (!targetsSameRoot) {
-      continue;
-    }
-    const targetMemberPath = targetPath.slice(1);
-    if (
-      targetMemberPath.length <= input.memberPath.length &&
-      targetMemberPath.every(
-        (part, index) => input.memberPath[index] === part,
-      ) &&
-      (
-        !hasUnknownComputedMember ||
-        targetMemberPath.length < input.memberPath.length
-      )
-    ) {
-      return true;
+    );
+    for (const mutationTarget of mutationTargets.resolutions) {
+      if (!hasSameRootBinding(mutationTarget.rootBinding)) {
+        continue;
+      }
+      const targetMemberPath = mutationTarget.path.slice(1);
+      if (
+        targetMemberPath.length <= input.memberPath.length &&
+        targetMemberPath.every(
+          (part, index) =>
+            part === null || input.memberPath[index] === part,
+        )
+      ) {
+        return true;
+      }
     }
   }
   return false;
@@ -5003,13 +5049,15 @@ function readStaticMemberMutationInitializersForPath(
     left.scopeStart === right.scopeStart &&
     left.scopeEnd === right.scopeEnd;
   const isMutationPrefix = (
-    mutation: StaticMemberPathResolution,
+    mutation: StaticMemberMutationTargetResolution,
     target: StaticMemberPathResolution,
   ): boolean =>
     hasSameRootBinding(mutation.rootBinding, target.rootBinding) &&
     mutation.path.length >= 1 &&
     mutation.path.length <= target.path.length &&
-    mutation.path.every((part, index) => target.path[index] === part);
+    mutation.path.every(
+      (part, index) => part === null || target.path[index] === part,
+    );
   const readNestedValues = (
     value: Node,
     remainingPath: readonly string[],
@@ -5030,16 +5078,13 @@ function readStaticMemberMutationInitializersForPath(
       continue;
     }
     if (isAssignmentExpression(candidate)) {
-      const assignedPath = readMemberPath(candidate.left);
-      const assignedResolutions = assignedPath
-        ? resolvePossibleStaticMemberPaths(
-            assignedPath,
-            bindings,
-            position,
-            sourceFile,
-          )
-        : [];
-      let matchedDirectAssignment = false;
+      const assignedResolutions = resolvePossibleStaticMemberMutationTargets(
+        candidate.left,
+        bindings,
+        position,
+        sourceFile,
+        false,
+      ).resolutions;
       for (const target of targets) {
         for (const assignedResolution of assignedResolutions) {
           if (!isMutationPrefix(assignedResolution, target)) {
@@ -5052,39 +5097,6 @@ function readStaticMemberMutationInitializersForPath(
               position,
             ),
           );
-          matchedDirectAssignment = true;
-        }
-      }
-      if (matchedDirectAssignment) {
-        continue;
-      }
-      if (
-        (isMemberExpression(candidate.left) ||
-          isOptionalMemberExpression(candidate.left)) &&
-        candidate.left.computed
-      ) {
-        const objectPath = readMemberPath(candidate.left.object);
-        const objectResolutions = objectPath
-          ? resolvePossibleStaticMemberPaths(
-              objectPath,
-              bindings,
-              position,
-              sourceFile,
-            )
-          : [];
-        for (const target of targets) {
-          for (const objectResolution of objectResolutions) {
-            if (!isMutationPrefix(objectResolution, target)) {
-              continue;
-            }
-            values.push(
-              ...readNestedValues(
-                candidate.right,
-                target.path.slice(objectResolution.path.length + 1),
-                position,
-              ),
-            );
-          }
         }
       }
       continue;
@@ -5101,15 +5113,13 @@ function readStaticMemberMutationInitializersForPath(
       ) {
         continue;
       }
-      const assignedPath = readMemberPath(assigned);
-      const assignedResolutions = assignedPath
-        ? resolvePossibleStaticMemberPaths(
-            assignedPath,
-            bindings,
-            position,
-            sourceFile,
-          )
-        : [];
+      const assignedResolutions = resolvePossibleStaticMemberMutationTargets(
+        assigned,
+        bindings,
+        position,
+        sourceFile,
+        true,
+      ).resolutions;
       for (const target of targets) {
         for (const assignedResolution of assignedResolutions) {
           if (!isMutationPrefix(assignedResolution, target)) {

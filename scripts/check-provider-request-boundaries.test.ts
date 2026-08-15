@@ -2767,6 +2767,88 @@ describe("check-provider-request-boundaries", () => {
     expect(matches.map((match) => match.line)).toEqual([2, 3, 7, 8, 12, 13]);
   });
 
+  it("uses one target-expression authority for provider transport mutations", () => {
+    const matches = violationsOfKind(
+      "raw-provider-http",
+      [
+        "const left = { send: async (_url: string) => ({ ok: true }) };",
+        "const right = { send: async (_url: string) => ({ ok: true }) };",
+        "const chooseLeft = Date.now() > 0;",
+        "(chooseLeft ? left : right).send = globalThis.fetch.bind(undefined, 'https://api.openai.com/v1/responses');",
+        "await left.send();",
+        "await right.send();",
+        "Object.assign(left || right, { send: globalThis.fetch.bind(undefined, 'https://api.openai.com/v1/responses') });",
+        "await left.send();",
+        "await right.send();",
+        "(left, right).send = globalThis.fetch.bind(undefined, 'https://api.openai.com/v1/responses');",
+        "await right.send();",
+        "async function getHolder(): Promise<typeof left> { return left; }",
+        "(await getHolder()).send = globalThis.fetch.bind(undefined, 'https://api.openai.com/v1/responses');",
+        "Object.assign(await getHolder(), { send: globalThis.fetch.bind(undefined, 'https://api.openai.com/v1/responses') });",
+        "getHolder().send = globalThis.fetch.bind(undefined, 'https://api.openai.com/v1/responses');",
+        "Object.assign(getHolder(), { send: globalThis.fetch.bind(undefined, 'https://api.openai.com/v1/responses') });",
+        "function issue(holder: { send: typeof fetch }) {",
+        "  holder.send = globalThis.fetch.bind(undefined, 'https://api.openai.com/v1/responses');",
+        "  Object.assign(holder, { send: globalThis.fetch.bind(undefined, 'https://api.openai.com/v1/responses') });",
+        "}",
+        "class HolderOwner {",
+        "  holder = { send: async (_url: string) => ({ ok: true }) };",
+        "  issue() {",
+        "    this.holder.send = globalThis.fetch.bind(undefined, 'https://api.openai.com/v1/responses');",
+        "    Object.assign(this.holder, { send: globalThis.fetch.bind(undefined, 'https://api.openai.com/v1/responses') });",
+        "  }",
+        "}",
+        "(await getHolder()).send = async (_url: string) => ({ ok: true });",
+        "Object.assign(getHolder(), { send: async (_url: string) => ({ ok: true }) });",
+        "function benign(holder: { send: (_url: string) => Promise<{ ok: boolean }> }) {",
+        "  holder.send = async (_url: string) => ({ ok: true });",
+        "  Object.assign(holder, { send: async (_url: string) => ({ ok: true }) });",
+        "}",
+      ].join("\n"),
+      "scripts/provider-transport-mutation-target-expressions.mts",
+    );
+
+    expect(matches.map((match) => match.line)).toEqual([
+      5,
+      6,
+      8,
+      9,
+      11,
+      13,
+      14,
+      15,
+      16,
+      18,
+      19,
+      24,
+      25,
+    ]);
+  });
+
+  it("keeps target-expression mutation alternatives inside their binding owners", () => {
+    const matches = violationsOfKind(
+      "raw-provider-http",
+      [
+        "const outer = { send: async (_url: string) => ({ ok: true }) };",
+        "{",
+        "  const left = { send: async (_url: string) => ({ ok: true }) };",
+        "  const right = { send: async (_url: string) => ({ ok: true }) };",
+        "  (Date.now() > 0 ? left : right).send = globalThis.fetch.bind(undefined, 'https://api.openai.com/v1/responses');",
+        "}",
+        "await outer.send();",
+        "const original = { send: async (_url: string) => ({ ok: true }) };",
+        "const replacement = { send: async (_url: string) => ({ ok: true }) };",
+        "let alias = original;",
+        "alias = replacement;",
+        "(alias || replacement).send = globalThis.fetch.bind(undefined, 'https://api.openai.com/v1/responses');",
+        "await original.send();",
+      ].join("\n"),
+      "scripts/scoped-provider-transport-mutation-target-expressions.mts",
+    );
+
+    expect(matches).toEqual([]);
+  });
+
   it("retains earlier transports across conditional benign reassignment", () => {
     const matches = violationsOfKind(
       "raw-provider-http",
