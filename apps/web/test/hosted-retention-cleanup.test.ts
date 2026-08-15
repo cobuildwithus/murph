@@ -226,7 +226,7 @@ describe("hosted retention cleanup", () => {
     ]);
 
     // One statement per category: every short batch stops that category's loop.
-    expect(executeRaw).toHaveBeenCalledTimes(8);
+    expect(executeRaw).toHaveBeenCalledTimes(14);
 
     const callbackNonceCall = findRetentionCall(
       executeRaw,

@@ -22,6 +22,7 @@ import {
   formatHostedConnectedAppToolkitLabel,
   readHostedConnectedAppsConfig,
 } from "../connected-apps/config";
+import { hostedConnectedAppStartedIntentOwnerCutoff } from "../connected-apps/connect-intent-ownership";
 import {
   formatHostedDeviceSyncProviderLabel,
   resolveHostedDeviceSyncBrowserProviderLabel,
@@ -142,6 +143,7 @@ export type HostedAccountStoreDeletionMode =
   | "local-reference-delete"
   | "documented-retention";
 
+const HOSTED_ACCOUNT_DELETION_CONNECTED_APP_INTENT_LIMIT = 20;
 const HOSTED_ACCOUNT_DELETION_SUSPENSION_FENCE_TRANSACTION_OPTIONS = {
   ...HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
   // Group-aware provider fences expire after fifteen seconds. Deletion gets a

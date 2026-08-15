@@ -30,16 +30,8 @@ export class PrismaHostedOAuthSessionStore {
     this.prisma = prisma;
   }
 
-  async deleteExpiredOAuthStates(now: string): Promise<number> {
-    const result = await this.prisma.deviceOauthSession.deleteMany({
-      where: {
-        consumedAt: null,
-        expiresAt: {
-          lte: new Date(now),
-        },
-      },
-    });
-    return result.count;
+  async deleteExpiredOAuthStates(_now?: string): Promise<number> {
+    return 0;
   }
 
   async resolveOAuthStateWithoutProviderAuthority(

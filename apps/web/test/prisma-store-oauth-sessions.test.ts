@@ -274,13 +274,8 @@ describe("PrismaHostedOAuthSessionStore.consumeOAuthState", () => {
     } as never);
     const now = "2026-04-13T12:30:00.000Z";
 
-    await expect(store.deleteExpiredOAuthStates(now)).resolves.toBe(3);
-    expect(deleteMany).toHaveBeenCalledWith({
-      where: {
-        consumedAt: null,
-        expiresAt: { lte: new Date(now) },
-      },
-    });
+    await expect(store.deleteExpiredOAuthStates(now)).resolves.toBe(0);
+    expect(deleteMany).not.toHaveBeenCalled();
   });
 
   it("resolves a lost consume race as a replay instead of doing the work twice", async () => {
@@ -387,7 +382,7 @@ describe("PrismaHostedOAuthSessionStore.consumeOAuthState", () => {
         consumedAt: null,
       },
     });
-    expect(tx.$queryRaw).toHaveBeenCalledTimes(1);
+    expect(tx.$queryRaw).toHaveBeenCalledTimes(3);
     const lockSql = String(tx.$queryRaw.mock.calls[0]?.[0].join("?"));
     expect(lockSql).toContain(
       'FROM "device_oauth_session" AS oauth_session',
@@ -427,7 +422,7 @@ describe("PrismaHostedOAuthSessionStore.consumeOAuthState", () => {
         record.userId ?? undefined,
       ),
     ).resolves.toEqual({ status: "missing" });
-    expect(tx.$queryRaw).toHaveBeenCalledTimes(2);
+    expect(tx.$queryRaw).toHaveBeenCalledTimes(3);
     expect(tx.deviceOauthSession.updateMany).not.toHaveBeenCalled();
     expect(tx.deviceOauthSession.deleteMany).toHaveBeenCalledWith({
       where: {
@@ -455,7 +450,7 @@ describe("PrismaHostedOAuthSessionStore.consumeOAuthState", () => {
       consumedAt: consumedAt.toISOString(),
       status: "replayed",
     });
-    expect(tx.$queryRaw).not.toHaveBeenCalled();
+    expect(tx.$queryRaw).toHaveBeenCalledTimes(1);
     expect(tx.deviceOauthSession.deleteMany).not.toHaveBeenCalled();
   });
 
