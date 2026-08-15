@@ -9,7 +9,7 @@ It intentionally lists live architecture, product, verification, and package-bou
 Current verification routing includes the WHOOP canary's bounded coherent-snapshot
 authorization diagnostics, accessibility-hidden control classification,
 embedding-frame exposure propagation, preserved action-first click precedence,
-and dynamic-DOM headed-browser proof.
+nearest-valid ARIA enabled-state semantics, and dynamic-DOM headed-browser proof.
 
 Optional local Frog issue repair uses exact App-and-main-bound admission,
 ReviewGPT-authored implementation patches, parent-revalidated ordinary

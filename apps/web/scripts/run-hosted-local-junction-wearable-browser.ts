@@ -601,7 +601,11 @@ async function summarizeAuthorizationControls(
         !disabled && current;
         current = readComposedParent(current)
       ) {
-        disabled = current.getAttribute("aria-disabled")?.toLowerCase() === "true";
+        const ariaDisabled = current.getAttribute("aria-disabled")?.toLowerCase();
+        if (ariaDisabled === "true" || ariaDisabled === "false") {
+          disabled = ariaDisabled === "true";
+          break;
+        }
       }
       if (!disabled) {
         visibleEnabled += 1;

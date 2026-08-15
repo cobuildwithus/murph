@@ -210,6 +210,80 @@ describe("hosted headed browser boundary", () => {
   );
 
   it.runIf(smokeEnabled)(
+    "uses the nearest valid ARIA disabled state for framed actions",
+    async () => {
+      const browser = await chromium.launch({ headless: false });
+      try {
+        const page = await browser.newPage();
+        page.setDefaultTimeout(250);
+        await page.setContent(`
+          <iframe
+            name="aria-disabled-consent"
+            srcdoc='<div aria-disabled="true"><button>Grant inherited disabled</button><button aria-disabled="false">Grant override enabled</button></div>'
+          ></iframe>
+        `);
+        await expect.poll(() => page.frames().length).toBe(2);
+        const consentFrame = page.frame({ name: "aria-disabled-consent" });
+        expect(consentFrame).not.toBeNull();
+        await expect.poll(async () =>
+          consentFrame?.getByRole("button", {
+            name: "Grant inherited disabled",
+          }).isEnabled().catch(() => true) ?? true
+        ).toBe(false);
+        await expect.poll(async () =>
+          consentFrame?.getByRole("button", {
+            name: "Grant override enabled",
+          }).isEnabled().catch(() => false) ?? false
+        ).toBe(true);
+
+        let now = 0;
+        const diagnosticPage = new Proxy(page, {
+          get(target, property, receiver) {
+            if (property === "url") {
+              return () => "https://id.whoop.com/consent";
+            }
+            if (property === "waitForTimeout") {
+              return async (duration: number) => {
+                now += duration;
+              };
+            }
+            const value = Reflect.get(target, property, receiver);
+            return typeof value === "function" ? value.bind(target) : value;
+          },
+        });
+        let failure = "";
+        try {
+          await completeExternalJunctionAuthorizationForTest(
+            diagnosticPage,
+            createWhoopConfig(),
+            () => now,
+          );
+        } catch (error) {
+          failure = error instanceof Error ? error.message : String(error);
+        }
+
+        const match = failure.match(/Authorization surface: (\{.*\})\.$/u);
+        const summary = JSON.parse(match?.[1] ?? "{}");
+        expect(summary.actions).toEqual({
+          negative: 0,
+          positive: 2,
+          positiveHidden: 0,
+          positiveInChildFrames: 2,
+          positiveVisible: 2,
+          positiveVisibleDisabled: 1,
+          positiveVisibleEnabled: 1,
+          positiveVisibleEnabledInChildFrames: 1,
+        });
+        expect(failure).not.toMatch(
+          /Grant inherited disabled|Grant override enabled/u,
+        );
+      } finally {
+        await browser.close();
+      }
+    },
+  );
+
+  it.runIf(smokeEnabled)(
     "bounds the terminal probe while provider controls are replaced",
     async () => {
       const browser = await chromium.launch({ headless: false });

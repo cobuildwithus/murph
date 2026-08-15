@@ -229,6 +229,9 @@ from its embedding element and composed ancestors, and propagate hidden
 parent-frame exposure through nested frames. Keep
 the click owner on the established action-first vocabulary precedence; only the
 read-only terminal aggregate may collapse those actions into one union locator.
+Within that aggregate, native `:disabled` remains authoritative; otherwise the
+nearest valid `aria-disabled` value in the composed chain determines enabled
+state, including an explicit `false` override of an outer `true`.
 A real sign-in proof remains available only after the exact
 workflow reaches protected `main`, where non-canceling concurrency serializes
 the dedicated provider account. Do not weaken the protected-branch gate or

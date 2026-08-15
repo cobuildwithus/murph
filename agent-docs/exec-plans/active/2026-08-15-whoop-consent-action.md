@@ -91,6 +91,14 @@ Updated: 2026-08-15
   not prove that its embedding iframe is exposed. Each child root now receives
   one ephemeral exposure value from its iframe and composed ancestors, inherited
   through nested frames; hidden-frame controls retain structural totals only.
+- Accepted final round 7's enabled-semantics finding: the aggregate had treated
+  any outer `aria-disabled="true"` as authoritative. It now preserves native
+  disablement and stops at the nearest valid composed ARIA value, matching
+  Playwright when a descendant explicitly overrides an ancestor with `false`.
+- The seven-round hard cap is reached. The accepted round-7 bug is corrected,
+  but the automatic ReviewGPT loop is paused until the cap retrospective, local
+  audits, parent final review, verification, and CI are complete and the user
+  explicitly chooses whether to continue to round 8.
 
 ## Verification
 
@@ -116,5 +124,9 @@ Updated: 2026-08-15
 - Passed the same sets after propagating embedding-frame exposure; the visible
   child action remains enabled, while an action and checkbox in an ARIA-hidden
   iframe contribute only to structural action/frame and checkbox totals.
+- Passed 13 focused tests and all five real headed-browser scenarios after the
+  nearest-ARIA correction. The added visible-frame case proves one inherited
+  disabled action and one explicitly re-enabled action against Playwright and
+  the exact content-free JSON partition.
 - Expected outcome: diagnostics first prove the current consent structure, then
   the corrected driver completes the full provider and persisted-state journey.
