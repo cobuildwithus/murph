@@ -7568,7 +7568,14 @@ describe("hosted workspace runtime entrypoint", () => {
       kind: "member.activated",
       label: "member activation",
       preCheckpointSafe: true,
-      withConversationPrefix: true,
+      conversationPrefixCount: 1,
+    },
+    {
+      dedupeKey: "member.activated:full-prefetch-synthetic",
+      kind: "member.activated",
+      label: "member activation with a full conversation prefetch",
+      preCheckpointSafe: true,
+      conversationPrefixCount: 52,
     },
     {
       dedupeKey:
@@ -7618,16 +7625,21 @@ describe("hosted workspace runtime entrypoint", () => {
 
       try {
         await initializeVault({ createdAt: TEST_NOW, vaultRoot });
-        const withConversationPrefix = "withConversationPrefix" in completion
-          && completion.withConversationPrefix;
+        const conversationPrefixCount = "conversationPrefixCount" in completion
+          ? completion.conversationPrefixCount ?? 0
+          : 0;
+        const withConversationPrefix = conversationPrefixCount > 0;
         if (withConversationPrefix) {
           mailboxItems.push(
-            createMailboxItem({
-              id: "mailbox_item_entrypoint_external_completion_conversation",
-              kind: "conversation.message",
-              lane: "conversation",
-              laneSeq: "1",
-            }),
+            ...Array.from({ length: conversationPrefixCount }, (_, index) =>
+              createMailboxItem({
+                id:
+                  `mailbox_item_entrypoint_external_completion_conversation_${index + 1}`,
+                kind: "conversation.message",
+                lane: "conversation",
+                laneSeq: String(index + 1),
+              })
+            ),
             createMailboxItem({
               dedupeKey: completion.dedupeKey,
               id: "mailbox_item_entrypoint_external_completion",
