@@ -203,24 +203,15 @@ function validateAutomationSupportOwnershipPair(
     supportSeriesId?: string
   },
   context: z.RefinementCtx,
-  requirePairedPatch: boolean,
 ): void {
   const supportKindPresent = value.supportKind !== undefined && value.supportKind !== null
   const supportSeriesPresent = value.supportSeriesId !== undefined
-  const supportKindTouched = Object.hasOwn(value, 'supportKind')
-  const supportSeriesTouched = Object.hasOwn(value, 'supportSeriesId')
 
-  if (
-    supportKindPresent !== supportSeriesPresent
-    || (
-      requirePairedPatch
-      && supportKindTouched !== supportSeriesTouched
-    )
-  ) {
+  if (supportKindPresent !== supportSeriesPresent) {
     context.addIssue({
       code: z.ZodIssueCode.custom,
       message: 'Plan-owned support requires supportKind and supportSeriesId together.',
-      path: supportKindPresent || supportKindTouched ? ['supportSeriesId'] : ['supportKind'],
+      path: supportKindPresent ? ['supportSeriesId'] : ['supportKind'],
     })
   }
 }
@@ -243,7 +234,7 @@ const saveAutomationArgumentsSchema = z.object({
   tags: automationTagsSchema.optional(),
   title: automationTitleSchema,
 }).strict().superRefine((value, context) => {
-  validateAutomationSupportOwnershipPair(value, context, false)
+  validateAutomationSupportOwnershipPair(value, context)
   if (
     value.localAtRecoveryKey !== undefined
     && (
@@ -294,7 +285,6 @@ const patchAutomationArgumentsSchema = z.object({
   tags: automationTagsSchema.optional(),
   title: automationTitleSchema.optional(),
 }).strict().superRefine((value, context) => {
-  validateAutomationSupportOwnershipPair(value, context, true)
   const patchKeys = [
     'activeUntil',
     'assistantTargetOverride',

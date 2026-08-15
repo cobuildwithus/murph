@@ -49,6 +49,7 @@ const canonicalTypedCommands = [
     fieldHints: [
       'id',
       'lookup',
+      'reminderIntentId',
       'interventionType',
       'durationMinutes',
       'sessionStatus',

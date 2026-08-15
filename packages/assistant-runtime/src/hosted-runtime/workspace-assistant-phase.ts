@@ -68,6 +68,7 @@ import {
   AUTOMATION_SUPPORT_SERIES_TAG_PREFIX,
   automationRouteSchema,
   buildAutomationSupportSeriesTag,
+  parseAutomationSupportSeriesTag,
   type AutomationRoute,
 } from "@murphai/contracts";
 import {
@@ -1590,6 +1591,19 @@ function createHostedAssistantAutomationTool(input: {
         route,
         status: request.status ?? existing.status,
       });
+      const tags = request.supportSeriesId === undefined && request.tags === undefined
+        ? existing.tags
+        : normalizeHostedAutomationSupportTags({
+          existingTags: existing.tags,
+          supportSeriesId: request.supportSeriesId,
+          tags: request.tags,
+        });
+      assertHostedAutomationEffectiveSupportOwnership({
+        supportKind: request.supportKind === undefined
+          ? existing.supportKind
+          : request.supportKind,
+        tags,
+      });
       const result = await patchAutomation({
         ...(request.activeUntil === undefined
           ? {}
@@ -1622,13 +1636,7 @@ function createHostedAssistantAutomationTool(input: {
         ...(
           request.supportSeriesId === undefined && request.tags === undefined
             ? {}
-            : {
-                tags: normalizeHostedAutomationSupportTags({
-                  existingTags: existing.tags,
-                  supportSeriesId: request.supportSeriesId,
-                  tags: request.tags,
-                }),
-              }
+            : { tags }
         ),
         ...(request.title === undefined ? {} : { title: request.title }),
         vaultRoot: input.vaultRoot,
@@ -1712,6 +1720,29 @@ function normalizeHostedAutomationSupportTags(input: {
   const tags = [...(input.tags ?? input.existingTags ?? [])]
     .filter((tag) => !tag.startsWith(AUTOMATION_SUPPORT_SERIES_TAG_PREFIX));
   return supportSeriesTag === undefined ? tags : [...tags, supportSeriesTag];
+}
+
+function assertHostedAutomationEffectiveSupportOwnership(input: {
+  supportKind: AutomationRecord["supportKind"];
+  tags: readonly string[];
+}): void {
+  if (input.supportKind === null) {
+    return;
+  }
+
+  const supportSeriesIds = new Set(
+    input.tags
+      .map((tag) => parseAutomationSupportSeriesTag(tag)?.seriesId ?? null)
+      .filter((seriesId): seriesId is string => seriesId !== null),
+  );
+  if (supportSeriesIds.size === 1) {
+    return;
+  }
+
+  throw new VaultCliError(
+    "invalid_option",
+    "Plan-owned support requires supportKind and supportSeriesId together.",
+  );
 }
 
 function assertActiveHostedAutomationRoute(input: {

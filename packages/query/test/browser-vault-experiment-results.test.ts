@@ -2059,6 +2059,39 @@ test("counts repeated same-day browser adherence occurrences up to the planned c
   assert.equal(result?.progress?.adherence.loggedSessions, 3);
   assert.equal(result?.progress?.adherence.missedSessions, 5);
   assert.equal(result?.progress?.adherence.status, "behind");
+  assert.deepEqual(
+    {
+      completedSessions: result?.schedule?.completedSessions,
+      missedSessions: result?.schedule?.missedSessions,
+      plannedSessions: result?.schedule?.plannedSessions,
+      cells: result?.schedule?.cells.map((cell) => ({
+        expectedCount: cell.expectedCount,
+        kind: cell.kind,
+        observedCount: cell.observedCount,
+        occurrences: cell.occurrences,
+      })),
+    },
+    {
+      completedSessions: 3,
+      missedSessions: 5,
+      plannedSessions: 8,
+      cells: [{
+        expectedCount: 8,
+        kind: "partial",
+        observedCount: 3,
+        occurrences: {
+          assumed: 0,
+          completed: 3,
+          expected: 8,
+          failed: 0,
+          missed: 5,
+          partial: 0,
+          scheduled: 0,
+          unknown: 0,
+        },
+      }],
+    },
+  );
 });
 
 test("does not make every repeated occurrence due before grace closes", () => {
@@ -2138,6 +2171,116 @@ test("does not make every repeated occurrence due before grace closes", () => {
   assert.equal(result?.progress?.adherence.loggedSessions, 3);
   assert.equal(result?.progress?.adherence.missedSessions, 0);
   assert.equal(result?.progress?.adherence.status, "on_track");
+  assert.deepEqual(
+    {
+      completedSessions: result?.schedule?.completedSessions,
+      missedSessions: result?.schedule?.missedSessions,
+      plannedSessions: result?.schedule?.plannedSessions,
+      occurrences: result?.schedule?.cells[0]?.occurrences,
+    },
+    {
+      completedSessions: 3,
+      missedSessions: 0,
+      plannedSessions: 8,
+      occurrences: {
+        assumed: 0,
+        completed: 3,
+        expected: 8,
+        failed: 0,
+        missed: 0,
+        partial: 0,
+        scheduled: 5,
+        unknown: 0,
+      },
+    },
+  );
+});
+
+test("counts every closed-grace repeated occurrence as not logged when the day is silent", () => {
+  const client = createBrowserVaultQueryClient(
+    createReplica({
+      generatedAt: "2026-04-05T12:00:00.000Z",
+      entities: [
+        experimentEntity({
+          id: "exp_browser_repeated_silent",
+          slug: "browser-repeated-silent",
+          status: "active",
+          runPlan: {
+            baselineStart: "2026-04-01",
+            baselineEnd: "2026-04-03",
+            interventionStart: "2026-04-04",
+            interventionEnd: "2026-04-04",
+            modality: "strength-practice",
+            targetSessions: 8,
+            minimumUsefulSessions: 4,
+            adherenceTargets: [
+              {
+                targetId: "strength-set",
+                label: "Strength set",
+                phase: "intervention",
+                calendar: {
+                  kind: "daily",
+                  timeZone: "America/New_York",
+                  targetCountPerDay: 8,
+                },
+                evidence: {
+                  kind: "linkedEventCount",
+                  eventKind: "intervention_session",
+                  missing: "missed_after_grace",
+                },
+                grace: { hours: 0 },
+                rollup: {
+                  targetCompletions: 8,
+                  minimumUsefulCompletions: 4,
+                },
+              },
+            ],
+          },
+        }),
+      ],
+    }),
+  );
+
+  const result = selectBrowserVaultExperimentResults(
+    client,
+    "browser-repeated-silent",
+  );
+
+  assert.deepEqual(
+    {
+      completedSessions: result?.progress?.adherence.completedSessions,
+      missedSessions: result?.progress?.adherence.missedSessions,
+      scheduleCompletedSessions: result?.schedule?.completedSessions,
+      scheduleMissedSessions: result?.schedule?.missedSessions,
+      schedulePlannedSessions: result?.schedule?.plannedSessions,
+      cell: result?.schedule?.cells[0] && {
+        expectedCount: result.schedule.cells[0].expectedCount,
+        observedCount: result.schedule.cells[0].observedCount,
+        occurrences: result.schedule.cells[0].occurrences,
+      },
+    },
+    {
+      completedSessions: 0,
+      missedSessions: 8,
+      scheduleCompletedSessions: 0,
+      scheduleMissedSessions: 8,
+      schedulePlannedSessions: 8,
+      cell: {
+        expectedCount: 8,
+        observedCount: 0,
+        occurrences: {
+          assumed: 0,
+          completed: 0,
+          expected: 8,
+          failed: 0,
+          missed: 8,
+          partial: 0,
+          scheduled: 0,
+          unknown: 0,
+        },
+      },
+    },
+  );
 });
 
 test("keeps completed live measurements separate from a not-yet-saved outcome", () => {

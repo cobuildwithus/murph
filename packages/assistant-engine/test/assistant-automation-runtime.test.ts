@@ -9702,8 +9702,17 @@ describe('assistant auto-reply runtime', () => {
         deliveryReplyToMessageId: 'incoming_group_reply_b',
       }),
     )
-    expect(replyMocks.sendAssistantMessage.mock.calls[0]?.[0])
-      .not.toHaveProperty('turnContext')
+    const turnContext =
+      replyMocks.sendAssistantMessage.mock.calls[0]?.[0]?.turnContext ?? ''
+    expect(turnContext).toContain('Prior message 1:')
+    expect(turnContext).toContain('Prior assistant answer A.')
+    expect(turnContext).toContain(
+      'Prior message 2 (native reply target):',
+    )
+    expect(turnContext).toContain('Prior assistant answer B.')
+    expect(turnContext.indexOf('Prior assistant answer A.')).toBeLessThan(
+      turnContext.indexOf('Prior assistant answer B.'),
+    )
   })
 
   it('batches twenty initial Linq messages into one four-handle speaker lookup', async () => {

@@ -1084,13 +1084,29 @@ describe('hosted domain dynamic tools', () => {
       expectedUpdatedAt: '2026-08-10T00:00:00.000Z',
       lookup: 'evening-wind-down',
       supportKind: 'reminder',
-    })).toMatchObject({ kind: 'invalid-automation-arguments' })
+    })).toEqual({
+      kind: 'automation',
+      request: {
+        action: 'patch',
+        expectedUpdatedAt: '2026-08-10T00:00:00.000Z',
+        lookup: 'evening-wind-down',
+        supportKind: 'reminder',
+      },
+    })
     expect(readToolRequest('automation', {
       action: 'patch',
       expectedUpdatedAt: '2026-08-10T00:00:00.000Z',
       lookup: 'evening-wind-down',
       supportSeriesId: 'habit:sleep-wind-down',
-    })).toMatchObject({ kind: 'invalid-automation-arguments' })
+    })).toEqual({
+      kind: 'automation',
+      request: {
+        action: 'patch',
+        expectedUpdatedAt: '2026-08-10T00:00:00.000Z',
+        lookup: 'evening-wind-down',
+        supportSeriesId: 'habit:sleep-wind-down',
+      },
+    })
 
     expect(readToolRequest('automation', {
       action: 'reconcile',

@@ -5035,6 +5035,69 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
           if (!saved || saved.action !== "save") {
             throw new Error("Expected saved automation.");
           }
+          const reviewPatch = await executionContext.hosted?.automationTool?.request({
+            action: "patch",
+            expectedUpdatedAt: saved.updatedAt,
+            lookup: saved.automationId,
+            supportKind: "review",
+          });
+          if (!reviewPatch || reviewPatch.action !== "patch") {
+            throw new Error("Expected support-kind patch.");
+          }
+          await expect(showAutomation({
+            automationId: saved.automationId,
+            vaultRoot,
+          })).resolves.toMatchObject({
+            supportKind: "review",
+            tags: expect.arrayContaining([
+              "system:support-series:habit:group-check-in",
+            ]),
+          });
+          const clearedSupportKind = await executionContext.hosted?.automationTool?.request({
+            action: "patch",
+            expectedUpdatedAt: reviewPatch.updatedAt,
+            lookup: saved.automationId,
+            supportKind: null,
+          });
+          if (!clearedSupportKind || clearedSupportKind.action !== "patch") {
+            throw new Error("Expected support-kind clearing patch.");
+          }
+          await expect(showAutomation({
+            automationId: saved.automationId,
+            vaultRoot,
+          })).resolves.toMatchObject({
+            supportKind: null,
+            tags: expect.arrayContaining([
+              "system:support-series:habit:group-check-in",
+            ]),
+          });
+          const restoredSupportKind = await executionContext.hosted?.automationTool?.request({
+            action: "patch",
+            expectedUpdatedAt: clearedSupportKind.updatedAt,
+            lookup: saved.automationId,
+            supportKind: "check_in",
+          });
+          if (!restoredSupportKind || restoredSupportKind.action !== "patch") {
+            throw new Error("Expected support-kind restore patch.");
+          }
+          const unowned = await executionContext.hosted?.automationTool?.request({
+            action: "save",
+            instructions: "Keep this unowned until support is assigned.",
+            schedule: { kind: "dailyLocal", localTime: "08:00" },
+            slug: "unowned-group-check-in",
+            title: "Unowned group check-in",
+          });
+          if (!unowned || unowned.action !== "save") {
+            throw new Error("Expected unowned automation.");
+          }
+          await expect(executionContext.hosted?.automationTool?.request({
+            action: "patch",
+            expectedUpdatedAt: unowned.updatedAt,
+            lookup: unowned.automationId,
+            supportKind: "check_in",
+          })).rejects.toThrow(
+            "Plan-owned support requires supportKind and supportSeriesId together.",
+          );
           const newsletter = await executionContext.hosted?.automationTool?.request({
             action: "save",
             continuityPolicy: "fresh",

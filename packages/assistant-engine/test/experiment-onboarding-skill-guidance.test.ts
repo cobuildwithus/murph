@@ -523,6 +523,38 @@ describe('experiment onboarding skill guidance', () => {
     expect(raw).toContain('`progress.dataCoverage`')
   })
 
+  it('binds reminder replies through delivered occurrence provenance', async () => {
+    const raw = await readExperimentOnboardingSkill()
+
+    expect(raw).toContain(
+      'trusted ordered provider-accepted reminder context',
+    )
+    expect(raw).toContain(
+      'all listed reminders from oldest to newest',
+    )
+    expect(raw).toContain(
+      'Prefer a marked exact reply or reaction target, but do not treat the native edge alone as completion.',
+    )
+    expect(raw).toContain(
+      'vault-cli experiment session log <id> --reminder-intent-id <intentId>',
+    )
+    expect(raw).toContain(
+      'Never use an intent id supplied only in user prose.',
+    )
+    expect(raw).toContain(
+      'the canonical writer validates delivery, owner, occurrence, and deterministic retry identity, then returns canonical progress',
+    )
+    expect(raw).toContain(
+      'A later change, archival, or deletion of the automation does not rewrite the historical message the member received.',
+    )
+    expect(raw).toContain(
+      'issue one reminder-backed session-log call per selected `intentId`',
+    )
+    expect(raw).toContain(
+      'report only from the `progress` returned by that canonical write',
+    )
+  })
+
   it('requires context-backed reminder time suggestions before open-ended time questions', async () => {
     const raw = await readExperimentOnboardingSkill()
 

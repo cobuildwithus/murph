@@ -20,7 +20,9 @@ import {
   resolveExperimentAdherenceRollupTarget,
   resolveAdherenceObservationActivityKind,
   resolveExperimentAdherenceTargets,
+  type CalendarAdherenceSessionCounts,
   type ExperimentAdherenceCalendarResult,
+  type ExperimentAdherenceCell,
   type ExperimentAdherenceCellStatus,
   type ExperimentAdherenceObservation,
 } from "../experiment-adherence.ts";
@@ -244,15 +246,29 @@ export type BrowserVaultExperimentScheduleCellKind =
 
 export interface BrowserVaultExperimentScheduleCell {
   evidenceIds: string[];
+  expectedCount: number | null;
   kind: BrowserVaultExperimentScheduleCellKind;
   label: string;
   localDate: string;
   localTime: string | null;
+  observedCount: number | null;
+  occurrences: BrowserVaultExperimentScheduleCellOccurrences;
   planned: boolean;
   reason: string;
   source: "event" | "planned";
   targetId: string;
   timeZone: string;
+}
+
+export interface BrowserVaultExperimentScheduleCellOccurrences {
+  assumed: number;
+  completed: number;
+  expected: number;
+  failed: number;
+  missed: number;
+  partial: number;
+  scheduled: number;
+  unknown: number;
 }
 
 export interface BrowserVaultExperimentContextEntry {
@@ -399,8 +415,15 @@ export function selectBrowserVaultExperimentResults(
     ? buildPersistedOutcomeBiomarkers(client, persistedOutcome)
     : liveBiomarkers ?? [];
   const adherence = buildAdherenceResult(context);
-  const schedule = buildScheduleResult(adherence);
-  const progress = buildProgressResult(context, biomarkers, schedule, adherence);
+  const occurrenceProjection = buildScheduleOccurrenceProjection(context, adherence);
+  const schedule = buildScheduleResult(adherence, occurrenceProjection);
+  const progress = buildProgressResult(
+    context,
+    biomarkers,
+    schedule,
+    adherence,
+    occurrenceProjection?.counts ?? null,
+  );
   const outcome = persistedOutcome
     ? buildPersistedOutcomeResult(persistedOutcome)
     : null;
@@ -1656,8 +1679,57 @@ function buildAdherenceResult(
   }
 }
 
+interface BrowserVaultExperimentScheduleOccurrenceProjection {
+  byCell: Map<ExperimentAdherenceCell, BrowserVaultExperimentScheduleCellOccurrences>;
+  counts: CalendarAdherenceSessionCounts;
+}
+
+function buildScheduleOccurrenceProjection(
+  context: BrowserVaultExperimentRunContext,
+  adherence: BrowserVaultExperimentAdherenceResult | null,
+): BrowserVaultExperimentScheduleOccurrenceProjection | null {
+  if (!adherence) {
+    return null;
+  }
+
+  const rollupTarget = resolveExperimentAdherenceRollupTarget(context.adherenceTargets);
+  const hasAmbiguousTargets = context.adherenceTargets.length > 1 && !rollupTarget;
+  const target = hasAmbiguousTargets
+    ? null
+    : rollupTarget ?? context.adherenceTargets[0] ?? null;
+  if (
+    !target?.calendar ||
+    target.evidence.kind !== "linkedEventCount"
+  ) {
+    return null;
+  }
+
+  const cells = adherence.cells.filter((cell) => cell.targetId === target.targetId);
+  const observations = buildAdherenceObservations(context, [target]);
+  const counts = countCalendarAdherenceSessions({
+    asOf: context.asOf,
+    cells,
+    observations,
+    target,
+  });
+  const byCell = new Map<ExperimentAdherenceCell, BrowserVaultExperimentScheduleCellOccurrences>();
+
+  for (const cell of cells) {
+    const cellCounts = countCalendarAdherenceSessions({
+      asOf: context.asOf,
+      cells: [cell],
+      observations,
+      target,
+    });
+    byCell.set(cell, buildLinkedEventScheduleOccurrences(cell, cellCounts));
+  }
+
+  return { byCell, counts };
+}
+
 function buildScheduleResult(
   adherence: BrowserVaultExperimentAdherenceResult | null,
+  occurrenceProjection: BrowserVaultExperimentScheduleOccurrenceProjection | null,
 ): BrowserVaultExperimentScheduleResult | null {
   if (!adherence) {
     return null;
@@ -1668,18 +1740,26 @@ function buildScheduleResult(
 
   const rollupTarget = resolveExperimentAdherenceRollupTarget(adherence.targets);
   const hasAmbiguousTargets = adherence.targets.length > 1 && !rollupTarget;
-  const cells: BrowserVaultExperimentScheduleCell[] = adherence.cells.map((cell) => ({
-    evidenceIds: cell.evidenceIds,
-    kind: mapAdherenceCellStatus(cell.status),
-    label: cell.label,
-    localDate: cell.localDate,
-    localTime: cell.localTime,
-    planned: cell.planned,
-    reason: cell.reason,
-    source: cell.evidenceIds.length > 0 ? "event" : "planned",
-    targetId: cell.targetId,
-    timeZone: adherence.timeZone,
-  }));
+  const cells: BrowserVaultExperimentScheduleCell[] = adherence.cells.map((cell) => {
+    const kind = mapAdherenceCellStatus(cell.status);
+    return {
+      evidenceIds: cell.evidenceIds,
+      expectedCount: cell.expectedCount,
+      kind,
+      label: cell.label,
+      localDate: cell.localDate,
+      localTime: cell.localTime,
+      observedCount: cell.observedCount,
+      occurrences:
+        occurrenceProjection?.byCell.get(cell) ??
+        buildFallbackScheduleOccurrences(cell, kind),
+      planned: cell.planned,
+      reason: cell.reason,
+      source: cell.evidenceIds.length > 0 ? "event" : "planned",
+      targetId: cell.targetId,
+      timeZone: adherence.timeZone,
+    };
+  });
   const countedCells = hasAmbiguousTargets
     ? []
     : rollupTarget
@@ -1763,16 +1843,77 @@ function summarizeScheduleCells(
 ): BrowserVaultExperimentScheduleResult {
   return {
     cells: cells.slice(),
-    assumedSessions: countCells(countedCells, "assumed"),
-    completedSessions: countCells(countedCells, "completed") + countCells(countedCells, "assumed"),
-    failedSessions: countCells(countedCells, "failed"),
-    missedSessions: countCells(countedCells, "missed"),
-    unknownSessions: countCells(countedCells, "unknown"),
-    partialSessions: countCells(countedCells, "partial"),
-    plannedSessions: countedCells.filter((cell) => cell.planned).length,
+    assumedSessions: sumScheduleOccurrences(countedCells, "assumed"),
+    completedSessions:
+      sumScheduleOccurrences(countedCells, "completed") +
+      sumScheduleOccurrences(countedCells, "assumed"),
+    failedSessions: sumScheduleOccurrences(countedCells, "failed"),
+    missedSessions: sumScheduleOccurrences(countedCells, "missed"),
+    unknownSessions: sumScheduleOccurrences(countedCells, "unknown"),
+    partialSessions: sumScheduleOccurrences(countedCells, "partial"),
+    plannedSessions: sumScheduleOccurrences(countedCells, "expected"),
     skippedSessions: 0,
     timeZone,
   };
+}
+
+function buildLinkedEventScheduleOccurrences(
+  cell: ExperimentAdherenceCell,
+  counts: CalendarAdherenceSessionCounts,
+): BrowserVaultExperimentScheduleCellOccurrences {
+  const expected = normalizeScheduleOccurrenceCount(cell.expectedCount);
+  const due = Math.min(expected, counts.expectedSessionsByNow);
+  const assumed = cell.status === "assumed"
+    ? Math.min(counts.assumedSessions, counts.completedSessions)
+    : 0;
+  const completed = Math.max(0, counts.completedSessions - assumed);
+  const accountedDue =
+    counts.completedSessions +
+    counts.partialSessions +
+    counts.missedSessions +
+    counts.skippedSessions;
+
+  return {
+    assumed,
+    completed,
+    expected,
+    failed: 0,
+    missed: counts.missedSessions,
+    partial: counts.partialSessions,
+    scheduled: Math.max(0, expected - due),
+    unknown: Math.max(0, due - accountedDue),
+  };
+}
+
+function buildFallbackScheduleOccurrences(
+  cell: ExperimentAdherenceCell,
+  kind: BrowserVaultExperimentScheduleCellKind,
+): BrowserVaultExperimentScheduleCellOccurrences {
+  const occurrences: BrowserVaultExperimentScheduleCellOccurrences = {
+    assumed: 0,
+    completed: 0,
+    expected: normalizeScheduleOccurrenceCount(cell.expectedCount),
+    failed: 0,
+    missed: 0,
+    partial: 0,
+    scheduled: 0,
+    unknown: 0,
+  };
+  occurrences[kind] = occurrences.expected;
+  return occurrences;
+}
+
+function normalizeScheduleOccurrenceCount(value: number | null): number {
+  return typeof value === "number" && Number.isFinite(value) && value > 0
+    ? Math.max(1, Math.floor(value))
+    : 1;
+}
+
+function sumScheduleOccurrences(
+  cells: readonly BrowserVaultExperimentScheduleCell[],
+  kind: keyof BrowserVaultExperimentScheduleCellOccurrences,
+): number {
+  return cells.reduce((total, cell) => total + cell.occurrences[kind], 0);
 }
 
 function buildExperimentContextEntries(
@@ -1885,6 +2026,7 @@ function buildProgressResult(
   biomarkers: readonly BrowserVaultExperimentBiomarkerResult[],
   schedule: BrowserVaultExperimentScheduleResult | null,
   adherence: BrowserVaultExperimentAdherenceResult | null,
+  occurrenceCounts: CalendarAdherenceSessionCounts | null,
 ): BrowserVaultExperimentProgressResult {
   const rollupTarget = resolveExperimentAdherenceRollupTarget(context.adherenceTargets);
   const hasAmbiguousTargets = context.adherenceTargets.length > 1 && !rollupTarget;
@@ -1908,17 +2050,6 @@ function buildProgressResult(
       ? adherence.cells.filter((cell) => cell.targetId === rollupTarget.targetId)
       : adherence.cells
     : null;
-  const occurrenceCounts =
-    progressTarget?.calendar &&
-      progressTarget.evidence.kind === "linkedEventCount" &&
-      progressCells
-      ? countCalendarAdherenceSessions({
-          asOf: context.asOf,
-          cells: progressCells,
-          observations: progressObservations,
-          target: progressTarget,
-        })
-      : null;
   const progressCounts = occurrenceCounts ??
     (progressTarget && !progressTarget.calendar
       ? countCompletedAdherenceSessions({
@@ -2648,13 +2779,6 @@ function computeExpectedSessionsByNow(
     1,
     Math.floor((targetSessions * daysBetweenInclusive(interventionStart, elapsedEnd)) / totalDays),
   );
-}
-
-function countCells(
-  cells: readonly BrowserVaultExperimentScheduleCell[],
-  kind: BrowserVaultExperimentScheduleCell["kind"],
-): number {
-  return cells.filter((cell) => cell.kind === kind).length;
 }
 
 function readRunLookupKeys(entity: BrowserVaultEntity): string[] {

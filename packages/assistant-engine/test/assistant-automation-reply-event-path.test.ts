@@ -3,8 +3,6 @@ import os from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { buildAutomationSupportSeriesTag } from '@murphai/contracts'
-import { initializeVault, upsertAutomation } from '@murphai/core'
 import type { InboxServices } from '@murphai/inbox-services'
 import { serializeHostedEmailThreadTarget } from '@murphai/runtime-state'
 import type { AssistantInputCandidate } from '../src/assistant/input-source.ts'
@@ -16,9 +14,6 @@ import type {
 import {
   assistantAutomationInputSummaryFromCandidate,
 } from '../src/assistant/automation/input-summary.ts'
-import {
-  computeAssistantAutomationSemanticRevision,
-} from '../src/assistant/automation/semantic-revision.ts'
 import {
   createAssistantAutoReplyGroupContext,
   createAssistantAutoReplyHistoryReader,
@@ -2951,7 +2946,7 @@ describe('assistant auto-reply event-first path', () => {
     expect(sendInput.prompt).toContain('Do not assume missing body content.')
   })
 
-  it('injects the latest confirmed cross-session delivery without replacing the chat session', async () => {
+  it('injects ordered confirmed cross-session deliveries without replacing the chat session', async () => {
     const vault = await createTempVault()
     replyEventPathMocks.resolveAssistantSession.mockResolvedValue({
       created: false,
@@ -3031,14 +3026,16 @@ describe('assistant auto-reply event-first path', () => {
       skipped: 0,
     })
     const sendInput = replyEventPathMocks.sendAssistantMessage.mock.calls[0]?.[0]
-    expect(sendInput.turnContext).toBe([
-      'Conversation context:',
-      'The assistant previously sent this message in the same conversation from another assistant run:',
-      '',
-      'latest cross-session reminder',
-      '',
-      'Use it only to interpret the current user message.',
-    ].join('\n'))
+    expect(sendInput.turnContext).toContain(
+      'The assistant previously sent these provider-accepted messages in the same conversation from other assistant runs, oldest to newest:',
+    )
+    expect(sendInput.turnContext).toContain('Prior message 1:')
+    expect(sendInput.turnContext).toContain('old reminder')
+    expect(sendInput.turnContext).toContain('Prior message 2:')
+    expect(sendInput.turnContext).toContain('latest cross-session reminder')
+    expect(sendInput.turnContext.indexOf('old reminder')).toBeLessThan(
+      sendInput.turnContext.indexOf('latest cross-session reminder'),
+    )
     expect(sendInput.receiptMetadata).toEqual(expect.objectContaining({
       [AUTO_REPLY_RECEIPT_CROSS_SESSION_CONTEXT_INTENT_ID_KEY]:
         'intent-cross-session',
@@ -3046,44 +3043,10 @@ describe('assistant auto-reply event-first path', () => {
     expect(sendInput.prompt).toContain('What do I do for this reset?')
   })
 
-  it('carries canonical experiment ownership only from the exact automation revision', async () => {
+  it('carries historical experiment reminder provenance without rereading the mutable automation', async () => {
     const vault = await createTempVault()
     const automationId = 'automation_01JQ8PWXP5A68SQM1W0GYM41WB'
     const experimentId = 'exp_01JQ8PWXP5A68SQM1W0GYM41WC'
-    await initializeVault({
-      createdAt: '2026-04-08T00:00:00.000Z',
-      vaultRoot: vault,
-    })
-    const automationScaffold = {
-      automationId,
-      continuityPolicy: 'fresh',
-      instructions: 'Ask for one synthetic set completion.',
-      route: {
-        channel: 'email',
-        deliveryTarget: 'thread-1',
-        identityId: 'identity-1',
-        participantId: 'actor-1',
-        threadId: 'thread-1',
-        threadIsDirect: true,
-      },
-      schedule: {
-        at: '2026-04-08T00:03:00.000Z',
-        kind: 'at',
-      },
-      status: 'active',
-      supportKind: 'reminder',
-      tags: [buildAutomationSupportSeriesTag(`experiment:${experimentId}`)],
-      title: 'Synthetic experiment set reminder',
-      vaultRoot: vault,
-    } as const
-    const automation = await upsertAutomation({
-      ...automationScaffold,
-      now: new Date('2026-04-08T00:04:00.000Z'),
-      status: 'active',
-      tags: [...automationScaffold.tags],
-    })
-    const expectedSemanticRevision =
-      computeAssistantAutomationSemanticRevision(automation.record)
     replyEventPathMocks.resolveAssistantSession.mockResolvedValue({
       created: false,
       session: {
@@ -3095,9 +3058,8 @@ describe('assistant auto-reply event-first path', () => {
       createOutboxMessage({
         automationAuthority: {
           automationId,
-          automationRelativePath: automation.record.relativePath,
-          expectedSemanticRevision,
-          expectedUpdatedAt: automation.record.updatedAt,
+          expectedUpdatedAt: '2026-04-08T00:04:00.000Z',
+          supportSeriesId: `experiment:${experimentId}`,
         },
         intentId: 'intent-experiment-reminder',
         message: 'Set two: reply when complete.',
@@ -3125,39 +3087,29 @@ describe('assistant auto-reply event-first path', () => {
 
     const turnContext = replyEventPathMocks.sendAssistantMessage.mock.calls[0]?.[0]
       .turnContext ?? ''
-    expect(turnContext).toContain('Canonical experiment reminder context:')
-    expect(turnContext).toContain(`belongs to experiment ${experimentId}`)
-    expect(turnContext).toContain('exactly one occurrence')
-    expect(turnContext).toContain('resolve the declared adherence event lane')
+    expect(turnContext).toContain('Prior message 1:')
+    expect(turnContext).toContain('Set two: reply when complete.')
+    expect(turnContext).toContain(`- automationId: ${automationId}`)
+    expect(turnContext).toContain(`- supportSeriesId: experiment:${experimentId}`)
     expect(turnContext).toContain(
-      'Say the occurrence was recorded only when that readback proves the new event',
+      '- scheduledOccurrenceAt: 2026-04-08T00:03:00.000Z',
     )
     expect(turnContext).toContain(
-      "This reminder's exact scheduled occurrence is 2026-04-08T00:03:00.000Z.",
+      '- providerAcceptedAt: 2026-04-08T00:05:00.000Z',
     )
-    expect(turnContext).toContain(
-      'The prior message reached provider acceptance at 2026-04-08T00:05:00.000Z. This is not a delivered-receipt timestamp.',
-    )
-
-    const archived = await upsertAutomation({
-      ...automationScaffold,
-      now: new Date('2026-04-08T00:10:30.000Z'),
-      status: 'archived',
-      tags: [...automationScaffold.tags],
-    })
-    expect(archived.record.updatedAt).not.toBe(automation.record.updatedAt)
+    expect(turnContext).not.toContain('Canonical experiment reminder context:')
+    expect(turnContext).not.toContain('exactly one occurrence')
 
     replyEventPathMocks.sendAssistantMessage.mockClear()
     replyEventPathMocks.listAssistantOutboxIntents.mockResolvedValue([
       createOutboxMessage({
         automationAuthority: {
           automationId,
-          automationRelativePath: automation.record.relativePath,
-          expectedSemanticRevision,
-          expectedUpdatedAt: automation.record.updatedAt,
+          expectedUpdatedAt: '2026-04-08T00:04:00.000Z',
+          supportSeriesId: `experiment:${experimentId}`,
         },
-        intentId: 'intent-archived-experiment-reminder',
-        message: 'Archived one-shot reminder.',
+        intentId: 'intent-edited-experiment-reminder',
+        message: 'Edited-later historical reminder.',
         scheduledOccurrenceAt: '2026-04-08T00:03:00.000Z',
         sentAt: '2026-04-08T00:05:00.000Z',
         sessionId: 'session-automation',
@@ -3181,62 +3133,12 @@ describe('assistant auto-reply event-first path', () => {
       vault,
     })
 
-    const archivedTurnContext =
+    const editedTurnContext =
       replyEventPathMocks.sendAssistantMessage.mock.calls[0]?.[0]
         .turnContext ?? ''
-    expect(archivedTurnContext).toContain('Archived one-shot reminder.')
-    expect(archivedTurnContext).toContain(
-      'Canonical experiment reminder context:',
-    )
-
-    await upsertAutomation({
-      ...automationScaffold,
-      instructions: 'Substantively edited completion instructions.',
-      now: new Date('2026-04-08T00:11:30.000Z'),
-      status: 'archived',
-      tags: [...automationScaffold.tags],
-    })
-    replyEventPathMocks.sendAssistantMessage.mockClear()
-    replyEventPathMocks.listAssistantOutboxIntents.mockResolvedValue([
-      createOutboxMessage({
-        automationAuthority: {
-          automationId,
-          automationRelativePath: automation.record.relativePath,
-          expectedSemanticRevision,
-          expectedUpdatedAt: automation.record.updatedAt,
-        },
-        intentId: 'intent-edited-experiment-reminder',
-        message: 'Edited reminder revision.',
-        scheduledOccurrenceAt: '2026-04-08T00:03:00.000Z',
-        sentAt: '2026-04-08T00:05:00.000Z',
-        sessionId: 'session-automation',
-      }),
-    ])
-
-    await processAssistantAutoReplyGroup({
-      allowSelfAuthored: false,
-      context: createReplyContext(createAssistantInputCandidate({
-        inputId: 'ain_55555555555555555555555555555555',
-        occurredAt: '2026-04-08T00:12:00.000Z',
-        optionalInboxCaptureId: null,
-        source: 'email',
-        text: 'Done after edit',
-        threadIsDirect: true,
-      })),
-      enabledChannels: ['email'],
-      inboxServices: createInboxServices(),
-      requestId: null,
-      sessionMaxAgeMs: null,
-      vault,
-    })
-
-    const staleTurnContext =
-      replyEventPathMocks.sendAssistantMessage.mock.calls[0]?.[0]
-        .turnContext ?? ''
-    expect(staleTurnContext).toContain('Edited reminder revision.')
-    expect(staleTurnContext).not.toContain(
-      'Canonical experiment reminder context:',
-    )
+    expect(editedTurnContext).toContain('Edited-later historical reminder.')
+    expect(editedTurnContext).toContain(`- supportSeriesId: experiment:${experimentId}`)
+    expect(editedTurnContext).not.toContain('Canonical experiment reminder context:')
   })
 
   it('records the selected cross-session intent in receipt metadata so subsequent turns can suppress it', async () => {
@@ -4089,33 +3991,6 @@ describe('assistant auto-reply event-first path', () => {
     const vault = await createTempVault()
     const automationId = 'automation_01JQ8PWXP5A68SQM1W0GYM42AA'
     const experimentId = 'exp_01JQ8PWXP5A68SQM1W0GYM42AB'
-    await initializeVault({
-      createdAt: '2026-04-08T00:00:00.000Z',
-      vaultRoot: vault,
-    })
-    const automation = await upsertAutomation({
-      automationId,
-      continuityPolicy: 'fresh',
-      instructions: 'Ask for one synthetic completion.',
-      now: new Date('2026-04-08T00:04:00.000Z'),
-      route: {
-        channel: 'linq',
-        deliveryTarget: 'thread-1',
-        identityId: 'identity-1',
-        participantId: 'actor-1',
-        threadId: 'thread-1',
-        threadIsDirect: true,
-      },
-      schedule: {
-        at: '2026-04-08T00:03:00.000Z',
-        kind: 'at',
-      },
-      status: 'active',
-      supportKind: 'check_in',
-      tags: [buildAutomationSupportSeriesTag(`experiment:${experimentId}`)],
-      title: 'Synthetic reaction reminder',
-      vaultRoot: vault,
-    })
     replyEventPathMocks.resolveAssistantSession.mockResolvedValue({
       created: false,
       session: {
@@ -4127,10 +4002,8 @@ describe('assistant auto-reply event-first path', () => {
       createOutboxMessage({
         automationAuthority: {
           automationId,
-          automationRelativePath: automation.record.relativePath,
-          expectedSemanticRevision:
-            computeAssistantAutomationSemanticRevision(automation.record),
-          expectedUpdatedAt: automation.record.updatedAt,
+          expectedUpdatedAt: '2026-04-08T00:04:00.000Z',
+          supportSeriesId: `experiment:${experimentId}`,
         },
         channel: 'linq',
         intentId: 'intent-same-session-reaction-target',
@@ -4197,14 +4070,8 @@ describe('assistant auto-reply event-first path', () => {
       '',
       'Interpret the reaction in the context of this message. A tapback usually signals acknowledgment or appreciation. Treat it as a "yes" only when this message asked a single closed yes/no question or proposed one specific action whose affirmative answer is unambiguous; never infer facts about the user or treat a reaction alone as consent or authorization. Respond only in relation to this message; a brief acknowledgment-weight reply is fine.',
     ].join('\n'))
-    expect(turnContext).toContain('Canonical experiment reminder context:')
-    expect(turnContext).toContain(`belongs to experiment ${experimentId}`)
-    expect(turnContext).toContain(
-      "This reminder's exact scheduled occurrence is 2026-04-08T00:03:00.000Z.",
-    )
-    expect(turnContext).toContain(
-      'continue/pause/modify question answers only that question and grants zero adherence-write authority',
-    )
+    expect(turnContext).not.toContain('Canonical experiment reminder context:')
+    expect(turnContext).not.toContain(`experiment:${experimentId}`)
     expect(turnContext).not.toContain('Should I send the newer message?')
     expect(turnContext).not.toContain('another assistant run')
     expect(sendInput?.receiptMetadata).not.toHaveProperty(
@@ -4403,7 +4270,7 @@ describe('assistant auto-reply event-first path', () => {
     expect(sendInput.turnContext).toContain('reminder that user replied to')
   })
 
-  it('selects cross-session context from the newest grouped Linq input with a native reply target, not the oldest grouped input', async () => {
+  it('marks the grouped Linq native reply target while preserving the ordered prior delivery window', async () => {
     const vault = await createTempVault()
     replyEventPathMocks.resolveAssistantSession.mockResolvedValue({
       created: false,
@@ -4487,8 +4354,18 @@ describe('assistant auto-reply event-first path', () => {
     })
 
     const sendInput = replyEventPathMocks.sendAssistantMessage.mock.calls[0]?.[0]
+    expect(sendInput.turnContext).toContain(
+      'Prior message 1 (native reply target):',
+    )
     expect(sendInput.turnContext).toContain('older anchored reminder')
-    expect(sendInput.turnContext).not.toContain('newer unrelated reminder')
+    expect(sendInput.turnContext).toContain('newer unrelated reminder')
+    expect(sendInput.turnContext.indexOf('older anchored reminder')).toBeLessThan(
+      sendInput.turnContext.indexOf('newer unrelated reminder'),
+    )
+    expect(sendInput.receiptMetadata).toEqual(expect.objectContaining({
+      [AUTO_REPLY_RECEIPT_CROSS_SESSION_CONTEXT_INTENT_ID_KEY]:
+        'intent-anchored-target',
+    }))
   })
 
   it('suppresses cross-session context in hosted queue-only mode via receipt metadata', async () => {
@@ -5035,9 +4912,8 @@ function createOutboxMessage(input: {
   actorId?: string | null
   automationAuthority?: {
     automationId: string
-    automationRelativePath?: string
-    expectedSemanticRevision?: string
     expectedUpdatedAt: string
+    supportSeriesId?: string
   } | null
   channel?: string
   identityId?: string | null

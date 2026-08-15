@@ -12150,6 +12150,10 @@
                                   "minLength": 1,
                                   "maxLength": 128
                                 },
+                                "reminderIntentId": {
+                                  "description": "Provider-accepted private reminder intent id from trusted ordered conversation context. The canonical writer derives and deduplicates the occurrence from it.",
+                                  "type": "string"
+                                },
                                 "date": {
                                   "description": "Optional intended local session date in YYYY-MM-DD form.",
                                   "type": "string",

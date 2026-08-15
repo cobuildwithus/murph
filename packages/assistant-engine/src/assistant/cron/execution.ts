@@ -39,7 +39,6 @@ import {
 } from '../../assistant-service.js'
 import { ASSISTANT_REQUIRE_SEND_AUTOMATION_TAG } from '../automation-tags.js'
 import { buildAssistantAutomationTurnEnvelope } from '../automation/turn-envelope.js'
-import { computeAssistantAutomationSemanticRevision } from '../automation/semantic-revision.js'
 import {
   computeAssistantAutomationRetryAt,
   type AssistantRunEvent,
@@ -1719,13 +1718,26 @@ function resolveAssistantCronOutboxAutomationAuthority(
     return null
   }
 
+  const supportSeriesId = resolveAssistantCronOutboxSupportSeriesId(
+    job.source.tags,
+  )
+
   return {
     automationId: job.source.automationId,
-    automationRelativePath: job.source.relativePath,
-    expectedSemanticRevision:
-      computeAssistantAutomationSemanticRevision(job.source),
     expectedUpdatedAt: job.source.updatedAt,
+    ...(supportSeriesId === null ? {} : { supportSeriesId }),
   }
+}
+
+function resolveAssistantCronOutboxSupportSeriesId(
+  tags: readonly string[],
+): string | null {
+  const supportSeriesIds = [...new Set(
+    tags
+      .map((tag) => parseAutomationSupportSeriesTag(tag)?.seriesId ?? null)
+      .filter((seriesId): seriesId is string => seriesId !== null),
+  )]
+  return supportSeriesIds.length === 1 ? supportSeriesIds[0]! : null
 }
 
 function buildAssistantCronExecutionInstructions(

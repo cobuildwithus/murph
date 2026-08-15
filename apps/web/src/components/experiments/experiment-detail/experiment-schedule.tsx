@@ -127,6 +127,14 @@ function CompactCellView({ cell }: { cell: ScheduleCell }) {
 }
 
 function renderCompactCellBody(cell: ScheduleCell): ReactNode {
+  if (cell.occurrences && cell.occurrences.expected > 1) {
+    const logged =
+      cell.occurrences.completed +
+      cell.occurrences.assumed +
+      cell.occurrences.partial;
+    return <span className="font-mono text-[9px]">{logged}/{cell.occurrences.expected}</span>;
+  }
+
   switch (cell.kind) {
     case "completed":
     case "assumed":
@@ -251,11 +259,17 @@ function renderCellBody(cell: ScheduleCell): ReactNode {
         </span>
       );
     case "missed":
-      return <X aria-label="Not logged" className="size-3.5" strokeWidth={2} />;
+      return cell.occurrences && cell.occurrences.expected > 1 && cell.detail ? (
+        <span className="text-[11px] font-semibold">{cell.detail}</span>
+      ) : <X aria-label="Not logged" className="size-3.5" strokeWidth={2} />;
     case "failed":
-      return <X aria-label="Not met" className="size-3.5" strokeWidth={2} />;
+      return cell.occurrences && cell.occurrences.expected > 1 && cell.detail ? (
+        <span className="text-[11px] font-semibold">{cell.detail}</span>
+      ) : <X aria-label="Not met" className="size-3.5" strokeWidth={2} />;
     case "unknown":
-      return <span className="font-mono text-xs">?</span>;
+      return cell.occurrences && cell.occurrences.expected > 1 && cell.detail ? (
+        <span className="text-[11px] font-semibold">{cell.detail}</span>
+      ) : <span className="font-mono text-xs">?</span>;
     case "scheduled":
       return cell.detail ? (
         <span className="text-[11px] font-medium">{cell.detail}</span>
