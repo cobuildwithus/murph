@@ -272,25 +272,6 @@ const maybeStartHostedLocalMinio = vi.fn<
   } | null>
 >(async () => null);
 const cleanupHostedLocalMinioContainerBestEffort = vi.fn(async () => {});
-const buildHostedLocalTemporalRuntimeEnv = vi.fn((input: {
-  config: HostedLocalDevConfig;
-  env: NodeJS.ProcessEnv;
-}) => {
-  if (input.config.temporal.mode === "disabled") {
-    return {};
-  }
-
-  const address = `${input.config.temporal.host}:${input.config.temporal.port}`;
-  return {
-    HOSTED_TEMPORAL_ADDRESS: address,
-    HOSTED_TEMPORAL_NAMESPACE: input.config.temporal.namespace,
-    HOSTED_TEMPORAL_TASK_QUEUE: input.config.temporal.taskQueue,
-    TEMPORAL_ADDRESS: address,
-    TEMPORAL_NAMESPACE: input.config.temporal.namespace,
-    TEMPORAL_TASK_QUEUE: input.config.temporal.taskQueue,
-    TEMPORAL_TLS_ENABLED: "false",
-  };
-});
 const startHostedLocalTemporalRuntime = vi.fn<
   (input: unknown) => Promise<HostedLocalTemporalRuntime | null>
 >(async () => null);
@@ -432,6 +413,11 @@ vi.mock("../../src/dev-hosted-local/environment.ts", () => ({
   readSimpleEnvFile: vi.fn(async () => ({})),
   requireEnvValue: vi.fn(),
   resolveCloudflareLocalEnv: vi.fn(async (input: { overrides?: Record<string, string | undefined> }) => ({
+    ...Object.fromEntries(
+      Object.entries(input.overrides ?? {}).filter(([name]) =>
+        /^(?:HOSTED_)?TEMPORAL_/u.test(name)
+      ),
+    ),
     HOSTED_ASSISTANT_MODEL: input.overrides?.HOSTED_ASSISTANT_MODEL ?? "gpt-5.6-terra",
     HOSTED_ASSISTANT_PROVIDER:
       input.overrides?.HOSTED_ASSISTANT_PROVIDER ?? "openai",
@@ -485,8 +471,8 @@ vi.mock("../../src/dev-hosted-local/minio.ts", () => ({
   maybeStartHostedLocalMinio,
 }));
 
-vi.mock("../../src/dev-hosted-local/temporal.ts", () => ({
-  buildHostedLocalTemporalRuntimeEnv,
+vi.mock("../../src/dev-hosted-local/temporal.ts", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../src/dev-hosted-local/temporal.ts")>()),
   requireHostedLocalTemporalWorkerPackageDir,
   startHostedLocalTemporalRuntime,
 }));
@@ -983,6 +969,105 @@ describe("hosted local dev stack", () => {
     expect(cloudflareSpawn?.[3]).not.toHaveProperty(
       STRIP_CLOUDFLARE_API_TOKEN_FOR_WRANGLER_ENV,
     );
+  });
+
+  it("clears remote Temporal env from every disabled-mode child boundary", async () => {
+    const temporalEnvNames = [
+      "HOSTED_TEMPORAL_ADDRESS",
+      "HOSTED_TEMPORAL_API_KEY",
+      "HOSTED_TEMPORAL_CLIENT_CERT_BASE64",
+      "HOSTED_TEMPORAL_CLIENT_CERT_PEM",
+      "HOSTED_TEMPORAL_CLIENT_KEY_BASE64",
+      "HOSTED_TEMPORAL_CLIENT_KEY_PEM",
+      "HOSTED_TEMPORAL_NAMESPACE",
+      "HOSTED_TEMPORAL_SERVER_ROOT_CA_CERT_BASE64",
+      "HOSTED_TEMPORAL_SERVER_ROOT_CA_CERT_PEM",
+      "HOSTED_TEMPORAL_TASK_QUEUE",
+      "HOSTED_TEMPORAL_TLS_ENABLED",
+      "HOSTED_TEMPORAL_TLS_SERVER_NAME_OVERRIDE",
+      "TEMPORAL_ADDRESS",
+      "TEMPORAL_API_KEY",
+      "TEMPORAL_CLIENT_CERT_BASE64",
+      "TEMPORAL_CLIENT_CERT_PEM",
+      "TEMPORAL_CLIENT_KEY_BASE64",
+      "TEMPORAL_CLIENT_KEY_PEM",
+      "TEMPORAL_NAMESPACE",
+      "TEMPORAL_SERVER_ROOT_CA_CERT_BASE64",
+      "TEMPORAL_SERVER_ROOT_CA_CERT_PEM",
+      "TEMPORAL_TASK_QUEUE",
+      "TEMPORAL_TLS_ENABLED",
+      "TEMPORAL_TLS_SERVER_NAME_OVERRIDE",
+    ] as const;
+    const remoteValuesFor = (
+      source: string,
+      names: readonly (typeof temporalEnvNames)[number][],
+    ): NodeJS.ProcessEnv => Object.fromEntries(
+      names.map((name) => [name, `${source}-${name.toLowerCase()}`]),
+    );
+    const shellEnv = remoteValuesFor(
+      "shell",
+      temporalEnvNames.filter((_, index) => index % 4 === 0),
+    );
+    const pulledEnv = remoteValuesFor(
+      "pulled",
+      temporalEnvNames.filter((_, index) => index % 4 === 1),
+    );
+    const webEnv = remoteValuesFor(
+      "env",
+      temporalEnvNames.filter((_, index) => index % 4 === 2),
+    );
+    const webLocalEnv = remoteValuesFor(
+      "env-local",
+      temporalEnvNames.filter((_, index) => index % 4 === 3),
+    );
+    const environmentModule = await import("../../src/dev-hosted-local/environment.ts");
+    vi.mocked(environmentModule.readOptionalSimpleEnvFile)
+      .mockResolvedValueOnce({
+        HOSTED_ASSISTANT_PROVIDER: "openai",
+        OPENAI_API_KEY: "local-openai-key",
+      })
+      .mockResolvedValueOnce(webEnv)
+      .mockResolvedValueOnce(webLocalEnv);
+    vi.mocked(environmentModule.readSimpleEnvFile).mockResolvedValueOnce(pulledEnv);
+    spawnChildProcess
+      .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "cloudflare", pid: 211 }))
+      .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "web", pid: 212 }));
+
+    const { startHostedLocalDevStack } = await import("../../src/dev-hosted-local/stack.ts");
+    const stack = await startHostedLocalDevStack({
+      env: {
+        ...process.env,
+        ...shellEnv,
+        MURPH_DEV_TEMPORAL: "disabled",
+      },
+      // The final child overlay must also beat callers that customize Web-only
+      // values; dev-local then sees defined empty values before loading .env files.
+      webProcessEnvOverrides: remoteValuesFor("web-override", temporalEnvNames),
+    });
+    await stack.ready;
+    await stack.stop();
+
+    const cloudflareCall = spawnChildProcess.mock.calls.find(([name]) => name === "cloudflare");
+    const webCall = spawnChildProcess.mock.calls.find(([name]) => name === "web");
+    const effectiveEnvironments = [
+      stack.runtimeEnv,
+      stack.workerRuntimeEnv,
+      cloudflareCall?.[3],
+      webCall?.[3],
+      vi.mocked(environmentModule.resolveCloudflareLocalEnv).mock.calls.at(-1)?.[0]
+        .overrides,
+      vi.mocked(environmentModule.buildWranglerEnvFileText).mock.calls.at(-1)?.[0],
+    ];
+    for (const environment of effectiveEnvironments) {
+      expect(environment).toBeDefined();
+      for (const name of temporalEnvNames) {
+        expect(environment?.[name], `${name} should be empty`).toBe("");
+      }
+    }
+    expect(stack.processes.temporalServer).toBeNull();
+    expect(stack.processes.temporalWorker).toBeNull();
+    expect(spawnChildProcess.mock.calls.map(([name]) => name)).not.toContain("temporal-server");
+    expect(spawnChildProcess.mock.calls.map(([name]) => name)).not.toContain("temporal-worker");
   });
 
   it("starts managed Temporal as part of the hosted-local process model", async () => {
