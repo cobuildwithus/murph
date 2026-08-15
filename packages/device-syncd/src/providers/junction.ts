@@ -481,6 +481,12 @@ function resolveJunctionExtendedTimeseriesBackfillPolicy(
   return policy.history === "extended" ? policy : null;
 }
 
+function doesJunctionImportReceiptResolveDeliveredRows(resource: string): boolean {
+  return isJunctionBodyTimeseriesResource(resource)
+    || resource === "carbohydrates"
+    || resource === "insulin_injection";
+}
+
 const DEFAULT_RECONCILE_DAYS = JUNCTION_DEVICE_PROVIDER_DESCRIPTOR.sync.windows.reconcileDays;
 const DEFAULT_REQUEST_TIMEOUT_MS = 15_000;
 const DEFAULT_SETUP_TTL_MS = 30 * 60_000;
@@ -2494,7 +2500,7 @@ export function createJunctionDeviceSyncProvider(
           ? job.payload.historicalRecordsSeen === true
             || timeseriesImport.canonicalEventCount > 0
             || (
-              isJunctionBodyTimeseriesResource(effectiveResource)
+              doesJunctionImportReceiptResolveDeliveredRows(effectiveResource)
               && timeseriesImport.providerRecordsExamined
             )
           : undefined;
@@ -2743,7 +2749,7 @@ export function createJunctionDeviceSyncProvider(
       input.job.payload.historicalRecordsSeen === true
       || input.importResult.canonicalEventCount > 0
       || (
-        isJunctionBodyTimeseriesResource(input.resource)
+        doesJunctionImportReceiptResolveDeliveredRows(input.resource)
         && input.importResult.providerRecordsExamined
       );
     const unresolvedProviderRecords =
@@ -3384,9 +3390,9 @@ export function createJunctionDeviceSyncProvider(
           windowEnd: executionWindowEnd,
         })
         : null;
-    const successfulImportTerminatesBodyRows =
+    const successfulImportTerminatesDeliveredRows =
       resources.length === 1
-      && isJunctionBodyTimeseriesResource(resources[0] ?? "");
+      && doesJunctionImportReceiptResolveDeliveredRows(resources[0] ?? "");
     if (fetchedProviderRecordIdentityEvidence) {
       unresolvedProviderRecordIdentities = uniqueJunctionProviderRecordIdentities(
         fetchedProviderRecordIdentityEvidence.repairStableExternalRefResourceIds,
@@ -3474,11 +3480,11 @@ export function createJunctionDeviceSyncProvider(
             unresolvedProviderRecordCount =
               unresolvedProviderRecordIdentities.length
               + (unresolvedProviderRecordsWithoutStableIdentity ? 1 : 0);
-          } else if (successfulImportTerminatesBodyRows) {
-            // A resolved import receipt means the body normalizer examined
-            // every delivered row. Valid readings became canonical events and
-            // deterministic validation rejects are terminal; delivery errors
-            // throw before this branch and retain the retry obligation.
+          } else if (successfulImportTerminatesDeliveredRows) {
+            // A resolved exact-record import receipt means the canonical owner
+            // examined every delivered row. Valid readings became canonical
+            // events and deterministic validation rejects are terminal;
+            // delivery errors throw before this branch and remain retryable.
             unresolvedProviderRecordCount = 0;
             unresolvedProviderRecordsWithoutStableIdentity = false;
           } else {

@@ -15621,11 +15621,12 @@ test("Junction metabolic history clears stale count-only ambiguity after a compl
   );
 });
 
-test("Junction metabolic history terminalizes deterministic count-only rejects", async () => {
+test("Junction metabolic history terminalizes deterministic rejects across the full chunked scan", async () => {
   const source = createConnectionSource({
     lifecycleEpoch: 1,
     resourceAvailabilitySummary: { carbohydrates: true },
   });
+  let groupedRequestCount = 0;
   const provider = createJunctionProvider(async (input) => {
     const url = new URL(readUrl(input));
     if (url.pathname === "/v2/user/providers/junction-user-1") {
@@ -15639,17 +15640,18 @@ test("Junction metabolic history terminalizes deterministic count-only rejects",
       });
     }
     if (url.pathname === "/v2/timeseries/junction-user-1/carbohydrates/grouped") {
+      groupedRequestCount += 1;
       return createJsonResponse({
-        groups: {
+        groups: groupedRequestCount === 1 ? {
           garmin: [{
             data: [{
-              timestamp: "2026-04-01T12:00:00.000Z",
+              timestamp: "2026-01-15T12:00:00.000Z",
               unit: "g",
               value: "invalid",
             }],
             source: { provider: "garmin", type: "nutrition" },
           }],
-        },
+        } : {},
       });
     }
     throw new Error(`Unexpected request: ${url.toString()}`);
@@ -15667,26 +15669,28 @@ test("Junction metabolic history terminalizes deterministic count-only rejects",
   });
   let job = createJob("resource", {
     historicalBackfill: true,
-    historicalWindowStart: "2026-04-01T00:00:00.000Z",
+    historicalWindowStart: "2026-01-01T00:00:00.000Z",
     resource: "carbohydrates",
     resourceCategory: "timeseries",
     sourceLifecycleEpoch: 1,
     sourceProviderSlug: "garmin",
-    windowEnd: "2026-04-02T00:00:00.000Z",
-    windowStart: "2026-04-01T00:00:00.000Z",
+    windowEnd: "2026-06-30T00:00:00.000Z",
+    windowStart: "2026-01-01T00:00:00.000Z",
   });
   let result = await executeJunctionJob(provider, context, job);
 
-  for (let attempt = 1; attempt < 5; attempt += 1) {
+  for (let completedChunkCount = 1; completedChunkCount < 6; completedChunkCount += 1) {
     const followUp = requireValue(
       result.scheduledJobs?.find((candidate) => candidate.kind === "resource"),
-      `metabolic history retry ${attempt}`,
+      `metabolic history continuation after chunk ${completedChunkCount}`,
     );
-    assert.equal(followUp.payload?.emptyBackfillAttempts, attempt);
+    assert.equal(followUp.payload?.emptyBackfillAttempts, undefined);
+    assert.equal(followUp.payload?.historicalRecordsSeen, true);
     job = createJob(followUp.kind, followUp.payload ?? {});
     result = await executeJunctionJob(provider, context, job);
   }
 
+  assert.equal(groupedRequestCount, 6);
   assert.equal(result.scheduledJobs, undefined);
   assert.equal(
     hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
