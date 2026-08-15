@@ -477,9 +477,12 @@ safe because Web does not require the runner to consume the header.
 A completed phone call delivers its result as a proactive
 `assistant.notification.requested` message: Murph composes the result in its own
 voice and must send every terminal success, failure, needs-user, and
-not-completed outcome. A provider-less start that becomes durably failed during
-reconciliation publishes the same required not-completed result rather than
-ending silently. The authenticated direct Linq or Telegram origin is
+not-completed outcome. A provider-less start or safety-rejected provider cleanup
+that becomes durably failed during reconciliation publishes the same required
+not-completed result rather than ending silently. Cleanup recovery stops the
+provider, appends and signals the deterministic result, and only then records
+terminal cleanup; notification failure leaves the cleanup row retryable. The
+authenticated direct Linq or Telegram origin is
 stored on the call row and resolved again at delivery; group calls continue to
 use their existing thread-container route. A missing or revoked persisted route
 keeps delivery retryable instead of falling back to another channel. This reuses
@@ -512,10 +515,28 @@ floor. A safe rollback below it requires disabling phone-call start, status, and
 stop capabilities, immediately recycling or draining warm runners, and
 retaining the compatible Web/reconciliation deployment until there are zero
 unsettled stop fences and every settled fence has its deterministic settlement
-mailbox item. Drain active origin-bound calls and verify the deterministic result
-mailbox item for every analyzed origin-bound call before restoring Web that
-would use default-route fallback. Keep the nullable columns; do not drop them
-during rollback. Prefer a forward fix after this floor is crossed.
+mailbox item. After producer disablement and warm-runner drain, require this
+read-only rollback check to return zero before restoring Web that would use
+default-route fallback:
+
+```sql
+SELECT count(*) AS unresolved_origin_bound_phone_calls
+FROM hosted_phone_call AS call
+WHERE call.origin_direct_channel IS NOT NULL
+  AND NOT EXISTS (
+    SELECT 1
+    FROM hosted_mailbox_item AS item
+    WHERE item.user_id = call.member_id
+      AND item.dedupe_key =
+        'assistant.notification.requested:phone-call-result:' || call.id
+  );
+```
+
+Do not narrow this proof to active or analyzed rows. In particular, an ended
+call with delayed analysis remains a rollback blocker because provider analysis
+has no finite SLA. Materialize every ordinary deterministic result item under
+compatible Web or use a forward fix. Keep the nullable columns; do not drop them
+during rollback.
 
 Direct Linq scheduled phone-call availability is an additive Web-first rollout.
 Deploy Web so it recognizes the reserved scheduled-occurrence request-key

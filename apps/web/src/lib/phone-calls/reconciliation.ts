@@ -104,11 +104,16 @@ export async function processHostedPhoneCallRecoveryById(input: {
     call = current;
   }
   if (isHostedPhoneCallProviderCleanupPending(call) && call.providerCallId) {
+    const cleanupCall = call;
+    const providerCallId = call.providerCallId;
     const stopped = await stopHostedPhoneCallCleanupAuthority({
       call: {
-        id: call.id,
-        providerCallId: call.providerCallId,
+        id: cleanupCall.id,
+        providerCallId,
       },
+      finalizeBeforeEnd: () => finalizeStartFailure(cleanupCall, {
+        abortSignal: input.signal,
+      }),
       runtime,
       signal: input.signal,
       store,
@@ -161,11 +166,16 @@ export async function processHostedPhoneCallRecoveryById(input: {
       && isHostedPhoneCallProviderCleanupPending(call)
       && call.providerCallId
     ) {
+      const cleanupCall = call;
+      const providerCallId = call.providerCallId;
       const stopped = await stopHostedPhoneCallCleanupAuthority({
         call: {
-          id: call.id,
-          providerCallId: call.providerCallId,
+          id: cleanupCall.id,
+          providerCallId,
         },
+        finalizeBeforeEnd: () => finalizeStartFailure(cleanupCall, {
+          abortSignal: input.signal,
+        }),
         runtime,
         signal: input.signal,
         store,
@@ -307,6 +317,7 @@ export async function stopHostedPhoneCallCleanupAuthority(input: {
     id: string;
     providerCallId: string;
   };
+  finalizeBeforeEnd?: () => Promise<void>;
   runtime: Pick<PhoneCallRuntime, "stopIfActive">;
   signal: AbortSignal;
   store: Pick<HostedPhoneCallReconciliationStore, "markCleanupEnded">;
@@ -316,6 +327,9 @@ export async function stopHostedPhoneCallCleanupAuthority(input: {
       input.runtime.stopIfActive(input.call.providerCallId, {
         signal: input.signal,
       }));
+    if (input.finalizeBeforeEnd) {
+      await waitForAbortableOperation(input.signal, input.finalizeBeforeEnd);
+    }
   } catch {
     input.signal.throwIfAborted();
     return false;

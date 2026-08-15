@@ -522,8 +522,12 @@ describe("createHostedPhoneCall", () => {
       ...store.prisma,
       recordTerminalUsage,
     };
+    const finalizeStartFailure = vi.fn()
+      .mockRejectedValueOnce(new Error("mailbox append unavailable"))
+      .mockResolvedValueOnce(undefined);
 
     await expect(processHostedPhoneCallRecoveryById({
+      finalizeStartFailure,
       phoneCallId: existing.id,
       prisma,
       runtime,
@@ -533,13 +537,28 @@ describe("createHostedPhoneCall", () => {
 
     stopUnavailable = false;
     await expect(processHostedPhoneCallRecoveryById({
+      finalizeStartFailure,
+      phoneCallId: existing.id,
+      prisma,
+      runtime,
+      signal: new AbortController().signal,
+    })).resolves.toBe("pending");
+    expect(store.currentCall().endedAt).toBeNull();
+
+    await expect(processHostedPhoneCallRecoveryById({
+      finalizeStartFailure,
       phoneCallId: existing.id,
       prisma,
       runtime,
       signal: new AbortController().signal,
     })).resolves.toBe("complete");
     expect(runtimeHarness.startCalls).toEqual([]);
-    expect(runtimeHarness.stopCalls).toEqual(["retell_unsafe", "retell_unsafe"]);
+    expect(runtimeHarness.stopCalls).toEqual([
+      "retell_unsafe",
+      "retell_unsafe",
+      "retell_unsafe",
+    ]);
+    expect(finalizeStartFailure).toHaveBeenCalledTimes(2);
     expect(recordTerminalUsage).toHaveBeenCalledWith({
       call: existing,
       usage: terminalUsage,
@@ -2225,13 +2244,35 @@ describe("createHostedPhoneCall", () => {
     expect(runtime.stopCalls).toEqual([]);
 
     store.advanceCurrentCall({ updatedAt: new Date(0) });
+    const finalizeStartFailure = vi.fn()
+      .mockRejectedValueOnce(new Error("runtime wake unavailable"))
+      .mockResolvedValueOnce(undefined);
     await expect(processHostedPhoneCallRecoveryById({
+      finalizeStartFailure,
+      phoneCallId: store.currentCall().id,
+      prisma: store.prisma,
+      runtime: runtime.runtime,
+      signal: new AbortController().signal,
+    })).resolves.toBe("pending");
+    expect(runtime.stopCalls).toEqual(["retell_cleanup_pending"]);
+    expect(store.currentCall()).toMatchObject({
+      endedAt: null,
+      providerCallId: "retell_cleanup_pending",
+      status: "failed",
+    });
+
+    await expect(processHostedPhoneCallRecoveryById({
+      finalizeStartFailure,
       phoneCallId: store.currentCall().id,
       prisma: store.prisma,
       runtime: runtime.runtime,
       signal: new AbortController().signal,
     })).resolves.toBe("complete");
-    expect(runtime.stopCalls).toEqual(["retell_cleanup_pending"]);
+    expect(runtime.stopCalls).toEqual([
+      "retell_cleanup_pending",
+      "retell_cleanup_pending",
+    ]);
+    expect(finalizeStartFailure).toHaveBeenCalledTimes(2);
     expect(store.currentCall()).toMatchObject({
       endedAt: expect.any(Date),
       providerCallId: "retell_cleanup_pending",

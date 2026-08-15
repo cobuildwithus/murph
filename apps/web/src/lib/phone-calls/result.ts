@@ -326,15 +326,19 @@ export async function finalizeHostedPhoneCallStartFailure(
     signalRuntime?: typeof signalHostedMailboxAppendRuntime;
   } = {},
 ): Promise<void> {
+  const providerCleanupPending = isHostedPhoneCallProviderCleanupPending(call);
   if (
     call.status !== "failed"
-    || call.providerCallId !== null
     || call.analyzedAt !== null
     || call.stopRequestedAt !== null
+    || (
+      call.providerCallId !== null
+      && !providerCleanupPending
+    )
   ) {
     throw hostedPhoneCallResultNotificationError(
       "HOSTED_PHONE_CALL_START_FAILURE_REQUIRED",
-      "Hosted phone-call start-failure notification requires a terminal provider-less start.",
+      "Hosted phone-call start-failure notification requires provider absence or pending safety cleanup.",
     );
   }
   const prisma = options.prisma ?? getPrisma();
@@ -343,7 +347,9 @@ export async function finalizeHostedPhoneCallStartFailure(
     prisma,
     result: {
       outcome: "not_completed",
-      summary: "Murph could not start the phone call.",
+      summary: providerCleanupPending
+        ? "Murph stopped the phone call before it could be completed safely."
+        : "Murph could not start the phone call.",
     },
   });
   await (options.signalRuntime ?? signalHostedMailboxAppendRuntime)({

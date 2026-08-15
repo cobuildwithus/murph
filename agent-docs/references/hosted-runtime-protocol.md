@@ -1988,10 +1988,13 @@ call is delivered as an ordinary `assistant.notification.requested` system-mailb
 event: Murph composes the result in its own voice and proactively messages the
 originating direct Linq or Telegram channel, or the existing group thread. Every
 terminal analysis uses `require_send`; failure and not-completed outcomes may
-not be omitted. A durable provider-less start failure publishes the same
-required result notification with a bounded not-completed outcome, so a call
-that originally returned `starting` cannot become silently failed during
-reconciliation. The result JSON is framed as untrusted provider/callee text. At
+not be omitted. A durable provider-less start failure or safety-rejected
+provider cleanup publishes the same required result notification with a bounded
+not-completed outcome, so a call that originally returned `starting` cannot
+become silently failed during reconciliation. Cleanup recovery keeps its
+existing pending row until provider stop, result append, and runtime signal all
+succeed; only then may it persist terminal cleanup. The result JSON is framed as
+untrusted provider/callee text. At
 call start the authenticated runtime supplies a bounded direct-channel
 discriminator that Web validates through the current route resolver and stores
 on the call row. Group calls store no direct discriminator and retain their
@@ -2036,10 +2039,13 @@ keep compatible Web plus reconciliation running until the database proves zero
 unsettled rows with `stop_requested_at IS NOT NULL` and neither an end timestamp
 nor a provider-less failed state. Every settled fence must also have its stable
 stop-settlement mailbox item before the compatible workflow is drained. For a
-non-null origin channel, drain active calls and prove the deterministic result
-mailbox item exists for every analyzed call so old Web cannot reroute a later
-result. Only then may Web roll back; leave both nullable columns in place.
-Prefer a forward fix after either floor is crossed.
+non-null origin channel, the rollback gate is the ordinary deterministic result
+mailbox item itself, not active, ended, or analyzed status: every such call must
+have `assistant.notification.requested:phone-call-result:${callId}` before old
+Web can be restored. An ended-but-unanalysed call therefore keeps compatible Web
+as the floor for the provider's unbounded analysis delay. If the item cannot be
+materialized, use a forward fix; do not weaken the gate. Only then may Web roll
+back, and both nullable columns remain in place.
 
 Approval decisions always append the generation-scoped reconciliation wake in
 the same transaction as the decision. Browser returns use a bare conversation

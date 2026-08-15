@@ -336,12 +336,26 @@ describe("default phone-call result notification store", () => {
     expect(signalRuntime).toHaveBeenCalledTimes(2);
   });
 
-  it("dedupes a provider-less start failure and requires Murph to send it", async () => {
+  it.each([
+    {
+      label: "provider-less start failure",
+      providerCallId: null,
+      summary: "Murph could not start the phone call.",
+    },
+    {
+      label: "unsafe provider cleanup",
+      providerCallId: PROVIDER_CALL_ID,
+      summary: "Murph stopped the phone call before it could be completed safely.",
+    },
+  ])("dedupes $label and requires Murph to send it", async ({
+    providerCallId,
+    summary,
+  }) => {
     const call: HostedPhoneCall = {
       ...buildStoredAnalyzedCall("linq"),
       analyzedAt: null,
       endedAt: null,
-      providerCallId: null,
+      providerCallId,
       resultEncrypted: null,
       status: "failed",
     };
@@ -381,7 +395,7 @@ describe("default phone-call result notification store", () => {
     expect(mocks.readHostedPhoneCallResult).not.toHaveBeenCalled();
     expect(JSON.stringify(
       mocks.appendHostedMailboxEnvelopeTx.mock.calls[0]?.[0],
-    )).toContain("Murph could not start the phone call.");
+    )).toContain(summary);
     expect(JSON.stringify(
       mocks.appendHostedMailboxEnvelopeTx.mock.calls[0]?.[0],
     )).toContain('"kind":"require_send"');
