@@ -6,6 +6,7 @@ import type {
   ScheduleCell,
   ScheduleCellKind,
 } from "@/src/types/experiments";
+import { countScheduleOccurrences } from "@/src/lib/experiments/schedule-occurrences";
 import { cn } from "@/src/lib/utils";
 
 interface ExperimentScheduleProps {
@@ -78,12 +79,12 @@ export function ExperimentScheduleSidebar({ schedule }: ExperimentScheduleProps)
 
 function tallyTargetStats(schedule: ExperimentSchedule) {
   const cells = schedule.weeks.flatMap((week) => week.cells);
-  const completed = cells.filter((c) => c.kind === "completed").length;
-  const assumed = cells.filter((c) => c.kind === "assumed").length;
-  const partial = cells.filter((c) => c.kind === "partial").length;
-  const missed = cells.filter((c) => c.kind === "missed").length;
-  const failed = cells.filter((c) => c.kind === "failed").length;
-  const unknown = cells.filter((c) => c.kind === "unknown").length;
+  const completed = countScheduleOccurrences(cells, "completed");
+  const assumed = countScheduleOccurrences(cells, "assumed");
+  const partial = countScheduleOccurrences(cells, "partial");
+  const missed = countScheduleOccurrences(cells, "missed");
+  const failed = countScheduleOccurrences(cells, "failed");
+  const unknown = countScheduleOccurrences(cells, "unknown");
   const hasToday = cells.some((c) => c.isToday);
   const due = completed + assumed + partial + missed + failed + unknown;
   const adherencePercent = due > 0 ? Math.round(((completed + assumed) / due) * 100) : 0;

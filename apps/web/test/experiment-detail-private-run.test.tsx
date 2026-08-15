@@ -12,7 +12,10 @@ import {
 import type { ExperimentOutcome } from "@murphai/contracts";
 import { describe, expect, it } from "vitest";
 
-import { ExperimentSchedule } from "@/src/components/experiments/experiment-detail/experiment-schedule";
+import {
+  ExperimentSchedule,
+  ExperimentScheduleSidebar,
+} from "@/src/components/experiments/experiment-detail/experiment-schedule";
 import { ExperimentSummaryTiles } from "@/src/components/experiments/experiment-detail/experiment-summary-tiles";
 import { ResultsSummary } from "@/src/components/experiments/experiment-detail/results-summary";
 import { ResultsTab } from "@/src/components/experiments/experiment-detail/results-tab";
@@ -2124,12 +2127,18 @@ describe("experiment detail private-run composition", () => {
         }}
       />,
     );
+    const sidebarMarkup = renderToStaticMarkup(
+      <ExperimentScheduleSidebar schedule={privateRun!.schedule!} />,
+    );
 
     expect(scheduleMarkup).toContain("3 of 8");
     expect(scheduleMarkup).toContain("3 done");
     expect(scheduleMarkup).toContain("5 not logged");
     expect(summaryMarkup).toContain("3 of 8 done");
     expect(summaryMarkup).toContain("5 not logged");
+    expect(sidebarMarkup).toContain("3/8");
+    expect(sidebarMarkup).toContain("3 of 8 due");
+    expect(sidebarMarkup).toContain("38%");
   });
 
   it("renders all-assumed schedule cells as done with assumed detail copy", async () => {
