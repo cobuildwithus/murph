@@ -1167,6 +1167,9 @@ describe('monorepo release flow coverage audit', () => {
     expect(reviewGptDriver).toContain(
       'const minimumMarkedResponseMs = Number(process.env.ORACLE_DRAFT_MINIMUM_MARKED_RESPONSE_MS || 5 * 60 * 1000);',
     )
+    expect(reviewGptDriver).toContain(
+      'if (!Number.isSafeInteger(minimumMarkedResponseMs) || minimumMarkedResponseMs <= 0) {',
+    )
     const solTarget: ReviewGptModelPickerTarget = {
       desiredVersion: '5-6',
       wantsInstant: false,
@@ -1259,6 +1262,9 @@ describe('monorepo release flow coverage audit', () => {
     expect(reviewGptReadme).toContain('after at least 5 minutes of observed generation')
     expect(reviewGptReadme).toContain(
       'A marked concrete-model response shorter than the trust threshold fails closed as untrusted',
+    )
+    expect(reviewGptReadme).toContain(
+      'The threshold defaults to 5 minutes and can be raised or lowered',
     )
     expect(reviewGptDriver).toContain('REVIEW_GPT_TURN_NONCE:')
     expect(reviewGptDriver).not.toContain("value.includes('MODEL_CONFIRMATION:')")
@@ -1463,6 +1469,9 @@ describe('monorepo release flow coverage audit', () => {
     expect(reviewGptConfig).toContain('app_connector="current"')
     expect(reviewGptConfig).toContain('model="gpt-5.6-sol"')
     expect(reviewGptConfig).toContain('thinking="current"')
+    expect(reviewGptConfig).toContain(
+      'if [[ ! -x "$review_gpt_installed_browser_binary" && ! -d "$review_gpt_selected_browser_app" ]]',
+    )
     expect(reviewGptConfig).toContain('hercules) printf \'%s\\n\' "Hercules" ;;')
     expect(reviewGptConfig).toContain('hercules) printf \'%s\\n\' "9444" ;;')
     expect(reviewGptConfig).toContain('vonneumann) printf \'%s\\n\' "Vonneumann" ;;')
@@ -1987,12 +1996,14 @@ describe('monorepo release flow coverage audit', () => {
   it('applies ReviewGPT response timeout precedence from repo config to one run', () => {
     const harnessRoot = mkdtempSync(path.join(os.tmpdir(), 'murph-review-gpt-timeout-'))
     const localConfigRoot = path.join(harnessRoot, 'config')
+    const harnessBin = path.join(harnessRoot, 'bin')
     const reviewGptBin = path.join(
       repoRoot,
       'node_modules',
       '.bin',
       'cobuild-review-gpt',
     )
+    writeHarnessFile(harnessRoot, 'bin/mdfind', '#!/bin/sh\nexit 0\n', true)
     const runDry = (extraArgs: string[] = []) =>
       spawnSync(
         reviewGptBin,
@@ -2014,6 +2025,7 @@ describe('monorepo release flow coverage audit', () => {
           env: {
             ...withoutNodeV8Coverage(),
             HOME: harnessRoot,
+            PATH: [harnessBin, process.env.PATH].filter(Boolean).join(path.delimiter),
             REVIEW_GPT_BROWSER_LANE_COUNT: '1',
             XDG_CONFIG_HOME: localConfigRoot,
           },
@@ -2181,8 +2193,9 @@ printf '%s|%s|%s|%s|%s|%s|%s\n' \
     const localConfigRoot = path.join(harnessRoot, 'config')
     const configHarness = `
 set -euo pipefail
-# Keep live local CDP ports out of the lock fixture.
+# Keep live local CDP ports and macOS app indexes out of the lock fixture.
 curl() { return 1; }
+mdfind() { return 0; }
 review_gpt_register_dir_preset() { :; }
 review_gpt_register_preset_group() { :; }
 source "$REPO_ROOT/scripts/review-gpt.config.sh"
