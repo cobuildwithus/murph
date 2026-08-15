@@ -776,7 +776,7 @@ test("device sync store preserves legacy Junction identity and reconnects one me
         now: "2026-07-28T10:05:30.000Z",
         sourceProviderSlug: "apple_health",
       }),
-      4,
+      3,
     );
     const authorityAfterArrival = store.listConnectionSources({
       connectionId: account.id,
@@ -807,7 +807,7 @@ test("device sync store preserves legacy Junction identity and reconnects one me
       workouts: true,
       sleep: true,
     });
-    assert.equal(store.listConnectionSources({ connectionId: account.id }).length, 5);
+    assert.equal(store.listConnectionSources({ connectionId: account.id }).length, 4);
 
     store.upsertConnectionSource({
       connectionId: account.id,

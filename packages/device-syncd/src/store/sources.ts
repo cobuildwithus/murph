@@ -634,14 +634,26 @@ export function prepareConnectionSourceWriteInTransaction(
     requested.connectionId,
     requested.sourceInstanceKey,
   );
-  const ownsCanonicalNewIdentity = !exactExisting
+  const established = canonicalProviderSlug !== null
+    ? mergeJunctionSourceIdentity(
+        readJunctionSourceIdentityCandidates(database, requested),
+      )
+    : null;
+  const ownsCanonicalNewIdentity = !established
+    && !exactExisting
     && canonicalProviderSlug !== null
     && canonicalSourceInstanceKey !== null
     && (
       hasOwnInputProperty(input, "lifecycleEpoch")
       || requested.sourceProviderSlug === canonicalProviderSlug
     );
-  const ownedInput = ownsCanonicalNewIdentity
+  const ownedInput = established
+    ? {
+        ...input,
+        sourceInstanceKey: established.sourceInstanceKey,
+        sourceProviderSlug: established.sourceProviderSlug,
+      }
+    : ownsCanonicalNewIdentity
       ? {
           ...input,
           sourceInstanceKey: canonicalSourceInstanceKey,
@@ -649,11 +661,11 @@ export function prepareConnectionSourceWriteInTransaction(
         }
       : input;
   const normalized = normalizeSourceInput(ownedInput);
-  const existing = getConnectionSourceByInstanceKey(
-    database,
-    normalized.connectionId,
-    normalized.sourceInstanceKey,
-  );
+  const existing = established ?? getConnectionSourceByInstanceKey(
+      database,
+      normalized.connectionId,
+      normalized.sourceInstanceKey,
+    );
   return { existing, input: ownedInput, normalized };
 }
 

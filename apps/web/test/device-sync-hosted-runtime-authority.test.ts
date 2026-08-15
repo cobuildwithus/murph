@@ -2140,6 +2140,79 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
     );
   });
 
+  it("applies Junction runtime updates through an established opaque source identity", async () => {
+    const connectionId = "conn_junction_opaque_source";
+    const canonicalSourceInstanceKey = buildJunctionProviderSourceInstanceKey({
+      connectionId,
+      sourceProviderSlug: "apple_health_kit",
+    });
+    if (!canonicalSourceInstanceKey) {
+      throw new Error("Expected a canonical Apple Health source key.");
+    }
+    const harness = createAuthorityHarness({
+      connectionSources: [{
+        connectionId,
+        displayName: null,
+        firstSeenAt: "2026-04-06T09:00:00.000Z",
+        lastErrorCode: null,
+        lastErrorMessage: null,
+        lastSeenAt: "2026-04-06T10:00:00.000Z",
+        lifecycleEpoch: 1,
+        resourceAvailabilitySummary: { activity: true },
+        sourceInstanceKey: "opaque-established-apple-health-source",
+        sourceProviderSlug: "apple_health_kit",
+        status: "connected",
+      }],
+      record: buildHostedRecord({
+        id: connectionId,
+        provider: "junction",
+        updatedAt: "2026-04-06T10:00:00.000Z",
+      }),
+    });
+    const { applyHostedDeviceSyncRuntimeResult } = await import(
+      "@/src/lib/device-sync/hosted-runtime-authority"
+    );
+
+    const response = await applyHostedDeviceSyncRuntimeResult({
+      request: new Request("https://example.test/device-sync/runtime/apply", {
+        body: JSON.stringify({
+          updates: [{
+            connectionId,
+            observedConnectedAt: "2026-04-06T09:00:00.000Z",
+            observedUpdatedAt: "2026-04-06T10:00:00.000Z",
+            sources: [{
+              displayName: null,
+              firstSeenAt: "2026-04-06T09:00:00.000Z",
+              lastErrorCode: null,
+              lastErrorMessage: null,
+              lastSeenAt: "2026-04-06T10:05:00.000Z",
+              observedLifecycleEpoch: 1,
+              observedLastSeenAt: "2026-04-06T10:00:00.000Z",
+              resourceAvailabilitySummary: { activity: true, workouts: true },
+              sourceInstanceKey: canonicalSourceInstanceKey,
+              sourceProviderSlug: "apple_health_kit",
+              status: "connected",
+            }],
+          }],
+          userId: "user_123",
+        }),
+        method: "POST",
+      }),
+      trustedUserId: "user_123",
+    });
+
+    expect(response.updates[0]?.writeUpdate).toBe("applied");
+    expect(harness.upsertConnectionSource).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sourceInstanceKey: "opaque-established-apple-health-source",
+        sourceProviderSlug: "apple_health_kit",
+      }),
+    );
+    expect(harness.upsertConnectionSource).not.toHaveBeenCalledWith(
+      expect.objectContaining({ sourceInstanceKey: canonicalSourceInstanceKey }),
+    );
+  });
+
   it("persists runtime source availability updates without rewriting connection state", async () => {
     const harness = createAuthorityHarness();
     const { applyHostedDeviceSyncRuntimeResult } = await import(

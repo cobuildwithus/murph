@@ -58,7 +58,10 @@ import {
 } from "../hosted-execution/logging";
 import { writeHostedRuntimeLogs } from "../hosted-runtime-log/write";
 import { createHostedDeviceSyncControlPlane } from "./control-plane";
-import { isHostedSourceDisconnectFenced } from "./connection-source-lifecycle";
+import {
+  isHostedSourceDisconnectFenced,
+  resolveHostedJunctionConnectionSource,
+} from "./connection-source-lifecycle";
 import {
   buildHostedPublicDeviceSyncAccount,
   type HostedStaticDeviceSyncConnectionRecord,
@@ -1504,9 +1507,24 @@ function resolveHostedRuntimeSourceUpdatesToApply(input: {
       provider: input.provider,
       update: rawUpdate,
     });
-    const sourceInstanceKeyCanonicalized = normalized.sourceInstanceKeyCanonicalized;
+    let sourceInstanceKeyCanonicalized = normalized.sourceInstanceKeyCanonicalized;
     let update = normalized.update;
-    const current = currentByInstanceKey.get(update.sourceInstanceKey) ?? null;
+    const current = junction
+      ? resolveHostedJunctionConnectionSource(
+          input.currentSources,
+          update.sourceProviderSlug,
+        )
+      : currentByInstanceKey.get(update.sourceInstanceKey) ?? null;
+    if (junction && current) {
+      update = {
+        ...update,
+        sourceInstanceKey: current.sourceInstanceKey,
+        sourceProviderSlug: current.sourceProviderSlug,
+      };
+      sourceInstanceKeyCanonicalized =
+        update.sourceInstanceKey !== rawUpdate.sourceInstanceKey
+        || update.sourceProviderSlug !== rawUpdate.sourceProviderSlug;
+    }
     const currentLastSeenAt = current?.lastSeenAt ?? null;
 
     if (

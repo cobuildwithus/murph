@@ -2681,10 +2681,13 @@ describe("hosted device-sync wakes", () => {
       setupPhase: "source_confirmed",
     });
     let sources = [
-      buildHostedConnectionSource(connection.id, "oura", {
-        lastSeenAt: "2026-03-26T12:02:00.000Z",
-        status: "disconnected",
-      }),
+      {
+        ...buildHostedConnectionSource(connection.id, "oura", {
+          lastSeenAt: "2026-03-26T12:02:00.000Z",
+          status: "disconnected",
+        }),
+        sourceInstanceKey: "opaque-established-oura-source",
+      },
       buildHostedConnectionSource(connection.id, "withings"),
     ];
     const siblingSnapshot = { ...sources[1]! };
@@ -2762,6 +2765,13 @@ describe("hosted device-sync wakes", () => {
     expect(mocks.syncDurableConnectionState).toHaveBeenCalledTimes(2);
     expect(mocks.createSignal).toHaveBeenCalledTimes(2);
     expect(mocks.appendHostedMailboxEnvelope).toHaveBeenCalledTimes(2);
+    expect(mocks.upsertConnectionSource).toHaveBeenCalledTimes(2);
+    for (const [input] of mocks.upsertConnectionSource.mock.calls) {
+      expect(input).toEqual(expect.objectContaining({
+        sourceInstanceKey: "opaque-established-oura-source",
+        sourceProviderSlug: "oura",
+      }));
+    }
   });
 
   it("rejects an older Junction Link callback while the newer source start is pending", async () => {
@@ -4202,7 +4212,10 @@ describe("hosted device-sync wakes", () => {
       setupPhase: "source_confirmed",
     });
     const storedConnection = buildProviderConfigStoredConnection(currentConnection);
-    let currentSource = buildHostedConnectionSource(currentConnection.id, "withings");
+    let currentSource = {
+      ...buildHostedConnectionSource(currentConnection.id, "withings"),
+      sourceInstanceKey: "opaque-established-withings-source",
+    };
     const revokeSourceAccess = vi.fn(async () => {
       currentConnection = {
         ...currentConnection,
@@ -4271,6 +4284,12 @@ describe("hosted device-sync wakes", () => {
       tx: mocks.prismaTx,
       updatedAt: expect.any(String),
     });
+    expect(mocks.upsertConnectionSource).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sourceInstanceKey: "opaque-established-withings-source",
+        sourceProviderSlug: "withings",
+      }),
+    );
     const sourceStartUpdatedAt = mocks.advanceConnectionSourceStartBoundary
       .mock.calls[0]?.[0].updatedAt;
     expect(currentConnection.updatedAt).toBe(sourceStartUpdatedAt);

@@ -1156,9 +1156,9 @@ test("local Junction reconnect fences in-flight blood-pressure completion before
       if (url.pathname === "/v2/user/providers/junction-user-reconnect") {
         return createJsonResponse({
           providers: [{
-            id: "provider-omron-reconnect",
-            slug: "omron",
-            name: "Omron",
+            id: "provider-apple-health-reconnect",
+            slug: "apple_health",
+            name: "Apple Health",
             status: "connected",
             resource_availability: { blood_pressure: true },
           }],
@@ -1170,7 +1170,7 @@ test("local Junction reconnect fences in-flight blood-pressure completion before
       ) {
         return createJsonResponse({
           groups: {
-            omron: [{
+            apple_health: [{
               data: [{
                 id: "bp-before-reconnect",
                 timestamp: "2026-05-12T08:30:00.000Z",
@@ -1259,8 +1259,8 @@ test("local Junction reconnect fences in-flight blood-pressure completion before
     });
     const source = store.upsertConnectionSource({
       connectionId: account.id,
-      sourceInstanceKey: "omron",
-      sourceProviderSlug: "omron",
+      sourceInstanceKey: "legacy-apple-health-source",
+      sourceProviderSlug: "apple_health",
       status: "connected",
       resourceAvailabilitySummary: { blood_pressure: true },
       firstSeenAt: "2026-05-12T00:00:00.000Z",
@@ -1277,7 +1277,7 @@ test("local Junction reconnect fences in-flight blood-pressure completion before
         resource: "blood_pressure",
         resourceCategory: "timeseries",
         sourceLifecycleEpoch: source.lifecycleEpoch,
-        sourceProviderSlug: "omron",
+        sourceProviderSlug: "apple_health",
         windowStart: "2026-05-12T00:00:00.000Z",
         windowEnd: "2026-05-14T00:00:00.000Z",
       },
@@ -1294,7 +1294,7 @@ test("local Junction reconnect fences in-flight blood-pressure completion before
     const reconnect = await service.startConnection({
       ownerId: "<REDACTED_OWNER_ID>",
       provider: "junction",
-      sourceProviderSlug: "omron",
+      sourceProviderSlug: "apple_health_kit",
     });
     const revisionAfterReconnectStart =
       store.getAccountById(account.id)?.localConnectionRevision;
@@ -1326,7 +1326,7 @@ test("local Junction reconnect fences in-flight blood-pressure completion before
     const reconnectedAccount = store.getAccountById(account.id);
     assert.ok(reconnectedAccount);
     const reconnectedSource = reconnectedAccount.sources?.find(
-      (candidate) => candidate.sourceProviderSlug === "omron",
+      (candidate) => candidate.sourceProviderSlug === "apple_health",
     );
     assert.equal(reconnectedSource?.lifecycleEpoch, source.lifecycleEpoch + 1);
     const replacementSchedule = executionProvider.jobExecutor?.createScheduledJobs?.(
@@ -1336,13 +1336,13 @@ test("local Junction reconnect fences in-flight blood-pressure completion before
     assert.ok(replacementSchedule?.jobs.some((job) =>
       job.kind === "resource"
       && job.payload?.resource === "blood_pressure"
-      && job.payload.sourceProviderSlug === "omron"
+      && job.payload.sourceProviderSlug === "apple_health_kit"
       && job.payload.sourceLifecycleEpoch === reconnectedSource?.lifecycleEpoch
     ));
 
     const coverage = addJunctionExtendedTimeseriesHistoryBackfillCoverage({
       metadata: reconnectedAccount.metadata,
-      providerSlug: "omron",
+      providerSlug: "apple_health",
       resource: "blood_pressure",
       version: 1,
     });
@@ -1355,7 +1355,7 @@ test("local Junction reconnect fences in-flight blood-pressure completion before
     const ordinaryReconnect = await service.startConnection({
       ownerId: "<REDACTED_OWNER_ID>",
       provider: "junction",
-      sourceProviderSlug: "omron",
+      sourceProviderSlug: "apple_health_kit",
     });
     vi.setSystemTime(new Date("2026-09-01T10:04:00.000Z"));
     await service.handleConnectionCallback({
@@ -1368,7 +1368,7 @@ test("local Junction reconnect fences in-flight blood-pressure completion before
     });
     assert.equal(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
       store.getAccountById(account.id)?.metadata ?? {},
-      "omron",
+      "apple_health",
       "blood_pressure",
       1,
     ), true);

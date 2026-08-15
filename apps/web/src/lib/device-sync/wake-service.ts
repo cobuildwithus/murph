@@ -84,6 +84,7 @@ import {
   HOSTED_SOURCE_USER_DISCONNECTED_ERROR_CODE,
   isHostedConnectionSourceAdmitted,
   isHostedSourceDisconnectFenced,
+  resolveHostedJunctionConnectionSource,
 } from "./connection-source-lifecycle";
 import {
   hasHostedDeviceSyncDirtyResourcePayload,
@@ -1438,8 +1439,10 @@ export async function handleHostedDeviceSyncConnectionEstablished(input: {
         sourceProviderSlug: input.sourceProviderSlug ?? null,
       });
       if (linkedSource) {
-        const currentSource = (await input.store.listConnectionSources(input.account.id, tx))
-          .find((source) => source.sourceInstanceKey === linkedSource.sourceInstanceKey);
+        const currentSource = resolveHostedJunctionConnectionSource(
+          await input.store.listConnectionSources(input.account.id, tx),
+          linkedSource.sourceProviderSlug,
+        );
         const sourceAdmission = decideJunctionSourceCallbackAdmission({
           connectionStartedAt: input.connectionStartedAt,
           currentSource: currentSource ?? null,
@@ -1465,8 +1468,10 @@ export async function handleHostedDeviceSyncConnectionEstablished(input: {
         }
         await input.store.upsertConnectionSource({
           connectionId: input.account.id,
-          sourceInstanceKey: linkedSource.sourceInstanceKey,
-          sourceProviderSlug: linkedSource.sourceProviderSlug,
+          sourceInstanceKey: currentSource?.sourceInstanceKey
+            ?? linkedSource.sourceInstanceKey,
+          sourceProviderSlug: currentSource?.sourceProviderSlug
+            ?? linkedSource.sourceProviderSlug,
           status: "connected",
           ...(advancedLifecycleEpoch !== undefined
             ? { lifecycleEpoch: advancedLifecycleEpoch }
@@ -1521,16 +1526,10 @@ async function findHostedConnectionSource(input: {
   store: PrismaDeviceSyncControlPlaneStore;
   tx: HostedPrismaTransactionClient;
 }): Promise<HostedDeviceConnectionSource | null> {
-  const sourceInstanceKey = buildJunctionProviderSourceInstanceKey({
-    connectionId: input.connectionId,
-    sourceProviderSlug: input.sourceProviderSlug,
-  });
-  if (!sourceInstanceKey) {
-    return null;
-  }
-
-  return (await input.store.listConnectionSources(input.connectionId, input.tx))
-    .find((source) => source.sourceInstanceKey === sourceInstanceKey) ?? null;
+  return resolveHostedJunctionConnectionSource(
+    await input.store.listConnectionSources(input.connectionId, input.tx),
+    input.sourceProviderSlug,
+  );
 }
 
 async function readCurrentSourceDisconnectTarget(input: {

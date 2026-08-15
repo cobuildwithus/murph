@@ -2485,17 +2485,12 @@ describe("hosted device-sync runtime", () => {
       });
 
       const sources = getStore(service).listConnectionSources({ connectionId: localAccountId });
-      assert.equal(sources.length, 2);
+      assert.equal(sources.length, 1);
       const establishedSource = sources.find(
         (source) => source.sourceInstanceKey === establishedSourceInstanceKey,
       );
-      const laterDuplicate = sources.find(
-        (source) => source.sourceInstanceKey === hostedSourceInstanceKey,
-      );
       assert.equal(establishedSource?.sourceProviderSlug, "apple_health");
       assert.equal(establishedSource?.lastSeenAt, "2026-04-06T09:25:00.000Z");
-      assert.equal(laterDuplicate?.sourceProviderSlug, "apple_healthkit");
-      assert.equal(laterDuplicate?.lastSeenAt, "2026-04-06T09:21:00.000Z");
       const job = getStore(service).enqueueJob({
         accountId: localAccountId,
         availableAt: "2026-04-06T09:25:00.000Z",
