@@ -443,6 +443,8 @@ describe.sequential("hosted local foreground reply priority e2e", () => {
     const replyText = "The post-enrollment foreground owner handled both lanes.";
     const replyPath = replyPathFor(identity);
     const replyMatcher = matchLinqMessageText(replyText);
+    let systemMailboxPreparedObserved = 0;
+    let systemMailboxRetryableFailedObserved = 0;
 
     // This full-stack layer begins after enrollment has committed. Focused Web
     // regressions own unknown-number admission, continuation ordering, and
@@ -584,6 +586,19 @@ describe.sequential("hosted local foreground reply priority e2e", () => {
       const status = await requireScenario().harness.readUserStatus(
         identity.userId,
       );
+      systemMailboxPreparedObserved = Math.max(
+        systemMailboxPreparedObserved,
+        Number(
+          status.workspace?.redactedStatus?.hostedSystemMailboxPrepared ?? 0,
+        ),
+      );
+      systemMailboxRetryableFailedObserved = Math.max(
+        systemMailboxRetryableFailedObserved,
+        Number(
+          status.workspace?.redactedStatus?.hostedSystemMailboxRetryableFailed
+            ?? 0,
+        ),
+      );
       const consumedConversation = await readHostedMailboxItemForTest({
         dedupeKey: inboundEventId,
         environment: requireScenario().runtimeEnv,
@@ -600,6 +615,8 @@ describe.sequential("hosted local foreground reply priority e2e", () => {
         systemImportedSeq:
           status.workspace?.redactedStatus?.hostedMailboxSystemImportedSeq
             ?? null,
+        systemMailboxPreparedObserved,
+        systemMailboxRetryableFailedObserved,
       };
     }, {
       interval: 250,
@@ -611,6 +628,8 @@ describe.sequential("hosted local foreground reply priority e2e", () => {
       mailboxCaughtUp: true,
       systemHandledThroughSeq: activationAppend.wake.seq,
       systemImportedSeq: activationAppend.wake.seq,
+      systemMailboxPreparedObserved: 1,
+      systemMailboxRetryableFailedObserved: 0,
     });
     await assertExactlyOneAcceptedReplyAfterBoundary({
       identity,
