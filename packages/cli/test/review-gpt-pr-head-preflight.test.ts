@@ -27,11 +27,27 @@ function createHarness() {
   const binDir = path.join(harnessRoot, 'bin')
   const capturePath = path.join(harnessRoot, 'review-gpt-invocation.txt')
   harnessRoots.push(harnessRoot)
-  mkdirSync(path.join(harnessRoot, 'scripts'), { recursive: true })
+  mkdirSync(path.join(harnessRoot, 'scripts', 'chatgpt-review-presets'), {
+    recursive: true,
+  })
   mkdirSync(binDir, { recursive: true })
   cpSync(
     path.join(repoRoot, 'scripts', 'review-gpt-pr-head-preflight.sh'),
     path.join(harnessRoot, 'scripts', 'review-gpt-pr-head-preflight.sh'),
+  )
+  cpSync(
+    path.join(
+      repoRoot,
+      'scripts',
+      'chatgpt-review-presets',
+      'completion-specialists.md',
+    ),
+    path.join(
+      harnessRoot,
+      'scripts',
+      'chatgpt-review-presets',
+      'completion-specialists.md',
+    ),
   )
   writeFileSync(path.join(harnessRoot, 'tracked.txt'), 'tracked\n', 'utf8')
   writeExecutable(
@@ -151,6 +167,34 @@ describe('ReviewGPT PR context guard', () => {
     expect(result.stderr).toContain(
       'preliminary and final PR ReviewGPT presets cannot run together',
     )
+    expect(() => readFileSync(harness.capturePath, 'utf8')).toThrow()
+  })
+
+  it('enforces the specialist prompt budget when options precede the positional preset', () => {
+    const harness = createHarness()
+    const result = runHarness(harness, [
+      '--prompt',
+      'x'.repeat(1_000),
+      'completion-specialists',
+    ])
+
+    expect(result.status).toBe(1)
+    expect(result.stderr).toContain('assembled completion-specialists prompt is')
+    expect(() => readFileSync(harness.capturePath, 'utf8')).toThrow()
+  })
+
+  it('counts the accepted camelCase promptFile spelling in the specialist budget', () => {
+    const harness = createHarness()
+    const promptPath = path.join(harness.harnessRoot, 'oversized-prompt.md')
+    writeFileSync(promptPath, 'x'.repeat(1_000), 'utf8')
+    const result = runHarness(harness, [
+      'completion-specialists',
+      '--promptFile',
+      promptPath,
+    ])
+
+    expect(result.status).toBe(1)
+    expect(result.stderr).toContain('assembled completion-specialists prompt is')
     expect(() => readFileSync(harness.capturePath, 'utf8')).toThrow()
   })
 
