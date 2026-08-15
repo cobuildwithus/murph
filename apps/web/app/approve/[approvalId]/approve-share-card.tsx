@@ -1,7 +1,7 @@
 import { MurphHeroOg } from "../../_og/murph-hero-og";
 
 export const APPROVE_OG_ALT =
-  "Murph needs your OK. Approve or deny in one tap.";
+  "Murph needs your OK. Tap to review the request before it expires.";
 
 /**
  * The /approve link unfurl. It lands inside a conversation with Murph, right
@@ -16,7 +16,8 @@ export function ApproveShareCard({ logoDataUri }: { logoDataUri: string }) {
       logoDataUri={logoDataUri}
       headline={"I need\nyour OK."}
       headlineFontSize={96}
-      subtext="One tap to decide. The link expires soon."
+      subtext="Tap to review. The link expires soon."
+      subtextFontSize={30}
     />
   );
 }

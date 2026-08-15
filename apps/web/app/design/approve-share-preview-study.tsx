@@ -15,7 +15,6 @@ export function ApproveSharePreviewStudy() {
     <div
       className="rounded-2xl border border-border bg-card p-4 sm:p-8"
       data-design-component="approve-share-preview"
-      inert
     >
       <div className="mb-6">
         <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
@@ -33,7 +32,11 @@ export function ApproveSharePreviewStudy() {
           generic.
         </p>
       </div>
-      <ScaledSharePreview />
+      {/* Only the rendered preview is inert; the explanatory prose above
+          stays reachable by assistive tech and find-in-page. */}
+      <div inert>
+        <ScaledSharePreview />
+      </div>
     </div>
   );
 }

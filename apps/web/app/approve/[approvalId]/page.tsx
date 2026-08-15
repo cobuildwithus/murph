@@ -45,7 +45,7 @@ const EXPIRED_APPROVAL_REPLY_BODY =
   "That approval link expired. Please send a new one.";
 
 const APPROVAL_METADATA_DESCRIPTION =
-  "Approve or deny in one tap. Approval links expire after a short time.";
+  "Review the request, then approve or deny it. Approval links expire after a short time.";
 
 export async function generateMetadata({
   params,

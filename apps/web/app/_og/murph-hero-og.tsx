@@ -23,8 +23,11 @@ export function MurphHeroOg(props: {
   subtext: string;
   /** Lower this for long dynamic headlines (experiment/biomarker titles). */
   headlineFontSize?: number;
+  /** Raise this when the subtext must stay legible at chat-thumbnail scale. */
+  subtextFontSize?: number;
 }) {
   const headlineFontSize = props.headlineFontSize ?? 78;
+  const subtextFontSize = props.subtextFontSize ?? 24;
 
   return (
     <div
@@ -124,7 +127,7 @@ export function MurphHeroOg(props: {
             marginTop: 26,
             maxWidth: 540,
             fontFamily: "DM Sans",
-            fontSize: 24,
+            fontSize: subtextFontSize,
             lineHeight: 1.45,
             color: MUTED,
           }}
