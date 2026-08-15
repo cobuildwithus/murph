@@ -109,7 +109,6 @@ describe('importHostedAssistantRuntimeIssues', () => {
             commandOrdinal: 3,
             durationMsBucket: '1_5s',
             exitCode: 2,
-            failureClass: 'search_error',
             outputBytesBucket: 'lt_1kb',
             recoveredAfterFailure: true,
           },
@@ -139,12 +138,12 @@ describe('importHostedAssistantRuntimeIssues', () => {
         commandOrdinal: 3,
         durationMsBucket: '1_5s',
         exitCode: 2,
-        failureClass: 'search_error',
         outputBytesBucket: 'lt_1kb',
         recoveredAfterFailure: true,
       },
       operation: 'command.execution',
     }))
+    expect(create?.detailsJson).not.toHaveProperty('failureClass')
     expect(create).not.toHaveProperty('memberId')
   })
 

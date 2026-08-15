@@ -10878,7 +10878,6 @@ describe('assistant codex runtime', () => {
         commandOrdinal: 1,
         durationMsBucket: '5_30s',
         exitCode: 2,
-        failureClass: 'nonzero_exit',
         outputBytesBucket: 'lt_1kb',
       },
     })
@@ -10996,7 +10995,7 @@ describe('assistant codex runtime', () => {
     expect(encodedIssues).not.toContain('dynamic private output')
   })
 
-  it('classifies command failures without retaining private command data', () => {
+  it('attributes command failures without retaining private command data', () => {
     const issueTracker = createCodexActionRuntimeIssueTracker()
     const commandEvent = (input: {
       command?: string
@@ -11064,10 +11063,10 @@ describe('assistant codex runtime', () => {
         commandFamily: 'search',
         commandOrdinal: 3,
         exitCode: 2,
-        failureClass: 'search_error',
         recoveredAfterFailure: false,
       },
     })
+    expect(searchIssue).not.toHaveProperty('details.failureClass')
 
     expect(record(commandEvent({
       command: 'rg narrower-query /tmp/private-record',
@@ -11081,36 +11080,31 @@ describe('assistant codex runtime', () => {
       },
     })
 
-    const classifiedFailures = [
+    const operationalFailures = [
       {
         command: 'cat /tmp/private-record',
         exitCode: 126,
-        failureClass: 'nonzero_exit',
       },
       {
         command: 'cat /tmp/private-record',
         exitCode: 127,
-        failureClass: 'nonzero_exit',
       },
       {
         command: 'cat /tmp/private-record',
         exitCode: 124,
-        failureClass: 'nonzero_exit',
       },
       {
         command: 'bash -lc "rg private-query /tmp/private-record"',
         exitCode: 1,
-        failureClass: 'nonzero_exit',
       },
       {
         command: 'rg private-query /tmp/private-record | head',
         exitCode: 1,
-        failureClass: 'nonzero_exit',
       },
     ] as const
-    const classifiedIssues: AssistantRuntimeIssueInput[] = []
+    const operationalIssues: AssistantRuntimeIssueInput[] = []
 
-    for (const [index, example] of classifiedFailures.entries()) {
+    for (const [index, example] of operationalFailures.entries()) {
       const event = commandEvent({
         command: example.command,
         event: 'completed',
@@ -11124,18 +11118,18 @@ describe('assistant codex runtime', () => {
           commandFamily: 'unknown',
           commandOrdinal: index + 5,
           exitCode: example.exitCode,
-          failureClass: example.failureClass,
         },
       })
+      expect(issue).not.toHaveProperty('details.failureClass')
       if (issue) {
-        classifiedIssues.push(issue)
+        operationalIssues.push(issue)
       }
       expect(record(event)).toBeNull()
     }
 
     const encodedIssues = JSON.stringify([
       searchIssue,
-      ...classifiedIssues,
+      ...operationalIssues,
     ])
     expect(encodedIssues).not.toContain('private-query')
     expect(encodedIssues).not.toContain('/tmp/private-record')
@@ -11207,7 +11201,6 @@ describe('assistant codex runtime', () => {
         commandFamily: 'search',
         commandOrdinal: 5,
         exitCode: 2,
-        failureClass: 'search_error',
         recoveredAfterFailure: false,
       },
     })
@@ -11243,7 +11236,6 @@ describe('assistant codex runtime', () => {
             commandFamily: 'unknown',
             commandOrdinal: index + 7,
             exitCode: 1,
-            failureClass: 'nonzero_exit',
           },
         })
         return issue
@@ -11310,7 +11302,6 @@ describe('assistant codex runtime', () => {
         commandFamily: 'unknown',
         commandOrdinal: 10_000,
         exitCode: 127,
-        failureClass: 'nonzero_exit',
       },
     })
 
@@ -11443,7 +11434,6 @@ describe('assistant codex runtime', () => {
           commandOrdinal: 1,
           durationMsBucket: 'unknown',
           exitCode: 2,
-          failureClass: 'search_error',
           outputBytesBucket: 'lt_1kb',
           recoveredAfterFailure: true,
         },

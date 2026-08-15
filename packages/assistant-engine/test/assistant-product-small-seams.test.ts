@@ -1055,10 +1055,10 @@ describe('assistant product small seams', () => {
       commandOrdinal: 1,
       durationMsBucket: 'unknown',
       exitCode: 2,
-      failureClass: 'search_error',
       outputBytesBucket: 'lt_1kb',
       recoveredAfterFailure: true,
     })
+    expect(written?.record.details).not.toHaveProperty('failureClass')
     const encodedRecord = JSON.stringify(written?.record)
     expect(encodedRecord).not.toContain('private-query')
     expect(encodedRecord).not.toContain('narrower-query')

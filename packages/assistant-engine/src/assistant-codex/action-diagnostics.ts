@@ -555,10 +555,6 @@ function buildRuntimeIssueInputForFailedCodexAction(input: {
           ? {
               commandFamily: input.commandDiagnostic.commandFamily,
               commandOrdinal: input.commandDiagnostic.commandOrdinal,
-              failureClass:
-                input.commandDiagnostic.commandFamily === 'search'
-                  ? 'search_error'
-                  : 'nonzero_exit',
               ...(input.commandDiagnostic.commandFamily === 'search'
                 ? { recoveredAfterFailure: false }
                 : {}),
