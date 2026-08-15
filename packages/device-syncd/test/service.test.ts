@@ -7568,6 +7568,7 @@ test("device sync service imports a workout stream that recovers on the third du
             return createJsonResponse({
               distance: [0, 1_000],
               heartrate: [120, 130],
+              source_id: "provider-garmin-recovery",
               time: [1_775_174_400, 1_775_174_460],
             });
           }

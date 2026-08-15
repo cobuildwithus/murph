@@ -39,8 +39,10 @@ permanent-versus-transient credential failure handling are jointly specified by
 `agent-docs/RELIABILITY.md`.
 
 Junction exact-workout execution requires local lifecycle proof plus continuity
-of one exact selected connected-provider id across the bounded stream fetch;
-ambiguous same-slug connections fail closed. Exact-linked
+of one exact selected connected-provider id across the bounded stream fetch.
+Explicit stream connection references bind directly to that id; fallback
+attribution must resolve uniquely, and ambiguous same-slug connections fail
+closed. Exact-linked
 `workout_duration` history imports atomically with its companion sessions;
 malformed or partial chunks exhaust bounded retry without certifying coverage.
 This contract is specified by `agent-docs/RELIABILITY.md`,

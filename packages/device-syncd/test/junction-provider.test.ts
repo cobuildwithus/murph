@@ -14645,6 +14645,8 @@ test.each([
       { id: "provider-garmin-after", slug: "garmin", status: "connected" },
     ],
     expectedImportCount: 0,
+    streamSource: undefined,
+    streamSourceId: undefined,
   },
   {
     label: "rejects substitution by another preexisting same-slug connection",
@@ -14656,6 +14658,8 @@ test.each([
       { id: "provider-garmin-other", slug: "garmin", status: "connected" },
     ],
     expectedImportCount: 0,
+    streamSource: undefined,
+    streamSourceId: undefined,
   },
   {
     label: "imports through an unchanged remote connection",
@@ -14666,6 +14670,8 @@ test.each([
       { id: "provider-garmin-stable", slug: "garmin", status: "connected" },
     ],
     expectedImportCount: 1,
+    streamSource: undefined,
+    streamSourceId: undefined,
   },
   {
     label: "compares only the fetched slug when another admitted source changes",
@@ -14678,11 +14684,122 @@ test.each([
       { id: "provider-fitbit-after", slug: "fitbit", status: "connected" },
     ],
     expectedImportCount: 1,
+    streamSource: undefined,
+    streamSourceId: undefined,
+  },
+  {
+    label: "imports an explicit id-only connection that remains connected",
+    preFetchProviders: [
+      { id: "provider-garmin-explicit", slug: "garmin", status: "connected" },
+    ],
+    postFetchProviders: [
+      { id: "provider-garmin-explicit", slug: "garmin", status: "connected" },
+    ],
+    expectedImportCount: 1,
+    streamSource: undefined,
+    streamSourceId: "provider-garmin-explicit",
+  },
+  {
+    label: "imports the explicit connection when another same-slug connection remains",
+    preFetchProviders: [
+      { id: "provider-garmin-explicit", slug: "garmin", status: "connected" },
+      { id: "provider-garmin-other", slug: "garmin", status: "connected" },
+    ],
+    postFetchProviders: [
+      { id: "provider-garmin-explicit", slug: "garmin", status: "connected" },
+      { id: "provider-garmin-other", slug: "garmin", status: "connected" },
+    ],
+    expectedImportCount: 1,
+    streamSource: undefined,
+    streamSourceId: "provider-garmin-explicit",
+  },
+  {
+    label: "rejects substitution when its explicit connection disappears",
+    preFetchProviders: [
+      { id: "provider-garmin-explicit", slug: "garmin", status: "connected" },
+      { id: "provider-garmin-other", slug: "garmin", status: "connected" },
+    ],
+    postFetchProviders: [
+      { id: "provider-garmin-other", slug: "garmin", status: "connected" },
+    ],
+    expectedImportCount: 0,
+    streamSource: undefined,
+    streamSourceId: "provider-garmin-explicit",
+  },
+  {
+    label: "rejects ambiguous shared device attribution in provider-list order",
+    preFetchProviders: [
+      {
+        id: "provider-garmin-first",
+        slug: "garmin",
+        source: { device_id: "device-shared" },
+        status: "connected",
+      },
+      {
+        id: "provider-garmin-second",
+        slug: "garmin",
+        source: { device_id: "device-shared" },
+        status: "connected",
+      },
+    ],
+    postFetchProviders: [
+      {
+        id: "provider-garmin-first",
+        slug: "garmin",
+        source: { device_id: "device-shared" },
+        status: "connected",
+      },
+      {
+        id: "provider-garmin-second",
+        slug: "garmin",
+        source: { device_id: "device-shared" },
+        status: "connected",
+      },
+    ],
+    expectedImportCount: 0,
+    streamSource: { device_id: "device-shared", provider: "garmin", type: "watch" },
+    streamSourceId: undefined,
+  },
+  {
+    label: "rejects ambiguous shared device attribution in reverse provider-list order",
+    preFetchProviders: [
+      {
+        id: "provider-garmin-second",
+        slug: "garmin",
+        source: { device_id: "device-shared" },
+        status: "connected",
+      },
+      {
+        id: "provider-garmin-first",
+        slug: "garmin",
+        source: { device_id: "device-shared" },
+        status: "connected",
+      },
+    ],
+    postFetchProviders: [
+      {
+        id: "provider-garmin-second",
+        slug: "garmin",
+        source: { device_id: "device-shared" },
+        status: "connected",
+      },
+      {
+        id: "provider-garmin-first",
+        slug: "garmin",
+        source: { device_id: "device-shared" },
+        status: "connected",
+      },
+    ],
+    expectedImportCount: 0,
+    streamSource: { device_id: "device-shared", provider: "garmin", type: "watch" },
+    streamSourceId: undefined,
   },
 ])("Junction source-less workout stream $label", async ({
   expectedImportCount,
   postFetchProviders,
   preFetchProviders,
+  streamSource,
+  streamSourceId,
 }) => {
   let providerListCount = 0;
   let sourceCatalogMutationCount = 0;
@@ -14700,7 +14817,8 @@ test.each([
       streamRequestCount += 1;
       return createJsonResponse({
         distance: [0, 1_000],
-        source: { provider: "garmin", type: "watch" },
+        source: streamSource ?? { provider: "garmin", type: "watch" },
+        ...(streamSourceId ? { source_id: streamSourceId } : {}),
         time: [1_776_859_200, 1_776_859_260],
       });
     }
@@ -14875,6 +14993,7 @@ test.each([
       status: "connected",
     }],
     sourceInstanceId: undefined,
+    streamSourceId: undefined,
   },
   {
     label: "the attributed remote provider when another same-slug connection survives",
@@ -14889,11 +15008,29 @@ test.each([
       source_id: "provider-garmin-fetched",
       sourceProviderSlug: "garmin",
     }).sourceInstanceId,
+    streamSourceId: undefined,
+  },
+  {
+    label: "a webhook-attributed provider when the stream names another connection",
+    preFetchProviders: [
+      { id: "provider-garmin-webhook", slug: "garmin", status: "connected" },
+      { id: "provider-garmin-stream", slug: "garmin", status: "connected" },
+    ],
+    postFetchProviders: [
+      { id: "provider-garmin-webhook", slug: "garmin", status: "connected" },
+      { id: "provider-garmin-stream", slug: "garmin", status: "connected" },
+    ],
+    sourceInstanceId: resolveJunctionOrigin({
+      source_id: "provider-garmin-webhook",
+      sourceProviderSlug: "garmin",
+    }).sourceInstanceId,
+    streamSourceId: "provider-garmin-stream",
   },
 ])("Junction workout stream fences $label", async ({
   postFetchProviders,
   preFetchProviders,
   sourceInstanceId,
+  streamSourceId,
 }) => {
   const requests: string[] = [];
   const importedSnapshots: unknown[] = [];
@@ -14910,6 +15047,7 @@ test.each([
     if (url.endsWith("/v2/timeseries/workouts/workout-remote-reconnect/stream")) {
       return createJsonResponse({
         distance: [0, 1_000],
+        ...(streamSourceId ? { source_id: streamSourceId } : {}),
         time: [1_776_859_200, 1_776_859_260],
       });
     }

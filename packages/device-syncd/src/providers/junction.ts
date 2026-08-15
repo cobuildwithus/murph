@@ -1990,24 +1990,17 @@ export function createJunctionDeviceSyncProvider(
         ),
       ];
       const webhookSourceInstanceId = normalizeString(job.payload.sourceInstanceId);
-      const webhookSourceProvider = webhookSourceInstanceId
-        ? matchingProviders.find((provider) =>
-            normalizeString(provider.origin.sourceInstanceId) === webhookSourceInstanceId
-            || resolveJunctionOrigin({
-              ...(provider.id ? { source_id: provider.id } : {}),
-              source: provider.source
-                ? {
-                    ...(provider.source.appId ? { app_id: provider.source.appId } : {}),
-                    ...(provider.source.deviceId ? { device_id: provider.source.deviceId } : {}),
-                  }
-                : undefined,
-              sourceProviderSlug: provider.origin.sourceProviderSlug ?? provider.slug,
-            }).sourceInstanceId === webhookSourceInstanceId
+      const webhookSourceProviders = webhookSourceInstanceId
+        ? matchingProviders.filter((provider) =>
+            junctionProviderMatchesSourceInstance(provider, webhookSourceInstanceId)
           )
+        : [];
+      const webhookSourceProvider = webhookSourceProviders.length === 1
+        ? webhookSourceProviders[0]
         : undefined;
       if (
         webhookSourceInstanceId
-        && !webhookSourceProvider
+        && webhookSourceProviders.length !== 1
       ) {
         return {};
       }
@@ -2062,6 +2055,17 @@ export function createJunctionDeviceSyncProvider(
         });
       }
 
+      const streamConnectionReference = readJunctionWorkoutStreamConnectionReference(
+        streamPayload,
+      );
+      if (streamConnectionReference.kind === "ambiguous") {
+        return {};
+      }
+      const streamSourceInstanceId = readJunctionWorkoutStreamSourceInstanceId(
+        streamPayload,
+        normalizeProviderSlug(workoutFeatures.sourceProviderSlug),
+      );
+
       // Re-list after the potentially large fetch so a disconnect that raced
       // the request fences the import. Only the compact feature envelope
       // crosses into the importer; the stream payload is never attached to a
@@ -2086,35 +2090,55 @@ export function createJunctionDeviceSyncProvider(
           === fetchedSourceProviderSlug
         && provider.status.trim().toLowerCase() === "connected"
       );
-      const fetchedSourceInstanceId = normalizeString(workoutFeatures.sourceInstanceId);
+      const exactStreamProviders = streamConnectionReference.kind === "exact"
+        ? preFetchFetchedSourceProviders.filter((provider) =>
+            normalizeString(provider.id) === streamConnectionReference.connectionId
+          )
+        : [];
+      if (
+        streamConnectionReference.kind === "exact"
+        && exactStreamProviders.length !== 1
+      ) {
+        return {};
+      }
+      const streamAttributedProviders = streamConnectionReference.kind === "none"
+        && streamSourceInstanceId
+        ? preFetchFetchedSourceProviders.filter((provider) =>
+            junctionProviderMatchesSourceInstance(provider, streamSourceInstanceId)
+          )
+        : [];
+      if (
+        streamConnectionReference.kind === "none"
+        && streamSourceInstanceId
+        && streamAttributedProviders.length !== 1
+      ) {
+        return {};
+      }
       // Preserve one exact remote authority across the fetch. Another
       // connection with the same provider slug cannot substitute for the
-      // webhook-selected, stream-selected, or sole unambiguous connection.
-      const preFetchFetchedSourceProvider = webhookSourceProvider
+      // exact stream id, uniquely attributed stream, webhook selection, or
+      // sole identity-less connection. Derived attribution never overrides an
+      // explicit stream connection id and must resolve uniquely.
+      const preFetchFetchedSourceProvider = exactStreamProviders[0]
+        ?? streamAttributedProviders[0]
+        ?? webhookSourceProvider
         ?? (
-          fetchedSourceInstanceId
-            ? preFetchFetchedSourceProviders.find((provider) =>
-                normalizeString(provider.origin.sourceInstanceId) === fetchedSourceInstanceId
-              )
-            : preFetchFetchedSourceProviders.length === 1
-              ? preFetchFetchedSourceProviders[0]
-              : undefined
+          !streamSourceInstanceId && preFetchFetchedSourceProviders.length === 1
+            ? preFetchFetchedSourceProviders[0]
+            : undefined
         );
       const preFetchFetchedSourceProviderConnectionId = normalizeString(
         preFetchFetchedSourceProvider?.id,
       );
+      const webhookSourceProviderConnectionId = normalizeString(webhookSourceProvider?.id);
       if (
         !preFetchFetchedSourceProviderConnectionId
+        || (
+          webhookSourceProviderConnectionId
+          && webhookSourceProviderConnectionId !== preFetchFetchedSourceProviderConnectionId
+        )
         || !connectedFetchedSourceProviders.some((provider) =>
           normalizeString(provider.id) === preFetchFetchedSourceProviderConnectionId
-        )
-      ) {
-        return {};
-      }
-      if (
-        fetchedSourceInstanceId
-        && !connectedFetchedSourceProviders.some((provider) =>
-          normalizeString(provider.origin.sourceInstanceId) === fetchedSourceInstanceId
         )
       ) {
         return {};
@@ -9362,6 +9386,103 @@ function readPlainObject(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" && !Array.isArray(value)
     ? value as Record<string, unknown>
     : null;
+}
+
+type JunctionWorkoutStreamConnectionReference =
+  | { kind: "none" }
+  | { kind: "ambiguous" }
+  | { kind: "exact"; connectionId: string };
+
+function readJunctionWorkoutStreamConnectionReference(
+  payload: unknown,
+): JunctionWorkoutStreamConnectionReference {
+  const records = readJunctionWorkoutStreamRecords(payload);
+  const connectionIds = new Set<string>();
+
+  for (const record of records) {
+    for (const key of [
+      "provider_connection_id",
+      "providerConnectionId",
+      "connection_id",
+      "connectionId",
+      "source_id",
+      "sourceId",
+    ]) {
+      const connectionId = normalizeString(record[key]);
+      if (connectionId) {
+        connectionIds.add(connectionId);
+      }
+    }
+  }
+
+  if (connectionIds.size === 0) {
+    return { kind: "none" };
+  }
+  if (connectionIds.size > 1) {
+    return { kind: "ambiguous" };
+  }
+  for (const connectionId of connectionIds) {
+    return { kind: "exact", connectionId };
+  }
+  return { kind: "none" };
+}
+
+function readJunctionWorkoutStreamSourceInstanceId(
+  payload: unknown,
+  sourceProviderSlug: string | null,
+): string | null {
+  if (!sourceProviderSlug) {
+    return null;
+  }
+  const records = readJunctionWorkoutStreamRecords(payload);
+  const streamRecord = records.length === 2
+    ? { ...records[0], ...records[1] }
+    : records[0];
+  return normalizeString(
+    resolveJunctionOrigin(streamRecord, { sourceProviderSlug }).sourceInstanceId,
+  ) ?? null;
+}
+
+function readJunctionWorkoutStreamRecords(
+  payload: unknown,
+): readonly Record<string, unknown>[] {
+  const record = readPlainObject(payload);
+  if (!record) {
+    return [];
+  }
+  const data = readPlainObject(record.data);
+  return data ? [record, data] : [record];
+}
+
+function junctionProviderMatchesSourceInstance(
+  provider: JunctionProviderConnection,
+  sourceInstanceId: string,
+): boolean {
+  const sourceProviderSlug = provider.origin.sourceProviderSlug ?? provider.slug;
+  const providerId = normalizeString(provider.id);
+  const source = provider.source
+    ? {
+        ...(provider.source.appId ? { app_id: provider.source.appId } : {}),
+        ...(provider.source.deviceId ? { device_id: provider.source.deviceId } : {}),
+      }
+    : undefined;
+  const candidateSourceInstanceIds = new Set([
+    normalizeString(provider.origin.sourceInstanceId),
+    providerId
+      ? normalizeString(resolveJunctionOrigin({
+          source_id: providerId,
+          sourceProviderSlug,
+        }).sourceInstanceId)
+      : null,
+    providerId
+      ? normalizeString(resolveJunctionOrigin({
+          source_id: providerId,
+          source,
+          sourceProviderSlug,
+        }).sourceInstanceId)
+      : null,
+  ]);
+  return candidateSourceInstanceIds.has(sourceInstanceId);
 }
 
 function readProviderSnapshotDurableDeliveryAccepted(value: unknown): boolean {
