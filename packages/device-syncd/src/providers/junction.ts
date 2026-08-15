@@ -1136,7 +1136,10 @@ export function createJunctionDeviceSyncProvider(
 
     if (job.kind === "resource") {
       const result = await executeResourceJob(context, job, skippedOptionalResources);
-      return job.payload.historicalBackfill === true
+      return (
+        job.payload.historicalBackfill === true
+        || readJunctionTemporalAuthorityJob(job) !== null
+      )
         ? { ...result, updatesLastSyncCompletedAt: false }
         : result;
     }

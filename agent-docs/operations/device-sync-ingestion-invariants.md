@@ -165,11 +165,15 @@ drain/batch service seam in `packages/device-syncd/src/service.ts`.
    recreated by a later reconcile. A failed, unavailable, or yielded immediate
    resource becomes the same stable resource/day job ahead of the older
    backlog; a retryable failure does not block an independent temporal sibling.
+   Temporal resource/day children never advance generic account completion;
+   when a parent also retains ordinary work, the parent or its one durable
+   ordinary reconcile follow-up remains that completion owner.
    With two temporal resources, one reconcile therefore performs at most two
    immediate one-day collections and normally schedules at most 26 older
    one-resource/one-day jobs. If both immediate resources require durable
    continuation, the queue bound is 28 resource/day jobs across the full
-   14-day horizon. Each child performs at most one canonical import transaction,
+   14-day horizon plus at most one ordinary reconcile follow-up, for 29
+   serialized rows. Each child performs at most one canonical import transaction,
    while the provider transport independently caps the collection at 100 pages
    and 25,000 records with no more than three attempts for each page request.
    The existing one-running-job-per-account fence bounds composition with other

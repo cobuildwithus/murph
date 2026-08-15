@@ -7768,6 +7768,8 @@ test("Junction reconcile atomically replaces a yielded temporal continuation wit
   const databasePath = path.join(vaultRoot, ".runtime", "device-syncd.sqlite");
   const now = new Date("2026-08-12T12:00:00.000Z");
   let yieldRequested = false;
+  let yieldAfterNewestBloodOxygen = true;
+  const requestedWindows: Array<{ end: string | null; resource: string; start: string | null }> = [];
   await initializeVault({ vaultRoot });
   const canonicalImporter = createImporters();
   const provider = createJunctionDeviceSyncProvider({
@@ -7799,16 +7801,21 @@ test("Junction reconcile atomically replaces a yielded temporal continuation wit
       if (url.pathname === "/v2/summary/activity/junction-temporal-yield") {
         return createJsonResponse({ data: [] });
       }
-      if (
-        /^\/v2\/timeseries\/junction-temporal-yield\/(blood_oxygen|stress_level|hrv)\/grouped$/u
-          .test(url.pathname)
-      ) {
+      const resource = url.pathname.match(
+        /^\/v2\/timeseries\/junction-temporal-yield\/(blood_oxygen|stress_level|hrv)\/grouped$/u,
+      )?.[1];
+      if (resource) {
+        requestedWindows.push({
+          end: url.searchParams.get("end_date"),
+          resource,
+          start: url.searchParams.get("start_date"),
+        });
         return createJsonResponse({ groups: {} });
       }
       throw new Error(`Unexpected Junction temporal-yield request: ${url.pathname}`);
     },
   });
-  const fixture = createServiceFixture({
+  const openFixture = () => createServiceFixture({
     secret: "secret-for-tests",
     clock: { now: () => now },
     config: {
@@ -7822,7 +7829,12 @@ test("Junction reconcile atomically replaces a yielded temporal continuation wit
         const result = await canonicalImporter.importDeviceProviderSnapshot(input);
         const timeseries = (input.snapshot as { timeseries?: Record<string, unknown[]> })
           .timeseries;
-        if (timeseries && Object.hasOwn(timeseries, "blood_oxygen")) {
+        if (
+          yieldAfterNewestBloodOxygen
+          && timeseries
+          && Object.hasOwn(timeseries, "blood_oxygen")
+        ) {
+          yieldAfterNewestBloodOxygen = false;
           yieldRequested = true;
         }
         return result;
@@ -7833,6 +7845,7 @@ test("Junction reconcile atomically replaces a yielded temporal continuation wit
     },
     providers: [provider],
   });
+  const fixture = openFixture();
   let fixtureClosed = false;
 
   try {
@@ -7897,13 +7910,45 @@ test("Junction reconcile atomically replaces a yielded temporal continuation wit
 
     fixture.close();
     fixtureClosed = true;
-    const reopenedStore = new SqliteDeviceSyncStore(databasePath);
+    const restarted = openFixture();
     try {
-      const restartedJobs = readJobsForAccountForTesting(reopenedStore, account.id);
+      const restartedJobs = readJobsForAccountForTesting(restarted.store, account.id);
       assert.equal(restartedJobs.filter((job) => job.status === "queued").length, 4);
       assert.equal(restartedJobs.find((job) => job.id === parent.id)?.status, "succeeded");
+      yieldRequested = false;
+      for (let temporalRun = 0; temporalRun < 3; temporalRun += 1) {
+        const processed = await restarted.service.runWorkerOnce();
+        assert.equal(processed?.kind, "resource");
+        assert.equal(restarted.store.getAccountById(account.id)?.lastSyncCompletedAt, null);
+      }
+
+      const processedFollowUp = await restarted.service.runWorkerOnce();
+      assert.equal(processedFollowUp?.id, reconcileFollowUp.id);
+      assert.equal(restarted.store.getAccountById(account.id)?.lastSyncCompletedAt, now.toISOString());
+      assert.deepEqual(
+        requestedWindows
+          .filter(({ resource }) => resource === "hrv")
+          .map(({ end, start }) => [start, end]),
+        [
+          ["2026-08-10", "2026-08-10"],
+          ["2026-08-11", "2026-08-11"],
+        ],
+      );
+      assert.equal(
+        requestedWindows.filter(({ resource }) => resource === "blood_oxygen").length,
+        2,
+      );
+      assert.equal(
+        requestedWindows.filter(({ resource }) => resource === "stress_level").length,
+        2,
+      );
+      assert.equal(
+        readJobsForAccountForTesting(restarted.store, account.id)
+          .filter((job) => job.status === "queued").length,
+        0,
+      );
     } finally {
-      reopenedStore.close();
+      restarted.close();
     }
   } finally {
     if (!fixtureClosed) {

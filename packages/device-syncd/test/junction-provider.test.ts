@@ -2298,6 +2298,7 @@ test("Junction backfill diagnostic rejects malformed requested windows without p
       return true;
     },
   );
+
 });
 
 const usefulHistoricalSummaryRecordByResource = {
@@ -7733,6 +7734,41 @@ test("Junction temporal recovery clamps its composed horizon to fourteen days", 
   );
 });
 
+test("Junction yielded temporal recovery caps at twenty-eight children and one ordinary owner", async () => {
+  const provider = createJunctionProvider(async (input) => {
+    const url = new URL(readUrl(input));
+    if (url.pathname === "/v2/user/providers/junction-user-1") {
+      return createJsonResponse({ providers: [] });
+    }
+    if (url.pathname === "/v2/summary/activity/junction-user-1") {
+      return createJsonResponse({ data: [] });
+    }
+    throw new Error(`Unexpected request after yield: ${url.toString()}`);
+  }, {
+    reconcileDays: 99,
+    timeseriesResources: ["blood_oxygen", "stress_level", "hrv"],
+  });
+
+  const result = await executeJunctionJob(
+    provider,
+    createJunctionJobContext({
+      now: "2026-04-20T00:00:00.000Z",
+      shouldYield: () => true,
+    }),
+    createJob("reconcile", {
+      windowStart: "2026-04-06T00:00:00.000Z",
+      windowEnd: "2026-04-20T00:00:00.000Z",
+    }),
+  );
+  const scheduledJobs = result.scheduledJobs ?? [];
+
+  assert.equal(scheduledJobs.length, 29);
+  assert.equal(scheduledJobs.filter((job) => job.kind === "resource").length, 28);
+  assert.equal(scheduledJobs.filter((job) => job.kind === "reconcile").length, 1);
+  assert.equal(result.jobContinuation, undefined);
+  assert.equal(result.updatesLastSyncCompletedAt, false);
+});
+
 test("Junction temporal catch-up yields and upstream failures remain retryable", async () => {
   const payload = {
     resource: "stress_level",
@@ -7789,6 +7825,33 @@ test("Junction temporal catch-up yields and upstream failures remain retryable",
       return true;
     },
   );
+
+  const completedProvider = createJunctionProvider(async (input) => {
+    const url = new URL(readUrl(input));
+    if (url.pathname === "/v2/user/providers/junction-user-1") {
+      return createJsonResponse({ providers: [] });
+    }
+    if (url.pathname === "/v2/timeseries/junction-user-1/stress_level/grouped") {
+      return createJsonResponse({ groups: {} });
+    }
+    throw new Error(`Unexpected request: ${url.toString()}`);
+  }, { timeseriesResources: ["stress_level"] });
+  const completedResult = await executeJunctionJob(
+    completedProvider,
+    createJunctionJobContext({ now: "2026-04-06T00:00:00.000Z" }),
+    createJob("resource", payload),
+  );
+  assert.equal(completedResult.updatesLastSyncCompletedAt, false);
+
+  const staleTimeZoneResult = await executeJunctionJob(
+    completedProvider,
+    createJunctionJobContext({
+      now: "2026-04-06T00:00:00.000Z",
+      vaultTimeZone: "America/Los_Angeles",
+    }),
+    createJob("resource", payload),
+  );
+  assert.deepEqual(staleTimeZoneResult, { updatesLastSyncCompletedAt: false });
 });
 
 test("Junction closed daily timeseries imports carry the exclusive temporal source-day proof", async () => {
