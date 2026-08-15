@@ -1461,6 +1461,13 @@ describe('monorepo release flow coverage audit', () => {
     expect(reviewGptConfig).toContain('MURPH_REVIEW_GPT_PROFILE_SLUG:-auto')
     expect(reviewGptConfig).toContain('REVIEW_GPT_BROWSER_LANE_COUNT')
     expect(reviewGptConfig).toContain('REVIEW_GPT_THREAD_URL')
+    expect(reviewGptConfig).toContain('review_gpt_reuses_existing_thread=1')
+    expect(reviewGptConfig).toContain(
+      'readonly review_gpt_direct_browser_lane="${REVIEW_GPT_BROWSER_LANE-}"',
+    )
+    expect(reviewGptConfig).toContain(
+      'require REVIEW_GPT_BROWSER_LANE=<first-round-lane>',
+    )
     expect(reviewGptConfig).toContain('REVIEW_GPT_FULL_REVIEW_REASON')
     expect(reviewGptConfig).toContain('pr-followup-review.md')
     expect(reviewGptConfig).not.toContain('review_gpt_load_pr_shape')
@@ -1726,6 +1733,13 @@ describe('monorepo release flow coverage audit', () => {
     )
     expect(prReviewGptLoop).toContain(
       '`REVIEW_GPT_BROWSER_LANE=eragon|phlebas|hercules|mountain`',
+    )
+    expect(prReviewGptLoop).toContain('6,500 UTF-8 bytes')
+    expect(prReviewGptLoop).toContain(
+      'REVIEW_GPT_CONTEXT_ANCHOR_HEAD="$(git rev-parse HEAD)"',
+    )
+    expect(prReviewGptLoop).toContain(
+      'A different-lane retry must use a fresh',
     )
     expect(prReviewGptLoop).toContain('zero accepted findings')
     expect(prReviewGptLoop).toContain('non-obvious affected surfaces')
@@ -2265,6 +2279,66 @@ printf '%s|%s|%s|%s|%s\n' \
         'later ReviewGPT rounds require REVIEW_GPT_THREAD_URL',
       )
 
+      const missingLaneResult = spawnSync('bash', ['-c', configHarness], {
+        cwd: repoRoot,
+        encoding: 'utf8',
+        env: {
+          ...cleanBrowserPreferenceEnv(),
+          HOME: harnessRoot,
+          REPO_ROOT: repoRoot,
+          REVIEW_GPT_REVIEW_PHASE: 'final',
+          REVIEW_GPT_ROUND_NUMBER: '3',
+          REVIEW_GPT_THREAD_URL: 'https://chatgpt.com/c/fallback-thread',
+          XDG_CONFIG_HOME: localConfigRoot,
+        },
+      })
+      expect(missingLaneResult.status).not.toBe(0)
+      expect(missingLaneResult.stderr).toContain(
+        'require REVIEW_GPT_BROWSER_LANE=<first-round-lane>',
+      )
+
+      const compatibilityLaneResult = spawnSync('bash', ['-c', configHarness], {
+        cwd: repoRoot,
+        encoding: 'utf8',
+        env: {
+          ...cleanBrowserPreferenceEnv(),
+          HOME: harnessRoot,
+          MURPH_REVIEW_GPT_BROWSER_LANE: 'phlebas',
+          REPO_ROOT: repoRoot,
+          REVIEW_GPT_REVIEW_PHASE: 'final',
+          REVIEW_GPT_ROUND_NUMBER: '3',
+          REVIEW_GPT_THREAD_URL: 'https://chatgpt.com/c/fallback-thread',
+          XDG_CONFIG_HOME: localConfigRoot,
+        },
+      })
+      expect(compatibilityLaneResult.status).not.toBe(0)
+      expect(compatibilityLaneResult.stderr).toContain(
+        'local-config defaults cannot select a same-thread workspace',
+      )
+
+      writeHarnessFile(
+        localConfigRoot,
+        'murph/review-gpt.conf',
+        'REVIEW_GPT_BROWSER_LANE=mountain\n',
+      )
+      const localLaneResult = spawnSync('bash', ['-c', configHarness], {
+        cwd: repoRoot,
+        encoding: 'utf8',
+        env: {
+          ...cleanBrowserPreferenceEnv(),
+          HOME: harnessRoot,
+          REPO_ROOT: repoRoot,
+          REVIEW_GPT_REVIEW_PHASE: 'final',
+          REVIEW_GPT_ROUND_NUMBER: '3',
+          REVIEW_GPT_THREAD_URL: 'https://chatgpt.com/c/fallback-thread',
+          XDG_CONFIG_HOME: localConfigRoot,
+        },
+      })
+      expect(localLaneResult.status).not.toBe(0)
+      expect(localLaneResult.stderr).toContain(
+        'local-config defaults cannot select a same-thread workspace',
+      )
+
       const existingThreadResult = spawnSync(
         'bash',
         [
@@ -2275,9 +2349,10 @@ printf '%s|%s|%s|%s|%s\n' \
           cwd: repoRoot,
           encoding: 'utf8',
           env: {
-            ...withoutNodeV8Coverage(),
+            ...cleanBrowserPreferenceEnv(),
             HOME: harnessRoot,
             REPO_ROOT: repoRoot,
+            REVIEW_GPT_BROWSER_LANE: 'phlebas',
             REVIEW_GPT_REVIEW_PHASE: 'final',
             REVIEW_GPT_ROUND_NUMBER: '3',
             REVIEW_GPT_THREAD_URL: 'https://chatgpt.com/c/fallback-thread',
@@ -2286,6 +2361,9 @@ printf '%s|%s|%s|%s|%s\n' \
         },
       )
       expect(existingThreadResult.status, existingThreadResult.stderr).toBe(0)
+      expect(existingThreadResult.stdout.trim().split('\n').at(-2)).toMatch(
+        /^phlebas\|/u,
+      )
       expect(existingThreadResult.stdout.trim().split('\n').at(-1)).toBe(
         'https://chatgpt.com/c/fallback-thread',
       )
@@ -2295,9 +2373,10 @@ printf '%s|%s|%s|%s|%s\n' \
         cwd: repoRoot,
         encoding: 'utf8',
         env: {
-          ...withoutNodeV8Coverage(),
+          ...cleanBrowserPreferenceEnv(),
           HOME: harnessRoot,
           REPO_ROOT: repoRoot,
+          REVIEW_GPT_BROWSER_LANE: 'eragon',
           REVIEW_GPT_REVIEW_PHASE: 'final',
           REVIEW_GPT_ROUND_NUMBER: '2',
           REVIEW_GPT_THREAD_URL: 'https://chatgpt.com/c/review-thread',
@@ -2314,7 +2393,7 @@ printf '%s|%s|%s|%s|%s\n' \
         cwd: repoRoot,
         encoding: 'utf8',
         env: {
-          ...withoutNodeV8Coverage(),
+          ...cleanBrowserPreferenceEnv(),
           HOME: harnessRoot,
           REPO_ROOT: repoRoot,
           REVIEW_GPT_FULL_REVIEW_REASON: 'The current thread is unavailable.',
@@ -2331,6 +2410,101 @@ printf '%s|%s|%s|%s|%s\n' \
     } finally {
       rmSync(harnessRoot, { force: true, recursive: true })
     }
+  })
+
+  it('enforces the assembled completion-specialists prompt budget for canonical and Frog callers', () => {
+    const preflightHarness = `
+source "$REPO_ROOT/scripts/review-gpt-pr-head-preflight.sh"
+review_gpt_require_completion_specialists_prompt_budget "$@"
+`
+    const workflow = readFileSync(
+      path.join(repoRoot, 'agent-docs', 'operations', 'pr-reviewgpt-loop.md'),
+      'utf8',
+    )
+    const canonicalPrompt = workflow.match(
+      /pnpm review:gpt completion-specialists[\s\S]*?--prompt "([^"]+)"/u,
+    )?.[1]
+    const frogAutofix = readFileSync(
+      path.join(repoRoot, 'scripts', 'frog-autofix.ts'),
+      'utf8',
+    )
+    const frogPromptTemplate = frogAutofix.match(
+      /prompt: `([^`]*SPECIALIST_REVIEW_COMPLETE[^`]*)`/u,
+    )?.[1]
+    expect(canonicalPrompt).toBeTruthy()
+    expect(frogPromptTemplate).toBeTruthy()
+
+    const renderedCanonicalPrompt = canonicalPrompt!.replace(
+      /\$\([^)]*\)/gu,
+      'a'.repeat(40),
+    )
+    // Conservatively render every Frog interpolation at a full-SHA width. The
+    // real PR/issue identifiers and abbreviated head are shorter.
+    const renderedFrogPrompt = frogPromptTemplate!.replace(
+      /\$\{[^}]+\}/gu,
+      'a'.repeat(40),
+    )
+    expect(renderedFrogPrompt).toContain(
+      'end with SPECIALIST_REVIEW_COMPLETE and exactly one SPECIALIST_OUTCOME marker',
+    )
+
+    const runBudget = (prompt: string) =>
+      spawnSync(
+        'bash',
+        [
+          '-c',
+          preflightHarness,
+          'review-gpt-prompt-budget',
+          'completion-specialists',
+          '--prompt',
+          prompt,
+        ],
+        {
+          cwd: repoRoot,
+          encoding: 'utf8',
+          env: {
+            ...withoutNodeV8Coverage(),
+            REPO_ROOT: repoRoot,
+          },
+        },
+      )
+
+    for (const prompt of [renderedCanonicalPrompt, renderedFrogPrompt]) {
+      const result = runBudget(prompt)
+      expect(result.status, result.stderr).toBe(0)
+    }
+
+    const oversizedResult = runBudget('x'.repeat(1_000))
+    expect(oversizedResult.status).not.toBe(0)
+    expect(oversizedResult.stderr).toContain(
+      'assembled completion-specialists prompt is',
+    )
+    expect(oversizedResult.stderr).toContain(
+      'canonical/Frog budget is 6500',
+    )
+    const mixedPresetResult = spawnSync(
+      'bash',
+      [
+        '-c',
+        'source "$REPO_ROOT/scripts/review-gpt-pr-head-preflight.sh"; review_gpt_detect_pr_phase "$@"',
+        'review-gpt-prompt-budget',
+        'completion-specialists',
+        '--preset',
+        'security',
+      ],
+      {
+        cwd: repoRoot,
+        encoding: 'utf8',
+        env: {
+          ...withoutNodeV8Coverage(),
+          REPO_ROOT: repoRoot,
+        },
+      },
+    )
+    expect(mixedPresetResult.status).not.toBe(0)
+    expect(mixedPresetResult.stderr).toContain(
+      'completion-specialists must run as the only preset',
+    )
   })
 
   it('keeps product-experience decisions distinct inside the unified specialist review', () => {
@@ -2378,12 +2552,13 @@ printf '%s|%s|%s|%s|%s\n' \
       'Make every word, click, field, choice,',
     )
     expect(completionSpecialists).toContain(
-      "repository's meaning-preserving tiny static-copy fast path",
+      'rendered interactions, or design-system UI outside the tiny-copy fast path',
     )
     expect(completionSpecialists).toContain(
-      'rendered fidelity to the declared',
+      'Missing readable, redacted desktop',
     )
-    expect(completionSpecialists).toContain('# Product-experience lens')
+    expect(completionSpecialists).toContain('# Lens contract')
+    expect(completionSpecialists).toContain('- Product experience:')
     expect(completionSpecialists).toContain(
       '`agent-docs/prompts/product-experience-review.md`',
     )
@@ -4555,6 +4730,7 @@ done <<< "\${COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS:-}"
       })
 
       const roundTwoFull = invokePackager('round-two-full', currentHead, {
+        REVIEW_GPT_CONTEXT_ANCHOR_HEAD: currentHead,
         REVIEW_GPT_FIRST_REVIEWED_HEAD: firstHead,
         REVIEW_GPT_FULL_REVIEW_REASON: 'The prior ChatGPT conversation is unavailable.',
         REVIEW_GPT_PREVIOUS_REVIEWED_HEAD: firstHead,
@@ -4584,6 +4760,23 @@ done <<< "\${COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS:-}"
           'review-gpt-pr-context/full-review-reason.txt',
           'review-gpt-pr-context/since-first-reviewed-head.diff',
         ]),
+      )
+
+      const roundTwoFullWithStaleAnchor = invokePackager(
+        'round-two-full-stale-anchor',
+        currentHead,
+        {
+          REVIEW_GPT_CONTEXT_ANCHOR_HEAD: firstHead,
+          REVIEW_GPT_FIRST_REVIEWED_HEAD: firstHead,
+          REVIEW_GPT_FULL_REVIEW_REASON:
+            'The prior ChatGPT conversation is unavailable.',
+          REVIEW_GPT_PREVIOUS_REVIEWED_HEAD: firstHead,
+          REVIEW_GPT_ROUND_NUMBER: '2',
+        },
+      )
+      expect(roundTwoFullWithStaleAnchor.result.status).not.toBe(0)
+      expect(roundTwoFullWithStaleAnchor.result.stderr).toContain(
+        'a full-snapshot context anchor must equal the current PR head',
       )
 
       writeHarnessFile(harnessRoot, 'apps/demo/source.ts', 'export const value = 3\n')
