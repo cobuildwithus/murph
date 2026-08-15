@@ -65,10 +65,18 @@ const HOSTED_CODEX_AUTH_FILE_NAME = "auth.json";
 const DEFAULT_HOSTED_CODEX_REASONING_EFFORT = "low";
 const DEFAULT_HOSTED_CODEX_APPROVAL_POLICY = "never";
 const DEFAULT_HOSTED_CODEX_SANDBOX = "danger-full-access";
+// Codex 0.147.0's canonical V2 subAgentActivity contract exposes child
+// lifecycle/thread identity, but not authoritative effective model, service
+// tier, provider-attempt identity, or terminal usage. Keep cross-model routing
+// hard-disabled until an upgraded protocol emits that evidence and
+// assistant-engine can consume it while remaining the sole immutable
+// usage-ledger writer.
 const HOSTED_CODEX_MULTI_AGENT_USAGE_HINT_TEXT = [
   "When the active route or skill contract permits delegation, proactively spawn a hosted child for genuinely bounded, self-contained background work whose result is not needed in the current reply, then reply without waiting.",
   "Use the child to replace a later root pass, not duplicate work; skip tiny tasks whose assignment and readback cost exceeds doing them once in the root.",
   "Follow the active route or skill contract for the exact leaf assignment and completion proof.",
+  "Per-child model, reasoning-effort, and service-tier overrides are disabled because the current V2 activity protocol does not provide authoritative child usage evidence.",
+  "Every hosted child must inherit the root routing.",
 ].join(" ");
 const HOSTED_CODEX_MULTI_AGENT_MODE_HINT_TEXT =
   "Murph bounded background delegation mode is active; reply-critical work stays in the root.";
@@ -647,10 +655,14 @@ export function buildHostedCodexConfigToml(input: {
     "",
     "# This table owns enablement and the proactive per-turn mode/tool hints.",
     "# A CLI boolean override would replace the table and silently drop them.",
-    // Keep per-spawn model overrides hidden until V2 activity emits authoritative
-    // effective child-model evidence before Murph writes immutable usage.
     "[features.multi_agent_v2]",
     "enabled = true",
+    "# Production rollout gate: the pinned V2 activity contract lacks",
+    "# authoritative effective child model, service tier, provider-attempt",
+    "# identity, and terminal usage. Do not price a routed child as its parent.",
+    "# Keep this hidden until the Codex binary and assistant-engine evidence path",
+    "# are upgraded together; no deployment flag may bypass that ownership change.",
+    "hide_spawn_agent_metadata = true",
     "# V2 counts the root in this limit: four means root plus three children.",
     "max_concurrent_threads_per_session = 4",
     `usage_hint_text = ${tomlString(HOSTED_CODEX_MULTI_AGENT_USAGE_HINT_TEXT)}`,

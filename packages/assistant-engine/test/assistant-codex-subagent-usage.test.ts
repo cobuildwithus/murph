@@ -849,7 +849,7 @@ describe('extractCodexSubagentUsageDrafts', () => {
     ).toBe(900)
   })
 
-  it('ignores unsupported V2 activity model metadata and inherits the parent model', () => {
+  it('ignores non-authoritative V2 routing metadata while cross-model routing is gated', () => {
     const drafts = extractCodexSubagentUsageDrafts({
       modelProvider: 'openai',
       ordinalStart: 2,
@@ -866,7 +866,11 @@ describe('extractCodexSubagentUsageDrafts', () => {
               kind: 'started',
               agentThreadId: 'thread-child-v2-terra',
               agentPath: 'root/terra_check',
-              model: 'gpt-5.6-terra',
+              model: 'gpt-5.6-luna',
+              reasoningEffort: 'high',
+              serviceTier: 'priority',
+              providerRequestId: 'req-untrusted-child',
+              providerResponseId: 'resp-untrusted-child',
             },
           },
         },
@@ -909,6 +913,11 @@ describe('extractCodexSubagentUsageDrafts', () => {
         totalTokens: 300,
       },
     })
-    expect(JSON.stringify(drafts)).not.toContain('thread-child-v2-terra')
+    const serializedDrafts = JSON.stringify(drafts)
+    expect(serializedDrafts).not.toContain('thread-child-v2-terra')
+    expect(serializedDrafts).not.toContain('gpt-5.6-luna')
+    expect(serializedDrafts).not.toContain('req-untrusted-child')
+    expect(serializedDrafts).not.toContain('resp-untrusted-child')
+    expect(serializedDrafts).not.toContain('priority')
   })
 })
