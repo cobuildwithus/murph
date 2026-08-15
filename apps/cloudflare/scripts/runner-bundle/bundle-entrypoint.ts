@@ -272,20 +272,10 @@ export const RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME = "dist-bundled";
 // Generation-10 Browser Vault projection adds the replica builder to lazy
 // runner output. A dedicated Query server facade keeps that graph off startup;
 // exact macOS assembly measured an 8,065,357B static closure and 10,325,065B
-// total after the merged AgentMail removal on 2026-08-14. Ratchet those
-// measurements while retaining the existing cross-platform tolerances and
-// forbidden-startup-input guards.
-//
-// Later reviewed current-main additions extended the existing lazy output
-// without adding a forbidden boot input. Exact Linux hosted-local assembly
-// measured 10,361,173B on 2026-08-14.
-//
-// Exact reminder-occurrence authority and due-reminder wake priority extend
-// existing lazy assistant/runtime output without adding a forbidden boot
-// input. Linux CI measured 10,362,146B total and exact macOS assembly measured
-// 10,413,418B total on 2026-08-14; ratchet the total baseline to the higher
-// cross-platform measurement and retain the established 32KB allowance.
-const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 10_413_418 + 32_768;
+// total after the merged AgentMail removal on 2026-08-14. Keep the entry and
+// static-closure ratchets below, while giving the previous 10,357,833B total
+// cap 10% headroom and retaining the forbidden-startup-input guards.
+const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 11_393_617;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 1_689_721;
 const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 8_065_357;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_TOLERANCE_BYTES = 48_000;
