@@ -377,6 +377,9 @@ describe("Frog autofix guards", () => {
       "agent-docs/prompts/prompt-review.md",
     ];
     expect(trustedReviewControlPaths).toContain("scripts/chatgpt-review-presets");
+    expect(trustedReviewControlPaths).toContain(
+      "scripts/review-gpt-duration-contract.sh",
+    );
     expect(trustedReviewControlPaths).toContain(".agents/skills/frog/SKILL.md");
     expect(trustedReviewControlPaths).toContain("AGENTS.md");
     expect(trustedReviewControlPaths).toContain(":(glob)**/AGENTS.md");
@@ -422,6 +425,10 @@ describe("Frog autofix guards", () => {
         path.join(root, "scripts", "review-gpt-pr-head-preflight.sh"),
         "trusted\n",
       );
+      writeFileSync(
+        path.join(root, "scripts", "review-gpt-duration-contract.sh"),
+        "trusted\n",
+      );
       git("init", "--quiet");
       mkdirSync(path.join(root, ".disabled-hooks"));
       git("config", "core.hooksPath", ".disabled-hooks");
@@ -436,6 +443,7 @@ describe("Frog autofix guards", () => {
         "package.json",
         "pnpm-lock.yaml",
         "scripts/package-audit-context-full.sh",
+        "scripts/review-gpt-duration-contract.sh",
         "scripts/review-gpt-pr-head-preflight.sh",
         "scripts/chatgpt-review-presets/pr-deep-review.md",
         "scripts/frog-autofix-worker.md",

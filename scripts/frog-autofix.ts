@@ -1676,6 +1676,7 @@ export const trustedReviewControlPaths = [
   "scripts/prune-generated-source-sidecars.ts",
   "scripts/repo-tools.config.sh",
   "scripts/review-gpt-context-policy.sh",
+  "scripts/review-gpt-duration-contract.sh",
   "scripts/review-gpt-pr-head-preflight.sh",
   "scripts/review-gpt.config.sh",
   FROG_AUTOFIX_WORKER_PROMPT_PATH,
