@@ -3226,7 +3226,11 @@ Linq `HostedThreadRoute` rows count as 25 each by their blinded
 `accountLookupKey`. Group load follows the canonical delivery account written
 with the encrypted route; it never follows the container owner's home line and
 the assignment read never decrypts route material. New direct placement prefers
-otherwise eligible lines below 5,000 planned messages. If every eligible line
+otherwise eligible lines below 5,000 planned messages. Signup welcomes are
+Linq-only proactive deliveries: activation never creates a Telegram welcome,
+and runtime execution terminally suppresses legacy Telegram welcome work that
+was already durable before this boundary. Telegram remains available for
+member-initiated conversations and their replies. If every eligible line
 is at or above that soft target, selection falls back to the least-loaded line;
 the target does not reject assignment, inbound group provisioning, inbound
 messages, or replies in an existing conversation. A healthy line contacted by a
