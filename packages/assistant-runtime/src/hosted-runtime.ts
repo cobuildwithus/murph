@@ -632,6 +632,7 @@ async function inspectHostedPreCheckpointSystemMailboxPrefetch(
 ): Promise<{
   containsOnlyBrowserVaultRefreshWakes: boolean;
   containsOnlyDeviceSyncWakes: boolean;
+  containsOnlyInitialMemberActivation: boolean;
   containsOnlySafeSystemWakes: boolean;
   hasSystemWork: boolean;
 }> {
@@ -691,6 +692,7 @@ async function inspectHostedPreCheckpointSystemMailboxPrefetch(
         item.lane === "system"
         && item.kind === "device-sync.wake"
       ),
+    containsOnlyInitialMemberActivation,
     containsOnlySafeSystemWakes: containsOnlyInitialMemberActivation
       || (
         response.items.length > 0
@@ -4695,6 +4697,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           HOSTED_INITIAL_CONVERSATION_MAILBOX_IMPORT_LANES,
           importForegroundMailboxItem,
         );
+        let assistantMailboxImport = conversationImport;
         if (input.includeReadyImageCompletion === true) {
           invocationLocalAssistantInputBatch =
             prependReadyImageCompletionInputs(
@@ -4715,6 +4718,24 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           || hostedMailboxImportHasForegroundConversationWork(
             conversationImport,
           );
+        if (
+          hasForegroundConversationWork
+          && preCheckpointSystemPrefetch
+            ?.containsOnlyInitialMemberActivation === true
+        ) {
+          // The first conversation can win admission before its activation
+          // continuation. Initialize that same prefetched member state before
+          // the provider turn, which can remain live until idle checkpointing.
+          await finishMailboxImportWithoutAssistant(conversationImport);
+          assistantMailboxImport = await importMailboxLanes(
+            ["system"],
+            importMailboxItem,
+          );
+          if (!shouldContinue()) {
+            await finishMailboxImportWithoutAssistant(assistantMailboxImport);
+            return false;
+          }
+        }
         const shouldRunLocalPreCheckpointSystemWork =
           input.systemMailboxAdmission === "pre_checkpoint_safe"
           && !hasForegroundConversationWork
@@ -4739,7 +4760,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
                 : {}),
               initialAssistantInputBatch:
                 invocationLocalAssistantInputBatch,
-              initialMailboxImport: conversationImport,
+              initialMailboxImport: assistantMailboxImport,
               initialMailboxImportContext,
               initialMailboxPrefetch,
               latencySeed: input.latencySeed,
