@@ -1,4 +1,4 @@
-import type { PrismaClient } from "@prisma/client";
+import type { Prisma, PrismaClient } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   buildHostedVaultShareProjectionScopeKey,
@@ -24,6 +24,12 @@ function createPrismaStub<T extends Record<string, unknown>>(
     Object.defineProperty(prisma, key, {
       configurable: true,
       value,
+    });
+  }
+  if (!("$executeRaw" in delegates)) {
+    Object.defineProperty(prisma, "$executeRaw", {
+      configurable: true,
+      value: vi.fn(async () => 1),
     });
   }
   return prisma as PrismaClient & T;
@@ -241,7 +247,9 @@ describe("grantHostedVaultShareTx", () => {
 
   it("starts a fresh pending generation when recent-date consent is reaffirmed", async () => {
     const tx = {
+      $executeRaw: vi.fn(async () => 1),
       hostedVaultShare: {
+        count: vi.fn(async () => 1),
         create: vi.fn(),
         findUnique: vi.fn(async () => ({
           id: "share_previous_generation",
@@ -290,6 +298,7 @@ describe("grantHostedVaultShareTx", () => {
 
   it("marks an active null snapshot as still requiring projection", async () => {
     const tx = {
+      $executeRaw: vi.fn(async () => 1),
       hostedVaultShare: {
         create: vi.fn(),
         findUnique: vi.fn(async () => ({

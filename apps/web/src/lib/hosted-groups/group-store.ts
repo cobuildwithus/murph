@@ -221,8 +221,9 @@ export type HostedGroupMemberLeaveSelector =
   | { joinCode: string; membershipId?: never }
   | { joinCode?: never; membershipId: string };
 
-export const HOSTED_GROUP_VAULT_SHARE_GRANT_LIMIT_PER_GRANTOR_PROJECTION =
-  HOSTED_VAULT_SHARE_ACTIVE_DESTINATIONS_PER_SCOPE_MAX;
+export {
+  HOSTED_GROUP_VAULT_SHARE_GRANT_LIMIT_PER_GRANTOR_PROJECTION,
+} from "../hosted-vault-share/delivery-limits";
 export const HOSTED_GROUP_VAULT_SHARE_DESTINATION_LIMIT_PER_PROJECTION = 100;
 export const HOSTED_GROUP_ACTIVE_JOIN_OFFER_SCAN_MAX = 64;
 
@@ -2581,7 +2582,7 @@ async function grantHostedGroupMembershipProjectionTx(
     projectionScope: HostedVaultShareProjectionScope;
   },
 ): ReturnType<typeof grantHostedVaultShareTx> {
-  await assertHostedGroupVaultShareGrantLimitTx(tx, {
+  await assertHostedGroupVaultShareDestinationLimitTx(tx, {
     destinationMemberId: input.groupRuntimeMemberId,
     grantorMemberId: input.memberId,
     projectionScope: input.projectionScope,

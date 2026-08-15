@@ -38,12 +38,16 @@ import {
   parseHostedLinqLineServiceStatus,
 } from "@/src/lib/hosted-onboarding/linq-provider-status";
 
-const inventoryMocks = vi.hoisted(() => ({
-  listChats: vi.fn(),
-  listPhoneNumbers: vi.fn(),
-  runLinqApiRequest: vi.fn(),
-  upsertHostedLinqLineForPhoneTx: vi.fn(),
-}));
+const inventoryMocks = vi.hoisted(() => {
+  const listChats = vi.fn();
+  return {
+    fetchLinqApi: listChats,
+    listChats,
+    listPhoneNumbers: vi.fn(),
+    runLinqApiRequest: vi.fn(),
+    upsertHostedLinqLineForPhoneTx: vi.fn(),
+  };
+});
 
 vi.mock("@/src/lib/linq/api", () => ({
   LINQ_API_DEFAULT_TIMEOUT_MS: 10_000,
@@ -306,14 +310,8 @@ describe("Linq provider health inventory synchronization", () => {
 
   it("associates inventoried chat health with its resolved sending line in one bounded chunk", async () => {
     const observedAt = new Date("2026-07-29T16:09:00.000Z");
-    const createMany = vi.fn().mockResolvedValue({ count: 1 });
-    const prisma = {
-      hostedLinqChatHealth: {
-        createMany,
-        findMany: vi.fn().mockResolvedValue([]),
-        updateMany: vi.fn(),
-      },
-    } as never;
+    const queryRaw = vi.fn().mockResolvedValue([{ syncedCount: 1n }]);
+    const projection = createChatHealthProjectionPrisma(queryRaw);
     inventoryMocks.listChats.mockResolvedValueOnce({
       chats: [buildChatInventoryRecord("chat-1")],
       next_cursor: null,
@@ -1255,6 +1253,10 @@ function mockChatInventoryPages(chatCount: number): void {
       next_cursor: nextCursor,
     }));
   }
+}
+
+function jsonResponse<T>(value: T): T {
+  return value;
 }
 
 function buildChatInventoryRecord(id: string) {

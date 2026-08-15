@@ -67,8 +67,11 @@ export async function grantHostedVaultShareTx(input: {
     select: { id: true, projectionSnapshotCiphertext: true, status: true },
   });
 
-  if (existing?.status === "granted") {
-    return;
+  if (existing?.status === "granted" && input.refreshMaterializedProjection !== true) {
+    return {
+      id: existing.id,
+      requiresProjection: existing.projectionSnapshotCiphertext === null,
+    };
   }
 
   const activeGrantCount = await input.tx.hostedVaultShare.count({

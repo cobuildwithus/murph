@@ -254,7 +254,12 @@ function assertHostedVaultShareCandidateBound(
   maximum: number,
 ): void {
   if (count > maximum) {
-    throw new Error("Hosted vault-share candidate read exceeded its admitted bound.");
+    throw hostedOnboardingError({
+      code: "HOSTED_VAULT_SHARE_GRANT_LIMIT_INVARIANT_VIOLATION",
+      httpStatus: 503,
+      message: "Hosted vault-share candidate read exceeded its admitted bound.",
+      retryable: false,
+    });
   }
 }
 
@@ -292,13 +297,6 @@ export async function replaceHostedVaultShareProjectionSnapshot(input: {
   return prisma.$transaction(async (tx) => {
     if (!await hasHostedVaultShareRuntimeActiveAccessForUpdateTx(
       [input.share.grantorMemberId, input.share.destinationMemberId],
-      tx,
-    )) {
-      return "no-active-share";
-    }
-
-    if (!await hasHostedVaultShareRuntimeActiveAccessForUpdateTx(
-      input.share.destinationMemberId,
       tx,
     )) {
       return "no-active-share";

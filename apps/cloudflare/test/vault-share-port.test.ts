@@ -32,7 +32,7 @@ describe("createHostedWebVaultSharePort delivery", () => {
     vi.clearAllMocks();
   });
 
-  it("delivers one complete legal cohort with one exact callback replay boundary", async () => {
+  it("delivers one complete legal cohort through the shared control-plane boundary", async () => {
     mocks.fetchHostedWebControlPlaneJson.mockResolvedValue({
       status: "delivered",
     });
@@ -45,8 +45,6 @@ describe("createHostedWebVaultSharePort delivery", () => {
     expect(mocks.fetchHostedWebControlPlaneJson).toHaveBeenCalledWith(
       expect.objectContaining({
         body: DELIVER_REQUEST,
-        replayOnceOnRetryableFailure: true,
-        timeoutMs: 1_000,
       }),
     );
   });

@@ -15,7 +15,9 @@ const mocks = vi.hoisted(() => ({
     return false;
   }),
   readActiveHostedMemberAccessIds: vi.fn(),
+  requireHostedRuntimeActiveAccess: vi.fn(),
   requireHostedRuntimeActiveAccessForUpdateTx: vi.fn(),
+  requireHostedRuntimeMembersActiveAccessForUpdateTx: vi.fn(),
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/member-access", () => ({
@@ -35,6 +37,10 @@ import {
 import {
   HostedDomainRootEnvelopeUnavailableError,
 } from "@/src/lib/hosted-crypto/domain-root-store";
+import {
+  HOSTED_GROUP_VAULT_SHARE_GRANT_LIMIT_PER_GRANTOR_PROJECTION,
+  HOSTED_VAULT_SHARE_DELIVER_INVARIANT_READ_LIMIT,
+} from "@/src/lib/hosted-vault-share/delivery-limits";
 import {
   buildHostedVaultShareGenerationToken,
   findActiveHostedVaultShares,
@@ -78,6 +84,7 @@ beforeEach(() => {
     async ({ memberIds }: { memberIds: readonly string[] }) => new Set(memberIds),
   );
   mocks.requireHostedRuntimeActiveAccessForUpdateTx.mockResolvedValue(undefined);
+  mocks.requireHostedRuntimeMembersActiveAccessForUpdateTx.mockResolvedValue(undefined);
 });
 
 function createSnapshotTestCodec(events?: string[]) {
@@ -239,15 +246,11 @@ describe("replaceHostedVaultShareProjectionSnapshot", () => {
     expect(events.slice(0, 2)).toEqual(["encrypt", "transaction"]);
     expect(codec.encryptInputs).toHaveLength(1);
     expect(transaction).toHaveBeenCalledOnce();
-    expect(mocks.requireHostedRuntimeActiveAccessForUpdateTx).toHaveBeenCalledTimes(2);
-    expect(mocks.requireHostedRuntimeActiveAccessForUpdateTx).toHaveBeenNthCalledWith(
-      1,
-      SHARE.grantorMemberId,
-      { prisma: expect.any(Object) },
-    );
-    expect(mocks.requireHostedRuntimeActiveAccessForUpdateTx).toHaveBeenNthCalledWith(
-      2,
-      SHARE.destinationMemberId,
+    expect(
+      mocks.requireHostedRuntimeMembersActiveAccessForUpdateTx,
+    ).toHaveBeenCalledOnce();
+    expect(mocks.requireHostedRuntimeMembersActiveAccessForUpdateTx).toHaveBeenCalledWith(
+      [SHARE.grantorMemberId, SHARE.destinationMemberId],
       { prisma: expect.any(Object) },
     );
     expect(queryRaw).toHaveBeenCalledOnce();
@@ -386,7 +389,8 @@ describe("replaceHostedVaultShareProjectionSnapshot", () => {
     createSnapshotTestCodec();
     const { prisma, updateMany } = createPrisma();
     const inactiveError = new Error("inactive");
-    mocks.requireHostedRuntimeActiveAccessForUpdateTx.mockRejectedValueOnce(inactiveError);
+    mocks.requireHostedRuntimeMembersActiveAccessForUpdateTx
+      .mockRejectedValueOnce(inactiveError);
     mocks.isHostedRuntimeInactiveAccessError.mockImplementation(
       (error: unknown) => error === inactiveError,
     );
@@ -418,14 +422,8 @@ describe("replaceHostedVaultShareProjectionSnapshot", () => {
       sourceWorkspaceVersion: SOURCE_WORKSPACE_VERSION,
     })).resolves.toBe("no-active-share");
 
-    expect(mocks.requireHostedRuntimeActiveAccessForUpdateTx).toHaveBeenNthCalledWith(
-      1,
-      SHARE.grantorMemberId,
-      { prisma: expect.any(Object) },
-    );
-    expect(mocks.requireHostedRuntimeActiveAccessForUpdateTx).toHaveBeenNthCalledWith(
-      2,
-      SHARE.destinationMemberId,
+    expect(mocks.requireHostedRuntimeMembersActiveAccessForUpdateTx).toHaveBeenCalledWith(
+      [SHARE.grantorMemberId, SHARE.destinationMemberId],
       { prisma: expect.any(Object) },
     );
     expect(updateMany).not.toHaveBeenCalled();

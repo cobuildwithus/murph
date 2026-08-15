@@ -777,7 +777,10 @@ describe("acceptHostedGroupJoinCodeTx", () => {
   it("propagates the central grant owner's bounded fan-out rejection", async () => {
     const tx = buildTx();
     mocks.grantHostedVaultShareTx
-      .mockResolvedValueOnce(undefined)
+      .mockResolvedValueOnce({
+        id: "share_profile",
+        requiresProjection: false,
+      })
       .mockRejectedValueOnce(hostedOnboardingError({
         code: "HOSTED_GROUP_VAULT_SHARE_GRANT_LIMIT_REACHED",
         httpStatus: 409,
