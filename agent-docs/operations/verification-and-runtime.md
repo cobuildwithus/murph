@@ -204,7 +204,14 @@ by the frozen root dependency graph before hosted-local model-catalog
 preparation. That workspace pin currently matches the independently owned
 `Dockerfile.cloudflare-hosted-runner-base` pin; both owners remain visible in
 the guarded review context, but no executable cross-owner equality guard links
-them. Keep that setup step free of Environment secrets; only the final
+them. The credential-free setup must also verify the stable Google Chrome
+binary supplied by the pinned `ubuntu-24.04` runner image, and the headed CI
+browser driver must select Playwright's `chrome` channel. This keeps the live
+identity proof on the current public browser instead of Playwright's
+ahead-of-stable bundled Chromium build; see the official
+[runner image inventory](https://github.com/actions/runner-images/blob/main/images/ubuntu/Ubuntu2404-Readme.md)
+and [Playwright browser-channel guidance](https://playwright.dev/docs/browsers#google-chrome--microsoft-edge).
+Keep those setup steps free of Environment secrets; only the final
 browser-canary step may receive Junction sandbox authority and the dedicated
 WHOOP login. A real sign-in proof remains available only after the exact
 workflow reaches protected `main`, where non-canceling concurrency serializes
