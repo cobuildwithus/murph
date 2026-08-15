@@ -5121,7 +5121,7 @@ printf 'ZIP: %s (%s bytes)\n' \
     expect(cliCoverageBranch).toBeTruthy()
     expect(packageCoverageDirs).toBeTruthy()
     expect(cliCoverageBranch).toContain(
-      'env MURPH_PREPARED_CLI_RUNTIME_ARTIFACTS=1 MURPH_VITEST_MAX_WORKERS="$package_coverage_cli_vitest_max_workers" pnpm exec vitest run --config "packages/cli/vitest.workspace.ts" --coverage',
+      'env MURPH_PREPARED_CLI_RUNTIME_ARTIFACTS=1 MURPH_CLI_RELEASE_TARBALL_TEST=1 MURPH_VITEST_MAX_WORKERS="$package_coverage_cli_vitest_max_workers" pnpm exec vitest run --config "packages/cli/vitest.workspace.ts" --coverage',
     )
     expect(cliCoverageBranch).toContain(
       'pnpm --dir packages/contracts test:coverage:prepared',
@@ -5496,7 +5496,9 @@ exit 1
     expect(existsSync(path.join(packageDir, 'scripts', 'verify-release-target.ts'))).toBe(false)
   })
 
-  it.skipIf(process.env.MURPH_PREPARED_CLI_RUNTIME_ARTIFACTS !== '1')(
+  // Prepared artifacts are also trusted by reverse-dependent test:diff fanout.
+  // Keep real release packaging exclusive to explicit CLI acceptance/coverage.
+  it.skipIf(process.env.MURPH_CLI_RELEASE_TARBALL_TEST !== '1')(
     'regenerates and verifies the assistant CLI surface contract in the real release tarball',
     () => {
       const openClawBuild = spawnSync(
