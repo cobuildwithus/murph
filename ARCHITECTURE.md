@@ -1011,13 +1011,15 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   returns to `/connect`.
 
   Final submission and credential capture remain trusted Web operations. The
-  model proposes two friendly words from the tool's neutral sets and supplies only
-  restricted control selectors identified from the live page. Web appends six
-  cryptographically random digits and freezes that exact full name on
-  the setup before trusted code writes or submits it within the one
-  provider-declared creation form. Trusted code then reloads the provider page and
-  derives the one exact-name application container before it proves credential
-  controls belong to that object. Before submission,
+  model proposes two friendly words from the tool's neutral sets. Web appends six
+  cryptographically random digits and freezes that exact full name on the setup.
+  The finite provider registration owns the application-name, final-submit,
+  client-ID, client-secret, and optional reveal coordinates, so the model assigns
+  neither credential roles nor the irreversible submit control. Trusted code
+  writes and submits the name within the one provider-declared creation form,
+  reloads the provider page, derives the one exact-name application container,
+  and reads the ID and secret through their registered semantic coordinates.
+  Before submission,
   trusted code also rejects a name already present on the page; the safe
   pre-submit rollback releases that choice so the model can propose another.
   Generic model-driven actions cannot fill the name or submit the form. Trusted

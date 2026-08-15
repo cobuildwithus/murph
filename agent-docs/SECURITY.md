@@ -82,8 +82,11 @@ Last verified: 2026-08-14
   only that exact run and is rejected unless durable state proves there is no
   provider submission, application binding, or connection. The provider-neutral
   trusted boundary may inspect or create only the safe-format friendly application
-  name frozen on the setup before trusted submission. Trusted submission rejects a
-  pre-existing exact name. After credential sealing, deletion uses a
+  name frozen on the setup before trusted submission. The finite provider
+  registration, not the model, owns the application-name, final-submit, client-ID,
+  client-secret, and optional reveal coordinates; trusted submission rejects a
+  pre-existing exact name and trusted capture preserves those semantic roles.
+  After credential sealing, deletion uses a
   Web-derived hash of the encrypted binding's client ID inside the registered
   container and client-ID coordinates, never mutable display text or a model-
   selected identifier locator. Blank, partial, unmatched, or nonempty inventory

@@ -68,7 +68,11 @@ describe("murph computer dynamic tools", () => {
     expect(providerSchema).toContain('"prepare_delete"');
     expect(providerSchema).toContain('"delete"');
     expect(providerSchema).not.toContain('"confirm_missing"');
-    expect(providerSchema).toContain('"clientSecretSelector"');
+    expect(providerSchema).not.toContain('"applicationNameSelector"');
+    expect(providerSchema).not.toContain('"clientIdSelector"');
+    expect(providerSchema).not.toContain('"clientSecretSelector"');
+    expect(providerSchema).not.toContain('"revealSecretSelector"');
+    expect(providerSchema).not.toContain('"submitSelector"');
     expect(providerSchema).not.toContain('"clientSecret"');
     expect(JSON.stringify(pauseTool?.inputSchema)).toContain("final_confirmation");
     expect(JSON.stringify(pauseTool?.inputSchema)).toContain("managed_login");
@@ -109,7 +113,8 @@ describe("murph computer dynamic tools", () => {
     const pauseDescription = pauseTool?.description ?? "";
 
     expect(providerDescription).toContain("never enter model context");
-    expect(providerDescription).toContain("live page at call time");
+    expect(providerDescription).toContain("registration owns application-name");
+    expect(providerDescription).toContain("capture takes no runtime selectors");
     expect(providerDescription).toContain("capture");
     expect(actDescription).toContain("typed steps only");
     expect(actDescription).toContain("blocks code");

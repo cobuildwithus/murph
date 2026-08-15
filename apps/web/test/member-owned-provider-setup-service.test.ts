@@ -64,8 +64,12 @@ const CUSTOM_REGISTRATION: MemberOwnedProviderSetupRegistration<"strava"> = {
     trustedAuthority: {
       applicationContainerSelector: "form[data-owned-application]",
       applicationIdSelector: "[data-client-id]",
+      applicationNameSelector: "[data-application-name]",
+      applicationSecretSelector: "[data-client-secret]",
       creationFormSelector: "form[data-owned-creation]",
       loadedEmptySelector: "[data-owned-application-empty]",
+      revealSecretSelector: "button.reveal-secret",
+      submitSelector: "button.create-application",
     },
   },
   coordinates: STRAVA_MEMBER_OWNED_PROVIDER_SETUP_COORDINATES,
@@ -712,6 +716,12 @@ describe("member-owned provider setup service", () => {
       providerApplicationRevision: 3,
       status: "oauth_ready",
     });
+    expect(computer.captureCodes).toHaveLength(1);
+    expect(computer.captureCodes[0]).toContain("[data-application-name]");
+    expect(computer.captureCodes[0]).toContain("button.create-application");
+    expect(computer.captureCodes[0]).toContain("[data-client-id]");
+    expect(computer.captureCodes[0]).toContain("[data-client-secret]");
+    expect(computer.captureCodes[0]).toContain("button.reveal-secret");
     expect(computer.finishOwnedRun).toHaveBeenCalledWith(expect.objectContaining({
       outcome: "completed",
       runId: RUN_ID,
@@ -1191,14 +1201,9 @@ function captureRequest() {
   return {
     action: "capture" as const,
     applicationName: "Cobalt Trail",
-    applicationNameSelector: "[data-application-name]",
-    clientIdSelector: "[data-client-id]",
-    clientSecretSelector: "[data-client-secret]",
     provider: "strava",
-    revealSecretSelector: "button.reveal-secret",
     runId: RUN_ID,
     setupId: SETUP_ID,
-    submitSelector: "button.create-application",
   };
 }
 

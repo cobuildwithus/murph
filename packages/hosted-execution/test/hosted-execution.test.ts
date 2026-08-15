@@ -912,29 +912,28 @@ describe("hosted execution coverage gaps", () => {
         },
       }],
     })).toThrow(/Hosted computer act request is invalid/u);
-    expect(() => parseHostedRuntimeProviderSetupToolRequest({
+    const captureRequest = {
       action: "capture",
       applicationName: "Cobalt Trail 482731",
-      applicationNameSelector: 'input[name="name"]',
-      clientIdSelector: 'input[value^="secret-prefix"]',
-      clientSecretSelector: 'input[name="client_secret"]',
       provider: "strava",
-      revealSecretSelector: null,
       runId: "hcr_setup",
       setupId: "dps_setup",
-      submitSelector: 'button[type="submit"]',
-    })).toThrow();
-    expect(() => parseHostedRuntimeProviderSetupToolRequest({
+    } as const;
+    expect(parseHostedRuntimeProviderSetupToolRequest(captureRequest)).toMatchObject({
       action: "capture",
-      applicationName: "A Member Name 123456",
+      applicationName: "Cobalt Trail 482731",
+    });
+    expect(() => parseHostedRuntimeProviderSetupToolRequest({
+      ...captureRequest,
       applicationNameSelector: 'input[name="name"]',
       clientIdSelector: '[data-client-id]',
       clientSecretSelector: 'input[name="client_secret"]',
-      provider: "strava",
       revealSecretSelector: null,
-      runId: "hcr_setup",
-      setupId: "dps_setup",
       submitSelector: 'button[type="submit"]',
+    })).toThrow();
+    expect(() => parseHostedRuntimeProviderSetupToolRequest({
+      ...captureRequest,
+      applicationName: "A Member Name 123456",
     })).toThrow();
     const deleteRequest = {
       action: "delete",

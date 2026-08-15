@@ -161,16 +161,17 @@ credential-redacted observation. Do not use `computer_os_control` or
 `computer_finish_run` on a setup-owned run.
 
 Never submit the developer-app form with `computer_act`. Once the exact form is
-ready, call `provider_setup` with `action: "capture"` and runtime selectors for
-the application name, final submit, client ID, and client secret fields. Do not
-fill the application name yourself. When `begin` returns no assigned name, choose
+ready, call `provider_setup` with `action: "capture"`; trusted provider
+registration owns the application-name, final-submit, client-ID, client-secret,
+and optional reveal coordinates. Do not fill the application name yourself. When
+`begin` returns no assigned name, choose
 one random two-word name using the exact neutral word sets in the tool
 description; never use member details. Web adds six cryptographically random
 digits, then the trusted operation freezes and fills that full name, submits the
 exact provider-declared creation form, reloads the trusted
 provider page, and derives the one exact-name application container before it
-reads and seals credentials. Model-selected selectors never grant ownership or
-credential-read authority. The operation navigates away and returns no credential
+reads and seals credentials in registered semantic roles. The model never assigns
+credential roles or the irreversible submit control. The operation navigates away and returns no credential
 value. Never ask for, read, copy, quote, log, screenshot, or preserve client IDs,
 client secrets, OAuth tokens, or other credentials.
 

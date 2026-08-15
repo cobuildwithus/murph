@@ -27,8 +27,11 @@ fences cadence publication. The contract is jointly specified by
 Member-owned provider setup keeps accepted no-handle recovery in the existing
 mailbox and computer owners, returns the typed retry disposition on the first
 durably retained ambiguity, and admits only its two exact signed POST callbacks
-through Cloudflare's bounded Web-control policy. This contract is jointly
-specified by `ARCHITECTURE.md`, `agent-docs/SECURITY.md`,
+through Cloudflare's bounded Web-control policy. The model proposes only neutral
+friendly words and reversible metadata; finite provider registration owns the
+application-name, submit, client-ID, client-secret, and reveal semantics used by
+the trusted browser boundary. This contract is jointly specified by
+`ARCHITECTURE.md`, `agent-docs/SECURITY.md`,
 `agent-docs/RELIABILITY.md`, and `agent-docs/references/testing-ci-map.md`.
 
 Personal-to-group projection convergence, including attempt-local foreground

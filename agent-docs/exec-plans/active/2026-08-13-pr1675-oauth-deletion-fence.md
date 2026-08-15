@@ -118,6 +118,9 @@ provider-specific automation layer.
     convergence; use provider-registered client-ID and disjoint loaded-empty
     coordinates while preserving `capturing` and `deletion_pending` on partial,
     nonempty, unmatched, or incomplete inventory.
+25. [x] Remove all model-authored credential-capture selectors and register the
+    application-name, submit, client-ID, client-secret, and reveal roles as
+    finite trusted provider coordinates.
 
 ## Decisions
 
@@ -305,3 +308,19 @@ provider-specific automation layer.
   application-store, migration, and changelog tests; 75 assistant prompt/tool
   tests; and 9 hosted-execution contract tests pass. Web, assistant-engine, and
   hosted-execution typechecks, focused Web ESLint, and docs drift pass.
+- ReviewGPT round 18 found that model-authored capture selectors could transpose
+  the client-ID and client-secret roles. That could serialize the real secret as
+  an OAuth `client_id` and poison the stable deletion digest. The finding is
+  accepted. The correction removes all five semantic selectors from the hosted
+  tool request and gives the finite provider registration sole ownership of the
+  application-name, submit, client-ID, client-secret, and optional reveal roles.
+  The model still chooses neutral friendly words and handles reversible metadata.
+  This adds finite declarative coordinates while deleting model authority; it
+  adds no state, lifecycle, owner, service, queue, scheduler, adapter, or
+  provider-specific browser program.
+- Round-18 remediation proof: the focused Web setup, browser, account, route,
+  application-store, migration, and changelog lane passes, including 44 direct
+  setup and browser-boundary cases; 109 assistant prompt/tool cases and 9
+  hosted-execution contract cases pass. Web, assistant-engine, and
+  hosted-execution typechecks, focused Web ESLint, docs drift, diff integrity,
+  and the changed-line privacy scan pass.

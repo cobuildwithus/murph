@@ -107,14 +107,9 @@ const beginRequestSchema = z.object({
 const captureRequestSchema = z.object({
   action: z.literal("capture"),
   applicationName: applicationNameProposalSchema.nullable().default(null),
-  applicationNameSelector: selectorSchema,
-  clientIdSelector: selectorSchema,
-  clientSecretSelector: selectorSchema,
   provider: providerSchema,
-  revealSecretSelector: selectorSchema.nullable().default(null),
   runId: runIdSchema,
   setupId: setupIdSchema,
-  submitSelector: selectorSchema,
 }).strict();
 
 const prepareDeleteRequestSchema = z.object({

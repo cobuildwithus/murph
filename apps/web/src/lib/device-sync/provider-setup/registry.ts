@@ -35,8 +35,12 @@ export interface MemberOwnedProviderSetupBrowserMetadata {
   trustedAuthority: {
     applicationContainerSelector: string;
     applicationIdSelector: string;
+    applicationNameSelector: string;
+    applicationSecretSelector: string;
     creationFormSelector: string;
     loadedEmptySelector: string;
+    revealSecretSelector: string | null;
+    submitSelector: string;
   };
 }
 
@@ -79,7 +83,7 @@ const STRAVA_REGISTRATION = Object.freeze({
     developerPortalUrl: "https://www.strava.com/settings/api",
     guidance: Object.freeze([
       "Use the provider developer page to prepare one private application with the supplied website, category, callback URL, and read-only scopes. Invent a tool-valid random friendly application name unless the contract already supplies one; pass it only to provider_setup capture.",
-      "Navigate and identify controls from the live page. Never rely on checked-in provider selectors or a provider-specific browser program.",
+      "Navigate and identify reversible metadata controls from the live page. Never invent selectors for the trusted application-name, submit, client-ID, client-secret, or reveal roles, and never run a provider-specific browser program.",
       "Fill the reversible metadata fields with computer tools, but do not fill the application name or submit with computer_act. Call provider_setup capture so the trusted browser boundary freezes, writes, and submits the chosen name before credential sealing.",
       "For sign-in, MFA, CAPTCHA, or developer-access prerequisites, pause the same run for the member. Ask them to complete only that interruption, not to create the application or copy credentials.",
     ]),
@@ -87,8 +91,12 @@ const STRAVA_REGISTRATION = Object.freeze({
     trustedAuthority: Object.freeze({
       applicationContainerSelector: "[data-strava-application]",
       applicationIdSelector: "[data-strava-client-id]",
+      applicationNameSelector: "[data-strava-application-name]",
+      applicationSecretSelector: "[data-strava-client-secret]",
       creationFormSelector: "form[data-strava-application-form]",
       loadedEmptySelector: "[data-strava-application-empty]",
+      revealSecretSelector: "[data-strava-client-secret-reveal]",
+      submitSelector: "[data-strava-application-submit]",
     }),
   }),
   coordinates: STRAVA_MEMBER_OWNED_PROVIDER_SETUP_COORDINATES,
@@ -197,7 +205,9 @@ function assertRegistrationsMatchConnectCatalog(): void {
   }
   for (const registration of REGISTRATIONS) {
     const coordinates = registration.coordinates;
-    const authoritySelectors = Object.values(registration.browser.trustedAuthority);
+    const authoritySelectors = Object.values(
+      registration.browser.trustedAuthority,
+    ).filter((selector) => selector !== null);
     if (
       authoritySelectors.some((selector) => selector.trim().length === 0)
       || new Set(authoritySelectors).size !== authoritySelectors.length

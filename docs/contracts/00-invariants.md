@@ -298,7 +298,10 @@ it has been explicitly elevated to a cross-cutting invariant.
   landing with zero registered application containers and one disjoint positive
   loaded-empty coordinate may clear that fence without submitting. Missing name
   evidence on a partial or nonempty inventory remains fenced; only a later
-  independent invocation may attempt creation again. Run
+  independent invocation may attempt creation again. Application-name,
+  final-submit, client-ID, client-secret, and optional reveal semantics belong to
+  finite provider registration, never model-supplied selectors; capture must seal
+  the ID and secret only through those registered roles. Run
   reservation is not navigation authority: a new or successor candidate
   must CAS-bind to an acquisition-eligible exact setup before Kernel provisioning
   and attach under that binding before navigation. A losing admission retires the

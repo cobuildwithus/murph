@@ -478,13 +478,6 @@ export class MemberOwnedProviderSetupService {
     memberId: string,
     request: CaptureRequest,
   ): Promise<MemberOwnedProviderSetupView> {
-    assertDistinctRuntimeSelectors([
-      request.applicationNameSelector,
-      request.clientIdSelector,
-      request.clientSecretSelector,
-      request.revealSecretSelector,
-      request.submitSelector,
-    ]);
     let setup = await this.requireExactBrowserSetup(memberId, request);
     if (readMemberOwnedProviderSetupBinding(setup)) {
       const disposition = await this.store.readConnectionDisposition(setup);
@@ -538,19 +531,24 @@ export class MemberOwnedProviderSetupService {
         code: buildBlindProviderCredentialCaptureCode({
           applicationNameSelector: recovery
             ? null
-            : request.applicationNameSelector,
+            : this.registration.browser.trustedAuthority.applicationNameSelector,
           applicationContainerSelector:
             this.registration.browser.trustedAuthority.applicationContainerSelector,
-          clientIdSelector: request.clientIdSelector,
-          clientSecretSelector: request.clientSecretSelector,
+          clientIdSelector:
+            this.registration.browser.trustedAuthority.applicationIdSelector,
+          clientSecretSelector:
+            this.registration.browser.trustedAuthority.applicationSecretSelector,
           creationFormSelector:
             this.registration.browser.trustedAuthority.creationFormSelector,
           loadedEmptySelector:
             this.registration.browser.trustedAuthority.loadedEmptySelector,
           applicationName,
-          revealSecretSelector: request.revealSecretSelector,
+          revealSecretSelector:
+            this.registration.browser.trustedAuthority.revealSecretSelector,
           safeLandingUrl: contract.safeLandingUrl,
-          submitSelector: recovery ? null : request.submitSelector,
+          submitSelector: recovery
+            ? null
+            : this.registration.browser.trustedAuthority.submitSelector,
         }),
         consume: async (credentials) => {
           await this.saveApplication({

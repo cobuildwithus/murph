@@ -59,8 +59,12 @@ describe("member-owned provider setup contract", () => {
         trustedAuthority: {
           applicationContainerSelector: "[data-strava-application]",
           applicationIdSelector: "[data-strava-client-id]",
+          applicationNameSelector: "[data-strava-application-name]",
+          applicationSecretSelector: "[data-strava-client-secret]",
           creationFormSelector: "form[data-strava-application-form]",
           loadedEmptySelector: "[data-strava-application-empty]",
+          revealSecretSelector: "[data-strava-client-secret-reveal]",
+          submitSelector: "[data-strava-application-submit]",
         },
       },
       coordinates: {
@@ -98,18 +102,13 @@ describe("member-owned provider setup contract", () => {
     expect(named.application.name).not.toContain(MEMBER_ID);
   });
 
-  it("accepts only the runtime selector handoff and rejects credential-shaped tool input", () => {
+  it("keeps capture semantics registered and rejects selector or credential tool input", () => {
     const parsed = parseHostedRuntimeProviderSetupToolRequest({
       action: "capture",
       applicationName: "Cobalt Trail 482731",
-      applicationNameSelector: "[data-application-name]",
-      clientIdSelector: "[data-client-id]",
-      clientSecretSelector: "[data-client-secret]",
       provider: "strava",
-      revealSecretSelector: null,
       runId: "hcr_synthetic",
       setupId: "dps_synthetic",
-      submitSelector: "button[type=submit]",
     });
 
     expect(parsed.action).toBe("capture");
@@ -120,6 +119,10 @@ describe("member-owned provider setup contract", () => {
     expect(() => parseHostedRuntimeProviderSetupToolRequest({
       ...parsed,
       selectorProgram: "await page.locator('provider-specific').click()",
+    })).toThrow();
+    expect(() => parseHostedRuntimeProviderSetupToolRequest({
+      ...parsed,
+      clientIdSelector: "[data-client-id]",
     })).toThrow();
   });
 
@@ -155,7 +158,7 @@ describe("member-owned provider setup contract", () => {
     expect(deletion).not.toMatch(/strava/iu);
   });
 
-  it("places the ownership marker only inside trusted submission before capture", async () => {
+  it("uses registered credential roles regardless of their DOM order", async () => {
     const page = createFixturePage(`
       <form data-owned-creation>
         <input class="application-name" value="" />
@@ -175,8 +178,8 @@ describe("member-owned provider setup contract", () => {
     page.setNavigationContent(`
       <section data-owned-application>
         <h3>Cobalt Trail 482731</h3>
-        <output class="client-id">right-id</output>
         <output class="client-secret">right-secret</output>
+        <output class="client-id">right-id</output>
       </section>
     `);
     const code = buildBlindProviderCredentialCaptureCode({
