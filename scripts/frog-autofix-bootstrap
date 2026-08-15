@@ -1,0 +1,192 @@
+#!/usr/bin/env node
+
+import { realpathSync } from "node:fs";
+import { spawn } from "node:child_process";
+import { fileURLToPath } from "node:url";
+
+const defaultDeadlineMs = 30 * 60 * 1_000;
+const defaultTerminationGraceMs = 2_000;
+const groupPollMs = 25;
+
+function positiveDuration(value, name) {
+  if (!Number.isSafeInteger(value) || value <= 0) {
+    throw new Error(`${name} must be a positive safe integer`);
+  }
+  return value;
+}
+
+function processGroupExists(processGroupId) {
+  try {
+    process.kill(-processGroupId, 0);
+    return true;
+  } catch (error) {
+    if (error?.code === "ESRCH") return false;
+    // The scriptless pnpm tree cannot change away from the invoking user's
+    // identity. EPERM therefore means this numeric group id was reused by a
+    // foreign process after the owned group disappeared. Never signal it.
+    if (error?.code === "EPERM") return false;
+    throw error;
+  }
+}
+
+function signalProcessGroup(processGroupId, signal) {
+  try {
+    process.kill(-processGroupId, signal);
+  } catch (error) {
+    if (error?.code !== "ESRCH" && error?.code !== "EPERM") throw error;
+  }
+}
+
+export async function reconcileDependencies(repoRoot, options = {}) {
+  if (process.platform === "win32") {
+    throw new Error("Frog autofix dependency reconciliation requires POSIX process groups");
+  }
+
+  const deadlineMs = positiveDuration(
+    options.deadlineMs ?? defaultDeadlineMs,
+    "dependency reconciliation deadline",
+  );
+  const terminationGraceMs = positiveDuration(
+    options.terminationGraceMs ?? defaultTerminationGraceMs,
+    "dependency reconciliation termination grace",
+  );
+  const child = spawn(
+    "pnpm",
+    ["--dir", repoRoot, "install", "--frozen-lockfile", "--ignore-scripts"],
+    {
+      cwd: repoRoot,
+      detached: true,
+      stdio: "inherit",
+    },
+  );
+  const processGroupId = child.pid;
+  if (processGroupId === undefined) {
+    child.on("error", () => {});
+    throw new Error("dependency reconciliation could not start");
+  }
+
+  return await new Promise((resolve, reject) => {
+    let childExitCode = null;
+    let childExitSignal = null;
+    let leaderExited = false;
+    let settled = false;
+    let terminationReason = null;
+    let terminationTimer;
+    let deadlineTimer;
+    let pollTimer;
+
+    const signalNumbers = new Map([
+      ["SIGHUP", 1],
+      ["SIGINT", 2],
+      ["SIGTERM", 15],
+    ]);
+    const signalHandlers = new Map();
+
+    const cleanup = () => {
+      clearInterval(pollTimer);
+      clearTimeout(deadlineTimer);
+      if (terminationTimer !== undefined) clearTimeout(terminationTimer);
+      for (const [signal, handler] of signalHandlers) {
+        process.off(signal, handler);
+      }
+    };
+
+    const fail = (error) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      reject(error);
+    };
+
+    const terminate = (reason) => {
+      if (terminationReason === null) terminationReason = reason;
+      try {
+        if (!processGroupExists(processGroupId)) return;
+        signalProcessGroup(processGroupId, "SIGTERM");
+        terminationTimer ??= setTimeout(() => {
+          try {
+            if (processGroupExists(processGroupId)) {
+              signalProcessGroup(processGroupId, "SIGKILL");
+            }
+          } catch (error) {
+            fail(error);
+          }
+        }, terminationGraceMs);
+      } catch (error) {
+        fail(error);
+      }
+    };
+
+    const finishIfReaped = () => {
+      if (settled || !leaderExited) return;
+      let groupExists;
+      try {
+        groupExists = processGroupExists(processGroupId);
+      } catch (error) {
+        fail(error);
+        return;
+      }
+      if (groupExists) {
+        terminate("orphaned-descendant");
+        return;
+      }
+
+      settled = true;
+      cleanup();
+      if (terminationReason === "deadline") {
+        resolve(124);
+      } else if (terminationReason?.startsWith("signal:")) {
+        const signal = terminationReason.slice("signal:".length);
+        resolve(128 + (signalNumbers.get(signal) ?? 1));
+      } else if (terminationReason === "spawn-error") {
+        resolve(2);
+      } else if (terminationReason === "orphaned-descendant") {
+        resolve(2);
+      } else if (childExitCode !== null) {
+        resolve(childExitCode);
+      } else {
+        resolve(childExitSignal === null ? 1 : 128 + (signalNumbers.get(childExitSignal) ?? 1));
+      }
+    };
+
+    child.once("error", () => {
+      leaderExited = true;
+      terminationReason = "spawn-error";
+      finishIfReaped();
+    });
+    child.once("exit", (code, signal) => {
+      childExitCode = code;
+      childExitSignal = signal;
+      leaderExited = true;
+      finishIfReaped();
+    });
+
+    for (const signal of signalNumbers.keys()) {
+      const handler = () => terminate(`signal:${signal}`);
+      signalHandlers.set(signal, handler);
+      process.on(signal, handler);
+    }
+
+    deadlineTimer = setTimeout(() => terminate("deadline"), deadlineMs);
+    pollTimer = setInterval(finishIfReaped, groupPollMs);
+  });
+}
+
+const invokedPath = process.argv[1];
+const isDirectInvocation = invokedPath !== undefined
+  && realpathSync(invokedPath) === realpathSync(fileURLToPath(import.meta.url));
+
+if (isDirectInvocation) {
+  if (process.argv.length !== 3) {
+    console.error("Usage: scripts/frog-autofix-bootstrap <repository-root>");
+    process.exitCode = 2;
+  } else {
+    try {
+      const repoRoot = realpathSync(process.argv[2]);
+      process.exitCode = await reconcileDependencies(repoRoot);
+    } catch (error) {
+      console.error(error instanceof Error ? error.message : "dependency reconciliation failed");
+      process.exitCode = 2;
+    }
+  }
+}
