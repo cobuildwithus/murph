@@ -1,5 +1,8 @@
 import type { DatabaseSync } from "node:sqlite";
 
+import { isDeviceSyncConnectionSetupPending } from "./public-account.ts";
+import { toIsoTimestamp } from "./shared.ts";
+
 import {
   applySqliteRuntimeMigrations,
   openSqliteRuntimeDatabase,
@@ -49,6 +52,7 @@ import {
   readNextDeviceSyncJobWakeAt,
   readNextDeviceSyncJobWakeAtForAccount,
   releaseDeviceSyncJobIfOwned,
+  wakeRetainedDeviceSyncJobsForAccount,
 } from "./store/jobs.ts";
 import {
   consumeOAuthState,
@@ -219,7 +223,14 @@ export class SqliteDeviceSyncStore {
   }
 
   upsertAccount(input: AccountUpsertInput): StoredDeviceSyncAccount {
-    return upsertStoredAccount(this.database, input);
+    const account = upsertStoredAccount(this.database, input);
+    if (account.status === "active" && !isDeviceSyncConnectionSetupPending(account)) {
+      wakeRetainedDeviceSyncJobsForAccount(this.database, {
+        accountId: account.id,
+        now: input.connectedAt,
+      });
+    }
+    return account;
   }
 
   patchAccount(accountId: string, patch: AccountPatchInput): StoredDeviceSyncAccount {
@@ -423,6 +434,11 @@ export class SqliteDeviceSyncStore {
       if (input.source) {
         upsertStoredConnectionSourceInTransaction(this.database, input.source);
       }
+
+      wakeRetainedDeviceSyncJobsForAccount(this.database, {
+        accountId: input.accountId,
+        now: input.source?.lastSeenAt ?? toIsoTimestamp(new Date()),
+      });
 
       return input.jobs.map((job) =>
         enqueueDeviceSyncJobInTransaction(this.database, {
