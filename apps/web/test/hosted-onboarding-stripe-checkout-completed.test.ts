@@ -1397,6 +1397,7 @@ describe("applyStripeCheckoutCompleted", () => {
       activatedMemberId: "member_123",
       cleanupPulseTrialStripeSubscriptionId: "sub_123",
       hostedExecutionEventId: "wake_123",
+      hostedExecutionMailboxItemId: null,
       runtimeRecheckMemberIds: ["member_123"],
       welcomeEmailMemberId: "member_123",
     });

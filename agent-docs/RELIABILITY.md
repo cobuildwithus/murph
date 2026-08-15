@@ -437,6 +437,18 @@ Last verified: 2026-08-14
   activation failure falls back to the existing signup-link path, while the
   single-owner wait remains provider-retryable, without creating a second
   entitlement, queue, or runtime.
+- Linq signup-link terminal failures recompute suppression under the existing
+  member-row lock without reading delivery history into application memory.
+  One scalar statement checks only the exact five source references for the
+  failed generic or source-event-digest identity and whether any syntactically
+  valid five-attempt identity remains live for that member/day. Both probes use
+  the concurrent partial `source_ref text_pattern_ops` index restricted to live
+  `invite_signup` and `invite_signup_fallback` rows. Receipt ordering remains
+  the terminal authority: a same-identity live attempt suppresses reopen, a
+  different group-aware identity may reopen only its group context while
+  retaining daily suppression, and the daily marker is released only after no
+  live identity remains. No cache, queue, or duplicate projection owns this
+  state.
 - Web and companion onboarding use the same semantic-keyed starter grant with
   their own bounded source references. A repeated enrollment cannot replace the
   accepted grant or add balance. Historical trial metadata remains only for
@@ -552,6 +564,13 @@ Last verified: 2026-08-14
   retryable obligation. Replay-safe cleanup or notification work does not gain
   blanket retry authority merely because it runs post-commit. No second queue
   owns redrive.
+- A completed Stripe receipt persists the exact mailbox item identifiers for
+  every `member.activated` result it committed. Runtime-wake replay reads only
+  those identifiers and revalidates the mailbox kind; a malformed non-null
+  projection fails closed. Receipts written before this additive field was
+  deployed retain the legacy lookup solely as a mixed-deploy transition, while
+  account deletion may legitimately cascade a pointed-to mailbox item without
+  changing the completed billing outcome.
 - Immediate paid-plan upgrades use a one-item Customer Portal
   `subscription_update_confirm` session rather than a Murph-owned Subscription
   mutation or pending-invoice retry loop. Web takes the member lock only to
