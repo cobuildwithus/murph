@@ -1,6 +1,6 @@
 # device-webhook-batch-throughput
 
-Status: active
+Status: completed
 Created: 2026-08-15
 Updated: 2026-08-15
 
@@ -119,6 +119,13 @@ Updated: 2026-08-15
   updates the canonical 100-entry/four-lane contract, proves Web accepts both
   25 and 100 entries while rejecting 101, and proves a non-success Web response
   retries every exact Queue message without acknowledgement.
+- ReviewGPT round 4 reviewed the complete corrected snapshot at `37083864` for
+  32 minutes 38 seconds and returned `ROUND_OUTCOME: PASS` with no findings. It
+  explicitly verified the rollout, lease, attempt-order, retry, byte-limit,
+  privacy, and bounded-concurrency corrections. The review ran through
+  ReviewGPT 0.5.131 on Pro; its post-submit attachment-tile verifier failed, but
+  the persisted exact turn and final file-specific analysis proved the current
+  ZIP was readable without resending the request.
 
 ## ReviewGPT retrospective
 
@@ -157,9 +164,12 @@ Updated: 2026-08-15
   assertions.
 - Hosted transport package: 7 focused tests passed.
 - Web, device-syncd, Cloudflare Worker, and hosted-control typechecks passed.
+- ReviewGPT was updated from 0.5.127 to 0.5.131. Frozen-lockfile installation,
+  CLI version output, and the focused release-contract test passed.
 - Preliminary ReviewGPT returned two coverage findings. The telemetry finding
   is resolved. The maximum-cardinality finding led first to an inadequate
   trace-only proof and then to this retrospective deletion of future-work trace
   batching. Round 3 returned documentation and direct-proof findings after
-  verifying the corrected production path; those findings are resolved and a
-  fresh final ReviewGPT round plus corrected exact-head CI remain pending.
+  verifying the corrected production path; those findings are resolved. Round
+  4 returned `PASS` with no findings on the exact pushed correction head.
+Completed: 2026-08-15
