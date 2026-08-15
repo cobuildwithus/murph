@@ -179,6 +179,7 @@ test('Junction body data composes from provider jobs through canonical vault rea
         }
         const recordByEndpoint: Record<string, Record<string, unknown>> = {
           body_fat: {
+            id: 'withings-body-fat-reading',
             observedAt: '2026-08-09T08:05:00.000Z',
             timestamp: '2026-08-10T08:05:00.000Z',
             unit: '%',
@@ -186,12 +187,14 @@ test('Junction body data composes from provider jobs through canonical vault rea
           },
           body_mass_index: {
             end: '2026-08-10T08:07:00.000Z',
+            id: 'withings-bmi-reading',
             start: '2026-08-10T08:06:00.000Z',
             timestamp: '2026-08-09T08:06:00.000Z',
             unit: 'index',
             value: 23.7,
           },
           body_weight: {
+            id: 'withings-weight-reading',
             observedAt: '2026-08-09T08:00:00.000Z',
             timestamp: '2026-08-10T08:00:00.000Z',
             unit: 'kg',
@@ -199,6 +202,7 @@ test('Junction body data composes from provider jobs through canonical vault rea
           },
           lean_body_mass: {
             end: '2026-08-10T08:09:00.000Z',
+            id: 'withings-lean-mass-reading',
             start: '2026-08-10T08:08:00.000Z',
             timestamp: '2026-08-09T08:08:00.000Z',
             unit: 'kg',
