@@ -7578,6 +7578,14 @@ describe("hosted workspace runtime entrypoint", () => {
       conversationPrefixCount: 52,
     },
     {
+      dedupeKey: "member.activated:prefetch-retry-synthetic",
+      kind: "member.activated",
+      label: "member activation after an initial prefetch retry",
+      preCheckpointSafe: true,
+      conversationPrefixCount: 1,
+      initialPrefetchFails: true,
+    },
+    {
       dedupeKey:
         "assistant.notification.requested:phone-call-result:phone_call_synthetic",
       kind: "assistant.notification.requested",
@@ -7624,7 +7632,12 @@ describe("hosted workspace runtime entrypoint", () => {
       let assistantPhaseCalls = 0;
 
       try {
-        await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+        const initialPrefetchFails = "initialPrefetchFails" in completion
+          && completion.initialPrefetchFails === true;
+        if (!initialPrefetchFails) {
+          await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+          await ensureHostedBootstrapMetadataForSystemMailboxTest(vaultRoot);
+        }
         const conversationPrefixCount = "conversationPrefixCount" in completion
           ? completion.conversationPrefixCount ?? 0
           : 0;
@@ -7649,6 +7662,22 @@ describe("hosted workspace runtime entrypoint", () => {
             }),
           );
         }
+        const baseMailboxPort = createMailboxPort({
+          events,
+          items: mailboxItems,
+        });
+        let initialPrefetchFailureCount = 0;
+        const mailboxPort: HostedRuntimeMailboxPort = {
+          ...baseMailboxPort,
+          async fetch(request) {
+            if (initialPrefetchFails && initialPrefetchFailureCount === 0) {
+              initialPrefetchFailureCount += 1;
+              events.push("mailbox.fetch:initial-prefetch-failed");
+              throw new Error("Synthetic initial mailbox prefetch failure.");
+            }
+            return await baseMailboxPort.fetch(request);
+          },
+        };
         const resultPromise = runHostedWorkspaceRuntimeJobInProcess(
           createWorkspaceRuntimeJobInput({
             request: {
@@ -7679,15 +7708,48 @@ describe("hosted workspace runtime entrypoint", () => {
               return { status: "imported" };
             },
             platform: createPlatform({
-              mailboxPort: createMailboxPort({
-                events,
-                items: mailboxItems,
-              }),
+              mailboxPort,
               workspacePort: createWorkspacePort({
                 checkpointRequests,
                 events,
-                workspace: createWorkspaceState({ version: "0" }),
+                workspace: createWorkspaceState({
+                  ...(initialPrefetchFails
+                    ? {
+                        snapshotRef: createWorkspaceSnapshotV2Ref(
+                          "external-completion-prefetch-retry",
+                        ),
+                      }
+                    : {}),
+                  version: "0",
+                }),
               }),
+              ...(initialPrefetchFails
+                ? {
+                    workspaceSnapshotPort: {
+                      async abortSnapshotSession() {
+                        throw new Error("Prefetch retry should not abort snapshots.");
+                      },
+                      async completeSnapshotSession() {
+                        throw new Error("Prefetch retry should not complete snapshots.");
+                      },
+                      async putSnapshotObjectDirect() {
+                        throw new Error("Prefetch retry should not upload snapshots.");
+                      },
+                      async restoreWorkspaceSnapshot(input) {
+                        await initializeVault({
+                          createdAt: TEST_NOW,
+                          vaultRoot: input.durableRoot,
+                        });
+                        await ensureHostedBootstrapMetadataForSystemMailboxTest(
+                          input.durableRoot,
+                        );
+                      },
+                      async startSnapshotSession() {
+                        throw new Error("Prefetch retry should not start snapshots.");
+                      },
+                    },
+                  }
+                : {}),
             }),
             runtimeWakeSignal,
             async runAssistantPhase() {
@@ -7735,7 +7797,11 @@ describe("hosted workspace runtime entrypoint", () => {
         }
         assert.equal(
           result.status,
-          withConversationPrefix ? "scheduled" : "idle",
+          withConversationPrefix && !initialPrefetchFails ? "scheduled" : "idle",
+        );
+        assert.equal(
+          initialPrefetchFailureCount,
+          initialPrefetchFails ? 1 : 0,
         );
       } finally {
         await removeTempRoot(vaultRoot);
