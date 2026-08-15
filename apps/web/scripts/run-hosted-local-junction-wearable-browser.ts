@@ -50,6 +50,10 @@ const AUTH_ACTIONS = [
   /\bconfirm\b/i,
   /\bconnect\b/i,
 ] as const;
+const AUTH_ACTION_PATTERN = new RegExp(
+  AUTH_ACTIONS.map((pattern) => pattern.source).join("|"),
+  "iu",
+);
 const NEGATIVE_AUTH_ACTION_PATTERN =
   /\b(?:cancel|decline|deny|disallow|do not|don't|not now|reject|skip)\b/iu;
 const TRUSTED_AUTHORIZATION_DOMAINS = [
@@ -360,15 +364,7 @@ async function clickFirstVisibleAction(
       const controls = page.getByRole(role, { name });
       for (let index = 0; index < await controls.count(); index += 1) {
         const control = controls.nth(index);
-        const actionText = [
-          await control.getAttribute("aria-label").catch(() => null),
-          await control.innerText().catch(() => ""),
-        ].filter(Boolean).join(" ");
-        if (
-          NEGATIVE_AUTH_ACTION_PATTERN.test(actionText)
-          || !await control.isVisible().catch(() => false)
-          || !await control.isEnabled().catch(() => false)
-        ) {
+        if (await readAuthorizationActionState(control) !== "enabled") {
           continue;
         }
         await control.click();
@@ -379,29 +375,68 @@ async function clickFirstVisibleAction(
   return false;
 }
 
+async function readAuthorizationActionState(
+  control: Locator,
+): Promise<"disabled" | "enabled" | null> {
+  const actionText = [
+    await control.getAttribute("aria-label").catch(() => null),
+    await control.innerText().catch(() => ""),
+  ].filter(Boolean).join(" ");
+  if (
+    NEGATIVE_AUTH_ACTION_PATTERN.test(actionText)
+    || !await control.isVisible().catch(() => false)
+  ) {
+    return null;
+  }
+  return await control.isEnabled().catch(() => false) ? "enabled" : "disabled";
+}
+
 async function describeAuthorizationSurface(page: Page): Promise<string> {
-  const actionSelectors = [
-    "button:visible",
-    'input[type="button"]:visible',
-    'input[type="submit"]:visible',
-    '[role="button"]:visible',
-    'a[href]:visible',
-  ];
-  const visibleActions = actionSelectors.join(", ");
-  const enabledVisibleActions = actionSelectors
-    .map((selector) => `${selector}:not(:disabled)`)
-    .join(", ");
-  const [actions, enabledActions, uncheckedCheckboxes] = await Promise.all([
-      page.locator(visibleActions).count(),
-      page.locator(enabledVisibleActions).count(),
-      page.locator('input[type="checkbox"]:visible:not(:checked)').count(),
-    ]);
+  const countScope = async (scope: Pick<Page, "getByRole">) => {
+    let actions = 0;
+    let enabledActions = 0;
+    for (const role of ["button", "link"] as const) {
+      const controls = scope.getByRole(role, { name: AUTH_ACTION_PATTERN });
+      for (let index = 0; index < await controls.count(); index += 1) {
+        const state = await readAuthorizationActionState(controls.nth(index));
+        if (state !== null) actions += 1;
+        if (state === "enabled") enabledActions += 1;
+      }
+    }
+    const checkboxes = scope.getByRole("checkbox");
+    let uncheckedCheckboxes = 0;
+    for (let index = 0; index < await checkboxes.count(); index += 1) {
+      const checkbox = checkboxes.nth(index);
+      if (
+        await checkbox.isVisible().catch(() => false)
+        && !await checkbox.isChecked().catch(() => false)
+      ) {
+        uncheckedCheckboxes += 1;
+      }
+    }
+    return { actions, enabledActions, uncheckedCheckboxes };
+  };
+  const mainFrame = page.mainFrame();
+  const childFrames = page.frames().filter((frame) => frame !== mainFrame);
+  const [main, ...children] = await Promise.all([
+    countScope(mainFrame),
+    ...childFrames.map(countScope),
+  ]);
+  const child = children.reduce((total, current) => ({
+    actions: total.actions + current.actions,
+    enabledActions: total.enabledActions + current.enabledActions,
+    uncheckedCheckboxes:
+      total.uncheckedCheckboxes + current.uncheckedCheckboxes,
+  }), { actions: 0, enabledActions: 0, uncheckedCheckboxes: 0 });
   return [
     "Authorization surface:",
-    `frames=${page.frames().length}`,
-    `actions=${actions}`,
-    `enabledActions=${enabledActions}`,
-    `uncheckedCheckboxes=${uncheckedCheckboxes}.`,
+    `childFrames=${childFrames.length}`,
+    `mainActions=${main.actions}`,
+    `mainEnabledActions=${main.enabledActions}`,
+    `childActions=${child.actions}`,
+    `childEnabledActions=${child.enabledActions}`,
+    `mainUncheckedCheckboxes=${main.uncheckedCheckboxes}`,
+    `childUncheckedCheckboxes=${child.uncheckedCheckboxes}.`,
   ].join(" ");
 }
 
