@@ -3985,6 +3985,7 @@ function buildWorkoutSourceCompletionTarget(
 async function hasWorkoutSourceCompletionAudit(input: {
   vaultRoot: string;
   targetId: string;
+  sourceEventIds: ReadonlySet<string>;
 }): Promise<boolean> {
   const auditPaths = await walkVaultFiles(input.vaultRoot, VAULT_LAYOUT.auditDirectory, {
     extension: ".jsonl",
@@ -3996,6 +3997,7 @@ async function hasWorkoutSourceCompletionAudit(input: {
         parsed.success
         && parsed.data.commandName === WORKOUT_SOURCE_IMPORT_AUDIT_COMMAND
         && parsed.data.targetIds?.includes(input.targetId) === true
+        && parsed.data.targetIds.some((targetId) => input.sourceEventIds.has(targetId))
       ) {
         return true;
       }
@@ -4004,10 +4006,11 @@ async function hasWorkoutSourceCompletionAudit(input: {
   return false;
 }
 
-async function hasActivitySessionForAnyRawRef(input: {
+async function findActivitySessionIdsForAnyRawRef(input: {
   vaultRoot: string;
   rawRefs: ReadonlySet<string>;
-}): Promise<boolean> {
+}): Promise<Set<string>> {
+  const eventIds = new Set<string>();
   const eventPaths = await walkVaultFiles(input.vaultRoot, VAULT_LAYOUT.eventLedgerDirectory, {
     extension: ".jsonl",
   });
@@ -4019,11 +4022,11 @@ async function hasActivitySessionForAnyRawRef(input: {
         && parsed.data.kind === "activity_session"
         && collectEventRawReferencePaths(parsed.data).some((rawRef) => input.rawRefs.has(rawRef))
       ) {
-        return true;
+        eventIds.add(parsed.data.id);
       }
     }
   }
-  return false;
+  return eventIds;
 }
 
 async function inspectWorkoutSourceImportStatus(input: {
@@ -4060,20 +4063,21 @@ async function inspectWorkoutSourceImportStatus(input: {
   }
 
   const completionTargetId = buildWorkoutSourceCompletionTarget(sourceReceipt);
+  const exactRawRefs = new Set(exactSources.liveSources.map((source) => source.rawRef));
+  const sourceEventIds = await findActivitySessionIdsForAnyRawRef({
+    vaultRoot: input.vaultRoot,
+    rawRefs: exactRawRefs,
+  });
   if (await hasWorkoutSourceCompletionAudit({
     vaultRoot: input.vaultRoot,
     targetId: completionTargetId,
+    sourceEventIds,
   })) {
     return { status: "completed", completionTargetId };
   }
 
-  const exactRawRefs = new Set(exactSources.liveSources.map((source) => source.rawRef));
-  const hasPartialHistory = await hasActivitySessionForAnyRawRef({
-    vaultRoot: input.vaultRoot,
-    rawRefs: exactRawRefs,
-  });
   return {
-    status: hasPartialHistory ? "partial_conflict" : "not_imported",
+    status: sourceEventIds.size > 0 ? "partial_conflict" : "not_imported",
     completionTargetId,
   };
 }

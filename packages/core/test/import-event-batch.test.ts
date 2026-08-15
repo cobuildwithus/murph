@@ -7,6 +7,7 @@ import { test } from "vitest";
 import type { AuditRecord, EventRecord } from "@murphai/contracts";
 
 import {
+  acquireCanonicalWriteLock,
   deleteEvent,
   findEventByExternalRef,
   findEventsByRawRefs,
@@ -16,10 +17,12 @@ import {
   listHistoryEvents,
   readJsonlRecords,
   resolveWorkoutSourceImportStatus,
+  statAndHashVaultFile,
   updateVaultSummary,
   upsertEvent,
   VaultError,
 } from "../src/index.ts";
+import { emitAuditRecord } from "../src/audit.ts";
 
 async function makeTempDirectory(name: string): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), `${name}-`));
@@ -319,6 +322,20 @@ test("source-guarded workout batches reject partial history without a completion
   assert.equal(unguarded.applied, true);
   assert.equal(await resolveWorkoutSourceImportStatus({ vaultRoot, rawRef }), "partial_conflict");
 
+  const sourceIntegrity = await statAndHashVaultFile(vaultRoot, rawRef);
+  assert.ok(sourceIntegrity);
+  await emitAuditRecord({
+    vaultRoot,
+    action: "event_upsert",
+    commandName: "core.importEventBatch.sourceRawRefOnce",
+    summary: "Marker without source-event authority.",
+    targetIds: [
+      `workout-source-v1:sha256:${sourceIntegrity.sha256}:bytes:${sourceIntegrity.byteSize}`,
+      "evt_01JQ9R7WF97M1WAB2B4QF2Q1AZ",
+    ],
+  });
+  assert.equal(await resolveWorkoutSourceImportStatus({ vaultRoot, rawRef }), "partial_conflict");
+
   await assert.rejects(
     importEventBatch({
       vaultRoot,
@@ -332,6 +349,36 @@ test("source-guarded workout batches reject partial history without a completion
       return true;
     },
   );
+});
+
+test("workout source status waits for an active canonical write", async () => {
+  const vaultRoot = await makeVault("murph-event-batch-source-status-lock");
+  const source = await importWorkoutSourceDocument(
+    vaultRoot,
+    "murph-event-batch-source-status-lock",
+  );
+  const lock = await acquireCanonicalWriteLock(vaultRoot);
+  let released = false;
+  try {
+    let settled = false;
+    const statusPromise = resolveWorkoutSourceImportStatus({
+      vaultRoot,
+      rawRef: source.raw.relativePath,
+    }).then((status) => {
+      settled = true;
+      return status;
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    assert.equal(settled, false);
+    await lock.release();
+    released = true;
+    assert.equal(await statusPromise, "not_imported");
+  } finally {
+    if (!released) {
+      await lock.release();
+    }
+  }
 });
 
 test("whole-source completion is shared by every live exact-byte document alias", async () => {
