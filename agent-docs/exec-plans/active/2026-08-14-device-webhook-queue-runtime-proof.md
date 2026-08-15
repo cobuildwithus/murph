@@ -75,6 +75,11 @@ Updated: 2026-08-14
   discrepancy: stage-specific codes would have reached the public provider JSON.
   Preserved the existing generic provider code and moved the closed stage into
   an allowlisted log-only detail, with composed response/log coverage.
+- Accepted final round 2's review-induced complexity finding: deleted the
+  duplicate uppercase Web diagnostic vocabulary and mapper. The Worker-owned
+  raw code now crosses the existing HTTP error object unchanged and is checked
+  once at the structured-log boundary; absent or unknown values collapse to
+  `enqueue_failed`.
 
 ## Verification
 

@@ -39,46 +39,24 @@ afterEach(() => {
 
 describe("hosted device webhook Queue enqueue", () => {
   it.each([
-    ["invalid_request", "DEVICE_WEBHOOK_QUEUE_INVALID_REQUEST"],
-    ["queue_unavailable", "DEVICE_WEBHOOK_QUEUE_UNAVAILABLE"],
-    [
-      "persistence_failure_unclassified",
-      "DEVICE_WEBHOOK_QUEUE_PERSISTENCE_FAILURE_UNCLASSIFIED",
-    ],
-    [
-      "persistence_key_unavailable",
-      "DEVICE_WEBHOOK_QUEUE_PERSISTENCE_KEY_UNAVAILABLE",
-    ],
-    [
-      "persistence_reseal_failed",
-      "DEVICE_WEBHOOK_QUEUE_PERSISTENCE_RESEAL_FAILED",
-    ],
-    [
-      "transport_context_mismatch",
-      "DEVICE_WEBHOOK_QUEUE_TRANSPORT_CONTEXT_MISMATCH",
-    ],
-    [
-      "transport_metadata_invalid",
-      "DEVICE_WEBHOOK_QUEUE_TRANSPORT_METADATA_INVALID",
-    ],
-    [
-      "transport_payload_open_failed",
-      "DEVICE_WEBHOOK_QUEUE_TRANSPORT_PAYLOAD_OPEN_FAILED",
-    ],
-    [
-      "transport_recipient_key_unavailable",
-      "DEVICE_WEBHOOK_QUEUE_TRANSPORT_RECIPIENT_KEY_UNAVAILABLE",
-    ],
-    [
-      "transport_root_key_unwrap_failed",
-      "DEVICE_WEBHOOK_QUEUE_TRANSPORT_ROOT_KEY_UNWRAP_FAILED",
-    ],
-    ["enqueue_failed", "DEVICE_WEBHOOK_QUEUE_ENQUEUE_FAILED"],
-    ["future_unknown_code", "DEVICE_WEBHOOK_QUEUE_ENQUEUE_FAILED"],
-  ])("projects control failure %s as value-free code %s", async (
+    "enqueue_failed",
+    "invalid_request",
+    "persistence_failure_unclassified",
+    "persistence_key_unavailable",
+    "persistence_reseal_failed",
+    "queue_unavailable",
+    "transport_context_mismatch",
+    "transport_metadata_invalid",
+    "transport_payload_open_failed",
+    "transport_recipient_key_unavailable",
+    "transport_root_key_unwrap_failed",
+    "future_unknown_code",
+  ])("projects control failure %s into a value-free log stage", async (
     controlCode,
-    expectedCode,
   ) => {
+    const expectedLogType = controlCode === "future_unknown_code"
+      ? "enqueue_failed"
+      : controlCode;
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const fetchImpl = vi.fn(async () => Response.json(
       {
@@ -116,7 +94,7 @@ describe("hosted device webhook Queue enqueue", () => {
       }
       expect(error).toMatchObject({
         code: "DEVICE_WEBHOOK_QUEUE_ENQUEUE_FAILED",
-        details: { type: expectedCode },
+        details: { type: controlCode },
         httpStatus: 503,
         retryable: true,
       });
@@ -132,7 +110,7 @@ describe("hosted device webhook Queue enqueue", () => {
       expect(warn).toHaveBeenCalledWith(
         "Hosted device-sync route failed.",
         expect.objectContaining({
-          deviceWebhookQueueFailureType: expectedCode,
+          deviceWebhookQueueFailureType: expectedLogType,
           errorResponseCode: "DEVICE_WEBHOOK_QUEUE_ENQUEUE_FAILED",
           errorResponseStatus: 503,
         }),
