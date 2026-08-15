@@ -105,7 +105,7 @@ function requireRecord(value: unknown): Record<string, unknown> {
 function createJobContext(importedSnapshots: unknown[]): ProviderJobContext {
   return {
     account: createAccount(),
-    now: "2026-04-03T00:00:00.000Z",
+    now: "2026-04-03T12:00:00.000Z",
     importSnapshot: async (snapshot) => {
       importedSnapshots.push(snapshot);
       return { imported: true };
