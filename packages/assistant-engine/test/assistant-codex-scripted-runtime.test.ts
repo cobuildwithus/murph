@@ -5434,33 +5434,30 @@ if (!tool) {
   }, async () => {
     const scenario = await prepareScriptedTurnScenario()
     const correctedCard = {
-      kind: 'compact_table',
-      version: 1,
-      title: 'Synthetic workout',
-      subtitle: null,
-      footer: null,
-      tracking: {
-        kind: 'workout',
-        entityId: 'evt_01K1ABCDEFGHJKMNPQRSTVWXYZ',
-        snapshotAt: '2026-08-09T19:45:00.000Z',
+      kind: 'daily_nutrition',
+      version: 2,
+      localDate: '2026-08-14',
+      mealCount: 2,
+      totals: {
+        calories: { total: 1_500, mealCount: 2 },
+        proteinGrams: { total: null, mealCount: 0 },
+        carbsGrams: { total: 170, mealCount: 2 },
+        fatGrams: { total: 50, mealCount: 2 },
+        fiberGrams: { total: 25, mealCount: 2 },
       },
-      workout: {
-        version: 1,
-        state: 'active',
-        exercises: [{
-          name: 'Synthetic movement',
-          sets: [{ status: 'pending', target: '8 reps', actual: null }],
-        }],
+      goals: {
+        calories: { target: 2_000, status: 'under_target' },
+        proteinGrams: { target: 100, status: 'unavailable' },
+        carbsGrams: { target: 200, status: 'under_target' },
+        fatGrams: { target: 60, status: 'under_target' },
+        fiberGrams: { target: 30, status: 'under_target' },
       },
     } as const
     const malformedCard = {
       ...correctedCard,
-      workout: {
-        ...correctedCard.workout,
-        exercises: [{
-          ...correctedCard.workout.exercises[0],
-          sets: [{ status: 'pending', target: '8 reps', actual: '8 reps' }],
-        }],
+      totals: {
+        ...correctedCard.totals,
+        proteinGrams: { total: null, mealCount: 1 },
       },
     } as const
     scenario.stub.queue(
@@ -5492,20 +5489,18 @@ if (!tool) {
     const invalidOutput = summaries[1]?.functionCallOutputs?.join('\n') ?? ''
     expect(invalidOutput).toContain('invalid_response_card_arguments')
     expect(invalidOutput).toContain(
-      '"field":"card.workout.exercises[].sets[].actual"',
+      '"field":"card.totals.proteinGrams.mealCount"',
     )
     expect(invalidOutput).toContain(
-      '"expected":"null_unless_status_completed"',
+      '"expected":"zero_iff_total_null"',
     )
     expect(invalidOutput).not.toContain('challengeSlug')
     expect(summaries[2]?.functionCallOutputs?.join('\n')).toContain(
       'response card attached',
     )
     expect(result.responseCard).toEqual(correctedCard)
-    expect(result.finalMessage).toContain(correctedCard.title)
-    expect(result.finalMessage).toContain(
-      correctedCard.workout.exercises[0].name,
-    )
+    expect(result.finalMessage).toContain('about 1,500 calories')
+    expect(result.finalMessage).toContain('100g protein (status unavailable)')
     expect(result.finalMessage).not.toBe('CARD_REPAIRED')
     expect(scenario.stub.requestCountSinceBaseline()).toBe(3)
   })

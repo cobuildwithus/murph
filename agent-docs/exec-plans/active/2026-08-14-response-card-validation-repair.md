@@ -183,3 +183,18 @@ Updated: 2026-08-15
   digest/formatter, strict mixed-case rejection, and corrected-parser proofs.
   Focused assistant and CLI tests and the assistant/contracts/CLI typechecks
   pass; exact-head broad CI remains the final verification owner.
+
+## Final review round 4 disposition
+
+- Accepted the nested optional-metric union finding. Flattening the supported
+  and unavailable macro branches made alternative requirements look
+  simultaneous for provider-valid hybrid inputs such as a null total with a
+  positive meal count.
+- Replaced only that union at its existing contract owner with one strict object
+  and an equivalent `total === null` iff `mealCount === 0` refinement. The
+  refinement owns one `zero_iff_total_null` repair token at the meal-count field;
+  no diagnostic discriminator or acceptance owner was added.
+- Both invalid hybrid directions now return exactly one bounded relation hint;
+  the supported and unavailable valid shapes still pass. Compatibility tests,
+  raw-value-free feedback assertions, the existing same-turn App Server repair
+  journey, focused operator tests, and all four affected package typechecks pass.

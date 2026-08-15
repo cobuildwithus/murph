@@ -42,14 +42,18 @@ const INVALID_NUTRITION_CARD = {
   },
 } as const
 
-const INVALID_NUTRITION_MEAL_COUNT_CARD = {
+const VALID_NUTRITION_CARD = {
   ...INVALID_NUTRITION_CARD,
   goals: {
     ...INVALID_NUTRITION_CARD.goals,
     carbsGrams: { target: 200, status: 'under_target' },
   },
+} as const
+
+const INVALID_NUTRITION_MEAL_COUNT_CARD = {
+  ...VALID_NUTRITION_CARD,
   totals: {
-    ...INVALID_NUTRITION_CARD.totals,
+    ...VALID_NUTRITION_CARD.totals,
     proteinGrams: { total: 90, mealCount: 3 },
   },
 } as const
@@ -416,6 +420,64 @@ describe('response-card validation feedback', () => {
       totals: {
         ...INVALID_NUTRITION_MEAL_COUNT_CARD.totals,
         proteinGrams: { total: 90, mealCount: 2 },
+      },
+    })).toMatchObject({ kind: 'attach-response-card' })
+
+    for (const proteinGrams of [
+      { total: null, mealCount: 1 },
+      { total: 12, mealCount: 0 },
+    ] as const) {
+      const hybridMetricCard = {
+        ...VALID_NUTRITION_CARD,
+        totals: {
+          ...VALID_NUTRITION_CARD.totals,
+          proteinGrams,
+        },
+        goals: {
+          ...VALID_NUTRITION_CARD.goals,
+          proteinGrams: { target: 100, status: 'unavailable' },
+        },
+      } as const
+      const hybridRequest = readCardToolRequest(hybridMetricCard)
+      expect(hybridRequest).toMatchObject({
+        kind: 'invalid-response-card-arguments',
+        validationDigest: {
+          pathIssues: [{
+            path: 'card.totals.proteinGrams.mealCount',
+            code: 'custom',
+            expected: 'zero_iff_total_null',
+          }],
+        },
+      })
+      if (
+        !hybridRequest
+        || hybridRequest.kind !== 'invalid-response-card-arguments'
+      ) {
+        throw new Error('expected optional metric relation to fail')
+      }
+      expect(buildResponseCardValidationFeedback(
+        hybridRequest.validationDigest,
+      )).toBe(JSON.stringify({
+        error: 'invalid_response_card_arguments',
+        hints: [{
+          field: 'card.totals.proteinGrams.mealCount',
+          code: 'custom',
+          expected: 'zero_iff_total_null',
+        }],
+      }))
+    }
+    expect(readCardToolRequest(VALID_NUTRITION_CARD)).toMatchObject({
+      kind: 'attach-response-card',
+    })
+    expect(readCardToolRequest({
+      ...VALID_NUTRITION_CARD,
+      totals: {
+        ...VALID_NUTRITION_CARD.totals,
+        proteinGrams: { total: null, mealCount: 0 },
+      },
+      goals: {
+        ...VALID_NUTRITION_CARD.goals,
+        proteinGrams: { target: 100, status: 'unavailable' },
       },
     })).toMatchObject({ kind: 'attach-response-card' })
 

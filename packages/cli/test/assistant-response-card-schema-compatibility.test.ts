@@ -231,6 +231,64 @@ describe('attach_response_card schema compatibility', () => {
       true,
     )
 
+    for (const proteinGrams of [
+      { total: null, mealCount: 1 },
+      { total: 12, mealCount: 0 },
+    ]) {
+      const hybridMetric = {
+        card: {
+          ...NUTRITION_CARD,
+          totals: {
+            ...NUTRITION_CARD.totals,
+            proteinGrams,
+          },
+          goals: {
+            ...NUTRITION_CARD.goals,
+            proteinGrams: { target: 100, status: 'unavailable' },
+          },
+        },
+      }
+      assert.equal(offeredSchemaAccepts(hybridMetric), true)
+      const hybridResult = attachResponseCardRuntimeSchema.safeParse(
+        hybridMetric,
+      )
+      assert.equal(hybridResult.success, false)
+      if (hybridResult.success) {
+        throw new TypeError('Expected optional metric relation to fail.')
+      }
+      assert.deepEqual(hybridResult.error.issues.map((issue) => ({
+        code: issue.code,
+        expected: issue.code === 'custom'
+          ? issue.params?.murphExpectedShape
+          : undefined,
+        path: issue.path,
+      })), [{
+        code: 'custom',
+        expected: 'zero_iff_total_null',
+        path: ['card', 'totals', 'proteinGrams', 'mealCount'],
+      }])
+    }
+
+    const unavailableNutritionMetric = {
+      card: {
+        ...NUTRITION_CARD,
+        totals: {
+          ...NUTRITION_CARD.totals,
+          proteinGrams: { total: null, mealCount: 0 },
+        },
+        goals: {
+          ...NUTRITION_CARD.goals,
+          proteinGrams: { target: 100, status: 'unavailable' },
+        },
+      },
+    }
+    assert.equal(offeredSchemaAccepts(unavailableNutritionMetric), true)
+    assert.equal(
+      attachResponseCardRuntimeSchema.safeParse(unavailableNutritionMetric)
+        .success,
+      true,
+    )
+
     const pendingActual = {
       card: {
         ...WORKOUT_CARD,
