@@ -5,6 +5,9 @@ import {
   type CompactTableResponseCardV1,
 } from '../src/assistant-response-cards.js'
 
+const OPAQUE_ACTION_BINDING =
+  '95958f9f83e6943ceb56704e19216f7ff6e105a9b74d8a5e466754b266f67a9a'
+
 const CARD: CompactTableResponseCardV1 = {
   kind: 'compact_table',
   version: 1,
@@ -62,10 +65,57 @@ const CARD: CompactTableResponseCardV1 = {
       },
     ],
   },
+  editor: {
+    actionBinding: OPAQUE_ACTION_BINDING,
+    version: 1,
+    setRemovalBinding: 'b'.repeat(64),
+    exercises: [
+      {
+        unitOverride: 'lb',
+        sets: [
+          {
+            logged: true,
+            result: {
+              kind: 'weight_reps',
+              reps: 8,
+              weight: 185,
+              weightUnit: null,
+            },
+          },
+          {
+            logged: true,
+            result: {
+              kind: 'weight_reps',
+              reps: 7,
+              weight: 185,
+              weightUnit: 'lb',
+            },
+          },
+          { logged: false, result: null },
+        ],
+      },
+      {
+        unitOverride: 'lb',
+        sets: [
+          {
+            logged: true,
+            result: {
+              kind: 'weight_reps',
+              reps: 10,
+              weight: 55,
+              weightUnit: null,
+            },
+          },
+          { logged: false, result: null },
+          { logged: false, result: null },
+        ],
+      },
+    ],
+  },
 }
 
 const EXACT_SWIFT_FIXTURE_URL =
-  'https://www.withmurph.ai/#murph-card=eyJzY2hlbWFWZXJzaW9uIjo0LCJjYXJkIjp7ImsiOiJ3IiwidiI6MSwidCI6IlB1c2ggZGF5IiwidSI6IjMgb2YgNiBzZXRzIGNvbXBsZXRlIiwicyI6ImEiLCJlIjpbWyJCZW5jaCBwcmVzcyIsW1siYyIsIjE4NSBsYiDDlyA4IiwiMTg1IGxiIMOXIDgiXSxbImMiLCIxODUgbGIgw5cgOCIsIjE4NSBsYiDDlyA3Il0sWyJwIiwiMTg1IGxiIMOXIDbigJM4IixudWxsXV1dLFsiSW5jbGluZSBkdW1iYmVsbCBwcmVzcyIsW1siYyIsIjU1IGxiIMOXIDEwIiwiNTUgbGIgw5cgMTAiXSxbInAiLCI1NSBsYiDDlyA44oCTMTAiLG51bGxdLFsicCIsbnVsbCxudWxsXV1dXSwiZiI6IlJlcGx5IHdpdGggdGhlIGV4ZXJjaXNlLCBzZXQsIGFuZCByZXN1bHQgdG8gbG9nIG9yIGNvcnJlY3QgaXQuIn19'
+  'https://www.withmurph.ai/#murph-card=eyJzY2hlbWFWZXJzaW9uIjo2LCJjYXJkIjp7ImsiOiJ3IiwidiI6MSwidCI6IlB1c2ggZGF5IiwidSI6IjMgb2YgNiBzZXRzIGNvbXBsZXRlIiwicyI6ImEiLCJlIjpbWyJCZW5jaCBwcmVzcyIsImwiLFtbImMiLCIxODUgbGIgw5cgOCIsWyJ3Iiw4LDE4NSxudWxsXV0sWyJjIiwiMTg1IGxiIMOXIDgiLFsidyIsNywxODUsImwiXV0sWyJwIiwiMTg1IGxiIMOXIDbigJM4IixudWxsXV1dLFsiSW5jbGluZSBkdW1iYmVsbCBwcmVzcyIsImwiLFtbImMiLCI1NSBsYiDDlyAxMCIsWyJ3IiwxMCw1NSxudWxsXV0sWyJwIiwiNTUgbGIgw5cgOOKAkzEwIixudWxsXSxbInAiLG51bGwsbnVsbF1dXV0sImYiOiJSZXBseSB3aXRoIHRoZSBleGVyY2lzZSwgc2V0LCBhbmQgcmVzdWx0IHRvIGxvZyBvciBjb3JyZWN0IGl0LiIsImIiOiI5NTk1OGY5ZjgzZTY5NDNjZWI1NjcwNGUxOTIxNmY3ZmY2ZTEwNWE5Yjc0ZDhhNWU0NjY3NTRiMjY2ZjY3YTlhIiwiZCI6ImJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmIifX0'
 
 describe('workout-session TypeScript to Swift contract fixture', () => {
   it('keeps the exact production encoder output pinned for the iOS decoder', () => {
