@@ -2,7 +2,10 @@ import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { access, readFile } from "node:fs/promises";
 
-import { CURRENT_VAULT_FORMAT_VERSION } from "@murphai/contracts";
+import {
+  CURRENT_VAULT_FORMAT_VERSION,
+  parseMemoryDocument,
+} from "@murphai/contracts";
 import { describe, expect, it } from "vitest";
 import {
   buildHostedWranglerDeployConfig,
@@ -782,6 +785,13 @@ describe("hosted runner container image contract", () => {
     ) as {
       formatVersion?: unknown;
     };
+    const demoMemoryDocument = parseMemoryDocument({
+      sourcePath: "bank/memory.md",
+      text: await readFile(
+        new URL("../../../fixtures/demo-web-vault/bank/memory.md", import.meta.url),
+        "utf8",
+      ),
+    });
     const hostedRunnerSmokeChild = await readFile(
       new URL("../src/hosted-runner-smoke-child.ts", import.meta.url),
       "utf8",
@@ -826,6 +836,7 @@ describe("hosted runner container image contract", () => {
       "pnpm runner:docker:smoke:prepare && pnpm runner:docker:smoke:image && pnpm runner:docker:smoke:built",
     );
     expect(demoVaultMetadata.formatVersion).toBe(CURRENT_VAULT_FORMAT_VERSION);
+    expect(demoMemoryDocument.records.length).toBeGreaterThan(0);
     expect(packageJson.scripts?.["worker:dev"]).toBe(
       "pnpm runner:docker:base && pnpm exec wrangler dev",
     );
@@ -895,6 +906,19 @@ describe("hosted runner container image contract", () => {
     expect(hostedRunnerSmokeChild).toContain('model_reasoning_effort = "low"');
     expect(hostedRunnerSmokeChild).toContain("model_auto_compact_token_limit = 132000");
     expect(hostedRunnerSmokeChild).toContain("runCodexVaultCliProof");
+    expect(hostedRunnerSmokeChild).toContain('"memory-show"');
+    expect(hostedRunnerSmokeChild).toContain(
+      "permissionProfile: MURPH_MEMBER_WORKSPACE_PERMISSION_PROFILE",
+    );
+    expect(hostedRunnerSmokeChild).toContain(
+      "includeOutputPreviewOnFailure: false",
+    );
+    expect(hostedRunnerSmokeChild).not.toContain(
+      "writeCanonicalVaultCliMemoryFixtureDocument(input.vaultRoot)",
+    );
+    expect(hostedRunnerSmokeChild).toContain(
+      "options.includeOutputPreviewOnFailure === false",
+    );
     expect(hostedRunnerSmokeChild).toContain('"vault-show-default"');
     expect(hostedRunnerSmokeChild).toContain('"vault-show-explicit"');
     expect(hostedRunnerSmokeChild).toContain('"measurement-add"');

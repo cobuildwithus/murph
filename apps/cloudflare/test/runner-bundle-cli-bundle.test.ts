@@ -1,8 +1,21 @@
 import { execFileSync } from "node:child_process";
-import { access, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import {
+  access,
+  mkdir,
+  mkdtemp,
+  readFile,
+  rm,
+  stat,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
+import {
+  memoryDocumentRelativePath,
+  parseMemoryDocument,
+  vaultMetadataSchema,
+} from "@murphai/contracts";
 import type { Metafile } from "esbuild";
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -15,6 +28,7 @@ import {
   RUNNER_BUNDLE_SHARED_EXTERNALS,
   RUNNER_BUNDLE_SHARED_FORBIDDEN_INPUT_MARKERS,
 } from "../scripts/runner-bundle/bundle-shared.js";
+import { createInitializedVaultCliMemoryFixture } from "../scripts/runner-bundle/vault-cli-memory-fixture.js";
 
 const temporaryDirectories: string[] = [];
 
@@ -32,21 +46,73 @@ afterEach(async () => {
 // tripwire emits a location-dependent line whenever a probe inherits operator
 // config (HOME or VAULT) from the assembling machine, so a regression in the
 // probes' env overrides surfaces as parity divergence.
-const FAKE_CLI_SOURCE = [
-  "import { createRequire } from 'node:module';",
-  "const require = createRequire(import.meta.url);",
-  "const packageJson = require('../package.json');",
-  "const args = process.argv.slice(2);",
-  "if (!(process.env.HOME ?? '').endsWith('.parity-probe-home') || process.env.VAULT !== '') {",
-  "  console.log(import.meta.url);",
-  "}",
-  "if (args.join('\\0') === '--no-config\\0exercise\\0facets\\0--format\\0json') {",
-  "  console.log(JSON.stringify({ facets: { kinds: ['exercise', 'stretch'] } }));",
-  "} else {",
-  "  console.log(JSON.stringify({ args, version: packageJson.version }));",
-  "}",
-  "",
-].join("\n");
+const MEMORY_DIAGNOSTIC_SENTINEL = "synthetic-memory-diagnostic-tripwire";
+
+function buildMemoryAwareFakeCliSource(
+  memoryShowBranch: readonly string[],
+): string {
+  return [
+    "import { existsSync } from 'node:fs';",
+    "import { createRequire } from 'node:module';",
+    "import path from 'node:path';",
+    "const require = createRequire(import.meta.url);",
+    "const packageJson = require('../package.json');",
+    "const args = process.argv.slice(2);",
+    "const vault = process.env.VAULT ?? '';",
+    "const isMemoryShow = args.join('\\0') === 'memory\\0show\\0--format\\0json';",
+    "const hasHermeticEnvironment = isMemoryShow",
+    "  ? vault.length > 0 && process.env.HOME === path.dirname(vault)",
+    "  : (process.env.HOME ?? '').endsWith('.parity-probe-home') && vault === '';",
+    "if (!hasHermeticEnvironment) {",
+    "  console.log(import.meta.url);",
+    "}",
+    "if (isMemoryShow) {",
+    ...memoryShowBranch,
+    "} else if (args.join('\\0') === '--no-config\\0exercise\\0facets\\0--format\\0json') {",
+    "  console.log(JSON.stringify({ facets: { kinds: ['exercise', 'stretch'] } }));",
+    "} else {",
+    "  console.log(JSON.stringify({ args, version: packageJson.version }));",
+    "}",
+    "",
+  ].join("\n");
+}
+
+const FAKE_CLI_SOURCE = buildMemoryAwareFakeCliSource([
+  "  const exists = existsSync(path.join(vault, 'bank', 'memory.md'));",
+  // Real missing-memory snapshots carry a read-time timestamp, so the fake
+  // intentionally varies one empty-only field between the two processes.
+  "  const emptyReadMarker = exists",
+  "    ? 'populated'",
+  "    : import.meta.url.includes('/.bundle/') ? 'bundled-empty' : 'unbundled-empty';",
+  "  console.log(JSON.stringify({",
+  "    document: { emptyReadMarker, exists, records: exists ? [{}] : [] },",
+  "    memory: null,",
+  "    vault,",
+  "  }));",
+]);
+
+const MISSING_MEMORY_FAILURE_CLI_SOURCE = buildMemoryAwareFakeCliSource([
+  "  const exists = existsSync(path.join(vault, 'bank', 'memory.md'));",
+  "  console.log(JSON.stringify({",
+  "    document: { exists, records: exists ? [{}] : [] },",
+  "    memory: null,",
+  "    vault,",
+  "  }));",
+  "  if (!exists) {",
+  "    process.exitCode = 1;",
+  "  }",
+]);
+
+const MEMORY_DIVERGENT_CLI_SOURCE = buildMemoryAwareFakeCliSource([
+  "  const exists = existsSync(path.join(vault, 'bank', 'memory.md'));",
+  "  const location = import.meta.url.includes('/.bundle/') ? 'bundled' : 'unbundled';",
+  `  const diagnostic = ${JSON.stringify(MEMORY_DIAGNOSTIC_SENTINEL)} + '-' + location;`,
+  "  console.log(JSON.stringify({",
+  "    document: { exists, records: exists ? [{ diagnostic }] : [] },",
+  "    memory: null,",
+  "    vault,",
+  "  }));",
+]);
 
 // Output that depends on the executing file's location diverges between the
 // bundled and unbundled binaries, which the parity battery must reject.
@@ -117,7 +183,7 @@ describe("runner bundle vault-cli esbuild step", () => {
     }
   });
 
-  it("bundles the installed CLI, passes parity hermetically, and retargets both bin wrappers", async () => {
+  it("passes populated parity and missing-memory success hermetically before retargeting both bin wrappers", async () => {
     const bundleDir = await stageFakeInstalledCli(FAKE_CLI_SOURCE);
 
     // Simulate an operator vault configured on the assembling machine: the
@@ -178,6 +244,80 @@ describe("runner bundle vault-cli esbuild step", () => {
       },
     });
     expect(JSON.parse(output)).toEqual({ args: ["--help"], version: "9.9.9" });
+  });
+
+  it("creates canonical populated and missing-memory fixtures with private permissions", async () => {
+    const fixtureRoot = await mkdtemp(
+      path.join(tmpdir(), "murph-runner-memory-fixture-"),
+    );
+    temporaryDirectories.push(fixtureRoot);
+    const vaultRoot = path.join(fixtureRoot, "home", "vault");
+    const bankRoot = path.join(vaultRoot, "bank");
+    const memoryPath = path.join(vaultRoot, memoryDocumentRelativePath);
+
+    await createInitializedVaultCliMemoryFixture({
+      includeMemory: true,
+      vaultRoot,
+    });
+
+    expect((await stat(vaultRoot)).mode & 0o777).toBe(0o700);
+    expect((await stat(bankRoot)).mode & 0o777).toBe(0o700);
+    for (const filePath of [
+      path.join(vaultRoot, "CORE.md"),
+      path.join(vaultRoot, "vault.json"),
+      memoryPath,
+    ]) {
+      expect((await stat(filePath)).mode & 0o777).toBe(0o600);
+    }
+
+    expect(
+      vaultMetadataSchema.parse(
+        JSON.parse(await readFile(path.join(vaultRoot, "vault.json"), "utf8")),
+      ).formatVersion,
+    ).toBeGreaterThan(0);
+
+    const document = parseMemoryDocument({
+      sourcePath: "bank/memory.md",
+      text: await readFile(memoryPath, "utf8"),
+    });
+    expect(document.records.length).toBeGreaterThan(0);
+
+    await createInitializedVaultCliMemoryFixture({
+      includeMemory: false,
+      vaultRoot,
+    });
+    await expect(access(memoryPath)).rejects.toThrow();
+  });
+
+  it("rejects a matching nonzero missing-memory result", async () => {
+    const bundleDir = await stageFakeInstalledCli(
+      MISSING_MEMORY_FAILURE_CLI_SOURCE,
+    );
+
+    await expect(bundleInstalledVaultCliBinary(bundleDir)).rejects.toThrow(
+      /unbundled missing memory/u,
+    );
+  });
+
+  it("keeps populated-memory parity diagnostics content-free", async () => {
+    const bundleDir = await stageFakeInstalledCli(
+      MEMORY_DIVERGENT_CLI_SOURCE,
+    );
+    const failure = await bundleInstalledVaultCliBinary(bundleDir).then(
+      () => null,
+      (error: unknown) => error,
+    );
+
+    expect(failure).toBeInstanceOf(Error);
+    const message = failure instanceof Error ? failure.message : String(failure);
+    expect(message).toContain("memory show --format json (populated)");
+    expect(message).toMatch(
+      /unbundled status=0 stdoutBytes=\d+ stderrBytes=0/u,
+    );
+    expect(message).toMatch(/bundled status=0 stdoutBytes=\d+ stderrBytes=0/u);
+    expect(message).not.toContain(MEMORY_DIAGNOSTIC_SENTINEL);
+    expect(message).not.toContain("stdoutPreview");
+    expect(message).not.toContain("stderrPreview");
   });
 
   it("fails the assembly when bundled output diverges from the unbundled binary", async () => {

@@ -10,6 +10,10 @@ import {
 } from "@murphai/health-commons/runtime";
 
 import {
+  VAULT_CLI_MEMORY_SHOW_ARGS,
+  createInitializedVaultCliMemoryFixture,
+} from "./vault-cli-memory-fixture.js";
+import {
   RUNNER_BUNDLE_SHARED_EXTERNALS,
   RUNNER_BUNDLE_SHARED_FORBIDDEN_INPUT_MARKERS,
 } from "./bundle-shared.js";
@@ -154,7 +158,7 @@ export async function bundleInstalledVaultCliBinary(
     "@murphai",
     "health-commons",
   );
-  assertVaultCliBundleParity({
+  await assertVaultCliBundleParity({
     bundleOutDir,
     cliPackageDir,
     entryPath,
@@ -285,68 +289,250 @@ export function assertVaultCliBundleWithinBudgets(
   );
 }
 
-function assertVaultCliBundleParity(input: {
+async function assertVaultCliBundleParity(input: {
   bundleOutDir: string;
   cliPackageDir: string;
   entryPath: string;
   healthCommonsPackageRoot: string;
-}): void {
+}): Promise<void> {
   const bundledEntryPath = path.join(input.bundleOutDir, "bin.js");
 
   for (const probe of VAULT_CLI_BUNDLE_PARITY_PROBES) {
-    const unbundledStartedAt = performance.now();
-    const expected = runVaultCliParityProbe({
+    const results = runVaultCliParityPair({
       args: probe,
+      bundledEntryPath,
       cwd: input.cliPackageDir,
-      entryPath: input.entryPath,
       healthCommonsPackageRoot: input.healthCommonsPackageRoot,
+      label: probe.join(" "),
+      unbundledEntryPath: input.entryPath,
     });
-    const unbundledDurationMs = Math.round(performance.now() - unbundledStartedAt);
-    const bundledStartedAt = performance.now();
-    const actual = runVaultCliParityProbe({
-      args: probe,
-      cwd: input.cliPackageDir,
-      entryPath: bundledEntryPath,
-      healthCommonsPackageRoot: input.healthCommonsPackageRoot,
-    });
-    const bundledDurationMs = Math.round(performance.now() - bundledStartedAt);
-
-    // Warn-only longitudinal trend signal in the assembly log. Never turn
-    // this into a hard assertion: shared CI runners make wall-time budgets
-    // flake, and a budget loose enough to be stable would catch nothing.
-    console.log(
-      `parity probe \`${probe.join(" ")}\`: unbundled ${unbundledDurationMs}ms, bundled ${bundledDurationMs}ms`,
-    );
 
     // Symmetric unknown-command output would otherwise "pass" parity while
     // proving nothing — a renamed command or broken CLI bootstrap must fail
     // the assembly, not slip through as matching error text.
-    if (expected.stdout.includes("is not a command for")) {
+    if (results.unbundled.stdout.includes("is not a command for")) {
       throw new Error(
         [
           `Unbundled vault-cli no longer recognizes parity probe \`${probe.join(" ")}\`.`,
-          `Update VAULT_CLI_BUNDLE_PARITY_PROBES to match the current command surface.`,
-          `unbundled stdout head: ${expected.stdout.slice(0, 400)}`,
+          "Update VAULT_CLI_BUNDLE_PARITY_PROBES to match the current command surface.",
+          formatVaultCliParityResult("unbundled", results.unbundled),
         ].join("\n"),
       );
     }
 
-    if (
-      expected.stdout !== actual.stdout ||
-      expected.stderr !== actual.stderr ||
-      expected.status !== actual.status
-    ) {
-      throw new Error(
-        [
-          `Bundled vault-cli output diverged for \`${probe.join(" ")}\`.`,
-          `unbundled status=${expected.status} stdout=${expected.stdout.length}B stderr=${expected.stderr.length}B`,
-          `bundled status=${actual.status} stdout=${actual.stdout.length}B stderr=${actual.stderr.length}B`,
-          `bundled stdout head: ${actual.stdout.slice(0, 200)}`,
-          `bundled stderr head: ${actual.stderr.slice(0, 400)}`,
-        ].join("\n"),
-      );
-    }
+    assertVaultCliParityMatch({
+      bundled: results.bundled,
+      label: probe.join(" "),
+      unbundled: results.unbundled,
+    });
   }
+
+  const fixtureRoot = await mkdtemp(
+    path.join(tmpdir(), "murph-runner-vault-cli-memory-parity-"),
+  );
+  const fixtureCases = [
+    {
+      compareStdout: true,
+      expectedExists: true,
+      expectedRecords: "populated",
+      label: "populated",
+      vaultRoot: path.join(fixtureRoot, "populated-home", "vault"),
+    },
+    {
+      // Empty documents are created at read time, so their timestamps differ
+      // across the two processes. Status, stderr, and shape remain the parity
+      // contract.
+      compareStdout: false,
+      expectedExists: false,
+      expectedRecords: "empty",
+      label: "missing",
+      vaultRoot: path.join(fixtureRoot, "missing-home", "vault"),
+    },
+  ] as const;
+
+  try {
+    await Promise.all(
+      fixtureCases.map((fixtureCase) =>
+        createInitializedVaultCliMemoryFixture({
+          includeMemory: fixtureCase.expectedExists,
+          vaultRoot: fixtureCase.vaultRoot,
+        }),
+      ),
+    );
+
+    for (const fixtureCase of fixtureCases) {
+      const label = `memory show --format json (${fixtureCase.label})`;
+      const results = runVaultCliParityPair({
+        args: VAULT_CLI_MEMORY_SHOW_ARGS,
+        bundledEntryPath,
+        cwd: fixtureCase.vaultRoot,
+        healthCommonsPackageRoot: input.healthCommonsPackageRoot,
+        homeRoot: path.dirname(fixtureCase.vaultRoot),
+        label,
+        unbundledEntryPath: input.entryPath,
+        vaultRoot: fixtureCase.vaultRoot,
+      });
+      for (const entryKind of ["unbundled", "bundled"] as const) {
+        assertVaultCliMemoryShowResult({
+          expectedExists: fixtureCase.expectedExists,
+          expectedRecords: fixtureCase.expectedRecords,
+          expectedVaultRoot: fixtureCase.vaultRoot,
+          label: `${entryKind} ${fixtureCase.label} memory`,
+          result: results[entryKind],
+        });
+      }
+      assertVaultCliParityMatch({
+        bundled: results.bundled,
+        compareStdout: fixtureCase.compareStdout,
+        label,
+        unbundled: results.unbundled,
+      });
+    }
+  } finally {
+    await rm(fixtureRoot, { force: true, recursive: true });
+  }
+}
+
+function runVaultCliParityPair(input: {
+  args: readonly string[];
+  bundledEntryPath: string;
+  cwd: string;
+  healthCommonsPackageRoot: string;
+  homeRoot?: string;
+  label: string;
+  unbundledEntryPath: string;
+  vaultRoot?: string;
+}): { bundled: VaultCliParityResult; unbundled: VaultCliParityResult } {
+  const unbundledStartedAt = performance.now();
+  const unbundled = runVaultCliParityProbe({
+    args: input.args,
+    cwd: input.cwd,
+    entryPath: input.unbundledEntryPath,
+    healthCommonsPackageRoot: input.healthCommonsPackageRoot,
+    homeRoot: input.homeRoot,
+    vaultRoot: input.vaultRoot,
+  });
+  const unbundledDurationMs = Math.round(performance.now() - unbundledStartedAt);
+  const bundledStartedAt = performance.now();
+  const bundled = runVaultCliParityProbe({
+    args: input.args,
+    cwd: input.cwd,
+    entryPath: input.bundledEntryPath,
+    healthCommonsPackageRoot: input.healthCommonsPackageRoot,
+    homeRoot: input.homeRoot,
+    vaultRoot: input.vaultRoot,
+  });
+  const bundledDurationMs = Math.round(performance.now() - bundledStartedAt);
+
+  // Warn-only longitudinal trend signal in the assembly log. Never turn
+  // this into a hard assertion: shared CI runners make wall-time budgets
+  // flake, and a budget loose enough to be stable would catch nothing.
+  console.log(
+    `parity probe \`${input.label}\`: unbundled ${unbundledDurationMs}ms, bundled ${bundledDurationMs}ms`,
+  );
+
+  return { bundled, unbundled };
+}
+
+function assertVaultCliParityMatch(input: {
+  bundled: VaultCliParityResult;
+  compareStdout?: boolean;
+  label: string;
+  unbundled: VaultCliParityResult;
+}): void {
+  if (
+    (input.compareStdout !== false && input.unbundled.stdout !== input.bundled.stdout) ||
+    input.unbundled.stderr !== input.bundled.stderr ||
+    input.unbundled.status !== input.bundled.status
+  ) {
+    throwVaultCliParityMismatch(input);
+  }
+}
+
+function throwVaultCliParityMismatch(input: {
+  bundled: VaultCliParityResult;
+  label: string;
+  unbundled: VaultCliParityResult;
+}): never {
+  throw new Error(
+    [
+      `Bundled vault-cli output diverged for \`${input.label}\`.`,
+      formatVaultCliParityResult("unbundled", input.unbundled),
+      formatVaultCliParityResult("bundled", input.bundled),
+    ].join("\n"),
+  );
+}
+
+function assertVaultCliMemoryShowResult(input: {
+  expectedExists: boolean;
+  expectedRecords: "empty" | "populated";
+  expectedVaultRoot: string;
+  label: string;
+  result: VaultCliParityResult;
+}): void {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(input.result.stdout);
+  } catch {
+    throwVaultCliMemoryShowFailure(input.label, input.result);
+  }
+
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throwVaultCliMemoryShowFailure(input.label, input.result);
+  }
+  const root = parsed as Record<string, unknown>;
+  const documentValue = root.document;
+  if (
+    !documentValue ||
+    typeof documentValue !== "object" ||
+    Array.isArray(documentValue)
+  ) {
+    throwVaultCliMemoryShowFailure(input.label, input.result);
+  }
+  const document = documentValue as Record<string, unknown>;
+  const records = document.records;
+  if (
+    input.result.status !== 0 ||
+    input.result.stderr.length !== 0 ||
+    root.vault !== input.expectedVaultRoot ||
+    document.exists !== input.expectedExists ||
+    !Array.isArray(records) ||
+    (input.expectedRecords === "empty"
+      ? records.length !== 0
+      : records.length === 0) ||
+    root.memory !== null
+  ) {
+    throwVaultCliMemoryShowFailure(input.label, input.result);
+  }
+}
+
+function throwVaultCliMemoryShowFailure(
+  label: string,
+  result: VaultCliParityResult,
+): never {
+  throw new Error(
+    [
+      `vault-cli memory show parity probe failed for ${label}.`,
+      formatVaultCliParityResult("result", result),
+    ].join("\n"),
+  );
+}
+
+function formatVaultCliParityResult(
+  label: string,
+  result: VaultCliParityResult,
+): string {
+  return [
+    `${label} status=${result.status}`,
+    `stdoutBytes=${Buffer.byteLength(result.stdout, "utf8")}`,
+    `stderrBytes=${Buffer.byteLength(result.stderr, "utf8")}`,
+  ].join(" ");
+}
+
+interface VaultCliParityResult {
+  status: number;
+  stderr: string;
+  stdout: string;
 }
 
 function runVaultCliParityProbe(input: {
@@ -354,17 +540,20 @@ function runVaultCliParityProbe(input: {
   cwd: string;
   entryPath: string;
   healthCommonsPackageRoot: string;
-}): { status: number; stderr: string; stdout: string } {
+  homeRoot?: string;
+  vaultRoot?: string;
+}): VaultCliParityResult {
   const result = spawnSync(process.execPath, [input.entryPath, ...input.args], {
     cwd: input.cwd,
     encoding: "utf8",
     env: {
       ...process.env,
       // Keep probes hermetic: no operator config or vault may leak in from
-      // the assembling machine.
-      HOME: path.join(input.cwd, ".parity-probe-home"),
+      // the assembling machine. Fixture probes opt into only their synthetic
+      // HOME and VAULT roots.
+      HOME: input.homeRoot ?? path.join(input.cwd, ".parity-probe-home"),
       [MURPH_HEALTH_COMMONS_PACKAGE_ROOT_ENV]: input.healthCommonsPackageRoot,
-      VAULT: "",
+      VAULT: input.vaultRoot ?? "",
     },
     // The full `--llms-full` manifest exceeds the 1MiB default; a too-small
     // buffer kills the child mid-stream and turns OS pipe chunking into
@@ -379,14 +568,24 @@ function runVaultCliParityProbe(input: {
   // infrastructure breaking and must fail the assembly loudly instead of
   // posing as a parity result.
   if (result.error || result.signal !== null || typeof result.status !== "number") {
+    const failureKind = result.error
+      ? "spawn_error"
+      : result.signal !== null
+        ? "signal"
+        : "missing_status";
     throw new Error(
-      `vault-cli parity probe \`${input.args.join(" ")}\` did not exit cleanly (${
-        result.error?.message ?? `signal ${result.signal ?? "unknown"}`
-      }).`,
+      [
+        `vault-cli parity probe \`${input.args.join(" ")}\` did not exit cleanly.`,
+        `outcome=${failureKind} status=${result.status ?? -1} stdoutBytes=${Buffer.byteLength(result.stdout ?? "", "utf8")} stderrBytes=${Buffer.byteLength(result.stderr ?? "", "utf8")}`,
+      ].join("\n"),
     );
   }
 
-  return { status: result.status, stderr: result.stderr, stdout: result.stdout };
+  return {
+    status: result.status,
+    stderr: result.stderr,
+    stdout: result.stdout,
+  };
 }
 
 async function assertVaultCliJsonImportSurface(input: {
