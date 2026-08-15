@@ -5825,6 +5825,38 @@ describe("HostedUserRunner execution coordination", () => {
     expect(alarms).toEqual([]);
   });
 
+  it("can age an existing active fence without replacing its attempt", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const { alarms, runner, sql } = createRunnerHarness({
+      workspace: createWorkspaceState({
+        nextWakeAt: WORKSPACE_NEXT_WAKE_AT,
+        nextWakeReason: "assistant",
+      }),
+    });
+    await runner.bindUser(TEST_USER_ID);
+    const stuck = await runner.startStuckInvocationForTest({
+      userId: TEST_USER_ID,
+    });
+
+    const aged = await runner.ageActiveRuntimeFenceForTest({
+      startedAgoMs: 35_000,
+      userId: TEST_USER_ID,
+    });
+
+    expect(aged).toEqual({
+      attemptId: stuck.attemptId,
+      ok: true,
+      startedAt: "2026-04-26T23:59:25.000Z",
+    });
+    expect(readRunnerMeta(sql)).toMatchObject({
+      active_attempt_id: stuck.attemptId,
+      active_expires_at: null,
+      active_started_at: "2026-04-26T23:59:25.000Z",
+    });
+    expect(alarms).toEqual([]);
+  });
+
   it("uses runtime processing recovery for hosted-local run-until-idle behind an active fence", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));

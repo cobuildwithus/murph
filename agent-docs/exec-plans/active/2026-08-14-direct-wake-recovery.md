@@ -1,7 +1,7 @@
 # Direct wake cold-start recovery
 
 Status: active
-Updated: 2026-08-14
+Updated: 2026-08-15
 
 ## Goal
 
@@ -28,9 +28,9 @@ retry; Temporal remains the only durable retry and reconciliation owner.
 - Preserve the Web-owned mailbox and Temporal orchestration owners.
 - Preserve per-user health-data-consent serialization and shell-prewarm
   behavior.
-- Preserve active runner destroy-timeout work. Open PR #1815 also changes the
-  startup-confirm timeout, so the final patch must keep its 20-second lifecycle
-  intent while reserving cleanup settlement and report merge-order risk.
+- Preserve active runner destroy-timeout work. Merged PR #1815 also changed the
+  startup-confirm timeout, so the resolved patch keeps its 20-second lifecycle
+  intent while reserving cleanup settlement.
 - Keep logs metadata-only and do not add payloads, prompts, provider facts, or
   member identifiers.
 - Maintain mixed-version safety: new Web must tolerate the legacy early ack,
@@ -50,9 +50,9 @@ retry; Temporal remains the only durable retry and reconciliation owner.
 4. Keep one 29-second Web fast-lane deadline. Retry `retry_later` once only when
    its recommended delay and a valid second command budget fit before that
    deadline.
-5. Add focused route, client, Web wake, startup-readiness, timeout-ordering, and
-   concurrent write-fence tests. Update the live hosted-runtime contracts and
-   deployment ordering.
+5. Add focused route, client, Web wake, startup-readiness, timeout-ordering,
+   concurrent write-fence, and hosted-local one-message recovery tests. Update
+   the live hosted-runtime contracts and deployment ordering.
 
 ## Verification
 
@@ -87,8 +87,19 @@ retry; Temporal remains the only durable retry and reconciliation owner.
   documentation.
 - [x] Pass focused tests, full RunnerContainer/UserRunner suites, relevant
   typechecks, Web lint, and diff whitespace validation.
-- [ ] Reconcile the pending Review GPT response, archive this plan, commit, and
-  open the pull request.
+- [x] Merge the current default branch after PR #1815 landed, resolve the two
+  expected controller/alarm-test conflicts while preserving the audited
+  15+5+1 timing and fence semantics, and restore the full focused matrix.
+- [x] Fix the raw-log AST guard finding without changing emitted direct-wake
+  fields or values; exact-head Release build/typecheck is green.
+- [x] Reconcile the preliminary Review GPT pass and add test-only proof that a
+  long first command reduces the second server budget, plus a hosted-local
+  fresh-fence journey that ages the same fence only after observing the first
+  `retry_later`, requires second-call acceptance, acknowledges Temporal's
+  converged accepted activity, and holds provider plus total Linq sends to one.
+- [ ] Complete the hosted-local journey in a capable environment, resolve the
+  exact-head final Review GPT gate and CI, archive this plan, and push the final
+  reviewed head.
 
 ## Surprises and discoveries
 
@@ -114,6 +125,20 @@ retry; Temporal remains the only durable retry and reconciliation owner.
   parsing, so its persisted timestamps could not say whether the final call was
   accepted or returned `retry_later`. The callback now fires only with a parsed
   bounded result.
+- The preliminary Review GPT pass found two proof gaps rather than production
+  defects: the second command's reduced aggregate budget was not asserted, and
+  the one-inbound recovery promise stopped at mocked component boundaries.
+  The added hosted-local proof uses a hosted-local-only fence-aging control and
+  does not introduce a runtime owner or production fault-injection path.
+- A fence pre-aged to 27 seconds still left scheduler-dependent ordering among
+  webhook handling, Temporal, and the first direct call. The deterministic
+  proof now creates a fresh fence, observes the correlated first direct
+  `retry_later`, and only then ages that same attempt beyond startup grace
+  before the bounded Web retry is released.
+- Local execution of that hosted-local proof reached the external Temporal
+  configuration but timed out during the harness's MinIO image fallback before
+  any test ran. Unit/typecheck proof is green; the capable hosted-local CI lane
+  remains the executable end-to-end gate.
 
 ## Decision log
 

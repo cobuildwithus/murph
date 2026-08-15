@@ -39,6 +39,10 @@ const hostedLocalShutdownCheckpointControlTimeoutMs = 120_000;
 const hostedLocalRunUntilIdleTimeoutMs = 30_000;
 
 export interface HostedLocalDevHarness {
+  ageActiveRuntimeFenceForTest(
+    userId: string,
+    startedAgoMs: number,
+  ): Promise<{ attemptId: string; ok: true; startedAt: string }>;
   assertNoInterventions(): void;
   assertStripeListenerAlive(): void;
   config: ReturnType<typeof resolveHostedLocalDevConfig>;
@@ -233,6 +237,24 @@ export async function startHostedLocalDevHarness(input: {
     }
 
     return {
+      ageActiveRuntimeFenceForTest: async (
+        userId: string,
+        startedAgoMs: number,
+      ): Promise<{ attemptId: string; ok: true; startedAt: string }> => {
+        assertHostedLocalTestControlsAvailable("ageActiveRuntimeFenceForTest");
+        return await requestJsonForRuntime<{
+          attemptId: string;
+          ok: true;
+          startedAt: string;
+        }>(
+          `/__test/users/${encodeURIComponent(userId)}`
+            + `/active-runtime-fence/age?startedAgoMs=${encodeURIComponent(String(startedAgoMs))}`,
+          {
+            headers: statusHeaders(userId),
+            method: "POST",
+          },
+        );
+      },
       assertNoInterventions: (): void => {
         if (interventionCount === 0) {
           return;

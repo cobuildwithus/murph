@@ -253,6 +253,7 @@ describe("cloudflare worker routes", () => {
     expect(workerSource).not.toContain("runUntilIdleForTest");
     expect(workerSource).not.toContain("startStuckInvocationForTest");
     expect(workerSource).not.toContain("readActiveRuntimeFenceForTest");
+    expect(workerSource).not.toContain("ageActiveRuntimeFenceForTest");
     expect(workerSource).not.toContain("armCanonicalCheckpointLostAckForTest");
     expect(workerSource).not.toContain("foregroundPriorityOrderingControlForTest");
     expect(workerSource).not.toContain("armSnapshotPublicationCorruptionForTest");
@@ -369,6 +370,7 @@ describe("cloudflare worker routes", () => {
       "test-container-activity-expired",
       "test-container-active-operation-drop",
       "test-read-active-runtime-fence",
+      "test-age-active-runtime-fence",
       "test-start-stuck-invocation",
       "test-temporal-mailbox-signal-fault-arm",
       "test-temporal-mailbox-signal-fault-clear",
@@ -2108,6 +2110,42 @@ describe("cloudflare worker routes", () => {
       processingMode: "system_mailbox",
     });
     expect(stub.readActiveRuntimeFenceForTest).toHaveBeenCalledWith({
+      userId: "member_123",
+    });
+  });
+
+  it("ages the active hosted-local runtime fence for correctly bound callers", async () => {
+    const stub = createUserRunnerStub({
+      ageActiveRuntimeFenceForTest: vi.fn(async () => ({
+        attemptId: "workspace-invocation-test",
+        ok: true as const,
+        startedAt: "2026-05-08T23:59:25.000Z",
+      })),
+    });
+    const env = createWorkerEnv(stub, {
+      MURPH_HOSTED_LOCAL_TEST_ROUTES: "1",
+      NODE_ENV: "test",
+    });
+
+    const response = await hostedLocalTestWorker.fetch(
+      await signControlRequest(new Request(
+        "https://runner.example.test/__test/users/member_123"
+          + "/active-runtime-fence/age?startedAgoMs=35000",
+        { method: "POST" },
+      ), {
+        boundUserId: "member_123",
+      }),
+      env,
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      attemptId: "workspace-invocation-test",
+      ok: true,
+      startedAt: "2026-05-08T23:59:25.000Z",
+    });
+    expect(stub.ageActiveRuntimeFenceForTest).toHaveBeenCalledWith({
+      startedAgoMs: 35_000,
       userId: "member_123",
     });
   });
@@ -4714,6 +4752,14 @@ async function resolveHostedUserCryptoContextForTest(
 }
 
 type WorkerTestUserRunnerStub = UserRunnerDurableObjectStubLike & {
+  ageActiveRuntimeFenceForTest(input: {
+    startedAgoMs: number;
+    userId: string;
+  }): Promise<{
+    attemptId: string;
+    ok: true;
+    startedAt: string;
+  }>;
   readActiveRuntimeFenceForTest(input: {
     userId: string;
   }): Promise<{
@@ -4746,6 +4792,11 @@ function createWorkerExecutionContextForTest(): {
 
 function createUserRunnerStub(overrides: Record<string, unknown> = {}) {
   return {
+    ageActiveRuntimeFenceForTest: vi.fn(async () => ({
+      attemptId: "workspace-invocation-test",
+      ok: true as const,
+      startedAt: "2026-05-08T23:59:25.000Z",
+    })),
     bindUser: vi.fn(async (userId: string) => ({ userId })),
     deleteHostedUserData: vi.fn(async (userId: string) => ({
       deletedAt: "2026-04-29T00:00:00.000Z",

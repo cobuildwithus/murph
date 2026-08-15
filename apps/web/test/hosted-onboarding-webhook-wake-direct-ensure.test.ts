@@ -368,6 +368,82 @@ describe("maybeHandoffHostedExecutionWebhookWake direct ensure fast path", () =>
     }
   });
 
+  it("gives the retry only the command budget remaining after a slow first attempt", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-02T00:00:00.000Z"));
+    const consoleInfo = vi.spyOn(console, "info").mockImplementation(() => undefined);
+    const afterResponseTasks: Array<() => Promise<void>> = [];
+    mocks.ensureRuntimeProcessing
+      .mockImplementationOnce(async (input: DirectEnsureInput) => {
+        await new Promise<void>((resolve) => setTimeout(resolve, 18_000));
+        input.onTiming({
+          directEnsureRequestStartedAtEpochMs: 1_777_000_000_012,
+          directEnsureResponseReceivedAtEpochMs: 1_777_000_018_000,
+          directEnsureResultKind: "retry_later",
+          orchestrationAttemptId: input.orchestrationAttemptId,
+          tokenAcquiredAtEpochMs: 1_777_000_000_010,
+          tokenAcquireStartedAtEpochMs: 1_777_000_000_000,
+        });
+        return {
+          kind: "retry_later",
+          retryAt: "2026-07-02T00:00:21.000Z",
+        };
+      })
+      .mockImplementationOnce(async (input: DirectEnsureInput) => {
+        input.onTiming({
+          directEnsureAction: "woken",
+          directEnsureRequestStartedAtEpochMs: 1_777_000_021_012,
+          directEnsureResponseReceivedAtEpochMs: 1_777_000_021_120,
+          directEnsureResultKind: "runtime_processing_accepted",
+          directEnsureRuntimeAttemptId: "runtime-attempt-final",
+          orchestrationAttemptId: input.orchestrationAttemptId,
+          tokenAcquiredAtEpochMs: 1_777_000_021_010,
+          tokenAcquireStartedAtEpochMs: 1_777_000_021_000,
+        });
+        return {
+          action: "woken",
+          kind: "runtime_processing_accepted",
+          recommendedRecheckAt: "2026-07-02T00:03:00.000Z",
+          runtimeAttemptId: "runtime-attempt-final",
+        };
+      });
+
+    try {
+      await expect(maybeHandoffHostedExecutionWebhookWake({
+        response,
+        scheduleAfterResponse: (task) => {
+          afterResponseTasks.push(task);
+        },
+        wakeHandoff: buildWakeHandoff(),
+      })).resolves.toMatchObject({
+        reason: "temporal-signaled",
+        signalAccepted: true,
+      });
+
+      const directWake = Promise.all(afterResponseTasks.map((task) => task()));
+      await vi.advanceTimersByTimeAsync(18_000);
+      expect(mocks.ensureRuntimeProcessing).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(3_000);
+      await directWake;
+
+      const firstInput = mocks.ensureRuntimeProcessing.mock.calls[0]?.[0] as
+        DirectEnsureInput;
+      const secondInput = mocks.ensureRuntimeProcessing.mock.calls[1]?.[0] as
+        DirectEnsureInput;
+      expect(firstInput.commandTimeoutMs).toBe(25_000);
+      expect(secondInput.commandTimeoutMs).toBe(7_000);
+      expect(secondInput.orchestrationAttemptId).toBe(
+        firstInput.orchestrationAttemptId,
+      );
+      expect(secondInput.signal).toBe(firstInput.signal);
+      expect(mocks.ensureRuntimeProcessing).toHaveBeenCalledTimes(2);
+      expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledTimes(1);
+    } finally {
+      consoleInfo.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
   it("does not retry when retry_later falls outside the direct wake deadline", async () => {
     const consoleInfo = vi.spyOn(console, "info").mockImplementation(() => undefined);
     mocks.ensureRuntimeProcessing.mockResolvedValueOnce({

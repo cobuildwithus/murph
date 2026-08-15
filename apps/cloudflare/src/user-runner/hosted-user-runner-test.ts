@@ -24,6 +24,12 @@ export interface HostedRunnerActiveFenceTestResult {
   processingMode: RunnerWriteFenceToken["processingMode"];
 }
 
+export interface HostedRunnerAgedActiveFenceTestResult {
+  attemptId: string;
+  ok: true;
+  startedAt: string;
+}
+
 export class HostedUserRunnerWithTestControls extends HostedUserRunner {
   private readonly testState: DurableObjectStateLike;
 
@@ -141,6 +147,29 @@ export class HostedUserRunnerWithTestControls extends HostedUserRunner {
           processingMode: token.processingMode,
         }
       : null;
+  }
+
+  async ageActiveRuntimeFenceForTest(input: {
+    startedAgoMs: number;
+    userId: string;
+  }): Promise<HostedRunnerAgedActiveFenceTestResult> {
+    if (!Number.isSafeInteger(input.startedAgoMs) || input.startedAgoMs <= 0) {
+      throw new TypeError("Hosted runner active fence test age must be a positive integer.");
+    }
+    await this.stateStore.bindUser(input.userId);
+    const startedAt = new Date(Date.now() - input.startedAgoMs).toISOString();
+    const record = await this.ageActiveWriteFenceForHostedLocalTest({
+      startedAt,
+    });
+    const activeFence = record.writeFence;
+    if (!activeFence) {
+      throw new Error("Hosted runner active fence disappeared while aging it for test.");
+    }
+    return {
+      attemptId: activeFence.attemptId,
+      ok: true,
+      startedAt,
+    };
   }
 
   private async ageActiveWriteFenceForHostedLocalTest(input: {

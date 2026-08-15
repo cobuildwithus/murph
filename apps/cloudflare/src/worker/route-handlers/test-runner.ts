@@ -39,6 +39,10 @@ import {
 } from "../route-utils/test-routes.ts";
 
 interface HostedLocalTestUserRunnerStubLike extends UserRunnerDurableObjectStubLike {
+  ageActiveRuntimeFenceForTest(input: {
+    startedAgoMs: number;
+    userId: string;
+  }): Promise<{ attemptId: string; ok: true; startedAt: string }>;
   readActiveRuntimeFenceForTest(input: {
     userId: string;
   }): Promise<HostedRunnerActiveFenceTestResult | null>;
@@ -356,6 +360,22 @@ export const testRunnerRoutes: readonly DeclarativeRoute<WorkerRouteContext>[] =
       return requireHostedWorkerTestEnvironment(context);
     },
     async handle(context, params) {
+      return handleTestAgeActiveRuntimeFenceRoute(context, params.userId);
+    },
+    match: matchHostedLocalTestUserRoute(
+      "/__test/users/",
+      "/active-runtime-fence/age",
+    ),
+    methods: ["POST"],
+    name: "test-age-active-runtime-fence",
+    wrongMethodResponse: "not-found",
+  },
+  {
+    authorization: "vercel-oidc",
+    beforeMethod(context) {
+      return requireHostedWorkerTestEnvironment(context);
+    },
+    async handle(context, params) {
       return handleTestStartStuckInvocationRoute(context, params.userId);
     },
     match: matchHostedLocalTestUserRoute("/__test/users/", "/stuck-invocation"),
@@ -387,6 +407,40 @@ export async function handleTestReadActiveRuntimeFenceRoute(
 
   const stub = context.env.USER_RUNNER.getByName(userId) as HostedLocalTestUserRunnerStubLike;
   return json(await stub.readActiveRuntimeFenceForTest({ userId }));
+}
+
+export async function handleTestAgeActiveRuntimeFenceRoute(
+  context: WorkerRouteContext,
+  encodedUserId: string,
+): Promise<Response> {
+  if (!isHostedWorkerTestEnvironment(context.env)) {
+    return notFound();
+  }
+
+  const userId = decodeRouteParam(encodedUserId);
+  const boundUserResponse = requireHostedExecutionBoundUserResponse(
+    context.request,
+    userId,
+    "Hosted execution bound user does not match the test runner user.",
+    "test-runner-bound-user-mismatch",
+    "test-age-active-runtime-fence",
+  );
+  if (boundUserResponse) {
+    return boundUserResponse;
+  }
+
+  const startedAgoMs = parseTestPositiveInteger(
+    context.url.searchParams.get("startedAgoMs"),
+  );
+  if (startedAgoMs === null || startedAgoMs === "invalid") {
+    return json({ error: "Unsupported test active fence age." }, 400);
+  }
+  const stub = context.env.USER_RUNNER.getByName(userId) as
+    HostedLocalTestUserRunnerStubLike;
+  return json(await stub.ageActiveRuntimeFenceForTest({
+    startedAgoMs,
+    userId,
+  }));
 }
 
 export async function handleTestRunUntilIdleRoute(
