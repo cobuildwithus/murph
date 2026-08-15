@@ -531,6 +531,7 @@ export function SectionsContent() {
           <SiteFooter
             id="design-site-footer-preview"
             referralsAvailable
+            vitalsMode="synthetic"
           />
         </div>
       </StudySection>

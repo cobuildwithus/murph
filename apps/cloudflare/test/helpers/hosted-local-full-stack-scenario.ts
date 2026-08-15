@@ -227,6 +227,7 @@ interface HostedLocalFullStackScenarioInput {
   streamLogs?: boolean;
   testControls?: boolean;
   webProcessEnvOverrides?: NodeJS.ProcessEnv;
+  webTemporalMailboxSignalFaultUserId?: string;
 }
 
 export async function startHostedLocalFullStackScenario(
@@ -382,6 +383,8 @@ async function startHostedLocalFullStackScenarioAttempt(
         ...(input.webProcessEnvOverrides ?? {}),
         HOSTED_RUNTIME_LOG_DATABASE_URL: runtimeLogDatabaseUrl,
       },
+      webTemporalMailboxSignalFaultUserId:
+        input.webTemporalMailboxSignalFaultUserId,
     });
     preparedRunnerBundleCacheKeys.add(runnerBundleCacheKey);
     const scenarioHarness = harness;
