@@ -29,8 +29,9 @@ if [[ "$review_gpt_caller_always_paths" == *"frog-review-evidence/frog-autofix-"
 fi
 
 review_gpt_pr_ref="${REVIEW_GPT_PR_URL:-${REVIEW_GPT_PR_REF:-}}"
-review_gpt_pr_context_dir="review-gpt-pr-context"
-review_gpt_cleanup_pr_context=0
+review_gpt_pr_context_archive_dir="review-gpt-pr-context"
+review_gpt_invocation_dir=""
+review_gpt_pr_context_dir=""
 review_gpt_review_phase="${REVIEW_GPT_REVIEW_PHASE:-final}"
 review_gpt_round_number="${REVIEW_GPT_ROUND_NUMBER:-}"
 review_gpt_first_reviewed_head="${REVIEW_GPT_FIRST_REVIEWED_HEAD:-}"
@@ -43,6 +44,46 @@ review_gpt_expected_pr_body_path="${REVIEW_GPT_EXPECTED_PR_BODY_PATH:-}"
 review_gpt_expected_pr_body_sha256="${REVIEW_GPT_EXPECTED_PR_BODY_SHA256:-}"
 review_gpt_context_mode="full_snapshot"
 review_gpt_pr_touches_health_commons=0
+review_gpt_package_args=("$@")
+review_gpt_package_format="both"
+review_gpt_package_prefix="${COBUILD_AUDIT_CONTEXT_PREFIX:-murph-audit}"
+review_gpt_has_explicit_output_dir=0
+
+for ((review_gpt_arg_index = 0; review_gpt_arg_index < ${#review_gpt_package_args[@]}; review_gpt_arg_index += 1)); do
+  case "${review_gpt_package_args[$review_gpt_arg_index]}" in
+    --zip)
+      review_gpt_package_format="zip"
+      ;;
+    --txt)
+      review_gpt_package_format="txt"
+      ;;
+    --both)
+      review_gpt_package_format="both"
+      ;;
+    --out-dir)
+      if (( review_gpt_arg_index + 1 >= ${#review_gpt_package_args[@]} )); then
+        echo "Error: --out-dir requires a value." >&2
+        exit 1
+      fi
+      review_gpt_arg_index=$((review_gpt_arg_index + 1))
+      review_gpt_has_explicit_output_dir=1
+      ;;
+    --name)
+      if (( review_gpt_arg_index + 1 >= ${#review_gpt_package_args[@]} )); then
+        echo "Error: --name requires a value." >&2
+        exit 1
+      fi
+      review_gpt_arg_index=$((review_gpt_arg_index + 1))
+      review_gpt_package_prefix="${review_gpt_package_args[$review_gpt_arg_index]}"
+      ;;
+  esac
+done
+
+if [[ -n "$review_gpt_pr_ref" ]] \
+  && [[ "$review_gpt_package_format" != "zip" ]]; then
+  echo "Error: PR-bound ReviewGPT packaging requires --zip; default, --both, and --txt modes are unsupported." >&2
+  exit 1
+fi
 
 if [[ -n "$review_gpt_full_review_reason" ]] \
   && [[ -z "${review_gpt_full_review_reason//[[:space:]]/}" ]]; then
@@ -169,8 +210,11 @@ review_gpt_add_rendered_evidence() {
       "$(basename "$evidence_path")"
     evidence_package_path="$evidence_package_dir/$evidence_package_name"
     cp -- "$evidence_path" "$evidence_package_path"
-    printf '%s\n' "$evidence_package_path" >> "$evidence_manifest"
-    COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS="$COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS"$'\n'"$evidence_package_path"
+    printf '%s/%s/%s\n' \
+      "$review_gpt_pr_context_archive_dir" \
+      "$(basename "$evidence_package_dir")" \
+      "$evidence_package_name" \
+      >> "$evidence_manifest"
   done <<< "$review_gpt_rendered_evidence_paths"
 }
 
@@ -242,15 +286,22 @@ review_gpt_add_supplemental_evidence() {
       "$(basename "$evidence_path")"
     evidence_package_path="$evidence_package_dir/$evidence_package_name"
     cp -- "$evidence_path" "$evidence_package_path"
-    printf '%s\t%s\n' "$evidence_path" "$evidence_package_path" >> "$evidence_manifest"
-    COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS="$COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS"$'\n'"$evidence_package_path"
+    printf '%s\t%s/%s/%s\n' \
+      "$evidence_path" \
+      "$review_gpt_pr_context_archive_dir" \
+      "$(basename "$evidence_package_dir")" \
+      "$evidence_package_name" \
+      >> "$evidence_manifest"
   done <<< "$review_gpt_supplemental_evidence_paths"
 }
 
 cleanup_review_gpt_pr_context() {
-  if [[ "$review_gpt_cleanup_pr_context" == "1" ]]; then
-    rm -rf "$review_gpt_pr_context_dir"
+  local exit_status="$?"
+  trap - EXIT
+  if [[ -n "$review_gpt_invocation_dir" ]]; then
+    rm -rf -- "$review_gpt_invocation_dir" || :
   fi
+  exit "$exit_status"
 }
 trap cleanup_review_gpt_pr_context EXIT
 
@@ -288,9 +339,23 @@ if [[ -n "$review_gpt_pr_ref" ]]; then
     echo "Error: gh is required to add ReviewGPT PR diff artifacts." >&2
     exit 127
   fi
-  rm -rf "$review_gpt_pr_context_dir"
+  if ! review_gpt_canonical_path_candidates="$(
+    git ls-files --cached --others --exclude-standard -- \
+      "$review_gpt_pr_context_archive_dir" \
+      "$review_gpt_pr_context_archive_dir/**"
+  )"; then
+    echo "Error: could not inspect the canonical ReviewGPT archive namespace." >&2
+    exit 1
+  fi
+  if [[ -n "$review_gpt_canonical_path_candidates" ]]; then
+    echo "Error: repository files must not occupy the canonical review-gpt-pr-context archive namespace." >&2
+    exit 1
+  fi
+  review_gpt_invocation_dir="$(
+    mktemp -d "${TMPDIR:-/tmp}/murph-review-gpt-context.XXXXXXXX"
+  )"
+  review_gpt_pr_context_dir="$review_gpt_invocation_dir/$review_gpt_pr_context_archive_dir"
   mkdir -p "$review_gpt_pr_context_dir"
-  review_gpt_cleanup_pr_context=1
   review_gpt_base_ref="$(
     gh pr view "$review_gpt_pr_ref" --json baseRefName --jq '.baseRefName'
   )"
@@ -442,7 +507,6 @@ if [[ -n "$review_gpt_pr_ref" ]]; then
     review_gpt_pr_touches_health_commons=1
   fi
 
-  COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS="${COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS:-}"$'\n'"$review_gpt_pr_context_dir/pr-body.md"$'\n'"$review_gpt_pr_context_dir/pr.diff"$'\n'"$review_gpt_pr_context_dir/changed-files.txt"
   if [[ "$review_gpt_review_phase" == "preliminary" ]]; then
     review_gpt_require_available_commit "current reviewed head" "$review_gpt_head_oid"
     {
@@ -453,7 +517,7 @@ if [[ -n "$review_gpt_pr_ref" ]]; then
       printf '  "currentReviewedHead": "%s"\n' "$review_gpt_head_oid"
       printf '}\n'
     } > "$review_gpt_pr_context_dir/review-phase.json"
-    COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS="$COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS"$'\n'"$review_gpt_pr_context_dir/review-phase.json"$'\n'"agent-docs/FRONTEND.md"$'\n'"PRODUCT.md"$'\n'"DESIGN.md"$'\n'"agent-docs/prompts/product-experience-review.md"$'\n'"agent-docs/prompts/prompt-review.md"$'\n'"agent-docs/prompts/frontend-review.md"$'\n'"agent-docs/prompts/coverage-write.md"
+    COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS="${COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS:-}"$'\n'"agent-docs/FRONTEND.md"$'\n'"PRODUCT.md"$'\n'"DESIGN.md"$'\n'"agent-docs/prompts/product-experience-review.md"$'\n'"agent-docs/prompts/prompt-review.md"$'\n'"agent-docs/prompts/frontend-review.md"$'\n'"agent-docs/prompts/coverage-write.md"
   else
     review_gpt_require_available_commit "first-reviewed head" "$review_gpt_first_reviewed_head"
     review_gpt_require_available_commit "context anchor head" "$review_gpt_context_anchor_head"
@@ -528,44 +592,31 @@ if [[ -n "$review_gpt_pr_ref" ]]; then
         "$review_gpt_context_anchor_is_ancestor_of_previous_json"
       printf '}\n'
     } > "$review_gpt_pr_context_dir/review-round.json"
-    COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS="$COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS"$'\n'"$review_gpt_pr_context_dir/review-round.json"$'\n'"$review_gpt_pr_context_dir/since-previous-reviewed-head.diff"
-    if [[ "$review_gpt_round_number" == "1" ]]; then
-      COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS="$COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS"$'\n'"$review_gpt_pr_context_dir/since-first-reviewed-head.diff"
-    elif [[ "$review_gpt_context_mode" == "full_snapshot" ]]; then
-      COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS="$COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS"$'\n'"$review_gpt_pr_context_dir/since-first-reviewed-head.diff"$'\n'"$review_gpt_pr_context_dir/changed-since-previous-reviewed-head.txt"$'\n'"$review_gpt_pr_context_dir/full-review-reason.txt"
-    else
-      COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS="$COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS"$'\n'"$review_gpt_pr_context_dir/changed-since-previous-reviewed-head.txt"
-    fi
   fi
   if [[ "$review_gpt_review_phase" == "preliminary" ]] \
     || [[ -n "$review_gpt_rendered_evidence_paths" ]]; then
-    COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS="$COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS"$'\n'"$review_gpt_pr_context_dir/rendered-evidence.txt"
     review_gpt_add_rendered_evidence
   fi
   if [[ -n "$review_gpt_supplemental_evidence_paths" ]]; then
-    COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS="$COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS"$'\n'"$review_gpt_pr_context_dir/supplemental-evidence.txt"
     review_gpt_add_supplemental_evidence
   fi
 
   if [[ "$review_gpt_context_mode" == "same_thread_delta" ]]; then
-    review_gpt_correction_paths="$review_gpt_pr_context_dir/pr-body.md"$'\n'"$review_gpt_pr_context_dir/review-round.json"$'\n'"$review_gpt_pr_context_dir/since-previous-reviewed-head.diff"$'\n'"$review_gpt_pr_context_dir/changed-since-previous-reviewed-head.txt"
+    review_gpt_correction_paths=""
     while IFS= read -r review_gpt_correction_path; do
       [[ -z "$review_gpt_correction_path" ]] && continue
       if [[ -f "$review_gpt_correction_path" ]] && [[ ! -L "$review_gpt_correction_path" ]]; then
         review_gpt_correction_paths="$review_gpt_correction_paths"$'\n'"$review_gpt_correction_path"
       fi
     done < "$review_gpt_pr_context_dir/changed-since-previous-reviewed-head.txt"
-    if [[ -f "$review_gpt_pr_context_dir/rendered-evidence.txt" ]]; then
-      review_gpt_correction_paths="$review_gpt_correction_paths"$'\n'"$review_gpt_pr_context_dir/rendered-evidence.txt"
-      while IFS= read -r review_gpt_correction_evidence_path; do
-        [[ -z "$review_gpt_correction_evidence_path" ]] && continue
-        review_gpt_correction_paths="$review_gpt_correction_paths"$'\n'"$review_gpt_correction_evidence_path"
-      done < "$review_gpt_pr_context_dir/rendered-evidence.txt"
-    fi
     COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS="$review_gpt_correction_paths"
+    rm -f -- \
+      "$review_gpt_pr_context_dir/pr.diff" \
+      "$review_gpt_pr_context_dir/changed-files.txt" \
+      "$review_gpt_pr_context_dir/since-first-reviewed-head.diff"
   fi
   if [[ "$review_gpt_context_mode" != "same_thread_delta" ]]; then
-    COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS="$COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS"$'\n'"$(cat "$review_gpt_pr_context_dir/changed-files.txt")"
+    COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS="${COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS:-}"$'\n'"$(cat "$review_gpt_pr_context_dir/changed-files.txt")"
   fi
   export COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS
 fi
@@ -610,8 +661,51 @@ if [[ "$review_gpt_context_mode" != "same_thread_delta" ]]; then
     "docs"
 fi
 package_audit_context_bin="$(cobuild_repo_tool_bin cobuild-package-audit-context)"
-if [[ "$review_gpt_cleanup_pr_context" == "1" ]]; then
-  "$package_audit_context_bin" "$@"
-else
+if [[ -z "$review_gpt_pr_ref" ]]; then
   exec "$package_audit_context_bin" "$@"
 fi
+
+if [[ "$review_gpt_has_explicit_output_dir" != "1" ]]; then
+  review_gpt_invocation_id="${review_gpt_invocation_dir##*.}"
+  review_gpt_package_prefix="$review_gpt_package_prefix-$review_gpt_invocation_id"
+  review_gpt_package_args+=(--name "$review_gpt_package_prefix")
+fi
+
+review_gpt_package_stdout="$review_gpt_invocation_dir/package-output.txt"
+if ! "$package_audit_context_bin" "${review_gpt_package_args[@]}" \
+  > "$review_gpt_package_stdout"; then
+  cat "$review_gpt_package_stdout"
+  exit 1
+fi
+review_gpt_zip_path="$(
+  sed -nE 's/^ZIP: (.*) \([^)]*\)$/\1/p' "$review_gpt_package_stdout" | tail -n 1
+)"
+if [[ -z "$review_gpt_zip_path" ]]; then
+  echo "Error: could not identify the invocation-owned ReviewGPT audit ZIP." >&2
+  exit 1
+fi
+if [[ ! -f "$review_gpt_zip_path" ]] || [[ -L "$review_gpt_zip_path" ]]; then
+  echo "Error: the ReviewGPT audit ZIP is missing or unsafe." >&2
+  exit 1
+fi
+review_gpt_zip_path="$(realpath -q "$review_gpt_zip_path")"
+
+review_gpt_archive_context_entries=()
+while IFS= read -r review_gpt_archive_context_entry; do
+  review_gpt_archive_context_entries+=("${review_gpt_archive_context_entry#./}")
+done < <(
+  cd "$review_gpt_invocation_dir"
+  find "$review_gpt_pr_context_archive_dir" -type f -print | LC_ALL=C sort
+)
+if [[ "${#review_gpt_archive_context_entries[@]}" == "0" ]]; then
+  echo "Error: the invocation-owned ReviewGPT PR context is empty." >&2
+  exit 1
+fi
+(
+  cd "$review_gpt_invocation_dir"
+  zip -q "$review_gpt_zip_path" "${review_gpt_archive_context_entries[@]}"
+)
+
+sed -E '/^ZIP: .* \([^)]*\)$/d' "$review_gpt_package_stdout"
+review_gpt_zip_bytes="$(wc -c < "$review_gpt_zip_path" | tr -d '[:space:]')"
+printf 'ZIP: %s (%s bytes)\n' "$review_gpt_zip_path" "$review_gpt_zip_bytes"

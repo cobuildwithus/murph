@@ -28,12 +28,14 @@ import {
   classifyJunctionSummaryNormalizationEvidence,
   identifyJunctionBloodPressureProviderRecords,
   importDeviceProviderSnapshot,
+  JunctionSparseCalendarRepairNormalizationError,
   normalizeJunctionSnapshot,
   prepareDeviceProviderSnapshotImport,
   resolveJunctionOrigin,
   type DeviceBatchImportPayload,
   type WearableRawIngestReceipt,
 } from "../src/index.ts";
+import { assertJunctionTimeseriesOutputBounds } from "../src/device-providers/junction-timeseries-fidelity.ts";
 
 type StoredJsonlRecord = Awaited<ReturnType<typeof coreRuntime.readJsonlRecords>>[number];
 
@@ -165,6 +167,16 @@ function storedObservationValue(record: StoredJsonlRecord | undefined): unknown 
   return record.value;
 }
 
+function storedSourceInstanceId(record: StoredJsonlRecord | undefined): string | undefined {
+  const dataOrigin = record?.dataOrigin;
+  if (!dataOrigin || typeof dataOrigin !== "object" || Array.isArray(dataOrigin)) {
+    return undefined;
+  }
+  return typeof dataOrigin.sourceInstanceId === "string"
+    ? dataOrigin.sourceInstanceId
+    : undefined;
+}
+
 function junctionFallbackSummaryResourceId(
   input: {
     observedAtRaw: string;
@@ -233,10 +245,47 @@ function findJunctionCompactTimeseriesArtifacts(
     .filter((artifact) => artifact.role.startsWith(`junction-timeseries-daily-${resourceSlug}:`));
 }
 
+function findJunctionTimeseriesFeatureArtifacts(
+  payload: DeviceBatchImportPayload,
+  resourceSlug: string,
+) {
+  return (payload.evidenceParts ?? [])
+    .filter((artifact) => artifact.role.startsWith(`junction-timeseries-features-${resourceSlug}:`));
+}
+
+function findJunctionIntervalReadingArtifacts(
+  payload: DeviceBatchImportPayload,
+  resourceSlug: string,
+) {
+  return (payload.evidenceParts ?? [])
+    .filter((artifact) => artifact.role.startsWith(`junction-timeseries-reading-${resourceSlug}:`));
+}
+
+interface JunctionTestMeasurement {
+  metric?: unknown;
+  qualifiers?: unknown;
+  unit?: unknown;
+  value?: unknown;
+}
+
+function readJunctionEventMeasurements(
+  event: { fields?: Record<string, unknown> } | undefined,
+): JunctionTestMeasurement[] {
+  const measurements = event?.fields?.measurements;
+  if (!Array.isArray(measurements)) return [];
+  return measurements.flatMap((measurement) =>
+    measurement && typeof measurement === "object" && !Array.isArray(measurement)
+      ? [measurement as JunctionTestMeasurement]
+      : []
+  );
+}
+
 function assertNoFullJunctionTimeseriesArtifacts(payload: DeviceBatchImportPayload): void {
   assert.equal(
     (payload.evidenceParts ?? []).some((artifact) =>
-      /^junction-timeseries-(?!daily-|feature-|reading-(?:blood-pressure|note|weight):)/u.test(artifact.role)
+      /^junction-timeseries-(?!daily-|features?-|reading-(?:blood-pressure|note|weight|caffeine|water|mindfulness-minutes):)/u.test(
+        artifact.role,
+      )
     ),
     false,
   );
@@ -286,6 +335,17 @@ function makeJunctionDefaultTimeseriesSample(resource: string): Record<string, u
     };
   }
 
+  if (resource === "caffeine" || resource === "water" || resource === "mindfulness_minutes") {
+    const unit = resource === "caffeine" ? "g" : resource === "water" ? "mL" : "min";
+    return {
+      sourceProviderSlug: "oura",
+      start: "2026-04-22T12:00:00Z",
+      end: "2026-04-22T12:15:00Z",
+      unit,
+      value: resource === "caffeine" ? 0.095 : 1,
+    };
+  }
+
   if (resource === "steps") {
     return { ...base, unit: "count", value: 1_000 };
   }
@@ -310,7 +370,6 @@ function makeJunctionDefaultTimeseriesSample(resource: string): Record<string, u
     body_temperature: 36.6,
     basal_body_temperature: 36.6,
     body_temperature_delta: -0.4,
-    caffeine: 0.095,
     glucose: 5.5,
   };
 
@@ -943,8 +1002,10 @@ test("Junction daily aggregates repair legacy calendar-date resource ids through
                 garmin: [{
                   data: [
                     {
+                      id: "stress-corrected-1",
                       calendar_date: "2026-06-25",
                       timestamp: "2026-06-24T23:30:00-04:00",
+                      updatedAt: "2026-06-25T12:00:00.000Z",
                       score: 44,
                     },
                   ],
@@ -1153,13 +1214,17 @@ test("Junction daily aggregates reserve proven legacy ids when adjacent primary 
         }],
       });
       const correctedSample = {
+        id: "stress-corrected-1",
         timestamp: "2026-06-25T00:30:00+02:00",
         timezone_offset: -14_400,
+        updatedAt: "2026-06-25T12:30:00.000Z",
         score: 44,
       };
       const adjacentSample = {
+        id: "stress-adjacent-1",
         timestamp: "2026-06-24T00:30:00+02:00",
         timezone_offset: -14_400,
+        updatedAt: "2026-06-25T12:30:00.000Z",
         score: 44,
       };
       const replayImport = await importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
@@ -1245,6 +1310,143 @@ test("Junction normalizer keeps floating stress timestamps on their raw day desp
   assert.equal(rawDayEvent?.dataOrigin?.timeZoneOffsetMinutes, -420);
   assert.equal(rawDayEvent?.dataOrigin?.timestampSemantics, "floating");
   assert.equal(stressEvents.some((event) => event.dayKey === "2026-04-22"), false);
+});
+
+test("Junction date-only dense readings remain daily facts without fabricated clock time", () => {
+  const payload = normalizeJunctionSnapshot({
+    importedAt: "2026-04-24T12:00:00.000Z",
+    timeseries: {
+      glucose: {
+        groups: {
+          dexcom: [{
+            data: [{
+              date: "2026-04-23",
+              recordedAt: "2026-04-23T12:00:00Z",
+              unit: "mmol/L",
+              value: 5.5,
+            }],
+            source: { provider: "dexcom", type: "cgm" },
+          }],
+        },
+      },
+      blood_oxygen: {
+        groups: {
+          garmin: [{
+            data: [{ date: "2026-04-23", unit: "percent", value: 88 }],
+            source: { provider: "garmin", type: "watch" },
+          }],
+        },
+      },
+      stress_level: {
+        groups: {
+          garmin: [{
+            data: [
+              { timestamp: "2026-04-23T06:30:00.000", score: 44 },
+              { date: "2026-04-23", value: 56 },
+            ],
+            source: { provider: "garmin", type: "watch" },
+          }],
+        },
+      },
+    },
+  });
+  const dailyValue = (metric: string) => payload.events?.find((event) =>
+    event.kind === "observation" && event.fields?.metric === metric
+  )?.fields?.value;
+  const featureArtifact = (resourceSlug: string) =>
+    findJunctionTimeseriesFeatureArtifacts(payload, resourceSlug)[0]?.content as {
+      coverage?: { estimatedCoverageMinutes?: number; observedSpanMinutes?: number };
+      features?: Record<string, number>;
+      firstSampleAt?: string;
+      hourlyBuckets?: Array<unknown[] | null>;
+      lastSampleAt?: string;
+      sampleCount?: number;
+    };
+  const featureMetrics = (resource: string) => {
+    const event = payload.events?.find((candidate) =>
+      candidate.kind === "measurement"
+      && candidate.externalRef?.facet === "features"
+      && candidate.title === `Junction ${resource.replaceAll("_", " ")} temporal features`
+    );
+    return readJunctionEventMeasurements(event).map((measurement) => measurement.metric).sort();
+  };
+
+  assert.equal(dailyValue("glucose"), 99.1001);
+  assert.equal(dailyValue("spo2"), 88);
+  assert.equal(dailyValue("stress-level"), 50);
+
+  const glucose = featureArtifact("glucose");
+  assert.equal(glucose.sampleCount, 0);
+  assert.deepEqual(glucose.features, {});
+  assert.equal(glucose.coverage?.estimatedCoverageMinutes, 0);
+  assert.equal(glucose.coverage?.observedSpanMinutes, 0);
+  assert.equal(glucose.firstSampleAt, undefined);
+  assert.equal(glucose.lastSampleAt, undefined);
+  assert.equal(glucose.hourlyBuckets?.length, 24);
+  assert.equal(glucose.hourlyBuckets?.every((bucket) => bucket === null), true);
+  assert.deepEqual(featureMetrics("glucose"), [
+    "glucose-estimated-coverage-minutes",
+    "glucose-observed-span-minutes",
+  ]);
+
+  const bloodOxygen = featureArtifact("blood-oxygen");
+  assert.equal(bloodOxygen.sampleCount, 0);
+  assert.deepEqual(bloodOxygen.features, {});
+  assert.equal(bloodOxygen.firstSampleAt, undefined);
+  assert.equal(bloodOxygen.lastSampleAt, undefined);
+  assert.equal(bloodOxygen.hourlyBuckets?.every((bucket) => bucket === null), true);
+  assert.deepEqual(featureMetrics("blood_oxygen"), [
+    "spo2-estimated-coverage-minutes",
+    "spo2-observed-span-minutes",
+  ]);
+
+  const stress = featureArtifact("stress-level");
+  assert.equal(stress.sampleCount, 1);
+  assert.equal(stress.features?.peakLocalHour, 6);
+  assert.equal(stress.firstSampleAt, "2026-04-23T06:30:00.000Z");
+  assert.equal(stress.lastSampleAt, "2026-04-23T06:30:00.000Z");
+  assert.equal(stress.hourlyBuckets?.[0], null);
+  assert.equal(stress.hourlyBuckets?.[6]?.[0], 1);
+  assert.equal(featureMetrics("stress_level").includes("stress-peak-local-hour"), true);
+});
+
+test("Junction date-only stress publishes zero temporal coverage", () => {
+  const payload = normalizeJunctionSnapshot({
+    importedAt: "2026-04-24T12:00:00.000Z",
+    timeseries: {
+      stress_level: {
+        groups: {
+          garmin: [{
+            data: [{ date: "2026-04-23", value: 56 }],
+            source: { provider: "garmin", type: "watch" },
+          }],
+        },
+      },
+    },
+  });
+  const daily = payload.events?.find((event) =>
+    event.kind === "observation" && event.fields?.metric === "stress-level"
+  );
+  const feature = findJunctionTimeseriesFeatureArtifacts(payload, "stress-level")[0]?.content as {
+    coverage?: { estimatedCoverageMinutes?: number; observedSpanMinutes?: number };
+    features?: Record<string, number>;
+    hourlyBuckets?: Array<unknown[] | null>;
+    sampleCount?: number;
+  };
+  const featureEvent = payload.events?.find((event) =>
+    event.kind === "measurement" && event.externalRef?.facet === "features"
+  );
+
+  assert.equal(daily?.fields?.value, 56);
+  assert.equal(feature.sampleCount, 0);
+  assert.deepEqual(feature.features, {});
+  assert.equal(feature.coverage?.estimatedCoverageMinutes, 0);
+  assert.equal(feature.coverage?.observedSpanMinutes, 0);
+  assert.equal(feature.hourlyBuckets?.every((bucket) => bucket === null), true);
+  assert.deepEqual(
+    readJunctionEventMeasurements(featureEvent).map((measurement) => measurement.metric).sort(),
+    ["stress-estimated-coverage-minutes", "stress-observed-span-minutes"],
+  );
 });
 
 test("Junction WHOOP workout summaries use provider offset local day across UTC midnight", () => {
@@ -3870,8 +4072,8 @@ test("Junction normalizer compacts tier-1 timeseries resources into bounded dail
 });
 
 test("Junction normalizer compacts dense CGM glucose timeseries into daily mean/min/max facts", () => {
-  // A full CGM day: 288 five-minute samples must reduce to one compact
-  // daily-aggregate artifact plus three daily observations, never raw dumps.
+  // A full CGM day: 288 five-minute samples must reduce to one compact daily
+  // aggregate, one bounded feature envelope, and derived facts, never raw dumps.
   const samples = Array.from({ length: 288 }, (_, index) => ({
     timestamp: new Date(Date.UTC(2026, 3, 22, 0, 0, 0) + index * 5 * 60_000).toISOString(),
     unit: "mmol/L",
@@ -3897,17 +4099,22 @@ test("Junction normalizer compacts dense CGM glucose timeseries into daily mean/
     },
   });
 
-  const glucoseEvents = payload.events ?? [];
+  const glucoseEvents = payload.events?.filter((event) =>
+    ["glucose", "lowest-glucose", "highest-glucose"].includes(String(event.fields?.metric))
+  ) ?? [];
   const mean = glucoseEvents.find((event) => event.fields?.metric === "glucose");
   const min = glucoseEvents.find((event) => event.fields?.metric === "lowest-glucose");
   const max = glucoseEvents.find((event) => event.fields?.metric === "highest-glucose");
   const artifacts = findJunctionCompactTimeseriesArtifacts(payload, "glucose");
+  const featureArtifacts = findJunctionTimeseriesFeatureArtifacts(payload, "glucose");
   const artifactContent = artifacts[0]?.content as Record<string, unknown>;
+  const featureContent = featureArtifacts[0]?.content as Record<string, unknown>;
 
   assert.deepEqual(payload.provenance?.timeseriesResources, ["glucose"]);
   assert.equal(payload.samples?.length ?? 0, 0);
   assert.equal(glucoseEvents.length, 3);
   assert.equal(artifacts.length, 1);
+  assert.equal(featureArtifacts.length, 1);
   assertNoFullJunctionTimeseriesArtifacts(payload);
   assertEventRawArtifactRolesExist(payload);
   // Junction normalizes glucose to mmol/L; values convert to mg/dL.
@@ -3921,6 +4128,1630 @@ test("Junction normalizer compacts dense CGM glucose timeseries into daily mean/
   assert.equal(artifactContent.maxValue, 126.1274);
   // Size bound: a whole CGM day stays one sub-kilobyte compact artifact.
   assert.ok(JSON.stringify(artifactContent).length < 1024);
+  assert.equal(featureContent.schema, "junction.timeseries_feature_envelope.v1");
+  assert.equal(featureContent.sampleCount, 288);
+  assert.equal((featureContent.hourlyBuckets as unknown[]).length, 24);
+  assert.ok(JSON.stringify(featureContent).length < 16 * 1024);
+});
+
+test("Junction normalizer preserves official point and interval timeseries shapes without raw samples", () => {
+  const payload = normalizeJunctionSnapshot({
+    importedAt: "2026-04-23T12:00:00.000Z",
+    timeseriesWindowKind: "calendar_day",
+    timeseries: {
+      glucose: {
+        groups: {
+          dexcom: [{
+            data: [{ timestamp: "2026-04-22T05:10:00-04:00", unit: "mmol/L", value: 5.5 }],
+            source: { provider: "dexcom", type: "cgm" },
+          }],
+        },
+      },
+      blood_oxygen: {
+        groups: {
+          garmin: [{
+            data: [{ timestamp: "2026-04-22T06:20:00-04:00", unit: "percent", value: 0.975 }],
+            source: { provider: "garmin", type: "watch" },
+          }],
+        },
+      },
+      stress_level: {
+        groups: {
+          garmin: [{
+            data: [{ timestamp: "2026-04-22T07:30:00-04:00", unit: "score", value: 72 }],
+            source: { provider: "garmin", type: "watch" },
+          }],
+        },
+      },
+      caffeine: {
+        groups: {
+          apple_health_kit: [{
+            data: [{
+              id: "caffeine-record-1",
+              start: "2026-04-22T08:15:30-04:00",
+              end: "2026-04-22T08:18:00-04:00",
+              unit: "g",
+              value: 0.095,
+            }],
+            source: { provider: "apple_health_kit", type: "phone" },
+          }],
+        },
+      },
+      water: {
+        groups: {
+          apple_health_kit: [{
+            data: [{
+              id: "water-record-1",
+              start: "2026-04-22T09:05:00-04:00",
+              end: "2026-04-22T09:09:30-04:00",
+              unit: "mL",
+              value: 250,
+            }],
+            source: { provider: "apple_health_kit", type: "phone" },
+          }],
+        },
+      },
+      mindfulness_minutes: {
+        groups: {
+          apple_health_kit: [{
+            data: [{
+              id: "mindfulness-record-1",
+              start: "2026-04-22T21:00:00-04:00",
+              end: "2026-04-22T21:10:00-04:00",
+              unit: "min",
+              value: 10,
+            }],
+            source: { provider: "apple_health_kit", type: "phone" },
+          }],
+        },
+      },
+    },
+  });
+
+  const dailyValue = (metric: string): unknown =>
+    payload.events?.find((event) =>
+      event.kind === "observation"
+      && event.fields?.observationGrain === "summary"
+      && event.fields.metric === metric
+    )?.fields?.value;
+  const intervalMeasurement = (metric: string) =>
+    payload.events?.find((event) =>
+      event.kind === "measurement"
+      && readJunctionEventMeasurements(event).some((measurement) => measurement.metric === metric)
+    );
+
+  assert.equal(payload.samples?.length ?? 0, 0);
+  assert.equal(payload.provenance?.timeseriesWindowKind, "calendar_day");
+  assert.equal(dailyValue("glucose"), 99.1001);
+  assert.equal(dailyValue("spo2"), 97.5);
+  assert.equal(dailyValue("stress-level"), 72);
+  assert.equal(dailyValue("caffeine"), 95);
+  assert.equal(dailyValue("water"), 250);
+  assert.equal(dailyValue("mindfulness-minutes"), 10);
+  for (const resourceSlug of ["glucose", "blood-oxygen", "stress-level"]) {
+    const [artifact] = findJunctionTimeseriesFeatureArtifacts(payload, resourceSlug);
+    const content = artifact?.content as Record<string, unknown> | undefined;
+    assert.equal(content?.schema, "junction.timeseries_feature_envelope.v1", resourceSlug);
+    assert.equal(content?.sampleCount, 1, resourceSlug);
+    assert.equal((content?.hourlyBuckets as unknown[] | undefined)?.length, 24, resourceSlug);
+  }
+
+  const expectedIntervals = [
+    {
+      metric: "caffeine",
+      resourceSlug: "caffeine",
+      startAt: "2026-04-22T12:15:30.000Z",
+      endAt: "2026-04-22T12:18:00.000Z",
+      durationSeconds: 150,
+      providerUnit: "g",
+      value: 95,
+      unit: "mg",
+    },
+    {
+      metric: "water",
+      resourceSlug: "water",
+      startAt: "2026-04-22T13:05:00.000Z",
+      endAt: "2026-04-22T13:09:30.000Z",
+      durationSeconds: 270,
+      providerUnit: "mL",
+      value: 250,
+      unit: "ml",
+    },
+    {
+      metric: "mindfulness-minutes",
+      resourceSlug: "mindfulness-minutes",
+      startAt: "2026-04-23T01:00:00.000Z",
+      endAt: "2026-04-23T01:10:00.000Z",
+      durationSeconds: 600,
+      providerUnit: "min",
+      value: 10,
+      unit: "minutes",
+    },
+  ] as const;
+
+  for (const expected of expectedIntervals) {
+    const event = intervalMeasurement(expected.metric);
+    const measurement = readJunctionEventMeasurements(event)
+      .find((entry) => entry.metric === expected.metric);
+    const [artifact] = findJunctionIntervalReadingArtifacts(payload, expected.resourceSlug);
+    const content = artifact?.content as Record<string, unknown> | undefined;
+
+    assert.equal(event?.occurredAt, expected.startAt, expected.metric);
+    assert.equal(event?.dayKey, "2026-04-22", expected.metric);
+    assert.equal(measurement?.value, expected.value, expected.metric);
+    assert.equal(measurement?.unit, expected.unit, expected.metric);
+    assert.deepEqual(measurement?.qualifiers, {
+      "interval-start-at": expected.startAt,
+      "interval-end-at": expected.endAt,
+      "interval-duration-seconds": expected.durationSeconds,
+      "provider-unit": expected.providerUnit,
+    }, expected.metric);
+    assert.equal(content?.schema, "junction.interval_reading.v1", expected.metric);
+    assert.equal(content?.startAt, expected.startAt, expected.metric);
+    assert.equal(content?.endAt, expected.endAt, expected.metric);
+    assert.equal(content?.durationSeconds, expected.durationSeconds, expected.metric);
+    assert.equal(content?.value, expected.value, expected.metric);
+  }
+  assertNoFullJunctionTimeseriesArtifacts(payload);
+  assertEventRawArtifactRolesExist(payload);
+});
+
+test("Junction precise sparse windows retain intervals without publishing partial daily sums", () => {
+  const payload = normalizeJunctionSnapshot({
+    importedAt: "2026-04-22T10:00:00.000Z",
+    timeseriesWindowKind: "precise",
+    windowStart: "2026-04-22T08:00:00.000Z",
+    windowEnd: "2026-04-22T10:00:00.000Z",
+    timeseries: {
+      water: {
+        groups: {
+          apple_health_kit: [{
+            data: [{
+              id: "water-record-precise-1",
+              start: "2026-04-22T09:00:00.000Z",
+              end: "2026-04-22T09:01:00.000Z",
+              unit: "mL",
+              value: 250,
+            }],
+            source: { provider: "apple_health_kit", type: "phone" },
+          }],
+        },
+      },
+    },
+  });
+
+  const waterEvents = (payload.events ?? []).filter((event) =>
+    readJunctionEventMeasurements(event).some((measurement) => measurement.metric === "water")
+  );
+  assert.equal(payload.provenance?.timeseriesWindowKind, "precise");
+  assert.equal(waterEvents.length, 1);
+  assert.equal(waterEvents[0]?.kind, "measurement");
+  assert.equal(
+    payload.events?.some((event) =>
+      event.kind === "observation" && event.fields?.metric === "water"
+    ),
+    false,
+  );
+  assert.equal(findJunctionCompactTimeseriesArtifacts(payload, "water").length, 0);
+  assert.equal(findJunctionIntervalReadingArtifacts(payload, "water").length, 1);
+  assertNoFullJunctionTimeseriesArtifacts(payload);
+});
+
+test("Junction glucose fidelity distinguishes equal daily mean/min/max days with different shape", () => {
+  const normalize = (samples: readonly { timestamp: string; value: number }[]) =>
+    normalizeJunctionSnapshot({
+      importedAt: "2026-04-23T12:00:00.000Z",
+      timeseries: {
+        glucose: {
+          groups: {
+            dexcom: [{
+              data: samples.map((sample) => ({ ...sample, unit: "mmol/L" })),
+              source: { provider: "dexcom", type: "cgm" },
+            }],
+          },
+        },
+      },
+    });
+  const overnightShape = normalize([
+    { timestamp: "2026-04-22T00:00:00Z", value: 3.5 },
+    { timestamp: "2026-04-22T00:05:00Z", value: 7 },
+    { timestamp: "2026-04-22T00:10:00Z", value: 7 },
+    { timestamp: "2026-04-22T00:15:00Z", value: 10.5 },
+  ]);
+  const daytimeShape = normalize([
+    { timestamp: "2026-04-22T12:00:00Z", value: 3.5 },
+    { timestamp: "2026-04-22T12:05:00Z", value: 10.5 },
+    { timestamp: "2026-04-22T12:10:00Z", value: 3.5 },
+    { timestamp: "2026-04-22T12:15:00Z", value: 10.5 },
+  ]);
+  const dailyFacts = (payload: DeviceBatchImportPayload) =>
+    (payload.events ?? [])
+      .filter((event) =>
+        event.kind === "observation"
+        && event.fields?.observationGrain === "summary"
+        && ["glucose", "lowest-glucose", "highest-glucose"].includes(String(event.fields.metric))
+      )
+      .map((event) => ({
+        metric: event.fields?.metric,
+        value: event.fields?.value,
+        resourceId: event.externalRef?.resourceId,
+      }))
+      .sort((left, right) => String(left.metric).localeCompare(String(right.metric)));
+  const featureContent = (payload: DeviceBatchImportPayload) =>
+    findJunctionTimeseriesFeatureArtifacts(payload, "glucose")[0]?.content as {
+      features?: Record<string, number>;
+      hourlyBuckets?: unknown[];
+    };
+  const overnight = featureContent(overnightShape);
+  const daytime = featureContent(daytimeShape);
+
+  assert.deepEqual(dailyFacts(overnightShape), dailyFacts(daytimeShape));
+  assert.equal(overnight.features?.observedInRangePercent, 50);
+  assert.equal(daytime.features?.observedInRangePercent, 0);
+  assert.equal(overnight.features?.estimatedBelowRangeMinutes, 5);
+  assert.equal(overnight.features?.estimatedAboveRangeMinutes, 0);
+  assert.equal(daytime.features?.estimatedBelowRangeMinutes, 10);
+  assert.equal(daytime.features?.estimatedAboveRangeMinutes, 5);
+  assert.equal(overnight.features?.estimatedTimeInRangePercent, 66.67);
+  assert.equal(daytime.features?.estimatedTimeInRangePercent, 0);
+  assert.notEqual(
+    overnight.features?.coefficientOfVariationPercent,
+    daytime.features?.coefficientOfVariationPercent,
+  );
+  assert.notEqual(
+    overnight.features?.observedMaxRiseRate,
+    daytime.features?.observedMaxRiseRate,
+  );
+  assert.equal(overnight.features?.ratePairCount, 3);
+  assert.equal(daytime.features?.ratePairCount, 3);
+  assert.ok((daytime.features?.observedMaxFallRate ?? 0) > 0);
+  assert.equal(overnight.features?.excursionCount, 2);
+  assert.equal(daytime.features?.excursionCount, 4);
+  assert.equal(overnight.features?.overnightSampleCount, 4);
+  assert.equal(daytime.features?.overnightSampleCount, 0);
+  assert.notDeepEqual(overnight.hourlyBuckets, daytime.hourlyBuckets);
+  const featureEvent = overnightShape.events?.find((event) =>
+    event.kind === "measurement" && event.externalRef?.facet === "features"
+  );
+  const queryableMetric = readJunctionEventMeasurements(featureEvent).find((measurement) =>
+    measurement.metric === "glucose-estimated-time-in-range-percent"
+  );
+  const queryableBelowRange = readJunctionEventMeasurements(featureEvent).find((measurement) =>
+    measurement.metric === "glucose-estimated-time-below-range-minutes"
+  );
+  const queryableAboveRange = readJunctionEventMeasurements(featureEvent).find((measurement) =>
+    measurement.metric === "glucose-estimated-time-above-range-minutes"
+  );
+  assert.equal(queryableMetric?.value, 66.67);
+  assert.equal(queryableBelowRange?.value, 5);
+  assert.equal(queryableAboveRange?.value, 0);
+  assert.equal(
+    (queryableMetric?.qualifiers as Record<string, unknown>)?.["feature-policy-version"],
+    "junction.glucose_feature_envelope.v1",
+  );
+});
+
+test("Junction blood oxygen fidelity separates an isolated low artifact from repeated lows", () => {
+  const normalize = (samples: readonly { timestamp: string; value: number }[]) =>
+    normalizeJunctionSnapshot({
+      importedAt: "2026-04-23T12:00:00.000Z",
+      timeseries: {
+        blood_oxygen: {
+          groups: {
+            garmin: [{
+              data: samples.map((sample) => ({ ...sample, unit: "percent" })),
+              source: { provider: "garmin", type: "watch" },
+            }],
+          },
+        },
+      },
+    });
+  const isolated = normalize([
+    { timestamp: "2026-04-22T01:00:00Z", value: 88 },
+    { timestamp: "2026-04-22T01:05:00Z", value: 97 },
+  ]);
+  const repeated = normalize([
+    { timestamp: "2026-04-22T01:00:00Z", value: 88 },
+    { timestamp: "2026-04-22T01:05:00Z", value: 87 },
+    { timestamp: "2026-04-22T01:10:00Z", value: 91 },
+    { timestamp: "2026-04-22T01:15:00Z", value: 97 },
+    { timestamp: "2026-04-22T03:00:00Z", value: 89 },
+    { timestamp: "2026-04-22T03:05:00Z", value: 88 },
+  ]);
+  const feature = (payload: DeviceBatchImportPayload) =>
+    findJunctionTimeseriesFeatureArtifacts(payload, "blood-oxygen")[0]?.content as {
+      episodes?: { totalCount?: number };
+      features?: Record<string, number>;
+    };
+
+  assert.equal(feature(isolated).features?.below90ReadingCount, 1);
+  assert.equal(feature(isolated).features?.below92ReadingCount, 1);
+  assert.equal(feature(isolated).features?.below90EstimatedMinutes, 0);
+  assert.equal(feature(isolated).features?.below92EstimatedMinutes, 0);
+  assert.equal(feature(repeated).features?.below90ReadingCount, 4);
+  assert.equal(feature(repeated).features?.below92ReadingCount, 5);
+  assert.equal(feature(repeated).features?.below90EpisodeCount, 2);
+  assert.equal(feature(repeated).features?.below92EpisodeCount, 2);
+  assert.equal(feature(repeated).features?.below90EstimatedMinutes, 10);
+  assert.equal(feature(repeated).features?.below92EstimatedMinutes, 15);
+  assert.equal(feature(repeated).features?.longestBelow90EstimatedMinutes, 5);
+  assert.equal(feature(repeated).features?.longestBelow92EstimatedMinutes, 10);
+  assert.equal(feature(repeated).episodes?.totalCount, 2);
+});
+
+test("Junction dense feature buckets use the vault timezone for UTC timestamps", () => {
+  const payload = normalizeJunctionSnapshot({
+    importedAt: "2026-04-23T12:00:00.000Z",
+    timeseries: {
+      glucose: {
+        groups: {
+          dexcom: [{
+            data: [{ timestamp: "2026-04-22T00:05:00Z", unit: "mmol/L", value: 5.5 }],
+            source: { provider: "dexcom", type: "cgm" },
+          }],
+        },
+      },
+    },
+  }, { defaultTimeZone: "America/New_York" });
+  const artifact = findJunctionTimeseriesFeatureArtifacts(payload, "glucose")[0]?.content as {
+    dayKey?: string;
+    hourlyBuckets?: Array<unknown[] | null>;
+  };
+
+  assert.equal(artifact.dayKey, "2026-04-21");
+  assert.equal(artifact.hourlyBuckets?.[20]?.[0], 1);
+  assert.equal(artifact.hourlyBuckets?.[0], null);
+});
+
+test("Junction dense feature envelopes retain coverage-only hourly buckets", () => {
+  const payload = normalizeJunctionSnapshot({
+    importedAt: "2026-04-23T12:00:00.000Z",
+    timeseries: {
+      glucose: {
+        groups: {
+          dexcom: [{
+            data: [
+              { timestamp: "2026-04-22T00:59:00Z", unit: "mmol/L", value: 5.5 },
+              { timestamp: "2026-04-22T02:00:00Z", unit: "mmol/L", value: 6 },
+            ],
+            source: { provider: "dexcom", type: "cgm" },
+          }],
+        },
+      },
+    },
+  });
+  const artifact = findJunctionTimeseriesFeatureArtifacts(payload, "glucose")[0]?.content as {
+    hourlyBuckets?: Array<Array<number | null> | null>;
+  };
+
+  assert.deepEqual(artifact.hourlyBuckets?.[1]?.slice(0, 5), [0, null, null, null, 14]);
+});
+
+test("Junction stress fidelity preserves episode, recovery, and time-of-day differences", () => {
+  const normalize = (samples: readonly { timestamp: string; value: number }[]) =>
+    normalizeJunctionSnapshot({
+      importedAt: "2026-04-23T12:00:00.000Z",
+      timeseries: {
+        stress_level: {
+          groups: {
+            garmin: [{
+              data: samples.map((sample) => ({ ...sample, unit: "score" })),
+              source: { provider: "garmin", type: "watch" },
+            }],
+          },
+        },
+      },
+    });
+  const morning = normalize([
+    { timestamp: "2026-04-22T08:00:00Z", value: 70 },
+    { timestamp: "2026-04-22T08:10:00Z", value: 75 },
+    { timestamp: "2026-04-22T08:20:00Z", value: 35 },
+  ]);
+  const evening = normalize([
+    { timestamp: "2026-04-22T18:00:00Z", value: 70 },
+    { timestamp: "2026-04-22T18:10:00Z", value: 75 },
+    { timestamp: "2026-04-22T18:20:00Z", value: 35 },
+    { timestamp: "2026-04-22T21:00:00Z", value: 80 },
+    { timestamp: "2026-04-22T21:05:00Z", value: 85 },
+    { timestamp: "2026-04-22T21:15:00Z", value: 30 },
+  ]);
+  const feature = (payload: DeviceBatchImportPayload) =>
+    findJunctionTimeseriesFeatureArtifacts(payload, "stress-level")[0]?.content as {
+      features?: Record<string, number>;
+      hourlyBuckets?: unknown[];
+    };
+
+  assert.equal(feature(morning).features?.elevatedEpisodeCount, 1);
+  assert.equal(feature(morning).features?.peakLocalHour, 8);
+  assert.equal(feature(morning).features?.medianObservedRecoveryLatencyMinutes, 10);
+  assert.equal(feature(evening).features?.elevatedEpisodeCount, 2);
+  assert.equal(feature(evening).features?.peakLocalHour, 21);
+  assert.equal(feature(evening).features?.medianObservedRecoveryLatencyMinutes, 10);
+  assert.ok((feature(evening).features?.eveningAverage ?? 0) > 0);
+  assert.notDeepEqual(feature(morning).hourlyBuckets, feature(evening).hourlyBuckets);
+});
+
+test("Junction timeseries fidelity deduplicates exact provider records before aggregation", () => {
+  const glucose = { timestamp: "2026-04-22T08:00:00Z", unit: "mmol/L", value: 5.5 };
+  const water = {
+    id: "water-record-1",
+    start: "2026-04-22T09:00:00Z",
+    end: "2026-04-22T09:01:00Z",
+    unit: "mL",
+    value: 250,
+  };
+  const payload = normalizeJunctionSnapshot({
+    importedAt: "2026-04-23T12:00:00.000Z",
+    timeseries: {
+      glucose: {
+        groups: {
+          dexcom: [{
+            data: [glucose, { ...glucose }],
+            source: { provider: "dexcom", type: "cgm" },
+          }],
+        },
+      },
+      water: {
+        groups: {
+          apple_health_kit: [{
+            data: [water, { ...water }],
+            source: { provider: "apple_health_kit", type: "phone" },
+          }],
+        },
+      },
+    },
+  });
+  const glucoseDaily = findJunctionCompactTimeseriesArtifacts(payload, "glucose")[0]?.content as
+    Record<string, unknown>;
+  const glucoseFeature = findJunctionTimeseriesFeatureArtifacts(payload, "glucose")[0]?.content as
+    Record<string, unknown>;
+  const waterDaily = findJunctionCompactTimeseriesArtifacts(payload, "water")[0]?.content as
+    Record<string, unknown>;
+  const waterEvents = (payload.events ?? []).filter((event) =>
+    event.kind === "measurement"
+    && readJunctionEventMeasurements(event).some((measurement) => measurement.metric === "water")
+  );
+
+  assert.equal(glucoseDaily.sampleCount, 1);
+  assert.equal(glucoseDaily.duplicateSampleCount, 1);
+  assert.equal(glucoseFeature.sampleCount, 1);
+  assert.equal(glucoseFeature.duplicateSampleCount, 1);
+  assert.equal(waterDaily.sampleCount, 1);
+  assert.equal(waterDaily.meanValue, 250);
+  assert.equal(waterDaily.duplicateSampleCount, 1);
+  assert.equal(waterEvents.length, 1);
+  assert.equal(findJunctionIntervalReadingArtifacts(payload, "water").length, 1);
+});
+
+test("Junction sparse interval revisions keep the daily sum aligned with the timed event", () => {
+  const payload = normalizeJunctionSnapshot({
+    importedAt: "2026-04-23T12:00:00.000Z",
+    timeseries: {
+      water: {
+        groups: {
+          garmin: [{
+            data: [
+              {
+                id: "water-record-1",
+                start: "2026-04-22T09:00:00Z",
+                end: "2026-04-22T09:01:00Z",
+                recordedAt: "2026-04-22T10:00:00Z",
+                unit: "mL",
+                value: 250,
+              },
+              {
+                id: "water-record-1",
+                start: "2026-04-22T09:00:00Z",
+                end: "2026-04-22T09:02:00Z",
+                recordedAt: "2026-04-22T11:00:00Z",
+                unit: "mL",
+                value: 300,
+              },
+            ],
+            source: { provider: "garmin", type: "watch" },
+          }],
+        },
+      },
+    },
+  });
+  const daily = payload.events?.find((event) =>
+    event.kind === "observation" && event.fields?.metric === "water"
+  );
+  const timed = payload.events?.find((event) =>
+    event.kind === "measurement"
+    && readJunctionEventMeasurements(event).some((measurement) => measurement.metric === "water")
+  );
+  const dailyArtifact = findJunctionCompactTimeseriesArtifacts(payload, "water")[0]?.content as
+    Record<string, unknown>;
+
+  assert.equal(readJunctionEventMeasurements(timed)[0]?.value, 300);
+  assert.equal(daily?.fields?.value, 300);
+  assert.equal(dailyArtifact.sampleCount, 1);
+  assert.equal(dailyArtifact.meanValue, 300);
+  assert.equal(findJunctionIntervalReadingArtifacts(payload, "water").length, 1);
+  assert.equal(daily?.externalRef?.version, undefined);
+  assert.equal(daily?.externalRefUpdatePolicy, undefined);
+  assert.equal(timed?.externalRef?.version, "2026-04-22T11:00:00.000Z");
+  assert.equal(timed?.externalRefUpdatePolicy, undefined);
+});
+
+test("Junction sparse intervals keep start-day ownership across local midnight", () => {
+  const payload = normalizeJunctionSnapshot({
+    importedAt: "2026-04-24T12:00:00.000Z",
+    timeseries: {
+      mindfulness_minutes: {
+        groups: {
+          apple_health_kit: [{
+            data: [{
+              id: "mindfulness-cross-midnight-1",
+              start: "2026-04-22T23:55:00-04:00",
+              end: "2026-04-23T00:05:00-04:00",
+              unit: "min",
+              value: 10,
+            }],
+            source: { provider: "apple_health_kit", type: "watch" },
+          }],
+        },
+      },
+    },
+  });
+  const daily = payload.events?.find((event) =>
+    event.kind === "observation" && event.fields?.metric === "mindfulness-minutes"
+  );
+  const timed = payload.events?.find((event) =>
+    event.kind === "measurement"
+    && readJunctionEventMeasurements(event).some((measurement) =>
+      measurement.metric === "mindfulness-minutes"
+    )
+  );
+  const dailyArtifact = findJunctionCompactTimeseriesArtifacts(payload, "mindfulness-minutes")[0]
+    ?.content as Record<string, unknown> | undefined;
+
+  assert.equal(readJunctionEventMeasurements(timed)[0]?.value, 10);
+  assert.equal(timed?.dayKey, "2026-04-22");
+  assert.equal(daily?.fields?.value, 10);
+  assert.equal(daily?.dayKey, "2026-04-22");
+  assert.equal(dailyArtifact?.dayKey, "2026-04-22");
+  assert.equal(dailyArtifact?.sampleCount, 1);
+});
+
+test("Junction dense stable-ID revisions select one newest reading per payload", () => {
+  const payload = normalizeJunctionSnapshot({
+    importedAt: "2026-04-23T12:00:00.000Z",
+    timeseries: {
+      glucose: {
+        groups: {
+          dexcom: [{
+            data: [
+              {
+                id: "glucose-record-1",
+                timestamp: "2026-04-22T08:00:00Z",
+                recordedAt: "2026-04-22T09:00:00Z",
+                unit: "mmol/L",
+                value: 5,
+              },
+              {
+                id: "glucose-record-1",
+                timestamp: "2026-04-22T08:00:00Z",
+                recordedAt: "2026-04-22T10:00:00Z",
+                unit: "mmol/L",
+                value: 7,
+              },
+            ],
+            source: { provider: "dexcom", type: "cgm" },
+          }],
+        },
+      },
+    },
+  });
+  const daily = payload.events?.find((event) =>
+    event.kind === "observation" && event.fields?.metric === "glucose"
+  );
+  const dailyArtifact = findJunctionCompactTimeseriesArtifacts(payload, "glucose")[0]?.content as
+    Record<string, unknown>;
+  const featureArtifact = findJunctionTimeseriesFeatureArtifacts(payload, "glucose")[0]?.content as
+    Record<string, unknown>;
+  const featureEvent = payload.events?.find((event) => event.externalRef?.facet === "features");
+
+  assert.equal(daily?.fields?.value, 126.1274);
+  assert.equal(dailyArtifact.sampleCount, 1);
+  assert.equal(dailyArtifact.meanValue, 126.1274);
+  assert.equal(featureArtifact.sampleCount, 1);
+  assert.equal(daily?.externalRef?.version, undefined);
+  assert.equal(daily?.externalRefUpdatePolicy, undefined);
+  assert.equal(featureEvent?.externalRef?.version, undefined);
+  assert.equal(featureEvent?.externalRefUpdatePolicy, undefined);
+});
+
+test("Junction stable-ID fidelity conflicts without an authoritative revision fail closed", () => {
+  const cases = [
+    {
+      resource: "glucose",
+      records: [
+        { id: "shared-reading", timestamp: "2026-04-22T08:00:00Z", unit: "mmol/L", value: 5 },
+        { id: "shared-reading", timestamp: "2026-04-22T08:00:00Z", unit: "mmol/L", value: 7 },
+      ],
+    },
+    {
+      resource: "water",
+      records: [
+        {
+          id: "shared-reading",
+          start: "2026-04-22T08:00:00Z",
+          end: "2026-04-22T08:01:00Z",
+          unit: "mL",
+          value: 250,
+        },
+        {
+          id: "shared-reading",
+          start: "2026-04-22T08:00:00Z",
+          end: "2026-04-22T08:02:00Z",
+          unit: "mL",
+          value: 300,
+        },
+      ],
+    },
+  ] as const;
+
+  for (const testCase of cases) {
+    for (const records of [testCase.records, [...testCase.records].reverse()]) {
+      assert.throws(
+        () => normalizeJunctionSnapshot({
+          importedAt: "2026-04-23T12:00:00.000Z",
+          timeseries: {
+            [testCase.resource]: {
+              groups: {
+                garmin: [{
+                  data: records,
+                  source: { provider: "garmin", type: "watch" },
+                }],
+              },
+            },
+          },
+        }),
+        new RegExp(
+          `Junction ${testCase.resource} stable-id records with different bodies require distinct explicit provider revisions`,
+          "u",
+        ),
+      );
+    }
+  }
+});
+
+test("Junction stable-ID fidelity conflicts at one provider revision fail closed", () => {
+  assert.throws(
+    () => normalizeJunctionSnapshot({
+      importedAt: "2026-04-23T12:00:00.000Z",
+      timeseries: {
+        glucose: {
+          groups: {
+            dexcom: [{
+              data: [
+                {
+                  id: "shared-reading",
+                  timestamp: "2026-04-22T08:00:00Z",
+                  updatedAt: "2026-04-22T10:00:00Z",
+                  unit: "mmol/L",
+                  value: 5,
+                },
+                {
+                  id: "shared-reading",
+                  timestamp: "2026-04-22T08:00:00Z",
+                  updatedAt: "2026-04-22T10:00:00Z",
+                  unit: "mmol/L",
+                  value: 7,
+                },
+              ],
+              source: { provider: "dexcom", type: "cgm" },
+            }],
+          },
+        },
+      },
+    }),
+    /different bodies require distinct explicit provider revisions/u,
+  );
+});
+
+test("Junction sparse stable-ID equality includes provider-day metadata", () => {
+  const representations = [
+    {
+      id: "shared-offset-reading",
+      start: "2026-04-22T23:30:00-04:00",
+      end: "2026-04-22T23:31:00-04:00",
+      timezone_offset: -14_400,
+      unit: "mL",
+      value: 250,
+    },
+    {
+      id: "shared-offset-reading",
+      start: "2026-04-23T03:30:00Z",
+      end: "2026-04-23T03:31:00Z",
+      unit: "mL",
+      value: 250,
+    },
+  ];
+
+  for (const sourceVersion of [undefined, "2026-04-23T04:00:00Z"]) {
+    const versionedRepresentations = representations.map((representation) => ({
+      ...representation,
+      updatedAt: sourceVersion,
+    }));
+    for (const records of [versionedRepresentations, [...versionedRepresentations].reverse()]) {
+      assert.throws(
+        () => normalizeJunctionSnapshot({
+          importedAt: "2026-04-24T12:00:00.000Z",
+          timeseries: {
+            water: {
+              groups: {
+                garmin: [{
+                  data: records,
+                  source: { provider: "garmin", type: "watch" },
+                }],
+              },
+            },
+          },
+        }),
+        /Junction water stable-id records with different bodies require distinct explicit provider revisions/u,
+      );
+    }
+  }
+});
+
+test("Junction sparse stable-ID revisions select newer provider-day metadata in either order", () => {
+  const olderOffsetBody = {
+    id: "shared-offset-revision",
+    start: "2026-04-22T23:30:00-04:00",
+    end: "2026-04-22T23:31:00-04:00",
+    timezone_offset: -14_400,
+    updatedAt: "2026-04-23T04:00:00Z",
+    unit: "mL",
+    value: 250,
+  };
+  const newerUtcBody = {
+    id: "shared-offset-revision",
+    start: "2026-04-23T03:30:00Z",
+    end: "2026-04-23T03:31:00Z",
+    updatedAt: "2026-04-23T05:00:00Z",
+    unit: "mL",
+    value: 250,
+  };
+
+  for (const records of [
+    [olderOffsetBody, newerUtcBody],
+    [newerUtcBody, olderOffsetBody],
+  ]) {
+    const payload = normalizeJunctionSnapshot({
+      importedAt: "2026-04-24T12:00:00.000Z",
+      timeseries: {
+        water: {
+          groups: {
+            garmin: [{
+              data: records,
+              source: { provider: "garmin", type: "watch" },
+            }],
+          },
+        },
+      },
+    });
+    const timed = payload.events?.find((event) =>
+      event.kind === "measurement"
+      && readJunctionEventMeasurements(event).some((measurement) => measurement.metric === "water")
+    );
+
+    assert.equal(timed?.dayKey, "2026-04-23");
+    assert.equal(timed?.dataOrigin?.observedAtRaw, "2026-04-23T03:30:00Z");
+    assert.equal(timed?.dataOrigin?.timestampSemantics, "utc");
+    assert.equal(timed?.externalRef?.version, "2026-04-23T05:00:00.000Z");
+  }
+});
+
+test("Junction sparse cross-day revisions report both affected provider days", async () => {
+  const vaultRoot = await makeTempDirectory("murph-junction-sparse-cross-day-revision");
+  const snapshotFor = (input: {
+    end: string;
+    importedAt: string;
+    start: string;
+    updatedAt: string;
+  }) => ({
+    accountId: "junction-account-sparse-cross-day-revision",
+    importedAt: input.importedAt,
+    timeseriesWindowKind: "precise" as const,
+    timeseries: {
+      water: {
+        groups: {
+          garmin: [{
+            data: [{
+              id: "water-cross-day-revision",
+              start: input.start,
+              end: input.end,
+              updatedAt: input.updatedAt,
+              unit: "mL",
+              value: 250,
+            }],
+            source: { provider: "garmin", type: "watch" },
+          }],
+        },
+      },
+    },
+  });
+
+  try {
+    await coreRuntime.initializeVault({
+      createdAt: "2026-04-20T00:00:00.000Z",
+      vaultRoot,
+    });
+    await importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
+      {
+        provider: "junction",
+        vaultRoot,
+        snapshot: snapshotFor({
+          start: "2026-04-21T23:30:00Z",
+          end: "2026-04-21T23:31:00Z",
+          updatedAt: "2026-04-22T01:00:00Z",
+          importedAt: "2026-04-22T12:00:00Z",
+        }),
+      },
+      { corePort: coreRuntime },
+    );
+    const correctionSnapshot = snapshotFor({
+      start: "2026-04-22T00:30:00Z",
+      end: "2026-04-22T00:31:00Z",
+      updatedAt: "2026-04-22T02:00:00Z",
+      importedAt: "2026-04-22T13:00:00Z",
+    });
+    const correction = await importDeviceProviderSnapshot<
+      Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>
+    >(
+      {
+        provider: "junction",
+        vaultRoot,
+        snapshot: correctionSnapshot,
+      },
+      { corePort: coreRuntime },
+    );
+    const retry = await importDeviceProviderSnapshot<
+      Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>
+    >(
+      { provider: "junction", vaultRoot, snapshot: correctionSnapshot },
+      { corePort: coreRuntime },
+    );
+
+    for (const result of [correction, retry]) {
+      assert.deepEqual(result.affectedEventDayKeys, ["2026-04-21", "2026-04-22"]);
+    }
+    assert.equal(correction.events[0]?.dayKey, "2026-04-22");
+    assert.equal(retry.applied, false);
+  } finally {
+    await rm(vaultRoot, { force: true, recursive: true });
+  }
+});
+
+test("Junction projected account source identity keeps revisions on one sparse spine", async () => {
+  const vaultRoot = await makeTempDirectory("murph-junction-account-source-alias-revision");
+  const sourceInstanceId = "source-aaaaaaaaaaaaaaaaaaaaaaaa";
+  const snapshotFor = (input: {
+    dayKey: string;
+    importedAt: string;
+    updatedAt: string;
+    value: number;
+  }) => ({
+    accountId: "junction-account-source-alias-revision",
+    importedAt: input.importedAt,
+    timeseriesWindowKind: "precise" as const,
+    timeseries: {
+      water: [{
+        calendarDate: input.dayKey,
+        end: `${input.dayKey}T08:01:00.000Z`,
+        id: "water-account-source-alias-revision",
+        sourceInstanceId,
+        sourceProviderSlug: "apple_health_kit",
+        sourceType: "phone",
+        start: `${input.dayKey}T08:00:00.000Z`,
+        updatedAt: input.updatedAt,
+        value: input.value,
+      }],
+    },
+  });
+
+  try {
+    await coreRuntime.initializeVault({
+      createdAt: "2026-04-20T00:00:00.000Z",
+      vaultRoot,
+    });
+    const first = await importDeviceProviderSnapshot<
+      Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>
+    >({
+      provider: "junction",
+      vaultRoot,
+      snapshot: snapshotFor({
+        dayKey: "2026-04-21",
+        importedAt: "2026-04-22T12:00:00.000Z",
+        updatedAt: "2026-04-22T08:00:00.000Z",
+        value: 250,
+      }),
+    }, { corePort: coreRuntime });
+    const correction = await importDeviceProviderSnapshot<
+      Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>
+    >({
+      provider: "junction",
+      vaultRoot,
+      snapshot: snapshotFor({
+        dayKey: "2026-04-22",
+        importedAt: "2026-04-23T12:00:00.000Z",
+        updatedAt: "2026-04-23T08:00:00.000Z",
+        value: 300,
+      }),
+    }, { corePort: coreRuntime });
+    const staleReplay = await importDeviceProviderSnapshot<
+      Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>
+    >({
+      provider: "junction",
+      vaultRoot,
+      snapshot: snapshotFor({
+        dayKey: "2026-04-21",
+        importedAt: "2026-04-24T12:00:00.000Z",
+        updatedAt: "2026-04-22T08:00:00.000Z",
+        value: 250,
+      }),
+    }, { corePort: coreRuntime });
+
+    assert.equal(first.events[0]?.id, correction.events[0]?.id);
+    assert.equal(correction.events[0]?.lifecycle?.revision, 2);
+    assert.deepEqual(correction.affectedEventDayKeys, ["2026-04-21", "2026-04-22"]);
+    assert.deepEqual(correction.affectedSparseCalendarTargets?.map((target) => target.dayKey), [
+      "2026-04-21",
+      "2026-04-22",
+    ]);
+    assert.equal(staleReplay.applied, false);
+    assert.equal(staleReplay.affectedSparseCalendarTargets, undefined);
+
+    const records = latestLiveRecords((await Promise.all(
+      [...new Set([...first.eventShardPaths, ...correction.eventShardPaths])].map((relativePath) =>
+        coreRuntime.readJsonlRecords({ vaultRoot, relativePath })
+      ),
+    )).flat()).filter((record) =>
+      record.kind === "measurement"
+      && typeof record.externalRef === "object"
+      && record.externalRef !== null
+      && !Array.isArray(record.externalRef)
+      && record.externalRef.facet === "interval"
+    );
+    assert.equal(records.length, 1);
+    assert.equal(records[0]?.dayKey, "2026-04-22");
+  } finally {
+    await rm(vaultRoot, { force: true, recursive: true });
+  }
+});
+
+test("Junction routine calendar and corrected interval converge on one persisted source spine", async () => {
+  const vaultRoot = await makeTempDirectory("murph-junction-shared-writer-source-identity");
+  const sourceInstanceId = resolveJunctionOrigin({
+    sourceInstanceId: "jxn_src_hosted_connection_apple_health",
+    sourceProviderSlug: "apple_health",
+  }).sourceInstanceId;
+  assert.ok(sourceInstanceId);
+  const accountId = "junction-account-shared-writer-source-identity";
+  const recordFor = (input: {
+    dayKey: string;
+    updatedAt: string;
+    value: number;
+  }) => ({
+    calendarDate: input.dayKey,
+    end: `${input.dayKey}T08:01:00.000Z`,
+    id: "water-shared-writer-source-identity",
+    sourceInstanceId,
+    sourceProviderSlug: "apple_health",
+    sourceType: "phone",
+    start: `${input.dayKey}T08:00:00.000Z`,
+    updatedAt: input.updatedAt,
+    value: input.value,
+  });
+  const importSnapshot = (snapshot: Record<string, unknown>) =>
+    importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
+      { provider: "junction", vaultRoot, snapshot },
+      { corePort: coreRuntime },
+    );
+
+  try {
+    await coreRuntime.initializeVault({
+      createdAt: "2026-04-20T00:00:00.000Z",
+      vaultRoot,
+    });
+    const routine = await importSnapshot({
+      accountId,
+      importedAt: "2026-04-22T12:00:00.000Z",
+      timeseriesWindowKind: "calendar_day",
+      windowStart: "2026-04-21T00:00:00.000Z",
+      windowEnd: "2026-04-22T00:00:00.000Z",
+      timeseries: {
+        water: [recordFor({
+          dayKey: "2026-04-21",
+          updatedAt: "2026-04-22T08:00:00.000Z",
+          value: 250,
+        })],
+      },
+    });
+    const correctionSnapshot = {
+      accountId,
+      importedAt: "2026-04-23T12:00:00.000Z",
+      timeseriesWindowKind: "precise",
+      timeseries: {
+        water: [recordFor({
+          dayKey: "2026-04-22",
+          updatedAt: "2026-04-23T08:00:00.000Z",
+          value: 300,
+        })],
+      },
+    };
+    const correction = await importSnapshot(correctionSnapshot);
+    const repairedD1 = await importSnapshot({
+      accountId,
+      importedAt: "2026-04-23T13:00:00.000Z",
+      timeseriesWindowKind: "calendar_day",
+      windowStart: "2026-04-21T00:00:00.000Z",
+      windowEnd: "2026-04-22T00:00:00.000Z",
+      timeseries: {
+        water: [{
+          authoritativeEmptyCalendarSet: true,
+          calendarDate: "2026-04-21",
+          date: "2026-04-21",
+          sourceInstanceId,
+          sourceProviderSlug: "apple_health",
+          sourceType: "phone",
+          value: 0,
+        }],
+      },
+    });
+    const repairedD2 = await importSnapshot({
+      accountId,
+      importedAt: "2026-04-23T13:01:00.000Z",
+      timeseriesWindowKind: "calendar_day",
+      windowStart: "2026-04-22T00:00:00.000Z",
+      windowEnd: "2026-04-23T00:00:00.000Z",
+      timeseries: { water: correctionSnapshot.timeseries.water },
+    });
+    const staleReplay = await importSnapshot({
+      accountId,
+      importedAt: "2026-04-24T12:00:00.000Z",
+      timeseriesWindowKind: "precise",
+      timeseries: {
+        water: [recordFor({
+          dayKey: "2026-04-21",
+          updatedAt: "2026-04-22T08:00:00.000Z",
+          value: 250,
+        })],
+      },
+    });
+
+    const routineDaily = routine.events.find((event) =>
+      event.kind === "observation"
+      && event.metric === "water"
+    );
+    const repairedD1Daily = repairedD1.events.find((event) =>
+      event.kind === "observation"
+      && event.metric === "water"
+    );
+    assert.ok(routineDaily);
+    assert.ok(repairedD1Daily);
+    assert.equal(repairedD1Daily?.id, routineDaily?.id);
+    assert.equal(
+      repairedD1Daily?.kind === "observation" ? repairedD1Daily.value : undefined,
+      0,
+    );
+    assert.deepEqual(correction.affectedEventDayKeys, ["2026-04-21", "2026-04-22"]);
+    assert.equal(staleReplay.applied, false);
+    assert.equal(staleReplay.affectedSparseCalendarTargets, undefined);
+
+    const allRecords = (await Promise.all(
+      [...new Set([
+        ...routine.eventShardPaths,
+        ...correction.eventShardPaths,
+        ...repairedD1.eventShardPaths,
+        ...repairedD2.eventShardPaths,
+      ])].map((relativePath) => coreRuntime.readJsonlRecords({ vaultRoot, relativePath })),
+    )).flat();
+    const live = latestLiveRecords(allRecords);
+    const liveIntervals = live.filter((record) =>
+      record.kind === "measurement"
+      && typeof record.externalRef === "object"
+      && record.externalRef !== null
+      && !Array.isArray(record.externalRef)
+      && record.externalRef.facet === "interval"
+    );
+    const liveDaily = live.filter((record) =>
+      record.kind === "observation"
+      && record.metric === "water"
+    );
+    assert.equal(liveIntervals.length, 1);
+    assert.equal(liveIntervals[0]?.dayKey, "2026-04-22");
+    assert.equal(liveDaily.length, 2);
+    assert.equal(
+      live.every((record) => storedSourceInstanceId(record) === sourceInstanceId),
+      true,
+    );
+    assert.deepEqual(
+      liveDaily.map((record) => [record.dayKey, storedObservationValue(record)]).sort(),
+      [["2026-04-21", 0], ["2026-04-22", 300]],
+    );
+  } finally {
+    await rm(vaultRoot, { force: true, recursive: true });
+  }
+});
+
+test("Junction authoritative empty sparse days clear the prior retained daily sum", async () => {
+  const vaultRoot = await makeTempDirectory("murph-junction-empty-sparse-calendar-day");
+  const snapshotFor = (records: readonly Record<string, unknown>[], importedAt: string) => ({
+    accountId: "junction-account-empty-sparse-calendar-day",
+    importedAt,
+    timeseriesWindowKind: "calendar_day" as const,
+    windowStart: "2026-04-22T00:00:00.000Z",
+    windowEnd: "2026-04-23T00:00:00.000Z",
+    timeseries: { water: records },
+  });
+
+  try {
+    await coreRuntime.initializeVault({
+      createdAt: "2026-04-20T00:00:00.000Z",
+      vaultRoot,
+    });
+    const populated = await importDeviceProviderSnapshot<
+      Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>
+    >(
+      {
+        provider: "junction",
+        vaultRoot,
+        snapshot: snapshotFor([{
+          calendarDate: "2026-04-22",
+          date: "2026-04-22",
+          end: "2026-04-22T08:01:00.000Z",
+          id: "water-empty-day-baseline",
+          sourceProviderSlug: "garmin",
+          sourceType: "watch",
+          start: "2026-04-22T08:00:00.000Z",
+          value: 250,
+        }], "2026-04-23T12:00:00.000Z"),
+      },
+      { corePort: coreRuntime },
+    );
+    const cleared = await importDeviceProviderSnapshot<
+      Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>
+    >(
+      {
+        provider: "junction",
+        vaultRoot,
+        snapshot: snapshotFor([{
+          authoritativeEmptyCalendarSet: true,
+          calendarDate: "2026-04-22",
+          date: "2026-04-22",
+          sourceProviderSlug: "garmin",
+          sourceType: "watch",
+          value: 0,
+        }], "2026-04-23T13:00:00.000Z"),
+      },
+      { corePort: coreRuntime },
+    );
+
+    const populatedWater = populated.events.find((event) =>
+      event.kind === "observation" && event.metric === "water"
+    );
+    const clearedWater = cleared.events.find((event) =>
+      event.kind === "observation" && event.metric === "water"
+    );
+    assert.equal(
+      populatedWater?.kind === "observation" ? populatedWater.value : undefined,
+      250,
+    );
+    assert.equal(
+      clearedWater?.kind === "observation" ? clearedWater.value : undefined,
+      0,
+    );
+    assert.equal(clearedWater?.id, populatedWater?.id);
+    const preparedEmpty = normalizeJunctionSnapshot(snapshotFor([{
+      authoritativeEmptyCalendarSet: true,
+      calendarDate: "2026-04-22",
+      date: "2026-04-22",
+      sourceProviderSlug: "garmin",
+      sourceType: "watch",
+      value: 0,
+    }], "2026-04-23T13:00:00.000Z"));
+    assert.ok(preparedEmpty.evidenceParts?.some((part) => {
+      const content = part.content;
+      return typeof content === "object"
+        && content !== null
+        && "status" in content
+        && content.status === "authoritative_empty_calendar_set"
+        && "sampleCount" in content
+        && content.sampleCount === 0;
+    }));
+  } finally {
+    await rm(vaultRoot, { force: true, recursive: true });
+  }
+});
+
+test("Junction strict sparse calendar repairs reject mixed valid and malformed rows before import", async () => {
+  const baseSnapshot = {
+    accountId: "junction-account-strict-sparse-calendar-day",
+    importedAt: "2026-04-23T12:00:00.000Z",
+    timeseriesWindowKind: "calendar_day" as const,
+    strictSparseCalendarRepair: {
+      dayKey: "2026-04-22",
+      resource: "water" as const,
+      sourceProviderSlug: "garmin",
+      sourceType: "watch",
+    },
+    windowStart: "2026-04-22T00:00:00.000Z",
+    windowEnd: "2026-04-23T00:00:00.000Z",
+  };
+  const valid = {
+    calendarDate: "2026-04-22",
+    end: "2026-04-22T08:01:00.000Z",
+    id: "water-strict-valid",
+    sourceProviderSlug: "garmin",
+    sourceType: "watch",
+    start: "2026-04-22T08:00:00.000Z",
+    value: 250,
+  };
+
+  assert.throws(
+    () => normalizeJunctionSnapshot({
+      ...baseSnapshot,
+      timeseries: {
+        water: [valid, {
+          ...valid,
+          id: "water-strict-malformed",
+          start: undefined,
+        }],
+      },
+    }),
+    (error: unknown) =>
+      error instanceof JunctionSparseCalendarRepairNormalizationError
+      && error.code === "JUNCTION_CALENDAR_REFRESH_INCOMPLETE_NORMALIZATION"
+      && error.retryable,
+  );
+  await assert.rejects(
+    prepareDeviceProviderSnapshotImport({
+      provider: "junction",
+      vaultRoot: "/tmp/unused-strict-calendar-repair",
+      snapshot: {
+        ...baseSnapshot,
+        timeseries: {
+          water: [valid, {
+            ...valid,
+            id: "water-strict-malformed-before-core",
+            value: "not-a-number",
+          }],
+        },
+      },
+    }),
+    JunctionSparseCalendarRepairNormalizationError,
+  );
+
+  const complete = normalizeJunctionSnapshot({
+    ...baseSnapshot,
+    timeseries: {
+      water: [valid, {
+        ...valid,
+        end: "2026-04-22T09:01:00.000Z",
+        id: "water-strict-second-valid",
+        start: "2026-04-22T09:00:00.000Z",
+        value: 125,
+      }],
+    },
+  });
+  const daily = complete.events?.find((event) =>
+    event.kind === "observation" && event.fields?.metric === "water"
+  );
+  assert.equal(daily?.fields && "value" in daily.fields ? daily.fields.value : undefined, 375);
+
+  assert.doesNotThrow(() => normalizeJunctionSnapshot({
+    ...baseSnapshot,
+    timeseries: {
+      water: [{
+        authoritativeEmptyCalendarSet: true,
+        calendarDate: "2026-04-22",
+        date: "2026-04-22",
+        sourceProviderSlug: "garmin",
+        sourceType: "watch",
+        value: 0,
+      }],
+    },
+  }));
+});
+
+test("Junction unversioned calendar aggregates reconcile through the serialized event spine", async () => {
+  const vaultRoot = await makeTempDirectory("murph-junction-unversioned-fidelity-correction");
+  const inputFor = (value: number) => ({
+    provider: "junction" as const,
+    vaultRoot,
+    snapshot: {
+      accountId: "junction-account-unversioned-fidelity",
+      importedAt: "2026-04-23T12:00:00.000Z",
+      timeseries: {
+        glucose: {
+          groups: {
+            dexcom: [{
+              data: [
+                {
+                  id: "glucose-reading-1",
+                  timestamp: "2026-04-22T08:00:00Z",
+                  unit: "mmol/L",
+                  value,
+                },
+                {
+                  id: "glucose-reading-2",
+                  timestamp: "2026-04-22T08:05:00Z",
+                  unit: "mmol/L",
+                  value: 10,
+                },
+              ],
+              source: { provider: "dexcom", type: "cgm" },
+            }],
+          },
+        },
+      },
+    },
+  });
+
+  try {
+    await coreRuntime.initializeVault({
+      createdAt: "2026-04-22T00:00:00.000Z",
+      vaultRoot,
+    });
+    await importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
+      inputFor(5),
+      { corePort: coreRuntime },
+    );
+    const correction = await importDeviceProviderSnapshot<
+      Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>
+    >(
+      inputFor(7),
+      { corePort: coreRuntime },
+    );
+    assert.equal(correction.applied, true);
+    assert.equal(
+      correction.events.some((event) =>
+        event.kind === "observation"
+        && event.metric === "glucose"
+        && event.value === 153.1547
+      ),
+      true,
+    );
+    assert.equal(
+      correction.events.some((event) =>
+        event.kind === "measurement" && event.externalRef?.facet === "features"
+      ),
+      true,
+    );
+  } finally {
+    await rm(vaultRoot, { force: true, recursive: true });
+  }
+});
+
+test("Junction fidelity value aliases preserve temporal shape through normalization", () => {
+  const payload = normalizeJunctionSnapshot({
+    importedAt: "2026-04-23T12:00:00.000Z",
+    timeseries: {
+      blood_oxygen: {
+        groups: {
+          garmin: [{
+            data: [
+              { timestamp: "2026-04-22T08:00:00Z", oxygenSaturation: 0.91 },
+              { timestamp: "2026-04-22T08:05:00Z", oxygen_saturation: 0.97 },
+            ],
+            source: { provider: "garmin", type: "watch" },
+          }],
+        },
+      },
+      stress_level: {
+        groups: {
+          garmin: [{
+            data: [
+              { timestamp: "2026-04-22T09:00:00Z", averageStressLevel: 50 },
+              { timestamp: "2026-04-22T09:05:00Z", stressLevelValue: 80 },
+            ],
+            source: { provider: "garmin", type: "watch" },
+          }],
+        },
+      },
+      mindfulness_minutes: {
+        groups: {
+          garmin: [{
+            data: [{
+              start: "2026-04-22T10:00:00Z",
+              end: "2026-04-22T10:05:00Z",
+              mindfulnessMinutes: 5,
+            }],
+            source: { provider: "garmin", type: "watch" },
+          }],
+        },
+      },
+    },
+  });
+
+  const dailyValue = (metric: string): unknown => payload.events?.find((event) =>
+    event.kind === "observation" && event.fields?.metric === metric
+  )?.fields?.value;
+  assert.equal(dailyValue("spo2"), 94);
+  assert.equal(dailyValue("stress-level"), 65);
+  assert.equal(dailyValue("mindfulness-minutes"), 5);
+  assert.equal(findJunctionTimeseriesFeatureArtifacts(payload, "blood-oxygen").length, 1);
+  assert.equal(findJunctionTimeseriesFeatureArtifacts(payload, "stress-level").length, 1);
+  assert.equal(findJunctionIntervalReadingArtifacts(payload, "mindfulness-minutes").length, 1);
+});
+
+test("Junction dense feature corrections revise one event instead of leaving optional facts stale", () => {
+  const normalize = (data: readonly Record<string, unknown>[]) => normalizeJunctionSnapshot({
+    importedAt: "2026-04-23T12:00:00.000Z",
+    timeseries: {
+      glucose: {
+        groups: {
+          dexcom: [{
+            data,
+            source: { provider: "dexcom", type: "cgm" },
+          }],
+        },
+      },
+    },
+  });
+  const rich = normalize([
+    { timestamp: "2026-04-22T12:00:00Z", unit: "mmol/L", value: 5 },
+    { timestamp: "2026-04-22T12:05:00Z", unit: "mmol/L", value: 7 },
+  ]);
+  const corrected = normalize([
+    { timestamp: "2026-04-22T12:00:00Z", unit: "mmol/L", value: 5 },
+  ]);
+  const featureEvent = (payload: DeviceBatchImportPayload) => payload.events?.find((event) =>
+    event.kind === "measurement" && event.externalRef?.facet === "features"
+  );
+  const metrics = (payload: DeviceBatchImportPayload) => readJunctionEventMeasurements(featureEvent(payload))
+    .map((measurement) => measurement.metric);
+
+  assert.deepEqual(featureEvent(rich)?.externalRef, featureEvent(corrected)?.externalRef);
+  assert.ok(metrics(rich).includes("glucose-estimated-time-in-range-percent"));
+  assert.ok(metrics(rich).includes("glucose-observed-max-rise-rate"));
+  assert.equal(metrics(corrected).includes("glucose-estimated-time-in-range-percent"), false);
+  assert.equal(metrics(corrected).includes("glucose-observed-max-rise-rate"), false);
+});
+
+test("Junction timeseries fidelity caps episode evidence deterministically", () => {
+  const records = Array.from({ length: 14 }, (_, index) => {
+    const lowAt = Date.UTC(2026, 3, 22, 0, index * 30);
+    return [
+      { timestamp: new Date(lowAt).toISOString(), unit: "percent", value: 88 },
+      { timestamp: new Date(lowAt + 5 * 60_000).toISOString(), unit: "percent", value: 97 },
+    ];
+  }).flat();
+  const normalize = (data: readonly Record<string, unknown>[]) =>
+    normalizeJunctionSnapshot({
+      importedAt: "2026-04-23T12:00:00.000Z",
+      timeseries: {
+        blood_oxygen: {
+          groups: {
+            garmin: [{
+              data,
+              source: { provider: "garmin", type: "watch" },
+            }],
+          },
+        },
+      },
+    });
+  const forward = findJunctionTimeseriesFeatureArtifacts(normalize(records), "blood-oxygen")[0]?.content as {
+    episodes?: { retainedCount?: number; retained?: unknown[]; totalCount?: number; truncatedCount?: number };
+  };
+  const reversed = findJunctionTimeseriesFeatureArtifacts(normalize([...records].reverse()), "blood-oxygen")[0]
+    ?.content as typeof forward;
+
+  assert.equal(forward.episodes?.totalCount, 14);
+  assert.equal(forward.episodes?.retainedCount, 12);
+  assert.equal(forward.episodes?.truncatedCount, 2);
+  assert.deepEqual(forward, reversed);
+});
+
+test("Junction timeseries fidelity fails closed at explicit response and source/day bounds", () => {
+  const tooManyGlucose = Array.from({ length: 1_441 }, (_, index) => ({
+    timestamp: new Date(Date.UTC(2026, 3, 22, 0, 0, index)).toISOString(),
+    unit: "mmol/L",
+    value: 5.5,
+  }));
+  assert.throws(
+    () => normalizeJunctionSnapshot({
+      importedAt: "2026-04-23T12:00:00.000Z",
+      timeseries: {
+        glucose: {
+          groups: {
+            dexcom: [{
+              data: tooManyGlucose,
+              source: { provider: "dexcom", type: "cgm" },
+            }],
+          },
+        },
+      },
+    }),
+    /source\/day has 1441 records; maximum admitted is 1440/u,
+  );
+
+  const tooManyWaterIntervals = Array.from({ length: 129 }, (_, index) => {
+    const startMs = Date.UTC(2026, 3, 22, 8, 0, index);
+    return {
+      id: `water-record-${index}`,
+      start: new Date(startMs).toISOString(),
+      end: new Date(startMs + 30_000).toISOString(),
+      unit: "mL",
+      value: 1,
+    };
+  });
+  assert.throws(
+    () => normalizeJunctionSnapshot({
+      importedAt: "2026-04-23T12:00:00.000Z",
+      timeseries: {
+        water: {
+          groups: {
+            apple_health_kit: [{
+              data: tooManyWaterIntervals,
+              source: { provider: "apple_health_kit", type: "phone" },
+            }],
+          },
+        },
+      },
+    }),
+    /source\/day has 129 records; maximum admitted is 128/u,
+  );
+
+  const oversizedResponse = Array.from({ length: 2_049 }, (_, index) => ({
+    id: `water-response-record-${index}`,
+    start: new Date(Date.UTC(2020, 0, 1 + index, 8)).toISOString(),
+    end: new Date(Date.UTC(2020, 0, 1 + index, 8, 1)).toISOString(),
+    unit: "mL",
+    value: 1,
+  }));
+  assert.throws(
+    () => normalizeJunctionSnapshot({
+      importedAt: "2026-04-23T12:00:00.000Z",
+      timeseries: {
+        water: {
+          groups: {
+            apple_health_kit: [{
+              data: oversizedResponse,
+              source: { provider: "apple_health_kit", type: "phone" },
+            }],
+          },
+        },
+      },
+    }),
+    /response has 2049 records; maximum admitted is 2048/u,
+  );
+});
+
+test("Junction timeseries fidelity fails closed at the normalized output bound", () => {
+  const glucose = Array.from({ length: 2_501 }, (_, index) => ({
+    timestamp: new Date(Date.UTC(2018, 0, 1 + index, 8)).toISOString(),
+    unit: "mmol/L",
+    value: 5.5,
+  }));
+
+  assert.throws(
+    () => normalizeJunctionSnapshot({
+      importedAt: "2026-04-23T12:00:00.000Z",
+      timeseries: {
+        glucose: {
+          groups: {
+            dexcom: [{
+              data: glucose,
+              source: { provider: "dexcom", type: "cgm" },
+            }],
+          },
+        },
+      },
+    }),
+    /normalization produced 10004 events; maximum admitted is 10000/u,
+  );
+  assert.throws(
+    () => assertJunctionTimeseriesOutputBounds({
+      eventCount: 10_000,
+      evidencePartCount: 10_001,
+    }),
+    /normalization produced 10001 evidence parts; maximum admitted is 10000/u,
+  );
 });
 
 test("Junction normalizer lands sparse paired blood pressure readings as measurement events", () => {
