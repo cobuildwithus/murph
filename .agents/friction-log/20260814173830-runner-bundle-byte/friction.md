@@ -1,6 +1,7 @@
 ---
 title: 'Runner bundle byte budget differs between macOS and deployment Linux'
 severity: 'minor'
+issue: 'cobuildwithus/murph#1845'
 ---
 
 ## Expected Behavior

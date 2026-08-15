@@ -13,6 +13,7 @@ import {
   isAssistantOutboxRetryBudgetExhausted,
   isAssistantOutboxRetryableError,
   normalizeAssistantDeliveryError,
+  resolveAssistantOutboxSendingRecoveryAt,
   resolveAssistantOutboxRetryDelayMs,
   shouldBeginAssistantOutboxDispatch,
   shouldDispatchAssistantOutboxIntent,
@@ -64,6 +65,29 @@ describe('assistant outbox retry policy', () => {
     expect(shouldBeginAssistantOutboxDispatch(futureRetry, now, true)).toBe(true)
     expect(shouldBeginAssistantOutboxDispatch(sent, now, true)).toBe(false)
     expect(shouldBeginAssistantOutboxDispatch(staleSending, now, false)).toBe(true)
+  })
+
+  it('derives the same sending recovery boundary used by dispatch', () => {
+    const now = new Date('2026-04-08T12:00:00.000Z')
+    const freshSending = createIntent({
+      lastAttemptAt: '2026-04-08T11:59:00.000Z',
+      status: 'sending',
+    })
+    const missingAttempt = createIntent({
+      lastAttemptAt: null,
+      status: 'sending',
+    })
+
+    expect(resolveAssistantOutboxSendingRecoveryAt(freshSending, now)).toBe(
+      '2026-04-08T12:09:00.000Z',
+    )
+    expect(resolveAssistantOutboxSendingRecoveryAt(missingAttempt, now)).toBe(
+      now.toISOString(),
+    )
+    expect(resolveAssistantOutboxSendingRecoveryAt(
+      createIntent({ status: 'sent' }),
+      now,
+    )).toBeNull()
   })
 
   it('detects retryable delivery errors from context, direct flags, failure-class hints, and normalized fallback signals', () => {

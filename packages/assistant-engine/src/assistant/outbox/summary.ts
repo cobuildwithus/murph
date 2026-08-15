@@ -1,4 +1,5 @@
 import type { AssistantStatusOutboxSummary } from '@murphai/operator-config/assistant-cli-contracts'
+import { resolveAssistantOutboxSendingRecoveryAt } from './retry-policy.js'
 import { listAssistantOutboxIntentsLocal } from './store.js'
 
 export async function buildAssistantOutboxSummary(
@@ -7,6 +8,7 @@ export async function buildAssistantOutboxSummary(
   const intents = await listAssistantOutboxIntentsLocal(vault)
   let oldestPendingAt: string | null = null
   let nextAttemptAt: string | null = null
+  const now = new Date()
 
   for (const intent of intents) {
     if (
@@ -30,6 +32,16 @@ export async function buildAssistantOutboxSummary(
       (!nextAttemptAt || intent.nextAttemptAt < nextAttemptAt)
     ) {
       nextAttemptAt = intent.nextAttemptAt
+    }
+    const sendingRecoveryAt = resolveAssistantOutboxSendingRecoveryAt(
+      intent,
+      now,
+    )
+    if (
+      sendingRecoveryAt &&
+      (!nextAttemptAt || sendingRecoveryAt < nextAttemptAt)
+    ) {
+      nextAttemptAt = sendingRecoveryAt
     }
   }
 

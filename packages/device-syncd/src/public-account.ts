@@ -14,6 +14,18 @@ export const DEVICE_SYNC_HISTORICAL_RESET_REVOKE_FAILED_ERROR_CODE =
 export const DEVICE_SYNC_DISCONNECT_IN_PROGRESS_ERROR_CODE =
   "DISCONNECT_IN_PROGRESS";
 
+export const DEVICE_SYNC_DISCONNECT_RECOVERY_REQUIRED_ERROR_CODE =
+  "DISCONNECT_RECOVERY_REQUIRED";
+
+const DEVICE_SYNC_DISCONNECT_RECOVERY_ERROR_CODES = new Set([
+  DEVICE_SYNC_DISCONNECT_IN_PROGRESS_ERROR_CODE,
+  DEVICE_SYNC_DISCONNECT_RECOVERY_REQUIRED_ERROR_CODE,
+  // Keep interpreting legacy rows written before the canonical recovery marker.
+  "PROVIDER_REVOKE_FAILED",
+  "PROVIDER_REVOKE_NOT_CONFIGURED",
+  DEVICE_SYNC_HISTORICAL_RESET_REVOKE_FAILED_ERROR_CODE,
+]);
+
 export const DEVICE_SYNC_SOURCE_DISCONNECT_IN_PROGRESS_ERROR_CODE =
   "SOURCE_DISCONNECT_IN_PROGRESS";
 
@@ -299,6 +311,17 @@ export function isDeviceSyncDisconnectInProgress(connection: {
 }): boolean {
   return connection.status === "reauthorization_required"
     && connection.lastErrorCode === DEVICE_SYNC_DISCONNECT_IN_PROGRESS_ERROR_CODE;
+}
+
+export function isDeviceSyncDisconnectRecoveryRequired(connection: {
+  lastErrorCode?: string | null;
+  status?: string | null;
+}): boolean {
+  return connection.status === "reauthorization_required"
+    && typeof connection.lastErrorCode === "string"
+    && DEVICE_SYNC_DISCONNECT_RECOVERY_ERROR_CODES.has(
+      connection.lastErrorCode,
+    );
 }
 
 export function isDeviceSyncConnectionSetupConfirmed(connection: {

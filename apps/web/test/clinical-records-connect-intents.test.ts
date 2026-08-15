@@ -53,7 +53,7 @@ describe("Clinical Records connect intents", () => {
     mocks.updateMany.mockResolvedValue({ count: 1 });
   });
 
-  it("replaces every prior incomplete intent for the same member inside the create transaction", async () => {
+  it("replaces only prior incomplete intents for the same member inside the create transaction", async () => {
     const { createClinicalRecordConnectIntent } = await import(
       "@/src/lib/clinical-records/connect-intents"
     );
@@ -66,13 +66,8 @@ describe("Clinical Records connect intents", () => {
 
     expect(mocks.deleteMany).toHaveBeenCalledWith({
       where: {
-        OR: [
-          { expiresAt: { lte: now } },
-          {
-            completedAt: null,
-            memberId: "member_clinical_1",
-          },
-        ],
+        completedAt: null,
+        memberId: "member_clinical_1",
       },
     });
     expect(mocks.oauthUpdateMany).toHaveBeenCalledWith({
@@ -192,6 +187,35 @@ describe("Clinical Records connect intents", () => {
     })).rejects.toMatchObject({ code: "CLINICAL_RECORD_CONNECT_INTENT_INVALID" });
 
     expect(mocks.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("rejects an expired exact claim without mutating or deleting it", async () => {
+    const { claimClinicalRecordConnectIntentForStart } = await import(
+      "@/src/lib/clinical-records/connect-intents"
+    );
+    const claim = `cr_${"C".repeat(32)}`;
+    const claimHash = createHash("sha256").update(claim).digest("hex");
+    mocks.findUnique.mockResolvedValue({
+      claimHash,
+      completedAt: null,
+      createdAt: new Date("2026-07-10T12:00:00.000Z"),
+      expiresAt: new Date("2026-07-10T12:15:00.000Z"),
+      memberId: "member_clinical_1",
+      providerDirectoryEntryId: null,
+      startedAt: null,
+    });
+
+    await expect(claimClinicalRecordConnectIntentForStart({
+      claim,
+      memberId: "member_clinical_1",
+      now: new Date("2026-07-10T12:15:00.000Z"),
+      providerDirectoryEntryId: "epic-test",
+    })).rejects.toMatchObject({
+      code: "CLINICAL_RECORD_CONNECT_INTENT_EXPIRED",
+    });
+
+    expect(mocks.updateMany).not.toHaveBeenCalled();
+    expect(mocks.deleteMany).not.toHaveBeenCalled();
   });
 
   it("maps a concurrent live-intent uniqueness race to a stable retryable conflict", async () => {

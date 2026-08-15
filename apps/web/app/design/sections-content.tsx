@@ -613,6 +613,7 @@ export function SectionsContent() {
       <Separator />
 
       <StudySection title="Settings billing return, Portal failure, and Family sign-in handoffs">
+        {/* Includes the signed-out account-deletion handoff rendered by this study. */}
         <SettingsAuthRequiredStudy />
       </StudySection>
 
@@ -624,7 +625,7 @@ export function SectionsContent() {
 
       <Separator />
 
-      <StudySection title="Account deletion during migration maintenance">
+      <StudySection title="Account deletion maintenance, provider-access, and connected-app recovery">
         <AccountDeletionMaintenanceStudy />
       </StudySection>
 
