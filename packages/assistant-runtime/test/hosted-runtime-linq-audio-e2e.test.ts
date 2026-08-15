@@ -74,7 +74,7 @@ import {
 } from "../src/hosted-runtime/events/conversation.ts";
 
 describe("hosted Linq audio conversation ingestion", () => {
-  it("finishes parser drain before propagating stop abort at the post-drain boundary", async () => {
+  it("commits mailbox progress when stop aborts after the parser drain", async () => {
     const workspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-linq-audio-abort-"));
     const vaultRoot = path.join(workspaceRoot, "vault");
     const fakeFfmpeg = path.join(workspaceRoot, "fake-ffmpeg");
@@ -183,21 +183,21 @@ describe("hosted Linq audio conversation ingestion", () => {
       });
       let state = createEmptyHostedMailboxImportState();
 
-      await assert.rejects(
-        fetchAndProcessHostedMailboxPrefix({
-          expectedUserId: "member_linq_audio",
-          importItem: (item) => importItem(item, { signal: controller.signal }),
-          lanes: ["conversation"],
-          limitPerLane: 10,
-          mailboxPort: mailboxPort.port,
-          requestId: "linq-audio-abort-first",
-          state,
-        }),
-        (error) => error === abortReason,
-      );
+      const firstImport = await fetchAndProcessHostedMailboxPrefix({
+        expectedUserId: "member_linq_audio",
+        importItem: (item) => importItem(item, { signal: controller.signal }),
+        lanes: ["conversation"],
+        limitPerLane: 10,
+        mailboxPort: mailboxPort.port,
+        requestId: "linq-audio-abort-first",
+        state,
+      });
+      state = firstImport.state;
 
       assert.deepEqual(providerSignals, [undefined]);
-      assert.equal(state.watermarks.conversation, "0");
+      assert.equal(firstImport.importedCount, 1);
+      assert.equal(firstImport.blocked.length, 0);
+      assert.equal(state.watermarks.conversation, "1");
       assert.equal(mailboxPort.fetchRequests.length, 1);
       assert.equal(mailboxPort.fetchRequests[0]?.lanes[0]?.importedSeq, "0");
       await assertSingleLinqAudioCapture({
@@ -206,21 +206,21 @@ describe("hosted Linq audio conversation ingestion", () => {
         vaultRoot,
       });
 
-      const retry = await fetchAndProcessHostedMailboxPrefix({
+      const replay = await fetchAndProcessHostedMailboxPrefix({
         expectedUserId: "member_linq_audio",
         importItem,
         lanes: ["conversation"],
         limitPerLane: 10,
         mailboxPort: mailboxPort.port,
-        requestId: "linq-audio-abort-retry",
+        requestId: "linq-audio-abort-replay",
         state,
       });
-      state = retry.state;
-      assert.equal(retry.importedCount, 1);
-      assert.equal(retry.blocked.length, 0);
+      state = replay.state;
+      assert.equal(replay.importedCount, 0);
+      assert.equal(replay.blocked.length, 0);
       assert.equal(state.watermarks.conversation, "1");
       assert.equal(mailboxPort.fetchRequests.length, 2);
-      assert.equal(mailboxPort.fetchRequests[1]?.lanes[0]?.importedSeq, "0");
+      assert.equal(mailboxPort.fetchRequests[1]?.lanes[0]?.importedSeq, "1");
       await assertSingleLinqAudioCapture({
         parseState: "succeeded",
         transcript,
