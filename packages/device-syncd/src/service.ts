@@ -1,4 +1,7 @@
-import { createImporters } from "@murphai/importers";
+import {
+  createImporters,
+  JunctionSparseCalendarRepairNormalizationError,
+} from "@murphai/importers";
 
 import {
   normalizeConfiguredDeviceSyncJobInput,
@@ -9,6 +12,10 @@ import { deviceSyncError, isDeviceSyncError } from "./errors.ts";
 import { JunctionTimeseriesProgressError } from "./junction-timeseries-progress.ts";
 import {
   isJunctionCompanionHrvRmssdJob,
+  isJunctionSparseCalendarRefreshJob,
+  isJunctionSparseCalendarRefreshPayloadValid,
+  isJunctionSparseCalendarRefreshTerminalFailureCode,
+  JUNCTION_CALENDAR_REFRESH_JOB_INVALID_CODE,
   JUNCTION_COMPANION_HRV_OBSERVATION_INVALID_CODE,
 } from "./junction-resources.ts";
 import { buildJunctionProviderSourceInstanceKey } from "./config/junction-connect-sources.ts";
@@ -833,17 +840,65 @@ class DeviceSyncServiceController {
     }
 
     const preservesAcceptedCompanionHrv = isJunctionCompanionHrvRmssdJob(job);
+    const retainsAcceptedCalendarRefresh = isJunctionSparseCalendarRefreshJob(job);
+    const retainsAcceptedWork = preservesAcceptedCompanionHrv || retainsAcceptedCalendarRefresh;
+    const delayRetainedJobUntilAuthorityReturns = (code: string, message: string): void => {
+      const delayedAt = currentNow();
+      this.store.failJobIfOwned(
+        job.id,
+        this.workerId,
+        delayedAt,
+        code,
+        message,
+        addMilliseconds(delayedAt, computeRetryDelayMs(job.attempts)),
+        true,
+        true,
+      );
+    };
+
+    if (
+      retainsAcceptedCalendarRefresh
+      && !isJunctionSparseCalendarRefreshPayloadValid(job.payload)
+    ) {
+      failClaimedJob(
+        JUNCTION_CALENDAR_REFRESH_JOB_INVALID_CODE,
+        "Junction calendar refresh job payload was invalid.",
+        null,
+        false,
+      );
+      return finishPass();
+    }
 
     if (
       storedAccount.status === "active"
       && isDeviceSyncConnectionSetupPending(storedAccount)
-      && !preservesAcceptedCompanionHrv
+      && !retainsAcceptedWork
     ) {
       failClaimedJob(
         "CONNECTION_SETUP_PENDING",
         "Device sync setup must finish before queued jobs can run.",
         null,
         false,
+      );
+      return finishPass();
+    }
+
+    if (
+      storedAccount.status === "active"
+      && isDeviceSyncConnectionSetupPending(storedAccount)
+      && retainsAcceptedCalendarRefresh
+    ) {
+      delayRetainedJobUntilAuthorityReturns(
+        "CONNECTION_SETUP_PENDING",
+        "Device sync setup must finish before retained calendar work can run.",
+      );
+      return finishPass();
+    }
+
+    if (storedAccount.status === "disconnected" && retainsAcceptedCalendarRefresh) {
+      delayRetainedJobUntilAuthorityReturns(
+        "ACCOUNT_DISCONNECTED",
+        "Device sync account must reconnect before retained calendar work can run.",
       );
       return finishPass();
     }
@@ -858,6 +913,14 @@ class DeviceSyncServiceController {
           jobId: job.id,
         });
       }
+      return finishPass();
+    }
+
+    if (storedAccount.status === "reauthorization_required" && retainsAcceptedCalendarRefresh) {
+      delayRetainedJobUntilAuthorityReturns(
+        "ACCOUNT_REAUTHORIZATION_REQUIRED",
+        "Device sync account must reauthorize before retained calendar work can run.",
+      );
       return finishPass();
     }
 
@@ -932,6 +995,7 @@ class DeviceSyncServiceController {
 
       if (!currentStoredAccount || (
         !preservesAcceptedCompanionHrv
+        && !retainsAcceptedCalendarRefresh
         && (
           currentStoredAccount.status !== "active"
           || currentStoredAccount.disconnectGeneration !== disconnectGeneration
@@ -982,7 +1046,7 @@ class DeviceSyncServiceController {
       ensureExecutionActive();
       currentAccount = this.toDecryptedAccount(storedAccount);
       const normalizedJob = normalizeConfiguredDeviceSyncJobRecord(provider.provider, job, "execution");
-      activeJobs = preservesAcceptedCompanionHrv
+      activeJobs = preservesAcceptedCompanionHrv || retainsAcceptedCalendarRefresh
         ? [normalizedJob]
         : this.claimProviderJobBatch({
             accountId: storedAccount.id,
@@ -1015,10 +1079,16 @@ class DeviceSyncServiceController {
             snapshot,
             vaultRoot: this.vaultRoot,
           });
+          const canonicalSparseCalendarTargets =
+            readCanonicalDeviceImportSparseCalendarTargets(importResult);
           const receipt: ProviderSnapshotImportReceipt = {
             canonicalEventCount: readCanonicalDeviceImportEventCount(importResult),
+            canonicalEventDayKeys: readCanonicalDeviceImportEventDayKeys(importResult),
             canonicalEventExternalRefResourceIds:
               readCanonicalDeviceImportEventExternalRefResourceIds(importResult),
+            ...(canonicalSparseCalendarTargets.length > 0
+              ? { canonicalSparseCalendarTargets }
+              : {}),
             durableDeliveryAccepted: true,
           };
           return receipt;
@@ -1212,7 +1282,13 @@ class DeviceSyncServiceController {
         : undefined;
       const retainsAcceptedCompanionHrvUntilSuccess = preservesAcceptedCompanionHrv
         && failure.code !== JUNCTION_COMPANION_HRV_OBSERVATION_INVALID_CODE;
-      const retainedFailureRetryable = failure.retryable || retainsAcceptedCompanionHrvUntilSuccess;
+      const retainsAcceptedCalendarRefreshUntilSuccess = retainsAcceptedCalendarRefresh
+        && !isJunctionSparseCalendarRefreshTerminalFailureCode(failure.code);
+      const retainsAcceptedWorkUntilSuccess = retainsAcceptedCompanionHrvUntilSuccess
+        || retainsAcceptedCalendarRefreshUntilSuccess;
+      const retainedFailureRetryable = failure.retryable
+        || retainsAcceptedCompanionHrvUntilSuccess
+        || retainsAcceptedCalendarRefreshUntilSuccess;
       const failureNow = currentNow();
       if (!isAccountExecutionCurrent()) {
         const released = releaseActiveJobsIfCurrentAccountActive(failureNow);
@@ -1239,7 +1315,7 @@ class DeviceSyncServiceController {
             failure.message,
             retryAt,
             retainedFailureRetryable,
-            retainsAcceptedCompanionHrvUntilSuccess,
+            retainsAcceptedWorkUntilSuccess,
             activeJob.id === job.id ? replacementPayload : undefined,
           );
         })
@@ -1871,6 +1947,15 @@ function normalizeExecutionError(error: unknown): {
   retryable: boolean;
   accountStatus?: "reauthorization_required" | "disconnected" | null;
 } {
+  if (error instanceof JunctionSparseCalendarRepairNormalizationError) {
+    return {
+      code: error.code,
+      details: {},
+      message: error.message,
+      retryable: true,
+    };
+  }
+
   if (isDeviceSyncError(error)) {
     return {
       code: error.code,
@@ -2176,6 +2261,21 @@ function readCanonicalDeviceImportEventCount(value: unknown): number {
   return record && Array.isArray(record.events) ? record.events.length : 0;
 }
 
+function readCanonicalDeviceImportEventDayKeys(value: unknown): string[] {
+  const record = toPlainRecord(value);
+  if (!record || !Array.isArray(record.events)) {
+    return [];
+  }
+
+  return [...new Set([
+    ...record.events.flatMap((event) => {
+      const dayKey = toPlainRecord(event)?.dayKey;
+      return typeof dayKey === "string" ? [dayKey] : [];
+    }),
+    ...readStringArray(record.affectedEventDayKeys),
+  ].filter((dayKey) => /^\d{4}-\d{2}-\d{2}$/u.test(dayKey)))].sort();
+}
+
 function shouldPreserveJunctionLastSyncCompletedAt(input: {
   activeJobs: readonly DeviceSyncJobRecord[];
   scheduledJobs: readonly DeviceSyncJobInput[];
@@ -2225,6 +2325,41 @@ function readCanonicalDeviceImportEventExternalRefResourceIds(value: unknown): s
     return typeof externalRef?.resourceId === "string"
       ? [externalRef.resourceId]
       : [];
+  });
+}
+
+function readCanonicalDeviceImportSparseCalendarTargets(value: unknown): Array<{
+  dayKey: string;
+  sourceInstanceId?: string | null;
+  sourceProviderSlug: string;
+  sourceType?: string;
+}> {
+  const record = toPlainRecord(value);
+  if (!record || !Array.isArray(record.affectedSparseCalendarTargets)) {
+    return [];
+  }
+  return record.affectedSparseCalendarTargets.flatMap((value) => {
+    const target = toPlainRecord(value);
+    const dayKey = target?.dayKey;
+    const sourceProviderSlug = target?.sourceProviderSlug;
+    if (
+      typeof dayKey !== "string"
+      || !/^\d{4}-\d{2}-\d{2}$/u.test(dayKey)
+      || typeof sourceProviderSlug !== "string"
+      || !sourceProviderSlug
+    ) {
+      return [];
+    }
+    const sourceInstanceId = target.sourceInstanceId;
+    const sourceType = target.sourceType;
+    return [{
+      dayKey,
+      ...(typeof sourceInstanceId === "string" || sourceInstanceId === null
+        ? { sourceInstanceId }
+        : {}),
+      sourceProviderSlug,
+      ...(typeof sourceType === "string" ? { sourceType } : {}),
+    }];
   });
 }
 

@@ -1526,6 +1526,18 @@ describe('assistant skill assets', () => {
 
     const raw = await readSkillFile(supplementSkill)
 
+    expect(raw).toContain(
+      'For connected or saved-meal nutrient questions, also read `food-journal`',
+    )
+    expect(raw).toContain(
+      'missing or partial meal coverage is not zero intake',
+    )
+    expect(raw).toContain(
+      'source-app targets and percentages are not imported',
+    )
+    expect(raw).toContain(
+      'one day of food records cannot diagnose a deficiency',
+    )
     expect(raw).toContain('vault-cli supplement search-labels`')
     expect(raw).toContain('vault-cli\nsupplement search-labels-batch`')
     expect(raw).toContain('preserve the full active ingredient panel')
