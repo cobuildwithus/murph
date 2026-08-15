@@ -918,11 +918,38 @@ describe('Codex assistant registry helpers', () => {
         { cachedInput: 33920, input: 34100, output: 80 },
       ],
       requestsTruncated: false,
-      schema: 'murph.assistant-turn-profile.v1',
+      schema: 'murph.assistant-turn-profile.v2',
       tools: [
-        { calls: 1, durationMs: 900, label: 'images.generate', outputChars: 40 },
-        { calls: 1, durationMs: 420, label: 'vault-cli samples query', outputChars: 2048 },
-        { calls: 1, durationMs: 35, label: 'grep', outputChars: 512 },
+        {
+          calls: 1,
+          durationKnownCalls: 1,
+          durationMs: 900,
+          failedCalls: 0,
+          kind: 'mcp_tool',
+          label: 's6_imagest8_generate',
+          outputBytesMax: 40,
+          outputBytesTotal: 40,
+        },
+        {
+          calls: 1,
+          durationKnownCalls: 1,
+          durationMs: 420,
+          failedCalls: 0,
+          kind: 'command',
+          label: 'command',
+          outputBytesMax: 2048,
+          outputBytesTotal: 2048,
+        },
+        {
+          calls: 1,
+          durationKnownCalls: 1,
+          durationMs: 35,
+          failedCalls: 0,
+          kind: 'command',
+          label: 'search',
+          outputBytesMax: 512,
+          outputBytesTotal: 512,
+        },
       ],
       toolsTruncated: false,
     })
@@ -946,7 +973,332 @@ describe('Codex assistant registry helpers', () => {
     expect(parsed.turnProfileJson).toEqual(usage.turnProfileJson)
   })
 
-  it('attributes a compound command duration to its ordered safe executable heads', () => {
+  it('separates tool kinds and distinguishes unknown duration from measured zero', () => {
+    const profile = buildAssistantCodexTurnProfileJson({
+      rawEvents: [
+        { method: 'turn/started', params: { turn: { id: 'turn_exact_metrics' } } },
+        {
+          method: 'item/completed',
+          params: {
+            item: {
+              type: 'commandExecution',
+              command: 'grep private-query',
+              aggregatedOutput: 'é',
+            },
+          },
+        },
+        {
+          method: 'item/completed',
+          params: {
+            item: {
+              type: 'commandExecution',
+              command: 'rg private-query',
+              aggregatedOutput: '🙂',
+              durationMs: 0,
+              exitCode: 1,
+            },
+          },
+        },
+        {
+          method: 'item/completed',
+          params: {
+            item: {
+              type: 'commandExecution',
+              command: 'grep private-query',
+              aggregatedOutput: '',
+              durationMs: Number.MAX_SAFE_INTEGER + 1,
+            },
+          },
+        },
+        {
+          method: 'item/completed',
+          params: {
+            item: {
+              type: 'dynamicToolCall',
+              tool: 'search',
+              contentItems: 'é',
+              durationMs: 0,
+            },
+          },
+        },
+      ],
+      turnId: 'turn_exact_metrics',
+    })
+
+    expect(profile?.tools).toEqual([
+      {
+        calls: 3,
+        durationKnownCalls: 1,
+        durationMs: 0,
+        failedCalls: 1,
+        kind: 'command',
+        label: 'search',
+        outputBytesMax: 4,
+        outputBytesTotal: 6,
+      },
+      {
+        calls: 1,
+        durationKnownCalls: 1,
+        durationMs: 0,
+        failedCalls: 0,
+        kind: 'dynamic_tool',
+        label: 'n0_t6_search',
+        outputBytesMax: 2,
+        outputBytesTotal: 2,
+      },
+    ])
+    expect(JSON.stringify(profile)).not.toContain('private-query')
+  })
+
+  it('uses canonical collision-free tool identities and fails closed on unsafe components', () => {
+    const toolEvent = (
+      id: string,
+      namespace: string,
+      tool: string,
+    ) => ({
+      method: 'item/completed',
+      params: {
+        item: {
+          contentItems: '',
+          id,
+          namespace,
+          tool,
+          type: 'dynamicToolCall',
+        },
+      },
+    })
+    const profile = buildAssistantCodexTurnProfileJson({
+      rawEvents: [
+        { method: 'turn/started', params: { turn: { id: 'turn_tool_identity' } } },
+        toolEvent('item_1', 'a.b', 'c'),
+        toolEvent('item_2', 'a', 'b.c'),
+        toolEvent('item_3', 'ab', 'c'),
+        toolEvent('item_4', 'a', 'bc'),
+        toolEvent('item_5', 'private/path', 'c'),
+        toolEvent('item_6', 'private-prefix-that-is-deliberately-longer-than-forty-eight-characters', 'c'),
+      ],
+      turnId: 'turn_tool_identity',
+    })
+
+    expect(profile?.tools).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        calls: 4,
+        kind: 'dynamic_tool',
+        label: 'dynamic_tool',
+      }),
+      expect.objectContaining({
+        calls: 1,
+        kind: 'dynamic_tool',
+        label: 'n1_at2_bc',
+      }),
+      expect.objectContaining({
+        calls: 1,
+        kind: 'dynamic_tool',
+        label: 'n2_abt1_c',
+      }),
+    ]))
+    const serialized = JSON.stringify(profile)
+    expect(serialized).not.toContain('a.b')
+    expect(serialized).not.toContain('b.c')
+    expect(serialized).not.toContain('private/path')
+    expect(serialized).not.toContain('private-prefix')
+  })
+
+  it('counts every canonical structural failure signal without reading error text', () => {
+    const commandEvent = (
+      id: string,
+      outcome: Record<string, unknown>,
+    ) => ({
+      method: 'item/completed',
+      params: {
+        item: {
+          aggregatedOutput: '',
+          command: 'curl https://private.example',
+          id,
+          type: 'commandExecution',
+          ...outcome,
+        },
+      },
+    })
+    const profile = buildAssistantCodexTurnProfileJson({
+      rawEvents: [
+        { method: 'turn/started', params: { turn: { id: 'turn_failures' } } },
+        commandEvent('item_1', { exitCode: 2 }),
+        commandEvent('item_2', { exit_code: '3' }),
+        commandEvent('item_3', { success: false }),
+        commandEvent('item_4', { status: 'error' }),
+        commandEvent('item_5', { status: 'errored' }),
+        commandEvent('item_6', { status: 'failed' }),
+        commandEvent('item_7', {
+          error: { message: 'private error text is not a structural signal' },
+          status: 'completed',
+          success: true,
+        }),
+      ],
+      turnId: 'turn_failures',
+    })
+
+    expect(profile?.tools).toEqual([
+      {
+        calls: 7,
+        durationKnownCalls: 0,
+        durationMs: 0,
+        failedCalls: 6,
+        kind: 'command',
+        label: 'curl',
+        outputBytesMax: 0,
+        outputBytesTotal: 0,
+      },
+    ])
+    expect(JSON.stringify(profile)).not.toContain('private error text')
+  })
+
+  it('drops the profile when a grouped aggregate would overflow a safe integer', () => {
+    const dynamicEvent = (id: string, durationMs: number) => ({
+      method: 'item/completed',
+      params: {
+        item: {
+          contentItems: '',
+          durationMs,
+          id,
+          tool: 'lookup',
+          type: 'dynamicToolCall',
+        },
+      },
+    })
+    expect(buildAssistantCodexTurnProfileJson({
+      rawEvents: [
+        { method: 'turn/started', params: { turn: { id: 'turn_overflow' } } },
+        dynamicEvent('item_1', Number.MAX_SAFE_INTEGER),
+        dynamicEvent('item_2', 1),
+      ],
+      turnId: 'turn_overflow',
+    })).toBeNull()
+  })
+
+  it('attributes reviewed display families without persisting arguments or output', () => {
+    const privateOutput = 'private-output🙂'
+    const profile = buildAssistantCodexTurnProfileJson({
+      rawEvents: [
+        { method: 'turn/started', params: { turn: { id: 'turn_safe_families' } } },
+        {
+          method: 'item/completed',
+          params: {
+            item: {
+              type: 'commandExecution',
+              command: 'bash -lc "vault-cli memory show private-record"',
+              aggregatedOutput: privateOutput,
+              durationMs: 120,
+              exitCode: 1,
+            },
+          },
+        },
+        {
+          method: 'item/completed',
+          params: {
+            item: {
+              type: 'commandExecution',
+              command: 'cat private-path',
+              aggregatedOutput: 'é',
+              durationMs: 20,
+            },
+          },
+        },
+        {
+          method: 'item/completed',
+          params: {
+            item: {
+              type: 'commandExecution',
+              command: 'curl https://private.example/path?query=private',
+              aggregatedOutput: '',
+              durationMs: 19,
+            },
+          },
+        },
+        {
+          method: 'item/completed',
+          params: {
+            item: {
+              type: 'commandExecution',
+              command: 'private-head safe-looking-subcommand private-query',
+              aggregatedOutput: '',
+              durationMs: 9,
+            },
+          },
+        },
+        {
+          method: 'item/completed',
+          params: {
+            item: {
+              type: 'commandExecution',
+              command: 'vault-cli memory private-subcommand private-query',
+              aggregatedOutput: '',
+              durationMs: 8,
+            },
+          },
+        },
+      ],
+      turnId: 'turn_safe_families',
+    })
+
+    expect(profile?.tools).toEqual([
+      {
+        calls: 1,
+        durationKnownCalls: 1,
+        durationMs: 120,
+        failedCalls: 1,
+        kind: 'command',
+        label: 'vault-cli memory show',
+        outputBytesMax: Buffer.byteLength(privateOutput, 'utf8'),
+        outputBytesTotal: Buffer.byteLength(privateOutput, 'utf8'),
+      },
+      {
+        calls: 1,
+        durationKnownCalls: 1,
+        durationMs: 20,
+        failedCalls: 0,
+        kind: 'command',
+        label: 'cat',
+        outputBytesMax: 2,
+        outputBytesTotal: 2,
+      },
+      {
+        calls: 1,
+        durationKnownCalls: 1,
+        durationMs: 19,
+        failedCalls: 0,
+        kind: 'command',
+        label: 'curl',
+        outputBytesMax: 0,
+        outputBytesTotal: 0,
+      },
+      {
+        calls: 2,
+        durationKnownCalls: 2,
+        durationMs: 17,
+        failedCalls: 0,
+        kind: 'command',
+        label: 'command',
+        outputBytesMax: 0,
+        outputBytesTotal: 0,
+      },
+    ])
+    const serialized = JSON.stringify(profile)
+    for (const privateValue of [
+      'private-record',
+      'private-path',
+      'https://private.example/path?query=private',
+      'private-head',
+      'safe-looking-subcommand',
+      'private-subcommand',
+      'private-query',
+      privateOutput,
+    ]) {
+      expect(serialized).not.toContain(privateValue)
+    }
+  })
+
+  it('collapses compound command text to the finite command family', () => {
     const profile = buildAssistantCodexTurnProfileJson({
       rawEvents: [
         { method: 'turn/started', params: { turn: { id: 'turn_compound_command' } } },
@@ -980,9 +1332,13 @@ describe('Codex assistant registry helpers', () => {
     expect(profile?.tools).toEqual([
       {
         calls: 1,
+        durationKnownCalls: 1,
         durationMs: 19_194,
-        label: 'cat node',
-        outputChars: 14,
+        failedCalls: 0,
+        kind: 'command',
+        label: 'command',
+        outputBytesMax: 14,
+        outputBytesTotal: 14,
       },
     ])
     expect(JSON.stringify(profile)).not.toContain('private-record')
@@ -1009,10 +1365,11 @@ describe('Codex assistant registry helpers', () => {
       commands: [
         {
           argv: ['food', 'search-labels-batch', '--query', 'private-query-a'],
-          data: { privateResult: 'private-output-a' },
+          data: { privateResult: 'private-output-a-é' },
           durationMs: 12_000,
           index: 0,
           ok: true,
+          outputBytes: 39,
           outputChars: 300_000,
           stdout: '',
         },
@@ -1022,8 +1379,9 @@ describe('Codex assistant registry helpers', () => {
           error: { message: 'private-failure-a' },
           index: 1,
           ok: false,
+          outputBytes: 20,
           outputChars: 200_000,
-          stdout: 'private-output-b',
+          stdout: 'private-output-b🙂',
         },
         {
           argv: ['meal', 'totals', '--from', '2026-01-01'],
@@ -1031,6 +1389,7 @@ describe('Codex assistant registry helpers', () => {
           durationMs: 1_000,
           index: 2,
           ok: true,
+          outputBytes: 36,
           outputChars: 900,
           stdout: '',
         },
@@ -1040,6 +1399,7 @@ describe('Codex assistant registry helpers', () => {
           error: { message: 'private-failure-b' },
           index: 3,
           ok: false,
+          outputBytes: 16,
           outputChars: 50,
           stdout: 'private-output-d',
         },
@@ -1069,23 +1429,33 @@ describe('Codex assistant registry helpers', () => {
     expect(profile?.tools).toEqual([
       {
         calls: 2,
+        durationKnownCalls: 2,
         durationMs: 19_000,
         failedCalls: 1,
+        kind: 'command',
         label: 'food.search-labels-batch',
-        outputChars: 500_000,
+        outputBytesMax: 39,
+        outputBytesTotal: 59,
       },
       {
         calls: 1,
+        durationKnownCalls: 1,
         durationMs: 1_000,
+        failedCalls: 0,
+        kind: 'command',
         label: 'meal.totals',
-        outputChars: 900,
+        outputBytesMax: 36,
+        outputBytesTotal: 36,
       },
       {
         calls: 1,
+        durationKnownCalls: 1,
         durationMs: 400,
         failedCalls: 1,
+        kind: 'command',
         label: 'other',
-        outputChars: 50,
+        outputBytesMax: 16,
+        outputBytesTotal: 16,
       },
     ])
     const persisted = parseAssistantUsageRecord({
@@ -1131,6 +1501,7 @@ describe('Codex assistant registry helpers', () => {
       error: index === 8 ? { message: 'private-failure' } : undefined,
       index,
       ok: index !== 8,
+      outputBytes: index === 8 ? 20 : 36,
       outputChars: index === 8 ? 500_000 : index === 9 ? 200 : 10,
       stdout: index === 8 ? 'private-large-output' : '',
     }))
@@ -1162,22 +1533,33 @@ describe('Codex assistant registry helpers', () => {
     expect(profile?.tools).toEqual([
       {
         calls: 1,
+        durationKnownCalls: 1,
         durationMs: 12_000,
         failedCalls: 1,
+        kind: 'command',
         label: 'food.search-labels-batch',
-        outputChars: 500_000,
+        outputBytesMax: 20,
+        outputBytesTotal: 20,
       },
       {
         calls: 1,
+        durationKnownCalls: 1,
         durationMs: 100,
+        failedCalls: 0,
+        kind: 'command',
         label: 'meal.add',
-        outputChars: 200,
+        outputBytesMax: 36,
+        outputBytesTotal: 36,
       },
       {
         calls: 8,
+        durationKnownCalls: 8,
         durationMs: 36,
+        failedCalls: 0,
+        kind: 'command',
         label: 'goal.list',
-        outputChars: 80,
+        outputBytesMax: 36,
+        outputBytesTotal: 288,
       },
     ])
     expect(profile?.toolsTruncated).toBe(false)
@@ -1186,6 +1568,19 @@ describe('Codex assistant registry helpers', () => {
   })
 
   it('falls back to the outer batch label when structured output is unavailable', () => {
+    const aggregatedOutput = JSON.stringify({
+      schema: VAULT_CLI_BATCH_RESULT_SCHEMA,
+      commands: [{
+        argv: ['memory', 'private-health-term'],
+        durationMs: 9,
+        ok: true,
+        outputChars: 20,
+        // An incomplete old producer did not carry an exact representation.
+        data: { privateResult: 'private-output' },
+      }],
+      count: 1,
+      failed: 0,
+    })
     const profile = buildAssistantCodexTurnProfileJson({
       rawEvents: [
         { method: 'turn/started', params: { turn: { id: 'turn_batch_fallback' } } },
@@ -1193,7 +1588,7 @@ describe('Codex assistant registry helpers', () => {
           method: 'item/completed',
           params: {
             item: {
-              aggregatedOutput: 'private malformed output',
+              aggregatedOutput,
               command: `vault-cli batch --command '["memory","private-health-term"]'`,
               durationMs: 10,
               id: 'item_batch_fallback',
@@ -1208,13 +1603,67 @@ describe('Codex assistant registry helpers', () => {
     expect(profile?.tools).toEqual([
       {
         calls: 1,
+        durationKnownCalls: 1,
         durationMs: 10,
+        failedCalls: 0,
+        kind: 'command',
         label: 'vault-cli batch',
-        outputChars: 24,
+        outputBytesMax: Buffer.byteLength(aggregatedOutput, 'utf8'),
+        outputBytesTotal: Buffer.byteLength(aggregatedOutput, 'utf8'),
       },
     ])
+    expect(profile?.toolsTruncated).toBe(true)
     expect(JSON.stringify(profile)).not.toContain('private-health-term')
-    expect(JSON.stringify(profile)).not.toContain('private malformed output')
+    expect(JSON.stringify(profile)).not.toContain('private-output')
+  })
+
+  it('never decomposes a batch-shaped payload from a non-batch command', () => {
+    const aggregatedOutput = JSON.stringify({
+      schema: VAULT_CLI_BATCH_RESULT_SCHEMA,
+      commands: [{
+        argv: ['memory', 'show'],
+        durationMs: 9,
+        ok: false,
+        outputBytes: 0,
+        outputChars: 0,
+        stdout: '',
+      }],
+      count: 1,
+      failed: 1,
+    })
+    const profile = buildAssistantCodexTurnProfileJson({
+      rawEvents: [
+        { method: 'turn/started', params: { turn: { id: 'turn_batch_spoof' } } },
+        {
+          method: 'item/completed',
+          params: {
+            item: {
+              aggregatedOutput,
+              command: 'printf private-batch-payload',
+              durationMs: 10,
+              id: 'item_batch_spoof',
+              type: 'commandExecution',
+            },
+          },
+        },
+      ],
+      turnId: 'turn_batch_spoof',
+    })
+
+    expect(profile?.tools).toEqual([
+      {
+        calls: 1,
+        durationKnownCalls: 1,
+        durationMs: 10,
+        failedCalls: 0,
+        kind: 'command',
+        label: 'printf',
+        outputBytesMax: Buffer.byteLength(aggregatedOutput, 'utf8'),
+        outputBytesTotal: Buffer.byteLength(aggregatedOutput, 'utf8'),
+      },
+    ])
+    expect(profile?.toolsTruncated).toBe(false)
+    expect(JSON.stringify(profile)).not.toContain('private-batch-payload')
   })
 
   it('uses the full safe structured chain when raw shell quoting fails closed', () => {
@@ -1251,9 +1700,13 @@ describe('Codex assistant registry helpers', () => {
     expect(profile?.tools).toEqual([
       {
         calls: 1,
+        durationKnownCalls: 1,
         durationMs: 19_194,
-        label: 'cat node',
-        outputChars: 0,
+        failedCalls: 0,
+        kind: 'command',
+        label: 'command',
+        outputBytesMax: 0,
+        outputBytesTotal: 0,
       },
     ])
     expect(JSON.stringify(profile)).not.toContain('private-record')
@@ -1299,9 +1752,13 @@ describe('Codex assistant registry helpers', () => {
     expect(profile?.tools).toEqual([
       {
         calls: 1,
+        durationKnownCalls: 1,
         durationMs: 19_194,
-        label: 'cat',
-        outputChars: 0,
+        failedCalls: 0,
+        kind: 'command',
+        label: 'command',
+        outputBytesMax: 0,
+        outputBytesTotal: 0,
       },
     ])
     expect(JSON.stringify(profile)).not.toContain('private-tool')
@@ -1311,7 +1768,7 @@ describe('Codex assistant registry helpers', () => {
   it('caps the per-turn profile request series and tool list under the callback payload limit', () => {
     const rawEvents: unknown[] = [
       // Replayed pre-turn tool output must never count toward this turn even
-      // when it would otherwise dominate the top-by-outputChars ranking.
+      // when it would otherwise dominate the top-by-outputBytesTotal ranking.
       {
         method: 'item/completed',
         params: {
@@ -1343,10 +1800,10 @@ describe('Codex assistant registry helpers', () => {
         method: 'item/completed',
         params: {
           item: {
-            type: 'commandExecution',
+            type: 'dynamicToolCall',
             id: `item_${tool}`,
-            command: `tool-${tool}`,
-            aggregatedOutput: 'x'.repeat(tool),
+            tool: `tool-${tool}`,
+            contentItems: 'x'.repeat(tool),
             durationMs: tool,
           },
         },
@@ -1373,8 +1830,8 @@ describe('Codex assistant registry helpers', () => {
     expect(requests[31]).toEqual({ cachedInput: 0, input: 34, output: 1 })
     const tools = profile?.tools as Array<{ label: string }>
     expect(tools).toHaveLength(16)
-    expect(tools[0]).toMatchObject({ label: 'tool-18', outputChars: 18 })
-    expect(tools[15]).toMatchObject({ label: 'tool-3', outputChars: 3 })
+    expect(tools[0]).toMatchObject({ label: 'n0_t7_tool-18', outputBytesTotal: 18 })
+    expect(tools[15]).toMatchObject({ label: 'n0_t6_tool-3', outputBytesTotal: 3 })
     const labels = tools.map((tool) => tool.label)
     expect(labels).not.toContain('replayed-binary')
     expect(labels).not.toContain('tool-1')
@@ -1434,8 +1891,8 @@ describe('Codex assistant registry helpers', () => {
         // Multiple quoted regions are not a single wrapped script; the greedy
         // splice must not surface inner words as a head binary.
         commandEvent('item_9', 'bash -lc "hypertension log" > "out"', 3),
-        // Codex's parsed action recovers only the fixed executable head when
-        // POSIX quote splicing makes the raw shell wrapper fail closed.
+        // Canonical POSIX quote splicing decodes only the outer shell's one
+        // script argv, then the same finite-family resolver inspects it.
         commandEvent(
           'item_10',
           "bash -lc 'rg -n '\\''sleep score'\\'' records'",
@@ -1448,7 +1905,7 @@ describe('Codex assistant registry helpers', () => {
           7,
           [{ type: 'read', command: "sed -n '1,80p' journal.md", path: 'journal.md' }],
         ),
-        // The fallback persists only the executable, not Vault CLI arguments.
+        // The fixed memory-show family persists without its record argument.
         commandEvent(
           'item_12',
           "bash -lc 'vault-cli memory show '\\''private-memory'\\'''",
@@ -1479,6 +1936,9 @@ describe('Codex assistant registry helpers', () => {
             { type: 'search', command: 'rg secret' },
           ],
         ),
+        // Only a direct reviewed search invocation leaves the coarse command
+        // family. Its query is inspected transiently and never persisted.
+        commandEvent('item_16', 'rg private-query records', 11),
       ],
       turnId: 'turn_labels',
     })
@@ -1491,14 +1951,46 @@ describe('Codex assistant registry helpers', () => {
       toolsTruncated: false,
     })
     expect(profile?.tools).toEqual([
-      { calls: 6, durationMs: 60, label: 'command', outputChars: 16 },
-      { calls: 2, durationMs: 20, label: 'murph reminders list', outputChars: 55 },
-      { calls: 2, durationMs: 20, label: 'vault-cli', outputChars: 46 },
-      { calls: 1, durationMs: 10, label: 'vault-cli samples query', outputChars: 20 },
-      { calls: 1, durationMs: 10, label: 'grep', outputChars: 15 },
-      { calls: 1, durationMs: 10, label: 'a'.repeat(64), outputChars: 10 },
-      { calls: 1, durationMs: 10, label: 'rg', outputChars: 8 },
-      { calls: 1, durationMs: 10, label: 'sed', outputChars: 7 },
+      {
+        calls: 11,
+        durationKnownCalls: 11,
+        durationMs: 110,
+        failedCalls: 0,
+        kind: 'command',
+        label: 'command',
+        outputBytesMax: 40,
+        outputBytesTotal: 141,
+      },
+      {
+        calls: 3,
+        durationKnownCalls: 3,
+        durationMs: 30,
+        failedCalls: 0,
+        kind: 'command',
+        label: 'search',
+        outputBytesMax: 15,
+        outputBytesTotal: 34,
+      },
+      {
+        calls: 1,
+        durationKnownCalls: 1,
+        durationMs: 10,
+        failedCalls: 0,
+        kind: 'command',
+        label: 'sed',
+        outputBytesMax: 7,
+        outputBytesTotal: 7,
+      },
+      {
+        calls: 1,
+        durationKnownCalls: 1,
+        durationMs: 10,
+        failedCalls: 0,
+        kind: 'command',
+        label: 'vault-cli memory show',
+        outputBytesMax: 6,
+        outputBytesTotal: 6,
+      },
     ])
     expect(JSON.stringify(profile)).not.toContain('sleep score')
     expect(JSON.stringify(profile)).not.toContain('private-memory')
@@ -1553,9 +2045,16 @@ describe('Codex assistant registry helpers', () => {
     })
 
     expect(profile?.tools).toEqual([
-      { calls: 6, durationMs: 60, label: 'command', outputChars: 21 },
-      { calls: 1, durationMs: 10, label: 'vault-cli samples query', outputChars: 30 },
-      { calls: 1, durationMs: 10, label: 'ls', outputChars: 9 },
+      {
+        calls: 8,
+        durationKnownCalls: 8,
+        durationMs: 80,
+        failedCalls: 0,
+        kind: 'command',
+        label: 'command',
+        outputBytesMax: 30,
+        outputBytesTotal: 60,
+      },
     ])
   })
 

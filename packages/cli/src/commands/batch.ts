@@ -1,8 +1,9 @@
+import { Buffer } from 'node:buffer'
+
 import { Cli, z } from 'incur'
 import {
   emptyArgsSchema,
-  resolveEffectiveTopLevelToken,
-  resolveRootOptionTokenWithValue,
+  resolveVaultCliCommandPath,
   withBaseOptions,
 } from '@murphai/operator-config/command-helpers'
 import {
@@ -17,6 +18,7 @@ const batchCommandResultSchema = z.object({
   argv: z.array(z.string().min(1)),
   durationMs: z.number().int().nonnegative(),
   ok: z.boolean(),
+  outputBytes: z.number().int().nonnegative(),
   outputChars: z.number().int().nonnegative(),
   stdout: z.string(),
   data: z.unknown().optional(),
@@ -101,10 +103,6 @@ function prepareBatchCommandArgv(argv: readonly string[], vault: string): string
   const normalizedArgv = [...argv]
   assertBatchCommandAllowed(normalizedArgv)
 
-  if (resolveEffectiveTopLevelToken(normalizedArgv) === 'batch') {
-    throw new Error('Nested batch commands are not supported.')
-  }
-
   if (!hasVaultOption(normalizedArgv)) {
     insertDefaultOption(normalizedArgv, ['--vault', vault])
   }
@@ -121,8 +119,12 @@ function assertBatchCommandAllowed(argv: readonly string[]) {
     throw new Error('Batch commands cannot run MCP server mode.')
   }
 
-  const commandPath = readBatchCommandPath(argv)
+  const commandPath = resolveVaultCliCommandPath(argv)
   const [root, subcommand] = commandPath
+
+  if (root === 'batch') {
+    throw new Error('Nested batch commands are not supported.')
+  }
 
   if (root === 'onboard') {
     throw new Error('Batch commands cannot run onboarding setup.')
@@ -137,54 +139,6 @@ function assertBatchCommandAllowed(argv: readonly string[]) {
   if (isAssistantRun) {
     throw new Error('Batch commands cannot run assistant automation.')
   }
-}
-
-function readBatchCommandPath(argv: readonly string[]): string[] {
-  const commandPath: string[] = []
-
-  for (let index = 0; index < argv.length; index += 1) {
-    const token = argv[index]
-    if (!token) {
-      continue
-    }
-
-    if (token === '--') {
-      const nextToken = argv[index + 1]
-      return nextToken ? [nextToken] : commandPath
-    }
-
-    const rootOptionWithValue = resolveRootOptionTokenWithValue(token)
-    if (rootOptionWithValue !== null) {
-      if (!token.includes('=')) {
-        index += 1
-      }
-      continue
-    }
-
-    if (isRootOptionWithoutValue(token)) {
-      continue
-    }
-
-    if (token.startsWith('-')) {
-      continue
-    }
-
-    commandPath.push(token)
-    if (commandPath.length >= 2) {
-      break
-    }
-  }
-
-  return commandPath
-}
-
-function isRootOptionWithoutValue(token: string): boolean {
-  return (
-    token === '--full-output' ||
-    token === '--json' ||
-    token === '--no-config' ||
-    token === '--token-count'
-  )
 }
 
 async function runBatchCommand(input: {
@@ -225,6 +179,7 @@ async function runBatchCommand(input: {
       argv,
       durationMs: elapsedMs(startedAt),
       ok: true,
+      outputBytes: Buffer.byteLength(output, 'utf8'),
       outputChars: output.length,
       stdout: input.compact && parsedOutput.ok ? '' : output,
       ...(parsedOutput.ok ? { data: parsedOutput.data } : {}),
@@ -236,6 +191,7 @@ async function runBatchCommand(input: {
       argv,
       durationMs: elapsedMs(startedAt),
       ok: false,
+      outputBytes: Buffer.byteLength(output, 'utf8'),
       outputChars: output.length,
       stdout: output,
       error: {

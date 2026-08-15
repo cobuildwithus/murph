@@ -84,6 +84,7 @@ test('batch runs multiple vault-cli argv arrays in one process', async () => {
         argv: string[]
         data?: unknown
         ok: boolean
+        outputBytes: number
         outputChars: number
         stdout: string
       }>
@@ -109,6 +110,14 @@ test('batch runs multiple vault-cli argv arrays in one process', async () => {
       result.commands[1]?.outputChars,
       result.commands[1]?.stdout.length,
     )
+    assert.equal(
+      result.commands[0]?.outputBytes,
+      Buffer.byteLength(result.commands[0]?.stdout ?? '', 'utf8'),
+    )
+    assert.equal(
+      result.commands[1]?.outputBytes,
+      Buffer.byteLength(result.commands[1]?.stdout ?? '', 'utf8'),
+    )
     assert.equal(typeof result.commands[0]?.data, 'object')
     assert.equal(typeof result.commands[1]?.data, 'object')
     assert.deepEqual(JSON.parse(result.commands[0]?.stdout ?? ''), result.commands[0]?.data)
@@ -127,6 +136,17 @@ test('batch compact mode removes duplicate parsed JSON bytes without changing th
 
   try {
     await runCli(['init', '--vault', vault, '--format', 'json'])
+    await runCli([
+      'memory',
+      'upsert',
+      'Préfère les réponses concises 🙂.',
+      '--section',
+      'Preferences',
+      '--vault',
+      vault,
+      '--format',
+      'json',
+    ])
 
     const raw = await runCli([
       'batch',
@@ -144,6 +164,7 @@ test('batch compact mode removes duplicate parsed JSON bytes without changing th
       commands: Array<{
         data?: unknown
         ok: boolean
+        outputBytes: number
         outputChars: number
         stdout: string
       }>
@@ -153,6 +174,16 @@ test('batch compact mode removes duplicate parsed JSON bytes without changing th
     assert.deepEqual(result.commands.map((command) => command.stdout), ['', ''])
     assert.equal(
       result.commands.every((command) => command.outputChars > 0),
+      true,
+    )
+    assert.equal(
+      result.commands.every((command) => command.outputBytes > 0),
+      true,
+    )
+    assert.equal(
+      result.commands.some(
+        (command) => command.outputBytes > command.outputChars,
+      ),
       true,
     )
     assert.equal(typeof result.commands[0]?.data, 'object')
@@ -331,6 +362,8 @@ test('batch rejects setup, interactive, and assistant automation child commands'
       '["assistant","run","--once"]',
       '--command',
       '["--filter-output","--once","assistant","run"]',
+      '--command',
+      '["--","assistant","run"]',
       '--format',
       'json',
     ])
@@ -344,8 +377,9 @@ test('batch rejects setup, interactive, and assistant automation child commands'
       }>
     }
 
-    assert.equal(result.failed, 9)
+    assert.equal(result.failed, 10)
     assert.deepEqual(result.commands.map((command) => command.ok), [
+      false,
       false,
       false,
       false,

@@ -28,6 +28,19 @@ Runner bundle assembly esbuild-bundles two boot-critical surfaces with byte budg
 The device-sync package boundary suite also walks the static source graph from the runner's runtime-config entrypoint and rejects provider runtime modules, importer modules, and the Junction SDK. This focused gate catches boot-closure ownership regressions before the packed-bundle guard validates the final esbuild metafile.
 Hosted assistant delivery recovery now relies on committed side-effect state inside the encrypted workspace and the web-owned hosted workspace checkpoint.
 
+## Assistant Turn-Profile V2 Rollout
+
+Deploy Web's shared hosted-execution reader first; it accepts both v1 and v2
+turn profiles. Then deploy the runner bundle, whose assistant producer writes
+v2 only. There is no dual-write or backfill. If a new runner reaches an older
+Web during skew, Web drops only the optional v2 profile; the surrounding usage
+row and token accounting still persist.
+
+Roll back the runner writer to v1 first, then roll back Web if needed. Verify
+the managed runner fingerprint, confirm newly persisted profiles use v2, and
+confirm usage rows retain their token totals when optional profile validation
+fails. Historical rows remain unchanged.
+
 ## Browser Vault Shard Rollout
 
 Deploy the Web dual reader first. It advertises fixed `core`, `metrics-index`,
