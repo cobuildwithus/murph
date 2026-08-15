@@ -22,6 +22,17 @@ batch write. Keep raw rows out of model context and user-facing replies.
 
 ## Preserve and map an unfamiliar source
 
+Before writing any helper or command output, create one private attempt
+directory under `.runtime/tmp/workout-csv-import/` and keep every ephemeral
+file for this import inside it: the Python helper, inspection and schema
+receipts, transformed JSONL, digest, dry-run/apply/status/readback receipts,
+errors, and summaries. Use an unpredictable attempt name and restrictive
+permissions. Remove the whole attempt directory after success, a clarification,
+or any handled failure. If the process or workspace stops first, do not move
+these files elsewhere for recovery: `.runtime/tmp/**` is excluded from hosted
+snapshots, and canonical source/import-audit state is the later-turn recovery
+owner.
+
 1. Preserve the CSV once with `vault-cli document import <readable-file-path>
    --source import --title "Workout CSV source" --reuse-exact --format json`.
    This exact-byte mode reuses a prior live source document across turns instead
@@ -90,9 +101,10 @@ batch write. Keep raw rows out of model context and user-facing replies.
 
 ## Validate, apply, and verify
 
-1. Write all grouped workouts to one temporary JSONL file. Record its SHA-256
-   digest and privacy-safe aggregates: source rows, grouped workouts, ignored
-   rows by reason, and the mapped date range. Do not log raw rows.
+1. Write all grouped workouts to one JSONL file in the current private attempt
+   directory. Record its SHA-256 digest and privacy-safe aggregates there:
+   source rows, grouped workouts, ignored rows by reason, and the mapped date
+   range. Do not log raw rows.
 2. Dry-run the complete file:
 
    `vault-cli event import-jsonl --input @<temporary.jsonl> --source-raw-ref-once <raw-file-ref> --format json`
