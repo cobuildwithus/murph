@@ -615,6 +615,113 @@ only when a non-PR task would otherwise require a broader local command. The
 text-only docs/process fast path remains the default for eligible Markdown-only
 docs work unless the change will be pushed directly to a shared default branch.
 
+The local Frog autofix entrypoint uses `scripts/frog-autofix scan` for a
+non-repairing live admission proof. The command may fetch `origin/main` and
+query public issue metadata, but it must not create durable autofix state or a
+worktree, start Codex, edit GitHub state, or print issue titles/bodies. Focused
+implementation proof includes the real leader-first descendant timeout,
+parent-owned ReviewGPT/patch boundaries, network-denied worker arguments,
+tracked/untracked/ignored interruption recovery, revoked-authority/head/check/
+conflict rejection, both sides of real Git renames/copies, product-runtime
+merge pausing, complete trusted prompt-preset and delegated specialist-lens
+coverage, final-retrospective
+handoff and queue advancement, same-named fork/different-operator rejection,
+closed-unmerged and descendant-head handoff continuity, terminal versus
+transient required-check classification, conflict disposition, real native
+two-contender serialization, operator-created but foreign-edited baseline/PASS/
+open-and-closed-handoff rejection with safe body recovery, parent-local
+baseline plus exact/ancestor human-handoff preservation when a foreign body
+edit is composed with an unchanged or newer same-repository branch head,
+pre-tooling handoff return with dirty bytes unchanged and no child/model/push,
+remote-only PASS recovery, fixed-body handoff when no trusted baseline remains,
+implementation prompts whose archives contain only the exact immutable
+`origin/main` friction task blob and path/digest manifest, and do not request or
+use a mutable GitHub-content connector,
+parent-verified worker authority that rejects candidate task/Frog-skill/
+worker-template or root/nested `AGENTS.md` changes, including ignored untracked
+instructions, before and after child execution; validates protected paths from
+Git's parsed patch targets; and binds the task, skill, and instruction
+paths/digests into the child prompt,
+task edit/move/delete/replacement/binding-drift rejection after long waits and
+at both merge fences including final-scope ref movement, fresh post-wait task
+reads, trusted remote-no-PR task provenance, terminal missing or
+rejected patch/response and edit-only worker outcomes that publish a fixed-body
+empty-tree handoff without candidate bytes or a second implementation, local
+terminal recovery before remote synchronization, foreign deterministic-branch
+preservation, cross-process pre/post-neutral-body recovery using the immutable
+first-reviewed candidate, exact current-neutral/candidate and branch-
+nonexistence lease authorization, plus
+retryable post-worker authority infrastructure after the parent commit,
+unchanged-PR ancestor normalization that preserves the pre-remote PR-head
+marker while discarding unpushed candidate bytes without a push, non-ancestor
+and projection-drift rejection, and next-issue advancement,
+100-plus-record
+cursor pagination before parent cardinality, clean post-commit/pre-first-push
+resume without a second implementation request or child, exact parent-local
+body/head provenance for push-before-PR recovery plus rejection of seeded or
+stale-tracking remote-no-PR branches, issue-authority revocation before push and
+before draft creation, mandatory foul-play prompt ordering, unrelated hostile
+evidence ignore behavior, boundary-weakening task/candidate refusal,
+parent-local review-body archive binding with changed digest/editor/body/head
+rejection before and after each model wait and before metadata persistence,
+fresh trusted-review-control comparison after each canonical model wait and at
+both finalization refreshes with exact-head handoff on drift,
+loaded-runner-version comparison against each of those freshly fetched refs,
+with unrelated main movement allowed and exact-head handoff before response
+acceptance, merge, or issue closure on loaded authority drift,
+candidate-and-runner-bound persisted PASS recovery that rejects legacy or
+drifted evidence across restarts, plus frozen scriptless primary dependency
+reconciliation before the mutating parent loads, dependency-free exact-process-
+group supervision with a fixed deadline and confirmed descendant cleanup before
+native-lock release, foreign numeric process-group reuse refusal, bootstrap
+loaded-runner coverage, lockfile coverage in
+the trusted review-control inventory, and a real macOS install/`RunAtLoad`
+handoff that waits only at the generated launcher boundary, admits exactly once
+after prompt gate release, times out behind a longer repair, and retains the
+same native-gate inode,
+operator-handoff preservation during a blocked model review, non-closing exact
+issue binding across short and full-URL forms plus parent-only post-merge
+closure and never-closed retry that refuses deliberate reopen,
+strict kind-specific specialist/final response structure, one final
+implementation completion marker, and production composition of implementation
+and canonical preliminary/final ZIPs with exact task/skill bytes and manifests
+plus fail-closed omission proof and filename-independent exactly-one bounded
+regular-archive selection with stale parent-owned archive replacement on retry,
+an explicit Frog script allowlist that excludes the GitHub Actions-owned
+`scripts/frog-pr-context.ts` on direct/rename/copy paths, and fixed content-free
+foreground admission/implementation/review/check/merge progress with an
+explicit success terminal line. A macOS
+permission smoke must also apply the exact native worker profile and prove an
+in-worktree read/write succeeds while an outside-root read and a network
+request fail:
+
+```sh
+pnpm exec vitest run scripts/frog-autofix.test.ts \
+  --config scripts/vitest.config.ts --no-coverage
+pnpm exec vitest run packages/cli/test/release-script-coverage-audit.test.ts \
+  --config packages/cli/vitest.workspace.ts --no-coverage
+bash -n scripts/frog-autofix scripts/package-audit-context-full.sh
+scripts/frog-autofix verify-permissions
+scripts/frog-autofix scan
+```
+
+After the owning PR merges, installation proof must run from the exact clean
+primary checkout: install with the intended Codex home, confirm `status`
+reports `loaded=yes` and `interval_seconds=7200`, inspect the generated plist,
+launcher, relative locators, lock, and bounded event log for owner-only modes
+and identifier/credential absence. Confirm the stable native gate remains while
+the JSON owner record clears and that `RunAtLoad` records a prompt first
+admission rather than disappearing behind installation, then invoke one manual
+`run`. When no
+committed eligible binding exists, success is a no-worker event. When one does
+exist, the exact GitHub PR/check/merge/issue lifecycle is the required end-to-
+end proof; a locally successful child exit alone is not completion evidence.
+For a local-agent-only test issue, require automatic merge plus closure. For any
+diff outside the narrow local-agent classifier, require a ready reviewed PR and
+open issue, then confirm the runner reports `awaiting_human_merge` without a
+merge or close call.
+
+
 ## Hosted Temporal Replay Proof
 
 Private `cobuildwithus/murph-cloud` owns the Temporal Workflows, Activities,
