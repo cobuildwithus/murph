@@ -30,8 +30,8 @@ Updated: 2026-08-15
 ## Scope
 
 - In scope: Cloudflare Queue consumer batching, signed Web admission, shared
-  device-ingress batch ownership, database adapters, value-free observability,
-  focused load/concurrency proof, and operations documentation.
+  device-ingress scalar ownership, value-free observability, focused
+  load/concurrency proof, and operations documentation.
 - Out of scope: provider payload coalescing, relaxed consent or provider
   authority checks, schema changes without a proven need, foreground sync
   degradation, or removing the existing retry/DLQ safety net.
@@ -103,14 +103,22 @@ Updated: 2026-08-15
 - Use 100 as the callback count ceiling, but partition dynamically when the
   exact UTF-8 body would exceed 2 MiB. This preserves the common one-callback
   path without making maximum-size valid events fail Web parsing.
-- Preserve same-account ordering. The observed peak was concentrated (about
-  65% in one account), so the conservative 10x lower-bound model is roughly 58
-  minutes at 200 ms/event or 2.4 hours at 500 ms/event. A hypothetical evenly
-  loaded four-account burst approaches 22 and 56 minutes, respectively.
+- Preserve non-overlap and input-order attempt starts within one account. As in
+  the base path, a later event may be durably accepted after an earlier attempt
+  returns retry. The observed peak was concentrated (about 65% in one account),
+  so the conservative 10x lower-bound model is roughly 58 minutes at 200
+  ms/event or 2.4 hours at 500 ms/event. A hypothetical evenly loaded
+  four-account burst approaches 22 and 56 minutes, respectively.
 - Accepted the preliminary telemetry finding and retained direct value-free Web
   and Worker marker-exclusion tests. Withdrew the claimed composed PostgreSQL
   proof after final ReviewGPT showed that its empty registry exercised only
   trace claim/completion, not the registered-provider durable path.
+- ReviewGPT round 3 verified the retrospective deletion and production code
+  invariants, then found stale rollout/reliability prose and missing direct
+  compatibility proof. The correction records Web-before-Worker version skew,
+  updates the canonical 100-entry/four-lane contract, proves Web accepts both
+  25 and 100 entries while rejecting 101, and proves a non-success Web response
+  retries every exact Queue message without acknowledgement.
 
 ## ReviewGPT retrospective
 
@@ -135,20 +143,23 @@ Updated: 2026-08-15
 
 ## Verification
 
-- Focused Web batch, signed-route, and scalar trace-store tests: 7, 4, and 4
-  passed. Coverage retains 100-entry same-account order, four active account
-  lanes, input-order results, per-event deadline retention, sibling failure
-  isolation, and cross-account failure isolation.
-- Signed Web route tests: 4 passed at the 100-entry contract and four-lane bound.
+- Focused Web batch, signed-route, and scalar trace-store tests: 7, 5, and 4
+  passed. Coverage retains 100-entry same-account input-order attempt starts,
+  four active account lanes, input-order results, per-event deadline retention,
+  sibling failure isolation, and cross-account failure isolation.
+- Signed Web route tests: 5 passed, directly covering compatible 25- and
+  100-entry callbacks, the four-lane bound, and 101-entry rejection.
 - Shared device ingress returned to its existing scalar owner; all 80 focused
   tests passed after removal of the cross-event claim API.
-- Cloudflare Worker: 11 focused tests passed, including one ordinary 100-entry
-  callback, exact 2 MiB body partitioning, independent dispositions, and
-  explicit success/failure telemetry privacy assertions.
+- Cloudflare Worker: 12 focused tests passed, including one ordinary 100-entry
+  callback, exact 2 MiB body partitioning, independent dispositions, whole-
+  callback non-success retry, and explicit success/failure telemetry privacy
+  assertions.
 - Hosted transport package: 7 focused tests passed.
 - Web, device-syncd, Cloudflare Worker, and hosted-control typechecks passed.
 - Preliminary ReviewGPT returned two coverage findings. The telemetry finding
   is resolved. The maximum-cardinality finding led first to an inadequate
   trace-only proof and then to this retrospective deletion of future-work trace
-  batching. A fresh final ReviewGPT round and corrected exact-head CI remain
-  pending.
+  batching. Round 3 returned documentation and direct-proof findings after
+  verifying the corrected production path; those findings are resolved and a
+  fresh final ReviewGPT round plus corrected exact-head CI remain pending.

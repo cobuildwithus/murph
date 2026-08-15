@@ -1139,13 +1139,14 @@ Last verified: 2026-08-14
   and payload bytes do not enter Queue state. The prepared event enters one
   Cloudflare Queue consumer configured for batches of 100, five-second
   collection, concurrency one, ten retries, and an encrypted DLQ. The consumer
-  decrypts outside Postgres and sends sequential Web subbatches of at most 25;
-  Web admits each prepared entry through the existing canonical ingress in an
-  explicit serial loop and never reruns a provider verifier whose secret,
-  parser, or replay window may have rotated. The original receipt instant
-  remains the signature and audit instant, while the trace-processing lease
-  starts when Web admits the queued delivery. Only `accepted` and `duplicate`
-  results ack one Queue
+  decrypts outside Postgres and partitions Web callbacks by exact UTF-8 size at
+  or below the 2 MiB callback ceiling and by at most 100 entries. Web admits the
+  prepared entries through the existing canonical ingress with at most four
+  independent provider-account lanes, one serial event attempt per account
+  lane, and no trace-processing lease until that exact event starts. It never
+  reruns a provider verifier whose secret, parser, or replay window may have
+  rotated. The original receipt instant remains the signature and audit
+  instant. Only `accepted` and `duplicate` results ack one Queue
   message; all failed, missing, malformed, tampered, ambiguous, or unavailable
   results retain only that encrypted message for retry and DLQ recovery.
   Current provider registration, connection epoch/status, consent, source

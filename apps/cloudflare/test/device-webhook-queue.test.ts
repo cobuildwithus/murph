@@ -328,6 +328,28 @@ describe("hosted device webhook Queue consumer", () => {
     }
   });
 
+  it("retries every exact message when Web returns a non-success response", async () => {
+    const envelopes = await Promise.all(
+      Array.from({ length: 3 }, (_, index) => createEnvelope(index)),
+    );
+    const fetchMock = vi.fn(async () =>
+      new Response("temporary failure", { status: 503 })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const messages = envelopes.map(createQueueMessage);
+
+    await handleHostedDeviceWebhookQueueBatch(
+      createQueueBatch(messages),
+      createWorkerEnv(),
+    );
+
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(messages.every((message) => message.retry.mock.calls.length === 1))
+      .toBe(true);
+    expect(messages.every((message) => message.ack.mock.calls.length === 0))
+      .toBe(true);
+  });
+
   it("splits a large valid Queue batch below the signed Web body ceiling", async () => {
     const envelopes = await Promise.all(
       Array.from(
