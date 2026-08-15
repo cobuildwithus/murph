@@ -383,6 +383,22 @@ Updated: 2026-08-14
   remain clean. The combined guard and Node-bootstrap suite passes 116 tests;
   production provider scan, repo-tools TypeScript compilation, docs drift, and
   doc gardening pass on the retrospective implementation.
+- ReviewGPT round 14 accepted two remaining consumers outside the retrospective
+  authority. Identifier transport analysis returned from the single latest
+  transport-expression binding before earlier chronological possibilities,
+  and property projection for destructuring or `Object.assign` read only
+  declaration-time properties rather than indexed member mutations.
+- The correction deletes the single-latest early return. Identifier transport
+  analysis evaluates every `resolvePossibleBindings` value and its transport
+  leaf, retaining prior web-global, Node, and Undici transports after a
+  conditional benign substitution while allowing a definitive benign
+  reassignment to close the set. One effective property-path reader now merges
+  closed declaration values with the existing indexed member mutations; both
+  destructured bindings and `Object.assign` source projection use it, including
+  nested objects and arrays. An uninitialized assignment retains the prior
+  bounded fallback only when the shared variable census has no accessible
+  binding. Lexical shadows remain negative controls. No new registry,
+  exception, scanner, or provider request was added.
 
 ## Verification
 

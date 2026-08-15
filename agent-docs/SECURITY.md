@@ -584,8 +584,12 @@ Last verified: 2026-08-14
   An opaque alias-producing call cannot prove safety: storing a provider-bound
   transport through that member fails at the mutation boundary. Destructured
   declaration/assignment values, nested property paths, and defaults enter the
-  same binding census, so provider URL and transport facts do not disappear
-  when a closed local configuration or namespace is unpacked. The guard also follows strict fetch-shaped
+  same binding census. Conditional benign transport substitution retains every
+  earlier possible transport, while a later definitive benign reassignment
+  remains authoritative. Destructuring or copying a mutated closed member reads
+  its indexed effective values rather than its declaration-time property, so
+  provider URL and transport facts do not disappear when a local configuration
+  or namespace is unpacked or copied. The guard also follows strict fetch-shaped
   wrappers at their nearest lexical binding when they resolve to provider
   literals or provider-configured URL data. Untyped fetch parameters retain
   their exact default expressions, and identifier reads resolve the nearest

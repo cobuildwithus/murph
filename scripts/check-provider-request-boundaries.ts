@@ -1985,7 +1985,11 @@ function readBoundTransportCall(input: {
       }
       const resolving = new Set(input.resolving);
       resolving.add(key);
-      const values = readVariableBindingPossibleValues(binding, input.bindings);
+      const values = readVariableBindingPossibleValues(
+        binding,
+        input.bindings,
+        input.analysis.sourceFile,
+      );
       possibleValueCount += values.length;
       for (const value of values) {
         const possibleBound = readBoundTransportCall({
@@ -2465,6 +2469,7 @@ function inferProviderExpressionFacts(input: {
       for (const value of readVariableBindingPossibleValues(
         binding,
         input.bindings,
+        input.analysis.sourceFile,
       )) {
         mergeProviderExpressionFacts(
           facts,
@@ -4313,7 +4318,11 @@ function resolveStaticMemberInitializer(
   ) {
     return null;
   }
-  const bindingValues = readVariableBindingPossibleValues(binding, bindings);
+  const bindingValues = readVariableBindingPossibleValues(
+    binding,
+    bindings,
+    sourceFile,
+  );
   if (bindingValues.length !== 1) {
     return null;
   }
@@ -4335,6 +4344,7 @@ function resolveStaticMemberInitializer(
       const currentValues = readVariableBindingPossibleValues(
         currentBinding,
         bindings,
+        sourceFile,
       );
       if (currentValues.length !== 1) {
         return null;
@@ -4498,21 +4508,73 @@ function readPossibleStaticPropertyValues(
   return [];
 }
 
-function readVariableBindingPossibleValues(
-  binding: VariableBinding,
+function readEffectiveStaticPropertyPathValues(
+  node: Node,
+  propertyPath: readonly string[],
   bindings: ReadonlyMap<string, readonly VariableBinding[]>,
+  before: number,
+  sourceFile: Node,
 ): Node[] {
-  let values: Node[] = [unwrapExpression(binding.initializer)];
-  for (const propertyName of binding.propertyPath ?? []) {
+  let values: Node[] = [unwrapExpression(node)];
+  for (const propertyName of propertyPath) {
     values = values.flatMap((candidate) =>
       readPossibleStaticPropertyValues(
         candidate,
         propertyName,
         bindings,
-        binding.start - 1,
+        before,
         new Set(),
       )
     );
+  }
+  if (propertyPath.length > 0) {
+    for (const referencePath of readPossibleReferencePaths(node)) {
+      values.push(
+        ...readStaticMemberMutationInitializersForPath(
+          [...referencePath, ...propertyPath],
+          bindings,
+          before,
+          sourceFile,
+        ),
+      );
+    }
+  }
+  return values.filter((value, index) =>
+    values.findIndex((candidate) =>
+      candidate.type === value.type &&
+      candidate.start === value.start &&
+      candidate.end === value.end
+    ) === index
+  );
+}
+
+function readVariableBindingPossibleValues(
+  binding: VariableBinding,
+  bindings: ReadonlyMap<string, readonly VariableBinding[]>,
+  sourceFile?: Node,
+): Node[] {
+  const propertyPath = binding.propertyPath ?? [];
+  let values = sourceFile
+    ? readEffectiveStaticPropertyPathValues(
+        binding.initializer,
+        propertyPath,
+        bindings,
+        binding.start,
+        sourceFile,
+      )
+    : [unwrapExpression(binding.initializer)];
+  if (!sourceFile) {
+    for (const propertyName of propertyPath) {
+      values = values.flatMap((candidate) =>
+        readPossibleStaticPropertyValues(
+          candidate,
+          propertyName,
+          bindings,
+          binding.start - 1,
+          new Set(),
+        )
+      );
+    }
   }
   if (binding.defaultExpression) {
     values.push(unwrapExpression(binding.defaultExpression));
@@ -4533,7 +4595,11 @@ function readPossibleStaticMemberInitializers(
   }
 
   let current = resolvePossibleBindings(bindings, root, before).flatMap(
-    (binding) => readVariableBindingPossibleValues(binding, bindings),
+    (binding) => readVariableBindingPossibleValues(
+      binding,
+      bindings,
+      sourceFile,
+    ),
   );
   for (const propertyName of pathParts.slice(1)) {
     current = current.flatMap((candidate) =>
@@ -4698,6 +4764,20 @@ function readStaticMemberMutationInitializers(
   if (!initialTargetPath || initialTargetPath.length < 2) {
     return [];
   }
+  return readStaticMemberMutationInitializersForPath(
+    initialTargetPath,
+    bindings,
+    before,
+    sourceFile,
+  );
+}
+
+function readStaticMemberMutationInitializersForPath(
+  initialTargetPath: readonly string[],
+  bindings: ReadonlyMap<string, readonly VariableBinding[]>,
+  before: number,
+  sourceFile: Node,
+): Node[] {
   const targets = resolvePossibleStaticMemberPaths(
     initialTargetPath,
     bindings,
@@ -4725,21 +4805,14 @@ function readStaticMemberMutationInitializers(
     value: Node,
     remainingPath: readonly string[],
     position: number,
-  ): Node[] => {
-    let values = [unwrapExpression(value)];
-    for (const propertyName of remainingPath) {
-      values = values.flatMap((candidate) =>
-        readPossibleStaticPropertyValues(
-          candidate,
-          propertyName,
-          bindings,
-          position,
-          new Set(),
-        )
-      );
-    }
-    return values;
-  };
+  ): Node[] =>
+    readEffectiveStaticPropertyPathValues(
+      value,
+      remainingPath,
+      bindings,
+      position,
+      sourceFile,
+    );
 
   const values: Node[] = [];
   for (const candidate of collectStaticMemberMutationCandidates(sourceFile)) {
@@ -5506,25 +5579,11 @@ function isFetchLikeCallTarget(input: {
     ? input.analysis.exactFetchTypeNames
     : input.analysis.fetchTypeNames;
   if (isIdentifier(expression)) {
-    const transport = resolveTransportBinding(
+    const latestTransport = resolveTransportBinding(
       input.analysis.transportBindings,
       expression.name,
       input.before,
     );
-    if (transport?.kind === "expression" && transport.initializer) {
-      const key = `${input.exact ? "exact-" : ""}fetch-assignment:${expression.name}:${transport.start}`;
-      if (input.resolving.has(key)) {
-        return false;
-      }
-      const resolving = new Set(input.resolving);
-      resolving.add(key);
-      return isFetchLikeCallTarget({
-        ...input,
-        before: transport.start,
-        node: transport.initializer,
-        resolving,
-      });
-    }
     const parameter = resolveParameterBinding(
       input.analysis.parameterBindings,
       expression.name,
@@ -5572,68 +5631,79 @@ function isFetchLikeCallTarget(input: {
       });
     }
 
-    const variable = resolveBinding(
+    const variables = resolvePossibleBindings(
       input.bindings,
       expression.name,
       input.before,
     );
-    if (variable) {
-      const transport = resolveTransportBinding(
-        input.analysis.transportBindings,
-        expression.name,
-        input.before,
-      );
-      if (transport?.kind === "call" && transport.start === variable.start) {
-        return true;
+    if (variables.length > 0) {
+      for (const variable of variables) {
+        const transport = resolveTransportBinding(
+          input.analysis.transportBindings,
+          expression.name,
+          variable.start,
+        );
+        if (transport?.kind === "call" && transport.start === variable.start) {
+          return true;
+        }
+        if (
+          variable.typeAnnotation &&
+          (
+            typeTextIsFetchCallable(
+              variable.typeAnnotation,
+              fetchTypeNames,
+            ) ||
+            (input.exact
+              ? looksLikeExactFetchFunctionType(variable.typeAnnotation)
+              : looksLikeFetchFunctionType(variable.typeAnnotation))
+          )
+        ) {
+          return true;
+        }
+        if (
+          !input.exact &&
+          /^fetch(?:er|Impl|Implementation)?$/u.test(expression.name) &&
+          variable.typeAnnotation &&
+          typeTextIsOpaqueNamedReference(variable.typeAnnotation)
+        ) {
+          return true;
+        }
+        const key = `${input.exact ? "exact-" : ""}fetch-variable:${expression.name}:${variable.start}`;
+        if (input.resolving.has(key)) {
+          continue;
+        }
+        const resolving = new Set(input.resolving);
+        resolving.add(key);
+        if (
+          readVariableBindingPossibleValues(
+            variable,
+            input.bindings,
+            input.analysis.sourceFile,
+          ).some(
+            (value) =>
+              isFetchLikeCallTarget({
+                ...input,
+                before: variable.start,
+                node: value,
+                resolving,
+              }) ||
+              functionHasFetchCallSignature(
+                value,
+                input.contents,
+                input.exact,
+              ) ||
+              functionDirectlyForwardsToFetch({
+                ...input,
+                before: variable.start,
+                node: value,
+                resolving,
+              }),
+          )
+        ) {
+          return true;
+        }
       }
-      if (
-        variable.typeAnnotation &&
-        (
-          typeTextIsFetchCallable(
-            variable.typeAnnotation,
-            fetchTypeNames,
-          ) ||
-          (input.exact
-            ? looksLikeExactFetchFunctionType(variable.typeAnnotation)
-            : looksLikeFetchFunctionType(variable.typeAnnotation))
-        )
-      ) {
-        return true;
-      }
-      if (
-        !input.exact &&
-        /^fetch(?:er|Impl|Implementation)?$/u.test(expression.name) &&
-        variable.typeAnnotation &&
-        typeTextIsOpaqueNamedReference(variable.typeAnnotation)
-      ) {
-        return true;
-      }
-      const key = `${input.exact ? "exact-" : ""}fetch-variable:${expression.name}:${variable.start}`;
-      if (input.resolving.has(key)) {
-        return false;
-      }
-      const resolving = new Set(input.resolving);
-      resolving.add(key);
-      return readVariableBindingPossibleValues(variable, input.bindings).some(
-        (value) =>
-          isFetchLikeCallTarget({
-            ...input,
-            before: variable.start,
-            node: value,
-            resolving,
-          }) ||
-          functionHasFetchCallSignature(
-            value,
-            input.contents,
-            input.exact,
-          ) ||
-          functionDirectlyForwardsToFetch({
-            ...input,
-            before: variable.start,
-            node: value,
-            resolving,
-          }),
-      );
+      return false;
     }
 
     const callable = resolveFunctionBinding(
@@ -5660,7 +5730,23 @@ function isFetchLikeCallTarget(input: {
       });
     }
 
-    return transport ? transport.kind === "call" : expression.name === "fetch";
+    if (latestTransport?.kind === "expression" && latestTransport.initializer) {
+      const key = `${input.exact ? "exact-" : ""}fetch-unbound-assignment:${expression.name}:${latestTransport.start}`;
+      if (input.resolving.has(key)) {
+        return false;
+      }
+      const resolving = new Set(input.resolving);
+      resolving.add(key);
+      return isFetchLikeCallTarget({
+        ...input,
+        before: latestTransport.start,
+        node: latestTransport.initializer,
+        resolving,
+      });
+    }
+    return latestTransport
+      ? latestTransport.kind === "call"
+      : expression.name === "fetch";
   }
 
   if (isMemberExpression(expression) || isOptionalMemberExpression(expression)) {

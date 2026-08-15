@@ -2599,4 +2599,86 @@ describe("check-provider-request-boundaries", () => {
     expect(matches.map((match) => match.line)).toEqual([4, 8]);
   });
 
+  it("retains earlier transports across conditional benign reassignment", () => {
+    const matches = violationsOfKind(
+      "raw-provider-http",
+      [
+        "let webSend = globalThis.fetch;",
+        "if (Date.now() > 0) webSend = async (_url: string) => ({ ok: true });",
+        "await webSend('https://api.openai.com/v1/responses', { method: 'POST' });",
+        "const { request: undiciRequest } = await import('undici');",
+        "let undiciSend = undiciRequest;",
+        "if (Date.now() > 0) undiciSend = async (_url: string) => ({ ok: true });",
+        "await undiciSend('https://api.openai.com/v1/responses', { method: 'POST' });",
+        "const httpsNamespace = await import('node:https');",
+        "let nodeSend = httpsNamespace.request;",
+        "if (Date.now() > 0) nodeSend = async (_url: string) => ({ ok: true });",
+        "nodeSend('https://api.openai.com/v1/responses', { method: 'POST' });",
+      ].join("\n"),
+      "scripts/conditional-provider-transports.mts",
+    );
+
+    expect(matches.map((match) => match.line)).toEqual([3, 7, 11]);
+  });
+
+  it("keeps a definite benign transport reassignment clean", () => {
+    const matches = violationsOfKind(
+      "raw-provider-http",
+      [
+        "let send = globalThis.fetch;",
+        "send = async (_url: string) => ({ ok: true });",
+        "await send('https://api.openai.com/v1/responses', { method: 'POST' });",
+      ].join("\n"),
+      "scripts/definitely-reassigned-provider-transport.mts",
+    );
+
+    expect(matches).toEqual([]);
+  });
+
+  it("projects effective member mutations through destructuring and Object.assign", () => {
+    const matches = violationsOfKind(
+      "raw-provider-http",
+      [
+        "const routes = { route: '/internal' };",
+        "routes.route = 'https://api.openai.com/v1/responses';",
+        "const { route: selected } = routes;",
+        "await fetch(selected, { method: 'POST' });",
+        "const source = { route: '/internal' };",
+        "source.route = 'https://api.openai.com/v1/responses';",
+        "const target = { route: '/internal' };",
+        "Object.assign(target, source);",
+        "await fetch(target.route, { method: 'POST' });",
+        "const nested = { holder: { route: '/internal' } };",
+        "nested.holder.route = 'https://api.openai.com/v1/responses';",
+        "const { holder: { route: nestedRoute } } = nested;",
+        "await fetch(nestedRoute, { method: 'POST' });",
+        "const tuple = ['/internal'];",
+        "tuple[0] = 'https://api.openai.com/v1/responses';",
+        "const [tupleRoute] = tuple;",
+        "await fetch(tupleRoute, { method: 'POST' });",
+      ].join("\n"),
+      "scripts/effective-provider-member-projection.mts",
+    );
+
+    expect(matches.map((match) => match.line)).toEqual([4, 9, 13, 17]);
+  });
+
+  it("does not project effective member mutations across lexical shadows", () => {
+    const matches = violationsOfKind(
+      "raw-provider-http",
+      [
+        "const routes = { route: '/internal' };",
+        "{",
+        "  const routes = { route: '/internal' };",
+        "  routes.route = 'https://api.openai.com/v1/responses';",
+        "}",
+        "const { route: selected } = routes;",
+        "await fetch(selected, { method: 'POST' });",
+      ].join("\n"),
+      "scripts/shadowed-provider-member-projection.mts",
+    );
+
+    expect(matches).toEqual([]);
+  });
+
 });
