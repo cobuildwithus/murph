@@ -3855,6 +3855,48 @@ describe("deleteHostedAccountData", () => {
     expect(rawDeletionQueries).toEqual([]);
   });
 
+  it("blocks suspension when an ambiguous token refresh finishes after the deletion preflight", async () => {
+    const hostedMemberUpdateCalls: unknown[] = [];
+    const rawDeletionQueries: HostedAccountDeletionRawQuery[] = [];
+    const connection = {
+      connectedAt: new Date("2026-04-27T00:07:00.000Z"),
+      id: "dsc_refresh_ambiguous_race",
+      provider: "oura",
+      providerAccountBlindIndex: "hbdi_refresh_ambiguous_race",
+      providerApplicationRevision: null,
+      sources: [],
+      status: "active",
+      tokenVersion: 4,
+    };
+    const prisma = createHostedAccountDeletionPrismaForTest({
+      deviceConnections: [connection],
+      hostedMemberUpdateCalls,
+      onTransaction: () => undefined,
+      rawDeletionQueries,
+      transactionDeviceConnections: [{
+        ...connection,
+        lastErrorCode: "TOKEN_REFRESH_STATE_UNKNOWN",
+        refreshLeaseExpiresAt: null,
+        refreshLeaseOwner: null,
+        refreshLeaseTokenVersion: null,
+        status: "reauthorization_required",
+      }],
+    });
+
+    await expect(deleteHostedAccountData({
+      memberId: "member_123",
+      prisma,
+      request: new Request("https://join.example.test/settings"),
+    })).rejects.toMatchObject({
+      code: "ACCOUNT_DELETION_DEVICE_AUTHORIZATION_IN_FLIGHT",
+      retryable: true,
+    });
+
+    expect(hostedMemberUpdateCalls).toEqual([]);
+    expect(serviceMocks.createHostedDeviceSyncControlPlane).not.toHaveBeenCalled();
+    expect(rawDeletionQueries).toEqual([]);
+  });
+
   it("blocks terminal erasure while a consumed OAuth callback owns provider completion", async () => {
     const rawDeletionQueries: HostedAccountDeletionRawQuery[] = [];
     const prisma = createHostedAccountDeletionPrismaForTest({
@@ -5604,6 +5646,10 @@ function createHostedAccountDeletionPrismaForTest(input: {
             connection.refreshLeaseExpiresAt !== null
             || connection.refreshLeaseOwner !== null
             || connection.refreshLeaseTokenVersion !== null
+            || (
+              connection.lastErrorCode === "TOKEN_REFRESH_STATE_UNKNOWN"
+              && connection.status === "reauthorization_required"
+            )
           ).length;
         }
         return input.countResults?.deviceConnection ?? 1;

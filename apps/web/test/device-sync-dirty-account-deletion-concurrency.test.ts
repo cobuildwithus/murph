@@ -10,8 +10,9 @@ import {
   serializeCompanionHrvRmssdObservation,
 } from "@murphai/contracts";
 
-import { PrismaHostedDirtyConnectionStore } from "@/src/lib/device-sync/prisma-store/dirty-connections";
+import { persistProviderTokenRefreshErrorStatus } from "@/src/lib/device-sync/agent-session-token-refresh";
 import { PrismaDeviceSyncControlPlaneStore } from "@/src/lib/device-sync/prisma-store";
+import { PrismaHostedDirtyConnectionStore } from "@/src/lib/device-sync/prisma-store/dirty-connections";
 import { PrismaHostedOAuthSessionStore } from "@/src/lib/device-sync/prisma-store/oauth-sessions";
 import { HostedDeviceSyncPublicIngressService } from "@/src/lib/device-sync/public-ingress-service";
 import { buildHostedProviderAccountBlindIndex } from "@/src/lib/device-sync/routing-index";
@@ -1811,6 +1812,178 @@ describe.skipIf(!runPostgresConcurrencyProof)(
       } finally {
         allowRefreshCommit.resolve();
         allowSuspensionCommit.resolve();
+        await observer.deviceConnection.deleteMany({ where: { id: connectionId } });
+        await observer.hostedMember.deleteMany({ where: { id: userId } });
+        await Promise.all([
+          deletionClient.$disconnect(),
+          observer.$disconnect(),
+          refreshClient.$disconnect(),
+        ]);
+      }
+    });
+
+    it("blocks suspension after an ambiguous refresh replaces its lease with a reconnect fence", async () => {
+      if (!databaseUrl) {
+        throw new Error("DATABASE_URL is required for the PostgreSQL concurrency proof.");
+      }
+      const fixtureId = randomUUID();
+      const userId = `member_refresh_unknown_delete_${fixtureId}`;
+      const connectionId = `dsc_refresh_unknown_delete_${fixtureId}`;
+      const leaseOwner = "agent-refresh:ambiguous-before-suspension";
+      const observer = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const deletionClient = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const refreshClient = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const store = new PrismaDeviceSyncControlPlaneStore({
+        codec: {
+          decrypt: (value) => value,
+          encrypt: (value) => value,
+          keyVersion: "test-device-key-v1",
+        },
+        prisma: refreshClient,
+      });
+      const connectedAt = "2026-08-11T12:00:00.000Z";
+      const account = {
+        accessTokenExpiresAt: "2026-08-11T13:00:00.000Z",
+        connectedAt,
+        createdAt: connectedAt,
+        credential: {
+          kind: "oauth_tokens" as const,
+          tokens: {
+            accessToken: "access-token",
+            accessTokenExpiresAt: "2026-08-11T13:00:00.000Z",
+            refreshToken: "refresh-token",
+          },
+        },
+        disconnectGeneration: 0,
+        displayName: "Oura",
+        externalAccountId: "provider-account",
+        id: connectionId,
+        keyVersion: "test-device-key-v1",
+        lastErrorCode: null,
+        lastErrorMessage: null,
+        lastSyncCompletedAt: null,
+        lastSyncErrorAt: null,
+        lastSyncStartedAt: null,
+        lastWebhookAt: null,
+        metadata: {},
+        nextReconcileAt: null,
+        provider: "oura",
+        scopes: ["daily"],
+        setupExpiresAt: null,
+        setupPhase: null,
+        status: "active" as const,
+        tokenVersion: 1,
+        updatedAt: connectedAt,
+      };
+      const currentTokenBundle = {
+        accessToken: "access-token",
+        accessTokenExpiresAt: "2026-08-11T13:00:00.000Z",
+        keyVersion: "test-device-key-v1",
+        refreshToken: "refresh-token",
+        tokenVersion: 1,
+      };
+      let providerCleanupAttempted = false;
+
+      try {
+        await observer.hostedMember.create({ data: { id: userId } });
+        await observer.deviceConnection.create({
+          data: {
+            accessTokenEncrypted: "access-token",
+            accessTokenExpiresAt: new Date("2026-08-11T13:00:00.000Z"),
+            connectedAt: new Date(connectedAt),
+            credentialKind: "oauth_tokens",
+            externalAccountIdEncrypted: "provider-account",
+            id: connectionId,
+            keyVersion: "test-device-key-v1",
+            provider: "oura",
+            providerAccountBlindIndex: `blind_${fixtureId}`,
+            refreshTokenEncrypted: "refresh-token",
+            status: "active",
+            tokenVersion: 1,
+            userId,
+          },
+        });
+
+        // This is the state immediately after deletion preflight: there is no
+        // lease or reconnect marker yet, so a refresh may still be admitted.
+        await expect(assertNoDeviceRefreshLeasesBeforeAccountSuspensionTx({
+          memberIds: [userId],
+          prisma: observer,
+        })).resolves.toBeUndefined();
+        await expect(store.withHealthDataAdmissionLock(
+          userId,
+          connectionId,
+          async (tx) => store.claimConnectionRefreshLease({
+            connectionId,
+            leaseExpiresAt: "2026-08-11T12:10:00.000Z",
+            leaseOwner,
+            now: "2026-08-11T12:05:00.000Z",
+            tokenVersion: 1,
+            tx,
+            userId,
+          }),
+          { requireActiveMember: true },
+        )).resolves.toEqual({ status: "claimed" });
+
+        await store.withConnectionMutationLock(connectionId, async (tx) => {
+          await persistProviderTokenRefreshErrorStatus({
+            account,
+            currentTokenBundle,
+            error: new Error("The provider did not confirm whether token rotation completed."),
+            now: "2026-08-11T12:05:30.000Z",
+            refreshLeaseOwner: leaseOwner,
+            store,
+            tx,
+            userId,
+          });
+          await expect(store.clearConnectionRefreshLease({
+            connectionId,
+            leaseOwner,
+            tx,
+          })).resolves.toBe(true);
+        });
+
+        const suspension = deletionClient.$transaction(async (tx) => {
+          await tx.$queryRaw`SELECT 1 FROM hosted_member WHERE id = ${userId} FOR UPDATE`;
+          await assertNoDeviceRefreshLeasesBeforeAccountSuspensionTx({
+            memberIds: [userId],
+            prisma: tx,
+          });
+          await tx.hostedMember.update({
+            data: { suspendedAt: new Date("2026-08-11T12:06:00.000Z") },
+            where: { id: userId },
+          });
+          providerCleanupAttempted = true;
+        });
+
+        await expect(suspension).rejects.toMatchObject({
+          code: "ACCOUNT_DELETION_DEVICE_AUTHORIZATION_IN_FLIGHT",
+        });
+        expect(providerCleanupAttempted).toBe(false);
+        await expect(observer.hostedMember.findUnique({
+          select: { suspendedAt: true },
+          where: { id: userId },
+        })).resolves.toEqual({ suspendedAt: null });
+        await expect(observer.deviceConnection.findUnique({
+          select: {
+            accessTokenEncrypted: true,
+            lastErrorCode: true,
+            refreshLeaseExpiresAt: true,
+            refreshLeaseOwner: true,
+            refreshLeaseTokenVersion: true,
+            status: true,
+          },
+          where: { id: connectionId },
+        })).resolves.toEqual({
+          accessTokenEncrypted: null,
+          lastErrorCode: "TOKEN_REFRESH_STATE_UNKNOWN",
+          refreshLeaseExpiresAt: null,
+          refreshLeaseOwner: null,
+          refreshLeaseTokenVersion: null,
+          status: "reauthorization_required",
+        });
+      } finally {
+        await observer.deviceSyncSignal.deleteMany({ where: { connectionId } });
         await observer.deviceConnection.deleteMany({ where: { id: connectionId } });
         await observer.hostedMember.deleteMany({ where: { id: userId } });
         await Promise.all([

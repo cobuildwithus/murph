@@ -1949,6 +1949,10 @@ export async function assertNoDeviceRefreshLeasesBeforeAccountSuspensionTx(
         { refreshLeaseExpiresAt: { not: null } },
         { refreshLeaseOwner: { not: null } },
         { refreshLeaseTokenVersion: { not: null } },
+        {
+          lastErrorCode: "TOKEN_REFRESH_STATE_UNKNOWN",
+          status: "reauthorization_required",
+        },
       ],
     },
   });
