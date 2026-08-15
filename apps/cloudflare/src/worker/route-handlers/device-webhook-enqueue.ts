@@ -3,6 +3,7 @@ import {
   createDeviceWebhookTransportPrivateKeyringFromJson,
   DEVICE_WEBHOOK_QUEUE_MAX_ENVELOPE_BYTES,
   parseDeviceWebhookQueueEnvelope,
+  readDeviceWebhookQueuePersistenceFailureCode,
   reencryptDeviceWebhookQueueEnvelopeForPersistence,
 } from "@murphai/cloudflare-hosted-control/device-webhook-queue";
 
@@ -60,8 +61,13 @@ async function handleDeviceWebhookEnqueueRoute(
           context.environment.hostedCryptoCloudflareAutomationPrivateKeyringJson,
       }),
     });
-  } catch {
-    return json({ code: "invalid_request", error: "Unauthenticated device webhook envelope." }, 400);
+  } catch (error) {
+    return json({
+      code:
+        readDeviceWebhookQueuePersistenceFailureCode(error)
+        ?? "persistence_failure_unclassified",
+      error: "Unauthenticated device webhook envelope.",
+    }, 400);
   }
   try {
     await context.env.DEVICE_WEBHOOK_QUEUE.send(envelope, { contentType: "json" });
