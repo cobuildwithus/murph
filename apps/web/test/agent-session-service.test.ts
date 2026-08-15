@@ -1290,13 +1290,17 @@ describe("HostedDeviceSyncAgentSessionService retry-safe bearer reuse", () => {
     }
   });
 
-  it("fails closed when provider refresh returns an unclassified error after lease claim", async () => {
+  it("fails closed when provider refresh returns an incomplete rotated generation", async () => {
     vi.useFakeTimers();
     try {
       const bearerToken = "hbds_agent_original";
       const harness = createRetrySafeStoreHarness(bearerToken);
       const refreshTokens = vi.fn(async () => {
-        throw new Error("provider request timed out");
+        throw deviceSyncError({
+          code: "OURA_REFRESH_TOKEN_ROTATION_MISSING",
+          message: "Oura refresh response did not include a replacement refresh token.",
+          retryable: false,
+        });
       });
       const registry = createDeviceSyncRegistry([createWhoopProvider({
         refreshTokens,

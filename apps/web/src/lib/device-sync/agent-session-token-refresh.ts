@@ -212,11 +212,11 @@ export async function persistProviderTokenRefreshErrorStatus(input: {
       });
 
   const sanitizedErrorCode = sanitizeHostedRuntimeErrorCode(
-    isDeviceSyncError(input.error) ? input.error.code : null,
+    isDeviceSyncError(persistedError) ? persistedError.code : null,
   ) ?? "TOKEN_REFRESH_STATE_UNKNOWN";
   const sanitizedErrorMessage =
     sanitizeHostedRuntimeErrorText(
-      input.error instanceof Error ? input.error.message : null,
+      persistedError instanceof Error ? persistedError.message : null,
     ) ?? "Token refresh state is unknown. Reconnect this source.";
   const seedAccount: PublicDeviceSyncAccount = {
     ...input.account,

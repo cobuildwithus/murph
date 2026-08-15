@@ -1930,7 +1930,11 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           await persistProviderTokenRefreshErrorStatus({
             account,
             currentTokenBundle,
-            error: new Error("The provider did not confirm whether token rotation completed."),
+            error: deviceSyncError({
+              code: "OURA_REFRESH_TOKEN_ROTATION_MISSING",
+              message: "Oura refresh response did not include a replacement refresh token.",
+              retryable: false,
+            }),
             now: "2026-08-11T12:05:30.000Z",
             refreshLeaseOwner: leaseOwner,
             store,

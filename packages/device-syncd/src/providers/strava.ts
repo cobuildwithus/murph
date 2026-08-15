@@ -1052,7 +1052,6 @@ export function createStravaDeviceSyncProvider(
               code: "STRAVA_REFRESH_TOKEN_MISSING",
               message: "Strava refresh response did not include a refresh token.",
               retryable: false,
-              accountStatus: "reauthorization_required",
             }),
           ),
       });

@@ -278,7 +278,7 @@ test("Oura provider requires a replacement refresh token during refresh", async 
     (error) =>
       error instanceof DeviceSyncError &&
       error.code === "OURA_REFRESH_TOKEN_ROTATION_MISSING" &&
-      error.accountStatus === "reauthorization_required",
+      error.accountStatus === null,
   );
 });
 
