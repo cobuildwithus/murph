@@ -95,8 +95,10 @@ retry; Temporal remains the only durable retry and reconciliation owner.
 - [x] Reconcile the preliminary Review GPT pass and add test-only proof that a
   long first command reduces the second server budget, plus a hosted-local
   fresh-fence journey that ages the same fence only after observing the first
-  `retry_later`, requires second-call acceptance, acknowledges Temporal's
-  converged accepted activity, and holds provider plus total Linq sends to one.
+  `retry_later`, holds the second outbound direct fetch at a test-only loopback
+  barrier until that aging completes, requires second-call acceptance,
+  acknowledges Temporal's converged accepted activity, and holds provider plus
+  total Linq sends to one.
 - [ ] Complete the hosted-local journey in a capable environment, resolve the
   exact-head final Review GPT gate and CI, archive this plan, and push the final
   reviewed head.
@@ -133,8 +135,10 @@ retry; Temporal remains the only durable retry and reconciliation owner.
 - A fence pre-aged to 27 seconds still left scheduler-dependent ordering among
   webhook handling, Temporal, and the first direct call. The deterministic
   proof now creates a fresh fence, observes the correlated first direct
-  `retry_later`, and only then ages that same attempt beyond startup grace
-  before the bounded Web retry is released.
+  `retry_later`, waits until the second direct fetch is blocked inside the Web
+  test process, ages that same attempt beyond startup grace, and explicitly
+  releases the fetch. The preload is injected only by the hosted-local test
+  process and fails closed outside the E2E test-control profile.
 - Local execution of that hosted-local proof reached the external Temporal
   configuration but timed out during the harness's MinIO image fallback before
   any test ran. Unit/typecheck proof is green; the capable hosted-local CI lane

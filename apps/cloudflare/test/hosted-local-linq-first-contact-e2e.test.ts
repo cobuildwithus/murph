@@ -1,5 +1,7 @@
-import { createHmac } from "node:crypto";
+import { createHmac, randomUUID } from "node:crypto";
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { createServer, type ServerResponse } from "node:http";
+import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -94,6 +96,10 @@ const richLinkRetryRecoveryUrl = "https://example.test/continue/recovered";
 const richLinkFallbackUrl = "https://example.test/continue/fallback";
 const productionLikeAssistantModel = "gpt-5.6-terra";
 const localRunnerIdleTtlMs = "300000";
+const directWakeRetryBarrierPreloadUrl = new URL(
+  "../../web/test/support/hosted-local-direct-wake-retry-barrier-preload.ts",
+  import.meta.url,
+).href;
 
 const streamDevLogs = process.env.MURPH_E2E_STREAM_DEV_LOGS === "1";
 const fastDeployGate = process.env.MURPH_HOSTED_LOCAL_E2E_FAST_GATE === "1";
@@ -110,7 +116,15 @@ const itCheckpointReplayRepro =
 
 let linqStub: HostedLocalLinqStub | null = null;
 let scenario: HostedLocalFullStackScenario | null = null;
+let directWakeRetryBarrier: HostedLocalDirectWakeRetryBarrier | null = null;
 const cleanupPaths: string[] = [];
+
+interface HostedLocalDirectWakeRetryBarrier {
+  release(): void;
+  stop(): Promise<void>;
+  url: string;
+  waitForBlockedRetry(): Promise<void>;
+}
 
 function buildHostedAssistantProgressAttemptResponses(input: {
   progressText: string;
@@ -125,8 +139,11 @@ function buildHostedAssistantProgressAttemptResponses(input: {
 }
 
 afterAll(async () => {
+  directWakeRetryBarrier?.release();
   await scenario?.stop();
   scenario = null;
+  await directWakeRetryBarrier?.stop();
+  directWakeRetryBarrier = null;
   await linqStub?.stop();
   linqStub = null;
   await Promise.all(cleanupPaths.splice(0).map((target) =>
@@ -162,6 +179,16 @@ it("extracts only the first retry_later direct-wake correlation", () => {
     `  orchestrationAttemptId: '${orchestrationAttemptId}',`,
     "}",
   ].join("\n"))).toBeNull();
+});
+
+it("releases a blocked direct-wake retry during barrier teardown", async () => {
+  const barrier = await startHostedLocalDirectWakeRetryBarrier();
+  const blockedRequest = fetch(barrier.url, { method: "POST" });
+  await barrier.waitForBlockedRetry();
+
+  await barrier.stop();
+
+  await expect(blockedRequest).resolves.toMatchObject({ status: 204 });
 });
 
 productionDescribe("hosted local Linq first-contact e2e", () => {
@@ -1266,10 +1293,21 @@ testControlsDescribe("hosted local Linq checkpoint replay e2e", () => {
 
 testControlsDescribe("hosted local Linq direct retry recovery e2e", () => {
   beforeAll(async () => {
+    directWakeRetryBarrier = await startHostedLocalDirectWakeRetryBarrier();
     await restartLinqScenario({
       HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS: "1",
     }, {
       faultInjection: true,
+      webProcessEnvOverrides: {
+        MURPH_HOSTED_LOCAL_DIRECT_WAKE_RETRY_BARRIER_URL:
+          directWakeRetryBarrier.url,
+        MURPH_HOSTED_LOCAL_DIRECT_WAKE_RETRY_BARRIER_USER_ID:
+          directRetryRecoveryUserId,
+        NODE_OPTIONS: appendNodeImportOption(
+          process.env.NODE_OPTIONS,
+          directWakeRetryBarrierPreloadUrl,
+        ),
+      },
     });
   }, 300_000);
 
@@ -1303,8 +1341,8 @@ testControlsDescribe("hosted local Linq direct retry recovery e2e", () => {
 
       // A fresh same-version fence with no child makes the first direct ensure
       // return retry_later. Age it only after that exact response is observed,
-      // so neither wall-clock startup time nor Temporal scheduling can make the
-      // first attempt replace the fence before the intended retry boundary.
+      // while a Web-process test barrier holds attempt two before its outbound
+      // fetch. Release only after the same fence crosses startup grace.
       const stuckFence = await activeScenario.harness.startStuckInvocationForTest(
         directRetryRecoveryUserId,
       );
@@ -1338,11 +1376,18 @@ testControlsDescribe("hosted local Linq direct retry recovery e2e", () => {
       );
       const directOrchestrationAttemptId =
         await waitForFirstDirectRetryLog();
-      const agedFence = await activeScenario.harness.ageActiveRuntimeFenceForTest(
-        directRetryRecoveryUserId,
-        31_000,
-      );
-      expect(agedFence.attemptId).toBe(stuckFence.attemptId);
+      const retryBarrier = requireDirectWakeRetryBarrier();
+      await retryBarrier.waitForBlockedRetry();
+      try {
+        const agedFence =
+          await activeScenario.harness.ageActiveRuntimeFenceForTest(
+            directRetryRecoveryUserId,
+            31_000,
+          );
+        expect(agedFence.attemptId).toBe(stuckFence.attemptId);
+      } finally {
+        retryBarrier.release();
+      }
 
       await pendingWake;
       const completion = activeScenario.waitForHostedCompletion(
@@ -1637,6 +1682,132 @@ function requireScenario(): HostedLocalFullStackScenario {
   return scenario;
 }
 
+function requireDirectWakeRetryBarrier(): HostedLocalDirectWakeRetryBarrier {
+  if (!directWakeRetryBarrier) {
+    throw new Error("Hosted-local direct-wake retry barrier was not initialized.");
+  }
+  return directWakeRetryBarrier;
+}
+
+async function startHostedLocalDirectWakeRetryBarrier(): Promise<
+  HostedLocalDirectWakeRetryBarrier
+> {
+  const token = randomUUID();
+  let released = false;
+  let arrivalResolved = false;
+  let resolveArrival!: () => void;
+  const arrival = new Promise<void>((resolve) => {
+    resolveArrival = resolve;
+  });
+  const pendingResponses = new Set<ServerResponse>();
+  const server = createServer((request, response) => {
+    if (
+      request.method !== "POST"
+      || request.url !== `/direct-wake-retry/${token}`
+    ) {
+      response.writeHead(404).end();
+      return;
+    }
+
+    if (!arrivalResolved) {
+      arrivalResolved = true;
+      resolveArrival();
+    }
+    if (released) {
+      response.writeHead(204).end();
+      return;
+    }
+
+    pendingResponses.add(response);
+    response.once("close", () => {
+      pendingResponses.delete(response);
+    });
+  });
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => {
+      server.off("error", reject);
+      resolve();
+    });
+  });
+  const address = server.address() as AddressInfo | null;
+  if (!address) {
+    await closeHttpServer(server);
+    throw new Error("Hosted-local direct-wake retry barrier did not bind.");
+  }
+
+  const release = (): void => {
+    if (released) {
+      return;
+    }
+    released = true;
+    for (const response of pendingResponses) {
+      response.writeHead(204).end();
+    }
+    pendingResponses.clear();
+  };
+
+  return {
+    release,
+    async stop(): Promise<void> {
+      release();
+      await closeHttpServer(server);
+    },
+    url: `http://127.0.0.1:${address.port}/direct-wake-retry/${token}`,
+    async waitForBlockedRetry(): Promise<void> {
+      await waitForPromiseWithTimeout(
+        arrival,
+        30_000,
+        "Timed out waiting for Web's second direct wake at the test barrier.",
+      );
+    },
+  };
+}
+
+async function closeHttpServer(
+  server: ReturnType<typeof createServer>,
+): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    server.close((error) => {
+      if (error) {
+        reject(error);
+      } else {
+        resolve();
+      }
+    });
+  });
+}
+
+async function waitForPromiseWithTimeout(
+  promise: Promise<void>,
+  timeoutMs: number,
+  timeoutMessage: string,
+): Promise<void> {
+  let timeout: ReturnType<typeof setTimeout> | null = null;
+  try {
+    await Promise.race([
+      promise,
+      new Promise<never>((_resolve, reject) => {
+        timeout = setTimeout(() => reject(new Error(timeoutMessage)), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timeout) {
+      clearTimeout(timeout);
+    }
+  }
+}
+
+function appendNodeImportOption(
+  existingNodeOptions: string | undefined,
+  importUrl: string,
+): string {
+  const existing = existingNodeOptions?.trim();
+  return existing
+    ? `${existing} --import=${importUrl}`
+    : `--import=${importUrl}`;
+}
+
 function readObservedLinqIdempotencyKey(request: ObservedLinqRequest): string | null {
   const parsed: unknown = JSON.parse(request.body);
   const message = readObjectProperty(parsed, "message");
@@ -1748,6 +1919,7 @@ async function startLinqScenario(
   additionalEnv: NodeJS.ProcessEnv = {},
   options: {
     faultInjection?: boolean;
+    webProcessEnvOverrides?: NodeJS.ProcessEnv;
   } = {},
 ): Promise<void> {
   linqStub = await startHostedLocalLinqStub({
@@ -1775,6 +1947,7 @@ async function startLinqScenario(
     requiredRunnerEnvProfile: "linq",
     scenarioLabel: "Local hosted Linq e2e",
     streamLogs: streamDevLogs,
+    webProcessEnvOverrides: options.webProcessEnvOverrides,
   });
 }
 
@@ -1792,6 +1965,7 @@ async function restartLinqScenario(
   additionalEnv: NodeJS.ProcessEnv = {},
   options: {
     faultInjection?: boolean;
+    webProcessEnvOverrides?: NodeJS.ProcessEnv;
   } = {},
 ): Promise<void> {
   await scenario?.stop();
