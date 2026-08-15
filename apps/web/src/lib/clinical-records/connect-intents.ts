@@ -58,13 +58,8 @@ export async function createClinicalRecordConnectIntent(input: {
       });
       await tx.clinicalRecordConnectIntent.deleteMany({
         where: {
-          OR: [
-            { expiresAt: { lte: now } },
-            {
-              completedAt: null,
-              memberId: input.memberId,
-            },
-          ],
+          completedAt: null,
+          memberId: input.memberId,
         },
       });
       await tx.clinicalRecordConnectIntent.create({
@@ -114,7 +109,6 @@ export async function claimClinicalRecordConnectIntentForStart(input: {
     const record = await tx.clinicalRecordConnectIntent.findUnique({ where: { claimHash } });
     if (!record || record.memberId !== input.memberId) throw invalidIntentError();
     if (record.expiresAt.getTime() <= now.getTime()) {
-      await tx.clinicalRecordConnectIntent.deleteMany({ where: { claimHash, expiresAt: { lte: now } } });
       throw clinicalRecordsError({
         code: "CLINICAL_RECORD_CONNECT_INTENT_EXPIRED",
         httpStatus: 410,

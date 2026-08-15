@@ -774,10 +774,19 @@ describe("acceptHostedGroupJoinCodeTx", () => {
     });
   });
 
-  it("refuses to add a group vault-share grant beyond the bounded fan-out cap", async () => {
-    const tx = buildTx({
-      activeGroupGrantCount: HOSTED_GROUP_VAULT_SHARE_GRANT_LIMIT_PER_GRANTOR_PROJECTION,
-    });
+  it("propagates the central grant owner's bounded fan-out rejection", async () => {
+    const tx = buildTx();
+    mocks.grantHostedVaultShareTx
+      .mockResolvedValueOnce({
+        id: "share_profile",
+        requiresProjection: false,
+      })
+      .mockRejectedValueOnce(hostedOnboardingError({
+        code: "HOSTED_GROUP_VAULT_SHARE_GRANT_LIMIT_REACHED",
+        httpStatus: 409,
+        message: "The vault-share grant limit was reached.",
+        retryable: false,
+      }));
 
     await expect(acceptHostedGroupJoinCodeTx({
       expectedMembershipId: null,
@@ -791,14 +800,7 @@ describe("acceptHostedGroupJoinCodeTx", () => {
       httpStatus: 409,
     });
 
-    expect(tx.hostedVaultShare.count).toHaveBeenCalledWith({
-      where: {
-        grantorMemberId: "member_grantor",
-        projectionScopeKey: "sleep-times.v0",
-        status: "granted",
-      },
-    });
-    expect(mocks.grantHostedVaultShareTx).not.toHaveBeenCalledWith(
+    expect(mocks.grantHostedVaultShareTx).toHaveBeenCalledWith(
       expect.objectContaining({ projectionScope: SLEEP_SCOPE }),
     );
   });
@@ -833,7 +835,7 @@ describe("acceptHostedGroupJoinCodeTx", () => {
     );
   });
 
-  it("keeps an existing active group vault-share grant idempotent at the cap", async () => {
+  it("keeps an existing active group vault-share grant idempotent without recounting", async () => {
     const tx = buildTx({
       activeGroupGrantCount: HOSTED_GROUP_VAULT_SHARE_GRANT_LIMIT_PER_GRANTOR_PROJECTION,
       activeShareAlreadyExists: true,

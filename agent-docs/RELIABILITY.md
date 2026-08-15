@@ -667,6 +667,33 @@ Last verified: 2026-08-14
 - Define startup requirements, health checks, and critical invariants.
 - Document retry/idempotency expectations for writes or background work.
 - Add tests for failure modes before relying on production-side recovery logic.
+- Short-lived connected-app, sensitive-action, device-connect, device OAuth,
+  Clinical Records connect, and Clinical Records OAuth rows never trigger a
+  global expiry sweep from foreground creation or provider admission. Exact
+  reads and consumes fail closed when the addressed row is expired; exact OAuth
+  consumers lock their addressed state row before replay classification and
+  consume, so retention skips a live consumer instead of fabricating replay
+  evidence. The hourly retention owner owns backlog deletion. Started
+  connected-app, device-connect, and Clinical Records intents retain their
+  exact completion row for one bounded 30-minute grace past link expiry.
+  Consumed device OAuth claims remain with exact callback finalization and
+  recovery; consumed Clinical OAuth claims remain while an incomplete linked
+  connect intent exists. Clinical bearer claims stay
+  non-redeemable after public expiry; a connected-app provider callback that
+  already owns its started row may finalize until the shared owner cutoff.
+  Connected-app retention, callback completion, and account deletion all derive
+  that cutoff from one owning helper and one frozen operation time. Account
+  deletion reads at most 21 deterministically ordered incomplete intents to
+  admit a maximum of 20 provider-cleanup owners, fails closed before provider
+  fan-out on overflow, and ignores an owner-dead physical row while hourly
+  retention reclaims it. This covers provider setup and valid callback
+  finalization without creating another worker or lease table. Retention
+  deletes only owner-dead eligible expiry-indexed rows
+  serially in expiry-and-primary-key order under the smaller control-artifact
+  batch and max-batch ceilings, with `FOR UPDATE SKIP LOCKED`. The unbound
+  sensitive-action lane has a partial expiry-and-token index so durable
+  approval history cannot enlarge its transient claim scan. Approval-backed
+  rows remain with their approval owner.
 - Account deletion must not discard its only external-cleanup owner. The
   canonical account transaction persists the KMS-encrypted, foreign-key-free
   receipt before deleting the member. The existing hourly retention sweep
