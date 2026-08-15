@@ -2408,7 +2408,10 @@ export function createJunctionDeviceSyncProvider(
             skippedOptionalResources,
           );
         }
-        if (timeseriesPolicy?.maxCanonicalRecordsPerWindow !== undefined) {
+        if (
+          !extendedHistoricalBackfill
+          && timeseriesPolicy?.maxCanonicalRecordsPerWindow !== undefined
+        ) {
           await importJunctionTimeseriesResourceSnapshot({
             context,
             dateQueryFormat: "datetime",
