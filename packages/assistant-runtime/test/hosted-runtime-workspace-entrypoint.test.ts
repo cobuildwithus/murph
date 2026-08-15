@@ -31854,7 +31854,7 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
-  test("idle checkpoint derives both imported cursors from local mailbox state", async () => {
+  test("mailbox progress checkpoints derive imported cursors from local state", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const events: string[] = [];
@@ -31897,6 +31897,18 @@ describe("hosted workspace runtime entrypoint", () => {
               },
               vaultRoot,
             });
+            await runCanonicalWrite({
+              vaultRoot,
+              operationType: "hosted_mailbox_cursor_projection_test",
+              summary: "Persist the mailbox cursor projection test receipt.",
+              occurredAt: TEST_NOW,
+              mutate: async ({ batch }) => {
+                await batch.stageTextWrite(
+                  "journal/mailbox-cursor-projection.md",
+                  "mailbox cursor projection\n",
+                );
+              },
+            });
             return {
               checkpointReason: "canonical_runtime_commit",
               progressed: true,
@@ -31912,7 +31924,7 @@ describe("hosted workspace runtime entrypoint", () => {
 
       assert.equal(result.status, "idle");
       assert.equal(
-        checkpointRequests.at(-1)?.redactedStatus
+        checkpointRequests[0]?.redactedStatus
           ?.hostedMailboxConversationImportedSeq,
         "1",
       );

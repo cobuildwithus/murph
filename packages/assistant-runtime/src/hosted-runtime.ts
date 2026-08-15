@@ -6975,7 +6975,6 @@ async function checkpointHostedRuntimeDirtyWorkspace(input: {
     });
   input.assertRuntimeNotAborted();
   const redactedStatus = await withHostedMailboxProgressStatus({
-    includeConversationImportedSeq: true,
     redactedStatus: input.retainCanonicalWriteReceiptLogStatus
       ? input.redactedStatus
       : omitHostedCanonicalWriteReceiptLogStatusFields(input.redactedStatus),
@@ -7037,7 +7036,6 @@ function readHostedConversationConsumedSeqFromStatus(
 }
 
 async function withHostedMailboxProgressStatus(input: {
-  includeConversationImportedSeq?: boolean;
   redactedStatus: HostedWorkspaceInvocationResult["redactedStatus"] | null;
   vaultRoot: string;
 }): Promise<HostedRuntimeRedactedJson> {
@@ -7046,7 +7044,11 @@ async function withHostedMailboxProgressStatus(input: {
   });
   return {
     ...(input.redactedStatus ?? {}),
-    ...(input.includeConversationImportedSeq === true
+    ...(mailboxState.watermarks.conversation !== "0"
+      || Object.hasOwn(
+        input.redactedStatus ?? {},
+        "hostedMailboxConversationImportedSeq",
+      )
       ? {
           hostedMailboxConversationImportedSeq:
             mailboxState.watermarks.conversation,
