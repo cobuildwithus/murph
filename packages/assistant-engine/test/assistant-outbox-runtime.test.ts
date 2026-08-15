@@ -53,6 +53,7 @@ import {
 } from '../src/assistant/onboarding-followup-automation.ts'
 import { applyMurphManagedAutomations } from '../src/assistant/managed-automations.ts'
 import { readAssistantDiagnosticsSnapshot } from '../src/assistant/diagnostics.ts'
+import { runAssistantAutomationPass } from '../src/assistant/automation/run-loop.ts'
 import {
   buildAssistantOutboxSummary,
   beginAssistantOutboxIntentMirrorDispatch,
@@ -3246,6 +3247,15 @@ describe('assistant outbox runtime', () => {
     const staleRecoveryAt = new Date(
       Date.parse(completedAt) + 10 * 60 * 1_000,
     ).toISOString()
+    const idlePass = await runAssistantAutomationPass({
+      requestId: 'request-completion-checkpoint-hook-wake',
+      vault: vaultRoot,
+    })
+    expect(idlePass).toMatchObject({
+      nextWakeAt: staleRecoveryAt,
+      outboxAttempted: 0,
+      progressed: false,
+    })
     vi.setSystemTime(new Date(staleRecoveryAt))
 
     const recovered = await dispatchAssistantOutboxIntent({
@@ -7064,17 +7074,32 @@ describe('assistant outbox runtime', () => {
       updatedAt: '2026-04-08T05:04:30.000Z',
     })
 
+    const freshSending = await createIntent(vaultRoot, {
+      createdAt: '2026-04-08T05:05:00.000Z',
+      message: 'fresh sending checkpoint',
+      sessionId: 'session-summary-sending',
+      turnId: 'turn-summary-sending',
+    })
+    await saveAssistantOutboxIntent(vaultRoot, {
+      ...freshSending,
+      attemptCount: 1,
+      lastAttemptAt: '2026-04-08T05:20:00.000Z',
+      nextAttemptAt: null,
+      status: 'sending',
+      updatedAt: '2026-04-08T05:20:00.000Z',
+    })
+
     const summary = await buildAssistantOutboxSummary(vaultRoot)
     expect(summary).toEqual({
       abandoned: 1,
       failed: 2,
-      nextAttemptAt: '2026-04-08T06:00:00.000Z',
+      nextAttemptAt: '2026-04-08T05:30:00.000Z',
       oldestPendingAt: futureRetryable.createdAt,
       pending: 0,
       retryable: 1,
-      sending: 0,
+      sending: 1,
       sent: 1,
-      total: 5,
+      total: 6,
     })
   })
 })

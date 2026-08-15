@@ -13870,6 +13870,76 @@ describe('assistant automation run loop', () => {
     expect(scanStartedAt[1]! - scanStartedAt[0]!).toBe(10)
   })
 
+  it('wakes at the outbox sending-recovery deadline without an inbox event', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-09T00:00:00.000Z'))
+
+    const externalAbort = new AbortController()
+    const scanStartedAt: number[] = []
+    const inboxServices = createInboxServices({
+      run: vi.fn().mockImplementation(
+        async (
+          _input: { requestId: string | null; vault: string },
+          options: { signal: AbortSignal },
+        ) => await new Promise<void>((resolve) => {
+          options.signal.addEventListener('abort', () => resolve(), {
+            once: true,
+          })
+        }),
+      ),
+    })
+    runLoopMocks.buildAssistantOutboxSummary.mockResolvedValue({
+      nextAttemptAt: '2026-04-09T00:10:00.000Z',
+    })
+    runLoopMocks.scanAssistantAutomationOnce.mockImplementation(async () => {
+      scanStartedAt.push(Date.now())
+      if (scanStartedAt.length === 2) {
+        externalAbort.abort()
+      }
+      return {
+        currentTurnDeliveryIntentIds: [],
+        routing: {
+          considered: 0,
+          failed: 0,
+          nextWakeAt: null,
+          noAction: 0,
+          routed: 0,
+          skipped: 0,
+        },
+        replies: {
+          considered: 0,
+          failed: 0,
+          nextWakeAt: null,
+          replied: 0,
+          skipped: 0,
+        },
+      }
+    })
+    const runLoop = await vi.importActual<
+      typeof import('../src/assistant/automation/run-loop.ts')
+    >('../src/assistant/automation/run-loop.ts')
+
+    const resultPromise = runLoop.runAssistantAutomation({
+      inboxServices,
+      once: false,
+      signal: externalAbort.signal,
+      startDaemon: true,
+      vault: '/tmp/assistant-automation-vault',
+    })
+
+    await vi.advanceTimersByTimeAsync(0)
+    expect(scanStartedAt).toEqual([Date.parse('2026-04-09T00:00:00.000Z')])
+
+    await vi.advanceTimersByTimeAsync(10 * 60 * 1_000)
+    const result = await resultPromise
+
+    expect(result.reason).toBe('signal')
+    expect(scanStartedAt).toEqual([
+      Date.parse('2026-04-09T00:00:00.000Z'),
+      Date.parse('2026-04-09T00:10:00.000Z'),
+    ])
+  })
+
   it('stages local imported captures as assistant input before the wake-driven scan', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-04-09T00:00:00.000Z'))
