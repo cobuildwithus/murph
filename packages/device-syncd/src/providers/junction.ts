@@ -2454,7 +2454,7 @@ export function createJunctionDeviceSyncProvider(
           ? job.payload.historicalRecordsSeen === true
             || timeseriesImport.canonicalEventCount > 0
             || (
-              effectiveResource === "weight"
+              isJunctionBodyTimeseriesResource(effectiveResource)
               && timeseriesImport.providerRecordsExamined
             )
           : undefined;
@@ -2485,10 +2485,14 @@ export function createJunctionDeviceSyncProvider(
         }
         const historicalUnresolvedProviderRecords = extendedHistoricalBackfill
           && extendedHistoricalPolicy?.completion !== "daily_aggregate"
-          ? resolveJunctionHistoricalUnresolvedProviderRecords(
-              job,
-              timeseriesImport,
-            )
+          ? isJunctionBodyTimeseriesResource(effectiveResource)
+              && timeseriesImport.fetchComplete
+              && timeseriesImport.unresolvedProviderRecordCount === 0
+            ? { identities: [], withoutStableIdentity: false }
+            : resolveJunctionHistoricalUnresolvedProviderRecords(
+                job,
+                timeseriesImport,
+              )
           : undefined;
         const historicalUnresolvedProviderRecordCount =
           historicalUnresolvedProviderRecords === undefined
@@ -2699,11 +2703,11 @@ export function createJunctionDeviceSyncProvider(
       input.job.payload.historicalRecordsSeen === true
       || input.importResult.canonicalEventCount > 0
       || (
-        input.resource === "weight"
+        isJunctionBodyTimeseriesResource(input.resource)
         && input.importResult.providerRecordsExamined
       );
     const unresolvedProviderRecords =
-      input.resource === "weight"
+      isJunctionBodyTimeseriesResource(input.resource)
         && input.importResult.fetchComplete
         && input.importResult.unresolvedProviderRecordCount === 0
         ? { identities: [], withoutStableIdentity: false }
@@ -3337,8 +3341,9 @@ export function createJunctionDeviceSyncProvider(
           windowEnd: executionWindowEnd,
         })
         : null;
-    const successfulImportTerminatesWeightRows =
-      resources.length === 1 && resources[0] === "weight";
+    const successfulImportTerminatesBodyRows =
+      resources.length === 1
+      && isJunctionBodyTimeseriesResource(resources[0] ?? "");
     if (fetchedProviderRecordIdentityEvidence) {
       unresolvedProviderRecordIdentities = uniqueJunctionProviderRecordIdentities(
         fetchedProviderRecordIdentityEvidence.repairStableExternalRefResourceIds,
@@ -3426,8 +3431,8 @@ export function createJunctionDeviceSyncProvider(
             unresolvedProviderRecordCount =
               unresolvedProviderRecordIdentities.length
               + (unresolvedProviderRecordsWithoutStableIdentity ? 1 : 0);
-          } else if (successfulImportTerminatesWeightRows) {
-            // A resolved import receipt means the weight normalizer examined
+          } else if (successfulImportTerminatesBodyRows) {
+            // A resolved import receipt means the body normalizer examined
             // every delivered row. Valid readings became canonical events and
             // deterministic validation rejects are terminal; delivery errors
             // throw before this branch and retain the retry obligation.

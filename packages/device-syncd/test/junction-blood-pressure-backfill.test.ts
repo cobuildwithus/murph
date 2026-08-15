@@ -484,20 +484,22 @@ function createProvider(input: {
         };
         const noteWindowStart = url.searchParams.get("start_date");
         const noteWindowEnd = url.searchParams.get("end_date");
+        const logicalResource = resource === "body_fat" ? "fat" : resource;
         const noteRecords = (input.noteRecords ?? []).filter((record) => {
           const timestamp = typeof record.start === "string" ? record.start : null;
           return timestamp !== null
             && isMockRecordInRequestWindow(timestamp, noteWindowStart, noteWindowEnd);
         });
-        const timeseriesRecords = (input.timeseriesRecords?.[resource] ?? []).filter((record) => {
-          const timestamp = typeof record.start === "string"
-            ? record.start
-            : typeof record.timestamp === "string"
-              ? record.timestamp
-              : null;
-          return timestamp !== null
-            && isMockRecordInRequestWindow(timestamp, noteWindowStart, noteWindowEnd);
-        });
+        const timeseriesRecords = (input.timeseriesRecords?.[logicalResource] ?? [])
+          .filter((record) => {
+            const timestamp = typeof record.start === "string"
+              ? record.start
+              : typeof record.timestamp === "string"
+                ? record.timestamp
+                : null;
+            return timestamp !== null
+              && isMockRecordInRequestWindow(timestamp, noteWindowStart, noteWindowEnd);
+          });
         const resourceGroups = resource === "note"
           ? { oura: noteRecords }
           : resource === "blood_pressure"
@@ -2414,6 +2416,182 @@ test("a sparse daily aggregate completes when several readings reduce to one eve
 
   assert.equal(result.scheduledJobs?.length ?? 0, 0);
   assertHistoryCoverage(result.metadataPatch, "omron", "caffeine");
+});
+
+test("deterministic sparse-body rejects are terminal and clean scans clear carried evidence", async () => {
+  const cases = [
+    {
+      record: {
+        id: "fat-invalid-unit",
+        timestamp: "2026-05-20T08:30:00.000Z",
+        unit: "percent",
+        value: 18,
+      },
+      resource: "fat",
+    },
+    {
+      record: {
+        end: "2026-05-20T08:35:00.000Z",
+        id: "bmi-out-of-range",
+        start: "2026-05-20T08:30:00.000Z",
+        unit: "index",
+        value: 101,
+      },
+      resource: "body_mass_index",
+    },
+    {
+      record: {
+        end: "2026-05-20T08:35:00.000Z",
+        id: "lean-body-mass-out-of-range",
+        start: "2026-05-20T08:30:00.000Z",
+        unit: "kg",
+        value: 0,
+      },
+      resource: "lean_body_mass",
+    },
+    {
+      record: {
+        end: "2026-05-20T08:35:00.000Z",
+        id: "waist-out-of-range",
+        start: "2026-05-20T08:30:00.000Z",
+        unit: "cm",
+        value: 301,
+      },
+      resource: "waist_circumference",
+    },
+  ] as const;
+
+  for (const [index, testCase] of cases.entries()) {
+    const records: Record<string, unknown>[] = [testCase.record];
+    const availability = { [testCase.resource]: true };
+    const provider = createProvider({
+      historicalPullState: { resource: testCase.resource, status: "success" },
+      providerState: { resourceAvailability: availability, status: "connected" },
+      requests: [],
+      timeseriesRecords: { [testCase.resource]: records },
+      timeseriesResources: [testCase.resource],
+    });
+    const source = createSourceSummary(
+      "omron",
+      "2026-01-01T12:00:00.000Z",
+      "connected",
+      availability,
+    );
+    const scheduled = findResourceJob(
+      requireValue(requireValue(provider.jobExecutor).createScheduledJobs)(
+        createStoredAccount({ sources: [source] }),
+        NOW,
+      ).jobs,
+      testCase.resource,
+    );
+    let importCalls = 0;
+    const rejected = await executeImmediateResourceContinuations({
+      context: createJobContext({
+        account: createAccount({ sources: [source] }),
+        importSnapshot: async (snapshot) => {
+          importCalls += 1;
+          const receipt = await importWithRealJunctionNormalizer(snapshot);
+          assert.equal(receipt.canonicalEventCount, 0, testCase.resource);
+          return receipt;
+        },
+      }),
+      job: toJobRecord(scheduled, 300 + index),
+      provider,
+      resource: testCase.resource,
+    });
+
+    assert.equal(importCalls, 1, testCase.resource);
+    assert.equal(rejected.result.scheduledJobs?.length ?? 0, 0, testCase.resource);
+    assertHistoryCoverage(
+      rejected.result.metadataPatch,
+      "omron",
+      testCase.resource,
+      true,
+      testCase.resource,
+    );
+
+    records.length = 0;
+    const clean = await executeImmediateResourceContinuations({
+      context: createJobContext({
+        account: createAccount({ sources: [source] }),
+        importSnapshot: importWithRealJunctionNormalizer,
+      }),
+      job: toJobRecord({
+        ...scheduled,
+        payload: {
+          ...scheduled.payload,
+          historicalProviderRecordsSeen: true,
+          historicalRecordsSeen: true,
+          historicalUnresolvedProviderRecordCount: 1,
+          historicalUnresolvedProviderRecordIdentitiesJson: '{"v":1,"i":[],"u":true}',
+        },
+      }, 310 + index),
+      provider,
+      resource: testCase.resource,
+    });
+
+    assert.equal(clean.result.scheduledJobs?.length ?? 0, 0, testCase.resource);
+    assertHistoryCoverage(
+      clean.result.metadataPatch,
+      "omron",
+      testCase.resource,
+      true,
+      testCase.resource,
+    );
+  }
+});
+
+test("retryable sparse-body delivery failure preserves the retry obligation", async () => {
+  const availability = { fat: true };
+  const provider = createProvider({
+    historicalPullState: { resource: "fat", status: "success" },
+    providerState: { resourceAvailability: availability, status: "connected" },
+    requests: [],
+    timeseriesRecords: {
+      fat: [{
+        id: "fat-before-retryable-delivery-failure",
+        timestamp: "2026-05-20T08:30:00.000Z",
+        unit: "percent",
+        value: 18,
+      }],
+    },
+    timeseriesResources: ["fat"],
+  });
+  const source = createSourceSummary(
+    "omron",
+    "2026-01-01T12:00:00.000Z",
+    "connected",
+    availability,
+  );
+  const scheduled = findResourceJob(
+    requireValue(requireValue(provider.jobExecutor).createScheduledJobs)(
+      createStoredAccount({ sources: [source] }),
+      NOW,
+    ).jobs,
+    "fat",
+  );
+  const failure = deviceSyncError({
+    code: "HOSTED_DEVICE_SYNC_ARTIFACT_WRITE_FAILED",
+    httpStatus: 503,
+    message: "Temporary hosted device-sync artifact failure.",
+    retryable: true,
+  });
+  const failed = await requireValue(provider.jobExecutor).executeJob(
+    createJobContext({
+      account: createAccount({ sources: [source] }),
+      importSnapshot: async () => {
+        throw failure;
+      },
+    }),
+    toJobRecord(scheduled, 320),
+  );
+  const retry = findResourceJob(failed.scheduledJobs ?? [], "fat");
+
+  assertHistoryCoverage(failed.metadataPatch, "omron", "fat", false);
+  assert.equal(retry.availableAt, "2026-06-11T12:15:00.000Z");
+  assert.equal(retry.dedupeKey, scheduled.dedupeKey);
+  assert.equal(retry.payload?.historicalProviderRecordsSeen, true);
+  assert.equal(retry.payload?.historicalUnresolvedProviderRecordCount, 1);
 });
 
 test("a sparse daily aggregate retries a date with a malformed sibling", async () => {
