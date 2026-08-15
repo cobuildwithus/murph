@@ -16,7 +16,11 @@ const SLOW_ACTION_SAMPLE_LIMIT = 8
 const OUTPUT_ITEM_SCAN_LIMIT = 64
 const TRACKED_ACTION_LIMIT = 256
 const TOOL_DIAGNOSTIC_LIMIT = 16
+const COMMAND_RUNTIME_ISSUE_TRACK_LIMIT = 256
+const COMMAND_RUNTIME_ISSUE_RECOVERY_LIMIT = 8
 const TOOL_IDENTIFIER_PART_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/u
+const DIRECT_SEARCH_COMMAND_PATTERN = /^(?:grep|rg)(?:\s|$)/u
+const SHELL_CONTROL_PATTERN = /[\r\n;&|<>`$(){}]/u
 
 type CodexActionKind =
   | 'command.execution'
@@ -40,6 +44,20 @@ type BytesBucket =
   | '1_10kb'
   | '10_100kb'
   | 'gt_100kb'
+
+type CommandDiagnosticFamily = 'search' | 'unknown'
+
+type CommandFailureClass =
+  | 'nonzero_exit'
+  | 'not_executable'
+  | 'not_found'
+  | 'search_error'
+  | 'timeout'
+
+type TrackedCommandDiagnostic = {
+  commandOrdinal: number
+  commandFamily: CommandDiagnosticFamily
+}
 
 type TokenUsageSample = {
   cachedInputTokens: number | null
@@ -94,6 +112,127 @@ export interface CodexActionDiagnosticsReducer {
     normalizedEvent: CodexNormalizedEvent
     rawEvent: unknown
   }): void
+}
+
+export interface CodexActionRuntimeIssueTracker {
+  recordEvent(input: {
+    activeTurnId: string | null
+    normalizedEvent: CodexNormalizedEvent
+    rawEvent: unknown
+  }): AssistantRuntimeIssueInput | null
+}
+
+export function createCodexActionRuntimeIssueTracker(): CodexActionRuntimeIssueTracker {
+  let commandActionOrdinal = 0
+  const startedCommands = new Map<string, TrackedCommandDiagnostic>()
+  const completedCommandIds = new Set<string>()
+  const pendingSearchFailureDetails: Record<string, unknown>[] = []
+
+  const nextCommandDiagnostic = (
+    normalizedEvent: CodexNormalizedEvent,
+  ): TrackedCommandDiagnostic => ({
+    commandOrdinal: ++commandActionOrdinal,
+    commandFamily: resolveDirectSearchCommandFamily(normalizedEvent),
+  })
+
+  return {
+    recordEvent(input) {
+      if (!shouldRecordEventForTurn(input.rawEvent, input.activeTurnId)) {
+        return null
+      }
+      const eventType = readEventType(input.rawEvent)
+      const kind = resolveActionKind(input.normalizedEvent, input.rawEvent)
+      if (kind !== 'command.execution') {
+        return buildRuntimeIssueInputForFailedCodexAction(input)
+      }
+
+      const itemId =
+        readNormalizedItemId(input.normalizedEvent)
+        ?? readRawItemId(input.rawEvent)
+      if (eventType === 'item.started') {
+        if (
+          itemId !== null
+          && !startedCommands.has(itemId)
+          && startedCommands.size < COMMAND_RUNTIME_ISSUE_TRACK_LIMIT
+        ) {
+          startedCommands.set(
+            itemId,
+            nextCommandDiagnostic(input.normalizedEvent),
+          )
+        }
+        return null
+      }
+      if (eventType !== 'item.completed') {
+        return null
+      }
+
+      if (itemId !== null && completedCommandIds.has(itemId)) {
+        return null
+      }
+      if (
+        itemId !== null
+        && completedCommandIds.size < COMMAND_RUNTIME_ISSUE_TRACK_LIMIT
+      ) {
+        completedCommandIds.add(itemId)
+      }
+
+      const startedDiagnostic = itemId === null
+        ? null
+        : startedCommands.get(itemId) ?? null
+      if (itemId !== null) {
+        startedCommands.delete(itemId)
+      }
+      const completionCommandPresent =
+        input.normalizedEvent.kind === 'status_item'
+        && input.normalizedEvent.commandLabel !== null
+      const commandDiagnostic = completionCommandPresent
+        ? {
+            commandOrdinal:
+              startedDiagnostic?.commandOrdinal ?? ++commandActionOrdinal,
+            commandFamily: resolveDirectSearchCommandFamily(
+              input.normalizedEvent,
+            ),
+          }
+        : startedDiagnostic ?? nextCommandDiagnostic(input.normalizedEvent)
+      const exitCode = readCommandExitCode({
+        item: readEventItem(input.rawEvent),
+        normalizedEvent: input.normalizedEvent,
+      })
+
+      if (exitCode === 0) {
+        if (commandDiagnostic.commandFamily === 'search') {
+          // Raw commands never enter diagnostic state, so recovery is the
+          // intentionally coarse fact that a later direct search succeeded;
+          // it does not claim that the exact query was retried.
+          for (const details of pendingSearchFailureDetails) {
+            details.recoveredAfterFailure = true
+          }
+          pendingSearchFailureDetails.length = 0
+        }
+        return null
+      }
+      if (
+        exitCode === 1
+        && commandDiagnostic.commandFamily === 'search'
+      ) {
+        return null
+      }
+
+      const issue = buildRuntimeIssueInputForFailedCodexAction({
+        ...input,
+        commandDiagnostic,
+      })
+      if (
+        issue?.details
+        && commandDiagnostic.commandFamily === 'search'
+        && pendingSearchFailureDetails.length
+          < COMMAND_RUNTIME_ISSUE_RECOVERY_LIMIT
+      ) {
+        pendingSearchFailureDetails.push(issue.details)
+      }
+      return issue
+    },
+  }
 }
 
 export function createCodexActionDiagnosticsReducer(): CodexActionDiagnosticsReducer {
@@ -354,7 +493,8 @@ export function createCodexActionDiagnosticsReducer(): CodexActionDiagnosticsRed
   }
 }
 
-export function buildRuntimeIssueInputForFailedCodexAction(input: {
+function buildRuntimeIssueInputForFailedCodexAction(input: {
+  commandDiagnostic?: TrackedCommandDiagnostic
   normalizedEvent: CodexNormalizedEvent
   rawEvent: unknown
 }): AssistantRuntimeIssueInput | null {
@@ -408,6 +548,19 @@ export function buildRuntimeIssueInputForFailedCodexAction(input: {
       summary: 'Codex command execution failed during provider turn.',
       details: {
         ...commonDetails,
+        ...(input.commandDiagnostic
+          ? {
+              commandFamily: input.commandDiagnostic.commandFamily,
+              commandOrdinal: input.commandDiagnostic.commandOrdinal,
+              failureClass: classifyCommandFailure({
+                commandFamily: input.commandDiagnostic.commandFamily,
+                exitCode,
+              }),
+              ...(input.commandDiagnostic.commandFamily === 'search'
+                ? { recoveredAfterFailure: false }
+                : {}),
+            }
+          : {}),
         exitCode,
       },
     }
@@ -436,6 +589,42 @@ export function buildRuntimeIssueInputForFailedCodexAction(input: {
     summary: 'Codex tool call failed during provider turn.',
     details: commonDetails,
   }
+}
+
+function resolveDirectSearchCommandFamily(
+  normalizedEvent: CodexNormalizedEvent,
+): CommandDiagnosticFamily {
+  if (
+    normalizedEvent.kind !== 'status_item'
+    || normalizedEvent.commandLabel === null
+  ) {
+    return 'unknown'
+  }
+
+  const command = normalizedEvent.commandLabel.trim()
+  return DIRECT_SEARCH_COMMAND_PATTERN.test(command)
+    && !SHELL_CONTROL_PATTERN.test(command)
+    ? 'search'
+    : 'unknown'
+}
+
+function classifyCommandFailure(input: {
+  commandFamily: CommandDiagnosticFamily
+  exitCode: number
+}): CommandFailureClass {
+  if (input.exitCode === 127) {
+    return 'not_found'
+  }
+  if (input.exitCode === 126) {
+    return 'not_executable'
+  }
+  if (input.exitCode === 124) {
+    return 'timeout'
+  }
+  if (input.commandFamily === 'search') {
+    return 'search_error'
+  }
+  return 'nonzero_exit'
 }
 
 function readCommandExitCode(input: {

@@ -86,6 +86,68 @@ describe('importHostedAssistantRuntimeIssues', () => {
     expect(create).not.toHaveProperty('memberId')
   })
 
+  it('persists bounded command attribution without a member relation', async () => {
+    const createMany = vi.fn<
+      (input: {
+        data: Record<string, unknown>[]
+        skipDuplicates: true
+      }) => Promise<{ count: number }>
+    >(async (input) => ({ count: input.data.length }))
+    prismaMocks.getPrisma.mockReturnValue({
+      hostedAssistantRuntimeIssue: {
+        createMany,
+      },
+    })
+
+    await importHostedAssistantRuntimeIssues({
+      issues: [
+        {
+          component: 'assistant.codex-action',
+          details: {
+            actionKind: 'command.execution',
+            commandFamily: 'search',
+            commandOrdinal: 3,
+            durationMsBucket: '1_5s',
+            exitCode: 2,
+            failureClass: 'search_error',
+            outputBytesBucket: 'lt_1kb',
+            recoveredAfterFailure: true,
+          },
+          environment: 'hosted',
+          errorCode: 'CODEX_COMMAND_EXIT_NONZERO',
+          fingerprint: TEST_FINGERPRINT,
+          issueId: TEST_ISSUE_ID,
+          issueKind: 'tool_error',
+          occurredAt: '2026-04-08T12:00:00.000Z',
+          operation: 'command.execution',
+          phase: 'provider_turn',
+          schema: 'murph.assistant-runtime-issue.v1',
+          severity: 'warning',
+          summary: 'Codex command execution failed during provider turn.',
+          surface: 'telegram',
+        },
+      ],
+      now: new Date('2026-04-08T00:00:00.000Z'),
+    })
+
+    const create = createMany.mock.calls[0]?.[0]?.data[0]
+    expect(create).toEqual(expect.objectContaining({
+      component: 'assistant.codex-action',
+      detailsJson: {
+        actionKind: 'command.execution',
+        commandFamily: 'search',
+        commandOrdinal: 3,
+        durationMsBucket: '1_5s',
+        exitCode: 2,
+        failureClass: 'search_error',
+        outputBytesBucket: 'lt_1kb',
+        recoveredAfterFailure: true,
+      },
+      operation: 'command.execution',
+    }))
+    expect(create).not.toHaveProperty('memberId')
+  })
+
   it('re-sanitizes hosted issue payloads before persistence', async () => {
     const bearerSecret = ['sk', 'testsecret12345'].join('-')
     const providerSecret = ['sk', 'providersecret12345'].join('-')

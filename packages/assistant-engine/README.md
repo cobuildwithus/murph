@@ -118,6 +118,15 @@ authority. Dynamic-tool dispatch requires the exact active root turn and
 rejects descendant, stale-turn, or foreign-thread calls; closing the invocation
 withdraws the tools without replacing the App Server.
 
+Codex command failures reuse the existing assistant runtime-issue path. The
+turn-scoped classifier persists only a `search` or `unknown` family, a bounded
+failure class, a command ordinal, the numeric exit code, and existing duration
+and output-size buckets. It never persists command text, arguments, paths,
+output, payloads, or provider action identifiers. A direct bare `rg` or `grep`
+exit code 1 is treated as an expected no-match result. When a later direct
+search succeeds, `recoveredAfterFailure` records only family-level recovery; it
+does not assert that the exact query was retried.
+
 MultiAgent V2 descendants admitted before the root final reply may keep working
 through Codex's native lifecycle after that reply. Root completion and the next
 ordinary turn do not terminate them. They retain normal local canonical
