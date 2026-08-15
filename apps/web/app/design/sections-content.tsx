@@ -634,7 +634,7 @@ export function SectionsContent() {
 
       <Separator />
 
-      <StudySection title="Account deletion maintenance, provider-access, and connected-app recovery">
+      <StudySection title="Account deletion billing, maintenance, provider-access, and connected-app recovery">
         <AccountDeletionMaintenanceStudy />
       </StudySection>
 

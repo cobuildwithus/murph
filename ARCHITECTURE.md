@@ -3567,3 +3567,14 @@ have no waiting audience and cannot durably order a progress send before the fin
 reply. No scheduler-specific service, persisted authority row, queue, or second
 continuation lifecycle is introduced. Occurrence-derived hashes are retry keys
 only; they are never accepted-input identities.
+
+Hosted Stripe effect ownership uses an explicit expand boundary before any
+short-database claim writer ships. Nullable scalar claim fields live on the
+existing member and Family billing-reference owners. The compatibility release
+does not write those fields; it reads them only after the existing member-row
+authority locks and rejects legacy direct billing, Family billing/relationship,
+sponsored-cleanup, and account-deletion mutations while a later owner holds an
+opaque claim. This release must converge and drain before the first claim writer
+deploys, after which it is the Web rollback floor. The operational sequence and
+removal condition are defined in
+`agent-docs/operations/stripe-effect-compatibility-cutover.md`.

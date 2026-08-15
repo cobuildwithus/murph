@@ -1,6 +1,6 @@
 # Verification And Runtime
 
-Last verified: 2026-08-13
+Last verified: 2026-08-15
 ## Verification Ownership By Delivery Path
 
 The delivery path decides who owns broad verification:
@@ -59,6 +59,21 @@ over source-text or statement-order assertions. Exercise the real owner with
 narrow injected boundaries and prove acquisition ordering, success, relevant
 failure exits, exactly-once release, and awaited cleanup. Text inspection may
 supplement that proof, but it cannot establish runtime cleanup behavior.
+
+Native companion auth/control/device-sync PRs additionally require the protected
+`Native iOS hosted E2E` status described in `agent-docs/references/testing-ci-map.md`.
+That status is production-shaped evidence: exact hosted PR Web deployment plus
+real Privy/Junction/HealthKit native flow. UI completion is not enough; trusted
+orchestration must also prove the exact candidate is anonymously reachable,
+a freshly created fixed Privy principal exists, and a connected real Junction
+`apple_health_kit` provider exists before cleanup. Local mocked or hosted-local
+tests do not replace it. Runtime credentials stay in the dedicated Vercel
+custom environment; the cleanup/dispatch credentials stay only in protected
+Actions environments. The Junction sandbox API key/team is exclusive to this
+one lane, and cleanup enumerates that team before touching the isolated database.
+PR reset ownership is `orchestrator_owned_reset`, while production canary mode
+is non-destructive and receives none of that authority. Controller child
+commands and direct PostgreSQL reads are explicitly time-bounded.
 
 ## Expensive And Stochastic Proof Order
 
@@ -158,6 +173,15 @@ preflight/matrix/cleanup steps only; within the scenario it reaches the web
 Stripe client and harness-owned `stripe listen` child, not the browser,
 Cloudflare, Temporal, setup, or runner children. Do not pass it as a CLI
 argument or write it to a repository file.
+
+The Stripe effect compatibility cutover has an additional credential-free
+database proof. After applying all Web migrations to an isolated loopback
+PostgreSQL database, run the `hosted-onboarding-member-lock-postgres.test.ts`
+command documented in
+`agent-docs/operations/stripe-effect-compatibility-cutover.md`. Its controlled
+barriers prove waiting current-revision direct, Family, relationship-authority,
+and owner/beneficiary deletion writers observe a committed future claim before
+provider or authority mutation.
 
 Use stable pre-provisioned test prices and an active default Portal
 configuration with plan updates enabled and immediate invoicing. The browser

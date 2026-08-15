@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-15",
+  "order": 100,
+  "item": {
+    "id": "keep-valid-workout-stream-metrics",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Keep workout sync moving past incomplete streams",
+    "summary": "Connected wearables can now continue syncing other workouts when one workout contains an incomplete metric stream.",
+    "details": "Murph skips the affected workout instead of guessing timestamp matches or replacing previously complete workout metrics.",
+    "relevanceTags": ["wearables", "workouts", "reliability", "sync"],
+    "sourcePullRequests": [1895]
+  }
+}
