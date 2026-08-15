@@ -52,7 +52,9 @@ type Fixture = {
 };
 
 async function createFixture(input: {
+  setupPhase?: "pending_link" | "source_confirmed";
   sourceLastErrorCode: string | null;
+  sourceProviderSlug?: string;
 }): Promise<Fixture> {
   const suffix = randomUUID().replaceAll("-", "");
   const memberId = `member_prepared_webhook_authority_${suffix}`;
@@ -60,6 +62,8 @@ async function createFixture(input: {
   const receivedAt = new Date();
   const connectedAt = new Date(receivedAt.getTime() - 120_000).toISOString();
   const sourceObservedAt = new Date(receivedAt.getTime() - 60_000).toISOString();
+  const setupPhase = input.setupPhase ?? "source_confirmed";
+  const sourceProviderSlug = input.sourceProviderSlug ?? "apple_health_kit";
   const prisma = createPrismaClient({ databaseUrl, poolMax: 3 });
   const observer = createPrismaClient({ databaseUrl, poolMax: 1 });
   const store = new PrismaDeviceSyncControlPlaneStore({
@@ -99,15 +103,18 @@ async function createFixture(input: {
     ownerId: memberId,
     provider: "junction",
     scopes: [],
-    setupPhase: "source_confirmed",
+    setupExpiresAt: setupPhase === "pending_link"
+      ? new Date(receivedAt.getTime() + 30 * 60_000).toISOString()
+      : null,
+    setupPhase,
     status: "active",
   });
   const sourceInstanceKey = buildJunctionProviderSourceInstanceKey({
     connectionId: connection.id,
-    sourceProviderSlug: "apple_health_kit",
+    sourceProviderSlug,
   });
   if (!sourceInstanceKey) {
-    throw new Error("Expected an Apple Health source instance key.");
+    throw new Error("Expected a Junction source instance key.");
   }
   const source = await store.upsertConnectionSource({
     connectionId: connection.id,
@@ -117,7 +124,7 @@ async function createFixture(input: {
     lastErrorMessage: null,
     lastSeenAt: sourceObservedAt,
     sourceInstanceKey,
-    sourceProviderSlug: "apple_health_kit",
+    sourceProviderSlug,
     status: "disconnected",
   });
 
@@ -186,20 +193,13 @@ function createIngressService(input: {
   );
 }
 
-function signJunctionSourceRegistration(input: {
-  externalAccountId: string;
+function signJunctionWebhook(input: {
+  body: Record<string, unknown>;
   messageId: string;
   receivedAt: Date;
 }): { headers: Headers; rawBody: Buffer } {
   const timestamp = Math.floor(input.receivedAt.getTime() / 1_000).toString();
-  const rawBody = Buffer.from(JSON.stringify({
-    data: {
-      provider: "apple_health_kit",
-      updated_at: input.receivedAt.toISOString(),
-    },
-    event_type: "provider.connection.updated",
-    user_id: input.externalAccountId,
-  }));
+  const rawBody = Buffer.from(JSON.stringify(input.body));
   const key = Buffer.from(
     junctionWebhookSecret.slice("whsec_".length),
     "base64",
@@ -225,9 +225,56 @@ async function prepareRegistration(input: {
   fixture: Fixture;
   registry: DeviceSyncRegistry;
 }): Promise<PreparedDeviceSyncWebhookV1> {
-  const signed = signJunctionSourceRegistration({
-    externalAccountId: input.fixture.externalAccountId,
+  const signed = signJunctionWebhook({
+    body: {
+      data: {
+        provider: "apple_health_kit",
+        updated_at: input.fixture.receivedAt.toISOString(),
+      },
+      event_type: "provider.connection.updated",
+      user_id: input.fixture.externalAccountId,
+    },
     messageId: `msg_prepared_authority_${randomUUID().replaceAll("-", "")}`,
+    receivedAt: input.fixture.receivedAt,
+  });
+  const service = createIngressService({
+    fixture: input.fixture,
+    headers: signed.headers,
+    registry: input.registry,
+  });
+  const prepared = await service.prepareWebhookForDurableEnqueue(
+    "junction",
+    signed.rawBody,
+    input.fixture.receivedAt,
+  );
+  input.fixture.traceIds.push(prepared.traceId);
+  return prepared;
+}
+
+async function prepareDailyData(input: {
+  fixture: Fixture;
+  registry: DeviceSyncRegistry;
+  sourceProviderSlug: string;
+}): Promise<PreparedDeviceSyncWebhookV1> {
+  const signed = signJunctionWebhook({
+    body: {
+      data: {
+        data: [{
+          end: input.fixture.receivedAt.toISOString(),
+          start: new Date(input.fixture.receivedAt.getTime() - 60_000).toISOString(),
+          unit: "count",
+          value: 321,
+        }],
+        source: {
+          provider: input.sourceProviderSlug,
+          type: "watch",
+        },
+        user_id: input.fixture.externalAccountId,
+      },
+      event_type: "daily.data.steps.created",
+      user_id: input.fixture.externalAccountId,
+    },
+    messageId: `msg_prepared_daily_${randomUUID().replaceAll("-", "")}`,
     receivedAt: input.fixture.receivedAt,
   });
   const service = createIngressService({
@@ -328,6 +375,119 @@ async function cleanupFixture(fixture: Fixture): Promise<void> {
 describe.skipIf(!runPostgresProof)(
   "prepared device-webhook authority revalidation (real PostgreSQL)",
   () => {
+    it("confirms pending setup from a signed daily event only after live source proof", async () => {
+      const sourceProviderSlug = "garmin";
+      const fixture = await createFixture({
+        setupPhase: "pending_link",
+        sourceLastErrorCode: null,
+        sourceProviderSlug,
+      });
+      const providerFetch = vi.fn(async () => new Response(JSON.stringify({
+        data: [{ slug: sourceProviderSlug, status: "connected" }],
+      }), {
+        headers: { "content-type": "application/json" },
+        status: 200,
+      }));
+      const registry = createJunctionRegistry(providerFetch);
+
+      try {
+        const prepared = await prepareDailyData({
+          fixture,
+          registry,
+          sourceProviderSlug,
+        });
+        expect(prepared).toMatchObject({
+          dataSourceProviderSlug: sourceProviderSlug,
+          eventType: "daily.data.steps.created",
+          sourceProviderSlug,
+        });
+        await fixture.prisma.deviceSyncDirtyConnection.create({
+          data: {
+            connectionId: fixture.connectionId,
+            dirtyRevision: 1n,
+            eventCount: 1n,
+            firstDirtyAt: new Date(fixture.receivedAt.getTime() - 1_000),
+            latestDirtyAt: new Date(fixture.receivedAt.getTime() - 1_000),
+            processedRevision: 0n,
+            provider: "junction",
+            userId: fixture.memberId,
+          },
+        });
+        const consumeService = createIngressService({
+          fixture,
+          headers: new Headers(),
+          registry,
+        });
+
+        await expect(consumeService.handlePreparedWebhook(prepared)).resolves.toMatchObject({
+          accepted: true,
+          duplicate: false,
+        });
+
+        expect(providerFetch).toHaveBeenCalledOnce();
+        await expect(fixture.prisma.deviceConnection.findUniqueOrThrow({
+          select: {
+            lastWebhookAt: true,
+            setupExpiresAt: true,
+            setupPhase: true,
+          },
+          where: { id: fixture.connectionId },
+        })).resolves.toEqual({
+          lastWebhookAt: fixture.receivedAt,
+          setupExpiresAt: null,
+          setupPhase: "source_confirmed",
+        });
+        await expect(fixture.prisma.deviceConnectionSource.findUniqueOrThrow({
+          select: {
+            lastDataAt: true,
+            lastErrorCode: true,
+            lastErrorMessage: true,
+            lastSeenAt: true,
+            status: true,
+          },
+          where: { id: fixture.sourceId },
+        })).resolves.toEqual({
+          lastDataAt: fixture.receivedAt,
+          lastErrorCode: null,
+          lastErrorMessage: null,
+          lastSeenAt: fixture.receivedAt,
+          status: "connected",
+        });
+        await expect(fixture.prisma.deviceWebhookTrace.findUniqueOrThrow({
+          select: { status: true },
+          where: {
+            provider_traceId: {
+              provider: "junction",
+              traceId: prepared.traceId,
+            },
+          },
+        })).resolves.toEqual({ status: "processed" });
+        await expect(fixture.prisma.deviceSyncDirtyConnection.findUniqueOrThrow({
+          select: {
+            dirtyRevision: true,
+            eventCount: true,
+            latestEventType: true,
+          },
+          where: { connectionId: fixture.connectionId },
+        })).resolves.toEqual({
+          dirtyRevision: 1n,
+          eventCount: 1n,
+          latestEventType: null,
+        });
+        await expect(fixture.prisma.deviceSyncDirtyPayload.count({
+          where: { connectionId: fixture.connectionId },
+        })).resolves.toBe(1);
+        await expect(fixture.prisma.deviceSyncSignal.count({
+          where: { connectionId: fixture.connectionId },
+        })).resolves.toBe(1);
+        await expect(fixture.prisma.hostedMailboxItem.count({
+          where: { userId: fixture.memberId },
+        })).resolves.toBe(0);
+      } finally {
+        await cleanupFixture(fixture);
+      }
+    });
+
     it("terminally settles a delayed signed Junction registration after consent is revoked during source cleanup", async () => {
       const fixture = await createFixture({
         sourceLastErrorCode: DEVICE_SYNC_SOURCE_DISCONNECT_IN_PROGRESS_ERROR_CODE,

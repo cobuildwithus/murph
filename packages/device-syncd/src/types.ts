@@ -776,9 +776,9 @@ export interface DeviceSyncPublicIngressHooks {
   onConnectionSourceAdmissionRejected?(
     input: DeviceSyncPublicIngressConnectionSourceAdmissionRejectedInput,
   ): void | Promise<void>;
-  // Native SDK sources have no browser callback. A current provider-authored
-  // event may commit their pending exact-source epoch; passive traffic cannot
-  // clear a completed disconnect fence.
+  // A current provider-authored event may trigger exact-source verification
+  // when a native or browser callback is absent. Passive traffic cannot clear
+  // a completed disconnect fence because the runtime owns final admission.
   onConnectionSourceObserved?(
     input: DeviceSyncPublicIngressConnectionSourceObservedInput,
   ): void

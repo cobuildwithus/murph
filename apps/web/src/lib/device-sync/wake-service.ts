@@ -1962,13 +1962,7 @@ async function prepareHostedWebhookSourceObservation(input: {
   webhook: DeviceSyncIngressWebhook;
 }): Promise<HostedWebhookSourceObservationPreparation> {
   const sourceProviderSlug = normalizeJunctionProviderSlug(input.webhook.sourceProviderSlug);
-  const isSourceRegistrationEvent = input.provider === "junction"
-    && sourceProviderSlug === COMPANION_APPLE_HEALTH_SOURCE_PROVIDER
-    && (
-      input.webhook.eventType === "provider.connection.created"
-      || input.webhook.eventType === "provider.connection.updated"
-    );
-  if (!isSourceRegistrationEvent || !sourceProviderSlug) {
+  if (input.provider !== "junction" || !sourceProviderSlug) {
     return { kind: "not_required" };
   }
 
@@ -1998,17 +1992,6 @@ async function prepareHostedWebhookSourceObservation(input: {
           await completeHostedWebhookTraceTx(input, tx);
           return { kind: "terminal" };
         }
-        if (isDeviceSyncConnectionSetupPending({
-          setupPhase: normalizeHostedDeviceSyncSetupPhase(current.setupPhase),
-        })) {
-          throw deviceSyncError({
-            code: "WEBHOOK_ACCOUNT_NOT_READY",
-            message: "Device sync setup changed before webhook work could be admitted.",
-            retryable: true,
-            httpStatus: 503,
-          });
-        }
-
         const matchingSources = await input.store.listConnectionSourceAdmissionCandidates({
           connectionId: input.account.id,
           sourceProviderSlug,
@@ -2938,9 +2921,10 @@ async function inspectHostedDeviceSyncWebhookAdmissionTx(
     await completeHostedWebhookTraceTx(input, tx);
     return "completed";
   }
-  if (isDeviceSyncConnectionSetupPending({
+  const setupPending = isDeviceSyncConnectionSetupPending({
     setupPhase: normalizeHostedDeviceSyncSetupPhase(current.setupPhase),
-  })) {
+  });
+  if (setupPending && !input.sourceObservation) {
     throw deviceSyncError({
       code: "WEBHOOK_ACCOUNT_NOT_READY",
       message: "Device sync setup changed before webhook work could be committed.",
@@ -3002,6 +2986,15 @@ async function inspectHostedDeviceSyncWebhookAdmissionTx(
           lastSeenAt: input.acceptedAt,
           tx,
         });
+        if (setupPending) {
+          await tx.deviceConnection.update({
+            where: { id: input.connectionId },
+            data: {
+              setupExpiresAt: null,
+              setupPhase: "source_confirmed",
+            },
+          });
+        }
       }
     } else {
       if (!source) {

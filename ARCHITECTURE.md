@@ -2492,13 +2492,22 @@ app-session and callback-proof cookies remain host-only; do not add a Domain
 cookie or cross-host handoff.
 
 Junction's existing setup phase is the account data-admission boundary. A new
-account in `pending_link` or `link_returned` cannot accept webhook side effects,
-persist dirty work, wake or schedule the runtime, execute queued provider jobs,
-or promote itself through sync success. After an account reaches
+account in `pending_link` or `link_returned` cannot accept ordinary webhook side
+effects, persist dirty work, wake or schedule the runtime, execute queued
+provider jobs, or promote itself through sync success. Hosted Web may recover a
+missing browser callback only after an authenticated, source-attributed webhook
+owns its trace and a live Junction provider-list read confirms the exact
+prepared source. The webhook is a trigger, not proof by itself. The runtime
+rechecks consent, shared-app binding, connection and credential epochs, source
+epoch, and disconnect fences. It then commits `source_confirmed`, source
+admission, dirty state, and trace completion in one locked transaction. A
+failed or ambiguous provider read leaves setup pending and retryable. After an
+account reaches
 `source_confirmed`, adding or retrying another Junction-backed source preserves
 that account and its established siblings. The target `DeviceConnectionSource`
 stays `disconnected` and its webhook and pull work remain inert until callback
-completion reaches the runtime connection-established hook. Shared ingress
+completion or the same provider-verified hosted admission reaches the runtime
+owner. Shared ingress
 chooses one closed account write policy for every persistence request:
 `replace` for an account reconnect or `preserve_established` for a
 source-scoped addition. Hosted Prisma and local SQLite apply the same shared
@@ -2514,7 +2523,8 @@ removes that source's records from the import. While any source admission is
 pending, a record whose source reference cannot be resolved fails closed;
 absence of a row for an explicit source remains the legacy admission rule.
 Explicit disconnect or a newer connection epoch wins the locked recheck,
-fails the stale callback, and leaves the target disconnected. Retry cleanup
+fails the stale callback or webhook recovery, and leaves the target
+disconnected. Retry cleanup
 deregisters only the target source; whole-account revoke remains the explicit
 connection-wide disconnect path. Ambiguous target cleanup blocks the new link
 and remains retryable. The hosted Connect surface uses that same split for
@@ -2546,9 +2556,10 @@ runtime rereads that durable source immediately before canonical import; a
 queued job never treats its cached account snapshot as current authorization.
 An explicit Apple Health SDK connect captures the exact source epoch before
 token mint and opens a pending epoch only if that proof is still current after
-mint; an older Connect therefore cannot clear a newer Disconnect. A signed
-source-registration event reconciles that pending epoch against Junction's live
-provider list and can mark it connected without inventing a timestamp. If the
+mint; an older Connect therefore cannot clear a newer Disconnect. An
+authenticated source-attributed Junction event can trigger reconciliation of a
+prepared native or Link source against Junction's live provider list. Only the
+live provider read can mark it connected without inventing a timestamp. If the
 source or parent was disconnected, the same event performs target-only cleanup
 instead. Receipt time and health-record occurrence time are never synthesized
 as registration proof, and source admission runs only after the webhook attempt

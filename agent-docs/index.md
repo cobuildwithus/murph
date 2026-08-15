@@ -1,6 +1,6 @@
 # Murph Agent Docs Index
 
-Last verified: 2026-08-14
+Last verified: 2026-08-15
 
 ## Purpose
 
@@ -107,6 +107,14 @@ is fully quiescent with no provider work or checkpoint.
 The contract is jointly specified by
 `agent-docs/RELIABILITY.md` and
 `agent-docs/references/hosted-runtime-protocol.md`.
+
+Hosted Junction setup recovery treats a signed source-attributed webhook as a
+trigger, not as connection proof. Web reads the live provider source list, then
+atomically confirms the matching pending setup, source receipt, dirty work, and
+webhook trace under the existing health-data admission lock. The trust and
+failure contracts are jointly specified by `ARCHITECTURE.md`,
+`agent-docs/SECURITY.md`, `agent-docs/RELIABILITY.md`, and
+`agent-docs/references/testing-ci-map.md`.
 
 Personal-to-group projection convergence, including attempt-local foreground
 preemption, abort/shutdown admission before every scope, its single forwarded deadline, and
