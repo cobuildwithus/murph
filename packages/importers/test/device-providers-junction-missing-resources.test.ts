@@ -280,6 +280,100 @@ test("Junction sparse clinical imports retain a deterministic bounded prefix", (
   assert.doesNotMatch(JSON.stringify(forward.evidenceParts), /clinical-row-/u);
 });
 
+test("Junction metabolic intervals admit one exact source-local instant and preserve real offsets", () => {
+  const payload = normalizeJunctionSnapshot({
+    importedAt: "2026-11-02T00:00:00.000Z",
+    timeseries: {
+      carbohydrates: grouped("freestyle_libre", "cgm", "libre-1", [
+        {
+          end: "2026-01-15T08:05:00+00:00",
+          id: "ordinary",
+          start: "2026-01-15T08:00:00+00:00",
+          unit: "g",
+          value: 30,
+        },
+        {
+          end: "2026-03-08T02:20:00+00:00",
+          id: "spring-gap",
+          start: "2026-03-08T02:15:00+00:00",
+          unit: "g",
+          value: 31,
+        },
+        {
+          end: "2026-11-01T01:20:00+00:00",
+          id: "fall-overlap",
+          start: "2026-11-01T01:15:00+00:00",
+          unit: "g",
+          value: 32,
+        },
+        {
+          end: "2026-11-01T01:20:00-04:00",
+          id: "first-offset",
+          start: "2026-11-01T01:15:00-04:00",
+          unit: "g",
+          value: 33,
+        },
+        {
+          end: "2026-11-01T01:20:00-05:00",
+          id: "second-offset",
+          start: "2026-11-01T01:15:00-05:00",
+          unit: "g",
+          value: 34,
+        },
+      ]),
+      insulin_injection: grouped("freestyle_libre", "cgm", "libre-1", [{
+        end: "2026-01-15T09:05:00+00:00",
+        id: "insulin-ordinary",
+        start: "2026-01-15T09:00:00+00:00",
+        type: "rapid_acting",
+        unit: "unit",
+        value: 4,
+      }]),
+    },
+  }, { defaultTimeZone: "America/New_York" });
+
+  const carbohydrates = (payload.events ?? []).filter((event) =>
+    event.kind === "observation" && event.fields?.metric === "carbohydrates"
+  );
+  const insulin = (payload.events ?? []).filter((event) =>
+    event.kind === "intervention_session"
+  );
+
+  assert.deepEqual(
+    carbohydrates.map((event) => event.occurredAt).sort(),
+    [
+      "2026-01-15T13:00:00.000Z",
+      "2026-11-01T05:15:00.000Z",
+      "2026-11-01T06:15:00.000Z",
+    ],
+  );
+  assert.deepEqual(insulin.map((event) => event.occurredAt), ["2026-01-15T14:00:00.000Z"]);
+  assert.equal((payload.events ?? []).length, 4);
+});
+
+test("Junction glucose summaries expose bounded population variability", () => {
+  const payload = normalizeJunctionSnapshot({
+    importedAt: "2026-02-02T00:00:00.000Z",
+    timeseries: {
+      glucose: grouped("dexcom", "cgm", "dexcom-1", [
+        { timestamp: "2026-02-01T12:00:00.000Z", value: 5 },
+        { timestamp: "2026-02-01T12:05:00.000Z", value: 7 },
+      ]),
+    },
+  });
+
+  const values = new Map(
+    (payload.events ?? []).map((event) => [event.fields?.metric, event.fields?.value]),
+  );
+  assert.equal(values.get("glucose"), 108.1092);
+  assert.equal(values.get("lowest-glucose"), 90.091);
+  assert.equal(values.get("highest-glucose"), 126.1274);
+  assert.equal(values.get("glucose-standard-deviation"), 18.0182);
+  assert.equal(values.get("glucose-coefficient-of-variation"), 16.6667);
+  assert.equal(payload.samples?.length ?? 0, 0);
+  assert.equal(payload.evidenceParts?.length, 1);
+});
+
 test("Junction missing-resource slice rejects malformed values, units, intervals, and alert types", () => {
   const payload = normalizeJunctionSnapshot({
     importedAt: "2026-02-02T00:00:00.000Z",

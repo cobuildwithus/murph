@@ -565,6 +565,104 @@ test("wearable source health reports sleep-window metrics for session-only provi
   }
 });
 
+test("wearable metric runtime retrieves metabolic observations through body-state summaries", async () => {
+  const testTempRoot = process.env.MURPH_VITEST_TEMP_ROOT;
+  if (!testTempRoot) {
+    throw new Error("MURPH_VITEST_TEMP_ROOT is required.");
+  }
+  const vaultRoot = await mkdtemp(path.join(testTempRoot, "query-metabolic-metrics-"));
+
+  try {
+    await mkdir(path.join(vaultRoot, "ledger/events/2026"), { recursive: true });
+    const observations = [
+      {
+        id: "evt_carbohydrate_intake_01",
+        metric: "carbohydrates",
+        observationGrain: "sample",
+        occurredAt: "2026-04-22T17:00:00.000Z",
+        provider: "freestyle_libre",
+        unit: "g",
+        value: 35,
+      },
+      {
+        id: "evt_glucose_sd_01",
+        metric: "glucose-standard-deviation",
+        observationGrain: "summary",
+        occurredAt: "2026-04-22T23:45:00.000Z",
+        provider: "dexcom",
+        unit: "mg/dL",
+        value: 18.5,
+      },
+      {
+        id: "evt_glucose_cv_01",
+        metric: "glucose-coefficient-of-variation",
+        observationGrain: "summary",
+        occurredAt: "2026-04-22T23:45:00.000Z",
+        provider: "dexcom",
+        unit: "%",
+        value: 16.2,
+      },
+    ];
+    await writeFile(
+      path.join(vaultRoot, "ledger/events/2026/2026-04.jsonl"),
+      observations.map((observation) => JSON.stringify({
+        schemaVersion: "murph.event.v1",
+        id: observation.id,
+        kind: "observation",
+        occurredAt: observation.occurredAt,
+        recordedAt: "2026-04-23T12:00:00.000Z",
+        dayKey: "2026-04-22",
+        source: "device",
+        title: observation.metric,
+        metric: observation.metric,
+        observationGrain: observation.observationGrain,
+        value: observation.value,
+        unit: observation.unit,
+        dataOrigin: {
+          version: 1,
+          aggregatorProvider: "junction",
+          sourceProviderSlug: observation.provider,
+          originConfidence: "high",
+        },
+        externalRef: {
+          system: "junction",
+          resourceType: `junction-${observation.metric}`,
+          resourceId: observation.id,
+        },
+      })).join("\n").concat("\n"),
+      "utf8",
+    );
+
+    const bodyState = await summarizeWearableBodyStateRuntime(vaultRoot);
+    const carbohydrate = await summarizeWearableMetricLatestRuntime(
+      vaultRoot,
+      "carbohydrateIntake",
+      { windowDays: 1 },
+    );
+    const standardDeviation = await summarizeWearableMetricLatestRuntime(
+      vaultRoot,
+      "glucose_sd",
+      { windowDays: 1 },
+    );
+    const coefficientOfVariation = await summarizeWearableMetricTrendRuntime(
+      vaultRoot,
+      "glucoseCoefficientOfVariation",
+      { windowDays: 1 },
+    );
+
+    assert.equal(bodyState[0]?.carbohydrateIntake.selection.value, 35);
+    assert.equal(carbohydrate?.metric, "carbohydrateIntake");
+    assert.equal(carbohydrate?.provider, "freestyle-libre");
+    assert.equal(carbohydrate?.value, 35);
+    assert.equal(standardDeviation?.metric, "glucoseStandardDeviation");
+    assert.equal(standardDeviation?.value, 18.5);
+    assert.equal(coefficientOfVariation?.metric, "glucoseCoefficientOfVariation");
+    assert.deepEqual(coefficientOfVariation?.points.map((point) => point.value), [16.2]);
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
 test("wearable source health keeps provider-scoped evidence when external provenance is partial", async () => {
   const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "murph-query-wearables-partial-provenance-"));
 

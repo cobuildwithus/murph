@@ -57,7 +57,8 @@ Current providers:
   unversioned work remains v1 after an upgrade and cannot certify or downgrade
   v2 coverage.
 - Junction's product-default labels include `steps`, `distance`,
-  `calories_active`, `heartrate`, and `weight`. Production configuration sets
+  `calories_active`, `heartrate`, `weight`, `carbohydrates`, and
+  `insulin_injection`. Production configuration sets
   the exhaustive 48-resource registry explicitly, and omitting the list at the
   programmatic runtime seam resolves to that same registry. An explicit empty
   list disables all timeseries; an explicit non-empty list remains exact and
@@ -77,10 +78,16 @@ Current providers:
   is checked again after each provider read so a reconnect retries the same
   resource/day instead of importing a stale response. Stable provider row IDs
   may inform hashing but are omitted from compact evidence.
-- BMI, carbohydrates, body fat, insulin injections, lean body mass, and waist
-  circumference remain product opt-in labels. The production provider assembly
+- Carbohydrates and insulin injections use bounded 30-day history chunks with
+  at most 3,840 provider rows and 3,000 deterministic canonical facts. Libre's
+  documented fake-UTC wall times are admitted only when the vault timezone
+  identifies one exact instant; real nonzero offsets stay absolute, while DST
+  gaps and overlaps fail closed. The lifecycle fence rechecks the source after
+  each fetch before import.
+- BMI, body fat, lean body mass, and waist circumference remain product opt-in
+  labels. The production provider assembly
   still enables the exhaustive exact code-owned registry; member overlays and
-  environment variables cannot widen or narrow it. These six resources retain
+  environment variables cannot widen or narrow it. These four resources retain
   bounded 30-day fetch chunks. `fat` remains the public resource name while the
   client requests Junction's `body_fat` path.
 - `electrocardiogram_voltage` and `workout_stream` are separate exact opt-ins in
@@ -181,14 +188,16 @@ second raw-payload metric parser.
 Junction timeseries use one exhaustive static history policy. Dense daily
 aggregates keep the bounded 14-day initial window. Advertised AFib burden, VO2
 max, heart-rate recovery, body and basal temperatures, sleep-breathing
-disturbance, caffeine, water, and mindfulness use the summary-history window,
-180 days by default. The existing source-scoped sparse-history jobs fetch one
-day at a time, serialize per account, and record terminal coverage in compact
+disturbance, caffeine, water, mindfulness, carbohydrates, and insulin injections
+use the summary-history window, 180 days by default. The existing source-scoped
+sparse-history jobs fetch policy-sized one- or 30-day chunks, serialize per
+account, and record terminal coverage in compact
 connection metadata; they do not add another queue or lifecycle. Blood pressure
 keeps exact per-reading completion, and note history keeps complete-fetch
 semantics. All extended timeseries completion shares one fixed-width,
-source-by-resource matrix in an existing blood-pressure or note metadata slot;
-legacy values still read, and unsupported route identities fail before history
+source-by-resource matrix in an existing blood-pressure or note metadata slot.
+The shorter pre-metabolic matrix zero-extends on its next write; older legacy
+values still read, and unsupported route identities fail before history
 egress rather than advancing an unretainable checkpoint. Every date-mode
 timeseries fetch preserves one complete provider
 calendar date during both migration and normal reconcile; a provider-bearing

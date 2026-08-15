@@ -42,15 +42,20 @@ const EXPECTED_DEFAULTS = [
   "peak_expiratory_flow_rate",
   "sleep_apnea_alert",
   "fall",
+  "carbohydrates",
+  "insulin_injection",
 ];
 
 const EXPECTED_NEW_SPARSE_OPT_INS = [
   "body_mass_index",
-  "carbohydrates",
   "fat",
-  "insulin_injection",
   "lean_body_mass",
   "waist_circumference",
+];
+
+const EXPECTED_METABOLIC_DEFAULTS = [
+  "carbohydrates",
+  "insulin_injection",
 ];
 
 const EXPECTED_SPARSE_CLINICAL_DEFAULTS = [
@@ -118,8 +123,11 @@ describe("Junction timeseries resource policy", () => {
     ]);
   });
 
-  it("keeps the remaining sparse slice off by default with extended bounded history", () => {
-    expect(JUNCTION_WIDE_CHUNK_TIMESERIES_RESOURCES).toEqual(EXPECTED_NEW_SPARSE_OPT_INS);
+  it("keeps sparse policy explicit and bounded", () => {
+    expect(JUNCTION_WIDE_CHUNK_TIMESERIES_RESOURCES).toEqual([
+      ...EXPECTED_METABOLIC_DEFAULTS,
+      ...EXPECTED_NEW_SPARSE_OPT_INS,
+    ]);
     for (const resource of EXPECTED_NEW_SPARSE_OPT_INS) {
       expect(JUNCTION_DEFAULT_TIMESERIES_RESOURCES).not.toContain(resource);
       expect(JUNCTION_LONG_HISTORY_TIMESERIES_RESOURCES).toContain(resource);
@@ -138,6 +146,17 @@ describe("Junction timeseries resource policy", () => {
         historyWindow: "summary_history",
         maxCanonicalRecordsPerWindow: 100,
         maxSamplesPerWindow: 128,
+      });
+    }
+    for (const resource of EXPECTED_METABOLIC_DEFAULTS) {
+      expect(JUNCTION_DEFAULT_TIMESERIES_RESOURCES).toContain(resource);
+      expect(JUNCTION_LONG_HISTORY_TIMESERIES_RESOURCES).toContain(resource);
+      expect(resolveJunctionTimeseriesResourcePolicy(resource)).toMatchObject({
+        enabledByDefault: true,
+        fetchChunkDays: 30,
+        historyWindow: "summary_history",
+        maxCanonicalRecordsPerWindow: 3_000,
+        maxSamplesPerWindow: 3_840,
       });
     }
     expect(resolveJunctionTimeseriesResourcePolicy("blood_oxygen")).toMatchObject({

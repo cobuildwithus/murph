@@ -4163,9 +4163,9 @@ test("Junction normalizer compacts tier-1 timeseries resources into bounded dail
   }
 });
 
-test("Junction normalizer compacts dense CGM glucose timeseries into daily mean/min/max facts", () => {
+test("Junction normalizer compacts dense CGM glucose timeseries into daily range and variability facts", () => {
   // A full CGM day: 288 five-minute samples must reduce to one compact
-  // daily-aggregate artifact plus three daily observations, never raw dumps.
+  // daily-aggregate artifact plus five daily observations, never raw dumps.
   const samples = Array.from({ length: 288 }, (_, index) => ({
     timestamp: new Date(Date.UTC(2026, 3, 22, 0, 0, 0) + index * 5 * 60_000).toISOString(),
     unit: "mmol/L",
@@ -4195,12 +4195,18 @@ test("Junction normalizer compacts dense CGM glucose timeseries into daily mean/
   const mean = glucoseEvents.find((event) => event.fields?.metric === "glucose");
   const min = glucoseEvents.find((event) => event.fields?.metric === "lowest-glucose");
   const max = glucoseEvents.find((event) => event.fields?.metric === "highest-glucose");
+  const standardDeviation = glucoseEvents.find((event) =>
+    event.fields?.metric === "glucose-standard-deviation"
+  );
+  const coefficientOfVariation = glucoseEvents.find((event) =>
+    event.fields?.metric === "glucose-coefficient-of-variation"
+  );
   const artifacts = findJunctionCompactTimeseriesArtifacts(payload, "glucose");
   const artifactContent = artifacts[0]?.content as Record<string, unknown>;
 
   assert.deepEqual(payload.provenance?.timeseriesResources, ["glucose"]);
   assert.equal(payload.samples?.length ?? 0, 0);
-  assert.equal(glucoseEvents.length, 3);
+  assert.equal(glucoseEvents.length, 5);
   assert.equal(artifacts.length, 1);
   assertNoFullJunctionTimeseriesArtifacts(payload);
   assertEventRawArtifactRolesExist(payload);
@@ -4209,10 +4215,16 @@ test("Junction normalizer compacts dense CGM glucose timeseries into daily mean/
   assert.equal(mean?.fields?.unit, "mg/dL");
   assert.equal(min?.fields?.value, 90.091);
   assert.equal(max?.fields?.value, 126.1274);
+  assert.equal(standardDeviation?.fields?.value, 18.0182);
+  assert.equal(standardDeviation?.fields?.unit, "mg/dL");
+  assert.equal(coefficientOfVariation?.fields?.value, 16.6667);
+  assert.equal(coefficientOfVariation?.fields?.unit, "%");
   assert.equal(mean?.dayKey, "2026-04-22");
   assert.equal(artifactContent.sampleCount, 288);
   assert.equal(artifactContent.minValue, 90.091);
   assert.equal(artifactContent.maxValue, 126.1274);
+  assert.equal(artifactContent.standardDeviationValue, 18.0182);
+  assert.equal(artifactContent.coefficientOfVariationPercent, 16.6667);
   // Size bound: a whole CGM day stays one sub-kilobyte compact artifact.
   assert.ok(JSON.stringify(artifactContent).length < 1024);
 });
@@ -5245,13 +5257,13 @@ test("Junction normalizer defaults to the documented resource allowlist", () => 
     "peak_expiratory_flow_rate",
     "sleep_apnea_alert",
     "fall",
+    "carbohydrates",
+    "insulin_injection",
   ]);
   assert.deepEqual([...JUNCTION_OPT_IN_SUMMARY_RESOURCES], []);
   assert.deepEqual([...JUNCTION_OPT_IN_TIMESERIES_RESOURCES], [
     "body_mass_index",
-    "carbohydrates",
     "fat",
-    "insulin_injection",
     "lean_body_mass",
     "waist_circumference",
     "calories_basal",

@@ -296,6 +296,13 @@ export function projectWearableBodyStateDayPublicSources(day: WearableBodyStateD
   const bodyWaterPercentage = projectWearableResolvedMetricPublicSources(day.bodyWaterPercentage);
   const boneMassPercentage = projectWearableResolvedMetricPublicSources(day.boneMassPercentage);
   const bmi = projectWearableResolvedMetricPublicSources(day.bmi);
+  const carbohydrateIntake = projectWearableResolvedMetricPublicSources(day.carbohydrateIntake);
+  const glucoseCoefficientOfVariation = projectWearableResolvedMetricPublicSources(
+    day.glucoseCoefficientOfVariation,
+  );
+  const glucoseStandardDeviation = projectWearableResolvedMetricPublicSources(
+    day.glucoseStandardDeviation,
+  );
   const leanBodyMassKg = projectWearableResolvedMetricPublicSources(day.leanBodyMassKg);
   const muscleMassPercentage = projectWearableResolvedMetricPublicSources(day.muscleMassPercentage);
   const temperature = projectWearableResolvedMetricPublicSources(day.temperature);
@@ -307,6 +314,9 @@ export function projectWearableBodyStateDayPublicSources(day: WearableBodyStateD
     ["bodyWaterPercentage", bodyWaterPercentage],
     ["boneMassPercentage", boneMassPercentage],
     ["bmi", bmi],
+    ["carbohydrateIntake", carbohydrateIntake],
+    ["glucoseCoefficientOfVariation", glucoseCoefficientOfVariation],
+    ["glucoseStandardDeviation", glucoseStandardDeviation],
     ["leanBodyMassKg", leanBodyMassKg],
     ["muscleMassPercentage", muscleMassPercentage],
     ["temperature", temperature],
@@ -325,6 +335,9 @@ export function projectWearableBodyStateDayPublicSources(day: WearableBodyStateD
     bodyFatPercentage,
     bodyWaterPercentage,
     boneMassPercentage,
+    carbohydrateIntake,
+    glucoseCoefficientOfVariation,
+    glucoseStandardDeviation,
     notes: projectSummaryNotes({
       metrics: metrics.map(([, metric]) => metric),
       originalNotes: day.notes,

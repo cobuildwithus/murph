@@ -1233,6 +1233,21 @@ function listWearableBodyStateDaysFromDataset(dataset: WearableDataset): Wearabl
     const boneMassPercentage = resolveMetric("boneMassPercentage", selectMetricCandidates(dateCandidates, "boneMassPercentage"), {
       metricFamily: "body",
     });
+    const carbohydrateIntake = resolveMetric(
+      "carbohydrateIntake",
+      selectMetricCandidates(dateCandidates, "carbohydrateIntake"),
+      { metricFamily: "body" },
+    );
+    const glucoseCoefficientOfVariation = resolveMetric(
+      "glucoseCoefficientOfVariation",
+      selectMetricCandidates(dateCandidates, "glucoseCoefficientOfVariation"),
+      { metricFamily: "body" },
+    );
+    const glucoseStandardDeviation = resolveMetric(
+      "glucoseStandardDeviation",
+      selectMetricCandidates(dateCandidates, "glucoseStandardDeviation"),
+      { metricFamily: "body" },
+    );
     const bmi = resolveMetric("bmi", selectMetricCandidates(dateCandidates, "bmi"), {
       metricFamily: "body",
     });
@@ -1256,6 +1271,9 @@ function listWearableBodyStateDaysFromDataset(dataset: WearableDataset): Wearabl
       ["bodyFatPercentage", bodyFatPercentage],
       ["bodyWaterPercentage", bodyWaterPercentage],
       ["boneMassPercentage", boneMassPercentage],
+      ["carbohydrateIntake", carbohydrateIntake],
+      ["glucoseCoefficientOfVariation", glucoseCoefficientOfVariation],
+      ["glucoseStandardDeviation", glucoseStandardDeviation],
       ["bmi", bmi],
       ["leanBodyMassKg", leanBodyMassKg],
       ["muscleMassPercentage", muscleMassPercentage],
@@ -1276,7 +1294,10 @@ function listWearableBodyStateDaysFromDataset(dataset: WearableDataset): Wearabl
       bodyFatPercentage,
       bodyWaterPercentage,
       boneMassPercentage,
+      carbohydrateIntake,
       date,
+      glucoseCoefficientOfVariation,
+      glucoseStandardDeviation,
       leanBodyMassKg,
       muscleMassPercentage,
       notes,

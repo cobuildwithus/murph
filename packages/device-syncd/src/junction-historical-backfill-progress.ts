@@ -84,6 +84,8 @@ const JUNCTION_EXTENDED_TIMESERIES_HISTORY_RESOURCE_SLOTS = Object.freeze([
   "body_mass_index",
   "lean_body_mass",
   "waist_circumference",
+  "carbohydrates",
+  "insulin_injection",
 ] as const);
 export const JUNCTION_SCHEDULE_TIME_EXTENDED_HISTORY_RESOURCE_VERSIONS = Object.freeze([
   ["note", 2] as const,
@@ -95,6 +97,8 @@ export const JUNCTION_SCHEDULE_TIME_EXTENDED_HISTORY_RESOURCE_VERSIONS = Object.
   ["body_mass_index", 1] as const,
   ["lean_body_mass", 1] as const,
   ["waist_circumference", 1] as const,
+  ["carbohydrates", 1] as const,
+  ["insulin_injection", 1] as const,
 ]);
 const JUNCTION_EXTENDED_TIMESERIES_HISTORY_RESOURCE_VERSION_BY_NAME = new Map<string, number>([
   ["blood_pressure", 1],
@@ -434,6 +438,13 @@ const JUNCTION_EXTENDED_TIMESERIES_HISTORY_V1_MATRIX_BYTE_LENGTH = Math.ceil(
     * JUNCTION_EXTENDED_TIMESERIES_HISTORY_V1_RESOURCE_SLOTS.length
     / 8,
 );
+const JUNCTION_EXTENDED_TIMESERIES_HISTORY_PRE_METABOLIC_RESOURCE_SLOT_COUNT =
+  JUNCTION_EXTENDED_TIMESERIES_HISTORY_RESOURCE_SLOTS.length - 2;
+const JUNCTION_EXTENDED_TIMESERIES_HISTORY_PRE_METABOLIC_MATRIX_BYTE_LENGTH = Math.ceil(
+  JUNCTION_EXTENDED_TIMESERIES_HISTORY_SOURCE_CAPACITY
+    * JUNCTION_EXTENDED_TIMESERIES_HISTORY_PRE_METABOLIC_RESOURCE_SLOT_COUNT
+    / 8,
+);
 const JUNCTION_EXTENDED_TIMESERIES_HISTORY_MATRIX_BYTE_LENGTH = Math.ceil(
   JUNCTION_EXTENDED_TIMESERIES_HISTORY_SOURCE_CAPACITY
     * JUNCTION_EXTENDED_TIMESERIES_HISTORY_RESOURCE_SLOTS.length
@@ -742,13 +753,46 @@ function readJunctionExtendedTimeseriesHistoryCoverageMatrix(
     return null;
   }
   const decoded = Buffer.from(encoded, "base64url");
-  return decoded.length === JUNCTION_EXTENDED_TIMESERIES_HISTORY_MATRIX_BYTE_LENGTH
-      && decoded.toString("base64url") === encoded
-    ? {
-        bytes: new Uint8Array(decoded),
-        version: JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_ENCODING_VERSION,
+  if (decoded.toString("base64url") !== encoded) {
+    return null;
+  }
+  if (decoded.length === JUNCTION_EXTENDED_TIMESERIES_HISTORY_MATRIX_BYTE_LENGTH) {
+    return {
+      bytes: new Uint8Array(decoded),
+      version: JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_ENCODING_VERSION,
+    };
+  }
+  if (decoded.length !== JUNCTION_EXTENDED_TIMESERIES_HISTORY_PRE_METABOLIC_MATRIX_BYTE_LENGTH) {
+    return null;
+  }
+
+  // A deployment of the preceding body-resource matrix may briefly emit this
+  // shorter m2 shape. Re-index its existing bits and leave the two appended
+  // metabolic slots clear; the next write upgrades the scalar to this width.
+  const current = createEmptyJunctionExtendedTimeseriesHistoryCoverageMatrix();
+  for (
+    let sourceSlot = 0;
+    sourceSlot < JUNCTION_EXTENDED_TIMESERIES_HISTORY_SOURCE_CAPACITY;
+    sourceSlot += 1
+  ) {
+    for (
+      let resourceSlot = 0;
+      resourceSlot < JUNCTION_EXTENDED_TIMESERIES_HISTORY_PRE_METABOLIC_RESOURCE_SLOT_COUNT;
+      resourceSlot += 1
+    ) {
+      const previousBitIndex = sourceSlot
+        * JUNCTION_EXTENDED_TIMESERIES_HISTORY_PRE_METABOLIC_RESOURCE_SLOT_COUNT
+        + resourceSlot;
+      if (hasJunctionExtendedTimeseriesHistoryCoverageBit(decoded, previousBitIndex)) {
+        setJunctionExtendedTimeseriesHistoryCoverageBit(
+          current.bytes,
+          sourceSlot * JUNCTION_EXTENDED_TIMESERIES_HISTORY_RESOURCE_SLOTS.length
+            + resourceSlot,
+        );
       }
-    : null;
+    }
+  }
+  return current;
 }
 
 function readJunctionExtendedTimeseriesHistoryCoverageMatrixVersion(

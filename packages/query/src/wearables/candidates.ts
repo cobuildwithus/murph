@@ -89,9 +89,10 @@ const INVALID_ZERO_SLEEP_METRIC_SUPPRESSION_KEYS = new Map<WearableMetricKey, st
   ["remMinutes", "rem-sleep-minutes"],
 ]);
 const INVALID_ZERO_SLEEP_METRICS = new Set<string>(INVALID_ZERO_SLEEP_METRIC_SUPPRESSION_KEYS.keys());
-const SPARSE_BODY_OBSERVATION_METRICS = new Set<WearableMetricKey>([
+const SPARSE_DAY_OBSERVATION_METRICS = new Set<WearableMetricKey>([
   "bmi",
   "bodyFatPercentage",
+  "carbohydrateIntake",
   "leanBodyMassKg",
   "waistCircumference",
   "weightKg",
@@ -1632,7 +1633,7 @@ function buildObservationMetricCandidates(
   }
 
   // Explicit point observations remain outside day summaries except for the
-  // five sparse body measurements. Those facts are naturally day-addressable
+  // sparse body and nutrition measurements. Those facts are naturally day-addressable
   // and must share the same candidate selection owner as curated body rows so
   // mixed provider history is resolved by canonical date and provenance.
   const observationGrain = normalizeLowercaseString(entity.attributes.observationGrain)
@@ -1643,10 +1644,10 @@ function buildObservationMetricCandidates(
     "daily-summary",
     "daily-timeseries-aggregate",
   ].includes(observationGrain);
-  const isSparseBodySample = observationGrain === "sample"
-    && SPARSE_BODY_OBSERVATION_METRICS.has(mapped.metric);
+  const isSparseDaySample = observationGrain === "sample"
+    && SPARSE_DAY_OBSERVATION_METRICS.has(mapped.metric);
 
-  if (!isDaySummaryGrain && !isSparseBodySample) {
+  if (!isDaySummaryGrain && !isSparseDaySample) {
     return [];
   }
 

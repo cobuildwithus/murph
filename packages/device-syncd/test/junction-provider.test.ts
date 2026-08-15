@@ -15512,6 +15512,51 @@ test("Junction full backfills keep configured sparse and dense resources in boun
   }));
 });
 
+test("Junction metabolic resources reuse exact-record extended history", () => {
+  const now = "2026-07-01T12:00:00.000Z";
+
+  for (const resource of ["carbohydrates", "insulin_injection"] as const) {
+    const provider = createJunctionProvider(async () => {
+      throw new Error("Scheduling should not make provider requests.");
+    }, {
+      summaryBackfillDays: 180,
+      timeseriesResources: [resource],
+    });
+    const source = createConnectionSource({
+      resourceAvailabilitySummary: { [resource]: true },
+    });
+    const sourceSummary = {
+      displayName: source.displayName,
+      firstSeenAt: source.firstSeenAt,
+      lastDataAt: source.lastDataAt,
+      lastErrorCode: source.lastErrorCode,
+      lastErrorMessage: source.lastErrorMessage,
+      lastSeenAt: source.lastSeenAt,
+      lifecycleEpoch: source.lifecycleEpoch,
+      resourceAvailabilitySummary: source.resourceAvailabilitySummary,
+      resourceCount: Object.keys(source.resourceAvailabilitySummary).length,
+      sourceProviderSlug: source.sourceProviderSlug,
+      status: source.status,
+    };
+    const scheduled = requireValue(provider.jobExecutor?.createScheduledJobs?.(
+      createStoredAccount({
+        metadata: { junctionHistoricalBackfillStatus: "coverage_v3_complete" },
+        nextReconcileAt: now,
+        sources: [sourceSummary],
+      }),
+      now,
+    ));
+    const historyJobs = scheduled.jobs.filter((job) =>
+      job.kind === "resource" && job.payload?.historicalBackfill === true
+    );
+
+    assert.equal(historyJobs.length, 1, resource);
+    assert.equal(historyJobs[0]?.payload?.resource, resource);
+    assert.equal(historyJobs[0]?.payload?.historicalWindowStart, "2026-01-02T00:00:00.000Z");
+    assert.equal(historyJobs[0]?.payload?.windowEnd, "2026-07-01T00:00:00.000Z");
+  }
+});
+
 test("Junction direct-Link body data activates the existing extended-history owner", async () => {
   const connectedAt = "2026-04-03T00:00:00.000Z";
   const now = "2026-07-01T12:00:00.000Z";
