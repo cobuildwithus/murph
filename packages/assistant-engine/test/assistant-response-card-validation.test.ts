@@ -262,12 +262,29 @@ describe('response-card validation feedback', () => {
       },
     })
 
-    const conflictingShapeRequest = readCardToolRequest({
-      ...INVALID_TABLE,
+    const trackedGenericRequest = readCardToolRequest({
+      ...genericWithoutColumns,
       tracking: {
         kind: 'workout',
         entityId: 'evt_01K1ABCDEFGHJKMNPQRSTVWXYZ',
         snapshotAt: '2026-08-09T19:45:00.000Z',
+      },
+    })
+    expect(trackedGenericRequest).toMatchObject({
+      kind: 'invalid-response-card-arguments',
+      validationDigest: {
+        pathIssues: expect.arrayContaining([
+          expect.objectContaining({ path: 'card.columns' }),
+        ]),
+      },
+    })
+    expect(JSON.stringify(trackedGenericRequest)).not.toContain('card.workout')
+
+    const conflictingShapeRequest = readCardToolRequest({
+      ...INVALID_TABLE,
+      workout: {
+        version: 1,
+        state: 'active',
       },
     })
     expect(conflictingShapeRequest).toMatchObject({

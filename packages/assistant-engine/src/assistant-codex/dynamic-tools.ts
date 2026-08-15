@@ -7173,20 +7173,23 @@ function readAttachResponseCardDiagnosticError(
     return parsed.success ? fallbackError : parsed.error
   }
   if (card?.kind === 'compact_table') {
-    const hasWorkoutShape = Object.hasOwn(card, 'workout')
-      || asRecord(card.tracking)?.kind === 'workout'
+    const hasExplicitWorkoutShape = Object.hasOwn(card, 'workout')
+    const hasWorkoutTracking = asRecord(card.tracking)?.kind === 'workout'
     const hasGenericShape = ['rowHeader', 'columns', 'rows']
       .some((key) => Object.hasOwn(card, key))
-    if (hasWorkoutShape === hasGenericShape) {
+    if (
+      (hasExplicitWorkoutShape && hasGenericShape)
+      || (!hasGenericShape && !hasExplicitWorkoutShape && !hasWorkoutTracking)
+    ) {
       return new z.ZodError([{
         code: z.ZodIssueCode.custom,
         message: 'Choose one compact-table card shape.',
         path: ['card'],
       }])
     }
-    const diagnosticSchema = hasWorkoutShape
-      ? attachCompactTableWorkoutResponseCardArgumentsSchema
-      : attachCompactTableGenericResponseCardArgumentsSchema
+    const diagnosticSchema = hasGenericShape
+      ? attachCompactTableGenericResponseCardArgumentsSchema
+      : attachCompactTableWorkoutResponseCardArgumentsSchema
     const parsed = diagnosticSchema.safeParse(value)
     return parsed.success ? fallbackError : parsed.error
   }
