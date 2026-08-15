@@ -42,9 +42,10 @@ Updated: 2026-08-14
 1. Risk: diagnostics disclose private webhook or cryptographic material.
    Mitigation: emit only a closed, value-free stage code derived at the owner
    boundary; never serialize the caught exception or envelope.
-2. Risk: a stale Vercel build re-enables the failed gate.
-   Mitigation: keep the gate removed and production pinned to the known direct
-   deployment until the correction is deployed and proved.
+2. Risk: the single-provider canary retries while the correction is prepared.
+   Mitigation: Junction remains the only enabled provider and receives the
+   existing fail-closed retryable response until Queue persistence succeeds;
+   remove the gate if the bounded correction cannot ship promptly.
 3. Risk: a provider receives a false success or duplicate processing.
    Mitigation: keep `Queue.send` acknowledgement as the only success boundary
    and retain provider redelivery plus existing trace idempotency.
@@ -57,6 +58,9 @@ Updated: 2026-08-14
 4. Run focused tests/typechecks, commit, push, and complete ReviewGPT/CI.
 5. Merge, deploy the Worker through the protected workflow, and re-run the
    one-provider production canary with Queue/DLQ/admission proof.
+6. Reproduce the observed persistence reseal failure in the real workerd crypto
+   runtime, correct the shared crypto boundary, and repeat review, CI, protected
+   deployment, and live one-provider proof.
 
 ## Decisions
 
@@ -103,6 +107,17 @@ Updated: 2026-08-14
   to this diagnostic projection, vocabulary ownership, or stage cardinality
   requires requirement-level reconsideration instead of another tactical
   branch. The immutable first-reviewed baseline remains unchanged.
+- The production canary reached `persistence_reseal_failed`, proving transport
+  authentication, initial unwrap, and payload open before Queue storage. A
+  workerd regression test then reproduced the underlying failure: its locally
+  generated ECDH public-key export carries runtime-specific metadata that the
+  strict public-JWK validator correctly rejects. Node's export shape had hidden
+  that runtime difference.
+- Keep strict validation for all external JWKs. Normalize only the public fields
+  of the locally generated ephemeral key before passing it into the existing
+  validator and envelope builder. This adds no compatibility owner, new error
+  taxonomy, or persistent state and prevents runtime metadata from entering the
+  authenticated envelope.
 
 ## Verification
 
@@ -114,5 +129,7 @@ Updated: 2026-08-14
   admission, and no unexplained DLQ growth or rejected-query alert.
 - Current focused proof: hosted-control 75 tests, Worker Queue 8 tests, and Web
   Queue/route/device-sync HTTP 46 tests pass; hosted-control, Cloudflare, and
-  prepared Web typechecks pass. Exact-head CI and corrected production canary
-  remain pending.
+  prepared Web typechecks pass. The focused Node crypto and Queue rotation suites
+  add 11 passing tests, the real workerd reseal regression passes, and the
+  runtime-state, hosted-control, and Cloudflare typechecks pass. Exact-head CI,
+  correction ReviewGPT, and the corrected production canary remain pending.

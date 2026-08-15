@@ -553,7 +553,21 @@ export async function wrapHostedDomainRootKeyWithP256Ecdh(input: {
     ),
   );
   let wrapKey: CryptoKey;
-  const ephemeralPublicJwk = await crypto.subtle.exportKey("jwk", ephemeral.publicKey);
+  const exportedEphemeralPublicJwk = await crypto.subtle.exportKey(
+    "jwk",
+    ephemeral.publicKey,
+  );
+  const ephemeralPublicJwk = normalizeP256PublicJwk(
+    {
+      crv: exportedEphemeralPublicJwk.crv,
+      ext: true,
+      key_ops: [],
+      kty: exportedEphemeralPublicJwk.kty,
+      x: exportedEphemeralPublicJwk.x,
+      y: exportedEphemeralPublicJwk.y,
+    },
+    "Generated ECDH ephemeral public JWK",
+  );
   const wrapAad = buildHostedEcdhWrapAad({
     encryptionContext: input.encryptionContext,
     ephemeralPublicJwk,
