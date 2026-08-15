@@ -184,20 +184,22 @@ describe('ReviewGPT PR context guard', () => {
   })
 
   it.each([
-    '--minimum-marked-response-time',
-    '--minimumMarkedResponseTime',
-  ])('keeps PR context guarded when %s precedes the preset', option => {
+    ['--idle-draft-timeout', '30m'],
+    ['--idleDraftTimeout', '30m'],
+    ['--minimum-marked-response-time', '5m'],
+    ['--minimumMarkedResponseTime', '5m'],
+  ])('keeps PR context guarded when %s precedes the preset', (option, value) => {
     const harness = createHarness()
     const result = runHarness(harness, [
       option,
-      '5m',
+      value,
       'completion-specialists',
       '--dry-run',
     ])
 
     expect(result.status).toBe(0)
     expect(readFileSync(harness.capturePath, 'utf8')).toBe(
-      `pr=42\nphase=preliminary\nargs=exec cobuild-review-gpt --config scripts/review-gpt.config.sh ${option} 5m completion-specialists --dry-run\n`,
+      `pr=42\nphase=preliminary\nargs=exec cobuild-review-gpt --config scripts/review-gpt.config.sh ${option} ${value} completion-specialists --dry-run\n`,
     )
   })
 
