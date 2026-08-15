@@ -223,14 +223,14 @@ test("hosted web dev smoke uses its own Next artifact directory", () => {
   );
 });
 
-test("next.config externalizes the Temporal client only for hosted-local smoke artifacts", () => {
+test("next.config externalizes one Temporal client instance in every server artifact", () => {
   const smokeNextConfig = buildHostedWebNextConfig(
     PHASE_PRODUCTION_BUILD,
     createHostedWebSmokeEnvironment(createProcessEnv({})),
   );
 
   assert.deepEqual(smokeNextConfig.serverExternalPackages, ["@temporalio/client"]);
-  assert.equal(productionNextConfig.serverExternalPackages, undefined);
+  assert.deepEqual(productionNextConfig.serverExternalPackages, ["@temporalio/client"]);
 });
 
 test("hosted web smoke can isolate concurrent dev and production runs with a dist-dir suffix", () => {
@@ -371,11 +371,11 @@ test("next.config leaves agent guidance under repository ownership", () => {
   assert.equal(productionNextConfig.agentRules, false);
 });
 
-test("production build uses the bounded Turbopack path", () => {
+test("production build config enables the bounded Webpack worker path", () => {
   assert.equal(productionNextConfig.experimental?.turbopackFileSystemCacheForBuild, false);
   assert.equal(productionNextConfig.experimental?.turbopackSourceMaps, false);
-  assert.equal(productionNextConfig.experimental?.webpackBuildWorker, undefined);
-  assert.equal(productionNextConfig.experimental?.webpackMemoryOptimizations, undefined);
+  assert.equal(productionNextConfig.experimental?.webpackBuildWorker, true);
+  assert.equal(productionNextConfig.experimental?.webpackMemoryOptimizations, true);
 });
 
 test("hosted runtime issue imports avoid the runtime-state Node barrel", () => {

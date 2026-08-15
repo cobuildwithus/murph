@@ -281,6 +281,8 @@ describe("hosted address-book projection lifecycle", () => {
     );
     expect(store.pendingGroupEventContextClearCount).toBe(1);
     expect(crypto.kms.macSign).toHaveBeenCalledTimes(1);
+    const macInput = vi.mocked(crypto.kms.macSign).mock.calls[0]?.[0];
+    expect(macInput?.data.every((byte) => byte === 0)).toBe(true);
   });
 
   it("continues to require active member access for replacement", async () => {

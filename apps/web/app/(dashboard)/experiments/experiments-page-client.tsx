@@ -12,7 +12,7 @@ import { Input } from "@/src/components/ui/input";
 import { PageHeader } from "@/src/components/ui/page-header";
 import { useBrowserVault } from "@/src/lib/browser-vault/context";
 import {
-  buildExperimentLibraryCards,
+  buildHomeExperimentLibraryCards,
   type ExperimentLibraryCard,
 } from "@/src/lib/experiments/library-cards";
 import type { ExperimentProtocol } from "@/src/types/experiments";
@@ -35,7 +35,11 @@ export function ExperimentsPageClient({ protocols }: ExperimentsPageClientProps)
     [client],
   );
   const libraryCards = useMemo(
-    () => buildExperimentLibraryCards({ protocols, trackedExperiments, client }),
+    () => buildHomeExperimentLibraryCards({
+      protocols,
+      trackedExperiments,
+      client,
+    }),
     [client, protocols, trackedExperiments],
   );
   const categoryOptions = useMemo(

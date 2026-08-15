@@ -3,6 +3,8 @@ set -euo pipefail
 
 parent_old_space_mb=1024
 typecheck_worker_old_space_mb=3072
+build_cache_epoch=webpack-next-16.3-v1
+build_cache_stamp=.next/cache/murph-production-build-epoch
 
 strip_inherited_old_space_flags() {
   printf '%s\n' "${NODE_OPTIONS:-}" \
@@ -20,7 +22,20 @@ else
 fi
 
 next_bin="$(node -p 'require.resolve("next/dist/bin/next")')"
-printf '[apps/web build] Next memory policy: parent_old_space_mb=%s typecheck_worker_old_space_mb=%s\n' \
+cache_reset=0
+if [[ ! -f "$build_cache_stamp" ]] || [[ "$(< "$build_cache_stamp")" != "$build_cache_epoch" ]]; then
+  printf '[apps/web build] Resetting incompatible Next build cache for epoch=%s\n' \
+    "$build_cache_epoch"
+  node ../../scripts/rm-paths.mjs .next/cache
+  cache_reset=1
+fi
+
+printf '[apps/web build] Next memory policy: compiler=webpack parent_old_space_mb=%s typecheck_worker_old_space_mb=%s\n' \
   "$parent_old_space_mb" \
   "$typecheck_worker_old_space_mb"
-exec node "--max-old-space-size=$parent_old_space_mb" "$next_bin" build
+node "--max-old-space-size=$parent_old_space_mb" "$next_bin" build --webpack
+
+if [[ "$cache_reset" == 1 ]]; then
+  mkdir -p "$(dirname "$build_cache_stamp")"
+  printf '%s\n' "$build_cache_epoch" > "$build_cache_stamp"
+fi

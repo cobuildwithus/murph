@@ -1545,7 +1545,7 @@ export function HeroClocksIn({
                   "hero-floater-btn pointer-events-auto cursor-pointer select-none whitespace-nowrap bg-transparent font-mono text-[10px] tracking-[0.18em] transition-colors duration-200 ease-out hover:text-[#5a6e32] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#5a6e32] focus-visible:ring-offset-2 focus-visible:ring-offset-[#f5f0e8] disabled:cursor-default",
                   f.member
                     ? "inline-flex min-h-8 items-center gap-1.5 rounded-full border border-[#c4a882]/40 bg-[#f5f0e8]/90 py-1 pl-1 pr-2.5 text-[#736a58] backdrop-blur-sm"
-                    : "inline-flex min-h-8 items-center rounded-md px-2 py-1 uppercase text-[#756c5a]",
+                    : "inline-flex min-h-8 items-center rounded-md px-2 py-1 uppercase text-[#c1baae]",
                 )}
               >
                 {f.member ? (

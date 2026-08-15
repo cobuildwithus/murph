@@ -34,9 +34,9 @@ describe("selectHostedPendingGroupSetupCandidate", () => {
     });
   });
 
-  it("distinguishes a non-managed recipient line before reading candidates", async () => {
-    const findFirst = vi.fn().mockResolvedValue(null);
-    const queryRaw = vi.fn();
+  it("distinguishes a non-managed recipient line from bounded live facts", async () => {
+    const findMany = vi.fn().mockResolvedValue([]);
+    const queryRaw = vi.fn().mockResolvedValue([]);
 
     await expect(claimHostedPendingGroupSetupForParticipantsTx({
       occurredAt: new Date("2026-07-29T18:01:00.000Z"),
@@ -45,14 +45,14 @@ describe("selectHostedPendingGroupSetupCandidate", () => {
       senderMemberId: "member_owner",
       tx: {
         $queryRaw: queryRaw,
-        hostedLinqLine: { findFirst },
+        hostedLinqLine: { findMany },
       } as never,
     })).resolves.toEqual({
       kind: "none",
       reason: "recipient_line_unmanaged",
     });
-    expect(findFirst).toHaveBeenCalledOnce();
-    expect(queryRaw).not.toHaveBeenCalled();
+    expect(queryRaw).toHaveBeenCalledOnce();
+    expect(findMany).toHaveBeenCalledOnce();
   });
 
   it("selects the only roster-matched pending setup even when someone else speaks first", () => {

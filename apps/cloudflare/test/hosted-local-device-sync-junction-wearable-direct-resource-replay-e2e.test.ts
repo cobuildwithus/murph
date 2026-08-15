@@ -834,6 +834,7 @@ async function runSignedJunctionHistoricalCoverageReplay(input: {
       `last error code: ${activationStatus.lastErrorCode}`,
     ]));
   }
+  const activationReplicaRef = activationStatus.workspace?.browserVaultReplicaRef ?? null;
 
   const seed = await input.scenario.seedJunctionDeviceSyncConnection({
     connectedAt: input.seededAt,
@@ -908,12 +909,11 @@ async function runSignedJunctionHistoricalCoverageReplay(input: {
     userId: input.userId,
   });
 
-  const finalStatus = deviceSyncStatus.workspace?.browserVaultReplicaRef
-    ? deviceSyncStatus
-    : await waitForScheduledBrowserVaultReplica({
-        scenario: input.scenario,
-        userId: input.userId,
-      });
+  const finalStatus = await waitForAdvancedBrowserVaultReplica({
+    baselineReplicaRef: activationReplicaRef,
+    scenario: input.scenario,
+    userId: input.userId,
+  });
   const replicaRef = requireReplicaRef(finalStatus.workspace?.browserVaultReplicaRef ?? null);
   const replica = await readBrowserVaultReplica({
     replicaRef,
@@ -1258,59 +1258,89 @@ async function assertHostedDeviceSyncReplayReceiptAccepted(input: {
   systemImportedSeqBefore: string;
   userId: string;
 }): Promise<void> {
-  const receiptStatus = parseHostedRunnerStatusResponse(
-    await input.scenario.harness.requestJson<unknown>(
-      `${buildCloudflareHostedControlUserStatusPath(input.userId)}?logLimit=${
-        hostedDeviceSyncReceiptLogLimit
-      }`,
-      {
-        headers: {
-          [HOSTED_EXECUTION_USER_ID_HEADER]: input.userId,
+  const startedAt = Date.now();
+  let receiptStatus: HostedRunnerStatusResponse | null = null;
+
+  while ((Date.now() - startedAt) < 60_000) {
+    receiptStatus = parseHostedRunnerStatusResponse(
+      await input.scenario.harness.requestJson<unknown>(
+        `${buildCloudflareHostedControlUserStatusPath(input.userId)}?logLimit=${
+          hostedDeviceSyncReceiptLogLimit
+        }`,
+        {
+          headers: {
+            [HOSTED_EXECUTION_USER_ID_HEADER]: input.userId,
+          },
         },
-      },
-    ),
-  );
-  const redactedStatus = receiptStatus.workspace?.redactedStatus ?? null;
-  const prepared = readNumberAtPath(redactedStatus, ["hostedSystemMailboxPrepared"]) ?? 0;
-  const recorded = readNumberAtPath(redactedStatus, ["hostedSystemMailboxRecorded"]) ?? 0;
-  const retryableFailed =
-    readNumberAtPath(redactedStatus, ["hostedSystemMailboxRetryableFailed"]) ?? 0;
-  const recordFailed =
-    readNumberAtPath(redactedStatus, ["hostedSystemMailboxRecordFailed"]) ?? 0;
-  const systemImportedSeq = readStringAtPath(
-    redactedStatus,
-    ["hostedMailboxSystemImportedSeq"],
-  );
-  const systemHandledThroughSeq = readStringAtPath(
-    redactedStatus,
-    ["hostedMailboxSystemHandledThroughSeq"],
-  );
-  const systemMailboxLogs = collectHostedSystemMailboxLogSummaries(receiptStatus);
-  const retryableLog = systemMailboxLogs.find((entry) => entry.status === "retryable_failed");
-  const recordedDeviceSyncLog = systemMailboxLogs.find((entry) =>
-    entry.routeAction === "run-device-sync-wake"
-    && entry.wakeKind === "device-sync.wake"
-    && (entry.status === "processed" || entry.status === "recorded")
-    && (entry.recordFailed ?? 0) === 0
-  );
-  const durableSystemLaneAdvancedAndSettled = systemImportedSeq !== null
-    && hasDecimalSequenceAdvanced(input.systemImportedSeqBefore, systemImportedSeq)
-    && systemImportedSeq === systemHandledThroughSeq
-    && receiptStatus.mailboxLag.some((lane) =>
-      lane.lane === "system" && lane.lag === "0"
+      ),
     );
-  const receiptObserved = durableSystemLaneAdvancedAndSettled
-    || (
-      input.requireAdvancedDurableFrontier !== true
-      && recordedDeviceSyncLog !== undefined
+    const redactedStatus = receiptStatus.workspace?.redactedStatus ?? null;
+    const retryableFailed =
+      readNumberAtPath(redactedStatus, ["hostedSystemMailboxRetryableFailed"]) ?? 0;
+    const recordFailed =
+      readNumberAtPath(redactedStatus, ["hostedSystemMailboxRecordFailed"]) ?? 0;
+    const systemImportedSeq = readStringAtPath(
+      redactedStatus,
+      ["hostedMailboxSystemImportedSeq"],
+    );
+    const systemHandledThroughSeq = readStringAtPath(
+      redactedStatus,
+      ["hostedMailboxSystemHandledThroughSeq"],
+    );
+    const systemMailboxLogs = collectHostedSystemMailboxLogSummaries(receiptStatus);
+    const retryableLog = systemMailboxLogs.find((entry) => entry.status === "retryable_failed");
+    const recordedDeviceSyncLog = systemMailboxLogs.find((entry) =>
+      entry.routeAction === "run-device-sync-wake"
+      && entry.wakeKind === "device-sync.wake"
+      && (entry.status === "processed" || entry.status === "recorded")
+      && (entry.recordFailed ?? 0) === 0
     );
 
-  if (
-    !receiptObserved
-    || retryableLog
-    || retryableFailed > 0
-    || recordFailed > 0
-  ) {
+    if (retryableLog || retryableFailed > 0 || recordFailed > 0) {
+      break;
+    }
+
+    const durableSystemLaneAdvancedAndDrained = systemImportedSeq !== null
+      && hasDecimalSequenceAdvanced(input.systemImportedSeqBefore, systemImportedSeq)
+      && receiptStatus.mailboxLag.some((lane) =>
+        lane.lane === "system" && lane.lag === "0"
+      );
+    const durableSystemLaneAdvancedAndSettled =
+      durableSystemLaneAdvancedAndDrained
+      && systemImportedSeq === systemHandledThroughSeq;
+    if (
+      durableSystemLaneAdvancedAndSettled
+      || (
+        input.requireAdvancedDurableFrontier !== true
+        && (
+          durableSystemLaneAdvancedAndDrained
+          || recordedDeviceSyncLog !== undefined
+        )
+      )
+    ) {
+      return;
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+
+  if (receiptStatus !== null) {
+    const redactedStatus = receiptStatus.workspace?.redactedStatus ?? null;
+    const prepared = readNumberAtPath(redactedStatus, ["hostedSystemMailboxPrepared"]) ?? 0;
+    const recorded = readNumberAtPath(redactedStatus, ["hostedSystemMailboxRecorded"]) ?? 0;
+    const retryableFailed =
+      readNumberAtPath(redactedStatus, ["hostedSystemMailboxRetryableFailed"]) ?? 0;
+    const recordFailed =
+      readNumberAtPath(redactedStatus, ["hostedSystemMailboxRecordFailed"]) ?? 0;
+    const systemImportedSeq = readStringAtPath(
+      redactedStatus,
+      ["hostedMailboxSystemImportedSeq"],
+    );
+    const systemHandledThroughSeq = readStringAtPath(
+      redactedStatus,
+      ["hostedMailboxSystemHandledThroughSeq"],
+    );
+    const systemMailboxLogs = collectHostedSystemMailboxLogSummaries(receiptStatus);
     const safeErrors = systemMailboxLogs
       .map((entry) => entry.safeErrorMessage)
       .filter((message): message is string => typeof message === "string" && message.length > 0);
@@ -1333,6 +1363,8 @@ async function assertHostedDeviceSyncReplayReceiptAccepted(input: {
       `system mailbox logs: ${JSON.stringify(systemMailboxLogs)}`,
     ]));
   }
+
+  throw new Error("Hosted Junction wearable direct-resource replay status was unavailable.");
 }
 
 async function readHostedSystemImportedSeq(input: {
@@ -1608,6 +1640,54 @@ async function waitForScheduledBrowserVaultReplica(input: {
     ]));
   }
   return status;
+}
+
+async function waitForAdvancedBrowserVaultReplica(input: {
+  baselineReplicaRef: HostedBrowserVaultReplicaRef | null;
+  scenario: HostedLocalFullStackScenario;
+  userId: string;
+}): Promise<HostedRunnerStatusResponse> {
+  const startedAt = Date.now();
+  const timeoutMs = 240_000;
+
+  while ((Date.now() - startedAt) < timeoutMs) {
+    const status = parseHostedRunnerStatusResponse(
+      await input.scenario.harness.requestJson<unknown>(
+        buildCloudflareHostedControlUserStatusPath(input.userId),
+        {
+          headers: {
+            [HOSTED_EXECUTION_USER_ID_HEADER]: input.userId,
+          },
+        },
+      ),
+    );
+    if (status.lastErrorCode ?? null) {
+      throw new Error(await input.scenario.buildFailureMessage(input.userId, [
+        "Hosted runner recorded an error before publishing the drained Junction replica.",
+        `last error code: ${status.lastErrorCode}`,
+      ]));
+    }
+
+    const replicaRef = status.workspace?.browserVaultReplicaRef ?? null;
+    if (
+      replicaRef !== null
+      && (
+        input.baselineReplicaRef === null
+        || replicaRef.dataVersion !== input.baselineReplicaRef.dataVersion
+        || replicaRef.generatedAt !== input.baselineReplicaRef.generatedAt
+        || replicaRef.generation !== input.baselineReplicaRef.generation
+        || replicaRef.objectKey !== input.baselineReplicaRef.objectKey
+      )
+    ) {
+      return status;
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+
+  throw new Error(await input.scenario.buildFailureMessage(input.userId, [
+    "Timed out waiting for the drained Junction browser-vault replica to advance.",
+  ]));
 }
 
 function requirePlan(): JunctionWearableHostedReplayPlan {

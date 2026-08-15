@@ -102,6 +102,13 @@ describe("hosted-local harness", () => {
       manualOnly: true,
       name: "linq-group-ios-app-download",
     });
+    expect(resolveHostedLocalE2eScenarios("personalized-next-trials")[0]).toEqual({
+      dedicatedVitestProcess: true,
+      file: "apps/cloudflare/test/hosted-local-personalized-next-trials-e2e.test.ts",
+      manualOnly: true,
+      name: "personalized-next-trials",
+      testControls: true,
+    });
     expect(
       resolveHostedLocalE2eScenarios("linq-home-line-reroute-retry")[0]?.file,
     ).toBe(
@@ -193,6 +200,8 @@ describe("hosted-local harness", () => {
     );
     expect(resolveHostedLocalE2eScenarios("all").map((scenario) => scenario.name))
       .not.toContain("linq-group-ios-app-download");
+    expect(resolveHostedLocalE2eScenarios("all").map((scenario) => scenario.name))
+      .not.toContain("personalized-next-trials");
     expect(resolveHostedLocalE2eScenarios("all").map((scenario) => scenario.name)).toContain(
       "linq-home-line-reroute-retry",
     );

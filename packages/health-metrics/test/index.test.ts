@@ -179,6 +179,10 @@ test("resolves metric aliases, biomarker primary metrics, and normalized metric 
   assert.equal(resolveMetricDefinition("diastolic_bp")?.key, "diastolic-blood-pressure");
   assert.equal(resolveMetricDefinition("body_mass_index")?.key, "bmi");
   assert.equal(resolveMetricDefinition("bodyfat")?.key, "body-fat-percentage");
+  assert.equal(resolveMetricDefinition("bone_mass_percentage")?.key, "bone-mass-percentage");
+  assert.equal(resolveMetricDefinition("muscle_mass_percentage")?.key, "muscle-mass-percentage");
+  assert.equal(resolveMetricDefinition("visceral_fat_index")?.key, "visceral-fat-index");
+  assert.equal(resolveMetricDefinition("water_percentage")?.key, "body-water-percentage");
   assert.equal(resolveMetricDefinition("bodymassindex")?.key, "bmi");
   assert.equal(resolveMetricDefinition("systolicbloodpressure")?.key, "systolic-blood-pressure");
   assert.equal(resolveMetricDefinition("diastolicbloodpressure")?.key, "diastolic-blood-pressure");
@@ -333,8 +337,19 @@ test("resolves metric aliases, biomarker primary metrics, and normalized metric 
     resolveExperimentSessionMetricSpec("soreness_score")?.key,
     "muscle-soreness-score",
   );
+  assert.equal(resolveWearableCanonicalMetricKey("activity-minutes"), "activityMinutes");
+  assert.equal(resolveWearableCanonicalMetricKey("low-activity-minutes"), "lowActivityMinutes");
+  assert.equal(resolveWearableCanonicalMetricKey("medium_activity_minutes"), "mediumActivityMinutes");
+  assert.equal(resolveWearableCanonicalMetricKey("high-activity-minutes"), "highActivityMinutes");
+  assert.equal(resolveWearableCanonicalMetricKey("average-heart-rate"), "averageHeartRate");
+  assert.equal(resolveWearableCanonicalMetricKey("walking-average-heart-rate"), "walkingAverageHeartRate");
+  assert.equal(resolveWearableCanonicalMetricKey("lowest-heart-rate"), "lowestHeartRate");
   assert.equal(resolveWearableCanonicalMetricKey("sleep-latency-minutes"), "sleepLatencyMinutes");
   assert.equal(resolveWearableCanonicalMetricKey("sleep_latency_minutes"), "sleepLatencyMinutes");
+  assert.equal(resolveWearableCanonicalMetricKey("bone_mass_percentage"), "boneMassPercentage");
+  assert.equal(resolveWearableCanonicalMetricKey("muscle_mass_percentage"), "muscleMassPercentage");
+  assert.equal(resolveWearableCanonicalMetricKey("visceral_fat_index"), "visceralFatIndex");
+  assert.equal(resolveWearableCanonicalMetricKey("water_percentage"), "bodyWaterPercentage");
   assert.equal(resolveMetricDefinitionForBiomarker("biomarker:unknown"), null);
   assert.deepEqual(createCustomMetricDefinition("hydration score", "%"), {
     aliases: [],
@@ -371,7 +386,11 @@ test("resolves every legacy collapsed body and blood-pressure identity from the 
   for (const wearableKey of [
     "bmi",
     "bodyFatPercentage",
+    "bodyWaterPercentage",
+    "boneMassPercentage",
     "leanBodyMassKg",
+    "muscleMassPercentage",
+    "visceralFatIndex",
     "waistCircumference",
     "weightKg",
   ] as const) {
@@ -1556,6 +1575,73 @@ test("selects metric points by policy and exposes provenance warnings", () => {
   assert.equal(blankMetricKey.status, "no_data");
   assert.equal(blankMetricKey.metricKey, "unknown");
   assert.equal(blankMetricKey.point, null);
+});
+
+test("reduces report sequence before the legacy fallback without input-order cycles", () => {
+  const common = {
+    effectiveDate: "2026-08-13",
+    metricKey: "steps",
+    recordedAt: "2026-08-13T18:00:00.000Z",
+    sourceKind: "observation" as const,
+    unit: "count",
+  };
+  const older = metricPoint({
+    ...common,
+    context: { causalSeq: "41" },
+    id: "metric-point:opaque-a",
+    observedAt: "2026-08-13T19:00:00.000Z",
+    recordId: "evt_older_report",
+    value: 8_000,
+  });
+  const newer = metricPoint({
+    ...common,
+    context: { causalSeq: "42" },
+    id: "metric-point:opaque-z",
+    observedAt: "2026-08-13T16:00:00.000Z",
+    recordId: "evt_newer_report",
+    value: 9_000,
+  });
+  const legacy = metricPoint({
+    ...common,
+    context: {},
+    id: "metric-point:legacy-manual",
+    observedAt: "2026-08-13T17:00:00.000Z",
+    recordId: "evt_legacy_manual",
+    value: 8_500,
+  });
+
+  assert.equal(selectMetricValue({ metricKey: "steps", points: [older, newer] }).value, 9_000);
+  for (const points of [
+    [newer, legacy, older],
+    [newer, older, legacy],
+    [legacy, newer, older],
+    [legacy, older, newer],
+    [older, newer, legacy],
+    [older, legacy, newer],
+  ]) {
+    assert.equal(selectMetricValue({ metricKey: "steps", points }).value, 8_500);
+    assert.equal(selectMetricSeries({
+      duplicatePolicy: "selection-policy",
+      grain: "day",
+      metricKey: "steps",
+      points,
+      statistic: "value",
+    }).rows[0]?.value, 8_500);
+  }
+  assert.equal(selectMetricValue({
+    metricKey: "steps",
+    points: [
+      { ...older, context: {} },
+      { ...newer, context: {} },
+    ],
+  }).value, 8_000);
+  assert.equal(selectMetricValue({
+    metricKey: "steps",
+    points: [
+      { ...older, context: {}, observedAt: newer.observedAt },
+      { ...newer, context: {} },
+    ],
+  }).value, 8_000);
 });
 
 test("requires truthful unit evidence before catalog metrics become selections or series", () => {

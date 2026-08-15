@@ -53,6 +53,7 @@ import type {
 } from "./connect-page-types";
 
 interface HostedDeviceSyncDisconnectResponse {
+  connection?: { status: string };
   warning?: { historicalResetIncomplete?: boolean; message: string };
 }
 
@@ -154,6 +155,7 @@ export function ConnectSourcesGrid({
             source.connectionAvailable !== false ||
             Boolean(source.setupGuideId) ||
             Boolean(source.unavailableActionUrl) ||
+            Boolean(source.unavailableMessage) ||
             source.connected === true ||
             source.requiresReconnect === true ||
             Boolean(source.recoveryKind) ||
@@ -171,6 +173,21 @@ export function ConnectSourcesGrid({
     () => filterConnectSourcesForSearch(displaySources, search),
     [displaySources, search],
   );
+  const disconnectUnavailableSourceNames = useMemo(() => {
+    if (
+      disconnectSource?.disconnectScope !== "junction_account"
+      || !disconnectSource.disconnectConnectionId
+    ) {
+      return [];
+    }
+
+    return displaySources
+      .filter((source) =>
+        source.disconnectConnectionId === disconnectSource.disconnectConnectionId
+        && source.connectionAvailable === false
+      )
+      .map((source) => source.name);
+  }, [disconnectSource, displaySources]);
   const hasInitialCallback = Boolean(initialCallback);
   const activeConnectIntent = initialConnectIntent ?? locationConnectIntent;
   const initialConnectIntentPresentation = useMemo(
@@ -441,6 +458,20 @@ export function ConnectSourcesGrid({
           method: "POST",
           url: disconnectUrl,
         });
+      if (
+        !sourceProviderSlug
+        && (
+          result.warning
+          || (
+            result.connection
+            && result.connection.status !== "disconnected"
+          )
+        )
+      ) {
+        throw new Error(result.warning?.historicalResetIncomplete === true
+          ? "Disconnect not finished. Remove the old connection in your wearable provider account, then retry Disconnect here."
+          : "Disconnect not finished. Remove Murph access in the provider account, then retry Disconnect here.");
+      }
       setDisconnectSource(null);
       if (sourceProviderSlug) {
         setDisconnectedSourceIds((current) => new Set([...current, source.id]));
@@ -609,6 +640,7 @@ export function ConnectSourcesGrid({
       />
 
       <ConnectDisconnectDialog
+        affectedUnavailableSourceNames={disconnectUnavailableSourceNames}
         errorMessage={
           disconnectSource && actionError?.sourceId === disconnectSource.id
             ? actionError.message

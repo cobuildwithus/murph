@@ -10,7 +10,6 @@ import {
 } from '@murphai/runtime-state/node'
 import { test } from 'vitest'
 import type {
-  EmailDriver,
   InboxRuntimeModule,
   PollConnector,
   TelegramDriver,
@@ -257,21 +256,6 @@ function createUnreachableTelegramDriver(): TelegramDriver {
   }
 }
 
-function createUnreachableEmailDriver(): EmailDriver {
-  return {
-    inboxId: 'unreachable',
-    async listUnreadMessages() {
-      throw new Error('unreachable')
-    },
-    async markProcessed() {
-      throw new Error('unreachable')
-    },
-    async downloadAttachment() {
-      throw new Error('unreachable')
-    },
-  }
-}
-
 function createStubInboxRuntimeModule(
   overrides: Partial<InboxRuntimeModule> = {},
 ): InboxRuntimeModule {
@@ -296,18 +280,8 @@ function createStubInboxRuntimeModule(
         accountId: input.accountId ?? null,
       })
     },
-    createEmailPollConnector(input) {
-      return createStubPollConnector({
-        id: input.id ?? 'email:default',
-        source: 'email',
-        accountId: input.accountId ?? null,
-      })
-    },
     createTelegramBotApiPollDriver() {
       return createUnreachableTelegramDriver()
-    },
-    createAgentmailApiPollDriver() {
-      return createUnreachableEmailDriver()
     },
     async rebuildRuntimeFromVault() {},
     async runInboxDaemon() {},

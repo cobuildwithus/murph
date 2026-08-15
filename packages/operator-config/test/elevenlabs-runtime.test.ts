@@ -3,8 +3,12 @@ import assert from 'node:assert/strict'
 import { afterEach, expect, test, vi } from 'vitest'
 
 import {
+  ELEVENLABS_AUDIO_MAX_BYTES,
+  ELEVENLABS_MUSIC_MODEL_ID,
+  ELEVENLABS_MUSIC_OUTPUT_FORMAT,
   ELEVENLABS_TTS_MAX_TEXT_LENGTH,
   ELEVENLABS_TTS_TIMEOUT_MS,
+  generateElevenLabsMusic,
   generateElevenLabsSpeech,
   resolveElevenLabsApiKey,
   resolveElevenLabsModelId,
@@ -25,11 +29,11 @@ test('elevenlabs runtime posts text-to-speech requests and returns MP3 bytes', a
       'https://api.elevenlabs.io/v1/text-to-speech/voice_123?output_format=mp3_44100_128',
     )
     assert.equal(init.method, 'POST')
-    assert.deepEqual(init.headers, {
-      accept: 'audio/mpeg',
-      'content-type': 'application/json',
-      'xi-api-key': 'elevenlabs-key',
-    })
+    assert.equal(init.redirect, 'error')
+    const headers = new Headers(init.headers)
+    assert.equal(headers.get('accept'), 'audio/mpeg')
+    assert.equal(headers.get('content-type'), 'application/json')
+    assert.equal(headers.get('xi-api-key'), 'elevenlabs-key')
     assert.deepEqual(JSON.parse(String(init.body)), {
       model_id: 'eleven_multilingual_v2',
       text: 'Short memo.',
@@ -49,6 +53,45 @@ test('elevenlabs runtime posts text-to-speech requests and returns MP3 bytes', a
       modelId: ' eleven_multilingual_v2 ',
       text: ' Short memo. ',
       voiceId: ' voice_123 ',
+    }),
+  ).resolves.toEqual({
+    bytes: audioBytes,
+    contentType: 'audio/mpeg',
+    filenameExtension: 'mp3',
+  })
+  expect(fetchImplementation).toHaveBeenCalledOnce()
+})
+
+test('elevenlabs runtime uses the SDK music operation with the exact request shape', async () => {
+  const audioBytes = new Uint8Array([9, 8, 7])
+  const fetchImplementation = vi.fn(async (url: string, init) => {
+    assert.equal(
+      url,
+      'https://api.elevenlabs.io/v1/music?output_format=mp3_48000_192',
+    )
+    assert.equal(init.method, 'POST')
+    const headers = new Headers(init.headers)
+    assert.equal(headers.get('accept'), 'audio/mpeg')
+    assert.equal(headers.get('content-type'), 'application/json')
+    assert.equal(headers.get('xi-api-key'), 'elevenlabs-key')
+    assert.deepEqual(JSON.parse(String(init.body)), {
+      force_instrumental: true,
+      model_id: 'music_v2',
+      music_length_ms: 12_000,
+      prompt: 'Warm instrumental transition.',
+    })
+    return new Response(audioBytes, { status: 200 })
+  })
+
+  await expect(
+    generateElevenLabsMusic({
+      apiKey: 'elevenlabs-key',
+      durationMs: 12_000,
+      fetchImplementation,
+      forceInstrumental: true,
+      modelId: ELEVENLABS_MUSIC_MODEL_ID,
+      outputFormat: ELEVENLABS_MUSIC_OUTPUT_FORMAT,
+      prompt: 'Warm instrumental transition.',
     }),
   ).resolves.toEqual({
     bytes: audioBytes,
@@ -80,6 +123,74 @@ test('elevenlabs runtime leaves audio byte validation to callers', async () => {
   })
 })
 
+test('elevenlabs runtime rejects and cancels audio with an oversized declared length', async () => {
+  let canceled = false
+  const body = new ReadableStream<Uint8Array>({
+    cancel() {
+      canceled = true
+    },
+  })
+
+  await expect(
+    generateElevenLabsSpeech({
+      apiKey: 'elevenlabs-key',
+      fetchImplementation: async () =>
+        new Response(body, {
+          headers: {
+            'content-length': String(ELEVENLABS_AUDIO_MAX_BYTES + 1),
+            'content-type': 'audio/mpeg',
+          },
+          status: 200,
+        }),
+      modelId: 'eleven_multilingual_v2',
+      text: 'Short memo.',
+      voiceId: 'voice_123',
+    }),
+  ).rejects.toSatisfy((error: unknown) =>
+    error instanceof VaultCliError &&
+    error.context?.failureStage === 'response_body' &&
+    error.context?.maxResponseBytes === ELEVENLABS_AUDIO_MAX_BYTES &&
+    error.context?.retryable === false
+  )
+  assert.equal(canceled, true)
+})
+
+test('elevenlabs runtime caps and cancels streamed audio without a declared length', async () => {
+  let canceled = false
+  let emittedFirstChunk = false
+  const body = new ReadableStream<Uint8Array>({
+    cancel() {
+      canceled = true
+    },
+    pull(controller) {
+      if (!emittedFirstChunk) {
+        emittedFirstChunk = true
+        controller.enqueue(new Uint8Array(ELEVENLABS_AUDIO_MAX_BYTES))
+        return
+      }
+      controller.enqueue(new Uint8Array([1]))
+    },
+  })
+
+  await expect(
+    generateElevenLabsSpeech({
+      apiKey: 'elevenlabs-key',
+      fetchImplementation: async () =>
+        new Response(body, {
+          headers: { 'content-type': 'audio/mpeg' },
+          status: 200,
+        }),
+      modelId: 'eleven_multilingual_v2',
+      text: 'Short memo.',
+      voiceId: 'voice_123',
+    }),
+  ).rejects.toSatisfy((error: unknown) =>
+    error instanceof VaultCliError &&
+    error.context?.failureStage === 'response_body'
+  )
+  assert.equal(canceled, true)
+})
+
 test('elevenlabs runtime resolves env defaults and keeps HTTP failures secret-safe', async () => {
   expect(resolveElevenLabsApiKey({
     ELEVENLABS_API_KEY: ' key ',
@@ -89,11 +200,13 @@ test('elevenlabs runtime resolves env defaults and keeps HTTP failures secret-sa
   })).toBe('voice')
   expect(resolveElevenLabsModelId({})).toBe('eleven_multilingual_v2')
 
+  const fetchImplementation = vi.fn(async () =>
+    new Response('provider said private text failed', { status: 429 }))
+
   await expect(
     generateElevenLabsSpeech({
       apiKey: 'elevenlabs-key',
-      fetchImplementation: async () =>
-        new Response('provider said private text failed', { status: 429 }),
+      fetchImplementation,
       modelId: 'eleven_multilingual_v2',
       text: 'Private memo text.',
       voiceId: 'voice_123',
@@ -108,6 +221,7 @@ test('elevenlabs runtime resolves env defaults and keeps HTTP failures secret-sa
     !JSON.stringify(error.context).includes('Private memo text') &&
     !JSON.stringify(error.context).includes('elevenlabs-key')
   )
+  expect(fetchImplementation).toHaveBeenCalledOnce()
 })
 
 test('elevenlabs runtime forwards echoed provider text but never the credential', async () => {
@@ -140,6 +254,37 @@ test('elevenlabs runtime forwards echoed provider text but never the credential'
       'Text rejected: Private memo text.' &&
     !JSON.stringify(error.context).includes('elevenlabs-key')
   )
+})
+
+test('elevenlabs runtime does not wrap a caller abort', async () => {
+  const controller = new AbortController()
+  const fetchImplementation = vi.fn(async (_url: string, init) => {
+    if (init.signal?.aborted) {
+      throw init.signal.reason
+    }
+    return await new Promise<Response>((_resolve, reject) => {
+      init.signal?.addEventListener('abort', () => {
+        reject(init.signal?.reason)
+      }, { once: true })
+    })
+  })
+
+  const generation = generateElevenLabsSpeech({
+    apiKey: 'elevenlabs-key',
+    fetchImplementation,
+    modelId: 'eleven_multilingual_v2',
+    signal: controller.signal,
+    text: 'Short memo.',
+    voiceId: 'voice_123',
+  })
+  controller.abort()
+
+  await expect(generation).rejects.toSatisfy((error: unknown) =>
+    error instanceof Error &&
+    error.name === 'AbortError' &&
+    !(error instanceof VaultCliError)
+  )
+  expect(fetchImplementation).toHaveBeenCalledOnce()
 })
 
 test('elevenlabs runtime keeps timeout active while consuming the response body', async () => {
@@ -267,6 +412,59 @@ test('elevenlabs runtime caps an oversized provider error message', async () => 
     return typeof message === 'string' && message.length === 301 &&
       message.endsWith('…')
   })
+})
+
+test('elevenlabs runtime keeps HTTP classification when the error body cannot be read', async () => {
+  await expect(
+    generateElevenLabsSpeech({
+      apiKey: 'elevenlabs-key',
+      fetchImplementation: async () => ({
+        arrayBuffer: async () => new ArrayBuffer(0),
+        ok: false,
+        status: 503,
+        text: async () => {
+          throw new Error('body unavailable')
+        },
+      }),
+      modelId: 'eleven_v3',
+      text: 'Short memo.',
+      voiceId: 'voice_probe',
+    }),
+  ).rejects.toSatisfy((error: unknown) =>
+    error instanceof VaultCliError &&
+    error.context?.failureStage === 'http' &&
+    error.context?.responseBodyTextLength === null &&
+    error.context?.status === 503
+  )
+})
+
+test('elevenlabs runtime cancels oversized error bodies and keeps HTTP classification', async () => {
+  let canceled = false
+  const body = new ReadableStream<Uint8Array>({
+    cancel() {
+      canceled = true
+    },
+  })
+
+  await expect(
+    generateElevenLabsSpeech({
+      apiKey: 'elevenlabs-key',
+      fetchImplementation: async () =>
+        new Response(body, {
+          headers: { 'content-length': '999999' },
+          status: 413,
+        }),
+      modelId: 'eleven_v3',
+      text: 'Short memo.',
+      voiceId: 'voice_probe',
+    }),
+  ).rejects.toSatisfy((error: unknown) =>
+    error instanceof VaultCliError &&
+    error.context?.failureStage === 'http' &&
+    error.context?.responseBodyTextLength === null &&
+    error.context?.status === 413
+  )
+  assert.equal(canceled, true)
 })
 
 test('elevenlabs runtime tolerates a non-JSON error body', async () => {

@@ -109,6 +109,7 @@ describe("physical-note durable replay", () => {
       acceptedAt,
       complimentaryOfferCode: "physical-note-v1",
       createdAt: new Date("2026-07-30T19:59:00.000Z"),
+      failureReason: null,
       id: `hpn_${"a".repeat(32)}`,
       memberId: MEMBER_ID,
       pricingVersion: "lob-test-v1",
@@ -172,7 +173,8 @@ describe("physical-note durable replay", () => {
     });
     expect(create).not.toHaveBeenCalled();
     expect(hostedPhysicalNote.findUnique).toHaveBeenCalledOnce();
-    expect(hostedPhysicalNote.updateMany).toHaveBeenCalledOnce();
+    expect(prismaLike.$transaction).not.toHaveBeenCalled();
+    expect(hostedPhysicalNote.updateMany).not.toHaveBeenCalled();
     expect(mocks.readUsageGate).not.toHaveBeenCalled();
     expect(mocks.recordUsage).not.toHaveBeenCalled();
   });

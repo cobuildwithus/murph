@@ -15,6 +15,7 @@ import {
   createHostedWebCallbackSignatureHeaders,
 } from "../src/web-callback-auth.ts";
 import {
+  createBrowserVaultReplicaAadFields,
   createHostedBrowserVaultReplicaStore,
 } from "../src/browser-vault-store.ts";
 import {
@@ -30,6 +31,9 @@ import {
   readDeployContainerSmokeAttempt,
   resolveDeployContainerSmokeObjectName,
 } from "../src/worker/route-handlers/deploy-smoke.ts";
+import {
+  parseBrowserVaultSessionRequest,
+} from "../src/worker/route-handlers/browser-vault-session.ts";
 import {
   DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL,
 } from "../src/deploy-smoke-live-model.ts";
@@ -66,6 +70,7 @@ import {
   type HostedExecutionWake,
 } from "@murphai/hosted-execution";
 import {
+  HOSTED_BROWSER_VAULT_REPLICA_METRIC_BUCKET_IDS,
   HOSTED_RUNTIME_PROCESSING_COMMAND_RESPONSE_MARGIN_MS,
   HOSTED_EXECUTION_SIGNATURE_HEADER,
   HOSTED_EXECUTION_USER_ID_HEADER,
@@ -221,20 +226,20 @@ describe("cloudflare worker routes", () => {
   });
 
   it("keeps runner wake traffic off Cloudflare Queues", async () => {
-    const [deployAutomationSource, wranglerSource] = await Promise.all([
-      readFile(path.join(APP_DIR, "scripts/deploy-automation.ts"), "utf8"),
-      readFile(path.join(APP_DIR, "wrangler.jsonc"), "utf8"),
-    ]);
+    const wranglerSource = await readFile(
+      path.join(APP_DIR, "wrangler.jsonc"),
+      "utf8",
+    );
     const workerSource = await readWorkerEntrypointSource();
 
-    expect(worker).not.toHaveProperty("queue");
-    expect(workerSource).not.toMatch(/\bqueue\s*\(/u);
+    expect(worker).toHaveProperty("queue");
+    expect(workerSource).toMatch(/\bqueue\s*\(/u);
     expect(workerSource).not.toContain("legacy-runner-wake-queue");
     await expect(
       readFile(path.join(APP_DIR, "src/legacy-runner-wake-queue.ts"), "utf8"),
     ).rejects.toMatchObject({ code: "ENOENT" });
-    expect(deployAutomationSource).not.toMatch(/\bqueues\b/u);
-    expect(wranglerSource).not.toMatch(/\bqueues\b/u);
+    expect(wranglerSource).toContain("murph-hosted-device-webhooks");
+    expect(wranglerSource).not.toContain("RUNNER_WAKE_QUEUE");
   });
 
   it("keeps hosted-local test routes and toggles out of the production Worker graph", async () => {
@@ -264,15 +269,15 @@ describe("cloudflare worker routes", () => {
     expect(workerSource).not.toContain("matchHostedLocalTestUserRoute");
   });
 
-  it("keeps generated worker contracts free of Queue producer bindings", async () => {
+  it("keeps the Queue binding scoped to device-webhook transport", async () => {
     const [workerSource, workerContractsSource] = await Promise.all([
       readWorkerEntrypointSource(),
       readFile(path.join(APP_DIR, "src/worker-contracts.ts"), "utf8"),
     ]);
 
     expect(workerSource).not.toContain("env.RUNNER_WAKE_QUEUE");
-    expect(workerContractsSource).not.toContain("WorkerQueueBinding");
-    expect(workerContractsSource).not.toContain("WorkerQueueMessage");
+    expect(workerContractsSource).toContain("DEVICE_WEBHOOK_QUEUE");
+    expect(workerContractsSource).not.toContain("RUNNER_WAKE_QUEUE");
   });
 
   it("serves a health endpoint even before secrets are configured", async () => {
@@ -336,6 +341,7 @@ describe("cloudflare worker routes", () => {
       "service-banner",
     ]);
     expect(workerInternalRoutes.map(({ name }) => name)).toEqual([
+      "device-webhook-enqueue",
       "deploy-container-smoke",
       "runtime-ensure-processing",
       "runtime-shell-prewarm",
@@ -369,6 +375,7 @@ describe("cloudflare worker routes", () => {
       "test-temporal-mailbox-signal-fault-consume",
       "test-direct-r2-presigned-put",
       "test-direct-r2-locator-marker",
+      "device-webhook-enqueue",
       "deploy-container-smoke",
       "runtime-ensure-processing",
       "runtime-shell-prewarm",
@@ -2408,15 +2415,391 @@ describe("cloudflare worker routes", () => {
     );
 
     expect(response.status).toBe(200);
-    const body = await response.json();
+    const body = await response.json() as Record<string, unknown>;
     expect(body).toMatchObject({
       replicaRef,
       state: "ready",
     });
     const sessionKeyEnvelope = parseHostedBrowserSessionKeyEnvelope(
-      (body as { replicaKeyEnvelope?: unknown }).replicaKeyEnvelope,
+      body.replicaKeyEnvelope,
     );
     expect(sessionKeyEnvelope.keyId).toBe(replicaRef.dataKeyEnvelope?.dataKeyId ?? replicaRef.keyId);
+    expect(body.replicaAad).toEqual(createBrowserVaultReplicaAadFields({
+      ref: replicaRef,
+      userId: "member_123",
+    }));
+    expect(body.replicaAad).not.toHaveProperty("generatedAt");
+    expect(body.replicaAad).not.toHaveProperty("generation");
+  });
+
+  it("returns only requested encrypted browser-vault shards", async () => {
+    const env = createWorkerEnv();
+    const runtimeRoot = await resolveHostedUserCryptoContextForTest(env, "member_123");
+    const replicaRef = await createStoredBrowserVaultReplicaRefForTest(env, "member_123", {
+      rootKey: runtimeRoot.rootKey,
+      rootKeyId: runtimeRoot.rootKeyId,
+    });
+    const coreRef = replicaRef.shards?.core;
+    const labsRef = replicaRef.shards?.labs;
+    const metricsRef = replicaRef.shards?.metricsIndex;
+    expect(coreRef).toBeDefined();
+    expect(labsRef).toBeDefined();
+    expect(metricsRef).toBeDefined();
+
+    const response = await worker.fetch(
+      await signControlRequest(new Request(
+        "https://runner.example.test/internal/users/member_123/browser-vault/session",
+        {
+          body: JSON.stringify({
+            browserPublicKeyJwk: await createBrowserSessionPublicKeyJwk(),
+            replicaRef,
+            requestedShards: ["core", "labs"],
+          }),
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          method: "POST",
+        },
+      )),
+      env,
+    );
+
+    expect(response.status).toBe(200);
+    const body = await response.json() as Record<string, unknown>;
+    expect(body).not.toHaveProperty("encryptedReplica");
+    expect(body).not.toHaveProperty("replicaAad");
+    expect(body).toMatchObject({
+      replicaRef,
+      shards: {
+        core: {
+          shardAad: {
+            byteLength: coreRef?.byteLength,
+            contentEncoding: coreRef?.contentEncoding,
+            encodedByteLength: coreRef?.encodedByteLength,
+            generatedAt: replicaRef.generatedAt,
+            generation: replicaRef.generation,
+            objectKey: coreRef?.objectKey,
+            shard: "core",
+            shardSchema: "murph.browser-vault-replica.core.v1",
+            shardSetRefSchema: replicaRef.shards?.schema,
+          },
+        },
+        labs: {
+          shardAad: {
+            byteLength: labsRef?.byteLength,
+            contentEncoding: labsRef?.contentEncoding,
+            encodedByteLength: labsRef?.encodedByteLength,
+            generatedAt: replicaRef.generatedAt,
+            generation: replicaRef.generation,
+            objectKey: labsRef?.objectKey,
+            shard: "labs",
+            shardSchema: "murph.browser-vault-replica.labs.v1",
+            shardSetRefSchema: replicaRef.shards?.schema,
+          },
+        },
+      },
+      state: "ready",
+    });
+    expect(Object.keys(body.shards as Record<string, unknown>)).toEqual(["core", "labs"]);
+    const sessionKeyEnvelope = parseHostedBrowserSessionKeyEnvelope(body.replicaKeyEnvelope);
+    expect(sessionKeyEnvelope.keyId).toBe(replicaRef.dataKeyEnvelope?.dataKeyId ?? replicaRef.keyId);
+    expect(env.__bucketStore.getCalls.filter((key) => key.includes("/browser-vault-replicas/"))).toEqual([
+      coreRef?.objectKey,
+      labsRef?.objectKey,
+    ]);
+    expect(env.__bucketStore.getCalls).not.toContain(replicaRef.objectKey);
+    expect(env.__bucketStore.getCalls).not.toContain(metricsRef?.objectKey);
+  });
+
+  it("returns only requested encrypted metric buckets with four bounded R2 reads", async () => {
+    const env = createWorkerEnv();
+    const runtimeRoot = await resolveHostedUserCryptoContextForTest(env, "member_123");
+    const replicaRef = await createStoredBrowserVaultReplicaRefForTest(env, "member_123", {
+      rootKey: runtimeRoot.rootKey,
+      rootKeyId: runtimeRoot.rootKeyId,
+    });
+    const requestedMetricBuckets = ["00", "03", "08", "0f", "10", "1f"] as const;
+    const requestedObjectKeys = requestedMetricBuckets.map((bucketId) =>
+      replicaRef.metricBuckets?.buckets[bucketId].objectKey);
+    expect(requestedObjectKeys.every((objectKey) => objectKey !== undefined)).toBe(true);
+
+    const originalBucket = env.BUNDLES;
+    const selectedObjectKeys = new Set(requestedObjectKeys);
+    let activeReads = 0;
+    let peakReads = 0;
+    let releaseReads: (() => void) | undefined;
+    const readsReleased = new Promise<void>((resolve) => {
+      releaseReads = resolve;
+    });
+    let resolvePoolFull: (() => void) | undefined;
+    const poolFull = new Promise<void>((resolve) => {
+      resolvePoolFull = resolve;
+    });
+    env.BUNDLES = {
+      ...originalBucket,
+      async get(key: string) {
+        if (!selectedObjectKeys.has(key)) {
+          return originalBucket.get(key);
+        }
+        activeReads += 1;
+        peakReads = Math.max(peakReads, activeReads);
+        if (peakReads === 4) {
+          resolvePoolFull?.();
+        }
+        await readsReleased;
+        try {
+          return await originalBucket.get(key);
+        } finally {
+          activeReads -= 1;
+        }
+      },
+    };
+    env.__bucketStore.getCalls.length = 0;
+
+    const responsePromise = worker.fetch(
+      await signControlRequest(new Request(
+        "https://runner.example.test/internal/users/member_123/browser-vault/session",
+        {
+          body: JSON.stringify({
+            browserPublicKeyJwk: await createBrowserSessionPublicKeyJwk(),
+            replicaRef,
+            requestedMetricBuckets,
+          }),
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          method: "POST",
+        },
+      )),
+      env,
+    );
+
+    await poolFull;
+    expect(peakReads).toBe(4);
+    releaseReads?.();
+    const response = await responsePromise;
+
+    expect(response.status).toBe(200);
+    const body = await response.json() as Record<string, unknown>;
+    expect(body).not.toHaveProperty("encryptedReplica");
+    expect(body).not.toHaveProperty("replicaAad");
+    expect(Object.keys(body.metricBuckets as Record<string, unknown>).sort()).toEqual(
+      [...requestedMetricBuckets].sort(),
+    );
+    expect(body).not.toHaveProperty("shards");
+    const firstBucketRef = replicaRef.metricBuckets?.buckets["00"];
+    expect(body).toMatchObject({
+      metricBuckets: {
+        "00": {
+          metricBucketAad: {
+            byteLength: firstBucketRef?.byteLength,
+            contentEncoding: firstBucketRef?.contentEncoding,
+            encodedByteLength: firstBucketRef?.encodedByteLength,
+            generatedAt: replicaRef.generatedAt,
+            generation: replicaRef.generation,
+            metricBucketCount: 32,
+            metricBucketId: "00",
+            metricBucketSchema: "murph.browser-vault-replica.metric-bucket.v1",
+            metricBucketSetRefSchema: replicaRef.metricBuckets?.schema,
+            objectKey: firstBucketRef?.objectKey,
+          },
+        },
+      },
+      replicaRef,
+      state: "ready",
+    });
+    expect(env.__bucketStore.getCalls.filter((key) =>
+      key.includes("/browser-vault-replicas/"))).toEqual([
+      ...requestedObjectKeys,
+    ]);
+    expect(env.__bucketStore.getCalls).not.toContain(replicaRef.objectKey);
+  });
+
+  it("returns every fixed child only for an explicit browser-vault export session", async () => {
+    const env = createWorkerEnv();
+    const runtimeRoot = await resolveHostedUserCryptoContextForTest(env, "member_123");
+    const replicaRef = await createStoredBrowserVaultReplicaRefForTest(env, "member_123", {
+      rootKey: runtimeRoot.rootKey,
+      rootKeyId: runtimeRoot.rootKeyId,
+    });
+    env.__bucketStore.getCalls.length = 0;
+
+    const response = await worker.fetch(
+      await signControlRequest(new Request(
+        "https://runner.example.test/internal/users/member_123/browser-vault/session",
+        {
+          body: JSON.stringify({
+            browserPublicKeyJwk: await createBrowserSessionPublicKeyJwk(),
+            replicaRef,
+            sessionPurpose: "export",
+          }),
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          method: "POST",
+        },
+      )),
+      env,
+    );
+
+    expect(response.status).toBe(200);
+    const body = await response.json() as Record<string, unknown>;
+    expect(Object.keys(body.shards as Record<string, unknown>)).toEqual([
+      "core",
+      "labs",
+      "metricsIndex",
+    ]);
+    expect(Object.keys(body.metricBuckets as Record<string, unknown>).sort()).toEqual(
+      [...HOSTED_BROWSER_VAULT_REPLICA_METRIC_BUCKET_IDS].sort(),
+    );
+    expect(env.__bucketStore.getCalls).not.toContain(replicaRef.objectKey);
+    expect(env.__bucketStore.getCalls.filter((key) =>
+      key.includes("/browser-vault-replicas/"))).toHaveLength(35);
+  });
+
+  it("falls back to the legacy monolith when a shard-capable request supplies an old replica ref", async () => {
+    const env = createWorkerEnv();
+    const runtimeRoot = await resolveHostedUserCryptoContextForTest(env, "member_123");
+    const storedRef = await createStoredBrowserVaultReplicaRefForTest(env, "member_123", {
+      rootKey: runtimeRoot.rootKey,
+      rootKeyId: runtimeRoot.rootKeyId,
+    });
+    const legacyRef = { ...storedRef };
+    delete legacyRef.shards;
+    delete legacyRef.metricBuckets;
+
+    const response = await worker.fetch(
+      await signControlRequest(new Request(
+        "https://runner.example.test/internal/users/member_123/browser-vault/session",
+        {
+          body: JSON.stringify({
+            browserPublicKeyJwk: await createBrowserSessionPublicKeyJwk(),
+            replicaRef: legacyRef,
+            requestedMetricBuckets: ["00"],
+            requestedShards: ["core"],
+          }),
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          method: "POST",
+        },
+      )),
+      env,
+    );
+
+    expect(response.status).toBe(200);
+    const body = await response.json() as Record<string, unknown>;
+    expect(body).toHaveProperty("encryptedReplica");
+    expect(body).toHaveProperty("replicaAad");
+    expect(body).not.toHaveProperty("shards");
+    expect(env.__bucketStore.getCalls.filter((key) => key.includes("/browser-vault-replicas/"))).toEqual([
+      legacyRef.objectKey,
+    ]);
+  });
+
+  it("fails closed when a requested browser-vault shard uses a different storage key id", async () => {
+    const env = createWorkerEnv();
+    const runtimeRoot = await resolveHostedUserCryptoContextForTest(env, "member_123");
+    const replicaRef = await createStoredBrowserVaultReplicaRefForTest(env, "member_123", {
+      rootKey: runtimeRoot.rootKey,
+      rootKeyId: runtimeRoot.rootKeyId,
+    });
+    const coreObjectKey = replicaRef.shards?.core?.objectKey;
+    if (!coreObjectKey) {
+      throw new TypeError("Expected the stored browser vault replica to include a core shard.");
+    }
+    const storedObject = await env.BUNDLES.get(coreObjectKey);
+    if (!storedObject) {
+      throw new TypeError("Expected the stored browser vault core shard object.");
+    }
+    const envelope = JSON.parse(
+      Buffer.from(await storedObject.arrayBuffer()).toString("utf8"),
+    ) as Record<string, unknown>;
+    await env.BUNDLES.put(coreObjectKey, JSON.stringify({
+      ...envelope,
+      keyId: "hdk:browser-vault-replica:different",
+    }));
+    env.__bucketStore.getCalls.length = 0;
+
+    const response = await worker.fetch(
+      await signControlRequest(new Request(
+        "https://runner.example.test/internal/users/member_123/browser-vault/session",
+        {
+          body: JSON.stringify({
+            browserPublicKeyJwk: await createBrowserSessionPublicKeyJwk(),
+            replicaRef,
+            requestedShards: ["core"],
+          }),
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          method: "POST",
+        },
+      )),
+      env,
+    );
+
+    expect(response.status).toBe(404);
+    await expect(response.json()).resolves.toEqual({
+      code: CLOUDFLARE_HOSTED_CONTROL_BROWSER_VAULT_REPLICA_NOT_FOUND_CODE,
+      error: "Browser vault replica was not found.",
+    });
+    expect(env.__bucketStore.getCalls.filter((key) => key.includes("/browser-vault-replicas/"))).toEqual([
+      coreObjectKey,
+    ]);
+  });
+
+  it("rejects empty, duplicate, and unsupported browser-vault shard requests", async () => {
+    const env = createWorkerEnv();
+    const replicaRef = await createMissingBrowserVaultReplicaRefForTest(env, "member_123");
+    const base = {
+      browserPublicKeyJwk: await createBrowserSessionPublicKeyJwk(),
+      replicaRef,
+    };
+
+    expect(() => parseBrowserVaultSessionRequest({
+      ...base,
+      requestedShards: [],
+    })).toThrow("requestedShards must be a non-empty array");
+    expect(() => parseBrowserVaultSessionRequest({
+      ...base,
+      requestedShards: ["core", "core"],
+    })).toThrow("requestedShards must not contain duplicates");
+    expect(() => parseBrowserVaultSessionRequest({
+      ...base,
+      requestedShards: ["private"],
+    })).toThrow("requestedShards[0] must be core, labs, or metricsIndex");
+  });
+
+  it("rejects invalid and all-bucket interactive browser-vault metric requests", async () => {
+    const env = createWorkerEnv();
+    const replicaRef = await createMissingBrowserVaultReplicaRefForTest(env, "member_123");
+    const base = {
+      browserPublicKeyJwk: await createBrowserSessionPublicKeyJwk(),
+      replicaRef,
+    };
+
+    expect(() => parseBrowserVaultSessionRequest({
+      ...base,
+      requestedMetricBuckets: [],
+    })).toThrow("requestedMetricBuckets must be a non-empty array");
+    expect(() => parseBrowserVaultSessionRequest({
+      ...base,
+      requestedMetricBuckets: ["00", "00"],
+    })).toThrow("requestedMetricBuckets must not contain duplicates");
+    expect(() => parseBrowserVaultSessionRequest({
+      ...base,
+      requestedMetricBuckets: ["20"],
+    })).toThrow("requestedMetricBuckets[0] must be a metric bucket id from 00 through 1f");
+    expect(() => parseBrowserVaultSessionRequest({
+      ...base,
+      requestedMetricBuckets: HOSTED_BROWSER_VAULT_REPLICA_METRIC_BUCKET_IDS,
+    })).toThrow("must not request all 32 buckets from the interactive session route");
+    expect(() => parseBrowserVaultSessionRequest({
+      ...base,
+      requestedMetricBuckets: ["00"],
+      sessionPurpose: "export",
+    })).toThrow("export session request must not include interactive selections");
   });
 
   it("returns the stable browser-vault missing-replica code when the replica runtime root is unavailable", async () => {

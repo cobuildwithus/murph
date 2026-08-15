@@ -285,9 +285,11 @@ const CONNECT_SOURCE_UI = {
     name: "Abbott LibreView",
   },
   dexcom: {
-    description: "Real-time CGM glucose and trend arrows.",
+    description: "CGM glucose readings and trends.",
     logo: logoAsset("dexcom.png"),
     name: "Dexcom",
+    unavailableActionLabel: "Coming soon",
+    unavailableMessage: "Dexcom connections are coming soon.",
   },
   kardia: {
     description: "Portable ECG recordings and rhythm detection.",
@@ -300,7 +302,8 @@ const CONNECT_SOURCE_UI = {
     name: "Kardia",
   },
   cronometer: {
-    description: "Calories, macros, micronutrients, and meal timing.",
+    description:
+      "Meal logs with calories, macros, timing, and supported nutrient fields. Daily targets and dashboard percentages stay in Cronometer.",
     logo: logoAsset("cronometer.png"),
     name: "Cronometer",
   },
@@ -689,6 +692,7 @@ export function resolveConfiguredConnectSources(
     (source) =>
       source.connectionAvailable !== false ||
       Boolean(source.setupGuideId) ||
+      Boolean(source.unavailableMessage) ||
       source.connected === true ||
       source.requiresReconnect === true ||
       Boolean(source.recoveryKind) ||

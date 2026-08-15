@@ -232,7 +232,7 @@ describe("mergeCloudflareLocalEnv", () => {
       "cloudflare-automation:local",
     );
     expect(merged.HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION).toMatch(
-      /^projects\/murph-local\/locations\/global\/keyRings\/hosted-local\/cryptoKeys\/authority-sign\/cryptoKeyVersions\/local-[a-f0-9]{16}$/u,
+      /^projects\/murph-local\/locations\/global\/keyRings\/hosted-local\/cryptoKeys\/authority-sign\/cryptoKeyVersions\/[1-9][0-9]*$/u,
     );
     expect(merged.HOSTED_CRYPTO_AUTHORITY_SIGN_PUBLIC_KEY_PEM).toBe(generatedAuthorityPublicPem);
     expect(JSON.parse(merged.HOSTED_CRYPTO_AUTHORITY_VERIFY_KEYRING_JSON)).toEqual({
@@ -511,7 +511,7 @@ describe("mergeCloudflareLocalEnv", () => {
 
     expect(merged.HOSTED_CRYPTO_ENV).toBe("local");
     expect(merged.HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_KEY_VERSION).toMatch(
-      /^projects\/murph-local\/locations\/global\/keyRings\/hosted-local\/cryptoKeys\/authority-sign\/cryptoKeyVersions\/local-[a-f0-9]{16}$/u,
+      /^projects\/murph-local\/locations\/global\/keyRings\/hosted-local\/cryptoKeys\/authority-sign\/cryptoKeyVersions\/[1-9][0-9]*$/u,
     );
     expect(merged.HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_PUBLIC_KEY_PEM).toBe(
       generatedAuthorityPublicPem,
@@ -554,7 +554,7 @@ describe("mergeCloudflareLocalEnv", () => {
 
     expect(merged.HOSTED_CRYPTO_ENV).toBe("local");
     expect(merged.HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_KEY_VERSION).toMatch(
-      /^projects\/murph-local\/locations\/global\/keyRings\/hosted-local\/cryptoKeys\/authority-sign\/cryptoKeyVersions\/local-[a-f0-9]{16}$/u,
+      /^projects\/murph-local\/locations\/global\/keyRings\/hosted-local\/cryptoKeys\/authority-sign\/cryptoKeyVersions\/[1-9][0-9]*$/u,
     );
     expect(merged.HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_PUBLIC_KEY_PEM).toBe(
       generatedAuthorityPublicPem,
@@ -1621,12 +1621,20 @@ describe("buildWranglerLocalDevConfig", () => {
           class_name: "DatabaseHealthDurableObject",
           name: "DATABASE_HEALTH_MONITOR",
         },
+        {
+          class_name: "DeviceWebhookQueueHealthDurableObject",
+          name: "DEVICE_WEBHOOK_QUEUE_MONITOR",
+        },
       ]),
     });
     expect(config.migrations).toEqual(expect.arrayContaining([
       {
         new_sqlite_classes: ["DatabaseHealthDurableObject"],
         tag: "v4",
+      },
+      {
+        new_sqlite_classes: ["DeviceWebhookQueueHealthDurableObject"],
+        tag: "v5",
       },
     ]));
     expect(config.triggers).toEqual({

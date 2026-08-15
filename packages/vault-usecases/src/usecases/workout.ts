@@ -263,7 +263,8 @@ function resolveStructuredDurationMinutes(input: {
   payloadDurationMinutes?: number
   structuredWorkout?: WorkoutSession
   fallbackText?: string
-}): number {
+  allowUnknownDuration?: boolean
+}): number | undefined {
   const explicitDurationMinutes =
     typeof input.explicitDurationMinutes === 'number'
       ? validateDurationMinutes(input.explicitDurationMinutes)
@@ -286,6 +287,10 @@ function resolveStructuredDurationMinutes(input: {
   )
   if (derivedDurationMinutes !== null) {
     return derivedDurationMinutes
+  }
+
+  if (input.structuredWorkout && input.allowUnknownDuration) {
+    return undefined
   }
 
   if (input.fallbackText) {
@@ -361,6 +366,7 @@ export function buildStructuredWorkoutActivitySessionDraft(input: {
   workout?: WorkoutSession | null
   text?: string
   title?: string
+  allowUnknownDuration?: boolean
 }): ActivitySessionDraft {
   const sourcePayload = parseWorkoutImportPayload(input.payload)
   const explicitStructuredWorkout =
@@ -395,6 +401,7 @@ export function buildStructuredWorkoutActivitySessionDraft(input: {
       payloadDurationMinutes: valueAsNumber(sourcePayload.durationMinutes),
       structuredWorkout: explicitStructuredWorkout,
       fallbackText: fallbackText ?? undefined,
+      allowUnknownDuration: input.allowUnknownDuration,
     })
   const distanceKm =
     typeof input.distanceKm === 'number'
@@ -440,7 +447,7 @@ export function buildStructuredWorkoutActivitySessionDraft(input: {
     title,
     note,
     activityType: activityDescriptor.activityType,
-    durationMinutes,
+    ...(durationMinutes !== undefined ? { durationMinutes } : {}),
     ...(typeof distanceKm === 'number' ? { distanceKm } : {}),
     workout: structuredWorkout,
   }) as ActivitySessionDraft
@@ -455,6 +462,13 @@ export async function addStructuredWorkoutRecord(input: {
   draft: ActivitySessionDraft
   mediaPaths?: string[]
 }) {
+  const durationMinutes = input.draft.durationMinutes
+  if (durationMinutes === undefined) {
+    throw new VaultCliError(
+      'invalid_option',
+      'Workout duration is missing. Pass --duration <minutes> to record it explicitly.',
+    )
+  }
   const mediaPaths = Array.isArray(input.mediaPaths)
     ? input.mediaPaths.filter((entry): entry is string => typeof entry === 'string' && entry.trim().length > 0)
     : []
@@ -484,7 +498,7 @@ export async function addStructuredWorkoutRecord(input: {
       kind: 'activity_session' as const,
       title: result.event.title,
       activityType: result.event.activityType,
-      durationMinutes: result.event.durationMinutes,
+      durationMinutes,
       distanceKm: typeof result.event.distanceKm === 'number' ? result.event.distanceKm : null,
       workout: result.event.workout ?? null,
       manifestFile: result.manifestPath,
@@ -640,7 +654,7 @@ async function assertWorkoutExerciseReplacementPreservesExistingStructure(input:
   vault: string
   lookup: string
   set?: string[]
-}): Promise<void> {
+}, preserveSavedSets: boolean): Promise<void> {
   const replacement = parseWorkoutExerciseReplacement(input.set)
   if (replacement === null) {
     return
@@ -683,6 +697,10 @@ async function assertWorkoutExerciseReplacementPreservesExistingStructure(input:
       )
     }
 
+    if (!preserveSavedSets) {
+      continue
+    }
+
     for (const existingSet of existingExercise.sets ?? []) {
       if (!replacementExercise.sets.some(
         (candidate) => candidate.order === existingSet.order,
@@ -696,15 +714,23 @@ async function assertWorkoutExerciseReplacementPreservesExistingStructure(input:
   }
 }
 
-export async function editWorkoutRecord(input: {
+interface EditWorkoutRecordInput {
   vault: string
   lookup: string
   inputFile?: string
   set?: string[]
   clear?: string[]
   dayKeyPolicy?: 'keep' | 'recompute'
-}) {
-  await assertWorkoutExerciseReplacementPreservesExistingStructure(input)
+}
+
+async function editWorkoutRecordWithStructurePolicy(
+  input: EditWorkoutRecordInput,
+  preserveSavedSets: boolean,
+) {
+  await assertWorkoutExerciseReplacementPreservesExistingStructure(
+    input,
+    preserveSavedSets,
+  )
   const result = await editEventRecord({
     vault: input.vault,
     lookup: input.lookup,
@@ -717,6 +743,39 @@ export async function editWorkoutRecord(input: {
   })
 
   return showWorkoutRecord(input.vault, result.lookupId)
+}
+
+export function editWorkoutRecord(input: EditWorkoutRecordInput) {
+  return editWorkoutRecordWithStructurePolicy(input, true)
+}
+
+/**
+ * Persists a live-workout replacement after the member-action owner has
+ * validated the exact canonical set snapshot and retained every exercise.
+ * Other workout writes must use editWorkoutRecord so accidental set loss
+ * remains fail-closed.
+ */
+export function editWorkoutRecordAfterValidatedSetRemoval(
+  input: {
+    durationMinutes?: number
+    exercises: WorkoutExercise[]
+    lastMemberActionId: string
+    lookup: string
+    vault: string
+  },
+) {
+  const set = [
+    `${WORKOUT_EXERCISES_PATCH_PREFIX}${JSON.stringify(input.exercises)}`,
+  ]
+  if (input.durationMinutes !== undefined) {
+    set.push(`durationMinutes=${input.durationMinutes}`)
+  }
+  set.push(`workout.lastMemberActionId=${input.lastMemberActionId}`)
+  return editWorkoutRecordWithStructurePolicy({
+    lookup: input.lookup,
+    set,
+    vault: input.vault,
+  }, false)
 }
 
 export async function deleteWorkoutRecord(input: {

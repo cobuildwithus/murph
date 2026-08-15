@@ -31,11 +31,6 @@ export const setupWizardChannelOptions: readonly SetupWizardChannelOption[] = [
     description: 'Reply through a Telegram bot.',
     title: 'Telegram',
   },
-  {
-    channel: 'email',
-    description: 'Read and reply in email.',
-    title: 'Email',
-  },
 ]
 
 export const setupWizardScheduledUpdateOptions: readonly SetupWizardScheduledUpdateOption[] =
@@ -187,8 +182,6 @@ export function formatSetupChannel(channel: SetupChannel): string {
   switch (channel) {
     case 'telegram':
       return 'Telegram'
-    case 'email':
-      return 'Email'
   }
 }
 

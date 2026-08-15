@@ -20,14 +20,19 @@ const activationMocks = vi.hoisted(() => ({
   buildHostedMemberActivationEventId: vi.fn(),
 }));
 const cryptoRootMocks = vi.hoisted(() => ({
+  prepareHostedDomainRootForWeb: vi.fn(),
   prepareHostedCryptoDomainRootCandidates: vi.fn(),
   provisionActiveHostedDomainRootEnvelopeForUserOnly: vi.fn(),
+  revalidatePreparedHostedDomainRootForWebTx: vi.fn(),
+  unwrapHostedDomainRootsForWebByRootKeyIds: vi.fn(),
 }));
 const identityMocks = vi.hoisted(() => ({
+  bindHostedMemberPhoneToPreparedMemberTx: vi.fn(),
   ensureHostedMemberForPhoneTx: vi.fn(),
 }));
 const mailboxMocks = vi.hoisted(() => ({
   appendHostedMailboxEnvelopeTx: vi.fn(),
+  appendHostedMailboxEnvelopeWithPreparedCryptoTx: vi.fn(),
   readHostedMailboxItemByDedupeKey: vi.fn(),
 }));
 const runtimeMocks = vi.hoisted(() => ({
@@ -64,16 +69,28 @@ vi.mock("@/src/lib/hosted-onboarding/member-activation-runtime-wake", () => ({
     activationWakeMocks.signalHostedMemberActivationRuntimeWakeBestEffortResult,
 }));
 vi.mock("@/src/lib/hosted-crypto/domain-root-store", () => ({
+  HostedDomainRootPreparationMismatchError: class extends Error {
+    readonly code = "HOSTED_DOMAIN_ROOT_PREPARATION_MISMATCH";
+  },
+  prepareHostedDomainRootForWeb: cryptoRootMocks.prepareHostedDomainRootForWeb,
   prepareHostedCryptoDomainRootCandidates:
     cryptoRootMocks.prepareHostedCryptoDomainRootCandidates,
   provisionActiveHostedDomainRootEnvelopeForUserOnly:
     cryptoRootMocks.provisionActiveHostedDomainRootEnvelopeForUserOnly,
+  revalidatePreparedHostedDomainRootForWebTx:
+    cryptoRootMocks.revalidatePreparedHostedDomainRootForWebTx,
+  unwrapHostedDomainRootsForWebByRootKeyIds:
+    cryptoRootMocks.unwrapHostedDomainRootsForWebByRootKeyIds,
 }));
 vi.mock("@/src/lib/hosted-onboarding/member-identity-service", () => ({
+  bindHostedMemberPhoneToPreparedMemberTx:
+    identityMocks.bindHostedMemberPhoneToPreparedMemberTx,
   ensureHostedMemberForPhoneTx: identityMocks.ensureHostedMemberForPhoneTx,
 }));
 vi.mock("@/src/lib/hosted-mailbox/store", () => ({
   appendHostedMailboxEnvelopeTx: mailboxMocks.appendHostedMailboxEnvelopeTx,
+  appendHostedMailboxEnvelopeWithPreparedCryptoTx:
+    mailboxMocks.appendHostedMailboxEnvelopeWithPreparedCryptoTx,
   readHostedMailboxItemByDedupeKey: mailboxMocks.readHostedMailboxItemByDedupeKey,
 }));
 vi.mock("@/src/lib/hosted-groups/group-join-confirmation", () => ({
@@ -93,6 +110,7 @@ vi.mock("next/server", () => ({
 
 import {
   createHostedEmailLookupKey,
+  createHostedLinqChatLookupKey,
   createHostedPhoneLookupKey,
   createHostedStripeCheckoutSessionLookupKey,
   createHostedTelegramUserLookupKey,
@@ -134,9 +152,11 @@ import {
   resolveHostedFamilyCheckoutRedirectUrl,
   writeHostedAccountGroupStripeBillingTx,
   parseHostedFamilyInviteStartToken,
+  prepareHostedFamilyOwnerNotification,
   readHostedFamilyAccessForMember,
   readHostedMemberFamilyBillingClaim,
   resolveHostedFamilyUsageCreditCheckoutTargetTx,
+  resolveHostedFamilyPhoneInvitePreparation,
   resolveHostedFamilyInviteTokenForInbound,
   removeHostedFamilyMemberTx,
   updateHostedFamilyMemberPlan,
@@ -300,6 +320,9 @@ describe("hosted Family plan", () => {
     mailboxMocks.appendHostedMailboxEnvelopeTx.mockResolvedValue({
       item: { id: "mailbox_item_owner_notification" },
     });
+    mailboxMocks.appendHostedMailboxEnvelopeWithPreparedCryptoTx.mockResolvedValue({
+      item: { id: "mailbox_item_owner_notification" },
+    });
     mailboxMocks.readHostedMailboxItemByDedupeKey.mockResolvedValue({
       dedupeKey: "member.activated:hosted.family.sponsorship:member_mom:family-invite:hbagi_invite",
       id: "mailbox_member_activation",
@@ -341,10 +364,35 @@ describe("hosted Family plan", () => {
     );
     cryptoRootMocks.provisionActiveHostedDomainRootEnvelopeForUserOnly.mockResolvedValue(undefined);
     cryptoRootMocks.prepareHostedCryptoDomainRootCandidates.mockResolvedValue(new Map());
+    cryptoRootMocks.prepareHostedDomainRootForWeb.mockImplementation(async ({
+      domain,
+      userId,
+    }) => ({
+      domain,
+      rootKeyId: `root_${domain}_${userId}`,
+      userId,
+    }));
+    cryptoRootMocks.revalidatePreparedHostedDomainRootForWebTx
+      .mockImplementation(async ({ prepared }) => ({
+        root: Promise.resolve({
+          envelope: prepared,
+          rootKey: new Uint8Array(32),
+        }),
+        rootKeyId: prepared.rootKeyId,
+      }));
+    cryptoRootMocks.unwrapHostedDomainRootsForWebByRootKeyIds
+      .mockResolvedValue([]);
     identityMocks.ensureHostedMemberForPhoneTx.mockResolvedValue({
       billingStatus: HostedBillingStatus.not_started,
       id: "member_mom",
       suspendedAt: null,
+    });
+    identityMocks.bindHostedMemberPhoneToPreparedMemberTx.mockResolvedValue({
+      billingStatus: HostedBillingStatus.not_started,
+      createdAt: new Date("2026-06-18T12:00:00.000Z"),
+      id: "member_mom",
+      suspendedAt: null,
+      updatedAt: new Date("2026-06-18T12:00:00.000Z"),
     });
   });
 
@@ -1098,6 +1146,98 @@ describe("hosted Family plan", () => {
       text: "hello",
     })).resolves.toBeNull();
     expect(tx.hostedAccountGroupInvite.findUnique).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([
+    {
+      expected: { inviteCode: "invite_phone", kind: "pending_acceptance" },
+      invite: () => createPendingInvite(),
+      label: "fully unbound pending",
+    },
+    {
+      expected: { inviteCode: "invite_phone", kind: "pending_acceptance" },
+      invite: () => createPendingInvite({
+        targetPhoneLookupKey: createHostedPhoneLookupKey("+48600000000"),
+      }),
+      label: "matching-phone pending",
+    },
+    {
+      expected: { inviteCode: "invite_phone", kind: "accepted_replay" },
+      invite: () => createPendingInvite({
+        acceptedByMemberId: "member_mom",
+        status: "accepted",
+        targetPhoneLookupKey: createHostedPhoneLookupKey("+48600000000"),
+      }),
+      label: "exact accepted replay",
+    },
+    {
+      expected: null,
+      invite: () => createPendingInvite({
+        expiresAt: new Date("2026-06-18T11:00:00.000Z"),
+      }),
+      label: "expired",
+    },
+    {
+      expected: null,
+      invite: () => createPendingInvite({
+        targetEmailLookupKey: createHostedEmailLookupKey("mom@example.com"),
+      }),
+      label: "email-bound",
+    },
+    {
+      expected: null,
+      invite: () => createPendingInvite({
+        targetTelegramUsernameLookupKey:
+          createHostedTelegramUsernameLookupKey("@Mom_User"),
+      }),
+      label: "Telegram-bound",
+    },
+    {
+      expected: null,
+      invite: () => createPendingInvite({
+        targetPhoneLookupKey: createHostedPhoneLookupKey("+48700000000"),
+      }),
+      label: "wrong-phone",
+    },
+    {
+      expected: null,
+      invite: () => createPendingInvite({
+        acceptedByMemberId: "member_other",
+        status: "accepted",
+        targetPhoneLookupKey: createHostedPhoneLookupKey("+48600000000"),
+      }),
+      label: "different accepted member",
+    },
+  ])("classifies $label Family preparation without decrypting", async ({
+    expected,
+    invite,
+  }) => {
+    const tx = createTxMock();
+    tx.hostedAccountGroupInvite.findUnique.mockResolvedValueOnce(invite());
+
+    await expect(resolveHostedFamilyPhoneInvitePreparation({
+      acceptedMemberId: "member_mom",
+      now: new Date("2026-06-18T12:00:00.000Z"),
+      phoneNumber: "+48600000000",
+      prisma: tx,
+      text: "family_invite_phone",
+    })).resolves.toEqual(expected);
+
+    expect(tx.hostedAccountGroupInvite.findUnique).toHaveBeenCalledWith({
+      select: {
+        acceptedByMemberId: true,
+        expiresAt: true,
+        status: true,
+        targetEmailLookupKey: true,
+        targetPhoneLookupKey: true,
+        targetTelegramUsernameLookupKey: true,
+      },
+      where: {
+        inviteCode: "invite_phone",
+      },
+    });
+    expect(encryptionMocks.decryptHostedWebNullableFields).not.toHaveBeenCalled();
+    expect(encryptionMocks.decryptHostedWebNullableString).not.toHaveBeenCalled();
   });
 
   it("builds short hosted Family checkout links from Stripe checkout URLs", () => {
@@ -2053,6 +2193,431 @@ describe("hosted Family plan", () => {
     ).not.toHaveProperty("preparedCryptoDomainRoots");
   });
 
+  it("forwards prepared roots through phone-bound Family activation", async () => {
+    const now = new Date("2026-06-18T12:30:00.000Z");
+    const tx = createTxMock();
+    const invite = createPendingInvite({
+      targetPhoneLookupKey: createHostedPhoneLookupKey("+48600000000"),
+    });
+    tx.hostedAccountGroupInvite.findUnique
+      .mockResolvedValueOnce(invite)
+      .mockResolvedValueOnce(invite);
+    const preparedCryptoDomainRoots = new Map([
+      ["control", { domain: "control" }],
+    ]) as never;
+
+    await expect(acceptHostedFamilyInviteFromPhoneTx({
+      now,
+      phoneNumber: "+48 600 000 000",
+      preparedCryptoDomainRoots,
+      text: "family_invite_phone",
+      tx,
+    })).resolves.toMatchObject({
+      memberId: "member_mom",
+      status: "active",
+    });
+
+    expect(activationMocks.activateHostedMemberForFamilySponsorshipTx)
+      .toHaveBeenCalledWith(expect.objectContaining({
+        memberId: "member_mom",
+        preparedCryptoDomainRoots,
+      }));
+  });
+
+  it("rejects Family eligibility drift before binding or mutation", async () => {
+    const now = new Date("2026-06-18T12:30:00.000Z");
+    const tx = createTxMock();
+    tx.hostedAccountGroupInvite.findUnique.mockResolvedValueOnce(
+      createPendingInvite({
+        expiresAt: new Date("2026-06-18T12:00:00.000Z"),
+        targetPhoneLookupKey: createHostedPhoneLookupKey("+48600000000"),
+      }),
+    );
+
+    await expect(acceptHostedFamilyInviteFromPhoneTx({
+      acceptedMember: {
+        currentIdentity: null,
+        member: {
+          billingStatus: HostedBillingStatus.not_started,
+          createdAt: now,
+          id: "member_mom",
+          suspendedAt: null,
+          updatedAt: now,
+        },
+        preparedControlRoot: {
+          domain: "control",
+          rootKeyId: "root_control_member_mom",
+          userId: "member_mom",
+        },
+      },
+      now,
+      phoneNumber: "+48600000000",
+      preparedInvite: {
+        inviteCode: "invite_phone",
+        kind: "pending_acceptance",
+      },
+      text: "family_invite_phone",
+      tx,
+    })).rejects.toMatchObject({
+      code: "HOSTED_DOMAIN_ROOT_PREPARATION_MISMATCH",
+    });
+
+    expect(identityMocks.bindHostedMemberPhoneToPreparedMemberTx)
+      .not.toHaveBeenCalled();
+    expect(tx.hostedAccountGroupInvite.updateMany).not.toHaveBeenCalled();
+    expect(tx.hostedAccountGroupMembership.upsert).not.toHaveBeenCalled();
+  });
+
+  it("keeps phone acceptance on the exact prepared member", async () => {
+    const now = new Date("2026-06-18T12:30:00.000Z");
+    const tx = createTxMock();
+    tx.$queryRaw.mockResolvedValue([{ id: "member_owner" }]);
+    const invite = createPendingInvite({
+      targetPhoneLookupKey: createHostedPhoneLookupKey("+48600000000"),
+    });
+    tx.hostedAccountGroupInvite.findUnique
+      .mockResolvedValueOnce(invite)
+      .mockResolvedValueOnce(invite);
+    const member = {
+      billingStatus: HostedBillingStatus.not_started,
+      createdAt: now,
+      id: "member_mom",
+      suspendedAt: null,
+      updatedAt: now,
+    };
+    const currentIdentity = {
+      maskedPhoneNumberHint: null,
+      memberId: member.id,
+      phoneLookupKey: null,
+      phoneNumber: null,
+      phoneNumberVerifiedAt: null,
+      privyUserId: null,
+      signupPhoneCodeSendAttemptId: null,
+      signupPhoneCodeSendAttemptStartedAt: null,
+      signupPhoneCodeSentAt: null,
+      signupPhoneNumber: null,
+      walletAddress: null,
+      walletChainType: null,
+      walletCreatedAt: null,
+      walletProvider: null,
+    };
+    const preparedControlRoot = {
+      domain: "control",
+      rootKeyId: "root_member_mom_control",
+      userId: member.id,
+    } as const;
+    identityMocks.bindHostedMemberPhoneToPreparedMemberTx.mockResolvedValueOnce(member);
+
+    await expect(acceptHostedFamilyInviteFromPhoneTx({
+      acceptedMember: {
+        currentIdentity,
+        member,
+        preparedControlRoot,
+      },
+      now,
+      phoneNumber: "+48 600 000 000",
+      text: "family_invite_phone",
+      tx,
+    })).resolves.toMatchObject({
+      memberId: member.id,
+      status: "active",
+    });
+
+    expect(identityMocks.bindHostedMemberPhoneToPreparedMemberTx)
+      .toHaveBeenCalledExactlyOnceWith({
+        currentIdentity,
+        member,
+        phoneNumber: "+48 600 000 000",
+        phoneNumberVerifiedAt: now,
+        preparedControlRoot,
+        prisma: tx,
+      });
+    expect(identityMocks.ensureHostedMemberForPhoneTx).not.toHaveBeenCalled();
+    expect(tx.hostedAccountGroupMembership.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        create: expect.objectContaining({ memberId: member.id }),
+      }),
+    );
+  });
+
+  it("prepares and revalidates the distinct Family owner before accepting", async () => {
+    const now = new Date("2026-06-18T12:30:00.000Z");
+    const tx = createTxMock();
+    const invite = createPendingInvite({
+      targetPhoneLookupKey: createHostedPhoneLookupKey("+48600000000"),
+    });
+    const ownerMember = {
+      billingStatus: HostedBillingStatus.active,
+      createdAt: now,
+      id: "member_owner",
+      suspendedAt: null,
+      updatedAt: now,
+    };
+    const ownerIdentity = {
+      createdAt: now,
+      maskedPhoneNumberHint: null,
+      memberId: ownerMember.id,
+      phoneLookupKey: createHostedPhoneLookupKey("+15550000000"),
+      phoneNumberEncrypted: "encrypted:+15550000000",
+      phoneNumberVerifiedAt: now,
+      privyUserIdEncrypted: null,
+      privyUserLookupKey: null,
+      signupPhoneCodeSendAttemptId: null,
+      signupPhoneCodeSendAttemptStartedAt: null,
+      signupPhoneCodeSentAt: null,
+      signupPhoneNumberEncrypted: null,
+      updatedAt: now,
+      walletAddressEncrypted: null,
+      walletAddressLookupKey: null,
+      walletChainType: null,
+      walletCreatedAt: null,
+      walletProvider: null,
+    };
+    const ownerRouting = {
+      linqChatIdEncrypted: "encrypted:chat_owner",
+      linqChatLookupKey: createHostedLinqChatLookupKey("chat_owner"),
+      linqHomeLineAssignedAt: now,
+      linqParticipantContactKind: "phone",
+      linqParticipantContactLookupKey: ownerIdentity.phoneLookupKey,
+      linqRecipientPhoneEncrypted: "encrypted:+15559999999",
+      linqRecipientPhoneLookupKey: createHostedPhoneLookupKey("+15559999999"),
+      memberId: ownerMember.id,
+      pendingLinqChatIdEncrypted: null,
+      pendingLinqChatLookupKey: null,
+      pendingLinqParticipantContactEncrypted: null,
+      pendingLinqParticipantContactKind: null,
+      pendingLinqParticipantContactLookupKey: null,
+      pendingLinqParticipantContactObservedAt: null,
+      pendingLinqRecipientPhoneEncrypted: null,
+      pendingLinqRecipientPhoneLookupKey: null,
+      replyAliasLookupKey: null,
+      telegramUserIdEncrypted: null,
+      telegramUserLookupKey: null,
+    };
+    tx.hostedAccountGroupInvite.findUnique
+      .mockResolvedValueOnce(invite)
+      .mockResolvedValueOnce(invite)
+      .mockResolvedValueOnce(invite);
+    tx.hostedMember.findUnique.mockResolvedValue(ownerMember);
+    tx.hostedMemberIdentity.findUnique.mockResolvedValue(ownerIdentity);
+    tx.hostedMemberRouting.findUnique.mockResolvedValue(ownerRouting);
+    tx.$queryRaw.mockResolvedValue([{ id: ownerMember.id }]);
+    const acceptedMember = {
+      billingStatus: HostedBillingStatus.not_started,
+      createdAt: now,
+      id: "member_mom",
+      suspendedAt: null,
+      updatedAt: now,
+    };
+    identityMocks.bindHostedMemberPhoneToPreparedMemberTx
+      .mockResolvedValueOnce(acceptedMember);
+
+    const preparedOwnerNotification = await prepareHostedFamilyOwnerNotification({
+      inviteCode: invite.inviteCode,
+      prisma: tx,
+    });
+    if (!preparedOwnerNotification) {
+      throw new Error("Expected the Family owner notification package.");
+    }
+
+    await expect(acceptHostedFamilyInviteFromPhoneTx({
+      acceptedMember: {
+        currentIdentity: null,
+        member: acceptedMember,
+        preparedControlRoot: {
+          domain: "control",
+          rootKeyId: "root_control_member_mom",
+          userId: acceptedMember.id,
+        },
+      },
+      now,
+      phoneNumber: "+48 600 000 000",
+      preparedOwnerNotification,
+      text: "family_invite_phone",
+      tx,
+    })).resolves.toMatchObject({
+      memberId: acceptedMember.id,
+      status: "active",
+    });
+
+    expect(cryptoRootMocks.prepareHostedDomainRootForWeb.mock.calls.map(
+      ([input]) => [input.domain, input.userId],
+    )).toEqual([
+      ["control", ownerMember.id],
+      ["ingress", ownerMember.id],
+    ]);
+    expect(cryptoRootMocks.revalidatePreparedHostedDomainRootForWebTx.mock.calls.map(
+      ([input]) => input.prepared.domain,
+    )).toEqual(["control", "ingress"]);
+    expect(mailboxMocks.appendHostedMailboxEnvelopeWithPreparedCryptoTx)
+      .toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+        prepared: preparedOwnerNotification.preparedIngressRoot,
+        tx,
+      }));
+    expect(mailboxMocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+    expect(tx.hostedAccountGroupMembership.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        create: expect.objectContaining({ memberId: acceptedMember.id }),
+      }),
+    );
+  });
+
+  it("rejects owner-route drift before a prepared Family invite mutation", async () => {
+    const now = new Date("2026-06-18T12:30:00.000Z");
+    const tx = createTxMock();
+    const invite = createPendingInvite({
+      targetPhoneLookupKey: createHostedPhoneLookupKey("+48600000000"),
+    });
+    const ownerMember = {
+      billingStatus: HostedBillingStatus.active,
+      createdAt: now,
+      id: "member_owner",
+      suspendedAt: null,
+      updatedAt: now,
+    };
+    const preparedOwnerNotification = {
+      inviteCode: invite.inviteCode,
+      ownerIdentity: null,
+      ownerIdentityState: null,
+      ownerMember,
+      ownerRouting: null,
+      ownerRoutingState: null,
+      preparedControlRoot: {
+        domain: "control",
+        rootKeyId: "root_control_member_owner",
+        userId: ownerMember.id,
+      },
+      preparedIngressRoot: null,
+    } as const;
+    tx.hostedAccountGroupInvite.findUnique
+      .mockResolvedValueOnce(invite)
+      .mockResolvedValueOnce(invite);
+    tx.hostedMember.findUnique.mockResolvedValue(ownerMember);
+    tx.hostedMemberIdentity.findUnique.mockResolvedValue(null);
+    tx.hostedMemberRouting.findUnique.mockResolvedValue({
+      linqChatIdEncrypted: "encrypted:chat_owner_changed",
+      linqChatLookupKey: createHostedLinqChatLookupKey("chat_owner_changed"),
+      linqHomeLineAssignedAt: now,
+      linqParticipantContactKind: "phone",
+      linqParticipantContactLookupKey: createHostedPhoneLookupKey("+15550000000"),
+      linqRecipientPhoneEncrypted: null,
+      linqRecipientPhoneLookupKey: null,
+      memberId: ownerMember.id,
+      pendingLinqChatIdEncrypted: null,
+      pendingLinqChatLookupKey: null,
+      pendingLinqParticipantContactEncrypted: null,
+      pendingLinqParticipantContactKind: null,
+      pendingLinqParticipantContactLookupKey: null,
+      pendingLinqParticipantContactObservedAt: null,
+      pendingLinqRecipientPhoneEncrypted: null,
+      pendingLinqRecipientPhoneLookupKey: null,
+      replyAliasLookupKey: null,
+      telegramUserIdEncrypted: null,
+      telegramUserLookupKey: null,
+    });
+    tx.$queryRaw.mockResolvedValue([{ id: ownerMember.id }]);
+    const acceptedMember = {
+      billingStatus: HostedBillingStatus.not_started,
+      createdAt: now,
+      id: "member_mom",
+      suspendedAt: null,
+      updatedAt: now,
+    };
+    identityMocks.bindHostedMemberPhoneToPreparedMemberTx
+      .mockResolvedValueOnce(acceptedMember);
+
+    await expect(acceptHostedFamilyInviteFromPhoneTx({
+      acceptedMember: {
+        currentIdentity: null,
+        member: acceptedMember,
+        preparedControlRoot: {
+          domain: "control",
+          rootKeyId: "root_control_member_mom",
+          userId: acceptedMember.id,
+        },
+      },
+      now,
+      phoneNumber: "+48 600 000 000",
+      preparedOwnerNotification,
+      text: "family_invite_phone",
+      tx,
+    })).rejects.toMatchObject({
+      code: "HOSTED_DOMAIN_ROOT_PREPARATION_MISMATCH",
+    });
+
+    expect(tx.hostedAccountGroupInvite.updateMany).not.toHaveBeenCalled();
+    expect(tx.hostedAccountGroupMembership.upsert).not.toHaveBeenCalled();
+    expect(activationMocks.activateHostedMemberForFamilySponsorshipTx)
+      .not.toHaveBeenCalled();
+    expect(mailboxMocks.appendHostedMailboxEnvelopeWithPreparedCryptoTx)
+      .not.toHaveBeenCalled();
+  });
+
+  it("fails prepared Family acceptance before mutation when the owner lock is busy", async () => {
+    const now = new Date("2026-06-18T12:30:00.000Z");
+    const tx = createTxMock();
+    tx.$queryRaw.mockResolvedValue([]);
+    const invite = createPendingInvite({
+      targetPhoneLookupKey: createHostedPhoneLookupKey("+48600000000"),
+    });
+    tx.hostedAccountGroupInvite.findUnique
+      .mockResolvedValueOnce(invite)
+      .mockResolvedValueOnce(invite);
+    const member = {
+      billingStatus: HostedBillingStatus.not_started,
+      createdAt: now,
+      id: "member_mom",
+      suspendedAt: null,
+      updatedAt: now,
+    };
+    identityMocks.bindHostedMemberPhoneToPreparedMemberTx.mockResolvedValueOnce(member);
+
+    await expect(acceptHostedFamilyInviteFromPhoneTx({
+      acceptedMember: {
+        currentIdentity: null,
+        member,
+        preparedControlRoot: {
+          domain: "control",
+          rootKeyId: "root_member_mom_control",
+          userId: member.id,
+        },
+      },
+      now,
+      phoneNumber: "+48 600 000 000",
+      preparedOwnerNotification: {
+        inviteCode: "invite_phone",
+        ownerIdentity: null,
+        ownerIdentityState: null,
+        ownerMember: {
+          billingStatus: HostedBillingStatus.active,
+          createdAt: now,
+          id: "member_owner",
+          suspendedAt: null,
+          updatedAt: now,
+        },
+        ownerRouting: null,
+        ownerRoutingState: null,
+        preparedControlRoot: {
+          domain: "control",
+          rootKeyId: "root_member_owner_control",
+          userId: "member_owner",
+        },
+        preparedIngressRoot: null,
+      },
+      text: "family_invite_phone",
+      tx,
+    })).rejects.toMatchObject({
+      code: "HOSTED_DOMAIN_ROOT_PREPARATION_MISMATCH",
+    });
+
+    expect(tx.hostedAccountGroupInvite.updateMany).not.toHaveBeenCalled();
+    expect(tx.hostedAccountGroupMembership.upsert).not.toHaveBeenCalled();
+    expect(activationMocks.activateHostedMemberForFamilySponsorshipTx)
+      .not.toHaveBeenCalled();
+    expect(mailboxMocks.appendHostedMailboxEnvelopeWithPreparedCryptoTx)
+      .not.toHaveBeenCalled();
+  });
+
   it("rejects a phone plus Telegram invite from the wrong Telegram username", async () => {
     const tx = createTxMock();
     tx.hostedAccountGroupInvite.findUnique.mockResolvedValueOnce(createPendingInvite({
@@ -2454,11 +3019,32 @@ describe("hosted Family plan", () => {
       role: "member",
       status: "active",
     });
+    const member = {
+      billingStatus: HostedBillingStatus.not_started,
+      createdAt: now,
+      id: "member_mom",
+      suspendedAt: null,
+      updatedAt: now,
+    };
+    identityMocks.bindHostedMemberPhoneToPreparedMemberTx.mockResolvedValueOnce(member);
 
     await expect(acceptHostedFamilyInviteFromPhoneTx({
+      acceptedMember: {
+        currentIdentity: null,
+        member,
+        preparedControlRoot: {
+          domain: "control",
+          rootKeyId: "root_control_member_mom",
+          userId: member.id,
+        },
+      },
       now,
       onAcceptedMemberLocked,
       phoneNumber: "+48 600 000 000",
+      preparedInvite: {
+        inviteCode: "invite_phone",
+        kind: "accepted_replay",
+      },
       text: "family_invite_phone",
       tx,
     })).resolves.toMatchObject({
@@ -2468,11 +3054,9 @@ describe("hosted Family plan", () => {
       status: "active",
     });
 
-    expect(identityMocks.ensureHostedMemberForPhoneTx).toHaveBeenCalledWith({
-      phoneNumber: "+48 600 000 000",
-      phoneNumberVerifiedAt: now,
-      prisma: tx,
-    });
+    expect(identityMocks.bindHostedMemberPhoneToPreparedMemberTx)
+      .toHaveBeenCalledOnce();
+    expect(identityMocks.ensureHostedMemberForPhoneTx).not.toHaveBeenCalled();
     expect(tx.hostedAccountGroupMembership.findFirst).toHaveBeenCalledWith(expect.objectContaining({
       where: {
         groupId: "hbag_family",
@@ -2484,6 +3068,8 @@ describe("hosted Family plan", () => {
     expect(tx.hostedAccountGroupInvite.updateMany).not.toHaveBeenCalled();
     expect(onAcceptedMemberLocked).not.toHaveBeenCalled();
     expect(activationMocks.activateHostedMemberForFamilySponsorshipTx).not.toHaveBeenCalled();
+    expect(mailboxMocks.appendHostedMailboxEnvelopeWithPreparedCryptoTx)
+      .not.toHaveBeenCalled();
   });
 
   it("does not let phone acceptance claim a Telegram-bound invite", async () => {
@@ -2809,12 +3395,32 @@ describe("hosted Family plan", () => {
     });
     tx.hostedAccountGroupMembership.findMany
       .mockResolvedValue([
-        { memberId: "member_owner", planCode: "pulse" },
-        { memberId: "member_mom", planCode: "max" },
+        {
+          createdAt: pendingStartedAt,
+          id: "hbagm_owner",
+          memberId: "member_owner",
+          planCode: "pulse",
+        },
+        {
+          createdAt: pendingStartedAt,
+          id: "hbagm_mom",
+          memberId: "member_mom",
+          planCode: "max",
+        },
       ])
       .mockResolvedValueOnce([
-        { memberId: "member_owner", planCode: "pulse" },
-        { memberId: "member_mom", planCode: "pulse" },
+        {
+          createdAt: pendingStartedAt,
+          id: "hbagm_owner",
+          memberId: "member_owner",
+          planCode: "pulse",
+        },
+        {
+          createdAt: pendingStartedAt,
+          id: "hbagm_mom",
+          memberId: "member_mom",
+          planCode: "pulse",
+        },
       ])
       .mockResolvedValueOnce([
         { memberId: "member_owner", planCode: "pulse" },
@@ -2911,8 +3517,18 @@ describe("hosted Family plan", () => {
     });
     tx.hostedAccountGroupMembership.findMany
       .mockResolvedValue([
-        { memberId: "member_owner", planCode: "pulse" },
-        { memberId: "member_relative", planCode: "edge" },
+        {
+          createdAt: pendingStartedAt,
+          id: "hbagm_owner",
+          memberId: "member_owner",
+          planCode: "pulse",
+        },
+        {
+          createdAt: pendingStartedAt,
+          id: "hbagm_member",
+          memberId: "member_relative",
+          planCode: "edge",
+        },
       ])
       .mockResolvedValueOnce([
         { memberId: "member_owner", planCode: "pulse" },
@@ -2974,8 +3590,18 @@ describe("hosted Family plan", () => {
     });
     tx.hostedAccountGroupMembership.findMany
       .mockResolvedValue([
-        { memberId: "member_owner", planCode: "pulse" },
-        { memberId: "member_mom", planCode: "edge" },
+        {
+          createdAt: pendingStartedAt,
+          id: "hbagm_owner",
+          memberId: "member_owner",
+          planCode: "pulse",
+        },
+        {
+          createdAt: pendingStartedAt,
+          id: "hbagm_mom",
+          memberId: "member_mom",
+          planCode: "edge",
+        },
       ])
       .mockResolvedValueOnce([
         { memberId: "member_owner", planCode: "pulse" },
@@ -2986,8 +3612,18 @@ describe("hosted Family plan", () => {
         { memberId: "member_mom", planCode: "pulse" },
       ])
       .mockResolvedValueOnce([
-        { memberId: "member_owner", planCode: "pulse" },
-        { memberId: "member_mom", planCode: "pulse" },
+        {
+          createdAt: pendingStartedAt,
+          id: "hbagm_owner",
+          memberId: "member_owner",
+          planCode: "pulse",
+        },
+        {
+          createdAt: pendingStartedAt,
+          id: "hbagm_mom",
+          memberId: "member_mom",
+          planCode: "pulse",
+        },
       ]);
     const currentCapacities = [{ billedQuantity: 2, planCode: "pulse" }];
     tx.hostedAccountGroupPlanCapacity.findMany
@@ -3064,14 +3700,21 @@ describe("hosted Family plan", () => {
       { memberId: "member_mom", planCode: "edge" },
     ];
     tx.hostedAccountGroupMembership.findMany
-      .mockResolvedValue(currentAssignments.map((assignment) => (
-        assignment.memberId === "member_mom"
-          ? { ...assignment, planCode: "pulse" }
-          : assignment
-      )))
+      .mockResolvedValue(currentAssignments.map((assignment, index) => ({
+        ...assignment,
+        createdAt: pendingStartedAt,
+        id: `hbagm_${index}`,
+        ...(assignment.memberId === "member_mom"
+          ? { planCode: "pulse" }
+          : {}),
+      })))
       .mockResolvedValueOnce(currentAssignments)
       .mockResolvedValueOnce(currentAssignments)
-      .mockResolvedValueOnce(currentAssignments);
+      .mockResolvedValueOnce(currentAssignments.map((assignment, index) => ({
+        ...assignment,
+        createdAt: pendingStartedAt,
+        id: `hbagm_snapshot_${index}`,
+      })));
     const currentCapacities = [
       { billedQuantity: 5, planCode: "pulse" },
       { billedQuantity: 1, planCode: "edge" },

@@ -18,6 +18,7 @@ import {
   type AssistantCronCanonicalRuntimeState,
 } from './runtime-state.js'
 import {
+  finalizeAssistantCronPendingRunDelivery,
   readAssistantCronStore,
   writeAssistantCronStore,
 } from './store.js'
@@ -98,6 +99,17 @@ async function reconcileAssistantCronTerminalDelivery(input: {
     const canonicalRecords = hasCanonicalPendingDelivery
       ? await listCanonicalAssistantCronRecords(input.vault, ['active', 'paused'])
       : []
+    const pendingRunTerminal = input.terminal.kind === 'sent'
+      ? {
+          error: null,
+          outcome: 'delivered' as const,
+          reason: 'delivery_sent',
+        }
+      : {
+          error: input.terminal.error.message,
+          outcome: 'failed' as const,
+          reason: `delivery_${input.terminal.failureStatus}`,
+        }
     let reconciled = 0
     let localChanged = false
 
@@ -109,6 +121,12 @@ async function reconcileAssistantCronTerminalDelivery(input: {
 
       reconciled += 1
       localChanged = true
+      await finalizeAssistantCronPendingRunDelivery({
+        jobId: job.jobId,
+        paths,
+        terminalAt: input.terminal.at,
+        ...pendingRunTerminal,
+      })
       if (
         assistantCronTerminalDeliveryConsumesOccurrence(input.terminal, null) &&
         shouldRemoveAssistantCronJobAfterDelivery(job)
@@ -138,6 +156,12 @@ async function reconcileAssistantCronTerminalDelivery(input: {
       ) ?? null
       reconciled += 1
       canonicalChanged = true
+      await finalizeAssistantCronPendingRunDelivery({
+        jobId: runtimeState.jobId,
+        paths,
+        terminalAt: input.terminal.at,
+        ...pendingRunTerminal,
+      })
       const deliveryConsumesOccurrence =
         assistantCronTerminalDeliveryConsumesOccurrence(input.terminal, source)
 

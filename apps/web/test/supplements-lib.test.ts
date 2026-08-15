@@ -137,6 +137,8 @@ describe("supplements query helpers", () => {
     expect(schemaSql).toContain(
       "CREATE INDEX IF NOT EXISTS supplements_canonical_key_idx",
     );
+    expect(schemaSql).not.toContain("supplements_name_rank_idx");
+    expect(schemaSql).not.toContain("supplements_canonical_rank_idx");
     expect(schemaSql).toContain("supplements_payload_format_check");
     expect(schemaSql).toContain("char_length(search_text) <= 6000");
     expect(schemaSql).toContain(
@@ -253,6 +255,8 @@ describe("supplements query helpers", () => {
     expect(searchCall?.text).toContain(
       "NOT EXISTS (SELECT 1 FROM fts_candidates)",
     );
+    expect(searchCall?.text).not.toContain("fts_nearest_matches");
+    expect(searchCall?.text).not.toContain("fts_canonical_matches");
     expect(searchCall?.text).toContain("name % query.raw_q");
     expect(searchCall?.text).not.toContain("OR name % query.raw_q");
     expect(searchCall?.text).toContain("name_phrase_match DESC");
@@ -2085,7 +2089,13 @@ describe("supplements query helpers", () => {
     });
     expect(calls).toHaveLength(1);
     expect(calls[0]?.text).toContain("fts_candidates AS MATERIALIZED");
-    expect(calls[0]?.text).toContain("LIMIT 250");
+    expect(calls[0]?.text).not.toContain("fts_canonical_matches AS MATERIALIZED");
+    expect(calls[0]?.text).toMatch(
+      /fts_candidates AS MATERIALIZED \([\s\S]*?LIMIT 250/u,
+    );
+    expect(calls[0]?.text).toMatch(
+      /trigram_candidates AS MATERIALIZED \([\s\S]*?LIMIT 250/u,
+    );
     expect(calls[0]?.text).toContain(
       "product_tests.supplement_id = selected.id",
     );

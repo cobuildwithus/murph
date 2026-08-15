@@ -6,12 +6,13 @@ import path from "node:path";
 import { test } from "vitest";
 
 import { CURRENT_VAULT_FORMAT_VERSION, type DeviceDataOrigin } from "@murphai/contracts";
-import { normalizeJunctionSnapshot } from "@murphai/importers";
+import * as coreRuntime from "@murphai/core";
+import { importDeviceProviderSnapshot, normalizeJunctionSnapshot } from "@murphai/importers";
 
 import type { CanonicalEntity } from "../src/canonical-entities.ts";
 import { buildMetricProjection } from "../src/metrics/projection.ts";
 import { createVaultReadModel, listEntities, readVault } from "../src/model.ts";
-import { searchVaultRuntime } from "../src/query-projection.ts";
+import { listMetricPointsRuntime, searchVaultRuntime } from "../src/query-projection.ts";
 import { searchVault } from "../src/search.ts";
 import {
   explainWearableDrift,
@@ -547,21 +548,21 @@ test("daily workout rollup adds distinct sessions and suppresses an imported mir
   assert.equal(point("activity-minutes"), undefined);
 });
 
-test("Junction raw-only timeseries stay out of default query/search and wearable summaries", async () => {
+test("unadmitted Junction timeseries stay out of default query/search and wearable summaries", async () => {
   const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "murph-junction-raw-timeseries-query-"));
-  const rawTimeseriesSnapshot = {
+  const unadmittedTimeseriesSnapshot = {
     importedAt: "2026-05-20T12:00:00.000Z",
     timeseries: {
-      heartrate: [{
+      experimental_raw: [{
         sourceProviderSlug: "garmin",
         sourceType: "watch",
         timestamp: "2026-05-20T08:00:00Z",
-        unit: "bpm",
-        value: 61,
+        unit: "sample",
+        value: 0.42,
       }],
     },
   };
-  const rawOnlyPayload = normalizeJunctionSnapshot(rawTimeseriesSnapshot);
+  const rawOnlyPayload = normalizeJunctionSnapshot(unadmittedTimeseriesSnapshot);
 
   assert.deepEqual(rawOnlyPayload.events, []);
   assert.deepEqual(rawOnlyPayload.samples ?? [], []);
@@ -574,7 +575,7 @@ test("Junction raw-only timeseries stay out of default query/search and wearable
         formatVersion: CURRENT_VAULT_FORMAT_VERSION,
         vaultId: "vault_01K72NVW6Z4QK8VYAVX7GT7S4B",
         createdAt: "2026-05-20T00:00:00.000Z",
-        title: "Junction raw timeseries query vault",
+        title: "Junction unadmitted timeseries query vault",
         timezone: "UTC",
       })}\n`,
       "utf8",
@@ -583,15 +584,15 @@ test("Junction raw-only timeseries stay out of default query/search and wearable
     const persistedRawVault = await readVault(vaultRoot);
     assert.deepEqual(listEntities(persistedRawVault, { families: ["event"] }), []);
     assert.deepEqual(listEntities(persistedRawVault, { families: ["sample"] }), []);
-    assert.equal(searchVault(persistedRawVault, "heart rate").total, 0);
-    assert.equal((await searchVaultRuntime(vaultRoot, "heart rate")).total, 0);
+    assert.equal(searchVault(persistedRawVault, "vendor waveform").total, 0);
+    assert.equal((await searchVaultRuntime(vaultRoot, "vendor waveform")).total, 0);
     assert.equal(summarizeWearableLatest(persistedRawVault, { providers: ["garmin"] }), null);
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
   }
 
   const compactSummaryVault = makeVaultFromJunctionSnapshot({
-    ...rawTimeseriesSnapshot,
+    ...unadmittedTimeseriesSnapshot,
     summaries: {
       activity: [{
         sourceProviderSlug: "garmin",
@@ -605,6 +606,688 @@ test("Junction raw-only timeseries stay out of default query/search and wearable
 
   assert.equal(latest?.latestDate, "2026-05-20");
   assert.equal(latest?.activity?.steps.selection.value, 7200);
+});
+
+test("Junction timed and derived timeseries facts survive core replay and remain queryable", async () => {
+  const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "murph-junction-timeseries-fidelity-query-"));
+  const snapshot = {
+    accountId: "junction-account-timeseries-fidelity",
+    importedAt: "2026-04-23T12:00:00.000Z",
+    timeseries: {
+      glucose: {
+        groups: {
+          dexcom: [{
+            data: [
+              { id: "glucose-reading-1", timestamp: "2026-04-22T00:00:00Z", recordedAt: "2026-04-22T07:00:00Z", unit: "mmol/L", value: 3.5 },
+              { id: "glucose-reading-2", timestamp: "2026-04-22T00:05:00Z", recordedAt: "2026-04-22T07:00:00Z", unit: "mmol/L", value: 7 },
+              { id: "glucose-reading-3", timestamp: "2026-04-22T00:10:00Z", recordedAt: "2026-04-22T07:00:00Z", unit: "mmol/L", value: 7 },
+              { id: "glucose-reading-4", timestamp: "2026-04-22T00:15:00Z", recordedAt: "2026-04-22T07:00:00Z", unit: "mmol/L", value: 10.5 },
+            ],
+            source: { provider: "dexcom", type: "cgm" },
+          }],
+        },
+      },
+      caffeine: {
+        groups: {
+          apple_health_kit: [{
+            data: [{
+              id: "caffeine-reading-1",
+              start: "2026-04-22T08:15:30-04:00",
+              end: "2026-04-22T08:18:00-04:00",
+              recordedAt: "2026-04-22T07:00:00Z",
+              unit: "g",
+              value: 0.095,
+            }],
+            source: { provider: "apple_health_kit", type: "phone" },
+          }],
+        },
+      },
+    },
+  };
+
+  try {
+    await coreRuntime.initializeVault({
+      createdAt: "2026-04-22T00:00:00.000Z",
+      timezone: "America/New_York",
+      vaultRoot,
+    });
+    const importInput = {
+      provider: "junction" as const,
+      vaultRoot,
+      snapshot,
+    };
+    const first = await importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
+      importInput,
+      { corePort: coreRuntime },
+    );
+    const replay = await importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
+      importInput,
+      { corePort: coreRuntime },
+    );
+
+    const caffeinePoints = await listMetricPointsRuntime(vaultRoot, {
+      limit: null,
+      metricKey: "caffeine",
+    });
+    const intervalPoint = caffeinePoints.find((point) => point.source.kind === "measurement");
+    const timeInRangePoints = await listMetricPointsRuntime(vaultRoot, {
+      limit: null,
+      metricKey: "glucose-estimated-time-in-range-percent",
+    });
+    const riseRatePoints = await listMetricPointsRuntime(vaultRoot, {
+      limit: null,
+      metricKey: "glucose-observed-max-rise-rate",
+    });
+    const belowRangePoints = await listMetricPointsRuntime(vaultRoot, {
+      limit: null,
+      metricKey: "glucose-estimated-time-below-range-minutes",
+    });
+    const aboveRangePoints = await listMetricPointsRuntime(vaultRoot, {
+      limit: null,
+      metricKey: "glucose-estimated-time-above-range-minutes",
+    });
+
+    assert.equal(first.events.some((event) => event.kind === "measurement"), true);
+    assert.equal(replay.applied, false);
+    assert.equal(intervalPoint?.observedAt, "2026-04-22T12:15:30.000Z");
+    assert.equal(intervalPoint?.effectiveDate, "2026-04-22");
+    assert.equal(intervalPoint?.value, 95);
+    assert.equal(intervalPoint?.unit, "mg");
+    assert.deepEqual(intervalPoint?.context.qualifiers, {
+      "interval-start-at": "2026-04-22T12:15:30.000Z",
+      "interval-end-at": "2026-04-22T12:18:00.000Z",
+      "interval-duration-seconds": 150,
+      "provider-unit": "g",
+    });
+    assert.deepEqual(intervalPoint?.provenance.rawRefs, []);
+    assert.equal(timeInRangePoints.length, 1);
+    assert.equal(timeInRangePoints[0]?.value, 66.67);
+    assert.equal(timeInRangePoints[0]?.unit, "%");
+    assert.equal(timeInRangePoints[0]?.source.kind, "measurement");
+    assert.equal(timeInRangePoints[0]?.grain, "event");
+    assert.deepEqual(timeInRangePoints[0]?.context.qualifiers, {
+      "feature-policy-version": "junction.glucose_feature_envelope.v1",
+    });
+    assert.deepEqual(timeInRangePoints[0]?.provenance.rawRefs, []);
+    assert.equal(riseRatePoints.length, 1);
+    assert.equal(riseRatePoints[0]?.value, 12.6127);
+    assert.equal(riseRatePoints[0]?.unit, "mg/dL/min");
+    assert.equal(riseRatePoints[0]?.source.kind, "measurement");
+    assert.equal(belowRangePoints[0]?.value, 5);
+    assert.equal(belowRangePoints[0]?.unit, "minutes");
+    assert.equal(aboveRangePoints[0]?.value, 0);
+    assert.equal(aboveRangePoints[0]?.unit, "minutes");
+
+    const correctedSnapshot = {
+      ...snapshot,
+      importedAt: "2026-04-24T12:00:00.000Z",
+      timeseries: {
+        ...snapshot.timeseries,
+        glucose: {
+          groups: {
+            dexcom: [{
+              data: [
+                {
+                  id: "corrected-glucose-reading",
+                  timestamp: "2026-04-22T00:00:00Z",
+                  recordedAt: "2026-04-23T08:00:00Z",
+                  unit: "mmol/L",
+                  value: 7,
+                },
+                {
+                  id: "corrected-glucose-reading",
+                  timestamp: "2026-04-22T00:00:00Z",
+                  recordedAt: "2026-04-23T09:00:00Z",
+                  unit: "mmol/L",
+                  value: 5.5,
+                },
+              ],
+              source: { provider: "dexcom", type: "cgm" },
+            }],
+          },
+        },
+        caffeine: {
+          groups: {
+            apple_health_kit: [{
+              data: [{
+                id: "caffeine-reading-1",
+                start: "2026-04-22T08:15:30-04:00",
+                end: "2026-04-22T08:18:00-04:00",
+                recordedAt: "2026-04-23T09:00:00Z",
+                unit: "g",
+                value: 0.12,
+              }],
+              source: { provider: "apple_health_kit", type: "phone" },
+            }],
+          },
+        },
+      },
+    };
+    const correction = await importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
+      { ...importInput, snapshot: correctedSnapshot },
+      { corePort: coreRuntime },
+    );
+    const correctedTimeInRangePoints = await listMetricPointsRuntime(vaultRoot, {
+      limit: null,
+      metricKey: "glucose-estimated-time-in-range-percent",
+    });
+    const correctedRiseRatePoints = await listMetricPointsRuntime(vaultRoot, {
+      limit: null,
+      metricKey: "glucose-observed-max-rise-rate",
+    });
+    const correctedCaffeinePoints = await listMetricPointsRuntime(vaultRoot, {
+      limit: null,
+      metricKey: "caffeine",
+    });
+    const correctedCaffeineInterval = correctedCaffeinePoints.find(
+      (point) => point.source.kind === "measurement",
+    );
+    const correctedCaffeineDaily = correctedCaffeinePoints.find(
+      (point) => point.source.kind === "observation",
+    );
+    const correctedGlucoseDailyValues = await Promise.all(
+      ["glucose", "lowest-glucose", "highest-glucose"].map(async (metricKey) => {
+        const points = await listMetricPointsRuntime(vaultRoot, { limit: null, metricKey });
+        return points.find((point) => point.source.kind === "observation")?.value;
+      }),
+    );
+
+    assert.equal(correction.applied, true);
+    assert.deepEqual(correctedTimeInRangePoints, []);
+    assert.deepEqual(correctedRiseRatePoints, []);
+    assert.equal(correctedCaffeineInterval?.value, 120);
+    assert.equal(correctedCaffeineDaily?.value, 120);
+    assert.deepEqual(correctedGlucoseDailyValues, [99.1001, 99.1001, 99.1001]);
+
+    const correctionReplay = await importDeviceProviderSnapshot<
+      Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>
+    >(
+      { ...importInput, snapshot: correctedSnapshot },
+      { corePort: coreRuntime },
+    );
+    const replayedTimeInRangePoints = await listMetricPointsRuntime(vaultRoot, {
+      limit: null,
+      metricKey: "glucose-estimated-time-in-range-percent",
+    });
+    const replayedCaffeinePoints = await listMetricPointsRuntime(vaultRoot, {
+      limit: null,
+      metricKey: "caffeine",
+    });
+    const replayedCaffeineInterval = replayedCaffeinePoints.find(
+      (point) => point.source.kind === "measurement",
+    );
+    const replayedCaffeineDaily = replayedCaffeinePoints.find(
+      (point) => point.source.kind === "observation",
+    );
+    const replayedGlucoseDailyValues = await Promise.all(
+      ["glucose", "lowest-glucose", "highest-glucose"].map(async (metricKey) => {
+        const points = await listMetricPointsRuntime(vaultRoot, { limit: null, metricKey });
+        return points.find((point) => point.source.kind === "observation")?.value;
+      }),
+    );
+
+    assert.equal(correctionReplay.applied, false);
+    assert.deepEqual(replayedTimeInRangePoints, []);
+    assert.equal(replayedCaffeineInterval?.value, 120);
+    assert.equal(replayedCaffeineDaily?.value, 120);
+    assert.deepEqual(replayedGlucoseDailyValues, [99.1001, 99.1001, 99.1001]);
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
+test("Junction date-only dense corrections clear temporal metrics without losing daily facts", async () => {
+  const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "murph-junction-date-only-fidelity-query-"));
+  const importSnapshot = async (snapshot: Parameters<typeof normalizeJunctionSnapshot>[0]) =>
+    importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
+      { provider: "junction", snapshot, vaultRoot },
+      { corePort: coreRuntime },
+    );
+
+  try {
+    await coreRuntime.initializeVault({
+      createdAt: "2026-04-22T00:00:00.000Z",
+      timezone: "UTC",
+      vaultRoot,
+    });
+    const timed = await importSnapshot({
+      accountId: "junction-account-date-only-fidelity",
+      importedAt: "2026-04-23T12:00:00.000Z",
+      timeseries: {
+        glucose: {
+          groups: {
+            dexcom: [{
+              data: [
+                { timestamp: "2026-04-22T00:00:00Z", unit: "mmol/L", value: 3.5 },
+                { timestamp: "2026-04-22T00:05:00Z", unit: "mmol/L", value: 7 },
+              ],
+              source: { provider: "dexcom", type: "cgm" },
+            }],
+          },
+        },
+      },
+    });
+    const timedOvernight = await listMetricPointsRuntime(vaultRoot, {
+      limit: null,
+      metricKey: "glucose-overnight-average",
+    });
+
+    assert.equal(timed.applied, true);
+    assert.equal(timedOvernight.length, 1);
+
+    const dateOnlySnapshot = {
+      accountId: "junction-account-date-only-fidelity",
+      importedAt: "2026-04-24T12:00:00.000Z",
+      timeseries: {
+        glucose: {
+          groups: {
+            dexcom: [{
+              data: [{ date: "2026-04-22", unit: "mmol/L", value: 5.5 }],
+              source: { provider: "dexcom", type: "cgm" },
+            }],
+          },
+        },
+      },
+    };
+    const dateOnly = await importSnapshot(dateOnlySnapshot);
+    const replay = await importSnapshot(dateOnlySnapshot);
+    const overnight = await listMetricPointsRuntime(vaultRoot, {
+      limit: null,
+      metricKey: "glucose-overnight-average",
+    });
+    const coverage = await listMetricPointsRuntime(vaultRoot, {
+      limit: null,
+      metricKey: "glucose-estimated-coverage-minutes",
+    });
+    const daily = await listMetricPointsRuntime(vaultRoot, {
+      limit: null,
+      metricKey: "glucose",
+    });
+
+    assert.equal(dateOnly.applied, true);
+    assert.equal(replay.applied, false);
+    assert.deepEqual(overnight, []);
+    assert.equal(coverage.length, 1);
+    assert.equal(coverage[0]?.value, 0);
+    assert.equal(daily.find((point) => point.source.kind === "observation")?.value, 99.1001);
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
+test("Junction child revisions do not order complete daily aggregate sets", async () => {
+  const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "murph-junction-aggregate-set-reconcile-"));
+  const reading = (
+    id: string,
+    timestamp: string,
+    recordedAt: string,
+    value: number,
+  ) => ({ id, recordedAt, timestamp, unit: "mmol/L", value });
+  const first = reading(
+    "glucose-set-a",
+    "2026-04-22T00:00:00.000Z",
+    "2026-04-22T10:00:00.000Z",
+    3.5,
+  );
+  const maxRevision = reading(
+    "glucose-set-b",
+    "2026-04-22T00:05:00.000Z",
+    "2026-04-22T20:00:00.000Z",
+    7,
+  );
+  const third = reading(
+    "glucose-set-d",
+    "2026-04-22T00:10:00.000Z",
+    "2026-04-22T12:00:00.000Z",
+    7,
+  );
+  const fourth = reading(
+    "glucose-set-e",
+    "2026-04-22T00:15:00.000Z",
+    "2026-04-22T11:00:00.000Z",
+    10.5,
+  );
+  const addedWithOlderRevision = reading(
+    "glucose-set-c",
+    "2026-04-22T00:07:30.000Z",
+    "2026-04-22T15:00:00.000Z",
+    5.5,
+  );
+  const snapshotFor = (
+    records: readonly ReturnType<typeof reading>[],
+    importedAt: string,
+  ) => ({
+    accountId: "junction-account-aggregate-set-reconcile",
+    importedAt,
+    timeseriesWindowKind: "calendar_day" as const,
+    windowStart: "2026-04-22T00:00:00.000Z",
+    windowEnd: "2026-04-23T00:00:00.000Z",
+    timeseries: {
+      glucose: {
+        groups: {
+          dexcom: [{
+            data: records,
+            source: { provider: "dexcom", type: "cgm" },
+          }],
+        },
+      },
+    },
+  });
+  const importSnapshot = (snapshot: ReturnType<typeof snapshotFor>) =>
+    importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
+      { provider: "junction", snapshot, vaultRoot },
+      { corePort: coreRuntime },
+    );
+  const includesDailyAndFeature = (
+    result: Awaited<ReturnType<typeof importSnapshot>>,
+  ) => ({
+    daily: result.events.some((event) =>
+      event.kind === "observation" && event.metric === "glucose"
+    ),
+    feature: result.events.some((event) =>
+      event.kind === "measurement" && event.externalRef?.facet === "features"
+    ),
+  });
+
+  try {
+    await coreRuntime.initializeVault({
+      createdAt: "2026-04-22T00:00:00.000Z",
+      timezone: "UTC",
+      vaultRoot,
+    });
+
+    const initial = await importSnapshot(snapshotFor(
+      [first, maxRevision, third, fourth],
+      "2026-04-23T00:00:00.000Z",
+    ));
+    assert.deepEqual(includesDailyAndFeature(initial), { daily: true, feature: true });
+    assert.equal(
+      (await listMetricPointsRuntime(vaultRoot, {
+        limit: null,
+        metricKey: "glucose",
+      })).find((point) => point.source.kind === "observation")?.value,
+      126.1274,
+    );
+
+    const grownSnapshot = snapshotFor(
+      [first, maxRevision, addedWithOlderRevision, third, fourth],
+      "2026-04-23T01:00:00.000Z",
+    );
+    const growth = await importSnapshot(grownSnapshot);
+    assert.deepEqual(includesDailyAndFeature(growth), { daily: true, feature: true });
+    assert.equal(
+      (await listMetricPointsRuntime(vaultRoot, {
+        limit: null,
+        metricKey: "glucose",
+      })).find((point) => point.source.kind === "observation")?.value,
+      120.7219,
+    );
+
+    const reducedSnapshot = snapshotFor(
+      [first, addedWithOlderRevision, third, fourth],
+      "2026-04-23T02:00:00.000Z",
+    );
+    const removal = await importSnapshot(reducedSnapshot);
+    assert.deepEqual(includesDailyAndFeature(removal), { daily: true, feature: true });
+    assert.equal(
+      (await listMetricPointsRuntime(vaultRoot, {
+        limit: null,
+        metricKey: "glucose",
+      })).find((point) => point.source.kind === "observation")?.value,
+      119.3706,
+    );
+    assert.equal(
+      (await listMetricPointsRuntime(vaultRoot, {
+        limit: null,
+        metricKey: "glucose-estimated-time-in-range-percent",
+      })).length,
+      1,
+    );
+
+    const exactReplay = await importSnapshot(reducedSnapshot);
+    assert.equal(exactReplay.applied, false);
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
+test("Junction sparse precise growth stays queryable before one closed-day sum is published", async () => {
+  const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "murph-junction-sparse-window-ownership-"));
+  const waterRecord = (id: string, start: string, value = 250) => ({
+    id,
+    start,
+    end: new Date(Date.parse(start) + 60_000).toISOString(),
+    unit: "mL",
+    value,
+  });
+  const firstRecord = waterRecord("water-record-a", "2026-04-22T09:00:00.000Z");
+  const secondRecord = waterRecord("water-record-b", "2026-04-22T10:00:00.000Z");
+  const snapshotFor = (
+    records: readonly ReturnType<typeof waterRecord>[],
+    timeseriesWindowKind: "calendar_day" | "precise",
+    importedAt: string,
+  ) => ({
+    accountId: "junction-account-sparse-window-ownership",
+    importedAt,
+    timeseriesWindowKind,
+    windowStart: "2026-04-22T00:00:00.000Z",
+    windowEnd: timeseriesWindowKind === "calendar_day"
+      ? "2026-04-23T00:00:00.000Z"
+      : importedAt,
+    timeseries: {
+      water: {
+        groups: {
+          apple_health_kit: [{
+            data: records,
+            source: { provider: "apple_health_kit", type: "phone" },
+          }],
+        },
+      },
+    },
+  });
+  const importSnapshot = (snapshot: ReturnType<typeof snapshotFor>) =>
+    importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
+      { provider: "junction", snapshot, vaultRoot },
+      { corePort: coreRuntime },
+    );
+
+  try {
+    await coreRuntime.initializeVault({
+      createdAt: "2026-04-22T00:00:00.000Z",
+      timezone: "UTC",
+      vaultRoot,
+    });
+
+    await importSnapshot(snapshotFor([firstRecord], "precise", "2026-04-22T09:30:00.000Z"));
+    await importSnapshot(snapshotFor(
+      [firstRecord, secondRecord],
+      "precise",
+      "2026-04-22T10:30:00.000Z",
+    ));
+
+    const precisePoints = await listMetricPointsRuntime(vaultRoot, {
+      limit: null,
+      metricKey: "water",
+    });
+    assert.deepEqual(
+      precisePoints
+        .filter((point) => point.source.kind === "measurement")
+        .map((point) => point.observedAt)
+        .sort(),
+      ["2026-04-22T09:00:00.000Z", "2026-04-22T10:00:00.000Z"],
+    );
+    assert.equal(
+      precisePoints.some((point) => point.source.kind === "observation"),
+      false,
+    );
+
+    await importSnapshot(snapshotFor(
+      [firstRecord],
+      "calendar_day",
+      "2026-04-23T00:00:00.000Z",
+    ));
+    const firstClosedDayPoints = await listMetricPointsRuntime(vaultRoot, {
+      limit: null,
+      metricKey: "water",
+    });
+    assert.equal(
+      firstClosedDayPoints.find((point) => point.source.kind === "observation")?.value,
+      250,
+    );
+
+    const completeCalendarSnapshot = snapshotFor(
+      [firstRecord, secondRecord],
+      "calendar_day",
+      "2026-04-23T00:00:00.000Z",
+    );
+    await importSnapshot(completeCalendarSnapshot);
+    const closedDayPoints = await listMetricPointsRuntime(vaultRoot, {
+      limit: null,
+      metricKey: "water",
+    });
+    assert.equal(
+      closedDayPoints.filter((point) => point.source.kind === "measurement").length,
+      2,
+    );
+    assert.equal(
+      closedDayPoints.find((point) => point.source.kind === "observation")?.value,
+      500,
+    );
+    const exactCalendarReplay = await importSnapshot(completeCalendarSnapshot);
+    assert.equal(exactCalendarReplay.applied, false);
+
+    await assert.rejects(
+      () => importSnapshot(snapshotFor(
+        [waterRecord("water-record-b", "2026-04-22T10:00:00.000Z", 300)],
+        "precise",
+        "2026-04-22T11:00:00.000Z",
+      )),
+      (error: unknown) =>
+        coreRuntime.isVaultError(error)
+        && error.code === "EVENT_IMMUTABLE_EXTERNAL_REF_CONFLICT",
+    );
+    const afterConflictPoints = await listMetricPointsRuntime(vaultRoot, {
+      limit: null,
+      metricKey: "water",
+    });
+    assert.equal(
+      afterConflictPoints.find((point) =>
+        point.source.kind === "measurement"
+        && point.observedAt === "2026-04-22T10:00:00.000Z"
+      )?.value,
+      250,
+    );
+    assert.equal(
+      afterConflictPoints.find((point) => point.source.kind === "observation")?.value,
+      500,
+    );
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
+test("Junction hourly features remain independently queryable without becoming day summaries", () => {
+  const snapshot = {
+    importedAt: "2026-05-20T12:00:00.000Z",
+    timeseries: {
+      heartrate: [
+        {
+          sourceProviderSlug: "garmin",
+          sourceType: "watch",
+          timestamp: "2026-05-20T08:00:00Z",
+          unit: "bpm",
+          value: 61,
+        },
+        {
+          sourceProviderSlug: "garmin",
+          sourceType: "watch",
+          timestamp: "2026-05-20T09:00:00Z",
+          unit: "bpm",
+          value: 72,
+        },
+        {
+          sourceProviderSlug: "garmin",
+          sourceType: "watch",
+          timestamp: "2026-05-20T10:15:00Z",
+          sessionId: "workout-1",
+          sessionStart: "2026-05-20T10:00:00Z",
+          sessionEnd: "2026-05-20T11:00:00Z",
+          unit: "bpm",
+          value: 90,
+        },
+      ],
+      calories_active: [
+        {
+          sourceProviderSlug: "garmin",
+          sourceType: "watch",
+          timestamp: "2026-05-20T08:15:00Z",
+          unit: "kcal",
+          value: 100,
+        },
+        {
+          sourceProviderSlug: "garmin",
+          sourceType: "watch",
+          timestamp: "2026-05-20T09:15:00Z",
+          unit: "kcal",
+          value: 200,
+        },
+        {
+          sourceProviderSlug: "garmin",
+          sourceType: "watch",
+          timestamp: "2026-05-20T10:15:00Z",
+          sessionId: "workout-1",
+          sessionStart: "2026-05-20T10:00:00Z",
+          sessionEnd: "2026-05-20T11:00:00Z",
+          unit: "kcal",
+          value: 50,
+        },
+      ],
+    },
+  };
+  const payload = normalizeJunctionSnapshot(snapshot);
+  const vault = makeVaultFromJunctionSnapshot(snapshot);
+  const sleepVault = makeVaultFromJunctionSnapshot({
+    ...snapshot,
+    summaries: {
+      sleep: [{
+        source: { provider: "garmin", type: "watch" },
+        id: "garmin-sleep-1",
+        calendar_date: "2026-05-20",
+        bedtime_start: "2026-05-20T02:00:00Z",
+        bedtime_stop: "2026-05-20T07:00:00Z",
+        duration: 18000,
+        total: 16200,
+        hr_lowest: 45,
+        hr_average: 50,
+      }],
+    },
+  });
+  const latest = summarizeWearableLatest(vault, { providers: ["garmin"] });
+  const heartRateSummary = summarizeWearableMetricLatest(vault, "max-heart-rate", {
+    providers: ["garmin"],
+    windowDays: 1,
+  });
+  const projection = buildMetricProjection(vault);
+  const maxHeartRatePoints = projection.metricPoints
+    .filter((point) => point.metricKey === "max-heart-rate")
+    .flatMap((point) => typeof point.value === "number" ? [point.value] : [])
+    .sort((left, right) => left - right);
+  const activeCaloriePoints = projection.metricPoints
+    .filter((point) => point.metricKey === "active-calories")
+    .flatMap((point) => typeof point.value === "number" ? [point.value] : [])
+    .sort((left, right) => left - right);
+
+  assert.equal(payload.events?.length, 12);
+  assert.deepEqual(payload.samples ?? [], []);
+  assert.ok(payload.events?.every((event) => event.fields?.observationGrain === "derived_fact"));
+  assert.equal(listEntities(vault, { families: ["event"] }).length, 12);
+  assert.equal(latest, null);
+  assert.equal(heartRateSummary?.value, null);
+  assert.equal(heartRateSummary?.recentWindow.count, 0);
+  assert.deepEqual(maxHeartRatePoints, [61, 72, 90]);
+  assert.deepEqual(activeCaloriePoints, [50, 100, 200]);
+  assert.equal(summarizeWearableLatest(sleepVault)?.sleep?.averageHeartRate.selection.value, 50);
+  assert.equal(summarizeWearableLatest(sleepVault)?.sleep?.lowestHeartRate.selection.value, 45);
 });
 
 test("latest surface sees Junction Garmin object data envelopes as usable summaries", () => {
@@ -931,6 +1614,14 @@ test("Junction expanded summaries project into wearable activity, sleep, and bod
         total_elevation_gain: 320,
         elevation_change: -12,
         percent_recorded: 0.95,
+        heart_rate: {
+          avg_bpm: 76,
+          avg_walking_bpm: 101,
+          min_bpm: 44,
+        },
+        high: 5,
+        low: 60,
+        medium: 13,
       }],
       sleep: [{
         source: { provider: "garmin", type: "watch" },
@@ -938,6 +1629,7 @@ test("Junction expanded summaries project into wearable activity, sleep, and bod
         bedtime_start: "2026-05-20T02:00:00Z",
         bedtime_stop: "2026-05-20T10:00:00Z",
         duration: 28800,
+        latency: 600,
         time_in_bed: 30000,
         sleep_consistency: 91,
         sleep_performance: 88,
@@ -954,27 +1646,146 @@ test("Junction expanded summaries project into wearable activity, sleep, and bod
   });
 
   const latest = summarizeWearableLatest(vault);
+  const activityMinutes = summarizeWearableMetricLatest(vault, "activity-minutes", { windowDays: 1 });
+  const lowActivityMinutes = summarizeWearableMetricLatest(vault, "low-activity-minutes", { windowDays: 1 });
+  const activityAverageHeartRate = summarizeWearableMetricLatest(vault, "activity-average-heart-rate", { windowDays: 1 });
+  const activityLowestHeartRate = summarizeWearableMetricTrend(vault, "activity-lowest-heart-rate", { windowDays: 1 });
+  const walkingAverageHeartRate = summarizeWearableMetricLatest(vault, "walking-average-heart-rate", { windowDays: 1 });
+  const sleepLatency = summarizeWearableMetricLatest(vault, "sleep-latency-minutes", { windowDays: 1 });
   const leanBodyMass = summarizeWearableMetricLatest(vault, "lean-body-mass", { windowDays: 1 });
   const waistCircumference = summarizeWearableMetricLatest(vault, "waist-circumference", { windowDays: 1 });
+  const projection = buildMetricProjection(vault);
 
   assert.equal(latest?.activity?.steps.selection.value, 9400);
+  assert.equal(latest?.activity?.activityMinutes.selection.value, 78);
+  assert.equal(latest?.activity?.lowActivityMinutes.selection.value, 60);
+  assert.equal(latest?.activity?.mediumActivityMinutes.selection.value, 13);
+  assert.equal(latest?.activity?.highActivityMinutes.selection.value, 5);
+  assert.equal(latest?.activity?.averageHeartRate.selection.value, 76);
+  assert.equal(latest?.activity?.walkingAverageHeartRate.selection.value, 101);
+  assert.equal(latest?.activity?.lowestHeartRate.selection.value, 44);
   assert.equal(latest?.activity?.floorsClimbed.selection.value, 18);
   assert.equal(latest?.activity?.estimatedVo2Max.selection.value, 48.5);
   assert.equal(latest?.activity?.totalElevationGainMeters.selection.value, 320);
   assert.equal(latest?.activity?.altitudeChangeMeters.selection.value, -12);
   assert.equal(latest?.activity?.percentRecorded.selection.value, 95);
   assert.equal(latest?.sleep?.timeInBedMinutes.selection.value, 500);
+  assert.equal(latest?.sleep?.sleepLatencyMinutes.selection.value, 10);
+  assert.equal(latest?.sleep?.averageHeartRate.selection.value, null);
+  assert.equal(latest?.sleep?.lowestHeartRate.selection.value, null);
+  assert.equal(latest?.recovery?.restingHeartRate.selection.value, null);
   assert.equal(latest?.sleep?.sleepConsistency.selection.value, 91);
   assert.equal(latest?.sleep?.sleepPerformance.selection.value, 88);
   assert.equal(latest?.bodyState?.leanBodyMassKg.selection.value, 40.1);
   assert.equal(latest?.bodyState?.temperature.selection.value, 36.7);
   assert.equal(latest?.bodyState?.waistCircumference.selection.value, 86.36);
+  assert.equal(activityMinutes?.summaryKind, "activity");
+  assert.equal(activityMinutes?.value, 78);
+  assert.equal(lowActivityMinutes?.summaryKind, "activity");
+  assert.equal(lowActivityMinutes?.value, 60);
+  assert.equal(activityAverageHeartRate?.metric, "averageHeartRate");
+  assert.equal(activityAverageHeartRate?.resolvedAlias, "activity-average-heart-rate");
+  assert.equal(activityAverageHeartRate?.summaryKind, "activity");
+  assert.equal(activityAverageHeartRate?.value, 76);
+  assert.equal(activityLowestHeartRate?.metric, "lowestHeartRate");
+  assert.equal(activityLowestHeartRate?.resolvedAlias, "activity-lowest-heart-rate");
+  assert.equal(activityLowestHeartRate?.summaryKind, "activity");
+  assert.equal(activityLowestHeartRate?.value, 44);
+  assert.equal(activityLowestHeartRate?.points[0]?.value, 44);
+  assert.equal(activityLowestHeartRate?.notes.some((note) => note.startsWith("No ")), false);
+  assert.equal(walkingAverageHeartRate?.summaryKind, "activity");
+  assert.equal(walkingAverageHeartRate?.value, 101);
+  assert.equal(sleepLatency?.summaryKind, "sleep");
+  assert.equal(sleepLatency?.value, 10);
   assert.equal(leanBodyMass?.metric, "leanBodyMassKg");
   assert.equal(leanBodyMass?.summaryKind, "bodyState");
   assert.equal(leanBodyMass?.value, 40.1);
   assert.equal(waistCircumference?.metric, "waistCircumference");
   assert.equal(waistCircumference?.summaryKind, "bodyState");
   assert.equal(waistCircumference?.value, 86.36);
+  const projectedActivitySummaryValue = (metricKey: string) =>
+    projection.metricPoints.find((point) =>
+      point.metricKey === metricKey && point.source.kind === "activity-summary"
+    )?.value;
+  assert.equal(projectedActivitySummaryValue("activity-minutes"), 78);
+  assert.equal(projectedActivitySummaryValue("low-activity-minutes"), 60);
+  assert.equal(projectedActivitySummaryValue("medium-activity-minutes"), 13);
+  assert.equal(projectedActivitySummaryValue("high-activity-minutes"), 5);
+  assert.equal(projectedActivitySummaryValue("average-heart-rate"), 76);
+  assert.equal(projectedActivitySummaryValue("walking-average-heart-rate"), 101);
+  assert.equal(projectedActivitySummaryValue("lowest-heart-rate"), 44);
+});
+
+test("Junction body composition facts remain distinct across wearable and canonical metric queries", () => {
+  const vault = makeVaultFromJunctionSnapshot({
+    importedAt: "2026-05-20T12:00:00.000Z",
+    summaries: {
+      body: [{
+        source: { provider: "withings", type: "scale" },
+        id: "body-composition-queryable",
+        date: "2026-05-20T08:00:00Z",
+        bone_mass_percentage: 4.2,
+        muscle_mass_percentage: 61.8,
+        visceral_fat_index: 7,
+        water_percentage: 54.6,
+      }],
+    },
+  });
+
+  const bodyState = summarizeWearableLatest(vault)?.bodyState;
+  const boneMass = summarizeWearableMetricLatest(vault, "bone_mass_percentage", { windowDays: 1 });
+  const muscleMass = summarizeWearableMetricLatest(vault, "muscle-mass-percentage", { windowDays: 1 });
+  const visceralFat = summarizeWearableMetricLatest(vault, "visceral_fat_index", { windowDays: 1 });
+  const bodyWater = summarizeWearableMetricLatest(vault, "water_percentage", { windowDays: 1 });
+  const compositionMetricKeys = new Set([
+    "body-water-percentage",
+    "bone-mass-percentage",
+    "muscle-mass-percentage",
+    "visceral-fat-index",
+  ]);
+  const metricPoints = buildMetricProjection(vault).metricPoints
+    .filter((point) => compositionMetricKeys.has(point.metricKey))
+    .sort((left, right) => left.metricKey.localeCompare(right.metricKey));
+
+  assert.equal(bodyState?.boneMassPercentage.selection.value, 4.2);
+  assert.equal(bodyState?.boneMassPercentage.selection.unit, "%");
+  assert.equal(bodyState?.boneMassPercentage.selection.provider, "withings");
+  assert.equal(bodyState?.muscleMassPercentage.selection.value, 61.8);
+  assert.equal(bodyState?.bodyWaterPercentage.selection.value, 54.6);
+  assert.equal(bodyState?.visceralFatIndex.selection.value, 7);
+  assert.equal(bodyState?.visceralFatIndex.selection.unit, "index");
+  assert.deepEqual(
+    [boneMass, muscleMass, visceralFat, bodyWater].map((summary) => ({
+      metric: summary?.metric,
+      provider: summary?.provider,
+      summaryKind: summary?.summaryKind,
+      unit: summary?.unit,
+      value: summary?.value,
+    })),
+    [
+      { metric: "boneMassPercentage", provider: "withings", summaryKind: "bodyState", unit: "%", value: 4.2 },
+      { metric: "muscleMassPercentage", provider: "withings", summaryKind: "bodyState", unit: "%", value: 61.8 },
+      { metric: "visceralFatIndex", provider: "withings", summaryKind: "bodyState", unit: "index", value: 7 },
+      { metric: "bodyWaterPercentage", provider: "withings", summaryKind: "bodyState", unit: "%", value: 54.6 },
+    ],
+  );
+  assert.deepEqual(
+    metricPoints.map((point) => ({
+      canonicalUnit: point.canonicalUnit,
+      metricKey: point.metricKey,
+      provider: point.provenance.provider,
+      sourceKind: point.source.kind,
+      value: point.value,
+    })),
+    [
+      { canonicalUnit: "percent", metricKey: "body-water-percentage", provider: "withings", sourceKind: "wearable-summary", value: 54.6 },
+      { canonicalUnit: "percent", metricKey: "bone-mass-percentage", provider: "withings", sourceKind: "wearable-summary", value: 4.2 },
+      { canonicalUnit: "percent", metricKey: "muscle-mass-percentage", provider: "withings", sourceKind: "wearable-summary", value: 61.8 },
+      { canonicalUnit: "index", metricKey: "visceral-fat-index", provider: "withings", sourceKind: "wearable-summary", value: 7 },
+    ],
+  );
+  assert.ok(metricPoints.every((point) => (point.provenance.dataOrigin as DeviceDataOrigin | null)?.aggregatorProvider === "junction"));
+  assert.ok(metricPoints.every((point) => (point.provenance.dataOrigin as DeviceDataOrigin | null)?.sourceProviderSlug === "withings"));
 });
 
 test("metric latest and trend surfaces keep derived sleep and aggregate-backed points", () => {

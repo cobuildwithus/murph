@@ -8,6 +8,7 @@ import type {
   PrismaClient,
 } from "@prisma/client";
 import type {
+  HostedPhysicalNoteFailureReason,
   HostedPhysicalNoteSendRequest,
   HostedPhysicalNoteSendResponse,
 } from "@murphai/hosted-execution/physical-notes";
@@ -94,8 +95,6 @@ export async function createHostedPhysicalNote(input: HostedPhysicalNoteSendRequ
   }
   if (existing) {
     const replay = await resolveHostedPhysicalNoteReplay({
-      memberId: input.memberId,
-      prisma,
       requestFingerprint,
       row: existing,
     });
@@ -116,12 +115,41 @@ export async function createHostedPhysicalNote(input: HostedPhysicalNoteSendRequ
     apiKey: config.apiKey,
     fromAddressId: config.fromAddressId,
   });
-  await resolveStaleComplimentaryPhysicalNote({
+  if (existing) {
+    return await resolveExactPhysicalNoteReplay({
+      memberId: input.memberId,
+      prisma,
+      row: existing,
+      runtime,
+      signal: input.signal,
+    });
+  }
+  const prior = await findPhysicalNoteEffectGuard({
     memberId: input.memberId,
     prisma,
-    runtime,
-    signal: input.signal,
   });
+  if (prior) {
+    const guarded = prior.requestKey === input.requestKey
+      ? { current: prior, prior }
+      : await recordPhysicalNoteBlockedRequest({
+          memberId: input.memberId,
+          pricingVersion: config.pricingVersion,
+          prisma,
+          providerCostUsdMicros: config.costUsdMicros,
+          requestFingerprint,
+          requestKey: input.requestKey,
+        });
+    if (guarded) {
+      return await resolvePhysicalNoteEffectGuard({
+        current: guarded.current,
+        memberId: input.memberId,
+        prior: guarded.prior,
+        prisma,
+        runtime,
+        signal: input.signal,
+      });
+    }
+  }
 
   const artworkExpiresAt = new Date(input.artwork.expiresAt);
   if (artworkExpiresAt.getTime() <= Date.now() + 60_000) {
@@ -132,15 +160,24 @@ export async function createHostedPhysicalNote(input: HostedPhysicalNoteSendRequ
 
   const reservation = await prisma.$transaction(async (tx) => {
     await lockHostedMemberRow(tx, input.memberId);
-    if (!await readActiveHostedMemberAccess({
+    const guarded = await reservePhysicalNoteBlockedRequestTx({
+      memberId: input.memberId,
+      pricingVersion: config.pricingVersion,
+      providerCostUsdMicros: config.costUsdMicros,
+      requestFingerprint,
+      requestKey: input.requestKey,
+      tx,
+    });
+    if (guarded) {
+      return {
+        kind: "guarded" as const,
+        ...guarded,
+      };
+    }
+    await assertHostedPhysicalNoteMemberAccess({
       memberId: input.memberId,
       prisma: tx,
-    })) {
-      await assertActiveHostedMemberAccessAllowed({
-        memberId: input.memberId,
-        prisma: tx,
-      });
-    }
+    });
     const existing = await tx.hostedPhysicalNote.findUnique({
       where: {
         memberId_requestKey: {
@@ -153,7 +190,7 @@ export async function createHostedPhysicalNote(input: HostedPhysicalNoteSendRequ
       if (existing.requestFingerprint !== requestFingerprint) {
         throw new Error("Hosted physical-note request key collision.");
       }
-      return { kind: "row" as const, row: existing };
+      return { kind: "existing" as const, row: existing };
     }
     const priorComplimentary = await tx.hostedPhysicalNote.findFirst({
       select: { id: true },
@@ -168,23 +205,9 @@ export async function createHostedPhysicalNote(input: HostedPhysicalNoteSendRequ
         memberId: input.memberId,
         prisma: tx,
       });
-      const pendingPaidNotes = await tx.hostedPhysicalNote.aggregate({
-        _sum: { providerCostUsdMicros: true },
-        where: {
-          complimentaryOfferCode: null,
-          createdAt: {
-            gte: gate.periodStart,
-            lt: gate.periodEnd,
-          },
-          memberId: input.memberId,
-          status: "starting",
-        },
-      });
-      const reservedUsdMicros =
-        pendingPaidNotes._sum.providerCostUsdMicros ?? 0n;
       if (
         !gate.allowed
-        || gate.remainingUsdMicros - reservedUsdMicros < config.costUsdMicros
+        || gate.remainingUsdMicros < config.costUsdMicros
       ) {
         return {
           kind: "insufficient" as const,
@@ -194,7 +217,7 @@ export async function createHostedPhysicalNote(input: HostedPhysicalNoteSendRequ
     }
 
     return {
-      kind: "row" as const,
+      kind: "created" as const,
       row: await tx.hostedPhysicalNote.create({
         data: {
           complimentaryOfferCode: complimentary
@@ -213,6 +236,16 @@ export async function createHostedPhysicalNote(input: HostedPhysicalNoteSendRequ
     };
   }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
 
+  if (reservation.kind === "guarded") {
+    return await resolvePhysicalNoteEffectGuard({
+      current: reservation.current,
+      memberId: input.memberId,
+      prior: reservation.prior,
+      prisma,
+      runtime,
+      signal: input.signal,
+    });
+  }
   if (reservation.kind === "insufficient") {
     return {
       complimentary: false,
@@ -222,14 +255,12 @@ export async function createHostedPhysicalNote(input: HostedPhysicalNoteSendRequ
     };
   }
 
-  const replay = await resolveHostedPhysicalNoteReplay({
-    memberId: input.memberId,
-    prisma,
-    requestFingerprint,
-    row: reservation.row,
-  });
-  if (replay) {
-    return replay;
+  if (reservation.kind === "existing") {
+    const replay = await resolveHostedPhysicalNoteReplay({
+      requestFingerprint,
+      row: reservation.row,
+    });
+    return replay ?? toResponse(reservation.row, "pending");
   }
   const providerResult = await runtime.create({
     artworkUrl: input.artwork.url,
@@ -259,6 +290,7 @@ export async function createHostedPhysicalNote(input: HostedPhysicalNoteSendRequ
   }
   if (providerResult.kind === "definite_failure") {
     await markHostedPhysicalNoteFailed({
+      failureReason: providerResult.reason,
       memberId: input.memberId,
       noteId: reservation.row.id,
       prisma,
@@ -290,8 +322,6 @@ export async function createHostedPhysicalNote(input: HostedPhysicalNoteSendRequ
 }
 
 async function resolveHostedPhysicalNoteReplay(input: {
-  memberId: string;
-  prisma: PrismaClient;
   requestFingerprint: string;
   row: HostedPhysicalNote;
 }): Promise<HostedPhysicalNoteSendResponse | null> {
@@ -299,62 +329,309 @@ async function resolveHostedPhysicalNoteReplay(input: {
     throw new Error("Hosted physical-note request key collision.");
   }
   if (input.row.status === "accepted") {
-    const accepted = await finalizeHostedPhysicalNoteAcceptance({
-      acceptedAt: input.row.acceptedAt ?? new Date(),
-      memberId: input.memberId,
-      noteId: input.row.id,
-      prisma: input.prisma,
-      providerLetterId: requireProviderLetterId(input.row),
-    });
-    return toResponse(accepted, "accepted");
+    requireProviderLetterId(input.row);
+    if (input.row.acceptedAt === null) {
+      throw new Error("Accepted physical note is missing its acceptance time.");
+    }
+    return toResponse(input.row, "accepted");
   }
   if (input.row.status === "failed") {
-    return toResponse(input.row, "failed");
+    return input.row.failureReason === null
+      ? null
+      : toResponse(input.row, "failed");
   }
-  return Date.now() - input.row.createdAt.getTime() >= REPLAY_WINDOW_MS
-    ? toResponse(input.row, "pending")
-    : null;
+  return null;
 }
 
-async function resolveStaleComplimentaryPhysicalNote(input: {
+async function resolveGuardedPhysicalNote(input: {
+  allowRecentLookup: boolean;
   memberId: string;
+  prior: HostedPhysicalNote;
   prisma: PrismaClient;
   runtime: LobPhysicalNoteRuntime;
   signal?: AbortSignal;
 }): Promise<void> {
-  const stale = await input.prisma.hostedPhysicalNote.findFirst({
-    select: { id: true },
-    where: {
-      complimentaryOfferCode: COMPLIMENTARY_OFFER_CODE,
-      createdAt: {
-        lte: new Date(Date.now() - REPLAY_WINDOW_MS),
-      },
-      memberId: input.memberId,
-      status: "starting",
-    },
-  });
-  if (!stale) return;
-
+  const mayResolveAbsence =
+    Date.now() - input.prior.createdAt.getTime() >= REPLAY_WINDOW_MS;
+  if (!input.allowRecentLookup && !mayResolveAbsence) {
+    return;
+  }
   const providerResult = await input.runtime.findLetterByNoteId({
-    noteId: stale.id,
+    noteId: input.prior.id,
     signal: input.signal,
   });
+  if (providerResult.kind === "indeterminate") {
+    return;
+  }
   if (providerResult.kind === "accepted") {
-    await finalizeHostedPhysicalNoteAcceptance({
-      acceptedAt: new Date(),
+    if (input.prior.status === "starting") {
+      await finalizeHostedPhysicalNoteAcceptance({
+        acceptedAt: new Date(),
+        memberId: input.memberId,
+        noteId: input.prior.id,
+        prisma: input.prisma,
+        providerLetterId: providerResult.providerLetterId,
+      });
+    } else {
+      await finalizeLegacyPhysicalNoteAcceptance({
+        acceptedAt: new Date(),
+        memberId: input.memberId,
+        noteId: input.prior.id,
+        prisma: input.prisma,
+        providerLetterId: providerResult.providerLetterId,
+      });
+    }
+    return;
+  }
+  if (!mayResolveAbsence) {
+    return;
+  }
+
+  await markGuardedPhysicalNoteAbsent({
+    memberId: input.memberId,
+    noteId: input.prior.id,
+    prisma: input.prisma,
+  });
+}
+
+async function resolveExactPhysicalNoteReplay(input: {
+  memberId: string;
+  prisma: PrismaClient;
+  row: HostedPhysicalNote;
+  runtime: LobPhysicalNoteRuntime;
+  signal?: AbortSignal;
+}): Promise<HostedPhysicalNoteSendResponse> {
+  await resolveGuardedPhysicalNote({
+    allowRecentLookup: input.row.status === "starting",
+    memberId: input.memberId,
+    prior: input.row,
+    prisma: input.prisma,
+    runtime: input.runtime,
+    signal: input.signal,
+  });
+  const reconciled = await input.prisma.hostedPhysicalNote.findUniqueOrThrow({
+    where: { id: input.row.id },
+  });
+  if (reconciled.status === "accepted") {
+    return toResponse(reconciled, "accepted");
+  }
+  return reconciled.failureReason === null
+    ? toResponse(reconciled, "pending")
+    : toResponse(reconciled, "failed");
+}
+
+async function findPhysicalNoteEffectGuard(input: {
+  memberId: string;
+  prisma: Prisma.TransactionClient;
+}): Promise<HostedPhysicalNote | null> {
+  return await input.prisma.hostedPhysicalNote.findFirst({
+    orderBy: { createdAt: "asc" },
+    where: {
       memberId: input.memberId,
-      noteId: stale.id,
+      OR: [
+        {
+          status: "starting",
+        },
+        {
+          failureReason: null,
+          status: "failed",
+        },
+      ],
+    },
+  });
+}
+
+type PhysicalNoteGuardedRequest = {
+  current: HostedPhysicalNote;
+  prior: HostedPhysicalNote;
+};
+
+async function recordPhysicalNoteBlockedRequest(input: {
+  memberId: string;
+  pricingVersion: string;
+  prisma: PrismaClient;
+  providerCostUsdMicros: bigint;
+  requestFingerprint: string;
+  requestKey: string;
+}): Promise<PhysicalNoteGuardedRequest | null> {
+  return await input.prisma.$transaction(async (tx) => {
+    await lockHostedMemberRow(tx, input.memberId);
+    return await reservePhysicalNoteBlockedRequestTx({
+      memberId: input.memberId,
+      pricingVersion: input.pricingVersion,
+      providerCostUsdMicros: input.providerCostUsdMicros,
+      requestFingerprint: input.requestFingerprint,
+      requestKey: input.requestKey,
+      tx,
+    });
+  }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+}
+
+async function reservePhysicalNoteBlockedRequestTx(input: {
+  memberId: string;
+  pricingVersion: string;
+  providerCostUsdMicros: bigint;
+  requestFingerprint: string;
+  requestKey: string;
+  tx: Prisma.TransactionClient;
+}): Promise<PhysicalNoteGuardedRequest | null> {
+  const prior = await findPhysicalNoteEffectGuard({
+    memberId: input.memberId,
+    prisma: input.tx,
+  });
+  if (!prior) return null;
+  const blockerReason: HostedPhysicalNoteFailureReason =
+    prior.status === "accepted"
+      ? "prior_note_accepted"
+      : "prior_note_unresolved";
+  const existing = await input.tx.hostedPhysicalNote.findUnique({
+    where: {
+      memberId_requestKey: {
+        memberId: input.memberId,
+        requestKey: input.requestKey,
+      },
+    },
+  });
+  if (existing) {
+    if (existing.requestFingerprint !== input.requestFingerprint) {
+      throw new Error("Hosted physical-note request key collision.");
+    }
+    return { current: existing, prior };
+  }
+  await assertHostedPhysicalNoteMemberAccess({
+    memberId: input.memberId,
+    prisma: input.tx,
+  });
+  const current = await input.tx.hostedPhysicalNote.create({
+    data: {
+      complimentaryOfferCode: null,
+      failureReason: blockerReason,
+      id: createPhysicalNoteId(),
+      memberId: input.memberId,
+      pricingVersion: input.pricingVersion,
+      provider: "lob",
+      providerCostUsdMicros: input.providerCostUsdMicros,
+      requestFingerprint: input.requestFingerprint,
+      requestKey: input.requestKey,
+      status: "failed",
+    },
+  });
+  return { current, prior };
+}
+
+async function resolvePhysicalNoteEffectGuard(input: {
+  current: HostedPhysicalNote;
+  memberId: string;
+  prior: HostedPhysicalNote;
+  prisma: PrismaClient;
+  runtime: LobPhysicalNoteRuntime;
+  signal?: AbortSignal;
+}): Promise<HostedPhysicalNoteSendResponse> {
+  if (input.current.status === "accepted") {
+    return toResponse(input.current, "accepted");
+  }
+  if (input.current.failureReason === "prior_note_accepted") {
+    return toResponse(input.current, "failed");
+  }
+  if (input.current.failureReason === null) {
+    return await resolveExactPhysicalNoteReplay({
+      memberId: input.memberId,
       prisma: input.prisma,
-      providerLetterId: providerResult.providerLetterId,
+      row: input.current,
+      runtime: input.runtime,
+      signal: input.signal,
     });
   }
-  if (providerResult.kind === "absent") {
-    await markHostedPhysicalNoteFailed({
-      memberId: input.memberId,
-      noteId: stale.id,
-      prisma: input.prisma,
-    });
+  await resolveGuardedPhysicalNote({
+    allowRecentLookup: false,
+    memberId: input.memberId,
+    prior: input.prior,
+    prisma: input.prisma,
+    runtime: input.runtime,
+    signal: input.signal,
+  });
+  const reconciledCurrent = await input.prisma.hostedPhysicalNote.findUniqueOrThrow({
+    where: { id: input.current.id },
+  });
+  return reconciledCurrent.status === "failed"
+    ? toResponse(reconciledCurrent, "failed")
+    : toResponse(reconciledCurrent, "pending");
+}
+
+async function assertHostedPhysicalNoteMemberAccess(input: {
+  memberId: string;
+  prisma: Prisma.TransactionClient;
+}): Promise<void> {
+  if (!await readActiveHostedMemberAccess(input)) {
+    await assertActiveHostedMemberAccessAllowed(input);
   }
+}
+
+async function finalizeLegacyPhysicalNoteAcceptance(input: {
+  acceptedAt: Date;
+  memberId: string;
+  noteId: string;
+  prisma: PrismaClient;
+  providerLetterId: string;
+}): Promise<HostedPhysicalNote> {
+  return await input.prisma.$transaction(async (tx) => {
+    await lockHostedMemberRow(tx, input.memberId);
+    const guard = await findPhysicalNoteEffectGuard({
+      memberId: input.memberId,
+      prisma: tx,
+    });
+    const currentComplimentary = await tx.hostedPhysicalNote.findFirst({
+      select: { id: true },
+      where: {
+        complimentaryOfferCode: COMPLIMENTARY_OFFER_CODE,
+        memberId: input.memberId,
+      },
+    });
+    await tx.hostedPhysicalNote.updateMany({
+      data: {
+        acceptedAt: input.acceptedAt,
+        ...(currentComplimentary
+          ? {}
+          : { complimentaryOfferCode: COMPLIMENTARY_OFFER_CODE }),
+        failureReason: "prior_note_accepted",
+        providerLetterId: input.providerLetterId,
+        status: "accepted",
+      },
+      where: {
+        failureReason: null,
+        id: input.noteId,
+        memberId: input.memberId,
+        providerLetterId: null,
+        status: "failed",
+      },
+    });
+    const note = await tx.hostedPhysicalNote.findUniqueOrThrow({
+      where: { id: input.noteId },
+    });
+    if (
+      note.memberId !== input.memberId
+      || note.status !== "accepted"
+      || note.failureReason !== "prior_note_accepted"
+      || note.providerLetterId !== input.providerLetterId
+      || note.acceptedAt === null
+    ) {
+      throw new Error("Legacy physical-note acceptance invariant failed.");
+    }
+    if (guard?.id === input.noteId) {
+      await tx.hostedPhysicalNote.updateMany({
+        data: { failureReason: "prior_note_accepted" },
+        where: {
+          failureReason: "prior_note_unresolved",
+          memberId: input.memberId,
+          providerLetterId: null,
+          status: "failed",
+        },
+      });
+    }
+    // The old failure transition erased whether this reservation was free or
+    // paid. Do not create a charge from missing historical billing evidence.
+    return note;
+  }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
 }
 
 async function finalizeHostedPhysicalNoteAcceptance(input: {
@@ -366,9 +643,14 @@ async function finalizeHostedPhysicalNoteAcceptance(input: {
 }): Promise<HostedPhysicalNote> {
   return await input.prisma.$transaction(async (tx) => {
     await lockHostedMemberRow(tx, input.memberId);
+    const guard = await findPhysicalNoteEffectGuard({
+      memberId: input.memberId,
+      prisma: tx,
+    });
     await tx.hostedPhysicalNote.updateMany({
       data: {
         acceptedAt: input.acceptedAt,
+        failureReason: null,
         providerLetterId: input.providerLetterId,
         status: "accepted",
       },
@@ -391,6 +673,17 @@ async function finalizeHostedPhysicalNoteAcceptance(input: {
       throw new Error("Hosted physical-note acceptance invariant failed.");
     }
     await recordPaidPhysicalNoteUsageTx({ note, tx });
+    if (guard?.id === input.noteId) {
+      await tx.hostedPhysicalNote.updateMany({
+        data: { failureReason: "prior_note_accepted" },
+        where: {
+          failureReason: "prior_note_unresolved",
+          memberId: input.memberId,
+          providerLetterId: null,
+          status: "failed",
+        },
+      });
+    }
     return note;
   }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
 }
@@ -426,15 +719,21 @@ async function recordPaidPhysicalNoteUsageTx(input: {
 }
 
 async function markHostedPhysicalNoteFailed(input: {
+  failureReason: HostedPhysicalNoteFailureReason;
   memberId: string;
   noteId: string;
   prisma: PrismaClient;
 }): Promise<void> {
   await input.prisma.$transaction(async (tx) => {
     await lockHostedMemberRow(tx, input.memberId);
-    await tx.hostedPhysicalNote.updateMany({
+    const guard = await findPhysicalNoteEffectGuard({
+      memberId: input.memberId,
+      prisma: tx,
+    });
+    const failed = await tx.hostedPhysicalNote.updateMany({
       data: {
         complimentaryOfferCode: null,
+        failureReason: input.failureReason,
         status: "failed",
       },
       where: {
@@ -444,6 +743,70 @@ async function markHostedPhysicalNoteFailed(input: {
         status: "starting",
       },
     });
+    if (failed.count > 0 && guard?.id === input.noteId) {
+      await tx.hostedPhysicalNote.updateMany({
+        data: { failureReason: "unknown" },
+        where: {
+          failureReason: "prior_note_unresolved",
+          memberId: input.memberId,
+          providerLetterId: null,
+          status: "failed",
+        },
+      });
+    }
+  }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+}
+
+async function markGuardedPhysicalNoteAbsent(input: {
+  memberId: string;
+  noteId: string;
+  prisma: PrismaClient;
+}): Promise<HostedPhysicalNote> {
+  return await input.prisma.$transaction(async (tx) => {
+    await lockHostedMemberRow(tx, input.memberId);
+    const guard = await findPhysicalNoteEffectGuard({
+      memberId: input.memberId,
+      prisma: tx,
+    });
+    await tx.hostedPhysicalNote.updateMany({
+      data: {
+        complimentaryOfferCode: null,
+        failureReason: "unknown",
+        status: "failed",
+      },
+      where: {
+        failureReason: null,
+        id: input.noteId,
+        memberId: input.memberId,
+        providerLetterId: null,
+        OR: [
+          { status: "failed" },
+          { status: "starting" },
+        ],
+      },
+    });
+    if (guard?.id === input.noteId) {
+      await tx.hostedPhysicalNote.updateMany({
+        data: { failureReason: "unknown" },
+        where: {
+          failureReason: "prior_note_unresolved",
+          memberId: input.memberId,
+          providerLetterId: null,
+          status: "failed",
+        },
+      });
+    }
+    const note = await tx.hostedPhysicalNote.findUniqueOrThrow({
+      where: { id: input.noteId },
+    });
+    if (
+      note.memberId !== input.memberId
+      || note.status !== "failed"
+      || note.failureReason === null
+    ) {
+      throw new Error("Guarded physical-note absence invariant failed.");
+    }
+    return note;
   }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
 }
 
@@ -474,13 +837,27 @@ function requireProviderLetterId(
 function toResponse(
   note: Pick<
     HostedPhysicalNote,
-    "complimentaryOfferCode" | "id" | "providerCostUsdMicros"
+    | "complimentaryOfferCode"
+    | "failureReason"
+    | "id"
+    | "providerCostUsdMicros"
   >,
   status: HostedPhysicalNoteSendResponse["status"],
 ): HostedPhysicalNoteSendResponse {
+  const failureReason = status === "failed"
+    || (
+      status === "accepted"
+      && note.failureReason === "prior_note_accepted"
+    )
+    ? note.failureReason
+    : null;
+  if (status === "failed" && failureReason === null) {
+    throw new Error("Legacy physical-note outcome remains unresolved.");
+  }
   return {
     complimentary: note.complimentaryOfferCode !== null,
     costUsdMicros: note.providerCostUsdMicros.toString(),
+    ...(failureReason ? { failureReason } : {}),
     physicalNoteId: note.id,
     status,
   };

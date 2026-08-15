@@ -1,6 +1,7 @@
 ---
 title: 'Single-file hosted Web tests still fan out through the full Vitest workspace'
 severity: 'minor'
+issue: 'cobuildwithus/murph#1638'
 ---
 
 ## Expected Behavior

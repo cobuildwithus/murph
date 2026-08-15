@@ -1,0 +1,18 @@
+{
+  "publishedOn": "2026-08-14",
+  "order": 100,
+  "item": {
+    "id": "faster-private-dashboard-loading",
+    "kind": "improvement",
+    "priority": 4,
+    "title": "Faster private dashboard loading",
+    "summary": "Authenticated dashboard pages now load the private data they need instead of waiting for the full connected-health history.",
+    "details": "Home and Training open from a compact core, while wearable history loads only on biomarker and experiment pages that need it and remains available in the complete vault export.",
+    "relevanceTags": ["dashboard", "performance", "wearables"],
+    "sourcePullRequests": [1802],
+    "tryIt": {
+      "href": "/home",
+      "label": "Open your dashboard"
+    }
+  }
+}
