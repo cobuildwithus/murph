@@ -6,7 +6,10 @@ import {
   withImmediateTransaction,
 } from "@murphai/runtime-state/node";
 
-import { clearJunctionScheduleTimeExtendedHistoryCoverageForProvider } from "./junction-source-reconnect.ts";
+import {
+  clearJunctionScheduleTimeExtendedHistoryCoverageForProvider,
+  decideJunctionSourceCallbackAdmission,
+} from "./junction-source-reconnect.ts";
 import { stringifyJson } from "./shared.ts";
 
 import {
@@ -450,21 +453,25 @@ export class SqliteDeviceSyncStore {
           const existingSource = input.provider === "junction" && source.status === "connected"
             ? preparedSource.existing
             : null;
-          if (
-            input.provider === "junction"
-            && source.status === "connected"
-            && (
-              existingSource?.status !== "disconnected"
-              || existingSource.lastSeenAt !== input.expectedSourceLastSeenAt
-            )
-          ) {
+          const sourceAdmission = input.provider === "junction" && source.status === "connected"
+            ? decideJunctionSourceCallbackAdmission({
+                connectionStartedAt: input.expectedSourceLastSeenAt,
+                currentSource: existingSource,
+              })
+            : "new_source";
+          if (sourceAdmission === "reject") {
             // Rolling the immediate transaction back also rolls back any
             // legacy alias collapse performed while resolving this source.
             throw new DeviceConnectionSourceAdmissionRejectedError();
           }
-          const reconnectsJunctionSource = existingSource?.status === "disconnected";
+          const advancesJunctionSourceLifecycle = sourceAdmission === "advance_lifecycle";
+          let advancedLifecycleEpoch: number | undefined;
 
-          if (reconnectsJunctionSource) {
+          if (advancesJunctionSourceLifecycle) {
+            if (!existingSource) {
+              throw new TypeError("Existing Junction source lifecycle was not found.");
+            }
+            advancedLifecycleEpoch = existingSource.lifecycleEpoch + 1;
             const account = getStoredAccountById(this.database, input.accountId);
             if (!account) {
               throw new TypeError(`Unknown account ${input.accountId}`);
@@ -495,8 +502,8 @@ export class SqliteDeviceSyncStore {
             preparedSource,
             {
               ...source,
-              ...(reconnectsJunctionSource
-                ? { lifecycleEpoch: existingSource.lifecycleEpoch + 1 }
+              ...(advancedLifecycleEpoch !== undefined
+                ? { lifecycleEpoch: advancedLifecycleEpoch }
                 : {}),
             },
           );

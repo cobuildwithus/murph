@@ -361,6 +361,18 @@ Updated: 2026-08-14
   target-source coverage on fenced/newer hosted hydration before durable hosted
   metadata is overlaid. The fix adds one exact parent timestamp write and one
   shared bounded cleanup helper; it adds no new state or asynchronous machinery.
+- Local and tunneled `device-syncd` reconnects remain part of the original
+  cross-runtime lifecycle outcome; narrowing or splitting them would leave the
+  same semantic source with divergent callback authority. Use one shared
+  stateless callback-admission decision in the existing package owner. A
+  disconnect fence or an older callback while a newer source start remains
+  pending rejects without mutation. Once an independently consumable Link state
+  completes successfully, every existing-source completion advances the current
+  lifecycle, exact schedule-time coverage owner, account revision, and existing
+  initial-job transaction. Same-state replay is rejected before this owner.
+  Junction supplies no registration generation that could make target cleanup
+  safe after a later completion, so do not add a rollback hook, generation
+  field, queue, manager, second lifecycle, or reconciliation process.
 - Valid final ReviewGPT round 8 reviewed exact head
   `2f6d78c233a8e9a78c32cbc9283affda58e281ad` in the existing review thread
   after the explicit hard-cap continuation decision. It returned
@@ -407,6 +419,25 @@ Updated: 2026-08-14
   No round-9 finding was rejected; the remediation deletes 136 net production
   lines while adding focused callback-lifecycle proof and narrowing the durable
   callback contract.
+- Valid final ReviewGPT round 10 reviewed exact head
+  `c3efefabaede240673b84359aab5e2c400e09e18` in the existing thread and
+  returned `ROUND_OUTCOME: RETROSPECTIVE_REQUIRED` plus `REVIEW_COMPLETE`.
+  The package-owned sidecar binds the exact response hash to the requested
+  compatible `gpt-5-6-pro` slug. One packaging attempt lost the shared transient
+  PR-context directory, one metadata preflight required the current full-
+  snapshot anchor, and Hercules failed before send because its attachment input
+  was not ready. The valid Phlebas retry sent once.
+- Accepted the repeated-mechanism retrospective trigger: the local SQLite
+  callback owner still rejected every independently successful callback once
+  the source was connected, so an out-of-order completion could change the
+  provider registration without advancing local source authority, clearing
+  target coverage, or invalidating earlier jobs. The round-9 hosted correction
+  therefore exposed an unchanged cross-runtime policy split. The original
+  requirement already includes local and hosted lifecycle admission; keep both
+  and align them through one shared stateless truth table rather than another
+  tactical branch. Owner-local Web and real-SQLite/service proofs remain the
+  test boundary; the previously rejected cross-owner mega-test is still
+  unnecessary.
 
 ## Verification
 
@@ -564,3 +595,19 @@ Updated: 2026-08-14
     export and dedicated error helper have no remaining source or test
     references; the stale-runtime guard, privacy scan, and `git diff --check`
     also pass.
+  - Round-10 local callback proof first reproduced the repeated mechanism:
+    independent callbacks B then A left the SQLite source at B's lifecycle and
+    rejected A with `CONNECTION_SOURCE_START_STALE`. After both owners adopted
+    one stateless callback-admission decision, B advances the source to epoch 4
+    and A advances it to epoch 5, A clears all twelve target schedule-time
+    coverage coordinates while preserving source-first blood pressure and a
+    sibling provider coordinate, increments the existing account revision, and
+    atomically adds exactly one initial job. The complementary pending-newer-
+    start case still rejects without mutation.
+  - The focused SQLite/service regression passes, the device-sync store,
+    service, and public-ingress files pass 241 tests, and the hosted wake,
+    callback-proof, and callback-route files pass 166 tests. The full
+    `@murphai/device-syncd` test command exits successfully. Device-sync and
+    prepared Web typechecks pass; the touched Web file passes its owning ESLint
+    configuration. The hosted stale-residue guard, stale-helper scan, privacy
+    scan, and `git diff --check` pass.

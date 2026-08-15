@@ -9,6 +9,7 @@ import {
 } from "@murphai/device-syncd/junction-resources";
 import {
   clearJunctionScheduleTimeExtendedHistoryCoverageForProvider,
+  decideJunctionSourceCallbackAdmission,
 } from "@murphai/device-syncd/junction-source-reconnect";
 import type {
   DeviceConnectionHandler,
@@ -1290,23 +1291,21 @@ export async function handleHostedDeviceSyncConnectionEstablished(input: {
       if (linkedSource) {
         const currentSource = (await input.store.listConnectionSources(input.account.id, tx))
           .find((source) => source.sourceInstanceKey === linkedSource.sourceInstanceKey);
-        if (
-          currentSource
-          && (
-            isHostedSourceDisconnectFenced(currentSource)
-            || (
-              currentSource.status === "disconnected"
-              && input.connectionStartedAt
-              && isHostedSourceConnectionStartOlder(
-                input.connectionStartedAt,
-                currentSource.lastSeenAt,
-              )
-            )
-          )
-        ) {
+        const sourceAdmission = decideJunctionSourceCallbackAdmission({
+          connectionStartedAt: input.connectionStartedAt,
+          currentSource: currentSource ?? null,
+        });
+        if (sourceAdmission === "reject") {
           throw connectionEstablishmentStaleError();
         }
-        if (currentSource) {
+        let advancedLifecycleEpoch: number | undefined;
+        if (sourceAdmission === "advance_lifecycle") {
+          if (!currentSource) {
+            throw connectionEstablishmentStaleError();
+          }
+          advancedLifecycleEpoch = nextHostedSourceLifecycleEpoch(
+            currentSource.lifecycleEpoch,
+          );
           await input.store.syncDurableConnectionState({
             ...current,
             metadata: clearJunctionScheduleTimeExtendedHistoryCoverageForProvider({
@@ -1320,12 +1319,8 @@ export async function handleHostedDeviceSyncConnectionEstablished(input: {
           sourceInstanceKey: linkedSource.sourceInstanceKey,
           sourceProviderSlug: linkedSource.sourceProviderSlug,
           status: "connected",
-          ...(currentSource
-            ? {
-                lifecycleEpoch: nextHostedSourceLifecycleEpoch(
-                  currentSource.lifecycleEpoch,
-                ),
-              }
+          ...(advancedLifecycleEpoch !== undefined
+            ? { lifecycleEpoch: advancedLifecycleEpoch }
             : {}),
           firstSeenAt: input.now,
           lastSeenAt: input.now,
@@ -1536,17 +1531,6 @@ function nextHostedSourceLifecycleEpoch(previous: number): number {
     });
   }
   return previous + 1;
-}
-
-function isHostedSourceConnectionStartOlder(
-  connectionStartedAt: string,
-  sourceEpoch: string,
-): boolean {
-  const connectionStartedAtMs = Date.parse(connectionStartedAt);
-  const sourceEpochMs = Date.parse(sourceEpoch);
-  return !Number.isFinite(connectionStartedAtMs)
-    || !Number.isFinite(sourceEpochMs)
-    || connectionStartedAtMs < sourceEpochMs;
 }
 
 function connectionEstablishmentStaleError(): never {

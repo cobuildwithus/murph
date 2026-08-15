@@ -19,6 +19,7 @@ import { DeviceSyncError, deviceSyncError } from "../src/errors.ts";
 import {
   addJunctionExtendedTimeseriesHistoryBackfillCoverage,
   hasJunctionExtendedTimeseriesHistoryBackfillCoverage,
+  JUNCTION_SCHEDULE_TIME_EXTENDED_HISTORY_RESOURCE_VERSIONS,
 } from "../src/junction-historical-backfill-progress.ts";
 import {
   createDeviceSyncService,
@@ -1022,6 +1023,107 @@ test("local shared-Junction target starts preserve established siblings through 
     assert.equal(afterCurrentCallback?.status, "connected");
     assert.equal(afterCurrentCallback?.lifecycleEpoch, 3);
     assert.ok(countJobsForAccountForTesting(store, baseline.id) > jobsBeforeCallbacks);
+
+    vi.setSystemTime(new Date("2026-07-28T10:10:00.000Z"));
+    const reconnectA = await service.startConnection({
+      ownerId: "<REDACTED_OWNER_ID>",
+      provider: "junction",
+      sourceProviderSlug: "fitbit",
+    });
+    vi.setSystemTime(new Date("2026-07-28T10:11:00.000Z"));
+    const reconnectB = await service.startConnection({
+      ownerId: "<REDACTED_OWNER_ID>",
+      provider: "junction",
+      sourceProviderSlug: "fitbit",
+    });
+
+    vi.setSystemTime(new Date("2026-07-28T10:12:00.000Z"));
+    await service.handleConnectionCallback({
+      expectedOwnerId: "<REDACTED_OWNER_ID>",
+      provider: "junction",
+      query: new URLSearchParams({
+        murph_state: reconnectB.state,
+        result: "success",
+      }),
+    });
+    const afterB = store.getAccountById(baseline.id);
+    const afterBSource = store.listConnectionSources({
+      connectionId: baseline.id,
+      sourceProviderSlug: "fitbit",
+    })[0];
+    assert.ok(afterB);
+    assert.ok(afterBSource);
+    assert.equal(afterBSource.lifecycleEpoch, 4);
+
+    let coverage = afterB.metadata;
+    for (const [resource, version] of JUNCTION_SCHEDULE_TIME_EXTENDED_HISTORY_RESOURCE_VERSIONS) {
+      const update = addJunctionExtendedTimeseriesHistoryBackfillCoverage({
+        metadata: coverage,
+        providerSlug: "fitbit",
+        resource,
+        version,
+      });
+      assert.ok(update);
+      coverage = { ...coverage, [update.metadataKey]: update.value };
+    }
+    for (const [providerSlug, resource] of [
+      ["fitbit", "blood_pressure"],
+      ["garmin", "weight"],
+    ] as const) {
+      const update = addJunctionExtendedTimeseriesHistoryBackfillCoverage({
+        metadata: coverage,
+        providerSlug,
+        resource,
+        version: 1,
+      });
+      assert.ok(update);
+      coverage = { ...coverage, [update.metadataKey]: update.value };
+    }
+    store.patchAccount(baseline.id, { metadata: coverage });
+    const jobsBeforeA = countJobsForAccountForTesting(store, baseline.id);
+    const revisionBeforeA = store.getAccountById(baseline.id)?.localConnectionRevision;
+    assert.ok(revisionBeforeA !== undefined);
+
+    vi.setSystemTime(new Date("2026-07-28T10:13:00.000Z"));
+    await service.handleConnectionCallback({
+      expectedOwnerId: "<REDACTED_OWNER_ID>",
+      provider: "junction",
+      query: new URLSearchParams({
+        murph_state: reconnectA.state,
+        result: "success",
+      }),
+    });
+
+    const afterA = store.getAccountById(baseline.id);
+    const afterASource = store.listConnectionSources({
+      connectionId: baseline.id,
+      sourceProviderSlug: "fitbit",
+    })[0];
+    assert.ok(afterA);
+    assert.ok(afterASource);
+    assert.equal(afterASource.lifecycleEpoch, 5);
+    assert.equal(afterA.localConnectionRevision, revisionBeforeA + 1);
+    for (const [resource, version] of JUNCTION_SCHEDULE_TIME_EXTENDED_HISTORY_RESOURCE_VERSIONS) {
+      assert.equal(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
+        afterA.metadata,
+        "fitbit",
+        resource,
+        version,
+      ), false);
+    }
+    assert.equal(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
+      afterA.metadata,
+      "fitbit",
+      "blood_pressure",
+      1,
+    ), true);
+    assert.equal(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
+      afterA.metadata,
+      "garmin",
+      "weight",
+      1,
+    ), true);
+    assert.equal(countJobsForAccountForTesting(store, baseline.id), jobsBeforeA + 1);
   } finally {
     close();
     vi.useRealTimers();
