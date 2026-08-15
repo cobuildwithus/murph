@@ -168,6 +168,7 @@ function addNutritionCardMealCountIssues(
       context.addIssue({
         code: "custom",
         message: "A metric cannot have more supporting meals than the card.",
+        params: { murphExpectedShape: "at_most_card.mealCount" },
         path: ["totals", metricName, "mealCount"],
       });
     }
@@ -193,6 +194,7 @@ function addNutritionCardGoalConsistencyIssue(
       code: "custom",
       message:
         "A missing or partial metric can only have an unavailable goal status.",
+      params: { murphExpectedShape: "unavailable_when_metric_partial" },
       path: ["goals", metricName, "status"],
     });
     return;
@@ -213,6 +215,7 @@ function addNutritionCardGoalConsistencyIssue(
     context.addIssue({
       code: "custom",
       message: "Goal status cannot point opposite the total and target.",
+      params: { murphExpectedShape: "consistent_with_total_and_target" },
       path: ["goals", metricName, "status"],
     });
   }

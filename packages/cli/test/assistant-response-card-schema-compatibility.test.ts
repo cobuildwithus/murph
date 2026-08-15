@@ -81,6 +81,28 @@ const WORKOUT_CARD = {
   },
 } as const
 
+function buildGenericTableAtImageBoundary(lastCellLength: number) {
+  return {
+    kind: 'compact_table',
+    version: 1,
+    title: 'Eight-exercise workout',
+    subtitle: 'Verified canonical workout snapshot for today',
+    rowHeader: 'Exercise',
+    columns: ['Set 1', 'Set 2', 'Set 3', 'Set 4'],
+    rows: Array.from({ length: 8 }, (_, rowIndex) => ({
+      label: `Exercise ${rowIndex + 1} movement pattern`,
+      values: Array.from({ length: 4 }, (_, columnIndex) => {
+        const cellLength = rowIndex === 7 && columnIndex === 3
+          ? lastCellLength
+          : 22
+        return `${rowIndex + columnIndex + 1}`.padEnd(cellLength, 'x')
+      }),
+    })),
+    footer: 'Assists and spotted reps remain on the exact set note.',
+    tracking: null,
+  }
+}
+
 const attachResponseCardTool = (() => {
   const tool = resolveMurphDynamicTools({
     responseCardsAvailable: true,
@@ -170,6 +192,66 @@ describe('attach_response_card schema compatibility', () => {
     assert.equal(offeredSchemaAccepts(repaired), true)
     assert.equal(
       attachResponseCardRuntimeSchema.safeParse(repaired).success,
+      true,
+    )
+  })
+
+  it('keeps refinement-only failures runtime-owned and repairable', () => {
+    const pendingActual = {
+      card: {
+        ...WORKOUT_CARD,
+        workout: {
+          ...WORKOUT_CARD.workout,
+          exercises: [{
+            ...WORKOUT_CARD.workout.exercises[0],
+            sets: [{ status: 'pending', target: '8 reps', actual: '8 reps' }],
+          }],
+        },
+      },
+    }
+    assert.equal(offeredSchemaAccepts(pendingActual), true)
+    const pendingResult = attachResponseCardRuntimeSchema.safeParse(pendingActual)
+    assert.equal(pendingResult.success, false)
+    if (pendingResult.success) {
+      throw new TypeError('Expected pending-set relation validation to fail.')
+    }
+    assert.ok(pendingResult.error.issues.some((issue) =>
+      issue.code === 'custom'
+      && issue.params?.murphExpectedShape === 'null_unless_status_completed'
+      && JSON.stringify(issue.path) === JSON.stringify([
+        'card',
+        'workout',
+        'exercises',
+        0,
+        'sets',
+        0,
+        'actual',
+      ])
+    ))
+    assert.equal(offeredSchemaAccepts({ card: WORKOUT_CARD }), true)
+    assert.equal(
+      attachResponseCardRuntimeSchema.safeParse({ card: WORKOUT_CARD }).success,
+      true,
+    )
+
+    const oversized = { card: buildGenericTableAtImageBoundary(18) }
+    assert.equal(offeredSchemaAccepts(oversized), true)
+    const oversizedResult = attachResponseCardRuntimeSchema.safeParse(oversized)
+    assert.equal(oversizedResult.success, false)
+    if (oversizedResult.success) {
+      throw new TypeError('Expected aggregate payload validation to fail.')
+    }
+    assert.ok(oversizedResult.error.issues.some((issue) =>
+      issue.code === 'custom'
+      && issue.params?.murphExpectedShape
+        === 'within_response_card_payload_limit'
+      && JSON.stringify(issue.path) === JSON.stringify(['card'])
+    ))
+
+    const repairedBoundary = { card: buildGenericTableAtImageBoundary(17) }
+    assert.equal(offeredSchemaAccepts(repairedBoundary), true)
+    assert.equal(
+      attachResponseCardRuntimeSchema.safeParse(repairedBoundary).success,
       true,
     )
   })

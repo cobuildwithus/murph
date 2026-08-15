@@ -46,8 +46,8 @@ Updated: 2026-08-15
    Schema cannot express.
    Mitigation: add representative provider-valid compatibility coverage for
    every discriminated card kind, keep inline-representable rejections aligned, and
-   prove the deliberate provider-permissive/runtime-rejected cardinality case
-   returns an authoritative repair hint.
+   prove deliberate provider-permissive/runtime-rejected cardinality, workout
+   relation, and aggregate-payload cases return authoritative repair hints.
 
 ## Tasks
 
@@ -57,8 +57,11 @@ Updated: 2026-08-15
 3. Completed: implement the smallest shared safe-path and response-card repair-hint change.
 4. Completed: add focused privacy, one-retry repair, and schema-compatibility
    regression tests.
-5. In progress: run focused tests, typecheck, diff/privacy review, ReviewGPT gates, commit,
-   push, and open a PR without merging.
+5. Completed: merge current main normally, preserving its accepted workout-card
+   capacity behavior and this patch's bounded diagnostic behavior.
+6. In progress: finish round-two remediation, run focused tests, typecheck,
+   diff/privacy review, ReviewGPT gates, commit, push, and update the PR without
+   merging.
 
 ## Decisions
 
@@ -78,17 +81,25 @@ Updated: 2026-08-15
   workout fields before building repair hints. Ambiguous and hybrid shapes get
   one bounded card-level shape-choice hint; the authoritative acceptance union
   remains unchanged.
+- Attach static expected-shape tokens to the authoritative custom refinements
+  that know why an input failed. The shared digest accepts only bounded safe
+  tokens from issue metadata; it never infers custom semantics from a path or
+  forwards a refinement message or submitted value.
+- Preserve main's semantic-workout oversized-envelope text fallback. Only the
+  diagnostic selection and repair description change; acceptance and execution
+  authority do not.
 
 ## Verification
 
 - Passed: safe-digest, audience-scoped diagnostics, and one-retry response-card
   focused tests, including mutually exclusive compact-table branch hints.
 - Passed: existing response-card tool suite (26 tests).
-- Passed: operator-config response-card tests and the 4,911-byte schema
+- Passed: operator-config response-card tests and the 4,913-byte schema
   compaction boundary (24 tests); exact-head full operator-config package
   coverage passed (39 files, 345 tests).
 - Passed: offered JSON schema versus runtime compatibility and deliberate
-  provider-permissive refinement proof (2 tests).
+  provider-permissive cardinality, pending-workout-set, and aggregate-payload
+  repair proofs (3 tests).
 - Passed: the real App Server same-turn private invalid-call/corrected-call/card
   delivery proof and a separate malformed group-card feedback proof (2 tests).
 - Passed: operator-config, assistant-engine, and CLI package typechecks.
@@ -107,6 +118,19 @@ Updated: 2026-08-15
   is confined to Codex-generated code-mode tool-schema guidance in `input`;
   temporary paths and generated ids were normalized, and capture code and
   payloads were removed.
+- Passed after the normal main merge: focused safe-digest and response-card
+  feedback tests (10 tests); private same-turn and group-audience App Server
+  tests (2 passed, 78 skipped); compact-table and workout contract tests (23
+  tests); CLI schema-compatibility tests (3 tests); operator-config response-card
+  tests (15 tests); and assistant-engine, contracts, CLI, and operator-config
+  typechecks. The round-two metadata-only refinement changes do not alter the
+  offered provider schema or the previously captured direct/group request
+  delta.
+- Merged current main at `c561eed4410ff2fa76be4944283760bfccd1be03`
+  through two-parent merge `60806e03dc6872e5570bb4a4743961253f83ed5e`.
+  The two conflicts were the compact-table dynamic-tool boundary and compact
+  table contract; resolution preserves main's semantic workout capacity/fallback
+  and this PR's privacy-safe, audience-scoped repair hints.
 
 ## Preliminary review dispositions
 
@@ -129,3 +153,17 @@ Updated: 2026-08-15
 - Updated the existing pending-vault-file diagnostic assertion for the shared
   conventional array path (`intentIds[]`) and explicitly covered the new
   metadata-only issue shape and summary; submitted content remains absent.
+
+## Final review round 2 disposition
+
+- Accepted the custom path-only mapping finding. A root `card` custom issue can
+  mean either ambiguous compact-table shape or aggregate payload size, so the
+  formatter no longer guesses custom semantics from paths.
+- Authoritative custom refinements now emit static, bounded expected-shape
+  tokens for compact-table cardinality and payload size, nutrition relations,
+  workout set/state relations, and the workout subtitle rule. The synthetic
+  ambiguity issue owns its separate shape-choice token.
+- Added provider-permissive pending-set and aggregate-size regression cases,
+  exact corrected retries, same-turn terminal delivery, ambiguity retention,
+  and metadata-only privacy coverage. Oversized generic cards now receive the
+  payload-limit hint and never the ambiguity hint.

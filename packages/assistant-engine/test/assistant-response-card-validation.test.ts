@@ -42,6 +42,47 @@ const INVALID_NUTRITION_CARD = {
   },
 } as const
 
+const INVALID_PENDING_ACTUAL_WORKOUT_CARD = {
+  kind: 'compact_table',
+  version: 1,
+  title: 'Synthetic workout',
+  subtitle: null,
+  footer: null,
+  tracking: {
+    kind: 'workout',
+    entityId: 'evt_01K1ABCDEFGHJKMNPQRSTVWXYZ',
+    snapshotAt: '2026-08-09T19:45:00.000Z',
+  },
+  workout: {
+    version: 1,
+    state: 'active',
+    exercises: [{
+      name: 'Synthetic movement',
+      sets: [{ status: 'pending', target: '8 reps', actual: '8 reps' }],
+    }],
+  },
+} as const
+
+function buildOversizedGenericTableCard() {
+  return {
+    kind: 'compact_table',
+    version: 1,
+    title: 'Eight-exercise workout',
+    subtitle: 'Verified canonical workout snapshot for today',
+    rowHeader: 'Exercise',
+    columns: ['Set 1', 'Set 2', 'Set 3', 'Set 4'],
+    rows: Array.from({ length: 8 }, (_, rowIndex) => ({
+      label: `Exercise ${rowIndex + 1} movement pattern`,
+      values: Array.from({ length: 4 }, (_, columnIndex) => {
+        const cellLength = rowIndex === 7 && columnIndex === 3 ? 18 : 22
+        return `${rowIndex + columnIndex + 1}`.padEnd(cellLength, 'x')
+      }),
+    })),
+    footer: 'Assists and spotted reps remain on the exact set note.',
+    tracking: null,
+  } as const
+}
+
 function readCardToolArguments(
   argumentsValue: unknown,
   responseCardAudience: 'group' | 'private',
@@ -150,6 +191,7 @@ describe('response-card validation feedback', () => {
           expect.objectContaining({
             path: 'card.goals.carbsGrams.status',
             code: 'custom',
+            expected: 'consistent_with_total_and_target',
           }),
         ]),
       },
@@ -330,5 +372,58 @@ describe('response-card validation feedback', () => {
         expected: 'compact_table.generic_or_workout_shape',
       }],
     }))
+  })
+
+  it('returns refinement-owned semantics for provider-permissive failures', () => {
+    const pendingActualRequest = readCardToolRequest(
+      INVALID_PENDING_ACTUAL_WORKOUT_CARD,
+    )
+    expect(pendingActualRequest).toMatchObject({
+      kind: 'invalid-response-card-arguments',
+      validationDigest: {
+        pathIssues: expect.arrayContaining([
+          expect.objectContaining({
+            path: 'card.workout.exercises[].sets[].actual',
+            code: 'custom',
+            expected: 'null_unless_status_completed',
+          }),
+        ]),
+      },
+    })
+    expect(readCardToolRequest({
+      ...INVALID_PENDING_ACTUAL_WORKOUT_CARD,
+      workout: {
+        ...INVALID_PENDING_ACTUAL_WORKOUT_CARD.workout,
+        exercises: [{
+          ...INVALID_PENDING_ACTUAL_WORKOUT_CARD.workout.exercises[0],
+          sets: [{ status: 'pending', target: '8 reps', actual: null }],
+        }],
+      },
+    })).toMatchObject({ kind: 'attach-response-card' })
+
+    const oversizedCard = buildOversizedGenericTableCard()
+    const oversizedRequest = readCardToolRequest(oversizedCard)
+    expect(oversizedRequest).toMatchObject({
+      kind: 'invalid-response-card-arguments',
+      validationDigest: {
+        pathIssues: expect.arrayContaining([
+          expect.objectContaining({
+            path: 'card',
+            code: 'custom',
+            expected: 'within_response_card_payload_limit',
+          }),
+        ]),
+      },
+    })
+    if (!oversizedRequest || oversizedRequest.kind !== 'invalid-response-card-arguments') {
+      throw new Error('expected oversized response card arguments to fail')
+    }
+    const feedback = buildResponseCardValidationFeedback(
+      oversizedRequest.validationDigest,
+    )
+    expect(feedback).toContain('within_response_card_payload_limit')
+    expect(feedback).not.toContain('generic_or_workout_shape')
+    expect(feedback).not.toContain(oversizedCard.title)
+    expect(feedback.length).toBeLessThanOrEqual(1_600)
   })
 })

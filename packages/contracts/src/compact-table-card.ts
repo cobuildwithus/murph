@@ -121,6 +121,7 @@ function addEncodedLengthIssues(
     context.addIssue({
       code: "custom",
       message: `The ${subject} exceeds the inline Messages card limit.`,
+      params: { murphExpectedShape: "within_response_card_payload_limit" },
       path: [],
     });
   }
@@ -131,6 +132,7 @@ function addEncodedLengthIssues(
     context.addIssue({
       code: "custom",
       message: `The ${subject} exceeds the static image payload limit.`,
+      params: { murphExpectedShape: "within_response_card_payload_limit" },
       path: [],
     });
   }
@@ -166,6 +168,7 @@ export const compactTableGenericResponseCardV1Schema = z
         context.addIssue({
           code: "custom",
           message: "Each table row must contain one value for every column.",
+          params: { murphExpectedShape: "same_count_as_card.columns" },
           path: ["rows", index, "values"],
         });
       }

@@ -5,22 +5,6 @@ import type {
 const MAX_RESPONSE_CARD_REPAIR_HINTS = 4
 const MAX_RESPONSE_CARD_VALIDATION_FEEDBACK_LENGTH = 1_600
 
-const CUSTOM_EXPECTED_SHAPES: Readonly<Record<string, string>> = {
-  card: 'compact_table.generic_or_workout_shape',
-  'card.goals.calories.status': 'consistent_with_total_and_target',
-  'card.goals.carbsGrams.status': 'consistent_with_total_and_target',
-  'card.goals.fatGrams.status': 'consistent_with_total_and_target',
-  'card.goals.fiberGrams.status': 'consistent_with_total_and_target',
-  'card.goals.proteinGrams.status': 'consistent_with_total_and_target',
-  'card.rows[].values': 'same_count_as_card.columns',
-  'card.subtitle': 'null_for_workout_card',
-  'card.totals.calories.mealCount': 'at_most_card.mealCount',
-  'card.totals.carbsGrams.mealCount': 'at_most_card.mealCount',
-  'card.totals.fatGrams.mealCount': 'at_most_card.mealCount',
-  'card.totals.fiberGrams.mealCount': 'at_most_card.mealCount',
-  'card.totals.proteinGrams.mealCount': 'at_most_card.mealCount',
-}
-
 export function buildResponseCardValidationFeedback(
   digest: SafeToolCallValidationDigest,
 ): string {
@@ -32,9 +16,7 @@ export function buildResponseCardValidationFeedback(
         return null
       }
       const expected = normalizeFeedbackToken(
-        issue.expected ?? (code === 'custom'
-          ? CUSTOM_EXPECTED_SHAPES[issue.path]
-          : undefined),
+        issue.expected,
         96,
       )
       return {

@@ -309,6 +309,16 @@ function normalizeIssueCode(
 
 function describeExpectedShape(issue: Record<string, unknown> | null): string | undefined {
   const code = typeof issue?.code === 'string' ? issue.code : null
+  if (code === 'custom') {
+    const expectedShape = asRecord(issue?.params)?.murphExpectedShape
+    if (
+      typeof expectedShape === 'string'
+      && expectedShape.length <= 96
+      && /^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$/.test(expectedShape)
+    ) {
+      return expectedShape
+    }
+  }
   const origin = typeof issue?.origin === 'string' ? normalizeShapeToken(issue.origin) : null
   if ((code === 'too_small' || code === 'too_big') && origin) {
     const bound = typeof issue?.minimum === 'number'

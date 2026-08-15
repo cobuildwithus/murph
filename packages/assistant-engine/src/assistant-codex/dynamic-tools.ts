@@ -316,6 +316,7 @@ function addAttachResponseCardArgumentIssues(
     context.addIssue({
       code: z.ZodIssueCode.custom,
       message: 'Structured workout card subtitles must be null.',
+      params: { murphExpectedShape: 'null_for_workout_card' },
       path: ['card', 'subtitle'],
     })
   }
@@ -355,15 +356,7 @@ const attachSemanticWorkoutResponseCardArgumentsSchema = z
     card: assistantWorkoutResponseCardSemanticSchema,
   })
   .strict()
-  .superRefine((value, context) => {
-    if (value.card.subtitle !== null) {
-      context.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: 'Structured workout card subtitles must be null.',
-        path: ['card', 'subtitle'],
-      })
-    }
-  })
+  .superRefine(addAttachResponseCardArgumentIssues)
 
 const attachGroupChallengeResponseCardArgumentsSchema =
   groupChallengeResponseCardToolInputSchema
@@ -7257,6 +7250,9 @@ function readAttachResponseCardDiagnosticError(
       return new z.ZodError([{
         code: z.ZodIssueCode.custom,
         message: 'Choose one compact-table card shape.',
+        params: {
+          murphExpectedShape: 'compact_table.generic_or_workout_shape',
+        },
         path: ['card'],
       }])
     }

@@ -5436,23 +5436,32 @@ if (!tool) {
     const correctedCard = {
       kind: 'compact_table',
       version: 1,
-      title: 'Synthetic plan',
+      title: 'Synthetic workout',
       subtitle: null,
-      rowHeader: 'Day',
-      columns: ['Focus'],
-      rows: [{ label: 'Monday', values: ['Strength'] }],
       footer: null,
-      tracking: null,
+      tracking: {
+        kind: 'workout',
+        entityId: 'evt_01K1ABCDEFGHJKMNPQRSTVWXYZ',
+        snapshotAt: '2026-08-09T19:45:00.000Z',
+      },
+      workout: {
+        version: 1,
+        state: 'active',
+        exercises: [{
+          name: 'Synthetic movement',
+          sets: [{ status: 'pending', target: '8 reps', actual: null }],
+        }],
+      },
     } as const
     const malformedCard = {
-      kind: 'compact_table',
-      version: 1,
-      title: 'Synthetic plan',
-      subtitle: null,
-      rowHeader: 'Day',
-      rows: [{ label: 'Monday', values: ['Strength'] }],
-      footer: null,
-      tracking: null,
+      ...correctedCard,
+      workout: {
+        ...correctedCard.workout,
+        exercises: [{
+          ...correctedCard.workout.exercises[0],
+          sets: [{ status: 'pending', target: '8 reps', actual: '8 reps' }],
+        }],
+      },
     } as const
     scenario.stub.queue(
       {
@@ -5482,16 +5491,21 @@ if (!tool) {
     const summaries = scenario.stub.requestSummariesSinceBaseline()
     const invalidOutput = summaries[1]?.functionCallOutputs?.join('\n') ?? ''
     expect(invalidOutput).toContain('invalid_response_card_arguments')
-    expect(invalidOutput).toContain('"field":"card.columns"')
-    expect(invalidOutput).not.toContain('card.workout')
-    expect(invalidOutput).not.toContain('card.tracking')
+    expect(invalidOutput).toContain(
+      '"field":"card.workout.exercises[].sets[].actual"',
+    )
+    expect(invalidOutput).toContain(
+      '"expected":"null_unless_status_completed"',
+    )
     expect(invalidOutput).not.toContain('challengeSlug')
     expect(summaries[2]?.functionCallOutputs?.join('\n')).toContain(
       'response card attached',
     )
     expect(result.responseCard).toEqual(correctedCard)
     expect(result.finalMessage).toContain(correctedCard.title)
-    expect(result.finalMessage).toContain(correctedCard.rows[0].values[0])
+    expect(result.finalMessage).toContain(
+      correctedCard.workout.exercises[0].name,
+    )
     expect(result.finalMessage).not.toBe('CARD_REPAIRED')
     expect(scenario.stub.requestCountSinceBaseline()).toBe(3)
   })

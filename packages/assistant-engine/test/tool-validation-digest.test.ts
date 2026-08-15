@@ -8,6 +8,46 @@ import {
 } from '../src/assistant/tool-validation-digest.ts'
 
 describe('buildSafeToolCallValidationDigest', () => {
+  it('forwards only bounded safe custom expected-shape tokens', () => {
+    const schema = z.object({ card: z.string() }).superRefine((_value, context) => {
+      context.addIssue({
+        code: 'custom',
+        message: 'Synthetic safe relation.',
+        params: { murphExpectedShape: 'static_safe_relation' },
+        path: ['card'],
+      })
+      context.addIssue({
+        code: 'custom',
+        message: 'Synthetic unsafe relation.',
+        params: { murphExpectedShape: 'unsafe relation marker!' },
+        path: ['card'],
+      })
+    })
+    const rawInput = { card: 'neutral synthetic value' }
+    const parsed = schema.safeParse(rawInput)
+    expect(parsed.success).toBe(false)
+    if (parsed.success) {
+      throw new Error('expected schema validation to fail')
+    }
+
+    const digest = buildSafeToolCallValidationDigest({
+      error: parsed.error,
+      rawInput,
+      schemaRootKeys: ['card'],
+      toolName: 'murph.synthetic',
+    })
+    expect(digest.pathIssues).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        code: 'custom',
+        expected: 'static_safe_relation',
+        path: 'card',
+      }),
+    ]))
+    const serialized = JSON.stringify(digest)
+    expect(serialized).not.toContain('unsafe relation marker')
+    expect(serialized).not.toContain('neutral synthetic value')
+  })
+
   it('records structural Zod validation facts without raw argument values', () => {
     const schema = z.object({
       brand: z.string(),
