@@ -231,13 +231,13 @@ const HOSTED_ACCOUNT_GROUP_INVITE_TARGET_TELEGRAM_USERNAME_FIELD =
   "hosted-account-group-invite.target-telegram-username";
 const HOSTED_ACCOUNT_GROUP_INVITE_TARGET_EMAIL_FIELD =
   "hosted-account-group-invite.target-email";
-const HOSTED_ACCOUNT_GROUP_BILLING_STRIPE_CUSTOMER_FIELD =
+export const HOSTED_ACCOUNT_GROUP_BILLING_STRIPE_CUSTOMER_FIELD =
   "hosted-account-group-billing-ref.stripe-customer-id";
-const HOSTED_ACCOUNT_GROUP_BILLING_STRIPE_SUBSCRIPTION_FIELD =
+export const HOSTED_ACCOUNT_GROUP_BILLING_STRIPE_SUBSCRIPTION_FIELD =
   "hosted-account-group-billing-ref.stripe-subscription-id";
 const HOSTED_ACCOUNT_GROUP_BILLING_STRIPE_SUBSCRIPTION_ITEM_FIELD =
   "hosted-account-group-billing-ref.stripe-subscription-item-id";
-const HOSTED_ACCOUNT_GROUP_BILLING_STRIPE_CHECKOUT_SESSION_FIELD =
+export const HOSTED_ACCOUNT_GROUP_BILLING_STRIPE_CHECKOUT_SESSION_FIELD =
   "hosted-account-group-billing-ref.stripe-checkout-session-id";
 
 const hostedAccountGroupAccessSelect =

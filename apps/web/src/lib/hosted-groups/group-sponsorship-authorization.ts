@@ -1346,12 +1346,22 @@ export async function cancelHostedGroupSponsorshipsForPayerAccountDeletionTx(
   const beneficiaryMemberIds = [...new Set(liveAuthorizations.map(
     (authorization) => authorization.beneficiaryMemberId,
   ))].sort();
-  for (const beneficiaryMemberId of beneficiaryMemberIds) {
-    await lockHostedMemberRow(input.tx, beneficiaryMemberId);
+  if (beneficiaryMemberIds.length > 0) {
+    await input.tx.$queryRaw<Array<{ id: string }>>`
+      SELECT id
+      FROM hosted_member
+      WHERE id IN (${Prisma.join(beneficiaryMemberIds)})
+      ORDER BY id ASC
+      FOR UPDATE
+    `;
   }
-  for (const payerMemberId of payerMemberIds) {
-    await lockHostedMemberRow(input.tx, payerMemberId);
-  }
+  await input.tx.$queryRaw<Array<{ id: string }>>`
+    SELECT id
+    FROM hosted_member
+    WHERE id IN (${Prisma.join(payerMemberIds)})
+    ORDER BY id ASC
+    FOR UPDATE
+  `;
 
   const currentAuthorizations =
     await input.tx.hostedGroupSponsorshipAuthorization.findMany({

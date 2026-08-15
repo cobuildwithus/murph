@@ -1556,7 +1556,7 @@ describe("hosted capped group sponsorship authorization", () => {
     })).rejects.toThrow(/recovery is no longer available/u);
   });
 
-  it("locks beneficiaries before the payer when account deletion cancels sponsorships", async () => {
+  it("locks beneficiaries before payers with constant set-lock queries during account deletion", async () => {
     const liveAuthorizations = [
       { beneficiaryMemberId: "member_group_z" },
       { beneficiaryMemberId: "member_group_a" },
@@ -1565,18 +1565,27 @@ describe("hosted capped group sponsorship authorization", () => {
       .mockResolvedValueOnce(liveAuthorizations)
       .mockResolvedValueOnce(liveAuthorizations);
     const updateMany = vi.fn(async () => ({ count: 2 }));
+    const lockQueries: string[][] = [];
+    const queryRaw = vi.fn(async (...args: unknown[]) => {
+      lockQueries.push(uniqueRawQueryStrings(args.slice(1)));
+      return [];
+    });
 
     await expect(cancelHostedGroupSponsorshipsForPayerAccountDeletionTx({
       now: NOW,
       payerMemberIds: ["member_payer", "member_payer"],
       tx: {
+        $queryRaw: queryRaw,
         hostedGroupSponsorshipAuthorization: { findMany, updateMany },
       } as never,
     })).resolves.toBe(2);
 
-    expect(sharedMocks.lockHostedMemberRow.mock.calls.map(([, memberId]) =>
-      memberId
-    )).toEqual(["member_group_a", "member_group_z", "member_payer"]);
+    expect(queryRaw).toHaveBeenCalledTimes(2);
+    expect(lockQueries).toEqual([
+      ["member_group_a", "member_group_z"],
+      ["member_payer"],
+    ]);
+    expect(sharedMocks.lockHostedMemberRow).not.toHaveBeenCalled();
     expect(findMany).toHaveBeenCalledTimes(2);
     expect(updateMany).toHaveBeenCalledWith({
       data: expect.objectContaining({
@@ -1979,3 +1988,26 @@ describe("hosted capped group sponsorship authorization", () => {
     expect(updatePurchase).not.toHaveBeenCalled();
   });
 });
+
+function uniqueRawQueryStrings(values: readonly unknown[]): string[] {
+  const strings: string[] = [];
+  const visit = (value: unknown): void => {
+    if (typeof value === "string") {
+      strings.push(value);
+      return;
+    }
+    if (Array.isArray(value)) {
+      for (const entry of value) {
+        visit(entry);
+      }
+      return;
+    }
+    if (value && typeof value === "object" && "values" in value) {
+      visit((value as { values?: unknown }).values);
+    }
+  };
+  for (const value of values) {
+    visit(value);
+  }
+  return [...new Set(strings)];
+}
