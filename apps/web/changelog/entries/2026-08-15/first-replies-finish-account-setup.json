@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-15",
+  "order": 200,
+  "item": {
+    "id": "first-replies-finish-account-setup",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "First replies now finish account setup cleanly",
+    "summary": "When someone messages Murph immediately after joining, Murph can answer without leaving the new conversation's setup work behind.",
+    "details": "This improves the first-conversation handoff while keeping welcome messages and shared-room setup on their existing durable delivery path.",
+    "relevanceTags": ["assistant", "messaging", "onboarding", "reliability"],
+    "sourcePullRequests": [1864]
+  }
+}

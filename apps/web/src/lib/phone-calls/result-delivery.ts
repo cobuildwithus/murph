@@ -241,6 +241,17 @@ function resolveHostedPhoneCallResultDeliveryTransition(input: {
     };
   }
 
+  if (
+    input.currentStatus === "queued"
+    && input.request.status === "failed"
+  ) {
+    return {
+      rearm: true,
+      status: "failed",
+      terminal: true,
+    };
+  }
+
   if (input.currentStatus !== "sending") {
     throwHostedPhoneCallResultDeliveryTransitionInvalid();
   }

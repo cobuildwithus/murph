@@ -134,11 +134,27 @@ the member's current authorized Telegram route.
   ambiguity abandoned a result that Web proved had never entered Telegram. Web
   now derives the disposition from its stronger generation state: queued
   ambiguity returns to `pending` and re-arms recovery idempotently, while
-  `sending` ambiguity remains terminal. Terminal success or failure from queued
-  now fails closed because no deployable runner emits a generation-scoped
-  terminal callback without first committing the provider-entry callback.
+  `sending` ambiguity remains terminal. Provider success from queued remains
+  invalid.
 - `pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage
   apps/web/test/phone-calls-result-delivery.test.ts
   apps/web/test/phone-calls-result-notification-store.test.ts
   apps/web/test/phone-calls-reconciliation-workflows.test.ts` passed: 3 files,
   29 tests. `pnpm --dir apps/web typecheck` passed.
+- ReviewGPT round 8 at
+  `6471b2fc534acacadae12dd6ff7778be55068e5f` found that a definitive generic
+  runtime failure can still precede the provider-entry callback: retry
+  exhaustion, unavailable provider fetch support, or missing Telegram
+  credentials emits the exact generation-scoped terminal callback while Web
+  still owns `queued`. Rejecting that callback left both durable owners stuck.
+  The remediation explicitly accepts generic `queued` to terminal `failed` and
+  re-arms the next obligation while preserving queued ambiguity and route loss
+  as recoverable and queued success as invalid. Callback-response loss and the
+  provider-entry compare-and-set race are idempotent.
+- Current focused proof passes 32 Web transition/reconciliation tests, 263
+  Assistant Runtime callback tests, and all three affected package typechecks.
+  The focused Engine outbox/checkpoint slice passed 160 of 161 tests under the
+  ordinary cap; its only failure was an unrelated upstream private-continuity
+  test timing out at 60 seconds. That exact test passed in 58.6 seconds when
+  rerun alone with a local 120-second harness bound, and the merged receipt
+  replay plus retry-exhaustion regressions pass directly.

@@ -457,6 +457,10 @@ retryable after any provider-terminal outcome until Web acknowledges the signed
 terminal callback. Callback retry derives from the persisted provider receipt or
 failure, never re-enters Telegram, and repeats Web's idempotent next-result re-arm
 when the first response is lost.
+Web keeps its provider-entry boundary stronger than the runtime's generic
+outbox state: queued ambiguity and exact route loss return to pending, a
+definitive pre-provider runtime failure terminalizes the queued generation as
+failed, and provider success from queued is rejected.
 Generation-aware Web is a hard rollback floor after the first call stores a
 non-null result channel: terminal rows still suppress duplicate analyzed
 webhooks under generation-scoped keys, while older Web uses a different key and

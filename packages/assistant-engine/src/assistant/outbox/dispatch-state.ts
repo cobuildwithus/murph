@@ -9,6 +9,10 @@ import {
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import { retireMaterializedExportPack } from '@murphai/vault-usecases/export-packs'
 import { recordAssistantDiagnosticEvent } from '../diagnostics.js'
+import {
+  carriesAssistantOutboxPersistedDeliveryCompletionCheckpoint,
+  hasAssistantOutboxDeliveryEvidence,
+} from '../response-media.js'
 import { withAssistantRuntimeWriteLock } from '../runtime-write-lock.js'
 import { ensureAssistantState } from '../store/persistence.js'
 import { writeJsonFileAtomic } from '../shared.js'
@@ -107,6 +111,7 @@ export function errorImpliesAssistantDeliveryMayHaveSucceeded(error: unknown): b
 }
 
 export async function persistAssistantOutboxIntentDeliveryPendingConfirmation(input: {
+  completedAt: string
   delivery: AssistantChannelDelivery
   deliveryTransportIdempotent: boolean
   intent: AssistantOutboxIntent
@@ -138,10 +143,10 @@ export async function persistAssistantOutboxIntentDeliveryPendingConfirmation(in
         preparedDispatchToken: baseIntent.preparedDispatchToken,
         deliveryIdempotencyKey:
           input.delivery.idempotencyKey ?? baseIntent.deliveryIdempotencyKey,
-        updatedAt: input.delivery.sentAt,
+        updatedAt: input.completedAt,
         nextAttemptAt: terminalConfirmationRequired
           ? buildAssistantOutboxRetryTimestamp(
-              new Date(input.delivery.sentAt),
+              new Date(input.completedAt),
               baseIntent.attemptCount,
             )
           : null,
@@ -228,13 +233,14 @@ export async function persistAssistantOutboxIntentLinqAppCardTextFallback(input:
 }
 
 export async function markAssistantOutboxIntentSent(input: {
+  completedAt?: string
   delivery: AssistantChannelDelivery
   intent: AssistantOutboxIntent
   intentPath: string
   preserveCurrentDispatchMetadata?: boolean
   vault: string
 }): Promise<AssistantOutboxIntent> {
-  const completedAt = input.delivery.sentAt
+  const completedAt = input.completedAt ?? input.delivery.sentAt
 
   const sentIntent = await withAssistantRuntimeWriteLock(input.vault, async (paths) => {
     await ensureAssistantState(paths)
@@ -419,6 +425,18 @@ export async function updateAssistantOutboxAfterDispatchFailure(input: {
       return current
     }
     const baseIntent = current ?? input.sending
+    if (
+      input.deliveryMayHaveSucceeded &&
+      carriesAssistantOutboxPersistedDeliveryCompletionCheckpoint(baseIntent)
+    ) {
+      return baseIntent
+    }
+    const stableLinqPartialDelivery = linqPartialDelivery
+      ? preserveAssistantOutboxAcceptedMediaDeliveryOrder({
+          delivery: linqPartialDelivery,
+          intent: baseIntent,
+        })
+      : null
     const preserveNonConfirmableLinqRichLinkCheckpoint =
       carriesNonConfirmableLinqRichLinkCheckpoint(baseIntent)
     const retainLinqReactionConfirmation =
@@ -446,7 +464,7 @@ export async function updateAssistantOutboxAfterDispatchFailure(input: {
         ...baseIntent,
         delivery:
           ambiguousDelivery ??
-          linqPartialDelivery ??
+          stableLinqPartialDelivery ??
           current?.delivery ??
           input.sending.delivery,
         deliveryConfirmationPending: terminalConfirmationPending
@@ -952,6 +970,59 @@ export async function rescheduleAssistantOutboxConfirmationRetry(input: {
 
 function buildAssistantOutboxRetryTimestamp(at: Date, attemptCount: number): string {
   return new Date(at.getTime() + resolveAssistantOutboxRetryDelayMs(attemptCount)).toISOString()
+}
+
+export function preserveAssistantOutboxAcceptedMediaDeliveryOrder(input: {
+  delivery: AssistantChannelDelivery
+  intent: AssistantOutboxIntent
+}): AssistantChannelDelivery {
+  const previousDelivery = input.intent.delivery
+  const delivery = input.delivery
+  if (
+    !hasAssistantOutboxDeliveryEvidence(input.intent, true) ||
+    !previousDelivery ||
+    previousDelivery.kind === 'message-reaction' ||
+    delivery.kind === 'message-reaction' ||
+    previousDelivery.channel !== 'linq' ||
+    delivery.channel !== 'linq' ||
+    previousDelivery.target !== delivery.target ||
+    previousDelivery.providerThreadId !== delivery.providerThreadId
+  ) {
+    return delivery
+  }
+
+  const acceptedMediaEffects = (previousDelivery.providerMessageEffects ?? [])
+    .filter((effect) =>
+      effect.carriesIntentMedia === true &&
+      (
+        effect.providerMessageId === previousDelivery.providerMessageId ||
+        previousDelivery.providerMessageIds?.includes(effect.providerMessageId) === true
+      ),
+    )
+  const acceptedMediaEffect = acceptedMediaEffects.length === 1
+    ? acceptedMediaEffects[0]
+    : null
+  if (!acceptedMediaEffect) {
+    return delivery
+  }
+
+  const matchingCompletedEffects = (delivery.providerMessageEffects ?? [])
+    .filter((effect) =>
+      effect.carriesIntentMedia === true &&
+      effect.providerMessageId === acceptedMediaEffect.providerMessageId &&
+      (
+        effect.providerMessageId === delivery.providerMessageId ||
+        delivery.providerMessageIds?.includes(effect.providerMessageId) === true
+      ),
+    )
+  if (matchingCompletedEffects.length !== 1) {
+    return delivery
+  }
+
+  return assistantChannelDeliverySchema.parse({
+    ...delivery,
+    sentAt: previousDelivery.sentAt,
+  })
 }
 
 export function sameAssistantChannelDelivery(

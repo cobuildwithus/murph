@@ -10510,6 +10510,21 @@ describe("hosted runtime callbacks", () => {
 
   it.each([
     {
+      deliveryErrorCode: "ASSISTANT_DELIVERY_RETRY_EXHAUSTED",
+      expectedStatus: "failed" as const,
+      outboxStatus: "failed",
+    },
+    {
+      deliveryErrorCode: "HOSTED_PROVIDER_FETCH_UNAVAILABLE",
+      expectedStatus: "failed" as const,
+      outboxStatus: "failed",
+    },
+    {
+      deliveryErrorCode: "ASSISTANT_TELEGRAM_TOKEN_REQUIRED",
+      expectedStatus: "failed" as const,
+      outboxStatus: "failed",
+    },
+    {
       deliveryErrorCode: "HOSTED_THREAD_ROUTE_EGRESS_UNAUTHORIZED",
       expectedStatus: "failed" as const,
       outboxStatus: "failed",
