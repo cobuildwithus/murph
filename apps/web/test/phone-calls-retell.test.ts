@@ -1191,6 +1191,10 @@ describe("Retell phone-call result handling", () => {
         id: "hpc_123",
         provider: "retell",
         providerCallId: "retell_call_123",
+        resultEncrypted: null,
+        resultJson: {
+          equals: Prisma.DbNull,
+        },
         status: {
           in: ["starting", "calling", "ended"],
         },
@@ -1314,6 +1318,52 @@ describe("Retell phone-call result handling", () => {
       status: "needs_user",
     });
     expect(store.appendResultNotificationResults).toEqual([undefined]);
+  });
+
+  it("keeps a fallback result canonical when late provider analysis loses the result fence", async () => {
+    const store = createWebhookStore({
+      call: buildHostedPhoneCall({
+        analyzedAt: null,
+        endedAt: new Date("2026-06-25T12:00:00.000Z"),
+        id: "hpc_123",
+        resultEncrypted: "encrypted-fallback-result",
+        status: "failed",
+      }),
+    });
+
+    await expect(handleRetellCallAnalyzed({
+      call: {
+        call_analysis: {
+          custom_analysis_data: {
+            outcome: "completed",
+            result: "A late provider event claimed the call completed.",
+          },
+        },
+        call_id: "retell_call_123",
+        data_storage_setting: "basic_attributes_only",
+      },
+      prisma: store.prisma,
+      requiresTransferFollowUp: true,
+    })).resolves.toEqual({
+      notificationMailboxItemId: "mailbox_hpc_123",
+      notificationUserId: "member_123",
+    });
+
+    expect(store.updateManyCalls).toHaveLength(1);
+    expect(store.updateManyCalls[0]!.where).toMatchObject({
+      resultEncrypted: null,
+      resultJson: {
+        equals: Prisma.DbNull,
+      },
+    });
+    expect(store.currentCall()).toMatchObject({
+      analyzedAt: null,
+      resultEncrypted: "encrypted-fallback-result",
+      resultJson: null,
+      status: "failed",
+    });
+    expect(store.appendResultNotificationResults).toEqual([undefined]);
+    expect(store.appendResultNotificationTransferRequirements).toEqual([false]);
   });
 
   it("does not overwrite provider authority bound while result encryption is in flight", async () => {
@@ -2264,6 +2314,12 @@ function matchesWebhookUpdateWhere(
     return false;
   }
   if (where.analyzedAt === null && call.analyzedAt !== null) {
+    return false;
+  }
+  if (where.resultEncrypted === null && call.resultEncrypted !== null) {
+    return false;
+  }
+  if (where.resultJson && call.resultJson !== null) {
     return false;
   }
   if (where.endedAt === null && call.endedAt !== null) {

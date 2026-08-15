@@ -290,6 +290,20 @@ Updated: 2026-08-15
   asynchronous resolution. Focused tests cover new fences, existing fences,
   nonterminal compare-and-set loss, exact retry, and terminal race truth. All
   14 phone-call Web test files pass 242 tests, and Web typecheck passes.
+- A second corrected-head round-12 attempt confirmed the stop correction, then
+  found that late provider analysis could overwrite an already-persisted
+  fallback result after provider cleanup advanced `endedAt`. The parent
+  accepted the independently confirmed finding. Provider analysis now uses the
+  existing encrypted and legacy result fields as a two-way first-writer fence;
+  a compare-and-set loser reuses the stored fallback as canonical without
+  importing provider-only transfer follow-up semantics, and the default Prisma
+  adapter preserves both predicates. Both non-Eragon attempts completed with
+  findings but reported `MODEL_CONFIRMATION: UNKNOWN` and a `gpt-5-6-pro`
+  response slug, so neither satisfies the required Sol gate. The two focused
+  result suites pass 72 tests; all 14 phone-call Web files pass 244 tests in
+  two explicit-project groups after the project-unspecified aggregate runner
+  stalled without a test result; Web typecheck, focused ESLint, docs drift,
+  privacy inspection, and `git diff --check` pass.
 - Corrected-head product-experience revalidation finds the implementation is
   again the smallest complete experience for the incident: status is durable,
   stop state is truthful, fallback outcomes are canonical, and an exact result

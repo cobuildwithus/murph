@@ -77,6 +77,8 @@ interface HostedPhoneCallWebhookUpdateWhere {
   id: string;
   provider: "retell";
   providerCallId?: string | null;
+  resultEncrypted?: null;
+  resultJson?: Prisma.JsonNullableFilter<"HostedPhoneCall">;
   status?: { in: HostedPhoneCallStatus[] };
 }
 
@@ -219,6 +221,9 @@ export async function handleRetellCallAnalyzed(input: {
       throw error;
     }
     const analyzedAt = new Date();
+    // Provider analysis and synthetic cleanup/start-failure results share the
+    // existing result columns as one first-writer fence. An analyzed callback
+    // must not replace a fallback that became canonical while crypto ran.
     const updated = await prisma.hostedPhoneCall.updateMany({
       data: {
         ...target.providerCallIdData,
@@ -233,6 +238,10 @@ export async function handleRetellCallAnalyzed(input: {
         analyzedAt: null,
         id: target.call.id,
         provider: "retell",
+        resultEncrypted: null,
+        resultJson: {
+          equals: Prisma.DbNull,
+        },
         ...authorityWhere,
       },
     });
@@ -250,13 +259,14 @@ export async function handleRetellCallAnalyzed(input: {
       }
       if (
         isRetellWebhookCallAuthorityCurrent(stored, input.call.call_id)
-        && stored.analyzedAt
         && hasStoredHostedPhoneCallResult(stored)
       ) {
         return appendRetellCallAnalyzedNotification({
           call: stored,
           prisma,
-          requiresTransferFollowUp: input.requiresTransferFollowUp === true,
+          requiresTransferFollowUp:
+            stored.analyzedAt !== null
+            && input.requiresTransferFollowUp === true,
         });
       }
       throw hostedOnboardingError({
@@ -866,6 +876,8 @@ function buildHostedPhoneCallWebhookDatabase(
           id: args.where.id,
           provider: args.where.provider,
           providerCallId: args.where.providerCallId,
+          resultEncrypted: args.where.resultEncrypted,
+          resultJson: args.where.resultJson,
           status: args.where.status,
         },
       }),

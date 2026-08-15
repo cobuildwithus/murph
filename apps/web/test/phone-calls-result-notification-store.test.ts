@@ -1,4 +1,4 @@
-import type { HostedPhoneCall } from "@prisma/client";
+import { Prisma, type HostedPhoneCall } from "@prisma/client";
 import type {
   HostedPhoneCallBrief,
   HostedPhoneCallResult,
@@ -507,7 +507,7 @@ describe("default phone-call result notification store", () => {
     };
     const prisma = buildPrisma({
       call,
-      onFallbackUpdate: () => ({
+      onResultUpdate: () => ({
         call: {
           ...call,
           analyzedAt: new Date("2026-08-09T00:02:00.000Z"),
@@ -541,6 +541,58 @@ describe("default phone-call result notification store", () => {
     expect(instructions).toContain(authoritativeResult.summary);
     expect(instructions).toContain('"outcome":"completed"');
     expect(instructions).not.toContain("could not safely verify");
+  });
+
+  it("forwards the provider result fence and reuses an existing fallback notification", async () => {
+    const call: HostedPhoneCall = {
+      ...buildStoredAnalyzedCall("linq"),
+      analyzedAt: null,
+      endedAt: new Date("2026-08-09T00:02:00.000Z"),
+      resultEncrypted: "encrypted-fallback-result",
+      status: "failed",
+    };
+    const prisma = buildPrisma({
+      call,
+      onResultUpdate: () => ({ call, count: 0 }),
+    });
+    mocks.getPrisma.mockReturnValue(prisma);
+    mocks.readHostedMailboxItemByDedupeKey.mockResolvedValue({
+      id: "mailbox_fallback_result",
+      userId: MEMBER_ID,
+    });
+
+    await expect(handleRetellCallAnalyzed({
+      call: {
+        call_analysis: {
+          custom_analysis_data: {
+            outcome: "completed",
+            result: "A late provider event claimed the call completed.",
+          },
+        },
+        call_id: PROVIDER_CALL_ID,
+        data_storage_setting: "basic_attributes_only",
+      },
+      requiresTransferFollowUp: true,
+    })).resolves.toEqual({
+      notificationMailboxItemId: "mailbox_fallback_result",
+      notificationUserId: MEMBER_ID,
+    });
+
+    expect(prisma.hostedPhoneCall.updateMany).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        resultEncrypted: expect.any(String),
+        status: "completed",
+      }),
+      where: expect.objectContaining({
+        resultEncrypted: null,
+        resultJson: {
+          equals: Prisma.DbNull,
+        },
+      }),
+    });
+    expect(mocks.readHostedMailboxItemByDedupeKey).toHaveBeenCalledOnce();
+    expect(mocks.readHostedPhoneCallResult).not.toHaveBeenCalled();
+    expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
   });
 
   it("keeps a cleanup fallback durable when ordinary notification fails", async () => {
@@ -603,7 +655,7 @@ describe("default phone-call result notification store", () => {
 
 function buildPrisma(input: {
   call?: HostedPhoneCall;
-  onFallbackUpdate?: () => {
+  onResultUpdate?: () => {
     call: HostedPhoneCall;
     count: number;
   };
@@ -628,8 +680,8 @@ function buildPrisma(input: {
         data: { resultEncrypted?: string; resultJson?: unknown };
       }) => {
         if (update.data.resultEncrypted) {
-          if (input.onFallbackUpdate) {
-            const result = input.onFallbackUpdate();
+          if (input.onResultUpdate) {
+            const result = input.onResultUpdate();
             call = result.call;
             return { count: result.count };
           }
