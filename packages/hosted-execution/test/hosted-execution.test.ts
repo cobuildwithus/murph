@@ -936,18 +936,21 @@ describe("hosted execution coverage gaps", () => {
       setupId: "dps_setup",
       submitSelector: 'button[type="submit"]',
     })).toThrow();
-    expect(parseHostedRuntimeProviderSetupToolRequest({
+    const deleteRequest = {
       action: "delete",
-      clientIdSelector: "[data-client-id]",
       confirmSelector: null,
       deleteSelector: "button.delete",
       provider: "strava",
       runId: "hcr_setup",
       setupId: "dps_setup",
-    })).toMatchObject({
+    } as const;
+    expect(parseHostedRuntimeProviderSetupToolRequest(deleteRequest)).toMatchObject({
       action: "delete",
-      clientIdSelector: "[data-client-id]",
     });
+    expect(() => parseHostedRuntimeProviderSetupToolRequest({
+      ...deleteRequest,
+      clientIdSelector: "[data-client-id]",
+    })).toThrow();
     expect(parseHostedRuntimeProviderSetupContinuationValidateRequest({
       provider: "strava",
       setupId: "dps_setup",

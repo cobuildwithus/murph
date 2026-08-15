@@ -63,7 +63,9 @@ const CUSTOM_REGISTRATION: MemberOwnedProviderSetupRegistration<"strava"> = {
     safeLandingUrl: "https://provider.example.test/developer/apps",
     trustedAuthority: {
       applicationContainerSelector: "form[data-owned-application]",
-      creationFormSelector: "form[data-owned-application]",
+      applicationIdSelector: "[data-client-id]",
+      creationFormSelector: "form[data-owned-creation]",
+      loadedEmptySelector: "[data-owned-application-empty]",
     },
   },
   coordinates: STRAVA_MEMBER_OWNED_PROVIDER_SETUP_COORDINATES,
@@ -862,7 +864,7 @@ describe("member-owned provider setup service", () => {
     });
   });
 
-  it("requires an independent exact-name absence proof before another submit", async () => {
+  it("requires an independent registered loaded-empty proof before another submit", async () => {
     const store = new MemorySetupStore();
     store.setup = buildSetup({ browserRunId: RUN_ID, status: "browser_setup", version: 3 });
     const computer = new FakeProviderComputer();
@@ -880,6 +882,7 @@ describe("member-owned provider setup service", () => {
     });
     expect(store.setup).toMatchObject({ status: "browser_setup", version: 5 });
     expect(computer.captureCodes[1]).not.toContain("button.create-application");
+    expect(computer.captureCodes[1]).toContain("[data-owned-application-empty]");
 
     await expect(service.captureAndSeal(MEMBER_ID, captureRequest())).resolves.toMatchObject({
       status: "oauth_ready",
@@ -929,7 +932,6 @@ describe("member-owned provider setup service", () => {
     const prepared = await service.prepareDeletion(MEMBER_ID);
     const result = await service.deleteOwnedApplication(MEMBER_ID, {
       action: "delete",
-      clientIdSelector: "[data-client-id]",
       confirmSelector: "button.confirm-delete",
       deleteSelector: "button.delete-application",
       provider: "strava",
@@ -987,7 +989,6 @@ describe("member-owned provider setup service", () => {
 
     await expect(service.deleteOwnedApplication(MEMBER_ID, {
       action: "delete",
-      clientIdSelector: "[data-client-id]",
       confirmSelector: "button.confirm-delete",
       deleteSelector: "button.delete-application",
       provider: "strava",
@@ -1031,7 +1032,6 @@ describe("member-owned provider setup service", () => {
     const prepared = await service.prepareDeletion(MEMBER_ID);
     const request = {
       action: "delete" as const,
-      clientIdSelector: "[data-client-id]",
       confirmSelector: "button.confirm-delete",
       deleteSelector: "button.delete-application",
       provider: "strava" as const,
@@ -1069,7 +1069,6 @@ describe("member-owned provider setup service", () => {
 
     await expect(service.deleteOwnedApplication(MEMBER_ID, {
       action: "delete",
-      clientIdSelector: "[data-client-id]",
       confirmSelector: "button.confirm-delete",
       deleteSelector: "button.delete-application",
       provider: "strava",

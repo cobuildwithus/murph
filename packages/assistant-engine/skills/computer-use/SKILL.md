@@ -178,11 +178,11 @@ For sign-in, MFA, CAPTCHA, or a provider prerequisite, pause the same run with a
 secure handoff. The member completes only the interruption and returns to
 `/connect`; call `provider_setup begin` again to resume the exact persisted run.
 For deletion, disconnect the provider first, call `prepare_delete`, navigate to
-the application, then use `delete` with the live client-ID selector without
-reading its value. The trusted operation matches the stable sealed client ID by
-digest inside one registered application container and confines confirmation to
-the dialog opened by that application before local credentials are removed.
-Blank, partial, or ambiguous inventory retains the local binding.
+the application, then use `delete` with only the delete and optional confirmation
+selectors. The trusted provider registration locates the stable client ID, and
+the trusted operation matches its digest inside one registered application
+container before confining confirmation to the dialog opened by that application.
+Blank, partial, unmatched, or ambiguous inventory retains the local binding.
 
 ## Act primitive
 

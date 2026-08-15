@@ -34,7 +34,9 @@ export interface MemberOwnedProviderSetupBrowserMetadata {
   safeLandingUrl: string;
   trustedAuthority: {
     applicationContainerSelector: string;
+    applicationIdSelector: string;
     creationFormSelector: string;
+    loadedEmptySelector: string;
   };
 }
 
@@ -83,10 +85,10 @@ const STRAVA_REGISTRATION = Object.freeze({
     ]),
     safeLandingUrl: "https://www.strava.com/settings/api",
     trustedAuthority: Object.freeze({
-      applicationContainerSelector:
-        '[data-strava-application], form[action*="/settings/api"]',
-      creationFormSelector:
-        'form[data-strava-application-form], form[action*="/settings/api"]',
+      applicationContainerSelector: "[data-strava-application]",
+      applicationIdSelector: "[data-strava-client-id]",
+      creationFormSelector: "form[data-strava-application-form]",
+      loadedEmptySelector: "[data-strava-application-empty]",
     }),
   }),
   coordinates: STRAVA_MEMBER_OWNED_PROVIDER_SETUP_COORDINATES,
@@ -195,6 +197,15 @@ function assertRegistrationsMatchConnectCatalog(): void {
   }
   for (const registration of REGISTRATIONS) {
     const coordinates = registration.coordinates;
+    const authoritySelectors = Object.values(registration.browser.trustedAuthority);
+    if (
+      authoritySelectors.some((selector) => selector.trim().length === 0)
+      || new Set(authoritySelectors).size !== authoritySelectors.length
+    ) {
+      throw new TypeError(
+        `Member-owned provider setup authority for ${coordinates.provider} must use distinct nonempty coordinates.`,
+      );
+    }
     if (!targets.some(
       (target) => target.connectSourceId === coordinates.connectSourceId
         && target.connectTarget === coordinates.connectTarget

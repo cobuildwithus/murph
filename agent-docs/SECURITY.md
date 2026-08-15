@@ -85,9 +85,11 @@ Last verified: 2026-08-14
   name frozen on the setup before trusted submission. Trusted submission rejects a
   pre-existing exact name. After credential sealing, deletion uses a
   Web-derived hash of the encrypted binding's client ID inside the registered
-  container coordinates, never mutable display text; blank or partial inventory
-  remains retryable unless the registered creation form positively proves an empty
-  loaded inventory. Setup-owned browsers use a separate deterministic persistent
+  container and client-ID coordinates, never mutable display text or a model-
+  selected identifier locator. Blank, partial, unmatched, or nonempty inventory
+  remains retryable. Absence converges only when there are zero registered
+  application containers and one visible, disjoint provider-registered loaded-
+  empty coordinate. Setup-owned browsers use a separate deterministic persistent
   Kernel profile from generic model-controlled browsing. A setup may
   navigate only a browser run durably bound to that exact setup owner key; a
   generic active member run is never reusable for provider setup, and generic

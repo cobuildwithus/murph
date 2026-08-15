@@ -295,16 +295,21 @@ it has been explicitly elevated to a cross-cutting invariant.
   fence and exact-run recovery cannot submit again. If that run expires, only a
   successor already proven by the computer owner to belong to the same setup may
   replace its run binding, without changing `capturing`. A fully loaded exact safe
-  landing with no exact persisted application name may clear that fence without submitting;
-  only a later independent invocation may attempt creation again. Run
+  landing with zero registered application containers and one disjoint positive
+  loaded-empty coordinate may clear that fence without submitting. Missing name
+  evidence on a partial or nonempty inventory remains fenced; only a later
+  independent invocation may attempt creation again. Run
   reservation is not navigation authority: a new or successor candidate
   must CAS-bind to an acquisition-eligible exact setup before Kernel provisioning
   and attach under that binding before navigation. A losing admission retires the
   candidate synchronously; a winning admission makes cancellation own it. The
   setup run and every exact successor use a deterministic persistent profile lane
   that generic computer work cannot open. After credential sealing, deletion
-  authority is the stable client ID compared only as a Web-derived digest inside
-  registered application containers, not the provider's mutable display name. If
+  authority is the stable client ID located through provider registration and
+  compared only as a Web-derived digest inside registered application containers,
+  not the provider's mutable display name or a model-selected locator. Missing or
+  incomplete identifiers remain fenced; absence requires zero containers plus one
+  disjoint positive loaded-empty coordinate. If
   remote browser creation may already be in flight, cancellation persists the
   existing cleanup claim and remains `canceling`: an early delete-by-name
   `NotFound` is not quiescence. The returning creator deletes its exact browser,

@@ -1025,16 +1025,20 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   seals them directly into `DeviceProviderApplication`, navigates away, scrubs
   transient values, and returns no credential-bearing result. After sealing,
   owned deletion hashes the encrypted binding's client ID in Web and compares
-  only that digest inside provider-declared application containers; a mutable or
-  reused display name cannot redirect deletion. Empty inventory converges only
-  when the exact creation form proves the provider page loaded. `capturing` is
+  only that digest inside provider-declared application containers using the
+  provider-registered client-ID coordinate; a mutable or reused display name
+  cannot redirect deletion. Empty inventory converges only when zero registered
+  application containers and one disjoint provider-registered loaded-empty
+  coordinate prove the page finished rendering. `capturing` is
   the irreversible submission fence, so it cannot be
   canceled after an ambiguous failure and recovery of the exact run never
   submits again. If that run expires, the computer owner's existing exact-owner
   recovery may CAS-bind only its same-setup successor while preserving
   `capturing`, so the successor's first inspection is also submit-free. One fully
-  loaded exact safe-landing inspection with no marker
-  may restore `browser_setup` without submitting; only a later independent
+  loaded exact safe-landing inspection with zero application containers and one
+  disjoint positive loaded-empty coordinate may restore `browser_setup` without
+  submitting; a missing marker on a partial or nonempty page remains fenced.
+  Only a later independent
   invocation may attempt creation again. A reserved new or successor browser run
   is not usable authority: its setup CAS must bind the exact run before Kernel
   provisioning, and the browser must attach under that still-eligible binding

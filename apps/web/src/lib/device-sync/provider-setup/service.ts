@@ -545,6 +545,8 @@ export class MemberOwnedProviderSetupService {
           clientSecretSelector: request.clientSecretSelector,
           creationFormSelector:
             this.registration.browser.trustedAuthority.creationFormSelector,
+          loadedEmptySelector:
+            this.registration.browser.trustedAuthority.loadedEmptySelector,
           applicationName,
           revealSecretSelector: request.revealSecretSelector,
           safeLandingUrl: contract.safeLandingUrl,
@@ -646,7 +648,6 @@ export class MemberOwnedProviderSetupService {
     request: DeleteRequest,
   ): Promise<MemberOwnedProviderSetupView> {
     assertDistinctRuntimeSelectors([
-      request.clientIdSelector,
       request.confirmSelector,
       request.deleteSelector,
     ]);
@@ -674,11 +675,12 @@ export class MemberOwnedProviderSetupService {
         applicationIdHash: sha256Hex(
           requireResolvedDeviceProviderApplicationClientId(application),
         ),
-        applicationIdSelector: request.clientIdSelector,
+        applicationIdSelector:
+          this.registration.browser.trustedAuthority.applicationIdSelector,
         confirmSelector: request.confirmSelector,
-        creationFormSelector:
-          this.registration.browser.trustedAuthority.creationFormSelector,
         deleteSelector: request.deleteSelector,
+        loadedEmptySelector:
+          this.registration.browser.trustedAuthority.loadedEmptySelector,
         safeLandingUrl: contract.safeLandingUrl,
       }),
       memberId,
@@ -1171,6 +1173,7 @@ export function buildBlindProviderCredentialCaptureCode(input: {
   clientIdSelector: string;
   clientSecretSelector: string;
   creationFormSelector: string;
+  loadedEmptySelector: string;
   applicationName: string;
   revealSecretSelector: string | null;
   safeLandingUrl: string;
@@ -1203,7 +1206,10 @@ const deriveAuthority = async () => {
       element.removeAttribute(authorityAttribute);
     });
     const roots = Array.from(new Set(markers.map((marker) => marker.closest(containerSelector))));
-    if (markers.length === 0) return { kind: "absent" };
+    if (markers.length === 0) {
+      const containers = Array.from(document.querySelectorAll(containerSelector));
+      return { kind: "absent", containerCount: containers.length };
+    }
     if (roots.length !== 1) return { kind: "marker_ambiguous" };
     const root = roots[0];
     if (!root || root === document.body || root === document.documentElement) {
@@ -1218,7 +1224,15 @@ const deriveAuthority = async () => {
   });
   if (result.kind === "absent") {
     ${recovery
-      ? 'return { kind: "no_application" };'
+      ? `if (result.containerCount !== 0) {
+      throw new Error("provider application inventory still contains an unmatched application");
+    }
+    const loadedEmpty = page.locator(${JSON.stringify(input.loadedEmptySelector)});
+    await loadedEmpty.first().waitFor({ state: "visible", timeout: 15000 }).catch(() => undefined);
+    if (await loadedEmpty.count() !== 1 || !await loadedEmpty.isVisible().catch(() => false)) {
+      throw new Error("provider application loaded-empty proof is unavailable");
+    }
+    return { kind: "no_application" };`
       : 'throw new Error("provider application ownership marker mismatch: marker_ambiguous");'}
   }
   if (result.kind !== "ok") {
@@ -1305,8 +1319,8 @@ export function buildBlindOwnedApplicationDeleteCode(input: {
   applicationIdHash: string;
   applicationIdSelector: string;
   confirmSelector: string | null;
-  creationFormSelector: string;
   deleteSelector: string;
+  loadedEmptySelector: string;
   safeLandingUrl: string;
 }): string {
   return `
@@ -1327,12 +1341,13 @@ const deriveAuthority = async () => {
     const matches = [];
     for (const container of containers) {
       const identifiers = Array.from(container.querySelectorAll(idSelector));
-      for (const identifier of identifiers) {
-        const value = readExact(identifier);
-        if (value && await sha256(value) === expectedIdHash) {
-          matches.push(container);
-          break;
-        }
+      if (identifiers.length !== 1) {
+        return { kind: "inventory_incomplete" };
+      }
+      const value = readExact(identifiers[0]);
+      if (!value) return { kind: "inventory_incomplete" };
+      if (await sha256(value) === expectedIdHash) {
+        matches.push(container);
       }
     }
     const roots = Array.from(new Set(matches));
@@ -1350,13 +1365,16 @@ const deriveAuthority = async () => {
     expectedIdHash: ${JSON.stringify(input.applicationIdHash)},
     idSelector: ${JSON.stringify(input.applicationIdSelector)},
   });
-  if (authority.kind === "empty_candidate" || authority.kind === "identifier_absent") {
-    const creationForm = page.locator(${JSON.stringify(input.creationFormSelector)});
-    await creationForm.first().waitFor({ state: "visible", timeout: 15000 }).catch(() => undefined);
-    if (await creationForm.count() === 1 && await creationForm.isVisible().catch(() => false)) {
-      return { kind: "absent" };
+  if (authority.kind === "identifier_absent") {
+    throw new Error("provider application stable identifier is absent from a nonempty inventory");
+  }
+  if (authority.kind === "empty_candidate") {
+    const loadedEmpty = page.locator(${JSON.stringify(input.loadedEmptySelector)});
+    await loadedEmpty.first().waitFor({ state: "visible", timeout: 15000 }).catch(() => undefined);
+    if (await loadedEmpty.count() !== 1 || !await loadedEmpty.isVisible().catch(() => false)) {
+      throw new Error("provider application loaded-empty proof is unavailable");
     }
-    throw new Error("provider application inventory is unavailable");
+    return { kind: "absent" };
   }
   if (authority.kind !== "ok") {
     throw new Error("provider application stable authority mismatch: " + authority.kind);

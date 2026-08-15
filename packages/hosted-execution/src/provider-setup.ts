@@ -124,7 +124,6 @@ const prepareDeleteRequestSchema = z.object({
 
 const deleteRequestSchema = z.object({
   action: z.literal("delete"),
-  clientIdSelector: selectorSchema,
   confirmSelector: selectorSchema.nullable().default(null),
   deleteSelector: selectorSchema,
   provider: providerSchema,

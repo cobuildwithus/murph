@@ -114,6 +114,10 @@ provider-specific automation layer.
     display text.
 23. [x] Delete reconcile-time application adoption so the capture transaction is
     the only setup-binding writer.
+24. [x] Remove negative model-locator evidence from capture and deletion
+    convergence; use provider-registered client-ID and disjoint loaded-empty
+    coordinates while preserving `capturing` and `deletion_pending` on partial,
+    nonempty, unmatched, or incomplete inventory.
 
 ## Decisions
 
@@ -287,3 +291,17 @@ provider-specific automation layer.
   another 130 focused application/account/route/migration/changelog tests with 10
   opt-in PostgreSQL cases skipped, 109 assistant prompt/tool tests, and 9 hosted
   execution contract tests pass.
+- ReviewGPT round 17 found that negative page evidence still released both
+  irreversible fences. The finding is accepted: delete-time client-ID lookup was
+  still model-selected, the Strava container and creation-form fallbacks
+  overlapped, and capture recovery treated any missing friendly name as proof of
+  absence. The correction removes the delete-time client-ID selector, locates it
+  through finite provider registration, rejects every incomplete or unmatched
+  nonempty inventory, and permits capture or deletion absence only with zero
+  registered application containers plus one visible disjoint loaded-empty
+  coordinate. It deletes unsafe convergence branches and adds no state, phase,
+  owner, service, queue, scheduler, adapter, or provider-specific browser program.
+- Round-17 remediation proof: 372 focused Web setup, browser, account, route,
+  application-store, migration, and changelog tests; 75 assistant prompt/tool
+  tests; and 9 hosted-execution contract tests pass. Web, assistant-engine, and
+  hosted-execution typechecks, focused Web ESLint, and docs drift pass.
