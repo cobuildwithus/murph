@@ -34,6 +34,7 @@ import {
 
 import type {
   BeginConnectionResult,
+  ClaimDeviceSyncWebhookTraceInput,
   CompleteConnectionResult,
   DeviceAccountCredential,
   DeviceConnectionHandler,
@@ -45,6 +46,7 @@ import type {
   DeviceSyncPublicIngressConnectionEstablishedInput,
   DeviceSyncPublicIngressHooks,
   DeviceSyncPublicIngressStore,
+  DeviceSyncWebhookTraceClaimResult,
   DeviceSyncWebhookAcceptanceMode,
   DeviceWebhookHandler,
   DeviceSyncRegistry,
@@ -100,6 +102,7 @@ function resolveDefinitivePreProviderOAuthCallbackError(
 }
 
 const WEBHOOK_TRACE_PROCESSING_TTL_MS = 5 * 60_000;
+const WEBHOOK_TRACE_ADMISSION_BATCH_MAX_SIZE = 16;
 const SEEDED_CONNECTION_ACCOUNT_ID_STATE_METADATA_KEY =
   "__murphSeededConnectionAccountId";
 const SEEDED_CONNECTION_EXTERNAL_ACCOUNT_ID_STATE_METADATA_KEY =
@@ -1501,6 +1504,65 @@ export class DeviceSyncPublicIngress {
   async handlePreparedWebhook(
     value: PreparedDeviceSyncWebhookV1,
   ): Promise<HandleWebhookResult> {
+    const admission = this.createPreparedWebhookAdmission(value);
+    const traceClaim = await this.store.claimWebhookTrace(admission.traceClaimInput);
+    return this.handlePreparedWebhookAfterTraceClaim(admission, traceClaim);
+  }
+
+  async handlePreparedWebhookBatch(
+    values: readonly PreparedDeviceSyncWebhookV1[],
+  ): Promise<PromiseSettledResult<HandleWebhookResult>[]> {
+    if (values.length > WEBHOOK_TRACE_ADMISSION_BATCH_MAX_SIZE) {
+      throw new RangeError(
+        `Prepared device webhook batches cannot exceed ${WEBHOOK_TRACE_ADMISSION_BATCH_MAX_SIZE} entries.`,
+      );
+    }
+    const admissions = values.map((value) => this.createPreparedWebhookAdmission(value));
+    const firstAdmission = admissions[0];
+    if (
+      firstAdmission
+      && admissions.some((admission) =>
+        admission.prepared.provider !== firstAdmission.prepared.provider
+        || admission.prepared.externalAccountId !== firstAdmission.prepared.externalAccountId)
+    ) {
+      throw new TypeError("Prepared device webhook batches must contain one provider account.");
+    }
+    const traceClaims: DeviceSyncWebhookTraceClaimResult[] = [];
+    if (this.store.claimWebhookTraceBatch) {
+      traceClaims.push(...await this.store.claimWebhookTraceBatch(
+        admissions.map((admission) => admission.traceClaimInput),
+      ));
+      if (traceClaims.length !== admissions.length) {
+        throw new TypeError("Device webhook batch trace claim returned incomplete results.");
+      }
+    } else {
+      for (const admission of admissions) {
+        traceClaims.push(await this.store.claimWebhookTrace(admission.traceClaimInput));
+      }
+    }
+
+    const results: PromiseSettledResult<HandleWebhookResult>[] = [];
+    for (const [index, admission] of admissions.entries()) {
+      try {
+        results.push({
+          status: "fulfilled",
+          value: await this.handlePreparedWebhookAfterTraceClaim(
+            admission,
+            traceClaims[index] ?? "processing",
+          ),
+        });
+      } catch (reason) {
+        results.push({ reason, status: "rejected" });
+      }
+    }
+    return results;
+  }
+
+  private createPreparedWebhookAdmission(value: PreparedDeviceSyncWebhookV1): {
+    prepared: PreparedDeviceSyncWebhookV1;
+    traceClaimInput: ClaimDeviceSyncWebhookTraceInput;
+    webhook: DeviceSyncIngressWebhook;
+  } {
     const prepared = parsePreparedDeviceSyncWebhook(value);
     // Provider registration remains live authority. The prepared event freezes
     // only the authenticated envelope interpretation, never whether Murph
@@ -1514,20 +1576,36 @@ export class DeviceSyncPublicIngress {
       jobs: prepared.jobs,
     });
 
-    const claimWebhookTrace = () => this.store.claimWebhookTrace({
-      provider: prepared.provider,
-      traceId,
-      claimedAt,
-      claimToken,
-      externalAccountId: prepared.externalAccountId,
-      eventType: webhook.eventType,
-      receivedAt: now,
-      processingExpiresAt: addMilliseconds(claimedAt, WEBHOOK_TRACE_PROCESSING_TTL_MS),
-    });
+    return {
+      prepared,
+      traceClaimInput: {
+        provider: prepared.provider,
+        traceId,
+        claimedAt,
+        claimToken,
+        externalAccountId: prepared.externalAccountId,
+        eventType: webhook.eventType,
+        receivedAt: now,
+        processingExpiresAt: addMilliseconds(claimedAt, WEBHOOK_TRACE_PROCESSING_TTL_MS),
+      },
+      webhook,
+    };
+  }
+
+  private async handlePreparedWebhookAfterTraceClaim(
+    admission: {
+      prepared: PreparedDeviceSyncWebhookV1;
+      traceClaimInput: ClaimDeviceSyncWebhookTraceInput;
+      webhook: DeviceSyncIngressWebhook;
+    },
+    traceClaim: DeviceSyncWebhookTraceClaimResult,
+  ): Promise<HandleWebhookResult> {
+    const { prepared, webhook } = admission;
+    const now = prepared.receivedAt;
+    const traceId = prepared.traceId;
+    const claimToken = admission.traceClaimInput.claimToken;
 
     const webhookSourceProviderSlug = normalizeString(webhook.sourceProviderSlug);
-
-    const traceClaim = await claimWebhookTrace();
 
     if (traceClaim === "processed") {
       return {

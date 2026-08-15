@@ -20,7 +20,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   createIngress: vi.fn(),
-  handlePreparedWebhook: vi.fn(),
+  handlePreparedWebhookBatch: vi.fn(),
   queryRaw: vi.fn(),
 }));
 
@@ -66,27 +66,31 @@ describe("device webhook signed batch callback route", () => {
     maxActiveAdmissions = 0;
     replayRequests = [];
     mocks.createIngress.mockReset();
-    mocks.handlePreparedWebhook.mockReset();
+    mocks.handlePreparedWebhookBatch.mockReset();
     mocks.queryRaw.mockReset();
     mocks.queryRaw.mockResolvedValue([{ admitted: true }]);
     mocks.createIngress.mockImplementation((request: Request) => {
       replayRequests.push(request);
-      return { handlePreparedWebhook: mocks.handlePreparedWebhook };
+      return { handlePreparedWebhookBatch: mocks.handlePreparedWebhookBatch };
     });
-    mocks.handlePreparedWebhook.mockImplementation(async (preparedWebhook) => {
+    mocks.handlePreparedWebhookBatch.mockImplementation(async (preparedWebhooks) => {
       activeAdmissions += 1;
       maxActiveAdmissions = Math.max(maxActiveAdmissions, activeAdmissions);
       await Promise.resolve();
       activeAdmissions -= 1;
-      return {
+      return preparedWebhooks.map((preparedWebhook: { provider: string }) => ({
+        status: "fulfilled",
+        value: {
         accepted: true,
         duplicate: false,
         eventType: "measurement.updated",
         provider: preparedWebhook.provider,
         traceId: crypto.randomUUID(),
-      };
+        },
+      }));
     });
     vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.spyOn(console, "info").mockImplementation(() => {});
   });
 
   afterEach(() => {
@@ -104,7 +108,7 @@ describe("device webhook signed batch callback route", () => {
     );
   });
 
-  it("accepts the exact signed subject and serially admits 25 prepared events", async () => {
+  it("accepts the exact signed subject and admits 100 accounts with at most four active lanes", async () => {
     const batch = createAdmissionBatch(DEVICE_WEBHOOK_ADMISSION_MAX_BATCH_SIZE);
     const response = await POST(await createSignedRequest({
       body: JSON.stringify(batch),
@@ -114,16 +118,16 @@ describe("device webhook signed batch callback route", () => {
 
     expect(response.status).toBe(200);
     expect(mocks.queryRaw).toHaveBeenCalledOnce();
-    expect(maxActiveAdmissions).toBe(1);
-    expect(mocks.handlePreparedWebhook).toHaveBeenCalledTimes(25);
+    expect(maxActiveAdmissions).toBe(4);
+    expect(mocks.handlePreparedWebhookBatch).toHaveBeenCalledTimes(100);
     expect(replayRequests).toHaveLength(1);
     expect(replayRequests[0]?.url).toBe(
       `https://join.example.test${HOSTED_DEVICE_WEBHOOK_ADMISSION_PATH}`,
     );
-    for (const [index, entry] of batch.entries.entries()) {
-      const [preparedWebhook] = mocks.handlePreparedWebhook.mock.calls[index]!;
-      expect(preparedWebhook).toEqual(entry.preparedWebhook);
-    }
+    const admitted = mocks.handlePreparedWebhookBatch.mock.calls
+      .flatMap(([preparedWebhooks]) => preparedWebhooks)
+      .sort((left, right) => left.receivedAt.localeCompare(right.receivedAt));
+    expect(admitted).toEqual(batch.entries.map((entry) => entry.preparedWebhook));
   });
 
   it("rejects a valid signature bound to the wrong subject before ordinary ingress", async () => {
@@ -135,10 +139,10 @@ describe("device webhook signed batch callback route", () => {
 
     expect(response.status).toBe(401);
     expect(mocks.createIngress).not.toHaveBeenCalled();
-    expect(mocks.handlePreparedWebhook).not.toHaveBeenCalled();
+    expect(mocks.handlePreparedWebhookBatch).not.toHaveBeenCalled();
   });
 
-  it("rejects 26 entries and malformed signed JSON before ordinary ingress", async () => {
+  it("rejects 101 entries and malformed signed JSON before ordinary ingress", async () => {
     const invalidBodies = [
       JSON.stringify(createAdmissionBatch(DEVICE_WEBHOOK_ADMISSION_MAX_BATCH_SIZE + 1)),
       "{",
@@ -154,7 +158,7 @@ describe("device webhook signed batch callback route", () => {
     }
 
     expect(mocks.createIngress).not.toHaveBeenCalled();
-    expect(mocks.handlePreparedWebhook).not.toHaveBeenCalled();
+    expect(mocks.handlePreparedWebhookBatch).not.toHaveBeenCalled();
   });
 
   it("rejects an oversized body before signature verification or ordinary ingress", async () => {
@@ -173,7 +177,7 @@ describe("device webhook signed batch callback route", () => {
     expect(response.ok).toBe(false);
     expect(mocks.queryRaw).not.toHaveBeenCalled();
     expect(mocks.createIngress).not.toHaveBeenCalled();
-    expect(mocks.handlePreparedWebhook).not.toHaveBeenCalled();
+    expect(mocks.handlePreparedWebhookBatch).not.toHaveBeenCalled();
   });
 });
 

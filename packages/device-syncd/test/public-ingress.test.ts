@@ -596,6 +596,17 @@ class InMemoryPublicIngressStore implements DeviceSyncPublicIngressStore {
   }
 }
 
+class BatchClaimPublicIngressStore extends InMemoryPublicIngressStore {
+  claimWebhookTraceBatchCalls = 0;
+
+  claimWebhookTraceBatch(
+    inputs: readonly ClaimDeviceSyncWebhookTraceInput[],
+  ): DeviceSyncWebhookTraceClaimResult[] {
+    this.claimWebhookTraceBatchCalls += 1;
+    return inputs.map((input) => super.claimWebhookTrace(input));
+  }
+}
+
 function createVoidDeferred(): { promise: Promise<void>; resolve: () => void } {
   let resolve = () => {};
   const promise = new Promise<void>((nextResolve) => {
@@ -3296,6 +3307,43 @@ test("public ingress revalidates current provider and connection authority for p
       error instanceof DeviceSyncError
       && error.code === "WEBHOOK_ACCOUNT_NOT_READY",
   );
+});
+
+test("public ingress batch-claims prepared trace admission while preserving per-entry outcomes", async () => {
+  const store = new BatchClaimPublicIngressStore();
+  const ingress = createDeviceSyncPublicIngress({
+    publicBaseUrl: "https://sync.example.test/device-sync",
+    registry: createDeviceSyncRegistry([]),
+    store,
+  });
+  const prepared = Array.from({ length: 3 }, (_, index) => ({
+    acceptanceMode: "durable_webhook_work" as const,
+    eventType: "demo.updated",
+    externalAccountId: "opaque-account",
+    jobs: [],
+    provider: "removed-provider",
+    receivedAt: "2026-04-10T12:00:00.000Z",
+    schema: "murph.device-sync-prepared-webhook.v1" as const,
+    traceId: index.toString(16).padStart(64, "0"),
+  }));
+
+  const results = await ingress.handlePreparedWebhookBatch(prepared);
+
+  assert.equal(store.claimWebhookTraceBatchCalls, 1);
+  assert.equal(store.claimWebhookTraceCalls, 3);
+  assert.deepEqual(results.map((result) => result.status), [
+    "fulfilled",
+    "fulfilled",
+    "fulfilled",
+  ]);
+  await assert.rejects(
+    () => ingress.handlePreparedWebhookBatch([
+      prepared[0]!,
+      { ...prepared[1]!, externalAccountId: "another-account" },
+    ]),
+    /must contain one provider account/u,
+  );
+  assert.equal(store.claimWebhookTraceBatchCalls, 1);
 });
 
 test("public ingress leases a delayed queued trace from dequeue time while preserving its receipt time", async () => {

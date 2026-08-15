@@ -37,8 +37,10 @@ export const POST = withJsonError(async (request: Request) => {
   const result = await admitHostedDeviceWebhookBatch({
     entries: batch.entries,
     shouldContinue: () => Date.now() < stopBefore,
-    async handle(entry) {
-      return ingress.handlePreparedWebhook(entry.preparedWebhook);
+    async handleBatch(entries) {
+      return ingress.handlePreparedWebhookBatch(
+        entries.map((entry) => entry.preparedWebhook),
+      );
     },
   });
   return jsonOk(result);

@@ -1,4 +1,5 @@
 import {
+  DEVICE_WEBHOOK_ADMISSION_MAX_BODY_BYTES,
   DEVICE_WEBHOOK_ADMISSION_RESULT_SCHEMA,
   DEVICE_WEBHOOK_TRANSPORT_USER_ID,
   HOSTED_DEVICE_WEBHOOK_ADMISSION_PATH,
@@ -192,7 +193,7 @@ describe("hosted device webhook Queue consumer", () => {
     }
   });
 
-  it("delivers a maximum 100-message Queue batch as four signed serial callbacks and settles once", async () => {
+  it("delivers a maximum 100-message Queue batch as one signed callback and settles once", async () => {
     const envelopes = await Promise.all(
       Array.from({ length: 100 }, (_, index) => createEnvelope(index)),
     );
@@ -250,15 +251,76 @@ describe("hosted device webhook Queue consumer", () => {
       workerEnv,
     );
 
-    expect(observedCallbacks).toEqual([25, 25, 25, 25]);
+    expect(observedCallbacks).toEqual([100]);
     expect(observedTransportIds).toEqual(
       envelopes.map((envelope) => envelope.transportId),
     );
     expect(new Set(observedTransportIds).size).toBe(100);
-    expect(consumedNonces.size).toBe(4);
+    expect(consumedNonces.size).toBe(1);
     expect(maxActiveCallbacks).toBe(1);
     expect(messages.every((message) => message.ack.mock.calls.length === 1)).toBe(true);
     expect(messages.every((message) => message.retry.mock.calls.length === 0)).toBe(true);
+  });
+
+  it("splits a large valid Queue batch below the signed Web body ceiling", async () => {
+    const envelopes = await Promise.all(
+      Array.from(
+        { length: 70 },
+        (_, index) => createEnvelope(index, "x".repeat(30 * 1024)),
+      ),
+    );
+    const observedCallbacks: number[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (_url: string, init?: RequestInit) => {
+      const body = String(init?.body);
+      expect(new TextEncoder().encode(body).byteLength)
+        .toBeLessThanOrEqual(DEVICE_WEBHOOK_ADMISSION_MAX_BODY_BYTES);
+      const request = JSON.parse(body);
+      observedCallbacks.push(request.entries.length);
+      return Response.json({
+        entries: request.entries.map((entry: { transportId: string }) => ({
+          disposition: "accepted",
+          transportId: entry.transportId,
+        })),
+        schema: DEVICE_WEBHOOK_ADMISSION_RESULT_SCHEMA,
+      });
+    }));
+    const messages = envelopes.map(createQueueMessage);
+
+    await handleHostedDeviceWebhookQueueBatch(
+      createQueueBatch(messages),
+      createWorkerEnv(),
+    );
+
+    expect(observedCallbacks.length).toBeGreaterThan(1);
+    expect(observedCallbacks.reduce((total, count) => total + count, 0)).toBe(70);
+    expect(messages.every((message) => message.ack.mock.calls.length === 1)).toBe(true);
+  });
+
+  it("settles accepted, duplicate, and retry dispositions independently in one callback", async () => {
+    const envelopes = await Promise.all(
+      Array.from({ length: 3 }, (_, index) => createEnvelope(index)),
+    );
+    vi.stubGlobal("fetch", vi.fn(async (_url: string, init?: RequestInit) => {
+      const request = JSON.parse(String(init?.body));
+      return Response.json({
+        entries: request.entries.map((entry: { transportId: string }, index: number) => ({
+          disposition: ["accepted", "duplicate", "retry"][index],
+          transportId: entry.transportId,
+        })),
+        schema: DEVICE_WEBHOOK_ADMISSION_RESULT_SCHEMA,
+      });
+    }));
+    const messages = envelopes.map(createQueueMessage);
+
+    await handleHostedDeviceWebhookQueueBatch(
+      createQueueBatch(messages),
+      createWorkerEnv(),
+    );
+
+    expect(messages[0]?.ack).toHaveBeenCalledOnce();
+    expect(messages[1]?.ack).toHaveBeenCalledOnce();
+    expect(messages[2]?.retry).toHaveBeenCalledOnce();
+    expect(messages[2]?.ack).not.toHaveBeenCalled();
   });
 
   it("retries a tampered message without suppressing a valid sibling", async () => {
@@ -345,14 +407,19 @@ describe("hosted device webhook Queue consumer", () => {
   });
 });
 
-async function createEnvelope(index: number): Promise<DeviceWebhookQueueEnvelopeV1> {
+async function createEnvelope(
+  index: number,
+  payloadText?: string,
+): Promise<DeviceWebhookQueueEnvelopeV1> {
   return sealDeviceWebhookQueueEnvelope({
     env: "test",
     preparedWebhook: {
       acceptanceMode: "level_dirty_hint",
       eventType: "demo.updated",
       externalAccountId: `opaque-account-${index}`,
-      jobs: [],
+      jobs: payloadText
+        ? [{ kind: "resource", payload: { blob: payloadText } }]
+        : [],
       provider: "oura",
       receivedAt: "2026-04-10T12:00:00.000Z",
       schema: "murph.device-sync-prepared-webhook.v1",

@@ -469,6 +469,9 @@ export interface DeviceSyncPublicIngressStore {
     >>>;
   getConnectionOwnerId?(accountId: string): string | null | Promise<string | null>;
   claimWebhookTrace(input: ClaimDeviceSyncWebhookTraceInput): DeviceSyncWebhookTraceClaimResult | Promise<DeviceSyncWebhookTraceClaimResult>;
+  claimWebhookTraceBatch?(
+    inputs: readonly ClaimDeviceSyncWebhookTraceInput[],
+  ): DeviceSyncWebhookTraceClaimResult[] | Promise<DeviceSyncWebhookTraceClaimResult[]>;
   completeWebhookTrace(provider: string, traceId: string, claimToken: string): boolean | Promise<boolean>;
   releaseWebhookTrace(provider: string, traceId: string, claimToken: string): void | Promise<void>;
   markWebhookReceived(accountId: string, now: string): void | Promise<void>;

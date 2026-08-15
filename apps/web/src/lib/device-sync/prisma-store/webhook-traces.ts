@@ -13,6 +13,7 @@ import type { HostedPrismaTransactionClient } from "./types";
 // handling; a global prune on every webhook made unrelated rows the cost of
 // serving a request.
 const MINIMIZED_HOSTED_WEBHOOK_TRACE_ACCOUNT_SENTINEL = "_minimized_";
+const HOSTED_WEBHOOK_TRACE_CLAIM_BATCH_MAX_SIZE = 16;
 
 export class PrismaHostedWebhookTraceStore {
   readonly prisma: PrismaClient;
@@ -108,6 +109,128 @@ export class PrismaHostedWebhookTraceStore {
     });
   }
 
+  async claimWebhookTraceBatch(
+    inputs: readonly ClaimDeviceSyncWebhookTraceInput[],
+  ): Promise<DeviceSyncWebhookTraceClaimResult[]> {
+    if (inputs.length === 0) return [];
+    if (inputs.length > HOSTED_WEBHOOK_TRACE_CLAIM_BATCH_MAX_SIZE) {
+      throw new RangeError(
+        `Hosted webhook trace claim batches cannot exceed ${HOSTED_WEBHOOK_TRACE_CLAIM_BATCH_MAX_SIZE} entries.`,
+      );
+    }
+
+    const firstByKey = new Map<string, ClaimDeviceSyncWebhookTraceInput>();
+    for (const input of inputs) {
+      const key = buildWebhookTraceKey(input.provider, input.traceId);
+      if (!firstByKey.has(key)) firstByKey.set(key, input);
+    }
+    const uniqueInputs = [...firstByKey.values()];
+    const prepared = uniqueInputs.map((input) => ({
+      claimedAt: new Date(input.claimedAt),
+      input,
+      processingExpiresAt: new Date(input.processingExpiresAt),
+      providerAccountBlindIndex: this.buildProviderAccountBlindIndex({
+        externalAccountId: input.externalAccountId,
+        provider: input.provider,
+      }),
+      receivedAt: new Date(input.receivedAt),
+    }));
+
+    const firstResults = await this.prisma.$transaction(async (tx) => {
+      await tx.deviceWebhookTrace.createMany({
+        data: prepared.map((entry) => ({
+          provider: entry.input.provider,
+          traceId: entry.input.traceId,
+          claimToken: entry.input.claimToken,
+          providerAccountBlindIndex: entry.providerAccountBlindIndex,
+          eventType: entry.input.eventType,
+          processingExpiresAt: entry.processingExpiresAt,
+          receivedAt: entry.receivedAt,
+          status: "processing",
+        })),
+        skipDuplicates: true,
+      });
+
+      const rows = await tx.deviceWebhookTrace.findMany({
+        where: {
+          OR: prepared.map((entry) => ({
+            provider: entry.input.provider,
+            traceId: entry.input.traceId,
+          })),
+        },
+        select: {
+          claimToken: true,
+          processingExpiresAt: true,
+          provider: true,
+          status: true,
+          traceId: true,
+        },
+      });
+      const rowsByKey = new Map(rows.map((row) => [
+        buildWebhookTraceKey(row.provider, row.traceId),
+        row,
+      ]));
+      const results = new Map<string, DeviceSyncWebhookTraceClaimResult>();
+
+      for (const entry of prepared) {
+        const key = buildWebhookTraceKey(entry.input.provider, entry.input.traceId);
+        const row = rowsByKey.get(key);
+        if (!row) {
+          results.set(key, "processing");
+          continue;
+        }
+        if (row.status === "processed") {
+          results.set(key, "processed");
+          continue;
+        }
+        if (row.claimToken === entry.input.claimToken) {
+          results.set(key, "claimed");
+          continue;
+        }
+        if (
+          row.processingExpiresAt
+          && row.processingExpiresAt.getTime() > entry.claimedAt.getTime()
+        ) {
+          results.set(key, "processing");
+          continue;
+        }
+
+        const takeover = await tx.deviceWebhookTrace.updateMany({
+          where: {
+            provider: entry.input.provider,
+            traceId: entry.input.traceId,
+            status: "processing",
+            OR: [
+              { processingExpiresAt: null },
+              { processingExpiresAt: { lte: entry.claimedAt } },
+            ],
+          },
+          data: {
+            providerAccountBlindIndex: entry.providerAccountBlindIndex,
+            eventType: entry.input.eventType,
+            claimToken: entry.input.claimToken,
+            processingExpiresAt: entry.processingExpiresAt,
+            receivedAt: entry.receivedAt,
+            status: "processing",
+          },
+        });
+        results.set(key, takeover.count > 0 ? "claimed" : "processing");
+      }
+      return results;
+    });
+
+    const seen = new Set<string>();
+    return inputs.map((input) => {
+      const key = buildWebhookTraceKey(input.provider, input.traceId);
+      const firstResult = firstResults.get(key) ?? "processing";
+      if (!seen.has(key)) {
+        seen.add(key);
+        return firstResult;
+      }
+      return firstResult === "processed" ? "processed" : "processing";
+    });
+  }
+
   async completeWebhookTrace(
     provider: string,
     traceId: string,
@@ -157,4 +280,8 @@ export class PrismaHostedWebhookTraceStore {
       provider: input.provider,
     });
   }
+}
+
+function buildWebhookTraceKey(provider: string, traceId: string): string {
+  return `${provider}\u0000${traceId}`;
 }

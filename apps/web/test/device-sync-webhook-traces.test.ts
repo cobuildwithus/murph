@@ -13,6 +13,7 @@ function createPrismaStub() {
       create: vi.fn().mockResolvedValue(undefined),
       createMany: vi.fn().mockResolvedValue({ count: 1 }),
       deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
+      findMany: vi.fn().mockResolvedValue([]),
       findUnique: vi.fn().mockResolvedValue(null),
       updateMany: vi.fn().mockResolvedValue({ count: 0 }),
     },
@@ -24,6 +25,98 @@ function createPrismaStub() {
 }
 
 describe("PrismaHostedWebhookTraceStore", () => {
+  it("claims a fresh bounded batch in one transaction and two set queries", async () => {
+    const prisma = createPrismaStub();
+    const inputs = Array.from({ length: 8 }, (_, index) => createClaimInput(index));
+    prisma.deviceWebhookTrace.findMany.mockResolvedValue(inputs.map((input) => ({
+      claimToken: input.claimToken,
+      processingExpiresAt: new Date(input.processingExpiresAt),
+      provider: input.provider,
+      status: "processing",
+      traceId: input.traceId,
+    })));
+    const store = new PrismaHostedWebhookTraceStore({ prisma: prisma as never });
+
+    await expect(store.claimWebhookTraceBatch(inputs)).resolves.toEqual(
+      Array.from({ length: 8 }, () => "claimed"),
+    );
+
+    expect(prisma.$transaction).toHaveBeenCalledOnce();
+    expect(prisma.deviceWebhookTrace.createMany).toHaveBeenCalledOnce();
+    expect(prisma.deviceWebhookTrace.createMany.mock.calls[0]?.[0].data).toHaveLength(8);
+    expect(prisma.deviceWebhookTrace.findMany).toHaveBeenCalledOnce();
+    expect(prisma.deviceWebhookTrace.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("collapses same-input trace duplicates so only the first owns the claim", async () => {
+    const prisma = createPrismaStub();
+    const first = createClaimInput(1);
+    const duplicate = { ...first, claimToken: "claim-duplicate" };
+    prisma.deviceWebhookTrace.findMany.mockResolvedValue([{
+      claimToken: first.claimToken,
+      processingExpiresAt: new Date(first.processingExpiresAt),
+      provider: first.provider,
+      status: "processing",
+      traceId: first.traceId,
+    }]);
+    const store = new PrismaHostedWebhookTraceStore({ prisma: prisma as never });
+
+    await expect(store.claimWebhookTraceBatch([first, duplicate])).resolves.toEqual([
+      "claimed",
+      "processing",
+    ]);
+    expect(prisma.deviceWebhookTrace.createMany.mock.calls[0]?.[0].data).toHaveLength(1);
+  });
+
+  it("classifies processed and active rows while conditionally taking over stale claims", async () => {
+    const prisma = createPrismaStub();
+    const processed = createClaimInput(1);
+    const active = createClaimInput(2);
+    const stale = createClaimInput(3);
+    prisma.deviceWebhookTrace.findMany.mockResolvedValue([
+      {
+        claimToken: null,
+        processingExpiresAt: null,
+        provider: processed.provider,
+        status: "processed",
+        traceId: processed.traceId,
+      },
+      {
+        claimToken: "another-active-claim",
+        processingExpiresAt: new Date("2026-04-12T00:03:00.000Z"),
+        provider: active.provider,
+        status: "processing",
+        traceId: active.traceId,
+      },
+      {
+        claimToken: "expired-claim",
+        processingExpiresAt: new Date("2026-04-11T23:59:00.000Z"),
+        provider: stale.provider,
+        status: "processing",
+        traceId: stale.traceId,
+      },
+    ]);
+    prisma.deviceWebhookTrace.updateMany.mockResolvedValueOnce({ count: 1 });
+    const store = new PrismaHostedWebhookTraceStore({ prisma: prisma as never });
+
+    await expect(store.claimWebhookTraceBatch([processed, active, stale])).resolves.toEqual([
+      "processed",
+      "processing",
+      "claimed",
+    ]);
+    expect(prisma.deviceWebhookTrace.updateMany).toHaveBeenCalledOnce();
+    expect(prisma.deviceWebhookTrace.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          traceId: stale.traceId,
+          OR: expect.arrayContaining([
+            { processingExpiresAt: { lte: new Date(stale.claimedAt) } },
+          ]),
+        }),
+      }),
+    );
+  });
+
   it("claims traces without a provider-account blind-index key and stores a minimized sentinel", async () => {
     const prisma = createPrismaStub();
     const store = new PrismaHostedWebhookTraceStore({
@@ -166,3 +259,16 @@ describe("PrismaHostedWebhookTraceStore", () => {
     expect(prisma.deviceWebhookTrace.updateMany).not.toHaveBeenCalled();
   });
 });
+
+function createClaimInput(index: number) {
+  return {
+    claimedAt: "2026-04-12T00:00:00.000Z",
+    claimToken: `claim-${index}`,
+    eventType: "sleep.updated",
+    externalAccountId: `external-account-${index}`,
+    processingExpiresAt: "2026-04-12T00:05:00.000Z",
+    provider: "oura",
+    receivedAt: "2026-04-12T00:00:00.000Z",
+    traceId: `trace-${index}`,
+  };
+}

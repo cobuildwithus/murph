@@ -311,6 +311,12 @@ export class PrismaDeviceSyncControlPlaneStore
     return this.webhookTraces.claimWebhookTrace(input);
   }
 
+  async claimWebhookTraceBatch(
+    inputs: readonly ClaimDeviceSyncWebhookTraceInput[],
+  ): Promise<DeviceSyncWebhookTraceClaimResult[]> {
+    return this.webhookTraces.claimWebhookTraceBatch(inputs);
+  }
+
   async completeWebhookTrace(
     provider: string,
     traceId: string,
