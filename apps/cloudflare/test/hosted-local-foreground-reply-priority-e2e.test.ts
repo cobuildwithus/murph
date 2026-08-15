@@ -632,16 +632,16 @@ describe.sequential("hosted local foreground reply priority e2e", () => {
       lastErrorCode: null,
       mailboxLag: [
         {
-          importedSeq: conversationItem.laneSeq,
-          lag: "0",
-          lane: "conversation",
-          maxSeq: conversationItem.laneSeq,
-        },
-        {
           importedSeq: activationAppend.wake.seq,
           lag: "0",
           lane: "system",
           maxSeq: activationAppend.wake.seq,
+        },
+        {
+          importedSeq: conversationItem.laneSeq,
+          lag: "0",
+          lane: "conversation",
+          maxSeq: conversationItem.laneSeq,
         },
       ],
       systemHandledThroughSeq: activationAppend.wake.seq,
