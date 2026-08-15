@@ -103,6 +103,17 @@ Updated: 2026-08-14
   to this diagnostic projection, vocabulary ownership, or stage cardinality
   requires requirement-level reconsideration instead of another tactical
   branch. The immutable first-reviewed baseline remains unchanged.
+- The post-deploy Junction canary reached `persistence_reseal_failed`
+  consistently. A focused workerd reproduction proved the root cause: workerd
+  exports an ECDH public JWK with an own `d` property whose value is
+  `undefined`, while the shared public-JWK normalizer rejected the property by
+  presence alone. Node omits the property, so the previous Node-only proof did
+  not exercise the deployed shape.
+- Requirement-level reconsideration is satisfied by the smallest correction:
+  continue rejecting every defined private scalar, accept only the
+  platform-equivalent `d: undefined` public shape, and add a workerd
+  open/reseal/reopen regression. This changes no diagnostic vocabulary, owner,
+  state, compatibility path, or Queue behavior.
 
 ## Verification
 
@@ -114,5 +125,7 @@ Updated: 2026-08-14
   admission, and no unexplained DLQ growth or rejected-query alert.
 - Current focused proof: hosted-control 75 tests, Worker Queue 8 tests, and Web
   Queue/route/device-sync HTTP 46 tests pass; hosted-control, Cloudflare, and
-  prepared Web typechecks pass. Exact-head CI and corrected production canary
-  remain pending.
+  prepared Web typechecks pass. The first protected deploy and smoke passed;
+  live main/DLQ metrics were both zero with 14-day retention and the alert
+  bindings configured. The workerd reseal regression now passes; its follow-up
+  PR, protected redeploy, and corrected production canary remain pending.
