@@ -508,7 +508,7 @@ function buildAcceptedTelegramMessageRef(userId: string, eventId: string): strin
 
 function readAssistantProviderRequestText(request: { body: string }): string {
   const body = JSON.parse(request.body) as Record<string, unknown>;
-  return collectJsonStrings(body.input).join("\n\n");
+  return collectJsonStrings(body).join("\n\n");
 }
 
 function collectJsonStrings(value: unknown): string[] {
